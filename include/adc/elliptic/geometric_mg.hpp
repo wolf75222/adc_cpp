@@ -57,6 +57,18 @@ class GeometricMG {
 
   void vcycle() { vcycle_rec(0, bc_); }
 
+  // V-cycles jusqu'a residu relatif < rel_tol (ou max_cycles). Renvoie le
+  // nombre de cycles effectues. phi est conserve entre appels (warm start).
+  int solve(Real rel_tol, int max_cycles) {
+    const Real r0 = current_residual();
+    if (r0 <= Real(0)) return 0;
+    for (int c = 1; c <= max_cycles; ++c) {
+      vcycle();
+      if (current_residual() <= rel_tol * r0) return c;
+    }
+    return max_cycles;
+  }
+
   // Residu courant (norme infinie) au niveau le plus fin.
   Real current_residual() {
     poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res);

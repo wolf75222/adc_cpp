@@ -118,7 +118,7 @@ coefficients durs.
 10a. integrateur temporel : SSPRK2 mono-niveau (fait)
 10b. sous-cyclage AMR + reflux
 11a. multigrille geometrique maison (Laplacien, GS red-black, V-cycle) (fait)
-11b. derivation aux = grad phi + coupleur (Poisson -> aux -> advance)
+11b. derivation aux = grad phi + coupleur (Poisson -> aux -> advance) (fait)
 
 ## Etat
 
@@ -148,6 +148,11 @@ points, lisseur Gauss-Seidel red-black, V-cycle, restriction par `average_down`
 et prolongation par `interpolate`). Convergence independante du maillage
 (8 V-cycles a n=32 comme n=64) et precision O(dx^2) sur solutions manufacturees
 Dirichlet et periodique.
+
+Couplage : `Coupler` ferme la boucle hyperbolique-elliptique stade par stade
+(elliptic_rhs -> resolution multigrille -> aux = grad phi par differences
+centrees -> assemble_rhs -> SSPRK2). Diocotron : equilibre neutre stationnaire,
+masse conservee et positivite preservee sous dynamique couplee non triviale.
 
 ## Build
 
