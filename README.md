@@ -88,18 +88,42 @@ maillage non structure ou coefficients durs). Interface abstraite `EllipticSolve
 pour brancher PETSc/hypre BoomerAMG comme oracle de verification et repli sur
 coefficients durs.
 
-## Decisions ouvertes
+## Decisions
 
-- socle maillage/AMR : AMReX, Parthenon (Kokkos natif) ou mini-AMReX maison
-- elliptique : multigrille geometrique maison ou MLMG du framework
-- couplage premiere validation : splitting (diocotron non raide) ou IMEX/
-  well-balanced (regime quasi-neutre, longueur de Debye -> 0)
+- socle maillage/AMR : mini-AMReX maison (block-structured AMR ecrit a la main,
+  inspire d'AMReX / Parthenon / AthenaK)
+- dispatch / donnees : seam maison (`Box2D` / `Fab2D` / `for_each_cell`) calque
+  sur la semantique Kokkos (handle `Array4` capture par valeur, fonctor sur
+  indices). Backend OpenMP maintenant, backend Kokkos branchable au passage
+  cluster sans toucher la logique AMR. La physique reste agnostique du backend.
+- elliptique : multigrille geometrique maison (FAC sur la hierarchie), interface
+  abstraite pour brancher PETSc/hypre en oracle de verification
+- couplage : a fixer (splitting pour diocotron non raide, IMEX/well-balanced
+  pour le regime quasi-neutre, longueur de Debye -> 0)
+
+## Plan mini-AMReX
+
+1. index space : `Box2D` (fait)
+2. donnees mono-grille : `Fab2D` + `Array4` + `for_each_cell` (fait)
+3. decomposition : `BoxArray` + `DistributionMapping` (rang unique, interface MPI)
+4. conteneur multi-grille : `MultiFab` (collection de `Fab2D` + ghosts)
+5. echange de halos : `fill_boundary` (intra-niveau, MPI ensuite)
+6. CL physiques : periodique / Dirichlet / Neumann au bord du domaine
+7. hierarchie AMR : niveaux, regrid (tagging, Berger-Rigoutsos, proper nesting),
+   prolongation / restriction
+8. reflux : `FluxRegister` coarse-fine
+9. operateur spatial : reconstruction + Riemann + divergence
+10. integrateur temporel : SSPRK2/3, sous-cyclage
+11. multigrille geometrique maison + coupleur
 
 ## Etat
 
-Socle de la couche physique : le concept `PhysicalModel`, les types ponctuels
-`StateVec` / `Aux`, et le premier modele conforme (`Diocotron`). Maillage,
-operateur spatial, elliptique et integrateur a venir en couches separees.
+Couche physique : concept `PhysicalModel`, types ponctuels `StateVec` / `Aux`,
+premier modele conforme (`Diocotron`).
+
+Couche donnees/maillage : index space `Box2D`, donnees mono-grille `Fab2D`
+(layout composante-lente, ghosts) avec handle `Array4` capturable par valeur, et
+dispatch `for_each_cell` (backend OpenMP, miroir de Kokkos `parallel_for`).
 
 ## Build
 
