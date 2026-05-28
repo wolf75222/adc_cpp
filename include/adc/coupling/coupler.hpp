@@ -14,6 +14,9 @@
 #include <adc/operator/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 
+#include <functional>
+#include <utility>
+
 // Coupleur hyperbolique-elliptique : ferme la boucle Poisson -> aux -> advance.
 //
 // A chaque etage de l'integrateur (couplage stade par stade) :
@@ -30,8 +33,11 @@ namespace adc {
 template <class Model>
 class Coupler {
  public:
+  // active : predicat optionnel "interieur du conducteur" (paroi embedded pour
+  // le solveur de Poisson). Vide => pas de paroi interne.
   Coupler(const Model& model, const Geometry& geom, const BoxArray& ba,
-          const BCRec& bcU, const BCRec& bcPhi)
+          const BCRec& bcU, const BCRec& bcPhi,
+          std::function<bool(Real, Real)> active = {})
       : model_(model),
         geom_(geom),
         ba_(ba),
@@ -39,7 +45,7 @@ class Coupler {
         bcU_(bcU),
         bcPhi_(bcPhi),
         aux_bc_(derive_aux_bc(bcPhi)),
-        mg_(geom, ba, bcPhi),
+        mg_(geom, ba, bcPhi, std::move(active)),
         aux_(ba, dm_, 3, 1) {}
 
   // SSPRK2 couple (phi recalcule a chaque etage). Le limiteur (reconstruction)

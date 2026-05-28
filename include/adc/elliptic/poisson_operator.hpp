@@ -11,17 +11,20 @@
 // la multigrille geometrique maison.
 //
 // Convention : on resout le laplacien lap(phi) = f. Pour le diocotron,
-// f = model.elliptic_rhs (densite de charge signee). Le solveur ne connait que
-// phi, f, la geometrie et les CL.
+// f = model.elliptic_rhs (densite de charge signee).
+//
+// Masque optionnel (embedded boundary) : un MultiFab mask (1 = actif, 0 =
+// conducteur) fige phi=0 dans les cellules conductrices. Le lisseur et le residu
+// sautent ces cellules ; les cellules actives voisines lisent phi=0 chez le
+// conducteur, ce qui impose la condition de Dirichlet sur la frontiere
+// (en escalier). Le point fixe du lisseur fin definit donc la solution masquee
+// correcte, independamment de la qualite de la correction grossiere.
 //
 // Le balayage red-black est parallelisable : avec le stencil 5 points, une
-// cellule rouge (i+j pair) ne depend que de cellules noires, et inversement.
-// On remplit les ghosts avant chaque couleur (porte les mises a jour des
-// voisins entre boxes / rangs).
+// cellule rouge ne depend que de cellules noires.
 
 namespace adc {
 
-// lap = laplacien(phi) sur les cellules valides. phi : ghosts deja remplis.
 inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
                             MultiFab& lap) {
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
@@ -37,10 +40,10 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
   }
 }
 
-// res = f - laplacien(phi). Remplit d'abord les ghosts de phi.
+// res = f - laplacien(phi) sur les cellules actives, 0 sur les conductrices.
 inline void poisson_residual(MultiFab& phi, const MultiFab& f,
                              const Geometry& geom, const BCRec& bc,
-                             MultiFab& res) {
+                             MultiFab& res, const MultiFab* mask = nullptr) {
   fill_ghosts(phi, geom.domain, bc);
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
@@ -49,7 +52,13 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
     const ConstArray4 ff = f.fab(li).const_array();
     Array4 r = res.fab(li).array();
     const Box2D v = res.box(li);
+    const bool hm = mask != nullptr;
+    const ConstArray4 mk = hm ? mask->fab(li).const_array() : ConstArray4{};
     for_each_cell(v, [=](int i, int j) {
+      if (hm && mk(i, j) == Real(0)) {
+        r(i, j) = 0;
+        return;
+      }
       const Real lap = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
                        (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
       r(i, j) = ff(i, j) - lap;
@@ -59,7 +68,7 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
 
 namespace detail {
 inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
-                     int color) {
+                     int color, const MultiFab* mask) {
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
   const Real diag = 2 * idx2 + 2 * idy2;
@@ -67,29 +76,43 @@ inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
     Array4 p = phi.fab(li).array();
     const ConstArray4 ff = f.fab(li).const_array();
     const Box2D v = phi.box(li);
+    const bool hm = mask != nullptr;
+    const ConstArray4 mk = hm ? mask->fab(li).const_array() : ConstArray4{};
     for_each_cell(v, [=](int i, int j) {
-      if (((i + j) & 1) == color) {
-        const Real off = (p(i + 1, j) + p(i - 1, j)) * idx2 +
-                         (p(i, j + 1) + p(i, j - 1)) * idy2;
-        p(i, j) = (off - ff(i, j)) / diag;
-      }
+      if (((i + j) & 1) != color) return;
+      if (hm && mk(i, j) == Real(0)) return;  // conducteur : fige
+      const Real off = (p(i + 1, j) + p(i - 1, j)) * idx2 +
+                       (p(i, j + 1) + p(i, j - 1)) * idy2;
+      p(i, j) = (off - ff(i, j)) / diag;
     });
   }
 }
 }  // namespace detail
 
-// Un balayage Gauss-Seidel red-black complet (rouge puis noir).
 inline void gs_rb_sweep(MultiFab& phi, const MultiFab& f, const Geometry& geom,
-                        const BCRec& bc) {
+                        const BCRec& bc, const MultiFab* mask = nullptr) {
   fill_ghosts(phi, geom.domain, bc);
-  detail::gs_color(phi, f, geom, 0);  // rouge : (i+j) pair
+  detail::gs_color(phi, f, geom, 0, mask);  // rouge
   fill_ghosts(phi, geom.domain, bc);
-  detail::gs_color(phi, f, geom, 1);  // noir : (i+j) impair
+  detail::gs_color(phi, f, geom, 1, mask);  // noir
 }
 
 inline void gs_smooth(MultiFab& phi, const MultiFab& f, const Geometry& geom,
-                      const BCRec& bc, int nsweeps) {
-  for (int s = 0; s < nsweeps; ++s) gs_rb_sweep(phi, f, geom, bc);
+                      const BCRec& bc, int nsweeps,
+                      const MultiFab* mask = nullptr) {
+  for (int s = 0; s < nsweeps; ++s) gs_rb_sweep(phi, f, geom, bc, mask);
+}
+
+// Force phi=0 dans les cellules conductrices (mask==0).
+inline void zero_conductor(MultiFab& phi, const MultiFab& mask) {
+  for (int li = 0; li < phi.local_size(); ++li) {
+    Array4 p = phi.fab(li).array();
+    const ConstArray4 mk = mask.fab(li).const_array();
+    const Box2D v = phi.box(li);
+    for_each_cell(v, [=](int i, int j) {
+      if (mk(i, j) == Real(0)) p(i, j) = 0;
+    });
+  }
 }
 
 }  // namespace adc

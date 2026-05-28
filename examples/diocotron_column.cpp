@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
 
 using namespace adc;
@@ -41,6 +42,7 @@ int main(int argc, char** argv) {
   const int n = (argc > 2) ? std::atoi(argv[2]) : 256;
   const int nsteps = (argc > 3) ? std::atoi(argv[3]) : 1500;
   const int ell = (argc > 4) ? std::atoi(argv[4]) : 3;  // mode azimutal
+  const double Rwall = (argc > 5) ? std::atof(argv[5]) : 0.0;  // 0 = bord carre
   std::filesystem::create_directories(out);
 
   Box2D dom = Box2D::from_extents(n, n);
@@ -76,7 +78,11 @@ int main(int argc, char** argv) {
   BCRec bcU;
   bcU.xlo = bcU.xhi = bcU.ylo = bcU.yhi = BCType::Foextrap;  // pour U
 
-  Coupler<Diocotron> cpl(model, geom, ba, bcU, bc);
+  // paroi conductrice circulaire optionnelle (sinon bord carre Dirichlet)
+  std::function<bool(Real, Real)> active{};
+  if (Rwall > 0)
+    active = [=](Real x, Real y) { return std::hypot(x - cx, y - cy) < Rwall; };
+  Coupler<Diocotron> cpl(model, geom, ba, bcU, bc, active);
 
   auto vmax_estimate = [&]() {
     const Fab2D& ax = cpl.aux().fab(0);
