@@ -113,8 +113,10 @@ coefficients durs.
     `parallel_copy` (fait)
 7b. regrid dynamique : tagging, Berger-Rigoutsos, proper nesting (fait)
 8. reflux : `FluxRegister` coarse-fine
-9. operateur spatial : reconstruction + Riemann + divergence
-10. integrateur temporel : SSPRK2/3, sous-cyclage
+9a. operateur spatial : `Geometry` + `assemble_rhs` (Rusanov 1er ordre) (fait)
+9b. reconstruction MUSCL + limiteurs (ordre 2)
+10a. integrateur temporel : SSPRK2 mono-niveau (fait)
+10b. sous-cyclage AMR + reflux
 11. multigrille geometrique maison + coupleur
 
 ## Etat
@@ -132,7 +134,13 @@ unique, interface MPI-ready), champ distribue `MultiFab`, echange de halos
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
-(injection grossier->fin), sur la brique `parallel_copy`.
+(injection grossier->fin) sur la brique `parallel_copy`, clustering
+Berger-Rigoutsos et regrid dynamique (tagging, buffer, nesting).
+
+Couche physique/temps : `Geometry` (coords physiques, dx par niveau),
+operateur spatial `assemble_rhs` (Rusanov 1er ordre, R = -div F + S consommant
+aux) et integrateur `advance_ssprk2`. Advection bout-en-bout du diocotron a aux
+prescrit : masse conservee, positivite, vitesse correcte.
 
 ## Build
 
