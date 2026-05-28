@@ -8,6 +8,7 @@
 // dans le meme process (meme sequence de FFT 1D + meme advance), donc l'accord
 // doit etre bit a bit. Invariant au nombre de rangs (Nx, Ny divisibles par N).
 
+#include <adc/coupling/spectral_coupler.hpp>  // composant teste
 #include <adc/elliptic/poisson_fft.hpp>
 #include <adc/integrator/amr_reflux.hpp>  // advance_fab_1c, fill_periodic_fab, *face_box
 #include <adc/mesh/box2d.hpp>
@@ -127,43 +128,22 @@ int main(int argc, char** argv) {
     }
   }
 
-  // ===== distribue : bandes (1 box/rang), meme layout que la FFT =====
-  const int nyl = Ny / np, y0 = me * nyl;
-  std::vector<Box2D> slabs;
-  for (int r = 0; r < np; ++r)
-    slabs.push_back(Box2D{{0, r * nyl}, {Nx - 1, (r + 1) * nyl - 1}});
-  BoxArray sba(std::move(slabs));
-  DistributionMapping sdm(np, np);  // box r -> rang r
-  MultiFab Une(sba, sdm, 1, 1), Uphi(sba, sdm, 1, 1), Uaux(sba, sdm, 3, 1);
+  // ===== distribue : via le composant reutilisable SpectralExBStepper =====
+  // (l'interet du test : valider que le composant de la lib egale la reference
+  //  serie bit a bit, pas reimplementer la boucle ici).
+  SpectralExBStepper<Diocotron> sim(model, Nx, Ny, Lx, Ly);
+  const int nyl = sim.ny_local(), y0 = sim.y_begin();
   {
-    Fab2D& F = Une.fab(0);
-    const Box2D b = F.box();
-    for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) F(i, j) = ne0(i, j);
+    Fab2D& F = sim.local();
+    for (int j = y0; j < y0 + nyl; ++j)
+      for (int i = 0; i < Nx; ++i) F(i, j) = ne0(i, j);
   }
-  PoissonFFT solver(Nx, Ny, Lx, Ly);
-  std::vector<double> rho_local(static_cast<std::size_t>(nyl) * Nx), phi_local;
-  for (int s = 0; s < K; ++s) {
-    Fab2D& Fn = Une.fab(0);
-    for (int jl = 0; jl < nyl; ++jl)
-      for (int i = 0; i < Nx; ++i)
-        rho_local[jl * Nx + i] = model.alpha * (Fn(i, y0 + jl) - model.n_i0);
-    solver.solve(rho_local, phi_local);
-    Fab2D& Fp = Uphi.fab(0);
-    for (int jl = 0; jl < nyl; ++jl)
-      for (int i = 0; i < Nx; ++i) Fp(i, y0 + jl) = phi_local[jl * Nx + i];
-    fill_boundary(Uphi, dom, Periodicity{true, true});
-    aux_from_phi(Uphi.fab(0), Uaux.fab(0), dx, dy);
-    fill_boundary(Uaux, dom, Periodicity{true, true});
-    fill_boundary(Une, dom, Periodicity{true, true});
-    Fab2D fxf(xface_box(Une.box(0)), 1, 0), fyf(yface_box(Une.box(0)), 1, 0);
-    advance_fab_1c(model, Une.fab(0), Uaux.fab(0), dx, dy, dt, fxf, fyf);
-  }
+  for (int s = 0; s < K; ++s) sim.step(dt);
 
   // ===== comparaison : rassembler la grille distribuee et confronter au serie =====
   std::vector<double> loc(static_cast<std::size_t>(nyl) * Nx);
   {
-    const Fab2D& F = Une.fab(0);
+    const Fab2D& F = sim.local();
     for (int jl = 0; jl < nyl; ++jl)
       for (int i = 0; i < Nx; ++i) loc[jl * Nx + i] = F(i, y0 + jl);
   }

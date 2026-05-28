@@ -348,12 +348,18 @@ corrects en distribue.
 
 ![Diocotron MPI](docs/anim_diocotron_mpi.gif)
 
-Le demo `diocotron_mpi` (couple distribue : transport + Poisson spectral, en
-bandes) produit ses instantanes en rassemblant la densite sur le rang 0
-(`MPI_Gather`) : la couche de cisaillement (mode m=2) s'enroule en deux
-tourbillons, version MPI du demo AMR 3 niveaux. La physique etant invariante au
-nombre de rangs (bit a bit, cf. `test_mpi_diocotron`), les images sont rendues a
-partir d'un run du meme binaire. Reproduire :
+Le pas couple distribue (transport E x B + Poisson spectral, en bandes) est un
+**composant reutilisable** `SpectralExBStepper<Model>` (`coupling/spectral_coupler.hpp`),
+generique sur le modele : on construit, on remplit `state()`, on boucle `step(dt)`.
+Le demo `diocotron_mpi` et le test `test_mpi_diocotron` ne reimplementent plus la
+boucle, ils l'**utilisent** ; c'est l'esprit composant de MUFFIN (`Simulation`),
+mais compile-time/template (zero virtuel, GPU-ready) plutot que factory runtime.
+C'est le pendant distribue du `Coupler<Model>` (multigrille, mono-niveau). Le demo
+produit ses instantanes en rassemblant la densite sur le rang 0 (`MPI_Gather`) :
+la couche de cisaillement (mode m=2) s'enroule en deux tourbillons, version MPI du
+demo AMR 3 niveaux. La physique etant invariante au nombre de rangs (bit a bit,
+`test_mpi_diocotron` valide le composant contre une reference serie pleine grille),
+les images sont rendues a partir d'un run du meme binaire. Reproduire :
 
 ```bash
 mpirun -np 4 ./build-mpi/bin/diocotron_mpi /tmp/dio_mpi 128 600
