@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
 
   // geometrie de l'anneau (ratios proches du papier : r1/r0 ~ 4/3)
   const double cx = 0.5, cy = 0.5;
-  const double r0 = 0.18, r1 = 0.24;  // anneau de charge
+  const double r0 = 0.15, r1 = 0.20;  // anneau (ratios du papier : a/b=0.75)
   const double rhomax = 1.0, rhomin = 1e-3;
   const double delta = 0.1;  // amplitude de la perturbation azimutale
 
