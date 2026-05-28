@@ -149,11 +149,15 @@ borne de la solution sur 3 niveaux.
 
 Le demo `diocotron_amr3` met cette pile en oeuvre : niveau 0 grossier (Poisson +
 transport), niveau 1 (cadre cyan, ratio 2) qui suit la bande de charge, niveau 2
-(cadre lime, ratio 4) qui suit les coeurs denses des deux tourbillons. Le regrid
-est **imbrique** : le niveau 2 est retague depuis le niveau 1 a chaque remaillage
-et clippe strictement a l'interieur du niveau 1 (nesting). La masse reste
-conservee a l'arrondi (drift ~1e-14 sur 500 pas). L'animation est un montage
-composite : chaque niveau est dessine a sa vraie resolution sur son extent.
+(cadre lime, ratio 4) qui suit l'interface de cisaillement et les filaments. Le
+tag est un **critere gradient** (magnitude de la difference centrale non-divisee,
+proxy d'erreur de troncature facon Berger-Colella) avec seuil relatif au max :
+il raffine les zones de forte variation (bords, braids) plutot que les pics de
+densite, et s'adapte a la decroissance des gradients par diffusion. Le regrid est
+**imbrique** : le niveau 2 est retague depuis le niveau 1 a chaque remaillage et
+clippe strictement a l'interieur du niveau 1 (nesting). La masse reste conservee
+a l'arrondi (drift ~1e-15 sur 500 pas). L'animation est un montage composite :
+chaque niveau est dessine a sa vraie resolution sur son extent.
 
 ```bash
 cmake --build build --target diocotron_amr3

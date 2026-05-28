@@ -37,6 +37,15 @@ static constexpr double kPi = 3.14159265358979323846;
 
 static int crsn(int x) { return x >= 0 ? x / 2 : -((-x + 1) / 2); }
 
+// magnitude du gradient non-divise (difference centrale) : proxy d'erreur de
+// troncature pour le tagging (critere gradient facon Berger-Colella, sect. 4.1).
+// Independant de dx -> seuil exprime en unites de densite par cellule.
+static double gradmag(const ConstArray4& u, int i, int j) {
+  const double gx = u(i + 1, j) - u(i - 1, j);
+  const double gy = u(i, j + 1) - u(i, j - 1);
+  return 0.5 * std::sqrt(gx * gx + gy * gy);
+}
+
 // remplissage periodique multi-composantes d'un Fab2D
 static void fill_periodic_mc(Fab2D& F, const Box2D& dom) {
   const int ng = F.n_ghost(), nc = F.ncomp();
@@ -166,11 +175,18 @@ int main(int argc, char** argv) {
   // niveau 2 = bbox des cellules fines taguees (seuil plus haut, coeurs denses),
   // clippe strictement a l'interieur du niveau 1. ---
   auto regrid = [&]() {
-    // niveau 1 depuis les tags du niveau 0
+    // niveau 1 : tag gradient (bords des structures) sur le grossier. Seuil
+    // relatif au max -> s'adapte a la decroissance des gradients (diffusion).
+    fill_periodic_fab(L[0].U, dom);  // ghosts periodiques pour le grad au bord
+    const ConstArray4 c0t = L[0].U.const_array();
+    double gmax1 = 0;
+    for (int j = 0; j < nc; ++j)
+      for (int i = 0; i < nc; ++i) gmax1 = std::max(gmax1, gradmag(c0t, i, j));
+    const double thr1 = 0.20 * gmax1;
     int i0 = nc, i1 = -1, j0 = nc, j1 = -1;
     for (int j = 0; j < nc; ++j)
       for (int i = 0; i < nc; ++i)
-        if (L[0].U(i, j) > model.n_i0 + 0.12) {
+        if (gradmag(c0t, i, j) > thr1) {
           i0 = std::min(i0, i); i1 = std::max(i1, i);
           j0 = std::min(j0, j); j1 = std::max(j1, j);
         }
@@ -192,13 +208,20 @@ int main(int argc, char** argv) {
           a(i, j) = old1.contains(i, j) ? o1(i, j) : c0(crsn(i), crsn(j));
     }
 
-    // niveau 2 depuis les tags du NOUVEAU niveau 1 (coeurs denses)
+    // niveau 2 : tag gradient (bords/filaments les plus raides) sur le NOUVEAU
+    // niveau 1, seuil relatif plus haut. Boucle a l'interieur strict de nf1
+    // (pas de ghost) -> les cellules taguees sont deja nesting-compatibles.
     int k0 = nf1.hi[0], k1 = nf1.lo[0], l0 = nf1.hi[1], l1 = nf1.lo[1];
     {
       const ConstArray4 a = nU1.const_array();
-      for (int j = nf1.lo[1]; j <= nf1.hi[1]; ++j)
-        for (int i = nf1.lo[0]; i <= nf1.hi[0]; ++i)
-          if (a(i, j) > model.n_i0 + 0.5) {
+      double gmax2 = 0;
+      for (int j = nf1.lo[1] + 1; j <= nf1.hi[1] - 1; ++j)
+        for (int i = nf1.lo[0] + 1; i <= nf1.hi[0] - 1; ++i)
+          gmax2 = std::max(gmax2, gradmag(a, i, j));
+      const double thr2 = 0.40 * gmax2;
+      for (int j = nf1.lo[1] + 1; j <= nf1.hi[1] - 1; ++j)
+        for (int i = nf1.lo[0] + 1; i <= nf1.hi[0] - 1; ++i)
+          if (gradmag(a, i, j) > thr2) {
             k0 = std::min(k0, i); k1 = std::max(k1, i);
             l0 = std::min(l0, j); l1 = std::max(l1, j);
           }
