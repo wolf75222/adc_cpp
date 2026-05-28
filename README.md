@@ -287,7 +287,11 @@ dispatch `for_each_cell` (backend OpenMP, miroir de Kokkos `parallel_for`).
 Decomposition `BoxArray` + `DistributionMapping` sur le seam `comm` (rang
 unique, interface MPI-ready), champ distribue `MultiFab`, echange de halos
 `fill_boundary` (intra-niveau, wrapping periodique) et CL physiques
-(`fill_physical_bc` : Foextrap, Dirichlet).
+(`fill_physical_bc` : Foextrap, Dirichlet). Equilibrage de charge
+(`parallel/load_balance.hpp`) : distribution **Z-order** (segments contigus le
+long de la courbe de Morton, localite) et **knapsack** (LPT, desequilibre max
+minimal), avec metrique de desequilibre. Algos purs, testes en serie, prets a
+alimenter le seam `comm` des qu'un backend MPI sera branche.
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
