@@ -16,8 +16,9 @@ endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-option(ADC_BUILD_TESTS "Build tests" ON)
-option(ADC_USE_OPENMP  "Enable the OpenMP dispatch backend" OFF)
+option(ADC_BUILD_TESTS    "Build tests"    ON)
+option(ADC_BUILD_EXAMPLES "Build examples" ON)
+option(ADC_USE_OPENMP     "Enable the OpenMP dispatch backend" OFF)
 
 # Couche physique + maillage : bibliotheque d'interface (header-only) pour
 # l'instant. L'operateur spatial, l'elliptique et l'integrateur viendront en
@@ -52,4 +53,8 @@ endif()
 if(ADC_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(ADC_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()

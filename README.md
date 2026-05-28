@@ -13,6 +13,39 @@ D phi = f(U)
 Cas H = 0 pour l'instant. Cible de validation : l'instabilite diocotron
 (transport E x B d'une densite electronique couple a Poisson).
 
+## Validation : instabilite diocotron
+
+Une bande de charge cree un ecoulement E x B cisaille, instable a une
+perturbation le long de la bande : les bords s'enroulent en "cat's eyes". Le
+systeme diocotron est isomorphe a la dynamique tourbillonnaire 2D d'Euler
+(densite = vorticite, potentiel = fonction de courant), donc c'est l'instabilite
+de Kelvin-Helmholtz d'une couche de cisaillement.
+
+![Instabilite diocotron](docs/anim_diocotron.gif)
+
+![Taux de croissance](docs/fig_diocotron_growth.png)
+
+Resultat (mode m=2, couplage Poisson resolu par la multigrille maison a chaque
+etage, reconstruction VanLeer ordre 2) : croissance exponentielle dans la phase
+lineaire puis saturation non lineaire. Le taux de croissance mesure est
+independant du maillage, donc physique :
+
+| n   | gamma |
+|-----|-------|
+| 128 | 0.086 |
+| 192 | 0.086 |
+| 256 | 0.086 |
+
+Le spectre KH est respecte : les grands modes (m=1, m=2) croissent, les petits
+(m=3 et au-dela) sont stables. Reproduire :
+
+```bash
+cmake --build build --target diocotron
+./build/bin/diocotron /tmp/dio 256 700 2
+python scripts/plot_diocotron_growth.py /tmp/dio/diocotron_amp.csv docs/fig_diocotron_growth.png
+python scripts/make_diocotron_gif.py /tmp/dio docs/anim_diocotron.gif
+```
+
 ## Niveau d'abstraction
 
 Trois axes orthogonaux qui ne se melangent jamais :

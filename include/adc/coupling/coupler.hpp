@@ -10,6 +10,7 @@
 #include <adc/mesh/mf_arith.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
+#include <adc/operator/reconstruction.hpp>
 #include <adc/operator/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 
@@ -41,21 +42,29 @@ class Coupler {
         mg_(geom, ba, bcPhi),
         aux_(ba, dm_, 3, 1) {}
 
-  // SSPRK2 couple (phi recalcule a chaque etage).
+  // SSPRK2 couple (phi recalcule a chaque etage). Le limiteur (reconstruction)
+  // est un parametre de template ; U doit avoir au moins Limiter::n_ghost ghosts.
+  template <class Limiter = NoSlope>
   void advance(MultiFab& U, Real dt, Real mg_tol = 1e-8, int mg_maxc = 30) {
     MultiFab R(ba_, dm_, Model::n_vars, 0);
 
     update_aux(U, mg_tol, mg_maxc);
     fill_ghosts(U, geom_.domain, bcU_);
-    assemble_rhs(model_, U, aux_, geom_, R);
+    assemble_rhs<Limiter>(model_, U, aux_, geom_, R);
     MultiFab U1 = U;
     saxpy(U1, dt, R);
 
     update_aux(U1, mg_tol, mg_maxc);
     fill_ghosts(U1, geom_.domain, bcU_);
-    assemble_rhs(model_, U1, aux_, geom_, R);
+    assemble_rhs<Limiter>(model_, U1, aux_, geom_, R);
     saxpy(U1, dt, R);
     lincomb(U, Real(0.5), U, Real(0.5), U1);
+  }
+
+  // Resout phi et derive aux pour un etat donne, sans avancer en temps
+  // (utile pour estimer la vitesse E x B avant de fixer le pas de temps).
+  void solve_fields(const MultiFab& U, Real mg_tol = 1e-8, int mg_maxc = 30) {
+    update_aux(U, mg_tol, mg_maxc);
   }
 
   MultiFab& phi() { return mg_.phi(); }
