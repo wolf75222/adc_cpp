@@ -98,6 +98,10 @@ coefficients durs.
   cluster sans toucher la logique AMR. La physique reste agnostique du backend.
 - elliptique : multigrille geometrique maison (FAC sur la hierarchie), interface
   abstraite pour brancher PETSc/hypre en oracle de verification
+- Eigen : cote host uniquement (bottom solve dense, decompositions
+  caracteristiques Euler, post-traitement). Jamais dans le hot path : l'etat
+  ponctuel (`StateVec`) et le stockage (`Fab2D`) restent device-safe pour le
+  passage Kokkos/GPU. Tire au premier besoin host reel, pas avant.
 - couplage : a fixer (splitting pour diocotron non raide, IMEX/well-balanced
   pour le regime quasi-neutre, longueur de Debye -> 0)
 
