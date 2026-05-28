@@ -46,6 +46,40 @@ python scripts/plot_diocotron_growth.py /tmp/dio/diocotron_amp.csv docs/fig_dioc
 python scripts/make_diocotron_gif.py /tmp/dio docs/anim_diocotron.gif
 ```
 
+### Colonne creuse en cavite (cas canonique)
+
+Le cas de reference de la litterature (Davidson-Felice 1998 ; Hoffart, Maier,
+Shadid, Tomas 2025, arXiv:2510.11808, fig. 5.1-5.3) : un anneau de charge creux
+dans une cavite conductrice, perturbe sur le mode azimutal l. Le mode l croit en
+l tourbillons "cat's eyes" disposes en anneau.
+
+Point cle : leur difficulte (schema implicite, complement de Schur PDE) sert a
+atteindre la limite de derive magnetique depuis le modele complet a beta=1e6
+(echelles cyclotron / plasma / diocotron separees de 10 ordres). Notre modele
+guiding-center vit deja dans cette limite : on resout directement le transport
+E x B de n_e, explicitement. On obtient donc la meme instabilite, bien plus
+simplement.
+
+![Modes diocotron l=3,4,5](docs/fig_diocotron_modes.png)
+
+![Colonne creuse l=3](docs/anim_diocotron_column.gif)
+
+La selection de mode est exacte : l = 3, 4, 5 donnent 3, 4, 5 tourbillons, en
+accord visuel direct avec les figures 5.1-5.3 du papier. Reproduire :
+
+```bash
+cmake --build build --target diocotron_column
+for L in 3 4 5; do ./build/bin/diocotron_column /tmp/col$L 256 1500 $L; done
+python scripts/plot_diocotron_modes.py docs/fig_diocotron_modes.png /tmp/col3 /tmp/col4 /tmp/col5
+python scripts/make_diocotron_gif.py /tmp/col3 docs/anim_diocotron_column.gif
+```
+
+Pas encore fait pour une comparaison quantitative du taux de croissance au
+modele lineaire de Davidson-Felice (leur fig. 5.4) : il faut une paroi
+conductrice circulaire (ici on approxime par le bord carre Dirichlet) et la
+normalisation par la frequence diocotron. C'est la prochaine etape de
+validation.
+
 ## Niveau d'abstraction
 
 Trois axes orthogonaux qui ne se melangent jamais :
