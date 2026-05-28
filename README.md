@@ -302,7 +302,12 @@ L'**echange de halos est distribue** : `fill_boundary` fait les copies locales
 puis, pour les paires coupant un bord de rang, agrege un message par voisin
 (`MPI_Isend/Irecv`). Les metadonnees etant repliquees, les deux rangs d'une paire
 enumerent la meme liste de jobs dans le meme ordre, donc la disposition des
-tampons coincide sans negocier les tailles. Verifie par `test_mpi_smoke`
+tampons coincide sans negocier les tailles. La recherche des paires de voisins
+passe par un **hash spatial** (`box_hash.hpp`, sect. 3.3) : au lieu de balayer
+tout le `BoxArray` (O(N) par box), on n'interroge que les bins recouvrant la box
+fantome, ce qui ramene la recherche a ~O(n), n << N. La requete rend un
+sur-ensemble trie ; le test d'intersection exact reste fait par l'appelant
+(aucune omission possible : deux boxes qui s'intersectent partagent un bin). Verifie par `test_mpi_smoke`
 (somme globale invariante au nombre de rangs), `test_mpi_fillboundary` (ghosts
 remplis depuis des fabs distants, egaux a la valeur periodique attendue, coins
 compris) et `test_mpi_advect` (capstone : un pas d'advection complet sur

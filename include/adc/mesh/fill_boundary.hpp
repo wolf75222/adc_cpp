@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/mesh/box2d.hpp>
+#include <adc/mesh/box_hash.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/multifab.hpp>
@@ -70,24 +71,26 @@ inline void fill_boundary(MultiFab& mf, const Box2D& domain,
   for (int sx : sxv)
     for (int sy : syv) shifts.push_back({sx, sy});
 
+  // hash spatial : restreint la recherche des boxes voisines (sect. 3.3). Une
+  // src vB (eventuellement decalee de shift) intersecte la box requete gbox ssi
+  // vB intersecte gbox decalee de -shift -> on interroge le hash avec ce Q.
+  const BoxHash hash(ba, suggest_bin(ba));
+
   // --- copies locales (dst locale ET src locale) ---
   for (int li = 0; li < mf.local_size(); ++li) {
     Fab2D& F = mf.fab(li);
     const int gF = mf.global_index(li);
     const Box2D gbox = F.box().grow(ng);
 
-    for (int gB = 0; gB < ba.size(); ++gB) {
-      const int srcLocal = mf.local_index_of(gB);
-      if (srcLocal < 0) continue;  // src non locale -> traitee par MPI ci-dessous
-      const Fab2D& S = mf.fab(srcLocal);
-      const Box2D vB = ba[gB];
-
-      for (auto [sx, sy] : shifts) {
+    for (auto [sx, sy] : shifts) {
+      const Box2D Q = gbox.shift(0, -sx).shift(1, -sy);
+      for (int gB : hash.query(Q)) {
         if (gB == gF && sx == 0 && sy == 0) continue;  // soi-meme, sans decalage
-        const Box2D src = vB.shift(0, sx).shift(1, sy);
-        const Box2D region = gbox.intersect(src);
+        const int srcLocal = mf.local_index_of(gB);
+        if (srcLocal < 0) continue;  // src non locale -> MPI ci-dessous
+        const Box2D region = gbox.intersect(ba[gB].shift(0, sx).shift(1, sy));
         if (region.empty()) continue;
-        detail::copy_shifted(F, S, region, sx, sy, nc);
+        detail::copy_shifted(F, mf.fab(srcLocal), region, sx, sy, nc);
       }
     }
   }
@@ -103,18 +106,20 @@ inline void fill_boundary(MultiFab& mf, const Box2D& domain,
   };
   std::vector<std::vector<Job>> send(np), recv(np);  // par rang voisin
 
-  // enumeration globale deterministe : (dst gF) x (src gB) x shifts.
+  // enumeration globale deterministe : (dst gF) x shifts x candidats hash (gB
+  // tries). Identique sur tous les rangs (ba/dm repliques), donc les listes
+  // send/recv d'une paire coincident en ordre -> tampons alignes.
   for (int gF = 0; gF < ba.size(); ++gF) {
     const int od = dm[gF];
     const Box2D gbox = ba[gF].grow(ng);
-    for (int gB = 0; gB < ba.size(); ++gB) {
-      const int os = dm[gB];
-      if (od != me && os != me) continue;  // ne nous concerne pas
-      if (od == me && os == me) continue;  // deja traite en local
-      const Box2D vB = ba[gB];
-      for (auto [sx, sy] : shifts) {
+    for (auto [sx, sy] : shifts) {
+      const Box2D Q = gbox.shift(0, -sx).shift(1, -sy);
+      for (int gB : hash.query(Q)) {
         if (gB == gF && sx == 0 && sy == 0) continue;
-        const Box2D region = gbox.intersect(vB.shift(0, sx).shift(1, sy));
+        const int os = dm[gB];
+        if (od != me && os != me) continue;  // ne nous concerne pas
+        if (od == me && os == me) continue;  // deja traite en local
+        const Box2D region = gbox.intersect(ba[gB].shift(0, sx).shift(1, sy));
         if (region.empty()) continue;
         if (os == me)
           send[od].push_back({gB, gF, sx, sy, region});  // je possede la src
