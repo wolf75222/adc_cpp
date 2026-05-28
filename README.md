@@ -346,6 +346,29 @@ aller-retour tuiles<->bandes a l'identite (np=1 a 8, multi-noeud ROMEO). La
 brique sert aussi a `average_down` / `interpolate` / `regrid`, desormais
 corrects en distribue.
 
+![Diocotron MPI](docs/anim_diocotron_mpi.gif)
+
+Le demo `diocotron_mpi` (couple distribue : transport + Poisson spectral, en
+bandes) produit ses instantanes en rassemblant la densite sur le rang 0
+(`MPI_Gather`) : la couche de cisaillement (mode m=2) s'enroule en deux
+tourbillons, version MPI du demo AMR 3 niveaux. La physique etant invariante au
+nombre de rangs (bit a bit, cf. `test_mpi_diocotron`), les images sont rendues a
+partir d'un run du meme binaire. Reproduire :
+
+```bash
+mpirun -np 4 ./build-mpi/bin/diocotron_mpi /tmp/dio_mpi 128 600
+python scripts/make_diocotron_gif.py /tmp/dio_mpi docs/anim_diocotron_mpi.gif
+```
+
+**Recouvrement calcul/comm** (sect. 4.3) : `fill_boundary` est decoupe en deux
+phases non-bloquantes. `fill_boundary_begin` fait les copies locales et poste les
+`MPI_Isend/Irecv` ; entre `begin` et `end` on avance l'**interieur** (qui ne
+depend d'aucun ghost distant) pendant que les halos transitent ; puis
+`fill_boundary_end` attend la reception, deballe, et on avance le **bord**.
+`test_mpi_overlap` verifie que ce schema recouvert egale **bit a bit** l'advance
+bloquante (maxdiff = 0, np=1 a 8). La version bloquante `fill_boundary` appelle
+simplement `begin` puis `end`.
+
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
 (injection grossier->fin) sur la brique `parallel_copy`, clustering
