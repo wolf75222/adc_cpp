@@ -117,7 +117,8 @@ coefficients durs.
 9b. reconstruction MUSCL + limiteurs (ordre 2)
 10a. integrateur temporel : SSPRK2 mono-niveau (fait)
 10b. sous-cyclage AMR + reflux
-11. multigrille geometrique maison + coupleur
+11a. multigrille geometrique maison (Laplacien, GS red-black, V-cycle) (fait)
+11b. derivation aux = grad phi + coupleur (Poisson -> aux -> advance)
 
 ## Etat
 
@@ -141,6 +142,12 @@ Couche physique/temps : `Geometry` (coords physiques, dx par niveau),
 operateur spatial `assemble_rhs` (Rusanov 1er ordre, R = -div F + S consommant
 aux) et integrateur `advance_ssprk2`. Advection bout-en-bout du diocotron a aux
 prescrit : masse conservee, positivite, vitesse correcte.
+
+Couche elliptique : multigrille geometrique maison `GeometricMG` (Laplacien 5
+points, lisseur Gauss-Seidel red-black, V-cycle, restriction par `average_down`
+et prolongation par `interpolate`). Convergence independante du maillage
+(8 V-cycles a n=32 comme n=64) et precision O(dx^2) sur solutions manufacturees
+Dirichlet et periodique.
 
 ## Build
 
