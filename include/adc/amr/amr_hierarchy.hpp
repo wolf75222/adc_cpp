@@ -7,6 +7,7 @@
 #include <adc/parallel/comm.hpp>
 
 #include <cassert>
+#include <utility>
 #include <vector>
 
 // AmrHierarchy : la pile de niveaux raffines. Niveau 0 = le plus grossier.
@@ -38,6 +39,35 @@ class AmrHierarchy {
     ba_.push_back(fine_ba);
     data_.emplace_back(fine_ba, DistributionMapping(fine_ba.size(), n_ranks()),
                        ncomp_, ngrow_);
+  }
+
+  // Installe (ajoute ou remplace) un niveau fin a l'indice lev. Remplacer un
+  // niveau invalide les niveaux plus fins, qui sont supprimes. Utilise par le
+  // regrid.
+  void install_level(int lev, const BoxArray& fine_ba, MultiFab data) {
+    assert(lev >= 1 && lev <= num_levels());
+    const Box2D dom = domain_[lev - 1].refine(ref_ratio_);
+    if (lev == num_levels()) {
+      domain_.push_back(dom);
+      ba_.push_back(fine_ba);
+      data_.push_back(std::move(data));
+    } else {
+      domain_[lev] = dom;
+      ba_[lev] = fine_ba;
+      data_[lev] = std::move(data);
+      domain_.resize(lev + 1);
+      ba_.resize(lev + 1);
+      data_.resize(lev + 1);
+    }
+  }
+
+  // Supprime tous les niveaux strictement plus fins que lev.
+  void clear_above(int lev) {
+    if (lev + 1 < num_levels()) {
+      domain_.resize(lev + 1);
+      ba_.resize(lev + 1);
+      data_.resize(lev + 1);
+    }
   }
 
   int num_levels() const { return static_cast<int>(data_.size()); }

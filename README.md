@@ -111,7 +111,7 @@ coefficients durs.
 6. CL physiques : Foextrap / Dirichlet au bord du domaine (fait)
 7a. hierarchie AMR + transfert : `AmrHierarchy`, `average_down`, `interpolate`,
     `parallel_copy` (fait)
-7b. regrid dynamique : tagging, Berger-Rigoutsos, proper nesting
+7b. regrid dynamique : tagging, Berger-Rigoutsos, proper nesting (fait)
 8. reflux : `FluxRegister` coarse-fine
 9. operateur spatial : reconstruction + Riemann + divergence
 10. integrateur temporel : SSPRK2/3, sous-cyclage
