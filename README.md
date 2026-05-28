@@ -369,6 +369,19 @@ depend d'aucun ghost distant) pendant que les halos transitent ; puis
 bloquante (maxdiff = 0, np=1 a 8). La version bloquante `fill_boundary` appelle
 simplement `begin` puis `end`.
 
+**GPU (Grace Hopper)** : le seam `Array4` est deja calque sur une vue Kokkos.
+Un macro `ADC_HD` (= `__host__ __device__` sous nvcc/hip, vide sinon) rend
+`Array4::operator()` appelable dans un kernel device, sans aucun effet sur le
+build CPU. Le demo `examples/gpu/advect_cuda.cu` execute un pas d'advection
+E x B (flux de Rusanov) dans un kernel CUDA en reutilisant TELLE QUELLE la vue
+`Array4` (meme layout SoA, meme indexation), et valide le resultat contre le CPU.
+Verifie sur ROMEO partition `armgpu` (Nvidia **GH200 120GB**, CUDA 12.6, gcc 11) :
+`maxdiff(GPU vs CPU) = 0`. Build + run : `scripts/romeo_gpu.sbatch` (l'aarch64 +
+CUDA ne se compile que sur un noeud `armgpu`, pas sur le login). C'est la preuve
+que la conception (vues legeres capturees par valeur, kernels sans etat) porte
+sur GPU ; le backend complet (`for_each_cell` device, Arenas memoire) est la
+suite.
+
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
 (injection grossier->fin) sur la brique `parallel_copy`, clustering

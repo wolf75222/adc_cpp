@@ -28,7 +28,7 @@ struct Array4 {
   long comp_stride{0};
   int ig0{0}, jg0{0};  // indices globaux du coin bas de la box etendue
 
-  Real& operator()(int i, int j, int c = 0) const {
+  ADC_HD Real& operator()(int i, int j, int c = 0) const {
     return p[c * comp_stride + static_cast<long>(j - jg0) * nx_tot + (i - ig0)];
   }
 };
@@ -39,7 +39,7 @@ struct ConstArray4 {
   long comp_stride{0};
   int ig0{0}, jg0{0};
 
-  Real operator()(int i, int j, int c = 0) const {
+  ADC_HD Real operator()(int i, int j, int c = 0) const {
     return p[c * comp_stride + static_cast<long>(j - jg0) * nx_tot + (i - ig0)];
   }
 };
