@@ -303,9 +303,11 @@ puis, pour les paires coupant un bord de rang, agrege un message par voisin
 (`MPI_Isend/Irecv`). Les metadonnees etant repliquees, les deux rangs d'une paire
 enumerent la meme liste de jobs dans le meme ordre, donc la disposition des
 tampons coincide sans negocier les tailles. Verifie par `test_mpi_smoke`
-(somme globale invariante au nombre de rangs) et `test_mpi_fillboundary` (ghosts
+(somme globale invariante au nombre de rangs), `test_mpi_fillboundary` (ghosts
 remplis depuis des fabs distants, egaux a la valeur periodique attendue, coins
-compris), lances via `mpirun -np 4`.
+compris) et `test_mpi_advect` (capstone : un pas d'advection complet sur
+`MultiFab` reparti egale **bit a bit** le calcul serie mono-Fab, maxdiff = 0 a
+np=1/2/4/7), lances via `mpirun -np 4`.
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
