@@ -118,7 +118,7 @@ coefficients durs.
 7b. regrid dynamique : tagging, Berger-Rigoutsos, proper nesting (fait)
 8. reflux : `FluxRegister` coarse-fine
 9a. operateur spatial : `Geometry` + `assemble_rhs` (Rusanov 1er ordre) (fait)
-9b. reconstruction MUSCL + limiteurs (ordre 2)
+9b. reconstruction MUSCL + limiteurs (Minmod, VanLeer), ordre 2 (fait)
 10a. integrateur temporel : SSPRK2 mono-niveau (fait)
 10b. sous-cyclage AMR + reflux
 11a. multigrille geometrique maison (Laplacien, GS red-black, V-cycle) (fait)
@@ -143,9 +143,11 @@ transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
 Berger-Rigoutsos et regrid dynamique (tagging, buffer, nesting).
 
 Couche physique/temps : `Geometry` (coords physiques, dx par niveau),
-operateur spatial `assemble_rhs` (Rusanov 1er ordre, R = -div F + S consommant
-aux) et integrateur `advance_ssprk2`. Advection bout-en-bout du diocotron a aux
-prescrit : masse conservee, positivite, vitesse correcte.
+operateur spatial `assemble_rhs` (flux de Rusanov, R = -div F + S consommant
+aux) avec reconstruction au choix par template (NoSlope 1er ordre, MUSCL
+Minmod/VanLeer ordre 2) et integrateur `advance_ssprk2`. Advection bout-en-bout
+du diocotron a aux prescrit : masse conservee, positivite, vitesse correcte.
+Convergence mesuree : ordre 1.86 (VanLeer) contre 0.89 (Rusanov 1er ordre).
 
 Couche elliptique : multigrille geometrique maison `GeometricMG` (Laplacien 5
 points, lisseur Gauss-Seidel red-black, V-cycle, restriction par `average_down`
