@@ -1,14 +1,9 @@
-// AMR dans le temps : conservation de la masse d'un advance 2-niveaux avec
-// reflux. Un blob est advecte a vitesse constante A TRAVERS l'interface
-// coarse-fine ; avec reflux la masse est conservee a l'arrondi pendant la
-// traversee. C'est LE test qui valide l'arithmetique du reflux.
-//
-// Note : cette version non sous-cyclee (dt commun aux deux niveaux, ghosts par
-// injection) est conservative mais developpe une instabilite lente aux temps
-// longs au coin d'evacuation. La stabilite inconditionnelle demande le
-// sous-cyclage Berger-Oliger + FillPatch espace-temps (brique suivante). On
-// teste donc la conservation sur la phase de traversee, ou la solution reste
-// propre.
+// AMR dans le temps : advance 2-niveaux sous-cycle (Berger-Oliger) avec reflux.
+// Un blob est advecte a vitesse constante A TRAVERS l'interface coarse-fine.
+// Le sous-cyclage (le fin fait r=2 sous-pas de dt/2) + l'accumulation des flux
+// fins dans le registre + le FillPatch interpole en temps rendent le schema
+// a la fois CONSERVATIF (masse a l'arrondi) et STABLE (solution bornee, pas
+// d'instabilite a l'interface).
 
 #include <adc/integrator/amr_reflux.hpp>
 #include <adc/mesh/box2d.hpp>
@@ -63,8 +58,8 @@ int main() {
   };
   const double M0 = mass();
 
-  const double dt = 0.4 * dxc;  // CFL avec vmax=1
-  for (int s = 0; s < 18; ++s)  // phase de traversee de l'interface
+  const double dt = 0.4 * dxc;  // CFL grossier ; CFL fin = 0.4 (sous-cycle)
+  for (int s = 0; s < 60; ++s)
     amr_step_2level(m, Uc, dom, dxc, dyc, Uf, CI0, CI1, CJ0, CJ1, a, dt);
 
   const double M1 = mass();
@@ -72,14 +67,14 @@ int main() {
               std::fabs(M1 - M0));
   chk(std::fabs(M1 - M0) < 1e-12, "mass_conserved_with_reflux");
 
-  // solution bornee et propre pendant la traversee (le blob est dans [1, 1.5])
+  // solution bornee et propre (le blob reste dans [1, 1.5], pas d'instabilite)
   double mn = 1e300, mx = -1e300;
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       mn = std::min(mn, Uc(i, j));
       mx = std::max(mx, Uc(i, j));
     }
-  chk(mn > 0.99 && mx < 1.6, "bounded");
+  chk(mn > 0.999 && mx < 1.5, "stable_and_bounded");
 
   if (fails == 0) std::printf("OK test_amr_reflux\n");
   return fails == 0 ? 0 : 1;

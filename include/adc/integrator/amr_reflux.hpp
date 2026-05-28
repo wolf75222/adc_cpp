@@ -90,16 +90,23 @@ inline void fill_periodic_fab(Fab2D& U, const Box2D& dom) {
     }
 }
 
-// ghosts du fin par injection depuis le grossier (ratio 2).
-inline void fill_fine_ghosts(Fab2D& Uf, const Fab2D& Uc) {
-  const ConstArray4 c = Uc.const_array();
+// ghosts du fin par injection depuis le grossier (ratio 2), interpoles en temps
+// entre l'etat grossier ancien (frac=0) et nouveau (frac=1) : FillPatch
+// espace-temps pour le sous-cyclage Berger-Oliger.
+inline void fill_fine_ghosts_t(Fab2D& Uf, const Fab2D& Uco, const Fab2D& Ucn,
+                               double frac) {
+  const ConstArray4 co = Uco.const_array();
+  const ConstArray4 cn = Ucn.const_array();
   Array4 f = Uf.array();
   const Box2D g = Uf.grown_box();
   const Box2D v = Uf.box();
   auto coarsen = [](int x) { return (x >= 0) ? x / 2 : -((-x + 1) / 2); };
   for (int j = g.lo[1]; j <= g.hi[1]; ++j)
     for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-      if (!v.contains(i, j)) f(i, j) = c(coarsen(i), coarsen(j));
+      if (!v.contains(i, j)) {
+        const int ci = coarsen(i), cj = coarsen(j);
+        f(i, j) = (1 - frac) * co(ci, cj) + frac * cn(ci, cj);
+      }
 }
 
 // moyenne fin -> grossier sur la region couverte (ratio 2).
@@ -113,73 +120,74 @@ inline void average_down_fab(const Fab2D& Uf, Fab2D& Uc, int CI0, int CI1,
                         f(2 * I, 2 * J + 1) + f(2 * I + 1, 2 * J + 1));
 }
 
-// Un pas 2-niveaux conservatif (non sous-cycle : dt commun) avec reflux.
-// region fine = cellules grossieres [CI0..CI1] x [CJ0..CJ1] (strictement
-// interieures), raffinees en [2CI0..2CI1+1] x [...]. dom = domaine grossier.
+// Un pas 2-niveaux conservatif avec sous-cyclage Berger-Oliger (le fin fait
+// r=2 sous-pas de dt/2) et reflux. region fine = cellules grossieres
+// [CI0..CI1] x [CJ0..CJ1] (strictement interieures), raffinees en
+// [2CI0..2CI1+1] x [...]. dom = domaine grossier periodique.
+//
+// Registre de flux : on accumule le flux grossier (x dt) et la somme des flux
+// fins (x dt/2 par sous-pas, moyennes spatialement) aux 4 faces de la region
+// fine, puis on corrige les cellules grossieres adjacentes par leur difference.
 template <class Model>
 void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
                      double dyc, Fab2D& Uf, int CI0, int CI1, int CJ0, int CJ1,
                      const Aux& a, double dt) {
-  const double dxf = dxc / 2, dyf = dyc / 2;
+  const int r = 2;
+  const double dxf = dxc / 2, dyf = dyc / 2, dtf = dt / r;
+  const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
 
-  // --- flux grossiers (avant mise a jour) ---
+  const Fab2D Uc_old = Uc;  // etat grossier au temps t (pour interp temporelle)
+
+  // --- flux grossiers (avant mise a jour) aux 4 faces de la region fine ---
   fill_periodic_fab(Uc, dom);
   Fab2D fxc(xface_box(Uc.box()), 1, 0), fyc(yface_box(Uc.box()), 1, 0);
   compute_fluxes_1c(m, Uc, a, fxc, fyc);
-
-  // sauve les flux grossiers aux 4 faces de la region fine
   const ConstArray4 FXc = fxc.const_array();
   const ConstArray4 FYc = fyc.const_array();
-  std::vector<double> cL(CJ1 - CJ0 + 1), cR(CJ1 - CJ0 + 1);
-  std::vector<double> cB(CI1 - CI0 + 1), cT(CI1 - CI0 + 1);
+  std::vector<double> cL(nJ), cR(nJ), cB(nI), cT(nI);
   for (int J = CJ0; J <= CJ1; ++J) {
-    cL[J - CJ0] = FXc(CI0, J);      // face gauche de CI0
-    cR[J - CJ0] = FXc(CI1 + 1, J);  // face droite de CI1
+    cL[J - CJ0] = FXc(CI0, J);
+    cR[J - CJ0] = FXc(CI1 + 1, J);
   }
   for (int I = CI0; I <= CI1; ++I) {
-    cB[I - CI0] = FYc(I, CJ0);      // face basse de CJ0
-    cT[I - CI0] = FYc(I, CJ1 + 1);  // face haute de CJ1
+    cB[I - CI0] = FYc(I, CJ0);
+    cT[I - CI0] = FYc(I, CJ1 + 1);
   }
 
-  // --- mise a jour grossiere (tout le domaine) ---
-  advance_fab_1c(m, Uc, a, dxc, dyc, dt, fxc, fyc);
+  advance_fab_1c(m, Uc, a, dxc, dyc, dt, fxc, fyc);  // Uc devient l'etat "t+dt"
 
-  // --- mise a jour fine + accumulation des flux fins aux 4 faces ---
-  std::vector<double> fL(CJ1 - CJ0 + 1, 0), fR(CJ1 - CJ0 + 1, 0);
-  std::vector<double> fB(CI1 - CI0 + 1, 0), fT(CI1 - CI0 + 1, 0);
-  fill_fine_ghosts(Uf, Uc);  // Uc est deja avance ; injection (1er ordre en temps)
+  // --- sous-cyclage fin : r sous-pas, accumulation des flux fins (x dtf) ---
+  std::vector<double> fL(nJ, 0), fR(nJ, 0), fB(nI, 0), fT(nI, 0);
   Fab2D fxf(xface_box(Uf.box()), 1, 0), fyf(yface_box(Uf.box()), 1, 0);
-  compute_fluxes_1c(m, Uf, a, fxf, fyf);
-  const ConstArray4 FXf = fxf.const_array();
-  const ConstArray4 FYf = fyf.const_array();
-  // moyenne spatiale des flux fins sur chaque face grossiere
-  for (int J = CJ0; J <= CJ1; ++J) {
-    fL[J - CJ0] = 0.5 * (FXf(2 * CI0, 2 * J) + FXf(2 * CI0, 2 * J + 1));
-    fR[J - CJ0] =
-        0.5 * (FXf(2 * CI1 + 2, 2 * J) + FXf(2 * CI1 + 2, 2 * J + 1));
+  for (int s = 0; s < r; ++s) {
+    fill_fine_ghosts_t(Uf, Uc_old, Uc, double(s) / r);  // BC interpolee en temps
+    compute_fluxes_1c(m, Uf, a, fxf, fyf);
+    const ConstArray4 FXf = fxf.const_array();
+    const ConstArray4 FYf = fyf.const_array();
+    for (int J = CJ0; J <= CJ1; ++J) {
+      fL[J - CJ0] += 0.5 * (FXf(2 * CI0, 2 * J) + FXf(2 * CI0, 2 * J + 1)) * dtf;
+      fR[J - CJ0] +=
+          0.5 * (FXf(2 * CI1 + 2, 2 * J) + FXf(2 * CI1 + 2, 2 * J + 1)) * dtf;
+    }
+    for (int I = CI0; I <= CI1; ++I) {
+      fB[I - CI0] += 0.5 * (FYf(2 * I, 2 * CJ0) + FYf(2 * I + 1, 2 * CJ0)) * dtf;
+      fT[I - CI0] +=
+          0.5 * (FYf(2 * I, 2 * CJ1 + 2) + FYf(2 * I + 1, 2 * CJ1 + 2)) * dtf;
+    }
+    advance_fab_1c(m, Uf, a, dxf, dyf, dtf, fxf, fyf);
   }
-  for (int I = CI0; I <= CI1; ++I) {
-    fB[I - CI0] = 0.5 * (FYf(2 * I, 2 * CJ0) + FYf(2 * I + 1, 2 * CJ0));
-    fT[I - CI0] =
-        0.5 * (FYf(2 * I, 2 * CJ1 + 2) + FYf(2 * I + 1, 2 * CJ1 + 2));
-  }
-  advance_fab_1c(m, Uf, a, dxf, dyf, dt, fxf, fyf);
 
-  // --- average down (sync des cellules grossieres couvertes) ---
-  average_down_fab(Uf, Uc, CI0, CI1, CJ0, CJ1);
+  average_down_fab(Uf, Uc, CI0, CI1, CJ0, CJ1);  // sync des cellules couvertes
 
-  // --- reflux des cellules grossieres adjacentes (cote grossier) ---
+  // --- reflux : flux grossier (x dt) remplace par somme des flux fins (x dtf) ---
   Array4 c = Uc.array();
   for (int J = CJ0; J <= CJ1; ++J) {
-    // cellule grossiere a gauche de la region : CI0-1, face droite = face
-    // gauche de CI0. flux grossier cL, flux fin fL. correction +(fin-grossier).
-    c(CI0 - 1, J) -= dt / dxc * (fL[J - CJ0] - cL[J - CJ0]);
-    // cellule grossiere a droite : CI1+1, face gauche = face droite de CI1.
-    c(CI1 + 1, J) += dt / dxc * (fR[J - CJ0] - cR[J - CJ0]);
+    c(CI0 - 1, J) -= (fL[J - CJ0] - cL[J - CJ0] * dt) / dxc;
+    c(CI1 + 1, J) += (fR[J - CJ0] - cR[J - CJ0] * dt) / dxc;
   }
   for (int I = CI0; I <= CI1; ++I) {
-    c(I, CJ0 - 1) -= dt / dyc * (fB[I - CI0] - cB[I - CI0]);
-    c(I, CJ1 + 1) += dt / dyc * (fT[I - CI0] - cT[I - CI0]);
+    c(I, CJ0 - 1) -= (fB[I - CI0] - cB[I - CI0] * dt) / dyc;
+    c(I, CJ1 + 1) += (fT[I - CI0] - cT[I - CI0] * dt) / dyc;
   }
 }
 
