@@ -314,6 +314,12 @@ compris) et `test_mpi_advect` (capstone : un pas d'advection complet sur
 `MultiFab` reparti egale **bit a bit** le calcul serie mono-Fab, maxdiff = 0 a
 np=1/2/4/7), lances via `mpirun -np 4`.
 
+Valide hors-Mac sur **ROMEO 2025** (partition CPU `x64cpu`, gcc 14 + Open MPI
+5.0.5, C++23) : les trois tests passent via `srun`, y compris en **multi-noeud**
+(2 noeuds x 4 = 8 rangs, halos a travers l'interconnect), avec le capstone
+toujours bit a bit (maxdiff = 0) et la somme globale invariante de np=1 a 16. Le
+workflow build + run est fige dans `scripts/romeo_mpi.sbatch`.
+
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
 (injection grossier->fin) sur la brique `parallel_copy`, clustering
