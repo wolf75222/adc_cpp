@@ -137,6 +137,14 @@ synchronise). Le cadre cyan de l'animation suit ainsi les structures (extents lu
 dans `boxes.csv`), et la masse reste conservee a l'arrondi a travers chaque
 remaillage (drift ~1e-15).
 
+Le sous-cyclage + reflux se generalise a **N niveaux emboites** par recursion
+(`amr_multilevel.hpp`) : chaque niveau qui possede un enfant joue le role du
+grossier de l'etape 2-niveaux vis-a-vis de cet enfant (flux grossier sauve,
+flux fins accumules sur les r sous-pas, average_down, reflux). Le niveau le plus
+fin d'une pile a 3 etages fait r*r = 4 sous-pas par pas grossier. Le test
+`test_amr_multilevel` valide la conservation a l'arrondi (drift ~1e-16) et la
+borne de la solution sur 3 niveaux.
+
 ## Niveau d'abstraction
 
 Trois axes orthogonaux qui ne se melangent jamais :
