@@ -336,6 +336,16 @@ par bande. Le resultat egale **bit a bit** une reference serie pleine grille
 noeuds). C'est le pendant MPI du demo AMR 3 niveaux : toute la chaine
 distribution + halos + Poisson reparti + transport, exacte.
 
+**Redistribution generale** (`parallel_copy`, le `ParallelCopy` d'AMReX) : copie
+les regions valides qui se recouvrent entre deux `MultiFab` sur le meme domaine
+mais a decompositions differentes (tuiles 2D <-> bandes FFT), y compris
+cross-rang (meme machinerie agregee + hash spatial que `fill_boundary`). Cela
+delie le layout du transport (tuiles 2D quelconques) de celui du Poisson
+(bandes) : un remap suffit entre les deux. `test_mpi_redistribute` valide un
+aller-retour tuiles<->bandes a l'identite (np=1 a 8, multi-noeud ROMEO). La
+brique sert aussi a `average_down` / `interpolate` / `regrid`, desormais
+corrects en distribue.
+
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
 (injection grossier->fin) sur la brique `parallel_copy`, clustering

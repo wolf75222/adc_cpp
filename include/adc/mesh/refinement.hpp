@@ -2,6 +2,7 @@
 
 #include <adc/core/types.hpp>
 #include <adc/mesh/box_array.hpp>
+#include <adc/mesh/box_hash.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/fill_boundary.hpp>  // detail::copy_shifted
 #include <adc/mesh/multifab.hpp>
@@ -37,22 +38,103 @@ inline BoxArray coarsen(const BoxArray& ba, int r) {
 }
 
 // Copie des regions valides qui se recouvrent : src -> dst (memes indices, pas
-// de decalage). Brique de base ; la version MPI postera des send/recv pour les
-// boxes non locales (aujourd'hui on saute simplement les boxes distantes).
+// de decalage). Redistribution generale entre deux MultiFab sur le meme domaine
+// mais a decompositions (BoxArray + DistributionMapping) eventuellement
+// differentes (ex. tuiles 2D <-> bandes FFT). C'est le ParallelCopy d'AMReX.
+//
+// Mono-rang : copies memoire directes. Multi-rang : metadonnees repliquees ->
+// chaque rang enumere la meme liste de jobs (gd, gs, region) dans le meme ordre
+// (hash spatial sur la src, candidats tries), classe par appartenance, et agrege
+// un message par voisin (MPI_Isend/Irecv, tag 1). Tampons alignes sans handshake.
 inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
   const int nc = std::min(dst.ncomp(), src.ncomp());
   const BoxArray& sba = src.box_array();
+  const BoxArray& dba = dst.box_array();
+  const BoxHash shash(sba, suggest_bin(sba));
+
+  // --- copies locales (dst locale ET src locale) ---
   for (int ld = 0; ld < dst.local_size(); ++ld) {
     Fab2D& D = dst.fab(ld);
     const Box2D vd = D.box();
-    for (int gs = 0; gs < sba.size(); ++gs) {
+    for (int gs : shash.query(vd)) {
       const int ls = src.local_index_of(gs);
-      if (ls < 0) continue;
+      if (ls < 0) continue;  // src non locale -> MPI ci-dessous
       const Box2D region = vd.intersect(sba[gs]);
       if (region.empty()) continue;
       detail::copy_shifted(D, src.fab(ls), region, 0, 0, nc);
     }
   }
+
+#ifdef ADC_HAS_MPI
+  if (n_ranks() <= 1) return;
+  const int me = my_rank(), np = n_ranks();
+  const DistributionMapping& sdm = src.dmap();
+  const DistributionMapping& ddm = dst.dmap();
+
+  struct Job {
+    int gs, gd;
+    Box2D region;
+  };
+  std::vector<std::vector<Job>> send(np), recv(np);
+  for (int gd = 0; gd < dba.size(); ++gd) {
+    const int od = ddm[gd];
+    const Box2D vd = dba[gd];
+    for (int gs : shash.query(vd)) {
+      const int os = sdm[gs];
+      if (od != me && os != me) continue;  // ne nous concerne pas
+      if (od == me && os == me) continue;  // local, deja fait
+      const Box2D region = vd.intersect(sba[gs]);
+      if (region.empty()) continue;
+      if (os == me)
+        send[od].push_back({gs, gd, region});  // je possede la src
+      else
+        recv[os].push_back({gs, gd, region});  // je possede la dst
+    }
+  }
+
+  auto bufsz = [&](const std::vector<Job>& js) {
+    long n = 0;
+    for (const auto& j : js) n += j.region.num_cells() * nc;
+    return n;
+  };
+  std::vector<std::vector<Real>> sbuf(np), rbuf(np);
+  std::vector<MPI_Request> reqs;
+  for (int r = 0; r < np; ++r) {
+    if (!send[r].empty()) {
+      sbuf[r].resize(bufsz(send[r]));
+      long k = 0;
+      for (const auto& j : send[r]) {
+        const ConstArray4 s = src.fab(src.local_index_of(j.gs)).const_array();
+        for (int c = 0; c < nc; ++c)
+          for (int jj = j.region.lo[1]; jj <= j.region.hi[1]; ++jj)
+            for (int ii = j.region.lo[0]; ii <= j.region.hi[0]; ++ii)
+              sbuf[r][k++] = s(ii, jj, c);
+      }
+      reqs.emplace_back();
+      MPI_Isend(sbuf[r].data(), static_cast<int>(sbuf[r].size()), MPI_DOUBLE, r,
+                1, MPI_COMM_WORLD, &reqs.back());
+    }
+    if (!recv[r].empty()) {
+      rbuf[r].resize(bufsz(recv[r]));
+      reqs.emplace_back();
+      MPI_Irecv(rbuf[r].data(), static_cast<int>(rbuf[r].size()), MPI_DOUBLE, r,
+                1, MPI_COMM_WORLD, &reqs.back());
+    }
+  }
+  if (!reqs.empty())
+    MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), MPI_STATUSES_IGNORE);
+
+  for (int r = 0; r < np; ++r) {
+    long k = 0;
+    for (const auto& j : recv[r]) {
+      Array4 d = dst.fab(dst.local_index_of(j.gd)).array();
+      for (int c = 0; c < nc; ++c)
+        for (int jj = j.region.lo[1]; jj <= j.region.hi[1]; ++jj)
+          for (int ii = j.region.lo[0]; ii <= j.region.hi[0]; ++ii)
+            d(ii, jj, c) = rbuf[r][k++];
+    }
+  }
+#endif
 }
 
 inline void average_down(const MultiFab& fine, MultiFab& coarse, int r) {
