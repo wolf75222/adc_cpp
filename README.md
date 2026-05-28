@@ -327,6 +327,15 @@ locale, transpose parallele (`MPI_Alltoall`), FFT-y locale, division spectrale,
 inverse. `test_mpi_poisson` verifie le residu `lap_h(phi) - rho` a 2e-14
 (arrondi) et l'invariance au nombre de rangs (np=1 a 8). FFT 1D radix-2 maison.
 
+**Diocotron distribue bout-en-bout** (`test_mpi_diocotron`) : K pas couples
+transport (advection E x B, Rusanov) + Poisson spectral distribue, sur une
+decomposition en bandes (meme layout que la FFT). A chaque pas : rho = alpha
+(n_e - n_i0) -> solve FFT -> phi -> halos -> aux = grad phi -> halos -> advance
+par bande. Le resultat egale **bit a bit** une reference serie pleine grille
+(maxdiff = 0 a np=1/2/4/8), y compris en multi-noeud sur ROMEO (8 rangs, 2
+noeuds). C'est le pendant MPI du demo AMR 3 niveaux : toute la chaine
+distribution + halos + Poisson reparti + transport, exacte.
+
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
 (injection grossier->fin) sur la brique `parallel_copy`, clustering
