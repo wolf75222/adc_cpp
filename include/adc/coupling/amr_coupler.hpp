@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/core/types.hpp>
+#include <adc/elliptic/elliptic_solver.hpp>  // concept EllipticSolver
 #include <adc/elliptic/geometric_mg.hpp>
 #include <adc/integrator/amr_multilevel.hpp>  // AmrLevel, amr_step_multilevel, average_down_fab
 #include <adc/mesh/box2d.hpp>
@@ -31,20 +32,19 @@
 
 namespace adc {
 
-template <class Model>
+template <class Model, class Elliptic = GeometricMG>
 class AmrCoupler {
+  static_assert(EllipticSolver<Elliptic>, "Elliptic doit modeler EllipticSolver");
+
  public:
   AmrCoupler(const Model& model, const Geometry& geom,
-                const BoxArray& ba_coarse, const BCRec& bc,
-                std::vector<AmrLevel> levels, Real mg_tol = 1e-8,
-                int mg_maxc = 30)
+             const BoxArray& ba_coarse, const BCRec& bc,
+             std::vector<AmrLevel> levels)
       : model_(model),
         geom_(geom),
         dom_(geom.domain),
         mg_(geom, ba_coarse, bc),
-        L_(std::move(levels)),
-        tol_(mg_tol),
-        maxc_(mg_maxc) {
+        L_(std::move(levels)) {
     nlev_ = static_cast<int>(L_.size());
     aux_.resize(nlev_);
     for (int k = 0; k < nlev_; ++k) {
@@ -81,7 +81,7 @@ class AmrCoupler {
         for (int i = 0; i < nx; ++i)
           f(i, j) = model_.alpha * (u0(i, j) - model_.n_i0);
     }
-    mg_.solve(tol_, maxc_);
+    mg_.solve();
     const ConstArray4 p = mg_.phi().fab(0).const_array();
     Array4 a0 = aux_[0].array();
     for (int j = 0; j < ny; ++j)
@@ -162,12 +162,10 @@ class AmrCoupler {
   Model model_;
   Geometry geom_;
   Box2D dom_;
-  GeometricMG mg_;
+  Elliptic mg_;
   std::vector<AmrLevel> L_;
   std::vector<Fab2D> aux_;
   int nlev_ = 0;
-  Real tol_;
-  int maxc_;
 };
 
 }  // namespace adc
