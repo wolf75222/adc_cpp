@@ -1,6 +1,7 @@
 #include <adc/solver/diocotron_solver.hpp>
 
 #include <adc/coupling/coupler.hpp>
+#include <adc/coupling/coupling_policy.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>
@@ -25,6 +26,7 @@ struct DiocotronSolver::Impl {
   MultiFab U;
   double t = 0;
   int n;
+  bool per_stage;
 
   explicit Impl(const DiocotronConfig& c)
       : geom{Box2D::from_extents(c.n, c.n), 0.0, c.L, 0.0, c.L},
@@ -33,7 +35,8 @@ struct DiocotronSolver::Impl {
         model{c.B0, c.n_i0, c.alpha},
         cpl(model, geom, ba, bcU, bcPhi),
         U(ba, dm, 1, 2),
-        n(c.n) {
+        n(c.n),
+        per_stage(c.poisson_per_stage) {
     // CI : densite lisse de moyenne n_i0 (second membre de Poisson a moyenne nulle)
     constexpr double pi = 3.14159265358979323846;
     Array4 u = U.fab(0).array();
@@ -55,7 +58,10 @@ DiocotronSolver::DiocotronSolver(DiocotronSolver&&) noexcept = default;
 DiocotronSolver& DiocotronSolver::operator=(DiocotronSolver&&) noexcept = default;
 
 void DiocotronSolver::step(double dt) {
-  p_->cpl.advance<Minmod>(p_->U, dt);
+  if (p_->per_stage)
+    p_->cpl.advance<Minmod, PerStageCoupling>(p_->U, dt);
+  else
+    p_->cpl.advance<Minmod, OncePerStepCoupling>(p_->U, dt);
   p_->t += dt;
 }
 double DiocotronSolver::mass() const { return sum(p_->U, 0); }

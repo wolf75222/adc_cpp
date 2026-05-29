@@ -1,6 +1,7 @@
 #include <adc/solver/euler_poisson_solver.hpp>
 
 #include <adc/coupling/coupler.hpp>
+#include <adc/coupling/coupling_policy.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>
@@ -33,6 +34,7 @@ struct EulerPoissonSolver::Impl {
   MultiFab U;
   double t = 0;
   int n;
+  bool per_stage;
 
   explicit Impl(const EulerPoissonConfig& c)
       : geom{Box2D::from_extents(c.n, c.n), 0.0, c.L, 0.0, c.L},
@@ -41,7 +43,8 @@ struct EulerPoissonSolver::Impl {
         model(make_model(c)),
         cpl(model, geom, ba, bcU, bcPhi),
         U(ba, dm, 4, 2),
-        n(c.n) {
+        n(c.n),
+        per_stage(c.poisson_per_stage) {
     // CI : perturbation acoustique-gravitationnelle au repos (Jeans), au repos.
     constexpr double pi = 3.14159265358979323846;
     const double k = 2 * pi / c.L, cs2 = c.gamma * c.p0 / c.rho0;
@@ -69,7 +72,10 @@ EulerPoissonSolver& EulerPoissonSolver::operator=(EulerPoissonSolver&&) noexcept
     default;
 
 void EulerPoissonSolver::step(double dt) {
-  p_->cpl.advance<Minmod>(p_->U, dt);
+  if (p_->per_stage)
+    p_->cpl.advance<Minmod, PerStageCoupling>(p_->U, dt);
+  else
+    p_->cpl.advance<Minmod, OncePerStepCoupling>(p_->U, dt);
   p_->t += dt;
 }
 double EulerPoissonSolver::mass() const { return sum(p_->U, 0); }

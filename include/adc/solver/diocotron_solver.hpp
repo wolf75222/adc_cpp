@@ -23,6 +23,10 @@ struct DiocotronConfig {
   double n_i0 = 1.0;    // densite ionique de fond (neutralisante)
   double alpha = 1.0;   // constante de couplage Poisson
   double eps = 0.2;     // amplitude de la perturbation initiale lisse
+  // true : Poisson resolu a chaque etage RK (precis). false : une fois par pas
+  // (OncePerStep) -> ~2.6x plus rapide (la multigrille domine le run), couplage
+  // 1er ordre. Voir docs/PERFORMANCE.md.
+  bool poisson_per_stage = true;
 };
 
 class DiocotronSolver {

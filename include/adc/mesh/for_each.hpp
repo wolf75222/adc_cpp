@@ -46,7 +46,12 @@ void for_each_cell(const Box2D& b, F f) {
           {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
       f);
 #elif defined(_OPENMP)
-#pragma omp parallel for collapse(2) schedule(static)
+  // Clause if() : on ne paie le fork/join que si la boite est assez grande. Sinon
+  // (niveaux grossiers de la multigrille : 2x2, 4x4...) le cout d'ouverture de la
+  // region parallele ecraserait le calcul (regression x40 mesuree sans le seuil).
+  const long n_cells = static_cast<long>(b.hi[0] - b.lo[0] + 1) *
+                       (b.hi[1] - b.lo[1] + 1);
+#pragma omp parallel for collapse(2) schedule(static) if (n_cells >= 4096)
   for (int j = b.lo[1]; j <= b.hi[1]; ++j)
     for (int i = b.lo[0]; i <= b.hi[0]; ++i) f(i, j);
 #else

@@ -17,6 +17,7 @@ struct EulerPoissonConfig {
   double rho0 = 1.0;        // fond neutralisant
   double p0 = 1.0;
   double eps = 1e-3;        // amplitude de la perturbation de Jeans
+  bool poisson_per_stage = true;  // false -> OncePerStep, ~2.6x plus rapide
 };
 
 class EulerPoissonSolver {
