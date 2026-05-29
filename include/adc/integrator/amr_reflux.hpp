@@ -22,12 +22,8 @@
 
 namespace adc {
 
-inline Box2D xface_box(const Box2D& v) {
-  return Box2D{{v.lo[0], v.lo[1]}, {v.hi[0] + 1, v.hi[1]}};
-}
-inline Box2D yface_box(const Box2D& v) {
-  return Box2D{{v.lo[0], v.lo[1]}, {v.hi[0], v.hi[1] + 1}};
-}
+// xface_box / yface_box : fournis par operator/spatial_operator.hpp (inclus ci-dessus),
+// memes conventions de boites de face. On ne les redefinit pas ici.
 
 // flux de Rusanov premier ordre, 1 composante, aux variable en espace (Fab2D a
 // 3 composantes [phi, gx, gy], ghosts remplis), sur un Fab2D.
