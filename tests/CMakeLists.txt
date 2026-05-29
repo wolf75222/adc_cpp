@@ -41,6 +41,7 @@ adc_add_test(test_interfaces)
 adc_add_test(test_euler)
 adc_add_test(test_euler_poisson)
 adc_add_test(test_riemann)
+adc_add_test(test_two_fluid_ap)
 
 if(ADC_HAS_HDF5)
   adc_add_test(test_hdf5_io)

@@ -562,6 +562,14 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   Euler-Poisson magnetique (Debye -> 0, Lorentz, quasi-neutralite du regime
   Hoffart). Sur une relaxation raide : stable et vers l'equilibre a dt >> eps la
   ou l'explicite explose ; ordre 1 en regime non raide.
+- `model/langmuir.hpp` : noyau 0D du schema AP deux-fluides. Mode de Langmuir
+  linearise (deux-fluides isotherme), ou la frequence plasma `omega_p` est le terme
+  RAIDE (-> infini quand `lambda_D -> 0`), traitee en implicite (solve 2x2 A-stable),
+  la correction acoustique `c_s^2 k^2` etant explicite. `test_two_fluid_ap` (via
+  `imex_euler_step`) : a `omega_p = 1e3`, `dt omega_p = 10`, l'IMEX reste borne
+  (`max|a| = 1.0`) la ou l'explicite explose (`1e200`) ; ordre 1 en non raide. C'est
+  le terme raide du futur deux-fluides isotherme magnetique, valide avant le
+  couplage spatial complet.
 - `analysis/hdf5_writer.hpp` (option `ADC_USE_HDF5`) : DataWriter HDF5 parallele.
   Chaque rang ecrit ses boites par hyperslab dans un dataset global, sans gather
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs
