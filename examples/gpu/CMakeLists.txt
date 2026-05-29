@@ -61,3 +61,10 @@ target_include_directories(coupled_kokkos
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 target_compile_definitions(coupled_kokkos PRIVATE ADC_HAS_KOKKOS)
 target_link_libraries(coupled_kokkos PRIVATE Kokkos::kokkos)
+
+# etape C : Arena (pool memoire unifiee) -> 0 cudaMallocManaged apres rodage
+add_executable(arena_kokkos arena_kokkos.cpp)
+target_include_directories(arena_kokkos
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_compile_definitions(arena_kokkos PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(arena_kokkos PRIVATE Kokkos::kokkos)

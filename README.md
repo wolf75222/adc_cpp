@@ -470,9 +470,20 @@ le CPU (serie) et le GH200 (Cuda) (`sum(U^2) = 1.6752629937e+04`, `max|U| =
 1.2998083392e+00`), masse conservee exactement. Le pas couple Euler-Poisson tourne
 donc entierement sur GPU et donne le meme resultat que le CPU.
 
-Reste surtout, pour la perf en production, un pool memoire (Arena) afin d'eviter un
-`cudaMallocManaged` par petit Fab temporaire dans les etages d'integration et les
-niveaux de la multigrille.
+**Pool memoire (Arena).** Un `cudaMallocManaged` par petit Fab temporaire (etages
+SSPRK, niveaux de la multigrille) est lent. `core/allocator.hpp` ajoute un cache
+(`ManagedArena`) : free-list par taille en octets, qui RECYCLE les blocs liberes au
+lieu de les rendre au pilote. Subtilite de correction : `cudaFree` synchronise
+implicitement le device, ce qui protegeait la destruction d'un Fab dont un kernel
+etait encore en vol ; le pool ne faisant pas de `cudaFree`, on reproduit cette
+barriere EN LOT (un bloc libere passe en attente ; une seule `cudaDeviceSynchronize`
+draine le device et rend tous les blocs reutilisables quand une allocation en manque).
+La semantique valeur de `Fab2D` est intacte (chaque vecteur possede un bloc distinct,
+le pool est un singleton sans etat). `examples/gpu/arena_kokkos.cpp` sur GH200 : apres
+le rodage du premier pas, **0 nouveau `cudaMallocManaged`** sur les pas suivants
+(`misses` constant a 32, des milliers de recyclages), et `coupled_kokkos` reste
+**bit a bit identique** au CPU. La validation CPU (23/23) est inchangee (le pool
+n'existe que dans la branche memoire unifiee).
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
