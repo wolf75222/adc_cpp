@@ -8,3 +8,8 @@ cmake-build-*/
 .DS_Store
 .cache/
 compile_commands.json
+
+# documentation generee (Doxygen + Sphinx)
+docs/_build/
+docs/sphinx/_generated/
+docs/sphinx/__pycache__/

@@ -1,0 +1,25 @@
+/* Limit image sizes on the Doxygen main page (rendered from README.md).
+   Natural-size PNGs (banner 2000+ px, result figures 1500+ px) otherwise
+   fill the entire content area on wide screens. */
+
+div.contents img,
+div.textblock img,
+.memdoc img,
+.markdownTable img {
+    max-width: 720px;
+    height: auto;
+    display: block;
+    margin: 0.5em auto;
+}
+
+/* Result-grid tables in the README: keep cells from stretching. */
+div.contents table.markdownTable td,
+div.textblock table.markdownTable td {
+    max-width: 360px;
+    vertical-align: top;
+}
+
+div.contents table.markdownTable td img,
+div.textblock table.markdownTable td img {
+    max-width: 100%;
+}

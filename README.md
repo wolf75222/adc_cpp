@@ -113,6 +113,15 @@ inspire d'AMReX / Parthenon) pour viser le GPU et le MPI sans dependance.
 - Architecture (couches, seams, frontiere lib/demo, etat AMR) : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Schema deux-fluides AP (modele, reformulation, transport, enveloppe mesuree) : [docs/two_fluid_ap.md](docs/two_fluid_ap.md)
 - Performance (profil, scaling, FFT vs MG) : [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+- Choix de conception : [docs/CHOICES.md](docs/CHOICES.md) ; bibliographie : [docs/BIBLIOGRAPHY.md](docs/BIBLIOGRAPHY.md) ; roadmap : [docs/ROADMAP.md](docs/ROADMAP.md)
+
+Generer la doc hebergeable :
+
+```bash
+doxygen docs/Doxyfile                                   # reference C++ -> docs/_build/doxygen/html
+pip install -r docs/sphinx/requirements.txt
+python3 -m sphinx -b html docs/sphinx docs/_build/sphinx # site Python + tutoriels
+```
 
 ## Quick start
 

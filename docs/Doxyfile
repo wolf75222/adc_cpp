@@ -1,0 +1,26 @@
+# Doxygen config pour adc_cpp. Reglages non-defaut seulement ; lancer depuis la racine :
+#   doxygen docs/Doxyfile   ->   docs/_build/doxygen/html/index.html
+
+PROJECT_NAME           = "adc_cpp"
+PROJECT_NUMBER         = "0.1.0"
+PROJECT_BRIEF          = "C++23 mini-AMReX maison : hyperbolique-elliptique couple sur AMR (diocotron, deux-fluides), seam serie/OpenMP/Kokkos/MPI"
+
+OUTPUT_DIRECTORY       = docs/_build/doxygen
+INPUT                  = include/adc README.md
+FILE_PATTERNS          = *.hpp *.h
+RECURSIVE              = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_EXTRA_STYLESHEET  = docs/doxygen_custom.css
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+GENERATE_LATEX         = NO
