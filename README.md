@@ -581,8 +581,14 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   ions sont figes). IMEX : plasma (`omega_pe, omega_pi`) implicite (solve 2x2
   A-stable), acoustique explicite. `test_two_fluid` : dispersion conforme (relations
   de Vieta exactes, limites k->0), AP (a `omega_pe = 1e3`, IMEX borne vs explicite a
-  `1e200`), et le schema reproduit la branche de Langmuir a 0.1%. Premier increment
-  vers le deux-fluides spatial.
+  `1e200`), et le schema reproduit la branche de Langmuir a 0.1%.
+- Deux-fluides SPATIAL 1D (non lineaire) : `test_two_fluid_spatial` transporte les
+  DEUX especes (Euler isotherme, flux de Rusanov, conservatif) + Poisson 1D
+  periodique + force de Lorentz, sur une grille. Il reproduit la dispersion de
+  Langmuir mesuree sur la grille (`5.07` vs `5.19` theorique, **2.4%**), conserve la
+  masse de chaque espece a `1e-14`, positivite preservee. Premier solveur reellement
+  multi-especes spatial (sort du mode de Fourier). Explicite (CFL plasma) ; l'AP
+  implicite, le 2D et l'integration MultiFab/AMR/GPU restent l'etape suivante.
 - `analysis/hdf5_writer.hpp` (option `ADC_USE_HDF5`) : DataWriter HDF5 parallele.
   Chaque rang ecrit ses boites par hyperslab dans un dataset global, sans gather
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs
