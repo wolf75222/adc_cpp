@@ -60,8 +60,9 @@ ADC_HD inline typename Model::State rusanov_flux(const Model& m,
 // Valeur de cellule (i,j) extrapolee vers sa face +dir (sgn=+1) ou -dir (sgn=-1).
 // Pour NoSlope (n_ghost==1) : pas de pente, aucune lecture de voisin.
 template <class Model, class Limiter>
-inline typename Model::State reconstruct(const ConstArray4& u, int i, int j,
-                                         int dir, Real sgn, const Limiter& lim) {
+ADC_HD inline typename Model::State reconstruct(const ConstArray4& u, int i,
+                                                int j, int dir, Real sgn,
+                                                const Limiter& lim) {
   typename Model::State s = load_state<Model>(u, i, j);
   if constexpr (Limiter::n_ghost > 1) {
     for (int c = 0; c < Model::n_vars; ++c) {
@@ -85,7 +86,7 @@ void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
     const ConstArray4 ax = aux.fab(li).const_array();
     Array4 r = R.fab(li).array();
     const Box2D v = R.box(li);
-    for_each_cell(v, [=](int i, int j) {
+    for_each_cell(v, [=] ADC_HD(int i, int j) {
       const Aux Ac = load_aux(ax, i, j);
       const Aux Axm = load_aux(ax, i - 1, j);
       const Aux Axp = load_aux(ax, i + 1, j);

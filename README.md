@@ -425,9 +425,16 @@ a `--expt-relaxed-constexpr`. Le demo `examples/gpu/advance_fab_kokkos.cpp` vali
 `maxdiff = 2e-16` sur GH200. Seuls le backend (`for_each_cell`) et l'allocateur
 (`Fab2D`) ont change ; l'operateur, lui, est le meme qu'en CPU.
 
-Reste pour un solveur complet GPU : router de meme les autres operateurs
-(`assemble_rhs` SSPRK, multigrille) par `for_each_cell`, et un pool memoire
-(Arenas) pour eviter un `cudaMallocManaged` par petit Fab temporaire.
+L'operateur hyperbolique d'ordre 2 suit : `assemble_rhs` (reconstruction MUSCL
+**Minmod** + flux de Rusanov + source, le RHS de l'integrateur SSPRK) utilisait
+deja `for_each_cell` ; il a suffi d'annoter `ADC_HD` son lambda, `reconstruct` et
+les limiteurs (avec `min`/`abs` manuels, device-safe). `examples/gpu/rhs_kokkos.cpp`
+le valide sur GH200 (`maxdiff = 3e-14` vs reference serie utilisant les memes
+fonctions). Donc transport 1er ordre ET MUSCL ordre 2 tournent sur GPU.
+
+Reste pour un pas couple entier GPU : la multigrille geometrique (lisseur GS
+red-black, residu, restriction, prolongation) par `for_each_cell`, et un pool
+memoire (Arena) pour eviter un `cudaMallocManaged` par petit Fab temporaire.
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`

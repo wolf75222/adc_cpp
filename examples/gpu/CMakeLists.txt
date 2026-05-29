@@ -33,3 +33,10 @@ target_include_directories(advance_fab_kokkos
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 target_compile_definitions(advance_fab_kokkos PRIVATE ADC_HAS_KOKKOS)
 target_link_libraries(advance_fab_kokkos PRIVATE Kokkos::kokkos)
+
+# etape A (solveur complet) : assemble_rhs (MUSCL Minmod + SSPRK rhs) sur GPU
+add_executable(rhs_kokkos rhs_kokkos.cpp)
+target_include_directories(rhs_kokkos
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_compile_definitions(rhs_kokkos PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(rhs_kokkos PRIVATE Kokkos::kokkos)
