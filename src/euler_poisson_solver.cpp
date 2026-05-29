@@ -2,6 +2,7 @@
 
 #include <adc/coupling/coupler.hpp>
 #include <adc/coupling/coupling_policy.hpp>
+#include <adc/elliptic/poisson_fft_solver.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>
@@ -10,9 +11,9 @@
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/model/euler_poisson.hpp>
 #include <adc/operator/reconstruction.hpp>
-#include <adc/parallel/comm.hpp>
 
 #include <cmath>
+#include <variant>
 
 namespace adc {
 
@@ -24,13 +25,26 @@ static EulerPoisson make_model(const EulerPoissonConfig& c) {
   return m;
 }
 
+// Le backend elliptique est choisi a l'execution (use_fft) : la variante tient soit
+// la multigrille (tout N), soit la FFT directe (~5x, mais N puissance de 2).
+using CouplerMG = Coupler<EulerPoisson>;
+using CouplerFFT = Coupler<EulerPoisson, PoissonFFTSolver>;
+using CouplerVar = std::variant<CouplerMG, CouplerFFT>;
+
+static CouplerVar make_coupler(const EulerPoisson& m, const Geometry& g,
+                               const BoxArray& ba, const BCRec& bcU,
+                               const BCRec& bcPhi, bool use_fft) {
+  if (use_fft) return CouplerVar{CouplerFFT(m, g, ba, bcU, bcPhi)};
+  return CouplerVar{CouplerMG(m, g, ba, bcU, bcPhi)};
+}
+
 struct EulerPoissonSolver::Impl {
   Geometry geom;
   BoxArray ba;
   DistributionMapping dm;
   EulerPoisson model;
   BCRec bcU, bcPhi;
-  Coupler<EulerPoisson> cpl;
+  CouplerVar cpl;
   MultiFab U;
   double t = 0;
   int n;
@@ -41,11 +55,10 @@ struct EulerPoissonSolver::Impl {
         ba(std::vector<Box2D>{Box2D::from_extents(c.n, c.n)}),
         dm(1, n_ranks()),
         model(make_model(c)),
-        cpl(model, geom, ba, bcU, bcPhi),
+        cpl(make_coupler(model, geom, ba, bcU, bcPhi, c.use_fft)),
         U(ba, dm, 4, 2),
         n(c.n),
         per_stage(c.poisson_per_stage) {
-    // CI : perturbation acoustique-gravitationnelle au repos (Jeans), au repos.
     constexpr double pi = 3.14159265358979323846;
     const double k = 2 * pi / c.L, cs2 = c.gamma * c.p0 / c.rho0;
     Array4 u = U.fab(0).array();
@@ -62,6 +75,18 @@ struct EulerPoissonSolver::Impl {
         u(i, j, 3) = p / (c.gamma - 1);
       }
   }
+
+  void step(double dt) {
+    std::visit(
+        [&](auto& c) {
+          if (per_stage)
+            c.template advance<Minmod, PerStageCoupling>(U, dt);
+          else
+            c.template advance<Minmod, OncePerStepCoupling>(U, dt);
+        },
+        cpl);
+    t += dt;
+  }
 };
 
 EulerPoissonSolver::EulerPoissonSolver(const EulerPoissonConfig& c)
@@ -71,13 +96,7 @@ EulerPoissonSolver::EulerPoissonSolver(EulerPoissonSolver&&) noexcept = default;
 EulerPoissonSolver& EulerPoissonSolver::operator=(EulerPoissonSolver&&) noexcept =
     default;
 
-void EulerPoissonSolver::step(double dt) {
-  if (p_->per_stage)
-    p_->cpl.advance<Minmod, PerStageCoupling>(p_->U, dt);
-  else
-    p_->cpl.advance<Minmod, OncePerStepCoupling>(p_->U, dt);
-  p_->t += dt;
-}
+void EulerPoissonSolver::step(double dt) { p_->step(dt); }
 double EulerPoissonSolver::mass() const { return sum(p_->U, 0); }
 double EulerPoissonSolver::energy() const { return sum(p_->U, 3); }
 double EulerPoissonSolver::total_momentum(int dir) const {

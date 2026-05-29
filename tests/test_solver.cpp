@@ -47,6 +47,20 @@ int main() {
     chk(std::isfinite(s.energy()), "ep_energie_finie");
   }
 
+  // --- EulerPoissonSolver, backend FFT (n puissance de 2) : memes invariants ---
+  {
+    EulerPoissonConfig cfg;
+    cfg.n = 64;  // puissance de 2
+    cfg.use_fft = true;
+    EulerPoissonSolver s(cfg);
+    const double m0 = s.mass();
+    for (int k = 0; k < 5; ++k) s.step(0.004);
+    std::printf("EulerPoissonSolver(FFT) : masse=%.6e p=(%.2e,%.2e)\n", s.mass(),
+                s.total_momentum(0), s.total_momentum(1));
+    chk(std::fabs(s.mass() - m0) < 1e-9, "ep_fft_masse_conservee");
+    chk(std::fabs(s.total_momentum(0)) < 1e-9, "ep_fft_qte_mouvement_nulle");
+  }
+
   if (fails == 0) std::printf("OK test_solver\n");
   return fails == 0 ? 0 : 1;
 }
