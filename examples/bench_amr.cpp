@@ -1,15 +1,17 @@
-// Banc de mesure : verifie que ca tourne VRAIMENT, et a quelle vitesse. Deux charges,
-// chronometrees sans I/O :
-//   1. deux-fluides AP mono-grille (transport 2 especes + Poisson multigrille) : cible
-//      de scaling OpenMP propre (compute pur, pas de desequilibre AMR). Reporte le debit
-//      en M mailles-MAJ/s et la conservation de la masse.
-//   2. coupleur AMR multi-patch (AmrCouplerMP) avec regrid Berger-Rigoutsos : verifie
-//      que l'AMR couple tourne et CONSERVE, et son debit.
+// Banc de mesure : verifie que ca tourne VRAIMENT, et a quelle vitesse. Chronometre
+// sans I/O :
+//   1. deux-fluides AP mono-grille (transport 2 especes + Poisson). Cible de scaling
+//      OpenMP. Si n est une puissance de 2, compare AUSSI l'elliptique multigrille
+//      (GeometricMG, iteratif) vs FFT (PoissonFFTSolver, direct) : meme physique,
+//      debit different. Reporte M mailles-MAJ/s + conservation.
+//   2. coupleur AMR multi-patch (AmrCouplerMP) + regrid Berger-Rigoutsos : verifie que
+//      l'AMR couple tourne et CONSERVE, et son debit.
 //
 // Run : OMP_NUM_THREADS=k ./build-omp/bin/bench_amr [n] [nsteps]
 
 #include <adc/coupling/amr_coupler_mp.hpp>
 #include <adc/elliptic/geometric_mg.hpp>
+#include <adc/elliptic/poisson_fft_solver.hpp>
 #include <adc/integrator/two_fluid_ap.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -28,26 +30,48 @@ static double secs(clk::time_point a, clk::time_point b) {
   return std::chrono::duration<double>(b - a).count();
 }
 
+// chronometre nsteps pas du deux-fluides AP avec l'elliptique Elliptic. Renvoie le temps ;
+// remplit drift (conservation masse) et dev (max|n_e - 1|, pour comparer les physiques).
+template <class Elliptic>
+static double bench_tfap(int n, int nsteps, double& drift, double& dev) {
+  TwoFluidAP2D<Elliptic> d(n, 2 * kPi, 1.0, 0.04, 5.0, 1.0);
+  d.init(1e-3);
+  const double m0 = sum(d.e, 0);
+  const double dt = 0.4 * (2 * kPi / n) / std::sqrt(1.0);  // CFL acoustique (c_s = 1)
+  d.step(dt, true);  // warm-up
+  const auto t0 = clk::now();
+  for (int s = 0; s < nsteps; ++s) d.step(dt, true);
+  const auto t1 = clk::now();
+  drift = std::fabs(sum(d.e, 0) - m0);
+  dev = 0;
+  const ConstArray4 f = d.e.fab(0).const_array();
+  for (int j = d.dom.lo[1]; j <= d.dom.hi[1]; ++j)
+    for (int i = d.dom.lo[0]; i <= d.dom.hi[0]; ++i)
+      dev = std::fmax(dev, std::fabs(f(i, j, 0) - 1.0));
+  return secs(t0, t1);
+}
+
 int main(int argc, char** argv) {
   const int n = (argc > 1) ? std::atoi(argv[1]) : 256;
   const int nsteps = (argc > 2) ? std::atoi(argv[2]) : 100;
+  const double cells = double(n) * n * nsteps;
 
-  // --- 1. deux-fluides AP mono-grille (scaling OpenMP) ---
+  // --- 1. deux-fluides AP mono-grille (scaling OpenMP, backend multigrille) ---
   {
-    TwoFluidAP2D<GeometricMG> d(n, 2 * kPi, 1.0, 0.04, 5.0, 1.0);
-    d.init(1e-3);
-    const double m0 = sum(d.e, 0);
-    const double dt = 0.4 * (2 * kPi / n) / std::sqrt(1.0);  // CFL acoustique (c_s = 1)
-    d.step(dt, true);  // warm-up (alloc, premier V-cycle)
-    const auto t0 = clk::now();
-    for (int s = 0; s < nsteps; ++s) d.step(dt, true);
-    const auto t1 = clk::now();
-    const double t = secs(t0, t1);
-    const double cells = double(n) * n * nsteps;
-    const double drift = std::fabs(sum(d.e, 0) - m0);
-    std::printf("two-fluid AP mono-grille n=%d, %d pas : %.3f s | %.1f M mailles-MAJ/s | "
+    double drift, dev;
+    const double t = bench_tfap<GeometricMG>(n, nsteps, drift, dev);
+    std::printf("two-fluid AP (MG) n=%d, %d pas : %.3f s | %.1f M mailles-MAJ/s | "
                 "%.2f us/pas | drift_masse=%.2e\n",
                 n, nsteps, t, cells / t / 1e6, t / nsteps * 1e6, drift);
+
+    // backend FFT direct (CL periodique, n puissance de 2) : meme physique, plus rapide.
+    if ((n & (n - 1)) == 0) {
+      double dF, devF;
+      const double tF = bench_tfap<PoissonFFTSolver>(n, nsteps, dF, devF);
+      std::printf("two-fluid AP (FFT) n=%d, %d pas : %.3f s | %.1f M mailles-MAJ/s | "
+                  "speedup vs MG x%.2f | ecart physique |dev_MG-dev_FFT|=%.2e\n",
+                  n, nsteps, tF, cells / tF / 1e6, t / tF, std::fabs(dev - devF));
+    }
   }
 
   // --- 2. coupleur AMR multi-patch + regrid Berger-Rigoutsos ---

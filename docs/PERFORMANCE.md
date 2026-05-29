@@ -86,6 +86,17 @@ par `for_each_cell` coute plus que le travail. A n=768 le grain par noyau amorti
 l'overhead -> x3.6 sur les **4 coeurs performants** du M2, puis plateau (les 4 coeurs
 efficiency n'ajoutent rien). Masse conservee a `~3e-7` (CFL `dt = 0.4 dx`).
 
+**Elliptique FFT vs multigrille pour le deux-fluides AP : MG GAGNE (contre-intuitif).**
+n=512, 60 pas, OMP=4 : MG **9.66 ms/pas**, FFT **23.1 ms/pas** (FFT x0.42, soit 2.4x plus
+LENT), a physique bit-identique (`|dev_MG - dev_FFT| = 6.7e-16`). C'est l'INVERSE du pas
+couple Euler-Poisson (ou le FFT gagne x4.8). Raison mesuree : le pas Euler-Poisson est
+Poisson-domine (86%) et resout 2x/pas (PerStage) ; le pas deux-fluides AP est
+TRANSPORT-domine (8 noyaux : 2x mstar, 2x div, efield, 2x lorentz) et ne resout le Poisson
+qu'1x/pas AVEC warm-start (la multigrille part du phi du pas precedent -> 1-2 V-cycles
+suffisent, moins cher qu'une paire de transformees FFT completes). Conclusion : garder
+`GeometricMG` par defaut pour le deux-fluides ; l'avantage FFT est specifique aux couplages
+Poisson-domines et par-etage. Lecon : mesurer, ne pas extrapoler d'un solveur a l'autre.
+
 **Coupleur AMR multi-patch** (`AmrCouplerMP`, n=256 + 1 niveau fin, regrid Berger-Rigoutsos) :
 ~100 ms/pas, 8 patchs, **masse conservee a 6.4e-15 (arrondi machine)**. Gain OpenMP faible
 (6.5 -> 5.9 s) : domine par le Poisson MG grossier + la reconciliation multi-box hote
