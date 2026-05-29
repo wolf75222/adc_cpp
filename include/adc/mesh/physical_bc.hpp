@@ -33,6 +33,15 @@ inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
                              const BCRec& bc) {
   const int ng = mf.n_grow();
   if (ng == 0) return;
+  // Tout periodique : fill_boundary a deja tout fait, rien a lire/ecrire ici (et on
+  // evite une barriere inutile sur le chemin chaud de la multigrille periodique).
+  if (bc.xlo == BCType::Periodic && bc.xhi == BCType::Periodic &&
+      bc.ylo == BCType::Periodic && bc.yhi == BCType::Periodic)
+    return;
+  // GPU : ces boucles HOTE lisent/ecrivent les ghosts que copy_shifted (kernel
+  // device, dans fill_boundary juste avant) vient potentiellement d'ecrire ->
+  // barriere obligatoire avant tout acces hote a la memoire unifiee (no-op hors GPU).
+  device_fence();
   const int nc = mf.ncomp();
 
   for (int li = 0; li < mf.local_size(); ++li) {

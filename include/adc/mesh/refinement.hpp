@@ -97,6 +97,7 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
     for (const auto& j : js) n += j.region.num_cells() * nc;
     return n;
   };
+  device_fence();  // GPU : les copies locales (device) precedent le pack HOTE
   std::vector<std::vector<Real>> sbuf(np), rbuf(np);
   std::vector<MPI_Request> reqs;
   for (int r = 0; r < np; ++r) {
@@ -124,6 +125,7 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
   if (!reqs.empty())
     MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), MPI_STATUSES_IGNORE);
 
+  device_fence();  // GPU : barriere avant l'ecriture HOTE des cellules recues
   for (int r = 0; r < np; ++r) {
     long k = 0;
     for (const auto& j : recv[r]) {

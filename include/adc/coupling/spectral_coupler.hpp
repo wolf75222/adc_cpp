@@ -100,6 +100,7 @@ class SpectralExBStepper {
 
   // vitesse de derive max (all-reduce), pour la CFL.
   double max_drift_speed() const {
+    device_fence();  // GPU : barriere avant lecture hote apres advance_fab_1c (device)
     const ConstArray4 a = Uaux_.fab(0).const_array();
     double v = 0;
     for (int j = y0_; j < y0_ + nyl_; ++j)
@@ -110,6 +111,7 @@ class SpectralExBStepper {
 
   // masse totale (all-reduce).
   double mass() const {
+    device_fence();  // GPU : barriere avant lecture hote apres advance_fab_1c (device)
     const ConstArray4 u = U_.fab(0).const_array();
     double s = 0;
     for (int j = y0_; j < y0_ + nyl_; ++j)

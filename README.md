@@ -240,12 +240,19 @@ advance(U, dt):
 
 ## Solveur elliptique
 
-Maillage cartesien structure + Poisson a coefficient constant (ou epsilon lisse)
-appelle une multigrille geometrique (FAC / MLMG), pas une FFT (incompatible AMR
-et difficile a distribuer) ni une multigrille algebrique (utile seulement sur
-maillage non structure ou coefficients durs). Interface abstraite `EllipticSolver`
-pour brancher PETSc/hypre BoomerAMG comme oracle de verification et repli sur
-coefficients durs.
+Maillage cartesien structure + Poisson a coefficient constant (ou epsilon lisse).
+DEUX backends, tous deux modelant le concept `EllipticSolver` et resolvant le MEME
+Laplacien discret 5 points (memes valeurs propres) :
+- **multigrille geometrique** (`GeometricMG`, V-cycle GS rouge-noir) : le cheval de
+  trait, seul compatible AMR (hierarchie) et tout `n`, entierement on-device.
+- **FFT spectrale** (`PoissonFFTSolver` / `PoissonFFT`) : backend DIRECT pour le cas
+  mono-niveau periodique (`n` puissance de 2), ~5x plus rapide quand l'elliptique
+  domine (cf. PERFORMANCE.md), distribue par bandes (`MPI_Alltoall`). Pas de FFT sous
+  AMR (incompatible) : c'est un chemin rapide pour le mono-niveau, pas le general.
+
+Le `Coupler<Model, Elliptic>` est generique sur le backend (defaut `GeometricMG`).
+Interface abstraite `EllipticSolver` aussi prevue pour brancher PETSc/hypre BoomerAMG
+comme oracle de verification.
 
 ## Decisions
 
@@ -656,10 +663,11 @@ include/adc/   coeur GENERIQUE, header-only : concepts (PhysicalModel,
                for_each_cell, Coupler, multigrille...). Tout y est template ou
                inline -> doit etre visible a l'instanciation, donc en en-tetes.
 src/           facade COMPILEE -> libadc : solveurs concrets non templatises
-               (DiocotronSolver, EulerPoissonSolver) en PIMPL, qui instancient la
-               pile template UNE fois. API stable, sans template (apps, pybind11).
-examples/      demos minces (main()) ; le solveur n'est PAS ici, il est dans
-               include/ + src/.
+               (DiocotronSolver, EulerPoissonSolver, TwoFluidAPSolver) en PIMPL, qui
+               instancient la pile template UNE fois. API stable, sans template (apps,
+               pybind11). Le backend (serie/OpenMP/Kokkos) est herite de la cible adc.
+examples/      pilotes minces (main()). diocotron/diocotron_column lient adc::solver
+               (facade) ; diocotron_amr/mpi/theory lient adc::adc (moteur bas-niveau).
 examples/gpu/  demos Kokkos/CUDA (GH200).
 tests/         tests unitaires et d'integration (CTest), + tests MPI.
 ```

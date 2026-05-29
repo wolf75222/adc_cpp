@@ -152,6 +152,8 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
     for (const auto& j : js) n += j.region.num_cells() * nc;
     return n;
   };
+  device_fence();  // GPU : les copies locales copy_shifted (device) precedent le pack
+                   // HOTE des tampons MPI -> barriere avant lecture memoire unifiee.
   h.sbuf.assign(np, {});
   h.rbuf.assign(np, {});
   for (int r = 0; r < np; ++r) {
@@ -186,6 +188,7 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
   if (h.reqs.empty()) return;
   MPI_Waitall(static_cast<int>(h.reqs.size()), h.reqs.data(),
               MPI_STATUSES_IGNORE);
+  device_fence();  // GPU : barriere avant l'ecriture HOTE des ghosts recus
   for (std::size_t r = 0; r < h.recv.size(); ++r) {
     long k = 0;
     for (const auto& j : h.recv[r]) {

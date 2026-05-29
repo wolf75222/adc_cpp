@@ -1,5 +1,9 @@
 #pragma once
 
+// En-tete d'analyse host-only (Eigen). Garde interne symetrique a hdf5_writer.hpp :
+// vide si Eigen n'est pas configure, donc safe a inclure n'importe ou.
+#ifdef ADC_HAS_EIGEN
+
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
@@ -74,3 +78,5 @@ inline double diocotron_growth_rate(int m, double a, double b, double Rw,
 }
 
 }  // namespace adc
+
+#endif  // ADC_HAS_EIGEN

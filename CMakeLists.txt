@@ -48,6 +48,7 @@ if(ADC_USE_EIGEN)
     set(ADC_HAS_EIGEN ON)
     add_library(adc_eigen INTERFACE)
     target_include_directories(adc_eigen INTERFACE ${EIGEN_INCLUDE_DIR})
+    target_compile_definitions(adc_eigen INTERFACE ADC_HAS_EIGEN)  # garde l'en-tete d'analyse
     message(STATUS "Eigen found at ${EIGEN_INCLUDE_DIR} : building host analysis tools")
   else()
     message(STATUS "Eigen not found : skipping host analysis tools")
