@@ -612,8 +612,16 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   `PoissonFFTSolver` (le wrapper `EllipticSolver` autour de `PoissonFFT`). Resultats
   **bit-identiques** a la reference self-contained (`max|dne|=5.786e-7`,
   `max|charge|=2.076e-11`, dispersion 3.1%) : une fois ici, le solveur herite du seam
-  de parallelisme (serial/OpenMP/Kokkos) et de la couche distribuee. Reste : non
-  lineaire upwind, niveaux AMR multi-especes, kernels GPU.
+  de parallelisme (serial/OpenMP/Kokkos) et de la couche distribuee.
+- Pas AP deux-fluides **entier sur GPU** : `integrator/two_fluid_ap.hpp` est le header
+  PORTABLE partage (kernels `for_each_cell` `ADC_HD`, abs/max par ternaires, template
+  sur l'`EllipticSolver`). `examples/gpu/two_fluid_ap_kokkos.cpp` utilise
+  `TwoFluidAP2D<GeometricMG>` (elliptique entierement on-device) : transport Rusanov +
+  Lorentz implicite + Poisson reformule par multigrille, tout en `for_each_cell`
+  (backend Kokkos -> Cuda). **Valide sur ROMEO GH200** (`sbatch scripts/romeo_tfap.sbatch`)
+  bit-identique au CPU a 10 chiffres (`exec=Cuda` : `max|dne|=5.7859390501e-7`,
+  `max|charge|=2.0756063535e-11`, `sum(ne^2)=4096`, `dmasse=4e-11`). Reste : non
+  lineaire upwind, niveaux AMR multi-especes, le magnetique complet (B).
 - `analysis/hdf5_writer.hpp` (option `ADC_USE_HDF5`) : DataWriter HDF5 parallele.
   Chaque rang ecrit ses boites par hyperslab dans un dataset global, sans gather
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs

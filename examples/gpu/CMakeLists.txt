@@ -75,3 +75,11 @@ target_include_directories(euler_poisson_kokkos
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 target_compile_definitions(euler_poisson_kokkos PRIVATE ADC_HAS_KOKKOS)
 target_link_libraries(euler_poisson_kokkos PRIVATE Kokkos::kokkos)
+
+# Deux-fluides isotherme 2D AP : pas entier sur GPU (transport + lorentz implicite +
+# poisson reformule par multigrille), bit-identique au CPU
+add_executable(two_fluid_ap_kokkos two_fluid_ap_kokkos.cpp)
+target_include_directories(two_fluid_ap_kokkos
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_compile_definitions(two_fluid_ap_kokkos PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(two_fluid_ap_kokkos PRIVATE Kokkos::kokkos)
