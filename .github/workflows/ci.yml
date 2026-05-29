@@ -73,4 +73,9 @@ jobs:
           cmake --build build-mpi --config Release -j 2
 
       - name: Test (bit-identique np=1/2/4)
+        # Les runners n'ont que 2-4 slots ; mpirun -np 4 a besoin d'oversubscribe.
+        # OMPI_MCA_* couvre OpenMPI 4.x, PRTE_MCA_* couvre OpenMPI 5.x.
+        env:
+          OMPI_MCA_rmaps_base_oversubscribe: "true"
+          PRTE_MCA_rmaps_default_mapping_policy: ":oversubscribe"
         run: ctest --test-dir build-mpi --output-on-failure -C Release

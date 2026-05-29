@@ -94,11 +94,11 @@ int main() {
   //    sur-diffusion) -> c'est un schema upwind ordre 2 PRECIS, l'apport reel ici.
   auto run_bump = [&](bool upwind, double wcell, double& minover, double& endpeak,
                       double& dm, bool& fin) {
-    Driver d(96, 2 * kPi, 1.0, 1.0, 2.0, 0.4);  // couplage faible
+    Driver d(128, 2 * kPi, 1.0, 1.0, 2.0, 0.4);  // couplage faible ; n puissance de 2 (FFT)
     d.upwind_continuity = upwind;
     d.e.set_val(0); d.ion.set_val(0);
     Array4 ae = d.e.fab(0).array(), ai = d.ion.fab(0).array();
-    const double xc = kPi, yc = kPi, w = wcell * (2 * kPi / 96);
+    const double xc = kPi, yc = kPi, w = wcell * (2 * kPi / 128);
     for (int j = d.dom.lo[1]; j <= d.dom.hi[1]; ++j)
       for (int i = d.dom.lo[0]; i <= d.dom.hi[0]; ++i) {
         const double x = d.geom.x_cell(i), y = d.geom.y_cell(j);
@@ -107,7 +107,7 @@ int main() {
         ae(i, j, 0) = bump; ai(i, j, 0) = bump;
       }
     const double m0 = sum(d.e, 0);
-    const double dt = 0.3 * (2 * kPi / 96) / std::sqrt(1.0);  // CFL acoustique
+    const double dt = 0.3 * (2 * kPi / 128) / std::sqrt(1.0);  // CFL acoustique
     minover = 1e300;
     for (int t = 0; t < 200; ++t) {
       d.step(dt, true);
