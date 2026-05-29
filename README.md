@@ -596,7 +596,16 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   `dt*omega_pe = 5` : le schema reste **borne** (`max|dne| ~ 5e-7`) et **quasi-neutre
   au niveau machine** (`max|charge| ~ 8e-13`) la ou l'explicite **explose** ; masse
   conservee, dispersion reproduite a 10% en regime resolu. C'est le coeur de
-  `APIMEXTwoFluidIsothermal` (MUFFIN). Reste : non lineaire upwind, 2D, MultiFab/GPU.
+  `APIMEXTwoFluidIsothermal` (MUFFIN).
+- Deux-fluides SPATIAL **2D** AP, branche sur le solveur spectral du depot :
+  `test_two_fluid_ap_2d`. Avec `beta0 = dt^2(omega_pe^2 + omega_pi^2)` CONSTANT (exact
+  en regime lineaire), la reformulation retombe sur un Poisson a coefficient constant
+  `Lap(phi) = (ne* - ni*)/(1+beta0)` : le `PoissonFFT` existant (memes valeurs propres
+  du Laplacien 5-points) s'utilise tel quel, on divise juste le RHS par `1+beta0`.
+  Valide a `omega_pe = 1e3`, `dt*omega_pe = 5` : **borne** (`max|dne| ~ 6e-7`),
+  **quasi-neutre** (`max|charge| ~ 2e-11`) vs la version non stabilisee qui
+  **explose** ; dispersion **isotrope** sur mode diagonal `k=(1,1)` a 3.1%, masse
+  conservee par espece. Reste : non lineaire upwind, portage MultiFab/AMR/GPU.
 - `analysis/hdf5_writer.hpp` (option `ADC_USE_HDF5`) : DataWriter HDF5 parallele.
   Chaque rang ecrit ses boites par hyperslab dans un dataset global, sans gather
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs
