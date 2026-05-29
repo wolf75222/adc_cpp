@@ -66,3 +66,32 @@ le MEME Laplacien discret 5 points (`test_fft_coupler` : MG vs FFT `maxdiff = 1.
 apres 5 pas ; residu FFT seul `7e-14`). C'est l'optimisation run-time a fort impact
 sur les 86% elliptiques. Limite : FFT periodique, N puissance de 2, mono-rang (le
 distribue tuiles<->bandes est `SpectralExBStepper`). Cumulable avec OncePerStep.
+
+## Banc `bench_amr` : deux-fluides AP + coupleur AMR multi-patch
+
+`examples/bench_amr.cpp`, chronometre sans I/O (M2 8 coeurs = 4 perf + 4 efficiency,
+Release -O3 -DNDEBUG, backend OpenMP). Run : `OMP_NUM_THREADS=k ./build-omp/bin/bench_amr n nsteps`.
+
+**Deux-fluides AP mono-grille** (2 especes Rusanov + continuite + Poisson multigrille).
+Le scaling OpenMP DEPEND DE LA TAILLE :
+
+| grille | 1 thread | 4 threads | 8 threads |
+| --- | --- | --- | --- |
+| n=384 | 12.1 M mailles/s | 9.2 M (PERDANT) | 6.3 M |
+| n=768 | 4.7 M mailles/s | **16.9 M (x3.6)** | 16.6 M (plateau) |
+
+A petite grille (n=384) on est overhead-bound : trop de petits noyaux (`tfap_mstar`,
+2x `div_update`, `efield`, 2x `lorentz`) + niveaux grossiers du multigrille, le fork/join
+par `for_each_cell` coute plus que le travail. A n=768 le grain par noyau amortit
+l'overhead -> x3.6 sur les **4 coeurs performants** du M2, puis plateau (les 4 coeurs
+efficiency n'ajoutent rien). Masse conservee a `~3e-7` (CFL `dt = 0.4 dx`).
+
+**Coupleur AMR multi-patch** (`AmrCouplerMP`, n=256 + 1 niveau fin, regrid Berger-Rigoutsos) :
+~100 ms/pas, 8 patchs, **masse conservee a 6.4e-15 (arrondi machine)**. Gain OpenMP faible
+(6.5 -> 5.9 s) : domine par le Poisson MG grossier + la reconciliation multi-box hote
+(`mf_find_box`, `mf_average_down_mb` en boucle serie). La conservation a l'arrondi machine
+sur un run avec regrid dynamique est la preuve que l'AMR couple tourne correctement.
+
+Lecon coherente avec la section OpenMP ci-dessus : le dispatch par-noyau aide le
+TRANSPORT a grosse grille (x3.6) mais pas les charges MG-dominees (couple, petit). Le bon
+grain reste de paralleliser au-dessus de la boucle de niveaux.
