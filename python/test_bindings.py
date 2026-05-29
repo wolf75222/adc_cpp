@@ -45,6 +45,34 @@ chk(abs(es.mass() - em0) < 1e-9, "ep_masse_conservee")
 chk(abs(es.total_momentum(0)) < 1e-9, "ep_qte_mouvement_nulle")
 chk(es.density().shape == (64, 64), "ep_density_numpy")
 
+# --- DiocotronSolver, CI bande + pas auto CFL ---
+bc = adc.DiocotronConfig()
+bc.n = 48
+bc.ic = adc.DiocotronIC.Band
+db = adc.DiocotronSolver(bc)
+bm0 = db.mass()
+for _ in range(10):
+    db.step_cfl(0.4)  # pas stable choisi par la facade (derive E x B)
+print(f"DiocotronSolver(Band) : v_derive={db.max_drift_speed():.3e} "
+      f"phi.shape={db.potential().shape} dmasse={abs(db.mass() - bm0):.2e}")
+chk(db.potential().shape == (48, 48), "diocotron_potential_numpy")
+chk(abs(db.mass() - bm0) < 1e-9, "diocotron_band_masse_conservee")
+
+# --- TwoFluidAPSolver, regime raide (AP) ---
+tc = adc.TwoFluidAPConfig()
+tc.n = 64
+tc.omega_pe = 1e3
+tc.omega_pi = 20.0
+ts = adc.TwoFluidAPSolver(tc)
+tm0 = ts.mass_e()
+ts.advance(5.0 / 1e3, 200)  # dt*omega_pe = 5 : explicite exploserait
+print(f"TwoFluidAPSolver(raide) : max|dne|={ts.max_dev():.3e} "
+      f"max|charge|={ts.max_charge():.3e} dmasse_e={abs(ts.mass_e() - tm0):.2e}")
+chk(ts.density_e().shape == (64, 64), "tfap_density_numpy")
+chk(ts.max_dev() < 0.1, "tfap_AP_borne")
+chk(ts.max_charge() < 0.1, "tfap_quasi_neutre")
+chk(abs(ts.mass_e() - tm0) < 1e-7, "tfap_masse_conservee")
+
 if fails == 0:
     print("OK test_bindings")
 sys.exit(0 if fails == 0 else 1)
