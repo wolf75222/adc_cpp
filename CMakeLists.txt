@@ -102,6 +102,16 @@ if(ADC_USE_HDF5)
   message(STATUS "HDF5 found (${HDF5_VERSION}, parallel=${HDF5_IS_PARALLEL}) : enabling DataWriter")
 endif()
 
+# Facade COMPILEE : solveurs concrets (PIMPL) instanciant la pile template
+# header-only une seule fois -> une vraie librairie libadc, API stable sans
+# template (ideale pour pybind11 et les applications). Le coeur generique reste
+# dans include/ (les templates doivent etre visibles a l'instanciation).
+add_library(adc_solver STATIC
+  src/diocotron_solver.cpp
+  src/euler_poisson_solver.cpp)
+target_link_libraries(adc_solver PUBLIC adc)
+add_library(adc::solver ALIAS adc_solver)
+
 if(ADC_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

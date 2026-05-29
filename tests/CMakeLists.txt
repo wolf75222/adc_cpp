@@ -43,6 +43,11 @@ adc_add_test(test_euler_poisson)
 adc_add_test(test_riemann)
 adc_add_test(test_two_fluid_ap)
 
+# Lie la facade COMPILEE (libadc) plutot que l'interface header-only seule.
+add_executable(test_solver test_solver.cpp)
+target_link_libraries(test_solver PRIVATE adc::solver)
+add_test(NAME test_solver COMMAND test_solver)
+
 if(ADC_HAS_HDF5)
   adc_add_test(test_hdf5_io)
 endif()

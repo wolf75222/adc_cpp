@@ -575,6 +575,27 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs
   MPI validee sur ROMEO (GPFS).
 
+## Organisation du depot
+
+```text
+include/adc/   coeur GENERIQUE, header-only : concepts (PhysicalModel,
+               NumericalFlux, EllipticSolver) et machinerie template (MultiFab,
+               for_each_cell, Coupler, multigrille...). Tout y est template ou
+               inline -> doit etre visible a l'instanciation, donc en en-tetes.
+src/           facade COMPILEE -> libadc : solveurs concrets non templatises
+               (DiocotronSolver, EulerPoissonSolver) en PIMPL, qui instancient la
+               pile template UNE fois. API stable, sans template (apps, pybind11).
+examples/      demos minces (main()) ; le solveur n'est PAS ici, il est dans
+               include/ + src/.
+examples/gpu/  demos Kokkos/CUDA (GH200).
+tests/         tests unitaires et d'integration (CTest), + tests MPI.
+```
+
+C'est le meme decoupage que poisson_cpp (`.hpp` API + `.cpp` compiles), adapte a un
+coeur template : ce qui PEUT etre concret (les solveurs "prets a l'emploi") vit dans
+`src/` et se compile dans `libadc` ; ce qui DOIT rester template (les operateurs
+generiques, le seam GPU) reste dans `include/`.
+
 ## Build
 
 ```bash
