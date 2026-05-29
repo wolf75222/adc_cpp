@@ -75,16 +75,22 @@ Release -O3 -DNDEBUG, backend OpenMP). Run : `OMP_NUM_THREADS=k ./build-omp/bin/
 **Deux-fluides AP mono-grille** (2 especes Rusanov + continuite + Poisson multigrille).
 Le scaling OpenMP DEPEND DE LA TAILLE :
 
-| grille | 1 thread | 4 threads | 8 threads |
-| --- | --- | --- | --- |
-| n=384 | 12.1 M mailles/s | 9.2 M (PERDANT) | 6.3 M |
-| n=768 | 4.7 M mailles/s | **16.9 M (x3.6)** | 16.6 M (plateau) |
+Balayage propre (`scripts/plot_bench_scaling.py`, figure `docs/fig_openmp_scaling.png`) :
 
-A petite grille (n=384) on est overhead-bound : trop de petits noyaux (`tfap_mstar`,
-2x `div_update`, `efield`, 2x `lorentz`) + niveaux grossiers du multigrille, le fork/join
-par `for_each_cell` coute plus que le travail. A n=768 le grain par noyau amortit
-l'overhead -> x3.6 sur les **4 coeurs performants** du M2, puis plateau (les 4 coeurs
-efficiency n'ajoutent rien). Masse conservee a `~3e-7` (CFL `dt = 0.4 dx`).
+| grille | 1 thread | 2 threads | 4 threads | 8 threads |
+| --- | --- | --- | --- | --- |
+| n=512 | 11.6 M mailles/s | 19.8 M | **28.3 M (x2.4)** | 26.4 M (plateau) |
+| n=768 | 6.4 M mailles/s | 10.5 M | **15.7 M (x2.5)** | 15.6 M (plateau) |
+
+![scaling OpenMP](fig_openmp_scaling.png)
+
+A TRES petite grille (n=384, hors figure) on est overhead-bound : trop de petits noyaux
+(`tfap_mstar`, 2x `div_update`, `efield`, 2x `lorentz`) + niveaux grossiers du multigrille,
+le fork/join par `for_each_cell` coute plus que le travail -> OpenMP perd. Des n>=512 le
+grain par noyau amortit l'overhead : **~x2.4-2.5 sur les 4 coeurs performants** du M2 (un
+run isole a meme donne x3.6 ; variabilite thermique/ordonnancement), puis **plateau net a 8
+threads** car les 4 coeurs efficiency n'ajoutent rien. Masse conservee a `~3e-7` (CFL
+`dt = 0.4 dx`).
 
 **Elliptique FFT vs multigrille pour le deux-fluides AP : MG GAGNE (contre-intuitif).**
 n=512, 60 pas, OMP=4 : MG **9.66 ms/pas**, FFT **23.1 ms/pas** (FFT x0.42, soit 2.4x plus

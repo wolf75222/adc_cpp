@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 using namespace adc;
@@ -54,10 +55,11 @@ static double bench_tfap(int n, int nsteps, double& drift, double& dev) {
 int main(int argc, char** argv) {
   const int n = (argc > 1) ? std::atoi(argv[1]) : 256;
   const int nsteps = (argc > 2) ? std::atoi(argv[2]) : 100;
+  const std::string mode = (argc > 3) ? argv[3] : "both";  // "tf" | "amr" | "both"
   const double cells = double(n) * n * nsteps;
 
   // --- 1. deux-fluides AP mono-grille (scaling OpenMP, backend multigrille) ---
-  {
+  if (mode != "amr") {
     double drift, dev;
     const double t = bench_tfap<GeometricMG>(n, nsteps, drift, dev);
     std::printf("two-fluid AP (MG) n=%d, %d pas : %.3f s | %.1f M mailles-MAJ/s | "
@@ -75,7 +77,7 @@ int main(int argc, char** argv) {
   }
 
   // --- 2. coupleur AMR multi-patch + regrid Berger-Rigoutsos ---
-  {
+  if (mode != "tf") {
     Box2D dom = Box2D::from_extents(n, n);
     Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
     const double dxc = geom.dx(), dyc = geom.dy();
