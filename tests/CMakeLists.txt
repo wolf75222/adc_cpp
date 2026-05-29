@@ -35,6 +35,8 @@ adc_add_test(test_muscl_convergence)
 adc_add_test(test_amr_reflux)
 adc_add_test(test_amr_multilevel)
 adc_add_test(test_load_balance)
+adc_add_test(test_splitting)
+adc_add_test(test_imex_ap)
 
 # Test MPI : seulement si le backend MPI est active. Lance via mpirun -np 4 ;
 # le seam (rang/size, all-reduce) doit donner le meme resultat quel que soit N.
