@@ -3,6 +3,9 @@
 Solveur advection-diffusion-couplage : systeme hyperbolique-elliptique couple,
 concu des le depart pour l'AMR dynamique, OpenMP, MPI et Kokkos, cible cluster.
 
+Architecture en couches, seams, frontiere lib/demo, etat AMR : voir
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 Forme generale resolue :
 
 ```
