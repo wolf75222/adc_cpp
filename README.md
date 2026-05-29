@@ -587,8 +587,16 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   periodique + force de Lorentz, sur une grille. Il reproduit la dispersion de
   Langmuir mesuree sur la grille (`5.07` vs `5.19` theorique, **2.4%**), conserve la
   masse de chaque espece a `1e-14`, positivite preservee. Premier solveur reellement
-  multi-especes spatial (sort du mode de Fourier). Explicite (CFL plasma) ; l'AP
-  implicite, le 2D et l'integration MultiFab/AMR/GPU restent l'etape suivante.
+  multi-especes spatial (sort du mode de Fourier).
+- Deux-fluides SPATIAL 1D **asymptotic-preserving** : `test_two_fluid_ap_spatial` rend
+  continuite + Lorentz implicites. En substituant, l'equation du champ devient
+  `d_x[(1+beta)E] = charge*` avec `beta = dt^2 (omega_pe^2 n_e + omega_pi^2 n_i)`
+  (Poisson reformule) : quand `omega_pe -> infini`, `E -> charge*/beta` et la
+  quasi-neutralite est capturee a `dt` FIXE. Valide a `omega_pe = 1e3`,
+  `dt*omega_pe = 5` : le schema reste **borne** (`max|dne| ~ 5e-7`) et **quasi-neutre
+  au niveau machine** (`max|charge| ~ 8e-13`) la ou l'explicite **explose** ; masse
+  conservee, dispersion reproduite a 10% en regime resolu. C'est le coeur de
+  `APIMEXTwoFluidIsothermal` (MUFFIN). Reste : non lineaire upwind, 2D, MultiFab/GPU.
 - `analysis/hdf5_writer.hpp` (option `ADC_USE_HDF5`) : DataWriter HDF5 parallele.
   Chaque rang ecrit ses boites par hyperslab dans un dataset global, sans gather
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs
