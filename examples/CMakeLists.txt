@@ -1,9 +1,13 @@
+# Pilotes MINCES sur la facade compilee (adc::solver) : ils ne font que CI (via
+# config), diagnostics (lecture des champs) et I/O. Toute la physique est dans libadc.
 add_executable(diocotron diocotron.cpp)
-target_link_libraries(diocotron PRIVATE adc::adc)
+target_link_libraries(diocotron PRIVATE adc::solver)
 
 add_executable(diocotron_column diocotron_column.cpp)
-target_link_libraries(diocotron_column PRIVATE adc::adc)
+target_link_libraries(diocotron_column PRIVATE adc::solver)
 
+# Demos du MOTEUR bas-niveau (AMR, MPI, theorie) : capacites hors perimetre de la
+# facade -> ils pilotent directement la pile generique (adc::adc).
 add_executable(diocotron_amr diocotron_amr.cpp)
 target_link_libraries(diocotron_amr PRIVATE adc::adc)
 
