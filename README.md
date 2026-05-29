@@ -605,7 +605,15 @@ Termes raides et sortie distribuee (briques inspirees de MUFFIN) :
   Valide a `omega_pe = 1e3`, `dt*omega_pe = 5` : **borne** (`max|dne| ~ 6e-7`),
   **quasi-neutre** (`max|charge| ~ 2e-11`) vs la version non stabilisee qui
   **explose** ; dispersion **isotrope** sur mode diagonal `k=(1,1)` a 3.1%, masse
-  conservee par espece. Reste : non lineaire upwind, portage MultiFab/AMR/GPU.
+  conservee par espece.
+- Portage **MultiFab** du pas AP 2D : `test_two_fluid_ap_2d_mf`. Le meme schema, mais
+  l'etat deux-especes vit dans des `MultiFab` (3 composantes `n, mx, my`), le transport
+  passe par `for_each_cell`, les halos periodiques par `fill_boundary` et le champ par
+  `PoissonFFTSolver` (le wrapper `EllipticSolver` autour de `PoissonFFT`). Resultats
+  **bit-identiques** a la reference self-contained (`max|dne|=5.786e-7`,
+  `max|charge|=2.076e-11`, dispersion 3.1%) : une fois ici, le solveur herite du seam
+  de parallelisme (serial/OpenMP/Kokkos) et de la couche distribuee. Reste : non
+  lineaire upwind, niveaux AMR multi-especes, kernels GPU.
 - `analysis/hdf5_writer.hpp` (option `ADC_USE_HDF5`) : DataWriter HDF5 parallele.
   Chaque rang ecrit ses boites par hyperslab dans un dataset global, sans gather
   (MPI-IO independant). Aller-retour `maxdiff = 0` en serie ; ecriture sur 4 rangs

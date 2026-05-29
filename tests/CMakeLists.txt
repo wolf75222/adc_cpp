@@ -46,6 +46,7 @@ adc_add_test(test_two_fluid)
 adc_add_test(test_two_fluid_spatial)
 adc_add_test(test_two_fluid_ap_spatial)
 adc_add_test(test_two_fluid_ap_2d)
+adc_add_test(test_two_fluid_ap_2d_mf)
 adc_add_test(test_fft_coupler)
 
 # Lie la facade COMPILEE (libadc) plutot que l'interface header-only seule.
