@@ -94,7 +94,7 @@ inline Box2D yface_box(const Box2D& v) {
 // (boites xface_box/yface_box, ncomp = Model::n_vars, 0 ghost). Device-callable.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& aux,
-                         const Geometry&, MultiFab& Fx, MultiFab& Fy) {
+                         MultiFab& Fx, MultiFab& Fy) {
   const Limiter lim{};
   const NumericalFlux nflux{};
   for (int li = 0; li < U.local_size(); ++li) {

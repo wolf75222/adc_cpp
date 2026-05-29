@@ -55,7 +55,7 @@ static double max_div_mismatch(int n) {
   BoxArray bax(std::vector<Box2D>{xface_box(dom)});
   BoxArray bay(std::vector<Box2D>{yface_box(dom)});
   MultiFab Fx(bax, dm, 4, 0), Fy(bay, dm, 4, 0);
-  compute_face_fluxes<Limiter, Flux>(model, U, aux, geom, Fx, Fy);
+  compute_face_fluxes<Limiter, Flux>(model, U, aux, Fx, Fy);
 
   const ConstArray4 r = R.fab(0).const_array();
   const ConstArray4 fx = Fx.fab(0).const_array();
