@@ -46,10 +46,23 @@ des niveaux grossiers). Corrige : `for_each_cell` porte une clause
 toujours pas un gain ici, mais n'est plus un piege. Le bon grain serait de
 paralleliser AU-DESSUS de la boucle de niveaux (region consolidee), pas par noyau.
 
-## Recommandation : Poisson par FFT pour le periodique
+## Poisson par FFT pour le periodique : FAIT, ~5x
 
 La multigrille est ITERATIVE (plusieurs V-cycles x balayages GS). Pour des CL
-PERIODIQUES (Jeans, diocotron), `elliptic/poisson_fft.hpp` est un solveur DIRECT
-(une transformee) : potentiellement bien plus rapide. Le concept `EllipticSolver`
-est en place ; l'etape est d'envelopper `PoissonFFT` au niveau MultiFab et de rendre
-`Coupler` generique sur le backend elliptique. C'est le prochain gros levier run-time.
+PERIODIQUES (Jeans, diocotron), `PoissonFFTSolver` (`elliptic/poisson_fft_solver.hpp`)
+est un solveur DIRECT (une transformee), enveloppant `PoissonFFT` au niveau MultiFab
+et modelisant le concept `EllipticSolver`. Le `Coupler` est devenu generique sur le
+backend : `Coupler<Model, PoissonFFTSolver>` au lieu de `Coupler<Model>` (= MG).
+
+Pas couple Euler-Poisson, N=256 (M2, -O3, PerStage) :
+
+| backend elliptique | ms/pas |
+| --- | --- |
+| GeometricMG (iteratif) | 76 |
+| **PoissonFFTSolver (direct)** | **16** |
+
+Soit **~4.8x** sur le pas couple, a physique **bit-identique** : les deux inversent
+le MEME Laplacien discret 5 points (`test_fft_coupler` : MG vs FFT `maxdiff = 1.6e-14`
+apres 5 pas ; residu FFT seul `7e-14`). C'est l'optimisation run-time a fort impact
+sur les 86% elliptiques. Limite : FFT periodique, N puissance de 2, mono-rang (le
+distribue tuiles<->bandes est `SpectralExBStepper`). Cumulable avec OncePerStep.

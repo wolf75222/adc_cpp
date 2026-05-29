@@ -42,6 +42,7 @@ adc_add_test(test_euler)
 adc_add_test(test_euler_poisson)
 adc_add_test(test_riemann)
 adc_add_test(test_two_fluid_ap)
+adc_add_test(test_fft_coupler)
 
 # Lie la facade COMPILEE (libadc) plutot que l'interface header-only seule.
 add_executable(test_solver test_solver.cpp)

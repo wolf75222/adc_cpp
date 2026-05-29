@@ -545,8 +545,12 @@ sont extraits en politiques/concepts, sans toucher mesh/amr/parallel.
   `L1(rho)` Rusanov `5.7e-3` > HLL `4.7e-3` > HLLC `4.6e-3` (HLLC capture l'onde de
   contact), positivite preservee pour les trois.
 - `elliptic/elliptic_solver.hpp` : concept `EllipticSolver` (rhs/phi/solve/
-  residual/geom). `GeometricMG` le modele (static_assert dans le coupleur) ; le
-  coupleur depend du contrat, pas du backend, pour preparer FFT/PETSc.
+  residual/geom). DEUX backends le modelent : `GeometricMG` (multigrille iterative)
+  et `PoissonFFTSolver` (FFT directe, periodique). Le `Coupler` est generique sur le
+  backend : `Coupler<Model, Elliptic = GeometricMG>` ; passer a `PoissonFFTSolver`
+  ne change que le type, pas la logique. `test_fft_coupler` : memes resultats
+  (`maxdiff = 1.6e-14`), et **~4.8x plus rapide** sur le pas couple (cf.
+  PERFORMANCE.md), car la FFT inverse le Laplacien discret en direct.
 - `coupling/coupling_policy.hpp` : `Coupler::advance<Limiter, Policy>` avec
   `PerStageCoupling` (phi a chaque etage, defaut) ou `OncePerStepCoupling` (un
   solve elliptique par pas). `test_interfaces` valide : flux defaut == explicite

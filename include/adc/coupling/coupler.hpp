@@ -69,8 +69,11 @@ inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx,
 }
 }  // namespace detail
 
-template <class Model>
+template <class Model, class Elliptic = GeometricMG>
 class Coupler {
+  static_assert(EllipticSolver<Elliptic>,
+                "le backend elliptique du Coupler doit modeler EllipticSolver");
+
  public:
   // active : predicat optionnel "interieur du conducteur" (paroi embedded pour
   // le solveur de Poisson). Vide => pas de paroi interne.
@@ -92,13 +95,13 @@ class Coupler {
   // ghosts. Policy = PerStageCoupling (defaut) recalcule phi a chaque etage ;
   // OncePerStepCoupling le resout une fois par pas (aux gele).
   template <class Limiter = NoSlope, class Policy = PerStageCoupling>
-  void advance(MultiFab& U, Real dt, Real mg_tol = 1e-8, int mg_maxc = 30) {
+  void advance(MultiFab& U, Real dt) {
     static_assert(std::is_same_v<Policy, PerStageCoupling> ||
                       std::is_same_v<Policy, OncePerStepCoupling>,
                   "Policy doit etre PerStageCoupling ou OncePerStepCoupling");
     MultiFab R(ba_, dm_, Model::n_vars, 0);
 
-    update_aux(U, mg_tol, mg_maxc);
+    update_aux(U);
     fill_ghosts(U, geom_.domain, bcU_);
     assemble_rhs<Limiter>(model_, U, aux_, geom_, R);
     MultiFab U1 = U;
@@ -106,8 +109,7 @@ class Coupler {
 
     // PerStage : phi recalcule pour l'etat intermediaire U1 (plus precis).
     // OncePerStep : on reutilise le aux du debut de pas (un seul solve elliptique).
-    if constexpr (std::is_same_v<Policy, PerStageCoupling>)
-      update_aux(U1, mg_tol, mg_maxc);
+    if constexpr (std::is_same_v<Policy, PerStageCoupling>) update_aux(U1);
     fill_ghosts(U1, geom_.domain, bcU_);
     assemble_rhs<Limiter>(model_, U1, aux_, geom_, R);
     saxpy(U1, dt, R);
@@ -116,9 +118,7 @@ class Coupler {
 
   // Resout phi et derive aux pour un etat donne, sans avancer en temps
   // (utile pour estimer la vitesse E x B avant de fixer le pas de temps).
-  void solve_fields(const MultiFab& U, Real mg_tol = 1e-8, int mg_maxc = 30) {
-    update_aux(U, mg_tol, mg_maxc);
-  }
+  void solve_fields(const MultiFab& U) { update_aux(U); }
 
   MultiFab& phi() { return mg_.phi(); }
   const MultiFab& aux() const { return aux_; }
@@ -136,9 +136,9 @@ class Coupler {
     return a;
   }
 
-  void update_aux(const MultiFab& state, Real tol, int maxc) {
+  void update_aux(const MultiFab& state) {
     detail::coupler_eval_rhs(state, mg_.rhs(), model_);
-    mg_.solve(tol, maxc);
+    mg_.solve();  // interface du concept EllipticSolver (backend-agnostique)
     derive_aux();
   }
 
@@ -155,7 +155,7 @@ class Coupler {
   BoxArray ba_;
   DistributionMapping dm_;
   BCRec bcU_, bcPhi_, aux_bc_;
-  GeometricMG mg_;
+  Elliptic mg_;
   MultiFab aux_;
 };
 
