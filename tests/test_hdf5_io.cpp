@@ -35,7 +35,9 @@ int main(int argc, char** argv) {
       for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) = fval(i, j);
   }
 
-  const std::string fn = "/tmp/adc_test_hdf5.h5";
+  // Chemin RELATIF (cwd) : en parallele il doit etre sur un systeme de fichiers
+  // PARTAGE (GPFS/Lustre). MPI-IO collectif sur un /tmp local par noeud bloque.
+  const std::string fn = "adc_test_hdf5.h5";
   write_hdf5(mf, N, N, fn, "field", 0);
   barrier();  // tous les rangs ont ecrit avant que le rang 0 ne relise
 
