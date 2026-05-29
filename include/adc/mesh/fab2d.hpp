@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/core/allocator.hpp>
 #include <adc/core/types.hpp>
 #include <adc/mesh/box2d.hpp>
 
@@ -92,7 +93,8 @@ class Fab2D {
   int ncomp_{1};
   Box2D gbox_{};
   int nx_tot_{0}, ny_tot_{0};
-  std::vector<Real> data_{};
+  // stockage : hote (std::allocator) ou memoire unifiee CUDA (cf. allocator.hpp).
+  std::vector<Real, fab_allocator<Real>> data_{};
 };
 
 }  // namespace adc

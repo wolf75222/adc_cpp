@@ -403,10 +403,21 @@ Kokkos 4.4 est compile maison (CUDA + `Kokkos_ARCH_HOPPER90`) dans le scratch ; 
 demo se construit via `examples/gpu/CMakeLists.txt` (`find_package(Kokkos)` +
 `nvcc_wrapper`).
 
-Etape suivante vers un solveur entierement GPU : rendre la donnee device-residente
-(`Fab2D` sur `Kokkos::View` / memoire unifiee coherente du GH200), pour que les
-operateurs (assemble_rhs, coupleurs) tournent sur device via ce meme seam, sans
-reecriture.
+**Etape 2 (faite) : donnee device-residente.** Le stockage de `Fab2D` passe par
+un allocateur selectionnable (`core/allocator.hpp`) : sous CUDA c'est la memoire
+UNIFIEE (`cudaMallocManaged`), accessible de facon coherente hote ET device sur le
+GH200 (Grace+Hopper, NVLink-C2C), tout en gardant la semantique VALEUR du
+`std::vector` (copie profonde -> reflux/average_down restent corrects). Le build
+CPU est byte-identique (l'alias se reduit a `std::allocator`). Le demo
+`examples/gpu/advect_fab_kokkos.cpp` execute un pas d'advection sur le VRAI
+`Fab2D` via `for_each_cell` (backend Kokkos -> Cuda) DIRECTEMENT sur ses vues
+`Array4`, **sans aucun buffer device manuel ni deep_copy** : `maxdiff = 2e-16`. La
+structure de donnees de la lib tourne donc sur GPU.
+
+Reste, pour un solveur entierement GPU : faire passer tous les operateurs
+(`assemble_rhs`, coupleurs, reflux) par `for_each_cell` (au lieu de boucles
+brutes), et un pool memoire (Arenas) pour eviter un `cudaMallocManaged` par petit
+Fab temporaire.
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`
