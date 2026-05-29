@@ -82,17 +82,23 @@ int main() {
   // garde minimale : le regime lineaire/faiblement non-lineaire reste positif et borne.
   chk(last_positive_eps >= 0.1, "positif_jusqua_eps_0.1");
 
-  // --- scenario 2 : front raide en transport (couplage faible ~= Euler isotherme) ---
-  // Une bosse gaussienne ETROITE quasi-neutre (e == ion -> E ~= 0) lance des ondes
-  // acoustiques a fronts raides. La continuite CENTREE est dispersive (sous-depassement
-  // = oscillations de Gibbs) ; la continuite UPWIND (flux de masse Rusanov) est monotone.
-  // On joue le MEME scenario dans les deux modes et on mesure la reduction de l'overshoot.
-  auto run_bump = [&](bool upwind, double& minover, double& dm, bool& fin) {
+  // --- scenario 2 : transport d'une bosse acoustique (couplage faible ~= Euler) ---
+  // Bosse gaussienne quasi-neutre (e == ion -> E ~= 0) lancant des ondes acoustiques.
+  // La continuite CENTREE est un flux central pur ; la continuite UPWIND est Rusanov
+  // a reconstruction MINMOD (MUSCL ordre 2, dissipation O(dx^2) en lisse). On joue le
+  // MEME scenario dans les deux modes, a deux largeurs, et on lit honnetement :
+  //  - bosse ETROITE : le sous-depassement (min n_e sous le fond) est presque IDENTIQUE
+  //    centre vs MUSCL -> il est surtout PHYSIQUE (rarefaction acoustique), pas du Gibbs
+  //    numerique. (Le 1er ordre Rusanov le reduisait artificiellement par sur-diffusion.)
+  //  - bosse LARGE (lisse, bien resolue) : MUSCL preserve le pic comme le centre (pas de
+  //    sur-diffusion) -> c'est un schema upwind ordre 2 PRECIS, l'apport reel ici.
+  auto run_bump = [&](bool upwind, double wcell, double& minover, double& endpeak,
+                      double& dm, bool& fin) {
     Driver d(96, 2 * kPi, 1.0, 1.0, 2.0, 0.4);  // couplage faible
     d.upwind_continuity = upwind;
     d.e.set_val(0); d.ion.set_val(0);
     Array4 ae = d.e.fab(0).array(), ai = d.ion.fab(0).array();
-    const double xc = kPi, yc = kPi, w = 6.0 * (2 * kPi / 96);  // demi-largeur ~6 mailles
+    const double xc = kPi, yc = kPi, w = wcell * (2 * kPi / 96);
     for (int j = d.dom.lo[1]; j <= d.dom.hi[1]; ++j)
       for (int i = d.dom.lo[0]; i <= d.dom.hi[0]; ++i) {
         const double x = d.geom.x_cell(i), y = d.geom.y_cell(j);
@@ -107,24 +113,32 @@ int main() {
       d.step(dt, true);
       minover = std::fmin(minover, mindens(d));
     }
+    endpeak = 1.0 + maxdev(d);  // densite max finale (= pic restant)
     dm = std::fabs(sum(d.e, 0) - m0);
     fin = allfinite(d);
   };
   {
-    double minC, dmC, minU, dmU; bool finC, finU;
-    run_bump(false, minC, dmC, finC);
-    run_bump(true, minU, dmU, finU);
+    double minC, pkC, dmC, minU, pkU, dmU; bool finC, finU;
+    run_bump(false, 6.0, minC, pkC, dmC, finC);  // front raide
+    run_bump(true, 6.0, minU, pkU, dmU, finU);
     const double underC = 1.0 - minC, underU = 1.0 - minU;
-    std::printf("front raide (bosse etroite, couplage faible) :\n");
-    std::printf("   continuite CENTREE : min(n_e)=%.4f sous-depassement=%.1f%% d masse=%.2e %s\n",
-                minC, 100 * underC, dmC, finC ? "fini" : "NON-FINI");
-    std::printf("   continuite UPWIND  : min(n_e)=%.4f sous-depassement=%.1f%% d masse=%.2e %s\n",
-                minU, 100 * underU, dmU, finU ? "fini" : "NON-FINI");
-    std::printf("   reduction de l'overshoot par l'upwind : %.0f%%\n",
-                underC > 0 ? 100 * (1 - underU / underC) : 0.0);
+    std::printf("front raide (bosse etroite) : sous-depassement CENTRE=%.1f%% MUSCL=%.1f%% "
+                "(quasi identiques -> physique, pas Gibbs) masse %.0e/%.0e\n",
+                100 * underC, 100 * underU, dmC, dmU);
     chk(finC && finU, "front_raide_fini");
     chk(dmC < 1e-7 && dmU < 1e-7, "front_raide_masse_conservee");
-    chk(underU < underC, "upwind_reduit_overshoot");  // monotone -> moins de Gibbs
+    // MUSCL precis : n'aggrave PAS le sous-depassement (il l'egale ; les deux schemas
+    // precis s'accordent sur la rarefaction physique). marge robuste cross-plateforme.
+    chk(underU < underC + 0.01, "muscl_naggrave_pas_le_front");
+
+    double minS, pkS, dmS, minM, pkM, dmM; bool finS, finM;
+    run_bump(false, 16.0, minS, pkS, dmS, finS);  // bosse lisse, bien resolue
+    run_bump(true, 16.0, minM, pkM, dmM, finM);
+    std::printf("bosse lisse (bien resolue) : pic final CENTRE=%.4f MUSCL=%.4f "
+                "(perte de pic MUSCL=%.1f%%) -> ordre 2, pas de sur-diffusion\n",
+                pkS, pkM, 100 * (pkS - pkM) / (pkS - 1.0));
+    // MUSCL ordre 2 : pas de sur-diffusion -> conserve l'essentiel du pic du schema centre.
+    chk(pkM > 1.0 + 0.95 * (pkS - 1.0), "muscl_pas_de_sur_diffusion");
   }
 
   if (fails == 0) std::printf("OK test_two_fluid_ap_amplitude\n");

@@ -27,6 +27,9 @@ namespace adc {
 namespace tfap {
 ADC_HD inline Real ab(Real x) { return x < 0 ? -x : x; }       // |x| device-safe
 ADC_HD inline Real mx2(Real a, Real b) { return a > b ? a : b; }  // max device-safe
+ADC_HD inline Real mm2(Real a, Real b) {  // minmod device-safe (pente limitee)
+  return (a * b <= Real(0)) ? Real(0) : (ab(a) < ab(b) ? a : b);
+}
 }  // namespace tfap
 
 // m* = m + dt*(-div F_mom) : Rusanov dimensionnellement scinde sur les equations de
@@ -78,9 +81,11 @@ inline void tfap_div_update(const MultiFab& nsrc, const MultiFab& m, MultiFab& n
 // Variante UPWIND de la continuite : flux de masse Rusanov COHERENT avec le flux de
 // quantite de mouvement de tfap_mstar (meme vitesse d'onde a = |u|+cs). Le schema
 // centre tfap_div_update est un flux central pur (dissipation nulle) -> dispersif sur
-// les fronts raides (oscillations de Gibbs). Ici F_n = 0.5(m_i+m_{i+1}) - 0.5 a (n_{i+1}-n_i)
-// complete le flux Rusanov sur la composante densite : monotone, supprime l'overshoot.
-// PAS in-place (lit n aux voisins) : nout doit etre distinct de nsrc. 1 ghost suffit.
+// les fronts raides (Gibbs). Ici la partie centrale 0.5(m_i+m_{i+1}) est completee par
+// une dissipation a*(n_R - n_L) ou n_L, n_R sont reconstruits a la face avec une pente
+// MINMOD (MUSCL ordre 2) : dissipation O(dx^2) en regime lisse (pas de sur-diffusion),
+// pleine dissipation 1er ordre aux extrema (monotone, anti-Gibbs). 2 ghosts sur n.
+// PAS in-place (lit n aux voisins) : nout doit etre distinct de nsrc.
 inline void tfap_div_update_up(const MultiFab& nsrc, const MultiFab& m, MultiFab& nout,
                                Real c2, Real dt, const Box2D& dom, Real dx, Real dy) {
   ConstArray4 s = nsrc.fab(0).const_array(), mm = m.fab(0).const_array();
@@ -88,19 +93,28 @@ inline void tfap_div_update_up(const MultiFab& nsrc, const MultiFab& m, MultiFab
   const Real cs = std::sqrt(c2);
   for_each_cell(dom, [=] ADC_HD(int i, int j) {
     using tfap::ab;
+    using tfap::mm2;
     using tfap::mx2;
-    const Real n0 = s(i, j, 0), nE = s(i + 1, j, 0), nW = s(i - 1, j, 0);
-    const Real nN = s(i, j + 1, 0), nS = s(i, j - 1, 0);
+    const Real n0 = s(i, j, 0);
+    const Real nE = s(i + 1, j, 0), nW = s(i - 1, j, 0), nEE = s(i + 2, j, 0), nWW = s(i - 2, j, 0);
+    const Real nN = s(i, j + 1, 0), nS = s(i, j - 1, 0), nNN = s(i, j + 2, 0), nSS = s(i, j - 2, 0);
     const Real x0 = mm(i, j, 0), xE = mm(i + 1, j, 0), xW = mm(i - 1, j, 0);
     const Real y0 = mm(i, j, 1), yN = mm(i, j + 1, 1), yS = mm(i, j - 1, 1);
+    // pentes minmod par cellule (x) puis sauts limites aux faces i+-1/2
+    const Real sxi = mm2(n0 - nW, nE - n0), sxE = mm2(nE - n0, nEE - nE), sxW = mm2(nW - nWW, n0 - nW);
+    const Real jxR = (nE - Real(0.5) * sxE) - (n0 + Real(0.5) * sxi);  // nR - nL face droite
+    const Real jxL = (n0 - Real(0.5) * sxi) - (nW + Real(0.5) * sxW);  // face gauche
+    const Real syi = mm2(n0 - nS, nN - n0), syN = mm2(nN - n0, nNN - nN), syS = mm2(nS - nSS, n0 - nS);
+    const Real jyU = (nN - Real(0.5) * syN) - (n0 + Real(0.5) * syi);
+    const Real jyD = (n0 - Real(0.5) * syi) - (nS + Real(0.5) * syS);
     const Real aR = mx2(ab(x0 / n0) + cs, ab(xE / nE) + cs);
     const Real aL = mx2(ab(xW / nW) + cs, ab(x0 / n0) + cs);
     const Real bU = mx2(ab(y0 / n0) + cs, ab(yN / nN) + cs);
     const Real bD = mx2(ab(yS / nS) + cs, ab(y0 / n0) + cs);
-    const Real FxR = Real(0.5) * (x0 + xE) - Real(0.5) * aR * (nE - n0);
-    const Real FxL = Real(0.5) * (xW + x0) - Real(0.5) * aL * (n0 - nW);
-    const Real FyU = Real(0.5) * (y0 + yN) - Real(0.5) * bU * (nN - n0);
-    const Real FyD = Real(0.5) * (yS + y0) - Real(0.5) * bD * (n0 - nS);
+    const Real FxR = Real(0.5) * (x0 + xE) - Real(0.5) * aR * jxR;
+    const Real FxL = Real(0.5) * (xW + x0) - Real(0.5) * aL * jxL;
+    const Real FyU = Real(0.5) * (y0 + yN) - Real(0.5) * bU * jyU;
+    const Real FyD = Real(0.5) * (yS + y0) - Real(0.5) * bD * jyD;
     o(i, j, 0) = n0 - dt * ((FxR - FxL) / dx + (FyU - FyD) / dy);
   });
 }
@@ -158,7 +172,7 @@ struct TwoFluidAP2D {
         geom{dom, 0.0, L_, 0.0, L_},
         ba(BoxArray::from_domain(dom, n_)),
         dm(ba.size(), n_ranks()),
-        e(ba, dm, 3, 1), ion(ba, dm, 3, 1),
+        e(ba, dm, 3, 2), ion(ba, dm, 3, 2),  // 2 ghosts sur n pour MUSCL (continuite upwind)
         mse(ba, dm, 2, 1), msi(ba, dm, 2, 1),
         nte(ba, dm, 1, 0), nti(ba, dm, 1, 0),
         Ef(ba, dm, 2, 0), mne(ba, dm, 2, 1), mni(ba, dm, 2, 1),
