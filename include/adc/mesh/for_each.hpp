@@ -37,10 +37,13 @@ inline void device_fence() {
 template <class F>
 void for_each_cell(const Box2D& b, F f) {
 #if defined(ADC_HAS_KOKKOS)
+  // IndexType<int> : indices SIGNES. Les boites de ghosts ont des bornes basses
+  // negatives (p.ex. lo = -ng pour copy_shifted) ; sans type signe explicite,
+  // MDRangePolicy rejette la borne -1 (conversion implicite jugee non sure).
   Kokkos::parallel_for(
       "adc_for_each_cell",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({b.lo[0], b.lo[1]},
-                                             {b.hi[0] + 1, b.hi[1] + 1}),
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
       f);
 #elif defined(_OPENMP)
 #pragma omp parallel for collapse(2) schedule(static)

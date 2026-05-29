@@ -54,3 +54,10 @@ target_include_directories(mg_kokkos
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 target_compile_definitions(mg_kokkos PRIVATE ADC_HAS_KOKKOS)
 target_link_libraries(mg_kokkos PRIVATE Kokkos::kokkos)
+
+# etape D (capstone) : un PAS COUPLE Euler-Poisson entier sur GPU
+add_executable(coupled_kokkos coupled_kokkos.cpp)
+target_include_directories(coupled_kokkos
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_compile_definitions(coupled_kokkos PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(coupled_kokkos PRIVATE Kokkos::kokkos)

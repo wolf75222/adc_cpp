@@ -30,6 +30,42 @@
 
 namespace adc {
 
+namespace detail {
+// Helpers a portee de namespace : un lambda etendu __host__ __device__ ne peut
+// PAS etre defini dans une methode privee/protegee (restriction nvcc), d'ou
+// l'extraction hors de la classe Coupler.
+
+// f = model.elliptic_rhs(U) sur les cellules valides.
+template <class Model>
+inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs,
+                             const Model& model) {
+  for (int li = 0; li < state.local_size(); ++li) {
+    const ConstArray4 s = state.fab(li).const_array();
+    Array4 f = rhs.fab(li).array();
+    const Box2D v = rhs.box(li);
+    const Model m = model;
+    for_each_cell(v, [=] ADC_HD(int i, int j) {
+      f(i, j, 0) = m.elliptic_rhs(load_state<Model>(s, i, j));
+    });
+  }
+}
+
+// aux = (phi, d phi/dx, d phi/dy) par differences centrees.
+inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx,
+                             Real cy) {
+  for (int li = 0; li < aux.local_size(); ++li) {
+    const ConstArray4 p = phi.fab(li).const_array();
+    Array4 a = aux.fab(li).array();
+    const Box2D v = aux.box(li);
+    for_each_cell(v, [=] ADC_HD(int i, int j) {
+      a(i, j, 0) = p(i, j);
+      a(i, j, 1) = (p(i + 1, j) - p(i - 1, j)) * cx;
+      a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) * cy;
+    });
+  }
+}
+}  // namespace detail
+
 template <class Model>
 class Coupler {
  public:
@@ -90,15 +126,7 @@ class Coupler {
   }
 
   void update_aux(const MultiFab& state, Real tol, int maxc) {
-    for (int li = 0; li < state.local_size(); ++li) {
-      const ConstArray4 s = state.fab(li).const_array();
-      Array4 f = mg_.rhs().fab(li).array();
-      const Box2D v = mg_.rhs().box(li);
-      const Model m = model_;
-      for_each_cell(v, [=](int i, int j) {
-        f(i, j, 0) = m.elliptic_rhs(load_state<Model>(s, i, j));
-      });
-    }
+    detail::coupler_eval_rhs(state, mg_.rhs(), model_);
     mg_.solve(tol, maxc);
     derive_aux();
   }
@@ -107,16 +135,7 @@ class Coupler {
     fill_ghosts(mg_.phi(), geom_.domain, bcPhi_);
     const Real cx = Real(1) / (2 * geom_.dx());
     const Real cy = Real(1) / (2 * geom_.dy());
-    for (int li = 0; li < aux_.local_size(); ++li) {
-      const ConstArray4 p = mg_.phi().fab(li).const_array();
-      Array4 a = aux_.fab(li).array();
-      const Box2D v = aux_.box(li);
-      for_each_cell(v, [=](int i, int j) {
-        a(i, j, 0) = p(i, j);
-        a(i, j, 1) = (p(i + 1, j) - p(i - 1, j)) * cx;
-        a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) * cy;
-      });
-    }
+    detail::coupler_grad_phi(mg_.phi(), aux_, cx, cy);
     fill_ghosts(aux_, geom_.domain, aux_bc_);
   }
 

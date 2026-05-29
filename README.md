@@ -455,11 +455,24 @@ manufacture Dirichlet : hierarchie 7 niveaux (128 -> 2), **9 V-cycles** pour un
 residu relatif de `8e-11`, solution exacte a `err = 5e-5` = O(dx^2). Tout le
 solveur elliptique tourne donc sur GPU.
 
-Bilan : hyperbolique (transport, MUSCL `assemble_rhs`), elliptique (multigrille
-complete) ET l'arithmetique des etages d'integration tournent sur GPU. Les briques
-d'un pas couple Euler-Poisson sont donc toutes portees. Reste surtout un pool
-memoire (Arena) pour eviter un `cudaMallocManaged` par petit Fab temporaire dans
-les etages d'integration et les niveaux de la multigrille.
+**Capstone : un PAS COUPLE entier sur GPU.** `Coupler<Diocotron>::advance` enchaine,
+par etage SSPRK2 : `f = elliptic_rhs(U)` -> multigrille `lap(phi)=f` -> `aux =
+(phi, grad phi)` -> `assemble_rhs` MUSCL -> mise a jour `saxpy`/`lincomb`. Toutes
+ces briques passent deja par `for_each_cell` ; il a suffi d'annoter `ADC_HD` les
+deux lambdas du coupleur (extraites hors des methodes privees, car nvcc interdit
+un lambda etendu `__host__ __device__` dans une methode privee). Une finesse de
+plus : `for_each_cell` fixe `Kokkos::IndexType<int>` (indices SIGNES) car les
+boites de ghosts ont des bornes basses negatives (le `copy_shifted` periodique),
+que `MDRangePolicy` refuse sinon. `examples/gpu/coupled_kokkos.cpp` se compile en
+CPU (sans Kokkos) ET en GPU (avec) depuis la MEME source : 20 pas couples d'un
+diocotron periodique donnent des sommes de controle **bit a bit identiques** entre
+le CPU (serie) et le GH200 (Cuda) (`sum(U^2) = 1.6752629937e+04`, `max|U| =
+1.2998083392e+00`), masse conservee exactement. Le pas couple Euler-Poisson tourne
+donc entierement sur GPU et donne le meme resultat que le CPU.
+
+Reste surtout, pour la perf en production, un pool memoire (Arena) afin d'eviter un
+`cudaMallocManaged` par petit Fab temporaire dans les etages d'integration et les
+niveaux de la multigrille.
 
 Couche AMR : `AmrHierarchy` (niveaux, ratio de raffinement), operateurs de
 transfert `average_down` (moyenne conservative fin->grossier) et `interpolate`

@@ -77,6 +77,7 @@ class MultiFab {
 // (all-reduce). Chaque rang somme ses fabs locaux, puis MPI_Allreduce agrege ;
 // en serie all_reduce_sum est l'identite.
 inline Real sum(const MultiFab& mf, int comp = 0) {
+  device_fence();  // GPU : barriere avant la reduction hote sur memoire unifiee
   Real s = 0;
   for (int li = 0; li < mf.local_size(); ++li) {
     const Fab2D& f = mf.fab(li);
