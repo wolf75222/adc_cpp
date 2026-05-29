@@ -94,7 +94,27 @@ Conclusion pratique : la continuite centree suffit pour le regime AP lisse vise 
 upwind MUSCL est un transport ordre 2 precis pour les cas a forts gradients, sans
 sur-diffusion.
 
-## 6. Validation
+## 6. Champ magnetique (extension Hoffart)
+
+Un champ magnetique uniforme hors-plan `B = B_z z` ajoute la force de Lorentz magnetique
+`z (m x B)` a la quantite de mouvement. Avec `B` hors-plan elle ne fait que FAIRE TOURNER
+`(m_x, m_y)` a la frequence cyclotron `wc_s = |q_s B_z / m_s|`, sans changer `|m|` ni `n`.
+La rotation exacte d'angle `theta_s = z_s wc_s dt` est inconditionnellement stable (aucune
+limite `wc * dt`). Elle est composee au pas electrostatique par splitting de Strang :
+`R(theta/2) o pas-ES o R(theta/2)`, ordre 2.
+
+Opt-in via `wce`, `wci` (frequences cyclotron par espece ; 0 = pas de champ, comportement
+electrostatique inchange). Valide analytiquement par
+[`tests/test_two_fluid_cyclotron.cpp`](../tests/test_two_fluid_cyclotron.cpp) : sur un
+plasma uniforme (charge nulle, `E = 0`, transport inerte) la quantite de mouvement tourne
+a `wce` a 0.00% d'ecart, `|m|` conservee a l'arrondi (`~1e-15`). Expose jusqu'a Python
+(`TwoFluidAPConfig.omega_ce/omega_ci`).
+
+C'est la premiere brique vers le modele magnetise complet de Hoffart : reste a coupler le
+champ a la dynamique inhomogene (le `E x B` et le diamagnetique entrant dans le transport),
+au-dela de la rotation pure validee ici.
+
+## 7. Validation
 
 - Dispersion isotrope sur mode diagonal : ecart theorie/mesure 3.1%.
 - Borne AP et quasi-neutralite a `omega_pe = 1e3`, `dt * omega_pe = 5`, la ou l'explicite

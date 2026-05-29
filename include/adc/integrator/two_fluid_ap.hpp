@@ -126,6 +126,20 @@ inline void tfap_copy_n(MultiFab& sp, const MultiFab& src, const Box2D& dom) {
   for_each_cell(dom, [=] ADC_HD(int i, int j) { d(i, j, 0) = s(i, j, 0); });
 }
 
+// Rotation cyclotron : champ magnetique uniforme hors-plan B = B_z z. La force de
+// Lorentz magnetique z (m x B) ne fait que FAIRE TOURNER (m_x, m_y) a la frequence
+// cyclotron, sans changer |m| ni n. La rotation exacte d'angle theta est
+// inconditionnellement stable (pas de limite Omega*dt). cos/sin calcules en hote.
+inline void tfap_rotate_mom(MultiFab& sp, Real theta, const Box2D& box) {
+  Array4 m = sp.fab(0).array();
+  const Real c = std::cos(theta), s = std::sin(theta);
+  for_each_cell(box, [=] ADC_HD(int i, int j) {
+    const Real mx = m(i, j, 1), my = m(i, j, 2);
+    m(i, j, 1) = c * mx + s * my;
+    m(i, j, 2) = -s * mx + c * my;
+  });
+}
+
 // E = -grad phi (centre, phi avec 1 ghost) ; Ex en comp 0, Ey en comp 1.
 inline void tfap_efield(const MultiFab& phi, MultiFab& E, const Box2D& dom, Real dx,
                         Real dy) {
@@ -164,6 +178,8 @@ struct TwoFluidAP2D {
   Periodicity per{true, true};
   bool upwind_continuity = false;  // false = continuite centree (defaut valide) ;
                                    // true = flux de masse Rusanov (anti-Gibbs).
+  Real wce = 0, wci = 0;  // frequences cyclotron |q B / m| par espece (0 = pas de B).
+                          // rotation magnetique de (mx,my) par Strang autour du pas ES.
 
   TwoFluidAP2D(int n_, Real L_, Real cse2_, Real csi2_, Real wpe, Real wpi)
       : n(n_), L(L_), dx(L_ / n_), dy(L_ / n_), cse2(cse2_), csi2(csi2_),
@@ -191,6 +207,14 @@ struct TwoFluidAP2D {
   }
 
   void step(Real dt, bool stabilize) {
+    // demi-rotation cyclotron (Strang) : R(theta/2) o pas-electrostatique o R(theta/2).
+    // signe = z_s (electron z=-1, ion z=+1). theta = z wc dt.
+    const Real the = Real(-1) * wce * dt, thi = Real(+1) * wci * dt;
+    const bool mag = (wce != Real(0) || wci != Real(0));
+    if (mag) {
+      tfap_rotate_mom(e, Real(0.5) * the, dom);
+      tfap_rotate_mom(ion, Real(0.5) * thi, dom);
+    }
     fill_boundary(e, dom, per);
     fill_boundary(ion, dom, per);
     tfap_mstar(e, mse, cse2, dt, dom, dx, dy);
@@ -231,6 +255,10 @@ struct TwoFluidAP2D {
     }
     copy_mom(e, mne);  // recopie mx, my finaux dans l'etat
     copy_mom(ion, mni);
+    if (mag) {  // seconde demi-rotation cyclotron (Strang)
+      tfap_rotate_mom(e, Real(0.5) * the, dom);
+      tfap_rotate_mom(ion, Real(0.5) * thi, dom);
+    }
   }
 
   static void copy_mom(MultiFab& sp, const MultiFab& mn) {

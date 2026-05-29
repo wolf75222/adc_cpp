@@ -24,6 +24,8 @@ struct TwoFluidAPConfig {
   double eps = 1e-3;             // amplitude de la perturbation cosinus initiale
   bool upwind_continuity = false;  // flux de masse Rusanov (anti-Gibbs sur fronts raides)
                                    // au lieu de la continuite centree par defaut
+  double omega_ce = 0.0;           // frequence cyclotron electronique (B hors-plan ; 0 = pas de B)
+  double omega_ci = 0.0;           // frequence cyclotron ionique
 };
 
 class TwoFluidAPSolver {

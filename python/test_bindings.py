@@ -86,6 +86,17 @@ print(f"TwoFluidAPSolver(upwind) : max|dne|={us.max_dev():.3e} dmasse_e={abs(us.
 chk(us.max_dev() < 0.1, "tfap_upwind_borne")
 chk(abs(us.mass_e() - um0) < 1e-7, "tfap_upwind_masse_conservee")
 
+# --- TwoFluidAPSolver, magnetise (rotation cyclotron, B hors-plan) ---
+mc = adc.TwoFluidAPConfig()
+mc.n = 64
+mc.omega_ce = 4.0
+mc.omega_ci = 0.2
+ms = adc.TwoFluidAPSolver(mc)
+mm0 = ms.mass_e()
+ms.advance(0.01, 100)
+print(f"TwoFluidAPSolver(magnetise) : max|dne|={ms.max_dev():.3e} dmasse_e={abs(ms.mass_e() - mm0):.2e}")
+chk(abs(ms.mass_e() - mm0) < 1e-7, "tfap_magnetise_masse_conservee")
+
 if fails == 0:
     print("OK test_bindings")
 sys.exit(0 if fails == 0 else 1)
