@@ -109,6 +109,7 @@ inspire d'AMReX / Parthenon) pour viser le GPU et le MPI sans dependance.
 ## Documentation
 
 - Architecture (couches, seams, frontiere lib/demo, etat AMR) : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Schema deux-fluides AP (modele, reformulation, transport, enveloppe mesuree) : [docs/two_fluid_ap.md](docs/two_fluid_ap.md)
 - Performance (profil, scaling, FFT vs MG) : [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 
 ## Quick start
