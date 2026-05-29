@@ -531,9 +531,14 @@ source) sans changement.
 Interfaces generiques (avant d'ajouter Euler-Poisson) : trois points de variation
 sont extraits en politiques/concepts, sans toucher mesh/amr/parallel.
 - `operator/numerical_flux.hpp` : le flux numerique est une POLITIQUE template, au
-  meme titre que le limiteur. `assemble_rhs<Limiter, NumericalFlux>` (defaut
-  `RusanovFlux`) ; HLL/HLLC suivront avec Euler (ils exigent les vitesses d'onde
-  signees, donc une extension du concept). `RusanovFlux` est `ADC_HD` (GPU-safe).
+  meme titre que le limiteur. `assemble_rhs<Limiter, NumericalFlux>` et
+  `advance_ssprk2<Limiter, NumericalFlux>` (defaut `RusanovFlux`). Trois flux
+  fournis, tous `ADC_HD` (GPU-safe) : `RusanovFlux` (Lax-Friedrichs local, ne
+  demande que `max_wave_speed`), `HLLFlux` et `HLLCFlux` (exigent `wave_speeds`
+  signees, et `pressure` pour HLLC ; fournis par `Euler`). Valides par
+  `test_riemann` (tube a choc de Sod contre la solution de Riemann EXACTE) :
+  `L1(rho)` Rusanov `5.7e-3` > HLL `4.7e-3` > HLLC `4.6e-3` (HLLC capture l'onde de
+  contact), positivite preservee pour les trois.
 - `elliptic/elliptic_solver.hpp` : concept `EllipticSolver` (rhs/phi/solve/
   residual/geom). `GeometricMG` le modele (static_assert dans le coupleur) ; le
   coupleur depend du contrat, pas du backend, pour preparer FFT/PETSc.

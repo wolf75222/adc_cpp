@@ -37,6 +37,11 @@ struct EulerPoisson {
   ADC_HD Real max_wave_speed(const State& u, const Aux& a, int dir) const {
     return hydro.max_wave_speed(u, a, dir);
   }
+  ADC_HD Real pressure(const State& u) const { return hydro.pressure(u); }
+  ADC_HD void wave_speeds(const State& u, const Aux& a, int dir, Real& smin,
+                          Real& smax) const {
+    hydro.wave_speeds(u, a, dir, smin, smax);
+  }
 
   // Force gravitationnelle g = -grad phi (aux = phi, d phi/dx, d phi/dy).
   ADC_HD State source(const State& u, const Aux& a) const {

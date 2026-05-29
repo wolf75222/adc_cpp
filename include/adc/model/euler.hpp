@@ -40,6 +40,16 @@ struct Euler {
     return std::sqrt(gamma * pressure(u) / u[0]);
   }
 
+  // Vitesses d'onde SIGNEES extremes dans la direction dir : v_dir - c et v_dir + c.
+  // Requises par les flux HLL/HLLC (au dela de max_wave_speed que demande Rusanov).
+  ADC_HD void wave_speeds(const State& u, const Aux&, int dir, Real& smin,
+                          Real& smax) const {
+    const Real vn = (dir == 0 ? u[1] : u[2]) / u[0];
+    const Real c = sound_speed(u);
+    smin = vn - c;
+    smax = vn + c;
+  }
+
   ADC_HD State flux(const State& u, const Aux&, int dir) const {
     const Real rho = u[0];
     const Real vn = (dir == 0 ? u[1] : u[2]) / rho;  // vitesse normale a la face
