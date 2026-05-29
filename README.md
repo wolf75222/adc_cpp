@@ -517,6 +517,17 @@ par `test_euler` : preservation d'un etat uniforme (`max|R| = 0`) et tourbillon
 isentropique advecte, ordre de convergence **1.86 (VanLeer)** vers l'ordre 2
 attendu (Minmod 1.50, ecretage des extrema lisses), positivite preservee.
 
+Modele Euler-Poisson auto-gravitant (`model/euler_poisson.hpp`) : Euler couple a la
+gravite, `lap phi = 4 pi G (rho - rho0)`, source = force `g = -grad phi` sur la
+quantite de mouvement et l'energie. La partie hydrodynamique est deleguee a `Euler`
+(seules la source et `elliptic_rhs` changent) : c'est le chemin "aux entre par la
+source" du concept, et il se branche TEL QUEL sur `Coupler<EulerPoisson>`. Valide par
+`test_euler_poisson` (theorie de Jeans, regime stable) : une perturbation oscille a
+`omega = sqrt(c_s^2 k^2 - 4 pi G rho0)`, mesure **a 0.1%** de la theorie ; quantite de
+mouvement totale conservee a `1e-16` (gravite interne) et masse conservee. Le meme
+`Coupler` porte donc diocotron (aux dans le flux) ET Euler-Poisson (aux dans la
+source) sans changement.
+
 Interfaces generiques (avant d'ajouter Euler-Poisson) : trois points de variation
 sont extraits en politiques/concepts, sans toucher mesh/amr/parallel.
 - `operator/numerical_flux.hpp` : le flux numerique est une POLITIQUE template, au

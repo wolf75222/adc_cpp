@@ -39,6 +39,7 @@ adc_add_test(test_splitting)
 adc_add_test(test_imex_ap)
 adc_add_test(test_interfaces)
 adc_add_test(test_euler)
+adc_add_test(test_euler_poisson)
 
 if(ADC_HAS_HDF5)
   adc_add_test(test_hdf5_io)
