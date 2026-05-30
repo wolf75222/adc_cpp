@@ -202,9 +202,15 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   128/192/256`, croissance monotone vers `0.911` mais **limitée par la diffusion numérique du bord
   d'anneau** (anneau fin de 6 à 13 cellules). Conclusion chiffrée : sur grille uniforme, atteindre
   `0.911` demande une très haute résolution -> motive directement l'AMR (M2).
-- **M2 : avec notre AMR.** Raffiner le bord de l'anneau (`AmrCouplerMP`, déjà distribué/testé) pour
-  garder le profil net et récupérer le taux analytique à coût réduit. C'est le « intégrer notre AMR »
-  de l'objectif, et la démonstration de pourquoi l'AMR compte sur ce cas.
+- **M2 : avec notre AMR.** Capacité AMR-sur-diocotron CONFIRMÉE : `diocotron_multipatch` tourne le
+  regrid Berger-Rigoutsos (8 patchs dynamiques suivant l'instabilité, dérive masse `~1e-15`,
+  conservatif). Reste, précisément, pour le **benchmark colonne** : le coupleur `AmrCouplerMP` est
+  périodique, alors que la colonne creuse a besoin de la **paroi conductrice** (embedded boundary,
+  déjà dans la multigrille) + la **CI anneau** (toutes deux dans `DiocotronSolver` mono-niveau, pas
+  encore dans le coupleur AMR). Tâche M2 : (a) câbler paroi + anneau dans `AmrCouplerMP`, (b) critère
+  de regrid sur le bord d'anneau, (c) diagnostic d'amplitude du mode (comme `diocotron_column`), puis
+  (d) comparer le taux AMR vs uniforme à base grossière égale -> montrer que l'AMR récupère `0.911`
+  pour bien moins de cellules. C'est le « intégrer notre AMR » de l'objectif.
 - **M3 : système magnétique complet (eq 2.4).** Au-delà de la limite de dérive : Euler+énergie +
   Poisson + Lorentz `m×Ω` (push de Boris déjà en place) + splitting d'opérateurs, pour reproduire la
   *méthode* du papier à travers les 12 ordres de grandeur d'échelles de temps.
