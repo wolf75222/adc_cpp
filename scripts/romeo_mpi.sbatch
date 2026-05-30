@@ -37,7 +37,10 @@ cmake -S "$SRC" -B "$BUILD" -DADC_USE_MPI=ON -DADC_USE_EIGEN=OFF \
 cmake --build "$BUILD" -j
 
 # srun lance les rangs MPI en lisant la configuration du job (8 rangs, 2 noeuds).
-for t in test_mpi_smoke test_mpi_fillboundary test_mpi_advect; do
+# test_mpi_array_reduce exerce all_reduce_sum_inplace (brique du reflux multi-patch
+# distribue) ; test_mpi_diocotron le pas couple E x B distribue.
+for t in test_mpi_smoke test_mpi_fillboundary test_mpi_advect \
+         test_mpi_array_reduce test_mpi_diocotron test_mpi_overlap; do
   echo "=== $t ==="
   srun "$BUILD/bin/$t"
 done

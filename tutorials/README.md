@@ -18,6 +18,12 @@ animations sont pré-générées sous `docs/` ; voir `00_install.md` pour les re
 | 07 | [Champ magnétique : rotation cyclotron](07_magnetic.md) | force de Lorentz magnétique, rotation exacte, splitting de Strang, fréquence cyclotron |
 | 08 | [Backends : OpenMP, MPI, GPU](08_backends.md) | le seam `for_each_cell`, déterminisme thread-count, bit-identité MPI, portage Kokkos GH200 |
 
+## Tutoriels exécutables
+
+Les pages ci-dessus expliquent ; [run/](run/README.md) fait tourner. Des scripts Python
+(bindings `adc`) et C++ qui produisent vraiment un plot ou un GIF, chacun vérifié par un
+`assert` sur l'invariant physique, plus les jobs MPI / GPU sur ROMEO. Sortie sous `docs/`.
+
 ## Conventions
 
 Les blocs C++ renvoient à des fichiers sous `examples/` ; les blocs Python importent le
