@@ -89,9 +89,16 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (`poisson_operator.hpp` : `apply_laplacian`, `poisson_residual`, lisseur) ; le
    `LinearSolver` est le concept `EllipticSolver` (MG, FFT) ; l'identité MG = FFT est rendue
    STRUCTURELLE et vérifiée (`test_elliptic_operator` applique le même opérateur canonique aux
-   deux solutions, résidus ~1e-14). Reste : `EllipticProblem` comme type distinct (coeffs,
-   CL, nullspace en un objet, aujourd'hui implicites) et `FieldPostProcess` comme composant
-   nommé (`E = -grad phi`, aujourd'hui la fonction `coupler_grad_phi`).
+   deux solutions, résidus ~1e-14). Fait : `EllipticProblem` (coeff `eps`, CL `BCRec`, nullspace
+   `nullspace_const` en un objet, jusqu'ici implicites) et `FieldPostProcess` (convention de
+   dérivation `E = -grad phi` via `GradSign::Plus`/`Minus`, jadis la fonction libre
+   `coupler_grad_phi`) sont nommés dans `elliptic/elliptic_problem.hpp`. Refactor structurel
+   bit-identique : `eps = 1` reste descriptif (le stencil ne le lit pas encore), la fabrique
+   `make_elliptic_solver(EllipticProblem)` délègue à la `BCRec`, et `field_postprocess` reproduit
+   à l'identique l'expression du coupleur. `test_elliptic_problem` prouve l'égalité bit-à-bit
+   (`operator==` strict, pas une tolérance). Reste hors-périmètre tant qu'on veut le bit-identique :
+   recâbler les sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`,
+   `two_fluid_ap`), division qui peut différer au dernier bit de la forme multiplicative `*cx`.
 4. **API mémoire explicite.** Remplacer la discipline manuelle `device_fence()` par
    `device_reduce` / `device_norm_inf` / `sync_host` / `sync_device` ; faire de `sum` et
    `norm_inf` de vraies réductions device (pas des boucles hôte protégées par fence).

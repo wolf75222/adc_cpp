@@ -223,10 +223,25 @@ Etat reel : la decomposition est plus avancee que ne le suggerait ce document.
   `7.2e-14` (FFT), solutions identiques a `1.3e-16`. Les deux inversent prouvablement le meme
   operateur (plus seulement `maxdiff` MG-vs-FFT de `test_fft_coupler`).
 
-Reste (cible) : `EllipticProblem` comme TYPE distinct (coeffs `eps`, CL, nullspace en un
-objet ; aujourd'hui implicite : Laplacien a coefficient constant, CL via `BCRec`, nullspace
-ad hoc en periodique) et `FieldPostProcess` comme composant nomme (`E = -grad phi` existe en
-fonction `coupler_grad_phi`, pas en brique).
+- **EllipticProblem et FieldPostProcess FAITS** : `elliptic/elliptic_problem.hpp` nomme les
+  deux. `EllipticProblem` rassemble le coeff `eps`, les CL `BCRec` et le drapeau
+  `nullspace_const` (jusqu'ici implicites : Laplacien a coefficient constant `eps = 1`, CL via
+  `BCRec`, nullspace ad hoc en periodique). `eps` reste DESCRIPTIF (le stencil ne le lit pas
+  encore ; le brancher changerait les valeurs des que `eps != 1`). La fabrique
+  `make_elliptic_solver<Solver>(geom, ba, EllipticProblem)` est additive et delegue a la
+  `BCRec` existante : aucun appelant casse, le concept `EllipticSolver` reste modele.
+  `FieldPostProcess` nomme la convention de derivation `E = -grad phi` via un signe explicite
+  `GradSign::Plus` (le coupleur stocke `+grad phi`, le signe physique est porte par
+  `diocotron::drift_velocity`) ou `GradSign::Minus` (`two_fluid_ap::tfap_efield` stocke
+  directement `-grad phi`). `field_postprocess` remplace le corps de la fonction libre
+  `coupler_grad_phi` a l'identique (meme ordre, forme multiplicative `*cx`). Refactor
+  structurel bit-identique, prouve par `test_elliptic_problem` (`operator==` strict).
+
+Reste hors-perimetre tant qu'on exige le bit-identique : recabler vers `FieldPostProcess` les
+sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`, `two_fluid_ap`),
+car la division peut differer au dernier bit de la forme multiplicative `*cx` du coupleur
+(IEEE754 : `a/b` et `a*(1/b)` ne coincident pas toujours). Ils instancient la meme convention
+nommee, documentee, mais ne sont pas touches a cette etape.
 
 ## 8. AMR : vers un objet nativement distribue (priorite)
 

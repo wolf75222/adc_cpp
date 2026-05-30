@@ -2,6 +2,7 @@
 
 #include <adc/core/types.hpp>
 #include <adc/coupling/coupling_policy.hpp>
+#include <adc/elliptic/elliptic_problem.hpp>
 #include <adc/elliptic/elliptic_solver.hpp>
 #include <adc/elliptic/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
@@ -53,19 +54,15 @@ inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs,
   }
 }
 
-// aux = (phi, d phi/dx, d phi/dy) par differences centrees.
+// aux = (phi, d phi/dx, d phi/dy) par differences centrees. Delegue a la
+// convention nommee FieldPostProcess avec GradSign::Plus et store_phi=true : le
+// coupler stocke +grad phi (le signe physique E = -grad phi est porte par
+// diocotron::drift_velocity). Forme multiplicative *cx / *cy conservee a
+// l'identique -> bit-identique.
 inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx,
                              Real cy) {
-  for (int li = 0; li < aux.local_size(); ++li) {
-    const ConstArray4 p = phi.fab(li).const_array();
-    Array4 a = aux.fab(li).array();
-    const Box2D v = aux.box(li);
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      a(i, j, 0) = p(i, j);
-      a(i, j, 1) = (p(i + 1, j) - p(i - 1, j)) * cx;
-      a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) * cy;
-    });
-  }
+  field_postprocess(phi, aux, cx, cy,
+                    FieldPostProcess{FieldPostProcess::GradSign::Plus, true});
 }
 }  // namespace detail
 

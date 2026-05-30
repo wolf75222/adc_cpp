@@ -26,6 +26,7 @@ adc_add_test(test_poisson_smoother)
 adc_add_test(test_geometric_mg)
 adc_add_test(test_poisson_convergence)
 adc_add_test(test_elliptic_operator)
+adc_add_test(test_elliptic_problem)
 
 if(ADC_HAS_EIGEN)
   add_executable(test_diocotron_theory test_diocotron_theory.cpp)
