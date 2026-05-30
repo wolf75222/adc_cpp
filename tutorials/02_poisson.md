@@ -8,7 +8,8 @@ Deux backends inversent le MÊME Laplacien 5 points, derrière le même concept.
 
 Tout solveur elliptique expose `rhs()`, `solve()`, `phi()`. Le coupleur est générique
 dessus : `AmrCoupler<Model, GeometricMG>` ou `AmrCoupler<Model, PoissonFFTSolver>`, même
-code. C'est un des trois axes orthogonaux de l'architecture.
+code. C'est la couche numérique de l'architecture, indépendante de l'exécution
+([ARCHITECTURE.md](../docs/ARCHITECTURE.md), modèle en quatre couches).
 
 ## Multigrille géométrique
 

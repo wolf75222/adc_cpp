@@ -1,68 +1,243 @@
 # Architecture de adc_cpp
 
 Solveur C++23 pour les systemes **hyperbolique-elliptique couples** sur **AMR** (pile
-mesh ecrite from scratch), concu des le depart pour
-**OpenMP + MPI + Kokkos**, cible cluster **ROMEO** (GH200). Cas de validation fil
-rouge : l'instabilite **diocotron** (derive E x B), puis le **deux-fluides isotherme**
+mesh ecrite from scratch), concu des le depart pour **OpenMP + MPI + Kokkos**, cible
+cluster **ROMEO** (GH200). Cas de validation fil rouge : l'instabilite **diocotron**
+(derive E x B), l'**Euler-Poisson** (gravite ou plasma) et le **deux-fluides isotherme**
 (type Hoffart, arXiv:2510.11808).
 
-Ce document fige l'architecture. Le README porte la narration et les resultats ;
-ici on decrit les couches, les seams et les decisions.
+Ce document fige l'architecture cible et son etat. Le README porte la narration et les
+resultats. Ici on decrit les couches, les seams, les decisions, et on distingue
+explicitement ce qui est **fait** de ce qui est **cible** (refactor planifie, voir
+[ROADMAP.md](ROADMAP.md)).
 
-## 1. Principe : trois axes orthogonaux
+## 1. Principe : quatre couches orthogonales
 
-La physique ne voit JAMAIS le parallelisme. Trois axes se composent par
-templates / concepts :
+Le modele physique ne depend JAMAIS du backend parallele. Il n'expose que des lois
+**locales**, pures ou quasi pures, appelables dans un kernel (`ADC_HD`, device-callable).
+Il ne voit ni MPI, ni AMR, ni MultiFab, ni halos. En revanche il est ecrit pour etre
+compatible avec l'execution choisie : pas d'allocation dans les boucles chaudes, pas de
+`std::function`, pas de polymorphisme dynamique, donnees accessibles sur GPU.
+
+Le code s'organise en quatre couches. Une couche haute exprime le probleme, une couche
+basse l'execute ; une couche haute ne depend jamais d'un detail d'execution.
 
 ```
-  PHYSIQUE (point-wise)        DISCRETISATION + PARALLELISME (seams)      TEMPS
-  -------------------          ------------------------------------       --------------
-  PhysicalModel        --->    for_each_cell  (serial/OpenMP/Kokkos)      ssprk2/3
-  NumericalFlux        --->    MultiFab + BoxArray + DistributionMapping   imex (AP)
-  EllipticSolver       --->    fill_boundary / fill_ghosts  (halos, MPI)   splitting (Lie/Strang)
-  CouplingPolicy       --->    AMR (hierarchy, clustering, regrid)         two_fluid_ap
-                               comm (rang / all-reduce, MPI)
-                               allocator (Arena memoire unifiee)
+  PhysicalModel          lois locales : flux, sources, fermetures (device-callable)
+        |
+        v
+  NumericalMethod        reconstruction, flux numerique, operateur elliptique, CL logiques
+        |
+        v
+  DiscreteOperator       applique la discretisation sur une grille (stencils, ghosts)
+        |
+        v
+  ExecutionBackend       comment boucler : for_each_cell serie / OpenMP / Kokkos ; comm,
+                         halos, reductions, allocateur, MPI ; conteneurs MultiFab/BoxArray
+        |
+  TimeIntegrator         compose les operateurs (RK, IMEX, splitting, AP) sans connaitre
+                         leur implementation interne
 ```
 
-## 2. Les seams (points de bascule)
+Les quatre couches, par contenu :
+
+| Couche | Quoi | Ne connait pas |
+|---|---|---|
+| **Physique** | `PhysicalModel`, equation d'etat, termes sources, lois de fermeture | MPI, AMR, MultiFab, Kokkos, halos |
+| **Numerique** | reconstruction, flux numerique, operateur spatial, operateur elliptique, CL | le layout memoire, la strategie AMR |
+| **Maillage / donnees / execution** | Box, BoxArray, DistributionMapping, MultiFab, Geometry, hierarchie AMR, `for_each_cell`, `comm`, echange de halos, reductions, allocateur | les formules physiques |
+| **Temps / couplage** | SSPRK, IMEX, splitting, `CouplingPolicy`, reflux / average-down / subcyclage | l'implementation des operateurs qu'il compose |
+
+**Point delicat : le modele point-wise ne suffit pas pour les modeles couples.** Certains
+termes ne sont pas purement locaux : potentiel, champ electrique, nullspace de Poisson
+periodique, moyenne de charge, sources implicites. La regle :
+
+```
+PhysicalModel   = lois locales (device-callable).
+CoupledProblem  = variables globales et contraintes (nullspace, <rho>, contraintes AP).
+DiscreteOperator = application sur grille.
+```
+
+Aujourd'hui le fond neutralisant `rho0 = <rho>` est passe au modele comme un parametre, pas
+calcule par lui : c'est deja l'esprit (la contrainte globale vit hors du `PhysicalModel`).
+
+## 2. Couche 1 : physique (local, device-callable)
+
+Le concept `PhysicalModel` (`core/physical_model.hpp`) n'expose que des fonctions locales :
+`flux`, `source`, `max_wave_speed`, `wave_speeds`, `elliptic_rhs`, toutes `ADC_HD`. Aucun
+acces au stockage ou au parallelisme.
+
+```cpp
+struct EulerPoisson {                       // bon : local, device-callable
+  ADC_HD State flux(const State& u, const Aux& a, int dir) const;
+  ADC_HD State source(const State& u, const Aux& a) const;     // g = -grad phi
+  ADC_HD Real elliptic_rhs(const State& u) const;              // s * 4 pi G (rho - rho0)
+};
+```
+
+A eviter : un modele qui connait le stockage (`void compute_flux(MultiFab& U, MultiFab& F)`)
+melange physique, parallelisme et organisation memoire.
+
+## 3. Couche 2 : numerique / discretisation
+
+`operator/numerical_flux.hpp` (Rusanov / HLL / HLLC, politiques `ADC_HD`),
+`operator/reconstruction.hpp` (MUSCL), `operator/spatial_operator.hpp`
+(`compute_face_fluxes`, `assemble_rhs`), l'operateur elliptique (`elliptic/`), les CL
+logiques (`mesh/physical_bc.hpp`).
+
+C'est de la logique numerique **locale**, pas un conteneur. **Le flux numerique ne
+parcourt pas les cellules lui-meme** : il est appele par l'operateur discret, qui le passe
+au `for_each_cell` du backend. Le mauvais design serait
+`numerical_flux.compute_all_cells(U, F, grid, mpi)` ; le bon est un `assemble_rhs` qui
+compose `(modele, flux, reconstruction, CL)` puis laisse l'execution boucler.
+
+## 4. Couche 3 : maillage, donnees, execution
 
 | Seam | Fichier | Role | Backends |
 |---|---|---|---|
-| `for_each_cell(box, f)` | `mesh/for_each.hpp` | boucle sur cellules | serie / `_OPENMP` / Kokkos (Cuda) |
+| `for_each_cell(box, f)` | `mesh/for_each.hpp` | politique d'execution, boucle sur cellules | serie / `_OPENMP` / Kokkos (Cuda) |
 | `Array4` + `ADC_HD` | `mesh/fab2d.hpp`, `core/types.hpp` | vue POD device-callable | identique host/device |
-| `device_fence()` | `mesh/for_each.hpp` | barriere avant lecture HOTE apres kernel | `Kokkos::fence` / no-op |
 | `comm` | `parallel/comm.hpp` | rang/size, all-reduce, barrier | identite serie / MPI |
-| `allocator` | `core/allocator.hpp` | stockage des Fab | `std::allocator` / `cudaMallocManaged` + Arena |
+| `allocator` | `core/allocator.hpp` | stockage des Fab (Arena) | `std::allocator` / `cudaMallocManaged` |
+| conteneurs | `mesh/box2d`, `box_array`, `multifab`, `geometry` | maillage et champs distribues | identiques tous backends |
 
-**Regle de fence (discipline halo).** Toute fonction qui fait un `for_each_cell`
-(kernel device) puis une boucle HOTE sur la meme memoire, dans le meme appel, doit
-`device_fence()` entre les deux (sinon course memoire unifiee sur GPU, invisible en
-CI CPU). Couvert : `sum`/`norm_inf`/`set_val`, `gs_rb_sweep`, `fill_physical_bc`,
-les pack/unpack MPI de `fill_boundary`/`parallel_copy`, les diagnostics distribues.
+**`for_each_cell` exprime une politique d'execution, pas de la logique numerique.** Il
+prend une box et un lambda `ADC_HD(i, j)`. S'il devenait un fourre-tout
+(`for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)`), on recreerait un framework opaque.
+La logique numerique reste dans le lambda (couche 2), pas dans le seam.
 
-## 3. Carte des modules (`include/adc/`)
+**Deux familles de ghosts, a ne pas confondre :**
 
-| Module | Role |
-|---|---|
-| `core/` | `types` (`ADC_HD`, `Real`), `state` (`StateVec<N>`), `physical_model` (concept), `allocator` (Arena) |
-| `mesh/` | `box2d`, `box_array`, `fab2d`/`multifab`, `for_each`, `fill_boundary`, `physical_bc`, `geometry`, `mf_arith`, `refinement`, `box_hash` |
-| `operator/` | `numerical_flux` (Rusanov/HLL/HLLC, `ADC_HD`), `reconstruction` (MUSCL), `spatial_operator` (`assemble_rhs`) |
-| `elliptic/` | concept `EllipticSolver` ; `geometric_mg` (V-cycle) ; `poisson_fft`(+`_solver`) (spectral) ; `poisson_operator` |
-| `integrator/` | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `amr_reflux` / `amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab : mono-box -> multi-patch N-niveaux, GPU-ready) |
-| `coupling/` | `coupler` (`Coupler<Model,Elliptic>`), `coupling_policy`, `amr_coupler` (`AmrCoupler`, mono-box), `amr_coupler_mp` (`AmrCouplerMP`, multi-patch + regrid BR), `spectral_coupler` (`SpectralCoupler`) |
-| `amr/` | `amr_hierarchy`, `cluster` (Berger-Rigoutsos), `regrid`, `tag_box` |
-| `parallel/` | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
-| `model/` | `diocotron`, `euler`, `euler_poisson` (PhysicalModel ; gravite OU plasma via `coupling_sign`) ; `langmuir`, `two_fluid_isothermal` (noyaux 0D AP) |
-| `analysis/` | `diocotron_growth` (Eigen, `#ifdef ADC_HAS_EIGEN`), `hdf5_writer` (`#ifdef ADC_HAS_HDF5`) |
-| `solver/` | facades PIMPL : `diocotron_solver`, `euler_poisson_solver`, `two_fluid_ap_solver` |
+```
+1. Ghosts PHYSIQUES   CL au bord du domaine : Dirichlet, Neumann/Foextrap, periodique, mur.
+2. Ghosts PARALLELES  echanges entre patchs / rangs MPI.
+3. Ghosts COARSE-FINE interpolation entre niveaux AMR.
+```
 
-## 4. Backends : propriete de la bibliotheque, pas un drapeau par cible
+Aujourd'hui : (1) est dans `mesh/physical_bc.hpp` (`fill_physical_bc`, `BCRec`), (2) dans
+`mesh/fill_boundary.hpp` (echange intra-niveau). La separation existe donc au niveau
+fichier. **Cible** : (3) l'interpolation coarse-fine vit encore dans le pas AMR
+(`mf_fill_fine_ghosts_mb`) et `fill_ghosts` melange encore physique et parallele ; il faut
+en faire des briques nommees distinctes (`BoundaryCondition`, `GhostExchange`,
+`AMRBoundaryInterpolation`) testables isolement.
 
-OpenMP, MPI, HDF5 et Kokkos sont attaches a la cible d'interface `adc`
-(`target_compile_definitions` / `target_link_libraries(adc INTERFACE ...)`). **Tout
-ce qui lie `adc` herite du backend** : la facade compilee `src/` (`libadc`), les
-tests, les exemples. On configure **une seule fois** :
+**Modele memoire : remplacer la discipline manuelle par une API explicite.** Aujourd'hui,
+toute fonction qui fait un kernel device puis une boucle HOTE sur la meme memoire doit
+appeler `device_fence()` entre les deux (sinon course memoire unifiee sur GPU, invisible en
+CI CPU). C'est correct mais c'est une discipline **manuelle** : un oubli est un bug
+silencieux GPU. De plus `sum` / `norm_inf` sont aujourd'hui des boucles hote derriere un
+fence, pas des reductions device. **Cible** : une API memoire explicite
+(`device_reduce`, `device_norm_inf`, `sync_host`, `sync_device`) qui rend la transition
+visible dans le type ou le nom, et des reductions device (pas des boucles hote protegees),
+pour ne pas accumuler de synchronisations globales sur GH200.
+
+## 5. Couche 4 : temps et couplage
+
+`integrator/ssprk.hpp`, `imex.hpp` (AP), `splitting.hpp`, `two_fluid_ap.hpp`. Un
+`TimeIntegrator` pilote explicitement les etapes (remplissage des ghosts entre stages,
+evaluation du RHS, combinaison) mais **ne connait pas la formule du flux** : il ne voit
+qu'une interface `RHSOperator` (evaluer le second membre en `(U, t) -> R`). Le temps
+compose des operateurs, il ne possede pas la physique.
+
+`coupling/` (`Coupler`, `AmrCoupler`, `AmrCouplerMP`, `SpectralCoupler`, `coupling_policy`)
+orchestre fluide <-> Poisson. Regle stricte pour eviter la classe-dieu :
+
+```
+Une CouplingPolicy decide l'ORDRE des operations, les variables couplees, les
+synchronisations, les contraintes. Elle ne possede pas la donnee, ne connait pas le
+backend, ne fait ni regrid, ni I/O, ni diagnostics, ni MPI brut.
+```
+
+Aujourd'hui les coupleurs AMR tiennent la hierarchie et appellent `regrid()` : ils font
+donc plus que de l'ordonnancement pur. **Cible** : une policy mince qui ordonne, la
+hierarchie et le regrid sortant en objets separes (voir section 8).
+
+## 6. Carte des modules (`include/adc/`)
+
+| Module | Couche | Role |
+|---|---|---|
+| `core/` | physique / exec | `types` (`ADC_HD`, `Real`), `state` (`StateVec<N>`), `physical_model` (concept), `allocator` (Arena) |
+| `model/` | physique | `diocotron`, `euler`, `euler_poisson` (gravite OU plasma via `coupling_sign`) ; `langmuir`, `two_fluid_isothermal` (noyaux 0D AP) |
+| `operator/` | numerique | `numerical_flux` (Rusanov/HLL/HLLC), `reconstruction` (MUSCL), `spatial_operator` (`assemble_rhs`) |
+| `elliptic/` | numerique + temps | concept `EllipticSolver` ; `geometric_mg` (V-cycle) ; `poisson_fft`(+`_solver`) ; `poisson_operator` |
+| `mesh/` | execution | `box2d`, `box_array`, `fab2d`/`multifab`, `for_each`, `fill_boundary`, `physical_bc`, `geometry`, `mf_arith`, `refinement`, `box_hash` |
+| `parallel/` | execution | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
+| `amr/` | execution | `amr_hierarchy`, `cluster` (Berger-Rigoutsos), `regrid`, `tag_box` |
+| `integrator/` | temps | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `amr_reflux`/`amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab, mono-box -> multi-patch N-niveaux, GPU-ready) |
+| `coupling/` | temps | `coupler`, `coupling_policy`, `amr_coupler` (mono-box), `amr_coupler_mp` (multi-patch + regrid BR), `spectral_coupler` |
+| `analysis/` | hors chemin chaud | `diocotron_growth` (Eigen, `#ifdef ADC_HAS_EIGEN`), `hdf5_writer` (`#ifdef ADC_HAS_HDF5`) |
+| `solver/` | facade | facades PIMPL : `diocotron_solver`, `euler_poisson_solver`, `two_fluid_ap_solver` |
+
+## 7. Solveur elliptique : probleme / operateur / solveur / post-traitement
+
+Un solveur elliptique depend fortement de la discretisation, des CL, du layout, de la
+structure AMR, des communications et du solveur lineaire disponible. Le mettre dans un seul
+bloc en fait vite une classe-dieu. Decomposition cible :
+
+```
+EllipticProblem        l'equation : -div(eps grad phi) = rho, CL physiques, nullspace, coeffs.
+EllipticOperator       l'operateur discret : stencil, apply(), residual(), restriction/prolongation.
+LinearSolver           l'inversion : multigrille, FFT, CG, (Hypre/PETSc).
+FieldPostProcess       E = -grad phi, energie, diagnostics.
+```
+
+La contrainte clef : MG et FFT doivent inverser le **MEME** Laplacien discret 5 points.
+Aujourd'hui c'est garanti par construction et verifie (`test_fft_coupler`,
+`maxdiff = 1.6e-14`), mais formalise seulement dans la doc. **Cible** : un `OperatorSpec`
+partage (stencil + CL + nullspace) que les deux backends consomment, pour que l'identite
+soit structurelle, pas documentaire.
+
+Etat aujourd'hui : le concept `EllipticSolver` fusionne operateur et solveur, et
+`GeometricMG` / `PoissonFFTSolver` sont des paquets operateur+solveur. `GeometricMG`
+(V-cycle GS rouge-noir) est le seul compatible AMR et tout `n`, entierement on-device.
+`PoissonFFTSolver` est direct pour le mono-niveau periodique (`n` puissance de 2), ~5x
+quand l'elliptique domine, distribue par bandes (`MPI_Alltoall`), pas de FFT sous AMR.
+`Coupler<Model, Elliptic = GeometricMG>` est generique sur le backend.
+
+## 8. AMR : vers un objet nativement distribue (priorite)
+
+**Etat.** L'integrateur AMR tourne sur la pile MultiFab + seam, du mono-box au multi-patch
+N-niveaux (`integrator/amr_reflux_mf.hpp`, generique `<Limiter, NumericalFlux, N-comp>`,
+bulk `for_each_cell` GPU-ready) : `amr_step_2level_mf`, `amr_step_multilevel_mf`,
+`amr_step_2level_multipatch`, `amr_step_multilevel_multipatch` (`subcycle_level_mp`). Le
+reflux est coverage-aware (interfaces fin-grossier reelles, pas les joints fin-fin geres par
+`fill_boundary`) et route la correction vers la box parente (`mf_find_box`). Les coupleurs
+`AmrCoupler` (mono-box) et `AmrCouplerMP` (multi-patch + `regrid()` Berger-Rigoutsos) sont
+conservatifs.
+
+**Faiblesse 1 : la duplication par cas particulier.** Les noms
+`amr_step_2level_mf` / `_multilevel_mf` / `_2level_multipatch` / `_multilevel_multipatch` /
+`subcycle_level_mp` signalent des cas codes avant l'abstraction finale. Cible : un seul
+moteur sur des objets nommes.
+
+```
+LevelHierarchy   PatchRange   CoarseFineInterface   FluxRegister
+SubcyclingSchedule   RegridPolicy   OwnershipPolicy
+
+advance_amr(hierarchy, dt, operators, schedule, execution);   // un seul point d'entree
+```
+
+**Faiblesse 2 : le multi-patch n'est pas encore un objet distribue (priorite n.1).** Il
+tourne mono-rang : le reflux ecrit la box grossiere localement, la couverture est batie sur
+les patchs locaux. Le MPI multi-patch n'est pas un simple reste-a-faire, c'est structurant.
+Si la cible est AMR + MPI + GPU, chaque patch doit porter **des le depart** :
+
+```
+owner_rank          global_box_id          parent_level
+interfaces coarse-fine GLOBALES             registre de flux DISTRIBUE
+politique de reduction conservative
+```
+
+Sinon le modele mono-rang est une fausse abstraction distribuee qu'il faudra recasser. Le
+chemin concret : all-gather des empreintes pour la couverture globale, gather des registres
+vers le rang du grossier, `load_balance` SFC sur le multi-box. C'est l'item prioritaire de
+la [ROADMAP.md](ROADMAP.md).
+
+## 9. Backends : propriete de la bibliotheque, pas un drapeau par cible
+
+OpenMP, MPI, HDF5 et Kokkos sont attaches a la cible d'interface `adc`. **Tout ce qui lie
+`adc` herite du backend** : la facade `src/` (`libadc`), les tests, les exemples. On
+configure une seule fois :
 
 ```
 cmake -B build                       # serie
@@ -72,99 +247,61 @@ cmake -B build -DADC_USE_KOKKOS=ON \ # GPU / CPU portable (ADC_HAS_KOKKOS)
    -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K
 ```
 
-Sous `-DADC_USE_KOKKOS=ON`, la norme retombe a C++20 (nvcc CUDA 12.x) et **`libadc`
-elle-meme se compile pour le GPU** (les 3 facades `src/` passent sous nvcc, valide
-GH200 bit-identique au CPU). Aucun `ADC_HAS_KOKKOS` rebadge par cible.
+Sous Kokkos, la norme retombe a C++20 (nvcc CUDA 12.x) et `libadc` elle-meme compile pour
+le GPU (les 3 facades passent sous nvcc, valide GH200 bit-identique au CPU).
 
-Le langage C n'est active (`enable_language` implicite via `project(... C)`) que pour
-fabriquer `MPI::MPI_C` exige par le hdf5-config parallele ; `find_package(OpenMP
-COMPONENTS CXX)` evite d'exiger un OpenMP C inutile.
+Compromis assume : ce choix garantit que tests, exemples et lib partagent les memes options
+(bon pour une cible recherche/HPC mono-config comme ROMEO/GH200), mais il est rigide pour
+une lib publique : on ne peut pas avoir une cible CPU et une cible GPU dans le meme build.
+**Cible si le projet grossit en lib reutilisable** : eclater en `adc_core` / `adc_serial` /
+`adc_openmp` / `adc_mpi` / `adc_kokkos` / `adc_solver`.
 
-## 5. Frontiere bibliotheque / demo
+## 10. Frontiere bibliotheque / demo + cout de compilation
 
 | Couche | Contenu | Lien |
 |---|---|---|
-| `include/` | coeur generique (concepts, templates, seam GPU). DOIT etre visible a l'instanciation. | header-only `adc::adc` |
+| `include/` | coeur generique (concepts, templates, seam GPU). Visible a l'instanciation. | header-only `adc::adc` |
 | `src/` | facade COMPILEE `libadc` : solveurs concrets non templatises (PIMPL), instancient la pile UNE fois. API stable (apps, pybind11). | `adc::solver` |
-| `examples/` (CPU) | pilotes minces. `diocotron`/`diocotron_column` lient `adc::solver` ; `diocotron_amr/mpi/theory` lient `adc::adc` (capacites moteur hors facade). | |
+| `examples/` (CPU) | pilotes minces. `diocotron`/`diocotron_column` lient `adc::solver` ; `diocotron_amr/mpi/theory` lient `adc::adc`. | |
 | `examples/gpu/` | demos Kokkos/CUDA (GH200), heritent Kokkos de `adc`. | |
 | `tests/` | CTest (+ MPI via `mpirun`). | |
 | `python/` | bindings pybind11 de la facade. | |
 
-Regle : besoin du solveur standard -> `adc::solver` ; besoin de toucher AMR/MPI/
-champs internes -> `adc::adc`.
+Regle : solveur standard -> `adc::solver` ; toucher AMR/MPI/champs internes -> `adc::adc`.
+Le PIMPL donne une API stable et borne le cout de compilation : le moteur template
+header-only est cher a compiler (surtout sous nvcc), donc on **explicite** quelques
+configurations standards (les 3 facades) instanciees une fois dans `src/`, et on reserve
+`adc::adc` aux usages experts.
 
-## 6. Solveur elliptique : dual MG + FFT
+## 11. Validation : logicielle ET numerique
 
-Deux backends, tous deux modelant `EllipticSolver` et resolvant le MEME Laplacien
-discret 5 points (memes valeurs propres) :
-- **`GeometricMG`** (V-cycle GS rouge-noir) : seul compatible AMR et tout `n`,
-  entierement on-device. Le cheval de trait.
-- **`PoissonFFTSolver`** / `PoissonFFT` : DIRECT pour le mono-niveau periodique (`n`
-  puissance de 2), ~5x quand l'elliptique domine, distribue par bandes
-  (`MPI_Alltoall`). Pas de FFT sous AMR.
+**Bit-identique = filet logiciel, pas preuve numerique.** Prouver que le multipatch est
+bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne prouve pas
+que le comportement est numeriquement correct. Les deux sont necessaires.
 
-`Coupler<Model, Elliptic = GeometricMG>` est generique sur le backend.
-
-## 7. AMR : etat (unification MultiFab + multi-patch N-niveaux faits)
-
-**L'integrateur AMR tourne sur la pile MultiFab + seam, du mono-box au multi-patch
-N-niveaux.** `integrator/amr_reflux_mf.hpp` fournit, generique
-`<Limiter, NumericalFlux, N-comp>`, bulk `for_each_cell` (GPU-ready), bati sur
-`operator/spatial_operator.hpp::compute_face_fluxes` :
-- mono-box par niveau : `amr_step_2level_mf` / `amr_step_multilevel_mf` (sous-cyclage
-  Berger-Oliger recursif + reflux) ;
-- multi-patch (plusieurs boxes par niveau) : `amr_step_2level_multipatch` (2 niveaux) et
-  `amr_step_multilevel_multipatch` (N niveaux, recursion `subcycle_level_mp`). Le reflux
-  est **coverage-aware** (reflux seulement aux interfaces fin-grossier reelles, pas aux
-  joints fin-fin geres par `fill_boundary`) et **route la correction vers la box parente**
-  contenant la cellule grossiere adjacente (`mf_find_box`) ; ghosts inter-patch et
-  moyenne descendante depuis un parent multi-box (`mf_fill_fine_ghosts_mb`,
-  `mf_average_down_mb`).
-- `coupling/amr_coupler.hpp::AmrCoupler<Model, Elliptic=GeometricMG>` : coupleur mono-box,
-  hierarchie `std::vector<AmrLevelMF>`, Poisson via le concept `EllipticSolver`,
-  `sync_down` / `inject_aux` / aux sur MultiFab.
-- `coupling/amr_coupler_mp.hpp::AmrCouplerMP<Model, Elliptic>` : coupleur MULTI-PATCH,
-  hierarchie `std::vector<AmrLevelMP>`, pas via `amr_step_multilevel_multipatch`, et
-  `regrid()` reconstruit le niveau fin a la volee par Berger-Rigoutsos (le regrid
-  dynamique est donc dans le coupleur reutilisable, plus seulement dans le demo).
-
-Chaque brique est prouvee **bit-identique** a sa reference. Le mono-box l'est vs la pile
-Fab2D (`amr_reflux.hpp` / `amr_multilevel.hpp`, reference testee). Le multipatch N-niveaux
-l'est sur DEUX axes (`test_amr_multilevel_multipatch`) : 3 niveaux mono-box -> identique
-a `amr_step_multilevel_mf` (`0`), 2 niveaux fin multi-box -> identique a
-`amr_step_2level_multipatch` (`0`), et 3 niveaux avec niveau intermediaire multi-box ->
-masse conservee (`0`). Autres tests : `test_face_fluxes`, `test_amr_reflux_mf`,
-`test_amr_multilevel_mf`, `test_amr_multipatch`, `test_amr_cluster_step`,
-`test_amr_coupler` (`5.55e-16`). `AmrCouplerMP` est prouve **bit-identique** (`0`) a
-`AmrCoupler` sur hierarchie mono-box et conservatif (`1.3e-15`) sous regrid BR dynamique
-a 3 patchs (`test_amr_coupler_mp`). Le demo couple `diocotron_multipatch` re-cluster ses
-patchs par Berger-Rigoutsos a la volee (masse `~2e-15`).
-
-Acquis : l'AMR peut utiliser MUSCL / HLL / HLLC / N-composantes, du mono-box au
-multi-patch N-niveaux, et est GPU-ready, la ou la pile Fab2D etait figee Rusanov 1er
-ordre scalaire hote-only.
-
-**Reste : le distribue.** Le multipatch tourne mono-rang (le reflux ecrit la box grossiere
-localement, la couverture est batie sur les patchs locaux). Le rendre MPI demande un
-all-gather des empreintes pour la couverture globale + un gather des registres vers le
-rang du grossier, plus `load_balance` SFC sur le multi-box. Effort distinct et
-conservation-critique. Le regrid dynamique BR dans le coupleur reutilisable est fait
-(`AmrCouplerMP::regrid`).
-
-## 8. Comparaison AMReX
-
-Correspondances : `MultiFab`, `BoxArray`/`DistributionMapping`, `Geometry`,
-`AmrLevel`, FillBoundary, Arena, reflux, MLMG ~ `GeometricMG`. Divergences assumees :
-pas de `MFIter` (on itere `for_each_cell` + fab local, GPU-ready) ; `EllipticSolver`
-joue `LinOp` mais Laplacien a coefficient constant (EB en escalier) ; le FluxRegister /
-FillPatch multi-patch N-niveaux existe (`amr_step_multilevel_multipatch`) mais reste
-mono-rang (le distribue MPI du reflux multi-patch est le morceau restant).
-
-## 9. Validation
-
+Fait aujourd'hui :
 - Tests : 48/48 CPU serie (Eigen inclus) ; 48/48 OpenMP ; +8 MPI (`mpirun -np 4`) ; +1 HDF5.
-- GPU : GH200 (CUDA 12.6), advection / MG / pas couple Euler-Poisson / deux-fluides AP
-  + `libadc` compilee GPU, tous **bit-identiques au CPU**.
-- MPI : advection bit-identique a np=1/2/4/7, halos + FFT distribues.
-- Perf : `docs/PERFORMANCE.md` (Poisson 86%, FFT x4.8, OncePerStep x2.6).
+- Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
+  (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
+  conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`).
+- Physique : Jeans 0.1%, Bohm-Gross 0.1%, dispersion deux-fluides 3.1%, cyclotron 0.00%.
+- GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4/7.
+
+Manque (cible, voir [ROADMAP.md](ROADMAP.md)) : une vraie suite numerique, pas seulement du
+bit-identique :
+
+```
+solutions manufacturees 1D/2D + ordre de convergence L1/L2/Linf
+conservation de masse sous regrid ; conservation du flux coarse-fine
+nullspace de Poisson periodique ; Gauss discret div(E) = rho
+limite asymptotique AP ; invariants diocotron (masse, energie, moment, enstrophie)
+```
+
+## 12. Comparaison AMReX
+
+Correspondances : `MultiFab`, `BoxArray`/`DistributionMapping`, `Geometry`, `AmrLevel`,
+FillBoundary, Arena, reflux, MLMG ~ `GeometricMG`. Divergences assumees : pas de `MFIter`
+(on itere `for_each_cell` + fab local, GPU-ready) ; l'operateur elliptique joue `LinOp`
+mais Laplacien a coefficient constant (EB en escalier) ; le FluxRegister / FillPatch
+multi-patch N-niveaux existe mais reste mono-rang (le distribue MPI du reflux multi-patch
+est le morceau structurant restant, section 8).

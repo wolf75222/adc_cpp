@@ -43,11 +43,40 @@ Liste vivante de ce qui est fait et de ce qui reste, par intention.
 
 ## En file
 
-### AMR distribué (le dernier morceau de la refonte)
+### Durcissement de l'architecture (revue de conception)
 
-- MPI du reflux multi-patch : disponibilité du grossier pour le ghost-fill (copie
-  inter-niveaux) + gather des registres via `all_reduce_sum_inplace` (primitive déjà posée).
-- `load_balance` SFC branché partout sur le multi-box.
+Issu d'une revue : la faiblesse structurelle est le mélange discrétisation / stockage /
+exécution, et un AMR multi-patch pas encore pensé distribué. Voir
+[ARCHITECTURE.md](ARCHITECTURE.md) (modèle en quatre couches, sections marquées « cible »).
+
+1. **AMR multi-patch nativement distribué (priorité absolue).** Aujourd'hui mono-rang
+   (couverture et reflux locaux). Chaque patch doit porter dès la conception `owner_rank`,
+   `global_box_id`, `parent_level`, les interfaces coarse-fine globales, un registre de flux
+   distribué et une politique de réduction conservative. Concrètement : all-gather des
+   empreintes pour la couverture globale, gather des registres vers le rang du grossier
+   (`all_reduce_sum_inplace`, primitive posée), `load_balance` SFC sur le multi-box. Repousser
+   ce point fige une fausse abstraction distribuée.
+2. **Moteur AMR unifié.** Replier la famille `amr_step_2level_mf` / `_multilevel_mf` /
+   `_2level_multipatch` / `_multilevel_multipatch` (duplication par cas particulier) sur un
+   seul `advance_amr(hierarchy, dt, operators, schedule, execution)`, au-dessus d'objets
+   nommés : `LevelHierarchy`, `PatchRange`, `CoarseFineInterface`, `FluxRegister`,
+   `SubcyclingSchedule`, `RegridPolicy`, `OwnershipPolicy`.
+3. **Découper l'elliptique.** `EllipticProblem` (équation, coeffs, CL, nullspace) /
+   `EllipticOperator` (stencil, `apply`, `residual`, restriction/prolongation) /
+   `LinearSolver` (MG, FFT, CG) / `FieldPostProcess` (E = -grad phi). Formaliser l'identité
+   MG = FFT dans un `OperatorSpec` partagé, pas seulement dans la doc.
+4. **API mémoire explicite.** Remplacer la discipline manuelle `device_fence()` par
+   `device_reduce` / `device_norm_inf` / `sync_host` / `sync_device` ; faire de `sum` et
+   `norm_inf` de vraies réductions device (pas des boucles hôte protégées par fence).
+5. **Séparer les trois familles de ghosts** en briques nommées testables :
+   `BoundaryCondition` (physique), `GhostExchange` (parallèle), `AMRBoundaryInterpolation`
+   (coarse-fine).
+6. **CouplingPolicy mince.** Sortir la hiérarchie, le regrid et les diagnostics des coupleurs
+   pour que la policy ne fasse plus qu'ordonner les opérations.
+7. **Suite de validation numérique** (le bit-identique ne prouve pas la justesse) : solutions
+   manufacturées 1D/2D + ordre L1/L2/Linf, conservation sous regrid, conservation du flux
+   coarse-fine, nullspace de Poisson périodique, Gauss discret div(E) = rho, limite AP,
+   invariants diocotron (masse, énergie, moment, enstrophie).
 
 ### Physique magnétisée (cible Hoffart)
 

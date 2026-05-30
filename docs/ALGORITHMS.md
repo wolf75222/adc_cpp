@@ -318,7 +318,7 @@ de E et B perd en précision face à un push de Boris combiné (E+B au même cen
 ## 14. Le seam de dispatch (série / OpenMP / Kokkos / MPI)
 
 Pas un algorithme numérique mais le point de bascule qui les rend tous portables. Détail
-dans [ARCHITECTURE.md](ARCHITECTURE.md) section 2-4. En bref : `for_each_cell(box, lambda)`
+dans [ARCHITECTURE.md](ARCHITECTURE.md) section 4 (couche execution). En bref : `for_each_cell(box, lambda)`
 dispatche vers une boucle série, `#pragma omp parallel for`, ou `Kokkos::parallel_for`
 selon le backend de la cible `adc` ; `comm.hpp` enveloppe les collectives MPI
 (`all_reduce_sum`, `all_reduce_sum_inplace`). La physique ne voit jamais le backend.
