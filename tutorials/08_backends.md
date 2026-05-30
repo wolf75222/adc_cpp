@@ -44,8 +44,11 @@ mpirun -np 4 ./build-mpi/bin/diocotron_mpi out 128 600
 ```
 
 Le BoxArray est global (tous les rangs connaissent toutes les boîtes) ; seules les données
-sont distribuées (`DistributionMapping`, équilibrage SFC). Les résultats sont
-**bit-identiques** à np=1 (invariance au nombre de rangs, vérifiée par les tests `test_mpi_*`).
+sont distribuées par le `DistributionMapping`. Le round-robin est le défaut ; un équilibrage
+par courbe de Morton (`make_sfc_distribution`, `parallel/load_balance.hpp`) est disponible et
+vérifié sur l'AMR distribué (`test_mpi_amr_multipatch3` : `maxdiff = 0` sous répartition SFC).
+Les résultats sont **bit-identiques** à np=1 quelle que soit la répartition (invariance au
+nombre de rangs ET à la distribution, vérifiée par les tests `test_mpi_*`).
 
 ## GPU (Kokkos, GH200)
 

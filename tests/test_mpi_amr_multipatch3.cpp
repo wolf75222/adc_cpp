@@ -9,18 +9,22 @@
 // le niveau 1 en 8 patchs round-robin pour que le PARENT du patch fin tombe sur un rang
 // DIFFERENT du patch fin (sinon le chemin cross-rank reste masque).
 //
-// On execute le MEME pas dans deux repartitions des niveaux 1/2, les deux par tous les
+// On execute le MEME pas dans trois repartitions des niveaux 1/2, toutes par tous les
 // rangs (collectives appariees) :
 //   DIST : patchs round-robin sur les rangs.
 //   REF  : patchs tous sur le rang 0 (equivalent np=1 ; les autres rangs a vide).
-// Le niveau 0 etant replique, chaque rang detient les deux resultats grossiers :
-// comparaison bit a bit. DIST == REF == np=1 prouve l'invariance a la distribution.
+//   SFC  : patchs repartis par courbe de Morton (make_sfc_distribution, load_balance reel).
+// Le niveau 0 etant replique, chaque rang detient les resultats grossiers : comparaison bit
+// a bit. DIST == SFC == REF == np=1 prouve l'invariance a la distribution, y compris sous un
+// equilibrage de charge par localite (le maillon "load_balance SFC" de la cible distribuee,
+// branche sur l'AMR distribue et non plus seulement teste comme algorithme en serie).
 
 #include <adc/integrator/amr_reflux_mf.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/model/diocotron.hpp>
 #include <adc/parallel/comm.hpp>
+#include <adc/parallel/load_balance.hpp>  // make_sfc_distribution, load_imbalance
 
 #include <cmath>
 #include <cstdio>
@@ -133,6 +137,30 @@ int main(int argc, char** argv) {
 
   if (maxdiff > 1e-12) { if (me == 0) std::printf("FAIL distribution_invariante\n"); ++fails; }
   if (drift > 1e-10) { if (me == 0) std::printf("FAIL masse_conservee\n"); ++fails; }
+
+  // SFC : niveaux 1/2 repartis par courbe de Morton (load_balance reel, pas round-robin).
+  // Le resultat grossier doit rester bit-identique a REF : un equilibrage par localite ne
+  // change pas la reponse, seulement quel rang detient quel patch. C'est le maillon
+  // "load_balance SFC" de la cible distribuee, branche sur l'AMR distribue (plus seulement
+  // teste en serie comme algorithme).
+  auto [UcSfc, driftSfc] = run(make_sfc_distribution(BoxArray(l1), n_ranks()),
+                               make_sfc_distribution(BoxArray(l2), n_ranks()));
+  (void)driftSfc;
+  double maxdiffSfc = 0;
+  {
+    const ConstArray4 us = UcSfc.fab(0).const_array(), ur2 = UcRef.fab(0).const_array();
+    for (int j = 0; j < nc; ++j)
+      for (int i = 0; i < nc; ++i)
+        maxdiffSfc = std::fmax(maxdiffSfc, std::fabs(us(i, j, 0) - ur2(i, j, 0)));
+  }
+  maxdiffSfc = all_reduce_max(maxdiffSfc);
+  const double imb = load_imbalance(BoxArray(l1), make_sfc_distribution(BoxArray(l1), n_ranks()),
+                                    n_ranks());
+  if (me == 0)
+    std::printf("  SFC (Morton) niveau 1/2 : max|Uc_sfc - Uc_ref| = %.3e, desequilibre = %.3f\n",
+                maxdiffSfc, imb);
+  if (maxdiffSfc > 1e-12) { if (me == 0) std::printf("FAIL sfc_invariante\n"); ++fails; }
+  if (imb > 1.6) { if (me == 0) std::printf("FAIL sfc_desequilibre\n"); ++fails; }
 
   fails = all_reduce_sum(fails);
   if (fails == 0 && me == 0) std::printf("OK test_mpi_amr_multipatch3\n");

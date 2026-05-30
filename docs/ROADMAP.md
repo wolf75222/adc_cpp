@@ -79,8 +79,14 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (5) couverture déjà globale. Le coupleur `AmrCouplerMP` est lui aussi distribué : son
    injection d'aux `coupler_inject_aux_mb` passe par `parallel_copy` quand le parent est réparti
    (niveau 0 répliqué : lecture locale), vérifié contre l'analytique np=1/2/4 par
-   `test_mpi_coupler_inject`. Reste, cible finale : chaque patch portant `owner_rank`,
-   `global_box_id`, interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
+   `test_mpi_coupler_inject`. Vers la cible finale : le `load_balance` SFC (Z-order de Morton,
+   `make_sfc_distribution`) est désormais BRANCHÉ sur l'AMR distribué et vérifié, pas seulement
+   testé comme algorithme en série : `test_mpi_amr_multipatch3` exécute le pas 3-niveaux sous
+   répartition Morton et obtient `maxdiff = 0` vs la référence (rang 0) à np=1/2/4, déséquilibre
+   1.000. Reste : chaque patch portant un `owner_rank` / `global_box_id` explicites (aujourd'hui
+   l'ownership vit dans le `DistributionMapping`, l'identité dans l'indice de `BoxArray`),
+   interfaces coarse-fine décrites globalement, et un registre de flux distribué point à point
+   (au lieu du gather `all_reduce` sur tout le domaine grossier répliqué).
 2. **Moteur AMR unifié.** Entrée unifiée faite : `advance_amr(m, LevelHierarchy&, dt)` + le
    type `LevelHierarchy`, vérifiée façade-fidèle en **2 et 3 niveaux** (`maxdiff = 0` vs l'appel
    direct, dérive masse `< 1e-12`) et conservatif (`test_advance_amr`). Promotion des rôles en
