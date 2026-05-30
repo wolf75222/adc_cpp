@@ -83,10 +83,18 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    `make_sfc_distribution`) est désormais BRANCHÉ sur l'AMR distribué et vérifié, pas seulement
    testé comme algorithme en série : `test_mpi_amr_multipatch3` exécute le pas 3-niveaux sous
    répartition Morton et obtient `maxdiff = 0` vs la référence (rang 0) à np=1/2/4, déséquilibre
-   1.000. Reste : chaque patch portant un `owner_rank` / `global_box_id` explicites (aujourd'hui
-   l'ownership vit dans le `DistributionMapping`, l'identité dans l'indice de `BoxArray`),
-   interfaces coarse-fine décrites globalement, et un registre de flux distribué point à point
-   (au lieu du gather `all_reduce` sur tout le domaine grossier répliqué).
+   1.000. Le registre de flux est aussi RESTREINT À L'INTERFACE coarse-fine : son `all_reduce`
+   ne porte plus sur tout le domaine grossier (`O(NX*NY)`) mais sur la boîte englobante des
+   empreintes fines (`O(interface)`), bit-identique (les cellules hors interface étaient nulles,
+   sautées à l'application ; np=1/2/4 `maxdiff = 0`). Une conception dédiée (workflow lecture
+   seule) a tranché le reste : le gather collectif RÉSIDUEL est irréductible tant que le grossier
+   est répliqué (chaque rang doit voir la correction) ; le supprimer entièrement (registre point
+   à point pur, zéro collective) exige de DÉ-RÉPLIQUER le niveau 0, ce qui casse le Poisson MG,
+   `fill_periodic_local` et la mesure de masse locale des tests pour un gain marginal sur un
+   grossier petit. Décision : **NO-GO sur la dé-réplication** pour ce cas (diocotron / Euler-Poisson,
+   base 32x32) ; le goulot `O(NX*NY)` est déjà éliminé sans elle. Reste, optionnel : `owner_rank` /
+   `global_box_id` explicites par patch (aujourd'hui dans `DistributionMapping` + indice `BoxArray`),
+   et la dé-réplication seulement si un jour le niveau de base devient gros.
 2. **Moteur AMR unifié.** Entrée unifiée faite : `advance_amr(m, LevelHierarchy&, dt)` + le
    type `LevelHierarchy`, vérifiée façade-fidèle en **2 et 3 niveaux** (`maxdiff = 0` vs l'appel
    direct, dérive masse `< 1e-12`) et conservatif (`test_advance_amr`). Promotion des rôles en

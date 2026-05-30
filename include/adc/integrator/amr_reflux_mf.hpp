@@ -484,9 +484,15 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   // l'identite et c'est bit a bit identique au direct (0 + moyenne = moyenne exactement ;
   // avance + correction). Cout : deux buffers NX*NY*nc par rang (replication grossiere).
   device_fence();
-  const Box2D cdom{{0, 0}, {NX - 1, NY - 1}};
-  FluxRegister avg(cdom, nc);  // moyenne descendante (ecrasement des cellules couvertes)
-  FluxRegister ref(cdom, nc);  // reflux (addition aux cellules bordantes)
+  // registre restreint a l'INTERFACE coarse-fine (boite englobante des empreintes fines,
+  // crue de 1 pour les cellules bordantes du reflux, clampee au domaine) : le all_reduce du
+  // gather passe de O(NX*NY) a O(interface). Bit-identique : les cellules hors interface
+  // etaient nulles (non couvertes, sans face), sautees a l'application.
+  const Box2D fpc = coarsen(Uf.box_array(), 2).bounding_box();
+  const Box2D rbox{{std::max(fpc.lo[0] - 1, 0), std::max(fpc.lo[1] - 1, 0)},
+                   {std::min(fpc.hi[0] + 1, NX - 1), std::min(fpc.hi[1] + 1, NY - 1)}};
+  FluxRegister avg(rbox, nc);  // moyenne descendante (ecrasement des cellules couvertes)
+  FluxRegister ref(rbox, nc);  // reflux (addition aux cellules bordantes)
   for (int li = 0; li < Uf.local_size(); ++li) {
     const ConstArray4 f = Uf.fab(li).const_array();
     Reg& g = regs[li];
@@ -516,11 +522,13 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     Array4 c = Uc.fab(0).array();
     const Box2D cb = Uc.box(0);
     for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
-      for (int I = cb.lo[0]; I <= cb.hi[0]; ++I)
+      for (int I = cb.lo[0]; I <= cb.hi[0]; ++I) {
+        if (!ref.in(I, J)) continue;  // hors interface : ni moyenne ni reflux (etait 0)
         for (int k = 0; k < nc; ++k) {
           if (covered(I, J)) c(I, J, k) = avg.at(I, J, k);  // moyenne descendante
           c(I, J, k) += ref.at(I, J, k);                    // reflux (0 si pas de face)
         }
+      }
   }
 }
 
@@ -825,7 +833,12 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   // parent etant reparti, chaque cellule n'a qu'un proprietaire : pas de double comptage).
   // En serie all_reduce est l'identite et l'application directe -> bit a bit identique.
   device_fence();
-  FluxRegister ref(Box2D{{0, 0}, {NX - 1, NY - 1}}, nc);  // reflux N-niveaux (grille grossiere)
+  // registre restreint a l'INTERFACE : boite englobante des empreintes fines (coarsen du
+  // niveau lev+1), crue de 1, clampee au niveau lev. all_reduce O(interface), bit-identique.
+  const Box2D fpcn = coarsen(L[lev + 1].U.box_array(), 2).bounding_box();
+  const Box2D rbox{{std::max(fpcn.lo[0] - 1, 0), std::max(fpcn.lo[1] - 1, 0)},
+                   {std::min(fpcn.hi[0] + 1, NX - 1), std::min(fpcn.hi[1] + 1, NY - 1)}};
+  FluxRegister ref(rbox, nc);  // reflux N-niveaux (interface)
   for (int lc = 0; lc < static_cast<int>(regs.size()); ++lc) {
     RegMP& g = regs[lc];
     for (int J = g.J0; J <= g.J1; ++J)
@@ -848,8 +861,10 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     Array4 c = lv.U.fab(pb).array();
     const Box2D pbx = lv.U.box(pb);
     for (int J = pbx.lo[1]; J <= pbx.hi[1]; ++J)
-      for (int I = pbx.lo[0]; I <= pbx.hi[0]; ++I)
+      for (int I = pbx.lo[0]; I <= pbx.hi[0]; ++I) {
+        if (!ref.in(I, J)) continue;  // hors interface : reflux nul
         for (int k = 0; k < nc; ++k) c(I, J, k) += ref.at(I, J, k);
+      }
   }
 }
 
