@@ -282,22 +282,25 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui :
-- Tests : 48/48 CPU serie (Eigen inclus) ; 48/48 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
+- Tests : 49/49 CPU serie (Eigen inclus) ; 49/49 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
 - Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
   (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
   conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`) ; reflux multipatch 2-niveaux
   DISTRIBUE (`test_mpi_amr_multipatch`, np=1/2/4 a `0` exact).
 - Physique : Jeans 0.1%, Bohm-Gross 0.1%, dispersion deux-fluides 3.1%, cyclotron 0.00%.
+- Numerique : ordre de convergence du Laplacien 5 points mesure (`test_poisson_convergence`,
+  L2 et Linf a l'ordre 2.00, Dirichlet et periodique) ; nullspace periodique (second membre
+  a moyenne nulle, jauge fixee) ; ordre MUSCL ~2 / Rusanov ~1 (`test_muscl_convergence`).
 - GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4/7.
 
-Manque (cible, voir [ROADMAP.md](ROADMAP.md)) : une vraie suite numerique, pas seulement du
-bit-identique :
+Manque (cible, voir [ROADMAP.md](ROADMAP.md)) : etendre la suite manufacturee a l'hyperbolique
+2D et au couple Euler-Poisson :
 
 ```
-solutions manufacturees 1D/2D + ordre de convergence L1/L2/Linf
-conservation de masse sous regrid ; conservation du flux coarse-fine
-nullspace de Poisson periodique ; Gauss discret div(E) = rho
-limite asymptotique AP ; invariants diocotron (masse, energie, moment, enstrophie)
+solutions manufacturees Euler / Euler-Poisson + ordre L1/L2/Linf
+ordre de la conservation du flux coarse-fine sous AMR
+Gauss discret div(E) = rho ; limite asymptotique AP quantifiee
+invariants diocotron (energie, moment, enstrophie au-dela de la masse)
 ```
 
 ## 12. Comparaison AMReX
