@@ -18,6 +18,7 @@ animations sont pré-générées sous `docs/` ; voir `00_install.md` pour les re
 | 07 | [Champ magnétique : rotation cyclotron](07_magnetic.md) | force de Lorentz magnétique, rotation exacte, splitting de Strang, fréquence cyclotron |
 | 08 | [Backends : OpenMP, MPI, GPU](08_backends.md) | le seam `for_each_cell`, déterminisme thread-count, bit-identité MPI, portage Kokkos GH200 |
 | 09 | [Euler-Poisson : gravité ou plasma](09_euler_poisson.md) | couplage hyperbolique-elliptique, dualité de signe, Jeans vs Bohm-Gross, effondrement vs explosion de Coulomb |
+| 10 | [Reproduire le papier diocotron](10_diocotron_reproduction.md) | objectif de stage (arXiv:2510.11808), M1 à M2b, Poisson multi-niveau, convergence et payoff AMR chiffré (~43 % des cellules) |
 
 ## Tutoriels exécutables
 

@@ -89,6 +89,9 @@ montre le passage du régime linéaire au régime non linéaire.
   ([04_amr_multilevel.md](04_amr_multilevel.md)).
 - `examples/diocotron_multipatch.cpp` : AMR multi-patch + regrid dynamique
   ([05_amr_multipatch.md](05_amr_multipatch.md)).
+- `examples/diocotron_column_amr.cpp` : colonne du papier (arXiv:2510.11808) sur AMR, avec
+  Poisson multi-niveau. C'est l'objectif du stage, détaillé pas à pas dans
+  [10_diocotron_reproduction.md](10_diocotron_reproduction.md).
 
 ## Pièges
 

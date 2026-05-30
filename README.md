@@ -204,7 +204,8 @@ docs/          ARCHITECTURE.md, PERFORMANCE.md, animations.
 
 ## Validation
 
-- **54/54** tests C++ (serie), idem OpenMP ; **+9** MPI (`mpirun -np 4`, bit-identique a np=1/2/4) ; **+1** HDF5 ; bindings Python verts.
+- **59/59** tests C++ (serie), idem OpenMP ; **+9** MPI (`mpirun -np 4`, bit-identique a np=1/2/4) ; **+1** HDF5 ; bindings Python verts.
 - **GPU GH200** (CUDA 12.6) : advection, multigrille, pas couple Euler-Poisson, deux-fluides AP + `libadc` compilee GPU, tous **bit-identiques au CPU**.
 - **AMR** : reflux 2-niveaux / N-niveaux / multi-patch coverage-aware, tous prouves **bit-identiques** a la reference, conservation a l'arrondi (5.55e-16) ; clustering Berger-Rigoutsos branche. Le demo couple `diocotron_multipatch` (Poisson grossier + reflux multi-patch) re-cluster ses patchs a la volee (`docs/anim_diocotron_multipatch.gif`) en conservant la masse a `~2e-15` sur tout le run.
+- **Reproduction papier diocotron** (arXiv:2510.11808, objectif de stage) : la colonne sur AMR avec Poisson multi-niveau **egale l'uniforme a resolution effective egale pour ~43 % des cellules** (taux mode 4 `0.526`/`0.563` a 256/320 effectif, identiques a l'uniforme). Detail : [tutorials/10_diocotron_reproduction.md](tutorials/10_diocotron_reproduction.md).
 - **Deux-fluides AP** : dispersion isotrope (3.1%), borne + quasi-neutre a `omega_pe = 1e3` (`dt*omega_pe = 5`) la ou l'explicite explose.
