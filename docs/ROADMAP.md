@@ -182,8 +182,33 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
   `m* = h cot(theta/2) (Ey, -Ex)` préservé avec rayon de giration constant (pas de croissance
   séculaire de l'énergie). `test_two_fluid_ap_amplitude` (B activé) valide le push dans la pile
   AP self-consistante.
-- Reste : reformulation AP tensorielle sous champ fort, reproduction d'un benchmark Hoffart
-  précis.
+- Reste : reformulation AP tensorielle sous champ fort.
+
+### Reproduction Hoffart (arXiv:2510.11808) : objectif du stage
+
+Le papier (Euler-Poisson magnétique, structure-preserving FEM) valide en Section 5 l'instabilité
+**diocotron** par ses taux de croissance, dans la **limite de dérive magnétique** (eq 2.7 :
+`v_dr = -∇φ×Ω/|Ω|²`, `∂tρ + ∇·(ρ v_dr) = 0`, `ωd = ρα/|Ω| = ωp²/ωc`). Cette limite EST le modèle
+`Diocotron` de adc_cpp. Aucune AMR dans le papier : l'objectif est de reproduire avec NOTRE solveur
+puis d'y ajouter notre AMR, puis SAMRAI.
+
+- **M1 (en cours) : taux de croissance numérique vs analytique.** Pipeline construit et validé.
+  L'analytique (`diocotron_growth.hpp`, valeurs propres de Petri/Davidson-Felice) redonne déjà les
+  taux du papier (`γ₃≈0.772, γ₄≈0.911, γ₅≈0.683`, pic au mode 4). La simu non-linéaire
+  (`diocotron_column`, géométrie `0.15:0.20:0.40 = 6:8:16`) reproduit **qualitativement**
+  l'instabilité mode 4 (croissance linéaire puis saturation). `scripts/validate_diocotron_growth.py`
+  ajuste le taux numérique sur la phase linéaire et le normalise par `ωD = ρ̄/(2π)`. Étude de
+  résolution (`docs/fig_diocotron_reproduction.png`) : `γ_norm = 0.52 → 0.54 → 0.55` à `n =
+  128/192/256`, croissance monotone vers `0.911` mais **limitée par la diffusion numérique du bord
+  d'anneau** (anneau fin de 6 à 13 cellules). Conclusion chiffrée : sur grille uniforme, atteindre
+  `0.911` demande une très haute résolution -> motive directement l'AMR (M2).
+- **M2 : avec notre AMR.** Raffiner le bord de l'anneau (`AmrCouplerMP`, déjà distribué/testé) pour
+  garder le profil net et récupérer le taux analytique à coût réduit. C'est le « intégrer notre AMR »
+  de l'objectif, et la démonstration de pourquoi l'AMR compte sur ce cas.
+- **M3 : système magnétique complet (eq 2.4).** Au-delà de la limite de dérive : Euler+énergie +
+  Poisson + Lorentz `m×Ω` (push de Boris déjà en place) + splitting d'opérateurs, pour reproduire la
+  *méthode* du papier à travers les 12 ordres de grandeur d'échelles de temps.
+- **M4 : SAMRAI.** Porter le diocotron sur l'AMR de SAMRAI (FetchContent + adaptateur).
 
 ### Performance
 
