@@ -318,6 +318,32 @@ inline void fill_periodic_local(MultiFab& mf, const Box2D& dom) {
   }
 }
 
+// FluxRegister (revue, point 2 : role promu en type). Registre grossier a indexation GLOBALE
+// sur une REGION (box, avec origine), pour remonter average_down (ecrasement des cellules
+// couvertes, set) et reflux (addition aux cellules bordantes, add borne) a travers les rangs.
+// Chaque rang remplit ses contributions LOCALES (0 ailleurs), gather() les somme par
+// all_reduce_sum_inplace, puis chaque rang lit le total via at(). En serie all_reduce est
+// l'identite -> bit a bit identique. Region a origine (0,0) = grille grossiere pleine ; region
+// = boite englobante = chemin average_down multi-box. Memes formules d'index qu'avant.
+struct FluxRegister {
+  int I0, J0, NX, NY, nc;
+  std::vector<Real> buf;
+  FluxRegister(const Box2D& region, int ncomp)
+      : I0(region.lo[0]), J0(region.lo[1]),
+        NX(region.hi[0] - region.lo[0] + 1), NY(region.hi[1] - region.lo[1] + 1), nc(ncomp),
+        buf(static_cast<std::size_t>(NX) * NY * ncomp, Real(0)) {}
+  std::size_t idx(int I, int J, int k) const {
+    return (static_cast<std::size_t>(J - J0) * NX + (I - I0)) * nc + k;
+  }
+  bool in(int I, int J) const { return I >= I0 && I < I0 + NX && J >= J0 && J < J0 + NY; }
+  void set(int I, int J, int k, Real v) { buf[idx(I, J, k)] = v; }  // ecrasement (average_down)
+  void add(int I, int J, int k, Real v) {                          // addition bordante (reflux)
+    if (in(I, J)) buf[idx(I, J, k)] += v;
+  }
+  Real at(int I, int J, int k) const { return buf[idx(I, J, k)]; }
+  void gather() { all_reduce_sum_inplace(buf.data(), static_cast<int>(buf.size())); }
+};
+
 // Pas 2-niveaux conservatif, niveau fin MULTI-BOX. Uc : grossier mono-box (periodique).
 // Uf : MultiFab a N boxes fines (ratio 2, strictement interieures, alignees grossier).
 //
@@ -438,45 +464,42 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   // l'identite et c'est bit a bit identique au direct (0 + moyenne = moyenne exactement ;
   // avance + correction). Cout : deux buffers NX*NY*nc par rang (replication grossiere).
   device_fence();
-  const std::size_t N = static_cast<std::size_t>(NX) * NY * nc;
-  std::vector<Real> avg(N, Real(0)), ref(N, Real(0));
-  auto idx = [&](int I, int J, int k) { return (static_cast<std::size_t>(J) * NX + I) * nc + k; };
-  auto radd = [&](int I, int J, int k, Real v) {
-    if (I >= 0 && I < NX && J >= 0 && J < NY) ref[idx(I, J, k)] += v;
-  };
+  const Box2D cdom{{0, 0}, {NX - 1, NY - 1}};
+  FluxRegister avg(cdom, nc);  // moyenne descendante (ecrasement des cellules couvertes)
+  FluxRegister ref(cdom, nc);  // reflux (addition aux cellules bordantes)
   for (int li = 0; li < Uf.local_size(); ++li) {
     const ConstArray4 f = Uf.fab(li).const_array();
     Reg& g = regs[li];
     for (int J = g.J0; J <= g.J1; ++J)
       for (int I = g.I0; I <= g.I1; ++I)
         for (int k = 0; k < nc; ++k)
-          avg[idx(I, J, k)] = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
-                                            f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
+          avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                         f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
     for (int J = g.J0; J <= g.J1; ++J)
       for (int k = 0; k < nc; ++k) {
         if (!covered(g.I0 - 1, J))
-          radd(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc);
+          ref.add(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc);
         if (!covered(g.I1 + 1, J))
-          radd(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc);
+          ref.add(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc);
       }
     for (int I = g.I0; I <= g.I1; ++I)
       for (int k = 0; k < nc; ++k) {
         if (!covered(I, g.J0 - 1))
-          radd(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc);
+          ref.add(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc);
         if (!covered(I, g.J1 + 1))
-          radd(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc);
+          ref.add(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc);
       }
   }
-  all_reduce_sum_inplace(avg.data(), static_cast<int>(N));
-  all_reduce_sum_inplace(ref.data(), static_cast<int>(N));
+  avg.gather();
+  ref.gather();
   if (Uc.local_size() > 0) {  // chaque rang detenant une copie du grossier l'applique
     Array4 c = Uc.fab(0).array();
     const Box2D cb = Uc.box(0);
     for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
       for (int I = cb.lo[0]; I <= cb.hi[0]; ++I)
         for (int k = 0; k < nc; ++k) {
-          if (covered(I, J)) c(I, J, k) = avg[idx(I, J, k)];  // moyenne descendante
-          c(I, J, k) += ref[idx(I, J, k)];                    // reflux (0 si pas de face)
+          if (covered(I, J)) c(I, J, k) = avg.at(I, J, k);  // moyenne descendante
+          c(I, J, k) += ref.at(I, J, k);                    // reflux (0 si pas de face)
         }
   }
 }
@@ -594,11 +617,7 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
                                    {std::max(bb.hi[0], cba[g].hi[0]), std::max(bb.hi[1], cba[g].hi[1])}};
   if (bb.empty()) { all_reduce_sum_inplace(nullptr, 0); return; }  // collective appariee a vide
   const int BX = bb.nx(), BY = bb.ny();
-  auto idx = [&](int I, int J, int k) {
-    return ((static_cast<std::size_t>(J - bb.lo[1]) * BX) + (I - bb.lo[0])) * nc + k;
-  };
-  const std::size_t N = static_cast<std::size_t>(BX) * BY * nc;
-  std::vector<Real> avg(N, Real(0));
+  FluxRegister avg(bb, nc);  // moyenne descendante multi-box (region = boite englobante)
   // couverture GLOBALE (toutes les empreintes enfant) : seules ces cellules sont ecrasees ;
   // la boite englobante peut contenir des trous entre patchs disjoints qu'il ne faut PAS ecraser.
   std::vector<char> cov(static_cast<std::size_t>(BX) * BY, 0);
@@ -620,17 +639,17 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
     for (int J = J0; J <= J1; ++J)
       for (int I = I0; I <= I1; ++I)
         for (int k = 0; k < nc; ++k)
-          avg[idx(I, J, k)] = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
-                                            f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
+          avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                         f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
   }
-  all_reduce_sum_inplace(avg.data(), static_cast<int>(N));
+  avg.gather();
   for (int pb = 0; pb < Uc.local_size(); ++pb) {
     Array4 c = Uc.fab(pb).array();
     const Box2D inter = Uc.box(pb).intersect(bb);
     for (int J = inter.lo[1]; J <= inter.hi[1]; ++J)
       for (int I = inter.lo[0]; I <= inter.hi[0]; ++I)
         if (covered(I, J))
-          for (int k = 0; k < nc; ++k) c(I, J, k) = avg[idx(I, J, k)];
+          for (int k = 0; k < nc; ++k) c(I, J, k) = avg.at(I, J, k);
   }
 }
 
@@ -799,36 +818,31 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   // parent etant reparti, chaque cellule n'a qu'un proprietaire : pas de double comptage).
   // En serie all_reduce est l'identite et l'application directe -> bit a bit identique.
   device_fence();
-  const std::size_t Nref = static_cast<std::size_t>(NX) * NY * nc;
-  std::vector<Real> ref(Nref, Real(0));
-  auto idx = [&](int I, int J, int k) { return (static_cast<std::size_t>(J) * NX + I) * nc + k; };
-  auto radd = [&](int I, int J, int k, Real v) {
-    if (I >= 0 && I < NX && J >= 0 && J < NY) ref[idx(I, J, k)] += v;
-  };
+  FluxRegister ref(Box2D{{0, 0}, {NX - 1, NY - 1}}, nc);  // reflux N-niveaux (grille grossiere)
   for (int lc = 0; lc < static_cast<int>(regs.size()); ++lc) {
     RegMP& g = regs[lc];
     for (int J = g.J0; J <= g.J1; ++J)
       for (int k = 0; k < nc; ++k) {
         if (!covered(g.I0 - 1, J))
-          radd(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / lv.dx);
+          ref.add(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / lv.dx);
         if (!covered(g.I1 + 1, J))
-          radd(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / lv.dx);
+          ref.add(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / lv.dx);
       }
     for (int I = g.I0; I <= g.I1; ++I)
       for (int k = 0; k < nc; ++k) {
         if (!covered(I, g.J0 - 1))
-          radd(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / lv.dy);
+          ref.add(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / lv.dy);
         if (!covered(I, g.J1 + 1))
-          radd(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / lv.dy);
+          ref.add(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / lv.dy);
       }
   }
-  all_reduce_sum_inplace(ref.data(), static_cast<int>(Nref));
+  ref.gather();
   for (int pb = 0; pb < lv.U.local_size(); ++pb) {  // application aux boxes parentes locales
     Array4 c = lv.U.fab(pb).array();
     const Box2D pbx = lv.U.box(pb);
     for (int J = pbx.lo[1]; J <= pbx.hi[1]; ++J)
       for (int I = pbx.lo[0]; I <= pbx.hi[0]; ++I)
-        for (int k = 0; k < nc; ++k) c(I, J, k) += ref[idx(I, J, k)];
+        for (int k = 0; k < nc; ++k) c(I, J, k) += ref.at(I, J, k);
   }
 }
 

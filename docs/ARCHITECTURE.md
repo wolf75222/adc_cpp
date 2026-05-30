@@ -265,16 +265,18 @@ conservatifs.
 `subcycle_level_mp` encodent le cas dans le NOM. Entree unifiee FAITE : `advance_amr(m,
 LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom + periodicite).
 Verifie facade-fidele en **2 ET 3 niveaux** (`test_advance_amr`, `maxdiff = 0` vs l'appel
-direct, derive masse `< 1e-12`) et conservatif. Le vocabulaire de la revue est pose : chaque
-role est NOMME et mappe sur le code existant (`amr_reflux_mf.hpp`), `OwnershipPolicy` est un
-alias reel de `DistributionMapping`. Reste a PROMOUVOIR ces roles en types de premier plan
-(extraction depuis le coeur conservatif, a faire bit-identique) et a y replier la famille de pas.
+direct, derive masse `< 1e-12`) et conservatif. La PROMOTION des roles en types a commence :
+`OwnershipPolicy` est un alias reel de `DistributionMapping` ; `FluxRegister` est un VRAI TYPE
+(registre grossier indexe global sur une region : `set` ecrase, `add` accumule borne, `gather`
+fait l'`all_reduce`), substitue aux quatre buffers manuels du reflux (2-niveaux avg/ref,
+N-niveaux avg/ref) a l'identique (np=1/2/4 `maxdiff = 0`), contrat fige par `test_flux_register`.
+Les autres roles restent nommes-mais-inlines, a extraire de meme.
 
 ```
-LevelHierarchy [fait, type]   OwnershipPolicy [fait, alias = DistributionMapping]
+LevelHierarchy [fait, type]   OwnershipPolicy [fait, alias]   FluxRegister [fait, type]
 PatchRange = AmrLevelMP   CoarseFineInterface = masque + routage reflux
-FluxRegister = buffers avg/ref + all_reduce   SubcyclingSchedule = recursion Berger-Oliger
-RegridPolicy = amr_regrid_finest (BR)         // noms poses ; extraction en types : reste
+SubcyclingSchedule = recursion Berger-Oliger   RegridPolicy = amr_regrid_finest (BR)
+// roles restants : nommes, encore inlines dans subcycle_level_mp ; extraction en types : reste
 
 advance_amr(m, hierarchy, dt);   // entree unifiee ; reste a absorber la famille amr_step_*
 ```

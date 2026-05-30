@@ -83,12 +83,14 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    `global_box_id`, interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
 2. **Moteur AMR unifié.** Entrée unifiée faite : `advance_amr(m, LevelHierarchy&, dt)` + le
    type `LevelHierarchy`, vérifiée façade-fidèle en **2 et 3 niveaux** (`maxdiff = 0` vs l'appel
-   direct, dérive masse `< 1e-12`) et conservatif (`test_advance_amr`). Vocabulaire de la revue
-   posé : `OwnershipPolicy` est un alias réel de `DistributionMapping` ; `PatchRange`,
-   `CoarseFineInterface`, `FluxRegister`, `SubcyclingSchedule`, `RegridPolicy` sont nommés et
-   mappés sur le code existant. Reste : promouvoir ces rôles en types de premier plan
-   (extraction depuis le cœur conservatif `subcycle_level_mp`, à faire bit-identique) et y
-   replier la famille `amr_step_*` (qui encode le cas dans le nom).
+   direct, dérive masse `< 1e-12`) et conservatif (`test_advance_amr`). Promotion des rôles en
+   types commencée : `OwnershipPolicy` est un alias réel de `DistributionMapping` ;
+   `FluxRegister` est un VRAI TYPE (registre grossier indexé global sur une région : `set`
+   écrase, `add` accumule borné, `gather` fait l'`all_reduce`), substitué aux quatre buffers
+   manuels du reflux (2-niveaux avg/ref, N-niveaux avg/ref) bit-identique (np=1/2/4 `maxdiff=0`),
+   contrat figé par `test_flux_register`. Reste : promouvoir les rôles restants (`PatchRange`,
+   `CoarseFineInterface`, `SubcyclingSchedule`, `RegridPolicy`, encore inlines dans
+   `subcycle_level_mp`) et y replier la famille `amr_step_*` (qui encode le cas dans le nom).
 3. **Découper l'elliptique.** Avancé : l'`EllipticOperator` existe déjà séparé
    (`poisson_operator.hpp` : `apply_laplacian`, `poisson_residual`, lisseur) ; le
    `LinearSolver` est le concept `EllipticSolver` (MG, FFT) ; l'identité MG = FFT est rendue
