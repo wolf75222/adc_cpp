@@ -99,9 +99,25 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (`operator==` strict, pas une tolérance). Reste hors-périmètre tant qu'on veut le bit-identique :
    recâbler les sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`,
    `two_fluid_ap`), division qui peut différer au dernier bit de la forme multiplicative `*cx`.
-4. **API mémoire explicite.** Remplacer la discipline manuelle `device_fence()` par
-   `device_reduce` / `device_norm_inf` / `sync_host` / `sync_device` ; faire de `sum` et
-   `norm_inf` de vraies réductions device (pas des boucles hôte protégées par fence).
+4. **API mémoire explicite.** Réductions `sum` / `norm_inf` faites (le reste de l'API
+   `sync_host` / `sync_device` reste en file). Le seam `for_each.hpp` porte désormais
+   `for_each_cell_reduce_sum` et `for_each_cell_reduce_max`, à côté de `for_each_cell` et
+   `device_fence()` : sous Kokkos une vraie `parallel_reduce` (MDRangePolicy, `Kokkos::Sum`
+   / `Kokkos::Max`, bloquante côté hôte donc sans `device_fence()` préalable) ; en série et
+   sous OpenMP une boucle hôte séquentielle. `sum` et `norm_inf` (multifab.hpp / mf_arith.hpp)
+   appellent ce seam par fab local puis agrègent ; les deux `device_fence()` qui protégeaient
+   leur boucle hôte ont disparu (absorbés par la réduction), les autres `device_fence()` (accès
+   hôte ailleurs) restent.
+   Conséquence FP : `sum` n'est plus bit-identique à la boucle hôte SOUS KOKKOS (la somme par
+   tuile réassocie l'addition flottante, non associative en IEEE754). En série et sous OpenMP
+   `sum` reste exact : on garde volontairement la boucle hôte séquentielle pour OpenMP, car
+   `reduction(+:)` réordonnerait la somme par thread et casserait la garantie « OpenMP identique
+   à la série » du repo. `norm_inf` reste EXACT partout (un max de valeurs absolues, sans
+   arrondi et invariant par réordonnancement). `Kokkos::Sum` est déterministe par tuile (pas
+   d'atomics flottants), donc deux `sum` sur des données inchangées rendent le même bit
+   (idempotence, clé pour `test_fill_boundary/sum_unchanged`). Contrat verrouillé par
+   `test_reduce` (sum_constant exact, sum varié en écart relatif < 1e-10, norm_inf strict,
+   idempotence).
 5. **Séparer les trois familles de ghosts** en briques nommées testables. Largement fait :
    `fill_physical_bc` (BoundaryCondition, testé seul `test_physical_bc`), `fill_boundary`
    (GhostExchange, testé `test_mpi_fillboundary`), `mf_fill_fine_ghosts_*`

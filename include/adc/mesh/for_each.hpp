@@ -1,6 +1,9 @@
 #pragma once
 
+#include <adc/core/types.hpp>
 #include <adc/mesh/box2d.hpp>
+
+#include <algorithm>
 
 #ifdef ADC_HAS_KOKKOS
 #include <Kokkos_Core.hpp>
@@ -57,6 +60,74 @@ void for_each_cell(const Box2D& b, F f) {
 #else
   for (int j = b.lo[1]; j <= b.hi[1]; ++j)
     for (int i = b.lo[0]; i <= b.hi[0]; ++i) f(i, j);
+#endif
+}
+
+// Reductions device : le pendant reducteur de for_each_cell. Memes contraintes
+// sur le fonctor (POD device-callable, pris par valeur, capture un ConstArray4,
+// jamais le Fab) ; il recoit (i, j) et rend la valeur a accumuler. Le seam porte
+// l'ordonnancement device : sous Kokkos le scalaire est pret au retour sans
+// device_fence() prealable (parallel_reduce est bloquant cote hote et s'ordonne
+// apres les parallel_for deja soumis dans le meme espace).
+//
+// CHOIX FP IMPORTANT. Une vraie reduction parallele reassocie l'addition
+// flottante (non associative en IEEE754) : le resultat de la somme depend de
+// l'ordre, donc d'un ordre device il differe de la boucle hote au dernier bit.
+//   - Kokkos : Kokkos::Sum / Kokkos::Max, reduction par tuile DETERMINISTE (pas
+//     d'atomics flottants), donc deux appels sur des donnees identiques rendent
+//     exactement le meme bit -> l'idempotence (sum_unchanged) tient.
+//   - OpenMP : on NE prend PAS reduction(+:acc). Le repo garantit OpenMP
+//     bit-identique a la serie ; or reduction(+:) reordonne la somme par thread
+//     et casserait cette garantie. On garde donc la boucle hote sequentielle,
+//     identique a la serie, pour OpenMP comme pour le backend serie.
+//   - Serie : boucle hote sequentielle, SEUL chemin bit-identique a l'ancien sum.
+// Bilan : sum n'est plus bit-identique a la boucle hote UNIQUEMENT sous Kokkos ;
+// serie et OpenMP restent exacts. norm_inf (un max) est exact partout (max et
+// fabs sont sans arrondi et associatifs/commutatifs en IEEE754).
+
+template <class F>
+Real for_each_cell_reduce_sum(const Box2D& b, F f) {
+#if defined(ADC_HAS_KOKKOS)
+  Real result = 0;
+  Kokkos::parallel_reduce(
+      "adc_reduce_sum",
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+      KOKKOS_LAMBDA(int i, int j, Real& acc) { acc += f(i, j); },
+      Kokkos::Sum<Real>{result});
+  return result;  // bloquant cote hote : valide au retour, sans device_fence()
+#else
+  // Serie ET OpenMP : meme ordre lexicographique que l'ancien sum (j externe, i
+  // interne). Bit-identique a la boucle hote, donc OpenMP reste identique a la
+  // serie (pas de reduction(+:) qui reordonnerait la somme par thread).
+  Real acc = 0;
+  for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+    for (int i = b.lo[0]; i <= b.hi[0]; ++i) acc += f(i, j);
+  return acc;
+#endif
+}
+
+template <class F>
+Real for_each_cell_reduce_max(const Box2D& b, F f) {
+#if defined(ADC_HAS_KOKKOS)
+  Real result = 0;
+  Kokkos::parallel_reduce(
+      "adc_reduce_max",
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+      KOKKOS_LAMBDA(int i, int j, Real& acc) {
+        const Real v = f(i, j);
+        if (v > acc) acc = v;
+      },
+      Kokkos::Max<Real>{result});
+  return result;  // max exact (associatif/commutatif IEEE754), pas de fence
+#else
+  // Serie ET OpenMP : max sequentiel. Exact dans tous les cas (max invariant par
+  // reordonnancement IEEE754), donc bit-identique a l'ancien norm_inf partout.
+  Real acc = 0;
+  for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+    for (int i = b.lo[0]; i <= b.hi[0]; ++i) acc = std::max(acc, f(i, j));
+  return acc;
 #endif
 }
 

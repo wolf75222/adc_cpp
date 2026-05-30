@@ -27,21 +27,25 @@ inline void saxpy(MultiFab& y, Real a, const MultiFab& x) {
   }
 }
 
-// norme infinie sur les cellules valides d'une composante
+// norme infinie sur les cellules valides d'une composante. Chaque fab local est
+// reduit par for_each_cell_reduce_max sur |f(i,j,comp)| (vraie reduction device
+// sous Kokkos, boucle hote en serie/OpenMP), agrege par max hote sur les fabs.
+//
+// Plus de device_fence() en tete : sous Kokkos parallel_reduce est bloquant et
+// absorbe la barriere. EXACT partout : max et fabs sont sans arrondi et le max
+// est associatif/commutatif en IEEE754, donc bit-identique a l'ancien norm_inf
+// quel que soit le backend (l'ordre de reduction ne change aucun bit).
 inline Real norm_inf(const MultiFab& mf, int comp = 0) {
-  device_fence();  // GPU : mf a pu etre ecrit par un kernel ; barriere avant
-                   // la reduction hote sur la memoire unifiee.
   Real m = 0;
   for (int li = 0; li < mf.local_size(); ++li) {
-    const Fab2D& f = mf.fab(li);
-    const Box2D b = f.box();
-    for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
-        const Real a = f(i, j, comp);
-        m = std::max(m, a < 0 ? -a : a);
-      }
+    const ConstArray4 a = mf.fab(li).const_array();
+    m = std::max(m, for_each_cell_reduce_max(
+                        mf.box(li), [a, comp] ADC_HD(int i, int j) {
+                          const Real v = a(i, j, comp);
+                          return v < 0 ? -v : v;
+                        }));
   }
-  return m;  // all-reduce max MPI plus tard
+  return m;  // all-reduce max MPI plus tard (iso-comportement, non ajoute ici)
 }
 
 // z <- a x + b y

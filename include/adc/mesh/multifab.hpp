@@ -74,16 +74,21 @@ class MultiFab {
 };
 
 // Somme des cellules valides de la composante comp, reduite sur tous les rangs
-// (all-reduce). Chaque rang somme ses fabs locaux, puis MPI_Allreduce agrege ;
-// en serie all_reduce_sum est l'identite.
+// (all-reduce). Chaque fab local est reduit par for_each_cell_reduce_sum (vraie
+// reduction device sous Kokkos, boucle hote en serie/OpenMP), puis on agrege les
+// fabs locaux par somme hote (peu de fabs, ordre stable par rang) avant
+// MPI_Allreduce ; en serie all_reduce_sum est l'identite.
+//
+// Plus de device_fence() en tete : sous Kokkos parallel_reduce est bloquant cote
+// hote et absorbe la barriere. NOTE FP : sous Kokkos l'ordre de sommation par
+// tuile differe de la boucle hote ; sum n'est donc PLUS bit-identique a l'ancien
+// sum sur ce backend (ecart au dernier bit). En serie et OpenMP il reste exact.
 inline Real sum(const MultiFab& mf, int comp = 0) {
-  device_fence();  // GPU : barriere avant la reduction hote sur memoire unifiee
   Real s = 0;
   for (int li = 0; li < mf.local_size(); ++li) {
-    const Fab2D& f = mf.fab(li);
-    const Box2D b = f.box();
-    for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) s += f(i, j, comp);
+    const ConstArray4 a = mf.fab(li).const_array();
+    s += for_each_cell_reduce_sum(
+        mf.box(li), [a, comp] ADC_HD(int i, int j) { return a(i, j, comp); });
   }
   return static_cast<Real>(all_reduce_sum(static_cast<double>(s)));
 }
