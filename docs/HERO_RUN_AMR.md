@@ -96,11 +96,23 @@ buffer : copie device -> hôte -> all_reduce -> hôte -> device, avec `device_fe
 (c) le regrid (le tagging lit des données device ; choix : noyau de tag device +
 clustering hôte sur un `TagBox` rapatrié, le clustering étant bon marché).
 
-- **Livrable** : le hero-run AMR à grossier répliqué, sur GPU.
-- **Gate** : GPU bit-identique au CPU (checksum), masse conservée ; un run réel
-  sur 1 puis 4 GH200 d'un nœud `armgpu`.
-- **Risque** : MOYEN (les coutures GPU de l'AMR sont neuves, mais chaque kernel
-  est déjà `ADC_HD` et le pas uniforme tourne déjà sur GPU).
+DE-RISK LOCAL FAIT (sans matériel CUDA) : `examples/gpu/diocotron_amr_kokkos.cpp`
+exécute tout le pas AMR (coupleur : Poisson grossier + injection d'aux + reflux
+multi-patch coverage-aware + regrid Berger-Rigoutsos) SOUS LE SEAM KOKKOS, espace
+d'exécution hôte OpenMP. Le `for_each_cell` qui partira sur le GPU (espace Cuda sur
+GH200) est donc déjà exercé. Résultat BIT À BIT IDENTIQUE à la voie série (même
+`checksum`, même `derive_masse = 2.2e-15`, mêmes 4 patchs) : les noyaux AMR sont
+des `parallel_for` par cellule sans réduction de somme dans le chemin chaud (les
+réductions sont des `norm_inf` = max, exactement associatif), donc l'ordre
+d'exécution ne change pas le résultat. Reste STRICTEMENT ROMEO : la mémoire device
+réelle et le `parallel_copy` CUDA-aware entre fabs device de rangs différents.
+
+- **Livrable** : algorithme AMR prouvé correct sous le seam Kokkos (de-risk local
+  fait) ; reste le run CUDA réel + MPI CUDA-aware sur GH200.
+- **Gate ROMEO** : GPU bit-identique au CPU (checksum), masse conservée ; un run
+  réel sur 1 puis 4 GH200 d'un nœud `armgpu`.
+- **Risque** : MOYEN, abaissé par le de-risk local (le pas AMR sous le seam est
+  validé ; ne restent que les coutures device/CUDA-MPI).
 
 ### Étape 2 : dé-réplication du grossier (objectif B proprement dit)
 
