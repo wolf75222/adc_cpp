@@ -219,9 +219,13 @@ puis d'y ajouter notre AMR, puis SAMRAI.
 Hero run ROMEO (`romeo/`) : scripts SLURM prets pour le diocotron a grande echelle sur GH200,
 hybride **MPI + Kokkos/CUDA** (1 rang MPI par H100, les noyaux `for_each_cell` sur GPU ; les
 232 H100 multi-noeud par Infiniband). C'est le « full machine » reel sur `armgpu` (OpenMP+MPI
-est le mode CPU separe sur `x64cpu`). But : pousser la resolution assez haut que le taux de
-croissance atteigne 0.911 a pleine resolution. `diocotron_hero.sbatch` (run) +
-`diocotron_scaling.sbatch` (scaling fort/faible) + `romeo/README.md` (build + soumission).
+est le mode CPU separe sur `x64cpu`). **Grille UNIFORME, pas d'AMR** : le binaire `diocotron_mpi`
+utilise `SpectralCoupler` (Poisson FFT, bandes), donc force brute (pousser la resolution uniforme
+jusqu'a resoudre le bord d'anneau et atteindre 0.911). Un hero-run AMR DYNAMIQUE est un objectif
+distinct (convergence du reflux distribue fait + coupleur AMR porte multi-GPU + benchmark colonne,
+cf. M2) ; le run uniforme sert de reference chiffree pour mesurer le gain de l'AMR.
+`diocotron_hero.sbatch` (run) + `diocotron_scaling.sbatch` (scaling fort/faible) +
+`romeo/README.md` (build + soumission).
 
 ### Performance
 

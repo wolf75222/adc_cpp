@@ -60,14 +60,27 @@ Avant de soumettre, éditer dans les `.sbatch` :
   bon point de départ « ça calcule un certain temps » ; monter à 16384 pour saturer plus.
 - `--time`, `--mem` (par SERVEUR) : voir la doc ROMEO.
 
+## Ce hero-run est UNIFORME, pas AMR
+
+Important : le binaire `diocotron_mpi` repose sur `SpectralCoupler`, une **grille uniforme**
+périodique (Poisson spectral FFT, décomposition en bandes). **Aucun AMR, aucun regrid.** C'est
+la version FORCE BRUTE : on pousse la résolution uniforme assez haut pour résoudre le bord
+d'anneau. Elle utilise toute la machine (MPI + Kokkos/CUDA) mais pas l'adaptation de maillage.
+
+Un hero-run **AMR dynamique** est un objectif distinct (la convergence de plusieurs briques) :
+le reflux multi-patch distribué (fait, bit-identique np=1/2/4) + le coupleur AMR `AmrCouplerMP`
+porté multi-GPU + le benchmark colonne (paroi conductrice, cf. M2 dans `docs/ROADMAP.md`). Tant
+que ce n'est pas assemblé, le hero-run reste uniforme.
+
 ## Le payoff scientifique
 
 Sur grille uniforme à `n <= 256` (Mac, M1), le taux mesuré plafonne à ~60 % de l'analytique
 (`docs/fig_diocotron_reproduction.png`) : la diffusion numérique lisse le bord d'anneau fin.
 À `n = 8192+` sur les H100, le bord reste net sur des dizaines de cellules -> le taux doit
-converger vers `0.911` et reproduire fig 5.1-5.3 du papier à pleine résolution. C'est la
-démonstration « notre solveur reproduit le papier, à l'échelle ». L'étape d'après (notre AMR
-sur le bord) atteindra le même taux pour bien moins de cellules.
+converger vers `0.911` et reproduire fig 5.1-5.3 du papier à pleine résolution, par FORCE BRUTE.
+C'est la démonstration « notre solveur reproduit le papier, à l'échelle ». Un run AMR atteindrait
+le même taux pour bien moins de cellules : c'est l'intérêt, et le hero-run uniforme sert de
+référence chiffrée (cellules, temps) pour mesurer ce que l'AMR fait gagner.
 
 ## Pièges ROMEO (rappel)
 
