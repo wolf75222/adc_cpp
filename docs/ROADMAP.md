@@ -210,6 +210,13 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   *méthode* du papier à travers les 12 ordres de grandeur d'échelles de temps.
 - **M4 : SAMRAI.** Porter le diocotron sur l'AMR de SAMRAI (FetchContent + adaptateur).
 
+Hero run ROMEO (`romeo/`) : scripts SLURM prets pour le diocotron a grande echelle sur GH200,
+hybride **MPI + Kokkos/CUDA** (1 rang MPI par H100, les noyaux `for_each_cell` sur GPU ; les
+232 H100 multi-noeud par Infiniband). C'est le « full machine » reel sur `armgpu` (OpenMP+MPI
+est le mode CPU separe sur `x64cpu`). But : pousser la resolution assez haut que le taux de
+croissance atteigne 0.911 a pleine resolution. `diocotron_hero.sbatch` (run) +
+`diocotron_scaling.sbatch` (scaling fort/faible) + `romeo/README.md` (build + soumission).
+
 ### Performance
 
 - Région OpenMP consolidée au-dessus de la boucle de niveaux du multigrille (le seul levier
