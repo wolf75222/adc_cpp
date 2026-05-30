@@ -216,12 +216,24 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   `ml` (`diocotron_column_amr <out> <nc> <nsteps> <refine> <l> <ml>`) assemble une densité composite
   sur la grille fine (grossier prolongé + patchs fins écrasés), résout un `GeometricMG` fin dessus,
   puis restreint le potentiel vers le grossier (gradient pour `auxc`) et garde le gradient fin direct
-  (`auxf`). Résultat (mode 4, mêmes 16 392 cellules) : le taux remonte de `γ_norm = 0.38` à `0.42`,
-  vers l'uniforme fin (`0.50` à 192 = 36 864 cellules). HYPOTHÈSE CONFIRMÉE : le Poisson grossier
-  bridait bien le taux. L'AMR multi-niveau atteint donc 85 % du taux de l'uniforme-192 pour 44 % des
-  cellules. Le reste de l'écart à `0.50` puis à `0.911` est le **transport grossier hors patchs** plus
-  la résolution effective finie (limite de diffusion de M1) : il se referme en montant la base (la
-  cible du hero-run).
+  (`auxf`). À base 96 (mêmes 16 392 cellules) le taux remonte de `γ_norm = 0.38` à `0.42` : le Poisson
+  grossier bridait bien le taux. HYPOTHÈSE CONFIRMÉE.
+- **M2b-conv : convergence vérifiée par balayage de base** (`docs/fig_diocotron_ml_convergence.png`).
+  En montant la base (96 -> 128 -> 160, résolution effective au bord 192 -> 256 -> 320), l'AMR
+  multi-niveau converge vers l'uniforme à MÊME résolution effective, pour ~43 % des cellules :
+
+  | résolution effective | AMR `ml` (γ_norm / cellules) | uniforme (γ_norm / cellules) | cellules AMR/unif |
+  |---|---|---|---|
+  | 192 | 0.42 / 16 392 | 0.50 / 36 864 | 44 % |
+  | 256 | 0.526 / 28 352 | 0.526 / 65 536 | 43 % |
+  | 320 | 0.563 / 44 192 | 0.565 / 102 400 | 43 % |
+
+  À base >= 128 le taux AMR COÏNCIDE avec l'uniforme à résolution effective égale, pour moins de la
+  moitié du coût : le payoff de l'AMR chiffré (même physique, ~43 % des cellules). À base 96 l'AMR
+  reste sous l'uniforme-192 (transport grossier hors patchs encore limitant), puis rattrape. Les deux
+  courbes montent vers `0.911` (0.50 -> 0.53 -> 0.56) sans l'atteindre : la limite de diffusion de M1
+  demande une base bien plus haute, ce qui est exactement la cible du hero-run ROMEO (et l'AMR y
+  arrivera pour ~43 % des cellules de l'uniforme équivalent).
 - **M3 : système magnétique complet (eq 2.4).** Au-delà de la limite de dérive : Euler+énergie +
   Poisson + Lorentz `m×Ω` (push de Boris déjà en place) + splitting d'opérateurs, pour reproduire la
   *méthode* du papier à travers les 12 ordres de grandeur d'échelles de temps.
