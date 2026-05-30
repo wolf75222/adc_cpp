@@ -76,10 +76,11 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    parent->enfant et (2) échantillonnage du registre grossier par `parallel_copy` quand le
    parent est réparti (lecture locale quand il est répliqué) ; (3) `average_down` et (4) reflux
    par buffer grossier global + `all_reduce_sum_inplace`, appliqué aux boxes parentes locales ;
-   (5) couverture déjà globale. Reste : le coupleur `AmrCouplerMP` au-delà de 2 niveaux
-   distribués (son injection d'aux `inject_aux_mb` suppose encore le parent local) ; puis, cible
-   finale, chaque patch portant `owner_rank`, `global_box_id`, interfaces coarse-fine globales,
-   registre distribué, `load_balance` SFC.
+   (5) couverture déjà globale. Le coupleur `AmrCouplerMP` est lui aussi distribué : son
+   injection d'aux `coupler_inject_aux_mb` passe par `parallel_copy` quand le parent est réparti
+   (niveau 0 répliqué : lecture locale), vérifié contre l'analytique np=1/2/4 par
+   `test_mpi_coupler_inject`. Reste, cible finale : chaque patch portant `owner_rank`,
+   `global_box_id`, interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
 2. **Moteur AMR unifié.** Premier pas fait : l'entrée unifiée `advance_amr(m, LevelHierarchy&,
    dt)` + le type `LevelHierarchy` (vérifié façade-fidèle et conservatif, `test_advance_amr`).
    Reste : nommer les autres objets (`PatchRange`, `CoarseFineInterface`, `FluxRegister`,

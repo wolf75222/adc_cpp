@@ -36,20 +36,54 @@ namespace adc {
 
 namespace detail {
 // Primitive de couplage (pas de la policy) : injection piecewise-constante de aux
-// (3 comp) parent multi-box -> enfant multi-box. Free function a portee de namespace
-// (seam GPU). Corps deplace TEL QUEL.
-inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child) {
+// parent multi-box -> enfant multi-box (valides + ghosts). DISTRIBUE, meme schema que
+// mf_fill_fine_ghosts_mb. Deux cas de parent :
+//  - REPLIQUE (niveau 0, replicated_parent=true) : parent entierement local sur chaque rang,
+//    lecture directe via mf_find_box. C'est le grossier replique (dmap par-rang) : parallel_copy
+//    violerait l'hypothese de metadonnees repliquees. Chemin bit-identique a l'historique.
+//  - REPARTI (intermediaire, replicated_parent=false) : le parent peut etre sur un autre rang,
+//    on amene ses regions valides sur une grille enfant-coarsen LOCALE par parallel_copy, puis
+//    on injecte. Une cellule enfant hors couverture parente (box_array GLOBAL) est laissee
+//    intacte, comme le chemin replique (qui la sautait via mf_find_box < 0).
+// En serie les deux chemins sont identiques (parent local partout, parallel_copy = copie memoire).
+inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
+                                  bool replicated_parent = true) {
+  const int nc = child.ncomp();
+  if (replicated_parent) {
+    device_fence();
+    for (int lc = 0; lc < child.local_size(); ++lc) {
+      Array4 c = child.fab(lc).array();
+      const Box2D g = child.fab(lc).grown_box();
+      for (int j = g.lo[1]; j <= g.hi[1]; ++j)
+        for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
+          const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+          const int pb = mf_find_box(parent, ci, cj);
+          if (pb < 0) continue;
+          const ConstArray4 pp = parent.fab(pb).const_array();
+          for (int k = 0; k < nc; ++k) c(i, j, k) = pp(ci, cj, k);
+        }
+    }
+    return;
+  }
+  const BoxArray& pba = parent.box_array();  // GLOBAL : couverture independante du rang
+  auto covered = [&](int ci, int cj) {
+    for (int b = 0; b < pba.size(); ++b)
+      if (pba[b].contains(ci, cj)) return true;
+    return false;
+  };
+  const BoxArray ccoarse = coarsen_grown(child.box_array(), child.n_grow(), 2);
+  MultiFab Pc(ccoarse, child.dmap(), parent.ncomp(), 0);
+  parallel_copy(Pc, parent);  // regions parentes (depuis n'importe quel rang) -> grille locale
   device_fence();
   for (int lc = 0; lc < child.local_size(); ++lc) {
     Array4 c = child.fab(lc).array();
+    const ConstArray4 pp = Pc.fab(lc).const_array();
     const Box2D g = child.fab(lc).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
         const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
-        const int pb = mf_find_box(parent, ci, cj);
-        if (pb < 0) continue;
-        const ConstArray4 pp = parent.fab(pb).const_array();
-        for (int k = 0; k < 3; ++k) c(i, j, k) = pp(ci, cj, k);
+        if (!covered(ci, cj)) continue;  // hors couverture -> on laisse la valeur enfant
+        for (int k = 0; k < nc; ++k) c(i, j, k) = pp(ci, cj, k);
       }
   }
 }
@@ -94,8 +128,9 @@ class AmrCouplerMP {
         a0(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) / (2 * dy);
       }
     fill_boundary(stack_.aux(0), dom, Periodicity{true, true});
+    // parent aux(k-1) replique seulement au niveau 0 (grossier mono-box) ; au-dela, reparti.
     for (int k = 1; k < stack_.nlev(); ++k)
-      detail::coupler_inject_aux_mb(stack_.aux(k - 1), stack_.aux(k));
+      detail::coupler_inject_aux_mb(stack_.aux(k - 1), stack_.aux(k), /*replicated_parent=*/k == 1);
   }
 
   void update() { sync_down(); compute_aux(); }
