@@ -6,7 +6,7 @@
 #include <vector>
 
 // BoxArray : l'ensemble des boxes qui pavent un niveau (disjointes, couvrantes).
-// Equivalent maison du BoxArray d'AMReX. from_domain decoupe un domaine en
+// Equivalent du BoxArray d'AMReX. from_domain decoupe un domaine en
 // tuiles d'au plus max_grid_size par direction, reparties le plus egalement
 // possible (meilleur equilibrage que des chunks gloutons).
 

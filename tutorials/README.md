@@ -30,6 +30,6 @@ Les blocs C++ renvoient à des fichiers sous `examples/` ; les blocs Python impo
 module compilé `adc` (alias par défaut `adc`). Les figures citées vivent sous `docs/`
 (pré-générées). Le banc de mesure est `examples/bench_amr.cpp` (voir `08_backends.md`).
 
-L'écosystème : `adc_cpp` est un mini-AMReX écrit *from scratch* (sa propre pile MultiFab +
-seam), contrairement à `euler_cpp` / `advection_cpp` qui dépendent de `pde_core_cpp`. Le
+L'écosystème : `adc_cpp` porte sa propre pile AMR *from scratch* (MultiFab + seam),
+contrairement à `euler_cpp` / `advection_cpp` qui dépendent de `pde_core_cpp`. Le
 rationale est dans le README et `docs/ARCHITECTURE.md`.

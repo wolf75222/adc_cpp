@@ -1,7 +1,7 @@
 # Architecture de adc_cpp
 
-Solveur C++23 maison (inspire d'AMReX / Parthenon, ecrit from scratch) pour les
-systemes **hyperbolique-elliptique couples** sur **AMR**, concu des le depart pour
+Solveur C++23 pour les systemes **hyperbolique-elliptique couples** sur **AMR** (pile
+mesh ecrite from scratch), concu des le depart pour
 **OpenMP + MPI + Kokkos**, cible cluster **ROMEO** (GH200). Cas de validation fil
 rouge : l'instabilite **diocotron** (derive E x B), puis le **deux-fluides isotherme**
 (type Hoffart, arXiv:2510.11808).

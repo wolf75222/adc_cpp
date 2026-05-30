@@ -1,7 +1,7 @@
 # adc_cpp
 
-Solveur C++23 maison (mini-AMReX écrit *from scratch*) pour les systèmes
-hyperbolique-elliptique couplés sur AMR : seam de dispatch unique série /
+Solveur C++23 pour les systèmes hyperbolique-elliptique couplés sur AMR (pile mesh
+écrite *from scratch*) : seam de dispatch unique série /
 OpenMP / Kokkos (GPU GH200) / MPI, pile MultiFab + BoxArray + Geometry,
 AMR block-structured multi-niveaux et multi-patch (Berger-Rigoutsos, reflux
 coverage-aware), Poisson multigrille ET FFT spectrale, couplage diocotron

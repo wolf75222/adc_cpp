@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-// MultiFab : champ distribue, l'equivalent maison du MultiFab d'AMReX. Porte le
+// MultiFab : champ distribue, l'equivalent du MultiFab d'AMReX. Porte le
 // decoupage (BoxArray), la repartition (DistributionMapping), le nombre de
 // composantes et de ghosts, et n'alloue que les Fab2D possedes par ce rang.
 //

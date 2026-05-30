@@ -3,8 +3,8 @@
 #include <algorithm>
 
 // Box2D : l'espace d'indices entier d'une grille cartesienne 2D, cellule au
-// centre. C'est la brique de base du mini-AMReX maison, inspiree du Box
-// d'AMReX. Coins lo / hi inclusifs (convention AMReX). Pure arithmetique
+// centre. C'est la brique de base de la pile AMR, inspiree du Box d'AMReX.
+// Coins lo / hi inclusifs (convention AMReX). Pure arithmetique
 // entiere : aucune donnee, aucun parallelisme, entierement testable.
 //
 // Les indices peuvent etre negatifs (couches de ghosts) ; coarsen utilise donc

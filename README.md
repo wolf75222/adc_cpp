@@ -2,7 +2,7 @@
 
 # ADC CPP
 
-**Solveur C++23 maison (mini-AMReX ecrit from scratch) pour les systemes hyperbolique-elliptique couples sur AMR : seam de dispatch unique serie / OpenMP / Kokkos (GPU GH200), MPI distribue, MultiFab + BoxArray + Geometry, AMR block-structured multi-niveaux + multi-patch (Berger-Rigoutsos, reflux coverage-aware), flux Rusanov / HLL / HLLC, reconstruction MUSCL, SSPRK2/3 + IMEX asymptotic-preserving + Strang, Poisson multigrille ET FFT spectrale, couplage diocotron (derive E x B) + Euler-Poisson (auto-gravite OU plasma electrostatique) + deux-fluides isotherme AP.**
+**Solveur C++23 pour les systemes hyperbolique-elliptique couples sur AMR : seam de dispatch unique serie / OpenMP / Kokkos (GPU GH200), MPI distribue, MultiFab + BoxArray + Geometry, AMR block-structured multi-niveaux + multi-patch (Berger-Rigoutsos, reflux coverage-aware), flux Rusanov / HLL / HLLC, reconstruction MUSCL, SSPRK2/3 + IMEX asymptotic-preserving + Strang, Poisson multigrille ET FFT spectrale, couplage diocotron (derive E x B) + Euler-Poisson (auto-gravite OU plasma electrostatique) + deux-fluides isotherme AP.**
 
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?logo=cplusplus)
 ![Tests](https://img.shields.io/badge/tests-47%2F47%20C%2B%2B%20%2B%208%20MPI%20%2B%20python-brightgreen)
@@ -95,8 +95,8 @@ valides **bit-identiques CPU vs GH200** (cf. `scripts/romeo_*.sbatch`).
 
 ADC est le membre **from scratch** d'une famille de solveurs PDE C++ : la ou
 `euler_cpp` / `advection_cpp` reutilisent `pde_core_cpp` (mesh, fields, AMR),
-**ADC reimplante son propre mini-AMReX** (`BoxArray` / `MultiFab` / `for_each_cell`,
-inspire d'AMReX / Parthenon) pour viser le GPU et le MPI sans dependance.
+**ADC porte sa propre pile AMR** (`BoxArray` / `MultiFab` / `for_each_cell`) pour viser
+le GPU et le MPI sans dependance.
 
 | Repo | Role | Socle maillage |
 |---|---|---|
@@ -104,7 +104,7 @@ inspire d'AMReX / Parthenon) pour viser le GPU et le MPI sans dependance.
 | [`pde_core_cpp`](https://github.com/wolf75222/pde_core_cpp) | infra partagee (mesh, fields, AMR, clustering) | propre |
 | [`advection_cpp`](https://github.com/wolf75222/advection_cpp) | advection scalaire + Burgers + Chorin NS | `pde_core_cpp` |
 | [`euler_cpp`](https://github.com/wolf75222/euler_cpp) | Euler 2D + viscous NS + sources plasma + Euler-Poisson | `pde_core_cpp` |
-| **`adc_cpp`** (ce depot) | hyperbolique-elliptique sur **mini-AMReX maison** + GPU/MPI/Kokkos | **propre (from scratch)** |
+| **`adc_cpp`** (ce depot) | hyperbolique-elliptique sur **AMR** + GPU/MPI/Kokkos | **propre (from scratch)** |
 
 ## Documentation
 

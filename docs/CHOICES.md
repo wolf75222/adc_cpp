@@ -5,7 +5,7 @@ Les décisions d'architecture d'`adc_cpp`, avec leur contexte et leur coût. Com
 
 ---
 
-## D-1. Mini-AMReX écrit *from scratch*, pas sur `pde_core_cpp`
+## D-1. Pile AMR écrite *from scratch*, pas sur `pde_core_cpp`
 
 **Contexte.** `euler_cpp` et `advection_cpp` dépendent de `pde_core_cpp` (primitives AMR
 partagées via FetchContent). Une option était de faire pareil pour `adc_cpp`.
@@ -15,7 +15,7 @@ partagées via FetchContent). Une option était de faire pareil pour `adc_cpp`.
 
 **Pourquoi.** Le couplage hyperbolique-elliptique sur AMR distribué (diocotron, deux-fluides
 plasma) demande une couche mesh proche d'AMReX (MultiFab distribué, FluxRegister, FillPatch)
-que `pde_core_cpp` n'avait pas. La construire from scratch fige un mini-AMReX maîtrisé de
+que `pde_core_cpp` n'avait pas. La construire from scratch fige une pile AMR maîtrisée de
 bout en bout, but pédagogique du stage.
 
 **Coût.** Duplication conceptuelle avec AMReX ; pas d'optimisations matures (MFIter, EB
