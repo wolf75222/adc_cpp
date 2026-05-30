@@ -844,11 +844,18 @@ void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
 // --- Moteur AMR unifie (revue, point 5) ---
 // La hierarchie AMR comme OBJET nomme que le moteur fait avancer, plutot qu'une famille de
 // fonctions amr_step_* dont le cas (2/N niveaux, mono/multi-box) est encode dans le NOM.
-// Premier pas : l'entree unifiee advance_amr(hierarchy, dt) + le type LevelHierarchy. Le
-// DistributionMapping de chaque MultiFab porte la repartition (OwnershipPolicy implicite).
-// Generalisation a venir (ROADMAP) : PatchRange / CoarseFineInterface / FluxRegister /
-// SubcyclingSchedule / RegridPolicy en objets de premier plan, puis repli complet de la
-// famille de pas dans ce seul moteur.
+// Entree unifiee : advance_amr(m, LevelHierarchy&, dt), facade fidele du moteur N-niveaux
+// multi-patch (verifie 2 ET 3 niveaux, maxdiff = 0, par test_advance_amr). Les ROLES de la
+// revue, aujourd'hui JOUES par du code existant (a promouvoir en types de premier plan,
+// ROADMAP) :
+//   OwnershipPolicy     = DistributionMapping (qui possede quel patch)        -> alias ci-dessous
+//   PatchRange          = AmrLevelMP (box + donnees + aux + dx d'un niveau)
+//   CoarseFineInterface = masque de couverture + routage bordant du reflux (subcycle_level_mp)
+//   FluxRegister        = buffers avg/ref a index global + all_reduce_sum_inplace
+//   SubcyclingSchedule  = recursion Berger-Oliger (dt/r par niveau) de subcycle_level_mp
+//   RegridPolicy        = amr_regrid_finest (Berger-Rigoutsos), cote coupleur
+using OwnershipPolicy = DistributionMapping;
+
 struct LevelHierarchy {
   std::vector<AmrLevelMP> levels;    // niveau 0 = grossier, niveaux >0 = patchs fins
   Box2D base_dom;                    // empreinte du niveau de base

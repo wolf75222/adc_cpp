@@ -262,17 +262,21 @@ conservatifs.
 
 **Faiblesse 1 : la duplication par cas particulier.** Les noms
 `amr_step_2level_mf` / `_multilevel_mf` / `_2level_multipatch` / `_multilevel_multipatch` /
-`subcycle_level_mp` encodent le cas dans le NOM. Premier pas FAIT : l'entree unifiee
-`advance_amr(m, LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom +
-periodicite ; l'`OwnershipPolicy` est portee par le `DistributionMapping` de chaque
-MultiFab). Verifie facade-fidele (`test_advance_amr`, `maxdiff = 0` vs l'appel direct) et
-conservatif. Reste : nommer les autres objets et y replier la famille de pas.
+`subcycle_level_mp` encodent le cas dans le NOM. Entree unifiee FAITE : `advance_amr(m,
+LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom + periodicite).
+Verifie facade-fidele en **2 ET 3 niveaux** (`test_advance_amr`, `maxdiff = 0` vs l'appel
+direct, derive masse `< 1e-12`) et conservatif. Le vocabulaire de la revue est pose : chaque
+role est NOMME et mappe sur le code existant (`amr_reflux_mf.hpp`), `OwnershipPolicy` est un
+alias reel de `DistributionMapping`. Reste a PROMOUVOIR ces roles en types de premier plan
+(extraction depuis le coeur conservatif, a faire bit-identique) et a y replier la famille de pas.
 
 ```
-LevelHierarchy [fait]   PatchRange   CoarseFineInterface   FluxRegister
-SubcyclingSchedule   RegridPolicy   OwnershipPolicy [via DistributionMapping]
+LevelHierarchy [fait, type]   OwnershipPolicy [fait, alias = DistributionMapping]
+PatchRange = AmrLevelMP   CoarseFineInterface = masque + routage reflux
+FluxRegister = buffers avg/ref + all_reduce   SubcyclingSchedule = recursion Berger-Oliger
+RegridPolicy = amr_regrid_finest (BR)         // noms poses ; extraction en types : reste
 
-advance_amr(m, hierarchy, dt);   // entree unifiee posee ; reste a absorber la famille amr_step_*
+advance_amr(m, hierarchy, dt);   // entree unifiee ; reste a absorber la famille amr_step_*
 ```
 
 **Faiblesse 2 : le multi-patch distribue (priorite n.1).** Fait pour le 2-niveaux :

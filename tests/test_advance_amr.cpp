@@ -97,6 +97,48 @@ int main() {
   chk(maxdiff == 0.0, "advance_amr_facade_fidele");   // facade : strictement identique
   chk(std::fabs(mF - m0) < 1e-10, "advance_amr_conservatif");
 
+  // --- 3 niveaux : le niveau 1 multi-box joue parent ET enfant. Meme facade unifiee. ---
+  // Niveau 2 = un patch interieur a la box gauche du niveau 1 ([16,31]x[16,47]).
+  {
+    BoxArray ba2(std::vector<Box2D>{Box2D{{40, 40}, {55, 55}}});
+    MultiFab ax2(ba2, dm, 3, 1);
+    fill_aux(ax2);
+    auto build = [&](std::vector<AmrLevelMP>& L) {
+      MultiFab U0(bac, dm, 1, 1), U1(baf, dm2, 1, 1), U2(ba2, dm, 1, 1);
+      fill(U0, dxc); fill(U1, dxc / 2); fill(U2, dxc / 4);
+      L.resize(3);
+      L[0] = {std::move(U0), &axc, dxc, dyc};
+      L[1] = {std::move(U1), &axf, dxc / 2, dyc / 2};
+      L[2] = {std::move(U2), &ax2, dxc / 4, dyc / 4};
+      mf_average_down_mb(L[2].U, L[1].U);  // sync init : niveau 1 <- niveau 2
+      mf_average_down_mb(L[1].U, L[0].U);  // niveau 0 <- niveau 1
+    };
+
+    std::vector<AmrLevelMP> Ld3;
+    build(Ld3);
+    for (int s = 0; s < 12; ++s)
+      amr_step_multilevel_multipatch<NoSlope, RusanovFlux>(model, Ld3, dom, dt);
+
+    LevelHierarchy h3;
+    h3.base_dom = dom;
+    h3.base_per = Periodicity{true, true};
+    build(h3.levels);
+    const double m0_3 = sum(h3.levels[0].U, 0);
+    for (int s = 0; s < 12; ++s) advance_amr<NoSlope, RusanovFlux>(model, h3, dt);
+    const double mF_3 = sum(h3.levels[0].U, 0);
+
+    double md3 = 0;
+    const ConstArray4 d3 = Ld3[0].U.fab(0).const_array(),
+                      n3 = h3.levels[0].U.fab(0).const_array();
+    for (int j = 0; j < nc; ++j)
+      for (int i = 0; i < nc; ++i)
+        md3 = std::fmax(md3, std::fabs(d3(i, j, 0) - n3(i, j, 0)));
+    std::printf("advance_amr 3 niveaux : maxdiff=%.3e | derive masse=%.3e\n", md3,
+                std::fabs(mF_3 - m0_3));
+    chk(md3 == 0.0, "advance_amr_3niv_facade");
+    chk(std::fabs(mF_3 - m0_3) < 1e-10, "advance_amr_3niv_conservatif");
+  }
+
   if (fails == 0) std::printf("OK test_advance_amr\n");
   return fails == 0 ? 0 : 1;
 }

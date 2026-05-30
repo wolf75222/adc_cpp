@@ -81,10 +81,13 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (niveau 0 répliqué : lecture locale), vérifié contre l'analytique np=1/2/4 par
    `test_mpi_coupler_inject`. Reste, cible finale : chaque patch portant `owner_rank`,
    `global_box_id`, interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
-2. **Moteur AMR unifié.** Premier pas fait : l'entrée unifiée `advance_amr(m, LevelHierarchy&,
-   dt)` + le type `LevelHierarchy` (vérifié façade-fidèle et conservatif, `test_advance_amr`).
-   Reste : nommer les autres objets (`PatchRange`, `CoarseFineInterface`, `FluxRegister`,
-   `SubcyclingSchedule`, `RegridPolicy` ; `OwnershipPolicy` ~ `DistributionMapping`) et y
+2. **Moteur AMR unifié.** Entrée unifiée faite : `advance_amr(m, LevelHierarchy&, dt)` + le
+   type `LevelHierarchy`, vérifiée façade-fidèle en **2 et 3 niveaux** (`maxdiff = 0` vs l'appel
+   direct, dérive masse `< 1e-12`) et conservatif (`test_advance_amr`). Vocabulaire de la revue
+   posé : `OwnershipPolicy` est un alias réel de `DistributionMapping` ; `PatchRange`,
+   `CoarseFineInterface`, `FluxRegister`, `SubcyclingSchedule`, `RegridPolicy` sont nommés et
+   mappés sur le code existant. Reste : promouvoir ces rôles en types de premier plan
+   (extraction depuis le cœur conservatif `subcycle_level_mp`, à faire bit-identique) et y
    replier la famille `amr_step_*` (qui encode le cas dans le nom).
 3. **Découper l'elliptique.** Avancé : l'`EllipticOperator` existe déjà séparé
    (`poisson_operator.hpp` : `apply_laplacian`, `poisson_residual`, lisseur) ; le
