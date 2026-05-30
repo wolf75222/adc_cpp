@@ -49,11 +49,11 @@ les pack/unpack MPI de `fill_boundary`/`parallel_copy`, les diagnostics distribu
 | `mesh/` | `box2d`, `box_array`, `fab2d`/`multifab`, `for_each`, `fill_boundary`, `physical_bc`, `geometry`, `mf_arith`, `refinement`, `box_hash` |
 | `operator/` | `numerical_flux` (Rusanov/HLL/HLLC, `ADC_HD`), `reconstruction` (MUSCL), `spatial_operator` (`assemble_rhs`) |
 | `elliptic/` | concept `EllipticSolver` ; `geometric_mg` (V-cycle) ; `poisson_fft`(+`_solver`) (spectral) ; `poisson_operator` |
-| `integrator/` | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `amr_multilevel`, `amr_reflux` |
-| `coupling/` | `coupler` (`Coupler<Model,Elliptic>`), `coupling_policy`, `amr_coupler` (`AmrCoupler`), `spectral_coupler` (`SpectralCoupler`) |
+| `integrator/` | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `amr_reflux` / `amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab : mono-box -> multi-patch N-niveaux, GPU-ready) |
+| `coupling/` | `coupler` (`Coupler<Model,Elliptic>`), `coupling_policy`, `amr_coupler` (`AmrCoupler`, mono-box), `amr_coupler_mp` (`AmrCouplerMP`, multi-patch + regrid BR), `spectral_coupler` (`SpectralCoupler`) |
 | `amr/` | `amr_hierarchy`, `cluster` (Berger-Rigoutsos), `regrid`, `tag_box` |
 | `parallel/` | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
-| `model/` | `diocotron`, `euler`, `euler_poisson` (PhysicalModel) ; `langmuir`, `two_fluid_isothermal` (noyaux 0D AP) |
+| `model/` | `diocotron`, `euler`, `euler_poisson` (PhysicalModel ; gravite OU plasma via `coupling_sign`) ; `langmuir`, `two_fluid_isothermal` (noyaux 0D AP) |
 | `analysis/` | `diocotron_growth` (Eigen, `#ifdef ADC_HAS_EIGEN`), `hdf5_writer` (`#ifdef ADC_HAS_HDF5`) |
 | `solver/` | facades PIMPL : `diocotron_solver`, `euler_poisson_solver`, `two_fluid_ap_solver` |
 
