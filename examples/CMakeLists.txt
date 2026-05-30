@@ -17,6 +17,9 @@ target_link_libraries(diocotron_amr3 PRIVATE adc::adc)
 add_executable(diocotron_multipatch diocotron_multipatch.cpp)
 target_link_libraries(diocotron_multipatch PRIVATE adc::adc)
 
+add_executable(diocotron_column_amr diocotron_column_amr.cpp)
+target_link_libraries(diocotron_column_amr PRIVATE adc::adc)
+
 add_executable(bench_amr bench_amr.cpp)
 target_link_libraries(bench_amr PRIVATE adc::adc)
 

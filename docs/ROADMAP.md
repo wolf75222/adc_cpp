@@ -202,15 +202,19 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   128/192/256`, croissance monotone vers `0.911` mais **limitée par la diffusion numérique du bord
   d'anneau** (anneau fin de 6 à 13 cellules). Conclusion chiffrée : sur grille uniforme, atteindre
   `0.911` demande une très haute résolution -> motive directement l'AMR (M2).
-- **M2 : avec notre AMR.** Capacité AMR-sur-diocotron CONFIRMÉE : `diocotron_multipatch` tourne le
-  regrid Berger-Rigoutsos (8 patchs dynamiques suivant l'instabilité, dérive masse `~1e-15`,
-  conservatif). Reste, précisément, pour le **benchmark colonne** : le coupleur `AmrCouplerMP` est
-  périodique, alors que la colonne creuse a besoin de la **paroi conductrice** (embedded boundary,
-  déjà dans la multigrille) + la **CI anneau** (toutes deux dans `DiocotronSolver` mono-niveau, pas
-  encore dans le coupleur AMR). Tâche M2 : (a) câbler paroi + anneau dans `AmrCouplerMP`, (b) critère
-  de regrid sur le bord d'anneau, (c) diagnostic d'amplitude du mode (comme `diocotron_column`), puis
-  (d) comparer le taux AMR vs uniforme à base grossière égale -> montrer que l'AMR récupère `0.911`
-  pour bien moins de cellules. C'est le « intégrer notre AMR » de l'objectif.
+- **M2 : avec notre AMR (mono-rang, FAIT).** `examples/diocotron_column_amr.cpp` : colonne creuse
+  (anneau + paroi conductrice circulaire `r=0.40` portée par le multigrille, `AmrCouplerMP` accepte
+  désormais le prédicat `active`) sur AMR 2 niveaux, raffinant le **bord d'anneau** (tag couronne
+  `[0.13,0.22]`, regrid Berger-Rigoutsos), diagnostic d'amplitude du mode `l` de phi à `r0`, dérive
+  masse `~3e-15`. Même binaire pour les deux branches (`refine=0/1`, numériques identiques).
+  Résultat (mode 4, `docs/fig_diocotron_amr_vs_uniforme.png`) : à BASE GROSSIÈRE ÉGALE (96), l'AMR
+  **triple le taux** (`γ_norm = 0.38` vs uniforme `0.12`) en raffinant le transport au bord, pour
+  1.8x les cellules ; il est sur une MEILLEURE courbe taux/cellule que l'uniforme (0.38 à 16k
+  cellules vs ~0.22 par interpolation uniforme). Constat HONNÊTE : il n'atteint pas encore l'uniforme
+  fin (`0.50` à 192) ni `0.911`, parce que le **Poisson reste résolu sur le grossier** (le coupleur
+  injecte l'aux grossier aux patchs ; le potentiel est donc bridé par la résolution grossière). Le
+  pas suivant vers `0.911` : un Poisson MULTI-NIVEAU (les patchs fins contribuant au potentiel), pas
+  seulement un transport raffiné.
 - **M3 : système magnétique complet (eq 2.4).** Au-delà de la limite de dérive : Euler+énergie +
   Poisson + Lorentz `m×Ω` (push de Boris déjà en place) + splitting d'opérateurs, pour reproduire la
   *méthode* du papier à travers les 12 ordres de grandeur d'échelles de temps.
