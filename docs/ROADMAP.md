@@ -123,8 +123,16 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (GhostExchange, testé `test_mpi_fillboundary`), `mf_fill_fine_ghosts_*`
    (AMRBoundaryInterpolation) sont déjà séparés ; `fill_ghosts` n'est qu'une composition
    explicite de (1) + (2). Reste : remonter le coarse-fine en helper nommé de premier niveau.
-6. **CouplingPolicy mince.** Sortir la hiérarchie, le regrid et les diagnostics des coupleurs
-   pour que la policy ne fasse plus qu'ordonner les opérations.
+6. **CouplingPolicy mince (FAIT).** Hiérarchie, regrid et diagnostics sortis des coupleurs
+   AMR en composants nommés : `coupling/amr_level_storage.hpp` (`AmrLevelStack<Level>`,
+   stockage niveaux + aux, câblage et réallocation d'aux), `coupling/amr_regrid_coupler.hpp`
+   (`amr_regrid_finest`, Berger-Rigoutsos en free function template, `comm.hpp` inclus
+   explicitement pour `n_ranks()`), `coupling/amr_diagnostics.hpp` (`amr_mass`,
+   `amr_max_drift_speed`). `AmrCoupler` / `AmrCouplerMP` ne font plus qu'ordonner
+   (`sync_down -> compute_aux -> step`, `regrid()` délégué) ; les primitives d'injection
+   restent des helpers `detail::`. Extraction structurelle bit-identique : équivalence
+   `max|dUc| = 0` et conservation de masse à l'arrondi inchangées
+   (`test_amr_coupler`, `test_amr_coupler_mp`).
 7. **Suite de validation numérique (FAIT).** Le bit-identique ne prouve pas la justesse ;
    la suite couvre désormais : ordre du Laplacien 5 points (`test_poisson_convergence`,
    L2/Linf = 2.00, Dirichlet + périodique + nullspace) ; tourbillon isentropique d'Euler

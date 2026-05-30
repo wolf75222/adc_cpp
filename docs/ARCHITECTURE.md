@@ -175,9 +175,15 @@ synchronisations, les contraintes. Elle ne possede pas la donnee, ne connait pas
 backend, ne fait ni regrid, ni I/O, ni diagnostics, ni MPI brut.
 ```
 
-Aujourd'hui les coupleurs AMR tiennent la hierarchie et appellent `regrid()` : ils font
-donc plus que de l'ordonnancement pur. **Cible** : une policy mince qui ordonne, la
-hierarchie et le regrid sortant en objets separes (voir section 8).
+Les coupleurs AMR sont desormais des ordonnanceurs minces (point 6 de la revue). Trois
+responsabilites sont sorties en composants nommes : la hierarchie (stockage des niveaux +
+aux) dans `coupling/amr_level_storage.hpp` (`AmrLevelStack<Level>`), le regrid
+Berger-Rigoutsos dans `coupling/amr_regrid_coupler.hpp` (`amr_regrid_finest`), les
+diagnostics (masse, vitesse de derive) dans `coupling/amr_diagnostics.hpp` (`amr_mass`,
+`amr_max_drift_speed`). `AmrCoupler` / `AmrCouplerMP` ne gardent que l'enchainement
+`sync_down -> compute_aux -> step` plus la delegation de `regrid()`. L'extraction est
+structurelle et bit-identique (equivalence `max|dUc|` a `0` et conservation de masse a
+l'arrondi inchangees).
 
 ## 6. Carte des modules (`include/adc/`)
 
@@ -191,7 +197,7 @@ hierarchie et le regrid sortant en objets separes (voir section 8).
 | `parallel/` | execution | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
 | `amr/` | execution | `amr_hierarchy`, `cluster` (Berger-Rigoutsos), `regrid`, `tag_box` |
 | `integrator/` | temps | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `amr_reflux`/`amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab, mono-box -> multi-patch N-niveaux, GPU-ready) |
-| `coupling/` | temps | `coupler`, `coupling_policy`, `amr_coupler` (mono-box), `amr_coupler_mp` (multi-patch + regrid BR), `spectral_coupler` |
+| `coupling/` | temps | `coupler`, `coupling_policy`, `amr_coupler` (mono-box), `amr_coupler_mp` (multi-patch + regrid BR), `amr_level_storage` (hierarchie `AmrLevelStack`), `amr_regrid_coupler` (`amr_regrid_finest`), `amr_diagnostics` (masse, derive), `spectral_coupler` |
 | `analysis/` | hors chemin chaud | `diocotron_growth` (Eigen, `#ifdef ADC_HAS_EIGEN`), `hdf5_writer` (`#ifdef ADC_HAS_HDF5`) |
 | `solver/` | facade | facades PIMPL : `diocotron_solver`, `euler_poisson_solver`, `two_fluid_ap_solver` |
 
