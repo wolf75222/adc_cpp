@@ -21,7 +21,7 @@ physique ne voit jamais le backend. Détail : [ARCHITECTURE.md §2-4](../docs/AR
 
 ```bash
 cmake -S . -B build-omp -DADC_USE_OPENMP=ON && cmake --build build-omp -j
-ctest --test-dir build-omp     # 52/52, identiques à la série (déterminisme thread-count)
+ctest --test-dir build-omp     # 53/53, identiques à la série (déterminisme thread-count)
 ```
 
 Le banc `bench_amr` mesure le scaling (`OMP_NUM_THREADS=k ./build-omp/bin/bench_amr n nsteps tf`).

@@ -5,7 +5,7 @@
 **Solveur C++23 pour les systemes hyperbolique-elliptique couples sur AMR : seam de dispatch unique serie / OpenMP / Kokkos (GPU GH200), MPI distribue, MultiFab + BoxArray + Geometry, AMR block-structured multi-niveaux + multi-patch (Berger-Rigoutsos, reflux coverage-aware), flux Rusanov / HLL / HLLC, reconstruction MUSCL, SSPRK2/3 + IMEX asymptotic-preserving + Strang, Poisson multigrille ET FFT spectrale, couplage diocotron (derive E x B) + Euler-Poisson (auto-gravite OU plasma electrostatique) + deux-fluides isotherme AP.**
 
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?logo=cplusplus)
-![Tests](https://img.shields.io/badge/tests-52%2F52%20C%2B%2B%20%2B%209%20MPI%20%2B%20python-brightgreen)
+![Tests](https://img.shields.io/badge/tests-53%2F53%20C%2B%2B%20%2B%209%20MPI%20%2B%20python-brightgreen)
 ![Build](https://img.shields.io/badge/build-CMake%203.20%2B-064F8C?logo=cmake)
 ![GPU](https://img.shields.io/badge/GPU-Nvidia%20GH200%20(Kokkos%2FCUDA)-76B900?logo=nvidia)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python)
@@ -204,7 +204,7 @@ docs/          ARCHITECTURE.md, PERFORMANCE.md, animations.
 
 ## Validation
 
-- **52/52** tests C++ (serie), idem OpenMP ; **+9** MPI (`mpirun -np 4`, bit-identique a np=1/2/4) ; **+1** HDF5 ; bindings Python verts.
+- **53/53** tests C++ (serie), idem OpenMP ; **+9** MPI (`mpirun -np 4`, bit-identique a np=1/2/4) ; **+1** HDF5 ; bindings Python verts.
 - **GPU GH200** (CUDA 12.6) : advection, multigrille, pas couple Euler-Poisson, deux-fluides AP + `libadc` compilee GPU, tous **bit-identiques au CPU**.
 - **AMR** : reflux 2-niveaux / N-niveaux / multi-patch coverage-aware, tous prouves **bit-identiques** a la reference, conservation a l'arrondi (5.55e-16) ; clustering Berger-Rigoutsos branche. Le demo couple `diocotron_multipatch` (Poisson grossier + reflux multi-patch) re-cluster ses patchs a la volee (`docs/anim_diocotron_multipatch.gif`) en conservant la masse a `~2e-15` sur tout le run.
 - **Deux-fluides AP** : dispersion isotrope (3.1%), borne + quasi-neutre a `omega_pe = 1e3` (`dt*omega_pe = 5`) la ou l'explicite explose.

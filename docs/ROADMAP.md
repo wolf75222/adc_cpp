@@ -75,10 +75,13 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    seul `advance_amr(hierarchy, dt, operators, schedule, execution)`, au-dessus d'objets
    nommés : `LevelHierarchy`, `PatchRange`, `CoarseFineInterface`, `FluxRegister`,
    `SubcyclingSchedule`, `RegridPolicy`, `OwnershipPolicy`.
-3. **Découper l'elliptique.** `EllipticProblem` (équation, coeffs, CL, nullspace) /
-   `EllipticOperator` (stencil, `apply`, `residual`, restriction/prolongation) /
-   `LinearSolver` (MG, FFT, CG) / `FieldPostProcess` (E = -grad phi). Formaliser l'identité
-   MG = FFT dans un `OperatorSpec` partagé, pas seulement dans la doc.
+3. **Découper l'elliptique.** Avancé : l'`EllipticOperator` existe déjà séparé
+   (`poisson_operator.hpp` : `apply_laplacian`, `poisson_residual`, lisseur) ; le
+   `LinearSolver` est le concept `EllipticSolver` (MG, FFT) ; l'identité MG = FFT est rendue
+   STRUCTURELLE et vérifiée (`test_elliptic_operator` applique le même opérateur canonique aux
+   deux solutions, résidus ~1e-14). Reste : `EllipticProblem` comme type distinct (coeffs,
+   CL, nullspace en un objet, aujourd'hui implicites) et `FieldPostProcess` comme composant
+   nommé (`E = -grad phi`, aujourd'hui la fonction `coupler_grad_phi`).
 4. **API mémoire explicite.** Remplacer la discipline manuelle `device_fence()` par
    `device_reduce` / `device_norm_inf` / `sync_host` / `sync_device` ; faire de `sum` et
    `norm_inf` de vraies réductions device (pas des boucles hôte protégées par fence).

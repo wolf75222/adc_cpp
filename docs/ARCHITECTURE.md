@@ -181,18 +181,24 @@ LinearSolver           l'inversion : multigrille, FFT, CG, (Hypre/PETSc).
 FieldPostProcess       E = -grad phi, energie, diagnostics.
 ```
 
-La contrainte clef : MG et FFT doivent inverser le **MEME** Laplacien discret 5 points.
-Aujourd'hui c'est garanti par construction et verifie (`test_fft_coupler`,
-`maxdiff = 1.6e-14`), mais formalise seulement dans la doc. **Cible** : un `OperatorSpec`
-partage (stencil + CL + nullspace) que les deux backends consomment, pour que l'identite
-soit structurelle, pas documentaire.
+Etat reel : la decomposition est plus avancee que ne le suggerait ce document.
+- **EllipticOperator FAIT** : `elliptic/poisson_operator.hpp` est l'operateur canonique,
+  separe des solveurs (`apply_laplacian`, `poisson_residual`, lisseur GS rouge-noir). C'est
+  l'`OperatorSpec` partage : `poisson_residual` EST la definition du Laplacien 5 points.
+- **LinearSolver FAIT** : le concept `EllipticSolver` (`rhs`/`phi`/`solve`/`residual`/`geom`)
+  est l'interface ; `GeometricMG` (V-cycle GS rb, seul compatible AMR et tout `n`, on-device)
+  et `PoissonFFTSolver` (direct, mono-niveau periodique `n` puissance de 2, ~5x, distribue par
+  bandes `MPI_Alltoall`) en sont deux implementations. `Coupler<Model, Elliptic = GeometricMG>`
+  depend du concept, pas d'un backend.
+- **Identite MG = FFT rendue STRUCTURELLE** : `test_elliptic_operator` applique le MEME
+  operateur canonique `poisson_residual` aux deux solutions -> residus `3.4e-14` (MG) et
+  `7.2e-14` (FFT), solutions identiques a `1.3e-16`. Les deux inversent prouvablement le meme
+  operateur (plus seulement `maxdiff` MG-vs-FFT de `test_fft_coupler`).
 
-Etat aujourd'hui : le concept `EllipticSolver` fusionne operateur et solveur, et
-`GeometricMG` / `PoissonFFTSolver` sont des paquets operateur+solveur. `GeometricMG`
-(V-cycle GS rouge-noir) est le seul compatible AMR et tout `n`, entierement on-device.
-`PoissonFFTSolver` est direct pour le mono-niveau periodique (`n` puissance de 2), ~5x
-quand l'elliptique domine, distribue par bandes (`MPI_Alltoall`), pas de FFT sous AMR.
-`Coupler<Model, Elliptic = GeometricMG>` est generique sur le backend.
+Reste (cible) : `EllipticProblem` comme TYPE distinct (coeffs `eps`, CL, nullspace en un
+objet ; aujourd'hui implicite : Laplacien a coefficient constant, CL via `BCRec`, nullspace
+ad hoc en periodique) et `FieldPostProcess` comme composant nomme (`E = -grad phi` existe en
+fonction `coupler_grad_phi`, pas en brique).
 
 ## 8. AMR : vers un objet nativement distribue (priorite)
 
@@ -282,7 +288,7 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui :
-- Tests : 52/52 CPU serie (Eigen inclus) ; 52/52 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
+- Tests : 53/53 CPU serie (Eigen inclus) ; 53/53 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
 - Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
   (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
   conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`) ; reflux multipatch 2-niveaux
