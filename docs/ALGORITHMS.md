@@ -253,9 +253,12 @@ rangs) : correcte sous n'importe quelle distribution MPI.
 **Validation.** `test_amr_multipatch` (« 2 boîtes pavant = 1 grande boîte », `0` exact) ;
 `test_amr_multilevel_multipatch` (3 niveaux mono-box = `amr_step_multilevel_mf` ; 2 niveaux
 multi-box = `amr_step_2level_multipatch` ; 3 niveaux avec niveau intermédiaire multi-box
-conservatif), les trois à `0`. **Pièges.** Sans le masque de couverture, le joint fin-fin
-serait reflué deux fois -> non-conservation ; le grossier doit être disponible (mono-rang
-pour l'instant, le distribué demande une copie inter-niveaux).
+conservatif), les trois à `0`. Sous MPI, `test_mpi_amr_multipatch3` (3 niveaux, niveau
+intermédiaire multi-box réparti dont le parent d'un patch fin tombe sur un autre rang) est
+bit à bit identique np=1/2/4, masse conservée. **Pièges.** Sans le masque de couverture, le
+joint fin-fin serait reflué deux fois -> non-conservation ; le grossier doit être disponible,
+ce que le distribué assure par `parallel_copy` (copie inter-niveaux parent->enfant-coarsen) +
+gather du registre par `all_reduce_sum_inplace` (niveau 0 répliqué, niveaux >0 répartis).
 
 ## 11. Clustering Berger-Rigoutsos
 

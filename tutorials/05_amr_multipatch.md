@@ -60,8 +60,10 @@ for (int s = 0; s < nsteps; ++s) {
 
 La couverture est bâtie sur le **BoxArray global** (toutes les boîtes, connues de tous les
 rangs), donc correcte sous n'importe quelle distribution MPI. Le reflux multi-patch tourne
-mono-rang pour l'instant ; le distribué complet (copie inter-niveaux du grossier + gather
-des registres via `all_reduce_sum_inplace`) est le dernier morceau restant.
+**réellement distribué**, 2-niveaux comme N-niveaux : la copie inter-niveaux parent->enfant
+passe par `parallel_copy`, le gather des registres par `all_reduce_sum_inplace` (niveau 0
+répliqué, niveaux >0 répartis). `test_mpi_amr_multipatch3` (3 niveaux, niveau intermédiaire
+multi-box réparti) est bit à bit identique np=1/2/4, masse conservée.
 
 ## Pièges
 
