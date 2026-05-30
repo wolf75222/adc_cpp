@@ -49,13 +49,17 @@ Issu d'une revue : la faiblesse structurelle est le mélange discrétisation / s
 exécution, et un AMR multi-patch pas encore pensé distribué. Voir
 [ARCHITECTURE.md](ARCHITECTURE.md) (modèle en quatre couches, sections marquées « cible »).
 
-1. **AMR multi-patch nativement distribué (priorité absolue).** Aujourd'hui mono-rang
-   (couverture et reflux locaux). Chaque patch doit porter dès la conception `owner_rank`,
-   `global_box_id`, `parent_level`, les interfaces coarse-fine globales, un registre de flux
-   distribué et une politique de réduction conservative. Concrètement : all-gather des
-   empreintes pour la couverture globale, gather des registres vers le rang du grossier
-   (`all_reduce_sum_inplace`, primitive posée), `load_balance` SFC sur le multi-box. Repousser
-   ce point fige une fausse abstraction distribuée.
+1. **AMR multi-patch nativement distribué (priorité absolue).** Avancé : la couverture est
+   déjà bâtie sur le `box_array()` global (MPI-safe), et le REFLUX de `amr_step_2level_multipatch`
+   est réécrit en forme distribuée (buffer grossier répliqué + `all_reduce_sum_inplace`),
+   bit à bit identique en série et à np=1. Blocage actif : le grossier mono-box vit sur un
+   seul rang, mais les rangs portant un patch fin ont besoin du champ grossier (ghost-fill)
+   et du flux grossier (registre). Il faut donc RÉPLIQUER le grossier (broadcast du champ +
+   du registre vers les rangs fins) et faire remonter `average_down` par le même buffer
+   additif ; puis généraliser au chemin N-niveaux récursif (`subcycle_level_mp`). Cible
+   finale : chaque patch porte `owner_rank`, `global_box_id`, interfaces coarse-fine
+   globales, registre distribué, politique de réduction conservative ; `load_balance` SFC
+   sur le multi-box. Repousser fige une fausse abstraction distribuée.
 2. **Moteur AMR unifié.** Replier la famille `amr_step_2level_mf` / `_multilevel_mf` /
    `_2level_multipatch` / `_multilevel_multipatch` (duplication par cas particulier) sur un
    seul `advance_amr(hierarchy, dt, operators, schedule, execution)`, au-dessus d'objets

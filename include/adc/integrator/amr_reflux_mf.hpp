@@ -7,6 +7,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/refinement.hpp>  // coarsen_index
 #include <adc/operator/spatial_operator.hpp>  // compute_face_fluxes, xface_box, yface_box
+#include <adc/parallel/comm.hpp>  // all_reduce_sum_inplace (reflux multi-patch distribue)
 
 #include <vector>
 
@@ -300,6 +301,17 @@ inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
 
 // Pas 2-niveaux conservatif, niveau fin MULTI-BOX. Uc : grossier mono-box (periodique).
 // Uf : MultiFab a N boxes fines (ratio 2, strictement interieures, alignees grossier).
+//
+// Etat distribue (MPI) : le REFLUX est deja ecrit en forme distribuee (buffer grossier
+// repique + all_reduce_sum_inplace, voir plus bas) : chaque rang verse les corrections de
+// ses patchs fins locaux, la somme revient au proprietaire du grossier. En serie c'est
+// bit a bit identique au chemin direct. CE QUI MANQUE pour tourner reellement a np>1 : le
+// grossier mono-box vit sur un seul rang, or les rangs possedant un patch fin ont besoin
+// du champ grossier (ghost-fill espace+temps) ET du flux grossier (registre cL/cR). Il
+// faut donc REPLIQUER le grossier (broadcast du champ + du registre vers les rangs fins),
+// et faire remonter average_down par le meme buffer additif. C'est le morceau prioritaire
+// de la ROADMAP (replication grossiere). Tant qu'il n'est pas la, n'appeler cette fonction
+// qu'en mono-rang.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
                                 Real dyc, MultiFab& Uf, const MultiFab& auxc,
@@ -395,25 +407,44 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
 
   mf_average_down_multi(Uf, Uc);
 
-  // reflux coverage-aware : seulement aux faces fin-grossier (voisin non couvert).
+  // reflux coverage-aware DISTRIBUE. Chaque rang accumule les corrections de SES patchs
+  // fins locaux dans un buffer grossier repique (indexe global, 0 ailleurs), puis
+  // all-reduce -> chaque rang a la somme, et le proprietaire du grossier mono-box
+  // l'applique. En serie (np=1) l'all-reduce est l'identite : la correction d'une
+  // cellule grossiere bordant un seul patch fin (cas usuel) est bit a bit identique au
+  // chemin direct. Le grossier etant mono-box, son proprietaire detient toutes les
+  // cellules visees. Cout : un buffer NX*NY*nc par rang (replication grossiere assumee).
   device_fence();
-  Array4 c = Uc.fab(0).array();
+  std::vector<Real> corr(static_cast<std::size_t>(NX) * NY * nc, Real(0));
+  auto cadd = [&](int I, int J, int k, Real v) {
+    if (I >= 0 && I < NX && J >= 0 && J < NY)
+      corr[(static_cast<std::size_t>(J) * NX + I) * nc + k] += v;
+  };
   for (int li = 0; li < Uf.local_size(); ++li) {
     Reg& g = regs[li];
     for (int J = g.J0; J <= g.J1; ++J)
       for (int k = 0; k < nc; ++k) {
         if (!covered(g.I0 - 1, J))
-          c(g.I0 - 1, J, k) -= (g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc;
+          cadd(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc);
         if (!covered(g.I1 + 1, J))
-          c(g.I1 + 1, J, k) += (g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc;
+          cadd(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc);
       }
     for (int I = g.I0; I <= g.I1; ++I)
       for (int k = 0; k < nc; ++k) {
         if (!covered(I, g.J0 - 1))
-          c(I, g.J0 - 1, k) -= (g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc;
+          cadd(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc);
         if (!covered(I, g.J1 + 1))
-          c(I, g.J1 + 1, k) += (g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc;
+          cadd(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc);
       }
+  }
+  all_reduce_sum_inplace(corr.data(), static_cast<int>(corr.size()));
+  if (Uc.local_size() > 0) {  // proprietaire du grossier mono-box
+    Array4 c = Uc.fab(0).array();
+    const Box2D cb = Uc.box(0);
+    for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
+      for (int I = cb.lo[0]; I <= cb.hi[0]; ++I)
+        for (int k = 0; k < nc; ++k)
+          c(I, J, k) += corr[(static_cast<std::size_t>(J) * NX + I) * nc + k];
   }
 }
 
