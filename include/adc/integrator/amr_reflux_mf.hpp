@@ -486,6 +486,20 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
 // (registre FluxRegister) est coverage-aware ET route la correction vers la box PARENTE
 // contenant la cellule grossiere adjacente. Se reduit BIT A BIT au chemin mono-box quand
 // chaque niveau n'a qu'une box (garde de validation).
+//
+// Etat distribue (MPI) : MONO-RANG pour l'instant (contrairement au 2-niveaux
+// amr_step_2level_multipatch, distribue + teste). Le grossier etant MULTI-BOX reparti, on
+// ne peut pas le repliquer a bon marche ; il faut un FillPatch facon AMReX, via le
+// parallel_copy deja present (mesh/refinement.hpp). Cinq points supposent le parent LOCAL
+// (via mf_find_box qui rend un indice LOCAL ou -1) et sont a rendre distribues :
+//   1. mf_fill_fine_ghosts_mb : recuperer les regions parentes couvrant chaque patch
+//      enfant par parallel_copy (parent -> fine-coarsen), puis interpoler ;
+//   2. echantillonnage du registre grossier (cL/cR depuis fx.fab(pb)) : meme fetch ;
+//   3. mf_average_down_mb : router la moyenne vers la box parente proprietaire (gather) ;
+//   4. reflux : router la correction vers la box parente proprietaire (gather) ;
+//   5. couverture : deja batie sur le box_array() global (MPI-safe).
+// Effort distinct et conservation-critique (ROADMAP). Tant qu'il n'est pas la, n'utiliser
+// amr_step_multilevel_multipatch / AmrCouplerMP qu'en mono-rang.
 
 // box LOCALE (valide) contenant la cellule (I,J), ou -1.
 inline int mf_find_box(const MultiFab& mf, int I, int J) {
@@ -566,10 +580,13 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     fill_boundary(lv.U, fdom, Periodicity{false, false});  // halos fin-fin
   }
 
+  // face-box par box GLOBALE + meme dmap (cf. amr_step_2level_multipatch) : BoxArray et
+  // DistributionMapping de meme taille sous MPI, fx.fab(li) <-> lv.U.fab(li). Identique en
+  // serie (local == global).
   std::vector<Box2D> fxb, fyb;
-  for (int li = 0; li < np; ++li) {
-    fxb.push_back(xface_box(lv.U.box(li)));
-    fyb.push_back(yface_box(lv.U.box(li)));
+  for (int g = 0; g < lv.U.box_array().size(); ++g) {
+    fxb.push_back(xface_box(lv.U.box_array()[g]));
+    fyb.push_back(yface_box(lv.U.box_array()[g]));
   }
   MultiFab fx(BoxArray(std::move(fxb)), lv.U.dmap(), nc, 0);
   MultiFab fy(BoxArray(std::move(fyb)), lv.U.dmap(), nc, 0);

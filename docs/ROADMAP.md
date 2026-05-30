@@ -56,9 +56,14 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (écrasement couvert) et reflux (addition bordante) remontent par deux buffers grossiers +
    `all_reduce_sum_inplace`. Au passage, un bug mono-rang corrigé : les face-box des flux fins
    se bâtissaient sur les boxes **locales** avec le dmap **global** (tailles incohérentes sous
-   MPI). Reste : généraliser au chemin N-niveaux récursif (`subcycle_level_mp`, grossier
-   multi-box, routage `mf_find_box`) ; puis, cible finale, chaque patch portant `owner_rank`,
-   `global_box_id`, interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
+   MPI). Le même bug latent corrigé dans `subcycle_level_mp`. Reste : rendre distribué le
+   chemin N-niveaux récursif (`subcycle_level_mp`, grossier MULTI-box réparti, qu'on ne peut
+   répliquer à bon marché). Cinq points supposent le parent local (via `mf_find_box`) et
+   demandent un FillPatch façon AMReX via le `parallel_copy` déjà présent : (1) ghost-fill
+   parent->enfant, (2) échantillonnage du registre grossier, (3) `average_down` routé vers
+   le propriétaire de la box parente, (4) reflux routé de même, (5) couverture (déjà
+   globale). Puis, cible finale, chaque patch portant `owner_rank`, `global_box_id`,
+   interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
 2. **Moteur AMR unifié.** Replier la famille `amr_step_2level_mf` / `_multilevel_mf` /
    `_2level_multipatch` / `_multilevel_multipatch` (duplication par cas particulier) sur un
    seul `advance_amr(hierarchy, dt, operators, schedule, execution)`, au-dessus d'objets
