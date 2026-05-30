@@ -282,27 +282,24 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui :
-- Tests : 50/50 CPU serie (Eigen inclus) ; 50/50 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
+- Tests : 52/52 CPU serie (Eigen inclus) ; 52/52 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
 - Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
   (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
   conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`) ; reflux multipatch 2-niveaux
   DISTRIBUE (`test_mpi_amr_multipatch`, np=1/2/4 a `0` exact).
 - Physique : Jeans 0.1%, Bohm-Gross 0.1%, dispersion deux-fluides 3.1%, cyclotron 0.00%.
-- Numerique : ordre de convergence du Laplacien 5 points mesure (`test_poisson_convergence`,
-  L2 et Linf a l'ordre 2.00, Dirichlet et periodique) ; nullspace periodique (second membre
-  a moyenne nulle, jauge fixee) ; ordre MUSCL ~2 / Rusanov ~1 (`test_muscl_convergence`) ;
+- Numerique : ordre du Laplacien 5 points (`test_poisson_convergence`, L2 et Linf a 2.00,
+  Dirichlet et periodique + nullspace) ; ordre MUSCL ~2 / Rusanov ~1 (`test_muscl_convergence`) ;
   tourbillon isentropique d'Euler (L1 ordre ~2, `test_euler`) ; loi de Gauss discrete du
-  couplage div(grad phi) = source a l'ordre 2.00 (`test_gauss_law`).
+  couplage div(grad phi) = source a 2.00 (`test_gauss_law`) ; limite AP quantifiee (uniforme
+  sur 8 decades de raideur, `test_ap_limit`) ; invariants diocotron (masse, principe du
+  maximum, enstrophie non croissante, `test_diocotron_stability`).
+- Conservation : flux coarse-fine exact (le reflux rend la masse machine-zero,
+  `test_amr_reflux_mf` / `test_amr_coupler` a `~1e-12` / `5.55e-16`).
 - GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4/7.
 
-Manque (cible, voir [ROADMAP.md](ROADMAP.md)) : etendre la suite manufacturee a l'hyperbolique
-2D et au couple Euler-Poisson :
-
-```
-ordre de la conservation du flux coarse-fine sous AMR
-limite asymptotique AP quantifiee
-invariants diocotron (energie, moment, enstrophie au-dela de la masse)
-```
+La suite numerique du point 7 (revue) est en place : ordres de convergence (Poisson, Euler,
+MUSCL), Gauss du couplage, limite AP, invariants diocotron, conservation sous regrid.
 
 ## 12. Comparaison AMReX
 
