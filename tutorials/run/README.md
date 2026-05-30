@@ -22,12 +22,22 @@ pip install numpy matplotlib
 | [`two_fluid_ap.py`](two_fluid_ap.py) | schéma AP : stabilisé borné vs non-stabilisé qui explose | `docs/tut_tfap_ap.png` | AP borné, l'autre explose |
 | [`euler_poisson.py`](euler_poisson.py) | Euler auto-gravitant, conservation | `docs/tut_euler_poisson.png` | masse + qté de mvt à l'arrondi |
 | [`plasma.py`](plasma.py) | Euler pour les plasmas : gravité vs électrostatique (Jeans vs Bohm-Gross, effondrement vs stabilité) | `docs/tut_plasma.png` | fréquences à 0.1%, gravité instable / plasma borné |
+| [`diocotron_ring.py`](diocotron_ring.py) | anneau de charge qui se brise en lobes ; densité ET potentiel côte à côte (le couplage en image) | `docs/tut_diocotron_ring.gif` | masse à ~1e-4 (filaments) |
+| [`diocotron_sequence.py`](diocotron_sequence.py) | planche temporelle : rollup linéaire puis vortex non linéaires (idéal rapport) | `docs/tut_diocotron_sequence.png` | masse à l'arrondi |
+| [`euler_poisson_collapse.py`](euler_poisson_collapse.py) | profil rho(x,t) : effondrement de Jeans vs oscillation bornée du plasma | `docs/tut_ep_collapse.gif` | gravité croît, plasma borné |
+| [`two_fluid_field.py`](two_fluid_field.py) | champ 2D : densité électronique + séparation de charge n_e - n_i | `docs/tut_tfap_field.gif` | charge bornée, masse à 1e-10 |
+| [`poisson_backends.py`](poisson_backends.py) | multigrille vs FFT : même densité, écart au niveau de l'arrondi | `docs/tut_poisson_backends.png` | MG = FFT à 1e-12 |
 
 ```bash
 PYTHONPATH=build-py/python python3 tutorials/run/diocotron.py 128 400
+PYTHONPATH=build-py/python python3 tutorials/run/diocotron_ring.py
+PYTHONPATH=build-py/python python3 tutorials/run/diocotron_sequence.py
 PYTHONPATH=build-py/python python3 tutorials/run/two_fluid_ap.py
+PYTHONPATH=build-py/python python3 tutorials/run/two_fluid_field.py
 PYTHONPATH=build-py/python python3 tutorials/run/euler_poisson.py
 PYTHONPATH=build-py/python python3 tutorials/run/plasma.py
+PYTHONPATH=build-py/python python3 tutorials/run/euler_poisson_collapse.py
+PYTHONPATH=build-py/python python3 tutorials/run/poisson_backends.py
 PYTHONPATH=build-py/python python3 tutorials/run/diocotron_growth.py
 ```
 

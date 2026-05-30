@@ -65,6 +65,23 @@ croissance** du mode instable est comparé à la théorie linéaire dans
 `include/adc/analysis/diocotron_growth.hpp` (sous `ADC_USE_EIGEN`) ; voir
 `docs/fig_diocotron_growth.png` et `fig_diocotron_modes.png`.
 
+## En images (bindings Python)
+
+Deux scripts exécutables (voir [run/](run/README.md)) produisent ces figures depuis la
+façade `adc`.
+
+`diocotron_ring.py` rend le couplage visible : un anneau de charge se brise en lobes
+(densité, à gauche, transport `E x B`) pendant que Poisson recalcule le potentiel `phi`
+(à droite, elliptique) à chaque pas.
+
+![diocotron anneau](../docs/tut_diocotron_ring.gif)
+
+`diocotron_sequence.py` fige une bande à six instants : la perturbation linéaire enfle,
+s'enroule en oeil-de-chat, puis fusionne en vortex. Une planche statique, sans GIF, qui
+montre le passage du régime linéaire au régime non linéaire.
+
+![diocotron séquence](../docs/tut_diocotron_sequence.png)
+
 ## Variantes
 
 - `examples/diocotron_column.cpp` : colonne au lieu d'une bande (`docs/anim_diocotron_column.gif`).

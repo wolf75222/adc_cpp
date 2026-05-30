@@ -58,6 +58,18 @@ quasi-neutralité à `omega_pe = 1e3` là où le non-stabilisé explose, conserv
 espèce. `test_two_fluid_ap_amplitude` : enveloppe de robustesse (lisse robuste à eps=0.8,
 front raide). Portable GPU GH200, bit-identique au CPU.
 
+## En images (bindings Python)
+
+`two_fluid_ap.py` (voir [run/](run/README.md)) trace la démonstration AP : le schéma
+stabilisé reste borné quand le non-stabilisé explose, au même pas de temps raide.
+
+![schéma AP borné vs explosif](../docs/tut_tfap_ap.png)
+
+`two_fluid_field.py` anime les champs 2D : la densité électronique `n_e` et la séparation
+de charge `n_e - n_i`, qui oscille à la fréquence plasma tout en restant quasi-neutre.
+
+![champ deux-fluides](../docs/tut_tfap_field.gif)
+
 ## Champ magnétique
 
 `cfg.omega_ce`, `cfg.omega_ci` ajoutent un champ magnétique hors-plan -> rotation cyclotron

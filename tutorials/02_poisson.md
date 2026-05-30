@@ -44,6 +44,11 @@ pas depuis une bonne initialisation.
 `test_fft_coupler` : MG vs FFT donnent `maxdiff = 1.6e-14` après 5 pas (ils inversent le
 même Laplacien discret). `test_poisson`, `test_mpi_poisson` (le distribué via `mpirun`).
 
+Le script `poisson_backends.py` (voir [run/](run/README.md)) le montre sur une simulation
+couplée complète : même densité par les deux chemins, écart au niveau de l'arrondi.
+
+![multigrille vs FFT](../docs/tut_poisson_backends.png)
+
 ## Python
 
 `EulerPoissonConfig.use_fft = True` bascule le backend depuis Python :
