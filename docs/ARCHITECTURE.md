@@ -217,21 +217,23 @@ SubcyclingSchedule   RegridPolicy   OwnershipPolicy
 advance_amr(hierarchy, dt, operators, schedule, execution);   // un seul point d'entree
 ```
 
-**Faiblesse 2 : le multi-patch n'est pas encore un objet distribue (priorite n.1).** Il
-tourne mono-rang : le reflux ecrit la box grossiere localement, la couverture est batie sur
-les patchs locaux. Le MPI multi-patch n'est pas un simple reste-a-faire, c'est structurant.
-Si la cible est AMR + MPI + GPU, chaque patch doit porter **des le depart** :
+**Faiblesse 2 : le multi-patch distribue (priorite n.1).** Fait pour le 2-niveaux :
+`amr_step_2level_multipatch` tourne **reellement distribue** (`test_mpi_amr_multipatch`,
+np=1/2/4 **bit a bit identiques**, masse conservee). Le grossier mono-box est replique
+(copie par-rang + remplissage periodique local au lieu du plan MPI de `fill_boundary`), les
+patchs fins repartis ; `average_down` (ecrasement des cellules couvertes) et reflux
+(addition aux cellules bordantes) remontent par deux buffers grossiers + `all_reduce_sum_inplace`,
+chaque rang appliquant a sa copie. La couverture etait deja batie sur le `box_array()`
+global. Reste : le chemin N-niveaux recursif (`subcycle_level_mp`, grossier multi-box,
+routage `mf_find_box`), puis, cible finale, chaque patch portant **des le depart** :
 
 ```
 owner_rank          global_box_id          parent_level
 interfaces coarse-fine GLOBALES             registre de flux DISTRIBUE
-politique de reduction conservative
+politique de reduction conservative   +   load_balance SFC sur le multi-box
 ```
 
-Sinon le modele mono-rang est une fausse abstraction distribuee qu'il faudra recasser. Le
-chemin concret : all-gather des empreintes pour la couverture globale, gather des registres
-vers le rang du grossier, `load_balance` SFC sur le multi-box. C'est l'item prioritaire de
-la [ROADMAP.md](ROADMAP.md).
+C'est l'item prioritaire de la [ROADMAP.md](ROADMAP.md).
 
 ## 9. Backends : propriete de la bibliotheque, pas un drapeau par cible
 
@@ -280,10 +282,11 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui :
-- Tests : 48/48 CPU serie (Eigen inclus) ; 48/48 OpenMP ; +8 MPI (`mpirun -np 4`) ; +1 HDF5.
+- Tests : 48/48 CPU serie (Eigen inclus) ; 48/48 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
 - Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
   (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
-  conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`).
+  conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`) ; reflux multipatch 2-niveaux
+  DISTRIBUE (`test_mpi_amr_multipatch`, np=1/2/4 a `0` exact).
 - Physique : Jeans 0.1%, Bohm-Gross 0.1%, dispersion deux-fluides 3.1%, cyclotron 0.00%.
 - GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4/7.
 
@@ -303,5 +306,5 @@ Correspondances : `MultiFab`, `BoxArray`/`DistributionMapping`, `Geometry`, `Amr
 FillBoundary, Arena, reflux, MLMG ~ `GeometricMG`. Divergences assumees : pas de `MFIter`
 (on itere `for_each_cell` + fab local, GPU-ready) ; l'operateur elliptique joue `LinOp`
 mais Laplacien a coefficient constant (EB en escalier) ; le FluxRegister / FillPatch
-multi-patch N-niveaux existe mais reste mono-rang (le distribue MPI du reflux multi-patch
-est le morceau structurant restant, section 8).
+multi-patch 2-niveaux est distribue (bit-identique np=1/2/4), le chemin N-niveaux recursif
+restant a generaliser de meme (section 8).

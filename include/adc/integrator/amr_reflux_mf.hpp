@@ -299,19 +299,38 @@ inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
   }
 }
 
+// Remplissage periodique PUREMENT LOCAL des ghosts d'un grossier mono-box (auto-repli).
+// Equivalent a fill_boundary periodique pour une seule box, mais SANS le plan MPI : sert
+// au grossier REPLIQUE (copie par-rang), dont le DistributionMapping par-rang violerait
+// l'hypothese de metadonnees repliquees de fill_boundary. Lit des cellules valides (indices
+// repliees dans [0,N)) et n'ecrit que des ghosts : pas de course lecture/ecriture.
+inline void fill_periodic_local(MultiFab& mf, const Box2D& dom) {
+  device_fence();
+  const int nc = mf.ncomp(), NX = dom.nx(), NY = dom.ny();
+  auto wrap = [](int x, int n) { return (x % n + n) % n; };
+  for (int li = 0; li < mf.local_size(); ++li) {
+    Array4 a = mf.fab(li).array();
+    const Box2D g = mf.fab(li).grown_box();
+    for (int j = g.lo[1]; j <= g.hi[1]; ++j)
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        if (i < 0 || i >= NX || j < 0 || j >= NY)
+          for (int k = 0; k < nc; ++k) a(i, j, k) = a(wrap(i, NX), wrap(j, NY), k);
+  }
+}
+
 // Pas 2-niveaux conservatif, niveau fin MULTI-BOX. Uc : grossier mono-box (periodique).
 // Uf : MultiFab a N boxes fines (ratio 2, strictement interieures, alignees grossier).
 //
-// Etat distribue (MPI) : le REFLUX est deja ecrit en forme distribuee (buffer grossier
-// repique + all_reduce_sum_inplace, voir plus bas) : chaque rang verse les corrections de
-// ses patchs fins locaux, la somme revient au proprietaire du grossier. En serie c'est
-// bit a bit identique au chemin direct. CE QUI MANQUE pour tourner reellement a np>1 : le
-// grossier mono-box vit sur un seul rang, or les rangs possedant un patch fin ont besoin
-// du champ grossier (ghost-fill espace+temps) ET du flux grossier (registre cL/cR). Il
-// faut donc REPLIQUER le grossier (broadcast du champ + du registre vers les rangs fins),
-// et faire remonter average_down par le meme buffer additif. C'est le morceau prioritaire
-// de la ROADMAP (replication grossiere). Tant qu'il n'est pas la, n'appeler cette fonction
-// qu'en mono-rang.
+// Distribue (MPI) avec REPLICATION GROSSIERE. Le grossier mono-box est replique : chaque
+// rang en detient une copie identique (DistributionMapping par-rang, ou init deterministe).
+// L'avance grossiere (fill_boundary self-periodique, flux, advance) tourne identiquement
+// sur chaque copie ; les patchs fins sont, eux, repartis. average_down (ecrasement des
+// cellules couvertes) et reflux (addition aux cellules bordantes) remontent par deux
+// buffers grossiers indexes global + all_reduce_sum_inplace, puis chaque rang applique a sa
+// copie -> toutes restent identiques. En serie c'est bit a bit identique au chemin direct
+// (voir le bloc final). Validation : test_mpi_amr_multipatch (np=1/2/4 bit-identiques). Le
+// grossier est petit (niveau de base), la replication est donc assumee ; le chemin N-niveaux
+// recursif (subcycle_level_mp) reste a generaliser de la meme facon (ROADMAP).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
                                 Real dyc, MultiFab& Uf, const MultiFab& auxc,
@@ -334,7 +353,7 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   };
 
   MultiFab Uc_old = Uc;
-  fill_boundary(Uc, dom, Periodicity{true, true});
+  fill_periodic_local(Uc, dom);  // grossier replique -> fill periodique local (pas de plan MPI)
   MultiFab fxc(BoxArray(std::vector<Box2D>{xface_box(Uc.box(0))}), Uc.dmap(), nc, 0);
   MultiFab fyc(BoxArray(std::vector<Box2D>{yface_box(Uc.box(0))}), Uc.dmap(), nc, 0);
   compute_face_fluxes<Limiter, NumericalFlux>(m, Uc, auxc, fxc, fyc);
@@ -369,11 +388,14 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   }
   mf_advance_faces(Uc, fxc, fyc, dxc, dyc, dt);
 
-  // flux fins multi-box (une face-box par box fine, meme dmap).
+  // flux fins multi-box : une face-box par box fine GLOBALE, meme dmap que Uf. Bati sur le
+  // box_array() global (et non les boxes locales) pour que BoxArray et DistributionMapping
+  // aient la meme taille sous MPI : fxf.fab(li) correspond alors a Uf.fab(li) (meme dmap,
+  // meme ordre global). En serie c'est identique (local == global).
   std::vector<Box2D> fxb, fyb;
-  for (int li = 0; li < Uf.local_size(); ++li) {
-    fxb.push_back(xface_box(Uf.box(li)));
-    fyb.push_back(yface_box(Uf.box(li)));
+  for (int g = 0; g < Uf.box_array().size(); ++g) {
+    fxb.push_back(xface_box(Uf.box_array()[g]));
+    fyb.push_back(yface_box(Uf.box_array()[g]));
   }
   MultiFab fxf(BoxArray(std::move(fxb)), Uf.dmap(), nc, 0);
   MultiFab fyf(BoxArray(std::move(fyb)), Uf.dmap(), nc, 0);
@@ -405,46 +427,57 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     mf_advance_faces(Uf, fxf, fyf, dxf, dyf, dtf);
   }
 
-  mf_average_down_multi(Uf, Uc);
-
-  // reflux coverage-aware DISTRIBUE. Chaque rang accumule les corrections de SES patchs
-  // fins locaux dans un buffer grossier repique (indexe global, 0 ailleurs), puis
-  // all-reduce -> chaque rang a la somme, et le proprietaire du grossier mono-box
-  // l'applique. En serie (np=1) l'all-reduce est l'identite : la correction d'une
-  // cellule grossiere bordant un seul patch fin (cas usuel) est bit a bit identique au
-  // chemin direct. Le grossier etant mono-box, son proprietaire detient toutes les
-  // cellules visees. Cout : un buffer NX*NY*nc par rang (replication grossiere assumee).
+  // average_down + reflux DISTRIBUES, le grossier etant REPLIQUE (chaque rang detient une
+  // copie identique apres l'avance grossiere deterministe). Chaque rang verse, pour ses
+  // patchs fins LOCAUX, dans deux buffers grossiers indexes global :
+  //   avg : la moyenne descendante sur les cellules COUVERTES (semantique ecrasement ;
+  //         une seule contribution par cellule, les patchs etant disjoints) ;
+  //   ref : la correction de reflux sur les cellules BORDANTES non couvertes (addition).
+  // all_reduce_sum -> chaque rang a le total, puis applique a SA copie : couvert = avg,
+  // bordant += ref. Toutes les copies restent identiques. En serie (np=1) l'all-reduce est
+  // l'identite et c'est bit a bit identique au direct (0 + moyenne = moyenne exactement ;
+  // avance + correction). Cout : deux buffers NX*NY*nc par rang (replication grossiere).
   device_fence();
-  std::vector<Real> corr(static_cast<std::size_t>(NX) * NY * nc, Real(0));
-  auto cadd = [&](int I, int J, int k, Real v) {
-    if (I >= 0 && I < NX && J >= 0 && J < NY)
-      corr[(static_cast<std::size_t>(J) * NX + I) * nc + k] += v;
+  const std::size_t N = static_cast<std::size_t>(NX) * NY * nc;
+  std::vector<Real> avg(N, Real(0)), ref(N, Real(0));
+  auto idx = [&](int I, int J, int k) { return (static_cast<std::size_t>(J) * NX + I) * nc + k; };
+  auto radd = [&](int I, int J, int k, Real v) {
+    if (I >= 0 && I < NX && J >= 0 && J < NY) ref[idx(I, J, k)] += v;
   };
   for (int li = 0; li < Uf.local_size(); ++li) {
+    const ConstArray4 f = Uf.fab(li).const_array();
     Reg& g = regs[li];
+    for (int J = g.J0; J <= g.J1; ++J)
+      for (int I = g.I0; I <= g.I1; ++I)
+        for (int k = 0; k < nc; ++k)
+          avg[idx(I, J, k)] = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                            f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
     for (int J = g.J0; J <= g.J1; ++J)
       for (int k = 0; k < nc; ++k) {
         if (!covered(g.I0 - 1, J))
-          cadd(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc);
+          radd(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc);
         if (!covered(g.I1 + 1, J))
-          cadd(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc);
+          radd(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc);
       }
     for (int I = g.I0; I <= g.I1; ++I)
       for (int k = 0; k < nc; ++k) {
         if (!covered(I, g.J0 - 1))
-          cadd(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc);
+          radd(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc);
         if (!covered(I, g.J1 + 1))
-          cadd(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc);
+          radd(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc);
       }
   }
-  all_reduce_sum_inplace(corr.data(), static_cast<int>(corr.size()));
-  if (Uc.local_size() > 0) {  // proprietaire du grossier mono-box
+  all_reduce_sum_inplace(avg.data(), static_cast<int>(N));
+  all_reduce_sum_inplace(ref.data(), static_cast<int>(N));
+  if (Uc.local_size() > 0) {  // chaque rang detenant une copie du grossier l'applique
     Array4 c = Uc.fab(0).array();
     const Box2D cb = Uc.box(0);
     for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
       for (int I = cb.lo[0]; I <= cb.hi[0]; ++I)
-        for (int k = 0; k < nc; ++k)
-          c(I, J, k) += corr[(static_cast<std::size_t>(J) * NX + I) * nc + k];
+        for (int k = 0; k < nc; ++k) {
+          if (covered(I, J)) c(I, J, k) = avg[idx(I, J, k)];  // moyenne descendante
+          c(I, J, k) += ref[idx(I, J, k)];                    // reflux (0 si pas de face)
+        }
   }
 }
 

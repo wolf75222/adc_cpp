@@ -49,17 +49,16 @@ Issu d'une revue : la faiblesse structurelle est le mélange discrétisation / s
 exécution, et un AMR multi-patch pas encore pensé distribué. Voir
 [ARCHITECTURE.md](ARCHITECTURE.md) (modèle en quatre couches, sections marquées « cible »).
 
-1. **AMR multi-patch nativement distribué (priorité absolue).** Avancé : la couverture est
-   déjà bâtie sur le `box_array()` global (MPI-safe), et le REFLUX de `amr_step_2level_multipatch`
-   est réécrit en forme distribuée (buffer grossier répliqué + `all_reduce_sum_inplace`),
-   bit à bit identique en série et à np=1. Blocage actif : le grossier mono-box vit sur un
-   seul rang, mais les rangs portant un patch fin ont besoin du champ grossier (ghost-fill)
-   et du flux grossier (registre). Il faut donc RÉPLIQUER le grossier (broadcast du champ +
-   du registre vers les rangs fins) et faire remonter `average_down` par le même buffer
-   additif ; puis généraliser au chemin N-niveaux récursif (`subcycle_level_mp`). Cible
-   finale : chaque patch porte `owner_rank`, `global_box_id`, interfaces coarse-fine
-   globales, registre distribué, politique de réduction conservative ; `load_balance` SFC
-   sur le multi-box. Repousser fige une fausse abstraction distribuée.
+1. **AMR multi-patch nativement distribué (priorité absolue).** Fait pour le 2-niveaux :
+   `amr_step_2level_multipatch` tourne **réellement distribué** (`test_mpi_amr_multipatch`,
+   np=1/2/4 **bit à bit identiques**, masse conservée). Le grossier mono-box est répliqué
+   (copie par-rang + remplissage périodique local), les patchs fins répartis, `average_down`
+   (écrasement couvert) et reflux (addition bordante) remontent par deux buffers grossiers +
+   `all_reduce_sum_inplace`. Au passage, un bug mono-rang corrigé : les face-box des flux fins
+   se bâtissaient sur les boxes **locales** avec le dmap **global** (tailles incohérentes sous
+   MPI). Reste : généraliser au chemin N-niveaux récursif (`subcycle_level_mp`, grossier
+   multi-box, routage `mf_find_box`) ; puis, cible finale, chaque patch portant `owner_rank`,
+   `global_box_id`, interfaces coarse-fine globales, registre distribué, `load_balance` SFC.
 2. **Moteur AMR unifié.** Replier la famille `amr_step_2level_mf` / `_multilevel_mf` /
    `_2level_multipatch` / `_multilevel_multipatch` (duplication par cas particulier) sur un
    seul `advance_amr(hierarchy, dt, operators, schedule, execution)`, au-dessus d'objets
