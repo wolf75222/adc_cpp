@@ -85,9 +85,11 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
 4. **API mémoire explicite.** Remplacer la discipline manuelle `device_fence()` par
    `device_reduce` / `device_norm_inf` / `sync_host` / `sync_device` ; faire de `sum` et
    `norm_inf` de vraies réductions device (pas des boucles hôte protégées par fence).
-5. **Séparer les trois familles de ghosts** en briques nommées testables :
-   `BoundaryCondition` (physique), `GhostExchange` (parallèle), `AMRBoundaryInterpolation`
-   (coarse-fine).
+5. **Séparer les trois familles de ghosts** en briques nommées testables. Largement fait :
+   `fill_physical_bc` (BoundaryCondition, testé seul `test_physical_bc`), `fill_boundary`
+   (GhostExchange, testé `test_mpi_fillboundary`), `mf_fill_fine_ghosts_*`
+   (AMRBoundaryInterpolation) sont déjà séparés ; `fill_ghosts` n'est qu'une composition
+   explicite de (1) + (2). Reste : remonter le coarse-fine en helper nommé de premier niveau.
 6. **CouplingPolicy mince.** Sortir la hiérarchie, le regrid et les diagnostics des coupleurs
    pour que la policy ne fasse plus qu'ordonner les opérations.
 7. **Suite de validation numérique (FAIT).** Le bit-identique ne prouve pas la justesse ;

@@ -106,7 +106,7 @@ prend une box et un lambda `ADC_HD(i, j)`. S'il devenait un fourre-tout
 (`for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)`), on recreerait un framework opaque.
 La logique numerique reste dans le lambda (couche 2), pas dans le seam.
 
-**Deux familles de ghosts, a ne pas confondre :**
+**Trois familles de ghosts, a ne pas confondre :**
 
 ```
 1. Ghosts PHYSIQUES   CL au bord du domaine : Dirichlet, Neumann/Foextrap, periodique, mur.
@@ -114,12 +114,15 @@ La logique numerique reste dans le lambda (couche 2), pas dans le seam.
 3. Ghosts COARSE-FINE interpolation entre niveaux AMR.
 ```
 
-Aujourd'hui : (1) est dans `mesh/physical_bc.hpp` (`fill_physical_bc`, `BCRec`), (2) dans
-`mesh/fill_boundary.hpp` (echange intra-niveau). La separation existe donc au niveau
-fichier. **Cible** : (3) l'interpolation coarse-fine vit encore dans le pas AMR
-(`mf_fill_fine_ghosts_mb`) et `fill_ghosts` melange encore physique et parallele ; il faut
-en faire des briques nommees distinctes (`BoundaryCondition`, `GhostExchange`,
-`AMRBoundaryInterpolation`) testables isolement.
+Etat : les trois sont deja des briques SEPAREES et testees isolement.
+- (1) `BoundaryCondition` = `mesh/physical_bc.hpp::fill_physical_bc` (Foextrap, Dirichlet,
+  coins), teste seul (`test_physical_bc`).
+- (2) `GhostExchange` = `mesh/fill_boundary.hpp` (echange intra-niveau + periodique), teste
+  seul (`test_mpi_fillboundary`, `test_mpi_overlap`).
+- (3) `AMRBoundaryInterpolation` = `mf_fill_fine_ghosts_*` (interp espace+temps coarse-fine).
+`fill_ghosts` n'est PAS un fourre-tout : c'est une COMPOSITION explicite de (1) puis (2)
+(`fill_boundary` ; `fill_physical_bc`). **Reste (cible)** : remonter (3), qui vit dans le pas
+AMR, en helper nomme de premier niveau (et le rendre distribue, cf. section 8).
 
 **Modele memoire : remplacer la discipline manuelle par une API explicite.** Aujourd'hui,
 toute fonction qui fait un kernel device puis une boucle HOTE sur la meme memoire doit
