@@ -88,9 +88,13 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    `FluxRegister` est un VRAI TYPE (registre grossier indexé global sur une région : `set`
    écrase, `add` accumule borné, `gather` fait l'`all_reduce`), substitué aux quatre buffers
    manuels du reflux (2-niveaux avg/ref, N-niveaux avg/ref) bit-identique (np=1/2/4 `maxdiff=0`),
-   contrat figé par `test_flux_register`. Reste : promouvoir les rôles restants (`PatchRange`,
-   `CoarseFineInterface`, `SubcyclingSchedule`, `RegridPolicy`, encore inlines dans
-   `subcycle_level_mp`) et y replier la famille `amr_step_*` (qui encode le cas dans le nom).
+   contrat figé par `test_flux_register`. `CoverageMask` est aussi un VRAI TYPE (masque grossier
+   sur une région : `mark(box)` marque une empreinte fine clippée, `covered(I,J)` borné), la part
+   « couverture » de `CoarseFineInterface` (le masque anti-double-reflux), substitué aux trois
+   masques manuels, bit-identique (np=1/2/4 `maxdiff=0`), contrat figé par `test_coverage_mask`.
+   Reste : promouvoir les rôles restants (`PatchRange`, le routage bordant de `CoarseFineInterface`,
+   `SubcyclingSchedule`, `RegridPolicy`, encore inlines dans `subcycle_level_mp`) et y replier la
+   famille `amr_step_*` (qui encode le cas dans le nom).
 3. **Découper l'elliptique.** Avancé : l'`EllipticOperator` existe déjà séparé
    (`poisson_operator.hpp` : `apply_laplacian`, `poisson_residual`, lisseur) ; le
    `LinearSolver` est le concept `EllipticSolver` (MG, FFT) ; l'identité MG = FFT est rendue

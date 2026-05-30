@@ -265,16 +265,19 @@ conservatifs.
 `subcycle_level_mp` encodent le cas dans le NOM. Entree unifiee FAITE : `advance_amr(m,
 LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom + periodicite).
 Verifie facade-fidele en **2 ET 3 niveaux** (`test_advance_amr`, `maxdiff = 0` vs l'appel
-direct, derive masse `< 1e-12`) et conservatif. La PROMOTION des roles en types a commence :
+direct, derive masse `< 1e-12`) et conservatif. La PROMOTION des roles en types avance :
 `OwnershipPolicy` est un alias reel de `DistributionMapping` ; `FluxRegister` est un VRAI TYPE
 (registre grossier indexe global sur une region : `set` ecrase, `add` accumule borne, `gather`
-fait l'`all_reduce`), substitue aux quatre buffers manuels du reflux (2-niveaux avg/ref,
-N-niveaux avg/ref) a l'identique (np=1/2/4 `maxdiff = 0`), contrat fige par `test_flux_register`.
-Les autres roles restent nommes-mais-inlines, a extraire de meme.
+fait l'`all_reduce`), substitue aux quatre buffers manuels du reflux ; `CoverageMask` est un
+VRAI TYPE (masque grossier sur une region : `mark(box)` marque une empreinte fine clippee,
+`covered(I,J)` borne) qui porte la part "couverture" de `CoarseFineInterface` (le masque
+anti-double-reflux), substitue aux trois masques manuels. Les deux a l'identique (np=1/2/4
+`maxdiff = 0`), contrats figes par `test_flux_register` / `test_coverage_mask`.
 
 ```
-LevelHierarchy [fait, type]   OwnershipPolicy [fait, alias]   FluxRegister [fait, type]
-PatchRange = AmrLevelMP   CoarseFineInterface = masque + routage reflux
+LevelHierarchy [fait, type]   OwnershipPolicy [fait, alias]
+FluxRegister [fait, type]     CoverageMask [fait, type] (part "couverture" de CoarseFineInterface)
+PatchRange = AmrLevelMP   CoarseFineInterface : routage bordant reste inline
 SubcyclingSchedule = recursion Berger-Oliger   RegridPolicy = amr_regrid_finest (BR)
 // roles restants : nommes, encore inlines dans subcycle_level_mp ; extraction en types : reste
 

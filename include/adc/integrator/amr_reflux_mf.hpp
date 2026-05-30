@@ -344,6 +344,30 @@ struct FluxRegister {
   void gather() { all_reduce_sum_inplace(buf.data(), static_cast<int>(buf.size())); }
 };
 
+// CoverageMask (revue, point 2 : part "couverture" de CoarseFineInterface). Masque grossier
+// sur une REGION disant quelles cellules sont OMBRAGEES par un patch fin. Bati sur le
+// box_array GLOBAL (connu de tous les rangs) -> MPI-safe. mark(box) marque l'empreinte
+// grossiere d'un patch (intersectee a la region) ; covered(I,J) est borne (faux hors region).
+// C'est ce qui empeche le double-reflux d'un joint fin-fin. Memes cellules qu'avant.
+struct CoverageMask {
+  int I0, J0, NX, NY;
+  std::vector<char> cov;
+  explicit CoverageMask(const Box2D& region)
+      : I0(region.lo[0]), J0(region.lo[1]),
+        NX(region.hi[0] - region.lo[0] + 1), NY(region.hi[1] - region.lo[1] + 1),
+        cov(static_cast<std::size_t>(NX) * NY, 0) {}
+  void mark(const Box2D& b) {  // marque les cellules de b intersectees a la region
+    const int i0 = std::max(b.lo[0], I0), i1 = std::min(b.hi[0], I0 + NX - 1);
+    const int j0 = std::max(b.lo[1], J0), j1 = std::min(b.hi[1], J0 + NY - 1);
+    for (int J = j0; J <= j1; ++J)
+      for (int I = i0; I <= i1; ++I) cov[(static_cast<std::size_t>(J - J0) * NX) + (I - I0)] = 1;
+  }
+  bool covered(int I, int J) const {
+    if (I < I0 || I >= I0 + NX || J < J0 || J >= J0 + NY) return false;
+    return cov[(static_cast<std::size_t>(J - J0) * NX) + (I - I0)] != 0;
+  }
+};
+
 // Pas 2-niveaux conservatif, niveau fin MULTI-BOX. Uc : grossier mono-box (periodique).
 // Uf : MultiFab a N boxes fines (ratio 2, strictement interieures, alignees grossier).
 //
@@ -367,16 +391,12 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
 
   // masque de couverture : cellules grossieres couvertes par une box fine. Bati sur le
   // BoxArray GLOBAL (toutes les boxes, connues de tous les rangs) -> correct sous MPI.
-  std::vector<char> cov(static_cast<std::size_t>(NX) * NY, 0);
+  CoverageMask cmask(Box2D{{0, 0}, {NX - 1, NY - 1}});
   for (int g = 0; g < Uf.box_array().size(); ++g) {
     const Box2D fb = Uf.box_array()[g];
-    for (int J = fb.lo[1] / 2; J <= (fb.hi[1] - 1) / 2; ++J)
-      for (int I = fb.lo[0] / 2; I <= (fb.hi[0] - 1) / 2; ++I)
-        cov[static_cast<std::size_t>(J) * NX + I] = 1;
+    cmask.mark(Box2D{{fb.lo[0] / 2, fb.lo[1] / 2}, {(fb.hi[0] - 1) / 2, (fb.hi[1] - 1) / 2}});
   }
-  auto covered = [&](int I, int J) {
-    return (I >= 0 && I < NX && J >= 0 && J < NY) ? cov[static_cast<std::size_t>(J) * NX + I] : char(0);
-  };
+  auto covered = [&](int I, int J) { return cmask.covered(I, J); };
 
   MultiFab Uc_old = Uc;
   fill_periodic_local(Uc, dom);  // grossier replique -> fill periodique local (pas de plan MPI)
@@ -616,20 +636,12 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
     bb = (g == 0) ? cba[g] : Box2D{{std::min(bb.lo[0], cba[g].lo[0]), std::min(bb.lo[1], cba[g].lo[1])},
                                    {std::max(bb.hi[0], cba[g].hi[0]), std::max(bb.hi[1], cba[g].hi[1])}};
   if (bb.empty()) { all_reduce_sum_inplace(nullptr, 0); return; }  // collective appariee a vide
-  const int BX = bb.nx(), BY = bb.ny();
   FluxRegister avg(bb, nc);  // moyenne descendante multi-box (region = boite englobante)
   // couverture GLOBALE (toutes les empreintes enfant) : seules ces cellules sont ecrasees ;
   // la boite englobante peut contenir des trous entre patchs disjoints qu'il ne faut PAS ecraser.
-  std::vector<char> cov(static_cast<std::size_t>(BX) * BY, 0);
-  for (int g = 0; g < cba.size(); ++g) {
-    const Box2D cb = cba[g];
-    for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
-      for (int I = cb.lo[0]; I <= cb.hi[0]; ++I)
-        cov[(static_cast<std::size_t>(J - bb.lo[1]) * BX) + (I - bb.lo[0])] = 1;
-  }
-  auto covered = [&](int I, int J) {
-    return cov[(static_cast<std::size_t>(J - bb.lo[1]) * BX) + (I - bb.lo[0])];
-  };
+  CoverageMask cmask(bb);
+  for (int g = 0; g < cba.size(); ++g) cmask.mark(cba[g]);
+  auto covered = [&](int I, int J) { return cmask.covered(I, J); };
   device_fence();
   for (int lf = 0; lf < Uf.local_size(); ++lf) {
     const ConstArray4 f = Uf.fab(lf).const_array();
@@ -726,17 +738,12 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
 
   // role GROSSIER pour lev+1 : couverture + registres + flux grossier sauve.
   const int NX = base_dom.nx() << lev, NY = base_dom.ny() << lev;
-  std::vector<char> cov(static_cast<std::size_t>(NX) * NY, 0);  // couverture GLOBALE (MPI-safe)
+  CoverageMask cmask(Box2D{{0, 0}, {NX - 1, NY - 1}});  // couverture GLOBALE (MPI-safe)
   for (int g = 0; g < L[lev + 1].U.box_array().size(); ++g) {
     const Box2D cb = L[lev + 1].U.box_array()[g];
-    for (int J = cb.lo[1] / 2; J <= (cb.hi[1] - 1) / 2; ++J)
-      for (int I = cb.lo[0] / 2; I <= (cb.hi[0] - 1) / 2; ++I)
-        cov[static_cast<std::size_t>(J) * NX + I] = 1;
+    cmask.mark(Box2D{{cb.lo[0] / 2, cb.lo[1] / 2}, {(cb.hi[0] - 1) / 2, (cb.hi[1] - 1) / 2}});
   }
-  auto covered = [&](int I, int J) {
-    return (I >= 0 && I < NX && J >= 0 && J < NY) ? cov[static_cast<std::size_t>(J) * NX + I]
-                                                  : char(0);
-  };
+  auto covered = [&](int I, int J) { return cmask.covered(I, J); };
 
   // Point 2 distribue : le flux grossier fx/fy vit sur la dmap du PARENT (lv.U), donc fx.fab
   // est sur le rang proprietaire de la box parente, pas forcement celui de l'enfant. Deux cas :
