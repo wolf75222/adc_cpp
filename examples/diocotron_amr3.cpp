@@ -76,8 +76,8 @@ int main(int argc, char** argv) {
   init(U0, dxc, dyc);
   init(U1, dxf1, dyf1);
   init(U2, dxf2, dyf2);
-  mf_average_down(U2, U1, L2CI0, L2CI1, L2CJ0, L2CJ1);
-  mf_average_down(U1, U0, L1CI0, L1CI1, L1CJ0, L1CJ1);
+  mf_average_down_mb(U2, U1);
+  mf_average_down_mb(U1, U0);
   {
     const ConstArray4 u0 = U0.fab(0).const_array();
     double mean = 0;
@@ -86,14 +86,14 @@ int main(int argc, char** argv) {
     model.n_i0 = mean / (double(nc) * nc);
   }
 
-  std::vector<AmrLevelMF> L0;
-  L0.push_back({std::move(U0), nullptr, dxc, dyc, L1CI0, L1CI1, L1CJ0, L1CJ1, true});
-  L0.push_back({std::move(U1), nullptr, dxf1, dyf1, L2CI0, L2CI1, L2CJ0, L2CJ1, true});
-  L0.push_back({std::move(U2), nullptr, dxf2, dyf2, 0, 0, 0, 0, false});
+  std::vector<AmrLevelMP> L0;
+  L0.push_back({std::move(U0), nullptr, dxc, dyc});
+  L0.push_back({std::move(U1), nullptr, dxf1, dyf1});
+  L0.push_back({std::move(U2), nullptr, dxf2, dyf2});
 
   BCRec bc;  // periodique
   AmrCoupler<Diocotron> sim(model, geom, ba, bc, std::move(L0));
-  std::vector<AmrLevelMF>& L = sim.levels();
+  std::vector<AmrLevelMP>& L = sim.levels();
 
   // --- PROPRE A CET EXEMPLE : regrid imbrique par tag gradient ---
   auto regrid = [&]() {
@@ -166,10 +166,8 @@ int main(int argc, char** argv) {
           a(i, j, 0) = old2.contains(i, j) ? o2(i, j, 0) : c1(crsn(i), crsn(j), 0);
     }
 
-    L[1].U = std::move(nU1);  // aux resynchronise par le stepper
+    L[1].U = std::move(nU1);  // region portee par le box_array ; aux resync par le stepper
     L[2].U = std::move(nU2);
-    L[0].rCI0 = nL1CI0; L[0].rCI1 = nL1CI1; L[0].rCJ0 = nL1CJ0; L[0].rCJ1 = nL1CJ1;
-    L[1].rCI0 = nL2CI0; L[1].rCI1 = nL2CI1; L[1].rCJ0 = nL2CJ0; L[1].rCJ1 = nL2CJ1;
   };
 
   // --- I/O : densite par niveau + extents ---

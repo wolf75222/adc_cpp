@@ -1,10 +1,11 @@
 // Test de caracterisation du AmrCoupler (le coupleur AMR de production, ce qui tourne
 // dans examples/diocotron_amr.cpp), desormais PORTE sur la pile MultiFab + le seam
-// (AmrLevelMF + amr_step_multilevel_mf + compute_face_fluxes). Fige son comportement :
-// conservation de la masse sur la hierarchie 2 niveaux (reflux coarse-fine a l'arrondi),
-// finitude, couplage Poisson effectif. Le meme invariant que la version Fab2D.
+// (AmrLevelMP + advance_amr, le moteur unifie multi-patch dont le mono-box est le cas
+// degenere). Fige son comportement : conservation de la masse sur la hierarchie 2
+// niveaux (reflux coarse-fine a l'arrondi), finitude, couplage Poisson effectif. Le
+// meme invariant que la version Fab2D.
 
-#include <adc/coupling/amr_coupler.hpp>       // AmrCoupler + AmrLevelMF + mf_average_down
+#include <adc/coupling/amr_coupler.hpp>       // AmrCoupler + AmrLevelMP + mf_average_down_mb
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -56,11 +57,11 @@ int main() {
       for (int i = fbox.lo[0]; i <= fbox.hi[0]; ++i)
         uf(i, j, 0) = ne0((i + 0.5) * dxf, (j + 0.5) * dyf);
   }
-  mf_average_down(Uf, Uc, CI0, CI1, CJ0, CJ1);
+  mf_average_down_mb(Uf, Uc);
 
-  std::vector<AmrLevelMF> L0;
-  L0.push_back({std::move(Uc), nullptr, dxc, dyc, CI0, CI1, CJ0, CJ1, true});
-  L0.push_back({std::move(Uf), nullptr, dxf, dyf, 0, 0, 0, 0, false});
+  std::vector<AmrLevelMP> L0;
+  L0.push_back({std::move(Uc), nullptr, dxc, dyc});
+  L0.push_back({std::move(Uf), nullptr, dxf, dyf});
 
   BCRec bc;  // periodique
   AmrCoupler<Diocotron> sim(model, geom, ba, bc, std::move(L0));

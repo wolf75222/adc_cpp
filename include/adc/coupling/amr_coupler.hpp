@@ -6,7 +6,7 @@
 #include <adc/coupling/coupler.hpp>  // detail::coupler_eval_rhs (f = model.elliptic_rhs(U))
 #include <adc/elliptic/elliptic_solver.hpp>  // concept EllipticSolver
 #include <adc/elliptic/geometric_mg.hpp>
-#include <adc/integrator/amr_reflux_mf.hpp>  // AmrLevelMF, amr_step_multilevel_mf, mf_average_down
+#include <adc/integrator/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fill_boundary.hpp>
@@ -20,18 +20,21 @@
 #include <vector>
 
 // Stepper couple AMR E x B, PORTE sur la pile MultiFab + le seam. La hierarchie est
-// une std::vector<AmrLevelMF> (mono-box par niveau) detenue par un AmrLevelStack ;
-// l'integration passe par amr_step_multilevel_mf (sous-cyclage Berger-Oliger +
-// reflux, via compute_face_fluxes -> MUSCL/HLL/HLLC/GPU dispo) et l'elliptique par un
-// EllipticSolver (defaut MG).
+// une std::vector<AmrLevelMP> (un MultiFab par niveau) detenue par un AmrLevelStack ;
+// l'integration passe par advance_amr, le moteur AMR unifie multi-patch (sous-cyclage
+// Berger-Oliger + reflux coverage-aware, via compute_face_fluxes -> MUSCL/HLL/HLLC/GPU
+// dispo) et l'elliptique par un EllipticSolver (defaut MG). Le mono-box est le cas
+// degenere (une box par niveau) de ce moteur, bit-identique a l'ancien chemin mono-box
+// (garde 1 de test_amr_multilevel_multipatch).
 //
 //   sync_down (fin -> grossier) -> Poisson grossier -> aux = grad phi (grossier)
-//   + injection vers les fins -> amr_step_multilevel_mf (N niveaux conservatif).
+//   + injection vers les fins -> advance_amr (N niveaux conservatif).
 //
 // La classe coupleur n'ORDONNE plus que les operations : la hierarchie (stockage des
 // niveaux + aux) est sortie dans AmrLevelStack, les diagnostics (masse, derive) dans
 // amr_diagnostics.hpp. Le critere de raffinement / regrid reste a l'appelant
-// (specifique au probleme) ; il manipule levels() pour reconstruire les box fines, le
+// (specifique au probleme) ; il manipule levels() pour reconstruire les box fines (la
+// region raffinee est portee par le box_array du niveau fin, plus d'indices rC*), le
 // stepper resynchronise aux. Generique sur le modele (Diocotron ; tout modele a alpha,
 // n_i0, B0, flux E x B).
 
@@ -59,24 +62,23 @@ class AmrCoupler {
 
  public:
   AmrCoupler(const Model& model, const Geometry& geom, const BoxArray& ba_coarse,
-             const BCRec& bc, std::vector<AmrLevelMF> levels)
+             const BCRec& bc, std::vector<AmrLevelMP> levels)
       : model_(model),
         geom_(geom),
         mg_(geom, ba_coarse, bc),
         stack_(geom.domain, std::move(levels)) {}
 
-  std::vector<AmrLevelMF>& levels() { return stack_.levels(); }
-  const std::vector<AmrLevelMF>& levels() const { return stack_.levels(); }
+  std::vector<AmrLevelMP>& levels() { return stack_.levels(); }
+  const std::vector<AmrLevelMP>& levels() const { return stack_.levels(); }
   MultiFab& coarse() { return stack_.coarse(); }
   const MultiFab& coarse() const { return stack_.coarse(); }
   const Box2D& domain() const { return stack_.domain(); }
 
-  // moyenne fin -> grossier sur toute la hierarchie (avant le solve Poisson).
+  // moyenne fin -> grossier sur toute la hierarchie (avant le solve Poisson). Region
+  // deduite du box_array du niveau fin (mf_average_down_mb) : bit-identique au mono-box.
   void sync_down() {
     auto& L = stack_.L();
-    for (int k = stack_.nlev() - 1; k >= 1; --k)
-      mf_average_down(L[k].U, L[k - 1].U, L[k - 1].rCI0, L[k - 1].rCI1,
-                      L[k - 1].rCJ0, L[k - 1].rCJ1);
+    for (int k = stack_.nlev() - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
   }
 
   // Poisson grossier + aux = grad phi + injection vers les fins. Reconstruit aux_[k]
@@ -112,7 +114,7 @@ class AmrCoupler {
 
   void step(Real dt) {
     update();
-    amr_step_multilevel_mf<NoSlope, RusanovFlux>(model_, stack_.L(), stack_.domain(), dt);
+    advance_amr<NoSlope, RusanovFlux>(model_, stack_.L(), stack_.domain(), dt);
   }
 
   Real max_drift_speed() const {
@@ -127,7 +129,7 @@ class AmrCoupler {
   Model model_;
   Geometry geom_;
   Elliptic mg_;
-  AmrLevelStack<AmrLevelMF> stack_;
+  AmrLevelStack<AmrLevelMP> stack_;
 };
 
 }  // namespace adc

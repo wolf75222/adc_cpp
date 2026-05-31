@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
       for (int i = fbox.lo[0]; i <= fbox.hi[0]; ++i)
         uf(i, j, 0) = ne0((i + 0.5) * dxf, (j + 0.5) * dyf);
   }
-  mf_average_down(Uf, Uc, CI0, CI1, CJ0, CJ1);
+  mf_average_down_mb(Uf, Uc);
   {
     const ConstArray4 uc = Uc.fab(0).const_array();
     double mean = 0;
@@ -73,13 +73,13 @@ int main(int argc, char** argv) {
     model.n_i0 = mean / (double(nc) * nc);
   }
 
-  std::vector<AmrLevelMF> L0;
-  L0.push_back({std::move(Uc), nullptr, dxc, dyc, CI0, CI1, CJ0, CJ1, true});
-  L0.push_back({std::move(Uf), nullptr, dxf, dyf, 0, 0, 0, 0, false});
+  std::vector<AmrLevelMP> L0;
+  L0.push_back({std::move(Uc), nullptr, dxc, dyc});
+  L0.push_back({std::move(Uf), nullptr, dxf, dyf});
 
   BCRec bc;  // periodique
   AmrCoupler<Diocotron> sim(model, geom, ba, bc, std::move(L0));
-  std::vector<AmrLevelMF>& L = sim.levels();
+  std::vector<AmrLevelMP>& L = sim.levels();
 
   // --- PROPRE A CET EXEMPLE : regrid dynamique (densite au-dessus du fond) ---
   auto regrid = [&]() {
@@ -95,18 +95,18 @@ int main(int argc, char** argv) {
     const int buf = 4;
     const int nCI0 = std::max(2, i0 - buf), nCI1 = std::min(nc - 3, i1 + buf);
     const int nCJ0 = std::max(2, j0 - buf), nCJ1 = std::min(nc - 3, j1 + buf);
-    if (nCI0 == L[0].rCI0 && nCI1 == L[0].rCI1 && nCJ0 == L[0].rCJ0 && nCJ1 == L[0].rCJ1)
+    const Box2D oldfb = L[1].U.box(0);  // box fine courante ; sa coarsen = region (niveau 0)
+    if (nCI0 == oldfb.lo[0] / 2 && nCI1 == (oldfb.hi[0] - 1) / 2 &&
+        nCJ0 == oldfb.lo[1] / 2 && nCJ1 == (oldfb.hi[1] - 1) / 2)
       return;
     Box2D nf{{2 * nCI0, 2 * nCJ0}, {2 * nCI1 + 1, 2 * nCJ1 + 1}};
     MultiFab Ufn(BoxArray(std::vector<Box2D>{nf}), dm, 1, 1);
     const ConstArray4 ofo = L[1].U.fab(0).const_array();
-    const Box2D oldfb = L[1].U.box(0);
     Array4 a = Ufn.fab(0).array();
     for (int j = nf.lo[1]; j <= nf.hi[1]; ++j)
       for (int i = nf.lo[0]; i <= nf.hi[0]; ++i)
         a(i, j, 0) = oldfb.contains(i, j) ? ofo(i, j, 0) : c(crsn(i), crsn(j), 0);
-    L[1].U = std::move(Ufn);  // aux resynchronise par le stepper
-    L[0].rCI0 = nCI0; L[0].rCI1 = nCI1; L[0].rCJ0 = nCJ0; L[0].rCJ1 = nCJ1;
+    L[1].U = std::move(Ufn);  // region portee par le box_array ; aux resync par le stepper
   };
 
   // --- I/O ---
@@ -119,8 +119,9 @@ int main(int argc, char** argv) {
     const ConstArray4 u = L[0].U.fab(0).const_array();
     for (int j = 0; j < nc; ++j)
       for (int i = 0; i < nc; ++i) f << u(i, j, 0) << (i + 1 < nc ? ' ' : '\n');
-    boxes << frame << ',' << L[0].rCI0 << ',' << L[0].rCI1 << ',' << L[0].rCJ0 << ','
-          << L[0].rCJ1 << ',' << nc << '\n';
+    const Box2D fb = L[1].U.box(0);
+    boxes << frame << ',' << fb.lo[0] / 2 << ',' << (fb.hi[0] - 1) / 2 << ','
+          << fb.lo[1] / 2 << ',' << (fb.hi[1] - 1) / 2 << ',' << nc << '\n';
   };
 
   sim.update();
@@ -133,8 +134,10 @@ int main(int argc, char** argv) {
   for (int s = 0; s <= nsteps; ++s) {
     if (s % snap == 0) {
       dump(frame++);
-      std::printf("  s=%4d  fine=[%d..%d]x[%d..%d]  drift=%.2e\n", s, L[0].rCI0,
-                  L[0].rCI1, L[0].rCJ0, L[0].rCJ1, std::fabs(sim.mass() - M0));
+      const Box2D fb = L[1].U.box(0);
+      std::printf("  s=%4d  fine=[%d..%d]x[%d..%d]  drift=%.2e\n", s, fb.lo[0] / 2,
+                  (fb.hi[0] - 1) / 2, fb.lo[1] / 2, (fb.hi[1] - 1) / 2,
+                  std::fabs(sim.mass() - M0));
     }
     if (s == nsteps) break;
     if (s > 0 && s % 20 == 0) regrid();

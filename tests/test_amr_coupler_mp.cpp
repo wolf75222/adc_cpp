@@ -59,10 +59,10 @@ int main() {
 
     // reference AmrCoupler
     MultiFab Rc(ba, dm, 1, 1), Rf(BoxArray(std::vector<Box2D>{fbox}), dm, 1, 1);
-    initc(Rc); initf(Rf); mf_average_down(Rf, Rc, CI0, CI1, CJ0, CJ1);
-    std::vector<AmrLevelMF> LR;
-    LR.push_back({std::move(Rc), nullptr, dxc, dyc, CI0, CI1, CJ0, CJ1, true});
-    LR.push_back({std::move(Rf), nullptr, dxf, dyf, 0, 0, 0, 0, false});
+    initc(Rc); initf(Rf); mf_average_down_mb(Rf, Rc);
+    std::vector<AmrLevelMP> LR;
+    LR.push_back({std::move(Rc), nullptr, dxc, dyc});
+    LR.push_back({std::move(Rf), nullptr, dxf, dyf});
     AmrCoupler<Diocotron> ref(model, geom, ba, bc, std::move(LR));
 
     // candidat AmrCouplerMP (memes donnees)
