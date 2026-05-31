@@ -72,10 +72,10 @@ arXiv:2510.11808), puis le **deux-fluides isotherme** plasma.
 | [`integrator::two_fluid_ap`](include/adc/integrator/two_fluid_ap.hpp) | deux-fluides 2D AP (Poisson reformule) | quasi-neutre a `dt` fixe quand `λ_D -> 0` |
 | [`integrator::amr_*_mf`](include/adc/integrator/amr_reflux_mf.hpp) | AMR MultiFab : reflux 2-niv, recursion N-niv, **multi-patch coverage-aware** | bit-identique a la reference Fab2D |
 | [`elliptic::GeometricMG`](include/adc/elliptic/geometric_mg.hpp) | multigrille geometrique (V-cycle GS rb) | compatible AMR, on-device |
-| [`elliptic::PoissonFFTSolver`](include/adc/elliptic/poisson_fft_solver.hpp) | Poisson FFT spectrale directe (`EllipticSolver`, **mono-rang**) | mono-niveau periodique `n=2^k`, ~5x ; la FFT DISTRIBUEE par bandes est `PoissonFFT` (autonome), portee par `SpectralCoupler` |
+| [`elliptic::PoissonFFTSolver`](include/adc/elliptic/poisson_fft_solver.hpp) | Poisson FFT spectrale directe (`EllipticSolver`, **mono-rang**) | mono-niveau periodique `n=2^k`, ~5x ; variante distribuee = `DistributedFFTSolver` (`EllipticSolver` par bandes, enveloppe `PoissonFFT`) |
 | [`coupling::Coupler`](include/adc/coupling/coupler.hpp) | couplage hyperbolique-elliptique par etage | `Coupler<Model, Elliptic = GeometricMG>` |
 | [`coupling::AmrCoupler`](include/adc/coupling/amr_coupler.hpp) | couplage E x B sur hierarchie AMR (MultiFab) | conservation a 5.55e-16 |
-| [`coupling::SpectralCoupler`](include/adc/coupling/spectral_coupler.hpp) | couplage E x B distribue (FFT par bandes) | MPI, `MPI_Alltoall` |
+| [`coupling::SpectralCoupler`](include/adc/coupling/spectral_coupler.hpp) | couplage E x B distribue ; delegue le Poisson a `DistributedFFTSolver` | MPI, `MPI_Alltoall` |
 | [`amr::{cluster,regrid,tag_box}`](include/adc/amr) | tagging + clustering Berger-Rigoutsos + regrid | genere les patchs multi-box |
 | [`solver::{Diocotron,EulerPoisson,TwoFluidAP}Solver`](include/adc/solver) | **facades compilees** (PIMPL, `libadc`) | API stable sans template (apps, Python) |
 
