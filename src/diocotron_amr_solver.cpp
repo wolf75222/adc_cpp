@@ -113,9 +113,9 @@ struct DiocotronAmrSolver::Impl {
     return out;
   }
 
-  int n_patches() const {
-    const auto& L = cpl.levels();
-    return L.size() >= 2 ? L[1].U.box_array().size() : 0;
+  int n_patches() {  // cpl.levels() est non-const ; appele via unique_ptr (pointee mutable)
+    auto& L = cpl.levels();
+    return L.size() >= 2 ? static_cast<int>(L[1].U.box_array().size()) : 0;
   }
 };
 
