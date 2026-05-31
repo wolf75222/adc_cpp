@@ -9,7 +9,10 @@
 //   refine=1 : AMR (grossier nc + patchs fins 2x autour de l'anneau).
 //   refine=0 : UNIFORME (grossier nc seul, pas de niveau fin) -> reference.
 //
-// Run : ./build/bin/diocotron_column_amr <out> [nc] [nsteps] [refine] [l]
+// Run : ./build/bin/diocotron_column_amr <out> [nc] [nsteps] [refine] [l] [ml] [recon]
+//   ml=1   : Poisson multi-niveau (grille fine) au lieu du grossier + injection d'aux.
+//   recon  : reconstruction du transport (0 NoSlope ordre 1 defaut, 1 VanLeer, 2 Minmod ordre 2).
+//            L'ordre 2 coupe la diffusion du bord d'anneau et fait monter le taux a resolution fixe.
 // Sortie : <out>/ring_amp.csv (t, amplitude du mode l de phi a r=r0) + <out>/cells.txt
 //          (cellules grossier + somme patchs ; pour la comparaison de cout).
 
@@ -59,6 +62,12 @@ int main(int argc, char** argv) {
   // ml=1 : Poisson MULTI-NIVEAU (densite composite sur la grille fine -> potentiel fin au bord
   // d'anneau), au lieu du Poisson grossier + injection d'aux. Teste si le grossier bride le taux.
   const bool ml = (argc > 6) ? (std::atoi(argv[6]) != 0) : false;
+  // recon : reconstruction du transport. 0 = NoSlope (premier ordre, defaut historique) ;
+  // 1 = VanLeer ; 2 = Minmod (MUSCL ordre 2, pente limitee). L'ordre 2 reduit fortement la
+  // DIFFUSION NUMERIQUE du bord d'anneau (le verrou de M1 vers 0.911) : a resolution fixe le
+  // taux monte nettement (eff 256 : gamma_norm 0.56 -> 0.76 en VanLeer). MUSCL lit 2 ghosts.
+  const int recon = (argc > 7) ? std::atoi(argv[7]) : 0;
+  const int ng = (recon != 0) ? 2 : 1;  // 1 ghost (NoSlope) ou 2 (MUSCL) ; recon=0 bit-identique
   std::filesystem::create_directories(out);
 
   const double L = 1.0, cx = 0.5 * L, cy = 0.5 * L;
@@ -86,7 +95,7 @@ int main(int argc, char** argv) {
   BCRec bc;
   bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;  // paroi conductrice phi=0
 
-  MultiFab Uc(ba, dm, 1, 1), auxc(ba, dm, 3, 1);
+  MultiFab Uc(ba, dm, 1, ng), auxc(ba, dm, 3, ng);
   {
     Array4 u = Uc.fab(0).array();
     const Box2D g = Uc.fab(0).grown_box();
@@ -199,7 +208,7 @@ int main(int argc, char** argv) {
       fboxes.push_back(Box2D{{2 * b.lo[0], 2 * b.lo[1]}, {2 * b.hi[0] + 1, 2 * b.hi[1] + 1}});
     }
     if (fboxes.empty()) return;
-    MultiFab nUf(BoxArray(fboxes), DistributionMapping((int)fboxes.size(), n_ranks()), 1, 1);
+    MultiFab nUf(BoxArray(fboxes), DistributionMapping((int)fboxes.size(), n_ranks()), 1, ng);
     const ConstArray4 uc = Uc.fab(0).const_array();
     for (int li = 0; li < nUf.local_size(); ++li) {
       Array4 a = nUf.fab(li).array();
@@ -215,7 +224,7 @@ int main(int argc, char** argv) {
       }
     }
     Uf = std::move(nUf);
-    auxf = MultiFab(Uf.box_array(), Uf.dmap(), 3, 1);
+    auxf = MultiFab(Uf.box_array(), Uf.dmap(), 3, ng);
   };
 
   // amplitude du mode l de phi sur le cercle r=r0 (potentiel grossier mg, ou fin fmg si ml).
@@ -274,12 +283,14 @@ int main(int argc, char** argv) {
 
   std::ofstream amp(out + "/ring_amp.csv");
   amp << "# diocotron colonne AMR nc=" << nc << " refine=" << refine << " l=" << l
-      << " (uniforme effectif " << (refine ? 2 * nc : nc) << ")\n";
+      << " (uniforme effectif " << (refine ? 2 * nc : nc) << ")";
+  if (recon) amp << " recon=" << recon;  // omis si recon=0 -> en-tete identique a l'historique
+  amp << "\n";
   amp << "t,amplitude\n";
   long maxcells = 0;
 
   const int snap = std::max(1, nsteps / 40);
-  std::printf("colonne-AMR nc=%d refine=%d : %d patchs, dt=%.2e\n", nc, refine,
+  std::printf("colonne-AMR nc=%d refine=%d recon=%d : %d patchs, dt=%.2e\n", nc, refine, recon,
               Uf.local_size(), dt);
   for (int s = 0; s <= nsteps; ++s) {
     const long cells = (long)nc * nc + fine_cells();
@@ -291,7 +302,13 @@ int main(int argc, char** argv) {
     if (s == nsteps) break;
     if (refine && s > 0 && s % 30 == 0) regrid();  // tag geometrique (Uc seul)
     if (ml) compute_aux_ml(); else { compute_coarse_aux(); if (refine) inject_aux(); }
-    amr_step_2level_multipatch<NoSlope, RusanovFlux>(model, Uc, dom, dxc, dyc, Uf, auxc, auxf, dt);
+    // reconstruction au choix (recon) ; recon=0 -> branche NoSlope identique a l'historique.
+    if (recon == 1)
+      amr_step_2level_multipatch<VanLeer, RusanovFlux>(model, Uc, dom, dxc, dyc, Uf, auxc, auxf, dt);
+    else if (recon == 2)
+      amr_step_2level_multipatch<Minmod, RusanovFlux>(model, Uc, dom, dxc, dyc, Uf, auxc, auxf, dt);
+    else
+      amr_step_2level_multipatch<NoSlope, RusanovFlux>(model, Uc, dom, dxc, dyc, Uf, auxc, auxf, dt);
     t += dt;
     if (s % 20 == 0) dt = std::min(dt0, 0.4 * dxc / vmax());
   }

@@ -267,6 +267,26 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   0.63, même montée). L'AMR `ml` SUIT l'uniforme à ~39-40 % des cellules jusqu'à eff 1024 : la promesse
   M2b (même physique, < moitié du coût) tient à l'échelle. Le verrou numérique qui bloquait le balayage
   est levé ; atteindre `0.911` reste une affaire de résolution encore plus haute (hero-run distribué).
+- **M2b-recon : le vrai verrou vers `0.911` est l'ORDRE de reconstruction, pas la résolution.** M1
+  attribuait le plafond à la diffusion numérique du bord d'anneau ; le transport tournait en `NoSlope`
+  (reconstruction premier ordre, la plus diffusive). En passant à MUSCL ordre 2 (`VanLeer`, pente
+  limitée, option `recon=1` de `diocotron_column_amr` ; 2 ghosts) le bord reste net et le taux MONTE
+  FORTEMENT à résolution FIXE :
+
+  | eff | `NoSlope` (lin 5,14) | `VanLeer` (lin 5,14) | `VanLeer` (lin 4,11, phase expo. propre) |
+  |---|---|---|---|
+  | 256 | 0.561 | 0.760 | **0.864** (95 % de 0.911) |
+  | 512 | 0.650 | 0.753 | 0.851 |
+
+  À eff 256 déjà, `VanLeer` atteint `γ_norm ~ 0.86` dans la fenêtre exponentielle propre (`--window
+  4,11`), soit ~95 % de l'analytique `0.911`, contre `0.56` en `NoSlope` : +0.30 de taux pour la SEULE
+  montée en ordre, sans toucher la résolution. Le taux `VanLeer` est quasi PLAT en résolution (0.864 ->
+  0.851 de eff 256 à 512) : il est déjà CONVERGÉ en reconstruction, ce qui CONFIRME directement
+  l'hypothèse M1 (le plafond ~0.58 du `NoSlope` venait de la diffusion du schéma, pas de la physique).
+  Stable (limiteur TVD, aucun `nan`) et conservatif (`~1.9e-14`), uniforme ET AMR `ml` (base 320 à 66
+  patchs incluse). Le défaut `recon=0` (`NoSlope`) reste BIT À BIT identique aux runs enregistrés. Les
+  ~5 % restants vers `0.911` (transitoire initial, intégration en temps Euler explicite d'ordre 1,
+  représentation embedded du bord) sont la cible fine ; le gros du gain est acquis à coût modeste.
 - **M3 : système magnétique complet (eq 2.4, FAIT).** Au-delà de la limite de dérive : Euler
   compressible + énergie + Poisson + force de Lorentz `m × Ω`. L'architecture était déjà prête : le
   modèle `EulerPoisson` porte l'hydro, la source `-ρ∇φ`, le travail `-m·∇φ` et le second membre

@@ -257,6 +257,15 @@ l'uniforme équivalent (la promesse de M2b, à l'échelle).
     pic plafonne, elle, à ~0.58 (biais de fenêtre : le rollover de saturation se raidit avec la
     résolution). Atteindre `0.911` reste affaire de résolution encore plus haute, désormais
     accessible sans blocage numérique (objet du hero-run distribué).
+  - **Levier décisif vers `0.911` : reconstruction d'ordre 2.** Le transport tournait en `NoSlope`
+    (premier ordre, le plus diffusif) : c'est LUI qui plafonnait le taux, pas la résolution. Passé en
+    MUSCL `VanLeer` (option `recon=1`, 2 ghosts), le taux saute à `γ_norm ~ 0.86` dès eff 256 (fenêtre
+    expo. propre `--window 4,11`), ~95 % de l'analytique `0.911`, contre `0.56` en `NoSlope` ; et il est
+    quasi PLAT en résolution (déjà convergé en reconstruction). Stable et conservatif (`~1.9e-14`),
+    uniforme ET AMR `ml`. `recon=0` reste bit-identique aux runs enregistrés. Conséquence pour le
+    hero-run : viser `0.911` ne demande PAS forcément la résolution extrême, mais l'ordre 2 (et un
+    intégrateur en temps d'ordre 2 pour les derniers %) ; le hero-run distribué reste utile pour la
+    marge de résolution et la démonstration à l'échelle. Détails dans `docs/ROADMAP.md` (M2b-recon).
 
 ## Décisions ouvertes (à trancher avant de coder)
 
