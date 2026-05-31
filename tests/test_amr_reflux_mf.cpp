@@ -82,7 +82,7 @@ int main() {
       for (int i = fbox.lo[0]; i <= fbox.hi[0]; ++i)
         uf(i, j, 0) = ne0((i + 0.5) * dxc / 2, (j + 0.5) * dyc / 2);
   }
-  amr_step_2level_mf<NoSlope, RusanovFlux>(model, Uc_m, dom, dxc, dyc, Uf_m, CI0, CI1,
+  detail::amr_step_2level_mf<NoSlope, RusanovFlux>(model, Uc_m, dom, dxc, dyc, Uf_m, CI0, CI1,
                                            CJ0, CJ1, axc_m, axf_m, dt);
 
   // --- comparaison etat grossier ---

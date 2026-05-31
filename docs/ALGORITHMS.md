@@ -222,10 +222,13 @@ et on remplace la contribution grossière :
 
 $$U_c \mathrel{-}= \frac{1}{\Delta x_c}\Big(\underbrace{\textstyle\sum_s \Delta t_f\,\bar F_f^{(s)}}_{\text{flux fin intégré}} - \Delta t_c\,F_c\Big)$$
 
-**Pseudocode.** `integrator/amr_reflux_mf.hpp` : `amr_step_2level_mf` (2 niveaux),
-`amr_step_multilevel_mf` (récursion N niveaux, `subcycle_level_mf`). Transfert :
+**Pseudocode.** `integrator/amr_reflux_mf.hpp`, en `detail::` : `amr_step_2level_mf`
+(2 niveaux), `amr_step_multilevel_mf` (récursion N niveaux, `subcycle_level_mf`). Transfert :
 `mf_average_down` (fin -> grossier), `mf_fill_fine_ghosts_t` (interp espace+temps des
-ghosts fins).
+ghosts fins). Ce moteur mono-box est désormais l'ORACLE de validation, plus la voie de
+production : celle-ci passe par `advance_amr` (le multi-patch, §10), dont le mono-box est le
+cas dégénéré. On le garde car il prouve le multi-patch bit-identique au mono-box jusqu'à N
+niveaux (ce que la pile Fab2D, 2 niveaux seulement, ne couvre pas).
 
 **Validation.** `test_amr_reflux_mf`, `test_amr_multilevel_mf` : **bit-identique** à la
 pile Fab2D de référence (`amr_multilevel.hpp`) ; conservation à `~1e-12`. **Pièges.** Le

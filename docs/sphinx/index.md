@@ -41,8 +41,9 @@ Trois axes orthogonaux (concept `PhysicalModel`, policy `NumericalFlux`, concept
   `TwoFluidAPSolver` (deux-fluides isotherme AP)
 - flux `RusanovFlux` / `HLLFlux` / `HLLCFlux`, reconstruction MUSCL (Minmod / VanLeer)
 - `GeometricMG` (multigrille V-cycle GS red-black) / `PoissonFFTSolver` (spectral direct)
-- AMR : `amr_step_multilevel_mf` (N niveaux mono-box), `amr_step_multilevel_multipatch`
-  (multi-box, reflux coverage-aware), `AmrCoupler` / `AmrCouplerMP` (regrid Berger-Rigoutsos)
+- AMR : `advance_amr` (entrée unifiée, multi-patch N niveaux, reflux coverage-aware ;
+  `detail::subcycle_level_mp`), `AmrCoupler` / `AmrCouplerMP` (regrid Berger-Rigoutsos) ; le
+  moteur mono-box d'origine (`amr_step_*_mf`) survit en `detail::` comme oracle de validation
 - `for_each_cell` : série / OpenMP / Kokkos ; `comm.hpp` : collectives MPI
 
 Détail des algorithmes :

@@ -283,19 +283,24 @@ nommee, documentee, mais ne sont pas touches a cette etape.
 
 ## 8. AMR : vers un objet nativement distribue (priorite)
 
-**Etat.** L'integrateur AMR tourne sur la pile MultiFab + seam, du mono-box au multi-patch
-N-niveaux (`integrator/amr_reflux_mf.hpp`, generique `<Limiter, NumericalFlux, N-comp>`,
-bulk `for_each_cell` GPU-ready) : `amr_step_2level_mf`, `amr_step_multilevel_mf`,
-`amr_step_2level_multipatch`, `amr_step_multilevel_multipatch` (`subcycle_level_mp`). Le
-reflux est coverage-aware (interfaces fin-grossier reelles, pas les joints fin-fin geres par
-`fill_boundary`) et route la correction vers la box parente (`mf_find_box`). Les coupleurs
-`AmrCoupler` (mono-box) et `AmrCouplerMP` (multi-patch + `regrid()` Berger-Rigoutsos) sont
-conservatifs.
+**Etat.** L'integrateur AMR tourne sur la pile MultiFab + seam (`integrator/amr_reflux_mf.hpp`,
+generique `<Limiter, NumericalFlux, N-comp>`, bulk `for_each_cell` GPU-ready). UN SEUL moteur de
+production : `advance_amr` (recursion `detail::subcycle_level_mp`, multi-patch N-niveaux
+distribue). Le reflux est coverage-aware (interfaces fin-grossier reelles, pas les joints fin-fin
+geres par `fill_boundary`) et route la correction vers la box parente (`mf_find_box`). Les DEUX
+coupleurs passent par ce moteur : `AmrCoupler` (mono-box = cas degenere, une box par niveau) et
+`AmrCouplerMP` (multi-patch + `regrid()` Berger-Rigoutsos), tous deux conservatifs. La pile
+mono-box d'origine (`amr_step_*_mf` + `AmrLevelMF`) est demue en `detail::` : ORACLE de validation
+seulement (chaine `Fab2D -> MF -> MP`, garde 1 de `test_amr_multilevel_multipatch` : `maxdiff=0`),
+plus aucun role en production.
 
-**Faiblesse 1 : la duplication par cas particulier.** Les noms
+**Faiblesse 1 : la duplication par cas particulier (RESORBEE en production).** Les noms
 `amr_step_2level_mf` / `_multilevel_mf` / `_2level_multipatch` / `_multilevel_multipatch` /
-`subcycle_level_mp` encodent le cas dans le NOM. Entree unifiee FAITE : `advance_amr(m,
-LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom + periodicite).
+`subcycle_level_mp` encodaient le cas dans le NOM. Entree unifiee FAITE : `advance_amr(m,
+LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom + periodicite),
+SEULE porte de production (les deux coupleurs y passent). Les `amr_step_*_multipatch` /
+`subcycle_level_mp` sont en `detail::` (moteur), les `amr_step_*_mf` aussi (oracle de test).
+Plus aucun `amr_step_*` dans l'API publique.
 Verifie facade-fidele en **2 ET 3 niveaux** (`test_advance_amr`, `maxdiff = 0` vs l'appel
 direct, derive masse `< 1e-12`) et conservatif. La PROMOTION des roles en types avance :
 `OwnershipPolicy` est un alias reel de `DistributionMapping` ; `FluxRegister` est un VRAI TYPE
@@ -313,7 +318,7 @@ PatchRange = AmrLevelMP   CoarseFineInterface : routage bordant reste inline
 SubcyclingSchedule = recursion Berger-Oliger   RegridPolicy = amr_regrid_finest (BR)
 // roles restants : nommes, encore inlines dans subcycle_level_mp ; extraction en types : reste
 
-advance_amr(m, hierarchy, dt);   // entree unifiee ; reste a absorber la famille amr_step_*
+advance_amr(m, hierarchy, dt);   // entree unifiee de production ; famille amr_step_* absorbee (detail::)
 ```
 
 **Faiblesse 2 : le multi-patch distribue.** Le 2-niveaux tourne **reellement distribue**

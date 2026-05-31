@@ -67,7 +67,7 @@ int main() {
   MultiFab UcA(bac, dm, 1, 1), UfA(BoxArray(std::vector<Box2D>{big}), dm, 1, 1);
   MultiFab axcA(bac, dm, 3, 1), axfA(BoxArray(std::vector<Box2D>{big}), dm, 3, 1);
   fill(UcA, dxc); fill(UfA, dxc / 2); fill_aux(axcA); fill_aux(axfA);
-  amr_step_2level_mf<NoSlope, RusanovFlux>(model, UcA, dom, dxc, dyc, UfA, CI0, CI1, CJ0,
+  detail::amr_step_2level_mf<NoSlope, RusanovFlux>(model, UcA, dom, dxc, dyc, UfA, CI0, CI1, CJ0,
                                            CJ1, axcA, axfA, dt);
 
   // --- version B : 2 boxes fines pavant la meme region (multipatch) ---

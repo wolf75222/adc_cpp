@@ -11,13 +11,15 @@
 
 #include <vector>
 
-// Pas AMR 2-niveaux conservatif (Berger-Oliger r=2 + reflux), version PORTEE sur
-// MultiFab + le seam, et GENERIQUE (Limiter, NumericalFlux, N composantes). C'est le
-// pendant MultiFab de integrator/amr_reflux.hpp::amr_step_2level (Fab2D, 1 comp,
-// Rusanov 1er ordre) : meme algorithme, mais les flux passent par compute_face_fluxes
-// (donc MUSCL / HLL / HLLC / Euler-Poisson / GPU dispo) et les boucles bulk par
-// for_each_cell. Region fine = cellules grossieres [CI0..CI1]x[CJ0..CJ1] (strictement
-// interieures), raffinees ratio 2. Mono-box par niveau (le multi-patch viendra).
+// Moteur AMR conservatif (Berger-Oliger r=2 + reflux) sur MultiFab + le seam, GENERIQUE
+// (Limiter, NumericalFlux, N composantes ; flux par compute_face_fluxes -> MUSCL / HLL /
+// HLLC / Euler-Poisson / GPU). Deux piles dans ce header :
+//   - PRODUCTION : advance_amr (+ LevelHierarchy, AmrLevelMP), moteur N-niveaux
+//     MULTI-PATCH et DISTRIBUE (MPI). C'est l'entree unifiee (cf. bas du fichier).
+//   - ORACLE (detail::) : amr_step_*_mf + AmrLevelMF, le moteur MONO-BOX d'origine,
+//     pendant MultiFab de amr_reflux.hpp::amr_step_2level (Fab2D, 1 comp, Rusanov).
+//     Plus utilise en production, conserve pour valider le multi-patch bit-identique
+//     au mono-box (chaine Fab2D -> MF -> MP).
 
 namespace adc {
 
@@ -67,6 +69,18 @@ inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
           f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
       }
 }
+
+// === PILE MF : ORACLE DE TEST, HORS PRODUCTION ===================================
+// amr_step_2level_mf / amr_step_multilevel_mf + AmrLevelMF : le moteur AMR MONO-BOX
+// d'origine. Plus appele en production (AmrCoupler passe par advance_amr, le moteur
+// unifie multi-patch). Conserve en detail:: comme ORACLE de validation : la chaine
+// Fab2D (amr_reflux.hpp::amr_step_2level) -> MF (ici) -> MP (detail::subcycle_level_mp)
+// prouve le moteur MP bit-identique au mono-box, jusqu'a N niveaux (ce que Fab2D seul,
+// 2-niveaux/1-comp/Rusanov, ne couvre pas). Gardes : test_amr_reflux_mf (vs Fab2D),
+// test_amr_multilevel_mf, test_amr_multilevel_multipatch garde 1 (MP vs MF, max|dUc|=0).
+// Les helpers partages restent a portee adc:: (mf_advance_faces, mf_average_down,
+// mf_fill_fine_ghosts_t), utilises aussi par les tests d'init.
+namespace detail {
 
 // Un pas 2-niveaux conservatif. Uc : grossier (domaine periodique, ghosts pour le
 // Limiter). Uf : fin (box raffinee). auxc/auxf : (phi, grad phi) prescrits, ghosts
@@ -254,6 +268,8 @@ void amr_step_multilevel_mf(const Model& m, std::vector<AmrLevelMF>& L,
   subcycle_level_mf<Limiter, NumericalFlux>(m, L, 0, dt, dom, nullptr, nullptr,
                                             Real(0), nullptr, nullptr, nullptr, nullptr);
 }
+
+}  // namespace detail (oracle MF mono-box : Fab2D -> MF -> MP)
 
 // --- MULTI-PATCH (plusieurs boxes fines par niveau) ---
 // Le niveau fin est un MultiFab a N boxes. Le reflux est COVERAGE-AWARE : il ne

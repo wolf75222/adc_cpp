@@ -82,7 +82,7 @@ int main() {
   init_m(M0, dxc); init_m(M1, dxc / 2); init_m(M2, dxc / 4);
   mf_average_down(M2, M1, K0, K1, L0, L1);
   mf_average_down(M1, M0, I0, I1, J0, J1);
-  std::vector<AmrLevelMF> LM(3);
+  std::vector<detail::AmrLevelMF> LM(3);
   LM[0] = {std::move(M0), &b0, dxc, dyc, I0, I1, J0, J1, true};
   LM[1] = {std::move(M1), &b1, dxc / 2, dyc / 2, K0, K1, L0, L1, true};
   LM[2] = {std::move(M2), &b2, dxc / 4, dyc / 4, 0, 0, 0, 0, false};
@@ -99,7 +99,7 @@ int main() {
   const double dt = 0.4 * dxc;
   for (int s = 0; s < 40; ++s) {
     amr_step_multilevel(m, LF, dom, dt);
-    amr_step_multilevel_mf<NoSlope, RusanovFlux>(m, LM, dom, dt);
+    detail::amr_step_multilevel_mf<NoSlope, RusanovFlux>(m, LM, dom, dt);
   }
 
   double maxdiff = 0;
