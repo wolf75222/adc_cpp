@@ -64,6 +64,20 @@ cout) tient a l'echelle ROMEO.
 - 613948 (high-order, eff 2048) : ANNULE, eff 2048 aurait depasse le mur horaire avant l'extraction
   -> re-cadre a eff 256/512/1024 (job 613961).
 
+## Job 614089 : porte de correction GPU (compute-sanitizer)
+
+`romeo/sanitizer.sbatch` sur 1 GH200 (armgpu). Build Kokkos/CUDA OK : les sommes de masse
+routees par le seam reducteur (`for_each_cell_reduce_sum`) compilent sur nvcc. compute-sanitizer
+sur les exemples GPU (qui initialisent Kokkos) :
+
+- `coupled_kokkos` : memcheck / initcheck / synccheck = **0 erreur** chacun.
+- `diocotron_amr_kokkos` (chemin AMR complet) : memcheck = **0 erreur**.
+
+Detecteur reel de fence manquant = checksum bit-identique CPU vs GPU : `diocotron_amr_kokkos`
+rend `checksum=4394594.404318` EXACTEMENT egal au CPU, derive de masse `2.22e-16`, npatch=4.
+Les diagnostics routes par le seam restent donc bit-identiques CPU/GPU, sans fence oublie.
+Sortie brute recopiee : `romeo/runs/adc_sanitizer.614089.out`.
+
 ## Reproduction
 
 Depuis la racine du depot sur ROMEO (apres `rsync` du source) :

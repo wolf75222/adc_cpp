@@ -1,0 +1,56 @@
+== uname=aarch64 ; nvcc=/apps/2025/manual_install/cuda_eviden/12.6/bin/nvcc ; sanitizer=/apps/2025/manual_install/cuda_eviden/12.6/bin/compute-sanitizer ==
+Cuda compilation tools, release 12.6, V12.6.85
+Build cuda_12.6.r12.6/compiler.35059454_0
+NVIDIA (R) Compute Sanitizer
+Copyright (c) 2020-2024 NVIDIA Corporation
+== Kokkos installe: /scratch_p/rmdraux/kokkos-install ==
+-- Eigen not found : skipping host analysis tools
+-- Enabled Kokkos devices: SERIAL;CUDA
+-- Kokkos found : for_each_cell dispatch backend = Kokkos (SERIAL;CUDA)
+-- Configuring done (0.1s)
+-- Generating done (0.2s)
+-- Build files have been written to: /home/rmdraux/adc_cpp/build-gh200
+[100%] Built target coupled_kokkos
+[100%] Built target diocotron_amr_kokkos
+===== compute-sanitizer (memcheck / initcheck / synccheck) =====
+----- compute-sanitizer --tool memcheck  coupled_kokkos -----
+========= COMPUTE-SANITIZER
+exec=Cuda  N=128  pas couples=20
+  masse0=1.6384000000e+04  masse=1.6384000000e+04  dmasse=0.000e+00
+  sum(U^2)=1.6752629937e+04  max|U|=1.2998083392e+00
+OK coupled_kokkos (checksums ci-dessus a comparer CPU vs GPU)
+========= ERROR SUMMARY: 0 errors
+  >>> memcheck coupled_kokkos : OK
+----- compute-sanitizer --tool initcheck  coupled_kokkos -----
+========= COMPUTE-SANITIZER
+exec=Cuda  N=128  pas couples=20
+  masse0=1.6384000000e+04  masse=1.6384000000e+04  dmasse=0.000e+00
+  sum(U^2)=1.6752629937e+04  max|U|=1.2998083392e+00
+OK coupled_kokkos (checksums ci-dessus a comparer CPU vs GPU)
+========= ERROR SUMMARY: 0 errors
+  >>> initcheck coupled_kokkos : OK
+----- compute-sanitizer --tool synccheck  coupled_kokkos -----
+========= COMPUTE-SANITIZER
+exec=Cuda  N=128  pas couples=20
+  masse0=1.6384000000e+04  masse=1.6384000000e+04  dmasse=0.000e+00
+  sum(U^2)=1.6752629937e+04  max|U|=1.2998083392e+00
+OK coupled_kokkos (checksums ci-dessus a comparer CPU vs GPU)
+========= ERROR SUMMARY: 0 errors
+  >>> synccheck coupled_kokkos : OK
+----- compute-sanitizer --tool memcheck  diocotron_amr_kokkos -----
+========= COMPUTE-SANITIZER
+PARALLELISME : exec=Cuda concurrency=270336 threads, nc=64, 80 pas en 299.222 s
+diocotron AMR sous le seam (Cuda) : npatch=4 derive_masse=2.220e-16 checksum=4394594.404318 fini
+OK diocotron_amr_kokkos
+========= ERROR SUMMARY: 0 errors
+  >>> memcheck diocotron_amr_kokkos : OK
+===== detecteur reel des fences manquants : checksum bit-identique CPU vs GPU =====
+exec=Cuda  N=128  pas couples=20
+  masse0=1.6384000000e+04  masse=1.6384000000e+04  dmasse=0.000e+00
+  sum(U^2)=1.6752629937e+04  max|U|=1.2998083392e+00
+OK coupled_kokkos (checksums ci-dessus a comparer CPU vs GPU)
+== diocotron_amr_kokkos : checksum doit valoir EXACTEMENT 4394594.404318 (= CPU) ==
+PARALLELISME : exec=Cuda concurrency=270336 threads, nc=64, 80 pas en 18.049 s
+diocotron AMR sous le seam (Cuda) : npatch=4 derive_masse=2.220e-16 checksum=4394594.404318 fini
+OK diocotron_amr_kokkos
+== FIN sanitizer ==
