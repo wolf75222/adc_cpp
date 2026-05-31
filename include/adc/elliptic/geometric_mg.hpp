@@ -102,6 +102,50 @@ class GeometricMG {
   void solve() { solve(Real(1e-8), 50); }
   Real residual() { return current_residual(); }
 
+  // Solve DURCI pour le bord embedded a haute resolution. Sur grille fine, le V-cycle
+  // geometrique diverge parfois pres de la paroi conductrice : le coarsening est
+  // NON-Galerkin et le masque du cercle est re-evalue par niveau, donc la correction
+  // grossiere devient incoherente avec le bord fin et le lissage nu1=nu2=2 ne la domine
+  // plus (rayon spectral du cycle > 1). Le potentiel diverge alors a chaque appel (le
+  // warm start propage la divergence d'un pas a l'autre), d'ou un nan du champ a haute
+  // resolution (voir docs/HERO_RUN_AMR.md). La divergence est ERRATIQUE en resolution
+  // (elle depend de l'alignement du cercle sur la hierarchie de grilles).
+  //
+  // Strategie, BIT-IDENTIQUE quand le solveur converge (ou stagne) deja :
+  //   1. cycle standard au lissage courant : EXACTEMENT le corps de solve(rel_tol,
+  //      max_cycles), donc identique aux runs deja stables ;
+  //   2. SEULEMENT si le residu final EXCEDE le residu initial (vraie divergence,
+  //      ratio > 1 ; pas une simple stagnation ratio < 1, qu'on garde telle quelle pour
+  //      rester bit-identique) : on durcit le lissage de facon STICKY (nu double, conserve
+  //      pour les pas suivants, le warm start repartant alors au lissage durci) et on
+  //      REPART A FROID (phi=0, le warm start portait l'etat diverge), jusqu'a convergence
+  //      ou saturation de nu. Plus de lissage rend le V-cycle contractant (le GS domine la
+  //      correction grossiere incoherente) : cf. balayage, nu=2 diverge a nc=640, nu>=4
+  //      converge. Tout run aujourd'hui stable n'a PAS diverge (divergence -> nan -> non
+  //      enregistre), donc la phase 2 ne se declenche jamais pour eux : bit-identique.
+  int solve_robust(Real rel_tol, int max_cycles) {
+    const Real r0 = current_residual();
+    if (r0 <= Real(0)) return 0;
+    int total = 0;
+    for (int c = 1; c <= max_cycles; ++c) {  // phase 1 : identique a solve()
+      vcycle();
+      ++total;
+      if (current_residual() <= rel_tol * r0) return total;
+    }
+    if (current_residual() <= r0) return total;  // stagnation (pas divergence) : on garde tel quel
+    while (nu1_ < 64 || nu2_ < 64) {             // phase 2 : durcissement sticky + restart a froid
+      if (nu1_ < 64) nu1_ *= 2;
+      if (nu2_ < 64) nu2_ *= 2;
+      lev_[0].phi.set_val(Real(0));
+      for (int c = 1; c <= max_cycles; ++c) {
+        vcycle();
+        ++total;
+        if (current_residual() <= rel_tol * r0) return total;
+      }
+    }
+    return total;  // meilleur effort au lissage maximal (residu deja sous r0 : pas de divergence)
+  }
+
   // Residu courant (norme infinie) au niveau le plus fin. all_reduce_max OBLIGATOIRE pour
   // un grossier MULTI-BOX REPARTI : sans lui, norm_inf rend le max LOCAL (different par rang),
   // donc le critere d'arret du V-cycle se declenche a des iterations differentes selon le rang

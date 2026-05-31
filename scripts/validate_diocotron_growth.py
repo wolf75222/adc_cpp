@@ -33,6 +33,22 @@ def read_amp(path):
     return np.asarray(t), np.asarray(a)
 
 
+def fit_fixed_window(t, a, t0, t1):
+    """Ajuste log(a) ~ gamma t sur une FENETRE PHYSIQUE FIXE [t0, t1].
+
+    Plus robuste que la detection de pic pour COMPARER des resolutions : la fenetre
+    saturation-relative (0.85 du pic) deplace ses bornes quand le pic se decale avec la
+    resolution, ce qui BIAISE la pente a haute resolution (le rollover de saturation est
+    capte differemment). Une fenetre commune, choisie dans la phase exponentielle propre
+    (avant tout debut de saturation), mesure le MEME regime pour toutes les resolutions.
+    """
+    m = (t >= t0) & (t <= t1) & (a > 0)
+    if m.sum() < 4:
+        return float("nan"), (t0, t1)
+    coef = np.polyfit(t[m], np.log(a[m]), 1)
+    return coef[0], (t0, t1)
+
+
 def fit_linear_phase(t, a):
     """Ajuste log(a) ~ gamma t sur la phase de croissance avant saturation."""
     if len(a) < 8:
@@ -59,16 +75,25 @@ def main():
     ap.add_argument("--rhobar", type=float, default=0.9, help="densite moyenne anneau (1-delta)")
     ap.add_argument("--target", type=float, default=0.911, help="taux analytique vise (mode)")
     ap.add_argument("--labels", default="", help="etiquettes separees par des virgules")
+    ap.add_argument("--window", default="", help="fenetre physique fixe t0,t1 (phase lineaire) "
+                    "au lieu de la detection de pic ; recommande pour comparer des resolutions")
     args = ap.parse_args()
+
+    win = None
+    if args.window:
+        w = args.window.split(",")
+        win = (float(w[0]), float(w[1]))
 
     omega_d = args.rhobar / (2.0 * math.pi)
     labels = args.labels.split(",") if args.labels else [c for c in args.csv]
     print(f"omega_D = rhobar/(2 pi) = {args.rhobar}/(2 pi) = {omega_d:.5f}")
+    if win:
+        print(f"fenetre lineaire fixe : t in [{win[0]}, {win[1]}]")
     print(f"taux analytique vise (normalise) : {args.target:.4f}\n")
     print(f"{'cas':<22} {'gamma_phys':>11} {'gamma_norm':>11} {'ratio':>8} {'fenetre fit':>16}")
     for path, lab in zip(args.csv, labels):
         t, a = read_amp(path)
-        g_phys, (t0, t1) = fit_linear_phase(t, a)
+        g_phys, (t0, t1) = fit_fixed_window(t, a, *win) if win else fit_linear_phase(t, a)
         g_norm = g_phys / omega_d
         ratio = g_norm / args.target if args.target else float("nan")
         print(f"{lab[:22]:<22} {g_phys:>11.4f} {g_norm:>11.4f} {ratio:>8.3f} "

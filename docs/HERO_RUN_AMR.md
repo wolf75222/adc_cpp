@@ -222,17 +222,41 @@ l'uniforme équivalent (la promesse de M2b, à l'échelle).
   | uniforme eff 448 (nc=448) | 200 704 | 0.577 | 0.577 |
   | AMR `ml` eff 448 (nc=224) | 82 808  | 0.592 | 0.592 |
 
-- **Barrière identifiée vers `0.911` : instabilité haute résolution.** Monter plus haut fait
-  diverger la simulation : densité/vitesse partent en `nan` dès les premiers pas, AUX DEUX schémas
-  (uniforme nc>=512, et AMR `ml` nc>=320 à ~66 patchs). Diagnostic : ce n'est PAS le pas de temps.
-  Le symptôme premier était une explosion d'horloge (`dt = 0.4 dx / vmax` avec `vmax ~ 0` quand le
-  Poisson converge mal -> `dt` énorme -> `t -> 2.3e12`) ; on plafonne `dt` à sa valeur initiale
-  `dt0` (la dérive E x B de l'anneau est ~constante, `dt` ne doit jamais croître), ce qui supprime
-  l'explosion mais le `nan` du CHAMP persiste avec `dt` borné. La cause est donc en amont, dans le
-  couplage Poisson/densité à haute résolution (multigrille géométrique qui converge mal au bord
-  embedded sur grille fine, et/ou plancher de densité `1e-3` franchi). C'est exactement pourquoi la
-  table s'arrête à eff 448. Lever ce verrou (durcir `GeometricMG` au bord embedded haute résolution,
-  garde de plancher de densité dans le pas) est le prochain chantier scientifique pour viser `0.911`.
+- **Barrière vers `0.911` LEVÉE : le multigrille divergeait au bord embedded.** Au-delà de eff 448
+  la simu partait en `nan` dès les premiers pas, aux DEUX schémas (uniforme et AMR `ml`). Diagnostic
+  complet, par instrumentation du résidu MG et de `vmax` localisé :
+  - Ce n'est NI le pas de temps (déjà plafonné à `dt0`, la dérive E x B de l'anneau étant
+    ~constante), NI le plancher de densité : pendant la divergence la densité RESTE bornée dans
+    `[1e-3, 1]`, seul `phi` explose. Le `vmax` partait du BORD CONDUCTEUR (`r = 0.398 = Rwall`), pas
+    du bord d'anneau.
+  - Cause RÉELLE : le V-cycle géométrique DIVERGE près de la paroi conductrice sur grille fine. Le
+    coarsening est NON-Galerkin et le masque du cercle est re-évalué à chaque niveau, donc la
+    correction grossière devient incohérente avec le bord fin ; le lissage `nu1=nu2=2` ne la domine
+    plus et le rayon spectral du cycle passe > 1. C'est ERRATIQUE en résolution (selon l'alignement
+    du cercle sur la hiérarchie : eff 640/1280/2048 divergent, 512/896 stagnent seulement). Le warm
+    start propage la divergence d'un pas à l'autre -> `phi` puis le champ en `nan`. Mesure : à
+    nc=640 le résidu MG monte (`ratio = r_fin / r_0 = 2.7e2`) là où nc=224 converge (`5.7e-9`).
+  - Correctif : `GeometricMG::solve_robust` (`include/adc/elliptic/geometric_mg.hpp`). Il lance le
+    V-cycle standard, EXACTEMENT comme `solve()` (donc BIT-IDENTIQUE quand il converge ou stagne) ;
+    SEULEMENT si le résidu final EXCÈDE le résidu initial (vraie divergence, pas une stagnation
+    `ratio < 1` qu'on garde telle quelle) il durcit le lissage GS de façon STICKY (nu double,
+    conservé pour les pas suivants) et repart à froid (`phi = 0`) jusqu'à redevenir contractant.
+    Plus de lissage rend le cycle contractant (le GS domine la correction grossière incohérente :
+    `nu = 2` diverge à nc=640, `nu >= 4` converge). L'exemple appelle `solve_robust` pour les deux
+    Poisson (`mg` grossier et `fmg` multi-niveau).
+  - **Vérification.** Les 8 runs enregistrés de la table M2b-conv (uniforme eff 192-448, AMR `ml`
+    eff 192-448) restent BIT À BIT identiques (`diff` des `ring_amp.csv`), car aucun ne divergeait :
+    `solve_robust` n'y déclenche jamais le durcissement. La suite elliptique reste verte
+    (`test_geometric_mg`, `test_poisson_convergence` ordre 2.00, `test_elliptic_operator` MG=FFT,
+    `test_gauss_law` ordre 2.00). Et le balayage monte désormais sans `nan` jusqu'à eff 1024
+    (uniforme ET AMR `ml`, y compris le cas AMR `ml` base 320 à 66 patchs ; masse conservée `~1e-14`).
+  - **Science débloquée.** La table M2b-conv est prolongée jusqu'à eff 1024 (voir `docs/ROADMAP.md`,
+    M2b-conv-HR). En phase linéaire (mesure robuste `--window 5,14`) le taux CONTINUE sa montée
+    monotone vers `0.911` : eff 448 -> 1024 donne `0.63 -> 0.65 -> 0.67 -> 0.70 -> 0.71` (uniforme
+    comme AMR), l'AMR `ml` suivant l'uniforme à ~40 % des cellules. La mesure historique relative au
+    pic plafonne, elle, à ~0.58 (biais de fenêtre : le rollover de saturation se raidit avec la
+    résolution). Atteindre `0.911` reste affaire de résolution encore plus haute, désormais
+    accessible sans blocage numérique (objet du hero-run distribué).
 
 ## Décisions ouvertes (à trancher avant de coder)
 

@@ -236,6 +236,37 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   `0.911`. C'est la SCIENCE de l'étape 3 du hero-run : pousser la résolution (l'AMR multi-niveau y
   arrive pour ~41-44 % des cellules de l'uniforme). Atteindre `0.911` à pleine échelle demande le
   driver AMR distribué (étape 2 dé-réplication + durcissement des primitives, cf. `docs/HERO_RUN_AMR.md`).
+- **M2b-conv-HR : balayage poussé au-delà de eff 448 (instabilité haute résolution corrigée).**
+  Le balayage plafonnait à eff 448 parce que la simu partait en `nan` au-dessus : le multigrille
+  géométrique DIVERGEAIT au bord embedded sur grille fine (correction grossière incohérente avec le
+  cercle re-discrétisé par niveau, rayon spectral du V-cycle > 1, ERRATIQUE selon l'alignement du
+  cercle). Le warm start propageait la divergence d'un pas à l'autre -> `phi` puis le champ en `nan`.
+  Ce n'était NI le pas de temps (déjà plafonné), NI le plancher de densité (la densité reste bornée
+  dans `[1e-3, 1]` pendant la divergence ; seul `phi` explose). Correctif : `GeometricMG::solve_robust`
+  (cf. [HERO_RUN_AMR.md](HERO_RUN_AMR.md)), qui lance le V-cycle standard (BIT-IDENTIQUE quand il
+  converge ou stagne) et, SEULEMENT en cas de vraie divergence (résidu final > résidu initial),
+  durcit le lissage GS (sticky) et repart à froid jusqu'à redevenir contractant. Les 8 runs
+  enregistrés ci-dessus restent BIT À BIT identiques (vérifié) ; la suite elliptique reste verte.
+  Le balayage monte alors sans `nan` jusqu'à eff 1024 (uniforme ET AMR `ml`, masse `~1e-14`) :
+
+  | eff | AMR `ml` γ (lin / sat) | uniforme γ (lin / sat) | cellules AMR / unif |
+  |---|---|---|---|
+  | 448  | 0.631 / 0.591 | 0.632 / 0.577 | 82 808 / 200 704 = 41 % |
+  | 512  | 0.664 / 0.582 | 0.650 / 0.579 | 104 632 / 262 144 = 40 % |
+  | 640  | 0.663 / 0.588 | 0.670 / 0.574 | 162 144 / 409 600 = 40 % |
+  | 896  | 0.695 / 0.570 | 0.699 / 0.561 | 314 340 / 802 816 = 39 % |
+  | 1024 | 0.706 / 0.565 | 0.706 / 0.558 | 409 008 / 1 048 576 = 39 % |
+
+  Deux mesures du taux. `sat` = fenêtre relative au pic (méthode historique de la table ci-dessus).
+  `lin` = fenêtre PHYSIQUE FIXE en phase linéaire (`validate_diocotron_growth.py --window 5,14`,
+  nouvelle option), plus robuste pour COMPARER des résolutions. La mesure `sat` PLAFONNE vers ~0.58
+  puis décline au-delà de eff 448 : ce n'est PAS la physique mais un biais de fenêtre (le rollover de
+  saturation se raidit avec la résolution et contamine la pente). La mesure `lin`, qui isole le régime
+  exponentiel, CONTINUE sa montée MONOTONE vers `0.911` (0.63 -> 0.65 -> 0.67 -> 0.70 -> 0.71 de eff
+  448 à 1024, uniforme comme AMR ; trend robuste au choix de fenêtre, `--window 6,16` donne 0.55 ->
+  0.63, même montée). L'AMR `ml` SUIT l'uniforme à ~39-40 % des cellules jusqu'à eff 1024 : la promesse
+  M2b (même physique, < moitié du coût) tient à l'échelle. Le verrou numérique qui bloquait le balayage
+  est levé ; atteindre `0.911` reste une affaire de résolution encore plus haute (hero-run distribué).
 - **M3 : système magnétique complet (eq 2.4, FAIT).** Au-delà de la limite de dérive : Euler
   compressible + énergie + Poisson + force de Lorentz `m × Ω`. L'architecture était déjà prête : le
   modèle `EulerPoisson` porte l'hydro, la source `-ρ∇φ`, le travail `-m·∇φ` et le second membre

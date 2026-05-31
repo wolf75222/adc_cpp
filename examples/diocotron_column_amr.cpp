@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
     const ConstArray4 u0 = Uc.fab(0).const_array();
     for (int j = 0; j < nc; ++j)
       for (int i = 0; i < nc; ++i) f(i, j) = model.alpha * (u0(i, j, 0) - model.n_i0);
-    mg.solve();
+    mg.solve_robust(1e-8, 50);  // durci au bord embedded haute resolution (bit-identique si convergent)
     const ConstArray4 p = mg.phi().fab(0).const_array();
     Array4 a = auxc.fab(0).array();
     for (int j = 0; j < nc; ++j)
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
       for (int j = nb.lo[1]; j <= nb.hi[1]; ++j)
         for (int i = nb.lo[0]; i <= nb.hi[0]; ++i) rf(i, j) = model.alpha * (uf(i, j, 0) - model.n_i0);
     }
-    fmg.solve();
+    fmg.solve_robust(1e-8, 50);  // durci au bord embedded haute resolution (bit-identique si convergent)
     const ConstArray4 pf = fmg.phi().fab(0).const_array();
     Array4 pq = phic.fab(0).array();  // restriction du potentiel fin sur le grossier
     for (int J = 0; J < nc; ++J)
