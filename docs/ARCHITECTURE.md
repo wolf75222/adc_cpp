@@ -300,6 +300,16 @@ possedee par un rang distant (l'ancien segfault). Bit-identique np=1/2/4 (`test_
 motif patch fin centre chevauchant les 4 boxes grossieres dont 3 distantes). `average_down` et
 reflux remontent par buffer grossier + `all_reduce`, appliques aux boxes parentes locales.
 
+**Critere de choix (decide).** Le grossier REPLIQUE (`replicated_coarse=true`) reste le DEFAUT
+performant : meilleur solve MG grossier (pas de degenerescence du multigrille), zero communication
+pour le Poisson grossier, reference robuste pour les cas petits/moyens. Le grossier REPARTI
+(`false`) est un mode scalable EXPLICITE, a n'activer que lorsque la memoire du niveau 0 devient le
+verrou (tres grande echelle) ; il degenere le multigrille pour un grossier finement decoupe (>2x2
+boxes ne pavent pas la grille la plus grossiere). La suppression du chemin replique est REPORTEE
+tant que le reparti n'est pas strictement superieur. Native-first ne veut pas dire tout distribuer
+meme quand c'est moins bon : le moteur SAIT gerer le distribue, mais choisit un ownership degenere
+performant quand c'est optimal.
+
 Reste : (a) un gather-tags dans `comm.hpp` pour taguer un niveau INTERMEDIAIRE reparti (3+
 niveaux ; a 2 niveaux le niveau 0 porte les tags) ; (b) `load_balance` SFC sur le multi-box
 (round-robin seul aujourd'hui). Detail : [ROADMAP.md](ROADMAP.md), [HERO_RUN_AMR.md](HERO_RUN_AMR.md).

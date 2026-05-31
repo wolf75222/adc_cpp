@@ -102,11 +102,19 @@ class AmrCouplerMP {
   // conductrice circulaire de l'instabilite colonne (passe tel quel au multigrille). Vide
   // par defaut -> pas de paroi (comportement historique inchange). Seul le grossier porte la
   // paroi : les patchs fins raffinent le bord d'anneau, strictement a l'interieur du mur.
-  // replicated_coarse : le niveau 0 (grossier mono-box) est REPLIQUE sur tous les rangs ;
-  // le multigrille de Poisson doit l'etre aussi (sinon, sous MPI, le grossier tombe sur le
-  // seul rang 0 et compute_aux lit un phi absent ailleurs). On le passe donc au mg_. En serie
-  // (my_rank()=0) c'est bit-identique au round-robin. Mettre false seulement quand le grossier
-  // devient multi-box reparti (de-replication, objectif B a l'echelle hero).
+  // replicated_coarse : POLITIQUE D'OWNERSHIP du niveau 0 (grossier). Les DEUX modes sont
+  // stables et leur equivalence est prouvee bit a bit (test_mpi_decoarse, maxdiff=0) :
+  //   true  (DEFAUT performant) : grossier mono-box REPLIQUE sur tous les rangs. Meilleur solve
+  //          MG grossier (pas de degenerescence du multigrille), zero communication pour le
+  //          Poisson grossier, reference robuste -> le bon defaut pour les cas petits/moyens.
+  //   false (mode scalable EXPLICITE) : grossier multi-box REPARTI round-robin. Leve le verrou
+  //          memoire O(NX*NY*nrangs) du niveau 0, necessaire a tres grande echelle. Mais le MG
+  //          geometrique degenere pour un grossier finement decoupe (>2x2 boxes ne pavent pas la
+  //          grille la plus grossiere) : a reserver aux cas ou la memoire niveau-0 est le verrou.
+  // Critere : mettre false UNIQUEMENT quand la scalabilite memoire l'exige ; sinon garder true.
+  // La suppression du chemin replique est REPORTEE tant que le reparti n'est pas strictement
+  // superieur. Le mg_ recoit le meme drapeau (sinon, sous MPI replique, le grossier tomberait sur
+  // le seul rang 0 et compute_aux lirait un phi absent ailleurs). En serie, les deux coincident.
   AmrCouplerMP(const Model& model, const Geometry& geom, const BoxArray& ba_coarse,
                const BCRec& bc, std::vector<AmrLevelMP> levels,
                std::function<bool(Real, Real)> active = {},
