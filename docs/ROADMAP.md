@@ -227,13 +227,15 @@ puis d'y ajouter notre AMR, puis SAMRAI.
   | 192 | 0.42 / 16 392 | 0.50 / 36 864 | 44 % |
   | 256 | 0.526 / 28 352 | 0.526 / 65 536 | 43 % |
   | 320 | 0.563 / 44 192 | 0.565 / 102 400 | 43 % |
+  | 448 | **0.592** / 82 808 | 0.577 / 200 704 | 41 % |
 
   À base >= 128 le taux AMR COÏNCIDE avec l'uniforme à résolution effective égale, pour moins de la
-  moitié du coût : le payoff de l'AMR chiffré (même physique, ~43 % des cellules). À base 96 l'AMR
-  reste sous l'uniforme-192 (transport grossier hors patchs encore limitant), puis rattrape. Les deux
-  courbes montent vers `0.911` (0.50 -> 0.53 -> 0.56) sans l'atteindre : la limite de diffusion de M1
-  demande une base bien plus haute, ce qui est exactement la cible du hero-run ROMEO (et l'AMR y
-  arrivera pour ~43 % des cellules de l'uniforme équivalent).
+  moitié du coût ; à eff 448 il le DÉPASSE (0.592 vs 0.577) pour 41 % des cellules. La convergence
+  vers `0.911` est nette et monotone (0.42 -> 0.526 -> 0.563 -> 0.592) mais LENTE : la diffusion
+  numérique du bord d'anneau (limite de M1) demande une résolution bien plus haute pour atteindre
+  `0.911`. C'est la SCIENCE de l'étape 3 du hero-run : pousser la résolution (l'AMR multi-niveau y
+  arrive pour ~41-44 % des cellules de l'uniforme). Atteindre `0.911` à pleine échelle demande le
+  driver AMR distribué (étape 2 dé-réplication + durcissement des primitives, cf. `docs/HERO_RUN_AMR.md`).
 - **M3 : système magnétique complet (eq 2.4, FAIT).** Au-delà de la limite de dérive : Euler
   compressible + énergie + Poisson + force de Lorentz `m × Ω`. L'architecture était déjà prête : le
   modèle `EulerPoisson` porte l'hydro, la source `-ρ∇φ`, le travail `-m·∇φ` et le second membre
