@@ -82,6 +82,31 @@ struct EulerPoisson {                       // bon : local, device-callable
 };
 ```
 
+**Les modeles, axe par axe** (verifie contre le code) :
+
+| Modele | U (`State`) | `aux` | `flux` | `source` | `elliptic_rhs` |
+|---|---|---|---|---|---|
+| `Diocotron` | `n_e` (1 var) | `(phi, dphi/dx, dphi/dy)` | advection par derive E x B : `n_e v_E`, `v_E = (-dphi/dy, dphi/dx)/B0` | 0 | `alpha (n_e - n_i0)` |
+| `Euler` | `(rho, rho u, rho v, E)` | inutilise (present pour le concept) | flux d'Euler compressible | 0 | `rho` (densite de masse, inutilisee en Euler pur) |
+| `EulerPoisson` | `(rho, rho u, rho v, E)` | `grad phi` | DELEGUE a `Euler` | force `g = -grad phi` : `(0, rho g_x, rho g_y, rho u . g)` | `s * 4 pi G (rho - rho0)`, `s = +-1` |
+
+Diocotron exerce le chemin **aux vers flux** (le potentiel entre par le flux) ; Euler-Poisson le
+chemin **aux vers source** (le potentiel entre par la source, le flux reste celui d'Euler). C'est
+ce qui unifie les deux sous le MEME operateur spatial, sans specialisation.
+
+**Etendre : hypotheses et limite.** Ajouter un modele est simple S'IL rentre dans la famille
+hyperbolique-elliptique LOCALE prevue. La promesse implicite (un nouveau modele marche partout)
+ne tient que SOUS RESERVE :
+- systeme conservatif ou quasi-conservatif, compatible avec un flux numerique de Riemann ;
+- `flux`, `source`, `max_wave_speed`, `elliptic_rhs` tous LOCAUX (ponctuels) ;
+- `aux` compatible avec le couplage existant (`phi` / `grad phi`) ;
+- pas de contrainte GLOBALE exotique (au-dela du fond `rho0 = <rho>`, deja gere hors du modele) ;
+- pas de source RAIDE exigeant un integrateur dedie (sinon IMEX / splitting).
+
+Hors de cette forme (modele non conservatif, integro-differentiel, cinetique, elliptique
+multi-champ), il faut une COUCHE AU-DESSUS, un concept d'operateur plus general, pas un nouveau
+`PhysicalModel`. C'est la seule vraie limite architecturale a long terme.
+
 A eviter : un modele qui connait le stockage (`void compute_flux(MultiFab& U, MultiFab& F)`)
 melange physique, parallelisme et organisation memoire.
 
