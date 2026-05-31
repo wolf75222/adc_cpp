@@ -6,6 +6,7 @@
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fill_boundary.hpp>
+#include <adc/mesh/for_each.hpp>  // for_each_cell_reduce_sum, ADC_HD, device_fence
 #include <adc/mesh/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 
@@ -108,12 +109,11 @@ class SpectralCoupler {
 
   // masse totale (all-reduce).
   double mass() const {
-    device_fence();  // GPU : barriere avant lecture hote apres advance_fab_1c (device)
+    // seam reducteur (bande locale = 1 fab -> bit-identique a l'ancienne somme hote en
+    // serie/OpenMP) ; parallel_reduce absorbe la barriere, plus de device_fence en tete.
     const ConstArray4 u = U_.fab(0).const_array();
-    double s = 0;
-    for (int j = y0_; j < y0_ + nyl_; ++j)
-      for (int i = 0; i < Nx_; ++i) s += u(i, j);
-    return all_reduce_sum(s) * dx_ * dy_;
+    const Real s = for_each_cell_reduce_sum(U_.box(0), [u] ADC_HD(int i, int j) { return u(i, j); });
+    return all_reduce_sum(static_cast<double>(s)) * dx_ * dy_;
   }
 
  private:

@@ -185,15 +185,13 @@ class AmrCouplerMP {
   // replique : la somme locale EST deja la masse totale (chaque rang detient tout) -> pas
   // d'all_reduce. Reparti : chaque rang n'a qu'une part -> all_reduce_sum.
   Real mass() const {
-    device_fence();
     const MultiFab& U = stack_.coarse();
     const Real dV = geom_.dx() * geom_.dy();
-    Real M = 0;
+    Real M = 0;  // somme par fab via le seam reducteur (mono-box replique : 1 fab -> exact)
     for (int li = 0; li < U.local_size(); ++li) {
       const ConstArray4 u = U.fab(li).const_array();
-      const Box2D b = U.box(li);
-      for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) M += u(i, j, 0) * dV;
+      M += for_each_cell_reduce_sum(
+          U.box(li), [u, dV] ADC_HD(int i, int j) { return u(i, j, 0) * dV; });
     }
     return replicated_coarse_ ? M : all_reduce_sum(M);
   }
