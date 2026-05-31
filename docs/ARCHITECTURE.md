@@ -227,8 +227,11 @@ Etat :
   est l'interface ; `GeometricMG` (V-cycle GS rb, seul compatible AMR et tout `n`, on-device)
   et `PoissonFFTSolver` (direct, mono-niveau periodique `n` puissance de 2, ~5x, **mono-rang /
   boite unique** : il assert `n_ranks()==1 && ba.size()==1`) en sont deux implementations. La
-  variante distribuee par bandes (`MPI_Alltoall`) vit dans `SpectralCoupler`, pas ici.
-  `Coupler<Model, Elliptic = GeometricMG>` depend du concept, pas d'un backend.
+  FFT DISTRIBUEE par bandes (`MPI_Alltoall`) est un composant AUTONOME, `PoissonFFT`
+  (`elliptic/poisson_fft.hpp`, layout en bandes/slabs) ; `SpectralCoupler` ne re-implemente pas la
+  FFT, il POSSEDE un `PoissonFFT` (membre `solver_`) et gere la redistribution tuiles <-> bandes.
+  Promouvoir `PoissonFFT` en `EllipticSolver` distribue (au lieu de le laisser dans le coupleur)
+  est un refactor identifie. `Coupler<Model, Elliptic = GeometricMG>` depend du concept, pas d'un backend.
 - **Identite MG = FFT rendue STRUCTURELLE** : `test_elliptic_operator` applique le MEME
   operateur canonique `poisson_residual` aux deux solutions -> residus `3.4e-14` (MG) et
   `7.2e-14` (FFT), solutions identiques a `1.3e-16`. Les deux inversent prouvablement le meme
