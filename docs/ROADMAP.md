@@ -167,7 +167,12 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    décades de raideur (`test_ap_limit`) ; invariants diocotron (masse, principe du maximum,
    enstrophie non croissante, `test_diocotron_stability`) ; conservation flux coarse-fine
    exacte par reflux (`test_amr_reflux`, masse à 1e-12) + conservation sous regrid
-   (`test_amr_coupler_mp`, dérive à 1e-9).
+   (`test_amr_coupler_mp`, dérive à 1e-9) ; ordre 5 de la reconstruction WENO5-Z mesure 5.00
+   (`test_weno_convergence`) ; INVARIANTS PHYSIQUES diocotron etendus (energie de champ et moment
+   angulaire ~conserves, enstrophie = mesure de diffusion, principe du maximum, `test_diocotron_invariants`
+   + module `analysis/diocotron_invariants.hpp`). Indicateurs de fidelite au-dela du taux : la simu
+   reproduit la VALEUR PROPRE COMPLEXE (rotation Re ET croissance Im, `diocotron_eigenvalue`), pas
+   seulement gamma. Toute la suite serie passe (63/63).
 
 ### Physique magnétisée (cible Hoffart)
 
