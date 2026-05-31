@@ -159,19 +159,22 @@ un bug `parallel_copy` à np=4 et le gather-tags 2c.
   (échange de halos inter-box DISTRIBUÉ) entre balayages rouge/noir, et le GS red-black
   est indépendant de la décomposition -> `phi` bit-identique au mono-box. Pas de solveur
   de fond séparé nécessaire ici (le bottom smoother fait aussi `fill_ghosts`).
-- **BUGS OUVERTS (np=4), dans les PRIMITIVES de comm, pas la logique.** Diagnostic affiné
-  par un handshake de tailles : `parallel_copy` n'est PAS en cause (ses tailles
-  s'apparient). Le `MPI_ERR_TRUNCATE` à np=4 vient de `fill_boundary` (échange de halos,
-  tag 0) sur le grossier 2x2 PÉRIODIQUE : avec 2 boxes par dimension, une box est sa
-  propre voisine des DEUX côtés via le wrap (double contribution), mal géré en
-  cross-rang. Cette dégénérescence DISPARAÎT à >= 3 boxes/dim (donc à l'échelle hero).
-  Mais une découpe 4x4 expose alors un SECOND bug (segfault à np=4) ailleurs dans les
-  primitives multi-box. Bilan : la logique de de-réplication du coupleur est correcte
-  (np<=2 : la découpe 2x2 donne le même grossier au bit près, 5.6e-13 à np=1 pour une
-  découpe 4x4 = simple réassociation FP du MG, physiquement identique), mais les
-  primitives `fill_boundary` / reflux ont des edge-cases multi-box à np>=4 à corriger
-  (audit de l'énumération des voisins périodiques + des bornes d'accès). C'est un
-  chantier de durcissement des primitives distribuées, distinct du coupleur.
+- **BUG OUVERT (np=4) : DÉSYNCHRONISATION de flux de messages dans `fill_boundary`.**
+  Diagnostic affiné par un handshake de tailles + dump des jobs. `parallel_copy` n'est PAS
+  en cause. Le `MPI_ERR_TRUNCATE` vient de `fill_boundary` (tag 0 pour TOUS les appels) :
+  à np=4, un Isend de l'échange sur l'AUX (3 composantes, `recv[1] = 96 = 32 cellules x 3`)
+  est apparié par MPI à un Irecv de l'échange sur le grossier U (1 composante, `32`). Les
+  deux rangs ne sont donc PAS dans le même appel `fill_boundary` au même point du flux
+  tag-0 : leurs flux de messages sont DÉCALÉS. La cause amont est un appel `fill_boundary`
+  où, à np=4 (multi-box périodique), les jobs send d'un rang ne s'apparient pas exactement
+  aux jobs recv de l'autre (le protocole suppose `les deux rangs d'une paire énumèrent les
+  MÊMES jobs dans le MÊME ordre` -- hypothèse fragile rompue ici), ce qui décale le flux et
+  fait dériver tous les appels suivants. La logique de de-réplication du coupleur, elle,
+  est correcte (np<=2 bit-identique ; 5.6e-13 sur une découpe 4x4 = réassociation FP du MG).
+  FIX (non fait, hors budget) : soit un handshake de tailles PAR appel `fill_boundary` (Probe
+  / négociation, robuste à l'asymétrie), soit un TAG unique par appel + correction du job
+  asymétrique dans l'énumération des voisins périodiques. C'est un durcissement de la
+  primitive distribuée `fill_boundary`, distinct du coupleur.
 - **2c. Gather-tags pour le regrid d'un niveau réparti (RESTE).** Ajouter à `comm.hpp` un
   `gather` (ou un `all_reduce` du `TagBox` indexé global), rassembler les tags répartis
   avant le clustering Berger-Rigoutsos (cf. `tag_box.hpp:11`). Non nécessaire à 2 niveaux
