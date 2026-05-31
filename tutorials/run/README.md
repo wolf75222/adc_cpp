@@ -85,7 +85,7 @@ En local, le même test tourne sous `mpirun` :
 
 ```bash
 cmake -S . -B build-mpi -DADC_USE_MPI=ON && cmake --build build-mpi -j
-ctest --test-dir build-mpi            # 55/55, bit-identique à np=1
+ctest --test-dir build-mpi            # 73/73 (60 + 13 MPI), bit-identique à np=1/2/4
 ```
 
 ## GPU GH200 sur ROMEO

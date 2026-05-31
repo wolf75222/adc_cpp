@@ -66,27 +66,28 @@ Le Poisson grossier bridait bien le taux : hypothèse confirmée.
 
 ## Convergence et payoff de l'AMR
 
-En montant la base (96, 128, 160 ; résolution effective au bord 192, 256, 320),
-l'AMR multi-niveau converge vers l'uniforme à MÊME résolution effective, pour
-environ 43 % des cellules :
+En montant la base (96, 128, 160, 224 ; résolution effective au bord 192, 256,
+320, 448), l'AMR multi-niveau converge vers l'uniforme à MÊME résolution
+effective, pour 41 à 44 % des cellules :
 
 | résolution effective | AMR `ml` (γ_norm / cellules) | uniforme (γ_norm / cellules) | coût AMR/unif |
 |---|---|---|---|
 | 192 | 0.42 / 16 392 | 0.50 / 36 864 | 44 % |
-| 256 | **0.526** / 28 352 | **0.526** / 65 536 | 43 % |
-| 320 | **0.563** / 44 192 | **0.565** / 102 400 | 43 % |
+| 256 | 0.526 / 28 352 | 0.526 / 65 536 | 43 % |
+| 320 | 0.563 / 44 192 | 0.565 / 102 400 | 43 % |
+| 448 | 0.592 / 82 808 | 0.577 / 200 704 | 41 % |
 
 ![convergence multi-niveau](../docs/fig_diocotron_ml_convergence.png)
 
 À base 128 et plus, le taux AMR COÏNCIDE avec l'uniforme à résolution effective
-égale, pour moins de la moitié du coût. C'est le payoff de l'AMR chiffré sur ce
-problème : même physique, ~43 % des cellules. À base 96 l'AMR reste sous
-l'uniforme-192 (le transport grossier hors patchs limite encore), puis rattrape.
+égale (à 41-44 % du coût). À base 96 l'AMR reste sous l'uniforme-192 (le transport
+grossier hors patchs limite encore), puis rattrape. La ligne eff 448 vient d'un
+run sur 1 GPU GH200 (voir plus bas).
 
-Les deux courbes montent vers `0.911` (0.50, 0.53, 0.56) sans l'atteindre : la
-limite de diffusion de M1 demande une base bien plus haute. C'est la cible du
-hero-run ROMEO, où l'AMR fera l'économie de plus de la moitié des cellules de
-l'uniforme équivalent.
+Le taux monte de façon monotone avec la résolution (0.42, 0.526, 0.563, 0.592)
+mais N'ATTEINT PAS `0.911` : la limite de diffusion de M1 demande une base plus
+haute, et au-delà de eff 448 la simulation devient numériquement instable. `0.911`
+reste la cible, non encore atteinte.
 
 ## Tout rejouer
 
@@ -130,9 +131,11 @@ ci-dessus quand `Ω` grandit. Démo `examples/magnetic_diocotron.cpp`, animation
 
 ## Où va la suite
 
-- **Hero-run ROMEO** : pousser la base sur GH200 (MPI + Kokkos/CUDA) pour viser
-  `0.911` à pleine résolution, en limite de dérive comme en système complet (les
-  deux y sont limités par la diffusion à basse résolution). Voir `romeo/README.md`.
+- **Hero-run ROMEO** : sur 1 GPU GH200 (ROMEO `armgpu`, MPI + Kokkos/CUDA) le pipeline
+  reproduit la ligne eff 448 sur matériel réel (uniforme 0.577, AMR `ml` 0.592). Au-delà,
+  la simulation diverge (densité/vitesse en `nan`) aux deux schémas : le couplage
+  Poisson/densité converge mal au bord embedded sur grille fine. Lever ce verrou pour viser
+  `0.911` est le prochain chantier (pas encore de run pleine machine). Voir `romeo/README.md`.
 - **M4 : SAMRAI**. Porter la colonne sur l'AMR de SAMRAI et comparer.
 
 Détail des opérateurs : [ALGORITHMS.md](../docs/ALGORITHMS.md). Hiérarchie AMR :

@@ -110,9 +110,9 @@ Poisson-domines et par-etage. Lecon : mesurer, ne pas extrapoler d'un solveur a 
 **Coupleur AMR multi-patch** (`AmrCouplerMP`, n=256 + 1 niveau fin, regrid Berger-Rigoutsos) :
 ~100 ms/pas, 8 patchs, **masse conservee a 6.4e-15 (arrondi machine)**. Gain OpenMP faible
 (6.5 -> 5.9 s) : domine par le Poisson MG grossier + la reconciliation multi-box hote
-(`mf_find_box`, `mf_average_down_mb` en boucle serie). La conservation a l'arrondi machine
-sur un run avec regrid dynamique est la preuve que l'AMR couple tourne correctement.
+(`mf_find_box`, `mf_average_down_mb` en boucle serie). La masse est conservee a l'arrondi
+machine sous regrid dynamique.
 
-Lecon coherente avec la section OpenMP ci-dessus : le dispatch par-noyau aide le
-TRANSPORT a grosse grille (x3.6) mais pas les charges MG-dominees (couple, petit). Le bon
-grain reste de paralleliser au-dessus de la boucle de niveaux.
+Le dispatch par-noyau aide le TRANSPORT a grosse grille (x3.6) mais pas les charges
+MG-dominees (couple, petit) : le bon grain reste de paralleliser au-dessus de la boucle de
+niveaux.

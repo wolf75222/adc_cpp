@@ -315,8 +315,8 @@ ordre 2). Opt-in via `omega_ce`, `omega_ci` (0 = pas de champ, comportement inch
 **Validation.** `test_two_fluid_cyclotron` : plasma uniforme (charge nulle, `E=0`,
 transport inerte) -> rotation pure à `w_c` mesurée à **0.00%** d'écart, `|m|` conservée à
 `8.9e-16`. **Pièges.** En régime fortement magnétisé ET fort champ, le splitting de Strang
-de E et B perd en précision face à un push de Boris combiné (E+B au même centrage temporel)
--- piste d'amélioration, pas encore implémentée.
+de E et B perd en précision face à un push de Boris combiné (E+B au même centrage temporel) :
+piste d'amélioration, pas encore implémentée.
 
 ## 14. Le seam de dispatch (série / OpenMP / Kokkos / MPI)
 

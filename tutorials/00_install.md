@@ -18,7 +18,7 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-**54/54** tests doivent passer (transport, flux de face, Riemann, Poisson, AMR reflux
+**60/60** tests doivent passer (transport, flux de face, Riemann, Poisson, AMR reflux
 2-niveaux / N-niveaux / multi-patch, deux-fluides AP, cyclotron, coupleurs).
 
 ## Options CMake
@@ -40,8 +40,8 @@ Le backend est une **propriété de la bibliothèque** : il est attaché à la c
 
 ```bash
 cmake -S . -B build-omp -DADC_USE_OPENMP=ON   # OpenMP
-cmake -S . -B build-mpi -DADC_USE_MPI=ON      # MPI (+8 tests via mpirun -np 4)
-ctest --test-dir build-mpi                    # 55/55 (47 + 8 MPI)
+cmake -S . -B build-mpi -DADC_USE_MPI=ON      # MPI (+13 tests via mpirun)
+ctest --test-dir build-mpi                    # 73/73 (60 + 13 MPI)
 ```
 
 Sous OpenMP les résultats sont **identiques à la série** (déterminisme thread-count) ;

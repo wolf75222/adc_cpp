@@ -21,7 +21,7 @@ physique ne voit jamais le backend. Détail : [ARCHITECTURE.md §2-4](../docs/AR
 
 ```bash
 cmake -S . -B build-omp -DADC_USE_OPENMP=ON && cmake --build build-omp -j
-ctest --test-dir build-omp     # 54/54, identiques à la série (déterminisme thread-count)
+ctest --test-dir build-omp     # 60/60, identiques à la série (déterminisme thread-count)
 ```
 
 Le banc `bench_amr` mesure le scaling (`OMP_NUM_THREADS=k ./build-omp/bin/bench_amr n nsteps tf`).
@@ -39,7 +39,7 @@ a 6) mais la **saturation de la bande passante mémoire** : le stencil + le mult
 
 ```bash
 cmake -S . -B build-mpi -DADC_USE_MPI=ON && cmake --build build-mpi -j
-ctest --test-dir build-mpi     # 55/55 (47 + 8 via mpirun -np 4)
+ctest --test-dir build-mpi     # 73/73 (60 + 13 via mpirun)
 mpirun -np 4 ./build-mpi/bin/diocotron_mpi out 128 600
 ```
 

@@ -1,15 +1,13 @@
 # Architecture de adc_cpp
 
-Solveur C++23 pour les systemes **hyperbolique-elliptique couples** sur **AMR** (pile
-mesh ecrite from scratch), concu des le depart pour **OpenMP + MPI + Kokkos**, cible
-cluster **ROMEO** (GH200). Cas de validation fil rouge : l'instabilite **diocotron**
-(derive E x B), l'**Euler-Poisson** (gravite ou plasma) et le **deux-fluides isotherme**
-(type Hoffart, arXiv:2510.11808).
+Solveur C++23 pour les systemes hyperbolique-elliptique couples sur AMR (pile mesh maison),
+ecrit pour OpenMP + MPI + Kokkos, cible cluster ROMEO (GH200). Cas de validation fil rouge :
+l'instabilite diocotron (derive E x B), l'Euler-Poisson (gravite ou plasma) et le
+deux-fluides isotherme (type Hoffart, arXiv:2510.11808).
 
 Ce document fige l'architecture cible et son etat. Le README porte la narration et les
-resultats. Ici on decrit les couches, les seams, les decisions, et on distingue
-explicitement ce qui est **fait** de ce qui est **cible** (refactor planifie, voir
-[ROADMAP.md](ROADMAP.md)).
+resultats. Ici on decrit les couches, les seams, les decisions, et on distingue ce qui est
+**fait** de ce qui est **cible** (refactor planifie, voir [ROADMAP.md](ROADMAP.md)).
 
 ## 1. Principe : cinq couches orthogonales
 
@@ -152,8 +150,8 @@ AMR, en helper nomme de premier niveau (et le rendre distribue, cf. section 8).
 toute fonction qui fait un kernel device puis une boucle HOTE sur la meme memoire doit
 appeler `device_fence()` entre les deux (sinon course memoire unifiee sur GPU, invisible en
 CI CPU). C'est correct mais c'est une discipline **manuelle** : un oubli est un bug
-silencieux GPU. De plus `sum` / `norm_inf` sont aujourd'hui des boucles hote derriere un
-fence, pas des reductions device. **Cible** : une API memoire explicite
+silencieux GPU. `sum` / `norm_inf` sont aujourd'hui des boucles hote derriere un fence, pas
+des reductions device. **Cible** : une API memoire explicite
 (`device_reduce`, `device_norm_inf`, `sync_host`, `sync_device`) qui rend la transition
 visible dans le type ou le nom, et des reductions device (pas des boucles hote protegees),
 pour ne pas accumuler de synchronisations globales sur GH200.
@@ -214,7 +212,7 @@ LinearSolver           l'inversion : multigrille, FFT, CG, (Hypre/PETSc).
 FieldPostProcess       E = -grad phi, energie, diagnostics.
 ```
 
-Etat reel : la decomposition est plus avancee que ne le suggerait ce document.
+Etat :
 - **EllipticOperator FAIT** : `elliptic/poisson_operator.hpp` est l'operateur canonique,
   separe des solveurs (`apply_laplacian`, `poisson_residual`, lisseur GS rouge-noir). C'est
   l'`OperatorSpec` partage : `poisson_residual` EST la definition du Laplacien 5 points.
@@ -349,7 +347,8 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui :
-- Tests : 54/54 CPU serie (Eigen inclus) ; 54/54 OpenMP ; +9 MPI (`mpirun -np 4`) ; +1 HDF5.
+- Tests : 60 tests CPU serie (`ctest` sur `build/`, Eigen inclus) ; 73 en build-mpi
+  (= 60 + 13 tests MPI lances par `mpirun -np 4`, bit-identiques np=1/2/4).
 - Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
   (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
   conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`) ; reflux multipatch 2-niveaux
@@ -363,10 +362,7 @@ Fait aujourd'hui :
   maximum, enstrophie non croissante, `test_diocotron_stability`).
 - Conservation : flux coarse-fine exact (le reflux rend la masse machine-zero,
   `test_amr_reflux_mf` / `test_amr_coupler` a `~1e-12` / `5.55e-16`).
-- GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4/7.
-
-La suite numerique du point 7 (revue) est en place : ordres de convergence (Poisson, Euler,
-MUSCL), Gauss du couplage, limite AP, invariants diocotron, conservation sous regrid.
+- GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4.
 
 ## 12. Comparaison AMReX
 

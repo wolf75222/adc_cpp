@@ -2,10 +2,10 @@
 
 # ADC CPP
 
-**Solveur C++23 pour les systemes hyperbolique-elliptique couples sur AMR : seam de dispatch unique serie / OpenMP / Kokkos (GPU GH200), MPI distribue, MultiFab + BoxArray + Geometry, AMR block-structured multi-niveaux + multi-patch (Berger-Rigoutsos, reflux coverage-aware), flux Rusanov / HLL / HLLC, reconstruction MUSCL, SSPRK2/3 + IMEX asymptotic-preserving + Strang, Poisson multigrille ET FFT spectrale, couplage diocotron (derive E x B) + Euler-Poisson (auto-gravite OU plasma electrostatique) + deux-fluides isotherme AP.**
+**Solveur C++23 pour systemes hyperbolique-elliptique couples sur AMR block-structured (multi-niveaux + multi-patch), dispatch unique serie / OpenMP / Kokkos (GPU) et MPI distribue. Cas fil rouge : l'instabilite diocotron (derive E x B) du papier Hoffart (arXiv:2510.11808).**
 
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?logo=cplusplus)
-![Tests](https://img.shields.io/badge/tests-54%2F54%20C%2B%2B%20%2B%209%20MPI%20%2B%20python-brightgreen)
+![Tests](https://img.shields.io/badge/tests-60%20C%2B%2B%20%2B%2013%20MPI%20%2B%20python-brightgreen)
 ![Build](https://img.shields.io/badge/build-CMake%203.20%2B-064F8C?logo=cmake)
 ![GPU](https://img.shields.io/badge/GPU-Nvidia%20GH200%20(Kokkos%2FCUDA)-76B900?logo=nvidia)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python)
@@ -140,7 +140,7 @@ git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build                 # 43 tests C++ doivent passer
+ctest --test-dir build                 # 60 tests C++
 ```
 
 Options CMake :
@@ -204,8 +204,8 @@ docs/          ARCHITECTURE.md, PERFORMANCE.md, animations.
 
 ## Validation
 
-- **59/59** tests C++ (serie), idem OpenMP ; **+9** MPI (`mpirun -np 4`, bit-identique a np=1/2/4) ; **+1** HDF5 ; bindings Python verts.
+- **60/60** tests C++ (serie), idem OpenMP ; **+13** MPI (`mpirun -np 4`, bit-identique a np=1/2/4) ; **+1** HDF5 ; bindings Python verts.
 - **GPU GH200** (CUDA 12.6) : advection, multigrille, pas couple Euler-Poisson, deux-fluides AP + `libadc` compilee GPU, tous **bit-identiques au CPU**.
 - **AMR** : reflux 2-niveaux / N-niveaux / multi-patch coverage-aware, tous prouves **bit-identiques** a la reference, conservation a l'arrondi (5.55e-16) ; clustering Berger-Rigoutsos branche. Le demo couple `diocotron_multipatch` (Poisson grossier + reflux multi-patch) re-cluster ses patchs a la volee (`docs/anim_diocotron_multipatch.gif`) en conservant la masse a `~2e-15` sur tout le run.
-- **Reproduction papier diocotron** (arXiv:2510.11808, objectif de stage) : la colonne sur AMR avec Poisson multi-niveau **egale l'uniforme a resolution effective egale pour ~43 % des cellules** (taux mode 4 `0.526`/`0.563` a 256/320 effectif, identiques a l'uniforme). Detail : [tutorials/10_diocotron_reproduction.md](tutorials/10_diocotron_reproduction.md).
+- **Reproduction papier diocotron** (arXiv:2510.11808, objectif de stage) : la colonne sur AMR avec Poisson multi-niveau egale l'uniforme a resolution effective egale pour ~41-44 % des cellules (taux mode 4 normalise `0.42`/`0.526`/`0.563`/`0.592` aux eff 192/256/320/448). La cible analytique `0.911` n'est pas atteinte : la montee est monotone mais lente, et une instabilite numerique au-dela de eff 448 (champ en `nan`) bloque la resolution. Pipeline valide sur 1 GPU GH200 (ROMEO), qui reproduit eff-448 (uniforme `0.577`, AMR `0.592`). Detail : [tutorials/10_diocotron_reproduction.md](tutorials/10_diocotron_reproduction.md).
 - **Deux-fluides AP** : dispersion isotrope (3.1%), borne + quasi-neutre a `omega_pe = 1e3` (`dt*omega_pe = 5`) la ou l'explicite explose.
