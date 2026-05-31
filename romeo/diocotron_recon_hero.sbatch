@@ -27,7 +27,11 @@ set -uo pipefail
 
 romeo_load_x64cpu_env
 spack load gcc@14.2.0
-spack load cmake@3.31.8
+# cmake@3.31.8 peut exister en double (meme spec, hash different) -> charger par hash (1er match),
+# sinon le spack load par version echoue ("matches multiple packages").
+CMHASH=$(spack find --format '{hash}' cmake@3.31.8 2>/dev/null | head -n1)
+[ -n "$CMHASH" ] && spack load "/$CMHASH" || spack load cmake
+command -v cmake >/dev/null || { echo "CMAKE_KO"; exit 1; }
 
 SRC="$SLURM_SUBMIT_DIR"
 RUN="/scratch_p/$USER/$SLURM_JOBID"
