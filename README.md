@@ -33,15 +33,26 @@ Reproduction :
 
 ---
 
-ADC resout, sur maillage cartesien adaptatif, la forme generale
+ADC resout, sur maillage cartesien adaptatif :
+
+```
+d U / d t  +  div F(U, aux)  =  S(U, aux)
+D phi = f(U)
+```
+
+ou la partie hyperbolique (U) et la partie elliptique (phi) sont couplees a chaque pas
+via aux = (phi, grad phi). Les termes diffusifs / visqueux sont hors coeur actuel (ou
+traites separement s'ils existent : le repo voisin `euler_cpp` porte un flux visqueux).
+
+Forme complete VISEE, le terme diffusif `div H(U, grad U)` n'etant pas encore une brique
+generique validee du coeur :
 
 ```
 d U / d t  +  div F(U, phi)  =  div H(U, grad U)  +  S(U, phi)
 D phi = f(U)
 ```
 
-ou la partie hyperbolique (U) et la partie elliptique (phi) sont couplees a chaque
-pas. Cas de validation fil rouge : l'instabilite **diocotron** (Hoffart et al.,
+Cas de validation fil rouge : l'instabilite **diocotron** (Hoffart et al.,
 arXiv:2510.11808), puis le **deux-fluides isotherme** plasma.
 
 ## Solveurs
