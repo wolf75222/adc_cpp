@@ -173,6 +173,11 @@ un bug `parallel_copy` à np=4 et le gather-tags 2c.
   s'accordent sur le résidu -> même nombre de V-cycles -> séquences `fill_boundary`
   synchronisées. Idempotent sous réplication et identité en série : série 60/60 et les 13
   tests MPI restent verts, bit-identique au comportement historique.
+  RESTE (séparé) : une découpe grossière plus fine (16 boxes = plusieurs boxes par rang)
+  expose un SECOND bug à np=4 (segfault, pas un TRUNCATE), distinct de la désync du résidu.
+  Le cas testé (4 boxes, 1 par rang à np=4) est donc bit-identique np=1/2/4 ; généraliser à
+  un grossier multi-box plus fin (nécessaire à l'échelle hero) demande de traquer ce segfault
+  (accès hors-bornes probable dans un chemin multi-box-par-rang). Non corrigé ici.
 - **2c. Gather-tags pour le regrid d'un niveau réparti (RESTE).** Ajouter à `comm.hpp` un
   `gather` (ou un `all_reduce` du `TagBox` indexé global), rassembler les tags répartis
   avant le clustering Berger-Rigoutsos (cf. `tag_box.hpp:11`). Non nécessaire à 2 niveaux
