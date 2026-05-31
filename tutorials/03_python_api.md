@@ -70,6 +70,35 @@ ts.max_dev()                             # max|n_e - 1| (borne en régime AP)
 ne = ts.density_e(); ni = ts.density_i() # numpy (n, n)
 ```
 
+## DiocotronAmrSolver (AMR multi-patch, regrid dynamique)
+
+Le seul solveur **raffiné** exposé : une bande de charge sur un niveau grossier + des
+patchs fins reconstruits a la volee par regrid Berger-Rigoutsos (couche `AmrCouplerMP`
+-> `advance_amr`). `density()` rend le niveau grossier en numpy ; `n_patches()` donne le
+nombre de patchs fins courants (il evolue avec l'enroulement cat's eye).
+
+```python
+ac = adc.DiocotronAmrConfig()
+ac.n = 128                 # cellules du niveau GROSSIER
+ac.band_amp = 1.0; ac.band_mode = 2; ac.band_width = 0.05
+ac.refine_frac = 0.15      # tag si n_e > fond + 0.15
+ac.regrid_every = 15       # re-raffine tous les 15 pas
+
+asim = adc.DiocotronAmrSolver(ac)
+m0 = asim.mass()
+for _ in range(480):
+    asim.step_cfl(0.4)     # un pas AMR couple (regrid periodique inclus)
+print(asim.n_patches(), asim.density().shape)   # patchs fins, grossier numpy (128,128)
+assert abs(asim.mass() - m0) < 1e-9             # reflux conservatif a l'arrondi
+```
+
+![diocotron AMR depuis Python](../docs/anim_python_amr.gif)
+
+GIF genere 100 % depuis Python (zero ligne de C++) :
+`python3 scripts/make_python_amr_gif.py docs/anim_python_amr.gif`. Le compteur de patchs
+monte avec l'instabilite (4 a 7 patchs ici). La masse reste conservee a `~1e-13` (7e-14 mesure) : le reflux
+conservatif de l'AMR passe inchange par la facade.
+
 ## Invariants à vérifier
 
 ```python

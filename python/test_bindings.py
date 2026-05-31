@@ -100,6 +100,22 @@ print(f"TwoFluidAPSolver(upwind) : max|dne|={us.max_dev():.3e} dmasse_e={abs(us.
 chk(us.max_dev() < 0.1, "tfap_upwind_borne")
 chk(abs(us.mass_e() - um0) < 1e-7, "tfap_upwind_masse_conservee")
 
+# --- DiocotronAmrSolver, AMR multi-patch + regrid Berger-Rigoutsos ---
+ac = adc.DiocotronAmrConfig()
+ac.n = 64
+ac.regrid_every = 10
+asim = adc.DiocotronAmrSolver(ac)
+am0 = asim.mass()
+for _ in range(30):
+    asim.step_cfl(0.4)
+arho = asim.density()
+print(f"DiocotronAmrSolver : patches={asim.n_patches()} shape={arho.shape} "
+      f"dmasse={abs(asim.mass() - am0):.2e}")
+chk(arho.shape == (64, 64), "diocotron_amr_density_numpy")
+chk(np.isfinite(arho).all(), "diocotron_amr_density_finite")
+chk(asim.n_patches() >= 1, "diocotron_amr_a_des_patchs")
+chk(abs(asim.mass() - am0) < 1e-9, "diocotron_amr_masse_conservee")
+
 # --- TwoFluidAPSolver, magnetise (rotation cyclotron, B hors-plan) ---
 mc = adc.TwoFluidAPConfig()
 mc.n = 64

@@ -76,7 +76,7 @@ arXiv:2510.11808), puis le **deux-fluides isotherme** plasma.
 | [`coupling::AmrCoupler`](include/adc/coupling/amr_coupler.hpp) | couplage E x B AMR mono-box (route par `advance_amr`) | conservation a 5.55e-16 |
 | [`coupling::SpectralCoupler`](include/adc/coupling/spectral_coupler.hpp) | couplage E x B distribue ; delegue le Poisson a `DistributedFFTSolver` | MPI, `MPI_Alltoall` |
 | [`amr::{cluster,regrid,tag_box}`](include/adc/amr) | tagging + clustering Berger-Rigoutsos + regrid | genere les patchs multi-box |
-| [`solver::{Diocotron,EulerPoisson,TwoFluidAP}Solver`](include/adc/solver) | **facades compilees** (PIMPL, `libadc`) | API stable sans template (apps, Python) |
+| [`solver::{Diocotron,DiocotronAmr,EulerPoisson,TwoFluidAP}Solver`](include/adc/solver) | **facades compilees** (PIMPL, `libadc`) | API stable sans template (apps, Python) ; `DiocotronAmrSolver` expose l'AMR multi-patch |
 
 Concepts (`PhysicalModel`, `NumericalFlux`, `EllipticSolver`, `CouplingPolicy`) et
 seams (`for_each_cell`, `comm`, `allocator`) : voir
@@ -195,6 +195,12 @@ ec.interaction = adc.InteractionKind.Gravity   # attractif : effondrement de Jea
 es = adc.EulerPoissonSolver(ec)
 for _ in range(100): es.step(2e-3)
 print(es.mass(), es.total_momentum(0))
+
+# diocotron sur AMR : regrid Berger-Rigoutsos pilote depuis Python
+ac = adc.DiocotronAmrConfig(); ac.n = 128; ac.regrid_every = 15
+asim = adc.DiocotronAmrSolver(ac)
+for _ in range(480): asim.step_cfl(0.4)
+print(asim.n_patches(), asim.density().shape)   # patchs fins, niveau grossier numpy
 ```
 
 ## Organisation du depot

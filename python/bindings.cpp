@@ -8,6 +8,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <adc/solver/diocotron_amr_solver.hpp>
 #include <adc/solver/diocotron_solver.hpp>
 #include <adc/solver/euler_poisson_solver.hpp>
 #include <adc/solver/two_fluid_ap_solver.hpp>
@@ -128,4 +129,31 @@ PYBIND11_MODULE(adc, m) {
            [](const TwoFluidAPSolver& s) { return to_2d(s.density_e(), s.nx()); })
       .def("density_i",
            [](const TwoFluidAPSolver& s) { return to_2d(s.density_i(), s.nx()); });
+
+  // --- Diocotron sur AMR multi-patch (bande de charge, regrid Berger-Rigoutsos) ---
+  py::class_<DiocotronAmrConfig>(m, "DiocotronAmrConfig")
+      .def(py::init<>())
+      .def_readwrite("n", &DiocotronAmrConfig::n)
+      .def_readwrite("L", &DiocotronAmrConfig::L)
+      .def_readwrite("B0", &DiocotronAmrConfig::B0)
+      .def_readwrite("alpha", &DiocotronAmrConfig::alpha)
+      .def_readwrite("band_amp", &DiocotronAmrConfig::band_amp)
+      .def_readwrite("band_width", &DiocotronAmrConfig::band_width)
+      .def_readwrite("band_mode", &DiocotronAmrConfig::band_mode)
+      .def_readwrite("band_disp", &DiocotronAmrConfig::band_disp)
+      .def_readwrite("refine_frac", &DiocotronAmrConfig::refine_frac)
+      .def_readwrite("regrid_every", &DiocotronAmrConfig::regrid_every);
+
+  py::class_<DiocotronAmrSolver>(m, "DiocotronAmrSolver")
+      .def(py::init<const DiocotronAmrConfig&>())
+      .def("step", &DiocotronAmrSolver::step, py::arg("dt"))
+      .def("step_cfl", &DiocotronAmrSolver::step_cfl, py::arg("cfl"))
+      .def("max_drift_speed", &DiocotronAmrSolver::max_drift_speed)
+      .def("dx", &DiocotronAmrSolver::dx)
+      .def("mass", &DiocotronAmrSolver::mass)
+      .def("time", &DiocotronAmrSolver::time)
+      .def("nx", &DiocotronAmrSolver::nx)
+      .def("n_patches", &DiocotronAmrSolver::n_patches)
+      .def("density",
+           [](const DiocotronAmrSolver& s) { return to_2d(s.density(), s.nx()); });
 }

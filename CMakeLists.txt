@@ -140,6 +140,7 @@ endif()
 # dans include/ (les templates doivent etre visibles a l'instanciation).
 add_library(adc_solver STATIC
   src/diocotron_solver.cpp
+  src/diocotron_amr_solver.cpp
   src/euler_poisson_solver.cpp
   src/two_fluid_ap_solver.cpp)
 target_link_libraries(adc_solver PUBLIC adc)
