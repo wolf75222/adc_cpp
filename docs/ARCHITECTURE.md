@@ -194,7 +194,7 @@ l'arrondi inchangees).
 | `mesh/` | execution | `box2d`, `box_array`, `fab2d`/`multifab`, `for_each`, `fill_boundary`, `physical_bc`, `geometry`, `mf_arith`, `refinement`, `box_hash` |
 | `parallel/` | execution | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
 | `amr/` | execution | `amr_hierarchy`, `cluster` (Berger-Rigoutsos), `regrid`, `tag_box` |
-| `integrator/` | temps | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `amr_reflux`/`amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab, mono-box -> multi-patch N-niveaux, GPU-ready) |
+| `integrator/` | temps | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `magnetic_euler_poisson` (rotation cyclotron `m x Omega` en Strang autour du couplage Euler-Poisson), `amr_reflux`/`amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab, mono-box -> multi-patch N-niveaux, GPU-ready) |
 | `coupling/` | temps | `coupler`, `coupling_policy`, `amr_coupler` (mono-box), `amr_coupler_mp` (multi-patch + regrid BR), `amr_level_storage` (hierarchie `AmrLevelStack`), `amr_regrid_coupler` (`amr_regrid_finest`), `amr_diagnostics` (masse, derive), `spectral_coupler` |
 | `analysis/` | hors chemin chaud | `diocotron_growth` (Eigen, `#ifdef ADC_HAS_EIGEN`), `hdf5_writer` (`#ifdef ADC_HAS_HDF5`) |
 | `solver/` | facade | facades PIMPL : `diocotron_solver`, `euler_poisson_solver`, `two_fluid_ap_solver` |
@@ -282,23 +282,20 @@ SubcyclingSchedule = recursion Berger-Oliger   RegridPolicy = amr_regrid_finest 
 advance_amr(m, hierarchy, dt);   // entree unifiee ; reste a absorber la famille amr_step_*
 ```
 
-**Faiblesse 2 : le multi-patch distribue (priorite n.1).** Fait pour le 2-niveaux :
-`amr_step_2level_multipatch` tourne **reellement distribue** (`test_mpi_amr_multipatch`,
-np=1/2/4 **bit a bit identiques**, masse conservee). Le grossier mono-box est replique
-(copie par-rang + remplissage periodique local au lieu du plan MPI de `fill_boundary`), les
-patchs fins repartis ; `average_down` (ecrasement des cellules couvertes) et reflux
-(addition aux cellules bordantes) remontent par deux buffers grossiers + `all_reduce_sum_inplace`,
-chaque rang appliquant a sa copie. La couverture etait deja batie sur le `box_array()`
-global. Reste : le chemin N-niveaux recursif (`subcycle_level_mp`, grossier multi-box,
-routage `mf_find_box`), puis, cible finale, chaque patch portant **des le depart** :
+**Faiblesse 2 : le multi-patch distribue.** Le 2-niveaux tourne **reellement distribue**
+(`test_mpi_amr_multipatch`, np=1/2/4 **bit a bit identiques**, masse conservee), grossier
+**replique OU de-replique**. De-replication FAITE (`AmrCouplerMP`, parametre `replicated_coarse`) :
+le niveau 0 peut etre une grille **multi-box repartie** round-robin au lieu d'une box unique
+repliquee par rang, ce qui leve le verrou memoire O(NX*NY*nrangs) a grande echelle. Le reflux
+`subcycle_level_mp` est generalise (drapeau `coarse_replicated`) : il route le grossier reparti
+par `parallel_copy` au lieu de `mf_find_box`, qui rendrait -1 sur une cellule grossiere bordante
+possedee par un rang distant (l'ancien segfault). Bit-identique np=1/2/4 (`test_mpi_decoarse`,
+motif patch fin centre chevauchant les 4 boxes grossieres dont 3 distantes). `average_down` et
+reflux remontent par buffer grossier + `all_reduce`, appliques aux boxes parentes locales.
 
-```
-owner_rank          global_box_id          parent_level
-interfaces coarse-fine GLOBALES             registre de flux DISTRIBUE
-politique de reduction conservative   +   load_balance SFC sur le multi-box
-```
-
-C'est l'item prioritaire de la [ROADMAP.md](ROADMAP.md).
+Reste : (a) un gather-tags dans `comm.hpp` pour taguer un niveau INTERMEDIAIRE reparti (3+
+niveaux ; a 2 niveaux le niveau 0 porte les tags) ; (b) `load_balance` SFC sur le multi-box
+(round-robin seul aujourd'hui). Detail : [ROADMAP.md](ROADMAP.md), [HERO_RUN_AMR.md](HERO_RUN_AMR.md).
 
 ## 9. Backends : propriete de la bibliotheque, pas un drapeau par cible
 
@@ -370,5 +367,5 @@ Correspondances : `MultiFab`, `BoxArray`/`DistributionMapping`, `Geometry`, `Amr
 FillBoundary, Arena, reflux, MLMG ~ `GeometricMG`. Divergences assumees : pas de `MFIter`
 (on itere `for_each_cell` + fab local, GPU-ready) ; l'operateur elliptique joue `LinOp`
 mais Laplacien a coefficient constant (EB en escalier) ; le FluxRegister / FillPatch
-multi-patch 2-niveaux est distribue (bit-identique np=1/2/4), le chemin N-niveaux recursif
-restant a generaliser de meme (section 8).
+multi-patch 2-niveaux est distribue (bit-identique np=1/2/4), grossier replique ou de-replique
+(multi-box reparti) ; reste le regrid d'un niveau intermediaire reparti pour 3+ niveaux (section 8).
