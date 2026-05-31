@@ -14,20 +14,19 @@
 </div>
 
 <p align="center">
-  <img src="docs/anim_diocotron_amr3.gif" alt="Instabilite diocotron sur AMR 3 niveaux" width="640">
+  <img src="docs/anim_romeo_diocotron_amr3.gif" alt="Instabilite diocotron AMR 3 niveaux sur ROMEO" width="640">
 </p>
 
 <div align="center">
 <sub>
-Instabilite diocotron (derive E x B) sur AMR 3 niveaux emboites. Une bande de charge
-cree un ecoulement cisaille, instable, qui s'enroule en "cat's eyes". Les patchs fins
-(cadres cyan) suivent les zones de fort gradient par regrid dynamique. Densite n_e
-transportee par v = (E x B)/B^2, phi resolu par multigrille a chaque etage SSPRK2,
-sous-cyclage Berger-Oliger + reflux conservatif aux interfaces coarse-fine (derive de
-masse ~ 1e-15). Le pas couple est porte par le composant <code>AmrCoupler</code> sur
-la pile MultiFab.
-Reproduction :
-<code>./build/bin/diocotron_amr3 out && python3 scripts/make_diocotron_amr3_gif.py out docs/anim_diocotron_amr3.gif</code>.
+Instabilite diocotron (derive E x B) sur AMR 3 niveaux emboites, produite sur ROMEO (x64cpu, 96 coeurs AMD EPYC).
+Une bande de charge cree un ecoulement cisaille instable qui s'enroule en cat's eyes. Les patchs fins
+(cyan = niveau 1, vert = niveau 2) suivent les zones de fort gradient par regrid dynamique (Berger-Rigoutsos).
+Transport v = (E x B)/B^2, phi resolu par multigrille a chaque etage SSPRK2, sous-cyclage Berger-Oliger +
+reflux conservatif aux interfaces coarse-fine (derive de masse ~ 1e-15). Moteur : <code>advance_amr</code>,
+multi-patch N-niveaux distribue. Reproduction :
+<code>sbatch romeo/diocotron_amr3_gif.sbatch</code> puis
+<code>python3 scripts/make_diocotron_amr3_gif.py out_gif_amr3 docs/anim_romeo_diocotron_amr3.gif</code>.
 </sub>
 </div>
 
@@ -220,3 +219,15 @@ docs/          ARCHITECTURE.md, PERFORMANCE.md, animations.
 - **AMR** : un seul moteur de production (`advance_amr`, multi-patch N-niveaux distribue), dont le mono-box est le cas degenere (`maxdiff=0`) ; reflux 2-niveaux / N-niveaux / multi-patch coverage-aware **bit-identiques** a la reference, conservation a l'arrondi (5.55e-16) ; clustering Berger-Rigoutsos branche. Le demo couple `diocotron_multipatch` (Poisson grossier + reflux multi-patch) re-cluster ses patchs a la volee (`docs/anim_diocotron_multipatch.gif`) en conservant la masse a `~2e-15` sur tout le run.
 - **Reproduction papier diocotron** (arXiv:2510.11808, objectif de stage) : la colonne sur AMR avec Poisson multi-niveau egale l'uniforme a resolution effective egale pour ~41-44 % des cellules (taux mode 4 normalise `0.42`/`0.526`/`0.563`/`0.592` aux eff 192/256/320/448). La cible analytique `0.911` n'est pas atteinte : la montee est monotone mais lente, et une instabilite numerique au-dela de eff 448 (champ en `nan`) bloque la resolution. Pipeline valide sur 1 GPU GH200 (ROMEO), qui reproduit eff-448 (uniforme `0.577`, AMR `0.592`). Detail : [tutorials/10_diocotron_reproduction.md](tutorials/10_diocotron_reproduction.md).
 - **Deux-fluides AP** : dispersion isotrope (3.1%), borne + quasi-neutre a `omega_pe = 1e3` (`dt*omega_pe = 5`) la ou l'explicite explose.
+
+## Resultats ROMEO (GH200 + EPYC)
+
+Runs de reproduction du taux diocotron (arXiv:2510.11808, mode 4, cible 0.911).
+
+| Figure | Source | Conclusion |
+|---|---|---|
+| ![convergence WENO5](docs/romeo_highorder_convergence.png) | job 613961, WENO5-Z + SSPRK3, modes 3/4/5 x eff 256/512/1024 | sur-tir ~+8 % **plat en resolution** : limite geometrique (bord cartesien), pas numerique |
+| ![croissance mode 4](docs/romeo_growth_mode4.png) | `ring_amp.csv` reels, mode 4 | eff 512 et 1024 **confondues** : taux converge en resolution effective |
+| ![efficacite AMR](docs/romeo_amr_efficiency.png) | job 613945, colonne AMR vs uniforme | meme taux pour **~40 % des cellules** (AMR multi-niveau VanLeer) |
+
+Voir `romeo/HERO_RESULTS.md` + `tutorials/10_diocotron_reproduction.md` pour le detail.

@@ -64,6 +64,33 @@ patchs. Le bord d'anneau voit donc un potentiel résolu à la résolution fine.
 À base 96 (mêmes 16 392 cellules qu'en M2), le taux remonte de `0.38` à `0.42`.
 Le Poisson grossier bridait bien le taux : hypothèse confirmée.
 
+## M2b-HO : WENO5-Z + SSPRK3 sur ROMEO (job 613961)
+
+Pour lever le plafond de diffusion numérique de M2b, la reconstruction WENO5-Z (ordre 5
+sur champ lisse) remplace le limiteur VanLeer sur la grille uniforme. Résultats sur ROMEO
+(96 cœurs EPYC, modes 3/4/5, résolutions effectives 256/512/1024) :
+
+| mode `l` | analytique | eff 256 | eff 512 | eff 1024 | sur-tir |
+|---|---|---|---|---|---|
+| 3 | 0.772 | 0.838 | 0.850 | 0.853 | +10 % |
+| **4** | **0.911** | **0.985** | **0.988** | **0.987** | **+8 %** |
+| 5 | 0.683 | 0.730 | 0.731 | 0.729 | +7 % |
+
+![convergence WENO5-Z ROMEO](../docs/romeo_highorder_convergence.png)
+
+Le sur-tir est **uniforme et PLAT** en résolution (eff 512 et eff 1024 donnent le même
+taux à 0.1 % près). La résolution ne referme pas l'écart. Conclusion : la limite n'est
+pas la diffusion numérique du schéma, c'est la **géométrie cartésienne en escalier** qui
+approxime l'anneau circulaire et la paroi conductrice ronde. Lever ce verrou demande
+soit des coordonnées polaires, soit des cellules coupées (cut-cell).
+
+Courbes d'amplitude `ring_amp.csv` réelles (mode 4) :
+
+![croissance mode 4](../docs/romeo_growth_mode4.png)
+
+Les courbes eff 512 et eff 1024 se superposent, ce qui confirme la convergence du taux.
+Données brutes : `romeo/runs/613961_growth/`.
+
 ## Convergence et payoff de l'AMR
 
 En montant la base (96, 128, 160, 224 ; résolution effective au bord 192, 256,
@@ -78,6 +105,7 @@ effective, pour 41 à 44 % des cellules :
 | 448 | 0.592 / 82 808 | 0.577 / 200 704 | 41 % |
 
 ![convergence multi-niveau](../docs/fig_diocotron_ml_convergence.png)
+![efficacite AMR ROMEO](../docs/romeo_amr_efficiency.png)
 
 À base 128 et plus, le taux AMR COÏNCIDE avec l'uniforme à résolution effective
 égale (à 41-44 % du coût). À base 96 l'AMR reste sous l'uniforme-192 (le transport
@@ -85,9 +113,11 @@ grossier hors patchs limite encore), puis rattrape. La ligne eff 448 vient d'un
 run sur 1 GPU GH200 (voir plus bas).
 
 Le taux monte de façon monotone avec la résolution (0.42, 0.526, 0.563, 0.592)
-mais N'ATTEINT PAS `0.911` : la limite de diffusion de M1 demande une base plus
-haute, et au-delà de eff 448 la simulation devient numériquement instable. `0.911`
-reste la cible, non encore atteinte.
+mais N'ATTEINT PAS `0.911`. La section M2b-HO ci-dessus montre que même avec WENO5-Z,
+le taux plafonne à ~0.987 (+8 % uniforme au-dessus de l'analytique). La limite n'est
+donc pas la diffusion numérique : c'est la **géométrie cartésienne en escalier**
+(anneau et paroi circulaires sur grille carrée). Lever ce verrou demande des coordonnées
+polaires ou des cellules coupées (cut-cell).
 
 ## Tout rejouer
 
@@ -131,11 +161,12 @@ ci-dessus quand `Ω` grandit. Démo `examples/magnetic_diocotron.cpp`, animation
 
 ## Où va la suite
 
-- **Hero-run ROMEO** : sur 1 GPU GH200 (ROMEO `armgpu`, MPI + Kokkos/CUDA) le pipeline
-  reproduit la ligne eff 448 sur matériel réel (uniforme 0.577, AMR `ml` 0.592). Au-delà,
-  la simulation diverge (densité/vitesse en `nan`) aux deux schémas : le couplage
-  Poisson/densité converge mal au bord embedded sur grille fine. Lever ce verrou pour viser
-  `0.911` est le prochain chantier (pas encore de run pleine machine). Voir `romeo/README.md`.
+- **Hero-run ROMEO (fait)** : 1 GPU GH200 (`armgpu`, MPI + Kokkos/CUDA) reproduit la
+  ligne eff 448 (uniforme 0.577, AMR `ml` 0.592, checksum bit-identique CPU). WENO5-Z sur
+  EPYC (job 613961) confirme le sur-tir geometrique (+8 % plat). Voir `romeo/HERO_RESULTS.md`.
+- **Verrou geometrique** : la prochaine amelioration demande soit des coordonnees polaires,
+  soit des cellules coupees (cut-cell) pour approximer correctement l'anneau et la paroi
+  circulaire. C'est le chantier M3bis / M4.
 - **M4 : SAMRAI**. Porter la colonne sur l'AMR de SAMRAI et comparer.
 
 Détail des opérateurs : [ALGORITHMS.md](../docs/ALGORITHMS.md). Hiérarchie AMR :
