@@ -26,24 +26,28 @@
 set -uo pipefail
 
 romeo_load_x64cpu_env
-spack load gcc@14.2.0
-# cmake@3.31.8 peut exister en double (meme spec, hash different) -> charger par hash (1er match),
-# sinon le spack load par version echoue ("matches multiple packages").
-CMHASH=$(spack find --format '{hash}' cmake@3.31.8 2>/dev/null | head -n1)
-[ -n "$CMHASH" ] && spack load "/$CMHASH" || spack load cmake
-command -v cmake >/dev/null || { echo "CMAKE_KO"; exit 1; }
+spack load gcc@14.2.0   # fournit g++ ET les runtimes libgomp/libstdc++ (a l execution sur calcul)
+command -v g++ >/dev/null || { echo "GXX_KO"; exit 1; }
 
 SRC="$SLURM_SUBMIT_DIR"
 RUN="/scratch_p/$USER/$SLURM_JOBID"
-BUILD="$RUN/build-omp"
 OUT="$RUN/out"
 mkdir -p "$OUT"
 
-# --- build OpenMP (gcc 14, C++23), determinisme OpenMP == serie garanti par le depot ---
-cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DADC_USE_OPENMP=ON \
-  -DCMAKE_CXX_COMPILER="$(command -v g++)" || { echo "CFG_KO"; exit 1; }
-cmake --build "$BUILD" -j --target diocotron_column_amr || { echo "BUILD_KO"; exit 1; }
-BIN="$BUILD/bin/diocotron_column_amr"
+# --- build OpenMP DIRECT (g++ -fopenmp ; le seam for_each_cell s active sur _OPENMP) ---
+# Pas de cmake : son paquet spack depend de libmd.so.0, presente sur le LOGIN mais ABSENTE
+# des noeuds de CALCUL (cmake y echoue "cannot open shared object file"). adc etant header-only
+# (cible INTERFACE), un seul g++ suffit. Le binaire est mis en cache dans un scratch STABLE
+# (reutilise d un job a l autre) ; on peut aussi le pre-construire sur le login (meme archi
+# x86_64) :  g++ -std=c++23 -O3 -fopenmp -I include examples/diocotron_column_amr.cpp -o "$BIN".
+# Determinisme OpenMP == serie garanti par le depot.
+BIN="/scratch_p/$USER/adc-recon-bin/diocotron_column_amr"
+if [ ! -x "$BIN" ]; then
+  mkdir -p "$(dirname "$BIN")"
+  g++ -std=c++23 -O3 -fopenmp -I "$SRC/include" "$SRC/examples/diocotron_column_amr.cpp" \
+    -o "$BIN" || { echo "BUILD_KO"; exit 1; }
+fi
+echo "binaire : $BIN"
 
 export OMP_NUM_THREADS=${THREADS:-$SLURM_CPUS_PER_TASK}
 export OMP_PLACES=cores OMP_PROC_BIND=close
