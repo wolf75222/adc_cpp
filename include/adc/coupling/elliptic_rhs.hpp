@@ -7,6 +7,7 @@
 #include <adc/operator/spatial_operator.hpp>  // load_state
 
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 // Assemblage du second membre elliptique.
@@ -80,8 +81,11 @@ struct TwoBlockChargeDensityRhs {
 // elliptique. `charge` inclut le signe (q_e < 0, q_i > 0) ; `comp` repere la
 // composante densite n_s dans le MultiFab du bloc (0 pour un scalaire, l'indice
 // rho pour un etat conserve Euler).
+//
+// Defaut `charge = 0` (revue Codex) : une espece NEUTRE, ou un bloc dont l'entree
+// serait oubliee, ne contribue PAS a Poisson (au lieu d'y verser q=+1 par accident).
 struct SpeciesCharge {
-  Real charge = Real(1);
+  Real charge = Real(0);
   int comp = 0;
 };
 
@@ -101,9 +105,11 @@ inline void add_scaled_component(const MultiFab& U, Real q, int comp,
 
 // Second membre de Poisson a N especes : f = Sum_s q_s n_s, somme sur TOUS les
 // blocs du systeme (generalise TwoBlockChargeDensityRhs aux N especes demandees
-// par le tuteur). `species[k]` decrit le bloc k dans l'ordre de CoupledSystem ;
-// un bloc sans entree (k >= species.size()) est traite avec la charge par defaut
-// (q = +1, comp = 0) plutot que d'echouer silencieusement.
+// par le tuteur). `species[k]` decrit le bloc k dans l'ordre de CoupledSystem.
+//
+// Contrat (revue Codex) : EXIGER une entree par bloc (species.size() == n_blocks),
+// pour qu'un bloc oublie ne soit pas silencieusement absent du second membre. Une
+// espece neutre se declare explicitement avec `charge = 0`.
 //
 // Exemple deux fluides "rhs = n_i - n_e" :
 //   ChargeDensityRhs{{ {.charge=-1, .comp=0},   // bloc 0 : electrons
@@ -113,12 +119,14 @@ struct ChargeDensityRhs {
 
   template <CoupledSystemLike System>
   void operator()(const System& system, MultiFab& rhs) const {
+    if (species.size() != System::n_blocks)
+      throw std::runtime_error(
+          "ChargeDensityRhs : il faut exactement une SpeciesCharge par bloc "
+          "(une espece neutre se declare avec charge = 0)");
     rhs.set_val(Real(0));
     std::size_t k = 0;
     system.for_each_block([&](const auto& block) {
-      const SpeciesCharge sc =
-          (k < species.size()) ? species[k] : SpeciesCharge{};
-      ++k;
+      const SpeciesCharge sc = species[k++];
       add_scaled_component(block.U(), sc.charge, sc.comp, rhs);
     });
   }

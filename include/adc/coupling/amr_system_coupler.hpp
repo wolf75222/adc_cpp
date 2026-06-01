@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -91,8 +92,28 @@ class AmrSystemCoupler {
         cadence_(cadence),
         mg_(geom, ba_coarse, bcPhi, std::move(active), replicated_coarse),
         block_levels_(std::move(block_levels)) {
+    // Verifications de construction (revue Codex) : sans elles, une hierarchie mal
+    // formee provoque un acces hors borne silencieux dans le cablage / l'avance.
+    if (block_levels_.size() != System::n_blocks)
+      throw std::runtime_error(
+          "AmrSystemCoupler : block_levels doit avoir un vecteur de niveaux par bloc "
+          "(taille != n_blocks)");
     nlev_ = block_levels_.empty() ? 0
                                   : static_cast<int>(block_levels_[0].size());
+    if (nlev_ == 0)
+      throw std::runtime_error("AmrSystemCoupler : au moins un niveau (grossier) requis");
+    for (std::size_t b = 0; b < block_levels_.size(); ++b) {
+      if (static_cast<int>(block_levels_[b].size()) != nlev_)
+        throw std::runtime_error(
+            "AmrSystemCoupler : tous les blocs doivent avoir le meme nombre de niveaux");
+      // grille partagee par niveau (aux unique) : meme nombre de boites que le bloc 0.
+      for (int k = 0; k < nlev_; ++k)
+        if (block_levels_[b][k].U.box_array().size() !=
+            block_levels_[0][k].U.box_array().size())
+          throw std::runtime_error(
+              "AmrSystemCoupler : grilles par niveau incoherentes entre blocs "
+              "(aux partage exige la meme BoxArray par niveau)");
+    }
     // aux PARTAGE : un MultiFab (phi, grad phi) par niveau, sur la grille commune.
     // Dimensionne une seule fois -> adresses stables pour les pointeurs aux des blocs.
     aux_.resize(nlev_);
