@@ -222,3 +222,54 @@ l'architecture utilisateur.
 > rendue conservative sur AMR (flux de face). Le `PhysicalModel` décrit une équation, le
 > `CoupledSystem` un système, le `Scheduler`/coupleur l'ordre d'exécution ; le cœur garantit
 > AMR / MPI / GPU. Restent des raffinements (composition Python générique, perf, §4.3/§4.4).
+
+---
+
+## 8. Retour tuteur (2026-06-01) — niveau d'assemblage : couvert vs à extraire
+
+Discussion : coupler ions / électrons / **neutres**, chacun son `PhysicalModel` ; les
+espèces interagissent dans le **second membre elliptique** `f` ET dans la **source `S`**
+(jamais dans le flux `F`). On veut choisir **par espèce** : le modèle (isotherme / profil
+constant donné / résolu ou non / pas à chaque pas), le **schéma spatial**, le **pas de
+temps** (sous-cyclage : 10 pas électrons pour 1 pas ions), le **traitement** implicite /
+explicite — et même **implicite sur une PARTIE seulement des variables** (coût). Côté
+archi : extraire l'**intégrateur en temps** comme objet (`take_step`) donné au coupleur,
+et **alléger le coupleur** qui « fait trop » (« avancer un coupleur » est philosophiquement
+bancal : un coupleur *assemble*, un *driver* avance).
+
+### 8.1 Déjà couvert (vérifié par test — réponses aux « est-ce qu'on peut ? »)
+- [x] **N espèces hétérogènes, chacune son `PhysicalModel`** → `CoupledSystem<Blocks...>`
+  (électrons Euler 4 var + ions isothermes 3 var, `test_two_species_euler`). Un **neutre**
+  = un bloc de plus (charge 0 → ne contribue pas à `f`, mais interagit via `S`).
+- [x] **Interaction dans `f`** (elliptique) : `f = Σ_s q_s n_s` → `ChargeDensityRhs`.
+- [x] **Interaction dans `S`** (collisions, échange ; pas dans `F`) → `CoupledSource`
+  (`coupled_source.hpp` ; `SystemCoupler::coupled_source_step` lit tous les blocs + φ).
+- [x] **Schéma spatial différent par espèce** (électrons MUSCL, ions ordre 1, limiteurs
+  distincts) → `SpatialDiscretisation` par bloc (`test_system_two_explicit`).
+- [x] **Sous-cyclage par espèce** (10 pas électrons : 1 pas ions) → `substeps` +
+  scheduler (`test_system_abstraction` : ne=10, ni=1).
+- [x] **Électrons implicites + ions explicites** → `TimeTreatment` par bloc
+  (`test_two_species_minimal`, `test_amr_system_coupler` part B).
+- [x] **Implicite sur une PARTIE des variables** (pas tout le modèle) → trait
+  `Model::is_implicit(c)` (`test_imex_partial`) = « dire quelles variables on step ».
+- [x] **Espèce en profil constant / non avancée** → `PrescribedTime` (le scheduler saute
+  les blocs `Prescribed`, qui contribuent quand même à `f`). *[à illustrer par un test]*
+- [x] **Résoudre l'elliptique tous les pas ou pas** → `PoissonCadence` (`OncePerStep`/`PerSubstep`).
+- [x] « numerical method » est **déjà** nommé `SpatialDiscretisation` (≠ time integrator).
+
+### 8.2 À extraire (les vrais manques d'abstraction)
+- [ ] **`TimeIntegrator` objet de premier plan** (`take_step(rhs, U, dt)`), DANS le cœur,
+  que le coupleur **appelle** — au lieu de SSPRK codé en dur dans `SystemCoupler` (et
+  **dupliqué** avec `ssprk.hpp` et `Coupler`). Fournir SSPRK2/3 génériques + un point
+  d'extension `UserTimeIntegrator` réellement câblé (l'utilisateur écrit son `take_step`,
+  C++ ou Python). But : donner `{PhysicalModel, SpatialDiscretisation, TimeIntegrator}` au
+  coupleur comme un trio composable. Aujourd'hui `Spatial`/`Time` sont des **tags template**
+  et `Time` n'est pas un objet à `take_step` ; cette extraction **unifie** les 3 copies de SSPRK.
+- [ ] **Alléger `Coupler` / `Simulation` (responsabilités)** : aujourd'hui un coupleur
+  assemble l'elliptique + résout Poisson + dérive aux + calcule le RHS spatial + intègre en
+  temps + sous-cycle. Séparer un **Assembleur** (couple hyperbolique + elliptique, RHS de
+  système) d'un **Driver** (orchestre les pas, appelle `TimeIntegrator::take_step`).
+  Reconsidérer le nom : le driver « avance », le coupleur « assemble ». (Prolonge §4
+  « Coupler fourre-tout ».)
+- [ ] **Pas de temps propre par modèle au-delà du sous-cyclage entier** : `substeps` couvre
+  10:1 en lock-step ; un `dt` par espèce (multirate, p.ex. piloté CFL) reste à faire.
