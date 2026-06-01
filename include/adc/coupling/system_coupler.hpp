@@ -164,7 +164,9 @@ class SystemDriver {
   template <class ImplicitAdvance>
   void step(Real dt, ImplicitAdvance&& implicit_advance) {
     ImplicitAdvance& advance_implicit = implicit_advance;
-    advance_subcycled(asm_.system(), dt, [&](auto& block, Real h, int s, int n) {
+    // macro_step_ : un bloc de cadence `stride` n'avance qu'1 macro-pas sur stride
+    // (alors d'un pas effectif stride*dt). stride=1 -> chaque pas (historique).
+    advance_subcycled(asm_.system(), dt, macro_step_, [&](auto& block, Real h, int s, int n) {
       using Block = std::decay_t<decltype(block)>;
       constexpr TimeTreatment treatment = block_time_treatment_v<Block>;
       if constexpr (treatment == TimeTreatment::Explicit) {
@@ -176,6 +178,7 @@ class SystemDriver {
         advance_implicit(*this, block, h, s, n);
       }
     });
+    ++macro_step_;
   }
 
   // Surcharge pratique pour un systeme entierement explicite.
@@ -242,6 +245,7 @@ class SystemDriver {
   }
 
   SystemAssembler<System, RhsAssembler, Elliptic> asm_;
+  int macro_step_ = 0;  // compteur de macro-pas (cadence stride par bloc)
 };
 
 // Compat / nommage historique : SystemCoupler == le Driver (qui avance). On garde l'alias

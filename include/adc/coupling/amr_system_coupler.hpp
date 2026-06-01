@@ -183,9 +183,15 @@ class AmrSystemCoupler {
       using Disc = typename Block::Spatial;
       constexpr TimeTreatment treatment = block_time_treatment_v<Block>;
       constexpr int n = block_substeps_v<Block>;
-      auto& levels = block_levels_[b];
+      constexpr int stride = block_stride_v<Block>;
+      const std::size_t bi = b++;
+      // cadence (retour tuteur §8.2 C) : un bloc lent n'avance qu'1 macro-pas sur stride,
+      // alors d'un pas effectif stride*dt. stride=1 -> chaque pas (historique).
+      if (macro_step_ % stride != 0) return;
+      const Real bdt = dt * static_cast<Real>(stride);
+      auto& levels = block_levels_[bi];
       if constexpr (treatment == TimeTreatment::Explicit) {
-        const Real h = dt / static_cast<Real>(n);
+        const Real h = bdt / static_cast<Real>(n);
         for (int s = 0; s < n; ++s) {
           // PerSubstep : re-resout phi avant chaque sous-pas suivant (la charge a
           // bouge) ; le premier reutilise le solve de tete. OncePerStep : phi gele.
@@ -200,12 +206,12 @@ class AmrSystemCoupler {
         // le callback. Implicite pur : tout au callback (pas de transport).
         if constexpr (treatment == TimeTreatment::IMEX)
           advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
-              SourceFreeModel<typename Block::Model>{block.model}, levels, dom_, dt,
+              SourceFreeModel<typename Block::Model>{block.model}, levels, dom_, bdt,
               base_per_, replicated_coarse_);
-        implicit_advance(*this, block, levels, dt);
+        implicit_advance(*this, block, levels, bdt);
       }
-      ++b;
     });
+    ++macro_step_;
   }
 
   // Surcharge pour un systeme entierement explicite.
@@ -275,6 +281,7 @@ class AmrSystemCoupler {
   bool replicated_coarse_;
   PoissonCadence cadence_;
   mutable int solve_count_ = 0;
+  int macro_step_ = 0;  // compteur de macro-pas (cadence stride par bloc)
   Elliptic mg_;
   std::vector<std::vector<AmrLevelMP>> block_levels_;  // [bloc][niveau]
   std::vector<MultiFab> aux_;                          // [niveau], partage

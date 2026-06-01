@@ -27,12 +27,18 @@ enum class TimeTreatment {
   Prescribed
 };
 
-template <class MethodT, TimeTreatment TreatmentT, int SubstepsT = 1>
+// SubstepsT : sous-pas PLUS FREQUENTS (n pas de dt/n par macro-pas — electrons rapides).
+// StrideT   : cadence PLUS LENTE (le bloc n'avance qu'1 macro-pas sur StrideT, alors d'un
+//   pas de StrideT*dt — un « gaz » lent qu'on ne resout pas a chaque pas, retour tuteur).
+//   Les deux sont orthogonaux ; StrideT=1 = comportement historique.
+template <class MethodT, TimeTreatment TreatmentT, int SubstepsT = 1, int StrideT = 1>
 struct TimePolicy {
   static_assert(SubstepsT >= 1, "un TimePolicy doit avoir au moins un sous-pas");
+  static_assert(StrideT >= 1, "un TimePolicy doit avoir une cadence (stride) >= 1");
   using Method = MethodT;
   static constexpr TimeTreatment treatment = TreatmentT;
   static constexpr int substeps = SubstepsT;
+  static constexpr int stride = StrideT;
 };
 
 template <class T>
@@ -40,24 +46,26 @@ struct TimePolicyTraits {
   using Method = T;
   static constexpr TimeTreatment treatment = TimeTreatment::Explicit;
   static constexpr int substeps = 1;
+  static constexpr int stride = 1;
 };
 
-template <class MethodT, TimeTreatment TreatmentT, int SubstepsT>
-struct TimePolicyTraits<TimePolicy<MethodT, TreatmentT, SubstepsT>> {
+template <class MethodT, TimeTreatment TreatmentT, int SubstepsT, int StrideT>
+struct TimePolicyTraits<TimePolicy<MethodT, TreatmentT, SubstepsT, StrideT>> {
   using Method = MethodT;
   static constexpr TimeTreatment treatment = TreatmentT;
   static constexpr int substeps = SubstepsT;
+  static constexpr int stride = StrideT;
 };
 
-template <class MethodT = SSPRK2, int SubstepsT = 1>
-using ExplicitTime = TimePolicy<MethodT, TimeTreatment::Explicit, SubstepsT>;
+template <class MethodT = SSPRK2, int SubstepsT = 1, int StrideT = 1>
+using ExplicitTime = TimePolicy<MethodT, TimeTreatment::Explicit, SubstepsT, StrideT>;
 
-template <class MethodT = UserTimeIntegrator, int SubstepsT = 1>
-using ImplicitTime = TimePolicy<MethodT, TimeTreatment::Implicit, SubstepsT>;
+template <class MethodT = UserTimeIntegrator, int SubstepsT = 1, int StrideT = 1>
+using ImplicitTime = TimePolicy<MethodT, TimeTreatment::Implicit, SubstepsT, StrideT>;
 
-template <class MethodT = UserTimeIntegrator, int SubstepsT = 1>
-using IMEXTime = TimePolicy<MethodT, TimeTreatment::IMEX, SubstepsT>;
+template <class MethodT = UserTimeIntegrator, int SubstepsT = 1, int StrideT = 1>
+using IMEXTime = TimePolicy<MethodT, TimeTreatment::IMEX, SubstepsT, StrideT>;
 
-using PrescribedTime = TimePolicy<UserTimeIntegrator, TimeTreatment::Prescribed, 1>;
+using PrescribedTime = TimePolicy<UserTimeIntegrator, TimeTreatment::Prescribed, 1, 1>;
 
 }  // namespace adc

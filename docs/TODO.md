@@ -299,10 +299,18 @@ trop. « Avancer un coupleur » est bancal — un coupleur *assemble*, un *drive
   `SystemDriver` (via l'alias `SystemCoupler`). La `Simulation` runtime garde sa propre
   orchestration (type-erased) par conception (espèces composées à l'exécution).
 
-**C. Multirate — `dt` propre par modèle (priorité 3).** `substeps` couvre 10:1 en lock-step.
-- [ ] `dt` par espèce piloté CFL (et la cadence φ associée), au-delà du sous-cyclage entier.
-- [ ] **Espèce « résolue pas à chaque pas »** (lag/every-N) au-delà de `Prescribed` (jamais)
-  et `substeps` (plus souvent) : avancer une espèce 1 fois toutes les N macro-itérations.
+**C. Multirate — `dt` propre par modèle (priorité 3).** `substeps` couvre le « plus souvent »
+(10 sous-pas électrons / 1 ion).
+- [x] **Espèce « résolue pas à chaque pas »** (every-N) : `TimePolicy` gagne un `Stride`
+  (`ExplicitTime<Method, Substeps, Stride>`). Un bloc de cadence N n'avance qu'1 macro-pas
+  sur N, alors d'un pas effectif `N·dt` (il rattrape le temps : total `M·dt` au bout de M
+  macro-pas, mais calculé N fois moins souvent — le « gaz pas résolu tous les pas »). Géré
+  par `block_stride_v` + `advance_subcycled(system, dt, macro_step, …)` ; `SystemDriver` et
+  `AmrSystemCoupler` portent `macro_step_`. `Stride=1` = historique bit-identique.
+  Testé (`test_multirate_stride` : rapide stride 1 + lent stride 3, synchronisés à M=3).
+- [ ] `dt` propre par espèce **piloté CFL** (au-delà du `Stride` entier fixé à la compilation) :
+  `dt_s` calculé par espèce via `max_wave_speed`, + coordination de la cadence φ. Plus lourd,
+  reste à faire.
 
 ---
 
