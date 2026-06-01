@@ -268,20 +268,22 @@ dur dans `SystemCoupler::advance_explicit_ssprk2/3` ET recopié dans `ssprk.hpp`
 `Time` n'est qu'un *tag* template, `UserTimeIntegrator` n'a pas de `take_step`. Objectif :
 donner `{PhysicalModel, SpatialDiscretisation, TimeIntegrator}` au coupleur comme un trio,
 le `TimeIntegrator` étant un objet du cœur (ou fourni par l'utilisateur).
-- [ ] **A1. Contrat** : concept `TimeIntegratorLike` exposant
-  `take_step(rhs_eval, U, dt)`, où `rhs_eval(U_stage, R)` remplit le résidu méthode-des-lignes
-  `R = −div F + S`. L'intégrateur ne voit QUE `rhs_eval` + les ops MultiFab (`saxpy`/`lincomb`).
-- [ ] **A2. Impls du cœur** : `ForwardEuler`, `SSPRK2`, `SSPRK3` comme objets `take_step`
-  génériques (agnostiques modèle/maillage). Absorber/factoriser `ssprk.hpp`.
-- [ ] **A3. Câbler `UserTimeIntegrator`** : l'utilisateur fournit son objet `take_step`
-  (C++) ; depuis Python, sélection par tag (pas de callback dans le hot path).
-- [ ] **A4. Délégation** : `SystemCoupler`/`AmrSystemCoupler`/`Coupler` appellent
-  `integrator.take_step(rhs_eval, U, dt)` au lieu de leur SSPRK interne → **supprime les 3
-  copies**. Le `rhs_eval` du coupleur encapsule `fill_ghosts` + `assemble_rhs<Spatial>` +
-  (re)solve elliptique selon `PoissonCadence`.
-- [ ] **A5. Exemple** : un cas fournissant son PROPRE `TimeIntegrator` (RK custom) + un cas
-  tout-cœur, pour montrer les deux voies.
-- Garde : **bit-identique** aux SSPRK actuels (mêmes opérations flottantes) sur tous les tests.
+- [x] **A1. Contrat** : concept `TimeStepper` exposant `take_step(rhs_eval, U, dt)`, où
+  `rhs_eval(U_stage, R)` remplit `R = −div F + S`. L'intégrateur ne voit QUE `rhs_eval` + les
+  ops MultiFab. (`integrator/time_steppers.hpp`.)
+- [x] **A2. Impls du cœur** : `ForwardEuler`, `SSPRK2Step`, `SSPRK3Step` comme objets
+  `take_step` génériques. `ssprk.hpp::advance_ssprk2` délègue désormais à `SSPRK2Step`.
+- [x] **A3. Câbler l'intégrateur utilisateur** : le `Method` d'un bloc explicite peut être
+  un tag du cœur (`SSPRK2`/`SSPRK3`) **ou un type `TimeStepper` écrit par l'utilisateur** —
+  le coupleur l'instancie et appelle son `take_step` (`test_user_time_integrator`). Depuis
+  Python : sélection par tag (pas de callback hot path). *[BYO-stepper Python = futur]*
+- [x] **A4. Délégation** : `SystemCoupler::advance_explicit_block` appelle l'objet stepper
+  (plus de SSPRK inline) ; `ssprk.hpp` aussi. `rhs_eval` du coupleur encapsule `fill_ghosts`
+  + (re)solve elliptique par étage + `assemble_rhs<Spatial>`. *[`Coupler` legacy mono-modèle
+  non migré — diocotron validé, à faire à comportement identique plus tard.]*
+- [x] **A5. Exemple** : `test_user_time_integrator` (intégrateur utilisateur) + tout le reste
+  tout-cœur. 
+- [x] Garde : **bit-identique** aux SSPRK actuels (adc_cpp 41/41, adc_cases 48/48).
 
 **B. Scinder le coupleur — Assembleur vs Driver (priorité 2).** Un coupleur assemble
 l'elliptique + résout Poisson + dérive aux + calcule le RHS spatial + intègre + sous-cycle :
@@ -308,14 +310,13 @@ Revue indépendante de `multispecies-fill` (build OK, `ctest` 38/38). Verdict : 
 multi-blocs **fonctionnel + testé**, mais points à durcir avant de le présenter comme
 architecture propre. Chaque point ci-dessous **vérifié dans le code**.
 
-- [ ] **9.1 `IMEXTime` n'est pas un IMEX complet** *(sév. moyenne ; recoupe §8.2 A et la
-  ligne §2.2 « IMEX par défaut »)*. Dans `SystemCoupler::step` ET `AmrSystemCoupler::step`,
-  `Implicit` **et** `IMEX` partent tous deux dans le callback ; seul `Explicit` avance le
-  flux. Donc un bloc `IMEXTime` à **flux non nul** ne voit PAS son transport explicite
-  avancé par défaut (le défaut `ImplicitSourceStepper` ne fait que la source). → Soit vrai
-  IMEX (transport explicite par le cœur + source implicite, cf. `integrator/imex.hpp`
-  `imex_euler_step`), soit renommer « callback implicite » tant que non câblé. À traiter
-  proprement **avec l'extraction `TimeIntegrator` (§8.2 A)**.
+- [x] **9.1 Vrai IMEX** *(recoupe §8.2 A)*. `SystemCoupler::step` ET `AmrSystemCoupler::step`
+  font maintenant, pour un bloc `IMEX` : **transport explicite par le cœur** (−div F via
+  `SourceFreeModel` + Euler avant / `advance_amr` source-free), **puis** source implicite par
+  le callback. Implicite pur : pas de transport. Un bloc IMEX à flux non nul est donc bien
+  transporté (`test_imex_transport` ; avant : champ figé). Limite connue : un bloc IMEX
+  **diffusif** perd le flux Fickien au demi-pas explicite (`SourceFreeModel` n'expose pas
+  `diffusivity()`) — raffinement à part.
 - [ ] **9.2 `ChargeDensityRhs` : défaut de charge dangereux** *(sév. correctness — **fix
   rapide**)*. `SpeciesCharge{}` vaut `q = +1` ; un bloc **sans entrée** dans `species`
   (p.ex. un **neutre** oublié) contribue à tort à Poisson. → défaut **`q = 0`** ET assert

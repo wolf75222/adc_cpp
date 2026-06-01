@@ -40,6 +40,25 @@ concept DiffusiveModel = requires(const M m) {
   { m.diffusivity() } -> std::convertible_to<Real>;
 };
 
+// Modele « sans source » : meme flux et vitesse d'onde que M, mais source nulle. Sert au
+// demi-pas EXPLICITE d'un schema IMEX (transport seul, −div F), la source raide etant
+// traitee implicitement a part (backward_euler_source). Note : n'expose pas diffusivity()
+// (le forwarder inconditionnellement casserait les modeles non diffusifs) -> un bloc IMEX
+// diffusif perdrait son flux Fickien dans le demi-pas explicite ; raffinement a part.
+template <class M>
+struct SourceFreeModel {
+  using State = typename M::State;
+  using Aux = typename M::Aux;
+  static constexpr int n_vars = M::n_vars;
+  M m;
+  ADC_HD State flux(const State& u, const Aux& a, int dir) const { return m.flux(u, a, dir); }
+  ADC_HD Real max_wave_speed(const State& u, const Aux& a, int dir) const {
+    return m.max_wave_speed(u, a, dir);
+  }
+  ADC_HD State source(const State&, const Aux&) const { return State{}; }
+  ADC_HD Real elliptic_rhs(const State& u) const { return m.elliptic_rhs(u); }
+};
+
 template <class Model>
 ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i,
                                               int j) {

@@ -9,6 +9,7 @@
 #include <adc/elliptic/geometric_mg.hpp>
 #include <adc/integrator/implicit_stepper.hpp>
 #include <adc/integrator/scheduler.hpp>
+#include <adc/integrator/time_steppers.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>
@@ -106,6 +107,10 @@ class SystemCoupler {
       } else if constexpr (treatment == TimeTreatment::Implicit ||
                            treatment == TimeTreatment::IMEX) {
         solve_fields();
+        // IMEX = vrai forward-backward (revue Codex 9.1) : le coeur avance le TRANSPORT
+        // explicite (−div F, source-free), puis le callback traite la SOURCE en implicite.
+        // Implicite pur : pas de transport, tout au callback.
+        if constexpr (treatment == TimeTreatment::IMEX) explicit_transport(block, h);
         advance_implicit(*this, block, h, s, n);
       }
     });
@@ -167,60 +172,48 @@ class SystemCoupler {
     assemble_rhs<Limiter, NumericalFlux>(block.model, state, aux_, geom_, R);
   }
 
+  // Avance explicite d'un bloc : on DELEGUE le schema a un objet TimeStepper du coeur
+  // (SSPRK2Step / SSPRK3Step) en lui passant l'evaluateur de residu du bloc (fill_ghosts +
+  // re-solve aux par etage + assemble_rhs<Spatial>). Bit-identique a l'ancien SSPRK inline.
   template <class Block>
   void advance_explicit_block(Block& block, Real dt) {
     using Time = TimePolicyTraits<typename Block::Time>;
     using Method = typename Time::Method;
+    using Limiter = typename Block::Spatial::Limiter;
+    using NumericalFlux = typename Block::Spatial::NumericalFlux;
     static_assert(Time::treatment == TimeTreatment::Explicit,
                   "advance_explicit_block attend un bloc explicite");
-    static_assert(std::is_same_v<Method, SSPRK2> ||
-                      std::is_same_v<Method, SSPRK3>,
-                  "SystemCoupler supporte SSPRK2 ou SSPRK3 pour les blocs explicites");
 
-    if constexpr (std::is_same_v<Method, SSPRK3>) {
-      advance_explicit_ssprk3(block, dt);
-    } else {
-      advance_explicit_ssprk2(block, dt);
-    }
+    auto rhs_eval = [&](MultiFab& stage, MultiFab& R) {
+      stage_rhs<Limiter, NumericalFlux>(block, stage, R, /*recompute_aux=*/true);
+    };
+    // Method = tag du coeur (SSPRK2/SSPRK3) -> objet stepper correspondant ; OU un
+    // TimeStepper fourni par l'utilisateur (son propre take_step), instancie ici.
+    if constexpr (std::is_same_v<Method, SSPRK3>)
+      SSPRK3Step{}.take_step(rhs_eval, block.U(), dt);
+    else if constexpr (std::is_same_v<Method, SSPRK2>)
+      SSPRK2Step{}.take_step(rhs_eval, block.U(), dt);
+    else if constexpr (TimeStepper<Method>)
+      Method{}.take_step(rhs_eval, block.U(), dt);
+    else
+      static_assert(detail::always_false_v<Method>,
+                    "Method explicite doit etre SSPRK2, SSPRK3, ou un TimeStepper "
+                    "(objet a take_step(rhs_eval, U, dt)) fourni par l'utilisateur");
   }
 
+  // Demi-pas EXPLICITE d'un bloc IMEX : transport seul (−div F, source-free), Euler avant.
+  // La source (raide) est traitee separement en implicite par le callback. aux suppose a
+  // jour (solve_fields appele juste avant dans step).
   template <class Block>
-  void advance_explicit_ssprk2(Block& block, Real dt) {
+  void explicit_transport(Block& block, Real dt) {
     using Model = typename Block::Model;
     using Limiter = typename Block::Spatial::Limiter;
     using NumericalFlux = typename Block::Spatial::NumericalFlux;
+    const SourceFreeModel<Model> sf{block.model};
     MultiFab R(ba_, dm_, Model::n_vars, 0);
-
-    MultiFab& U = block.U();
-    stage_rhs<Limiter, NumericalFlux>(block, U, R, /*recompute_aux=*/true);
-    MultiFab U1 = U;
-    saxpy(U1, dt, R);
-    stage_rhs<Limiter, NumericalFlux>(block, U1, R, /*recompute_aux=*/true);
-    saxpy(U1, dt, R);
-    lincomb(U, Real(0.5), U, Real(0.5), U1);
-  }
-
-  template <class Block>
-  void advance_explicit_ssprk3(Block& block, Real dt) {
-    using Model = typename Block::Model;
-    using Limiter = typename Block::Spatial::Limiter;
-    using NumericalFlux = typename Block::Spatial::NumericalFlux;
-    MultiFab R(ba_, dm_, Model::n_vars, 0);
-
-    MultiFab& U = block.U();
-    stage_rhs<Limiter, NumericalFlux>(block, U, R, /*recompute_aux=*/true);
-    MultiFab U1 = U;
-    saxpy(U1, dt, R);
-
-    stage_rhs<Limiter, NumericalFlux>(block, U1, R, /*recompute_aux=*/true);
-    MultiFab U2 = U1;
-    saxpy(U2, dt, R);
-    lincomb(U2, Real(3) / 4, U, Real(1) / 4, U2);
-
-    stage_rhs<Limiter, NumericalFlux>(block, U2, R, /*recompute_aux=*/true);
-    MultiFab U3 = U2;
-    saxpy(U3, dt, R);
-    lincomb(U, Real(1) / 3, U, Real(2) / 3, U3);
+    fill_ghosts(block.U(), geom_.domain, block.bc);
+    assemble_rhs<Limiter, NumericalFlux>(sf, block.U(), aux_, geom_, R);
+    saxpy(block.U(), dt, R);
   }
 
   System system_;

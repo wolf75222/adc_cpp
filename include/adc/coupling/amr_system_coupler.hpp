@@ -195,6 +195,13 @@ class AmrSystemCoupler {
         }
       } else if constexpr (treatment == TimeTreatment::Implicit ||
                            treatment == TimeTreatment::IMEX) {
+        // IMEX = vrai forward-backward (revue Codex 9.1) : transport explicite par le
+        // moteur AMR sur un modele SOURCE-FREE (−div F seul), puis source implicite par
+        // le callback. Implicite pur : tout au callback (pas de transport).
+        if constexpr (treatment == TimeTreatment::IMEX)
+          advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
+              SourceFreeModel<typename Block::Model>{block.model}, levels, dom_, dt,
+              base_per_, replicated_coarse_);
         implicit_advance(*this, block, levels, dt);
       }
       ++b;
