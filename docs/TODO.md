@@ -299,3 +299,44 @@ trop. « Avancer un coupleur » est bancal — un coupleur *assemble*, un *drive
 - [ ] `dt` par espèce piloté CFL (et la cadence φ associée), au-delà du sous-cyclage entier.
 - [ ] **Espèce « résolue pas à chaque pas »** (lag/every-N) au-delà de `Prescribed` (jamais)
   et `substeps` (plus souvent) : avancer une espèce 1 fois toutes les N macro-itérations.
+
+---
+
+## 9. Durcissement — revue Codex (2026-06-01)
+
+Revue indépendante de `multispecies-fill` (build OK, `ctest` 38/38). Verdict : vrai squelette
+multi-blocs **fonctionnel + testé**, mais points à durcir avant de le présenter comme
+architecture propre. Chaque point ci-dessous **vérifié dans le code**.
+
+- [ ] **9.1 `IMEXTime` n'est pas un IMEX complet** *(sév. moyenne ; recoupe §8.2 A et la
+  ligne §2.2 « IMEX par défaut »)*. Dans `SystemCoupler::step` ET `AmrSystemCoupler::step`,
+  `Implicit` **et** `IMEX` partent tous deux dans le callback ; seul `Explicit` avance le
+  flux. Donc un bloc `IMEXTime` à **flux non nul** ne voit PAS son transport explicite
+  avancé par défaut (le défaut `ImplicitSourceStepper` ne fait que la source). → Soit vrai
+  IMEX (transport explicite par le cœur + source implicite, cf. `integrator/imex.hpp`
+  `imex_euler_step`), soit renommer « callback implicite » tant que non câblé. À traiter
+  proprement **avec l'extraction `TimeIntegrator` (§8.2 A)**.
+- [ ] **9.2 `ChargeDensityRhs` : défaut de charge dangereux** *(sév. correctness — **fix
+  rapide**)*. `SpeciesCharge{}` vaut `q = +1` ; un bloc **sans entrée** dans `species`
+  (p.ex. un **neutre** oublié) contribue à tort à Poisson. → défaut **`q = 0`** ET assert
+  `species.size() == System::n_blocks` (exiger une charge par bloc). *[ne casse aucun test :
+  les cas existants listent toutes les espèces.]*
+- [ ] **9.3 `AmrSystemCoupler` suppose sans vérifier** *(sév. robustesse — **fix rapide**)*.
+  Le ctor suppose `block_levels.size() == n_blocks`, même `nlev` par bloc, mêmes grilles par
+  niveau, layout `aux` == layout bloc — sans contrôle → out-of-bounds silencieux possible.
+  → asserts explicites : `n_blocks` (compile-time), tailles + `box_array()` par niveau
+  (runtime).
+- [ ] **9.4 BC `phi`/`aux` AMR simplifiées** *(sév. moyenne)*. `AmrSystemCoupler::solve_fields`
+  dérive `aux` à la main + `fill_boundary` (OK périodique) ; moins propre que le `Coupler`
+  mono-niveau (`fill_ghosts` + `FieldPostProcess`, `aux_bc` dérivé de `bcPhi`). → router par
+  le même chemin pour le **non-périodique / cut-cell**.
+- [ ] **9.5 `CoupledSource` pas intégré sur AMR** *(sév. moyenne ; recoupe §2.1.2)*. Mono-
+  niveau a `SystemCoupler::coupled_source_step` ; `AmrSystemCoupler` n'a **pas** d'équivalent.
+  → ajouter `AmrSystemCoupler::coupled_source_step` (splitting par niveau, après `solve_fields`).
+- [ ] **9.6 Nom `Coupler`** *(sév. cosmétique)* → déjà §8.2 B3 : `SystemCoupler`/`AmrSystemCoupler`
+  sont plutôt des `SimulationDriver` / `SystemStepper` / `CoupledSolver`. Pas urgent.
+
+**Ordre de durcissement conseillé** : 9.2 + 9.3 (fixes rapides, correctness/robustesse) →
+9.5 (parité AMR de la source de couplage) → 9.4 (BC propres) → 9.1 (vrai IMEX, avec §8.2 A) →
+9.6 (renommage, avec §8.2 B). Tout est à **comportement identique** sur les tests existants
+sauf 9.1 (qui ajoute le transport explicite des blocs IMEX — nouveau comportement à tester).
