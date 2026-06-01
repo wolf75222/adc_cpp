@@ -39,6 +39,7 @@ adc_add_test(test_cut_cell)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)
+adc_add_test(test_diffusion)
 adc_add_test(test_weno_convergence)
 adc_add_test(test_splitting)
 adc_add_test(test_imex_ap)

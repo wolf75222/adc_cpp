@@ -10,6 +10,7 @@
 #include <adc/operator/reconstruction.hpp>
 
 #include <algorithm>
+#include <concepts>
 
 // Operateur spatial : assemble le residu R(U, aux) = -div F(U, aux) + S(U, aux)
 // sur les cellules valides d'un niveau. Fleche "PDE -> systeme d'ODE" de la
@@ -28,6 +29,16 @@
 // Convention aux : composantes [0]=phi, [1]=d phi/dx, [2]=d phi/dy.
 
 namespace adc {
+
+// Modele DIFFUSIF (optionnel) : fournit une diffusivite scalaire isotrope nu. Le
+// tuteur : "la diffusion, c'est comme un flux de plus". Le flux Fickien F = -nu grad U
+// ajoute au flux hyperbolique donne, apres divergence (-div F), exactement +nu Lap(U).
+// On l'implemente comme un terme additif au residu, GARDE par ce trait : un modele
+// sans diffusivity() ne change pas d'un bit (chemin hyperbolique inchange).
+template <class M>
+concept DiffusiveModel = requires(const M m) {
+  { m.diffusivity() } -> std::convertible_to<Real>;
+};
 
 template <class Model>
 ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i,
@@ -172,6 +183,16 @@ void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
       const auto S = model.source(load_state<Model>(u, i, j), Ac);
       for (int c = 0; c < Model::n_vars; ++c)
         r(i, j, c) = S[c] - (Fxp[c] - Fxm[c]) / dx - (Fyp[c] - Fym[c]) / dy;
+
+      // Terme parabolique (Fickien) : +nu Lap(U), differences centrees a 5 points.
+      // Garde par DiffusiveModel : aucun effet (ni codegen) pour un modele non diffusif.
+      if constexpr (DiffusiveModel<Model>) {
+        const Real nu = model.diffusivity();
+        const Real idx2 = Real(1) / (dx * dx), idy2 = Real(1) / (dy * dy);
+        for (int c = 0; c < Model::n_vars; ++c)
+          r(i, j, c) += nu * ((u(i + 1, j, c) - 2 * u(i, j, c) + u(i - 1, j, c)) * idx2 +
+                              (u(i, j + 1, c) - 2 * u(i, j, c) + u(i, j - 1, c)) * idy2);
+      }
     });
   }
 }
