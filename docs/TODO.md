@@ -132,8 +132,13 @@ l'architecture utilisateur.
   (espèces arbitraires) reste un cap ultérieur (explosion combinatoire / type erasure).
 - [x] Bindings pybind11 : `adc.MultiSpeciesConfig`, `adc.MultiSpeciesSolver`
   (`step/advance/density_e/density_i/potential/mass_e/mass_i/max_charge`), champs en numpy
-  (`python/bindings.cpp`, testé `python/test_bindings.py`). L'API `Simulation.add_equation(...)`
-  fluide reste à dériver de cette façade.
+  (`python/bindings.cpp`, testé `python/test_bindings.py`).
+- [x] **Composition à l'exécution** : `adc.Simulation` (`solver/simulation.{hpp,cpp}`) —
+  `add_species(name, charge)` ajoute N espèces à la volée, partageant un Poisson de système ;
+  `set_density` (numpy), `step/advance`, `density/potential/mass`. Esprit `sim.add_equation(...)`
+  du TODO, borné aux espèces de dérive (Diocotron, 1 var, CI simples) ; physique compilée,
+  pas de callback Python dans le hot path. Testé (`test_simulation`, `test_bindings.py`).
+  Étendre à Euler / IMEX = même patron + une CI par modèle.
 - [x] `model`/`flux`/`time` ↔ tags C++ : la physique est en C++ compilé (schémas et politiques
   fixés à la compilation), aucun callback Python dans le hot path.
 - [ ] (avancé) exposer un `PhysicalModel` écrit en C++ par l'utilisateur, puis composable depuis Python.
@@ -166,6 +171,13 @@ l'architecture utilisateur.
   empilé (un bloc mémoire contigu, offsets par espèce — meilleure localité, plus complexe).
   À confirmer/infléchir : c'est la décision qui pèse sur la perf (point 0 : structure de
   données = plus tard, mais la décision d'interface se prend maintenant).
+  - **Retour d'expérience du remplissage** : `tuple<Blocks...>` a tenu sans friction pour
+    tous les cas livrés, y compris des blocs **hétérogènes** (Euler 4 var + isotherme 3 var :
+    un `StateVec<N_total>` empilé imposerait des espèces de même taille ou un layout AoS
+    irrégulier). Le `for_each_block`/`block<I>()` reste l'interface ; la structure interne
+    (un `MultiFab` par bloc) peut basculer en empilé plus tard **sans changer l'API** des
+    coupleurs. Recommandation : **garder `tuple` par bloc** comme défaut, mesurer avant
+    d'empiler ; n'empiler que si un cas homogène (mêmes `n_vars`) devient le goulot perf.
 
 ---
 
@@ -180,7 +192,14 @@ l'architecture utilisateur.
 | seam | couture où vit le parallélisme (`for_each_cell`, `comm`) |
 | `EquationBlock` | state + modèle + méthode spatiale + politique temps + BC (un bloc) |
 | `CoupledSystem` | plusieurs `EquationBlock` |
-| `SystemCoupler` | orchestrateur : RHS elliptique global + avance chaque bloc |
+| `SystemCoupler` | orchestrateur mono-niveau : RHS elliptique global + avance chaque bloc |
+| `AmrSystemCoupler` | le `SystemCoupler` porté sur AMR (Poisson grossier + reflux par bloc) |
+| `ChargeDensityRhs` | second membre de Poisson à N espèces : `f = Σ_s q_s n_s` |
+| `CoupledSource` | source inter-espèces (lit plusieurs blocs + φ), distincte de `model.source` |
+| `ImplicitSourceStepper` | défaut implicite : backward-Euler (Newton) sur la source, sans Newton utilisateur |
+| `is_implicit(c)` | trait IMEX partiel : quelles variables d'un bloc sont implicites |
+| `PoissonCadence` | fréquence de re-résolution de φ entre sous-pas (`OncePerStep`/`PerSubstep`) |
+| `MultiSpeciesSolver` / `Simulation` | façades `adc_cases` : composition multi-espèces (compilée / à l'exécution) |
 
 ---
 
