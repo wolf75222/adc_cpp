@@ -4,7 +4,7 @@
 
 **Coeur C++23 d'un solveur AMR / MPI / GPU pour systemes hyperbolique-elliptique couples.**
 
-![Tests](https://img.shields.io/badge/tests-32-brightgreen)
+![Tests](https://img.shields.io/badge/tests-45%20%28serie%2FASan%2FKokkos%29%20%7C%2052%20MPI-brightgreen)
 
 </div>
 
@@ -45,21 +45,24 @@ est fourni par l'application.
 | Module | Role |
 |---|---|
 | [`core/physical_model.hpp`](include/adc/core/physical_model.hpp) | concept `PhysicalModel` (flux, max_wave_speed, source, elliptic_rhs) |
-| [`core::{EquationBlock,CoupledSystem}`](include/adc/core/equation_block.hpp) | squelette multi-blocs : state + modele + methode spatiale + politique temps |
+| [`core::{EquationBlock,CoupledSystem}`](include/adc/core/equation_block.hpp) | bundle par espece (modele + schema spatial + politique temps + BC) et systeme de N especes |
 | [`operator::{RusanovFlux,HLLFlux,HLLCFlux}`](include/adc/operator/numerical_flux.hpp) | flux numeriques (politiques `ADC_HD`) |
 | [`operator::reconstruction`](include/adc/operator/reconstruction.hpp) | MUSCL ordre 2 (NoSlope / Minmod / VanLeer) + WENO5Z |
-| [`operator::assemble_rhs` / `compute_face_fluxes`](include/adc/operator/spatial_operator.hpp) | `R = -div F + S`, flux de face pour le reflux ; GPU via `for_each_cell` |
-| [`integrator::{TimePolicy,SSPRK2,SSPRK3}`](include/adc/integrator/time_integrator.hpp) | choix explicite / implicite / IMEX + sous-pas par bloc |
-| [`integrator::advance_subcycled`](include/adc/integrator/scheduler.hpp) | scheduler generique pour avancer chaque `EquationBlock` avec son nombre de sous-pas |
+| [`operator::assemble_rhs` / `compute_face_fluxes`](include/adc/operator/spatial_operator.hpp) | `R = -div F + S`, flux de face pour le reflux (diffusion incluse) ; GPU via `for_each_cell` |
+| [`integrator::{TimePolicy,SSPRK2,SSPRK3}`](include/adc/integrator/time_integrator.hpp) | par bloc : explicite / implicite / IMEX, sous-pas (`substeps`) ET cadence (`stride`) |
+| [`integrator::{ForwardEuler,SSPRK2Step,SSPRK3Step}`](include/adc/integrator/time_steppers.hpp) | integrateurs en temps OBJETS (`take_step(rhs, U, dt)`) ; l'utilisateur peut fournir le sien |
+| [`integrator::{ImplicitSourceStepper,backward_euler_source}`](include/adc/integrator/implicit_stepper.hpp) | defaut implicite (Newton local) ; IMEX partiel via `Model::is_implicit(c)` |
+| [`integrator::advance_subcycled`](include/adc/integrator/scheduler.hpp) | scheduler : sous-pas + cadence (macro-pas) par `EquationBlock` |
 | [`integrator::imex_euler_step`](include/adc/integrator/imex.hpp) | IMEX asymptotic-preserving |
 | [`integrator::{lie_step,strang_step}`](include/adc/integrator/splitting.hpp) | splitting d'operateurs |
 | [`integrator::advance_amr`](include/adc/integrator/amr_reflux_mf.hpp) | moteur AMR unifie : multi-patch N-niveaux, reflux coverage-aware, distribue MPI |
 | [`elliptic::GeometricMG`](include/adc/elliptic/geometric_mg.hpp) | multigrille geometrique (V-cycle GS rb), AMR-compatible, on-device |
 | [`elliptic::PoissonFFTSolver` / `DistributedFFTSolver`](include/adc/elliptic) | Poisson FFT spectral (mono-rang) et distribue (MPI) |
-| [`coupling::elliptic_rhs`](include/adc/coupling/elliptic_rhs.hpp) | assembleurs de second membre elliptique mono-modele ou multi-champs |
-| [`coupling::Coupler`](include/adc/coupling/coupler.hpp) | couplage hyperbolique-elliptique par etage : `Coupler<Model, Elliptic>` |
-| [`coupling::SystemCoupler`](include/adc/coupling/system_coupler.hpp) | execution mono-niveau d'un `CoupledSystem` multi-blocs |
-| [`coupling::AmrCouplerMP`](include/adc/coupling) | couplage AMR multi-patch (route par `advance_amr`) |
+| [`coupling::{ChargeDensityRhs,CoupledSource}`](include/adc/coupling/elliptic_rhs.hpp) | RHS de systeme `f = Σ_s q_s n_s` (N especes) ; source inter-especes `S(U_e,U_i,φ)` |
+| [`coupling::Coupler`](include/adc/coupling/coupler.hpp) | couplage hyperbolique-elliptique mono-modele : `Coupler<Model, Elliptic>` |
+| [`coupling::{SystemAssembler,SystemDriver}`](include/adc/coupling/system_coupler.hpp) | multi-especes mono-niveau : l'**assembleur** assemble (Poisson de systeme + aux), le **driver** avance (`step`, `step_cfl`, `step_adaptive`) ; `SystemCoupler` = alias du driver |
+| [`coupling::AmrSystemCoupler`](include/adc/coupling/amr_system_coupler.hpp) | le systeme multi-especes porte sur **AMR** (Poisson grossier + reflux par bloc) |
+| [`coupling::AmrCouplerMP`](include/adc/coupling) | couplage AMR multi-patch mono-modele (route par `advance_amr`) |
 | [`amr::{cluster,regrid,tag_box}`](include/adc/amr) | tagging + clustering Berger-Rigoutsos + regrid |
 | [`mesh::{MultiFab,BoxArray,Geometry}`](include/adc/mesh) | conteneurs distribues, halos, geometrie |
 | seams [`for_each_cell`](include/adc/mesh/for_each.hpp), [`comm`](include/adc/parallel/comm.hpp) | dispatch serie/OpenMP/Kokkos, comm MPI |
@@ -67,21 +70,46 @@ est fourni par l'application.
 Concepts et seams : [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md). Algorithmes :
 [docs/ALGORITHMS.md](docs/ALGORITHMS.md). Profil : [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
+## Systemes multi-especes
+
+On couple N especes (ions, electrons, neutres...), chacune avec **son** `PhysicalModel`, son
+schema spatial, sa politique temporelle. Les especes interagissent dans le **second membre
+elliptique** (`f = Σ_s q_s n_s`, `ChargeDensityRhs`) et dans la **source** (`CoupledSource`,
+`S` inter-especes), jamais dans le flux. Tout est composable par bloc :
+
+| Capacite | Comment |
+|---|---|
+| especes heterogenes (Euler 4 var + isotherme 3 var + ...) | `CoupledSystem<Blocks...>` |
+| schema spatial different par espece (HLLC electrons, Rusanov ions...) | `EquationBlock<Model, SpatialDiscretisation, Time>` |
+| sous-pas plus frequents (10 electrons : 1 ion) | `ExplicitTime<Method, /*substeps*/10>` |
+| cadence plus lente (gaz pas resolu tous les pas) | `ExplicitTime<Method, 1, /*stride*/3>` |
+| pas adaptatif multirate (stride derive du CFL par espece) | `SystemDriver::step_adaptive(cfl)` |
+| electrons implicites + ions explicites | `ImplicitTime` / `ExplicitTime` par bloc |
+| implicite sur une PARTIE des variables (coute moins cher) | `Model::is_implicit(c)` (IMEX partiel) |
+| espece en profil constant donne | `PrescribedTime` (le scheduler la saute) |
+| integrateur en temps fait maison | un objet a `take_step` donne comme `Method` du bloc |
+
+Le `SystemDriver` *avance*, le `SystemAssembler` *assemble* (Poisson de systeme + aux) :
+« avancer un assembleur » n'a pas de sens, c'est le driver qui avance. Porte sur AMR par
+`AmrSystemCoupler`.
+
 ## Backends : configures UNE fois, herites partout
 
-OpenMP, MPI, HDF5 et Kokkos sont attaches a la cible d'interface `adc` ; tout ce qui lie
-`adc` en herite. Aucun drapeau rebadge par cible.
+MPI, HDF5 et Kokkos sont attaches a la cible d'interface `adc` ; tout ce qui lie `adc` en
+herite. Aucun drapeau rebadge par cible. **Kokkos est le backend de dispatch recommande** :
+il couvre le CPU multi-thread (device OpenMP) ET le GPU (CUDA/HIP) avec un seul code. Le
+backend OpenMP autonome (`ADC_USE_OPENMP`) est **deprecie** au profit de Kokkos.
 
 ```bash
 cmake -B build                       # serie
-cmake -B build -DADC_USE_OPENMP=ON   # CPU multi-thread
 cmake -B build -DADC_USE_MPI=ON      # distribue (halos + FFT par MPI)
-cmake -B build -DADC_USE_KOKKOS=ON \ # GPU GH200 (ou CPU portable)
+cmake -B build -DADC_USE_KOKKOS=ON   # CPU multi-thread (device OpenMP) — recommande
+cmake -B build -DADC_USE_KOKKOS=ON \ # GPU GH200
    -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K
 ```
 
-Le seam `for_each_cell` bascule serie -> `#pragma omp` -> `Kokkos::parallel_for` (Cuda)
-sans toucher les operateurs.
+Le seam `for_each_cell` bascule serie -> `Kokkos::parallel_for` (OpenMP ou Cuda) sans toucher
+les operateurs (Kokkos est initialise paresseusement, aucun `Kokkos::initialize` a ecrire).
 
 ## Utiliser le coeur
 
@@ -117,14 +145,14 @@ git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build                 # 32 tests coeur (maillage, AMR, elliptique, integrateurs)
+ctest --test-dir build                 # 45 tests coeur (maillage, AMR, elliptique, integrateurs)
 ```
 
 | Option | Defaut | Role |
 |---|---|---|
 | `ADC_BUILD_TESTS` | `ON` | suite CTest du coeur |
-| `ADC_USE_OPENMP` | `OFF` | dispatch OpenMP |
-| `ADC_USE_KOKKOS` | `OFF` | dispatch Kokkos (CPU/GPU) |
+| `ADC_USE_KOKKOS` | `OFF` | dispatch Kokkos (CPU OpenMP + GPU) — **recommande** |
+| `ADC_USE_OPENMP` | `OFF` | dispatch OpenMP autonome — **deprecie** (utiliser Kokkos) |
 | `ADC_USE_MPI` | `OFF` | backend distribue (comm, halos, FFT) |
 | `ADC_USE_HDF5` | `OFF` | DataWriter HDF5 parallele |
 | `ADC_USE_EIGEN` | `ON` | cible d'analyse host `adc_eigen` (utilisee par adc_cases) |
@@ -141,13 +169,13 @@ include/adc/
   coupling/    Coupler, SystemCoupler, AmrCouplerMP, diagnostics
   integrator/  SSP-RK, TimePolicy, scheduler, IMEX, splitting, moteur AMR
   amr/         clustering Berger-Rigoutsos, regrid, hierarchie
-tests/         32 tests coeur (+ tests MPI via mpirun)
+tests/         45 tests coeur (+ tests MPI via mpirun)
 docs/          ARCHITECTURE.md, ALGORITHMS.md, PERFORMANCE.md, validation diocotron
 ```
 
 ## Validation (coeur)
 
-- **32** tests coeur (serie ; MPI bit-identique np=1/2/4 quand `-DADC_USE_MPI=ON`).
+- **45** tests coeur (serie, ASan/UBSan, Kokkos device OpenMP ; MPI 52 bit-identiques np=1/2/4).
 - AMR conservatif : reflux multi-patch a l'arrondi machine (`~1e-15`).
 - GPU GH200 : pas couple + AMR bit-identiques au CPU (checksum exact).
 
