@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# GIF du diocotron AMR pilote DEPUIS PYTHON (binding DiocotronAmrSolver). Montre que la
-# facade AMR compilee est utilisable sans une ligne de C++ : config, boucle step_cfl,
-# densite en numpy a chaque frame. Le nombre de patchs evolue par regrid Berger-Rigoutsos.
+# GIF du diocotron AMR pilote depuis Python (binding DiocotronAmrSolver) : config,
+# boucle step_cfl, densite en numpy a chaque frame. Le nombre de patchs evolue par regrid.
 #
 #   PYTHONPATH=<dir du .so> python3 scripts/make_python_amr_gif.py docs/anim_python_amr.gif
 #

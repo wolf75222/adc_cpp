@@ -3,15 +3,11 @@
 #include <memory>
 #include <vector>
 
-// Facade COMPILEE du solveur diocotron sur AMR multi-patch. Meme esprit que
-// DiocotronSolver (PIMPL, API stable sans template, bindable pybind11), mais la
-// hierarchie est raffinee : un niveau grossier + des patchs fins reconstruits a la
-// volee par regrid Berger-Rigoutsos autour de la bande de charge. Le pas couple passe
-// par AmrCouplerMP -> advance_amr (sous-cyclage + reflux conservatif). Le backend
-// (serie/OpenMP/Kokkos) est celui de la cible adc, comme pour les autres facades.
-//
-// Cas couvert : bande de charge periodique (cat's eye / Kelvin-Helmholtz). C'est le
-// cas ou l'AMR montre son interet : le bord cisaille concentre le raffinement.
+// Facade compilee du diocotron sur AMR multi-patch (PIMPL, bindable pybind11).
+// Comme DiocotronSolver mais hierarchie raffinee : niveau grossier + patchs fins
+// reconstruits par regrid Berger-Rigoutsos. Le pas passe par AmrCouplerMP ->
+// advance_amr (sous-cyclage + reflux conservatif). Cas couvert : bande de charge
+// periodique.
 
 namespace adc {
 
