@@ -256,20 +256,46 @@ bancal : un coupleur *assemble*, un *driver* avance).
   les blocs `Prescribed`, qui contribuent quand même à `f`). *[à illustrer par un test]*
 - [x] **Résoudre l'elliptique tous les pas ou pas** → `PoissonCadence` (`OncePerStep`/`PerSubstep`).
 - [x] « numerical method » est **déjà** nommé `SpatialDiscretisation` (≠ time integrator).
+- [x] **Le « `PhysicalModel` plus grand » qui englobe tout** = `EquationBlock`
+  (`{Model, SpatialDiscretisation, TimePolicy, BC}`) ; `CoupledSystem` = plusieurs de ces
+  bundles. C'est déjà le « state physical model » composable décrit (chaque fluide a son
+  jeu d'équations : densité seule, ou tous les moments).
 
-### 8.2 À extraire (les vrais manques d'abstraction)
-- [ ] **`TimeIntegrator` objet de premier plan** (`take_step(rhs, U, dt)`), DANS le cœur,
-  que le coupleur **appelle** — au lieu de SSPRK codé en dur dans `SystemCoupler` (et
-  **dupliqué** avec `ssprk.hpp` et `Coupler`). Fournir SSPRK2/3 génériques + un point
-  d'extension `UserTimeIntegrator` réellement câblé (l'utilisateur écrit son `take_step`,
-  C++ ou Python). But : donner `{PhysicalModel, SpatialDiscretisation, TimeIntegrator}` au
-  coupleur comme un trio composable. Aujourd'hui `Spatial`/`Time` sont des **tags template**
-  et `Time` n'est pas un objet à `take_step` ; cette extraction **unifie** les 3 copies de SSPRK.
-- [ ] **Alléger `Coupler` / `Simulation` (responsabilités)** : aujourd'hui un coupleur
-  assemble l'elliptique + résout Poisson + dérive aux + calcule le RHS spatial + intègre en
-  temps + sous-cycle. Séparer un **Assembleur** (couple hyperbolique + elliptique, RHS de
-  système) d'un **Driver** (orchestre les pas, appelle `TimeIntegrator::take_step`).
-  Reconsidérer le nom : le driver « avance », le coupleur « assemble ». (Prolonge §4
-  « Coupler fourre-tout ».)
-- [ ] **Pas de temps propre par modèle au-delà du sous-cyclage entier** : `substeps` couvre
-  10:1 en lock-step ; un `dt` par espèce (multirate, p.ex. piloté CFL) reste à faire.
+### 8.2 À extraire (les vrais manques d'abstraction) — plan détaillé
+
+**A. `TimeIntegrator` objet de premier plan (priorité 1).** Aujourd'hui SSPRK est codé en
+dur dans `SystemCoupler::advance_explicit_ssprk2/3` ET recopié dans `ssprk.hpp` et `Coupler` ;
+`Time` n'est qu'un *tag* template, `UserTimeIntegrator` n'a pas de `take_step`. Objectif :
+donner `{PhysicalModel, SpatialDiscretisation, TimeIntegrator}` au coupleur comme un trio,
+le `TimeIntegrator` étant un objet du cœur (ou fourni par l'utilisateur).
+- [ ] **A1. Contrat** : concept `TimeIntegratorLike` exposant
+  `take_step(rhs_eval, U, dt)`, où `rhs_eval(U_stage, R)` remplit le résidu méthode-des-lignes
+  `R = −div F + S`. L'intégrateur ne voit QUE `rhs_eval` + les ops MultiFab (`saxpy`/`lincomb`).
+- [ ] **A2. Impls du cœur** : `ForwardEuler`, `SSPRK2`, `SSPRK3` comme objets `take_step`
+  génériques (agnostiques modèle/maillage). Absorber/factoriser `ssprk.hpp`.
+- [ ] **A3. Câbler `UserTimeIntegrator`** : l'utilisateur fournit son objet `take_step`
+  (C++) ; depuis Python, sélection par tag (pas de callback dans le hot path).
+- [ ] **A4. Délégation** : `SystemCoupler`/`AmrSystemCoupler`/`Coupler` appellent
+  `integrator.take_step(rhs_eval, U, dt)` au lieu de leur SSPRK interne → **supprime les 3
+  copies**. Le `rhs_eval` du coupleur encapsule `fill_ghosts` + `assemble_rhs<Spatial>` +
+  (re)solve elliptique selon `PoissonCadence`.
+- [ ] **A5. Exemple** : un cas fournissant son PROPRE `TimeIntegrator` (RK custom) + un cas
+  tout-cœur, pour montrer les deux voies.
+- Garde : **bit-identique** aux SSPRK actuels (mêmes opérations flottantes) sur tous les tests.
+
+**B. Scinder le coupleur — Assembleur vs Driver (priorité 2).** Un coupleur assemble
+l'elliptique + résout Poisson + dérive aux + calcule le RHS spatial + intègre + sous-cycle :
+trop. « Avancer un coupleur » est bancal — un coupleur *assemble*, un *driver* *avance*.
+- [ ] **B1. `SystemAssembler`** : couple hyperbolique + elliptique → expose `solve_fields()`
+  (Poisson de système `f = Σ_s q_s n_s` + aux) et le `rhs_eval` par bloc. NE fait PAS de pas.
+- [ ] **B2. `SystemDriver`** : porte le schedule (sous-cyclage par espèce, cadence φ,
+  implicite/IMEX délégué) et appelle `TimeIntegrator::take_step` via le `rhs_eval` de
+  l'assembleur. C'est lui qui « avance ».
+- [ ] **B3. Renommage** : acter `Coupler` = *Assembler/Simulation Driver* (avec Sacha).
+- [ ] **B4.** `Simulation` (`adc_cases`) repose sur `{Assembler, Driver, TimeIntegrator}`
+  au lieu de tout faire elle-même.
+
+**C. Multirate — `dt` propre par modèle (priorité 3).** `substeps` couvre 10:1 en lock-step.
+- [ ] `dt` par espèce piloté CFL (et la cadence φ associée), au-delà du sous-cyclage entier.
+- [ ] **Espèce « résolue pas à chaque pas »** (lag/every-N) au-delà de `Prescribed` (jamais)
+  et `substeps` (plus souvent) : avancer une espèce 1 fois toutes les N macro-itérations.
