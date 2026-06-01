@@ -3,7 +3,9 @@
 #include <adc/core/coupled_system.hpp>
 #include <adc/core/types.hpp>
 #include <adc/coupling/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
+#include <adc/coupling/coupled_source.hpp>  // CoupledSourceFor
 #include <adc/coupling/elliptic_rhs.hpp>
+#include <adc/elliptic/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess
 #include <adc/elliptic/elliptic_solver.hpp>
 #include <adc/elliptic/geometric_mg.hpp>
 #include <adc/integrator/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
@@ -88,6 +90,8 @@ class AmrSystemCoupler {
         geom_(geom),
         dom_(geom.domain),
         base_per_(base_per),
+        bcPhi_(bcPhi),
+        aux_bc_(derive_aux_bc(bcPhi)),
         replicated_coarse_(replicated_coarse),
         cadence_(cadence),
         mg_(geom, ba_coarse, bcPhi, std::move(active), replicated_coarse),
@@ -151,21 +155,16 @@ class AmrSystemCoupler {
 
     rhs_assembler_(system_, mg_.rhs());  // f = Sum_s q_s n_s sur le grossier
     mg_.solve();
-    device_fence();
 
-    const Real dx = geom_.dx(), dy = geom_.dy();
-    for (int li = 0; li < mg_.phi().local_size(); ++li) {
-      const ConstArray4 p = mg_.phi().fab(li).const_array();
-      Array4 a = aux_[0].fab(li).array();
-      const Box2D b = aux_[0].box(li);
-      for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
-          a(i, j, 0) = p(i, j);
-          a(i, j, 1) = (p(i + 1, j) - p(i - 1, j)) / (2 * dx);
-          a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) / (2 * dy);
-        }
-    }
-    fill_boundary(aux_[0], dom_, base_per_);
+    // aux grossier = (phi, grad phi) via le MEME chemin propre que le SystemCoupler
+    // mono-niveau (revue Codex 9.4) : remplir les ghosts de phi selon bcPhi_, puis
+    // field_postprocess, puis remplir les ghosts d'aux selon aux_bc_ (derive de bcPhi_).
+    // Gere le non-periodique (Foextrap) au lieu d'un fill_boundary periodique en dur.
+    fill_ghosts(mg_.phi(), dom_, bcPhi_);
+    const Real cx = Real(1) / (2 * geom_.dx()), cy = Real(1) / (2 * geom_.dy());
+    field_postprocess(mg_.phi(), aux_[0], cx, cy,
+                      FieldPostProcess{FieldPostProcess::GradSign::Plus, true});
+    fill_ghosts(aux_[0], dom_, aux_bc_);
     for (int k = 1; k < nlev_; ++k)
       detail::coupler_inject_aux_mb(aux_[k - 1], aux_[k],
                                     /*replicated_parent=*/(k == 1) && replicated_coarse_);
@@ -212,6 +211,29 @@ class AmrSystemCoupler {
     });
   }
 
+  // Source de couplage inter-especes sur AMR (parite avec SystemCoupler, revue Codex
+  // 9.5) : splitting forward-Euler applique PAR NIVEAU. On rafraichit phi (aux par
+  // niveau) puis, a chaque niveau k, on repointe temporairement chaque bloc vers son
+  // niveau k et on laisse la source lire tous les blocs + aux[k]. NoCoupledSource => no-op.
+  template <class CoupledSource>
+  void coupled_source_step(CoupledSource&& src, Real dt) {
+    static_assert(CoupledSourceFor<std::decay_t<CoupledSource>, System>,
+                  "coupled_source_step attend une CoupledSource : apply(system, aux, dt)");
+    solve_fields();
+    for (int k = 0; k < nlev_; ++k) {
+      std::size_t b = 0;
+      MultiFab* saved[System::n_blocks == 0 ? 1 : System::n_blocks];
+      system_.for_each_block([&](auto& block) {
+        saved[b] = block.state;
+        block.state = &block_levels_[b][k].U;
+        ++b;
+      });
+      src.apply(system_, aux_[k], dt);
+      b = 0;
+      system_.for_each_block([&](auto& block) { block.state = saved[b++]; });
+    }
+  }
+
   // masse de la composante 0 du grossier du bloc b (somme u*dV sur fabs locaux ;
   // grossier replique -> somme locale = totale, sinon all_reduce).
   Real mass(std::size_t b) const {
@@ -229,9 +251,20 @@ class AmrSystemCoupler {
  private:
   System system_;
   RhsAssembler rhs_assembler_;
+  static BCRec derive_aux_bc(const BCRec& b) {
+    auto t = [](BCType x) {
+      return x == BCType::Periodic ? BCType::Periodic : BCType::Foextrap;
+    };
+    BCRec a;
+    a.xlo = t(b.xlo); a.xhi = t(b.xhi);
+    a.ylo = t(b.ylo); a.yhi = t(b.yhi);
+    return a;
+  }
+
   Geometry geom_;
   Box2D dom_;
   Periodicity base_per_;
+  BCRec bcPhi_, aux_bc_;
   bool replicated_coarse_;
   PoissonCadence cadence_;
   mutable int solve_count_ = 0;

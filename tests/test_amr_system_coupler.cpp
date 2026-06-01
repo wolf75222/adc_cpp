@@ -73,6 +73,29 @@ struct ZeroSystemRhs {
   void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
 };
 
+// Echange lineaire conservatif entre les deux premiers blocs (lit les DEUX blocs) :
+// n0 += dt k (n1 - n0), n1 -= idem. Conserve n0 + n1 par cellule.
+struct LinearExchange {
+  Real k = Real(0.5);
+  template <CoupledSystemLike System>
+  void apply(System& sys, const MultiFab& /*aux*/, Real dt) const {
+    MultiFab& U0 = sys.template block<0>().U();
+    MultiFab& U1 = sys.template block<1>().U();
+    const Real coef = k * dt;
+    for (int li = 0; li < U0.local_size(); ++li) {
+      Array4 a0 = U0.fab(li).array();
+      Array4 a1 = U1.fab(li).array();
+      const Box2D b = U0.box(li);
+      const Real c = coef;
+      for_each_cell(b, [=] ADC_HD(int i, int j) {
+        const Real flux = c * (a1(i, j, 0) - a0(i, j, 0));
+        a0(i, j, 0) += flux;
+        a1(i, j, 0) -= flux;
+      });
+    }
+  }
+};
+
 // remplit U (composante 0) par une fonction de l'indice GROSSIER (le fin echantillonne
 // la meme fonction via coarsen_index) -> grossier et fin coherents a l'init.
 template <class F>
@@ -228,6 +251,39 @@ int main() {
     auto each = build(PoissonCadence::PerSubstep);
     each.step(Real(0.01));
     chk(each.solve_count() == 4, "cadence_per_substep");
+  }
+
+  // --- Partie D : source de couplage inter-especes sur AMR (revue Codex 9.5) ---
+  // Deux blocs, echange lineaire conservatif applique PAR NIVEAU : la masse totale
+  // (somme des deux especes) est conservee a chaque niveau ; chaque espece change.
+  {
+    using Blk = EquationBlock<AdvectX, FirstOrder, ExplicitTime<SSPRK2, 1>>;
+    MultiFab U0c(ba_coarse, dm, 1, 2), U0f(ba_fine, dm, 1, 2);
+    MultiFab U1c(ba_coarse, dm, 1, 2), U1f(ba_fine, dm, 1, 2);
+    U0c.set_val(Real(1)); U0f.set_val(Real(1));
+    U1c.set_val(Real(3)); U1f.set_val(Real(3));
+    Blk b0{"a", AdvectX{Real(0)}, U0c, BCRec{}};
+    Blk b1{"b", AdvectX{Real(0)}, U1c, BCRec{}};
+    CoupledSystem system{b0, b1};
+    std::vector<std::vector<AmrLevelMP>> bl;
+    bl.emplace_back();
+    bl.back().push_back(make_level(std::move(U0c), dxc, dyc));
+    bl.back().push_back(make_level(std::move(U0f), dxc / 2, dyc / 2));
+    bl.emplace_back();
+    bl.back().push_back(make_level(std::move(U1c), dxc, dyc));
+    bl.back().push_back(make_level(std::move(U1f), dxc / 2, dyc / 2));
+    AmrSystemCoupler sim(system, geom, ba_coarse, BCRec{},
+                         ChargeDensityRhs{{{Real(1), 0}, {Real(-1), 0}}}, std::move(bl));
+
+    const Real tot0 = sim.mass(0) + sim.mass(1);
+    const Real m0_before = sim.mass(0);
+    sim.coupled_source_step(LinearExchange{Real(0.5)}, Real(0.1));
+    chk(std::fabs((sim.mass(0) + sim.mass(1)) - tot0) < Real(1e-12), "amr_coupled_source_conserves");
+    chk(sim.mass(0) > m0_before + Real(1e-6), "amr_coupled_source_transfers");  // b0 gagne (n1>n0)
+    // NoCoupledSource : no-op.
+    const Real m0_now = sim.mass(0);
+    sim.coupled_source_step(NoCoupledSource{}, Real(0.1));
+    chk(std::fabs(sim.mass(0) - m0_now) < Real(1e-14), "amr_no_coupled_source_noop");
   }
 
   if (fails == 0) std::printf("OK test_amr_system_coupler\n");
