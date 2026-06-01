@@ -47,50 +47,62 @@ testable**. `[x]` = fait et vert ; `[ ]` = à faire.
 
 ## 2. À faire — compléter le squelette multi-espèces
 
-**Ordre conseillé** : (1) `PoissonRhsAssembler` N-blocs → (2) `CoupledSource` → (3) vraie
-interface implicite `ImplicitSolver`/`IMEXStepper` → (4) **exemple C++ minimal** (électrons
-implicites + ions explicites, rhs = n_i − n_e, sans Python) → (5) `AmrSystemCoupler` →
-(6) API Python dans `adc_cases`. On valide à chaque étape par un test d'intégration (§2.5).
+**Ordre conseillé** : (1) `ChargeDensityRhs` N-blocs ✅ → (2) `CoupledSource` ✅ → (3) interface
+implicite `ImplicitBlockStepper` + défaut ✅ → (4) **exemple C++ minimal** (électrons
+implicites + ions explicites, rhs = n_i − n_e, sans Python) ✅ → (5) `AmrSystemCoupler` ✅ →
+(6) API Python dans `adc_cases` (reste à faire). Chaque étape validée par un test d'intégration
+(§2.5, tous verts). **Reste dans le cœur** : §2.2 IMEX partiel + cadence φ ; §4 nettoyages.
+**Hors cœur** : §2.4 modèles canoniques + §3 API Python (dans `adc_cases`).
 
 ### 2.1 Couplage et RHS
-- [ ] **`PoissonRhsAssembler` / `ChargeDensityRhs<Blocks...>` à N blocs** : généraliser
-  `TwoBlockChargeDensityRhs` (q0·n0+q1·n1) à N espèces `f = Σ_s q_s n_s` (somme sur
-  `for_each_block`), avec **charges, composantes densité et signes configurables** par bloc.
-- [ ] **`CoupledSource` (sources inter-espèces)** : distinguer `source` locale du modèle et
-  une couche de **couplage** qui lit plusieurs blocs : `S_e(U_e, U_i, phi)`,
-  `S_i(U_i, U_e, phi)` (collisions, échange q/m). Aujourd'hui `source(u,aux)` ne voit que le
-  bloc local.
-- [ ] **BC par bloc réellement appliquées** : `EquationBlock::bc` existe ; vérifier/forcer son usage dans `SystemCoupler` (remplissage des halos par bloc), pas une BC globale unique.
+- [x] **`ChargeDensityRhs` à N blocs** : `f = Σ_s q_s n_s` (somme sur `for_each_block`),
+  **charge/composante/signe configurables** par espèce (`SpeciesCharge` + `add_scaled_component`),
+  dans `coupling/elliptic_rhs.hpp`. `TwoBlockChargeDensityRhs` conservé (compat). Testé
+  (`test_two_species_minimal`, `test_amr_system_coupler`).
+- [x] **`CoupledSource` (sources inter-espèces)** : `coupling/coupled_source.hpp` — concept
+  `CoupledSourceFor`, `NoCoupledSource`, et `SystemCoupler::coupled_source_step(src, dt)`
+  (splitting forward-Euler) qui lit **plusieurs blocs + aux**. Distinct de `model.source`
+  (local). Testé (`test_coupled_source` : échange linéaire conservatif).
+- [x] **BC par bloc réellement appliquées** : `SystemCoupler::stage_rhs` remplit les halos
+  avec `block.bc` (pas une BC globale). Vérifié par `test_system_two_explicit` (périodique vs
+  outflow → champs divergents, même donnée initiale).
 
 ### 2.2 Temps : implicite / IMEX réellement exécutés
-- [ ] **Vraie interface implicite** : aujourd'hui `SystemCoupler::step` exécute l'**explicite**
-  (SSPRK2/3) et **délègue** l'implicite/IMEX à un simple callback. Définir un **contrat clair**
-  `ImplicitSolver<Block>` / `IMEXStepper<Block>` (au lieu du callback nu), et fournir **un
-  IMEX par défaut** (réutiliser `integrator/imex.hpp` / `two_fluid_ap`) pour un cas plasma
-  raide sans que l'utilisateur écrive Newton.
-- [ ] **IMEX partiel** : traiter implicitement un **sous-ensemble** des variables d'un bloc (trait `which_implicit()` sur le modèle), pas tout le bloc.
-- [ ] **Sous-cyclage temporel par espèce** : déjà exprimé par `substeps` ; vérifier la cohérence du couplage Poisson quand les blocs ont des `dt` différents (re-résoudre φ à quelle cadence ?).
+- [x] **Vraie interface implicite + défaut** : `integrator/implicit_stepper.hpp` — concept
+  `ImplicitBlockStepper`, `backward_euler_source` (Newton local, jacobienne par différences
+  finies : **inconditionnellement stable**, exact en 1 itération pour une relaxation linéaire,
+  là où Picard divergerait dès `dt·raideur > 1`), et `ImplicitSourceStepper` (défaut prêt à
+  l'emploi, **aucun Newton côté utilisateur**). Testé (`test_two_species_minimal` : `dt·k=100`).
+- [ ] **IMEX partiel** : traiter implicitement un **sous-ensemble** des variables d'un bloc (trait `which_implicit()` sur le modèle), pas tout le bloc. (Le défaut actuel traite toute la source en implicite.)
+- [ ] **Sous-cyclage temporel par espèce** : `substeps` exécuté (mono-niveau **et** AMR). Reste à trancher la **cadence de re-résolution de φ** entre sous-pas d'espèce (aujourd'hui φ figé sur le pas dans `AmrSystemCoupler`, re-solve par étage RK en mono-niveau).
 
 ### 2.3 AMR pour le système : `AmrSystemCoupler`
-- [ ] `SystemCoupler` est **mono-niveau**. Créer `AmrSystemCoupler` qui porte
-  `EquationBlock / CoupledSystem` sur AMR : niveaux 0/1/2, **sous-cyclage AMR**, **reflux**,
-  **average_down**, **Poisson par niveau**, chaque bloc avancé par `advance_amr<Disc_bloc>`
-  avec son schéma. (L'AMR est déjà un orchestrateur : `fill_ghosts → subcycle → average_down
-  → reflux → regrid`.) Note : `AmrCoupler`/`AmrCouplerMP` restent mono-modèle aujourd'hui.
+- [x] `coupling/amr_system_coupler.hpp` : porte `CoupledSystem` sur AMR. Chaque bloc a **sa**
+  hiérarchie (`std::vector<AmrLevelMP>`), toutes les espèces **partagent** la grille AMR,
+  l'aux (φ, ∇φ) et le **Poisson grossier de système** (`f = Σ_s q_s n_s`). Orchestration :
+  `sync_down` (par bloc) → Poisson grossier → aux + injection fine → chaque bloc avancé par
+  `advance_amr<Disc_bloc>` (sous-cyclage Berger-Oliger + **reflux** + **average_down**), avec
+  ses **sous-pas d'espèce** ; implicites/IMEX délégués (défaut `AmrImplicitSourceStepper`,
+  backward-Euler par niveau). Testé (`test_amr_system_coupler` : conservation par bloc, RHS
+  système, φ non nul, relaxation implicite grossier+fin). Réutilise le moteur `advance_amr`
+  et les primitives `_mb` ; mono-box par niveau validé (comme `AmrCoupler`).
 
 ### 2.4 Cas de validation (squelette testable)
-- [ ] **Exemple C++ minimal SANS Python** (pour valider l'archi utilisateur) : électrons
-  implicites + ions explicites + `rhs Poisson = n_i − n_e`, via `CoupledSystem` +
-  `SystemCoupler`. C'est le test « est-ce qu'un utilisateur peut construire son cas ? ».
+- [x] **Exemple C++ minimal SANS Python** : `test_two_species_minimal` — électrons implicites
+  (relaxation raide) + ions explicites + `rhs Poisson = n_i − n_e` via `ChargeDensityRhs` +
+  `ImplicitSourceStepper`. Le test « un utilisateur peut-il composer son cas ? » : il
+  n'assemble que des briques (modèle, schéma, politique temps, charge), aucun solveur écrit.
 - [ ] **électrons Euler + ions Euler isothermes + Poisson** (cas canonique deux-espèces) — modèles dans `adc_cases`.
 - [ ] **diocotron à ions mobiles** (les ions deviennent un 2e bloc ; réutiliser le diocotron existant pour les électrons).
-- [ ] Garde : masse conservée par bloc, RHS = q_i n_i − q_e n_e correct, comparaison à une référence simple.
+- [x] Garde : masse conservée par bloc (`test_amr_system_coupler`), RHS = q_i n_i + q_e n_e
+  correct (`test_two_species_minimal`, `test_amr_system_coupler`). Comparaison à une référence
+  analytique (backward-Euler exact, production exacte).
 
 ### 2.5 Tests d'intégration à ajouter
-- [ ] `CoupledSystem` + **Poisson RHS non nul** (au-delà du `ZeroSystemRhs` actuel).
-- [ ] `SystemCoupler` avec **deux blocs explicites différents** (schémas/sous-pas distincts).
-- [ ] `SystemCoupler` avec **bloc implicite** branché sur le callback (déjà amorcé par `test_system_coupler`, à durcir).
-- [ ] `AmrSystemCoupler` quand il existera (conservation par niveau, reflux).
+- [x] `CoupledSystem` + **Poisson RHS non nul** (`ChargeDensityRhs`) — `test_two_species_minimal`.
+- [x] `SystemCoupler` avec **deux blocs explicites différents** (schémas/sous-pas distincts) — `test_system_two_explicit`.
+- [x] **Bloc implicite** branché et durci (relaxation raide `dt·k=100`, stabilité inconditionnelle) — `test_two_species_minimal`.
+- [x] `AmrSystemCoupler` : conservation par bloc, reflux, RHS système, relaxation implicite multi-niveau — `test_amr_system_coupler`.
 
 ---
 
@@ -147,9 +159,12 @@ l'architecture utilisateur.
 
 > `adc` sait prendre une **loi physique locale** (`PhysicalModel`) et la faire tourner sur
 > un maillage avec Poisson, AMR, MPI et GPU. Le niveau d'**assemblage multi-blocs** est
-> désormais en place en squelette : `EquationBlock` (state + modèle + schéma spatial +
-> politique temps + BC), `CoupledSystem` (plusieurs blocs), `SystemCoupler` (RHS elliptique
-> global, explicite avancé par le cœur, implicite délégué, sous-pas par bloc). Reste à le
-> remplir : RHS à N espèces, source de couplage, implicite/IMEX par défaut, AMR du système,
-> et l'API Python de composition. Le `PhysicalModel` décrit une équation, le `CoupledSystem`
-> un système, le `Scheduler` l'ordre d'exécution ; le cœur garantit AMR / MPI / GPU.
+> désormais **rempli** (squelette testable, tous tests verts) : `EquationBlock` (state +
+> modèle + schéma spatial + politique temps + BC), `CoupledSystem` (plusieurs blocs),
+> `SystemCoupler` mono-niveau **et** `AmrSystemCoupler` sur AMR (RHS elliptique de système
+> `Σ_s q_s n_s`, explicite avancé par le cœur, implicite/IMEX délégué avec un défaut
+> backward-Euler sans Newton utilisateur, source de couplage inter-espèces, sous-pas par
+> bloc, conservation par reflux). Reste : IMEX partiel + cadence φ (§2.2), nettoyages cœur
+> (§4), puis — dans `adc_cases` — les modèles canoniques deux-espèces (§2.4) et l'API Python
+> de composition (§3). Le `PhysicalModel` décrit une équation, le `CoupledSystem` un système,
+> le `Scheduler`/coupleur l'ordre d'exécution ; le cœur garantit AMR / MPI / GPU.

@@ -2,10 +2,12 @@
 
 #include <adc/core/coupled_system.hpp>
 #include <adc/core/types.hpp>
+#include <adc/coupling/coupled_source.hpp>
 #include <adc/coupling/elliptic_rhs.hpp>
 #include <adc/elliptic/elliptic_problem.hpp>
 #include <adc/elliptic/elliptic_solver.hpp>
 #include <adc/elliptic/geometric_mg.hpp>
+#include <adc/integrator/implicit_stepper.hpp>
 #include <adc/integrator/scheduler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -117,6 +119,19 @@ class SystemCoupler {
                     "SystemCoupler::step(dt) ne peut pas avancer un bloc "
                     "implicite/IMEX sans callback");
     });
+  }
+
+  // Pas de SOURCE DE COUPLAGE inter-especes (splitting forward-Euler) : on
+  // rafraichit phi (aux) puis on laisse la source lire tous les blocs et les
+  // mettre a jour. C'est l'endroit distinct de model.source (locale au bloc) :
+  // ici S_e peut dependre de U_i et de phi. NoCoupledSource => no-op.
+  template <class CoupledSource>
+  void coupled_source_step(CoupledSource&& src, Real dt) {
+    static_assert(CoupledSourceFor<std::decay_t<CoupledSource>, System>,
+                  "coupled_source_step attend une CoupledSource : "
+                  "apply(system, aux, dt)");
+    solve_fields();
+    src.apply(system_, aux_, dt);
   }
 
  private:
