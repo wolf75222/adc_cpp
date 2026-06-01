@@ -71,6 +71,29 @@ ADC_HD inline Aux load_aux(const ConstArray4& a, int i, int j) {
   return Aux{a(i, j, 0), a(i, j, 1), a(i, j, 2)};
 }
 
+// Vitesse d'onde maximale d'un champ : max sur les cellules valides et les deux directions
+// de model.max_wave_speed(U, aux, dir). Sert au choix CFL du pas (dt = cfl*h/w_max). Pour un
+// modele sans transport (flux nul, w=0) -> 0, donc ne contraint pas le pas. Reduction par le
+// seam (vraie reduction device sous Kokkos, boucle hote sinon).
+template <class Model>
+inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
+                              const MultiFab& aux) {
+  Real m = 0;
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 a = aux.fab(li).const_array();
+    const Model mm = model;
+    m = std::max(m, for_each_cell_reduce_max(U.box(li), [u, a, mm] ADC_HD(int i, int j) {
+                      const auto s = load_state<Model>(u, i, j);
+                      const Aux ax = load_aux(a, i, j);
+                      const Real wx = mm.max_wave_speed(s, ax, 0);
+                      const Real wy = mm.max_wave_speed(s, ax, 1);
+                      return wx > wy ? wx : wy;
+                    }));
+  }
+  return m;
+}
+
 // Compat : flux de Rusanov en fonction libre, delegue a la politique RusanovFlux
 // (operator/numerical_flux.hpp). Conserve pour les references serie (demos GPU,
 // tests) qui appellent rusanov_flux directement.

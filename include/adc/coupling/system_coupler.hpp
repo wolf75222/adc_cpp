@@ -19,6 +19,7 @@
 #include <adc/operator/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 
+#include <algorithm>
 #include <functional>
 #include <type_traits>
 #include <utility>
@@ -189,6 +190,32 @@ class SystemDriver {
                     "SystemDriver::step(dt) ne peut pas avancer un bloc "
                     "implicite/IMEX sans callback");
     });
+  }
+
+  // Pas macro choisi par CFL multi-especes (§8.2 C) : dt = cfl * min(dx,dy) / w_max, ou
+  // w_max est la PLUS GRANDE vitesse d'onde sur TOUTES les especes (l'espece la plus rapide
+  // contraint le pas). Combine au `Stride` d'une espece lente (gaz), cela donne le multirate
+  // pratique : pas macro fixe par les rapides, lente avancee 1 fois sur stride. Retourne le
+  // dt utilise. aux est rafraichi avant la mesure (vitesses d'onde dependantes de phi).
+  Real cfl_dt(Real cfl) {
+    asm_.solve_fields();
+    const Real h = std::min(asm_.geom().dx(), asm_.geom().dy());
+    Real wmax = 0;
+    asm_.system().for_each_block([&](auto& block) {
+      wmax = std::max(wmax, max_wave_speed_mf(block.model, block.U(), asm_.aux()));
+    });
+    return cfl * h / std::max(wmax, Real(1e-30));
+  }
+  template <class ImplicitAdvance>
+  Real step_cfl(Real cfl, ImplicitAdvance&& implicit_advance) {
+    const Real dt = cfl_dt(cfl);
+    step(dt, std::forward<ImplicitAdvance>(implicit_advance));
+    return dt;
+  }
+  Real step_cfl(Real cfl) {
+    const Real dt = cfl_dt(cfl);
+    step(dt);
+    return dt;
   }
 
   // Source de couplage inter-especes (splitting forward-Euler) : rafraichit phi (aux) puis

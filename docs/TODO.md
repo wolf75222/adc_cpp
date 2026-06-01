@@ -309,9 +309,16 @@ trop. « Avancer un coupleur » est bancal — un coupleur *assemble*, un *drive
   par `block_stride_v` + `advance_subcycled(system, dt, macro_step, …)` ; `SystemDriver` et
   `AmrSystemCoupler` portent `macro_step_`. `Stride=1` = historique bit-identique.
   Testé (`test_multirate_stride` : rapide stride 1 + lent stride 3, synchronisés à M=3).
-- [ ] `dt` propre par espèce **piloté CFL** (au-delà du `Stride` entier fixé à la compilation) :
-  `dt_s` calculé par espèce via `max_wave_speed`, + coordination de la cadence φ. Plus lourd,
-  reste à faire.
+- [x] **Pas macro choisi par CFL** : `SystemDriver::step_cfl(cfl)` / `cfl_dt(cfl)` calculent
+  `dt = cfl·min(dx,dy) / w_max`, `w_max` = plus grande vitesse d'onde **sur toutes les
+  espèces** (réduction `max_wave_speed_mf` par espèce, via `model.max_wave_speed`) — l'espèce
+  la plus rapide contraint le pas. Combiné au `Stride` d'une espèce lente, cela donne le
+  **multirate pratique** (pas macro fixé par les rapides, lente avancée 1 fois sur stride).
+  Testé `test_cfl_dt`.
+- [ ] **Multirate pleinement adaptatif** (raffinement) : dériver le `Stride` de chaque espèce
+  au RUNTIME du ratio `dt_s / dt_macro` (au lieu d'un stride fixé à la compilation), + cadence
+  φ associée. La brique (`step_cfl`, `max_wave_speed_mf`, `Stride` runtime dans le scheduler)
+  est là ; reste à boucler la sélection automatique du stride par espèce.
 
 ---
 
