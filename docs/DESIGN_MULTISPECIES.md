@@ -18,10 +18,10 @@ et des couplages **globaux** (Poisson et sources voient toutes les espèces).
 
 ```
 PhysicalModel   décrit une équation LOCALE          (déjà bon)
-EquationBlock   = State + Model + Spatial + Time     (à ajouter)
-CoupledSystem   = plusieurs EquationBlock            (à ajouter)
-Scheduler       = ordre des steps, sous-pas, IMEX    (à ajouter)
-PoissonRHS      = assemblé depuis toutes les espèces (à ajouter)
+EquationBlock   = State + Model + Spatial + Time     (fait, coeur)
+CoupledSystem   = plusieurs EquationBlock            (fait, coeur)
+Scheduler       = ordre des steps, sous-pas, IMEX    (fait, coeur)
+PoissonRHS      = assemblé depuis toutes les espèces (fait, coeur)
 ```
 
 Le cœur garantit que ces choix restent compatibles **AMR / MPI / GPU**.
@@ -72,35 +72,34 @@ solveurs elliptiques + ordre d'exécution.
 template <class Model, class Spatial, class Time>
 struct EquationBlock {
   Model    model;
-  MultiFab U;          // (ou une vue dans un état stacké, cf. §7)
+  MultiFab* U;         // vue non-possédante vers l'état du bloc
   BCRec    bc;         // conditions au bord PAR BLOC (cf. ci-dessous)
-  // Spatial = SpatialDiscretisation<Limiter, NumericalFlux>  (existe deja)
-  // Time    = SSPRK2 / SSPRK3 / ImexImplicit ...             (tags, existent en partie)
-  int substeps = 1;    // sous-cyclage temporel relatif
+  // Spatial = SpatialDiscretisation<Limiter, NumericalFlux>
+  // Time    = ExplicitTime / ImplicitTime / IMEXTime / PrescribedTime
 };
 
-// Un systeme = plusieurs blocs + un couplage elliptique + un ordonnanceur.
+// Un systeme = plusieurs blocs.
 template <class... Blocks>
 struct CoupledSystem {
   std::tuple<Blocks...> blocks;
-  PoissonCoupling       poisson;   // rhs = Σ_s q_s n_s, solveur MG/FFT
-  Scheduler             scheduler; // qui avance quand, implicite/explicite
 };
+
+// Le driver mono-niveau connecte systeme + Poisson + scheduler.
+SystemCoupler sim(system, geom, ba, bc_phi, rhs_assembler);
 ```
 
-- **`EquationBlock`** : déjà à moitié là. `SpatialDiscretisation<Limiter, Flux>` existe
-  et est sélectionnable au coupleur (uniforme **et** AMR). Les tags temporels `SSPRK2`/
-  `SSPRK3` existent. Manque : les regrouper *par bloc*, avec `substeps` et le choix
-  implicite/explicite.
-- **`CoupledSystem`** : à créer. Couche d'assemblage de N blocs.
-- **`Scheduler`** : à créer. Encode l'ordre (ex. 10 sous-pas électrons par pas ion),
-  l'implicite ciblé (IMEX partiel).
-- **`PoissonCoupling`** : à créer. Le RHS elliptique somme les contributions de toutes
-  les espèces (`f = Σ_s α_s · model_s.elliptic_rhs(U_s)`), **champ φ unique partagé**.
+- **`EquationBlock`** : fait. Il regroupe `PhysicalModel`, `SpatialDiscretisation`,
+  `TimePolicy`, état `MultiFab` et conditions au bord.
+- **`CoupledSystem`** : fait. Couche d'assemblage de N blocs.
+- **`Scheduler`** : fait. Encode l'ordre (ex. 10 sous-pas électrons par pas ion),
+  l'implicite ciblé (IMEX partiel) via `TimePolicy`.
+- **`PoissonCoupling`** : première brique faite. `elliptic_rhs.hpp` fournit le cas
+  mono-modele et le cas deux champs / deux blocs ; `SystemCoupler` accepte un assembleur
+  utilisateur pour generaliser `f = Σ_s α_s · model_s.elliptic_rhs(U_s)`.
   Conforme à la demande : couplage dans `f(U)`, pas dans `F`.
 
-Adaptateur de non-régression : `SingleFieldSystem<Model>` enveloppe le `Coupler` actuel
-comme un système à un bloc, pour ne rien casser pendant la transition.
+Non-régression : `Coupler<Model>` reste le chemin mono-bloc ; `SystemCoupler` est ajouté
+à côté, sans casser l'API historique.
 
 ### 3bis. Points d'architecture à acter
 

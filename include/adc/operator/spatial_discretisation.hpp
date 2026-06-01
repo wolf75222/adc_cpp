@@ -3,6 +3,8 @@
 #include <adc/operator/numerical_flux.hpp>
 #include <adc/operator/reconstruction.hpp>
 
+#include <concepts>
+
 // Discretisation spatiale : une reconstruction (limiteur) + un flux numerique,
 // regroupes en un type nomme passe en bloc au coupleur. C'est la "methode spatiale"
 // (a distinguer de l'integration en temps, cf. integrator/time_integrator.hpp).
@@ -18,6 +20,12 @@ template <class LimiterT, class NumericalFluxT = RusanovFlux>
 struct SpatialDiscretisation {
   using Limiter = LimiterT;
   using NumericalFlux = NumericalFluxT;
+};
+
+template <class D>
+concept SpatialDiscretisationLike = requires {
+  typename D::Limiter;
+  typename D::NumericalFlux;
 };
 
 // Bundles usuels.

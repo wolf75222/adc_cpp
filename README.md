@@ -4,9 +4,7 @@
 
 **Coeur C++23 d'un solveur AMR / MPI / GPU pour systemes hyperbolique-elliptique couples.**
 
-![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)
-![CMake](https://img.shields.io/badge/build-CMake-064F8C)
-![Tests](https://img.shields.io/badge/tests-35-brightgreen)
+![Tests](https://img.shields.io/badge/tests-32-brightgreen)
 
 </div>
 
@@ -47,16 +45,20 @@ est fourni par l'application.
 | Module | Role |
 |---|---|
 | [`core/physical_model.hpp`](include/adc/core/physical_model.hpp) | concept `PhysicalModel` (flux, max_wave_speed, source, elliptic_rhs) |
+| [`core::{EquationBlock,CoupledSystem}`](include/adc/core/equation_block.hpp) | squelette multi-blocs : state + modele + methode spatiale + politique temps |
 | [`operator::{RusanovFlux,HLLFlux,HLLCFlux}`](include/adc/operator/numerical_flux.hpp) | flux numeriques (politiques `ADC_HD`) |
 | [`operator::reconstruction`](include/adc/operator/reconstruction.hpp) | MUSCL ordre 2 (NoSlope / Minmod / VanLeer) + WENO5Z |
 | [`operator::assemble_rhs` / `compute_face_fluxes`](include/adc/operator/spatial_operator.hpp) | `R = -div F + S`, flux de face pour le reflux ; GPU via `for_each_cell` |
-| [`integrator::{ssprk2,ssprk3}`](include/adc/integrator/ssprk.hpp) | Shu-Osher SSP-RK (TVD) |
+| [`integrator::{TimePolicy,SSPRK2,SSPRK3}`](include/adc/integrator/time_integrator.hpp) | choix explicite / implicite / IMEX + sous-pas par bloc |
+| [`integrator::advance_subcycled`](include/adc/integrator/scheduler.hpp) | scheduler generique pour avancer chaque `EquationBlock` avec son nombre de sous-pas |
 | [`integrator::imex_euler_step`](include/adc/integrator/imex.hpp) | IMEX asymptotic-preserving |
 | [`integrator::{lie_step,strang_step}`](include/adc/integrator/splitting.hpp) | splitting d'operateurs |
 | [`integrator::advance_amr`](include/adc/integrator/amr_reflux_mf.hpp) | moteur AMR unifie : multi-patch N-niveaux, reflux coverage-aware, distribue MPI |
 | [`elliptic::GeometricMG`](include/adc/elliptic/geometric_mg.hpp) | multigrille geometrique (V-cycle GS rb), AMR-compatible, on-device |
 | [`elliptic::PoissonFFTSolver` / `DistributedFFTSolver`](include/adc/elliptic) | Poisson FFT spectral (mono-rang) et distribue (MPI) |
+| [`coupling::elliptic_rhs`](include/adc/coupling/elliptic_rhs.hpp) | assembleurs de second membre elliptique mono-modele ou multi-champs |
 | [`coupling::Coupler`](include/adc/coupling/coupler.hpp) | couplage hyperbolique-elliptique par etage : `Coupler<Model, Elliptic>` |
+| [`coupling::SystemCoupler`](include/adc/coupling/system_coupler.hpp) | execution mono-niveau d'un `CoupledSystem` multi-blocs |
 | [`coupling::AmrCouplerMP`](include/adc/coupling) | couplage AMR multi-patch (route par `advance_amr`) |
 | [`amr::{cluster,regrid,tag_box}`](include/adc/amr) | tagging + clustering Berger-Rigoutsos + regrid |
 | [`mesh::{MultiFab,BoxArray,Geometry}`](include/adc/mesh) | conteneurs distribues, halos, geometrie |
@@ -115,7 +117,7 @@ git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build                 # 35 tests coeur (maillage, AMR, elliptique, integrateurs)
+ctest --test-dir build                 # 32 tests coeur (maillage, AMR, elliptique, integrateurs)
 ```
 
 | Option | Defaut | Role |
@@ -131,21 +133,21 @@ ctest --test-dir build                 # 35 tests coeur (maillage, AMR, elliptiq
 
 ```
 include/adc/
-  core/        types, etat, concept PhysicalModel
+  core/        types, etat, PhysicalModel, EquationBlock, CoupledSystem
   mesh/        MultiFab, BoxArray, Geometry, for_each_cell, CL physiques
   parallel/    seam comm (MPI)
   operator/    reconstruction, flux numeriques, operateur spatial
   elliptic/    concept EllipticSolver, multigrille, FFT (mono / distribue)
-  coupling/    Coupler, AmrCouplerMP, diagnostics
-  integrator/  SSP-RK, IMEX, splitting, moteur AMR (reflux, multi-niveau)
+  coupling/    Coupler, SystemCoupler, AmrCouplerMP, diagnostics
+  integrator/  SSP-RK, TimePolicy, scheduler, IMEX, splitting, moteur AMR
   amr/         clustering Berger-Rigoutsos, regrid, hierarchie
-tests/         35 tests coeur (+ tests MPI via mpirun)
+tests/         32 tests coeur (+ tests MPI via mpirun)
 docs/          ARCHITECTURE.md, ALGORITHMS.md, PERFORMANCE.md, validation diocotron
 ```
 
 ## Validation (coeur)
 
-- **35** tests coeur (serie ; MPI bit-identique np=1/2/4 quand `-DADC_USE_MPI=ON`).
+- **32** tests coeur (serie ; MPI bit-identique np=1/2/4 quand `-DADC_USE_MPI=ON`).
 - AMR conservatif : reflux multi-patch a l'arrondi machine (`~1e-15`).
 - GPU GH200 : pas couple + AMR bit-identiques au CPU (checksum exact).
 

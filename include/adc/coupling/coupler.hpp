@@ -2,6 +2,7 @@
 
 #include <adc/core/types.hpp>
 #include <adc/coupling/coupling_policy.hpp>
+#include <adc/coupling/elliptic_rhs.hpp>
 #include <adc/elliptic/elliptic_problem.hpp>
 #include <adc/elliptic/elliptic_solver.hpp>
 #include <adc/elliptic/geometric_mg.hpp>
@@ -23,16 +24,17 @@
 #include <type_traits>
 #include <utility>
 
-// Coupleur hyperbolique-elliptique : ferme la boucle Poisson -> aux -> advance.
+// Coupleur hyperbolique-elliptique mono-bloc : ferme la boucle Poisson -> aux -> advance.
 //
 // A chaque etage de l'integrateur (couplage stade par stade) :
-//   1. second membre f = model.elliptic_rhs(U)
+//   1. second membre f via SingleModelEllipticRhs(model, U)
 //   2. resolution lap(phi) = f par la multigrille geometrique (warm start)
 //   3. aux = (phi, grad phi) par differences centrees
 //   4. assemblage du residu hyperbolique avec ce aux
 //
 // Pour diocotron aux entre par le flux (derive E x B) ; pour Euler-Poisson il
-// entrerait par la source. Le coupleur est identique, seul le modele change.
+// entrerait par la source. Le coupleur reste compatible mono-modele ; le niveau
+// multi-especes doit assembler le rhs elliptique depuis un CoupledSystem.
 
 namespace adc {
 
@@ -41,19 +43,12 @@ namespace detail {
 // PAS etre defini dans une methode privee/protegee (restriction nvcc), d'ou
 // l'extraction hors de la classe Coupler.
 
-// f = model.elliptic_rhs(U) sur les cellules valides.
+// Compatibilite mono-modele : f = model.elliptic_rhs(U) sur les cellules valides,
+// deleguee a un assembleur nomme pour ne pas enfermer cette responsabilite dans Coupler.
 template <class Model>
 inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs,
                              const Model& model) {
-  for (int li = 0; li < state.local_size(); ++li) {
-    const ConstArray4 s = state.fab(li).const_array();
-    Array4 f = rhs.fab(li).array();
-    const Box2D v = rhs.box(li);
-    const Model m = model;
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      f(i, j, 0) = m.elliptic_rhs(load_state<Model>(s, i, j));
-    });
-  }
+  SingleModelEllipticRhs<Model>{model}(state, rhs);
 }
 
 // aux = (phi, d phi/dx, d phi/dy) par differences centrees. Delegue a la
@@ -139,18 +134,28 @@ class Coupler {
   }
 
   // Point d'entree unifie : on donne au coupleur une DISCRETISATION SPATIALE
-  // (limiteur + flux) et un INTEGRATEUR EN TEMPS (tag), plus la politique de
-  // couplage. Le coupleur assemble ; le cas ne choisit que les politiques.
-  //   sim.step<MusclVanLeerHLLC, SSPRK3>(U, dt);
+  // (limiteur + flux) et une politique de temps explicite. Les anciens tags
+  // SSPRK2/SSPRK3 restent valides ; la forme nouvelle permet aussi le sous-cyclage :
+  //   sim.step<MusclVanLeerHLLC, ExplicitTime<SSPRK3, 4>>(U, dt);
   template <class Disc = FirstOrder, class TimeInteg = SSPRK2,
             class Policy = PerStageCoupling>
   void step(MultiFab& U, Real dt) {
     using L = typename Disc::Limiter;
     using F = typename Disc::NumericalFlux;
-    if constexpr (std::is_same_v<TimeInteg, SSPRK3>)
-      advance_ssprk3<L, Policy, F>(U, dt);
-    else
-      advance<L, Policy, F>(U, dt);
+    using T = typename TimePolicyTraits<TimeInteg>::Method;
+    static_assert(TimePolicyTraits<TimeInteg>::treatment == TimeTreatment::Explicit,
+                  "Coupler::step ne sait executer que des politiques explicites ; "
+                  "utiliser un scheduler/systeme pour IMEX ou implicite");
+    static_assert(std::is_same_v<T, SSPRK2> || std::is_same_v<T, SSPRK3>,
+                  "Coupler::step supporte SSPRK2 ou SSPRK3");
+    constexpr int n = TimePolicyTraits<TimeInteg>::substeps;
+    const Real h = dt / static_cast<Real>(n);
+    for (int s = 0; s < n; ++s) {
+      if constexpr (std::is_same_v<T, SSPRK3>)
+        advance_ssprk3<L, Policy, F>(U, h);
+      else
+        advance<L, Policy, F>(U, h);
+    }
   }
 
   // Resout phi et derive aux pour un etat donne, sans avancer en temps

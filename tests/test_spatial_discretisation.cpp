@@ -27,6 +27,10 @@ static_assert(std::is_same_v<MinmodHLL::NumericalFlux, HLLFlux>);
 
 // Les tags d'integration en temps sont distincts.
 static_assert(!std::is_same_v<SSPRK2, SSPRK3>);
+static_assert(TimePolicyTraits<SSPRK2>::substeps == 1);
+static_assert(TimePolicyTraits<ExplicitTime<SSPRK3, 4>>::substeps == 4);
+static_assert(TimePolicyTraits<ImplicitTime<UserTimeIntegrator, 10>>::treatment ==
+              TimeTreatment::Implicit);
 
 int main() {
   std::printf("OK test_spatial_discretisation\n");

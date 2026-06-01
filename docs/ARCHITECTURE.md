@@ -1,9 +1,8 @@
 # Architecture de adc_cpp
 
-Solveur C++23 pour les systemes hyperbolique-elliptique couples sur AMR, ecrit pour
-OpenMP + MPI + Kokkos. Cas de validation : l'instabilite diocotron (derive E x B),
-l'Euler-Poisson (gravite ou plasma) et le deux-fluides isotherme (type Hoffart,
-arXiv:2510.11808).
+Coeur C++23 pour les systemes hyperbolique-elliptique couples sur AMR, ecrit pour
+OpenMP + MPI + Kokkos. Les modeles physiques, facades, exemples et bindings Python
+vivent dans `adc_cases`, qui consomme ce coeur via `adc::adc`.
 
 Ce document fige l'architecture cible et son etat. Le README porte la narration et les
 resultats. Ici on decrit les couches, les seams, les decisions, et on distingue ce qui est
@@ -61,12 +60,14 @@ periodique, moyenne de charge, sources implicites. La regle :
 
 ```
 PhysicalModel   = lois locales (device-callable).
-CoupledProblem  = variables globales et contraintes (nullspace, <rho>, contraintes AP).
+EquationBlock   = un U + un modele + une discretisation spatiale + une TimePolicy.
+CoupledSystem   = plusieurs EquationBlock.
+SystemCoupler   = assemblage global, Poisson, aux, ordonnancement des blocs.
 DiscreteOperator = application sur grille.
 ```
 
-Aujourd'hui le fond neutralisant `rho0 = <rho>` est passe au modele comme un parametre, pas
-calcule par lui : c'est deja l'esprit (la contrainte globale vit hors du `PhysicalModel`).
+Le fond neutralisant `rho0 = <rho>` ou une densite de charge multi-especes ne doit pas
+etre calcule dans un `PhysicalModel` : c'est une responsabilite de l'assembleur de systeme.
 
 ## 2. Couche 1 : physique (local, device-callable)
 
@@ -171,7 +172,7 @@ Etat : les trois sont deja des briques SEPAREES et testees isolement.
 - (1) `BoundaryCondition` = `mesh/physical_bc.hpp::fill_physical_bc` (Foextrap, Dirichlet,
   coins), teste seul (`test_physical_bc`).
 - (2) `GhostExchange` = `mesh/fill_boundary.hpp` (echange intra-niveau + periodique), teste
-  seul (`test_mpi_fillboundary`, `test_mpi_overlap`).
+  seul (`test_mpi_fillboundary` quand MPI est active).
 - (3) `AMRBoundaryInterpolation` = `mf_fill_fine_ghosts_*` (interp espace+temps coarse-fine).
 `fill_ghosts` n'est PAS un fourre-tout : c'est une COMPOSITION explicite de (1) puis (2)
 (`fill_boundary` ; `fill_physical_bc`). **Reste (cible)** : remonter (3), qui vit dans le pas
@@ -195,20 +196,26 @@ desambiguiser).
 
 ## 5. Couche 5 : temps et couplage
 
-`integrator/ssprk.hpp`, `imex.hpp` (AP), `splitting.hpp`, `two_fluid_ap.hpp`. Un
-`TimeIntegrator` pilote explicitement les etapes (remplissage des ghosts entre stages,
-evaluation du RHS, combinaison) mais **ne connait pas la formule du flux** : il ne voit
-qu'une interface `RHSOperator` (evaluer le second membre en `(U, t) -> R`). Le temps
+`integrator/time_integrator.hpp`, `scheduler.hpp`, `ssprk.hpp`, `imex.hpp` (AP) et
+`splitting.hpp`. Une `TimePolicy` nomme, par bloc, le traitement temporel
+(explicite, implicite, IMEX, prescrit) et le nombre de sous-pas. Le scheduler lit cette
+politique et appelle l'operateur adapte ; il ne connait pas la formule du flux. Le temps
 compose des operateurs, il ne possede pas la physique.
 
-`coupling/` (`Coupler`, `AmrCoupler`, `AmrCouplerMP`, `SpectralCoupler`, `coupling_policy`)
-orchestre fluide <-> Poisson. Regle stricte pour eviter la classe-dieu :
+`coupling/` (`Coupler`, `SystemCoupler`, `AmrCoupler`, `AmrCouplerMP`,
+`SpectralCoupler`, `coupling_policy`) orchestre fluide <-> Poisson. Regle stricte
+pour eviter la classe-dieu :
 
 ```
 Une CouplingPolicy decide l'ORDRE des operations, les variables couplees, les
 synchronisations, les contraintes. Elle ne possede pas la donnee, ne connait pas le
 backend, ne fait ni regrid, ni I/O, ni diagnostics, ni MPI brut.
 ```
+
+`Coupler<Model>` reste le chemin mono-modele. `SystemCoupler<CoupledSystem<...>>`
+est le chemin multi-blocs mono-niveau : il assemble le RHS elliptique depuis plusieurs
+etats, derive `aux`, avance les blocs explicites SSPRK, et delegue les blocs implicites
+ou IMEX a un callback utilisateur.
 
 Les coupleurs AMR sont desormais des ordonnanceurs minces (point 6 de la revue). Trois
 responsabilites sont sorties en composants nommes : la hierarchie (stockage des niveaux +
@@ -224,18 +231,15 @@ l'arrondi inchangees).
 
 | Module | Couche | Role |
 |---|---|---|
-| `core/` | physique / exec | `types` (`ADC_HD`, `Real`), `state` (`StateVec<N>`), `physical_model` (concept), `allocator` (Arena) |
-| `model/` | physique | `diocotron`, `euler`, `euler_poisson` (gravite OU plasma via `coupling_sign`) ; `langmuir`, `two_fluid_isothermal` (noyaux 0D AP) |
+| `core/` | physique / systeme | `types` (`ADC_HD`, `Real`), `state` (`StateVec<N>`), `physical_model` (concept), `EquationBlock`, `CoupledSystem`, `allocator` (Arena) |
 | `operator/` | numerique | `numerical_flux` (Rusanov/HLL/HLLC), `reconstruction` (MUSCL), `spatial_operator` (`assemble_rhs`) |
 | `elliptic/` | numerique + temps | concept `EllipticSolver` ; `geometric_mg` (V-cycle) ; `poisson_fft`(+`_solver`) ; `poisson_operator` |
 | `mesh/` (donnees) | maillage / donnees | `box2d`, `box_array`, `distribution_mapping`, `fab2d`/`multifab`, `geometry`, `refinement`, `box_hash` |
 | `mesh/` (execution) | execution | `for_each` (seam `for_each_cell`), `fill_boundary` (GhostExchange), `physical_bc`, `mf_arith` (operateurs de grille qui bouclent le seam) |
 | `parallel/` | execution | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
 | `amr/` | maillage adaptatif | `amr_hierarchy` (conteneur de niveaux), `cluster` (Berger-Rigoutsos, arithmetique entiere), `regrid` (politique de remaillage), `tag_box` (grille de marqueurs) |
-| `integrator/` | temps | `ssprk`, `imex` (AP), `splitting`, `two_fluid_ap`, `magnetic_euler_poisson` (rotation cyclotron `m x Omega` en Strang autour du couplage Euler-Poisson), `amr_reflux`/`amr_multilevel` (pile Fab2D de reference), `amr_reflux_mf` (pile MultiFab, mono-box -> multi-patch N-niveaux, GPU-ready) |
-| `coupling/` | temps | `coupler`, `coupling_policy`, `amr_coupler` (mono-box), `amr_coupler_mp` (multi-patch + regrid BR), `amr_level_storage` (hierarchie `AmrLevelStack`), `amr_regrid_coupler` (`amr_regrid_finest`), `amr_diagnostics` (masse, derive), `spectral_coupler` |
-| `analysis/` | hors chemin chaud | `diocotron_growth` (Eigen, `#ifdef ADC_HAS_EIGEN`), `hdf5_writer` (`#ifdef ADC_HAS_HDF5`) |
-| `solver/` | facade | facades PIMPL : `diocotron_solver`, `euler_poisson_solver`, `two_fluid_ap_solver` |
+| `integrator/` | temps | `TimePolicy`, scheduler par sous-pas, SSPRK, IMEX, splitting, moteur AMR `advance_amr` |
+| `coupling/` | temps / couplage | `elliptic_rhs`, `Coupler`, `SystemCoupler`, `coupling_policy`, `amr_coupler`, `amr_coupler_mp`, `spectral_coupler`, diagnostics AMR |
 
 ## 7. Solveur elliptique : probleme / operateur / solveur / post-traitement
 
@@ -265,7 +269,7 @@ Etat :
 - **Identite MG = FFT rendue STRUCTURELLE** : `test_elliptic_operator` applique le MEME
   operateur canonique `poisson_residual` aux deux solutions -> residus `3.4e-14` (MG) et
   `7.2e-14` (FFT), solutions identiques a `1.3e-16`. Les deux inversent prouvablement le meme
-  operateur (plus seulement `maxdiff` MG-vs-FFT de `test_fft_coupler`).
+  operateur.
 
 - **EllipticProblem et FieldPostProcess FAITS** : `elliptic/elliptic_problem.hpp` nomme les
   deux. `EllipticProblem` rassemble le coeff `eps`, les CL `BCRec` et le drapeau
@@ -289,74 +293,27 @@ nommee, documentee, mais ne sont pas touches a cette etape.
 
 ## 8. AMR distribue
 
-**Etat.** L'integrateur AMR tourne sur la pile MultiFab + seam (`integrator/amr_reflux_mf.hpp`,
-generique `<Limiter, NumericalFlux, N-comp>`, bulk `for_each_cell` GPU-ready). UN SEUL moteur de
-production : `advance_amr` (recursion `detail::subcycle_level_mp`, multi-patch N-niveaux
-distribue). Le reflux est coverage-aware (interfaces fin-grossier reelles, pas les joints fin-fin
-geres par `fill_boundary`) et route la correction vers la box parente (`mf_find_box`). Les DEUX
-coupleurs passent par ce moteur : `AmrCoupler` (mono-box = cas degenere, une box par niveau) et
-`AmrCouplerMP` (multi-patch + `regrid()` Berger-Rigoutsos), tous deux conservatifs. La pile
-mono-box d'origine (`amr_step_*_mf` + `AmrLevelMF`) est demue en `detail::` : ORACLE de validation
-seulement (chaine `Fab2D -> MF -> MP`, garde 1 de `test_amr_multilevel_multipatch` : `maxdiff=0`),
-plus aucun role en production.
+**Etat.** Le coeur fournit les briques AMR dans `amr/` et le moteur MultiFab dans
+`integrator/amr_reflux_mf.hpp`. Le schema reste le meme : tagging, clustering
+Berger-Rigoutsos, regrid, sous-cyclage, average-down et reflux conservatif. Les roles
+importants sont explicites : `FluxRegister` accumule les flux de face, `CoverageMask`
+evite les doubles corrections, `DistributionMapping` porte l'ownership des boxes.
 
-**Faiblesse 1 : la duplication par cas particulier (RESORBEE en production).** Les noms
-`amr_step_2level_mf` / `_multilevel_mf` / `_2level_multipatch` / `_multilevel_multipatch` /
-`subcycle_level_mp` encodaient le cas dans le NOM. Entree unifiee FAITE : `advance_amr(m,
-LevelHierarchy&, dt)` + le type nomme `LevelHierarchy` (niveaux + base_dom + periodicite),
-SEULE porte de production (les deux coupleurs y passent). Les `amr_step_*_multipatch` /
-`subcycle_level_mp` sont en `detail::` (moteur), les `amr_step_*_mf` aussi (oracle de test).
-Plus aucun `amr_step_*` dans l'API publique.
-Verifie facade-fidele en **2 ET 3 niveaux** (`test_advance_amr`, `maxdiff = 0` vs l'appel
-direct, derive masse `< 1e-12`) et conservatif. La PROMOTION des roles en types avance :
-`OwnershipPolicy` est un alias reel de `DistributionMapping` ; `FluxRegister` est un VRAI TYPE
-(registre grossier indexe global sur une region : `set` ecrase, `add` accumule borne, `gather`
-fait l'`all_reduce`), substitue aux quatre buffers manuels du reflux ; `CoverageMask` est un
-VRAI TYPE (masque grossier sur une region : `mark(box)` marque une empreinte fine clippee,
-`covered(I,J)` borne) qui porte la part "couverture" de `CoarseFineInterface` (le masque
-anti-double-reflux), substitue aux trois masques manuels. Les deux a l'identique (np=1/2/4
-`maxdiff = 0`), contrats figes par `test_flux_register` / `test_coverage_mask`.
+**Couplage.** `AmrCoupler` et `AmrCouplerMP` restent les drivers AMR mono-modele. Le nouveau
+`SystemCoupler` couvre pour l'instant le mono-niveau multi-blocs ; l'etape suivante est de
+faire porter la meme notion d'`EquationBlock` par le moteur AMR, au lieu de dupliquer la
+logique par cas physique.
 
-```
-LevelHierarchy [fait, type]   OwnershipPolicy [fait, alias]
-FluxRegister [fait, type]     CoverageMask [fait, type] (part "couverture" de CoarseFineInterface)
-PatchRange = AmrLevelMP   CoarseFineInterface : routage bordant reste inline
-SubcyclingSchedule = recursion Berger-Oliger   RegridPolicy = amr_regrid_finest (BR)
-// roles restants : nommes, encore inlines dans subcycle_level_mp ; extraction en types : reste
-
-advance_amr(m, hierarchy, dt);   // entree unifiee de production ; famille amr_step_* absorbee (detail::)
-```
-
-**Faiblesse 2 : le multi-patch distribue.** Le 2-niveaux tourne **reellement distribue**
-(`test_mpi_amr_multipatch`, np=1/2/4 **bit a bit identiques**, masse conservee), grossier
-**replique OU de-replique**. De-replication FAITE (`AmrCouplerMP`, parametre `replicated_coarse`) :
-le niveau 0 peut etre une grille **multi-box repartie** round-robin au lieu d'une box unique
-repliquee par rang, ce qui leve le verrou memoire O(NX*NY*nrangs) a grande echelle. Le reflux
-`subcycle_level_mp` est generalise (drapeau `coarse_replicated`) : il route le grossier reparti
-par `parallel_copy` au lieu de `mf_find_box`, qui rendrait -1 sur une cellule grossiere bordante
-possedee par un rang distant (l'ancien segfault). Bit-identique np=1/2/4 (`test_mpi_decoarse`,
-motif patch fin centre chevauchant les 4 boxes grossieres dont 3 distantes). `average_down` et
-reflux remontent par buffer grossier + `all_reduce`, appliques aux boxes parentes locales.
-
-**Critere de choix (decide).** Le grossier REPLIQUE (`replicated_coarse=true`) reste le DEFAUT
-performant : meilleur solve MG grossier (pas de degenerescence du multigrille), zero communication
-pour le Poisson grossier, reference robuste pour les cas petits/moyens. Le grossier REPARTI
-(`false`) est un mode scalable EXPLICITE, a n'activer que lorsque la memoire du niveau 0 devient le
-verrou (tres grande echelle) ; il degenere le multigrille pour un grossier finement decoupe (>2x2
-boxes ne pavent pas la grille la plus grossiere). La suppression du chemin replique est REPORTEE
-tant que le reparti n'est pas strictement superieur. Native-first ne veut pas dire tout distribuer
-meme quand c'est moins bon : le moteur SAIT gerer le distribue, mais choisit un ownership degenere
-performant quand c'est optimal.
-
-Reste : (a) un gather-tags dans `comm.hpp` pour taguer un niveau INTERMEDIAIRE reparti (3+
-niveaux ; a 2 niveaux le niveau 0 porte les tags) ; (b) `load_balance` SFC sur le multi-box
-(round-robin seul aujourd'hui). Detail : [ROADMAP.md](ROADMAP.md), [HERO_RUN_AMR.md](HERO_RUN_AMR.md).
+**Tests coeur.** Les invariants AMR actuellement couverts dans ce depot sont le raffinement,
+la hierarchie, le clustering, le regrid, le reflux, le masque de couverture, les diagnostics
+AMR et le load balancing. Les tests MPI AMR plus applicatifs vivent ou devront vivre au niveau
+des cas downstream si le modele physique est necessaire.
 
 ## 9. Backends : propriete de la bibliotheque, pas un drapeau par cible
 
 OpenMP, MPI, HDF5 et Kokkos sont attaches a la cible d'interface `adc`. **Tout ce qui lie
-`adc` herite du backend** : la facade `src/` (`libadc`), les tests, les exemples. On
-configure une seule fois :
+`adc` herite du backend** : les tests du coeur et les applications downstream. On configure
+une seule fois :
 
 ```
 cmake -B build                       # serie
@@ -366,31 +323,26 @@ cmake -B build -DADC_USE_KOKKOS=ON \ # GPU / CPU portable (ADC_HAS_KOKKOS)
    -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K
 ```
 
-Sous Kokkos, la norme retombe a C++20 (nvcc CUDA 12.x) et `libadc` elle-meme compile pour
-le GPU (les 3 facades passent sous nvcc, valide GH200 bit-identique au CPU).
+Sous Kokkos, la norme retombe a C++20 (nvcc CUDA 12.x). Les kernels `ADC_HD` et le seam
+`for_each_cell` sont alors compiles pour le backend choisi.
 
-Compromis assume : ce choix garantit que tests, exemples et lib partagent les memes options
+Compromis assume : ce choix garantit que tests et applications downstream partagent les memes options
 (bon pour une cible recherche/HPC mono-config comme ROMEO/GH200), mais il est rigide pour
 une lib publique : on ne peut pas avoir une cible CPU et une cible GPU dans le meme build.
 **Cible si le projet grossit en lib reutilisable** : eclater en `adc_core` / `adc_serial` /
-`adc_openmp` / `adc_mpi` / `adc_kokkos` / `adc_solver`.
+`adc_openmp` / `adc_mpi` / `adc_kokkos`.
 
 ## 10. Frontiere bibliotheque / demo + cout de compilation
 
 | Couche | Contenu | Lien |
 |---|---|---|
 | `include/` | coeur generique (concepts, templates, seam GPU). Visible a l'instanciation. | header-only `adc::adc` |
-| `src/` | facade COMPILEE `libadc` : solveurs concrets non templatises (PIMPL), instancient la pile UNE fois. API stable (apps, pybind11). | `adc::solver` |
-| `examples/` (CPU) | pilotes minces. `diocotron`/`diocotron_column` lient `adc::solver` ; `diocotron_amr/mpi/theory` lient `adc::adc`. | |
-| `examples/gpu/` | demos Kokkos/CUDA (GH200), heritent Kokkos de `adc`. | |
-| `tests/` | CTest (+ MPI via `mpirun`). | |
-| `python/` | bindings pybind11 de la facade. | |
+| `tests/` | CTest du coeur (+ MPI via `mpirun` quand active). | lie `adc::adc` |
+| `docs/` | architecture, algorithmes, notes de validation/performance. | documentation |
+| `adc_cases` | modeles, facades, exemples, Python, runs applicatifs. | consomme `adc::adc` |
 
-Regle : solveur standard -> `adc::solver` ; toucher AMR/MPI/champs internes -> `adc::adc`.
-Le PIMPL donne une API stable et borne le cout de compilation : le moteur template
-header-only est cher a compiler (surtout sous nvcc), donc on **explicite** quelques
-configurations standards (les 3 facades) instanciees une fois dans `src/`, et on reserve
-`adc::adc` aux usages experts.
+Regle actuelle : `adc_cpp` reste le coeur generique. Une API Python ou une facade stable
+doit vivre au-dessus, dans `adc_cases`, pour ne pas faire dependre le coeur de cas physiques.
 
 ## 11. Validation : logicielle ET numerique
 
@@ -398,23 +350,12 @@ configurations standards (les 3 facades) instanciees une fois dans `src/`, et on
 bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne prouve pas
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
-Fait aujourd'hui :
-- Tests : 60 tests CPU serie (`ctest` sur `build/`, Eigen inclus) ; 73 en build-mpi
-  (= 60 + 13 tests MPI lances par `mpirun -np 4`, bit-identiques np=1/2/4).
-- Bit-identique : mono-box vs pile Fab2D ; multipatch N-niveaux sur deux axes
-  (`test_amr_multilevel_multipatch`, `0`) ; `AmrCouplerMP` vs `AmrCoupler` (`0`) et
-  conservatif sous regrid BR (`1.3e-15`, `test_amr_coupler_mp`) ; reflux multipatch 2-niveaux
-  DISTRIBUE (`test_mpi_amr_multipatch`, np=1/2/4 a `0` exact).
-- Physique : Jeans 0.1%, Bohm-Gross 0.1%, dispersion deux-fluides 3.1%, cyclotron 0.00%.
-- Numerique : ordre du Laplacien 5 points (`test_poisson_convergence`, L2 et Linf a 2.00,
-  Dirichlet et periodique + nullspace) ; ordre MUSCL ~2 / Rusanov ~1 (`test_muscl_convergence`) ;
-  tourbillon isentropique d'Euler (L1 ordre ~2, `test_euler`) ; loi de Gauss discrete du
-  couplage div(grad phi) = source a 2.00 (`test_gauss_law`) ; limite AP quantifiee (uniforme
-  sur 8 decades de raideur, `test_ap_limit`) ; invariants diocotron (masse, principe du
-  maximum, enstrophie non croissante, `test_diocotron_stability`).
-- Conservation : flux coarse-fine exact (le reflux rend la masse machine-zero,
-  `test_amr_reflux_mf` / `test_amr_coupler` a `~1e-12` / `5.55e-16`).
-- GPU : GH200 (CUDA 12.6) bit-identique au CPU ; MPI bit-identique a np=1/2/4.
+Fait aujourd'hui dans `adc_cpp` :
+- Tests : 32 tests CPU serie par defaut (`ctest --test-dir build`).
+- Numerique coeur : maillage, halos, AMR, reflux, multigrille, Poisson, discretisations,
+  IMEX/AP, splitting, `EquationBlock`, `CoupledSystem`, `SystemCoupler`.
+- MPI : tests dedies actives quand `-DADC_USE_MPI=ON`.
+- Les validations applicatives (diocotron, runs ROMEO, Python) vivent dans `adc_cases`.
 
 ## 12. Comparaison AMReX
 
@@ -434,6 +375,8 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `types.hpp` : scalaires de base (`Real`) + macro `ADC_HD` (host/device). Minimal, inclus partout.
 - `state.hpp` : `State` / `Aux`, les deux types ponctuels de la couche physique (POD device-callable).
 - `physical_model.hpp` : le concept `PhysicalModel` (contrat flux / source / max_wave_speed / elliptic_rhs).
+- `equation_block.hpp` : un bloc d'equation = nom, `MultiFab`, modele, discretisation spatiale, politique temps.
+- `coupled_system.hpp` : tuple type de plusieurs `EquationBlock`, iteration generique par bloc.
 - `allocator.hpp` : allocateur du `Fab2D`, std (host) ou `cudaMallocManaged` (memoire unifiee GH200).
 
 ### `mesh/` : donnees + seams (couche 3)
@@ -450,13 +393,6 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `refinement.hpp` : transfert AMR ratio r : prolongation (interp) + restriction (average_down).
 - `mf_arith.hpp` : combinaisons lineaires de MultiFab (saxpy, norm_inf, sum) pour les etages RK.
 
-### `model/` : physique locale (couche 1)
-- `diocotron.hpp` : transport derive E x B d'une densite n_e (cas de validation principal).
-- `euler.hpp` : Euler compressible 2D (gaz parfait).
-- `euler_poisson.hpp` : Euler couple Poisson (gravite OU plasma).
-- `two_fluid_isothermal.hpp` : deux-fluides isotherme, mode lineaire 1-Fourier.
-- `langmuir.hpp` : mode de Langmuir 0D, noyau du schema AP deux-fluides.
-
 ### `operator/` : numerique local (couche 2)
 - `numerical_flux.hpp` : flux de Riemann en politique (template) : Rusanov / HLL / HLLC.
 - `reconstruction.hpp` : reconstruction d'interface : NoSlope / MUSCL (Minmod, VanLeer, MC) / WENO5-Z.
@@ -471,23 +407,25 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `poisson_fft_solver.hpp` : backend `EllipticSolver` FFT : `PoissonFFTSolver` (mono-rang) + `DistributedFFTSolver` (bandes MPI).
 
 ### `integrator/` : temps + AMR (couche 5)
+- `time_integrator.hpp` : tags SSPRK + `TimePolicy` explicite / implicite / IMEX / prescrit.
+- `scheduler.hpp` : sous-cyclage generique d'un `CoupledSystem` selon les policies de blocs.
 - `ssprk.hpp` : SSPRK2 / SSPRK3 (Shu-Osher, TVD).
 - `imex.hpp` : IMEX asymptotic-preserving (raide implicite + non-raide explicite).
 - `splitting.hpp` : splitting d'operateur Lie (ordre 1) / Strang (ordre 2).
-- `two_fluid_ap.hpp` : pas deux-fluides 2D AP, portable GPU.
-- `magnetic_euler_poisson.hpp` : systeme magnetique complet (Hoffart eq 2.4), Strang cyclotron exact.
 - `amr_reflux_mf.hpp` : **moteur AMR de production** `advance_amr` (multi-patch N-niveaux distribue) + types `FluxRegister` / `CoverageMask` ; la pile mono-box `amr_*_mf` y vit en `detail::` (oracle de validation).
 - `amr_reflux.hpp` / `amr_multilevel.hpp` : reference Fab2D mono-box (2-niveaux / N-niveaux), verite-terrain du moteur ci-dessus.
 
 ### `coupling/` : couplage hyperbolique-elliptique (couche 5)
 - `coupler.hpp` : coupleur generique (ferme Poisson -> aux -> advance), par etage.
+- `system_coupler.hpp` : execution mono-niveau d'un `CoupledSystem`, avec callback pour blocs implicites/IMEX.
+- `elliptic_rhs.hpp` : assembleurs de second membre elliptique mono-modele ou multi-blocs.
 - `coupling_policy.hpp` : frequence du solve elliptique (PerStage / OncePerStep).
 - `amr_coupler.hpp` : coupleur AMR E x B mono-box (route par `advance_amr`).
 - `amr_coupler_mp.hpp` : coupleur AMR E x B multi-patch + regrid BR, parametre `replicated_coarse`.
 - `amr_regrid_coupler.hpp` : le regrid Berger-Rigoutsos extrait du coupleur multi-patch.
 - `amr_level_storage.hpp` : stockage de la hierarchie (niveaux + aux) extrait des coupleurs.
 - `amr_diagnostics.hpp` : masse / vitesse de derive via le seam reducteur.
-- `spectral_coupler.hpp` : coupleur E x B periodique distribue (FFT par bandes).
+- `spectral_coupler.hpp` : coupleur periodique distribue (FFT par bandes).
 
 ### `amr/` : maillage adaptatif
 - `amr_hierarchy.hpp` : `AmrHierarchy`, la pile de niveaux raffines (niveau 0 = grossier).
@@ -495,20 +433,10 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `cluster.hpp` : clustering Berger-Rigoutsos (tags -> peu de boxes).
 - `regrid.hpp` : regrid dynamique (tague, regroupe, proper nesting).
 
-### `analysis/` : diagnostics hors hot-path
-- `diocotron_growth.hpp` : mesure du taux de croissance (host-only, Eigen).
-- `diocotron_invariants.hpp` : invariants (masse, energie, enstrophie, moment angulaire).
-- `hdf5_writer.hpp` : sortie HDF5 distribuee a l'echelle, sans gather (hyperslab MPI-IO).
-
 ### `parallel/` : seam HPC
 - `comm.hpp` : seam MPI (rang / taille / all-reduce / send-recv), degenere en serie.
 - `load_balance.hpp` : equilibrage des boxes sur les rangs (round-robin / SFC).
 
-### `solver/` + `src/` : facades compilees
-- `solver/{diocotron,euler_poisson,two_fluid_ap}_solver.hpp` + `src/*.cpp` : facades PIMPL `libadc`, API stable sans template (apps + bindings Python).
-
 ### Hors `include/`
-- `examples/` (23 pilotes, dont `examples/gpu/`) : un `main` chacun, demos CPU / MPI / GPU + generation de GIF.
-- `tests/` (81, dont `test_mpi_*`) : suite CTest, serie + MPI np=4 bit-identique.
-- `romeo/` : jobs SLURM ROMEO (hero-runs, sanitizer GPU) + journal `HERO_RESULTS.md`.
-- `scripts/` : generation des figures / GIF + extraction du taux de croissance + jobs.
+- `tests/` : suite CTest du coeur ; les tests MPI sont declares seulement si `ADC_USE_MPI=ON`.
+- `docs/` : architecture, algorithmes, performance et notes de validation.
