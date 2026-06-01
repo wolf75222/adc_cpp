@@ -167,9 +167,12 @@ class AmrCouplerMP {
 
   void update() { sync_down(); compute_aux(); }
 
+  // Discretisation spatiale selectionnable (defaut FirstOrder = NoSlope + Rusanov,
+  // strictement identique a l'ancien step()).
+  template <class Disc = FirstOrder>
   void step(Real dt) {
     update();
-    advance_amr<NoSlope, RusanovFlux>(
+    advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
         model_, stack_.L(), stack_.domain(), dt, Periodicity{true, true}, replicated_coarse_);
   }
 

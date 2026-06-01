@@ -112,9 +112,13 @@ class AmrCoupler {
     compute_aux();
   }
 
+  // Discretisation spatiale (limiteur + flux) selectionnable, comme pour Coupler::step.
+  // Defaut FirstOrder = NoSlope + Rusanov : strictement identique a l'ancien step().
+  template <class Disc = FirstOrder>
   void step(Real dt) {
     update();
-    advance_amr<NoSlope, RusanovFlux>(model_, stack_.L(), stack_.domain(), dt);
+    advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
+        model_, stack_.L(), stack_.domain(), dt);
   }
 
   Real max_drift_speed() const {
