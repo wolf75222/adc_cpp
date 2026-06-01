@@ -26,6 +26,30 @@ PoissonRHS      = assemblé depuis toutes les espèces (à ajouter)
 
 Le cœur garantit que ces choix restent compatibles **AMR / MPI / GPU**.
 
+## 1bis. Posture (ce qu'il attend MAINTENANT)
+
+Quatre principes qui cadrent l'objectif immédiat (ne pas survendre, ne pas figer) :
+
+- **Un squelette, pas le solveur final.** L'objectif est de poser les bonnes briques et de
+  les **tester sur des cas simples**, pas de tout coder ni d'optimiser.
+- **Abstraction avant structure de données.** Il distingue trois niveaux : (1) abstraction,
+  (2) architecture / interaction des classes, (3) structure de données. La (3) « se change
+  facilement plus tard ». On montre d'abord *qui dépend de qui, qui assemble quoi*, pas le
+  layout mémoire (`MultiFab`, stockage stacké…).
+- **Performance après stabilisation.** « Optimiser, je saurai le faire quand le code sera
+  propre et figé. » Message : bonnes abstractions d'abord, optimisation ensuite, pas
+  l'inverse.
+- **Validé par un utilisateur, pas par le compilateur.** Sacha est un utilisateur clé. Le
+  vrai test n'est pas « est-ce que ça compile ? » mais : **un utilisateur peut-il décrire
+  son système physique sans comprendre l'AMR / MPI / GPU ?** Question centrale : *quelle API
+  minimale permet à Sacha de décrire son cas ?*
+
+**Diffusion = un flux, pas une nouvelle couche.** Le parabolique est une contribution de
+flux supplémentaire dans l'opérateur spatial, pas une grande abstraction. (Fait sur grille
+uniforme via `DiffusiveModel` ; sur AMR le moteur travaille par **flux de face** pour le
+reflux, donc la diffusion doit y passer comme **flux de face diffusif** : c'est le
+follow-up, pas un nouveau niveau.)
+
 ## 2. Traduction des remarques du tuteur en exigences
 
 | Il dit | Ça veut dire |
@@ -49,6 +73,7 @@ template <class Model, class Spatial, class Time>
 struct EquationBlock {
   Model    model;
   MultiFab U;          // (ou une vue dans un état stacké, cf. §7)
+  BCRec    bc;         // conditions au bord PAR BLOC (cf. ci-dessous)
   // Spatial = SpatialDiscretisation<Limiter, NumericalFlux>  (existe deja)
   // Time    = SSPRK2 / SSPRK3 / ImexImplicit ...             (tags, existent en partie)
   int substeps = 1;    // sous-cyclage temporel relatif
@@ -76,6 +101,26 @@ struct CoupledSystem {
 
 Adaptateur de non-régression : `SingleFieldSystem<Model>` enveloppe le `Coupler` actuel
 comme un système à un bloc, pour ne rien casser pendant la transition.
+
+### 3bis. Points d'architecture à acter
+
+- **Conditions au bord par bloc.** Aujourd'hui les `BCRec` sont globales dans les coupleurs.
+  Le multi-espèces exige des BC par bloc : électrons périodiques, ions mur/extrapolation,
+  neutres profil imposé. → `bc` dans `EquationBlock` (ci-dessus), plus de BC globale unique.
+- **L'AMR est un orchestrateur, pas une option de maillage.** Il prend une définition
+  *locale, cellule par cellule* et la projette sur toute une hiérarchie de grilles :
+  `fill_ghosts → subcycling → average_down → reflux → regrid`. Donc `AmrCoupler` /
+  `AmrCouplerMP` ne sont pas de simples variantes techniques mais des **orchestrateurs
+  d'exécution** : ils jouent déjà le rôle du futur `Scheduler` au niveau d'un bloc.
+- **`Coupler` : un nom historique.** Conceptuellement cette couche est un **Assembler /
+  Simulation Driver** (elle prend tous les ingrédients et les met sur le maillage). Le nom
+  « Coupler » vient de « coupler hyperbolique + elliptique » ; on ne le défend pas à tout
+  prix, on assume qu'il désigne l'assemblage.
+- **Templates, mais on dessine les concepts.** Le tuteur accepte les templates (« ça va
+  dans le bon sens ») tout en notant que c'est moins lisible que le virtuel. Donc on
+  présente les **objets conceptuels** (`PhysicalModel`, `SpatialDiscretisation`,
+  `TimeIntegrator`, `EquationBlock`, `CoupledSystem`, `Scheduler`), même si techniquement
+  ce sont des templates.
 
 ## 4. API Python cible (composition, pas calcul)
 
@@ -167,6 +212,32 @@ Tous poussés, tous verts (adc_cpp 30/30, adc_cases 44/44 ; MPI 7+7) :
    (appeler `model.elliptic_rhs` / `model.max_wave_speed`) ; clarifier le contrat `Aux`
    (fixe `phi, grad φ` ou réellement `typename M::Aux`) ; diffusion sur AMR (flux de face
    diffusif pour rester conservatif au reflux).
+
+## 7bis. Cas simples pour tester le squelette
+
+L'architecture se valide sur des cas **utilisateur** simples (pas un solveur de prod) :
+
+- électrons Euler + ions Euler **isothermes** + Poisson (le cas canonique deux-espèces) ;
+- **diocotron à ions fixes** (≈ ce qui existe : `n_i0` constant) ;
+- **diocotron à ions mobiles** (les ions deviennent un second bloc) ;
+- gaz / neutres **résolus** ou **prescrits** (profil imposé, pas résolu chaque pas).
+
+Critère de réussite : un utilisateur (Sacha) peut décrire ces cas **sans toucher** à
+l'AMR / MPI / GPU. Si l'API ne le permet pas, l'abstraction est incomplète.
+
+## 7ter. Lexique (pour les slides, à définir avant de jeter les sigles)
+
+| Terme | Sens court |
+|---|---|
+| `BoxArray` | découpage du domaine en blocs (boîtes) |
+| `MultiFab` | les champs `U` stockés sur ces blocs (collection distribuée) |
+| `BCRec` | conditions aux limites d'un champ |
+| `aux` | variable auxiliaire transportée (ici `phi, grad phi`) |
+| seam | couture où vit le parallélisme (`for_each_cell`, `comm`) |
+
+Note Python : ne jamais appeler `flux()` cellule par cellule depuis Python (lent, non
+GPU/MPI). Python **configure** le système, ou fournit des champs **vectorisés** (numpy sur
+toutes les cellules). Le hot path cellule reste en C++.
 
 ## 8. Synthèse (phrase tableau)
 
