@@ -4,6 +4,7 @@
 #include <adc/mesh/box2d.hpp>
 
 #include <algorithm>
+#include <cstdlib>  // std::atexit (init paresseuse Kokkos)
 
 #ifdef ADC_HAS_KOKKOS
 #include <Kokkos_Core.hpp>
@@ -27,19 +28,37 @@
 
 namespace adc {
 
+#if defined(ADC_HAS_KOKKOS)
+namespace detail {
+// Initialise Kokkos PARESSEUSEMENT au premier kernel (finalize a la sortie via atexit).
+// Permet d'executer tests/exemples sans Kokkos::initialize explicite dans chaque main : les
+// Views des MultiFab LOCAUX sont detruites a la fin de main, donc AVANT le finalize atexit.
+// No-op si Kokkos est deja initialise (l'appelant a fait son propre ScopeGuard) ou finalize.
+inline void ensure_kokkos_initialized() {
+  if (!Kokkos::is_initialized() && !Kokkos::is_finalized()) {
+    Kokkos::initialize();
+    std::atexit([] {
+      if (Kokkos::is_initialized()) Kokkos::finalize();
+    });
+  }
+}
+}  // namespace detail
+#endif
+
 // Barriere device : attend la fin des kernels en vol avant qu'un acces HOTE a la
 // memoire (unifiee) ne lise des donnees encore en cours d'ecriture par un kernel.
 // No-op hors Kokkos. A appeler avant toute lecture/ecriture hote (fill_ghosts,
 // transferts, normes) suivant un for_each_cell sur GPU.
 inline void device_fence() {
 #if defined(ADC_HAS_KOKKOS)
-  Kokkos::fence();
+  if (Kokkos::is_initialized()) Kokkos::fence();  // rien a attendre si aucun kernel lance
 #endif
 }
 
 template <class F>
 void for_each_cell(const Box2D& b, F f) {
 #if defined(ADC_HAS_KOKKOS)
+  detail::ensure_kokkos_initialized();
   // IndexType<int> : indices SIGNES. Les boites de ghosts ont des bornes basses
   // negatives (p.ex. lo = -ng pour copy_shifted) ; sans type signe explicite,
   // MDRangePolicy rejette la borne -1 (conversion implicite jugee non sure).
@@ -88,6 +107,7 @@ void for_each_cell(const Box2D& b, F f) {
 template <class F>
 Real for_each_cell_reduce_sum(const Box2D& b, F f) {
 #if defined(ADC_HAS_KOKKOS)
+  detail::ensure_kokkos_initialized();
   Real result = 0;
   Kokkos::parallel_reduce(
       "adc_reduce_sum",
@@ -110,6 +130,7 @@ Real for_each_cell_reduce_sum(const Box2D& b, F f) {
 template <class F>
 Real for_each_cell_reduce_max(const Box2D& b, F f) {
 #if defined(ADC_HAS_KOKKOS)
+  detail::ensure_kokkos_initialized();
   Real result = 0;
   Kokkos::parallel_reduce(
       "adc_reduce_max",

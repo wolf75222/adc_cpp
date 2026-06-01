@@ -10,11 +10,23 @@ project(adc_cpp
 option(ADC_BUILD_TESTS    "Build tests"    ON)
 # Exemples, bindings Python et facades libadc vivent dans le depot adc_cases (qui
 # consomme adc::adc). Le coeur ne fournit que la lib d'interface + ses tests.
-option(ADC_USE_OPENMP     "Enable the OpenMP dispatch backend" OFF)
-option(ADC_USE_KOKKOS     "Enable the Kokkos dispatch backend (CPU/GPU portable)" OFF)
+# Backends de dispatch on-node : KOKKOS est le chemin recommande (il couvre OpenMP CPU ET
+# GPU CUDA/HIP via un seul code portable). ADC_USE_OPENMP (backend OpenMP autonome) est
+# DEPRECIE : prefere ADC_USE_KOKKOS (Kokkos avec device OPENMP donne le meme parallelisme CPU
+# et ouvre le GPU). On le garde pour compat / comparaison, avec un avertissement.
+option(ADC_USE_KOKKOS     "Enable the Kokkos dispatch backend (CPU OpenMP + GPU CUDA/HIP, recommande)" OFF)
+option(ADC_USE_OPENMP     "[DEPRECIE -> ADC_USE_KOKKOS] backend OpenMP autonome (CPU seul)" OFF)
 option(ADC_USE_MPI        "Enable the MPI backend (distributed comm seam)" OFF)
 option(ADC_USE_HDF5       "Enable the HDF5 DataWriter (parallel output)" OFF)
 option(ADC_USE_EIGEN      "Build host-side Eigen analysis tools (diocotron theory)" ON)
+
+if(ADC_USE_OPENMP AND NOT ADC_USE_KOKKOS)
+  message(WARNING "ADC_USE_OPENMP est DEPRECIE : Kokkos (ADC_USE_KOKKOS=ON, device OPENMP) "
+                  "couvre le meme parallelisme CPU et ouvre le GPU. Conserve pour compat.")
+endif()
+if(ADC_USE_OPENMP AND ADC_USE_KOKKOS)
+  message(FATAL_ERROR "Choisir UN backend de dispatch : ADC_USE_KOKKOS OU ADC_USE_OPENMP, pas les deux.")
+endif()
 
 # Norme C++ : 23 par defaut. Sous Kokkos+nvcc on retombe a 20 (CUDA 12.x ne propose
 # pas -std=c++23) ; tout le coeur compile en C++20 (le seul usage >20 est cote hote).
