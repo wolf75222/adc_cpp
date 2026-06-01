@@ -100,14 +100,26 @@ class SpectralCoupler {
     advance_fab_1c(model_, U_.fab(0), Uaux_.fab(0), dx_, dy_, dt, fx, fy);
   }
 
-  // vitesse de derive max (all-reduce), pour la CFL.
+  // vitesse d'onde max (all-reduce), pour la CFL. GENERALISE (TODO 4.3) : via
+  // model.max_wave_speed au lieu du diocotron /B0 code en dur -> le coupleur spectral
+  // n'est plus lie au diocotron. NB : pour le diocotron c'est max(|gx|,|gy|)/B0 (par
+  // direction) au lieu de hypot(gx,gy)/B0 ; le dt CFL change donc legerement (a re-valider
+  // cote physique, ce n'est PAS bit-identique a l'ancien diagnostic).
   double max_drift_speed() const {
     device_fence();  // GPU : barriere avant lecture hote apres advance_fab_1c (device)
+    const ConstArray4 u = U_.fab(0).const_array();
     const ConstArray4 a = Uaux_.fab(0).const_array();
+    const Model m = model_;
     double v = 0;
     for (int j = y0_; j < y0_ + nyl_; ++j)
-      for (int i = 0; i < Nx_; ++i)
-        v = std::max(v, std::hypot(a(i, j, 1), a(i, j, 2)) / model_.B0);
+      for (int i = 0; i < Nx_; ++i) {
+        typename Model::State s{};
+        s[0] = u(i, j, 0);
+        const typename Model::Aux ax{a(i, j, 0), a(i, j, 1), a(i, j, 2)};
+        const Real wx = m.max_wave_speed(s, ax, 0);
+        const Real wy = m.max_wave_speed(s, ax, 1);
+        v = std::max(v, static_cast<double>(wx > wy ? wx : wy));
+      }
     return std::max(all_reduce_max(v), 1e-12);
   }
 

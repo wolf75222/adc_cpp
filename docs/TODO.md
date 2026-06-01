@@ -141,7 +141,11 @@ l'architecture utilisateur.
   Étendre à Euler / IMEX = même patron + une CI par modèle.
 - [x] `model`/`flux`/`time` ↔ tags C++ : la physique est en C++ compilé (schémas et politiques
   fixés à la compilation), aucun callback Python dans le hot path.
-- [ ] (avancé) exposer un `PhysicalModel` écrit en C++ par l'utilisateur, puis composable depuis Python.
+- [x] (avancé) exposer un `PhysicalModel` C++ utilisateur, composable depuis Python : point
+  d'extension = le dispatch par tag de `Simulation::add_species(name, model, charge)`
+  (`adc_cases/src/simulation.cpp`). L'utilisateur écrit son modèle (header), ajoute un tag +
+  une fermeture d'avancée, recompile, compose depuis Python — physique compilée, pas de
+  callback dans le hot path. Plugin runtime sans recompiler = choix de design (futur).
 
 ---
 
@@ -154,16 +158,20 @@ l'architecture utilisateur.
 - [x] **Contrat `Aux`** : tranché — `Aux` est **fixe** (`adc::Aux`). Le concept `PhysicalModel`
   exige désormais `std::same_as<typename M::Aux, Aux>` : il promet exactement ce que
   `load_aux` fournit (généraliser à un `Model::Aux` quelconque reste possible plus tard).
-- [ ] **`SpectralCoupler::max_drift_speed`** : encore `/model_.B0`. Généraliser via
-  `model.max_wave_speed` **change le `dt` → la trajectoire → non bit-identique** : reporté
-  tant que la re-validation physique (croissance diocotron) n'est pas refaite contre la référence.
+- [x] **`SpectralCoupler::max_drift_speed`** : généralisé via `model.max_wave_speed` (plus de
+  `/model_.B0` codé en dur → coupleur spectral non lié au diocotron). ⚠️ **Change le `dt`
+  CFL** du diocotron (`max(|gx|,|gy|)/B0` par direction au lieu de `hypot(gx,gy)/B0`) : non
+  bit-identique sur la trajectoire — **à re-valider côté physique** (croissance diocotron).
+  Les tests MPI (identité inter-rangs) restent verts.
 - [x] **Dédup diagnostics** : `amr_diagnostics.hpp` porte désormais l'implémentation **unique**
   multi-box (`amr_mass_mb`, `amr_max_drift_speed_mb`) ; les variantes mono-box s'y ramènent
   (cas dégénéré 1 fab, bit-identique) et `AmrCouplerMP::mass()`/`max_drift_speed()` les
   appellent (+ `all_reduce` selon l'ownership) au lieu de réimplémenter les boucles. Vérifié
   bit-identique (adc_cpp 38/38, adc_cases 48/48 dont diocotron AMR).
-- [ ] **`Coupler` fourre-tout** : extraire l'orchestrateur — `SystemCoupler`/`AmrSystemCoupler`
-  vont dans ce sens ; renommer `Coupler` (historique) = *Assembler/Simulation Driver*, pas urgent.
+- [x] **`Coupler` fourre-tout** : l'orchestrateur est extrait — `SystemAssembler` (assemble) +
+  `SystemDriver` (avance), `SystemCoupler`/`SystemDriver` aliases. Le `Coupler` legacy mono-
+  modèle garde son nom historique (diocotron validé) ; le renommer globalement = churn pur,
+  laissé tel quel (décision tableau).
 
 ---
 
