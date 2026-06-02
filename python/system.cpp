@@ -38,6 +38,7 @@ struct System::Impl {
     std::function<void(MultiFab&, MultiFab&)> rhs_into;        // R <- -div F + S (Poisson fige)
     std::function<Real(const MultiFab&)> max_speed;           // max |vitesse d'onde| du bloc
     std::function<void(const MultiFab&, MultiFab&)> add_poisson_rhs;  // += elliptic_rhs(U)
+    std::vector<std::string> cons_names, prim_names;  // noms des variables (introspection)
   };
 
   SystemConfig cfg;
@@ -92,6 +93,19 @@ struct System::Impl {
     for (std::size_t k = 0; k < sp.size(); ++k)
       if (sp[k].name == name) return static_cast<int>(k);
     throw std::runtime_error("System : bloc inconnu '" + name + "'");
+  }
+
+  // Noms des variables (conservatives ou primitives) selon le transport. Metadonnee HOTE pour
+  // l'introspection / les diagnostics ; ne sert pas au calcul (le coeur travaille par composante).
+  static std::vector<std::string> var_names(const std::string& transport, bool prim) {
+    if (transport == "exb") return {"n"};
+    if (transport == "compressible")
+      return prim ? std::vector<std::string>{"rho", "u", "v", "p"}
+                  : std::vector<std::string>{"rho", "rho_u", "rho_v", "E"};
+    if (transport == "isothermal")
+      return prim ? std::vector<std::string>{"rho", "u", "v"}
+                  : std::vector<std::string>{"rho", "rho_u", "rho_v"};
+    return {};
   }
 
   // Sources de COUPLAGE inter-especes : appliquees par SPLITTING (un pas additif explicite de
@@ -344,6 +358,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                                 evolve, model.gamma, std::move(clo.advance), std::move(clo.rhs_into),
                                 std::move(max_speed), std::move(add_poisson_rhs)});
   P->sp.back().U.set_val(Real(0));
+  P->sp.back().cons_names = Impl::var_names(model.transport, false);
+  P->sp.back().prim_names = Impl::var_names(model.transport, true);
 }
 
 void System::set_poisson(const std::string& rhs, const std::string& solver,
@@ -526,6 +542,14 @@ void System::set_state(const std::string& name, const std::vector<double>& u) {
   p_->write_state(s.U, s.ncomp, u);
 }
 int System::n_vars(const std::string& name) const { return p_->find(name).ncomp; }
+std::vector<std::string> System::variable_names(const std::string& name,
+                                               const std::string& kind) const {
+  const Impl::Species& s = p_->find(name);
+  if (kind == "conservative") return s.cons_names;
+  if (kind == "primitive") return s.prim_names;
+  throw std::runtime_error("System::variable_names : kind 'conservative' | 'primitive' (recu '" +
+                           kind + "')");
+}
 
 int System::nx() const { return p_->cfg.n; }
 double System::time() const { return p_->t; }

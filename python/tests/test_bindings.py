@@ -255,6 +255,16 @@ try:
 except NotImplementedError:
     chk(True, "EPM : eps != 1 refuse (raffinement solveur)")
 
+# --- 4h. Descripteur de variables (introspection : noms cons/prim par bloc) -----
+print("== descripteur Variables : noms des variables par bloc ==")
+vn = adc.System(n=16)
+vn.add_block("e", model=electron())
+vn.add_block("d", model=diocotron())
+chk(list(vn.variable_names("e", "conservative")) == ["rho", "rho_u", "rho_v", "E"],
+    "noms conservatifs (Euler)")
+chk(list(vn.variable_names("e", "primitive")) == ["rho", "u", "v", "p"], "noms primitifs (Euler)")
+chk(list(vn.variable_names("d")) == ["n"], "noms scalaire (diocotron)")
+
 # --- 5. garde-fous --------------------------------------------------------------
 print("== garde-fous ==")
 

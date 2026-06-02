@@ -80,6 +80,8 @@ PYBIND11_MODULE(_adc, m) {
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))
       .def("add_thermal_exchange", &System::add_thermal_exchange, py::arg("a"), py::arg("b"),
            py::arg("rate"))
+      .def("variable_names", &System::variable_names, py::arg("name"),
+           py::arg("kind") = "conservative")
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0)

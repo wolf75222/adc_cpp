@@ -43,8 +43,11 @@ seconde correction est de **ne pas hard-coder Poisson** mais d'en faire une inst
 - #58 EPM premier ordre : add_elliptic_model + briques (elliptic / div_eps_grad / charge_density /
   electric_field_from_potential) ; Poisson = instance ; set_poisson raccourci ; eps!=1 et operateurs
   alternatifs rejetes (raffinements). Pur Python au-dessus du solveur existant.
-- Verifie : test_bindings (briques + frozen + 3 couplages + EPM + garde-fous), cas two_euler et
-  plasma, ctest coeur 46/46 inchange.
+- #55/#56/#59 : recettes systeme models.two_fluid / models.plasma ; objets de couplage
+  (adc.Ionization / Collision / ThermalExchange) + sim.add_coupling ; descripteur de variables
+  (sim.variable_names cons/prim par bloc, introspection).
+- Verifie : test_bindings (briques + frozen + 3 couplages + EPM + introspection + garde-fous),
+  cas two_euler et plasma, ctest coeur 46/46 inchange.
 
 ### Deja generique : NE PAS refaire
 - `RusanovFlux` / `HLLFlux` / `HLLCFlux` sont `template<class Model>` et appellent `m.flux`,
@@ -143,10 +146,11 @@ if (recon == Primitive)  { P = model.to_primitive(U); reconstruct(model.primitiv
                            U = model.to_conservative(P); }
 ```
 Etat : la Phase 1 fournit le coeur FONCTIONNEL (Prim + to_primitive/to_conservative ; la
-reconstruction limite composante par composante, deja aveugle au sens des composantes). L'objet
-descripteur `Variables` (kind + names + size) reste a ajouter comme ENRICHISSEMENT (introspection,
-diagnostics nommes, sortie labellisee, "Vars" vraie brique au meme niveau que Flux/Source) : tache
-#59. Non bloquant pour la physique (les conversions + la taille n_vars suffisent au calcul).
+reconstruction limite composante par composante, deja aveugle au sens des composantes). Les NOMS
+des variables (cons/prim par bloc) sont exposes pour l'introspection via `sim.variable_names`
+(#59, FAIT, metadonnee hote). Un objet descripteur `Variables` (kind + names + size) porte
+directement par la brique (vraie "Vars" au meme niveau que Flux/Source) resterait une forme plus
+poussee, non necessaire au calcul.
 
 ---
 
@@ -238,9 +242,9 @@ vers une vraie espece de fond n_g(x). Passer evolue <-> gele doit etre "une lign
 [x] 7. EPM premier ordre (#58) : add_elliptic_model + briques elliptic / div_eps_grad /
        charge_density / electric_field_from_potential ; Poisson = instance ; set_poisson raccourci.
        eps(x) et operateurs alternatifs (diffusion, projection) = raffinements (rejetes proprement).
-[ ] -- niveau systeme dans adc_cases : models.py recipes (two_fluid, plasma) + couplages (#55)
-[ ] -- Python : Spatial(recon=) [fait], objets de couplage, add_background, add_elliptic_model (#56)
-[ ] -- brique Variables (descripteur kind/names/size), Vars au meme niveau que Flux/Source (#59)
+[x] -- niveau systeme dans adc_cases : models.py recipes (two_fluid, plasma) + couplages (#55)
+[x] -- Python : Spatial(recon=), objets de couplage (add_coupling), add_background, add_elliptic_model (#56)
+[x] -- descripteur Variables : sim.variable_names (cons/prim par bloc), introspection (#59)
 ```
 
 Note : ordre des priorites = celui du tuteur. #59 (objet Variables descripteur) est un

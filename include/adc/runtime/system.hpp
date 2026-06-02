@@ -104,6 +104,9 @@ class System {
   std::vector<double> get_state(const std::string& name);  ///< U, ncomp*n*n (composante-majeur)
   void set_state(const std::string& name, const std::vector<double>& u);
   int n_vars(const std::string& name) const;
+  /// Noms des variables d'un bloc (introspection) : kind = "conservative" | "primitive".
+  std::vector<std::string> variable_names(const std::string& name,
+                                          const std::string& kind = "conservative") const;
   /// @}
 
   /// @name Diagnostics
