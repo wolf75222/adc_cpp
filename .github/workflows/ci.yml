@@ -45,9 +45,19 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
-      # Les bindings Python, les facades libadc et les exemples vivent desormais dans
-      # le depot adc_cases (cf. CMakeLists.txt en-tete) et y sont testes par sa propre
-      # CI. adc_cpp ne construit plus de cible adc_py : on ne la build donc plus ici.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build + test Python module `adc`
+        # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On
+        # construit l'extension _adc et on exerce test_bindings.py (composition,
+        # Poisson a paroi, implicite/explicite par bloc, integrateur Python).
+        run: |
+          pip install --upgrade pip numpy
+          cmake -B build-py -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_PYTHON=ON -DADC_USE_EIGEN=OFF
+          cmake --build build-py --target _adc -j 2
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_bindings.py
 
   mpi:
     name: ubuntu-latest / MPI

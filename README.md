@@ -22,10 +22,11 @@ regrid Berger-Rigoutsos, sous-cyclage Berger-Oliger + reflux conservatif (derive
 
 ---
 
-`adc_cpp` est la **bibliotheque coeur** : le moteur generique, sans aucun modele physique.
-Les modeles, les facades compilees, les exemples, les bindings Python et les cas
-d'utilisation vivent dans le depot separe **[`adc_cases`](https://github.com/wolf75222/adc_cases)**,
-qui consomme ce coeur via la cible CMake `adc::adc`.
+`adc_cpp` est la **bibliotheque** : le moteur generique (coeur sans modele) **plus** la
+bibliotheque de modeles physiques (`include/adc/model/`) et **les bindings Python de la lib**
+— le module `adc` (composition `System` + solveurs specialises `TwoFluidAP`, `DiocotronAmr`).
+Le depot separe **[`adc_cases`](https://github.com/wolf75222/adc_cases)** ne contient QUE des
+**cas d'utilisation en Python** (un dossier par cas) qui importent ce module ; il n'a plus de C++.
 
 Le coeur resout, sur maillage cartesien adaptatif, la partie generique :
 
@@ -37,8 +38,8 @@ D phi = f(U)
 ou la partie hyperbolique (U) et la partie elliptique (phi) sont couplees a chaque pas
 via `aux = (phi, grad phi)`. Le coeur ne connait aucun modele : il fournit les contrats
 (`PhysicalModel`, `EllipticSolver`), les operateurs, l'elliptique, les integrateurs, l'AMR
-et les seams de parallelisme. Un modele concret (diocotron, Euler-Poisson, deux-fluides)
-est fourni par l'application.
+et les seams de parallelisme. Les modeles concrets (diocotron, Euler, Euler-Poisson, fluides
+charges, isotherme) vivent dans `include/adc/model/` ; le module Python les compose.
 
 ## Ce que fournit le coeur
 
@@ -125,6 +126,46 @@ target_link_libraries(mon_appli PRIVATE adc::adc)
 
 On definit alors un type qui satisfait `PhysicalModel`, on l'instancie dans un
 `Coupler<Model, Elliptic>` (ou `AmrCouplerMP` pour l'AMR), et on avance en temps.
+
+## Module Python `adc` (bindings de la lib)
+
+Les bindings vivent **ici** (`python/`), pas dans l'application : ce sont les bindings de la
+lib. On construit le module avec `-DADC_BUILD_PYTHON=ON` :
+
+```bash
+cmake -B build-py -DADC_BUILD_PYTHON=ON && cmake --build build-py --target _adc -j
+export PYTHONPATH=$PWD/build-py/python        # contient le paquet adc/
+```
+
+Le module expose **deux niveaux**, dans l'esprit « Python compose QUOI, le C++ calcule » :
+
+```python
+import adc
+sim = adc.System(n=192, periodic=False, B0=1.0, alpha=1.0)
+# un BLOC par espece : modele + schema spatial + traitement temporel + sous-pas, au choix
+sim.add_block("electrons", model="electron_euler", charge=-1.0,
+              spatial=adc.Spatial(vanleer=True, flux="hllc"), time=adc.IMEX(substeps=10))
+sim.add_block("ions", model="ion_isothermal", charge=+1.0,
+              spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet",
+                wall="circle", wall_radius=0.40)   # paroi conductrice = embedded boundary
+sim.set_density("electrons", ne_numpy)             # CI ecrite en numpy
+sim.step_cfl(0.4)
+```
+
+- **`adc.System`** — composition multi-blocs : `add_block(model, spatial=adc.Spatial(...),
+  time=adc.Explicit()|adc.IMEX(...)|adc.Implicit(...), substeps=...)`, `set_poisson(...)`,
+  `set_density`, `step`/`advance`/`step_cfl`, diagnostics. Modeles : `diocotron`,
+  `electron_euler`, `ion_isothermal`, `euler_poisson`. Le choix implicite/explicite est
+  **par bloc et reversible** ; aucun callback Python dans le hot path.
+- **Integrateur temporel ecrit en Python** — primitives `solve_fields()`, `eval_rhs(name)`,
+  `get_state`/`set_state` : on ecrit son propre `take_step` cote Python (par PAS), le residu
+  et Poisson restant calcules en C++ (par CELLULE). Cf. `adc.integrate.ssprk2_step`.
+- **Solveurs specialises** — `adc.TwoFluidAP` (asymptotic-preserving), `adc.DiocotronAmr` (AMR) :
+  integrateurs sur mesure exposes comme facades.
+
+Le test `python/tests/test_bindings.py` exerce ces chemins. Exemples complets : depot
+[`adc_cases`](https://github.com/wolf75222/adc_cases) (un dossier Python par cas).
 Modeles prets, facades, exemples et Python : voir **`adc_cases`**.
 
 ## Ecosysteme

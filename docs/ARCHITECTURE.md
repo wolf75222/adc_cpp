@@ -1,8 +1,9 @@
 # Architecture de adc_cpp
 
 Coeur C++23 pour les systemes hyperbolique-elliptique couples sur AMR, ecrit pour
-OpenMP + MPI + Kokkos. Les modeles physiques, facades, exemples et bindings Python
-vivent dans `adc_cases`, qui consomme ce coeur via `adc::adc`.
+OpenMP + MPI + Kokkos. Les modeles physiques (`include/adc/model/`) et **les bindings
+Python de la lib** (module `adc` : composition `System` + solveurs specialises) vivent ICI ;
+`adc_cases` ne contient que des **cas d'utilisation en Python** qui importent ce module.
 
 Ce document fige l'architecture cible et son etat. Le README porte la narration et les
 resultats. Ici on decrit les couches, les seams, les decisions, et on distingue ce qui est
@@ -339,10 +340,13 @@ une lib publique : on ne peut pas avoir une cible CPU et une cible GPU dans le m
 | `include/` | coeur generique (concepts, templates, seam GPU). Visible a l'instanciation. | header-only `adc::adc` |
 | `tests/` | CTest du coeur (+ MPI via `mpirun` quand active). | lie `adc::adc` |
 | `docs/` | architecture, algorithmes, notes de validation/performance. | documentation |
-| `adc_cases` | modeles, facades, exemples, Python, runs applicatifs. | consomme `adc::adc` |
+| `include/adc/model/` | bibliotheque de modeles physiques (diocotron, Euler, Euler-Poisson, fluides charges, isotherme). | header-only `adc::adc` |
+| `python/` | module Python `adc` (pybind11) : facade runtime `System` + solveurs `TwoFluidAP`/`DiocotronAmr` + `adc.integrate`. | `-DADC_BUILD_PYTHON=ON` |
+| `adc_cases` | cas d'utilisation 100 % Python (un dossier par cas), importent le module `adc`. | aucun C++ |
 
-Regle actuelle : `adc_cpp` reste le coeur generique. Une API Python ou une facade stable
-doit vivre au-dessus, dans `adc_cases`, pour ne pas faire dependre le coeur de cas physiques.
+Regle actuelle : `adc_cpp` est la bibliotheque (coeur + modeles + bindings). Le coeur
+generique (`include/`, hors `model/`) ne depend d'aucun modele ; les modeles et la facade
+runtime se posent au-dessus. `adc_cases` ne fait que **consommer** le module Python.
 
 ## 11. Validation : logicielle ET numerique
 

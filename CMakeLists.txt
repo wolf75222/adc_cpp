@@ -8,8 +8,10 @@ project(adc_cpp
 )
 
 option(ADC_BUILD_TESTS    "Build tests"    ON)
-# Exemples, bindings Python et facades libadc vivent dans le depot adc_cases (qui
-# consomme adc::adc). Le coeur ne fournit que la lib d'interface + ses tests.
+# Module Python `adc` (pybind11) : c'est LES BINDINGS DE LA LIB, donc ils vivent ici.
+# Le coeur reste header-only ; le module compile la facade runtime System (python/system.cpp)
+# + les bindings. adc_cases ne contient QUE du code Python qui importe ce module.
+option(ADC_BUILD_PYTHON   "Build the pybind11 Python module `adc`" OFF)
 # Backends de dispatch on-node : KOKKOS est le chemin recommande (il couvre OpenMP CPU ET
 # GPU CUDA/HIP via un seul code portable). ADC_USE_OPENMP (backend OpenMP autonome) est
 # DEPRECIE : prefere ADC_USE_KOKKOS (Kokkos avec device OPENMP donne le meme parallelisme CPU
@@ -154,4 +156,18 @@ endif()
 if(ADC_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+# Module Python `adc` (bindings de la lib). Compile la facade runtime System + pybind11.
+if(ADC_BUILD_PYTHON)
+  include(FetchContent)
+  find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+  find_package(pybind11 2.11 CONFIG QUIET)
+  if(NOT pybind11_FOUND)
+    FetchContent_Declare(pybind11
+      GIT_REPOSITORY https://github.com/pybind/pybind11.git
+      GIT_TAG        v2.13.6)
+    FetchContent_MakeAvailable(pybind11)
+  endif()
+  add_subdirectory(python)
 endif()
