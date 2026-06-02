@@ -13,7 +13,7 @@ target_compile_features(_adc PRIVATE cxx_std_${ADC_CXX_STD})
 # L'extension va dans le paquet adc/ ; on y copie aussi les sources Python du paquet.
 set(ADC_PY_PKG ${CMAKE_CURRENT_BINARY_DIR}/adc)
 set_target_properties(_adc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ADC_PY_PKG})
-foreach(pyf adc/__init__.py adc/integrate.py)
+foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()
 
@@ -26,4 +26,10 @@ endforeach()
 add_test(NAME test_bindings
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bindings.py)
 set_tests_properties(test_bindings PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# Test du mini-DSL symbolique (adc.dsl) : pur Python (interprete CPU), meme PYTHONPATH.
+add_test(NAME test_dsl
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)
+set_tests_properties(test_dsl PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")

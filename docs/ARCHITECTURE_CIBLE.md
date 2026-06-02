@@ -3,7 +3,8 @@
 Doc de VISION (pas l'etat actuel), issu de la description du tuteur. A relire avant la seance
 tableau. Deux niveaux :
 - **(A)** l'architecture OO en couches (modeles composables) : DEJA largement realisee dans adc_cpp ;
-- **(B)** le DSL symbolique ou Python ECRIT les formules : l'endgame, gros chantier (compilateur).
+- **(B)** le DSL symbolique ou Python ECRIT les formules : interprete CPU PROTOTYPE fait (`adc.dsl`) ;
+  le codegen C++/GPU reste le gros chantier (compilateur).
 
 ---
 
@@ -77,10 +78,11 @@ Bilan : **les couches 1-12 du design OO sont ~80 % en place** (organisation et n
 But : Python ECRIT les formules (pas une fonction appelee par cellule), ADC en fait un solveur.
 
 ```python
-e = adc.HyperbolicModel("electrons")
+e = adc.dsl.HyperbolicModel("electrons")
 rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
 u = e.primitive("u", rhou / rho)
 p = e.primitive("p", (gamma - 1) * (E - 0.5 * rho * (u*u + v*v)))
+c = adc.dsl.sqrt(gamma * p / rho)
 e.set_flux(x=[rhou, rhou*u + p, rhou*v, rho*H*u], y=[...])
 e.set_eigenvalues(x=[u - c, u, u + c], y=[...])
 e.set_source([...]); e.set_elliptic_rhs(-qe * rho / me)
@@ -110,9 +112,26 @@ adc/symbolic/  expression (Var/Const/Add/Mul/Sqrt...), vector_expr, formula_grap
   en numpy) est le cout que le DSL supprimerait : UNE source de formules -> interprete CPU + kernel
   GPU genere. Le gain croit avec le nombre de modeles (plasma multi-especes : beaucoup de variantes).
 - **Recommandation** : garder le solveur compile actuel (il marche, GPU-ready) comme cible de
-  production ; demarrer le DSL en **prototype separe** (`adc/symbolic/`), d'abord un interprete CPU
+  production ; demarrer le DSL en **prototype separe** (`adc/dsl.py`), d'abord un interprete CPU
   d'un graphe de formules (valider le concept sur Euler), PUIS un codegen C++. Ne PAS reecrire le
   solveur en attendant que le DSL soit mur.
+
+### Etat : interprete CPU PROTOTYPE fait (`adc.dsl`)
+
+Le module `python/adc/dsl.py` realise l'etape (1) (interpreter en CPU) et (5) (verifier les
+dependances) :
+- arbre d'expressions (`Expr` : `Const`, `Var`, `Add/Sub/Mul/Div/Pow/Neg`, `Sqrt`) construit par
+  surcharge d'operateurs ; `eval(env)` l'applique a des tableaux numpy (tout le domaine d'un coup) ;
+- `HyperbolicModel` declaratif : `conservative_vars` / `primitive` (formules) / `aux` / `set_flux` /
+  `set_eigenvalues` / `set_source` / `set_elliptic_rhs` / `check()` (dependances) ;
+- `to_python_flux()` branche l'arbre sur le backend hote `adc.PythonFlux` -> **le modele TOURNE**.
+
+Verifie : `python/tests/test_dsl.py` (flux symbolique d'Euler == flux de reference numpy,
+`max_wave_speed` coherent, `check()` detecte une variable non definie, masse conservee a l'execution)
+et le cas `adc_cases/dsl_euler/` (Euler ecrit en formules, expansion acoustique, masse conservee).
+
+RESTE a faire (le compilateur) : (2) codegen C++ depuis l'arbre, (3) codegen Kokkos/CUDA, (4) JIT.
+Le prototype CPU NE remplace PAS les briques compilees (il prototype, lentement, sur l'hote).
 
 ---
 

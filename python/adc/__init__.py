@@ -34,7 +34,7 @@ __all__ = [
     "elliptic", "div_eps_grad", "charge_density", "electric_field_from_potential",
     "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
-    "PythonFlux",
+    "PythonFlux", "dsl",
 ]
 
 
@@ -432,3 +432,4 @@ class PythonFlux:
 
 
 from . import integrate  # noqa: E402  (apres la definition de System)
+from . import dsl  # noqa: E402  mini-DSL symbolique (prototype, interprete CPU ; apres PythonFlux)
