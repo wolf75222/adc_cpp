@@ -47,4 +47,18 @@ concept PhysicalModel =
       { m.elliptic_rhs(u) } -> std::convertible_to<Real>;
     };
 
+// Extension OPTIONNELLE : variables primitives + conversions cons <-> prim. Permet a
+// l'operateur spatial de reconstruire en variables primitives (rho, u, p) plutot que
+// conservatives (plus robuste pour Euler : positivite de rho et p), et centralise le
+// passage cons <-> prim (la vitesse d'onde, les termes de collision u_a - u_b s'expriment
+// naturellement en primitif). Un modele qui ne l'expose pas reconstruit en conservatif.
+template <class M>
+concept HasPrimitiveVars =
+    PhysicalModel<M> &&
+    requires(const M m, const typename M::State u, const typename M::Prim p) {
+      typename M::Prim;
+      { m.to_primitive(u) } -> std::same_as<typename M::Prim>;
+      { m.to_conservative(p) } -> std::same_as<typename M::State>;
+    };
+
 }  // namespace adc

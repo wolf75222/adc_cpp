@@ -136,6 +136,104 @@ for _ in range(20):
 chk(amr.n_patches() >= 1, "AmrSystem : raffinement actif")
 chk(abs(amr.mass() - am0) / abs(am0) < 1e-9, "AmrSystem : masse conservee (reflux)")
 
+# --- 4c. Espece gelee (background fixe) : non avancee, mais vue par Poisson ------
+print("== espece gelee (evolve=False) : fond fixe vu par Poisson ==")
+fz = adc.System(n=32, L=1.0, periodic=True)
+fz.add_block("electrons", model=electron(), spatial=adc.Spatial(minmod=True))
+fz.add_background("ions", model=ion(charge=1.0), density=np.ones((32, 32)))
+fz.set_poisson()
+fz.set_density("electrons", 1.0 + 0.05 * np.cos(2 * np.pi * meshx(32))[None, :] * np.ones((32, 32)))
+ni0 = np.array(fz.density("ions"))
+me0 = fz.mass("electrons")
+fz.solve_fields()
+chk(np.abs(fz.potential()).max() > 1e-8, "espece gelee : le fond contribue a Poisson")
+for _ in range(5):
+    fz.step_cfl(0.4)
+chk(np.allclose(np.array(fz.density("ions")), ni0), "espece gelee : fond inchange (non avance)")
+chk(abs(fz.mass("electrons") - me0) < 1e-9, "espece gelee : electrons avances, masse conservee")
+
+# --- 4d. Source couplee inter-especes : ionisation n_g -> n_i (+ n_e) ------------
+print("== source couplee : ionisation (operator-split, masse transferee) ==")
+
+
+def inert():  # scalaire SANS transport (charge 0 -> phi 0 -> derive nulle) : isole le couplage
+    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
+                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=0.0))
+
+
+iz = adc.System(n=24, L=1.0, periodic=True)
+iz.add_block("ne", model=inert(), spatial=adc.Spatial(none=True))
+iz.add_block("ni", model=inert(), spatial=adc.Spatial(none=True))
+iz.add_block("ng", model=inert(), spatial=adc.Spatial(none=True))
+iz.set_poisson()
+iz.set_density("ne", 0.1 * np.ones((24, 24)))
+iz.set_density("ni", np.zeros((24, 24)))
+iz.set_density("ng", np.ones((24, 24)))
+iz.add_ionization(electron="ne", ion="ni", neutral="ng", rate=0.5)
+ne0, ni0i, ng0 = iz.mass("ne"), iz.mass("ni"), iz.mass("ng")
+iz.advance(0.05, 10)  # pas FIXE (transport nul) : on teste uniquement la source couplee
+ne1, ni1, ng1 = iz.mass("ne"), iz.mass("ni"), iz.mass("ng")
+chk(ng1 < ng0 - 1e-6 and ni1 > ni0i + 1e-6, "ionisation : neutres -> ions (n_g diminue, n_i augmente)")
+chk(abs((ni1 + ng1) - (ni0i + ng0)) < 1e-9, "ionisation : masse n_i + n_g conservee")
+chk(ne1 > ne0, "ionisation : electrons crees (nombre)")
+
+# --- 4e. Source couplee : friction inter-especes (qte de mvt conservee) ---------
+print("== source couplee : collision / friction (qte de mvt transferee) ==")
+
+
+def iso_inert():  # isotherme sans couplage de champ (charge 0) : on isole la friction
+    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5), transport=adc.IsothermalFlux(),
+                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=0.0))
+
+
+co = adc.System(n=24, L=1.0, periodic=True)
+co.add_block("a", model=iso_inert(), spatial=adc.Spatial(minmod=True))
+co.add_block("b", model=iso_inert(), spatial=adc.Spatial(minmod=True))
+co.set_poisson()
+Ua = np.zeros((3, 24, 24)); Ua[0] = 1.0; Ua[1] = 0.3   # a : rho=1, u_x=0.3
+Ub = np.zeros((3, 24, 24)); Ub[0] = 1.0; Ub[1] = 0.0   # b : rho=1, au repos
+co.set_state("a", Ua.reshape(-1).tolist())
+co.set_state("b", Ub.reshape(-1).tolist())
+co.add_collision("a", "b", rate=1.0)
+pa0 = float(np.array(co.get_state("a")).reshape(3, 24, 24)[1].sum())
+pb0 = float(np.array(co.get_state("b")).reshape(3, 24, 24)[1].sum())
+co.advance(0.01, 20)  # etat uniforme -> transport nul : on teste la friction seule
+pa1 = float(np.array(co.get_state("a")).reshape(3, 24, 24)[1].sum())
+pb1 = float(np.array(co.get_state("b")).reshape(3, 24, 24)[1].sum())
+chk(pa1 < pa0 - 1e-6 and pb1 > pb0 + 1e-6, "collision : transfert de qte de mvt a -> b")
+chk(abs((pa1 + pb1) - (pa0 + pb0)) < 1e-9, "collision : qte de mvt totale conservee")
+
+# --- 4f. Source couplee : echange thermique (energie totale conservee) ----------
+print("== source couplee : echange thermique (chaud -> froid) ==")
+
+
+def euler_inert():  # Euler sans couplage de champ (charge 0) : on isole l'echange thermique
+    return adc.Model(state=adc.FluidState("compressible", gamma=1.4),
+                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
+                     elliptic=adc.ChargeDensity(charge=0.0))
+
+
+te = adc.System(n=16, L=1.0, periodic=True)
+te.add_block("a", model=euler_inert(), spatial=adc.Spatial(minmod=True))
+te.add_block("b", model=euler_inert(), spatial=adc.Spatial(minmod=True))
+te.set_poisson()
+Ua = np.zeros((4, 16, 16)); Ua[0] = 1.0; Ua[3] = 2.0 / 0.4   # rho=1, u=0, p=2 -> T=2
+Ub = np.zeros((4, 16, 16)); Ub[0] = 1.0; Ub[3] = 1.0 / 0.4   # rho=1, u=0, p=1 -> T=1
+te.set_state("a", Ua.reshape(-1).tolist())
+te.set_state("b", Ub.reshape(-1).tolist())
+te.add_thermal_exchange("a", "b", rate=1.0)
+A0 = np.array(te.get_state("a")).reshape(4, 16, 16)
+B0 = np.array(te.get_state("b")).reshape(4, 16, 16)
+Ea0, Eb0 = float(A0[3].sum()), float(B0[3].sum())
+te.advance(0.01, 20)  # etat uniforme -> transport nul : on teste l'echange seul
+A1 = np.array(te.get_state("a")).reshape(4, 16, 16)
+B1 = np.array(te.get_state("b")).reshape(4, 16, 16)
+Ea1, Eb1 = float(A1[3].sum()), float(B1[3].sum())
+Ta1, Tb1 = float((0.4 * A1[3] / A1[0]).mean()), float((0.4 * B1[3] / B1[0]).mean())
+chk(Ea1 < Ea0 - 1e-6 and Eb1 > Eb0 + 1e-6, "echange thermique : energie chaud -> froid")
+chk(abs((Ea1 + Eb1) - (Ea0 + Eb0)) < 1e-9, "echange thermique : energie totale conservee")
+chk(abs(Ta1 - Tb1) < 1.0 - 1e-3, "echange thermique : temperatures relaxent")
+
 # --- 5. garde-fous --------------------------------------------------------------
 print("== garde-fous ==")
 

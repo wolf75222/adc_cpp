@@ -72,7 +72,14 @@ PYBIND11_MODULE(_adc, m) {
       // (explicit/imex) + sous-pas. Python dit QUOI, le C++ compile fait le calcul.
       .def("add_block", &System::add_block, py::arg("name"), py::arg("model"),
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
-           py::arg("time") = "explicit", py::arg("substeps") = 1)
+           py::arg("recon") = "conservative",
+           py::arg("time") = "explicit", py::arg("substeps") = 1,
+           py::arg("evolve") = true)
+      .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
+           py::arg("neutral"), py::arg("rate"))
+      .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))
+      .def("add_thermal_exchange", &System::add_thermal_exchange, py::arg("a"), py::arg("b"),
+           py::arg("rate"))
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0)

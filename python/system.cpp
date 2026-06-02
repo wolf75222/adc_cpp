@@ -32,6 +32,7 @@ struct System::Impl {
     MultiFab U;
     int ncomp;
     int substeps;                                             // sous-pas statiques (add_block)
+    bool evolve;                                              // false = espece gelee (fond fixe non avance)
     double gamma;                                             // pour l'energie au repos (4 var)
     std::function<void(MultiFab&, Real, int)> advance;        // (U, dt, n) : n sous-pas de dt/n
     std::function<void(MultiFab&, MultiFab&)> rhs_into;        // R <- -div F + S (Poisson fige)
@@ -50,6 +51,7 @@ struct System::Impl {
   MultiFab aux;
   std::vector<Species> sp;
   double t = 0;
+  std::vector<std::function<void(Real)>> couplings;  // sources couplees inter-especes (splitting)
 
   // Configuration Poisson (solveur elliptique construit paresseusement).
   std::string p_rhs = "charge_density";
@@ -85,6 +87,20 @@ struct System::Impl {
     for (auto& s : sp)
       if (s.name == name) return s;
     throw std::runtime_error("System : bloc inconnu '" + name + "'");
+  }
+  int index(const std::string& name) const {
+    for (std::size_t k = 0; k < sp.size(); ++k)
+      if (sp[k].name == name) return static_cast<int>(k);
+    throw std::runtime_error("System : bloc inconnu '" + name + "'");
+  }
+
+  // Sources de COUPLAGE inter-especes : appliquees par SPLITTING (un pas additif explicite de
+  // dt) APRES le transport de chaque bloc. Passe HOTE (comme set_density) : a revisiter pour
+  // Kokkos/GPU. Chaque couplage lit/met a jour l'etat de PLUSIEURS blocs au meme point.
+  void apply_couplings(Real dt) {
+    if (couplings.empty()) return;
+    device_fence();
+    for (auto& c : couplings) c(dt);
   }
 
   // --- solveur elliptique (Poisson de systeme) -----------------------------
@@ -143,20 +159,20 @@ struct System::Impl {
   // Evaluateur methode-des-lignes d'un bloc (L/F/Model figes) : ghosts puis R = -div F + S.
   // La math RK est portee par les TimeStepper du coeur, pas reimplementee.
   template <class Limiter, class Flux, class Model>
-  auto rhs_eval(const Model& model) {
-    return [this, &model](MultiFab& U, MultiFab& R) {
+  auto rhs_eval(const Model& model, bool recon_prim) {
+    return [this, &model, recon_prim](MultiFab& U, MultiFab& R) {
       fill_ghosts(U, dom, bc_);
-      assemble_rhs<Limiter, Flux>(model, U, aux, geom, R);
+      assemble_rhs<Limiter, Flux>(model, U, aux, geom, R, recon_prim);
     };
   }
   template <class Limiter, class Flux, class Model>
-  void ssprk2(const Model& model, MultiFab& U, Real dt) {
-    SSPRK2Step{}.take_step(rhs_eval<Limiter, Flux>(model), U, dt);
+  void ssprk2(const Model& model, MultiFab& U, Real dt, bool recon_prim) {
+    SSPRK2Step{}.take_step(rhs_eval<Limiter, Flux>(model, recon_prim), U, dt);
   }
   template <class Limiter, class Flux, class Model>
-  void imex_step(const Model& model, MultiFab& U, Real dt) {
-    const SourceFreeModel<Model> sf{model};
-    ForwardEuler{}.take_step(rhs_eval<Limiter, Flux>(sf), U, dt);
+  void imex_step(const Model& model, MultiFab& U, Real dt, bool recon_prim) {
+    const SourceFreeModel<Model> sf{model};  // demi-pas explicite : SourceFreeModel sans Prim
+    ForwardEuler{}.take_step(rhs_eval<Limiter, Flux>(sf, recon_prim), U, dt);  // -> conservatif
     backward_euler_source(model, aux, U, dt);
   }
 
@@ -166,22 +182,22 @@ struct System::Impl {
   };
 
   template <class Limiter, class Flux, class Model>
-  BlockClosures build(const Model& m, bool imex) {
+  BlockClosures build(const Model& m, bool imex, bool recon_prim) {
     Impl* P = this;
     BlockClosures bc;
     if (imex)
-      bc.advance = [P, m](MultiFab& U, Real dt, int n) {
+      bc.advance = [P, m, recon_prim](MultiFab& U, Real dt, int n) {
         const Real h = dt / static_cast<Real>(n);
-        for (int s = 0; s < n; ++s) P->imex_step<Limiter, Flux>(m, U, h);
+        for (int s = 0; s < n; ++s) P->imex_step<Limiter, Flux>(m, U, h, recon_prim);
       };
     else
-      bc.advance = [P, m](MultiFab& U, Real dt, int n) {
+      bc.advance = [P, m, recon_prim](MultiFab& U, Real dt, int n) {
         const Real h = dt / static_cast<Real>(n);
-        for (int s = 0; s < n; ++s) P->ssprk2<Limiter, Flux>(m, U, h);
+        for (int s = 0; s < n; ++s) P->ssprk2<Limiter, Flux>(m, U, h, recon_prim);
       };
-    bc.rhs_into = [P, m](MultiFab& U, MultiFab& R) {
+    bc.rhs_into = [P, m, recon_prim](MultiFab& U, MultiFab& R) {
       fill_ghosts(U, P->dom, P->bc_);
-      assemble_rhs<Limiter, Flux>(m, U, P->aux, P->geom, R);
+      assemble_rhs<Limiter, Flux>(m, U, P->aux, P->geom, R, recon_prim);
     };
     return bc;
   }
@@ -190,19 +206,19 @@ struct System::Impl {
   // par requires : exige un transport a 4 variables exposant pressure (sinon -> rusanov).
   template <class Model>
   BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
-                           bool imex) {
+                           bool imex, bool recon_prim) {
     if (riem == "rusanov") {
-      if (lim == "none") return build<NoSlope, RusanovFlux>(m, imex);
-      if (lim == "minmod") return build<Minmod, RusanovFlux>(m, imex);
-      if (lim == "vanleer") return build<VanLeer, RusanovFlux>(m, imex);
+      if (lim == "none") return build<NoSlope, RusanovFlux>(m, imex, recon_prim);
+      if (lim == "minmod") return build<Minmod, RusanovFlux>(m, imex, recon_prim);
+      if (lim == "vanleer") return build<VanLeer, RusanovFlux>(m, imex, recon_prim);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     }
     if (riem == "hllc") {
       if constexpr (Model::n_vars == 4 &&
                     requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-        if (lim == "none") return build<NoSlope, HLLCFlux>(m, imex);
-        if (lim == "minmod") return build<Minmod, HLLCFlux>(m, imex);
-        if (lim == "vanleer") return build<VanLeer, HLLCFlux>(m, imex);
+        if (lim == "none") return build<NoSlope, HLLCFlux>(m, imex, recon_prim);
+        if (lim == "minmod") return build<Minmod, HLLCFlux>(m, imex, recon_prim);
+        if (lim == "vanleer") return build<VanLeer, HLLCFlux>(m, imex, recon_prim);
         throw std::runtime_error("System : limiter inconnu '" + lim + "'");
       } else {
         throw std::runtime_error("System : flux 'hllc' exige un transport compressible "
@@ -297,13 +313,18 @@ System& System::operator=(System&&) noexcept = default;
 
 void System::add_block(const std::string& name, const ModelSpec& model,
                        const std::string& limiter, const std::string& riemann,
-                       const std::string& time, int substeps) {
+                       const std::string& recon, const std::string& time, int substeps,
+                       bool evolve) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
   if (time != "explicit" && time != "imex")
     throw std::runtime_error("System::add_block : time 'explicit' | 'imex' (recu '" + time +
                              "')");
+  if (recon != "conservative" && recon != "primitive")
+    throw std::runtime_error("System::add_block : recon 'conservative' | 'primitive' (recu '" +
+                             recon + "')");
   const bool imex = (time == "imex");
+  const bool recon_prim = (recon == "primitive");
 
   int ncomp = 1;
   Impl::BlockClosures clo;
@@ -314,13 +335,13 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   detail::dispatch_model(model, [&](auto m) {
     using M = decltype(m);
     ncomp = M::n_vars;
-    clo = P->make_block(m, limiter, riemann, imex);
+    clo = P->make_block(m, limiter, riemann, imex, recon_prim);
     max_speed = P->make_max_speed(m);
     add_poisson_rhs = P->make_poisson_rhs(m);
   });
 
   P->sp.push_back(Impl::Species{name, MultiFab(P->ba, P->dm, ncomp, 2), ncomp, substeps,
-                                model.gamma, std::move(clo.advance), std::move(clo.rhs_into),
+                                evolve, model.gamma, std::move(clo.advance), std::move(clo.rhs_into),
                                 std::move(max_speed), std::move(add_poisson_rhs)});
   P->sp.back().U.set_val(Real(0));
 }
@@ -333,6 +354,93 @@ void System::set_poisson(const std::string& rhs, const std::string& solver,
   p_->p_wall = wall;
   p_->p_wall_radius = wall_radius;
   p_->ell_.reset();
+}
+
+void System::add_ionization(const std::string& electron, const std::string& ion,
+                            const std::string& neutral, double rate) {
+  Impl* P = p_.get();
+  const int ie = P->index(electron), ii = P->index(ion), ig = P->index(neutral);
+  const Real k = static_cast<Real>(rate);
+  // Ionisation (operator-split, sur la densite = comp 0) : taux r = k n_e n_g. Un neutre
+  // disparait, un ion et un electron apparaissent : n_g -= dt r, n_i += dt r, n_e += dt r. La
+  // masse est transferee du neutre vers l'ion (n_i + n_g conserve). Premiere brique de couplage ;
+  // le transfert de quantite de mouvement / energie (especes fluides) est un raffinement ulterieur.
+  P->couplings.push_back([P, ie, ii, ig, k](Real dt) {
+    Impl::Species& e = P->sp[ie];
+    Impl::Species& s_i = P->sp[ii];
+    Impl::Species& g = P->sp[ig];
+    Array4 ue = e.U.fab(0).array();
+    Array4 ui = s_i.U.fab(0).array();
+    Array4 ug = g.U.fab(0).array();
+    const Box2D v = e.U.box(0);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int x = v.lo[0]; x <= v.hi[0]; ++x) {
+        const Real dn = dt * k * ue(x, j, 0) * ug(x, j, 0);
+        ug(x, j, 0) -= dn;
+        ui(x, j, 0) += dn;
+        ue(x, j, 0) += dn;
+      }
+  });
+}
+
+void System::add_collision(const std::string& a, const std::string& b, double rate) {
+  Impl* P = p_.get();
+  const int ia = P->index(a), ib = P->index(b);
+  if (P->sp[ia].ncomp < 3 || P->sp[ib].ncomp < 3)
+    throw std::runtime_error("System::add_collision : les deux blocs doivent porter une quantite "
+                             "de mouvement (transport fluide >= 3 variables)");
+  const Real k = static_cast<Real>(rate);
+  // Friction inter-especes (operator-split) : force F = k (u_a - u_b) sur la quantite de
+  // mouvement, opposee sur chaque espece (qte de mvt totale conservee) ; les vitesses relaxent
+  // l'une vers l'autre. Sur comp 1 et 2 (qte de mvt). L'echauffement par friction (energie) est
+  // un raffinement ulterieur (neglige : convient aux especes isothermes, sans eq. d'energie).
+  P->couplings.push_back([P, ia, ib, k](Real dt) {
+    Impl::Species& A = P->sp[ia];
+    Impl::Species& B = P->sp[ib];
+    Array4 ua = A.U.fab(0).array();
+    Array4 ub = B.U.fab(0).array();
+    const Box2D v = A.U.box(0);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int x = v.lo[0]; x <= v.hi[0]; ++x)
+        for (int c = 1; c <= 2; ++c) {  // composantes de quantite de mouvement (x, y)
+          const Real va = ua(x, j, c) / ua(x, j, 0);
+          const Real vb = ub(x, j, c) / ub(x, j, 0);
+          const Real f = dt * k * (va - vb);
+          ua(x, j, c) -= f;
+          ub(x, j, c) += f;
+        }
+  });
+}
+
+void System::add_thermal_exchange(const std::string& a, const std::string& b, double rate) {
+  Impl* P = p_.get();
+  const int ia = P->index(a), ib = P->index(b);
+  if (P->sp[ia].ncomp != 4 || P->sp[ib].ncomp != 4)
+    throw std::runtime_error("System::add_thermal_exchange : les deux blocs doivent porter une "
+                             "energie (Euler compressible, 4 variables)");
+  const Real k = static_cast<Real>(rate);
+  const Real ga = static_cast<Real>(P->sp[ia].gamma), gb = static_cast<Real>(P->sp[ib].gamma);
+  // Echange thermique (operator-split) : flux de chaleur q = k (T_a - T_b) sur l'energie, oppose
+  // sur chaque espece (energie totale conservee) ; les temperatures relaxent. T = p/rho (a une
+  // constante pres), p = (gamma-1)(E - 1/2 rho |u|^2). Transfere l'energie INTERNE (u inchange).
+  P->couplings.push_back([P, ia, ib, k, ga, gb](Real dt) {
+    Impl::Species& A = P->sp[ia];
+    Impl::Species& B = P->sp[ib];
+    Array4 ua = A.U.fab(0).array();
+    Array4 ub = B.U.fab(0).array();
+    const Box2D v = A.U.box(0);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int x = v.lo[0]; x <= v.hi[0]; ++x) {
+        const Real ra = ua(x, j, 0), rb = ub(x, j, 0);
+        const Real pa = (ga - Real(1)) * (ua(x, j, 3) -
+            Real(0.5) * (ua(x, j, 1) * ua(x, j, 1) + ua(x, j, 2) * ua(x, j, 2)) / ra);
+        const Real pb = (gb - Real(1)) * (ub(x, j, 3) -
+            Real(0.5) * (ub(x, j, 1) * ub(x, j, 1) + ub(x, j, 2) * ub(x, j, 2)) / rb);
+        const Real q = dt * k * (pa / ra - pb / rb);  // k (T_a - T_b), T = p/rho
+        ua(x, j, 3) -= q;
+        ub(x, j, 3) += q;
+      }
+  });
 }
 
 void System::set_density(const std::string& name, const std::vector<double>& rho) {
@@ -356,7 +464,9 @@ void System::solve_fields() { p_->solve_fields(); }
 
 void System::step(double dt) {
   p_->solve_fields();
-  for (auto& s : p_->sp) s.advance(s.U, Real(dt), s.substeps);
+  for (auto& s : p_->sp)
+    if (s.evolve) s.advance(s.U, Real(dt), s.substeps);  // bloc gele : non avance
+  p_->apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres transport
   p_->t += dt;
 }
 void System::advance(double dt, int nsteps) {
@@ -365,10 +475,13 @@ void System::advance(double dt, int nsteps) {
 double System::step_cfl(double cfl) {
   p_->solve_fields();
   Real wmax = Real(1e-30);
-  for (auto& s : p_->sp) wmax = std::max(wmax, s.max_speed(s.U));
+  for (auto& s : p_->sp)
+    if (s.evolve) wmax = std::max(wmax, s.max_speed(s.U));  // bloc gele : ne contraint pas le pas
   const Real h = std::min(p_->geom.dx(), p_->geom.dy());
   const double dt = cfl * static_cast<double>(h) / static_cast<double>(wmax);
-  for (auto& s : p_->sp) s.advance(s.U, Real(dt), s.substeps);
+  for (auto& s : p_->sp)
+    if (s.evolve) s.advance(s.U, Real(dt), s.substeps);
+  p_->apply_couplings(Real(dt));
   p_->t += dt;
   return dt;
 }
@@ -380,17 +493,20 @@ double System::step_adaptive(double cfl) {
   std::vector<Real> wb;
   wb.reserve(p_->sp.size());
   for (auto& s : p_->sp) {
-    const Real w = s.max_speed(s.U);
+    const Real w = s.evolve ? s.max_speed(s.U) : Real(0);  // bloc gele : hors cadence
     wb.push_back(w);
-    wmin = std::min(wmin, w);
+    if (s.evolve) wmin = std::min(wmin, w);
   }
+  if (wmin >= Real(1e30)) wmin = Real(1e-30);  // aucun bloc evolutif (tous geles)
   const Real h = std::min(p_->geom.dx(), p_->geom.dy());
   const double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
   for (std::size_t b = 0; b < p_->sp.size(); ++b) {
+    if (!p_->sp[b].evolve) continue;  // bloc gele : non avance
     int n = static_cast<int>(std::ceil(static_cast<double>(wb[b] / wmin)));
     if (n < 1) n = 1;
     p_->sp[b].advance(p_->sp[b].U, Real(macro_dt), n);
   }
+  p_->apply_couplings(Real(macro_dt));
   p_->t += macro_dt;
   return macro_dt;
 }

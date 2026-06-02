@@ -167,18 +167,23 @@ class Spatial:
 
     limiter : "none" | "minmod" | "vanleer"  (raccourcis none=/minmod=/vanleer=)
     flux    : "rusanov" | "hllc"  (hllc exige un transport compressible)
+    recon   : "conservative" | "primitive"  (variables reconstruites ; primitif plus robuste
+              pour Euler : positivite de rho et p ; raccourci primitive=)
     """
 
-    def __init__(self, limiter="minmod", flux="rusanov", *, none=False, minmod=False,
-                 vanleer=False):
+    def __init__(self, limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
+                 minmod=False, vanleer=False, primitive=False):
         if none:
             limiter = "none"
         elif minmod:
             limiter = "minmod"
         elif vanleer:
             limiter = "vanleer"
+        if primitive:
+            recon = "primitive"
         self.limiter = limiter
         self.flux = flux
+        self.recon = recon
 
 
 class Explicit:
@@ -224,12 +229,19 @@ class System:
         self._s = _System(config)
         self._names = []
 
-    def add_block(self, name, model, spatial=None, time=None):
+    def add_block(self, name, model, spatial=None, time=None, evolve=True):
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
-        self._s.add_block(name, model, spatial.limiter, spatial.flux, time.kind,
-                          getattr(time, "substeps", 1))
+        self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
+                          getattr(time, "substeps", 1), evolve)
         self._names.append(name)
+
+    def add_background(self, name, model, density, spatial=None):
+        """Espece GELEE (non avancee) : un fond fixe qui contribue au Poisson de systeme (et, a
+        venir, aux sources couplees). density : tableau n*n. Equivaut a add_block(evolve=False)
+        suivi de set_density."""
+        self.add_block(name, model, spatial=spatial, evolve=False)
+        self.set_density(name, density)
 
     def block_names(self):
         """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python)."""
@@ -251,6 +263,9 @@ class AmrSystem:
 
     def add_block(self, name, model, spatial=None, time=None):
         spatial = spatial if spatial is not None else Spatial()
+        if spatial.recon == "primitive":
+            raise NotImplementedError(
+                "reconstruction primitive non supportee sur AMR (utiliser recon conservative)")
         time = time if time is not None else Explicit()
         self._s.add_block(name, model, spatial.limiter, spatial.flux, time.kind,
                           getattr(time, "substeps", 1))

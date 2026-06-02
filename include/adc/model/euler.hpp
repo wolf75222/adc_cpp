@@ -26,6 +26,7 @@ namespace adc {
  */
 struct Euler {
   using State = StateVec<4>;  ///< variables conservatives (rho, rho u, rho v, E)
+  using Prim = StateVec<4>;   ///< variables primitives (rho, u, v, p)
   using Aux = adc::Aux;       ///< champs auxiliaires (inutilises en Euler pur)
   static constexpr int n_vars = 4;  ///< nombre de variables conservees
 
@@ -42,6 +43,27 @@ struct Euler {
     return std::sqrt(gamma * pressure(u) / u[0]);
   }
 
+  /// Conservatif -> primitif : (rho, rho u, rho v, E) -> (rho, u, v, p).
+  ADC_HD Prim to_primitive(const State& u) const {
+    const Real rho = u[0];
+    Prim p{};
+    p[0] = rho;
+    p[1] = u[1] / rho;
+    p[2] = u[2] / rho;
+    p[3] = pressure(u);
+    return p;
+  }
+  /// Primitif -> conservatif : (rho, u, v, p) -> (rho, rho u, rho v, E).
+  ADC_HD State to_conservative(const Prim& p) const {
+    const Real rho = p[0];
+    State u{};
+    u[0] = rho;
+    u[1] = rho * p[1];
+    u[2] = rho * p[2];
+    u[3] = p[3] / (gamma - Real(1)) + Real(0.5) * rho * (p[1] * p[1] + p[2] * p[2]);
+    return u;
+  }
+
   /**
    * Vitesses d'onde signees extremes dans la direction dir : v_dir - c et v_dir + c.
    *
@@ -54,8 +76,9 @@ struct Euler {
    */
   ADC_HD void wave_speeds(const State& u, const Aux&, int dir, Real& smin,
                           Real& smax) const {
-    const Real vn = (dir == 0 ? u[1] : u[2]) / u[0];
-    const Real c = sound_speed(u);
+    const Prim p = to_primitive(u);
+    const Real vn = (dir == 0 ? p[1] : p[2]);
+    const Real c = std::sqrt(gamma * p[3] / p[0]);
     smin = vn - c;
     smax = vn + c;
   }
@@ -73,11 +96,12 @@ struct Euler {
     return f;
   }
 
-  /// Vitesse d'onde maximale |v_dir| + c (estimation Rusanov).
+  /// Vitesse d'onde maximale |v_dir| + c (estimation Rusanov), calculee en primitif.
   ADC_HD Real max_wave_speed(const State& u, const Aux&, int dir) const {
-    const Real vn = (dir == 0 ? u[1] : u[2]) / u[0];
+    const Prim p = to_primitive(u);
+    const Real vn = (dir == 0 ? p[1] : p[2]);
     const Real a = vn < 0 ? -vn : vn;  // |v_dir| device-safe
-    return a + sound_speed(u);
+    return a + std::sqrt(gamma * p[3] / p[0]);
   }
 
   /// Terme source nul : Euler pur.

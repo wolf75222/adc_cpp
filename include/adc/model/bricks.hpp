@@ -42,6 +42,10 @@ struct ExBVelocity {
     const Real d = velocity(a, dir);
     return d < 0 ? -d : d;
   }
+  // Transport scalaire : variables primitives = conservatives (densite transportee).
+  using Prim = StateVec<1>;
+  ADC_HD Prim to_primitive(const StateVec<1>& u) const { return u; }
+  ADC_HD StateVec<1> to_conservative(const Prim& p) const { return p; }
 };
 
 /// Flux d'Euler compressible 2D (reutilise Euler : gamma, pression, vitesses d'onde signees).
@@ -50,6 +54,7 @@ using CompressibleFlux = Euler;
 /// Flux d'Euler ISOTHERME (p = cs^2 rho), 3 variables (rho, rho u, rho v).
 struct IsothermalFlux {
   static constexpr int n_vars = 3;
+  using Prim = StateVec<3>;  ///< variables primitives (rho, u, v)
   Real cs2 = 1;
   ADC_HD StateVec<3> flux(const StateVec<3>& u, const Aux&, int dir) const {
     const Real rho = u[0];
@@ -61,15 +66,33 @@ struct IsothermalFlux {
     f[2] = u[2] * vn + (dir == 1 ? p : Real(0));
     return f;
   }
+  /// Conservatif -> primitif : (rho, rho u, rho v) -> (rho, u, v).
+  ADC_HD Prim to_primitive(const StateVec<3>& u) const {
+    Prim p{};
+    p[0] = u[0];
+    p[1] = u[1] / u[0];
+    p[2] = u[2] / u[0];
+    return p;
+  }
+  /// Primitif -> conservatif : (rho, u, v) -> (rho, rho u, rho v).
+  ADC_HD StateVec<3> to_conservative(const Prim& p) const {
+    StateVec<3> u{};
+    u[0] = p[0];
+    u[1] = p[0] * p[1];
+    u[2] = p[0] * p[2];
+    return u;
+  }
   ADC_HD Real max_wave_speed(const StateVec<3>& u, const Aux&, int dir) const {
-    const Real vn = (dir == 0 ? u[1] : u[2]) / u[0];
+    const Prim p = to_primitive(u);
+    const Real vn = (dir == 0 ? p[1] : p[2]);
     const Real a = vn < 0 ? -vn : vn;
     return a + std::sqrt(cs2);
   }
   /// Vitesses signees (HLL/HLLC) : v_dir -+ c_s.
   ADC_HD void wave_speeds(const StateVec<3>& u, const Aux&, int dir, Real& smin,
                           Real& smax) const {
-    const Real vn = (dir == 0 ? u[1] : u[2]) / u[0];
+    const Prim p = to_primitive(u);
+    const Real vn = (dir == 0 ? p[1] : p[2]);
     const Real c = std::sqrt(cs2);
     smin = vn - c;
     smax = vn + c;
@@ -156,6 +179,7 @@ struct GravityCoupling {
 template <class Transport, class Source, class Elliptic>
 struct CompositeModel {
   using State = StateVec<Transport::n_vars>;
+  using Prim = typename Transport::Prim;
   using Aux = adc::Aux;
   static constexpr int n_vars = Transport::n_vars;
 
@@ -169,6 +193,8 @@ struct CompositeModel {
   }
   ADC_HD State source(const State& u, const Aux& a) const { return src.apply(u, a); }
   ADC_HD Real elliptic_rhs(const State& u) const { return ell.rhs(u); }
+  ADC_HD Prim to_primitive(const State& u) const { return tr.to_primitive(u); }
+  ADC_HD State to_conservative(const Prim& p) const { return tr.to_conservative(p); }
 
   ADC_HD Real pressure(const State& u) const
     requires requires(const Transport t, const State s) { t.pressure(s); }

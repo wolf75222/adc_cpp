@@ -39,6 +39,7 @@ adc_add_test(test_cut_cell)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)
+adc_add_test(test_primitive_recon)
 adc_add_test(test_system_abstraction)
 adc_add_test(test_system_coupler)
 adc_add_test(test_two_species_minimal)

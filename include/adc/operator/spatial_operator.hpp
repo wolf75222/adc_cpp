@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/core/state.hpp>
+#include <adc/core/physical_model.hpp>  // HasPrimitiveVars : reconstruction primitive optionnelle
 #include <adc/core/types.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>
@@ -57,6 +58,9 @@ struct SourceFreeModel {
   }
   ADC_HD State source(const State&, const Aux&) const { return State{}; }
   ADC_HD Real elliptic_rhs(const State& u) const { return m.elliptic_rhs(u); }
+  // SourceFreeModel n'expose pas les variables primitives : le demi-pas explicite IMEX qui
+  // l'utilise reconstruit donc en conservatif (le chemin explicite direct, lui, dispose des
+  // conversions du modele compose et peut reconstruire en primitif).
   // Transparent au contrat HLL/HLLC : ne forwarde pression et vitesses signees QUE si M
   // les expose (clause requires), pour qu'un demi-pas IMEX puisse rester en flux HLLC.
   ADC_HD Real pressure(const State& u) const
@@ -121,11 +125,44 @@ ADC_HD inline typename Model::State rusanov_flux(const Model& m,
 }
 
 // Valeur de cellule (i,j) extrapolee vers sa face +dir (sgn=+1) ou -dir (sgn=-1).
-// Pour NoSlope (n_ghost==1) : pas de pente, aucune lecture de voisin.
+// Reconstruit en variables PRIMITIVES si prim==true et que le modele expose les conversions
+// (plus robuste pour Euler : positivite de rho et p) ; sinon en conservatif. L'etat rendu est
+// TOUJOURS conservatif (consomme par le flux numerique). NoSlope (n_ghost==1) : pas de pente,
+// prim sans effet -> chemin conservatif.
 template <class Model, class Limiter>
-ADC_HD inline typename Model::State reconstruct(const ConstArray4& u, int i,
-                                                int j, int dir, Real sgn,
-                                                const Limiter& lim) {
+ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstArray4& u,
+                                                int i, int j, int dir, Real sgn,
+                                                const Limiter& lim, bool prim) {
+  if constexpr (HasPrimitiveVars<Model> && Limiter::n_ghost >= 2) {
+    if (prim) {  // convertir le stencil U->P, limiter sur P, reconvertir P->U
+      using Prim = typename Model::Prim;
+      const Prim P0 = model.to_primitive(load_state<Model>(u, i, j));
+      Prim Pf{};
+      if constexpr (Limiter::n_ghost == 2) {
+        const Prim Pm = model.to_primitive(
+            load_state<Model>(u, dir == 0 ? i - 1 : i, dir == 0 ? j : j - 1));
+        const Prim Pp = model.to_primitive(
+            load_state<Model>(u, dir == 0 ? i + 1 : i, dir == 0 ? j : j + 1));
+        for (int c = 0; c < Model::n_vars; ++c)
+          Pf[c] = P0[c] + sgn * Real(0.5) * lim(P0[c] - Pm[c], Pp[c] - P0[c]);
+      } else {  // WENO5 sur le stencil 5 points en primitif
+        const int d = (sgn > Real(0)) ? 1 : -1;
+        const Prim Pm2 = model.to_primitive(
+            load_state<Model>(u, dir == 0 ? i - 2 * d : i, dir == 0 ? j : j - 2 * d));
+        const Prim Pm1 = model.to_primitive(
+            load_state<Model>(u, dir == 0 ? i - d : i, dir == 0 ? j : j - d));
+        const Prim Pp1 = model.to_primitive(
+            load_state<Model>(u, dir == 0 ? i + d : i, dir == 0 ? j : j + d));
+        const Prim Pp2 = model.to_primitive(
+            load_state<Model>(u, dir == 0 ? i + 2 * d : i, dir == 0 ? j : j + 2 * d));
+        for (int c = 0; c < Model::n_vars; ++c)
+          Pf[c] = weno5z(Pm2[c], Pm1[c], P0[c], Pp1[c], Pp2[c]);
+      }
+      return model.to_conservative(Pf);
+    }
+  }
+  (void)model;
+  (void)prim;
   typename Model::State s = load_state<Model>(u, i, j);
   if constexpr (Limiter::n_ghost == 2) {
     // MUSCL : pente limitee par composante (ordre 2).
@@ -183,7 +220,8 @@ inline Box2D yface_box(const Box2D& v) {
 // lus pour un modele non diffusif -> chemin hyperbolique strictement bit-identique).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& aux,
-                         MultiFab& Fx, MultiFab& Fy, Real dx = 0, Real dy = 0) {
+                         MultiFab& Fx, MultiFab& Fy, Real dx = 0, Real dy = 0,
+                         bool recon_prim = false) {
   const Limiter lim{};
   const NumericalFlux nflux{};
   for (int li = 0; li < U.local_size(); ++li) {
@@ -193,8 +231,8 @@ void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& 
     Array4 fy = Fy.fab(li).array();
     const Box2D v = U.box(li);
     for_each_cell(xface_box(v), [=] ADC_HD(int i, int j) {
-      const auto L = reconstruct<Model>(u, i - 1, j, 0, +1, lim);
-      const auto Rr = reconstruct<Model>(u, i, j, 0, -1, lim);
+      const auto L = reconstruct<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim);
+      const auto Rr = reconstruct<Model>(model, u, i, j, 0, -1, lim, recon_prim);
       const auto F = nflux(model, L, load_aux(ax, i - 1, j), Rr, load_aux(ax, i, j), 0);
       for (int c = 0; c < Model::n_vars; ++c) fx(i, j, c) = F[c];
       if constexpr (DiffusiveModel<Model>) {
@@ -204,8 +242,8 @@ void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& 
       }
     });
     for_each_cell(yface_box(v), [=] ADC_HD(int i, int j) {
-      const auto L = reconstruct<Model>(u, i, j - 1, 1, +1, lim);
-      const auto Rr = reconstruct<Model>(u, i, j, 1, -1, lim);
+      const auto L = reconstruct<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim);
+      const auto Rr = reconstruct<Model>(model, u, i, j, 1, -1, lim, recon_prim);
       const auto F = nflux(model, L, load_aux(ax, i, j - 1), Rr, load_aux(ax, i, j), 1);
       for (int c = 0; c < Model::n_vars; ++c) fy(i, j, c) = F[c];
       if constexpr (DiffusiveModel<Model>) {
@@ -222,7 +260,7 @@ void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& 
 // MUSCL au choix de l'appelant + Rusanov. Tous deux device-callable (ADC_HD).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
-                  const Geometry& geom, MultiFab& R) {
+                  const Geometry& geom, MultiFab& R, bool recon_prim = false) {
   const Real dx = geom.dx(), dy = geom.dy();
   const Limiter lim{};
   const NumericalFlux nflux{};
@@ -239,18 +277,18 @@ void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
       const Aux Ayp = load_aux(ax, i, j + 1);
 
       // faces x : reconstruction des etats de part et d'autre de chaque face
-      const auto Lxm = reconstruct<Model>(u, i - 1, j, 0, +1, lim);
-      const auto Rxm = reconstruct<Model>(u, i, j, 0, -1, lim);
-      const auto Lxp = reconstruct<Model>(u, i, j, 0, +1, lim);
-      const auto Rxp = reconstruct<Model>(u, i + 1, j, 0, -1, lim);
+      const auto Lxm = reconstruct<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim);
+      const auto Rxm = reconstruct<Model>(model, u, i, j, 0, -1, lim, recon_prim);
+      const auto Lxp = reconstruct<Model>(model, u, i, j, 0, +1, lim, recon_prim);
+      const auto Rxp = reconstruct<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim);
       const auto Fxm = nflux(model, Lxm, Axm, Rxm, Ac, 0);
       const auto Fxp = nflux(model, Lxp, Ac, Rxp, Axp, 0);
 
       // faces y
-      const auto Lym = reconstruct<Model>(u, i, j - 1, 1, +1, lim);
-      const auto Rym = reconstruct<Model>(u, i, j, 1, -1, lim);
-      const auto Lyp = reconstruct<Model>(u, i, j, 1, +1, lim);
-      const auto Ryp = reconstruct<Model>(u, i, j + 1, 1, -1, lim);
+      const auto Lym = reconstruct<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim);
+      const auto Rym = reconstruct<Model>(model, u, i, j, 1, -1, lim, recon_prim);
+      const auto Lyp = reconstruct<Model>(model, u, i, j, 1, +1, lim, recon_prim);
+      const auto Ryp = reconstruct<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim);
       const auto Fym = nflux(model, Lym, Aym, Rym, Ac, 1);
       const auto Fyp = nflux(model, Lyp, Ac, Ryp, Ayp, 1);
 

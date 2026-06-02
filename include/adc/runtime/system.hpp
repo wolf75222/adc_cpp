@@ -43,12 +43,18 @@ class System {
   /// @param model    composition de briques (transport/source/elliptic + parametres)
   /// @param limiter  reconstruction : "none" | "minmod" | "vanleer"
   /// @param riemann  flux numerique : "rusanov" | "hllc" (hllc exige un transport a pression)
+  /// @param recon    variables reconstruites : "conservative" | "primitive" (Euler : primitif
+  ///                 plus robuste, positivite de rho et p)
   /// @param time     "explicit" (SSPRK2) | "imex" (transport explicite, source implicite)
   /// @param substeps sous-pas par macro-pas
+  /// @param evolve   false = espece GELEE (fond fixe) : non avancee en temps, mais vue par le
+  ///                 Poisson de systeme (et, a venir, par les sources couplees)
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
-                 const std::string& time = "explicit", int substeps = 1);
+                 const std::string& recon = "conservative",
+                 const std::string& time = "explicit", int substeps = 1,
+                 bool evolve = true);
 
   /// Configure le Poisson partage.
   /// @param rhs    seul mode : "charge_density", f = somme_s elliptic_rhs_s(u_s)
@@ -63,6 +69,22 @@ class System {
   /// Fixe la densite d'une espece (composante 0), tableau n*n row-major. Les autres
   /// composantes (qte de mouvement, energie) sont posees a l'equilibre au repos.
   void set_density(const std::string& name, const std::vector<double>& rho);
+
+  /// Ajoute un couplage d'IONISATION (operator-split) : taux k n_e n_g ; un neutre devient un ion
+  /// et un electron. Masse transferee du neutre vers l'ion (n_i + n_g conserve). Les trois blocs
+  /// doivent exister. Premiere brique de source inter-especes (sur la densite, comp 0).
+  void add_ionization(const std::string& electron, const std::string& ion,
+                      const std::string& neutral, double rate);
+
+  /// Ajoute une COLLISION / friction inter-especes (operator-split) : force k (u_a - u_b) sur la
+  /// quantite de mouvement, opposee sur chaque espece (qte de mvt totale conservee). Les deux
+  /// blocs doivent etre fluides (>= 3 variables). Echauffement par friction neglige (raffinement).
+  void add_collision(const std::string& a, const std::string& b, double rate);
+
+  /// Ajoute un ECHANGE THERMIQUE inter-especes (operator-split) : flux de chaleur k (T_a - T_b)
+  /// sur l'energie, oppose sur chaque espece (energie totale conservee) ; T = p/rho. Les deux
+  /// blocs doivent etre Euler compressible (4 variables, equation d'energie).
+  void add_thermal_exchange(const std::string& a, const std::string& b, double rate);
 
   void solve_fields();   ///< resout Poisson puis derive aux = (phi, grad phi)
   void step(double dt);  ///< solve_fields, puis avance chaque bloc selon son schema
