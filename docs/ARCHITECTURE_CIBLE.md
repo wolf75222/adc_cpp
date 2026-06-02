@@ -139,14 +139,26 @@ Etape (2) FAITE pour Euler (codegen hote + emballage en brique) :
   non inversibles (to_conservative) sont fournies par l'utilisateur (`set_conservative_from`), le DSL
   ne sachant pas inverser symboliquement.
 
-Verifie : `test_dsl_codegen.py` (flux genere == interprete numpy) ; `test_dsl_brick.py` (la brique
-COMPILE contre les en-tetes adc, `static_assert(adc::HyperbolicModel<...>)`, et == `adc::Euler` ecrite
-a la main, ecart nul).
+- `emit_cpp_source()` genere une BRIQUE de SOURCE composable (`apply(U, a)`), avec locals aux lus
+  comme `a.<champ>` (convention : noms aux = champs de `adc::Aux`, p.ex. grad_x / grad_y).
 
-RESTE (le compilateur) : codegen des sources / contributions elliptiques, CSE (H et c sont inlines a
-chaque apparition), branchement de la brique generee dans la factory runtime (dispatch / `ModelSpec`),
-puis (3) Kokkos/CUDA et (4) JIT. Le prototype et ce codegen hote NE remplacent PAS les briques
-compilees de production.
+Verifie (tous en CI) :
+- `test_dsl_codegen.py` : flux genere == interprete numpy ;
+- `test_dsl_brick.py` : la brique COMPILE contre les en-tetes adc, `static_assert(adc::HyperbolicModel<...>)`,
+  et == `adc::Euler` (4 var, sans aux) ET `adc::ExBVelocity` (1 var, flux dependant des aux), ecart nul ;
+- `test_dsl_source.py` : la source generee == `adc::PotentialForce` ;
+- `test_dsl_compose.py` : `CompositeModel<EulerGen, NoSource, ChargeDensity>` satisfait `adc::PhysicalModel`
+  et egale la version ecrite a la main ;
+- `test_dsl_jit.py` : JIT-lite end-to-end (formules Python -> `.hpp` genere -> g++ compile un driver
+  volumes-finis -> residu Rusanov identique a `adc::Euler`).
+Verifie aussi sur ROMEO (g++ 11, C++20) : compilation et egalite au bit pres.
+
+RESTE (le compilateur) : codegen des contributions elliptiques ; CSE (H et c sont inlines a chaque
+apparition) ; branchement de la brique generee dans la factory runtime (dispatch / `ModelSpec`, ce qui
+suppose un JIT/compilation a la volee puisque le solveur compile travaille sur des types connus a la
+compilation) ; puis (3) Kokkos/CUDA et (4) JIT complet. La brique generee est deja device-ready
+(`ADC_HD`, ops device-safe, `std::sqrt` comme `adc::Euler`). Le prototype et ce codegen hote NE
+remplacent PAS les briques compilees de production.
 
 ---
 

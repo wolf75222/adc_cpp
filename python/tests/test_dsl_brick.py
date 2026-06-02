@@ -72,6 +72,54 @@ int main() {
 """
 
 
+def build_exb_brick():
+    """Transport scalaire par derive E x B (B0=1) : flux qui DEPEND des champs auxiliaires (grad phi).
+    Sert a verifier que la brique generee emet bien des locals aux (a.grad_x / a.grad_y) dans flux et
+    max_wave_speed, et reproduit la brique manuelle adc::ExBVelocity{B0=1}."""
+    e = dsl.HyperbolicModel("exb")
+    (n,) = e.conservative_vars("n")
+    gx = e.aux("grad_x")
+    gy = e.aux("grad_y")
+    e.set_flux(x=[n * (-gy)], y=[n * gx])     # v = (-d_y phi, d_x phi)/B0 ; flux = n v
+    e.set_eigenvalues(x=[-gy], y=[gx])        # |v_dir| comme borne
+    e.set_primitive_state(n)                  # scalaire : primitif = conservatif
+    e.set_conservative_from([n])
+    return e
+
+
+EXB_HARNESS = r"""
+#include <adc/model/bricks.hpp>
+#include <adc/core/physical_model.hpp>
+%s
+#include <cstdio>
+#include <cmath>
+
+static_assert(adc::HyperbolicModel<adc::ExBVelocity>, "oracle ExB non conforme (setup du test)");
+static_assert(adc::HyperbolicModel<adc_generated::ExBGen>, "brique ExB generee non conforme au concept");
+
+int main() {
+  adc::ExBVelocity ref; ref.B0 = 1.0;
+  adc_generated::ExBGen gen;
+  const double S[] = {0.5, 1.0, 2.0, -0.3};
+  const double A[][2] = {{0.5,-0.3},{-0.2,0.7},{0.0,0.4},{1.1,-0.9}};
+  double maxdiff = 0.0;
+  auto upd = [&](double a, double b){ double d = std::fabs(a-b); if (d>maxdiff) maxdiff=d; };
+  for (int k=0;k<4;++k){
+    adc::StateVec<1> u{}; u[0]=S[k];
+    for (int j=0;j<4;++j){
+      adc::Aux a{}; a.grad_x=A[j][0]; a.grad_y=A[j][1];
+      for (int dir=0; dir<2; ++dir){
+        upd(ref.flux(u,a,dir)[0], gen.flux(u,a,dir)[0]);
+        upd(ref.max_wave_speed(u,a,dir), gen.max_wave_speed(u,a,dir));
+      }
+    }
+  }
+  printf("%%.17g\n", maxdiff);
+  return 0;
+}
+"""
+
+
 def main():
     e = build_euler_brick()
     brick = e.emit_cpp_brick(name="EulerGen")
@@ -103,6 +151,23 @@ def main():
     assert maxdiff < 1e-12, "brique generee != adc::Euler (ecart max %.2e)" % maxdiff
     print("OK  static_assert(HyperbolicModel<EulerGen>) + brique == adc::Euler (ecart max %.1e)"
           % maxdiff)
+
+    # (2) brique a flux dependant des AUXILIAIRES (ExB) : les locals aux doivent etre emis dans
+    # flux ET max_wave_speed, et la brique doit egaler adc::ExBVelocity ecrite a la main.
+    exb = build_exb_brick().emit_cpp_brick(name="ExBGen")
+    assert exb.count("const adc::Real grad_x = a.grad_x;") >= 2, "locals aux absents (flux/vitesse)"
+    assert "flux(const State& U, const Aux& a, int dir)" in exb, "parametre Aux non nomme dans le flux"
+    prog2 = EXB_HARNESS % exb
+    with tempfile.TemporaryDirectory() as tmp:
+        cpp = os.path.join(tmp, "exb.cpp")
+        exe = os.path.join(tmp, "exb")
+        with open(cpp, "w") as f:
+            f.write(prog2)
+        subprocess.run([cxx, "-std=c++20", "-O2", "-I", INCLUDE, cpp, "-o", exe], check=True)
+        out2 = subprocess.run([exe], capture_output=True, text=True, check=True).stdout
+    d2 = float(out2.strip())
+    assert d2 < 1e-12, "brique ExB generee != adc::ExBVelocity (ecart max %.2e)" % d2
+    print("OK  brique a flux auxiliaire (ExB) == adc::ExBVelocity (ecart max %.1e)" % d2)
     print("test_dsl_brick : tout est vert")
 
 

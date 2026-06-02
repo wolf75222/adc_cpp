@@ -158,7 +158,7 @@ class HyperbolicModel:
 
     def set_flux(self, x, y): self._flux = {"x": list(x), "y": list(y)}
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
-    def set_source(self, s): self._source = list(s)
+    def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
 
     def set_primitive_state(self, *vars_or_names):
@@ -247,6 +247,10 @@ class HyperbolicModel:
         (templatable sur Real). Le codegen Kokkos/CUDA (3) et le JIT (4) restent a faire ; ce code
         ne passe pas encore par l'interface de brique compilee adc (StateVec/Aux/ADC_HD)."""
         name = func or self.name
+        if not self._flux:
+            raise ValueError("emit_cpp : appeler set_flux(...) d'abord")
+        if len(self._flux.get("x", [])) != self.n_vars or len(self._flux.get("y", [])) != self.n_vars:
+            raise ValueError("emit_cpp : flux attendu avec %d composantes par direction" % self.n_vars)
         out = [
             "// genere depuis le modele symbolique '%s' (adc.dsl.emit_cpp)" % self.name,
             "// flux physique F = flux(U, dir) ; dir 0=x, 1=y ; U et F de taille %d." % self.n_vars,
@@ -282,6 +286,13 @@ class HyperbolicModel:
         if self.cons_from is None or len(self.cons_from) != self.n_vars:
             raise ValueError("emit_cpp_brick : set_conservative_from([...]) attendu (%d expressions)"
                              % self.n_vars)
+        if not self._flux:
+            raise ValueError("emit_cpp_brick : appeler set_flux(...) d'abord")
+        if len(self._flux.get("x", [])) != self.n_vars or len(self._flux.get("y", [])) != self.n_vars:
+            raise ValueError("emit_cpp_brick : flux attendu avec %d composantes par direction"
+                             % self.n_vars)
+        if not self._eig:
+            raise ValueError("emit_cpp_brick : appeler set_eigenvalues(...) d'abord")
         nm = name or (self.name.capitalize() + "Gen")
         nc, npr = self.n_vars, len(self.prim_state)
 
@@ -291,13 +302,22 @@ class HyperbolicModel:
         def prim_locals():
             return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
 
+        def aux_locals():
+            return ["    const adc::Real %s = a.%s;" % (n, n) for n in self.aux_names]
+
+        # parametre Aux nomme 'a' uniquement si une formule lit un champ auxiliaire (sinon anonyme,
+        # pour ne pas declencher d'avertissement de parametre inutilise).
+        aux_param = "const Aux& a" if self.aux_names else "const Aux&"
+
         def eig_block(eigs, ind):
-            lines = ["%sconst adc::Real l%d = %s;" % (ind, k, e.to_cpp()) for k, e in enumerate(eigs)]
-            lines.append("%sadc::Real m = l0 < 0 ? -l0 : l0;" % ind)
+            # noms internes a suffixe '_' : ne masquent ni une variable de l'utilisateur ni le
+            # parametre Aux 'a' (cf. revue adverse : collision possible avec une primitive l0/m/a).
+            lines = ["%sconst adc::Real lam%d_ = %s;" % (ind, k, e.to_cpp()) for k, e in enumerate(eigs)]
+            lines.append("%sadc::Real mws_ = lam0_ < 0 ? -lam0_ : lam0_;" % ind)
             for k in range(1, len(eigs)):
-                lines.append("%s{ const adc::Real a = l%d < 0 ? -l%d : l%d; if (a > m) m = a; }"
-                             % (ind, k, k, k))
-            lines.append("%sreturn m;" % ind)
+                lines.append("%s{ const adc::Real cand_ = lam%d_ < 0 ? -lam%d_ : lam%d_;"
+                             " if (cand_ > mws_) mws_ = cand_; }" % (ind, k, k, k))
+            lines.append("%sreturn mws_;" % ind)
             return lines
 
         cnames = ", ".join('"%s"' % c for c in self.cons_names)
@@ -313,9 +333,9 @@ class HyperbolicModel:
             "  using Aux   = adc::Aux;",
             "  static constexpr int n_vars = %d;" % nc,
             "",
-            "  ADC_HD State flux(const State& U, const Aux&, int dir) const {",
+            "  ADC_HD State flux(const State& U, %s, int dir) const {" % aux_param,
         ]
-        S += cons_locals() + prim_locals()
+        S += cons_locals() + prim_locals() + aux_locals()
         S.append("    State F{};")
         S.append("    if (dir == 0) {")
         S += ["      F[%d] = %s;" % (i, c.to_cpp()) for i, c in enumerate(self._flux["x"])]
@@ -323,8 +343,8 @@ class HyperbolicModel:
         S += ["      F[%d] = %s;" % (i, c.to_cpp()) for i, c in enumerate(self._flux["y"])]
         S += ["    }", "    return F;", "  }", ""]
 
-        S.append("  ADC_HD adc::Real max_wave_speed(const State& U, const Aux&, int dir) const {")
-        S += cons_locals() + prim_locals()
+        S.append("  ADC_HD adc::Real max_wave_speed(const State& U, %s, int dir) const {" % aux_param)
+        S += cons_locals() + prim_locals() + aux_locals()
         S.append("    if (dir == 0) {")
         S += eig_block(self._eig["x"], "      ")
         S.append("    } else {")
@@ -348,4 +368,49 @@ class HyperbolicModel:
         S.append('  static adc::Variables primitive_vars() { return {adc::VariableKind::Primitive, {%s}, %d}; }'
                  % (pnames, npr))
         S += ["};", "}  // namespace %s" % namespace]
+        return "\n".join(S) + "\n"
+
+    def emit_cpp_source(self, name=None, namespace="adc_generated"):
+        """Genere une BRIQUE de SOURCE C++ composable (au sens adc) depuis self._source.
+
+        Le struct produit expose apply(U, a) renvoyant le terme source S(U, aux), avec une ligne par
+        composante conservative (S[i] = self._source[i].to_cpp()). Il a la meme forme que les briques
+        de source ecrites a la main (NoSource, PotentialForce dans adc/model/bricks.hpp) et peut donc
+        entrer comme parametre Source d'un CompositeModel.
+
+        CONVENTION : les noms auxiliaires (poses via aux(...)) doivent etre des CHAMPS de adc::Aux,
+        car ils sont lus directement comme a.<nom> (p.ex. aux('grad_x') -> a.grad_x, aux('grad_y') ->
+        a.grad_y). Cette convention est la meme que celle des briques manuelles, ou la source ne lit
+        l'etat exterieur que par le canal adc::Aux (potentiel et son gradient).
+
+        Style identique a emit_cpp_brick (constantes inlinees, cons -> locals, primitives -> locals ;
+        en plus, aux -> locals) ; pas de CSE. Leve ValueError si set_source(...) n'a pas ete appele."""
+        if self._source is None:
+            raise ValueError("emit_cpp_source : appeler set_source([...]) d'abord")
+        nm = name or (self.name.capitalize() + "Source")
+        nc = self.n_vars
+
+        def cons_locals():
+            return ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
+
+        def prim_locals():
+            return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
+
+        def aux_locals():
+            return ["    const adc::Real %s = a.%s;" % (nm_, nm_) for nm_ in self.aux_names]
+
+        S = [
+            "// brique de SOURCE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_source)."
+            % self.name,
+            "// apply(U, a) -> terme source S(U, aux) ; noms aux = champs de adc::Aux (grad_x, grad_y).",
+            "namespace %s {" % namespace,
+            "struct %s {" % nm,
+            "  ADC_HD adc::StateVec<%d> apply(const adc::StateVec<%d>& U, const adc::Aux& a) const {"
+            % (nc, nc),
+        ]
+        S += cons_locals() + prim_locals() + aux_locals()
+        S.append("    adc::StateVec<%d> S{};" % nc)
+        # _wrap : une composante peut etre un litteral Python (p.ex. 0.0), promu en Const.
+        S += ["    S[%d] = %s;" % (i, _wrap(e).to_cpp()) for i, e in enumerate(self._source)]
+        S += ["    return S;", "  }", "};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
