@@ -50,6 +50,7 @@ def _wrap(o):
 class Const(Expr):
     def __init__(self, value): self.value = float(value)
     def eval(self, env): return self.value
+    def to_cpp(self): return repr(self.value)
     def _str(self): return repr(self.value)
 
 
@@ -62,6 +63,7 @@ class Var(Expr):
             raise KeyError("variable '%s' (%s) absente de l'environnement" % (self.name, self.kind))
         return env[self.name]
     def deps(self): return {self.name}
+    def to_cpp(self): return self.name
     def _str(self): return self.name
 
 
@@ -69,6 +71,7 @@ class _Bin(Expr):
     op = "?"
     def __init__(self, a, b): self.a = a; self.b = b
     def deps(self): return self.a.deps() | self.b.deps()
+    def to_cpp(self): return "(%s %s %s)" % (self.a.to_cpp(), self.op, self.b.to_cpp())
     def _str(self): return "(%s %s %s)" % (self.a, self.op, self.b)
 
 
@@ -95,12 +98,14 @@ class Div(_Bin):
 class Pow(_Bin):
     op = "**"
     def eval(self, env): return self.a.eval(env) ** self.b.eval(env)
+    def to_cpp(self): return "std::pow(%s, %s)" % (self.a.to_cpp(), self.b.to_cpp())
 
 
 class Neg(Expr):
     def __init__(self, a): self.a = a
     def eval(self, env): return -self.a.eval(env)
     def deps(self): return self.a.deps()
+    def to_cpp(self): return "(-%s)" % self.a.to_cpp()
     def _str(self): return "(-%s)" % self.a
 
 
@@ -108,6 +113,7 @@ class Sqrt(Expr):
     def __init__(self, a): self.a = a
     def eval(self, env): return np.sqrt(self.a.eval(env))
     def deps(self): return self.a.deps()
+    def to_cpp(self): return "std::sqrt(%s)" % self.a.to_cpp()
     def _str(self): return "sqrt(%s)" % self.a
 
 
@@ -213,3 +219,37 @@ class HyperbolicModel:
         if missing:
             raise ValueError("modele '%s' : variables non definies %s" % (self.name, sorted(missing)))
         return True
+
+    # --- codegen (etape 2 : arbre symbolique -> C++ compilable) ---
+    def emit_cpp(self, func=None):
+        """Genere une fonction C++ compilable calculant le flux physique a partir de l'arbre
+        symbolique (chaque noeud Expr sait s'ecrire en C++ via to_cpp).
+
+        Signature produite : template <class Real> void <func>_flux(const Real* U, Real* F, int dir).
+        Les constantes sont inlinees ; chaque primitive devient une variable locale (les
+        sous-expressions H, c... sont inlinees a chaque apparition, pas de CSE pour l'instant).
+
+        C'est l'etape (2) du DSL (cf. docs/ARCHITECTURE_CIBLE.md sect. 3) : on genere du C++ HOTE
+        (templatable sur Real). Le codegen Kokkos/CUDA (3) et le JIT (4) restent a faire ; ce code
+        ne passe pas encore par l'interface de brique compilee adc (StateVec/Aux/ADC_HD)."""
+        name = func or self.name
+        out = [
+            "// genere depuis le modele symbolique '%s' (adc.dsl.emit_cpp)" % self.name,
+            "// flux physique F = flux(U, dir) ; dir 0=x, 1=y ; U et F de taille %d." % self.n_vars,
+            "#include <cmath>",
+            "template <class Real>",
+            "inline void %s_flux(const Real* U, Real* F, int dir) {" % name,
+        ]
+        for i, c in enumerate(self.cons_names):
+            out.append("  const Real %s = U[%d];" % (c, i))
+        for pname, pexpr in self.prim_defs.items():
+            out.append("  const Real %s = %s;" % (pname, pexpr.to_cpp()))
+        out.append("  if (dir == 0) {")
+        for i, comp in enumerate(self._flux["x"]):
+            out.append("    F[%d] = %s;" % (i, comp.to_cpp()))
+        out.append("  } else {")
+        for i, comp in enumerate(self._flux["y"]):
+            out.append("    F[%d] = %s;" % (i, comp.to_cpp()))
+        out.append("  }")
+        out.append("}")
+        return "\n".join(out) + "\n"

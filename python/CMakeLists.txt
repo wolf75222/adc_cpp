@@ -33,3 +33,9 @@ add_test(NAME test_dsl
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)
 set_tests_properties(test_dsl PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# Codegen C++ du DSL : compile la fonction flux generee et la compare a l'interprete numpy.
+add_test(NAME test_dsl_codegen
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_codegen.py)
+set_tests_properties(test_dsl_codegen PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")

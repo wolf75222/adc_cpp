@@ -3,8 +3,8 @@
 Doc de VISION (pas l'etat actuel), issu de la description du tuteur. A relire avant la seance
 tableau. Deux niveaux :
 - **(A)** l'architecture OO en couches (modeles composables) : DEJA largement realisee dans adc_cpp ;
-- **(B)** le DSL symbolique ou Python ECRIT les formules : interprete CPU PROTOTYPE fait (`adc.dsl`) ;
-  le codegen C++/GPU reste le gros chantier (compilateur).
+- **(B)** le DSL symbolique ou Python ECRIT les formules : interprete CPU + codegen C++ du flux faits
+  (`adc.dsl`) ; codegen Kokkos/CUDA + JIT restent le gros chantier (compilateur).
 
 ---
 
@@ -130,8 +130,13 @@ Verifie : `python/tests/test_dsl.py` (flux symbolique d'Euler == flux de referen
 `max_wave_speed` coherent, `check()` detecte une variable non definie, masse conservee a l'execution)
 et le cas `adc_cases/dsl_euler/` (Euler ecrit en formules, expansion acoustique, masse conservee).
 
-RESTE a faire (le compilateur) : (2) codegen C++ depuis l'arbre, (3) codegen Kokkos/CUDA, (4) JIT.
-Le prototype CPU NE remplace PAS les briques compilees (il prototype, lentement, sur l'hote).
+Etape (2) AMORCEE : `emit_cpp()` genere une fonction C++ `template <class Real> void <nom>_flux(
+const Real* U, Real* F, int dir)` depuis l'arbre (chaque noeud `Expr` sait s'ecrire via `to_cpp()`) ;
+`python/tests/test_dsl_codegen.py` COMPILE cette fonction (c++) et verifie qu'elle rend le meme flux
+que l'interprete numpy (memes etats). RESTE : codegen des valeurs propres / source / conversions,
+suppression des sous-expressions communes (CSE : H et c sont inlines a chaque apparition), emballage
+en brique adc compilee (StateVec / Aux / ADC_HD), puis (3) Kokkos/CUDA et (4) JIT. Le prototype et ce
+codegen NE remplacent PAS les briques compilees de production.
 
 ---
 

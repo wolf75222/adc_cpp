@@ -52,12 +52,16 @@ jobs:
       - name: Build + test Python module `adc`
         # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On
         # construit l'extension _adc et on exerce test_bindings.py (composition,
-        # Poisson a paroi, implicite/explicite par bloc, integrateur Python).
+        # Poisson a paroi, implicite/explicite par bloc, integrateur Python),
+        # test_dsl.py (mini-DSL symbolique, interprete CPU) et test_dsl_codegen.py
+        # (codegen C++ : compile la fonction generee et la compare a l'interprete).
         run: |
           pip install --upgrade pip numpy
           cmake -B build-py -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_PYTHON=ON -DADC_USE_EIGEN=OFF
           cmake --build build-py --target _adc -j 2
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_bindings.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_codegen.py
 
   mpi:
     name: ubuntu-latest / MPI
