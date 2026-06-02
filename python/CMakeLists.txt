@@ -39,3 +39,10 @@ add_test(NAME test_dsl_codegen
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_codegen.py)
 set_tests_properties(test_dsl_codegen PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# Emballage en brique compilee : compile la brique generee contre les en-tetes adc, verifie le
+# concept HyperbolicModel et l'egalite avec adc::Euler. -I include passe via le source du test.
+add_test(NAME test_dsl_brick
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_brick.py)
+set_tests_properties(test_dsl_brick PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")

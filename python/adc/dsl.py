@@ -136,6 +136,8 @@ class HyperbolicModel:
         self._eig = {}          # "x" / "y" -> liste d'Expr (valeurs propres)
         self._source = None     # liste d'Expr (une par composante) ou None
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
+        self.prim_state = []    # noms ordonnes de l'etat primitif (layout de Prim) ; pour le codegen
+        self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
 
     def cons(self, name):
         self.cons_names.append(name)
@@ -158,6 +160,18 @@ class HyperbolicModel:
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
     def set_source(self, s): self._source = list(s)
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
+
+    def set_primitive_state(self, *vars_or_names):
+        """Declare le layout ORDONNE de l'etat primitif (Prim) : noms des composantes, dans l'ordre.
+        Necessaire au codegen brique (to_primitive remplit Prim dans cet ordre). Chaque nom doit
+        etre une variable conservative ou une primitive deja definie."""
+        self.prim_state = [v.name if isinstance(v, Var) else str(v) for v in vars_or_names]
+
+    def set_conservative_from(self, exprs):
+        """Formules du conservatif en fonction des primitives (une par variable conservative, dans
+        l'ordre de conservative_vars). Sert a generer to_conservative : le DSL ne sait pas inverser
+        symboliquement les primitives, l'utilisateur fournit donc l'inverse explicitement."""
+        self.cons_from = [_wrap(e) for e in exprs]
 
     @property
     def n_vars(self): return len(self.cons_names)
@@ -253,3 +267,85 @@ class HyperbolicModel:
         out.append("  }")
         out.append("}")
         return "\n".join(out) + "\n"
+
+    def emit_cpp_brick(self, name=None, namespace="adc_generated"):
+        """Genere une BRIQUE C++ satisfaisant le concept adc::HyperbolicModel (emballage : etape
+        2bis). Le struct produit utilise StateVec / Aux / ADC_HD / Variables et expose flux,
+        max_wave_speed, to_primitive, to_conservative, conservative_vars, primitive_vars : il peut
+        donc entrer dans un CompositeModel et tourner dans le solveur compile.
+
+        Exige set_primitive_state(...) (layout de Prim) et set_conservative_from([...]) (to_conservative,
+        que le DSL ne sait pas inverser tout seul). Constantes inlinees, primitives -> locals, pas de
+        CSE. Reste a faire (cf. ARCHITECTURE_CIBLE.md sect. 3) : CSE, codegen Kokkos/CUDA, JIT."""
+        if not self.prim_state:
+            raise ValueError("emit_cpp_brick : appeler set_primitive_state(...) d'abord")
+        if self.cons_from is None or len(self.cons_from) != self.n_vars:
+            raise ValueError("emit_cpp_brick : set_conservative_from([...]) attendu (%d expressions)"
+                             % self.n_vars)
+        nm = name or (self.name.capitalize() + "Gen")
+        nc, npr = self.n_vars, len(self.prim_state)
+
+        def cons_locals():
+            return ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
+
+        def prim_locals():
+            return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
+
+        def eig_block(eigs, ind):
+            lines = ["%sconst adc::Real l%d = %s;" % (ind, k, e.to_cpp()) for k, e in enumerate(eigs)]
+            lines.append("%sadc::Real m = l0 < 0 ? -l0 : l0;" % ind)
+            for k in range(1, len(eigs)):
+                lines.append("%s{ const adc::Real a = l%d < 0 ? -l%d : l%d; if (a > m) m = a; }"
+                             % (ind, k, k, k))
+            lines.append("%sreturn m;" % ind)
+            return lines
+
+        cnames = ", ".join('"%s"' % c for c in self.cons_names)
+        pnames = ", ".join('"%s"' % p for p in self.prim_state)
+        S = [
+            "// brique HYPERBOLIQUE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_brick)."
+            % self.name,
+            "// Satisfait adc::HyperbolicModel : flux + max_wave_speed + conversions + descripteurs.",
+            "namespace %s {" % namespace,
+            "struct %s {" % nm,
+            "  using State = adc::StateVec<%d>;" % nc,
+            "  using Prim  = adc::StateVec<%d>;" % npr,
+            "  using Aux   = adc::Aux;",
+            "  static constexpr int n_vars = %d;" % nc,
+            "",
+            "  ADC_HD State flux(const State& U, const Aux&, int dir) const {",
+        ]
+        S += cons_locals() + prim_locals()
+        S.append("    State F{};")
+        S.append("    if (dir == 0) {")
+        S += ["      F[%d] = %s;" % (i, c.to_cpp()) for i, c in enumerate(self._flux["x"])]
+        S.append("    } else {")
+        S += ["      F[%d] = %s;" % (i, c.to_cpp()) for i, c in enumerate(self._flux["y"])]
+        S += ["    }", "    return F;", "  }", ""]
+
+        S.append("  ADC_HD adc::Real max_wave_speed(const State& U, const Aux&, int dir) const {")
+        S += cons_locals() + prim_locals()
+        S.append("    if (dir == 0) {")
+        S += eig_block(self._eig["x"], "      ")
+        S.append("    } else {")
+        S += eig_block(self._eig["y"], "      ")
+        S += ["    }", "  }", ""]
+
+        S.append("  ADC_HD Prim to_primitive(const State& U) const {")
+        S += cons_locals() + prim_locals()
+        S.append("    Prim P{};")
+        S += ["    P[%d] = %s;" % (i, p) for i, p in enumerate(self.prim_state)]
+        S += ["    return P;", "  }", ""]
+
+        S.append("  ADC_HD State to_conservative(const Prim& P) const {")
+        S += ["    const adc::Real %s = P[%d];" % (p, i) for i, p in enumerate(self.prim_state)]
+        S.append("    State U{};")
+        S += ["    U[%d] = %s;" % (i, e.to_cpp()) for i, e in enumerate(self.cons_from)]
+        S += ["    return U;", "  }", ""]
+
+        S.append('  static adc::Variables conservative_vars() { return {adc::VariableKind::Conservative, {%s}, %d}; }'
+                 % (cnames, nc))
+        S.append('  static adc::Variables primitive_vars() { return {adc::VariableKind::Primitive, {%s}, %d}; }'
+                 % (pnames, npr))
+        S += ["};", "}  // namespace %s" % namespace]
+        return "\n".join(S) + "\n"

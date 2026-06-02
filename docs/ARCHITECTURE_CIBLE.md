@@ -130,13 +130,23 @@ Verifie : `python/tests/test_dsl.py` (flux symbolique d'Euler == flux de referen
 `max_wave_speed` coherent, `check()` detecte une variable non definie, masse conservee a l'execution)
 et le cas `adc_cases/dsl_euler/` (Euler ecrit en formules, expansion acoustique, masse conservee).
 
-Etape (2) AMORCEE : `emit_cpp()` genere une fonction C++ `template <class Real> void <nom>_flux(
-const Real* U, Real* F, int dir)` depuis l'arbre (chaque noeud `Expr` sait s'ecrire via `to_cpp()`) ;
-`python/tests/test_dsl_codegen.py` COMPILE cette fonction (c++) et verifie qu'elle rend le meme flux
-que l'interprete numpy (memes etats). RESTE : codegen des valeurs propres / source / conversions,
-suppression des sous-expressions communes (CSE : H et c sont inlines a chaque apparition), emballage
-en brique adc compilee (StateVec / Aux / ADC_HD), puis (3) Kokkos/CUDA et (4) JIT. Le prototype et ce
-codegen NE remplacent PAS les briques compilees de production.
+Etape (2) FAITE pour Euler (codegen hote + emballage en brique) :
+- `emit_cpp()` genere la fonction flux `template <class Real> void <nom>_flux(const Real*, Real*, int)`
+  depuis l'arbre (chaque noeud `Expr` sait s'ecrire via `to_cpp()`) ;
+- `emit_cpp_brick()` genere une BRIQUE complete : un struct (`StateVec` / `Aux` / `ADC_HD`) avec flux,
+  max_wave_speed, to_primitive, to_conservative, conservative_vars / primitive_vars, qui SATISFAIT le
+  concept `adc::HyperbolicModel` (donc utilisable dans un CompositeModel / le solveur). Les conversions
+  non inversibles (to_conservative) sont fournies par l'utilisateur (`set_conservative_from`), le DSL
+  ne sachant pas inverser symboliquement.
+
+Verifie : `test_dsl_codegen.py` (flux genere == interprete numpy) ; `test_dsl_brick.py` (la brique
+COMPILE contre les en-tetes adc, `static_assert(adc::HyperbolicModel<...>)`, et == `adc::Euler` ecrite
+a la main, ecart nul).
+
+RESTE (le compilateur) : codegen des sources / contributions elliptiques, CSE (H et c sont inlines a
+chaque apparition), branchement de la brique generee dans la factory runtime (dispatch / `ModelSpec`),
+puis (3) Kokkos/CUDA et (4) JIT. Le prototype et ce codegen hote NE remplacent PAS les briques
+compilees de production.
 
 ---
 
