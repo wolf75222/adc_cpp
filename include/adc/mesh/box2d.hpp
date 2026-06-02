@@ -10,8 +10,9 @@
 // Les indices peuvent etre negatifs (couches de ghosts) ; coarsen utilise donc
 // une division plancher pour rester coherent de part et d'autre de zero.
 //
-// 2D concret pour coller aux cibles physiques (diocotron, Euler-Poisson). Le
-// passage Dim-template est une generalisation mecanique laissee pour plus tard.
+// 2D concret pour coller aux cibles physiques (transport scalaire a derive,
+// fluide compressible auto-gravitant). Le passage Dim-template est une
+// generalisation mecanique laissee pour plus tard.
 
 namespace adc {
 

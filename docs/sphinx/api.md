@@ -12,8 +12,9 @@ pour des exemples annotés.
 ## Composition générique : `adc.System`
 
 On ajoute des blocs (un modèle par bloc), on configure un Poisson de système partagé, on
-fixe les conditions initiales en numpy, on avance. Modèles disponibles : `diocotron`,
-`electron_euler`, `ion_isothermal`, `euler_poisson`.
+fixe les conditions initiales en numpy, on avance. Un modèle est une **composition de briques
+génériques** `adc.Model(state, transport, source, elliptic)` ; le cœur ne nomme aucun scénario
+(les compositions nommées vivent côté application, cf. `adc_cases/models.py`).
 
 ```{eval-rst}
 .. autoclass:: adc.System
@@ -21,6 +22,28 @@ fixe les conditions initiales en numpy, on avance. Modèles disponibles : `dioco
 
 .. autoclass:: adc.SystemConfig
    :members:
+```
+
+### Modèle composé par briques
+
+Un modèle est assemblé par `adc.Model(state, transport, source, elliptic)` à partir de briques
+génériques. Le cœur C++ ne connaît que ces briques (aucun nom de scénario) ; une composition
+nommée (diocotron, electron_euler, ...) vit côté application (`adc_cases/models.py`).
+
+```{eval-rst}
+.. autofunction:: adc.Model
+
+.. autoclass:: adc.Scalar
+.. autoclass:: adc.FluidState
+.. autoclass:: adc.ExB
+.. autoclass:: adc.CompressibleFlux
+.. autoclass:: adc.IsothermalFlux
+.. autoclass:: adc.NoSource
+.. autoclass:: adc.PotentialForce
+.. autoclass:: adc.GravityForce
+.. autoclass:: adc.ChargeDensity
+.. autoclass:: adc.BackgroundDensity
+.. autoclass:: adc.GravityCoupling
 ```
 
 ### Schéma par bloc

@@ -5,8 +5,9 @@
 
 // Integrateur IMEX (implicit-explicit) asymptotic-preserving (AP).
 //
-// Pour le vrai systeme Euler-Poisson magnetique (regime du papier Hoffart,
-// arXiv:2510.11808), certains termes sont RAIDES : force de Lorentz, limite de
+// Pour le vrai fluide compressible magnetise couple a un champ self-consistant
+// (regime du papier Hoffart, arXiv:2510.11808), certains termes sont RAIDES :
+// force de Lorentz, limite de
 // Debye lambda_D -> 0, quasi-neutralite. Les traiter en explicite imposerait
 // dt ~ raideur (Debye, gyrofrequence) -> impraticable. Un schema IMEX prend ces
 // termes en IMPLICITE et le transport en EXPLICITE. La propriete AP : quand le
@@ -21,7 +22,7 @@
 // Simpl(U, dt) : resout EN PLACE U <- W tel que W = U + dt S(W), ou U (en entree)
 //   est le membre connu. Source lineaire (relaxation) : analytique ; non lineaire
 //   (Lorentz complet) : Newton local. C'est l'analogue de APIMEXTwoFluidIsothermal
-//   de MUFFIN, le pont entre notre diocotron reduit et la physique complete.
+//   de MUFFIN, le pont entre notre modele reduit de derive et la physique complete.
 
 namespace adc {
 

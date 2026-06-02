@@ -203,7 +203,7 @@ class AmrCouplerMP {
   /// @brief Max wave speed over the coarse level via `model.max_wave_speed`.
   ///
   /// Model-generic CFL speed (any `PhysicalModel`), unlike `max_drift_speed` which is
-  /// specific to the E x B drift (`model.B0`). For the diocotron it equals the drift speed.
+  /// specific to the E x B drift (`model.B0`). For a pure E x B transport it equals the drift speed.
   ///
   /// @returns the max over coarse cells and both directions, reduced across ranks.
   /// @note `update()` must have run so that `aux(0)` holds the current `grad phi`.

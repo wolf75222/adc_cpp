@@ -34,8 +34,9 @@
 //
 // FieldPostProcess nomme la derivation E = -grad phi et la convention de signe.
 // Le coupler stocke aux = (phi, +d phi/dx, +d phi/dy) : le signe physique
-// E = -grad phi est porte plus loin par diocotron::drift_velocity qui lit
-// aux.grad_x / aux.grad_y (cf. model/diocotron.hpp). C'est GradSign::Plus.
+// E = -grad phi est porte plus loin par la brique de transport qui lit
+// aux.grad_x / aux.grad_y (la vitesse vient de la policy de transport, p.ex. une
+// derive E x B). C'est GradSign::Plus.
 // two_fluid_ap::tfap_efield stocke directement E = -grad phi : GradSign::Minus.
 // FieldPostProcess::apply reproduit caractere pour caractere l'expression de
 // detail::coupler_grad_phi (meme ordre, meme facteur multiplicatif *cx / *cy).

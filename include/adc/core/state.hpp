@@ -13,7 +13,7 @@
 namespace adc {
 
 // Vecteur d'etat conserve de taille fixe (connue a la compilation).
-// Pour un scalaire (advection / diocotron) : StateVec<1>.
+// Pour un scalaire (advection / transport a derive) : StateVec<1>.
 // Pour Euler 2D : StateVec<4>. La taille pilote n_vars du modele.
 template <int N>
 struct StateVec {
@@ -45,10 +45,10 @@ ADC_HD StateVec<N> operator*(Real s, StateVec<N> a) {
 
 // Champs auxiliaires derives de la resolution elliptique : le potentiel et
 // son gradient au point. C'est le canal unique par lequel le couplage entre
-// dans la physique. Il alimente A LA FOIS le flux (cas diocotron : la vitesse
-// E x B vient de grad phi) et la source (cas Euler-Poisson : S = -rho grad phi).
-// Cette dualite est ce qui permet a un seul operateur spatial de servir les
-// deux problemes cibles.
+// dans la physique. Il alimente A LA FOIS le flux (transport a derive : la
+// vitesse E x B vient de grad phi) et la source (fluide compressible
+// auto-gravitant : S = -rho grad phi). Cette dualite est ce qui permet a un seul
+// operateur spatial de servir les deux problemes cibles.
 struct Aux {
   Real phi{};     // potentiel
   Real grad_x{};  // d phi / d x

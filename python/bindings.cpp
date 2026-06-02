@@ -46,24 +46,33 @@ PYBIND11_MODULE(_adc, m) {
       .def(py::init<>())
       .def_readwrite("n", &SystemConfig::n)
       .def_readwrite("L", &SystemConfig::L)
-      .def_readwrite("B0", &SystemConfig::B0)
-      .def_readwrite("n_i0", &SystemConfig::n_i0)
-      .def_readwrite("alpha", &SystemConfig::alpha)
-      .def_readwrite("gamma", &SystemConfig::gamma)
-      .def_readwrite("cs2", &SystemConfig::cs2)
-      .def_readwrite("four_pi_G", &SystemConfig::four_pi_G)
-      .def_readwrite("rho0", &SystemConfig::rho0)
       .def_readwrite("periodic", &SystemConfig::periodic);
+
+  // ModelSpec : composition de briques generiques (transport/source/elliptic + parametres).
+  // Aucun scenario nomme ; le sucre adc.Model(...) cote Python remplit ces champs.
+  py::class_<ModelSpec>(m, "ModelSpec")
+      .def(py::init<>())
+      .def_readwrite("transport", &ModelSpec::transport)
+      .def_readwrite("source", &ModelSpec::source)
+      .def_readwrite("elliptic", &ModelSpec::elliptic)
+      .def_readwrite("B0", &ModelSpec::B0)
+      .def_readwrite("gamma", &ModelSpec::gamma)
+      .def_readwrite("cs2", &ModelSpec::cs2)
+      .def_readwrite("qom", &ModelSpec::qom)
+      .def_readwrite("q", &ModelSpec::q)
+      .def_readwrite("alpha", &ModelSpec::alpha)
+      .def_readwrite("n0", &ModelSpec::n0)
+      .def_readwrite("sign", &ModelSpec::sign)
+      .def_readwrite("four_pi_G", &ModelSpec::four_pi_G)
+      .def_readwrite("rho0", &ModelSpec::rho0);
 
   py::class_<System>(m, "System")
       .def(py::init<const SystemConfig&>())
-      // Composition par bloc : modele + schema spatial (limiter/flux) + temps
+      // Composition par bloc : modele (briques) + schema spatial (limiter/riemann) + temps
       // (explicit/imex) + sous-pas. Python dit QUOI, le C++ compile fait le calcul.
       .def("add_block", &System::add_block, py::arg("name"), py::arg("model"),
-           py::arg("charge"), py::arg("limiter") = "minmod", py::arg("flux") = "rusanov",
+           py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("time") = "explicit", py::arg("substeps") = 1)
-      .def("add_species", &System::add_species, py::arg("name"), py::arg("model"),
-           py::arg("charge"))
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0)
@@ -109,7 +118,7 @@ PYBIND11_MODULE(_adc, m) {
 
   // --- Solveurs SPECIALISES (integrateurs sur mesure non composables bloc-a-bloc) ---
   // Exposes comme facades de la lib : un schema asymptotic-preserving deux-fluides, et
-  // le diocotron sur AMR multi-patch. adc_cases les PILOTE depuis Python (pas de C++ cote
+  // une composition mono-espece sur AMR multi-patch. adc_cases les PILOTE depuis Python (pas de C++ cote
   // cases) au meme titre que System.
 
   py::class_<TwoFluidAPConfig>(m, "TwoFluidAPConfig")
@@ -140,25 +149,18 @@ PYBIND11_MODULE(_adc, m) {
       .def("density_i",
            [](const TwoFluidAPSolver& s) { return to_2d(s.density_i(), s.nx()); });
 
-  // AmrSystem : composition mono-espece generique sur AMR (remplace DiocotronAmrSolver).
+  // AmrSystem : composition mono-espece generique sur AMR.
   py::class_<AmrSystemConfig>(m, "AmrSystemConfig")
       .def(py::init<>())
       .def_readwrite("n", &AmrSystemConfig::n)
       .def_readwrite("L", &AmrSystemConfig::L)
-      .def_readwrite("B0", &AmrSystemConfig::B0)
-      .def_readwrite("n_i0", &AmrSystemConfig::n_i0)
-      .def_readwrite("alpha", &AmrSystemConfig::alpha)
-      .def_readwrite("gamma", &AmrSystemConfig::gamma)
-      .def_readwrite("cs2", &AmrSystemConfig::cs2)
-      .def_readwrite("four_pi_G", &AmrSystemConfig::four_pi_G)
-      .def_readwrite("rho0", &AmrSystemConfig::rho0)
       .def_readwrite("regrid_every", &AmrSystemConfig::regrid_every)
       .def_readwrite("periodic", &AmrSystemConfig::periodic);
 
   py::class_<AmrSystem>(m, "AmrSystem")
       .def(py::init<const AmrSystemConfig&>())
       .def("add_block", &AmrSystem::add_block, py::arg("name"), py::arg("model"),
-           py::arg("charge"), py::arg("limiter") = "minmod", py::arg("flux") = "rusanov",
+           py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("time") = "explicit", py::arg("substeps") = 1)
       .def("set_refinement", &AmrSystem::set_refinement, py::arg("threshold"))
       .def("set_poisson", &AmrSystem::set_poisson, py::arg("rhs") = "charge_density",

@@ -1,10 +1,7 @@
 #include <adc/runtime/amr_system.hpp>
 
-#include <adc/runtime/model_factory.hpp>     // detail::dispatch_model (liste des modeles)
+#include <adc/runtime/model_factory.hpp>     // detail::dispatch_model + briques compilees
 #include <adc/coupling/amr_coupler_mp.hpp>   // AmrCouplerMP, AmrLevelMP
-#include <adc/model/charged_fluid.hpp>        // ChargedEuler, ChargedEulerIsothermal (+ Euler)
-#include <adc/model/diocotron.hpp>
-#include <adc/model/euler_poisson.hpp>
 #include <adc/operator/numerical_flux.hpp>    // RusanovFlux, HLLCFlux
 #include <adc/operator/reconstruction.hpp>    // NoSlope, Minmod, VanLeer
 
@@ -24,7 +21,7 @@
 
 namespace adc {
 
-/// Paquet (limiteur, flux) attendu par AmrCouplerMP::step<Disc>.
+/// Paquet (limiteur, flux Riemann) attendu par AmrCouplerMP::step<Disc>.
 template <class L, class F>
 struct DiscLF {
   using Limiter = L;
@@ -32,17 +29,15 @@ struct DiscLF {
 };
 
 struct AmrSystem::Impl {
-  enum class Kind { Diocotron, Euler, Isothermal };
-
   AmrSystemConfig cfg;
 
   // Specification du bloc (figee a add_block, materialisee au build paresseux).
   bool has_block = false;
-  std::string b_model, b_limiter = "minmod", b_flux = "rusanov";
-  double b_charge = 0;
+  ModelSpec b_spec;
+  std::string b_limiter = "minmod", b_riemann = "rusanov";
   int b_substeps = 1;
   int ncomp = 1;
-  Kind kind = Kind::Diocotron;
+  double gamma = 1.4;
 
   double refine_threshold = 1e30;  // 1e30 => aucun raffinement par defaut
 
@@ -53,9 +48,8 @@ struct AmrSystem::Impl {
   std::vector<double> pending_density;
   bool has_density = false;
 
-  // Fermetures type-erased sur l'AmrCouplerMP<Model> concret (construit au build paresseux).
   bool built = false;
-  std::shared_ptr<void> coupler_holder;  // garde le coupleur vivant
+  std::shared_ptr<void> coupler_holder;
   std::function<void(double)> step_fn;
   std::function<double()> max_speed_fn;
   std::function<double()> mass_fn;
@@ -69,20 +63,13 @@ struct AmrSystem::Impl {
   Geometry geom() const {
     return Geometry{Box2D::from_extents(cfg.n, cfg.n), 0.0, cfg.L, 0.0, cfg.L};
   }
-
   BCRec poisson_bc() {
     std::string mode = p_bc;
     if (mode == "auto") mode = (p_wall == "circle" || !cfg.periodic) ? "dirichlet" : "periodic";
-    BCRec b;  // periodique par defaut
+    BCRec b;
     if (mode == "periodic") return b;
-    if (mode == "dirichlet") {
-      b.xlo = b.xhi = b.ylo = b.yhi = BCType::Dirichlet;
-      return b;
-    }
-    if (mode == "neumann") {
-      b.xlo = b.xhi = b.ylo = b.yhi = BCType::Foextrap;
-      return b;
-    }
+    if (mode == "dirichlet") { b.xlo = b.xhi = b.ylo = b.yhi = BCType::Dirichlet; return b; }
+    if (mode == "neumann") { b.xlo = b.xhi = b.ylo = b.yhi = BCType::Foextrap; return b; }
     throw std::runtime_error("AmrSystem::set_poisson : bc inconnu '" + mode + "'");
   }
   std::function<bool(Real, Real)> wall_active() {
@@ -94,24 +81,19 @@ struct AmrSystem::Impl {
     throw std::runtime_error("AmrSystem::set_poisson : wall inconnu '" + p_wall + "'");
   }
 
-  // Ecrit la densite grossiere (composante 0) + equilibre au repos sur les autres.
   void write_coarse(MultiFab& U, const std::vector<double>& rho) {
     const int n = cfg.n;
     if (static_cast<int>(rho.size()) != n * n)
       throw std::runtime_error("AmrSystem::set_density : taille != n*n");
-    const Real gm1 = Real(cfg.gamma) - Real(1);
+    const Real gm1 = Real(gamma) - Real(1);
     Array4 u = U.fab(0).array();
     const Box2D v = U.box(0);
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
       for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
         const Real r = rho[static_cast<std::size_t>(j) * n + i];
         u(i, j, 0) = r;
-        if (kind == Kind::Euler) {
-          u(i, j, 1) = 0; u(i, j, 2) = 0;
-          u(i, j, 3) = r / gm1;  // E = p/(g-1), p = rho, au repos
-        } else if (kind == Kind::Isothermal) {
-          u(i, j, 1) = 0; u(i, j, 2) = 0;
-        }
+        if (ncomp >= 3) { u(i, j, 1) = 0; u(i, j, 2) = 0; }
+        if (ncomp == 4) u(i, j, 3) = r / gm1;
       }
   }
 
@@ -126,9 +108,8 @@ struct AmrSystem::Impl {
     return out;
   }
 
-  // Construit le coupleur AMR pour un Model + (Limiter, Flux) concrets et cable les
-  // fermetures. Hierarchie a deux niveaux : grossier + un patch fin seed central, que le
-  // premier regrid remodele d'apres le seuil de raffinement.
+  // Construit le coupleur AMR pour un Model compose + (Limiter, Flux) concrets et cable les
+  // fermetures. Deux niveaux : grossier + un patch fin seed central, remodele par le regrid.
   template <class Model, class L, class F>
   void build(const Model& model) {
     using Coupler = AmrCouplerMP<Model>;
@@ -156,7 +137,7 @@ struct AmrSystem::Impl {
     const double thr = refine_threshold;
     auto crit = [thr](const ConstArray4& a, int i, int j) { return a(i, j, 0) > thr; };
     cpl->regrid(crit);
-    cpl->update();  // champs valides pour le premier step_cfl
+    cpl->update();
 
     Impl* P = this;
     const int sub = b_substeps;
@@ -178,15 +159,16 @@ struct AmrSystem::Impl {
     built = true;
   }
 
+  // Dispatch du schema spatial (limiteur x flux Riemann) pour un Model compose.
   template <class Model>
   void dispatch_spatial(const Model& m) {
-    if (b_flux == "rusanov") {
+    if (b_riemann == "rusanov") {
       if (b_limiter == "none") return build<Model, NoSlope, RusanovFlux>(m);
       if (b_limiter == "minmod") return build<Model, Minmod, RusanovFlux>(m);
       if (b_limiter == "vanleer") return build<Model, VanLeer, RusanovFlux>(m);
       throw std::runtime_error("AmrSystem : limiter inconnu '" + b_limiter + "'");
     }
-    if (b_flux == "hllc") {
+    if (b_riemann == "hllc") {
       if constexpr (Model::n_vars == 4 &&
                     requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
         if (b_limiter == "none") return build<Model, NoSlope, HLLCFlux>(m);
@@ -194,24 +176,20 @@ struct AmrSystem::Impl {
         if (b_limiter == "vanleer") return build<Model, VanLeer, HLLCFlux>(m);
         throw std::runtime_error("AmrSystem : limiter inconnu '" + b_limiter + "'");
       } else {
-        throw std::runtime_error("AmrSystem : flux 'hllc' exige un modele Euler complet "
-                                 "(4 variables + pression) ; ce modele -> 'rusanov'");
+        throw std::runtime_error("AmrSystem : flux 'hllc' exige un transport compressible "
+                                 "(4 variables + pression) ; ce transport -> 'rusanov'");
       }
     }
-    throw std::runtime_error("AmrSystem : flux inconnu '" + b_flux + "' (rusanov|hllc)");
+    throw std::runtime_error("AmrSystem : flux Riemann inconnu '" + b_riemann + "'");
   }
 
   void ensure_built() {
     if (built) return;
     if (!has_block) throw std::runtime_error("AmrSystem : appeler add_block d'abord");
-    // Meme fabrique partagee que System ; kind (set_density) vient de n_vars.
-    const detail::ModelParams mp{cfg.B0, cfg.n_i0, cfg.alpha, cfg.gamma, cfg.cs2,
-                                 cfg.four_pi_G, cfg.rho0, b_charge};
-    detail::dispatch_model(b_model, mp, [&](auto m) {
+    detail::dispatch_model(b_spec, [&](auto m) {
       using M = decltype(m);
-      kind = (M::n_vars == 1) ? Kind::Diocotron
-             : (M::n_vars == 3) ? Kind::Isothermal
-                                : Kind::Euler;
+      ncomp = M::n_vars;
+      gamma = b_spec.gamma;
       dispatch_spatial(m);
     });
   }
@@ -222,23 +200,18 @@ AmrSystem::~AmrSystem() = default;
 AmrSystem::AmrSystem(AmrSystem&&) noexcept = default;
 AmrSystem& AmrSystem::operator=(AmrSystem&&) noexcept = default;
 
-void AmrSystem::add_block(const std::string& name, const std::string& model, double charge,
-                          const std::string& limiter, const std::string& flux,
+void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
+                          const std::string& limiter, const std::string& riemann,
                           const std::string& time, int substeps) {
   (void)name;
   if (p_->has_block) throw std::runtime_error("AmrSystem : un seul bloc (AMR mono-modele)");
   if (substeps < 1) throw std::runtime_error("AmrSystem::add_block : substeps >= 1");
   if (time != "explicit")
     throw std::runtime_error("AmrSystem : seul time='explicit' est supporte sur AMR");
-  if (model != "diocotron" && model != "electron_euler" && model != "ion_isothermal" &&
-      model != "euler_poisson")
-    throw std::runtime_error("AmrSystem::add_block : modele inconnu '" + model + "'");
-  p_->b_model = model;
-  p_->b_charge = charge;
+  p_->b_spec = model;
   p_->b_limiter = limiter;
-  p_->b_flux = flux;
+  p_->b_riemann = riemann;
   p_->b_substeps = substeps;
-  p_->ncomp = (model == "diocotron") ? 1 : (model == "ion_isothermal") ? 3 : 4;
   p_->has_block = true;
 }
 

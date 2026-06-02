@@ -33,8 +33,8 @@
 //   3. aux = (phi, grad phi) par differences centrees
 //   4. assemblage du residu hyperbolique avec ce aux
 //
-// Pour diocotron aux entre par le flux (derive E x B) ; pour Euler-Poisson il
-// entrerait par la source. Le coupleur reste compatible mono-modele ; le niveau
+// Pour un transport a derive aux entre par le flux (derive E x B) ; pour un fluide
+// compressible auto-gravitant il entrerait par la source. Le coupleur reste compatible mono-modele ; le niveau
 // multi-especes doit assembler le rhs elliptique depuis un CoupledSystem.
 
 namespace adc {
@@ -55,7 +55,7 @@ inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs,
 // aux = (phi, d phi/dx, d phi/dy) par differences centrees. Delegue a la
 // convention nommee FieldPostProcess avec GradSign::Plus et store_phi=true : le
 // coupler stocke +grad phi (le signe physique E = -grad phi est porte par
-// diocotron::drift_velocity). Forme multiplicative *cx / *cy conservee a
+// la vitesse de derive du transport). Forme multiplicative *cx / *cy conservee a
 // l'identique -> bit-identique.
 inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx,
                              Real cy) {

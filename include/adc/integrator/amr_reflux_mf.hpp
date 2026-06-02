@@ -13,7 +13,7 @@
 
 // Moteur AMR conservatif (Berger-Oliger r=2 + reflux) sur MultiFab + le seam, GENERIQUE
 // (Limiter, NumericalFlux, N composantes ; flux par compute_face_fluxes -> MUSCL / HLL /
-// HLLC / Euler-Poisson / GPU). Deux piles dans ce header :
+// HLLC / compressible auto-gravitant / GPU). Deux piles dans ce header :
 //   - PRODUCTION : advance_amr (+ LevelHierarchy, AmrLevelMP), moteur N-niveaux
 //     MULTI-PATCH et DISTRIBUE (MPI). C'est l'entree unifiee (cf. bas du fichier).
 //   - ORACLE (detail::) : amr_step_*_mf + AmrLevelMF, le moteur MONO-BOX d'origine,
@@ -41,7 +41,7 @@ inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy
 // U <- U + dt S(U, aux) sur les cellules valides : terme source applique en Euler
 // avant a chaque sous-pas AMR (cellule-local, pas de reflux). Sans cela le chemin AMR
 // (compute_face_fluxes -> divergence) ignorerait model.source. Pour un modele a source
-// nulle (diocotron) ceci ajoute dt*0 : bit-identique. La DIFFUSION, elle, est portee
+// nulle (transport scalaire pur) ceci ajoute dt*0 : bit-identique. La DIFFUSION, elle, est portee
 // par compute_face_fluxes comme FLUX de face Fickien (-nu grad u), donc vue par le
 // reflux et conservative aux interfaces coarse-fine : ce n'est PAS une source locale.
 template <class Model>

@@ -1,54 +1,66 @@
 #pragma once
 
-#include <adc/core/types.hpp>
-#include <adc/model/charged_fluid.hpp>   // ChargedEuler, ChargedEulerIsothermal (+ Euler)
-#include <adc/model/diocotron.hpp>
-#include <adc/model/euler_poisson.hpp>
+#include <adc/model/bricks.hpp>
+#include <adc/runtime/model_spec.hpp>
 
 #include <stdexcept>
 #include <string>
 
 /// @file
-/// @brief Fabrique partagee des modeles physiques de la composition runtime.
+/// @brief Assemble un CompositeModel a partir d'une ModelSpec (briques + parametres).
 ///
-/// Centralise la LISTE des modeles connus des facades runtime (System, AmrSystem) en UN
-/// seul endroit : ajouter un modele = une entree ici, les deux facades en heritent. Ce
-/// n'est pas un plugin a l'execution (les modeles sont du code device compile), mais cela
-/// supprime la duplication du dispatch par tag.
+/// Le coeur ne connait que des BRIQUES generiques ; un scenario est une composition,
+/// nommee cote application (adc_cases). dispatch_model(spec, visitor) construit le
+/// CompositeModel<Transport, Source, Elliptic> designe par la spec et appelle visitor(model).
+/// Les combinaisons invalides (source fluide sur un transport scalaire) sont rejetees.
 
 namespace adc::detail {
 
-/// Champs de configuration lus pour construire un modele (communs a System / AmrSystem).
-struct ModelParams {
-  double B0, n_i0, alpha, gamma, cs2, four_pi_G, rho0, charge;
-};
-
-/// Construit le modele designe par @p tag et appelle `visitor(model)`.
-///
-/// @param tag     "diocotron" | "electron_euler" | "ion_isothermal" | "euler_poisson"
-/// @param p        parametres du modele (charge incluse)
-/// @param visitor  appele avec le modele concret (lambda generique `[](auto m){...}`)
-/// @throws std::runtime_error si @p tag est inconnu.
+/// Construit la brique de transport et appelle v(transport).
 template <class Visitor>
-void dispatch_model(const std::string& tag, const ModelParams& p, Visitor&& visitor) {
-  if (tag == "diocotron") {
-    visitor(Diocotron{Real(p.B0), Real(p.n_i0), Real(p.alpha)});
-  } else if (tag == "electron_euler") {
-    visitor(ChargedEuler{Euler{Real(p.gamma)}, Real(p.charge), Real(p.charge)});
-  } else if (tag == "ion_isothermal") {
-    visitor(ChargedEulerIsothermal{Real(p.cs2), Real(p.charge), Real(p.charge)});
-  } else if (tag == "euler_poisson") {
-    EulerPoisson m;
-    m.hydro.gamma = Real(p.gamma);
-    m.four_pi_G = Real(p.four_pi_G);
-    m.rho0 = Real(p.rho0);
-    m.coupling_sign = Real(p.charge);  // +1 auto-gravite, -1 electrostatique (Langmuir)
-    visitor(m);
-  } else {
-    throw std::runtime_error(
-        "modele inconnu '" + tag +
-        "' (diocotron|electron_euler|ion_isothermal|euler_poisson)");
+void dispatch_transport(const ModelSpec& m, Visitor&& v) {
+  if (m.transport == "exb") return v(ExBVelocity{Real(m.B0)});
+  if (m.transport == "compressible") return v(CompressibleFlux{Real(m.gamma)});
+  if (m.transport == "isothermal") return v(IsothermalFlux{Real(m.cs2)});
+  throw std::runtime_error("transport inconnu '" + m.transport +
+                           "' (exb|compressible|isothermal)");
+}
+
+/// Construit la brique de source et appelle v(source). Les sources fluides (force) exigent
+/// >= 3 variables : sur un transport scalaire (exb), seule "none" est valide.
+template <int NV, class Visitor>
+void dispatch_source(const ModelSpec& m, Visitor&& v) {
+  if (m.source == "none") return v(NoSource{});
+  if constexpr (NV >= 3) {
+    if (m.source == "potential") return v(PotentialForce{Real(m.qom)});
+    if (m.source == "gravity") return v(GravityForce{});
   }
+  throw std::runtime_error("source '" + m.source +
+                           "' invalide ici (exige un transport fluide >= 3 variables, ou 'none')");
+}
+
+/// Construit la brique de second membre elliptique et appelle v(elliptic).
+template <class Visitor>
+void dispatch_elliptic(const ModelSpec& m, Visitor&& v) {
+  if (m.elliptic == "charge") return v(ChargeDensity{Real(m.q)});
+  if (m.elliptic == "background") return v(BackgroundDensity{Real(m.alpha), Real(m.n0)});
+  if (m.elliptic == "gravity")
+    return v(GravityCoupling{Real(m.sign), Real(m.four_pi_G), Real(m.rho0)});
+  throw std::runtime_error("elliptic inconnu '" + m.elliptic + "' (charge|background|gravity)");
+}
+
+/// Assemble le CompositeModel designe par @p m et appelle `visitor(model)`.
+/// @throws std::runtime_error sur tag inconnu ou combinaison invalide.
+template <class Visitor>
+void dispatch_model(const ModelSpec& m, Visitor&& visitor) {
+  dispatch_transport(m, [&](auto tr) {
+    using TR = decltype(tr);
+    dispatch_source<TR::n_vars>(m, [&](auto src) {
+      dispatch_elliptic(m, [&](auto ell) {
+        visitor(CompositeModel<TR, decltype(src), decltype(ell)>{tr, src, ell});
+      });
+    });
+  });
 }
 
 }  // namespace adc::detail

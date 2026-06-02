@@ -16,13 +16,13 @@ namespace adc {
  * la vitesse d'onde maximale vaut |v_dir| + c avec c = sqrt(gamma p/rho).
  *
  * Le terme source est nul (Euler pur) et elliptic_rhs renvoie la densite de masse rho,
- * second membre de Poisson pour le futur Euler-Poisson auto-gravitant (inutilise en
+ * second membre de Poisson pour un futur Euler compressible auto-gravitant (inutilise en
  * Euler pur). L'argument aux est present pour le concept et recevra grad phi via la
- * source en Euler-Poisson, mais n'entre pas dans le flux d'Euler pur.
+ * source dans ce couplage auto-gravitant, mais n'entre pas dans le flux d'Euler pur.
  *
  * @note Tout est device-callable (ADC_HD) : StateVec sur tableau C, std::sqrt
  *       (intrinseque device sous nvcc), abs manuel. Compatible kernel GPU comme le
- *       modele diocotron.
+ *       modele de transport scalaire.
  */
 struct Euler {
   using State = StateVec<4>;  ///< variables conservatives (rho, rho u, rho v, E)
@@ -83,7 +83,7 @@ struct Euler {
   /// Terme source nul : Euler pur.
   ADC_HD State source(const State&, const Aux&) const { return State{}; }
 
-  /// Second membre de Poisson : densite de masse rho (auto-gravite Euler-Poisson).
+  /// Second membre de Poisson : densite de masse rho (auto-gravite du fluide compressible).
   ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 

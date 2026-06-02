@@ -147,11 +147,20 @@ Le module expose deux niveaux, dans l'esprit "Python compose QUOI, le C++ calcul
 
 ```python
 import adc
-sim = adc.System(n=192, periodic=False, B0=1.0, alpha=1.0)
-# un BLOC par espece : modele + schema spatial + traitement temporel + sous-pas, au choix
-sim.add_block("electrons", model="electron_euler", charge=-1.0,
+sim = adc.System(n=192, periodic=False)            # config = maillage seul
+# un modele = COMPOSITION de briques generiques (le coeur ne nomme aucun scenario)
+electrons = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
+                      transport=adc.CompressibleFlux(),
+                      source=adc.PotentialForce(charge=-1.0),
+                      elliptic=adc.ChargeDensity(charge=-1.0))
+ions = adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
+                 transport=adc.IsothermalFlux(),
+                 source=adc.PotentialForce(charge=+1.0),
+                 elliptic=adc.ChargeDensity(charge=+1.0))
+# un BLOC par espece : modele compose + schema spatial + traitement temporel, au choix
+sim.add_block("electrons", model=electrons,
               spatial=adc.Spatial(vanleer=True, flux="hllc"), time=adc.IMEX(substeps=10))
-sim.add_block("ions", model="ion_isothermal", charge=+1.0,
+sim.add_block("ions", model=ions,
               spatial=adc.Spatial(minmod=True), time=adc.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet",
                 wall="circle", wall_radius=0.40)   # paroi conductrice = embedded boundary
@@ -159,11 +168,14 @@ sim.set_density("electrons", ne_numpy)             # CI ecrite en numpy
 sim.step_cfl(0.4)
 ```
 
-- **`adc.System`** (composition multi-blocs) : `add_block(model, spatial=adc.Spatial(...),
-  time=adc.Explicit()|adc.IMEX(...)|adc.Implicit(...), substeps=...)`, `set_poisson(...)`,
-  `set_density`, `step`/`advance`/`step_cfl`, diagnostics. Modeles : `diocotron`,
-  `electron_euler`, `ion_isothermal`, `euler_poisson`. Le choix implicite/explicite est
-  **par bloc et reversible** ; aucun callback Python dans le hot path.
+- **`adc.System`** (composition multi-blocs) : `add_block(name, model, spatial=adc.Spatial(...),
+  time=adc.Explicit()|adc.IMEX(...)|adc.Implicit(...))`, `set_poisson(...)`, `set_density`,
+  `step`/`advance`/`step_cfl`, diagnostics. Un `model` est une COMPOSITION de briques generiques
+  `adc.Model(state, transport, source, elliptic)` : etat (`Scalar`/`FluidState`), transport
+  (`ExB`/`CompressibleFlux`/`IsothermalFlux`), source (`NoSource`/`PotentialForce`/`GravityForce`),
+  second membre elliptique (`ChargeDensity`/`BackgroundDensity`/`GravityCoupling`). Le coeur ne
+  nomme aucun scenario ; les compositions nommees vivent cote application (`adc_cases/models.py`).
+  Le choix implicite/explicite est **par bloc et reversible** ; aucun callback Python dans le hot path.
 - **Integrateur temporel ecrit en Python** : primitives `solve_fields()`, `eval_rhs(name)`,
   `get_state`/`set_state` : on ecrit son propre `take_step` cote Python (par PAS), le residu
   et Poisson restant calcules en C++ (par CELLULE). Cf. `adc.integrate.ssprk2_step`.

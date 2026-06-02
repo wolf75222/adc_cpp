@@ -23,7 +23,7 @@
 //
 // Decomposition en bandes (1 box par rang), layout du solveur FFT ; Nx, Ny
 // puissances de 2 divisibles par n_ranks(). Generique sur le modele (tout modele
-// portant alpha, n_i0, B0 et un flux de derive E x B, p.ex. Diocotron).
+// portant alpha, n_i0, B0 et un flux de derive E x B).
 //
 // L'exemple/test ne reimplemente plus rien : il construit le stepper, remplit
 // state() (densite initiale), puis boucle step(dt). C'est l'esprit "composant"
@@ -74,8 +74,8 @@ class SpectralCoupler {
     const ConstArray4 u = U_.fab(0).const_array();
     Array4 r = fft_.rhs().fab(0).array();
     // f = model.elliptic_rhs(U) : on appelle le PhysicalModel (comme le Coupler normal)
-    // au lieu de coder la formule diocotron alpha*(u - n_i0) en dur dans le coeur.
-    // Pour le diocotron c'est exactement la meme expression -> bit-identique.
+    // au lieu de coder le couplage de fond alpha*(u - n0) en dur dans le coeur.
+    // Pour ce couplage c'est exactement la meme expression -> bit-identique.
     for (int j = y0_; j < y0_ + nyl_; ++j)
       for (int i = 0; i < Nx_; ++i)
         r(i, j) = model_.elliptic_rhs(typename Model::State{u(i, j)});
@@ -101,9 +101,9 @@ class SpectralCoupler {
   }
 
   // vitesse d'onde max (all-reduce), pour la CFL. GENERALISE (TODO 4.3) : via
-  // model.max_wave_speed au lieu du diocotron /B0 code en dur -> le coupleur spectral
-  // n'est plus lie au diocotron. NB : pour le diocotron c'est max(|gx|,|gy|)/B0 (par
-  // direction) au lieu de hypot(gx,gy)/B0 ; le dt CFL change donc legerement (a re-valider
+  // model.max_wave_speed au lieu de la derive /B0 codee en dur -> le coupleur spectral
+  // n'est plus lie a un flux de derive particulier. NB : pour la derive E x B c'est
+  // max(|gx|,|gy|)/B0 (par direction) au lieu de hypot(gx,gy)/B0 ; le dt CFL change donc legerement (a re-valider
   // cote physique, ce n'est PAS bit-identique a l'ancien diagnostic).
   double max_drift_speed() const {
     device_fence();  // GPU : barriere avant lecture hote apres advance_fab_1c (device)

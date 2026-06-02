@@ -146,6 +146,10 @@ l'architecture utilisateur.
   (`adc_cases/src/simulation.cpp`). L'utilisateur écrit son modèle (header), ajoute un tag +
   une fermeture d'avancée, recompile, compose depuis Python, physique compilée, pas de
   callback dans le hot path. Plugin runtime sans recompiler = choix de design (futur).
+- [x] **Évolution (juin 2026)** : cette couche (`add_species`, blocs nommés `Diocotron`/`Euler`,
+  tags `model=`) est remplacée par la **composition générique par briques** : `CompositeModel`
+  en C++, `adc.Model(state, transport, source, elliptic)` en Python. `adc_cpp` ne nomme plus
+  aucun scénario ; les compositions nommées vivent côté application (`adc_cases/models.py`).
 
 ---
 

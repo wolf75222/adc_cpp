@@ -35,8 +35,8 @@
 // amr_diagnostics.hpp. Le critere de raffinement / regrid reste a l'appelant
 // (specifique au probleme) ; il manipule levels() pour reconstruire les box fines (la
 // region raffinee est portee par le box_array du niveau fin, plus d'indices rC*), le
-// stepper resynchronise aux. Generique sur le modele (Diocotron ; tout modele a alpha,
-// n_i0, B0, flux E x B).
+// stepper resynchronise aux. Generique sur le modele (tout modele a alpha,
+// n_i0, B0, flux de derive E x B).
 
 namespace adc {
 

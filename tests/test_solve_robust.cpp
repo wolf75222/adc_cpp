@@ -23,7 +23,7 @@
 
 using namespace adc;
 
-// remplit le RHS = anneau de charge (meme CI que le diocotron colonne) et remet phi a 0.
+// remplit le RHS = anneau de charge (meme CI que le transport a derive en colonne) et remet phi a 0.
 static void set_ring_rhs(GeometricMG& mg, int nc, double dx) {
   const double cx = 0.5, cy = 0.5, r0 = 0.15, r1 = 0.20, delta = 0.1, floor = 1e-3;
   mg.phi().set_val(0.0);

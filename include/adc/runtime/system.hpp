@@ -1,5 +1,7 @@
 #pragma once
 
+#include <adc/runtime/model_spec.hpp>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -7,39 +9,29 @@
 /// @file
 /// @brief Composition multi-especes a l'execution : un systeme couple, bloc par bloc.
 ///
-/// Chaque bloc est une espece (un etat U) avec son modele physique, son schema spatial
-/// (limiteur + flux), son traitement temporel (explicite / IMEX) et son nombre de
-/// sous-pas. Tous les blocs partagent un Poisson dont le second membre est la somme des
-/// contributions par modele, f = somme_s elliptic_rhs_s(u_s) ; la source S agit par bloc.
-/// La liste de blocs est dynamique, les noyaux par cellule restent compiles : aucun
-/// callback Python dans le hot path, sauf integrateur temporel ecrit en Python pilotant
-/// eval_rhs / get_state / set_state.
+/// Chaque bloc est une espece (un etat U) decrite par une ModelSpec (composition de briques
+/// generiques : transport + source + second membre elliptique), avec son schema spatial
+/// (limiteur + flux Riemann), son traitement temporel et ses sous-pas. Tous les blocs
+/// partagent un Poisson dont le second membre est la somme des elliptic_rhs par bloc ; la
+/// source S agit par bloc. Le coeur ne nomme aucun scenario ; ceux-ci sont des compositions
+/// definies cote application (adc_cases).
 ///
-/// Modeles (tag, elliptic_rhs) :
-///   "diocotron"      derive E x B, 1 var, fond n_i0 ;        alpha*(n - n_i0)
-///   "electron_euler" Euler + force electrostatique, 4 var ;  q*n
-///   "ion_isothermal" Euler isotherme + force, 3 var ;        q*n
-///   "euler_poisson"  Euler + champ self-consistent, 4 var ;  signe*4piG*(rho - rho0)
+/// Python compose (objets-briques) ; le calcul par cellule (assemble_rhs<L,F>, Newton de la
+/// source implicite, multigrille/FFT) reste C++ compile et fige a l'ajout du bloc. Aucun
+/// callback Python dans le hot path, sauf integrateur temporel ecrit en Python via
+/// eval_rhs / get_state / set_state.
 
 namespace adc {
 
-/// Parametres partages par tous les blocs d'un System. Un champ par modele n'est lu que
-/// par le tag concerne.
+/// Maillage et domaine partages par tous les blocs (les parametres physiques sont par bloc,
+/// dans la ModelSpec).
 struct SystemConfig {
-  int n = 64;             ///< cellules par direction (domaine n x n)
-  double L = 1.0;         ///< taille du domaine carre [0,L]^2
-  double B0 = 1.0;        ///< champ magnetique, derive E x B ("diocotron")
-  double n_i0 = 0.0;      ///< fond ionique neutralisant ("diocotron")
-  double alpha = 1.0;     ///< constante de couplage Poisson ("diocotron")
-  double gamma = 1.4;     ///< indice adiabatique ("electron_euler", "euler_poisson")
-  double cs2 = 0.5;       ///< vitesse du son au carre, isotherme ("ion_isothermal")
-  double four_pi_G = 1.0; ///< intensite de couplage ("euler_poisson")
-  double rho0 = 1.0;      ///< fond neutralisant ("euler_poisson", solvabilite periodique)
-  bool periodic = true;   ///< domaine periodique, sinon sortie libre en transport
+  int n = 64;            ///< cellules par direction (domaine n x n)
+  double L = 1.0;        ///< taille du domaine carre [0,L]^2
+  bool periodic = true;  ///< domaine periodique, sinon sortie libre en transport
 };
 
-/// Systeme multi-especes couple, compose a l'execution. Python choisit QUOI assembler,
-/// le calcul par cellule reste en C++ compile.
+/// Systeme multi-especes couple, compose a l'execution a partir de briques generiques.
 class System {
  public:
   explicit System(const SystemConfig& cfg);
@@ -48,32 +40,28 @@ class System {
   System& operator=(System&&) noexcept;
 
   /// Ajoute un bloc d'equation (une espece).
-  /// @param charge   signe utilise dans elliptic_rhs des modeles de fluide charge
+  /// @param model    composition de briques (transport/source/elliptic + parametres)
   /// @param limiter  reconstruction : "none" | "minmod" | "vanleer"
-  /// @param flux     "rusanov" | "hllc" (hllc exige un modele Euler a 4 variables)
+  /// @param riemann  flux numerique : "rusanov" | "hllc" (hllc exige un transport a pression)
   /// @param time     "explicit" (SSPRK2) | "imex" (transport explicite, source implicite)
-  /// @param substeps sous-pas par macro-pas (p.ex. 10 electrons pour 1 ion)
-  void add_block(const std::string& name, const std::string& model, double charge,
+  /// @param substeps sous-pas par macro-pas
+  void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
-                 const std::string& flux = "rusanov",
+                 const std::string& riemann = "rusanov",
                  const std::string& time = "explicit", int substeps = 1);
 
-  /// Raccourci de add_block(..., "minmod", "rusanov", "explicit", 1).
-  void add_species(const std::string& name, const std::string& model, double charge);
-
   /// Configure le Poisson partage.
-  /// @param rhs    seul mode : "charge_density", f = somme_s q_s n_s
+  /// @param rhs    seul mode : "charge_density", f = somme_s elliptic_rhs_s(u_s)
   /// @param solver "geometric_mg" (tout cas, paroi comprise) | "fft" (periodique, n = 2^k)
   /// @param bc     "auto" | "periodic" | "dirichlet" | "neumann"
-  /// @param wall   "none" | "circle" : paroi conductrice en (L/2, L/2), rayon wall_radius,
-  ///               imposee en embedded boundary ; exige solver = "geometric_mg"
+  /// @param wall   "none" | "circle" : paroi conductrice en (L/2, L/2), rayon wall_radius
   void set_poisson(const std::string& rhs = "charge_density",
                    const std::string& solver = "geometric_mg",
                    const std::string& bc = "auto", const std::string& wall = "none",
                    double wall_radius = 0.0);
 
-  /// Fixe la densite d'une espece (composante 0), tableau n*n row-major. Quantite de
-  /// mouvement et energie posees a l'equilibre au repos.
+  /// Fixe la densite d'une espece (composante 0), tableau n*n row-major. Les autres
+  /// composantes (qte de mouvement, energie) sont posees a l'equilibre au repos.
   void set_density(const std::string& name, const std::vector<double>& rho);
 
   void solve_fields();   ///< resout Poisson puis derive aux = (phi, grad phi)
@@ -84,12 +72,10 @@ class System {
   double step_cfl(double cfl);
 
   /// Avance d'un macro-pas MULTIRATE : le bloc le plus lent fixe le macro-pas, chaque bloc
-  /// plus rapide est sous-cycle n = ceil(w_bloc / w_min) fois (sa contrainte CFL). @return
-  /// le macro-pas. @note aux est fige sur le macro-pas (couplage once-per-step).
+  /// plus rapide est sous-cycle n = ceil(w_bloc / w_min) fois. @return le macro-pas.
   double step_adaptive(double cfl);
 
   /// @name Primitives pour un integrateur temporel ecrit en Python
-  /// Pilotage depuis Python (par pas), residu et Poisson restant en C++ (par cellule) :
   /// solve_fields(); R = eval_rhs(name); U = get_state(name); ...; set_state(name, U).
   /// @{
   std::vector<double> eval_rhs(const std::string& name);   ///< -div F + S, taille ncomp*n*n

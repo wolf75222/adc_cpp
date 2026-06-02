@@ -12,7 +12,8 @@ champs en numpy `(n, n)`. Le backend (série / OpenMP / Kokkos) est celui avec l
 
 ## Diocotron (dérive E x B)
 
-Un bloc `diocotron` dans un domaine non périodique avec paroi conductrice circulaire.
+Une dérive E x B (briques `ExB` + `BackgroundDensity`) dans un domaine non périodique avec
+paroi conductrice circulaire.
 
 ```python
 def ring_density(n, L=1.0):
@@ -23,9 +24,10 @@ def ring_density(n, L=1.0):
     ne[(r > 0.15) & (r < 0.20)] = 1.0
     return ne
 
-sim = adc.System(n=128, L=1.0, B0=1.0, alpha=1.0, n_i0=0.0, periodic=False)
-sim.add_block("ne", model="diocotron", charge=1.0,
-              spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim = adc.System(n=128, L=1.0, periodic=False)     # config = maillage seul
+model = adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
+                  source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet",
                 wall="circle", wall_radius=0.40)
 sim.set_density("ne", ring_density(128))
@@ -38,18 +40,21 @@ phi = sim.potential()
 print("dérive masse :", abs(sim.mass("ne") - m0))   # ~ arrondi machine
 ```
 
-## Euler-Poisson auto-gravitant
+## Euler compressible couplé à un champ auto-consistant
 
-Un bloc `euler_poisson` (4 variables) en domaine périodique. La charge encode le signe du
-couplage : `+1.0` attractif (auto-gravité), `-1.0` répulsif (Langmuir).
+Un fluide compressible (4 variables) en domaine périodique. Le signe du couplage
+(`GravityCoupling(sign=...)`) : `+1.0` attractif (auto-gravité), `-1.0` répulsif (Langmuir).
 
 ```python
 n = 64
 x = (np.arange(n) + 0.5) / n
 rho = 1.0 + 0.01 * np.cos(2.0 * np.pi * x)[:, None] * np.ones((n, n))
 
-sim = adc.System(n=n, gamma=1.4, four_pi_G=1.0, rho0=1.0, periodic=True)
-sim.add_block("gas", model="euler_poisson", charge=+1.0,
+sim = adc.System(n=n, L=1.0, periodic=True)
+model = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
+                  transport=adc.CompressibleFlux(), source=adc.GravityForce(),
+                  elliptic=adc.GravityCoupling(sign=+1.0, four_pi_G=1.0, rho0=1.0))
+sim.add_block("gas", model=model,
               spatial=adc.Spatial(vanleer=True, flux="hllc"), time=adc.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("gas", rho)
@@ -69,11 +74,17 @@ n = 48
 x = (np.arange(n) + 0.5) / n
 ne = 1.0 + 0.02 * np.cos(2.0 * np.pi * x)[None, :] * np.ones((n, n))
 
-sim = adc.System(n=n, gamma=1.4, cs2=0.5, periodic=True)
-sim.add_block("electrons", model="electron_euler", charge=-1.0,
+sim = adc.System(n=n, L=1.0, periodic=True)
+electrons = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
+                      transport=adc.CompressibleFlux(),
+                      source=adc.PotentialForce(charge=-1.0), elliptic=adc.ChargeDensity(charge=-1.0))
+ions = adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
+                 transport=adc.IsothermalFlux(),
+                 source=adc.PotentialForce(charge=+1.0), elliptic=adc.ChargeDensity(charge=+1.0))
+sim.add_block("electrons", model=electrons,
               spatial=adc.Spatial(vanleer=True, flux="hllc"),
               time=adc.IMEX(substeps=10))     # raide -> source implicite, sous-cyclé
-sim.add_block("ions", model="ion_isothermal", charge=+1.0,
+sim.add_block("ions", model=ions,
               spatial=adc.Spatial(minmod=True), time=adc.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("electrons", ne)

@@ -20,7 +20,6 @@ option(ADC_USE_KOKKOS     "Enable the Kokkos dispatch backend (CPU OpenMP + GPU 
 option(ADC_USE_OPENMP     "[DEPRECIE -> ADC_USE_KOKKOS] backend OpenMP autonome (CPU seul)" OFF)
 option(ADC_USE_MPI        "Enable the MPI backend (distributed comm seam)" OFF)
 option(ADC_USE_HDF5       "Enable the HDF5 DataWriter (parallel output)" OFF)
-option(ADC_USE_EIGEN      "Build host-side Eigen analysis tools (diocotron theory)" ON)
 
 if(ADC_USE_OPENMP AND NOT ADC_USE_KOKKOS)
   message(WARNING "ADC_USE_OPENMP est DEPRECIE : Kokkos (ADC_USE_KOKKOS=ON, device OPENMP) "
@@ -46,28 +45,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-# Eigen : cote host uniquement (analyse, hors hot path). Header-only : on
-# localise juste le dossier d'include et on l'expose via une cible d'interface
-# adc_eigen. Si introuvable, les cibles d'analyse sont sautees.
-set(ADC_HAS_EIGEN OFF)
-if(ADC_USE_EIGEN)
-  execute_process(COMMAND brew --prefix eigen
-                  OUTPUT_VARIABLE EIGEN_PREFIX
-                  OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  find_path(EIGEN_INCLUDE_DIR Eigen/Dense
-    HINTS "${EIGEN_PREFIX}/include/eigen3" /opt/homebrew/include/eigen3
-          /usr/local/include/eigen3 /usr/include/eigen3)
-  if(EIGEN_INCLUDE_DIR)
-    set(ADC_HAS_EIGEN ON)
-    add_library(adc_eigen INTERFACE)
-    target_include_directories(adc_eigen INTERFACE ${EIGEN_INCLUDE_DIR})
-    target_compile_definitions(adc_eigen INTERFACE ADC_HAS_EIGEN)  # garde l'en-tete d'analyse
-    message(STATUS "Eigen found at ${EIGEN_INCLUDE_DIR} : building host analysis tools")
-  else()
-    message(STATUS "Eigen not found : skipping host analysis tools")
-  endif()
-endif()
 
 # Couche physique + maillage : bibliotheque d'interface (header-only) pour
 # l'instant. L'operateur spatial, l'elliptique et l'integrateur viendront en

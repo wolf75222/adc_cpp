@@ -1,6 +1,6 @@
 // Propriete asymptotic-preserving (AP) de l'IMEX d'Euler sur une source raide de
-// relaxation lineaire (modele jouet du regime raide Euler-Poisson : Debye -> 0,
-// Lorentz, quasi-neutralite) :
+// relaxation lineaire (modele jouet du regime raide d'un fluide compressible couple
+// a un champ self-consistant : Debye -> 0, Lorentz, quasi-neutralite) :
 //
 //   du/dt = (u_eq - u) / eps           (transport nul : champ uniforme)
 //   exact : u(t) = u_eq + (u0 - u_eq) e^{-t/eps}

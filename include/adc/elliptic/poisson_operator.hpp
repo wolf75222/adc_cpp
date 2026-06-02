@@ -10,8 +10,8 @@
 // Operateur de Poisson 5 points et lisseur Gauss-Seidel red-black, briques de
 // la multigrille geometrique maison.
 //
-// Convention : on resout le laplacien lap(phi) = f. Pour le diocotron,
-// f = model.elliptic_rhs (densite de charge signee).
+// Convention : on resout le laplacien lap(phi) = f. Le second membre vient du
+// modele, f = model.elliptic_rhs (p.ex. une densite de charge signee).
 //
 // Masque optionnel (embedded boundary) : un MultiFab mask (1 = actif, 0 =
 // conducteur) fige phi=0 dans les cellules conductrices. Le lisseur et le residu

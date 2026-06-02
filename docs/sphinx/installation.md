@@ -47,8 +47,10 @@ drapeau à rajouter dans le code. Voir le tutoriel
 import numpy as np
 import adc
 
-sim = adc.System(n=64, periodic=True, n_i0=1.0)
-sim.add_block("ne", model="diocotron", charge=-1.0)
+sim = adc.System(n=64, periodic=True)
+sim.add_block("ne", model=adc.Model(
+    state=adc.Scalar(), transport=adc.ExB(B0=1.0),
+    source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=1.0)))
 sim.set_poisson()
 sim.set_density("ne", np.ones((64, 64)))
 sim.step_cfl(0.4)

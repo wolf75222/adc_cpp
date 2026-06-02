@@ -9,7 +9,8 @@ namespace adc {
 /**
  * Mode de Langmuir linearise : noyau 0D du schema asymptotic-preserving deux-fluides.
  *
- * Regime raide Euler-Poisson magnetique, papier Hoffart arXiv:2510.11808. Deux-fluides
+ * Regime raide d'un fluide compressible magnetise couple a un champ self-consistant,
+ * papier Hoffart arXiv:2510.11808. Deux-fluides
  * isotherme, electrons mobiles sur fond ionique fixe, un mode de Fourier k. L'amplitude
  * du mode (a = perturbation, b = da/dt) obeit a a'' + (omega_p^2 + c_s^2 k^2) a = 0, soit
  * une oscillation a omega = sqrt(omega_p^2 + c_s^2 k^2) (Bohm-Gross isotherme). La

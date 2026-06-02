@@ -20,8 +20,9 @@
 //   - elliptic_rhs(U)            : le second membre de l'equation elliptique
 //                                  (densite de charge / de masse selon le modele)
 //
-// flux ET source prennent aux : c'est le point qui unifie diocotron (aux dans
-// le flux) et Euler-Poisson (aux dans la source) sous un meme operateur spatial.
+// flux ET source prennent aux : c'est le point qui unifie le transport a derive
+// (aux dans le flux) et le fluide compressible auto-gravitant (aux dans la
+// source) sous un meme operateur spatial.
 //
 // Contrat Aux (tranche, cf. TODO 4) : l'auxiliaire est FIXE a adc::Aux (phi, grad
 // phi). C'est ce que load_aux construit et tout ce que l'operateur spatial fournit ;
