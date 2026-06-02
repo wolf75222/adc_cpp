@@ -1,10 +1,11 @@
 # Schema deux-fluides isotherme asymptotic-preserving
 
 Note de methode sur le solveur deux-fluides de `adc_cpp` : modele, raideur, schema AP,
-discretisation du transport, et enveloppe de robustesse mesuree. Le code est dans
-[`include/adc/integrator/two_fluid_ap.hpp`](../include/adc/integrator/two_fluid_ap.hpp)
-(coeur portable GPU) et la facade dans
-[`include/adc/solver/two_fluid_ap_solver.hpp`](../include/adc/solver/two_fluid_ap_solver.hpp).
+discretisation du transport, et enveloppe de robustesse mesuree. Le coeur portable GPU est
+dans [`include/adc/integrator/two_fluid_ap.hpp`](../include/adc/integrator/two_fluid_ap.hpp).
+Le solveur est expose a Python sous le nom `adc.TwoFluidAP`, construit depuis
+[`python/two_fluid_ap_solver.cpp`](../python/two_fluid_ap_solver.cpp). Le cas d'usage est
+`adc_cases/two_fluid_ap/run.py` (Python pur), qui importe le module `adc`.
 Reference physique : Hoffart, arXiv:2510.11808.
 
 ## 1. Modele
@@ -122,4 +123,4 @@ au-dela de la rotation pure validee ici.
 - Conservation de la masse par espece a l'arrondi (`~1e-11`), centree et upwind.
 - Portable GPU GH200 (memes kernels `for_each_cell` + `ADC_HD`, multigrille on-device),
   bit-identique au CPU.
-- Expose jusqu'a Python : `TwoFluidAPConfig` (dont `upwind_continuity`), `TwoFluidAPSolver`.
+- Expose a Python : `adc.TwoFluidAP` et `adc.TwoFluidAPConfig` (dont `upwind_continuity`).

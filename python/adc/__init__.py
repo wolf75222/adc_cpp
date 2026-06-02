@@ -1,10 +1,10 @@
-"""adc — bindings Python de la lib adc_cpp.
+"""adc : bindings Python de la lib adc_cpp.
 
-Composition multi-especes a l'EXECUTION, dans l'esprit voulu : on COMPOSE un
-systeme bloc par bloc, et pour CHAQUE bloc on choisit independamment son modele,
-son schema spatial (limiteur + flux), son traitement temporel (explicite / IMEX,
-ou un integrateur ecrit en Python) et son nombre de sous-pas. Python dit QUOI
-assembler ; tout le calcul cellule par cellule reste dans la lib C++ compilee.
+Composition multi-especes a l'execution : on compose un systeme bloc par bloc, et
+pour chaque bloc on choisit independamment son modele, son schema spatial (limiteur
++ flux), son traitement temporel (explicite / IMEX, ou un integrateur ecrit en
+Python) et son nombre de sous-pas. Python dit QUOI assembler, le calcul cellule par
+cellule reste dans la lib C++ compilee.
 
 API lisible (objets) :
 
@@ -21,10 +21,10 @@ API lisible (objets) :
     sim.set_density("electrons", ne_numpy)             # CI ecrite en numpy
     sim.step_cfl(0.4)
 
-Le bloc compile sa fermeture d'avancee a l'ajout ; aucun callback Python dans le
-hot path — SAUF si on fournit soi-meme un integrateur temporel en Python, via les
-primitives sim.solve_fields()/sim.eval_rhs(name)/get_state/set_state (Python par
-PAS, le C++ reste par CELLULE). Cf. adc.integrate.ssprk2_step.
+Le bloc compile sa fermeture d'avancee a l'ajout, aucun callback Python dans le hot
+path, sauf si on fournit soi-meme un integrateur temporel en Python via les primitives
+sim.solve_fields()/sim.eval_rhs(name)/get_state/set_state (Python par pas, le C++ reste
+par cellule). Voir adc.integrate.ssprk2_step.
 """
 
 from ._adc import (SystemConfig, System as _System,
@@ -66,7 +66,7 @@ class IMEX:
     """IMEX : transport EXPLICITE + source raide IMPLICITE (Newton local).
 
     C'est l'« implicite partiel » : seule la partie raide (source) est implicite,
-    le transport reste explicite — beaucoup moins cher qu'un implicite total.
+    le transport reste explicite, beaucoup moins cher qu'un implicite total.
     substeps : sous-cyclage du bloc.
     """
 
@@ -110,7 +110,7 @@ class System:
         self._names.append(name)
 
     def block_names(self):
-        """Noms des blocs ajoutes (dans l'ordre) — utile a un integrateur Python."""
+        """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python)."""
         return list(self._names)
 
     # Tout le reste de l'API (set_poisson, set_density, solve_fields, step, step_cfl,

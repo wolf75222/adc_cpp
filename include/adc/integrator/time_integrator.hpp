@@ -27,9 +27,9 @@ enum class TimeTreatment {
   Prescribed
 };
 
-// SubstepsT : sous-pas PLUS FREQUENTS (n pas de dt/n par macro-pas — electrons rapides).
+// SubstepsT : sous-pas PLUS FREQUENTS (n pas de dt/n par macro-pas, electrons rapides).
 // StrideT   : cadence PLUS LENTE (le bloc n'avance qu'1 macro-pas sur StrideT, alors d'un
-//   pas de StrideT*dt — un « gaz » lent qu'on ne resout pas a chaque pas, retour tuteur).
+//   pas de StrideT*dt, un « gaz » lent qu'on ne resout pas a chaque pas, retour tuteur).
 //   Les deux sont orthogonaux ; StrideT=1 = comportement historique.
 template <class MethodT, TimeTreatment TreatmentT, int SubstepsT = 1, int StrideT = 1>
 struct TimePolicy {

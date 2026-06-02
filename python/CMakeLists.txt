@@ -18,13 +18,13 @@ foreach(pyf adc/__init__.py adc/integrate.py)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()
 
-# Test : importe le paquet et verifie les invariants (composition, masse, Poisson,
-# integrateur temporel Python). PYTHONPATH = dossier contenant le paquet adc/.
-if(ADC_BUILD_TESTS)
-  # Le test vit dans python/tests/ (PAS dans python/) pour que sys.path[0] (= dossier
-  # du script) ne contienne pas le paquet source adc/ qui masquerait le paquet construit.
-  add_test(NAME test_bindings
-           COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bindings.py)
-  set_tests_properties(test_bindings PROPERTIES
-    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
-endif()
+# Test des bindings : importe le paquet et verifie les invariants (composition, masse,
+# Poisson, integrateur temporel Python). Enregistre des que le module est construit (pas
+# garde par ADC_BUILD_TESTS), pour que `ctest --test-dir build-py` le voie meme avec
+# ADC_BUILD_TESTS=OFF. Lance avec le MEME interpreteur que celui ayant compile _adc.
+# Le test vit dans python/tests/ (pas python/) : sinon sys.path[0] (dossier du script)
+# contiendrait le paquet source adc/ et masquerait le paquet construit.
+add_test(NAME test_bindings
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bindings.py)
+set_tests_properties(test_bindings PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")

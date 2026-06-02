@@ -1,4 +1,4 @@
-# adc — Cap multi-espèces : du `PhysicalModel` au `CoupledSystem`
+# adc : Cap multi-espèces : du `PhysicalModel` au `CoupledSystem`
 
 *Document de conception pour la session tableau (avec Sacha). Met à jour la feuille de
 route après les remarques du tuteur et les incréments déjà réalisés.*
@@ -65,7 +65,7 @@ Le `Coupler` cible n'est plus « hyperbolique + elliptique » mais un **assemble
 système** : il prend `{U_e, U_i, U_n, …}` + méthodes spatiales + méthodes temporelles +
 solveurs elliptiques + ordre d'exécution.
 
-## 3. Vision cible — abstractions C++
+## 3. Vision cible : abstractions C++
 
 ```cpp
 // Un bloc = un état + un modèle + une discrétisation spatiale + une politique temporelle.
@@ -154,7 +154,7 @@ sim.run(t_end=1.0, cfl=0.4,
 Les chaînes (`flux="hllc"`, `time="imex"`) **sélectionnent des briques C++ compilées** ;
 elles ne sont jamais des callbacks cellule-par-cellule (lent, non GPU/MPI-friendly). Un
 utilisateur avancé écrit son `PhysicalModel` en C++ (`StateVec<N>`, `ADC_HD`) et l'expose
-ensuite à Python — toujours en composition, jamais en boucle interne Python.
+ensuite à Python, toujours en composition, jamais en boucle interne Python.
 
 ## 5. État actuel vs cible
 
@@ -186,7 +186,7 @@ Tous poussés, tous verts (adc_cpp 30/30, adc_cases 44/44 ; MPI 7+7) :
 
 ## 7. Modifications à faire (ordonnées)
 
-**Décision-mère (au tableau) — design des données :**
+**Décision-mère (au tableau), design des données :**
 - `tuple<Blocks…>` (chaque bloc garde son `StateVec<n_k>`, composition variadique) **vs**
   `StateVec<N_total>` empilé (un bloc mémoire contigu, offsets par espèce). Conditionne
   tout le reste (perf de localité, vues, GPU). À trancher avec Sacha.

@@ -44,9 +44,13 @@ drapeau à rajouter dans le code. Voir le tutoriel
 ## Vérification
 
 ```python
+import numpy as np
 import adc
-cfg = adc.DiocotronConfig(); cfg.n = 64
-sim = adc.DiocotronSolver(cfg)
+
+sim = adc.System(n=64, periodic=True, n_i0=1.0)
+sim.add_block("ne", model="diocotron", charge=-1.0)
+sim.set_poisson()
+sim.set_density("ne", np.ones((64, 64)))
 sim.step_cfl(0.4)
-print(sim.density().shape)      # (64, 64)
+print(sim.density("ne").shape)   # (64, 64)
 ```

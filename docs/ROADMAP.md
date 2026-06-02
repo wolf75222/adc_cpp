@@ -49,8 +49,10 @@ Liste vivante de ce qui est fait et de ce qui reste, par intention.
 - Validation numérique (au-delà du bit-identique) : ordre du Laplacien 5 points (L2/Linf=2.00),
   tourbillon isentropique Euler (VanLeer L1 mesuré 1.86), MUSCL mesuré 1.86 / Rusanov mesuré 0.89,
   loi de Gauss du couplage (`div(grad phi)=source`, ordre 2.00), conservation sous regrid.
-- Bindings Python (3 solveurs, 1:1 avec les façades), 10 scripts exécutables (GIF/plots), banc
-  `bench_amr`, figures de scaling.
+- Bindings Python de la lib (`python/`, module `adc`, `-DADC_BUILD_PYTHON=ON`) : `adc.System`
+  (composition bloc par bloc via `add_block`, `set_poisson`, `set_density`, `step`/`advance`/`step_cfl`,
+  primitives `eval_rhs`/`get_state`/`set_state` + `adc.integrate.ssprk2_step`) et les façades
+  spécialisées `adc.TwoFluidAP`, `adc.DiocotronAmr`. Banc `bench_amr`, figures de scaling.
 - Docs : README, ALGORITHMS, ARCHITECTURE (5 couches), CHOICES, BIBLIOGRAPHY, PERFORMANCE,
   two_fluid_ap, tutoriels 00 à 09, Doxygen + Sphinx.
 

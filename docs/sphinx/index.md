@@ -37,8 +37,9 @@ C++ API (Doxygen) <https://wolf75222.github.io/adc_cpp/cpp/>
 Trois axes orthogonaux (concept `PhysicalModel`, policy `NumericalFlux`, concept
 `EllipticSolver`) et un seam de parallélisme unique :
 
-- `DiocotronSolver` (dérive E x B), `EulerPoissonSolver` (auto-gravitant),
-  `TwoFluidAPSolver` (deux-fluides isotherme AP)
+- composition générique `System` : un bloc par modèle (`diocotron`, `electron_euler`,
+  `ion_isothermal`, `euler_poisson`), Poisson de système partagé ; côté Python via
+  `adc.System`
 - flux `RusanovFlux` / `HLLFlux` / `HLLCFlux`, reconstruction MUSCL (Minmod / VanLeer)
 - `GeometricMG` (multigrille V-cycle GS red-black) / `PoissonFFTSolver` (spectral direct)
 - AMR : `advance_amr` (entrée unifiée, multi-patch N niveaux, reflux coverage-aware ;

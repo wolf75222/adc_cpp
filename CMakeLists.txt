@@ -153,15 +153,28 @@ endif()
 # vivent dans le depot applicatif separe adc_cases, qui consomme adc::adc via
 # FetchContent. Le coeur ne connait aucun modele : aucune dependance coeur->cas.
 
-if(ADC_BUILD_TESTS)
+# enable_testing() des que des tests existent : le coeur (tests/) OU le module Python.
+# Sans ca, `ctest --test-dir build-py` avec ADC_BUILD_TESTS=OFF ne voit aucun test.
+if(ADC_BUILD_TESTS OR ADC_BUILD_PYTHON)
   enable_testing()
+endif()
+if(ADC_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
 # Module Python `adc` (bindings de la lib). Compile la facade runtime System + pybind11.
 if(ADC_BUILD_PYTHON)
   include(FetchContent)
+  # macOS expose souvent plusieurs Python (framework Python.org, conda, brew). Sans garde,
+  # FindPython prend le framework le plus recent comme Interpreter mais un autre pour
+  # Development.Module : l'interpreteur ne peut alors pas importer l'extension compilee
+  # (suffixe ABI cpython-3XY different). On deprioritise les frameworks pour que les deux
+  # concordent. Surchargeable via -DPython_EXECUTABLE=/chemin/python pour pinner.
+  if(APPLE)
+    set(Python_FIND_FRAMEWORK LAST)
+  endif()
   find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+  message(STATUS "adc Python module: interpreteur ${Python_EXECUTABLE} (${Python_VERSION})")
   find_package(pybind11 2.11 CONFIG QUIET)
   if(NOT pybind11_FOUND)
     FetchContent_Declare(pybind11

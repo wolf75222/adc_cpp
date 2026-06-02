@@ -1,6 +1,6 @@
 // Integrateur en temps fourni par l'UTILISATEUR (retour tuteur §8.2 A3/A5). Le coeur
 // fournit SSPRK2/SSPRK3 ; mais on peut aussi ecrire son propre objet a `take_step` et le
-// passer comme Method d'un bloc explicite — le coupleur l'instancie et l'appelle, sans
+// passer comme Method d'un bloc explicite, le coupleur l'instancie et l'appelle, sans
 // rien changer au coeur. La physique (rhs_eval = flux + source) reste compilee.
 
 #include <adc/core/coupled_system.hpp>

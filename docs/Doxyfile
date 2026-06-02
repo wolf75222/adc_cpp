@@ -6,7 +6,7 @@ PROJECT_NUMBER         = "0.1.0"
 PROJECT_BRIEF          = "C++23 mini-AMReX maison : hyperbolique-elliptique couple sur AMR (diocotron, deux-fluides), seam serie/OpenMP/Kokkos/MPI"
 
 OUTPUT_DIRECTORY       = docs/_build/doxygen
-INPUT                  = include/adc README.md
+INPUT                  = include README.md
 FILE_PATTERNS          = *.hpp *.h
 RECURSIVE              = YES
 USE_MDFILE_AS_MAINPAGE = README.md

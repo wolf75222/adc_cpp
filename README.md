@@ -23,8 +23,8 @@ regrid Berger-Rigoutsos, sous-cyclage Berger-Oliger + reflux conservatif (derive
 ---
 
 `adc_cpp` est la **bibliotheque** : le moteur generique (coeur sans modele) **plus** la
-bibliotheque de modeles physiques (`include/adc/model/`) et **les bindings Python de la lib**
-— le module `adc` (composition `System` + solveurs specialises `TwoFluidAP`, `DiocotronAmr`).
+bibliotheque de modeles physiques (`include/adc/model/`) et **les bindings Python de la lib**,
+le module `adc` (composition `System` + solveurs specialises `TwoFluidAP`, `DiocotronAmr`).
 Le depot separe **[`adc_cases`](https://github.com/wolf75222/adc_cases)** ne contient QUE des
 **cas d'utilisation en Python** (un dossier par cas) qui importent ce module ; il n'a plus de C++.
 
@@ -104,7 +104,7 @@ backend OpenMP autonome (`ADC_USE_OPENMP`) est **deprecie** au profit de Kokkos.
 ```bash
 cmake -B build                       # serie
 cmake -B build -DADC_USE_MPI=ON      # distribue (halos + FFT par MPI)
-cmake -B build -DADC_USE_KOKKOS=ON   # CPU multi-thread (device OpenMP) — recommande
+cmake -B build -DADC_USE_KOKKOS=ON   # CPU multi-thread (device OpenMP), recommande
 cmake -B build -DADC_USE_KOKKOS=ON \ # GPU GH200
    -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K
 ```
@@ -135,9 +135,15 @@ lib. On construit le module avec `-DADC_BUILD_PYTHON=ON` :
 ```bash
 cmake -B build-py -DADC_BUILD_PYTHON=ON && cmake --build build-py --target _adc -j
 export PYTHONPATH=$PWD/build-py/python        # contient le paquet adc/
+ctest --test-dir build-py                     # lance test_bindings
 ```
 
-Le module expose **deux niveaux**, dans l'esprit « Python compose QUOI, le C++ calcule » :
+L'extension est liee a une version de Python (suffixe ABI `cpython-3XY`). Construire et
+lancer avec le MEME interpreteur ; en cas de Python multiples, pinner explicitement :
+`cmake -B build-py -DADC_BUILD_PYTHON=ON -DPython_EXECUTABLE=$(which python3.12)`. La ligne
+`adc Python module: interpreteur ...` affichee a la configuration indique l'interpreteur retenu.
+
+Le module expose deux niveaux, dans l'esprit "Python compose QUOI, le C++ calcule" :
 
 ```python
 import adc
@@ -153,15 +159,15 @@ sim.set_density("electrons", ne_numpy)             # CI ecrite en numpy
 sim.step_cfl(0.4)
 ```
 
-- **`adc.System`** — composition multi-blocs : `add_block(model, spatial=adc.Spatial(...),
+- **`adc.System`** (composition multi-blocs) : `add_block(model, spatial=adc.Spatial(...),
   time=adc.Explicit()|adc.IMEX(...)|adc.Implicit(...), substeps=...)`, `set_poisson(...)`,
   `set_density`, `step`/`advance`/`step_cfl`, diagnostics. Modeles : `diocotron`,
   `electron_euler`, `ion_isothermal`, `euler_poisson`. Le choix implicite/explicite est
   **par bloc et reversible** ; aucun callback Python dans le hot path.
-- **Integrateur temporel ecrit en Python** — primitives `solve_fields()`, `eval_rhs(name)`,
+- **Integrateur temporel ecrit en Python** : primitives `solve_fields()`, `eval_rhs(name)`,
   `get_state`/`set_state` : on ecrit son propre `take_step` cote Python (par PAS), le residu
   et Poisson restant calcules en C++ (par CELLULE). Cf. `adc.integrate.ssprk2_step`.
-- **Solveurs specialises** — `adc.TwoFluidAP` (asymptotic-preserving), `adc.DiocotronAmr` (AMR) :
+- **Solveurs specialises** : `adc.TwoFluidAP` (asymptotic-preserving), `adc.DiocotronAmr` (AMR),
   integrateurs sur mesure exposes comme facades.
 
 Le test `python/tests/test_bindings.py` exerce ces chemins. Exemples complets : depot
@@ -192,8 +198,8 @@ ctest --test-dir build                 # 45 tests coeur (maillage, AMR, elliptiq
 | Option | Defaut | Role |
 |---|---|---|
 | `ADC_BUILD_TESTS` | `ON` | suite CTest du coeur |
-| `ADC_USE_KOKKOS` | `OFF` | dispatch Kokkos (CPU OpenMP + GPU) — **recommande** |
-| `ADC_USE_OPENMP` | `OFF` | dispatch OpenMP autonome — **deprecie** (utiliser Kokkos) |
+| `ADC_USE_KOKKOS` | `OFF` | dispatch Kokkos (CPU OpenMP + GPU), **recommande** |
+| `ADC_USE_OPENMP` | `OFF` | dispatch OpenMP autonome, **deprecie** (utiliser Kokkos) |
 | `ADC_USE_MPI` | `OFF` | backend distribue (comm, halos, FFT) |
 | `ADC_USE_HDF5` | `OFF` | DataWriter HDF5 parallele |
 | `ADC_USE_EIGEN` | `ON` | cible d'analyse host `adc_eigen` (utilisee par adc_cases) |

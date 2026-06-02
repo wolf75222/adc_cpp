@@ -1,20 +1,18 @@
-"""Integrateurs temporels ECRITS EN PYTHON, par-dessus les primitives de la lib.
+"""Integrateurs temporels ecrits en Python, par-dessus les primitives de la lib.
 
-Le tuteur voulait pouvoir implementer SON propre integrateur temporel — en Python
-si on veut — sans que cela force un callback Python dans le hot path. C'est exactement
-ce que permettent les primitives exposees par `System` :
+On peut implementer son propre integrateur temporel en Python sans callback Python
+dans le hot path, via les primitives exposees par `System` :
 
     sim.solve_fields()          # Poisson + aux = grad(phi)        (calcul C++)
-    R = sim.eval_rhs(name)      # residu -div F + S du bloc        (calcul C++, par CELLULE)
+    R = sim.eval_rhs(name)      # residu -div F + S du bloc        (calcul C++, par cellule)
     U = sim.get_state(name)     # etat du bloc (ndarray ncomp,n,n)
     sim.set_state(name, U)      # ecrit l'etat
 
-Le residu et Poisson restent calcules dans la lib compilee (par cellule) ; seul
-l'ASSEMBLAGE des etages RK est en Python (par PAS). On peut donc ecrire n'importe
-quel schema en temps — ici Euler avant et SSPRK2 — sans toucher au C++.
-
-Bonus : ces integrateurs Python re-resolvent Poisson a CHAQUE etage RK (couplage
-« per-stage », plus precis que le couplage fige par pas du step() compile).
+Le residu et Poisson restent calcules dans la lib compilee (par cellule), seul
+l'assemblage des etages RK est en Python (par pas). On peut donc ecrire n'importe quel
+schema en temps (ici Euler avant et SSPRK2) sans toucher au C++. Ces integrateurs
+re-resolvent Poisson a chaque etage RK (couplage per-stage, plus precis que le couplage
+fige par pas du step() compile).
 """
 
 
@@ -33,7 +31,7 @@ def ssprk2_step(sim, dt, names=None):
         U  = 1/2 U0 + 1/2 (U1 + dt R(U1))
 
     Tous les blocs avancent ensemble, Poisson (qui les couple) etant re-resolu entre
-    les deux etages — le couplage hyperbolique/elliptique « per-stage » du tuteur.
+    les deux etages : couplage hyperbolique/elliptique per-stage.
     """
     names = names if names is not None else sim.block_names()
     sim.solve_fields()
