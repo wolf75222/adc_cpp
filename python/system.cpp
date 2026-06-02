@@ -3,6 +3,7 @@
 #include <adc/elliptic/geometric_mg.hpp>
 #include <adc/elliptic/poisson_fft_solver.hpp>
 #include <adc/integrator/implicit_stepper.hpp>   // backward_euler_source
+#include <adc/integrator/time_steppers.hpp>      // ForwardEuler, SSPRK2Step (math RK du coeur)
 #include <adc/model/charged_fluid.hpp>           // ChargedEuler, ChargedEulerIsothermal (+ Euler)
 #include <adc/model/diocotron.hpp>
 #include <adc/model/euler_poisson.hpp>           // EulerPoisson (auto-gravite / Langmuir)
@@ -148,26 +149,27 @@ struct System::Impl {
   }
 
   // --- schemas spatiaux compiles -------------------------------------------
+  // L'evaluateur methode-des-lignes d'un bloc (L/F/Model figes) : ghosts puis
+  // R = -div F + S. La math RK est portee par les TimeStepper du coeur, pas reimplementee.
+  template <class Limiter, class Flux, class Model>
+  auto rhs_eval(const Model& model) {
+    return [this, &model](MultiFab& U, MultiFab& R) {
+      fill_ghosts(U, dom, bc_);
+      assemble_rhs<Limiter, Flux>(model, U, aux, geom, R);
+    };
+  }
+  // SSPRK2 du coeur sur le RHS du bloc.
   template <class Limiter, class Flux, class Model>
   void ssprk2(const Model& model, MultiFab& U, Real dt) {
-    MultiFab R(ba, dm, Model::n_vars, 0);
-    fill_ghosts(U, dom, bc_);
-    assemble_rhs<Limiter, Flux>(model, U, aux, geom, R);
-    MultiFab U1 = U;
-    saxpy(U1, dt, R);
-    fill_ghosts(U1, dom, bc_);
-    assemble_rhs<Limiter, Flux>(model, U1, aux, geom, R);
-    saxpy(U1, dt, R);
-    lincomb(U, Real(0.5), U, Real(0.5), U1);
+    SSPRK2Step{}.take_step(rhs_eval<Limiter, Flux>(model), U, dt);
   }
+  // IMEX : transport explicite (modele source-free, Euler avant du coeur) puis source
+  // raide implicite (backward-Euler / Newton local).
   template <class Limiter, class Flux, class Model>
   void imex_step(const Model& model, MultiFab& U, Real dt) {
     const SourceFreeModel<Model> sf{model};
-    MultiFab R(ba, dm, Model::n_vars, 0);
-    fill_ghosts(U, dom, bc_);
-    assemble_rhs<Limiter, Flux>(sf, U, aux, geom, R);  // transport explicite
-    saxpy(U, dt, R);
-    backward_euler_source(model, aux, U, dt);          // source implicite (Newton local)
+    ForwardEuler{}.take_step(rhs_eval<Limiter, Flux>(sf), U, dt);
+    backward_euler_source(model, aux, U, dt);
   }
 
   struct BlockClosures {

@@ -77,8 +77,11 @@ class IMEX:
 
 
 def Implicit(dt_ratio=1, substeps=None):
-    """Alias lisible : un bloc « implicite » (au sens partiel/IMEX) sous-cycle
-    dt_ratio fois par macro-pas. Equivaut a IMEX(substeps=dt_ratio)."""
+    """Alias d'IMEX (implicite PARTIEL : source raide implicite, transport explicite).
+
+    Il n'y a pas d'implicite TOTAL expose (backward-Euler sur le transport aussi) : c'est
+    le cas couteux que l'on evite. `Implicit(dt_ratio=k)` vaut exactement `IMEX(substeps=k)`.
+    """
     return IMEX(substeps=substeps if substeps is not None else dt_ratio)
 
 
