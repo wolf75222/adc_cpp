@@ -31,6 +31,8 @@ __all__ = [
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
     "Spatial", "Explicit", "IMEX", "Implicit", "integrate",
     "TwoFluidAP", "TwoFluidAPConfig",
+    "elliptic", "div_eps_grad", "charge_density", "electric_field_from_potential",
+    "EllipticSolver", "EllipticModel",
 ]
 
 
@@ -161,6 +163,62 @@ def Model(state, transport, source, elliptic):
     return spec
 
 
+# --- Modele elliptique (EPM) : Poisson = une instance composable ------------
+# Le modele elliptique n'est pas un cas special hard-code ; c'est un EllipticPhysicalModel
+# compose de briques (operateur + second membre + sortie). Poisson en est l'instance courante.
+class DivEpsGrad:
+    """Operateur elliptique D = div(eps grad .). eps constant (1.0 = Poisson). eps(x) variable et
+    d'autres operateurs (diffusion, projection) sont des raffinements (ils toucheraient le solveur)."""
+
+    def __init__(self, epsilon=1.0):
+        self.epsilon = float(epsilon)
+
+
+class ChargeDensitySource:
+    """Second membre f = densite de charge du systeme = somme_s q_s n_s. Les charges q_s vivent sur
+    les blocs (brique elliptique de chaque espece) ; ce second membre les somme."""
+
+
+class ElectricFieldFromPotential:
+    """Post-traitement : E = -grad phi, reinjecte dans aux des modeles hyperboliques."""
+
+
+class EllipticModel:
+    """EllipticPhysicalModel : inconnue + operateur + second membre + sortie."""
+
+    def __init__(self, unknown, operator, rhs, output):
+        self.unknown = unknown
+        self.operator = operator
+        self.rhs = rhs
+        self.output = output
+
+
+def div_eps_grad(epsilon=1.0):
+    return DivEpsGrad(epsilon)
+
+
+def charge_density():
+    return ChargeDensitySource()
+
+
+def electric_field_from_potential():
+    return ElectricFieldFromPotential()
+
+
+def elliptic(unknown="phi", operator=None, rhs=None, output=None):
+    """Compose un EPM. Poisson = elliptic(operator=div_eps_grad(), rhs=charge_density(),
+    output=electric_field_from_potential())."""
+    return EllipticModel(unknown, operator or DivEpsGrad(), rhs or ChargeDensitySource(),
+                         output or ElectricFieldFromPotential())
+
+
+class EllipticSolver:
+    """Solveur elliptique : 'geometric_mg' (tout cas, paroi) | 'fft' (periodique, n = 2^k)."""
+
+    def __init__(self, kind="geometric_mg"):
+        self.kind = kind
+
+
 # --- Schema spatial + traitement temporel (par bloc) ------------------------
 class Spatial:
     """Discretisation spatiale : reconstruction (limiteur) + flux numerique de Riemann.
@@ -242,6 +300,24 @@ class System:
         suivi de set_density."""
         self.add_block(name, model, spatial=spatial, evolve=False)
         self.set_density(name, density)
+
+    def add_elliptic_model(self, name, model, solver=None, bc="auto", wall="none",
+                           wall_radius=0.0):
+        """EPM : configure le modele elliptique de systeme (Poisson en est l'instance courante).
+        model = adc.elliptic(operator=adc.div_eps_grad(eps), rhs=adc.charge_density(),
+        output=adc.electric_field_from_potential()). set_poisson(...) reste le raccourci equivalent.
+        Premier ordre : operateur div(eps grad) a eps=1 + densite de charge ; eps(x), charges au
+        niveau EPM, et autres operateurs (diffusion, projection) sont des raffinements."""
+        if not isinstance(model.operator, DivEpsGrad):
+            raise NotImplementedError("add_elliptic_model : seul l'operateur div_eps_grad (Poisson) "
+                                      "est supporte pour l'instant")
+        if model.operator.epsilon != 1.0:
+            raise NotImplementedError("add_elliptic_model : eps != 1 (variable ou non unitaire) est "
+                                      "un raffinement (solveur multigrille)")
+        if not isinstance(model.rhs, ChargeDensitySource):
+            raise NotImplementedError("add_elliptic_model : seul rhs=charge_density est supporte")
+        kind = solver.kind if solver is not None else "geometric_mg"
+        self.set_poisson(rhs="charge_density", solver=kind, bc=bc, wall=wall, wall_radius=wall_radius)
 
     def block_names(self):
         """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python)."""

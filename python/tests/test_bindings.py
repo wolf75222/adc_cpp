@@ -234,6 +234,27 @@ chk(Ea1 < Ea0 - 1e-6 and Eb1 > Eb0 + 1e-6, "echange thermique : energie chaud ->
 chk(abs((Ea1 + Eb1) - (Ea0 + Eb0)) < 1e-9, "echange thermique : energie totale conservee")
 chk(abs(Ta1 - Tb1) < 1.0 - 1e-3, "echange thermique : temperatures relaxent")
 
+# --- 4g. EPM : Poisson comme instance composable d'add_elliptic_model -----------
+print("== EPM : Poisson via add_elliptic_model (set_poisson = raccourci) ==")
+ep = adc.System(n=48, L=1.0, periodic=False)
+ep.add_block("ne", model=diocotron(B0=1.0, alpha=1.0, n_i0=0.0), spatial=adc.Spatial(minmod=True))
+ep.add_elliptic_model("phi", model=adc.elliptic(operator=adc.div_eps_grad(1.0),
+                      rhs=adc.charge_density(), output=adc.electric_field_from_potential()),
+                      solver=adc.EllipticSolver("geometric_mg"), bc="dirichlet",
+                      wall="circle", wall_radius=0.40)
+xx, yy = np.meshgrid(meshx(48), meshx(48), indexing="xy")
+r = np.hypot(xx - 0.5, yy - 0.5)
+ne_ring = np.full((48, 48), 1e-3)
+ne_ring[(r > 0.15) & (r < 0.20)] = 1.0
+ep.set_density("ne", ne_ring)
+ep.solve_fields()
+chk(np.abs(ep.potential()).max() > 1e-6, "EPM : add_elliptic_model (Poisson) actif")
+try:
+    adc.System(n=16).add_elliptic_model("d", adc.elliptic(operator=adc.div_eps_grad(2.0)))
+    chk(False, "EPM : eps != 1 refuse (raffinement solveur)")
+except NotImplementedError:
+    chk(True, "EPM : eps != 1 refuse (raffinement solveur)")
+
 # --- 5. garde-fous --------------------------------------------------------------
 print("== garde-fous ==")
 

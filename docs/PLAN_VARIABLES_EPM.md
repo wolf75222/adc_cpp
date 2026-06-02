@@ -29,7 +29,7 @@ seconde correction est de **ne pas hard-coder Poisson** mais d'en faire une inst
 - Tests : `tests/test_primitive_recon.cpp` (round-trip + concept) + test Python (Euler recon
   cons vs prim : masse conservee ~1e-15 dans les deux, positivite, fini).
 
-### Fait (priorites 5-6 + cas, ce chantier)
+### Fait (priorites 5-7 + cas, ce chantier)
 - #57 cas "deux Euler independants" (adc_cases/two_euler) : meme schema HLLC + recon primitif,
   multirate ; masse/bloc, positivite, electrons plus rapides.
 - #54 espece GELEE : flag `evolve` sur le bloc (non avance, vu par Poisson) + `add_background`.
@@ -40,8 +40,11 @@ seconde correction est de **ne pas hard-coder Poisson** mais d'en faire une inst
 - #55 (partiel) cas plasma (adc_cases/plasma) : e + i + n, Poisson + ionisation + collision cables
   de bout en bout ; n_i+n_g conserve a ~1e-15, Poisson actif, densites positives. models.py :
   recettes `euler()` et `neutral_isothermal()` ajoutees.
-- Verifie : test_bindings (briques + frozen + ionisation + collision + echange thermique +
-  garde-fous), cas two_euler et plasma, ctest coeur 46/46 inchange.
+- #58 EPM premier ordre : add_elliptic_model + briques (elliptic / div_eps_grad / charge_density /
+  electric_field_from_potential) ; Poisson = instance ; set_poisson raccourci ; eps!=1 et operateurs
+  alternatifs rejetes (raffinements). Pur Python au-dessus du solveur existant.
+- Verifie : test_bindings (briques + frozen + 3 couplages + EPM + garde-fous), cas two_euler et
+  plasma, ctest coeur 46/46 inchange.
 
 ### Deja generique : NE PAS refaire
 - `RusanovFlux` / `HLLFlux` / `HLLCFlux` sont `template<class Model>` et appellent `m.flux`,
@@ -175,6 +178,11 @@ models.elliptic(unknown="p", operator=models.pressure_projection(), rhs=models.d
 `set_poisson(...)` RESTE comme raccourci pratique (= add_elliptic_model avec les briques de
 Poisson), mais pas comme architecture centrale.
 
+Etat (premier ordre, FAIT, #58) : add_elliptic_model + briques exposes en Python ; Poisson = instance ;
+set_poisson raccourci. Pour l'instant operateur div(eps grad) a eps=1 + densite de charge (charges sur
+les blocs) ; eps(x), charges au niveau EPM, et autres operateurs (diffusion, projection) = raffinements
+(rejetes proprement par NotImplementedError).
+
 ### Forme math
 ```
 HPM : d_t U + div F(U) = S(U, aux)
@@ -227,8 +235,9 @@ vers une vraie espece de fond n_g(x). Passer evolue <-> gele doit etre "une lign
 [x] 5. cas "deux Euler independants" (adc_cases)            (#57, etape 4 de l'echelle)
 [x] 6. CoupledSource (operator-split) + ionisation/collision/echange thermique + espece gelee
        (#52, #53, #54) : sim.add_ionization / add_collision / add_thermal_exchange / add_background
-[ ] 7. EPM premier ordre : add_elliptic_model, Poisson = instance, set_poisson raccourci,
-       eps(x), briques div_eps_grad / charge_density / electric_field_from_potential  (#58)
+[x] 7. EPM premier ordre (#58) : add_elliptic_model + briques elliptic / div_eps_grad /
+       charge_density / electric_field_from_potential ; Poisson = instance ; set_poisson raccourci.
+       eps(x) et operateurs alternatifs (diffusion, projection) = raffinements (rejetes proprement).
 [ ] -- niveau systeme dans adc_cases : models.py recipes (two_fluid, plasma) + couplages (#55)
 [ ] -- Python : Spatial(recon=) [fait], objets de couplage, add_background, add_elliptic_model (#56)
 [ ] -- brique Variables (descripteur kind/names/size), Vars au meme niveau que Flux/Source (#59)
