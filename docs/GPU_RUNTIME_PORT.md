@@ -42,9 +42,13 @@ pas une reecriture des noyaux de calcul.
    prolongation, residu en kernels device ; ou PoissonFFTSolver via cuFFT. C'est le coeur de
    l'effort, et c'est aussi la ou se brancherait le solveur a COEFFICIENTS VARIABLES (eps(x)) encore
    manquant. Effort : eleve.
-4. **Couplages inter-especes sur device.** `apply_couplings` (ionisation/collision/echange,
-   operator-split) est aujourd'hui une passe HOTE ; la porter en kernels lisant plusieurs blocs.
-   Effort : moyen.
+4. **Couplages inter-especes sur device.** ✅ FAIT (verifie GH200). Les 3 couplages
+   (ionisation, collision, echange thermique, `system.cpp`) portes de boucles HOTE vers `for_each_cell`
+   (kernels device lisant/ecrivant PLUSIEURS blocs au meme point) ; `device_fence` prealable de
+   `apply_couplings` supprime (kernels ordonnes apres le transport). Le kernel d'ionisation sur GH200
+   donne un resultat BIT-IDENTIQUE au CPU, n_i + n_g conserve (`python/tests/gpu/phase4_coupling.cpp`).
+   Host : `test_bindings` (conservation des 3 couplages) vert. => jalon 1->2->4 atteint : TRANSPORT
+   MULTI-ESPECES complet (transport + BCs + couplages) sur GPU, sans Poisson.
 5. **AMR sur device.** regrid, prolongation/restriction de niveau, reflux : kernels device + gestion
    de la hierarchie cote hote (orchestration) avec donnees device. Effort : eleve.
 6. **MPI CUDA-aware.** Echange de halos device-to-device (GPUDirect), `fill_boundary` distribue sans

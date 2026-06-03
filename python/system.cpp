@@ -142,12 +142,12 @@ struct System::Impl {
     throw std::runtime_error("System : bloc inconnu '" + name + "'");
   }
 
-  // Sources de COUPLAGE inter-especes : appliquees par SPLITTING (un pas additif explicite de
-  // dt) APRES le transport de chaque bloc. Passe HOTE (comme set_density) : a revisiter pour
-  // Kokkos/GPU. Chaque couplage lit/met a jour l'etat de PLUSIEURS blocs au meme point.
+  // Sources de COUPLAGE inter-especes : appliquees par SPLITTING (un pas additif explicite de dt)
+  // APRES le transport de chaque bloc. Chaque couplage est un for_each_cell (kernel DEVICE) lisant /
+  // mettant a jour plusieurs blocs au meme point ; ils s'ordonnent apres le transport sur le meme
+  // espace d'execution, donc plus de device_fence prealable (plus d'acces hote).
   void apply_couplings(Real dt) {
     if (couplings.empty()) return;
-    device_fence();
     for (auto& c : couplings) c(dt);
   }
 
@@ -523,20 +523,15 @@ void System::add_ionization(const std::string& electron, const std::string& ion,
   // masse est transferee du neutre vers l'ion (n_i + n_g conserve). Premiere brique de couplage ;
   // le transfert de quantite de mouvement / energie (especes fluides) est un raffinement ulterieur.
   P->couplings.push_back([P, ie, ii, ig, k](Real dt) {
-    Impl::Species& e = P->sp[ie];
-    Impl::Species& s_i = P->sp[ii];
-    Impl::Species& g = P->sp[ig];
-    Array4 ue = e.U.fab(0).array();
-    Array4 ui = s_i.U.fab(0).array();
-    Array4 ug = g.U.fab(0).array();
-    const Box2D v = e.U.box(0);
-    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int x = v.lo[0]; x <= v.hi[0]; ++x) {
-        const Real dn = dt * k * ue(x, j, 0) * ug(x, j, 0);
-        ug(x, j, 0) -= dn;
-        ui(x, j, 0) += dn;
-        ue(x, j, 0) += dn;
-      }
+    Array4 ue = P->sp[ie].U.fab(0).array();
+    Array4 ui = P->sp[ii].U.fab(0).array();
+    Array4 ug = P->sp[ig].U.fab(0).array();
+    for_each_cell(P->sp[ie].U.box(0), [=] ADC_HD(int i, int j) {  // sur device (lit n_e, n_g)
+      const Real dn = dt * k * ue(i, j, 0) * ug(i, j, 0);
+      ug(i, j, 0) -= dn;
+      ui(i, j, 0) += dn;
+      ue(i, j, 0) += dn;
+    });
   });
 }
 
@@ -552,20 +547,17 @@ void System::add_collision(const std::string& a, const std::string& b, double ra
   // l'une vers l'autre. Sur comp 1 et 2 (qte de mvt). L'echauffement par friction (energie) est
   // un raffinement ulterieur (neglige : convient aux especes isothermes, sans eq. d'energie).
   P->couplings.push_back([P, ia, ib, k](Real dt) {
-    Impl::Species& A = P->sp[ia];
-    Impl::Species& B = P->sp[ib];
-    Array4 ua = A.U.fab(0).array();
-    Array4 ub = B.U.fab(0).array();
-    const Box2D v = A.U.box(0);
-    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int x = v.lo[0]; x <= v.hi[0]; ++x)
-        for (int c = 1; c <= 2; ++c) {  // composantes de quantite de mouvement (x, y)
-          const Real va = ua(x, j, c) / ua(x, j, 0);
-          const Real vb = ub(x, j, c) / ub(x, j, 0);
-          const Real f = dt * k * (va - vb);
-          ua(x, j, c) -= f;
-          ub(x, j, c) += f;
-        }
+    Array4 ua = P->sp[ia].U.fab(0).array();
+    Array4 ub = P->sp[ib].U.fab(0).array();
+    for_each_cell(P->sp[ia].U.box(0), [=] ADC_HD(int i, int j) {  // sur device
+      for (int c = 1; c <= 2; ++c) {  // composantes de quantite de mouvement (x, y)
+        const Real va = ua(i, j, c) / ua(i, j, 0);
+        const Real vb = ub(i, j, c) / ub(i, j, 0);
+        const Real f = dt * k * (va - vb);
+        ua(i, j, c) -= f;
+        ub(i, j, c) += f;
+      }
+    });
   });
 }
 
@@ -581,22 +573,18 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
   // sur chaque espece (energie totale conservee) ; les temperatures relaxent. T = p/rho (a une
   // constante pres), p = (gamma-1)(E - 1/2 rho |u|^2). Transfere l'energie INTERNE (u inchange).
   P->couplings.push_back([P, ia, ib, k, ga, gb](Real dt) {
-    Impl::Species& A = P->sp[ia];
-    Impl::Species& B = P->sp[ib];
-    Array4 ua = A.U.fab(0).array();
-    Array4 ub = B.U.fab(0).array();
-    const Box2D v = A.U.box(0);
-    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int x = v.lo[0]; x <= v.hi[0]; ++x) {
-        const Real ra = ua(x, j, 0), rb = ub(x, j, 0);
-        const Real pa = (ga - Real(1)) * (ua(x, j, 3) -
-            Real(0.5) * (ua(x, j, 1) * ua(x, j, 1) + ua(x, j, 2) * ua(x, j, 2)) / ra);
-        const Real pb = (gb - Real(1)) * (ub(x, j, 3) -
-            Real(0.5) * (ub(x, j, 1) * ub(x, j, 1) + ub(x, j, 2) * ub(x, j, 2)) / rb);
-        const Real q = dt * k * (pa / ra - pb / rb);  // k (T_a - T_b), T = p/rho
-        ua(x, j, 3) -= q;
-        ub(x, j, 3) += q;
-      }
+    Array4 ua = P->sp[ia].U.fab(0).array();
+    Array4 ub = P->sp[ib].U.fab(0).array();
+    for_each_cell(P->sp[ia].U.box(0), [=] ADC_HD(int i, int j) {  // sur device
+      const Real ra = ua(i, j, 0), rb = ub(i, j, 0);
+      const Real pa = (ga - Real(1)) * (ua(i, j, 3) -
+          Real(0.5) * (ua(i, j, 1) * ua(i, j, 1) + ua(i, j, 2) * ua(i, j, 2)) / ra);
+      const Real pb = (gb - Real(1)) * (ub(i, j, 3) -
+          Real(0.5) * (ub(i, j, 1) * ub(i, j, 1) + ub(i, j, 2) * ub(i, j, 2)) / rb);
+      const Real q = dt * k * (pa / ra - pb / rb);  // k (T_a - T_b), T = p/rho
+      ua(i, j, 3) -= q;
+      ub(i, j, 3) += q;
+    });
   });
 }
 
