@@ -168,11 +168,17 @@ l'espace d'execution `Cuda` (GH200 ; Kokkos 4.4 + CUDA 12.6, `HOPPER90`), == `ad
 (5.6e-17, contraction FMA), cf. docs/GPU_ROMEO.md. C'est le meme primitif de dispatch que
 `adc/mesh/for_each.hpp`.
 
-RESTE : (a) brancher la brique generee dans le solveur TEMPLATE compile a L'EXECUTION (dispatch /
-`ModelSpec`) : suppose une interface de modele TYPE-ERASED (le solveur connait ses types a la
-compilation ; le `.so` JIT et le harnais Kokkos compilent la brique STATIQUEMENT) ; (b) rebatir le
-solveur adc COMPLET avec `-DADC_USE_KOKKOS=ON` et faire tourner un CAS entier (pas seulement le flux)
-sur GPU. Le codegen hote NE remplace PAS les briques compilees de production.
+(a) FAIT (mecanisme type-erased) : `adc::IModel<NV>` + `ModelAdapter` (include/adc/runtime/dynamic_model.hpp).
+Une brique generee, compilee en `.so`, est CHARGEE a l'execution (dlopen) et dispatchee par l'interface
+virtuelle, == `adc::Euler` (`test_dynamic_model` C++ ; `test_dsl_dynamic` Python). Chemin HOTE (vtable,
+hors GPU ; pendant COMPILE de PythonFlux). Reste pour (a) : cabler `IModel` dans le runtime `System`
+(`sim.add_dynamic_block`) pour piloter depuis Python un modele charge a l'execution.
+
+(b) RESTE : rebatir le solveur adc COMPLET avec `-DADC_USE_KOKKOS=ON` et faire tourner un CAS entier
+(time-stepping, pas seulement le flux) sur GPU.
+
+Le codegen hote et le dispatch type-erased NE remplacent PAS les briques compilees de production (chemin
+template, GPU/MPI).
 
 ---
 

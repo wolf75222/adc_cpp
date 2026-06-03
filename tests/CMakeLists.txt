@@ -61,6 +61,9 @@ adc_add_test(test_splitting)
 adc_add_test(test_imex_ap)
 adc_add_test(test_ap_limit)
 
+# --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
+adc_add_test(test_dynamic_model)
+
 # --- MPI (coeur) : seam comm, reductions, Poisson distribue ---
 if(ADC_HAS_MPI)
   function(adc_add_mpi_test name nproc)
