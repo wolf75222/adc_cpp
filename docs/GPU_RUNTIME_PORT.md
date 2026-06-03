@@ -3,8 +3,9 @@
 Le DSL et le coeur de calcul sont verifies jusqu'au GPU GH200 (flux, brique generee, CAS Euler complet
 via le seam Kokkos `for_each_cell` ; cf. docs/GPU_ROMEO.md). Ce qui reste pour une PRODUCTION GPU de
 bout en bout, c'est porter la PILE RUNTIME entiere (System / MultiFab / Poisson / AMR / MPI) sur device.
-C'est un chantier d'integration MAJEUR (semaines), pas un tour. Ce document le decoupe en phases, avec
-ce qui est deja acquis et ce que chaque phase exige.
+ETAT (juin 2026) : le solveur MONO-GRILLE complet (transport + BCs + couplages + Poisson + pas
+de temps, orchestre par le System) tourne sur GH200, verifie == CPU (phases 1-5 et 7). Reste la phase 6
+(MPI CUDA-aware, multi-GPU) et des optimisations perf. Ce document decoupe le chantier en phases.
 
 ## Atout de conception : le seam ne change pas les sites d'appel
 
@@ -63,8 +64,13 @@ pas une reecriture des noyaux de calcul.
    perf follow-up). python/tests/gpu/{amr_CMakeLists.txt, romeo_amr_build.sh}.
 6. **MPI CUDA-aware.** Echange de halos device-to-device (GPUDirect), `fill_boundary` distribue sans
    detour par l'hote ; FFT distribuee device. Effort : eleve.
-7. **Validation bout-en-bout.** Un cas plasma multi-especes complet (transport + Poisson + couplages
-   [+ AMR]) sur GH200, compare bit-a-bit (ou a tolerance FP documentee) au meme cas CPU/serie.
+7. **Validation bout-en-bout via le System.** ✅ FAIT (verifie GH200) -- sans modif de code.
+   `system.cpp` ENTIER (dispatch des modeles, transport HLLC, source de gravite, solve Poisson a CHAQUE
+   pas, pas de temps CFL) compile sous nvcc, et le cas `euler_poisson` complet tourne sur GH200 : `max|phi|`
+   et `sum(phi)` bit-identiques au CPU, masse a ~1.7e-15 relatif (FMA dans la reduction CFL). Les
+   correctifs nvcc des phases 1/2 + le design for_each suffisent. `python/tests/gpu/phase7_system.cpp`.
+   RESTE pour la prod multi-GPU : phase 6 (MPI CUDA-aware) + perf (full-device reflux, eviter les
+   sync hote des reductions par pas).
 
 ## Strategie suggeree
 
