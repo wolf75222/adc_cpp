@@ -369,6 +369,14 @@ struct System::Impl {
           for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
       }
     }
+    // TODO permittivite VARIABLE eps(x) : le coeur GeometricMG la supporte deja via
+    // set_epsilon (champ par cellule ou fonction analytique, operateur div(eps grad phi)
+    // a coefficient de face harmonique, valide a l'ordre 2 par test_variable_epsilon). Le
+    // cablage System reste a faire : exposer cote Python un moyen de fournir eps (numpy a 1
+    // composante ou callable), appeler set_epsilon UNIQUEMENT sur la branche GeometricMG du
+    // variant ell_ (le solveur 'fft' est a coefficient constant par construction -> erreur
+    // explicite si eps variable demande avec 'fft'), et NE PLUS mettre le rhs a l'echelle
+    // 1/eps dans ce cas (l'operateur porte alors eps directement).
     ell_solve();
     device_fence();
     const Real dx = geom.dx(), dy = geom.dy();

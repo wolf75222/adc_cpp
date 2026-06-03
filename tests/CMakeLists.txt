@@ -37,6 +37,7 @@ adc_add_test(test_elliptic_problem)
 adc_add_test(test_poisson_disc)
 adc_add_test(test_solve_robust)
 adc_add_test(test_cut_cell)
+adc_add_test(test_variable_epsilon)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)

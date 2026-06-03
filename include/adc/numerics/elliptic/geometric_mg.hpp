@@ -134,6 +134,55 @@ class GeometricMG {
   const Geometry& geom() const { return lev_[0].geom; }
   int num_levels() const { return static_cast<int>(lev_.size()); }
 
+  // Active la permittivite VARIABLE eps(x) : l'operateur passe de lap(phi)=f a
+  // div(eps grad phi)=f. eps est un champ AU CENTRE des cellules, evalue par la
+  // fonction analytique fournie sur CHAQUE niveau de la hierarchie (comme le masque
+  // et les coefficients cut-cell), puis ses ghosts sont remplis. Evaluer eps niveau
+  // par niveau (plutot que restreindre depuis le niveau fin) donne la permittivite
+  // EXACTE a chaque resolution grossiere, ce qui preserve l'ordre 2. Appeler une fois
+  // apres construction, avant solve. NE PAS appeler => eps uniforme (chemin historique).
+  void set_epsilon(std::function<Real(Real, Real)> eps_fn) {
+    const BCRec ebc = eps_bc();
+    for (auto& L : lev_) {
+      L.eps = MultiFab(L.ba, L.dm, 1, 1);  // 1 ghost : voisins de bord de box lus
+      const Geometry& g = L.geom;
+      for (int li = 0; li < L.eps.local_size(); ++li) {
+        Array4 e = L.eps.fab(li).array();
+        const Box2D b = L.eps.box(li);
+        // initialisation hote (fonction std::function non device-callable)
+        for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+          for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+            e(i, j) = eps_fn(g.x_cell(i), g.y_cell(j));
+      }
+      fill_ghosts(L.eps, g.domain, ebc);
+    }
+    has_eps_ = true;
+  }
+
+  // Surcharge prenant un champ eps DEJA discretise (MultiFab a 1 composante, defini
+  // sur la grille du niveau le plus fin). Il est copie sur le niveau fin puis
+  // RESTREINT (average_down, moyenne 2x2) vers les niveaux grossiers, et ses ghosts
+  // sont remplis a chaque niveau. A utiliser quand eps vient d'un champ par cellule
+  // (pas d'une formule analytique) : c'est le point d'entree pour le cablage System.
+  void set_epsilon(const MultiFab& eps_fine) {
+    const BCRec ebc = eps_bc();
+    for (auto& L : lev_) L.eps = MultiFab(L.ba, L.dm, 1, 1);
+    // niveau fin : copie de la composante 0
+    for (int li = 0; li < lev_[0].eps.local_size(); ++li) {
+      Array4 e = lev_[0].eps.fab(li).array();
+      const ConstArray4 s = eps_fine.fab(li).const_array();
+      const Box2D b = lev_[0].eps.box(li);
+      for_each_cell(b, [=] ADC_HD(int i, int j) { e(i, j) = s(i, j, 0); });
+    }
+    fill_ghosts(lev_[0].eps, lev_[0].geom.domain, ebc);
+    // niveaux grossiers : moyenne conservative du milieu, puis ghosts
+    for (int l = 1; l < num_levels(); ++l) {
+      average_down(lev_[l - 1].eps, lev_[l].eps, 2);
+      fill_ghosts(lev_[l].eps, lev_[l].geom.domain, ebc);
+    }
+    has_eps_ = true;
+  }
+
   void vcycle() { vcycle_rec(0, bc_); }
 
   // V-cycles jusqu'a residu relatif < rel_tol (ou max_cycles). Renvoie le
@@ -213,7 +262,7 @@ class GeometricMG {
   // identite en serie -> bit-identique au comportement historique.
   Real current_residual() {
     poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res,
-                     mask_ptr(0), coef_ptr(0));
+                     mask_ptr(0), coef_ptr(0), eps_ptr(0));
     return all_reduce_max(norm_inf(lev_[0].res));
   }
 
@@ -222,11 +271,24 @@ class GeometricMG {
     Geometry geom;
     BoxArray ba;
     DistributionMapping dm;
-    MultiFab phi, rhs, res, mask, coef;
+    MultiFab phi, rhs, res, mask, coef, eps;
   };
 
   const MultiFab* mask_ptr(int l) { return active_ ? &lev_[l].mask : nullptr; }
   const MultiFab* coef_ptr(int l) { return cut_cell_ ? &lev_[l].coef : nullptr; }
+  const MultiFab* eps_ptr(int l) { return has_eps_ ? &lev_[l].eps : nullptr; }
+
+  // CL utilisee pour remplir les ghosts du champ eps : on garde le periodique mais
+  // on remplace tout bord physique (Dirichlet ou outflow de phi) par une
+  // extrapolation gradient-nul (eps_ghost = eps interieur), ce qui donne une
+  // permittivite de face = eps au bord (face sur le contour du domaine).
+  BCRec eps_bc() const {
+    auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
+    BCRec b;
+    b.xlo = fo(bc_.xlo); b.xhi = fo(bc_.xhi);
+    b.ylo = fo(bc_.ylo); b.yhi = fo(bc_.yhi);
+    return b;
+  }
 
   void add_level(const Geometry& g, const BoxArray& ba) {
     DistributionMapping dm = replicated_
@@ -234,22 +296,23 @@ class GeometricMG {
         : DistributionMapping(ba.size(), n_ranks());
     lev_.push_back(MGLevel{g, ba, dm, MultiFab(ba, dm, 1, 1),
                            MultiFab(ba, dm, 1, 0), MultiFab(ba, dm, 1, 0),
-                           MultiFab{}, MultiFab{}});
+                           MultiFab{}, MultiFab{}, MultiFab{}});
   }
 
   void vcycle_rec(int l, const BCRec& bc) {
     MGLevel& L = lev_[l];
     const MultiFab* mk = mask_ptr(l);
     const MultiFab* ck = coef_ptr(l);
-    gs_smooth(L.phi, L.rhs, L.geom, bc, nu1_, mk, ck);
+    const MultiFab* ep = eps_ptr(l);
+    gs_smooth(L.phi, L.rhs, L.geom, bc, nu1_, mk, ck, ep);
 
     if (l + 1 == static_cast<int>(lev_.size())) {
-      gs_smooth(L.phi, L.rhs, L.geom, bc, nbottom_, mk, ck);  // bottom solve
+      gs_smooth(L.phi, L.rhs, L.geom, bc, nbottom_, mk, ck, ep);  // bottom solve
       if (mk) zero_conductor(L.phi, L.mask);
       return;
     }
 
-    poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck);
+    poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep);
     MGLevel& C = lev_[l + 1];
     average_down(L.res, C.rhs, 2);  // restriction du residu
     C.phi.set_val(0.0);
@@ -259,7 +322,7 @@ class GeometricMG {
     interpolate(C.phi, corr, 2);  // prolongation de la correction
     saxpy(L.phi, Real(1), corr);
     if (mk) zero_conductor(L.phi, L.mask);  // refige le conducteur
-    gs_smooth(L.phi, L.rhs, L.geom, bc, nu2_, mk, ck);
+    gs_smooth(L.phi, L.rhs, L.geom, bc, nu2_, mk, ck, ep);
   }
 
   BCRec bc_;
@@ -267,6 +330,7 @@ class GeometricMG {
   int nu1_, nu2_, nbottom_;
   bool replicated_ = false;
   bool cut_cell_ = false;
+  bool has_eps_ = false;
   std::function<Real(Real, Real)> levelset_;
   std::vector<MGLevel> lev_;
 };
