@@ -249,11 +249,23 @@ ne_ring[(r > 0.15) & (r < 0.20)] = 1.0
 ep.set_density("ne", ne_ring)
 ep.solve_fields()
 chk(np.abs(ep.potential()).max() > 1e-6, "EPM : add_elliptic_model (Poisson) actif")
+# eps != 1 CONSTANT est desormais supporte (div(eps grad phi) = f <=> lap phi = f/eps)
 try:
     adc.System(n=16).add_elliptic_model("d", adc.elliptic(operator=adc.div_eps_grad(2.0)))
-    chk(False, "EPM : eps != 1 refuse (raffinement solveur)")
+    chk(True, "EPM : eps != 1 constant accepte")
 except NotImplementedError:
-    chk(True, "EPM : eps != 1 refuse (raffinement solveur)")
+    chk(False, "EPM : eps != 1 constant accepte")
+
+
+class _BogusOperator:  # operateur non div_eps_grad (diffusion / projection : non disponible)
+    pass
+
+
+try:
+    adc.System(n=16).add_elliptic_model("d", adc.elliptic(operator=_BogusOperator()))
+    chk(False, "EPM : operateur non div_eps_grad refuse")
+except NotImplementedError:
+    chk(True, "EPM : operateur non div_eps_grad refuse")
 
 # --- 4h. Descripteur de variables (introspection : noms cons/prim par bloc) -----
 print("== descripteur Variables : noms des variables par bloc ==")
