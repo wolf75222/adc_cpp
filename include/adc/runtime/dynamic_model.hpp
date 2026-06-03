@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/core/physical_model.hpp>  // aux_comps<M> : largeur aux du modele enrobe
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 
@@ -34,6 +35,10 @@ struct IModel {
   virtual State source(const State&, const Aux&) const { return State{}; }
   /// Second membre elliptique f(U) du Poisson de systeme (defaut : zero, pas de couplage).
   virtual Real elliptic_rhs(const State&) const { return Real(0); }
+  /// Largeur du canal aux que le modele LIT (cf. aux_comps). Permet au runtime System de
+  /// dimensionner et de marshaler le bon nombre de composantes vers le chemin hote (B_z...).
+  /// Defaut : contrat de base (phi/grad), pour un modele qui ne lit pas de champ extra.
+  virtual int n_aux() const { return kAuxBaseComps; }
 };
 
 /// Adapte un modele STATIQUE M en IModel<M::n_vars>. M peut etre une brique hyperbolique (flux +
@@ -64,6 +69,7 @@ struct ModelAdapter final : IModel<M::n_vars> {
     else
       return Real(0);
   }
+  int n_aux() const override { return aux_comps<M>(); }  // p.ex. 4 si une brique lit B_z
 };
 
 /// Fabrique : enrobe un modele statique dans un IModel possede (unique_ptr).

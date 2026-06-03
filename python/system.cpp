@@ -69,6 +69,7 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       a.phi = AUX[k];
       a.grad_x = AUX[nn + k];
       a.grad_y = AUX[2 * nn + k];
+      if (AUX.size() >= 4 * nn) a.B_z = AUX[3 * nn + k];  // champ extra B_z si marshale (n_aux > 3)
     }
     return a;
   };
@@ -395,16 +396,20 @@ struct System::Impl {
     }
     std::shared_ptr<IModel<NV>> im(static_cast<IModel<NV>*>(mk()),
                                    [del, h](IModel<NV>* p) { del(p); dlclose(h); });
+    // Le modele charge peut lire des champs aux supplementaires (n_aux > 3, p.ex. B_z) : on
+    // elargit le canal aux PARTAGE pour que set_magnetic_field le peuple et que le marshaling hote
+    // les transporte. Modele de base (3) -> no-op. Les fermetures lisent P->aux_ncomp_ a l'appel.
+    P->ensure_aux_width(im->n_aux());
     const int n = P->cfg.n;
     const double dx = P->cfg.L / P->cfg.n;
 
     std::function<void(MultiFab&, MultiFab&)> rhs_into = [P, im, n, dx, recon](MultiFab& U,
                                                                                MultiFab& R) {
-      P->write_state(R, NV, host_residual<NV>(*im, P->copy_state(U, NV), P->copy_state(P->aux, 3),
-                                              n, dx, recon));
+      P->write_state(R, NV, host_residual<NV>(*im, P->copy_state(U, NV),
+                                              P->copy_state(P->aux, P->aux_ncomp_), n, dx, recon));
     };
     std::function<Real(const MultiFab&)> max_speed = [P, im, n](const MultiFab& U) -> Real {
-      std::vector<double> u = P->copy_state(U, NV), aux = P->copy_state(P->aux, 3);
+      std::vector<double> u = P->copy_state(U, NV), aux = P->copy_state(P->aux, P->aux_ncomp_);
       const std::size_t nn = static_cast<std::size_t>(n) * n;
       Real mx = 0;
       for (std::size_t c0 = 0; c0 < nn; ++c0) {
@@ -415,6 +420,7 @@ struct System::Impl {
           a.phi = aux[c0];
           a.grad_x = aux[nn + c0];
           a.grad_y = aux[2 * nn + c0];
+          if (aux.size() >= 4 * nn) a.B_z = aux[3 * nn + c0];
         }
         Real v = std::max(im->max_wave_speed(s, a, 0), im->max_wave_speed(s, a, 1));
         if (v > mx) mx = v;
@@ -424,7 +430,7 @@ struct System::Impl {
     std::function<void(MultiFab&, Real, int)> advance = [P, im, n, dx, recon](MultiFab& U, Real dt,
                                                                               int nsub) {
       const Real hh = dt / nsub;
-      const std::vector<double> aux = P->copy_state(P->aux, 3);  // aux gelee sur le pas (splitting)
+      const std::vector<double> aux = P->copy_state(P->aux, P->aux_ncomp_);  // aux gelee (splitting)
       for (int s = 0; s < nsub; ++s) {  // Euler explicite par sous-pas (chemin hote, prototype)
         std::vector<double> u = P->copy_state(U, NV);
         std::vector<double> res = host_residual<NV>(*im, u, aux, n, dx, recon);
