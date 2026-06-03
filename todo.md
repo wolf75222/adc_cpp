@@ -21,21 +21,22 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] **Inc. 6 — DSL** : emet `n_aux` quand une formule lit `aux('B_z')` (`AUX_CANONICAL`). (#30)
 - [x] **Inc. 7 — chemin JIT** `add_dynamic_block` : `IModel::n_aux()` virtuel + marshaling
       `aux_ncomp_` -> B_z transporte, Python end-to-end. (#32)
-- [ ] **Inc. 8 — chemin AOT compile** `add_compiled_block` : l'ABI `compiled_block_abi.hpp`
-      (`adc_compiled_*`) marshale encore 3 composantes en dur -> B_z absent par ce chemin.
-      Symetrique de l'inc. 7 cote ABI `extern "C"`.
+- [x] **Inc. 8 — chemin AOT compile** `add_compiled_block` : l'ABI `compiled_block_abi.hpp`
+      transporte desormais la largeur aux (B_z/T_e), symetrique de l'inc. 7 cote ABI `extern "C"` ;
+      modele DSL B_z pilote 100% depuis Python via `compile_aot`. (#46)
 - [x] **T_e — 2e champ extra DERIVE** : T = p/rho calculee par le `System` depuis un bloc fluide
       designe a chaque solve (comp 4, `set_electron_temperature_from`, recalcule dans `solve_fields`,
       pas user-fourni comme B_z). Valide la generalisation a 2 champs aux. (#35)
-- [ ] **AMR / implicite** : `advance_amr` et le stepper implicite gardent `load_aux` defaut (3) ;
-      etendre a la largeur du modele pour un B_z sur AMR (bit-identique aujourd'hui).
+- [x] **AMR / implicite** : `load_aux` width-aware sur `advance_amr` et le stepper implicite
+      (canal extensible sur le chemin AMR) ; bit-identique pour un modele de base. (#42)
 
 ## 2. Chantier "EPM elliptique generique" (operateur elliptique composable)
 
 - [x] Permittivite variable `eps(x)` : `GeometricMG::set_epsilon` + `System::set_epsilon_field`
       (binding Python) sur `master`.
 - [x] `EllipticProblem` / `FieldPostProcess` nommes (coeff, CL, nullspace, convention `E = -grad phi`).
-- [ ] Autres operateurs / coefficients composables (au-dela d'eps(x)).
+- [x] Second membre de Poisson de systeme GENERIQUE (somme des `elliptic_rhs` des briques par bloc). (#43)
+- [x] Operateur elliptique ECRANTE / Helmholtz `div(eps grad phi) - kappa phi = f` (GeometricMG + binding). (#44)
 - [ ] Recabler les sites en forme `/(2*dx)` vers la forme multiplicative `*cx` (`amr_coupler`,
       `amr_coupler_mp`, `spectral_coupler`) — differe au dernier bit, donc hors perimetre tant
       qu'on veut le bit-identique.
@@ -50,8 +51,8 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       RESTE : `sync_host` / `sync_device` explicites.
 - [~] **Familles de ghosts** : `fill_physical_bc` / `fill_boundary` / `mf_fill_fine_ghosts` separes.
       RESTE : remonter le coarse-fine en helper nomme de premier niveau.
-- [~] **VariableRole** : couplages inter-especes par role faits (#18). RESTE : usage plein dans le
-      runtime / le DSL (noms de variables generes par role).
+- [x] **VariableRole** : couplages inter-especes par role (#18) + la brique generee par le DSL
+      declare ses VariableRole et le runtime resout les variables par role avec fallback indices. (#40)
 - [x] AMR multi-patch distribue MPI (2 et N niveaux), `CouplingPolicy` mince, suite de validation
       numerique coeur, decoupage elliptique (operateur / solveur / probleme).
 
@@ -59,9 +60,11 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 
 - [x] Composants valides SEPAREMENT et bit-identiques au CPU sur GH200 : System mono-grille, ops de
       champ AMR, halos MPI multi-GPU, backend AOT d'un modele DSL, `load_aux<4>` (B_z device).
-- [ ] **Validation INTEGREE** `AmrSystem` + MPI + GPU en un seul run ; perf full-device a travailler.
-- [ ] `add_compiled_model` (chemin AOT externe) n'a PAS d'API dans `AmrSystem` (System seul,
-      mono-box mono-rang) — l'etendre si besoin AMR.
+- [x] Parite multi-box MPI du chemin compile (`add_compiled_model` / `make_block`, np=1/2/4
+      bit-identique) PERENNISEE comme test de regression dans le depot. (#39)
+- [x] `add_compiled_model` cable cote `AmrSystem` (pendant multi-niveau du chemin compile). (#45)
+- [~] **Validation INTEGREE** `AmrSystem` + MPI + GPU en un seul run + perf full-device : EN COURS
+      (agent ROMEO GH200) ; doc `docs/GPU_RUNTIME_PORT.md` a la cle.
 
 ## 5. Physique magnetisee
 
