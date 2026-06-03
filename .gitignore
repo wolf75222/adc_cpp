@@ -13,3 +13,7 @@ compile_commands.json
 docs/_build/
 docs/sphinx/_generated/
 docs/sphinx/__pycache__/
+
+# Python bytecode
+__pycache__/
+*.pyc
