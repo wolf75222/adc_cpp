@@ -10,6 +10,8 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 
+#include <adc/core/physical_model.hpp>  // aux_comps<Model> : largeur du canal aux du modele genere
+
 #include <string>
 #include <utility>
 
@@ -38,22 +40,27 @@ struct LocalGrid {
   DistributionMapping dm;
   BCRec bc;
   bool periodic;
-  MultiFab aux;  // 3 comp (phi, grad phi), 1 ghost
+  MultiFab aux;  // naux comp (phi, grad phi, [B_z, T_e...]), 1 ghost
 };
 
-inline LocalGrid make_grid(int n, double dx, double dy, bool periodic, const double* aux_in) {
+/// @p naux = largeur du canal aux que le modele LIT (aux_comps<Model>(), >= 3). Le tableau plat
+/// @p aux_in porte EXACTEMENT @p naux composantes (marshale par le System via copy_state) ; on les
+/// copie toutes dans l'aux interne pour que assemble_rhs (load_aux<aux_comps<Model>()>) lise B_z/T_e.
+/// Les ghosts (B_z/T_e inclus) sont remplis par les memes CL que le System.
+inline LocalGrid make_grid(int n, double dx, double dy, bool periodic, const double* aux_in,
+                           int naux) {
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, dx * n, 0.0, dy * n};
   BoxArray ba = BoxArray::from_domain(dom, n);
   DistributionMapping dm(ba.size(), 1);  // .so mono-rang (bloc CPU prototype)
   BCRec bc;
   if (!periodic) bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Foextrap;
-  MultiFab aux(ba, dm, 3, 1);
+  MultiFab aux(ba, dm, naux, 1);
   aux.set_val(0.0);
   if (aux_in) {  // aux interieur depuis le tableau, puis ghosts (memes CL que le System)
     Array4 a = aux.fab(0).array();
     const std::size_t nn = static_cast<std::size_t>(n) * n;
-    for (int c = 0; c < 3; ++c)
+    for (int c = 0; c < naux; ++c)
       for (int j = 0; j < n; ++j)
         for (int i = 0; i < n; ++i)
           a(i, j, c) = aux_in[static_cast<std::size_t>(c) * nn + static_cast<std::size_t>(j) * n + i];
@@ -89,7 +96,7 @@ inline void extract(const MultiFab& mf, double* out, int n, int nv) {
 template <class Model>
 void residual(const double* U, double* R, const double* aux_in, int n, double dx, double dy,
               bool periodic, const std::string& lim, const std::string& riem, bool recon_prim) {
-  LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in);
+  LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in, aux_comps<Model>());
   MultiFab Umf(lg.ba, lg.dm, Model::n_vars, 2), Rmf(lg.ba, lg.dm, Model::n_vars, 0);
   fill_interior(Umf, U, n, Model::n_vars);
   const GridContext ctx{lg.dom, lg.bc, lg.geom, &lg.aux};
@@ -104,7 +111,7 @@ template <class Model>
 void advance(double* U, const double* aux_in, int n, double dx, double dy, bool periodic,
              const std::string& lim, const std::string& riem, bool recon_prim, bool imex,
              double dt, int nsub) {
-  LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in);
+  LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in, aux_comps<Model>());
   MultiFab Umf(lg.ba, lg.dm, Model::n_vars, 2);
   fill_interior(Umf, U, n, Model::n_vars);
   const GridContext ctx{lg.dom, lg.bc, lg.geom, &lg.aux};
@@ -116,7 +123,7 @@ void advance(double* U, const double* aux_in, int n, double dx, double dy, bool 
 
 template <class Model>
 double max_speed(const double* U, const double* aux_in, int n, double dx, double dy, bool periodic) {
-  LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in);
+  LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in, aux_comps<Model>());
   MultiFab Umf(lg.ba, lg.dm, Model::n_vars, 2);
   fill_interior(Umf, U, n, Model::n_vars);
   const GridContext ctx{lg.dom, lg.bc, lg.geom, &lg.aux};
@@ -148,6 +155,7 @@ void poisson_rhs(const double* U, double* rhs_out, int n) {
 /// niveau superieur : poser `using Model = adc::CompositeModel<...>;` puis passer cet alias).
 #define ADC_DEFINE_COMPILED_BLOCK(MODEL)                                                            \
   extern "C" int adc_model_nvars() { return MODEL::n_vars; }                                        \
+  extern "C" int adc_compiled_naux() { return adc::aux_comps<MODEL>(); }                            \
   extern "C" void adc_compiled_residual(const double* U, double* R, const double* aux, int n,       \
                                         double dx, double dy, int periodic, const char* lim,        \
                                         const char* riem, int recon_prim) {                         \

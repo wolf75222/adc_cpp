@@ -663,6 +663,13 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
                              "dsl.compile_aot / compile_or_jit(mode='compile'))");
   }
   const int nv = nv_fn();
+  // Largeur du canal aux que le modele compile LIT (B_z, T_e...). Symetrique du chemin JIT
+  // (IModel::n_aux). Optionnel : un vieux .so sans ce symbole retombe sur le contrat de base (3).
+  auto naux_fn = reinterpret_cast<nv_fn_t>(dlsym(h, "adc_compiled_naux"));
+  const int naux = naux_fn ? naux_fn() : kAuxBaseComps;
+  // Elargit le canal aux PARTAGE pour que set_magnetic_field/T_e le peuplent et que le marshaling
+  // transporte les composantes extra vers le .so. Modele de base (3) -> no-op (bit-identique).
+  P->ensure_aux_width(naux);
   std::shared_ptr<void> lib(h, [](void* p) { dlclose(p); });  // ferme le .so a la mort des fermetures
   const int n = P->cfg.n;
   const double dx = P->geom.dx(), dy = P->geom.dy();
@@ -671,7 +678,7 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
 
   std::function<void(MultiFab&, MultiFab&)> rhs_into =
       [P, lib, res_fn, nv, n, dx, dy, per, lim, riem, recon_prim](MultiFab& U, MultiFab& R) {
-        std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, 3);
+        std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         std::vector<double> r(static_cast<std::size_t>(nv) * n * n, 0.0);
         res_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim);
         P->write_state(R, nv, r);
@@ -679,14 +686,14 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
   std::function<void(MultiFab&, Real, int)> advance =
       [P, lib, adv_fn, nv, n, dx, dy, per, lim, riem, recon_prim, imex](MultiFab& U, Real dt,
                                                                         int nsub) {
-        std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, 3);
+        std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         adv_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
                static_cast<double>(dt), nsub);
         P->write_state(U, nv, u);
       };
   std::function<Real(const MultiFab&)> max_speed =
       [P, lib, max_fn, nv, n, dx, dy, per](const MultiFab& U) -> Real {
-        std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, 3);
+        std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         return max_fn(u.data(), a.data(), n, dx, dy, per);
       };
   std::function<void(const MultiFab&, MultiFab&)> add_poisson =
