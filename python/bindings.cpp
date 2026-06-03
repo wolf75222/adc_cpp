@@ -77,7 +77,8 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("evolve") = true)
       // Bloc dont le modele est charge a l'execution depuis un .so genere par le DSL (chemin hote).
       .def("add_dynamic_block", &System::add_dynamic_block, py::arg("name"), py::arg("so_path"),
-           py::arg("substeps") = 1, py::arg("names") = std::vector<std::string>{})
+           py::arg("substeps") = 1, py::arg("names") = std::vector<std::string>{},
+           py::arg("recon") = "none")
       .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
            py::arg("neutral"), py::arg("rate"))
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))

@@ -59,11 +59,15 @@ class System {
   /// Ajoute un bloc dont le modele est CHARGE A L'EXECUTION depuis une bibliotheque partagee (.so)
   /// generee par le DSL (emit_cpp_brick -> ModelAdapter -> fabrique extern "C"). Le .so doit exposer
   /// adc_model_nvars(), adc_make_model() (renvoie un IModel<NV>*) et adc_destroy_model(void*).
-  /// CHEMIN HOTE (dispatch virtuel, Rusanov ordre 1 periodique, Euler explicite) : pour prototyper
-  /// un modele inedit, ecrit en formules cote Python, sans recompiler le coeur. cf. dynamic_model.hpp.
+  /// CHEMIN HOTE (dispatch virtuel, Rusanov a_max global periodique, Euler explicite) : pour
+  /// prototyper un modele inedit, ecrit en formules cote Python, sans recompiler le coeur. cf.
+  /// dynamic_model.hpp.
   /// @param names noms des variables (introspection) ; defaut u0..u{NV-1}.
+  /// @param recon reconstruction MUSCL des etats de face (conservatif) : "none" (ordre 1) | "minmod"
+  ///              | "vanleer" (ordre 2, TVD). Le choix du FLUX (HLLC/Roe) reste sur le chemin compile.
   void add_dynamic_block(const std::string& name, const std::string& so_path, int substeps = 1,
-                         const std::vector<std::string>& names = {});
+                         const std::vector<std::string>& names = {},
+                         const std::string& recon = "none");
 
   /// Configure le Poisson partage.
   /// @param rhs    seul mode : "charge_density", f = somme_s elliptic_rhs_s(u_s)

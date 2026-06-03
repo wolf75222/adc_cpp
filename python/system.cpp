@@ -27,16 +27,30 @@
 
 namespace adc {
 
-// Residu hote R = -div F* + S(U, aux) (Rusanov ordre 1, periodique, a_max GLOBAL comme
-// adc.PythonFlux) calcule via un IModel : sert au bloc DYNAMIQUE (modele charge a l'execution,
-// dispatch virtuel, hors GPU). Le flux ET la source recoivent l'aux par cellule (phi, grad phi) de
-// sorte qu'un modele genere couple (transport ExB, force electrostatique) fonctionne, pas seulement
-// Euler. @p AUX est l'aux du systeme (3 comp : phi, grad_x, grad_y) en disposition composante-majeur ;
-// vide => aux nul. U et le retour en disposition composante-majeur (c*n*n + j*n + i).
+// Residu hote R = -div F* + S(U, aux) (Rusanov, a_max GLOBAL comme adc.PythonFlux, periodique)
+// calcule via un IModel : sert au bloc DYNAMIQUE (modele charge a l'execution, dispatch virtuel,
+// hors GPU). @p recon = ordre de reconstruction MUSCL des etats de face sur les variables
+// conservatives : 0 = aucune (ordre 1), 1 = minmod, 2 = van Leer (ordre 2, TVD). Le flux ET la
+// source recoivent l'aux par cellule (phi, grad phi) : un modele couple (transport ExB, force) marche,
+// pas seulement Euler. @p AUX est l'aux du systeme (3 comp phi/grad_x/grad_y, composante-majeur ; vide
+// => nul). U et le retour en disposition composante-majeur (c*n*n + j*n + i).
 namespace {
+ADC_HD inline double limited_slope(double am, double ap, int recon) {
+  if (recon == 1) {  // minmod : TVD, robuste
+    if (am * ap <= 0) return 0.0;
+    return (std::fabs(am) < std::fabs(ap)) ? am : ap;
+  }
+  if (recon == 2) {  // van Leer : plus lisse aux extrema
+    const double ab = am * ap;
+    if (ab <= 0) return 0.0;
+    return 2.0 * ab / (am + ap);
+  }
+  return 0.0;  // ordre 1 (pas de pente)
+}
+
 template <int NV>
 std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>& U,
-                                  const std::vector<double>& AUX, int n, double dx) {
+                                  const std::vector<double>& AUX, int n, double dx, int recon) {
   const std::size_t nn = static_cast<std::size_t>(n) * n;
   auto idx = [&](int i, int j) {
     return static_cast<std::size_t>((j + n) % n) * n + ((i + n) % n);
@@ -56,6 +70,16 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
     }
     return a;
   };
+  // pente limitee de la cellule (i,j) dans la direction dir (sur les variables conservatives)
+  auto slope = [&](int i, int j, int dir) {
+    StateVec<NV> s{};
+    if (recon == 0) return s;
+    StateVec<NV> Uc = cell(i, j);
+    StateVec<NV> Um = (dir == 0) ? cell(i - 1, j) : cell(i, j - 1);
+    StateVec<NV> Up = (dir == 0) ? cell(i + 1, j) : cell(i, j + 1);
+    for (int c = 0; c < NV; ++c) s[c] = limited_slope(Uc[c] - Um[c], Up[c] - Uc[c], recon);
+    return s;
+  };
   double amax = 0;
   for (int j = 0; j < n; ++j)
     for (int i = 0; i < n; ++i) {
@@ -64,9 +88,16 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       double s = std::max(m.max_wave_speed(u, a, 0), m.max_wave_speed(u, a, 1));
       if (s > amax) amax = s;
     }
-  auto rus = [&](int iL, int jL, int iR, int jR, int dir) {  // flux a chaque cote avec son aux
-    StateVec<NV> L = cell(iL, jL), R = cell(iR, jR);
-    StateVec<NV> FL = m.flux(L, aux_at(iL, jL), dir), FR = m.flux(R, aux_at(iR, jR), dir), f;
+  // flux numerique a la face +dir de la cellule (i,j) : etats MUSCL (cellule + voisine) puis Rusanov
+  auto face_flux = [&](int i, int j, int dir) {
+    const int in = (dir == 0) ? i + 1 : i, jn = (dir == 0) ? j : j + 1;
+    StateVec<NV> Uc = cell(i, j), Un = cell(in, jn);
+    StateVec<NV> sc = slope(i, j, dir), sn = slope(in, jn, dir), L, R;
+    for (int c = 0; c < NV; ++c) {
+      L[c] = Uc[c] + 0.5 * sc[c];  // extrapolation vers la face depuis chaque cote
+      R[c] = Un[c] - 0.5 * sn[c];
+    }
+    StateVec<NV> FL = m.flux(L, aux_at(i, j), dir), FR = m.flux(R, aux_at(in, jn), dir), f;
     for (int c = 0; c < NV; ++c) f[c] = 0.5 * (FL[c] + FR[c]) - 0.5 * amax * (R[c] - L[c]);
     return f;
   };
@@ -74,8 +105,8 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
   for (int j = 0; j < n; ++j)
     for (int i = 0; i < n; ++i) {
       StateVec<NV> Uc = cell(i, j);
-      StateVec<NV> Fxr = rus(i, j, i + 1, j, 0), Fxl = rus(i - 1, j, i, j, 0);
-      StateVec<NV> Fyr = rus(i, j, i, j + 1, 1), Fyl = rus(i, j - 1, i, j, 1);
+      StateVec<NV> Fxr = face_flux(i, j, 0), Fxl = face_flux(i - 1, j, 0);
+      StateVec<NV> Fyr = face_flux(i, j, 1), Fyl = face_flux(i, j - 1, 1);
       StateVec<NV> S = m.source(Uc, aux_at(i, j));  // terme source genere (force, etc.)
       for (int c = 0; c < NV; ++c)
         Rout[static_cast<std::size_t>(c) * nn + static_cast<std::size_t>(j) * n + i] =
@@ -393,7 +424,7 @@ struct System::Impl {
   // shared_ptr possede le modele : il appelle adc_destroy_model puis ferme le .so a la destruction.
   template <int NV>
   static void push_dynamic(Impl* P, const std::string& name, void* h, int substeps,
-                           std::vector<std::string> names) {
+                           std::vector<std::string> names, int recon) {
     auto mk = reinterpret_cast<void* (*)()>(dlsym(h, "adc_make_model"));
     auto del = reinterpret_cast<void (*)(void*)>(dlsym(h, "adc_destroy_model"));
     if (!mk || !del) {
@@ -405,9 +436,10 @@ struct System::Impl {
     const int n = P->cfg.n;
     const double dx = P->cfg.L / P->cfg.n;
 
-    std::function<void(MultiFab&, MultiFab&)> rhs_into = [P, im, n, dx](MultiFab& U, MultiFab& R) {
+    std::function<void(MultiFab&, MultiFab&)> rhs_into = [P, im, n, dx, recon](MultiFab& U,
+                                                                               MultiFab& R) {
       P->write_state(R, NV, host_residual<NV>(*im, P->copy_state(U, NV), P->copy_state(P->aux, 3),
-                                              n, dx));
+                                              n, dx, recon));
     };
     std::function<Real(const MultiFab&)> max_speed = [P, im, n](const MultiFab& U) -> Real {
       std::vector<double> u = P->copy_state(U, NV), aux = P->copy_state(P->aux, 3);
@@ -427,12 +459,13 @@ struct System::Impl {
       }
       return mx;
     };
-    std::function<void(MultiFab&, Real, int)> advance = [P, im, n, dx](MultiFab& U, Real dt, int nsub) {
+    std::function<void(MultiFab&, Real, int)> advance = [P, im, n, dx, recon](MultiFab& U, Real dt,
+                                                                              int nsub) {
       const Real hh = dt / nsub;
       const std::vector<double> aux = P->copy_state(P->aux, 3);  // aux gelee sur le pas (splitting)
       for (int s = 0; s < nsub; ++s) {  // Euler explicite par sous-pas (chemin hote, prototype)
         std::vector<double> u = P->copy_state(U, NV);
-        std::vector<double> res = host_residual<NV>(*im, u, aux, n, dx);
+        std::vector<double> res = host_residual<NV>(*im, u, aux, n, dx, recon);
         for (std::size_t k = 0; k < u.size(); ++k) u[k] += hh * res[k];
         P->write_state(U, NV, u);
       }
@@ -512,8 +545,14 @@ void System::add_block(const std::string& name, const ModelSpec& model,
 }
 
 void System::add_dynamic_block(const std::string& name, const std::string& so_path, int substeps,
-                               const std::vector<std::string>& names) {
+                               const std::vector<std::string>& names, const std::string& recon) {
   if (substeps < 1) throw std::runtime_error("System::add_dynamic_block : substeps >= 1");
+  int recon_id = 0;  // ordre de reconstruction MUSCL des etats de face (conservatif)
+  if (recon == "none") recon_id = 0;
+  else if (recon == "minmod") recon_id = 1;
+  else if (recon == "vanleer") recon_id = 2;
+  else throw std::runtime_error("System::add_dynamic_block : recon 'none' | 'minmod' | 'vanleer' "
+                                "(recu '" + recon + "')");
   void* h = dlopen(so_path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!h) {
     const char* e = dlerror();
@@ -527,9 +566,9 @@ void System::add_dynamic_block(const std::string& name, const std::string& so_pa
   }
   const int nv = nv_fn();
   switch (nv) {
-    case 1: Impl::push_dynamic<1>(p_.get(), name, h, substeps, names); break;
-    case 3: Impl::push_dynamic<3>(p_.get(), name, h, substeps, names); break;
-    case 4: Impl::push_dynamic<4>(p_.get(), name, h, substeps, names); break;
+    case 1: Impl::push_dynamic<1>(p_.get(), name, h, substeps, names, recon_id); break;
+    case 3: Impl::push_dynamic<3>(p_.get(), name, h, substeps, names, recon_id); break;
+    case 4: Impl::push_dynamic<4>(p_.get(), name, h, substeps, names, recon_id); break;
     default:
       dlclose(h);
       throw std::runtime_error("add_dynamic_block : n_vars=" + std::to_string(nv) +

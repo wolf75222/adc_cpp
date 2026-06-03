@@ -105,6 +105,12 @@ add_test(NAME test_dsl_coupled
 set_tests_properties(test_dsl_coupled PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Choix de reconstruction (ordre) du bloc dynamique : recon none/minmod/vanleer == reference MUSCL numpy.
+add_test(NAME test_dsl_recon
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_recon.py)
+set_tests_properties(test_dsl_recon PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Operateur elliptique a permittivite constante : phi(eps=2) == phi(eps=1)/2.
 add_test(NAME test_poisson_eps
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_poisson_eps.py)
