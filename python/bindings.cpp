@@ -12,7 +12,6 @@
 
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/system.hpp>
-#include <adc/solver/two_fluid_ap_solver.hpp>
 
 #include <cstring>
 #include <vector>
@@ -143,43 +142,11 @@ PYBIND11_MODULE(_adc, m) {
 
   // --- AMR : composition mono-espece sur AMR multi-patch (brique generique composable) ---
   // adc_cases la PILOTE depuis Python (pas de C++ cote cases) au meme titre que System.
-
-  // --- ECHAPPATOIRE INTERNE (hors API publique) : integrateur AP deux-fluides --------------
-  // La methode AP-IMEX (terme raide de frequence plasma integre implicitement via un Poisson
-  // REFORMULE lap(phi) = (ne* - ni*)/(1 + dt^2 (wpe^2 + wpi^2))) est une methode numerique
-  // legitime du coeur, mais c'est un integrateur SUR MESURE : non composable bloc a bloc comme
-  // System (la stabilisation AP couple la raideur au pas de temps DANS l'elliptique, ce que la
-  // composition System ne sait pas reproduire). On ne l'expose donc PAS comme scenario nomme de
-  // l'API : les classes sont publiees sous des noms PREFIXES `_` (convention "prive") dans le
-  // module prive `_adc`, comme echappatoire pour piloter la methode depuis une application sans
-  // recompiler le coeur. Le paquet adc/__init__.py ne les reexporte pas (cf. son __all__).
-  py::class_<TwoFluidAPConfig>(m, "_TwoFluidAPConfig")
-      .def(py::init<>())
-      .def_readwrite("n", &TwoFluidAPConfig::n)
-      .def_readwrite("L", &TwoFluidAPConfig::L)
-      .def_readwrite("cse2", &TwoFluidAPConfig::cse2)
-      .def_readwrite("csi2", &TwoFluidAPConfig::csi2)
-      .def_readwrite("omega_pe", &TwoFluidAPConfig::omega_pe)
-      .def_readwrite("omega_pi", &TwoFluidAPConfig::omega_pi)
-      .def_readwrite("stabilize", &TwoFluidAPConfig::stabilize)
-      .def_readwrite("eps", &TwoFluidAPConfig::eps)
-      .def_readwrite("upwind_continuity", &TwoFluidAPConfig::upwind_continuity)
-      .def_readwrite("omega_ce", &TwoFluidAPConfig::omega_ce)
-      .def_readwrite("omega_ci", &TwoFluidAPConfig::omega_ci);
-
-  py::class_<TwoFluidAPSolver>(m, "_TwoFluidAP")
-      .def(py::init<const TwoFluidAPConfig&>(), py::arg("cfg") = TwoFluidAPConfig{})
-      .def("step", &TwoFluidAPSolver::step, py::arg("dt"))
-      .def("advance", &TwoFluidAPSolver::advance, py::arg("dt"), py::arg("nsteps"))
-      .def("nx", &TwoFluidAPSolver::nx)
-      .def("mass_e", &TwoFluidAPSolver::mass_e)
-      .def("mass_i", &TwoFluidAPSolver::mass_i)
-      .def("max_charge", &TwoFluidAPSolver::max_charge)
-      .def("max_dev", &TwoFluidAPSolver::max_dev)
-      .def("density_e",
-           [](const TwoFluidAPSolver& s) { return to_2d(s.density_e(), s.nx()); })
-      .def("density_i",
-           [](const TwoFluidAPSolver& s) { return to_2d(s.density_i(), s.nx()); });
+  //
+  // NB : l'integrateur AP deux-fluides (schema asymptotic-preserving SUR MESURE, non composable
+  // bloc a bloc) a quitte le coeur : ce n'est pas une brique generique mais un SCENARIO. Il vit
+  // desormais dans adc_cases (cf. adc_cases/two_fluid_ap/), compile a la volee contre les
+  // en-tetes generiques d'adc_cpp ; il n'est plus expose par le module _adc.
 
   // AmrSystem : composition mono-espece generique sur AMR.
   py::class_<AmrSystemConfig>(m, "AmrSystemConfig")

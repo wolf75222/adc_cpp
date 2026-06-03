@@ -25,9 +25,9 @@ from ._adc import (SystemConfig, ModelSpec, System as _System,
 
 # L'API PUBLIQUE n'expose QUE des briques composables (System, AmrSystem, Model...) : aucun
 # scenario physique nomme. L'integrateur AP deux-fluides (schema asymptotic-preserving, non
-# composable bloc a bloc) n'est volontairement PAS reexporte ici ; sa methode reste compilee
-# dans le module prive _adc (cf. _adc._TwoFluidAP) comme echappatoire interne, pilotable depuis
-# une application sans recompiler le coeur, mais hors du contrat d'API stable.
+# composable bloc a bloc) a quitte le coeur : ce n'est pas une brique generique mais un SCENARIO,
+# qui vit desormais dans adc_cases (cf. adc_cases/two_fluid_ap/), compile a la volee contre les
+# en-tetes generiques d'adc_cpp. Il n'est donc ni reexporte ici ni present dans le module _adc.
 __all__ = [
     "System", "SystemConfig", "AmrSystem", "AmrSystemConfig", "Model",
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",

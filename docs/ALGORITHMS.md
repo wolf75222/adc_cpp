@@ -106,7 +106,7 @@ reconstruction demande **2 ghosts** (pente en `i±1`). Limiteurs disponibles : N
 (ordre 1), Minmod, VanLeer.
 
 **Pseudocode.** Policy `Limiter` templée dans `compute_face_fluxes`. **Stabilité.** TVD
-sous CFL `<= 0.5` typiquement. **Validation.** `test_two_fluid_ap_amplitude` compare
+sous CFL `<= 0.5` typiquement. **Validation.** Le cas `adc_cases/two_fluid_ap/run.py` compare
 centré vs reconstruction limitée sur un front raide (la continuité upwind MUSCL ne
 sur-diffuse pas le pic lisse, 0.4% de perte). **Pièges.** Reconstruire la variable
 conservée vs primitive change le comportement aux chocs forts.
@@ -293,9 +293,9 @@ reformule Poisson pour rester stable quand `omega_pe -> inf`.
 `lap(phi) = (n_e^* - n_i^*)/(1 + beta0)`. Le facteur `1/(1+beta0)` est l'ingrédient AP :
 il tend vers 0 quand la raideur explose, forçant la quasi-neutralité.
 
-**Validation.** `test_two_fluid_ap_2d_mf` : dispersion isotrope (3.1%), borne AP et
-quasi-neutralité à `omega_pe = 1e3` là où le non-stabilisé explose, conservation par
-espèce. **Pièges.** La continuité centrée est dispersive sur les fronts raides (option
+**Validation.** Le cas `adc_cases/two_fluid_ap/run.py` : borne AP et quasi-neutralité à
+`omega_pe = 1e3` là où le non-stabilisé explose, conservation par espèce. **Pièges.** La
+continuité centrée est dispersive sur les fronts raides (option
 upwind MUSCL `upwind_continuity`) ; le sous-dépassement mesuré est surtout physique
 (raréfaction acoustique), pas du Gibbs.
 

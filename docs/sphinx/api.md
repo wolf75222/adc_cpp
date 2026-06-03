@@ -82,12 +82,13 @@ publique : aucun scénario nommé n'est exposé par le paquet `adc`.
 
 ### Deux-fluides isotherme asymptotic-preserving
 
-L'intégrateur AP deux-fluides reste compilé dans le module privé sous le nom
-`_adc._TwoFluidAP` (config `_adc._TwoFluidAPConfig`) : échappatoire interne pour piloter la
-méthode depuis une application sans recompiler le cœur, hors contrat d'API stable. La
-stabilisation AP couple la raideur au pas de temps dans l'elliptique, ce que la composition
-`System` ne reproduit pas ; d'où son statut d'intégrateur sur mesure plutôt que de brique
-composable. Voir [la note de méthode](two_fluid_ap.md) et `adc_cases/two_fluid_ap/run.py`.
+L'intégrateur AP deux-fluides a quitté le cœur : ce n'est pas une brique générique mais un
+**scénario**. La stabilisation AP couple la raideur au pas de temps dans l'elliptique, ce que
+la composition `System` ne reproduit pas ; d'où son statut d'intégrateur sur mesure plutôt que
+de brique composable. Sa physique C++ vit désormais dans `adc_cases/two_fluid_ap/`
+(`two_fluid_ap.hpp`), compilée à la volée contre les en-têtes génériques d'`adc_cpp` puis
+pilotée depuis Python ; le module `_adc` ne l'expose plus. Voir [la note de
+méthode](two_fluid_ap.md) et `adc_cases/two_fluid_ap/run.py`.
 
 ### Composition sur AMR multi-patch
 

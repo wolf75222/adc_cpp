@@ -79,10 +79,10 @@ Liste vivante de ce qui est fait et de ce qui reste, par intention.
 - Bindings Python de la lib (`python/`, module `adc`, `-DADC_BUILD_PYTHON=ON`) : `adc.System`
   (composition bloc par bloc via `add_block`, `set_poisson`, `set_density`, `step`/`advance`/`step_cfl`,
   primitives `eval_rhs`/`get_state`/`set_state` + `adc.integrate.ssprk2_step`), la composition
-  AMR `adc.AmrSystem` (mono-bloc, explicite, PAS à parité avec `System` ; l'intégrateur AP
-  deux-fluides sur mesure n'est pas exposé dans l'API publique : méthode compilée dans le module
-  privé `_adc._TwoFluidAP`, en cours de sortie du cœur vers `adc_cases`), plus le mini-DSL
-  symbolique (suite `test_dsl_*`).
+  AMR `adc.AmrSystem` (mono-bloc, explicite ; partage désormais l'opérateur spatial de `System` :
+  reconstruction primitive et flux HLLC/Roe via `advance_amr`, cf. `test_amr_spatial_parity`.
+  L'intégrateur AP deux-fluides sur mesure n'est pas une brique générique mais un scénario : il a
+  quitté le cœur pour `adc_cases/two_fluid_ap/`), plus le mini-DSL symbolique (suite `test_dsl_*`).
 - Docs : README, ALGORITHMS, ARCHITECTURE (5 couches), CHOICES, BIBLIOGRAPHY, PERFORMANCE,
   two_fluid_ap, Doxygen + Sphinx (les tutoriels et figures vivent dans `adc_cases`).
 

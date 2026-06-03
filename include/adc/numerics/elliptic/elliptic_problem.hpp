@@ -37,7 +37,7 @@
 // E = -grad phi est porte plus loin par la brique de transport qui lit
 // aux.grad_x / aux.grad_y (la vitesse vient de la policy de transport, p.ex. une
 // derive E x B). C'est GradSign::Plus.
-// two_fluid_ap::tfap_efield stocke directement E = -grad phi : GradSign::Minus.
+// A l'inverse, un consommateur qui stocke directement E = -grad phi utilise GradSign::Minus.
 // FieldPostProcess::apply reproduit caractere pour caractere l'expression de
 // detail::coupler_grad_phi (meme ordre, meme facteur multiplicatif *cx / *cy).
 

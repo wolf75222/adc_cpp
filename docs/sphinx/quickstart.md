@@ -98,17 +98,11 @@ print("blocs :", sim.block_names(), "| |phi|_max :", np.abs(sim.potential()).max
 
 Intégrateur AP **sur mesure** : un schéma asymptotic-preserving stable quand `dt*omega_pe >> 1`,
 là où un explicite exploserait. Non composable bloc à bloc (la stabilisation AP couple la
-raideur au pas de temps dans l'elliptique), il n'est **pas** exposé dans l'API publique : sa
-méthode reste compilée dans le module privé, pilotable via l'échappatoire interne
-`adc._adc._TwoFluidAP` (cf. `adc_cases/two_fluid_ap/run.py`).
-
-```python
-cfg = adc._adc._TwoFluidAPConfig()           # échappatoire interne (hors API publique)
-cfg.n = 64; cfg.omega_pe = 1e3; cfg.omega_pi = 20.0
-ts = adc._adc._TwoFluidAP(cfg)
-ts.advance(5.0 / 1e3, 200)          # dt*omega_pe = 5 : l'explicite exploserait
-print("borne AP :", ts.max_dev(), " quasi-neutre :", ts.max_charge())
-```
+raideur au pas de temps dans l'elliptique), ce n'est **pas** une brique générique mais un
+**scénario** : il a quitté le cœur et vit désormais dans `adc_cases/two_fluid_ap/`, où sa
+physique C++ (`two_fluid_ap.hpp`) est compilée à la volée contre les en-têtes génériques
+d'`adc_cpp` puis pilotée depuis Python (cf. `adc_cases/two_fluid_ap/run.py`). Le module `_adc`
+ne l'expose plus.
 
 ## Invariant à vérifier
 

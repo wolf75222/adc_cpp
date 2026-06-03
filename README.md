@@ -24,13 +24,14 @@ regrid Berger-Rigoutsos, sous-cyclage Berger-Oliger + reflux conservatif (derive
 
 `adc_cpp` est la **bibliotheque** : le moteur generique (coeur sans modele) **plus** une
 bibliotheque de briques physiques (`include/adc/physics/`) et **les bindings Python de la lib**,
-le module `adc` (composition `System` / `AmrSystem` + solveur specialise `TwoFluidAP`, ce
-dernier en cours de sortie du coeur vers `adc_cases`). Le coeur est **agnostique au modele** :
+le module `adc` (composition `System` / `AmrSystem`). Le coeur est **agnostique au modele** :
 il ne nomme aucun scenario, il ne fournit que des briques generiques (etat, transport, source,
 second membre elliptique) composees en `CompositeModel` ; les scenarios nommes (diocotron,
 Euler-Poisson, deux-fluides...) vivent cote application. Le depot separe
-**[`adc_cases`](https://github.com/wolf75222/adc_cases)** ne contient QUE des **cas
-d'utilisation en Python** (un dossier par cas) qui importent ce module ; il n'a plus de C++.
+**[`adc_cases`](https://github.com/wolf75222/adc_cases)** contient les **cas d'utilisation**
+(un dossier par cas) qui importent ce module : essentiellement du Python pilotant les briques
+generiques ; un cas SUR MESURE peut porter son propre C++ compile a la volee contre les en-tetes
+generiques d'`adc_cpp` (cf. le scenario `two_fluid_ap/`, l'integrateur AP deux-fluides sorti du coeur).
 
 Le coeur resout, sur maillage cartesien adaptatif, la partie generique :
 
@@ -206,11 +207,12 @@ sim.step_cfl(0.4)
   `get_state`/`set_state` : on ecrit son propre `take_step` cote Python (par PAS), le residu
   et Poisson restant calcules en C++ (par CELLULE). Cf. `adc.integrate.ssprk2_step`.
 - **AMR** : `adc.AmrSystem` compose un bloc sur une hierarchie raffinee (API proche de System
-  plus `set_refinement`). Il n'est PAS a parite avec `System` : MONO-bloc, explicite, sans
-  reconstruction primitive ni flux de Roe. L'integrateur AP deux-fluides (asymptotic-preserving)
-  est un integrateur **sur mesure**, non composable bloc a bloc : il n'est PAS expose dans l'API
-  publique ; sa methode reste compilee dans le module prive (`_adc._TwoFluidAP`, echappatoire
-  interne), en cours de sortie du coeur vers `adc_cases`.
+  plus `set_refinement`). Il partage desormais l'operateur spatial de `System` : reconstruction
+  primitive et flux HLLC/Roe, transmis via `advance_amr` (cf. `test_amr_spatial_parity`) ; il
+  reste mono-bloc et explicite. L'integrateur AP deux-fluides (asymptotic-preserving) est un
+  integrateur **sur mesure**, non composable bloc a bloc : ce n'est pas une brique generique
+  mais un SCENARIO, qui a quitte le coeur et vit dans `adc_cases/two_fluid_ap/` (physique C++
+  compilee a la volee contre les en-tetes generiques d'`adc_cpp`). Le module `_adc` ne l'expose plus.
 
 Le test `python/tests/test_bindings.py` exerce ces chemins. Exemples complets : depot
 [`adc_cases`](https://github.com/wolf75222/adc_cases) (un dossier Python par cas).

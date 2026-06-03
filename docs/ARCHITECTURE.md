@@ -296,13 +296,13 @@ Etat :
   `BCRec` existante : aucun appelant casse, le concept `EllipticSolver` reste modele.
   `FieldPostProcess` nomme la convention de derivation `E = -grad phi` via un signe explicite
   `GradSign::Plus` (le coupleur stocke `+grad phi`, le signe physique est porte par
-  `diocotron::drift_velocity`) ou `GradSign::Minus` (`two_fluid_ap::tfap_efield` stocke
-  directement `-grad phi`). `field_postprocess` remplace le corps de la fonction libre
+  `diocotron::drift_velocity`) ou `GradSign::Minus` (un consommateur qui stocke directement
+  `-grad phi`). `field_postprocess` remplace le corps de la fonction libre
   `coupler_grad_phi` a l'identique (meme ordre, forme multiplicative `*cx`). Refactor
   structurel bit-identique, prouve par `test_elliptic_problem` (`operator==` strict).
 
 Reste hors-perimetre tant qu'on exige le bit-identique : recabler vers `FieldPostProcess` les
-sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`, `two_fluid_ap`),
+sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`),
 car la division peut differer au dernier bit de la forme multiplicative `*cx` du coupleur
 (IEEE754 : `a/b` et `a*(1/b)` ne coincident pas toujours). Ils instancient la meme convention
 nommee, documentee, mais ne sont pas touches a cette etape.
@@ -362,7 +362,7 @@ une lib publique : on ne peut pas avoir une cible CPU et une cible GPU dans le m
 | `tests/` | CTest du coeur (+ MPI via `mpirun` quand active). | lie `adc::adc` |
 | `docs/` | architecture, algorithmes, notes de validation/performance. | documentation |
 | `include/adc/physics/` | briques physiques generiques (etat, transport, source, elliptique) composees en `CompositeModel`. | header-only `adc::adc` |
-| `python/` | module Python `adc` (pybind11) : facades runtime `System` / `AmrSystem` + `adc.integrate` + DSL (l'integrateur AP deux-fluides reste compile dans le module prive `_adc._TwoFluidAP`, hors API publique). | `-DADC_BUILD_PYTHON=ON` |
+| `python/` | module Python `adc` (pybind11) : facades runtime `System` / `AmrSystem` + `adc.integrate` + DSL. L'integrateur AP deux-fluides a quitte le coeur (scenario, non brique) : il vit dans `adc_cases/two_fluid_ap/`, compile a la volee contre les en-tetes generiques. | `-DADC_BUILD_PYTHON=ON` |
 | `adc_cases` | cas d'utilisation 100 % Python (un dossier par cas), importent le module `adc`. | aucun C++ |
 
 Regle actuelle : `adc_cpp` est la bibliotheque (coeur + briques physiques + bindings). Le coeur

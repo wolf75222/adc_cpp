@@ -1,14 +1,13 @@
 # Schema deux-fluides isotherme asymptotic-preserving
 
-Note de methode sur le solveur deux-fluides de `adc_cpp` : modele, raideur, schema AP,
-discretisation du transport, et enveloppe de robustesse mesuree. Le coeur portable GPU est
-dans [`include/adc/integrator/two_fluid_ap.hpp`](../include/adc/integrator/two_fluid_ap.hpp).
-C'est un integrateur SUR MESURE, non composable bloc a bloc comme `System` ; il n'est donc
-PAS un scenario de l'API Python publique. Sa methode reste compilee dans le module prive
-`_adc` sous le nom `_adc._TwoFluidAP` (echappatoire interne, hors contrat d'API stable),
-construit depuis [`python/two_fluid_ap_solver.cpp`](../python/two_fluid_ap_solver.cpp). Le cas
-d'usage est `adc_cases/two_fluid_ap/run.py` (Python pur), qui pilote cet echappatoire.
-Reference physique : Hoffart, arXiv:2510.11808.
+Note de methode sur le solveur deux-fluides : modele, raideur, schema AP, discretisation du
+transport, et enveloppe de robustesse mesuree. C'est un integrateur SUR MESURE, non composable
+bloc a bloc comme `System` ; ce n'est donc pas une brique generique mais un SCENARIO. Il a
+quitte le coeur `adc_cpp` et vit desormais dans `adc_cases/two_fluid_ap/` : le coeur portable
+GPU est dans `adc_cases/two_fluid_ap/two_fluid_ap.hpp`, expose via l'ABI C de
+`adc_cases/two_fluid_ap/_two_fluid_ap.cpp`. Ce dernier est compile a la volee contre les
+en-tetes GENERIQUES d'`adc_cpp` (maillage, elliptique, parallele) puis charge dans Python
+(ctypes) par `adc_cases/two_fluid_ap/run.py`. Reference physique : Hoffart, arXiv:2510.11808.
 
 ## 1. Modele
 
@@ -77,7 +76,8 @@ schemas, selectionnes par `upwind_continuity` :
 
 ## 5. Enveloppe de robustesse mesuree
 
-Mesuree par [`tests/test_two_fluid_ap_amplitude.cpp`](../tests/test_two_fluid_ap_amplitude.cpp).
+Les invariants AP (borne, quasi-neutralite, conservation de la masse) sont verifies par le
+cas `adc_cases/two_fluid_ap/run.py`.
 
 **Perturbation lisse** (mode cosinus, regime raide AP `dt * omega_pe = 5`) : le schema est
 robuste jusqu'a une grande amplitude. A `eps = 0.8` la densite reste positive
@@ -125,5 +125,6 @@ au-dela de la rotation pure validee ici.
 - Conservation de la masse par espece a l'arrondi (`~1e-11`), centree et upwind.
 - Portable GPU GH200 (memes kernels `for_each_cell` + `ADC_HD`, multigrille on-device),
   bit-identique au CPU.
-- Pilotable depuis Python via l'echappatoire interne `_adc._TwoFluidAP` et `_adc._TwoFluidAPConfig`
-  (dont `upwind_continuity`) ; hors API publique (integrateur sur mesure, non composable).
+- Pilotable depuis Python par le scenario `adc_cases/two_fluid_ap/` : la classe `TwoFluidAP`
+  de `run.py` (config `n`, `omega_pe`, `upwind_continuity`, ...) charge l'ABI C compilee a la
+  volee ; hors API publique du coeur (scenario sur mesure, non composable).
