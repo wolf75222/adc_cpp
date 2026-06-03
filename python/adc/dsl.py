@@ -507,26 +507,51 @@ class HyperbolicModel:
         S += ["    return S;", "  }", "};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
 
+    def emit_cpp_so_source(self, name=None):
+        """Assemble le code source de la bibliotheque JIT : le MODELE COMPLET (brique hyperbolique +
+        source + second membre elliptique) en adc::CompositeModel<GenHyp, GenSrc, GenEll>, derriere une
+        fabrique extern "C" (adc_model_nvars / adc_make_model / adc_destroy_model via adc::ModelAdapter).
+        Source et elliptique sont OPTIONNELS : sans set_source -> adc::NoSource ; sans set_elliptic_rhs
+        -> rhs nul (le bloc ne contribue pas au Poisson). C'est ce que compile_so compile en .so et que
+        System.add_dynamic_block charge comme un vrai bloc COUPLE (flux + source + Poisson)."""
+        nm = name or (self.name.capitalize() + "Gen")
+        nv = self.n_vars
+        parts = [self.emit_cpp_brick(name=nm + "Hyp")]
+        if self._source is not None:  # brique de source generee, sinon NoSource
+            parts.append(self.emit_cpp_source(name=nm + "Src"))
+            src_type = "adc_generated::%sSrc" % nm
+        else:
+            src_type = "adc::NoSource"
+        if self._elliptic is not None:  # brique elliptique generee, sinon rhs nul (pas de couplage)
+            parts.append(self.emit_cpp_elliptic(name=nm + "Ell"))
+        else:
+            parts.append(
+                "namespace adc_generated { struct %sEll {\n"
+                "  template <class State> ADC_HD adc::Real rhs(const State&) const { return adc::Real(0); }\n"
+                "}; }\n" % nm)
+        ell_type = "adc_generated::%sEll" % nm
+        composite = ("adc::CompositeModel<adc_generated::%sHyp, %s, %s>" % (nm, src_type, ell_type))
+        return ('#include <adc/runtime/dynamic_model.hpp>\n'
+                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
+                '#include <adc/core/variables.hpp>\n'
+                + "".join(parts)
+                + '\nextern "C" int adc_model_nvars() { return %d; }\n' % nv
+                + 'extern "C" void* adc_make_model() { return new adc::ModelAdapter<%s>(); }\n' % composite
+                + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv)
+
     def compile_so(self, so_path, include, name=None, cxx=None, std="c++20"):
-        """JIT : genere la brique, l'emballe dans une fabrique extern "C" (adc_model_nvars /
-        adc_make_model / adc_destroy_model via adc::ModelAdapter) et compile une bibliotheque
-        partagee chargeable par System.add_dynamic_block (dlopen). include = dossier des en-tetes adc ;
-        cxx = compilateur (defaut c++/g++/clang++). Renvoie so_path. Exige set_primitive_state(...) et
-        set_conservative_from([...]) (comme emit_cpp_brick)."""
+        """JIT : genere le MODELE COMPLET (emit_cpp_so_source) et compile une bibliotheque partagee
+        chargeable par System.add_dynamic_block (dlopen). Le .so expose un CompositeModel<hyperbolique,
+        source, elliptique> : le bloc dynamique applique le flux ET la source, et contribue au Poisson
+        de systeme via elliptic_rhs (vrai bloc couple, plus seulement transport). include = dossier des
+        en-tetes adc ; cxx = compilateur (defaut c++/g++/clang++). Renvoie so_path. Exige
+        set_primitive_state(...) et set_conservative_from([...]) (comme emit_cpp_brick)."""
         import os
         import shutil
         import subprocess
         import tempfile
 
-        nm = name or (self.name.capitalize() + "Gen")
-        nv = self.n_vars
-        brick = self.emit_cpp_brick(name=nm)
-        src = ('#include <adc/runtime/dynamic_model.hpp>\n'
-               '#include <adc/core/variables.hpp>\n'
-               + brick
-               + '\nextern "C" int adc_model_nvars() { return %d; }\n' % nv
-               + 'extern "C" void* adc_make_model() { return new adc::ModelAdapter<adc_generated::%s>(); }\n' % nm
-               + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv)
+        src = self.emit_cpp_so_source(name=name)
         cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if not cc:
             raise RuntimeError("compile_so : aucun compilateur C++ trouve")

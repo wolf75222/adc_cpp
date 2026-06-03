@@ -27,44 +27,59 @@
 
 namespace adc {
 
-// Residu hote -div F* (Rusanov ordre 1, periodique, a_max GLOBAL comme adc.PythonFlux) calcule via un
-// IModel : sert au bloc DYNAMIQUE (modele charge a l'execution, dispatch virtuel, hors GPU). U et le
-// retour en disposition composante-majeur (c*n*n + j*n + i), comme copy_state / write_state.
+// Residu hote R = -div F* + S(U, aux) (Rusanov ordre 1, periodique, a_max GLOBAL comme
+// adc.PythonFlux) calcule via un IModel : sert au bloc DYNAMIQUE (modele charge a l'execution,
+// dispatch virtuel, hors GPU). Le flux ET la source recoivent l'aux par cellule (phi, grad phi) de
+// sorte qu'un modele genere couple (transport ExB, force electrostatique) fonctionne, pas seulement
+// Euler. @p AUX est l'aux du systeme (3 comp : phi, grad_x, grad_y) en disposition composante-majeur ;
+// vide => aux nul. U et le retour en disposition composante-majeur (c*n*n + j*n + i).
 namespace {
 template <int NV>
-std::vector<double> host_rusanov(const IModel<NV>& m, const std::vector<double>& U, int n, double dx) {
+std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>& U,
+                                  const std::vector<double>& AUX, int n, double dx) {
   const std::size_t nn = static_cast<std::size_t>(n) * n;
-  auto at = [&](int c, int i, int j) {
-    return U[static_cast<std::size_t>(c) * nn + static_cast<std::size_t>((j + n) % n) * n +
-             ((i + n) % n)];
+  auto idx = [&](int i, int j) {
+    return static_cast<std::size_t>((j + n) % n) * n + ((i + n) % n);
   };
   auto cell = [&](int i, int j) {
     StateVec<NV> u;
-    for (int c = 0; c < NV; ++c) u[c] = at(c, i, j);
+    for (int c = 0; c < NV; ++c) u[c] = U[static_cast<std::size_t>(c) * nn + idx(i, j)];
     return u;
   };
-  Aux a{};
+  auto aux_at = [&](int i, int j) {  // aux par cellule, periodique ; vide => nul
+    Aux a{};
+    if (AUX.size() >= 3 * nn) {
+      const std::size_t k = idx(i, j);
+      a.phi = AUX[k];
+      a.grad_x = AUX[nn + k];
+      a.grad_y = AUX[2 * nn + k];
+    }
+    return a;
+  };
   double amax = 0;
   for (int j = 0; j < n; ++j)
     for (int i = 0; i < n; ++i) {
       StateVec<NV> u = cell(i, j);
+      Aux a = aux_at(i, j);
       double s = std::max(m.max_wave_speed(u, a, 0), m.max_wave_speed(u, a, 1));
       if (s > amax) amax = s;
     }
-  auto rus = [&](const StateVec<NV>& L, const StateVec<NV>& Rr, int dir) {
-    StateVec<NV> FL = m.flux(L, a, dir), FR = m.flux(Rr, a, dir), f;
-    for (int c = 0; c < NV; ++c) f[c] = 0.5 * (FL[c] + FR[c]) - 0.5 * amax * (Rr[c] - L[c]);
+  auto rus = [&](int iL, int jL, int iR, int jR, int dir) {  // flux a chaque cote avec son aux
+    StateVec<NV> L = cell(iL, jL), R = cell(iR, jR);
+    StateVec<NV> FL = m.flux(L, aux_at(iL, jL), dir), FR = m.flux(R, aux_at(iR, jR), dir), f;
+    for (int c = 0; c < NV; ++c) f[c] = 0.5 * (FL[c] + FR[c]) - 0.5 * amax * (R[c] - L[c]);
     return f;
   };
   std::vector<double> Rout(static_cast<std::size_t>(NV) * nn, 0.0);
   for (int j = 0; j < n; ++j)
     for (int i = 0; i < n; ++i) {
       StateVec<NV> Uc = cell(i, j);
-      StateVec<NV> Fxr = rus(Uc, cell(i + 1, j), 0), Fxl = rus(cell(i - 1, j), Uc, 0);
-      StateVec<NV> Fyr = rus(Uc, cell(i, j + 1), 1), Fyl = rus(cell(i, j - 1), Uc, 1);
+      StateVec<NV> Fxr = rus(i, j, i + 1, j, 0), Fxl = rus(i - 1, j, i, j, 0);
+      StateVec<NV> Fyr = rus(i, j, i, j + 1, 1), Fyl = rus(i, j - 1, i, j, 1);
+      StateVec<NV> S = m.source(Uc, aux_at(i, j));  // terme source genere (force, etc.)
       for (int c = 0; c < NV; ++c)
         Rout[static_cast<std::size_t>(c) * nn + static_cast<std::size_t>(j) * n + i] =
-            -((Fxr[c] - Fxl[c]) + (Fyr[c] - Fyl[c])) / dx;
+            -((Fxr[c] - Fxl[c]) + (Fyr[c] - Fyl[c])) / dx + S[c];
     }
   return Rout;
 }
@@ -391,16 +406,22 @@ struct System::Impl {
     const double dx = P->cfg.L / P->cfg.n;
 
     std::function<void(MultiFab&, MultiFab&)> rhs_into = [P, im, n, dx](MultiFab& U, MultiFab& R) {
-      P->write_state(R, NV, host_rusanov<NV>(*im, P->copy_state(U, NV), n, dx));
+      P->write_state(R, NV, host_residual<NV>(*im, P->copy_state(U, NV), P->copy_state(P->aux, 3),
+                                              n, dx));
     };
     std::function<Real(const MultiFab&)> max_speed = [P, im, n](const MultiFab& U) -> Real {
-      std::vector<double> u = P->copy_state(U, NV);
+      std::vector<double> u = P->copy_state(U, NV), aux = P->copy_state(P->aux, 3);
       const std::size_t nn = static_cast<std::size_t>(n) * n;
-      Aux a{};
       Real mx = 0;
       for (std::size_t c0 = 0; c0 < nn; ++c0) {
         StateVec<NV> s;
         for (int c = 0; c < NV; ++c) s[c] = u[static_cast<std::size_t>(c) * nn + c0];
+        Aux a{};
+        if (aux.size() >= 3 * nn) {
+          a.phi = aux[c0];
+          a.grad_x = aux[nn + c0];
+          a.grad_y = aux[2 * nn + c0];
+        }
         Real v = std::max(im->max_wave_speed(s, a, 0), im->max_wave_speed(s, a, 1));
         if (v > mx) mx = v;
       }
@@ -408,19 +429,35 @@ struct System::Impl {
     };
     std::function<void(MultiFab&, Real, int)> advance = [P, im, n, dx](MultiFab& U, Real dt, int nsub) {
       const Real hh = dt / nsub;
+      const std::vector<double> aux = P->copy_state(P->aux, 3);  // aux gelee sur le pas (splitting)
       for (int s = 0; s < nsub; ++s) {  // Euler explicite par sous-pas (chemin hote, prototype)
         std::vector<double> u = P->copy_state(U, NV);
-        std::vector<double> res = host_rusanov<NV>(*im, u, n, dx);
+        std::vector<double> res = host_residual<NV>(*im, u, aux, n, dx);
         for (std::size_t k = 0; k < u.size(); ++k) u[k] += hh * res[k];
         P->write_state(U, NV, u);
       }
     };
-    std::function<void(const MultiFab&, MultiFab&)> no_poisson = [](const MultiFab&, MultiFab&) {};
+    // Contribution du bloc dynamique au Poisson de systeme : rhs += elliptic_rhs(U) par cellule.
+    // Modele sans elliptique => elliptic_rhs vaut 0 (aucun effet), donc retro-compatible.
+    std::function<void(const MultiFab&, MultiFab&)> add_poisson =
+        [P, im, n](const MultiFab& U, MultiFab& rhs) {
+          std::vector<double> u = P->copy_state(U, NV);
+          const std::size_t nn = static_cast<std::size_t>(n) * n;
+          Array4 r = rhs.fab(0).array();
+          const Box2D v = rhs.box(0);
+          for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+            for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
+              const std::size_t k = static_cast<std::size_t>(j - v.lo[1]) * n + (i - v.lo[0]);
+              StateVec<NV> s;
+              for (int c = 0; c < NV; ++c) s[c] = u[static_cast<std::size_t>(c) * nn + k];
+              r(i, j, 0) += im->elliptic_rhs(s);
+            }
+        };
     if (names.empty())
       for (int c = 0; c < NV; ++c) names.push_back("u" + std::to_string(c));
 
     Species block{name, MultiFab(P->ba, P->dm, NV, 2), NV, substeps, true, 1.4,
-                  std::move(advance), std::move(rhs_into), std::move(max_speed), std::move(no_poisson)};
+                  std::move(advance), std::move(rhs_into), std::move(max_speed), std::move(add_poisson)};
     block.cons_names = names;
     block.prim_names = names;
     P->sp.push_back(std::move(block));

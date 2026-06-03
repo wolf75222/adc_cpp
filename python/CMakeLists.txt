@@ -98,6 +98,13 @@ add_test(NAME test_dsl_block
 set_tests_properties(test_dsl_block PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Bloc dynamique COUPLE : euler_poisson en formules -> .so (CompositeModel) -> add_dynamic_block ;
+# elliptic_rhs cable au Poisson (== compile) + eval_rhs == flux + source de gravite.
+add_test(NAME test_dsl_coupled
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_coupled.py)
+set_tests_properties(test_dsl_coupled PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Operateur elliptique a permittivite constante : phi(eps=2) == phi(eps=1)/2.
 add_test(NAME test_poisson_eps
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_poisson_eps.py)
