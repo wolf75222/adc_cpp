@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(p1 CXX)
+find_package(Kokkos REQUIRED)
+add_executable(p1 phase1_transport.cpp)
+target_include_directories(p1 PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(p1 PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(p1 PRIVATE Kokkos::kokkos)

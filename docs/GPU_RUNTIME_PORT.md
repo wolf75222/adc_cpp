@@ -22,9 +22,15 @@ pas une reecriture des noyaux de calcul.
 
 ## Phases du portage runtime (par dependance croissante)
 
-1. **MultiFab device-resident.** Garder l'etat U dans des Views DEVICE entre les pas ; reserver les
-   copies hote (`copy_state`/`write_state`) aux seules I/O (set_density, get_state, diagnostics). Le
-   hot loop (assemble_rhs, advance) ne doit jamais rapatrier U sur l'hote. Effort : moyen.
+1. **MultiFab device-resident.** ✅ FAIT (verifie GH200). Constat : `fab_allocator` sous
+   `ADC_HAS_KOKKOS + __CUDACC__` est `ManagedAllocator` (cudaMallocManaged) -> les Fab sont en MEMOIRE
+   UNIFIEE, donc deja device-accessibles, et `assemble_rhs` (via `for_each_cell` -> Kokkos) tourne sur
+   le device par CONSTRUCTION. Un transport Euler COMPLET (80 pas, fill_boundary + assemble_rhs +
+   maj SSPRK/FE sur la VRAIE pile adc) donne sur GH200 un resultat BIT-IDENTIQUE au CPU
+   (`python/tests/gpu/phase1_transport.cpp`, masse 4096 / energie identiques). A leve + corrige un bug
+   nvcc dans `numerics/spatial_operator.hpp` (capture `dx`/`dy` en contexte `constexpr-if`, interdite
+   pour une lambda `__host__ __device__` etendue). Optimisation restante : eviter le va-et-vient hote
+   de `fill_boundary` (phase 2) ; la memoire unifiee assure la correction mais pas la perf optimale.
 2. **Conditions aux limites sur device.** `fill_ghosts` / `fill_boundary` (`mesh/physical_bc.hpp`)
    en kernels (ou via `for_each` sur les boites de ghosts). Periodicite + parois. Effort : moyen.
 3. **Poisson sur device (le plus gros).** GeometricMG : smoother (Jacobi/GS), restriction,

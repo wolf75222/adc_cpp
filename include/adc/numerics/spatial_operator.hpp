@@ -231,6 +231,7 @@ void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& 
     Array4 fy = Fy.fab(li).array();
     const Box2D v = U.box(li);
     for_each_cell(xface_box(v), [=] ADC_HD(int i, int j) {
+      (void)dx;  // capture HORS du if constexpr : nvcc interdit la 1ere capture en contexte constexpr-if
       const auto L = reconstruct<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim);
       const auto Rr = reconstruct<Model>(model, u, i, j, 0, -1, lim, recon_prim);
       const auto F = nflux(model, L, load_aux(ax, i - 1, j), Rr, load_aux(ax, i, j), 0);
@@ -242,6 +243,7 @@ void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& 
       }
     });
     for_each_cell(yface_box(v), [=] ADC_HD(int i, int j) {
+      (void)dy;  // capture HORS du if constexpr : nvcc interdit la 1ere capture en contexte constexpr-if
       const auto L = reconstruct<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim);
       const auto Rr = reconstruct<Model>(model, u, i, j, 1, -1, lim, recon_prim);
       const auto F = nflux(model, L, load_aux(ax, i, j - 1), Rr, load_aux(ax, i, j), 1);
