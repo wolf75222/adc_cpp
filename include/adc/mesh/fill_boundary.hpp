@@ -63,7 +63,10 @@ struct HaloExchange {
     Box2D region;
   };
   std::vector<std::vector<Job>> recv;         // jobs de reception (deballage)
-  std::vector<std::vector<Real>> sbuf, rbuf;  // tampons (vivants jusqu'a end)
+  // Tampons en MEMOIRE UNIFIEE (fab_allocator = SharedSpace sous Kokkos, std::allocator sinon) :
+  // pack/unpack en for_each (device sous Kokkos), et on passe le pointeur unifie DIRECTEMENT a MPI ;
+  // une MPI CUDA-aware detecte l'UVM et fait du device-to-device (GPUDirect), sans rebond hote.
+  std::vector<std::vector<Real, fab_allocator<Real>>> sbuf, rbuf;  // vivants jusqu'a end
   std::vector<MPI_Request> reqs;
   int nc = 0;
 #endif
@@ -152,30 +155,43 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
     for (const auto& j : js) n += j.region.num_cells() * nc;
     return n;
   };
-  device_fence();  // GPU : les copies locales copy_shifted (device) precedent le pack
-                   // HOTE des tampons MPI -> barriere avant lecture memoire unifiee.
   h.sbuf.assign(np, {});
   h.rbuf.assign(np, {});
+  // PACK device (for_each, parallele sous Kokkos) dans les tampons unifies. Disposition par job :
+  // c-majeur puis (jj, ii), IDENTIQUE a l'ancien ordre k++ -> tampon bit-identique au chemin hote
+  // (les ctests MPI CPU restent bit-identiques np=1/2/4). Le rang pair enumere dans le meme ordre,
+  // donc sbuf[A->B] et rbuf[B<-A] s'alignent sans negocier les tailles.
   for (int r = 0; r < np; ++r) {
-    if (!send[r].empty()) {
-      h.sbuf[r].resize(buf_size(send[r]));
-      long k = 0;
-      for (const auto& j : send[r]) {
-        const ConstArray4 s = mf.fab(mf.local_index_of(j.src)).const_array();
-        for (int c = 0; c < nc; ++c)
-          for (int jj = j.region.lo[1]; jj <= j.region.hi[1]; ++jj)
-            for (int ii = j.region.lo[0]; ii <= j.region.hi[0]; ++ii)
-              h.sbuf[r][k++] = s(ii - j.sx, jj - j.sy, c);
-      }
-      h.reqs.emplace_back();
-      MPI_Isend(h.sbuf[r].data(), static_cast<int>(h.sbuf[r].size()),
-                MPI_DOUBLE, r, 0, MPI_COMM_WORLD, &h.reqs.back());
+    if (send[r].empty()) continue;
+    h.sbuf[r].resize(buf_size(send[r]));
+    Real* sb = h.sbuf[r].data();
+    long base = 0;
+    for (const auto& jb : send[r]) {
+      const ConstArray4 s = mf.fab(mf.local_index_of(jb.src)).const_array();
+      const int lo0 = jb.region.lo[0], lo1 = jb.region.lo[1], rnx = jb.region.nx();
+      const long rsz = static_cast<long>(rnx) * jb.region.ny();
+      const int sx = jb.sx, sy = jb.sy, ncl = nc;
+      const long b0 = base;
+      for_each_cell(jb.region, [=] ADC_HD(int i, int jc) {
+        const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
+        for (int c = 0; c < ncl; ++c) sb[b0 + static_cast<long>(c) * rsz + off] = s(i - sx, jc - sy, c);
+      });
+      base += rsz * nc;
     }
-    if (!h.recv[r].empty()) {
-      h.rbuf[r].resize(buf_size(h.recv[r]));
+  }
+  for (int r = 0; r < np; ++r)  // allouer les tampons de reception
+    if (!h.recv[r].empty()) h.rbuf[r].resize(buf_size(h.recv[r]));
+  device_fence();  // les kernels de pack (et les copies locales) doivent finir avant que MPI ne lise sbuf
+  for (int r = 0; r < np; ++r) {  // postage non-bloquant ; MPI recoit des pointeurs UNIFIES (GPUDirect si CUDA-aware)
+    if (!h.sbuf[r].empty()) {
       h.reqs.emplace_back();
-      MPI_Irecv(h.rbuf[r].data(), static_cast<int>(h.rbuf[r].size()),
-                MPI_DOUBLE, r, 0, MPI_COMM_WORLD, &h.reqs.back());
+      MPI_Isend(h.sbuf[r].data(), static_cast<int>(h.sbuf[r].size()), MPI_DOUBLE, r, 0,
+                MPI_COMM_WORLD, &h.reqs.back());
+    }
+    if (!h.rbuf[r].empty()) {
+      h.reqs.emplace_back();
+      MPI_Irecv(h.rbuf[r].data(), static_cast<int>(h.rbuf[r].size()), MPI_DOUBLE, r, 0,
+                MPI_COMM_WORLD, &h.reqs.back());
     }
   }
 #endif
@@ -186,17 +202,24 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
 inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
 #ifdef ADC_HAS_MPI
   if (h.reqs.empty()) return;
-  MPI_Waitall(static_cast<int>(h.reqs.size()), h.reqs.data(),
-              MPI_STATUSES_IGNORE);
-  device_fence();  // GPU : barriere avant l'ecriture HOTE des ghosts recus
+  MPI_Waitall(static_cast<int>(h.reqs.size()), h.reqs.data(), MPI_STATUSES_IGNORE);
+  // UNPACK device (for_each) depuis les tampons unifies recus. Waitall garantit le transfert
+  // termine ; le kernel lance ensuite lit la memoire unifiee (coherente). Pas de rebond hote.
   for (std::size_t r = 0; r < h.recv.size(); ++r) {
-    long k = 0;
-    for (const auto& j : h.recv[r]) {
-      Array4 d = mf.fab(mf.local_index_of(j.dst)).array();
-      for (int c = 0; c < h.nc; ++c)
-        for (int jj = j.region.lo[1]; jj <= j.region.hi[1]; ++jj)
-          for (int ii = j.region.lo[0]; ii <= j.region.hi[0]; ++ii)
-            d(ii, jj, c) = h.rbuf[r][k++];
+    if (h.rbuf[r].empty()) continue;
+    const Real* rb = h.rbuf[r].data();
+    long base = 0;
+    for (const auto& jb : h.recv[r]) {
+      Array4 d = mf.fab(mf.local_index_of(jb.dst)).array();
+      const int lo0 = jb.region.lo[0], lo1 = jb.region.lo[1], rnx = jb.region.nx();
+      const long rsz = static_cast<long>(rnx) * jb.region.ny();
+      const int ncl = h.nc;
+      const long b0 = base;
+      for_each_cell(jb.region, [=] ADC_HD(int i, int jc) {
+        const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
+        for (int c = 0; c < ncl; ++c) d(i, jc, c) = rb[b0 + static_cast<long>(c) * rsz + off];
+      });
+      base += rsz * ncl;
     }
   }
 #else
