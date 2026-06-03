@@ -141,13 +141,19 @@ struct AmrSystem::Impl {
     const Geometry g = geom();
     const double dxc = cfg.L / cfg.n, dxf = dxc / 2;
     DistributionMapping dm(1, n_ranks());
+    // Largeur de ghost = stencil de reconstruction du limiteur : 1 (NoSlope) ou 2 (Minmod /
+    // VanLeer, MUSCL ordre 2). Figer 1 (l'historique, ne testant que le scalaire diocotron en
+    // NoSlope) lisait HORS BORNES le 2e ghost en minmod/vanleer : tolere en conservatif (octets
+    // adjacents finis), mais NaN en primitif (to_primitive divise par un rho parasite). C'est la
+    // largeur que System alloue ; indispensable a la PARITE du schema reconstruit, pas un confort.
+    const int ng = L::n_ghost;
     BoxArray bac(std::vector<Box2D>{Box2D::from_extents(cfg.n, cfg.n)});
-    MultiFab Uc(bac, dm, nc, 1);
+    MultiFab Uc(bac, dm, nc, ng);
     Uc.set_val(Real(0));
     const int I0 = cfg.n / 4, I1 = 3 * cfg.n / 4 - 1, J0 = cfg.n / 4, J1 = 3 * cfg.n / 4 - 1;
     Box2D fb{{2 * I0, 2 * J0}, {2 * I1 + 1, 2 * J1 + 1}};
     BoxArray baf(std::vector<Box2D>{fb});
-    MultiFab Uf(baf, dm, nc, 1);
+    MultiFab Uf(baf, dm, nc, ng);
     Uf.set_val(Real(0));
     std::vector<AmrLevelMP> levels;
     levels.push_back({std::move(Uc), nullptr, dxc, dxc});

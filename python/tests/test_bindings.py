@@ -136,6 +136,45 @@ for _ in range(20):
 chk(amr.n_patches() >= 1, "AmrSystem : raffinement actif")
 chk(abs(amr.mass() - am0) / abs(am0) < 1e-9, "AmrSystem : masse conservee (reflux)")
 
+# --- 4b-bis. AmrSystem : Euler en reconstruction PRIMITIVE (minmod/vanleer + hllc/roe) ----
+# Garde de non-regression du stencil de ghost : un patch reconstruit en MUSCL ordre 2 a besoin
+# de 2 ghosts ; le primitif (to_primitive) divise par rho et part en NaN si on lit un 2e ghost
+# hors bornes (allocation a 1 ghost). On verifie ici que le schema reconstruit (le meme que
+# System) tourne reellement sur la facade AMR : fini, densite positive, masse conservee, et
+# proche de System sur une grille mono-niveau equivalente (l'integration AMR est sous-cyclee,
+# d'ou un ecart de l'ordre du pourcent, pas zero).
+print("== AmrSystem : Euler primitif sur AMR (garde du stencil de ghost) ==")
+def euler_gas():
+    return adc.Model(state=adc.FluidState(kind="compressible", gamma=1.4),
+                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
+                     elliptic=adc.ChargeDensity(charge=1.0))
+ne = 32
+exs = meshx(ne); exx, eyy = np.meshgrid(exs, exs, indexing="xy")
+erho = 1.0 + 0.4 * np.exp(-((exx - 0.5) ** 2 + (eyy - 0.5) ** 2) / 0.02)
+for elim, eflux in (("minmod", "hllc"), ("minmod", "roe"), ("vanleer", "hllc")):
+    eamr = adc.AmrSystem(n=ne, regrid_every=0, periodic=True)
+    eamr.add_block("gas", model=euler_gas(),
+                   spatial=adc.Spatial(**{elim: True}, flux=eflux, primitive=True))
+    eamr.set_refinement(threshold=1e9)  # patch seed coherent, sans tagger de cellule
+    eamr.set_poisson(); eamr.set_density("gas", erho)
+    em0 = eamr.mass()
+    for _ in range(10):
+        eamr.step_cfl(0.2)
+    eda = np.array(eamr.density())
+    chk(np.isfinite(eda).all() and eda.min() > 0,
+        f"AMR {elim}+{eflux}+primitif : fini, densite positive")
+    chk(abs(eamr.mass() - em0) / abs(em0) < 1e-6,
+        f"AMR {elim}+{eflux}+primitif : masse conservee (reflux)")
+    esys = adc.System(n=ne, periodic=True)
+    esys.add_block("gas", model=euler_gas(),
+                   spatial=adc.Spatial(**{elim: True}, flux=eflux, primitive=True))
+    esys.set_poisson(); esys.set_density("gas", erho)
+    for _ in range(10):
+        esys.step_cfl(0.2)
+    eds = np.array(esys.density("gas"))
+    erel = np.abs(eda - eds).max() / np.abs(eds).max()
+    chk(erel < 0.05, f"AMR {elim}+{eflux}+primitif vs System : ecart relatif {erel:.1%} < 5%")
+
 # --- 4c. Espece gelee (background fixe) : non avancee, mais vue par Poisson ------
 print("== espece gelee (evolve=False) : fond fixe vu par Poisson ==")
 fz = adc.System(n=32, L=1.0, periodic=True)

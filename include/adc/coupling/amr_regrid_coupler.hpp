@@ -52,7 +52,11 @@ void amr_regrid_finest(std::vector<AmrLevelMP>& L, std::vector<MultiFab>& aux,
     fb.push_back(Box2D{{2 * b.lo[0], 2 * b.lo[1]}, {2 * b.hi[0] + 1, 2 * b.hi[1] + 1}});
   }
   if (fb.empty()) return;  // rien a raffiner : on garde la grille courante
-  MultiFab nU(BoxArray(fb), DistributionMapping((int)fb.size(), n_ranks()), L[fk].U.ncomp(), 1);
+  // Les nouveaux patchs HERITENT la largeur de ghost du niveau remplace (et non un 1 fige) : un
+  // niveau reconstruit en MUSCL ordre 2 (Minmod / VanLeer) porte 2 ghosts, que le regrid doit
+  // preserver, sinon la reconstruction lirait hors bornes apres re-raffinement.
+  const int ngf = L[fk].U.n_grow();
+  MultiFab nU(BoxArray(fb), DistributionMapping((int)fb.size(), n_ranks()), L[fk].U.ncomp(), ngf);
   const MultiFab& par = L[pk].U;
   const MultiFab& old = L[fk].U;
   const int ncf = nU.ncomp();
