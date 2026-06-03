@@ -38,10 +38,14 @@ pas une reecriture des noyaux de calcul.
    apres les faces x, sur le meme flux). Un transport NON-periodique (sortie Foextrap) sur GH200 donne
    un resultat BIT-IDENTIQUE au CPU (`python/tests/gpu/phase2_transport.cpp` ; la masse decroit comme
    il se doit, sortie libre). 49 ctests (dont test_physical_bc, poisson_disc, cut_cell) verts.
-3. **Poisson sur device (le plus gros).** GeometricMG : smoother (Jacobi/GS), restriction,
-   prolongation, residu en kernels device ; ou PoissonFFTSolver via cuFFT. C'est le coeur de
-   l'effort, et c'est aussi la ou se brancherait le solveur a COEFFICIENTS VARIABLES (eps(x)) encore
-   manquant. Effort : eleve.
+3. **Poisson sur device.** ✅ FAIT (verifie GH200) -- et SANS modification de code. Toute la boucle
+   V-cycle de `GeometricMG` etait DEJA en `for_each` -> device : smoother red-black GS, residu, Laplacien
+   (`poisson_operator.hpp`), restriction `average_down` + prolongation `interpolate` (`mesh/refinement.hpp`),
+   norme via `for_each_cell_reduce_max` (`mf_arith.hpp`). Seul le SETUP (masque + coefs cut-cell depuis
+   des `std::function`) reste hote (one-shot, ecrit la memoire unifiee). Un solve Poisson Dirichlet
+   (n=128) sur GH200 donne un resultat BIT-IDENTIQUE au CPU : cycles=9, sum/max(phi) identiques
+   (`python/tests/gpu/phase3_poisson.cpp`). Le "gros morceau" etait deja porte par le seam for_each.
+   (Le solveur a COEFFICIENTS VARIABLES eps(x) reste un ajout numerique a part, non requis ici.)
 4. **Couplages inter-especes sur device.** ✅ FAIT (verifie GH200). Les 3 couplages
    (ionisation, collision, echange thermique, `system.cpp`) portes de boucles HOTE vers `for_each_cell`
    (kernels device lisant/ecrivant PLUSIEURS blocs au meme point) ; `device_fence` prealable de
