@@ -38,12 +38,12 @@ inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
   if (bc.xlo == BCType::Periodic && bc.xhi == BCType::Periodic &&
       bc.ylo == BCType::Periodic && bc.yhi == BCType::Periodic)
     return;
-  // GPU : ces boucles HOTE lisent/ecrivent les ghosts que copy_shifted (kernel
-  // device, dans fill_boundary juste avant) vient potentiellement d'ecrire ->
-  // barriere obligatoire avant tout acces hote a la memoire unifiee (no-op hors GPU).
-  device_fence();
+  // Bords physiques sur DEVICE (for_each_cell -> kernel) : ghost = cellule miroir (Foextrap : copie
+  // de la 1ere interne ; Dirichlet : 2 v - reflexion). Indice ghost <-> couche : pour x bas, i = lo-k
+  // donc le miroir Dirichlet est 2 lo - i - 1 (k = lo - i). Plus de device_fence ni d'acces hote : ces
+  // kernels s'ordonnent apres copy_shifted (meme espace d'execution), et les faces y (i ETENDU pour
+  // les coins) s'ordonnent apres les faces x sur le meme flux.
   const int nc = mf.ncomp();
-
   for (int li = 0; li < mf.local_size(); ++li) {
     Fab2D& F = mf.fab(li);
     const Box2D v = F.box();
@@ -51,47 +51,43 @@ inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
 
     // --- faces x, sur la plage j valide ---
     if (bc.xlo != BCType::Periodic && v.lo[0] == domain.lo[0]) {
-      for (int c = 0; c < nc; ++c)
-        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int k = 1; k <= ng; ++k) {
-            int g = domain.lo[0] - k;
-            a(g, j, c) = (bc.xlo == BCType::Foextrap)
-                             ? a(domain.lo[0], j, c)
-                             : 2 * bc.xlo_val - a(domain.lo[0] + k - 1, j, c);
-          }
+      const int lo = domain.lo[0];
+      const bool foe = bc.xlo == BCType::Foextrap;
+      const Real val = bc.xlo_val;
+      for_each_cell(Box2D{{lo - ng, v.lo[1]}, {lo - 1, v.hi[1]}}, [=] ADC_HD(int i, int j) {
+        for (int c = 0; c < nc; ++c)
+          a(i, j, c) = foe ? a(lo, j, c) : 2 * val - a(2 * lo - i - 1, j, c);
+      });
     }
     if (bc.xhi != BCType::Periodic && v.hi[0] == domain.hi[0]) {
-      for (int c = 0; c < nc; ++c)
-        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int k = 1; k <= ng; ++k) {
-            int g = domain.hi[0] + k;
-            a(g, j, c) = (bc.xhi == BCType::Foextrap)
-                             ? a(domain.hi[0], j, c)
-                             : 2 * bc.xhi_val - a(domain.hi[0] - k + 1, j, c);
-          }
+      const int hi = domain.hi[0];
+      const bool foe = bc.xhi == BCType::Foextrap;
+      const Real val = bc.xhi_val;
+      for_each_cell(Box2D{{hi + 1, v.lo[1]}, {hi + ng, v.hi[1]}}, [=] ADC_HD(int i, int j) {
+        for (int c = 0; c < nc; ++c)
+          a(i, j, c) = foe ? a(hi, j, c) : 2 * val - a(2 * hi - i + 1, j, c);
+      });
     }
 
     // --- faces y, sur la plage i ETENDUE (coins via les ghosts-x deja remplis) ---
     const int iglo = v.lo[0] - ng, ighi = v.hi[0] + ng;
     if (bc.ylo != BCType::Periodic && v.lo[1] == domain.lo[1]) {
-      for (int c = 0; c < nc; ++c)
-        for (int i = iglo; i <= ighi; ++i)
-          for (int k = 1; k <= ng; ++k) {
-            int g = domain.lo[1] - k;
-            a(i, g, c) = (bc.ylo == BCType::Foextrap)
-                             ? a(i, domain.lo[1], c)
-                             : 2 * bc.ylo_val - a(i, domain.lo[1] + k - 1, c);
-          }
+      const int lo = domain.lo[1];
+      const bool foe = bc.ylo == BCType::Foextrap;
+      const Real val = bc.ylo_val;
+      for_each_cell(Box2D{{iglo, lo - ng}, {ighi, lo - 1}}, [=] ADC_HD(int i, int j) {
+        for (int c = 0; c < nc; ++c)
+          a(i, j, c) = foe ? a(i, lo, c) : 2 * val - a(i, 2 * lo - j - 1, c);
+      });
     }
     if (bc.yhi != BCType::Periodic && v.hi[1] == domain.hi[1]) {
-      for (int c = 0; c < nc; ++c)
-        for (int i = iglo; i <= ighi; ++i)
-          for (int k = 1; k <= ng; ++k) {
-            int g = domain.hi[1] + k;
-            a(i, g, c) = (bc.yhi == BCType::Foextrap)
-                             ? a(i, domain.hi[1], c)
-                             : 2 * bc.yhi_val - a(i, domain.hi[1] - k + 1, c);
-          }
+      const int hi = domain.hi[1];
+      const bool foe = bc.yhi == BCType::Foextrap;
+      const Real val = bc.yhi_val;
+      for_each_cell(Box2D{{iglo, hi + 1}, {ighi, hi + ng}}, [=] ADC_HD(int i, int j) {
+        for (int c = 0; c < nc; ++c)
+          a(i, j, c) = foe ? a(i, hi, c) : 2 * val - a(i, 2 * hi - j + 1, c);
+      });
     }
   }
 }

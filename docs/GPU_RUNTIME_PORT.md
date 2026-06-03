@@ -31,8 +31,13 @@ pas une reecriture des noyaux de calcul.
    nvcc dans `numerics/spatial_operator.hpp` (capture `dx`/`dy` en contexte `constexpr-if`, interdite
    pour une lambda `__host__ __device__` etendue). Optimisation restante : eviter le va-et-vient hote
    de `fill_boundary` (phase 2) ; la memoire unifiee assure la correction mais pas la perf optimale.
-2. **Conditions aux limites sur device.** `fill_ghosts` / `fill_boundary` (`mesh/physical_bc.hpp`)
-   en kernels (ou via `for_each` sur les boites de ghosts). Periodicite + parois. Effort : moyen.
+2. **Conditions aux limites sur device.** ✅ FAIT (verifie GH200). `copy_shifted` (ghosts
+   PERIODIQUES, `mesh/fill_boundary.hpp`) etait deja `for_each` -> device. `fill_physical_bc`
+   (Foextrap / Dirichlet, `mesh/physical_bc.hpp`) porte des boucles HOTE vers `for_each_cell` ;
+   `device_fence` interne supprime (les kernels BC s'ordonnent apres `copy_shifted`, et les faces y
+   apres les faces x, sur le meme flux). Un transport NON-periodique (sortie Foextrap) sur GH200 donne
+   un resultat BIT-IDENTIQUE au CPU (`python/tests/gpu/phase2_transport.cpp` ; la masse decroit comme
+   il se doit, sortie libre). 49 ctests (dont test_physical_bc, poisson_disc, cut_cell) verts.
 3. **Poisson sur device (le plus gros).** GeometricMG : smoother (Jacobi/GS), restriction,
    prolongation, residu en kernels device ; ou PoissonFFTSolver via cuFFT. C'est le coeur de
    l'effort, et c'est aussi la ou se brancherait le solveur a COEFFICIENTS VARIABLES (eps(x)) encore
