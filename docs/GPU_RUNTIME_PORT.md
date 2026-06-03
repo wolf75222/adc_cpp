@@ -53,8 +53,14 @@ pas une reecriture des noyaux de calcul.
    donne un resultat BIT-IDENTIQUE au CPU, n_i + n_g conserve (`python/tests/gpu/phase4_coupling.cpp`).
    Host : `test_bindings` (conservation des 3 couplages) vert. => jalon 1->2->4 atteint : TRANSPORT
    MULTI-ESPECES complet (transport + BCs + couplages) sur GPU, sans Poisson.
-5. **AMR sur device.** regrid, prolongation/restriction de niveau, reflux : kernels device + gestion
-   de la hierarchie cote hote (orchestration) avec donnees device. Effort : eleve.
+5. **AMR (ops de champ) sur device.** ✅ FAIT (verifie GH200) -- sans modif de code. Les tests
+   self-checking `test_flux_register` (registre de flux / reflux 2-niveaux, conservation) et
+   `test_amr_diffusion` (transport multi-niveaux) PASSENT sur GH200 : transferts `average_down` /
+   `interpolate` + reflux + transport sont des `for_each` -> device. Le CLUSTERING / la hierarchie
+   (`cluster.hpp`, `regrid.hpp`) est de la METADATA hote (box lists, predicats `std::function`) : reste
+   hote (correct, infrequent ; nvcc ne la compile pas, ce qui est normal -- ce n'est pas un kernel).
+   Les registres de flux gardent des boucles hote (corrects via memoire unifiee ; full-device reflux =
+   perf follow-up). python/tests/gpu/{amr_CMakeLists.txt, romeo_amr_build.sh}.
 6. **MPI CUDA-aware.** Echange de halos device-to-device (GPUDirect), `fill_boundary` distribue sans
    detour par l'hote ; FFT distribuee device. Effort : eleve.
 7. **Validation bout-en-bout.** Un cas plasma multi-especes complet (transport + Poisson + couplages

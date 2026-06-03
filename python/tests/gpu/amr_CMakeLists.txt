@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.16)
+project(amrgpu CXX)
+find_package(Kokkos REQUIRED)
+# Tests AMR sur DONNEES DE CHAMP (kernels) : reflux (registre de flux) + transport multi-niveaux.
+# Le clustering / la hierarchie (test_amr_hierarchy, test_regrid) sont de la METADATA hote (box lists,
+# predicats std::function) : hors device, non compiles ici.
+foreach(t test_flux_register test_amr_diffusion)
+  add_executable(${t} ${t}.cpp)
+  target_include_directories(${t} PRIVATE ${ADC_INCLUDE})
+  target_compile_definitions(${t} PRIVATE ADC_HAS_KOKKOS)
+  target_link_libraries(${t} PRIVATE Kokkos::kokkos)
+endforeach()
