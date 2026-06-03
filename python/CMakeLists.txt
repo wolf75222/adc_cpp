@@ -97,3 +97,9 @@ add_test(NAME test_dsl_block
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_block.py)
 set_tests_properties(test_dsl_block PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# Operateur elliptique a permittivite constante : phi(eps=2) == phi(eps=1)/2.
+add_test(NAME test_poisson_eps
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_poisson_eps.py)
+set_tests_properties(test_poisson_eps PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")

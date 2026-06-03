@@ -87,7 +87,7 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("kind") = "conservative")
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
-           py::arg("wall") = "none", py::arg("wall_radius") = 0.0)
+           py::arg("wall") = "none", py::arg("wall_radius") = 0.0, py::arg("epsilon") = 1.0)
       .def("set_density",
            [](System& s, const std::string& name,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr) {

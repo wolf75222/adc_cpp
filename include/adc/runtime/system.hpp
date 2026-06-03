@@ -70,10 +70,13 @@ class System {
   /// @param solver "geometric_mg" (tout cas, paroi comprise) | "fft" (periodique, n = 2^k)
   /// @param bc     "auto" | "periodic" | "dirichlet" | "neumann"
   /// @param wall   "none" | "circle" : paroi conductrice en (L/2, L/2), rayon wall_radius
+  /// @param epsilon permittivite CONSTANTE de l'operateur div(eps grad phi) = f. eps != 1 resout
+  ///                eps lap phi = f (i.e. lap phi = f/eps). eps(x) variable demanderait un solveur
+  ///                a coefficients variables (non encore disponible).
   void set_poisson(const std::string& rhs = "charge_density",
                    const std::string& solver = "geometric_mg",
                    const std::string& bc = "auto", const std::string& wall = "none",
-                   double wall_radius = 0.0);
+                   double wall_radius = 0.0, double epsilon = 1.0);
 
   /// Fixe la densite d'une espece (composante 0), tableau n*n row-major. Les autres
   /// composantes (qte de mouvement, energie) sont posees a l'equilibre au repos.

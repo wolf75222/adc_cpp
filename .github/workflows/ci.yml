@@ -72,6 +72,7 @@ jobs:
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_jitlib.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_dynamic.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_block.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_poisson_eps.py
 
   mpi:
     name: ubuntu-latest / MPI

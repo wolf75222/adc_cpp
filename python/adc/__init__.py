@@ -337,18 +337,17 @@ class System:
         """EPM : configure le modele elliptique de systeme (Poisson en est l'instance courante).
         model = adc.elliptic(operator=adc.div_eps_grad(eps), rhs=adc.charge_density(),
         output=adc.electric_field_from_potential()). set_poisson(...) reste le raccourci equivalent.
-        Premier ordre : operateur div(eps grad) a eps=1 + densite de charge ; eps(x), charges au
-        niveau EPM, et autres operateurs (diffusion, projection) sont des raffinements."""
+        Operateur div(eps grad) a eps CONSTANT (eps != 1 supporte : eps lap phi = f) + densite de
+        charge. eps(x) variable, diffusion / projection demanderaient un solveur a coefficients
+        variables (raffinement non encore disponible)."""
         if not isinstance(model.operator, DivEpsGrad):
             raise NotImplementedError("add_elliptic_model : seul l'operateur div_eps_grad (Poisson) "
-                                      "est supporte pour l'instant")
-        if model.operator.epsilon != 1.0:
-            raise NotImplementedError("add_elliptic_model : eps != 1 (variable ou non unitaire) est "
-                                      "un raffinement (solveur multigrille)")
+                                      "est supporte ; diffusion / projection -> raffinement (solveur)")
         if not isinstance(model.rhs, ChargeDensitySource):
             raise NotImplementedError("add_elliptic_model : seul rhs=charge_density est supporte")
         kind = solver.kind if solver is not None else "geometric_mg"
-        self.set_poisson(rhs="charge_density", solver=kind, bc=bc, wall=wall, wall_radius=wall_radius)
+        self.set_poisson(rhs="charge_density", solver=kind, bc=bc, wall=wall, wall_radius=wall_radius,
+                         epsilon=model.operator.epsilon)
 
     def add_coupling(self, coupling):
         """Ajoute un couplage inter-especes : objet adc.Ionization / Collision / ThermalExchange.

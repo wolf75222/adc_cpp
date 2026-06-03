@@ -106,6 +106,7 @@ struct System::Impl {
   std::string p_bc = "auto";
   std::string p_wall = "none";
   double p_wall_radius = 0.0;
+  Real p_eps_ = 1;  // permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps
   std::optional<std::variant<GeometricMG, PoissonFFTSolver>> ell_;
 
   explicit Impl(const SystemConfig& c)
@@ -313,6 +314,15 @@ struct System::Impl {
     MultiFab& rhs = ell_rhs();
     rhs.set_val(Real(0));
     for (auto& s : sp) s.add_poisson_rhs(s.U, rhs);  // f = Sum_s elliptic_rhs_s(u_s)
+    if (p_eps_ != Real(1)) {  // permittivite constante : div(eps grad phi) = f <=> lap phi = f/eps
+      const Real inv = Real(1) / p_eps_;
+      for (int li = 0; li < rhs.local_size(); ++li) {
+        Array4 r = rhs.fab(li).array();
+        const Box2D v = rhs.box(li);
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
+      }
+    }
     ell_solve();
     device_fence();
     const Real dx = geom.dx(), dy = geom.dy();
@@ -491,12 +501,15 @@ void System::add_dynamic_block(const std::string& name, const std::string& so_pa
 }
 
 void System::set_poisson(const std::string& rhs, const std::string& solver,
-                         const std::string& bc, const std::string& wall, double wall_radius) {
+                         const std::string& bc, const std::string& wall, double wall_radius,
+                         double epsilon) {
+  if (epsilon == 0.0) throw std::runtime_error("System::set_poisson : epsilon != 0 requis");
   p_->p_rhs = rhs;
   p_->p_solver = solver;
   p_->p_bc = bc;
   p_->p_wall = wall;
   p_->p_wall_radius = wall_radius;
+  p_->p_eps_ = static_cast<Real>(epsilon);
   p_->ell_.reset();
 }
 
