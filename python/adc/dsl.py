@@ -42,6 +42,43 @@ def aux_n_aux(aux_names):
     return w
 
 
+# --- Roles physiques : nom de variable -> VariableRole ----------------------
+# Mapping CANONIQUE nom -> role physique (cf. adc::VariableRole / role_name cote C++). Permet a une
+# brique generee de DECLARER le SENS de ses composantes (densite, qte de mvt, energie...) au lieu de
+# roles vides, pour que les couplages inter-especes (System::add_collision / add_thermal_exchange)
+# resolvent par index_of(role) plutot que par un indice litteral. Les noms usuels des modeles fluides
+# (rho, rho_u, u, p, E, n...) sont reconnus ; un nom inconnu reste 'Custom'. Un modele peut imposer
+# ses roles explicitement (conservative_vars(..., roles=[...]) / set_primitive_state(..., roles=[...]))
+# pour un layout non standard. Cle = nom EXACT de la variable, valeur = membre de adc::VariableRole.
+CANONICAL_ROLES = {
+    "rho": "Density", "n": "Density", "density": "Density",
+    "rho_u": "MomentumX", "rhou": "MomentumX", "mom_x": "MomentumX", "mx": "MomentumX",
+    "rho_v": "MomentumY", "rhov": "MomentumY", "mom_y": "MomentumY", "my": "MomentumY",
+    "rho_w": "MomentumZ", "rhow": "MomentumZ", "mom_z": "MomentumZ", "mz": "MomentumZ",
+    "E": "Energy", "rho_E": "Energy", "ener": "Energy", "energy": "Energy",
+    "u": "VelocityX", "v": "VelocityY", "w": "VelocityZ",
+    "vx": "VelocityX", "vy": "VelocityY", "vz": "VelocityZ",
+    "p": "Pressure", "pressure": "Pressure",
+    "T": "Temperature", "temperature": "Temperature",
+}
+
+
+def role_of(name):
+    """Role physique CANONIQUE du nom @p name (membre de adc::VariableRole), 'Custom' si inconnu."""
+    return CANONICAL_ROLES.get(name, "Custom")
+
+
+def roles_for(names, override=None):
+    """Liste des roles (membres adc::VariableRole) paralleles a @p names. @p override (optionnel) :
+    liste de meme longueur fixant explicitement les roles (chaine 'Density'... ou None pour retomber
+    sur le mapping canonique du nom). Sert aux layouts non standard ou les noms ne suffisent pas."""
+    if override is None:
+        return [role_of(nm) for nm in names]
+    if len(override) != len(names):
+        raise ValueError("roles : %d roles pour %d variables" % (len(override), len(names)))
+    return [(r if r is not None else role_of(nm)) for nm, r in zip(names, override)]
+
+
 # --- Arbre d'expressions ----------------------------------------------------
 class Expr:
     """Noeud d'expression symbolique. Les operateurs construisent l'arbre ; eval(env) l'applique a
@@ -235,12 +272,21 @@ class HyperbolicModel:
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
         self.prim_state = []    # noms ordonnes de l'etat primitif (layout de Prim) ; pour le codegen
         self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
+        self.cons_roles = None  # override explicite des roles conservatifs (sinon mapping canonique)
+        self.prim_roles = None  # override explicite des roles primitifs (sinon mapping canonique)
 
     def cons(self, name):
         self.cons_names.append(name)
         return Var(name, "cons")
 
-    def conservative_vars(self, *names):
+    def conservative_vars(self, *names, roles=None):
+        """Declare les variables conservatives. @p roles (optionnel) : liste de meme longueur fixant
+        explicitement le role physique de chaque composante (chaine 'Density'/'MomentumX'... ou None
+        pour retomber sur le mapping canonique du nom) ; sert a un layout non standard ou les noms ne
+        suffisent pas a deduire le sens. Sans roles, le mapping canonique nom -> role s'applique."""
+        if roles is not None and len(roles) != len(names):
+            raise ValueError("conservative_vars : %d roles pour %d variables" % (len(roles), len(names)))
+        self.cons_roles = list(roles) if roles is not None else None
         return tuple(self.cons(n) for n in names)
 
     def primitive(self, name, expr):
@@ -258,11 +304,16 @@ class HyperbolicModel:
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
 
-    def set_primitive_state(self, *vars_or_names):
+    def set_primitive_state(self, *vars_or_names, roles=None):
         """Declare le layout ORDONNE de l'etat primitif (Prim) : noms des composantes, dans l'ordre.
         Necessaire au codegen brique (to_primitive remplit Prim dans cet ordre). Chaque nom doit
-        etre une variable conservative ou une primitive deja definie."""
+        etre une variable conservative ou une primitive deja definie. @p roles (optionnel) : meme
+        convention que conservative_vars (override explicite par composante, None = mapping canonique)."""
         self.prim_state = [v.name if isinstance(v, Var) else str(v) for v in vars_or_names]
+        if roles is not None and len(roles) != len(self.prim_state):
+            raise ValueError("set_primitive_state : %d roles pour %d variables"
+                             % (len(roles), len(self.prim_state)))
+        self.prim_roles = list(roles) if roles is not None else None
 
     def set_conservative_from(self, exprs):
         """Formules du conservatif en fonction des primitives (une par variable conservative, dans
@@ -433,6 +484,17 @@ class HyperbolicModel:
 
         cnames = ", ".join('"%s"' % c for c in self.cons_names)
         pnames = ", ".join('"%s"' % p for p in self.prim_state)
+        # Roles physiques paralleles aux noms : initialiseur C++ d'adc::VariableSet::roles. Emis SI au
+        # moins une composante a un role reconnu (sinon roles vides -> brique identique a l'historique,
+        # les couplages retombent sur les indices de fallback). Les roles permettent a System de
+        # resoudre les couplages inter-especes par index_of(role) au lieu d'un indice litteral.
+        def roles_init(roles):
+            if all(r == "Custom" for r in roles):
+                return None  # aucun role utile : on n'emet pas le 4e champ (retro-compat stricte)
+            return ", ".join("adc::VariableRole::%s" % r for r in roles)
+
+        croles = roles_init(roles_for(self.cons_names, self.cons_roles))
+        proles = roles_init(roles_for(self.prim_state, self.prim_roles))
         S = [
             "#include <cmath>",  # std::sqrt / std::pow : brique autosuffisante (g++ ne tire pas cmath)
             "// brique HYPERBOLIQUE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_brick)."
@@ -506,10 +568,12 @@ class HyperbolicModel:
         S += ["    U[%d] = %s;" % (i, c) for i, c in enumerate(ccpps)]
         S += ["    return U;", "  }", ""]
 
-        S.append('  static adc::VariableSet conservative_vars() { return {adc::VariableKind::Conservative, {%s}, %d}; }'
-                 % (cnames, nc))
-        S.append('  static adc::VariableSet primitive_vars() { return {adc::VariableKind::Primitive, {%s}, %d}; }'
-                 % (pnames, npr))
+        cons_set = "{adc::VariableKind::Conservative, {%s}, %d%s}" % (
+            cnames, nc, (", {%s}" % croles) if croles is not None else "")
+        prim_set = "{adc::VariableKind::Primitive, {%s}, %d%s}" % (
+            pnames, npr, (", {%s}" % proles) if proles is not None else "")
+        S.append('  static adc::VariableSet conservative_vars() { return %s; }' % cons_set)
+        S.append('  static adc::VariableSet primitive_vars() { return %s; }' % prim_set)
         S += ["};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
 

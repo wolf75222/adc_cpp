@@ -733,19 +733,25 @@ void System::add_ionization(const std::string& electron, const std::string& ion,
   Impl* P = p_.get();
   const int ie = P->index(electron), ii = P->index(ion), ig = P->index(neutral);
   const Real k = static_cast<Real>(rate);
-  // Ionisation (operator-split, sur la densite = comp 0) : taux r = k n_e n_g. Un neutre
-  // disparait, un ion et un electron apparaissent : n_g -= dt r, n_i += dt r, n_e += dt r. La
-  // masse est transferee du neutre vers l'ion (n_i + n_g conserve). Premiere brique de couplage ;
-  // le transfert de quantite de mouvement / energie (especes fluides) est un raffinement ulterieur.
-  P->couplings.push_back([P, ie, ii, ig, k](Real dt) {
+  // Densite resolue par ROLE (comme add_collision / add_thermal_exchange), fallback comp 0 si le
+  // bloc ne renseigne pas ses roles (bloc dynamique / compile). Un bloc rangeant sa densite ailleurs
+  // que l'indice 0 reste correctement couple.
+  const int de = role_index(P->sp[ie].cons_vars, VariableRole::Density, 0);
+  const int di = role_index(P->sp[ii].cons_vars, VariableRole::Density, 0);
+  const int dg = role_index(P->sp[ig].cons_vars, VariableRole::Density, 0);
+  // Ionisation (operator-split, sur la densite) : taux r = k n_e n_g. Un neutre disparait, un ion et
+  // un electron apparaissent : n_g -= dt r, n_i += dt r, n_e += dt r. La masse est transferee du
+  // neutre vers l'ion (n_i + n_g conserve). Premiere brique de couplage ; le transfert de quantite
+  // de mouvement / energie (especes fluides) est un raffinement ulterieur.
+  P->couplings.push_back([P, ie, ii, ig, k, de, di, dg](Real dt) {
     Array4 ue = P->sp[ie].U.fab(0).array();
     Array4 ui = P->sp[ii].U.fab(0).array();
     Array4 ug = P->sp[ig].U.fab(0).array();
     for_each_cell(P->sp[ie].U.box(0), [=] ADC_HD(int i, int j) {  // sur device (lit n_e, n_g)
-      const Real dn = dt * k * ue(i, j, 0) * ug(i, j, 0);
-      ug(i, j, 0) -= dn;
-      ui(i, j, 0) += dn;
-      ue(i, j, 0) += dn;
+      const Real dn = dt * k * ue(i, j, de) * ug(i, j, dg);
+      ug(i, j, dg) -= dn;
+      ui(i, j, di) += dn;
+      ue(i, j, de) += dn;
     });
   });
 }

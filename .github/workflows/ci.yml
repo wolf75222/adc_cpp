@@ -56,7 +56,8 @@ jobs:
         # fonction flux), test_dsl_brick (brique satisfaisant HyperbolicModel == Euler/ExB),
         # test_dsl_source (source == PotentialForce), test_dsl_compose (CompositeModel genere ==
         # ecrit main), test_dsl_jit (formules -> .hpp -> g++ -> residu Rusanov identique a Euler),
-        # test_dsl_coupled (euler_poisson JIT = bloc COUPLE : elliptic_rhs cable au Poisson + source).
+        # test_dsl_coupled (euler_poisson JIT = bloc COUPLE : elliptic_rhs cable au Poisson + source),
+        # test_dsl_roles (la brique generee declare ses VariableRole ; index_of(role) resout par sens).
         run: |
           pip install --upgrade pip numpy
           cmake -B build-py -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_PYTHON=ON -DADC_USE_EIGEN=OFF
@@ -80,6 +81,7 @@ jobs:
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_magnetic_field.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_aux_naux.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_jit_bz.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_roles.py
 
   mpi:
     name: ubuntu-latest / MPI
