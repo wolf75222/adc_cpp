@@ -17,9 +17,12 @@ code source (`for_each_cell`, `assemble_rhs`, les briques) cible donc CPU et GPU
 A LA COMPILATION ; on n'ecrit AUCUN kernel CUDA a la main. Dans les sorties ci-dessous, `exec=Cuda` est
 simplement le backend Kokkos actif ; les memes .cpp passent en `exec=Serial`/`OpenMP` sur CPU (c'est ce
 que verifie la CI MPI cote hote). `nvcc_wrapper` n'est que le compilateur exige par le backend Cuda de
-Kokkos. SEULE dependance CUDA brute restante : l'allocateur unifie (`cudaMallocManaged` dans
-`core/allocator.hpp`, sous `__CUDACC__`) et la macro `ADC_HD` (= `__host__ __device__`) ; tous deux
-remplacables par du Kokkos pur (`Kokkos::SharedSpace`, `KOKKOS_FUNCTION`) si l'on veut zero CUDA.
+Kokkos. Le coeur est desormais **100% Kokkos** : l'allocateur unifie utilise
+`Kokkos::kokkos_malloc<Kokkos::SharedSpace>` + `Kokkos::fence` (et non plus `cudaMallocManaged` /
+`cudaDeviceSynchronize`), et `ADC_HD` delegue a `KOKKOS_FUNCTION`. Plus AUCUNE API CUDA ecrite a la
+main ; seul subsiste un repli `__host__ __device__` dans la branche HORS Kokkos de `ADC_HD` (inerte
+chez nous). `SharedSpace` etant un alias portable (`CudaUVMSpace` / `HIPManagedSpace` /
+`SYCLSharedUSMSpace` / `HostSpace`), le meme coeur ciblerait aussi AMD/Intel via les backends Kokkos.
 
 ## Atout de conception : le seam ne change pas les sites d'appel
 

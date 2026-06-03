@@ -5,8 +5,9 @@
 
 // Allocateur du stockage Fab2D, selectionnable a la compilation.
 //
-//   - CUDA (ADC_HAS_KOKKOS + __CUDACC__) : memoire UNIFIEE (cudaMallocManaged),
-//     accessible de facon coherente depuis l'hote ET le device. Sur GH200
+//   - Kokkos (ADC_HAS_KOKKOS) : memoire UNIFIEE PORTABLE via Kokkos::SharedSpace (alias
+//     CudaUVMSpace / HIPManagedSpace / SYCLSharedUSMSpace / HostSpace selon le backend ; AUCUNE
+//     API CUDA ecrite a la main), accessible de facon coherente depuis l'hote ET le device. Sur GH200
 //     (Grace+Hopper, NVLink-C2C) c'est materiellement coherent : un meme buffer
 //     sert au code hote (operator(), boucles) ET aux kernels device lances par
 //     for_each_cell, sans deep_copy ni migration. Et std::vector conserve sa
@@ -15,28 +16,28 @@
 //     corrects.
 //   - sinon : std::allocator (hote). Le build CPU est byte-identique a avant.
 //
-// ARENA (pool memoire) : un cudaMallocManaged par petit Fab temporaire est lent
+// ARENA (pool memoire) : un kokkos_malloc<SharedSpace> par petit Fab temporaire est lent
 // (synchronisation, mise en place de la table de pages). Les etages d'integration
 // (SSPRK) et les niveaux de la multigrille allouent/liberent en boucle des Fabs de
 // MEMES tailles. ManagedArena est un cache : a la liberation on RECYCLE le bloc
-// (free-list par taille en octets) au lieu de le rendre au pilote ; a l'allocation
+// (free-list par taille en octets) au lieu de le rendre tout de suite ; a l'allocation
 // on reutilise un bloc libre de la meme taille s'il existe. Apres un rodage (les
 // premieres tailles distinctes), les pas suivants ne font plus aucun
-// cudaMallocManaged. C'est l'Arena d'AMReX / l'allocateur a cache de PyTorch. La
+// kokkos_malloc. C'est l'Arena d'AMReX / l'allocateur a cache de PyTorch. La
 // semantique valeur est intacte : chaque vecteur possede un bloc distinct ; le pool
 // est un singleton partage, donc l'allocateur reste sans etat (stateless).
 
 namespace adc {
 struct ArenaStats {
-  long hits = 0;       // allocations servies par le pool (pas de cudaMallocManaged)
-  long misses = 0;     // allocations ayant declenche un cudaMallocManaged
-  long fences = 0;     // barrieres device en lot (recyclage des blocs en attente)
-  std::size_t reserved_bytes = 0;  // total managee jamais rendue au pilote
+  long hits = 0;       // allocations servies par le pool (pas de kokkos_malloc)
+  long misses = 0;     // allocations ayant declenche un kokkos_malloc<SharedSpace>
+  long fences = 0;     // barrieres Kokkos::fence en lot (recyclage des blocs en attente)
+  std::size_t reserved_bytes = 0;  // total managee detenu par le pool
 };
 }  // namespace adc
 
-#if defined(ADC_HAS_KOKKOS) && defined(__CUDACC__)
-#include <cuda_runtime.h>
+#if defined(ADC_HAS_KOKKOS)
+#include <Kokkos_Core.hpp>
 
 #include <mutex>
 #include <new>
@@ -45,15 +46,18 @@ struct ArenaStats {
 
 namespace adc {
 
-// Cache d'allocations en memoire unifiee, free-list par taille (octets).
+static_assert(Kokkos::has_shared_space,
+              "adc : le backend Kokkos doit fournir SharedSpace (memoire unifiee) pour le Fab "
+              "device ; activer un backend Cuda/HIP/SYCL (ou un backend hote, ou SharedSpace est HostSpace)");
+
+// Cache d'allocations en memoire unifiee (Kokkos::SharedSpace), free-list par taille (octets).
 //
-// SECURITE async : cudaFree synchronise implicitement le device, ce qui protegeait
-// la destruction d'un Fab temporaire dont un kernel etait encore en vol. Le pool ne
-// faisant pas de cudaFree, on reproduit cette barriere mais EN LOT : un bloc libere
-// va dans `pending_` (pas encore reutilisable) ; quand une allocation manque de bloc
-// pret, un seul cudaDeviceSynchronize draine le device et bascule TOUS les pending
-// vers `ready_`. Un bloc de `ready_` a donc forcement vu sa derniere utilisation
-// device terminee avant que l'hote (value-init du vector) ne le reecrive.
+// SECURITE async : un kernel peut encore lire/ecrire un Fab au moment de sa destruction. Avant on
+// s'appuyait sur la synchro implicite de cudaFree ; ici on reproduit cette barriere mais EN LOT et
+// PORTABLE (Kokkos::fence) : un bloc libere va dans `pending_` (pas encore reutilisable) ; quand une
+// allocation manque de bloc pret, un seul Kokkos::fence() draine le device et bascule TOUS les
+// pending vers `ready_`. Un bloc de `ready_` a donc forcement vu sa derniere utilisation device
+// terminee avant que l'hote (value-init du vector) ne le reecrive.
 class ManagedArena {
  public:
   static ManagedArena& instance() {
@@ -64,9 +68,12 @@ class ManagedArena {
   void* allocate(std::size_t bytes) {
     if (bytes == 0) return nullptr;
     std::lock_guard<std::mutex> lk(m_);
+    std::call_once(hook_once_, [] {  // rendre les blocs a Kokkos::finalize (sinon allocation "fuitee")
+      Kokkos::push_finalize_hook([] { ManagedArena::instance().release_all(); });
+    });
     if (void* p = pop_ready(bytes)) return p;
     if (pending_count_ > 0) {
-      cudaDeviceSynchronize();  // barriere en lot (equivaut au sync de cudaFree)
+      Kokkos::fence();  // barriere en lot, portable (draine les kernels en vol ; ancien cudaDeviceSynchronize)
       ++fences_;
       for (auto& kv : pending_) {
         auto& r = ready_[kv.first];
@@ -76,20 +83,34 @@ class ManagedArena {
       pending_count_ = 0;
       if (void* p = pop_ready(bytes)) return p;
     }
-    void* p = nullptr;
-    if (cudaMallocManaged(&p, bytes) != cudaSuccess) throw std::bad_alloc();
+    void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>("adc_fab", bytes);  // memoire unifiee portable
+    if (!p) throw std::bad_alloc();
     ++misses_;
     reserved_ += bytes;
     return p;
   }
 
-  // Bloc libere : en attente (pas reutilisable avant la prochaine barriere en lot).
-  // Aucun cudaFree (le pool vit jusqu'a la fin du process ; l'OS reclame a la sortie).
+  // Bloc libere : en attente (pas reutilisable avant la prochaine barriere en lot). Pas de
+  // kokkos_free immediat (le pool vit jusqu'a la fin du process ; release_all rend tout a finalize).
   void deallocate(void* p, std::size_t bytes) {
     if (!p) return;
     std::lock_guard<std::mutex> lk(m_);
     pending_[bytes].push_back(p);
     ++pending_count_;
+  }
+
+  // Hook de Kokkos::finalize : libere tous les blocs (ready + pending) via kokkos_free AVANT l'arret
+  // des espaces memoire, pour ne laisser aucune allocation Kokkos non rendue (le pool ne free jamais
+  // en cours de route). Appele une seule fois, hors de toute allocation concurrente.
+  void release_all() {
+    std::lock_guard<std::mutex> lk(m_);
+    for (auto& kv : ready_)
+      for (void* p : kv.second) Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
+    for (auto& kv : pending_)
+      for (void* p : kv.second) Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
+    ready_.clear();
+    pending_.clear();
+    pending_count_ = 0;
   }
 
   ArenaStats stats() {
@@ -110,6 +131,7 @@ class ManagedArena {
   }
 
   std::mutex m_;
+  std::once_flag hook_once_;  // enregistrement unique du finalize hook Kokkos
   std::unordered_map<std::size_t, std::vector<void*>> ready_;    // surs, reutilisables
   std::unordered_map<std::size_t, std::vector<void*>> pending_;  // liberes, a draîner
   long pending_count_ = 0;

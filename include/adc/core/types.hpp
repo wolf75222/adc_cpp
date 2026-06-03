@@ -5,11 +5,16 @@
 // (partage avec advection_cpp / euler_cpp / poisson_cpp) se fera quand le
 // maillage distribue arrivera, pas avant.
 
-// ADC_HD : annotation host+device pour les accesseurs appeles dans les kernels
-// GPU (CUDA/HIP). Vide hors compilateur device -> aucun effet sur le build CPU.
-// C'est le pendant de AMREX_GPU_HOST_DEVICE / KOKKOS_FUNCTION : le meme code
-// (Array4, indexation) se compile pour l'hote et le device.
-#if defined(__CUDACC__) || defined(__HIPCC__)
+// ADC_HD : annotation host+device pour les accesseurs appeles dans les kernels.
+// Sous Kokkos on delegue a KOKKOS_FUNCTION (le pendant PORTABLE de __host__ __device__ :
+// Cuda, HIP, SYCL... le meme code source vise CPU et GPU selon le backend) -> aucune syntaxe
+// CUDA ecrite a la main. KOKKOS_FUNCTION (et non KOKKOS_INLINE_FUNCTION) reproduit exactement
+// l'ancien comportement (pas de 'inline' ajoute, pour les sites ecrits 'ADC_HD inline ...').
+// Hors Kokkos : repli compilateur device, sinon vide (build CPU inchange).
+#if defined(ADC_HAS_KOKKOS)
+#include <Kokkos_Macros.hpp>
+#define ADC_HD KOKKOS_FUNCTION
+#elif defined(__CUDACC__) || defined(__HIPCC__)
 #define ADC_HD __host__ __device__
 #else
 #define ADC_HD
