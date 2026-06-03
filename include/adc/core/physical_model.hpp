@@ -69,7 +69,7 @@ concept HasPrimitiveVars =
 // et de l'elliptique. PAS de source ni de second membre elliptique ici (ce sont d'autres briques de
 // CompositeModel). conservative_vars() / primitive_vars() sont OBLIGATOIRES (contrat, pas un extra).
 template <class M>
-concept HyperbolicModel =
+concept HyperbolicPhysicalModel =
     requires(const M m, const typename M::State u, const typename M::Prim p, const Aux a, int dir) {
       typename M::State;
       typename M::Prim;
@@ -78,8 +78,12 @@ concept HyperbolicModel =
       { m.max_wave_speed(u, a, dir) } -> std::convertible_to<Real>;
       { m.to_primitive(u) } -> std::same_as<typename M::Prim>;
       { m.to_conservative(p) } -> std::same_as<typename M::State>;
-      { M::conservative_vars() } -> std::same_as<Variables>;
-      { M::primitive_vars() } -> std::same_as<Variables>;
+      { M::conservative_vars() } -> std::same_as<VariableSet>;
+      { M::primitive_vars() } -> std::same_as<VariableSet>;
     };
+
+/// Ancien nom (compat) : HyperbolicPhysicalModel etait `HyperbolicModel`.
+template <class M>
+concept HyperbolicModel = HyperbolicPhysicalModel<M>;
 
 }  // namespace adc

@@ -36,7 +36,7 @@ struct Variable {
 /// Jeu de variables d'un modele : nature (cons/prim), noms, taille, et roles (optionnels, paralleles
 /// a `names` ; absents -> Custom). Les appels existants `{kind, names, size}` restent valides (roles
 /// vides). index_of(role) donne l'indice de la composante portant ce role (-1 si absent).
-struct Variables {
+struct VariableSet {
   VariableKind kind;
   std::vector<std::string> names;
   int size;
@@ -53,5 +53,8 @@ struct Variables {
     return {names[i], i < static_cast<int>(roles.size()) ? roles[i] : VariableRole::Custom, i};
   }
 };
+
+/// Ancien nom (compat) : VariableSet etait `Variables`. Conserve pour le code existant et genere.
+using Variables = VariableSet;
 
 }  // namespace adc

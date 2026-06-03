@@ -120,12 +120,12 @@ struct Euler {
   }
 
   /// Descripteur des variables (contrat du modele hyperbolique ; metadonnee hote d'introspection).
-  static Variables conservative_vars() {
+  static VariableSet conservative_vars() {
     return {VariableKind::Conservative, {"rho", "rho_u", "rho_v", "E"}, 4,
             {VariableRole::Density, VariableRole::MomentumX, VariableRole::MomentumY,
              VariableRole::Energy}};
   }
-  static Variables primitive_vars() {
+  static VariableSet primitive_vars() {
     return {VariableKind::Primitive, {"rho", "u", "v", "p"}, 4,
             {VariableRole::Density, VariableRole::VelocityX, VariableRole::VelocityY,
              VariableRole::Pressure}};

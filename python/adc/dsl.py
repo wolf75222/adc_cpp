@@ -451,9 +451,9 @@ class HyperbolicModel:
         S += ["    U[%d] = %s;" % (i, c) for i, c in enumerate(ccpps)]
         S += ["    return U;", "  }", ""]
 
-        S.append('  static adc::Variables conservative_vars() { return {adc::VariableKind::Conservative, {%s}, %d}; }'
+        S.append('  static adc::VariableSet conservative_vars() { return {adc::VariableKind::Conservative, {%s}, %d}; }'
                  % (cnames, nc))
-        S.append('  static adc::Variables primitive_vars() { return {adc::VariableKind::Primitive, {%s}, %d}; }'
+        S.append('  static adc::VariableSet primitive_vars() { return {adc::VariableKind::Primitive, {%s}, %d}; }'
                  % (pnames, npr))
         S += ["};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"

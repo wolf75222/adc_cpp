@@ -57,10 +57,10 @@ struct ExBVelocity {
   using Prim = StateVec<1>;
   ADC_HD Prim to_primitive(const StateVec<1>& u) const { return u; }
   ADC_HD StateVec<1> to_conservative(const Prim& p) const { return p; }
-  static Variables conservative_vars() {
+  static VariableSet conservative_vars() {
     return {VariableKind::Conservative, {"n"}, 1, {VariableRole::Density}};
   }
-  static Variables primitive_vars() {
+  static VariableSet primitive_vars() {
     return {VariableKind::Primitive, {"n"}, 1, {VariableRole::Density}};
   }
 };
@@ -126,11 +126,11 @@ struct IsothermalFlux {
     smin = vn - c;
     smax = vn + c;
   }
-  static Variables conservative_vars() {
+  static VariableSet conservative_vars() {
     return {VariableKind::Conservative, {"rho", "rho_u", "rho_v"}, 3,
             {VariableRole::Density, VariableRole::MomentumX, VariableRole::MomentumY}};
   }
-  static Variables primitive_vars() {
+  static VariableSet primitive_vars() {
     return {VariableKind::Primitive, {"rho", "u", "v"}, 3,
             {VariableRole::Density, VariableRole::VelocityX, VariableRole::VelocityY}};
   }
@@ -219,7 +219,7 @@ struct GravityCoupling {
 /// l'hyperbolique les fournit (necessaire au flux HLLC).
 template <class Hyperbolic, class Source, class Elliptic>
 struct CompositeModel {
-  static_assert(HyperbolicModel<Hyperbolic>,
+  static_assert(HyperbolicPhysicalModel<Hyperbolic>,
                 "CompositeModel : la 1ere brique doit etre un modele HYPERBOLIQUE (Vars + "
                 "conversions cons<->prim + flux + max_wave_speed), cf. concept HyperbolicModel");
   using State = StateVec<Hyperbolic::n_vars>;
@@ -239,8 +239,8 @@ struct CompositeModel {
   ADC_HD Real elliptic_rhs(const State& u) const { return ell.rhs(u); }
   ADC_HD Prim to_primitive(const State& u) const { return hyp.to_primitive(u); }
   ADC_HD State to_conservative(const Prim& p) const { return hyp.to_conservative(p); }
-  static Variables conservative_vars() { return Hyperbolic::conservative_vars(); }
-  static Variables primitive_vars() { return Hyperbolic::primitive_vars(); }
+  static VariableSet conservative_vars() { return Hyperbolic::conservative_vars(); }
+  static VariableSet primitive_vars() { return Hyperbolic::primitive_vars(); }
 
   ADC_HD Real pressure(const State& u) const
     requires requires(const Hyperbolic h, const State s) { h.pressure(s); }

@@ -8,7 +8,7 @@
 using R = adc::VariableRole;
 
 int main() {
-  const adc::Variables c = adc::Euler::conservative_vars();
+  const adc::VariableSet c = adc::Euler::conservative_vars();
   if (c.index_of(R::Density) != 0 || c.index_of(R::MomentumX) != 1 ||
       c.index_of(R::MomentumY) != 2 || c.index_of(R::Energy) != 3) {
     std::printf("FAIL : roles conservatifs Euler\n");
@@ -18,7 +18,7 @@ int main() {
     std::printf("FAIL : Pressure devrait etre absente des conservatives\n");
     return 1;
   }
-  const adc::Variables p = adc::Euler::primitive_vars();
+  const adc::VariableSet p = adc::Euler::primitive_vars();
   if (p.index_of(R::Pressure) != 3 || p.index_of(R::VelocityX) != 1) {
     std::printf("FAIL : roles primitifs Euler\n");
     return 1;
