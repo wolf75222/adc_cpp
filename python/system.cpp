@@ -272,7 +272,19 @@ struct System::Impl {
                                  "(4 variables + pression) ; ce transport -> 'rusanov'");
       }
     }
-    throw std::runtime_error("System : flux Riemann inconnu '" + riem + "' (rusanov|hllc)");
+    if (riem == "roe") {
+      if constexpr (Model::n_vars == 4 &&
+                    requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+        if (lim == "none") return build<NoSlope, RoeFlux>(m, imex, recon_prim);
+        if (lim == "minmod") return build<Minmod, RoeFlux>(m, imex, recon_prim);
+        if (lim == "vanleer") return build<VanLeer, RoeFlux>(m, imex, recon_prim);
+        throw std::runtime_error("System : limiter inconnu '" + lim + "'");
+      } else {
+        throw std::runtime_error("System : flux 'roe' exige un transport compressible "
+                                 "(4 variables + pression) ; ce transport -> 'rusanov'");
+      }
+    }
+    throw std::runtime_error("System : flux Riemann inconnu '" + riem + "' (rusanov|hllc|roe)");
   }
 
   template <class Model>

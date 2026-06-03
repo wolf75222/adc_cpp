@@ -47,6 +47,12 @@ struct ExBVelocity {
     const Real d = velocity(a, dir);
     return d < 0 ? -d : d;
   }
+  /// Spectre : une onde, la vitesse de derive dans la direction dir.
+  ADC_HD StateVec<1> eigenvalues(const StateVec<1>&, const Aux& a, int dir) const {
+    StateVec<1> e{};
+    e[0] = velocity(a, dir);
+    return e;
+  }
   // Scalaire : variables primitives = conservatives (densite transportee).
   using Prim = StateVec<1>;
   ADC_HD Prim to_primitive(const StateVec<1>& u) const { return u; }
@@ -99,6 +105,17 @@ struct IsothermalFlux {
     const Real vn = (dir == 0 ? p[1] : p[2]);
     const Real a = vn < 0 ? -vn : vn;
     return a + std::sqrt(cs2);
+  }
+  /// Spectre complet : (v_dir - c, v_dir, v_dir + c), c = sqrt(cs2).
+  ADC_HD StateVec<3> eigenvalues(const StateVec<3>& u, const Aux&, int dir) const {
+    const Prim p = to_primitive(u);
+    const Real vn = (dir == 0 ? p[1] : p[2]);
+    const Real c = std::sqrt(cs2);
+    StateVec<3> e{};
+    e[0] = vn - c;
+    e[1] = vn;
+    e[2] = vn + c;
+    return e;
   }
   /// Vitesses signees (HLL/HLLC) : v_dir -+ c_s.
   ADC_HD void wave_speeds(const StateVec<3>& u, const Aux&, int dir, Real& smin,

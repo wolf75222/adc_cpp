@@ -97,6 +97,20 @@ struct Euler {
     return f;
   }
 
+  /// Spectre complet dans la direction dir : (v_dir - c, v_dir, v_dir, v_dir + c). Pendant vecteur
+  /// de wave_speeds (qui ne donne que les extremes signes) ; utile aux schemas a spectre (Roe).
+  ADC_HD State eigenvalues(const State& u, const Aux&, int dir) const {
+    const Prim p = to_primitive(u);
+    const Real vn = (dir == 0 ? p[1] : p[2]);
+    const Real c = std::sqrt(gamma * p[3] / p[0]);
+    State e{};
+    e[0] = vn - c;
+    e[1] = vn;
+    e[2] = vn;
+    e[3] = vn + c;
+    return e;
+  }
+
   /// Vitesse d'onde maximale |v_dir| + c (estimation Rusanov), calculee en primitif.
   ADC_HD Real max_wave_speed(const State& u, const Aux&, int dir) const {
     const Prim p = to_primitive(u);

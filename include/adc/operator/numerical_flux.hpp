@@ -127,4 +127,67 @@ struct HLLCFlux {
   }
 };
 
+// Roe (linearisation de Roe + correction d'entropie de Harten sur les ondes acoustiques). Capture
+// nettement contacts et chocs (comme HLLC), mais via la decomposition complete en ondes : pour un
+// etat supersonique, F* = flux amont EXACT (propriete de Roe : F_R - F_L = A_roe (U_R - U_L)).
+// Euler 2D (n_vars == 4) : requiert m.pressure. gamma-1 est deduit de l'etat (gaz parfait), donc
+// aucun membre gamma n'est requis du modele. Indices normal/tangentiel selon dir.
+struct RoeFlux {
+  template <class Model>
+  ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
+                                          const Aux& AL, const typename Model::State& UR,
+                                          const Aux& AR, int dir) const {
+    const int in = (dir == 0) ? 1 : 2;  // qte de mvt normale
+    const int it = (dir == 0) ? 2 : 1;  // tangentielle
+    const Real rL = UL[0], rR = UR[0];
+    const Real unL = UL[in] / rL, unR = UR[in] / rR;
+    const Real utL = UL[it] / rL, utR = UR[it] / rR;
+    const Real pL = m.pressure(UL), pR = m.pressure(UR);
+    const Real HL = (UL[3] + pL) / rL, HR = (UR[3] + pR) / rR;
+
+    // moyenne de Roe (ponderee par sqrt(rho))
+    const Real sqL = std::sqrt(rL), sqR = std::sqrt(rR), den = sqL + sqR;
+    const Real un = (sqL * unL + sqR * unR) / den;
+    const Real ut = (sqL * utL + sqR * utR) / den;
+    const Real H = (sqL * HL + sqR * HR) / den;
+    const Real rho = sqL * sqR;
+    const Real q2 = un * un + ut * ut;
+    // gamma-1 deduit du gaz parfait : p = (gamma-1) (E - 1/2 rho |v|^2)
+    const Real gm1 = pL / (UL[3] - Real(0.5) * rL * (unL * unL + utL * utL));
+    const Real c2 = gm1 * (H - Real(0.5) * q2);
+    const Real c = std::sqrt(c2);
+
+    // sauts et amplitudes d'onde
+    const Real dr = rR - rL, dp = pR - pL, dun = unR - unL, dut = utR - utL;
+    const Real a1 = (dp - rho * c * dun) / (Real(2) * c2);  // onde un - c
+    const Real a2 = dr - dp / c2;                           // entropie, un
+    const Real a3 = rho * dut;                              // cisaillement, un
+    const Real a5 = (dp + rho * c * dun) / (Real(2) * c2);  // onde un + c
+
+    // |valeur propre| avec correction d'entropie de Harten sur les ondes acoustiques (1, 5)
+    const Real eps = Real(0.1) * c;
+    auto absfix = [eps](Real l) {
+      const Real al = l < 0 ? -l : l;
+      return al < eps ? Real(0.5) * (l * l / eps + eps) : al;
+    };
+    const Real al1 = absfix(un - c), al2 = (un < 0 ? -un : un), al5 = absfix(un + c);
+
+    // dissipation Sum |lambda_k| a_k r_k, base (rho, mom_n, mom_t, E)
+    const Real d_rho = al1 * a1 + al2 * a2 + al5 * a5;
+    const Real d_mn = al1 * a1 * (un - c) + al2 * a2 * un + al5 * a5 * (un + c);
+    const Real d_mt = al1 * a1 * ut + al2 * (a2 * ut + a3) + al5 * a5 * ut;
+    const Real d_E = al1 * a1 * (H - un * c) + al2 * (a2 * Real(0.5) * q2 + a3 * ut) +
+                     al5 * a5 * (H + un * c);
+
+    const auto FL = m.flux(UL, AL, dir);
+    const auto FR = m.flux(UR, AR, dir);
+    typename Model::State F;
+    F[0] = Real(0.5) * (FL[0] + FR[0]) - Real(0.5) * d_rho;
+    F[in] = Real(0.5) * (FL[in] + FR[in]) - Real(0.5) * d_mn;
+    F[it] = Real(0.5) * (FL[it] + FR[it]) - Real(0.5) * d_mt;
+    F[3] = Real(0.5) * (FL[3] + FR[3]) - Real(0.5) * d_E;
+    return F;
+  }
+};
+
 }  // namespace adc
