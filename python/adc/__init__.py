@@ -34,8 +34,8 @@ __all__ = [
     "NoSource", "PotentialForce", "GravityForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
     "Spatial", "Explicit", "IMEX", "Implicit", "integrate",
-    "elliptic", "div_eps_grad", "charge_density", "electric_field_from_potential",
-    "EllipticSolver", "EllipticModel",
+    "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
+    "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
     "PythonFlux", "dsl",
 ]
@@ -179,9 +179,16 @@ class DivEpsGrad:
         self.epsilon = float(epsilon)
 
 
-class ChargeDensitySource:
-    """Second membre f = densite de charge du systeme = somme_s q_s n_s. Les charges q_s vivent sur
-    les blocs (brique elliptique de chaque espece) ; ce second membre les somme."""
+class CompositeRhs:
+    """Second membre de systeme f = somme_s elliptic_rhs_s(u_s) : la SOMME des briques elliptiques
+    portees par les blocs. Chaque bloc choisit sa brique (charge q n, fond alpha (n-n0), couplage
+    gravite sign 4piG (rho-rho0)) via Model(elliptic=...) ; ce second membre les assemble. C'est le
+    second membre GENERIQUE de l'EPM : il ne suppose AUCUNE forme particuliere des contributions."""
+
+
+class ChargeDensitySource(CompositeRhs):
+    """Cas usuel du second membre composite : tous les blocs portent une densite de charge, donc
+    f = somme_s q_s n_s. Alias historique de CompositeRhs (le calcul reste la somme des briques)."""
 
 
 class ElectricFieldFromPotential:
@@ -206,14 +213,21 @@ def charge_density():
     return ChargeDensitySource()
 
 
+def composite_rhs():
+    """Second membre generique f = somme_s elliptic_rhs_s(u_s) (somme des briques par bloc)."""
+    return CompositeRhs()
+
+
 def electric_field_from_potential():
     return ElectricFieldFromPotential()
 
 
 def elliptic(unknown="phi", operator=None, rhs=None, output=None):
     """Compose un EPM. Poisson = elliptic(operator=div_eps_grad(), rhs=charge_density(),
-    output=electric_field_from_potential())."""
-    return EllipticModel(unknown, operator or DivEpsGrad(), rhs or ChargeDensitySource(),
+    output=electric_field_from_potential()). Le second membre peut etre composite_rhs() (somme
+    GENERIQUE des briques elliptiques par bloc : charge, fond, gravite) ; charge_density() en est
+    le cas usuel (alias)."""
+    return EllipticModel(unknown, operator or DivEpsGrad(), rhs or CompositeRhs(),
                          output or ElectricFieldFromPotential())
 
 
@@ -338,18 +352,26 @@ class System:
     def add_elliptic_model(self, name, model, solver=None, bc="auto", wall="none",
                            wall_radius=0.0):
         """EPM : configure le modele elliptique de systeme (Poisson en est l'instance courante).
-        model = adc.elliptic(operator=adc.div_eps_grad(eps), rhs=adc.charge_density(),
+        model = adc.elliptic(operator=adc.div_eps_grad(eps), rhs=adc.composite_rhs(),
         output=adc.electric_field_from_potential()). set_poisson(...) reste le raccourci equivalent.
-        Operateur div(eps grad) a eps CONSTANT (eps != 1 supporte : eps lap phi = f) + densite de
-        charge. eps(x) variable, diffusion / projection demanderaient un solveur a coefficients
-        variables (raffinement non encore disponible)."""
+
+        Operateur : div(eps grad) a eps CONSTANT (eps != 1 supporte : eps lap phi = f) ; eps(x)
+        variable se branche via set_epsilon_field. Second membre : composite_rhs() = somme GENERIQUE
+        des briques elliptiques portees par les blocs (charge q n, fond alpha (n-n0), couplage gravite
+        sign 4piG (rho-rho0)) ; charge_density() en est le cas usuel. Diffusion / projection (autre
+        operateur) demanderaient un solveur a coefficients variables (raffinement non disponible)."""
         if not isinstance(model.operator, DivEpsGrad):
             raise NotImplementedError("add_elliptic_model : seul l'operateur div_eps_grad (Poisson) "
                                       "est supporte ; diffusion / projection -> raffinement (solveur)")
-        if not isinstance(model.rhs, ChargeDensitySource):
-            raise NotImplementedError("add_elliptic_model : seul rhs=charge_density est supporte")
+        if not isinstance(model.rhs, CompositeRhs):
+            raise NotImplementedError("add_elliptic_model : rhs doit etre composite_rhs() (somme des "
+                                      "briques par bloc) ou charge_density() (son cas usuel)")
         kind = solver.kind if solver is not None else "geometric_mg"
-        self.set_poisson(rhs="charge_density", solver=kind, bc=bc, wall=wall, wall_radius=wall_radius,
+        # Token honnete : "composite" pour un second membre generique, "charge_density" (alias,
+        # bit-identique) quand tous les blocs portent une densite de charge. Les deux empruntent le
+        # MEME chemin numerique cote C++ (somme des briques elliptiques de chaque bloc).
+        rhs_tok = "charge_density" if type(model.rhs) is ChargeDensitySource else "composite"
+        self.set_poisson(rhs=rhs_tok, solver=kind, bc=bc, wall=wall, wall_radius=wall_radius,
                          epsilon=model.operator.epsilon)
 
     def add_coupling(self, coupling):

@@ -287,9 +287,15 @@ struct System::Impl {
   }
   void ensure_elliptic() {
     if (ell_) return;
-    if (p_rhs != "charge_density")
+    // Le second membre de systeme est TOUJOURS f = Sum_s elliptic_rhs_s(u_s), assemble par
+    // solve_fields a partir de la brique elliptique de CHAQUE bloc (charge q n, fond alpha (n-n0),
+    // couplage gravite 4piG (rho-rho0)). Le token n'est donc PAS un mode de calcul mais une ETIQUETTE
+    // de ce second membre compose. "composite" nomme honnetement ce comportement ; "charge_density"
+    // reste l'alias historique (defaut, bit-identique) car le cas usuel est un bloc de charge.
+    if (p_rhs != "charge_density" && p_rhs != "composite")
       throw std::runtime_error("System::set_poisson : rhs '" + p_rhs +
-                               "' inconnu (seul 'charge_density')");
+                               "' inconnu (charge_density|composite ; le second membre = somme des "
+                               "briques elliptiques par bloc)");
     const BCRec pbc = poisson_bc();
     std::function<bool(Real, Real)> active = wall_active();
     if (p_solver == "fft") {
