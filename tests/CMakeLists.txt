@@ -119,4 +119,17 @@ if(ADC_HAS_MPI)
   adc_add_mpi_test(test_mpi_redistribute 4)
   adc_add_mpi_test(test_mpi_coupler_inject 4)
   adc_add_mpi_test(test_mpi_fft_distributed 4)
+
+  # --- parite multi-box du chemin compile add_compiled_model (make_block, foncteurs nommes) ---
+  # Le residu des fermetures de make_block doit etre invariant au decoupage en boites ET au nombre de
+  # rangs (halos intra-rang multi-box + cross-rang MPI). Header-only (adc::adc tire MPI::MPI_CXX), donc
+  # CI-landable sans GPU ; la propriete est independante du backend. Un binaire, trois entrees ctest :
+  # np=1 couvre le chemin multi-box mono-rang, np=2/4 le chemin MPI cross-rang. Resultat bit-identique.
+  add_executable(test_mpi_mbox_parity test_mpi_mbox_parity.cpp)
+  target_link_libraries(test_mpi_mbox_parity PRIVATE adc::adc)
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_mbox_parity_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_mbox_parity> ${MPIEXEC_POSTFLAGS})
+  endforeach()
 endif()

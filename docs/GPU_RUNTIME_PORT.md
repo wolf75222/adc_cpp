@@ -107,9 +107,25 @@ pas une reecriture des noyaux de calcul.
    dlopen sans partage d'objet C++ (ABI propre) ; ce chemin .so ne porte ni AMR ni MPI.
    RESTE (non fait) : la variante ZERO-COPIE NATIVE (`add_compiled_model` / `dsl_block.hpp`, modele
    compile dans le meme binaire que le System, sans marshaling) est validee BIT-IDENTIQUE a
-   `add_block` sur CPU/Serial (`test_compiled_model_parity`), mais sur GPU (backend Cuda) elle BUTE
-   sur une limite nvcc : une lambda etendue `__host__ __device__` instanciee dans une TU EXTERNE
-   (le .so genere) n'est pas acceptee. La parite zero-copie sur device n'est donc PAS encore acquise.
+   `add_block` sur CPU/Serial (`test_compiled_model_parity`), mais sur GPU (backend Cuda) la variante
+   a LAMBDAS ETENDUES butait sur une limite nvcc : une lambda etendue `__host__ __device__` instanciee
+   dans une TU EXTERNE n'etait pas acceptee. Cette limite a ete levee par le chemin a FONCTEURS NOMMES
+   (cf. point 9).
+9. **Parite multi-box MPI du chemin compile a foncteurs nommes.** ✅ FAIT (verifie GH200).
+   Le residu des fermetures de `make_block` (`block_builder.hpp` ; la machinerie exacte
+   d'`add_compiled_model`, instanciee depuis une UNITE DE TRADUCTION EXTERNE via des foncteurs NOMMES,
+   le chemin device-clean qui contourne la limite nvcc des lambdas etendues du point 8) doit etre
+   invariant au decoupage du domaine en boites ET au nombre de rangs. Le test compare une decomposition
+   16-boites distribuee par SFC a une reference mono-boite : `max|R|` BIT-IDENTIQUE (`dmax = 0`), L2 a
+   l'arrondi pres de l'ordre de sommation. Porte en test de regression header-only `tests/test_mpi_mbox_parity.cpp`
+   (job CI MPI, np=1/2/4, Kokkos Serial sur CPU) ET execute sur GH200 (Kokkos Cuda) : le MEME source,
+   compile par nvcc_wrapper et lance par `srun -n {1,2,4} --gpus-per-task=1` (OpenMPI 4.1.7 CUDA-aware,
+   noeud armgpu), donne `dmax = 0.00e+00` aux trois comptes de rangs, `maxK`/`max1`/`L2` identiques au
+   run CPU. Un `Kokkos::fence()` (garde `ADC_HAS_KOKKOS`) precede la lecture HOTE du residu (kernels
+   `for_each_cell` async sous Cuda). Ce que cela valide HONNETEMENT sur device : le chemin
+   `make_block`/`add_compiled_model` (foncteurs nommes) + `fill_ghosts` multi-box intra-rang ET
+   cross-rang MPI multi-GPU, pour le residu d'un pas. Ce que cela ne valide PAS : l'integration AMR
+   dans le meme run, ni la perf full-device (le test lit le residu cote hote, donc fence par pas).
 
 ## Strategie suggeree
 
