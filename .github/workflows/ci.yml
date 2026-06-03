@@ -78,6 +78,7 @@ jobs:
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_recon.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_poisson_eps.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_magnetic_field.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_aux_naux.py
 
   mpi:
     name: ubuntu-latest / MPI

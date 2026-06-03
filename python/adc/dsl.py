@@ -21,6 +21,27 @@ chemin de production (qui reste les briques C++ compilees, GPU/MPI).
 import numpy as np
 
 
+# --- Canal aux : disposition canonique --------------------------------------
+# Les champs auxiliaires nommes (aux('...')) sont des COMPOSANTES a indice FIXE du canal aux
+# (cf. adc::Aux / kAuxBaseComps cote C++). phi/grad_x/grad_y = contrat de BASE (3 composantes) ;
+# les suivants (B_z, ...) ELARGISSENT le canal -> la brique generee declare alors n_aux pour que
+# le systeme dimensionne et peuple le canal partage (cf. CompositeModel::n_aux, ensure_aux_width).
+AUX_CANONICAL = {"phi": 0, "grad_x": 1, "grad_y": 2, "B_z": 3}
+AUX_BASE_COMPS = 3
+
+
+def aux_n_aux(aux_names):
+    """Largeur du canal aux requise par ces champs : max(3, plus grand indice canonique + 1).
+    Leve ValueError sur un nom inconnu (un champ aux DOIT etre une composante de adc::Aux)."""
+    w = AUX_BASE_COMPS
+    for nm in aux_names:
+        if nm not in AUX_CANONICAL:
+            raise ValueError("champ aux '%s' inconnu : attendus %s (composantes de adc::Aux)"
+                             % (nm, sorted(AUX_CANONICAL)))
+        w = max(w, AUX_CANONICAL[nm] + 1)
+    return w
+
+
 # --- Arbre d'expressions ----------------------------------------------------
 class Expr:
     """Noeud d'expression symbolique. Les operateurs construisent l'arbre ; eval(env) l'applique a
@@ -423,6 +444,11 @@ class HyperbolicModel:
             "  using Prim  = adc::StateVec<%d>;" % npr,
             "  using Aux   = adc::Aux;",
             "  static constexpr int n_vars = %d;" % nc,
+        ]
+        # n_aux si une formule (flux / valeurs propres) lit un champ aux supplementaire (B_z...).
+        if aux_n_aux(self.aux_names) > AUX_BASE_COMPS:
+            S.append("  static constexpr int n_aux = %d;" % aux_n_aux(self.aux_names))
+        S += [
             "",
             "  ADC_HD State flux(const State& U, %s, int dir) const {" % aux_param,
         ]
@@ -517,6 +543,7 @@ class HyperbolicModel:
         def aux_locals():
             return ["    const adc::Real %s = a.%s;" % (nm_, nm_) for nm_ in self.aux_names]
 
+        na = aux_n_aux(self.aux_names)  # largeur aux requise (B_z... -> > 3)
         S = [
             "#include <cmath>",  # autosuffisant pour std::sqrt / std::pow
             "// brique de SOURCE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_source)."
@@ -524,9 +551,14 @@ class HyperbolicModel:
             "// apply(U, a) -> terme source S(U, aux) ; noms aux = champs de adc::Aux (grad_x, grad_y).",
             "namespace %s {" % namespace,
             "struct %s {" % nm,
-            "  ADC_HD adc::StateVec<%d> apply(const adc::StateVec<%d>& U, const adc::Aux& a) const {"
-            % (nc, nc),
         ]
+        # Si une formule lit un champ aux SUPPLEMENTAIRE (B_z...), declarer n_aux : CompositeModel le
+        # propage (max sur les briques) et le systeme dimensionne/peuple le canal aux partage. Sans
+        # champ extra -> pas de n_aux emis -> brique strictement identique a l'historique.
+        if na > AUX_BASE_COMPS:
+            S.append("  static constexpr int n_aux = %d;" % na)
+        S.append("  ADC_HD adc::StateVec<%d> apply(const adc::StateVec<%d>& U, const adc::Aux& a) const {"
+                 % (nc, nc))
         S += cons_locals() + prim_locals() + aux_locals()
         # _wrap : une composante peut etre un litteral Python (p.ex. 0.0), promu en Const.
         stl, scpps = self._codegen_exprs([_wrap(e) for e in self._source], cse)
