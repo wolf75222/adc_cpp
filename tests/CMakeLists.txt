@@ -64,6 +64,7 @@ adc_add_test(test_amr_spatial_parity)
 adc_add_test(test_aux_extra)
 adc_add_test(test_aux_coupler_bz)
 adc_add_test(test_aux_system_bz)  # B_z partage multi-blocs (SystemAssembler, aux = max sur les blocs)
+adc_add_test(test_aux_composite)  # CompositeModel propage n_aux depuis ses briques (B_z)
 
 adc_add_test(test_weno_convergence)
 adc_add_test(test_splitting)

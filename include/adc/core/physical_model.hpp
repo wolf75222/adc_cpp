@@ -34,6 +34,20 @@
 
 namespace adc {
 
+// Largeur du canal aux qu'un modele CONSOMME : Model::n_aux s'il le declare (champs auxiliaires
+// supplementaires au-dela de phi/grad : B_z, ...), sinon kAuxBaseComps (= 3, le contrat de base
+// phi/grad_x/grad_y). Pilote le nombre de composantes que load_aux lit et que le systeme doit
+// allouer/peupler. Un modele sans n_aux -> 3 -> strictement identique a l'historique (champs extra
+// de Aux a 0, jamais lus). Vit dans le header CONTRAT (et non l'operateur spatial) pour que
+// CompositeModel puisse propager n_aux sans tirer toute la numerique.
+template <class M>
+constexpr int aux_comps() {
+  if constexpr (requires { M::n_aux; })
+    return M::n_aux;
+  else
+    return kAuxBaseComps;
+}
+
 template <class M>
 concept PhysicalModel =
     requires(const M m, const typename M::State u, const typename M::Aux a,

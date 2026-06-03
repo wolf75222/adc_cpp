@@ -27,6 +27,16 @@ struct CompositeModel {
   using Prim = typename Hyperbolic::Prim;
   using Aux = adc::Aux;
   static constexpr int n_vars = Hyperbolic::n_vars;
+  // Largeur du canal aux du modele compose = MAX des largeurs de ses briques : si une brique (flux
+  // ou source) lit un champ auxiliaire supplementaire (p.ex. une source magnetisee declarant
+  // n_aux=4 pour lire B_z), le compose l'expose au systeme (qui dimensionne alors le canal aux).
+  // Sans brique a champ extra, n_aux = kAuxBaseComps (3) -> strictement identique a l'historique.
+  static constexpr int n_aux = [] {
+    int w = aux_comps<Hyperbolic>();
+    if (aux_comps<Source>() > w) w = aux_comps<Source>();
+    if (aux_comps<Elliptic>() > w) w = aux_comps<Elliptic>();
+    return w;
+  }();
 
   Hyperbolic hyp{};
   Source src{};

@@ -31,18 +31,8 @@
 
 namespace adc {
 
-// Largeur du canal aux qu'un modele CONSOMME : Model::n_aux s'il le declare (champs
-// auxiliaires supplementaires au-dela de phi/grad : B_z, ...), sinon kAuxBaseComps (= 3,
-// le contrat de base phi/grad_x/grad_y). Pilote le nombre de composantes que load_aux lit
-// et que le systeme doit allouer/peupler. Un modele sans n_aux -> 3 -> strictement
-// identique a l'historique (les champs extra de Aux restent a 0, jamais lus).
-template <class M>
-constexpr int aux_comps() {
-  if constexpr (requires { M::n_aux; })
-    return M::n_aux;
-  else
-    return kAuxBaseComps;
-}
+// aux_comps<Model>() (largeur du canal aux d'un modele) vit desormais dans le header contrat
+// adc/core/physical_model.hpp (inclus ci-dessus) pour que CompositeModel puisse le propager.
 
 // Modele DIFFUSIF (optionnel) : fournit une diffusivite scalaire isotrope nu. Le
 // tuteur : "la diffusion, c'est comme un flux de plus". Le flux Fickien F = -nu grad U
