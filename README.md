@@ -4,7 +4,7 @@
 
 **Coeur C++23 d'un solveur AMR / MPI / GPU pour systemes hyperbolique-elliptique couples.**
 
-![Tests](https://img.shields.io/badge/tests-71%20ctests%20C%2B%2B%20%28serie%20%2B%20Kokkos%20Serial%29%20%7C%20%2B21%20MPI%20%7C%2026%20Python-brightgreen)
+![Tests](https://img.shields.io/badge/tests-C%2B%2B%20serie%20%2B%20Kokkos%20%2B%20MPI%20%2B%20Python-brightgreen)
 
 </div>
 
@@ -89,19 +89,11 @@ Un mini-DSL symbolique cote Python decrit un modele en FORMULES et le transforme
 emission de la fonction de flux (`emit_cpp_brick`), de la source et du second membre elliptique,
 elimination de sous-expressions communes (CSE). Deux chemins de mise en oeuvre :
 
-- **JIT** (`.so` + `IModel` virtuel) : `System.add_dynamic_block` charge un modele a dispatch
-  virtuel, pour le prototypage hote ;
-- **AOT** : `compile_or_jit(mode="compile")` produit un bloc compile via `compiled_block_abi.hpp`,
-  branche par `System.add_compiled_block` (`.so`, marshaling de tableaux plats cote hote, sans
-  AMR ni MPI) ; et `System.add_compiled_model` (`dsl_block.hpp`) branche un `CompositeModel`
-  connu a la compilation comme un bloc NATIF, **valide bit-identique a `add_block` sur CPU/Serial**
-  (`test_compiled_model_parity`). Le chemin device-clean equivalent passe par les FONCTEURS NOMMES
-  de `block_builder.hpp` (la machinerie d'`add_compiled_model`, instanciee depuis une unite de
-  traduction externe sans lambda etendue) : il est valide BIT-IDENTIQUE jusqu'au GH200, multi-box et
-  MPI multi-GPU (`test_mpi_mbox_parity`, np=1/2/4). En revanche la variante `add_compiled_model` a
-  LAMBDAS ETENDUES bute encore sur une limite nvcc (lambda etendue `__host__ __device__` instanciee
-  dans une TU externe) : la parite zero-copie sur device par CE chemin n'est pas acquise. Voir
-  [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md).
+- **JIT** (`.so` + `IModel` virtuel) : `System.add_dynamic_block`, prototypage hote ;
+- **AOT** : `System.add_compiled_block` (bloc compile via `compiled_block_abi.hpp`, marshaling hote,
+  sans AMR ni MPI) ; `System.add_compiled_model` (`dsl_block.hpp`) branche un `CompositeModel` connu
+  a la compilation comme bloc NATIF, bit-identique a `add_block` et device-clean sur GH200 (foncteurs
+  nommes de `block_builder.hpp`, multi-box + MPI). Detail : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md).
 
 ## Systemes multi-especes
 
@@ -241,13 +233,12 @@ git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build                 # 71 tests coeur (maillage, AMR, elliptique, integrateurs)
+ctest --test-dir build                 # tests coeur (maillage, AMR, elliptique, integrateurs)
 ```
 
-La CI a trois jobs : Release (serie), MPI (build `-DADC_USE_MPI=ON`, qui ajoute `+21` entrees
-`ctest` lancees par `mpirun`, bit-identiques np=1/2/4) et Kokkos (backend Serial). Le module
-Python ajoute une suite (`26` tests : bindings + DSL). La CI ignore les changements purement
-documentaires (`paths-ignore: docs/**`, `**.md`).
+La CI a trois jobs : Release (serie), MPI (`-DADC_USE_MPI=ON`, entrees `ctest` lancees par
+`mpirun`, bit-identiques np=1/2/4) et Kokkos (Serial). Le module Python ajoute une suite (bindings
++ DSL). La CI ignore les changements purement documentaires (`paths-ignore: docs/**`, `**.md`).
 
 | Option | Defaut | Role |
 |---|---|---|
@@ -272,32 +263,17 @@ include/adc/
   coupling/     Coupler, SystemCoupler, AmrSystemCoupler, AmrCouplerMP, diagnostics
   amr/          clustering Berger-Rigoutsos, regrid, hierarchie
   runtime/      facades System / AmrSystem, model_factory, JIT/AOT du DSL, canal aux extensible
-tests/          71 tests coeur (+21 entrees ctest MPI via mpirun quand -DADC_USE_MPI=ON)
+tests/          tests coeur (+ entrees ctest MPI via mpirun quand -DADC_USE_MPI=ON)
 docs/           ARCHITECTURE.md, ALGORITHMS.md, GPU_RUNTIME_PORT.md, CHOICES.md, PERFORMANCE.md, BIBLIOGRAPHY.md ; archive/ (planning + notes applicatives)
 ```
 
 ## Validation (coeur)
 
-- **71** ctests coeur, joues sur deux builds en CI : Release (serie) et Kokkos (backend Serial) ;
-  **+21** entrees ctest MPI bit-identiques np=1/2/4 (build `-DADC_USE_MPI=ON`). Le module Python
-  ajoute **26** tests (bindings + DSL).
+- ctests coeur en CI sur deux builds : Release (serie) et Kokkos (Serial) ; entrees MPI
+  bit-identiques np=1/2/4 (`-DADC_USE_MPI=ON`). Le module Python ajoute une suite (bindings + DSL).
 - AMR conservatif : reflux multi-patch a l'arrondi machine (`~1e-15`).
-- GPU GH200 (backend Kokkos Cuda, validations integrees au depot, hors CI car le materiel n'est
-  pas un runner) :
-  - composants valides bit-identiques au CPU (System mono-grille, ops de champ AMR, halos MPI
-    multi-GPU, chemin compile a foncteurs nommes multi-box + MPI) ;
-  - validation INTEGREE AmrSystem + MPI + GPU FAITE (les trois axes dans un seul run) : densite
-    grossiere bit-identique au nombre de rangs (np=1/2/4, `dmax=0`), masse conservee a `0` ;
-  - features a chemin device fusionnees apres la validation integree confirmees bit-identiques :
-    `T_e` lu via le canal aux, EPM ecrante/Helmholtz, EPM anisotrope `eps_x/eps_y`, B_z par niveau AMR.
-  - CAVEATS HONNETES : (1) un grossier multi-box DISTRIBUE n'est pas bit-identique sur les sommes
-    globales (`mass`/`csum`) entre np, par ordre de reduction FMA (le max reste exact) ; (2) la
-    facade `AmrSystemCoupler` complete ne s'instancie pas sous nvcc (concept + lambda generique),
-    donc le chemin device de B_z par niveau est valide via `advance_amr`/`assemble_rhs` ; (3)
-    `System::add_compiled_model` a lambdas etendues n'est pas zero-copie sur device (limite nvcc) ;
-    (4) le strong-scaling AMR par grossier reparti est cable et correct mais NEGATIF a cette echelle
-    (la latence des halos multi-box cross-rang domine le compute economise). Detail :
-    [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md).
+- GPU GH200 (Kokkos Cuda, hors CI) : System, ops de champ AMR, halos MPI multi-GPU, chemin compile
+  a foncteurs nommes, et la chaine AmrSystem + MPI + GPU valides bit-identiques au CPU.
 
-Validation bout-en-bout (modeles, taux diocotron, runs ROMEO a grande echelle) : depot
-[`adc_cases`](https://github.com/wolf75222/adc_cases). Trace des validations device : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md).
+Detail des validations device : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md). Validation
+applicative (modeles, diocotron, runs ROMEO) : [`adc_cases`](https://github.com/wolf75222/adc_cases).
