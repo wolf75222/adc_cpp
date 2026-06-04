@@ -32,6 +32,56 @@ namespace adc {
 // (cycle de vie Kokkos partage avec l'allocateur unifie, qui doit aussi initialiser Kokkos AVANT
 // son premier kokkos_malloc, sans quoi le build Kokkos plante a la construction d'un Fab).
 
+// ---------------------------------------------------------------------------
+// Residence des donnees : sync_host() / sync_device(). Le seam de COHERENCE, le
+// pendant de for_each_cell pour les acces hote.
+//
+// Aujourd'hui le stockage Fab vit en memoire UNIFIEE (Kokkos::SharedSpace, cf.
+// allocator.hpp) : un meme buffer sert au code hote (operator(), boucles) ET
+// aux kernels device. La coherence ne demande donc PAS de copie, seulement de
+// l'ORDONNANCEMENT : un acces hote ne doit pas lire/ecrire un buffer pendant
+// qu'un kernel async le touche encore. Jusqu'ici cet ordonnancement etait pose a
+// la main par des device_fence() epars, sans jamais dire QUELLE residence on
+// veut rendre valide.
+//
+// sync_host()/sync_device() ENCODENT cette intention :
+//   - sync_host()   : "je vais lire/ecrire ces donnees DEPUIS L'HOTE ;
+//                      rends-les valides cote hote". Sous SharedSpace = un
+//                      device_fence() cible (attendre les kernels en vol), donc
+//                      acces hote sur sont sans course.
+//   - sync_device() : "je vais lire/ecrire ces donnees DEPUIS LE DEVICE
+//                      (un kernel) ; rends-les valides cote device". Sous
+//                      SharedSpace les ecritures hote precedentes sont visibles
+//                      du device sans barriere (pas de pipeline hote async a
+//                      drainer), donc c'est un VRAI no-op aujourd'hui ; la
+//                      fonction existe pour MARQUER l'intention au site d'appel.
+//
+// SEMANTIQUE SOUS SHAREDSPACE (etat actuel) : ces appels sont au plus un fence,
+// jamais une copie. Le comportement reste donc BIT-IDENTIQUE a l'ancien code
+// (sync_host == l'ancien device_fence() pose avant un acces hote ; sync_device
+// == rien). C'est volontairement du SCAFFOLDING : sous memoire unifiee il n'y a
+// rien d'autre a faire.
+//
+// CHEMIN FUTUR NON UNIFIE (buffers hote/device separes + deep_copy) : c'est ICI
+// que se brancherait la migration. sync_host() ferait un Kokkos::deep_copy
+// device->hote (et un fence) si le device est la derniere residence ecrite ;
+// sync_device() un deep_copy hote->device dans l'autre sens. Le suivi "qui
+// possede la donnee a jour" (dirty flag par residence) vivrait sur le MultiFab,
+// pas ici : ce seam reste sans etat, les surcharges MultiFab portent l'etat.
+// Comme tous les sites d'acces hote passent deja par sync_host(), basculer vers
+// ce chemin ne touchera PAS les operateurs, exactement comme for_each_cell
+// isole le passage CPU -> GPU des sites d'appel.
+
+// Rend la residence HOTE valide avant un acces hote. Sous memoire unifiee : un
+// device_fence() cible (attend les kernels en vol). No-op hors Kokkos.
+inline void sync_host() { device_fence(); }
+
+// Marque une residence DEVICE (kernel a venir). Sous memoire unifiee : no-op
+// (les ecritures hote sont deja visibles du device, rien a drainer). Existe pour
+// documenter l'intention au site d'appel et accueillir un futur deep_copy
+// hote->device sur un chemin non unifie.
+inline void sync_device() {}
+
 template <class F>
 void for_each_cell(const Box2D& b, F f) {
 #if defined(ADC_HAS_KOKKOS)

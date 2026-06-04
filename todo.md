@@ -51,8 +51,11 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       en vrais types. RESTE : promouvoir `PatchRange`, le routage bordant de `CoarseFineInterface`,
       `SubcyclingSchedule`, `RegridPolicy` (encore inlines dans `subcycle_level_mp`) et y replier la
       famille `amr_step_*` (qui encode le cas dans le nom).
-- [~] **API memoire explicite** : `for_each_cell_reduce_{sum,max}`, `sum`/`norm_inf` faits.
-      RESTE : `sync_host` / `sync_device` explicites.
+- [x] **API memoire explicite** : `for_each_cell_reduce_{sum,max}`, `sum`/`norm_inf` faits.
+      `sync_host()` / `sync_device()` explicites poses sur le seam `for_each.hpp` + methodes
+      `MultiFab` : encodent l'intention de residence. Sous memoire unifiee (`Kokkos::SharedSpace`)
+      `sync_host()` est un `device_fence()` cible, `sync_device()` un no-op (bit-identique).
+      Scaffolding pour le futur chemin NON unifie (buffers separes + deep_copy).
 - [~] **Familles de ghosts** : `fill_physical_bc` / `fill_boundary` / `mf_fill_fine_ghosts` separes.
       RESTE : remonter le coarse-fine en helper nomme de premier niveau.
 - [x] **VariableRole** : couplages inter-especes par role (#18) + la brique generee par le DSL

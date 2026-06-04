@@ -5,7 +5,7 @@
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence
+#include <adc/mesh/for_each.hpp>  // device_fence, sync_host, sync_device
 #include <adc/parallel/comm.hpp>
 
 #include <utility>
@@ -57,9 +57,20 @@ class MultiFab {
   // Indice local d'une box globale, ou -1 si elle n'est pas sur ce rang.
   int local_index_of(int global) const { return local_index_[global]; }
 
+  // Residence explicite des donnees de ce MultiFab (cf. for_each.hpp). Encodent
+  // l'INTENTION d'acces : sync_host() avant un acces HOTE (operator(), boucle,
+  // set_val), sync_device() avant un kernel DEVICE. Sous memoire unifiee
+  // (Kokkos::SharedSpace) sync_host() est un device_fence() cible et
+  // sync_device() un no-op ; le comportement reste donc bit-identique a l'ancien
+  // code. Sur un futur chemin non unifie (buffers separes) ces methodes
+  // porteraient la migration deep_copy et le suivi de residence par fab.
+  void sync_host() { adc::sync_host(); }
+  void sync_device() { adc::sync_device(); }
+
   void set_val(Real v) {
-    device_fence();  // GPU : un kernel a pu ecrire ces fabs ; barriere avant le
-                     // remplissage hote (sinon course ecriture hote/kernel).
+    sync_host();  // un kernel a pu ecrire ces fabs ; on rend la residence hote
+                  // valide avant le remplissage hote (sinon course ecriture
+                  // hote/kernel). Sous memoire unifiee = un device_fence().
     for (auto& f : fabs_) f.set_val(v);
   }
 

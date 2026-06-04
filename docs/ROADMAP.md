@@ -161,8 +161,8 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (`operator==` strict, pas une tolérance). Reste hors-périmètre tant qu'on veut le bit-identique :
    recâbler les sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`,
    `two_fluid_ap`), division qui peut différer au dernier bit de la forme multiplicative `*cx`.
-4. **API mémoire explicite.** Réductions `sum` / `norm_inf` faites (le reste de l'API
-   `sync_host` / `sync_device` reste en file). Le seam `for_each.hpp` porte désormais
+4. **API mémoire explicite.** Réductions `sum` / `norm_inf` faites ; `sync_host()` /
+   `sync_device()` explicites désormais posés. Le seam `for_each.hpp` porte désormais
    `for_each_cell_reduce_sum` et `for_each_cell_reduce_max`, à côté de `for_each_cell` et
    `device_fence()` : sous Kokkos une vraie `parallel_reduce` (MDRangePolicy, `Kokkos::Sum`
    / `Kokkos::Max`, bloquante côté hôte donc sans `device_fence()` préalable) ; en série et
@@ -180,6 +180,18 @@ exécution, et un AMR multi-patch pas encore pensé distribué. Voir
    (idempotence, clé pour `test_fill_boundary/sum_unchanged`). Contrat verrouillé par
    `test_reduce` (sum_constant exact, sum varié en écart relatif < 1e-10, norm_inf strict,
    idempotence).
+   Résidence explicite des données : `sync_host()` / `sync_device()` (fonctions libres du seam
+   `for_each.hpp` + méthodes `MultiFab`) encodent l'INTENTION d'accès, là où la cohérence
+   reposait sur des `device_fence()` épars sans dire quelle résidence rendre valide. Sous mémoire
+   unifiée (`Kokkos::SharedSpace`) `sync_host()` est un `device_fence()` ciblé (drainer les kernels
+   en vol avant un accès hôte) et `sync_device()` un no-op (les écritures hôte sont déjà visibles
+   du device) : le comportement reste BIT-IDENTIQUE à l'ancien code (au plus un fence, jamais de
+   copie). `MultiFab::set_val` appelle `sync_host()` au lieu d'un `device_fence()` nu (même
+   sémantique, intention nommée). C'est volontairement du scaffolding sous mémoire unifiée ; la
+   valeur est l'abstraction : un futur chemin NON unifié (buffers hôte/device séparés) y branchera
+   un `deep_copy` directionnel et le suivi de résidence par fab, SANS toucher les opérateurs (tous
+   les accès hôte passent déjà par `sync_host()`), exactement comme `for_each_cell` isole le
+   passage CPU -> GPU des sites d'appel. Idempotence et no-op verrouillés par `test_sync_residence`.
 5. **Séparer les trois familles de ghosts** en briques nommées testables. Largement fait :
    `fill_physical_bc` (BoundaryCondition, testé seul `test_physical_bc`), `fill_boundary`
    (GhostExchange, testé `test_mpi_fillboundary`), `mf_fill_fine_ghosts_*`
