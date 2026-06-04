@@ -177,17 +177,25 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       `add_equation` (dispatch `ModelSpec` vs `CompiledModel`), `FiniteVolume(riemann=)`, `run`. Erreurs
       explicites (role/param/backend/flux). (#89, #90 fix substeps ModelSpec)
 - [x] **Etape 3 - `production` reel pour `System`** : loader natif zero-copie. (#85)
-- [ ] **Etape 4 - cas demonstrateurs `adc_cases`** : `diocotron_dsl` (ExB en formules, == `models.diocotron`,
-      validation CI legere), puis `magnetic_isothermal_dsl` (isotherme magnetise, B_z/phi/grad), puis
-      `two_species_dsl` (electrons+ions, temps par bloc, Poisson `sum q_s n_s`). EN COURS (adc_cases).
-- [ ] **Etape 5 - `production` -> `AmrSystem`** (Phase D) : binding Python du natif AMR
-      `add_compiled_model(AmrSystem&)` (`amr_dsl_block.hpp`). Borne par la non-parite `AmrSystem`. TOUCHE
-      `adc_cpp/python` -> a lancer sur accord.
-- [~] **Etape 6 - validation MPI/GPU du chemin `production`** : `add_compiled_model` C++ valide GH200
-      (bit-identique, multi-box + MPI). RESTE : valider le chemin Python `add_native_block` de bout en
-      bout (device GH200 + MPI np=1/2/4) ; tests `adc_cpp/python` -> a lancer sur accord.
+- [x] **Etape 4 - cas demonstrateurs `adc_cases`** : `diocotron_dsl` (ExB en formules, == `models.diocotron`
+      BIT-IDENTIQUE) + `two_species_dsl` (electrons+ions, temps par bloc, Poisson `sum q_s n_s`), backend
+      `production`, validation CI legere. (adc_cases #7) `magnetic_isothermal_dsl` saute (pas d'oracle natif).
+- [x] **Etape 5 - `production` -> `AmrSystem`** (Phase D) : `AmrSystem::add_native_block` +
+      `target="amr_system"` ; parite bit-identique a `add_compiled_model(AmrSystem&)`. VALIDE CPU/CI
+      (test_amr_native_loader dlopen, Release+MPI+Kokkos verts). (#92) Limites AMR (mono-bloc, explicite,
+      pas de recon primitive/Roe/weno5) rejetees explicitement.
+- [~] **Etape 6 - validation MPI/GPU du chemin `production`** : `add_compiled_model` valide GH200 pour
+      `eval_rhs`/`advance` (foncteurs nommes). **BLOQUE** : le chemin production CRASHE sur GH200 dans
+      `solve_fields()` (segfault HOTE, hors kernel ; `add_block` y tourne propre). Root-cause en cours
+      (#93, harness diagnostic, NON mergeable comme validation). La production sur GPU de bout en bout
+      n'est donc PAS encore demontree.
 - [ ] **Etape 7 - DIFFERE** : domaine disque FV / paroi transport + reproduction papier quantitative
       (cf. section 6 ; subordonne a la confirmation haute resolution du plateau l=4).
+
+**STATUT HONNETE (ne PAS presenter "Plan Ideal termine")** : System production CPU = OK ; AmrSystem
+production CPU = OK ; demonstrateurs DSL Python = OK ; production GPU de bout en bout = NON (bloquee par
+le crash `solve_fields` GH200, #93) ; WENO5 sur `CompiledModel` = encore limite (2 ghosts) ;
+`PAPER_ROADMAP.md` = a NE PAS reecrire automatiquement (attend la validation humaine du sweep O5).
 
 ## 9. Mesure diocotron haut ordre (PR-0 + O5, cote `adc_cases`)
 
