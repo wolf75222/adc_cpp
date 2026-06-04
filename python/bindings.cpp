@@ -153,6 +153,7 @@ PYBIND11_MODULE(_adc, m) {
       .def("nx", &System::nx)
       .def("time", &System::time)
       .def("n_species", &System::n_species)
+      .def("block_names", &System::block_names)
       .def("mass", &System::mass, py::arg("name"))
       .def("density",
            [](const System& s, const std::string& name) {

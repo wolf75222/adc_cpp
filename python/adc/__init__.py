@@ -333,14 +333,12 @@ class System:
             for k, v in cfg_kw.items():
                 setattr(config, k, v)
         self._s = _System(config)
-        self._names = []
 
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1), evolve)
-        self._names.append(name)
 
     def add_background(self, name, model, density, spatial=None):
         """Espece GELEE (non avancee) : un fond fixe qui contribue au Poisson de systeme (et, a
@@ -388,8 +386,12 @@ class System:
             raise TypeError("add_coupling attend adc.Ionization / Collision / ThermalExchange")
 
     def block_names(self):
-        """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python)."""
-        return list(self._names)
+        """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python).
+
+        Delegue au registre de blocs C++ (source unique), donc inclut les blocs charges via
+        add_dynamic_block (.so JIT) et add_compiled_block (.so AOT), pas seulement add_block.
+        """
+        return list(self._s.block_names())
 
     def __getattr__(self, attr):
         return getattr(self._s, attr)

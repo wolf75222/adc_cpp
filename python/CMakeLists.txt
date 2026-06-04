@@ -137,7 +137,8 @@ foreach(t
     test_dsl_jit_bz           # B_z end-to-end via add_dynamic_block (.so JIT)
     test_dsl_jit_te           # T_e (derive p/rho) via add_dynamic_block (.so JIT)
     test_dsl_aot_bz           # B_z via add_compiled_block (.so AOT)
-    test_dsl_aot_te)          # T_e via add_compiled_block (.so AOT)
+    test_dsl_aot_te           # T_e via add_compiled_block (.so AOT)
+    test_block_names_dynamic) # block_names() voit le bloc dynamique (.so JIT), pas seulement add_block
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
   set_tests_properties(${t} PROPERTIES

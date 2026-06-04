@@ -214,6 +214,11 @@ class System {
   int nx() const;
   double time() const;
   int n_species() const;
+  /// Noms des blocs, dans l'ordre d'ajout. SOURCE UNIQUE : le registre de blocs interne, peuple par
+  /// TOUS les chemins d'ajout (add_block / add_dynamic_block / add_compiled_block / install_block).
+  /// Un integrateur ecrit en Python itere dessus, donc il doit voir aussi les blocs charges depuis
+  /// un .so (JIT / AOT) ; les compter par n_species() seul les sauterait.
+  std::vector<std::string> block_names() const;
   double mass(const std::string& name) const;
   std::vector<double> density(const std::string& name) const;  ///< n*n row-major
   std::vector<double> potential();                             ///< phi, n*n row-major

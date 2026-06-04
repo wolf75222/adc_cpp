@@ -1045,6 +1045,14 @@ std::vector<std::string> System::variable_roles(const std::string& name,
 int System::nx() const { return p_->cfg.n; }
 double System::time() const { return p_->t; }
 int System::n_species() const { return static_cast<int>(p_->sp.size()); }
+std::vector<std::string> System::block_names() const {
+  // Lit le registre de blocs UNIQUE (p_->sp), peuple par tous les chemins d'ajout : un bloc charge
+  // via add_dynamic_block / add_compiled_block (.so) y figure au meme titre qu'un add_block.
+  std::vector<std::string> out;
+  out.reserve(p_->sp.size());
+  for (const auto& s : p_->sp) out.push_back(s.name);
+  return out;
+}
 double System::mass(const std::string& name) const { return sum(p_->find(name).U, 0); }
 std::vector<double> System::density(const std::string& name) const {
   return p_->copy_comp0(p_->find(name).U);
