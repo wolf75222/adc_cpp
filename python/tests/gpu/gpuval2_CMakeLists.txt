@@ -1,0 +1,28 @@
+# Build des harness de validation device "round 2" (features post-#48 a chemin device).
+# Usage (sur le noeud armgpu, cf. romeo_gpuval2_build.sh) :
+#   cmake -S . -B build -DCMAKE_CXX_COMPILER=<nvcc_wrapper> -DKokkos_ROOT=<kinstall> \
+#         -DADC_INCLUDE=<include> -DCMAKE_BUILD_TYPE=Release
+# Les trois harness sont HEADER-ONLY (assemble_rhs / advance_amr / GeometricMG via for_each ADC_HD).
+# Le MEME source compile aussi en Serial pur (g++ -DADC_HAS_KOKKOS off) pour l'oracle hote.
+cmake_minimum_required(VERSION 3.16)
+project(gpuval2 CXX)
+find_package(Kokkos REQUIRED)
+
+# (2)+(3) EPM ecrante (Helmholtz) + anisotrope : header-only.
+add_executable(gpu_epm_validate gpu_epm_validate.cpp)
+target_include_directories(gpu_epm_validate PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(gpu_epm_validate PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(gpu_epm_validate PRIVATE Kokkos::kokkos)
+
+# (4) B_z par niveau AMR (advance_amr, chemin consomme par AmrSystemCoupler) : header-only.
+add_executable(gpu_amr_bz_validate gpu_amr_bz_validate.cpp)
+target_include_directories(gpu_amr_bz_validate PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(gpu_amr_bz_validate PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(gpu_amr_bz_validate PRIVATE Kokkos::kokkos)
+
+# (1) T_e via load_aux<5> : assemble_rhs header-only (fonceurs nommes device-robustes), PAS
+# add_compiled_model (lambdas etendues cross-TU -> crash device documente).
+add_executable(gpu_aux_validate gpu_aux_validate.cpp)
+target_include_directories(gpu_aux_validate PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(gpu_aux_validate PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(gpu_aux_validate PRIVATE Kokkos::kokkos)

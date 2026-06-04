@@ -160,6 +160,86 @@ pas une reecriture des noyaux de calcul.
    les memes invariants : `crossrank_spread=0`, conservation, parite au nb de rangs) ; harness GPU
    `python/tests/gpu/{amrmpi_integrated.cpp, amrmpi_CMakeLists.txt, amrmpi_romeo_build.sh}`.
 
+## Validation device des features post-#48 (round 2)
+
+La CI ne joue que Release / Python / MPI / Kokkos SERIAL (CPU). Plusieurs briques fusionnees sur
+master APRES #48 ont un CHEMIN DEVICE mais n'avaient ete exercees que CPU. On les a confirmees sur
+GH200 (noeud `armgpu`, `module load cuda/12.6`, Kokkos 4.4.01 `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`),
+chacune par la MEME logique compilee en `exec=Cuda` (backend Kokkos Cuda, `srun -n 1 --gpus-per-task=1`)
+ET en oracle `exec=Serial` (g++, `ADC_HAS_KOKKOS` off), avec comparaison BIT-A-BIT cellule par cellule
+(`diff_bin`, `dmax = max|cuda - serial|`). `for_each_cell` est ASYNC sous Cuda : chaque harness fait
+`device_fence()` avant la lecture hote / le dump. Harness versionnes (hors CI, gardes par `srun`/sbatch) :
+`python/tests/gpu/{gpu_aux_validate,gpu_epm_validate,gpu_amr_bz_validate,diff_bin}.cpp`,
+`gpuval2_CMakeLists.txt`, `romeo_gpuval2_build.sh`. Resultats REELS (job sbatch GH200) :
+
+- **T_e lu via `load_aux<5>` (composante aux 4) (#50/#51).** ✅ VALIDE DEVICE. Le portage precedent
+  n'avait valide que `load_aux<4>` (B_z, comp 3) ; on ajoute la comp 4 (T_e). Un modele jouet `n_aux=5`
+  (flux nul, source `S = T_e u`) lit `a.T_e = a(i,j,4)` dans `assemble_rhs` -> `load_aux<5>` (fonceur
+  nomme `AssembleRhsKernel`, `for_each_cell` ADC_HD) sur device. Profil NON CONSTANT `T_e = 1 + x + 2y`.
+  exec=Cuda : `R = T_e u` dans [2.1875, 7.8125] (lecture par cellule), `max|R - T_e u| = 0`.
+  **`dmax = 0.000e+00`** vs Serial (256 cellules). Bit-identique.
+  NOTE D'HONNETETE : on valide ICI le chemin device REEL de la lecture de T_e (`assemble_rhs`, fonceurs
+  nommes), PAS le chemin `System::add_compiled_model`. Ce dernier instancie des lambdas etendues
+  `__host__ __device__` dans la TU appelante (limite nvcc connue, documentee dans
+  `runtime/dsl_block.hpp` et `tests/test_compiled_model_parity.cpp`) et SEGFAUTE a l'execution sur Cuda
+  -- independamment de T_e (un harness System+`add_compiled_model`+`eval_rhs` a bien crashe sur GH200,
+  `compute-sanitizer memcheck` = 0 erreur device, donc crash cote hote/lambda etendue). Le marshaling
+  T_e du chemin System (`apply_te`, `copy_state` comp 4) reste donc couvert uniquement en CI Serial.
+
+- **EPM ECRANTE / Helmholtz `div(eps grad phi) - kappa phi = f` (#44, `GeometricMG::set_reaction`).**
+  ✅ VALIDE DEVICE. Le terme `kappa` vit dans les `for_each_cell` ADC_HD du smoother red-black, du
+  residu et de l'apply (`numerics/elliptic/poisson_operator.hpp`) -> device sous Cuda. MMS `eps=1+0.5x`
+  + `kappa=50`, Dirichlet exact, V-cycles avec le meme critere que `tests/test_screened_poisson.cpp`.
+  exec=Cuda : cycles 8/9/9 (IDENTIQUES a Serial), convergence ordre 2 (ratios Linf 3.69 / 3.85).
+  **`dmax = 0.000e+00`** vs Serial sur phi (n=64, 4096 cellules). Memes cycles, meme phi au bit pres.
+
+- **EPM ANISOTROPE `div(diag(eps_x, eps_y) grad phi) = f` (#52/#56, `set_epsilon_anisotropic`).**
+  ✅ VALIDE DEVICE. Le second champ `eps_y` (faces normales a y) est lu dans les memes
+  `for_each_cell` ADC_HD que ci-dessus. MMS `eps_x=1+0.5x`, `eps_y=1+0.3y` (cf.
+  `tests/test_anisotropic_epsilon.cpp`). exec=Cuda : cycles 9/10/11 (IDENTIQUES a Serial), ordre 2
+  (ratios Linf 4.00 / 4.00). **`dmax = 0.000e+00`** vs Serial sur phi (n=64, 4096 cellules).
+
+- **B_z par niveau dans le chemin AMR (#53, `AmrSystemCoupler::fill_bz`).** ✅ VALIDE DEVICE. B_z(x,y)
+  est pose aux centres DE CHAQUE NIVEAU (`geom.refine(1<<k)`, dx = dx_coarse / 2^k) sur la comp
+  `kAuxBaseComps` du canal aux partage ; le modele le lit `load_aux<4>` dans le noyau source AMR
+  (`for_each_cell` ADC_HD) niveau par niveau. Profil NON CONSTANT `B_z = 1 + sin(2 pi x) cos(2 pi y)`
+  pour distinguer les niveaux. exec=Cuda : `B_z` relu = 0.80865828 au niveau 0 (centre (4,4)),
+  0.90245484 au niveau 1 (centre (8,8)) -- VALEURS DISTINCTES, chacune == son centre de niveau ; la
+  source consomme le bon B_z par niveau (grossier et fin evoluent avec LEUR B_z). **`dmax = 0.000e+00`**
+  vs Serial sur U grossier+fin (512 cellules, 2 niveaux), conservation respectee.
+  Validation par `advance_amr` (HEADER-ONLY, le moteur que `AmrSystemCoupler` appelle niveau par
+  niveau). La FACADE `AmrSystemCoupler` elle-meme s'instancie via le concept `CoupledSystemLike`
+  (`requires s.for_each_block(...)`), que le frontend nvcc/EDG refuse d'evaluer ici alors que gcc/clang
+  l'acceptent -> la facade complete reste couverte en CI Serial (`tests/test_amr_aux_bz.cpp`), mais le
+  CHEMIN DEVICE consommateur de B_z par niveau (le seul code device de #53) est bien valide GH200.
+
+- **B_z multi-box AMR distribue sur plusieurs GPU (#59).** ⚠️ FONCTIONNEL DEVICE multi-GPU, mais PAS
+  bit-identique au sens strict sur les sommes globales. #59 a fusionne sur master la couverture
+  multi-box (mono-rang + MPI np=2/4, CI Kokkos Serial). Sur GH200 (np=1/2/4, un GH200 par rang,
+  exec=Cuda, OpenMPI CUDA-aware, grossier 2x2 boites + 2 patchs fins disjoints repartis SFC,
+  `coarse_replicated=false`) : B_z est correctement echantillonne PAR NIVEAU et PAR BOITE locale
+  (`bz_bad = 0` a chaque np) et la source `S = B_z u` le lit par boite sur le device. `cmax`
+  (reduction max, insensible a l'ordre) est BIT-IDENTIQUE aux trois np (`dcmax = 0`). En revanche les
+  invariants ADDITIFS globaux (mass/csum/csumsq, `all_reduce_sum` sur les boites locales) DIFFERENT au
+  niveau de l'arrondi entre np : `dmass ~ 1e-15`, `dcsum ~ 3e-13`, `PARITE dmax = 9.1e-13` (np=2/4 vs
+  oracle np=1) -- effet d'ORDRE DE REDUCTION FMA (le grossier multi-box est genuinement reparti, donc
+  la somme partielle change d'ordre selon le decoupage par rang). Ce n'est pas un bug : le calcul
+  device par cellule est correct et le max est exact ; seules les sommes flottantes dependent de
+  l'ordre. Contraste avec phase 10 (`amrmpi_integrated`, dmax=0) ou le grossier est REPLIQUE -> chaque
+  rang somme le MEME domaine entier -> reductions identiques. Honnetement : multi-GPU FONCTIONNELLEMENT
+  CORRECT (B_z par boite/niveau lu sur device, conservation a l'arrondi) mais bit-identite stricte NON
+  atteinte sur les quantites sommees quand le grossier est reparti. Harness
+  `python/tests/gpu/{gpu_amr_bz_mpi_validate.cpp, gpuval2_mpi_CMakeLists.txt, romeo_gpuval2_mpi_build.sh}`.
+
+Bilan round 2 : les 4 features mono-GPU a chemin device (T_e, EPM Helmholtz, EPM anisotrope, B_z par
+niveau AMR) sont confirmees BIT-IDENTIQUES (dmax=0) sur GH200 en exec=Cuda vs Serial ; pour chaque
+elliptique, memes cycles MG ; conservation respectee. Le B_z multi-box distribue multi-GPU (#59) est
+fonctionnellement correct (B_z par boite/niveau lu sur device, `bz_bad=0`, `dcmax=0`) mais les sommes
+globales ne sont pas bit-identiques entre np (ordre de reduction, dmax ~ 9e-13). Reserve honnete : le
+chemin `System::add_compiled_model` sur Cuda reste limite par les lambdas etendues cross-TU (suivi
+existant phase 8) -- la lecture des champs aux (B_z, T_e) a ete validee device via `assemble_rhs` /
+`advance_amr` (fonceurs nommes), qui sont les chemins device reels.
+
 ## Strategie suggeree
 
 - Avancer phase par phase, chacune validee CPU == GPU (le seam autorise a basculer une etape a la
@@ -178,7 +258,10 @@ Le reste de la vision (DSL symbolique : interprete, codegen flux/brique/source/e
 VariableRole present mais pas encore cable ; eps(x) variable cote coeur, cablage System/Python a faire ;
 reorg physics/ numerics/) est COMPLET au niveau PROTOTYPE, teste (~54 ctests C++ + ~16 tests Python) et
 verifie jusqu'au GH200. La VALIDATION INTEGREE AmrSystem + MPI + GPU (les trois axes dans un seul run)
-est FAITE (phase 10, GH200, dmax=0, masse conservee a 0). Restent, cote PERF et non plus
-correction : le strong-scaling AMR full-device (grossier reparti `replicated_coarse=false` cable dans
-`AmrSystem`, reflux sans rebond hote, halos GPUDirect device-direct, FFT distribuee device) et la
-parite AOT zero-copie sur device (limite nvcc, phase 8).
+est FAITE (phase 10, GH200, dmax=0, masse conservee a 0). Les briques a chemin device fusionnees
+APRES #48 (T_e via `load_aux<5>`, EPM ecrante/Helmholtz #44, EPM anisotrope #52/#56, B_z par niveau
+AMR #53) sont confirmees BIT-IDENTIQUES sur GH200 (round 2, dmax=0, memes cycles MG, conservation).
+Restent, cote PERF et non plus correction : le strong-scaling AMR full-device (grossier reparti
+`replicated_coarse=false` cable dans `AmrSystem`, reflux sans rebond hote, halos GPUDirect
+device-direct, FFT distribuee device) et la parite AOT zero-copie sur device (limite nvcc, phase 8 ;
+c'est aussi pourquoi T_e a ete valide device via `assemble_rhs` et non `add_compiled_model`).

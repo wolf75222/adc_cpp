@@ -1,0 +1,12 @@
+# Build du harness multi-box MPI (B_z par niveau AMR distribue sur plusieurs GPU). Header-only :
+# advance_amr + comm.hpp (MPI). Compile via nvcc_wrapper (backend Cuda) + OpenMPI CUDA-aware.
+cmake_minimum_required(VERSION 3.16)
+project(gpuval2mpi CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Kokkos REQUIRED)
+find_package(MPI REQUIRED)
+add_executable(gpu_amr_bz_mpi_validate gpu_amr_bz_mpi_validate.cpp)
+target_include_directories(gpu_amr_bz_mpi_validate PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(gpu_amr_bz_mpi_validate PRIVATE ADC_HAS_KOKKOS ADC_HAS_MPI)
+target_link_libraries(gpu_amr_bz_mpi_validate PRIVATE Kokkos::kokkos MPI::MPI_CXX)
