@@ -133,6 +133,67 @@ int role_index(const VariableSet& vs, VariableRole role, int fallback) {
   const int c = vs.index_of(role);
   return c >= 0 ? c : fallback;
 }
+
+// Decoupe @p s sur @p sep (champs vides conserves). Brique de parsing des metadonnees TEXTE
+// transportees par l'ABI du .so (noms / roles en CSV).
+std::vector<std::string> split(const std::string& s, char sep) {
+  std::vector<std::string> out;
+  std::string cur;
+  for (char c : s) {
+    if (c == sep) { out.push_back(cur); cur.clear(); }
+    else cur += c;
+  }
+  out.push_back(cur);
+  return out;
+}
+
+// Metadonnees OPTIONNELLES lues par dlsym sur un .so genere (noms / roles / gamma). Toutes optionnelles :
+// un vieux .so sans ces symboles donne meta vide -> les chemins add_compiled_block / add_dynamic_block
+// retombent sur leur fallback (noms u0.., roles vides, gamma 1.4). Aucune dependance d'objet C++ :
+// seules des chaines et un double transitent par dlsym (ABI plate, comme le reste du bloc).
+struct BlockMeta {
+  bool has_gamma = false;
+  double gamma = 1.4;
+  VariableSet cons{VariableKind::Conservative, {}, 0, {}};
+  VariableSet prim{VariableKind::Primitive, {}, 0, {}};
+};
+
+// Construit un VariableSet a partir des CSV noms / roles (parallele a names ; roles VIDE = non
+// renseignes -> VariableSet sans roles, fallback indices cote couplages). @p names_csv vide -> set vide.
+VariableSet parse_var_set(VariableKind kind, const std::string& names_csv,
+                          const std::string& roles_csv) {
+  VariableSet vs{kind, {}, 0, {}};
+  if (names_csv.empty()) return vs;  // pas de noms transportes : set vide (le caller mettra son fallback)
+  vs.names = split(names_csv, ',');
+  vs.size = static_cast<int>(vs.names.size());
+  if (!roles_csv.empty()) {
+    std::vector<std::string> rs = split(roles_csv, ',');
+    for (const std::string& r : rs) vs.roles.push_back(role_from_name(r));
+  }
+  return vs;
+}
+
+// Lit (par dlsym, tous OPTIONNELS) les symboles de metadonnees d'un .so deja ouvert (@p h). Renvoie
+// noms+roles deserialises et gamma s'il est present. Les symboles absents laissent les champs vides /
+// has_gamma=false : le caller decide alors du fallback. Format des chaines : "cons_csv|prim_csv".
+BlockMeta read_block_meta(void* h) {
+  BlockMeta m;
+  auto names_fn = reinterpret_cast<const char* (*)()>(dlsym(h, "adc_compiled_var_names"));
+  auto roles_fn = reinterpret_cast<const char* (*)()>(dlsym(h, "adc_compiled_roles"));
+  auto gamma_fn = reinterpret_cast<double (*)()>(dlsym(h, "adc_compiled_gamma"));
+  std::string names = names_fn ? std::string(names_fn()) : std::string();
+  std::string roles = roles_fn ? std::string(roles_fn()) : std::string();
+  // "cons|prim" : indice 0 = jeu conservatif, indice 1 = jeu primitif (chacun eventuellement vide).
+  std::vector<std::string> nparts = split(names, '|');
+  std::vector<std::string> rparts = split(roles, '|');
+  auto part = [](const std::vector<std::string>& v, std::size_t i) {
+    return i < v.size() ? v[i] : std::string();
+  };
+  m.cons = parse_var_set(VariableKind::Conservative, part(nparts, 0), part(rparts, 0));
+  m.prim = parse_var_set(VariableKind::Primitive, part(nparts, 1), part(rparts, 1));
+  if (gamma_fn) { m.has_gamma = true; m.gamma = gamma_fn(); }
+  return m;
+}
 }  // namespace
 
 struct System::Impl {
@@ -546,15 +607,31 @@ struct System::Impl {
               r(i, j, 0) += im->elliptic_rhs(s);
             }
         };
-    if (names.empty())
-      for (int c = 0; c < NV; ++c) names.push_back("u" + std::to_string(c));
+    // Metadonnees OPTIONNELLES (noms / roles / gamma) portees par l'ABI etendue du .so. Symetrique
+    // du chemin AOT. Absentes d'un vieux .so -> meta vide -> fallback (noms u0.. / pas de roles /
+    // gamma 1.4). PRIORITE au nom explicite (names=), puis meta, puis fallback ; roles + primitif
+    // ne viennent QUE de l'ABI (l'API ne les expose pas).
+    const BlockMeta meta = read_block_meta(h);
+    VariableSet cons_vs = meta.cons, prim_vs = meta.prim;
+    if (!names.empty()) {
+      if (static_cast<int>(names.size()) != NV)
+        throw std::runtime_error("System::add_dynamic_block : names= a " +
+                                 std::to_string(names.size()) + " noms mais le bloc '" + name +
+                                 "' a " + std::to_string(NV) + " variables");
+      cons_vs.names = names;
+      cons_vs.size = static_cast<int>(names.size());
+    }
+    if (cons_vs.names.empty()) {
+      for (int c = 0; c < NV; ++c) cons_vs.names.push_back("u" + std::to_string(c));
+      cons_vs.size = NV;
+    }
+    if (prim_vs.names.empty()) prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
+    const double gamma = meta.has_gamma ? meta.gamma : 1.4;
 
-    Species block{name, MultiFab(P->ba, P->dm, NV, 2), NV, substeps, true, 1.4,
+    Species block{name, MultiFab(P->ba, P->dm, NV, 2), NV, substeps, true, gamma,
                   std::move(advance), std::move(rhs_into), std::move(max_speed), std::move(add_poisson)};
-    // Bloc dynamique : descripteur a noms seuls (pas de roles ; les couplages retombent alors
-    // sur les indices historiques via role_index).
-    block.cons_vars = {VariableKind::Conservative, names, NV, {}};
-    block.prim_vars = {VariableKind::Primitive, names, NV, {}};
+    block.cons_vars = std::move(cons_vs);
+    block.prim_vars = std::move(prim_vs);
     P->sp.push_back(std::move(block));
     P->sp.back().U.set_val(Real(0));
   }
@@ -702,6 +779,9 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
   // (IModel::n_aux). Optionnel : un vieux .so sans ce symbole retombe sur le contrat de base (3).
   auto naux_fn = reinterpret_cast<nv_fn_t>(dlsym(h, "adc_compiled_naux"));
   const int naux = naux_fn ? naux_fn() : kAuxBaseComps;
+  // Metadonnees OPTIONNELLES (noms / roles / gamma) transportees par l'ABI etendue du .so. Absentes
+  // d'un vieux .so -> meta vide, on retombe sur le fallback (noms u0.. / pas de roles / gamma 1.4).
+  const BlockMeta meta = read_block_meta(h);
   // Elargit le canal aux PARTAGE pour que set_magnetic_field/T_e le peuplent et que le marshaling
   // transporte les composantes extra vers le .so. Modele de base (3) -> no-op (bit-identique).
   P->ensure_aux_width(naux);
@@ -743,15 +823,30 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
             r(i, j, 0) += pr[static_cast<std::size_t>(j - v.lo[1]) * n + (i - v.lo[0])];
       };
 
-  std::vector<std::string> nm = names;
-  if (nm.empty())
-    for (int c = 0; c < nv; ++c) nm.push_back("u" + std::to_string(c));
-  Impl::Species block{name, MultiFab(P->ba, P->dm, nv, 2), nv, substeps, true, 1.4,
+  // Descripteurs de variables : PRIORITE au nom explicite passe par l'appelant (names=), sinon aux
+  // NOMS portes par l'ABI etendue du .so (meta), sinon fallback u0.. . Les ROLES et le PRIMITIF ne
+  // transitent QUE par l'ABI (l'API n'a pas de moyen de les fournir) : on les prend de meta tels quels.
+  VariableSet cons_vs = meta.cons, prim_vs = meta.prim;
+  if (!names.empty()) {                 // override explicite des noms conservatifs
+    if (static_cast<int>(names.size()) != nv)
+      throw std::runtime_error("System::add_compiled_block : names= a " +
+                               std::to_string(names.size()) + " noms mais le bloc '" + name +
+                               "' a " + std::to_string(nv) + " variables");
+    cons_vs.names = names;
+    cons_vs.size = static_cast<int>(names.size());
+  }
+  if (cons_vs.names.empty()) {          // ni names= ni meta : fallback historique u0..
+    for (int c = 0; c < nv; ++c) cons_vs.names.push_back("u" + std::to_string(c));
+    cons_vs.size = nv;
+  }
+  if (prim_vs.names.empty()) prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
+  // gamma : porte par l'ABI si le modele le declare (adc_compiled_gamma), sinon defaut historique 1.4.
+  const double gamma = meta.has_gamma ? meta.gamma : 1.4;
+  Impl::Species block{name, MultiFab(P->ba, P->dm, nv, 2), nv, substeps, true, gamma,
                       std::move(advance), std::move(rhs_into), std::move(max_speed),
                       std::move(add_poisson)};
-  // Bloc compile AOT : descripteur a noms seuls (roles non transmis par l'ABI extern "C").
-  block.cons_vars = {VariableKind::Conservative, nm, nv, {}};
-  block.prim_vars = {VariableKind::Primitive, nm, nv, {}};
+  block.cons_vars = std::move(cons_vs);
+  block.prim_vars = std::move(prim_vs);
   P->sp.push_back(std::move(block));
   P->sp.back().U.set_val(Real(0));
 }
@@ -1037,6 +1132,7 @@ std::vector<std::string> System::variable_roles(const std::string& name,
   for (int i = 0; i < vs->size; ++i) out.push_back(role_name(vs->at(i).role));  // 'custom' si absent
   return out;
 }
+double System::block_gamma(const std::string& name) const { return p_->find(name).gamma; }
 
 int System::nx() const { return p_->cfg.n; }
 double System::time() const { return p_->t; }

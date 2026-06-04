@@ -280,6 +280,9 @@ class HyperbolicModel:
         self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
         self.cons_roles = None  # override explicite des roles conservatifs (sinon mapping canonique)
         self.prim_roles = None  # override explicite des roles primitifs (sinon mapping canonique)
+        self.gamma = None       # indice adiabatique du bloc (EOS), lu par les couplages inter-especes
+                                # cote System. None -> symbole adc_compiled_gamma non emis (le System
+                                # retombe alors sur son defaut historique 1.4, retro-compat stricte).
 
     def cons(self, name):
         self.cons_names.append(name)
@@ -309,6 +312,13 @@ class HyperbolicModel:
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
+
+    def set_gamma(self, gamma):
+        """Indice adiabatique du bloc (EOS compressible). Transporte par le .so genere via le symbole
+        optionnel adc_compiled_gamma, pour que les couplages inter-especes du System (collision,
+        echange thermique, T_e) utilisent le BON gamma au lieu du defaut historique 1.4. Sans appel,
+        aucun symbole gamma n'est emis (retro-compat : le System garde son defaut)."""
+        self.gamma = float(gamma)
 
     def set_primitive_state(self, *vars_or_names, roles=None):
         """Declare le layout ORDONNE de l'etat primitif (Prim) : noms des composantes, dans l'ordre.
@@ -662,6 +672,20 @@ class HyperbolicModel:
                      % (nm, src_type, nm))
         return nv, "".join(parts), composite
 
+    def _emit_metadata(self, model_alias):
+        """Symboles OPTIONNELS de metadonnees du bloc .so, lus par dlsym cote System. PARTAGES par les
+        deux backends (JIT et AOT). Les NOMS + ROLES sont toujours emis (ADC_EXPORT_BLOCK_METADATA) :
+        ils viennent du VariableSet du modele (source unique de verite), le System les lit au lieu du
+        fallback u0.. / pas de roles. Le GAMMA n'est emis (ADC_EXPORT_BLOCK_GAMMA) que si set_gamma(...)
+        a ete appele ; sinon aucun symbole gamma -> le System garde son defaut 1.4 (retro-compat).
+
+        @p model_alias doit etre un alias SANS virgule de niveau superieur (le preprocesseur decoupe
+        les arguments de macro sur les virgules) : les callers passent un `using ... = CompositeModel<...>`."""
+        out = "\nADC_EXPORT_BLOCK_METADATA(%s)\n" % model_alias
+        if self.gamma is not None:
+            out += "ADC_EXPORT_BLOCK_GAMMA(%r)\n" % self.gamma
+        return out
+
     def emit_cpp_so_source(self, name=None):
         """Source de la bibliotheque JIT (backend "jit") : le MODELE COMPLET en CompositeModel<GenHyp,
         GenSrc, GenEll> derriere une fabrique extern "C" (adc_model_nvars / adc_make_model /
@@ -672,9 +696,11 @@ class HyperbolicModel:
                 '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
                 '#include <adc/core/variables.hpp>\n'
                 + bricks
-                + '\nextern "C" int adc_model_nvars() { return %d; }\n' % nv
-                + 'extern "C" void* adc_make_model() { return new adc::ModelAdapter<%s>(); }\n' % composite
-                + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv)
+                + '\nnamespace adc_generated { using JitModel = %s; }\n' % composite  # alias sans virgule (macro metadata)
+                + 'extern "C" int adc_model_nvars() { return %d; }\n' % nv
+                + 'extern "C" void* adc_make_model() { return new adc::ModelAdapter<adc_generated::JitModel>(); }\n'
+                + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv
+                + self._emit_metadata("adc_generated::JitModel"))
 
     def compile_so(self, so_path, include, name=None, cxx=None, std="c++20"):
         """JIT : genere le MODELE COMPLET (emit_cpp_so_source) et compile une bibliotheque partagee
@@ -711,7 +737,8 @@ class HyperbolicModel:
                 '#include <adc/core/variables.hpp>\n'
                 + bricks
                 + '\nnamespace adc_generated { using AotModel = %s; }\n' % composite
-                + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n')
+                + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n'
+                + self._emit_metadata("adc_generated::AotModel"))  # alias sans virgule (macro metadata)
 
     def compile_aot(self, so_path, include, name=None, cxx=None, std="c++20"):
         """Backend "compile" (AOT) : genere le MODELE COMPLET (emit_cpp_aot_source) et compile une .so

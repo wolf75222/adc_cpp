@@ -73,7 +73,82 @@ inline const char* role_name(VariableRole r) {
   return "custom";
 }
 
+/// Inverse de role_name : role physique a partir de son nom stable (Custom si inconnu). Sert a
+/// reconstruire un VariableSet a roles a partir d'une metadonnee TEXTE (p.ex. la chaine portee par
+/// un .so compile / dynamique : l'ABI extern "C" ne transporte que des chaines, pas l'enum).
+inline VariableRole role_from_name(const std::string& s) {
+  if (s == "density")     return VariableRole::Density;
+  if (s == "momentum_x")  return VariableRole::MomentumX;
+  if (s == "momentum_y")  return VariableRole::MomentumY;
+  if (s == "momentum_z")  return VariableRole::MomentumZ;
+  if (s == "energy")      return VariableRole::Energy;
+  if (s == "velocity_x")  return VariableRole::VelocityX;
+  if (s == "velocity_y")  return VariableRole::VelocityY;
+  if (s == "velocity_z")  return VariableRole::VelocityZ;
+  if (s == "pressure")    return VariableRole::Pressure;
+  if (s == "temperature") return VariableRole::Temperature;
+  if (s == "scalar")      return VariableRole::Scalar;
+  return VariableRole::Custom;
+}
+
+/// CSV des noms d'un VariableSet (separateur ','). Brique de la metadonnee TEXTE qu'un .so genere
+/// expose : l'ABI extern "C" ne transporte pas d'objet C++, on serialise donc en chaine.
+inline std::string names_csv(const VariableSet& vs) {
+  std::string s;
+  for (std::size_t i = 0; i < vs.names.size(); ++i) {
+    if (i) s += ',';
+    s += vs.names[i];
+  }
+  return s;
+}
+
+/// CSV des roles d'un VariableSet (role_name, separateur ','). VIDE si le modele ne renseigne pas
+/// ses roles (vs.roles vide) : le consommateur retombe alors sur le fallback indices (retro-compat).
+inline std::string roles_csv(const VariableSet& vs) {
+  std::string s;
+  for (std::size_t i = 0; i < vs.roles.size(); ++i) {
+    if (i) s += ',';
+    s += role_name(vs.roles[i]);
+  }
+  return s;
+}
+
+/// Metadonnee "noms" d'un modele : "cons_csv|prim_csv" (separateur '|' entre les deux jeux). Lue
+/// telle quelle par le consommateur (System) via le symbole optionnel adc_compiled_var_names.
+template <class Model>
+std::string var_names_meta() {
+  return names_csv(Model::conservative_vars()) + "|" + names_csv(Model::primitive_vars());
+}
+
+/// Metadonnee "roles" d'un modele : "cons_roles_csv|prim_roles_csv" (cote vide = roles non renseignes).
+template <class Model>
+std::string roles_meta() {
+  return roles_csv(Model::conservative_vars()) + "|" + roles_csv(Model::primitive_vars());
+}
+
 /// Ancien nom (compat) : VariableSet etait `Variables`. Conserve pour le code existant et genere.
 using Variables = VariableSet;
 
 }  // namespace adc
+
+/// Exporte les metadonnees OPTIONNELLES "noms + roles" d'un bloc .so via des symboles extern "C" lus
+/// par dlsym cote System. PARTAGE par les deux backends generes (AOT compiled_block et JIT
+/// dynamic_model) : la metadonnee perdue (noms/roles) est transportee sans rompre l'ABI plate.
+/// RETRO-COMPATIBLE : un .so ne definissant pas ces symboles (genere avant ce chantier) reste valide
+/// -- le System ne trouve pas le symbole et retombe sur son fallback (noms u0.., pas de roles).
+/// @p MODEL = type du modele (porte conservative_vars / primitive_vars).
+#define ADC_EXPORT_BLOCK_METADATA(MODEL)                                         \
+  extern "C" const char* adc_compiled_var_names() {                             \
+    static const std::string s = adc::var_names_meta<MODEL>();                  \
+    return s.c_str();                                                           \
+  }                                                                             \
+  extern "C" const char* adc_compiled_roles() {                                 \
+    static const std::string s = adc::roles_meta<MODEL>();                      \
+    return s.c_str();                                                           \
+  }
+
+/// Exporte le gamma (indice adiabatique) du bloc via le symbole optionnel adc_compiled_gamma, lu par
+/// les couplages inter-especes du System (collision, echange thermique, T_e). EMIS SEULEMENT si le
+/// modele declare un gamma : sinon le symbole reste absent et le System garde son defaut 1.4.
+#define ADC_EXPORT_BLOCK_GAMMA(GAMMA) \
+  extern "C" double adc_compiled_gamma() { return (GAMMA); }

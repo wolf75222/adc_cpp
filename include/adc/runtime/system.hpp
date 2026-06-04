@@ -207,6 +207,10 @@ class System {
   /// resolvent les couplages inter-especes (index_of(role)) au lieu d'un indice litteral.
   std::vector<std::string> variable_roles(const std::string& name,
                                           const std::string& kind = "conservative") const;
+  /// Indice adiabatique (gamma) du bloc, lu par les couplages inter-especes (collision, echange
+  /// thermique, T_e). Vaut le defaut historique 1.4 sauf si le bloc le declare (add_block : ModelSpec
+  /// gamma ; bloc compile / dynamique : symbole optionnel adc_compiled_gamma de l'ABI du .so).
+  double block_gamma(const std::string& name) const;
   /// @}
 
   /// @name Diagnostics

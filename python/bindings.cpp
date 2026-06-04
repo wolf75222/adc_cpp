@@ -91,6 +91,7 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("kind") = "conservative")
       .def("variable_roles", &System::variable_roles, py::arg("name"),
            py::arg("kind") = "conservative")
+      .def("block_gamma", &System::block_gamma, py::arg("name"))
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0, py::arg("epsilon") = 1.0)
