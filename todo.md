@@ -47,17 +47,22 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 
 ## 3. Durcissement de l'architecture (`docs/ROADMAP.md` "en file")
 
-- [~] **Moteur AMR unifie** : `advance_amr(LevelHierarchy&)`, `FluxRegister`, `CoverageMask` promus
-      en vrais types. RESTE : promouvoir `PatchRange`, le routage bordant de `CoarseFineInterface`,
-      `SubcyclingSchedule`, `RegridPolicy` (encore inlines dans `subcycle_level_mp`) et y replier la
-      famille `amr_step_*` (qui encode le cas dans le nom).
+- [~] **Moteur AMR unifie** : `advance_amr(LevelHierarchy&)`, `FluxRegister`, `CoverageMask`,
+      `RegridPolicy` (`amr_regrid_finest`) promus en vrais types. `PatchRange` promu (empreinte
+      grossiere `[I0..I1]x[J0..J1]` d'un patch fin ; dedup de 6 calculs d'empreinte inlines, arithmetique
+      `(hi-1)/2` historique preservee donc bit-identique). (#80) RESTE : le routage bordant de
+      `CoarseFineInterface` et `SubcyclingSchedule` (encore inlines dans la recursion `subcycle_level_mp`)
+      et replier la famille `amr_step_*` (`amr_step_2level_multipatch` replique-grossier vs
+      `amr_step_multilevel_multipatch` recursif : invariants distincts, non fusionnes pour garder le
+      bit-identique ; `advance_amr` sert deja de facade unifiee).
 - [x] **API memoire explicite** : `for_each_cell_reduce_{sum,max}`, `sum`/`norm_inf` faits.
       `sync_host()` / `sync_device()` explicites poses sur le seam `for_each.hpp` + methodes
       `MultiFab` : encodent l'intention de residence. Sous memoire unifiee (`Kokkos::SharedSpace`)
       `sync_host()` est un `device_fence()` cible, `sync_device()` un no-op (bit-identique).
       Scaffolding pour le futur chemin NON unifie (buffers separes + deep_copy).
-- [~] **Familles de ghosts** : `fill_physical_bc` / `fill_boundary` / `mf_fill_fine_ghosts` separes.
-      RESTE : remonter le coarse-fine en helper nomme de premier niveau.
+- [x] **Familles de ghosts** : `fill_physical_bc` / `fill_boundary` / `mf_fill_fine_ghosts` separes ;
+      le coarse-fine remonte en helper nomme de premier niveau `fill_cf_ghost_cell` (interp constante
+      en espace + lineaire en temps, factorise les 3 corps de `mf_fill_fine_ghosts_t/_multi/_mb`). (#80)
 - [x] **VariableRole** : couplages inter-especes par role (#18) + la brique generee par le DSL
       declare ses VariableRole et le runtime resout les variables par role avec fallback indices. (#40)
       `block_names()` lit desormais le registre de blocs C++ (voit JIT/AOT, plus seulement
@@ -132,3 +137,26 @@ disque, Schur EPM, AMR multi-bloc, repro Hoffart) -- toutes DIFFEREES. Une PR pa
       chemins (JIT + AOT), fallback pour les `.so` anciens, garde-fou sur la longueur de `names=`. (#75)
 - [x] **adc_cases** : package + manifest CI, validations renforcees (pas de validation importante
       masquee par le manifest). (adc_cases #2, #3)
+
+### Vague parallele (juin 2026, 4 chantiers en PR separees, write-sets disjoints)
+
+- [x] **adc_cases package maintenable** : `recipes.py` (recettes systeme separees des modeles
+      mono-espece), `common/native.py` (compile JIT hors source + cle d'ABI + erreurs de symbole
+      explicites), preambule d'import garde (plus de `sys.path.insert` inconditionnel), `two_fluid_ap`
+      build dans `out/<cas>/build/` (git-ignore). (adc_cases #4)
+- [x] **Facade DSL `m.compile(backend=prototype|aot|production)`** : aiguillage par intention couple a
+      l'adder System correct ; preserve noms/roles/gamma/n_aux/B_z/T_e ; `require_metadata=True` leve une
+      erreur explicite au lieu du fallback muet. PUR-PYTHON (aucune modif binding). `production` =
+      alias HONNETE de `aot` aujourd'hui (pas encore un backend zero-copie device distinct -> suivi). (#79)
+- [x] **Moteur AMR durci** : `PatchRange` + helper coarse-fine `fill_cf_ghost_cell` promus,
+      bit-identique (Serial 73/73, MPI 94/94 np=1/2/4). (#80) Voir section 3.
+- [x] **Audit feuille de route papier** : `docs/PAPER_ROADMAP.md` (4 paniers : API actuelle / DSL
+      production / domaine disque FV / AMR multi-bloc + EPM avance). Verrou = bord d'anneau cartesien
+      (cut-cell ne sert que Poisson, pas le transport). Aucune implementation. (#78)
+
+### Suite identifiee (non commencee, hors feature papier)
+
+- [ ] **Routage `CoarseFineInterface` + `SubcyclingSchedule`** encore inlines dans `subcycle_level_mp`
+      (extraction touche la recursion coeur, differee pour garder un diff sur et bit-identique).
+- [ ] **Backend DSL `production` distinct** (TU C++ native `add_compiled_model` ou codegen Kokkos/CUDA
+      avec garde-fous GPU/MPI/AMR cote moteur) : aujourd'hui alias de `aot`.
