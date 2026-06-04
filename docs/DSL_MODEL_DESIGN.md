@@ -32,6 +32,18 @@ PAS le `add_compiled_block` hote a marshaling) sans presumer de ses noms de symb
 exacts : on decrit le CONTRAT, pas l'implementation du frere.
 
 
+## Decisions tranchees (revue)
+
+Points d'API fixes apres revue, pour eviter l'ambiguite a l'implementation :
+1. `m.flux(x=, y=)` = DECLARATEUR symbolique ; l'evaluateur numpy est `m.eval_flux(...)` (noms distincts). (section 1)
+2. `m.primitive_vars(rho=expr, ...)` accepte les KWARGS (ordre = layout `Prim`) ; forme positionnelle aussi. (section 1)
+3. Le flux NUMERIQUE est `adc.FiniteVolume(limiter=, riemann=, variables=)` -- `riemann`, PAS `flux` (qui est le flux physique). (section 6)
+4. `m.param(name, value)` retourne un objet `Param` NOMME (`name`/`value`/`kind`), pas un `Const` anonyme. (section 2)
+5. `CompiledModel` porte `abi_key` + `model_hash` + flags de build, pas seulement `so_path`/backend/noms. (section 3)
+6. Statut GPU natif CLARIFIE : le chemin device-clean a foncteurs nommes est VALIDE GH200 ; il manque seulement son binding Python. Production GPU n'est PAS casse. (section 5)
+7. `m.compile(backend, target)` SANS `device=` : capacites GPU/MPI/AMR verifiees au branchement/execution, pas figees a la compilation. (sections 1, 5, 7)
+
+
 ## 0. Etat actuel (factuel, point de depart)
 
 `HyperbolicModel` (`dsl.py:266`) est le SEUL objet modele. Il porte les formules
@@ -82,35 +94,37 @@ Mapping methode cible -> backing `HyperbolicModel` :
 | `dsl.Model` (cible) | backe par `HyperbolicModel` (`dsl.py`) | note |
 |---|---|---|
 | `m.conservative_vars(*names, roles=)` | `conservative_vars(*names, roles=)` `:291` | identique (transfere `roles=`) |
-| `m.primitive_vars(*vars, roles=)` | `set_primitive_state(*vars_or_names, roles=)` `:323` | RENOMMAGE seul ; meme semantique (layout ORDONNE de `Prim`) |
+| `m.primitive_vars(rho=expr, u=expr, ...)` (kwargs) ou `(*vars, roles=)` | `set_primitive_state(*vars_or_names, roles=)` `:323` + `primitive(name, expr)` `:301` | STYLE CIBLE = KWARGS `name=expr` : chaque kwarg definit une primitive (`_m.primitive(name, expr)`) ET fixe le layout ORDONNE de `Prim` dans l'ordre des kwargs (Python 3.7+ : ordre d'insertion garanti). La forme positionnelle `(*vars, roles=)` reste acceptee. Les `roles=` (kwarg ou liste) restent supportes pour le mapping role->indice |
 | `m.primitive(name, expr)` | `primitive(name, expr)` `:301` | definition d'une primitive par formule |
 | `m.aux(name)` | `aux(name)` `:306` | champ auxiliaire (doit etre clef de `AUX_CANONICAL` `:35`) |
 | `m.conservative_from(exprs)` | `set_conservative_from(exprs)` `:334` | inverse prim->cons (le DSL ne sait pas inverser) |
-| `m.flux(x=, y=)` | `set_flux(x, y)` `:311` | NB collision de nom : voir ci-dessous |
+| `m.flux(x=, y=)` | `set_flux(x, y)` `:311` | DECLARATEUR symbolique du flux physique (decision tranchee, voir ci-dessous) |
+| `m.eval_flux(U, aux, dir)` | `flux(U, aux, dir)` `:354` | EVALUATEUR numpy (debug / proto hote) ; nom DISTINCT du declarateur `m.flux` |
 | `m.source(s)` | `set_source(s)` `:313` | optionnel |
 | `m.eigenvalues(x=, y=)` | `set_eigenvalues(x, y)` `:312` | |
 | `m.elliptic_rhs(e)` | `set_elliptic_rhs(e)` `:314` | optionnel (couplage Poisson) |
 | `m.gamma(value)` ou `m.set_gamma(value)` | `set_gamma(gamma)` `:316` | EOS, porte par `ADC_EXPORT_BLOCK_GAMMA` |
 | `m.param(name, value)` | (aucun backing) | GAP, voir section 2 |
 | `m.check()` | `check()` `:382` | verifie dependances |
-| `m.compile(backend, target, device)` | `compile(...)` `:798` (+ section 3) | renvoie un `CompiledModel`, voir section 3 |
+| `m.compile(backend, target)` | `compile(...)` `:798` (+ section 3) | renvoie un `CompiledModel`. PAS d'argument `device` : les capacites (GPU/MPI/AMR) sont verifiees AU BRANCHEMENT/EXECUTION (`add_equation`/`run`), pas figees comme un drapeau de compilation (eviterait une fausse garantie si le module n'est pas bati avec Kokkos/CUDA). Voir sections 5 et 7 |
 
-COLLISION DE NOMS A TRANCHER (decision d'implementation, pas un blocage). Dans
-`HyperbolicModel`, `flux(U, aux, dir)` `:354` est l'EVALUATEUR numpy (interprete CPU)
-et `set_flux` `:311` est le DECLARATEUR. La plan cible nomme le declarateur `m.flux`.
-Deux options pour `dsl.Model` :
-- (a) `m.flux` = declarateur (`set_flux`), et exposer l'evaluateur sous un autre nom
-  (`m.eval_flux` -> `_m.flux`). Recommande : la surface declarative prime.
-- (b) garder `m.set_flux`/`m.set_eigenvalues`/`m.set_source`/`m.set_elliptic_rhs`
-  comme alias directs, plus surs en attendant. La spec n'impose pas ; elle exige que
-  le choix soit COHERENT (declaratif vs evaluatif separes par des noms distincts).
+COLLISION DE NOMS : TRANCHEE. Dans `HyperbolicModel`, `flux(U, aux, dir)` `:354` est
+l'EVALUATEUR numpy (interprete CPU) et `set_flux` `:311` est le DECLARATEUR. Le plan
+cible nomme le declarateur `m.flux`. DECISION : sur `dsl.Model`, `m.flux(x=, y=)` est le
+DECLARATEUR symbolique (delegue a `set_flux`) ; l'evaluateur numpy est expose sous le
+nom DISTINCT `m.eval_flux(U, aux, dir)` (delegue a `_m.flux`). La surface declarative
+prime ; aucun nom ne porte les deux sens. (Pas d'alias `m.set_flux` sur la facade : un
+seul nom par intention.)
 
 Methodes cible SANS backing actuel (GAP LIST consolidee section 7) :
 - `m.param(name, value)` : aucun mecanisme de parametre nomme dans `dsl.py` (voir 2).
-- `m.compile(target=, device=)` : `compile()` `:798` n'a PAS d'argument `target` ni
-  `device` ; il a `backend`, `name`, `cxx`, `std`, `require_metadata`. `target`/`device`
-  sont a ajouter (section 3) et restent en grande partie no-op tant que le backend
-  natif/Kokkos n'est pas branche.
+- `m.compile(target=)` : `compile()` `:798` n'a PAS d'argument `target` ; il a `backend`,
+  `name`, `cxx`, `std`, `require_metadata`. `target` (`"system"`/`"amr_system"`) est a
+  ajouter (section 3). PAS de `device=` : decision (point 7) de ne PAS porter la capacite
+  device comme un argument de `compile` -> les capacites sont verifiees au branchement
+  (`add_equation`) et a l'execution (`run`), ou l'on sait si le module est bati Kokkos/CUDA
+  et le contexte MPI/AMR reel (section 5). Un `device=True` a la compilation donnerait une
+  fausse garantie (un `.so` peut compiler sans que le module hote soit device-capable).
 - `m.compile()` ne renvoie PAS un objet `CompiledModel` aujourd'hui : il renvoie
   `so_path` (un `str`). Le `CompiledModel` (section 3) est nouveau.
 
@@ -127,9 +141,14 @@ est inline. Donc `m.param("gamma", 1.4)` en mode constante n'a besoin d'AUCUN mo
 nouveau : c'est du sucre Python qui retourne un `Const` (ou un scalaire) reutilisable
 dans plusieurs formules, recompile a chaque changement de valeur.
 
-Forme proposee : `g = m.param("gamma", 1.4)` retourne un objet utilisable comme un
-`Expr` (ou directement un float) ; changer la valeur exige `m.compile(...)` a nouveau.
-C'est ccoherent avec l'etat actuel (tout est recompile) et zero-risque.
+Forme proposee : `g = m.param("gamma", 1.4)` retourne un objet `Param` NOMME (pas un
+`Const` anonyme), porteur de son IDENTITE : `name`, `value`, `kind` (`"const"` au depart,
+`"runtime"` reserve, voir mode b). `Param` se comporte comme un `Expr` dans les formules
+(il s'INLINE en `Const(value)` au codegen, donc zero-risque cote brique generee), mais
+GARDE name/value/kind pour : l'introspection (`m.params`), les logs/diagnostics, la
+reproductibilite (un run trace ses parametres), et la transition future vers les params
+runtime (mode b) SANS changer la surface utilisateur. Changer la valeur exige
+`m.compile(...)` a nouveau (tout est recompile aujourd'hui).
 
 CAS PARTICULIER deja cable : `gamma` a un canal dedie hors formule via `set_gamma`
 `:316` -> `ADC_EXPORT_BLOCK_GAMMA` (`variables.hpp:153`), lu par `read_block_meta`
@@ -190,8 +209,11 @@ chemin et tout ce qu'il faut pour le brancher correctement.
 | `n_vars` | `HyperbolicModel.n_vars` (`dsl.py:340`) | nb composantes |
 | `gamma` | `HyperbolicModel.gamma` (`dsl.py:316`) | EOS (None = defaut 1.4) |
 | `n_aux` | `aux_n_aux(aux_names)` (`dsl.py:39`) | largeur canal aux requise |
-| `params` | dict des `m.param` (mode const) | introspection / reproductibilite |
+| `params` | dict `{name: Param}` (objets `Param` nommes, section 2) | introspection / reproductibilite |
 | `caps` | derive du backend (section 5) | drapeaux CPU/MPI/AMR/GPU |
+| `abi_key` | cle ABI baked (compilateur + std + signature d'en-tetes, cf. `abi_key.hpp` / `adc_cases/common/native.py`) | refuser un `.so` incompatible AU CHARGEMENT plutot qu'un UB silencieux |
+| `model_hash` | hash stable du modele (formules + roles + n_aux + params) | identifier/reutiliser un `.so` deja compile ; tracer le run |
+| `cxx`, `std`, `cxx_flags` | compilateur, standard, flags passes a la compilation | reproductibilite + diagnostic d'incompatibilite ABI |
 
 `CompiledModel` est PRODUIT par `m.compile(...)` : la facade compile le `.so` (via
 `compile_so`/`compile_aot` inchangees), puis empaquette le chemin avec les
@@ -200,6 +222,13 @@ detient deja noms/roles/gamma/n_aux). Les memes metadonnees sont DEJA emises dan
 `.so` par `_emit_metadata` (`dsl.py:675`) et relues cote C++ par `read_block_meta`
 (`system.cpp:179`) ; `CompiledModel` les expose juste cote Python pour le dispatch et
 les diagnostics, sans nouvelle source de verite.
+
+Un `CompiledModel` n'est donc PAS un simple `str so_path` : il porte aussi la CLE ABI
+et les flags de build (`abi_key`, `model_hash`, `cxx`/`std`/`cxx_flags`). C'est ce qui
+permet de refuser au CHARGEMENT un `.so` compile avec un etat incompatible (compilateur,
+standard, en-tetes divergents) au lieu d'un comportement indefini silencieux : le chemin
+natif `production` compare deja cette cle cote C++ (`abi_key.hpp`, garde-fou du loader),
+et `CompiledModel.abi_key` rend la verification + le diagnostic disponibles cote Python.
 
 ### Consommation : `System.add_equation(model=compiled, ...)`
 
@@ -211,10 +240,12 @@ dispatche sur le bon adder selon `compiled.backend`/`compiled.adder` :
   (`bindings.cpp:78`, `system.cpp:706`). NB : `add_dynamic_block` ne prend PAS
   `limiter`/`riemann`/`time` (chemin hote Rusanov ordre 1) ; il prend `recon`
   (`none`/`minmod`/`vanleer`) et `substeps`. La facade doit donc IGNORER (ou refuser,
-  section 4) un `spatial.flux != "rusanov"` pour ce backend.
+  section 4) un `spatial.riemann != "rusanov"` pour ce backend (`riemann` = flux
+  NUMERIQUE de `FiniteVolume`, cf. section 6 ; `flux` reste le flux PHYSIQUE du modele).
 - `backend in {"aot","production"}` aujourd'hui (`adder="add_compiled_block"`) ->
-  `self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.flux,
-  spatial.recon, time.kind, substeps, names)` (`bindings.cpp:81`, `system.cpp:738`).
+  `self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.riemann,
+  spatial.variables, time.kind, substeps, names)` (`bindings.cpp:81`, `system.cpp:738` ;
+  l'arg C++ du flux numerique s'appelle deja `riemann`, `variables` mappe `recon`).
 - `backend="production"` CIBLE (apres le travail du frere) -> adder natif zero-copie
   (le pendant Python de `add_compiled_model`, `dsl_block.hpp:36`). Cet adder n'existe
   PAS encore cote binding (`add_compiled_model` est un template C++ non bindable tel
@@ -244,7 +275,7 @@ de `dsl.py` (p.ex. `:296`, `:822`, `:845`).
 | param non defini | formule reference un `param` jamais pose | "param '<name>' reference mais non defini (m.param('<name>', valeur))" | etend `check()` `:382` (qui leve deja sur variable non declaree, `:397`) |
 | param mode runtime | `m.param(name, value, kind="runtime")` | "param runtime non supporte (changement d'ABI/codegen requis, phase ulterieure) ; utiliser un param constant ou un champ aux" | NOUVEAU, `NotImplementedError` (section 2 mode b) |
 | backend inconnu | `compile(backend=x)` hors `_BACKENDS` | "compile : backend <x> inconnu (attendus ['aot','production','prototype'])" | DEJA `dsl.py:821-823` |
-| flux incompatible variables | `spatial.flux in {hllc,roe}` sans primitive `p` declaree | "flux 'hllc'/'roe' exige une pression : declarer m.primitive('p', ...)" | ANCRE physique : la brique n'emet `pressure`/`wave_speeds` que si `'p' in prim_defs` (`dsl.py:558`) ; `make_block` exige `m.pressure`/`m.wave_speeds` pour HLLC/Roe (cf. `amr_dsl_block.hpp:135`) |
+| flux incompatible variables | `spatial.riemann in {hllc,roe}` sans primitive `p` declaree | "riemann 'hllc'/'roe' exige une pression : declarer m.primitive('p', ...)" | ANCRE physique : la brique n'emet `pressure`/`wave_speeds` que si `'p' in prim_defs` (`dsl.py:558`) ; `make_block` exige `m.pressure`/`m.wave_speeds` pour HLLC/Roe (cf. `amr_dsl_block.hpp:135`) |
 | GPU/MPI/AMR incompatible backend | `add_equation` avec `device="gpu"`/MPI/AMR sur backend non capable | "backend '<b>' n'est pas device-clean / multi-rang : utiliser backend='production' (chemin natif)" | section 5 ; `compiled_block_abi.hpp:24-26` ("sans AMR/MPI"), `dynamic_model.hpp:18-21` (hors hot path GPU) |
 | production demande mais seul aot dispo | `compile(backend="production")` tant que le natif n'est pas branche | soit un WARNING explicite ("production -> aot : chemin natif zero-copie non encore branche"), soit erreur si `device="gpu"` exige | `dsl.py:786-791` documente deja l'alias ; aujourd'hui SILENCIEUX (a rendre explicite) |
 | require_metadata sur prototype | `compile(backend="prototype", require_metadata=True)` | "backend 'prototype' (...) incompatible avec require_metadata=True ; utiliser 'aot' ou 'production'" | DEJA `dsl.py:830-834` |
@@ -283,10 +314,16 @@ Ancres :
   avec `fill_boundary` (halos MPI) + `assemble_rhs` Kokkos sur les vrais `MultiFab`,
   SANS recopie ; parite bit-identique `add_block` validee CPU/Serial ET GH200
   (foncteurs nommes, `dsl_block.hpp:22-29`). AMR : `add_compiled_model(AmrSystem&)`
-  (`amr_dsl_block.hpp`). LIMITE connue : ce chemin n'a pas de binding Python, et
-  `add_compiled_model` a LAMBDAS ETENDUES segfaute encore sur Cuda ; le contournement
-  device-clean (foncteurs nommes) est valide mais le chemin Python n'est PAS re-route
-  dessus (`PAPER_ROADMAP.md:89-95`).
+  (`amr_dsl_block.hpp`). STATUT GPU (a ne PAS lire comme "production GPU casse") :
+  l'ANCIEN chemin a LAMBDAS ETENDUES `__host__ __device__` segfautait sur Cuda (limite
+  nvcc) ; il a ete remplace par les FONCTEURS NOMMES device-clean de `block_builder.hpp`,
+  et c'est CE chemin (le seul que `add_compiled_model` emprunte aujourd'hui) qui est
+  VALIDE bit-identique sur GH200 (parite A==B `dres=0`, multi-box + MPI ; #64/#48,
+  `dsl_block.hpp:22-29`). La SEULE limite restante est cote PYTHON : `add_compiled_model`
+  est un template C++ sans binding, donc le backend `production` n'est pas encore
+  re-route dessus depuis Python (c'est le travail du frere ; cf. section 0 et 7). Autrement
+  dit : le chemin natif device-clean EXISTE et est valide en C++ ; il manque juste son
+  exposition Python.
 - Aucun backend n'execute de callback Python par cellule : meme `prototype` est un
   modele C++ (issu du codegen), pas un `adc.PythonFlux`. `adc.PythonFlux`
   (`__init__.py:420`) est un chemin numpy hote SEPARE, hors DSL compile.
@@ -299,7 +336,7 @@ Mapping des objets/methodes runtime cibles du plan sur ce qui EXISTE
 
 | cible (plan) | existant | statut |
 |---|---|---|
-| `adc.FiniteVolume(reconstruction=, flux=)` | `adc.Spatial(limiter=, flux=, recon=)` (`__init__.py:271`) | RENOMMAGE + REMAP des args. `reconstruction` mappe `limiter` (none/minmod/vanleer) ET/OU `recon` (conservative/primitive), deux axes distincts aujourd'hui (`Spatial.limiter` vs `Spatial.recon`). A clarifier : `FiniteVolume` doit exposer les deux. GAP de nommage, pas de moteur. |
+| `adc.FiniteVolume(limiter=, riemann=, variables=)` | `adc.Spatial(limiter=, flux=, recon=)` (`__init__.py:271`) | RENOMMAGE + REMAP des args. DECISION (point 3) : le flux NUMERIQUE (Rusanov/HLL/HLLC/Roe) s'appelle `riemann=`, PAS `flux=`, pour ne pas collisionner avec le flux PHYSIQUE `m.flux` du modele. `limiter=` -> `Spatial.limiter` (none/minmod/vanleer, et a terme weno5), `riemann=` -> `Spatial.flux`, `variables=` (`"conservative"`/`"primitive"`) -> `Spatial.recon`. GAP de nommage, pas de moteur. |
 | `adc.IMEX(substeps=)` | `adc.IMEX(substeps=)` (`__init__.py:304`) | EXISTE a l'identique. `Explicit(substeps=)` `:295` et `Implicit(dt_ratio=, substeps=)` `:313` (alias d'IMEX) aussi. |
 | `adc.DivEpsGrad` | `adc.DivEpsGrad(epsilon=)` (`__init__.py:174`) | EXISTE. Operateur elliptique `div(eps grad)`. eps(x) variable via `set_epsilon_field` (`system.cpp:867`). |
 | `adc.DirichletWall.circle(radius=)` | `set_poisson(wall="circle", wall_radius=)` (`bindings.cpp:95`, `system.cpp:854`) | GAP de sucre : pas d'objet `DirichletWall` ; aujourd'hui c'est un argument chaine de `set_poisson`/`add_elliptic_model` (`__init__.py:350`). `DirichletWall.circle(r)` serait un constructeur retournant `(wall="circle", wall_radius=r)`. |
@@ -369,7 +406,7 @@ les noms). Ne touche pas la numerique ; c'est du cablage de dispatch.
     natif `add_compiled_model(AmrSystem&)` (`amr_dsl_block.hpp`). LIMITE : `AmrSystem`
     n'est PAS a parite avec `System` (mono-bloc, explicite, sans recon primitive ni
     Roe ; `ARCHITECTURE.md:494`, `PAPER_ROADMAP.md:118-121`) : la facade doit refuser
-    (section 4) un `spatial.flux="roe"`/`recon="primitive"` sur AMR. WRITE-SET :
+    (section 4) un `spatial.riemann="roe"`/`variables="primitive"` sur AMR. WRITE-SET :
     `python/adc/__init__.py` (facade `AmrSystem`).
 
 ### Phase E : `m.param` runtime (phase 2, changement de moteur)
