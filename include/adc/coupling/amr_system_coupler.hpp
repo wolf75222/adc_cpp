@@ -78,13 +78,20 @@ class AmrSystemCoupler {
   // est (re)cable ici vers l'aux PARTAGE. Le ctor re-pointe aussi block.state vers le
   // niveau grossier de sa hierarchie, pour que le RHS de systeme (ChargeDensityRhs) lise
   // bien les densites grossieres.
+  // bz : champ magnetique hors-plan B_z(x, y) fourni par l'utilisateur (constante ou champ),
+  // partage par TOUS les blocs. Pose sur la composante B_z (indice kAuxBaseComps) du canal aux
+  // PARTAGE de CHAQUE niveau, depuis les centres de cellule DE CE NIVEAU (chaque niveau a sa
+  // propre geometrie / dx). Calque AMR du bz_ de SystemAssembler (chemin non-AMR). Un bloc qui
+  // lit B_z (n_aux=4) le voit a tous les niveaux, un bloc de base (3) ignore la composante. Sans
+  // bloc a champ extra (largeur 3) ou si bz vide : no-op -> bit-identique a l'historique.
   AmrSystemCoupler(System system, const Geometry& geom, const BoxArray& ba_coarse,
                    const BCRec& bcPhi, RhsAssembler rhs_assembler,
                    std::vector<std::vector<AmrLevelMP>> block_levels,
                    Periodicity base_per = Periodicity{true, true},
                    bool replicated_coarse = true,
                    PoissonCadence cadence = PoissonCadence::OncePerStep,
-                   std::function<bool(Real, Real)> active = {})
+                   std::function<bool(Real, Real)> active = {},
+                   std::function<Real(Real, Real)> bz = {})
       : system_(std::move(system)),
         rhs_assembler_(std::move(rhs_assembler)),
         geom_(geom),
@@ -95,7 +102,8 @@ class AmrSystemCoupler {
         replicated_coarse_(replicated_coarse),
         cadence_(cadence),
         mg_(geom, ba_coarse, bcPhi, std::move(active), replicated_coarse),
-        block_levels_(std::move(block_levels)) {
+        block_levels_(std::move(block_levels)),
+        bz_(std::move(bz)) {
     // Verifications de construction (revue Codex) : sans elles, une hierarchie mal
     // formee provoque un acces hors borne silencieux dans le cablage / l'avance.
     if (block_levels_.size() != System::n_blocks)
@@ -137,6 +145,15 @@ class AmrSystemCoupler {
       block.state = &block_levels_[b][0].U;
       ++b;
     });
+
+    fill_bz();  // peuple B_z par niveau (no-op si aucun bloc ne le demande ou si bz vide)
+  }
+
+  // Setter (parite avec le ctor : alternative pour poser B_z apres construction). Re-peuple
+  // immediatement le canal aux de chaque niveau. No-op effectif si la largeur aux <= base.
+  void set_bz(std::function<Real(Real, Real)> bz) {
+    bz_ = std::move(bz);
+    fill_bz();
   }
 
   System& system() { return system_; }
@@ -177,6 +194,14 @@ class AmrSystemCoupler {
     for (int k = 1; k < nlev_; ++k)
       detail::coupler_inject_aux_mb(aux_[k - 1], aux_[k],
                                     /*replicated_parent=*/(k == 1) && replicated_coarse_);
+
+    // B_z PAR NIVEAU (pas seulement propage) : coupler_inject_aux_mb recopie TOUTES les
+    // composantes du parent (dont B_z) vers les fins, ce qui ecraserait le B_z fin par un B_z
+    // grossier injecte (constant par cellule grossiere). On re-pose donc B_z depuis bz_ aux
+    // centres FINS apres l'injection, pour qu'un B_z spatialement variable soit echantillonne a
+    // la resolution du niveau. Statique et bon marche ; no-op si la largeur aux <= base ou bz vide
+    // (B_z constant : ce re-fill est idempotent, l'injection aurait suffi).
+    fill_bz();
   }
 
   // Avance le systeme d'un pas. Blocs explicites : advance_amr avec leur Disc et leurs
@@ -298,6 +323,33 @@ class AmrSystemCoupler {
     return a;
   }
 
+  // Peuple la composante aux B_z (indice kAuxBaseComps) du canal partage de CHAQUE niveau depuis
+  // bz_(x, y). B_z est statique (externe a l'elliptique) : pose une fois (au ctor / set_bz),
+  // preserve par solve_fields (field_postprocess n'ecrit que phi/grad, comp 0..2 ; on re-pose
+  // apres l'injection coarse->fine qui, elle, recopierait un B_z grossier) et par l'avance (le
+  // moteur AMR ne touche pas l'aux). Chaque niveau a SA geometrie : niveau k = geom_.refine(1 << k),
+  // memes extents physiques mais domaine d'indices raffine, donc x_cell/y_cell pointent au centre
+  // physique de la cellule FINE. On remplit la GROWN box (valides + halos) directement depuis
+  // bz_(x, y) : bz_ etant fonction pure de la position physique, son evaluation aux centres ghost
+  // donne le B_z physiquement correct la aussi (independant des BC du patch fin, sans ambiguite de
+  // periodicite sur un domaine de patch). No-op si la largeur aux <= kAuxBaseComps (aucun bloc ne
+  // lit B_z) ou si bz_ vide : garde RUNTIME (la largeur n'est connue qu'a la construction) ->
+  // modele de base strictement bit-identique a l'historique.
+  void fill_bz() {
+    if (!bz_ || aux_ncomp_ <= kAuxBaseComps) return;
+    for (int k = 0; k < nlev_; ++k) {
+      const Geometry gk = geom_.refine(1 << k);  // geometrie du niveau k (dx = dx_coarse / 2^k)
+      MultiFab& A = aux_[k];
+      for (int li = 0; li < A.local_size(); ++li) {
+        Fab2D& f = A.fab(li);
+        const Box2D g = f.grown_box();  // valides + halos : B_z(x,y) correct partout
+        for (int j = g.lo[1]; j <= g.hi[1]; ++j)
+          for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+            f(i, j, kAuxBaseComps) = bz_(gk.x_cell(i), gk.y_cell(j));
+      }
+    }
+  }
+
   Geometry geom_;
   Box2D dom_;
   Periodicity base_per_;
@@ -311,6 +363,7 @@ class AmrSystemCoupler {
   std::vector<MultiFab> aux_;                          // [niveau], partage
   int aux_ncomp_ = kAuxBaseComps;  // largeur du canal aux partage (max aux_comps sur les blocs)
   int nlev_ = 0;
+  std::function<Real(Real, Real)> bz_;  // B_z(x, y) externe (vide si non fourni)
 };
 
 // Defaut implicite sur AMR : backward-Euler (Newton) sur la source du modele, applique

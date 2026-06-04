@@ -69,6 +69,7 @@ adc_add_test(test_aux_coupler_bz)
 adc_add_test(test_aux_system_bz)  # B_z partage multi-blocs (SystemAssembler, aux = max sur les blocs)
 adc_add_test(test_aux_composite)  # CompositeModel propage n_aux depuis ses briques (B_z)
 adc_add_test(test_amr_aux_bz)     # lecture + allocation aux width-aware sur les chemins AMR (B_z lu)
+adc_add_test(test_amr_system_bz_pop)  # B_z peuple PAR NIVEAU dans AmrSystemCoupler (echantillonne au niveau)
 
 adc_add_test(test_weno_convergence)
 adc_add_test(test_splitting)
