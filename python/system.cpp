@@ -69,8 +69,14 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       a.phi = AUX[k];
       a.grad_x = AUX[nn + k];
       a.grad_y = AUX[2 * nn + k];
-      if (AUX.size() >= 4 * nn) a.B_z = AUX[3 * nn + k];  // champ extra B_z si marshale (n_aux > 3)
-      if (AUX.size() >= 5 * nn) a.T_e = AUX[4 * nn + k];  // champ extra T_e si marshale (n_aux > 4)
+      // Champs extra marshales depuis la SOURCE UNIQUE ADC_AUX_FIELDS (adc/core/state.hpp) :
+      // meme table que load_aux cote device. Une composante extra n'est lue que si le canal est
+      // assez large ((idx+1)*nn elements). Ajouter un champ aux => 1 ligne dans ADC_AUX_FIELDS,
+      // ce site (et l'autre, plus bas) le transporte AUTOMATIQUEMENT. Ferme le trou #51.
+#define ADC_AUX_MARSHAL(name, idx) \
+  if (AUX.size() >= ((idx) + 1) * nn) a.name = AUX[(idx) * nn + k];
+      ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
+#undef ADC_AUX_MARSHAL
     }
     return a;
   };
@@ -505,8 +511,12 @@ struct System::Impl {
           a.phi = aux[c0];
           a.grad_x = aux[nn + c0];
           a.grad_y = aux[2 * nn + c0];
-          if (aux.size() >= 4 * nn) a.B_z = aux[3 * nn + c0];
-          if (aux.size() >= 5 * nn) a.T_e = aux[4 * nn + c0];
+          // Champs extra : meme SOURCE UNIQUE ADC_AUX_FIELDS que load_aux et que l'autre site
+          // de marshaling (host_residual). cf. note la-haut ; ajout d'un champ = 1 ligne.
+#define ADC_AUX_MARSHAL(name, idx) \
+  if (aux.size() >= ((idx) + 1) * nn) a.name = aux[(idx) * nn + c0];
+          ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
+#undef ADC_AUX_MARSHAL
         }
         Real v = std::max(im->max_wave_speed(s, a, 0), im->max_wave_speed(s, a, 1));
         if (v > mx) mx = v;

@@ -94,11 +94,19 @@ ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i,
 // suivantes, optionnelles, alimentent les champs extra de Aux dans l'ordre canonique.
 // NComp = kAuxBaseComps (defaut) reproduit a l'identique l'ancien comportement : les
 // champs extra restent a 0 et aucune composante au-dela de 2 n'est touchee.
+//
+// Les champs extra sont charges depuis la SOURCE UNIQUE ADC_AUX_FIELDS (state.hpp) : chaque
+// X(name, idx) genere `if constexpr (NComp > idx) x.name = a(i,j,idx);`, exactement la
+// sequence ecrite a la main auparavant. Ajouter un champ extra => 1 ligne dans ADC_AUX_FIELDS
+// suffit pour que ce chemin de lecture device le couvre (et le marshaling hote, genere de la
+// meme table). NComp = kAuxBaseComps : toutes les gardes sont fausses -> bit-identique.
 template <int NComp = kAuxBaseComps>
 ADC_HD inline Aux load_aux(const ConstArray4& a, int i, int j) {
   Aux x{a(i, j, 0), a(i, j, 1), a(i, j, 2)};
-  if constexpr (NComp > 3) x.B_z = a(i, j, 3);
-  if constexpr (NComp > 4) x.T_e = a(i, j, 4);  // champ extra suivant (composante canonique 4)
+#define ADC_AUX_LOAD(name, idx) \
+  if constexpr (NComp > (idx)) x.name = a(i, j, idx);
+  ADC_AUX_FIELDS(ADC_AUX_LOAD)
+#undef ADC_AUX_LOAD
   return x;
 }
 

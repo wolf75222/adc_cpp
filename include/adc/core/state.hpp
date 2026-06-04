@@ -58,16 +58,44 @@ ADC_HD StateVec<N> operator*(Real s, StateVec<N> a) {
 // via un membre statique n_aux (defaut kAuxBaseComps = 3) ; un modele sans n_aux ne lit jamais
 // les champs extra et reste strictement bit-identique. Les champs extra valent 0 par defaut :
 // load_aux ne les ecrase que si le modele les demande.
+//
+// SOURCE UNIQUE de la disposition des champs aux EXTRA (X-macro). C'est le SEUL endroit
+// listant {membre, indice} pour les champs au-dela du contrat de base. load_aux (lecture
+// device, spatial_operator.hpp) ET le marshaling hote (python/system.cpp) en sont GENERES,
+// donc ajouter un champ aux extra se fait ICI et NULLE PART AILLEURS. Cela ferme le trou
+// historique (#51 : T_e ajoute au struct + load_aux mais oublie dans le marshaling JIT ->
+// lu comme 0 en silence). Chaque entree : X(membre, indice). L'indice DOIT etre >= 3
+// (les composantes 0..2 sont phi/grad_x/grad_y, cablees dans le constructeur de base) et
+// suivre la disposition canonique partagee avec AUX_CANONICAL cote DSL (python/adc/dsl.py),
+// duplication inherente : Python ne lit pas les en-tetes C++. Pour ajouter un champ :
+// 1 ligne ici (et la ligne miroir dans AUX_CANONICAL). Pur preprocesseur -> device-clean
+// (nvcc/Kokkos), aucune reflection C++26.
+#define ADC_AUX_FIELDS(X) \
+  X(B_z, 3)               \
+  X(T_e, 4)
+
 struct Aux {
   Real phi{};     // potentiel       (composante aux 0)
   Real grad_x{};  // d phi / d x     (composante aux 1)
   Real grad_y{};  // d phi / d y     (composante aux 2)
-  Real B_z{};     // champ B hors-plan, fourni par le systeme (composante aux 3, optionnel)
-  Real T_e{};     // temperature electronique, derivee p/rho d'un bloc fluide (composante aux 4)
+  // Membres EXTRA generes depuis ADC_AUX_FIELDS (source unique). B_z = champ B hors-plan
+  // fourni par le systeme (comp 3) ; T_e = temperature electronique p/rho d'un bloc fluide
+  // (comp 4). Tous optionnels, a 0 par defaut.
+#define ADC_AUX_DECL(name, idx) Real name{};
+  ADC_AUX_FIELDS(ADC_AUX_DECL)
+#undef ADC_AUX_DECL
 };
 
 // Largeur du canal aux du contrat de base (phi, grad phi). Un modele lisant des champs
 // supplementaires declare un n_aux plus grand ; cf. aux_comps()/load_aux().
 inline constexpr int kAuxBaseComps = 3;
+
+// Garde-fou : les indices declares dans ADC_AUX_FIELDS sont strictement EXTRA (>= base) et
+// commencent juste apres le contrat de base. Verifie a la compilation que la table reste
+// coherente avec kAuxBaseComps (le 1er champ extra est a l'indice kAuxBaseComps).
+#define ADC_AUX_IDX_CHECK(name, idx) static_assert((idx) >= kAuxBaseComps, \
+    "champ aux extra '" #name "' : indice doit etre >= kAuxBaseComps (3)");
+ADC_AUX_FIELDS(ADC_AUX_IDX_CHECK)
+#undef ADC_AUX_IDX_CHECK
 
 }  // namespace adc

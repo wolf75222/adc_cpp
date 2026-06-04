@@ -74,6 +74,7 @@ adc_add_test(test_aux_composite)  # CompositeModel propage n_aux depuis ses briq
 adc_add_test(test_amr_aux_bz)     # lecture + allocation aux width-aware sur les chemins AMR (B_z lu)
 adc_add_test(test_amr_system_bz_pop)  # B_z peuple PAR NIVEAU dans AmrSystemCoupler (echantillonne au niveau)
 adc_add_test(test_amr_system_bz_multibox)  # B_z PAR NIVEAU multi-box (grossier 2x2, fin multi-patch) mono-rang
+adc_add_test(test_aux_single_source)  # source unique ADC_AUX_FIELDS : load_aux + marshaling generes, tous champs couverts (anti-#51)
 
 adc_add_test(test_weno_convergence)
 adc_add_test(test_splitting)
