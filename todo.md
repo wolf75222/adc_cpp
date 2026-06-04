@@ -39,8 +39,8 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] `EllipticProblem` / `FieldPostProcess` nommes (coeff, CL, nullspace, convention `E = -grad phi`).
 - [x] Second membre de Poisson de systeme GENERIQUE (somme des `elliptic_rhs` des briques par bloc). (#43)
 - [x] Operateur elliptique ECRANTE / Helmholtz `div(eps grad phi) - kappa phi = f` (GeometricMG + binding). (#44)
-- [x] Operateur elliptique ANISOTROPE `div(diag(eps_x, eps_y) grad phi)` (GeometricMG). (#52)
-      [~] cablage Python + variantes (anisotrope Python, cut-cell) en cours cote agents.
+- [x] Operateur elliptique ANISOTROPE `div(diag(eps_x, eps_y) grad phi)` : coeur GeometricMG (#52),
+      eps_x(x)/eps_y(x) exposes au runtime System + Python (#56), test cut-cell + anisotrope MMS ordre 2 (#55).
 - [ ] Recabler les sites en forme `/(2*dx)` vers la forme multiplicative `*cx` (`amr_coupler`,
       `amr_coupler_mp`, `spectral_coupler`) — differe au dernier bit, donc hors perimetre tant
       qu'on veut le bit-identique.
