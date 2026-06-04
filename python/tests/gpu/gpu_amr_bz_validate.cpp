@@ -2,11 +2,12 @@
 // Le coupleur de systeme (AmrSystemCoupler::fill_bz) pose B_z(x,y) aux centres DE CHAQUE NIVEAU
 // (dx = dx_coarse / 2^k) sur la composante kAuxBaseComps du canal aux PARTAGE, puis le modele lit
 // a.B_z via load_aux<4> dans le noyau source AMR (for_each_cell ADC_HD -> device). On valide ICI
-// ce CHEMIN DEVICE par le moteur header-only advance_amr (le meme que celui qu'appelle le coupleur
-// niveau par niveau), pour deux raisons : (1) advance_amr est exactement la primitive qui consomme
-// B_z sur le device a chaque niveau ; (2) la facade AmrSystemCoupler s'instancie via le concept
-// CoupledSystemLike (requires s.for_each_block(...)), que le frontend nvcc/EDG refuse d'evaluer ici
-// alors que gcc/clang l'acceptent -- la facade reste couverte en CI Serial (tests/test_amr_aux_bz.cpp).
+// ce CHEMIN DEVICE par le moteur header-only advance_amr, qui est exactement la primitive qui
+// consomme B_z sur le device a chaque niveau (le meme que celui qu'appelle le coupleur niveau par
+// niveau). NB : la facade AmrSystemCoupler ENTIERE est, elle, validee sous nvcc par le harness frere
+// gpu_amrsys_facade_validate.cpp -- la limite "le concept CoupledSystemLike (requires
+// s.for_each_block(...)) ne s'instancie pas sous nvcc/EDG" a ete LEVEE en passant la sonde du concept
+// a un foncteur nomme (detail::ForEachBlockProbe), meme recette que les foncteurs nommes (#64).
 //
 // Le harness : B_z(x,y) = 1 + sin(2 pi x) cos(2 pi y) NON CONSTANT (depend vraiment du niveau via
 // dx), pose par niveau comme fill_bz ; un modele BzGrow (n_aux=4, source S = B_z u) sur grossier +

@@ -90,9 +90,13 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       `PoissonRhs`) sont passees de lambdas etendues a des FONCTEURS NOMMES (meme recette que les
       kernels) -> plus de segfault Cuda, parite A==B bit-identique sur GH200 (`dres=0`, exit 0 ;
       avant : SIGSEGV exit 139). Modeles DSL compiles utilisables sur GPU via la facade `System`. (#64)
-- [ ] **Limite device (b)** : la facade `AmrSystemCoupler` ne s'instancie pas sous nvcc (concept
-      `requires for_each_block`) -> chemin device de B_z-AMR valide via `advance_amr`, facade en CI
-      Serial. (memes foncteurs nommes a appliquer a la facade, comme (a))
+- [x] **Limite device (b) LEVEE** : la facade `AmrSystemCoupler` s'instancie + compile desormais sous
+      nvcc. La sonde du concept `CoupledSystemLike` (`s.for_each_block([](auto&){})`, lambda generique
+      en contexte non evalue que le frontend nvcc/EDG refusait -> CTAD du coupleur impossible) est
+      passee a un FONCTEUR NOMME `detail::ForEachBlockProbe` (meme recette que (a) / #64). Valide GH200
+      (job 637927) : `CUDA_BUILD_OK`, `exec=Cuda` OK, U(grossier+fin, 2 blocs) bit-identique au Serial
+      (`dmax=0`), avant/apres confirme (sonde lambde remise -> echec nvcc). Harness perenne
+      `python/tests/gpu/gpu_amrsys_facade_validate.cpp` (+ gpuval2 CMake). Hote inchange (72/72 ctest).
 - [ ] **Perf full-device** : le run integre NE SCALE PAS (grossier REPLIQUE -> Poisson/transport
       grossier redondants par GPU ; seuls les patchs fins se repartissent). Mode `replicated_coarse=false`
       (grossier reparti) existe dans `AmrCouplerMP` mais degrade le MG et n'est pas cable dans `AmrSystem` :

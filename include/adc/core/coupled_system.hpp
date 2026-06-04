@@ -49,10 +49,23 @@ struct CoupledSystem {
   }
 };
 
+namespace detail {
+// Sonde no-op NOMMEE pour le concept CoupledSystemLike. Une lambda generique dans le
+// requires-clause (s.for_each_block([](auto&){})) fait buter le frontend nvcc/EDG : une
+// lambda etendue en contexte NON EVALUE n'est pas instanciable cote device -> la facade
+// AmrSystemCoupler<CoupledSystemLike System> ne s'instancie pas sous Cuda (le chemin B_z-AMR
+// device passait alors par advance_amr en direct). Un FONCTEUR NOMME contourne (meme recette
+// que les foncteurs nommes de block_builder.hpp, #64) sans changer la semantique cote hote.
+struct ForEachBlockProbe {
+  template <class B>
+  void operator()(B&) const {}
+};
+}  // namespace detail
+
 template <class S>
 concept CoupledSystemLike = requires(S s) {
   { S::n_blocks } -> std::convertible_to<std::size_t>;
-  s.for_each_block([](auto&) {});
+  s.for_each_block(detail::ForEachBlockProbe{});
 };
 
 template <EquationBlockLike... Blocks>

@@ -26,3 +26,11 @@ add_executable(gpu_aux_validate gpu_aux_validate.cpp)
 target_include_directories(gpu_aux_validate PRIVATE ${ADC_INCLUDE})
 target_compile_definitions(gpu_aux_validate PRIVATE ADC_HAS_KOKKOS)
 target_link_libraries(gpu_aux_validate PRIVATE Kokkos::kokkos)
+
+# (5) FACADE AmrSystemCoupler entiere (limite device (b)) : instancie le coupleur de systeme sur AMR
+# (CoupledSystem 2 blocs + Poisson de systeme + solve_fields + step). Ne compilait PAS sous nvcc avant
+# le passage de la sonde du concept CoupledSystemLike a un foncteur nomme (detail::ForEachBlockProbe).
+add_executable(gpu_amrsys_facade_validate gpu_amrsys_facade_validate.cpp)
+target_include_directories(gpu_amrsys_facade_validate PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(gpu_amrsys_facade_validate PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(gpu_amrsys_facade_validate PRIVATE Kokkos::kokkos)

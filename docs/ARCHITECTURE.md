@@ -399,9 +399,10 @@ Fait aujourd'hui dans `adc_cpp` :
   multi-box + MPI) ET validation INTEGREE AmrSystem + MPI + GPU FAITE (les trois axes dans un
   seul run, np=1/2/4 `dmax=0`, masse conservee a `0`). Caveats honnetes : un grossier multi-box
   DISTRIBUE n'est pas bit-identique sur les sommes globales (ordre de reduction FMA, le max reste
-  exact) ; `AmrSystemCoupler` complet ne s'instancie pas sous nvcc (concept + lambda generique) ;
-  `add_compiled_model` a lambdas etendues n'est pas zero-copie sur device ; le strong-scaling AMR
-  par grossier reparti est NEGATIF a cette echelle. Detail : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md).
+  exact) ; `add_compiled_model` a lambdas etendues n'est pas zero-copie sur device (rebond hote) ; le
+  strong-scaling AMR par grossier reparti est NEGATIF a cette echelle. (La facade `AmrSystemCoupler`
+  s'instancie + se compile desormais sous nvcc, limite device (b) LEVEE : concept a sonde nommee.)
+  Detail : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md).
 
 ## 12. Comparaison AMReX
 

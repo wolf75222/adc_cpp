@@ -270,11 +270,16 @@ ET en oracle `exec=Serial` (g++, `ADC_HAS_KOKKOS` off), avec comparaison BIT-A-B
   0.90245484 au niveau 1 (centre (8,8)) -- VALEURS DISTINCTES, chacune == son centre de niveau ; la
   source consomme le bon B_z par niveau (grossier et fin evoluent avec LEUR B_z). **`dmax = 0.000e+00`**
   vs Serial sur U grossier+fin (512 cellules, 2 niveaux), conservation respectee.
-  Validation par `advance_amr` (HEADER-ONLY, le moteur que `AmrSystemCoupler` appelle niveau par
-  niveau). La FACADE `AmrSystemCoupler` elle-meme s'instancie via le concept `CoupledSystemLike`
-  (`requires s.for_each_block(...)`), que le frontend nvcc/EDG refuse d'evaluer ici alors que gcc/clang
-  l'acceptent -> la facade complete reste couverte en CI Serial (`tests/test_amr_aux_bz.cpp`), mais le
-  CHEMIN DEVICE consommateur de B_z par niveau (le seul code device de #53) est bien valide GH200.
+  Validation initiale par `advance_amr` (HEADER-ONLY, le moteur que `AmrSystemCoupler` appelle niveau
+  par niveau). La FACADE `AmrSystemCoupler` ENTIERE est desormais validee sous nvcc elle aussi (limite
+  device (b) LEVEE) : le concept `CoupledSystemLike` sondait `for_each_block` avec une LAMBDA GENERIQUE
+  en contexte non evalue (`requires s.for_each_block([](auto&){})`), que le frontend nvcc/EDG refusait
+  -> `CoupledSystemLike<CoupledSystem<...>>` faux sous Cuda -> CTAD du coupleur impossible. La sonde
+  est passee a un FONCTEUR NOMME `detail::ForEachBlockProbe` (meme recette que les foncteurs nommes,
+  point 8). Harness `python/tests/gpu/gpu_amrsys_facade_validate.cpp` (instancie la facade entiere :
+  CoupledSystem 2 blocs + Poisson de systeme + `solve_fields` + `step` sur AMR 2 niveaux) : GH200
+  `CUDA_BUILD_OK`, `exec=Cuda` OK, U(grossier+fin, 2 blocs) **`dmax = 0.000e+00`** vs Serial,
+  avant/apres confirme (sonde lambda remise -> nvcc echoue sur la CTAD).
 
 - **B_z multi-box AMR distribue sur plusieurs GPU (#59).** ⚠️ FONCTIONNEL DEVICE multi-GPU, mais PAS
   bit-identique au sens strict sur les sommes globales. #59 a fusionne sur master la couverture
