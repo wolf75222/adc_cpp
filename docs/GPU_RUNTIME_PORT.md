@@ -3,14 +3,14 @@
 Le DSL et le coeur de calcul sont verifies jusqu'au GPU GH200 (flux, brique generee, CAS Euler complet
 via le seam Kokkos `for_each_cell` ; cf. docs/GPU_ROMEO.md). Ce qui reste pour une PRODUCTION GPU de
 bout en bout, c'est porter la PILE RUNTIME entiere (System / MultiFab / Poisson / AMR / MPI) sur device.
-ETAT (juin 2026) : les composants sont valides SEPAREMENT sur GH200, pas en pile integree. Le
-solveur MONO-GRILLE complet (transport + BCs + couplages + Poisson + pas de temps, orchestre par
-le System) tourne sur GH200, verifie == CPU (phases 1-5, 7) ; les ops de champ AMR (reflux,
-transferts) tournent sur device (phase 5) ; l'echange de halos MULTI-GPU est valide (phase 6,
-np=1/2/4 bit-identiques) ; le backend AOT .so d'un modele genere par le DSL tourne sur device
-(phase 8, avec marshaling hote). Ce qui RESTE : la VALIDATION INTEGREE AmrSystem + MPI + GPU
-(jamais executee ensemble), la perf full-device, et la parite AOT zero-copie sur device. Ce
-document decoupe en phases.
+ETAT (juin 2026) : le solveur MONO-GRILLE complet (transport + BCs + couplages + Poisson + pas de
+temps, orchestre par le System) tourne sur GH200, verifie == CPU (phases 1-5, 7) ; les ops de champ
+AMR (reflux, transferts) tournent sur device (phase 5) ; l'echange de halos MULTI-GPU est valide
+(phase 6, np=1/2/4 bit-identiques) ; le backend AOT .so d'un modele genere par le DSL tourne sur
+device (phase 8, avec marshaling hote). La VALIDATION INTEGREE AmrSystem + MPI + GPU (les trois axes
+ensemble dans UN SEUL run) est desormais FAITE sur GH200 (phase 10) : np=1/2/4 BIT-IDENTIQUES (dmax=0)
+et masse conservee a 0. Ce qui RESTE : la perf full-device (le run integre ne scale pas, le grossier
+etant replique -- voir phase 10) et la parite AOT zero-copie sur device. Ce document decoupe en phases.
 
 ## Modele d'execution : MPI + Kokkos (PAS de CUDA ecrit a la main)
 
@@ -126,6 +126,39 @@ pas une reecriture des noyaux de calcul.
    `make_block`/`add_compiled_model` (foncteurs nommes) + `fill_ghosts` multi-box intra-rang ET
    cross-rang MPI multi-GPU, pour le residu d'un pas. Ce que cela ne valide PAS : l'integration AMR
    dans le meme run, ni la perf full-device (le test lit le residu cote hote, donc fence par pas).
+10. **Validation INTEGREE AmrSystem + MPI + GPU (les trois axes dans UN SEUL run).** ✅ FAIT (verifie
+   GH200). C'etait le dernier verrou : phases 5/6/9 validaient l'AMR, le MPI multi-GPU et le chemin
+   compile SEPAREMENT, jamais ensemble. Un harness branche un modele euler_poisson COMPILE via
+   `add_compiled_model(AmrSystem, ...)` (chemin `runtime/amr_dsl_block.hpp`, PR #45) sur une vraie
+   hierarchie AMR (`AmrSystem` : grossier replique 128^2 + niveau fin 256^2 multi-patch suivi par
+   regrid Berger-Rigoutsos, reflux conservatif, Poisson grossier a chaque pas), et DISTRIBUE les
+   patchs fins sur `n_ranks()` GH200 (un GPU par rang, halos cross-rang via `fill_boundary`, reflux
+   et masse reduits par `all_reduce`). Le MEME source tourne en `srun -n {1,2,4} --gpus-per-task=1`
+   (OpenMPI 4.1.7 CUDA-aware, noeud armgpu) sous Kokkos Cuda (`exec=Cuda`), 4 patchs fins, 40 pas
+   apres warmup. Resultat (`AMRMPI np=...`) :
+   - **BIT-IDENTIQUE au nombre de rangs** : `mass`, `csum`, `csumsq`, `cmax` de la densite grossiere
+     IDENTIQUES aux 17 chiffres a np=1 (oracle mono-GPU), np=2 et np=4. `PARITE dmax = 0.00e+00`.
+   - **grossier bit-identique cross-rang** : `crossrank_spread = 0.00e+00` (le niveau 0 replique est
+     le meme champ sur chaque GPU, donc halos/reflux/injection distants corrects).
+   - **masse conservee a 0** : `dm = |mass - m0| = 0.00e+00` (reflux conservatif exact sur device).
+   - perf : `per_step_ms` ~221 (np=1), ~266 (np=2), ~272 (np=4) sur un noeud GH200. Le run NE SCALE
+     PAS : c'est ATTENDU et HONNETE. Le grossier est REPLIQUE (defaut `replicated_coarse=true`), donc
+     le Poisson grossier + le transport grossier sont REDONDANTS sur chaque GPU (compute O(NX*NY) x
+     nrangs, zero communication) ; seuls les patchs fins se repartissent (4 patchs -> 2/GPU a np=2,
+     1/GPU a np=4). A cette taille le grossier domine -> ajouter des GPU n'accelere pas, ajoute juste
+     le cout des halos fins cross-rang. Le mode SCALABLE (`replicated_coarse=false`, grossier reparti)
+     existe dans `AmrCouplerMP` mais degrade le MG geometrique (cf. son commentaire) et n'est pas
+     cable dans `AmrSystem` : c'est le vrai chantier perf restant pour le strong-scaling AMR.
+   Un BUG LATENT a ete corrige au passage : `add_compiled_model(AmrSystem)` ET le chemin natif
+   `AmrSystem::build` construisaient le grossier mono-box en `DistributionMapping(1, n_ranks())`
+   (round-robin) -> la box ne vivait que sur le rang 0, et `coarse().fab(0)` segfaultait sur les
+   autres rangs des le premier write/inject/read sous np>1. Or `AmrCouplerMP` (et `GeometricMG`)
+   attendent un grossier REPLIQUE (`DistributionMapping(vector<int>(ba.size(), my_rank()))`). Le
+   chemin AMR runtime n'avait simplement jamais ete exerce sous MPI. Corrige (grossier replique) ;
+   en serie `my_rank()=0` -> identique bit a bit a l'historique. Porte en test de regression
+   header-only `tests/test_mpi_amr_compiled_parity.cpp` (job CI MPI, np=1/2/4, Kokkos Serial sur CPU,
+   les memes invariants : `crossrank_spread=0`, conservation, parite au nb de rangs) ; harness GPU
+   `python/tests/gpu/{amrmpi_integrated.cpp, amrmpi_CMakeLists.txt, amrmpi_romeo_build.sh}`.
 
 ## Strategie suggeree
 
@@ -143,8 +176,9 @@ pas une reecriture des noyaux de calcul.
 Le reste de la vision (DSL symbolique : interprete, codegen flux/brique/source/elliptique, CSE, JIT
 .so, dispatch type-erased dans le System, AOT bloc compile a parite native sur CPU/Serial ; flux Roe ;
 VariableRole present mais pas encore cable ; eps(x) variable cote coeur, cablage System/Python a faire ;
-reorg physics/ numerics/) est COMPLET au niveau PROTOTYPE, teste (~53 ctests C++ + ~16 tests Python) et
-verifie jusqu'au GH200 PAR COMPOSANTS SEPARES. Restent : la VALIDATION INTEGREE AmrSystem + MPI + GPU
-(seuls des composants separes ont ete valides), la perf full-device (reflux sans rebond hote, halos
-GPUDirect device-direct, FFT distribuee device) et la parite AOT zero-copie sur device (limite nvcc,
-phase 8). Ce portage runtime reste le gros morceau ouvert.
+reorg physics/ numerics/) est COMPLET au niveau PROTOTYPE, teste (~54 ctests C++ + ~16 tests Python) et
+verifie jusqu'au GH200. La VALIDATION INTEGREE AmrSystem + MPI + GPU (les trois axes dans un seul run)
+est FAITE (phase 10, GH200, dmax=0, masse conservee a 0). Restent, cote PERF et non plus
+correction : le strong-scaling AMR full-device (grossier reparti `replicated_coarse=false` cable dans
+`AmrSystem`, reflux sans rebond hote, halos GPUDirect device-direct, FFT distribuee device) et la
+parite AOT zero-copie sur device (limite nvcc, phase 8).

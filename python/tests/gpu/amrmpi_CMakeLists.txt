@@ -1,0 +1,14 @@
+cmake_minimum_required(VERSION 3.16)
+project(amrmpi CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Kokkos REQUIRED)
+find_package(MPI REQUIRED)
+# Le harness compile le runtime AmrSystem (python/amr_system.cpp) avec add_compiled_model (header).
+add_executable(amrmpi_integrated
+  amrmpi_integrated.cpp
+  ${ADC_SRC}/amr_system.cpp)
+target_include_directories(amrmpi_integrated PRIVATE ${ADC_INCLUDE})
+target_compile_definitions(amrmpi_integrated PRIVATE ADC_HAS_KOKKOS ADC_HAS_MPI)
+target_compile_features(amrmpi_integrated PRIVATE cxx_std_20)
+target_link_libraries(amrmpi_integrated PRIVATE Kokkos::kokkos MPI::MPI_CXX)

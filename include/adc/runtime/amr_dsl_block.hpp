@@ -97,7 +97,15 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   const int nc = Model::n_vars;
   const Geometry g{Box2D::from_extents(bp.n, bp.n), 0.0, bp.L, 0.0, bp.L};
   const double dxc = bp.L / bp.n, dxf = dxc / 2;
-  DistributionMapping dm(1, n_ranks());
+  // Le niveau 0 (grossier mono-box) est REPLIQUE sur tous les rangs : c'est le defaut performant
+  // de AmrCouplerMP (replicated_coarse=true) et le layout que GeometricMG construit en interne
+  // (dmap = my_rank() partout). Le construire en round-robin DistributionMapping(1, n_ranks())
+  // poserait la box sur le seul rang 0 -> coarse().fab(0) hors bornes sur les autres rangs (segfault
+  // au premier write/inject/read sous np>1). En serie my_rank()=0 : identique au round-robin, bit a
+  // bit. Le seed fin part egalement replique ; le regrid initial le RECONSTRUIT puis le REPARTIT en
+  // round-robin (DistributionMapping(nfine, n_ranks()), cf amr_regrid_coupler.hpp) -> distribution
+  // multi-GPU des patchs fins. C'est ce qui fait du run un calcul AMR reellement distribue.
+  const DistributionMapping dm(std::vector<int>{my_rank()});
   const int ng = Limiter::n_ghost;  // stencil du limiteur (1 NoSlope, 2 MUSCL) : parite du schema
   BoxArray bac(std::vector<Box2D>{Box2D::from_extents(bp.n, bp.n)});
   MultiFab Uc(bac, dm, nc, ng);

@@ -147,7 +147,12 @@ struct AmrSystem::Impl {
     const int nc = Model::n_vars;
     const Geometry g = geom();
     const double dxc = cfg.L / cfg.n, dxf = dxc / 2;
-    DistributionMapping dm(1, n_ranks());
+    // Niveau 0 (grossier mono-box) REPLIQUE sur tous les rangs : defaut de AmrCouplerMP
+    // (replicated_coarse=true) et layout interne de GeometricMG (dmap = my_rank() partout). En
+    // round-robin DistributionMapping(1, n_ranks()) la box ne vivrait que sur le rang 0 -> fab(0)
+    // hors bornes ailleurs (segfault sous np>1). Serie my_rank()=0 : identique, bit a bit. Le seed
+    // fin part replique ; le regrid initial le repartit (round-robin) sur les rangs -> AMR distribue.
+    const DistributionMapping dm(std::vector<int>{my_rank()});
     // Largeur de ghost = stencil de reconstruction du limiteur : 1 (NoSlope) ou 2 (Minmod /
     // VanLeer, MUSCL ordre 2). Figer 1 (l'historique, ne testant que le scalaire diocotron en
     // NoSlope) lisait HORS BORNES le 2e ghost en minmod/vanleer : tolere en conservatif (octets

@@ -144,4 +144,20 @@ if(ADC_HAS_MPI)
              COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_mbox_parity> ${MPIEXEC_POSTFLAGS})
   endforeach()
+
+  # --- VALIDATION INTEGREE AmrSystem + MPI + (GPU) : hierarchie AMR (regrid + reflux + Poisson) +
+  # modele COMPILE (add_compiled_model) DISTRIBUE sur n_ranks(). Le grossier replique impose un
+  # resultat invariant au nombre de rangs : on verifie la consistance cross-rang (spread == 0) et le
+  # script ROMEO (python/tests/gpu/amrmpi_romeo_build.sh) diff les sorties np=1/2/4 (np=1 = oracle
+  # mono-GPU). Compile le runtime AmrSystem comme test_amr_compiled_model. Independant du backend :
+  # vert sous Kokkos Serial (CI, CPU) et Kokkos Cuda (GH200). Un binaire, trois entrees ctest.
+  add_executable(test_mpi_amr_compiled_parity test_mpi_amr_compiled_parity.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+  target_link_libraries(test_mpi_amr_compiled_parity PRIVATE adc::adc ${CMAKE_DL_LIBS})
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_amr_compiled_parity_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_amr_compiled_parity>
+                     ${MPIEXEC_POSTFLAGS})
+  endforeach()
 endif()
