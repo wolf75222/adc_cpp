@@ -26,9 +26,11 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       modele DSL B_z pilote 100% depuis Python via `compile_aot`. (#46)
 - [x] **T_e — 2e champ extra DERIVE** : T = p/rho calculee par le `System` depuis un bloc fluide
       designe a chaque solve (comp 4, `set_electron_temperature_from`, recalcule dans `solve_fields`,
-      pas user-fourni comme B_z). Valide la generalisation a 2 champs aux. (#35)
+      pas user-fourni comme B_z). Valide la generalisation a 2 champs aux. (#35) ; lu sur les TROIS
+      chemins dynamiques : natif (#35), AOT (test #50), JIT (marshaling complete #51, etait a 0).
 - [x] **AMR / implicite** : `load_aux` width-aware sur `advance_amr` et le stepper implicite
       (canal extensible sur le chemin AMR) ; bit-identique pour un modele de base. (#42)
+      + B_z peuple PAR NIVEAU dans le coupleur AMR de systeme (chaque niveau recoit son B_z). (#53)
 
 ## 2. Chantier "EPM elliptique generique" (operateur elliptique composable)
 
@@ -37,6 +39,8 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] `EllipticProblem` / `FieldPostProcess` nommes (coeff, CL, nullspace, convention `E = -grad phi`).
 - [x] Second membre de Poisson de systeme GENERIQUE (somme des `elliptic_rhs` des briques par bloc). (#43)
 - [x] Operateur elliptique ECRANTE / Helmholtz `div(eps grad phi) - kappa phi = f` (GeometricMG + binding). (#44)
+- [x] Operateur elliptique ANISOTROPE `div(diag(eps_x, eps_y) grad phi)` (GeometricMG). (#52)
+      [~] cablage Python + variantes (anisotrope Python, cut-cell) en cours cote agents.
 - [ ] Recabler les sites en forme `/(2*dx)` vers la forme multiplicative `*cx` (`amr_coupler`,
       `amr_coupler_mp`, `spectral_coupler`) — differe au dernier bit, donc hors perimetre tant
       qu'on veut le bit-identique.
