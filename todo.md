@@ -63,8 +63,15 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] Parite multi-box MPI du chemin compile (`add_compiled_model` / `make_block`, np=1/2/4
       bit-identique) PERENNISEE comme test de regression dans le depot. (#39)
 - [x] `add_compiled_model` cable cote `AmrSystem` (pendant multi-niveau du chemin compile). (#45)
-- [~] **Validation INTEGREE** `AmrSystem` + MPI + GPU en un seul run + perf full-device : EN COURS
-      (agent ROMEO GH200) ; doc `docs/GPU_RUNTIME_PORT.md` a la cle.
+- [x] **Validation INTEGREE** `AmrSystem` + MPI + GPU en un seul run : FAITE sur GH200 (`exec=Cuda`,
+      euler_poisson compile sur AMR 128->256 multi-patch, patchs fins repartis 1 GPU/rang). np=1/2/4
+      BIT-IDENTIQUES (csum identique a 17 chiffres, dmax=0), `crossrank_spread=0`, masse conservee
+      (dm=0). Test de regression CPU/MPI `test_mpi_amr_compiled_parity` (CI) + harness GPU
+      `python/tests/gpu/amrmpi_integrated.cpp`. Doc `docs/GPU_RUNTIME_PORT.md` (phase 10). (#48)
+- [ ] **Perf full-device** : le run integre NE SCALE PAS (grossier REPLIQUE -> Poisson/transport
+      grossier redondants par GPU ; seuls les patchs fins se repartissent). Mode `replicated_coarse=false`
+      (grossier reparti) existe dans `AmrCouplerMP` mais degrade le MG et n'est pas cable dans `AmrSystem` :
+      vrai chantier strong-scaling AMR. + parite AOT zero-copie sur device (sans rebond hote).
 
 ## 5. Physique magnetisee
 
