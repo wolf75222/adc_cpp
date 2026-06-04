@@ -71,14 +71,17 @@ choisir sans réécrire le coupleur.
 
 ---
 
-## D-6. Façade compilée `src/` (PIMPL) + bindings
+## D-6. Façade runtime de composition + bindings
 
-**Décision.** `src/*_solver.cpp` expose des solveurs CONCRETS sans template
-(`DiocotronSolver`, ...) ; `python/bindings.cpp` les bind 1:1.
+**Décision.** Les bindings (`python/bindings.cpp`) exposent des façades de COMPOSITION à
+l'exécution (`System`, `AmrSystem`), pas des solveurs nommés. Un modèle est une composition de
+briques génériques (`adc.Model(state, transport, source, elliptic)`) assemblée par le
+`model_factory` ; aucun scénario n'est nommé dans la lib.
 
-**Pourquoi.** Une surface stable et bindable, jamais `Coupler<Model, Elliptic>` au-dehors.
-Le cœur générique reste header-only ; la façade donne une API Python propre et une frontière
-de compilation.
+**Pourquoi.** Une surface stable et bindable, jamais `Coupler<Model, Elliptic>` au-dehors. Le
+cœur générique reste header-only ; la façade runtime (`runtime/system.hpp`) donne une API Python
+propre et une frontière de compilation. Les solveurs nommés concrets ont disparu au profit de la
+composition agnostique : les noms de scénario vivent côté application (`adc_cases`).
 
 ---
 

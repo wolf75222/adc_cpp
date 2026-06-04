@@ -4,6 +4,14 @@ Methodologie CS:APP : mesurer d'abord, identifier le goulot, transformer, re-mes
 Banc : pas couple Euler-Poisson, N=256, Apple M1 Pro (6 coeurs perf + 2 efficiency),
 AppleClang -O3 -DNDEBUG.
 
+> Ces mesures ont ete prises avec des pilotes et bancs APPLICATIFS (scenarios nommes,
+> harness de figures) qui vivent dans [`adc_cases`](https://github.com/wolf75222/adc_cases),
+> pas dans ce depot (le coeur est agnostique au modele). Les chiffres restent representatifs
+> du coeur (operateur elliptique, transport, reflux AMR) ; les noms de fichiers/types cites
+> ci-dessous (`bench_amr`, `*Config`, scripts de figures) sont ceux du depot applicatif. Les
+> figures conservees sont sous `docs/`. La trace des validations device GH200 est dans
+> [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md).
+
 ## Profil d'un pas couple (ou part le temps)
 
 | phase | ms/pas | part |
@@ -25,9 +33,9 @@ ne change rien (~2%) : on n'est pas compute-bound sur l'hyperbolique.
 | **OncePerStep (Poisson 1x/pas)** | **19.8** |
 
 Gain x2.6 (mieux que x2 attendu : le solve unique part d'un warm-start plus proche
-de la convergence). Cout : couplage 1er ordre au lieu de 2e. Accessible via
-`DiocotronConfig::poisson_per_stage = false` (idem EulerPoisson), ou
-`Coupler::advance<Limiter, OncePerStepCoupling>`.
+de la convergence). Cout : couplage 1er ordre au lieu de 2e. Accessible via la
+`CouplingPolicy` du coeur : `OncePerStepCoupling` au lieu de `PerStage`
+(`coupling/coupling_policy.hpp`).
 
 ### 2. OpenMP par-kernel : PERDANT ici (ne pas activer tel quel)
 
@@ -50,10 +58,10 @@ paralleliser AU-DESSUS de la boucle de niveaux (region consolidee), pas par noya
 ## Poisson par FFT pour le periodique : FAIT, ~5x
 
 La multigrille est ITERATIVE (plusieurs V-cycles x balayages GS). Pour des CL
-PERIODIQUES (Jeans, diocotron), `PoissonFFTSolver` (`elliptic/poisson_fft_solver.hpp`)
-est un solveur DIRECT (une transformee), enveloppant `PoissonFFT` au niveau MultiFab
-et modelisant le concept `EllipticSolver`. Le `Coupler` est devenu generique sur le
-backend : `Coupler<Model, PoissonFFTSolver>` au lieu de `Coupler<Model>` (= MG).
+PERIODIQUES, `PoissonFFTSolver` (`numerics/elliptic/poisson_fft_solver.hpp`) est un
+solveur DIRECT (une transformee), enveloppant `PoissonFFT` au niveau MultiFab et
+modelisant le concept `EllipticSolver`. Le `Coupler` est generique sur le backend :
+`Coupler<Model, PoissonFFTSolver>` au lieu de `Coupler<Model>` (= MG).
 
 Pas couple Euler-Poisson, N=256 (M1 Pro, -O3, PerStage) :
 
@@ -63,10 +71,11 @@ Pas couple Euler-Poisson, N=256 (M1 Pro, -O3, PerStage) :
 | **PoissonFFTSolver (direct)** | **16** |
 
 Soit **~4.8x** sur le pas couple, a physique **bit-identique** : les deux inversent
-le MEME Laplacien discret 5 points (`test_fft_coupler` : MG vs FFT `maxdiff = 1.6e-14`
-apres 5 pas ; residu FFT seul `7e-14`). C'est l'optimisation run-time a fort impact
-sur les 86% elliptiques. Limite : FFT periodique, N puissance de 2, mono-rang (le
-distribue par bandes MPI est `SpectralCoupler`). Cumulable avec OncePerStep.
+le MEME Laplacien discret 5 points (cf. `test_elliptic_operator` : MG vs FFT, residus
+a l'arrondi `~1e-14`, solutions identiques a `~1e-16`). C'est l'optimisation run-time a
+fort impact sur les 86% elliptiques. Limite : FFT periodique, mono-rang (le distribue
+par bandes MPI est `DistributedFFTSolver`, enveloppe `SpectralCoupler`). Cumulable avec
+OncePerStep.
 
 ## Banc `bench_amr` : deux-fluides AP + coupleur AMR multi-patch
 

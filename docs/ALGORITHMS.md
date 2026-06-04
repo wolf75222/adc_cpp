@@ -1,77 +1,62 @@
 # Algorithmes
 
-Les méthodes numériques implémentées dans `adc_cpp`, avec leurs formules, leur
-discrétisation et le test qui les exerce. Chaque section suit le même plan :
-**Intuition** (à quoi ça sert), **Dérivation** (d'où vient la formule),
-**Pseudocode** (ce que fait le code), **Stabilité** (borne CFL), **Validation**
-(quel test), **Pièges** (modes de défaillance connus). Références : Birdsall &
-Langdon (PIC, dérive), Toro 2009 (solveurs de Riemann), Berger & Oliger 1984 et
-Berger & Colella 1989 (AMR), Berger & Rigoutsos 1991 (clustering), Hoffart
-arXiv:2510.11808 (deux-fluides).
+Catalogue des methodes numeriques GENERIQUES implementees dans le coeur `adc_cpp`, avec leur
+formule, leur discretisation et le test du depot qui les exerce. Le coeur est AGNOSTIQUE au
+modele : il ne nomme aucun scenario (diocotron, Euler-Poisson, deux-fluides...). Ces scenarios
+sont des COMPOSITIONS de briques generiques et vivent cote application
+([`adc_cases`](https://github.com/wolf75222/adc_cases)) ; leurs validations bout-en-bout aussi.
 
-Architecture (les couches, le seam de dispatch, le découpage lib/démo) :
-[ARCHITECTURE.md](ARCHITECTURE.md). Schéma deux-fluides détaillé :
-[two_fluid_ap.md](two_fluid_ap.md). Profil run-time : [PERFORMANCE.md](PERFORMANCE.md).
+Chaque section suit le meme plan : **Intuition** (a quoi ca sert), **Formule** (d'ou ca vient),
+**Code** (ou c'est, comment c'est appele), **Validation** (le test ctest qui le verifie).
+Tous les chemins de fichiers et noms de tests cites existent dans ce depot.
 
-## 1. Le modèle diocotron (dérive E x B)
+Architecture (couches, seam de dispatch, frontiere lib/application) :
+[ARCHITECTURE.md](ARCHITECTURE.md). Choix de conception : [CHOICES.md](CHOICES.md). Trace des
+validations device GH200 : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md). References :
+[BIBLIOGRAPHY.md](BIBLIOGRAPHY.md).
 
-**Intuition.** Une couche d'électrons non neutre dans un champ magnétique uniforme
-`B = B_z ẑ` hors-plan. Les électrons ne suivent pas le champ électrique `E` qu'ils
-créent : ils **dérivent perpendiculairement** à `E` et à `B`, à la vitesse de dérive
-`E x B`. Une perturbation de densité crée un champ qui fait tourner la couche, ce qui
-amplifie la perturbation : c'est l'instabilité diocotron, l'analogue électrostatique de
-Kelvin-Helmholtz.
+Le coeur resout, sur maillage cartesien adaptatif, la forme generique
 
-**Équation.** Densité `n`, potentiel `phi`. Champ `E = -grad phi`, vitesse de dérive
+```
+d U / d t  +  div F(U, aux)  =  S(U, aux)        (hyperbolique, par bloc)
+div(eps grad phi) - kappa phi = f(U)             (elliptique, partage)
+```
 
-$$\mathbf{v} = \frac{\mathbf{E}\times\mathbf{B}}{B^2} = \frac{1}{B}\,(-\partial_y\phi,\ \partial_x\phi)$$
+ou la partie hyperbolique `U` et la partie elliptique `phi` sont couplees a chaque pas par le
+canal `aux` (contrat de base `(phi, grad_x, grad_y)`, extensible). Un modele est une
+composition `CompositeModel<Transport, Source, Elliptic>` ; le couplage entre par le FLUX (aux
+lu dans `F`) ou par la SOURCE (aux lu dans `S`), sous le meme operateur spatial.
 
-Transport conservatif de la densité, couplé à Poisson pour le champ :
+## 1. Volumes finis : Godunov ordre 1
 
-$$\partial_t n + \nabla\cdot(n\,\mathbf{v}) = 0, \qquad \nabla^2\phi = \alpha\,(n - n_{i0})$$
+**Intuition.** Le profil dans chaque maille est remplace par sa moyenne. A chaque interface,
+deux moyennes se rencontrent : un probleme de Riemann local. Le flux numerique le resout
+(approximativement) et la mise a jour conservative transporte la matiere d'une maille a l'autre.
 
-`n_i0` est le fond ionique neutralisant, `alpha` le couplage. La vitesse dérive d'un
-potentiel-flux (`v = ẑ × grad(phi)/B`), donc `div(v) = 0` : le transport est
-**incompressible**, la densité est advectée sans compression. C'est ce qui rend
-l'instabilité purement cinématique (enroulement), sans choc.
-
-**Couplage.** `aux = (phi, ∂x phi, ∂y phi)` est calculé par le solveur elliptique puis
-passé au flux hyperbolique. Le modèle (`include/adc/model/diocotron.hpp`) lit `aux` et
-forme le flux `n v` à chaque face.
-
-**Validation.** `examples/diocotron*`, `analysis/diocotron_growth.hpp` (taux de
-croissance vs théorie linéaire). **Pièges.** Si Poisson n'est pas résolu à chaque étage
-RK, le couplage tombe à l'ordre 1 en temps (voir `poisson_per_stage`).
-
-## 2. Volumes finis : Godunov ordre 1
-
-**Intuition.** On remplace le profil dans chaque maille par sa moyenne. À chaque
-interface, deux moyennes se rencontrent : un problème de Riemann local. Le flux numérique
-résout (approximativement) ce Riemann et la mise à jour conservative transporte la
-matière d'une maille à l'autre.
-
-**Dérivation.** Intégrer la loi de conservation sur la maille `(i,j)` et le pas `dt` :
+**Formule.** Integration de la loi de conservation sur la maille `(i,j)` et le pas `dt` :
 
 $$U_{ij}^{n+1} = U_{ij}^n - \frac{\Delta t}{\Delta x}\big(\hat F_{i+1/2,j} - \hat F_{i-1/2,j}\big)
                              - \frac{\Delta t}{\Delta y}\big(\hat G_{i,j+1/2} - \hat G_{i,j-1/2}\big)$$
 
-La forme conservative (différence de flux de face) garantit la conservation discrète
-exacte : ce que la maille `i` perd à sa face droite, la maille `i+1` le gagne à sa face
-gauche. C'est la propriété centrale dont dépend tout l'AMR (le reflux corrige justement
-ces flux de face).
+La forme conservative (difference de flux de face) garantit la conservation discrete exacte : ce
+que la maille `i` perd a sa face droite, la maille `i+1` le gagne a sa face gauche. C'est la
+propriete dont depend tout l'AMR (le reflux corrige justement ces flux de face).
 
-**Pseudocode.** `operator/spatial_operator.hpp::compute_face_fluxes` calcule les flux de
-FACE `Fx, Fy` (ce dont le reflux a besoin) ; `mf_advance_faces` applique la différence de
-flux via `for_each_cell` (portable série / OpenMP / GPU).
+**Code.** `numerics/spatial_operator.hpp::assemble_rhs` calcule directement `R = -div F + S`.
+`compute_face_fluxes` ecrit les flux de FACE `Fx, Fy` (ce dont le reflux a besoin), avec la MEME
+reconstruction et le MEME flux numerique que `assemble_rhs`, donc leur divergence redonne
+exactement le residu. La boucle passe par le seam `for_each_cell` (serie / OpenMP / Kokkos).
 
-**Stabilité.** CFL : `dt <= C dx / max|lambda|`, `lambda` = vitesse d'onde locale.
-**Validation.** `test_face_fluxes` : `div(face_fluxes)` vs `assemble_rhs` à `0` exact.
+**Validation.** `test_spatial_discretisation` (le couple reconstruction x flux est un type nomme),
+`test_cfl_dt` (`dt = cfl * min(dx,dy) / max|lambda|` multi-especes). **Stabilite.** CFL :
+`dt <= C dx / max|lambda|`, `lambda` = vitesse d'onde locale.
 
-## 3. Flux numériques : Rusanov, HLL, HLLC
+## 2. Flux numeriques : Rusanov, HLL, HLLC, Roe
 
-**Intuition.** Trois niveaux de fidélité pour le Riemann de face. Rusanov met une seule
-bosse de diffusion (la plus robuste, la plus diffusive) ; HLL estime deux vitesses
-acoustiques ; HLLC ajoute l'onde de contact (la discontinuité de densité passive).
+**Intuition.** Quatre niveaux de fidelite pour le Riemann de face. Rusanov pose une seule bosse
+de diffusion (le plus robuste, le plus diffusif) ; HLL estime deux vitesses acoustiques ; HLLC
+ajoute l'onde de contact (la discontinuite de densite passive) ; Roe linearise le systeme par la
+moyenne de Roe et resout exactement le Riemann linearise.
 
 **Formules.** Rusanov (Lax-Friedrichs local) :
 
@@ -82,249 +67,350 @@ HLL avec estimations de vitesses `S_L, S_R` :
 
 $$\hat F^{HLL} = \frac{S_R F(U_L) - S_L F(U_R) + S_L S_R (U_R - U_L)}{S_R - S_L}$$
 
-HLLC restaure l'onde de contact `S_*` au milieu (états étoile `U_L^*, U_R^*`).
+HLLC restaure l'onde de contact `S_*` au milieu (etats etoile `U_L^*, U_R^*`). Roe :
+`F = (F_L + F_R)/2 - (1/2) sum_k |lambda_k| alpha_k r_k` sur les vecteurs propres de la matrice
+de Roe.
 
-**Pseudocode.** Policies sans état dans `numerics/` ; `compute_face_fluxes<Limiter,
-NumericalFlux, Model>` est templé sur le flux. **Validation.** `test_riemann`.
-**Pièges.** HLLC sur un état du vide (densité nulle) demande un garde-fou ; Rusanov reste
-le défaut robuste pour le diocotron (transport scalaire).
+**Code.** Politiques SANS etat dans `numerics/numerical_flux.hpp` : `RusanovFlux`, `HLLFlux`,
+`HLLCFlux`, `RoeFlux` (toutes `ADC_HD`, device-callable). `compute_face_fluxes<Limiter,
+NumericalFlux, Model>` est temple sur le flux.
 
-## 4. Reconstruction MUSCL (ordre 2)
+**Validation.** `test_roe_flux` : consistance `F*(U,U) = F(U)` et resolution exacte d'un Riemann
+linearise + `eigenvalues()` d'Euler. **Pieges.** HLLC sur un etat du vide (densite nulle)
+demande un garde-fou ; Rusanov reste le defaut robuste pour le transport scalaire.
 
-**Intuition.** Godunov ordre 1 est très diffusif. MUSCL reconstruit un profil **linéaire**
-dans chaque maille à partir de pentes limitées, puis évalue le flux sur les valeurs
-reconstruites aux faces. Le **limiteur** coupe la pente près des extrema pour éviter les
-oscillations (TVD).
+## 3. Reconstruction MUSCL (ordre 2) et WENO5-Z (ordre 5)
 
-**Dérivation.** Pente limitée par maille, par exemple minmod :
+**Intuition.** Godunov ordre 1 est tres diffusif. MUSCL reconstruit un profil LINEAIRE par
+maille a partir de pentes limitees, puis evalue le flux sur les valeurs reconstruites aux faces.
+Le limiteur coupe la pente pres des extrema pour eviter les oscillations (TVD). WENO5-Z monte a
+l'ordre 5 en zone lisse via une moyenne ponderee de trois stencils, sans limiteur explicite.
 
-$$\sigma_i = \mathrm{minmod}(U_i - U_{i-1},\ U_{i+1} - U_i),\qquad
-\mathrm{minmod}(a,b) = \begin{cases} a & |a|<|b|,\ ab>0\\ b & |b|\le|a|,\ ab>0\\ 0 & ab\le 0\end{cases}$$
+**Formule.** Pente limitee par maille, par exemple minmod :
 
-États reconstruits aux faces : `U_L = U_i + σ_i/2`, `U_R = U_{i+1} - σ_{i+1}/2`. La
-reconstruction demande **2 ghosts** (pente en `i±1`). Limiteurs disponibles : NoSlope
-(ordre 1), Minmod, VanLeer.
+$$\sigma_i = \mathrm{minmod}(U_i - U_{i-1},\ U_{i+1} - U_i)$$
 
-**Pseudocode.** Policy `Limiter` templée dans `compute_face_fluxes`. **Stabilité.** TVD
-sous CFL `<= 0.5` typiquement. **Validation.** Le cas `adc_cases/two_fluid_ap/run.py` compare
-centré vs reconstruction limitée sur un front raide (la continuité upwind MUSCL ne
-sur-diffuse pas le pic lisse, 0.4% de perte). **Pièges.** Reconstruire la variable
-conservée vs primitive change le comportement aux chocs forts.
+Etats reconstruits aux faces : `U_L = U_i + sigma_i/2`, `U_R = U_{i+1} - sigma_{i+1}/2`. MUSCL
+demande 2 ghosts (pente en `i+-1`), WENO5 en demande 3. Les poids WENO-Z (Borges 2008) utilisent
+`tau5 = |beta0 - beta2|` pour rester moins dissipatifs que Jiang-Shu en zone lisse.
 
-## 5. Intégration en temps : SSPRK2/3
+**Code.** Politiques `Limiter` dans `numerics/reconstruction.hpp` : `NoSlope` (ordre 1), `Minmod`,
+`VanLeer`, `Weno5` (WENO5-Z). La reconstruction peut se faire sur les variables CONSERVEES ou
+PRIMITIVES (`rho, u, p`) selon le bloc.
+
+**Validation.** `test_weno_convergence` (la reconstruction de face d'une fonction lisse est ordre 5),
+`test_primitive_recon` (conversions cons <-> prim et leur usage dans la reconstruction).
+**Pieges.** Reconstruire la variable conservee vs primitive change le comportement aux chocs forts.
+
+## 4. Integration en temps : SSPRK, integrateurs objets, integrateur utilisateur
 
 **Intuition.** Strong-Stability-Preserving Runge-Kutta : des combinaisons convexes d'Euler
-explicites, donc la propriété TVD de l'opérateur spatial est préservée à l'ordre 2 ou 3.
+explicites, donc la propriete TVD de l'operateur spatial est preservee a l'ordre 2 ou 3.
 
-**Formules.** SSPRK2 (Heun) :
+**Formule.** SSPRK2 (Heun) :
 
 $$U^{(1)} = U^n + \Delta t\,L(U^n),\qquad U^{n+1} = \tfrac12 U^n + \tfrac12\big(U^{(1)} + \Delta t\,L(U^{(1)})\big)$$
 
-SSPRK3 (Shu-Osher) ajoute un étage, ordre 3, même coefficient SSP `C=1`.
+SSPRK3 (Shu-Osher) ajoute un etage, ordre 3, meme coefficient SSP `C=1`. `L(U)` = `assemble_rhs`.
 
-**Pseudocode.** `integrator/` ; `L(U)` = `assemble_rhs` (divergence des flux). En couplé,
-Poisson est résolu une fois par étage (`poisson_per_stage = true`, ordre 2) ou une fois
-par pas (ordre 1, ~2.6x plus rapide, voir PERFORMANCE.md). **Validation.** advection
-bout-en-bout (`test` SSPRK2). **Pièges.** L'ordre du couplage limite l'ordre global :
-SSPRK3 + Poisson 1x/pas reste ordre 1 sur le champ.
+**Code.** Deux expressions coexistent. Les TAGS `SSPRK2`/`SSPRK3` (`numerics/time/time_integrator.hpp`)
+nomment, par bloc, le traitement temporel via une `TimePolicy` (explicite / implicite / IMEX /
+prescrit). Les integrateurs OBJETS (`numerics/time/time_steppers.hpp` : `ForwardEuler`,
+`SSPRK2Step`, `SSPRK3Step`) exposent `take_step(rhs, U, dt)` ; l'utilisateur peut fournir le sien
+(tout objet a `take_step`).
 
-## 6. Elliptique : multigrille géométrique
+**Validation.** `test_user_time_integrator` (un integrateur en temps fourni par l'utilisateur
+donne le meme resultat qu'un SSPRK du coeur). **Pieges.** En couple, l'ordre du solve elliptique
+limite l'ordre global : Poisson resolu 1x/pas plafonne le champ a l'ordre 1.
 
-**Intuition.** Le lisseur Gauss-Seidel tue vite les hautes fréquences de l'erreur mais
-rampe sur les basses. La multigrille restreint l'erreur basse fréquence sur des grilles
-plus grossières (où elle redevient haute fréquence), la lisse, et la prolonge : chaque
-fréquence est traitée à l'échelle où le lisseur est efficace. Coût O(N), pas O(N^1.5).
+## 5. Sources raides : IMEX asymptotic-preserving et IMEX partiel
 
-**V-cycle.** lisser (`nu1` balayages GS red-black) -> résidu -> restreindre -> récursion
-sur la grille grossière -> prolonger la correction -> lisser (`nu2`). Le rouge-noir rend
-le balayage indépendant des données (parallélisable).
+**Intuition.** Une source RAIDE (relaxation rapide, frequence plasma) impose au schema explicite
+un `dt` minuscule. L'IMEX traite la partie raide IMPLICITEMENT (stable a grand `dt`) et la partie
+non raide explicitement. La propriete asymptotic-preserving (AP) garantit que le schema reste
+consistant et stable quand la raideur tend vers l'infini.
 
-**Pseudocode.** `elliptic/geometric_mg.hpp::GeometricMG` modèle le concept
-`EllipticSolver` (`rhs()`, `solve()`, `phi()`). Entièrement on-device (le V-cycle passe
-par `for_each_cell`), donc la façade compile pour le GPU. Warm-start : `solve()` repart du
-`phi` précédent -> 1-2 V-cycles suffisent en régime établi.
+**Formule.** Un pas IMEX d'Euler sur `dU/dt = T(U) + (1/eps) R(U)` traite `T` explicite et
+`(1/eps) R` implicite. Quand `eps -> 0`, le schema relaxe vers la variete d'equilibre `R(U)=0`
+sans contrainte `dt < eps`.
 
-**Validation.** `test_poisson`, `test_mpi_poisson`. **Pièges.** Itératif : le résidu n'est
-pas nul à la machine ; pour des CL périodiques exactes, préférer le FFT (section 7).
+**Code.** `numerics/time/imex.hpp::imex_euler_step` (IMEX d'Euler), `numerics/time/implicit_stepper.hpp`
+(defaut implicite par Newton local). L'IMEX PARTIEL n'integre implicitement qu'une SOUS-PARTIE des
+variables : le modele declare `is_implicit(c)` par composante (moins cher quand seule une variable
+est raide). Le transport d'un bloc IMEX reste explicite.
 
-## 7. Elliptique : Poisson spectral (FFT)
+**Validation.** `test_imex_ap` (propriete AP sur une source de relaxation lineaire raide),
+`test_ap_limit` (limite AP QUANTIFIEE : balayage de la raideur sur 8 decades a `dt` fixe),
+`test_imex_partial` (un modele a 2 variables, une seule implicite), `test_imex_transport` (le
+transport d'un bloc IMEX est bien avance explicitement).
 
-**Intuition.** Sur un domaine périodique, le Laplacien est diagonal en Fourier : `lap`
-devient une multiplication par `-(k_x^2 + k_y^2)`. Une transformée directe + division +
-transformée inverse résout Poisson **exactement** (au résidu machine), sans itération.
+## 6. Splitting d'operateurs : Lie et Strang
 
-**Formule.** `phî(k) = -rhŝ(k) / (k_x^2 + k_y^2)`, mode `k=0` fixé à 0 (jauge).
+**Intuition.** Quand le RHS est une somme d'operateurs (transport + source + rotation cyclotron),
+on les applique en SEQUENCE plutot que simultanement. Lie (ordre 1) les enchaine, Strang (ordre 2)
+symetrise la sequence (`R(dt/2) . pas-central . R(dt/2)`).
 
-**Pseudocode.** `elliptic/poisson_fft_solver.hpp::PoissonFFTSolver` modèle le même concept
-`EllipticSolver` que la multigrille -> le coupleur est générique sur le backend. Limites :
-CL périodiques, `N` puissance de 2, mono-rang.
+**Code.** `numerics/time/splitting.hpp::lie_step` / `strang_step`.
 
-**Validation.** `test_fft_coupler` : MG vs FFT `maxdiff = 1.6e-14` (ils inversent le MÊME
-Laplacien 5 points). **Pièges.** Le FFT n'est PAS toujours plus rapide : il l'est sur le
-couplé Euler-Poisson Poisson-dominé (~4.8x), mais la multigrille warm-startée gagne sur le
-deux-fluides transport-dominé (voir PERFORMANCE.md).
+**Validation.** `test_splitting` : ordre du splitting mesure sur un systeme lineaire 2x2 NON
+commutant dont le flot exact est connu (Lie ordre 1, Strang ordre 2 verifies par la pente).
 
-## 8. Euler-Poisson : couplage hyperbolique-elliptique (gravité OU plasma)
+## 7. Multirate : sous-cyclage, cadence, pas adaptatif
 
-**Intuition.** Un gaz compressible (Euler) dont chaque maille crée un potentiel `phi` via
-Poisson, et subit en retour la force `g = -grad phi`. Selon le SIGNE de la source
-elliptique, le même code fait deux physiques opposées : auto-gravité attractive
-(astrophysique, effondrement de Jeans) ou électrostatique répulsive mono-espèce (plasma :
-oscillation de Langmuir + explosion de Coulomb).
+**Intuition.** Toutes les especes ne demandent pas le meme `dt`. Une espece raide (electrons) fait
+plusieurs SOUS-PAS pour un macro-pas ; une espece lente (gaz peu resolu) n'est avancee qu'une fois
+sur N macro-pas (CADENCE / stride). Le pas macro peut etre derive du CFL par espece.
 
-**Équations.**
+**Code.** `numerics/time/scheduler.hpp::advance_subcycled` lit la `TimePolicy` de chaque
+`EquationBlock` (`ExplicitTime<Method, substeps, stride>`) et appelle l'operateur adapte. Le
+`SystemDriver` expose `step_cfl(cfl)` (pas macro par CFL) et `step_adaptive(cfl)` (stride derive du
+CFL par espece). Une espece `PrescribedTime` est sautee par le scheduler.
 
-$$\partial_t U + \nabla\!\cdot F(U) = S(U,\nabla\phi),\qquad \nabla^2\phi = s\,4\pi G\,(\rho-\rho_0),\qquad s=\pm 1$$
+**Validation.** `test_multirate_stride` (une espece lente avancee une fois sur N),
+`test_adaptive_multirate` (`step_adaptive`, pas macro fixe par l'espece la plus contraignante),
+`test_cfl_dt` (`step_cfl` multi-especes).
 
-avec `g = -grad phi` et `S = (0, rho g_x, rho g_y, rho u . g)`. `rho0` est le fond
-neutralisant (la moyenne de `rho`) : en périodique, Poisson exige un second membre à
-moyenne nulle pour être soluble.
+## 8. Terme parabolique : diffusion en flux de face
 
-**La dualité en une ligne.** `s = +1` (attractif) : là où `rho > rho0`, `phi` creuse un
-puits, `g` pointe vers la sur-densité, elle s'accentue (instabilité de Jeans). `s = -1`
-(répulsif) : `phi` fait une bosse, `g` pointe vers l'extérieur, la sur-densité se disperse
-(Coulomb). Retourner `coupling_sign` retourne `phi`, donc `g` : une seule ligne sépare
-gravité et plasma (`model/euler_poisson.hpp::elliptic_rhs`, exposée par `InteractionKind`).
+**Intuition.** Un terme `+nu Lap(U)` (diffusion, viscosite) s'ecrit comme la divergence d'un flux
+de face Fickien `-nu grad U`. Le mettre en flux de face le rend AMR-compatible : le reflux le
+corrige a l'interface fin-grossier comme un flux hyperbolique.
 
-**Dispersion (validation quantitative).** Une perturbation acoustique au repos
-`delta_rho = eps rho0 cos(kx)` obéit à
+**Formule.** `F_diff = -nu grad U`, ajoute aux flux de face avant la divergence ; `div(F_diff) =
+-nu Lap(U)`, donc `R += +nu Lap(U)`.
 
-$$\omega^2 = c_s^2 k^2 \;\mp\; \omega_p^2,\qquad \omega_p^2 = 4\pi G\,\rho_0$$
+**Code.** Un modele qui declare `diffusivity()` recoit le flux Fickien dans `assemble_rhs` ;
+`compute_face_fluxes` l'inclut pour le reflux.
 
-signe `-` en gravité (critère de Jeans : `omega^2 < 0` dès que `omega_p > c_s k`, donc
-effondrement), signe `+` en plasma (Bohm-Gross : `omega^2 > 0` toujours, donc
-inconditionnellement stable).
+**Validation.** `test_diffusion` (le terme parabolique du coeur, `+nu Lap(U)` via la divergence du
+flux Fickien), `test_amr_diffusion` (la diffusion en flux de face traverse correctement l'AMR).
 
-**Pseudocode.** Le modèle `EulerPoisson` délègue toute l'hydrodynamique à `Euler` (flux,
-vitesses d'onde) et n'ajoute que `source` (la force, via `aux = grad phi`) et `elliptic_rhs`
-(le second membre signé). C'est le chemin « aux entre par la SOURCE » du concept
-`PhysicalModel` (contraste avec le diocotron, « aux entre par le FLUX »). Branché tel quel
-sur `Coupler<EulerPoisson>` : `elliptic_rhs -> multigrille/FFT -> aux=grad phi -> assemble_rhs`.
+## 9. Elliptique : multigrille geometrique
 
-**Validation.** `test_euler_poisson` (Jeans stable : `omega` mesuré à 0.1% de la théorie,
-masse et qté de mouvement conservées) ; `test_euler_poisson_plasma` (Bohm-Gross à 0.1%, et
-un même grumeau gaussien dont le pic CROÎT en gravité et DÉCROÎT en plasma : signes
-opposés). Démo Python : `tutorials/run/plasma.py`. **Pièges.** Le FFT direct exige `N`
-puissance de 2 (sinon UB) ; `rho0` doit valoir `<rho>` exactement, sinon le second membre
-périodique n'est pas à moyenne nulle et `phi` dérive.
+**Intuition.** Le lisseur Gauss-Seidel tue vite les hautes frequences de l'erreur mais rampe sur
+les basses. La multigrille restreint l'erreur basse frequence sur des grilles plus grossieres (ou
+elle redevient haute frequence), la lisse, et la prolonge. Cout O(N).
 
-## 9. AMR : sous-cyclage Berger-Oliger + reflux
+**V-cycle.** lisser (`nu1` balayages GS rouge-noir) -> residu -> restreindre -> recursion grossiere
+-> prolonger la correction -> lisser (`nu2`). Le rouge-noir rend le balayage independant des
+donnees (parallelisable).
 
-**Intuition.** Raffiner seulement là où il le faut. Un niveau fin (pas d'espace `dx/2`)
-recouvre une sous-région ; pour respecter sa propre CFL il fait `r=2` sous-pas de `dt/2`
-pendant que le grossier fait 1 pas de `dt`. Problème : à l'interface fin-grossier, les
-deux niveaux calculent des flux différents -> la conservation est cassée. Le **reflux**
-(FluxRegister) corrige la maille grossière par la différence (flux fin intégré - flux
-grossier).
+**Code.** `numerics/elliptic/geometric_mg.hpp::GeometricMG` modele le concept `EllipticSolver`
+(`rhs()`, `solve()`, `residual()`, `phi()`). Entierement on-device (le V-cycle passe par
+`for_each_cell`), AMR-compatible, accepte tout `n`. Le Laplacien 5 points et le lisseur sont
+dans `numerics/elliptic/poisson_operator.hpp` (operateur canonique partage). `solve_robust`
+ajoute un garde-fou anti-divergence ; le warm-start repart du `phi` precedent (1-2 V-cycles en
+regime etabli).
 
-**Dérivation.** À chaque face fin-grossier, on accumule le flux fin sur les `r` sous-pas
-et on remplace la contribution grossière :
+**Validation.** `test_geometric_mg` (convergence rapide quasi independante du maillage sur
+solutions manufacturees), `test_poisson_convergence` (ordre 2 quantitatif du Laplacien 5 points),
+`test_solve_robust` (le garde-fou anti-divergence).
 
-$$U_c \mathrel{-}= \frac{1}{\Delta x_c}\Big(\underbrace{\textstyle\sum_s \Delta t_f\,\bar F_f^{(s)}}_{\text{flux fin intégré}} - \Delta t_c\,F_c\Big)$$
+## 10. Elliptique : Poisson spectral (FFT), mono-rang et distribue
 
-**Pseudocode.** `integrator/amr_reflux_mf.hpp`, en `detail::` : `amr_step_2level_mf`
-(2 niveaux), `amr_step_multilevel_mf` (récursion N niveaux, `subcycle_level_mf`). Transfert :
-`mf_average_down` (fin -> grossier), `mf_fill_fine_ghosts_t` (interp espace+temps des
-ghosts fins). Ce moteur mono-box est désormais l'ORACLE de validation, plus la voie de
-production : celle-ci passe par `advance_amr` (le multi-patch, §10), dont le mono-box est le
-cas dégénéré. On le garde car il prouve le multi-patch bit-identique au mono-box jusqu'à N
-niveaux (ce que la pile Fab2D, 2 niveaux seulement, ne couvre pas).
+**Intuition.** Sur un domaine periodique, le Laplacien est diagonal en Fourier : une transformee
+directe + division + transformee inverse resout Poisson EXACTEMENT (au residu machine), sans
+iteration.
 
-**Validation.** `test_amr_reflux_mf`, `test_amr_multilevel_mf` : **bit-identique** à la
-pile Fab2D de référence (`amr_multilevel.hpp`) ; conservation à `~1e-12`. **Pièges.** Le
-flux grossier doit être échantillonné AVANT d'avancer le grossier (sinon mauvais
-centrage temporel) ; la moyenne descendante doit précéder la mesure de masse initiale.
+**Formule.** `phi_hat(k) = -rhs_hat(k) / (k_x^2 + k_y^2)`, mode `k=0` fixe a 0 (jauge).
 
-## 10. AMR multi-patch : reflux coverage-aware
+**Code.** `numerics/elliptic/poisson_fft_solver.hpp` : `PoissonFFTSolver` (mono-rang, boite unique,
+assert `n_ranks()==1 && ba.size()==1`) et `DistributedFFTSolver` (FFT distribuee par BANDES via
+`MPI_Alltoall`). Les deux modelent le meme concept `EllipticSolver` que la multigrille, donc le
+coupleur est generique sur le backend. Un correctif gere `n` non puissance de 2.
 
-**Intuition.** Un niveau fin n'est pas une seule boîte mais un **ensemble de patchs**
-(plusieurs zones raffinées). Deux subtilités : (a) au joint entre deux patchs voisins
-(interface fin-fin), il ne faut PAS refluxer (ce n'est pas une interface fin-grossier) ;
-(b) la correction doit aller dans la BONNE boîte parente quand le grossier est lui-même
-multi-box.
+**Validation.** `test_poisson_fft` (non-regression, taille `n` non puissance de 2),
+`test_elliptic_operator` : le MEME operateur canonique `poisson_residual` applique aux solutions
+MG et FFT donne des residus a l'arrondi (`~1e-14`) et des solutions identiques a `~1e-16` -> les
+deux inversent prouvablement le meme Laplacien discret. **Pieges.** Le FFT exige periodique ; le
+mode `k=0` doit etre fixe (second membre a moyenne nulle), sinon `phi` derive.
 
-**Dérivation.** Masque de couverture : une cellule grossière est *couverte* si un patch
-fin la recouvre. Le reflux ne corrige une cellule grossière adjacente à un patch que si
-elle n'est PAS couverte par un autre patch. La correction est routée vers la boîte parente
-qui contient la cellule (recherche `mf_find_box`).
+## 11. Elliptique etendu : eps(x), Helmholtz/ecrante, anisotrope
 
-**Pseudocode.** `amr_step_2level_multipatch` (2 niveaux, grossier mono-box) et
-`amr_step_multilevel_multipatch` (`subcycle_level_mp`, multi-box à CHAQUE niveau). La
-couverture est bâtie sur le **BoxArray global** (toutes les boîtes, connues de tous les
-rangs) : correcte sous n'importe quelle distribution MPI.
+**Intuition.** Le meme operateur multigrille couvre trois generalisations du Laplacien, toutes
+opt-in et bit-identiques au chemin historique quand on ne les active pas :
 
-**Validation.** `test_amr_multipatch` (« 2 boîtes pavant = 1 grande boîte », `0` exact) ;
-`test_amr_multilevel_multipatch` (3 niveaux mono-box = `amr_step_multilevel_mf` ; 2 niveaux
-multi-box = `amr_step_2level_multipatch` ; 3 niveaux avec niveau intermédiaire multi-box
-conservatif), les trois à `0`. Sous MPI, `test_mpi_amr_multipatch3` (3 niveaux, niveau
-intermédiaire multi-box réparti dont le parent d'un patch fin tombe sur un autre rang) est
-bit à bit identique np=1/2/4, masse conservée. **Pièges.** Sans le masque de couverture, le
-joint fin-fin serait reflué deux fois -> non-conservation ; le grossier doit être disponible,
-ce que le distribué assure par `parallel_copy` (copie inter-niveaux parent->enfant-coarsen) +
-gather du registre par `all_reduce_sum_inplace` (niveau 0 répliqué, niveaux >0 répartis).
+- **permittivite variable** `div(eps(x) grad phi) = f` : chaque face est la moyenne HARMONIQUE des
+  deux centres adjacents du champ `eps` ;
+- **operateur ecrante / Helmholtz** `div(eps grad phi) - kappa phi = f` : un terme de reaction
+  `kappa >= 0` (ecrantage de Debye `kappa = 1 / lambda_D^2`), qui rend l'operateur plus
+  diagonalement dominant ;
+- **permittivite anisotrope** `div(diag(eps_x, eps_y) grad phi) = f` : les faces normales a x
+  lisent `eps_x`, les faces normales a y lisent `eps_y` (milieu tensoriel diagonal).
 
-## 11. Clustering Berger-Rigoutsos
+**Code.** `GeometricMG::set_epsilon(eps_fn | eps_fine)`, `set_reaction(kappa_fn)`,
+`set_epsilon_anisotropic(eps_x, eps_y)` (`numerics/elliptic/geometric_mg.hpp`). Le terme `kappa`,
+les champs `eps`/`eps_y` vivent dans les `for_each_cell` ADC_HD du smoother, du residu et de
+l'apply (`poisson_operator.hpp`) -> device. `eps` est echantillonne PAR NIVEAU (permittivite
+exacte au grossier, ordre 2 preserve). Les trois sont composables. Donner `eps_x == eps_y` redonne
+l'isotrope ; ne pas appeler `set_reaction` redonne Poisson pur.
 
-**Intuition.** Étant donné les cellules marquées (fort gradient), trouver un petit nombre
-de boîtes rectangulaires qui les couvrent sans trop de gaspillage. L'algorithme coupe
-récursivement une région là où la « signature » (histogramme des marques projeté) présente
-un trou ou un changement de courbure marqué (le laplacien de la signature).
+**Validation.** `test_variable_epsilon` (eps(x), MMS ordre 2), `test_screened_poisson`
+(Helmholtz/ecrante, MMS ordre 2), `test_anisotropic_epsilon` (anisotrope `eps_x != eps_y`, MMS
+ordre 2). Ces trois chemins sont aussi exerces cote Python (`test_poisson_eps`,
+`test_poisson_screened`, `test_poisson_eps_aniso`) et valides bit-identiques sur GH200
+(cf. GPU_RUNTIME_PORT.md, round 2).
 
-**Pseudocode.** `amr/cluster.hpp::berger_rigoutsos` : signature par axe -> trou (zéro) ou
-inflexion (laplacien max) -> coupe -> récursion jusqu'à une efficacité de remplissage
-suffisante (`ClusterParams`). `amr/regrid.hpp::tag_cells` + `grow_tags` produisent et
-dilatent les marques.
+## 12. Bord embedded : cut-cell Shortley-Weller
 
-**Validation.** `test_amr_cluster_step` (clustering branché sur le pas multipatch
-conservatif, masse `6.4e-12`) ; le démo `diocotron_multipatch` re-clusterise à la volée.
-**Pièges.** Le nesting propre (chaque patch fin strictement intérieur à la couverture
-parente) doit être imposé après le clustering, sinon le ghost-fill inter-niveaux échoue.
+**Intuition.** Une paroi non alignee sur la grille (conducteur circulaire) n'est pas un escalier :
+la cut-cell Shortley-Weller corrige le stencil au bord pour placer la condition de Dirichlet a la
+position REELLE de l'interface, retrouvant l'ordre 2 la ou l'escalier tombe a l'ordre 1.
 
-## 12. Deux-fluides isotherme asymptotic-preserving
+**Code.** Le masque + les coefficients cut-cell sont calcules au SETUP (hote, one-shot) puis lus
+par le V-cycle on-device. Compatible avec l'operateur anisotrope.
 
-Résumé ; détail complet dans [two_fluid_ap.md](two_fluid_ap.md).
+**Validation.** `test_cut_cell` (cut-cell vs escalier sur solution manufacturee),
+`test_cut_cell_anisotropic` (cut-cell + operateur anisotrope), `test_cut_cell_anisotropic_multibox`
+(domaine multi-box mono-rang), `test_mpi_cutcell_multibox` (multi-box distribue np=1/2/4, verrou de
+non-regression du bug average_down hors bornes sur hierarchie MG degenere).
 
-**Intuition.** Deux espèces (électrons, ions) couplées par Poisson. La fréquence plasma
-`omega_pe` rend le système **raide** : un schéma explicite demande `omega_pe dt < O(1)`,
-minuscule en régime quasi-neutre. Le schéma AP traite la force de Lorentz implicitement et
-reformule Poisson pour rester stable quand `omega_pe -> inf`.
+## 13. AMR : sous-cyclage Berger-Oliger + reflux conservatif
 
-**Formule clé.** `beta0 = dt^2 (omega_pe^2 + omega_pi^2)`, Poisson reformulé
-`lap(phi) = (n_e^* - n_i^*)/(1 + beta0)`. Le facteur `1/(1+beta0)` est l'ingrédient AP :
-il tend vers 0 quand la raideur explose, forçant la quasi-neutralité.
+**Intuition.** Raffiner seulement la ou il le faut. Un niveau fin (pas `dx/2`) recouvre une
+sous-region ; pour respecter sa CFL il fait `r` sous-pas de `dt/r` pendant que le grossier fait 1
+pas de `dt`. A l'interface fin-grossier, les deux niveaux calculent des flux differents -> la
+conservation est cassee. Le REFLUX (FluxRegister) corrige la maille grossiere par la difference
+(flux fin integre - flux grossier).
 
-**Validation.** Le cas `adc_cases/two_fluid_ap/run.py` : borne AP et quasi-neutralité à
-`omega_pe = 1e3` là où le non-stabilisé explose, conservation par espèce. **Pièges.** La
-continuité centrée est dispersive sur les fronts raides (option
-upwind MUSCL `upwind_continuity`) ; le sous-dépassement mesuré est surtout physique
-(raréfaction acoustique), pas du Gibbs.
+**Formule.** A chaque face fin-grossier, on accumule le flux fin sur les `r` sous-pas et on
+remplace la contribution grossiere :
 
-## 13. Champ magnétique : rotation cyclotron
+$$U_c \mathrel{-}= \frac{1}{\Delta x_c}\Big(\textstyle\sum_s \Delta t_f\,\bar F_f^{(s)} - \Delta t_c\,F_c\Big)$$
 
-**Intuition.** Un champ `B_z` hors-plan ajoute la force de Lorentz magnétique `z (m x B)`
-qui ne fait que **faire tourner** `(m_x, m_y)` à la fréquence cyclotron `w_c`, sans changer
-`|m|` ni `n`. La rotation exacte d'angle `theta = z w_c dt` est inconditionnellement stable
-(aucune limite `w_c dt`).
+**Code.** `numerics/time/amr_reflux_mf.hpp::advance_amr` est le moteur de production (multi-patch,
+N niveaux, distribue MPI) ; la pile mono-box `amr_*_mf` y vit en `detail::` comme ORACLE de
+validation. Transferts : `average_down` (fin -> grossier, conservatif) et `interpolate` (injection
+grossier -> fin) dans `mesh/refinement.hpp`. Roles promus en types : `FluxRegister` accumule les
+flux de face, `CoverageMask` evite les doubles corrections.
 
-**Formule.** Rotation analytique des composantes de quantité de mouvement :
+**Validation.** `test_refinement` (average_down conservatif + interpolate), `test_amr_hierarchy`
+(construction niveau grossier + fin imbrique + interpolation ghosts), `test_flux_register`
+(indexation du registre de flux), `test_coverage_mask` (marquage des cellules couvertes),
+`test_amr_diagnostics` (masse / vitesse de derive via le seam reducteur). **Pieges.** Le flux
+grossier doit etre echantillonne AVANT d'avancer le grossier ; l'average_down doit preceder la
+mesure de masse initiale.
 
-$$\begin{pmatrix} m_x' \\ m_y' \end{pmatrix} =
-  \begin{pmatrix}\cos\theta & \sin\theta\\ -\sin\theta & \cos\theta\end{pmatrix}
-  \begin{pmatrix} m_x \\ m_y \end{pmatrix}$$
+## 14. AMR multi-patch : reflux coverage-aware, distribue MPI
 
-composée au pas électrostatique par splitting de Strang (`R(θ/2) ∘ pas-ES ∘ R(θ/2)`,
-ordre 2). Opt-in via `omega_ce`, `omega_ci` (0 = pas de champ, comportement inchangé).
+**Intuition.** Un niveau fin n'est pas une seule boite mais un ENSEMBLE de patchs. Deux subtilites :
+(a) au joint entre deux patchs voisins (interface fin-fin), il ne faut PAS refluxer ; (b) la
+correction doit aller dans la BONNE boite parente quand le grossier est lui-meme multi-box.
 
-**Validation.** `test_two_fluid_cyclotron` : plasma uniforme (charge nulle, `E=0`,
-transport inerte) -> rotation pure à `w_c` mesurée à **0.00%** d'écart, `|m|` conservée à
-`8.9e-16`. **Pièges.** En régime fortement magnétisé ET fort champ, le splitting de Strang
-de E et B perd en précision face à un push de Boris combiné (E+B au même centrage temporel) :
-piste d'amélioration, pas encore implémentée.
+**Code.** Le masque de couverture est bati sur le BoxArray GLOBAL (toutes les boites, connues de
+tous les rangs), donc correct sous n'importe quelle distribution MPI. Sous MPI le grossier est
+soit REPLIQUE (defaut, `replicated_coarse=true`), soit DE-REPLIQUE (multi-box reparti). Le reflux
+distant passe par `parallel_copy` (copie inter-niveaux) + gather du registre par
+`all_reduce_sum_inplace`.
 
-## 14. Le seam de dispatch (série / OpenMP / Kokkos / MPI)
+**Validation.** `test_amr_spatial_parity` (le coeur spatial du chemin AMR == celui de `System` :
+meme reconstruction primitive, meme flux HLLC/Roe), `test_mpi_mbox_parity` (le residu du chemin
+compile a foncteurs nommes est invariant au decoupage en boites ET au nombre de rangs np=1/2/4,
+`dmax=0`), `test_mpi_amr_distributed_coarse` (grossier reparti == replique bit a bit, np=1/2/4).
+**Pieges.** Sans masque de couverture, le joint fin-fin serait reflue deux fois -> non-conservation.
 
-Pas un algorithme numérique mais le point de bascule qui les rend tous portables. Détail
-dans [ARCHITECTURE.md](ARCHITECTURE.md) section 4 (couche execution). En bref : `for_each_cell(box, lambda)`
-dispatche vers une boucle série, `#pragma omp parallel for`, ou `Kokkos::parallel_for`
-selon le backend de la cible `adc` ; `comm.hpp` enveloppe les collectives MPI
-(`all_reduce_sum`, `all_reduce_sum_inplace`). La physique ne voit jamais le backend.
+## 15. Clustering Berger-Rigoutsos et regrid
+
+**Intuition.** Etant donne les cellules marquees (fort gradient), trouver un petit nombre de boites
+rectangulaires qui les couvrent sans trop de gaspillage. L'algorithme coupe recursivement une
+region la ou la signature (histogramme des marques projete) presente un trou ou une inflexion (le
+laplacien de la signature).
+
+**Code.** `amr/cluster.hpp::berger_rigoutsos` (signature par axe -> trou ou inflexion -> coupe ->
+recursion jusqu'a l'efficacite de remplissage cible `ClusterParams`). `amr/regrid.hpp` produit et
+dilate les marques, impose le proper nesting, interpole les nouveaux patchs depuis le grossier.
+Sous MPI le regrid est rendu correct pour un grossier reparti (OU global des tags par
+`all_reduce_or_inplace` avant le clustering, sinon la BoxArray fine differerait par rang).
+
+**Validation.** `test_cluster` (bloc plein -> 1 boite, deux blocs separes -> 2 boites, gros bloc
+decoupe par `max_box_size`), `test_regrid` (un niveau fin est cree autour de la region taguee, les
+donnees fines interpolees depuis le grossier). **Pieges.** Le proper nesting (chaque patch fin
+strictement interieur a la couverture parente) doit etre impose apres le clustering, sinon le
+ghost-fill inter-niveaux echoue.
+
+## 16. Maillage distribue : BoxArray global, halos, equilibrage
+
+**Intuition.** Le AMR distribue exige que tous les rangs connaissent toutes les boites (BoxArray
+GLOBAL) pour calculer la couverture multi-patch correctement, mais que chaque rang n'alloue que
+ses fabs locaux (via la `DistributionMapping`). L'echange de halos comble les ghosts paralleles ;
+l'equilibrage repartit les boites sur les rangs.
+
+**Code.** `mesh/box_array.hpp` (BoxArray global), `mesh/distribution_mapping.hpp` (box -> rang),
+`mesh/multifab.hpp` (n'alloue que les fabs locaux), `mesh/fill_boundary.hpp` (echange de halos
+intra-niveau, begin/end non-bloquant), `parallel/load_balance.hpp` (Z-order SFC + knapsack).
+`parallel/comm.hpp` enveloppe les collectives MPI (`all_reduce_sum`, `all_reduce_or_inplace`,
+send-recv), degenere en serie.
+
+**Validation.** `test_box_array`, `test_multifab`, `test_load_balance` ; sous MPI :
+`test_mpi_fillboundary` (echange de halos), `test_mpi_poisson` (Poisson distribue),
+`test_mpi_fft_distributed` (FFT par bandes), `test_mpi_redistribute`, `test_mpi_array_reduce`,
+`test_mpi_coupler_inject` (np=4, bit-identiques np=1/2/4).
+
+## 17. Canal aux extensible
+
+**Intuition.** Le couplage hyperbolique-elliptique passe par un canal `aux` de contrat de BASE
+`(phi, grad_x, grad_y)` (3 composantes). Certains modeles ont besoin de champs SUPPLEMENTAIRES : un
+champ magnetique `B_z` hors-plan, une temperature electronique `T_e` derivee de `p/rho`. Le canal
+est elargi a la demande, bit-identique a l'historique quand `n_aux = 3`.
+
+**Code.** Un modele declare un membre statique `n_aux > 3` ; `load_aux<NComp>` / `aux_comps<Model>()`
+lisent les composantes supplementaires. `B_z` (comp 3) est une fonction PURE de la position,
+echantillonnee par niveau ; `T_e` (comp 4) est derivee d'un bloc fluide. Un `CompositeModel`
+propage la largeur aux maximale de ses briques.
+
+**Validation.** `test_aux_extra` (un modele declare `n_aux > 3`), `test_aux_composite` (un modele
+compose propage la largeur aux de ses briques), `test_aux_coupler_bz` / `test_aux_system_bz` /
+`test_amr_aux_bz` / `test_amr_system_bz_pop` / `test_amr_system_bz_multibox` (B_z lu et peuple le
+long des chemins coupleur, systeme, AMR, multi-box), `test_aux_te` (T_e derive p/rho),
+`test_aux_single_source` (une source unique genere `load_aux` + marshaling, tous champs couverts).
+
+## 18. Composition runtime et systeme multi-especes
+
+**Intuition.** Python compose QUOI (un bloc par espece : modele compose + schema spatial + politique
+temporelle), le C++ calcule par CELLULE. N especes interagissent dans le SECOND MEMBRE elliptique
+(`f = sum_s q_s n_s`) et dans la SOURCE inter-especes, jamais dans le flux.
+
+**Code.** `runtime/system.hpp::System` (multi-blocs mono-niveau, Poisson partage),
+`runtime/amr_system.hpp::AmrSystem` (un bloc sur hierarchie raffinee). Cote couplage :
+`coupling/system_coupler.hpp` (`SystemAssembler` assemble, `SystemDriver` avance),
+`coupling/amr_system_coupler.hpp` (le systeme porte sur AMR). `runtime/model_factory.hpp` assemble
+un `CompositeModel` depuis une spec de briques (le coeur ne nomme aucun scenario).
+
+**Validation.** `test_system_abstraction`, `test_system_coupler`, `test_two_species_minimal`,
+`test_coupled_source` (source inter-especes), `test_system_two_explicit`, `test_assembler_driver`
+(l'assembleur assemble, le driver avance), `test_amr_system_coupler`, `test_system_hardening`,
+`test_variable_role` (adresser une composante par son ROLE physique plutot que par indice).
+
+## 19. DSL symbolique : codegen, JIT, AOT
+
+**Intuition.** Un mini-DSL cote Python decrit un modele en FORMULES et l'emet en brique C++ : flux,
+source, second membre elliptique, avec elimination de sous-expressions communes (CSE). Trois
+chemins de mise en oeuvre, du plus dynamique au plus natif.
+
+**Code.**
+- **JIT** : `runtime/dynamic_model.hpp` (`IModel` virtuel, charge via `.so` / `dlopen`) ;
+  `System.add_dynamic_block` branche un modele a dispatch virtuel (prototypage hote).
+- **AOT marshale** : `runtime/compiled_block_abi.hpp` (`add_compiled_block`, ABI `extern "C"`,
+  marshaling de tableaux plats, sans AMR ni MPI).
+- **AOT natif** : `runtime/dsl_block.hpp` (`add_compiled_model`) branche un `CompositeModel` connu
+  a la compilation comme un bloc NATIF, sans marshaling. La machinerie equivalente device-clean est
+  `runtime/block_builder.hpp` (fermetures de bloc instanciables hors `System`, foncteurs nommes).
+
+**Validation.** Cote C++ : `test_dynamic_model` (modele type-erased == Euler statique),
+`test_block_builder` (fermetures de bloc instanciables hors System), `test_compiled_model_parity`
+(AOT natif == bloc natif sur CPU/Serial), `test_amr_compiled_model` (AOT natif sur hierarchie AMR).
+Cote Python : `test_dsl*` (codegen flux/source/elliptique, CSE, JIT `.so`, dispatch type-erased,
+recon, roles, aux), exerces par la suite `ctest` du module Python. Sur GH200, le chemin a foncteurs
+nommes est valide bit-identique (cf. GPU_RUNTIME_PORT.md, phase 9) ; `add_compiled_model` a lambdas
+etendues bute encore sur une limite nvcc (cf. GPU_RUNTIME_PORT.md, phase 8).
+
+## 20. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)
+
+Pas un algorithme numerique mais le point de bascule qui les rend tous portables. Detail dans
+[ARCHITECTURE.md](ARCHITECTURE.md) section 4 (couche execution). En bref :
+`for_each_cell(box, lambda ADC_HD)` dispatche vers une boucle serie, `#pragma omp parallel for`, ou
+`Kokkos::parallel_for` (OpenMP / Cuda) selon le backend de la cible `adc`, choisi A LA COMPILATION.
+`for_each_cell_reduce_sum` / `_max` portent les reductions (reducteurs `Kokkos::Sum`/`Max`
+deterministes). `comm.hpp` enveloppe les collectives MPI. La physique ne voit jamais le backend ; on
+n'ecrit AUCUN kernel CUDA a la main. Discipline GPU : `device_fence()` entre un kernel device et une
+boucle hote sur la meme memoire unifiee (cf. CHOICES.md).

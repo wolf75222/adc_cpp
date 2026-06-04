@@ -26,7 +26,8 @@ modèles, invariants physiques, AMR multi-niveau, runs ROMEO à grande échelle)
 
 Les harnais GPU sous `python/tests/gpu/` sont compilés quand `-DADC_USE_KOKKOS=ON` ; ils
 héritent du backend Kokkos de la cible `adc`. Les composants (System mono-grille, ops de champ
-AMR, halos MPI multi-GPU, backend AOT d'un modèle DSL) ont été validés SÉPARÉMENT et
-bit-identiques au CPU sur GH200 ; la validation INTÉGRÉE AmrSystem + MPI + GPU reste à faire.
-Détail :
+AMR, halos MPI multi-GPU, chemin compilé à foncteurs nommés) ont été validés bit-identiques au
+CPU sur GH200, ET la validation INTÉGRÉE AmrSystem + MPI + GPU est FAITE (np=1/2/4 `dmax=0`,
+masse conservée à `0`), avec des caveats honnêtes (sommes globales d'un grossier distribué non
+bit-identiques par ordre de réduction FMA ; strong-scaling AMR négatif à cette échelle). Détail :
 [GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md).

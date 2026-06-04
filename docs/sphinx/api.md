@@ -2,9 +2,9 @@
 
 Référence du module `adc` (bindings pybind11 de `libadc`, plus le sucre objet du paquet
 `adc/`). Python compose un système bloc par bloc ; tout le calcul cellule par cellule
-reste dans la lib C++ compilée. Voir le tutoriel
-[03, API Python](https://github.com/wolf75222/adc_cpp/blob/master/tutorials/03_python_api.md)
-pour des exemples annotés.
+reste dans la lib C++ compilée. Pour des exemples annotés, voir le [quickstart](quickstart.md) ;
+les parcours guidés applicatifs vivent dans le dépôt
+[`adc_cases`](https://github.com/wolf75222/adc_cases).
 
 > Les blocs `autoclass` ci-dessous ne se rendent que si le module `adc` a été construit
 > (`-DADC_BUILD_PYTHON=ON`) et est importable au build de la doc.
@@ -87,8 +87,9 @@ L'intégrateur AP deux-fluides a quitté le cœur : ce n'est pas une brique gén
 la composition `System` ne reproduit pas ; d'où son statut d'intégrateur sur mesure plutôt que
 de brique composable. Sa physique C++ vit désormais dans `adc_cases/two_fluid_ap/`
 (`two_fluid_ap.hpp`), compilée à la volée contre les en-têtes génériques d'`adc_cpp` puis
-pilotée depuis Python ; le module `_adc` ne l'expose plus. Voir [la note de
-méthode](two_fluid_ap.md) et `adc_cases/two_fluid_ap/run.py`.
+pilotée depuis Python ; le module `_adc` ne l'expose plus. Voir `adc_cases/two_fluid_ap/run.py`
+(note de méthode archivée :
+[archive/two_fluid_ap.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/archive/two_fluid_ap.md)).
 
 ### Composition sur AMR multi-patch
 

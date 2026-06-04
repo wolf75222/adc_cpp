@@ -14,7 +14,7 @@ git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build          # ~53 ctests coeur
+ctest --test-dir build          # 71 ctests coeur
 ```
 
 ## Module Python
@@ -33,7 +33,7 @@ python3 -c "import adc; print(adc.__doc__)"
 
 ```bash
 cmake -S . -B build-omp -DADC_USE_OPENMP=ON    # OpenMP autonome (déprécié -> Kokkos)
-cmake -S . -B build-mpi -DADC_USE_MPI=ON       # MPI (+7 tests via mpirun -np 4)
+cmake -S . -B build-mpi -DADC_USE_MPI=ON       # MPI (+21 entrées ctest via mpirun, np=1/2/4)
 cmake -S . -B build-gpu -DADC_USE_KOKKOS=ON    # Kokkos (CPU Serial/OpenMP, GPU Cuda)
 ```
 

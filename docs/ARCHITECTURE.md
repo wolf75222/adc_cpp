@@ -2,14 +2,17 @@
 
 Coeur C++23 pour les systemes hyperbolique-elliptique couples sur AMR, ecrit pour
 MPI + Kokkos (le backend OpenMP autonome est deprecie). Les briques physiques
-(`include/adc/physics/`) et **les bindings Python de la lib** (module `adc` : composition
-`System` + solveur specialise `TwoFluidAP`) vivent ICI ; `adc_cases` ne contient que des
-**cas d'utilisation en Python** qui importent ce module. Le coeur est AGNOSTIQUE au modele :
-il ne nomme aucun scenario, il fournit des briques generiques composees en `CompositeModel`.
+(`include/adc/physics/`) et **les bindings Python de la lib** (module `adc` : facades de
+composition `System` / `AmrSystem`) vivent ICI ; `adc_cases` ne contient que des **cas
+d'utilisation en Python** qui importent ce module. Le coeur est AGNOSTIQUE au modele : il ne
+nomme aucun scenario, il fournit des briques generiques composees en `CompositeModel`. Les
+integrateurs SUR MESURE (deux-fluides AP) ont quitte le coeur : ce sont des scenarios qui
+vivent dans `adc_cases`, compiles a la volee contre les en-tetes generiques.
 
-Ce document fige l'architecture cible et son etat. Le README porte la narration et les
+Ce document decrit l'architecture et son etat reel. Le README porte la narration et les
 resultats. Ici on decrit les couches, les seams, les decisions, et on distingue ce qui est
-**fait** de ce qui est **cible** (refactor planifie, voir [ROADMAP.md](ROADMAP.md)).
+**fait** de ce qui reste **cible**. Les notes de planification et de vision sont archivees
+sous [`archive/`](archive/) (hors navigation).
 
 ## 1. Principe : cinq couches orthogonales
 
@@ -324,10 +327,13 @@ parite avec `System` : MONO-bloc, explicite, sans reconstruction primitive ni fl
 L'etape suivante est de faire porter pleinement la meme notion d'`EquationBlock` par le moteur
 AMR, au lieu de dupliquer la logique par cas physique.
 
-**Tests coeur.** Les invariants AMR actuellement couverts dans ce depot sont le raffinement,
-la hierarchie, le clustering, le regrid, le reflux, le masque de couverture, les diagnostics
-AMR et le load balancing. Les tests MPI AMR plus applicatifs vivent ou devront vivre au niveau
-des cas downstream si le modele physique est necessaire.
+**Tests coeur.** Les invariants AMR couverts dans ce depot sont le raffinement, la hierarchie,
+le clustering, le regrid, le reflux, le masque de couverture, les diagnostics AMR et le load
+balancing (serie), plus, sous MPI, la parite du chemin compile multi-box au nombre de rangs
+(`test_mpi_mbox_parity`, `test_mpi_amr_compiled_parity`), le grossier reparti == replique
+(`test_mpi_amr_distributed_coarse`) et B_z par niveau multi-box distribue
+(`test_amr_system_bz_multibox_np2/4`), tous np=1/2/4. Les validations applicatives (modele
+physique nomme, taux de croissance) restent dans les cas downstream (`adc_cases`).
 
 ## 9. Backends : propriete de la bibliotheque, pas un drapeau par cible
 
@@ -379,15 +385,23 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui dans `adc_cpp` :
-- Tests : ~53 ctests coeur par defaut (`ctest --test-dir build`), joues en CI sur deux builds
-  (Release serie ET Kokkos backend Serial) ; +7 tests MPI quand `-DADC_USE_MPI=ON`. Le module
-  Python ajoute ~16 tests (bindings + DSL).
-- Numerique coeur : maillage, halos, AMR, reflux, multigrille, Poisson (dont eps(x) variable),
-  discretisations, flux de Roe, IMEX/AP, splitting, `EquationBlock`, `CoupledSystem`,
-  `SystemCoupler`, parite du bloc compile AOT (CPU/Serial).
+- Tests : 71 ctests coeur par defaut (`ctest --test-dir build`), joues en CI sur deux builds
+  (Release serie ET Kokkos backend Serial) ; +21 entrees ctest MPI quand `-DADC_USE_MPI=ON`
+  (np=1/2/4, bit-identiques). Le module Python ajoute 26 tests (bindings + DSL).
+- Numerique coeur : maillage, halos, AMR, reflux, multigrille, Poisson (dont eps(x) variable,
+  Helmholtz/ecrante, anisotrope, cut-cell), discretisations, flux de Roe, WENO5-Z, IMEX/AP,
+  splitting, multirate, `EquationBlock`, `CoupledSystem`, `SystemCoupler`, canal aux extensible
+  (B_z, T_e), parite du bloc compile AOT (CPU/Serial).
 - Les validations applicatives (diocotron, runs ROMEO, taux de croissance) vivent dans `adc_cases`.
-- GPU GH200 : composants valides SEPAREMENT (System mono-grille, ops de champ AMR, halos MPI
-  multi-GPU, backend AOT d'un modele DSL) ; pas de validation INTEGREE AmrSystem + MPI + GPU.
+- GPU GH200 (backend Kokkos Cuda, validations integrees au depot via harness sous
+  `python/tests/gpu/`, hors CI faute de runner GPU) : composants valides bit-identiques au CPU
+  (System mono-grille, ops de champ AMR, halos MPI multi-GPU, chemin compile a foncteurs nommes
+  multi-box + MPI) ET validation INTEGREE AmrSystem + MPI + GPU FAITE (les trois axes dans un
+  seul run, np=1/2/4 `dmax=0`, masse conservee a `0`). Caveats honnetes : un grossier multi-box
+  DISTRIBUE n'est pas bit-identique sur les sommes globales (ordre de reduction FMA, le max reste
+  exact) ; `AmrSystemCoupler` complet ne s'instancie pas sous nvcc (concept + lambda generique) ;
+  `add_compiled_model` a lambdas etendues n'est pas zero-copie sur device ; le strong-scaling AMR
+  par grossier reparti est NEGATIF a cette echelle. Detail : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md).
 
 ## 12. Comparaison AMReX
 

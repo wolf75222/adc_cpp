@@ -59,7 +59,7 @@ pas une reecriture des noyaux de calcul.
    `device_fence` interne supprime (les kernels BC s'ordonnent apres `copy_shifted`, et les faces y
    apres les faces x, sur le meme flux). Un transport NON-periodique (sortie Foextrap) sur GH200 donne
    un resultat BIT-IDENTIQUE au CPU (`python/tests/gpu/phase2_transport.cpp` ; la masse decroit comme
-   il se doit, sortie libre). ~53 ctests (dont test_physical_bc, poisson_disc, cut_cell) verts.
+   il se doit, sortie libre). Les ctests coeur (dont test_physical_bc, poisson_disc, cut_cell) verts.
 3. **Poisson sur device.** ✅ FAIT (verifie GH200) -- et SANS modification de code. Toute la boucle
    V-cycle de `GeometricMG` etait DEJA en `for_each` -> device : smoother red-black GS, residu, Laplacien
    (`poisson_operator.hpp`), restriction `average_down` + prolongation `interpolate` (`mesh/refinement.hpp`),
@@ -319,8 +319,8 @@ existant phase 8) -- la lecture des champs aux (B_z, T_e) a ete validee device v
 Le reste de la vision (DSL symbolique : interprete, codegen flux/brique/source/elliptique, CSE, JIT
 .so, dispatch type-erased dans le System, AOT bloc compile a parite native sur CPU/Serial ; flux Roe ;
 VariableRole present mais pas encore cable ; eps(x) variable cote coeur, cablage System/Python a faire ;
-reorg physics/ numerics/) est COMPLET au niveau PROTOTYPE, teste (~54 ctests C++ + ~16 tests Python) et
-verifie jusqu'au GH200. La VALIDATION INTEGREE AmrSystem + MPI + GPU (les trois axes dans un seul run)
+reorg physics/ numerics/) est COMPLET au niveau PROTOTYPE, teste (71 ctests C++ coeur, +21 entrees
+ctest MPI, 26 tests Python) et verifie jusqu'au GH200. La VALIDATION INTEGREE AmrSystem + MPI + GPU (les trois axes dans un seul run)
 est FAITE (phase 10, GH200, dmax=0, masse conservee a 0). Les briques a chemin device fusionnees
 APRES #48 (T_e via `load_aux<5>`, EPM ecrante/Helmholtz #44, EPM anisotrope #52/#56, B_z par niveau
 AMR #53) sont confirmees BIT-IDENTIQUES sur GH200 (round 2, dmax=0, memes cycles MG, conservation).

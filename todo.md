@@ -1,4 +1,4 @@
-# TODO — adc_cpp
+# TODO - adc_cpp
 
 > Liste de travail vivante. Synthese de (1) l'objectif initial du chantier (canal `aux` extensible
 > + parite AMR + cablage runtime / Python / DSL), (2) ce que `docs/ROADMAP.md` marque "en file",
@@ -10,21 +10,21 @@
 Objectif : un modele declare/lit des champs aux SUPPLEMENTAIRES (B_z magnetique, T_e electronique)
 sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strictement identique).
 
-- [x] **Inc. 1 — Lecture** : `adc::Aux` + `B_z` (comp 3), `kAuxBaseComps=3`, `aux_comps<Model>()`,
+- [x] **Inc. 1 - Lecture** : `adc::Aux` + `B_z` (comp 3), `kAuxBaseComps=3`, `aux_comps<Model>()`,
       `load_aux<NComp>`. Les foncteurs nommes lisent `load_aux<aux_comps<Model>()>`. (#24)
-- [x] **Inc. 2 — Peuplement Coupler** mono-bloc : `fill_bz`, aux alloue a `aux_comps<Model>()`. (#24)
-- [x] **Inc. 3 — Peuplement SystemAssembler** multi-blocs (aux = max sur les blocs). (#25)
-- [x] **Inc. 4 — `CompositeModel::n_aux`** = max des briques ; `aux_comps` deplace dans
+- [x] **Inc. 2 - Peuplement Coupler** mono-bloc : `fill_bz`, aux alloue a `aux_comps<Model>()`. (#24)
+- [x] **Inc. 3 - Peuplement SystemAssembler** multi-blocs (aux = max sur les blocs). (#25)
+- [x] **Inc. 4 - `CompositeModel::n_aux`** = max des briques ; `aux_comps` deplace dans
       `physical_model.hpp` (header contrat). (#26)
-- [x] **Inc. 5 — runtime `System`** : `ensure_aux_width` + `set_magnetic_field` (binding Python
+- [x] **Inc. 5 - runtime `System`** : `ensure_aux_width` + `set_magnetic_field` (binding Python
       calque sur `set_epsilon_field`). Chemin natif `add_compiled_model` complet. (#29)
-- [x] **Inc. 6 — DSL** : emet `n_aux` quand une formule lit `aux('B_z')` (`AUX_CANONICAL`). (#30)
-- [x] **Inc. 7 — chemin JIT** `add_dynamic_block` : `IModel::n_aux()` virtuel + marshaling
+- [x] **Inc. 6 - DSL** : emet `n_aux` quand une formule lit `aux('B_z')` (`AUX_CANONICAL`). (#30)
+- [x] **Inc. 7 - chemin JIT** `add_dynamic_block` : `IModel::n_aux()` virtuel + marshaling
       `aux_ncomp_` -> B_z transporte, Python end-to-end. (#32)
-- [x] **Inc. 8 — chemin AOT compile** `add_compiled_block` : l'ABI `compiled_block_abi.hpp`
+- [x] **Inc. 8 - chemin AOT compile** `add_compiled_block` : l'ABI `compiled_block_abi.hpp`
       transporte desormais la largeur aux (B_z/T_e), symetrique de l'inc. 7 cote ABI `extern "C"` ;
       modele DSL B_z pilote 100% depuis Python via `compile_aot`. (#46)
-- [x] **T_e — 2e champ extra DERIVE** : T = p/rho calculee par le `System` depuis un bloc fluide
+- [x] **T_e - 2e champ extra DERIVE** : T = p/rho calculee par le `System` depuis un bloc fluide
       designe a chaque solve (comp 4, `set_electron_temperature_from`, recalcule dans `solve_fields`,
       pas user-fourni comme B_z). Valide la generalisation a 2 champs aux. (#35) ; lu sur les TROIS
       chemins dynamiques : natif (#35), AOT (test #50), JIT (marshaling complete #51, etait a 0).
@@ -42,7 +42,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] Operateur elliptique ANISOTROPE `div(diag(eps_x, eps_y) grad phi)` : coeur GeometricMG (#52),
       eps_x(x)/eps_y(x) exposes au runtime System + Python (#56), test cut-cell + anisotrope MMS ordre 2 (#55).
 - [ ] Recabler les sites en forme `/(2*dx)` vers la forme multiplicative `*cx` (`amr_coupler`,
-      `amr_coupler_mp`, `spectral_coupler`) — differe au dernier bit, donc hors perimetre tant
+      `amr_coupler_mp`, `spectral_coupler`) - differe au dernier bit, donc hors perimetre tant
       qu'on veut le bit-identique.
 
 ## 3. Durcissement de l'architecture (`docs/ROADMAP.md` "en file")
@@ -63,7 +63,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] AMR multi-patch distribue MPI (2 et N niveaux), `CouplingPolicy` mince, suite de validation
       numerique coeur, decoupage elliptique (operateur / solveur / probleme).
 
-## 4. GPU (GH200) — integration
+## 4. GPU (GH200) - integration
 
 - [x] Composants valides SEPAREMENT et bit-identiques au CPU sur GH200 : System mono-grille, ops de
       champ AMR, halos MPI multi-GPU, backend AOT d'un modele DSL, `load_aux<4>` (B_z device).
@@ -99,7 +99,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] Push de Boris E+B combine (`tfap_boris`, cyclotron exact, derive ExB sans croissance seculaire).
 - [ ] Reformulation AP tensorielle sous champ fort.
 
-## 6. Reproduction Hoffart (arXiv:2510.11808) — APPLICATIF, cote `adc_cases`
+## 6. Reproduction Hoffart (arXiv:2510.11808) - APPLICATIF, cote `adc_cases`
 
 - [~] **M1** : taux de croissance numerique vs analytique (diocotron). Pipeline valide ; `gamma_norm`
       croit vers 0.911 mais limite par la diffusion numerique du bord d'anneau (-> motive l'AMR).
