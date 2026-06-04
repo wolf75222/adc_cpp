@@ -424,6 +424,61 @@ struct CoverageMask {
   }
 };
 
+// SubcyclingSchedule (revue, point 5 : role promu en type). Cadence Berger-Oliger d'un
+// niveau : ratio de raffinement temporel r, sous-pas dt/r, et position temporelle frac(s)
+// = s/r du sous-pas s dans le pas parent. Centralise le `const int r = 2`, `dt / r` et
+// `Real(s) / r` epars dans les boucles de sous-cyclage. Arithmetique strictement preservee :
+// dt_sub(dt) == dt / r et frac(s) == Real(s) / r aux memes types, donc bit-identique.
+struct SubcyclingSchedule {
+  int r;
+  explicit SubcyclingSchedule(int ratio = 2) : r(ratio) {}
+  int count() const { return r; }                       // nombre de sous-pas
+  Real dt_sub(Real dt) const { return dt / r; }         // pas fin = pas parent / r
+  Real frac(int s) const { return Real(s) / r; }        // position temporelle du sous-pas s
+};
+
+// CoarseFineInterface (revue, point 2). L'interface grossier-fin d'un niveau : couverture
+// (quelles cellules grossieres sont ombragees par un patch fin, via CoverageMask) + ROUTAGE
+// bordant du reflux (quelle cellule grossiere borde quelle face de patch fin, et la
+// correction conservative qu'on y verse). Centralise les deux logiques inline auparavant
+// dupliquees dans amr_step_2level_multipatch et subcycle_level_mp. Construit le masque sur le
+// box_array() GLOBAL des patchs fins (MPI-safe). route_reflux est un template sur le type de
+// registre (Reg / RegMP, meme disposition de champs) : fonction nommee (pas de lambda
+// generique), donc sure sous nvcc. Arithmetique bit-identique aux corps precedents.
+struct CoarseFineInterface {
+  CoverageMask cmask;
+  // region = empreinte grossiere du niveau (origine (0,0), dims NX x NY) ; fine_ba = patchs
+  // fins GLOBAUX (toutes les boxes, connues de tous les rangs). On marque l'empreinte
+  // grossiere PatchRange de chaque patch.
+  CoarseFineInterface(const Box2D& coarse_region, const BoxArray& fine_ba)
+      : cmask(coarse_region) {
+    for (int g = 0; g < fine_ba.size(); ++g) cmask.mark(PatchRange(fine_ba[g]).box());
+  }
+  bool covered(int I, int J) const { return cmask.covered(I, J); }
+
+  // Verse la correction de reflux d'UN patch fin (registre g, coords parentes) dans le
+  // registre grossier ref : sur chaque cellule grossiere BORDANTE non couverte par un autre
+  // patch, (flux fin time-integre - flux grossier x dt) / dx|dy. Memes formules, meme ordre
+  // (gauche/droite en x, bas/haut en y) que les corps inline d'origine.
+  template <class Reg>
+  void route_reflux(const Reg& g, Real dx, Real dy, Real dt, FluxRegister& ref, int nc) const {
+    for (int J = g.J0; J <= g.J1; ++J)
+      for (int k = 0; k < nc; ++k) {
+        if (!covered(g.I0 - 1, J))
+          ref.add(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dx);
+        if (!covered(g.I1 + 1, J))
+          ref.add(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dx);
+      }
+    for (int I = g.I0; I <= g.I1; ++I)
+      for (int k = 0; k < nc; ++k) {
+        if (!covered(I, g.J0 - 1))
+          ref.add(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dy);
+        if (!covered(I, g.J1 + 1))
+          ref.add(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dy);
+      }
+  }
+};
+
 // Pas 2-niveaux conservatif, niveau fin MULTI-BOX. Uc : grossier mono-box (periodique).
 // Uf : MultiFab a N boxes fines (ratio 2, strictement interieures, alignees grossier).
 //
@@ -441,16 +496,16 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
                                 Real dyc, MultiFab& Uf, const MultiFab& auxc,
                                 const MultiFab& auxf, Real dt) {
-  const int r = 2, nc = Uc.ncomp();
-  const Real dxf = dxc / 2, dyf = dyc / 2, dtf = dt / r;
+  const SubcyclingSchedule sched(2);
+  const int nc = Uc.ncomp();
+  const Real dxf = dxc / 2, dyf = dyc / 2, dtf = sched.dt_sub(dt);
   const int NX = dom.nx(), NY = dom.ny();
 
-  // masque de couverture : cellules grossieres couvertes par une box fine. Bati sur le
-  // BoxArray GLOBAL (toutes les boxes, connues de tous les rangs) -> correct sous MPI.
-  CoverageMask cmask(Box2D{{0, 0}, {NX - 1, NY - 1}});
-  for (int g = 0; g < Uf.box_array().size(); ++g)
-    cmask.mark(PatchRange(Uf.box_array()[g]).box());
-  auto covered = [&](int I, int J) { return cmask.covered(I, J); };
+  // interface grossier-fin : couverture (cellules grossieres ombragees par un patch fin) +
+  // routage bordant du reflux. Couverture batie sur le BoxArray GLOBAL (toutes les boxes,
+  // connues de tous les rangs) -> correct sous MPI.
+  const CoarseFineInterface cfi(Box2D{{0, 0}, {NX - 1, NY - 1}}, Uf.box_array());
+  auto covered = [&](int I, int J) { return cfi.covered(I, J); };
 
   MultiFab Uc_old = Uc;
   fill_periodic_local(Uc, dom);  // grossier replique -> fill periodique local (pas de plan MPI)
@@ -502,8 +557,8 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   MultiFab fyf(BoxArray(std::move(fyb)), Uf.dmap(), nc, 0);
   const Box2D fdom = Box2D::from_extents(2 * NX, 2 * NY);
 
-  for (int s = 0; s < r; ++s) {
-    mf_fill_fine_ghosts_multi(Uf, Uc_old, Uc, Real(s) / r);
+  for (int s = 0; s < sched.count(); ++s) {
+    mf_fill_fine_ghosts_multi(Uf, Uc_old, Uc, sched.frac(s));
     fill_boundary(Uf, fdom, Periodicity{false, false});  // halos fin-fin
     compute_face_fluxes<Limiter, NumericalFlux>(m, Uf, auxf, fxf, fyf, dxf, dyf);
     device_fence();
@@ -557,20 +612,7 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
         for (int k = 0; k < nc; ++k)
           avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
                                          f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
-    for (int J = g.J0; J <= g.J1; ++J)
-      for (int k = 0; k < nc; ++k) {
-        if (!covered(g.I0 - 1, J))
-          ref.add(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dxc);
-        if (!covered(g.I1 + 1, J))
-          ref.add(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dxc);
-      }
-    for (int I = g.I0; I <= g.I1; ++I)
-      for (int k = 0; k < nc; ++k) {
-        if (!covered(I, g.J0 - 1))
-          ref.add(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dyc);
-        if (!covered(I, g.J1 + 1))
-          ref.add(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dyc);
-      }
+    cfi.route_reflux(g, dxc, dyc, dt, ref, nc);  // reflux bordant coverage-aware
   }
   avg.gather();
   ref.gather();
@@ -743,7 +785,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
                        const Box2D& base_dom, Periodicity base_per, const MultiFab* pOld,
                        const MultiFab* pNew, Real frac, std::vector<RegMP>* parentRegs,
                        bool coarse_replicated = true, bool recon_prim = false) {
-  const int r = 2, nc = L[lev].U.ncomp();
+  const SubcyclingSchedule sched(2);
+  const int nc = L[lev].U.ncomp();
   AmrLevelMP& lv = L[lev];
   const int np = lv.U.local_size();
 
@@ -798,12 +841,11 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     return;
   }
 
-  // role GROSSIER pour lev+1 : couverture + registres + flux grossier sauve.
+  // role GROSSIER pour lev+1 : interface grossier-fin (couverture GLOBALE MPI-safe + routage
+  // bordant du reflux) + registres + flux grossier sauve.
   const int NX = base_dom.nx() << lev, NY = base_dom.ny() << lev;
-  CoverageMask cmask(Box2D{{0, 0}, {NX - 1, NY - 1}});  // couverture GLOBALE (MPI-safe)
-  for (int g = 0; g < L[lev + 1].U.box_array().size(); ++g)
-    cmask.mark(PatchRange(L[lev + 1].U.box_array()[g]).box());
-  auto covered = [&](int I, int J) { return cmask.covered(I, J); };
+  const CoarseFineInterface cfi(Box2D{{0, 0}, {NX - 1, NY - 1}}, L[lev + 1].U.box_array());
+  auto covered = [&](int I, int J) { return cfi.covered(I, J); };
 
   // Point 2 distribue : le flux grossier fx/fy vit sur la dmap du PARENT (lv.U), donc fx.fab
   // est sur le rang proprietaire de la box parente, pas forcement celui de l'enfant. Deux cas :
@@ -878,9 +920,9 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   MultiFab U_old = lv.U;  // etat t (interp temporelle pour les enfants)
   mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
   mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) au sous-pas
-  for (int s = 0; s < r; ++s)
-    subcycle_level_mp<Limiter, NumericalFlux>(m, L, lev + 1, dt / r, base_dom, base_per,
-                                              &U_old, &lv.U, Real(s) / r, &regs,
+  for (int s = 0; s < sched.count(); ++s)
+    subcycle_level_mp<Limiter, NumericalFlux>(m, L, lev + 1, sched.dt_sub(dt), base_dom, base_per,
+                                              &U_old, &lv.U, sched.frac(s), &regs,
                                               coarse_replicated, recon_prim);
   mf_average_down_mb(L[lev + 1].U, lv.U);  // point 3 distribue (parallel_copy)
 
@@ -897,23 +939,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   const Box2D rbox{{std::max(fpcn.lo[0] - 1, 0), std::max(fpcn.lo[1] - 1, 0)},
                    {std::min(fpcn.hi[0] + 1, NX - 1), std::min(fpcn.hi[1] + 1, NY - 1)}};
   FluxRegister ref(rbox, nc);  // reflux N-niveaux (interface)
-  for (int lc = 0; lc < static_cast<int>(regs.size()); ++lc) {
-    RegMP& g = regs[lc];
-    for (int J = g.J0; J <= g.J1; ++J)
-      for (int k = 0; k < nc; ++k) {
-        if (!covered(g.I0 - 1, J))
-          ref.add(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / lv.dx);
-        if (!covered(g.I1 + 1, J))
-          ref.add(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / lv.dx);
-      }
-    for (int I = g.I0; I <= g.I1; ++I)
-      for (int k = 0; k < nc; ++k) {
-        if (!covered(I, g.J0 - 1))
-          ref.add(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / lv.dy);
-        if (!covered(I, g.J1 + 1))
-          ref.add(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / lv.dy);
-      }
-  }
+  for (int lc = 0; lc < static_cast<int>(regs.size()); ++lc)
+    cfi.route_reflux(regs[lc], lv.dx, lv.dy, dt, ref, nc);  // reflux bordant coverage-aware
   ref.gather();
   for (int pb = 0; pb < lv.U.local_size(); ++pb) {  // application aux boxes parentes locales
     Array4 c = lv.U.fab(pb).array();
@@ -950,10 +977,10 @@ void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
 //                         (ratio 2), partagee par average_down, couverture et registres
 //   CoarseFineGhost     = TYPE/HELPER NOMME : fill_cf_ghost_cell (interp espace+temps par
 //                         cellule ghost), partage par les trois mf_fill_fine_ghosts_*
-//   CoarseFineInterface = masque de couverture (CoverageMask) + routage bordant du reflux
-//                         (encore inline dans subcycle_level_mp / amr_step_2level_multipatch)
+//   CoarseFineInterface = TYPE NOMME : couverture (CoverageMask) + routage bordant du reflux
+//                         (route_reflux), partage par subcycle_level_mp et amr_step_2level_multipatch
 //   FluxRegister        = TYPE NOMME : buffers avg/ref a index global + all_reduce_sum_inplace
-//   SubcyclingSchedule  = recursion Berger-Oliger (dt/r par niveau) de subcycle_level_mp
+//   SubcyclingSchedule  = TYPE NOMME : cadence Berger-Oliger (ratio r, dt/r, frac s/r) par niveau
 //   RegridPolicy        = amr_regrid_finest (Berger-Rigoutsos), cote coupleur
 using OwnershipPolicy = DistributionMapping;
 
