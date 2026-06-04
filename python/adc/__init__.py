@@ -272,20 +272,25 @@ class ThermalExchange:
 class Spatial:
     """Discretisation spatiale : reconstruction (limiteur) + flux numerique de Riemann.
 
-    limiter : "none" | "minmod" | "vanleer"  (raccourcis none=/minmod=/vanleer=)
+    limiter : "none" | "minmod" | "vanleer" | "weno5"  (raccourcis none=/minmod=/vanleer=/weno5=)
+              weno5 = WENO5-Z, ordre 5 en zone lisse, stencil 5 points (3 ghosts) ; capture sans
+              oscillation pres d'un front. Seul le chemin natif add_block l'expose (les chemins
+              compiles .so allouent 2 ghosts -> rejet explicite).
     flux    : "rusanov" | "hllc" | "roe"  (hllc/roe exigent un transport compressible)
     recon   : "conservative" | "primitive"  (variables reconstruites ; primitif plus robuste
               pour Euler : positivite de rho et p ; raccourci primitive=)
     """
 
     def __init__(self, limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
-                 minmod=False, vanleer=False, primitive=False):
+                 minmod=False, vanleer=False, weno5=False, primitive=False):
         if none:
             limiter = "none"
         elif minmod:
             limiter = "minmod"
         elif vanleer:
             limiter = "vanleer"
+        elif weno5:
+            limiter = "weno5"
         if primitive:
             recon = "primitive"
         self.limiter = limiter
@@ -294,12 +299,22 @@ class Spatial:
 
 
 class Explicit:
-    """Traitement temporel explicite (SSPRK2). substeps : sous-cyclage du bloc."""
+    """Traitement temporel explicite. substeps : sous-cyclage du bloc.
 
-    kind = "explicit"
+    method : "ssprk2" (defaut, Shu-Osher 2 etages ordre 2) | "ssprk3" (3 etages ordre 3, moins
+             dissipatif, a apparier a une reconstruction d'ordre eleve comme weno5). Raccourci
+             ssprk3=True. Le defaut reste SSPRK2 (comportement historique inchange).
+    """
 
-    def __init__(self, substeps=1):
+    def __init__(self, substeps=1, method="ssprk2", *, ssprk3=False):
+        if ssprk3:
+            method = "ssprk3"
+        if method not in ("ssprk2", "ssprk3"):
+            raise ValueError("Explicit : method 'ssprk2' | 'ssprk3' (recu %r)" % (method,))
         self.substeps = int(substeps)
+        self.method = method
+        # kind transmis a la facade compilee : "explicit" (SSPRK2, defaut bit-identique) ou "ssprk3".
+        self.kind = "ssprk3" if method == "ssprk3" else "explicit"
 
 
 class IMEX:

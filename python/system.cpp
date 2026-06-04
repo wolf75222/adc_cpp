@@ -290,6 +290,27 @@ struct System::Impl {
         a(i, j, kAuxBaseComps) = bz_field_[static_cast<std::size_t>(j) * n + i];
   }
 
+  // Garantit que l'etat U du bloc @p name porte au moins @p ng ghosts (stencil du schema spatial).
+  // WENO5 lit 3 ghosts, > les 2 alloues par defaut dans install_block ; sans cette largeur,
+  // fill_ghosts + assemble_rhs liraient hors bornes (cf. AmrSystem qui alloue avec Limiter::n_ghost,
+  // PR #22). Reallue le MultiFab et RECOPIE les cellules valides (set_density peut avoir precede) ;
+  // no-op si U a deja assez de ghosts -> allocation et donnees bit-identiques a avant pour MUSCL.
+  void set_block_ghosts(const std::string& name, int ng) {
+    Species& s = find(name);
+    if (s.U.n_grow() >= ng) return;
+    MultiFab nu(s.U.box_array(), s.U.dmap(), s.ncomp, ng);
+    nu.set_val(Real(0));
+    for (int li = 0; li < s.U.local_size(); ++li) {
+      const ConstArray4 old = s.U.fab(li).const_array();
+      Array4 dst = nu.fab(li).array();
+      const Box2D v = s.U.box(li);  // cellules valides (hors ghost) : copiees telles quelles
+      for (int c = 0; c < s.ncomp; ++c)
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i) dst(i, j, c) = old(i, j, c);
+    }
+    s.U = std::move(nu);
+  }
+
   // Composante canonique de T_e (apres phi/grad/B_z) ; cf. adc::Aux et AUX_CANONICAL cote DSL.
   static constexpr int kTeComp = kAuxBaseComps + 1;  // = 4
 
@@ -656,14 +677,18 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                        bool evolve) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
-  if (time != "explicit" && time != "imex")
-    throw std::runtime_error("System::add_block : time 'explicit' | 'imex' (recu '" + time +
-                             "')");
+  // @p time porte le TRAITEMENT et, en explicite, le SCHEMA RK : "explicit"/"ssprk2" = SSPRK2
+  // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "imex" = transport explicite + source raide
+  // implicite. La math RK reste un FONCTEUR du coeur (build_block).
+  if (time != "explicit" && time != "ssprk2" && time != "ssprk3" && time != "imex")
+    throw std::runtime_error("System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'imex' (recu '" +
+                             time + "')");
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_block : recon 'conservative' | 'primitive' (recu '" +
                              recon + "')");
   const bool imex = (time == "imex");
   const bool recon_prim = (recon == "primitive");
+  const std::string method = (time == "ssprk3") ? "ssprk3" : "ssprk2";
 
   int ncomp = 1;
   BlockClosures clo;
@@ -678,7 +703,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   detail::dispatch_model(model, [&](auto m) {
     using M = decltype(m);
     ncomp = M::n_vars;
-    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim);
+    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method);
     max_speed = make_max_speed(m, ctx);
     add_poisson_rhs = make_poisson_rhs(m);
     cons_vs = M::conservative_vars();  // noms + ROLES physiques (source unique de verite)
@@ -689,6 +714,11 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   // via Kokkos), sans recopie.
   install_block(name, ncomp, cons_vs, prim_vs, model.gamma, std::move(clo), std::move(max_speed),
                 std::move(add_poisson_rhs), substeps, evolve);
+  // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par defaut dans
+  // install_block. On reallue l'etat du bloc avec block_n_ghost(limiter) si besoin (cf. AmrSystem qui
+  // alloue avec Limiter::n_ghost, PR #22) pour que fill_ghosts + assemble_rhs ne lisent pas hors
+  // bornes. minmod/vanleer (2 ghosts) : no-op, allocation et resultat bit-identiques a avant.
+  P->set_block_ghosts(name, block_n_ghost(limiter));
 }
 
 // Contexte de grille reel (maillage + CL + aux) : sert au gabarit add_compiled_model pour fabriquer
@@ -751,8 +781,18 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
   if (substeps < 1) throw std::runtime_error("System::add_compiled_block : substeps >= 1");
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_compiled_block : recon 'conservative' | 'primitive'");
+  // NB : le chemin AOT (.so) marshale time->imex sans schema RK explicite : seul SSPRK2 est cable
+  // dans l'ABI extern "C" du .so. "ssprk3" n'est donc PAS supporte ici (l'avance resterait SSPRK2,
+  // silencieusement) -> on le rejette. SSPRK3 est expose par le chemin natif add_block.
   if (time != "explicit" && time != "imex")
-    throw std::runtime_error("System::add_compiled_block : time 'explicit' | 'imex'");
+    throw std::runtime_error("System::add_compiled_block : time 'explicit' | 'imex' (ssprk3 -> "
+                             "add_block ; le chemin AOT n'expose que SSPRK2)");
+  // WENO5 (3 ghosts) lirait hors bornes dans la grille locale du .so (alloue 2 ghosts dans
+  // compiled_block_abi.hpp, chantier DSL Phase-A) : on le rejette ICI plutot que de produire
+  // silencieusement un resultat faux. WENO5 est cable de bout en bout par le chemin natif add_block.
+  if (limiter == "weno5")
+    throw std::runtime_error("System::add_compiled_block : limiter 'weno5' non expose par le chemin "
+                             "AOT (.so a 2 ghosts) ; utiliser add_block (chemin natif).");
   const int recon_prim = (recon == "primitive") ? 1 : 0;
   const int imex = (time == "imex") ? 1 : 0;
 
@@ -875,6 +915,12 @@ void System::add_native_block(const std::string& name, const std::string& so_pat
   if (time != "explicit" && time != "imex")
     throw std::runtime_error("System::add_native_block : time 'explicit' | 'imex' (recu '" + time +
                              "')");
+  // WENO5 (3 ghosts) : le loader natif inline add_compiled_model qui installe via install_block
+  // (allocation a 2 ghosts ; chantier DSL Phase-A, hors de ce write-set). Rejete ICI pour ne pas
+  // lire hors bornes. WENO5 est cable de bout en bout par le chemin natif add_block.
+  if (limiter == "weno5")
+    throw std::runtime_error("System::add_native_block : limiter 'weno5' non expose par le chemin "
+                             "natif loader (install_block a 2 ghosts) ; utiliser add_block.");
   // Chemin "production" du DSL : le loader .so genere (emit_cpp_native_loader) inline le gabarit
   // en-tete add_compiled_model<ProdModel>, qui fabrique les fermetures sur le CONTEXTE REEL du
   // System (grid_context) et installe le bloc via install_block -- chemin NATIF, zero-copie, MEMES

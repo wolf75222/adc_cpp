@@ -54,8 +54,11 @@ struct BlockRhsEval {
   }
 };
 
-/// Avance EXPLICITE : n sous-pas de SSPRK2 sur le residu transport+source.
-template <class Limiter, class Flux, class Model>
+/// Avance EXPLICITE : n sous-pas du stepper @c Stepper (SSPRK2 par defaut, SSPRK3 optionnel) sur le
+/// residu transport+source. Le schema RK est un parametre de template (FONCTEUR NOMME du coeur :
+/// SSPRK2Step / SSPRK3Step) -> meme contrat device-clean que SSPRK2Step. SSPRK2 reproduit a l'identique
+/// l'avance historique (bit-identique).
+template <class Limiter, class Flux, class Model, class Stepper = SSPRK2Step>
 struct AdvanceExplicit {
   Model m;
   GridContext ctx;
@@ -63,7 +66,7 @@ struct AdvanceExplicit {
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim};
-    for (int s = 0; s < n; ++s) SSPRK2Step{}.take_step(rhs, U, h);
+    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
   }
 };
 
@@ -98,37 +101,52 @@ struct RhsInto {
 }  // namespace detail
 
 /// Fermetures (avance + residu) pour un schema spatial (Limiter x Flux) fige. La math RK vient des
-/// TimeStepper du coeur : SSPRK2 en explicite ; ForwardEuler + backward_euler_source en IMEX. Les
-/// fermetures sont des FONCTEURS NOMMES (cf. namespace detail) et non des lambdas : le chemin
-/// add_compiled_model (premiere instanciation depuis une TU externe) s'emet alors proprement sous nvcc.
+/// TimeStepper du coeur : en explicite SSPRK2 (defaut) ou SSPRK3 selon @p method ; ForwardEuler +
+/// backward_euler_source en IMEX. Les fermetures sont des FONCTEURS NOMMES (cf. namespace detail) et
+/// non des lambdas : le chemin add_compiled_model (premiere instanciation depuis une TU externe)
+/// s'emet alors proprement sous nvcc. @p method ne joue QUE sur l'avance explicite (l'IMEX garde son
+/// demi-pas ForwardEuler + source implicite) ; "ssprk2" reproduit l'avance historique (bit-identique).
 template <class Limiter, class Flux, class Model>
-BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim) {
+BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
+                          const std::string& method = "ssprk2") {
   BlockClosures bc;
-  if (imex)
+  if (imex) {
     bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim};
-  else
-    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model>{m, ctx, recon_prim};
+  } else if (method == "ssprk3") {
+    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim};
+  } else if (method == "ssprk2") {
+    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK2Step>{m, ctx, recon_prim};
+  } else {
+    throw std::runtime_error("System : methode temporelle explicite inconnue '" + method +
+                             "' (ssprk2|ssprk3)");
+  }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim};
   return bc;
 }
 
 /// Dispatch du schema spatial (limiteur x flux Riemann) -> fermetures compilees. HLLC / Roe gardes
 /// par requires : exigent un transport a 4 variables exposant pressure (sinon erreur explicite).
+/// "weno5" = reconstruction WENO5-Z (ordre 5, stencil 5 points, 3 ghosts) ; spatial_operator route
+/// sur weno5z quand Limiter::n_ghost >= 3 (l'appelant doit allouer 3 ghosts, cf. block_n_ghost).
+/// @p method choisit l'avance EXPLICITE (ssprk2 par defaut, ssprk3 optionnel) ; sans effet en IMEX.
 template <class Model>
 BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
-                         const GridContext& ctx, bool imex, bool recon_prim) {
+                         const GridContext& ctx, bool imex, bool recon_prim,
+                         const std::string& method = "ssprk2") {
   if (riem == "rusanov") {
-    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim);
-    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim);
-    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim);
+    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method);
+    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method);
+    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method);
+    if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method);
     throw std::runtime_error("System : limiter inconnu '" + lim + "'");
   }
   if (riem == "hllc") {
     if constexpr (Model::n_vars == 4 &&
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim);
-      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim);
-      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim);
+      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'hllc' exige un transport compressible "
@@ -138,9 +156,10 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
   if (riem == "roe") {
     if constexpr (Model::n_vars == 4 &&
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim);
-      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim);
-      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim);
+      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'roe' exige un transport compressible "
@@ -148,6 +167,18 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
     }
   }
   throw std::runtime_error("System : flux Riemann inconnu '" + riem + "' (rusanov|hllc|roe)");
+}
+
+/// Nombre de ghosts requis par le schema spatial @p lim (source unique : Limiter::n_ghost). Sert a
+/// l'allocation du MultiFab d'etat d'un bloc, pour que le stencil large de WENO5 (5 points, 3 ghosts)
+/// ne lise pas hors bornes -- cf. comment AmrSystem alloue avec Limiter::n_ghost (PR #22). Defaut 2
+/// (MUSCL) pour un limiteur inconnu : c'est l'allocation historique, donc bit-identique.
+inline int block_n_ghost(const std::string& lim) {
+  if (lim == "none") return NoSlope::n_ghost;
+  if (lim == "minmod") return Minmod::n_ghost;
+  if (lim == "vanleer") return VanLeer::n_ghost;
+  if (lim == "weno5") return Weno5::n_ghost;
+  return 2;  // fallback MUSCL (allocation historique ; le dispatch make_block levera sur un lim invalide)
 }
 
 namespace detail {

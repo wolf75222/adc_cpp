@@ -155,6 +155,13 @@ add_test(NAME test_poisson_eps
 set_tests_properties(test_poisson_eps PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# WENO5-Z + SSPRK3 exposes depuis l'API : adc.Spatial(limiter="weno5") + adc.Explicit(method="ssprk3")
+# end-to-end, defaut SSPRK2 inchange (bit-identique), garde-fous sur les chemins compiles (.so).
+add_test(NAME test_weno5_ssprk3
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_weno5_ssprk3.py)
+set_tests_properties(test_weno5_ssprk3 PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # --- Garde-fou : tests des chantiers aux extensible / EPM / roles, jusqu'ici lances en CI
 # (ci.yml) mais PAS enregistres en ctest -> on les rend visibles a `ctest` (et donc enforces
 # localement avant tout refactor). Les chemins JIT/AOT (test_dsl_{jit,aot}_{bz,te}) compilent
