@@ -20,11 +20,13 @@
 /// add_block. Parite validee sur CPU (build/ ET backend Kokkos Serial) : eval_rhs bit-identique a
 /// add_block (cf. tests/test_compiled_model_parity.cpp).
 ///
-/// LIMITE CONNUE (backend Kokkos Cuda) : make_block instancie des LAMBDAS ETENDUES (__host__
-/// __device__) ; instanciees ICI dans la TU appelante (et non dans system.cpp), elles butent sur une
-/// limite nvcc des lambdas etendues en template cross-TU -> crash device a l'execution. La parite GPU
-/// demande de remplacer ces lambdas par des FONCTEURS NOMMES dans block_builder.hpp (suivi dedie).
-/// C'est le backend "compile" de l'ideal m.compile_or_jit() pour un binaire de production.
+/// DEVICE (backend Kokkos Cuda) : tout le chemin make_block est desormais bati sur des FONCTEURS
+/// NOMMES (build_block via AdvanceExplicit/AdvanceImex/RhsInto/BlockRhsEval, make_max_speed via
+/// MaxSpeed ; cf. block_builder.hpp), au lieu des lambdas premiere-instanciees depuis cette TU
+/// appelante. nvcc emet alors fiablement le kernel device imbrique (AssembleRhsKernel) ; le crash
+/// device a l'execution (Heisenbug : OK Serial + compute-sanitizer, segfault Cuda) est leve, et la
+/// parite A==B (dres=0) est obtenue sur GH200. C'est le backend "compile" de l'ideal
+/// m.compile_or_jit() pour un binaire de production.
 
 namespace adc {
 

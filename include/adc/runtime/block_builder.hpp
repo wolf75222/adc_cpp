@@ -36,40 +36,79 @@ namespace adc {
 // aussi par system.hpp pour exposer grid_context() / install_block() sans tirer la numerique).
 
 namespace detail {
-/// Foncteur residu -div F + S (fill_ghosts puis assemble_rhs) capture par les TimeStepper.
+/// Foncteur residu -div F + S (fill_ghosts puis assemble_rhs), passe AUX TimeStepper comme RhsEval.
+/// FONCTEUR NOMME (et non lambda) : c'est lui que take_step recoit et qui declenche l'instanciation
+/// d'assemble_rhs<Limiter, Flux> (et de son AssembleRhsKernel device). Premiere-instancie depuis une
+/// TU EXTERNE (add_compiled_model), une lambda a cette place fait buter nvcc sur l'emission du kernel
+/// device imbrique (Heisenbug : OK Serial + compute-sanitizer, segfault a l'execution Cuda). Une
+/// classe a un contexte d'instanciation stable -> codegen device robuste. Corps identique a l'ancienne
+/// lambda -> residu bit-identique a add_block sur CPU (et, vise, sur device).
 template <class Limiter, class Flux, class Model>
-auto block_rhs_eval(const Model& model, const GridContext& ctx, bool recon_prim) {
-  return [model, ctx, recon_prim](MultiFab& U, MultiFab& R) {
+struct BlockRhsEval {
+  Model model;
+  const GridContext* ctx;
+  bool recon_prim;
+  void operator()(MultiFab& U, MultiFab& R) const {
+    fill_ghosts(U, ctx->dom, ctx->bc);
+    assemble_rhs<Limiter, Flux>(model, U, *ctx->aux, ctx->geom, R, recon_prim);
+  }
+};
+
+/// Avance EXPLICITE : n sous-pas de SSPRK2 sur le residu transport+source.
+template <class Limiter, class Flux, class Model>
+struct AdvanceExplicit {
+  Model m;
+  GridContext ctx;
+  bool recon_prim;
+  void operator()(MultiFab& U, Real dt, int n) const {
+    const Real h = dt / static_cast<Real>(n);
+    const BlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim};
+    for (int s = 0; s < n; ++s) SSPRK2Step{}.take_step(rhs, U, h);
+  }
+};
+
+/// Avance IMEX : par sous-pas, demi-pas EXPLICITE (transport sans source) + source IMPLICITE raide.
+template <class Limiter, class Flux, class Model>
+struct AdvanceImex {
+  Model m;
+  GridContext ctx;
+  bool recon_prim;
+  void operator()(MultiFab& U, Real dt, int n) const {
+    const Real h = dt / static_cast<Real>(n);
+    const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
+                                                                  recon_prim};
+    for (int s = 0; s < n; ++s) {
+      ForwardEuler{}.take_step(rhs, U, h);     // demi-pas explicite : transport sans source
+      backward_euler_source(m, *ctx.aux, U, h);  // source implicite (rappel raide)
+    }
+  }
+};
+
+/// Residu fige (fill_ghosts + assemble_rhs) installe comme rhs_into du bloc.
+template <class Limiter, class Flux, class Model>
+struct RhsInto {
+  Model m;
+  GridContext ctx;
+  bool recon_prim;
+  void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx.dom, ctx.bc);
-    assemble_rhs<Limiter, Flux>(model, U, *ctx.aux, ctx.geom, R, recon_prim);
-  };
-}
+    assemble_rhs<Limiter, Flux>(m, U, *ctx.aux, ctx.geom, R, recon_prim);
+  }
+};
 }  // namespace detail
 
 /// Fermetures (avance + residu) pour un schema spatial (Limiter x Flux) fige. La math RK vient des
-/// TimeStepper du coeur : SSPRK2 en explicite ; ForwardEuler + backward_euler_source en IMEX.
+/// TimeStepper du coeur : SSPRK2 en explicite ; ForwardEuler + backward_euler_source en IMEX. Les
+/// fermetures sont des FONCTEURS NOMMES (cf. namespace detail) et non des lambdas : le chemin
+/// add_compiled_model (premiere instanciation depuis une TU externe) s'emet alors proprement sous nvcc.
 template <class Limiter, class Flux, class Model>
 BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim) {
   BlockClosures bc;
   if (imex)
-    bc.advance = [m, ctx, recon_prim](MultiFab& U, Real dt, int n) {
-      const Real h = dt / static_cast<Real>(n);
-      for (int s = 0; s < n; ++s) {
-        const SourceFreeModel<Model> sf{m};  // demi-pas explicite : transport sans source
-        ForwardEuler{}.take_step(detail::block_rhs_eval<Limiter, Flux>(sf, ctx, recon_prim), U, h);
-        backward_euler_source(m, *ctx.aux, U, h);  // source implicite (rappel raide)
-      }
-    };
+    bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim};
   else
-    bc.advance = [m, ctx, recon_prim](MultiFab& U, Real dt, int n) {
-      const Real h = dt / static_cast<Real>(n);
-      for (int s = 0; s < n; ++s)
-        SSPRK2Step{}.take_step(detail::block_rhs_eval<Limiter, Flux>(m, ctx, recon_prim), U, h);
-    };
-  bc.rhs_into = [m, ctx, recon_prim](MultiFab& U, MultiFab& R) {
-    fill_ghosts(U, ctx.dom, ctx.bc);
-    assemble_rhs<Limiter, Flux>(m, U, *ctx.aux, ctx.geom, R, recon_prim);
-  };
+    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model>{m, ctx, recon_prim};
+  bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim};
   return bc;
 }
 
@@ -111,16 +150,22 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
   throw std::runtime_error("System : flux Riemann inconnu '" + riem + "' (rusanov|hllc|roe)");
 }
 
-/// Fermeture de vitesse d'onde max du bloc (pour le pas CFL).
+namespace detail {
+/// Foncteur vitesse d'onde max du bloc (max_wave_speed_mf, reduction par le seam). FONCTEUR NOMME :
+/// max_wave_speed_mf instancie MaxWaveSpeedKernel (deja un foncteur device) ; l'envelopper dans une
+/// classe nommee plutot qu'une lambda preserve le contexte d'instanciation cross-TU sous nvcc.
 template <class Model>
-std::function<Real(const MultiFab&)> make_max_speed(const Model& m, const GridContext& ctx) {
-  return [m, ctx](const MultiFab& U) { return max_wave_speed_mf(m, U, *ctx.aux); };
-}
+struct MaxSpeed {
+  Model m;
+  GridContext ctx;
+  Real operator()(const MultiFab& U) const { return max_wave_speed_mf(m, U, *ctx.aux); }
+};
 
-/// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs(U) (boucle hote).
+/// Foncteur contribution Poisson : rhs += elliptic_rhs(U) (boucle HOTE pure, pas de kernel device).
 template <class Model>
-std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs(const Model& m) {
-  return [m](const MultiFab& U, MultiFab& rhs) {
+struct PoissonRhs {
+  Model m;
+  void operator()(const MultiFab& U, MultiFab& rhs) const {
     for (int li = 0; li < rhs.local_size(); ++li) {
       Array4 r = rhs.fab(li).array();
       const ConstArray4 u = U.fab(li).const_array();
@@ -129,7 +174,20 @@ std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs(const Model& m)
         for (int i = b.lo[0]; i <= b.hi[0]; ++i)
           r(i, j) += m.elliptic_rhs(load_state<Model>(u, i, j));
     }
-  };
+  }
+};
+}  // namespace detail
+
+/// Fermeture de vitesse d'onde max du bloc (pour le pas CFL).
+template <class Model>
+std::function<Real(const MultiFab&)> make_max_speed(const Model& m, const GridContext& ctx) {
+  return detail::MaxSpeed<Model>{m, ctx};
+}
+
+/// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs(U) (boucle hote).
+template <class Model>
+std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs(const Model& m) {
+  return detail::PoissonRhs<Model>{m};
 }
 
 }  // namespace adc
