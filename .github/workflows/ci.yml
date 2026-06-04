@@ -78,6 +78,7 @@ jobs:
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_aot.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_recon.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_poisson_eps.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_poisson_eps_aniso.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_poisson_screened.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_poisson_composite.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_magnetic_field.py

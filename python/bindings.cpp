@@ -100,6 +100,13 @@ PYBIND11_MODULE(_adc, m) {
              s.set_epsilon_field(flat(arr));
            },
            py::arg("eps"))
+      .def("set_epsilon_anisotropic_field",
+           [](System& s,
+              py::array_t<double, py::array::c_style | py::array::forcecast> eps_x,
+              py::array_t<double, py::array::c_style | py::array::forcecast> eps_y) {
+             s.set_epsilon_anisotropic_field(flat(eps_x), flat(eps_y));
+           },
+           py::arg("eps_x"), py::arg("eps_y"))
       .def("set_reaction_field",
            [](System& s,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr) {

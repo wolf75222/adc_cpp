@@ -173,6 +173,9 @@ struct System::Impl {
   Real p_eps_ = 1;  // permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps
   bool has_eps_field_ = false;          // permittivite VARIABLE eps(x) fournie (porte par l'operateur)
   std::vector<double> p_eps_field_;     // champ eps(x), n*n row-major (si has_eps_field_)
+  bool has_eps_xy_field_ = false;       // permittivite ANISOTROPE eps_x(x), eps_y(x) (operateur div(diag(eps_x,eps_y) grad phi))
+  std::vector<double> p_eps_x_field_;   // champ eps_x(x), n*n row-major (faces normales a x ; si has_eps_xy_field_)
+  std::vector<double> p_eps_y_field_;   // champ eps_y(x), n*n row-major (faces normales a y ; si has_eps_xy_field_)
   bool has_kappa_field_ = false;        // terme de REACTION kappa(x) fourni : div(eps grad phi) - kappa phi
   std::vector<double> p_kappa_field_;   // champ kappa(x), n*n row-major (si has_kappa_field_)
   std::optional<std::variant<GeometricMG, PoissonFFTSolver>> ell_;
@@ -307,6 +310,9 @@ struct System::Impl {
       if (has_eps_field_)
         throw std::runtime_error("System : solver 'fft' a coefficient CONSTANT, incompatible avec un "
                                  "champ eps(x) variable -> utiliser solver='geometric_mg'");
+      if (has_eps_xy_field_)
+        throw std::runtime_error("System : solver 'fft' a coefficient CONSTANT, incompatible avec une "
+                                 "permittivite ANISOTROPE eps_x(x), eps_y(x) -> utiliser solver='geometric_mg'");
       if (has_kappa_field_)
         throw std::runtime_error("System : solver 'fft' (Poisson pur) incompatible avec un terme de "
                                  "reaction kappa(x) -> utiliser solver='geometric_mg'");
@@ -314,11 +320,12 @@ struct System::Impl {
     } else if (p_solver == "geometric_mg") {
       ell_.emplace(std::in_place_type<GeometricMG>, geom, ba, pbc, std::move(active));
       if (has_eps_field_) apply_epsilon_field();    // operateur div(eps grad phi) a eps(x) variable
+      if (has_eps_xy_field_) apply_epsilon_anisotropic_field();  // div(diag(eps_x, eps_y) grad phi)
       if (has_kappa_field_) apply_reaction_field();  // terme - kappa phi (Poisson ecrante / Helmholtz)
       // Garde-fou : avec kappa et une permittivite CONSTANTE eps != 1 (sans champ eps(x)), le rhs
       // serait mis a l'echelle 1/eps (raccourci lap phi = f/eps) -- incoherent avec le terme -kappa phi.
       // On exige alors eps = 1 ou un champ eps(x) (porte par l'operateur, sans mise a l'echelle).
-      if (has_kappa_field_ && !has_eps_field_ && p_eps_ != Real(1))
+      if (has_kappa_field_ && !has_eps_field_ && !has_eps_xy_field_ && p_eps_ != Real(1))
         throw std::runtime_error("System : terme de reaction kappa(x) + permittivite CONSTANTE eps != 1 "
                                  "non supporte ; utiliser eps = 1 ou un champ eps(x) (set_epsilon_field)");
     } else {
@@ -339,6 +346,25 @@ struct System::Impl {
       for (int i = v.lo[0]; i <= v.hi[0]; ++i)
         e(i, j, 0) = static_cast<Real>(p_eps_field_[static_cast<std::size_t>(j) * n + i]);
     mg.set_epsilon(eps_fine);  // copie sur le niveau fin + restriction (average_down) aux grossiers
+  }
+  // Installe les champs eps_x(x), eps_y(x) (n*n row-major chacun) sur le GeometricMG : l'operateur
+  // passe a div(diag(eps_x, eps_y) grad phi) = f. Les faces normales a x lisent eps_x, celles
+  // normales a y lisent eps_y (coefficients de face harmoniques, ordre 2), PORTES PAR L'OPERATEUR
+  // sans mise a l'echelle 1/eps du second membre. GeometricMG seul (coefficient tensoriel variable).
+  void apply_epsilon_anisotropic_field() {
+    GeometricMG& mg = std::get<GeometricMG>(*ell_);
+    MultiFab eps_x_fine(ba, dm, 1, 0), eps_y_fine(ba, dm, 1, 0);
+    Array4 ex = eps_x_fine.fab(0).array();
+    Array4 ey = eps_y_fine.fab(0).array();
+    const Box2D v = eps_x_fine.box(0);
+    const int n = cfg.n;
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
+        const std::size_t k = static_cast<std::size_t>(j) * n + i;
+        ex(i, j, 0) = static_cast<Real>(p_eps_x_field_[k]);
+        ey(i, j, 0) = static_cast<Real>(p_eps_y_field_[k]);
+      }
+    mg.set_epsilon_anisotropic(eps_x_fine, eps_y_fine);  // faces x <- eps_x, faces y <- eps_y (+ restriction)
   }
   // Installe le terme de reaction kappa(x) (n*n row-major) sur le GeometricMG : l'operateur passe a
   // div(eps grad phi) - kappa phi = f (Poisson ecrante / Helmholtz ; kappa = 1/lambda_D^2 pour Debye).
@@ -378,9 +404,10 @@ struct System::Impl {
     rhs.set_val(Real(0));
     for (auto& s : sp) s.add_poisson_rhs(s.U, rhs);  // f = Sum_s elliptic_rhs_s(u_s)
     // Permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps, donc on met le rhs a
-    // l'echelle 1/eps. Avec un champ eps(x) VARIABLE on NE le fait PAS : l'operateur GeometricMG
-    // porte eps directement (cf. apply_epsilon_field), le rhs reste f tel quel.
-    if (!has_eps_field_ && p_eps_ != Real(1)) {
+    // l'echelle 1/eps. Avec un champ eps(x) VARIABLE ou ANISOTROPE on NE le fait PAS : l'operateur
+    // GeometricMG porte eps directement (apply_epsilon_field / apply_epsilon_anisotropic_field), le
+    // rhs reste f tel quel.
+    if (!has_eps_field_ && !has_eps_xy_field_ && p_eps_ != Real(1)) {
       const Real inv = Real(1) / p_eps_;
       for (int li = 0; li < rhs.local_size(); ++li) {
         Array4 r = rhs.fab(li).array();
@@ -746,6 +773,23 @@ void System::set_epsilon_field(const std::vector<double>& eps) {
   p_->p_eps_field_ = eps;
   p_->has_eps_field_ = true;
   p_->ell_.reset();  // l'operateur sera reconstruit avec le champ eps au prochain solve_fields
+}
+
+void System::set_epsilon_anisotropic_field(const std::vector<double>& eps_x,
+                                           const std::vector<double>& eps_y) {
+  const int n = p_->cfg.n;
+  if (static_cast<int>(eps_x.size()) != n * n || static_cast<int>(eps_y.size()) != n * n)
+    throw std::runtime_error("System::set_epsilon_anisotropic_field : taille != n*n (eps_x et eps_y)");
+  for (double e : eps_x)
+    if (!(e > 0.0))
+      throw std::runtime_error("System::set_epsilon_anisotropic_field : permittivite eps_x(x) > 0 requise");
+  for (double e : eps_y)
+    if (!(e > 0.0))
+      throw std::runtime_error("System::set_epsilon_anisotropic_field : permittivite eps_y(x) > 0 requise");
+  p_->p_eps_x_field_ = eps_x;
+  p_->p_eps_y_field_ = eps_y;
+  p_->has_eps_xy_field_ = true;
+  p_->ell_.reset();  // operateur reconstruit en div(diag(eps_x, eps_y) grad phi) au prochain solve_fields
 }
 
 void System::set_reaction_field(const std::vector<double>& kappa) {

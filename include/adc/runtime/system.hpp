@@ -125,6 +125,15 @@ class System {
   /// erreur. Prevaut sur la permittivite constante de set_poisson. A appeler avant solve_fields.
   void set_epsilon_field(const std::vector<double>& eps);
 
+  /// Fixe une permittivite ANISOTROPE eps_x(x), eps_y(x), deux champs n*n row-major (> 0), au CENTRE
+  /// des cellules. L'operateur du Poisson de systeme passe a div(diag(eps_x, eps_y) grad phi) = f :
+  /// les faces normales a x portent eps_x, celles normales a y portent eps_y (coefficients de face
+  /// harmoniques, ordre 2), PORTES PAR L'OPERATEUR sans mise a l'echelle 1/eps du second membre.
+  /// eps_x == eps_y redonne l'operateur isotrope div(eps grad phi). Seul 'geometric_mg' le supporte ;
+  /// le demander avec 'fft' (coefficient constant) leve une erreur. A appeler avant solve_fields.
+  void set_epsilon_anisotropic_field(const std::vector<double>& eps_x,
+                                     const std::vector<double>& eps_y);
+
   /// Active un terme de REACTION kappa(x) >= 0 : l'operateur du Poisson de systeme passe de
   /// div(eps grad phi) = f a div(eps grad phi) - kappa phi = f (Poisson ECRANTE / Helmholtz ;
   /// kappa = 1/lambda_D^2 pour l'ecrantage de Debye). Champ n*n row-major, porte par l'operateur
