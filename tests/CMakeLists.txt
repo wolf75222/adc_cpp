@@ -110,6 +110,32 @@ add_executable(test_amr_compiled_model test_amr_compiled_model.cpp
 target_link_libraries(test_amr_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS})
 add_test(NAME test_amr_compiled_model COMMAND test_amr_compiled_model)
 
+# --- chemin "production" NATIF cote AMR : AmrSystem::add_native_block (DSL Phase D) ---
+# Compile A L'EXECUTION un loader .so (la source qu'emet dsl.emit_cpp_native_loader(target="amr_system"),
+# ecrite ici pour un test C++ autonome) qui inline add_compiled_model(AmrSystem&), le branche via
+# AmrSystem::add_native_block, et compare a add_compiled_model(AmrSystem&) EN DIRECT (memes types/schema)
+# -> densite grossiere bit-identique (dmax==0) + rejet d'une cle d'ABI falsifiee. Compile amr_system.cpp
+# (AmrSystem::add_native_block) avec le test. Injecte compilateur / include / norme / tmpdir : le loader
+# est rebati avec la MEME norme C++ que ce binaire (cle d'ABI concordante, garde-fou explicite sinon).
+# Le test s'auto-saute (exit 0) si le compilateur du build ne sait pas compiler le loader.
+add_executable(test_amr_native_loader test_amr_native_loader.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+target_link_libraries(test_amr_native_loader PRIVATE adc::adc ${CMAKE_DL_LIBS})
+# ELF (Linux) : un executable n'exporte AUCUN symbole dans sa table dynamique sauf -rdynamic. Le loader
+# .so est dlopen-e en RTLD_GLOBAL et resout ses indefinis (adc::AmrSystem::set_compiled_block, exportee
+# ADC_EXPORT = visibilite defaut) contre l'image deja chargee : ICI le binaire de test lui-meme (auto-
+# promu RTLD_NOLOAD|RTLD_GLOBAL via dladdr). Sans ENABLE_EXPORTS (-rdynamic), set_compiled_block n'est
+# pas dans la .dynsym de l'exe -> dlopen echoue (undefined symbol). MEME role que le module _adc .so
+# cote System (un .so a SES symboles defaut dans la .dynsym ; un exe non). Sans effet sur macOS (le
+# loader y resout par -undefined dynamic_lookup), inoffensif.
+set_target_properties(test_amr_native_loader PROPERTIES ENABLE_EXPORTS ON)
+target_compile_definitions(test_amr_native_loader PRIVATE
+  ADC_TEST_CXX="${CMAKE_CXX_COMPILER}"
+  ADC_TEST_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/../include"
+  ADC_TEST_CXX_STD="c++${CMAKE_CXX_STANDARD}"
+  ADC_TEST_TMPDIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME test_amr_native_loader COMMAND test_amr_native_loader)
+
 # --- contrat mono-bloc/explicite de la facade AmrSystem : refus explicite des params non cables ---
 # Compile le runtime AmrSystem (python/amr_system.cpp) avec le test : verrouille que set_poisson
 # refuse solver/rhs hors du domaine cable (GeometricMG + somme des briques elliptiques) et qu'add_block

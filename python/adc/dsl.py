@@ -791,68 +791,102 @@ class HyperbolicModel:
                             "-o", so_path], check=True)
         return so_path
 
-    def emit_cpp_native_loader(self, name=None):
+    def emit_cpp_native_loader(self, name=None, target="system"):
         """Source du LOADER NATIF (backend "production") : le MODELE COMPLET en CompositeModel<...>
-        derriere une ABI extern "C" MINCE de DEUX symboles.
+        derriere une ABI extern "C" MINCE.
 
         A la difference du backend "aot" (emit_cpp_aot_source : ABI plate de tableaux, le .so
         recalcule tout sur une grille locale et marshale les tableaux), le loader natif NE porte PAS
-        la numerique : il se contente d'INSTALLER le modele genere comme bloc NATIF du System deja
-        construit, via le gabarit en-tete adc::add_compiled_model<ProdModel>. Ce gabarit fabrique les
-        fermetures sur le CONTEXTE REEL du System (grid_context) -> le bloc tourne ensuite le MEME
-        chemin que add_block (assemble_rhs, fill_boundary), ZERO-COPIE, device-clean (foncteurs nommes).
+        la numerique : il se contente d'INSTALLER le modele genere comme bloc NATIF de la facade deja
+        construite, via le gabarit en-tete adc::add_compiled_model<ProdModel>. Ce gabarit fabrique les
+        fermetures sur le CONTEXTE REEL de la facade -> le bloc tourne ensuite le MEME chemin que
+        add_block, ZERO-COPIE, device-clean (foncteurs nommes).
 
-        Deux symboles extern "C" :
+        @p target : "system" (defaut) | "amr_system". Choisit la facade visee et donc la SURCHARGE
+        add_compiled_model appelee :
+          - "system"     : adc::System -> add_compiled_model(System&, ..., evolve) ; bloc plat
+            mono-niveau (fermetures sur grid_context, chemin de production de add_block).
+          - "amr_system" : adc::AmrSystem -> add_compiled_model(AmrSystem&, ...) ; bloc unique porte
+            sur la hierarchie AMR (reflux conservatif, regrid). PAS de parametre evolve (AMR mono-bloc).
+
+        Symboles extern "C" emis :
           - adc_native_abi_key() : cle d'ABI figee a la compilation DU LOADER (adc::detail::
             abi_key_string()). add_native_block la compare a abi_key() du module -> erreur explicite
             si en-tetes / compilateur / standard divergent (pas d'UB silencieux a la frontiere C++).
-          - adc_install_native(sys, name, limiter, riemann, recon, time, gamma, substeps, evolve) :
-            reinterpret_cast<adc::System*>(sys) puis add_compiled_model<ProdModel>(*s, name, ...).
+            Commune aux deux cibles.
+          - adc_install_native (target="system") OU adc_install_native_amr (target="amr_system") :
+            reinterpret_cast<adc::System*|adc::AmrSystem*>(sys) puis add_compiled_model<ProdModel>(...).
             Le schema transite en arguments plats (chaines + double + int) ; aucun objet C++ ne
-            traverse l'ABI dans CE sens (seul le System* est repris par reference cote loader, d'ou
-            l'exigence d'ABI identique verifiee par la cle)."""
+            traverse l'ABI dans CE sens (seul le facade* est repris par reference cote loader, d'ou
+            l'exigence d'ABI identique verifiee par la cle). Symbole DISTINCT par cible : un loader
+            System ne peut pas etre branche sur AmrSystem.add_native_block, et inversement."""
+        if target not in ("system", "amr_system"):
+            raise ValueError("emit_cpp_native_loader : target 'system' | 'amr_system' (recu %r)"
+                             % (target,))
         nv, bricks, composite = self._emit_bricks(name)
-        return ('#include <adc/runtime/dsl_block.hpp>\n'      # add_compiled_model<Model> (gabarit natif)
-                '#include <adc/runtime/abi_key.hpp>\n'         # detail::abi_key_string (cle figee a la compil)
+        head = ('#include <adc/runtime/abi_key.hpp>\n'         # detail::abi_key_string (cle figee a la compil)
                 '#include <adc/physics/bricks.hpp>\n'          # CompositeModel + NoSource + briques
                 '#include <adc/core/variables.hpp>\n'
-                '#include <string>\n'
+                '#include <string>\n')
+        # Gabarit en-tete de la cible : dsl_block.hpp (System) ou amr_dsl_block.hpp (AmrSystem). Inclus
+        # selectivement pour ne pas tirer la machinerie AMR dans un loader System (et inversement).
+        head += ('#include <adc/runtime/dsl_block.hpp>\n' if target == "system"
+                 else '#include <adc/runtime/amr_dsl_block.hpp>\n')
+        key = ('extern "C" const char* adc_native_abi_key() {\n'
+               '  static const std::string k = adc::detail::abi_key_string();\n'
+               '  return k.c_str();\n'
+               '}\n')
+        if target == "system":
+            install = ('extern "C" void adc_install_native(void* sys, const char* name, const char* limiter,\n'
+                       '                                    const char* riemann, const char* recon,\n'
+                       '                                    const char* time, double gamma, int substeps,\n'
+                       '                                    int evolve) {\n'
+                       '  adc::System* s = reinterpret_cast<adc::System*>(sys);\n'
+                       '  adc::add_compiled_model<adc_generated::ProdModel>(*s, name, adc_generated::ProdModel{},\n'
+                       '                                                    limiter, riemann, recon, time, gamma,\n'
+                       '                                                    substeps, evolve != 0);\n'
+                       '}\n')
+        else:  # amr_system : surcharge AmrSystem (pas de parametre evolve, AMR mono-bloc)
+            install = ('extern "C" void adc_install_native_amr(void* sys, const char* name,\n'
+                       '                                        const char* limiter, const char* riemann,\n'
+                       '                                        const char* recon, const char* time,\n'
+                       '                                        double gamma, int substeps) {\n'
+                       '  adc::AmrSystem* s = reinterpret_cast<adc::AmrSystem*>(sys);\n'
+                       '  adc::add_compiled_model<adc_generated::ProdModel>(*s, name, adc_generated::ProdModel{},\n'
+                       '                                                    limiter, riemann, recon, time, gamma,\n'
+                       '                                                    substeps);\n'
+                       '}\n')
+        return (head
                 + bricks
                 + '\nnamespace adc_generated { using ProdModel = %s; }\n' % composite  # alias sans virgule
-                + 'extern "C" const char* adc_native_abi_key() {\n'
-                + '  static const std::string k = adc::detail::abi_key_string();\n'
-                + '  return k.c_str();\n'
-                + '}\n'
-                + 'extern "C" void adc_install_native(void* sys, const char* name, const char* limiter,\n'
-                + '                                    const char* riemann, const char* recon,\n'
-                + '                                    const char* time, double gamma, int substeps,\n'
-                + '                                    int evolve) {\n'
-                + '  adc::System* s = reinterpret_cast<adc::System*>(sys);\n'
-                + '  adc::add_compiled_model<adc_generated::ProdModel>(*s, name, adc_generated::ProdModel{},\n'
-                + '                                                    limiter, riemann, recon, time, gamma,\n'
-                + '                                                    substeps, evolve != 0);\n'
-                + '}\n'
+                + key
+                + install
                 + self._emit_metadata("adc_generated::ProdModel"))  # noms/roles/gamma (diagnostic, comme AOT/JIT)
 
-    def compile_native(self, so_path, include, name=None, cxx=None, std="c++23"):
+    def compile_native(self, so_path, include, name=None, cxx=None, std="c++23", target="system"):
         """Backend "production" : genere le LOADER NATIF (emit_cpp_native_loader) et le compile en une
-        .so chargeable par System.add_native_block. Le .so inline add_compiled_model<ProdModel> : le
-        bloc tourne le chemin NATIF zero-copie (parite stricte avec add_block / add_compiled_model<>).
+        .so chargeable par System.add_native_block (target="system") ou AmrSystem.add_native_block
+        (target="amr_system"). Le .so inline add_compiled_model<ProdModel> : le bloc tourne le chemin
+        NATIF zero-copie (parite stricte avec add_block / add_compiled_model<>).
+
+        @p target : "system" (defaut) | "amr_system" (cf. emit_cpp_native_loader). Selectionne la
+        facade visee et donc le gabarit en-tete + le symbole d'installation emis.
 
         Le loader appelle des methodes hors-ligne du module _adc (install_block / grid_context /
-        ensure_aux_width) DEFINIES ailleurs : on compile donc avec '-undefined dynamic_lookup' (macOS)
-        pour autoriser ces indefinis (resolus a l'execution contre le module deja charge ; cf.
-        add_native_block). On bake aussi -DADC_HEADER_SIG=<signature> a l'IDENTIQUE du module pour que
-        les cles d'ABI concordent quand les en-tetes concordent. std defaut c++23 (le module se compile
-        en C++23 hors Kokkos) : un std different changerait __cplusplus donc la cle -> rejet explicite.
-        include = dossier des en-tetes adc ; cxx = compilateur. Renvoie so_path."""
+        ensure_aux_width cote System ; set_compiled_block cote AmrSystem) DEFINIES ailleurs : on compile
+        donc avec '-undefined dynamic_lookup' (macOS) pour autoriser ces indefinis (resolus a
+        l'execution contre le module deja charge ; cf. add_native_block). On bake aussi
+        -DADC_HEADER_SIG=<signature> a l'IDENTIQUE du module pour que les cles d'ABI concordent quand
+        les en-tetes concordent. std defaut c++23 (le module se compile en C++23 hors Kokkos) : un std
+        different changerait __cplusplus donc la cle -> rejet explicite. include = dossier des en-tetes
+        adc ; cxx = compilateur. Renvoie so_path."""
         import os
         import shutil
         import subprocess
         import sys
         import tempfile
 
-        src = self.emit_cpp_native_loader(name=name)
+        src = self.emit_cpp_native_loader(name=name, target=target)
         cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if not cc:
             raise RuntimeError("compile_native : aucun compilateur C++ trouve")
@@ -874,20 +908,31 @@ class HyperbolicModel:
             subprocess.run([cc, *flags, "-I", include, cpp, "-o", so_path], check=True)
         return so_path
 
-    def compile_or_jit(self, so_path, include, mode="jit", name=None, cxx=None, std="c++20"):
+    def compile_or_jit(self, so_path, include, mode="jit", name=None, cxx=None, std="c++20",
+                       target="system"):
         """API unifiee (facade de l'ideal m.compile_or_jit()) choisissant le backend :
         mode="jit"     -> compile_so  (IModel, dispatch virtuel : prototypage hote, a brancher via
                           System.add_dynamic_block) ;
         mode="compile" -> compile_aot (chemin de production AOT, numerique identique au natif : a
                           brancher via System.add_compiled_block) ;
         mode="native"  -> compile_native (loader natif zero-copie : add_compiled_model<> via
-                          System.add_native_block ; chemin "production")."""
+                          System.add_native_block ou AmrSystem.add_native_block ; chemin "production").
+
+        @p target : "system" (defaut) | "amr_system". UNIQUEMENT consomme par mode="native" (choix de
+        la facade visee, cf. compile_native). Les autres modes (jit/compile) ne ciblent que System ;
+        un target="amr_system" y est rejete (le chemin .so AMR n'existe que pour le backend natif)."""
         if mode == "jit":
+            if target != "system":
+                raise ValueError("compile_or_jit : target='amr_system' non supporte en mode 'jit' "
+                                 "(le chemin AMR n'existe que pour mode='native')")
             return self.compile_so(so_path, include, name=name, cxx=cxx, std=std)
         if mode == "compile":
+            if target != "system":
+                raise ValueError("compile_or_jit : target='amr_system' non supporte en mode 'compile' "
+                                 "(le chemin AMR n'existe que pour mode='native')")
             return self.compile_aot(so_path, include, name=name, cxx=cxx, std=std)
         if mode == "native":
-            return self.compile_native(so_path, include, name=name, cxx=cxx, std=std)
+            return self.compile_native(so_path, include, name=name, cxx=cxx, std=std, target=target)
         raise ValueError("compile_or_jit : mode 'jit' | 'compile' | 'native' (recu %r)" % mode)
 
     # --- facade de production : un point d'entree unique par INTENTION (backend) -----------------
@@ -913,7 +958,7 @@ class HyperbolicModel:
     }
 
     def compile(self, so_path, include, backend="aot", name=None, cxx=None, std=None,
-                require_metadata=False):
+                require_metadata=False, target="system"):
         """Facade de compilation par INTENTION : compile le modele en une .so via le moteur designe
         par @p backend et renvoie son chemin. Wrappe les moteurs existants (compile_so / compile_aot /
         compile_native) SANS changer la numerique ; preserve de bout en bout noms, VariableRole, gamma,
@@ -927,6 +972,10 @@ class HyperbolicModel:
           "production" -> NATIF (compile_native) : loader .so inline add_compiled_model<ProdModel>, bloc
                           natif zero-copie (parite stricte add_block / add_compiled_model<>), a brancher
                           via add_native_block (cle d'ABI verifiee). Chemin device-clean prepare.
+
+        @p target : "system" (defaut) | "amr_system". Seul le backend "production" cible AmrSystem
+        (System.add_native_block vs AmrSystem.add_native_block) ; un target="amr_system" sur les autres
+        backends est rejete (pas de chemin .so AMR hors natif, cf. compile_or_jit).
 
         @p std : standard C++. Defaut None -> "c++23" pour "production" (le loader natif partage l'ABI
         du module, compile en C++23 hors Kokkos : un std different changerait __cplusplus donc la cle
@@ -944,7 +993,12 @@ class HyperbolicModel:
         if backend not in self._BACKENDS:
             raise ValueError("compile : backend %r inconnu (attendus %s)"
                              % (backend, sorted(self._BACKENDS)))
+        if target not in ("system", "amr_system"):
+            raise ValueError("compile : target 'system' | 'amr_system' (recu %r)" % (target,))
         mode, adder = self._BACKENDS[backend]
+        if target == "amr_system" and mode != "native":
+            raise ValueError("compile : target='amr_system' n'existe que pour backend='production' "
+                             "(chemin natif AMR) ; recu backend=%r" % (backend,))
         if std is None:  # defaut par backend : le natif partage l'ABI C++23 du module, les autres c++20
             std = "c++23" if mode == "native" else "c++20"
 
@@ -971,7 +1025,8 @@ class HyperbolicModel:
                     "retomberait sur le fallback du System (roles 'custom' / gamma 1.4)"
                     % (self.name, " ni ".join(missing)))
 
-        return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std)
+        return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
+                                  target=target)
 
     @classmethod
     def adder_for(cls, backend):
@@ -1026,10 +1081,12 @@ _BACKEND_CAPS = {
     "prototype": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
     "aot": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
     # production = chemin NATIF (add_native_block, #85) : meme moteur que add_block, donc MPI-capable
-    # par construction (halos fill_boundary). amr=False (System mono-niveau ; AMR = Phase D). gpu=False
-    # par PRUDENCE : le chemin natif est device-clean en C++ (GH200) mais la validation end-to-end
-    # depuis Python (add_native_block sur device) est une PR dediee non encore faite (DSL section 5).
-    "production": {"cpu": True, "mpi": True, "amr": False, "gpu": False},
+    # par construction (halos fill_boundary). amr=True : le loader natif a desormais un pendant AMR
+    # (m.compile(backend='production', target='amr_system') -> AmrSystem.add_native_block, DSL Phase D)
+    # qui inline add_compiled_model(AmrSystem&) -> MEME hierarchie AMR que AmrSystem.add_block (reflux,
+    # regrid). gpu=False par PRUDENCE : le chemin natif est device-clean en C++ (GH200) mais la
+    # validation end-to-end depuis Python (add_native_block sur device) est une PR dediee (DSL sect. 5).
+    "production": {"cpu": True, "mpi": True, "amr": True, "gpu": False},
 }
 
 
@@ -1094,10 +1151,11 @@ class CompiledModel:
     et les diagnostics. cf. DSL_MODEL_DESIGN.md section 3."""
 
     def __init__(self, so_path, backend, adder, cons_names, cons_roles, prim_names, n_vars,
-                 gamma, n_aux, params, caps, abi_key, model_hash, cxx, std):
+                 gamma, n_aux, params, caps, abi_key, model_hash, cxx, std, target="system"):
         self.so_path = so_path
         self.backend = backend       # "prototype" | "aot" | "production"
-        self.adder = adder           # nom de methode System : add_dynamic_block / add_compiled_block / add_native_block
+        self.target = target         # "system" | "amr_system" : facade visee (loader natif AMR si amr_system)
+        self.adder = adder           # nom de methode (Amr)System : add_dynamic_block / add_compiled_block / add_native_block
         self.cons_names = list(cons_names)
         self.cons_roles = list(cons_roles)
         self.prim_names = list(prim_names)
@@ -1112,9 +1170,9 @@ class CompiledModel:
         self.std = std
 
     def __repr__(self):
-        return ("CompiledModel(backend=%r, so_path=%r, n_vars=%d, gamma=%r, n_aux=%d, "
+        return ("CompiledModel(backend=%r, target=%r, so_path=%r, n_vars=%d, gamma=%r, n_aux=%d, "
                 "adder=%r, abi_key=%.12s..., model_hash=%.12s...)"
-                % (self.backend, self.so_path, self.n_vars, self.gamma, self.n_aux,
+                % (self.backend, self.target, self.so_path, self.n_vars, self.gamma, self.n_aux,
                    self.adder, self.abi_key or "", self.model_hash or ""))
 
 
@@ -1288,38 +1346,40 @@ class Model:
         empaquette le .so avec les metadonnees deja connues (pas de relecture du .so).
 
         @p backend : "prototype" | "aot" | "production" (cf. HyperbolicModel.compile).
-        @p target : "system" (defaut) | "amr_system". En Phase A seul "system" est cable
-            (AmrSystem.add_equation est Phase D) -> "amr_system" leve NotImplementedError.
+        @p target : "system" (defaut) | "amr_system" (DSL Phase D). "amr_system" exige
+            backend="production" (le loader natif inline add_compiled_model(AmrSystem&), seul chemin
+            .so AMR ; cf. compile_or_jit) -> a brancher via AmrSystem.add_equation. Un autre backend
+            avec target="amr_system" leve ValueError (pas de chemin AMR hors natif).
         PAS d'argument `device` : les capacites GPU/MPI/AMR sont verifiees au branchement
             (add_equation) / a l'execution, pas figees a la compilation (DSL_MODEL_DESIGN.md point 7).
 
-        Renvoie un CompiledModel portant so_path, backend, adder, noms/roles/gamma/n_aux/params, caps,
-        abi_key, model_hash, cxx, std."""
+        Renvoie un CompiledModel portant so_path, backend, target, adder, noms/roles/gamma/n_aux/params,
+        caps, abi_key, model_hash, cxx, std."""
         import shutil
         if backend not in HyperbolicModel._BACKENDS:
             raise ValueError("compile : backend %r inconnu (attendus %s)"
                              % (backend, sorted(HyperbolicModel._BACKENDS)))
         if target not in ("system", "amr_system"):
             raise ValueError("compile : target 'system' | 'amr_system' (recu %r)" % (target,))
-        if target == "amr_system":
-            raise NotImplementedError(
-                "compile : target='amr_system' (DSL Phase D) non cable ; AmrSystem.add_equation viendra "
-                "avec le pendant natif add_compiled_model(AmrSystem&). Phase A : target='system'")
 
         m = self._m
         # std effectif : meme defaut par backend que HyperbolicModel.compile (c++23 natif, c++20 sinon).
         mode = HyperbolicModel._BACKENDS[backend][0]
+        if target == "amr_system" and mode != "native":
+            raise ValueError("compile : target='amr_system' n'existe que pour backend='production' "
+                             "(chemin natif AMR) ; recu backend=%r" % (backend,))
         eff_std = std if std is not None else ("c++23" if mode == "native" else "c++20")
         eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 
-        # Compilation (moteurs inchanges, garde-fous require_metadata/backend de HyperbolicModel.compile).
+        # Compilation (moteurs inchanges, garde-fous require_metadata/backend/target de
+        # HyperbolicModel.compile : le loader emet adc_install_native_amr pour target="amr_system").
         out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
-                             require_metadata=require_metadata)
+                             require_metadata=require_metadata, target=target)
 
         adder = HyperbolicModel.adder_for(backend)
         cons_roles = roles_for(m.cons_names, m.cons_roles)
         return CompiledModel(
-            so_path=out_path, backend=backend, adder=adder,
+            so_path=out_path, backend=backend, adder=adder, target=target,
             cons_names=m.cons_names, cons_roles=cons_roles, prim_names=m.prim_state,
             n_vars=m.n_vars, gamma=m.gamma, n_aux=aux_n_aux(m.aux_names),
             params=self.params, caps=_BACKEND_CAPS[backend],

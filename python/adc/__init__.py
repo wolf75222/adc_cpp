@@ -554,6 +554,78 @@ class AmrSystem:
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1))
 
+    def add_equation(self, name, model, spatial=None, time=None, substeps=None):
+        """Ajoute l'UNIQUE equation/bloc AMR en aiguillant sur le TYPE de @p model (DSL Phase D) :
+
+        - un ModelSpec (adc.Model(...)) -> add_block (briques natives composees sur la hierarchie) ;
+        - un CompiledModel(backend='production', target='amr_system') (m.compile(...)) -> chemin NATIF
+          add_native_block : le loader .so inline add_compiled_model(AmrSystem&), donc le bloc tourne
+          la MEME hierarchie AMR que add_block (reflux conservatif, regrid), ZERO-COPIE.
+
+        LIMITES AMR (AmrSystem n'est PAS a parite avec System : mono-bloc, EXPLICITE, sans
+        reconstruction primitive ni flux de Riemann complet). La facade REJETTE clairement, AVANT la
+        frontiere C++, les chemins non cables sur AMR pour un CompiledModel :
+          - variables="primitive" (spatial.recon) : le chemin .so AMR reste conservatif ;
+          - riemann="roe"/"hllc" (spatial.flux) : seul Rusanov est cable sur AMR via le .so ;
+          - limiter="weno5" : le .so alloue 2 ghosts, WENO5 en exige 3.
+        Ces limites valent pour le chemin COMPILE (.so) ; un modele natif (adc.Model -> add_block)
+        garde l'API add_block existante (recon primitive accepte cote C++). cf. DSL_MODEL_DESIGN.md
+        Phase D (point 10).
+
+        @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (defaut minmod+rusanov+conservatif).
+        @p time : adc.Explicit (defaut ; AMR EXPLICITE uniquement). @p substeps : surcharge time.substeps.
+        """
+        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+
+        spatial = spatial if spatial is not None else Spatial()
+        time = time if time is not None else Explicit()
+        nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
+
+        # --- ModelSpec : briques natives composees -> add_block (chemin existant) ---
+        if isinstance(model, ModelSpec):
+            self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
+                              nsub)
+            return
+
+        if not isinstance(model, dsl.CompiledModel):
+            raise TypeError("AmrSystem.add_equation : model doit etre un adc.Model(...) (ModelSpec) "
+                            "ou un CompiledModel (m.compile(...)) ; recu %r" % type(model).__name__)
+
+        compiled = model
+        # Seul le chemin NATIF "production" cible AmrSystem : il inline add_compiled_model(AmrSystem&).
+        # Les .so prototype (JIT) / aot n'ont pas de pendant AMR (add_dynamic_block/add_compiled_block
+        # sont mono-niveau). On exige donc backend='production' + target='amr_system'.
+        if compiled.adder != "add_native_block":
+            raise ValueError(
+                "AmrSystem.add_equation : seul un CompiledModel backend='production' (chemin natif) "
+                "est branchable sur AMR ; recu backend=%r (les .so prototype/aot sont mono-niveau, "
+                "sans pendant AMR)" % compiled.backend)
+        if getattr(compiled, "target", "system") != "amr_system":
+            raise ValueError(
+                "AmrSystem.add_equation : le CompiledModel a ete compile pour target='system' ; "
+                "recompiler avec m.compile(..., backend='production', target='amr_system') pour que "
+                "le loader inline add_compiled_model(AmrSystem&) (symbole adc_install_native_amr)")
+
+        # LIMITES AMR (non-parite avec System) : rejet CLAIR avant le C++ pour le chemin .so AMR.
+        if spatial.recon == "primitive":
+            raise ValueError(
+                "AmrSystem.add_equation : variables='primitive' non supporte sur le chemin compile "
+                "AMR (le .so reste conservatif) ; utiliser variables='conservative' (AmrSystem n'est "
+                "pas a parite avec System : pas de reconstruction primitive sur le .so AMR)")
+        if spatial.flux in ("roe", "hllc"):
+            raise ValueError(
+                "AmrSystem.add_equation : riemann='%s' non supporte sur le chemin compile AMR ; seul "
+                "riemann='rusanov' est cable sur la hierarchie via le .so (AmrSystem n'est pas a "
+                "parite avec System : pas de flux de Riemann complet sur le .so AMR)" % spatial.flux)
+        if spatial.limiter == "weno5":
+            raise ValueError(
+                "AmrSystem.add_equation : limiter 'weno5' non supporte sur un CompiledModel (.so a 2 "
+                "ghosts ; WENO5 en exige 3) ; utiliser none/minmod/vanleer")
+
+        gamma = compiled.gamma if compiled.gamma is not None else 1.4
+        self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
+                                 spatial.recon, time.kind, gamma, nsub)
+
     def __getattr__(self, attr):
         return getattr(self._s, attr)
 

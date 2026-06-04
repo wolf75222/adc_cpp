@@ -118,12 +118,14 @@ def pure_python_checks():
         "FiniteVolume(riemann=) -> Spatial.flux"
     print("OK  FiniteVolume(limiter=, riemann=, variables=) remappe sur Spatial")
 
-    # compile : backend inconnu + target amr_system rejetes AVANT toute compilation
+    # compile : backend inconnu rejete AVANT toute compilation ; target='amr_system' n'existe que pour
+    # le backend natif "production" (DSL Phase D : le loader inline add_compiled_model(AmrSystem&)),
+    # donc le demander avec un autre backend (aot) leve ValueError.
     expect_raises(ValueError, lambda: m.compile("x.so", INCLUDE, backend="bogus"),
                   "backend inconnu")
-    expect_raises(NotImplementedError,
+    expect_raises(ValueError,
                   lambda: m.compile("x.so", INCLUDE, backend="aot", target="amr_system"),
-                  "target amr_system (Phase D)")
+                  "target amr_system hors backend production")
 
     # add_equation : erreurs sur un CompiledModel FACTICE (pas de .so reel necessaire, les gardes
     # levent AVANT la frontiere C++).

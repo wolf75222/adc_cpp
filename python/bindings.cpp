@@ -202,6 +202,15 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("recon") = "conservative", py::arg("time") = "explicit",
            py::arg("substeps") = 1)
+      // Bloc NATIF AMR charge depuis un loader .so genere par le DSL (backend "production",
+      // target="amr_system") : le .so inline add_compiled_model(AmrSystem&) -> bloc natif sur la
+      // hierarchie AMR (reflux, regrid), cle d'ABI verifiee. cf. AmrSystem::add_native_block. PAS de
+      // evolve (AMR mono-bloc). Les LIMITES AMR (primitive/roe/hllc/weno5) sont gardees cote facade
+      // Python (AmrSystem.add_equation) avant ce binding.
+      .def("add_native_block", &AmrSystem::add_native_block, py::arg("name"), py::arg("so_path"),
+           py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
+           py::arg("recon") = "conservative", py::arg("time") = "explicit", py::arg("gamma") = 1.4,
+           py::arg("substeps") = 1)
       .def("set_refinement", &AmrSystem::set_refinement, py::arg("threshold"))
       .def("set_poisson", &AmrSystem::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",

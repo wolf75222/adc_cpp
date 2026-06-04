@@ -1,10 +1,12 @@
 #include <adc/runtime/amr_system.hpp>
 
+#include <adc/runtime/abi_key.hpp>         // detail::abi_key_string : cle d'ABI (header-only), comparee a celle du loader
 #include <adc/runtime/amr_dsl_block.hpp>   // detail::dispatch_amr_compiled + build_amr_compiled (chemin partage)
 #include <adc/runtime/model_factory.hpp>   // detail::dispatch_model + briques compilees
 #include <adc/runtime/wall_predicate.hpp>  // detail::wall_predicate (paroi partagee System/AmrSystem)
 
 #include <cmath>
+#include <dlfcn.h>  // dlopen/dlsym : chargement du loader natif AMR genere (.so)
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -147,6 +149,101 @@ void AmrSystem::set_compiled_block(int ncomp, double gamma, int substeps,
   p_->b_substeps = substeps;
   p_->compiled_builder = std::move(builder);
   p_->has_compiled = true;
+}
+
+namespace {
+// Ancre de module pour dladdr : son ADRESSE vit dans l'image qui contient amr_system.cpp (le module
+// _adc, ou le binaire de test). add_native_block s'en sert pour localiser le module et le promouvoir
+// en portee globale (RTLD_NOLOAD). Une fonction locale a la TU suffit (pas besoin d'export) et evite
+// de dependre d'un symbole defini ailleurs (adc::abi_key, system.cpp).
+void amr_native_anchor() {}
+}  // namespace
+
+void AmrSystem::add_native_block(const std::string& name, const std::string& so_path,
+                                 const std::string& limiter, const std::string& riemann,
+                                 const std::string& recon, const std::string& time, double gamma,
+                                 int substeps) {
+  if (substeps < 1) throw std::runtime_error("AmrSystem::add_native_block : substeps >= 1");
+  // Validation AMONT du schema (comme add_block) : add_compiled_model(AmrSystem&) rejette deja
+  // time != "explicit" et recon hors {conservative, primitive}, mais on diagnostique ICI une faute
+  // de frappe avant la frontiere C++. RESPECT des LIMITES AMR (non-parite avec System) : seul
+  // time == "explicit" est cable sur la hierarchie (pas d'IMEX). limiter/riemann sont valides par
+  // dispatch_amr_compiled dans le loader (exception claire, ABI partagee verifiee plus bas).
+  if (recon != "conservative" && recon != "primitive")
+    throw std::runtime_error("AmrSystem::add_native_block : recon 'conservative' | 'primitive' "
+                             "(recu '" + recon + "')");
+  if (time != "explicit")
+    throw std::runtime_error("AmrSystem::add_native_block : seul time='explicit' sur AMR (recu '" +
+                             time + "')");
+  // Chemin "production" du DSL cote AMR : le loader .so genere (emit_cpp_native_loader avec
+  // target="amr_system") inline le gabarit en-tete add_compiled_model(AmrSystem&, ...), qui
+  // materialise un AmrCouplerMP<Model> concret au build paresseux et installe ses hooks via
+  // set_compiled_block -- chemin NATIF, MEME hierarchie AMR que add_block (reflux, regrid). Le loader
+  // appelle donc set_compiled_block (methode hors-ligne de adc::AmrSystem) DEFINIE dans CE module ;
+  // il faut la resoudre a travers le dlopen contre le module _adc deja charge.
+  // PORTABILITE ELF (Linux) : CPython charge _adc en RTLD_LOCAL, donc ses symboles ne sont PAS dans
+  // la portee globale. On PROMEUT le module courant en portee globale (RTLD_NOLOAD = sans le
+  // recharger ; RTLD_GLOBAL OR'e dans les flags de l'objet deja charge), localise par dladdr sur une
+  // ADRESSE de CE module : amr_native_anchor (fonction locale a cette TU). On evite ainsi de dependre
+  // de adc::abi_key (defini dans system.cpp) -- ce qui couplerait au link tout test compilant
+  // amr_system.cpp seul. Sur macOS, inoffensif (le loader resout par dynamic_lookup).
+  {
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&amr_native_anchor), &info) && info.dli_fname)
+      dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+  }
+  // RTLD_GLOBAL : place les symboles du loader dans la portee globale ET autorise le loader a resoudre
+  // ses indefinis (set_compiled_block exportee ADC_EXPORT) contre les images deja chargees. RTLD_NOW :
+  // resolution immediate -> un symbole AmrSystem manquant echoue ICI, pas en vol.
+  void* h = dlopen(so_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+  if (!h) {
+    const char* e = dlerror();
+    throw std::runtime_error("AmrSystem::add_native_block : dlopen('" + so_path + "') : " +
+                             std::string(e ? e : "?") +
+                             " (le symbole adc::AmrSystem::set_compiled_block doit etre exporte ET le "
+                             "module _adc charge globalement ; cf. ADC_EXPORT)");
+  }
+  // GARDE-FOU ABI EXPLICITE : la cle baked dans le loader (a SA compilation) doit egaler la cle du
+  // module. Un ecart = en-tetes / compilateur / standard divergents -> agencement memoire de
+  // AmrSystem/AmrBuildParams/AmrCompiledHooks potentiellement different a la frontiere -> UB. On leve
+  // une erreur CLAIRE plutot que de laisser passer un loader incompatible. MEME symbole de cle que le
+  // chemin System (adc_native_abi_key) : seul l'installateur (adc_install_native_amr) differe.
+  auto key_fn = reinterpret_cast<const char* (*)()>(dlsym(h, "adc_native_abi_key"));
+  if (!key_fn) {
+    dlclose(h);
+    throw std::runtime_error("AmrSystem::add_native_block : adc_native_abi_key absent du .so "
+                             "(regenerer via dsl.compile_native(target='amr_system') / "
+                             "compile(backend='production', target='amr_system'))");
+  }
+  const std::string loader_key = key_fn();
+  // Cle du module = MEME calcul que adc::abi_key() (header-only detail::abi_key_string()) : evite la
+  // dependance au symbole hors-ligne adc::abi_key (system.cpp). Le loader bake la sienne a SA compil.
+  const std::string module_key = detail::abi_key_string();
+  if (loader_key != module_key) {
+    dlclose(h);
+    throw std::runtime_error("AmrSystem::add_native_block : ABI incompatible -- cle du loader '" +
+                             loader_key + "' != cle du module '" + module_key +
+                             "'. Recompiler le loader avec le MEME compilateur, standard C++ et "
+                             "en-tetes adc que le module _adc.");
+  }
+  // Installateur natif AMR du loader : reinterpret_cast<AmrSystem*>(this) puis
+  // add_compiled_model<ProdModel>(*amrsys, ...). Schema marshale en arguments plats extern "C". Pas
+  // de parametre evolve (AMR mono-bloc, pas de bloc fond gele comme System). SYMBOLE DISTINCT
+  // (adc_install_native_amr, vs adc_install_native cote System) : un loader genere pour System ne
+  // l'exporte PAS, donc le brancher ici echoue clairement au lieu d'un cast incoherent.
+  using install_fn_t = void (*)(void*, const char*, const char*, const char*, const char*,
+                                const char*, double, int);
+  auto install = reinterpret_cast<install_fn_t>(dlsym(h, "adc_install_native_amr"));
+  if (!install) {
+    dlclose(h);
+    throw std::runtime_error("AmrSystem::add_native_block : adc_install_native_amr absent du .so "
+                             "(loader genere pour System, ou regenerer via "
+                             "dsl.compile_native(target='amr_system'))");
+  }
+  install(static_cast<void*>(this), name.c_str(), limiter.c_str(), riemann.c_str(), recon.c_str(),
+          time.c_str(), gamma, substeps);
+  // Le .so reste charge (RTLD_GLOBAL) pour la duree du process : le builder type-erase installe par
+  // set_compiled_block capture du code (gabarit en-tete) qui y vit. On NE le ferme PAS.
 }
 
 void AmrSystem::set_refinement(double threshold) { p_->refine_threshold = threshold; }

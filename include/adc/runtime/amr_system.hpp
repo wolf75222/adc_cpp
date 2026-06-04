@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/mesh/physical_bc.hpp>  // BCRec
+#include <adc/runtime/export.hpp>    // ADC_EXPORT : set_compiled_block resolu par le loader natif AMR
 #include <adc/runtime/model_spec.hpp>
 
 #include <functional>
@@ -101,8 +102,38 @@ class AmrSystem {
   /// est une fermeture type-erased qui, recevant les AmrBuildParams figes au build paresseux, rend
   /// les AmrCompiledHooks d'un AmrCouplerMP<Model> concret. NE PAS appeler directement : passer par
   /// la fonction libre add_compiled_model(AmrSystem&, ...). @throws si un bloc est deja defini.
-  void set_compiled_block(int ncomp, double gamma, int substeps,
+  /// VISIBILITE DEFAUT (ADC_EXPORT) : SEULE methode appelee par le gabarit en-tete
+  /// add_compiled_model(AmrSystem&) (cf. amr_dsl_block.hpp:182). Un loader .so genere (chemin DSL
+  /// "production" cote AMR, emit_cpp_native_loader(target="amr_system") / add_native_block) inline ce
+  /// gabarit et doit resoudre ce symbole depuis le module _adc deja charge ; compile en
+  /// -fvisibility=hidden (pybind11), le module ne l'exporterait pas sans cette annotation et le dlopen
+  /// du loader echouerait. Symetrique des methodes ADC_EXPORT de System (grid_context/install_block).
+  ADC_EXPORT void set_compiled_block(int ncomp, double gamma, int substeps,
                           std::function<AmrCompiledHooks(const AmrBuildParams&)> builder);
+
+  /// Branche un bloc NATIF AMR depuis un loader .so genere par le DSL (backend "production", cible
+  /// "amr_system" : dsl.compile_native(target="amr_system") / compile(backend="production",
+  /// target="amr_system")). Pendant AMR de System::add_native_block : le .so inline le gabarit en-tete
+  /// add_compiled_model(AmrSystem&, ...), qui materialise un AmrCouplerMP<Model> concret au build
+  /// paresseux et installe ses hooks via set_compiled_block -- chemin NATIF, MEME hierarchie AMR que
+  /// add_block (reflux conservatif, regrid), pas de marshaling de tableaux plats.
+  ///
+  /// Le module _adc est PROMU en portee globale (RTLD_NOLOAD) puis le loader est dlopen-e en
+  /// RTLD_GLOBAL pour resoudre set_compiled_block ; la cle d'ABI baked dans le loader
+  /// (adc_native_abi_key) est comparee a celle du module (abi_key()) -- ecart => erreur claire (pas
+  /// d'UB silencieux a la frontiere C++). Memes garde-fous de schema que System (validation amont).
+  ///
+  /// LIMITES (AmrSystem n'est PAS a parite avec System) : mono-bloc, EXPLICITE uniquement (time !=
+  /// "explicit" rejete par add_compiled_model). recon "primitive" et flux "roe"/"hllc" + weno5 sont
+  /// rejetes par la facade Python (AmrSystem.add_equation) AVANT d'arriver ici (chemin .so a contrat
+  /// restreint). @throws std::runtime_error si l'ABI diverge, si un symbole manque, ou substeps < 1.
+  /// @param name etiquette cosmetique (AMR mono-bloc : ne sert pas d'index).
+  void add_native_block(const std::string& name, const std::string& so_path,
+                        const std::string& limiter = "minmod",
+                        const std::string& riemann = "rusanov",
+                        const std::string& recon = "conservative",
+                        const std::string& time = "explicit", double gamma = 1.4,
+                        int substeps = 1);
 
   /// Raffine les cellules ou la densite (composante 0) depasse @p threshold.
   void set_refinement(double threshold);

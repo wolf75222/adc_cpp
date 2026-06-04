@@ -143,6 +143,16 @@ add_test(NAME test_dsl_production
 set_tests_properties(test_dsl_production PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Backend NATIF "production" cote AMR (DSL Phase D) : euler compile(backend="production",
+# target="amr_system") -> loader .so inline add_compiled_model(AmrSystem&) -> AmrSystem.add_native_block.
+# Parite BIT-IDENTIQUE au bloc natif add_block (transport pur dmax=0, euler_poisson couple < 1e-12) +
+# limites AMR enforcees (primitive/roe/hllc/weno5 rejetes) + rejet d'une cle d'ABI falsifiee.
+# S'auto-saute sans compilateur.
+add_test(NAME test_dsl_production_amr
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_production_amr.py)
+set_tests_properties(test_dsl_production_amr PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Choix de reconstruction (ordre) du bloc dynamique : recon none/minmod/vanleer == reference MUSCL numpy.
 add_test(NAME test_dsl_recon
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_recon.py)
