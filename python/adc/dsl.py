@@ -775,6 +775,89 @@ class HyperbolicModel:
             return self.compile_aot(so_path, include, name=name, cxx=cxx, std=std)
         raise ValueError("compile_or_jit : mode 'jit' | 'compile' (recu %r)" % mode)
 
+    # --- facade de production : un point d'entree unique par INTENTION (backend) -----------------
+    # Aiguillage du backend de compilation par INTENTION plutot que par detail d'implementation. Chaque
+    # entree designe l'un des moteurs existants (compile_so / compile_aot) ET l'adder System a employer
+    # cote execution -- couple ici pour qu'un caller ne branche pas un .so AOT sur add_dynamic_block (ou
+    # l'inverse), ce qui chargerait mais avec une ABI/numerique incoherente.
+    #   "prototype"  -> compile_so  (JIT, IModel, dispatch virtuel, Rusanov hote ordre 1 ; iteration
+    #                   rapide, a brancher via System.add_dynamic_block) ;
+    #   "aot"        -> compile_aot (AOT, chemin de PRODUCTION : assemble_rhs<Limiter, Flux>, HLLC/Roe,
+    #                   ordre 2, SSPRK2/IMEX ; numerique identique au natif, via add_compiled_block) ;
+    #   "production" -> ALIAS du meilleur chemin device-clean disponible AUJOURD'HUI = "aot". La
+    #                   numerique AOT est inlinee (pas de dispatch virtuel) donc tournable GPU/MPI quand
+    #                   le .so est compile avec la bonne toolchain. (cf. note de suivi : un vrai backend
+    #                   "production" dedie -- TU C++ native add_compiled_model, codegen Kokkos/CUDA --
+    #                   reste a faire ; ce n'est PAS un moteur distinct ici.)
+    _BACKENDS = {
+        "prototype": ("jit", "add_dynamic_block"),
+        "aot": ("compile", "add_compiled_block"),
+        "production": ("compile", "add_compiled_block"),
+    }
+
+    def compile(self, so_path, include, backend="aot", name=None, cxx=None, std="c++20",
+                require_metadata=False):
+        """Facade de compilation par INTENTION : compile le modele en une .so via le moteur designe
+        par @p backend et renvoie son chemin. Wrappe les moteurs existants (compile_so / compile_aot)
+        SANS changer la numerique ; preserve de bout en bout noms, VariableRole, gamma, n_aux, B_z et
+        T_e (les memes briques + metadonnees ABI que compile_or_jit).
+
+        @p backend :
+          "prototype"  -> JIT (compile_so) : iteration rapide, dispatch virtuel hote (Rusanov ordre 1),
+                          a brancher cote System via add_dynamic_block ;
+          "aot"        -> AOT (compile_aot) : chemin de production, numerique identique au bloc natif,
+                          a brancher via add_compiled_block ;
+          "production" -> alias du meilleur chemin device-clean disponible (aujourd'hui "aot").
+
+        @p require_metadata (defaut False) : si True, exige que le .so transporte des roles physiques
+        utiles ET un gamma explicite (set_gamma), faute de quoi le System retomberait sur le fallback
+        (roles 'custom' / gamma 1.4) -- regression silencieuse des couplages inter-especes. Sert a un
+        pipeline de production qui veut une erreur EXPLICITE plutot qu'un fallback muet.
+
+        Leve ValueError sur un backend inconnu ou une feature incompatible avec le backend demande
+        (plutot qu'un echec obscur a l'execution). Renvoie so_path.
+
+        Pour connaitre l'adder System a employer : voir adder_for(backend)."""
+        if backend not in self._BACKENDS:
+            raise ValueError("compile : backend %r inconnu (attendus %s)"
+                             % (backend, sorted(self._BACKENDS)))
+        mode, adder = self._BACKENDS[backend]
+
+        # Garde-fou device/production : le backend "prototype" passe par add_dynamic_block (IModel,
+        # dispatch VIRTUEL, Rusanov hote ordre 1). Ce n'est PAS un chemin de production device-clean :
+        # demander explicitement les metadonnees de production dessus est une incoherence -> erreur
+        # claire plutot que le fallback muet d'un .so prototype.
+        if require_metadata and backend == "prototype":
+            raise ValueError(
+                "compile : backend 'prototype' (JIT, dispatch virtuel hote) incompatible avec "
+                "require_metadata=True ; utiliser backend='aot' ou 'production' pour le chemin "
+                "device-clean a metadonnees garanties")
+
+        if require_metadata:
+            missing = []
+            roles = roles_for(self.cons_names, self.cons_roles)
+            if all(r == "Custom" for r in roles):
+                missing.append("roles physiques (conservative_vars(..., roles=[...]) ou noms canoniques)")
+            if self.gamma is None:
+                missing.append("gamma (set_gamma(...))")
+            if missing:
+                raise ValueError(
+                    "compile(require_metadata=True) : le modele '%s' ne fournit pas %s ; le .so "
+                    "retomberait sur le fallback du System (roles 'custom' / gamma 1.4)"
+                    % (self.name, " ni ".join(missing)))
+
+        return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std)
+
+    @classmethod
+    def adder_for(cls, backend):
+        """Nom de la methode System a employer pour brancher la .so produite par compile(backend=...) :
+        'add_dynamic_block' (prototype/JIT) ou 'add_compiled_block' (aot/production). Couple le backend
+        de compilation a son adder pour eviter une frontiere ABI incoherente. ValueError si inconnu."""
+        if backend not in cls._BACKENDS:
+            raise ValueError("adder_for : backend %r inconnu (attendus %s)"
+                             % (backend, sorted(cls._BACKENDS)))
+        return cls._BACKENDS[backend][1]
+
     def emit_cpp_elliptic(self, name=None, namespace="adc_generated", cse=True):
         """Genere une BRIQUE de SECOND MEMBRE elliptique composable depuis self._elliptic.
 
