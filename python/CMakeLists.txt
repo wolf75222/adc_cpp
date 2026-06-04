@@ -122,3 +122,24 @@ add_test(NAME test_poisson_eps
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_poisson_eps.py)
 set_tests_properties(test_poisson_eps PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# --- Garde-fou : tests des chantiers aux extensible / EPM / roles, jusqu'ici lances en CI
+# (ci.yml) mais PAS enregistres en ctest -> on les rend visibles a `ctest` (et donc enforces
+# localement avant tout refactor). Les chemins JIT/AOT (test_dsl_{jit,aot}_{bz,te}) compilent
+# un .so a la volee et s'AUTO-SAUTENT (exit 0) si aucun compilateur C++ n'est trouve. ---
+foreach(t
+    test_dsl_roles            # la brique generee declare ses VariableRole
+    test_dsl_aux_naux         # le DSL emet n_aux quand une formule lit un champ aux extra
+    test_magnetic_field       # binding set_magnetic_field (B_z)
+    test_poisson_composite    # second membre de Poisson de systeme generique
+    test_poisson_eps_aniso    # permittivite anisotrope eps_x/eps_y cote Python
+    test_poisson_screened     # operateur ecrante / Helmholtz
+    test_dsl_jit_bz           # B_z end-to-end via add_dynamic_block (.so JIT)
+    test_dsl_jit_te           # T_e (derive p/rho) via add_dynamic_block (.so JIT)
+    test_dsl_aot_bz           # B_z via add_compiled_block (.so AOT)
+    test_dsl_aot_te)          # T_e via add_compiled_block (.so AOT)
+  add_test(NAME ${t}
+           COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
+  set_tests_properties(${t} PROPERTIES
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+endforeach()
