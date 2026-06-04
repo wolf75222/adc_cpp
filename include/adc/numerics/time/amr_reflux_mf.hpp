@@ -71,6 +71,19 @@ inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
   });
 }
 
+// Helper coarse-fine de premier niveau (revue, point ghosts) : remplit UNE cellule ghost
+// fine (i,j) par interpolation espace (constant par morceaux : cellule grossiere couvrante)
+// + temps (lineaire entre l'etat parent ancien/nouveau). frac = position temporelle du
+// sous-pas dans le pas parent. Centralise l'arithmetique partagee par mf_fill_fine_ghosts_t
+// (mono-box), mf_fill_fine_ghosts_multi (multi-box) et mf_fill_fine_ghosts_mb (multi-niveau) :
+// une seule formule (1-frac)*co + frac*cn, bit-identique aux trois corps precedents.
+inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray4& cn,
+                               int i, int j, int nc, Real frac) {
+  const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+  for (int k = 0; k < nc; ++k)
+    f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
+}
+
 // ghosts du fin = interp espace (constant par morceaux) + temps (lineaire) depuis le
 // grossier ancien/nouveau. frac = position temporelle du sous-pas dans le pas grossier.
 inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
@@ -83,11 +96,7 @@ inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
   const Box2D v = Uf.box(0), g = Uf.fab(0).grown_box();
   for (int j = g.lo[1]; j <= g.hi[1]; ++j)
     for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-      if (!v.contains(i, j)) {
-        const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
-        for (int k = 0; k < nc; ++k)
-          f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
-      }
+      if (!v.contains(i, j)) fill_cf_ghost_cell(f, co, cn, i, j, nc, frac);
 }
 
 // === PILE MF : ORACLE DE TEST, HORS PRODUCTION ===================================
@@ -301,6 +310,19 @@ void amr_step_multilevel_mf(const Model& m, std::vector<AmrLevelMF>& L,
 // couverte par une autre box fine (interface fin-grossier reelle ; les interfaces
 // fin-fin sont gerees par fill_boundary). C'est la logique FluxRegister d'AMReX.
 
+// PatchRange (revue, point 5 : role promu en type). Empreinte GROSSIERE [I0..I1]x[J0..J1]
+// d'un patch fin sous ratio 2 : I0 = lo/2, I1 = (hi-1)/2 (patch aligne, lo pair / hi impair).
+// Centralise le calcul d'empreinte repete inline dans average_down, la couverture et l'init
+// des registres de reflux. NB : ce n'est PAS Box2D::coarsen (floor des deux bornes) mais la
+// borne haute (hi-1)/2 historique ; on conserve l'arithmetique exacte (bit-identique).
+struct PatchRange {
+  int I0, I1, J0, J1;
+  explicit PatchRange(const Box2D& fine)
+      : I0(fine.lo[0] / 2), I1((fine.hi[0] - 1) / 2),
+        J0(fine.lo[1] / 2), J1((fine.hi[1] - 1) / 2) {}
+  Box2D box() const { return Box2D{{I0, J0}, {I1, J1}}; }  // empreinte grossiere (cellules)
+};
+
 // ghosts fins multi-box depuis le grossier (interp espace+temps), PUIS fill_boundary
 // (fin-fin) ecrasera les ghosts couverts par une box voisine. coarse mono-box.
 inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
@@ -314,11 +336,7 @@ inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
     const Box2D v = Uf.box(li), g = Uf.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-        if (!v.contains(i, j)) {
-          const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
-          for (int k = 0; k < nc; ++k)
-            f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
-        }
+        if (!v.contains(i, j)) fill_cf_ghost_cell(f, co, cn, i, j, nc, frac);
   }
 }
 
@@ -328,10 +346,8 @@ inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
   Array4 c = Uc.fab(0).array();
   for (int li = 0; li < Uf.local_size(); ++li) {
     const ConstArray4 f = Uf.fab(li).const_array();
-    const Box2D fb = Uf.box(li);
-    const int I0 = fb.lo[0] / 2, I1 = (fb.hi[0] - 1) / 2;
-    const int J0 = fb.lo[1] / 2, J1 = (fb.hi[1] - 1) / 2;
-    for_each_cell(Box2D{{I0, J0}, {I1, J1}}, [=] ADC_HD(int I, int J) {
+    const PatchRange pr(Uf.box(li));
+    for_each_cell(pr.box(), [=] ADC_HD(int I, int J) {
       for (int k = 0; k < nc; ++k)
         c(I, J, k) = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
                                    f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
@@ -432,10 +448,8 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   // masque de couverture : cellules grossieres couvertes par une box fine. Bati sur le
   // BoxArray GLOBAL (toutes les boxes, connues de tous les rangs) -> correct sous MPI.
   CoverageMask cmask(Box2D{{0, 0}, {NX - 1, NY - 1}});
-  for (int g = 0; g < Uf.box_array().size(); ++g) {
-    const Box2D fb = Uf.box_array()[g];
-    cmask.mark(Box2D{{fb.lo[0] / 2, fb.lo[1] / 2}, {(fb.hi[0] - 1) / 2, (fb.hi[1] - 1) / 2}});
-  }
+  for (int g = 0; g < Uf.box_array().size(); ++g)
+    cmask.mark(PatchRange(Uf.box_array()[g]).box());
   auto covered = [&](int I, int J) { return cmask.covered(I, J); };
 
   MultiFab Uc_old = Uc;
@@ -451,10 +465,10 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     device_fence();
     const ConstArray4 FX = fxc.fab(0).const_array(), FY = fyc.fab(0).const_array();
     for (int li = 0; li < Uf.local_size(); ++li) {
-      const Box2D fb = Uf.box(li);
+      const PatchRange pr(Uf.box(li));
       Reg& g = regs[li];
-      g.I0 = fb.lo[0] / 2; g.I1 = (fb.hi[0] - 1) / 2;
-      g.J0 = fb.lo[1] / 2; g.J1 = (fb.hi[1] - 1) / 2;
+      g.I0 = pr.I0; g.I1 = pr.I1;
+      g.J0 = pr.J0; g.J1 = pr.J1;
       const int nJ = g.J1 - g.J0 + 1, nI = g.I1 - g.I0 + 1;
       g.cL.assign(nJ * nc, 0); g.cR.assign(nJ * nc, 0);
       g.cB.assign(nI * nc, 0); g.cT.assign(nI * nc, 0);
@@ -643,8 +657,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
             const int pb = mf_find_box(Po, ci, cj);
             if (pb < 0) continue;  // hors couverture parente -> laisse au fill_boundary
             const ConstArray4 po = Po.fab(pb).const_array(), pn = Pn.fab(pb).const_array();
-            for (int k = 0; k < nc; ++k)
-              f(i, j, k) = (1 - frac) * po(ci, cj, k) + frac * pn(ci, cj, k);
+            fill_cf_ghost_cell(f, po, pn, i, j, nc, frac);
           }
     }
     return;
@@ -660,11 +673,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
     const Box2D v = Uf.box(li), g = Uf.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-        if (!v.contains(i, j)) {
-          const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
-          for (int k = 0; k < nc; ++k)
-            f(i, j, k) = (1 - frac) * po(ci, cj, k) + frac * pn(ci, cj, k);
-        }
+        if (!v.contains(i, j)) fill_cf_ghost_cell(f, po, pn, i, j, nc, frac);
   }
 }
 
@@ -695,11 +704,9 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
   device_fence();
   for (int lf = 0; lf < Uf.local_size(); ++lf) {
     const ConstArray4 f = Uf.fab(lf).const_array();
-    const Box2D fb = Uf.box(lf);
-    const int I0 = fb.lo[0] / 2, I1 = (fb.hi[0] - 1) / 2;
-    const int J0 = fb.lo[1] / 2, J1 = (fb.hi[1] - 1) / 2;
-    for (int J = J0; J <= J1; ++J)
-      for (int I = I0; I <= I1; ++I)
+    const PatchRange pr(Uf.box(lf));
+    for (int J = pr.J0; J <= pr.J1; ++J)
+      for (int I = pr.I0; I <= pr.I1; ++I)
         for (int k = 0; k < nc; ++k)
           avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
                                          f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
@@ -794,10 +801,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   // role GROSSIER pour lev+1 : couverture + registres + flux grossier sauve.
   const int NX = base_dom.nx() << lev, NY = base_dom.ny() << lev;
   CoverageMask cmask(Box2D{{0, 0}, {NX - 1, NY - 1}});  // couverture GLOBALE (MPI-safe)
-  for (int g = 0; g < L[lev + 1].U.box_array().size(); ++g) {
-    const Box2D cb = L[lev + 1].U.box_array()[g];
-    cmask.mark(Box2D{{cb.lo[0] / 2, cb.lo[1] / 2}, {(cb.hi[0] - 1) / 2, (cb.hi[1] - 1) / 2}});
-  }
+  for (int g = 0; g < L[lev + 1].U.box_array().size(); ++g)
+    cmask.mark(PatchRange(L[lev + 1].U.box_array()[g]).box());
   auto covered = [&](int I, int J) { return cmask.covered(I, J); };
 
   // Point 2 distribue : le flux grossier fx/fy vit sur la dmap du PARENT (lv.U), donc fx.fab
@@ -829,10 +834,10 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
 
   std::vector<RegMP> regs(L[lev + 1].U.local_size());
   for (int lc = 0; lc < L[lev + 1].U.local_size(); ++lc) {
-    const Box2D cb = L[lev + 1].U.box(lc);
+    const PatchRange pr(L[lev + 1].U.box(lc));
     RegMP& g = regs[lc];
-    g.I0 = cb.lo[0] / 2; g.I1 = (cb.hi[0] - 1) / 2;
-    g.J0 = cb.lo[1] / 2; g.J1 = (cb.hi[1] - 1) / 2;
+    g.I0 = pr.I0; g.I1 = pr.I1;
+    g.J0 = pr.J0; g.J1 = pr.J1;
     const int nJ = g.J1 - g.J0 + 1, nI = g.I1 - g.I0 + 1;
     g.cL.assign(nJ * nc, 0); g.cR.assign(nJ * nc, 0);
     g.cB.assign(nI * nc, 0); g.cT.assign(nI * nc, 0);
@@ -938,12 +943,16 @@ void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
 // fonctions amr_step_* dont le cas (2/N niveaux, mono/multi-box) est encode dans le NOM.
 // Entree unifiee : advance_amr(m, LevelHierarchy&, dt), facade fidele du moteur N-niveaux
 // multi-patch (verifie 2 ET 3 niveaux, maxdiff = 0, par test_advance_amr). Les ROLES de la
-// revue, aujourd'hui JOUES par du code existant (a promouvoir en types de premier plan,
-// ROADMAP) :
+// revue, leurs supports actuels (types nommes, ou code restant a promouvoir) :
 //   OwnershipPolicy     = DistributionMapping (qui possede quel patch)        -> alias ci-dessous
-//   PatchRange          = AmrLevelMP (box + donnees + aux + dx d'un niveau)
-//   CoarseFineInterface = masque de couverture + routage bordant du reflux (subcycle_level_mp)
-//   FluxRegister        = buffers avg/ref a index global + all_reduce_sum_inplace
+//   AmrLevel            = AmrLevelMP (box + donnees + aux + dx d'un niveau)
+//   PatchRange          = TYPE NOMME : empreinte grossiere [I0..I1]x[J0..J1] d'un patch fin
+//                         (ratio 2), partagee par average_down, couverture et registres
+//   CoarseFineGhost     = TYPE/HELPER NOMME : fill_cf_ghost_cell (interp espace+temps par
+//                         cellule ghost), partage par les trois mf_fill_fine_ghosts_*
+//   CoarseFineInterface = masque de couverture (CoverageMask) + routage bordant du reflux
+//                         (encore inline dans subcycle_level_mp / amr_step_2level_multipatch)
+//   FluxRegister        = TYPE NOMME : buffers avg/ref a index global + all_reduce_sum_inplace
 //   SubcyclingSchedule  = recursion Berger-Oliger (dt/r par niveau) de subcycle_level_mp
 //   RegridPolicy        = amr_regrid_finest (Berger-Rigoutsos), cote coupleur
 using OwnershipPolicy = DistributionMapping;

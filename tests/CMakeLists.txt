@@ -25,6 +25,7 @@ adc_add_test(test_cluster)
 adc_add_test(test_regrid)
 adc_add_test(test_flux_register)
 adc_add_test(test_coverage_mask)
+adc_add_test(test_patch_range)
 adc_add_test(test_amr_diagnostics)
 adc_add_test(test_load_balance)
 
