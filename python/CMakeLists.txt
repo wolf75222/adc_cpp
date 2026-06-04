@@ -162,6 +162,13 @@ add_test(NAME test_weno5_ssprk3
 set_tests_properties(test_weno5_ssprk3 PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# DSL Phase A : API utilisateur stable (dsl.Model + Param + CompiledModel + add_equation +
+# FiniteVolume + run). Erreurs explicites + aot/production end-to-end (production -> add_native_block).
+add_test(NAME test_dsl_phase_a
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_phase_a.py)
+set_tests_properties(test_dsl_phase_a PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # --- Garde-fou : tests des chantiers aux extensible / EPM / roles, jusqu'ici lances en CI
 # (ci.yml) mais PAS enregistres en ctest -> on les rend visibles a `ctest` (et donc enforces
 # localement avant tout refactor). Les chemins JIT/AOT (test_dsl_{jit,aot}_{bz,te}) compilent

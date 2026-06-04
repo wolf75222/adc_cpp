@@ -1010,3 +1010,311 @@ class HyperbolicModel:
         out += tl
         out += ["    return %s;" % cpps[0], "  }", "};", "}  // namespace %s" % namespace]
         return "\n".join(out) + "\n"
+
+
+# === Phase A : facade utilisateur pure-Python =================================
+# La surface STABLE que l'utilisateur ecrit (dsl.Model / Param / CompiledModel). Pur sucre :
+# aucune numerique nouvelle, aucun changement de moteur. dsl.Model COMPOSE un HyperbolicModel prive
+# (_m) et delegue chaque appel a une methode existante ; Param est une constante NOMMEE qui s'inline
+# au codegen ; CompiledModel empaquette le .so + les metadonnees deja connues cote Python (pas de
+# relecture du .so). cf. docs/DSL_MODEL_DESIGN.md (Phase A).
+
+# Caracteristiques HONNETES par backend (cf. DSL_MODEL_DESIGN.md section 5). Sert au diagnostic et
+# aux garde-fous device/MPI/AMR (verifies au branchement/execution, pas figes a la compilation).
+_BACKEND_CAPS = {
+    # backend : (cpu, mpi, amr, gpu)  -- True/False selon ce que le chemin SUPPORTE aujourd'hui
+    "prototype": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
+    "aot": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
+    # production = chemin NATIF (add_native_block, #85) : meme moteur que add_block, donc MPI-capable
+    # par construction (halos fill_boundary). amr=False (System mono-niveau ; AMR = Phase D). gpu=False
+    # par PRUDENCE : le chemin natif est device-clean en C++ (GH200) mais la validation end-to-end
+    # depuis Python (add_native_block sur device) est une PR dediee non encore faite (DSL section 5).
+    "production": {"cpu": True, "mpi": True, "amr": False, "gpu": False},
+}
+
+
+class Param:
+    """Parametre NOMME d'un modele DSL, utilisable comme une Expr dans les formules.
+
+    Mode (a), constante figee a la compilation (la SEULE supportee en Phase A) : `kind="const"`.
+    Le codegen INLINE deja toute constante (Const.to_cpp -> repr(value)), donc Param s'inline en
+    Const(value) au codegen (zero-risque cote brique generee) tout en gardant son IDENTITE
+    (name/value/kind) pour l'introspection (m.params), les diagnostics et la reproductibilite.
+
+    Mode (b), parametre runtime (modifiable sans recompiler) : `kind="runtime"` -> NotImplementedError
+    (changement d'ABI + codegen requis, phase ulterieure ; cf. DSL_MODEL_DESIGN.md section 2b).
+
+    Comme Param se comporte comme un noeud d'arbre (il herite d'Expr), `g * (E - ...)` construit
+    directement l'arbre attendu : `eval`/`to_cpp`/`deps` delegues a un Const interne (la valeur est
+    une constante, pas une variable d'environnement -> pas de dependance a verifier dans check())."""
+
+    # NB : Param N'HERITE PAS d'Expr pour eviter d'embarquer son etat (name/kind) dans la cle
+    # structurelle de CSE ; il EXPOSE plutot les hooks d'arbre en deleguant a un Const interne.
+    def __init__(self, name, value, kind="const"):
+        if kind not in ("const", "runtime"):
+            raise ValueError("Param : kind 'const' | 'runtime' (recu %r)" % (kind,))
+        if kind == "runtime":
+            raise NotImplementedError(
+                "param '%s' runtime non supporte (changement d'ABI/codegen requis, phase "
+                "ulterieure) ; utiliser un param constant (kind='const') ou un champ aux" % name)
+        self.name = name
+        self.value = float(value)
+        self.kind = kind
+        self._const = Const(self.value)  # s'inline au codegen : la valeur est ecrite EN DUR dans le .so
+
+    # --- hooks d'arbre (delegues au Const interne) : Param utilisable comme une Expr ---
+    def eval(self, env): return self._const.eval(env)
+    def to_cpp(self): return self._const.to_cpp()
+    def deps(self): return set()  # une constante n'a aucune dependance (rien a verifier dans check())
+
+    # --- operateurs : Param se combine comme une Expr (promotion via _wrap du Const interne) ---
+    def __add__(self, o): return Add(self._const, _wrap(o))
+    def __radd__(self, o): return Add(_wrap(o), self._const)
+    def __sub__(self, o): return Sub(self._const, _wrap(o))
+    def __rsub__(self, o): return Sub(_wrap(o), self._const)
+    def __mul__(self, o): return Mul(self._const, _wrap(o))
+    def __rmul__(self, o): return Mul(_wrap(o), self._const)
+    def __truediv__(self, o): return Div(self._const, _wrap(o))
+    def __rtruediv__(self, o): return Div(_wrap(o), self._const)
+    def __neg__(self): return Neg(self._const)
+    def __pow__(self, o): return Pow(self._const, _wrap(o))
+
+    def __float__(self): return self.value
+    def __repr__(self): return "Param(%r, %r, kind=%r)" % (self.name, self.value, self.kind)
+
+
+class CompiledModel:
+    """Resultat de `m.compile(...)` : empaquette le `.so` produit + TOUT ce qu'il faut pour le
+    brancher correctement (dispatch adder, diagnostic ABI, reproductibilite). Remplace le couple
+    historique (str so_path, adder_for(backend)) par un objet unique.
+
+    Les metadonnees ne sont PAS relues du `.so` : Python detient deja noms/roles/gamma/n_aux/params
+    (le HyperbolicModel les porte) ; CompiledModel les expose juste pour le dispatch (add_equation)
+    et les diagnostics. cf. DSL_MODEL_DESIGN.md section 3."""
+
+    def __init__(self, so_path, backend, adder, cons_names, cons_roles, prim_names, n_vars,
+                 gamma, n_aux, params, caps, abi_key, model_hash, cxx, std):
+        self.so_path = so_path
+        self.backend = backend       # "prototype" | "aot" | "production"
+        self.adder = adder           # nom de methode System : add_dynamic_block / add_compiled_block / add_native_block
+        self.cons_names = list(cons_names)
+        self.cons_roles = list(cons_roles)
+        self.prim_names = list(prim_names)
+        self.n_vars = int(n_vars)
+        self.gamma = gamma           # None = defaut historique 1.4 cote System
+        self.n_aux = int(n_aux)
+        self.params = dict(params)   # {name: Param}
+        self.caps = dict(caps)       # {cpu/mpi/amr/gpu: bool}
+        self.abi_key = abi_key       # cle ABI miroir d'adc_header_signature + compilateur/std
+        self.model_hash = model_hash  # hash stable formules+roles+n_aux+params
+        self.cxx = cxx
+        self.std = std
+
+    def __repr__(self):
+        return ("CompiledModel(backend=%r, so_path=%r, n_vars=%d, gamma=%r, n_aux=%d, "
+                "adder=%r, abi_key=%.12s..., model_hash=%.12s...)"
+                % (self.backend, self.so_path, self.n_vars, self.gamma, self.n_aux,
+                   self.adder, self.abi_key or "", self.model_hash or ""))
+
+
+def _abi_key_python(include, cxx, std):
+    """Cle d'ABI cote Python, MIROIR de adc::detail::abi_key_string (compilateur + standard +
+    signature des en-tetes). Rend la verification + le diagnostic disponibles cote Python AVANT le
+    chargement du .so (le chemin natif compare la sienne cote C++). Forme stable et lisible :
+    "<sig en-tetes>|<cxx>|<std>". include absent -> signature vide (diagnostic degrade, pas d'UB)."""
+    import os
+    sig = adc_header_signature(include) if include and os.path.isdir(include) else ""
+    return "%s|%s|%s" % (sig, cxx or "", std or "")
+
+
+class Model:
+    """Facade STABLE de modele DSL (Phase A). COMPOSE un HyperbolicModel prive (_m, composition et
+    NON heritage) et delegue chaque appel a une methode existante : aucune numerique nouvelle.
+
+        m = adc.dsl.Model("euler")
+        rho, rhou, rhov, E = m.conservative_vars("rho", "rho_u", "rho_v", "E")
+        g = m.param("gamma", 1.4)                 # constante NOMMEE, inlinee au codegen
+        u = m.primitive("u", rhou / rho)
+        p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u*u + ...)))
+        m.flux(x=[...], y=[...])                   # DECLARATEUR symbolique du flux physique
+        m.eval_flux(U, aux, dir)                   # EVALUATEUR numpy (debug), nom DISTINCT
+        m.primitive_vars(rho=rho, u=u, v=v, p=p)   # layout Prim ordonne (ordre des kwargs)
+        compiled = m.compile(so_path, include, backend="aot")  # -> CompiledModel
+
+    cf. docs/DSL_MODEL_DESIGN.md sections 1-3."""
+
+    def __init__(self, name):
+        self._m = HyperbolicModel(name)
+        self.params = {}   # name -> Param (introspection / reproductibilite)
+
+    @property
+    def name(self): return self._m.name
+
+    # --- declaration des variables (delegation directe a HyperbolicModel) ---
+    def conservative_vars(self, *names, roles=None):
+        """Declare les variables conservatives. @p roles : meme convention que HyperbolicModel."""
+        return self._m.conservative_vars(*names, roles=roles)
+
+    def primitive(self, name, expr):
+        """Definit une primitive par sa formule (en fonction des cons / primitives precedentes)."""
+        return self._m.primitive(name, expr)
+
+    def primitive_vars(self, *vars, roles=None, **named):
+        """Declare les primitives ET le layout ORDONNE de Prim. Deux formes :
+
+        - KWARGS (style cible) : `primitive_vars(rho=expr, u=expr, v=expr, p=expr)` : chaque kwarg
+          DEFINIT une primitive (m.primitive(name, expr)) ET fixe le layout de Prim dans l'ordre
+          d'insertion des kwargs (Python 3.7+ : ordre garanti). @p roles (liste) optionnel.
+        - POSITIONNELLE : `primitive_vars(rho, u, v, p, roles=...)` : noms/Var deja definis, fixe
+          juste le layout (delegue a set_primitive_state, comme HyperbolicModel).
+
+        Les deux formes sont exclusives (melanger kwargs nommes et positionnels leve)."""
+        if named and vars:
+            raise ValueError("primitive_vars : melanger forme positionnelle et kwargs nommes "
+                             "(choisir l'une ; les kwargs definissent ET ordonnent les primitives)")
+        if named:
+            # kwargs : definir chaque primitive, puis fixer le layout dans l'ordre d'insertion.
+            # CAS rho=rho : un nom DEJA conservatif (la primitive est la variable conservative elle-meme,
+            # ex. la densite) n'est PAS redefini comme primitive -- sinon le codegen emettrait
+            # `const Real rho = rho;` (auto-init). On le laisse simplement REJOINDRE le layout.
+            ordered = list(named.keys())
+            for nm in ordered:
+                if nm not in self._m.cons_names:
+                    self._m.primitive(nm, named[nm])
+            self._m.set_primitive_state(*ordered, roles=roles)
+            return tuple(Var(nm, "prim") for nm in ordered)
+        # forme positionnelle : fixe le layout a partir de noms/Var deja definis.
+        self._m.set_primitive_state(*vars, roles=roles)
+        return None
+
+    def aux(self, name):
+        """Champ auxiliaire (doit etre une clef de AUX_CANONICAL : phi/grad_x/grad_y/B_z/T_e)."""
+        return self._m.aux(name)
+
+    def conservative_from(self, exprs):
+        """Inverse prim -> cons (le DSL ne sait pas inverser symboliquement)."""
+        self._m.set_conservative_from(exprs)
+
+    # --- flux : DECLARATEUR symbolique vs EVALUATEUR numpy (noms DISTINCTS, decision tranchee) ---
+    def flux(self, x, y):
+        """DECLARATEUR symbolique du flux physique (delegue a set_flux). x/y : listes d'Expr, une
+        par composante conservative. NE PAS confondre avec l'evaluateur numpy eval_flux."""
+        self._m.set_flux(x, y)
+
+    def eval_flux(self, U, aux, dir):
+        """EVALUATEUR numpy du flux physique (debug / proto hote ; delegue a HyperbolicModel.flux).
+        U : numpy (n_vars, ...) ; aux : dict nom -> tableau ; dir : 0=x, 1=y."""
+        return self._m.flux(U, aux, dir)
+
+    def eigenvalues(self, x, y):
+        """Valeurs propres (vitesses caracteristiques) par direction (delegue a set_eigenvalues)."""
+        self._m.set_eigenvalues(x, y)
+
+    def source(self, s):
+        """Terme source S(U, aux), une expression par composante (optionnel ; delegue a set_source)."""
+        self._m.set_source(s)
+
+    def elliptic_rhs(self, e):
+        """Contribution au second membre elliptique (couplage Poisson ; delegue a set_elliptic_rhs)."""
+        self._m.set_elliptic_rhs(e)
+
+    def gamma(self, value):
+        """Indice adiabatique (EOS), porte par ADC_EXPORT_BLOCK_GAMMA (delegue a set_gamma)."""
+        self._m.set_gamma(value)
+
+    def param(self, name, value, kind="const"):
+        """Parametre NOMME utilisable dans les formules. Mode (a) (`kind="const"`, defaut) : constante
+        figee a la compilation, inlinee au codegen ; stockee dans m.params (introspection /
+        reproductibilite). Mode (b) (`kind="runtime"`) : NotImplementedError (Phase E).
+
+        CAS gamma : si name == "gamma", appelle AUSSI set_gamma(value) pour que la metadonnee ABI
+        reste coherente (sinon le System retombe sur 1.4)."""
+        p = Param(name, value, kind=kind)  # leve NotImplementedError si kind == "runtime"
+        self.params[name] = p
+        if name == "gamma":
+            self._m.set_gamma(p.value)
+        return p
+
+    def check(self):
+        """Verifie les dependances (variables referencees declarees). Leve ValueError sinon."""
+        return self._m.check()
+
+    # --- introspection (lecture seule, deleguee au modele backing) ---
+    @property
+    def cons_names(self): return self._m.cons_names
+
+    @property
+    def prim_state(self): return self._m.prim_state
+
+    @property
+    def n_vars(self): return self._m.n_vars
+
+    def _model_hash(self):
+        """Hash stable du modele : formules (flux/eig/source/elliptic/primitives/cons_from) + roles +
+        n_aux + params. Sert a identifier/reutiliser un .so deja compile et a tracer le run. Repose sur
+        repr(Expr) (stable, structurel) ; insensible a l'ordre des dict (tries)."""
+        import hashlib
+        m = self._m
+        parts = []
+        parts.append("name=%s" % m.name)
+        parts.append("cons=%s" % ",".join(m.cons_names))
+        parts.append("croles=%s" % ",".join(roles_for(m.cons_names, m.cons_roles)))
+        parts.append("prim_state=%s" % ",".join(m.prim_state))
+        parts.append("proles=%s" % ",".join(roles_for(m.prim_state, m.prim_roles)))
+        parts.append("prim=%s" % ";".join("%s=%r" % (k, m.prim_defs[k]) for k in m.prim_defs))
+        for d in ("x", "y"):
+            parts.append("flux_%s=%s" % (d, ";".join(repr(e) for e in m._flux.get(d, []))))
+            parts.append("eig_%s=%s" % (d, ";".join(repr(e) for e in m._eig.get(d, []))))
+        parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
+        parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
+        parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
+        parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
+        parts.append("gamma=%r" % m.gamma)
+        parts.append("params=%s" % ";".join("%s=%r:%s" % (k, self.params[k].value, self.params[k].kind)
+                                             for k in sorted(self.params)))
+        return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+    def compile(self, so_path, include, backend="aot", target="system", name=None, cxx=None,
+                std=None, require_metadata=False):
+        """Compile le modele en un CompiledModel (Phase A). Delegue la GENERATION + compilation a
+        HyperbolicModel.compile (moteurs inchanges : compile_so / compile_aot / compile_native), puis
+        empaquette le .so avec les metadonnees deja connues (pas de relecture du .so).
+
+        @p backend : "prototype" | "aot" | "production" (cf. HyperbolicModel.compile).
+        @p target : "system" (defaut) | "amr_system". En Phase A seul "system" est cable
+            (AmrSystem.add_equation est Phase D) -> "amr_system" leve NotImplementedError.
+        PAS d'argument `device` : les capacites GPU/MPI/AMR sont verifiees au branchement
+            (add_equation) / a l'execution, pas figees a la compilation (DSL_MODEL_DESIGN.md point 7).
+
+        Renvoie un CompiledModel portant so_path, backend, adder, noms/roles/gamma/n_aux/params, caps,
+        abi_key, model_hash, cxx, std."""
+        import shutil
+        if backend not in HyperbolicModel._BACKENDS:
+            raise ValueError("compile : backend %r inconnu (attendus %s)"
+                             % (backend, sorted(HyperbolicModel._BACKENDS)))
+        if target not in ("system", "amr_system"):
+            raise ValueError("compile : target 'system' | 'amr_system' (recu %r)" % (target,))
+        if target == "amr_system":
+            raise NotImplementedError(
+                "compile : target='amr_system' (DSL Phase D) non cable ; AmrSystem.add_equation viendra "
+                "avec le pendant natif add_compiled_model(AmrSystem&). Phase A : target='system'")
+
+        m = self._m
+        # std effectif : meme defaut par backend que HyperbolicModel.compile (c++23 natif, c++20 sinon).
+        mode = HyperbolicModel._BACKENDS[backend][0]
+        eff_std = std if std is not None else ("c++23" if mode == "native" else "c++20")
+        eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+
+        # Compilation (moteurs inchanges, garde-fous require_metadata/backend de HyperbolicModel.compile).
+        out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
+                             require_metadata=require_metadata)
+
+        adder = HyperbolicModel.adder_for(backend)
+        cons_roles = roles_for(m.cons_names, m.cons_roles)
+        return CompiledModel(
+            so_path=out_path, backend=backend, adder=adder,
+            cons_names=m.cons_names, cons_roles=cons_roles, prim_names=m.prim_state,
+            n_vars=m.n_vars, gamma=m.gamma, n_aux=aux_n_aux(m.aux_names),
+            params=self.params, caps=_BACKEND_CAPS[backend],
+            abi_key=_abi_key_python(include, eff_cxx, eff_std), model_hash=self._model_hash(),
+            cxx=eff_cxx, std=eff_std)

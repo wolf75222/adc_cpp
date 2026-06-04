@@ -34,7 +34,7 @@ __all__ = [
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",
     "NoSource", "PotentialForce", "GravityForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
-    "Spatial", "Explicit", "IMEX", "Implicit", "integrate",
+    "Spatial", "FiniteVolume", "Explicit", "IMEX", "Implicit", "integrate",
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
@@ -298,6 +298,20 @@ class Spatial:
         self.recon = recon
 
 
+def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"):
+    """Schema volumes finis (surface stable Phase A) : remappe sur l'objet Spatial existant.
+
+    Le flux NUMERIQUE de Riemann s'appelle `riemann` (NON `flux`, reserve au flux PHYSIQUE du modele
+    DSL m.flux) pour ne pas collisionner les deux sens. Mapping des arguments :
+      limiter   -> Spatial.limiter  ("none" | "minmod" | "vanleer" | "weno5")
+      riemann   -> Spatial.flux     ("rusanov" | "hllc" | "roe")
+      variables -> Spatial.recon    ("conservative" | "primitive")
+
+    cf. docs/DSL_MODEL_DESIGN.md section 6. Renvoie un Spatial (consomme tel quel par add_block /
+    add_equation). adc.Spatial reste disponible a l'identique."""
+    return Spatial(limiter=limiter, flux=riemann, recon=variables)
+
+
 class Explicit:
     """Traitement temporel explicite. substeps : sous-cyclage du bloc.
 
@@ -355,6 +369,106 @@ class System:
         time = time if time is not None else Explicit()
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1), evolve)
+
+    def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
+                     evolve=True):
+        """Ajoute une equation/bloc en aiguillant sur le TYPE de @p model (DSL Phase A) :
+
+        - un ModelSpec (adc.Model(...)) -> add_block (briques natives composees) ;
+        - un CompiledModel (m.compile(...)) -> l'adder du backend (add_dynamic_block pour prototype,
+          add_compiled_block pour aot/production), avec les noms/roles/gamma transportes par le .so.
+
+        Centralise le couplage backend <-> adder (un .so AOT ne doit pas etre branche sur
+        add_dynamic_block, et inversement). cf. docs/DSL_MODEL_DESIGN.md section 3.
+
+        @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (defaut minmod+rusanov+conservatif).
+        @p time : adc.Explicit / IMEX (defaut Explicit). @p substeps : surcharge time.substeps.
+        @p names : noms des composantes (longueur = n_vars du modele compile). @p evolve : bloc avance.
+        """
+        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+
+        spatial = spatial if spatial is not None else Spatial()
+        time = time if time is not None else Explicit()
+        nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
+
+        # --- ModelSpec : briques natives composees -> add_block (chemin existant) ---
+        if isinstance(model, ModelSpec):
+            self.add_block(name, model, spatial=spatial, time=time, evolve=evolve)
+            return
+
+        if not isinstance(model, dsl.CompiledModel):
+            raise TypeError("add_equation : model doit etre un adc.Model(...) (ModelSpec) ou un "
+                            "CompiledModel (m.compile(...)) ; recu %r" % type(model).__name__)
+
+        compiled = model
+        # Garde-fou noms : longueur explicite verifiee tot (le C++ leve aussi, mais on diagnostique ici).
+        if names is not None and len(names) != compiled.n_vars:
+            raise ValueError("add_equation : names= a %d noms mais le bloc '%s' a %d variables"
+                             % (len(names), name, compiled.n_vars))
+        names_arg = list(names) if names is not None else []
+
+        backend = compiled.backend
+        # Garde-fou WENO5 : tout CompiledModel passe par un .so qui alloue 2 ghosts ; WENO5 en exige 3
+        # (rejete cote C++, system.cpp pour aot/production). On le rejette ICI, AVANT le C++, sur TOUS
+        # les chemins .so : WENO5 n'est valide que via le chemin natif add_block (adc.Model ->
+        # ModelSpec). Differe pour les .so (Phase A : les 3 ghosts ne sont pas regles).
+        if spatial.limiter == "weno5":
+            raise ValueError(
+                "add_equation : limiter 'weno5' non supporte sur un CompiledModel (.so a 2 ghosts ; "
+                "WENO5 en exige 3) ; WENO5 n'est valide que via add_block (modele compose "
+                "adc.Model(...)). Differe pour les .so (Phase A).")
+
+        # Garde-fou flux numerique : HLLC/Roe exigent une pression -> la brique generee n'emet
+        # pressure()/wave_speeds() que si une primitive 'p' est declaree. Sans 'p', make_block ne
+        # compile pas le flux : on le diagnostique ici avant la frontiere C++.
+        if spatial.flux in ("hllc", "roe") and "p" not in compiled.prim_names:
+            raise ValueError(
+                "add_equation : riemann '%s' exige une pression : declarer une primitive 'p' "
+                "(m.primitive('p', ...)) dans le modele ; sinon utiliser riemann='rusanov'"
+                % spatial.flux)
+
+        # Aiguillage AUTORITAIRE par l'adder du CompiledModel (fixe par le backend, cf. dsl._BACKENDS) :
+        # prototype -> add_dynamic_block, aot -> add_compiled_block, production -> add_native_block (#85).
+        adder = compiled.adder
+        if adder == "add_dynamic_block":
+            # JIT, residu HOTE Rusanov ordre 1 : ne prend que le LIMITER MUSCL (none/minmod/vanleer)
+            # + substeps ; pas de flux HLLC/Roe, pas de recon primitif.
+            if spatial.flux != "rusanov":
+                raise ValueError(
+                    "add_equation : backend 'prototype' (JIT, residu hote Rusanov ordre 1) n'expose "
+                    "que riemann='rusanov' (recu '%s') ; utiliser backend='aot'/'production' pour "
+                    "HLLC/Roe" % spatial.flux)
+            self._s.add_dynamic_block(name, compiled.so_path, nsub, names_arg, spatial.limiter)
+            return
+        if adder == "add_compiled_block":
+            # AOT host-marshale : limiter x riemann x recon, mono-rang (sans MPI/AMR).
+            self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.flux,
+                                       spatial.recon, time.kind, nsub, names_arg)
+            return
+        if adder == "add_native_block":
+            # NATIF zero-copie (#85) : bloc installe sur le CONTEXTE REEL du System (meme chemin que
+            # add_block). Prend un gamma, PAS de names= (les noms/roles viennent des metadonnees du .so).
+            # La validation device/MPI end-to-end depuis Python est une PR dediee ulterieure.
+            if names is not None:
+                raise ValueError(
+                    "add_equation : names= non supporte sur le chemin natif (production) ; les noms et "
+                    "roles sont portes par les metadonnees du modele compile (.so)")
+            gamma = compiled.gamma if compiled.gamma is not None else 1.4
+            self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
+                                     spatial.recon, time.kind, gamma, nsub, evolve)
+            return
+        raise ValueError("add_equation : adder %r inconnu (backend %r)" % (adder, backend))
+
+    def run(self, t_end, cfl=0.4, max_steps=1_000_000):
+        """Avance jusqu'a t_end par pas CFL (sucre : `while time() < t_end: step_cfl(cfl)`).
+
+        @p cfl : nombre de Courant passe a step_cfl. @p max_steps : garde-fou (evite une boucle
+        infinie si dt -> 0). Renvoie le nombre de pas effectues. cf. DSL_MODEL_DESIGN.md section 6."""
+        steps = 0
+        while self.time() < t_end and steps < max_steps:
+            self.step_cfl(cfl)
+            steps += 1
+        return steps
 
     def add_background(self, name, model, density, spatial=None):
         """Espece GELEE (non avancee) : un fond fixe qui contribue au Poisson de systeme (et, a
