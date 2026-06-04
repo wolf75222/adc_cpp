@@ -151,6 +151,19 @@ if(ADC_HAS_MPI)
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_mbox_parity> ${MPIEXEC_POSTFLAGS})
   endforeach()
 
+  # --- cut-cell multi-box DISTRIBUE : verrou de non-regression du bug "cut-cell multi-box MPI" ---
+  # Enchaine des solves cut-cell sur un domaine multi-box (16 boites) dont la hierarchie degenerait
+  # au plus grossier (average_down lisait hors bornes d'un fab fin 1x1 -> divergence intermittente
+  # sous MPI, meme a np=1). Exige finitude + determinisme intra-rang + invariance vs mono-box. np=1
+  # couvre le chemin qui flakait ; np=2/4 le multi-box reparti (halos cut-cell cross-rang).
+  add_executable(test_mpi_cutcell_multibox test_mpi_cutcell_multibox.cpp)
+  target_link_libraries(test_mpi_cutcell_multibox PRIVATE adc::adc)
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_cutcell_multibox_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_cutcell_multibox> ${MPIEXEC_POSTFLAGS})
+  endforeach()
+
   # --- VALIDATION INTEGREE AmrSystem + MPI + (GPU) : hierarchie AMR (regrid + reflux + Poisson) +
   # modele COMPILE (add_compiled_model) DISTRIBUE sur n_ranks(). Le grossier replique impose un
   # resultat invariant au nombre de rangs : on verifie la consistance cross-rang (spread == 0) et le

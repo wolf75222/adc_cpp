@@ -67,6 +67,24 @@ class GeometricMG {
       if (g.domain.nx() % 2 || g.domain.ny() % 2) break;
       if (g.domain.nx() / 2 < min_coarse || g.domain.ny() / 2 < min_coarse)
         break;
+      // Stop si une boite du niveau courant ne se coarsen pas PROPREMENT : sur un domaine
+      // MULTI-BOX (max_grid_size < n), les boites retrecissent par 2 a chaque niveau et
+      // finissent a 1 cellule ; coarsen(ba, 2) ferait alors retomber PLUSIEURS boites fines
+      // distinctes sur la MEME cellule grossiere -> BoxArray grossier DEGENERE (boites en
+      // doublon couvrant la meme cellule). average_down lit un bloc r x r par cellule grossiere
+      // (F(r*I+a, r*J+b)) : pour un fab fin de 1 cellule (0 fantome) trois des quatre lectures
+      // tombent HORS des bornes du buffer (indices negatifs), donc en memoire non initialisee.
+      // En serie le tas est stable (lecture deterministe), mais sous le chemin MPI le tas est
+      // remue et la lecture devient ERRATIQUE (ecart ponctuel jusqu'au blow-up). On garde donc
+      // le niveau courant comme grille la plus grossiere. refine(coarsen(b)) == b caracterise
+      // exactement les boites alignees ET de taille paire (coarsening exact, sans doublon ni
+      // debordement) ; mono-box et multi-box non degenere ne franchissent jamais ce break ->
+      // hierarchie (et resultat) STRICTEMENT inchanges sur ces cas.
+      const BoxArray& cur = lev_.back().ba;
+      bool coarsenable = true;
+      for (int i = 0; i < cur.size(); ++i)
+        if (!(cur[i].coarsen(2).refine(2) == cur[i])) { coarsenable = false; break; }
+      if (!coarsenable) break;
       Geometry gc{g.domain.coarsen(2), g.xlo, g.xhi, g.ylo, g.yhi};
       add_level(gc, coarsen(lev_.back().ba, 2));
     }
