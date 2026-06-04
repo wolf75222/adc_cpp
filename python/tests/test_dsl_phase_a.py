@@ -48,6 +48,30 @@ def build_euler(name="euler_pa"):
     return m
 
 
+def build_euler_predef(name="euler_predef"):
+    """IDENTIQUE a build_euler, mais u/v/p sont des Var PRIMITIVES deja definies (m.primitive(...))
+    passees en SELF-REFERENCE a primitive_vars(rho=rho, u=u, v=v, p=p). C'est le style cible avec des
+    Var pre-definies : sans le garde-fou self-ref, u=u redefinirait la primitive en `const Real u = u;`
+    (auto-init -> NaN). Doit produire le MEME modele que build_euler (formes equivalentes)."""
+    m = dsl.Model(name)
+    rho, rhou, rhov, E = m.conservative_vars(
+        "rho", "rho_u", "rho_v", "E",
+        roles=["Density", "MomentumX", "MomentumY", "Energy"])
+    g = m.param("gamma", GAMMA)
+    u = m.primitive("u", rhou / rho)                  # Var PRIMITIVE deja definie
+    v = m.primitive("v", rhov / rho)
+    p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
+    H = (E + p) / rho
+    c = dsl.sqrt(g * p / rho)
+    m.flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
+           y=[rhov, rhov * u, rhov * v + p, rho * H * v])
+    m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
+    prho, pu, pv, pp = m.primitive_vars(rho=rho, u=u, v=v, p=p)   # u=u : Var primitive self-ref
+    m.conservative_from([prho, prho * pu, prho * pv,
+                         pp / (g - 1.0) + 0.5 * prho * (pu * pu + pv * pv)])
+    return m
+
+
 def initial_state(n):
     xs = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(xs, xs)
@@ -159,6 +183,23 @@ def end_to_end_checks(cxx):
         print("[phase A] dmax(aot vs production) = %.3e" % da)
         assert da < 1e-10, "aot et production doivent coincider (memes briques de production), dmax=%.3e" % da
         print("OK  aot == production (memes briques de production, dmax=%.3e)" % da)
+
+        # Garde-fou self-ref kwargs (style cible avec Var pre-definies) : u/v/p definies par m.primitive
+        # puis passees en primitive_vars(rho=rho, u=u, v=v, p=p). Doit (a) ne PAS produire de NaN
+        # (sans le fix, u=u -> `Real u = u;` auto-init) et (b) donner le MEME modele que la forme expr.
+        mp = build_euler_predef("euler_predef")
+        cmp_ = mp.compile(os.path.join(tmp, "m_predef.so"), INCLUDE, backend="aot")
+        sp = adc.System(n=n, periodic=True)
+        sp.add_equation("gas", cmp_, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+                                                              variables="primitive"))
+        sp.set_poisson(rhs="charge_density", solver="geometric_mg")
+        sp.set_state("gas", initial_state(n))
+        sp.run(t_end=0.02, cfl=0.4)
+        pf = np.array(sp.get_state("gas"))
+        assert np.all(np.isfinite(pf)), "primitive_vars kwargs (Var pre-definies) : etat fini, pas de NaN"
+        dp = float(np.max(np.abs(pf - finals["aot"])))
+        assert dp < 1e-10, "primitive_vars(u=u) Var pre-definie == forme expr (meme modele), dmax=%.3e" % dp
+        print("OK  primitive_vars kwargs Var pre-definies : pas de NaN, == forme expr (dmax=%.3e)" % dp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -187,8 +228,23 @@ def modelspec_substeps_check():
     print("OK  substeps= override forwarde pour ModelSpec (10) ; defaut = time.substeps (3)")
 
 
+def predef_primitive_selfref_check():
+    """primitive_vars(rho=rho, u=u, v=v, p=p) avec u/v/p des Var PRIMITIVES deja definies (m.primitive).
+    Le garde-fou self-ref ne doit PAS redefinir u en `u = u` (auto-init NaN) : prim_defs garde la
+    formule d'origine (rho_u/rho), pas un renvoi a soi. Pur-Python (aucun compilateur requis)."""
+    m = build_euler_predef("euler_predef_pp")
+    pd = m._m.prim_defs
+    for nm in ("u", "v", "p"):
+        assert nm in pd, "primitive '%s' absente de prim_defs" % nm
+        assert pd[nm].to_cpp() != nm, \
+            "primitive '%s' auto-initialisee (self-ref kwargs mal gere : `%s = %s;`)" % (nm, nm, nm)
+    assert "rho_u" in pd["u"].deps(), "primitive 'u' doit garder sa formule (depend de rho_u)"
+    print("OK  primitive_vars kwargs Var pre-definies : pas d'auto-init (formules prim_defs preservees)")
+
+
 def main():
     pure_python_checks()
+    predef_primitive_selfref_check()
     modelspec_substeps_check()
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):

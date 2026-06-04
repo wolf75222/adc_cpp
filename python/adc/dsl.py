@@ -1175,13 +1175,19 @@ class Model:
                              "(choisir l'une ; les kwargs definissent ET ordonnent les primitives)")
         if named:
             # kwargs : definir chaque primitive, puis fixer le layout dans l'ordre d'insertion.
-            # CAS rho=rho : un nom DEJA conservatif (la primitive est la variable conservative elle-meme,
-            # ex. la densite) n'est PAS redefini comme primitive -- sinon le codegen emettrait
-            # `const Real rho = rho;` (auto-init). On le laisse simplement REJOINDRE le layout.
+            # Une primitive n'est PAS (re)definie si le kwarg est la Var de MEME nom -- sinon le codegen
+            # emettrait `const Real x = x;` (auto-init -> NaN). Deux cas de self-reference, tous deux
+            # laisses REJOINDRE le layout sans redefinition (style cible primitive_vars(rho=rho, u=u, ...)) :
+            #  - nom DEJA CONSERVATIF (ex. rho=rho : la densite, primitive == conservative) ;
+            #  - Var PRIMITIVE DEJA DEFINIE de meme nom (ex. u=u quand u vient de m.primitive('u', ...)).
+            # Sinon (kwarg = expression, ex. p=cs2*rho ou u=mx/rho) la primitive est definie normalement.
             ordered = list(named.keys())
             for nm in ordered:
-                if nm not in self._m.cons_names:
-                    self._m.primitive(nm, named[nm])
+                val = named[nm]
+                self_ref = isinstance(val, Var) and getattr(val, "name", None) == nm
+                if nm in self._m.cons_names or self_ref:
+                    continue
+                self._m.primitive(nm, val)
             self._m.set_primitive_state(*ordered, roles=roles)
             return tuple(Var(nm, "prim") for nm in ordered)
         # forme positionnelle : fixe le layout a partir de noms/Var deja definis.
