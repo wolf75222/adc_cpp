@@ -60,6 +60,10 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       RESTE : remonter le coarse-fine en helper nomme de premier niveau.
 - [x] **VariableRole** : couplages inter-especes par role (#18) + la brique generee par le DSL
       declare ses VariableRole et le runtime resout les variables par role avec fallback indices. (#40)
+      `block_names()` lit desormais le registre de blocs C++ (voit JIT/AOT, plus seulement
+      `add_block`) (#72) ; les blocs `.so` (JIT `add_dynamic_block` + AOT `add_compiled_block`)
+      transportent leurs noms/roles/gamma via symboles ABI OPTIONNELS, avec fallback pour les `.so`
+      anciens et garde-fou sur la longueur de `names=`. (#75)
 - [x] AMR multi-patch distribue MPI (2 et N niveaux), `CouplingPolicy` mince, suite de validation
       numerique coeur, decoupage elliptique (operateur / solveur / probleme).
 
@@ -105,3 +109,22 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       croit vers 0.911 mais limite par la diffusion numerique du bord d'anneau (-> motive l'AMR).
 - [x] **M2 / M2b** : AMR sur le bord d'anneau (triple le taux a base egale) + Poisson multi-niveau.
 - [ ] Montee en resolution / convergence vers le taux analytique ; integration SAMRAI ulterieure.
+
+## 7. Nettoyage / consolidation (vague P1/P2, juin 2026)
+
+Passe de durcissement APRES le chantier aux/EPM/GPU : pas de feature papier (SAMRAI, domaine
+disque, Schur EPM, AMR multi-bloc, repro Hoffart) -- toutes DIFFEREES. Une PR par bloc, CI verte.
+
+- [x] **Garde-fou ctest** : les 10 tests Python des chantiers aux/EPM/roles enregistres en ctest
+      avant le nettoyage (filet de regression). (#69)
+- [x] **AmrSystem** : refus EXPLICITE des parametres non cables + dedup des deux chemins de build AMR. (#71)
+- [x] **Docs honnetes** : README / ARCHITECTURE / ALGORITHMS alignes sur l'etat reel, notes hors-nav
+      archivees (sans toucher le backlog vivant `todo.md` ni la `ROADMAP`). (#70)
+- [x] **Headers morts** : 6 en-tetes a 0 include / 0 test documentes comme API non cablee (0 suppression). (#73)
+- [x] **Dedup helpers aux** : `derive_aux_bc`, `fill_bz`, `wall_active` factorises
+      (`coupling/aux_fill.hpp`, `runtime/wall_predicate.hpp`). (#74)
+- [x] **`block_names()` depuis le registre C++** (voit JIT/AOT, plus seulement `add_block`). (#72)
+- [x] **ABI bloc `.so`** : noms / roles / gamma transportes par symboles ABI OPTIONNELS sur les deux
+      chemins (JIT + AOT), fallback pour les `.so` anciens, garde-fou sur la longueur de `names=`. (#75)
+- [x] **adc_cases** : package + manifest CI, validations renforcees (pas de validation importante
+      masquee par le manifest). (adc_cases #2, #3)
