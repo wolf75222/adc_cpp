@@ -153,6 +153,21 @@ PYBIND11_MODULE(_adc, m) {
              s.set_density(name, flat(arr));
            },
            py::arg("name"), py::arg("rho"))
+      // Init depuis les PRIMITIVES : prim = tableau (ncomp, n, n) composante-majeur dans l'ordre de
+      // primitive_vars(name) ; converti en conservatif par le modele du bloc. La facade Python
+      // (adc.System.set_primitive_state(**prims)) assemble ce tableau a partir des kwargs nommes.
+      .def("set_primitive_state",
+           [](System& s, const std::string& name,
+              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+             s.set_primitive_state(name, flat(arr));
+           },
+           py::arg("name"), py::arg("prim"))
+      // Diagnostic : etat conservatif -> primitif (ncomp, n, n), ordre de primitive_vars(name).
+      .def("get_primitive_state",
+           [](System& s, const std::string& name) {
+             return to_3d(s.get_primitive_state(name), s.n_vars(name), s.nx());
+           },
+           py::arg("name"))
       .def("solve_fields", &System::solve_fields)
       .def("step", &System::step, py::arg("dt"))
       .def("advance", &System::advance, py::arg("dt"), py::arg("nsteps"))

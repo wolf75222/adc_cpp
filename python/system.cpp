@@ -284,6 +284,11 @@ struct System::Impl {
     // Les roles (fournis par M::conservative_vars()) permettent aux couplages inter-especes de
     // viser une composante par son SENS (qte de mvt, energie) au lieu d'un indice u[1]/u[3] en dur.
     VariableSet cons_vars, prim_vars;
+    // Conversions PONCTUELLES cons <-> prim DU MODELE du bloc (une cellule, ncomp doubles in/out).
+    // Posees a l'ajout (install_block / push_dynamic) depuis le modele reel ; vides -> identite (le
+    // modele n'expose pas de conversion, p.ex. scalaire pur ou .so genere avant ce chantier).
+    // Consommees par set_primitive_state / get_primitive_state (init/diagnostic en primitif).
+    System::CellConvert prim_to_cons, cons_to_prim;
   };
 
   SystemConfig cfg;
@@ -808,6 +813,22 @@ struct System::Impl {
                   std::move(advance), std::move(rhs_into), std::move(max_speed), std::move(add_poisson)};
     block.cons_vars = std::move(cons_vs);
     block.prim_vars = std::move(prim_vs);
+    // Conversions PONCTUELLES cons <-> prim DU MODELE (set/get_primitive_state) : forwardees par
+    // l'interface virtuelle IModel<NV> (ModelAdapter delegue a M.to_primitive/to_conservative quand
+    // M les expose, sinon identite). Un vieux .so dont le modele n'a pas de conversion retombe donc
+    // sur l'identite -- exact pour un scalaire (prim == cons). StateVec<NV> partage la largeur NV.
+    block.prim_to_cons = [im](const double* in, double* out) {
+      StateVec<NV> p{};
+      for (int c = 0; c < NV; ++c) p[c] = static_cast<Real>(in[c]);
+      const StateVec<NV> u = im->to_conservative(p);
+      for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(u[c]);
+    };
+    block.cons_to_prim = [im](const double* in, double* out) {
+      StateVec<NV> u{};
+      for (int c = 0; c < NV; ++c) u[c] = static_cast<Real>(in[c]);
+      const StateVec<NV> p = im->to_primitive(u);
+      for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(p[c]);
+    };
     P->sp.push_back(std::move(block));
     P->sp.back().U.set_val(Real(0));
   }
@@ -870,6 +891,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   BlockClosures clo;
   std::function<Real(const MultiFab&)> max_speed;
   std::function<void(const MultiFab&, MultiFab&)> add_poisson_rhs;
+  CellConvert prim_to_cons, cons_to_prim;  // conversions ponctuelles du modele (set/get_primitive_state)
   VariableSet cons_vs, prim_vs;
   const GridContext ctx = P->grid_ctx();
   // Le modele est compose a partir des briques designees par la spec ; le visiteur cable les
@@ -889,12 +911,17 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components);
     max_speed = make_max_speed(m, ctx);
     add_poisson_rhs = make_poisson_rhs(m);
+    // Conversions cons <-> prim DU MODELE (set/get_primitive_state) : memes formules que le flux/CFL.
+    auto conv = make_cell_convert(m);
+    prim_to_cons = std::move(conv.first);
+    cons_to_prim = std::move(conv.second);
   });
   // Installation commune (meme chemin que add_compiled_model pour un modele genere par le DSL) :
   // les fermetures tournent sur les MultiFab REELS du System (halos MPI via fill_boundary, device
   // via Kokkos), sans recopie.
   install_block(name, ncomp, cons_vs, prim_vs, model.gamma, std::move(clo), std::move(max_speed),
                 std::move(add_poisson_rhs), substeps, evolve, stride);
+  set_block_conversion(name, std::move(prim_to_cons), std::move(cons_to_prim));
   // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par defaut dans
   // install_block. On reallue l'etat du bloc avec block_n_ghost(limiter) si besoin (cf. AmrSystem qui
   // alloue avec Limiter::n_ghost, PR #22) pour que fill_ghosts + assemble_rhs ne lisent pas hors
@@ -1087,6 +1114,16 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
                       std::move(add_poisson)};
   block.cons_vars = std::move(cons_vs);
   block.prim_vars = std::move(prim_vs);
+  // Conversions cons <-> prim DU MODELE via l'ABI etendue du .so (set/get_primitive_state). Les
+  // symboles operent sur des tableaux plats composante-majeur c*nn+k : appeles avec n=1 (donc nn=1),
+  // ils convertissent UNE cellule (in/out = nv doubles), ce qui est exactement le contrat CellConvert.
+  // OPTIONNELS : un .so genere avant ce chantier ne les expose pas -> conversion vide -> identite (le
+  // chemin set/get_primitive_state retombe alors sur prim == cons, exact pour un scalaire).
+  using cv_fn_t = void (*)(const double*, double*, int);
+  auto p2c_fn = reinterpret_cast<cv_fn_t>(dlsym(h, "adc_compiled_to_conservative"));
+  auto c2p_fn = reinterpret_cast<cv_fn_t>(dlsym(h, "adc_compiled_to_primitive"));
+  if (p2c_fn) block.prim_to_cons = [lib, p2c_fn](const double* in, double* out) { p2c_fn(in, out, 1); };
+  if (c2p_fn) block.cons_to_prim = [lib, c2p_fn](const double* in, double* out) { c2p_fn(in, out, 1); };
   P->sp.push_back(std::move(block));
   P->sp.back().U.set_val(Real(0));
 }
@@ -1371,6 +1408,57 @@ void System::set_density(const std::string& name, const std::vector<double>& rho
       if (s.ncomp >= 3) { u(i, j, 1) = 0; u(i, j, 2) = 0; }  // qte de mvt au repos
       if (s.ncomp == 4) u(i, j, 3) = r / gm1;                // E = p/(g-1), p = rho
     }
+}
+
+void System::set_block_conversion(const std::string& name, CellConvert prim_to_cons,
+                                  CellConvert cons_to_prim) {
+  Impl::Species& s = p_->find(name);
+  s.prim_to_cons = std::move(prim_to_cons);
+  s.cons_to_prim = std::move(cons_to_prim);
+}
+
+void System::set_primitive_state(const std::string& name, const std::vector<double>& prim) {
+  Impl::Species& s = p_->find(name);
+  const int nc = s.ncomp;
+  const std::size_t nn = static_cast<std::size_t>(p_->cfg.n) * p_->cfg.n;
+  if (prim.size() != static_cast<std::size_t>(nc) * nn)
+    throw std::runtime_error("System::set_primitive_state : taille != ncomp*n*n (bloc '" + name +
+                             "' a " + std::to_string(nc) + " variables)");
+  if (!s.prim_to_cons)
+    throw std::runtime_error("System::set_primitive_state : le modele du bloc '" + name +
+                             "' n'expose pas de conversion primitif -> conservatif (.so genere avant "
+                             "ce chantier ?) ; utiliser set_state (etat conservatif direct)");
+  // Conversion CELLULE PAR CELLULE via le modele du bloc : on lit les nc primitives composante-majeur
+  // (prim[c*nn + k]) dans un petit tampon contigu, on convertit, et on ecrit les conservatives au
+  // meme emplacement d'un tampon de sortie. Puis write_state pousse tout vers le MultiFab (chemin de
+  // set_state, marshaling identique). Reutilise donc le marshaling existant (copy/write_state).
+  std::vector<double> cons(prim.size());
+  std::vector<double> cell_in(static_cast<std::size_t>(nc)), cell_out(static_cast<std::size_t>(nc));
+  for (std::size_t k = 0; k < nn; ++k) {
+    for (int c = 0; c < nc; ++c) cell_in[c] = prim[static_cast<std::size_t>(c) * nn + k];
+    s.prim_to_cons(cell_in.data(), cell_out.data());
+    for (int c = 0; c < nc; ++c) cons[static_cast<std::size_t>(c) * nn + k] = cell_out[c];
+  }
+  p_->write_state(s.U, nc, cons);
+}
+
+std::vector<double> System::get_primitive_state(const std::string& name) {
+  Impl::Species& s = p_->find(name);
+  const int nc = s.ncomp;
+  const std::size_t nn = static_cast<std::size_t>(p_->cfg.n) * p_->cfg.n;
+  if (!s.cons_to_prim)
+    throw std::runtime_error("System::get_primitive_state : le modele du bloc '" + name +
+                             "' n'expose pas de conversion conservatif -> primitif (.so genere avant "
+                             "ce chantier ?) ; utiliser get_state (etat conservatif direct)");
+  const std::vector<double> cons = p_->copy_state(s.U, nc);  // chemin de get_state (meme marshaling)
+  std::vector<double> prim(cons.size());
+  std::vector<double> cell_in(static_cast<std::size_t>(nc)), cell_out(static_cast<std::size_t>(nc));
+  for (std::size_t k = 0; k < nn; ++k) {
+    for (int c = 0; c < nc; ++c) cell_in[c] = cons[static_cast<std::size_t>(c) * nn + k];
+    s.cons_to_prim(cell_in.data(), cell_out.data());
+    for (int c = 0; c < nc; ++c) prim[static_cast<std::size_t>(c) * nn + k] = cell_out[c];
+  }
+  return prim;
 }
 
 void System::solve_fields() { p_->solve_fields(); }

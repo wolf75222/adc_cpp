@@ -852,6 +852,55 @@ class System:
         delegue __getattr__ ne couvre que les instances), donc adc.System.abi_key() fonctionne."""
         return _System.abi_key()
 
+    def set_primitive_state(self, name, **prims):
+        """Initialise un bloc depuis ses variables PRIMITIVES, nommees (rho/u/v/p ...) :
+
+            sim.set_primitive_state("electrons", rho=rho0, u=u0, v=v0, p=p0)
+
+        Chaque primitive est un tableau (n, n). Les noms attendus sont ceux de
+        variable_names(name, "primitive") (l'ordre du modele du bloc). Le tableau (ncomp, n, n) est
+        assemble dans cet ordre, puis CONVERTI en variables conservatives par le modele du bloc (cote
+        C++ : compressible E = p/(g-1) + 1/2 rho|v|^2 ; isotherme rho u ; scalaire identite) et ecrit
+        dans l'etat. Pendant ergonomique de set_density (qui ne pose que la densite, reste au repos).
+
+        Leve une erreur claire si un nom de primitive est inconnu pour le bloc, ou s'il en manque."""
+        import numpy as np  # local : numpy n'est requis que pour cet assemblage host
+
+        names = list(self._s.variable_names(name, "primitive"))
+        n = self.nx()
+        unknown = [k for k in prims if k not in names]
+        if unknown:
+            raise ValueError(
+                "set_primitive_state : primitive(s) inconnue(s) %r pour le bloc '%s' ; "
+                "primitives attendues : %r" % (unknown, name, names))
+        missing = [k for k in names if k not in prims]
+        if missing:
+            raise ValueError(
+                "set_primitive_state : primitive(s) manquante(s) %r pour le bloc '%s' ; "
+                "fournir toutes les primitives : %r" % (missing, name, names))
+        # Assemble (ncomp, n, n) dans l'ORDRE du modele (primitive_vars), pas l'ordre des kwargs.
+        prim = np.empty((len(names), n, n), dtype=np.float64)
+        for c, nm in enumerate(names):
+            arr = np.asarray(prims[nm], dtype=np.float64)
+            if arr.shape != (n, n):
+                raise ValueError(
+                    "set_primitive_state : primitive '%s' de forme %r, attendu (%d, %d)"
+                    % (nm, tuple(arr.shape), n, n))
+            prim[c] = arr
+        self._s.set_primitive_state(name, prim)
+
+    def get_primitive_state(self, name):
+        """Lit l'etat conservatif d'un bloc et le rend en variables PRIMITIVES (diagnostic) :
+
+            P = sim.get_primitive_state("electrons")   # {"rho": ..., "u": ..., "v": ..., "p": ...}
+
+        Renvoie un dict {nom_primitive: tableau (n, n)} dans l'ordre de variable_names(name,
+        "primitive"). Inverse de set_primitive_state (round-trip exact a la precision machine, la
+        conversion cons <-> prim du modele etant consistante)."""
+        names = list(self._s.variable_names(name, "primitive"))
+        prim = self._s.get_primitive_state(name)  # (ncomp, n, n)
+        return {nm: prim[c] for c, nm in enumerate(names)}
+
     def __getattr__(self, attr):
         return getattr(self._s, attr)
 

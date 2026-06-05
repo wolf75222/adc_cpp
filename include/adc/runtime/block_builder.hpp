@@ -15,6 +15,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 /// @file
@@ -246,6 +247,43 @@ std::function<Real(const MultiFab&)> make_max_speed(const Model& m, const GridCo
 template <class Model>
 std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs(const Model& m) {
   return detail::PoissonRhs<Model>{m};
+}
+
+/// Conversions PONCTUELLES (une cellule) cons <-> prim du MODELE, type-erasees sur des tableaux de
+/// Model::n_vars doubles. Premiere = primitif -> conservatif (M.to_conservative, init depuis les
+/// primitives), seconde = conservatif -> primitif (M.to_primitive, diagnostic). Capture le modele par
+/// valeur (fige a l'ajout du bloc). Pour un modele SANS conversion (scalaire pur, pas de brique
+/// hyperbolique) les deux sont l'IDENTITE -- exact pour un transport scalaire (prim == cons).
+/// Model::Prim partage la largeur Model::n_vars de State (contrat HyperbolicPhysicalModel), donc les
+/// tableaux plats s'alignent composante a composante. Partage par add_block (natif) et
+/// add_compiled_model (compile) : la MEME conversion sert les deux chemins.
+template <class Model>
+std::pair<std::function<void(const double*, double*)>,
+          std::function<void(const double*, double*)>>
+make_cell_convert(const Model& m) {
+  constexpr int NV = Model::n_vars;
+  if constexpr (HasPrimitiveVars<Model>) {
+    auto p2c = [m](const double* in, double* out) {
+      typename Model::Prim p{};
+      for (int c = 0; c < NV; ++c) p[c] = static_cast<Real>(in[c]);
+      const typename Model::State u = m.to_conservative(p);
+      for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(u[c]);
+    };
+    auto c2p = [m](const double* in, double* out) {
+      typename Model::State u{};
+      for (int c = 0; c < NV; ++c) u[c] = static_cast<Real>(in[c]);
+      const typename Model::Prim p = m.to_primitive(u);
+      for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(p[c]);
+    };
+    return {std::function<void(const double*, double*)>(p2c),
+            std::function<void(const double*, double*)>(c2p)};
+  } else {
+    auto id = [](const double* in, double* out) {
+      for (int c = 0; c < NV; ++c) out[c] = in[c];
+    };
+    return {std::function<void(const double*, double*)>(id),
+            std::function<void(const double*, double*)>(id)};
+  }
 }
 
 }  // namespace adc

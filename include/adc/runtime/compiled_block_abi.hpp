@@ -136,6 +136,47 @@ double max_speed(const double* U, const double* aux_in, int n, double dx, double
   return make_max_speed(model, ctx)(Umf);
 }
 
+/// Conversion PRIMITIF -> CONSERVATIF cellule par cellule (M.to_conservative) sur des tableaux plats
+/// ncomp*n*n composante-majeur. Sert a System::set_primitive_state via le bloc AOT (init depuis les
+/// primitives). Modele sans conversion (scalaire) -> identite (HasPrimitiveVars faux). Pas de
+/// maillage / ghosts : conversion PONCTUELLE, donc une simple boucle sur les n*n cellules.
+template <class Model>
+void to_conservative(const double* P, double* U, int n) {
+  constexpr int NV = Model::n_vars;
+  const std::size_t nn = static_cast<std::size_t>(n) * n;
+  Model model{};
+  for (std::size_t k = 0; k < nn; ++k) {
+    if constexpr (HasPrimitiveVars<Model>) {
+      typename Model::Prim p{};
+      for (int c = 0; c < NV; ++c) p[c] = static_cast<Real>(P[static_cast<std::size_t>(c) * nn + k]);
+      const typename Model::State u = model.to_conservative(p);
+      for (int c = 0; c < NV; ++c) U[static_cast<std::size_t>(c) * nn + k] = static_cast<double>(u[c]);
+    } else {
+      for (int c = 0; c < NV; ++c) U[static_cast<std::size_t>(c) * nn + k] = P[static_cast<std::size_t>(c) * nn + k];
+    }
+  }
+}
+
+/// Conversion CONSERVATIF -> PRIMITIF cellule par cellule (M.to_primitive). Pendant diagnostic de
+/// to_conservative (System::get_primitive_state via le bloc AOT). Identite si le modele n'expose pas
+/// de conversion.
+template <class Model>
+void to_primitive(const double* U, double* P, int n) {
+  constexpr int NV = Model::n_vars;
+  const std::size_t nn = static_cast<std::size_t>(n) * n;
+  Model model{};
+  for (std::size_t k = 0; k < nn; ++k) {
+    if constexpr (HasPrimitiveVars<Model>) {
+      typename Model::State u{};
+      for (int c = 0; c < NV; ++c) u[c] = static_cast<Real>(U[static_cast<std::size_t>(c) * nn + k]);
+      const typename Model::Prim p = model.to_primitive(u);
+      for (int c = 0; c < NV; ++c) P[static_cast<std::size_t>(c) * nn + k] = static_cast<double>(p[c]);
+    } else {
+      for (int c = 0; c < NV; ++c) P[static_cast<std::size_t>(c) * nn + k] = U[static_cast<std::size_t>(c) * nn + k];
+    }
+  }
+}
+
 /// Second membre elliptique f(U) du bloc (le System l'ajoute a sa somme de Poisson).
 template <class Model>
 void poisson_rhs(const double* U, double* rhs_out, int n) {
@@ -179,4 +220,10 @@ void poisson_rhs(const double* U, double* rhs_out, int n) {
   }                                                                                                 \
   extern "C" void adc_compiled_poisson_rhs(const double* U, double* rhs, int n) {                   \
     adc::compiled_block::poisson_rhs<MODEL>(U, rhs, n);                                             \
+  }                                                                                                 \
+  extern "C" void adc_compiled_to_conservative(const double* P, double* U, int n) {                 \
+    adc::compiled_block::to_conservative<MODEL>(P, U, n);                                           \
+  }                                                                                                 \
+  extern "C" void adc_compiled_to_primitive(const double* U, double* P, int n) {                    \
+    adc::compiled_block::to_primitive<MODEL>(U, P, n);                                              \
   }

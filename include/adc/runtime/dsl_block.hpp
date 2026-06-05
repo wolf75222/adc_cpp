@@ -58,6 +58,11 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
   std::function<void(const MultiFab&, MultiFab&)> pr = make_poisson_rhs(model);
   sys.install_block(name, Model::n_vars, Model::conservative_vars(), Model::primitive_vars(),
                     gamma, std::move(clo), std::move(ms), std::move(pr), substeps, evolve, stride);
+  // Conversions cons <-> prim DU MODELE (set/get_primitive_state) : memes formules que le flux du
+  // chemin de production. Posees APRES install_block (comme set_block_ghosts) ; un loader .so natif
+  // recompile contre cet en-tete (cle d'ABI verifiee) les transporte donc aussi.
+  auto conv = make_cell_convert(model);
+  sys.set_block_conversion(name, std::move(conv.first), std::move(conv.second));
   // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par install_block.
   // On reallue l'etat du bloc avec block_n_ghost(limiter) -- MEME mecanisme qu'add_block (PR #88) --
   // pour que fill_boundary + assemble_rhs ne lisent pas hors bornes sur les vrais MultiFab du System.

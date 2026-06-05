@@ -241,6 +241,28 @@ class System {
   /// composantes (qte de mouvement, energie) sont posees a l'equilibre au repos.
   void set_density(const std::string& name, const std::vector<double>& rho);
 
+  /// Initialise l'etat d'un bloc depuis ses variables PRIMITIVES (rho, u, v, p ...) : @p prim est
+  /// un tableau plat ncomp*n*n composante-majeur dans l'ordre de primitive_vars(name). Chaque cellule
+  /// est convertie en variables CONSERVATIVES par la conversion du MODELE du bloc (M.to_conservative),
+  /// puis ecrite dans l'etat. Pendant ergonomique de set_density pour un modele a plusieurs primitives
+  /// (compressible 4 var : p ; isotherme 3 var ; scalaire 1 var : identite). cf. get_primitive_state.
+  void set_primitive_state(const std::string& name, const std::vector<double>& prim);
+
+  /// Lit l'etat CONSERVATIF du bloc et le convertit en variables PRIMITIVES via la conversion du
+  /// modele (M.to_primitive). @return un tableau plat ncomp*n*n composante-majeur dans l'ordre de
+  /// primitive_vars(name) (diagnostics : vitesses, pression). Round-trip exact avec set_primitive_state.
+  std::vector<double> get_primitive_state(const std::string& name);
+
+  /// Type-erase de la conversion PONCTUELLE (une cellule) cons <-> prim d'un bloc : in/out sont des
+  /// tableaux de ncomp doubles. Installee par install_block / add_compiled_model / push_dynamic depuis
+  /// le modele du bloc, consommee par set_primitive_state / get_primitive_state.
+  using CellConvert = std::function<void(const double* in, double* out)>;
+  /// Installe les conversions ponctuelles cons <-> prim d'un bloc (apres install_block). Appelee par
+  /// le gabarit en-tete add_compiled_model (modele compile) ; le chemin natif add_block et le chemin
+  /// dynamique .so les posent directement. ADC_EXPORT : resolue par le loader natif a travers le dlopen.
+  ADC_EXPORT void set_block_conversion(const std::string& name, CellConvert prim_to_cons,
+                                       CellConvert cons_to_prim);
+
   /// Ajoute un couplage d'IONISATION (operator-split) : taux k n_e n_g ; un neutre devient un ion
   /// et un electron. Masse transferee du neutre vers l'ion (n_i + n_g conserve). Les trois blocs
   /// doivent exister. Premiere brique de source inter-especes (sur la densite, comp 0).

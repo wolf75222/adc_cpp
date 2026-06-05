@@ -35,6 +35,14 @@ struct IModel {
   virtual State source(const State&, const Aux&) const { return State{}; }
   /// Second membre elliptique f(U) du Poisson de systeme (defaut : zero, pas de couplage).
   virtual Real elliptic_rhs(const State&) const { return Real(0); }
+  /// Conversion conservatif -> primitif (P = M.to_primitive(U)). Le DSL/CompositeModel l'expose
+  /// (brique hyperbolique) ; un modele sans conversion (scalaire pur) la laisse a l'IDENTITE
+  /// (prim == cons), ce qui est exact pour un transport scalaire. Sert au marshaling hote de
+  /// System::get_primitive_state. Prim partage la meme largeur NV que State (cf. concept).
+  virtual State to_primitive(const State& u) const { return u; }
+  /// Conversion primitif -> conservatif (U = M.to_conservative(P)). Pendant de to_primitive ;
+  /// sert a System::set_primitive_state (init depuis les primitives). Identite par defaut.
+  virtual State to_conservative(const State& p) const { return p; }
   /// Largeur du canal aux que le modele LIT (cf. aux_comps). Permet au runtime System de
   /// dimensionner et de marshaler le bon nombre de composantes vers le chemin hote (B_z...).
   /// Defaut : contrat de base (phi/grad), pour un modele qui ne lit pas de champ extra.
@@ -68,6 +76,22 @@ struct ModelAdapter final : IModel<M::n_vars> {
       return model.elliptic_rhs(u);
     else
       return Real(0);
+  }
+  // Conversions cons <-> prim forwardees QUAND M les expose (brique hyperbolique : to_primitive /
+  // to_conservative). M::Prim partage la largeur NV de State (contrat HyperbolicPhysicalModel), donc
+  // le retour s'aligne directement sur State. Modele sans conversion (scalaire) -> identite (defaut),
+  // exact pour un transport scalaire (prim == cons).
+  State to_primitive(const State& u) const override {
+    if constexpr (requires(const M& mm, const State& s) { mm.to_primitive(s); })
+      return model.to_primitive(u);
+    else
+      return u;
+  }
+  State to_conservative(const State& p) const override {
+    if constexpr (requires(const M& mm, const State& s) { mm.to_conservative(s); })
+      return model.to_conservative(p);
+    else
+      return p;
   }
   int n_aux() const override { return aux_comps<M>(); }  // p.ex. 4 si une brique lit B_z
 };
