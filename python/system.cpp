@@ -4,6 +4,7 @@
 #include <adc/runtime/abi_key.hpp>  // adc::abi_key + detail::abi_key_string (frontiere ABI du loader natif)
 #include <adc/runtime/block_builder.hpp>  // GridContext + make_block/make_max_speed (fermetures compilees)
 #include <adc/runtime/model_factory.hpp>  // detail::dispatch_model + briques compilees
+#include <adc/coupling/condensed_schur_source_stepper.hpp>  // etage source condense par Schur (adc.Split / CondensedSchur, #126)
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>
 #include <adc/numerics/time/implicit_stepper.hpp>   // backward_euler_source
@@ -289,6 +290,13 @@ struct System::Impl {
     // modele n'expose pas de conversion, p.ex. scalaire pur ou .so genere avant ce chantier).
     // Consommees par set_primitive_state / get_primitive_state (init/diagnostic en primitif).
     System::CellConvert prim_to_cons, cons_to_prim;
+    // ETAGE SOURCE condense par Schur (OPT-IN, adc.Split(source=CondensedSchur), cf. set_source_stage).
+    // nullptr (defaut) = pas d'etage source condense : le bloc avance EXACTEMENT comme avant
+    // (bit-identique). Non nul = apres le transport hyperbolique, le pas joue l'etage source autonome
+    // (CondensedSchurSourceStepper, #126) en lieu et place de la source explicite / IMEX. shared_ptr :
+    // garde Species MOVABLE (le stepper porte un GeometricMG, ni copiable ni movable simplement).
+    std::shared_ptr<CondensedSchurSourceStepper> schur;
+    double schur_theta = 0.5;  // theta-schema de l'etage source (0.5 = Crank-Nicolson)
   };
 
   SystemConfig cfg;
@@ -603,6 +611,21 @@ struct System::Impl {
         },
         *ell_);
     adc_sf_mark("ell_solve: apres std::visit");
+  }
+
+  // ETAGE SOURCE condense par Schur (OPT-IN, cf. set_source_stage). No-op si le bloc n'a pas d'etage
+  // source (s.schur == nullptr) : le chemin par defaut reste BIT-IDENTIQUE. Sinon, APRES le transport
+  // hyperbolique du bloc (deja joue par s.advance), on joue l'etage source AUTONOME
+  // (CondensedSchurSourceStepper, #126) sur l'etat post-transport :
+  //   - state = s.U (rho gelee dans la source, mom/E mis a jour) ;
+  //   - phi    = le potentiel du Poisson de systeme (ell_phi(), warm start phi^n issu de solve_fields
+  //              en tete de step) -- l'etage resout son PROPRE operateur condense et ECRIT phi^{n+1}
+  //              dedans, il NE rappelle PAS solve_fields (pas de duplication) ;
+  //   - B_z    = canal aux a l'indice kAuxBaseComps (peuple + ghosts remplis par solve_fields).
+  // theta/dt du theta-schema ; dt = eff_dt (facteur stride deja inclus par l'appelant, comme s.advance).
+  void run_source_stage(Species& s, Real eff_dt) {
+    if (!s.schur) return;
+    s.schur->step(s.U, ell_phi(), aux, kAuxBaseComps, static_cast<Real>(s.schur_theta), eff_dt);
   }
 
   // --- schemas spatiaux compiles -------------------------------------------
@@ -1393,6 +1416,54 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
   });
 }
 
+void System::set_source_stage(const std::string& name, const std::string& kind, double theta,
+                              double alpha) {
+  Impl* P = p_.get();
+  Impl::Species& s = P->find(name);  // leve si bloc inconnu
+  // SEUL kind cable pour l'instant : ElectrostaticLorentzCondensation (cf. CondensedSchurSourceStepper).
+  // D'autres kind pourront s'ajouter sans toucher la facade (rejet explicite, pas d'ignore silencieux).
+  if (kind != "electrostatic_lorentz")
+    throw std::runtime_error("System::set_source_stage : kind '" + kind +
+                             "' inconnu (seul 'electrostatic_lorentz' est supporte)");
+  if (!(theta > 0.0 && theta <= 1.0))
+    throw std::runtime_error("System::set_source_stage : theta doit etre dans (0, 1] (recu " +
+                             std::to_string(theta) + ")");
+  // Geometrie cartesienne uniquement (le branchement polaire de l'etage condense est un chantier
+  // ulterieur, cf. docs/SCHUR_CONDENSATION_DESIGN.md section 7) ; System lui-meme rejette deja polar.
+  if (P->cfg.geometry != "cartesian")
+    throw std::runtime_error("System::set_source_stage : etage source condense supporte uniquement la "
+                             "geometrie cartesienne (recu '" + P->cfg.geometry + "')");
+  // CONTRAT roles : le bloc doit exposer Density / MomentumX / MomentumY (Energy optionnel). On lit le
+  // descripteur CONSERVATIF du bloc (peuple par add_block / les .so a roles, dont le DSL compile qui
+  // declare les electrons en roles). Un role requis absent leve une erreur EXPLICITE ICI (avant le pas)
+  // -- le constructeur du stepper la leverait aussi, mais on diagnostique cote bloc nomme.
+  const VariableSet& vs = s.cons_vars;
+  auto require_role = [&](VariableRole role, const char* label) {
+    if (vs.index_of(role) < 0)
+      throw std::runtime_error(
+          "System::set_source_stage : le bloc '" + name + "' n'expose pas le role " + label +
+          " requis par adc.CondensedSchur (le modele doit declarer Density / MomentumX / MomentumY ; "
+          "Energy optionnel). Verifier les roles du modele (variable_roles).");
+  };
+  require_role(VariableRole::Density, "Density");
+  require_role(VariableRole::MomentumX, "MomentumX");
+  require_role(VariableRole::MomentumY, "MomentumY");
+  // B_z OBLIGATOIRE : l'etage de Lorentz lit Omega = B_z. On exige set_magnetic_field appele
+  // (bz_field_ renseigne) et on elargit le canal aux au canal B_z (kAuxBaseComps) pour que apply_bz le
+  // peuple et que solve_fields en remplisse les ghosts. Un B_z absent leve une erreur EXPLICITE.
+  if (P->bz_field_.empty())
+    throw std::runtime_error(
+        "System::set_source_stage : le bloc '" + name + "' n'a pas de champ B_z (aux Omega) ; "
+        "adc.CondensedSchur exige set_magnetic_field(B_z) (le terme de Lorentz lit Omega = B_z).");
+  P->ensure_aux_width(kAuxBaseComps + 1);  // garantit le canal B_z dans l'aux partage + re-applique B_z
+  // Construit l'etage source condense sur le layout REEL du System (ba/dm/geom) avec la CL du Poisson.
+  // Le stepper alloue ses tampons UNE fois ; step() les reutilise (cf. son cycle de vie). alpha =
+  // constante de couplage electrostatique du sous-systeme source. n_precond_vcycles = defaut (1).
+  s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, P->geom, P->ba, P->poisson_bc(),
+                                                          static_cast<Real>(alpha));
+  s.schur_theta = theta;
+}
+
 void System::set_density(const std::string& name, const std::vector<double>& rho) {
   Impl::Species& s = p_->find(name);
   const int n = p_->cfg.n;
@@ -1475,6 +1546,7 @@ void System::step(double dt) {
     if (!Impl::stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
     const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up : pas effectif s.stride * dt
     s.advance(s.U, eff_dt, s.substeps);
+    P->run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
   }
   P->apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres transport
   P->t += dt;
@@ -1507,6 +1579,7 @@ double System::step_cfl(double cfl) {
     if (!Impl::stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
     const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up : pas effectif s.stride * dt
     s.advance(s.U, eff_dt, s.substeps);
+    P->run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
   }
   P->apply_couplings(Real(dt));
   P->t += dt;
@@ -1543,6 +1616,7 @@ double System::step_adaptive(double cfl) {
     if (n < 1) n = 1;
     const Real eff_dt = Real(macro_dt) * Real(s.stride);  // catch-up : pas effectif M*macro_dt
     s.advance(s.U, eff_dt, n);
+    P->run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
   }
   P->apply_couplings(Real(macro_dt));
   P->t += macro_dt;

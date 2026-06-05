@@ -35,7 +35,8 @@ __all__ = [
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",
     "NoSource", "PotentialForce", "GravityForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
-    "Spatial", "FiniteVolume", "Explicit", "IMEX", "SourceImplicit", "Implicit", "integrate",
+    "Spatial", "FiniteVolume", "Explicit", "IMEX", "SourceImplicit", "Implicit",
+    "Split", "CondensedSchur", "Role", "integrate",
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
@@ -632,6 +633,127 @@ def Implicit(dt_ratio=1, substeps=None, stride=1):
     return IMEX(substeps=substeps if substeps is not None else dt_ratio, stride=stride)
 
 
+class Role:
+    """Roles PHYSIQUES des composantes d'un modele (cf. VariableRole cote C++ / variable_roles).
+
+    Permet d'adresser une composante par son SENS dans adc.CondensedSchur(density=adc.Role.Density,
+    momentum=(adc.Role.MomentumX, adc.Role.MomentumY), energy=adc.Role.Energy) plutot que par un nom
+    litteral. Les valeurs sont les cles STABLES attendues par le C++ (role_from_name : snake_case). La
+    RESOLUTION role -> composante est faite cote C++ (le bloc lit ses propres VariableRole) : ces
+    constantes servent a EXPRIMER l'intention dans la formule et a valider qu'un role requis est demande.
+    """
+
+    Density = "density"
+    MomentumX = "momentum_x"
+    MomentumY = "momentum_y"
+    MomentumZ = "momentum_z"
+    Energy = "energy"
+    VelocityX = "velocity_x"
+    VelocityY = "velocity_y"
+    VelocityZ = "velocity_z"
+    Pressure = "pressure"
+    Temperature = "temperature"
+    Scalar = "scalar"
+
+
+class CondensedSchur:
+    """Etage SOURCE condense par Schur (Hoffart et al., arXiv:2510.11808 ; cf.
+    docs/SCHUR_CONDENSATION_DESIGN.md). NOMME l'algorithme de la source implicite couplee potentiel /
+    vitesse / Lorentz et MAPPE les champs sur les roles physiques du bloc. C'est le `source=` d'une
+    politique temporelle adc.Split (splitting EXPLICITE / IMPLICITE).
+
+    kind="electrostatic_lorentz" (seul pour l'instant) selectionne ElectrostaticLorentzCondensation :
+    l'etage assemble l'operateur elliptique condense A = I + theta^2 dt^2 alpha rho B^{-1}, le resout
+    (BiCGStab preconditionne MG), reconstruit la vitesse v = B^{-1}(v^n - theta dt grad phi) et extrapole
+    au pas plein. Tout est en C++ (CondensedSchurSourceStepper, #126) : AUCUN callback Python par cellule.
+
+    Le bloc doit exposer les roles Density / MomentumX / MomentumY (Energy optionnel) et un champ B_z
+    (set_magnetic_field) -- un role / B_z manquant leve une erreur EXPLICITE a add_equation. Marche pour
+    un modele en briques natives comme pour un modele DSL compile qui declare ces roles (electrons).
+
+    theta : theta-schema dans (0, 1] (0.5 = Crank-Nicolson, 1 = Euler retrograde).
+    alpha : constante de couplage electrostatique du sous-systeme source (d_t(-Lap phi) = -alpha div(rho v)).
+    density / momentum / energy / magnetic_field / potential : descripteurs de roles / champs. Ils
+        EXPRIMENT l'intention ; la resolution role -> composante est faite cote C++ (le bloc lit ses
+        propres VariableRole). Tolerent adc.Role.* (recommande), un nom de role stable, ou un nom de
+        variable du bloc. momentum est un couple (x, y).
+    """
+
+    def __init__(self, kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
+                 density=Role.Density, momentum=(Role.MomentumX, Role.MomentumY),
+                 energy=None, magnetic_field="B_z", potential="phi"):
+        if kind != "electrostatic_lorentz":
+            raise ValueError(
+                "CondensedSchur : kind 'electrostatic_lorentz' (seul supporte) ; recu %r" % (kind,))
+        if not (0.0 < float(theta) <= 1.0):
+            raise ValueError("CondensedSchur : theta doit etre dans (0, 1] (recu %r)" % (theta,))
+        # momentum doit etre un couple (role_x, role_y) ; une chaine seule (iterable de caracteres)
+        # est rejetee explicitement (sinon tuple("xy") donnerait deux composantes par accident).
+        if isinstance(momentum, str):
+            raise ValueError(
+                "CondensedSchur : momentum doit etre un couple (role_x, role_y), pas une chaine (recu %r)"
+                % (momentum,))
+        try:
+            mom = tuple(momentum)
+        except TypeError:
+            raise ValueError(
+                "CondensedSchur : momentum doit etre un couple (role_x, role_y) (recu %r)" % (momentum,))
+        if len(mom) != 2:
+            raise ValueError(
+                "CondensedSchur : momentum doit etre un couple (role_x, role_y) (recu %r)" % (momentum,))
+        self.kind = kind
+        self.theta = float(theta)
+        self.alpha = float(alpha)
+        self.density = density
+        self.momentum = mom
+        self.energy = energy
+        self.magnetic_field = magnetic_field
+        self.potential = potential
+
+
+class Split:
+    """Politique temporelle SPLITTING EXPLICITE / IMPLICITE : un etage de transport hyperbolique
+    EXPLICITE (adc.Explicit, SSPRK) suivi d'un etage SOURCE separe (cf. docs/SCHUR_CONDENSATION_DESIGN.md
+    section 6). C'est l'OPT-IN du chantier Schur : un bloc qui n'emploie PAS adc.Split garde le chemin
+    par defaut (Explicit / IMEX / SourceImplicit), BIT-IDENTIQUE.
+
+        time=adc.Split(
+            hyperbolic=adc.Explicit(ssprk3=True),
+            source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, ...),
+        )
+
+    hyperbolic : adc.Explicit (le transport ; SSPRK2/3, substeps, stride heritent de lui).
+    source     : adc.CondensedSchur (l'etage source condense, joue APRES le transport). Seul backend
+                 source cable pour l'instant.
+    """
+
+    # kind="explicit" : le transport est joue par le chemin explicite du coeur (SSPRK), la source
+    # condensee est branchee EN PLUS via set_source_stage (cf. System.add_equation). Le bloc n'est donc
+    # PAS IMEX (la source raide locale backward-Euler) : sa source est l'etage condense, a part.
+    def __init__(self, hyperbolic=None, source=None):
+        hyperbolic = hyperbolic if hyperbolic is not None else Explicit()
+        if not isinstance(hyperbolic, Explicit):
+            raise TypeError(
+                "Split : hyperbolic doit etre un adc.Explicit (transport explicite SSPRK) ; recu %r"
+                % type(hyperbolic).__name__)
+        if source is None:
+            raise ValueError(
+                "Split : source= est requis (l'etage source separe) ; ex. "
+                "adc.Split(hyperbolic=adc.Explicit(), source=adc.CondensedSchur(...))")
+        if not isinstance(source, CondensedSchur):
+            raise TypeError(
+                "Split : source doit etre un adc.CondensedSchur(...) (seul etage source cable) ; recu %r"
+                % type(source).__name__)
+        self.hyperbolic = hyperbolic
+        self.source = source
+        # Le transport emprunte le chemin explicite du coeur : on relaie le kind / substeps / stride de
+        # l'etage hyperbolique (SSPRK2/3). La source condensee est branchee separement (add_equation).
+        self.kind = hyperbolic.kind
+        self.method = hyperbolic.method
+        self.substeps = hyperbolic.substeps
+        self.stride = hyperbolic.stride
+
+
 class System:
     """Le systeme/coupleur : compose des blocs, partage un Poisson, avance le tout.
 
@@ -662,6 +784,13 @@ class System:
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
+        # adc.Split (etage source condense) n'est cable que par add_equation (qui branche
+        # set_source_stage apres l'ajout du bloc) : le rejeter ICI plutot que de jouer le seul transport
+        # en silence (la source condensee serait perdue).
+        if isinstance(time, Split):
+            raise TypeError(
+                "System.add_block : adc.Split (etage source condense par Schur) n'est supporte que par "
+                "add_equation (qui branche l'etage source) ; utiliser add_equation(..., time=adc.Split(...)).")
         # Masque implicite porte par la politique temporelle (IMEX/SourceImplicit) ; vide sur les autres
         # politiques (Explicit). Resolu/valide cote C++ (System::add_block) contre les noms/roles du bloc.
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
@@ -689,6 +818,18 @@ class System:
 
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
+
+        # --- adc.Split (splitting EXPLICITE / IMPLICITE, OPT-IN Schur) ---------------------------
+        # Le bloc est d'abord ajoute avec l'etage HYPERBOLIQUE explicite (chemin de production existant,
+        # aucune duplication d'aiguillage), PUIS on branche l'etage SOURCE condense (set_source_stage,
+        # C++). La source est jouee APRES le transport a chaque pas. Le defaut (sans Split) est inchange.
+        if isinstance(time, Split):
+            self.add_equation(name, model, spatial=spatial, time=time.hyperbolic,
+                              substeps=substeps, names=names, evolve=evolve, stride=stride)
+            src = time.source
+            self._s.set_source_stage(name, src.kind, src.theta, src.alpha)
+            return
+
         nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
         nstride = stride if stride is not None else getattr(time, "stride", 1)
 

@@ -112,6 +112,11 @@ PYBIND11_MODULE(_adc, m) {
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))
       .def("add_thermal_exchange", &System::add_thermal_exchange, py::arg("a"), py::arg("b"),
            py::arg("rate"))
+      // Etage source condense par Schur (OPT-IN, adc.Split(source=adc.CondensedSchur(...))) : remplace
+      // la source explicite / IMEX du bloc par l'etage condense C++ (CondensedSchurSourceStepper, #126)
+      // apres le transport hyperbolique. kind='electrostatic_lorentz'. Defaut (sans appel) inchange.
+      .def("set_source_stage", &System::set_source_stage, py::arg("name"), py::arg("kind"),
+           py::arg("theta"), py::arg("alpha"))
       .def("variable_names", &System::variable_names, py::arg("name"),
            py::arg("kind") = "conservative")
       .def("variable_roles", &System::variable_roles, py::arg("name"),

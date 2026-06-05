@@ -279,6 +279,26 @@ class System {
   /// blocs doivent etre Euler compressible (4 variables, equation d'energie).
   void add_thermal_exchange(const std::string& a, const std::string& b, double rate);
 
+  /// Active un ETAGE SOURCE condense par Schur sur le bloc @p name (splitting EXPLICITE / IMPLICITE,
+  /// cf. docs/SCHUR_CONDENSATION_DESIGN.md sections 5-6). C'est l'OPT-IN de la politique adc.Split(
+  /// hyperbolic=Explicit, source=CondensedSchur) : a chaque pas, le bloc fait son transport
+  /// hyperbolique EXPLICITE comme aujourd'hui, PUIS cet etage source remplace la source explicite /
+  /// IMEX par l'etage condense (CondensedSchurSourceStepper, #126), AUTONOME et resolu en C++ (aucun
+  /// callback Python par cellule). Le chemin par defaut (sans cet appel) reste BIT-IDENTIQUE.
+  ///
+  /// CONTRAT (valide ICI, avant tout pas) : le bloc DOIT exposer les roles Density / MomentumX /
+  /// MomentumY (Energy optionnel) dans son descripteur conservatif ; un role manquant leve une erreur
+  /// EXPLICITE. Le champ B_z doit etre disponible (set_magnetic_field appele) : l'aux est elargi au
+  /// canal B_z et un B_z absent leve une erreur. Le bloc reutilise le potentiel phi du Poisson de
+  /// systeme comme warm start (solve_fields tourne en tete de step), mais l'etage source resout son
+  /// PROPRE operateur elliptique condense (il ne duplique pas solve_fields).
+  /// @param kind  seul "electrostatic_lorentz" pour l'instant (ElectrostaticLorentzCondensation).
+  /// @param theta theta-schema in (0,1] (0.5 = Crank-Nicolson, 1 = Euler retrograde).
+  /// @param alpha constante de couplage electrostatique du sous-systeme source (d_t(-Lap phi) =
+  ///              -alpha div(rho v)).
+  void set_source_stage(const std::string& name, const std::string& kind, double theta,
+                        double alpha);
+
   void solve_fields();   ///< resout Poisson puis derive aux = (phi, grad phi)
   void step(double dt);  ///< solve_fields, puis avance chaque bloc selon son schema
   void advance(double dt, int nsteps);
