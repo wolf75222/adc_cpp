@@ -98,6 +98,7 @@ jobs:
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_production_amr.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_stride.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_time_policy.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_implicit_vars.py
 
   mpi:
     name: ubuntu-latest / MPI

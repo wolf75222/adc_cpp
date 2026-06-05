@@ -86,7 +86,12 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("recon") = "conservative",
            py::arg("time") = "explicit", py::arg("substeps") = 1,
-           py::arg("evolve") = true, py::arg("stride") = 1)
+           py::arg("evolve") = true, py::arg("stride") = 1,
+           // Masque implicite PORTE PAR LE BLOC (IMEX) : variables conservees traitees en implicite par
+           // NOM (implicit_vars) ou par ROLE physique (implicit_roles). Vides (defaut) -> defaut modele,
+           // bit-identique. Resolus cote C++ contre les noms/roles du bloc (erreur sur un nom/role absent).
+           py::arg("implicit_vars") = std::vector<std::string>{},
+           py::arg("implicit_roles") = std::vector<std::string>{})
       // Bloc dont le modele est charge a l'execution depuis un .so genere par le DSL (chemin hote).
       .def("add_dynamic_block", &System::add_dynamic_block, py::arg("name"), py::arg("so_path"),
            py::arg("substeps") = 1, py::arg("names") = std::vector<std::string>{},

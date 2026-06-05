@@ -62,6 +62,26 @@ ADC_HD inline bool model_is_implicit(int c) {
     return true;
 }
 
+// Masque implicite PORTE PAR LE BLOC / la politique temporelle (et NON par le modele) : carrier POD
+// device-clean (tableau fixe N, passe PAR VALEUR dans le kernel, aucun pointeur hote deref. sur device).
+// Quand actif (active == true), il OVERRIDE le defaut modele (model_is_implicit) : seules les composantes
+// flag[c] == true sont avancees en implicite, les autres en explicite (Euler avant). C'est ce qui permet
+// de REUTILISER le MEME modele avec des traitements implicites differents selon le bloc. Inactif (defaut :
+// active == false) -> retombe sur model_is_implicit -> comportement bit-identique a l'historique.
+template <int N>
+struct ImplicitMask {
+  bool active = false;
+  bool flag[N] = {};
+};
+
+// La composante c est-elle implicite, masque de bloc PRIORITAIRE sur le defaut modele ? Le masque inactif
+// (defaut) delegue a model_is_implicit<Model> -> strictement identique a avant ce chantier.
+template <class Model, int N>
+ADC_HD inline bool is_implicit_component(const ImplicitMask<N>& mask, int c) {
+  if (mask.active) return mask.flag[c];
+  return model_is_implicit<Model>(c);
+}
+
 namespace detail {
 // Resolution dense J x = b sur le bloc de tete n x n (n <= N), pivot partiel. J et b
 // detruits. N est constexpr (= Model::n_vars) -> tableau fixe, pas d'allocation,
@@ -95,24 +115,25 @@ ADC_HD inline void solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
 //   - composantes IMPLICITES : Newton sur le sous-systeme reduit, F_i = W_i - Un_i -
 //     dt*S_i(W), jacobienne I - dt*(dS/dW) restreinte aux implicites (colonnes par
 //     differences finies), les explicites figees a leur valeur avancee (donnee connue).
-// Sans trait is_implicit, toutes les composantes sont implicites : backward-Euler plein,
-// strictement identique au comportement d'origine.
+// QUI est implicite : un masque PORTE PAR LE BLOC (@p mask) prioritaire sur le defaut modele
+// (is_implicit_component). Masque inactif (defaut) + modele sans trait is_implicit : toutes les
+// composantes sont implicites -> backward-Euler plein, strictement identique au comportement d'origine.
 template <class Model>
 ADC_HD inline typename Model::State newton_source_solve(
     const Model& m, const typename Model::State& Un, const Aux& a, Real dt,
-    int iters) {
+    int iters, const ImplicitMask<Model::n_vars>& mask = {}) {
   constexpr int N = Model::n_vars;
   int impl[N];  // indices des composantes implicites (les m_impl premieres slots utiles)
   int m_impl = 0;
   for (int c = 0; c < N; ++c)
-    if (model_is_implicit<Model>(c)) impl[m_impl++] = c;
+    if (is_implicit_component<Model>(mask, c)) impl[m_impl++] = c;
 
   typename Model::State W = Un;
   // (1) explicite : Euler avant sur les composantes non implicites (source a l'entree).
   if (m_impl < N) {
     const typename Model::State S_in = m.source(Un, a);
     for (int c = 0; c < N; ++c)
-      if (!model_is_implicit<Model>(c)) W[c] = Un[c] + dt * S_in[c];
+      if (!is_implicit_component<Model>(mask, c)) W[c] = Un[c] + dt * S_in[c];
   }
   // (2) implicite : Newton sur le sous-systeme des composantes implicites.
   for (int it = 0; it < iters; ++it) {
@@ -156,26 +177,29 @@ struct BackwardEulerSourceKernel {
   Array4 u;
   Real dt;
   int it;
+  ImplicitMask<Model::n_vars> mask;  // masque de bloc (POD, par valeur) ; inactif = defaut modele
   ADC_HD void operator()(int i, int j) const {
     const typename Model::State Un = load_state<Model>(uc, i, j);
     const Aux a = load_aux<aux_comps<Model>()>(ax, i, j);
-    const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, it);
+    const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, it, mask);
     for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = W[c];
   }
 };
 }  // namespace detail
 
 // W = U + dt * model.source(W, aux), resolu EN PLACE par Newton local (jacobienne
-// par differences finies). Voir l'en-tete du fichier pour la stabilite.
+// par differences finies). Voir l'en-tete du fichier pour la stabilite. @p mask : masque implicite
+// PORTE PAR LE BLOC (override du defaut modele) ; inactif (defaut) -> comportement bit-identique.
 template <class Model>
 void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
-                           Real dt, int iters = 2) {
+                           Real dt, int iters = 2,
+                           const ImplicitMask<Model::n_vars>& mask = {}) {
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
     const ConstArray4 uc = U.fab(li).const_array();
     const ConstArray4 ax = aux.fab(li).const_array();
     const Box2D b = U.box(li);
-    for_each_cell(b, detail::BackwardEulerSourceKernel<Model>{model, uc, ax, u, dt, iters});
+    for_each_cell(b, detail::BackwardEulerSourceKernel<Model>{model, uc, ax, u, dt, iters, mask});
   }
 }
 

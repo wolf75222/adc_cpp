@@ -15,6 +15,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 /// @file
 /// @brief Construit les fermetures d'un bloc (avance en temps + residu + contribution Poisson) a
@@ -71,18 +72,22 @@ struct AdvanceExplicit {
 };
 
 /// Avance IMEX : par sous-pas, demi-pas EXPLICITE (transport sans source) + source IMPLICITE raide.
+/// @c mask : masque implicite PORTE PAR LE BLOC (override du defaut modele is_implicit), resolu une
+/// fois a l'ajout du bloc contre ses noms/roles de variables. Masque inactif (defaut) -> backward_euler
+/// retombe sur model_is_implicit -> avance bit-identique a l'historique.
 template <class Limiter, class Flux, class Model>
 struct AdvanceImex {
   Model m;
   GridContext ctx;
   bool recon_prim;
+  ImplicitMask<Model::n_vars> mask{};
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                   recon_prim};
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);     // demi-pas explicite : transport sans source
-      backward_euler_source(m, *ctx.aux, U, h);  // source implicite (rappel raide)
+      backward_euler_source(m, *ctx.aux, U, h, 2, mask);  // source implicite (rappel raide)
     }
   }
 };
@@ -100,18 +105,37 @@ struct RhsInto {
 };
 }  // namespace detail
 
+/// Construit le masque implicite POD device-clean d'un modele a N variables a partir d'une liste
+/// d'indices de composantes (vide -> masque INACTIF -> defaut modele, bit-identique). Tout indice
+/// hors [0, N) est ignore ici (la validation/le message clair vit cote System::add_block, qui resout
+/// les noms/roles en indices et leve sur un nom/role absent).
+template <int N>
+ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) {
+  ImplicitMask<N> mask;
+  if (implicit_components.empty()) return mask;  // inactif : defaut modele
+  mask.active = true;
+  for (int c : implicit_components)
+    if (c >= 0 && c < N) mask.flag[c] = true;
+  return mask;
+}
+
 /// Fermetures (avance + residu) pour un schema spatial (Limiter x Flux) fige. La math RK vient des
 /// TimeStepper du coeur : en explicite SSPRK2 (defaut) ou SSPRK3 selon @p method ; ForwardEuler +
 /// backward_euler_source en IMEX. Les fermetures sont des FONCTEURS NOMMES (cf. namespace detail) et
 /// non des lambdas : le chemin add_compiled_model (premiere instanciation depuis une TU externe)
 /// s'emet alors proprement sous nvcc. @p method ne joue QUE sur l'avance explicite (l'IMEX garde son
 /// demi-pas ForwardEuler + source implicite) ; "ssprk2" reproduit l'avance historique (bit-identique).
+/// @p implicit_components : indices des variables conservees a traiter en IMPLICITE dans la source IMEX
+/// (masque PORTE PAR LE BLOC, override du defaut modele). VIDE (defaut) -> masque inactif -> defaut
+/// modele is_implicit -> bit-identique. Sans effet hors IMEX (l'explicite n'a pas de pas implicite).
 template <class Limiter, class Flux, class Model>
 BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
-                          const std::string& method = "ssprk2") {
+                          const std::string& method = "ssprk2",
+                          const std::vector<int>& implicit_components = {}) {
   BlockClosures bc;
   if (imex) {
-    bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim};
+    bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{
+        m, ctx, recon_prim, make_implicit_mask<Model::n_vars>(implicit_components)};
   } else if (method == "ssprk3") {
     bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim};
   } else if (method == "ssprk2") {
@@ -129,24 +153,27 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
 /// "weno5" = reconstruction WENO5-Z (ordre 5, stencil 5 points, 3 ghosts) ; spatial_operator route
 /// sur weno5z quand Limiter::n_ghost >= 3 (l'appelant doit allouer 3 ghosts, cf. block_n_ghost).
 /// @p method choisit l'avance EXPLICITE (ssprk2 par defaut, ssprk3 optionnel) ; sans effet en IMEX.
+/// @p implicit_components : masque implicite IMEX porte par le bloc (indices ; vide = defaut modele,
+/// bit-identique). cf. build_block.
 template <class Model>
 BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
                          const GridContext& ctx, bool imex, bool recon_prim,
-                         const std::string& method = "ssprk2") {
+                         const std::string& method = "ssprk2",
+                         const std::vector<int>& implicit_components = {}) {
   if (riem == "rusanov") {
-    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method);
-    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method);
-    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method);
-    if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method);
+    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+    if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
     throw std::runtime_error("System : limiter inconnu '" + lim + "'");
   }
   if (riem == "hllc") {
     if constexpr (Model::n_vars == 4 &&
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method);
-      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method);
-      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method);
-      if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'hllc' exige un transport compressible "
@@ -156,10 +183,10 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
   if (riem == "roe") {
     if constexpr (Model::n_vars == 4 &&
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method);
-      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method);
-      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method);
-      if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method);
+      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'roe' exige un transport compressible "

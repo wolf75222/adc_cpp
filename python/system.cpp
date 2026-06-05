@@ -47,6 +47,49 @@ inline bool adc_trace_sf() {
 inline void adc_sf_mark(const char* w) {
   if (adc_trace_sf()) { std::fprintf(stderr, "[sf] %s\n", w); std::fflush(stderr); }
 }
+
+// Resout le MASQUE IMPLICITE d'un bloc (cf. add_block : implicit_vars / implicit_roles) en une liste
+// d'indices de composantes conservees, contre le descripteur du bloc @p cons. Le masque vit cote BLOC /
+// politique temporelle (et NON le modele) : meme modele, traitements implicites distincts par bloc. Un
+// nom ou un role absent du bloc leve une erreur EXPLICITE (pas d'ignore silencieux). Renvoie les indices
+// UNIQUES, tries (l'ordre est sans importance pour le masque). VIDE en entree -> vide -> masque inactif.
+inline std::vector<int> resolve_implicit_components(const std::string& block,
+                                                    const VariableSet& cons,
+                                                    const std::vector<std::string>& names,
+                                                    const std::vector<std::string>& roles) {
+  std::vector<int> out;
+  auto push_unique = [&out](int c) {
+    if (std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
+  };
+  for (const std::string& nm : names) {
+    int idx = -1;
+    for (int i = 0; i < static_cast<int>(cons.names.size()); ++i)
+      if (cons.names[i] == nm) { idx = i; break; }
+    if (idx < 0) {
+      std::string have;
+      for (std::size_t i = 0; i < cons.names.size(); ++i) {
+        if (i) have += ", ";
+        have += cons.names[i];
+      }
+      throw std::runtime_error("System::add_block : implicit_vars : variable '" + nm +
+                               "' absente du bloc '" + block + "' (variables conservees : " + have + ")");
+    }
+    push_unique(idx);
+  }
+  for (const std::string& rn : roles) {
+    const VariableRole role = role_from_name(rn);
+    const int idx = cons.index_of(role);
+    if (role == VariableRole::Custom || idx < 0) {
+      std::string have = roles_csv(cons);
+      throw std::runtime_error("System::add_block : implicit_roles : role '" + rn +
+                               "' absent du bloc '" + block + "' (roles : " +
+                               (have.empty() ? std::string("<non renseignes>") : have) + ")");
+    }
+    push_unique(idx);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
 }  // namespace
 
 // Cle d'ABI du MODULE (figee a la compilation de cette TU). Definie ici pour que le module _adc
@@ -799,7 +842,8 @@ System& System::operator=(System&&) noexcept = default;
 void System::add_block(const std::string& name, const ModelSpec& model,
                        const std::string& limiter, const std::string& riemann,
                        const std::string& recon, const std::string& time, int substeps,
-                       bool evolve, int stride) {
+                       bool evolve, int stride, const std::vector<std::string>& implicit_vars,
+                       const std::vector<std::string>& implicit_roles) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
@@ -815,6 +859,12 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   const bool imex = (time == "imex");
   const bool recon_prim = (recon == "primitive");
   const std::string method = (time == "ssprk3") ? "ssprk3" : "ssprk2";
+  // Le masque implicite (implicit_vars / implicit_roles) ne s'applique qu'au pas de source IMEX. Le
+  // demander en explicite est une ERREUR (pas d'ignore silencieux) : l'explicite n'a pas de pas implicite.
+  if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))
+    throw std::runtime_error("System::add_block : implicit_vars / implicit_roles exigent time='imex' "
+                             "(le masque implicite ne s'applique qu'au pas de source IMEX ; recu time='" +
+                             time + "')");
 
   int ncomp = 1;
   BlockClosures clo;
@@ -829,11 +879,16 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   detail::dispatch_model(model, [&](auto m) {
     using M = decltype(m);
     ncomp = M::n_vars;
-    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method);
-    max_speed = make_max_speed(m, ctx);
-    add_poisson_rhs = make_poisson_rhs(m);
     cons_vs = M::conservative_vars();  // noms + ROLES physiques (source unique de verite)
     prim_vs = M::primitive_vars();
+    // Masque implicite PORTE PAR LE BLOC : resout noms/roles -> indices contre le descripteur du bloc
+    // (erreur explicite sur un nom/role absent). Vide -> make_implicit_mask inactif -> defaut modele
+    // (bit-identique). Ne joue qu'en IMEX (garde ci-dessus pour l'explicite).
+    const std::vector<int> impl_components =
+        resolve_implicit_components(name, cons_vs, implicit_vars, implicit_roles);
+    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components);
+    max_speed = make_max_speed(m, ctx);
+    add_poisson_rhs = make_poisson_rhs(m);
   });
   // Installation commune (meme chemin que add_compiled_model pour un modele genere par le DSL) :
   // les fermetures tournent sur les MultiFab REELS du System (halos MPI via fill_boundary, device

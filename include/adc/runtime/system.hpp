@@ -77,12 +77,24 @@ class System {
   ///                 avance figee). step_cfl honore la cadence (dt <= cfl*h*substeps / (stride*w)).
   /// @param evolve   false = espece GELEE (fond fixe) : non avancee en temps, mais vue par le
   ///                 Poisson de systeme (et, a venir, par les sources couplees)
+  /// @param implicit_vars  IMEX seulement : noms des variables conservees a traiter en IMPLICITE dans
+  ///                 le pas de source (backward-Euler) ; les autres restent explicites (Euler avant). Le
+  ///                 masque est PORTE PAR LE BLOC / la politique temporelle (et NON par le modele) : le
+  ///                 MEME modele peut donc etre reutilise avec des traitements implicites differents. VIDE
+  ///                 (defaut) + implicit_roles VIDE -> defaut du modele (Model::is_implicit, ou tout
+  ///                 implicite a defaut de trait) -> bit-identique. Resolu contre les noms conservatifs
+  ///                 du bloc ; un nom absent leve une erreur EXPLICITE.
+  /// @param implicit_roles IMEX seulement : meme masque implicite mais par ROLE physique ("density",
+  ///                 "momentum_x", "energy", ...) au lieu du nom (cf. variable_roles). Union avec
+  ///                 implicit_vars. Un role absent du bloc leve une erreur EXPLICITE.
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
                  const std::string& recon = "conservative",
                  const std::string& time = "explicit", int substeps = 1,
-                 bool evolve = true, int stride = 1);
+                 bool evolve = true, int stride = 1,
+                 const std::vector<std::string>& implicit_vars = {},
+                 const std::vector<std::string>& implicit_roles = {});
 
   /// Ajoute un bloc dont le modele est CHARGE A L'EXECUTION depuis une bibliotheque partagee (.so)
   /// generee par le DSL (emit_cpp_brick -> ModelAdapter -> fabrique extern "C"). Le .so doit exposer

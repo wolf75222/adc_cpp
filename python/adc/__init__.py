@@ -497,6 +497,50 @@ class Explicit:
         self.kind = "ssprk3" if method == "ssprk3" else "explicit"
 
 
+def _role_to_stable(name):
+    """Normalise un nom de role vers la cle STABLE attendue par le C++ (role_from_name) : minuscules
+    snake_case ("momentum_x", "energy"). Tolere les variantes PascalCase de l'enum C++ exposees dans
+    l'API cible (ex. "MomentumX" -> "momentum_x", "Energy" -> "energy") en inserant un '_' avant chaque
+    majuscule interne avant la mise en minuscules. Un nom deja en snake_case ("momentum_x") est inchange."""
+    s = str(name).strip()
+    if not s:
+        return s
+    if s == s.lower():  # deja snake_case / minuscules : inchange
+        return s
+    out = [s[0].lower()]
+    for ch in s[1:]:
+        if ch.isupper():
+            out.append("_")
+            out.append(ch.lower())
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _norm_implicit(label, implicit_vars, implicit_roles):
+    """Normalise les listes du masque implicite (noms / roles physiques) en listes de chaines.
+
+    None -> [] (defaut : masque inactif, defaut modele, bit-identique). Une chaine seule est tolerree
+    (ex. implicit_vars="rho_u" -> ["rho_u"]). Les roles sont ramenes a la cle STABLE du C++ (snake_case)
+    via _role_to_stable -> "MomentumX" et "momentum_x" sont equivalents. Le masque vit cote POLITIQUE
+    TEMPORELLE / bloc (et NON le modele) : le MEME modele se reutilise avec des traitements implicites
+    distincts. La RESOLUTION des noms/roles -> indices et la validation (nom/role absent du bloc) vit
+    cote C++ (System::add_block), seule source de verite des noms/roles du bloc."""
+    def as_list(x, what):
+        if x is None:
+            return []
+        if isinstance(x, str):
+            return [x]
+        try:
+            out = [str(v) for v in x]
+        except TypeError:
+            raise ValueError("%s : %s doit etre une liste de chaines (recu %r)" % (label, what, x))
+        return out
+    names = as_list(implicit_vars, "implicit_vars")
+    roles = [_role_to_stable(r) for r in as_list(implicit_roles, "implicit_roles")]
+    return names, roles
+
+
 class IMEX:
     """IMEX : transport explicite (SSPRK) + source raide implicite (backward-Euler, Newton local).
 
@@ -510,17 +554,27 @@ class IMEX:
                  que (macro_step + 1) % M != 0, puis avance d'un pas effectif M*dt en fin de fenetre.
                  Entre deux rattrapages, son etat PERIME contribue au Poisson de systeme. Defaut 1 =
                  chaque macro-pas, bit-identique. Backend 'aot' : stride > 1 rejete (cf. Explicit).
+    implicit_vars  : noms des variables conservees a traiter en IMPLICITE dans le pas de source ; les
+                 autres restent explicites (Euler avant). Le masque est PORTE PAR CETTE POLITIQUE / le
+                 bloc, PAS par le modele -> le MEME modele se reutilise avec des traitements implicites
+                 differents. Defaut [] (+ implicit_roles []) = defaut du modele (Model::is_implicit, ou
+                 tout implicite a defaut), BIT-IDENTIQUE. Resolu cote C++ contre les noms du bloc (un nom
+                 absent leve une erreur). Ex. adc.IMEX(implicit_vars=["rho_u", "rho_v"]).
+    implicit_roles : meme masque mais par ROLE physique ("density", "momentum_x", "energy", ...) au lieu
+                 du nom (cf. System.variable_roles). Union avec implicit_vars. Ex.
+                 adc.IMEX(implicit_roles=["MomentumX", "MomentumY", "Energy"]).
     """
 
     kind = "imex"
 
-    def __init__(self, substeps=1, stride=1):
+    def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None):
         if int(substeps) < 1:
             raise ValueError("IMEX : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
             raise ValueError("IMEX : stride >= 1 (recu %r)" % (stride,))
         self.substeps = int(substeps)
         self.stride = int(stride)
+        self.implicit_vars, self.implicit_roles = _norm_implicit("IMEX", implicit_vars, implicit_roles)
 
 
 class SourceImplicit:
@@ -537,17 +591,22 @@ class SourceImplicit:
 
     substeps=N : sous-pas par macro-pas (cf. Explicit). Defaut 1.
     stride=M   : cadence du bloc, semantique hold-then-catch-up (cf. Explicit). Defaut 1.
+    implicit_vars / implicit_roles : masque implicite par NOM ou par ROLE physique des variables
+                 conservees a traiter en implicite dans le pas de source (cf. IMEX). Masque PORTE PAR
+                 CETTE POLITIQUE / le bloc, pas par le modele. Defauts [] = defaut modele, bit-identique.
     """
 
     kind = "imex"  # meme chemin C++ que IMEX (ImplicitSourceStepper)
 
-    def __init__(self, substeps=1, stride=1):
+    def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None):
         if int(substeps) < 1:
             raise ValueError("SourceImplicit : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
             raise ValueError("SourceImplicit : stride >= 1 (recu %r)" % (stride,))
         self.substeps = int(substeps)
         self.stride = int(stride)
+        self.implicit_vars, self.implicit_roles = _norm_implicit(
+            "SourceImplicit", implicit_vars, implicit_roles)
 
 
 def Implicit(dt_ratio=1, substeps=None, stride=1):
@@ -603,8 +662,11 @@ class System:
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
+        # Masque implicite porte par la politique temporelle (IMEX/SourceImplicit) ; vide sur les autres
+        # politiques (Explicit). Resolu/valide cote C++ (System::add_block) contre les noms/roles du bloc.
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
-                          getattr(time, "substeps", 1), evolve, getattr(time, "stride", 1))
+                          getattr(time, "substeps", 1), evolve, getattr(time, "stride", 1),
+                          getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
                      evolve=True, stride=None):
@@ -635,8 +697,18 @@ class System:
         # signature n'a pas de substeps -> elle utiliserait time.substeps et IGNORERAIT les overrides).
         if isinstance(model, ModelSpec):
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
-                              nsub, evolve, nstride)
+                              nsub, evolve, nstride,
+                              getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
             return
+
+        # Masque implicite (IMEX) : seul le chemin natif compose (ModelSpec -> add_block) le cable. Les
+        # backends compiles (.so : dynamic/aot/production) n'exposent pas l'argument -> on REJETTE un
+        # masque non vide plutot que l'ignorer en silence (cf. le rejet du stride sur backend 'aot').
+        if getattr(time, "implicit_vars", []) or getattr(time, "implicit_roles", []):
+            raise ValueError(
+                "add_equation : implicit_vars / implicit_roles (masque IMEX par bloc) ne sont supportes "
+                "que sur un modele compose adc.Model(...) (-> add_block). Le modele compile (.so) ne "
+                "transporte pas le masque ; utiliser un adc.Model(...) natif.")
 
         if not isinstance(model, dsl.CompiledModel):
             raise TypeError("add_equation : model doit etre un adc.Model(...) (ModelSpec) ou un "
