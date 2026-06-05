@@ -11,6 +11,7 @@
 #include <adc/numerics/elliptic/poisson_operator.hpp>
 #include <adc/parallel/comm.hpp>
 
+#include <cassert>
 #include <cmath>
 
 // Solveur de Krylov MATRICE-LIBRE (BiCGStab) pour l'operateur elliptique a TENSEUR PLEIN
@@ -66,9 +67,11 @@ struct KrylovResult {
 //               (op_eps(), op_a_xy(), ...). C'est l'objet que modele le concept EllipticSolver.
 // @p precond  : GeometricMG portant la partie SYMETRIQUE (memes eps/eps_y/kappa, MAIS set_cross_terms
 //               NON appele -> bloc diagonal). Son phi()/rhs() servent de tampon de preconditionnement.
-//               PEUT etre le MEME objet que @p op (alors le preconditionneur tourne avec les termes
-//               croises EXPLICITES dans le residu MG -- toujours valable, le lisseur reste diagonal),
-//               mais un objet SEPARE sans termes croises est le preconditionneur symetrique propre.
+//               DOIT etre un objet DISTINCT de @p op : apply_precond ECRASE precond_.rhs() (copy_into)
+//               et precond_.phi() (set_val(0) puis V-cycle) a chaque iteration. Si precond_ == op_, ces
+//               ecritures ecraseraient l'iterate phi() et le rhs() reel de BiCGStab, detruisant le solve.
+//               Le constructeur l'impose par assert(&op != &precond). Un objet SEPARE sans termes
+//               croises est de toute facon le preconditionneur symetrique propre.
 class TensorKrylovSolver {
  public:
   // @p n_precond_vcycles : nombre N de V-cycles MG par application du preconditionneur (1 ou 2).
@@ -77,7 +80,12 @@ class TensorKrylovSolver {
         ba_(op.box_array()), dm_(op.dmap()),
         r_(ba_, dm_, 1, 0), rhat_(ba_, dm_, 1, 0), p_(ba_, dm_, 1, 0),
         v_(ba_, dm_, 1, 0), s_(ba_, dm_, 1, 0), t_(ba_, dm_, 1, 0),
-        phat_(ba_, dm_, 1, 1), shat_(ba_, dm_, 1, 1) {}
+        phat_(ba_, dm_, 1, 1), shat_(ba_, dm_, 1, 1),
+        op_offset_(ba_, dm_, 1, 0), bc_offset_(ba_, dm_, 1, 0) {
+    // op_ et precond_ DOIVENT etre distincts : apply_precond ecrase precond_.rhs()/phi() a chaque
+    // iteration ; les confondre avec op_ ecraserait l'iterate et le second membre du solve (cf. entete).
+    assert(&op_ != &precond_ && "TensorKrylovSolver : op et precond doivent etre des objets distincts");
+  }
 
   // --- concept EllipticSolver ---
   MultiFab& phi() { return op_.phi(); }
@@ -94,7 +102,12 @@ class TensorKrylovSolver {
   // BiCGStab preconditionne. phi() est l'inconnue (warm start : valeur entrante = point de depart) ;
   // rhs() le second membre. Renvoie iterations + residu relatif + convergence.
   KrylovResult solve(Real rel_tol, int max_iters) {
-    // r0 = rhs - L_int(phi)  (residu vrai, warm start respecte)
+    prepare_solve();  // calcule (une fois) les offsets de CL Dirichlet inhomogene (matvec + precond)
+    // r0 = rhs - L_int(phi)  (residu vrai INHOMOGENE, warm start respecte). On GARDE ici l'operateur
+    // AFFINE : il replie la donnee de Dirichlet dans le residu, exactement ce qu'on veut pour r0. Le
+    // systeme lineaire equivalent est L_lin x = rhs - c_bc (c_bc = apply_operator(0)) ; comme
+    // r0 = rhs - apply_operator(phi) = (rhs - c_bc) - L_lin(phi), r0 est INCHANGE. Les matvec EN BOUCLE,
+    // eux, agissent sur des DIRECTIONS de correction et doivent etre LINEAIRES (apply_operator_lin).
     apply_operator(phi(), v_);                       // v_ = L_int(phi)
     lincomb(r_, Real(1), rhs(), Real(-1), v_);       // r_ = rhs - L_int(phi)
     const Real bnorm = l2_norm(rhs());
@@ -124,7 +137,7 @@ class TensorKrylovSolver {
       lincomb(p_, beta, p_, Real(1), r_);       // p <- r + beta p
       // phat = M^{-1} p  (N V-cycles MG sur la partie symetrique)
       apply_precond(p_, phat_);
-      apply_operator(phat_, v_);                // v = L_int(phat)
+      apply_operator_lin(phat_, v_);            // v = L_lin(phat) (matvec LINEAIRE : phat est une direction)
       const Real rhat_dot_v = dot(rhat_, v_);   // COLLECTIF
       if (std::fabs(rhat_dot_v) < kTiny) { res.iters = k - 1; res.rel_residual = rnorm / norm0; return res; }
       alpha = rho / rhat_dot_v;
@@ -137,9 +150,9 @@ class TensorKrylovSolver {
         rnorm = snorm;
         res.iters = k; res.rel_residual = rnorm / norm0; res.converged = true; return res;
       }
-      // shat = M^{-1} s ; t = L_int(shat)
+      // shat = M^{-1} s ; t = L_lin(shat) (matvec LINEAIRE : shat est une direction de correction)
       apply_precond(s_, shat_);
-      apply_operator(shat_, t_);
+      apply_operator_lin(shat_, t_);
       const Real tt = dot(t_, t_);              // COLLECTIF
       omega = tt > kTiny ? dot(t_, s_) / tt : Real(0);
       // phi <- phi + omega shat ; r <- s - omega t
@@ -157,8 +170,13 @@ class TensorKrylovSolver {
  private:
   static constexpr Real kTiny = Real(1e-300);  // garde-fou rupture / division par 0
 
-  // matvec MATRICE-LIBRE : out = L_int(in) = div(A grad in) - kappa in, ghosts de in remplis avant.
-  // Reutilise les coefficients de l'operateur PLEIN de op_ (memes pointeurs que current_residual).
+  // matvec MATRICE-LIBRE INHOMOGENE : out = L_int(in) = div(A grad in) - kappa in, ghosts de in remplis
+  // avec op_.bc() (la CL ENTIERE). Reutilise les coefficients de l'operateur PLEIN de op_ (memes pointeurs
+  // que current_residual). AFFINE en in quand bcPhi porte une valeur de Dirichlet non nulle : le ghost de
+  // bord vaut 2 v - in_interieur, donc le stencil des cellules de bord recoit un terme CONSTANT c_bc =
+  // apply_operator(0). On l'utilise UNIQUEMENT pour le residu vrai r0 / residual() (ou ce terme constant
+  // est exactement la donnee de Dirichlet repliee dans le residu, ce qu'on veut). Les matvec EN BOUCLE
+  // (sur des directions de correction) passent par apply_operator_lin (operateur LINEAIRE).
   void apply_operator(MultiFab& in, MultiFab& out) {
     device_fence();  // un kernel a pu ecrire in ; on attend avant la lecture hote de fill_ghosts
     fill_ghosts(in, op_.geom().domain, op_.bc());
@@ -168,14 +186,74 @@ class TensorKrylovSolver {
     if (const MultiFab* mk = op_.op_mask()) mask_zero(out, *mk);
   }
 
-  // preconditionneur M^{-1} : out = (N V-cycles MG sur la partie symetrique) appliques a in.
-  // On resout M out = in a CL HOMOGENES, depart out = 0 (pas de warm start : M^{-1} est un operateur
-  // lineaire fige par iteration BiCGStab). precond_ ne porte PAS les termes croises -> bloc diagonal.
+  // matvec MATRICE-LIBRE LINEAIRE : out = L_lin(in) = apply_operator(in) - c_bc, avec c_bc =
+  // apply_operator(0) la part inhomogene de bord (constante). BiCGStab applique la matvec a des DIRECTIONS
+  // de correction (phat = M^{-1} p, shat = M^{-1} s), PAS a l'iterate ; l'operateur doit y etre lineaire
+  // sinon le terme constant c_bc injecte a chaque matvec brise les relations de BiCGStab (residu qui
+  // oscille / diverge). On retranche donc c_bc, comme on retranche d_bc dans le preconditionneur. CL
+  // Dirichlet nulle => has_op_offset_ reste false => apply_operator_lin == apply_operator, bit-identique.
+  void apply_operator_lin(MultiFab& in, MultiFab& out) {
+    apply_operator(in, out);
+    if (has_op_offset_) lincomb(out, Real(1), out, Real(-1), op_offset_);  // out <- L_lin(in)
+  }
+
+  // preconditionneur M^{-1} : out = (N V-cycles MG sur la partie symetrique) appliques a in, A CL
+  // HOMOGENES (depart out = 0, pas de warm start : M^{-1} est un operateur LINEAIRE fige par iteration
+  // BiCGStab). precond_ ne porte PAS les termes croises -> bloc diagonal.
+  //
+  // Le V-cycle de precond_ (precond_.vcycle()) tourne au niveau 0 avec sa CL bc_ ENTIERE. Or si bcPhi
+  // porte une valeur de Dirichlet NON nulle (xlo_val/... != 0), fill_physical_bc remplit le ghost par
+  // ghost = 2 v - interieur : depart phi=0, la premiere passe injecte un terme source FIXE ~2 v,
+  // INDEPENDANT de in. Le V-cycle brut est donc AFFINE : precond_raw(in) = M^{-1} in + d_bc, avec
+  // d_bc = precond_raw(0) (offset constant, fonction de la seule CL et des coefficients, PAS de in).
+  // Cet offset injecte dans phat/shat ferait deriver phi += alpha phat + omega shat d'un terme parasite
+  // alpha d_bc + omega d_bc a chaque iteration et casserait la convergence. On RETRANCHE donc l'offset :
+  //   M^{-1} in = precond_raw(in) - precond_raw(0),
+  // ce qui est EXACTEMENT le V-cycle a CL HOMOGENES (la recursion MG est affine, sa partie homogene ne
+  // depend pas de v). Bit-identique a un vcycle_homogeneous() interne, sans toucher GeometricMG.
+  //
+  // Memes raison et remede que apply_operator_lin (matvec lineaire) : l'operateur ET le preconditionneur
+  // sont AFFINES sous CL Dirichlet non nulle, et BiCGStab les applique a des DIRECTIONS de correction ;
+  // on linearise les deux en retranchant leur offset respectif (c_bc pour la matvec, d_bc pour le precond).
+  // Seul le residu vrai r0 / residual() garde l'operateur affine (la donnee de Dirichlet y est repliee).
+  //
+  // d_bc est calcule UNE fois par solve (prepare_solve). CL Dirichlet nulle (xlo_val=... =0) =>
+  // has_bc_offset_ reste false => CHEMIN STRICTEMENT INCHANGE (aucune soustraction), bit-identique.
   void apply_precond(MultiFab& in, MultiFab& out) {
+    precond_raw(in, out);
+    if (has_bc_offset_) lincomb(out, Real(1), out, Real(-1), bc_offset_);  // out <- M^{-1} in (homogene)
+  }
+
+  // V-cycle BRUT du preconditionneur : out = (N V-cycles MG) applique a in, depart phi=0. AFFINE en in
+  // quand bcPhi porte une valeur de Dirichlet non nulle (offset d_bc = precond_raw(0)).
+  void precond_raw(MultiFab& in, MultiFab& out) {
     copy_into(precond_.rhs(), in);
     precond_.phi().set_val(Real(0));
     for (int i = 0; i < n_precond_; ++i) precond_.vcycle();
     copy_into(out, precond_.phi());
+  }
+
+  // Prepare les offsets de CL inhomogene, UNE fois par solve : c_bc = apply_operator(0) pour la matvec et
+  // d_bc = precond_raw(0) pour le preconditionneur. Une CL sans valeur de Dirichlet non nulle laisse les
+  // deux offsets a 0 (has_*_offset_ = false) : apply_operator_lin et apply_precond redeviennent le chemin
+  // historique (aucune soustraction), STRICTEMENT bit-identique. On detecte l'inhomogeneite sur op_.bc()
+  // (matvec) et precond_.bc() (precond) separement. On utilise phat_ (1 fantome, requis par fill_ghosts
+  // de apply_operator) comme entree NULLE ; phat_ est ecrase a la 1ere iteration (apply_precond(p_, phat_)).
+  void prepare_solve() {
+    auto inhomog = [](const BCRec& b) {
+      return b.xlo_val != Real(0) || b.xhi_val != Real(0) ||
+             b.ylo_val != Real(0) || b.yhi_val != Real(0);
+    };
+    has_op_offset_ = inhomog(op_.bc());
+    has_bc_offset_ = inhomog(precond_.bc());
+    if (has_op_offset_) {
+      phat_.set_val(Real(0));            // entree nulle (1 fantome pour fill_ghosts ; phat_ ecrase apres)
+      apply_operator(phat_, op_offset_); // op_offset_ <- apply_operator(0) = c_bc (part inhomogene de bord)
+    }
+    if (has_bc_offset_) {
+      phat_.set_val(Real(0));
+      precond_raw(phat_, bc_offset_);    // bc_offset_ <- precond_raw(0) = d_bc
+    }
   }
 
   // norme L2 GLOBALE sqrt(sum x^2), collective (dot). sqrt hote, identique sur tous les rangs.
@@ -206,6 +284,10 @@ class TensorKrylovSolver {
   DistributionMapping dm_;
   MultiFab r_, rhat_, p_, v_, s_, t_;  // 0 ghost : ops point a point
   MultiFab phat_, shat_;               // 1 ghost : entrees de apply_operator (fill_ghosts)
+  MultiFab op_offset_;                 // c_bc = apply_operator(0) : part inhomogene de bord de la matvec
+  MultiFab bc_offset_;                 // d_bc = precond_raw(0)   : offset de CL Dirichlet du precond
+  bool has_op_offset_ = false;         // true si la CL de l'operateur porte une valeur de Dirichlet != 0
+  bool has_bc_offset_ = false;         // true si la CL du preconditionneur porte une valeur != 0
 };
 
 }  // namespace adc
