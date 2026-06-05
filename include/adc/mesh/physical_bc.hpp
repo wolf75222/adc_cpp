@@ -29,6 +29,55 @@ struct BCRec {
   Real xlo_val = 0, xhi_val = 0, ylo_val = 0, yhi_val = 0;
 };
 
+namespace detail {
+// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les conditions aux limites physiques. Memes raisons
+// que le reste du chemin elliptique/maillage (#93, recette #64) : fill_physical_bc est appele depuis
+// fill_ghosts, lui-meme tire du V-cycle MG premiere-instancie depuis une TU externe ; une lambda
+// etendue y fait buter l'emission du kernel device sous nvcc. Corps identique aux anciennes lambdas
+// (Foextrap : copie de la cellule miroir interne ; Dirichlet : 2 v - reflexion) -> bit-identique.
+// Face x bas : i = lo - k (k = lo - i), miroir Dirichlet en 2 lo - i - 1.
+struct BCFaceXLoKernel {
+  Array4 a;
+  int nc, lo;
+  bool foe;
+  Real val;
+  ADC_HD void operator()(int i, int j) const {
+    for (int c = 0; c < nc; ++c)
+      a(i, j, c) = foe ? a(lo, j, c) : 2 * val - a(2 * lo - i - 1, j, c);
+  }
+};
+struct BCFaceXHiKernel {
+  Array4 a;
+  int nc, hi;
+  bool foe;
+  Real val;
+  ADC_HD void operator()(int i, int j) const {
+    for (int c = 0; c < nc; ++c)
+      a(i, j, c) = foe ? a(hi, j, c) : 2 * val - a(2 * hi - i + 1, j, c);
+  }
+};
+struct BCFaceYLoKernel {
+  Array4 a;
+  int nc, lo;
+  bool foe;
+  Real val;
+  ADC_HD void operator()(int i, int j) const {
+    for (int c = 0; c < nc; ++c)
+      a(i, j, c) = foe ? a(i, lo, c) : 2 * val - a(i, 2 * lo - j - 1, c);
+  }
+};
+struct BCFaceYHiKernel {
+  Array4 a;
+  int nc, hi;
+  bool foe;
+  Real val;
+  ADC_HD void operator()(int i, int j) const {
+    for (int c = 0; c < nc; ++c)
+      a(i, j, c) = foe ? a(i, hi, c) : 2 * val - a(i, 2 * hi - j + 1, c);
+  }
+};
+}  // namespace detail
+
 inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
                              const BCRec& bc) {
   const int ng = mf.n_grow();
@@ -54,19 +103,15 @@ inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
       const int lo = domain.lo[0];
       const bool foe = bc.xlo == BCType::Foextrap;
       const Real val = bc.xlo_val;
-      for_each_cell(Box2D{{lo - ng, v.lo[1]}, {lo - 1, v.hi[1]}}, [=] ADC_HD(int i, int j) {
-        for (int c = 0; c < nc; ++c)
-          a(i, j, c) = foe ? a(lo, j, c) : 2 * val - a(2 * lo - i - 1, j, c);
-      });
+      for_each_cell(Box2D{{lo - ng, v.lo[1]}, {lo - 1, v.hi[1]}},
+                    detail::BCFaceXLoKernel{a, nc, lo, foe, val});
     }
     if (bc.xhi != BCType::Periodic && v.hi[0] == domain.hi[0]) {
       const int hi = domain.hi[0];
       const bool foe = bc.xhi == BCType::Foextrap;
       const Real val = bc.xhi_val;
-      for_each_cell(Box2D{{hi + 1, v.lo[1]}, {hi + ng, v.hi[1]}}, [=] ADC_HD(int i, int j) {
-        for (int c = 0; c < nc; ++c)
-          a(i, j, c) = foe ? a(hi, j, c) : 2 * val - a(2 * hi - i + 1, j, c);
-      });
+      for_each_cell(Box2D{{hi + 1, v.lo[1]}, {hi + ng, v.hi[1]}},
+                    detail::BCFaceXHiKernel{a, nc, hi, foe, val});
     }
 
     // --- faces y, sur la plage i ETENDUE (coins via les ghosts-x deja remplis) ---
@@ -75,19 +120,15 @@ inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
       const int lo = domain.lo[1];
       const bool foe = bc.ylo == BCType::Foextrap;
       const Real val = bc.ylo_val;
-      for_each_cell(Box2D{{iglo, lo - ng}, {ighi, lo - 1}}, [=] ADC_HD(int i, int j) {
-        for (int c = 0; c < nc; ++c)
-          a(i, j, c) = foe ? a(i, lo, c) : 2 * val - a(i, 2 * lo - j - 1, c);
-      });
+      for_each_cell(Box2D{{iglo, lo - ng}, {ighi, lo - 1}},
+                    detail::BCFaceYLoKernel{a, nc, lo, foe, val});
     }
     if (bc.yhi != BCType::Periodic && v.hi[1] == domain.hi[1]) {
       const int hi = domain.hi[1];
       const bool foe = bc.yhi == BCType::Foextrap;
       const Real val = bc.yhi_val;
-      for_each_cell(Box2D{{iglo, hi + 1}, {ighi, hi + ng}}, [=] ADC_HD(int i, int j) {
-        for (int c = 0; c < nc; ++c)
-          a(i, j, c) = foe ? a(i, hi, c) : 2 * val - a(i, 2 * hi - j + 1, c);
-      });
+      for_each_cell(Box2D{{iglo, hi + 1}, {ighi, hi + ng}},
+                    detail::BCFaceYHiKernel{a, nc, hi, foe, val});
     }
   }
 }

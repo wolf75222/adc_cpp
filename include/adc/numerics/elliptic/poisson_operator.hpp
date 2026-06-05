@@ -71,6 +71,104 @@ ADC_HD inline Real eps_harmonic(Real ec, Real ev) {
   return s > Real(0) ? Real(2) * ec * ev / s : Real(0);
 }
 
+namespace detail {
+// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels de l'operateur de Poisson et du lisseur
+// Gauss-Seidel. Memes raisons que le reste du chemin elliptique (#93, recette #64) : ces kernels sont
+// premiere-instancies depuis le V-cycle MG tire d'une TU externe (harness / loader natif) ; une lambda
+// etendue y fait buter l'emission du kernel device sous nvcc (kernel-stub nul -> segfault Cuda en
+// Release -O sans -g). Corps STRICTEMENT identique aux anciennes lambdas (memes branches he/hc/hk,
+// meme stencil) -> residu et potentiel bit-identiques sur CPU et device.
+
+// L = div(eps grad phi) - kappa phi (apply_laplacian). cf/ep/ey/ka inutilises si le flag est faux.
+struct ApplyLaplacianKernel {
+  ConstArray4 p;
+  Array4 L;
+  Real idx2, idy2;
+  bool hc;
+  ConstArray4 cf;
+  bool he;
+  ConstArray4 ep, ey;
+  bool hk;
+  ConstArray4 ka;
+  ADC_HD void operator()(int i, int j) const {
+    if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
+      const Real ec = ep(i, j);    // eps_x au centre (faces x)
+      const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
+      const Real exm = eps_harmonic(ec, ep(i - 1, j));
+      const Real exp = eps_harmonic(ec, ep(i + 1, j));
+      const Real eym = eps_harmonic(ecy, ey(i, j - 1));
+      const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
+      Real wxm, wxp, wym, wyp;
+      if (hc) {  // cut-cell : eps_face multiplie chaque poids Shortley-Weller
+        wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
+        wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
+      } else {   // stencil 5 points a coefficient de face variable
+        wxm = exm * idx2; wxp = exp * idx2;
+        wym = eym * idy2; wyp = eyp * idy2;
+      }
+      L(i, j) = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
+                wym * p(i, j - 1) - (wxm + wxp + wym + wyp) * p(i, j);
+    } else if (hc)
+      L(i, j) = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
+                cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1) -
+                cf(i, j, 4) * p(i, j);
+    else
+      L(i, j) = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
+                (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
+    // operateur Helmholtz / ecrante : L phi = div(eps grad phi) - kappa phi.
+    if (hk) L(i, j) -= ka(i, j) * p(i, j);
+  }
+};
+
+// res = f - L phi sur les cellules actives, 0 sur les conductrices (poisson_residual).
+struct PoissonResidualKernel {
+  ConstArray4 p, ff;
+  Array4 r;
+  Real idx2, idy2;
+  bool hm;
+  ConstArray4 mk;
+  bool hc;
+  ConstArray4 cf;
+  bool he;
+  ConstArray4 ep, ey;
+  bool hk;
+  ConstArray4 ka;
+  ADC_HD void operator()(int i, int j) const {
+    if (hm && mk(i, j) == Real(0)) {
+      r(i, j) = 0;
+      return;
+    }
+    Real lap;
+    if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
+      const Real ec = ep(i, j);    // eps_x au centre (faces x)
+      const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
+      const Real exm = eps_harmonic(ec, ep(i - 1, j));
+      const Real exp = eps_harmonic(ec, ep(i + 1, j));
+      const Real eym = eps_harmonic(ecy, ey(i, j - 1));
+      const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
+      Real wxm, wxp, wym, wyp;
+      if (hc) {
+        wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
+        wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
+      } else {
+        wxm = exm * idx2; wxp = exp * idx2;
+        wym = eym * idy2; wyp = eyp * idy2;
+      }
+      lap = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
+            wym * p(i, j - 1) - (wxm + wxp + wym + wyp) * p(i, j);
+    } else if (hc)
+      lap = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
+            cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1) -
+            cf(i, j, 4) * p(i, j);
+    else
+      lap = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
+            (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
+    // res = f - L phi, L phi = div(eps grad phi) - kappa phi = lap - kappa phi.
+    r(i, j) = ff(i, j) - lap + (hk ? ka(i, j) * p(i, j) : Real(0));
+  }
+};
+}  // namespace detail
+
 inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
                             MultiFab& lap, const MultiFab* coef = nullptr,
                             const MultiFab* eps = nullptr,
@@ -90,34 +188,7 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
     const bool hk = kappa != nullptr;  // terme de reaction -kappa phi
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
-        const Real ec = ep(i, j);    // eps_x au centre (faces x)
-        const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
-        const Real exm = eps_harmonic(ec, ep(i - 1, j));
-        const Real exp = eps_harmonic(ec, ep(i + 1, j));
-        const Real eym = eps_harmonic(ecy, ey(i, j - 1));
-        const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
-        Real wxm, wxp, wym, wyp;
-        if (hc) {  // cut-cell : eps_face multiplie chaque poids Shortley-Weller
-          wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
-          wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
-        } else {   // stencil 5 points a coefficient de face variable
-          wxm = exm * idx2; wxp = exp * idx2;
-          wym = eym * idy2; wyp = eyp * idy2;
-        }
-        L(i, j) = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
-                  wym * p(i, j - 1) - (wxm + wxp + wym + wyp) * p(i, j);
-      } else if (hc)
-        L(i, j) = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
-                  cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1) -
-                  cf(i, j, 4) * p(i, j);
-      else
-        L(i, j) = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
-                  (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
-      // operateur Helmholtz / ecrante : L phi = div(eps grad phi) - kappa phi.
-      if (hk) L(i, j) -= ka(i, j) * p(i, j);
-    });
+    for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, hc, cf, he, ep, ey, hk, ka});
   }
 }
 
@@ -149,43 +220,65 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
     const bool hk = kappa != nullptr;  // terme de reaction -kappa phi
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      if (hm && mk(i, j) == Real(0)) {
-        r(i, j) = 0;
-        return;
-      }
-      Real lap;
-      if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
-        const Real ec = ep(i, j);    // eps_x au centre (faces x)
-        const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
-        const Real exm = eps_harmonic(ec, ep(i - 1, j));
-        const Real exp = eps_harmonic(ec, ep(i + 1, j));
-        const Real eym = eps_harmonic(ecy, ey(i, j - 1));
-        const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
-        Real wxm, wxp, wym, wyp;
-        if (hc) {
-          wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
-          wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
-        } else {
-          wxm = exm * idx2; wxp = exp * idx2;
-          wym = eym * idy2; wyp = eyp * idy2;
-        }
-        lap = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
-              wym * p(i, j - 1) - (wxm + wxp + wym + wyp) * p(i, j);
-      } else if (hc)
-        lap = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
-              cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1) -
-              cf(i, j, 4) * p(i, j);
-      else
-        lap = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
-              (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
-      // res = f - L phi, L phi = div(eps grad phi) - kappa phi = lap - kappa phi.
-      r(i, j) = ff(i, j) - lap + (hk ? ka(i, j) * p(i, j) : Real(0));
-    });
+    for_each_cell(v, detail::PoissonResidualKernel{p, ff, r, idx2, idy2, hm, mk, hc, cf,
+                                                   he, ep, ey, hk, ka});
   }
 }
 
 namespace detail {
+// Lisseur Gauss-Seidel red-black sur une couleur (gs_color). p est ECRIT en place. Corps identique a
+// l'ancienne lambda -> bit-identique. Voir le commentaire des autres kernels (#93) pour la motivation
+// du foncteur nomme.
+struct GsColorKernel {
+  Array4 p;
+  ConstArray4 ff;
+  Real idx2, idy2, diag0;
+  int color;
+  bool hm;
+  ConstArray4 mk;
+  bool hc;
+  ConstArray4 cf;
+  bool he;
+  ConstArray4 ep, ey;
+  bool hk;
+  ConstArray4 ka;
+  ADC_HD void operator()(int i, int j) const {
+    if (((i + j) & 1) != color) return;
+    if (hm && mk(i, j) == Real(0)) return;  // conducteur : fige phi=0
+    Real off, diag;
+    if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
+      const Real ec = ep(i, j);    // eps_x au centre (faces x)
+      const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
+      const Real exm = eps_harmonic(ec, ep(i - 1, j));
+      const Real exp = eps_harmonic(ec, ep(i + 1, j));
+      const Real eym = eps_harmonic(ecy, ey(i, j - 1));
+      const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
+      Real wxm, wxp, wym, wyp;
+      if (hc) {
+        wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
+        wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
+      } else {
+        wxm = exm * idx2; wxp = exp * idx2;
+        wym = eym * idy2; wyp = eyp * idy2;
+      }
+      off = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
+            wym * p(i, j - 1);
+      diag = wxm + wxp + wym + wyp;
+    } else if (hc) {  // stencil cut-cell (Shortley-Weller) ; voisin conducteur = phi=0 sur le cercle
+      off = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
+            cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1);
+      diag = cf(i, j, 4);
+    } else {
+      off = (p(i + 1, j) + p(i - 1, j)) * idx2 +
+            (p(i, j + 1) + p(i, j - 1)) * idy2;
+      diag = diag0;
+    }
+    // Terme de reaction : l'operateur devient div(eps grad phi) - kappa phi, donc la
+    // diagonale gagne +kappa (kappa >= 0 => plus diagonalement dominant, MG converge mieux).
+    p(i, j) = (off - ff(i, j)) / (diag + (hk ? ka(i, j) : Real(0)));
+  }
+};
+
 inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
                      int color, const MultiFab* mask, const MultiFab* coef,
                      const MultiFab* eps, const MultiFab* kappa = nullptr,
@@ -207,41 +300,8 @@ inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
     const bool hk = kappa != nullptr;  // terme de reaction -kappa phi (Helmholtz / ecrante)
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      if (((i + j) & 1) != color) return;
-      if (hm && mk(i, j) == Real(0)) return;  // conducteur : fige phi=0
-      Real off, diag;
-      if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
-        const Real ec = ep(i, j);    // eps_x au centre (faces x)
-        const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
-        const Real exm = eps_harmonic(ec, ep(i - 1, j));
-        const Real exp = eps_harmonic(ec, ep(i + 1, j));
-        const Real eym = eps_harmonic(ecy, ey(i, j - 1));
-        const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
-        Real wxm, wxp, wym, wyp;
-        if (hc) {
-          wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
-          wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
-        } else {
-          wxm = exm * idx2; wxp = exp * idx2;
-          wym = eym * idy2; wyp = eyp * idy2;
-        }
-        off = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
-              wym * p(i, j - 1);
-        diag = wxm + wxp + wym + wyp;
-      } else if (hc) {  // stencil cut-cell (Shortley-Weller) ; voisin conducteur = phi=0 sur le cercle
-        off = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
-              cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1);
-        diag = cf(i, j, 4);
-      } else {
-        off = (p(i + 1, j) + p(i - 1, j)) * idx2 +
-              (p(i, j + 1) + p(i, j - 1)) * idy2;
-        diag = diag0;
-      }
-      // Terme de reaction : l'operateur devient div(eps grad phi) - kappa phi, donc la
-      // diagonale gagne +kappa (kappa >= 0 => plus diagonalement dominant, MG converge mieux).
-      p(i, j) = (off - ff(i, j)) / (diag + (hk ? ka(i, j) : Real(0)));
-    });
+    for_each_cell(v, GsColorKernel{p, ff, idx2, idy2, diag0, color, hm, mk, hc, cf,
+                                   he, ep, ey, hk, ka});
   }
 }
 }  // namespace detail
@@ -267,15 +327,24 @@ inline void gs_smooth(MultiFab& phi, const MultiFab& f, const Geometry& geom,
   for (int s = 0; s < nsweeps; ++s) gs_rb_sweep(phi, f, geom, bc, mask, coef, eps, kappa, eps_y);
 }
 
+namespace detail {
+// Fige phi=0 dans les cellules conductrices (mask==0). Foncteur nomme (#93) ; corps identique.
+struct ZeroConductorKernel {
+  Array4 p;
+  ConstArray4 mk;
+  ADC_HD void operator()(int i, int j) const {
+    if (mk(i, j) == Real(0)) p(i, j) = 0;
+  }
+};
+}  // namespace detail
+
 // Force phi=0 dans les cellules conductrices (mask==0).
 inline void zero_conductor(MultiFab& phi, const MultiFab& mask) {
   for (int li = 0; li < phi.local_size(); ++li) {
     Array4 p = phi.fab(li).array();
     const ConstArray4 mk = mask.fab(li).const_array();
     const Box2D v = phi.box(li);
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      if (mk(i, j) == Real(0)) p(i, j) = 0;
-    });
+    for_each_cell(v, detail::ZeroConductorKernel{p, mk});
   }
 }
 

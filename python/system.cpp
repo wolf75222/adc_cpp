@@ -22,6 +22,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS : trace de diagnostic device (env-gate, inerte par defaut)
+#include <cstdlib>  // getenv
 #include <dlfcn.h>  // dlopen/dlsym : chargement d'une brique generee (.so)
 #include <functional>
 #include <memory>
@@ -30,6 +32,21 @@
 #include <variant>
 
 namespace adc {
+
+// Trace de DIAGNOSTIC du chemin solve_fields (jalon #93, crash device GH200). Active SEULEMENT si la
+// variable d'environnement ADC_TRACE_SOLVE_FIELDS est posee ; ecrit sur stderr avec flush immediat pour
+// localiser le dernier marqueur avant un crash device. INERTE par defaut : aucun effet sur les sorties
+// ni sur la numerique. Diagnostic CONSERVE (env-gate, inerte par defaut) : utile pour un futur
+// crash device dans solve_fields.
+namespace {
+inline bool adc_trace_sf() {
+  static const bool on = std::getenv("ADC_TRACE_SOLVE_FIELDS") != nullptr;
+  return on;
+}
+inline void adc_sf_mark(const char* w) {
+  if (adc_trace_sf()) { std::fprintf(stderr, "[sf] %s\n", w); std::fflush(stderr); }
+}
+}  // namespace
 
 // Cle d'ABI du MODULE (figee a la compilation de cette TU). Definie ici pour que le module _adc
 // l'exporte (ADC_EXPORT) : add_native_block la compare a la cle baked dans le loader .so.
@@ -479,7 +496,18 @@ struct System::Impl {
     return std::visit([](auto& e) -> MultiFab& { return e.phi(); }, *ell_);
   }
   void ell_solve() {
-    std::visit([](auto& e) { e.solve(); }, *ell_);
+    adc_sf_mark("ell_solve: avant std::visit");
+    std::visit(
+        [](auto& e) {
+          using T = std::decay_t<decltype(e)>;
+          if (adc_trace_sf())
+            adc_sf_mark(std::is_same_v<T, GeometricMG> ? "ell_solve: GeometricMG::solve() debut"
+                                                       : "ell_solve: PoissonFFTSolver::solve() debut");
+          e.solve();
+          adc_sf_mark("ell_solve: solve() retour");
+        },
+        *ell_);
+    adc_sf_mark("ell_solve: apres std::visit");
   }
 
   // --- schemas spatiaux compiles -------------------------------------------
@@ -491,10 +519,14 @@ struct System::Impl {
   GridContext grid_ctx() { return GridContext{dom, bc_, geom, &aux}; }
 
   void solve_fields() {
+    adc_sf_mark("solve_fields: debut");
     ensure_elliptic();
+    adc_sf_mark("solve_fields: apres ensure_elliptic");
     MultiFab& rhs = ell_rhs();
     rhs.set_val(Real(0));
+    adc_sf_mark("solve_fields: apres rhs.set_val(0)");
     for (auto& s : sp) s.add_poisson_rhs(s.U, rhs);  // f = Sum_s elliptic_rhs_s(u_s)
+    adc_sf_mark("solve_fields: apres add_poisson_rhs");
     // Permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps, donc on met le rhs a
     // l'echelle 1/eps. Avec un champ eps(x) VARIABLE ou ANISOTROPE on NE le fait PAS : l'operateur
     // GeometricMG porte eps directement (apply_epsilon_field / apply_epsilon_anisotropic_field), le
@@ -508,8 +540,11 @@ struct System::Impl {
           for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
       }
     }
+    adc_sf_mark("solve_fields: avant ell_solve");
     ell_solve();
+    adc_sf_mark("solve_fields: apres ell_solve, avant device_fence");
     device_fence();
+    adc_sf_mark("solve_fields: apres device_fence (derivation aux)");
     const Real dx = geom.dx(), dy = geom.dy();
     const ConstArray4 p = ell_phi().fab(0).const_array();
     Array4 a = aux.fab(0).array();
@@ -520,11 +555,14 @@ struct System::Impl {
         a(i, j, 1) = (p(i + 1, j) - p(i - 1, j)) / (2 * dx);
         a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) / (2 * dy);
       }
+    adc_sf_mark("solve_fields: apres derivation aux (phi, grad phi)");
     apply_te();  // T_e = p/rho du bloc fluide source, recalculee a chaque solve (B_z, comp 3, preservee)
+    adc_sf_mark("solve_fields: apres apply_te");
     if (periodic_)
       fill_boundary(aux, dom, per_);
     else
       fill_ghosts(aux, dom, bc_);  // extrapolation au bord (paroi / sortie libre)
+    adc_sf_mark("solve_fields: fin (fill ghosts aux)");
   }
 
   std::vector<double> copy_comp0(const MultiFab& mf) const {

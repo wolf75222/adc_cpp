@@ -15,6 +15,45 @@
 
 namespace adc {
 
+namespace detail {
+// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels d'arithmetique MultiFab. Meme recette que
+// le chemin block (#64) : ces operations sont premiere-instanciees depuis le V-cycle MG, lui-meme tire
+// depuis une TU externe (harness/loader natif) ; une lambda etendue a cette place fait buter nvcc sur
+// l'emission du kernel device (kernel-stub nul -> segfault Cuda a -O Release sans -g, #93). Corps
+// strictement identique aux anciennes lambdas -> bit-identique sur CPU et device.
+struct SaxpyKernel {
+  Array4 Y;
+  ConstArray4 X;
+  Real a;
+  int c;
+  ADC_HD void operator()(int i, int j) const { Y(i, j, c) += a * X(i, j, c); }
+};
+
+struct LincombKernel {
+  Array4 Z;
+  ConstArray4 X, Y;
+  Real a, b;
+  int c;
+  ADC_HD void operator()(int i, int j) const {
+    Z(i, j, c) = a * X(i, j, c) + b * Y(i, j, c);
+  }
+};
+
+// Reducteur |f(i,j,comp)| -> max, passe DIRECTEMENT a reduce_max_cell (aucune lambda etendue
+// d'enveloppe, a la difference de for_each_cell_reduce_max). C'est le chemin device-clean documente
+// dans for_each.hpp. Signature reducteur (i, j, Real& acc) ; meme Kokkos::Max / meme boucle hote
+// sequentielle -> bit-identique a l'ancien norm_inf (max et fabs sans arrondi).
+struct NormInfKernel {
+  ConstArray4 a;
+  int comp;
+  ADC_HD void operator()(int i, int j, Real& acc) const {
+    const Real v = a(i, j, comp);
+    const Real av = v < 0 ? -v : v;
+    if (av > acc) acc = av;
+  }
+};
+}  // namespace detail
+
 // y <- y + a x
 inline void saxpy(MultiFab& y, Real a, const MultiFab& x) {
   const int nc = y.ncomp();
@@ -23,7 +62,7 @@ inline void saxpy(MultiFab& y, Real a, const MultiFab& x) {
     const ConstArray4 X = x.fab(li).const_array();
     const Box2D b = y.fab(li).box();
     for (int c = 0; c < nc; ++c)
-      for_each_cell(b, [=] ADC_HD(int i, int j) { Y(i, j, c) += a * X(i, j, c); });
+      for_each_cell(b, detail::SaxpyKernel{Y, X, a, c});
   }
 }
 
@@ -39,11 +78,7 @@ inline Real norm_inf(const MultiFab& mf, int comp = 0) {
   Real m = 0;
   for (int li = 0; li < mf.local_size(); ++li) {
     const ConstArray4 a = mf.fab(li).const_array();
-    m = std::max(m, for_each_cell_reduce_max(
-                        mf.box(li), [a, comp] ADC_HD(int i, int j) {
-                          const Real v = a(i, j, comp);
-                          return v < 0 ? -v : v;
-                        }));
+    m = std::max(m, reduce_max_cell(mf.box(li), detail::NormInfKernel{a, comp}));
   }
   return m;  // all-reduce max MPI plus tard (iso-comportement, non ajoute ici)
 }
@@ -58,9 +93,7 @@ inline void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b,
     const ConstArray4 Y = y.fab(li).const_array();
     const Box2D bb = z.fab(li).box();
     for (int c = 0; c < nc; ++c)
-      for_each_cell(bb, [=] ADC_HD(int i, int j) {
-        Z(i, j, c) = a * X(i, j, c) + b * Y(i, j, c);
-      });
+      for_each_cell(bb, detail::LincombKernel{Z, X, Y, a, b, c});
   }
 }
 

@@ -20,13 +20,20 @@
 /// add_block. Parite validee sur CPU (build/ ET backend Kokkos Serial) : eval_rhs bit-identique a
 /// add_block (cf. tests/test_compiled_model_parity.cpp).
 ///
-/// DEVICE (backend Kokkos Cuda) : tout le chemin make_block est desormais bati sur des FONCTEURS
-/// NOMMES (build_block via AdvanceExplicit/AdvanceImex/RhsInto/BlockRhsEval, make_max_speed via
-/// MaxSpeed ; cf. block_builder.hpp), au lieu des lambdas premiere-instanciees depuis cette TU
-/// appelante. nvcc emet alors fiablement le kernel device imbrique (AssembleRhsKernel) ; le crash
-/// device a l'execution (Heisenbug : OK Serial + compute-sanitizer, segfault Cuda) est leve, et la
-/// parite A==B (dres=0) est obtenue sur GH200. C'est le backend "compile" de l'ideal
+/// DEVICE (backend Kokkos Cuda) : le chemin TRANSPORT make_block est bati sur des FONCTEURS NOMMES
+/// (build_block via AdvanceExplicit/AdvanceImex/RhsInto/BlockRhsEval, make_max_speed via MaxSpeed ;
+/// cf. block_builder.hpp), au lieu des lambdas premiere-instanciees depuis cette TU appelante. nvcc
+/// emet alors fiablement le kernel device imbrique (AssembleRhsKernel) : la parite A==B (dres=0) du
+/// residu transport est obtenue sur GH200 (#64). C'est le backend "compile" de l'ideal
 /// m.compile_or_jit() pour un binaire de production.
+///
+/// LA MEME limite valait pour le chemin ELLIPTIQUE / MAILLAGE de solve_fields (fill_boundary, BC
+/// physiques, operateur de Poisson, lisseur GS, arithmetique MultiFab), restes en lambdas etendues
+/// inline et donc victimes du MEME bug nvcc : Release Cuda SANS -g segfaute dans solve_fields (#93,
+/// Heisenbug : OK Serial + compute-sanitizer + -g). Ces kernels sont eux aussi convertis en foncteurs
+/// nommes (mf_arith / fill_boundary / physical_bc / poisson_operator / geometric_mg). La parite GH200
+/// du chemin de PRODUCTION COMPLET (solve_fields + transport, np=1) est validee une fois #93 referme ;
+/// les cas MPI multi-rang du System non decoupe restent un suivi distinct.
 
 namespace adc {
 

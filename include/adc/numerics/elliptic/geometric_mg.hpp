@@ -11,6 +11,8 @@
 #include <adc/mesh/refinement.hpp>
 #include <adc/parallel/comm.hpp>
 
+#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS : trace de diagnostic device (#93), inerte par defaut
+#include <cstdlib>  // getenv
 #include <functional>
 #include <utility>
 #include <vector>
@@ -28,6 +30,24 @@
 // de transfert AMR (average_down / interpolate).
 
 namespace adc {
+
+// Trace de DIAGNOSTIC du V-cycle MG (jalon #93). Active uniquement si ADC_TRACE_SOLVE_FIELDS est pose ;
+// stderr + flush immediat pour localiser le dernier marqueur avant un crash device. INERTE par defaut.
+namespace detail {
+inline void mg_trace_mark(const char* w) {
+  static const bool on = std::getenv("ADC_TRACE_SOLVE_FIELDS") != nullptr;
+  if (on) { std::fprintf(stderr, "[mg] %s\n", w); std::fflush(stderr); }
+}
+
+// Copie de la composante 0 d'un champ fin (eps/eps_y/kappa discretise) vers le niveau fin du MG.
+// FONCTEUR NOMME (et non lambda ADC_HD) : meme recette device-clean que le reste (#93). Corps
+// identique -> bit-identique. Inerte sur le chemin a eps constant, exerce des qu'un champ est cable.
+struct CopyComp0Kernel {
+  Array4 d;
+  ConstArray4 s;
+  ADC_HD void operator()(int i, int j) const { d(i, j) = s(i, j, 0); }
+};
+}  // namespace detail
 
 inline BCRec homogeneous(const BCRec& b) {
   BCRec h = b;
@@ -190,7 +210,7 @@ class GeometricMG {
       Array4 e = lev_[0].eps.fab(li).array();
       const ConstArray4 s = eps_fine.fab(li).const_array();
       const Box2D b = lev_[0].eps.box(li);
-      for_each_cell(b, [=] ADC_HD(int i, int j) { e(i, j) = s(i, j, 0); });
+      for_each_cell(b, detail::CopyComp0Kernel{e, s});
     }
     fill_ghosts(lev_[0].eps, lev_[0].geom.domain, ebc);
     // niveaux grossiers : moyenne conservative du milieu, puis ghosts
@@ -240,7 +260,7 @@ class GeometricMG {
       Array4 e = lev_[0].eps_y.fab(li).array();
       const ConstArray4 s = eps_y_fine.fab(li).const_array();
       const Box2D b = lev_[0].eps_y.box(li);
-      for_each_cell(b, [=] ADC_HD(int i, int j) { e(i, j) = s(i, j, 0); });
+      for_each_cell(b, detail::CopyComp0Kernel{e, s});
     }
     fill_ghosts(lev_[0].eps_y, lev_[0].geom.domain, ebc);
     for (int l = 1; l < num_levels(); ++l) {
@@ -281,7 +301,7 @@ class GeometricMG {
       Array4 k = lev_[0].kappa.fab(li).array();
       const ConstArray4 s = kappa_fine.fab(li).const_array();
       const Box2D b = lev_[0].kappa.box(li);
-      for_each_cell(b, [=] ADC_HD(int i, int j) { k(i, j) = s(i, j, 0); });
+      for_each_cell(b, detail::CopyComp0Kernel{k, s});
     }
     for (int l = 1; l < num_levels(); ++l) average_down(lev_[l - 1].kappa, lev_[l].kappa, 2);
     has_kappa_ = true;
@@ -292,10 +312,14 @@ class GeometricMG {
   // V-cycles jusqu'a residu relatif < rel_tol (ou max_cycles). Renvoie le
   // nombre de cycles effectues. phi est conserve entre appels (warm start).
   int solve(Real rel_tol, int max_cycles) {
+    detail::mg_trace_mark("solve: avant current_residual initial");
     const Real r0 = current_residual();
+    detail::mg_trace_mark("solve: apres current_residual initial");
     if (r0 <= Real(0)) return 0;
     for (int c = 1; c <= max_cycles; ++c) {
+      detail::mg_trace_mark("solve: avant vcycle");
       vcycle();
+      detail::mg_trace_mark("solve: apres vcycle");
       if (current_residual() <= rel_tol * r0) return c;
     }
     return max_cycles;
@@ -365,9 +389,13 @@ class GeometricMG {
   // MPI (MPI_ERR_TRUNCATE). Idempotent sous replication (max local = global sur chaque rang) et
   // identite en serie -> bit-identique au comportement historique.
   Real current_residual() {
+    detail::mg_trace_mark("current_residual: avant poisson_residual");
     poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res,
                      mask_ptr(0), coef_ptr(0), eps_ptr(0), kappa_ptr(0), eps_y_ptr(0));
-    return all_reduce_max(norm_inf(lev_[0].res));
+    detail::mg_trace_mark("current_residual: apres poisson_residual, avant norm_inf");
+    const Real r = all_reduce_max(norm_inf(lev_[0].res));
+    detail::mg_trace_mark("current_residual: apres norm_inf");
+    return r;
   }
 
  private:
@@ -413,7 +441,9 @@ class GeometricMG {
     const MultiFab* ep = eps_ptr(l);
     const MultiFab* kp = kappa_ptr(l);
     const MultiFab* ey = eps_y_ptr(l);  // nullptr => isotrope (eps_y = eps_x)
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): avant gs_smooth(nu1) [premier kernel GS]");
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu1_, mk, ck, ep, kp, ey);
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres gs_smooth(nu1)");
 
     if (l + 1 == static_cast<int>(lev_.size())) {
       gs_smooth(L.phi, L.rhs, L.geom, bc, nbottom_, mk, ck, ep, kp, ey);  // bottom solve
@@ -422,16 +452,22 @@ class GeometricMG {
     }
 
     poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep, kp, ey);
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres poisson_residual");
     MGLevel& C = lev_[l + 1];
     average_down(L.res, C.rhs, 2);  // restriction du residu
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres average_down");
     C.phi.set_val(0.0);
     vcycle_rec(l + 1, homogeneous(bc));
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres recursion grossiere");
 
     MultiFab corr(L.ba, L.dm, 1, 0);
     interpolate(C.phi, corr, 2);  // prolongation de la correction
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres interpolate");
     saxpy(L.phi, Real(1), corr);
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres saxpy");
     if (mk) zero_conductor(L.phi, L.mask);  // refige le conducteur
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu2_, mk, ck, ep, kp, ey);
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres gs_smooth(nu2)");
   }
 
   BCRec bc_;

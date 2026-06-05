@@ -36,16 +36,51 @@ struct Periodicity {
 
 namespace detail {
 
+// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels d'echange de halos. Memes raisons que le
+// reste du chemin elliptique/maillage (#93, recette #64) : fill_boundary est premiere-instancie depuis
+// le V-cycle MG tire d'une TU externe ; une lambda etendue y fait buter l'emission du kernel device
+// sous nvcc (-O Release sans -g). Corps strictement identique -> bit-identique CPU et device.
+struct CopyShiftedKernel {
+  Array4 d;
+  ConstArray4 s;
+  int sx, sy, c;
+  ADC_HD void operator()(int i, int j) const { d(i, j, c) = s(i - sx, j - sy, c); }
+};
+
 // dst(i, j, c) = src(i - sx, j - sy, c) pour (i, j) dans region.
 inline void copy_shifted(Fab2D& dst, const Fab2D& src, const Box2D& region,
                          int sx, int sy, int ncomp) {
   Array4 d = dst.array();
   ConstArray4 s = src.const_array();
   for (int c = 0; c < ncomp; ++c)
-    for_each_cell(region, [=] ADC_HD(int i, int j) {
-      d(i, j, c) = s(i - sx, j - sy, c);
-    });
+    for_each_cell(region, CopyShiftedKernel{d, s, sx, sy, c});
 }
+
+// Pack d'un job d'envoi : sb[b0 + c*rsz + off] = s(i - sx, jc - sy, c), off = (jc-lo1)*rnx + (i-lo0).
+struct PackKernel {
+  Real* sb;
+  ConstArray4 s;
+  long b0, rsz;
+  int lo0, lo1, rnx, sx, sy, ncl;
+  ADC_HD void operator()(int i, int jc) const {
+    const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
+    for (int c = 0; c < ncl; ++c)
+      sb[b0 + static_cast<long>(c) * rsz + off] = s(i - sx, jc - sy, c);
+  }
+};
+
+// Unpack d'un job de reception : d(i, jc, c) = rb[b0 + c*rsz + off], off = (jc-lo1)*rnx + (i-lo0).
+struct UnpackKernel {
+  const Real* rb;
+  Array4 d;
+  long b0, rsz;
+  int lo0, lo1, rnx, ncl;
+  ADC_HD void operator()(int i, int jc) const {
+    const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
+    for (int c = 0; c < ncl; ++c)
+      d(i, jc, c) = rb[b0 + static_cast<long>(c) * rsz + off];
+  }
+};
 
 }  // namespace detail
 
@@ -172,10 +207,8 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
       const long rsz = static_cast<long>(rnx) * jb.region.ny();
       const int sx = jb.sx, sy = jb.sy, ncl = nc;
       const long b0 = base;
-      for_each_cell(jb.region, [=] ADC_HD(int i, int jc) {
-        const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
-        for (int c = 0; c < ncl; ++c) sb[b0 + static_cast<long>(c) * rsz + off] = s(i - sx, jc - sy, c);
-      });
+      for_each_cell(jb.region,
+                    detail::PackKernel{sb, s, b0, rsz, lo0, lo1, rnx, sx, sy, ncl});
       base += rsz * nc;
     }
   }
@@ -215,10 +248,8 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
       const long rsz = static_cast<long>(rnx) * jb.region.ny();
       const int ncl = h.nc;
       const long b0 = base;
-      for_each_cell(jb.region, [=] ADC_HD(int i, int jc) {
-        const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
-        for (int c = 0; c < ncl; ++c) d(i, jc, c) = rb[b0 + static_cast<long>(c) * rsz + off];
-      });
+      for_each_cell(jb.region,
+                    detail::UnpackKernel{rb, d, b0, rsz, lo0, lo1, rnx, ncl});
       base += rsz * ncl;
     }
   }
