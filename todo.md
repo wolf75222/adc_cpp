@@ -196,15 +196,17 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       np=1 bit-identique) + test `test_mpi_system_solve_fields_np{1,2,4}`. (#99) **Device-MPI production
       VALIDE sur GH200** (job ROMEO 641249, harness #93) pour `geometric_mg` : np=1/2/4 exit 0, pas de
       deadlock, bit-identique cross-np, compute-sanitizer 0 erreur, `dmax_abs` Cuda-vs-Serial dans la
-      tolerance ; `fft` np=1 OK. **`fft` np>1 = SIGSEGV, bug reel suivi separe** (`PoissonFFTSolver::solve()`
-      deref `fab(0)` sur rang non-proprietaire ; garde `assert(n_ranks()==1)` compile-out en Release NDEBUG).
+      tolerance ; `fft` np=1 OK. **`fft` np>1 sous System = REFUSE proprement (#106)** : `set_poisson("fft")`
+      leve si n_ranks()>1, et l'`assert(n_ranks()==1)` compile-out devient un garde-fou DUR (throw actif en
+      Release) dans `PoissonFFTSolver`. fft direct = np=1 seulement ; `DistributedFFTSolver` existe (teste a
+      part, `test_mpi_fft_distributed`) mais non route dans System (layout bandes vs box unique).
 - [ ] **Etape 7 - DIFFERE** : domaine disque FV / paroi transport + reproduction papier quantitative
       (cf. section 6 ; subordonne a la confirmation haute resolution du plateau l=4).
 
 **STATUT HONNETE (ne PAS presenter "Plan Ideal termine")** : System production CPU = OK ; AmrSystem
 production CPU = OK ; demonstrateurs DSL Python = OK ; **production GPU np=1 = OK (GH200, #97)** ;
 **`solve_fields` MPI np=1/2/4 = OK cote CPU/CI (#99)** ; **device-MPI production `geometric_mg` = VALIDE
-(GH200, #93, np=1/2/4)** ; **`fft` np>1 = segfault, suivi separe** ; `set_density`/`get_state` multi-rang
+(GH200, #93, np=1/2/4)** ; **`fft` np>1 sous System = refuse proprement (#106), plus de segfault** (DistributedFFTSolver non route, layout) ; `set_density`/`get_state` multi-rang
 = hors scope ; WENO5 sur `CompiledModel` = SUPPORTE (3 ghosts via `set_block_ghosts`, #102) ;
 `PAPER_ROADMAP.md` = a NE PAS reecrire automatiquement
 (attend la validation humaine du sweep O5).
