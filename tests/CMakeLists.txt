@@ -83,6 +83,14 @@ adc_add_test(test_splitting)
 adc_add_test(test_imex_ap)
 adc_add_test(test_ap_limit)
 
+# --- Proto Phase-0 : mesure decisive pour le chantier "grille polaire diocotron" ---
+# Quantifie la diffusion du gradient radial d'un anneau en rotation azimutale :
+#   bras 1 (Cartesien) = WENO5+Rusanov+SSPRK3 sur grille (x,y) reguliere,
+#   bras 2 (Polaire)   = WENO5+Rusanov 1D en theta sur grille (r,theta).
+# Verdict : SUCCESS si perte polaire <= 2% ET rapport C/P >= 5 (ordre de grandeur).
+# ABORT si le rapport est marginal (< 5) : le verrou n'est alors pas la geometrie.
+adc_add_test(test_polar_ring_advection)
+
 # --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
 adc_add_test(test_dynamic_model)
 
