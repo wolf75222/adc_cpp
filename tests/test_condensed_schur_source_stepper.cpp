@@ -115,6 +115,10 @@ struct ConstBzKernel {
 
 // norme L2 GLOBALE (sqrt sum x^2) de la VITESSE (mx,my)/rho de l'etat : diagnostic de stabilite.
 static double vel_l2(const MultiFab& st, int c_rho, int c_mx, int c_my) {
+  // st a pu etre ecrit par un kernel device (make_state / step) : rendre la residence hote valide
+  // avant la lecture directe (Kokkos::Cuda = device_fence ; no-op en serie/OpenMP). Sans cela on lit
+  // st pendant que le kernel est en vol (memoire unifiee non ordonnee) -> valeurs indefinies (NaN).
+  sync_host();
   double s = 0;
   for (int li = 0; li < st.local_size(); ++li) {
     const ConstArray4 u = st.fab(li).const_array();
@@ -131,6 +135,7 @@ static double vel_l2(const MultiFab& st, int c_rho, int c_mx, int c_my) {
 
 // ecart L2 GLOBAL relatif des VITESSES entre deux etats (sur les cellules valides).
 static double vel_rel_diff(const MultiFab& a, const MultiFab& b, int c_rho, int c_mx, int c_my) {
+  sync_host();  // a/b ecrits par des kernels device : residence hote valide avant la lecture directe.
   double num = 0, den = 0;
   for (int li = 0; li < a.local_size(); ++li) {
     const ConstArray4 ua = a.fab(li).const_array();
@@ -159,6 +164,7 @@ static double implicit_residual(const MultiFab& st_new, const MultiFab& vxn, con
                                 Real dt, int c_rho, int c_mx, int c_my) {
   device_fence();
   fill_ghosts(phi_new, geom.domain, bc);  // grad centre lit phi(i+-1), phi(j+-1)
+  device_fence();  // fill_ghosts est un kernel device : on attend avant la lecture hote des ghosts.
   const Real half_idx = Real(1) / (Real(2) * geom.dx());
   const Real half_idy = Real(1) / (Real(2) * geom.dy());
   double d = 0;
@@ -333,6 +339,7 @@ struct RefIntegrator {
   // y <- y + h/6 (k0 + 2 k1 + 2 k2 + k3)
   void combine(MultiFab& y, MultiFab (&k)[4], Real h) {
     const Real s = h / Real(6);
+    sync_host();  // k0..k3 ecrits par derivative (kernels device) : residence hote valide avant lecture.
     for (int li = 0; li < y.local_size(); ++li) {
       Array4 Y = y.fab(li).array();
       const ConstArray4 k0 = k[0].fab(li).const_array(), k1 = k[1].fab(li).const_array(),
@@ -348,6 +355,7 @@ struct RefIntegrator {
 // Copie l'etat fluide (mom/rho -> v) vers (vx, vy, phi) de l'integrateur de reference, + phi0.
 static void load_ref_from_state(RefIntegrator& R, const MultiFab& st, const MultiFab& phi0,
                                 int c_rho, int c_mx, int c_my) {
+  sync_host();  // st/phi0 ecrits par make_state (kernels device) : residence hote valide avant lecture.
   for (int li = 0; li < st.local_size(); ++li) {
     const ConstArray4 u = st.fab(li).const_array();
     Array4 vx = R.vx.fab(li).array(), vy = R.vy.fab(li).array(), p = R.phi.fab(li).array();
@@ -366,6 +374,7 @@ static void load_ref_from_state(RefIntegrator& R, const MultiFab& st, const Mult
 // ecart relatif des vitesses entre un etat fluide (st) et les champs vx,vy d'un integrateur de ref.
 static double vel_rel_state_vs_ref(const MultiFab& st, const RefIntegrator& R, int c_rho, int c_mx,
                                    int c_my) {
+  sync_host();  // st/R.vx/R.vy ecrits par des kernels device : residence hote valide avant lecture.
   double num = 0, den = 0;
   for (int li = 0; li < st.local_size(); ++li) {
     const ConstArray4 u = st.fab(li).const_array();
@@ -483,6 +492,7 @@ int main(int argc, char** argv) {
     for (int k = 0; k < K; ++k) expl.euler_step(dt);
     double v_expl = 0;
     {  // norme L2 des vitesses de l'integrateur explicite
+      sync_host();  // vx/vy ecrits par euler_step (kernels device) : residence hote valide avant lecture.
       double s = 0;
       for (int li = 0; li < expl.vx.local_size(); ++li) {
         const ConstArray4 vx = expl.vx.fab(li).const_array(), vy = expl.vy.fab(li).const_array();

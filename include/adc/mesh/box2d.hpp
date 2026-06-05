@@ -1,5 +1,7 @@
 #pragma once
 
+#include <adc/core/types.hpp>  // ADC_HD : nx/ny/length appeles depuis Geometry::dx() dans un kernel device
+
 #include <algorithm>
 
 // Box2D : l'espace d'indices entier d'une grille cartesienne 2D, cellule au
@@ -24,9 +26,12 @@ struct Box2D {
     return Box2D{{0, 0}, {nx - 1, ny - 1}};
   }
 
-  int length(int d) const { return hi[d] - lo[d] + 1; }
-  int nx() const { return length(0); }
-  int ny() const { return length(1); }
+  // ADC_HD : Geometry::dx()/dy() (eux-memes ADC_HD) lisent domain.nx()/ny() ; un kernel device qui
+  // appelle geom.x_cell(i) descend jusqu'ici. Sans ADC_HD c'est un __host__ depuis __device__ -> nvcc
+  // rend du GARBAGE (souvent 0) sans erreur. Arithmetique entiere pure, device-safe, hote inchange.
+  ADC_HD int length(int d) const { return hi[d] - lo[d] + 1; }
+  ADC_HD int nx() const { return length(0); }
+  ADC_HD int ny() const { return length(1); }
   long num_cells() const {
     return static_cast<long>(std::max(0, nx())) * std::max(0, ny());
   }

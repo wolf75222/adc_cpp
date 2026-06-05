@@ -135,6 +135,12 @@ struct MaxWaveSpeedKernel {
 // de model.max_wave_speed(U, aux, dir). Sert au choix CFL du pas (dt = cfl*h/w_max). Pour un
 // modele sans transport (flux nul, w=0) -> 0, donc ne contraint pas le pas. Reduction par le
 // seam (vraie reduction device sous Kokkos, boucle hote sinon).
+//
+// COLLECTIF SOUS MPI : on agrege par all_reduce_max sur TOUS les rangs (meme convention que
+// AmrCouplerMp::max_wave_speed et GeometricMG::current_residual). Sans cet all-reduce, chaque rang
+// ne voit que le max de SES boites : step_cfl / step_adaptive choisissent alors un dt DIFFERENT par
+// rang (le rang dont le max local est plus faible prend un pas trop grand) et la simulation diverge
+// ou desynchronise les rangs. En serie all_reduce_max est l'identite (comportement inchange).
 template <class Model>
 inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
                               const MultiFab& aux) {
@@ -144,7 +150,7 @@ inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
     const ConstArray4 a = aux.fab(li).const_array();
     m = std::max(m, reduce_max_cell(U.box(li), detail::MaxWaveSpeedKernel<Model>{model, u, a}));
   }
-  return m;
+  return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
 }
 
 // Compat : flux de Rusanov en fonction libre, delegue a la politique RusanovFlux

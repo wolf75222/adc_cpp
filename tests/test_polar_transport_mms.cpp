@@ -142,6 +142,10 @@ static ErrNorms mms_error(int nr, int nth, bool cv) {
   model.B0 = kB0;
   assemble_rhs_polar<Limiter, RusanovFlux>(model, U, aux, g, R);
 
+  // R vient d'etre ecrit par un kernel device : rendre la residence HOTE valide avant la lecture
+  // directe ci-dessous (sous Kokkos::Cuda = device_fence ; no-op en serie/OpenMP). Sans cela on lit
+  // R pendant que le kernel est en vol (memoire unifiee non ordonnee) -> R quasi nul, ordre faux.
+  sync_host();
   const ConstArray4 r = R.fab(0).const_array();
   const double dr = g.dr(), dth = g.dtheta();
   double l1 = 0.0, vol = 0.0, linf = 0.0;
@@ -161,6 +165,9 @@ static ErrNorms mms_error(int nr, int nth, bool cv) {
 // --- (B) CONSERVATION : champ purement azimutal (v_r = 0), masse conservee sur K pas SSPRK3 -------
 // Masse totale FV = Sum_ij n_ij r_i dr dtheta.
 static double total_mass(const MultiFab& U, const PolarGeometry& g, const Box2D& dom) {
+  // U a pu etre ecrit par les kernels device de l'integrateur (SSPRK3) : on rend la residence hote
+  // valide avant la lecture directe ci-dessous (Kokkos::Cuda = device_fence ; no-op en serie/OpenMP).
+  sync_host();
   const ConstArray4 u = U.fab(0).const_array();
   const double dr = g.dr(), dth = g.dtheta();
   double m = 0.0;

@@ -14,10 +14,16 @@ struct Geometry {
   Box2D domain{};
   Real xlo = 0, xhi = 1, ylo = 0, yhi = 1;
 
-  Real dx() const { return (xhi - xlo) / domain.nx(); }
-  Real dy() const { return (yhi - ylo) / domain.ny(); }
-  Real x_cell(int i) const { return xlo + (i + Real(0.5)) * dx(); }
-  Real y_cell(int j) const { return ylo + (j + Real(0.5)) * dy(); }
+  // Accesseurs ADC_HD : arithmetique pure, capturables par valeur et appelables DEPUIS UN KERNEL
+  // device. Sans ADC_HD, geom.x_cell(i) dans un kernel Kokkos::Cuda est un appel __host__ depuis
+  // __device__ : nvcc rend une valeur GARBAGE (souvent 0) sur device, SANS erreur de compilation ni
+  // d'execution. Un noyau d'init qui pose x = geom.x_cell(i) voit alors x = 0 sur GPU (sin(pi*0) = 0)
+  // -> champ silencieusement nul (defaut observe sur test_condensed_schur). Geometry est un POD
+  // trivial : l'annotation est gratuite et laisse le chemin hote bit-identique.
+  ADC_HD Real dx() const { return (xhi - xlo) / domain.nx(); }
+  ADC_HD Real dy() const { return (yhi - ylo) / domain.ny(); }
+  ADC_HD Real x_cell(int i) const { return xlo + (i + Real(0.5)) * dx(); }
+  ADC_HD Real y_cell(int j) const { return ylo + (j + Real(0.5)) * dy(); }
 
   // Meme extent physique, domaine d'indices raffine.
   Geometry refine(int r) const { return Geometry{domain.refine(r), xlo, xhi, ylo, yhi}; }
@@ -48,16 +54,18 @@ struct PolarGeometry {
   // 'using namespace adc;' de plusieurs tests). Constexpr -> aucune surcharge.
   static constexpr Real kTwoPi = Real(2) * Real(3.14159265358979323846);
 
-  Real dr() const { return (r_max - r_min) / domain.nx(); }
-  Real dtheta() const { return kTwoPi / domain.ny(); }
+  // Accesseurs ADC_HD (meme motif que Geometry) : device-callable depuis un kernel sans rendre du
+  // garbage sous nvcc. Arithmetique pure, hote bit-identique.
+  ADC_HD Real dr() const { return (r_max - r_min) / domain.nx(); }
+  ADC_HD Real dtheta() const { return kTwoPi / domain.ny(); }
   /// Rayon au CENTRE de la cellule radiale i (i = 0 -> r_min + dr/2).
-  Real r_cell(int i) const { return r_min + (i + Real(0.5)) * dr(); }
+  ADC_HD Real r_cell(int i) const { return r_min + (i + Real(0.5)) * dr(); }
   /// Rayon a la FACE radiale i (face entre les cellules i-1 et i ; i = 0 -> r_min, i = nr -> r_max).
-  Real r_face(int i) const { return r_min + i * dr(); }
+  ADC_HD Real r_face(int i) const { return r_min + i * dr(); }
   /// Angle au CENTRE de la cellule azimutale j (j = 0 -> dtheta/2).
-  Real theta_cell(int j) const { return (j + Real(0.5)) * dtheta(); }
+  ADC_HD Real theta_cell(int j) const { return (j + Real(0.5)) * dtheta(); }
   /// Angle a la FACE azimutale j (face entre les cellules j-1 et j).
-  Real theta_face(int j) const { return j * dtheta(); }
+  ADC_HD Real theta_face(int j) const { return j * dtheta(); }
 
   // Meme extent physique annulaire, domaine d'indices raffine (pendant de Geometry::refine).
   PolarGeometry refine(int r) const { return PolarGeometry{domain.refine(r), r_min, r_max}; }
