@@ -5,6 +5,7 @@
 #include <adc/runtime/block_builder.hpp>  // GridContext + make_block/make_max_speed (fermetures compilees)
 #include <adc/runtime/model_factory.hpp>  // detail::dispatch_model + briques compilees
 #include <adc/coupling/condensed_schur_source_stepper.hpp>  // etage source condense par Schur (adc.Split / CondensedSchur, #126)
+#include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel : source couplee generique (DSL P5, bytecode)
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>
 #include <adc/numerics/time/implicit_stepper.hpp>   // backward_euler_source
@@ -1414,6 +1415,110 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
       ub(i, j, eb) += q;
     });
   });
+}
+
+void System::add_coupled_source(const std::vector<std::string>& in_blocks,
+                                const std::vector<std::string>& in_roles,
+                                const std::vector<double>& consts,
+                                const std::vector<std::string>& out_blocks,
+                                const std::vector<std::string>& out_roles,
+                                const std::vector<int>& prog_ops,
+                                const std::vector<int>& prog_args,
+                                const std::vector<int>& prog_lens) {
+  Impl* P = p_.get();
+  const int n_in = static_cast<int>(in_blocks.size());
+  const int n_const = static_cast<int>(consts.size());
+  const int n_terms = static_cast<int>(out_blocks.size());
+  // --- validation de forme (avant tout pas, erreurs EXPLICITES) ------------------------------------
+  if (n_terms == 0)
+    throw std::runtime_error("System::add_coupled_source : aucun terme de source (out_blocks vide)");
+  if (static_cast<int>(in_roles.size()) != n_in)
+    throw std::runtime_error("System::add_coupled_source : in_blocks / in_roles de tailles differentes");
+  if (static_cast<int>(out_roles.size()) != n_terms || static_cast<int>(prog_lens.size()) != n_terms)
+    throw std::runtime_error("System::add_coupled_source : out_blocks / out_roles / prog_lens de tailles "
+                             "differentes");
+  if (prog_ops.size() != prog_args.size())
+    throw std::runtime_error("System::add_coupled_source : prog_ops / prog_args de tailles differentes");
+  if (n_in + n_const > kCsMaxReg)
+    throw std::runtime_error("System::add_coupled_source : trop de registres (entrees + constantes > " +
+                             std::to_string(kCsMaxReg) + ")");
+  if (n_terms > kCsMaxTerms)
+    throw std::runtime_error("System::add_coupled_source : trop de termes de source (> " +
+                             std::to_string(kCsMaxTerms) + ")");
+  // Resout role -> composante par le descripteur CONSERVATIF du bloc (comme add_collision) ; fallback
+  // comp 0 si le bloc ne renseigne pas le role. Un bloc inconnu leve via P->index().
+  auto resolve = [&](const std::string& block, const std::string& role) -> std::pair<int, int> {
+    const int sidx = P->index(block);  // leve si bloc inconnu
+    const VariableRole r = role_from_name(role);
+    if (r == VariableRole::Custom)
+      throw std::runtime_error("System::add_coupled_source : role '" + role + "' inconnu (bloc '" +
+                               block + "')");
+    const int comp = role_index(P->sp[static_cast<std::size_t>(sidx)].cons_vars, r, 0);
+    return {sidx, comp};
+  };
+  // Entrees : (espece, composante) lues par cellule. Capturees par INDICE (les fabs peuvent etre
+  // reallouees entre l'enregistrement et l'application : on reconstruit les Array4 a CHAQUE pas).
+  struct InRef { int sidx, comp; };
+  std::vector<InRef> ins(static_cast<std::size_t>(n_in));
+  for (int c = 0; c < n_in; ++c) {
+    auto [s, comp] = resolve(in_blocks[static_cast<std::size_t>(c)], in_roles[static_cast<std::size_t>(c)]);
+    ins[static_cast<std::size_t>(c)] = {s, comp};
+  }
+  struct OutRef { int sidx, comp; CsProgram prog; };
+  std::vector<OutRef> outs(static_cast<std::size_t>(n_terms));
+  int off = 0;
+  for (int t = 0; t < n_terms; ++t) {
+    auto [s, comp] = resolve(out_blocks[static_cast<std::size_t>(t)], out_roles[static_cast<std::size_t>(t)]);
+    const int len = prog_lens[static_cast<std::size_t>(t)];
+    if (len < 0 || len > kCsMaxProg)
+      throw std::runtime_error("System::add_coupled_source : programme du terme " + std::to_string(t) +
+                               " trop long (> " + std::to_string(kCsMaxProg) + ")");
+    if (off + len > static_cast<int>(prog_ops.size()))
+      throw std::runtime_error("System::add_coupled_source : prog_lens incoherent avec prog_ops");
+    CsProgram pg;
+    pg.len = len;
+    for (int k = 0; k < len; ++k) {
+      const int opc = prog_ops[static_cast<std::size_t>(off + k)];
+      const int a = prog_args[static_cast<std::size_t>(off + k)];
+      if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
+        throw std::runtime_error("System::add_coupled_source : opcode invalide");
+      if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
+        throw std::runtime_error("System::add_coupled_source : registre hors bornes dans le programme");
+      pg.op[k] = opc;
+      pg.arg[k] = a;
+    }
+    outs[static_cast<std::size_t>(t)] = {s, comp, pg};
+    off += len;
+  }
+  // Toutes les especes touchees (entrees + sorties) partagent la DistributionMapping du System (une box
+  // repartie en round-robin), donc meme local_size() et meme indexation locale -> on iterait en parallele
+  // sur les fabs locaux. Conversion en valeurs CAPTUREES (pas de reference a 'this' du lambda C++).
+  std::vector<Real> kconsts(consts.begin(), consts.end());
+  P->couplings.push_back(
+      [P, ins, outs, kconsts, n_in, n_const, n_terms](Real dt) {
+        // MPI-safe : iteration sur les fabs LOCAUX du premier bloc d'entree (ou de sortie si aucune
+        // entree). local_size()==0 sur un rang sans box -> boucle vide, no-op (pas de fab(0) en dur).
+        const int sref = n_in > 0 ? ins[0].sidx : outs[0].sidx;
+        MultiFab& Uref = P->sp[static_cast<std::size_t>(sref)].U;
+        for (int li = 0; li < Uref.local_size(); ++li) {
+          CoupledSourceKernel kern;
+          kern.dt = dt;
+          kern.n_in = n_in;
+          kern.n_const = n_const;
+          kern.n_terms = n_terms;
+          for (int c = 0; c < n_in; ++c) {
+            kern.in[c] = P->sp[static_cast<std::size_t>(ins[static_cast<std::size_t>(c)].sidx)].U.fab(li).array();
+            kern.in_comp[c] = ins[static_cast<std::size_t>(c)].comp;
+          }
+          for (int c = 0; c < n_const; ++c) kern.consts[c] = kconsts[static_cast<std::size_t>(c)];
+          for (int t = 0; t < n_terms; ++t) {
+            kern.out[t] = P->sp[static_cast<std::size_t>(outs[static_cast<std::size_t>(t)].sidx)].U.fab(li).array();
+            kern.out_comp[t] = outs[static_cast<std::size_t>(t)].comp;
+            kern.prog[t] = outs[static_cast<std::size_t>(t)].prog;
+          }
+          for_each_cell(Uref.box(li), kern);  // foncteur NOMME (device-clean), additif forward-Euler
+        }
+      });
 }
 
 void System::set_source_stage(const std::string& name, const std::string& kind, double theta,

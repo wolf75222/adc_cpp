@@ -299,6 +299,35 @@ class System {
   void set_source_stage(const std::string& name, const std::string& kind, double theta,
                         double alpha);
 
+  /// Ajoute une SOURCE COUPLEE GENERIQUE inter-especes decrite par un BYTECODE (adc.dsl.CoupledSource,
+  /// P5 phase 1, splitting EXPLICITE forward-Euler apres le transport). A la difference des couplages
+  /// nommes (add_ionization / add_collision / add_thermal_exchange) qui figent une formule, celle-ci lit
+  /// des champs (bloc, role) en ENTREE et ecrit des termes de source (bloc, role) calcules par des
+  /// EXPRESSIONS symboliques compilees en bytecode postfixe (machine a pile, evaluee dans le meme
+  /// for_each_cell device ; aucun callback Python par cellule). Reutilise EXACTEMENT le seam
+  /// d'application des couplages (P->couplings) ; MPI-safe (iteration sur les fabs locaux,
+  /// local_size()==0 -> no-op).
+  ///
+  /// ABI PLATE (aucun objet C++ ne traverse la frontiere) :
+  /// @param in_blocks  noms des blocs lus en entree (un par registre d'entree) ;
+  /// @param in_roles   roles correspondants (resolus en composante par le descripteur du bloc) ;
+  /// @param consts     constantes (parametres .param()), chargees apres les entrees ;
+  /// @param out_blocks bloc cible de chaque terme de source ;
+  /// @param out_roles  role cible de chaque terme de source ;
+  /// @param prog_ops   opcodes concatenes de TOUS les termes (machine a pile, cf. CsOp) ;
+  /// @param prog_args  arguments paralleles a prog_ops (indice de registre pour PushReg) ;
+  /// @param prog_lens  longueur du programme de chaque terme (segmente prog_ops/prog_args dans l'ordre).
+  /// Les blocs / roles inconnus, une capacite depassee ou un programme mal forme levent une erreur
+  /// EXPLICITE (avant tout pas). Sans appel, le chemin par defaut reste BIT-IDENTIQUE.
+  void add_coupled_source(const std::vector<std::string>& in_blocks,
+                          const std::vector<std::string>& in_roles,
+                          const std::vector<double>& consts,
+                          const std::vector<std::string>& out_blocks,
+                          const std::vector<std::string>& out_roles,
+                          const std::vector<int>& prog_ops,
+                          const std::vector<int>& prog_args,
+                          const std::vector<int>& prog_lens);
+
   void solve_fields();   ///< resout Poisson puis derive aux = (phi, grad phi)
   void step(double dt);  ///< solve_fields, puis avance chaque bloc selon son schema
   void advance(double dt, int nsteps);

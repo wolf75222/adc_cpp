@@ -966,9 +966,20 @@ class System:
                          epsilon=model.operator.epsilon)
 
     def add_coupling(self, coupling):
-        """Ajoute un couplage inter-especes : objet adc.Ionization / Collision / ThermalExchange.
-        Equivaut a add_ionization / add_collision / add_thermal_exchange."""
-        if isinstance(coupling, Ionization):
+        """Ajoute un couplage inter-especes (operator-split, applique apres le transport) :
+
+        - objet NOMME adc.Ionization / Collision / ThermalExchange -> formule figee
+          (add_ionization / add_collision / add_thermal_exchange) ;
+        - CompiledCoupledSource (adc.dsl.CoupledSource(...).compile(...)) -> source GENERIQUE decrite en
+          formules, transportee en bytecode et interpretee cote C++ (System.add_coupled_source ; aucun
+          callback Python par cellule, MPI-safe)."""
+        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+
+        if isinstance(coupling, dsl.CompiledCoupledSource):
+            self._s.add_coupled_source(coupling.in_blocks, coupling.in_roles, coupling.consts,
+                                       coupling.out_blocks, coupling.out_roles, coupling.prog_ops,
+                                       coupling.prog_args, coupling.prog_lens)
+        elif isinstance(coupling, Ionization):
             self.add_ionization(electron=coupling.electron, ion=coupling.ion,
                                 neutral=coupling.neutral, rate=coupling.rate)
         elif isinstance(coupling, Collision):
@@ -976,7 +987,8 @@ class System:
         elif isinstance(coupling, ThermalExchange):
             self.add_thermal_exchange(coupling.a, coupling.b, coupling.rate)
         else:
-            raise TypeError("add_coupling attend adc.Ionization / Collision / ThermalExchange")
+            raise TypeError("add_coupling attend adc.Ionization / Collision / ThermalExchange ou un "
+                            "CompiledCoupledSource (adc.dsl.CoupledSource(...).compile(...))")
 
     def block_names(self):
         """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python).

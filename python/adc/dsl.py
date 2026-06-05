@@ -201,6 +201,7 @@ class Expr:
     def __truediv__(self, o): return Div(self, _wrap(o))
     def __rtruediv__(self, o): return Div(_wrap(o), self)
     def __neg__(self): return Neg(self)
+    def __pos__(self): return self  # +expr = identite (l'API CoupledSource ecrit +k*ne*ng)
     def __pow__(self, o): return Pow(self, _wrap(o))
 
     def eval(self, env): raise NotImplementedError
@@ -1274,6 +1275,7 @@ class Param:
     def __truediv__(self, o): return Div(self._const, _wrap(o))
     def __rtruediv__(self, o): return Div(_wrap(o), self._const)
     def __neg__(self): return Neg(self._const)
+    def __pos__(self): return self._const  # +param = identite (Expr), pour +k*ne*ng
     def __pow__(self, o): return Pow(self._const, _wrap(o))
 
     def __float__(self): return self.value
@@ -1984,3 +1986,252 @@ class HybridModel:
             prim_names=self.prim_names, n_vars=self.n_vars, gamma=self.gamma, n_aux=self.n_aux,
             params={}, caps=_BACKEND_CAPS[backend], abi_key=abi_key, model_hash=model_hash,
             cxx=cxx, std=std)
+
+
+# --- Source COUPLEE generique inter-especes (P5 phase 1, splitting EXPLICITE) -----------------------
+#
+# adc.dsl.CoupledSource decrit un couplage ARBITRAIRE entre especes en FORMULES, par-dela les couplages
+# nommes (Ionization / Collision / ThermalExchange) qui figent une formule. On lit des champs (bloc,
+# role) en ENTREE et on ECRIT des termes de source (bloc, role) donnes par des expressions symboliques
+# (memes Expr que le DSL des modeles : +, *, -, /, **, sqrt, params). compile(backend) compile chaque
+# expr en BYTECODE postfixe (machine a pile) que C++ evalue dans le meme for_each_cell device que les
+# couplages nommes -- AUCUN .so ni callback Python par cellule. Applique APRES le transport (split).
+
+# Inverse de adc::role_name : nom de role DSL (CamelCase, cf. CANONICAL_ROLES) -> nom canonique
+# lowercase attendu par adc::role_from_name (frontiere C++). Source unique de la correspondance.
+_ROLE_TO_CANONICAL = {
+    "Density": "density",
+    "MomentumX": "momentum_x", "MomentumY": "momentum_y", "MomentumZ": "momentum_z",
+    "Energy": "energy",
+    "VelocityX": "velocity_x", "VelocityY": "velocity_y", "VelocityZ": "velocity_z",
+    "Pressure": "pressure", "Temperature": "temperature", "Scalar": "scalar",
+}
+
+
+def _role_canonical(role):
+    """Nom de role canonique (lowercase, frontiere C++) pour un role DSL. Accepte deja-canonique."""
+    if role in _ROLE_TO_CANONICAL:
+        return _ROLE_TO_CANONICAL[role]
+    if role in _ROLE_TO_CANONICAL.values():
+        return role
+    raise ValueError("CoupledSource : role %r inconnu (roles : %s)"
+                     % (role, ", ".join(sorted(_ROLE_TO_CANONICAL))))
+
+
+# Opcodes de la machine a pile : MIROIR de adc::CsOp (coupled_source_program.hpp). Valeurs FIGEES
+# (transportees telles quelles par l'ABI Python -> C++).
+_CS_PUSHREG = 0
+_CS_ADD = 1
+_CS_SUB = 2
+_CS_MUL = 3
+_CS_DIV = 4
+_CS_NEG = 5
+_CS_POW = 6
+_CS_SQRT = 7
+
+# Capacites FIGEES, miroir de coupled_source_program.hpp (kCsMaxReg / kCsMaxTerms / kCsMaxProg). On
+# diagnostique cote Python (erreur claire) avant d'atteindre la frontiere C++.
+_CS_MAX_REG = 32
+_CS_MAX_TERMS = 16
+_CS_MAX_PROG = 256
+
+
+class _CsField(Var):
+    """Handle symbolique d'un (bloc, role) : c'est une Var (donc une Expr a part entiere) dont le NOM
+    d'environnement '<bloc>::<role>' indexe a la fois l'eval numpy (env) et le registre d'entree au
+    codegen bytecode. Sous-classer Var donne directement operateurs / _wrap / to_cpp / eval / deps, donc
+    `+k * ne * ng` construit l'arbre Expr attendu sans delegation."""
+
+    def __init__(self, block, role):
+        super().__init__("%s::%s" % (block, role), "coupled_field")
+        self.block = block
+        self.role = role
+
+    def __repr__(self): return "_CsField(%r, %r)" % (self.block, self.role)
+
+
+class _CsBlock:
+    """Aide a la construction : `src.block("electrons").role("density")` -> _CsField. Memorise les
+    (bloc, role) demandes sur la source pour fixer l'ordre des registres d'entree."""
+
+    def __init__(self, src, name):
+        self._src = src
+        self.name = name
+
+    def role(self, role):
+        return self._src._field(self.name, role)
+
+
+class CompiledCoupledSource:
+    """Resultat de CoupledSource.compile(...) : empaquette l'ABI PLATE (bytecode) prete pour
+    System.add_coupled_source, + l'evaluateur numpy de REFERENCE (memes Expr) pour les tests / un
+    integrateur Python. Aucun .so : le couplage est interprete cote C++ (machine a pile device)."""
+
+    def __init__(self, name, backend, in_blocks, in_roles, consts, out_blocks, out_roles,
+                 prog_ops, prog_args, prog_lens, terms, reg_order):
+        self.name = name
+        self.backend = backend
+        self.in_blocks = list(in_blocks)
+        self.in_roles = list(in_roles)        # canoniques (lowercase, frontiere C++)
+        self.consts = list(consts)
+        self.out_blocks = list(out_blocks)
+        self.out_roles = list(out_roles)      # canoniques
+        self.prog_ops = list(prog_ops)
+        self.prog_args = list(prog_args)
+        self.prog_lens = list(prog_lens)
+        self._terms = list(terms)             # [(block, role_canonical, Expr)] : reference numpy
+        self._reg_order = list(reg_order)     # noms d'env '<bloc>::<role>' dans l'ordre des registres
+
+    def __repr__(self):
+        return ("CompiledCoupledSource(name=%r, backend=%r, n_in=%d, n_const=%d, n_terms=%d)"
+                % (self.name, self.backend, len(self.in_blocks), len(self.consts),
+                   len(self.out_blocks)))
+
+    def reference_terms(self, fields):
+        """Evalue les termes de source sur des tableaux numpy (REFERENCE pour les tests). @p fields :
+        dict (bloc, role_canonical) -> tableau ; renvoie [(bloc, role_canonical, dS)] avec dS = S
+        (le terme symbolique evalue), AVANT multiplication par dt. Memes Expr que le codegen C++."""
+        env = {}
+        for (block, role), arr in fields.items():
+            env["%s::%s" % (block, _role_canonical(role))] = arr
+        return [(b, r, e.eval(env)) for (b, r, e) in self._terms]
+
+
+class CoupledSource:
+    """Source COUPLEE generique inter-especes (adc.dsl), Phase 1 (splitting EXPLICITE). Reutilise les
+    Expr du DSL des modeles pour les formules de source ; aucun couplage n'est code en dur.
+
+        src = adc.dsl.CoupledSource("ionization")
+        ne = src.block("electrons").role("density")
+        ng = src.block("neutrals").role("density")
+        k  = src.param("Kiz", 1.0)
+        src.add("electrons", role="density", expr=+k * ne * ng)
+        src.add("neutrals",  role="density", expr=-k * ne * ng)
+        sim.add_coupling(src.compile(backend="production"))
+
+    compile(backend) -> CompiledCoupledSource : ABI plate (bytecode) consommee par
+    System.add_coupled_source (cote C++ : machine a pile evaluee dans un for_each_cell device, MPI-safe,
+    foncteur nomme). Le backend (production / prototype) ne change PAS la numerique : le bytecode est
+    interprete cote C++ dans les deux cas (pas de .so par couplage) ; il est conserve pour l'introspection
+    et la parite d'API avec le DSL des modeles."""
+
+    def __init__(self, name="coupled_source"):
+        self.name = name
+        self._fields = {}    # '<bloc>::<role>' -> _CsField (registre d'entree unique par (bloc, role))
+        self._reg_order = []  # ordre d'apparition des champs d'entree (-> ordre des registres)
+        self._params = {}    # nom -> Param
+        self._terms = []     # [(block, role_canonical, Expr)]
+
+    # --- construction symbolique ----------------------------------------------------------------
+    def block(self, name):
+        """Handle d'un bloc : .role(role) en tire un champ symbolique (bloc, role)."""
+        return _CsBlock(self, name)
+
+    def _field(self, block, role):
+        canon = _role_canonical(role)
+        key = "%s::%s" % (block, canon)
+        if key not in self._fields:
+            f = _CsField(block, canon)
+            self._fields[key] = f
+            self._reg_order.append(key)
+        return self._fields[key]
+
+    def param(self, name, value):
+        """Parametre NOMME constant, utilisable comme une Expr (s'inline comme reel dans le bytecode)."""
+        p = Param(name, value, kind="const")
+        self._params[name] = p
+        return p
+
+    def add(self, block, role=None, expr=None):
+        """Ajoute un TERME de source : d_t (bloc.role) += expr. @p expr est une Expr / _CsField / Param /
+        nombre. Plusieurs add sur le meme (bloc, role) s'ADDITIONNENT (somme de termes sources)."""
+        if role is None:
+            raise ValueError("CoupledSource.add : role= requis")
+        if expr is None:
+            raise ValueError("CoupledSource.add : expr= requis")
+        e = expr if isinstance(expr, Expr) else _wrap(expr)  # _CsField / Var sont deja des Expr ; Param/scalaire -> _wrap
+        self._terms.append((block, _role_canonical(role), e))
+        return self
+
+    # --- codegen bytecode -----------------------------------------------------------------------
+    def _emit_program(self, expr, reg_index):
+        """Compile @p expr (arbre Expr) en bytecode postfixe (listes ops/args paralleles) contre la table
+        de registres @p reg_index (nom d'env '<bloc>::<role>' OU valeur constante -> indice de registre).
+        Les constantes (Const / Param inline) deviennent un registre constant dedie. Parcours postfixe
+        (recursion sur la structure de l'arbre) : une Var pousse son registre, un binaire emet ses deux
+        sous-arbres puis l'opcode, etc. -- exactement la semantique de CsProgram::eval cote C++."""
+        ops, args = [], []
+
+        def emit(node):
+            if isinstance(node, Var):
+                if node.name not in reg_index:
+                    raise ValueError("CoupledSource : champ %r utilise sans .block(...).role(...)"
+                                     % node.name)
+                ops.append(_CS_PUSHREG); args.append(reg_index[node.name])
+            elif isinstance(node, Const):
+                ops.append(_CS_PUSHREG); args.append(self._const_reg(node.value, reg_index))
+            elif isinstance(node, Neg):
+                emit(node.a); ops.append(_CS_NEG); args.append(0)
+            elif isinstance(node, Sqrt):
+                emit(node.a); ops.append(_CS_SQRT); args.append(0)
+            elif isinstance(node, Add):
+                emit(node.a); emit(node.b); ops.append(_CS_ADD); args.append(0)
+            elif isinstance(node, Sub):
+                emit(node.a); emit(node.b); ops.append(_CS_SUB); args.append(0)
+            elif isinstance(node, Mul):
+                emit(node.a); emit(node.b); ops.append(_CS_MUL); args.append(0)
+            elif isinstance(node, Div):
+                emit(node.a); emit(node.b); ops.append(_CS_DIV); args.append(0)
+            elif isinstance(node, Pow):
+                emit(node.a); emit(node.b); ops.append(_CS_POW); args.append(0)
+            else:
+                raise TypeError("CoupledSource : noeud d'expression non supporte en Phase 1 : %r "
+                                "(supporte : +, -, *, /, **, -unaire, sqrt, champ, constante)"
+                                % type(node).__name__)
+
+        emit(expr)
+        return ops, args
+
+    def _const_reg(self, value, reg_index):
+        """Indice de registre d'une constante @p value (deduplique). Les constantes occupent les
+        registres APRES les champs d'entree (cf. CoupledSourceKernel : r[n_in + c] = consts[c])."""
+        key = ("const", float(value))
+        if key not in reg_index:
+            reg_index[key] = len(self._reg_order) + len(self._consts)
+            self._consts.append(float(value))
+        return reg_index[key]
+
+    def compile(self, backend="production"):
+        """Compile la source en CompiledCoupledSource (ABI plate bytecode). @p backend documente
+        l'intention (parite d'API avec le DSL des modeles) ; la numerique est identique (interprete C++)."""
+        if not self._terms:
+            raise ValueError("CoupledSource.compile : aucun terme (.add(...) requis)")
+        # Table de registres : champs d'entree d'abord (ordre d'apparition), constantes ensuite.
+        reg_index = {key: i for i, key in enumerate(self._reg_order)}
+        self._consts = []
+        prog_ops, prog_args, prog_lens = [], [], []
+        out_blocks, out_roles = [], []
+        for (block, role, expr) in self._terms:
+            ops, args = self._emit_program(expr, reg_index)
+            if len(ops) > _CS_MAX_PROG:
+                raise ValueError("CoupledSource : programme du terme (%s.%s) trop long (%d > %d)"
+                                 % (block, role, len(ops), _CS_MAX_PROG))
+            prog_ops += ops
+            prog_args += args
+            prog_lens.append(len(ops))
+            out_blocks.append(block)
+            out_roles.append(role)
+        n_reg = len(self._reg_order) + len(self._consts)
+        if n_reg > _CS_MAX_REG:
+            raise ValueError("CoupledSource : trop de registres (entrees + constantes = %d > %d)"
+                             % (n_reg, _CS_MAX_REG))
+        if len(out_blocks) > _CS_MAX_TERMS:
+            raise ValueError("CoupledSource : trop de termes de source (%d > %d)"
+                             % (len(out_blocks), _CS_MAX_TERMS))
+        in_blocks = [self._fields[key].block for key in self._reg_order]
+        in_roles = [self._fields[key].role for key in self._reg_order]
+        return CompiledCoupledSource(
+            name=self.name, backend=backend, in_blocks=in_blocks, in_roles=in_roles,
+            consts=list(self._consts), out_blocks=out_blocks, out_roles=out_roles,
+            prog_ops=prog_ops, prog_args=prog_args, prog_lens=prog_lens,
+            terms=self._terms, reg_order=self._reg_order)

@@ -117,6 +117,12 @@ PYBIND11_MODULE(_adc, m) {
       // apres le transport hyperbolique. kind='electrostatic_lorentz'. Defaut (sans appel) inchange.
       .def("set_source_stage", &System::set_source_stage, py::arg("name"), py::arg("kind"),
            py::arg("theta"), py::arg("alpha"))
+      // Source COUPLEE generique (adc.dsl.CoupledSource, P5) : ABI plate (bytecode postfixe). Lit des
+      // champs (bloc, role) et ecrit des termes de source compiles en machine a pile, appliques par
+      // splitting explicite apres le transport (meme seam que add_ionization). Sans appel, inchange.
+      .def("add_coupled_source", &System::add_coupled_source, py::arg("in_blocks"),
+           py::arg("in_roles"), py::arg("consts"), py::arg("out_blocks"), py::arg("out_roles"),
+           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"))
       .def("variable_names", &System::variable_names, py::arg("name"),
            py::arg("kind") = "conservative")
       .def("variable_roles", &System::variable_roles, py::arg("name"),

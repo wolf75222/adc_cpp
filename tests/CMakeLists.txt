@@ -455,4 +455,20 @@ if(ADC_HAS_MPI)
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_system_fft>
                      ${MPIEXEC_POSTFLAGS})
   endforeach()
+
+  # --- source COUPLEE generique (System::add_coupled_source, DSL P5) sous MPI np=1/2/4 ---
+  # La source generique s'applique par splitting (P->couplings) en iterant local_size() : MPI-safe
+  # (no-op sur un rang sans box locale, contrairement aux couplages nommes qui dereferencent fab(0)).
+  # On exerce une ionisation 3 especes codee en bytecode ; resultat INVARIANT au nombre de rangs (la box
+  # vit sur rang 0). np=1 = chemin proprietaire ; np=2/4 = chemin distribue (rangs vides). Compile le
+  # runtime System comme test_mpi_system_solve_fields.
+  add_executable(test_mpi_coupled_source test_mpi_coupled_source.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
+  target_link_libraries(test_mpi_coupled_source PRIVATE adc::adc ${CMAKE_DL_LIBS})
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_coupled_source_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_coupled_source>
+                     ${MPIEXEC_POSTFLAGS})
+  endforeach()
 endif()

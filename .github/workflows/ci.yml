@@ -75,6 +75,7 @@ jobs:
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_dynamic.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_block.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_coupled.py
+          PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_coupled_source.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_aot.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_hybrid.py
           PYTHONPATH=$PWD/build-py/python python3 python/tests/test_dsl_hybrid_bz.py
