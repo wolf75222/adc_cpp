@@ -163,8 +163,16 @@ sur N macro-pas (CADENCE / stride). Le pas macro peut etre derive du CFL par esp
 
 **Code.** `numerics/time/scheduler.hpp::advance_subcycled` lit la `TimePolicy` de chaque
 `EquationBlock` (`ExplicitTime<Method, substeps, stride>`) et appelle l'operateur adapte. Le
-`SystemDriver` expose `step_cfl(cfl)` (pas macro par CFL) et `step_adaptive(cfl)` (stride derive du
+`SystemDriver` expose `step_cfl(cfl)` et `step_adaptive(cfl)` (stride derive du
 CFL par espece). Une espece `PrescribedTime` est sautee par le scheduler.
+
+**Formule step_cfl (substeps-aware, post-#121).** Pour chaque bloc evolutif b :
+`dt_b = cfl * h * substeps_b / (stride_b * w_b)` ; le dt global est le minimum sur les blocs.
+Consequence : avec `substeps_b > 1`, `step_cfl` avance un dt PLUS GRAND qu'avant #121
+(ancienne formule : `dt = cfl * h / w_max`, sans facteur substeps). La parite bit-identique avec
+l'historique tient UNIQUEMENT pour `substeps=1` (quel que soit stride). Pour reproduire un ancien
+run calibre avec l'ancienne formule, utiliser `step(dt)` avec le dt historique explicite, PAS
+`step_cfl`.
 
 **Validation.** `test_multirate_stride` (une espece lente avancee une fois sur N),
 `test_adaptive_multirate` (`step_adaptive`, pas macro fixe par l'espece la plus contraignante),

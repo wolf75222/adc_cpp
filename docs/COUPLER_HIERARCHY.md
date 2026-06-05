@@ -120,7 +120,11 @@ explique la scission en deux classes :
     deleguee au callback `implicit_advance(*this, block, dt, ...)`.
 - `step_adaptive(cfl)` : pas macro adaptatif ; chaque bloc calcule son propre `stride`
   au runtime a partir du ratio des vitesses d'onde (`system_coupler.hpp:208-232`).
-- `step_cfl(cfl)` : `dt = cfl * min(dx,dy) / w_max` puis `step(dt)`.
+- `step_cfl(cfl)` : calcule `dt_b = cfl * min(dx,dy) * substeps_b / (stride_b * w_b)` pour chaque
+  bloc evolutif, retient le minimum, puis avance d'un `step(dt)`. Formule substeps-aware (post-#121) :
+  bit-identique avec l'historique UNIQUEMENT pour `substeps=1`. Avec `substeps>1`, le dt retourne est
+  plus grand que l'ancienne formule `cfl*h/w_max` (chaque sous-pas reste a la limite de stabilite).
+  Pour reproduire un run calibre avec l'ancienne formule, utiliser `step(dt)` avec le dt explicite.
 - `coupled_source_step(src, dt)` : etape de source de couplage inter-especes (splitting
   forward-Euler), lecture de tous les blocs + aux (`system_coupler.hpp:276-283`).
 

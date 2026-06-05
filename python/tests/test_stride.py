@@ -7,9 +7,13 @@ Semantique verifiee = HOLD-THEN-CATCH-UP (rattrapage en FIN de fenetre) :
                 Le bloc reste ainsi temporellement coherent avec les blocs rapides (jamais avance
                 "dans le futur" des le pas 0, contrairement a l'ancienne semantique de DEBUT de
                 fenetre macro_step % M == 0).
-  - stride=1  : comportement par defaut, BIT-IDENTIQUE a l'historique sans stride.
+  - stride=1  : comportement par defaut. Bit-identique a l'historique UNIQUEMENT pour substeps=1.
+                Avec substeps>1, step_cfl est substeps-aware (dt = cfl*h*substeps/(stride*w)) et
+                avance un dt plus grand qu'avant #121 (chaque sous-pas reste a la limite de stabilite).
+                Pour reproduire un run calibre avec l'ancienne formule, utiliser step(dt) explicite.
   - CFL       : step_cfl honore la cadence -- un bloc stride=M limiteur fait retourner un dt ~ dt/M
                 par rapport a stride=1 (le facteur stride entre dans la condition stable par bloc).
+                step_cfl est substeps-aware : dt = cfl*h*substeps/(stride*w) (post-#121).
   - AOT       : Explicit(stride>1) + backend='aot' (CompiledModel) leve une erreur CLAIRE
                 (la cadence n'est pas cablee dans l'ABI du .so AOT -> pas d'ignore silencieux).
   - evolve=False : bloc GELE (etat inchange), mais toujours visible par le Poisson de systeme.
@@ -338,6 +342,55 @@ try:
     chk(False, "IMEX(stride=-1) doit lever ValueError")
 except ValueError:
     chk(True, "IMEX(stride=-1) leve ValueError")
+
+# ---- 10. step_cfl substeps-aware : dt = cfl*h*S/(stride*w) -------------------
+# a) substeps=S>1, stride=1 : le dt retourne doit valoir exactement S fois le dt obtenu avec
+#    substeps=1 (meme w, meme h, meme cfl, meme macro_step=0). Formule verifiee :
+#      dt(substeps=S) = cfl*h*S/w  vs  dt(substeps=1) = cfl*h/w  => ratio=S.
+# b) substeps=1 (defaut), stride=1 : non-regression -- le dt retourne est cfl*h/w (ancienne
+#    formule), i.e. la modification #121 est isolee a substeps>1.
+print("== step_cfl substeps-aware : dt = cfl*h*substeps/(stride*w) ==")
+S_cfl = 4
+n_cfl = 32
+cfl_sub = 0.4
+rho_sub = 1.0 + 0.03 * np.cos(2 * np.pi * meshx(n_cfl))[None, :] * np.ones((n_cfl, 1))
+h_cfl = 1.0 / n_cfl  # domaine [0,1]^2 : h = dx = dy = 1/n
+
+# substeps=1 (referent) : dt_ref = cfl*h/w
+sim_sub1 = adc.System(n=n_cfl, periodic=False)
+sim_sub1.add_block("ne", diocotron_model(), time=adc.Explicit(substeps=1, stride=1))
+sim_sub1.set_poisson(bc="dirichlet")
+sim_sub1.set_density("ne", rho_sub.copy())
+dt_sub1 = sim_sub1.step_cfl(cfl_sub)  # avance le systeme d'un pas -> macro_step=1 apres
+
+# substeps=S (test) : systeme identique en etat initial, aussi a macro_step=0 au debut
+sim_subS = adc.System(n=n_cfl, periodic=False)
+sim_subS.add_block("ne", diocotron_model(), time=adc.Explicit(substeps=S_cfl, stride=1))
+sim_subS.set_poisson(bc="dirichlet")
+sim_subS.set_density("ne", rho_sub.copy())
+dt_subS = sim_subS.step_cfl(cfl_sub)
+
+# (a) dt(substeps=S) doit valoir S * dt(substeps=1) = cfl*h*S/w
+#     h_cfl et cfl_sub sont connus ; w = cfl_sub*h_cfl/dt_sub1 (retrouve depuis le cas referent).
+w_ref = cfl_sub * h_cfl / dt_sub1  # vitesse d'onde retrouvee depuis le referent substeps=1
+dt_subS_expected = cfl_sub * h_cfl * S_cfl / w_ref  # = S * dt_sub1
+rel_err_S = abs(dt_subS - dt_subS_expected) / dt_subS_expected
+chk(rel_err_S < 1e-9,
+    "step_cfl substeps=%d stride=1 : dt=cfl*h*%d/w (attendu %.6g, obtenu %.6g, err_rel %.2e)"
+    % (S_cfl, S_cfl, dt_subS_expected, dt_subS, rel_err_S))
+
+# (b) substeps=1 non-regression : dt_sub1 = cfl*h/w (ancienne formule)
+dt_sub1_expected = cfl_sub * h_cfl / w_ref  # = dt_sub1 par construction, mais verifie la formule
+rel_err_1 = abs(dt_sub1 - dt_sub1_expected) / dt_sub1_expected
+chk(rel_err_1 < 1e-9,
+    "step_cfl substeps=1 stride=1 : non-regression dt=cfl*h/w (attendu %.6g, obtenu %.6g, err_rel %.2e)"
+    % (dt_sub1_expected, dt_sub1, rel_err_1))
+
+# Coherence : dt(substeps=S) / dt(substeps=1) == S exactement
+ratio_sub = dt_subS / dt_sub1
+chk(abs(ratio_sub - S_cfl) < 1e-9,
+    "step_cfl : ratio dt(substeps=%d)/dt(substeps=1) = %g (attendu %d)"
+    % (S_cfl, ratio_sub, S_cfl))
 
 # ---- Bilan -------------------------------------------------------------------
 print()

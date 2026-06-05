@@ -1664,12 +1664,20 @@ double System::step_cfl(double cfl) {
   Impl* P = p_.get();
   P->solve_fields();
   const Real h = std::min(P->geom.dx(), P->geom.dy());
-  // CFL PAR BLOC, FACTEUR STRIDE INCLUS. Un bloc de cadence M avance d'un pas effectif M*dt en
-  // substeps_b sous-pas, donc chaque sous-pas vaut stride_b * dt / substeps_b : la condition stable
-  // par sous-pas est stride_b * dt / substeps_b <= cfl * h / w_b, soit
+  // CFL PAR BLOC, FACTEUR STRIDE ET SUBSTEPS INCLUS. Un bloc de cadence M avance d'un pas effectif
+  // M*dt en substeps_b sous-pas, donc chaque sous-pas vaut stride_b * dt / substeps_b : la condition
+  // stable par sous-pas est stride_b * dt / substeps_b <= cfl * h / w_b, soit
   //   dt <= cfl * h * substeps_b / (stride_b * w_b).
   // Le dt GLOBAL est le min sur les blocs evolutifs (le plus contraignant). Sans cela, le pas calcule
   // sur w_max seul puis multiplie par M violerait la CFL d'un facteur M sur le bloc a stride.
+  //
+  // RETRO-COMPATIBILITE (post-#121). La formule est SUBSTEPS-AWARE : avec substeps_b > 1, le dt
+  // retourne est substeps_b fois plus grand que l'ancienne formule dt = cfl*h/(stride*w).
+  // bit-identique seulement pour substeps=1 (a tout stride) ; step_cfl est desormais substeps-aware
+  // (dt = cfl*h*substeps/(stride*w)), donc un run step_cfl avec substeps>1 avance un dt plus grand
+  // qu'avant #121 (pas CFL-maximal, chaque sous-pas est a la limite de stabilite).
+  // Pour reproduire un run calibre avec l'ancienne formule, utiliser step(dt) avec le dt historique
+  // explicite, PAS step_cfl.
   double dt = std::numeric_limits<double>::infinity();
   for (auto& s : P->sp) {
     if (!s.evolve) continue;  // bloc gele : ne contraint pas le pas
