@@ -701,6 +701,36 @@ class CondensedSchur:
         if len(mom) != 2:
             raise ValueError(
                 "CondensedSchur : momentum doit etre un couple (role_x, role_y) (recu %r)" % (momentum,))
+        # Descripteurs roles / champs NON cables : l'ABI C++ set_source_stage ne prend que
+        # (name, kind, theta, alpha) ; l'etage condense HARDCODE les roles conservatifs
+        # (Density / MomentumX / MomentumY, Energy optionnel) et les champs B_z / phi (cf.
+        # System::set_source_stage). Un descripteur different serait IGNORE en silence : on le
+        # REJETTE explicitement (rejet plutot qu'ignore silencieux) tout en gardant la signature
+        # (ces parametres pourront devenir configurables quand le C++ les transportera).
+        if density != Role.Density:
+            raise ValueError(
+                "CondensedSchur : density=%r non configurable (l'etage source C++ hardcode le role "
+                "Density) ; laisser density=adc.Role.Density (defaut)." % (density,))
+        if mom != (Role.MomentumX, Role.MomentumY):
+            raise ValueError(
+                "CondensedSchur : momentum=%r non configurable (l'etage source C++ hardcode les roles "
+                "MomentumX / MomentumY) ; laisser momentum=(adc.Role.MomentumX, adc.Role.MomentumY) "
+                "(defaut)." % (mom,))
+        if energy is not None and energy != Role.Energy:
+            raise ValueError(
+                "CondensedSchur : energy=%r non configurable (l'etage source C++ traite l'energie par "
+                "le role Energy hardcode, optionnel) ; laisser energy=None ou energy=adc.Role.Energy."
+                % (energy,))
+        if magnetic_field != "B_z":
+            raise ValueError(
+                "CondensedSchur : magnetic_field=%r non configurable (l'etage source C++ lit le champ "
+                "B_z hardcode, Omega = B_z) ; laisser magnetic_field='B_z' (defaut)."
+                % (magnetic_field,))
+        if potential != "phi":
+            raise ValueError(
+                "CondensedSchur : potential=%r non configurable (l'etage source C++ utilise le "
+                "potentiel phi du Poisson de systeme) ; laisser potential='phi' (defaut)."
+                % (potential,))
         self.kind = kind
         self.theta = float(theta)
         self.alpha = float(alpha)
@@ -812,7 +842,10 @@ class System:
         @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (defaut minmod+rusanov+conservatif).
         @p time : adc.Explicit / IMEX (defaut Explicit). @p substeps : surcharge time.substeps.
         @p stride : surcharge time.stride (1 = chaque macro-pas, defaut bit-identique).
-        @p names : noms des composantes (longueur = n_vars du modele compile). @p evolve : bloc avance.
+        @p names : noms des composantes (longueur = n_vars du modele compile). @p evolve : bloc avance ;
+        evolve=False (champ gele) n'est cable que sur le chemin natif (ModelSpec -> add_block, backend
+        'production' -> add_native_block). Sur backend 'prototype'/'aot' (l'ABI .so ne transporte pas
+        evolve) un evolve=False est REJETE explicitement -> utiliser un bloc natif (add_background).
         """
         from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
 
@@ -891,6 +924,16 @@ class System:
                     "add_equation : backend 'prototype' (JIT, residu hote Rusanov ordre 1) n'expose "
                     "que riemann='rusanov' (recu '%s') ; utiliser backend='aot'/'production' pour "
                     "HLLC/Roe" % spatial.flux)
+            # evolve=False (bloc GELE / fond fixe) n'est PAS cable : l'ABI add_dynamic_block ne
+            # transporte pas evolve (push_dynamic le force a true cote C++) -> le bloc serait avance
+            # en SILENCE. On le REJETTE (rejet plutot qu'ignore silencieux). Pour un champ gele,
+            # utiliser un bloc natif/production (add_background -> add_block(..., evolve=False)).
+            if not evolve:
+                raise ValueError(
+                    "add_equation : evolve=False non supporte sur backend 'prototype' (l'ABI du .so JIT "
+                    "ne transporte pas evolve ; le bloc serait avance en silence). Utiliser un modele "
+                    "natif compose adc.Model(...) -> add_block(..., evolve=False) (ou add_background) "
+                    "pour un champ gele.")
             self._s.add_dynamic_block(name, compiled.so_path, nsub, names_arg, spatial.limiter)
             return
         if adder == "add_compiled_block":
@@ -905,6 +948,17 @@ class System:
                     "transporte pas la cadence ; le bloc tournerait a stride=1 en silence). Utiliser "
                     "backend='production' (chemin natif, cadence cablee) ou un modele natif compose "
                     "adc.Model(...) -> add_block." % nstride)
+            # evolve=False (bloc GELE / fond fixe) n'est PAS cable : l'ABI add_compiled_block ne
+            # transporte pas evolve (add_compiled_block le force a true cote C++) -> le bloc serait
+            # avance en SILENCE. On le REJETTE (rejet plutot qu'ignore silencieux). Pour un champ gele,
+            # utiliser backend='production' (add_native_block transporte evolve) ou un modele natif
+            # compose adc.Model(...) -> add_block(..., evolve=False) (ou add_background).
+            if not evolve:
+                raise ValueError(
+                    "add_equation : evolve=False non supporte sur backend 'aot' (l'ABI du .so AOT ne "
+                    "transporte pas evolve ; le bloc serait avance en silence). Utiliser "
+                    "backend='production' (chemin natif, evolve cable) ou un modele natif compose "
+                    "adc.Model(...) -> add_block(..., evolve=False) (ou add_background) pour un champ gele.")
             self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                        spatial.recon, time.kind, nsub, names_arg)
             return
@@ -1071,6 +1125,15 @@ class AmrSystem:
     def add_block(self, name, model, spatial=None, time=None):
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
+        # adc.Split (etage source condense par Schur) n'a PAS de pendant AMR : set_source_stage n'est
+        # cable que sur System (pas sur AmrSystem cote bindings). Split exposant .kind/.substeps, il
+        # passerait ici comme un transport seul et la source condensee serait PERDUE en silence. On le
+        # rejette explicitement (meme garde que System.add_block).
+        if isinstance(time, Split):
+            raise TypeError(
+                "AmrSystem.add_block : adc.Split (etage source condense par Schur) n'est pas supporte "
+                "sur AMR (AMR n'a pas de pendant de Schur-splitting ; set_source_stage n'est cable que "
+                "sur System). Utiliser un System (non raffine) pour l'etage source condense.")
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1))
 
@@ -1099,6 +1162,17 @@ class AmrSystem:
 
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
+
+        # adc.Split (etage source condense par Schur) n'a PAS de pendant AMR : set_source_stage n'est
+        # cable que sur System (pas sur AmrSystem cote bindings). Split exposant .kind/.substeps, il
+        # passerait ici comme un transport seul et la source condensee serait PERDUE en silence. On le
+        # rejette explicitement (meme garde que System.add_block, avant tout aiguillage).
+        if isinstance(time, Split):
+            raise TypeError(
+                "AmrSystem.add_equation : adc.Split (etage source condense par Schur) n'est pas "
+                "supporte sur AMR (AMR n'a pas de pendant de Schur-splitting ; set_source_stage n'est "
+                "cable que sur System). Utiliser un System (non raffine) pour l'etage source condense.")
+
         nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
 
         # --- ModelSpec : briques natives composees -> add_block (chemin existant) ---

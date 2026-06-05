@@ -106,7 +106,87 @@ def vel_l2(sim):
     return float(np.sqrt(np.sum(P["u"] ** 2 + P["v"] ** 2)))
 
 
+def raises(exc_types, fn, *args, **kw):
+    """Renvoie l'exception levee par fn (du type attendu), ou leve AssertionError si rien n'est leve /
+    le type ne correspond pas. Equivaut a pytest.raises mais SANS dependance pytest (la CI lance ces
+    tests comme de simples scripts python3, pytest n'est pas installe)."""
+    try:
+        fn(*args, **kw)
+    except exc_types as e:
+        return e
+    except Exception as e:  # pragma: no cover - diagnostic d'un mauvais type d'erreur
+        raise AssertionError("attendu %r, leve %r (%s)" % (exc_types, type(e).__name__, e))
+    raise AssertionError("attendu %r, aucune exception levee" % (exc_types,))
+
+
+def scalar_native_model():
+    """Modele natif (ModelSpec) diocotron-like (Scalar + ExB), valide sur AmrSystem (cf. test_bindings).
+    Sert a exercer les gardes de facade (rejet de adc.Split sur AmrSystem) SANS compilateur C++ : la
+    garde Split leve AVANT tout usage du modele (juste apres les defauts), le modele reste un argument
+    valide pour ne pas masquer le rejet par une autre erreur."""
+    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
+                     source=adc.NoSource(),
+                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+
+
+def check_condensed_schur_descriptors():
+    """(e) FINDING 6 : les descripteurs roles / champs de adc.CondensedSchur NE sont PAS transportes
+    au C++ (set_source_stage ne prend que name/kind/theta/alpha ; l'etage condense hardcode les roles
+    Density/MomentumX/MomentumY et les champs B_z / phi). Un descripteur != defaut serait IGNORE en
+    silence : on verifie qu'il est REJETE (ValueError), et que le chemin par defaut construit toujours."""
+    # Defaut explicite ET implicite : doivent construire SANS lever (parite stricte avec l'existant).
+    adc.CondensedSchur()
+    adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
+                       density=adc.Role.Density,
+                       momentum=(adc.Role.MomentumX, adc.Role.MomentumY),
+                       energy=None, magnetic_field="B_z", potential="phi")
+    chk(True, "(e) CondensedSchur defaut (explicite + implicite) construit sans lever")
+    # energy=adc.Role.Energy est tolere (c'est la valeur que le C++ utilise pour l'energie optionnelle).
+    adc.CondensedSchur(energy=adc.Role.Energy)
+    chk(True, "(e) CondensedSchur(energy=adc.Role.Energy) tolere (valeur hardcodee C++)")
+
+    e_density = raises(ValueError, lambda: adc.CondensedSchur(density=adc.Role.Energy))
+    raises(ValueError, lambda: adc.CondensedSchur(momentum=(adc.Role.VelocityX, adc.Role.VelocityY)))
+    raises(ValueError, lambda: adc.CondensedSchur(energy=adc.Role.Scalar))
+    e_bz = raises(ValueError, lambda: adc.CondensedSchur(magnetic_field="B_custom"))
+    e_phi = raises(ValueError, lambda: adc.CondensedSchur(potential="psi"))
+    chk("density" in str(e_density) and "B_z" in str(e_bz) and "phi" in str(e_phi),
+        "(e) CondensedSchur(descripteur != defaut) -> ValueError (5 descripteurs, messages clairs)")
+
+
+def check_amr_split_rejected():
+    """(f) FINDING 5 : adc.Split (etage source condense par Schur) n'a PAS de pendant AMR
+    (set_source_stage n'est cable que sur System). AmrSystem.add_block ET add_equation doivent le
+    REJETER explicitement (sinon Split, exposant .kind/.substeps, passerait comme un transport seul et
+    la source condensee serait perdue en silence). On exige le MEME rejet que System.add_block."""
+    n, L = 16, 1.0
+    split = adc.Split(hyperbolic=adc.Explicit(),
+                      source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5))
+    model = scalar_native_model()
+
+    amr1 = adc.AmrSystem(n=n, L=L, periodic=True)
+    e1 = raises((TypeError, ValueError), amr1.add_block, "ne", model=model, time=split)
+    chk("Split" in str(e1) or "Schur" in str(e1),
+        "(f) AmrSystem.add_block(time=adc.Split(...)) -> rejet explicite (Split/Schur)")
+
+    amr2 = adc.AmrSystem(n=n, L=L, periodic=True)
+    e2 = raises((TypeError, ValueError), amr2.add_equation, "ne", model=model, time=split)
+    chk("Split" in str(e2) or "Schur" in str(e2),
+        "(f) AmrSystem.add_equation(time=adc.Split(...)) -> rejet explicite (Split/Schur)")
+
+    # DEFAUT INCHANGE : un bloc AMR en adc.Explicit pur s'ajoute toujours sans lever.
+    amr_ok = adc.AmrSystem(n=n, L=L, periodic=True)
+    amr_ok.add_block("ne", model=scalar_native_model(), time=adc.Explicit())
+    chk(True, "(f) AmrSystem.add_block(time=adc.Explicit()) defaut inchange (pas de rejet)")
+
+
 def main():
+    # --- Gardes de facade pures Python (FINDING 5/6) : aucune compilation requise, on les exerce
+    # AVANT le saut conditionnel pour qu'elles tournent meme sans compilateur C++. -----------------
+    check_condensed_schur_descriptors()
+    check_amr_split_rejected()
+
+
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
         print("skip  compilateur ou en-tetes adc absents -> test_schur_split saute (%s)" % INCLUDE)
@@ -239,6 +319,34 @@ def main():
     bg = sim_two.get_primitive_state("bg")
     chk(bool(np.all(np.isfinite(bg["u"]))) and bool(np.all(np.isfinite(bg["v"]))),
         "(d) bloc voisin Explicit pur reste fini en presence d'un bloc Split")
+
+    # ------------------------------------------------------------------------------------------
+    # (g) FINDING 4 : evolve=False (bloc GELE) est SILENCIEUSEMENT IGNORE sur les backends compiles
+    #     'prototype' (add_dynamic_block) et 'aot' (add_compiled_block) : leur ABI .so ne transporte
+    #     PAS evolve (force a true cote C++). On exige un REJET explicite (ValueError) nommant le
+    #     backend, et on verifie que evolve=True (defaut) passe toujours sur ces memes backends.
+    # ------------------------------------------------------------------------------------------
+    sim_aot = adc.System(n=n, L=L, periodic=False)
+    sim_aot.set_poisson(bc="dirichlet")
+    sim_aot.set_magnetic_field(np.ones((n, n)))
+    e_aot = raises(ValueError, sim_aot.add_equation, "frozen", model=compiled,
+                   time=adc.Explicit(), evolve=False)
+    chk("aot" in str(e_aot) and "evolve" in str(e_aot),
+        "(g) backend 'aot' : evolve=False -> ValueError (nomme le backend)")
+    # evolve=True (defaut) : meme backend, meme bloc -> aucun rejet (chemin nominal inchange).
+    sim_aot.add_equation("ok", model=compiled, time=adc.Explicit())  # evolve True par defaut
+    chk(True, "(g) backend 'aot' : evolve=True (defaut) passe toujours (pas de rejet)")
+
+    proto = isothermal_magnetized().compile(backend="prototype", include=INCLUDE)
+    sim_proto = adc.System(n=n, L=L, periodic=False)
+    sim_proto.set_poisson(bc="dirichlet")
+    sim_proto.set_magnetic_field(np.ones((n, n)))
+    e_proto = raises(ValueError, sim_proto.add_equation, "frozen", model=proto,
+                     time=adc.Explicit(), evolve=False)
+    chk("prototype" in str(e_proto) and "evolve" in str(e_proto),
+        "(g) backend 'prototype' : evolve=False -> ValueError (nomme le backend)")
+    sim_proto.add_equation("ok", model=proto, time=adc.Explicit())  # evolve True par defaut
+    chk(True, "(g) backend 'prototype' : evolve=True (defaut) passe toujours (pas de rejet)")
 
     if fails == 0:
         print("test_schur_split : tout est vert")
