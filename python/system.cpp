@@ -26,6 +26,7 @@
 #include <cstdlib>  // getenv
 #include <dlfcn.h>  // dlopen/dlsym : chargement d'une brique generee (.so)
 #include <functional>
+#include <limits>  // std::numeric_limits (CFL par bloc : dt = min sur les blocs)
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -230,6 +231,7 @@ struct System::Impl {
     int ncomp;
     int substeps;                                             // sous-pas statiques (add_block)
     bool evolve;                                              // false = espece gelee (fond fixe non avance)
+    int stride = 1;                                           // cadence : avance 1 fois tous les stride macro-pas
     double gamma;                                             // pour l'energie au repos (4 var)
     std::function<void(MultiFab&, Real, int)> advance;        // (U, dt, n) : n sous-pas de dt/n
     std::function<void(MultiFab&, MultiFab&)> rhs_into;        // R <- -div F + S (Poisson fige)
@@ -255,7 +257,17 @@ struct System::Impl {
   int te_src_ = -1;                   // indice du bloc fluide source de T_e (-1 = aucune)
   std::vector<Species> sp;
   double t = 0;
+  int macro_step_ = 0;  // compteur de macro-pas (0-indexe) : sert au filtre stride par bloc
   std::vector<std::function<void(Real)>> couplings;  // sources couplees inter-especes (splitting)
+
+  // SEMANTIQUE STRIDE = HOLD-THEN-CATCH-UP (rattrapage en FIN de fenetre). Un bloc de cadence M est
+  // TENU (non avance) sur les macro-pas ou (macro_step + 1) % M != 0, puis avance d'un pas effectif
+  // M*dt au macro-pas ou (macro_step + 1) % M == 0, i.e. a la FIN de sa fenetre de M macro-pas. Au
+  // macro-pas k, le temps du systeme est (k+1)*dt et le bloc qui RATTRAPE a alors avance du meme
+  // (k+1)*dt cumule : il est temporellement COHERENT avec les blocs rapides, jamais "dans le futur".
+  // (L'ancienne semantique avancait au DEBUT de fenetre, macro_step % M == 0 : a k=0 le bloc avancait
+  // deja M*dt alors que le systeme n'avancait que dt -> bloc anticipe, couplage Poisson/source faux.)
+  static bool stride_due(int macro_step, int stride) { return (macro_step + 1) % stride == 0; }
 
   // Configuration Poisson (solveur elliptique construit paresseusement).
   std::string p_rhs = "charge_density";
@@ -560,7 +572,11 @@ struct System::Impl {
     MultiFab& rhs = ell_rhs();
     rhs.set_val(Real(0));
     adc_sf_mark("solve_fields: apres rhs.set_val(0)");
-    for (auto& s : sp) s.add_poisson_rhs(s.U, rhs);  // f = Sum_s elliptic_rhs_s(u_s)
+    // f = Sum_s elliptic_rhs_s(U_s) sur l'etat COURANT de chaque bloc. STRIDE : un bloc de cadence M
+    // est tenu (hold-then-catch-up) entre deux rattrapages, donc U_s y reste FIGE a sa derniere avance ;
+    // sa densite / charge entre dans cette somme avec un etat PERIME jusqu'a son prochain rattrapage
+    // (couplage Poisson lache du bloc lent, assume par le choix du stride).
+    for (auto& s : sp) s.add_poisson_rhs(s.U, rhs);
     adc_sf_mark("solve_fields: apres add_poisson_rhs");
     // Permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps, donc on met le rhs a
     // l'echelle 1/eps. Avec un champ eps(x) VARIABLE ou ANISOTROPE on NE le fait PAS : l'operateur
@@ -745,7 +761,7 @@ struct System::Impl {
     if (prim_vs.names.empty()) prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
     const double gamma = meta.has_gamma ? meta.gamma : 1.4;
 
-    Species block{name, MultiFab(P->ba, P->dm, NV, 2), NV, substeps, true, gamma,
+    Species block{name, MultiFab(P->ba, P->dm, NV, 2), NV, substeps, true, /*stride=*/1, gamma,
                   std::move(advance), std::move(rhs_into), std::move(max_speed), std::move(add_poisson)};
     block.cons_vars = std::move(cons_vs);
     block.prim_vars = std::move(prim_vs);
@@ -783,9 +799,10 @@ System& System::operator=(System&&) noexcept = default;
 void System::add_block(const std::string& name, const ModelSpec& model,
                        const std::string& limiter, const std::string& riemann,
                        const std::string& recon, const std::string& time, int substeps,
-                       bool evolve) {
+                       bool evolve, int stride) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
+  if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
   // @p time porte le TRAITEMENT et, en explicite, le SCHEMA RK : "explicit"/"ssprk2" = SSPRK2
   // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "imex" = transport explicite + source raide
   // implicite. La math RK reste un FONCTEUR du coeur (build_block).
@@ -822,7 +839,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   // les fermetures tournent sur les MultiFab REELS du System (halos MPI via fill_boundary, device
   // via Kokkos), sans recopie.
   install_block(name, ncomp, cons_vs, prim_vs, model.gamma, std::move(clo), std::move(max_speed),
-                std::move(add_poisson_rhs), substeps, evolve);
+                std::move(add_poisson_rhs), substeps, evolve, stride);
   // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par defaut dans
   // install_block. On reallue l'etat du bloc avec block_n_ghost(limiter) si besoin (cf. AmrSystem qui
   // alloue avec Limiter::n_ghost, PR #22) pour que fill_ghosts + assemble_rhs ne lisent pas hors
@@ -840,11 +857,13 @@ void System::install_block(const std::string& name, int ncomp,
                            const VariableSet& cons_vars, const VariableSet& prim_vars, double gamma,
                            BlockClosures closures, std::function<Real(const MultiFab&)> max_speed,
                            std::function<void(const MultiFab&, MultiFab&)> poisson_rhs,
-                           int substeps, bool evolve) {
+                           int substeps, bool evolve, int stride) {
+  if (stride < 1) throw std::runtime_error("System::install_block : stride >= 1");
   Impl* P = p_.get();
   P->sp.push_back(Impl::Species{name, MultiFab(P->ba, P->dm, ncomp, 2), ncomp, substeps, evolve,
-                                gamma, std::move(closures.advance), std::move(closures.rhs_into),
-                                std::move(max_speed), std::move(poisson_rhs)});
+                                stride, gamma, std::move(closures.advance),
+                                std::move(closures.rhs_into), std::move(max_speed),
+                                std::move(poisson_rhs)});
   P->sp.back().U.set_val(Real(0));
   P->sp.back().cons_vars = cons_vars;
   P->sp.back().prim_vars = prim_vars;
@@ -1008,7 +1027,7 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
   if (prim_vs.names.empty()) prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
   // gamma : porte par l'ABI si le modele le declare (adc_compiled_gamma), sinon defaut historique 1.4.
   const double gamma = meta.has_gamma ? meta.gamma : 1.4;
-  Impl::Species block{name, MultiFab(P->ba, P->dm, nv, 2), nv, substeps, true, gamma,
+  Impl::Species block{name, MultiFab(P->ba, P->dm, nv, 2), nv, substeps, true, /*stride=*/1, gamma,
                       std::move(advance), std::move(rhs_into), std::move(max_speed),
                       std::move(add_poisson)};
   block.cons_vars = std::move(cons_vs);
@@ -1020,8 +1039,9 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
 void System::add_native_block(const std::string& name, const std::string& so_path,
                               const std::string& limiter, const std::string& riemann,
                               const std::string& recon, const std::string& time, double gamma,
-                              int substeps, bool evolve) {
+                              int substeps, bool evolve, int stride) {
   if (substeps < 1) throw std::runtime_error("System::add_native_block : substeps >= 1");
+  if (stride < 1) throw std::runtime_error("System::add_native_block : stride >= 1");
   // Validation AMONT du schema (comme add_block / add_compiled_block) : add_compiled_model retombe
   // SILENCIEUSEMENT sur explicit/conservatif pour une chaine inconnue (imex = (time=="imex"),
   // recon_prim = (recon=="primitive")) ; on rejette donc une faute de frappe ICI plutot que de
@@ -1089,7 +1109,7 @@ void System::add_native_block(const std::string& name, const std::string& so_pat
   // loader reconstruit imex/recon_prim et appelle le gabarit. evolve est passe pour qu'un bloc fond
   // fixe (non avance) soit possible comme via add_block.
   using install_fn_t = void (*)(void*, const char*, const char*, const char*, const char*,
-                                const char*, double, int, int);
+                                const char*, double, int, int, int);
   auto install = reinterpret_cast<install_fn_t>(dlsym(h, "adc_install_native"));
   if (!install) {
     dlclose(h);
@@ -1097,7 +1117,7 @@ void System::add_native_block(const std::string& name, const std::string& so_pat
                              "dsl.compile_native / compile(backend='production'))");
   }
   install(static_cast<void*>(this), name.c_str(), limiter.c_str(), riemann.c_str(), recon.c_str(),
-          time.c_str(), gamma, substeps, evolve ? 1 : 0);
+          time.c_str(), gamma, substeps, evolve ? 1 : 0, stride);
   // Le .so reste charge (RTLD_GLOBAL) pour la duree du process : le bloc installe pointe du code
   // (fermetures de block_builder, foncteurs nommes) qui y vit. On NE le ferme PAS (pas de propriete
   // partagee a accrocher : les fermetures sont copiees dans le registre du System mais leur CODE est
@@ -1301,51 +1321,89 @@ void System::set_density(const std::string& name, const std::vector<double>& rho
 void System::solve_fields() { p_->solve_fields(); }
 
 void System::step(double dt) {
-  p_->solve_fields();
-  for (auto& s : p_->sp)
-    if (s.evolve) s.advance(s.U, Real(dt), s.substeps);  // bloc gele : non avance
-  p_->apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres transport
-  p_->t += dt;
+  Impl* P = p_.get();
+  // COUPLAGE / POISSON : solve_fields assemble f = Sum_s elliptic_rhs_s(U_s) sur l'etat COURANT de
+  // chaque bloc. Un bloc TENU (cadence M, hors fin de fenetre) y contribue avec son etat PERIME (sa
+  // derniere avance, donc figee jusqu'a son prochain rattrapage) : densite / charge stale dans la
+  // somme du Poisson tant qu'il n'a pas rattrape. Choix assume du stride (couplage lache du bloc lent).
+  P->solve_fields();
+  for (auto& s : P->sp) {
+    if (!s.evolve) continue;  // bloc gele : non avance
+    if (!Impl::stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
+    const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up : pas effectif s.stride * dt
+    s.advance(s.U, eff_dt, s.substeps);
+  }
+  P->apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres transport
+  P->t += dt;
+  P->macro_step_++;
 }
 void System::advance(double dt, int nsteps) {
   for (int s = 0; s < nsteps; ++s) step(dt);
 }
 double System::step_cfl(double cfl) {
-  p_->solve_fields();
-  Real wmax = Real(1e-30);
-  for (auto& s : p_->sp)
-    if (s.evolve) wmax = std::max(wmax, s.max_speed(s.U));  // bloc gele : ne contraint pas le pas
-  const Real h = std::min(p_->geom.dx(), p_->geom.dy());
-  const double dt = cfl * static_cast<double>(h) / static_cast<double>(wmax);
-  for (auto& s : p_->sp)
-    if (s.evolve) s.advance(s.U, Real(dt), s.substeps);
-  p_->apply_couplings(Real(dt));
-  p_->t += dt;
+  Impl* P = p_.get();
+  P->solve_fields();
+  const Real h = std::min(P->geom.dx(), P->geom.dy());
+  // CFL PAR BLOC, FACTEUR STRIDE INCLUS. Un bloc de cadence M avance d'un pas effectif M*dt en
+  // substeps_b sous-pas, donc chaque sous-pas vaut stride_b * dt / substeps_b : la condition stable
+  // par sous-pas est stride_b * dt / substeps_b <= cfl * h / w_b, soit
+  //   dt <= cfl * h * substeps_b / (stride_b * w_b).
+  // Le dt GLOBAL est le min sur les blocs evolutifs (le plus contraignant). Sans cela, le pas calcule
+  // sur w_max seul puis multiplie par M violerait la CFL d'un facteur M sur le bloc a stride.
+  double dt = std::numeric_limits<double>::infinity();
+  for (auto& s : P->sp) {
+    if (!s.evolve) continue;  // bloc gele : ne contraint pas le pas
+    const Real w = std::max(s.max_speed(s.U), Real(1e-30));
+    const double dt_b = cfl * static_cast<double>(h) * static_cast<double>(s.substeps) /
+                        (static_cast<double>(s.stride) * static_cast<double>(w));
+    dt = std::min(dt, dt_b);
+  }
+  if (!std::isfinite(dt)) dt = cfl * static_cast<double>(h) / 1e-30;  // tous geles : pas degenere
+  for (auto& s : P->sp) {
+    if (!s.evolve) continue;
+    if (!Impl::stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
+    const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up : pas effectif s.stride * dt
+    s.advance(s.U, eff_dt, s.substeps);
+  }
+  P->apply_couplings(Real(dt));
+  P->t += dt;
+  P->macro_step_++;
   return dt;
 }
 double System::step_adaptive(double cfl) {
-  p_->solve_fields();
+  Impl* P = p_.get();
+  P->solve_fields();
   // Multirate : macro-pas = pas stable du bloc le plus LENT ; chaque bloc plus rapide est
-  // sous-cycle n_b = ceil(w_b / w_min). aux fige sur le macro-pas (couplage once-per-step).
+  // sous-cycle n_b. aux fige sur le macro-pas (couplage once-per-step). SEMANTIQUE STRIDE =
+  // hold-then-catch-up : un bloc de cadence M est TENU tant que (macro_step + 1) % M != 0, puis
+  // avance d'un pas effectif M*macro_dt en fin de fenetre (cf. stride_due).
   Real wmin = Real(1e30);
   std::vector<Real> wb;
-  wb.reserve(p_->sp.size());
-  for (auto& s : p_->sp) {
+  wb.reserve(P->sp.size());
+  for (auto& s : P->sp) {
     const Real w = s.evolve ? s.max_speed(s.U) : Real(0);  // bloc gele : hors cadence
     wb.push_back(w);
     if (s.evolve) wmin = std::min(wmin, w);
   }
   if (wmin >= Real(1e30)) wmin = Real(1e-30);  // aucun bloc evolutif (tous geles)
-  const Real h = std::min(p_->geom.dx(), p_->geom.dy());
+  const Real h = std::min(P->geom.dx(), P->geom.dy());
   const double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
-  for (std::size_t b = 0; b < p_->sp.size(); ++b) {
-    if (!p_->sp[b].evolve) continue;  // bloc gele : non avance
-    int n = static_cast<int>(std::ceil(static_cast<double>(wb[b] / wmin)));
+  for (std::size_t b = 0; b < P->sp.size(); ++b) {
+    auto& s = P->sp[b];
+    if (!s.evolve) continue;  // bloc gele : non avance
+    if (!Impl::stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
+    // Sous-cyclage stable du pas EFFECTIF M*macro_dt : chaque sous-pas doit verifier
+    // M*macro_dt / n <= cfl*h / w_b, i.e. n >= ceil(M * w_b / w_min). Le facteur stride M est donc
+    // porte par le nombre de sous-pas (sans lui, n sur w_b/w_min seul violerait la CFL d'un facteur M).
+    int n = static_cast<int>(std::ceil(static_cast<double>(s.stride) *
+                                       static_cast<double>(wb[b] / wmin)));
     if (n < 1) n = 1;
-    p_->sp[b].advance(p_->sp[b].U, Real(macro_dt), n);
+    const Real eff_dt = Real(macro_dt) * Real(s.stride);  // catch-up : pas effectif M*macro_dt
+    s.advance(s.U, eff_dt, n);
   }
-  p_->apply_couplings(Real(macro_dt));
-  p_->t += macro_dt;
+  P->apply_couplings(Real(macro_dt));
+  P->t += macro_dt;
+  P->macro_step_++;
   return macro_dt;
 }
 

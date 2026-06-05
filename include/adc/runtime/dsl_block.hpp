@@ -45,7 +45,7 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
                         const std::string& riemann = "rusanov",
                         const std::string& recon = "conservative",
                         const std::string& time = "explicit", double gamma = 1.4,
-                        int substeps = 1, bool evolve = true) {
+                        int substeps = 1, bool evolve = true, int stride = 1) {
   const bool imex = (time == "imex");
   const bool recon_prim = (recon == "primitive");
   // Le bloc peut lire des champs auxiliaires supplementaires (aux_comps<Model> > 3, p.ex. B_z d'une
@@ -57,7 +57,7 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
   std::function<Real(const MultiFab&)> ms = make_max_speed(model, ctx);
   std::function<void(const MultiFab&, MultiFab&)> pr = make_poisson_rhs(model);
   sys.install_block(name, Model::n_vars, Model::conservative_vars(), Model::primitive_vars(),
-                    gamma, std::move(clo), std::move(ms), std::move(pr), substeps, evolve);
+                    gamma, std::move(clo), std::move(ms), std::move(pr), substeps, evolve, stride);
   // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par install_block.
   // On reallue l'etat du bloc avec block_n_ghost(limiter) -- MEME mecanisme qu'add_block (PR #88) --
   // pour que fill_boundary + assemble_rhs ne lisent pas hors bornes sur les vrais MultiFab du System.

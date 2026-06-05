@@ -459,40 +459,72 @@ def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"):
 
 
 class Explicit:
-    """Traitement temporel explicite. substeps : sous-cyclage du bloc.
+    """Traitement temporel explicite.
 
-    method : "ssprk2" (defaut, Shu-Osher 2 etages ordre 2) | "ssprk3" (3 etages ordre 3, moins
-             dissipatif, a apparier a une reconstruction d'ordre eleve comme weno5). Raccourci
-             ssprk3=True. Le defaut reste SSPRK2 (comportement historique inchange).
+    substeps=N : le bloc avance N fois par macro-pas, chaque sous-pas de longueur dt/N
+                 (electrons rapides : substeps=10). Defaut 1 = comportement historique.
+    stride=M   : cadence du bloc, semantique HOLD-THEN-CATCH-UP (rattrapage en FIN de fenetre).
+                 Le bloc est TENU (non avance) tant que (macro_step + 1) % M != 0, puis avance d'un
+                 pas effectif M*dt au macro-pas ou (macro_step + 1) % M == 0, i.e. a la fin de chaque
+                 fenetre de M macro-pas (bloc lent, p.ex. neutres : stride=20). Il reste ainsi
+                 temporellement COHERENT avec les blocs rapides (jamais avance "dans le futur"). Defaut
+                 1 = chaque macro-pas, bit-identique a l'historique. substeps et stride sont ORTHOGONAUX :
+                 stride=M, substeps=N -> N sous-pas de M*dt/N une fois en fin de fenetre.
+                 COUPLAGE POISSON : entre deux rattrapages, le bloc tenu contribue au second membre du
+                 Poisson de systeme (et aux sources couplees) avec son etat PERIME -- sa derniere densite
+                 /charge avancee, figee jusqu'au prochain rattrapage. step_cfl honore la cadence : le pas
+                 stable inclut le facteur stride (dt <= cfl*h*substeps / (stride*w)).
+                 NB : le backend 'aot' (System.add_equation sur un CompiledModel backend='aot') ne
+                 transporte PAS la cadence et REJETTE stride > 1 (route explicite, pas d'ignore silencieux) ;
+                 add_block (natif) et backend='production' supportent le stride.
+    method     : "ssprk2" (defaut, Shu-Osher 2 etages ordre 2) | "ssprk3" (3 etages ordre 3,
+                 moins dissipatif, a apparier a weno5). Raccourci ssprk3=True.
     """
 
-    def __init__(self, substeps=1, method="ssprk2", *, ssprk3=False):
+    def __init__(self, substeps=1, method="ssprk2", stride=1, *, ssprk3=False):
         if ssprk3:
             method = "ssprk3"
         if method not in ("ssprk2", "ssprk3"):
             raise ValueError("Explicit : method 'ssprk2' | 'ssprk3' (recu %r)" % (method,))
+        if int(substeps) < 1:
+            raise ValueError("Explicit : substeps >= 1 (recu %r)" % (substeps,))
+        if int(stride) < 1:
+            raise ValueError("Explicit : stride >= 1 (recu %r)" % (stride,))
         self.substeps = int(substeps)
+        self.stride = int(stride)
         self.method = method
         # kind transmis a la facade compilee : "explicit" (SSPRK2, defaut bit-identique) ou "ssprk3".
         self.kind = "ssprk3" if method == "ssprk3" else "explicit"
 
 
 class IMEX:
-    """IMEX : transport explicite + source raide implicite (Newton local), implicite PARTIEL."""
+    """IMEX : transport explicite + source raide implicite (Newton local), implicite PARTIEL.
+
+    substeps=N : sous-pas par macro-pas (cf. Explicit). Defaut 1.
+    stride=M   : cadence du bloc, semantique hold-then-catch-up (cf. Explicit) : le bloc est tenu tant
+                 que (macro_step + 1) % M != 0, puis avance d'un pas effectif M*dt en fin de fenetre.
+                 Entre deux rattrapages, son etat PERIME contribue au Poisson de systeme. Defaut 1 =
+                 chaque macro-pas, bit-identique. Backend 'aot' : stride > 1 rejete (cf. Explicit).
+    """
 
     kind = "imex"
 
-    def __init__(self, substeps=1):
+    def __init__(self, substeps=1, stride=1):
+        if int(substeps) < 1:
+            raise ValueError("IMEX : substeps >= 1 (recu %r)" % (substeps,))
+        if int(stride) < 1:
+            raise ValueError("IMEX : stride >= 1 (recu %r)" % (stride,))
         self.substeps = int(substeps)
+        self.stride = int(stride)
 
 
-def Implicit(dt_ratio=1, substeps=None):
+def Implicit(dt_ratio=1, substeps=None, stride=1):
     """Alias d'IMEX (implicite PARTIEL : source raide implicite, transport explicite).
 
     Pas d'implicite TOTAL expose (le cas couteux que l'on evite). `Implicit(dt_ratio=k)`
-    vaut `IMEX(substeps=k)`.
+    vaut `IMEX(substeps=k)`. stride : cadence du bloc (cf. IMEX).
     """
-    return IMEX(substeps=substeps if substeps is not None else dt_ratio)
+    return IMEX(substeps=substeps if substeps is not None else dt_ratio, stride=stride)
 
 
 class System:
@@ -526,10 +558,10 @@ class System:
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
-                          getattr(time, "substeps", 1), evolve)
+                          getattr(time, "substeps", 1), evolve, getattr(time, "stride", 1))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
-                     evolve=True):
+                     evolve=True, stride=None):
         """Ajoute une equation/bloc en aiguillant sur le TYPE de @p model (DSL Phase A) :
 
         - un ModelSpec (adc.Model(...)) -> add_block (briques natives composees) ;
@@ -542,6 +574,7 @@ class System:
 
         @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (defaut minmod+rusanov+conservatif).
         @p time : adc.Explicit / IMEX (defaut Explicit). @p substeps : surcharge time.substeps.
+        @p stride : surcharge time.stride (1 = chaque macro-pas, defaut bit-identique).
         @p names : noms des composantes (longueur = n_vars du modele compile). @p evolve : bloc avance.
         """
         from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
@@ -549,13 +582,14 @@ class System:
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
         nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
+        nstride = stride if stride is not None else getattr(time, "stride", 1)
 
         # --- ModelSpec : briques natives composees -> add_block (chemin existant) ---
-        # NB : on appelle _s.add_block DIRECTEMENT avec nsub (pas self.add_block, dont la signature
-        # n'a pas de substeps -> elle utiliserait time.substeps et IGNORERAIT l'override substeps=).
+        # NB : on appelle _s.add_block DIRECTEMENT avec nsub/nstride (pas self.add_block, dont la
+        # signature n'a pas de substeps -> elle utiliserait time.substeps et IGNORERAIT les overrides).
         if isinstance(model, ModelSpec):
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
-                              nsub, evolve)
+                              nsub, evolve, nstride)
             return
 
         if not isinstance(model, dsl.CompiledModel):
@@ -601,7 +635,17 @@ class System:
             self._s.add_dynamic_block(name, compiled.so_path, nsub, names_arg, spatial.limiter)
             return
         if adder == "add_compiled_block":
-            # AOT host-marshale : limiter x riemann x recon, mono-rang (sans MPI/AMR).
+            # AOT host-marshale : limiter x riemann x recon, mono-rang (sans MPI/AMR). L'ABI extern "C"
+            # du .so AOT (add_compiled_block) NE transporte PAS de cadence : le bloc tournerait a stride=1
+            # en SILENCE. On REJETTE donc stride > 1 sur ce backend (route explicite) plutot que de
+            # l'ignorer. Le stride par bloc est cable sur add_block (natif compose) et add_native_block
+            # (backend='production'). On lit time.stride ET l'override stride= (nstride couvre les deux).
+            if nstride != 1:
+                raise ValueError(
+                    "add_equation : stride=%d non supporte sur backend 'aot' (l'ABI du .so AOT ne "
+                    "transporte pas la cadence ; le bloc tournerait a stride=1 en silence). Utiliser "
+                    "backend='production' (chemin natif, cadence cablee) ou un modele natif compose "
+                    "adc.Model(...) -> add_block." % nstride)
             self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                        spatial.recon, time.kind, nsub, names_arg)
             return
@@ -615,7 +659,7 @@ class System:
                     "roles sont portes par les metadonnees du modele compile (.so)")
             gamma = compiled.gamma if compiled.gamma is not None else 1.4
             self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
-                                     spatial.recon, time.kind, gamma, nsub, evolve)
+                                     spatial.recon, time.kind, gamma, nsub, evolve, nstride)
             return
         raise ValueError("add_equation : adder %r inconnu (backend %r)" % (adder, backend))
 

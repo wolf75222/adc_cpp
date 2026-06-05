@@ -206,7 +206,8 @@ foreach(t
     test_block_names_dynamic  # block_names() voit le bloc dynamique (.so JIT), pas seulement add_block
     test_dsl_abi_metadata     # noms/roles/gamma transportes par l'ABI du .so (AOT+JIT) + retro-compat
     test_dsl_compile_facade   # facade m.compile(backend=...) -> moteurs JIT/AOT + metadonnees preservees
-    test_dsl_compile_cache)   # ergonomie m.compile() : auto-detect include + cache so_path (HIT/MISS)
+    test_dsl_compile_cache    # ergonomie m.compile() : auto-detect include + cache so_path (HIT/MISS)
+    test_stride)              # exposition du parametre stride (P1 : cadence par bloc, runtime)
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
   set_tests_properties(${t} PROPERTIES

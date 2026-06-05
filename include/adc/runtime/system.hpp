@@ -65,7 +65,16 @@ class System {
   /// @param recon    variables reconstruites : "conservative" | "primitive" (Euler : primitif
   ///                 plus robuste, positivite de rho et p)
   /// @param time     "explicit" (SSPRK2) | "imex" (transport explicite, source implicite)
-  /// @param substeps sous-pas par macro-pas
+  /// @param substeps sous-pas par macro-pas : le bloc avance N fois par macro-pas, chaque
+  ///                 sous-pas de longueur dt/N (electrons rapides : substeps=10, pas dt/10).
+  /// @param stride   cadence du bloc, semantique HOLD-THEN-CATCH-UP : 1 = chaque macro-pas (defaut,
+  ///                 bit-identique) ; M > 1 = bloc TENU (non avance) tant que (macro_step + 1) % M != 0,
+  ///                 puis avance d'un pas effectif M*dt au macro-pas ou (macro_step + 1) % M == 0 (fin de
+  ///                 fenetre de M pas), donc temporellement coherent avec les blocs rapides (bloc lent,
+  ///                 p.ex. neutres sur stride=20). substeps et stride sont ORTHOGONAUX : stride=M,
+  ///                 substeps=N -> N sous-pas de M*dt/N, une fois en fin de fenetre. COUPLAGE : entre deux
+  ///                 rattrapages, le bloc tenu entre dans la somme du Poisson avec son etat PERIME (derniere
+  ///                 avance figee). step_cfl honore la cadence (dt <= cfl*h*substeps / (stride*w)).
   /// @param evolve   false = espece GELEE (fond fixe) : non avancee en temps, mais vue par le
   ///                 Poisson de systeme (et, a venir, par les sources couplees)
   void add_block(const std::string& name, const ModelSpec& model,
@@ -73,7 +82,7 @@ class System {
                  const std::string& riemann = "rusanov",
                  const std::string& recon = "conservative",
                  const std::string& time = "explicit", int substeps = 1,
-                 bool evolve = true);
+                 bool evolve = true, int stride = 1);
 
   /// Ajoute un bloc dont le modele est CHARGE A L'EXECUTION depuis une bibliotheque partagee (.so)
   /// generee par le DSL (emit_cpp_brick -> ModelAdapter -> fabrique extern "C"). Le .so doit exposer
@@ -115,12 +124,13 @@ class System {
   /// @param limiter "none" | "minmod" | "vanleer"   @param riemann "rusanov" | "hllc" | "roe"
   /// @param recon   "conservative" | "primitive"    @param time "explicit" | "imex"
   /// @param gamma   indice adiabatique du bloc (set_density / couplages inter-especes)
+  /// @param stride  cadence du bloc (1 = chaque pas, defaut ; cf. add_block)
   void add_native_block(const std::string& name, const std::string& so_path,
                         const std::string& limiter = "minmod",
                         const std::string& riemann = "rusanov",
                         const std::string& recon = "conservative",
                         const std::string& time = "explicit", double gamma = 1.4,
-                        int substeps = 1, bool evolve = true);
+                        int substeps = 1, bool evolve = true, int stride = 1);
 
   /// Cle d'ABI du module (compilateur + standard C++ + signature des en-tetes adc, figee a la
   /// compilation). Comparee a la cle baked dans un loader natif .so par add_native_block ; exposee
@@ -148,7 +158,7 @@ class System {
                      const VariableSet& prim_vars, double gamma, BlockClosures closures,
                      std::function<Real(const MultiFab&)> max_speed,
                      std::function<void(const MultiFab&, MultiFab&)> poisson_rhs, int substeps,
-                     bool evolve);
+                     bool evolve, int stride = 1);
   /// Garantit que l'etat U du bloc @p name porte au moins @p n_ghost ghosts (largeur du stencil
   /// spatial). WENO5 lit 3 ghosts, > les 2 alloues par install_block ; appelee par add_compiled_model
   /// (en-tete) avec block_n_ghost(limiter) APRES install_block, pour que le chemin compile natif

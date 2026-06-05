@@ -86,7 +86,7 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("recon") = "conservative",
            py::arg("time") = "explicit", py::arg("substeps") = 1,
-           py::arg("evolve") = true)
+           py::arg("evolve") = true, py::arg("stride") = 1)
       // Bloc dont le modele est charge a l'execution depuis un .so genere par le DSL (chemin hote).
       .def("add_dynamic_block", &System::add_dynamic_block, py::arg("name"), py::arg("so_path"),
            py::arg("substeps") = 1, py::arg("names") = std::vector<std::string>{},
@@ -101,7 +101,7 @@ PYBIND11_MODULE(_adc, m) {
       .def("add_native_block", &System::add_native_block, py::arg("name"), py::arg("so_path"),
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("recon") = "conservative", py::arg("time") = "explicit", py::arg("gamma") = 1.4,
-           py::arg("substeps") = 1, py::arg("evolve") = true)
+           py::arg("substeps") = 1, py::arg("evolve") = true, py::arg("stride") = 1)
       .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
            py::arg("neutral"), py::arg("rate"))
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))
