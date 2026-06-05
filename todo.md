@@ -190,17 +190,20 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       Release sans `-g`) ; converties en FONCTEURS NOMMES (#97, meme recette que #64). Preuve GH200 (job
       ROMEO 640236, Release sans `-g`) : `geometric_mg` ET `fft` Cuda np=1 exit 0 (etaient 139),
       compute-sanitizer 0 erreur, `dmax_abs` Cuda-vs-Serial = 5.0e-13 (MG) / 1.3e-15 (FFT) -- DANS LA
-      TOLERANCE (reassociation FMA des reductions Kokkos), CPU bit-identique. RESTE BLOQUE : **MPI np=2/4**
-      par le bug System mono-box / `fab(0)` appele sans test `local_size()` dans `solve_fields` (rang sans
-      box locale -> segfault hote) ; chantier SEPARE, pas dans #97.
+      TOLERANCE (reassociation FMA des reductions Kokkos), CPU bit-identique. **MPI `solve_fields`
+      np=1/2/4 VALIDE CPU/CI** : le bug mono-box / `fab(0)` appele sans test `local_size()` (rang sans
+      box locale -> segfault hote) est corrige par une garde `local_size()` (no-op sur rang sans box,
+      np=1 bit-identique) + test `test_mpi_system_solve_fields_np{1,2,4}`. (#99) RESTE : valider la
+      production **device-MPI** (GPU + multi-rang) sur GH200 -- chantier SEPARE a venir.
 - [ ] **Etape 7 - DIFFERE** : domaine disque FV / paroi transport + reproduction papier quantitative
       (cf. section 6 ; subordonne a la confirmation haute resolution du plateau l=4).
 
 **STATUT HONNETE (ne PAS presenter "Plan Ideal termine")** : System production CPU = OK ; AmrSystem
 production CPU = OK ; demonstrateurs DSL Python = OK ; **production GPU np=1 = OK (GH200, #97)** ;
-production GPU MPI np=2/4 = NON, bloquee par le bug System mono-box / `fab(0)` (chantier separe a venir,
-sur accord) ; WENO5 sur `CompiledModel` = encore limite (2 ghosts) ; `PAPER_ROADMAP.md` = a NE PAS
-reecrire automatiquement (attend la validation humaine du sweep O5).
+**`solve_fields` MPI np=1/2/4 = OK cote CPU/CI (#99)** ; production **device-MPI** (GPU + multi-rang)
+= reste a valider separement (GH200) ; `set_density`/`get_state` multi-rang = hors scope ; WENO5 sur
+`CompiledModel` = encore limite (2 ghosts) ; `PAPER_ROADMAP.md` = a NE PAS reecrire automatiquement
+(attend la validation humaine du sweep O5).
 
 ## 9. Mesure diocotron haut ordre (PR-0 + O5, cote `adc_cases`)
 
