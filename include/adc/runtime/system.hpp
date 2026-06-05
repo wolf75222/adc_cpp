@@ -29,10 +29,25 @@ namespace adc {
 
 /// Maillage et domaine partages par tous les blocs (les parametres physiques sont par bloc,
 /// dans la ModelSpec).
+///
+/// GEOMETRIE (chantier "grille polaire", Phase 1) : le CHOIX de la geometrie vit ICI, dans la config
+/// du maillage, PAS dans le schema (FiniteVolume reste reconstruction + Riemann + variables). Defaut
+/// "cartesian" : domaine carre [0,L]^2, comportement et numerique STRICTEMENT INCHANGES (bit-identique).
+/// "polar" decrit un anneau global r in [r_min, r_max] x theta in [0, 2pi) (cf. PolarGeometry) ; il est
+/// porte par adc.PolarMesh cote Python et n'est PAS encore branche dans System::step (Phase 1 livre la
+/// geometrie + l'operateur de transport polaire + sa validation MMS ; le transport polaire a travers
+/// System, qui demanderait aussi le Poisson polaire, est une phase ulterieure). Les champs polaires sont
+/// ignores tant que geometry == "cartesian".
 struct SystemConfig {
-  int n = 64;            ///< cellules par direction (domaine n x n)
-  double L = 1.0;        ///< taille du domaine carre [0,L]^2
-  bool periodic = true;  ///< domaine periodique, sinon sortie libre en transport
+  int n = 64;            ///< cellules par direction (domaine n x n) -- pour polaire : n_r = n_theta = n
+  double L = 1.0;        ///< taille du domaine carre [0,L]^2 (cartesien)
+  bool periodic = true;  ///< domaine periodique, sinon sortie libre en transport (cartesien)
+  // --- geometrie opt-in (Phase 1) : "cartesian" (defaut, bit-identique) | "polar" (anneau global) ---
+  std::string geometry = "cartesian";  ///< choix de geometrie (porte par adc.CartesianMesh / adc.PolarMesh)
+  int nr = 0;            ///< cellules radiales (polaire ; 0 => prend n)
+  int ntheta = 0;        ///< cellules azimutales (polaire ; 0 => prend n)
+  double r_min = 0.0;    ///< rayon interieur de l'anneau (polaire)
+  double r_max = 1.0;    ///< rayon exterieur de l'anneau (polaire)
 };
 
 /// Systeme multi-especes couple, compose a l'execution a partir de briques generiques.

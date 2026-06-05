@@ -91,6 +91,14 @@ adc_add_test(test_ap_limit)
 # ABORT si le rapport est marginal (< 5) : le verrou n'est alors pas la geometrie.
 adc_add_test(test_polar_ring_advection)
 
+# --- Phase 1 grille polaire : operateur de transport polaire additif (assemble_rhs_polar) ---
+# MMS de la divergence polaire (1/r) d_r(r F_r) + (1/r) d_theta(F_theta) sur un anneau global
+# (r, theta), champ aux PRESCRIT (transport seul, AUCUN Poisson) : convergence a l'ordre du schema
+# (WENO5-Z >= 3.5, minmod >= 1.5) + CONSERVATION FV de la masse a ~machine (champ azimutal pur).
+# Verifie que la metrique polaire (facteur r aux faces radiales, 1/r en cellule) est portee
+# correctement par l'operateur additif, sans toucher au chemin cartesien (bit-identique par defaut).
+adc_add_test(test_polar_transport_mms)
+
 # --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
 adc_add_test(test_dynamic_model)
 

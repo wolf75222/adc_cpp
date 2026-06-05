@@ -52,6 +52,61 @@ struct ExBVelocity {
   }
 };
 
+/// Advection scalaire par la derive E x B en coordonnees POLAIRES (r, theta) -- chantier "grille
+/// polaire diocotron", Phase 1. C'est une brique SEPAREE d'ExBVelocity (cartesienne), pas une
+/// modification : le solveur polaire (assemble_rhs_polar) l'utilise sur une PolarGeometry.
+///
+/// DISPOSITION DU CANAL aux EN POLAIRE (documentee, contrat de cette brique) -- les composantes de
+/// base [0..2] portent le champ E dans la BASE LOCALE ORTHONORMEE (e_r, e_theta) :
+///   aux.phi    [0] = phi (potentiel ; inutilise par le flux, present pour symetrie)
+///   aux.grad_x [1] = grad_r     = d phi / d r            (composante radiale de grad phi)
+///   aux.grad_y [2] = grad_theta = (1/r) d phi / d theta  (composante AZIMUTALE PHYSIQUE de grad phi)
+/// On REUTILISE les deux emplacements grad_x/grad_y de adc::Aux pour grad_r/grad_theta (pas de
+/// nouveau champ aux) ; le SENS est polaire et porte par cette brique seule. grad_theta est la
+/// derivee PHYSIQUE (deja divisee par r) : ainsi la vitesse ci-dessous est symetrique de la
+/// cartesienne (vr <- -grad_theta/B, vtheta <- grad_r/B) et l'appelant qui remplit aux porte le 1/r.
+///
+/// VITESSE E x B EN POLAIRE (composantes PHYSIQUES dans la base locale) :
+///   v_r     = -(1/(B r)) d phi/d theta = -grad_theta / B   (dir == 0, radiale)
+///   v_theta =  (1/B)     d phi/d r     =  grad_r     / B   (dir == 1, azimutale)
+/// Le flux rendu (dir 0 = F_r = n v_r ; dir 1 = F_theta = n v_theta) est PHYSIQUE ; la metrique 1/r
+/// et la divergence (1/r) d_r(r F_r) + (1/r) d_theta(F_theta) sont portees par assemble_rhs_polar,
+/// PAS par cette brique. La brique reste ainsi une physique pure (aucune box, aucun r).
+struct ExBVelocityPolar {
+  static constexpr int n_vars = 1;
+  using State = StateVec<1>;
+  Real B0 = 1;
+  /// Composante PHYSIQUE de la vitesse de derive dans la direction d'indice dir (0 = r, 1 = theta).
+  ADC_HD Real velocity(const Aux& a, int dir) const {
+    return (dir == 0) ? (-a.grad_y / B0) : (a.grad_x / B0);
+  }
+  ADC_HD StateVec<1> flux(const StateVec<1>& u, const Aux& a, int dir) const {
+    StateVec<1> f{};
+    f[0] = u[0] * velocity(a, dir);
+    return f;
+  }
+  ADC_HD Real max_wave_speed(const StateVec<1>&, const Aux& a, int dir) const {
+    const Real d = velocity(a, dir);
+    return d < 0 ? -d : d;
+  }
+  /// Spectre : une onde, la vitesse de derive dans la direction dir.
+  ADC_HD StateVec<1> eigenvalues(const StateVec<1>&, const Aux& a, int dir) const {
+    StateVec<1> e{};
+    e[0] = velocity(a, dir);
+    return e;
+  }
+  // Scalaire : variables primitives = conservatives (densite transportee).
+  using Prim = StateVec<1>;
+  ADC_HD Prim to_primitive(const StateVec<1>& u) const { return u; }
+  ADC_HD StateVec<1> to_conservative(const Prim& p) const { return p; }
+  static VariableSet conservative_vars() {
+    return {VariableKind::Conservative, {"n"}, 1, {VariableRole::Density}};
+  }
+  static VariableSet primitive_vars() {
+    return {VariableKind::Primitive, {"n"}, 1, {VariableRole::Density}};
+  }
+};
+
 /// Flux d'Euler compressible 2D (reutilise Euler : gamma, pression, vitesses d'onde signees).
 using CompressibleFlux = Euler;
 

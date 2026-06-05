@@ -51,7 +51,14 @@ PYBIND11_MODULE(_adc, m) {
       .def(py::init<>())
       .def_readwrite("n", &SystemConfig::n)
       .def_readwrite("L", &SystemConfig::L)
-      .def_readwrite("periodic", &SystemConfig::periodic);
+      .def_readwrite("periodic", &SystemConfig::periodic)
+      // Geometrie opt-in (chantier "grille polaire", Phase 1). "cartesian" (defaut) = bit-identique ;
+      // "polar" = anneau global porte par adc.PolarMesh. Champs polaires ignores si geometry=="cartesian".
+      .def_readwrite("geometry", &SystemConfig::geometry)
+      .def_readwrite("nr", &SystemConfig::nr)
+      .def_readwrite("ntheta", &SystemConfig::ntheta)
+      .def_readwrite("r_min", &SystemConfig::r_min)
+      .def_readwrite("r_max", &SystemConfig::r_max);
 
   // ModelSpec : composition de briques generiques (transport/source/elliptic + parametres).
   // Aucun scenario nomme ; le sucre adc.Model(...) cote Python remplit ces champs.

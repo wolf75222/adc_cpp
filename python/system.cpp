@@ -754,7 +754,28 @@ struct System::Impl {
   }
 };
 
-System::System(const SystemConfig& c) : p_(std::make_unique<Impl>(c)) {}
+namespace {
+// Garde-fou geometrie (chantier "grille polaire", Phase 1). Le CHOIX de geometrie est porte par la
+// config (adc.CartesianMesh / adc.PolarMesh). "cartesian" : chemin historique, bit-identique. "polar" :
+// la geometrie annulaire + l'operateur de transport polaire (assemble_rhs_polar) + sa validation MMS
+// sont livres par cette phase, MAIS le transport polaire A TRAVERS System::step n'est PAS encore cable
+// (il demanderait aussi le Poisson polaire, hors scope Phase 1). On REFUSE donc explicitement un System
+// polaire au lieu de faire tourner SILENCIEUSEMENT la numerique cartesienne sur une config polaire
+// (ce qui serait un piege). Tout autre token est une erreur. Cartesien : aucun effet (chemin inchange).
+void check_geometry(const SystemConfig& c) {
+  if (c.geometry == "cartesian") return;
+  if (c.geometry == "polar")
+    throw std::runtime_error(
+        "System : geometry='polar' (adc.PolarMesh) n'est pas encore branche dans System.step (Phase 1 "
+        "livre la grille annulaire PolarGeometry, l'operateur de transport polaire assemble_rhs_polar "
+        "et sa validation MMS ; le transport polaire via System, qui demande aussi le Poisson polaire, "
+        "est une phase ulterieure). Utiliser adc.CartesianMesh (defaut) ou l'operateur polaire en C++.");
+  throw std::runtime_error("System : geometry '" + c.geometry +
+                           "' inconnu (cartesian | polar) ; cf. adc.CartesianMesh / adc.PolarMesh");
+}
+}  // namespace
+
+System::System(const SystemConfig& c) : p_(std::make_unique<Impl>(c)) { check_geometry(c); }
 System::~System() = default;
 System::System(System&&) noexcept = default;
 System& System::operator=(System&&) noexcept = default;

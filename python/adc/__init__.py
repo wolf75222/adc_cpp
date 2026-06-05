@@ -31,6 +31,7 @@ from ._adc import (SystemConfig, ModelSpec, System as _System,
 # en-tetes generiques d'adc_cpp. Il n'est donc ni reexporte ici ni present dans le module _adc.
 __all__ = [
     "System", "SystemConfig", "AmrSystem", "AmrSystemConfig", "Model",
+    "CartesianMesh", "PolarMesh",
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",
     "NoSource", "PotentialForce", "GravityForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
@@ -40,6 +41,65 @@ __all__ = [
     "Ionization", "Collision", "ThermalExchange",
     "PythonFlux", "dsl", "abi_key",
 ]
+
+
+# --- Maillage / geometrie (chantier "grille polaire", Phase 1) --------------
+# Le CHOIX de la geometrie vit dans un objet MAILLAGE, pas dans le schema : adc.FiniteVolume reste
+# reconstruction + flux de Riemann + variables (aucun argument de geometrie). On passe le maillage au
+# systeme via adc.System(mesh=...). adc.CartesianMesh est le defaut implicite (domaine carre, numerique
+# STRICTEMENT inchangee, bit-identique). adc.PolarMesh decrit un anneau global (r, theta).
+class CartesianMesh:
+    """Maillage CARTESIEN (defaut implicite) : domaine carre [0, L]^2, n x n cellules.
+
+    C'est la geometrie historique : adc.System(mesh=adc.CartesianMesh(n, L, periodic)) est STRICTEMENT
+    equivalent (bit-identique) a adc.System(n=n, L=L, periodic=periodic). Fourni pour la symetrie avec
+    adc.PolarMesh (le choix de geometrie est explicite des deux cotes)."""
+
+    def __init__(self, n=64, L=1.0, periodic=True):
+        self.n = int(n)
+        self.L = float(L)
+        self.periodic = bool(periodic)
+
+    def _apply(self, config):
+        config.geometry = "cartesian"
+        config.n = self.n
+        config.L = self.L
+        config.periodic = self.periodic
+
+
+class PolarMesh:
+    """Maillage POLAIRE ANNULAIRE GLOBAL (chantier "grille polaire diocotron", Phase 1) : domaine
+    r in [r_min, r_max] x theta in [0, 2pi), nr x ntheta cellules. theta est PERIODIQUE, r porte une
+    condition aux limites PHYSIQUE (paroi / sortie). Convention d'axes : direction 0 = radiale,
+    direction 1 = azimutale (cf. PolarGeometry / assemble_rhs_polar cote C++).
+
+    Le proto Phase-0 a quantifie que la grille cartesienne diffuse le gradient RADIAL d'un anneau en
+    rotation azimutale (rapport 73 vs polaire) : porter la direction radiale sur un axe de grille leve
+    ce verrou structural du diocotron.
+
+    PORTEE PHASE 1 : cette phase livre la geometrie polaire, l'operateur de transport polaire et sa
+    validation MMS (cote C++). Le transport polaire A TRAVERS System.step (qui demanderait aussi un
+    Poisson polaire) est une phase ulterieure ; adc.System(mesh=adc.PolarMesh(...)) leve donc une
+    erreur EXPLICITE (plutot que de faire tourner en silence la numerique cartesienne sur une config
+    polaire)."""
+
+    def __init__(self, r_min, r_max, nr, ntheta):
+        if not (r_max > r_min >= 0.0):
+            raise ValueError("PolarMesh : exige r_max > r_min >= 0 (anneau)")
+        if nr < 1 or ntheta < 1:
+            raise ValueError("PolarMesh : nr >= 1 et ntheta >= 1")
+        self.r_min = float(r_min)
+        self.r_max = float(r_max)
+        self.nr = int(nr)
+        self.ntheta = int(ntheta)
+
+    def _apply(self, config):
+        config.geometry = "polar"
+        config.nr = self.nr
+        config.ntheta = self.ntheta
+        config.r_min = self.r_min
+        config.r_max = self.r_max
+        config.n = self.nr  # n sert de taille par defaut au reste de la config (diagnostics)
 
 
 # --- Briques d'etat ---------------------------------------------------------
@@ -355,14 +415,26 @@ class System:
     add_block prend un modele compose (adc.Model(...)) + des objets Spatial / Explicit / IMEX.
     Tout le reste (set_poisson, set_density, step, step_cfl, step_adaptive, diagnostics,
     primitives eval_rhs/get_state/set_state) est transmis a la facade compilee.
-    """
 
-    def __init__(self, config=None, **cfg_kw):
+    GEOMETRIE : le choix vit dans un objet MAILLAGE passe en mesh= (adc.CartesianMesh / adc.PolarMesh),
+    PAS dans le schema (adc.FiniteVolume reste reconstruction + Riemann + variables). Defaut (mesh=None
+    ou adc.CartesianMesh) = domaine carre, bit-identique a l'historique. adc.PolarMesh (anneau global)
+    est livre en Phase 1 au niveau geometrie + operateur + MMS (cote C++) mais pas encore branche dans
+    System.step -> le construire ici leve une erreur explicite (cf. PolarMesh)."""
+
+    def __init__(self, config=None, mesh=None, **cfg_kw):
         if config is None:
             config = SystemConfig()
             for k, v in cfg_kw.items():
                 setattr(config, k, v)
-        self._s = _System(config)
+        # Le maillage (s'il est fourni) porte le CHOIX de geometrie et ecrase les champs correspondants
+        # de la config. Applique APRES cfg_kw : mesh= prevaut sur les n=/L= passes en mots-cles.
+        if mesh is not None:
+            if not hasattr(mesh, "_apply"):
+                raise TypeError("System : mesh doit etre un adc.CartesianMesh / adc.PolarMesh (recu %r)"
+                                % type(mesh).__name__)
+            mesh._apply(config)
+        self._s = _System(config)  # leve si geometry == 'polar' (non cable dans step, cf. PolarMesh)
 
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
         spatial = spatial if spatial is not None else Spatial()
