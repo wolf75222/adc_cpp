@@ -606,20 +606,20 @@ class AmrSystem:
                 "recompiler avec m.compile(..., backend='production', target='amr_system') pour que "
                 "le loader inline add_compiled_model(AmrSystem&) (symbole adc_install_native_amr)")
 
-        # LIMITES AMR (non-parite avec System) : rejet CLAIR avant le C++ pour le chemin .so AMR.
-        if spatial.recon == "primitive":
+        # recon "primitive" et flux "roe"/"hllc" sont CABLES sur AMR via dispatch_amr_compiled : le
+        # chemin .so passe recon_prim a AmrBuildParams (consomme par advance_amr/compute_face_fluxes)
+        # et hllc/roe sont instancies sous la MEME garde requires que System::make_block (transport
+        # compressible a 4 variables + pression). Plus de rejet de facade (parite stricte avec
+        # add_block, cf. test_amr_riemann_native).
+        # Garde-fou flux numerique (porte de System.add_equation) : HLLC/Roe exigent une pression ; la
+        # brique generee n'emet pressure()/wave_speeds() que si une primitive 'p' est declaree. Sans
+        # 'p', dispatch_amr_compiled retombe sur la branche else (requires non satisfait) et leve une
+        # erreur C++ generique : on diagnostique ICI, clairement, avant la frontiere C++.
+        if spatial.flux in ("roe", "hllc") and "p" not in compiled.prim_names:
             raise ValueError(
-                "AmrSystem.add_equation : variables='primitive' non supporte sur le chemin compile "
-                "AMR (le .so reste conservatif) ; utiliser variables='conservative' (AmrSystem n'est "
-                "pas a parite avec System : pas de reconstruction primitive sur le .so AMR)")
-        if spatial.flux in ("roe", "hllc"):
-            raise ValueError(
-                "AmrSystem.add_equation : riemann='%s' non supporte sur le chemin compile AMR ; seul "
-                "riemann='rusanov' est cable sur la hierarchie via le .so (AmrSystem n'est pas a "
-                "parite avec System : pas de flux de Riemann complet sur le .so AMR)" % spatial.flux)
-        # limiter weno5 (3 ghosts) : CABLE sur AMR via dispatch_amr_compiled (rusanov). Le coupleur
-        # alloue ses niveaux a Limiter::n_ghost et le regrid herite n_grow() -> pas hors bornes. Plus
-        # de rejet ici (parite stricte avec add_block, cf. test_amr_weno5_native).
+                "AmrSystem.add_equation : riemann '%s' exige une pression : declarer une primitive 'p' "
+                "(m.primitive('p', ...)) dans le modele ; sinon utiliser riemann='rusanov'"
+                % spatial.flux)
 
         gamma = compiled.gamma if compiled.gamma is not None else 1.4
         self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,

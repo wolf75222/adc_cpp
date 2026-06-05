@@ -174,23 +174,65 @@ def main():
         assert C.n_patches() == D.n_patches(), "n_patches final != add_block (regrid different)"
         print("OK  (2) euler_poisson AMR couple : masse/densite/patchs == add_block (dmax=%.1e)" % dmaxp)
 
-        # --- (3) LIMITES AMR : la facade add_equation rejette primitive / roe / hllc ---
-        amr_cm = ep.compile(os.path.join(tmp, "ep_amr_cm.so"), INCLUDE,
-                            backend="production", target="amr_system")
+        # --- (3) PARITE hllc/roe/primitive : la facade add_equation ACCEPTE et donne un resultat
+        #     bit-identique a add_block (Gap 1 parite : le moteur AMR supporte ces schemas).
+        #     Reutilise cm_t (transport pur, phi=0) : parite STRICTE dmax==0 (zero bruit FP),
+        #     meme garantie que le test C++ test_amr_riemann_native. cm_t a une primitive 'p'
+        #     (declaree dans _euler_formulas via _build_euler_transport) -> garde-fou pression OK.
 
-        def expect(spatial, frag):
-            s = adc.AmrSystem(n=n, L=L, periodic=True)
-            try:
-                s.add_equation("gas", amr_cm, spatial=spatial)
-            except ValueError as ex:
-                assert frag in str(ex), "message inattendu (%s) : %s" % (frag, ex)
-                return
-            raise AssertionError("add_equation a accepte un schema non cable sur AMR : %s" % frag)
+        def parity_riemann(riem, recon, label):
+            """add_equation(riemann, recon) BIT-IDENTIQUE a add_block (dmax==0)."""
+            R = _amr(n, L, lambda s: s.add_equation(
+                "gas", cm_t,
+                spatial=adc.FiniteVolume(limiter="minmod", riemann=riem, variables=recon)))
+            S = _amr(n, L, lambda s: s.add_block(
+                "gas", spec_t,
+                spatial=adc.Spatial(minmod=True, flux=riem, recon=recon),
+                time=adc.Explicit()))
+            for _ in range(12):
+                R.step(dt)
+                S.step(dt)
+            dr, ds = np.array(R.density()), np.array(S.density())
+            dmax = float(np.max(np.abs(dr - ds)))
+            assert dmax == 0.0, ("%s: add_equation != add_block (dmax=%.2e)" % (label, dmax))
+            assert np.isfinite(dr).all() and float(np.max(np.abs(ds))) > 1e-6
+            print("OK  (3) %s : add_equation BIT-IDENTIQUE a add_block (dmax=%.0f)" % (label, dmax))
 
-        expect(adc.Spatial(minmod=True, flux="rusanov", recon="primitive"), "primitive")
-        expect(adc.Spatial(minmod=True, flux="roe", recon="conservative"), "roe")
-        expect(adc.Spatial(minmod=True, flux="hllc", recon="conservative"), "hllc")
-        print("OK  (3) AMR : variables='primitive' / riemann='roe'/'hllc' REJETES clairement")
+        parity_riemann("hllc", "conservative", "hllc/conservative")
+        parity_riemann("hllc", "primitive",    "hllc/primitive")
+        parity_riemann("roe",  "conservative", "roe/conservative")
+        parity_riemann("roe",  "primitive",    "roe/primitive")
+
+        # La garde-fou pressure reste active : un modele SANS primitive 'p' doit etre rejete.
+        # Modele isotherme 3 variables (rho, rho_u, rho_v) avec primitives (rho, u, v) sans 'p' :
+        # il compile, mais add_equation(flux=hllc) doit lever ValueError (pression requise).
+        m_iso = dsl.Model("isothermal_no_p")
+        rho_i, rhou_i, rhov_i = m_iso.conservative_vars("rho", "rho_u", "rho_v")
+        cs2 = 0.5
+        ui = rhou_i / rho_i
+        vi = rhov_i / rho_i
+        pui = m_iso.primitive("u", ui)
+        pvi = m_iso.primitive("v", vi)
+        m_iso.flux(x=[rhou_i, rhou_i * pui + cs2 * rho_i, rhou_i * pvi],
+                   y=[rhov_i, rhov_i * pui, rhov_i * pvi + cs2 * rho_i])
+        m_iso.eigenvalues(x=[pui - dsl.sqrt(cs2), pui, pui + dsl.sqrt(cs2)],
+                          y=[pvi - dsl.sqrt(cs2), pvi, pvi + dsl.sqrt(cs2)])
+        m_iso.primitive_vars(rho_i, pui, pvi)
+        m_iso.conservative_from([rho_i, rho_i * pui, rho_i * pvi])
+        m_iso.elliptic_rhs(0.0 * rho_i)
+        cm_iso = m_iso.compile(os.path.join(tmp, "isothermal_amr.so"), INCLUDE,
+                               backend="production", target="amr_system")
+        assert "p" not in cm_iso.prim_names, "modele isotherme ne devrait pas avoir 'p'"
+        raised = False
+        try:
+            s_nop = adc.AmrSystem(n=n, L=L, periodic=True)
+            s_nop.add_equation("gas", cm_iso,
+                               spatial=adc.Spatial(minmod=True, flux="hllc"))
+        except ValueError as ex:
+            raised = True
+            assert "pression" in str(ex) or "pressure" in str(ex) or "hllc" in str(ex).lower()
+        assert raised, "add_equation a accepte hllc sans primitive 'p'"
+        print("OK  (3) garde-fou pression hllc/roe SANS primitive 'p' : rejet explicite")
 
         # --- (3w) WENO5 (3 ghosts) CABLE sur AMR : parite stricte production == add_block + != minmod.
         # Le coupleur alloue ses niveaux a Limiter::n_ghost (3) et le regrid herite n_grow() : le
@@ -215,8 +257,9 @@ def main():
         # reconstruction WENO5 est bien active (sinon le branchement weno5 retomberait sur minmod).
         assert float(np.max(np.abs(daw - da))) > 1e-9, "weno5 == minmod (reconstruction inactive)"
         # WENO5 via la facade add_equation (pas seulement le binding bas niveau) : meme chemin nominal.
+        # Reutilise cm_t (transport pur) : pas de Poisson, tourne sans set_poisson.
         Gw = adc.AmrSystem(n=n, L=L, periodic=True)
-        Gw.add_equation("gas", amr_cm,
+        Gw.add_equation("gas", cm_t,
                         spatial=adc.Spatial(weno5=True, flux="rusanov", recon="conservative"))
         Gw.set_refinement(1.2)
         Gw.set_density("gas", _bubble(n))
@@ -229,7 +272,7 @@ def main():
         # add_equation chemin nominal (rusanov + conservatif) accepte et tourne :
         E = adc.AmrSystem(n=n, L=L, periodic=True)
         E.set_poisson("charge_density", "geometric_mg")
-        E.add_equation("gas", amr_cm,
+        E.add_equation("gas", cm_t,
                        spatial=adc.Spatial(minmod=True, flux="rusanov", recon="conservative"))
         E.set_refinement(1.2)
         E.set_density("gas", _bubble(n))

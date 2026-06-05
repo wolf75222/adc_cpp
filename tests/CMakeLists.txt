@@ -185,6 +185,23 @@ target_compile_definitions(test_amr_weno5_native PRIVATE
   ADC_TEST_TMPDIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME test_amr_weno5_native COMMAND test_amr_weno5_native)
 
+# --- HLLC/Roe + recon primitive sur le chemin "production" NATIF cote AMR (Gap 1 parite) ---
+# Pendant de test_amr_weno5_native : prouve que riemann=hllc/roe et recon=primitive sont cables
+# sur la hierarchie AMR (AmrCouplerMP + reflux + regrid) et produisent add_compiled_model ==
+# add_block BIT-IDENTIQUE (dmax==0) pour les 4 combos (hllc/roe) x (conservative/primitive).
+# Verifie aussi que hllc/roe different de rusanov (flux actif, non silencieux). Compile amr_system.cpp
+# comme test_amr_weno5_native ; memes injections compilateur / include / norme / tmpdir.
+add_executable(test_amr_riemann_native test_amr_riemann_native.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+target_link_libraries(test_amr_riemann_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
+set_target_properties(test_amr_riemann_native PROPERTIES ENABLE_EXPORTS ON)
+target_compile_definitions(test_amr_riemann_native PRIVATE
+  ADC_TEST_CXX="${CMAKE_CXX_COMPILER}"
+  ADC_TEST_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/../include"
+  ADC_TEST_CXX_STD="c++${CMAKE_CXX_STANDARD}"
+  ADC_TEST_TMPDIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME test_amr_riemann_native COMMAND test_amr_riemann_native)
+
 # --- contrat mono-bloc/explicite de la facade AmrSystem : refus explicite des params non cables ---
 # Compile le runtime AmrSystem (python/amr_system.cpp) avec le test : verrouille que set_poisson
 # refuse solver/rhs hors du domaine cable (GeometricMG + somme des briques elliptiques) et qu'add_block
