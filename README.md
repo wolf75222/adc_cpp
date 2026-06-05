@@ -121,39 +121,55 @@ dans `adc.FiniteVolume(limiter=, riemann=, variables=)`, PAS `flux=`, pour ne pa
 le flux physique du modele (`limiter` = reconstruction MUSCL/WENO5, `riemann` = `rusanov`/`hllc`/`roe`,
 `variables` = reconstruction conservative/primitive). `m.param(name, value)` est une constante NOMMEE
 inlinee au codegen ; `m.compile(...)` renvoie un `CompiledModel` qui porte `so_path`, le backend, son
-adder, les noms/roles/gamma/n_aux, la cle d'ABI et le hash du modele. (#89/#90)
+adder, les noms/roles/gamma/n_aux, la cle d'ABI et le hash du modele. (#89/#90) `compile()` est
+ergonomique (#103) : `so_path` et `include` sont optionnels, et le `.so` est mis en cache par
+`so_path` (cle derivee du hash du modele) pour eviter une recompilation a l'identique. Le backend
+RECOMMANDE par defaut est `backend="production"` (chemin natif (d)).
 
 ### Les QUATRE chemins de modele
 
+L'API publique RECOMMANDEE est en gras : composer des briques natives avec
+`adc.Model(...)` (a), ou ecrire un modele en formules avec `adc.dsl.Model(...)` dont le
+DEFAUT recommande est `backend="production"` (d). Les autres backends et adders sont des
+chemins AVANCES / LEGACY / TEST, pas le chemin utilisateur principal.
+
 | chemin | comment l'ecrire | adder System | execution |
 |---|---|---|---|
-| **(a) natif compose de briques** | `adc.Model(state, transport, source, elliptic)` (briques d'`include/adc/physics/`) | `add_block` | bloc NATIF du coeur (chemin de production : GPU/MPI/AMR, WENO5/SSPRK3) |
-| **(b) DSL Python, backend `prototype`** | `m.compile(backend="prototype")` (JIT) | `add_dynamic_block` | `.so` -> `IModel` a DISPATCH VIRTUEL, residu HOTE Rusanov ordre 1 (iteration rapide, hors hot path GPU/MPI) |
-| **(c) DSL Python, backend `aot`** | `m.compile(backend="aot")` | `add_compiled_block` | `.so` a ABI plate, chemin de production (HLLC/Roe, ordre 2, SSPRK2/IMEX) mais sur grille LOCALE host-marshalee, mono-rang (sans MPI/AMR) |
-| **(d) DSL Python, backend `production`** | `m.compile(backend="production")` (NATIF, #85) | `add_native_block` | loader `.so` qui inline `add_compiled_model<ProdModel>` sur le CONTEXTE REEL du `System` : bloc natif ZERO-COPIE, parite stricte avec `add_block` (cle d'ABI verifiee). Objectif MPI/GPU/AMR |
+| **(a) natif compose de briques (RECOMMANDE)** | `adc.Model(state, transport, source, elliptic)` (briques d'`include/adc/physics/`) | `add_block` | bloc NATIF du coeur (chemin de production : GPU/MPI/AMR, WENO5/SSPRK3) |
+| **(d) DSL Python, backend `production` (DEFAUT DSL RECOMMANDE)** | `m.compile(backend="production")` (NATIF, #85) | `add_native_block` | loader `.so` qui inline `add_compiled_model<ProdModel>` sur le CONTEXTE REEL du `System` : bloc natif ZERO-COPIE, parite stricte avec `add_block` (cle d'ABI verifiee). WENO5 + Rusanov + reconstruction conservative cables (#102 cote `.so`) ; MPI/GPU/AMR |
+| (c) DSL Python, backend `aot` (AVANCE/TEST) | `m.compile(backend="aot")` | `add_compiled_block` | `.so` a ABI plate, chemin de production (HLLC/Roe, ordre 2, SSPRK2/IMEX, WENO5 #102) mais sur grille LOCALE host-marshalee, mono-rang (sans MPI/AMR) |
+| (b) DSL Python, backend `prototype` (LEGACY/TEST) | `m.compile(backend="prototype")` (JIT) | `add_dynamic_block` | `.so` -> `IModel` a DISPATCH VIRTUEL, residu HOTE Rusanov ordre 1 (iteration rapide, hors hot path GPU/MPI) |
 
 Les chemins (b)/(c)/(d) sont aiguilles automatiquement par `System.add_equation` selon
 `compiled.backend` (un `.so` AOT ne peut pas se brancher sur `add_dynamic_block`, et inversement).
-Detail natif : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md) ; conception et statut :
+`add_dynamic_block` et `add_compiled_block` sont des adders AVANCES / TEST ; le chemin utilisateur
+de production passe par `add_block` (a) ou `add_native_block` (d). Detail natif :
+[docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md) ; conception et statut :
 [docs/DSL_MODEL_DESIGN.md](docs/DSL_MODEL_DESIGN.md).
 
 ### Limites actuelles (honnetes)
 
-- **WENO5 hors des chemins `.so`** : `weno5` (WENO5-Z, stencil 5 points, 3 ghosts) n'est cable que
-  par le chemin natif `add_block` (a). Les chemins compiles (`aot`/`production`) allouent 2 ghosts et
-  REJETTENT `weno5` explicitement (`system.cpp:793` pour AOT, `system.cpp:921` pour le natif loader) ;
-  `add_equation` le rejette aussi cote Python avant la frontiere C++. SSPRK3 est, lui, accessible
-  depuis Python (`adc.Explicit(ssprk3=True)`, #88).
-- **Ergonomie de `compile()`** : `m.compile(so_path=, include=, backend=)` exige encore le chemin de
-  sortie `.so` et le dossier d'en-tetes ; un cache automatique (cle = `model_hash`) reste a faire.
-- **`AmrSystem` en production** : `m.compile(target="amr_system")` leve `NotImplementedError` (le
-  pendant natif `add_compiled_model(AmrSystem&)` n'a pas de binding Python ; Phase D).
-- **Validation Python device/MPI** : le chemin natif (d) est device-clean et valide bit-identique en
-  C++ sur GH200 pour l'`eval_rhs`/`advance` (foncteurs nommes, parite A==B). La validation end-to-end
-  sur GPU n'est PAS encore acquise : un crash device a ete identifie sur GH200 dans `solve_fields()`
-  par le chemin `add_compiled_model` (cote hote, hors kernel ; le chemin natif `add_block` y tourne
-  pourtant proprement), diagnostic en cours via un harness dedie. Tant que ce point n'est pas leve,
-  on ne peut pas affirmer que la production DSL tourne sur GPU de bout en bout.
+- **WENO5 sur les chemins `.so` : OK.** `weno5` (WENO5-Z, stencil 5 points, 3 ghosts) est cable
+  par le chemin natif `add_block` (a) ET par les chemins compiles `aot` / `production` depuis #102
+  (allocation de 3 ghosts cote `.so`) ; le chemin natif AMR le porte aussi avec Rusanov et la
+  reconstruction conservative (#105). SSPRK3 est accessible depuis Python (`adc.Explicit(ssprk3=True)`,
+  #88).
+- **`AmrSystem` en production : natif SHIPPE.** L'AmrSystem de production est cable nativement
+  (`add_native_block` avec `target="amr_system"`, #92) ; le chemin natif AMR atteint la parite
+  `add_native_block == add_compiled_model == add_block` (dmax=0, #105). Limites encore reelles cote
+  facade AMR : mono-bloc (pas multi-espece), explicite (pas IMEX), multi-box natif non cable cote
+  facade, et HLLC / Roe / reconstruction primitive sont REJETES cote facade Python AMR (le moteur C++
+  les supporte deja, le rejet est purement facade). `AmrSystem.potential()` : binding EN COURS (PR
+  ouverte, NON mergee) ; ne pas le supposer acquis.
+- **Validation device / MPI : acquise pour le chemin par defaut (`geometric_mg`).** Le System de
+  production tourne sur GPU GH200 a np=1 (#97) ; `solve_fields()` est valide en MPI np=1/2/4 sur
+  CPU/CI (#99) ; le multigrille geometrique de production en device-MPI est valide sur GH200 a
+  np=1/2/4 (#93). Le crash device de `solve_fields()` par le chemin compile est leve : la production
+  DSL native tourne sur GPU de bout en bout avec `geometric_mg` (l'exception `fft` np>1 est ci-dessous).
+- **FFT sous `System` MPI np>1 : REFUSEE proprement.** Sous `System` distribue avec np>1, le solveur
+  Poisson FFT est rejete par un garde-fou dur (#106), plus de segfault. `DistributedFFTSolver` existe
+  et est teste a part, mais n'est PAS route dans `System` (layout en bandes contre la box unique du
+  System). Le multigrille geometrique reste le solveur elliptique distribue.
 
 ## Systemes multi-especes
 
@@ -263,13 +279,20 @@ sim.step_cfl(0.4)
   Pour un modele ECRIT EN FORMULES (DSL), `add_equation(name, model=compiled, ...)` prend un
   `CompiledModel` (`adc.dsl.Model(...).compile(...)`) et aiguille sur l'adder du backend ; cf. la
   section DSL ci-dessus et [docs/DSL_MODEL_DESIGN.md](docs/DSL_MODEL_DESIGN.md).
-- **Integrateur temporel ecrit en Python** : primitives `solve_fields()`, `eval_rhs(name)`,
-  `get_state`/`set_state` : on ecrit son propre `take_step` cote Python (par PAS), le residu
-  et Poisson restant calcules en C++ (par CELLULE). Cf. `adc.integrate.ssprk2_step`.
+- **Integrateur temporel ecrit en Python (chemin TEST / hote)** : primitives `solve_fields()`,
+  `eval_rhs(name)`, `get_state`/`set_state` : on ecrit son propre `take_step` cote Python (par PAS),
+  le residu et Poisson restant calcules en C++ (par CELLULE). Cf. `adc.integrate.ssprk2_step`. De
+  meme, `adc.PythonFlux` est un chemin numpy HOTE, HORS du hot path GPU/MPI : il sert a TESTER un
+  flux, pas a la production.
 - **AMR** : `adc.AmrSystem` compose un bloc sur une hierarchie raffinee (API proche de System
-  plus `set_refinement`). Il partage desormais l'operateur spatial de `System` : reconstruction
-  primitive et flux HLLC/Roe, transmis via `advance_amr` (cf. `test_amr_spatial_parity`) ; il
-  reste mono-bloc et explicite. L'integrateur AP deux-fluides (asymptotic-preserving) est un
+  plus `set_refinement`). L'AmrSystem de production est cable nativement (`add_native_block`,
+  `target="amr_system"`, #92), avec parite stricte `add_native_block == add_compiled_model ==
+  add_block` (dmax=0) et WENO5 + Rusanov + reconstruction conservative sur le chemin natif AMR
+  (#105). Il partage l'operateur spatial de `System` via `advance_amr` (cf. `test_amr_spatial_parity`).
+  Limites encore reelles : mono-bloc (pas multi-espece), explicite (pas IMEX), multi-box natif non
+  cable cote facade, et HLLC / Roe / reconstruction primitive REJETES cote facade Python AMR (le
+  moteur C++ les supporte deja, le rejet est purement facade). `AmrSystem.potential()` : binding EN
+  COURS (PR ouverte, non mergee). L'integrateur AP deux-fluides (asymptotic-preserving) est un
   integrateur **sur mesure**, non composable bloc a bloc : ce n'est pas une brique generique
   mais un SCENARIO, qui a quitte le coeur et vit dans `adc_cases/two_fluid_ap/` (physique C++
   compilee a la volee contre les en-tetes generiques d'`adc_cpp`). Le module `_adc` ne l'expose plus.
@@ -335,8 +358,15 @@ docs/           ARCHITECTURE.md, ALGORITHMS.md, GPU_RUNTIME_PORT.md, CHOICES.md,
 - ctests coeur en CI sur deux builds : Release (serie) et Kokkos (Serial) ; entrees MPI
   bit-identiques np=1/2/4 (`-DADC_USE_MPI=ON`). Le module Python ajoute une suite (bindings + DSL).
 - AMR conservatif : reflux multi-patch a l'arrondi machine (`~1e-15`).
+- Chemin natif AMR (production) : parite stricte `add_native_block == add_compiled_model == add_block`
+  (dmax=0, #105), WENO5 + Rusanov + reconstruction conservative cables.
+- `solve_fields()` en MPI : valide np=1/2/4 sur CPU/CI (#99).
 - GPU GH200 (Kokkos Cuda, hors CI) : System, ops de champ AMR, halos MPI multi-GPU, chemin compile
-  a foncteurs nommes, et la chaine AmrSystem + MPI + GPU valides bit-identiques au CPU.
+  a foncteurs nommes, et la chaine AmrSystem + MPI + GPU valides bit-identiques au CPU. System de
+  production np=1 valide (#97) ; multigrille geometrique de production en device-MPI valide
+  np=1/2/4 (#93).
+- Demonstrateurs DSL (depot `adc_cases`, tous `ci=true` en CI) : `diocotron_dsl`, `two_species_dsl`,
+  `magnetic_isothermal_dsl`.
 
 Detail des validations device : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md). Validation
 applicative (modeles, diocotron, runs ROMEO) : [`adc_cases`](https://github.com/wolf75222/adc_cases).

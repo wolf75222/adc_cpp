@@ -89,6 +89,25 @@ tres lente) ; (2) les points l=4 haute resolution sont biaises par leur fenetre 
 reste l'argument quantitatif pour la PR-A "transport-wall", desormais avec une taille plausible
 revisee a ~9-10 % a l'ordre 5.
 
+## API publique recommandee (orientation)
+
+Deux points d'entree utilisateur recommandes, tous deux sur des briques natives (chemin GPU/MPI) :
+
+- **Composer des briques natives** : `adc.Model(state, transport, source, elliptic)` assemble un
+  modele a partir de briques d'etat / transport / source / elliptique, consomme par
+  `System.add_block(...)` (ou `AmrSystem`). C'est la voie des cas diocotron du sweep.
+- **Ecrire un modele en formules** : `adc.dsl.Model(...)` decrit les equations symboliquement, puis
+  `m.compile(...)` produit un `.so`. Pour la production, `backend="production"` est le defaut
+  recommande (loader natif zero-copie -> `add_native_block`, chemin GPU/MPI).
+
+Chemins AVANCES / LEGACY / TEST, PAS le chemin utilisateur principal :
+
+- `backend="prototype"` (JIT, IModel, dispatch virtuel, Rusanov hote ordre 1) et
+  `backend="aot"` (AOT host-marshale) : iteration / verification, pas la production.
+- `add_dynamic_block` (prototype JIT) et `add_compiled_block` (AOT) : adders bas niveau correspondants.
+- `adc.PythonFlux` : chemin numpy HOTE (HORS hot path GPU/MPI), pour TESTER un flux ecrit en
+  formules, pas pour la production.
+
 ## Classification des manques (4 paniers)
 
 ### Panier 1 : deja possible avec l'API ACTUELLE (a lancer / regler)
@@ -101,10 +120,11 @@ Capacites cablees et exposees, suffisantes pour pousser plus loin sans nouveau c
   (adc_cpp #88) : `adc.Spatial(limiter="weno5")` (raccourci `weno5=True`) selectionne la
   reconstruction WENO5-Z dans `make_block`, et `adc.Explicit(method="ssprk3")` (raccourci
   `ssprk3=True`) l'integrateur SSPRK3, par le chemin natif `add_block`. Le defaut reste inchange
-  (Minmod / SSPRK2, bit-identique au pre-#88). Seule limite : le chemin natif `add_block` expose
-  WENO5 ; les chemins `.so` AOT/JIT (`add_compiled_block`) allouent 2 ghosts et rejettent `"weno5"`
-  (cf. Panier 2 / locks infra). Le balayage couvre donc `{O1, O2-minmod, O2-vanleer, O5 weno5}`,
-  jusqu'a n=512.
+  (Minmod / SSPRK2, bit-identique au pre-#88). WENO5 est desormais cable AUSSI sur les chemins `.so`
+  AOT et production (`add_compiled_block` / `add_native_block`, adc_cpp #102 : grille `.so` a 3
+  ghosts), et sur le chemin natif AMR (`AmrSystem` production, adc_cpp #105). Seul le chemin JIT
+  prototype (`add_dynamic_block`) reste a 2 ghosts et rejette `"weno5"` (cf. Panier 2). Le balayage
+  couvre donc `{O1, O2-minmod, O2-vanleer, O5 weno5}`, jusqu'a n=512.
 - **Paroi conductrice circulaire sur Poisson** : `wall="circle"` + `wall_radius` est cable sur
   `System` (`python/bindings.cpp:97`) ET sur `AmrSystem` (`python/bindings.cpp:193`,
   `python/amr_system.cpp:78`). Le cut-cell elliptique est valide (MMS ordre 2, multi-box, MPI ;
@@ -112,7 +132,9 @@ Capacites cablees et exposees, suffisantes pour pousser plus loin sans nouveau c
 - **AMR sur le bord d'anneau** : `adc.AmrSystem` + `set_refinement(threshold)` tourne et
   conserve la masse (cas `adc_cases/diocotron_amr/run.py`). M2/M2b de `todo.md` notent que
   l'AMR triple le taux a base egale. Pousser le raffinement / le nombre de niveaux est un
-  reglage de config.
+  reglage de config. Reserve pour le diagnostic de taux : `AmrSystem.potential()` (lecture de
+  `phi` depuis Python pour la FFT azimutale) a son binding EN COURS (PR ouverte, NON mergee) ;
+  ne pas le tenir pour acquis.
 - **Diagnostic de taux** : la chaine mesure (FFT azimutale du mode `l` de `phi`, ajustement de
   la phase lineaire) est entierement en place cote `adc_cases`.
 
@@ -129,30 +151,42 @@ Statut factuel des chemins production (briques natives, pas DSL), independant de
 - **`System::solve_fields` MPI CPU np=1/2/4** : valide (adc_cpp #99). #99 corrige le segfault hote
   du post-traitement par cellule (`fab(0)` sans garde `local_size()` sur les rangs sans box) ;
   resultat bit-invariant au nombre de rangs (`test_mpi_system_solve_fields_np{1,2,4}`, joue en CI MPI).
-- **device-MPI production (GPU multi-rang)** : RESTE A VALIDER separement (adc_cpp #100, suivi).
+- **device-MPI production (GPU multi-rang)** : valide sur GH200 (adc_cpp #93). Le chemin production
+  DSL (`add_compiled_model`) avec `geometric_mg` est valide device + MPI np=1/2/4 (harness dedie).
+- **fft sous `System` en MPI np>1** : REFUSE proprement (adc_cpp #106 : garde-fou dur, plus de
+  segfault). En MPI `System` repartit UNE box en round-robin, layout incompatible avec la FFT.
+  `DistributedFFTSolver` (layout en bandes, `MPI_Alltoall`) existe et est teste a part, mais N'est
+  PAS route dans `System` (layout bandes vs box unique) ; le periodique distribue passe par lui ou
+  par `geometric_mg`.
 
 Ces chemins ne sont PAS sur le chemin critique de la cible analytique ni du sweep diocotron (CPU),
 mais ils conditionnent la montee en resolution multi-GPU evoquee au Panier 4.
 
 ### Panier 2 : facade DSL de production `m.compile(backend=...)`
 
-Le DSL symbolique existe et compile (JIT IModel + AOT natif) ; ce qui manque est la
-consolidation en facade de production, pas la machinerie.
+Le DSL symbolique existe et compile (prototype JIT IModel, AOT, et loader natif de production) ;
+la facade de production est consolidee. Reproduire Hoffart NE depend PAS du DSL (les briques
+natives suffisent) ; ce panier n'est requis que si l'on veut piloter le modele magnetise complet
+en formules depuis Python plutot qu'en composant des briques.
 
-- **Facade `compile` unifiee** : `python/adc/dsl.py` expose `compile_so` (JIT, backend "jit"),
-  `compile_aot` (AOT, backend "compile") et `compile_or_jit(mode=...)`. C'est la facade visee
-  `m.compile(backend=...)`, mais elle reste prototype/experimentale : le cas DSL `dsl_euler` est
-  marque `category = "experimental", ci = false` dans `cases_manifest.toml`. Aucun cas diocotron
-  ne passe par le DSL aujourd'hui (les compositions vont par `models.diocotron(...)`, briques
-  natives).
-- **Limite device connue** : la recette device-clean (lambda etendue -> foncteur nomme, codegen
-  device robuste sous nvcc) couvre maintenant le transport (`block_builder.hpp`, adc_cpp #64) ET
-  les kernels elliptique/maillage de `solve_fields` (#97), d'ou la validation GPU np=1 ci-dessus.
-  Le chemin `add_compiled_model` / WENO5 sur `.so` reste a part : `add_compiled_block` alloue 2
-  ghosts (rejette `"weno5"`) et le pilotage device de bout en bout du modele compile n'est pas
-  consolide. Reproduire Hoffart NE depend pas du DSL (les briques natives suffisent) ; ce panier
-  n'est requis que si l'on veut piloter le modele magnetise complet en formules depuis Python
-  plutot qu'en composant des briques.
+- **Facade `compile` consolidee** : `python/adc/dsl.py` expose `m.compile(backend=...)` ergonomique
+  (auto-detection de l'include du coeur, cache `so_path` par cle d'ABI, adc_cpp #103) au-dessus de
+  `compile_so` (prototype JIT), `compile_aot` (AOT) et `compile_native` (production, loader natif
+  zero-copie -> `add_native_block`, target `"system"` ou `"amr_system"`). Le backend de production
+  natif est SHIPPE (#85, #92) : `target="amr_system"` route vers `AmrSystem.add_native_block` (DSL
+  Phase D). Les demonstrateurs DSL sont complets et tous `ci = true` en CI adc_cases :
+  `diocotron_dsl`, `two_species_dsl`, `magnetic_isothermal_dsl`. Aucun cas diocotron du sweep ne
+  passe par le DSL (les compositions vont par `models.diocotron(...)`, briques natives), mais le
+  diocotron EST desormais ecrit en DSL dans `diocotron_dsl`.
+- **WENO5 sur `.so`** : SHIPPE (#102). `add_compiled_block` (AOT) et `add_native_block`
+  (production) allouent une grille `.so` a 3 ghosts et acceptent `"weno5"` ; le chemin natif AMR
+  l'accepte aussi (#105, parite `add_native_block` == `add_compiled_model` == `add_block`, dmax=0).
+  Seul le chemin JIT prototype (`add_dynamic_block`) reste a 2 ghosts et rejette `"weno5"`.
+- **Pilotage device consolide** : la recette device-clean (lambda etendue -> foncteur nomme, codegen
+  device robuste sous nvcc) couvre le transport (`block_builder.hpp`, adc_cpp #64), les kernels
+  elliptique/maillage de `solve_fields` (#97, GPU `System` production np=1 valide GH200) ET le chemin
+  production DSL device + MPI np=1/2/4 (#93, `geometric_mg` valide GH200). La validation GPU n'est
+  donc plus en suspens cote production.
 
 ### Panier 3 : domaine-disque FV / capacite de paroi (vrai domaine circulaire, pas bord cartesien)
 
@@ -175,10 +209,13 @@ bornee par la diffusion du bord cartesien (constat M1, `todo.md` section 6).
 
 Capacites partiellement presentes mais incompletes pour un usage Hoffart pousse.
 
-- **AMR multi-bloc / multi-niveau a parite `System`** : `AmrSystem` est MONO-bloc, explicite,
-  SANS reconstruction primitive ni flux de Roe (`docs/ARCHITECTURE.md` section 8 : "AmrSystem
-  n'est PAS a parite avec System"). Un diocotron AMR a haute resolution + ordre eleve sur
-  plusieurs niveaux demande de faire porter le meme `EquationBlock` par le moteur AMR.
+- **AMR multi-bloc / multi-niveau a parite `System`** : `AmrSystem` reste MONO-bloc (pas
+  multi-espece), explicite (pas IMEX) cote facade. Le multi-box natif n'est pas cable cote facade,
+  et la facade Python AMR REJETTE HLLC/Roe et la reconstruction primitive (cf. `python/adc/__init__.py`,
+  garde-fou `add_equation`) ; ce rejet est PUREMENT facade : le moteur C++ les supporte deja
+  (l'API `add_block` accepte la recon primitive cote C++). WENO5 + Rusanov + conservatif EST cable
+  sur le chemin natif AMR (#105). Un diocotron AMR a haute resolution + ordre eleve a parite
+  `System` (recon primitive, Roe, multi-box) demande d'ouvrir ces options cote facade.
 - **Strong-scaling AMR full-device** : le grossier reparti (`replicated_coarse=false`) est cable
   mais NEGATIF a l'echelle testee (`docs/GPU_RUNTIME_PORT.md` phase 11). Requis seulement pour de
   tres grandes resolutions multi-GPU, pas pour la cible Section 5.3.
@@ -206,6 +243,16 @@ Capacites partiellement presentes mais incompletes pour un usage Hoffart pousse.
   fenetre de fit ; l=5 deja a la cible (cf. conclusion prudente section verrou).
 - **GPU `System` production np=1** valide sur GH200 (adc_cpp #97).
 - **`solve_fields` MPI CPU np=1/2/4** valide (adc_cpp #99).
+- **device-MPI production** (`add_compiled_model` + `geometric_mg`) valide sur GH200 np=1/2/4
+  (adc_cpp #93).
+- **WENO5 sur les chemins `.so`** (AOT + production) valide (adc_cpp #102), et sur le chemin natif
+  AMR (adc_cpp #105, parite `add_native_block` == `add_compiled_model` == `add_block`, dmax=0).
+- **`AmrSystem` production natif** (`add_native_block`, `target="amr_system"`) shippe (adc_cpp #92,
+  DSL Phase D).
+- **fft sous `System` MPI np>1 refuse proprement** (adc_cpp #106 : garde-fou dur, plus de segfault).
+- **`compile()` ergonomique + cache `so_path`** (adc_cpp #103).
+- **Demonstrateurs DSL complets** (`diocotron_dsl`, `two_species_dsl`, `magnetic_isothermal_dsl`),
+  tous `ci = true` en CI adc_cases.
 
 ### Prochain VERROU scientifique (le seul qui leve le sous-taux structurel)
 
@@ -215,19 +262,25 @@ Capacites partiellement presentes mais incompletes pour un usage Hoffart pousse.
   structurel ~9-10 % mis en evidence par le sweep O5. Chantier le plus lourd et le plus payant pour
   le taux numerique. Le sweep n'en est PAS une preuve : il SUGGERE le candidat et reste a confirmer
   (n=768/1024 ou deux horizons `t_end` pour l=3 ; diagnostic de fenetre robuste pour l=4).
+  La tentative "paroi-transport Phase 1" (adc_cpp #109) est EXPERIMENTALE et a ete FERMEE SANS
+  merge : elle posait un bord de transport sur le CONDUCTEUR externe (mauvais bord), ce qui masque
+  le vrai verrou. Le verrou scientifique reste le BORD D'ANNEAU (le gradient radial net de l'anneau
+  de charge), pas la paroi conductrice. La PR-A "transport-wall" doit viser ce bord d'anneau.
 
 ### Prochains verrous d'infrastructure (peuvent atterrir en parallele)
 
-- **Validation device-MPI production** (GPU multi-rang) : adc_cpp #100 (suivi). Prerequis a une
-  montee en resolution multi-GPU.
-- **WENO5 sur `CompiledModel` / `.so`** : les chemins AOT/JIT allouent 2 ghosts et rejettent
-  `"weno5"` ; etendre le stencil 5 points au chemin compile pour aligner DSL et `add_block`.
-- **Ergonomie `compile()` / cache** : consolider `m.compile(backend=...)` (Panier 2) + re-router
-  `add_compiled_model` sur les foncteurs nommes device-clean. PAS sur le chemin critique de la
-  reproduction (briques natives suffisent), mais utile pour piloter le modele magnetise en formules.
-- **Panier 4 selon l'ambition** : parite `AmrSystem` <-> `System` (recon primitive + Roe +
-  multi-bloc) pour pousser l'AMR a haute resolution ; puis modele magnetise complet
-  (`two_fluid_ap` couple au transport) si l'on sort de la limite de derive.
+- **`AmrSystem.potential()` cote Python** : binding EN COURS (PR ouverte, NON mergee) pour lire
+  `phi` depuis l'AMR et alimenter la FFT azimutale du diagnostic de taux. A finaliser avant un
+  sweep diocotron AMR pilote en Python.
+- **fft distribuee routee dans `System`** : `DistributedFFTSolver` (layout en bandes) existe et
+  est teste a part mais N'est PAS route dans `System` (layout bandes vs box unique) ; le cabler
+  permettrait le periodique distribue MPI sans repli sur `geometric_mg`. Non requis pour la cible.
+- **Parite facade AMR <-> `System`** : ouvrir cote facade Python le multi-box natif, la recon
+  primitive et les flux HLLC/Roe (deja supportes par le moteur C++, rejet purement facade) pour
+  pousser l'AMR a haute resolution + ordre eleve a parite `System`.
+- **Panier 4 selon l'ambition** : strong-scaling AMR full-device (grossier reparti negatif a
+  l'echelle testee), puis modele magnetise complet (`two_fluid_ap` couple au transport) si l'on
+  sort de la limite de derive.
 
 ## Resume du verrou
 

@@ -5,6 +5,25 @@
 > (3) ce que les agents ont explicitement note comme "reste a faire".
 > Convention : `[x]` fait et sur `master`, `[~]` partiel, `[ ]` a faire.
 
+## 0. API publique RECOMMANDEE (point d'entree utilisateur)
+
+Deux facons d'ecrire un modele, toutes deux executees en C++ natif (zero boucle cellule par cellule
+en Python sur le chemin performant) :
+
+- **Composer des briques natives** : `adc.Model(state, transport, source, elliptic)` -> assemble un
+  `ModelSpec` a partir de briques d'etat / transport / source / elliptique deja compilees dans la lib.
+- **Ecrire le modele en formules** : `adc.dsl.Model(...)` (DSL symbolique) puis `m.compile(...)`. Le
+  backend RECOMMANDE est **`production`** (loader natif zero-copie `add_native_block`, objectif
+  MPI/GPU/AMR) ; le marquer comme defaut conseille du DSL.
+
+Chemins AVANCES / LEGACY / TEST (PAS le chemin utilisateur principal) :
+- `m.compile(backend='prototype')` (JIT NumPy/hote), `m.compile(backend='aot')` (.so ABI plate) :
+  chemins de developpement / portabilite, doubles par `production`.
+- `System.add_dynamic_block` (JIT) et `System.add_compiled_block` (AOT) : adders bas niveau ; preferer
+  `add_native_block` (production) via la facade DSL.
+- `adc.PythonFlux` : backend de PROTOTYPAGE, chemin HOTE pur (numpy, ordre 1 Rusanov periodique), HORS
+  hot path GPU/MPI. Pour tester rapidement un flux inedit sans recompiler, PAS pour la production.
+
 ## 1. Chantier "Aux extensible" (champs auxiliaires au-dela de phi / grad)
 
 Objectif : un modele declare/lit des champs aux SUPPLEMENTAIRES (B_z magnetique, T_e electronique)
@@ -71,6 +90,16 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       anciens et garde-fou sur la longueur de `names=`. (#75)
 - [x] AMR multi-patch distribue MPI (2 et N niveaux), `CouplingPolicy` mince, suite de validation
       numerique coeur, decoupage elliptique (operateur / solveur / probleme).
+
+**Ordre de parite `AmrSystem` -> `System`** (combler les ecarts du chemin AMR dans cet ordre) :
+- **Gap 1 - flip facade** : lever le rejet FACADE Python de HLLC/Roe + reconstruction primitive sur
+  `AmrSystem.add_equation` (le moteur C++ `add_compiled_model(AmrSystem&)` les supporte deja ; rejet
+  PUREMENT facade, cf. section 8 Etape 5). Le moins couteux : un flip de garde-fou.
+- **Gap 2 - IMEX** : steppers implicites/IMEX sur AMR (aujourd'hui AMR EXPLICITE uniquement).
+- **Gap 3 - multi-box natif** : cabler le chemin natif multi-box cote facade (le moteur existe ;
+  non expose).
+- **Gap 4 - multi-espece (capstone)** : `AmrSystem` mono-bloc -> plusieurs blocs/especes sur la
+  hierarchie (couronnement de la parite avec `System`).
 
 ## 4. GPU (GH200) - integration
 
@@ -146,8 +175,9 @@ disque, Schur EPM, AMR multi-bloc, repro Hoffart) -- toutes DIFFEREES. Une PR pa
       build dans `out/<cas>/build/` (git-ignore). (adc_cases #4)
 - [x] **Facade DSL `m.compile(backend=prototype|aot|production)`** : aiguillage par intention couple a
       l'adder System correct ; preserve noms/roles/gamma/n_aux/B_z/T_e ; `require_metadata=True` leve une
-      erreur explicite au lieu du fallback muet. PUR-PYTHON (aucune modif binding). `production` =
-      alias HONNETE de `aot` aujourd'hui (pas encore un backend zero-copie device distinct -> suivi). (#79)
+      erreur explicite au lieu du fallback muet. PUR-PYTHON (aucune modif binding). A #79, `production`
+      etait encore un alias de `aot` ; depuis #85 c'est un backend natif zero-copie DISTINCT
+      (`add_native_block`), cf. "Suite identifiee (faite)" ci-dessous. (#79)
 - [x] **Moteur AMR durci** : `PatchRange` + helper coarse-fine `fill_cf_ghost_cell` promus,
       bit-identique (Serial 73/73, MPI 94/94 np=1/2/4). (#80) Voir section 3.
 - [x] **Audit feuille de route papier** : `docs/PAPER_ROADMAP.md` (4 paniers : API actuelle / DSL
@@ -186,7 +216,10 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       `target="amr_system"` ; parite bit-identique a `add_compiled_model(AmrSystem&)`. VALIDE CPU/CI
       (test_amr_native_loader dlopen, Release+MPI+Kokkos verts). (#92) **WENO5/Rusanov/conservatif** cable
       sur le chemin natif AMR (parite `add_native_block`==`add_compiled_model`==`add_block`, dmax=0, #105).
-      Limites restantes : AMR mono-bloc, explicite, pas de reconstruction primitive ni HLLC/Roe via le `.so` AMR.
+      Limites restantes (cf. ordre de parite AmrSystem, section 3) : AMR mono-bloc / pas multi-espece,
+      explicite (pas d'IMEX), multi-box natif non cable cote facade, et HLLC/Roe/reconstruction primitive
+      REJETES cote FACADE Python AMR (le moteur C++ `add_compiled_model(AmrSystem&)` les supporte deja :
+      rejet PUREMENT facade, pas une limite du moteur).
 - [~] **Etape 6 - validation MPI/GPU du chemin `production`** : **np=1 GPU VALIDE sur GH200.** Le crash
       device dans `solve_fields()` etait du a des lambdas `ADC_HD` etendues inline (noyaux elliptiques/mesh
       `copy_shifted`/`fill_boundary`/MG, premiere instanciation cross-TU -> stub kernel nvcc nul en
@@ -203,20 +236,25 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       leve si n_ranks()>1, et l'`assert(n_ranks()==1)` compile-out devient un garde-fou DUR (throw actif en
       Release) dans `PoissonFFTSolver`. fft direct = np=1 seulement ; `DistributedFFTSolver` existe (teste a
       part, `test_mpi_fft_distributed`) mais non route dans System (layout bandes vs box unique).
-- [~] **Etape 7 - paroi transport / domaine disque FV** (prochain vrai verrou scientifique) : le cut-cell
+- [ ] **Etape 7 - paroi transport / domaine disque FV** (prochain vrai verrou scientifique) : le cut-cell
       ne nourrit que le Poisson, pas le flux hyperbolique -> bord d'anneau diffuse sur la grille cartesienne.
-      **Phase 1 EN COURS** : paroi-transport opt-in par masque (experimental, defaut inchange) pour tester
-      l'hypothese du plancher structurel sur l=3. Phase 2 si concluant : fractions cut-cell FV. Reproduction
-      papier quantitative subordonnee (cf. section 6, confirmation haute resolution du plateau l=4).
+      **Phase 1 (paroi-transport opt-in par masque, experimentale) FERMEE SANS MERGE (#109)** : la paroi
+      ainsi posee masque le CONDUCTEUR EXTERNE (mauvais bord), pas le bord d'anneau qui reste le verrou
+      scientifique reel. A reprendre : la paroi-transport doit cibler le BORD D'ANNEAU. Phase 2 (fractions
+      cut-cell FV) seulement si une Phase 1 correctement bordee est concluante. Reproduction papier
+      quantitative subordonnee (cf. section 6, confirmation haute resolution du plateau l=4).
 
 **STATUT HONNETE (ne PAS presenter "Plan Ideal termine")** : System production CPU = OK ; AmrSystem
 production CPU = OK (WENO5/Rusanov/conservatif, #105) ; demonstrateurs DSL = OK (diocotron_dsl,
 two_species_dsl, magnetic_isothermal_dsl, tous en CI) ; **production GPU np=1 = OK (GH200, #97)** ;
 **`solve_fields` MPI np=1/2/4 = OK cote CPU/CI (#99)** ; **device-MPI production `geometric_mg` = VALIDE
 (GH200, #93, np=1/2/4)** ; **`fft` np>1 sous System = refuse proprement (#106), plus de segfault** (DistributedFFTSolver non route, layout) ; `set_density`/`get_state` multi-rang
-= hors scope ; WENO5 sur `CompiledModel` = SUPPORTE (3 ghosts via `set_block_ghosts`, #102) ;
+= hors scope ; WENO5 sur `CompiledModel` (.so AOT ET production) = SUPPORTE (3 ghosts via `set_block_ghosts`, #102),
+WENO5 cable aussi sur le chemin natif AMR (#105) ; `m.compile()` ergonomique (auto-detect include + cache `so_path`, #103) ;
+`AmrSystem.potential()` = binding EN COURS (PR ouverte NON mergee), NE PAS l'affirmer comme acquis ;
 `PAPER_ROADMAP.md` = a NE PAS reecrire automatiquement
-(attend la validation humaine du sweep O5) ; **prochain verrou scientifique = Phase 1 paroi-transport (experimental, en cours)**.
+(attend la validation humaine du sweep O5) ; **prochain verrou scientifique = paroi-transport CORRECTEMENT BORDEE
+sur le BORD D'ANNEAU (Phase 1 par masque fermee sans merge, #109, car elle masquait le conducteur externe)**.
 
 ## 9. Mesure diocotron haut ordre (PR-0 + O5, cote `adc_cases`)
 
