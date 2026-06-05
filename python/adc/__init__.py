@@ -35,7 +35,7 @@ __all__ = [
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",
     "NoSource", "PotentialForce", "GravityForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
-    "Spatial", "FiniteVolume", "Explicit", "IMEX", "Implicit", "integrate",
+    "Spatial", "FiniteVolume", "Explicit", "IMEX", "SourceImplicit", "Implicit", "integrate",
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
@@ -498,7 +498,12 @@ class Explicit:
 
 
 class IMEX:
-    """IMEX : transport explicite + source raide implicite (Newton local), implicite PARTIEL.
+    """IMEX : transport explicite (SSPRK) + source raide implicite (backward-Euler, Newton local).
+
+    Traitement PARTIEL : seule la SOURCE est implicite (backward-Euler, Newton local a la cellule,
+    via backward_euler_source / ImplicitSourceStepper cote C++). Le TRANSPORT reste explicite
+    (avance par le coeur SSPRK). Ce n'est PAS un solveur implicite global (flux + source + Poisson
+    resolus implicitement / Newton-Krylov) -- ce chantier est une phase future distincte.
 
     substeps=N : sous-pas par macro-pas (cf. Explicit). Defaut 1.
     stride=M   : cadence du bloc, semantique hold-then-catch-up (cf. Explicit) : le bloc est tenu tant
@@ -518,12 +523,53 @@ class IMEX:
         self.stride = int(stride)
 
 
-def Implicit(dt_ratio=1, substeps=None, stride=1):
-    """Alias d'IMEX (implicite PARTIEL : source raide implicite, transport explicite).
+class SourceImplicit:
+    """Traitement implicite de la SOURCE raide (backward-Euler, Newton local), transport explicite.
 
-    Pas d'implicite TOTAL expose (le cas couteux que l'on evite). `Implicit(dt_ratio=k)`
-    vaut `IMEX(substeps=k)`. stride : cadence du bloc (cf. IMEX).
+    Nom clair pour le schema IMEX source-only : seule la SOURCE est traitee en implicite
+    (backward-Euler resolu par Newton local a la cellule, via backward_euler_source /
+    ImplicitSourceStepper cote C++). Le TRANSPORT reste EXPLICITE (avance par le coeur SSPRK).
+
+    IMPORTANT -- ce n'est PAS un solveur implicite global PDE. Un solveur implicite global
+    (flux + source + Poisson tous implicites, Newton-Krylov ou Schur global) est un chantier
+    futur distinct. SourceImplicit = IMEX source-only (strictement equivalent a IMEX/adc.Implicit,
+    numerique bit-identique).
+
+    substeps=N : sous-pas par macro-pas (cf. Explicit). Defaut 1.
+    stride=M   : cadence du bloc, semantique hold-then-catch-up (cf. Explicit). Defaut 1.
     """
+
+    kind = "imex"  # meme chemin C++ que IMEX (ImplicitSourceStepper)
+
+    def __init__(self, substeps=1, stride=1):
+        if int(substeps) < 1:
+            raise ValueError("SourceImplicit : substeps >= 1 (recu %r)" % (substeps,))
+        if int(stride) < 1:
+            raise ValueError("SourceImplicit : stride >= 1 (recu %r)" % (stride,))
+        self.substeps = int(substeps)
+        self.stride = int(stride)
+
+
+def Implicit(dt_ratio=1, substeps=None, stride=1):
+    """OBSOLETE -- utiliser adc.SourceImplicit(...) ou adc.IMEX(...) a la place.
+
+    adc.Implicit etait un alias d'IMEX (source raide implicite via backward-Euler, transport
+    explicite). Le nom "Implicit" est TROMPEUR : il suggere un solveur implicite global PDE
+    (flux + source + Poisson tous implicites / Newton-Krylov), ce qui n'est PAS le cas.
+    adc.SourceImplicit est le nom clair du meme schema (numerique bit-identique).
+
+    Conserve pour la retrocompatibilite ; emet un DeprecationWarning. Utiliser :
+      adc.SourceImplicit(substeps=k, stride=s)  -- nouveau nom clair
+      adc.IMEX(substeps=k, stride=s)            -- acronyme officiel
+    """
+    import warnings
+    warnings.warn(
+        "adc.Implicit est obsolete : le nom est trompeur (ce n'est PAS un solveur implicite "
+        "global PDE). Utiliser adc.SourceImplicit(...) (source implicite backward-Euler, "
+        "transport explicite) ou adc.IMEX(...) a la place.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return IMEX(substeps=substeps if substeps is not None else dt_ratio, stride=stride)
 
 
