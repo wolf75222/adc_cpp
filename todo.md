@@ -14,26 +14,26 @@ les sections 10 a 15 (nouvelles).
 sur AMR (Gap 2) ; #133 foncteurs nommes nvcc (tests device) ; #134 krylov precond/matvec CL homogenes
 (findings revue 1+2) ; #139 doc archi AMR multi-blocs ; #137 honnetete API (findings 4/5/6) ;
 #138 step_cfl substeps-aware (finding 3 ; commentaires+docs+tests, formule INCHANGEE) ; #136
-acceleration CI (split fast/full + cache Kokkos/ccache, ~25 min -> ~5 min a chaud, tous les tests gardes).
+acceleration CI (split fast/full + cache Kokkos/ccache, ~25 min -> ~5 min a chaud, tous les tests gardes) ;
+#135 fix device GPU (Schur+polaire DEVICE-CLEAN valide GH200, finding 7) ; #141 garde-fou layout AMR
++ AmrHierarchyLayout (step-1 du capstone multi-blocs).
 
-Findings de revue : **1-6 sur master** ; 7 dans #135 (en vol) ; 8 differe au portage MPI.
+Findings de revue : **1-7 sur master** ; 8 differe au portage MPI.
 
 CI (depuis #136) : PR de routine = ci-fast (Release + Python). MPI + Kokkos via push master / nightly /
 `workflow_dispatch` / label `ci-full`. REGLE : poser le label `ci-full` sur toute PR risquee (MPI /
 Kokkos / device / Schur / AMR) AVANT merge pour la validation complete.
 
 **En vol :**
-- [ ] **#135 fix device GPU** : accesseurs `Geometry`/`Box2D` `ADC_HD` + `all_reduce_max` CFL (finding 7).
-      Cause racine du "Schur/polaire FAUX EN SILENCE sur Cuda". Host-CI VERT ; attend validation device
-      GH200 avant merge (le host ne teste pas le device).
-- [ ] **PR stride (agent)** : fix cadence hold-then-catch-up `(macro+1)%stride==0` (bug latent du
-      couplage strided dans `AmrSystemCoupler`). Cf. section 15.
-- [ ] **PR layout-guard (agent)** : `same_layout_or_throw` exact (boxes+ordre, dmap, dx/dy, niveaux) +
-      `AmrHierarchyLayout` minimal + correction doc #139 + test bit-identique. Step-1 du capstone (section 15).
+- [ ] **#140 fix cadence stride** : hold-then-catch-up `(macro_step_+1)%stride==0` (bug latent du
+      couplage strided dans `AmrSystemCoupler` ; bloc lent n'est plus "dans le futur" au 1er pas).
+      Rebasee sur #141, `ci-full` en cours (validation MPI+Kokkos). Cf. section 15 etape (iv).
 
 **Prochaines etapes (sequencees) :**
-1. Merger #135 (sur vert device ROMEO) ; puis les 2 PR AMR-prep (stride + layout-guard, merge-tree
-   verifie entre elles, label `ci-full`).
+1. Merger #140 (sur ci-full vert MPI+Kokkos) -> AMR-prep alors TERMINEE (#135 device-clean, #141
+   layout-guard, #140 cadence). Ensuite : **registre runtime multi-blocs** (type-erased par nom +
+   closures advance/rhs/source/max_speed/mass/density ; refus `regrid_every>0` tant que regrid-union
+   absent ; conservation composite leaf-only/average_down).
 2. AMR multi-blocs capstone (Gap 4, section 15) : doc #139 faite ; le MOTEUR EXISTE DEJA
    (`AmrSystemCoupler`), donc COMPLETION pas creation. step-1 (extraire AmrBlock/layout, bit-identique)
    EN ATTENTE DE GO ; les etapes facade attendent que #137 libere `__init__.py`.
@@ -384,11 +384,15 @@ confirmes reels sur 12. Disposition :
 
 ## 14. Acceleration CI (garder tous les tests, aller plus vite)
 
-- [ ] **#136** (en vol) : cache du Kokkos INSTALLE (gros gain : plus de rebuild a chaque run) + ccache
-      (`CMAKE_CXX_COMPILER_LAUNCHER`) + Ninja + `ctest --parallel 2` (PAS plus : TU AMR/Eigen 1-2 Go) +
-      `setup-python@v6` + auto-decouverte `python/tests/test_*.py` + `concurrency: cancel-in-progress`
-      + split **ci-fast** (PR) / **ci-full** (push master + nightly + `workflow_dispatch` + label
-      `ci-full`). Aucun test supprime ; label `ci-full` pour exiger MPI/Kokkos sur une PR risquee.
+- [x] **#136 (FAIT, sur master)** : cache du Kokkos INSTALLE (gros gain : plus de rebuild a chaque run)
+      + ccache (`CMAKE_CXX_COMPILER_LAUNCHER`) + Ninja + `ctest --parallel 2` (PAS plus : TU AMR/Eigen
+      1-2 Go) + `setup-python@v6` + auto-decouverte `python/tests/test_*.py` +
+      `concurrency: cancel-in-progress` + split **ci-fast** (PR) / **ci-full** (push master + nightly +
+      `workflow_dispatch` + label `ci-full`). Aucun test supprime ; label `ci-full` pour exiger
+      MPI/Kokkos sur une PR risquee.
+      RESULTAT MESURE : **~25 min -> ~5 min a chaud** (Release 4.8 min, MPI 2 min, Kokkos 1.7 min) ;
+      **45 tests Python** auto-decouverts (superset des 40 ; +5 jamais cables avant). Les PR d'agents
+      suivantes en beneficient des maintenant (CI plus rapide = iteration plus rapide).
 
 ## 15. AMR multi-blocs sur hierarchie partagee (capstone Gap 4 / P6)
 
