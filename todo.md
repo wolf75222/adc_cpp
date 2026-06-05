@@ -1,7 +1,7 @@
 # TODO - adc_cpp
 
 > Liste de travail vivante. Synthese de (1) l'objectif initial du chantier (canal `aux` extensible
-> + parite AMR + cablage runtime / Python / DSL), (2) ce que `docs/ROADMAP.md` marque "en file",
+> + parite AMR + cablage runtime / Python / DSL), (2) ce que `docs/archive/ROADMAP.md` (ARCHIVE) marque "en file",
 > (3) ce que les agents ont explicitement note comme "reste a faire".
 > Convention : `[x]` fait et sur `master`, `[~]` partiel, `[ ]` a faire.
 
@@ -104,7 +104,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       `amr_coupler_mp`, `spectral_coupler`) - differe au dernier bit, donc hors perimetre tant
       qu'on veut le bit-identique.
 
-## 3. Durcissement de l'architecture (`docs/ROADMAP.md` "en file")
+## 3. Durcissement de l'architecture (`docs/archive/ROADMAP.md`, ARCHIVE -- plus une doc active)
 
 - [~] **Moteur AMR unifie** : `advance_amr(LevelHierarchy&)`, `FluxRegister`, `CoverageMask`,
       `RegridPolicy` (`amr_regrid_finest`) promus en vrais types. `PatchRange` promu (empreinte
@@ -257,10 +257,9 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       `target="amr_system"` ; parite bit-identique a `add_compiled_model(AmrSystem&)`. VALIDE CPU/CI
       (test_amr_native_loader dlopen, Release+MPI+Kokkos verts). (#92) **WENO5/Rusanov/conservatif** cable
       sur le chemin natif AMR (parite `add_native_block`==`add_compiled_model`==`add_block`, dmax=0, #105).
-      Limites restantes (cf. ordre de parite AmrSystem, section 3) : AMR mono-bloc / pas multi-espece,
-      explicite (pas d'IMEX), multi-box natif non cable cote facade, et HLLC/Roe/reconstruction primitive
-      REJETES cote FACADE Python AMR (le moteur C++ `add_compiled_model(AmrSystem&)` les supporte deja :
-      rejet PUREMENT facade, pas une limite du moteur).
+      Limites restantes (cf. ordre de parite AmrSystem, section 3 + capstone section 15) : AMR mono-bloc /
+      pas multi-espece ; **IMEX source LOCALE OK (Gap 2 #132)** mais pas de Schur GLOBAL sur AMR ; multi-box
+      natif non cable cote facade. (HLLC/Roe/reconstruction primitive : **Gap 1 LEVE cote facade**.)
 - [~] **Etape 6 - validation MPI/GPU du chemin `production`** : **np=1 GPU VALIDE sur GH200.** Le crash
       device dans `solve_fields()` etait du a des lambdas `ADC_HD` etendues inline (noyaux elliptiques/mesh
       `copy_shifted`/`fill_boundary`/MG, premiere instanciation cross-TU -> stub kernel nvcc nul en
@@ -292,7 +291,10 @@ two_species_dsl, magnetic_isothermal_dsl, tous en CI) ; **production GPU np=1 = 
 (GH200, #93, np=1/2/4)** ; **`fft` np>1 sous System = refuse proprement (#106), plus de segfault** (DistributedFFTSolver non route, layout) ; `set_density`/`get_state` multi-rang
 = hors scope ; WENO5 sur `CompiledModel` (.so AOT ET production) = SUPPORTE (3 ghosts via `set_block_ghosts`, #102),
 WENO5 cable aussi sur le chemin natif AMR (#105) ; `m.compile()` ergonomique (auto-detect include + cache `so_path`, #103) ;
-`AmrSystem.potential()` = binding EN COURS (PR ouverte NON mergee), NE PAS l'affirmer comme acquis ;
+`AmrSystem.potential()` = binding EXISTE et expose (`python/bindings.cpp:272`) ; **Schur/polaire device** :
+#135 (`Geometry`/`Box2D` `ADC_HD` + `all_reduce_max` CFL) corrige le "faux en silence" sur Kokkos Cuda,
+valide GH200 (reductions bit-exact, condensed_schur BiCGStab converge, polaire ordre 2) ; re-validation
+sur master en cours (front de nuit) ;
 `PAPER_ROADMAP.md` = a NE PAS reecrire automatiquement
 (attend la validation humaine du sweep O5) ; **prochain verrou scientifique = paroi-transport CORRECTEMENT BORDEE
 sur le BORD D'ANNEAU (Phase 1 par masque fermee sans merge, #109, car elle masquait le conducteur externe)**.
