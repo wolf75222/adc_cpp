@@ -307,6 +307,40 @@ class GeometricMG {
     has_kappa_ = true;
   }
 
+  // Active les COEFFICIENTS HORS-DIAGONAUX du tenseur PLEIN A = [[eps_x, Axy], [Ayx, eps_y]] :
+  // l'operateur passe de div(diag(eps_x, eps_y) grad phi) a div(A grad phi), en ajoutant les flux
+  // CROISES d_x(Axy d_y phi) + d_y(Ayx d_x phi) (cf. poisson_operator.hpp). A peut etre NON
+  // symetrique (Axy != Ayx). Memes conventions que set_epsilon : champs AU CENTRE, evalues PAR
+  // NIVEAU (coefficient exact au grossier) puis ghosts remplis (la moyenne de face lit le voisin a
+  // i+-1 / j+-1). Composable avec set_epsilon[_anisotropic] et set_reaction. Appeler une fois apres
+  // construction, avant solve. NE PAS appeler => bloc DIAGONAL (chemin actuel bit-identique).
+  // AVERTISSEMENT : pour A fortement non symetrique le V-cycle GS-5-points (lisseur du bloc
+  // DIAGONAL, termes croises EXPLICITES) peut ne PAS converger ; un Krylov serait alors requis.
+  void set_cross_terms(std::function<Real(Real, Real)> a_xy_fn,
+                       std::function<Real(Real, Real)> a_yx_fn) {
+    const BCRec ebc = eps_bc();
+    for (auto& L : lev_) {
+      L.a_xy = MultiFab(L.ba, L.dm, 1, 1);  // 1 ghost : la moyenne de face lit le voisin de bord
+      L.a_yx = MultiFab(L.ba, L.dm, 1, 1);
+      const Geometry& g = L.geom;
+      for (int li = 0; li < L.a_xy.local_size(); ++li) {
+        Array4 fxy = L.a_xy.fab(li).array();
+        Array4 fyx = L.a_yx.fab(li).array();
+        const Box2D b = L.a_xy.box(li);
+        // initialisation hote (std::function non device-callable) ; memoire unifiee avant kernel
+        for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+          for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
+            const Real x = g.x_cell(i), y = g.y_cell(j);
+            fxy(i, j) = a_xy_fn(x, y);
+            fyx(i, j) = a_yx_fn(x, y);
+          }
+      }
+      fill_ghosts(L.a_xy, g.domain, ebc);
+      fill_ghosts(L.a_yx, g.domain, ebc);
+    }
+    has_cross_ = true;
+  }
+
   void vcycle() { vcycle_rec(0, bc_); }
 
   // V-cycles jusqu'a residu relatif < rel_tol (ou max_cycles). Renvoie le
@@ -391,7 +425,8 @@ class GeometricMG {
   Real current_residual() {
     detail::mg_trace_mark("current_residual: avant poisson_residual");
     poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res,
-                     mask_ptr(0), coef_ptr(0), eps_ptr(0), kappa_ptr(0), eps_y_ptr(0));
+                     mask_ptr(0), coef_ptr(0), eps_ptr(0), kappa_ptr(0), eps_y_ptr(0),
+                     a_xy_ptr(0), a_yx_ptr(0));
     detail::mg_trace_mark("current_residual: apres poisson_residual, avant norm_inf");
     const Real r = all_reduce_max(norm_inf(lev_[0].res));
     detail::mg_trace_mark("current_residual: apres norm_inf");
@@ -403,7 +438,7 @@ class GeometricMG {
     Geometry geom;
     BoxArray ba;
     DistributionMapping dm;
-    MultiFab phi, rhs, res, mask, coef, eps, kappa, eps_y;
+    MultiFab phi, rhs, res, mask, coef, eps, kappa, eps_y, a_xy, a_yx;
   };
 
   const MultiFab* mask_ptr(int l) { return active_ ? &lev_[l].mask : nullptr; }
@@ -412,6 +447,9 @@ class GeometricMG {
   const MultiFab* kappa_ptr(int l) { return has_kappa_ ? &lev_[l].kappa : nullptr; }
   // eps_y absent => nullptr => operateur isotrope (eps_y = eps_x) inchange.
   const MultiFab* eps_y_ptr(int l) { return has_eps_y_ ? &lev_[l].eps_y : nullptr; }
+  // termes croises absents => nullptr => bloc DIAGONAL (chemin actuel inchange).
+  const MultiFab* a_xy_ptr(int l) { return has_cross_ ? &lev_[l].a_xy : nullptr; }
+  const MultiFab* a_yx_ptr(int l) { return has_cross_ ? &lev_[l].a_yx : nullptr; }
 
   // CL utilisee pour remplir les ghosts du champ eps : on garde le periodique mais
   // on remplace tout bord physique (Dirichlet ou outflow de phi) par une
@@ -431,7 +469,8 @@ class GeometricMG {
         : DistributionMapping(ba.size(), n_ranks());
     lev_.push_back(MGLevel{g, ba, dm, MultiFab(ba, dm, 1, 1),
                            MultiFab(ba, dm, 1, 0), MultiFab(ba, dm, 1, 0),
-                           MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}});
+                           MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{},
+                           MultiFab{}, MultiFab{}});
   }
 
   void vcycle_rec(int l, const BCRec& bc) {
@@ -441,6 +480,13 @@ class GeometricMG {
     const MultiFab* ep = eps_ptr(l);
     const MultiFab* kp = kappa_ptr(l);
     const MultiFab* ey = eps_y_ptr(l);  // nullptr => isotrope (eps_y = eps_x)
+    const MultiFab* axy = a_xy_ptr(l);  // nullptr => bloc diagonal (pas de flux croise)
+    const MultiFab* ayx = a_yx_ptr(l);
+    // NB : gs_smooth reste 5 POINTS (bloc diagonal). Les termes croises sont EXPLICITES : seul le
+    // residu (poisson_residual) les porte. Le lisseur GS ne touche que la diagonale -> sa diag reste
+    // dominante (kappa>=0, eps>0) ; le couplage croise est relegue au residu, comme la convention de
+    // l'entete. Pour A symetrique-defini-positif le V-cycle reste contractant ; pour A non symetrique
+    // fort, il peut diverger (cf. set_cross_terms, observation reportee).
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): avant gs_smooth(nu1) [premier kernel GS]");
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu1_, mk, ck, ep, kp, ey);
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres gs_smooth(nu1)");
@@ -451,7 +497,7 @@ class GeometricMG {
       return;
     }
 
-    poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep, kp, ey);
+    poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep, kp, ey, axy, ayx);
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres poisson_residual");
     MGLevel& C = lev_[l + 1];
     average_down(L.res, C.rhs, 2);  // restriction du residu
@@ -478,6 +524,7 @@ class GeometricMG {
   bool has_eps_ = false;
   bool has_eps_y_ = false;
   bool has_kappa_ = false;
+  bool has_cross_ = false;  // coefficients hors-diagonaux Axy/Ayx (tenseur PLEIN) actifs
   std::function<Real(Real, Real)> levelset_;
   std::vector<MGLevel> lev_;
 };

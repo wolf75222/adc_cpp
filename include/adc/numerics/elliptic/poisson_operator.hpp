@@ -55,6 +55,32 @@
 // eps_y==nullptr => ISOTROPE : eps_y = eps (eps_x), donc faces x et y partagent le meme
 // champ, comportement actuel STRICTEMENT bit-identique. Le terme kappa est inchange.
 //
+// COEFFICIENTS HORS-DIAGONAUX optionnels (a_xy, a_yx) : tenseur de diffusion PLEIN 2x2
+// A = [[Axx, Axy], [Ayx, Ayy]], avec Axx=eps_x, Ayy=eps_y le bloc DIAGONAL deja gere
+// ci-dessus, et Axy, Ayx les coefficients de COUPLAGE croise (au CENTRE des cellules,
+// 1 composante, ghosts remplis). A peut etre NON SYMETRIQUE (Axy != Ayx). CONVENTION
+// GLOBALE du chemin elliptique : on resout L(phi) = -div(A grad phi) + kappa phi = f_phys ;
+// en interne ces kernels assemblent L_int = div(A grad phi) - kappa phi et poisson_residual
+// rend res = f - L_int (f = -f_phys), comportement inchange. Le bloc plein AJOUTE a
+// div(A grad phi) les deux termes CROISES :
+//     d_x(Axy d_y phi) + d_y(Ayx d_x phi).
+// DISCRETISATION VOLUMES FINIS (stencil 9 points) : le flux croise sur chaque face est porte
+// par la derivee TANGENTIELLE moyennee sur 4 voisins ; le coefficient de face est la moyenne
+// ARITHMETIQUE des deux centres adjacents (le terme croise n'est pas un flux NORMAL, la
+// continuite de la moyenne harmonique n'a pas de sens ici ; l'arithmetique reste d'ordre 2) :
+//   face x en i+1/2 : Fx_p = Axy_xp (phi(i,j+1)+phi(i+1,j+1) - phi(i,j-1) - phi(i+1,j-1)) / (4 dy),
+//     Axy_xp = 0.5 (Axy(i,j) + Axy(i+1,j)) ; idem Fx_m en i-1/2 (avec Axy(i-1,j)) ;
+//   face y en j+1/2 : Fy_p = Ayx_yp (phi(i+1,j)+phi(i+1,j+1) - phi(i-1,j) - phi(i-1,j+1)) / (4 dx),
+//     Ayx_yp = 0.5 (Ayx(i,j) + Ayx(i,j+1)) ; idem Fy_m en j-1/2 (avec Ayx(i,j-1)).
+//   contribution a div(A grad phi) : (Fx_p - Fx_m)/dx + (Fy_p - Fy_m)/dy.
+// Le terme croise est ADDITIF : applique APRES le stencil diagonal (5 points) deja calcule, il
+// ne touche NI la diagonale du lisseur (les termes croises restent EXPLICITES : le GS 5 points
+// du bloc diagonal demeure le lisseur) NI aucun chemin existant. a_xy==a_yx==nullptr => terme
+// croise ABSENT, operateur STRICTEMENT bit-identique au chemin diagonal/Poisson actuel.
+// AVERTISSEMENT : pour A NON symetrique l'operateur discret n'est pas auto-adjoint ; ces kernels
+// n'assemblent QUE l'application (apply/residu). Un V-cycle GS-5-points peut NE PAS converger sur
+// un A fortement non symetrique (un solveur de Krylov serait alors requis, hors de ce jalon).
+//
 // Combinaison cut-cell + eps : chaque poids de face Shortley-Weller est multiplie
 // par sa permittivite de face, et la diagonale est la somme des poids de face (eps
 // inclus). Avec eps uniforme=1 on retrouve les poids de face cut-cell d'origine.
@@ -72,6 +98,32 @@ ADC_HD inline Real eps_harmonic(Real ec, Real ev) {
 }
 
 namespace detail {
+// Divergence des FLUX CROISES du tenseur plein en (i,j) : d_x(Axy d_y phi) + d_y(Ayx d_x phi),
+// discretisee en volumes finis (stencil 9 points) comme decrit dans l'entete. Renvoie la
+// contribution a AJOUTER a div(A grad phi). Foncteur libre ADC_HD (device-clean) partage par
+// apply_laplacian et poisson_residual ; coefficient de face = moyenne ARITHMETIQUE. hxy/hyx
+// gardent chaque demi-terme : un coefficient ABSENT (champ non fourni) contribue 0 sans deref.
+ADC_HD inline Real cross_div(const ConstArray4& p, bool hxy, const ConstArray4& axy, bool hyx,
+                             const ConstArray4& ayx, int i, int j, Real idx, Real idy) {
+  Real out = Real(0);
+  if (hxy) {  // Faces x : flux croise = Axy_face * (d_y phi)_face, tangentielle moyennee sur 4 coins.
+    const Real axy_xp = Real(0.5) * (axy(i, j) + axy(i + 1, j));
+    const Real axy_xm = Real(0.5) * (axy(i, j) + axy(i - 1, j));
+    const Real dyf_xp = (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idy);
+    const Real dyf_xm = (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idy);
+    out += (axy_xp * dyf_xp - axy_xm * dyf_xm) * idx;
+  }
+  if (hyx) {  // Faces y : flux croise = Ayx_face * (d_x phi)_face.
+    const Real ayx_yp = Real(0.5) * (ayx(i, j) + ayx(i, j + 1));
+    const Real ayx_ym = Real(0.5) * (ayx(i, j) + ayx(i, j - 1));
+    const Real dxf_yp = (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idx);
+    const Real dxf_ym = (p(i + 1, j - 1) + p(i + 1, j) - p(i - 1, j - 1) - p(i - 1, j)) * (Real(0.25) * idx);
+    out += (ayx_yp * dxf_yp - ayx_ym * dxf_ym) * idy;
+  }
+  return out;
+}
+
+
 // FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels de l'operateur de Poisson et du lisseur
 // Gauss-Seidel. Memes raisons que le reste du chemin elliptique (#93, recette #64) : ces kernels sont
 // premiere-instancies depuis le V-cycle MG tire d'une TU externe (harness / loader natif) ; une lambda
@@ -79,17 +131,21 @@ namespace detail {
 // Release -O sans -g). Corps STRICTEMENT identique aux anciennes lambdas (memes branches he/hc/hk,
 // meme stencil) -> residu et potentiel bit-identiques sur CPU et device.
 
-// L = div(eps grad phi) - kappa phi (apply_laplacian). cf/ep/ey/ka inutilises si le flag est faux.
+// L = div(A grad phi) - kappa phi (apply_laplacian). cf/ep/ey/ka inutilises si le flag est faux.
+// hxy/hyx => tenseur PLEIN : on AJOUTE les flux croises d_x(Axy d_y phi) + d_y(Ayx d_x phi) (idx/idy
+// = 1/dx, 1/dy ; axy/ayx = coefficients hors-diagonaux au centre). hxy=hyx=false => bit-identique.
 struct ApplyLaplacianKernel {
   ConstArray4 p;
   Array4 L;
-  Real idx2, idy2;
+  Real idx2, idy2, idx, idy;
   bool hc;
   ConstArray4 cf;
   bool he;
   ConstArray4 ep, ey;
   bool hk;
   ConstArray4 ka;
+  bool hxy, hyx;
+  ConstArray4 axy, ayx;
   ADC_HD void operator()(int i, int j) const {
     if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
       const Real ec = ep(i, j);    // eps_x au centre (faces x)
@@ -115,16 +171,19 @@ struct ApplyLaplacianKernel {
     else
       L(i, j) = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
                 (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
-    // operateur Helmholtz / ecrante : L phi = div(eps grad phi) - kappa phi.
+    // Bloc PLEIN : flux croises ADDITIFS (apres le stencil diagonal). hxy=hyx=false => +0, bit-identique.
+    if (hxy || hyx) L(i, j) += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
+    // operateur Helmholtz / ecrante : L phi = div(A grad phi) - kappa phi.
     if (hk) L(i, j) -= ka(i, j) * p(i, j);
   }
 };
 
 // res = f - L phi sur les cellules actives, 0 sur les conductrices (poisson_residual).
+// hx => tenseur PLEIN : flux croises ADDITIFS (cf. ApplyLaplacianKernel). hx=false => bit-identique.
 struct PoissonResidualKernel {
   ConstArray4 p, ff;
   Array4 r;
-  Real idx2, idy2;
+  Real idx2, idy2, idx, idy;
   bool hm;
   ConstArray4 mk;
   bool hc;
@@ -133,6 +192,8 @@ struct PoissonResidualKernel {
   ConstArray4 ep, ey;
   bool hk;
   ConstArray4 ka;
+  bool hxy, hyx;
+  ConstArray4 axy, ayx;
   ADC_HD void operator()(int i, int j) const {
     if (hm && mk(i, j) == Real(0)) {
       r(i, j) = 0;
@@ -163,19 +224,27 @@ struct PoissonResidualKernel {
     else
       lap = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
             (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
-    // res = f - L phi, L phi = div(eps grad phi) - kappa phi = lap - kappa phi.
+    // Bloc PLEIN : flux croises ADDITIFS (apres le stencil diagonal). hxy=hyx=false => +0, bit-identique.
+    if (hxy || hyx) lap += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
+    // res = f - L phi, L phi = div(A grad phi) - kappa phi = lap - kappa phi.
     r(i, j) = ff(i, j) - lap + (hk ? ka(i, j) * p(i, j) : Real(0));
   }
 };
 }  // namespace detail
 
+// a_xy/a_yx : coefficients hors-diagonaux (tenseur PLEIN). nullptr => terme croise absent
+// (operateur diagonal/Poisson bit-identique). Ghosts (1 couche) supposes remplis par l'appelant.
 inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
                             MultiFab& lap, const MultiFab* coef = nullptr,
                             const MultiFab* eps = nullptr,
                             const MultiFab* kappa = nullptr,
-                            const MultiFab* eps_y = nullptr) {
+                            const MultiFab* eps_y = nullptr,
+                            const MultiFab* a_xy = nullptr,
+                            const MultiFab* a_yx = nullptr) {
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
+  const Real idx = Real(1) / geom.dx();
+  const Real idy = Real(1) / geom.dy();
   for (int li = 0; li < phi.local_size(); ++li) {
     const ConstArray4 p = phi.fab(li).const_array();
     Array4 L = lap.fab(li).array();
@@ -188,23 +257,33 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
     const bool hk = kappa != nullptr;  // terme de reaction -kappa phi
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, hc, cf, he, ep, ey, hk, ka});
+    const bool hxy = a_xy != nullptr;  // demi-terme croise Axy (faces x)
+    const bool hyx = a_yx != nullptr;  // demi-terme croise Ayx (faces y)
+    const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
+    const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
+    for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, idx, idy, hc, cf, he,
+                                                  ep, ey, hk, ka, hxy, hyx, axy, ayx});
   }
 }
 
-// res = f - div(eps grad phi) sur les cellules actives, 0 sur les conductrices.
+// res = f - div(A grad phi) sur les cellules actives, 0 sur les conductrices.
+// a_xy/a_yx : coefficients hors-diagonaux (cf. apply_laplacian). nullptr => bit-identique.
 inline void poisson_residual(MultiFab& phi, const MultiFab& f,
                              const Geometry& geom, const BCRec& bc,
                              MultiFab& res, const MultiFab* mask = nullptr,
                              const MultiFab* coef = nullptr,
                              const MultiFab* eps = nullptr,
                              const MultiFab* kappa = nullptr,
-                             const MultiFab* eps_y = nullptr) {
+                             const MultiFab* eps_y = nullptr,
+                             const MultiFab* a_xy = nullptr,
+                             const MultiFab* a_yx = nullptr) {
   device_fence();  // GPU : phi a pu etre ecrit par un kernel (lisseur) ; on
                    // attend avant la lecture hote de fill_ghosts.
   fill_ghosts(phi, geom.domain, bc);
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
+  const Real idx = Real(1) / geom.dx();
+  const Real idy = Real(1) / geom.dy();
   for (int li = 0; li < phi.local_size(); ++li) {
     const ConstArray4 p = phi.fab(li).const_array();
     const ConstArray4 ff = f.fab(li).const_array();
@@ -220,8 +299,12 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
     const bool hk = kappa != nullptr;  // terme de reaction -kappa phi
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, detail::PoissonResidualKernel{p, ff, r, idx2, idy2, hm, mk, hc, cf,
-                                                   he, ep, ey, hk, ka});
+    const bool hxy = a_xy != nullptr;  // demi-terme croise Axy (faces x)
+    const bool hyx = a_yx != nullptr;  // demi-terme croise Ayx (faces y)
+    const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
+    const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
+    for_each_cell(v, detail::PoissonResidualKernel{p, ff, r, idx2, idy2, idx, idy, hm, mk, hc, cf,
+                                                   he, ep, ey, hk, ka, hxy, hyx, axy, ayx});
   }
 }
 

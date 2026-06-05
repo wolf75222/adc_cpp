@@ -46,6 +46,7 @@ adc_add_test(test_variable_epsilon)
 adc_add_test(test_screened_poisson)  # operateur Helmholtz/ecrante : div(eps grad phi) - kappa phi
 adc_add_test(test_anisotropic_epsilon)  # operateur anisotrope : div(diag(eps_x, eps_y) grad phi)
 adc_add_test(test_cut_cell_anisotropic_multibox)  # cut-cell + aniso sur domaine MULTI-BOX (mono-rang)
+adc_add_test(test_full_tensor_operator)  # operateur tenseur PLEIN : -div(A grad phi)+kappa phi, A=[[Axx,Axy],[Ayx,Ayy]] (termes croises)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)
