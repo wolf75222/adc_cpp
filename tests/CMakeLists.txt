@@ -52,6 +52,12 @@ adc_add_test(test_full_tensor_operator)  # operateur tenseur PLEIN : -div(A grad
 # SEUL echoue (#120 : stagnation c=0.1-0.4, divergence c=0.7), + consistance A=I vs GeometricMG.
 # (entree serie ; les entrees MPI np=1/2/4 sont ajoutees dans le bloc ADC_HAS_MPI plus bas)
 adc_add_test(test_krylov_solver)
+# Schur PR3 (batisseur) : ASSEMBLE l'operateur tensoriel A_op = I + theta^2 dt^2 alpha rho B^{-1}
+# (eps_x/eps_y diag, a_xy/a_yx croises) + le RHS condense -Lap phi^n - theta dt alpha div(rho B^{-1} v^n)
+# depuis les roles Density/MomentumX/MomentumY d'un bloc fluide. PAS de solve (PR4). Tests analytiques :
+# coeff vs A=I+c rho B^{-1} ferme, RHS vs analytique interieur, B_z=0 -> Poisson bit-identique.
+# (entree serie ; entrees MPI np=1/2/4 ajoutees dans le bloc ADC_HAS_MPI plus bas)
+adc_add_test(test_schur_condensation)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)
@@ -267,6 +273,17 @@ if(ADC_HAS_MPI)
     add_test(NAME test_krylov_solver_np${np}
              COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_krylov_solver> ${MPIEXEC_POSTFLAGS})
+  endforeach()
+
+  # Schur PR3 (batisseur) sous MPI np=1/2/4 : l'assemblage (coefficients A_op + RHS) doit etre
+  # INVARIANT au nombre de rangs. Les boucles iterent sur local_size() (un rang sans box n'execute
+  # aucun kernel, ne deref jamais fab(0)) et les reductions de verification (all_reduce_max) sont
+  # COLLECTIVES (appelees sur tous les rangs, y compris vide) : pas d'interblocage. np=1 = chemin
+  # mono-rang (== serie) ; np=2/4 = chemin distribue. Reutilise la cible serie test_schur_condensation.
+  foreach(np 1 2 4)
+    add_test(NAME test_schur_condensation_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_schur_condensation> ${MPIEXEC_POSTFLAGS})
   endforeach()
 
   adc_add_mpi_test(test_mpi_smoke 4)
