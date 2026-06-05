@@ -47,6 +47,7 @@ struct AmrSystem::Impl {
   std::function<double()> mass_fn;
   std::function<int()> n_patches_fn;
   std::function<std::vector<double>()> density_fn;
+  std::function<std::vector<double>()> potential_fn;
   double t = 0;
 
   explicit Impl(const AmrSystemConfig& c) : cfg(c) {}
@@ -93,6 +94,7 @@ struct AmrSystem::Impl {
     mass_fn = std::move(h.mass);
     n_patches_fn = std::move(h.n_patches);
     density_fn = std::move(h.density);
+    potential_fn = std::move(h.potential);
     built = true;
   }
 
@@ -307,6 +309,10 @@ double AmrSystem::mass() {
 std::vector<double> AmrSystem::density() {
   p_->ensure_built();
   return p_->density_fn();
+}
+std::vector<double> AmrSystem::potential() {
+  p_->ensure_built();
+  return p_->potential_fn();
 }
 
 }  // namespace adc

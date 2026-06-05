@@ -119,6 +119,18 @@ add_executable(test_amr_compiled_model test_amr_compiled_model.cpp
 target_link_libraries(test_amr_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS})
 add_test(NAME test_amr_compiled_model COMMAND test_amr_compiled_model)
 
+# --- AmrSystem::potential() : phi du niveau grossier expose, pendant de System::potential() ---
+# Compile les runtimes AmrSystem ET System (python/amr_system.cpp + python/system.cpp) avec le test :
+# sans raffinement, AmrSystem resout le MEME Poisson discret que System(geometric_mg) sur le grossier
+# mono-box -> potential() : forme n*n, valeurs finies, champ non trivial, moyenne ~0 (source neutre),
+# et PARITE avec System::potential() a la tolerance MG pres. C'est l'observable phi qu'echantillonne le
+# benchmark diocotron (FFT azimutale sur un cercle median) cote AMR.
+add_executable(test_amr_potential test_amr_potential.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
+target_link_libraries(test_amr_potential PRIVATE adc::adc ${CMAKE_DL_LIBS})
+add_test(NAME test_amr_potential COMMAND test_amr_potential)
+
 # --- chemin "production" NATIF cote AMR : AmrSystem::add_native_block (DSL Phase D) ---
 # Compile A L'EXECUTION un loader .so (la source qu'emet dsl.emit_cpp_native_loader(target="amr_system"),
 # ecrite ici pour un test C++ autonome) qui inline add_compiled_model(AmrSystem&), le branche via

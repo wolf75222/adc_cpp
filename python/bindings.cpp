@@ -228,5 +228,8 @@ PYBIND11_MODULE(_adc, m) {
       .def("time", &AmrSystem::time)
       .def("n_patches", &AmrSystem::n_patches)
       .def("mass", &AmrSystem::mass)
-      .def("density", [](AmrSystem& s) { return to_2d(s.density(), s.nx()); });
+      .def("density", [](AmrSystem& s) { return to_2d(s.density(), s.nx()); })
+      // phi du niveau grossier (base), (n, n). MEME observable que System.potential() : le niveau 0
+      // couvre tout le domaine -> suffit a echantillonner un cercle median (FFT azimutale).
+      .def("potential", [](AmrSystem& s) { return to_2d(s.potential(), s.nx()); });
 }

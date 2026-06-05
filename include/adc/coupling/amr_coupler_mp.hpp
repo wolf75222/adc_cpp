@@ -139,6 +139,27 @@ inline std::vector<double> coupler_read_coarse(const MultiFab& U, int n, bool re
   return out;
 }
 
+// Lit le potentiel phi du niveau grossier (composante 0 de aux(0), ecrite par compute_aux apres le
+// solve Poisson) en un champ n*n row-major GLOBAL, MULTI-BOX et DISTRIBUTION-AWARE. aux(0) partage
+// EXACTEMENT le layout du grossier U (meme BoxArray + DistributionMapping, cf. amr_level_storage :
+// aux_[0] est construit sur U.box_array()/U.dmap()), donc la recomposition est identique a
+// coupler_read_coarse : buffer local n*n, all_reduce_sum si reparti (boites disjointes -> somme
+// exacte), evitee en mono-box replique (champ deja complet). PRECONDITION : update()/compute_aux a
+// tourne au moins une fois (sinon aux(0) vaut 0). Pendant strict de coupler_read_coarse pour phi.
+inline std::vector<double> coupler_read_coarse_phi(const MultiFab& aux0, int n, bool replicated) {
+  device_fence();
+  std::vector<double> out(static_cast<std::size_t>(n) * n, 0.0);
+  for (int li = 0; li < aux0.local_size(); ++li) {
+    const ConstArray4 a = aux0.fab(li).const_array();
+    const Box2D v = aux0.box(li);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        out[static_cast<std::size_t>(j) * n + i] = a(i, j, 0);
+  }
+  if (!replicated) all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
+  return out;
+}
+
 // Injecte le grossier dans les cellules valides d'un patch fin (constant par morceaux, ratio 2),
 // MULTI-BOX et DISTRIBUTION-AWARE. Rend la hierarchie coherente avant le premier sync_down (le
 // patch seed est a 0). Mono-box replique : grossier entierement local, lecture directe via
@@ -235,6 +256,10 @@ class AmrCouplerMP {
   std::vector<AmrLevelMP>& levels() { return stack_.levels(); }
   MultiFab& coarse() { return stack_.coarse(); }
   const MultiFab& coarse() const { return stack_.coarse(); }
+  // aux du niveau grossier : (phi, dphi/dx, dphi/dy), composante 0 = phi (cf. compute_aux). Meme
+  // layout que coarse(). Lu par le hook potential d'AmrSystem (coupler_read_coarse_phi).
+  MultiFab& aux0() { return stack_.aux(0); }
+  const MultiFab& aux0() const { return stack_.aux(0); }
   const Box2D& domain() const { return stack_.domain(); }
   int nlev() const { return stack_.nlev(); }
 

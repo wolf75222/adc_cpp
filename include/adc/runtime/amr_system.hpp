@@ -70,6 +70,7 @@ struct AmrCompiledHooks {
   std::function<double()> mass;           ///< masse grossiere
   std::function<int()> n_patches;         ///< nombre de patchs fins
   std::function<std::vector<double>()> density;  ///< densite grossiere, n*n row-major
+  std::function<std::vector<double>()> potential;  ///< phi du niveau grossier, n*n row-major
 };
 
 /// Bloc unique porte sur une hierarchie AMR, compose a l'execution.
@@ -166,6 +167,11 @@ class AmrSystem {
   int n_patches();                ///< nombre de patchs fins courants
   double mass();                  ///< masse sur le grossier (conservee au reflux)
   std::vector<double> density();  ///< densite grossiere (composante 0), n*n row-major
+  /// Potentiel electrostatique phi du NIVEAU GROSSIER (base), n*n row-major. Le niveau 0 couvre
+  /// tout le domaine : suffisant pour echantillonner un cercle median (FFT azimutale), MEME
+  /// observable que System::potential() sur grille mono-niveau. Resout le Poisson grossier si
+  /// besoin (cf. System::potential / ensure_elliptic), donc valeur courante meme avant tout step.
+  std::vector<double> potential();
 
  private:
   struct Impl;

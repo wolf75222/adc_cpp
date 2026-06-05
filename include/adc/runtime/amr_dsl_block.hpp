@@ -110,6 +110,14 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   const int nn = bp.n;
   const bool repl = !bp.distribute_coarse;
   h.density = [cpl, nn, repl] { return coupler_read_coarse(cpl->coarse(), nn, repl); };
+  // phi du grossier : on rafraichit (update() = sync_down + compute_aux, donc solve Poisson grossier)
+  // puis on lit aux0 composante 0. Pendant de System::potential() qui appelle ensure_elliptic : la
+  // valeur est courante meme si aucun step n'a encore tourne. update() est deja appele a chaque step,
+  // donc le surcout n'existe que sur un appel hors boucle (diagnostic).
+  h.potential = [cpl, nn, repl] {
+    cpl->update();
+    return coupler_read_coarse_phi(cpl->aux0(), nn, repl);
+  };
   return h;
 }
 
