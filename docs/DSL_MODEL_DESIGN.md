@@ -60,16 +60,17 @@ GAP (encore cible / differe) :
   Un `DistributedFFTSolver` existe et est teste a part, mais il n'est PAS route dans `System` (son
   layout en bandes ne colle pas au layout box-unique attendu par `System`). MPI `np>1` doit donc
   employer `geometric_mg`, pas `fft`.
-- **`AmrSystem.potential()`** : binding EN COURS (PR ouverte NON mergee). NE PAS l'affirmer comme
-  acquis.
+- **`AmrSystem.potential()`** : binding SHIPPE (python/bindings.cpp:272, `#135`). Acquis.
 - **Paroi-transport Phase 1** : EXPERIMENTALE, fermee SANS merge (#109). Elle masque le CONDUCTEUR
   externe (mauvais bord) ; le verrou scientifique reste le BORD D'ANNEAU. NE PAS lire comme livre.
 - **Params runtime** : `m.param(kind="runtime")` leve `NotImplementedError` (changement d'ABI/codegen ;
   section 2b, Phase E).
-- **LIMITES `AmrSystem` (reelles, a garder honnete)** : mono-bloc (pas multi-espece), explicite
-  (pas IMEX), multi-box natif non cable cote facade, et HLLC/Roe/`primitive` REJETES cote facade
-  Python AMR. Ce rejet est PUREMENT FACADE : le moteur C++ (`amr_dsl_block.hpp`/`make_block`) les
-  supporte deja ; seule la facade Python ne les expose pas encore sur AMR.
+- **LIMITES `AmrSystem` (reelles, a garder honnete)** : mono-bloc (pas multi-espece), IMEX source
+  locale OK (Gap 2 #132, backward_euler_source / mf_apply_source_treatment) mais Schur global sur
+  AMR et AMR multi-blocs restent a faire, multi-box natif non cable cote facade, et
+  HLLC/Roe/`primitive` REJETES cote facade Python AMR. Ce rejet est PUREMENT FACADE : le moteur C++
+  (`amr_dsl_block.hpp`/`make_block`) les supporte deja ; seule la facade Python ne les expose pas
+  encore sur AMR.
 
 NOTE HISTORIQUE. Le texte ci-dessous emploie encore le futur ("CIBLE", "a ajouter") la ou la
 chose est desormais livree ; se fier a 0bis et aux balises SHIPPE/GAP. Le contenu de conception
@@ -520,11 +521,11 @@ Livree. C'est du cablage de dispatch (pas de numerique nouvelle).
     `m.compile(target="amr_system")` est cable (#92). WENO5 + Rusanov + reconstruction conservative
     valides sur ce chemin (#105 ; parite `add_native_block` == `add_compiled_model` == `add_block`,
     `dmax=0`). LIMITES ENCORE REELLES (a garder honnetes) : `AmrSystem` n'est PAS a parite avec
-    `System` (mono-bloc, pas multi-espece, explicite et non IMEX, multi-box natif non cable cote
-    facade) ; HLLC/Roe/`primitive` sont REJETES cote facade Python AMR alors que le moteur C++ les
-    supporte deja (rejet PUREMENT facade). NB : `AmrSystem.potential()` a un binding EN COURS (PR
-    ouverte NON mergee), a ne pas presumer acquis. WRITE-SET : `python/adc/__init__.py` (facade
-    `AmrSystem`).
+    `System` (mono-bloc, pas multi-espece, IMEX source locale OK Gap 2 #132 mais Schur global sur
+    AMR et AMR multi-blocs restent a faire, multi-box natif non cable cote facade) ;
+    HLLC/Roe/`primitive` sont REJETES cote facade Python AMR alors que le moteur C++ les supporte
+    deja (rejet PUREMENT facade). `AmrSystem.potential()` : binding SHIPPE (bindings.cpp:272,
+    `#135`). WRITE-SET : `python/adc/__init__.py` (facade `AmrSystem`).
 
 ### Phase E : `m.param` runtime -- GAP (phase 2, changement de moteur)
 
@@ -577,8 +578,9 @@ Livree. C'est du cablage de dispatch (pas de numerique nouvelle).
   WENO5 desormais sur tous les chemins (.so #102, natif AMR #105).
 - C (9) : SHIPPE (#97/#99/#93). Validation device/MPI DEPUIS Python (System GPU np=1, solve_fields
   MPI np=1/2/4, device-MPI geometric_mg np=1/2/4). `fft` refuse sous System MPI np>1 (#106).
-- D (10) : SHIPPE (#92/#105) mais BORNE : AMR mono-bloc/explicite, multi-box natif non cable facade,
-  HLLC/Roe/primitive rejetes cote facade (moteur C++ OK). `AmrSystem.potential()` PR non mergee.
+- D (10) : SHIPPE (#92/#105) mais BORNE : AMR mono-bloc, IMEX source locale OK (#132) mais Schur
+  global et multi-blocs restent a faire, multi-box natif non cable facade, HLLC/Roe/primitive
+  rejetes cote facade (moteur C++ OK). `AmrSystem.potential()` : SHIPPE (#135).
 - E (11) : GAP, phase 2, seul item exigeant un changement d'ABI/codegen (param runtime).
 - F (12) : PROTOTYPE (branche, non mergee). Composition HYBRIDE native + DSL dans un modele
   (`adc.CompositeModel`) ; backends aot/production/jit, cible system/amr_system, aux B_z/T_e, couplage

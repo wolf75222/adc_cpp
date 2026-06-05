@@ -132,9 +132,8 @@ Capacites cablees et exposees, suffisantes pour pousser plus loin sans nouveau c
 - **AMR sur le bord d'anneau** : `adc.AmrSystem` + `set_refinement(threshold)` tourne et
   conserve la masse (cas `adc_cases/diocotron_amr/run.py`). M2/M2b de `todo.md` notent que
   l'AMR triple le taux a base egale. Pousser le raffinement / le nombre de niveaux est un
-  reglage de config. Reserve pour le diagnostic de taux : `AmrSystem.potential()` (lecture de
-  `phi` depuis Python pour la FFT azimutale) a son binding EN COURS (PR ouverte, NON mergee) ;
-  ne pas le tenir pour acquis.
+  reglage de config. `AmrSystem.potential()` (lecture de `phi` depuis Python pour la FFT
+  azimutale) : binding SHIPPE (python/bindings.cpp:272, `#135`).
 - **Diagnostic de taux** : la chaine mesure (FFT azimutale du mode `l` de `phi`, ajustement de
   la phase lineaire) est entierement en place cote `adc_cases`.
 
@@ -210,7 +209,9 @@ bornee par la diffusion du bord cartesien (constat M1, `todo.md` section 6).
 Capacites partiellement presentes mais incompletes pour un usage Hoffart pousse.
 
 - **AMR multi-bloc / multi-niveau a parite `System`** : `AmrSystem` reste MONO-bloc (pas
-  multi-espece), explicite (pas IMEX) cote facade. Le multi-box natif n'est pas cable cote facade,
+  multi-espece) ; IMEX source locale OK (Gap 2 #132, backward_euler_source /
+  mf_apply_source_treatment) mais Schur global sur AMR et AMR multi-blocs restent a faire. Le
+  multi-box natif n'est pas cable cote facade,
   et la facade Python AMR REJETTE HLLC/Roe et la reconstruction primitive (cf. `python/adc/__init__.py`,
   garde-fou `add_equation`) ; ce rejet est PUREMENT facade : le moteur C++ les supporte deja
   (l'API `add_block` accepte la recon primitive cote C++). WENO5 + Rusanov + conservatif EST cable
@@ -269,9 +270,8 @@ Capacites partiellement presentes mais incompletes pour un usage Hoffart pousse.
 
 ### Prochains verrous d'infrastructure (peuvent atterrir en parallele)
 
-- **`AmrSystem.potential()` cote Python** : binding EN COURS (PR ouverte, NON mergee) pour lire
-  `phi` depuis l'AMR et alimenter la FFT azimutale du diagnostic de taux. A finaliser avant un
-  sweep diocotron AMR pilote en Python.
+- **`AmrSystem.potential()` cote Python** : binding SHIPPE (python/bindings.cpp:272, `#135`) ;
+  `phi` lisible depuis l'AMR pour la FFT azimutale du diagnostic de taux.
 - **fft distribuee routee dans `System`** : `DistributedFFTSolver` (layout en bandes) existe et
   est teste a part mais N'est PAS route dans `System` (layout bandes vs box unique) ; le cabler
   permettrait le periodique distribue MPI sans repli sur `geometric_mg`. Non requis pour la cible.

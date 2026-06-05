@@ -74,6 +74,7 @@ flux Roe, source de potentiel/gravite, second membre de charge) vivent dans
 | [`coupling::AmrSystemCoupler`](include/adc/coupling/amr_system_coupler.hpp) | le systeme multi-especes porte sur **AMR** (Poisson grossier + reflux par bloc) |
 | [`coupling::AmrCouplerMP`](include/adc/coupling) | couplage AMR multi-patch mono-modele (route par `advance_amr`) |
 | [`amr::{cluster,regrid,tag_box}`](include/adc/amr) | tagging + clustering Berger-Rigoutsos + regrid |
+| [`amr::AmrHierarchyLayout` / `same_layout_or_throw`](include/adc/amr) | garde-fou de layout AMR partage (boites + ordre + dmap + dx/dy + niveaux) ; premier pas du capstone AMR multi-blocs (#141) |
 | [`mesh::{MultiFab,BoxArray,Geometry}`](include/adc/mesh) | conteneurs distribues, halos, geometrie |
 | [`runtime::{System,AmrSystem}`](include/adc/runtime/system.hpp) | facades runtime de composition (assise des bindings Python) |
 | [`runtime::{model_factory,model_spec}`](include/adc/runtime/model_factory.hpp) | assemblage d'un `CompositeModel` a partir d'une spec de briques |
@@ -157,10 +158,11 @@ de production passe par `add_block` (a) ou `add_native_block` (d). Detail natif 
 - **`AmrSystem` en production : natif SHIPPE.** L'AmrSystem de production est cable nativement
   (`add_native_block` avec `target="amr_system"`, #92) ; le chemin natif AMR atteint la parite
   `add_native_block == add_compiled_model == add_block` (dmax=0, #105). Limites encore reelles cote
-  facade AMR : mono-bloc (pas multi-espece), explicite (pas IMEX), multi-box natif non cable cote
-  facade, et HLLC / Roe / reconstruction primitive sont REJETES cote facade Python AMR (le moteur C++
-  les supporte deja, le rejet est purement facade). `AmrSystem.potential()` : binding EN COURS (PR
-  ouverte, NON mergee) ; ne pas le supposer acquis.
+  facade AMR : mono-bloc (pas multi-espece), IMEX source locale OK (Gap 2 #132,
+  backward_euler_source / mf_apply_source_treatment) mais Schur global sur AMR et AMR multi-blocs
+  restent a faire, multi-box natif non cable cote facade, et HLLC / Roe / reconstruction primitive
+  sont REJETES cote facade Python AMR (le moteur C++ les supporte deja, le rejet est purement
+  facade). `AmrSystem.potential()` : binding SHIPPE (python/bindings.cpp:272, `#135`).
 - **Validation device / MPI : acquise pour le chemin par defaut (`geometric_mg`).** Le System de
   production tourne sur GPU GH200 a np=1 (#97) ; `solve_fields()` est valide en MPI np=1/2/4 sur
   CPU/CI (#99) ; le multigrille geometrique de production en device-MPI est valide sur GH200 a
@@ -289,10 +291,11 @@ sim.step_cfl(0.4)
   `target="amr_system"`, #92), avec parite stricte `add_native_block == add_compiled_model ==
   add_block` (dmax=0) et WENO5 + Rusanov + reconstruction conservative sur le chemin natif AMR
   (#105). Il partage l'operateur spatial de `System` via `advance_amr` (cf. `test_amr_spatial_parity`).
-  Limites encore reelles : mono-bloc (pas multi-espece), explicite (pas IMEX), multi-box natif non
-  cable cote facade, et HLLC / Roe / reconstruction primitive REJETES cote facade Python AMR (le
-  moteur C++ les supporte deja, le rejet est purement facade). `AmrSystem.potential()` : binding EN
-  COURS (PR ouverte, non mergee). L'integrateur AP deux-fluides (asymptotic-preserving) est un
+  Limites encore reelles : mono-bloc (pas multi-espece), IMEX source locale OK (Gap 2 #132,
+  backward_euler_source / mf_apply_source_treatment) mais Schur global sur AMR et AMR multi-blocs
+  restent a faire, multi-box natif non cable cote facade, et HLLC / Roe / reconstruction primitive
+  REJETES cote facade Python AMR (le moteur C++ les supporte deja, le rejet est purement facade).
+  `AmrSystem.potential()` : binding SHIPPE (python/bindings.cpp:272, `#135`). L'integrateur AP deux-fluides (asymptotic-preserving) est un
   integrateur **sur mesure**, non composable bloc a bloc : ce n'est pas une brique generique
   mais un SCENARIO, qui a quitte le coeur et vit dans `adc_cases/two_fluid_ap/` (physique C++
   compilee a la volee contre les en-tetes generiques d'`adc_cpp`). Le module `_adc` ne l'expose plus.
@@ -364,9 +367,12 @@ docs/           ARCHITECTURE.md, ALGORITHMS.md, GPU_RUNTIME_PORT.md, CHOICES.md,
 - GPU GH200 (Kokkos Cuda, hors CI) : System, ops de champ AMR, halos MPI multi-GPU, chemin compile
   a foncteurs nommes, et la chaine AmrSystem + MPI + GPU valides bit-identiques au CPU. System de
   production np=1 valide (#97) ; multigrille geometrique de production en device-MPI valide
-  np=1/2/4 (#93).
+  np=1/2/4 (#93). Schur/polar device : corrige et valide GH200 (#135 : Geometry/Box2D accesseurs
+  ADC_HD + all_reduce_max CFL ; dev==host bit-exact, condensed-Schur BiCGStab converge, transport
+  polaire ordre 2, masse ~1e-14).
 - Demonstrateurs DSL (depot `adc_cases`, tous `ci=true` en CI) : `diocotron_dsl`, `two_species_dsl`,
   `magnetic_isothermal_dsl`.
 
-Detail des validations device : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md). Validation
-applicative (modeles, diocotron, runs ROMEO) : [`adc_cases`](https://github.com/wolf75222/adc_cases).
+Detail des validations device : [docs/GPU_RUNTIME_PORT.md](docs/GPU_RUNTIME_PORT.md). Matrice de
+couverture backend (quel test sur quel backend) : [docs/BACKEND_COVERAGE.md](docs/BACKEND_COVERAGE.md).
+Validation applicative (modeles, diocotron, runs ROMEO) : [`adc_cases`](https://github.com/wolf75222/adc_cases).
