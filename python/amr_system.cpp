@@ -168,9 +168,9 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
   if (substeps < 1) throw std::runtime_error("AmrSystem::add_native_block : substeps >= 1");
   // Validation AMONT du schema (comme add_block) : add_compiled_model(AmrSystem&) rejette deja
   // time != "explicit" et recon hors {conservative, primitive}, mais on diagnostique ICI une faute
-  // de frappe avant la frontiere C++. RESPECT des LIMITES AMR (non-parite avec System) : seul
-  // time == "explicit" est cable sur la hierarchie (pas d'IMEX). limiter/riemann sont valides par
-  // dispatch_amr_compiled dans le loader (exception claire, ABI partagee verifiee plus bas).
+  // de frappe avant la frontiere C++. LIMITE RESTANTE : seul time == "explicit" est cable sur la
+  // hierarchie (pas d'IMEX sur AMR). limiter (dont weno5, cable #105) et riemann (dont hllc/roe,
+  // cables a parite #113) sont valides par dispatch_amr_compiled dans le loader (exception claire).
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("AmrSystem::add_native_block : recon 'conservative' | 'primitive' "
                              "(recu '" + recon + "')");

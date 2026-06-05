@@ -124,11 +124,12 @@ class AmrSystem {
   /// (adc_native_abi_key) est comparee a celle du module (abi_key()) -- ecart => erreur claire (pas
   /// d'UB silencieux a la frontiere C++). Memes garde-fous de schema que System (validation amont).
   ///
-  /// LIMITES (AmrSystem n'est PAS a parite avec System) : mono-bloc, EXPLICITE uniquement (time !=
-  /// "explicit" rejete par add_compiled_model). recon "primitive" et flux "roe"/"hllc" sont rejetes
-  /// par la facade Python (AmrSystem.add_equation) AVANT d'arriver ici (chemin .so a contrat
-  /// restreint). limiter "weno5" (WENO5-Z, 3 ghosts) est CABLE sur rusanov (les niveaux du coupleur
-  /// sont alloues a Limiter::n_ghost et le regrid herite n_grow() : pas de lecture hors bornes).
+  /// LIMITES RESTANTES (AmrSystem mono-bloc, EXPLICITE uniquement) : time != "explicit" est rejete
+  /// par add_compiled_model (pas d'IMEX sur AMR). Multi-box natif (grille multi-bloc) n'est pas
+  /// cable dans la facade. recon "primitive" et flux "roe"/"hllc" sont CABLES a parite (#113 :
+  /// dispatch_amr_compiled les accepte ; la facade Python applique un garde pression pour hllc/roe).
+  /// limiter "weno5" (WENO5-Z, 3 ghosts) est CABLE sur rusanov (#105 : les niveaux du coupleur sont
+  /// alloues a Limiter::n_ghost et le regrid herite n_grow() : pas de lecture hors bornes).
   /// @throws std::runtime_error si l'ABI diverge, si un symbole manque, ou substeps < 1.
   /// @param name etiquette cosmetique (AMR mono-bloc : ne sert pas d'index).
   void add_native_block(const std::string& name, const std::string& so_path,
