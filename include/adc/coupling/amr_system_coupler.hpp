@@ -62,9 +62,82 @@ namespace adc {
 
 enum class PoissonCadence { OncePerStep, PerSubstep };
 
+// Layout EXPLICITE d'une hierarchie AMR partagee (point 2 du capstone multi-blocs, premier pas
+// MINIMAL). Source unique de verite sur la GRILLE que tous les blocs partagent : par niveau le
+// BoxArray (les boites ET leur ordre), le DistributionMapping (rang par boite), dx/dy, et le
+// nombre de niveaux (= ba.size()). Aujourd'hui cette information est implicite, eparpillee dans
+// chaque AmrLevelMP (U.box_array() / U.dmap() / dx,dy). Ce type ne fait que l'EXTRAIRE pour le
+// garde-fou same_layout_or_throw : il NE remplace PAS EquationBlock / AmrLevelMP et n'introduit
+// AUCUNE abstraction de bloc (l'AmrBlock large du design est un pas ULTERIEUR, et seulement si
+// necessaire). On lit le layout d'une pile de niveaux via from_levels.
+struct AmrHierarchyLayout {
+  std::vector<BoxArray> ba;             // [niveau] : boites du niveau (ensemble ET ordre)
+  std::vector<DistributionMapping> dm;  // [niveau], parallele a ba : rang MPI par boite
+  std::vector<Real> dx, dy;             // [niveau] : pas d'espace (= dx_coarse / 2^k)
+
+  int nlev() const { return static_cast<int>(ba.size()); }
+
+  // Lit le layout porte par la pile de niveaux d'UN bloc (chaque AmrLevelMP porte
+  // U.box_array() / U.dmap() / dx,dy). Aucune copie de donnees de champ : seulement la grille.
+  static AmrHierarchyLayout from_levels(const std::vector<AmrLevelMP>& levels) {
+    AmrHierarchyLayout L;
+    const int n = static_cast<int>(levels.size());
+    L.ba.reserve(n);
+    L.dm.reserve(n);
+    L.dx.reserve(n);
+    L.dy.reserve(n);
+    for (const auto& lv : levels) {
+      L.ba.push_back(lv.U.box_array());
+      L.dm.push_back(lv.U.dmap());
+      L.dx.push_back(lv.dx);
+      L.dy.push_back(lv.dy);
+    }
+    return L;
+  }
+};
+
 namespace detail {
 template <class>
 inline constexpr bool amr_always_false_v = false;
+
+// Comparaison EXACTE des grilles de deux niveaux (point 1) : meme BoxArray (boites ET ordre),
+// meme DistributionMapping (rang par boite), meme dx/dy (au bit pres). Renvoie true si tout
+// concorde. dx/dy sont les pas du niveau, identiques par construction si les boites le sont ;
+// on les compare quand meme pour attraper une geometrie mal cablee.
+inline bool same_level_layout(const BoxArray& a_ba, const DistributionMapping& a_dm, Real a_dx,
+                              Real a_dy, const BoxArray& b_ba, const DistributionMapping& b_dm,
+                              Real b_dx, Real b_dy) {
+  return a_ba.boxes() == b_ba.boxes() && a_dm.ranks() == b_dm.ranks() && a_dx == b_dx &&
+         a_dy == b_dy;
+}
+
+// Garde-fou de COHERENCE DE LAYOUT entre blocs (point 1 du capstone). L'aux est PARTAGE par
+// niveau : tous les blocs DOIVENT vivre sur EXACTEMENT la meme grille a chaque niveau, sinon le
+// recablage levels[k].aux = &aux_[k] et l'avance lisent une grille incoherente (acces hors borne
+// silencieux). L'ancien controle ne comparait que le NOMBRE de boites (.size()) ; ici on compare
+// EXACTEMENT : nombre de niveaux, puis par niveau BoxArray (boites ET ordre), DistributionMapping
+// et dx/dy. Jette une erreur claire au PREMIER ecart (bloc et niveau localises). Un seul bloc
+// concorde trivialement avec lui-meme -> chemin mono-bloc strictement bit-identique (la boucle
+// sur les autres blocs est vide).
+inline void same_layout_or_throw(const std::vector<std::vector<AmrLevelMP>>& block_levels) {
+  if (block_levels.empty()) return;
+  const auto& ref = block_levels[0];
+  const int nlev = static_cast<int>(ref.size());
+  for (std::size_t b = 1; b < block_levels.size(); ++b) {
+    const auto& cur = block_levels[b];
+    if (static_cast<int>(cur.size()) != nlev)
+      throw std::runtime_error(
+          "AmrSystemCoupler : tous les blocs doivent avoir le meme nombre de niveaux "
+          "(layout AMR partage)");
+    for (int k = 0; k < nlev; ++k) {
+      if (!same_level_layout(cur[k].U.box_array(), cur[k].U.dmap(), cur[k].dx, cur[k].dy,
+                             ref[k].U.box_array(), ref[k].U.dmap(), ref[k].dx, ref[k].dy))
+        throw std::runtime_error(
+            "AmrSystemCoupler : layout AMR incoherent entre blocs (l'aux partage exige le MEME "
+            "BoxArray [boites et ordre], le MEME DistributionMapping et le MEME dx/dy par niveau)");
+    }
+  }
+}
 }  // namespace detail
 
 template <CoupledSystemLike System, class RhsAssembler,
@@ -115,18 +188,11 @@ class AmrSystemCoupler {
                                   : static_cast<int>(block_levels_[0].size());
     if (nlev_ == 0)
       throw std::runtime_error("AmrSystemCoupler : au moins un niveau (grossier) requis");
-    for (std::size_t b = 0; b < block_levels_.size(); ++b) {
-      if (static_cast<int>(block_levels_[b].size()) != nlev_)
-        throw std::runtime_error(
-            "AmrSystemCoupler : tous les blocs doivent avoir le meme nombre de niveaux");
-      // grille partagee par niveau (aux unique) : meme nombre de boites que le bloc 0.
-      for (int k = 0; k < nlev_; ++k)
-        if (block_levels_[b][k].U.box_array().size() !=
-            block_levels_[0][k].U.box_array().size())
-          throw std::runtime_error(
-              "AmrSystemCoupler : grilles par niveau incoherentes entre blocs "
-              "(aux partage exige la meme BoxArray par niveau)");
-    }
+    // Coherence de layout EXACTE entre blocs (l'aux est partage par niveau) : meme nombre de
+    // niveaux, et par niveau meme BoxArray (boites ET ordre), meme DistributionMapping, meme
+    // dx/dy. Remplace l'ancien controle qui ne comparait que le NOMBRE de boites (.size()).
+    // Mono-bloc : la verification est triviale (un seul bloc) -> bit-identique a l'historique.
+    detail::same_layout_or_throw(block_levels_);
     // aux PARTAGE : un MultiFab (phi, grad phi [, B_z, ...]) par niveau, sur la grille commune.
     // Dimensionne une seule fois -> adresses stables pour les pointeurs aux des blocs. Largeur =
     // max des aux_comps<Model> sur les blocs (au moins 3) : un bloc lisant B_z (n_aux > 3) dispose
