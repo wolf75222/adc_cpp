@@ -49,6 +49,80 @@ def adc_header_signature(include):
     return hashlib.sha256(blob).hexdigest()
 
 
+# --- Auto-detection du dossier include adc -----------------------------------
+# Pour rendre m.compile(...) ergonomique, le dossier des en-tetes adc est deduit automatiquement
+# quand l'appelant ne le passe pas. MIROIR de adc_cases/common/native.py::adc_include : on essaie
+# $ADC_INCLUDE (override explicite), puis on remonte depuis le paquet `adc` installe (build-py/python/
+# adc/ -> ../../../include), puis le depot voisin ../adc_cpp/include. Critere de validite : le fichier
+# canonique adc/mesh/multifab.hpp existe. Pas d'import dur de adc ici (le module dsl peut etre charge
+# hors paquet) : on resout `adc.__file__` paresseusement.
+def adc_include():
+    """Dossier include/ d'adc_cpp (en-tetes header-only du coeur), auto-detecte.
+
+    Priorite : $ADC_INCLUDE (override), sinon depuis le paquet `adc` installe
+    (.../adc -> ../../../include), sinon le depot voisin (.../adc_cpp/include depuis ce module).
+    Exige que adc/mesh/multifab.hpp existe. Leve RuntimeError si introuvable (diagnostic listant les
+    candidats), pour ne JAMAIS compiler contre un include silencieusement faux."""
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))           # .../python/adc
+    candidates = []
+    env = os.environ.get("ADC_INCLUDE")
+    if env:
+        candidates.append(env)
+    try:
+        import adc as _adc_pkg
+        pkg = os.path.dirname(os.path.abspath(_adc_pkg.__file__))   # .../adc
+        candidates.append(os.path.normpath(os.path.join(pkg, "..", "..", "..", "include")))
+    except Exception:
+        pass
+    # depuis ce fichier (python/adc/dsl.py) : python/adc -> python -> racine depot -> include
+    candidates.append(os.path.normpath(os.path.join(here, "..", "..", "include")))
+    for c in candidates:
+        if c and os.path.isfile(os.path.join(c, "adc", "mesh", "multifab.hpp")):
+            return c
+    raise RuntimeError(
+        "en-tetes adc introuvables (cherche adc/mesh/multifab.hpp). "
+        "Passer include=<adc_cpp>/include ou definir ADC_INCLUDE. Candidats essayes : "
+        + ", ".join(repr(c) for c in candidates))
+
+
+# --- Cache de build hors source ----------------------------------------------
+# Quand l'appelant ne fournit pas so_path, m.compile(...) ecrit la .so dans un cache PARTAGE hors
+# source (jamais a cote du .cpp temporaire), indexe par une cle stable du modele : model_hash (formules
+# + roles + n_aux + params) ET abi_key (signature des en-tetes + compilateur + std). Deux compilations
+# du MEME modele (meme cle) reutilisent la .so en cache (cache HIT, pas de recompilation) ; changer le
+# modele OU un parametre OU la toolchain change la cle -> nouvelle .so (cache MISS, recompilation). Le
+# nom de fichier porte la cle, donc plusieurs variantes coexistent sans collision. cf. la meme idee
+# dans adc_cases/common/native.py (cle d'ABI = compilateur + flags + signature des en-tetes).
+def adc_cache_dir():
+    """Dossier de cache des .so generees par m.compile() sans so_path explicite.
+
+    $ADC_CACHE_DIR (override), sinon $XDG_CACHE_HOME/adc/dsl, sinon ~/.cache/adc/dsl. Cree au besoin.
+    Hors source par construction (jamais dans l'arbre du depot), donc rien a ignorer cote git."""
+    import os
+    base = os.environ.get("ADC_CACHE_DIR")
+    if not base:
+        xdg = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+        base = os.path.join(xdg, "adc", "dsl")
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+def _cache_so_path(model_hash, abi_key, backend, target, name):
+    """Chemin .so en cache pour ce (model_hash, abi_key, backend, target, name).
+
+    La cle de cache combine model_hash (le QUOI : formules/roles/params) et abi_key (le COMMENT :
+    en-tetes + compilateur + std), plus backend/target/name qui changent le code emis (loader natif
+    vs AOT vs JIT, System vs AmrSystem). Le nom de fichier est <model_hash[:16]>-<sha(reste)[:16]>.so :
+    lisible (prefixe = identite du modele) et sans collision (suffixe = reste de la cle)."""
+    import hashlib
+    import os
+    rest = "|".join((abi_key or "", backend or "", target or "", name or "")).encode()
+    tag = hashlib.sha256(rest).hexdigest()[:16]
+    fname = "%s-%s.so" % ((model_hash or "nohash")[:16], tag)
+    return os.path.join(adc_cache_dir(), fname)
+
+
 # --- Canal aux : disposition canonique --------------------------------------
 # Les champs auxiliaires nommes (aux('...')) sont des COMPOSANTES a indice FIXE du canal aux
 # (cf. adc::Aux / kAuxBaseComps cote C++). phi/grad_x/grad_y = contrat de BASE (3 composantes) ;
@@ -730,18 +804,21 @@ class HyperbolicModel:
                 + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv
                 + self._emit_metadata("adc_generated::JitModel"))
 
-    def compile_so(self, so_path, include, name=None, cxx=None, std="c++20"):
+    def compile_so(self, so_path, include=None, name=None, cxx=None, std="c++20"):
         """JIT : genere le MODELE COMPLET (emit_cpp_so_source) et compile une bibliotheque partagee
         chargeable par System.add_dynamic_block (dlopen). Le .so expose un CompositeModel<hyperbolique,
         source, elliptique> : le bloc dynamique applique le flux ET la source, et contribue au Poisson
         de systeme via elliptic_rhs (vrai bloc couple, plus seulement transport). include = dossier des
-        en-tetes adc ; cxx = compilateur (defaut c++/g++/clang++). Renvoie so_path. Exige
-        set_primitive_state(...) et set_conservative_from([...]) (comme emit_cpp_brick)."""
+        en-tetes adc (None -> auto-detecte via adc_include()) ; cxx = compilateur (defaut
+        c++/g++/clang++). Renvoie so_path. Exige set_primitive_state(...) et
+        set_conservative_from([...]) (comme emit_cpp_brick)."""
         import os
         import shutil
         import subprocess
         import tempfile
 
+        if include is None:
+            include = adc_include()
         src = self.emit_cpp_so_source(name=name)
         cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if not cc:
@@ -768,17 +845,20 @@ class HyperbolicModel:
                 + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n'
                 + self._emit_metadata("adc_generated::AotModel"))  # alias sans virgule (macro metadata)
 
-    def compile_aot(self, so_path, include, name=None, cxx=None, std="c++20"):
+    def compile_aot(self, so_path, include=None, name=None, cxx=None, std="c++20"):
         """Backend "compile" (AOT) : genere le MODELE COMPLET (emit_cpp_aot_source) et compile une .so
         chargeable par System.add_compiled_block. Contrairement au backend "jit" (compile_so : IModel,
         dispatch virtuel, Rusanov hote), le bloc tourne ici le chemin de PRODUCTION (flux HLLC/Roe au
         choix, ordre 2, SSPRK2/IMEX) sur le modele genere -- numerique identique a un bloc natif.
-        include = dossier des en-tetes adc ; cxx = compilateur. Renvoie so_path."""
+        include = dossier des en-tetes adc (None -> auto-detecte via adc_include()) ; cxx = compilateur.
+        Renvoie so_path."""
         import os
         import shutil
         import subprocess
         import tempfile
 
+        if include is None:
+            include = adc_include()
         src = self.emit_cpp_aot_source(name=name)
         cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if not cc:
@@ -863,7 +943,7 @@ class HyperbolicModel:
                 + install
                 + self._emit_metadata("adc_generated::ProdModel"))  # noms/roles/gamma (diagnostic, comme AOT/JIT)
 
-    def compile_native(self, so_path, include, name=None, cxx=None, std="c++23", target="system"):
+    def compile_native(self, so_path, include=None, name=None, cxx=None, std="c++23", target="system"):
         """Backend "production" : genere le LOADER NATIF (emit_cpp_native_loader) et le compile en une
         .so chargeable par System.add_native_block (target="system") ou AmrSystem.add_native_block
         (target="amr_system"). Le .so inline add_compiled_model<ProdModel> : le bloc tourne le chemin
@@ -879,13 +959,15 @@ class HyperbolicModel:
         -DADC_HEADER_SIG=<signature> a l'IDENTIQUE du module pour que les cles d'ABI concordent quand
         les en-tetes concordent. std defaut c++23 (le module se compile en C++23 hors Kokkos) : un std
         different changerait __cplusplus donc la cle -> rejet explicite. include = dossier des en-tetes
-        adc ; cxx = compilateur. Renvoie so_path."""
+        adc (None -> auto-detecte via adc_include()) ; cxx = compilateur. Renvoie so_path."""
         import os
         import shutil
         import subprocess
         import sys
         import tempfile
 
+        if include is None:
+            include = adc_include()
         src = self.emit_cpp_native_loader(name=name, target=target)
         cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if not cc:
@@ -908,7 +990,7 @@ class HyperbolicModel:
             subprocess.run([cc, *flags, "-I", include, cpp, "-o", so_path], check=True)
         return so_path
 
-    def compile_or_jit(self, so_path, include, mode="jit", name=None, cxx=None, std="c++20",
+    def compile_or_jit(self, so_path, include=None, mode="jit", name=None, cxx=None, std="c++20",
                        target="system"):
         """API unifiee (facade de l'ideal m.compile_or_jit()) choisissant le backend :
         mode="jit"     -> compile_so  (IModel, dispatch virtuel : prototypage hote, a brancher via
@@ -957,12 +1039,73 @@ class HyperbolicModel:
         "production": ("native", "add_native_block"),
     }
 
-    def compile(self, so_path, include, backend="aot", name=None, cxx=None, std=None,
+    def _model_hash(self, params=None):
+        """Hash stable du modele : formules (flux/eig/source/elliptic/primitives/cons_from) + roles +
+        n_aux + gamma (+ params NOMMES eventuels). Source unique du hash, reutilisee par Model._model_hash
+        (qui passe ses Param). Sert a identifier/reutiliser un .so deja compile (cle de cache) et a tracer
+        le run. Repose sur repr(Expr) (stable, structurel) ; insensible a l'ordre des dict (tries)."""
+        import hashlib
+        m = self
+        parts = []
+        parts.append("name=%s" % m.name)
+        parts.append("cons=%s" % ",".join(m.cons_names))
+        parts.append("croles=%s" % ",".join(roles_for(m.cons_names, m.cons_roles)))
+        parts.append("prim_state=%s" % ",".join(m.prim_state))
+        parts.append("proles=%s" % ",".join(roles_for(m.prim_state, m.prim_roles)))
+        parts.append("prim=%s" % ";".join("%s=%r" % (k, m.prim_defs[k]) for k in m.prim_defs))
+        for d in ("x", "y"):
+            parts.append("flux_%s=%s" % (d, ";".join(repr(e) for e in m._flux.get(d, []))))
+            parts.append("eig_%s=%s" % (d, ";".join(repr(e) for e in m._eig.get(d, []))))
+        parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
+        parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
+        parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
+        parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
+        parts.append("gamma=%r" % m.gamma)
+        params = params or {}
+        parts.append("params=%s" % ";".join("%s=%r:%s" % (k, params[k].value, params[k].kind)
+                                             for k in sorted(params)))
+        return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+    def _check_require_metadata(self, require_metadata, backend):
+        """Garde-fous require_metadata (pur-Python, deterministes sur le modele + backend). Factorises
+        pour etre appeles AVANT le cache (cote HyperbolicModel ET Model) : un cache HIT ne doit jamais
+        masquer une exigence de metadonnees. Sans require_metadata, no-op."""
+        if not require_metadata:
+            return
+        # backend "prototype" (add_dynamic_block, dispatch VIRTUEL, Rusanov hote ordre 1) : PAS un chemin
+        # de production device-clean -> demander les metadonnees dessus est incoherent (erreur claire).
+        if backend == "prototype":
+            raise ValueError(
+                "compile : backend 'prototype' (JIT, dispatch virtuel hote) incompatible avec "
+                "require_metadata=True ; utiliser backend='aot' ou 'production' pour le chemin "
+                "device-clean a metadonnees garanties")
+        missing = []
+        roles = roles_for(self.cons_names, self.cons_roles)
+        if all(r == "Custom" for r in roles):
+            missing.append("roles physiques (conservative_vars(..., roles=[...]) ou noms canoniques)")
+        if self.gamma is None:
+            missing.append("gamma (set_gamma(...))")
+        if missing:
+            raise ValueError(
+                "compile(require_metadata=True) : le modele '%s' ne fournit pas %s ; le .so "
+                "retomberait sur le fallback du System (roles 'custom' / gamma 1.4)"
+                % (self.name, " ni ".join(missing)))
+
+    def compile(self, so_path=None, include=None, backend="aot", name=None, cxx=None, std=None,
                 require_metadata=False, target="system"):
         """Facade de compilation par INTENTION : compile le modele en une .so via le moteur designe
         par @p backend et renvoie son chemin. Wrappe les moteurs existants (compile_so / compile_aot /
         compile_native) SANS changer la numerique ; preserve de bout en bout noms, VariableRole, gamma,
         n_aux, B_z et T_e (les memes briques + metadonnees ABI que compile_or_jit).
+
+        ERGONOMIE (ne change pas la numerique) :
+          - @p include None -> auto-detecte (adc_include() : $ADC_INCLUDE, paquet adc installe, depot
+            voisin) ; passer include= reste possible (retro-compat) ;
+          - @p so_path None -> compile dans un cache hors source (adc_cache_dir()), avec un nom de
+            fichier keye sur model_hash + abi_key (+ backend/target/name). Sur un cache HIT (.so deja
+            presente pour cette cle), AUCUNE recompilation : la .so en cache est reutilisee telle quelle.
+            Sur un cache MISS (modele/parametre/toolchain change -> cle differente), recompilation puis
+            stockage. Passer so_path= force ce chemin et compile toujours (retro-compat stricte).
 
         @p backend :
           "prototype"  -> JIT (compile_so) : iteration rapide, dispatch virtuel hote (Rusanov ordre 1),
@@ -990,6 +1133,8 @@ class HyperbolicModel:
         (plutot qu'un echec obscur a l'execution). Renvoie so_path.
 
         Pour connaitre l'adder System a employer : voir adder_for(backend)."""
+        import os
+        import shutil
         if backend not in self._BACKENDS:
             raise ValueError("compile : backend %r inconnu (attendus %s)"
                              % (backend, sorted(self._BACKENDS)))
@@ -1001,29 +1146,23 @@ class HyperbolicModel:
                              "(chemin natif AMR) ; recu backend=%r" % (backend,))
         if std is None:  # defaut par backend : le natif partage l'ABI C++23 du module, les autres c++20
             std = "c++23" if mode == "native" else "c++20"
+        if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
+            include = adc_include()
 
-        # Garde-fou device/production : le backend "prototype" passe par add_dynamic_block (IModel,
-        # dispatch VIRTUEL, Rusanov hote ordre 1). Ce n'est PAS un chemin de production device-clean :
-        # demander explicitement les metadonnees de production dessus est une incoherence -> erreur
-        # claire plutot que le fallback muet d'un .so prototype.
-        if require_metadata and backend == "prototype":
-            raise ValueError(
-                "compile : backend 'prototype' (JIT, dispatch virtuel hote) incompatible avec "
-                "require_metadata=True ; utiliser backend='aot' ou 'production' pour le chemin "
-                "device-clean a metadonnees garanties")
+        # Garde-fous metadonnees (avant tout cache : ils ne dependent que du modele + backend, et un
+        # cache HIT ne doit pas les masquer).
+        self._check_require_metadata(require_metadata, backend)
 
-        if require_metadata:
-            missing = []
-            roles = roles_for(self.cons_names, self.cons_roles)
-            if all(r == "Custom" for r in roles):
-                missing.append("roles physiques (conservative_vars(..., roles=[...]) ou noms canoniques)")
-            if self.gamma is None:
-                missing.append("gamma (set_gamma(...))")
-            if missing:
-                raise ValueError(
-                    "compile(require_metadata=True) : le modele '%s' ne fournit pas %s ; le .so "
-                    "retomberait sur le fallback du System (roles 'custom' / gamma 1.4)"
-                    % (self.name, " ni ".join(missing)))
+        # CACHE hors source quand so_path est omis : nom de fichier keye sur model_hash + abi_key
+        # (+ backend/target/name). Cache HIT (.so deja presente pour cette cle) -> reutilisation sans
+        # recompilation. Cache MISS -> compilation dans le chemin keye (donc stockee pour la prochaine
+        # fois). so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
+        if so_path is None:
+            eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+            abi_key = _abi_key_python(include, eff_cxx, std)
+            so_path = _cache_so_path(self._model_hash(), abi_key, backend, target, name)
+            if os.path.exists(so_path):
+                return so_path  # cache HIT : .so deja compilee pour cette cle, on la reutilise telle quelle
 
         return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
                                   target=target)
@@ -1316,31 +1455,13 @@ class Model:
 
     def _model_hash(self):
         """Hash stable du modele : formules (flux/eig/source/elliptic/primitives/cons_from) + roles +
-        n_aux + params. Sert a identifier/reutiliser un .so deja compile et a tracer le run. Repose sur
-        repr(Expr) (stable, structurel) ; insensible a l'ordre des dict (tries)."""
-        import hashlib
-        m = self._m
-        parts = []
-        parts.append("name=%s" % m.name)
-        parts.append("cons=%s" % ",".join(m.cons_names))
-        parts.append("croles=%s" % ",".join(roles_for(m.cons_names, m.cons_roles)))
-        parts.append("prim_state=%s" % ",".join(m.prim_state))
-        parts.append("proles=%s" % ",".join(roles_for(m.prim_state, m.prim_roles)))
-        parts.append("prim=%s" % ";".join("%s=%r" % (k, m.prim_defs[k]) for k in m.prim_defs))
-        for d in ("x", "y"):
-            parts.append("flux_%s=%s" % (d, ";".join(repr(e) for e in m._flux.get(d, []))))
-            parts.append("eig_%s=%s" % (d, ";".join(repr(e) for e in m._eig.get(d, []))))
-        parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
-        parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
-        parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
-        parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
-        parts.append("gamma=%r" % m.gamma)
-        parts.append("params=%s" % ";".join("%s=%r:%s" % (k, self.params[k].value, self.params[k].kind)
-                                             for k in sorted(self.params)))
-        return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+        n_aux + params NOMMES (m.params). Sert a identifier/reutiliser un .so deja compile (cle de
+        cache) et a tracer le run. Delegue au calcul partage HyperbolicModel._model_hash en lui passant
+        les Param de la facade (sinon deux modeles ne differant que par un param auraient le meme hash)."""
+        return self._m._model_hash(params=self.params)
 
-    def compile(self, so_path, include, backend="aot", target="system", name=None, cxx=None,
-                std=None, require_metadata=False):
+    def compile(self, so_path=None, include=None, backend="aot", target="system", name=None,
+                cxx=None, std=None, require_metadata=False):
         """Compile le modele en un CompiledModel (Phase A). Delegue la GENERATION + compilation a
         HyperbolicModel.compile (moteurs inchanges : compile_so / compile_aot / compile_native), puis
         empaquette le .so avec les metadonnees deja connues (pas de relecture du .so).
@@ -1353,8 +1474,16 @@ class Model:
         PAS d'argument `device` : les capacites GPU/MPI/AMR sont verifiees au branchement
             (add_equation) / a l'execution, pas figees a la compilation (DSL_MODEL_DESIGN.md point 7).
 
+        ERGONOMIE (ne change pas la numerique) :
+          - @p include None -> auto-detecte (adc_include()) ; passer include= reste possible ;
+          - @p so_path None -> .so dans un cache hors source (adc_cache_dir()), nom de fichier keye sur
+            model_hash (PARAMS COMPRIS) + abi_key (+ backend/target/name). Cache HIT (.so deja presente)
+            -> reutilisation sans recompilation ; cache MISS (modele/param/toolchain change) ->
+            recompilation + stockage. Passer so_path= force ce chemin et recompile (retro-compat).
+
         Renvoie un CompiledModel portant so_path, backend, target, adder, noms/roles/gamma/n_aux/params,
         caps, abi_key, model_hash, cxx, std."""
+        import os
         import shutil
         if backend not in HyperbolicModel._BACKENDS:
             raise ValueError("compile : backend %r inconnu (attendus %s)"
@@ -1370,11 +1499,34 @@ class Model:
                              "(chemin natif AMR) ; recu backend=%r" % (backend,))
         eff_std = std if std is not None else ("c++23" if mode == "native" else "c++20")
         eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
+            include = adc_include()
 
-        # Compilation (moteurs inchanges, garde-fous require_metadata/backend/target de
-        # HyperbolicModel.compile : le loader emet adc_install_native_amr pour target="amr_system").
-        out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
-                             require_metadata=require_metadata, target=target)
+        # Garde-fous metadonnees AVANT le cache (un HIT ne doit pas les masquer ; cf.
+        # HyperbolicModel._check_require_metadata).
+        m._check_require_metadata(require_metadata, backend)
+
+        # model_hash PARAMS-COMPRIS (celui porte par le CompiledModel) ET cle d'ABI : tous deux servent
+        # aussi de cle de cache, donc on les calcule ici pour les reutiliser (coherence cle/metadonnees).
+        model_hash = self._model_hash()
+        abi_key = _abi_key_python(include, eff_cxx, eff_std)
+
+        # CACHE hors source quand so_path est omis : on RESOUT le chemin keye ici (avec le hash
+        # params-compris) et on le passe explicitement au moteur -- le cache de HyperbolicModel.compile
+        # utiliserait sinon le hash SANS params (la facade Model ajoute les Param). HIT -> on saute la
+        # compilation. so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
+        cache_hit = False
+        if so_path is None:
+            so_path = _cache_so_path(model_hash, abi_key, backend, target, name)
+            cache_hit = os.path.exists(so_path)
+
+        if cache_hit:
+            out_path = so_path  # .so deja compilee pour cette cle : pas de recompilation
+        else:
+            # Compilation (moteurs inchanges, garde-fous require_metadata/backend/target de
+            # HyperbolicModel.compile : le loader emet adc_install_native_amr pour target="amr_system").
+            out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
+                                 require_metadata=require_metadata, target=target)
 
         adder = HyperbolicModel.adder_for(backend)
         cons_roles = roles_for(m.cons_names, m.cons_roles)
@@ -1383,5 +1535,5 @@ class Model:
             cons_names=m.cons_names, cons_roles=cons_roles, prim_names=m.prim_state,
             n_vars=m.n_vars, gamma=m.gamma, n_aux=aux_n_aux(m.aux_names),
             params=self.params, caps=_BACKEND_CAPS[backend],
-            abi_key=_abi_key_python(include, eff_cxx, eff_std), model_hash=self._model_hash(),
+            abi_key=abi_key, model_hash=model_hash,
             cxx=eff_cxx, std=eff_std)
