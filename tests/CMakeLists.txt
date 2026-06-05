@@ -87,6 +87,7 @@ adc_add_test(test_system_two_explicit)
 adc_add_test(test_assembler_driver)
 adc_add_test(test_amr_system_coupler)
 adc_add_test(test_amr_layout_guard)  # garde-fou de layout AMR partage : AmrHierarchyLayout + same_layout_or_throw (comparaison EXACTE)
+adc_add_test(test_amr_stride_cadence)  # cadence HOLD-THEN-CATCH-UP dans AmrSystemCoupler
 adc_add_test(test_system_hardening)
 adc_add_test(test_imex_partial)
 adc_add_test(test_imex_transport)

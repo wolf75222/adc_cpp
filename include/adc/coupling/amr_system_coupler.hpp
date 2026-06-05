@@ -286,9 +286,13 @@ class AmrSystemCoupler {
       constexpr int n = block_substeps_v<Block>;
       constexpr int stride = block_stride_v<Block>;
       const std::size_t bi = b++;
-      // cadence (retour tuteur §8.2 C) : un bloc lent n'avance qu'1 macro-pas sur stride,
-      // alors d'un pas effectif stride*dt. stride=1 -> chaque pas (historique).
-      if (macro_step_ % stride != 0) return;
+      // cadence HOLD-THEN-CATCH-UP (doc add_block, §8.2 C) : le bloc est TENU aux
+      // macro-pas 0..stride-2 et rattrape au macro-pas stride-1 (quand
+      // (macro_step_+1) % stride == 0). Evite qu'un bloc lent avance en avance
+      // au premier macro-pas (macro_step_=0, ancienne condition 0%stride==0 vraie),
+      // ce qui mettait le bloc lent DANS LE FUTUR par rapport aux blocs rapides.
+      // stride=1 : (macro_step_+1)%1==0 toujours vrai -> chaque pas, bit-identique.
+      if ((macro_step_ + 1) % stride != 0) return;
       const Real bdt = dt * static_cast<Real>(stride);
       auto& levels = block_levels_[bi];
       if constexpr (treatment == TimeTreatment::Explicit) {
