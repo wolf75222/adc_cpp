@@ -52,11 +52,18 @@ namespace detail {
 // (ExBVelocityPolar) n'expose pas source(), seul un modele compose (CompositeModel) le fait. On le
 // detecte et on retombe sur 0 sinon -> l'operateur polaire marche aussi bien sur la brique seule que
 // sur un modele compose, sans imposer source() (le chemin cartesien, lui, suppose un modele compose).
+/// PolarHasSource<M> : concept interne -- vrai si M expose source(U, aux) -> State.
+///
+/// Sert a router polar_source : retombe sur l'etat nul si la brique pure (ExBVelocityPolar)
+/// n'expose pas source(), sans imposer le contrat a toutes les briques hyperboliques.
 template <class M>
 concept PolarHasSource = requires(const M m, const typename M::State u, const Aux a) {
   { m.source(u, a) } -> std::convertible_to<typename M::State>;
 };
 
+/// polar_source<Model> : retourne m.source(u, a) si PolarHasSource<Model>, sinon etat nul.
+///
+/// Garde if constexpr : zero codegen supplementaire pour les briques sans source. ADC_HD.
 template <class Model>
 ADC_HD inline typename Model::State polar_source(const Model& m, const typename Model::State& u,
                                                  const Aux& a) {
@@ -67,6 +74,12 @@ ADC_HD inline typename Model::State polar_source(const Model& m, const typename 
 // Noyau de FLUX DE FACE RADIALE (dir 0) : flux numerique a la face radiale i (entre i-1 et i), DEJA
 // pondere par le rayon de face r_face(i). On stocke r_{i-1/2} Fr_{i-1/2} pour que la divergence soit
 // une simple difference. FONCTEUR NOMME (device-clean cross-TU).
+/// PolarFaceFluxRKernel : noyau device du flux a la face radiale i (ponderation par r_face(i)).
+///
+/// Stocke r_face(i) * Fr a la face entre i-1 et i, pour que la divergence discrete soit une
+/// simple difference (cf. formule dans @file). Si wall_radial == true, force le flux a zero
+/// aux faces physiques de bord (paroi no-penetration, conservation de la masse a la machine).
+/// Foncteur nomme, device-clean cross-TU. ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct PolarFaceFluxRKernel {
   Model model;
@@ -102,6 +115,10 @@ struct PolarFaceFluxRKernel {
 
 // Noyau de FLUX DE FACE AZIMUTALE (dir 1) : flux numerique a la face theta j (entre j-1 et j). PAS de
 // ponderation par r (la metrique azimutale 1/r est appliquee en cellule, cf. PolarAssembleRhsKernel).
+/// PolarFaceFluxThetaKernel : noyau device du flux a la face azimutale j.
+///
+/// Calcule Ftheta a la face entre j-1 et j. Pas de ponderation par r ici : le facteur 1/r
+/// est applique en cellule dans PolarAssembleRhsKernel. Foncteur nomme. ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct PolarFaceFluxThetaKernel {
   Model model;
@@ -122,6 +139,10 @@ struct PolarFaceFluxThetaKernel {
 // Noyau d'assemblage du residu polaire en cellule (i, j) :
 //   R = S - (1/r_i) (Fr_pondere_{i+1} - Fr_pondere_i) / dr - (1/r_i) (Ftheta_{j+1} - Ftheta_j) / dtheta
 // Fr_pondere = r_face * Fr (deja produit par PolarFaceFluxRKernel). FONCTEUR NOMME.
+/// PolarAssembleRhsKernel : noyau device du residu polaire en cellule (i,j).
+///
+/// R = S - (1/r_i) [ (r Fr)_{i+1} - (r Fr)_i ] / dr - (1/r_i) [ Ftheta_{j+1} - Ftheta_j ] / dtheta.
+/// fr contient deja r_face * Fr (produit par PolarFaceFluxRKernel). Foncteur nomme. ADC_HD.
 template <class Model>
 struct PolarAssembleRhsKernel {
   Model model;

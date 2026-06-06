@@ -1,3 +1,12 @@
+/// @file
+/// @brief LorentzEliminator : operateur 2x2 B du schema de Schur pour l'elimination implicite de la vitesse.
+///
+/// Encode B = [[1, -w], [w, 1]] et son inverse B^{-1} = (1/det)*[[1, w], [-w, 1]],
+/// avec w = theta * dt * B_z et det(B) = 1 + w^2 (toujours > 0 : B inversible pour tout w reel).
+///
+/// Struct POD, zero allocation, trivially copyable. Tous les accesseurs ADC_HD.
+/// Aucun appel a std:: : device-safe sous Kokkos/CUDA/HIP sans restriction.
+
 #pragma once
 
 #include <adc/core/types.hpp>
@@ -39,6 +48,18 @@
 
 namespace adc {
 
+/// LorentzEliminator : operateur B = [[1,-w],[w,1]] et son inverse analytique.
+///
+/// Construit depuis (theta, dt, B_z) ; encode le terme implicite de Lorentz dans un schema
+/// Crank-Nicolson ou theta-implicite. Utilise pour assembler l'operateur de Schur
+/// A = rho * B^{-1} dans le solveur implicite de la vitesse.
+///
+/// CONVENTION DE SIGNE : B_field = B_z z_hat dans le plan (x,y).
+///   v x B_field = (v_y B_z, -v_x B_z) => B = [[1, -w], [w, 1]] avec w = theta*dt*B_z.
+///   Ne pas modifier sans relire la derivation dans le commentaire interne.
+///
+/// INVARIANT : struct trivialement copiable (static_assert ci-dessous), device-safe,
+/// zero allocation, zero appel a std::. Peut etre capture par valeur dans un kernel Kokkos/CUDA.
 // LorentzEliminator(theta, dt, B_z) encode B = [[1,-w],[w,1]] et son inverse.
 struct LorentzEliminator {
   Real w;    // w = theta * dt * B_z
@@ -48,11 +69,13 @@ struct LorentzEliminator {
   // theta : implicite du schema (0 = explicite, 1 = implicite, 0.5 = Crank-Nicolson).
   // dt    : pas de temps.
   // B_z   : composante z du champ magnetique.
+  /// Construit depuis (theta, dt, B_z) : w = theta*dt*B_z, det = 1 + w^2. ADC_HD.
   ADC_HD LorentzEliminator(Real theta, Real dt, Real B_z)
       : w(theta * dt * B_z), det(Real(1) + (theta * dt * B_z) * (theta * dt * B_z)) {}
 
   // apply_B : applique B = [[1,-w],[w,1]] a (vx, vy).
   // Retourne (Bx, By) dans les arguments de sortie.
+  /// apply_B : applique B = [[1,-w],[w,1]] a (vx, vy), ecrit (Bx, By). ADC_HD.
   ADC_HD void apply_B(Real vx, Real vy, Real& Bx, Real& By) const {
     Bx = vx - w * vy;
     By = vy + w * vx;
@@ -60,6 +83,7 @@ struct LorentzEliminator {
 
   // apply_Binv : applique B^{-1} = (1/det)*[[1,w],[-w,1]] a (vx, vy).
   // Retourne (vx', vy') dans les arguments de sortie.
+  /// apply_Binv : applique B^{-1} = (1/det)*[[1,w],[-w,1]] a (vx, vy), ecrit (vxp, vyp). ADC_HD.
   ADC_HD void apply_Binv(Real vx, Real vy, Real& vxp, Real& vyp) const {
     const Real inv = Real(1) / det;
     vxp = inv * (vx + w * vy);
@@ -68,10 +92,13 @@ struct LorentzEliminator {
 
   // binv_11, binv_12, binv_21, binv_22 : entrees de B^{-1} = (1/det)*[[1,w],[-w,1]].
   // Utiles pour assembler l'operateur de Schur A = rho * B^{-1} cellule par cellule.
+  /// @name Entrees scalaires de B^{-1} (pour assembler l'operateur de Schur A = rho * B^{-1}).
+  /// @{
   ADC_HD Real binv_11() const { return Real(1) / det; }
   ADC_HD Real binv_12() const { return w / det; }
   ADC_HD Real binv_21() const { return -w / det; }
   ADC_HD Real binv_22() const { return Real(1) / det; }
+  /// @}
 };
 
 // Verification statique : LorentzEliminator est trivially copyable (POD-like),

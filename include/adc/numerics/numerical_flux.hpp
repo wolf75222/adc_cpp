@@ -1,3 +1,20 @@
+/// @file
+/// @brief Politiques de flux numerique a une interface : Rusanov, HLL, HLLC, Roe.
+///
+/// Chaque politique est un foncteur ADC_HD sans etat satisfaisant le contrat :
+///   operator()(model, UL, AL, UR, AR, dir) -> Model::State
+/// qui rend le flux numerique a l'interface entre l'etat gauche (UL, aux AL) et droit (UR, AR)
+/// dans la direction dir (0 = x, 1 = y). Etats et auxiliaires passes par valeur ; aucun virtuel.
+///
+/// Hierarchie de precision (coupe des ondes intermediaires) :
+///   RusanovFlux  : Lax-Friedrichs local ; ne demande que max_wave_speed.
+///   HLLFlux      : 2 ondes (Davis) ; requiert model.wave_speeds (vitesses signees sL, sR).
+///   HLLCFlux     : 3 ondes (+ onde de contact) ; requiert model.pressure et wave_speeds.
+///   RoeFlux      : decomposition complete en ondes ; requiert model.pressure ; Euler 2D seulement.
+///
+/// INVARIANT device : pas de vtable, pas de std:: dans les chemins critiques (std::sqrt
+/// est authorise dans RoeFlux pour la moyenne de Roe, device-clean sous Kokkos/nvcc).
+
 #pragma once
 
 #include <adc/core/state.hpp>
@@ -26,6 +43,12 @@
 
 namespace adc {
 
+/// RusanovFlux (Lax-Friedrichs local) : flux robuste, compatible avec tout PhysicalModel minimal.
+///
+/// Fhat = 1/2 (F(UL) + F(UR)) - 1/2 alpha (UR - UL), alpha = max(sL, sR).
+/// Ne requiert que model.max_wave_speed -- compatible TOUT PhysicalModel du concept de base
+/// (pas de wave_speeds, pas de pressure). Diffusif (alpha borne haute) mais universel.
+/// ADC_HD. INVARIANT : traitement composante par composante (upwind scalaire), sans couplage.
 struct RusanovFlux {
   template <class Model>
   ADC_HD typename Model::State operator()(const Model& m,
@@ -47,6 +70,11 @@ struct RusanovFlux {
 
 // Estimation des vitesses de signal (Davis) : sL = min, sR = max des vitesses
 // d'onde signees des deux etats. Requiert model.wave_speeds (cf. Euler).
+/// hll_speeds : estimees de Davis pour les vitesses de signal des solveurs HLL/HLLC.
+///
+/// sL = min(sL_gauche, sL_droit), sR = max(sR_gauche, sR_droit).
+/// Requiert model.wave_speeds(U, aux, dir, lo, hi) -> vitesses signees (cf. Euler).
+/// Partagee par HLLFlux et HLLCFlux. ADC_HD.
 template <class Model>
 ADC_HD inline void hll_speeds(const Model& m, const typename Model::State& UL,
                               const Aux& AL, const typename Model::State& UR,
@@ -61,6 +89,11 @@ ADC_HD inline void hll_speeds(const Model& m, const typename Model::State& UL,
 // HLL (Harten-Lax-van Leer) : une seule onde intermediaire (pas d'onde de
 // contact). Moins diffusif que Rusanov sur chocs et detentes ; lisse encore les
 // discontinuites de contact.
+/// HLLFlux (Harten-Lax-van Leer) : 2 vitesses de signal, moins diffusif que Rusanov.
+///
+/// Requiert model.wave_speeds (vitesses signees sL, sR). Moins diffusif que Rusanov sur
+/// chocs et detentes ; capte encore imparfaitement les discontinuites de contact (une seule
+/// region etoile). Retourne FL si sL >= 0, FR si sR <= 0, flux HLL sinon. ADC_HD.
 struct HLLFlux {
   template <class Model>
   ADC_HD typename Model::State operator()(const Model& m,
@@ -85,6 +118,12 @@ struct HLLFlux {
 // HLLC (HLL + onde de Contact) : restitue l'onde de contact (Toro), donc capture
 // nettement la discontinuite de densite. Requiert model.pressure et wave_speeds.
 // n_vars == 4 attendu (Euler 2D) : indices normal/tangentiel selon dir.
+/// HLLCFlux (HLL + onde de Contact, Toro) : 3 ondes, capture la discontinuite de densite.
+///
+/// Requiert model.pressure et model.wave_speeds. Cible Euler 2D (n_vars == 4) ;
+/// indices de quantite de mouvement normale/tangentielle selon dir. Vitesse etoile sStar
+/// calculee par la formule de Toro eq. 10.37. Retombe sur FL / FR en zone supersonique. ADC_HD.
+/// INVARIANT : n_vars == 4 suppose ; comportement indefini sur d'autres modeles.
 struct HLLCFlux {
   template <class Model>
   ADC_HD typename Model::State operator()(const Model& m,
@@ -134,6 +173,14 @@ struct HLLCFlux {
 // etat supersonique, F* = flux amont EXACT (propriete de Roe : F_R - F_L = A_roe (U_R - U_L)).
 // Euler 2D (n_vars == 4) : requiert m.pressure. gamma-1 est deduit de l'etat (gaz parfait), donc
 // aucun membre gamma n'est requis du modele. Indices normal/tangentiel selon dir.
+/// RoeFlux : linearisation de Roe + correction d'entropie de Harten (ondes acoustiques).
+///
+/// Decomposition COMPLETE en ondes propres : F_R - F_L = A_roe (U_R - U_L) exactement.
+/// Pour un etat supersonique, F* = flux amont exact. Correction d'entropie de Harten
+/// (eps = 0.1*c) sur ondes acoustiques : evite les chocs non-entropiques (sonic glitch).
+/// Requiert model.pressure ; gamma-1 deduit de l'etat courant (hypothese gaz parfait).
+/// std::sqrt utilise pour la moyenne de Roe (device-clean sous Kokkos/nvcc). ADC_HD.
+/// INVARIANT : n_vars == 4 suppose (Euler 2D) ; comportement indefini sur autres modeles.
 struct RoeFlux {
   template <class Model>
   ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,

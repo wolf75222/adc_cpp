@@ -1,3 +1,24 @@
+/// @file
+/// @brief Operateur spatial cartesien : assemble R(U, aux) = -div F + S sur les cellules d'un niveau.
+///
+/// C'est la fleche "PDE -> systeme d'ODE" de la methode des lignes. L'integrateur en temps
+/// (time/) ne connait que R ; il ignore tout de la geometrie et du schema de reconstruction.
+///
+/// Fonctions et types exposes :
+///   - DiffusiveModel        : concept optionnel (model.diffusivity() -> nu) ; le flux Fickien
+///                             F = -nu grad U est ajoute au flux hyperbolique si presente.
+///   - SourceFreeModel<M>    : adaptateur qui zero la source (demi-pas explicite IMEX).
+///   - load_state<Model>     : lecture de l'etat conserve depuis un Array4 (ADC_HD).
+///   - load_aux<NComp>       : lecture de l'auxiliaire (phi, grad, champs extra) (ADC_HD).
+///   - max_wave_speed_mf     : max CFL sur toute la MultiFab (reduction + all_reduce MPI).
+///   - rusanov_flux          : compat libre, delegue a RusanovFlux{}.
+///   - reconstruct<>         : valeur de face depuis le stencil MUSCL ou WENO5 (ADC_HD).
+///   - compute_face_fluxes<> : flux aux faces (pour reflux AMR).
+///   - assemble_rhs<>        : residu R = -div Fhat + S (+ diffusion) sur la boite.
+///
+/// INVARIANT : l'operateur cartesien est STRICTEMENT INTOUCHE par l'operateur polaire
+/// (spatial_operator_polar.hpp) ; un run sur maillage cartesien est bit-identique.
+
 #pragma once
 
 #include <adc/core/state.hpp>
@@ -34,6 +55,13 @@ namespace adc {
 // aux_comps<Model>() (largeur du canal aux d'un modele) vit desormais dans le header contrat
 // adc/core/physical_model.hpp (inclus ci-dessus) pour que CompositeModel puisse le propager.
 
+/// DiffusiveModel : concept optionnel pour les modeles avec diffusion scalaire isotrope.
+///
+/// Un modele satisfait DiffusiveModel si et seulement si m.diffusivity() -> Real (nu >= 0).
+/// Le flux Fickien F = -nu grad U est AJOUTE au flux hyperbolique dans assemble_rhs /
+/// compute_face_fluxes. La divergence donne exactement +nu Lap(U).
+/// INVARIANT : un modele sans diffusivity() ne change pas d'un bit (chemin hyperbolique
+/// strictement inchange -- le if constexpr est faux, zero codegen supplementaire).
 // Modele DIFFUSIF (optionnel) : fournit une diffusivite scalaire isotrope nu. Le
 // tuteur : "la diffusion, c'est comme un flux de plus". Le flux Fickien F = -nu grad U
 // ajoute au flux hyperbolique donne, apres divergence (-div F), exactement +nu Lap(U).
@@ -44,6 +72,13 @@ concept DiffusiveModel = requires(const M m) {
   { m.diffusivity() } -> std::convertible_to<Real>;
 };
 
+/// SourceFreeModel<M> : adaptateur qui annule la source de M (demi-pas explicite IMEX).
+///
+/// Meme flux et max_wave_speed que M, mais source() renvoie toujours l'etat nul.
+/// Sert au demi-pas EXPLICITE d'un schema IMEX (transport seul, -div F) ; la source raide
+/// est traitee implicitement par backward_euler_source. N'expose pas diffusivity() pour ne
+/// pas casser les modeles non diffusifs. Transparent au contrat HLL/HLLC : forwarde
+/// pressure et wave_speeds uniquement si M les expose (clause requires).
 // Modele « sans source » : meme flux et vitesse d'onde que M, mais source nulle. Sert au
 // demi-pas EXPLICITE d'un schema IMEX (transport seul, −div F), la source raide etant
 // traitee implicitement a part (backward_euler_source). Note : n'expose pas diffusivity()
@@ -81,6 +116,10 @@ struct SourceFreeModel {
   }
 };
 
+/// load_state<Model> : lit Model::n_vars scalaires a (i,j) depuis un Array4.
+///
+/// Retourne un StateVec<n_vars> initialise depuis les composantes 0..n_vars-1 du canal.
+/// ADC_HD, zero allocation. Ne lit PAS les composantes au-dela de n_vars.
 template <class Model>
 ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i,
                                               int j) {
@@ -89,6 +128,13 @@ ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i,
   return u;
 }
 
+/// load_aux<NComp> : lit NComp composantes de l'auxiliaire depuis un Array4 en (i,j).
+///
+/// Les 3 premieres composantes (phi, grad_x, grad_y) sont le contrat de base.
+/// Les composantes >= 3 (B_z, T_e...) sont lues seulement si NComp > leur indice canonique
+/// (guard if constexpr -> zero codegen pour NComp = kAuxBaseComps = 3 : bit-identique).
+/// Les champs extra sont gouvernes par ADC_AUX_FIELDS (state.hpp) : ajouter un champ =>
+/// 1 ligne dans ADC_AUX_FIELDS, pas dans ce chemin. ADC_HD.
 // Charge l'auxiliaire de cellule depuis le canal aux. NComp = nombre de composantes lues
 // (cf. aux_comps<Model>()). Les trois premieres sont toujours phi/grad_x/grad_y ; les
 // suivantes, optionnelles, alimentent les champs extra de Aux dans l'ordre canonique.
@@ -116,6 +162,11 @@ namespace detail {
 // instancie depuis une TU EXTERNE (add_compiled_model, via la std::function de make_max_speed).
 // Passe directement a reduce_max_cell -> aucune lambda etendue. Corps identique a l'ancienne
 // lambda -> resultat bit-identique (meme Kokkos::Max, meme boucle hote).
+/// MaxWaveSpeedKernel<Model> : foncteur de reduction device pour max_wave_speed_mf.
+///
+/// Accumule le max des vitesses d'onde dans les deux directions en cellule (i,j).
+/// Foncteur nomme (et non lambda etendue) : emission device robuste depuis une TU externe
+/// (add_compiled_model). Corps bit-identique a l'ancienne lambda. ADC_HD.
 template <class Model>
 struct MaxWaveSpeedKernel {
   Model model;
@@ -131,6 +182,12 @@ struct MaxWaveSpeedKernel {
 };
 }  // namespace detail
 
+/// max_wave_speed_mf : max global de la vitesse d'onde sur toute la MultiFab (CFL).
+///
+/// Reduce sur toutes les boites locales puis all_reduce_max sur tous les rangs MPI.
+/// Sans l'all_reduce, chaque rang ne voit que ses boites et step_cfl calcule un dt
+/// different par rang (desynchronisation / divergence). En serie all_reduce_max est l'identite.
+/// Pour un modele sans transport (max_wave_speed = 0 partout) -> renvoie 0 (pas non contraint).
 // Vitesse d'onde maximale d'un champ : max sur les cellules valides et les deux directions
 // de model.max_wave_speed(U, aux, dir). Sert au choix CFL du pas (dt = cfl*h/w_max). Pour un
 // modele sans transport (flux nul, w=0) -> 0, donc ne contraint pas le pas. Reduction par le
@@ -153,6 +210,10 @@ inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
   return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
 }
 
+/// rusanov_flux : compat libre, delegue a RusanovFlux{} (politique de numerical_flux.hpp).
+///
+/// Conserve pour les references serie (demos GPU, tests unitaires) qui apellent rusanov_flux
+/// directement. Preferer RusanovFlux{} passe en template pour les nouveaux appels. ADC_HD.
 // Compat : flux de Rusanov en fonction libre, delegue a la politique RusanovFlux
 // (operator/numerical_flux.hpp). Conserve pour les references serie (demos GPU,
 // tests) qui appellent rusanov_flux directement.
@@ -165,6 +226,13 @@ ADC_HD inline typename Model::State rusanov_flux(const Model& m,
   return RusanovFlux{}(m, UL, AL, UR, AR, dir);
 }
 
+/// reconstruct<Model,Limiter> : valeur de face a (i,j) extrapolee dans la direction dir.
+///
+/// sgn = +1 -> face +dir de (i,j) ; sgn = -1 -> face -dir. Reconstruit en variables
+/// PRIMITIVES si prim == true ET si Model expose HasPrimitiveVars (positivite de rho et p
+/// pour Euler) ; sinon en conservatif. L'etat rendu est TOUJOURS conservatif.
+/// NoSlope (n_ghost == 1) : pente nulle, prim sans effet -- chemin conservatif pur.
+/// INVARIANT : fonction PONCTUELLE, ne boucle PAS sur la grille. ADC_HD.
 // Valeur de cellule (i,j) extrapolee vers sa face +dir (sgn=+1) ou -dir (sgn=-1).
 // Reconstruit en variables PRIMITIVES si prim==true et que le modele expose les conversions
 // (plus robuste pour Euler : positivite de rho et p) ; sinon en conservatif. L'etat rendu est
@@ -231,6 +299,11 @@ ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstA
   return s;
 }
 
+/// xface_box / yface_box : boites de face normales a x (resp. y) associees a une boite de cellules.
+///
+/// xface_box(v) : nx+1 x ny (i dans [lo..hi+1], j dans [lo..hi]).
+/// yface_box(v) : nx x ny+1 (i dans [lo..hi], j dans [lo..hi+1]).
+/// Sert a dimensionner les MultiFab Fx, Fy recus par compute_face_fluxes.
 // Boites de FACE associees a une boite de cellules (faces normales a x : nx+1 x ny ;
 // normales a y : nx x ny+1). Sert a dimensionner les MultiFab de flux de face.
 inline Box2D xface_box(const Box2D& v) {
@@ -266,6 +339,11 @@ namespace detail {
 // DiffusiveModel) -> flux de face bit-identique. dx/dy ne sont lus que par la branche diffusive
 // (membre inutilise, sans codegen, pour un modele non diffusif) : plus besoin du (void)dx hors
 // if-constexpr qu'imposait la capture d'une lambda.
+/// FaceFluxXKernel : noyau device de flux a la face radiale x (entre i-1 et i).
+///
+/// Reconstruit les etats L (cellule i-1, face +x) et R (cellule i, face -x), calcule
+/// le flux numerique, ecrit dans fx(i,j). Ajoute le flux Fickien si DiffusiveModel.
+/// Foncteur nomme (device-clean cross-TU). ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct FaceFluxXKernel {
   Model model;
@@ -288,6 +366,9 @@ struct FaceFluxXKernel {
     }
   }
 };
+/// FaceFluxYKernel : noyau device de flux a la face y (entre j-1 et j).
+///
+/// Analogue de FaceFluxXKernel dans la direction j. Foncteur nomme. ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct FaceFluxYKernel {
   Model model;
@@ -312,6 +393,34 @@ struct FaceFluxYKernel {
 };
 }  // namespace detail
 
+/// compute_face_fluxes<Limiter,NumericalFlux> : ecrit les flux aux faces AVANT divergence.
+///
+/// Fx(i,j) = flux a la face entre (i-1,j) et (i,j), i dans [lo..hi+1].
+/// Fy(i,j) = flux entre (i,j-1) et (i,j), j dans [lo..hi+1].
+/// Brique necessaire au reflux AMR : assemble_rhs calcule directement -div F et jette les
+/// flux de face, mais le reflux doit les voir pour corriger les interfaces coarse-fine.
+/// Pour un DiffusiveModel, le flux Fickien F_diff = -nu (u_R-u_L)/h est ajoute (sa
+/// divergence reproduit EXACTEMENT +nu Lap(u) d'assemble_rhs, et reste visible du reflux).
+/// dx=0, dy=0 par defaut : non lus pour un modele non diffusif (bit-identique hyperbolique).
+// compute_face_fluxes : ecrit les flux numeriques aux FACES (Fx aux faces normales
+// a x, Fy a y), AVANT divergence. C'est la brique dont le reflux AMR a besoin (il
+// accumule les flux fins et soustrait le flux grossier aux interfaces coarse-fine ;
+// assemble_rhs, lui, calcule directement -div F et jette les flux de face).
+//
+// Conventions : Fx(i,j) = flux a la face entre les cellules (i-1,j) et (i,j), i dans
+// [lo..hi+1]. Fy(i,j) = flux entre (i,j-1) et (i,j), j dans [lo..hi+1]. Memes
+// reconstruction (Limiter) et flux numerique (NumericalFlux) qu'assemble_rhs, donc
+//   r(i,j) = S - (Fx(i+1,j)-Fx(i,j))/dx - (Fy(i,j+1)-Fy(i,j))/dy
+// redonne EXACTEMENT le residu d'assemble_rhs. Fx, Fy dimensionnes par l'appelant
+// (boites xface_box/yface_box, ncomp = Model::n_vars, 0 ghost). Device-callable.
+//
+// DIFFUSION sur AMR (TODO 4) : pour un DiffusiveModel, on ajoute le flux de FACE
+// Fickien F_diff = -nu (u_R - u_L)/h (gradient centre au face, valeurs de cellule).
+// Sa divergence -(Fx(i+1)-Fx(i))/dx redonne EXACTEMENT +nu Lap(u) d'assemble_rhs,
+// mais traite en FLUX : le reflux AMR le voit donc, et la diffusion reste
+// conservative aux interfaces coarse-fine (sinon un Laplacien direct serait ignore
+// par le reflux). dx/dy = pas du NIVEAU (passes par l'appelant ; 0 par defaut, non
+// lus pour un modele non diffusif -> chemin hyperbolique strictement bit-identique).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& aux,
                          MultiFab& Fx, MultiFab& Fy, Real dx = 0, Real dy = 0,
@@ -339,6 +448,11 @@ namespace detail {
 // passe sur Serial et sous compute-sanitizer mais segfaute a l'execution sur Cuda (Heisenbug). Une
 // classe device-callable n'a pas ces restrictions de contexte d'instanciation. Corps IDENTIQUE a
 // l'ancienne lambda -> residu BIT-IDENTIQUE a add_block sur CPU (et, vise, sur device).
+/// AssembleRhsKernel<Limiter,NumericalFlux,Model> : noyau device du residu central d'assemble_rhs.
+///
+/// Calcule R(i,j) = S - (Fxp-Fxm)/dx - (Fyp-Fym)/dy (+ terme Fickien si DiffusiveModel).
+/// Foncteur nomme : point cle de la parite native AOT (add_compiled_model via TU externe).
+/// Corps bit-identique a l'ancienne lambda. ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct AssembleRhsKernel {
   Model model;
@@ -388,6 +502,13 @@ struct AssembleRhsKernel {
 };
 }  // namespace detail
 
+/// assemble_rhs<Limiter,NumericalFlux> : residu R = -div Fhat + S sur toutes les boites.
+///
+/// Point d'entree principal de l'operateur spatial cartesien. Le limiteur (reconstruction)
+/// ET le flux numerique sont des parametres de template choisis a la compilation (defaut :
+/// NoSlope + RusanovFlux). recon_prim = true active la reconstruction en variables primitives
+/// si le modele expose HasPrimitiveVars. Pour le terme diffusif, voir DiffusiveModel.
+/// INVARIANT : l'operateur ne modifie pas U, aux -- il ecrit uniquement R. Pas de ghost fill.
 // assemble_rhs<Limiter, NumericalFlux> : R = -div Fhat + S. Le limiteur (pente de
 // reconstruction) ET le flux numerique sont des parametres de template, par defaut
 // MUSCL au choix de l'appelant + Rusanov. Tous deux device-callable (ADC_HD).

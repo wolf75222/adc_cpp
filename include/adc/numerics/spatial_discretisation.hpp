@@ -1,3 +1,13 @@
+/// @file
+/// @brief Agregat "methode spatiale" : reconstruction (limiteur) + flux numerique en un type nomme.
+///
+/// SpatialDiscretisation<Limiter, NumericalFlux> regroupe les deux choix de discretisation spatiale
+/// en un seul type de template passe en bloc a assemble_rhs / compute_face_fluxes. Cela permet de
+/// choisir la methode PAR sous-modele (Rusanov pour les ions, HLLC pour les electrons) sans toucher
+/// au modele ni au coupleur. Choix compile a la compilation, zero surcout de branche.
+///
+/// Aliases fournis : FirstOrder, MusclMinmod, MusclVanLeer, MusclVanLeerHLLC.
+
 #pragma once
 
 #include <adc/numerics/numerical_flux.hpp>
@@ -16,12 +26,21 @@
 
 namespace adc {
 
+/// SpatialDiscretisation<LimiterT, NumericalFluxT> : tag-type regroupant la politique de
+/// reconstruction et la politique de flux numerique en un seul parametre de template.
+///
+/// Satisfait SpatialDiscretisationLike. Exposes deux alias Limiter / NumericalFlux
+/// consommes par assemble_rhs et compute_face_fluxes.
 template <class LimiterT, class NumericalFluxT = RusanovFlux>
 struct SpatialDiscretisation {
   using Limiter = LimiterT;
   using NumericalFlux = NumericalFluxT;
 };
 
+/// SpatialDiscretisationLike : concept de validation d'un SpatialDiscretisation.
+///
+/// Verifie la presence des alias Limiter et NumericalFlux. Utilisable comme contrainte
+/// sur un parametre de template pour documenter l'interface attendue.
 template <class D>
 concept SpatialDiscretisationLike = requires {
   typename D::Limiter;
