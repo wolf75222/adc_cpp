@@ -53,8 +53,28 @@
 /// substeps (sous-pas explicites) et stride (cadence hold-then-catch-up), honores dans step() en
 /// mirroir de AmrSystemCoupler::step (#140). Le TRAITEMENT TEMPOREL est PAR BLOC : explicite (source
 /// en Euler avant, portee par le pas AMR) OU IMEX (source raide traitee en IMPLICITE par
-/// backward_euler_source, le transport restant explicite ; capstone vii), selectionne dans step() en
-/// mirroir de la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper).
+/// backward_euler_source, le transport restant explicite ; capstone vii), selectionne dans step().
+///
+/// SEMANTIQUE IMEX SOUS substeps (decision d'integration, suite revue #184). A substeps=1 ET stride=1
+/// la branche IMEX du runtime COINCIDE avec la branche IMEX du moteur compile-time AmrSystemCoupler::step
+/// (un transport SOURCE-FREE + un backward_euler_source sur le pas effectif). POUR substeps>1 les deux
+/// chemins DIVERGENT DELIBEREMENT :
+///   - le moteur COMPILE-TIME IGNORE substeps sur la branche IMEX : il fait UN seul transport source-free
+///     puis UN seul implicit_advance sur tout le pas effectif bdt (cf. amr_system_coupler.hpp : la boucle
+///     de sous-pas n'existe que dans la branche Explicit) ;
+///   - le RUNTIME SOUS-CYCLE le splitting IMEX : il applique imex_advance K=substeps fois, chacune sur
+///     bdt/K, soit K pas de Lie [transport(dt/K) ; source implicite(dt/K)].
+/// Ce choix est ASSUME et SAIN (ce n'est PAS un bug) : (a) le transport explicite source-free devient
+/// PLUS SUR EN CFL (chaque sous-pas porte dt/K, donc une vitesse d'onde K fois plus grande reste
+/// admissible) ; (b) le backward-Euler est INCONDITIONNELLEMENT STABLE quel que soit le pas, donc le
+/// sous-cyclage ne destabilise jamais la source ; (c) raffiner le pas du backward-Euler RAPPROCHE la
+/// relaxation raide de sa trajectoire continue (erreur de splitting et erreur temporelle implicite en
+/// O(dt) toutes deux reduites). Le runtime ne mirroite donc PAS le compile-time bit-a-bit des que
+/// substeps>1 ; il honore substeps de facon COHERENTE avec la branche explicite (meme decoupage en K
+/// sous-pas egaux), ce qui est le comportement attendu d'un utilisateur reglant substeps. Verrou de
+/// non-regression : test_amr_multiblock_imex compare une trajectoire substeps=4 a substeps=1 et exige
+/// qu'elles DIFFERENT (le sous-cyclage est intentionnel, pas accidentel).
+///
 /// Le regrid d'union des tags et le DSL production multi-bloc compile restent des PR ULTERIEURES. Le
 /// facade runtime (AmrSystem) REFUSE explicitement multi-blocs + regrid_every > 0 tant que le regrid
 /// d'union n'existe pas.
@@ -116,18 +136,23 @@ struct AmrRuntimeBlock {
   /// par advance, un bloc IMEX par imex_advance. false partout -> trajectoire bit-identique a l'historique.
   bool imex = false;
 
-  /// Avance IMEX du bloc d'UN sous-pas de taille dt (mirroir FIDELE de la branche IMEX de
-  /// AmrSystemCoupler::step + AmrImplicitSourceStepper) : (1) TRANSPORT EXPLICITE sur le modele
-  /// SOURCE-FREE (-div F seul, SourceFreeModel<Model>) par le moteur AMR (Berger-Oliger + reflux +
-  /// average_down conservatifs), puis (2) SOURCE RAIDE IMPLICITE backward_euler_source A CHAQUE NIVEAU
-  /// (Newton local, jacobienne par differences finies ; masque implicite PORTE PAR LE BLOC pour l'IMEX
-  /// partiel), suivie d'une cascade fin -> grossier (mf_average_down_mb). Capture le Model/Limiter/Flux
-  /// CONCRETS + le masque (build_amr_block) ; le noyau reste COMPILE, seul le registre de blocs est
-  /// type-erase. INVARIANT DE CONSERVATION (source LOCALE) : la source est cellule-locale (hors flux de
-  /// face), donc HORS des registres de reflux -> la conservation aux interfaces grossier-fin reste
-  /// intacte ; une cellule grossiere COUVERTE redevient la moyenne 2x2 de ses enfants par la cascade
-  /// finale (sinon le diagnostic de masse, somme du seul grossier, compterait une source fantome). Vide
-  /// pour un bloc explicite (imex == false) : step() ne l'appelle jamais.
+  /// Avance IMEX du bloc d'UN sous-pas de taille dt : (1) TRANSPORT EXPLICITE sur le modele SOURCE-FREE
+  /// (-div F seul, SourceFreeModel<Model>) par le moteur AMR (Berger-Oliger + reflux + average_down
+  /// conservatifs), puis (2) SOURCE RAIDE IMPLICITE backward_euler_source A CHAQUE NIVEAU (Newton local,
+  /// jacobienne par differences finies ; masque implicite PORTE PAR LE BLOC pour l'IMEX partiel), suivie
+  /// d'une cascade fin -> grossier (mf_average_down_mb). UN appel = UN pas de Lie [transport ; source
+  /// implicite] sur dt. La SEMANTIQUE de ce splitting (transport source-free puis backward-Euler) calque
+  /// la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper) ; A substeps=1
+  /// elle lui est IDENTIQUE. Mais step() appelle CETTE fermeture substeps fois (sur dt = pas effectif /
+  /// substeps), donc pour substeps>1 le runtime SOUS-CYCLE le splitting IMEX la ou le compile-time
+  /// l'applique une seule fois sur tout le pas effectif : divergence ASSUMEE (cf. SEMANTIQUE IMEX SOUS
+  /// substeps, en-tete du fichier). Capture le Model/Limiter/Flux CONCRETS + le masque (build_amr_block) ;
+  /// le noyau reste COMPILE, seul le registre de blocs est type-erase. INVARIANT DE CONSERVATION (source
+  /// LOCALE) : la source est cellule-locale (hors flux de face), donc HORS des registres de reflux -> la
+  /// conservation aux interfaces grossier-fin reste intacte ; une cellule grossiere COUVERTE redevient la
+  /// moyenne 2x2 de ses enfants par la cascade finale (sinon le diagnostic de masse, somme du seul
+  /// grossier, compterait une source fantome). Vide pour un bloc explicite (imex == false) : step() ne
+  /// l'appelle jamais.
   std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> imex_advance;
 
   /// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs_b(U_b) sur le grossier.
@@ -421,14 +446,20 @@ class AmrRuntime {
   /// block_substeps_v / block_stride_v et choisit le traitement par le constexpr block_time_treatment_v ;
   /// ici le moteur porte la boucle de sous-pas, le filtre stride ET la selection IMEX-vs-explicite.
   ///
-  /// SELECTION DU TRAITEMENT (capstone vii, mirroir de la branche IMEX de AmrSystemCoupler::step) :
+  /// SELECTION DU TRAITEMENT (capstone vii) :
   ///  - bloc EXPLICITE (b.imex == false) : la fermeture advance fait UN advance_amr (transport + source
   ///    en Euler avant), appelee substeps fois ;
   ///  - bloc IMEX (b.imex == true) : la fermeture imex_advance fait UN advance_amr SOURCE-FREE puis la
   ///    source raide IMPLICITE backward_euler_source par niveau + cascade (cf. AmrRuntimeBlock::imex_advance),
   ///    appelee substeps fois. Inconditionnellement stable sur une relaxation raide (la ou l'explicite,
   ///    de facteur |1 - dt/eps|, DIVERGE des que dt > 2 eps).
-  /// imex == false partout -> chemin advance seul -> trajectoire bit-identique a l'historique (l'IMEX est opt-in).
+  /// La boucle de sous-pas est COMMUNE aux deux traitements (substeps applications de h = bdt/substeps),
+  /// donc le runtime SOUS-CYCLE aussi le splitting IMEX. A substeps=1 ce sous-cyclage est un no-op et le
+  /// chemin IMEX coincide avec la branche IMEX du moteur compile-time AmrSystemCoupler::step ; pour
+  /// substeps>1 il DIVERGE deliberement de ce moteur (qui, lui, ignore substeps sur sa branche IMEX) :
+  /// voir SEMANTIQUE IMEX SOUS substeps en en-tete (CFL-safe sur le transport, backward-Euler stable a
+  /// tout pas, relaxation raide plus precise). imex == false partout -> chemin advance seul ->
+  /// trajectoire bit-identique a l'historique (l'IMEX est opt-in).
   void step(Real dt) {
     solve_count_ = 0;
     // Poisson de systeme resolu UNE fois sur l'etat courant (cadence OncePerStep). Un bloc TENU
@@ -445,9 +476,13 @@ class AmrRuntime {
       const Real bdt = dt * static_cast<Real>(b.stride);  // catch-up : pas effectif stride*dt
       // substeps sous-pas egaux de bdt/substeps. La fermeture choisie fait UN advance par appel ;
       // substeps=1 -> un seul advance de bdt (bit-identique au cas mono-substep). SELECTION du
-      // traitement par bloc : IMEX (transport source-free + source raide implicite, mirroir
-      // AmrSystemCoupler::step) si b.imex, sinon EXPLICITE (transport + source Euler avant). Le test
-      // est PAR BLOC et stable : un seul bloc IMEX ne change rien aux blocs explicites voisins.
+      // traitement par bloc : IMEX (transport source-free + source raide implicite, calque la branche
+      // IMEX de AmrSystemCoupler::step) si b.imex, sinon EXPLICITE (transport + source Euler avant). Le
+      // test est PAR BLOC et stable : un seul bloc IMEX ne change rien aux blocs explicites voisins.
+      // NOTE substeps>1 : la boucle ci-dessous appelle step_block substeps fois pour LES DEUX
+      // traitements, donc le splitting IMEX est SOUS-CYCLE (K pas de Lie sur bdt/K). Le compile-time, lui,
+      // n'applique son IMEX qu'une fois sur bdt (il ignore substeps sur sa branche IMEX) : divergence
+      // ASSUMEE et saine pour substeps>1 (cf. SEMANTIQUE IMEX SOUS substeps en en-tete du fichier).
       const Real h = bdt / static_cast<Real>(b.substeps);
       auto& step_block = b.imex ? b.imex_advance : b.advance;
       for (int s = 0; s < b.substeps; ++s)

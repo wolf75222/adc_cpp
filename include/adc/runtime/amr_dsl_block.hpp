@@ -198,8 +198,12 @@ inline SharedAmrLayout make_shared_amr_layout(const AmrBuildParams& bp) {
 /// DEUX fermetures distinctes posees sur l'AmrRuntimeBlock et AmrRuntime::step choisit (b.imex) :
 ///   - advance : transport AMR + source EXPLICITE (Euler avant) -- chemin historique inchange ;
 ///   - imex_advance : transport AMR SOURCE-FREE + source raide IMPLICITE backward_euler_source par
-///     niveau (masque @p implicit_components pour l'IMEX partiel) + cascade, mirroir FIDELE de la
-///     branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper).
+///     niveau (masque @p implicit_components pour l'IMEX partiel) + cascade. La SEMANTIQUE du splitting
+///     calque la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper), et
+///     A substeps=1 lui est IDENTIQUE. Cette fermeture fait UN pas de Lie ; AmrRuntime::step l'appelle
+///     substeps fois (sur le pas effectif / substeps), donc pour substeps>1 le runtime SOUS-CYCLE le
+///     splitting IMEX la ou le compile-time l'applique une seule fois sur le pas effectif. Divergence
+///     ASSUMEE et saine (cf. SEMANTIQUE IMEX SOUS substeps dans amr_runtime.hpp).
 /// @p implicit_components : indices des composantes traitees en IMPLICITE (IMEX partiel, porte par le
 /// BLOC, prioritaire sur le defaut modele) ; VIDE (defaut) -> masque inactif -> backward-Euler plein
 /// (toutes les composantes implicites), comportement bit-identique a l'IMEX sans masque. Ignore si imex==false.
@@ -250,12 +254,15 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
                              Periodicity per, bool repl) {
     advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, /*imex=*/false);
   };
-  // imex_advance (capstone vii) : mirroir FIDELE de la branche IMEX de AmrSystemCoupler::step
-  // (SourceFreeModel + AmrImplicitSourceStepper), peuple SEULEMENT si imex. (1) transport EXPLICITE
-  // sur le modele SOURCE-FREE (SourceFreeModel<Model> : flux/CFL du modele, source nulle) par le MEME
-  // moteur AMR (reflux conservatif) ; (2) source raide IMPLICITE backward_euler_source A CHAQUE NIVEAU
-  // (Newton local), avec le masque @p implicit_components porte par le BLOC (IMEX partiel) ; (3)
-  // cascade fin -> grossier (mf_average_down_mb) pour la coherence des cellules grossieres couvertes.
+  // imex_advance (capstone vii) : UN pas de Lie [transport source-free ; source implicite] dont la
+  // SEMANTIQUE calque la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper),
+  // peuple SEULEMENT si imex. (1) transport EXPLICITE sur le modele SOURCE-FREE (SourceFreeModel<Model> :
+  // flux/CFL du modele, source nulle) par le MEME moteur AMR (reflux conservatif) ; (2) source raide
+  // IMPLICITE backward_euler_source A CHAQUE NIVEAU (Newton local), avec le masque @p implicit_components
+  // porte par le BLOC (IMEX partiel) ; (3) cascade fin -> grossier (mf_average_down_mb) pour la coherence
+  // des cellules grossieres couvertes. AmrRuntime::step appelle cette fermeture substeps fois : a
+  // substeps=1 c'est exactement la branche IMEX compile-time, pour substeps>1 le runtime SOUS-CYCLE le
+  // splitting (decision assumee, cf. SEMANTIQUE IMEX SOUS substeps dans amr_runtime.hpp).
   // On CAPTURE le masque dans un ImplicitMask<Model::n_vars> (POD device-clean) une fois ici (la
   // largeur n_vars n'est connue qu'au build, le masque est inactif si implicit_components est vide ->
   // backward-Euler plein, bit-identique a l'IMEX sans masque). SourceFreeModel<Model> est un type

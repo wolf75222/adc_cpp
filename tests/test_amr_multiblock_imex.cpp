@@ -4,16 +4,22 @@
 // (SourceFreeModel transport + AmrImplicitSourceStepper). Le pas IMEX d'UN bloc n'altere PAS les blocs
 // explicites voisins (selection PAR BLOC).
 //
-// Ce que le test verrouille (cf. tache capstone vii) :
+// Ce que le test verrouille (cf. tache capstone vii + suite revue #184) :
 //   (1) STABILITE RAIDE : un bloc a SOURCE LOCALE RAIDE (relaxation, raideur 1/eps >> 1/dt) sous IMEX
 //       sur une hierarchie AMR 2 NIVEAUX est FINI et BORNE, la ou le MEME bloc en EXPLICITE DIVERGE
-//       (facteur |1 - dt/eps| >> 1). Rejet nan/inf AVANT toute tolerance.
+//       (facteur |1 - dt/eps| >> 1). Rejet nan/inf AVANT toute tolerance. La stabilite est observee
+//       DIRECTEMENT sur le champ STIFFENE mx/my/E (comp 1/2/3 du grossier, lues via levels(b)), pas
+//       seulement par contamination indirecte de la densite (revue #184) : la source ne touche PAS rho.
 //   (2) CONSERVATION : la source raide IMEX choisie est CELLULE-LOCALE et n'agit PAS sur la composante 0
 //       (densite) -> la masse du bloc IMEX est conservee a ~machine (hors registres de reflux, cascade
 //       fin -> grossier intacte). On le verifie sur 2 niveaux (un patch fin present).
 //   (3) DISABLE-AND-FAIL : forcer le MEME bloc raide en EXPLICITE (imex=false) le fait EXPLOSER -> la
 //       selection IMEX est GENUINEMENT exercee (ce n'est pas un no-op silencieux). C'est le pendant
-//       "negatif" de (1) : sans IMEX, la stabilite disparait.
+//       "negatif" de (1) : sans IMEX, la stabilite disparait. L'explosion est verifiee SUR mx/my/E.
+//   (3bis) IMEX SOUS-CYCLE substeps>1 (revue #184) : un run IMEX substeps=4 est fini, borne (densite ET
+//       mx/my/E), conservatif, et sa trajectoire DIFFERE d'un run IMEX substeps=1 -> le SOUS-CYCLAGE du
+//       splitting IMEX (decision d'integration, contraire au compile-time qui ignore substeps en IMEX)
+//       est INTENTIONNEL et reellement execute, pas un no-op silencieux.
 //   (4) OPT-IN BIT-IDENTIQUE : un multi-blocs TOUT-EXPLICITE est inchange (dmax==0 entre deux runs), et
 //       le mono-bloc reste sur AmrCouplerMP (dmax==0). L'IMEX par bloc est strictement opt-in.
 //   (5) FACADE : AmrSystem.add_block(time="imex") en MULTI-BLOCS construit et tourne (bloc IMEX
@@ -115,10 +121,13 @@ double dmax_field(const std::vector<double>& a, const std::vector<double>& b) {
 }
 
 // Construit un AmrRuntime a DEUX blocs sur une hierarchie 2 NIVEAUX figee N x N : un bloc RAIDE
-// (StiffModel) au traitement @p imex_stiff, et un bloc NEUTRE explicite. La densite initiale rho est
-// posee sur les deux. Le patch fin central FIXE de make_shared_amr_layout donne la 2e niveau (couverture).
+// (StiffModel) au traitement @p imex_stiff et de cadence @p substeps sous-pas, et un bloc NEUTRE
+// explicite. La densite initiale rho est posee sur les deux. Le patch fin central FIXE de
+// make_shared_amr_layout donne la 2e niveau (couverture). @p substeps : sous-pas du bloc raide
+// (1 = un seul advance par macro-pas ; >1 = le pas effectif est decoupe en substeps morceaux, le
+// splitting IMEX est alors SOUS-CYCLE par le moteur -- decision assumee, cf. amr_runtime.hpp).
 AmrRuntime make_stiff_pair(int N, double L, double eps, bool imex_stiff,
-                           const std::vector<double>& rho) {
+                           const std::vector<double>& rho, int substeps = 1) {
   AmrBuildParams bp;
   bp.n = N;
   bp.L = L;
@@ -128,7 +137,7 @@ AmrRuntime make_stiff_pair(int N, double L, double eps, bool imex_stiff,
   std::vector<AmrRuntimeBlock> blocks;
   // bloc A : raide, traitement imex_stiff (true = IMEX, false = explicite : disable-and-fail).
   blocks.push_back(detail::build_amr_block<StiffModel, Minmod, RusanovFlux>(
-      make_stiff(eps), S, "stiff", rho, /*has_density=*/true, kGamma, /*substeps=*/1,
+      make_stiff(eps), S, "stiff", rho, /*has_density=*/true, kGamma, substeps,
       /*recon_prim=*/false, /*imex=*/imex_stiff, /*stride=*/1));
   // bloc B : neutre, EXPLICITE (voisin sur la hierarchie partagee ; Poisson somme co-localise).
   blocks.push_back(detail::build_amr_block<NeutralModel, Minmod, RusanovFlux>(
@@ -136,6 +145,32 @@ AmrRuntime make_stiff_pair(int N, double L, double eps, bool imex_stiff,
       /*recon_prim=*/false, /*imex=*/false, /*stride=*/1));
   return AmrRuntime(S.geom, S.ba_coarse, S.poisson_bc, std::move(blocks), S.base_per,
                     S.replicated_coarse, S.wall);
+}
+
+// Lit DIRECTEMENT le grossier (niveau 0) du bloc @p b et renvoie le max |U(.,.,c)| sur les
+// composantes STIFFENEES mx/my/E (c=1,2,3), tout en signalant la presence d'un non-fini. Le reviewer
+// #184 a note que borner la densite (comp 0) n'observe la stabilite qu'INDIRECTEMENT (la source raide
+// StiffMomentumRelax laisse rho INTACTE et ne stiffenne que mx/my/E) : on lit donc les composantes
+// REELLEMENT relaxees, sans changer l'API de production (rt est non-const et expose levels(b), exactement
+// l'accesseur de test_amr_source_covered_cells). On itere les fabs LOCAUX (local_size()==0 sur un rang
+// sans boite -> max nul, MPI-safe) et les cellules VALIDES (box(li), pas les ghosts). @p finite mis a
+// false des qu'une cellule est non finie.
+double max_momentum_energy_coarse(AmrRuntime& rt, std::size_t b, bool& finite) {
+  finite = true;
+  double m = 0.0;
+  const MultiFab& U = rt.levels(b)[0].U;
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 a = U.fab(li).const_array();
+    const Box2D box = U.box(li);
+    for (int j = box.lo[1]; j <= box.hi[1]; ++j)
+      for (int i = box.lo[0]; i <= box.hi[0]; ++i)
+        for (int c = 1; c <= 3; ++c) {
+          const double v = static_cast<double>(a(i, j, c));
+          if (!std::isfinite(v)) finite = false;
+          m = std::fmax(m, std::fabs(v));
+        }
+  }
+  return m;
 }
 
 // modeles ModelSpec pour la FACADE : ExB scalaire (charge q) et Euler+potential (source raide self-consistent).
@@ -206,24 +241,82 @@ int main(int argc, char** argv) {
     // AVANT toute tolerance : etat fini (un nan passerait une borne par hasard).
     chk(all_finite(dStiff) && all_finite(dNeutral), "imex_stiff_state_finite");
     chk(maxabs(dStiff) < 1e3, "imex_stiff_state_bounded");
+    // (3-revue #184) STABILITE OBSERVEE SUR LE BON CHAMP : la source raide ne stiffenne PAS la densite
+    // (comp 0) mais mx/my/E (comp 1/2/3). Borner la seule densite n'observe la stabilite qu'INDIRECTEMENT
+    // (par contamination via le transport). On lit donc DIRECTEMENT mx/my/E du grossier et on exige
+    // qu'elles restent finies ET bornees sous IMEX (la ou l'explicite, ci-dessous, les fait diverger).
+    bool me_finite = false;
+    const double me_max = max_momentum_energy_coarse(rt, 0, me_finite);
+    chk(me_finite, "imex_stiff_momentum_energy_finite_DIRECT");
+    chk(me_max < 1e3, "imex_stiff_momentum_energy_bounded_DIRECT");
     // (2) CONSERVATION : la source raide ne touche pas la densite (comp 0) -> masse conservee ~machine.
     const double drift = std::fabs(static_cast<double>(m1 - m0)) /
                          (std::fabs(static_cast<double>(m0)) + 1e-30);
     chk(drift < 1e-12, "imex_stiff_mass_conserved_to_machine");
-    std::printf("      IMEX : max=%.3e, derive de masse=%.3e (eps=%.0e, dt=%.0e)\n",
-                maxabs(dStiff), drift, eps, dt);
+    std::printf("      IMEX : max(rho)=%.3e, max|mx,my,E|=%.3e, derive de masse=%.3e (eps=%.0e, dt=%.0e)\n",
+                maxabs(dStiff), me_max, drift, eps, dt);
   }
 
-  // (3) DISABLE-AND-FAIL : MEME bloc raide en EXPLICITE -> EXPLOSE (non fini ou >> borne). Prouve que la
-  //     selection IMEX de (1) est GENUINEMENT exercee (sans elle, la stabilite disparait).
+  // (3) DISABLE-AND-FAIL : MEME bloc raide en EXPLICITE -> EXPLOSE. Prouve que la selection IMEX de (1)
+  //     est GENUINEMENT exercee (sans elle, la stabilite disparait). On observe l'explosion SUR LE CHAMP
+  //     STIFFENE (mx/my/E directement, comp 1/2/3), la ou la source agit, pas seulement sur la densite.
   {
     AmrRuntime rt = make_stiff_pair(N, L, eps, /*imex_stiff=*/false, rho);
     for (int s = 0; s < K; ++s) rt.step(static_cast<Real>(dt));
     const std::vector<double> dStiff = rt.density(0);
-    const bool blew_up = !all_finite(dStiff) || maxabs(dStiff) > 1e3;
-    chk(blew_up, "explicit_stiff_BLOWS_UP (disable-and-fail : IMEX genuinement requis)");
-    std::printf("      EXPLICITE : %s (la stabilite vient bien du pas implicite)\n",
+    bool me_finite = false;
+    const double me_max = max_momentum_energy_coarse(rt, 0, me_finite);
+    // L'explosion DOIT etre visible sur mx/my/E (le champ que la raideur attaque) ; on garde aussi le
+    // critere densite (contamination par le transport) pour la lisibilite du diagnostic.
+    const bool me_blew_up = !me_finite || me_max > 1e3;
+    const bool rho_blew_up = !all_finite(dStiff) || maxabs(dStiff) > 1e3;
+    chk(me_blew_up, "explicit_stiff_momentum_energy_BLOWS_UP_DIRECT (disable-and-fail sur mx/my/E)");
+    chk(rho_blew_up, "explicit_stiff_BLOWS_UP (disable-and-fail : IMEX genuinement requis)");
+    std::printf("      EXPLICITE : mx/my/E %s, rho %s (la stabilite vient bien du pas implicite)\n",
+                me_finite ? "borne >> 1" : "NON FINI (explose)",
                 all_finite(dStiff) ? "borne >> 1" : "NON FINI (explose)");
+  }
+
+  // ============================================================================================
+  // (3bis) IMEX SOUS-CYCLE substeps>1 (revue #184) : le chemin IMEX avec substeps>1 est ATTEIGNABLE
+  //     (AmrRuntime::step boucle substeps fois sur les DEUX traitements) et la DECISION d'integration
+  //     est de SOUS-CYCLER le splitting IMEX (K=substeps pas de Lie sur dt/K), CONTRAIREMENT au moteur
+  //     compile-time AmrSystemCoupler::step qui ignore substeps sur sa branche IMEX. Ce test VERROUILLE
+  //     cette semantique : un run IMEX substeps=4 est (a) fini, (b) borne (densite ET mx/my/E directement),
+  //     (c) conservatif en masse, et SURTOUT (d) sa trajectoire DIFFERE d'un run IMEX substeps=1 (memes
+  //     eps/dt/macro-pas). La difference PROUVE que le sous-cyclage est INTENTIONNEL et REELLEMENT
+  //     execute (si substeps etait silencieusement ignore comme en compile-time, dmax serait nul).
+  // ============================================================================================
+  {
+    // substeps=1 : reference (un seul pas de Lie par macro-pas).
+    AmrRuntime rt1 = make_stiff_pair(N, L, eps, /*imex_stiff=*/true, rho, /*substeps=*/1);
+    const Real m0_1 = rt1.mass(0);
+    for (int s = 0; s < K; ++s) rt1.step(static_cast<Real>(dt));
+    const std::vector<double> d1 = rt1.density(0);
+    const double drift1 = std::fabs(static_cast<double>(rt1.mass(0) - m0_1)) /
+                          (std::fabs(static_cast<double>(m0_1)) + 1e-30);
+
+    // substeps=4 : meme eps/dt/macro-pas, mais le moteur SOUS-CYCLE le splitting IMEX en 4 pas de dt/4.
+    AmrRuntime rt4 = make_stiff_pair(N, L, eps, /*imex_stiff=*/true, rho, /*substeps=*/4);
+    const Real m0_4 = rt4.mass(0);
+    for (int s = 0; s < K; ++s) rt4.step(static_cast<Real>(dt));
+    const std::vector<double> d4 = rt4.density(0);
+    bool me4_finite = false;
+    const double me4_max = max_momentum_energy_coarse(rt4, 0, me4_finite);
+    const double drift4 = std::fabs(static_cast<double>(rt4.mass(0) - m0_4)) /
+                          (std::fabs(static_cast<double>(m0_4)) + 1e-30);
+
+    // (a)(b) le run sous-cycle reste fini + borne (backward-Euler stable a tout pas ; transport plus sur
+    //        en CFL sur dt/4) sur la densite ET sur le champ stiffene mx/my/E lu directement.
+    chk(all_finite(d4) && me4_finite, "imex_subcycled_s4_finite");
+    chk(maxabs(d4) < 1e3 && me4_max < 1e3, "imex_subcycled_s4_bounded");
+    // (c) conservation : la source raide laisse rho intacte -> masse conservee ~machine, comme substeps=1.
+    chk(drift4 < 1e-12, "imex_subcycled_s4_mass_conserved");
+    // (d) VERROU : substeps=4 DIFFERE de substeps=1 -> le sous-cyclage IMEX est intentionnel et execute.
+    const double d14 = dmax_field(d1, d4);
+    chk(d14 > 0.0, "imex_subcycled_s4_DIFFERS_from_s1 (sous-cyclage assume, pas ignore)");
+    std::printf("      IMEX substeps : s1 (derive=%.2e) vs s4 (max|mx,my,E|=%.3e, derive=%.2e), "
+                "dmax(rho)=%.3e\n", drift1, me4_max, drift4, d14);
   }
 
   // ============================================================================================
