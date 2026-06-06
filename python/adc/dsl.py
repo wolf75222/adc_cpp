@@ -2129,6 +2129,11 @@ class CoupledSource:
         self._reg_order = []  # ordre d'apparition des champs d'entree (-> ordre des registres)
         self._params = {}    # nom -> Param
         self._terms = []     # [(block, role_canonical, Expr)]
+        # Indices (dans self._terms) des termes EMIS PAR add_pair, par paire : [(idx_gain, idx_perte)].
+        # add_pair garantit que les deux termes portent EXACTEMENT la meme Expr evaluee, l'un +expr,
+        # l'autre -expr (Neg) -> echange conservatif par construction. verify_conservation=True les
+        # revisite a la compilation pour CONTROLER la propriete (et detecter une rupture cote add manuel).
+        self._pairs = []
 
     # --- construction symbolique ----------------------------------------------------------------
     def block(self, name):
@@ -2159,6 +2164,48 @@ class CoupledSource:
             raise ValueError("CoupledSource.add : expr= requis")
         e = expr if isinstance(expr, Expr) else _wrap(expr)  # _CsField / Var sont deja des Expr ; Param/scalaire -> _wrap
         self._terms.append((block, _role_canonical(role), e))
+        return self
+
+    def add_pair(self, block_a, block_b, role=None, expr=None):
+        """Ajoute un ECHANGE CONSERVATIF de la quantite @p role entre @p block_a et @p block_b, decrit
+        par UNE seule expression @p expr (Expr / _CsField / Param / nombre).
+
+        Convention de signe (a retenir) : @p block_a GAGNE +expr, @p block_b PERD -expr, sur la MEME
+        valeur evaluee de @p expr. Autrement dit :
+
+            d_t (block_a.role) += +expr
+            d_t (block_b.role) += -expr
+
+        C'est l'equivalent DSL des couplages NOMMES du C++ (add_collision / add_thermal_exchange), qui
+        calculent UNE valeur et l'appliquent avec deux signes opposes : la somme sur les deux blocs du
+        terme echange est nulle a chaque cellule et a chaque pas, donc la quantite totale sum(role) sur
+        (block_a, block_b) est CONSERVEE par construction -- independamment de la formule choisie, du dt
+        et de l'etat. Choisir @p expr >= 0 pour un transfert de B vers A (A gagne, B perd) ; un signe
+        de expr negatif inverse simplement le sens du transfert (la conservation tient dans tous les cas).
+
+        Contraste avec deux .add(...) ecrits a la main (+expr sur A, -expr sur B) : add_pair garantit que
+        les DEUX legs portent la MEME Expr (le second est exactement Neg du premier), alors qu'a la main
+        rien n'empeche d'ecrire par megarde deux formules legerement differentes -> conservation rompue
+        silencieusement. add_pair retire ce risque ; compile(verify_conservation=True) le controle aussi
+        pour les couplages ecrits a la main.
+
+        @p block_a et @p block_b doivent etre distincts. add_pair est purement ADDITIF par-dessus .add :
+        l'API manuelle reste disponible et inchangee. Renvoie self (chainable)."""
+        if role is None:
+            raise ValueError("CoupledSource.add_pair : role= requis")
+        if expr is None:
+            raise ValueError("CoupledSource.add_pair : expr= requis")
+        if block_a == block_b:
+            raise ValueError("CoupledSource.add_pair : block_a et block_b doivent etre distincts "
+                             "(recu %r pour les deux)" % (block_a,))
+        canon = _role_canonical(role)
+        gain = expr if isinstance(expr, Expr) else _wrap(expr)  # +expr (leg gagnant)
+        loss = Neg(gain)                                        # -expr : MEME sous-arbre, signe oppose
+        idx_gain = len(self._terms)
+        self._terms.append((block_a, canon, gain))
+        idx_loss = len(self._terms)
+        self._terms.append((block_b, canon, loss))
+        self._pairs.append((idx_gain, idx_loss))
         return self
 
     # --- codegen bytecode -----------------------------------------------------------------------
@@ -2209,11 +2256,66 @@ class CoupledSource:
             self._consts.append(float(value))
         return reg_index[key]
 
-    def compile(self, backend="production"):
+    @staticmethod
+    def _signed_key(expr):
+        """Cle STRUCTURELLE SIGNEE de @p expr : (signe, cle_du_corps), ou signe vaut +1 / -1 et
+        cle_du_corps est la cle structurelle (_key) de l'expression debarrassee de TOUS ses Neg de tete
+        (le signe replie chaque Neg pele). Deux expressions sont structurellement OPPOSEES ssi elles ont
+        la MEME cle_du_corps et des signes contraires (p.ex. E et Neg(E), ou -E et Neg(-E)=E). Peler
+        TOUS les Neg de tete rend la cle robuste a la paire +expr / -expr d'add_pair MEME quand expr est
+        deja un Neg (add_pair pose loss = Neg(gain), donc un Neg de plus). On ne normalise PAS l'algebre
+        interne (k*ne vs ne*k) : au pire un faux 'non conservatif' sur des formes ecrites differemment,
+        JAMAIS un faux 'conservatif' (le controle reste conservateur, donc sain)."""
+        sign = 1
+        while isinstance(expr, Neg):
+            sign = -sign
+            expr = expr.a
+        return (sign, _key(expr))
+
+    def _verify_conservation(self):
+        """Verifie que, role par role, la somme des termes de source s'ANNULE structurellement : chaque
+        contribution +E sur un bloc est compensee par une contribution -E (meme corps structurel) sur un
+        autre bloc. Leve ValueError EXPLICITE sinon. C'est exactement la propriete que garantit add_pair
+        par construction ; ce controle l'etend aux couplages ecrits a la main (deux .add) et detecte une
+        rupture (formules legerement differentes, signe oublie, terme orphelin). Purement symbolique
+        (aucune evaluation numerique) : meme cle structurelle que la CSE du codegen."""
+        from collections import Counter
+        per_role = {}
+        for (_block, role, expr) in self._terms:
+            sign, body = self._signed_key(expr)
+            # Compteur signe par corps structurel : +1 pour +E, -1 pour -E. Tout s'annule => conservatif.
+            c = per_role.setdefault(role, Counter())
+            c[body] += sign
+        offenders = []
+        for role in sorted(per_role):
+            for body, net in per_role[role].items():
+                if net != 0:
+                    offenders.append((role, body, net))
+        if offenders:
+            details = "; ".join(
+                "role '%s' : terme %r non compense (net=%+d)" % (role, body, net)
+                for (role, body, net) in offenders)
+            raise ValueError(
+                "CoupledSource.compile(verify_conservation=True) : couplage NON conservatif. "
+                "Chaque contribution +E sur un bloc doit etre compensee par -E (meme expression) "
+                "sur un autre bloc (utiliser add_pair pour le garantir). Termes non compenses : "
+                + details)
+
+    def compile(self, backend="production", verify_conservation=False):
         """Compile la source en CompiledCoupledSource (ABI plate bytecode). @p backend documente
-        l'intention (parite d'API avec le DSL des modeles) ; la numerique est identique (interprete C++)."""
+        l'intention (parite d'API avec le DSL des modeles) ; la numerique est identique (interprete C++).
+
+        @p verify_conservation (opt-in, defaut False) : controle SYMBOLIQUE que le couplage conserve
+        chaque quantite (role) -- la somme des termes de source d'un meme role s'annule structurellement
+        (chaque +E compense par un -E sur un autre bloc). add_pair satisfait cette propriete par
+        construction ; ce mode l'etend aux couplages ecrits a la main (deux .add) et leve une ValueError
+        EXPLICITE si un terme n'est pas compense (formule divergente, signe oublie, terme orphelin).
+        Off par defaut : un couplage volontairement NON conservatif (creation/destruction nette, p.ex.
+        ionisation creant une paire e/i) reste licite sans passer le flag."""
         if not self._terms:
             raise ValueError("CoupledSource.compile : aucun terme (.add(...) requis)")
+        if verify_conservation:
+            self._verify_conservation()
         # Table de registres : champs d'entree d'abord (ordre d'apparition), constantes ensuite.
         reg_index = {key: i for i, key in enumerate(self._reg_order)}
         self._consts = []
