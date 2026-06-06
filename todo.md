@@ -316,7 +316,10 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       ne marche PAS ; c'est bien le facteur GLOBAL 2pi/rhobar. POURQUOI Codex (cartesien-Schur) donne 0.035
       et pas 0.77 : (a) son runner OMET le facteur 2pi/rhobar (x2pi -> 0.22) ET (b) sa grille CARTESIENNE
       diffuse le bord d'anneau (gamma_raw polaire 0.155 ~ 4.4x son 0.035 a resolution comparable). Polaire
-      + 2pi/rhobar reproduit le papier ; pas un bug de physique. Diag reproductible : `/tmp/diag_polar_omega.py`.
+      + 2pi/rhobar reproduit le papier ; pas un bug de physique. ROBUSTE EN RESOLUTION : a n=192 les
+      trois modes tombent dans [0.87,0.97] (l=4 EXACT aux deux resolutions ; l=5 passe de -29% n=128 a
+      +27% n=192 quand sa fenetre se resserre -> le scatter est de la SENSIBILITE A LA FENETRE de fit,
+      PAS un deficit de physique). Diag reproductible : `/tmp/diag_polar_omega.py`.
 - [x] **M2 / M2b** : AMR sur le bord d'anneau (triple le taux a base egale) + Poisson multi-niveau.
 - [ ] Montee en resolution / convergence vers le taux analytique ; integration SAMRAI ulterieure.
 
