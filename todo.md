@@ -24,7 +24,7 @@ AMR (Gap 2) ; #133 foncteurs nvcc ; #134 krylov CL homogenes ; #135 fix device G
 
 **Merge session courante (post-coupure agents nuit) :** #167 A2 (helper `add_pair` conservatif DSL +
 verif opt-in) ; #170 C.1 (decoupe `amr_reflux_mf.hpp` en 5 sous-entetes + umbrella, verbatim, ctest 93/93) ;
-#169 A3 (average_down trailing covered cells AMR + tests discriminants). **En vol : #168 Polaire 2b.**
+#169 A3 (average_down trailing covered cells AMR + tests discriminants). #168 Polaire 2b MERGE.
 
 **PROCESS (nouveau, integrateur) :** chaque vague de PR passe une REVUE ADVERSARIALE (workflow multi-
 lentilles : correctness / bit-identity / test-rigor / hygiene-scope, chaque finding verifie par un
@@ -90,22 +90,33 @@ Release (ci.yml l.148-150) ; `python/CMakeLists.txt` (foreach) est l'enregistrem
 MPI/Kokkos). DETTE tracee : segfault de teardown sur profils polaires INSTABLES (PRE-EXISTANT, hors #176).
 
 **Vague 3 MERGEE :**
-- [x] **AMR capstone (vii) #184** : facade runtime honore time=imex par bloc (source implicite locale,
-  mirror du callback AmrImplicitSourceStepper) ; stiff stable, disable-and-fail (explicite -> non-fini) ;
-  all-explicit/mono-bloc bit-identique. MERGE-SAFE (3 findings reels NON-bloquants -> traites par #185).
+- [x] **AMR runtime IMEX par bloc #184** : la facade runtime honore time=imex par bloc (source implicite
+  locale, mirror du callback AmrImplicitSourceStepper) ; stiff stable, disable-and-fail (explicite ->
+  non-fini) ; all-explicit/mono-bloc bit-identique. (3 findings reels NON-bloquants -> traites par #185.)
+- [x] **IMEX-hardening #185** : DIVERGENCE IMEX substeps>1 documentee et assumee -- la facade runtime
+  SOUS-CYCLE l'IMEX (substeps=K : K applications de dt/K, sain et plus CFL-safe) alors que le moteur
+  compile-time `AmrSystemCoupler` IGNORE substeps sur sa branche IMEX (un seul pas de bdt). Les deux
+  trajectoires DIFFERENT pour substeps>1 ; ce n'est PAS un mirror bit-identique a substeps>1 (claim
+  "mirror fidele" corrige en commentaire). Test substeps>1 (DIFFERS load-bearing), mx/my/E observes
+  directement. ctest 99/99.
 
-**En vol :**
-- [~] **IMEX-hardening #185 (suite revue #184)** : assume la semantique IMEX SUBCYCLEE (substeps>1 : K pas
-  de dt/K ; sain, plus CFL-safe ; differe du moteur compile-time qui ignore substeps sur IMEX) ; corrige
-  le claim "mirror fidele" (commentaires) ; test substeps>1 (DIFFERS load-bearing) ; observe mx/my/E
-  directement. ctest 99/99. Verifie propre (prod comment-only, ASCII). A MERGER des Release verte.
+**CADRAGE AMR (etat reel, a NE PAS surestimer) : l'AMR multi-bloc runtime est PHASE 1 A HIERARCHIE
+FIGEE, complete** -- substeps/stride (#175), sources couplees (#179), IMEX local (#184/#185), sur UNE
+hierarchie commune NON adaptative (le regrid runtime est refuse pour multi-bloc). RESTENT ABSENTS :
+le **regrid union-tags** (hierarchie adaptative = Phase 2), le **DSL natif multi-bloc**, le **Schur
+GLOBAL sur AMR**. Ne PAS ecrire "capstone AMR complet".
+
+**En vol (vague parallele, branches isolees, juin 2026) :** P0 fix role-fallback AMR (mirror #181) ;
+design-only regrid union-tags ; test A4 flux radial ; fix segfault teardown polaire instable ; A.5
+commentaires physics/. (Plus : A.5 commentaires `amr/` deja en WIP local non commite, a preserver.)
 
 **=== RESTE A FAIRE (synthese todo + CODEBASE_AUDIT, juin 2026) ===**
 
-AUDIT : ~90% fait. Lots DONE : A.1 #172, A.2 #161, A.4 #159 ; B.1 NativeLoader #151, B.2 SystemFieldSolver
-#176 ; C.1 split #170, C.2 amr_coupler retire #164, C.3 layout #141, C.4 stride #140, C.5 decision multi-bloc
-(IMPLEMENTE #154/#175/#179/#184/#185) ; D.1 EllipticOperator #163, D.4 Schur device-clean 7/7 ; E.1 stride
-tests, E.2 roles #178/#181, E.3 PolarMesh erreurs #168/#178, E.5 CI auto-decouverte verifiee (find-glob).
+AUDIT (etat FACTUEL, pas de pourcentage). Lots DONE : A.1 #172, A.2 #161, A.4 #159 ; B.1 NativeLoader
+#151, B.2 SystemFieldSolver #176, B (SystemStepper) #180 ; C.1 split #170, C.2 amr_coupler retire #164,
+C.3 layout #141, C.4 stride #140, C.5 decision multi-bloc = PHASE 1 hierarchie FIGEE (#154/#175/#179/#184/
+#185) ; D.1 EllipticOperator #163, D.4 Schur device-clean 7/7 ; E.1 stride tests, E.2 roles #178/#181,
+E.3 PolarMesh erreurs #168/#178, E.5 CI auto-decouverte verifiee (find-glob). Lots NON faits : voir RESTE.
 
 RESTE (audit) :
 - [ ] **Lot B.3 SystemBlockStore** : derniere extraction de `system.cpp` (sp + ghosts + get/set state) ;
@@ -138,32 +149,19 @@ DETTE / DIFFERES (ne pas oublier) :
 - [ ] finding 8 (`fab(0)` sans garde local_size) au portage MPI ; `/(2*dx)->*cx` au dernier bit ; P7
   (implicit-total + params runtime DSL).
 
-**Prochaines etapes (sequencees, ETAT PRECIS post-scoping) :**
-1. **Schur PR6** (apres merge #168) : mesure diocotron-Schur sur le chemin polaire desormais dispo ;
-   isole l'effet TEMPOREL du Schur ; ne pretend PAS corriger l'erreur geometrique. Mesure + doc, pas une
-   modif coeur. Write-set : adc_cases / harnais + doc.
-2. **AMR capstone (cf. section 15, ROADMAP PRECIS)** : #154 a livre (ii) = facade 2 blocs explicites
-   fonctionnelle (hierarchie partagee, schemas differents, Poisson somme co-localisee, conservation par
-   bloc, MPI np=1/2/4). Le moteur compile-time `AmrSystemCoupler` sait DEJA substeps/stride/IMEX/sources
-   couplees ; c'est la FACADE RUNTIME `AmrRuntime` qui ne les honore pas encore. Reste, par ordre :
-   (iii) test validation Poisson-somme [trivial] ; **(iv) substeps/stride/evolve + step_cfl substeps-aware
-   [IMMEDIAT, deverrouille le multirate ; write-set amr_runtime.hpp + amr_system.cpp, AUCUN conflit]** ;
-   (v) DSL production multi-bloc [//] ; (vi) sources couplees runtime [//, A3 deja fait] ; (vii) IMEX
-   multi-bloc runtime [apres vi] ; (viii) regrid union-tags [Phase 2]. stride_due deja correct (#140).
-3. **Lot B restant** (apres merge #168, qui touche `system.cpp`) : SystemFieldSolver, SystemBlockStore,
-   SystemStepper -- extractions de `python/system.cpp` (NativeLoader deja extrait #151), bit-identiques.
-4. **Lot A.5** : convention de commentaires par dossier (CODE_DOCUMENTATION_CONVENTION.md), progressif,
-   dossier par dossier, sans churn automatique. Basse priorite.
-5. **A4** : couvert par le test C++/Python #168 (conservation masse avec flux radial interieur non nul) ;
-   ajouter au besoin un cas MMS polaire avec v_r != 0 dedie.
-6. **Hoffart re-drive** : build Kokkos PIC corrige (echec -fPIC du module Python sur aarch64), smoke ->
-   n=384 -> n=512 GH200. Le chemin polaire annulaire est maintenant dispo dans System (apres #168).
-7. **Perf (apres Polaire 2b, cf. #165)** : Poisson MG V-cycle domine 96-99.9% et REGRESSE sous Kokkos
-   OpenMP (parallel_for par lissage jusqu'aux grilles 2x2 ; le chemin serie garde n_cells>=4096, pas le
-   chemin Kokkos). UNE optim par PR, profil avant/apres. Pas avant que Polaire 2b soit merge.
-8. **BORD D'ANNEAU = discontinuite de densite transportee, PAS une paroi** : NE PAS refaire paroi-transport
-   dessus (physiquement faux) ; leviers valides = polaire / haut ordre / AMR. Differes : finding 8
-   (`fab(0)`) au portage MPI ; `/(2*dx)->*cx` au dernier bit ; P7 (implicit-total + params runtime DSL).
+**Prochaines etapes :** voir la section "RESTE A FAIRE" ci-dessus (source de verite unique). Invariants
+verrouilles a NE PAS violer :
+- **Schur PR6 = CARTESIEN seulement** (mesure de l'effet TEMPOREL sur un fluide magnetise raide). Le
+  chemin POLAIRE est EXPLICITE-ONLY : le stage Schur n'y est PAS branche. NE PAS pretendre que "Schur
+  polaire" fonctionne ; le brancher serait une feature ulterieure. (Le PAPIER Hoffart, lui, fait le
+  systeme Euler-Poisson COMPLET raide avec son complement de Schur ; la pile Schur d'adc #118-128 en est
+  l'analogue FV -- reproduire la METHODE du papier = un chantier separe, pas Schur PR6.)
+- **BORD D'ANNEAU = discontinuite de densite TRANSPORTEE, PAS une paroi.** NE PAS poser de "paroi" de
+  transport dessus (physiquement faux) ; leviers valides = polaire / haut ordre / AMR.
+- **Perf : AUCUNE optimisation sans profil AVANT/APRES.** Cible identifiee #165 (Poisson MG small-box
+  sous Kokkos), une optim par PR.
+- **finding 8 (`fab(0)`)** : a faire AVEC le gather/scatter du portage MPI, PAS en demi-fix (un demi-fix
+  transforme un crash franc en faux-silencieux). `/(2*dx)->*cx` : NON bit-identique, dernier bit. P7 differe.
 
 ## 0. API publique RECOMMANDEE (point d'entree utilisateur)
 
