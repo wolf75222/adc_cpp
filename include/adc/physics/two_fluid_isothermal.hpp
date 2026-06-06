@@ -1,11 +1,10 @@
 #pragma once
 
-// DEPRECATED : noyau lineaire deux-fluides isotherme (TwoFluidLinear), brique du schema
-// AP deux-fluides. Aucun #include dans le coeur, les tests ou les bindings Python.
-// L'integrateur AP deux-fluides a quitte le coeur et vit dans adc_cases/two_fluid_ap/
-// (compile a la volee contre les en-tetes generiques). Conservee car documentee comme
-// brique (docs/ARCHITECTURE.md). A retirer apres confirmation que two_fluid_ap n'en
-// depend plus.
+// Noyau lineaire deux-fluides isotherme (TwoFluidLinear). Aucun #include dans le coeur,
+// les tests ou les bindings Python. L'integrateur AP deux-fluides vit dans
+// adc_cases/two_fluid_ap/ mais reimplemente son propre solveur (TwoFluidAP2D) sans
+// inclure ce fichier. Conservee comme brique de reference analytique pour la dispersion
+// electrostatique deux-fluides (docs/ARCHITECTURE.md).
 
 #include <adc/core/types.hpp>
 
@@ -15,6 +14,10 @@ namespace adc {
 
 /**
  * Deux-fluides isotherme electrostatique, mode lineaire (un Fourier k).
+ *
+ * Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) ;
+ * conservee comme exemple analytique du schema IMEX deux-especes et pour verifier
+ * les branches de dispersion electrostatique (w_fast Langmuir, w_slow ion-acoustique).
  *
  * Generalise LangmuirMode aux deux especes mobiles, electrons (omega_pe) et ions
  * (omega_pi), avec pressions isothermes (vitesses du son c_se, c_si). C'est le noyau

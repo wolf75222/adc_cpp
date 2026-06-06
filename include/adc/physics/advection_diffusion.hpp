@@ -1,9 +1,9 @@
 #pragma once
 
-// DEPRECATED : brique modele advection-diffusion scalaire (AdvectionDiffusion). Aucun
-// #include dans le coeur, les tests ou les bindings Python ; non instanciee. Conservee
-// car documentee comme brique de physique d'exemple (docs/ARCHITECTURE.md). A retirer
-// si aucun scenario (adc_cases) ne l'adopte.
+// Brique modele advection-diffusion scalaire (AdvectionDiffusion). Utilisee dans les
+// tests C++ du coeur (tests/test_weno5_ssprk3.cpp) comme modele de reference pour
+// WENO5/SSPRK3, mais non utilisee par adc_cases. Conservee comme brique de validation
+// et brique de physique d'exemple (docs/ARCHITECTURE.md).
 
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
@@ -14,6 +14,9 @@ namespace adc {
 
 /**
  * Advection-diffusion scalaire : d_t u + a . grad u = nu Lap u.
+ *
+ * Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) ;
+ * conservee comme exemple et comme modele de reference pour tests/test_weno5_ssprk3.cpp.
  *
  * Illustre la remarque "la diffusion, c'est comme un flux de plus" : on garde le
  * PhysicalModel d'advection et on ajoute la seule methode diffusivity(). Le terme

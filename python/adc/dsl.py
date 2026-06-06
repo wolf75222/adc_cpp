@@ -25,6 +25,13 @@ Cible (target=) :
 Ergonomie :
   - m.compile() auto-detecte les includes adc et cache le .so par (model_hash, abi_key) (#103).
   - Les roles physiques (gamma, n_aux, B_z, T_e) sont preserves et transmis au C++.
+
+Couplage inter-especes (#131, #167) :
+  - CoupledSource decrit un echange entre blocs par formules DSL (source croisee arbitraire).
+  - CoupledSource.add_pair(block_a, block_b, role, expr) garantit la conservation par
+    construction (+expr sur A, -expr sur B, MEME sous-arbre) ; equivalent DSL de
+    add_collision / add_thermal_exchange cote C++. compile(verify_conservation=True) controle
+    la propriete symboliquement sur l'ensemble des termes (add et add_pair).
 """
 import numpy as np
 

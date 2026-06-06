@@ -130,9 +130,9 @@ Ces invariants sont les "rites" du code : si un fichier les casse, il devient su
 | `source.hpp` | `NoSource`, `PotentialForce`, `GravityForce` | Sources locales par cellule. | Representer Schur/global implicite. | OK. Sources couplees doivent rester hors de ce fichier. |
 | `elliptic.hpp` | `ChargeDensity`, `BackgroundDensity`, `GravityCoupling` | RHS elliptique local par bloc. | Modifier l'operateur elliptique. | OK. Important pour clarifier Schur : RHS seulement. |
 | `composite.hpp` | `CompositeModel<H,S,E>` | Compose transport/source/elliptic. | Autoriser combinaisons incoherentes Vars/Flux. | Bon grain d'abstraction. |
-| `advection_diffusion.hpp` | `AdvectionDiffusion` | Modele test / transport-diffusion. | Devenir API utilisateur principale. | A classer comme exemple/validation si peu utilise. |
-| `langmuir.hpp` | `LangmuirMode` | Modele analytique/test plasma. | Polluer API publique si scenario trop specifique. | Potentiellement "physics test brick"; documenter usage. |
-| `two_fluid_isothermal.hpp` | `TwoFluidLinear` | Brique lineaire specifique deux-fluides. | Redevenir `TwoFluidAPSolver`. | A verifier : si seulement test, deplacer/documenter comme validation. |
+| `advection_diffusion.hpp` | `AdvectionDiffusion` | Modele de reference transport-diffusion. | Devenir API utilisateur principale. | Brique de TEST/VALIDATION (non utilisee par adc_cases) ; utilisee dans `tests/test_weno5_ssprk3.cpp`. Classee exemple/validation, marquee dans le doc-comment. |
+| `langmuir.hpp` | `LangmuirMode` | Noyau 0D IMEX mode de Langmuir. | Polluer API publique si scenario trop specifique. | Brique de TEST/VALIDATION (non utilisee par adc_cases) ; `two_fluid_ap/` est autonome (TwoFluidAP2D). Marquee dans le doc-comment. |
+| `two_fluid_isothermal.hpp` | `TwoFluidLinear` | Noyau IMEX deux-fluides isotherme. | -- | Brique de TEST/VALIDATION (non utilisee par adc_cases) ; meme situation que LangmuirMode. Marquee dans le doc-comment. |
 | `bricks.hpp` | include agregateur | Convenience header. | Porter logique. | OK. |
 
 ### `include/adc/numerics`
@@ -368,7 +368,9 @@ runtime.
 | `amr_multilevel.hpp`, `amr_reflux.hpp` | Moteurs AMR historiques simples. | Classer legacy/test ou fusionner documentation avec `amr_reflux_mf`. |
 | `SpectralCoupler` | Variante mono-modele utile mais secondaire. | Garder si tests, sinon documenter comme API C++ avancee. |
 | `DynamicModel` | Prototype CPU hote. | Garder, mais ne pas mettre dans chemin principal. |
-| `AdvectionDiffusion`, `LangmuirMode`, `TwoFluidLinear` | Physiques potentiellement de test. | Si non utilisees par `adc_cases`, les marquer comme exemples/validation ou les sortir. |
+| `AdvectionDiffusion` | Brique de TEST/VALIDATION : utilisee dans `tests/test_weno5_ssprk3.cpp` (modele de reference WENO5/SSPRK3) mais NON utilisee par `adc_cases` (verifie 2026-06-06). | Conserver comme exemple et brique de test coeur ; marquee dans le doc-comment. |
+| `LangmuirMode` | Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) : `adc_cases/two_fluid_ap/` reimplemente `TwoFluidAP2D` sans inclure ce fichier. | Conserver comme reference analytique IMEX ; marquee dans le doc-comment. |
+| `TwoFluidLinear` | Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) : meme situation que `LangmuirMode` -- `two_fluid_ap/` est autonome. | Conserver comme reference analytique deux-especes ; marquee dans le doc-comment. |
 
 ## 7. Ce qui est bien abstrait
 

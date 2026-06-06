@@ -1,11 +1,10 @@
 #pragma once
 
-// DEPRECATED : noyau 0D du mode de Langmuir linearise (LangmuirMode), brique du schema
-// AP deux-fluides. Aucun #include dans le coeur, les tests ou les bindings Python.
-// L'integrateur AP deux-fluides a quitte le coeur et vit dans adc_cases/two_fluid_ap/
-// (compile a la volee contre les en-tetes generiques). Conservee car documentee comme
-// brique (docs/ARCHITECTURE.md). A retirer apres confirmation que two_fluid_ap n'en
-// depend plus.
+// Noyau 0D du mode de Langmuir linearise (LangmuirMode). Aucun #include dans le coeur,
+// les tests ou les bindings Python. L'integrateur AP deux-fluides vit dans
+// adc_cases/two_fluid_ap/ mais reimplemente son propre solveur (TwoFluidAP2D) sans
+// inclure ce fichier. Conservee comme brique de reference analytique IMEX
+// (docs/ARCHITECTURE.md).
 
 #include <adc/core/types.hpp>
 
@@ -15,6 +14,9 @@ namespace adc {
 
 /**
  * Mode de Langmuir linearise : noyau 0D du schema asymptotic-preserving deux-fluides.
+ *
+ * Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) ;
+ * conservee comme exemple analytique du schema IMEX (explicit_step / implicit_solve).
  *
  * Regime raide d'un fluide compressible magnetise couple a un champ self-consistant,
  * papier Hoffart arXiv:2510.11808. Deux-fluides
