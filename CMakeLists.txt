@@ -12,6 +12,10 @@ option(ADC_BUILD_TESTS    "Build tests"    ON)
 # Le coeur reste header-only ; le module compile la facade runtime System (python/system.cpp)
 # + les bindings. adc_cases ne contient QUE du code Python qui importe ce module.
 option(ADC_BUILD_PYTHON   "Build the pybind11 Python module `adc`" OFF)
+# Harnais de PROFILAGE (mesure seule, ZERO optimisation). HORS du build par defaut : le CI ne
+# passe JAMAIS ce drapeau, donc bench/ n'est ni configure ni compile en CI. Active a la main par
+# -DADC_BUILD_BENCH=ON pour mesurer le cout par phase d'un pas (cf. bench/, docs/PROFILE_RESULTS.md).
+option(ADC_BUILD_BENCH    "Build the standalone profiling harness (bench/, OFF by default)" OFF)
 # Backends de dispatch on-node : KOKKOS est le chemin recommande (il couvre OpenMP CPU ET
 # GPU CUDA/HIP via un seul code portable). ADC_USE_OPENMP (backend OpenMP autonome) est
 # DEPRECIE : prefere ADC_USE_KOKKOS (Kokkos avec device OPENMP donne le meme parallelisme CPU
@@ -137,6 +141,13 @@ if(ADC_BUILD_TESTS OR ADC_BUILD_PYTHON)
 endif()
 if(ADC_BUILD_TESTS)
   add_subdirectory(tests)
+endif()
+
+# Harnais de profilage (mesure seule) : sous-repertoire HORS du build par defaut (OFF). N'ajoute
+# AUCUNE cible au build standard ni au CI ; lie adc::adc et herite donc du backend actif (Kokkos /
+# MPI) sans find_package redondant.
+if(ADC_BUILD_BENCH)
+  add_subdirectory(bench)
 endif()
 
 # Module Python `adc` (bindings de la lib). Compile la facade runtime System + pybind11.
