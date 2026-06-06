@@ -239,7 +239,7 @@ PYBIND11_MODULE(_adc, m) {
       .def("add_block", &AmrSystem::add_block, py::arg("name"), py::arg("model"),
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("recon") = "conservative", py::arg("time") = "explicit",
-           py::arg("substeps") = 1)
+           py::arg("substeps") = 1, py::arg("stride") = 1)
       // Bloc NATIF AMR charge depuis un loader .so genere par le DSL (backend "production",
       // target="amr_system") : le .so inline add_compiled_model(AmrSystem&) -> bloc natif sur la
       // hierarchie AMR (reflux, regrid), cle d'ABI verifiee. cf. AmrSystem::add_native_block. PAS de

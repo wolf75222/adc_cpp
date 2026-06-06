@@ -33,6 +33,7 @@ struct AmrSystem::Impl {
     bool recon_prim = false;        // recon == "primitive"
     bool imex = false;              // time == "imex" : source raide implicite
     int substeps = 1;
+    int stride = 1;                 // cadence hold-then-catch-up (multi-blocs ; cf. AmrRuntimeBlock)
     double gamma = 1.4;
     // Chemin compile MONO-BLOC : builder type-erase (AmrCompiledHooks d'un AmrCouplerMP concret),
     // invoque au build paresseux. Le multi-blocs compile (DSL production) est une PR ulterieure.
@@ -150,7 +151,7 @@ struct AmrSystem::Impl {
       detail::dispatch_model(b.spec, [&](auto m) {
         rblocks.push_back(detail::dispatch_amr_block(m, b.limiter, b.riemann, S, b.name, b.density,
                                                      b.has_density, b.gamma, b.substeps,
-                                                     b.recon_prim, b.imex));
+                                                     b.recon_prim, b.imex, b.stride));
       });
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
@@ -197,11 +198,13 @@ AmrSystem& AmrSystem::operator=(AmrSystem&&) noexcept = default;
 
 void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
                           const std::string& limiter, const std::string& riemann,
-                          const std::string& recon, const std::string& time, int substeps) {
+                          const std::string& recon, const std::string& time, int substeps,
+                          int stride) {
   if (p_->built)
     throw std::runtime_error("AmrSystem::add_block : le systeme est deja construit (appeler "
                              "add_block avant tout step/mass/density)");
   if (substeps < 1) throw std::runtime_error("AmrSystem::add_block : substeps >= 1");
+  if (stride < 1) throw std::runtime_error("AmrSystem::add_block : stride >= 1");
   if (time != "explicit" && time != "imex")
     throw std::runtime_error("AmrSystem : time '" + time +
                              "' inconnu sur AMR (explicit|imex)");
@@ -236,6 +239,7 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   b.recon_prim = (recon == "primitive");
   b.imex = (time == "imex");
   b.substeps = substeps;
+  b.stride = stride;
   b.gamma = model.gamma;  // indice adiabatique du bloc (Euler), lu par coupler_write_coarse
   if (p_->blocks.empty()) p_->gamma = model.gamma;  // compat : gamma du 1er bloc (chemin mono-bloc)
   p_->blocks.push_back(std::move(b));
@@ -418,13 +422,23 @@ void AmrSystem::advance(double dt, int nsteps) {
 }
 double AmrSystem::step_cfl(double cfl) {
   p_->ensure_built();
+  const double hx = p_->cfg.L / p_->cfg.n;  // pas d'espace du grossier (dx_coarse)
   if (p_->runtime) {
-    const double h = cfl * (p_->cfg.L / p_->cfg.n) / static_cast<double>(p_->runtime->max_speed());
-    p_->runtime->step(static_cast<Real>(h));
-    p_->t += h;
-    return h;
+    // MULTI-BLOCS : pas CFL SUBSTEPS/STRIDE-AWARE, mirroir EXACT de System::step_cfl. Un bloc de
+    // cadence stride avance d'un pas effectif stride*dt en substeps sous-pas, donc chaque sous-pas
+    // vaut stride*dt/substeps ; la condition de stabilite par sous-pas donne le dt par bloc
+    // dt_b = cfl*h*substeps_b/(stride_b*w_b), et le dt GLOBAL est le min sur les blocs (le plus
+    // contraignant). AmrRuntime::step_cfl porte la formule (les w_b/substeps/stride y vivent), puis
+    // avance d'un step(dt) qui re-applique stride et substeps. RETRO-COMPAT : avec substeps=1 et
+    // stride=1 partout, dt = cfl*h*min_b(1/w_b) = cfl*h/w_max, identique a l'ancienne formule
+    // (max_speed = max_b w_b) -> facade multi-blocs substeps=1/stride=1 bit-identique.
+    const double dt = static_cast<double>(
+        p_->runtime->step_cfl(static_cast<Real>(cfl), static_cast<Real>(hx)));
+    p_->t += dt;
+    return dt;
   }
-  const double h = cfl * (p_->cfg.L / p_->cfg.n) / p_->max_speed_fn();
+  // MONO-BLOC (AmrCouplerMP, intouche) : formule historique dt = cfl*h/w_max (bit-identique).
+  const double h = cfl * hx / p_->max_speed_fn();
   p_->step_fn(h);
   p_->t += h;
   return h;

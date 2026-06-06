@@ -292,6 +292,15 @@ add_executable(test_amr_system_twoblock test_amr_system_twoblock.cpp
 target_link_libraries(test_amr_system_twoblock PRIVATE adc::adc ${CMAKE_DL_LIBS})
 add_test(NAME test_amr_system_twoblock COMMAND test_amr_system_twoblock)
 
+# --- AMR MULTI-BLOCS MULTIRATE (capstone iv) : substeps + stride PAR BLOC honores par AmrRuntime ---
+# substeps reellement exerces (A=4 differe de A=1, etat fini, masse conservee), stride hold-then-catch-up
+# (bloc lent tenu au mac0, rattrape au mac1, Poisson somme actif), step_cfl substeps/stride-aware
+# (dt = cfl*h*min_b(substeps_b/(stride_b*w_b))), mono-bloc bit-identique. Compile python/amr_system.cpp.
+add_executable(test_amr_multiblock_substeps test_amr_multiblock_substeps.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+target_link_libraries(test_amr_multiblock_substeps PRIVATE adc::adc ${CMAKE_DL_LIBS})
+add_test(NAME test_amr_multiblock_substeps COMMAND test_amr_multiblock_substeps)
+
 # --- runtime System : B_z partage cable de bout en bout (ensure_aux_width + set_magnetic_field) ---
 add_executable(test_aux_runtime_bz test_aux_runtime_bz.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)

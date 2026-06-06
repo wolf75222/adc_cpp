@@ -15,8 +15,11 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 
+#include <algorithm>  // std::max (pas CFL substeps/stride-aware)
+#include <cmath>      // std::isfinite (rejet d'un dt degenere)
 #include <cstddef>
 #include <functional>
+#include <limits>     // std::numeric_limits (dt initial = +inf, min sur les blocs)
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -43,11 +46,12 @@
 ///    coarse->fine (coupler_inject_aux_mb), exactement comme AmrSystemCoupler ;
 ///  - conservation PAR BLOC (reflux + average_down du moteur AMR, dans la fermeture advance).
 ///
-/// PERIMETRE PR1 (premiere PR du capstone). On porte UNIQUEMENT des blocs EXPLICITES a schemas
-/// spatiaux potentiellement DIFFERENTS sur la hierarchie FIGEE (pas de regrid : AmrSystemCoupler
-/// n'en a pas). Le multirate (stride / evolve), les sources couplees, l'IMEX multi-bloc et le
-/// regrid d'union des tags sont des PR ULTERIEURES. Le facade runtime (AmrSystem) REFUSE
-/// explicitement multi-blocs + regrid_every > 0 tant que le regrid d'union n'existe pas.
+/// PERIMETRE (capstone). On porte des blocs EXPLICITES a schemas spatiaux potentiellement DIFFERENTS
+/// sur la hierarchie FIGEE (pas de regrid : AmrSystemCoupler n'en a pas), avec le MULTIRATE par bloc :
+/// substeps (sous-pas explicites) et stride (cadence hold-then-catch-up), honores dans step() en
+/// mirroir de AmrSystemCoupler::step (#140). Les sources couplees, l'IMEX multi-bloc et le regrid
+/// d'union des tags restent des PR ULTERIEURES. Le facade runtime (AmrSystem) REFUSE explicitement
+/// multi-blocs + regrid_every > 0 tant que le regrid d'union n'existe pas.
 
 namespace adc {
 
@@ -60,7 +64,19 @@ struct AmrRuntimeBlock {
   std::string name;
   int ncomp = 1;
   double gamma = 1.4;
+  /// Sous-pas EXPLICITES du bloc dans SON macro-pas effectif : le pas effectif (stride * dt) est
+  /// decoupe en substeps morceaux egaux et chaque morceau est avance par UN advance_amr (cf.
+  /// AmrRuntime::step). substeps=1 => un seul advance_amr de tout le pas effectif (bit-identique).
   int substeps = 1;
+  /// Cadence HOLD-THEN-CATCH-UP du bloc (multirate). stride=1 (defaut) : le bloc avance a CHAQUE
+  /// macro-pas (bit-identique). stride=M>1 : le bloc est TENU aux macro-pas 0..M-2 (non avance) puis
+  /// RATTRAPE au macro-pas M-1, ou (macro_step+1)%M==0, d'un pas effectif M*dt. Memes semantiques que
+  /// block_stride_v / AmrSystemCoupler::step (#140). L'INVARIANT du rattrapage en FIN de fenetre :
+  /// au macro-pas k le temps systeme est (k+1)*dt et le bloc qui rattrape a alors cumule (k+1)*dt, il
+  /// reste donc temporellement COHERENT avec les blocs rapides (jamais "dans le futur"), ce qui garde
+  /// le couplage Poisson (RHS somme) sense : un bloc tenu y contribue avec son etat FIGE (sa derniere
+  /// avance), pas avec un etat anticipe qui fausserait q_b n_b dans la somme.
+  int stride = 1;
   /// Largeur du canal aux LUE par le modele du bloc (aux_comps<Model>() ; >= kAuxBaseComps). Le
   /// canal aux PARTAGE par niveau est dimensionne au MAX de cette largeur sur tous les blocs, pour
   /// qu'un bloc lisant un champ extra (B_z, T_e ; n_aux > 3) ne lise jamais hors borne.
@@ -72,10 +88,13 @@ struct AmrRuntimeBlock {
   /// dans un std::function, et le ctor du moteur a besoin d'une adresse stable pour les fermetures).
   std::shared_ptr<std::vector<AmrLevelMP>> levels;
 
-  /// Avance le bloc d'un macro-pas dt : transport AMR (Berger-Oliger + reflux + average_down
-  /// conservatifs) sur la pile de niveaux du bloc, avec SON schema spatial (Limiter, Flux) et SES
-  /// sous-pas. Capture advance_amr<Limiter, Flux> sur le Model concret. La signature passe le
-  /// domaine de base + periodicite + politique d'ownership grossier, recables par le moteur.
+  /// Avance le bloc d'UN sous-pas de taille dt : transport AMR (Berger-Oliger + reflux +
+  /// average_down conservatifs) sur la pile de niveaux du bloc, avec SON schema spatial (Limiter,
+  /// Flux). Capture advance_amr<Limiter, Flux> sur le Model concret. La boucle de sous-pas et la
+  /// cadence stride sont portees par AmrRuntime::step (pendant runtime de AmrSystemCoupler::step) :
+  /// la fermeture fait UN advance_amr, le moteur l'appelle substeps fois (dt = pas effectif/substeps).
+  /// La signature passe le domaine de base + periodicite + politique d'ownership grossier, recables
+  /// par le moteur.
   std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> advance;
 
   /// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs_b(U_b) sur le grossier.
@@ -207,16 +226,56 @@ class AmrRuntime {
                                     /*replicated_parent=*/(k == 1) && replicated_coarse_);
   }
 
-  /// Avance le systeme d'un pas dt. PR1 : tous les blocs sont EXPLICITES. On resout d'abord les
-  /// champs (Poisson somme), puis chaque bloc avance sur SA pile de niveaux avec SON schema (la
-  /// fermeture advance capture advance_amr<Limiter, Flux>). Reproduit AmrSystemCoupler::step pour
-  /// le cas tout-explicite, sans le filtre stride (multirate = PR ulterieure : stride == 1 ici).
+  /// Avance le systeme d'un macro-pas dt. Tous les blocs sont EXPLICITES (l'IMEX multi-bloc est une
+  /// PR ulterieure). On resout d'abord les champs (Poisson somme co-localise, UNE fois par macro-pas
+  /// : cadence OncePerStep), puis chaque bloc avance sur SA pile de niveaux avec SON schema, en
+  /// honorant sa cadence stride et ses substeps. Pendant runtime de AmrSystemCoupler::step (cas
+  /// tout-explicite, OncePerStep) : la fermeture advance fait UN advance_amr, le moteur porte ici la
+  /// boucle de sous-pas et le filtre stride (la version compile-time les a dans block_substeps_v /
+  /// block_stride_v).
   void step(Real dt) {
     solve_count_ = 0;
+    // Poisson de systeme resolu UNE fois sur l'etat courant (cadence OncePerStep). Un bloc TENU
+    // (stride > 1, hors fin de fenetre) y a contribue avec son etat FIGE depuis sa derniere avance :
+    // couplage lache assume du multirate, exactement comme System::step / AmrSystemCoupler en
+    // OncePerStep. phi reste gele pendant l'avance des blocs (pas de re-solve par sous-pas ici).
     solve_fields();
-    for (auto& b : blocks_)
-      b.advance(*b.levels, dom_, dt, base_per_, replicated_coarse_);
+    for (auto& b : blocks_) {
+      // Cadence HOLD-THEN-CATCH-UP (cf. AmrRuntimeBlock::stride, #140) : le bloc est TENU tant que
+      // (macro_step_+1) % stride != 0, puis RATTRAPE en fin de fenetre d'un pas effectif stride*dt.
+      // Le rattrapage en FIN de fenetre garde le bloc temporellement coherent avec les rapides au
+      // point de couplage (jamais dans le futur). stride=1 : toujours vrai -> chaque pas, bit-identique.
+      if ((macro_step_ + 1) % b.stride != 0) continue;
+      const Real bdt = dt * static_cast<Real>(b.stride);  // catch-up : pas effectif stride*dt
+      // substeps sous-pas EXPLICITES egaux de bdt/substeps. La fermeture advance fait UN advance_amr
+      // par appel ; substeps=1 -> un seul advance_amr de bdt (bit-identique au cas mono-substep).
+      const Real h = bdt / static_cast<Real>(b.substeps);
+      for (int s = 0; s < b.substeps; ++s)
+        b.advance(*b.levels, dom_, h, base_per_, replicated_coarse_);
+    }
     ++macro_step_;
+  }
+
+  /// Pas CFL substeps/stride-aware (pendant runtime de System::step_cfl, mirroir EXACT de sa
+  /// formule). Un bloc de cadence stride avance d'un pas effectif stride*dt en substeps sous-pas,
+  /// donc chaque sous-pas vaut stride*dt/substeps ; la condition de stabilite par sous-pas
+  /// stride*dt/substeps <= cfl*h/w_b donne dt <= cfl*h*substeps_b/(stride_b*w_b). Le dt GLOBAL est le
+  /// min sur les blocs (le plus contraignant). On resout d'abord les champs (max_speed par bloc exige
+  /// l'aux a jour), on calcule dt, puis on avance d'un step(dt). @p h = pas d'espace du grossier
+  /// (dx_coarse). Renvoie le dt utilise. Mono-bloc (un seul bloc, stride=1) : si w_b est le seul
+  /// contraignant, dt = cfl*h*substeps/w (identique a System::step_cfl mono-bloc).
+  Real step_cfl(Real cfl, Real h) {
+    solve_fields();  // aux a jour : max_speed de chaque bloc le lit sur le grossier courant
+    Real dt = std::numeric_limits<Real>::infinity();
+    for (auto& b : blocks_) {
+      const Real w = std::max(b.max_speed((*b.levels)[0].U, aux_[0]), Real(1e-30));
+      const Real dt_b = cfl * h * static_cast<Real>(b.substeps) /
+                        (static_cast<Real>(b.stride) * w);
+      if (dt_b < dt) dt = dt_b;
+    }
+    if (!std::isfinite(dt)) dt = cfl * h / Real(1e-30);  // garde-fou (aucun bloc : impossible ici)
+    step(dt);
+    return dt;
   }
 
   /// Potentiel grossier (composante 0 de l'aux partage) en champ n*n row-major. Resout les champs

@@ -187,12 +187,15 @@ inline SharedAmrLayout make_shared_amr_layout(const AmrBuildParams& bp) {
 /// pose la densite initiale (composante 0) + injection coarse->fine, et CAPTURE le schema concret
 /// dans les fermetures (advance via advance_amr<Limiter, Flux>, add_elliptic_rhs via PoissonRhs).
 /// Le noyau reste COMPILE ; seule la liste de blocs est type-erasee (calque AMR de make_block /
-/// PoissonRhs cote System plat). @p density (vide = grossier a zero), @p substeps sous-pas du bloc.
+/// PoissonRhs cote System plat). @p density (vide = grossier a zero), @p substeps sous-pas du bloc,
+/// @p stride cadence hold-then-catch-up du bloc (1 = chaque macro-pas). substeps et stride sont
+/// portes par AmrRuntime::step (la fermeture advance ne fait qu'UN advance_amr) : ils ne touchent
+/// donc PAS la capture du schema, juste les champs substeps/stride de l'AmrRuntimeBlock.
 template <class Model, class Limiter, class Flux>
 AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
                                 const std::string& name, const std::vector<double>& density,
                                 bool has_density, double gamma, int substeps, bool recon_prim,
-                                bool imex) {
+                                bool imex, int stride = 1) {
   const int nc = Model::n_vars;
   const int ng = Limiter::n_ghost;  // stencil du limiteur (parite du schema, comme build_amr_compiled)
   const int nlev = S.nlev();
@@ -215,22 +218,23 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
   b.ncomp = nc;
   b.gamma = gamma;
   b.substeps = substeps;
+  b.stride = stride;
   b.aux_ncomp = aux_comps<Model>();  // largeur aux LUE par le modele (B_z/T_e -> > kAuxBaseComps)
   b.levels = levels;
 
-  const int sub = substeps;
   const bool rprim = recon_prim;
   const bool bimex = imex;
-  // advance : transport AMR du bloc (Berger-Oliger + reflux + average_down conservatifs) avec SON
-  // schema (Limiter, Flux) sur SA pile de niveaux. sub sous-pas de dt/sub. imex => source raide
-  // implicite via le drapeau d'advance_amr (transport explicite porte par le reflux). FONCTEUR
-  // implicite : advance_amr<Limiter, Flux> est une fonction template nommee (pas de lambda etendue
-  // cross-TU) ; on la capture dans une std::function depuis CETTE TU (recette device-clean #64/#97).
-  b.advance = [model, sub, rprim, bimex](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
-                                         Periodicity per, bool repl) {
-    const Real h = dt / static_cast<Real>(sub);
-    for (int s = 0; s < sub; ++s)
-      advance_amr<Limiter, Flux>(model, L, dom, h, per, repl, rprim, bimex);
+  // advance : UN sous-pas de transport AMR du bloc (Berger-Oliger + reflux + average_down
+  // conservatifs) de taille dt, avec SON schema (Limiter, Flux) sur SA pile de niveaux. imex =>
+  // source raide implicite via le drapeau d'advance_amr (transport explicite porte par le reflux).
+  // La boucle de sous-pas (substeps) et la cadence stride sont PORTEES par AmrRuntime::step, pas par
+  // cette fermeture : ainsi la semantique multirate est UNE seule fois dans le moteur (mirroir de
+  // AmrSystemCoupler::step) et reste neutralisable / testable la-bas. FONCTEUR implicite :
+  // advance_amr<Limiter, Flux> est une fonction template nommee (pas de lambda etendue cross-TU) ;
+  // on la capture dans une std::function depuis CETTE TU (recette device-clean #64/#97).
+  b.advance = [model, rprim, bimex](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
+                                    Periodicity per, bool repl) {
+    advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, bimex);
   };
   // contribution du bloc au RHS de Poisson SOMME : rhs += elliptic_rhs(U) sur le grossier (boucle
   // hote pure). MEME foncteur que System plat (make_poisson_rhs -> detail::PoissonRhs) -> chaque
@@ -269,20 +273,21 @@ template <class Model>
 AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const std::string& riem,
                                    const SharedAmrLayout& S, const std::string& name,
                                    const std::vector<double>& density, bool has_density,
-                                   double gamma, int substeps, bool recon_prim, bool imex) {
+                                   double gamma, int substeps, bool recon_prim, bool imex,
+                                   int stride = 1) {
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                          substeps, recon_prim, imex);
+                                                          substeps, recon_prim, imex, stride);
     if (lim == "minmod")
       return build_amr_block<Model, Minmod, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex);
+                                                        substeps, recon_prim, imex, stride);
     if (lim == "vanleer")
       return build_amr_block<Model, VanLeer, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                         substeps, recon_prim, imex);
+                                                         substeps, recon_prim, imex, stride);
     if (lim == "weno5")
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex);
+                                                       substeps, recon_prim, imex, stride);
     throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
   }
   if (riem == "hllc") {
@@ -290,13 +295,13 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex);
+                                                        substeps, recon_prim, imex, stride);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex);
+                                                      substeps, recon_prim, imex, stride);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex);
+                                                       substeps, recon_prim, imex, stride);
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hllc' exige un transport "
@@ -308,13 +313,13 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex);
+                                                       substeps, recon_prim, imex, stride);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                     substeps, recon_prim, imex);
+                                                     substeps, recon_prim, imex, stride);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex);
+                                                      substeps, recon_prim, imex, stride);
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'roe' exige un transport "

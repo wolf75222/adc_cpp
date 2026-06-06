@@ -107,13 +107,19 @@ class AmrSystem {
   /// @param time    "explicit" (source en Euler avant, portee par le pas AMR) ou "imex" (source
   ///                raide traitee en IMPLICITE par backward_euler_source ; le transport reste
   ///                explicite, porte par le reflux conservatif). Tout autre traitement est refuse.
-  /// @throws std::runtime_error si un bloc est deja defini, si substeps < 1, si time n'est pas dans
-  ///         {explicit, imex}, ou si recon n'est pas dans {conservative, primitive}.
+  /// @param substeps sous-pas explicites du bloc (>= 1) : le pas effectif est decoupe en substeps
+  ///                morceaux egaux (MULTI-BLOCS uniquement ; en mono-bloc, porte par AmrCouplerMP).
+  /// @param stride  cadence HOLD-THEN-CATCH-UP du bloc (>= 1 ; defaut 1 = chaque macro-pas). stride=M
+  ///                tient le bloc M-1 macro-pas puis le rattrape d'un pas effectif M*dt (multirate).
+  ///                MULTI-BLOCS uniquement (un seul bloc avance toujours a chaque pas). step_cfl honore
+  ///                la cadence : dt = cfl*h*min_b(substeps_b/(stride_b*w_b)), mirroir de System::step_cfl.
+  /// @throws std::runtime_error si un bloc est deja defini, si substeps < 1, si stride < 1, si time
+  ///         n'est pas dans {explicit, imex}, ou si recon n'est pas dans {conservative, primitive}.
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
                  const std::string& recon = "conservative",
-                 const std::string& time = "explicit", int substeps = 1);
+                 const std::string& time = "explicit", int substeps = 1, int stride = 1);
 
   /// Enregistre un bloc COMPILE (chemin add_compiled_model, header amr_dsl_block.hpp) : @p builder
   /// est une fermeture type-erased qui, recevant les AmrBuildParams figes au build paresseux, rend
