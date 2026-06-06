@@ -1,10 +1,9 @@
-"""adc.dsl : mini-DSL SYMBOLIQUE de modeles physiques (prototype, interprete CPU).
+"""adc.dsl : mini-DSL SYMBOLIQUE de modeles physiques.
 
 Python ECRIT les formules (variables nommees, expressions), pas une fonction appelee par cellule.
-Les operations (+, -, *, /, **, adc.dsl.sqrt) construisent un ARBRE d'expressions ; l'evaluateur
-applique cet arbre a des tableaux numpy (tout le domaine d'un coup). Un HyperbolicModel declare ses
-variables conservatives, ses primitives (definies par des formules), son flux, ses valeurs propres,
-sa source et sa contribution elliptique.
+Les operations (+, -, *, /, **, adc.dsl.sqrt) construisent un ARBRE d'expressions. Un
+HyperbolicModel declare ses variables conservatives, ses primitives (definies par des formules),
+son flux, ses valeurs propres, sa source et sa contribution elliptique.
 
     e = adc.dsl.HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
@@ -13,10 +12,19 @@ sa source et sa contribution elliptique.
     e.set_flux(x=[rhou, rhou*u + p, ...], y=[...])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[...])
 
-Etat : INTERPRETE CPU (numpy) -> le modele TOURNE pour prototyper (via adc.PythonFlux, hote). Les
-etapes suivantes (codegen C++ / Kokkos / CUDA, JIT) reutiliseraient le MEME arbre (cf.
-docs/ARCHITECTURE_CIBLE.md sect. 3). On ne genere PAS encore de code compile : ce n'est pas le
-chemin de production (qui reste les briques C++ compilees, GPU/MPI).
+Backends disponibles via m.compile(backend=..., target=...) :
+  - "prototype" : evaluateur JIT NumPy/hote, Rusanov ordre 1, TEST uniquement (hote seul) ;
+  - "aot"       : genere un .so ABI plate (debug ABI), compilation ahead-of-time ;
+  - "production": loader natif zero-copie (add_native_block), RECOMMANDE par defaut ; chemin
+                  device-clean (foncteurs nommes, valide GH200, #97/#93) et MPI/AMR-ready.
+
+Cible (target=) :
+  - "System"    : systeme mono-niveau ;
+  - "AmrSystem" : systeme AMR cable (#92/#105), uniquement avec backend "production".
+
+Ergonomie :
+  - m.compile() auto-detecte les includes adc et cache le .so par (model_hash, abi_key) (#103).
+  - Les roles physiques (gamma, n_aux, B_z, T_e) sont preserves et transmis au C++.
 """
 import numpy as np
 
