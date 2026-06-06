@@ -18,7 +18,7 @@
 /// @file
 /// @brief Operateur spatial POLAIRE additif : R = -div_polar F + S sur une grille annulaire (r, theta).
 ///
-/// Chantier "grille polaire diocotron", Phase 1 (TRANSPORT seul). C'est un assemble_rhs SEPARE de
+/// Chantier "grille polaire annulaire", Phase 1 (TRANSPORT seul). C'est un assemble_rhs SEPARE de
 /// l'historique cartesien (adc/numerics/spatial_operator.hpp) : ce dernier reste STRICTEMENT INTOUCHE,
 /// donc un run sur maillage cartesien est bit-identique. Le chemin polaire est PUREMENT ADDITIF,
 /// opt-in (l'appelant choisit assemble_rhs_polar avec une PolarGeometry).

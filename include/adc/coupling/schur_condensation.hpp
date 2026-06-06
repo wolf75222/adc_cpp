@@ -44,7 +44,7 @@
 ///
 /// GENERICITE (docs/SCHUR_CONDENSATION_DESIGN.md section 4). Ce batisseur ne nomme AUCUN scenario :
 ///   il lit les ROLES Density / MomentumX / MomentumY (et Energy ignore ici) d'un VariableSet, plus un
-///   champ aux B_z, alpha, theta, dt. Tout bloc fluide qui expose ces roles est eligible (diocotron OU
+///   champ aux B_z, alpha, theta, dt. Tout bloc fluide qui expose ces roles est eligible (anneau polaire a derive ExB OU
 ///   multi-especes magnetisees) sans une ligne de code Schur supplementaire. Le contrat est valide a
 ///   l'assemblage (roles presents, sinon exception explicite cote HOTE, avant tout kernel).
 ///

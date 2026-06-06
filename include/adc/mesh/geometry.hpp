@@ -30,7 +30,7 @@ struct Geometry {
 };
 
 // PolarGeometry : SIBLING de Geometry pour un domaine ANNULAIRE GLOBAL (r, theta).
-// Chantier "grille polaire diocotron", Phase 1 (TRANSPORT seul, opt-in via adc.PolarMesh).
+// Chantier "grille polaire annulaire", Phase 1 (TRANSPORT seul, opt-in via adc.PolarMesh).
 // Le proto Phase-0 (test_polar_ring_advection) a quantifie que la grille cartesienne diffuse
 // le gradient RADIAL d'un anneau en rotation azimutale (~18%/5 tours) la ou la polaire le
 // preserve (rapport 73) : porter la direction radiale sur un AXE de grille leve ce verrou.

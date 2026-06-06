@@ -53,7 +53,7 @@ struct ExBVelocity {
 };
 
 /// Advection scalaire par la derive E x B en coordonnees POLAIRES (r, theta) -- chantier "grille
-/// polaire diocotron", Phase 1. C'est une brique SEPAREE d'ExBVelocity (cartesienne), pas une
+/// polaire annulaire", Phase 1. C'est une brique SEPAREE d'ExBVelocity (cartesienne), pas une
 /// modification : le solveur polaire (assemble_rhs_polar) l'utilise sur une PolarGeometry.
 ///
 /// DISPOSITION DU CANAL aux EN POLAIRE (documentee, contrat de cette brique) -- les composantes de

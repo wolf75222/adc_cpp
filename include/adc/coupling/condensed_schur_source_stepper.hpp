@@ -179,7 +179,7 @@ struct CopyBzKernel {
 
 /// ETAGE SOURCE condense par Schur, AUTONOME (transport gele), GENERIQUE sur tout bloc fluide qui
 /// expose les roles Density / MomentumX / MomentumY (+ Energy optionnel). Ne nomme aucun scenario :
-/// le diocotron de derive n'est qu'UN client, un modele a deux especes magnetisees en serait un autre.
+/// un modele anneau polaire a derive ExB n'est qu'UN client, un modele a deux especes magnetisees en serait un autre.
 ///
 /// CYCLE DE VIE : construit UNE fois sur un layout (BoxArray + DistributionMapping + Geometry) fixe ;
 /// alloue tous ses tampons a la construction (operateur GeometricMG + preconditionneur + champs A_op,
