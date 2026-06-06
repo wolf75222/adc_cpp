@@ -119,8 +119,12 @@ C.3 layout #141, C.4 stride #140, C.5 decision multi-bloc = PHASE 1 hierarchie F
 E.3 PolarMesh erreurs #168/#178, E.5 CI auto-decouverte verifiee (find-glob). Lots NON faits : voir RESTE.
 
 RESTE (audit) :
-- [ ] **Lot B.3 SystemBlockStore** : derniere extraction de `system.cpp` (sp + ghosts + get/set state) ;
-  system.cpp deja 1470->1044 (-29%) ; rendement decroissant mais ferme le P0 god-class. (sequentiel sur system.cpp)
+- [x] **Lot B.3 SystemBlockStore -- FAIT #197** : `class SystemBlockStore` (include/adc/runtime/system_block_
+  store.hpp, 165 l) OWN le registre `std::vector<BlockState>` (ex-Species) + index/find/copy_comp0/copy_state/
+  write_state ; Impl delegue. Decision CONSERVATRICE : alias `using Species=...` + `std::vector<Species>& sp=
+  blocks_.blocks` pour NE PAS churner les gabarits deja extraits (SystemFieldSolver/SystemStepper/native_loader).
+  Bit-identique (helpers verbatim, ordre d'insertion preserve, ordre membres == init aggregat -- verifie par
+  revue adversariale 4 lentilles : 0 finding). system.cpp 1065->1015. ctest 140/140 inchange. CI full verte.
 - [ ] **Lot C.6 / AMR (viii) regrid union-tags** : LE finale du capstone AMR (Phase 2) ; regrid pilote par
   l'UNION des tags (e OR i OR n OR phi OR user), prolong/restrict + reflux bloc-par-bloc, deverrouille
   multi-bloc + regrid_every>0. CHANTIER (gros) + decision de cadrage.
