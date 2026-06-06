@@ -1,10 +1,11 @@
 #pragma once
 
-// Noyau 0D du mode de Langmuir linearise (LangmuirMode). Aucun #include dans le coeur,
-// les tests ou les bindings Python. L'integrateur AP deux-fluides vit dans
-// adc_cases/two_fluid_ap/ mais reimplemente son propre solveur (TwoFluidAP2D) sans
-// inclure ce fichier. Conservee comme brique de reference analytique IMEX
-// (docs/ARCHITECTURE.md).
+/// @file
+/// @brief Noyau 0D du mode de Langmuir linearise (LangmuirMode) : brique de TEST/VALIDATION IMEX.
+///
+/// Conservee comme exemple analytique du schema IMEX (explicit_step / implicit_solve) : le terme
+/// plasma omega_p^2 est raide (traite en implicite, A-stable), la correction acoustique c_s^2 k^2
+/// reste explicite. Non utilisee par adc_cases au 2026-06-06.
 
 #include <adc/core/types.hpp>
 

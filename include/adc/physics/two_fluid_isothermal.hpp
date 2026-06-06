@@ -1,10 +1,11 @@
 #pragma once
 
-// Noyau lineaire deux-fluides isotherme (TwoFluidLinear). Aucun #include dans le coeur,
-// les tests ou les bindings Python. L'integrateur AP deux-fluides vit dans
-// adc_cases/two_fluid_ap/ mais reimplemente son propre solveur (TwoFluidAP2D) sans
-// inclure ce fichier. Conservee comme brique de reference analytique pour la dispersion
-// electrostatique deux-fluides (docs/ARCHITECTURE.md).
+/// @file
+/// @brief Noyau lineaire deux-fluides isotherme electrostatique (TwoFluidLinear) : brique TEST/VALIDATION.
+///
+/// Generalise LangmuirMode aux deux especes mobiles (electrons omega_pe + ions omega_pi) avec
+/// pressions isothermes. Permet de verifier les branches de dispersion electrostatique
+/// (w_fast Langmuir, w_slow ion-acoustique). Non utilisee par adc_cases au 2026-06-06.
 
 #include <adc/core/types.hpp>
 

@@ -11,7 +11,8 @@
 
 namespace adc {
 
-/// Pas de source.
+/// Pas de source : S(U, aux) = 0. Brique neutre (modele sans couplage potentiel/gravite).
+/// Device-callable, aucun etat interne.
 struct NoSource {
   template <class State>
   ADC_HD State apply(const State&, const Aux&) const {
@@ -19,8 +20,13 @@ struct NoSource {
   }
 };
 
-/// Force du potentiel (electrostatique) (q/m) rho E sur la quantite de mouvement (+ travail
-/// sur l'energie si 4 variables). E = -grad phi.
+/// Force du potentiel electrostatique (q/m) rho E sur la quantite de mouvement (+ travail
+/// sur l'energie si 4 variables). E = -grad phi = -(aux.grad_x, aux.grad_y).
+///
+/// CONTRAT : brique SOURCE ponctuelle, device-callable (ADC_HD), aucun etat global.
+/// Formule : s[1] += qom*rho*Ex, s[2] += qom*rho*Ey, s[3] += qom*(rho_u*Ex + rho_v*Ey)
+/// (le terme travail s[3] n'est actif que si State::size() == 4 : Euler compressible).
+/// Invariant : u[0] = rho (composante 0 = densite, indice stable entre briques).
 struct PotentialForce {
   Real qom = 1;  // q/m (signe inclus)
   template <class State>
@@ -35,6 +41,11 @@ struct PotentialForce {
 };
 
 /// Force gravitationnelle rho g (+ travail si 4 variables). g = -grad phi.
+///
+/// CONTRAT : brique SOURCE ponctuelle, device-callable (ADC_HD), aucun etat global.
+/// Formule : s[1] += rho*gx, s[2] += rho*gy, s[3] += rho_u*gx + rho_v*gy
+/// (le terme travail s[3] n'est actif que si State::size() == 4 : Euler compressible).
+/// Pas de coefficient q/m (contrairement a PotentialForce) : g est la gravite directement.
 struct GravityForce {
   template <class State>
   ADC_HD State apply(const State& u, const Aux& a) const {

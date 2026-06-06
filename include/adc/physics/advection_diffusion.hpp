@@ -1,9 +1,11 @@
 #pragma once
 
-// Brique modele advection-diffusion scalaire (AdvectionDiffusion). Utilisee dans les
-// tests C++ du coeur (tests/test_weno5_ssprk3.cpp) comme modele de reference pour
-// WENO5/SSPRK3, mais non utilisee par adc_cases. Conservee comme brique de validation
-// et brique de physique d'exemple (docs/ARCHITECTURE.md).
+/// @file
+/// @brief Modele d'advection-diffusion scalaire (AdvectionDiffusion) : brique de TEST/VALIDATION.
+///
+/// Utilisee dans les tests C++ du coeur (tests/test_weno5_ssprk3.cpp) comme modele de reference
+/// pour WENO5/SSPRK3 ; non utilisee par adc_cases. Conservee comme brique de validation et exemple
+/// illustrant le trait DiffusiveModel (nu > 0 active le terme parabolique cote coeur).
 
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>

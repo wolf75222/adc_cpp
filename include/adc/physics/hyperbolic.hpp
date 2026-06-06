@@ -18,6 +18,12 @@
 namespace adc {
 
 /// Advection scalaire par la derive E x B : v = (-d_y phi, d_x phi)/B0 (a divergence nulle).
+///
+/// Brique HYPERBOLIQUE 1-variable (densite scalaire n). Satisfait HyperbolicPhysicalModel.
+/// CONTRAT : fonctions purement ponctuelles, device-callables (ADC_HD). Aucune MultiFab,
+/// aucune allocation, aucun acces global. La divergence nulle de la derive E x B assure
+/// la conservation exacte (pas de terme de compression dans ce flux).
+/// Variables cons = prim = {n} (scalaire : pas de conversion nontriviale).
 struct ExBVelocity {
   static constexpr int n_vars = 1;
   using State = StateVec<1>;
@@ -108,9 +114,16 @@ struct ExBVelocityPolar {
 };
 
 /// Flux d'Euler compressible 2D (reutilise Euler : gamma, pression, vitesses d'onde signees).
+/// Alias de compat : CompressibleFlux == Euler ; la brique hyperbolique complete.
 using CompressibleFlux = Euler;
 
-/// Flux d'Euler ISOTHERME (p = cs^2 rho), 3 variables (rho, rho u, rho v).
+/// Flux d'Euler ISOTHERME (p = cs2 rho), 3 variables (rho, rho u, rho v).
+///
+/// Brique HYPERBOLIQUE 3-variables (densite + quantites de mouvement). Satisfait
+/// HyperbolicPhysicalModel. Loi de fermeture isotherme : p = cs2 * rho (pas d'equation
+/// d'energie). CONTRAT : fonctions purement ponctuelles, device-callables (ADC_HD).
+/// Aucune MultiFab, aucune allocation, aucun acces global.
+/// Invariant : cs2 > 0 pour que la vitesse d'onde sqrt(cs2) soit reelle.
 struct IsothermalFlux {
   static constexpr int n_vars = 3;
   using State = StateVec<3>;  ///< variables conservatives (rho, rho u, rho v)

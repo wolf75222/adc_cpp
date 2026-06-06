@@ -1,5 +1,11 @@
 #pragma once
 
+/// @file
+/// @brief Modele d'Euler compressible 2D (gaz parfait) : brique HYPERBOLIQUE pure satisfaisant
+///        le concept HyperbolicPhysicalModel. Source et second membre elliptique sont des briques
+///        separees (physics/source.hpp, physics/elliptic.hpp) ; ce fichier contient uniquement
+///        Vars + flux + vitesses d'onde + conversions cons<->prim.
+
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 #include <adc/core/variables.hpp>

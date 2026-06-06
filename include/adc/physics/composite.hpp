@@ -18,6 +18,14 @@ namespace adc {
 /// Satisfait le concept PhysicalModel ; les Vars (conversions + descripteur), le flux et les
 /// vitesses d'onde viennent de l'hyperbolique ; pressure / wave_speeds sont exposes quand
 /// l'hyperbolique les fournit (necessaire au flux HLLC / Roe).
+///
+/// CONTRAT : CompositeModel est une fonction pure de ses 3 briques, device-callable (ADC_HD).
+/// Aucune MultiFab, aucune allocation, aucun acces global. Toute methode deleguee herite de
+/// l'invariant device-clean de la brique sous-jacente.
+///
+/// Propagation n_aux : n_aux = max(aux_comps<Hyperbolic>, aux_comps<Source>, aux_comps<Elliptic>).
+/// Le systeme dimensionne le canal aux en consequence. Une brique sans n_aux (defaut kAuxBaseComps=3)
+/// ne modifie pas l'historique bit-identique.
 template <class Hyperbolic, class Source, class Elliptic>
 struct CompositeModel {
   static_assert(HyperbolicPhysicalModel<Hyperbolic>,

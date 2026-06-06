@@ -12,7 +12,10 @@
 
 namespace adc {
 
-/// Densite de charge f = q n.
+/// Densite de charge f = q n. Second membre elliptique du bloc ions ou electrons.
+///
+/// CONTRAT : brique ELLIPTIQUE ponctuelle, device-callable (ADC_HD), aucun etat global.
+/// Lit uniquement u[0] (densite). Signe de q inclus (ion : q=+1, electron : q=-1).
 struct ChargeDensity {
   Real q = 1;
   template <class State>
@@ -21,7 +24,10 @@ struct ChargeDensity {
   }
 };
 
-/// Fond neutralisant f = alpha (n - n0).
+/// Fond neutralisant f = alpha (n - n0). Modelise un fond de neutralisation fixe de densite n0.
+///
+/// CONTRAT : brique ELLIPTIQUE ponctuelle, device-callable (ADC_HD), aucun etat global.
+/// Lit uniquement u[0]. alpha = charge effective du fond ; n0 = densite du fond neutre.
 struct BackgroundDensity {
   Real alpha = 1, n0 = 0;
   template <class State>
@@ -30,7 +36,10 @@ struct BackgroundDensity {
   }
 };
 
-/// Couplage self-consistant f = sign 4piG (rho - rho0) (sign = +1 gravite, -1 plasma).
+/// Couplage self-consistant f = sign * 4piG * (rho - rho0).
+///
+/// CONTRAT : brique ELLIPTIQUE ponctuelle, device-callable (ADC_HD), aucun etat global.
+/// sign = +1 gravite (Poisson standard), sign = -1 plasma (signe de Gauss). rho0 = fond.
 struct GravityCoupling {
   Real sign = 1, four_pi_G = 1, rho0 = 1;
   template <class State>
