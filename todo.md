@@ -130,8 +130,10 @@ RESTE (audit) :
   (core/ fait #173) ; dossier par dossier, sans churn. (basse priorite)
 - [ ] **Lot A.3** : note SourceImplicit (local) vs CondensedSchur (global) dans les exemples. (mineur doc)
 - [ ] **Lot E.4** : tests backend a noms precis (partiellement couvert par BACKEND_COVERAGE + validation).
-- [ ] **Fix role-fallback cote AMR** : le `resolve` de `add_coupled_source` AMR (#179) a probablement le meme
-  repli silencieux comp=0 que System (corrige #181) ; mirror le fix strict. (petit ; sequentiel sur amr files)
+- [x] **Fix role-fallback cote AMR -- FAIT #191** : `AmrRuntime::add_coupled_source` (include/adc/runtime/
+  amr_runtime.hpp, lambda resolve) durci strict (miroir #181) : bloc inconnu/role non-canonique/role canonique
+  non expose -> throw nommant bloc+role, plus de repli silencieux comp=0. Test tests/test_amr_coupled_source_
+  role_strict.cpp (ctest #94) : role valide/absent/inconnu. Build 214/214, ctest 100/100. (verifie 06/06)
 
 RESTE (scientifique / hors audit) :
 - [ ] **Run Hoffart haute resolution (ROMEO, AUTORISE)** : corriger le build -fPIC du module Python sur
