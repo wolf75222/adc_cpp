@@ -16,6 +16,8 @@
 
 namespace adc {
 
+/// Nature des variables d'un jeu : conservees (U) ou primitives (W).
+/// Sert d'etiquette dans VariableSet ; ne pas utiliser pour dispatcher de la logique numerique.
 enum class VariableKind { Conservative, Primitive };
 
 /// Role PHYSIQUE d'une composante. Permet d'adresser une composante par son SENS

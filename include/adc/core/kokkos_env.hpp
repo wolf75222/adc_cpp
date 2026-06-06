@@ -1,3 +1,15 @@
+/// @file
+/// @brief Cycle de vie Kokkos partage : init paresseuse + barriere device. Indispensable depuis que
+///        l'allocateur unifie (kokkos_malloc<SharedSpace>) est appele DES la construction d'un Fab,
+///        AVANT tout for_each. L'init ne peut donc plus etre confiee au seul premier kernel : c'est
+///        ce meme garde qui s'applique a l'allocation ET aux kernels, pour que le build Kokkos
+///        (Serial/OpenMP/Cuda) marche sans Kokkos::initialize explicite dans chaque main.
+///
+/// INVARIANT de sequencement : detail::ensure_kokkos_initialized() est appelee par ManagedArena
+/// avant tout kokkos_malloc ; device_fence() est appelee par l'hote avant tout acces a la memoire
+/// unifiee apres un kernel. Ces deux points d'entree sont les SEULS endroits ou le cycle de vie
+/// Kokkos est pilote; ne pas appeler Kokkos::initialize/finalize ailleurs.
+
 #pragma once
 
 #ifdef ADC_HAS_KOKKOS
@@ -5,13 +17,6 @@
 
 #include <cstdlib>  // std::atexit
 #endif
-
-/// @file
-/// @brief Cycle de vie Kokkos partage : init paresseuse + barriere device. Indispensable depuis que
-///        l'allocateur unifie (kokkos_malloc<SharedSpace>) est appele DES la construction d'un Fab,
-///        AVANT tout for_each. L'init ne peut donc plus etre confiee au seul premier kernel : c'est
-///        ce meme garde qui s'applique a l'allocation ET aux kernels, pour que le build Kokkos
-///        (Serial/OpenMP/Cuda) marche sans Kokkos::initialize explicite dans chaque main.
 
 namespace adc {
 

@@ -1,3 +1,19 @@
+/// @file
+/// @brief Allocateur du stockage Fab2D, selectionnable a la compilation.
+///
+/// Deux strategies selon le build :
+///   - Kokkos (ADC_HAS_KOKKOS) : `ManagedAllocator<T>` backed par `ManagedArena` (pool de
+///     blocs en memoire unifiee Kokkos::SharedSpace). std::vector<T, ManagedAllocator<T>>
+///     conserve la semantique valeur (copie profonde dans une nouvelle allocation managee).
+///   - CPU pur : `std::allocator<T>` -- byte-identique a l'ancien comportement.
+///
+/// `fab_allocator<T>` est l'alias canonique a utiliser; ne pas instancier ManagedAllocator
+/// directement dans le code numerique.
+///
+/// INVARIANT securite async : un bloc libere passe dans `pending_` (ManagedArena) et n'est
+/// reutilise qu'apres la prochaine Kokkos::fence en lot. Cela reproduit la barriere implicite
+/// de cudaFree de facon portable. Voir ManagedArena::deallocate et ManagedArena::allocate.
+
 #pragma once
 
 #include <cstddef>
@@ -28,6 +44,9 @@
 // est un singleton partage, donc l'allocateur reste sans etat (stateless).
 
 namespace adc {
+
+/// Statistiques du pool ManagedArena : hits/misses/fences et octets retenus.
+/// Lecture sans effets de bord via adc::arena_stats() (snapshot sous verrou).
 struct ArenaStats {
   long hits = 0;       // allocations servies par le pool (pas de kokkos_malloc)
   long misses = 0;     // allocations ayant declenche un kokkos_malloc<SharedSpace>
@@ -59,6 +78,18 @@ static_assert(Kokkos::has_shared_space,
 // allocation manque de bloc pret, un seul Kokkos::fence() draine le device et bascule TOUS les
 // pending vers `ready_`. Un bloc de `ready_` a donc forcement vu sa derniere utilisation device
 // terminee avant que l'hote (value-init du vector) ne le reecrive.
+/// Pool de memoire unifiee (Kokkos::SharedSpace) avec free-list par taille (octets).
+///
+/// Singleton (ManagedArena::instance()). Stateless du point de vue de std::allocator :
+/// tous les ManagedAllocator<T> partagent le meme pool, l'operateur == renvoie true.
+///
+/// INVARIANT async : un bloc rendu par deallocate() passe en `pending_` et n'est
+/// reutilise qu'apres Kokkos::fence() en lot (dans allocate(), si la free-list ready_
+/// est vide). Un bloc de `ready_` a donc forcement ete vu finalize par le device.
+///
+/// Cycle de vie : les blocs ne sont jamais retournes a Kokkos au fil du calcul; seul
+/// release_all() (hook Kokkos::finalize) les rend via kokkos_free. Ne pas appeler
+/// release_all() manuellement.
 class ManagedArena {
  public:
   static ManagedArena& instance() {
@@ -146,6 +177,9 @@ class ManagedArena {
 
 inline ArenaStats arena_stats() { return ManagedArena::instance().stats(); }
 
+/// Adaptateur std::allocator_traits backed par ManagedArena.
+/// Stateless : tous les ManagedAllocator<T> sont egaux (pool singleton partage).
+/// Utiliser l'alias `fab_allocator<T>` plutot que ce template directement.
 template <class T>
 struct ManagedAllocator {
   using value_type = T;

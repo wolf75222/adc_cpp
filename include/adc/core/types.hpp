@@ -1,5 +1,21 @@
 #pragma once
 
+/// @file
+/// @brief Types scalaires de base et macro ADC_HD (portabilite host+device). Socle minimal
+///        sans dependance externe; la bascule vers pde_core::Real attendra le maillage distribue.
+///
+/// `Real` : alias double centralise. Tout le calcul numerique l'utilise; ne pas ecrire `double`
+/// directement dans la couche physique ou les kernels.
+///
+/// `ADC_HD` : annotation portant les fonctions appelees dans les kernels Kokkos sur host ET device.
+/// - Kokkos  : KOKKOS_FUNCTION (portable Cuda/HIP/SYCL/CPU, sans syntaxe CUDA manuelle).
+///   KOKKOS_FUNCTION est prefere a KOKKOS_INLINE_FUNCTION pour ne pas ajouter d'`inline` implicite
+///   sur les sites deja notes `ADC_HD inline ...`.
+/// - CUDA/HIP directs (sans Kokkos) : __host__ __device__.
+/// - CPU pur : expansion vide.
+/// INVARIANT : ADC_HD ne peut entourer que du code device-clean (pas d'objet hote,
+/// pas de std::vector, pas de vtable).
+
 // Types scalaires de base. Volontairement local et minimal pour garder le
 // premier socle sans dependance externe. La bascule vers pde_core::Real
 // (partage avec advection_cpp / euler_cpp / poisson_cpp) se fera quand le

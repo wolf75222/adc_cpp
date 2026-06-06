@@ -1,3 +1,18 @@
+/// @file
+/// @brief EquationBlock : association (modele, champ U, schema spatial, politique temporelle, BC).
+///        Niveau d'abstraction au-dessus de PhysicalModel.
+///
+/// Un PhysicalModel decrit une loi locale ponctuelle. Un EquationBlock dit comment cette loi
+/// est portee par la simulation : quel MultiFab U, quelle discretisation spatiale (SpatialT),
+/// quelle politique temporelle (TimeT), quelles conditions aux limites (BCRec).
+///
+/// INVARIANT : `state` n'est jamais null apres construction (pointe vers le MultiFab passe au
+/// constructeur). L'EquationBlock ne possede pas le MultiFab; la duree de vie du MultiFab doit
+/// exceder celle du bloc.
+///
+/// `EquationBlockLike` : concept minimal permettant au CoupledSystem et au scheduler de
+/// manipuler un bloc sans connaitre ses types concrets (ModelT, SpatialT, TimeT).
+
 #pragma once
 
 #include <adc/core/physical_model.hpp>
@@ -21,6 +36,18 @@
 
 namespace adc {
 
+/// Association d'un PhysicalModel avec son champ U (MultiFab), son schema spatial, sa
+/// politique temporelle et ses conditions aux limites.
+///
+/// Parametres templates :
+///   ModelT  : doit satisfaire PhysicalModel.
+///   SpatialT: doit satisfaire SpatialDiscretisationLike (defaut FirstOrder).
+///   TimeT   : politique temporelle (defaut ExplicitTime<SSPRK2>).
+///
+/// INVARIANT : `state != nullptr` apres construction. L'EquationBlock ne possede PAS
+/// le MultiFab; la duree de vie du MultiFab doit exceder celle du bloc.
+/// Ne pas stocker dans un conteneur par valeur si le MultiFab est alloue dynamiquement
+/// et pourrait etre deplace (le pointeur deviendrait invalide).
 template <class ModelT, class SpatialT = FirstOrder,
           class TimeT = ExplicitTime<SSPRK2>>
 struct EquationBlock {
@@ -46,6 +73,9 @@ struct EquationBlock {
   const MultiFab& U() const { return *state; }
 };
 
+/// Concept minimal pour les blocs d'equation : State, Spatial, Time, name, state, U().
+/// Permet au CoupledSystem et au scheduler de manipuler un bloc sans connaitre ses types
+/// concrets. Verifie que `state` est convertible en `MultiFab*` et que U() retourne MultiFab&.
 template <class B>
 concept EquationBlockLike = requires(B b) {
   typename B::Model;

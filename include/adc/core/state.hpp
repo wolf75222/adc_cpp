@@ -1,3 +1,9 @@
+/// @file
+/// @brief Types ponctuels de la couche physique : StateVec<N> (etat conserve) et Aux (champs
+///        auxiliaires issus du solveur elliptique). Les indices canoniques de Aux sont definis ici
+///        et doivent rester en phase avec AUX_CANONICAL dans python/adc/dsl.py (duplication
+///        inherente : Python ne lit pas les en-tetes C++).
+
 #pragma once
 
 #include <adc/core/types.hpp>
@@ -12,9 +18,13 @@
 
 namespace adc {
 
-// Vecteur d'etat conserve de taille fixe (connue a la compilation).
-// Pour un scalaire (advection / transport a derive) : StateVec<1>.
-// Pour Euler 2D : StateVec<4>. La taille pilote n_vars du modele.
+/// Vecteur d'etat conserve de taille fixe, connue a la compilation.
+///
+/// Exemples : StateVec<1> pour un scalaire (advection), StateVec<4> pour Euler 2D.
+/// La valeur N pilote PhysicalModel::n_vars.
+///
+/// INVARIANT device : tableau C brut (`Real v[N]`), pas std::array; trivialement
+/// copiable, device-clean (ADC_HD). Aucun constructeur non-trivial.
 template <int N>
 struct StateVec {
   Real v[N]{};  // tableau C : trivialement utilisable sur device (pas std::array)
@@ -25,6 +35,8 @@ struct StateVec {
   ADC_HD static constexpr int size() { return N; }
 };
 
+/// @name Arithmetic operators for StateVec (ADC_HD, device-clean).
+/// @{
 template <int N>
 ADC_HD StateVec<N> operator+(StateVec<N> a, const StateVec<N>& b) {
   for (int i = 0; i < N; ++i) a[i] += b[i];
@@ -42,6 +54,7 @@ ADC_HD StateVec<N> operator*(Real s, StateVec<N> a) {
   for (int i = 0; i < N; ++i) a[i] *= s;
   return a;
 }
+/// @}
 
 // Champs auxiliaires derives de la resolution elliptique : le potentiel et
 // son gradient au point. C'est le canal unique par lequel le couplage entre
@@ -59,6 +72,12 @@ ADC_HD StateVec<N> operator*(Real s, StateVec<N> a) {
 // les champs extra et reste strictement bit-identique. Les champs extra valent 0 par defaut :
 // load_aux ne les ecrase que si le modele les demande.
 //
+/// SOURCE UNIQUE de la disposition des champs aux EXTRA (X-macro). C'est le SEUL endroit
+/// listant {membre, indice} pour les champs au-dela du contrat de base.
+/// INVARIANT Python-C++ : les indices ici doivent rester identiques a AUX_CANONICAL dans
+/// python/adc/dsl.py ({"phi":0,"grad_x":1,"grad_y":2,"B_z":3,"T_e":4}). Modifier l'un
+/// exige de modifier l'autre simultanement. La duplication est inherente : Python ne lit
+/// pas les en-tetes C++.
 // SOURCE UNIQUE de la disposition des champs aux EXTRA (X-macro). C'est le SEUL endroit
 // listant {membre, indice} pour les champs au-dela du contrat de base. load_aux (lecture
 // device, spatial_operator.hpp) ET le marshaling hote (python/system.cpp) en sont GENERES,
