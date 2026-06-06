@@ -43,15 +43,22 @@ CI (depuis #136) : PR de routine = ci-fast (Release + Python). MPI + Kokkos via 
 `workflow_dispatch` / label `ci-full`. REGLE : poser le label `ci-full` sur toute PR risquee (MPI /
 Kokkos / device / Schur / AMR) AVANT merge pour la validation complete.
 
-**En vol :**
-- [~] **#168 Polaire 2b (PRIORITE, CE PR)** : transport + Poisson polaire branches dans `System.step`
-  (anneau GLOBAL, PAS de couplage cart<->polaire ; cartesien defaut bit-identique). WIP de l'agent nuit
-  recupere + 2 BUGS CORRIGES : (1) `phi` sans ghost -> derive de l'aux lisait phi hors allocation -> nan
-  masque (test passait FAUX : `nan>tol` faux en C++) ; fix `derive_aux_polar` (radial DECENTRE ordre 2
-  aux parois, theta ENROULE periodique). (2) revue adversariale : precondition nr>=3 non imposee -> OOB
-  pour `PolarMesh(nr=2)` ; garde ajoutee (check_geometry C++ + PolarMesh Python) + test de rejet.
-  Validation : C++ conservation masse 3.4e-15 ; Python `System(PolarMesh)` step+step_cfl <1e-11 ;
-  cartesien 4/4 PASS. ci-full re-run en cours -> merge des verte.
+**Polaire 2b MERGE (#168, master = 43a9160) :** transport + Poisson polaire dans `System.step` (anneau
+GLOBAL, PAS de couplage cart<->polaire ; cartesien bit-identique). 2 bugs trouves+corriges : (1) `phi`
+sans ghost -> derive de l'aux lisait phi hors allocation -> nan masque (test passait FAUX : `nan>tol`
+faux en C++) ; fix `derive_aux_polar` (radial DECENTRE ordre 2 aux parois, theta ENROULE periodique).
+(2) revue adversariale : precondition nr>=3 non imposee -> OOB pour `PolarMesh(nr=2)` ; garde
+(check_geometry C++ + PolarMesh Python) + test de rejet. Validation : C++ conservation masse 3.4e-15 ;
+Python `System(PolarMesh)` step+step_cfl <1e-11 ; cartesien 4/4 PASS. RESTE : le RUN diocotron annulaire
+quantitatif (mesure du taux) = livrable scientifique suivant.
+
+**En vol (vague parallele, agents isoles + integrateur ; chaque PR passe la revue adversariale) :**
+- [ ] **AMR capstone (iv)** : facade runtime honore substeps/stride par bloc + step_cfl substeps-aware
+  (`amr_runtime.hpp` + `amr_system.cpp` + tests ; le moteur `AmrSystemCoupler` a deja la logique a mirror).
+- [ ] **Lot B SystemFieldSolver** : extraction de `system.cpp` (elliptique + derive de champ, cartesien +
+  polaire), bit-identique, jugee par la suite System+polaire.
+- [ ] **Lot A.5 core/** : convention de commentaires sur `include/adc/core/` (commentaires seuls).
+- [ ] **Doc honnetete** : docstring DSL A.1 + classification briques physics (audit section 6).
 
 **Prochaines etapes (sequencees, ETAT PRECIS post-scoping) :**
 1. **Schur PR6** (apres merge #168) : mesure diocotron-Schur sur le chemin polaire desormais dispo ;
