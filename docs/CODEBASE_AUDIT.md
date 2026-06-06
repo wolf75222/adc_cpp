@@ -207,7 +207,7 @@ Ces invariants sont les "rites" du code : si un fichier les casse, il devient su
 | `coupler.hpp` | `Coupler<Model>` | Coupleur mono-bloc historique Poisson + transport. | Etre l'API Python moderne. | Utile en tests/C++ direct, mais API secondaire. |
 | `system_coupler.hpp` | `SystemAssembler`, `SystemDriver`, alias `SystemCoupler` | Couplage multi-blocs compile. | Refaire le runtime Python. | Bonne abstraction tuteur, mais coexiste avec `runtime/System`. |
 | `amr_system_coupler.hpp` | `AmrSystemCoupler`, `AmrSystemDriver` | CoupledSystem sur AMR compile. | Pretendre couvrir runtime `AmrSystem`. | Utile mais surface a clarifier. |
-| `amr_coupler.hpp` | `AmrCoupler` | AMR mono-box deprecated. | Rester indefiniment. | Le fichier dit deprecated. Planifier retrait ou archive. |
+| ~~`amr_coupler.hpp`~~ | ~~`AmrCoupler`~~ | AMR mono-box RETIRE (C.2, juin 2026). | Remplace par `AmrCouplerMP`. | Aucun client #include ; fichier supprime. |
 | `amr_coupler_mp.hpp` | `AmrCouplerMP` + helpers | Moteur AMR multipatch couple. | Porter toute la logique runtime Python. | Important, mais gros. Extraire helpers layout/read/write/inject. |
 | `amr_regrid_coupler.hpp` | regrid AMR coupler | Rebuild niveau fin mono-bloc. | Faire avance en temps. | OK. Pour multi-blocs, le regrid par union des tags reste a ecrire. |
 | `amr_level_storage.hpp` | `AmrLevelStack` | Stockage niveaux + aux. | Porter equations. | OK. |
@@ -300,11 +300,10 @@ runtime.
    - Gain : AMR lisible, plus facile a porter GPU/MPI.
 
 3. **Famille `coupling/`**
-   - `amr_coupler.hpp` est explicitement deprecated.
+   - `amr_coupler.hpp` (AmrCoupler mono-box) est RETIRE (C.2, juin 2026) : aucun client #include detecte, remplace par AmrCouplerMP.
    - `Coupler` et `SpectralCoupler` sont des facades C++ directes utiles, mais secondaires.
    - `SystemCoupler` est conceptuellement propre, mais coexiste avec `runtime/System`.
-   - Action : ajouter une page "public vs internal vs deprecated", puis retirer/archiver
-     `AmrCoupler` quand plus aucun client public n'en depend.
+   - Action : ajouter une page "public vs internal vs deprecated".
 
 ### P1 - Renforcer les contrats
 
@@ -365,7 +364,7 @@ runtime.
 
 | Element | Diagnostic | Recommandation |
 |---|---|---|
-| `amr_coupler.hpp` | Marque deprecated dans le code. | Planifier retrait apres verification des clients. |
+| ~~`amr_coupler.hpp`~~ | RETIRE (C.2, juin 2026). | Supprime -- aucun client #include ; remplace par AmrCouplerMP. |
 | `amr_multilevel.hpp`, `amr_reflux.hpp` | Moteurs AMR historiques simples. | Classer legacy/test ou fusionner documentation avec `amr_reflux_mf`. |
 | `SpectralCoupler` | Variante mono-modele utile mais secondaire. | Garder si tests, sinon documenter comme API C++ avancee. |
 | `DynamicModel` | Prototype CPU hote. | Garder, mais ne pas mettre dans chemin principal. |
@@ -652,7 +651,7 @@ Pour eviter les divergences :
 ### Lot C - AMR
 
 1. Decouper `amr_reflux_mf.hpp`.
-2. Declarer `amr_coupler.hpp` legacy dans docs, puis retirer si possible.
+2. `amr_coupler.hpp` RETIRE (C.2, juin 2026) -- aucun client #include, supprime, remplace par AmrCouplerMP.
 3. S'appuyer sur la garde de layout stricte #141 avant toute API multi-blocs.
 4. Corriger la cadence `stride` AMR type #140 avant d'exposer des pas lents depuis Python.
 5. Decider explicitement : `AmrSystem` reste mono-bloc ou devient runtime multi-bloc.

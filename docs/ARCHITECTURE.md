@@ -272,7 +272,7 @@ l'arrondi inchangees).
 | `mesh/` (execution) | execution | `for_each` (seam `for_each_cell`), `fill_boundary` (GhostExchange), `physical_bc`, `mf_arith` (operateurs de grille qui bouclent le seam) |
 | `parallel/` | execution | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
 | `amr/` | maillage adaptatif | `amr_hierarchy` (conteneur de niveaux), `cluster` (Berger-Rigoutsos, arithmetique entiere), `regrid` (politique de remaillage), `tag_box` (grille de marqueurs) |
-| `coupling/` | temps / couplage | `elliptic_rhs`, `Coupler`, `SystemCoupler`, `coupling_policy`, `amr_coupler`, `amr_coupler_mp`, `amr_system_coupler`, `spectral_coupler`, diagnostics AMR |
+| `coupling/` | temps / couplage | `elliptic_rhs`, `Coupler`, `SystemCoupler`, `coupling_policy`, `amr_coupler_mp`, `amr_system_coupler`, `spectral_coupler`, diagnostics AMR |
 | `runtime/` | runtime / bindings | facades `System` / `AmrSystem`, `model_factory` / `model_spec`, `block_builder`, JIT/AOT du DSL (`dynamic_model`, `compiled_block_abi`, `dsl_block`), `add_compiled_model` cote AmrSystem (`amr_dsl_block`) ; canal aux extensible (`ensure_aux_width`, `set_magnetic_field`, `set_electron_temperature_from`) |
 
 ### 6bis. Modules detailles (par type, source de verite unique)
@@ -361,7 +361,7 @@ Etat :
   structurel bit-identique, prouve par `test_elliptic_problem` (`operator==` strict).
 
 Reste hors-perimetre tant qu'on exige le bit-identique : recabler vers `FieldPostProcess` les
-sites en forme `/(2*dx)` (`amr_coupler`, `amr_coupler_mp`, `spectral_coupler`),
+sites en forme `/(2*dx)` (`amr_coupler_mp`, `spectral_coupler`),
 car la division peut differer au dernier bit de la forme multiplicative `*cx` du coupleur
 (IEEE754 : `a/b` et `a*(1/b)` ne coincident pas toujours). Ils instancient la meme convention
 nommee, documentee, mais ne sont pas touches a cette etape.
@@ -535,7 +535,6 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `system_coupler.hpp` : execution mono-niveau d'un `CoupledSystem`, avec callback pour blocs implicites/IMEX.
 - `elliptic_rhs.hpp` : assembleurs de second membre elliptique mono-modele ou multi-blocs.
 - `coupling_policy.hpp` : frequence du solve elliptique (PerStage / OncePerStep).
-- `amr_coupler.hpp` : coupleur AMR E x B mono-box (route par `advance_amr`).
 - `amr_coupler_mp.hpp` : coupleur AMR E x B multi-patch + regrid BR, parametre `replicated_coarse`.
 - `amr_system_coupler.hpp` : systeme multi-especes porte sur AMR (Poisson grossier + reflux par bloc).
 - `amr_regrid_coupler.hpp` : le regrid Berger-Rigoutsos extrait du coupleur multi-patch.
