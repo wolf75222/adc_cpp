@@ -76,7 +76,19 @@ struct PolarFaceFluxRKernel {
   Limiter lim;
   NumericalFlux nflux;
   bool recon_prim;
+  // PAROI RADIALE (no-penetration) optionnelle. wall_radial == false (defaut) : aucun effet, flux de
+  // bord calcule comme l'interieur (BIT-IDENTIQUE a l'historique : MMS, conservation azimutale). true :
+  // le flux radial aux DEUX faces physiques de bord (i = i_lo_face = lo, i = i_hi_face = hi+1) est force
+  // a ZERO -> le terme radial telescope EXACTEMENT (chaque face interieure est partagee, les bords ne
+  // comptent plus) -> masse Sum n r dr dtheta conservee a la machine, quel que soit v_r (paroi solide).
+  bool wall_radial;
+  int i_lo_face, i_hi_face;  // indices de FACE des bords physiques (lo et hi+1) ; ignores si !wall_radial
   ADC_HD void operator()(int i, int j) const {
+    const Real rf = r_min + i * dr;  // r_face(i) (positif sur l'anneau : r_min >= 0, i >= 0)
+    if (wall_radial && (i == i_lo_face || i == i_hi_face)) {
+      for (int c = 0; c < Model::n_vars; ++c) fr(i, j, c) = Real(0);  // paroi : flux radial nul
+      return;
+    }
     // Etats reconstruits de part et d'autre de la face radiale i (REUTILISE reconstruct<> cartesien,
     // dir == 0). L = extrapolation depuis la cellule i-1 vers sa face + ; R = depuis la cellule i
     // vers sa face -.
@@ -84,7 +96,6 @@ struct PolarFaceFluxRKernel {
     const auto Rr = reconstruct<Model>(model, u, i, j, 0, -1, lim, recon_prim);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i - 1, j), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 0);
-    const Real rf = r_min + i * dr;  // r_face(i) (positif sur l'anneau : r_min >= 0, i >= 0)
     for (int c = 0; c < Model::n_vars; ++c) fr(i, j, c) = rf * F[c];
   }
 };
@@ -140,16 +151,22 @@ struct PolarAssembleRhsKernel {
 /// cartesien. Calcule d'abord les flux de FACE (radial pondere par r, azimutal) dans des MultiFab
 /// temporaires, puis differencie. Tous les noyaux sont device-callable (foncteurs nommes).
 ///
-/// CONDITIONS AUX LIMITES (Phase 1, transport seul) : theta PERIODIQUE (l'appelant remplit les ghosts
-/// azimutaux par fill_boundary periodique). r PHYSIQUE : l'appelant remplit les ghosts radiaux (paroi
-/// / sortie). Les flux radiaux aux faces r_min (i = lo) et r_max (i = hi+1) sont calcules a partir des
-/// etats de ghost ; pour une PAROI (flux radial nul, conservation stricte) l'appelant impose des
-/// ghosts radiaux qui annulent la vitesse radiale de derive (ou, plus simplement, le test verifie la
-/// conservation sur un champ ou v_r = 0 aux bords -- cf. test_polar_transport_mms).
+/// CONDITIONS AUX LIMITES : theta PERIODIQUE (l'appelant remplit les ghosts azimutaux par fill_boundary
+/// periodique). r PHYSIQUE : l'appelant remplit les ghosts radiaux (paroi / sortie). Les flux radiaux
+/// aux faces r_min (i = lo) et r_max (i = hi+1) sont calcules a partir des etats de ghost (sortie
+/// libre), SAUF si @p wall_radial == true : alors le flux radial aux deux faces physiques de bord est
+/// force a ZERO (PAROI SOLIDE no-penetration), ce qui rend la masse Sum n r dr dtheta conservee A LA
+/// MACHINE quel que soit v_r (le terme radial telescope exactement). @p wall_radial == false (defaut)
+/// reproduit EXACTEMENT l'historique (MMS, conservation azimutale -- cf. test_polar_transport_mms).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void assemble_rhs_polar(const Model& model, const MultiFab& U, const MultiFab& aux,
-                        const PolarGeometry& geom, MultiFab& R, bool recon_prim = false) {
+                        const PolarGeometry& geom, MultiFab& R, bool recon_prim = false,
+                        bool wall_radial = false) {
   const Real r_min = geom.r_min, dr = geom.dr(), dtheta = geom.dtheta();
+  // Faces radiales physiques de bord (paroi) : r_min a la face lo du domaine d'indices, r_max a la face
+  // hi+1. geom.domain est le domaine GLOBAL (la PolarGeometry de System couvre tout l'anneau, mono-box).
+  const int i_lo_face = geom.domain.lo[0];
+  const int i_hi_face = geom.domain.hi[0] + 1;
   const Limiter lim{};
   const NumericalFlux nflux{};
   // BoxArrays de FACE (cf. compute_face_fluxes cartesien) : faces radiales = surroundingNodes en x
@@ -171,8 +188,10 @@ void assemble_rhs_polar(const Model& model, const MultiFab& U, const MultiFab& a
     Array4 ft = Ft.fab(li).array();
     const Box2D v = R.box(li);
     // Faces radiales : i dans [lo..hi+1], j dans [lo..hi] (cf. xface_box).
-    for_each_cell(xface_box(v), detail::PolarFaceFluxRKernel<Limiter, NumericalFlux, Model>{
-                                    model, u, ax, fr, r_min, dr, lim, nflux, recon_prim});
+    for_each_cell(xface_box(v),
+                  detail::PolarFaceFluxRKernel<Limiter, NumericalFlux, Model>{
+                      model, u, ax, fr, r_min, dr, lim, nflux, recon_prim, wall_radial, i_lo_face,
+                      i_hi_face});
     // Faces azimutales : i dans [lo..hi], j dans [lo..hi+1] (cf. yface_box).
     for_each_cell(yface_box(v), detail::PolarFaceFluxThetaKernel<Limiter, NumericalFlux, Model>{
                                     model, u, ax, ft, lim, nflux, recon_prim});

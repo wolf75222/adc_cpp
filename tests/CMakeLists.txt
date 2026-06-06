@@ -137,6 +137,14 @@ adc_add_test(test_polar_ring_advection)
 # correctement par l'operateur additif, sans toucher au chemin cartesien (bit-identique par defaut).
 adc_add_test(test_polar_transport_mms)
 
+# --- Phase 2b grille polaire : pas COUPLE polaire (transport -> Poisson -> aux -> avance) au niveau
+# C++, pendant du chemin cable dans System::step pour geometry == "polar". Exerce PolarPoissonSolver +
+# derivation aux en base locale (e_r, e_theta) + transport polaire avec paroi radiale solide. Verifie
+# (A) un pas couple modifie reellement la densite (champ non gele) et (B) la masse Sum n r dr dtheta est
+# conservee a ~machine sur K pas (paroi radiale no-penetration -> wall_radial). Host / Serial-safe (UNE
+# box ; PolarPoissonSolver mono-rang, non enregistre MPI comme test_polar_poisson_mms).
+adc_add_test(test_polar_system_step)
+
 # --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
 adc_add_test(test_dynamic_model)
 

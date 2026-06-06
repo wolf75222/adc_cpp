@@ -78,17 +78,22 @@ class PolarMesh:
     rotation azimutale (rapport 73 vs polaire) : porter la direction radiale sur un axe de grille leve
     ce verrou structural du diocotron.
 
-    PORTEE PHASE 1 : cette phase livre la geometrie polaire, l'operateur de transport polaire et sa
-    validation MMS (cote C++). Le transport polaire A TRAVERS System.step (qui demanderait aussi un
-    Poisson polaire) est une phase ulterieure ; adc.System(mesh=adc.PolarMesh(...)) leve donc une
-    erreur EXPLICITE (plutot que de faire tourner en silence la numerique cartesienne sur une config
-    polaire)."""
+    PORTEE PHASE 2b : le chemin polaire est maintenant BRANCHE dans System.step (transport polaire
+    assemble_rhs_polar + Poisson polaire PolarPoissonSolver + aux derive en base locale (e_r, e_theta)).
+    adc.System(mesh=adc.PolarMesh(...)) construit donc un anneau global et avance dessus. Limites Phase
+    2b : transport ExB scalaire seulement (limiter/riemann fluides leves cote C++), mono-rang (le solveur
+    polaire direct refuse MPI), pas de couplage cartesien<->polaire (anneau global)."""
 
     def __init__(self, r_min, r_max, nr, ntheta):
         if not (r_max > r_min >= 0.0):
             raise ValueError("PolarMesh : exige r_max > r_min >= 0 (anneau)")
-        if nr < 1 or ntheta < 1:
-            raise ValueError("PolarMesh : nr >= 1 et ntheta >= 1")
+        # nr >= 3 : la derive radiale de l'aux (System.solve_fields_polar) utilise un stencil DECENTRE
+        # d'ordre 2 aux deux parois sur phi (sans ghost) ; nr < 3 lirait phi hors bornes. Un anneau
+        # global a toujours nr >= 3. ntheta >= 1 (la derive azimutale enroule l'indice periodique).
+        if nr < 3:
+            raise ValueError("PolarMesh : nr >= 3 (stencil radial decentre d'ordre 2 aux parois)")
+        if ntheta < 1:
+            raise ValueError("PolarMesh : ntheta >= 1")
         self.r_min = float(r_min)
         self.r_max = float(r_max)
         self.nr = int(nr)
@@ -794,8 +799,8 @@ class System:
     GEOMETRIE : le choix vit dans un objet MAILLAGE passe en mesh= (adc.CartesianMesh / adc.PolarMesh),
     PAS dans le schema (adc.FiniteVolume reste reconstruction + Riemann + variables). Defaut (mesh=None
     ou adc.CartesianMesh) = domaine carre, bit-identique a l'historique. adc.PolarMesh (anneau global)
-    est livre en Phase 1 au niveau geometrie + operateur + MMS (cote C++) mais pas encore branche dans
-    System.step -> le construire ici leve une erreur explicite (cf. PolarMesh)."""
+    est BRANCHE dans System.step (Phase 2b) : transport ExB polaire + Poisson polaire + aux en base
+    locale (e_r, e_theta). Limites : transport ExB scalaire, mono-rang, pas de couplage cart<->polaire."""
 
     def __init__(self, config=None, mesh=None, **cfg_kw):
         if config is None:
@@ -809,7 +814,7 @@ class System:
                 raise TypeError("System : mesh doit etre un adc.CartesianMesh / adc.PolarMesh (recu %r)"
                                 % type(mesh).__name__)
             mesh._apply(config)
-        self._s = _System(config)  # leve si geometry == 'polar' (non cable dans step, cf. PolarMesh)
+        self._s = _System(config)  # geometry == 'polar' construit un anneau global (Phase 2b, cf. PolarMesh)
 
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
         spatial = spatial if spatial is not None else Spatial()

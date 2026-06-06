@@ -8,6 +8,8 @@
 #include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel : source couplee generique (DSL P5, bytecode)
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>
+#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver (Poisson polaire direct, REUTILISE)
+#include <adc/runtime/block_builder_polar.hpp>  // fermetures de bloc POLAIRE (assemble_rhs_polar, REUTILISE)
 #include <adc/numerics/time/implicit_stepper.hpp>   // backward_euler_source
 #include <adc/numerics/time/time_steppers.hpp>      // ForwardEuler, SSPRK2Step (math RK du coeur)
 #include <adc/numerics/spatial_operator.hpp>     // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
@@ -147,9 +149,17 @@ struct System::Impl {
 
   SystemConfig cfg;
   Geometry geom;
+  // GEOMETRIE POLAIRE (chantier "grille polaire diocotron", Phase 2b). polar_ == true quand
+  // cfg.geometry == "polar" : le System tourne alors sur un anneau global (r, theta), avec le transport
+  // polaire (assemble_rhs_polar) et le Poisson polaire (PolarPoissonSolver) au lieu du chemin cartesien.
+  // pgeom_ est l'anneau (r_min, r_max, nr, ntheta) ; INERTE (jamais lu) en cartesien -> chemin
+  // bit-identique. dom/ba/dm couvrent toujours l'espace d'INDICES (nx() x ny()), commun aux deux
+  // geometries : seule la correspondance indices -> espace physique (geom vs pgeom_) change.
+  bool polar_;
+  PolarGeometry pgeom_;
   BoxArray ba;
   DistributionMapping dm;
-  BCRec bc_;        // CL transport (periodique ou Foextrap selon cfg.periodic)
+  BCRec bc_;        // CL transport (periodique ou Foextrap selon cfg.periodic ; polaire : r physique, theta periodique)
   Box2D dom;
   Periodicity per_;
   bool periodic_;
@@ -186,16 +196,31 @@ struct System::Impl {
   bool has_kappa_field_ = false;        // terme de REACTION kappa(x) fourni : div(eps grad phi) - kappa phi
   std::vector<double> p_kappa_field_;   // champ kappa(x), n*n row-major (si has_kappa_field_)
   std::optional<std::variant<GeometricMG, PoissonFFTSolver>> ell_;
+  // Solveur de Poisson POLAIRE direct (FFT-en-theta + tridiag-en-r), construit paresseusement quand
+  // polar_ (cf. ensure_elliptic_polar). SEPARE de ell_ (geom() rend une PolarGeometry, pas une
+  // Geometry) : le chemin cartesien n'est jamais touche. INERTE (nullopt) en cartesien.
+  std::optional<PolarPoissonSolver> pell_;
+
+  // Nombre de cellules radiales / azimutales en POLAIRE (0 => repli sur cfg.n, cf. SystemConfig).
+  static int polar_nr(const SystemConfig& c) { return c.nr > 0 ? c.nr : c.n; }
+  static int polar_ntheta(const SystemConfig& c) { return c.ntheta > 0 ? c.ntheta : c.n; }
+  // Domaine d'INDICES : carre n x n en cartesien ; nr x ntheta en polaire (i = r, j = theta).
+  static Box2D index_domain(const SystemConfig& c) {
+    if (c.geometry == "polar") return Box2D::from_extents(polar_nr(c), polar_ntheta(c));
+    return Box2D::from_extents(c.n, c.n);
+  }
 
   explicit Impl(const SystemConfig& c)
       : cfg(c),
         geom{Box2D::from_extents(c.n, c.n), 0.0, c.L, 0.0, c.L},
-        ba(std::vector<Box2D>{Box2D::from_extents(c.n, c.n)}),
+        polar_(c.geometry == "polar"),
+        pgeom_{index_domain(c), Real(c.r_min), Real(c.r_max)},
+        ba(std::vector<Box2D>{index_domain(c)}),
         dm(1, n_ranks()),
         bc_(make_bc(c)),
-        dom(Box2D::from_extents(c.n, c.n)),
-        per_{c.periodic, c.periodic},
-        periodic_(c.periodic),
+        dom(index_domain(c)),
+        per_{!polar_ && c.periodic, !polar_ && c.periodic},
+        periodic_(!polar_ && c.periodic),
         aux(ba, dm, kAuxBaseComps, 1) {}
 
   // Garantit une largeur aux >= ncomp (canal PARTAGE). Reallouer l'aux GARDE son adresse (membre :
@@ -276,6 +301,14 @@ struct System::Impl {
 
   static BCRec make_bc(const SystemConfig& c) {
     BCRec b;  // periodique par defaut
+    if (c.geometry == "polar") {
+      // POLAIRE : r (dir 0, xlo/xhi) porte une CL PHYSIQUE (paroi / sortie libre, Foextrap) ; theta
+      // (dir 1, ylo/yhi) est PERIODIQUE (l'anneau couvre [0, 2pi)). C'est la convention de
+      // test_polar_transport_mms et de assemble_rhs_polar (theta periodique, r physique).
+      b.xlo = b.xhi = BCType::Foextrap;
+      b.ylo = b.yhi = BCType::Periodic;
+      return b;
+    }
     if (!c.periodic) b.xlo = b.xhi = b.ylo = b.yhi = BCType::Foextrap;
     return b;
   }
@@ -482,7 +515,69 @@ struct System::Impl {
   // modele genere). Ici on ne fournit que le contexte de grille a leur passer.
   GridContext grid_ctx() { return GridContext{dom, bc_, geom, &aux}; }
 
+  // Contexte de grille POLAIRE (anneau pgeom_ + CL r/theta + aux) pour les fermetures de bloc polaires
+  // (block_builder_polar.hpp). Pendant de grid_ctx() ; jamais appele en cartesien.
+  PolarGridContext grid_ctx_polar() { return PolarGridContext{dom, bc_, pgeom_, &aux}; }
+
+  // --- Poisson POLAIRE direct (PolarPoissonSolver) : construit paresseusement, mono-rang, box unique
+  // couvrant l'anneau. La BC radiale vient de poisson_bc() (Foextrap -> Neumann homogene, paroi ; le
+  // 'wall' cartesien circulaire n'a pas de sens sur un anneau global et n'est pas applique). theta est
+  // PERIODIQUE (gere par la FFT-en-theta, aucune BC azimutale). ADDITIF : ne touche jamais ell_.
+  void ensure_elliptic_polar() {
+    if (pell_) return;
+    if (p_rhs != "charge_density" && p_rhs != "composite")
+      throw std::runtime_error("System::set_poisson (polaire) : rhs '" + p_rhs +
+                               "' inconnu (charge_density|composite)");
+    if (p_solver != "geometric_mg" && p_solver != "polar")
+      throw std::runtime_error(
+          "System::set_poisson (polaire) : solver '" + p_solver +
+          "' non supporte sur un anneau ; le Poisson polaire est direct (FFT-en-theta + tridiag-en-r). "
+          "Laisser le defaut ('geometric_mg') ou demander 'polar'.");
+    if (has_eps_field_ || has_eps_xy_field_ || has_kappa_field_)
+      throw std::runtime_error(
+          "System::set_poisson (polaire) : permittivite variable / anisotrope / reaction non supportee "
+          "par le Poisson polaire direct (Phase 2b ; operateur (1/r) d_r(r d_r) + (1/r^2) d_theta^2)");
+    // BC radiale : Dirichlet/Neumann depuis poisson_bc() (xlo/xhi). theta toujours periodique.
+    const BCRec pbc = poisson_bc();
+    pell_.emplace(pgeom_, ba, pbc);
+  }
+
+  // solve_fields POLAIRE : assemble f = Sum_s elliptic_rhs_s(U_s) (boucle hote par cellule), resout le
+  // Poisson polaire, puis DERIVE l'aux en base locale (e_r, e_theta) :
+  //   aux[0] = phi ;  aux[1] = grad_r = d phi/dr ;  aux[2] = grad_theta = (1/r) d phi/d theta.
+  // C'est la disposition attendue par ExBVelocityPolar (v_r = -grad_theta/B, v_theta = grad_r/B).
+  void solve_fields_polar() {
+    ensure_elliptic_polar();
+    MultiFab& rhs = pell_->rhs();
+    rhs.set_val(Real(0));
+    for (auto& s : sp) s.add_poisson_rhs(s.U, rhs);
+    // Permittivite CONSTANTE eps != 1 : lap phi = f/eps (mise a l'echelle 1/eps du rhs), comme le
+    // cartesien. (eps(x) variable/aniso est refuse par ensure_elliptic_polar.)
+    if (p_eps_ != Real(1)) {
+      const Real inv = Real(1) / p_eps_;
+      for (int li = 0; li < rhs.local_size(); ++li) {
+        Array4 r = rhs.fab(li).array();
+        const Box2D v = rhs.box(li);
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
+      }
+    }
+    pell_->solve();
+    device_fence();
+    // Derivation (phi, grad_r, grad_theta) en base locale (e_r, e_theta) via le MEME helper que le test
+    // C++ (derive_aux_polar de block_builder_polar.hpp). phi est SANS ghost (solveur direct mono-box) :
+    // le helper n'en lit donc jamais d'index hors domaine (radial DECENTRE aux parois, theta ENROULE en
+    // periodique) -- c'etait le bug : la difference centree lisait phi(lo-1)/phi(hi+1)/phi(.,jlo-1) hors
+    // allocation -> gradient parasite -> vitesse divergente -> nan.
+    derive_aux_polar(pell_->phi(), aux, pgeom_);
+    apply_te();  // inerte en polaire ExB (aucun bloc fluide source de T_e), conserve par symetrie
+    // Ghosts de l'aux : theta PERIODIQUE (joint 0/2pi), r PHYSIQUE (extrapolation au bord). fill_ghosts
+    // route deja par bc_ (xlo/xhi Foextrap, ylo/yhi Periodic) -> halo azimutal periodique correct.
+    fill_ghosts(aux, dom, bc_);
+  }
+
   void solve_fields() {
+    if (polar_) return solve_fields_polar();  // anneau : Poisson polaire + aux en base locale (e_r, e_theta)
     adc_sf_mark("solve_fields: debut");
     ensure_elliptic();
     adc_sf_mark("solve_fields: apres ensure_elliptic");
@@ -581,21 +676,30 @@ struct System::Impl {
 };
 
 namespace {
-// Garde-fou geometrie (chantier "grille polaire", Phase 1). Le CHOIX de geometrie est porte par la
-// config (adc.CartesianMesh / adc.PolarMesh). "cartesian" : chemin historique, bit-identique. "polar" :
-// la geometrie annulaire + l'operateur de transport polaire (assemble_rhs_polar) + sa validation MMS
-// sont livres par cette phase, MAIS le transport polaire A TRAVERS System::step n'est PAS encore cable
-// (il demanderait aussi le Poisson polaire, hors scope Phase 1). On REFUSE donc explicitement un System
-// polaire au lieu de faire tourner SILENCIEUSEMENT la numerique cartesienne sur une config polaire
-// (ce qui serait un piege). Tout autre token est une erreur. Cartesien : aucun effet (chemin inchange).
+// Garde-fou geometrie (chantier "grille polaire"). Le CHOIX de geometrie est porte par la config
+// (adc.CartesianMesh / adc.PolarMesh). "cartesian" : chemin historique, bit-identique. "polar" : anneau
+// global (r, theta) branche dans System.step (Phase 2b) : transport polaire (assemble_rhs_polar) +
+// Poisson polaire (PolarPoissonSolver) + aux en base locale (e_r, e_theta). On valide ICI les bornes
+// radiales de l'anneau (r_max > r_min >= 0) ; le Python (PolarMesh) les valide deja, mais un appelant
+// qui construit le SystemConfig a la main doit aussi etre protege. Tout autre token est une erreur.
 void check_geometry(const SystemConfig& c) {
   if (c.geometry == "cartesian") return;
-  if (c.geometry == "polar")
-    throw std::runtime_error(
-        "System : geometry='polar' (adc.PolarMesh) n'est pas encore branche dans System.step (Phase 1 "
-        "livre la grille annulaire PolarGeometry, l'operateur de transport polaire assemble_rhs_polar "
-        "et sa validation MMS ; le transport polaire via System, qui demande aussi le Poisson polaire, "
-        "est une phase ulterieure). Utiliser adc.CartesianMesh (defaut) ou l'operateur polaire en C++.");
+  if (c.geometry == "polar") {
+    if (!(c.r_max > c.r_min && c.r_min >= 0.0))
+      throw std::runtime_error(
+          "System : geometry='polar' exige un anneau r_max > r_min >= 0 (r_min > 0 evite la "
+          "singularite de coordonnee r=0) ; cf. adc.PolarMesh");
+    // nr >= 3 IMPOSE : la derive radiale de l'aux (derive_aux_polar) utilise un stencil DECENTRE
+    // d'ordre 2 aux deux parois (lit phi(i+1),phi(i+2) a r_min et phi(i-1),phi(i-2) a r_max). phi est
+    // alloue SANS ghost par le solveur direct (sa box valide EST son allocation) : nr < 3 ferait lire
+    // phi hors bornes (UB). On le refuse ICI (meme calcul de repli que Impl::polar_nr : nr ou n).
+    const int nr = c.nr > 0 ? c.nr : c.n;
+    if (nr < 3)
+      throw std::runtime_error(
+          "System : geometry='polar' exige nr >= 3 (stencil radial decentre d'ordre 2 aux parois ; "
+          "phi sans ghost) ; cf. adc.PolarMesh");
+    return;
+  }
   throw std::runtime_error("System : geometry '" + c.geometry +
                            "' inconnu (cartesian | polar) ; cf. adc.CartesianMesh / adc.PolarMesh");
 }
@@ -639,6 +743,31 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   std::function<void(const MultiFab&, MultiFab&)> add_poisson_rhs;
   CellConvert prim_to_cons, cons_to_prim;  // conversions ponctuelles du modele (set/get_primitive_state)
   VariableSet cons_vs, prim_vs;
+  if (P->polar_) {
+    // CHEMIN POLAIRE (anneau) : fermetures bati par block_builder_polar.hpp (assemble_rhs_polar +
+    // ExBVelocityPolar + Poisson polaire). IMEX n'a pas de sens ici (transport ExB scalaire, pas de
+    // source raide) : on le refuse explicitement plutot que de jouer le seul transport en silence.
+    if (imex)
+      throw std::runtime_error(
+          "System::add_block (polaire) : time='imex' non supporte (transport ExB scalaire sur un "
+          "anneau : pas de source raide a traiter en implicite). Utiliser 'explicit'/'ssprk2'/'ssprk3'.");
+    const PolarGridContext pctx = P->grid_ctx_polar();
+    detail::dispatch_model_polar(model, [&](auto m) {
+      using M = decltype(m);
+      ncomp = M::n_vars;
+      cons_vs = M::conservative_vars();
+      prim_vs = M::primitive_vars();
+      // wall_radial = true : paroi solide aux deux bords radiaux (no-penetration) -> flux radial nul
+      // a r_min / r_max -> masse Sum n r dr dtheta conservee A LA MACHINE (l'anneau diocotron est borne
+      // par deux parois conductrices). C'est la BC qui rend le pas couple conservatif.
+      clo = make_block_polar(m, limiter, riemann, pctx, recon_prim, method, /*wall_radial=*/true);
+      max_speed = make_max_speed_polar(m, &P->aux);
+      add_poisson_rhs = make_poisson_rhs_polar(m);
+      auto conv = make_cell_convert(m);
+      prim_to_cons = std::move(conv.first);
+      cons_to_prim = std::move(conv.second);
+    });
+  } else {
   const GridContext ctx = P->grid_ctx();
   // Le modele est compose a partir des briques designees par la spec ; le visiteur cable les
   // fermetures (constructeurs en en-tete, instanciables AOT). ncomp = n_vars du modele compose ;
@@ -662,6 +791,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     prim_to_cons = std::move(conv.first);
     cons_to_prim = std::move(conv.second);
   });
+  }
   // Installation commune (meme chemin que add_compiled_model pour un modele genere par le DSL) :
   // les fermetures tournent sur les MultiFab REELS du System (halos MPI via fill_boundary, device
   // via Kokkos), sans recopie.
@@ -1062,15 +1192,22 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
 
 void System::set_density(const std::string& name, const std::vector<double>& rho) {
   Impl::Species& s = p_->find(name);
-  const int n = p_->cfg.n;
-  if (static_cast<int>(rho.size()) != n * n)
-    throw std::runtime_error("System::set_density : taille != n*n");
+  // Layout row-major du tableau d'entree : (ni x nj) = extents de la box de l'etat. En cartesien
+  // ni = nj = cfg.n (indexation et taille bit-identiques a avant). En polaire ni = nr, nj = ntheta :
+  // on indexe par les extents reels de la box (et non n*n), donc nr != ntheta est correctement gere.
+  const Box2D v = s.U.box(0);
+  const int ni = v.nx(), nj = v.ny();
+  if (static_cast<int>(rho.size()) != ni * nj)
+    throw std::runtime_error("System::set_density : taille != nr*ntheta (ou n*n en cartesien)");
   const Real gm1 = Real(s.gamma) - Real(1);
   Array4 u = s.U.fab(0).array();
-  const Box2D v = s.U.box(0);
+  // CONVENTION DE LAYOUT (inchangee vs l'historique) : axe lent = 2nd indice de box (j), axe rapide =
+  // 1er (i), i.e. flat[(j-lo) * ni + (i-lo)]. En cartesien ni = n, lo = 0 -> flat[j*n+i] (bit-identique
+  // a avant). En polaire le tableau est donc (nr, ntheta) ligne-par-ligne radiale (i = r lent par
+  // rapport a... non : j = theta lent, i = r rapide), MEME ordre que density()/copy_comp0 -> coherent.
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
     for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
-      const Real r = rho[static_cast<std::size_t>(j) * n + i];
+      const Real r = rho[static_cast<std::size_t>(j - v.lo[1]) * ni + (i - v.lo[0])];
       u(i, j, 0) = r;
       if (s.ncomp >= 3) { u(i, j, 1) = 0; u(i, j, 2) = 0; }  // qte de mvt au repos
       if (s.ncomp == 4) u(i, j, 3) = r / gm1;                // E = p/(g-1), p = rho
@@ -1154,7 +1291,12 @@ void System::advance(double dt, int nsteps) {
 double System::step_cfl(double cfl) {
   Impl* P = p_.get();
   P->solve_fields();
-  const Real h = std::min(P->geom.dx(), P->geom.dy());
+  // Pas physique MIN de la grille : cartesien = min(dx, dy) ; POLAIRE = min(dr, r_min * dtheta) (le pas
+  // physique azimutal r*dtheta est minimal au rayon interieur r_min de l'anneau -> bord le plus
+  // contraignant pour la CFL). Le reste de la formule CFL (par bloc, substeps/stride) est inchange.
+  const Real h = P->polar_
+                     ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
+                     : std::min(P->geom.dx(), P->geom.dy());
   // CFL PAR BLOC, FACTEUR STRIDE ET SUBSTEPS INCLUS. Un bloc de cadence M avance d'un pas effectif
   // M*dt en substeps_b sous-pas, donc chaque sous-pas vaut stride_b * dt / substeps_b : la condition
   // stable par sous-pas est stride_b * dt / substeps_b <= cfl * h / w_b, soit
@@ -1206,7 +1348,9 @@ double System::step_adaptive(double cfl) {
     if (s.evolve) wmin = std::min(wmin, w);
   }
   if (wmin >= Real(1e30)) wmin = Real(1e-30);  // aucun bloc evolutif (tous geles)
-  const Real h = std::min(P->geom.dx(), P->geom.dy());
+  const Real h = P->polar_
+                     ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
+                     : std::min(P->geom.dx(), P->geom.dy());
   const double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
   for (std::size_t b = 0; b < P->sp.size(); ++b) {
     auto& s = P->sp[b];
@@ -1277,13 +1421,43 @@ std::vector<std::string> System::block_names() const {
   for (const auto& s : p_->sp) out.push_back(s.name);
   return out;
 }
-double System::mass(const std::string& name) const { return sum(p_->find(name).U, 0); }
+double System::mass(const std::string& name) const {
+  const Impl::Species& s = p_->find(name);
+  if (!p_->polar_) return sum(s.U, 0);  // cartesien : somme nue des cellules (bit-identique)
+  // POLAIRE : masse FV = Sum_ij n_ij r_i dr dtheta (volume de cellule annulaire r dr dtheta). C'est la
+  // quantite CONSERVEE par assemble_rhs_polar (cf. test_polar_transport_mms). Boucle hote sur les
+  // cellules valides (mono-rang : un seul fab local), reduite sur les rangs par symetrie (n_ranks==1).
+  device_fence();
+  const PolarGeometry& g = p_->pgeom_;
+  const Real dr = g.dr(), dth = g.dtheta();
+  double m = 0.0;
+  for (int li = 0; li < s.U.local_size(); ++li) {
+    const ConstArray4 u = s.U.fab(li).const_array();
+    const Box2D v = s.U.box(li);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        m += static_cast<double>(u(i, j, 0)) * static_cast<double>(g.r_cell(i) * dr * dth);
+  }
+  return all_reduce_sum(m);
+}
 std::vector<double> System::density(const std::string& name) const {
   return p_->copy_comp0(p_->find(name).U);
 }
 std::vector<double> System::potential() {
-  p_->ensure_elliptic();
   device_fence();
+  // POLAIRE : phi vient du Poisson polaire (pell_), pas du solveur cartesien (ell_). On le construit
+  // paresseusement si besoin (un appel avant tout step) et on lit phi() de PolarPoissonSolver.
+  if (p_->polar_) {
+    p_->ensure_elliptic_polar();
+    const ConstArray4 ph = p_->pell_->phi().fab(0).const_array();
+    const Box2D v = p_->aux.box(0);
+    std::vector<double> out;
+    out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(ph(i, j));
+    return out;
+  }
+  p_->ensure_elliptic();
   const ConstArray4 ph = p_->ell_phi().fab(0).const_array();
   const Box2D v = p_->aux.box(0);
   std::vector<double> out;

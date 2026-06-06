@@ -5,19 +5,32 @@
 > (3) ce que les agents ont explicitement note comme "reste a faire".
 > Convention : `[x]` fait et sur `master`, `[~]` partiel, `[ ]` a faire.
 
-## ETAT COURANT (session juin 2026, master = #139)
+## ETAT COURANT (session juin 2026, master = #154)
 
-Synthese a date apres la pile Schur + pipeline System + polaire + revue adversariale. Detail dans
-les sections 10 a 15 (nouvelles).
+Synthese a date apres la pile Schur + pipeline System + polaire + revue adversariale + run nuit. Detail
+dans les sections 10 a 15 (nouvelles).
 
-**Merge cette session :** #130 Poisson polaire (Phase 2a) ; #131 source couplee DSL (P5) ; #132 IMEX
-sur AMR (Gap 2) ; #133 foncteurs nommes nvcc (tests device) ; #134 krylov precond/matvec CL homogenes
-(findings revue 1+2) ; #139 doc archi AMR multi-blocs ; #137 honnetete API (findings 4/5/6) ;
-#138 step_cfl substeps-aware (finding 3 ; commentaires+docs+tests, formule INCHANGEE) ; #136
-acceleration CI (split fast/full + cache Kokkos/ccache, ~25 min -> ~5 min a chaud, tous les tests gardes) ;
-#135 fix device GPU (finding 7 : Geometry/Box2D ADC_HD + all_reduce_max CFL ; NB ne rend PAS tout le
-stack Schur/polaire device-clean -- voir verdict GH200 ci-dessous) ; #141 garde-fou layout AMR
-+ AmrHierarchyLayout (step-1 du capstone multi-blocs).
+**Merge run nuit (#150-#166) :** #150/#152/#158 fix device TEST-SIDE (foncteurs hote dans kernels) ;
+#151 extraction NativeLoader de system.cpp ; #155 CI Kokkos OpenMP (91/91) ; #156 surface couplage ;
+#157 validation MPI+Kokkos Cuda multi-GPU rank-invariant ; #159 neutraliser mentions diocotron ;
+#160/#161/#162 corrections doc (BACKEND_COVERAGE 7/7, ARCHITECTURE A.2, findings A2/A3/A4) ;
+#163 concepts C++20 elliptiques (EllipticOperator/LinearSolver/FieldPostProcessor) ; #164 supprimer
+amr_coupler.hpp deprecated ; #165 harnais profiling (Poisson MG domine 96-99.9%) ; #166 refresh todo.
+
+**Merge sessions precedentes :** #130 Poisson polaire (2a) ; #131 source couplee DSL (P5) ; #132 IMEX
+AMR (Gap 2) ; #133 foncteurs nvcc ; #134 krylov CL homogenes ; #135 fix device Geometry/Box2D+CFL ;
+#136 CI split fast/full ; #137 honnetete API ; #138 step_cfl substeps-aware ; #139 doc AMR multi-blocs ;
+#141 garde-fou layout AMR ; #154 capstone PR1 (facade runtime multi-blocs AmrSystem, hierarchie partagee).
+
+**Merge session courante (post-coupure agents nuit) :** #167 A2 (helper `add_pair` conservatif DSL +
+verif opt-in) ; #170 C.1 (decoupe `amr_reflux_mf.hpp` en 5 sous-entetes + umbrella, verbatim, ctest 93/93) ;
+#169 A3 (average_down trailing covered cells AMR + tests discriminants). **En vol : #168 Polaire 2b.**
+
+**PROCESS (nouveau, integrateur) :** chaque vague de PR passe une REVUE ADVERSARIALE (workflow multi-
+lentilles : correctness / bit-identity / test-rigor / hygiene-scope, chaque finding verifie par un
+skeptique independant) AVANT merge, EN PLUS de ci-full. Merge seulement si ci-full verte ET zero blocker
+confirme. Gain mesure : la revue a attrape sur #168 un blocker que la CI NE voyait PAS (precondition
+nr>=3 de `derive_aux_polar` non imposee -> lecture phi hors bornes pour `PolarMesh(nr=2)`) -> corrige.
 
 Findings de revue : **1-7 sur master** ; 8 differe au portage MPI.
 
@@ -30,27 +43,42 @@ CI (depuis #136) : PR de routine = ci-fast (Release + Python). MPI + Kokkos via 
 `workflow_dispatch` / label `ci-full`. REGLE : poser le label `ci-full` sur toute PR risquee (MPI /
 Kokkos / device / Schur / AMR) AVANT merge pour la validation complete.
 
-**En vol (run autonome nuit, ~20 PR mergees) :**
-- [ ] **SystemStepper** : 2e extraction de `system.cpp` (apres NativeLoader #151), bit-identique -> debloque **Polaire 2b**.
-- [ ] **#154 AMR capstone PR1** : facade runtime multi-blocs (2 blocs explicites co-localises) -> debloque AMR PR2 + le fix conservation A3.
-- [ ] **#165 profiling** : harnais de mesure par phase (transport/Poisson/halos/reductions/fences/alloc/regrid), ZERO optim.
-- [ ] **Hoffart re-drive** : build Kokkos PIC corrige (echec -fPIC du module Python sur aarch64), smoke -> n=384 -> n=512 GH200.
+**En vol :**
+- [~] **#168 Polaire 2b (PRIORITE, CE PR)** : transport + Poisson polaire branches dans `System.step`
+  (anneau GLOBAL, PAS de couplage cart<->polaire ; cartesien defaut bit-identique). WIP de l'agent nuit
+  recupere + 2 BUGS CORRIGES : (1) `phi` sans ghost -> derive de l'aux lisait phi hors allocation -> nan
+  masque (test passait FAUX : `nan>tol` faux en C++) ; fix `derive_aux_polar` (radial DECENTRE ordre 2
+  aux parois, theta ENROULE periodique). (2) revue adversariale : precondition nr>=3 non imposee -> OOB
+  pour `PolarMesh(nr=2)` ; garde ajoutee (check_geometry C++ + PolarMesh Python) + test de rejet.
+  Validation : C++ conservation masse 3.4e-15 ; Python `System(PolarMesh)` step+step_cfl <1e-11 ;
+  cartesien 4/4 PASS. ci-full re-run en cours -> merge des verte.
 
-**Prochaines etapes (sequencees, PRIORITE Polaire 2b) :**
-1. **Polaire Phase 2b (PRIORITE, section 12)** : brancher transport+Poisson polaire dans `System.step`
-   (maillage annulaire GLOBAL, PAS de couplage cart<->polaire en v1 ; cartesien defaut bit-identique)
-   + RUN diocotron annulaire. LE livrable scientifique. DES QUE SystemStepper merge.
-2. **Schur PR6** (mesure diocotron-Schur sur le chemin polaire fonctionnel) : isole l'effet TEMPOREL du
-   Schur ; ne pretend PAS corriger l'erreur geometrique. Apres Polaire 2b.
-3. **AMR capstone PR2-8** (apres #154) : substeps/stride/evolve par bloc -> sources couplees AMR
-   (conservation composite) -> IMEX local -> DSL prod multi-bloc -> regrid union-tags -> Schur global AMR.
-4. **Fixes conservation (section 16)** : A3 (average_down trailing dans `coupled_source_step` /
-   `AmrImplicitSourceStepper`, apres #154) ; A2 (helper conservatif DSL) ; A4 (test polaire flux radial).
-5. **Lot B restant** : SystemFieldSolver, SystemBlockStore (apres SystemStepper). **Lot C.1** : decouper
-   `amr_reflux_mf.hpp`. **Lot A.5** : convention de commentaires par dossier.
-6. **BORD D'ANNEAU = discontinuite de densite transportee, PAS une paroi** : NE PAS refaire paroi-transport
-   dessus (physiquement faux) ; leviers valides = polaire / haut ordre / AMR (cf. Etape 7). Differes :
-   finding 8 (`fab(0)`) au portage MPI ; `/(2*dx)->*cx` au dernier bit ; P7.
+**Prochaines etapes (sequencees, ETAT PRECIS post-scoping) :**
+1. **Schur PR6** (apres merge #168) : mesure diocotron-Schur sur le chemin polaire desormais dispo ;
+   isole l'effet TEMPOREL du Schur ; ne pretend PAS corriger l'erreur geometrique. Mesure + doc, pas une
+   modif coeur. Write-set : adc_cases / harnais + doc.
+2. **AMR capstone (cf. section 15, ROADMAP PRECIS)** : #154 a livre (ii) = facade 2 blocs explicites
+   fonctionnelle (hierarchie partagee, schemas differents, Poisson somme co-localisee, conservation par
+   bloc, MPI np=1/2/4). Le moteur compile-time `AmrSystemCoupler` sait DEJA substeps/stride/IMEX/sources
+   couplees ; c'est la FACADE RUNTIME `AmrRuntime` qui ne les honore pas encore. Reste, par ordre :
+   (iii) test validation Poisson-somme [trivial] ; **(iv) substeps/stride/evolve + step_cfl substeps-aware
+   [IMMEDIAT, deverrouille le multirate ; write-set amr_runtime.hpp + amr_system.cpp, AUCUN conflit]** ;
+   (v) DSL production multi-bloc [//] ; (vi) sources couplees runtime [//, A3 deja fait] ; (vii) IMEX
+   multi-bloc runtime [apres vi] ; (viii) regrid union-tags [Phase 2]. stride_due deja correct (#140).
+3. **Lot B restant** (apres merge #168, qui touche `system.cpp`) : SystemFieldSolver, SystemBlockStore,
+   SystemStepper -- extractions de `python/system.cpp` (NativeLoader deja extrait #151), bit-identiques.
+4. **Lot A.5** : convention de commentaires par dossier (CODE_DOCUMENTATION_CONVENTION.md), progressif,
+   dossier par dossier, sans churn automatique. Basse priorite.
+5. **A4** : couvert par le test C++/Python #168 (conservation masse avec flux radial interieur non nul) ;
+   ajouter au besoin un cas MMS polaire avec v_r != 0 dedie.
+6. **Hoffart re-drive** : build Kokkos PIC corrige (echec -fPIC du module Python sur aarch64), smoke ->
+   n=384 -> n=512 GH200. Le chemin polaire annulaire est maintenant dispo dans System (apres #168).
+7. **Perf (apres Polaire 2b, cf. #165)** : Poisson MG V-cycle domine 96-99.9% et REGRESSE sous Kokkos
+   OpenMP (parallel_for par lissage jusqu'aux grilles 2x2 ; le chemin serie garde n_cells>=4096, pas le
+   chemin Kokkos). UNE optim par PR, profil avant/apres. Pas avant que Polaire 2b soit merge.
+8. **BORD D'ANNEAU = discontinuite de densite transportee, PAS une paroi** : NE PAS refaire paroi-transport
+   dessus (physiquement faux) ; leviers valides = polaire / haut ordre / AMR. Differes : finding 8
+   (`fab(0)`) au portage MPI ; `/(2*dx)->*cx` au dernier bit ; P7 (implicit-total + params runtime DSL).
 
 ## 0. API publique RECOMMANDEE (point d'entree utilisateur)
 
@@ -376,8 +404,11 @@ n'adresse PAS ce gap (il stabilise le temps). Donc le levier = mettre la geometr
       evite le MG-en-polaire qui stagne). (#130)
 - [~] **Device** : flux/metrique polaire FAUX en silence sur Cuda (meme cause #135 : `r_cell`/`theta_cell`
       non `ADC_HD`). Fix #135 (en vol).
-- [ ] **Phase 2b** : cabler transport+Poisson polaire dans `System.step` + couplage cartesien<->polaire
-      + RUN diocotron annulaire (la mesure). Apres #138 (libere `system.cpp`). LE livrable scientifique.
+- [~] **Phase 2b (#168, en vol)** : transport + Poisson polaire branches dans `System.step` sur un anneau
+      GLOBAL (PAS de couplage cartesien<->polaire en v1 ; cartesien defaut bit-identique). `derive_aux_polar`
+      (aux en base locale e_r/e_theta), paroi radiale solide (wall_radial), `mass`/`step_cfl`/`step_adaptive`
+      polaires, garde nr>=3. Tests C++ (conservation 3.4e-15) + Python `System(PolarMesh)` (<1e-11). RESTE
+      apres merge : le RUN diocotron annulaire quantitatif (mesure du taux) = livrable scientifique suivant.
 
 ## 13. Revue adversariale + durcissement (findings)
 
@@ -420,31 +451,40 @@ sources couplees meme-cellule a contributions EXACTEMENT opposees ; reflux par b
 OR phi OR user ; optimisations futures TEMPORELLES seulement (stride / evolve global au bloc), JAMAIS
 spatiales locales. PAS de hierarchie par espece en v1 (Phase 3 seulement si besoin scientifique reel).
 
-CONSTAT CLE : le moteur multi-blocs EXISTE DEJA = `AmrSystemCoupler` (compile-time : hierarchie
-partagee, Poisson somme, scheme/substeps/stride par bloc, IMEX-callback, sources niveau-par-niveau,
-B_z partage). Donc COMPLETION, pas creation. Deux manques reels : (1) la facade runtime `AmrSystem`
-refuse un 2e bloc (`python/amr_system.cpp:129-130, 152-153`) ; (2) `AmrSystemCoupler` n'a PAS de
-`regrid` (hierarchie figee) contrairement a `AmrCouplerMP::regrid`. Bug latent : cadence sur
-`macro_step_ % stride` au lieu de `stride_due` (couplage faux pour blocs strided).
+CONSTAT CLE (confirme par scoping juin 2026 sur master = #154) : le moteur multi-blocs EXISTE DEJA =
+`AmrSystemCoupler` (compile-time : hierarchie partagee, Poisson somme, scheme/substeps/stride par bloc,
+IMEX-callback, sources niveau-par-niveau + average_down trailing #169, B_z partage ; `same_layout_or_throw`).
+La FACADE RUNTIME `AmrRuntime` (#154, `include/adc/runtime/amr_runtime.hpp`) expose un registre type-erase
+par nom et fait DEJA tourner 2 blocs explicites, mais ne TRANSMET pas encore substeps/stride/IMEX/sources
+couplees/regrid de la facade vers le moteur. Donc COMPLETION cote facade, pas creation. Le bug `stride_due`
+est DEJA corrige (#140 : cadence `(macro_step_+1) % stride`, hold-then-catch-up). Mono-bloc passe toujours
+par `AmrCouplerMP` (jamais `AmrRuntime`) -> baseline bit-identique. Multi-bloc + regrid_every>0 REFUSE.
 
-Decoupe PR (Phase 1, write-sets) - EN ATTENTE DE GO :
-- [ ] **(i)** extraire `AmrBlock` / `AmrHierarchyLayout`, sans changer la physique (bit-identique mono-bloc).
-- [ ] **(ii)** 2 blocs explicites, schemas differents.
-- [ ] **(iii)** Poisson somme co-localise.
-- [ ] **(iv)** substeps/stride/evolve + step_cfl substeps-aware (+ fix `stride_due`).
-- [ ] **(v)** DSL production multi-bloc (bloc NOMME) -- attend #137 (libere `__init__.py`).
-- [ ] **(vi)** sources couplees AMR meme-cellule / opposees.
-- [ ] **(vii)** IMEX local AMR.
-- [ ] **(viii)** ensuite seulement : Schur / implicite global / repro papier.
+Decoupe PR (Phase 1, write-sets) - ETAT PRECIS (scoping) :
+- [x] **(i)** extraire `AmrBlock` / `AmrHierarchyLayout` (bit-identique mono-bloc). FAIT #141.
+- [x] **(ii)** 2 blocs explicites, schemas differents (facade AmrRuntime + Poisson somme co-localisee +
+      conservation par bloc + MPI np=1/2/4). FAIT #154. Tests test_amr_system_twoblock + mpi_twoblock_parity.
+- [ ] **(iii)** test de VALIDATION Poisson somme co-localise [trivial, validation seule ; le moteur le fait deja].
+- [ ] **(iv) IMMEDIAT** substeps/stride/evolve + step_cfl substeps-aware : `AmrRuntime::step` doit honorer
+      `substeps_`/`stride` par bloc (actuellement tous explicites a 1 sous-pas) ; `AmrSystem::step_cfl` doit
+      devenir substeps-aware (`dt=cfl*h*min(sub_b)/max(stride_b*w_b)`). Write-set : amr_runtime.hpp +
+      amr_system.cpp + 2 tests. AUCUN conflit avec system.cpp/dsl.py. stride_due deja correct (#140).
+- [ ] **(v)** DSL production multi-bloc : `add_native_block`/`add_compiled_model(AmrSystem&)` ne doit plus
+      lever sur le 2e bloc (file d'attente + build a `ensure_built`). Write-set amr_dsl_block.hpp + amr_system.cpp.
+- [ ] **(vi)** sources couplees AMR meme-cellule / opposees : exposer `coupled_source_step` du moteur via le
+      registre runtime ; A3 (average_down covered cells) DEJA fait (#169). Write-set amr_runtime.hpp + amr_system.cpp.
+- [ ] **(vii)** IMEX local AMR runtime : la facade honore `time="imex"` multi-bloc (le moteur a deja le callback).
+- [ ] **(viii)** Phase 2 : regrid union-tags (deverrouille multi-bloc + regrid_every>0) ; puis Schur / implicite
+      global / repro papier.
 
 Tests d'acceptation : 2 blocs explicites schemas differents ; e- IMEX(substeps=10) + ions
 Explicit(substeps=1) ET l'inverse ; neutres stride=20 nourrissant sources/Poisson ; evolve=False fond
 fixe dans le RHS elliptique ; regrid conserve la masse par bloc ; DSL production 2 blocs ; MPI np=1/2/4 ;
 Kokkos Serial ; 1 cas multi-bloc production sur GH200.
 
-## 16. Findings conservation (revue, A FAIRE)
+## 16. Findings conservation (revue)
 
-- **A3 [BUG conservation, prio]** : `AmrSystemCoupler::coupled_source_step` (include/adc/coupling/amr_system_coupler.hpp:341-352) et `AmrImplicitSourceStepper` (:436-438) appliquent la source a CHAQUE niveau, Y COMPRIS aux cellules grossieres COUVERTES, SANS average_down trailing -> les cellules grossieres couvertes portent une source redondante jusqu'au prochain solve_fields ; le diagnostic `amr_mass` (somme du seul niveau grossier) est alors incoherent pour une source non lineaire / champ non uniforme. (Le chemin transport-IMEX `advance_amr`->`subcycle_level_mp` est SAIN : `mf_apply_source_treatment` suivi de `mf_average_down_mb`.) FIX : `mf_average_down_mb` fin->grossier apres la boucle de niveaux dans ces deux methodes, OU application leaf-only. (Fichier occupe par le capstone AMR ; a faire apres.)
-- **A2 [RISK conservation]** : la CoupledSource DSL ne GARANTIT pas la conservation (`coupled_source_program.hpp:107` somme aveuglement les termes ; `dsl.py` ne verifie pas que les contributions +expr/-expr sur des (bloc,role) couples sont opposees -- contrairement aux couplages C++ nommes qui calculent UNE valeur a deux signes). FIX : helper `add_pair(src_block, dst_block, role, expr)` emettant automatiquement +expr et -expr, ou un mode de verification opt-in au compile().
-- **A4 [GAP test]** : conservation polaire correcte par construction mais `tests/test_polar_transport_mms.cpp:198` ne teste la conservation globale que pour v_r=0 (aucun flux radial). Ajouter un test de conservation avec flux radial INTERIEUR non nul.
+- [x] **A3 [BUG conservation] FAIT #169** : `AmrSystemCoupler::coupled_source_step` et `AmrImplicitSourceStepper` appliquaient la source aux cellules grossieres COUVERTES sans average_down trailing. Fix : cascade `mf_average_down_mb` fin->grossier apres la boucle de niveaux (no-op strict mono-niveau, bit-identique). Tests `test_amr_source_covered_cells` + `test_amr_composite_source_conservation` (discriminants : echouent sans le fix). Revu adversarialement (MERGE-SAFE).
+- [x] **A2 [RISK conservation] FAIT #167** : helper `add_pair(block_a, block_b, role, expr)` emet +expr / -expr depuis le MEME sous-arbre (conservatif par construction) + mode `compile(verify_conservation=True)` opt-in. Test `test_dsl_coupled_source_conservation`. Revu adversarialement (MERGE-SAFE).
+- [~] **A4 [GAP test]** : couvert en pratique par les tests #168 (conservation masse polaire avec flux radial INTERIEUR non nul, profil module en theta -> v_r != 0). RESTE optionnel : un cas MMS polaire dedie avec v_r != 0 analytique (au-dela de la conservation globale).
 - Tests a ajouter : `test_dsl_coupled_source_conservation`, `test_amr_composite_source_conservation`, `test_amr_source_covered_cells`, `test_polar_conservation_radial_flux`.
