@@ -350,6 +350,19 @@ class AmrSystemCoupler {
       b = 0;
       system_.for_each_block([&](auto& block) { block.state = saved[b++]; });
     }
+    // INVARIANT DE COUVERTURE : la source a ete appliquee independamment sur CHAQUE
+    // niveau, donc une cellule grossiere COUVERTE par un patch fin porte maintenant sa
+    // propre source grossiere, sans rapport avec la source vue par ses enfants fins. Une
+    // cellule grossiere couverte doit, par definition, etre la moyenne 2x2 de ses enfants
+    // (elle ne represente pas de matiere a elle seule, elle est une vue grossiere du fin).
+    // On restaure cette coherence par une cascade fin -> grossier identique a celle de
+    // solve_fields et du chemin transport-IMEX (subcycle_level_mp). Sans elle, le
+    // diagnostic amr_mass (qui somme le seul niveau grossier) compte une source grossiere
+    // fantome sous le patch. Hierarchie mono-niveau : aucune cellule couverte, la boucle
+    // ne s'execute pas -> strictement bit-identique a l'historique.
+    for (auto& levels : block_levels_)
+      for (int k = nlev_ - 1; k >= 1; --k)
+        mf_average_down_mb(levels[k].U, levels[k - 1].U);
   }
 
   // masse de la composante 0 du grossier du bloc b (somme u*dV sur fabs locaux ;
@@ -433,8 +446,18 @@ struct AmrImplicitSourceStepper {
 
   template <class Coupler, class Block, class Levels>
   void operator()(Coupler& coupler, Block& block, Levels& levels, Real dt) const {
-    for (int k = 0; k < static_cast<int>(levels.size()); ++k)
+    const int nlev = static_cast<int>(levels.size());
+    for (int k = 0; k < nlev; ++k)
       backward_euler_source(block.model, coupler.aux(k), levels[k].U, dt, iters);
+    // INVARIANT DE COUVERTURE (cf. coupled_source_step) : la source implicite a ete
+    // resolue independamment niveau par niveau, donc les cellules grossieres COUVERTES
+    // portent une source grossiere fantome au lieu de la moyenne 2x2 de leurs enfants
+    // fins. On retablit la coherence par la meme cascade fin -> grossier que le chemin
+    // transport-IMEX, pour qu'une cellule grossiere couverte reste la vue grossiere du fin
+    // (sinon amr_mass, somme du seul grossier, compte la source du patch en double).
+    // Mono-niveau : aucune cellule couverte, boucle vide -> bit-identique a l'historique.
+    for (int k = nlev - 1; k >= 1; --k)
+      mf_average_down_mb(levels[k].U, levels[k - 1].U);
   }
 };
 

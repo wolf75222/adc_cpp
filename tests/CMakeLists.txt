@@ -86,6 +86,8 @@ adc_add_test(test_coupled_source)
 adc_add_test(test_system_two_explicit)
 adc_add_test(test_assembler_driver)
 adc_add_test(test_amr_system_coupler)
+adc_add_test(test_amr_source_covered_cells)  # A3 : cellules grossieres couvertes coherentes apres source par niveau (average_down trailing)
+adc_add_test(test_amr_composite_source_conservation)  # A3 : masse totale (somme feuille-consciente) conservee par la source couplee conservative
 adc_add_test(test_amr_layout_guard)  # garde-fou de layout AMR partage : AmrHierarchyLayout + same_layout_or_throw (comparaison EXACTE)
 adc_add_test(test_amr_stride_cadence)  # cadence HOLD-THEN-CATCH-UP dans AmrSystemCoupler
 adc_add_test(test_system_hardening)
