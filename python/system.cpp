@@ -903,9 +903,12 @@ void System::set_block_conversion(const std::string& name, CellConvert prim_to_c
 void System::set_primitive_state(const std::string& name, const std::vector<double>& prim) {
   Impl::Species& s = p_->find(name);
   const int nc = s.ncomp;
-  const std::size_t nn = static_cast<std::size_t>(p_->cfg.n) * p_->cfg.n;
+  // Nombre de cellules = EXTENTS REELS du domaine d'indices (n*n cartesien, nr*ntheta polaire), PAS
+  // cfg.n*cfg.n : en polaire cfg.n = nr, donc cfg.n^2 != nr*ntheta -> debordement de tas (ntheta<nr) ou
+  // contenu partiel/faux (ntheta>nr). Cartesien bit-identique (dom.nx()==dom.ny()==n).
+  const std::size_t nn = static_cast<std::size_t>(p_->dom.nx()) * static_cast<std::size_t>(p_->dom.ny());
   if (prim.size() != static_cast<std::size_t>(nc) * nn)
-    throw std::runtime_error("System::set_primitive_state : taille != ncomp*n*n (bloc '" + name +
+    throw std::runtime_error("System::set_primitive_state : taille != ncomp*nr*ntheta (n*n cartesien) (bloc '" + name +
                              "' a " + std::to_string(nc) + " variables)");
   if (!s.prim_to_cons)
     throw std::runtime_error("System::set_primitive_state : le modele du bloc '" + name +
@@ -928,7 +931,10 @@ void System::set_primitive_state(const std::string& name, const std::vector<doub
 std::vector<double> System::get_primitive_state(const std::string& name) {
   Impl::Species& s = p_->find(name);
   const int nc = s.ncomp;
-  const std::size_t nn = static_cast<std::size_t>(p_->cfg.n) * p_->cfg.n;
+  // Nombre de cellules = EXTENTS REELS du domaine d'indices (n*n cartesien, nr*ntheta polaire), PAS
+  // cfg.n*cfg.n : en polaire cfg.n = nr, donc cfg.n^2 != nr*ntheta -> debordement de tas (ntheta<nr) ou
+  // contenu partiel/faux (ntheta>nr). Cartesien bit-identique (dom.nx()==dom.ny()==n).
+  const std::size_t nn = static_cast<std::size_t>(p_->dom.nx()) * static_cast<std::size_t>(p_->dom.ny());
   if (!s.cons_to_prim)
     throw std::runtime_error("System::get_primitive_state : le modele du bloc '" + name +
                              "' n'expose pas de conversion conservatif -> primitif (.so genere avant "
@@ -994,6 +1000,12 @@ std::vector<std::string> System::variable_roles(const std::string& name,
 double System::block_gamma(const std::string& name) const { return p_->find(name).gamma; }
 
 int System::nx() const { return p_->cfg.n; }
+// Axe LENT du champ (lignes du tableau (ny, nx)). On le lit du domaine d'INDICES (dom = nx() x ny()),
+// SOURCE UNIQUE des extents pour les deux geometries : cartesien dom = n x n -> ny() == nx() == n (carre,
+// INCHANGE) ; polaire dom = nr x ntheta -> nx() == nr (rapide, i), ny() == ntheta (lent, j). C'est cette
+// dimension qui dimensionne le tableau numpy cote bindings : un champ polaire fait nx()*ny() = nr*ntheta
+// valeurs, et avec nr != ntheta le remodelage carre (nx, nx) deborde le tampon (bug de teardown).
+int System::ny() const { return p_->dom.ny(); }
 double System::time() const { return p_->t; }
 int System::n_species() const { return static_cast<int>(p_->sp.size()); }
 std::vector<std::string> System::block_names() const {

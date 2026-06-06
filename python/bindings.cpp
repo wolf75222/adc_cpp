@@ -15,20 +15,36 @@
 #include <adc/runtime/system.hpp>
 
 #include <cstring>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace py = pybind11;
 using namespace adc;
 
-// champ (n*n row-major) -> tableau numpy (n, n) (copie).
-static py::array_t<double> to_2d(const std::vector<double>& v, int n) {
-  py::array_t<double> a({n, n});
+// champ (ny*nx row-major, j lent / i rapide) -> tableau numpy (ny, nx) (copie). On dimensionne le tampon
+// avec les DEUX extents reels du domaine d'indices (rows = ny, cols = nx) : carre n x n en cartesien
+// (INCHANGE), mais nr x ntheta en polaire ou nr != ntheta. Un remodelage carre (n, n) y allouait nx^2
+// cases pour ny*nx valeurs -> memcpy deborde le tampon numpy (heap overflow, crash au teardown). On
+// VERIFIE l'accord taille du tampon == taille de la source avant le memcpy (garde-fou explicite).
+static py::array_t<double> to_2d(const std::vector<double>& v, int rows, int cols) {
+  py::array_t<double> a({rows, cols});
+  if (static_cast<std::size_t>(a.size()) != v.size())
+    throw std::runtime_error("adc (bindings) : taille du champ (" + std::to_string(v.size()) +
+                             ") != rows*cols (" + std::to_string(rows) + "*" + std::to_string(cols) +
+                             ") ; remodelage 2D incoherent");
   std::memcpy(a.mutable_data(), v.data(), v.size() * sizeof(double));
   return a;
 }
-// etat (ncomp*n*n, ordre composante-majeur) -> tableau numpy (ncomp, n, n).
-static py::array_t<double> to_3d(const std::vector<double>& v, int ncomp, int n) {
-  py::array_t<double> a({ncomp, n, n});
+// etat (ncomp*ny*nx, ordre composante-majeur, j lent / i rapide) -> tableau numpy (ncomp, ny, nx).
+// Meme garde-fou que to_2d : rows = ny, cols = nx (carre en cartesien, nr x ntheta en polaire).
+static py::array_t<double> to_3d(const std::vector<double>& v, int ncomp, int rows, int cols) {
+  py::array_t<double> a({ncomp, rows, cols});
+  if (static_cast<std::size_t>(a.size()) != v.size())
+    throw std::runtime_error("adc (bindings) : taille de l'etat (" + std::to_string(v.size()) +
+                             ") != ncomp*rows*cols (" + std::to_string(ncomp) + "*" +
+                             std::to_string(rows) + "*" + std::to_string(cols) +
+                             ") ; remodelage 3D incoherent");
   std::memcpy(a.mutable_data(), v.data(), v.size() * sizeof(double));
   return a;
 }
@@ -176,7 +192,7 @@ PYBIND11_MODULE(_adc, m) {
       // Diagnostic : etat conservatif -> primitif (ncomp, n, n), ordre de primitive_vars(name).
       .def("get_primitive_state",
            [](System& s, const std::string& name) {
-             return to_3d(s.get_primitive_state(name), s.n_vars(name), s.nx());
+             return to_3d(s.get_primitive_state(name), s.n_vars(name), s.ny(), s.nx());
            },
            py::arg("name"))
       .def("solve_fields", &System::solve_fields)
@@ -187,12 +203,12 @@ PYBIND11_MODULE(_adc, m) {
       // Primitives pour un integrateur temporel CUSTOM en Python (take_step) :
       .def("eval_rhs",
            [](System& s, const std::string& name) {
-             return to_3d(s.eval_rhs(name), s.n_vars(name), s.nx());
+             return to_3d(s.eval_rhs(name), s.n_vars(name), s.ny(), s.nx());
            },
            py::arg("name"))
       .def("get_state",
            [](System& s, const std::string& name) {
-             return to_3d(s.get_state(name), s.n_vars(name), s.nx());
+             return to_3d(s.get_state(name), s.n_vars(name), s.ny(), s.nx());
            },
            py::arg("name"))
       .def("set_state",
@@ -203,16 +219,17 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("name"), py::arg("u"))
       .def("n_vars", &System::n_vars, py::arg("name"))
       .def("nx", &System::nx)
+      .def("ny", &System::ny)
       .def("time", &System::time)
       .def("n_species", &System::n_species)
       .def("block_names", &System::block_names)
       .def("mass", &System::mass, py::arg("name"))
       .def("density",
            [](const System& s, const std::string& name) {
-             return to_2d(s.density(name), s.nx());
+             return to_2d(s.density(name), s.ny(), s.nx());
            },
            py::arg("name"))
-      .def("potential", [](System& s) { return to_2d(s.potential(), s.nx()); })
+      .def("potential", [](System& s) { return to_2d(s.potential(), s.ny(), s.nx()); })
       .def_static("abi_key", &System::abi_key,
                   "Cle d'ABI du module (cf. adc.abi_key) ; comparee a celle d'un loader natif.");
 
@@ -284,12 +301,15 @@ PYBIND11_MODULE(_adc, m) {
       .def("mass", [](AmrSystem& s) { return s.mass(); })
       .def("mass", [](AmrSystem& s, const std::string& name) { return s.mass(name); },
            py::arg("name"))
-      .def("density", [](AmrSystem& s) { return to_2d(s.density(), s.nx()); })
+      // AMR : domaine CARRE (n x n), aucune geometrie polaire -> rows == cols == nx() (inchange).
+      .def("density", [](AmrSystem& s) { return to_2d(s.density(), s.nx(), s.nx()); })
       .def("density",
-           [](AmrSystem& s, const std::string& name) { return to_2d(s.density(name), s.nx()); },
+           [](AmrSystem& s, const std::string& name) {
+             return to_2d(s.density(name), s.nx(), s.nx());
+           },
            py::arg("name"))
       // phi du niveau grossier (base), (n, n). MEME observable que System.potential() : le niveau 0
       // couvre tout le domaine -> suffit a echantillonner un cercle median (FFT azimutale). En
       // multi-blocs, phi resulte du Poisson de SYSTEME (Sum_b q_b n_b co-localise), partage par tous.
-      .def("potential", [](AmrSystem& s) { return to_2d(s.potential(), s.nx()); });
+      .def("potential", [](AmrSystem& s) { return to_2d(s.potential(), s.nx(), s.nx()); });
 }

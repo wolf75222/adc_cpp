@@ -363,6 +363,12 @@ class System {
   /// @name Diagnostics
   /// @{
   int nx() const;
+  /// Extent de l'axe LENT du champ (lignes du tableau (ny, nx) row-major rendu par density / potential
+  /// / get_state). Cartesien : ny() == nx() == n (carre, INCHANGE). Polaire (anneau) : ny() == ntheta
+  /// (axe azimutal lent) tandis que nx() == nr (axe radial rapide) -- avec nr != ntheta le champ fait
+  /// nr*ntheta valeurs, PAS nx()^2 : c'est cette dimension qui dimensionne correctement le tableau
+  /// numpy cote bindings (sans elle, un remodelage (nx, nx) deborde le tampon quand nr != ntheta).
+  int ny() const;
   double time() const;
   int n_species() const;
   /// Noms des blocs, dans l'ordre d'ajout. SOURCE UNIQUE : le registre de blocs interne, peuple par
@@ -371,8 +377,8 @@ class System {
   /// un .so (JIT / AOT) ; les compter par n_species() seul les sauterait.
   std::vector<std::string> block_names() const;
   double mass(const std::string& name) const;
-  std::vector<double> density(const std::string& name) const;  ///< n*n row-major
-  std::vector<double> potential();                             ///< phi, n*n row-major
+  std::vector<double> density(const std::string& name) const;  ///< ny*nx row-major (j lent, i rapide)
+  std::vector<double> potential();                             ///< phi, ny*nx row-major (j lent, i rapide)
   /// @}
 
  private:
