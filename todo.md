@@ -132,8 +132,9 @@ RESTE (audit) :
   Tests : test_amr_multiblock_compiled (cas F = IMEX stride=2 + masque par composante), test_amr_production_
   stride_reject.py. ctest 140/140. => PHASE 1 MULTI-BLOC A HIERARCHIE FIGEE COMPLETE (substeps/stride #175,
   sources couplees #179/#191, IMEX #184/#185, multi-bloc DSL/compile #195). Reste Phase 2 = regrid (C.6).
-- [ ] **Lot A.5 autres dossiers** : convention de commentaires sur physics/numerics/mesh/coupling/runtime/amr
-  (core/ fait #173) ; dossier par dossier, sans churn. (basse priorite)
+- [~] **Lot A.5 autres dossiers** : convention de commentaires. FAIT : core/ #173, physics/ #189, numerics/
+  #193, mesh/+coupling/ #196. RESTE : runtime/ (sauf amr_*.hpp deja commentes par #185/#195) et amr/
+  (primitives geometriques). (basse priorite, dossier par dossier sans churn)
 - [ ] **Lot A.3** : note SourceImplicit (local) vs CondensedSchur (global) dans les exemples. (mineur doc)
 - [ ] **Lot E.4** : tests backend a noms precis (partiellement couvert par BACKEND_COVERAGE + validation).
 - [x] **Fix role-fallback cote AMR -- FAIT #191** : `AmrRuntime::add_coupled_source` (include/adc/runtime/
