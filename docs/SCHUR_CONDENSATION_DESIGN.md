@@ -305,6 +305,17 @@ Principes de cette API :
   qui n'emploie pas `adc.Split(... source=adc.CondensedSchur ...)` ne voit jamais le nouvel etage.
   La selection est OPT-IN, comme la grille polaire (#116, defaut cartesien bit-identique).
 
+ENCART -- `adc.SourceImplicit` (LOCAL) vs `adc.CondensedSchur` (GLOBAL). Deux mecanismes
+distincts traitent une source raide implicitement ; ne pas les confondre.
+- `adc.SourceImplicit` (= IMEX source-only) est LOCAL : l'implicite ne couple que les composantes
+  d'UNE MEME cellule (backward-Euler resolu par Newton a la cellule), AUCUN couplage spatial.
+  C'est le bon choix pour les termes raides purement locaux (relaxation, reactions, friction) :
+  pas de solve elliptique, donc bien moins cher.
+- `adc.CondensedSchur` (via `adc.Split`, cf. sections 2 a 5) est GLOBAL : il assemble l'operateur
+  elliptique tensoriel condense et le resout par Krylov (BiCGStab), couplant TOUT le domaine.
+  C'est le bon choix UNIQUEMENT pour un couplage raide non local (Lorentz / electrostatique, ex.
+  Euler-Poisson magnetise de Hoffart). Une source raide locale n'a pas besoin de Schur.
+
 
 ## 7. Geometrie = abstraction MAILLAGE, pas une option de `FiniteVolume`
 

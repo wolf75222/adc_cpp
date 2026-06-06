@@ -595,6 +595,16 @@ class SourceImplicit:
     futur distinct. SourceImplicit = IMEX source-only (strictement equivalent a IMEX/adc.Implicit,
     numerique bit-identique).
 
+    QUAND L'UTILISER (SourceImplicit LOCAL vs adc.CondensedSchur GLOBAL) -- ces deux mecanismes
+    traitent une source raide implicitement, mais a des echelles differentes :
+    - SourceImplicit est LOCAL : l'implicite ne couple que les composantes d'UNE MEME cellule
+      (backward-Euler resolu par Newton a la cellule), il n'y a AUCUN couplage spatial entre
+      cellules. Adapte aux termes raides purement locaux (relaxation, reactions, friction).
+    - adc.CondensedSchur (via adc.Split) est GLOBAL : il assemble et resout un operateur
+      elliptique tensoriel par Schur (Krylov BiCGStab) qui COUPLE tout le domaine. Adapte au
+      couplage Lorentz / electrostatique raide non local (ex. Euler-Poisson magnetise du papier
+      Hoffart, arXiv:2510.11808). Une source raide locale n'a PAS besoin de Schur.
+
     substeps=N : sous-pas par macro-pas (cf. Explicit). Defaut 1.
     stride=M   : cadence du bloc, semantique hold-then-catch-up (cf. Explicit). Defaut 1.
     implicit_vars / implicit_roles : masque implicite par NOM ou par ROLE physique des variables
@@ -675,6 +685,13 @@ class CondensedSchur:
     Le bloc doit exposer les roles Density / MomentumX / MomentumY (Energy optionnel) et un champ B_z
     (set_magnetic_field) -- un role / B_z manquant leve une erreur EXPLICITE a add_equation. Marche pour
     un modele en briques natives comme pour un modele DSL compile qui declare ces roles (electrons).
+
+    QUAND L'UTILISER (CondensedSchur GLOBAL vs adc.SourceImplicit LOCAL). CondensedSchur est un
+    implicite GLOBAL : il COUPLE tout le domaine via l'operateur elliptique tensoriel condense
+    (resolu par Krylov BiCGStab), pour le couplage Lorentz / electrostatique raide non local. Si la
+    source raide est purement LOCALE (ne couple que les composantes d'une meme cellule, sans couplage
+    spatial : relaxation, reactions, friction), prendre plutot adc.SourceImplicit : c'est moins cher
+    et il n'y a alors AUCUN solve elliptique a faire.
 
     theta : theta-schema dans (0, 1] (0.5 = Crank-Nicolson, 1 = Euler retrograde).
     alpha : constante de couplage electrostatique du sous-systeme source (d_t(-Lap phi) = -alpha div(rho v)).
