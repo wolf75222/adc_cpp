@@ -89,9 +89,54 @@ NOTE INFRA verifiee : les tests Python tournent en CI via un find-glob `python/t
 Release (ci.yml l.148-150) ; `python/CMakeLists.txt` (foreach) est l'enregistrement ctest SEPARE (jobs
 MPI/Kokkos). DETTE tracee : segfault de teardown sur profils polaires INSTABLES (PRE-EXISTANT, hors #176).
 
+**Vague 3 MERGEE :**
+- [x] **AMR capstone (vii) #184** : facade runtime honore time=imex par bloc (source implicite locale,
+  mirror du callback AmrImplicitSourceStepper) ; stiff stable, disable-and-fail (explicite -> non-fini) ;
+  all-explicit/mono-bloc bit-identique. MERGE-SAFE (3 findings reels NON-bloquants -> traites par #185).
+
 **En vol :**
-- [~] **AMR capstone (vii)** : facade runtime honore time=imex par bloc (source implicite locale ; le moteur
-  a deja le callback AmrImplicitSourceStepper). Agent en cours.
+- [~] **IMEX-hardening #185 (suite revue #184)** : assume la semantique IMEX SUBCYCLEE (substeps>1 : K pas
+  de dt/K ; sain, plus CFL-safe ; differe du moteur compile-time qui ignore substeps sur IMEX) ; corrige
+  le claim "mirror fidele" (commentaires) ; test substeps>1 (DIFFERS load-bearing) ; observe mx/my/E
+  directement. ctest 99/99. Verifie propre (prod comment-only, ASCII). A MERGER des Release verte.
+
+**=== RESTE A FAIRE (synthese todo + CODEBASE_AUDIT, juin 2026) ===**
+
+AUDIT : ~90% fait. Lots DONE : A.1 #172, A.2 #161, A.4 #159 ; B.1 NativeLoader #151, B.2 SystemFieldSolver
+#176 ; C.1 split #170, C.2 amr_coupler retire #164, C.3 layout #141, C.4 stride #140, C.5 decision multi-bloc
+(IMPLEMENTE #154/#175/#179/#184/#185) ; D.1 EllipticOperator #163, D.4 Schur device-clean 7/7 ; E.1 stride
+tests, E.2 roles #178/#181, E.3 PolarMesh erreurs #168/#178, E.5 CI auto-decouverte verifiee (find-glob).
+
+RESTE (audit) :
+- [ ] **Lot B.3 SystemBlockStore** : derniere extraction de `system.cpp` (sp + ghosts + get/set state) ;
+  system.cpp deja 1470->1044 (-29%) ; rendement decroissant mais ferme le P0 god-class. (sequentiel sur system.cpp)
+- [ ] **Lot C.6 / AMR (viii) regrid union-tags** : LE finale du capstone AMR (Phase 2) ; regrid pilote par
+  l'UNION des tags (e OR i OR n OR phi OR user), prolong/restrict + reflux bloc-par-bloc, deverrouille
+  multi-bloc + regrid_every>0. CHANTIER (gros) + decision de cadrage.
+- [ ] **AMR (v) DSL production multi-bloc** : `add_native_block`/`add_compiled_model(AmrSystem&)` ne plus
+  lever sur le 2e bloc (file + build a ensure_built). (medium)
+- [ ] **Lot A.5 autres dossiers** : convention de commentaires sur physics/numerics/mesh/coupling/runtime/amr
+  (core/ fait #173) ; dossier par dossier, sans churn. (basse priorite)
+- [ ] **Lot A.3** : note SourceImplicit (local) vs CondensedSchur (global) dans les exemples. (mineur doc)
+- [ ] **Lot E.4** : tests backend a noms precis (partiellement couvert par BACKEND_COVERAGE + validation).
+- [ ] **Fix role-fallback cote AMR** : le `resolve` de `add_coupled_source` AMR (#179) a probablement le meme
+  repli silencieux comp=0 que System (corrige #181) ; mirror le fix strict. (petit ; sequentiel sur amr files)
+
+RESTE (scientifique / hors audit) :
+- [ ] **Run Hoffart haute resolution (ROMEO, AUTORISE)** : corriger le build -fPIC du module Python sur
+  aarch64, puis smoke -> n=384 -> n=512, modes l=3/4/5, O5 WENO5+SSPRK3 ; enregistrer gamma/erreur/fenetre/
+  cout/backend/commit. LE livrable scientifique quantitatif. (HPC, externe, demande GO ressources)
+- [ ] **Schur PR6** : mesure de l'effet TEMPOREL du Schur sur un fluide magnetise CARTESIEN (le chemin
+  polaire est explicite-only ; "Schur sur polaire" = feature ulterieure). DECISION de cadrage requise.
+- [ ] **Perf : Poisson MG V-cycle small-box sous Kokkos** (#165 : domine 96-99.9%, regresse en OpenMP car
+  parallel_for jusqu'aux grilles 2x2 ; le chemin serie garde n_cells>=4096, pas Kokkos). UNE optim par PR,
+  profil avant/apres. (hot-path, delicat)
+
+DETTE / DIFFERES (ne pas oublier) :
+- [ ] segfault de teardown sur profils polaires INSTABLES (PRE-EXISTANT, hors #176) -> a tracer/corriger.
+- [ ] A4 : cas MMS polaire dedie avec v_r != 0 (couvert en pratique par #168/#174 ; optionnel).
+- [ ] finding 8 (`fab(0)` sans garde local_size) au portage MPI ; `/(2*dx)->*cx` au dernier bit ; P7
+  (implicit-total + params runtime DSL).
 
 **Prochaines etapes (sequencees, ETAT PRECIS post-scoping) :**
 1. **Schur PR6** (apres merge #168) : mesure diocotron-Schur sur le chemin polaire desormais dispo ;
