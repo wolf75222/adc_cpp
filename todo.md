@@ -137,8 +137,10 @@ RESTE (audit) :
   stride_reject.py. ctest 140/140. => PHASE 1 MULTI-BLOC A HIERARCHIE FIGEE COMPLETE (substeps/stride #175,
   sources couplees #179/#191, IMEX #184/#185, multi-bloc DSL/compile #195). Reste Phase 2 = regrid (C.6).
 - [~] **Lot A.5 autres dossiers** : convention de commentaires. FAIT : core/ #173, physics/ #189, numerics/
-  #193, mesh/+coupling/ #196. RESTE : runtime/ (sauf amr_*.hpp deja commentes par #185/#195) et amr/
-  (primitives geometriques). (basse priorite, dossier par dossier sans churn)
+  #193, mesh/+coupling/ #196, runtime/ non-amr #198. RESTE (bas) : amr/ (primitives geometriques) et les
+  runtime/amr_*.hpp (deja partiellement commentes par #185/#195/#199). (basse priorite, sans churn)
+  NOTE : 2 coquilles non-ASCII pre-existantes a corriger en passe dediee (abi_key.hpp "batis", system_field_
+  solver.hpp "ind+ependants" = em-dash casse).
 - [x] **Lot A.3 -- FAIT #194** : note SourceImplicit (local, par cellule) vs CondensedSchur (global, Schur)
   dans les docstrings python/adc/__init__.py + docs/SCHUR_CONDENSATION_DESIGN.md (pas de dossier examples/
   dans adc_cpp ; les exemples runnables sont dans adc_cases). Doc-only, 28 insertions.
