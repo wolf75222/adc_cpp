@@ -30,26 +30,27 @@ CI (depuis #136) : PR de routine = ci-fast (Release + Python). MPI + Kokkos via 
 `workflow_dispatch` / label `ci-full`. REGLE : poser le label `ci-full` sur toute PR risquee (MPI /
 Kokkos / device / Schur / AMR) AVANT merge pour la validation complete.
 
-**En vol :**
-- [ ] **#140 fix cadence stride** : hold-then-catch-up `(macro_step_+1)%stride==0` (bug latent du
-      couplage strided dans `AmrSystemCoupler` ; bloc lent n'est plus "dans le futur" au 1er pas).
-      Rebasee sur #141, `ci-full` en cours (validation MPI+Kokkos). Cf. section 15 etape (iv).
+**En vol (run autonome nuit, ~20 PR mergees) :**
+- [ ] **SystemStepper** : 2e extraction de `system.cpp` (apres NativeLoader #151), bit-identique -> debloque **Polaire 2b**.
+- [ ] **#154 AMR capstone PR1** : facade runtime multi-blocs (2 blocs explicites co-localises) -> debloque AMR PR2 + le fix conservation A3.
+- [ ] **#165 profiling** : harnais de mesure par phase (transport/Poisson/halos/reductions/fences/alloc/regrid), ZERO optim.
+- [ ] **Hoffart re-drive** : build Kokkos PIC corrige (echec -fPIC du module Python sur aarch64), smoke -> n=384 -> n=512 GH200.
 
-**Prochaines etapes (sequencees) :**
-1. #140 (ci-full MPI+Kokkos vert) MERGE -> AMR-prep TERMINEE (#135 fix finding 7, #141
-   layout-guard, #140 cadence). Ensuite : **registre runtime multi-blocs** (type-erased par nom +
-   closures advance/rhs/source/max_speed/mass/density ; refus `regrid_every>0` tant que regrid-union
-   absent ; conservation composite leaf-only/average_down).
-2. AMR multi-blocs capstone (Gap 4, section 15) : doc #139 faite ; le MOTEUR EXISTE DEJA
-   (`AmrSystemCoupler`), donc COMPLETION pas creation. step-1 (extraire AmrBlock/layout, bit-identique)
-   EN ATTENTE DE GO ; les etapes facade attendent que #137 libere `__init__.py`.
-3. Polaire Phase 2b (section 12) : cabler transport+Poisson polaire dans `System.step` + couplage
-   cartesien<->polaire + RUN diocotron annulaire. LE livrable scientifique (geometrie = le verrou du
-   taux de croissance). Apres #138.
-4. Schur PR6 (mesure diocotron-Schur) : differe jusqu'a la geometrie polaire (le Schur stabilise le
-   TEMPS, il n'adresse PAS le gap de taux de croissance, qui est GEOMETRIQUE).
-5. Finding revue 8 (`fab(0)` sans garde) : DIFFERE au portage MPI (un demi-fix ferait un faux-silencieux
-   au lieu d'un crash franc).
+**Prochaines etapes (sequencees, PRIORITE Polaire 2b) :**
+1. **Polaire Phase 2b (PRIORITE, section 12)** : brancher transport+Poisson polaire dans `System.step`
+   (maillage annulaire GLOBAL, PAS de couplage cart<->polaire en v1 ; cartesien defaut bit-identique)
+   + RUN diocotron annulaire. LE livrable scientifique. DES QUE SystemStepper merge.
+2. **Schur PR6** (mesure diocotron-Schur sur le chemin polaire fonctionnel) : isole l'effet TEMPOREL du
+   Schur ; ne pretend PAS corriger l'erreur geometrique. Apres Polaire 2b.
+3. **AMR capstone PR2-8** (apres #154) : substeps/stride/evolve par bloc -> sources couplees AMR
+   (conservation composite) -> IMEX local -> DSL prod multi-bloc -> regrid union-tags -> Schur global AMR.
+4. **Fixes conservation (section 16)** : A3 (average_down trailing dans `coupled_source_step` /
+   `AmrImplicitSourceStepper`, apres #154) ; A2 (helper conservatif DSL) ; A4 (test polaire flux radial).
+5. **Lot B restant** : SystemFieldSolver, SystemBlockStore (apres SystemStepper). **Lot C.1** : decouper
+   `amr_reflux_mf.hpp`. **Lot A.5** : convention de commentaires par dossier.
+6. **BORD D'ANNEAU = discontinuite de densite transportee, PAS une paroi** : NE PAS refaire paroi-transport
+   dessus (physiquement faux) ; leviers valides = polaire / haut ordre / AMR (cf. Etape 7). Differes :
+   finding 8 (`fab(0)`) au portage MPI ; `/(2*dx)->*cx` au dernier bit ; P7.
 
 ## 0. API publique RECOMMANDEE (point d'entree utilisateur)
 
