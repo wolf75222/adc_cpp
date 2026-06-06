@@ -10,6 +10,8 @@
 #include <adc/mesh/refinement.hpp>  // coarsen_index
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/spatial_operator.hpp>  // SourceFreeModel (demi-pas explicite IMEX, transport seul)
+#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source + ImplicitMask (source raide IMEX)
 #include <adc/parallel/comm.hpp>  // n_ranks
 #include <adc/runtime/amr_runtime.hpp>  // AmrRuntimeBlock (registre multi-blocs type-erase)
 #include <adc/runtime/amr_system.hpp>
@@ -191,11 +193,22 @@ inline SharedAmrLayout make_shared_amr_layout(const AmrBuildParams& bp) {
 /// @p stride cadence hold-then-catch-up du bloc (1 = chaque macro-pas). substeps et stride sont
 /// portes par AmrRuntime::step (la fermeture advance ne fait qu'UN advance_amr) : ils ne touchent
 /// donc PAS la capture du schema, juste les champs substeps/stride de l'AmrRuntimeBlock.
+///
+/// TRAITEMENT TEMPOREL (capstone vii) : @p imex selectionne le traitement de la SOURCE. On peuple
+/// DEUX fermetures distinctes posees sur l'AmrRuntimeBlock et AmrRuntime::step choisit (b.imex) :
+///   - advance : transport AMR + source EXPLICITE (Euler avant) -- chemin historique inchange ;
+///   - imex_advance : transport AMR SOURCE-FREE + source raide IMPLICITE backward_euler_source par
+///     niveau (masque @p implicit_components pour l'IMEX partiel) + cascade, mirroir FIDELE de la
+///     branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper).
+/// @p implicit_components : indices des composantes traitees en IMPLICITE (IMEX partiel, porte par le
+/// BLOC, prioritaire sur le defaut modele) ; VIDE (defaut) -> masque inactif -> backward-Euler plein
+/// (toutes les composantes implicites), comportement bit-identique a l'IMEX sans masque. Ignore si imex==false.
 template <class Model, class Limiter, class Flux>
 AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
                                 const std::string& name, const std::vector<double>& density,
                                 bool has_density, double gamma, int substeps, bool recon_prim,
-                                bool imex, int stride = 1) {
+                                bool imex, int stride = 1,
+                                const std::vector<int>& implicit_components = {}) {
   const int nc = Model::n_vars;
   const int ng = Limiter::n_ghost;  // stencil du limiteur (parite du schema, comme build_amr_compiled)
   const int nlev = S.nlev();
@@ -219,24 +232,60 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
   b.gamma = gamma;
   b.substeps = substeps;
   b.stride = stride;
+  b.imex = imex;  // traitement temporel du bloc : selectionne advance vs imex_advance dans step()
   b.aux_ncomp = aux_comps<Model>();  // largeur aux LUE par le modele (B_z/T_e -> > kAuxBaseComps)
   b.cons_vars = Model::conservative_vars();  // noms + ROLES : resolution role -> comp des sources couplees
   b.levels = levels;
 
   const bool rprim = recon_prim;
-  const bool bimex = imex;
   // advance : UN sous-pas de transport AMR du bloc (Berger-Oliger + reflux + average_down
-  // conservatifs) de taille dt, avec SON schema (Limiter, Flux) sur SA pile de niveaux. imex =>
-  // source raide implicite via le drapeau d'advance_amr (transport explicite porte par le reflux).
-  // La boucle de sous-pas (substeps) et la cadence stride sont PORTEES par AmrRuntime::step, pas par
-  // cette fermeture : ainsi la semantique multirate est UNE seule fois dans le moteur (mirroir de
-  // AmrSystemCoupler::step) et reste neutralisable / testable la-bas. FONCTEUR implicite :
+  // conservatifs) de taille dt, avec SON schema (Limiter, Flux) sur SA pile de niveaux, source en
+  // EULER AVANT (imex=false toujours ici : le chemin IMEX vit dans imex_advance, selectionne par
+  // step()). La boucle de sous-pas (substeps) et la cadence stride sont PORTEES par AmrRuntime::step,
+  // pas par cette fermeture : ainsi la semantique multirate est UNE seule fois dans le moteur (mirroir
+  // de AmrSystemCoupler::step) et reste neutralisable / testable la-bas. FONCTEUR implicite :
   // advance_amr<Limiter, Flux> est une fonction template nommee (pas de lambda etendue cross-TU) ;
   // on la capture dans une std::function depuis CETTE TU (recette device-clean #64/#97).
-  b.advance = [model, rprim, bimex](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
-                                    Periodicity per, bool repl) {
-    advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, bimex);
+  b.advance = [model, rprim](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
+                             Periodicity per, bool repl) {
+    advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, /*imex=*/false);
   };
+  // imex_advance (capstone vii) : mirroir FIDELE de la branche IMEX de AmrSystemCoupler::step
+  // (SourceFreeModel + AmrImplicitSourceStepper), peuple SEULEMENT si imex. (1) transport EXPLICITE
+  // sur le modele SOURCE-FREE (SourceFreeModel<Model> : flux/CFL du modele, source nulle) par le MEME
+  // moteur AMR (reflux conservatif) ; (2) source raide IMPLICITE backward_euler_source A CHAQUE NIVEAU
+  // (Newton local), avec le masque @p implicit_components porte par le BLOC (IMEX partiel) ; (3)
+  // cascade fin -> grossier (mf_average_down_mb) pour la coherence des cellules grossieres couvertes.
+  // On CAPTURE le masque dans un ImplicitMask<Model::n_vars> (POD device-clean) une fois ici (la
+  // largeur n_vars n'est connue qu'au build, le masque est inactif si implicit_components est vide ->
+  // backward-Euler plein, bit-identique a l'IMEX sans masque). SourceFreeModel<Model> est un type
+  // concret instancie DANS cette TU : son advance_amr<Limiter, Flux> reste compile (pas de lambda
+  // etendue cross-TU), capture dans la std::function de signature identique a advance. La reconstruction
+  // du demi-pas source-free reste CONSERVATIVE (recon_prim=false) : MEME choix que AmrSystemCoupler::step
+  // (qui appelle advance_amr sur SourceFreeModel avec le defaut), et SourceFreeModel n'expose de toute
+  // facon pas les variables primitives (cf. son en-tete). Le bloc EXPLICITE, lui, garde recon_prim=rprim.
+  if (imex) {
+    ImplicitMask<Model::n_vars> mask;
+    for (int c : implicit_components)
+      if (c >= 0 && c < Model::n_vars) { mask.active = true; mask.flag[c] = true; }
+    b.imex_advance = [model, mask](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
+                                   Periodicity per, bool repl) {
+      // (1) transport explicite source-free (-div F seul), reflux porte la conservation hyperbolique.
+      advance_amr<Limiter, Flux>(SourceFreeModel<Model>{model}, L, dom, dt, per, repl,
+                                 /*recon_prim=*/false, /*imex=*/false);
+      // (2) source raide implicite backward-Euler PAR NIVEAU (Newton local, masque de bloc).
+      const int nlev_l = static_cast<int>(L.size());
+      for (int k = 0; k < nlev_l; ++k)
+        backward_euler_source<Model>(model, *L[k].aux, L[k].U, dt, /*iters=*/2, mask);
+      // (3) INVARIANT DE COUVERTURE (cf. AmrImplicitSourceStepper) : la source implicite a ete resolue
+      // niveau par niveau, donc une cellule grossiere COUVERTE porterait une source grossiere fantome
+      // au lieu de la moyenne 2x2 de ses enfants. Cascade fin -> grossier pour la coherence (la masse,
+      // somme du seul grossier, ne compte alors pas la source du patch en double). Mono-niveau : boucle
+      // vide -> bit-identique. La source restant CELLULE-LOCALE (hors flux de face), elle n'entre PAS
+      // dans les registres de reflux : la conservation aux interfaces grossier-fin reste intacte.
+      for (int k = nlev_l - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
+    };
+  }
   // contribution du bloc au RHS de Poisson SOMME : rhs += elliptic_rhs(U) sur le grossier (boucle
   // hote pure). MEME foncteur que System plat (make_poisson_rhs -> detail::PoissonRhs) -> chaque
   // bloc accumule (+=) aux MEMES cellules du grossier partage (co-localisation par cellule).
@@ -269,26 +318,28 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
 
 /// Dispatch du schema spatial (limiteur x flux Riemann) -> build_amr_block. MEMES gardes que
 /// dispatch_amr_compiled (hllc/roe exigent un transport compressible a 4 variables + pression).
-/// Pendant multi-blocs de dispatch_amr_compiled.
+/// Pendant multi-blocs de dispatch_amr_compiled. @p implicit_components : masque IMEX partiel porte
+/// par le bloc (indices des composantes implicites ; vide = backward-Euler plein), thread a build_amr_block.
 template <class Model>
 AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const std::string& riem,
                                    const SharedAmrLayout& S, const std::string& name,
                                    const std::vector<double>& density, bool has_density,
                                    double gamma, int substeps, bool recon_prim, bool imex,
-                                   int stride = 1) {
+                                   int stride = 1,
+                                   const std::vector<int>& implicit_components = {}) {
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                          substeps, recon_prim, imex, stride);
+                                                          substeps, recon_prim, imex, stride, implicit_components);
     if (lim == "minmod")
       return build_amr_block<Model, Minmod, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride);
+                                                        substeps, recon_prim, imex, stride, implicit_components);
     if (lim == "vanleer")
       return build_amr_block<Model, VanLeer, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                         substeps, recon_prim, imex, stride);
+                                                         substeps, recon_prim, imex, stride, implicit_components);
     if (lim == "weno5")
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride);
+                                                       substeps, recon_prim, imex, stride, implicit_components);
     throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
   }
   if (riem == "hllc") {
@@ -296,13 +347,13 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride);
+                                                        substeps, recon_prim, imex, stride, implicit_components);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride);
+                                                      substeps, recon_prim, imex, stride, implicit_components);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride);
+                                                       substeps, recon_prim, imex, stride, implicit_components);
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hllc' exige un transport "
@@ -314,13 +365,13 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride);
+                                                       substeps, recon_prim, imex, stride, implicit_components);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                     substeps, recon_prim, imex, stride);
+                                                     substeps, recon_prim, imex, stride, implicit_components);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride);
+                                                      substeps, recon_prim, imex, stride, implicit_components);
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'roe' exige un transport "

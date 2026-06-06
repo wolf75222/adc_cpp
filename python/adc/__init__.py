@@ -1148,8 +1148,13 @@ class AmrSystem:
                 "AmrSystem.add_block : adc.Split (etage source condense par Schur) n'est pas supporte "
                 "sur AMR (AMR n'a pas de pendant de Schur-splitting ; set_source_stage n'est cable que "
                 "sur System). Utiliser un System (non raffine) pour l'etage source condense.")
+        # On thread substeps/stride (multirate, capstone iv) ET le masque IMEX partiel implicit_vars /
+        # implicit_roles (capstone vii : adc.IMEX(implicit_vars=...)). Resolus / valides cote C++
+        # (AmrSystem::add_block) contre les noms/roles du bloc : vides -> backward-Euler plein, et
+        # demander un masque en explicite (ou en mono-bloc) leve une erreur claire la-bas.
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
-                          getattr(time, "substeps", 1))
+                          getattr(time, "substeps", 1), getattr(time, "stride", 1),
+                          getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None):
         """Ajoute l'UNIQUE equation/bloc AMR en aiguillant sur le TYPE de @p model (DSL Phase D) :

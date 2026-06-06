@@ -48,12 +48,16 @@
 ///    coarse->fine (coupler_inject_aux_mb), exactement comme AmrSystemCoupler ;
 ///  - conservation PAR BLOC (reflux + average_down du moteur AMR, dans la fermeture advance).
 ///
-/// PERIMETRE (capstone). On porte des blocs EXPLICITES a schemas spatiaux potentiellement DIFFERENTS
-/// sur la hierarchie FIGEE (pas de regrid : AmrSystemCoupler n'en a pas), avec le MULTIRATE par bloc :
+/// PERIMETRE (capstone). On porte des blocs a schemas spatiaux potentiellement DIFFERENTS sur la
+/// hierarchie FIGEE (pas de regrid : AmrSystemCoupler n'en a pas), avec le MULTIRATE par bloc :
 /// substeps (sous-pas explicites) et stride (cadence hold-then-catch-up), honores dans step() en
-/// mirroir de AmrSystemCoupler::step (#140). Les sources couplees, l'IMEX multi-bloc et le regrid
-/// d'union des tags restent des PR ULTERIEURES. Le facade runtime (AmrSystem) REFUSE explicitement
-/// multi-blocs + regrid_every > 0 tant que le regrid d'union n'existe pas.
+/// mirroir de AmrSystemCoupler::step (#140). Le TRAITEMENT TEMPOREL est PAR BLOC : explicite (source
+/// en Euler avant, portee par le pas AMR) OU IMEX (source raide traitee en IMPLICITE par
+/// backward_euler_source, le transport restant explicite ; capstone vii), selectionne dans step() en
+/// mirroir de la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper).
+/// Le regrid d'union des tags et le DSL production multi-bloc compile restent des PR ULTERIEURES. Le
+/// facade runtime (AmrSystem) REFUSE explicitement multi-blocs + regrid_every > 0 tant que le regrid
+/// d'union n'existe pas.
 
 namespace adc {
 
@@ -104,6 +108,27 @@ struct AmrRuntimeBlock {
   /// La signature passe le domaine de base + periodicite + politique d'ownership grossier, recables
   /// par le moteur.
   std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> advance;
+
+  /// TRAITEMENT TEMPOREL du bloc : false (defaut) = EXPLICITE (source en Euler avant, dans advance) ;
+  /// true = IMEX (source raide traitee en IMPLICITE par backward_euler_source). Le facade (AmrSystem)
+  /// le fige depuis time="imex". Selectionne EXPLICITEMENT dans AmrRuntime::step (pendant runtime du
+  /// branchement constexpr block_time_treatment_v de AmrSystemCoupler::step) : un bloc explicite passe
+  /// par advance, un bloc IMEX par imex_advance. false partout -> trajectoire bit-identique a l'historique.
+  bool imex = false;
+
+  /// Avance IMEX du bloc d'UN sous-pas de taille dt (mirroir FIDELE de la branche IMEX de
+  /// AmrSystemCoupler::step + AmrImplicitSourceStepper) : (1) TRANSPORT EXPLICITE sur le modele
+  /// SOURCE-FREE (-div F seul, SourceFreeModel<Model>) par le moteur AMR (Berger-Oliger + reflux +
+  /// average_down conservatifs), puis (2) SOURCE RAIDE IMPLICITE backward_euler_source A CHAQUE NIVEAU
+  /// (Newton local, jacobienne par differences finies ; masque implicite PORTE PAR LE BLOC pour l'IMEX
+  /// partiel), suivie d'une cascade fin -> grossier (mf_average_down_mb). Capture le Model/Limiter/Flux
+  /// CONCRETS + le masque (build_amr_block) ; le noyau reste COMPILE, seul le registre de blocs est
+  /// type-erase. INVARIANT DE CONSERVATION (source LOCALE) : la source est cellule-locale (hors flux de
+  /// face), donc HORS des registres de reflux -> la conservation aux interfaces grossier-fin reste
+  /// intacte ; une cellule grossiere COUVERTE redevient la moyenne 2x2 de ses enfants par la cascade
+  /// finale (sinon le diagnostic de masse, somme du seul grossier, compterait une source fantome). Vide
+  /// pour un bloc explicite (imex == false) : step() ne l'appelle jamais.
+  std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> imex_advance;
 
   /// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs_b(U_b) sur le grossier.
   /// CO-LOCALISE : la boucle lit U_b et ecrit rhs AUX MEMES cellules (meme BoxArray grossier
@@ -389,13 +414,21 @@ class AmrRuntime {
                                     /*replicated_parent=*/(k == 1) && replicated_coarse_);
   }
 
-  /// Avance le systeme d'un macro-pas dt. Tous les blocs sont EXPLICITES (l'IMEX multi-bloc est une
-  /// PR ulterieure). On resout d'abord les champs (Poisson somme co-localise, UNE fois par macro-pas
-  /// : cadence OncePerStep), puis chaque bloc avance sur SA pile de niveaux avec SON schema, en
-  /// honorant sa cadence stride et ses substeps. Pendant runtime de AmrSystemCoupler::step (cas
-  /// tout-explicite, OncePerStep) : la fermeture advance fait UN advance_amr, le moteur porte ici la
-  /// boucle de sous-pas et le filtre stride (la version compile-time les a dans block_substeps_v /
-  /// block_stride_v).
+  /// Avance le systeme d'un macro-pas dt. On resout d'abord les champs (Poisson somme co-localise, UNE
+  /// fois par macro-pas : cadence OncePerStep), puis chaque bloc avance sur SA pile de niveaux avec SON
+  /// schema, en honorant sa cadence stride et ses substeps, et SON traitement temporel. Pendant runtime
+  /// de AmrSystemCoupler::step (OncePerStep) : la version compile-time porte substeps/stride dans
+  /// block_substeps_v / block_stride_v et choisit le traitement par le constexpr block_time_treatment_v ;
+  /// ici le moteur porte la boucle de sous-pas, le filtre stride ET la selection IMEX-vs-explicite.
+  ///
+  /// SELECTION DU TRAITEMENT (capstone vii, mirroir de la branche IMEX de AmrSystemCoupler::step) :
+  ///  - bloc EXPLICITE (b.imex == false) : la fermeture advance fait UN advance_amr (transport + source
+  ///    en Euler avant), appelee substeps fois ;
+  ///  - bloc IMEX (b.imex == true) : la fermeture imex_advance fait UN advance_amr SOURCE-FREE puis la
+  ///    source raide IMPLICITE backward_euler_source par niveau + cascade (cf. AmrRuntimeBlock::imex_advance),
+  ///    appelee substeps fois. Inconditionnellement stable sur une relaxation raide (la ou l'explicite,
+  ///    de facteur |1 - dt/eps|, DIVERGE des que dt > 2 eps).
+  /// imex == false partout -> chemin advance seul -> trajectoire bit-identique a l'historique (l'IMEX est opt-in).
   void step(Real dt) {
     solve_count_ = 0;
     // Poisson de systeme resolu UNE fois sur l'etat courant (cadence OncePerStep). Un bloc TENU
@@ -410,11 +443,15 @@ class AmrRuntime {
       // point de couplage (jamais dans le futur). stride=1 : toujours vrai -> chaque pas, bit-identique.
       if ((macro_step_ + 1) % b.stride != 0) continue;
       const Real bdt = dt * static_cast<Real>(b.stride);  // catch-up : pas effectif stride*dt
-      // substeps sous-pas EXPLICITES egaux de bdt/substeps. La fermeture advance fait UN advance_amr
-      // par appel ; substeps=1 -> un seul advance_amr de bdt (bit-identique au cas mono-substep).
+      // substeps sous-pas egaux de bdt/substeps. La fermeture choisie fait UN advance par appel ;
+      // substeps=1 -> un seul advance de bdt (bit-identique au cas mono-substep). SELECTION du
+      // traitement par bloc : IMEX (transport source-free + source raide implicite, mirroir
+      // AmrSystemCoupler::step) si b.imex, sinon EXPLICITE (transport + source Euler avant). Le test
+      // est PAR BLOC et stable : un seul bloc IMEX ne change rien aux blocs explicites voisins.
       const Real h = bdt / static_cast<Real>(b.substeps);
+      auto& step_block = b.imex ? b.imex_advance : b.advance;
       for (int s = 0; s < b.substeps; ++s)
-        b.advance(*b.levels, dom_, h, base_per_, replicated_coarse_);
+        step_block(*b.levels, dom_, h, base_per_, replicated_coarse_);
     }
     // Sources couplees inter-especes APRES le transport (meme ordre que AmrSystemCoupler : transport
     // puis coupled_source_step), par splitting forward-Euler. No-op si aucune source enregistree ->

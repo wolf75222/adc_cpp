@@ -6,6 +6,7 @@
 #include <adc/runtime/model_factory.hpp>   // detail::dispatch_model + briques compilees
 #include <adc/runtime/wall_predicate.hpp>  // detail::wall_predicate (paroi partagee System/AmrSystem)
 
+#include <algorithm>  // std::find, std::sort (resolution du masque IMEX partiel : indices uniques tries)
 #include <cmath>
 #include <cstddef>
 #include <dlfcn.h>  // dlopen/dlsym : chargement du loader natif AMR genere (.so)
@@ -16,6 +17,48 @@
 #include <vector>
 
 namespace adc {
+
+namespace {
+// Resout le MASQUE IMEX PARTIEL d'un bloc (implicit_vars / implicit_roles) en une liste d'indices de
+// composantes conservees, contre le descripteur @p cons du bloc (resolu au build paresseux, quand le
+// type Model concret -- donc cons_vars -- est connu). MEME logique que System::resolve_implicit_components
+// (python/system.cpp) : nom ou role absent -> erreur EXPLICITE (pas d'ignore silencieux) ; indices
+// UNIQUES tries (l'ordre est sans importance pour le masque). VIDE en entree -> vide -> masque inactif
+// -> backward-Euler plein (toutes les composantes implicites), bit-identique a l'IMEX sans masque.
+std::vector<int> resolve_implicit_components(const std::string& block, const VariableSet& cons,
+                                             const std::vector<std::string>& names,
+                                             const std::vector<std::string>& roles) {
+  std::vector<int> out;
+  auto push_unique = [&out](int c) {
+    if (std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
+  };
+  for (const std::string& nm : names) {
+    int idx = -1;
+    for (int i = 0; i < static_cast<int>(cons.names.size()); ++i)
+      if (cons.names[i] == nm) { idx = i; break; }
+    if (idx < 0) {
+      std::string have;
+      for (std::size_t i = 0; i < cons.names.size(); ++i) {
+        if (i) have += ", ";
+        have += cons.names[i];
+      }
+      throw std::runtime_error("AmrSystem::add_block : implicit_vars : variable '" + nm +
+                               "' absente du bloc '" + block + "' (variables conservees : " + have + ")");
+    }
+    push_unique(idx);
+  }
+  for (const std::string& rn : roles) {
+    const VariableRole role = role_from_name(rn);
+    const int idx = cons.index_of(role);
+    if (role == VariableRole::Custom || idx < 0)
+      throw std::runtime_error("AmrSystem::add_block : implicit_roles : role '" + rn +
+                               "' absent du bloc '" + block + "' (le bloc ne renseigne pas ce role)");
+    push_unique(idx);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+}  // namespace
 
 struct AmrSystem::Impl {
   AmrSystemConfig cfg;
@@ -32,6 +75,12 @@ struct AmrSystem::Impl {
     std::string limiter = "minmod", riemann = "rusanov";
     bool recon_prim = false;        // recon == "primitive"
     bool imex = false;              // time == "imex" : source raide implicite
+    // Masque IMEX partiel PORTE PAR LE BLOC (cf. System::add_block) : composantes conservees traitees
+    // en implicite, par NOM (implicit_vars) ou par ROLE physique (implicit_roles). On STOCKE les chaines
+    // brutes ici (le type Model concret -- donc cons_vars -- n'est resolu qu'au build paresseux, dans
+    // build_multi via dispatch_model) ; la resolution noms/roles -> indices se fait la, contre le
+    // descripteur conservatif du bloc. Vides (defaut) -> backward-Euler plein (toutes implicites).
+    std::vector<std::string> implicit_vars, implicit_roles;
     int substeps = 1;
     int stride = 1;                 // cadence hold-then-catch-up (multi-blocs ; cf. AmrRuntimeBlock)
     double gamma = 1.4;
@@ -159,11 +208,18 @@ struct AmrSystem::Impl {
       }
       // Chemin ModelSpec natif : dispatch du modele -> type concret, puis dispatch schema spatial
       // -> build_amr_block (alloue la pile de niveaux du bloc sur le layout PARTAGE + fermetures).
-      // La densite du bloc est portee par le BlockSpec (set_density(name) la cible).
+      // La densite du bloc est portee par le BlockSpec (set_density(name) la cible). Le MASQUE IMEX
+      // partiel (implicit_vars / implicit_roles) est resolu ICI en indices de composantes, contre le
+      // descripteur conservatif du type Model concret (cons_vars), puis thread a build_amr_block.
       detail::dispatch_model(b.spec, [&](auto m) {
+        using M = decltype(m);
+        const std::vector<int> impl_components =
+            b.imex ? resolve_implicit_components(b.name, M::conservative_vars(), b.implicit_vars,
+                                                 b.implicit_roles)
+                   : std::vector<int>{};
         rblocks.push_back(detail::dispatch_amr_block(m, b.limiter, b.riemann, S, b.name, b.density,
                                                      b.has_density, b.gamma, b.substeps,
-                                                     b.recon_prim, b.imex, b.stride));
+                                                     b.recon_prim, b.imex, b.stride, impl_components));
       });
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
@@ -197,6 +253,14 @@ struct AmrSystem::Impl {
 
     // --- chemin MONO-BLOC (AmrCouplerMP, intouche : bit-identique a l'historique) ---
     const BlockSpec& b = blocks[0];
+    // Le mono-bloc IMEX passe par AmrCouplerMP (drapeau imex d'advance_amr), qui ne porte PAS de masque
+    // IMEX partiel (backward-Euler PLEIN). Un masque demande mais reste MONO-BLOC serait donc IGNORE en
+    // silence -> on le REFUSE explicitement (le masque partiel exige le moteur runtime multi-blocs).
+    if (!b.implicit_vars.empty() || !b.implicit_roles.empty())
+      throw std::runtime_error(
+          "AmrSystem : implicit_vars / implicit_roles (masque IMEX partiel) ne sont cables qu'en "
+          "MULTI-BLOCS (>= 2 add_block, moteur runtime). En mono-bloc l'IMEX traite TOUTES les "
+          "composantes en implicite (backward-Euler plein) : retirer le masque ou ajouter un 2e bloc.");
     const AmrBuildParams bp = make_build_params();
     if (b.is_compiled) {  // chemin compile : le builder fige les types (Model, Limiter, Flux)
       install(b.compiled_hooks_builder(bp));
@@ -218,7 +282,8 @@ AmrSystem& AmrSystem::operator=(AmrSystem&&) noexcept = default;
 void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
                           const std::string& limiter, const std::string& riemann,
                           const std::string& recon, const std::string& time, int substeps,
-                          int stride) {
+                          int stride, const std::vector<std::string>& implicit_vars,
+                          const std::vector<std::string>& implicit_roles) {
   if (p_->built)
     throw std::runtime_error("AmrSystem::add_block : le systeme est deja construit (appeler "
                              "add_block avant tout step/mass/density)");
@@ -230,6 +295,13 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("AmrSystem : recon inconnu '" + recon +
                              "' (conservative|primitive)");
+  const bool imex = (time == "imex");
+  // Le MASQUE IMEX partiel (implicit_vars / implicit_roles) ne s'applique qu'au pas de source IMEX :
+  // le demander en explicite est une ERREUR (pas d'ignore silencieux ; meme garde que System::add_block).
+  if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))
+    throw std::runtime_error("AmrSystem::add_block : implicit_vars / implicit_roles exigent time='imex' "
+                             "(le masque implicite ne s'applique qu'au pas de source IMEX ; recu time='" +
+                             time + "')");
   // MULTI-BLOCS PR1 : un 2e bloc (ou plus) bascule sur le moteur runtime AmrRuntime (hierarchie
   // partagee, Poisson somme co-localise). Le mono-bloc reste sur AmrCouplerMP (bit-identique).
   // Un bloc deja COMPILE (set_compiled_block) ne se melange pas a un bloc natif en multi-blocs
@@ -256,7 +328,9 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   b.limiter = limiter;
   b.riemann = riemann;
   b.recon_prim = (recon == "primitive");
-  b.imex = (time == "imex");
+  b.imex = imex;
+  b.implicit_vars = implicit_vars;    // masque IMEX partiel (resolu en indices au build, build_multi)
+  b.implicit_roles = implicit_roles;
   b.substeps = substeps;
   b.stride = stride;
   b.gamma = model.gamma;  // indice adiabatique du bloc (Euler), lu par coupler_write_coarse

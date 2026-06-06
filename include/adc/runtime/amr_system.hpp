@@ -23,12 +23,13 @@
 /// same_layout_or_throw). Tous les blocs vivent sur TOUS les patchs. Un seul aux par niveau (phi,
 /// grad phi) et un seul Poisson grossier dont le second membre est la SOMME CO-LOCALISEE des briques
 /// elliptiques des blocs (f = Sum_b q_b n_b lu aux memes cellules). Conservation PAR BLOC (reflux +
-/// average_down). Moteur runtime AmrRuntime (registre type-erase par nom). PR1 : blocs EXPLICITES a
-/// schemas spatiaux potentiellement DIFFERENTS, hierarchie FIGEE (multi-blocs + regrid_every > 0 est
-/// REFUSE : le regrid d'union des tags est une PR ulterieure). Multirate (stride/evolve), sources
-/// couplees, IMEX multi-bloc et DSL production multi-bloc : PR ulterieures.
+/// average_down). Moteur runtime AmrRuntime (registre type-erase par nom). Blocs a schemas spatiaux
+/// potentiellement DIFFERENTS et a TRAITEMENT TEMPOREL par bloc (explicite ou IMEX, source raide
+/// implicite locale ; capstone vii) sur une hierarchie FIGEE (multi-blocs + regrid_every > 0 est
+/// REFUSE : le regrid d'union des tags est une PR ulterieure). Multirate (substeps/stride), sources
+/// couplees inter-especes : deja cables. DSL production multi-bloc compile et regrid d'union : PR ulterieures.
 ///
-/// @note Deux niveaux (ratio 2) ; traitement temporel explicite (ou imex en mono-bloc).
+/// @note Deux niveaux (ratio 2) ; traitement temporel explicite OU imex (par bloc).
 
 namespace adc {
 
@@ -106,20 +107,30 @@ class AmrSystem {
   ///                robuste pour Euler : positivite de rho et p)
   /// @param time    "explicit" (source en Euler avant, portee par le pas AMR) ou "imex" (source
   ///                raide traitee en IMPLICITE par backward_euler_source ; le transport reste
-  ///                explicite, porte par le reflux conservatif). Tout autre traitement est refuse.
+  ///                explicite, porte par le reflux conservatif ; cf. capstone vii). Tout autre
+  ///                traitement est refuse.
   /// @param substeps sous-pas explicites du bloc (>= 1) : le pas effectif est decoupe en substeps
   ///                morceaux egaux (MULTI-BLOCS uniquement ; en mono-bloc, porte par AmrCouplerMP).
   /// @param stride  cadence HOLD-THEN-CATCH-UP du bloc (>= 1 ; defaut 1 = chaque macro-pas). stride=M
   ///                tient le bloc M-1 macro-pas puis le rattrape d'un pas effectif M*dt (multirate).
   ///                MULTI-BLOCS uniquement (un seul bloc avance toujours a chaque pas). step_cfl honore
   ///                la cadence : dt = cfl*h*min_b(substeps_b/(stride_b*w_b)), mirroir de System::step_cfl.
+  /// @param implicit_vars / implicit_roles  masque IMEX partiel PORTE PAR LE BLOC (cf. System::add_block) :
+  ///                composantes conservees traitees en IMPLICITE, par NOM (implicit_vars) ou par ROLE
+  ///                physique (implicit_roles). VIDES (defaut) -> backward-Euler plein (toutes les
+  ///                composantes implicites). N'ont de sens qu'en time="imex" : les demander en explicite
+  ///                est une ERREUR (pas d'ignore silencieux). MULTI-BLOCS uniquement (le mono-bloc
+  ///                AmrCouplerMP porte son IMEX sans masque ; un masque y est donc refuse).
   /// @throws std::runtime_error si un bloc est deja defini, si substeps < 1, si stride < 1, si time
-  ///         n'est pas dans {explicit, imex}, ou si recon n'est pas dans {conservative, primitive}.
+  ///         n'est pas dans {explicit, imex}, si recon n'est pas dans {conservative, primitive}, ou si
+  ///         un masque implicite est demande hors IMEX / avec un nom-role absent du bloc.
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
                  const std::string& recon = "conservative",
-                 const std::string& time = "explicit", int substeps = 1, int stride = 1);
+                 const std::string& time = "explicit", int substeps = 1, int stride = 1,
+                 const std::vector<std::string>& implicit_vars = {},
+                 const std::vector<std::string>& implicit_roles = {});
 
   /// Enregistre un bloc COMPILE (chemin add_compiled_model, header amr_dsl_block.hpp) : @p builder
   /// est une fermeture type-erased qui, recevant les AmrBuildParams figes au build paresseux, rend
