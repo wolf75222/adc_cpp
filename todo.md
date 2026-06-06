@@ -68,13 +68,30 @@ taux vs theorie (l=3/4/5, O5, n=384/512) reste le run ROMEO.
   adc_cases ; correction d'un commentaire "deprecated" faux).
 - [x] **Test diocotron polaire #174** (cf. milestone ci-dessus).
 
-**En vol (vague suivante) :**
-- [~] **Lot B SystemFieldSolver (#176, EN REVUE)** : extraction de `system.cpp` (elliptique + derive de
-  champ, cartesien + polaire) vers `system_field_solver.hpp` ; 1470->1155 lignes ; bit-identite prouvee
-  par md5 de snapshots (5 chemins) ; ctest 133/133. NOTE : segfault de teardown sur profils polaires
-  INSTABLES = PRE-EXISTANT (reproduit sur master, hors #176) -> a tracer.
-- [~] **AMR capstone (vi)** : sources couplees inter-especes sur la facade runtime (ionisation/collision,
-  +k/-k meme cellule ; average_down covered cells deja #169). Agent en cours.
+**Vague 2 MERGEE (revue adversariale + ci-full) :**
+- [x] **Lot B SystemFieldSolver #176** : extraction de `system.cpp` (elliptique + derive de champ) vers
+  `system_field_solver.hpp` ; 1470->1155 lignes ; md5 bit-identite (5 chemins) ; ctest 133/133.
+- [x] **AMR capstone (vi) #179** : sources couplees inter-especes sur la facade runtime (+k/-k meme cellule,
+  average_down covered cells #169) ; conservation par-cellule+globale ; disable-and-fail. MERGE-SAFE.
+- [x] **Lot B SystemStepper #180** : extraction de step/advance/step_cfl/step_adaptive/stride_due/
+  run_source_stage/apply_couplings ; 1155->1044 ; md5 bit-identite MATCH exact ; ctest 134/134.
+- [x] **Lot E rejets explicites #178** : tests verrouillant les rejets du chemin polaire (transport/riemann/
+  imex/eps-variable) + roles DSL. A REVELE le gap role-fallback -> corrige #181.
+- [x] **Fix role-fallback #181** : `add_coupled_source` (chemin DSL resolve) STRICT -> throw si le bloc
+  n'expose pas le role (avant : repli silencieux comp=0). role_index + couplages nommes inchanges.
+- [x] **Couverture Schur-via-System #182** : test natif `System -> run_source_stage -> Schur` (gap revue #180).
+
+**MILESTONE SCIENTIFIQUE 2 (probe locale, PRELIMINAIRE) :** taux gamma(l) polaire (96x96, anneau creux) :
+l=3 gamma~0.233 (x7.0), l=4 ~0.210 (x6.4), l=5 ~0.168 (x4.7) ; croissance exponentielle propre, positive,
+l-dependante (decroit avec l), masse conservee ~1e-14 partout. QUALITATIF ; vs theorie = run ROMEO.
+
+NOTE INFRA verifiee : les tests Python tournent en CI via un find-glob `python/tests/test_*.py` dans le job
+Release (ci.yml l.148-150) ; `python/CMakeLists.txt` (foreach) est l'enregistrement ctest SEPARE (jobs
+MPI/Kokkos). DETTE tracee : segfault de teardown sur profils polaires INSTABLES (PRE-EXISTANT, hors #176).
+
+**En vol :**
+- [~] **AMR capstone (vii)** : facade runtime honore time=imex par bloc (source implicite locale ; le moteur
+  a deja le callback AmrImplicitSourceStepper). Agent en cours.
 
 **Prochaines etapes (sequencees, ETAT PRECIS post-scoping) :**
 1. **Schur PR6** (apres merge #168) : mesure diocotron-Schur sur le chemin polaire desormais dispo ;
@@ -493,9 +510,10 @@ Decoupe PR (Phase 1, write-sets) - ETAT PRECIS (scoping) :
       `cfl*h*min_b(substeps_b/(stride_b*w_b))`. Mono-bloc bit-identique (routage AmrCouplerMP). MERGE.
 - [ ] **(v)** DSL production multi-bloc : `add_native_block`/`add_compiled_model(AmrSystem&)` ne doit plus
       lever sur le 2e bloc (file d'attente + build a `ensure_built`). Write-set amr_dsl_block.hpp + amr_system.cpp.
-- [~] **(vi) EN COURS** sources couplees AMR meme-cellule / opposees : exposer `coupled_source_step` du
-      moteur via le registre runtime ; A3 (average_down covered cells) DEJA fait (#169). amr_runtime.hpp + amr_system.cpp.
-- [ ] **(vii)** IMEX local AMR runtime : la facade honore `time="imex"` multi-bloc (le moteur a deja le callback).
+- [x] **(vi) #179** sources couplees AMR meme-cellule / opposees : `coupled_source_step` via le registre
+      runtime + average_down covered cells (#169) ; conservation par-cellule+globale, disable-and-fail. MERGE.
+- [~] **(vii) EN COURS** IMEX local AMR runtime : la facade honore `time="imex"` multi-bloc (le moteur a deja
+      le callback AmrImplicitSourceStepper). Agent en cours.
 - [ ] **(viii)** Phase 2 : regrid union-tags (deverrouille multi-bloc + regrid_every>0) ; puis Schur / implicite
       global / repro papier.
 
