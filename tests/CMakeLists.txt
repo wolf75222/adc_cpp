@@ -311,6 +311,15 @@ add_executable(test_amr_multiblock_coupled_source test_amr_multiblock_coupled_so
 target_link_libraries(test_amr_multiblock_coupled_source PRIVATE adc::adc ${CMAKE_DL_LIBS})
 add_test(NAME test_amr_multiblock_coupled_source COMMAND test_amr_multiblock_coupled_source)
 
+# --- AMR SOURCES COUPLEES : RESOLUTION DE ROLE STRICTE (P0, mirroir de System #181) -------------------
+# add_coupled_source sur le moteur runtime AMR : un role CANONIQUE mais NON EXPOSE par le bloc (momentum_x
+# sur un bloc scalaire) doit LEVER (avec bloc + role dans le message) au lieu de retomber silencieusement
+# sur la composante 0. Trois cas : role valide (reussit), role absent (leve), role inconnu (leve).
+add_executable(test_amr_coupled_source_role_strict test_amr_coupled_source_role_strict.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+target_link_libraries(test_amr_coupled_source_role_strict PRIVATE adc::adc ${CMAKE_DL_LIBS})
+add_test(NAME test_amr_coupled_source_role_strict COMMAND test_amr_coupled_source_role_strict)
+
 # --- AMR MULTI-BLOCS IMEX (capstone vii) : time="imex" PAR BLOC honore par la facade runtime ----------
 # Source raide locale implicite (backward_euler_source par niveau, mirroir de AmrSystemCoupler::step :
 # SourceFreeModel + AmrImplicitSourceStepper) : bloc raide STABLE sous IMEX la ou l'explicite EXPLOSE

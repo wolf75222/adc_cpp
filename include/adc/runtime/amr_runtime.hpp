@@ -110,8 +110,9 @@ struct AmrRuntimeBlock {
 
   /// Descripteur des variables CONSERVATIVES du modele (noms + ROLES physiques, Model::conservative_vars()).
   /// Source unique de verite pour resoudre un role (Density, MomentumX, ...) -> indice de composante dans
-  /// add_coupled_source, comme System::add_coupled_source lit Species::cons_vars (fallback comp 0 si le bloc
-  /// ne renseigne pas le role). Vide pour un bloc qui ne le declare pas : la source retombe sur la comp 0.
+  /// add_coupled_source, comme System::add_coupled_source lit Species::cons_vars. La resolution est STRICTE
+  /// (#181) : si le bloc n'expose PAS le role canonique demande (index_of < 0), add_coupled_source LEVE au
+  /// lieu de retomber sur la composante 0 (un repli silencieux appliquerait la source au mauvais champ).
   VariableSet cons_vars;
 
   /// Pile de niveaux du bloc (niveau 0 = grossier, > 0 = patchs fins), SUR le layout partage. Le
@@ -299,7 +300,7 @@ class AmrRuntime {
       throw std::runtime_error("AmrRuntime::add_coupled_source : trop de termes de source (> " +
                                std::to_string(kCsMaxTerms) + ")");
     // Resout (bloc, role) -> (indice de bloc, composante) par le descripteur CONSERVATIF du bloc, comme
-    // System (fallback comp 0 si le role n'est pas declare). Un bloc inconnu leve immediatement.
+    // System (#181). Un bloc inconnu leve immediatement ; un role inconnu (non canonique) aussi.
     auto resolve = [&](const std::string& block, const std::string& role) -> std::pair<int, int> {
       const int b = block_index(block);
       if (b < 0)
@@ -308,10 +309,17 @@ class AmrRuntime {
       if (r == VariableRole::Custom)
         throw std::runtime_error("AmrRuntime::add_coupled_source : role '" + role + "' inconnu (bloc '" +
                                  block + "')");
-      // role -> composante par le descripteur CONSERVATIF du bloc ; fallback comp 0 si le bloc ne
-      // renseigne pas ce role (meme regle que System::role_index, qui n'est qu'un wrapper de index_of).
-      const int ix = blocks_[static_cast<std::size_t>(b)].cons_vars.index_of(r);
-      const int comp = ix >= 0 ? ix : 0;
+      // STRICT (pas de repli silencieux ; mirroir de System::add_coupled_source #181) : une source couplee
+      // DSL vise un (bloc, role) EXPLICITEMENT demande par l'utilisateur. Si le bloc n'expose PAS ce role
+      // (canonique mais absent de cons_vars), un repli sur la composante 0 appliquerait la source au mauvais
+      // champ EN SILENCE (le faux-positif identifie a la revue Lot E). On leve. Distinct des couplages NOMMES
+      // (add_collision/add_pair cote System) qui assument volontairement la disposition canonique via
+      // role_index(..., fallback) et restent inchanges (ils ne passent pas par ce chemin runtime AMR).
+      const int comp = blocks_[static_cast<std::size_t>(b)].cons_vars.index_of(r);
+      if (comp < 0)
+        throw std::runtime_error("AmrRuntime::add_coupled_source : le bloc '" + block +
+                                 "' n'expose pas le role '" + role +
+                                 "' (pas de repli silencieux sur la composante 0)");
       return {b, comp};
     };
     // Entrees : (bloc, composante) lues par cellule. Capturees par INDICE -> on reconstruit les Array4 a
