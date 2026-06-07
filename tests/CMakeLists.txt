@@ -579,6 +579,25 @@ if(ADC_HAS_MPI)
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_coupled_source>
                      ${MPIEXEC_POSTFLAGS})
   endforeach()
+
+  # --- finding 8 : garde local_size avant fab(0) dans les fermetures rhs_into / advance / max_speed
+  # des blocs DSL hote (compile via add_compiled_model). System repartit UNE box en round-robin,
+  # donc a np>1 des rangs ont local_size()==0 ; avant le fix, rhs_into / advance / max_speed
+  # appelaient copy_state / write_state -> fab(0) hors-bornes -> crash UB silencieux ou segfault.
+  # Le fix ajoute "if (U.local_size() == 0) return;" en tete de chaque fermeture (meme pattern que
+  # add_poisson). La garde est un no-op unilateral (pas de collectif MPI dans ces fermetures) ->
+  # aucun interblocage. np=1 = chemin proprietaire (bit-identique au serie) ; np=2/4 = chemin
+  # distribue (rangs vides). Resultat INVARIANT en np (box sur rang 0). Compile le runtime System
+  # comme test_mpi_coupled_source.
+  add_executable(test_mpi_system_gather_scatter test_mpi_system_gather_scatter.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
+  target_link_libraries(test_mpi_system_gather_scatter PRIVATE adc::adc ${CMAKE_DL_LIBS})
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_system_gather_scatter_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_system_gather_scatter>
+                     ${MPIEXEC_POSTFLAGS})
+  endforeach()
 endif()
 
 # --- contrats communs de l'etage elliptique (audit D.1) : concepts EllipticOperator /

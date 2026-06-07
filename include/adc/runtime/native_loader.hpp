@@ -220,10 +220,18 @@ void push_dynamic(ImplT* P, const std::string& name, void* h, int substeps,
 
   std::function<void(MultiFab&, MultiFab&)> rhs_into = [P, im, n, dx, recon](MultiFab& U,
                                                                              MultiFab& R) {
+    // Chemin HOTE (bloc dynamique) : meme garde MPI que add_poisson. Sur un rang sans box locale
+    // (local_size()==0 a np>1) il n'y a rien a marshaler ; le rang proprietaire porte la physique
+    // complete. Sans cette garde, copy_state(U) / write_state(R) dereferenceraient fab(0) inexistant.
+    // Pas d'operation MPI collective ici -> no-op unilateral, aucun risque d'interblocage.
+    if (U.local_size() == 0) return;
     P->write_state(R, NV, host_residual<NV>(*im, P->copy_state(U, NV),
                                             P->copy_state(P->aux, P->aux_ncomp_), n, dx, recon));
   };
   std::function<Real(const MultiFab&)> max_speed = [P, im, n](const MultiFab& U) -> Real {
+    // Meme garde MPI : rang vide -> vitesse locale 0 (l'all_reduce_max en aval prend le max global,
+    // le proprietaire contribue la vraie valeur). Pas de collectif ici -> no-op sans interblocage.
+    if (U.local_size() == 0) return Real(0);
     std::vector<double> u = P->copy_state(U, NV), aux = P->copy_state(P->aux, P->aux_ncomp_);
     const std::size_t nn = static_cast<std::size_t>(n) * n;
     Real mx = 0;
@@ -249,6 +257,8 @@ void push_dynamic(ImplT* P, const std::string& name, void* h, int substeps,
   };
   std::function<void(MultiFab&, Real, int)> advance = [P, im, n, dx, recon](MultiFab& U, Real dt,
                                                                             int nsub) {
+    // Meme garde MPI : rang vide -> no-op (rien a marshaler). Pas de collectif -> sans interblocage.
+    if (U.local_size() == 0) return;
     const Real hh = dt / nsub;
     const std::vector<double> aux = P->copy_state(P->aux, P->aux_ncomp_);  // aux gelee (splitting)
     for (int s = 0; s < nsub; ++s) {  // Euler explicite par sous-pas (chemin hote, prototype)
@@ -428,6 +438,10 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
 
   std::function<void(MultiFab&, MultiFab&)> rhs_into =
       [P, lib, res_fn, nv, n, dx, dy, per, lim, riem, recon_prim](MultiFab& U, MultiFab& R) {
+        // Chemin HOTE (bloc compile .so) : meme garde MPI que add_poisson. Sur un rang sans box
+        // locale (local_size()==0 a np>1) il n'y a rien a marshaler ; le rang proprietaire porte
+        // la physique complete. Pas de collectif ici -> no-op unilateral, aucun interblocage.
+        if (U.local_size() == 0) return;
         std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         std::vector<double> r(static_cast<std::size_t>(nv) * n * n, 0.0);
         res_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim);
@@ -436,6 +450,8 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   std::function<void(MultiFab&, Real, int)> advance =
       [P, lib, adv_fn, nv, n, dx, dy, per, lim, riem, recon_prim, imex](MultiFab& U, Real dt,
                                                                         int nsub) {
+        // Meme garde MPI : rang vide -> no-op. Pas de collectif -> sans interblocage.
+        if (U.local_size() == 0) return;
         std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         adv_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
                static_cast<double>(dt), nsub);
@@ -443,6 +459,8 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
       };
   std::function<Real(const MultiFab&)> max_speed =
       [P, lib, max_fn, nv, n, dx, dy, per](const MultiFab& U) -> Real {
+        // Meme garde MPI : rang vide -> vitesse locale 0. L'all_reduce_max en aval prend le max global.
+        if (U.local_size() == 0) return Real(0);
         std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         return max_fn(u.data(), a.data(), n, dx, dy, per);
       };
