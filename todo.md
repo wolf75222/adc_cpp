@@ -389,18 +389,23 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       ne marche PAS ; c'est bien le facteur GLOBAL 2pi/rhobar. POURQUOI Codex (cartesien-Schur) donne 0.035
       et pas 0.77 : (a) son runner OMET le facteur 2pi/rhobar (x2pi -> 0.22) ET (b) sa grille CARTESIENNE
       diffuse le bord d'anneau (gamma_raw polaire 0.155 ~ 4.4x son 0.035 a resolution comparable). Polaire
-      + 2pi/rhobar reproduit le papier ; pas un bug de physique. ROBUSTE EN RESOLUTION : a n=192 les
+      + 2pi/rhobar reproduit le taux diocotron REDUIT (ExB-scalaire, benchmark Petri) ; PAS le modele Hoffart complet (cf. correction ci-dessous). ROBUSTE EN RESOLUTION : a n=192 les
       trois modes tombent dans [0.87,0.97] (l=4 EXACT aux deux resolutions ; l=5 passe de -29% n=128 a
       +27% n=192 quand sa fenetre se resserre -> le scatter est de la SENSIBILITE A LA FENETRE de fit,
       PAS un deficit de physique). Diag reproductible : `/tmp/diag_polar_omega.py`.
-- [x] **MODELE COMPLET = DEJA OPERATIONNEL (chemin cartesien, juin 2026, investigation multi-agents)** :
-      adc_cases/hoffart_euler_poisson_dsl tourne le systeme COMPLET (continuite + momentum + Lorentz +
-      pression isotherme p=theta*rho + Gauss) via adc.Split(Explicit ssprk3, CondensedSchur) = pile Schur
-      #118-128 sur grille CARTESIENNE. l=3 = -0.38% n=512 GH200. L'observable de taux (FFT-theta de phi sur
-      un cercle) est polaire-propre MEME en cartesien (la diffusion de bord ne touche que le rendu de
-      DENSITE, pas le taux). => VOIE B (cartesien) RECOMMANDEE ; Voie A (fluide polaire + Schur polaire) =
-      RECHERCHE, optionnelle (PolarPoissonSolver direct scalaire incompatible avec le Schur tenseur croise ;
-      dispatch_transport_polar rejette le fluide). Roadmap : docs/FULL_MODEL_VALIDATION_ROADMAP.md.
+- [~] **MODELE COMPLET Hoffart -- PAS encore valide a fidelite papier (CORRECTION d'honnetete, Codex juin 2026)** :
+      ATTENTION : le "-0.38% l=3 n=512" cite plus haut est le DIOCOTRON ExB-SCALAIRE REDUIT (adc_cases/diocotron/,
+      models.diocotron, CARTESIEN + paroi circulaire, sweep ROMEO ~/adc_gpu_hires/.../diocotron/sweep.py). Il valide
+      la NORMALISATION 2pi/rhobar + la methode sur le MODELE REDUIT (benchmark Petri standard) -- PAS le systeme
+      Hoffart complet. Le MODELE COMPLET (continuite + momentum + Lorentz + pression isotherme + Gauss via Schur)
+      EXISTE = adc_cases/hoffart_euler_poisson_dsl, MAIS : (a) sur la branche feat/normalization-and-schur-measurement,
+      PAS sur master ; (b) mesure seulement BASSE RES (0.027/0.035, runner Codex) ; (c) PAS valide haute-res ni avec
+      la geometrie/init EXACTE du papier. magnetic_isothermal_dsl = validation locale PERIODIQUE, pas le papier.
+      diocotron_polar_fluid = figure demo (branche feat/diocotron-polar-fluid), pas le setup quantitatif du papier.
+      => RESTE REEL pour la repro papier : assembler le MODELE COMPLET au setup papier (disque/anneau + init) a HAUTE
+      RES + matcher les taux. NON FAIT. Les CAPACITES sont la (Schur cartesien #118-128, Schur polaire #210/#212,
+      fluide polaire #209) ; reste l'ASSEMBLAGE + la run quantitative. (Erreur propagee corrigee : le workflow frontier
+      avait attribue le -0.38% du reduit au modele complet -- faux.)
 - [x] **Conservation discrete cartesien-fluide-Schur -- FAIT #207** : tests masse (machine, domaine ferme),
       symetrie momentum (machine), impulsion momentum (physique O(dt) convergente), E>0/p>0 (3 limiteurs).
       Note honnete FV-vs-FE. Decouverte : Dirichlet fuit la masse ~1e-2 par Foextrap (artefact CL, pas schema).
