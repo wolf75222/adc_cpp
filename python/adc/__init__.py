@@ -686,6 +686,12 @@ class CondensedSchur:
     (set_magnetic_field) -- un role / B_z manquant leve une erreur EXPLICITE a add_equation. Marche pour
     un modele en briques natives comme pour un modele DSL compile qui declare ces roles (electrons).
 
+    GEOMETRIE : cable en CARTESIEN (System(mesh=adc.CartesianMesh(...))) ET en POLAIRE
+    (System(mesh=adc.PolarMesh(...)), anneau (r, theta), Voie A etape 2c). Le choix du stepper condense
+    (cartesien CondensedSchurSourceStepper / polaire PolarCondensedSchurSourceStepper) est fait cote C++
+    selon la geometrie du System : la MEME adc.CondensedSchur(...) s'utilise dans les deux cas. Le pendant
+    polaire est MONO-RANG (le solveur polaire = boite unique couvrant l'anneau) : n_ranks>1 leve.
+
     QUAND L'UTILISER (CondensedSchur GLOBAL vs adc.SourceImplicit LOCAL). CondensedSchur est un
     implicite GLOBAL : il COUPLE tout le domaine via l'operateur elliptique tensoriel condense
     (resolu par Krylov BiCGStab), pour le couplage Lorentz / electrostatique raide non local. Si la

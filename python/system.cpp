@@ -5,6 +5,7 @@
 #include <adc/runtime/block_builder.hpp>  // GridContext + make_block/make_max_speed (fermetures compilees)
 #include <adc/runtime/model_factory.hpp>  // detail::dispatch_model + briques compilees
 #include <adc/coupling/condensed_schur_source_stepper.hpp>  // etage source condense par Schur (adc.Split / CondensedSchur, #126)
+#include <adc/coupling/polar_condensed_schur_source_stepper.hpp>  // pendant POLAIRE de l'etage source condense (Voie A etape 2c, #212)
 #include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel : source couplee generique (DSL P5, bytecode)
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>
@@ -573,9 +574,18 @@ void System::set_reaction_field(const std::vector<double>& kappa) {
 void System::ensure_aux_width(int ncomp) { p_->ensure_aux_width(ncomp); }
 
 void System::set_magnetic_field(const std::vector<double>& bz) {
-  const int n = p_->cfg.n;
-  if (static_cast<int>(bz.size()) != n * n)
-    throw std::runtime_error("System::set_magnetic_field : taille != n*n");
+  // Taille attendue du champ B_z(x) row-major (axe lent = 2nd indice de box, axe rapide = 1er) :
+  //   cartesien = n * n (carre, BIT-IDENTIQUE) ; POLAIRE = nr * ntheta (anneau, i = r rapide, cf.
+  //   apply_bz / set_density polaire). Le layout est le MEME que set_density (flat[j * nr + i]).
+  if (p_->polar_) {
+    const int nr = Impl::polar_nr(p_->cfg), nth = Impl::polar_ntheta(p_->cfg);
+    if (static_cast<int>(bz.size()) != nr * nth)
+      throw std::runtime_error("System::set_magnetic_field : taille != nr*ntheta (polaire)");
+  } else {
+    const int n = p_->cfg.n;
+    if (static_cast<int>(bz.size()) != n * n)
+      throw std::runtime_error("System::set_magnetic_field : taille != n*n");
+  }
   p_->fields_.bz_field_.assign(bz.begin(), bz.end());
   p_->fields_.apply_bz();  // applique tout de suite si un bloc lit deja B_z ; sinon conserve pour ensure_aux_width
 }
@@ -817,11 +827,20 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   if (!(theta > 0.0 && theta <= 1.0))
     throw std::runtime_error("System::set_source_stage : theta doit etre dans (0, 1] (recu " +
                              std::to_string(theta) + ")");
-  // Geometrie cartesienne uniquement (le branchement polaire de l'etage condense est un chantier
-  // ulterieur, cf. docs/SCHUR_CONDENSATION_DESIGN.md section 7) ; System lui-meme rejette deja polar.
-  if (P->cfg.geometry != "cartesian")
-    throw std::runtime_error("System::set_source_stage : etage source condense supporte uniquement la "
-                             "geometrie cartesienne (recu '" + P->cfg.geometry + "')");
+  // GEOMETRIE : l'etage source condense est cable en CARTESIEN (CondensedSchurSourceStepper, #126) ET en
+  // POLAIRE (PolarCondensedSchurSourceStepper, #212, Voie A etape 2c). Le dispatch ci-dessous construit le
+  // stepper adapte a la geometrie du System. Toute autre geometrie est REJETEE explicitement (pas
+  // d'ignore silencieux).
+  const bool polar = (P->cfg.geometry == "polar");
+  if (P->cfg.geometry != "cartesian" && !polar)
+    throw std::runtime_error("System::set_source_stage : etage source condense supporte les geometries "
+                             "cartesienne et polaire (recu '" + P->cfg.geometry + "')");
+  // Le pendant POLAIRE exige le mono-rang (PolarTensorKrylovSolver / PolarPoissonSolver = boite unique
+  // couvrant l'anneau ; cf. PolarCondensedSchurSourceStepper, garde-fou dur du constructeur). On le
+  // diagnostique ICI, cote facade, avant toute construction.
+  if (polar && n_ranks() != 1)
+    throw std::runtime_error("System::set_source_stage : l'etage source condense POLAIRE est mono-rang "
+                             "(n_ranks>1 non supporte a l'etape 2c ; le solveur polaire = boite unique).");
   // CONTRAT roles : le bloc doit exposer Density / MomentumX / MomentumY (Energy optionnel). On lit le
   // descripteur CONSERVATIF du bloc (peuple par add_block / les .so a roles, dont le DSL compile qui
   // declare les electrons en roles). Un role requis absent leve une erreur EXPLICITE ICI (avant le pas)
@@ -847,9 +866,19 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   P->ensure_aux_width(kAuxBaseComps + 1);  // garantit le canal B_z dans l'aux partage + re-applique B_z
   // Construit l'etage source condense sur le layout REEL du System (ba/dm/geom) avec la CL du Poisson.
   // Le stepper alloue ses tampons UNE fois ; step() les reutilise (cf. son cycle de vie). alpha =
-  // constante de couplage electrostatique du sous-systeme source. n_precond_vcycles = defaut (1).
-  s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, P->geom, P->ba, P->fields_.poisson_bc(),
-                                                          static_cast<Real>(alpha));
+  // constante de couplage electrostatique du sous-systeme source.
+  if (polar) {
+    // POLAIRE (Voie A etape 2c) : PolarCondensedSchurSourceStepper sur l'anneau pgeom_, MEME CL Poisson
+    // (Dirichlet/Neumann radiale, theta toujours periodique cote solveur). Preconditionneur RadialLine
+    // (defaut). run_source_stage l'invoque exactement comme le cartesien (signature step() identique).
+    // schur reste nullptr (chemin cartesien intouche).
+    s.schur_polar = std::make_shared<PolarCondensedSchurSourceStepper>(
+        vs, P->pgeom_, P->ba, P->fields_.poisson_bc(), static_cast<Real>(alpha));
+  } else {
+    // CARTESIEN (#126) : INCHANGE, bit-identique. n_precond_vcycles = defaut (1).
+    s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, P->geom, P->ba, P->fields_.poisson_bc(),
+                                                            static_cast<Real>(alpha));
+  }
   s.schur_theta = theta;
 }
 

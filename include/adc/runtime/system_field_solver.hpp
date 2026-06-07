@@ -104,6 +104,14 @@ class SystemFieldSolver {
   // polar_ (cf. ensure_elliptic_polar). SEPARE de ell_ (geom() rend une PolarGeometry, pas une
   // Geometry) : le chemin cartesien n'est jamais touche. INERTE (nullopt) en cartesien.
   std::optional<PolarPoissonSolver> pell_;
+  // Tampon phi de l'ETAGE SOURCE condense POLAIRE (Voie A etape 2c). Le PolarPoissonSolver direct
+  // (pell_->phi()) est SANS ghost (box valide = allocation) ; or le PolarCondensedSchurSourceStepper
+  // a besoin d'un phi AVEC 1 ghost (fill_ghosts + apply_polar_tensor + grad centre + ecriture de
+  // phi^{n+1}). On lui passe donc ce tampon dedie (1 ghost), alimente par phi^n (= aux[0] apres
+  // solve_fields_polar) avant le source stage, et qui porte phi^{n+1} en sortie (warm start du pas
+  // suivant). En CARTESIEN ce tampon est INERTE (nullopt) : ell_phi() route vers ell_->phi() comme
+  // avant, BIT-IDENTIQUE.
+  std::optional<MultiFab> phi_src_polar_;
   std::vector<Real> bz_field_;        // champ B_z(x) n*n row-major (vide si non fourni)
   int te_src_ = -1;                   // indice du bloc fluide source de T_e (-1 = aucune)
 
@@ -112,7 +120,10 @@ class SystemFieldSolver {
   /// halos de B_z sont remplis par solve_fields (comme grad) ; field_postprocess n'ecrit que comp 0..2.
   void apply_bz() {
     if (bz_field_.empty() || owner_->aux_ncomp_ <= kAuxBaseComps) return;
-    const int n = owner_->cfg.n;
+    // LARGEUR DE LIGNE (axe rapide i) du tableau row-major bz_field_ : n en cartesien (carre n x n,
+    // BIT-IDENTIQUE), nr en POLAIRE (anneau nr x ntheta, i = r de taille nr, cf. set_magnetic_field).
+    // L'index reste flat[j * row + i] : en cartesien row == n (inchange) ; en polaire row == nr.
+    const int row = owner_->polar_ ? owner_->aux.box(0).nx() : owner_->cfg.n;
     // Peuplement LOCAL au rang proprietaire (cf. solve_fields) : iteration sur les fabs locaux du
     // canal aux au lieu de fab(0) en dur (no-op sur un rang sans box locale a np>1, bit-identique au
     // proprietaire).
@@ -121,7 +132,7 @@ class SystemFieldSolver {
       const Box2D v = owner_->aux.box(li);
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
         for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-          a(i, j, kAuxBaseComps) = bz_field_[static_cast<std::size_t>(j) * n + i];
+          a(i, j, kAuxBaseComps) = bz_field_[static_cast<std::size_t>(j) * row + i];
     }
   }
 
@@ -294,8 +305,25 @@ class SystemFieldSolver {
   MultiFab& ell_rhs() {
     return std::visit([](auto& e) -> MultiFab& { return e.rhs(); }, *ell_);
   }
-  /// Potentiel phi du solveur elliptique cartesien actif (lu aussi par l'etage source condense).
+  /// Potentiel phi lu (et reecrit) par l'etage source condense. CARTESIEN : le phi du solveur
+  /// elliptique actif (GeometricMG/FFT, AVEC ghosts), BIT-IDENTIQUE. POLAIRE : un tampon dedie 1 ghost
+  /// (phi_src_polar_), alimente avec phi^n (= aux[0], pose par solve_fields_polar) au moment de l'appel
+  /// -- le PolarPoissonSolver direct n'a pas de ghosts, donc on ne peut pas exposer pell_->phi()
+  /// directement a un stepper qui fait fill_ghosts/apply_polar_tensor. Le stepper y ecrit phi^{n+1}
+  /// (warm start du pas suivant ; l'aux[0] sera de toute facon reecrit par le prochain solve_fields).
   MultiFab& ell_phi() {
+    if (owner_->polar_) {
+      // Alloue paresseusement (1 ghost) sur le layout du System, puis copie phi^n depuis aux[0].
+      if (!phi_src_polar_) phi_src_polar_.emplace(owner_->ba, owner_->dm, 1, 1);
+      for (int li = 0; li < phi_src_polar_->local_size(); ++li) {
+        const ConstArray4 a = owner_->aux.fab(li).const_array();
+        Array4 p = phi_src_polar_->fab(li).array();
+        const Box2D v = phi_src_polar_->box(li);
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i) p(i, j, 0) = a(i, j, 0);  // aux[0] = phi^n
+      }
+      return *phi_src_polar_;
+    }
     return std::visit([](auto& e) -> MultiFab& { return e.phi(); }, *ell_);
   }
   /// Resout le Poisson cartesien actif (GeometricMG V-cycle ou FFT directe). Pose les marqueurs de

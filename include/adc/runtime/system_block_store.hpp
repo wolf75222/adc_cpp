@@ -47,6 +47,10 @@ namespace adc {
 /// condense OPT-IN). Le pointeur seul suffit ici ; la definition vit dans le header de couplage, inclus
 /// la ou l'etage est reellement construit (python/system.cpp::set_source_stage).
 class CondensedSchurSourceStepper;
+/// Forward-declaration : pendant POLAIRE de l'etage source condense (anneau (r, theta)). Un BlockState
+/// porte AU PLUS UN des deux steppers (cartesien OU polaire), selon la geometrie du System, choisi par
+/// set_source_stage. Le pointeur seul suffit ici (cf. PolarCondensedSchurSourceStepper, Voie A etape 2c).
+class PolarCondensedSchurSourceStepper;
 
 /// Registre ORDONNE des blocs du System + helpers de marshaling d'etat. Voir contrat ci-dessus (POSSEDE
 /// BlockState + le vector ; EXPOSE index/find + copy/write_state ; NE POSSEDE PAS le domaine/aux/Poisson).
@@ -90,6 +94,11 @@ class SystemBlockStore {
     // (CondensedSchurSourceStepper, #126) en lieu et place de la source explicite / IMEX. shared_ptr :
     // garde BlockState MOVABLE (le stepper porte un GeometricMG, ni copiable ni movable simplement).
     std::shared_ptr<CondensedSchurSourceStepper> schur;
+    // Pendant POLAIRE de l'etage source condense (anneau (r, theta), Voie A etape 2c). Exclusif avec
+    // schur ci-dessus : set_source_stage construit l'UN ou l'AUTRE selon la geometrie du System (polaire
+    // -> schur_polar, cartesien -> schur). run_source_stage dispatche sur celui qui est non nul. Le
+    // chemin cartesien reste BIT-IDENTIQUE (schur_polar == nullptr quand le System est cartesien).
+    std::shared_ptr<PolarCondensedSchurSourceStepper> schur_polar;
     double schur_theta = 0.5;  // theta-schema de l'etage source (0.5 = Crank-Nicolson)
   };
 

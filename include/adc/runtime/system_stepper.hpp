@@ -84,6 +84,16 @@ class SystemStepper {
   ///   - B_z    = canal aux a l'indice kAuxBaseComps (peuple + ghosts remplis par solve_fields).
   /// theta/dt du theta-schema ; dt = eff_dt (facteur stride deja inclus par l'appelant, comme s.advance).
   void run_source_stage(typename Impl::Species& s, Real eff_dt) {
+    // DISPATCH GEOMETRIE (Voie A etape 2c) : un bloc porte AU PLUS UN etage source condense (set_source_stage
+    // construit le cartesien OU le polaire selon la geometrie du System). Le POLAIRE
+    // (PolarCondensedSchurSourceStepper, #212) a la MEME signature step(state, phi, bz, c_bz, theta, dt) que
+    // le cartesien (#126) : seul le pointeur change. Le chemin cartesien reste BIT-IDENTIQUE (schur_polar
+    // == nullptr en cartesien -> on prend la branche schur d'origine, inchangee).
+    if (s.schur_polar) {
+      s.schur_polar->step(s.U, owner_->fields_.ell_phi(), owner_->aux, kAuxBaseComps,
+                          static_cast<Real>(s.schur_theta), eff_dt);
+      return;
+    }
     if (!s.schur) return;
     s.schur->step(s.U, owner_->fields_.ell_phi(), owner_->aux, kAuxBaseComps,
                   static_cast<Real>(s.schur_theta), eff_dt);
