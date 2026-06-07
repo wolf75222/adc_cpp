@@ -437,7 +437,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       erreur DIMINUE avec delta -> non-linearite ; DIMINUE avec n -> resolution/diffusion ; STABLE ->
       probleme de modele/geometrie/diagnostic. n=768 ENSUITE, seulement pour les configs qui le justifient.
       SUITE : Voie A ETAPE 2a = operateur elliptique polaire TENSORIEL iteratif MERGE #210
-      (BiCGStab + precond RadialLine, MMS ordre 2, revue clean) ; ETAPE 2b = wiring Schur polaire (elliptique tenseur croise +
+      (BiCGStab + precond RadialLine, MMS ordre 2, revue clean) ; ETAPE 2b = etage source Schur polaire MERGE #212 (gain dt 2000x) ; ETAPE 2c = cablage facade -> PR6 (elliptique tenseur croise +
       stencils Schur polaires) ; cas demonstrateur diocotron fluide polaire (la figure 2D nette) ; table de
       validation finale ; (optionnel) Strang ordre 2. Roadmap detaillee : docs/FULL_MODEL_VALIDATION_ROADMAP.md.
       Question ouverte restante : preuve structure-preservation FE formelle requise, ou tests empiriques O(dt^2)
@@ -536,8 +536,10 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       part, `test_mpi_fft_distributed`) mais non route dans System (layout bandes vs box unique).
 - [~] **Etape 7 - domaine disque FV / Polaire Phase 2b** (EN COURS) : Voie A etape 1 = transport fluide
       polaire MERGE #209 ; etape 2a = operateur elliptique polaire TENSORIEL iteratif MERGE #210 (MMS ordre 2, BiCGStab+RadialLine, revue adversariale
-      clean) ; EN COURS etape 2b = wiring Schur polaire (SchurReconstructKernel polaire + coupleur
-      PolarTensorKrylovSolver) + demonstrateur diocotron 2D (l'explicit non-raide peut venir avant 2b) :
+      clean) ; etape 2b = etage source Schur polaire MERGE #212 (assemblage A polaire via #210, reconstruct
+      polaire, gain dt STABLE jusqu'a 2000x, bit-identite Schur cartesien). RESTE etape 2c = CABLAGE FACADE
+      (System.step/Python du stepper #212) -> PR6 (mesure diocotron-Schur polaire raide). Demonstrateur 2D
+      explicit FAIT (#feat/diocotron-polar-fluid) :
       DEMONSTRATEUR 2D POLAIRE FAIT (adc_cases branche feat/diocotron-polar-fluid, build+run ROMEO) : fluide
       isotherme polaire, mode l=4 croit (x14.9, gamma_fit 0.589), masse machine (4.6e-14), BORD D'ANNEAU NET
       (4 lobes sharp, zero diffusion isotrope vs cartesien). Param cle = cs2 (0.1 instable / 0.5 relaxe).
