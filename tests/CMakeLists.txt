@@ -183,6 +183,18 @@ adc_add_test(test_polar_mms_vr)
 # != 0) ; (C) conservation de la masse a ~machine (paroi radiale). Host / Serial-safe (UNE box).
 adc_add_test(test_polar_fluid_transport)
 
+# --- FORCE DE LORENTZ MAGNETIQUE v x B_z NATIVE pour le fluide isotherme polaire (3 var) : brique de
+# SOURCE MagneticLorentzForce (physics/source.hpp) + composition CompositeSource<PotentialForce,
+# MagneticLorentzForce> cablee dans dispatch_source (none/potential/gravity/magnetic/potential_magnetic).
+# Comble le contournement du demonstrateur diocotron (la geometrie polaire ne cablait pas v x B_z).
+# Verifie : (A) algebre ponctuelle (0, +qom B_z m_theta, -qom B_z m_r), travail nul, composition,
+# propagation du canal aux (n_aux=4 -> B_z) ; (B) giration cyclotron sous la SEULE force de Lorentz
+# (|m| constant, rotation pure) ; (C) diocotron polaire NATIF (source potential_magnetic) : pas de NaN,
+# masse conservee a ~machine, mode azimutal croissant porte par la VRAIE force magnetique (vs controle
+# B_z=0). Host / Serial-safe (UNE box). La force est ALGEBRIQUE et invariante par orientation du repere
+# -> la MEME brique sert cartesien et polaire (regime explicite ; le raide passe par le Schur #212).
+adc_add_test(test_polar_lorentz_source)
+
 # --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
 adc_add_test(test_dynamic_model)
 

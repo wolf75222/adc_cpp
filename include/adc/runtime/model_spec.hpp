@@ -16,13 +16,14 @@ namespace adc {
 /// concernee (cf. dispatch_model dans model_factory.hpp).
 struct ModelSpec {
   std::string transport = "compressible";  ///< "exb" | "compressible" | "isothermal"
-  std::string source = "none";             ///< "none" | "potential" | "gravity"
+  std::string source = "none";             ///< "none" | "potential" | "gravity" | "magnetic"/"lorentz"
+                                           ///< | "potential_magnetic"/"potential_lorentz"
   std::string elliptic = "charge";         ///< "charge" | "background" | "gravity"
 
   double B0 = 1.0;         ///< ExBVelocity : champ magnetique
   double gamma = 1.4;      ///< CompressibleFlux : indice adiabatique
   double cs2 = 0.5;        ///< IsothermalFlux : vitesse du son au carre
-  double qom = 1.0;        ///< PotentialForce : q/m (signe inclus)
+  double qom = 1.0;        ///< PotentialForce / MagneticLorentzForce : q/m (signe inclus)
   double q = 1.0;          ///< ChargeDensity : charge q
   double alpha = 1.0;      ///< BackgroundDensity : couplage Poisson
   double n0 = 0.0;         ///< BackgroundDensity : fond neutralisant

@@ -28,12 +28,27 @@ void dispatch_transport(const ModelSpec& m, Visitor&& v) {
 
 /// Construit la brique de source et appelle v(source). Les sources fluides (force) exigent
 /// >= 3 variables : sur un transport scalaire (exb), seule "none" est valide.
+///   - "none"                       : NoSource (neutre) ;
+///   - "potential"                  : PotentialForce (q/m) rho E (electrostatique) ;
+///   - "gravity"                    : GravityForce rho g ;
+///   - "magnetic" | "lorentz"       : MagneticLorentzForce q v x B_z (B_z lu dans l'aux, regime
+///                                    EXPLICITE ; le regime raide passe par le Schur condense) ;
+///   - "potential_magnetic" | "potential_lorentz" : CompositeSource<PotentialForce, MagneticLorentz>
+///                                    = electrostatique + Lorentz somme (force complete du diocotron
+///                                    polaire NATIF, sans le contournement centrifuge).
+/// qom (q/m, signe inclus) est partage par les deux forces chargees (meme espece). Les briques
+/// magnetisees declarent n_aux = 4 -> CompositeModel remonte la largeur aux au systeme (canal B_z).
 template <int NV, class Visitor>
 void dispatch_source(const ModelSpec& m, Visitor&& v) {
   if (m.source == "none") return v(NoSource{});
   if constexpr (NV >= 3) {
     if (m.source == "potential") return v(PotentialForce{Real(m.qom)});
     if (m.source == "gravity") return v(GravityForce{});
+    if (m.source == "magnetic" || m.source == "lorentz")
+      return v(MagneticLorentzForce{Real(m.qom)});
+    if (m.source == "potential_magnetic" || m.source == "potential_lorentz")
+      return v(CompositeSource<PotentialForce, MagneticLorentzForce>{PotentialForce{Real(m.qom)},
+                                                                     MagneticLorentzForce{Real(m.qom)}});
   }
   throw std::runtime_error("source '" + m.source +
                            "' invalide ici (exige un transport fluide >= 3 variables, ou 'none')");

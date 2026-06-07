@@ -1,13 +1,16 @@
 #pragma once
 
+#include <adc/core/physical_model.hpp>  // aux_comps<> : propagation du canal aux d'une source composee
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 
 /// @file
 /// @brief Briques de SOURCE S(U, aux) : terme local, generique sur la taille d'etat (travail sur
-///        l'energie si 4 variables). NoSource, PotentialForce ((q/m) rho E), GravityForce (rho g).
-///        Composables comme parametre Source d'un CompositeModel (physics/composite.hpp). Les sources
-///        INTER-especes (ionisation, collision) vivent au niveau du systeme (operator-split).
+///        l'energie si 4 variables). NoSource, PotentialForce ((q/m) rho E), GravityForce (rho g),
+///        MagneticLorentzForce (q v x B_z). Composables comme parametre Source d'un CompositeModel
+///        (physics/composite.hpp) ; CompositeSource<A, B> SOMME deux sources (electrostatique +
+///        Lorentz). Les sources INTER-especes (ionisation, collision) vivent au niveau du systeme
+///        (operator-split).
 
 namespace adc {
 
@@ -55,6 +58,57 @@ struct GravityForce {
     s[2] = u[0] * gy;
     if constexpr (State::size() == 4) s[3] = u[1] * gx + u[2] * gy;
     return s;
+  }
+};
+
+/// Force de Lorentz MAGNETIQUE q (v x B) sur la quantite de mouvement, champ B = B_z z_hat hors-plan.
+/// Regime EXPLICITE (omega_c modere) : terme ponctuel ALGEBRIQUE (aucune derivee), code une fois pour
+/// les DEUX geometries car il est INVARIANT par orientation du repere local orthonorme (x,y) ou
+/// (e_r, e_theta) :
+///   (rho v_x, rho v_y) x B_z z_hat = (+B_z rho v_y, -B_z rho v_x) = (+B_z m_y, -B_z m_x)  [cartesien]
+///   (rho v_r, rho v_th) x B_z z_hat = (+B_z rho v_th, -B_z rho v_r) = (+B_z m_th, -B_z m_r)  [polaire]
+/// Donc s[1] = +qom*B_z*m[2], s[2] = -qom*B_z*m[1] avec m[1]=u[1] (1ere composante de qdm),
+/// m[2]=u[2] (2nde). v x B est PERPENDICULAIRE a v : le travail F . v = 0 -> s[3] (energie) reste NUL
+/// meme a 4 variables (la force magnetique ne change pas l'energie cinetique). qom = q/m (signe inclus,
+/// coherent avec PotentialForce) ; le sens de giration (cyclotron) suit le signe de qom*B_z.
+///
+/// CONTRAT : brique SOURCE ponctuelle, device-callable (ADC_HD), aucun etat global. Lit B_z dans l'aux
+/// (composante canonique 3, comme set_magnetic_field le peuple) -> declare n_aux = 4 pour que le canal
+/// aux soit dimensionne et que load_aux remplisse a.B_z. Le regime RAIDE (omega_c grand) passe par le
+/// Schur condense (ElectrostaticLorentzCondensation), PAS par cette brique explicite.
+/// PRECONDITION : exige un transport fluide >= 3 variables (qdm sur 2 axes) ; sans objet sur scalaire.
+struct MagneticLorentzForce {
+  Real qom = 1;             // q/m (signe inclus)
+  static constexpr int n_aux = 4;  // lit B_z (canal aux extra, indice canonique 3)
+  template <class State>
+  ADC_HD State apply(const State& u, const Aux& a) const {
+    static_assert(State::size() >= 3,
+                  "MagneticLorentzForce : exige un transport fluide >= 3 variables (qdm sur 2 axes)");
+    const Real c = qom * a.B_z;
+    State s{};
+    s[1] = c * u[2];   // +qom B_z m_(y/theta)
+    s[2] = -c * u[1];  // -qom B_z m_(x/r)
+    // s[3] (energie) reste 0 : v x B est perpendiculaire a v, travail nul.
+    return s;
+  }
+};
+
+/// SOMME de deux briques source : S(U, aux) = A.apply(U, aux) + B.apply(U, aux). Permet de COMPOSER
+/// plusieurs forces ponctuelles dans l'UNIQUE slot Source du CompositeModel (p.ex. electrostatique
+/// PotentialForce + magnetique MagneticLorentzForce pour le diocotron). Generique sur la taille d'etat
+/// (l'addition de StateVec est definie composante a composante, cf. core/state.hpp).
+///
+/// CONTRAT : brique SOURCE ponctuelle, device-callable (ADC_HD), aucun etat global au-dela des deux
+/// sous-briques (elles-memes POD). PROPAGE le canal aux : n_aux = max(aux_comps<A>, aux_comps<B>) ->
+/// si une sous-brique lit B_z (n_aux=4), le compose l'expose et CompositeModel le remonte au systeme.
+template <class A, class B>
+struct CompositeSource {
+  A a{};
+  B b{};
+  static constexpr int n_aux = aux_comps<A>() > aux_comps<B>() ? aux_comps<A>() : aux_comps<B>();
+  template <class State>
+  ADC_HD State apply(const State& u, const Aux& ax) const {
+    return a.apply(u, ax) + b.apply(u, ax);
   }
 };
 

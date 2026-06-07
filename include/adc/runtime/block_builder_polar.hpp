@@ -78,7 +78,12 @@ void dispatch_transport_polar(const ModelSpec& m, Visitor&& v) {
 /// elliptique IDENTIQUES au cartesien : elles ne portent pas de geometrie). Seule la brique de
 /// transport change (ExBVelocityPolar ou IsothermalFluxPolar). dispatch_source<TR::n_vars> filtre
 /// automatiquement : transport scalaire ExB (1 var) -> seule source 'none' ; transport fluide
-/// isotherme (3 var) -> 'none' | 'potential' (-rho grad phi) | 'gravity' egalement valides.
+/// isotherme (3 var) -> 'none' | 'potential' (-rho grad phi) | 'gravity' | 'magnetic'/'lorentz'
+/// (q v x B_z, B_z lu dans l'aux, regime EXPLICITE) | 'potential_magnetic'/'potential_lorentz'
+/// (electrostatique + Lorentz somme = force complete du diocotron polaire NATIF) egalement valides.
+/// La force de Lorentz est ALGEBRIQUE et INVARIANTE par orientation du repere local orthonorme :
+/// la MEME brique MagneticLorentzForce sert les deux geometries (cartesien et polaire), comme
+/// PotentialForce / GravityForce. La metrique 1/r et la courbure restent portees par le transport.
 template <class Visitor>
 void dispatch_model_polar(const ModelSpec& m, Visitor&& visitor) {
   dispatch_transport_polar(m, [&](auto tr) {
