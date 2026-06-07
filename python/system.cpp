@@ -141,6 +141,16 @@ struct System::Impl {
   bool periodic_;
   MultiFab aux;
   int aux_ncomp_ = kAuxBaseComps;     // largeur du canal aux PARTAGE (max des blocs ; >= 3)
+
+  // MASQUE DE DOMAINE DISQUE (chantier T2, CONTRAT inerte par defaut). disc_set_ == false : aucun
+  // disque fixe -> le masque est "tout actif" et le chemin de transport reste BIT-IDENTIQUE. Quand
+  // set_disc_domain est appele, disc_ porte le descripteur (centre + rayon, SOURCE UNIQUE reutilisant
+  // le level set du mur conducteur) et disc_mask_ materialise le champ 0/1 cellule-centre (1 ghost,
+  // pour que le transport mask-aware lise les voisins). Le masque est CONSTRUIT mais PAS encore branche
+  // dans step() (scaffolding) ; il est consultable (disc_mask()) et consomme par assemble_rhs_masked.
+  detail::DiscDomain disc_;
+  bool disc_set_ = false;
+  MultiFab disc_mask_;  // 0/1 cellule-centre, meme layout que les blocs (ba/dm), 1 ghost ; vide tant que !disc_set_
   // Champs d'APPLICATION aux (bz_field_, te_src_) et tampons apply_bz/apply_te EXTRAITS vers
   // fields_ (SystemFieldSolver, Lot B) ; l'aux PARTAGE et sa largeur restent ici (canal commun).
   // Registre de blocs POSSEDE par le store (Lot B.3). `sp` est une REFERENCE sur blocks_.blocks : meme
@@ -527,6 +537,51 @@ void System::set_poisson(const std::string& rhs, const std::string& solver,
   p_->fields_.p_wall_radius = wall_radius;
   p_->fields_.p_eps_ = static_cast<Real>(epsilon);
   p_->fields_.ell_.reset();
+}
+
+void System::set_disc_domain(double cx, double cy, double R) {
+  Impl* P = p_.get();
+  // CARTESIEN seulement : le polaire borne deja l'anneau par ses parois radiales (r_min / r_max,
+  // flux radial nul) -> un masque disque cartesien n'a pas de sens sur la grille (r, theta).
+  if (P->polar_)
+    throw std::runtime_error(
+        "System::set_disc_domain : geometrie polaire (l'anneau est deja borne par ses parois "
+        "radiales r_min/r_max ; le masque disque cartesien ne s'applique pas)");
+  if (!(R > 0.0))
+    throw std::runtime_error("System::set_disc_domain : rayon R > 0 requis");
+  P->disc_ = detail::DiscDomain{cx, cy, R};
+  P->disc_set_ = true;
+  // Materialise le masque 0/1 cellule-centre (1 ghost, pour que le transport mask-aware lise les
+  // voisins i-1/i+1/j-1/j+1 jusqu'au bord). Meme layout que les blocs (ba/dm). Cellule active quand
+  // son CENTRE est dans le disque (level set < 0, MEME convention que le mur conducteur).
+  P->disc_mask_ = MultiFab(P->ba, P->dm, 1, 1);
+  const detail::DiscDomain disc = P->disc_;
+  const Geometry geom = P->geom;
+  for (int li = 0; li < P->disc_mask_.local_size(); ++li) {
+    Array4 m = P->disc_mask_.fab(li).array();
+    // boite AVEC ghosts : on classe aussi les ghosts (le transport mask-aware lit les voisins de bord).
+    const Box2D g = P->disc_mask_.fab(li).grown_box();
+    for_each_cell(g, [=] ADC_HD(int i, int j) {
+      m(i, j, 0) = disc.cell_active(geom.x_cell(i), geom.y_cell(j)) ? Real(1) : Real(0);
+    });
+  }
+}
+
+std::vector<double> System::disc_mask() const {
+  Impl* P = p_.get();
+  device_fence();
+  const Box2D v = P->dom;
+  std::vector<double> out;
+  out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
+  if (!P->disc_set_) {
+    // CONTRAT : sans disque fixe, le sous-domaine de transport est le domaine entier -> tout actif.
+    out.assign(static_cast<std::size_t>(v.nx()) * v.ny(), 1.0);
+    return out;
+  }
+  const ConstArray4 m = P->disc_mask_.fab(0).const_array();
+  for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(static_cast<double>(m(i, j, 0)));
+  return out;
 }
 
 void System::set_epsilon_field(const std::vector<double>& eps) {

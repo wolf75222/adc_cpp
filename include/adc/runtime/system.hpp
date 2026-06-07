@@ -202,6 +202,28 @@ class System {
                    const std::string& bc = "auto", const std::string& wall = "none",
                    double wall_radius = 0.0, double epsilon = 1.0);
 
+  /// Fixe le DOMAINE DE TRANSPORT comme un DISQUE de centre (@p cx, @p cy) et de rayon @p R
+  /// (chantier T2, CONTRAT inerte par defaut). Materialise un masque 0/1 cellule-centre (cellule
+  /// active quand son centre est dans le disque, level set hypot(x-cx, y-cy) - R < 0, MEME convention
+  /// que le mur conducteur du Poisson). C'est le pendant FV du mur elliptique : le papier (Hoffart et
+  /// al., arXiv:2510.11808) transporte sur un vrai disque, alors qu'ADC transporte sur le carre
+  /// cartesien plein avec le cercle seulement dans la paroi de Poisson (verrou "bords d'anneau
+  /// cartesiens", cf. docs/HOFFART_FIDELITY.md). Le masque rend possible un transport mask-aware
+  /// CONSERVATIF (flux normal nul aux faces active/inactive).
+  ///
+  /// INVARIANT (CONTRAT) : tant que set_disc_domain N'EST PAS appele, le masque est "tout actif" et
+  /// le chemin FV/AMR/MPI reste BIT-IDENTIQUE a l'historique. Cet appel construit et stocke le masque
+  /// MAIS NE BRANCHE PAS encore le transport mask-aware dans step() (qui reste donc inchange) : c'est
+  /// le SCAFFOLDING. Le masque est consultable via disc_mask() ; le transport mask-aware (surcharge
+  /// assemble_rhs_masked) est exerce par les tests. R > 0 requis ; cartesien seulement (le polaire
+  /// borne deja l'anneau par ses parois radiales -> erreur explicite).
+  void set_disc_domain(double cx, double cy, double R);
+
+  /// @return le masque de domaine 0/1 cellule-centre, ny*nx row-major (j lent, i rapide). Sans
+  /// set_disc_domain, renvoie un masque TOUT ACTIF (que des 1.0) : le sous-domaine de transport est
+  /// le domaine entier (chemin par defaut). Diagnostic / verification du contrat.
+  std::vector<double> disc_mask() const;
+
   /// Fixe une permittivite VARIABLE eps(x), champ n*n row-major (> 0), au CENTRE des cellules.
   /// L'operateur du Poisson de systeme passe a div(eps grad phi) = f, eps PORTE PAR L'OPERATEUR
   /// (coefficient de face harmonique, ordre 2) sans mise a l'echelle 1/eps du second membre. Seul

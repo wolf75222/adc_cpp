@@ -153,6 +153,14 @@ PYBIND11_MODULE(_adc, m) {
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0, py::arg("epsilon") = 1.0)
+      // Domaine de transport DISQUE (chantier T2, CONTRAT inerte par defaut) : materialise un masque
+      // 0/1 cellule-centre (cellule active si son centre est dans hypot(x-cx, y-cy) - R < 0). Sans cet
+      // appel, le masque est tout actif et le chemin de transport reste bit-identique. cf.
+      // System::set_disc_domain.
+      .def("set_disc_domain", &System::set_disc_domain, py::arg("cx"), py::arg("cy"), py::arg("R"))
+      // Masque de domaine 0/1 (ny, nx) row-major (diagnostic / verification du contrat). Tout 1.0 sans
+      // set_disc_domain.
+      .def("disc_mask", [](const System& s) { return to_2d(s.disc_mask(), s.ny(), s.nx()); })
       .def("set_epsilon_field",
            [](System& s,
               py::array_t<double, py::array::c_style | py::array::forcecast> arr) {

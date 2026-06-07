@@ -528,4 +528,111 @@ void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
   }
 }
 
+// ============================================================================
+// MASQUE DE DOMAINE (chantier T2, conservatif, OPT-IN -- chemin par defaut intouche)
+// ============================================================================
+// Le masque rend le transport FV conscient d'un sous-domaine ACTIF (p.ex. le disque du papier).
+// Convention : mask(i, j) >= 0.5 -> cellule ACTIVE, sinon INACTIVE. Une face est OUVERTE (flux
+// normal calcule) si ses DEUX cellules adjacentes sont actives ; elle est FERMEE (flux normal mis
+// a ZERO) si l'une au moins est inactive. Mettre a zero le flux normal aux faces active/inactive
+// rend le pas CONSERVATIF sur le sous-domaine actif : aucune masse ne traverse la frontiere, donc
+// la masse totale sur les cellules actives est conservee a la machine (flux telescopiques internes,
+// flux de bord nuls). C'est le pendant FV du mur conducteur (qui n'agit que sur l'elliptique).
+//
+// Le residu n'est ecrit QUE sur les cellules actives ; une cellule inactive garde son residu a 0
+// (l'appelant ne l'avance pas). Ce header NE wire PAS ce chemin dans System::step : il fournit la
+// brique mask-aware, exercee directement par les tests et, a terme, derriere l'opt-in disque.
+
+namespace detail {
+/// Indicateur d'activite d'une cellule depuis un masque 0/1 cellule-centre (>= 0.5 -> actif).
+ADC_HD inline bool mask_active(const ConstArray4& mask, int i, int j) {
+  return mask(i, j, 0) >= Real(0.5);
+}
+
+/// AssembleRhsMaskedKernel : variante de AssembleRhsKernel CONSCIENTE d'un masque de domaine.
+///
+/// Cellule inactive -> residu 0 (non avancee par l'appelant). Cellule active -> R = -div Fhat + S,
+/// MAIS le flux normal d'une face dont la cellule voisine est INACTIVE est mis a ZERO (paroi
+/// FV : zero flux normal a la frontiere active/inactive) -> conservation de masse sur le
+/// sous-domaine actif. Foncteur nomme (meme contrat device que AssembleRhsKernel). ADC_HD.
+///
+/// NB : sans terme diffusif (modeles transport-seul vises par le disque) ; un DiffusiveModel garde
+/// son Laplacien NON masque ici (raffinement separe -- le masque conservatif cible le flux
+/// hyperbolique, cf. le chantier "bords d'anneau").
+template <class Limiter, class NumericalFlux, class Model>
+struct AssembleRhsMaskedKernel {
+  Model model;
+  ConstArray4 u, ax, mask;
+  Array4 r;
+  Real dx, dy;
+  Limiter lim;
+  NumericalFlux nflux;
+  bool recon_prim;
+  ADC_HD void operator()(int i, int j) const {
+    if (!mask_active(mask, i, j)) {  // cellule hors sous-domaine actif : residu nul, non avancee
+      for (int c = 0; c < Model::n_vars; ++c) r(i, j, c) = Real(0);
+      return;
+    }
+    const Aux Ac = load_aux<aux_comps<Model>()>(ax, i, j);
+    const Aux Axm = load_aux<aux_comps<Model>()>(ax, i - 1, j);
+    const Aux Axp = load_aux<aux_comps<Model>()>(ax, i + 1, j);
+    const Aux Aym = load_aux<aux_comps<Model>()>(ax, i, j - 1);
+    const Aux Ayp = load_aux<aux_comps<Model>()>(ax, i, j + 1);
+
+    // faces x : reconstruction de part et d'autre, flux numerique, PUIS porte du masque (face fermee
+    // -> flux normal nul) -- une cellule voisine inactive ferme la face entre elle et (i, j).
+    const auto Lxm = reconstruct<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim);
+    const auto Rxm = reconstruct<Model>(model, u, i, j, 0, -1, lim, recon_prim);
+    const auto Lxp = reconstruct<Model>(model, u, i, j, 0, +1, lim, recon_prim);
+    const auto Rxp = reconstruct<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim);
+    auto Fxm = nflux(model, Lxm, Axm, Rxm, Ac, 0);
+    auto Fxp = nflux(model, Lxp, Ac, Rxp, Axp, 0);
+    if (!mask_active(mask, i - 1, j)) Fxm = typename Model::State{};
+    if (!mask_active(mask, i + 1, j)) Fxp = typename Model::State{};
+
+    // faces y
+    const auto Lym = reconstruct<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim);
+    const auto Rym = reconstruct<Model>(model, u, i, j, 1, -1, lim, recon_prim);
+    const auto Lyp = reconstruct<Model>(model, u, i, j, 1, +1, lim, recon_prim);
+    const auto Ryp = reconstruct<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim);
+    auto Fym = nflux(model, Lym, Aym, Rym, Ac, 1);
+    auto Fyp = nflux(model, Lyp, Ac, Ryp, Ayp, 1);
+    if (!mask_active(mask, i, j - 1)) Fym = typename Model::State{};
+    if (!mask_active(mask, i, j + 1)) Fyp = typename Model::State{};
+
+    const auto S = model.source(load_state<Model>(u, i, j), Ac);
+    for (int c = 0; c < Model::n_vars; ++c)
+      r(i, j, c) = S[c] - (Fxp[c] - Fxm[c]) / dx - (Fyp[c] - Fym[c]) / dy;
+  }
+};
+}  // namespace detail
+
+/// assemble_rhs_masked<Limiter,NumericalFlux> : residu R = -div Fhat + S RESTREINT a un masque de
+/// domaine 0/1 cellule-centre (OPT-IN, chantier T2). Sur une cellule inactive R = 0 (non avancee) ;
+/// sur une cellule active, le flux normal d'une face dont la voisine est inactive est mis a zero
+/// (paroi FV). Resultat : la masse sur le sous-domaine actif est CONSERVEE a la machine (aucun flux
+/// ne traverse la frontiere) -- propriete validee par le test conservation du chantier disque.
+///
+/// @p mask doit avoir le MEME layout que @p U (meme BoxArray / DistributionMapping) et porter au
+/// moins 1 ghost (lecture des voisins i-1/i+1/j-1/j+1 jusqu'au bord). Ce point d'entree est SEPARE
+/// d'assemble_rhs : le chemin par defaut (System::step) reste strictement bit-identique tant qu'il
+/// n'appelle PAS cette surcharge.
+template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
+void assemble_rhs_masked(const Model& model, const MultiFab& U, const MultiFab& aux,
+                         const MultiFab& mask, const Geometry& geom, MultiFab& R,
+                         bool recon_prim = false) {
+  const Real dx = geom.dx(), dy = geom.dy();
+  const Limiter lim{};
+  const NumericalFlux nflux{};
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 ax = aux.fab(li).const_array();
+    const ConstArray4 mk = mask.fab(li).const_array();
+    Array4 r = R.fab(li).array();
+    const Box2D v = R.box(li);
+    for_each_cell(v, detail::AssembleRhsMaskedKernel<Limiter, NumericalFlux, Model>{
+                         model, u, ax, mk, r, dx, dy, lim, nflux, recon_prim});
+  }
+}
+
 }  // namespace adc

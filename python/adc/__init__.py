@@ -1079,6 +1079,28 @@ class System:
         self.set_poisson(rhs=rhs_tok, solver=kind, bc=bc, wall=wall, wall_radius=wall_radius,
                          epsilon=model.operator.epsilon)
 
+    def set_disc_domain(self, cx, cy, R):
+        """Fixe le DOMAINE DE TRANSPORT comme un DISQUE de centre (cx, cy) et de rayon R (chantier T2,
+        CONTRAT inerte par defaut). Materialise un masque 0/1 cellule-centre (cellule active quand son
+        centre est dans le disque, level set hypot(x-cx, y-cy) - R < 0, MEME convention que le mur
+        conducteur du Poisson). C'est le pendant volumes-finis du mur elliptique : le papier (Hoffart
+        et al., arXiv:2510.11808) transporte sur un VRAI disque alors qu'ADC transporte sur le carre
+        cartesien plein, le cercle n'agissant que dans la paroi de Poisson (verrou des bords d'anneau
+        cartesiens, cf. docs/HOFFART_FIDELITY.md).
+
+        INVARIANT (CONTRAT) : tant que set_disc_domain n'est PAS appele, le masque est tout actif et
+        le chemin de transport (cartesien / AMR / MPI) reste BIT-IDENTIQUE. Cet appel CONSTRUIT et
+        stocke le masque mais NE BRANCHE PAS encore le transport mask-aware dans step() : c'est le
+        scaffolding (le masque est consultable via disc_mask()). R > 0 ; cartesien seulement (le
+        polaire borne deja l'anneau par ses parois radiales -> erreur explicite)."""
+        self._s.set_disc_domain(cx, cy, R)
+
+    def disc_mask(self):
+        """Masque de domaine 0/1 cellule-centre, tableau (ny, nx) (diagnostic / verification du
+        contrat). Tout 1.0 tant que set_disc_domain n'a pas ete appele (sous-domaine = domaine
+        entier, chemin par defaut)."""
+        return self._s.disc_mask()
+
     def add_coupling(self, coupling):
         """Ajoute un couplage inter-especes (operator-split, applique apres le transport) :
 
