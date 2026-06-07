@@ -1,3 +1,19 @@
+/// @file
+/// @brief Clustering Berger-Rigoutsos : grille de tags -> petit jeu de boxes couvrant les cellules taguees.
+///
+/// Couche : `include/adc/amr` (primitives geometriques AMR).
+/// Role : regrouper les cellules taguees (TagBox) en un nombre reduit de boxes a bonne efficacite
+/// (fraction de cellules taguees dans les boxes), pour definir les patchs d'un niveau fin.
+/// Contrat : pur, sequentiel, sans physique ni MPI ; consomme une TagBox deja rassemblee.
+///
+/// Recursion :
+///   1. reduire la region au bounding box des tags (trim) ;
+///   2. si efficacite >= seuil, ou region non splittable -> accepter la box ;
+///   3. sinon choisir une coupe : trou (colonne/ligne vide) en priorite, sinon inflexion (max du
+///      changement de Laplacien de la signature), sinon milieu ;
+///   4. recurser sur les deux moities.
+/// Puis chop final selon max_box_size.
+
 #pragma once
 
 #include <adc/amr/tag_box.hpp>
@@ -23,14 +39,16 @@
 
 namespace adc {
 
+/// Parametres du clustering Berger-Rigoutsos (objet de configuration).
 struct ClusterParams {
-  double min_efficiency = 0.7;
-  int min_box_size = 1;
-  int max_box_size = 32;
+  double min_efficiency = 0.7;  ///< seuil d'efficacite (fraction taguee) pour accepter une box.
+  int min_box_size = 1;         ///< taille minimale d'une box ; borne les coupes admissibles.
+  int max_box_size = 32;        ///< taille max d'une box ; les boxes acceptees sont chopees a cette taille.
 };
 
 namespace detail {
 
+/// Bounding box des cellules taguees dans region ; box vide (hi < lo) si aucune n'est taguee.
 inline Box2D tag_bbox(const TagBox& tb, const Box2D& region) {
   int lo0 = INT_MAX, lo1 = INT_MAX, hi0 = INT_MIN, hi1 = INT_MIN;
   for (int j = region.lo[1]; j <= region.hi[1]; ++j)
@@ -45,6 +63,7 @@ inline Box2D tag_bbox(const TagBox& tb, const Box2D& region) {
   return Box2D{{lo0, lo1}, {hi0, hi1}};
 }
 
+/// Nombre de cellules taguees dans la box r.
 inline long count_in(const TagBox& tb, const Box2D& r) {
   long c = 0;
   for (int j = r.lo[1]; j <= r.hi[1]; ++j)
@@ -52,6 +71,7 @@ inline long count_in(const TagBox& tb, const Box2D& r) {
   return c;
 }
 
+/// Signature de r selon axis : nombre de cellules taguees par colonne (axis 0) ou par ligne (axis 1).
 inline std::vector<long> signature(const TagBox& tb, const Box2D& r, int axis) {
   const int len = (axis == 0) ? r.nx() : r.ny();
   std::vector<long> s(len, 0);
@@ -61,7 +81,7 @@ inline std::vector<long> signature(const TagBox& tb, const Box2D& r, int axis) {
   return s;
 }
 
-// trou (zero) interieur le plus proche du centre, dans [mb, len-mb]. -1 sinon.
+/// Trou (signature nulle) interieur le plus proche du centre, dans [mb, len-mb] ; -1 si aucun.
 inline int best_hole(const std::vector<long>& s, int mb) {
   const int len = static_cast<int>(s.size());
   int best = -1, bestd = INT_MAX, c = len / 2;
@@ -76,8 +96,8 @@ inline int best_hole(const std::vector<long>& s, int mb) {
   return best;
 }
 
-// inflexion : max |D[k] - D[k-1]| avec D le Laplacien discret, dans la plage
-// valide. score renvoye via `score`. -1 si aucune.
+/// Inflexion : indice du max |D[k] - D[k-1]| avec D le Laplacien discret de la signature, dans la
+/// plage valide ; -1 si aucune. @param score recoit le score du max retenu (sortie).
 inline int best_inflection(const std::vector<long>& s, int mb, long& score) {
   const int len = static_cast<int>(s.size());
   score = 0;
@@ -96,6 +116,9 @@ inline int best_inflection(const std::vector<long>& s, int mb, long& score) {
   return best;
 }
 
+/// Coeur recursif Berger-Rigoutsos : trim, accepte si efficace/non splittable, sinon coupe et recurse.
+/// @param region region courante (trimmee en place au bounding box des tags).
+/// @param out recoit les boxes acceptees (avant chop final par max_box_size).
 inline void cluster_rec(const TagBox& tb, Box2D region, const ClusterParams& p,
                         std::vector<Box2D>& out) {
   region = tag_bbox(tb, region);
@@ -161,6 +184,10 @@ inline void cluster_rec(const TagBox& tb, Box2D region, const ClusterParams& p,
 
 }  // namespace detail
 
+/// Clusterise une TagBox en boxes couvrant les cellules taguees (Berger-Rigoutsos), puis chop final.
+/// @param tags grille de tags a couvrir (espace d'indices de tags.box).
+/// @param p parametres (efficacite cible, tailles min/max de box).
+/// @return boxes dans l'espace d'indices de tags.box, chacune de taille <= p.max_box_size.
 inline std::vector<Box2D> berger_rigoutsos(const TagBox& tags,
                                            const ClusterParams& p = {}) {
   std::vector<Box2D> raw;

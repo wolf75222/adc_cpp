@@ -1,3 +1,18 @@
+/// @file
+/// @brief Regrid dynamique : (re)construit un niveau fin a partir du tagging d'un niveau grossier.
+///
+/// Couche : `include/adc/amr` (primitives geometriques AMR).
+/// Role : tague un niveau, regroupe les cellules taguees en boxes (Berger-Rigoutsos), raffine en
+/// BoxArray du niveau suivant, reconstruit son MultiFab et le remplit (interpolation depuis le
+/// grossier, puis copie de l'ancien fin la ou il existait pour preserver la precision).
+/// Contrat : le critere de tagging est un predicat generique sur (ConstArray4, i, j) ; on reste
+/// agnostique de la physique. Pour un critere a gradient, l'appelant remplit les ghosts avant.
+///
+/// Invariants :
+/// - regrid conservatif = hierarchie commune, cellules co-localisees, regrid par union des tags ;
+/// - le niveau fin est dans l'espace d'indices raffine du niveau grossier (refine(ref_ratio)) ;
+/// - sans tag, le niveau fin (et les plus fins) est supprime.
+
 #pragma once
 
 #include <adc/amr/amr_hierarchy.hpp>
@@ -25,8 +40,11 @@
 
 namespace adc {
 
-// Marque les cellules valides ou le predicat est vrai, sur une TagBox couvrant
-// le domaine.
+/// Marque les cellules valides ou le predicat est vrai, sur une TagBox couvrant le domaine.
+/// @tparam Crit predicat (ConstArray4, i, j) -> bool, evalue sur les cellules valides de chaque fab.
+/// @param mf champ source (local : ne parcourt que les fabs locaux du rang).
+/// @param domain domaine couvert par la TagBox retournee (espace d'indices du niveau).
+/// @return TagBox sur domain, marquee la ou crit est vrai.
 template <class Crit>
 TagBox tag_cells(const MultiFab& mf, const Box2D& domain, Crit crit) {
   TagBox tb(domain);
@@ -41,8 +59,10 @@ TagBox tag_cells(const MultiFab& mf, const Box2D& domain, Crit crit) {
   return tb;
 }
 
-// Dilate les tags de n cellules (voisinage carre), en restant dans le domaine.
-// Sert au nesting et a anticiper le deplacement des structures.
+/// Dilate les tags de n cellules (voisinage carre), en restant dans le domaine.
+/// @param n rayon de dilatation (buffer) ; sert au nesting et a anticiper le deplacement des structures.
+/// @param domain borne le voisinage : aucun tag n'est pose hors du domaine.
+/// @return nouvelle TagBox sur in.box, marquee sur l'union des voisinages carres des cellules taguees.
 inline TagBox grow_tags(const TagBox& in, int n, const Box2D& domain) {
   TagBox out(in.box);
   const Box2D& b = in.box;
@@ -57,11 +77,19 @@ inline TagBox grow_tags(const TagBox& in, int n, const Box2D& domain) {
   return out;
 }
 
+/// Parametres du regrid (objet de configuration).
 struct RegridParams {
-  int n_buffer = 1;
-  ClusterParams cluster{};
+  int n_buffer = 1;        ///< rayon de dilatation des tags (grow_tags) avant clustering.
+  ClusterParams cluster{};  ///< parametres du clustering Berger-Rigoutsos.
 };
 
+/// (Re)construit le niveau coarse_lev+1 a partir du tagging du niveau coarse_lev.
+/// @tparam Crit predicat de tagging (ConstArray4, i, j) -> bool.
+/// @param h hierarchie modifiee en place (niveau fin installe, ou niveaux plus fins supprimes si aucun tag).
+/// @param coarse_lev niveau grossier source du tagging ; le niveau fin construit est coarse_lev+1.
+/// @param rp parametres (buffer de tags, clustering).
+/// Etapes : tag -> grow -> Berger-Rigoutsos -> refine(ref_ratio) -> interpolation depuis le grossier,
+/// puis copie de l'ancien fin la ou il existait pour preserver la precision.
 template <class Crit>
 void regrid_level(AmrHierarchy& h, int coarse_lev, Crit crit,
                   const RegridParams& rp = {}) {
