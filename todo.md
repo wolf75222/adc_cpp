@@ -424,7 +424,15 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       A LA FENETRE de fit ; l=5 DEVIATION ROBUSTE 16-18% quelle que soit la fenetre ; CAUSE PAS ENCORE
       IDENTIFIEE (non-linearite ? resolution/diffusion ? modele/geometrie/diagnostic ?). PAS de promesse +-2%
       avant resultats.
-      CAMPAGNE DISCRIMINANTE EN COURS (job ROMEO 647366, 12 runs ; separer les causes) : modes l=4,5 x n=256,512 x
+      CAMPAGNE DISCRIMINANTE FAITE (job ROMEO 647366, 12 runs) -- VERDICT : NON-LINEARITE dominante. Tendance
+      robuste : gamma_num remonte vers l'analytique quand delta diminue (l=5 n=512 : delta=0.10 -71%, 0.05 -37%,
+      delta=0.025 -> +0.17% QUASI-EXACT ; l=4 n=512 : -64/-39/-22%). => la deviation l=5 +16-18% etait un
+      ARTEFACT NON-LINEAIRE (delta=0.10 trop grand). Levier = delta plus petit, PAS n=768 (resolution pas le
+      verrou). CAVEAT METHODE : la campagne a delta=0.10 (l=5 n=512=0.20, fenetre longue dans la saturation) NE
+      CORRESPOND PAS au sweep original (0.81) -> la campagne n'a pas pris la MEME fenetre ; la tendance delta est
+      valide mais la comparaison absolue campagne<->original est faussee par la fenetre. RESTE : (1) reconcilier
+      la fenetre (refaire avec l'observable/fenetre EXACTE de l'original) ; (2) investiguer le residu l=4 (-22%
+      a delta=0.025, tendance n inversee). PAS de promesse +-2%. Donnees : /scratch_p/rmdraux/647366/. [ancienne note :] modes l=4,5 x n=256,512 x
       delta=0.10/0.05/0.025, MEMES fenetres + MEME observable (aucun ajustement opportuniste). Lecture :
       erreur DIMINUE avec delta -> non-linearite ; DIMINUE avec n -> resolution/diffusion ; STABLE ->
       probleme de modele/geometrie/diagnostic. n=768 ENSUITE, seulement pour les configs qui le justifient.
