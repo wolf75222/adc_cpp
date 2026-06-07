@@ -534,28 +534,21 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       leve si n_ranks()>1, et l'`assert(n_ranks()==1)` compile-out devient un garde-fou DUR (throw actif en
       Release) dans `PoissonFFTSolver`. fft direct = np=1 seulement ; `DistributedFFTSolver` existe (teste a
       part, `test_mpi_fft_distributed`) mais non route dans System (layout bandes vs box unique).
-- [~] **Etape 7 - domaine disque FV / Polaire Phase 2b** (EN COURS) : Voie A etape 1 = transport fluide
-      polaire MERGE #209 ; etape 2a = operateur elliptique polaire TENSORIEL iteratif MERGE #210 (MMS ordre 2, BiCGStab+RadialLine, revue adversariale
-      clean) ; etape 2b = etage source Schur polaire MERGE #212 (assemblage A polaire via #210, reconstruct
-      polaire, gain dt STABLE jusqu'a 2000x, bit-identite Schur cartesien). RESTE etape 2c = CABLAGE FACADE
-      (System.step/Python du stepper #212) -> PR6 (mesure diocotron-Schur polaire raide). Demonstrateur 2D
-      explicit FAIT (#feat/diocotron-polar-fluid) :
-      DEMONSTRATEUR 2D POLAIRE FAIT (adc_cases branche feat/diocotron-polar-fluid, build+run ROMEO) : fluide
-      isotherme polaire, mode l=4 croit (x14.9, gamma_fit 0.589), masse machine (4.6e-14), BORD D'ANNEAU NET
-      (4 lobes sharp, zero diffusion isotrope vs cartesien). Param cle = cs2 (0.1 instable / 0.5 relaxe).
-      LIMITE honnete : pas de Lorentz magnetique NATIF sur le chemin polaire 3-var (dispatch_source<3> = none/
-      potential/gravity ; pas de brique v x B_z polaire) -> derive electrostatique + centrifuge utilisee ;
-      brique source magnetique polaire = raffinement futur. (Doc perimee a corriger : docstring PolarMesh dit
-      encore 'ExB scalaire seulement', faux depuis #209.)
-      DECISION DU PROPRIETAIRE SCIENTIFIQUE -- le bord d'anneau du diocotron est une DISCONTINUITE DE
-      DENSITE TRANSPORTEE, PAS une paroi physique. NE PAS refaire "paroi-transport" (masque / cut-cell fixe)
-      sur le bord d'anneau : ce serait physiquement FAUX. Le cut-cell reste pertinent pour le CONDUCTEUR
-      EXTERNE uniquement, mais l'experience #109 a montre qu'il NE CORRIGE PAS le taux de croissance.
-      Pour le bord d'anneau, les seuls leviers valides sont la GEOMETRIE POLAIRE, le HAUT ORDRE (WENO5/SSPRK3),
-      et l'AMR. Le prochain livrable scientifique est le CHEMIN POLAIRE COMPLET (Polaire Phase 2b) :
-      cabler transport+Poisson polaire dans `System.step` + couplage cartesien<->polaire + RUN diocotron
-      annulaire. Reproduction papier quantitative subordonnee (cf. section 6, confirmation haute resolution
-      du plateau l=4).
+- [~] **Etape 7 / Polaire Phase 2b -- PRESQUE FINI, reste etape 2c** :
+      FAIT : transport + Poisson polaire dans System.step (#168) ; Voie A fluide polaire (#209) ; elliptique
+      polaire tensoriel (#210) ; etage source Schur polaire (#212, gain dt 2000x, bit-identite cartesien) ;
+      RUN diocotron annulaire (sweeps n=384/512 GH200 + demonstrateur) ; demonstrateur 2D fluide polaire
+      (adc_cases feat/diocotron-polar-fluid : l=4 croit x14.9, masse machine, BORD D'ANNEAU NET vs cartesien).
+      RESTE :
+        - etape 2c = CABLAGE FACADE du Schur polaire (#212) dans System.step/Python -- EN VOL (afd1c6c5)
+          -> debloque PR6 (mesure diocotron-Schur polaire raide). C'est le SEUL reste actif.
+        - MINEUR : corriger le docstring PolarMesh ("ExB scalaire seulement", perime depuis #209).
+        - OPTIONNEL/futur : brique source Lorentz v x B_z POLAIRE native (le demonstrateur a contourne via
+          derive electrostatique + centrifuge ; cs2=0.1 instable / 0.5 relaxe).
+      INVARIANT PROPRIETAIRE (garder) : bord d'anneau = DISCONTINUITE DE DENSITE TRANSPORTEE, PAS une paroi.
+      NE PAS poser de paroi/masque/cut-cell fixe dessus (physiquement FAUX). Cut-cell pertinent SEULEMENT pour
+      le conducteur EXTERNE (#109 montre qu'il NE corrige PAS le taux). Leviers du taux = polaire / haut-ordre
+      (WENO5/SSPRK3) / AMR -- tous FAITS.
 
 **STATUT HONNETE (ne PAS presenter "Plan Ideal termine")** : System production CPU = OK ; AmrSystem
 production CPU = OK (WENO5/Rusanov/conservatif, #105) ; demonstrateurs DSL = OK (diocotron_dsl,
