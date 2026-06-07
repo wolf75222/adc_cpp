@@ -210,7 +210,8 @@ foreach(t
     test_stride               # exposition du parametre stride (P1 : cadence par bloc, runtime)
     test_amr_production_stride_reject  # rejet stride/masque IMEX sur le chemin production AMR (.so loader, revue #195)
     test_primitive_state      # init/diagnostic en primitif (P4) : set/get_primitive_state, natif + DSL
-    test_schur_via_system)    # System -> run_source_stage -> etage Schur condense, briques natives (no AOT)
+    test_schur_via_system     # System -> run_source_stage -> etage Schur condense, briques natives (no AOT)
+    test_schur_conservation)  # conservation discrete masse/momentum/energie + positivite du chemin cartesien-fluide-Schur (briques natives, no AOT)
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
   set_tests_properties(${t} PROPERTIES
