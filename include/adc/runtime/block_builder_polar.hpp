@@ -51,23 +51,34 @@ struct PolarGridContext {
 
 namespace detail {
 
-/// Construit la brique de transport POLAIRE et appelle v(transport). Phase 2b : seul "exb" est cable
-/// (la brique ExBVelocityPolar, advection scalaire ExB en base locale (e_r, e_theta)). Les transports
-/// fluides (compressible / isothermal) en polaire demanderaient des flux fluides en metrique polaire
-/// (termes de courbure de quantite de mouvement), hors scope de cette phase -> erreur EXPLICITE.
+/// Construit la brique de transport POLAIRE et appelle v(transport). Deux transports cables :
+///   - "exb"        : ExBVelocityPolar, advection scalaire ExB en base locale (e_r, e_theta) ;
+///   - "isothermal" : IsothermalFluxPolar (Voie A etape 1), fluide isotherme 3 var (rho, rho v_r,
+///                    rho v_theta) en metrique polaire. Le flux PHYSIQUE est celui d'IsothermalFlux
+///                    cartesien (reutilise verbatim) ; la metrique 1/r (divergence (1/r) d_r(r F_r) +
+///                    (1/r) d_theta(F_theta)) ET le terme GEOMETRIQUE de courbure (centrifuge
+///                    -rho v_theta^2/r + courbure croisee) sont portes par assemble_rhs_polar /
+///                    IsothermalFluxPolar::polar_geom_source. Couplage electrostatique = Poisson
+///                    polaire SCALAIRE existant + source LOCALE (PotentialForce), regime explicite.
+/// Le transport "compressible" (Euler 4 var avec energie) en polaire reste hors scope : son flux
+/// d'energie et son terme de courbure n'ont pas encore de brique polaire -> erreur EXPLICITE.
 template <class Visitor>
 void dispatch_transport_polar(const ModelSpec& m, Visitor&& v) {
   if (m.transport == "exb") return v(ExBVelocityPolar{Real(m.B0)});
+  if (m.transport == "isothermal") return v(IsothermalFluxPolar{IsothermalFlux{Real(m.cs2)}});
   throw std::runtime_error(
       "transport polaire '" + m.transport +
-      "' non supporte (Phase 2b : seul 'exb' = advection scalaire ExB en base locale (e_r, e_theta) ; "
-      "un transport fluide en metrique polaire est une phase ulterieure)");
+      "' non supporte (cables : 'exb' = advection scalaire ExB ; 'isothermal' = fluide isotherme "
+      "3 var en metrique polaire (Voie A etape 1). 'compressible' (Euler avec energie) en polaire "
+      "est une phase ulterieure)");
 }
 
 /// Assemble le CompositeModel POLAIRE designe par @p m et appelle visitor(model). REUTILISE
 /// dispatch_source / dispatch_elliptic de model_factory.hpp (briques de source / second membre
 /// elliptique IDENTIQUES au cartesien : elles ne portent pas de geometrie). Seule la brique de
-/// transport change (ExBVelocityPolar). Mono-variable (ExB scalaire) -> seule source 'none' est valide.
+/// transport change (ExBVelocityPolar ou IsothermalFluxPolar). dispatch_source<TR::n_vars> filtre
+/// automatiquement : transport scalaire ExB (1 var) -> seule source 'none' ; transport fluide
+/// isotherme (3 var) -> 'none' | 'potential' (-rho grad phi) | 'gravity' egalement valides.
 template <class Visitor>
 void dispatch_model_polar(const ModelSpec& m, Visitor&& visitor) {
   dispatch_transport_polar(m, [&](auto tr) {
@@ -241,10 +252,12 @@ BlockClosures build_block_polar(const Model& m, const PolarGridContext& ctx, boo
   return bc;
 }
 
-/// Dispatch du schema spatial (limiteur fige, flux RusanovFlux) -> fermetures polaires compilees. Phase
-/// 2b : seul RusanovFlux (ExB scalaire ; HLLC/Roe exigent un transport compressible, sans objet ici).
-/// "weno5" route assemble_rhs_polar sur la reconstruction WENO5-Z (3 ghosts) comme le cartesien.
-/// @p wall_radial : paroi solide radiale (conservation de masse a la machine ; cf. build_block_polar).
+/// Dispatch du schema spatial (limiteur fige, flux RusanovFlux) -> fermetures polaires compilees.
+/// Seul RusanovFlux est cable en polaire : il ne demande que max_wave_speed (donc valable pour
+/// l'ExB scalaire ET le fluide isotherme), tandis que HLLC/Roe supposent n_vars==4 (Euler avec
+/// energie), sans objet ici. "weno5" route assemble_rhs_polar sur la reconstruction WENO5-Z (3
+/// ghosts) comme le cartesien. @p wall_radial : paroi solide radiale (conservation de masse a la
+/// machine ; cf. build_block_polar).
 template <class Model>
 BlockClosures make_block_polar(const Model& m, const std::string& lim, const std::string& riem,
                                const PolarGridContext& ctx, bool recon_prim,
@@ -252,8 +265,8 @@ BlockClosures make_block_polar(const Model& m, const std::string& lim, const std
   if (riem != "rusanov")
     throw std::runtime_error(
         "System (polaire) : flux Riemann '" + riem +
-        "' non supporte (Phase 2b transport ExB scalaire -> 'rusanov' ; HLLC/Roe exigent un transport "
-        "compressible, sans objet en advection scalaire polaire)");
+        "' non supporte (polaire -> 'rusanov' ; HLLC/Roe supposent n_vars==4 (Euler avec energie), "
+        "sans objet pour l'ExB scalaire ou le fluide isotherme polaire)");
   if (lim == "none") return build_block_polar<NoSlope, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);
   if (lim == "minmod") return build_block_polar<Minmod, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);
   if (lim == "vanleer") return build_block_polar<VanLeer, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);

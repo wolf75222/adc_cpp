@@ -368,12 +368,15 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   VariableSet cons_vs, prim_vs;
   if (P->polar_) {
     // CHEMIN POLAIRE (anneau) : fermetures bati par block_builder_polar.hpp (assemble_rhs_polar +
-    // ExBVelocityPolar + Poisson polaire). IMEX n'a pas de sens ici (transport ExB scalaire, pas de
-    // source raide) : on le refuse explicitement plutot que de jouer le seul transport en silence.
+    // transport polaire scalaire ExBVelocityPolar OU fluide IsothermalFluxPolar + Poisson polaire
+    // scalaire). IMEX n'est pas supporte sur l'anneau a cette etape : le couplage electrostatique
+    // passe par une source LOCALE explicite (regime non raide, Voie A etape 1) ; on le refuse
+    // explicitement plutot que de jouer le seul transport en silence.
     if (imex)
       throw std::runtime_error(
-          "System::add_block (polaire) : time='imex' non supporte (transport ExB scalaire sur un "
-          "anneau : pas de source raide a traiter en implicite). Utiliser 'explicit'/'ssprk2'/'ssprk3'.");
+          "System::add_block (polaire) : time='imex' non supporte (anneau : couplage par source "
+          "locale explicite, pas de source raide a traiter en implicite a cette etape). Utiliser "
+          "'explicit'/'ssprk2'/'ssprk3'.");
     const PolarGridContext pctx = P->grid_ctx_polar();
     detail::dispatch_model_polar(model, [&](auto m) {
       using M = decltype(m);

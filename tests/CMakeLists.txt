@@ -154,6 +154,16 @@ adc_add_test(test_polar_system_step)
 # / Serial-safe (UNE box, non enregistre MPI comme les autres tests polaires mono-box).
 adc_add_test(test_polar_mms_vr)
 
+# --- Voie A etape 1 grille polaire : TRANSPORT FLUIDE ISOTHERME (3 var : rho, rho v_r, rho v_theta)
+# via la brique IsothermalFluxPolar (flux physique reutilise d'IsothermalFlux + terme GEOMETRIQUE de
+# courbure polar_geom_source = (0, (rho v_theta^2 + p)/r, -(rho v_r v_theta)/r)). Verifie : (A)
+# preservation d'un EQUILIBRE ROTATIF exact (rotation rigide + densite cyclostrophique) -> le residu
+# radial converge vers 0, PREUVE que le terme centrifuge est correct ; (A') controle negatif : la
+# meme config SANS terme geometrique (IsothermalFlux) laisse un residu O(1) non convergent -> le
+# terme geometrique est INDISPENSABLE ; (B) convergence MMS d'ordre 2 du systeme 3 var complet (v_r
+# != 0) ; (C) conservation de la masse a ~machine (paroi radiale). Host / Serial-safe (UNE box).
+adc_add_test(test_polar_fluid_transport)
+
 # --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
 adc_add_test(test_dynamic_model)
 

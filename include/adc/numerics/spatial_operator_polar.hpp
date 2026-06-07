@@ -71,6 +71,28 @@ ADC_HD inline typename Model::State polar_source(const Model& m, const typename 
   else return typename Model::State{};
 }
 
+/// PolarHasGeomSource<M> : concept interne -- vrai si M expose polar_geom_source(u, r) -> State.
+///
+/// Le terme GEOMETRIQUE de courbure (centrifuge -rho v_theta^2/r etc.) n'a de sens qu'en metrique
+/// polaire et ne depend QUE de l'etat et du rayon de cellule (pas d'aux). Une brique de transport
+/// SCALAIRE (ExBVelocityPolar) ne l'expose pas -> on retombe sur 0 (bit-identique au transport ExB
+/// polaire historique). Une brique FLUIDE polaire (IsothermalFluxPolar) l'expose -> il est ajoute
+/// en cellule par PolarAssembleRhsKernel (qui seul connait r_cell(i)).
+template <class M>
+concept PolarHasGeomSource = requires(const M m, const typename M::State u, Real r) {
+  { m.polar_geom_source(u, r) } -> std::convertible_to<typename M::State>;
+};
+
+/// polar_geom_source<Model> : retourne m.polar_geom_source(u, r) si PolarHasGeomSource<Model>,
+/// sinon etat nul. Garde if constexpr : zero codegen supplementaire pour les briques scalaires (le
+/// chemin ExB polaire reste strictement bit-identique). ADC_HD. r > 0 (anneau) impose en amont.
+template <class Model>
+ADC_HD inline typename Model::State polar_geom_source(const Model& m, const typename Model::State& u,
+                                                      Real r) {
+  if constexpr (PolarHasGeomSource<Model>) return m.polar_geom_source(u, r);
+  else return typename Model::State{};
+}
+
 // Noyau de FLUX DE FACE RADIALE (dir 0) : flux numerique a la face radiale i (entre i-1 et i), DEJA
 // pondere par le rayon de face r_face(i). On stocke r_{i-1/2} Fr_{i-1/2} pour que la divergence soit
 // une simple difference. FONCTEUR NOMME (device-clean cross-TU).
@@ -153,11 +175,17 @@ struct PolarAssembleRhsKernel {
     const Real ri = r_min + (i + Real(0.5)) * dr;  // r_cell(i)
     const Real inv_r = Real(1) / ri;
     const Aux Ac = load_aux<aux_comps<Model>()>(ax, i, j);
-    const auto S = polar_source<Model>(model, load_state<Model>(u, i, j), Ac);
+    const auto Us = load_state<Model>(u, i, j);
+    const auto S = polar_source<Model>(model, Us, Ac);
+    // Terme GEOMETRIQUE de courbure (centrifuge + courbure croisee) : non capture par la divergence
+    // conservative en base locale tournante (e_r, e_theta). Nul pour les briques scalaires (ExB
+    // polaire = bit-identique) ; non nul pour un fluide polaire (IsothermalFluxPolar). Voir
+    // PolarHasGeomSource / IsothermalFluxPolar pour la derivation. r_cell(i) > 0 (anneau).
+    const auto Sg = polar_geom_source<Model>(model, Us, ri);
     for (int c = 0; c < Model::n_vars; ++c) {
       const Real div_r = (fr(i + 1, j, c) - fr(i, j, c)) / dr;       // d_r(r Fr) discret
       const Real div_t = (ft(i, j + 1, c) - ft(i, j, c)) / dtheta;   // d_theta(Ftheta) discret
-      r(i, j, c) = S[c] - inv_r * (div_r + div_t);
+      r(i, j, c) = S[c] + Sg[c] - inv_r * (div_r + div_t);
     }
   }
 };

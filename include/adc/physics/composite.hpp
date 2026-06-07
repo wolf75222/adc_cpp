@@ -72,6 +72,17 @@ struct CompositeModel {
   {
     hyp.wave_speeds(u, a, dir, smin, smax);
   }
+
+  /// Terme source GEOMETRIQUE de courbure polaire, delegue a la brique hyperbolique quand elle
+  /// l'expose (fluide polaire : IsothermalFluxPolar). Concept-gate comme pressure / wave_speeds :
+  /// si l'hyperbolique ne le fournit pas (transport scalaire ExB polaire), CompositeModel ne
+  /// l'expose pas -> assemble_rhs_polar retombe sur 0 (bit-identique). Ne touche PAS le cartesien
+  /// (assemble_rhs ne l'appelle jamais).
+  ADC_HD State polar_geom_source(const State& u, Real r) const
+    requires requires(const Hyperbolic h, const State s, Real rr) { h.polar_geom_source(s, rr); }
+  {
+    return hyp.polar_geom_source(u, r);
+  }
 };
 
 }  // namespace adc

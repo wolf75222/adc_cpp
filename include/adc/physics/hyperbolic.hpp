@@ -191,4 +191,52 @@ struct IsothermalFlux {
   }
 };
 
+/// Flux d'Euler ISOTHERME en geometrie POLAIRE (anneau r, theta), 3 variables (rho, rho v_r,
+/// rho v_theta) -- chantier "grille polaire fluide", Voie A etape 1. C'est une brique SEPAREE
+/// d'IsothermalFlux (cartesien) : le flux PHYSIQUE et les conversions sont IDENTIQUES (les
+/// composantes 1, 2 sont la quantite de mouvement dans la BASE LOCALE ORTHONORMEE (e_r, e_theta) ;
+/// dir 0 = radial, dir 1 = azimutal), mais cette brique ajoute le TERME GEOMETRIQUE DE COURBURE
+/// porte par la metrique polaire. On herite IsothermalFlux pour ne PAS dupliquer flux /
+/// conversions / vitesses d'onde (cartesien strictement intact, bit-identique) et on n'ajoute QUE
+/// la methode polar_geom_source.
+///
+/// POURQUOI UN TERME GEOMETRIQUE EXPLICITE (et non une simple divergence conservative) :
+/// l'equation vectorielle de quantite de mouvement d_t(rho v) + div(rho v (x) v) + grad p = 0,
+/// projetee sur la base LOCALE polaire (e_r, e_theta) qui TOURNE avec theta, donne pour les
+/// composantes PHYSIQUES m_r = rho v_r, m_theta = rho v_theta :
+///   d_t m_r     + (1/r) d_r(r (rho v_r^2 + p)) + (1/r) d_theta(rho v_r v_theta)
+///                 - (rho v_theta^2 + p)/r            = 0      (terme CENTRIFUGE + pression)
+///   d_t m_theta + (1/r) d_r(r rho v_r v_theta)     + (1/r) d_theta(rho v_theta^2 + p)
+///                 + (rho v_r v_theta)/r             = 0      (terme de COURBURE croisee)
+/// L'operateur assemble_rhs_polar calcule EXACTEMENT -(1/r) d_r(r F_r) - (1/r) d_theta(F_theta)
+/// avec F_r, F_theta = IsothermalFlux::flux : il reproduit donc les divergences, mais PAS les
+/// termes algebriques -(rho v_theta^2 + p)/r et +(rho v_r v_theta)/r. Ces termes ne sont PAS
+/// captures par la divergence conservative (preuve : sur la cellule (rho, v_r=0, v_theta(r)) en
+/// equilibre rotatif d_r p = rho v_theta^2/r, la divergence radiale seule rendrait
+/// d_t m_r = -(d_r p + p/r) != 0, brisant l'equilibre). Il FAUT donc une SOURCE GEOMETRIQUE
+/// explicite, fournie ici et ajoutee en cellule par assemble_rhs_polar (qui seul connait r) :
+///   S_geom = ( 0 , (rho v_theta^2 + p)/r , -(rho v_r v_theta)/r ).
+/// Avec cette source l'equilibre rotatif est preserve a l'ordre du schema (cf.
+/// test_polar_fluid_equilibrium). r > 0 (anneau, r_min > 0) : aucune singularite d'axe.
+///
+/// CONTRAT : brique PHYSIQUE ponctuelle, device-callable (ADC_HD), aucune box, aucune allocation.
+/// polar_geom_source ne prend QUE l'etat et r (pas d'aux) : c'est de la pure metrique.
+struct IsothermalFluxPolar : IsothermalFlux {
+  /// Terme source GEOMETRIQUE de courbure en cellule de rayon r > 0 (anneau). Voir le bloc @file
+  /// ci-dessus pour la derivation. S_geom = (0, (rho v_theta^2 + p)/r, -(rho v_r v_theta)/r),
+  /// p = cs2 rho. Composante 0 (masse) nulle : la masse est purement conservative en polaire.
+  ADC_HD StateVec<3> polar_geom_source(const StateVec<3>& u, Real r) const {
+    const Real rho = u[0];
+    const Real inv_rho = Real(1) / rho;
+    const Real mr = u[1], mth = u[2];  // rho v_r, rho v_theta (base locale (e_r, e_theta))
+    const Real p = cs2 * rho;
+    const Real inv_r = Real(1) / r;
+    StateVec<3> s{};
+    s[0] = Real(0);
+    s[1] = (mth * mth * inv_rho + p) * inv_r;   // (rho v_theta^2 + p)/r : centrifuge + pression
+    s[2] = -(mr * mth * inv_rho) * inv_r;        // -(rho v_r v_theta)/r : courbure croisee
+    return s;
+  }
+};
+
 }  // namespace adc
