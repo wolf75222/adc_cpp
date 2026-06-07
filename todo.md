@@ -207,7 +207,10 @@ DETTE / DIFFERES (ne pas oublier) :
   source manufacturee polaire (1/r)d_r(r rho v_r)+(1/r)d_theta(rho v_theta)), ordre de convergence 2.00 (limite
   par la ponderation de face radiale). + #209 : MMS fluide 3-var (v_r != 0) ordre 2.00. (A4 TERMINE. Un MMS polaire
   TRANSITOIRE v_r!=0 reste un durcissement OPTIONNEL, NON prioritaire : ne doit pas retarder Schur polaire
-  ni la reproduction scientifique.)
+  ni la reproduction scientifique.) AUDIT MMS (workflow juin 2026) : verdict COUVERTURE SUFFISANTE -- ordre-2
+  GENUINE/structurel (ponderation metrique radiale r_{i+/-1/2}, casse le telescopage haut-ordre ; PAS un bug) ;
+  gap transitoire deja couvert par la validation temporelle CARTESIENNE (meme integrateur SSPRK3 reutilise en
+  polaire) ; AUCUN nouveau test requis (2 notes doc optionnelles non bloquantes).
 - [x] **finding 8 -- FAIT #204** : `fab(0)` sans garde `local_size` corrige (6 fermetures rhs_into/max_speed/
   advance dans native_loader.hpp ; garde `if (U.local_size()==0) return` ; collectifs hors fermetures -> pas
   d'interblocage) + test MPI np=1/2/4 (test_mpi_system_gather_scatter). CI job MPI verte. RESTE : `/(2*dx)->*cx`
