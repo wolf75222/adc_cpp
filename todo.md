@@ -624,7 +624,7 @@ pas implicite stable a grand dt. Modele = physique ; SchurCondensation = algo. O
       foncteur device nomme dans `apply_couplings` ; generique inter-especes ; 3 especes + conservation,
       MPI np=1/2/4 bit-identique. (#131)
 - [x] **P6 - AMR multi-blocs** = capstone Gap 4, voir section 15.
-- [~] **P7** : P7-b params runtime DSL = DOABLE, EN VOL (agent dedie, PR a venir) ; P7-a implicit-total =
+- [~] **P7** : P7-b params runtime DSL = FAIT #213 (m.param(kind=runtime) + System.set_block_params ; change un param sans recompiler le .so ; byte-identite des params const confirmee) ; P7-a implicit-total =
       RECHERCHE (schema totalement implicite, gros chantier ; cf docs/RESEARCH_BACKLOG.md), differe sauf si le
       splitting Lie ordre 1 devient limitant mesure (sinon Strang ordre 2 suffit).
 
