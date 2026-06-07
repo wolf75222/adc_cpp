@@ -1,9 +1,19 @@
 # Roadmap : reproduction du modele COMPLET de Hoffart (Euler-Poisson magnetise)
 
-Issu d'une investigation multi-agents (juin 2026, workflow scope-full-euler-poisson). Etat factuel,
-verifie dans le code.
+> SUPERSEDE (juin 2026, audit Phase 0 -- voir docs/HOFFART_FIDELITY.md et docs/HOFFART_STEP_SEQUENCE.md).
+> Deux affirmations de ce document sont CORRIGEES par l'audit code + relecture du papier :
+> 1. "le modele complet tourne DEJA, -0.38%" est FAUX : le -0.38% est le DIOCOTRON REDUIT ExB-scalaire
+>    (diag_polar_omega.py, chemin POLAIRE). Le modele complet (run.py system-schur, CARTESIEN) n'est PAS
+>    valide ; ses runs courts donnent ~0.035 (-95 % vs papier), croissance ECRASEE.
+> 2. "VOIE B cartesien recommandee, Voie A esthetique" est INVERSE : la geometrie est le suspect PRINCIPAL.
+>    Le carre cartesien + mur Poisson circulaire diffuse le bord d'anneau et ecrase l'instabilite. Le
+>    chemin retenu (Agent D) est un DOMAINE DISQUE CONSERVATIF (masque 2a -> cut-cell/EB), pas le carre.
+> RESOLU aussi : |Omega| = beta^2 = 1e12 est CORRECT (papier ligne 1082 "omega_c := beta^2"), donc
+> omega_d = 1 et la pente brute du modele complet est DIRECTEMENT comparable a 0.772/0.911/0.683, SANS
+> facteur 2pi (le 2pi ne concerne que le chemin reduit ExB). Le reste de ce fichier est conserve pour
+> l'historique mais lire HOFFART_FIDELITY.md en priorite.
 
-## Fait majeur : le modele COMPLET tourne DEJA (chemin cartesien)
+## Fait majeur (OBSOLETE, voir note supra) : le modele COMPLET tourne DEJA (chemin cartesien)
 
 `adc_cases/hoffart_euler_poisson_dsl/run.py` construit le systeme COMPLET du papier :
 - modele 3 variables (rho, rho_u, rho_v), pression isotherme p = theta*rho (model.py:90-122),
