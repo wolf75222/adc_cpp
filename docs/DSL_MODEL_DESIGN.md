@@ -66,8 +66,12 @@ GAP (encore cible / differe) :
 - **`AmrSystem.potential()`** : binding SHIPPE (python/bindings.cpp:272, `#135`). Acquis.
 - **Paroi-transport Phase 1** : EXPERIMENTALE, fermee SANS merge (#109). Elle masque le CONDUCTEUR
   externe (mauvais bord) ; le verrou scientifique reste le BORD D'ANNEAU. NE PAS lire comme livre.
-- **Params runtime** : `m.param(kind="runtime")` leve `NotImplementedError` (changement d'ABI/codegen ;
-  section 2b, Phase E).
+- **Params runtime** : `m.param(kind="runtime")` est SHIPPE sur le backend "aot" (P7-b) : le param
+  emet `params.get(<indice>)` (membre `adc::RuntimeParams` de la brique, include/adc/runtime/
+  runtime_params.hpp), l'ABI AOT transporte un bloc de valeurs (symboles `_p`), et
+  `System.set_block_params(name, values)` change la valeur au RUNTIME sans recompiler. Les backends
+  "prototype"/"production" compilent un param runtime comme sa valeur de DECLARATION (figee : le modele
+  y est default-construit, pas d'injection). Les params `const` restent INLINES (bit-identiques).
 - **LIMITES `AmrSystem` (reelles, a garder honnete)** : mono-bloc (pas multi-espece), IMEX source
   locale OK (Gap 2 #132, backward_euler_source / mf_apply_source_treatment) mais Schur global sur
   AMR et AMR multi-blocs restent a faire, multi-box natif non cable cote facade, et

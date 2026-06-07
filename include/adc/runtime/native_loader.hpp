@@ -424,6 +424,37 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   // (IModel::n_aux). Optionnel : un vieux .so sans ce symbole retombe sur le contrat de base (3).
   auto naux_fn = reinterpret_cast<nv_fn_t>(dlsym(h, "adc_compiled_naux"));
   const int naux = naux_fn ? naux_fn() : kAuxBaseComps;
+  // PARAMS RUNTIME (P7-b) : variantes SUFFIXEES `_p` qui prennent un bloc plat (const double*, int) de
+  // valeurs de parametres runtime, injectees dans le modele avant l'execution. OPTIONNELLES : un .so
+  // genere avant ce chantier (ou un modele sans param runtime) ne les expose pas / declare nparams=0 ->
+  // on garde les symboles historiques (chemin params-const, bit-identique). On SEEDE le bloc de valeurs
+  // aux defauts de declaration (adc_compiled_param_defaults) pour qu'un set_param ulterieur n'ecrase
+  // qu'une entree sans remettre les autres a zero.
+  auto nparams_fn = reinterpret_cast<nv_fn_t>(dlsym(h, "adc_compiled_nparams"));
+  const int nparams = nparams_fn ? nparams_fn() : 0;
+  using res_p_fn_t = void (*)(const double*, double*, const double*, int, double, double, int,
+                              const char*, const char*, int, const double*, int);
+  using adv_p_fn_t = void (*)(double*, const double*, int, double, double, int, const char*,
+                              const char*, int, int, double, int, const double*, int);
+  using max_p_fn_t = double (*)(const double*, const double*, int, double, double, int,
+                                const double*, int);
+  using poi_p_fn_t = void (*)(const double*, double*, int, const double*, int);
+  auto res_p_fn = reinterpret_cast<res_p_fn_t>(dlsym(h, "adc_compiled_residual_p"));
+  auto adv_p_fn = reinterpret_cast<adv_p_fn_t>(dlsym(h, "adc_compiled_advance_p"));
+  auto max_p_fn = reinterpret_cast<max_p_fn_t>(dlsym(h, "adc_compiled_max_speed_p"));
+  auto poi_p_fn = reinterpret_cast<poi_p_fn_t>(dlsym(h, "adc_compiled_poisson_rhs_p"));
+  // Bloc PARTAGE des valeurs courantes : capture par les fermetures ET enregistre dans P->block_params_
+  // (set_block_params y ecrit -> les fermetures voient la nouvelle valeur au prochain pas). Vide si le
+  // bloc n'a aucun param runtime ou si l'ABI `_p` est absente (vieux .so) : les fermetures appellent
+  // alors les symboles historiques (chemin const). pv non nul declenche le chemin `_p`.
+  std::shared_ptr<std::vector<double>> pv;
+  const bool use_params = (nparams > 0 && res_p_fn && adv_p_fn && max_p_fn && poi_p_fn);
+  if (use_params) {
+    pv = std::make_shared<std::vector<double>>(static_cast<std::size_t>(nparams), 0.0);
+    auto defs_fn = reinterpret_cast<void (*)(double*)>(dlsym(h, "adc_compiled_param_defaults"));
+    if (defs_fn) defs_fn(pv->data());  // seed aux defauts de declaration
+  }  // enregistrement dans P->block_params_ DIFFERE juste avant push_back (apres les validations qui
+     // peuvent lever : evite une entree orpheline sans bloc associe si l'ajout echoue).
   // Metadonnees OPTIONNELLES (noms / roles / gamma) transportees par l'ABI etendue du .so. Absentes
   // d'un vieux .so -> meta vide, on retombe sur le fallback (noms u0.. / pas de roles / gamma 1.4).
   const BlockMeta meta = read_block_meta(h);
@@ -437,35 +468,48 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   const std::string lim = limiter, riem = riemann;
 
   std::function<void(MultiFab&, MultiFab&)> rhs_into =
-      [P, lib, res_fn, nv, n, dx, dy, per, lim, riem, recon_prim](MultiFab& U, MultiFab& R) {
+      [P, lib, res_fn, res_p_fn, pv, nv, n, dx, dy, per, lim, riem, recon_prim](MultiFab& U,
+                                                                                MultiFab& R) {
         // Chemin HOTE (bloc compile .so) : meme garde MPI que add_poisson. Sur un rang sans box
         // locale (local_size()==0 a np>1) il n'y a rien a marshaler ; le rang proprietaire porte
         // la physique complete. Pas de collectif ici -> no-op unilateral, aucun interblocage.
         if (U.local_size() == 0) return;
         std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
         std::vector<double> r(static_cast<std::size_t>(nv) * n * n, 0.0);
-        res_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim);
+        if (pv)  // params RUNTIME : variante `_p` avec le bloc PARTAGE des valeurs courantes (P7-b)
+          res_p_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(),
+                   recon_prim, pv->data(), static_cast<int>(pv->size()));
+        else
+          res_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim);
         P->write_state(R, nv, r);
       };
   std::function<void(MultiFab&, Real, int)> advance =
-      [P, lib, adv_fn, nv, n, dx, dy, per, lim, riem, recon_prim, imex](MultiFab& U, Real dt,
-                                                                        int nsub) {
+      [P, lib, adv_fn, adv_p_fn, pv, nv, n, dx, dy, per, lim, riem, recon_prim, imex](MultiFab& U,
+                                                                                      Real dt,
+                                                                                      int nsub) {
         // Meme garde MPI : rang vide -> no-op. Pas de collectif -> sans interblocage.
         if (U.local_size() == 0) return;
         std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
-        adv_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
-               static_cast<double>(dt), nsub);
+        if (pv)  // params RUNTIME (P7-b)
+          adv_p_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
+                   static_cast<double>(dt), nsub, pv->data(), static_cast<int>(pv->size()));
+        else
+          adv_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
+                 static_cast<double>(dt), nsub);
         P->write_state(U, nv, u);
       };
   std::function<Real(const MultiFab&)> max_speed =
-      [P, lib, max_fn, nv, n, dx, dy, per](const MultiFab& U) -> Real {
+      [P, lib, max_fn, max_p_fn, pv, nv, n, dx, dy, per](const MultiFab& U) -> Real {
         // Meme garde MPI : rang vide -> vitesse locale 0. L'all_reduce_max en aval prend le max global.
         if (U.local_size() == 0) return Real(0);
         std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
+        if (pv)  // params RUNTIME (P7-b)
+          return max_p_fn(u.data(), a.data(), n, dx, dy, per, pv->data(),
+                          static_cast<int>(pv->size()));
         return max_fn(u.data(), a.data(), n, dx, dy, per);
       };
   std::function<void(const MultiFab&, MultiFab&)> add_poisson =
-      [P, lib, poi_fn, nv, n](const MultiFab& U, MultiFab& rhs) {
+      [P, lib, poi_fn, poi_p_fn, pv, nv, n](const MultiFab& U, MultiFab& rhs) {
         // Chemin HOTE (bloc compile .so prototype) : meme garde MPI que le bloc dynamique. Sur un
         // rang sans box locale (local_size()==0 a np>1) il n'y a rien a marshaler -> on saute, le
         // rang proprietaire porte la contribution complete. Sans cela copy_state(U) / rhs.fab(0)
@@ -473,7 +517,10 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
         if (rhs.local_size() == 0) return;
         std::vector<double> u = P->copy_state(U, nv);
         std::vector<double> pr(static_cast<std::size_t>(n) * n, 0.0);
-        poi_fn(u.data(), pr.data(), n);
+        if (pv)  // params RUNTIME (P7-b)
+          poi_p_fn(u.data(), pr.data(), n, pv->data(), static_cast<int>(pv->size()));
+        else
+          poi_fn(u.data(), pr.data(), n);
         Array4 r = rhs.fab(0).array();
         const Box2D v = rhs.box(0);
         for (int j = v.lo[1]; j <= v.hi[1]; ++j)
@@ -513,8 +560,26 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   using cv_fn_t = void (*)(const double*, double*, int);
   auto p2c_fn = reinterpret_cast<cv_fn_t>(dlsym(h, "adc_compiled_to_conservative"));
   auto c2p_fn = reinterpret_cast<cv_fn_t>(dlsym(h, "adc_compiled_to_primitive"));
-  if (p2c_fn) block.prim_to_cons = [lib, p2c_fn](const double* in, double* out) { p2c_fn(in, out, 1); };
-  if (c2p_fn) block.cons_to_prim = [lib, c2p_fn](const double* in, double* out) { c2p_fn(in, out, 1); };
+  // P7-b : si le bloc a des params runtime, les conversions cons<->prim doivent les voir aussi (la
+  // conversion peut lire un param runtime). On prefere alors les variantes `_p` avec le bloc PARTAGE.
+  using cv_p_fn_t = void (*)(const double*, double*, int, const double*, int);
+  auto p2c_p_fn = reinterpret_cast<cv_p_fn_t>(dlsym(h, "adc_compiled_to_conservative_p"));
+  auto c2p_p_fn = reinterpret_cast<cv_p_fn_t>(dlsym(h, "adc_compiled_to_primitive_p"));
+  if (pv && p2c_p_fn)
+    block.prim_to_cons = [lib, p2c_p_fn, pv](const double* in, double* out) {
+      p2c_p_fn(in, out, 1, pv->data(), static_cast<int>(pv->size()));
+    };
+  else if (p2c_fn)
+    block.prim_to_cons = [lib, p2c_fn](const double* in, double* out) { p2c_fn(in, out, 1); };
+  if (pv && c2p_p_fn)
+    block.cons_to_prim = [lib, c2p_p_fn, pv](const double* in, double* out) {
+      c2p_p_fn(in, out, 1, pv->data(), static_cast<int>(pv->size()));
+    };
+  else if (c2p_fn)
+    block.cons_to_prim = [lib, c2p_fn](const double* in, double* out) { c2p_fn(in, out, 1); };
+  // P7-b : enregistrer le bloc PARTAGE des params runtime APRES les validations (toutes passees ici) :
+  // set_block_params le retrouvera par nom, et les fermetures du bloc partagent le meme shared_ptr.
+  if (pv) P->block_params_[name] = pv;
   P->sp.push_back(std::move(block));
   P->sp.back().U.set_val(Real(0));
 }

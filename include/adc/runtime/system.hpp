@@ -123,6 +123,15 @@ class System {
                           const std::string& time = "explicit", int substeps = 1,
                           const std::vector<std::string>& names = {});
 
+  /// Change les valeurs des parametres RUNTIME d'un bloc AOT (add_compiled_block) SANS recompiler le
+  /// .so (P7-b). @p values est le bloc COMPLET des valeurs (ordre = ordre trie des noms cote DSL, cf.
+  /// CompiledModel.runtime_param_names). Le bloc doit avoir ete ajoute via add_compiled_block ET
+  /// declarer au moins un parametre runtime (dsl.Param(..., kind="runtime")) ; sinon erreur explicite
+  /// (un set_param silencieux sur un bloc sans param runtime masquerait un bug). Effet au prochain pas
+  /// (les fermetures du bloc lisent le bloc de valeurs PARTAGE). @throws std::runtime_error si le bloc
+  /// est inconnu, n'a pas de params runtime, ou si @p values n'a pas la bonne longueur.
+  void set_block_params(const std::string& name, const std::vector<double>& values);
+
   /// Ajoute un bloc dont le modele est compile dans un LOADER NATIF .so genere par le DSL
   /// (dsl.compile_native / compile(backend="production")). C'est le chemin de PRODUCTION : le loader
   /// inline le gabarit en-tete adc::add_compiled_model<ProdModel>, qui fabrique les fermetures sur le

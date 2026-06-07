@@ -35,10 +35,12 @@
 #include <dlfcn.h>  // dlopen/dlsym : chargement d'une brique generee (.so)
 #include <functional>
 #include <limits>  // std::numeric_limits (CFL par bloc : dt = min sur les blocs)
+#include <map>     // std::map (registre des params runtime par bloc, P7-b)
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <variant>
+#include <vector>
 
 namespace adc {
 
@@ -144,6 +146,11 @@ struct System::Impl {
   // objet (aucune copie), donc owner_->sp / P->sp dans les gabarits en-tete restent bit-identiques.
   SystemBlockStore blocks_;
   std::vector<Species>& sp = blocks_.blocks;
+  // P7-b : valeurs des parametres RUNTIME par bloc AOT (nom du bloc -> vecteur des valeurs courantes).
+  // Le vecteur est PARTAGE (shared_ptr) avec les fermetures du bloc compile : ecrire dedans
+  // (set_block_params) change le comportement du bloc au prochain pas SANS recompiler. Absent pour un
+  // bloc sans param runtime ou pour les autres chemins (natif / dynamique). Pose par add_compiled_block.
+  std::map<std::string, std::shared_ptr<std::vector<double>>> block_params_;
   double t = 0;
   int macro_step_ = 0;  // compteur de macro-pas (0-indexe) : sert au filtre stride par bloc
   std::vector<std::function<void(Real)>> couplings;  // sources couplees inter-especes (splitting)
@@ -475,6 +482,27 @@ void System::add_compiled_block(const std::string& name, const std::string& so_p
                                 const std::vector<std::string>& names) {
   native_loader::add_compiled_block(this, p_.get(), name, so_path, limiter, riemann, recon, time,
                                     substeps, names);
+}
+
+// P7-b : ecrase le bloc PARTAGE des valeurs de parametres runtime du bloc @p name. add_compiled_block
+// a enregistre ce vecteur dans p_->block_params_ ET l'a capture dans les fermetures du bloc : ecrire
+// dedans suffit a changer le comportement au prochain pas, SANS recompiler le .so. Erreur explicite si
+// le bloc n'a pas de params runtime (vecteur absent) ou si values n'a pas la bonne taille.
+void System::set_block_params(const std::string& name, const std::vector<double>& values) {
+  // index() leve "System : bloc inconnu '...'" si le bloc n'existe pas (meme diagnostic que partout).
+  (void)p_->blocks_.index(name);
+  auto it = p_->block_params_.find(name);
+  if (it == p_->block_params_.end())
+    throw std::runtime_error(
+        "System::set_block_params : le bloc '" + name +
+        "' n'a pas de parametre runtime (declarer dsl.Param(..., kind='runtime') et brancher via "
+        "backend='aot' / add_compiled_block ; les params const sont figes a la compilation)");
+  std::vector<double>& pv = *it->second;
+  if (values.size() != pv.size())
+    throw std::runtime_error(
+        "System::set_block_params : le bloc '" + name + "' attend " + std::to_string(pv.size()) +
+        " parametres runtime, recu " + std::to_string(values.size()));
+  pv = values;  // le vecteur est PARTAGE avec les fermetures (shared_ptr) : effet au prochain pas
 }
 
 // Corps EXTRAIT VERBATIM vers adc::native_loader::add_native_block (native_loader.hpp) ; instancie

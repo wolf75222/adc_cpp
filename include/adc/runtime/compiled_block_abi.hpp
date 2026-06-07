@@ -11,8 +11,10 @@
 #include <adc/mesh/physical_bc.hpp>
 
 #include <adc/core/physical_model.hpp>  // aux_comps<Model> : largeur du canal aux du modele genere
+#include <adc/runtime/runtime_params.hpp>  // RuntimeParams : params RUNTIME (P7-b) transportes par l'ABI
 
 #include <string>
+#include <type_traits>
 #include <utility>
 
 /// @file
@@ -97,6 +99,82 @@ inline void extract(const MultiFab& mf, double* out, int n, int nv) {
         out[static_cast<std::size_t>(c) * nn + static_cast<std::size_t>(j) * n + i] = a(i, j, c);
 }
 
+/// Detecte (SFINAE) si une brique B expose un membre `params` de type adc::RuntimeParams (les briques
+/// DSL n'en portent un que si une formule lit un parametre runtime, P7-b). Une brique native ou une
+/// brique DSL SANS param runtime n'en a pas -> les helpers ci-dessous sont alors des no-op (bit-identite).
+template <class B, class = void>
+struct HasRuntimeParams : std::false_type {};
+template <class B>
+struct HasRuntimeParams<B, std::void_t<decltype(std::declval<B&>().params)>>
+    : std::is_same<std::decay_t<decltype(std::declval<B&>().params)>, RuntimeParams> {};
+
+/// Ecrit @p rp dans le membre `params` de la brique @p b si elle en a un (P7-b) ; sinon no-op. La
+/// brique se comporte alors comme avec ces valeurs de parametres a la place de ses defauts de
+/// declaration.
+template <class B>
+inline void apply_runtime_params(B& b, const RuntimeParams& rp) {
+  if constexpr (HasRuntimeParams<B>::value) b.params = rp;
+}
+
+/// Construit un Model (CompositeModel<Hyp, Src, Ell>) et y injecte les @p npar valeurs de parametres
+/// runtime @p pvals dans CHAQUE brique qui porte un membre `params` (P7-b). @p pvals == nullptr ou
+/// @p npar == 0 -> aucune injection : le Model garde ses defauts de declaration (donc identique a un
+/// param const). Centralise le seul point de l'ABI AOT qui depend des params runtime ; les briques
+/// natives / sans param runtime sont inchangees (apply_runtime_params est un no-op chez elles).
+template <class Model>
+Model make_model_with_params(const double* pvals, int npar) {
+  Model model{};
+  if (pvals && npar > 0) {
+    RuntimeParams rp;
+    rp.count = npar > kMaxRuntimeParams ? kMaxRuntimeParams : npar;
+    for (int k = 0; k < rp.count; ++k) rp.values[k] = static_cast<Real>(pvals[k]);
+    apply_runtime_params(model.hyp, rp);
+    apply_runtime_params(model.src, rp);
+    apply_runtime_params(model.ell, rp);
+  }
+  return model;
+}
+
+/// Nombre de parametres runtime que le membre `params` d'une brique @p b porte (0 si la brique n'en a
+/// pas). Sert a model_nparams pour reporter au loader la taille attendue du bloc de parametres.
+template <class B>
+inline int brick_nparams(const B& b) {
+  if constexpr (HasRuntimeParams<B>::value) return b.params.count;
+  else { (void)b; return 0; }
+}
+
+/// Bloc `params` (RuntimeParams complet) du modele : la PREMIERE brique qui en porte un (toutes
+/// portent le meme bloc complet quand le modele a des params runtime). RuntimeParams vide (count=0)
+/// si aucune brique n'a de param runtime.
+template <class Model>
+inline RuntimeParams model_params(const Model& model) {
+  if constexpr (HasRuntimeParams<std::decay_t<decltype(model.hyp)>>::value) return model.hyp.params;
+  else if constexpr (HasRuntimeParams<std::decay_t<decltype(model.src)>>::value) return model.src.params;
+  else if constexpr (HasRuntimeParams<std::decay_t<decltype(model.ell)>>::value) return model.ell.params;
+  else { (void)model; return RuntimeParams{}; }
+}
+
+/// Nombre de parametres runtime declares par @p Model (P7-b) : max des `params.count` de ses 3 briques
+/// (chacune porte le MEME bloc complet quand le modele a des params runtime ; 0 partout sinon). Expose
+/// par adc_compiled_nparams() pour que le loader dimensionne le bloc de valeurs qu'il transmet.
+template <class Model>
+inline int model_nparams() {
+  Model model{};
+  int a = brick_nparams(model.hyp), b = brick_nparams(model.src), c = brick_nparams(model.ell);
+  int m = a > b ? a : b;
+  return m > c ? m : c;
+}
+
+/// Ecrit les valeurs de DECLARATION des parametres runtime de @p Model dans @p out (au moins
+/// model_nparams<Model>() doubles). Sert au loader a SEEDER son bloc de valeurs : un set_param ulterieur
+/// n'ecrase qu'une entree, les autres gardent leur defaut de declaration (pas de remise a zero).
+template <class Model>
+void model_param_defaults(double* out) {
+  Model model{};
+  const RuntimeParams rp = model_params(model);
+  for (int k = 0; k < rp.count; ++k) out[k] = static_cast<double>(rp.values[k]);
+}
+
 /// Residu -div F + S du chemin de production (assemble_rhs<Limiter, Flux>) sur le modele genere.
 /// GHOSTS : on alloue l'etat local avec block_n_ghost(lim) (3 pour weno5, son stencil 5 points,
 /// sinon 2 MUSCL) -- MEME mecanisme que System::add_block (set_block_ghosts, PR #88). Sans cette
@@ -104,12 +182,13 @@ inline void extract(const MultiFab& mf, double* out, int n, int nv) {
 /// ghosts) : allocation et resultat bit-identiques a l'historique (le surplus ghost est un no-op).
 template <class Model>
 void residual(const double* U, double* R, const double* aux_in, int n, double dx, double dy,
-              bool periodic, const std::string& lim, const std::string& riem, bool recon_prim) {
+              bool periodic, const std::string& lim, const std::string& riem, bool recon_prim,
+              const double* pvals = nullptr, int npar = 0) {
   LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in, aux_comps<Model>());
   MultiFab Umf(lg.ba, lg.dm, Model::n_vars, block_n_ghost(lim)), Rmf(lg.ba, lg.dm, Model::n_vars, 0);
   fill_interior(Umf, U, n, Model::n_vars);
   const GridContext ctx{lg.dom, lg.bc, lg.geom, &lg.aux};
-  Model model{};
+  Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
   BlockClosures clo = make_block(model, lim, riem, ctx, /*imex=*/false, recon_prim);
   clo.rhs_into(Umf, Rmf);
   extract(Rmf, R, n, Model::n_vars);
@@ -119,13 +198,13 @@ void residual(const double* U, double* R, const double* aux_in, int n, double dx
 template <class Model>
 void advance(double* U, const double* aux_in, int n, double dx, double dy, bool periodic,
              const std::string& lim, const std::string& riem, bool recon_prim, bool imex,
-             double dt, int nsub) {
+             double dt, int nsub, const double* pvals = nullptr, int npar = 0) {
   LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in, aux_comps<Model>());
   // block_n_ghost(lim) : 3 pour weno5 (stencil 5 points), 2 MUSCL sinon. cf. residual ci-dessus.
   MultiFab Umf(lg.ba, lg.dm, Model::n_vars, block_n_ghost(lim));
   fill_interior(Umf, U, n, Model::n_vars);
   const GridContext ctx{lg.dom, lg.bc, lg.geom, &lg.aux};
-  Model model{};
+  Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
   BlockClosures clo = make_block(model, lim, riem, ctx, imex, recon_prim);
   clo.advance(Umf, dt, nsub);
   extract(Umf, U, n, Model::n_vars);
@@ -133,12 +212,13 @@ void advance(double* U, const double* aux_in, int n, double dx, double dy, bool 
 
 /// Vitesse d'onde max du bloc (pour le pas CFL cote System) via make_max_speed sur le modele genere.
 template <class Model>
-double max_speed(const double* U, const double* aux_in, int n, double dx, double dy, bool periodic) {
+double max_speed(const double* U, const double* aux_in, int n, double dx, double dy, bool periodic,
+                 const double* pvals = nullptr, int npar = 0) {
   LocalGrid lg = make_grid(n, dx, dy, periodic, aux_in, aux_comps<Model>());
   MultiFab Umf(lg.ba, lg.dm, Model::n_vars, 2);
   fill_interior(Umf, U, n, Model::n_vars);
   const GridContext ctx{lg.dom, lg.bc, lg.geom, &lg.aux};
-  Model model{};
+  Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
   return make_max_speed(model, ctx)(Umf);
 }
 
@@ -147,10 +227,10 @@ double max_speed(const double* U, const double* aux_in, int n, double dx, double
 /// primitives). Modele sans conversion (scalaire) -> identite (HasPrimitiveVars faux). Pas de
 /// maillage / ghosts : conversion PONCTUELLE, donc une simple boucle sur les n*n cellules.
 template <class Model>
-void to_conservative(const double* P, double* U, int n) {
+void to_conservative(const double* P, double* U, int n, const double* pvals = nullptr, int npar = 0) {
   constexpr int NV = Model::n_vars;
   const std::size_t nn = static_cast<std::size_t>(n) * n;
-  Model model{};
+  Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
   for (std::size_t k = 0; k < nn; ++k) {
     if constexpr (HasPrimitiveVars<Model>) {
       typename Model::Prim p{};
@@ -167,10 +247,10 @@ void to_conservative(const double* P, double* U, int n) {
 /// to_conservative (System::get_primitive_state via le bloc AOT). Identite si le modele n'expose pas
 /// de conversion.
 template <class Model>
-void to_primitive(const double* U, double* P, int n) {
+void to_primitive(const double* U, double* P, int n, const double* pvals = nullptr, int npar = 0) {
   constexpr int NV = Model::n_vars;
   const std::size_t nn = static_cast<std::size_t>(n) * n;
-  Model model{};
+  Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
   for (std::size_t k = 0; k < nn; ++k) {
     if constexpr (HasPrimitiveVars<Model>) {
       typename Model::State u{};
@@ -185,14 +265,15 @@ void to_primitive(const double* U, double* P, int n) {
 
 /// Second membre elliptique f(U) du bloc (le System l'ajoute a sa somme de Poisson).
 template <class Model>
-void poisson_rhs(const double* U, double* rhs_out, int n) {
+void poisson_rhs(const double* U, double* rhs_out, int n, const double* pvals = nullptr,
+                 int npar = 0) {
   Box2D dom = Box2D::from_extents(n, n);
   BoxArray ba = BoxArray::from_domain(dom, n);
   DistributionMapping dm(ba.size(), 1);
   MultiFab Umf(ba, dm, Model::n_vars, 2), rhsmf(ba, dm, 1, 0);
   fill_interior(Umf, U, n, Model::n_vars);
   rhsmf.set_val(0.0);
-  Model model{};
+  Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
   make_poisson_rhs(model)(Umf, rhsmf);
   const ConstArray4 r = rhsmf.fab(0).const_array();
   const std::size_t nn = static_cast<std::size_t>(n) * n;
@@ -205,14 +286,33 @@ void poisson_rhs(const double* U, double* rhs_out, int n) {
 
 /// Definit l'ABI extern "C" du bloc compile pour le modele @p MODEL (un alias SANS virgule de
 /// niveau superieur : poser `using Model = adc::CompositeModel<...>;` puis passer cet alias).
+///
+/// P7-b (PARAMS RUNTIME). En PLUS des symboles historiques (inchanges, donc bit-identiques pour un
+/// modele sans param runtime), on emet des variantes SUFFIXEES `_p` qui prennent un bloc plat de
+/// parametres runtime (const double* pvals, int npar) injecte dans le modele avant l'execution, et
+/// `adc_compiled_nparams()` (nb de params runtime du modele, 0 si aucun). Le loader (native_loader.hpp)
+/// PREFERE les symboles `_p` quand ils sont presents ; un vieux .so sans eux retombe sur les symboles
+/// historiques (aucun param runtime). Les symboles historiques delegent aux memes templates avec
+/// pvals=nullptr/npar=0 -> bit-identite stricte du chemin params-const.
 #define ADC_DEFINE_COMPILED_BLOCK(MODEL)                                                            \
   extern "C" int adc_model_nvars() { return MODEL::n_vars; }                                        \
   extern "C" int adc_compiled_naux() { return adc::aux_comps<MODEL>(); }                            \
+  extern "C" int adc_compiled_nparams() { return adc::compiled_block::model_nparams<MODEL>(); }     \
+  extern "C" void adc_compiled_param_defaults(double* out) {                                        \
+    adc::compiled_block::model_param_defaults<MODEL>(out);                                          \
+  }                                                                                                 \
   extern "C" void adc_compiled_residual(const double* U, double* R, const double* aux, int n,       \
                                         double dx, double dy, int periodic, const char* lim,        \
                                         const char* riem, int recon_prim) {                         \
     adc::compiled_block::residual<MODEL>(U, R, aux, n, dx, dy, periodic != 0, lim, riem,            \
                                          recon_prim != 0);                                          \
+  }                                                                                                 \
+  extern "C" void adc_compiled_residual_p(const double* U, double* R, const double* aux, int n,     \
+                                          double dx, double dy, int periodic, const char* lim,      \
+                                          const char* riem, int recon_prim, const double* pvals,    \
+                                          int npar) {                                               \
+    adc::compiled_block::residual<MODEL>(U, R, aux, n, dx, dy, periodic != 0, lim, riem,            \
+                                         recon_prim != 0, pvals, npar);                             \
   }                                                                                                 \
   extern "C" void adc_compiled_advance(double* U, const double* aux, int n, double dx, double dy,   \
                                        int periodic, const char* lim, const char* riem,             \
@@ -220,16 +320,40 @@ void poisson_rhs(const double* U, double* rhs_out, int n) {
     adc::compiled_block::advance<MODEL>(U, aux, n, dx, dy, periodic != 0, lim, riem,                \
                                         recon_prim != 0, imex != 0, dt, nsub);                      \
   }                                                                                                 \
+  extern "C" void adc_compiled_advance_p(double* U, const double* aux, int n, double dx, double dy, \
+                                         int periodic, const char* lim, const char* riem,           \
+                                         int recon_prim, int imex, double dt, int nsub,             \
+                                         const double* pvals, int npar) {                           \
+    adc::compiled_block::advance<MODEL>(U, aux, n, dx, dy, periodic != 0, lim, riem,                \
+                                        recon_prim != 0, imex != 0, dt, nsub, pvals, npar);         \
+  }                                                                                                 \
   extern "C" double adc_compiled_max_speed(const double* U, const double* aux, int n, double dx,    \
                                            double dy, int periodic) {                               \
     return adc::compiled_block::max_speed<MODEL>(U, aux, n, dx, dy, periodic != 0);                 \
   }                                                                                                 \
+  extern "C" double adc_compiled_max_speed_p(const double* U, const double* aux, int n, double dx,  \
+                                             double dy, int periodic, const double* pvals,          \
+                                             int npar) {                                            \
+    return adc::compiled_block::max_speed<MODEL>(U, aux, n, dx, dy, periodic != 0, pvals, npar);    \
+  }                                                                                                 \
   extern "C" void adc_compiled_poisson_rhs(const double* U, double* rhs, int n) {                   \
     adc::compiled_block::poisson_rhs<MODEL>(U, rhs, n);                                             \
+  }                                                                                                 \
+  extern "C" void adc_compiled_poisson_rhs_p(const double* U, double* rhs, int n,                   \
+                                             const double* pvals, int npar) {                       \
+    adc::compiled_block::poisson_rhs<MODEL>(U, rhs, n, pvals, npar);                                \
   }                                                                                                 \
   extern "C" void adc_compiled_to_conservative(const double* P, double* U, int n) {                 \
     adc::compiled_block::to_conservative<MODEL>(P, U, n);                                           \
   }                                                                                                 \
+  extern "C" void adc_compiled_to_conservative_p(const double* P, double* U, int n,                 \
+                                                 const double* pvals, int npar) {                   \
+    adc::compiled_block::to_conservative<MODEL>(P, U, n, pvals, npar);                              \
+  }                                                                                                 \
   extern "C" void adc_compiled_to_primitive(const double* U, double* P, int n) {                    \
     adc::compiled_block::to_primitive<MODEL>(U, P, n);                                              \
+  }                                                                                                 \
+  extern "C" void adc_compiled_to_primitive_p(const double* U, double* P, int n,                    \
+                                              const double* pvals, int npar) {                      \
+    adc::compiled_block::to_primitive<MODEL>(U, P, n, pvals, npar);                                 \
   }

@@ -116,6 +116,9 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
            py::arg("recon") = "conservative", py::arg("time") = "explicit", py::arg("substeps") = 1,
            py::arg("names") = std::vector<std::string>{})
+      // P7-b : change les parametres RUNTIME d'un bloc AOT SANS recompiler le .so. values = bloc
+      // complet (ordre trie des noms cote DSL). cf. System::set_block_params.
+      .def("set_block_params", &System::set_block_params, py::arg("name"), py::arg("values"))
       // Bloc NATIF charge depuis un loader .so genere par le DSL (backend "production",
       // dsl.compile_native) : le .so inline add_compiled_model<ProdModel> -> bloc zero-copie sur le
       // contexte reel du System, cle d'ABI verifiee. cf. System::add_native_block.

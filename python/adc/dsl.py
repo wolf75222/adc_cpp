@@ -152,6 +152,11 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
 AUX_CANONICAL = {"phi": 0, "grad_x": 1, "grad_y": 2, "B_z": 3, "T_e": 4}
 AUX_BASE_COMPS = 3
 
+# Borne du nombre de parametres RUNTIME par bloc (P7-b). MIROIR de kMaxRuntimeParams
+# (include/adc/runtime/runtime_params.hpp) : le porteur C++ RuntimeParams a un tableau de cette taille
+# FIXE (device-copiable sans allocation), donc un modele depassant la borne est rejete au codegen.
+_K_MAX_RUNTIME_PARAMS = 32
+
 
 def aux_n_aux(aux_names):
     """Largeur du canal aux requise par ces champs : max(3, plus grand indice canonique + 1).
@@ -226,7 +231,15 @@ class Expr:
 
 
 def _wrap(o):
-    return o if isinstance(o, Expr) else Const(float(o))
+    if isinstance(o, Expr):
+        return o
+    # Un Param expose son NOEUD d'arbre interne (_node : Const pour 'const', RuntimeParamRef pour
+    # 'runtime'). On le promeut par ce noeud, PAS par float(o) : sinon sqrt(param_runtime) /
+    # dsl.sqrt(param) inlinerait la valeur de declaration (Const) au lieu d'emettre params.get(...).
+    node = getattr(o, "_node", None)
+    if isinstance(node, Expr):
+        return node
+    return Const(float(o))
 
 
 class Const(Expr):
@@ -304,6 +317,46 @@ def sqrt(x):
     return Sqrt(_wrap(x))
 
 
+class RuntimeParamRef(Expr):
+    """Reference a un parametre RUNTIME (P7-b) dans l'arbre d'expressions. A la difference d'un Const
+    (param const inline EN DUR), ce noeud emet `params.get(<indice>)` au codegen : la brique generee
+    LIT la valeur dans son membre adc::RuntimeParams au lieu de l'avoir cuite. La valeur peut donc etre
+    CHANGEE au runtime sans recompiler le .so (cf. include/adc/runtime/runtime_params.hpp).
+
+    @c index : indice STABLE du parametre dans le bloc RuntimeParams (attribue par le modele a la
+    compilation, ordre trie des noms) ; -1 tant qu'il n'est pas assigne. @c value : valeur de
+    DECLARATION (utilisee par l'interprete numpy eval et comme defaut du membre genere -> sans appel
+    set au runtime, le bloc se comporte comme avec un param const de cette valeur).
+
+    Cle structurelle de CSE (cf. _key) : le NOM (deux refs au meme param runtime partagent la meme
+    locale CSE) ; la valeur de declaration n'entre pas dans la cle (elle est runtime, pas structurelle)."""
+
+    def __init__(self, name, value, index=-1):
+        self.name = name
+        self.value = float(value)
+        self.index = index
+
+    def eval(self, env):
+        # Interprete numpy (proto hote / debug) : la valeur de declaration tient lieu de valeur courante
+        # (le chemin numpy ne passe pas par RuntimeParams ; il sert au prototypage, pas a la production).
+        return self.value
+
+    def deps(self):
+        # Un parametre runtime n'est PAS une variable d'environnement (cons/prim/aux) : il vient du canal
+        # RuntimeParams, donc rien a verifier dans check() (comme un Const).
+        return set()
+
+    def to_cpp(self):
+        if self.index < 0:
+            raise RuntimeError(
+                "RuntimeParamRef('%s') : indice non assigne au codegen (appeler la compilation via "
+                "dsl.Model qui attribue les indices runtime)" % self.name)
+        return "params.get(%d)" % self.index
+
+    def _str(self):
+        return "rparam(%s)" % self.name
+
+
 # --- Elimination des sous-expressions communes (CSE) -------------------------
 # Le codegen inline chaque sous-expression a chaque apparition (H, c... recalcules). La CSE detecte
 # les sous-expressions COMPOUND (non feuilles) apparaissant plusieurs fois et les sort en variables
@@ -320,6 +373,8 @@ def _children(e):
 def _key(e):
     if isinstance(e, Const):
         return ("const", e.value)
+    if isinstance(e, RuntimeParamRef):
+        return ("rparam", e.name)  # cle = nom : deux refs au meme param runtime partagent la locale CSE
     if isinstance(e, Var):
         return ("var", e.name)
     if isinstance(e, Neg):
@@ -333,6 +388,8 @@ def _cpp_expand(e, cse_map):
     """C++ du noeud e en developpant SON niveau ; les enfants passent par _cpp_cse (-> locales CSE)."""
     if isinstance(e, Const):
         return repr(e.value)
+    if isinstance(e, RuntimeParamRef):
+        return e.to_cpp()  # params.get(<indice>) : lit le membre RuntimeParams de la brique
     if isinstance(e, Var):
         return e.name
     if isinstance(e, Neg):
@@ -516,6 +573,69 @@ class HyperbolicModel:
             raise ValueError("modele '%s' : variables non definies %s" % (self.name, sorted(missing)))
         return True
 
+    # --- parametres RUNTIME (P7-b) : collecte + attribution d'indices + membre genere -------------
+    def _all_exprs(self):
+        """Toutes les Expr du modele (primitives, flux, valeurs propres, source, elliptique,
+        cons_from). Sert a decouvrir les noeuds RuntimeParamRef caches dans l'arbre."""
+        out = list(self.prim_defs.values())
+        for d in ("x", "y"):
+            out += self._flux.get(d, [])
+            out += self._eig.get(d, [])
+        if self._source is not None:
+            out += [_wrap(e) for e in self._source]
+        if self.cons_from is not None:
+            out += list(self.cons_from)
+        if self._elliptic is not None:
+            out.append(self._elliptic)
+        return out
+
+    def runtime_param_nodes(self):
+        """Noeuds RuntimeParamRef PRESENTS dans les formules, dedupliques par nom (un meme param peut
+        apparaitre plusieurs fois mais partage le MEME objet noeud). Ordre TRIE par nom (indice stable
+        = position dans cette liste, miroir de RuntimeParams cote C++)."""
+        seen = {}
+
+        def walk(e):
+            if isinstance(e, RuntimeParamRef):
+                seen.setdefault(e.name, e)
+                return
+            for c in _children(e):
+                walk(c)
+
+        for e in self._all_exprs():
+            walk(e)
+        return [seen[k] for k in sorted(seen)]
+
+    def assign_runtime_indices(self):
+        """Attribue a chaque RuntimeParamRef son indice STABLE (ordre trie des noms) et renvoie la liste
+        ordonnee des noeuds. APPELE avant tout codegen de brique : sans cet appel, to_cpp() leverait
+        (indice -1). Idempotent (reaffecte les memes indices). Rejette un modele depassant la borne C++
+        kMaxRuntimeParams (sinon le tableau de taille fixe deborderait)."""
+        nodes = self.runtime_param_nodes()
+        if len(nodes) > _K_MAX_RUNTIME_PARAMS:
+            raise ValueError(
+                "modele '%s' : %d parametres runtime > borne kMaxRuntimeParams=%d "
+                "(include/adc/runtime/runtime_params.hpp) ; reduire le nombre de params runtime"
+                % (self.name, len(nodes), _K_MAX_RUNTIME_PARAMS))
+        for k, node in enumerate(nodes):
+            node.index = k
+        return nodes
+
+    def _runtime_params_member(self):
+        """Ligne C++ declarant le membre RuntimeParams d'une brique generee, initialise aux valeurs de
+        DECLARATION (defaut sans appel set au runtime). Chaine vide si le modele n'a aucun param runtime
+        (brique strictement identique a l'historique -> bit-identite des params const preservee)."""
+        nodes = self.assign_runtime_indices()
+        if not nodes:
+            return ""
+        vals = ", ".join(repr(node.value) for node in nodes)
+        return ("  adc::RuntimeParams params{%d, {%s}};  // params RUNTIME (P7-b) : ecrasables a "
+                "l'execution\n" % (len(nodes), vals))
+
+    def has_runtime_params(self):
+        """Vrai si au moins une formule lit un parametre runtime (kind='runtime')."""
+        return bool(self.runtime_param_nodes())
+
     # --- codegen (etape 2 : arbre symbolique -> C++ compilable) ---
     def _codegen_exprs(self, exprs, cse, real="adc::Real", indent="    "):
         """(lignes de locales CSE, [C++ par expr]). Si cse, factorise les sous-expressions communes
@@ -629,11 +749,17 @@ class HyperbolicModel:
 
         croles = roles_init(roles_for(self.cons_names, self.cons_roles))
         proles = roles_init(roles_for(self.prim_state, self.prim_roles))
+        # P7-b : attribuer les indices runtime AVANT tout to_cpp() (un RuntimeParamRef leve sinon).
+        rt_member = self._runtime_params_member()
         S = [
             "#include <cmath>",  # std::sqrt / std::pow : brique autosuffisante (g++ ne tire pas cmath)
             "// brique HYPERBOLIQUE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_brick)."
             % self.name,
             "// Satisfait adc::HyperbolicModel : flux + max_wave_speed + conversions + descripteurs.",
+        ]
+        if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
+            S.append("#include <adc/runtime/runtime_params.hpp>")
+        S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
             "  using State = adc::StateVec<%d>;" % nc,
@@ -641,6 +767,8 @@ class HyperbolicModel:
             "  using Aux   = adc::Aux;",
             "  static constexpr int n_vars = %d;" % nc,
         ]
+        if rt_member:  # membre adc::RuntimeParams params{count, {defauts}} (P7-b)
+            S.append(rt_member.rstrip("\n"))
         # n_aux si une formule (flux / valeurs propres) lit un champ aux supplementaire (B_z...).
         if aux_n_aux(self.aux_names) > AUX_BASE_COMPS:
             S.append("  static constexpr int n_aux = %d;" % aux_n_aux(self.aux_names))
@@ -742,14 +870,21 @@ class HyperbolicModel:
             return ["    const adc::Real %s = a.%s;" % (nm_, nm_) for nm_ in self.aux_names]
 
         na = aux_n_aux(self.aux_names)  # largeur aux requise (B_z... -> > 3)
+        rt_member = self._runtime_params_member()  # P7-b : indices runtime AVANT tout to_cpp()
         S = [
             "#include <cmath>",  # autosuffisant pour std::sqrt / std::pow
             "// brique de SOURCE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_source)."
             % self.name,
             "// apply(U, a) -> terme source S(U, aux) ; noms aux = champs de adc::Aux (grad_x, grad_y).",
+        ]
+        if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
+            S.append("#include <adc/runtime/runtime_params.hpp>")
+        S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
         ]
+        if rt_member:  # membre adc::RuntimeParams params{count, {defauts}} (P7-b)
+            S.append(rt_member.rstrip("\n"))
         # Si une formule lit un champ aux SUPPLEMENTAIRE (B_z...), declarer n_aux : CompositeModel le
         # propage (max sur les briques) et le systeme dimensionne/peuple le canal aux partage. Sans
         # champ extra -> pas de n_aux emis -> brique strictement identique a l'historique.
@@ -1077,6 +1212,10 @@ class HyperbolicModel:
         parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
         parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
         parts.append("gamma=%r" % m.gamma)
+        # Les params entrent dans le hash par (nom, valeur de DECLARATION, kind). La valeur d'un param
+        # RUNTIME (P7-b) y figure car elle SEEDE le defaut du membre RuntimeParams genere (donc deux .so
+        # a defaut different sont distincts) ; le "sans recompilation" de P7-b porte sur set_block_params
+        # a l'EXECUTION, pas sur un nouvel appel compile() a valeur de declaration changee.
         params = params or {}
         parts.append("params=%s" % ";".join("%s=%r:%s" % (k, params[k].value, params[k].kind)
                                              for k in sorted(params)))
@@ -1204,13 +1343,22 @@ class HyperbolicModel:
         if self._elliptic is None:
             raise ValueError("emit_cpp_elliptic : appeler set_elliptic_rhs(...) d'abord")
         nm = name or (self.name.capitalize() + "Elliptic")
+        rt_member = self._runtime_params_member()  # P7-b : indices runtime AVANT tout to_cpp()
         out = [
             "#include <cmath>",  # autosuffisant pour std::sqrt / std::pow
             "// brique de SECOND MEMBRE elliptique generee depuis '%s' (adc.dsl.emit_cpp_elliptic)."
             % self.name,
             "// rhs(U) -> Real : second membre f(U) de l'operateur elliptique (p.ex. densite de charge).",
+        ]
+        if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
+            out.append("#include <adc/runtime/runtime_params.hpp>")
+        out += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
+        ]
+        if rt_member:  # membre adc::RuntimeParams params{count, {defauts}} (P7-b)
+            out.append(rt_member.rstrip("\n"))
+        out += [
             "  template <class State>",
             "  ADC_HD adc::Real rhs(const State& U) const {",
         ]
@@ -1248,53 +1396,67 @@ _BACKEND_CAPS = {
 class Param:
     """Parametre NOMME d'un modele DSL, utilisable comme une Expr dans les formules.
 
-    Mode (a), constante figee a la compilation (la SEULE supportee en Phase A) : `kind="const"`.
-    Le codegen INLINE deja toute constante (Const.to_cpp -> repr(value)), donc Param s'inline en
-    Const(value) au codegen (zero-risque cote brique generee) tout en gardant son IDENTITE
-    (name/value/kind) pour l'introspection (m.params), les diagnostics et la reproductibilite.
+    Mode (a), constante figee a la compilation : `kind="const"` (defaut). Le codegen INLINE toute
+    constante (Const.to_cpp -> repr(value)), donc le param s'inline en Const(value) au codegen (valeur
+    ecrite EN DUR dans le .so) tout en gardant son IDENTITE (name/value/kind) pour l'introspection
+    (m.params), les diagnostics et la reproductibilite. INCHANGE par P7-b : bit-identique a l'historique.
 
-    Mode (b), parametre runtime (modifiable sans recompiler) : `kind="runtime"` -> NotImplementedError
-    (changement d'ABI + codegen requis, phase ulterieure ; cf. DSL_MODEL_DESIGN.md section 2b).
+    Mode (b), parametre RUNTIME (modifiable SANS recompiler) : `kind="runtime"` (P7-b). Au codegen, le
+    param emet `params.get(<indice>)` (lecture d'un membre adc::RuntimeParams de la brique) au lieu
+    d'une constante ; sa valeur est transportee au runtime par l'ABI du .so AOT et peut etre CHANGEE
+    (block.set_param / System.set_block_params) sans recompiler. La valeur passee a la declaration sert
+    de DEFAUT (sans appel set, le bloc se comporte comme avec un param const de cette valeur).
+    SUPPORTE par le backend "aot" (add_compiled_block). Les backends "prototype" (JIT) et "production"
+    (natif) compilent un param runtime comme sa valeur de declaration (figee) : un set_param y est sans
+    effet, l'API le signale (cf. CompiledModel.runtime_param_names / System.set_block_params).
 
     Param N'HERITE PAS d'Expr (voir NB ci-dessous) : il EXPOSE les memes hooks d'arbre
-    (`eval`/`to_cpp`/`deps`) et les operateurs en DELEGANT a un Const interne, donc `g * (E - ...)`
-    construit directement l'arbre attendu. La valeur est une constante (pas une variable
-    d'environnement) -> aucune dependance a verifier dans check()."""
+    (`eval`/`to_cpp`/`deps`) et les operateurs en DELEGANT a un NOEUD interne (Const pour 'const',
+    RuntimeParamRef pour 'runtime'), donc `g * (E - ...)` construit directement l'arbre attendu. La
+    valeur n'est pas une variable d'environnement -> aucune dependance a verifier dans check()."""
 
     # NB : Param N'HERITE PAS d'Expr pour eviter d'embarquer son etat (name/kind) dans la cle
-    # structurelle de CSE ; il EXPOSE plutot les hooks d'arbre en deleguant a un Const interne.
+    # structurelle de CSE ; il EXPOSE plutot les hooks d'arbre en deleguant a un noeud interne.
     def __init__(self, name, value, kind="const"):
         if kind not in ("const", "runtime"):
             raise ValueError("Param : kind 'const' | 'runtime' (recu %r)" % (kind,))
-        if kind == "runtime":
-            raise NotImplementedError(
-                "param '%s' runtime non supporte (changement d'ABI/codegen requis, phase "
-                "ulterieure) ; utiliser un param constant (kind='const') ou un champ aux" % name)
         self.name = name
         self.value = float(value)
         self.kind = kind
-        self._const = Const(self.value)  # s'inline au codegen : la valeur est ecrite EN DUR dans le .so
+        if kind == "runtime":
+            # Noeud RUNTIME PARTAGE : toutes les apparitions du param dans les formules pointent ce meme
+            # objet, donc fixer son .index a la compilation (Model._assign_runtime_indices) suffit a
+            # router toutes ses lectures vers params.get(<indice>). index=-1 tant que non assigne.
+            self._node = RuntimeParamRef(self.name, self.value)
+        else:
+            self._node = Const(self.value)  # s'inline au codegen : valeur ecrite EN DUR dans le .so
 
-    # --- hooks d'arbre (delegues au Const interne) : Param utilisable comme une Expr ---
-    def eval(self, env): return self._const.eval(env)
-    def to_cpp(self): return self._const.to_cpp()
-    def deps(self): return set()  # une constante n'a aucune dependance (rien a verifier dans check())
+    # --- hooks d'arbre (delegues au noeud interne) : Param utilisable comme une Expr ---
+    def eval(self, env): return self._node.eval(env)
+    def to_cpp(self): return self._node.to_cpp()
+    def deps(self): return set()  # ni const ni runtime n'ont de dependance (rien a verifier dans check())
 
-    # --- operateurs : Param se combine comme une Expr (promotion via _wrap du Const interne) ---
-    def __add__(self, o): return Add(self._const, _wrap(o))
-    def __radd__(self, o): return Add(_wrap(o), self._const)
-    def __sub__(self, o): return Sub(self._const, _wrap(o))
-    def __rsub__(self, o): return Sub(_wrap(o), self._const)
-    def __mul__(self, o): return Mul(self._const, _wrap(o))
-    def __rmul__(self, o): return Mul(_wrap(o), self._const)
-    def __truediv__(self, o): return Div(self._const, _wrap(o))
-    def __rtruediv__(self, o): return Div(_wrap(o), self._const)
-    def __neg__(self): return Neg(self._const)
-    def __pos__(self): return self._const  # +param = identite (Expr), pour +k*ne*ng
-    def __pow__(self, o): return Pow(self._const, _wrap(o))
+    # --- operateurs : Param se combine comme une Expr (promotion via _wrap du noeud interne) ---
+    def __add__(self, o): return Add(self._node, _wrap(o))
+    def __radd__(self, o): return Add(_wrap(o), self._node)
+    def __sub__(self, o): return Sub(self._node, _wrap(o))
+    def __rsub__(self, o): return Sub(_wrap(o), self._node)
+    def __mul__(self, o): return Mul(self._node, _wrap(o))
+    def __rmul__(self, o): return Mul(_wrap(o), self._node)
+    def __truediv__(self, o): return Div(self._node, _wrap(o))
+    def __rtruediv__(self, o): return Div(_wrap(o), self._node)
+    def __neg__(self): return Neg(self._node)
+    def __pos__(self): return self._node  # +param = identite (Expr), pour +k*ne*ng
+    def __pow__(self, o): return Pow(self._node, _wrap(o))
 
     def __float__(self): return self.value
     def __repr__(self): return "Param(%r, %r, kind=%r)" % (self.name, self.value, self.kind)
+
+
+def RuntimeParam(name, value):
+    """Sucre : un parametre RUNTIME (modifiable sans recompiler). Equivaut a Param(name, value,
+    kind='runtime'). cf. Param mode (b) et include/adc/runtime/runtime_params.hpp (P7-b)."""
+    return Param(name, value, kind="runtime")
 
 
 class CompiledModel:
@@ -1325,11 +1487,23 @@ class CompiledModel:
         self.cxx = cxx
         self.std = std
 
+    @property
+    def runtime_param_names(self):
+        """Noms des parametres RUNTIME du modele (kind='runtime'), TRIES : c'est l'ORDRE des indices
+        cote C++ (RuntimeParams) ET l'ordre attendu par System.set_block_params(name, values) (P7-b).
+        Vide si le modele n'a que des params const."""
+        return sorted(k for k, p in self.params.items() if getattr(p, "kind", "const") == "runtime")
+
+    def runtime_param_values(self):
+        """Valeurs de DECLARATION des params runtime, paralleles a runtime_param_names (defaut tant
+        qu'aucun set_block_params n'a ete appele)."""
+        return [self.params[k].value for k in self.runtime_param_names]
+
     def __repr__(self):
         return ("CompiledModel(backend=%r, target=%r, so_path=%r, n_vars=%d, gamma=%r, n_aux=%d, "
-                "adder=%r, abi_key=%.12s..., model_hash=%.12s...)"
+                "adder=%r, runtime_params=%r, abi_key=%.12s..., model_hash=%.12s...)"
                 % (self.backend, self.target, self.so_path, self.n_vars, self.gamma, self.n_aux,
-                   self.adder, self.abi_key or "", self.model_hash or ""))
+                   self.adder, self.runtime_param_names, self.abi_key or "", self.model_hash or ""))
 
 
 def _abi_key_python(include, cxx, std):
