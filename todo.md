@@ -609,8 +609,11 @@ pas implicite stable a grand dt. Modele = physique ; SchurCondensation = algo. O
 - [x] **Device-clean GPU** : le stack Schur etait FAUX EN SILENCE sur Cuda (accesseurs Geometry/Box2D
       non `ADC_HD` -> RHS/reductions faux, BiCGStab "0 iters rel=0 puis NaN"). Fix dans #135 (en vol,
       attend validation GH200). Host = correct, CI verte.
-- [ ] **PR6 - mesure diocotron-Schur** : DIFFERE jusqu'a la geometrie polaire (le Schur stabilise le
-      TEMPS ; il n'adresse PAS le gap de taux de croissance, qui est GEOMETRIQUE).
+- [~] **PR6 - mesure diocotron-Schur polaire -- DEBLOQUE, EN COURS** : la capacite Schur POLAIRE est FAITE
+      (elliptique tensoriel #210 + etage source #212, gain dt 2000x) ; cablage facade etape 2c EN VOL
+      (afd1c6c5) -> rend le Schur polaire utilisable depuis System/Python -> la mesure diocotron-Schur polaire
+      raide devient runnable. (Rappel : le Schur stabilise le TEMPS ; le gap de TAUX est geometrique/non-lineaire,
+      adresse separement par le chemin polaire + la campagne delta.)
 - [x] **PR7/PR8 - portage GPU/MPI + AMR** : apres #135 ; bit-invariance au nombre de rangs.
 
 ## 11. Pipeline ergonomique System (P1-P7)
