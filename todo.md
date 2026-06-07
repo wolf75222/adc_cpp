@@ -203,7 +203,10 @@ DETTE / DIFFERES (ne pas oublier) :
 - [x] segfault de teardown sur profils polaires INSTABLES (PRE-EXISTANT, hors #176) -> CORRIGE #192 :
   bug get/set_primitive_state + accesseurs (to_2d/to_3d) supposaient un domaine CARRE (n*n) ; passes a
   (ny,nx) -> polaire nr!=ntheta correct, cartesien bit-identique (ny==nx==n), AMR garde carre. CI full verte.
-- [ ] A4 : cas MMS polaire dedie avec v_r != 0 (couvert en pratique par #168/#174 ; optionnel).
+- [x] A4 -- FAIT #202 : test_polar_mms_vr.cpp, MMS polaire DEDIE v_r != 0 (champ (v_r=0.35, v_theta=0.6),
+  source manufacturee polaire (1/r)d_r(r rho v_r)+(1/r)d_theta(rho v_theta)), ordre de convergence 2.00 (limite
+  par la ponderation de face radiale). + #209 : MMS fluide 3-var (v_r != 0) ordre 2.00. (campagne MMS complete
+  = workflow en cours : audit rigueur + analyse de l'ordre + MMS transitoire manquant.)
 - [x] **finding 8 -- FAIT #204** : `fab(0)` sans garde `local_size` corrige (6 fermetures rhs_into/max_speed/
   advance dans native_loader.hpp ; garde `if (U.local_size()==0) return` ; collectifs hors fermetures -> pas
   d'interblocage) + test MPI np=1/2/4 (test_mpi_system_gather_scatter). CI job MPI verte. RESTE : `/(2*dx)->*cx`
@@ -396,8 +399,14 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
           centrifuge S_geom verifiee EXACTE par derivation sympy independante ; ExB-polaire + cartesien
           bit-identiques via concept-gate ; equilibre rotatif ordre 1.99, MMS 2.00, masse 1.2e-15). Revue
           adversariale 4 lentilles = 0 vrai probleme (6 "findings" = confirmations positives). -- CI, merge sur vert.
-        - re-fit fenetre precoce l=4/l=5 sur ROMEO (job 647356, probe_fit amplitude(t) n=384/512 + detection
-          de saturation) -> table serree + maj PAPER_FIT_WINDOWS (adc_cases).
+        - re-fit fenetre precoce l=4/l=5 sur ROMEO (job 647356) -- RESULTAT HONNETE : la fenetre precoce
+          N'ATTEINT PAS +-2% et n'est PAS un fit-window pur. n=512 : l=3 +4.86% (la fenetre LONGUE etait
+          meilleure : -0.38%), l=4 +5.09% (mieux que -8.4%), l=5 +18.10% (~ inchange vs +16%). Les modes
+          preferent des fenetres DIFFERENTES ; l=5 reste +16-18% quelle que soit la fenetre => DEVIATION
+          REELLE (resolution insuffisante pour le mode rapide a fort gradient, et/ou perturbation delta=0.1
+          legerement non-lineaire), PAS un artefact de mesure. CONCLUSION : la normalisation 2pi/rhobar est
+          PROUVEE par l=3 (-0.38% fenetre longue) ; +-2% sur l=4/l=5 exigerait n=768/1024 (plus de GPU)
+          et/ou delta plus petit (regime plus lineaire). Donnees : /scratch_p/rmdraux/early_fit_647356/.
       SUITE (s'enchaine) : Voie A ETAPE 2 = Schur polaire (elliptique iteratif pour le tenseur croise +
       stencils Schur polaires) ; cas demonstrateur diocotron fluide polaire (la figure 2D nette) ; table de
       validation finale ; (optionnel) Strang ordre 2. Roadmap detaillee : docs/FULL_MODEL_VALIDATION_ROADMAP.md.
