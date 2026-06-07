@@ -145,6 +145,15 @@ adc_add_test(test_polar_transport_mms)
 # box ; PolarPoissonSolver mono-rang, non enregistre MPI comme test_polar_poisson_mms).
 adc_add_test(test_polar_system_step)
 
+# --- Lot A4 grille polaire : MMS DEDIE avec vitesse RADIALE v_r != 0. Avance en temps (assemble_rhs_polar
+# + SSPRK3) jusqu'a un t court sous un champ a v_r != 0 constant + un TERME SOURCE manufacture, et asserte
+# l'ORDRE DE CONVERGENCE de l'erreur L2 de la solution vs l'exact (>= 1.8, calibre sur l'ordre 2 mesure ;
+# divergence FV polaire formellement d'ordre 2, cf. test_polar_transport_mms). Comble le trou laisse par
+# #168/#174 : aucun MMS polaire dedie a v_r != 0 ne verifiait quantitativement le transport RADIAL (et pas
+# seulement azimutal). Brique de transport + source MANUFACTURE locales au test (aucun code de prod). Host
+# / Serial-safe (UNE box, non enregistre MPI comme les autres tests polaires mono-box).
+adc_add_test(test_polar_mms_vr)
+
 # --- dispatch a l'execution (modele type-erased pour brique generee / JIT) ---
 adc_add_test(test_dynamic_model)
 
