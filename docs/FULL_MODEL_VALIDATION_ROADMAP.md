@@ -58,12 +58,13 @@ besoin visuel se confirme, PAS un chemin vers la fidelite au papier. A court ter
   nette (type Fig 5.1) est jugee indispensable. Flux fluide polaire (courbure 1/r) + elliptique polaire
   ITERATIF pour le tenseur croise + stencils Schur polaires. 2-3 PR recherche. (recherche)
 
-## Questions ouvertes (decision proprietaire) -- voir todo
+## DECISIONS PROPRIETAIRE (juin 2026)
 
-1. Figure 2D de densite nette requise pour le rapport (=> Voie A prioritaire) ou les courbes de taux
-   suffisent (=> Voie A optionnelle) ?
-2. Cible de fidelite : l=3/4/5 tous a +-2% (=> re-fit + rejouer n=512, heures-GPU) OU accepter l=3=-0.38%
-   comme preuve de la normalisation et documenter l=4/l=5 comme sensibilite de mesure ?
-3. Preuve formelle de structure-preservation au sens FE (conservation exacte) requise, ou tests empiriques
-   bornes O(dt^2) suffisants ? (le schema est FV, pas FE : momentum non garanti exact par construction.)
-4. Splitting : Lie (ordre 1, actuel) acceptable, ou passer a Strang (ordre 2) ?
+- Q1 (figure 2D nette) : **OUI requise** => Voie A (fluide polaire) POURSUIVIE (plus optionnelle). Etape 1
+  = #209 (transport fluide polaire, en CI). Etape 2 = Schur polaire (a faire).
+- Q2 (cible fidelite) : **l=4/5 a +-2%** => re-fit fenetre precoce (ROMEO job 647356) + maj PAPER_FIT_WINDOWS
+  + table de validation finale (rejouer si besoin).
+- Q3 (structure-preservation FE formelle vs tests empiriques O(dt^2)) : OUVERTE.
+- Q4 (Lie vs Strang) : OUVERTE (Strang = PR optionnelle PR5).
+
+Etat des PR : PR1 conservation = #207 (merge). doc CONSERVATION_SUMMARY = #208 (CI). Voie A etape 1 = #209 (CI).

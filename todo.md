@@ -388,11 +388,21 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] **Conservation discrete cartesien-fluide-Schur -- FAIT #207** : tests masse (machine, domaine ferme),
       symetrie momentum (machine), impulsion momentum (physique O(dt) convergente), E>0/p>0 (3 limiteurs).
       Note honnete FV-vs-FE. Decouverte : Dirichlet fuit la masse ~1e-2 par Foextrap (artefact CL, pas schema).
-- [ ] **RESTE Hoffart = VALIDATION (pas de capacite manquante)** : (a) re-fit fenetre precoce l=4/l=5 --
-      BLOQUEUR : seul le gamma final est sauve sur ROMEO, pas amplitude(t) -> modifier sweep.py + REJOUER
-      n=384/512 (heures GH200) ; (b) table de validation finale ; (c) optionnel Strang ordre 2. DECISIONS
-      PROPRIETAIRE ouvertes (figure 2D nette requise ? cible l=4/5 a +-2% ? structure-preservation FE
-      formelle ? Strang ?) -- detaillees dans docs/FULL_MODEL_VALIDATION_ROADMAP.md.
+- [~] **RESTE Hoffart -- DECISIONS PRISES + EN COURS (juin 2026)** : le proprietaire a tranche : cible l=4/5
+      a +-2% (=> re-fit + rejouer), figure 2D nette REQUISE (=> Voie A poursuivie), tout en parallele.
+      EN VOL :
+        - #208 doc CONSERVATION_SUMMARY (FV vs FE) -- CI.
+        - #209 Voie A ETAPE 1 = transport fluide isotherme polaire (IsothermalFluxPolar + source geometrique
+          centrifuge S_geom verifiee EXACTE par derivation sympy independante ; ExB-polaire + cartesien
+          bit-identiques via concept-gate ; equilibre rotatif ordre 1.99, MMS 2.00, masse 1.2e-15). Revue
+          adversariale 4 lentilles = 0 vrai probleme (6 "findings" = confirmations positives). -- CI, merge sur vert.
+        - re-fit fenetre precoce l=4/l=5 sur ROMEO (job 647356, probe_fit amplitude(t) n=384/512 + detection
+          de saturation) -> table serree + maj PAPER_FIT_WINDOWS (adc_cases).
+      SUITE (s'enchaine) : Voie A ETAPE 2 = Schur polaire (elliptique iteratif pour le tenseur croise +
+      stencils Schur polaires) ; cas demonstrateur diocotron fluide polaire (la figure 2D nette) ; table de
+      validation finale ; (optionnel) Strang ordre 2. Roadmap detaillee : docs/FULL_MODEL_VALIDATION_ROADMAP.md.
+      Question ouverte restante : preuve structure-preservation FE formelle requise, ou tests empiriques O(dt^2)
+      suffisent (le schema est FV, momentum non exact par construction) ?
 - [x] **M2 / M2b** : AMR sur le bord d'anneau (triple le taux a base egale) + Poisson multi-niveau.
 - [ ] Montee en resolution / convergence vers le taux analytique ; integration SAMRAI ulterieure.
 
