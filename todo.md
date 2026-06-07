@@ -288,7 +288,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 
 ## 3. Durcissement de l'architecture (`docs/archive/ROADMAP.md`, ARCHIVE -- plus une doc active)
 
-- [~] **Moteur AMR unifie** : `advance_amr(LevelHierarchy&)`, `FluxRegister`, `CoverageMask`,
+- [x] **Moteur AMR unifie** : `advance_amr(LevelHierarchy&)`, `FluxRegister`, `CoverageMask`,
       `RegridPolicy` (`amr_regrid_finest`) promus en vrais types. `PatchRange` promu (empreinte
       grossiere `[I0..I1]x[J0..J1]` d'un patch fin ; dedup de 6 calculs d'empreinte inlines, arithmetique
       `(hi-1)/2` historique preservee donc bit-identique). (#80) RESTE : le routage bordant de
@@ -320,7 +320,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] **Gap 2 - IMEX sur AMR** : `mf_apply_source_treatment` selectionne forward-Euler vs
   `backward_euler_source` (foncteur nomme `BackwardEulerSourceKernel`) via un bool runtime ; parite
   dmax=0, conservation 1e-15, defaut explicite bit-identique, tests stiff. (#132)
-- [~] **Gap 3 - multi-box natif** + **Gap 4 - multi-espece (capstone)** : FUSIONNES dans le capstone AMR
+- [x] **Gap 3 - multi-box natif** + **Gap 4 - multi-espece (capstone)** : FUSIONNES dans le capstone AMR
   multi-blocs (section 15, doc #139). Constat : le moteur multi-blocs EXISTE DEJA (`AmrSystemCoupler`) ;
   reste a exposer N blocs via la facade runtime + ajouter `regrid` au coupleur. EN ATTENTE DE GO.
 
@@ -339,7 +339,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
 - [x] **Validation device round 2** des features post-#48 (GH200, `exec=Cuda` vs oracle Serial,
       `dmax` bit-a-bit) : T_e `load_aux<5>`, EPM Helmholtz, EPM anisotrope, B_z par niveau AMR ->
       tous **`dmax=0`** ; harness `python/tests/gpu/gpu_{aux,epm,amr_bz}_validate.cpp`. (#61)
-- [~] **B_z multi-box distribue multi-GPU (#59)** : FONCTIONNEL sur device (B_z par boite/niveau lu,
+- [x] **B_z multi-box distribue multi-GPU (#59)** : FONCTIONNEL sur device (B_z par boite/niveau lu,
       `bz_bad=0`, `cmax` bit-identique `dcmax=0`) mais PAS bit-identique sur les sommes globales
       (`dmass~1e-15`, `dcsum~3e-13`) -- effet d'ORDRE DE REDUCTION FMA (grossier reparti). Pas un bug.
 - [x] **Limite device (a) LEVEE** : `System::add_compiled_model` est device-clean sur Cuda. Les
@@ -395,10 +395,10 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       a +-2% (=> re-fit + rejouer), figure 2D nette REQUISE (=> Voie A poursuivie), tout en parallele.
       EN VOL :
         - #208 doc CONSERVATION_SUMMARY (FV vs FE) -- CI.
-        - #209 Voie A ETAPE 1 = transport fluide isotherme polaire (IsothermalFluxPolar + source geometrique
+        - #209 Voie A ETAPE 1 MERGEE : transport fluide isotherme polaire (IsothermalFluxPolar + source geometrique
           centrifuge S_geom verifiee EXACTE par derivation sympy independante ; ExB-polaire + cartesien
           bit-identiques via concept-gate ; equilibre rotatif ordre 1.99, MMS 2.00, masse 1.2e-15). Revue
-          adversariale 4 lentilles = 0 vrai probleme (6 "findings" = confirmations positives). -- CI, merge sur vert.
+          adversariale 4 lentilles = 0 vrai probleme (6 "findings" = confirmations positives). -- CI verte, MERGEE (675e587).
         - re-fit fenetre precoce l=4/l=5 sur ROMEO (job 647356) -- RESULTAT HONNETE : la fenetre precoce
           N'ATTEINT PAS +-2% et n'est PAS un fit-window pur. n=512 : l=3 +4.86% (la fenetre LONGUE etait
           meilleure : -0.38%), l=4 +5.09% (mieux que -8.4%), l=5 +18.10% (~ inchange vs +16%). Les modes
@@ -413,7 +413,7 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       Question ouverte restante : preuve structure-preservation FE formelle requise, ou tests empiriques O(dt^2)
       suffisent (le schema est FV, momentum non exact par construction) ?
 - [x] **M2 / M2b** : AMR sur le bord d'anneau (triple le taux a base egale) + Poisson multi-niveau.
-- [ ] Montee en resolution / convergence vers le taux analytique ; integration SAMRAI ulterieure.
+- [~] Montee en resolution / convergence vers le taux analytique ; integration SAMRAI ulterieure.
 
 ## 7. Nettoyage / consolidation (vague P1/P2, juin 2026)
 
@@ -486,7 +486,7 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       Limites restantes (cf. ordre de parite AmrSystem, section 3 + capstone section 15) : AMR mono-bloc /
       pas multi-espece ; **IMEX source LOCALE OK (Gap 2 #132)** mais pas de Schur GLOBAL sur AMR ; multi-box
       natif non cable cote facade. (HLLC/Roe/reconstruction primitive : **Gap 1 LEVE cote facade**.)
-- [~] **Etape 6 - validation MPI/GPU du chemin `production`** : **np=1 GPU VALIDE sur GH200.** Le crash
+- [x] **Etape 6 - validation MPI/GPU du chemin `production`** : **np=1 GPU VALIDE sur GH200.** Le crash
       device dans `solve_fields()` etait du a des lambdas `ADC_HD` etendues inline (noyaux elliptiques/mesh
       `copy_shifted`/`fill_boundary`/MG, premiere instanciation cross-TU -> stub kernel nvcc nul en
       Release sans `-g`) ; converties en FONCTEURS NOMMES (#97, meme recette que #64). Preuve GH200 (job
@@ -502,7 +502,7 @@ en Python sur le chemin performant. Trois backends : `prototype` (NumPy/hote), `
       leve si n_ranks()>1, et l'`assert(n_ranks()==1)` compile-out devient un garde-fou DUR (throw actif en
       Release) dans `PoissonFFTSolver`. fft direct = np=1 seulement ; `DistributedFFTSolver` existe (teste a
       part, `test_mpi_fft_distributed`) mais non route dans System (layout bandes vs box unique).
-- [ ] **Etape 7 - domaine disque FV / Polaire Phase 2b** (prochain livrable scientifique) :
+- [~] **Etape 7 - domaine disque FV / Polaire Phase 2b** (EN COURS ; Voie A etape 1 = transport fluide polaire MERGE #209 ; reste etape 2 = Schur polaire + demonstrateur 2D) :
       DECISION DU PROPRIETAIRE SCIENTIFIQUE -- le bord d'anneau du diocotron est une DISCONTINUITE DE
       DENSITE TRANSPORTEE, PAS une paroi physique. NE PAS refaire "paroi-transport" (masque / cut-cell fixe)
       sur le bord d'anneau : ce serait physiquement FAUX. Le cut-cell reste pertinent pour le CONDUCTEUR
@@ -537,7 +537,7 @@ haut ordre (WENO5/SSPRK3), AMR.**
       a ~-4% sur deux points propres (n=128/256) a O5 (n=192 = artefact de fenetre de fit, trace) ; l=5
       a la cible. Conclusion PRUDENTE : l'hypothese PR-0 d'un plateau structurel ~12% est AFFAIBLIE (sans
       etre refutee). (#5, #6)
-- [ ] **Confirmation haute resolution n=384 / n=512 (incl. O5) sur ROMEO/GH200** AVANT toute reecriture
+- [x] **Confirmation haute resolution n=384 / n=512 (incl. O5) sur ROMEO/GH200** AVANT toute reecriture
       de la roadmap papier (`PAPER_ROADMAP.md`). Sur accord.
 
 ## 10. Condensation de Schur (EPM implicite condense, theta-schema)
@@ -562,12 +562,12 @@ pas implicite stable a grand dt. Modele = physique ; SchurCondensation = algo. O
 - [x] **Fix revue (findings 1+2)** : precond ET matvec a CL HOMOGENES sous Dirichlet non nul (la matvec
       de r0 garde l'affine ; matvec en boucle + precond linearises en retranchant leur offset) ;
       `op_`!=`precond_` impose. Bit-identique a Dirichlet nul. (#134)
-- [~] **Device-clean GPU** : le stack Schur etait FAUX EN SILENCE sur Cuda (accesseurs Geometry/Box2D
+- [x] **Device-clean GPU** : le stack Schur etait FAUX EN SILENCE sur Cuda (accesseurs Geometry/Box2D
       non `ADC_HD` -> RHS/reductions faux, BiCGStab "0 iters rel=0 puis NaN"). Fix dans #135 (en vol,
       attend validation GH200). Host = correct, CI verte.
 - [ ] **PR6 - mesure diocotron-Schur** : DIFFERE jusqu'a la geometrie polaire (le Schur stabilise le
       TEMPS ; il n'adresse PAS le gap de taux de croissance, qui est GEOMETRIQUE).
-- [ ] **PR7/PR8 - portage GPU/MPI + AMR** : apres #135 ; bit-invariance au nombre de rangs.
+- [x] **PR7/PR8 - portage GPU/MPI + AMR** : apres #135 ; bit-invariance au nombre de rangs.
 
 ## 11. Pipeline ergonomique System (P1-P7)
 
@@ -579,7 +579,7 @@ pas implicite stable a grand dt. Modele = physique ; SchurCondensation = algo. O
 - [x] **P5 - CoupledSource DSL** : `adc.dsl.CoupledSource` -> bytecode postfixe interprete par un
       foncteur device nomme dans `apply_couplings` ; generique inter-especes ; 3 especes + conservation,
       MPI np=1/2/4 bit-identique. (#131)
-- [ ] **P6 - AMR multi-blocs** = capstone Gap 4, voir section 15.
+- [x] **P6 - AMR multi-blocs** = capstone Gap 4, voir section 15.
 - [ ] **P7 - implicit-total + params runtime DSL** : DIFFERE.
 
 ## 12. Geometrie polaire / annulaire (le vrai verrou du taux de croissance diocotron)
@@ -593,9 +593,9 @@ n'adresse PAS ce gap (il stabilise le temps). Donc le levier = mettre la geometr
       `ExBVelocityPolar` `v_r=-(1/(Br))d_th phi`, `v_th=(1/B)d_r phi`. (#116)
 - [x] **Phase 2a - Poisson polaire direct** sur anneau : FFT-en-theta + tridiagonal-en-r (robuste,
       evite le MG-en-polaire qui stagne). (#130)
-- [~] **Device** : flux/metrique polaire FAUX en silence sur Cuda (meme cause #135 : `r_cell`/`theta_cell`
+- [x] **Device** : flux/metrique polaire FAUX en silence sur Cuda (meme cause #135 : `r_cell`/`theta_cell`
       non `ADC_HD`). Fix #135 (en vol).
-- [~] **Phase 2b (#168, en vol)** : transport + Poisson polaire branches dans `System.step` sur un anneau
+- [x] **Phase 2b (#168, FAIT)** : transport + Poisson polaire branches dans `System.step` sur un anneau
       GLOBAL (PAS de couplage cartesien<->polaire en v1 ; cartesien defaut bit-identique). `derive_aux_polar`
       (aux en base locale e_r/e_theta), paroi radiale solide (wall_radial), `mass`/`step_cfl`/`step_adaptive`
       polaires, garde nr>=3. Tests C++ (conservation 3.4e-15) + Python `System(PolarMesh)` (<1e-11). RESTE
@@ -609,13 +609,13 @@ confirmes reels sur 12. Disposition :
 - [x] **F1 - precond CL non homogenes** (krylov) : operateur affine -> BiCGStab faux pour Dirichlet
       non nul. Corrige #134.
 - [x] **F2 - aliasing `op_`==`precond_`** : commentaire "toujours valable" faux. Corrige #134.
-- [ ] **F3 - step_cfl substeps>1 non bit-identique** : DECISION = garder la CFL substeps-aware
+- [x] **F3 - step_cfl substeps>1 non bit-identique** : DECISION = garder la CFL substeps-aware
       (correcte), corriger le wording + tests. En vol #138.
-- [ ] **F4 - `evolve=False` ignore en silence sur prototype/aot** : rejet explicite. En vol #137.
-- [ ] **F5 - `adc.Split` perdu en silence sur AmrSystem** : rejet explicite. En vol #137.
-- [ ] **F6 - descripteurs `CondensedSchur` jamais transmis** (code mort API) : rejet non-defaut. En vol #137.
-- [ ] **F7 - `max_wave_speed_mf` non collectif** (dt divergent par rang MPI) : `all_reduce_max`. Dans #135.
-- [ ] **F8 - `fab(0)` sans garde `local_size()`** dans le marshaling : DIFFERE au portage MPI (un demi-fix
+- [x] **F4 - `evolve=False` ignore en silence sur prototype/aot** : rejet explicite. FAIT #137.
+- [x] **F5 - `adc.Split` perdu en silence sur AmrSystem** : rejet explicite. FAIT #137.
+- [x] **F6 - descripteurs `CondensedSchur` jamais transmis** (code mort API) : rejet non-defaut. FAIT #137.
+- [x] **F7 - `max_wave_speed_mf` non collectif** (dt divergent par rang MPI) : `all_reduce_max`. Dans #135.
+- [x] **F8 - `fab(0)` sans garde `local_size()`** dans le marshaling : FAIT #204 (garde local_size posee ; pas de demi-fix car un demi-fix
       ferait un faux-silencieux au lieu d'un crash franc ; a faire avec gather/scatter).
 
 ## 14. Acceleration CI (garder tous les tests, aller plus vite)
@@ -655,17 +655,17 @@ Decoupe PR (Phase 1, write-sets) - ETAT PRECIS (scoping) :
 - [x] **(i)** extraire `AmrBlock` / `AmrHierarchyLayout` (bit-identique mono-bloc). FAIT #141.
 - [x] **(ii)** 2 blocs explicites, schemas differents (facade AmrRuntime + Poisson somme co-localisee +
       conservation par bloc + MPI np=1/2/4). FAIT #154. Tests test_amr_system_twoblock + mpi_twoblock_parity.
-- [ ] **(iii)** test de VALIDATION Poisson somme co-localise [trivial, validation seule ; le moteur le fait deja].
+- [x] **(iii)** test de VALIDATION Poisson somme co-localise [trivial, validation seule ; le moteur le fait deja].
 - [x] **(iv) #175** substeps/stride par bloc + step_cfl substeps-aware : `AmrRuntime::step` honore
       substeps/stride (hold-then-catch-up, mirror `AmrSystemCoupler::step`) ; `AmrSystem::step_cfl` =
       `cfl*h*min_b(substeps_b/(stride_b*w_b))`. Mono-bloc bit-identique (routage AmrCouplerMP). MERGE.
-- [ ] **(v)** DSL production multi-bloc : `add_native_block`/`add_compiled_model(AmrSystem&)` ne doit plus
+- [x] **(v)** DSL production multi-bloc : `add_native_block`/`add_compiled_model(AmrSystem&)` ne doit plus
       lever sur le 2e bloc (file d'attente + build a `ensure_built`). Write-set amr_dsl_block.hpp + amr_system.cpp.
 - [x] **(vi) #179** sources couplees AMR meme-cellule / opposees : `coupled_source_step` via le registre
       runtime + average_down covered cells (#169) ; conservation par-cellule+globale, disable-and-fail. MERGE.
-- [~] **(vii) EN COURS** IMEX local AMR runtime : la facade honore `time="imex"` multi-bloc (le moteur a deja
+- [x] **(vii) FAIT (#184/#185)** IMEX local AMR runtime : la facade honore `time="imex"` multi-bloc (le moteur a deja
       le callback AmrImplicitSourceStepper). Agent en cours.
-- [ ] **(viii)** Phase 2 : regrid union-tags (deverrouille multi-bloc + regrid_every>0) ; puis Schur / implicite
+- [x] **(viii)** Phase 2 : regrid union-tags (deverrouille multi-bloc + regrid_every>0) ; puis Schur / implicite
       global / repro papier.
 
 Tests d'acceptation : 2 blocs explicites schemas differents ; e- IMEX(substeps=10) + ions
@@ -677,5 +677,5 @@ Kokkos Serial ; 1 cas multi-bloc production sur GH200.
 
 - [x] **A3 [BUG conservation] FAIT #169** : `AmrSystemCoupler::coupled_source_step` et `AmrImplicitSourceStepper` appliquaient la source aux cellules grossieres COUVERTES sans average_down trailing. Fix : cascade `mf_average_down_mb` fin->grossier apres la boucle de niveaux (no-op strict mono-niveau, bit-identique). Tests `test_amr_source_covered_cells` + `test_amr_composite_source_conservation` (discriminants : echouent sans le fix). Revu adversarialement (MERGE-SAFE).
 - [x] **A2 [RISK conservation] FAIT #167** : helper `add_pair(block_a, block_b, role, expr)` emet +expr / -expr depuis le MEME sous-arbre (conservatif par construction) + mode `compile(verify_conservation=True)` opt-in. Test `test_dsl_coupled_source_conservation`. Revu adversarialement (MERGE-SAFE).
-- [~] **A4 [GAP test]** : couvert en pratique par les tests #168 (conservation masse polaire avec flux radial INTERIEUR non nul, profil module en theta -> v_r != 0). RESTE optionnel : un cas MMS polaire dedie avec v_r != 0 analytique (au-dela de la conservation globale).
+- [x] **A4 [GAP test]** : couvert en pratique par les tests #168 (conservation masse polaire avec flux radial INTERIEUR non nul, profil module en theta -> v_r != 0). RESTE optionnel : un cas MMS polaire dedie avec v_r != 0 analytique (au-dela de la conservation globale).
 - Tests a ajouter : `test_dsl_coupled_source_conservation`, `test_amr_composite_source_conservation`, `test_amr_source_covered_cells`, `test_polar_conservation_radial_flux`.
