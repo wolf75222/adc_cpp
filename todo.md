@@ -112,11 +112,22 @@ commentaires physics/. (Plus : A.5 commentaires `amr/` deja en WIP local non com
 
 **=== RESTE A FAIRE (synthese todo + CODEBASE_AUDIT, juin 2026) ===**
 
-AUDIT (etat FACTUEL, pas de pourcentage). Lots DONE : A.1 #172, A.2 #161, A.4 #159 ; B.1 NativeLoader
-#151, B.2 SystemFieldSolver #176, B (SystemStepper) #180 ; C.1 split #170, C.2 amr_coupler retire #164,
-C.3 layout #141, C.4 stride #140, C.5 decision multi-bloc = PHASE 1 hierarchie FIGEE (#154/#175/#179/#184/
-#185) ; D.1 EllipticOperator #163, D.4 Schur device-clean 7/7 ; E.1 stride tests, E.2 roles #178/#181,
-E.3 PolarMesh erreurs #168/#178, E.5 CI auto-decouverte verifiee (find-glob). Lots NON faits : voir RESTE.
+AUDIT COMPLET (juin 2026) -- TOUS les lots du plan section 10 de docs/CODEBASE_AUDIT.md sont faits ou sont des
+invariants maintenus. Aucun lot d'audit restant.
+- Lot A (doc + verite API) : A.1 dsl.py #172, A.2 ARCHITECTURE table #161, A.3 SourceImplicit/CondensedSchur #194,
+  A.4 mentions applicatives neutralisees #159, A.5 convention commentaires TOUS dossiers (#173 core, #189 physics,
+  #193 numerics, #196 mesh+coupling, #198 runtime, #200 amr).
+- Lot B (runtime System) : B.1 NativeLoader #151, B.2 SystemFieldSolver #176, B.2bis SystemStepper #180,
+  B.3 SystemBlockStore #197, B.4 System::Impl orchestrateur mince = resultat de B.1-B.3 (god-class P0 fermee).
+- Lot C (AMR) : C.1 amr_reflux_mf decoupe #170, C.2 amr_coupler retire #164, C.3 garde layout #141, C.4 stride #140,
+  C.5 decision = runtime multi-bloc, C.6 regrid union-tags #199 => CAPSTONE AMR COMPLET (Phase 1 figee + Phase 2 regrid).
+- Lot D (Schur/elliptique) : D.1 EllipticOperator #163, D.2 TensorKrylovSolver = solveur PUR (prend GeometricMG& op
+  en argument, ne possede pas la physique -- INVARIANT verifie), D.3 CondensedSchurSourceStepper = etage temps/couplage
+  via Split/set_source_stage, PAS model.source (INVARIANT verifie + doc #194), D.4 Schur device-clean 7/7.
+- Lot E (validation) : E.1 tests stride, E.2 roles #178/#181, E.3 PolarMesh erreurs #168/#178, E.4 noms backend #201,
+  E.5 CI auto-decouverte verifiee (find-glob).
+NB : D.2 et D.3 sont des INVARIANTS A MAINTENIR (ne pas laisser TensorKrylovSolver posseder la physique ni
+CondensedSchurSourceStepper devenir un model.source), pas des taches a faire.
 
 RESTE (audit) :
 - [x] **Lot B.3 SystemBlockStore -- FAIT #197** : `class SystemBlockStore` (include/adc/runtime/system_block_
@@ -180,9 +191,13 @@ RESTE (scientifique / hors audit) :
   #126). (chemin polaire reste explicite-only ; "Schur polaire" = feature ulterieure). A REVOIR par le proprietaire.
 - [x] **Normalisation diocotron CONSOLIDEE (adc_cases, meme branche)** : NORMALIZATION.md + diag/diag_polar_omega.py
   (gamma_norm = gamma_raw*2pi/rhobar ; l=4 exact n=128/192). Cas hoffart_euler_poisson_dsl de Codex inclus.
-- [ ] **Perf : Poisson MG V-cycle small-box sous Kokkos** (#165 : domine 96-99.9%, regresse en OpenMP car
-  parallel_for jusqu'aux grilles 2x2 ; le chemin serie garde n_cells>=4096, pas Kokkos). UNE optim par PR,
-  profil avant/apres. (hot-path, delicat)
+- [x] **Perf : Poisson MG small-box sous Kokkos -- FAIT (PR #206)** : `for_each_cell` execute en SERIE (boucle
+  hote) si box < 4096 cellules SOUS backend Kokkos a execution HOTE (Serial/OpenMP) ; chemin device Cuda/GH200
+  strictement INCHANGE (garde `if constexpr DefaultExecutionSpace==DefaultHostExecutionSpace`). Seuil 4096
+  (surchargeable ADC_FOREACH_SERIAL_THRESHOLD). PROFIL ROMEO (Kokkos OpenMP, phase poisson ms/pas) : n=128/16th
+  -91%, n=256/16th -80%, n=512/16th -55%, et 1-thread a/sous baseline partout (le MG EMPIRAIT avec les threads
+  avant). BIT-IDENTIQUE PROUVE : hash FNV du phi final identique seuil=0 vs 4096 sur n=64..512 a 1/8/16 threads
+  (for_each_cell sans dependance inter-iteration : GS rouge-noir colore ; reduce NON touche). 7 tests elliptiques OK.
 
 DETTE / DIFFERES (ne pas oublier) :
 - [x] segfault de teardown sur profils polaires INSTABLES (PRE-EXISTANT, hors #176) -> CORRIGE #192 :
