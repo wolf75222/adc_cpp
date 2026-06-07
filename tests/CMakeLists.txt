@@ -55,6 +55,15 @@ adc_add_test(test_full_tensor_operator)  # operateur tenseur PLEIN : -div(A grad
 # discret ~arrondi, jauge mode 0 (double Neumann). C++ SEUL, PAS branche dans System.step (Phase 2b).
 # Additif : aucun solveur elliptique cartesien (geometric_mg, PoissonFFTSolver) touche.
 adc_add_test(test_polar_poisson_mms)
+# Voie A etape 2a : operateur elliptique POLAIRE TENSORIEL iteratif (PolarTensorKrylovSolver) sur un
+# anneau (r, theta), r_min > 0. Supporte un coefficient TENSORIEL anisotrope A = [[a_rr,a_rt],[a_tr,a_tt]]
+# eventuellement NON symetrique (termes croises), en FV conservatif avec metrique polaire. Solveur
+# BiCGStab matrice-libre preconditionne JACOBI (diagonal) -- PAS de V-cycle MG (stagnation 1/r^2 signalee
+# par le scoping). MMS : convergence O(2) isotrope (A=I) ET tenseur non symetrique (a_rt != a_tr),
+# convergence BiCGStab (pas de stagnation), consistance isotrope vs PolarPoissonSolver direct. C++ SEUL,
+# PAS branche dans System.step (etape 2b = SchurReconstructKernel polaire + wiring). Additif : le
+# PolarPoissonSolver scalaire direct et le Schur cartesien restent INTOUCHES.
+adc_add_test(test_polar_tensor_elliptic_mms)
 # Schur PR3 : solveur de Krylov MATRICE-LIBRE (BiCGStab) preconditionne par le V-cycle MG sur la
 # partie SYMETRIQUE, pour l'operateur a tenseur PLEIN non symetrique. Resout les cas MMS ou le MG
 # SEUL echoue (#120 : stagnation c=0.1-0.4, divergence c=0.7), + consistance A=I vs GeometricMG.
