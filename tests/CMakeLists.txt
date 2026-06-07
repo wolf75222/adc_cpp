@@ -530,6 +530,23 @@ if(ADC_HAS_MPI)
                      ${MPIEXEC_POSTFLAGS})
   endforeach()
 
+  # --- PARITE MPI du REGRID D'UNION DES TAGS (T4 du design AMR_REGRID_UNION_TAGS_DESIGN.md, suivi
+  # #199). Le SEUL chemin ou la reduction collective des tags (R4, all_reduce_or_inplace) est active :
+  # grossier REPARTI + regrid actif. Le MEME scenario regrid (deux blocs ExB, union des tags densite par
+  # bloc + tag phi sur |grad phi| cable depuis la facade) est relance en np=1/2/4 et la hierarchie fine
+  # resultante doit etre IDENTIQUE : meme n_patches + densites/potentiel bit-identiques cross-rang
+  # (spread == 0), masse par bloc conservee a travers les regrids. La CI diffe la ligne AMRREGRID entre
+  # np=1/2/4 (layout fin d'union UNIQUE par rang). Compile le runtime AmrSystem comme les autres tests AMR.
+  add_executable(test_amr_regrid_mpi_parity test_amr_regrid_mpi_parity.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+  target_link_libraries(test_amr_regrid_mpi_parity PRIVATE adc::adc ${CMAKE_DL_LIBS})
+  foreach(np 1 2 4)
+    add_test(NAME test_amr_regrid_mpi_parity_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_amr_regrid_mpi_parity>
+                     ${MPIEXEC_POSTFLAGS})
+  endforeach()
+
   # --- runtime System + Poisson + solve_fields() DISTRIBUE : verrou de non-regression du bug HOTE
   # fab(0) (#98). System repartit UNE box en round-robin, donc a np>1 un seul rang la possede ; les
   # autres ont local_size()==0. Avant le fix, le post-traitement par cellule de solve_fields()

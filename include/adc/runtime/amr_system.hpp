@@ -228,6 +228,19 @@ class AmrSystem {
   /// Raffine les cellules ou la densite (composante 0) depasse @p threshold.
   void set_refinement(double threshold);
 
+  /// Ajoute au critere de regrid le tag de PHI sur |grad phi| (D4 du design
+  /// docs/AMR_REGRID_UNION_TAGS_DESIGN.md) : raffine aussi les cellules ou la norme du gradient du
+  /// potentiel electrostatique |grad phi| (composantes 1,2 de l'aux partage) depasse @p grad_threshold.
+  /// MULTI-BLOCS uniquement (le moteur runtime AmrRuntime porte le regrid d'union des tags ; le chemin
+  /// mono-bloc AmrCouplerMP n'a pas de predicat phi separe). Le tag de phi s'AJOUTE a l'union des tags
+  /// de densite par bloc (set_refinement) : la grille raffine la ou N'IMPORTE QUEL bloc depasse son
+  /// seuil de densite OU |grad phi| depasse @p grad_threshold. Critere PHYSIQUE du diocotron : le bord
+  /// d'anneau suit le gradient du potentiel, pas la densite seule.
+  /// @param grad_threshold seuil de |grad phi|. <= 0 (DEFAUT) -> le tag phi est DESACTIVE (phi ne
+  ///        contribue pas a l'union ; bit-identique a avant cet appel). Sans regrid_every > 0, sans
+  ///        effet (le regrid n'est jamais appele). A appeler AVANT le premier step.
+  void set_phi_refinement(double grad_threshold);
+
   /// Configure le Poisson grossier (cf. System::set_poisson). Sur AMR le solveur elliptique est
   /// TOUJOURS GeometricMG et le second membre TOUJOURS f = somme des briques elliptiques du bloc.
   /// @param rhs    "charge_density" | "composite" (meme second membre compose que System)

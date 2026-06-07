@@ -272,6 +272,10 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("recon") = "conservative", py::arg("time") = "explicit", py::arg("gamma") = 1.4,
            py::arg("substeps") = 1)
       .def("set_refinement", &AmrSystem::set_refinement, py::arg("threshold"))
+      // Tag de PHI sur |grad phi| (D4) ajoute a l'union des tags du regrid : raffine aussi la ou la
+      // norme du gradient du potentiel depasse grad_threshold (bord d'anneau du diocotron). MULTI-BLOCS
+      // + regrid_every > 0. <= 0 (defaut) -> phi DESACTIVE (bit-identique). cf. AmrSystem::set_phi_refinement.
+      .def("set_phi_refinement", &AmrSystem::set_phi_refinement, py::arg("grad_threshold"))
       .def("set_poisson", &AmrSystem::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0)

@@ -116,6 +116,10 @@ struct AmrSystem::Impl {
   std::vector<CoupledSourceSpec> coupled_sources;
 
   double refine_threshold = 1e30;  // 1e30 => aucun raffinement par defaut
+  // Seuil de tag de PHI sur |grad phi| (D4) : <= 0 => phi ne contribue PAS a l'union des tags (defaut,
+  // bit-identique). > 0 => en multi-blocs + regrid_every > 0, build_multi pose le predicat phi du moteur
+  // (set_phi_tag_predicate) : raffine la ou |grad phi| (composantes 1,2 de l'aux partage) depasse ce seuil.
+  double phi_grad_threshold = 0.0;
 
   std::string p_rhs = "charge_density", p_solver = "geometric_mg", p_bc = "auto",
               p_wall = "none";
@@ -261,6 +265,18 @@ struct AmrSystem::Impl {
     if (cfg.regrid_every > 0) {
       const auto crit = [thr](const ConstArray4& a, int i, int j) { return a(i, j, 0) > thr; };
       for (std::size_t b = 0; b < blocks.size(); ++b) runtime->set_block_tag_predicate(b, crit);
+      // PREDICAT DE PHI (D4) : si l'utilisateur a pose un seuil de |grad phi| (set_phi_refinement > 0),
+      // on cable le predicat phi du moteur (lu sur l'aux partage, composantes 1,2 = grad phi en x,y).
+      // Il s'AJOUTE a l'union des predicats de densite par bloc : la grille raffine la ou n'importe quel
+      // bloc depasse refine_threshold OU |grad phi| depasse gthr. Critere physique du diocotron (bord
+      // d'anneau = gradient du potentiel). <= 0 (defaut) -> non cable -> phi ne contribue pas (bit-identique).
+      if (phi_grad_threshold > 0.0) {
+        const Real gthr = static_cast<Real>(phi_grad_threshold);
+        runtime->set_phi_tag_predicate([gthr](const ConstArray4& a, int i, int j) {
+          const Real gx = a(i, j, 1), gy = a(i, j, 2);
+          return std::sqrt(gx * gx + gy * gy) > gthr;
+        });
+      }
     }
     // Rejoue les sources couplees figees a add_coupled_source sur le moteur runtime juste construit :
     // chacune resout (bloc, role) -> (indice, composante) contre les cons_vars des blocs et stocke sa
@@ -510,6 +526,20 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
 }
 
 void AmrSystem::set_refinement(double threshold) { p_->refine_threshold = threshold; }
+
+void AmrSystem::set_phi_refinement(double grad_threshold) {
+  if (p_->built)
+    throw std::runtime_error("AmrSystem::set_phi_refinement : le systeme est deja construit (poser le "
+                             "critere de raffinement avant tout step/mass/density)");
+  // <= 0 (defaut) -> phi DESACTIVE (build_multi ne pose pas le predicat phi) ; bit-identique. > 0 ->
+  // tag de phi sur |grad phi| ajoute a l'union des tags (D4), pose par build_multi. On N'IMPOSE PAS de
+  // garde sur le nombre de blocs ici : le routage mono/multi n'est arrete qu'a ensure_built (>= 2
+  // add_block), et l'ordre des appels de configuration est libre (set_phi_refinement peut preceder le
+  // 2e add_block). En MONO-BLOC le seuil reste sans effet : le chemin AmrCouplerMP regrid sur la seule
+  // densite (pas de predicat phi separe) et n'appelle pas build_multi -> phi_grad_threshold est ignore,
+  // sans illusion (le predicat phi n'a de sens que sur le moteur runtime multi-blocs).
+  p_->phi_grad_threshold = grad_threshold;
+}
 
 void AmrSystem::set_poisson(const std::string& rhs, const std::string& solver,
                             const std::string& bc, const std::string& wall,

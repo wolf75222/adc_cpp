@@ -1140,10 +1140,18 @@ class AmrSystem:
     MONO-BLOC (1 add_block) : chemin AmrCouplerMP historique (regrid dynamique, reflux). MULTI-BLOCS
     (>= 2 add_block) : N blocs co-localises sur UNE hierarchie AMR PARTAGEE (moteur AmrRuntime),
     Poisson de SYSTEME a second membre SOMME co-localise (Sum_b q_b n_b), conservation PAR BLOC. Les
-    blocs peuvent avoir des SCHEMAS SPATIAUX DIFFERENTS. PR1 du capstone : blocs EXPLICITES,
-    hierarchie FIGEE (multi-blocs + regrid_every > 0 est REFUSE ; le regrid d'union des tags, le
-    multirate stride/evolve, les sources couplees et le DSL production multi-bloc sont des PR
-    ulterieures). En multi-blocs le NOM du bloc indexe set_density(name) / mass(name) / density(name).
+    blocs peuvent avoir des SCHEMAS SPATIAUX DIFFERENTS, un TRAITEMENT TEMPOREL par bloc (explicit /
+    imex), du MULTIRATE (substeps / stride), des SOURCES COUPLEES inter-especes et le DSL production
+    multi-bloc. En multi-blocs le NOM du bloc indexe set_density(name) / mass(name) / density(name).
+
+    REGRID D'UNION DES TAGS (multi-blocs + regrid_every > 0) : la hierarchie partagee est re-grillee a
+    partir de l'UNION des tags de tous les blocs. Deux criteres se composent (OU cellule a cellule) :
+      - DENSITE PAR BLOC (set_refinement(threshold)) : raffine la ou la densite (composante 0) d'un bloc
+        depasse threshold ;
+      - |GRAD PHI| (set_phi_refinement(grad_threshold)) : raffine la ou la norme du gradient du potentiel
+        electrostatique depasse grad_threshold (bord d'anneau du diocotron). Desactive par defaut
+        (grad_threshold <= 0). MULTI-BLOCS uniquement.
+    regrid_every == 0 -> hierarchie FIGEE (regrid jamais appele, bit-identique).
     """
 
     def __init__(self, config=None, **cfg_kw):
