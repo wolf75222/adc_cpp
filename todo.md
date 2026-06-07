@@ -162,12 +162,16 @@ RESTE (audit) :
   role_strict.cpp (ctest #94) : role valide/absent/inconnu. Build 214/214, ctest 100/100. (verifie 06/06)
 
 RESTE (scientifique / hors audit) :
-- [~] **Run Hoffart haute resolution (ROMEO/GH200) -- n=384 FAIT, n=512 EN COURS** : build -fPIC resolu
-  (Kokkos PIC /scratch_p/rmdraux/kokkos-install-pic) ; module _adc aarch64+CUDA bati (adc_gpu_hires/adc_cpp/
-  build-gpu-py). n=384 O5 WENO5/SSPRK3 sur 1 GH200 (job 644126) : l=3 gamma=0.7545 vs 0.7721 (-2.3%), l=4
-  0.8673 vs 0.9118 (-4.9%), l=5 0.7644 vs 0.6872 (+11.2%). CONFIRME la normalisation 2pi/rhobar a haute
-  resolution (le scatter local +-26% a n=128 se resserre a <=+-11% a n=384). n=512 soumis (job 647010,
-  short/1 GPU) pour confirmer la convergence de l=5. Backend = Kokkos Cuda np=1 GH200.
+- [x] **Run Hoffart haute resolution (ROMEO/GH200) -- n=384 ET n=512 FAITS** : build -fPIC resolu (Kokkos PIC
+  /scratch_p/rmdraux/kokkos-install-pic) ; module _adc aarch64+CUDA bati (adc_gpu_hires/adc_cpp/build-gpu-py).
+  O5 WENO5/SSPRK3 sur 1 GH200 (Kokkos Cuda np=1) :
+    n=384 (job 644126) : l=3 -2.3%, l=4 -4.9%, l=5 +11.2%
+    n=512 (job 647010) : l=3 -0.38%, l=4 -8.4%, l=5 +16.0%
+  l=3 CONVERGE proprement vers le papier (-0.38% a n=512) = confirmation forte de la normalisation 2pi/rhobar.
+  l=4/l=5 NON monotones (l=4 -4.9->-8.4, l=5 +11->+16) : sensibilite a la FENETRE DE FIT pour les modes rapides
+  (la fenetre auto de sweep.py est longue [~5,~38] et mord dans la saturation pour les modes a forte croissance).
+  SUIVI (mesure, pas physique) : re-fitter l=4/l=5 sur une fenetre exponentielle PRECOCE dediee (probe_fit.py
+  existe deja sur ROMEO). Le coeur scientifique (normalisation, l=3 exact) est ETABLI.
 - [x] **Schur PR6 -- MESURE (adc_cases, branche feat/normalization-and-schur-measurement)** : effet TEMPOREL
   du Schur sur un fluide magnetise CARTESIEN raide mesure. cas schur_magnetized_cartesian/ : dt stable explicite
   = 3.16e-4 (dt*omega_c=0.32, borne cyclotronique) vs CondensedSchur theta=0.5 = 1.78e-1 (gain 562x), theta=1.0
