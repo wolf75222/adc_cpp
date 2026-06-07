@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/core/types.hpp>
+#include <adc/numerics/elliptic/cut_fraction.hpp>
 #include <adc/numerics/elliptic/poisson_operator.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -138,29 +139,25 @@ class GeometricMG {
           Array4 c = L.coef.fab(li).array();
           const ConstArray4 m = L.mask.fab(li).const_array();
           const Box2D b = L.coef.box(li);
-          auto cut = [](Real lc, Real ln, Real h) -> Real {
-            if (ln < Real(0)) return h;              // voisin interieur : pas de coupe
-            Real th = lc / (lc - ln);                // ls change de signe : fraction de coupe
-            if (th < Real(1e-3)) th = Real(1e-3);    // garde-fou anti division par 0 (theta->0)
-            if (th > Real(1)) th = Real(1);
-            return th * h;
-          };
+          // Primitive PARTAGEE de croisement de face (cut_fraction.hpp) : MEME geometrie d'ouverture
+          // que le futur transport EB. detail::cut_fraction reprend a l'identique l'ancienne lambda
+          // 'cut' (cut_distance, memes branches et meme clamp 1e-3) et detail::shortley_weller la
+          // formule des 5 poids -> coef BIT-IDENTIQUE a l'assemblage inline d'avant le refactor.
+          const auto& ls = levelset_;
           for (int j = b.lo[1]; j <= b.hi[1]; ++j)
             for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
               if (m(i, j) == Real(0)) {  // conducteur : coef inutilise (cellule sautee)
                 for (int k = 0; k < 5; ++k) c(i, j, k) = 0;
                 continue;
               }
-              const Real xc = g.x_cell(i), yc = g.y_cell(j), lc = levelset_(xc, yc);
-              const Real axm = cut(lc, levelset_(xc - dx, yc), dx);
-              const Real axp = cut(lc, levelset_(xc + dx, yc), dx);
-              const Real aym = cut(lc, levelset_(xc, yc - dy), dy);
-              const Real ayp = cut(lc, levelset_(xc, yc + dy), dy);
-              c(i, j, 0) = Real(2) / (axm * (axm + axp));  // w_xm sur p(i-1)
-              c(i, j, 1) = Real(2) / (axp * (axm + axp));  // w_xp sur p(i+1)
-              c(i, j, 2) = Real(2) / (aym * (aym + ayp));  // w_ym sur p(i,j-1)
-              c(i, j, 3) = Real(2) / (ayp * (aym + ayp));  // w_yp sur p(i,j+1)
-              c(i, j, 4) = Real(2) / (axm * axp) + Real(2) / (aym * ayp);  // w_diag
+              const detail::CutFraction cf =
+                  detail::cut_fraction(ls, g.x_cell(i), g.y_cell(j), dx, dy);
+              const detail::ShortleyWellerWeights w = detail::shortley_weller(cf);
+              c(i, j, 0) = w.w_xm;    // w_xm sur p(i-1)
+              c(i, j, 1) = w.w_xp;    // w_xp sur p(i+1)
+              c(i, j, 2) = w.w_ym;    // w_ym sur p(i,j-1)
+              c(i, j, 3) = w.w_yp;    // w_yp sur p(i,j+1)
+              c(i, j, 4) = w.w_diag;  // w_diag
             }
         }
       }
