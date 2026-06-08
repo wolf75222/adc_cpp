@@ -314,7 +314,7 @@ Le coeur est `SystemStepper::step_cfl` (et `step`), dans
 [`include/adc/runtime/system_stepper.hpp`](../include/adc/runtime/system_stepper.hpp). L ordre est un
 invariant explicite (cf. le contrat en tete du fichier) : `solve_fields` une fois en tete, puis pour
 chaque bloc DU (cadence stride honoree) un `advance_transport` suivi d un `run_source_stage`
-entrelaces, puis `apply_couplings`, puis `t += dt` et `++macro_step_`.
+entrelaces, puis `apply_couplings`, puis `avance le temps` et `avance le compteur de macro-pas`.
 
 Le `solve_fields` delegue a `SystemFieldSolver`
 ([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)) : il
@@ -322,7 +322,7 @@ resout le Poisson de systeme dont le second membre est la somme des briques elli
 ($f = \sum_b q_b\, n_b$), puis derive l aux. L aux est le canal partage qui porte $\phi$ et $\nabla\phi$
 (composantes 1 et 2), plus eventuellement $B_z$ et $T_e$. Le transport d un bloc, lui, lit cet aux :
 `advance_transport` aiguille vers la fermeture `s.advance` (chemin plein) ou ses variantes disque, et
-cette fermeture fait `fill_ghosts` puis `assemble_rhs` (reconstruction limitee + flux numerique ->
+cette fermeture fait `fill_ghosts` puis `assemble_rhs` (reconstruction limitee puis flux numerique ->
 $R = -\mathrm{div} F + S$) a chaque etage SSPRK (cf.
 [`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/ssprk.hpp), `SSPRK2Step` /
 `SSPRK3`). Le pas $dt$ retourne par `step_cfl` est le min sur les blocs evolutifs de
@@ -346,22 +346,22 @@ sequenceDiagram
     Note over Utilisateur,TimeIntegrator: Un macro-pas (System.step_cfl)
     Utilisateur->>System: step_cfl(cfl)
     System->>EllipticSolver: solve_fields()
-    EllipticSolver->>EllipticSolver: f = somme_b q_b n_b  puis  resoudre Poisson -> phi
-    EllipticSolver-->>System: aux = (phi, grad phi [, B_z, T_e])
-    System->>System: dt = min_b cfl*h*substeps_b/(stride_b*w_b)
+    EllipticSolver->>EllipticSolver: assemble le second membre (somme des q_b n_b) puis resout Poisson pour phi
+    EllipticSolver-->>System: renvoie aux (phi, grad phi, et B_z ou T_e si declares)
+    System->>System: calcule le pas dt par la condition CFL multi-blocs
 
     loop pour chaque bloc DU (stride honore), eff_dt = stride*dt
         System->>TimeIntegrator: advance_transport(s, eff_dt)
         loop etages SSPRK (substeps sous-pas)
             TimeIntegrator->>SpatialOperator: fill_ghosts(U) puis assemble_rhs(U, aux)
-            SpatialOperator->>SpatialOperator: reconstruction limitee + flux numerique
-            SpatialOperator-->>TimeIntegrator: R = -div F + S
+            SpatialOperator->>SpatialOperator: reconstruction limitee puis flux numerique
+            SpatialOperator-->>TimeIntegrator: assemble le residu R (moins divergence du flux, plus source)
             TimeIntegrator->>TimeIntegrator: combinaison RK (mise a jour de U)
         end
         System->>System: run_source_stage(s, eff_dt) (Schur condense, opt-in)
     end
     System->>System: apply_couplings(dt) (sources inter-especes, splitting)
-    System->>System: t += dt ; ++macro_step_
+    System->>System: avance le temps et le compteur de macro-pas
     System-->>Utilisateur: dt utilise
 ```
 
@@ -389,7 +389,7 @@ vers les niveaux fins (`coupler_inject_aux_mb`). Le transport de chaque bloc DU 
 (transport explicite : `advance_amr` = Berger-Oliger + reflux conservatif + `average_down`) ou
 `imex_advance` (transport source-free + source raide implicite `backward_euler_source`), sous-cycle
 `substeps` fois sur le pas effectif $\mathrm{stride} \cdot dt$. Enfin `coupled_source_step` applique les
-sources inter-especes par splitting, avant `++macro_step_`.
+sources inter-especes par splitting, avant `avance le compteur de macro-pas`.
 
 ```mermaid
 sequenceDiagram
@@ -404,7 +404,7 @@ sequenceDiagram
     Note over Utilisateur,AmrSystem: Construction (une fois)
     Utilisateur->>AmrSystem: set_poisson(rhs, geometric_mg, bc)
     Utilisateur->>AmrSystem: add_block(name, model, limiter, ...)
-    Utilisateur->>AmrSystem: set_refinement(threshold) [+ set_phi_refinement]
+    Utilisateur->>AmrSystem: set_refinement(threshold) et set_phi_refinement
     Utilisateur->>AmrSystem: set_density(name, rho)
 
     Note over Utilisateur,TimeIntegrator: Un macro-pas (AmrSystem.step)
@@ -412,27 +412,27 @@ sequenceDiagram
     AmrSystem->>AmrRuntime: step(dt)
 
     opt regrid_every > 0 et macro_step % regrid_every == 0
-        AmrRuntime->>AmrRuntime: regrid() (union des tags densite + |grad phi|, nouveau layout fin)
+        AmrRuntime->>AmrRuntime: regrid() (union des tags densite et gradient de phi, nouveau layout fin)
     end
 
     AmrRuntime->>EllipticSolver: solve_fields()
-    EllipticSolver->>EllipticSolver: average_down par bloc (fin -> grossier)
-    EllipticSolver->>EllipticSolver: f = somme_b elliptic_rhs_b(U_b)  puis  mg.solve() -> phi grossier
-    EllipticSolver->>EllipticSolver: aux grossier = (phi, grad phi) puis injection coarse -> fine
+    EllipticSolver->>EllipticSolver: average_down par bloc (du fin vers le grossier)
+    EllipticSolver->>EllipticSolver: assemble le second membre par bloc puis resout le Poisson grossier (phi)
+    EllipticSolver->>EllipticSolver: aux grossier (phi, grad phi) puis injection du grossier vers le fin
     EllipticSolver-->>AmrRuntime: aux a jour par niveau
 
     loop pour chaque bloc DU (stride honore), bdt = stride*dt
         loop substeps sous-pas (h = bdt/substeps)
             AmrRuntime->>TimeIntegrator: advance (explicite) ou imex_advance
             TimeIntegrator->>SpatialOperator: advance_amr (Berger-Oliger)
-            SpatialOperator->>SpatialOperator: transport par niveau + reflux conservatif + average_down
+            SpatialOperator->>SpatialOperator: transport par niveau, reflux conservatif, average_down
             SpatialOperator-->>TimeIntegrator: U mis a jour (conservatif par bloc)
         end
     end
-    AmrRuntime->>AmrRuntime: coupled_source_step(dt) (sources inter-especes, splitting + cascade)
-    AmrRuntime->>AmrRuntime: ++macro_step_
+    AmrRuntime->>AmrRuntime: coupled_source_step(dt) : sources inter-especes (splitting, cascade)
+    AmrRuntime->>AmrRuntime: avance le compteur de macro-pas
     AmrRuntime-->>AmrSystem: retour
-    AmrSystem->>AmrSystem: t += dt
+    AmrSystem->>AmrSystem: avance le temps
 ```
 
 Le parallele entre les deux pipelines est volontaire : `AmrRuntime::solve_fields` reproduit
