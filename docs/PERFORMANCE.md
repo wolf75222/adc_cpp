@@ -1,5 +1,7 @@
 # Performance (run-time)
 
+> **STATUT : historique (non-normatif).** Mesures datees (M1, ancien jalon). Les chiffres courants vivent dans PROFILE_RESULTS.md ; ne pas s'y fier comme etat de perf actuel.
+
 > **MESURES HISTORIQUES (pilotes applicatifs, anciennes). NE PAS lire comme la perf actuelle.**
 > Une campagne Kokkos/MPI/GPU a jour est en cours (voir docs/PROFILE_RESULTS.md quand disponible).
 

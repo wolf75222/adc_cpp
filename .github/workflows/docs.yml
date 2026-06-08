@@ -45,6 +45,13 @@ jobs:
           pip install numpy
           pip install -r docs/sphinx/requirements.txt
 
+      # Garde-fous documentaires (rapide, pur Python, AVANT le build) : em-dash interdits,
+      # ASCII strict des pages Sphinx, termes/anciennes API faux dans les docs normatives,
+      # images referencees existantes. Attrape ce qu'un sphinx-build -W laisse passer (em-dash,
+      # claim faux en prose). Echoue tot, message clair.
+      - name: Doc lint
+        run: python docs/check_docs.py
+
       # Compile le module `adc` pour qu'autodoc (reference/api_python.md) resolve les
       # signatures. Non best-effort : `sphinx-build -W` echouera sur les warnings autodoc
       # si le module n'est pas importable, donc le build doit reussir ici. La cible pybind

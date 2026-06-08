@@ -25,11 +25,15 @@ et [docs/COUPLING_SURFACE.md](COUPLING_SURFACE.md) (classification complete du c
 | `System` (Python) | **API** | facade composition Python, point d'entree principal |
 | `AmrSystem` (Python) | **API** | facade AMR Python (mono- ET multi-bloc, explicite ET IMEX) |
 | `adc.dsl.Model` / `adc.Model` | **API** | DSL Python + assemblage de briques natives |
-| `adc.FiniteVolume` / `adc.Explicit` / `adc.IMEX` | **API** | objets de configuration passes aux facades |
+| `adc.CartesianMesh` / `adc.PolarMesh` | **API** | objet MAILLAGE passe a `adc.System(mesh=...)` : choix de geometrie (carre / anneau) |
+| `adc.FiniteVolume` / `adc.Explicit` / `adc.IMEX` | **API** | objets de configuration de schema / temps passes aux facades |
+| `adc.Split` / `adc.Strang` / `adc.CondensedSchur` | **API** | politiques de splitting (Lie / Strang) et etage source condense par Schur |
 | `Coupler<M,E>` | interne | coupleur mono-modele mono-niveau, non expose en Python |
 | `SystemCoupler` / `SystemDriver` | interne | ordonnanceur multi-especes mono-niveau |
 | `AmrCouplerMP` | interne | driver AMR mono-modele multi-box |
 | `AmrSystemCoupler` / `AmrSystemDriver` | interne | driver AMR multi-especes |
+| `CondensedSchurSourceStepper` | interne | etage source condense par Schur (Lorentz electrostatique), opt-in `System::set_source_stage` ; pendant polaire `PolarCondensedSchurSourceStepper` |
+| `numerics::TensorKrylovSolver` (`PolarTensorKrylovSolver`) | interne | BiCGStab matrice-libre pour l'operateur condense non auto-adjoint (preconditionne MG) |
 | `spectral_coupler.hpp::SpectralCoupler` | **legacy** | orchestre `DistributedFFTSolver`, non route dans `System` MPI np>1 |
 | `amr_multilevel.hpp` / `amr_reflux.hpp` | **legacy** | reference Fab2D mono-box, verite-terrain de `advance_amr` |
 
@@ -115,7 +119,7 @@ briques generiques, les noms de scenario (diocotron, Euler-Poisson...) vivant co
 
 | Axe | Briques (exemples) | Role |
 |---|---|---|
-| etat / transport | `ExBVelocity` (1 var), `Euler` / `CompressibleFlux` (4 var), `IsothermalFlux` (3 var) | `flux(U, aux, dir)` + `max_wave_speed` |
+| etat / transport | `ExBVelocity` (1 var), `Euler` / `CompressibleFlux` (4 var), `IsothermalFlux` (3 var), pendants polaires `ExBVelocityPolar` / `IsothermalFluxPolar` | `flux(U, aux, dir)` + `max_wave_speed` |
 | source | `NoSource`, `PotentialForce(charge)`, `GravityForce` | `source(U, aux)` (force du champ) |
 | elliptique | `ChargeDensity`, `BackgroundDensity`, `GravityCoupling(sign)` | `elliptic_rhs(U)` (second membre de Poisson) |
 
@@ -143,12 +147,35 @@ multi-champ), il faut une COUCHE AU-DESSUS, un concept d'operateur plus general,
 A eviter : un modele qui connait le stockage (`void compute_flux(MultiFab& U, MultiFab& F)`)
 melange physique, parallelisme et organisation memoire.
 
+**La GEOMETRIE est un axe de CONFIG du maillage, pas un axe du modele.** Le CHOIX de la
+geometrie vit dans `SystemConfig` (`runtime/system.hpp`), PAS dans le schema ni le modele : le
+flux numerique, la reconstruction et les variables sont identiques. Trois geometries coexistent
+cote `System` :
+- **cartesien** (defaut, `geometry == "cartesian"`) : domaine carre `[0,L]^2`, chemin historique
+  bit-identique (`adc.CartesianMesh`).
+- **polaire** (`geometry == "polar"`, `adc.PolarMesh`) : anneau global `r in [r_min, r_max] x
+  theta in [0, 2pi)` (`PolarGeometry`, `mesh/geometry.hpp`). BRANCHE dans `System::step`
+  (`python/system.cpp` chemin `polar_`) : transport polaire (`assemble_rhs_polar`,
+  `spatial_operator_polar.hpp`), Poisson polaire direct (`PolarPoissonSolver` : FFT-en-theta +
+  tridiagonale-en-r, `numerics/elliptic/polar_poisson_solver.hpp`), aux en base locale
+  `(e_r, e_theta)`. L'anneau exclut `r = 0` (`r_min > 0`, pas de singularite de coordonnee).
+- **disque** (masque de domaine, `System::set_disc_domain(cx, cy, R, mode)`) : sous-domaine de
+  transport DISQUE sur grille cartesienne, masque 0/1 cellule-centre (level set
+  `hypot(x-cx, y-cy) - R < 0`, meme convention que la paroi conductrice du Poisson). Trois modes :
+  `"none"` (defaut, masque inerte, transport plein bit-identique), `"staircase"` (transport masque
+  conservatif `assemble_rhs_masked`, frontiere crenelee), `"cutcell"` (embedded-boundary conservatif
+  `assemble_rhs_eb`, apertures `alpha_f` + fraction de volume `kappa`, ordre 2 interieur, MMS valide).
+  Le mode disque est honore sous Lie ET Strang (`set_time_scheme`).
+
 ## 3. Couche 2 : numerique / discretisation
 
 `numerics/numerical_flux.hpp` (Rusanov / HLL / HLLC / Roe, politiques `ADC_HD`),
 `numerics/reconstruction.hpp` (MUSCL + WENO5-Z), `numerics/spatial_operator.hpp`
-(`compute_face_fluxes`, `assemble_rhs`), l'operateur elliptique (`numerics/elliptic/`),
-les CL logiques (`mesh/physical_bc.hpp`).
+(`compute_face_fluxes`, `assemble_rhs`, `assemble_rhs_masked`), l'operateur elliptique
+(`numerics/elliptic/`), les CL logiques (`mesh/physical_bc.hpp`). Les variantes de geometrie sont
+des operateurs spatiaux SEPARES, PUREMENT ADDITIFS (le cartesien reste intouche, bit-identique) :
+`numerics/spatial_operator_eb.hpp` (`assemble_rhs_eb`, cut-cell / embedded-boundary sur disque) et
+`numerics/spatial_operator_polar.hpp` (`assemble_rhs_polar`, divergence en metrique annulaire).
 
 C'est de la logique numerique **locale**, pas un conteneur. **Le flux numerique ne
 parcourt pas les cellules lui-meme** : il est appele par l'operateur discret, qui le passe
@@ -206,9 +233,11 @@ Etat : les trois sont deja des briques SEPAREES et testees isolement.
 - (2) `GhostExchange` = `mesh/fill_boundary.hpp` (echange intra-niveau + periodique), teste
   seul (`test_mpi_fillboundary` quand MPI est active).
 - (3) `AMRBoundaryInterpolation` = `mf_fill_fine_ghosts_*` (interp espace+temps coarse-fine).
-`fill_ghosts` n'est PAS un fourre-tout : c'est une COMPOSITION explicite de (1) puis (2)
-(`fill_boundary` ; `fill_physical_bc`). **Reste (cible)** : remonter (3), qui vit dans le pas
-AMR, en helper nomme de premier niveau (et le rendre distribue, cf. section 8).
+  Trois variantes co-existent : `_t` (mono-box, `amr_flux_helpers.hpp`), `_multi` (multi-box,
+  `amr_patch_range.hpp`) et `_mb` (multi-niveau) ; les variantes multi-box sont MPI-safe (iteration
+  sur les fabs locaux). `fill_ghosts` n'est PAS un fourre-tout : c'est une COMPOSITION explicite de
+(1) puis (2) (`fill_boundary` ; `fill_physical_bc`). **Reste (cible)** : remonter (3), qui vit dans
+le pas AMR, en helper nomme de premier niveau.
 
 **Modele memoire : reductions device + detection des oublis de fence.** Toute fonction qui
 fait un kernel device puis une boucle HOTE sur la meme memoire unifiee doit appeler
@@ -229,10 +258,13 @@ desambiguiser).
 ## 5. Couche 5 : temps et couplage
 
 `numerics/time/time_integrator.hpp`, `scheduler.hpp`, `ssprk.hpp`, `imex.hpp` (AP) et
-`splitting.hpp`. Une `TimePolicy` nomme, par bloc, le traitement temporel
-(explicite, implicite, IMEX, prescrit) et le nombre de sous-pas. Le scheduler lit cette
-politique et appelle l'operateur adapte ; il ne connait pas la formule du flux. Le temps
-compose des operateurs, il ne possede pas la physique.
+`splitting.hpp` (`lie_step` ordre 1 ; `strang_step` ordre 2 `S(dt/2) T(dt) S(dt/2)`). Une
+`TimePolicy` nomme, par bloc, le traitement temporel (explicite, implicite, IMEX, prescrit) et le
+nombre de sous-pas. Le scheduler lit cette politique et appelle l'operateur adapte ; il ne connait
+pas la formule du flux. Le temps compose des operateurs, il ne possede pas la physique. Cote
+`System`, la POLITIQUE de splitting du macro-pas (transport `H` + etage source `S`) est choisie par
+`set_time_scheme("lie" | "strang")` : Strang RE-RESOUT `solve_fields` entre les demi-avances pour
+que chaque `H(dt/2)` lise un `phi` coherent ; `"lie"` (defaut) reste bit-identique a l'historique.
 
 `coupling/` (`Coupler`, `SystemCoupler`, `AmrCouplerMP`,
 `SpectralCoupler`, `coupling_policy`) orchestre fluide <-> Poisson. Regle stricte
@@ -249,6 +281,22 @@ est le chemin multi-blocs mono-niveau : il assemble le RHS elliptique depuis plu
 etats, derive `aux`, avance les blocs explicites SSPRK, et delegue les blocs implicites
 ou IMEX a un callback utilisateur.
 
+**Etage source condense par Schur (Lorentz electrostatique RAIDE).** Pour le systeme
+Euler-Poisson couple potentiel / vitesse / Lorentz (Hoffart et al., arXiv:2510.11808) a `omega_c`
+eleve, `System::set_source_stage(name, "electrostatic_lorentz", theta, alpha)` active un ETAGE
+SOURCE condense (`coupling/condensed_schur_source_stepper.hpp`) qui remplace la source explicite /
+IMEX du bloc. La sequence (cf. `docs/SCHUR_CONDENSATION_DESIGN.md`) compose trois briques deja en
+place : `ElectrostaticLorentzCondensation` (`coupling/schur_condensation.hpp`) assemble l'operateur
+tensoriel plein `A = I + c rho B^{-1}` (eps_x/eps_y diag, a_xy/a_yx croises) et le second membre
+condense ; `TensorKrylovSolver` (`numerics/elliptic/krylov_solver.hpp`, BiCGStab matrice-libre
+preconditionne par le V-cycle `GeometricMG` sur la partie symetrique) inverse cet operateur NON
+auto-adjoint des que `B_z != 0` ; `LorentzEliminator` (`numerics/lorentz_eliminator.hpp`) fournit
+`B^{-1}` ferme pour reconstruire la vitesse. Pendant POLAIRE : `PolarCondensedSchurSourceStepper`
+(`coupling/polar_condensed_schur_source_stepper.hpp`) + `PolarTensorKrylovSolver`
+(`numerics/elliptic/polar_tensor_operator.hpp`, iteratif car la FFT-en-theta du `PolarPoissonSolver`
+direct est incompatible avec le tenseur plein). Sans `set_source_stage`, le chemin reste
+bit-identique.
+
 Les coupleurs AMR sont desormais des ordonnanceurs minces (point 6 de la revue). Trois
 responsabilites sont sorties en composants nommes : la hierarchie (stockage des niveaux +
 aux) dans `coupling/amr_level_storage.hpp` (`AmrLevelStack<Level>`), le regrid
@@ -264,16 +312,16 @@ l'arrondi inchangees).
 | Module | Couche | Role |
 |---|---|---|
 | `core/` | physique / systeme | `types` (`ADC_HD`, `Real`), `state` (`StateVec<N>`), `physical_model` (concept), `EquationBlock`, `CoupledSystem`, `variables` (`VariableRole`), `allocator` (Arena) |
-| `physics/` | physique | briques generiques (`bricks`, `composite`), `euler`, `hyperbolic` (iso), `source`, `elliptic`, `langmuir`, `advection_diffusion` |
-| `numerics/` | numerique | `numerical_flux` (Rusanov/HLL/HLLC/Roe), `reconstruction` (MUSCL + WENO5-Z), `spatial_operator` (`assemble_rhs`), `spatial_discretisation` |
-| `numerics/elliptic/` | numerique + temps | concept `EllipticSolver` ; `geometric_mg` (V-cycle, eps(x)) ; `poisson_fft`(+`_solver`) ; `poisson_operator` ; `elliptic_problem` |
-| `numerics/time/` | temps | `TimePolicy`, scheduler par sous-pas, SSPRK, `time_steppers`, `implicit_stepper`, IMEX, splitting, moteur AMR `advance_amr` |
-| `mesh/` (donnees) | maillage / donnees | `box2d`, `box_array`, `distribution_mapping`, `fab2d`/`multifab`, `geometry`, `refinement`, `box_hash` |
+| `physics/` | physique | briques generiques (`bricks`, `composite`), `euler`, `hyperbolic` (iso + pendants polaires `ExBVelocityPolar` / `IsothermalFluxPolar`), `source`, `elliptic`, `langmuir`, `advection_diffusion`, `two_fluid_isothermal` |
+| `numerics/` | numerique | `numerical_flux` (Rusanov/HLL/HLLC/Roe), `reconstruction` (MUSCL + WENO5-Z), `spatial_operator` (`assemble_rhs` + `assemble_rhs_masked`), `spatial_operator_eb` (cut-cell EB), `spatial_operator_polar`, `spatial_discretisation`, `lorentz_eliminator` (`B^{-1}` 2x2 ferme) |
+| `numerics/elliptic/` | numerique + temps | concept `EllipticSolver` ; `geometric_mg` (V-cycle, eps(x), kappa, eps anisotrope) ; `poisson_fft`(+`_solver`) ; `poisson_operator` ; `elliptic_problem` ; `elliptic_interface` (3 concepts operateur/solveur/post-trait) ; `krylov_solver` (`TensorKrylovSolver` BiCGStab) ; `polar_poisson_solver` (direct, FFT-en-theta + tridiag-en-r) ; `polar_tensor_operator` (iteratif tenseur plein) ; `cut_fraction` |
+| `numerics/time/` | temps | `TimePolicy`, scheduler par sous-pas, SSPRK, `time_steppers`, `implicit_stepper`, IMEX, splitting (`lie` / `strang`), moteur AMR `advance_amr` (`amr_reflux_mf`), pile de reference `amr_multilevel` / `amr_reflux` / `amr_level` / `amr_advance` / `amr_subcycling` / `amr_patch_range` / `amr_flux_helpers` |
+| `mesh/` (donnees) | maillage / donnees | `box2d`, `box_array`, `distribution_mapping`, `fab2d`/`multifab`, `geometry` (cartesien + `PolarGeometry`), `refinement`, `box_hash` |
 | `mesh/` (execution) | execution | `for_each` (seam `for_each_cell`), `fill_boundary` (GhostExchange), `physical_bc`, `mf_arith` (operateurs de grille qui bouclent le seam) |
 | `parallel/` | execution | `comm` (seam MPI), `load_balance` (Z-order + knapsack) |
 | `amr/` | maillage adaptatif | `amr_hierarchy` (conteneur de niveaux), `cluster` (Berger-Rigoutsos, arithmetique entiere), `regrid` (politique de remaillage), `tag_box` (grille de marqueurs) |
-| `coupling/` | temps / couplage | `elliptic_rhs`, `Coupler`, `SystemCoupler`, `coupling_policy`, `amr_coupler_mp`, `amr_system_coupler`, `spectral_coupler`, diagnostics AMR |
-| `runtime/` | runtime / bindings | facades `System` / `AmrSystem`, `model_factory` / `model_spec`, `block_builder`, JIT/AOT du DSL (`dynamic_model`, `compiled_block_abi`, `dsl_block`), `add_compiled_model` cote AmrSystem (`amr_dsl_block`) ; canal aux extensible (`ensure_aux_width`, `set_magnetic_field`, `set_electron_temperature_from`) |
+| `coupling/` | temps / couplage | `elliptic_rhs`, `Coupler`, `SystemCoupler`, `coupling_policy`, `amr_coupler_mp`, `amr_system_coupler`, `amr_regrid_coupler`, `amr_level_storage`, `spectral_coupler`, `aux_fill`, `coupled_source`(+`_program`), `schur_condensation` + `condensed_schur_source_stepper` (+ pendant `polar_*`), diagnostics AMR |
+| `runtime/` | runtime / bindings | facades `System` / `AmrSystem` (+ `amr_runtime` moteur multi-blocs), `model_factory` / `model_spec`, `block_builder` (+ `block_builder_polar`), `grid_context`, `system_field_solver` / `system_stepper` / `system_block_store` (extraits du god-class), `wall_predicate`, JIT/AOT du DSL (`dynamic_model`, `compiled_block_abi`, `dsl_block`), chemin natif (`native_loader`, `abi_key`, `add_native_block`), `add_compiled_model` cote AmrSystem (`amr_dsl_block`) ; canal aux extensible (`ensure_aux_width`, `set_magnetic_field`, `set_electron_temperature_from`) |
 
 ### 6bis. Modules detailles (par type, source de verite unique)
 
@@ -286,7 +334,10 @@ Relocalise depuis le README. Chaque entree nomme le header, le type ou la foncti
 | [`physics::bricks` / `composite`](include/adc/physics/bricks.hpp) | briques generiques (etat, transport, source, elliptique) composees en `CompositeModel` |
 | [`numerics::{RusanovFlux,HLLFlux,HLLCFlux,RoeFlux}`](include/adc/numerics/numerical_flux.hpp) | flux numeriques (politiques `ADC_HD`) |
 | [`numerics::reconstruction`](include/adc/numerics/reconstruction.hpp) | MUSCL ordre 2 (NoSlope / Minmod / VanLeer) + Weno5 |
-| [`numerics::assemble_rhs` / `compute_face_fluxes`](include/adc/numerics/spatial_operator.hpp) | `R = -div F + S`, flux de face pour le reflux (diffusion incluse) ; GPU via `for_each_cell` |
+| [`numerics::assemble_rhs` / `compute_face_fluxes` / `assemble_rhs_masked`](include/adc/numerics/spatial_operator.hpp) | `R = -div F + S`, flux de face pour le reflux (diffusion incluse) ; variante masquee 0/1 (disque escalier) ; GPU via `for_each_cell` |
+| [`numerics::assemble_rhs_eb`](include/adc/numerics/spatial_operator_eb.hpp) | transport cut-cell / embedded-boundary conservatif sur disque (apertures `alpha_f` + fraction de volume `kappa`, ordre 2) |
+| [`numerics::assemble_rhs_polar`](include/adc/numerics/spatial_operator_polar.hpp) | transport polaire additif `R = -div_polar F + S` (metrique annulaire, theta periodique) |
+| [`numerics::lorentz_eliminator`](include/adc/numerics/lorentz_eliminator.hpp) | `B = I - theta dt (v x B_z)`, `B^{-1}` 2x2 ferme (reconstruction Lorentz du Schur) |
 | [`numerics::time::{TimePolicy,SSPRK2,SSPRK3}`](include/adc/numerics/time/time_integrator.hpp) | par bloc : explicite / implicite / IMEX, sous-pas (`substeps`) ET cadence (`stride`) |
 | [`numerics::time::{ForwardEuler,SSPRK2Step,SSPRK3Step}`](include/adc/numerics/time/time_steppers.hpp) | integrateurs en temps OBJETS (`take_step(rhs, U, dt)`) ; l'utilisateur peut fournir le sien |
 | [`numerics::time::{ImplicitSourceStepper,backward_euler_source}`](include/adc/numerics/time/implicit_stepper.hpp) | defaut implicite (Newton local) ; IMEX partiel via `Model::is_implicit(c)` |
@@ -296,17 +347,29 @@ Relocalise depuis le README. Chaque entree nomme le header, le type ou la foncti
 | [`numerics::time::advance_amr`](include/adc/numerics/time/amr_reflux_mf.hpp) | moteur AMR unifie : multi-patch N-niveaux, reflux coverage-aware, distribue MPI |
 | [`numerics::elliptic::GeometricMG`](include/adc/numerics/elliptic/geometric_mg.hpp) | multigrille geometrique (V-cycle GS rb), AMR-compatible, on-device ; eps(x) variable cote coeur (`set_epsilon`) |
 | [`numerics::elliptic::PoissonFFTSolver` / `DistributedFFTSolver`](include/adc/numerics/elliptic) | Poisson FFT spectral (mono-rang) et distribue (MPI), correctif `n` non puissance de 2 |
+| [`numerics::elliptic::TensorKrylovSolver`](include/adc/numerics/elliptic/krylov_solver.hpp) | BiCGStab matrice-libre pour l'operateur condense non auto-adjoint, preconditionne par le V-cycle MG symetrique |
+| [`numerics::elliptic::PolarPoissonSolver`](include/adc/numerics/elliptic/polar_poisson_solver.hpp) | Poisson polaire DIRECT sur anneau : FFT-en-theta + tridiagonale (Thomas)-en-r, exact par mode azimutal |
+| [`numerics::elliptic::PolarTensorKrylovSolver`](include/adc/numerics/elliptic/polar_tensor_operator.hpp) | operateur elliptique polaire a tenseur plein (termes croises `a_rt`/`a_tr`), iteratif (Schur polaire) |
+| [`numerics::elliptic::elliptic_interface`](include/adc/numerics/elliptic/elliptic_interface.hpp) | concepts `EllipticOperator` / `EllipticSolver` / `FieldPostProcessor` (contrat REELLEMENT commun, fonctions libres exclues) |
 | [`coupling::{ChargeDensityRhs,CoupledSource}`](include/adc/coupling/elliptic_rhs.hpp) | RHS de systeme `f = sum_s q_s n_s` (N especes) ; source inter-especes `S(U_e,U_i,phi)` |
 | [`coupling::Coupler`](include/adc/coupling/coupler.hpp) | couplage hyperbolique-elliptique mono-modele : `Coupler<Model, Elliptic>` |
 | [`coupling::{SystemAssembler,SystemDriver}`](include/adc/coupling/system_coupler.hpp) | multi-especes mono-niveau : l'**assembleur** assemble (Poisson de systeme + aux), le **driver** avance (`step`, `step_cfl`, `step_adaptive`) ; `SystemCoupler` = alias du driver |
 | [`coupling::AmrSystemCoupler`](include/adc/coupling/amr_system_coupler.hpp) | le systeme multi-especes porte sur **AMR** (Poisson grossier + reflux par bloc) |
 | [`coupling::AmrCouplerMP`](include/adc/coupling) | couplage AMR multi-patch mono-modele (route par `advance_amr`) |
+| [`coupling::{ElectrostaticLorentzCondensation,CondensedSchurSourceStepper}`](include/adc/coupling/schur_condensation.hpp) | etage source condense par Schur (Lorentz electrostatique raide) ; assemble `A = I + c rho B^{-1}` + RHS condense, resout via `TensorKrylovSolver`, reconstruit par `LorentzEliminator` |
+| [`coupling::PolarCondensedSchurSourceStepper`](include/adc/coupling/polar_condensed_schur_source_stepper.hpp) | pendant POLAIRE de l'etage Schur (operateur tensoriel polaire iteratif) |
+| [`coupling::CoupledSourceKernel` / `CsProgram`](include/adc/coupling/coupled_source_program.hpp) | interprete de source couplee generique (bytecode postfixe device, `adc.dsl.CoupledSource`) |
+| [`coupling::aux_fill`](include/adc/coupling/aux_fill.hpp) | helpers du canal aux partages par les trois coupleurs (Coupler / SystemAssembler / AmrSystemCoupler) |
 | [`amr::{cluster,regrid,tag_box}`](include/adc/amr) | tagging + clustering Berger-Rigoutsos + regrid |
 | [`amr::AmrHierarchyLayout` / `same_layout_or_throw`](include/adc/amr) | garde-fou de layout AMR partage (boites + ordre + dmap + dx/dy + niveaux) ; premier pas du capstone AMR multi-blocs (#141) |
 | [`mesh::{MultiFab,BoxArray,Geometry}`](include/adc/mesh) | conteneurs distribues, halos, geometrie |
 | [`runtime::{System,AmrSystem}`](include/adc/runtime/system.hpp) | facades runtime de composition (assise des bindings Python) |
 | [`runtime::{model_factory,model_spec}`](include/adc/runtime/model_factory.hpp) | assemblage d'un `CompositeModel` a partir d'une spec de briques |
 | [`runtime::{dynamic_model,compiled_block_abi,dsl_block}`](include/adc/runtime/dsl_block.hpp) | dispatch JIT (`.so`, `IModel` virtuel) et AOT (bloc compile) d'un modele genere par le DSL |
+| [`runtime::{native_loader,abi_key}`](include/adc/runtime/native_loader.hpp) | chemin DSL "production" : loader `.so` zero-copie inline `add_compiled_model<ProdModel>` ; `abi_key()` rend l'incompatibilite d'ABI EXPLICITE (`add_native_block`) |
+| [`runtime::{SystemFieldSolver,SystemStepper,SystemBlockStore}`](include/adc/runtime/system_stepper.hpp) | responsabilites extraites du god-class `System::Impl` : solve_fields / avance en temps (Lie + Strang) / registre de blocs |
+| [`runtime::{block_builder_polar,grid_context}`](include/adc/runtime/block_builder_polar.hpp) | fermetures de bloc POLAIRE (`assemble_rhs_polar`, `derive_aux_polar`) ; contexte de grille reel partage |
+| [`runtime::AmrRuntime`](include/adc/runtime/amr_runtime.hpp) | moteur multi-blocs runtime (registre type-erase par nom) + regrid d'union des tags |
 | seams [`for_each_cell`](include/adc/mesh/for_each.hpp), [`comm`](include/adc/parallel/comm.hpp) | dispatch serie/OpenMP/Kokkos, comm MPI |
 
 ## 7. Solveur elliptique : probleme / operateur / solveur / post-traitement
@@ -344,8 +407,16 @@ Etat :
   `eps` etant un champ au centre des cellules fourni par `set_epsilon(eps_fn)` (formule
   analytique evaluee niveau par niveau, ordre 2 preserve) ou `set_epsilon(eps_fine)` (champ
   discretise restreint par `average_down`). NON appele => `eps` uniforme (chemin historique).
-  RESTE (TODO) : le cablage `System` / Python n'est PAS fait ; aucune facade runtime ne passe
-  encore un `eps` non uniforme au solveur.
+  Le cablage `System` / Python est desormais FAIT : `System::set_epsilon_field` (eps(x) isotrope),
+  `set_epsilon_anisotropic_field` (eps_x/eps_y, operateur `div(diag(eps_x, eps_y) grad phi)`) et
+  `set_reaction_field` (terme `-kappa phi`, Poisson ecrante / Helmholtz) passent un coefficient non
+  uniforme au solveur de systeme (`geometric_mg` seul ; demander avec `fft` leve une erreur).
+- **Solveurs POLAIRES et TENSORIELS** (geometrie annulaire + Schur condense) : `PolarPoissonSolver`
+  (`polar_poisson_solver.hpp`, direct FFT-en-theta + tridiag-en-r) est l'inversion polaire du chemin
+  `System` polaire ; `TensorKrylovSolver` (`krylov_solver.hpp`, BiCGStab matrice-libre) et son
+  pendant `PolarTensorKrylovSolver` (`polar_tensor_operator.hpp`) inversent l'operateur condense NON
+  auto-adjoint de l'etage Schur. `elliptic_interface.hpp` documente les trois concepts
+  (`EllipticOperator` / `EllipticSolver` / `FieldPostProcessor`) sans redefinir le contrat existant.
 - **EllipticProblem et FieldPostProcess FAITS** : `numerics/elliptic/elliptic_problem.hpp` nomme
   les deux. `EllipticProblem` rassemble le coeff `eps`, les CL `BCRec` et le drapeau
   `nullspace_const`. Au niveau de CETTE fabrique additive, `eps` du `EllipticProblem` reste
@@ -374,13 +445,19 @@ Berger-Rigoutsos, regrid, sous-cyclage, average-down et reflux conservatif. Les 
 importants sont explicites : `FluxRegister` accumule les flux de face, `CoverageMask`
 evite les doubles corrections, `DistributionMapping` porte l'ownership des boxes.
 
-**Couplage.** `AmrCouplerMP` reste le driver AMR mono-modele. Le
+**Couplage.** `AmrCouplerMP` reste le driver AMR mono-modele (1 seul `add_block`). Le
 `SystemCoupler` couvre le mono-niveau multi-blocs ; `AmrSystemCoupler` porte le systeme
 multi-especes sur AMR (Poisson grossier + reflux par bloc). La facade `AmrSystem` supporte
-desormais mono- ET multi-bloc (`multi_block()` / `build_multi()` / `set_regrid`),
-reconstruction conservative | primitive, flux Riemann rusanov | hllc | roe, integrateur
-explicite ET IMEX ; 7 tests capstone (`test_amr_system_twoblock`, `test_amr_multiblock_*`),
-regrid union-tags #199. Nuance honnete restante : pas d'etage Schur GLOBAL sur AMR.
+desormais mono- ET multi-bloc : le multi-bloc s'active AUTOMATIQUEMENT des le 2e `add_block`
+(moteur runtime `AmrRuntime`, registre type-erase par nom ; le build paresseux materialise la
+hierarchie partagee, garde `same_layout_or_throw`). Reconstruction conservative | primitive, flux
+Riemann rusanov | hllc | roe, integrateur explicite ET IMEX (par bloc), multirate (substeps /
+stride), sources couplees inter-especes, blocs natifs ET compiles melanges ; couvert par la famille
+de tests capstone (`test_amr_system_*`, `test_amr_multiblock_*`). Le regrid d'union des
+tags (#199) est cable : avec `regrid_every > 0`, la hierarchie est re-grillee a partir de l'UNION
+(OU cellule a cellule) des tags de TOUS les blocs (predicat par bloc, `set_refinement`) plus le tag
+de `|grad phi|` (`set_phi_refinement`) ; `regrid_every == 0` -> hierarchie figee, bit-identique.
+Nuance honnete restante : pas d'etage Schur GLOBAL sur AMR, et le regrid d'union reste a 2 niveaux.
 
 **Tests coeur.** Les invariants AMR couverts dans ce depot sont le raffinement, la hierarchie,
 le clustering, le regrid, le reflux, le masque de couverture, les diagnostics AMR et le load
@@ -447,8 +524,17 @@ Fait aujourd'hui dans `adc_cpp` :
   ne pas coder en dur ici.
 - Numerique coeur : maillage, halos, AMR, reflux, multigrille, Poisson (dont eps(x) variable,
   Helmholtz/ecrante, anisotrope, cut-cell), discretisations, flux de Roe, WENO5-Z, IMEX/AP,
-  splitting, multirate, `EquationBlock`, `CoupledSystem`, `SystemCoupler`, canal aux extensible
-  (B_z, T_e), parite du bloc compile AOT (CPU/Serial).
+  splitting Lie ET Strang (`test_strang_splitting`), multirate, `EquationBlock`, `CoupledSystem`,
+  `SystemCoupler`, canal aux extensible (B_z, T_e), parite du bloc compile AOT (CPU/Serial).
+- Geometrie : transport EB cut-cell sur disque (`test_eb_transport`, `test_cut_cell*`, MMS ordre 2),
+  primitive de fraction coupee (`test_cut_fraction*`), masque de domaine disque (`test_disc_domain_mask`).
+- Polaire : Poisson polaire direct (`test_polar_poisson_mms`), transport annulaire
+  (`test_polar_transport_mms`, `test_polar_ring_advection`, `test_polar_mms_vr`), chemin complet via
+  `System` (`test_polar_system_step`), operateur tensoriel polaire (`test_polar_tensor_elliptic_mms`).
+- Etage Schur condense : `LorentzEliminator` (`test_lorentz_eliminator`), operateur tensoriel +
+  BiCGStab (`test_schur_condensation`, `test_krylov_solver`), etage source cartesien ET polaire
+  (`test_condensed_schur_source_stepper`, `test_polar_condensed_schur_source_stepper`), Schur polaire
+  multi-rang MPI (`test_mpi_polar_schur`).
 - Les validations applicatives (diocotron, runs ROMEO, taux de croissance) vivent dans `adc_cases`.
 - GPU GH200 (backend Kokkos Cuda, validations integrees au depot via harness sous
   `python/tests/gpu/`, hors CI faute de runner GPU) : composants valides bit-identiques au CPU
@@ -465,10 +551,13 @@ Fait aujourd'hui dans `adc_cpp` :
 
 Correspondances : `MultiFab`, `BoxArray`/`DistributionMapping`, `Geometry`, `AmrLevel`,
 FillBoundary, Arena, reflux, MLMG ~ `GeometricMG`. Divergences assumees : pas de `MFIter`
-(on itere `for_each_cell` + fab local, GPU-ready) ; l'operateur elliptique joue `LinOp`
-mais Laplacien a coefficient constant (EB en escalier) ; le FluxRegister / FillPatch
-multi-patch 2-niveaux est distribue (bit-identique np=1/2/4), grossier replique ou de-replique
-(multi-box reparti) ; reste le regrid d'un niveau intermediaire reparti pour 3+ niveaux (section 8).
+(on itere `for_each_cell` + fab local, GPU-ready) ; l'operateur elliptique joue `LinOp` et porte
+desormais le coefficient variable `eps(x)`, le tenseur anisotrope `diag(eps_x, eps_y)`, le terme de
+reaction `kappa` (Helmholtz / ecrantage) et le cut-cell EB (cut_fraction) -- le tenseur PLEIN
+(termes croises de la condensation de Schur) sort, lui, du `GeometricMG` symetrique et passe par
+`TensorKrylovSolver` ; le FluxRegister / FillPatch multi-patch 2-niveaux est distribue (bit-identique
+np=1/2/4), grossier replique ou de-replique (multi-box reparti) ; reste le regrid d'un niveau
+intermediaire reparti pour 3+ niveaux (section 8).
 
 ## 13. Arborescence detaillee (fichier par fichier)
 
@@ -492,7 +581,7 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `distribution_mapping.hpp` : `DistributionMapping`, box -> rang MPI.
 - `fab2d.hpp` : `Fab2D`, donnees mono-grille sur une Box2D + ghosts (equivalent du FArrayBox).
 - `multifab.hpp` : `MultiFab`, champ distribue (collection de Fab2D) (equivalent du MultiFab AMReX).
-- `geometry.hpp` : `Geometry`, correspondance indices <-> coordonnees physiques.
+- `geometry.hpp` : `Geometry` (cartesien) + `PolarGeometry` (anneau global (r, theta) : `r_cell` / `r_face` / `dr` / `dtheta`), correspondance indices <-> coordonnees physiques.
 - `for_each.hpp` : **seam d'execution** `for_each_cell` + `for_each_cell_reduce_*` (serie/OpenMP/Kokkos) + `device_fence`.
 - `fill_boundary.hpp` : echange de halos intra-niveau (begin/end non-bloquant).
 - `physical_bc.hpp` : CL physiques du domaine + `fill_ghosts`.
@@ -501,7 +590,7 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 
 ### `physics/` : briques physiques generiques (couche 1)
 - `bricks.hpp` / `composite.hpp` : briques generiques (etat, transport, source, elliptique) et leur composition en `CompositeModel<Hyperbolic, Source, Elliptic>`.
-- `hyperbolic.hpp` : flux hyperboliques generiques (dont `IsothermalFlux`).
+- `hyperbolic.hpp` : flux hyperboliques generiques (`ExBVelocity`, `IsothermalFlux`) + pendants polaires en base locale (`ExBVelocityPolar`, `IsothermalFluxPolar`).
 - `euler.hpp` : flux d'Euler compressible 4 var (+ `eigenvalues`, roles de variables).
 - `source.hpp` : termes sources de potentiel / gravite.
 - `elliptic.hpp` : seconds membres elliptiques (charge, fond, gravite).
@@ -510,16 +599,24 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 ### `numerics/` : numerique local (couche 2)
 - `numerical_flux.hpp` : flux de Riemann en politique (template) : Rusanov / HLL / HLLC / Roe.
 - `reconstruction.hpp` : reconstruction d'interface : NoSlope / MUSCL (Minmod, VanLeer) / WENO5-Z.
-- `spatial_operator.hpp` : `assemble_rhs` (R = -div F + S) + `compute_face_fluxes` (flux de face pour le reflux).
+- `spatial_operator.hpp` : `assemble_rhs` (R = -div F + S) + `compute_face_fluxes` (flux de face pour le reflux) + `assemble_rhs_masked` (masque de domaine disque escalier 0/1).
+- `spatial_operator_eb.hpp` : `assemble_rhs_eb`, transport cut-cell / embedded-boundary conservatif sur disque (apertures `alpha_f` + fraction de volume `kappa`).
+- `spatial_operator_polar.hpp` : `assemble_rhs_polar`, transport polaire additif (divergence en metrique annulaire, le cartesien reste intouche).
 - `spatial_discretisation.hpp` : assemblage du couple (reconstruction x flux) par bloc.
+- `lorentz_eliminator.hpp` : `B = I - theta dt (v x B_z)` 2x2 + son inverse analytique ferme (reconstruction de la vitesse dans l'etage Schur).
 
 ### `numerics/elliptic/` : Poisson
 - `elliptic_solver.hpp` : concept `EllipticSolver` (contrat resoudre D phi = f).
-- `elliptic_problem.hpp` : types descriptifs de l'etage elliptique.
-- `poisson_operator.hpp` : Laplacien 5 points + lisseur Gauss-Seidel red-black.
-- `geometric_mg.hpp` : multigrille geometrique (V-cycle), `solve_robust` anti-divergence, `set_epsilon` (eps(x) variable).
-- `poisson_fft.hpp` : Poisson spectral direct (FFT), distribue par bandes (MPI_Alltoall), correctif `n` non puissance de 2.
+- `elliptic_interface.hpp` : concepts `EllipticOperator` / `EllipticSolver` / `FieldPostProcessor` (contrat REELLEMENT commun ; fonctions libres exclues, role d'operateur porte par `GeometricMG`).
+- `elliptic_problem.hpp` : types descriptifs de l'etage elliptique (`EllipticProblem`, `FieldPostProcess`, `make_elliptic_solver`).
+- `poisson_operator.hpp` : Laplacien 5 points + lisseur Gauss-Seidel red-black ; `apply_laplacian` porte aussi le tenseur plein (eps_x/eps_y + croises a_xy/a_yx) + kappa.
+- `geometric_mg.hpp` : multigrille geometrique (V-cycle), `solve_robust` anti-divergence, `set_epsilon` (eps(x) variable, anisotrope), terme de reaction kappa (Helmholtz / ecrante).
+- `krylov_solver.hpp` : `TensorKrylovSolver`, BiCGStab matrice-libre pour l'operateur condense non auto-adjoint, preconditionne par N V-cycles `GeometricMG` symetriques.
+- `poisson_fft.hpp` : Poisson spectral direct (FFT), distribue par bandes (MPI_Alltoall), correctif `n` non puissance de 2 ; `fft1d` reutilise par le solveur polaire.
 - `poisson_fft_solver.hpp` : backend `EllipticSolver` FFT : `PoissonFFTSolver` (mono-rang) + `DistributedFFTSolver` (bandes MPI).
+- `polar_poisson_solver.hpp` : `PolarPoissonSolver`, Poisson polaire DIRECT sur anneau (FFT-en-theta + tridiagonale-en-r, exact par mode azimutal).
+- `polar_tensor_operator.hpp` : `PolarTensorKrylovSolver`, operateur elliptique polaire a tenseur plein (termes croises a_rt/a_tr), iteratif (Schur polaire).
+- `cut_fraction.hpp` : primitive `detail::cut_fraction` partagee (cut-cell elliptique + transport EB : distance de coupe, fraction de volume).
 
 ### `numerics/time/` : temps + AMR (couche 5)
 - `time_integrator.hpp` : tags SSPRK + `TimePolicy` explicite / implicite / IMEX / prescrit.
@@ -530,7 +627,7 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `imex.hpp` : IMEX asymptotic-preserving (raide implicite + non-raide explicite).
 - `splitting.hpp` : splitting d'operateur Lie (ordre 1) / Strang (ordre 2).
 - (l'integrateur AP deux-fluides a quitte le coeur : il vit dans `adc_cases/two_fluid_ap/`, compile a la volee contre les en-tetes generiques.)
-- `amr_reflux_mf.hpp` : **moteur AMR de production** `advance_amr` (multi-patch N-niveaux distribue) + types `FluxRegister` / `CoverageMask` ; la pile mono-box `amr_*_mf` y vit en `detail::` (oracle de validation).
+- `amr_reflux_mf.hpp` : PARAPLUIE du **moteur AMR de production** ; inclut, dans l'ordre de dependance, `amr_flux_helpers` (avance divergence / source / average_down / ghosts coarse-fine mono-box), `amr_level` (oracle MF mono-box `detail::AmrLevelMF`, hors production), `amr_patch_range` (`PatchRange` / `FluxRegister` / `CoverageMask` + helpers multi-box MPI-safe), `amr_subcycling` (moteur N-niveaux multi-patch interne), `amr_advance` (facade publique `advance_amr` + `LevelHierarchy` / `OwnershipPolicy`).
 - `amr_reflux.hpp` / `amr_multilevel.hpp` : reference Fab2D mono-box (2-niveaux / N-niveaux), verite-terrain du moteur ci-dessus.
 
 ### `coupling/` : couplage hyperbolique-elliptique (couche 5)
@@ -544,16 +641,26 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 - `amr_level_storage.hpp` : stockage de la hierarchie (niveaux + aux) extrait des coupleurs.
 - `amr_diagnostics.hpp` : masse / vitesse de derive via le seam reducteur.
 - `spectral_coupler.hpp` : coupleur periodique distribue (FFT par bandes).
+- `aux_fill.hpp` : helpers du canal aux partages par les trois coupleurs (Coupler / SystemAssembler / AmrSystemCoupler).
+- `coupled_source.hpp` : contrat `CoupledSourceFor` d'une source de couplage inter-especes (apply(system, aux, dt), splitting forward-Euler).
+- `coupled_source_program.hpp` : interprete de source couplee generique (bytecode postfixe device, `CsProgram` / `CoupledSourceKernel`, `adc.dsl.CoupledSource`).
+- `schur_condensation.hpp` : `ElectrostaticLorentzCondensation` : assemble l'operateur condense A = I + c rho B^{-1} (eps_x/eps_y + croises) et son RHS (etage Schur, Lorentz electrostatique).
+- `condensed_schur_source_stepper.hpp` : `CondensedSchurSourceStepper`, etage source condense complet (assemble -> TensorKrylovSolver -> reconstruit) ; opt-in `System::set_source_stage`.
+- `polar_condensed_schur_source_stepper.hpp` : pendant POLAIRE de l'etage Schur (operateur tensoriel polaire iteratif).
 
 ### `runtime/` : facades runtime + DSL (assise des bindings)
-- `system.hpp` : facade `System` (composition multi-blocs mono-niveau, Poisson partage).
-- `amr_system.hpp` : facade `AmrSystem` (mono- ET multi-bloc sur hierarchie raffinee ; recon conservative | primitive, flux rusanov | hllc | roe, explicite ET IMEX ; reste hors parite : pas d'etage Schur global).
+- `system.hpp` : facade `System` (composition multi-blocs mono-niveau, Poisson partage ; geometrie cartesien / polaire / disque, masque `set_disc_domain`, splitting `set_time_scheme`, etage Schur `set_source_stage`, eps(x) / anisotrope / reaction).
+- `amr_system.hpp` : facade `AmrSystem` (mono- ET multi-bloc sur hierarchie raffinee ; recon conservative | primitive, flux rusanov | hllc | roe, explicite ET IMEX, regrid d'union des tags ; reste hors parite : pas d'etage Schur global).
+- `amr_runtime.hpp` : moteur multi-blocs runtime (`AmrRuntime`, registre type-erase par nom) + regrid d'union des tags.
 - `model_spec.hpp` / `model_factory.hpp` : spec de briques -> `CompositeModel` (le coeur ne nomme aucun scenario).
-- `block_builder.hpp` : fermetures de bloc instanciables hors `System` (fondation backend AOT).
+- `block_builder.hpp` / `block_builder_polar.hpp` : fermetures de bloc instanciables hors `System` (fondation backend AOT) ; pendant polaire (`assemble_rhs_polar`, `derive_aux_polar`).
 - `grid_context.hpp` : contexte de grille reel (maillage + CL + aux) partage par les chemins de bloc.
+- `system_field_solver.hpp` / `system_stepper.hpp` / `system_block_store.hpp` : responsabilites extraites du god-class `System::Impl` (solve_fields ; avance Lie + Strang ; registre de blocs).
+- `wall_predicate.hpp` : predicat de paroi conductrice (cercle centre) partage par `System` et `AmrSystem`.
 - `dynamic_model.hpp` : modele type-erased a dispatch virtuel (`IModel`), charge en JIT via `.so`.
 - `compiled_block_abi.hpp` : ABI `extern "C"` du bloc compile (`add_compiled_block`, marshaling hote, sans AMR/MPI).
 - `dsl_block.hpp` : `add_compiled_model` (bloc compile NATIF connu a la compilation ; parite `add_block` bit-identique, validee CPU/Serial ET sur device GH200 via foncteurs nommes A==B `dres=0`).
+- `native_loader.hpp` / `abi_key.hpp` : chemin DSL "production" : loader `.so` zero-copie qui inline `add_compiled_model<ProdModel>` (`add_native_block`) ; `abi_key()` rend l'incompatibilite d'ABI EXPLICITE.
 - `amr_dsl_block.hpp` : `add_compiled_model` cote `AmrSystem` (pendant multi-niveau du chemin compile).
 
 ### `amr/` : maillage adaptatif

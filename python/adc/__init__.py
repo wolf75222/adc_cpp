@@ -1095,12 +1095,14 @@ class System:
         carre cartesien plein, le cercle n'agissant que dans la paroi de Poisson (verrou des bords
         d'anneau cartesiens, cf. docs/HOFFART_FIDELITY.md).
 
-        mode :
-          - 'none' (defaut) : le masque est materialise (consultable via disc_mask()) mais le transport
-            reste PLEIN cartesien (assemble_rhs) -> step() BIT-IDENTIQUE meme avec le disque pose ;
-          - 'staircase' : transport masque conservatif (assemble_rhs_masked, porte de face 0/1) ;
-          - 'cutcell'   : transport cut-cell / embedded-boundary (assemble_rhs_eb, apertures alpha_f +
-            fraction de volume kappa, frontiere lisse, ordre 2 a l'interieur du disque).
+        Le parametre ``mode`` cable le transport :
+
+        - 'none' (defaut) : le masque est materialise (consultable via disc_mask()) mais le transport
+          reste PLEIN cartesien (assemble_rhs) -> step() BIT-IDENTIQUE meme avec le disque pose ;
+        - 'staircase' : transport masque conservatif (assemble_rhs_masked, porte de face 0/1) ;
+        - 'cutcell' : transport cut-cell / embedded-boundary (assemble_rhs_eb, apertures alpha_f +
+          fraction de volume kappa, frontiere lisse, ordre 2 a l'interieur du disque).
+
         Le mode est honore sous Lie ET Strang (cf. Split / Strang). R > 0 ; cartesien seulement (le
         polaire borne deja l'anneau par ses parois radiales -> erreur explicite)."""
         self._s.set_disc_domain(cx, cy, R, mode)
