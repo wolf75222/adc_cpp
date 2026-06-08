@@ -1,0 +1,4 @@
+commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes
+1d4cd25e25,adc_cpp,transport,strong,mpi-omp,romeo-x64cpu,1,16,0,4096,,15,3,,764.7296,,,job=648114 branch=unknown
+1d4cd25e25,adc_cpp,transport,strong,mpi-cuda,romeo-gh200,1,1,1,4096,,20,3,,502.9065,,,job=648115 branch=unknown
+1d4cd25e25,adc_cpp,poisson,strong,mpi-cuda,romeo-gh200,1,1,1,1024,,20,3,,20.68346,,,job=648115 branch=unknown

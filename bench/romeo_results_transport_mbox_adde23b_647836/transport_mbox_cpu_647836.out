@@ -1,0 +1,46 @@
+=== ADC TRANSPORT MBOX CPU job=647836 node=romeo-c026 date=Mon Jun  8 15:55:10 CEST 2026 ===
+/apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-11.4.1/gcc-14.2.0-fmrcj5jrubquulzxeqmhucxqunhodrxp/bin/gcc
+/apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-11.4.1/gcc-14.2.0-fmrcj5jrubquulzxeqmhucxqunhodrxp/bin/g++
+/apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-14.2.0/cmake-3.30.5-kvj6wp2orddkj242czv5newzylvyv5ez/bin/cmake
+/apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-14.2.0/python-3.11.9-2celb2jubj3ho6k56vyf4fonosldjxej/bin/python3
+/apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-11.4.1/openmpi-5.0.5-lni3xp2q7ts2btrkm3rt3ciz6laogc6y/bin/mpicxx
+/usr/bin/srun
+gcc (Spack GCC) 14.2.0
+g++ (Spack GCC) 14.2.0
+cmake version 3.30.5
+Python 3.11.9
+g++ (Spack GCC) 14.2.0
+ADC_CPP_COMMIT=adde23b
+CONFIG build_transport_mbox_cpu_kokkos rc=0
+BUILD build_transport_mbox_cpu_kokkos rc=0
+RUN transport mbox kokkos-openmp strong threads=1 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_kokkos-openmp_np1_thr1_n1024_647836.log
+RUN transport mbox kokkos-openmp strong threads=2 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_kokkos-openmp_np1_thr2_n1024_647836.log
+RUN transport mbox kokkos-openmp strong threads=4 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_kokkos-openmp_np1_thr4_n1024_647836.log
+RUN transport mbox kokkos-openmp strong threads=8 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_kokkos-openmp_np1_thr8_n1024_647836.log
+RUN transport mbox kokkos-openmp strong threads=16 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_kokkos-openmp_np1_thr16_n1024_647836.log
+CONFIG build_transport_mbox_cpu_mpi_kokkos rc=0
+BUILD build_transport_mbox_cpu_mpi_kokkos rc=0
+RUN transport mbox mpi+kokkos-openmp strong np=1 threads=4 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_mpi-kokkos-openmp_np1_thr4_n1024_647836.log
+RUN transport mbox mpi+kokkos-openmp strong np=2 threads=4 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_mpi-kokkos-openmp_np2_thr4_n1024_647836.log
+RUN transport mbox mpi+kokkos-openmp strong np=4 threads=4 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_mpi-kokkos-openmp_np4_thr4_n1024_647836.log
+RUN transport mbox mpi+kokkos-openmp strong np=8 threads=4 n=1024
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_strong_mpi-kokkos-openmp_np8_thr4_n1024_647836.log
+RUN transport mbox mpi+kokkos-openmp weak np=1 threads=4 n=384 local_root=384
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_weak_mpi-kokkos-openmp_np1_thr4_n384_647836.log
+RUN transport mbox mpi+kokkos-openmp weak np=2 threads=4 n=543 local_root=384
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_weak_mpi-kokkos-openmp_np2_thr4_n543_647836.log
+RUN transport mbox mpi+kokkos-openmp weak np=4 threads=4 n=768 local_root=384
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_weak_mpi-kokkos-openmp_np4_thr4_n768_647836.log
+RUN transport mbox mpi+kokkos-openmp weak np=8 threads=4 n=1086 local_root=384
+RC=0 log=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_weak_mpi-kokkos-openmp_np8_thr4_n1086_647836.log
+=== TRANSPORT MBOX CPU DONE ===
+PHASE_CSV=/home/rmdraux/adc_perf_20260608/results/perf_phases_transport_mbox_cpu_adde23b_647836.csv
+SCALING_CSV=/home/rmdraux/adc_perf_20260608/results/perf_scaling_transport_mbox_cpu_adde23b_647836.csv

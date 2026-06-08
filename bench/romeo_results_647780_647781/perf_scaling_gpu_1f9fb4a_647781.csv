@@ -1,0 +1,13 @@
+commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes
+1f9fb4a,adc_cpp,profile-step,strong,kokkos-cuda,romeo-armgpu,1,,1,256,,8,2,1.9072,238.3818,,,single-gpu
+1f9fb4a,adc_cpp,profile-step,strong,mpi+kokkos-cuda,romeo-armgpu,1,,1,256,,8,2,1.8727,234.0581,,,one-node-gh200
+1f9fb4a,adc_cpp,profile-step,strong,mpi+kokkos-cuda,romeo-armgpu,2,,2,256,,8,2,2.2616,284.6077,,,one-node-gh200
+1f9fb4a,adc_cpp,profile-step,strong,mpi+kokkos-cuda,romeo-armgpu,4,,4,256,,8,2,2.3270,292.7265,,,one-node-gh200
+1f9fb4a,adc_cpp,profile-step,weak,mpi+kokkos-cuda,romeo-armgpu,1,,1,128,,8,2,1.7584,219.7633,,,weak-local-n128-per-rank-axis
+1f9fb4a,adc_cpp,profile-step,weak,mpi+kokkos-cuda,romeo-armgpu,4,,4,512,,8,2,2.5990,328.7405,,,weak-local-n128-per-rank-axis
+1f9fb4a,adc_cpp,amr-synthetic-reparti,strong,mpi+kokkos-cuda,romeo-armgpu,1,,1,128,,40,4,,696.8547,,,amrmpi_integrated cmax_spread=0.0
+1f9fb4a,adc_cpp,amr-synthetic-reparti,strong,mpi+kokkos-cuda,romeo-armgpu,2,,2,128,,40,4,,1014.3559,,,amrmpi_integrated cmax_spread=0.0
+1f9fb4a,adc_cpp,amr-synthetic-reparti,strong,mpi+kokkos-cuda,romeo-armgpu,4,,4,128,,40,4,,1373.7033,,,amrmpi_integrated cmax_spread=0.0
+1f9fb4a,adc_cpp,amr-synthetic-replique,strong,mpi+kokkos-cuda,romeo-armgpu,1,,1,128,,40,4,,216.368,,,amrmpi_integrated cmax_spread=0.0
+1f9fb4a,adc_cpp,amr-synthetic-replique,strong,mpi+kokkos-cuda,romeo-armgpu,2,,2,128,,40,4,,273.1515,,,amrmpi_integrated cmax_spread=0.0
+1f9fb4a,adc_cpp,amr-synthetic-replique,strong,mpi+kokkos-cuda,romeo-armgpu,4,,4,128,,40,4,,272.6566,,,amrmpi_integrated cmax_spread=0.0

@@ -1,0 +1,4 @@
+commit,case,frontend,backend,n,steps,dt,cache_state,setup_ms,compile_ms,advance_ms,step_loop_ms,extract_ms,total_ms,ratio_vs_cpp,notes
+1f9fb4a,frontend-euler-periodic,cpp-native,kokkos-openmp,128,40,1e-4,n/a,,0,291.196226,n/a,0.122962,291.319188,1.0,threads=1
+1f9fb4a,frontend-euler-periodic,cpp-native,kokkos-openmp,128,40,1e-4,n/a,,0,253.697298,n/a,0.142852,253.840150,1.0,threads=4
+1f9fb4a,frontend-euler-periodic,cpp-native,kokkos-openmp,128,40,1e-4,n/a,,0,181.671259,n/a,0.139341,181.810600,1.0,threads=8

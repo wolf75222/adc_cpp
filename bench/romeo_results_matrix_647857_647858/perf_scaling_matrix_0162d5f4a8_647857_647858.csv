@@ -1,0 +1,31 @@
+commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes
+0162d5f4a8,adc_cpp,transport,strong,kokkos-omp,romeo-x64cpu,1,1,0,4096,,15,3,,5238.64,,,branch=feat/perf-campaign-bench job=647857 boxes=256 max_grid=256
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-omp,romeo-x64cpu,1,1,0,1024,,15,3,,71.19186,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,transport,strong,kokkos-omp,romeo-x64cpu,1,2,0,4096,,15,3,,5106.551,,,branch=feat/perf-campaign-bench job=647857 boxes=256 max_grid=256
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-omp,romeo-x64cpu,1,2,0,1024,,15,3,,319.5004,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,transport,strong,kokkos-omp,romeo-x64cpu,1,4,0,4096,,15,3,,2735.657,,,branch=feat/perf-campaign-bench job=647857 boxes=256 max_grid=256
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-omp,romeo-x64cpu,1,4,0,1024,,15,3,,214.0247,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,transport,strong,kokkos-omp,romeo-x64cpu,1,8,0,4096,,15,3,,1483.221,,,branch=feat/perf-campaign-bench job=647857 boxes=256 max_grid=256
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-omp,romeo-x64cpu,1,8,0,1024,,15,3,,121.3065,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,transport,strong,kokkos-omp,romeo-x64cpu,1,16,0,4096,,15,3,,912.9574,,,branch=feat/perf-campaign-bench job=647857 boxes=256 max_grid=256
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-omp,romeo-x64cpu,1,16,0,1024,,15,3,,82.42049,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,transport,strong,mpi-omp,romeo-x64cpu,1,16,0,4096,,15,3,,760.8623,,,branch=feat/perf-campaign-bench job=647857 boxes=256 max_grid=256
+0162d5f4a8,adc_cpp,transport,weak,kokkos-omp,romeo-x64cpu,1,1,0,512,,15,3,,80.83768,,,branch=feat/perf-campaign-bench job=647857 boxes=4 max_grid=256
+0162d5f4a8,adc_cpp,poisson,weak,kokkos-omp,romeo-x64cpu,1,1,0,256,,15,3,,4.198807,,,branch=feat/perf-campaign-bench job=647857 boxes=1 max_grid=256
+0162d5f4a8,adc_cpp,transport,weak,kokkos-omp,romeo-x64cpu,1,4,0,1024,,15,3,,194.1276,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,poisson,weak,kokkos-omp,romeo-x64cpu,1,4,0,512,,15,3,,54.00261,,,branch=feat/perf-campaign-bench job=647857 boxes=4 max_grid=256
+0162d5f4a8,adc_cpp,transport,weak,kokkos-omp,romeo-x64cpu,1,16,0,2048,,15,3,,252.225,,,branch=feat/perf-campaign-bench job=647857 boxes=64 max_grid=256
+0162d5f4a8,adc_cpp,poisson,weak,kokkos-omp,romeo-x64cpu,1,16,0,1024,,15,3,,79.96299,,,branch=feat/perf-campaign-bench job=647857 boxes=16 max_grid=256
+0162d5f4a8,adc_cpp,amr,strong,kokkos-omp,romeo-x64cpu,1,16,0,128,,20,3,,75.5329,,,branch=feat/perf-campaign-bench job=647857 boxes= max_grid= distribute_coarse=False patches=4
+0162d5f4a8,adc_cpp,amr,strong,kokkos-omp,romeo-x64cpu,1,16,0,256,,20,3,,234.2081,,,branch=feat/perf-campaign-bench job=647857 boxes= max_grid= distribute_coarse=False patches=16
+0162d5f4a8,adc_cpp,transport,strong,kokkos-cuda,romeo-gh200,1,1,1,1024,,20,3,,30.09031,,,branch=feat/perf-campaign-bench job=647858 boxes=4 max_grid=512 mono_gpu_size_sweep=true
+0162d5f4a8,adc_cpp,transport,strong,kokkos-cuda,romeo-gh200,1,1,1,2048,,20,3,,123.7273,,,branch=feat/perf-campaign-bench job=647858 boxes=16 max_grid=512 mono_gpu_size_sweep=true
+0162d5f4a8,adc_cpp,transport,strong,kokkos-cuda,romeo-gh200,1,1,1,4096,,20,3,,497.1155,,,branch=feat/perf-campaign-bench job=647858 boxes=64 max_grid=512 mono_gpu_size_sweep=true
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-cuda,romeo-gh200,1,1,1,512,,20,3,,6.34903,,,branch=feat/perf-campaign-bench job=647858 boxes=1 max_grid=512 mono_gpu_size_sweep=true
+0162d5f4a8,adc_cpp,poisson,strong,kokkos-cuda,romeo-gh200,1,1,1,1024,,20,3,,19.53764,,,branch=feat/perf-campaign-bench job=647858 boxes=4 max_grid=512 mono_gpu_size_sweep=true
+0162d5f4a8,adc_cpp,amr,strong,kokkos-cuda,romeo-gh200,1,1,1,128,,20,3,,215.4362,,,branch=feat/perf-campaign-bench job=647858 boxes= max_grid= distribute_coarse=False patches=4
+0162d5f4a8,adc_cpp,amr,strong,kokkos-cuda,romeo-gh200,2,1,2,128,,20,3,,1012.817,,,branch=feat/perf-campaign-bench job=647858 boxes= max_grid= distribute_coarse=True patches=4
+0162d5f4a8,adc_cpp,amr,strong,kokkos-cuda,romeo-gh200,4,1,4,128,,20,3,,1389.794,,,branch=feat/perf-campaign-bench job=647858 boxes= max_grid= distribute_coarse=True patches=4
+0162d5f4a8,adc_cpp,amr,strong,kokkos-cuda,romeo-gh200,1,1,1,256,,20,3,,233.2561,,,branch=feat/perf-campaign-bench job=647858 boxes= max_grid= distribute_coarse=False patches=16
+0162d5f4a8,adc_cpp,amr,strong,kokkos-cuda,romeo-gh200,2,1,2,256,,20,3,,1079.724,,,branch=feat/perf-campaign-bench job=647858 boxes= max_grid= distribute_coarse=True patches=16
+0162d5f4a8,adc_cpp,amr,strong,kokkos-cuda,romeo-gh200,4,1,4,256,,20,3,,1485.322,,,branch=feat/perf-campaign-bench job=647858 boxes= max_grid= distribute_coarse=True patches=16

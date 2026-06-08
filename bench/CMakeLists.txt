@@ -43,5 +43,8 @@ foreach(perf_tgt frontend_cpp scaling_step scaling_amr)
   endif()
 endforeach()
 
+add_executable(profile_transport_mbox profile_transport_mbox.cpp)
+target_link_libraries(profile_transport_mbox PRIVATE adc::adc)
+
 # Pas d'add_test : les harnais ne sont PAS des tests (mesure, sortie chronometree non deterministe).
 # Le CI ne les verra pas (cibles hors du build par defaut). On les lance a la main / via run_*.sh.

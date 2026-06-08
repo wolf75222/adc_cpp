@@ -1,0 +1,16 @@
+Loading aarch64 (arm, gpus available) environment
+Environment loaded. Spack available.
+=== MULTI-GPU MPI v2 (fix #254) job=648115 @ 1d4cd25e25 ===
+# transport 1 GPU
+{"schema":"adc_perf_v1","front":"cpp_scaling","adc_cpp_sha":"1d4cd25e25d244cd7c4f6cfd4c0eb815cd997790","adc_cpp_branch":"unknown","backend":"mpi-cuda","machine":"romeo-gh200","ranks":1,"threads":1,"gpus":0,"workload":"transport","scaling":"strong","nx":4096,"ny":4096,"boxes":64,"max_grid":512,"warmup":3,"steps":20,"hot_ms_per_step":{"median":5.029065e+02,"p10":5.009305e+02,"p90":5.050115e+02,"cv":4.829308e-03},"phases_ms_per_step":{"halos":7.248923e+01,"transport":3.938217e+02,"poisson":0.000000e+00,"reduction":1.933036e+01,"alloc_tmp":1.777578e+01,"diag":4.395228e+01},"cells_per_s":3.336051e+07,"invariants":{"mass":1.6777216000e+07,"rho_min":9.999671e-01,"p_min":1.000000e+00,"nan":false}}
+# poisson 1 GPU
+{"schema":"adc_perf_v1","front":"cpp_scaling","adc_cpp_sha":"1d4cd25e25d244cd7c4f6cfd4c0eb815cd997790","adc_cpp_branch":"unknown","backend":"mpi-cuda","machine":"romeo-gh200","ranks":1,"threads":1,"gpus":0,"workload":"poisson","scaling":"strong","nx":1024,"ny":1024,"boxes":4,"max_grid":512,"warmup":3,"steps":20,"hot_ms_per_step":{"median":2.068346e+01,"p10":1.890139e+01,"p90":2.481350e+01,"cv":1.181952e-01},"phases_ms_per_step":{"halos":0.000000e+00,"transport":0.000000e+00,"poisson":2.145130e+01,"reduction":0.000000e+00,"alloc_tmp":0.000000e+00,"diag":1.017837e+00},"cells_per_s":5.069636e+07,"invariants":{"phi_min":-1.266507e-02,"phi_max":1.266507e-02,"nan":false}}
+# transport 2 GPU
+transport np=2 rc=124 FAIL/TIMEOUT
+# poisson 2 GPU
+poisson np=2 rc=124 FAIL/TIMEOUT
+# transport 4 GPU
+transport np=4 rc=124 FAIL/TIMEOUT
+# poisson 4 GPU
+poisson np=4 rc=124 FAIL/TIMEOUT
+=== DONE 648115 (2 lignes) ===

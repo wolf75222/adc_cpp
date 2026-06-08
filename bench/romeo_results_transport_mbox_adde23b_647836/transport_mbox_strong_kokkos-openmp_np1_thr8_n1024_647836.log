@@ -1,0 +1,12 @@
+# adc_cpp profile_transport_mbox
+# ranks=1 boxes=64 local_boxes_rank0=64 n=1024 max_grid=128 steps=24 warmup=5
+# limiter=minmod distribution=sfc periodic=xy reconstruct=primitive checksum=1.04857600000000000e+06
+# load_cells min=1048576 max=1048576 total=1048576 imbalance=1.000000
+# wall_total=3.787647314e+00 s per_step=157.818638 ms sum_phases=3.787611444e+00 s
+phase                  total_s per_step_ms pct
+halos                  5.971026100e-02 2.487928 1.576%
+cfl_reduction          6.015294900e-02 2.506373 1.588%
+transport              3.634696772e+00 151.445699 95.963%
+diagnostic_reduction   3.304853200e-02 1.377022 0.873%
+fence                  2.930000000e-06 0.000122 0.000%
+TOTAL                  3.787611444e+00 157.817144 100.000%

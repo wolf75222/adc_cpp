@@ -1,0 +1,5 @@
+From https://github.com/wolf75222/adc_cpp
+ - [deleted]         (none)     -> origin/feat/isothermal-hll-flux
+   0c3eae1..adde23b  master     -> origin/master
+Previous HEAD position was 1f9fb4a docs: reecrire ALGORITHMS.md et ARCHITECTURE.md au format poisson_cpp (#244)
+HEAD is now at adde23b feat(flux): exposer HLL pour les modeles 3-var a vitesses d'onde (sans pression) (#239)

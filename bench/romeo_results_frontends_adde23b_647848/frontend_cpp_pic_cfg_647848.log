@@ -1,0 +1,12 @@
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-11.4.1/gcc-14.2.0-fmrcj5jrubquulzxeqmhucxqunhodrxp/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found OpenMP_CXX: -fopenmp (found version "4.5")
+-- Found OpenMP: TRUE (found version "4.5") found components: CXX
+-- Enabled Kokkos devices: OPENMP;SERIAL
+-- Configuring done (0.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/rmdraux/adc_perf_frontends_adde23b_20260608/build_frontend_cpp_pic

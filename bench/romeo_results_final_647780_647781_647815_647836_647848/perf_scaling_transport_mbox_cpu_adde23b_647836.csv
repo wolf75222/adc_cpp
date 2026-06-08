@@ -1,0 +1,14 @@
+commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,kokkos-openmp,romeo-x64cpu,1,1,0,1024,,24,5,1.257901608e+01,524.125670,,,single-rank-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,kokkos-openmp,romeo-x64cpu,1,2,0,1024,,24,5,1.042206207e+01,434.252586,,,single-rank-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,kokkos-openmp,romeo-x64cpu,1,4,0,1024,,24,5,6.819583515e+00,284.149313,,,single-rank-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,kokkos-openmp,romeo-x64cpu,1,8,0,1024,,24,5,3.787647314e+00,157.818638,,,single-rank-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,kokkos-openmp,romeo-x64cpu,1,16,0,1024,,24,5,2.143461530e+00,89.310897,,,single-rank-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,mpi+kokkos-openmp,romeo-x64cpu,1,4,0,1024,,24,5,4.520495114e+00,188.353963,,,one-node-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,mpi+kokkos-openmp,romeo-x64cpu,2,4,0,1024,,24,5,8.905179176e+00,371.049132,,,one-node-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,mpi+kokkos-openmp,romeo-x64cpu,4,4,0,1024,,24,5,1.006699442e+01,419.458101,,,one-node-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,strong,mpi+kokkos-openmp,romeo-x64cpu,8,4,0,1024,,24,5,1.427399906e+01,594.749961,,,one-node-true-multibox
+adde23b,adc_cpp,transport-euler-periodic-mbox,weak,mpi+kokkos-openmp,romeo-x64cpu,1,4,0,384,384,24,5,6.055386610e-01,25.230778,,,weak-2d-local-root-384
+adde23b,adc_cpp,transport-euler-periodic-mbox,weak,mpi+kokkos-openmp,romeo-x64cpu,2,4,0,543,384,24,5,4.971094412e+00,207.128934,,,weak-2d-local-root-384
+adde23b,adc_cpp,transport-euler-periodic-mbox,weak,mpi+kokkos-openmp,romeo-x64cpu,4,4,0,768,384,24,5,8.410994710e+00,350.458113,,,weak-2d-local-root-384
+adde23b,adc_cpp,transport-euler-periodic-mbox,weak,mpi+kokkos-openmp,romeo-x64cpu,8,4,0,1086,384,24,5,1.582299410e+01,659.291421,,,weak-2d-local-root-384

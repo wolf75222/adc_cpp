@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.16)
+project(adc_frontend_cpp CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Kokkos REQUIRED)
+
+add_executable(frontend_cpp frontend_bench.cpp ${ADC_SRC}/python/system.cpp)
+target_include_directories(frontend_cpp PRIVATE ${ADC_SRC}/include)
+target_compile_definitions(frontend_cpp PRIVATE ADC_HAS_KOKKOS)
+target_link_libraries(frontend_cpp PRIVATE Kokkos::kokkos)

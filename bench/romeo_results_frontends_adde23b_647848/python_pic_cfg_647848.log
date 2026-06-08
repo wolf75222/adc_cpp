@@ -1,0 +1,24 @@
+-- The CXX compiler identification is GNU 14.2.0
+-- The C compiler identification is GNU 14.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-11.4.1/gcc-14.2.0-fmrcj5jrubquulzxeqmhucxqunhodrxp/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/gcc-11.4.1/gcc-14.2.0-fmrcj5jrubquulzxeqmhucxqunhodrxp/bin/gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Found OpenMP_CXX: -fopenmp (found version "4.5")
+-- Found OpenMP: TRUE (found version "4.5") found components: CXX
+-- Enabled Kokkos devices: OPENMP;SERIAL
+-- Kokkos found : for_each_cell dispatch backend = Kokkos (OPENMP;SERIAL)
+-- Found Python: /apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/aocc-5.0.0/python-venv-1.0-67qe4nrfb5p5ff3sqes5yuvqvgd242yh/bin/python3 (found version "3.10.14") found components: Interpreter Development.Module
+-- adc Python module: interpreteur /apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/aocc-5.0.0/python-venv-1.0-67qe4nrfb5p5ff3sqes5yuvqvgd242yh/bin/python3 (3.10.14)
+-- Performing Test HAS_FLTO
+-- Performing Test HAS_FLTO - Success
+-- adc Python module: signature en-tetes ADC_HEADER_SIG=0aaa4e641a74f04bafb6999e3d21bacc21bf82efc440be352a5e5cb78f9d820f
+-- Configuring done (2.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/rmdraux/adc_perf_frontends_adde23b_20260608/build_python_kokkos_pic
