@@ -17,5 +17,31 @@
 add_executable(profile_step profile_step.cpp)
 target_link_libraries(profile_step PRIVATE adc::adc)
 
-# Pas d'add_test : le harnais n'est PAS un test (mesure, sortie chronometree non deterministe). Le
-# CI ne le verra pas (cible hors du build par defaut). On le lance a la main / via bench/run_bench.sh.
+# Front C++ DIRECT (campagne de perf : C++ vs Python briques vs DSL) et driver de SCALING. Memes
+# conventions que profile_step (lib header-only, backend herite). SHA/branche injectes a la
+# configuration (-DADC_BUILD_SHA / -DADC_BUILD_BRANCH) : le binaire ne lance pas git (noeud de calcul).
+add_executable(frontend_cpp frontend_cpp.cpp)
+target_link_libraries(frontend_cpp PRIVATE adc::adc)
+
+add_executable(scaling_step scaling_step.cpp)
+target_link_libraries(scaling_step PRIVATE adc::adc)
+
+# Scaling AMR synthetique (4 bulles, AmrSystem + add_compiled_model). AmrSystem est une classe
+# COMPILEE (PIMPL) : on lie son implementation python/amr_system.cpp (comme le test integre
+# amrmpi_integrated). Initialise Kokkos quand le backend est Kokkos (#ifdef ADC_HAS_KOKKOS) ; tourne
+# aussi en serie pour la validation locale.
+add_executable(scaling_amr scaling_amr.cpp ${CMAKE_SOURCE_DIR}/python/amr_system.cpp)
+target_link_libraries(scaling_amr PRIVATE adc::adc)
+target_include_directories(scaling_amr PRIVATE ${CMAKE_SOURCE_DIR}/python)
+
+foreach(perf_tgt frontend_cpp scaling_step scaling_amr)
+  if(ADC_BUILD_SHA)
+    target_compile_definitions(${perf_tgt} PRIVATE ADC_BUILD_SHA="${ADC_BUILD_SHA}")
+  endif()
+  if(ADC_BUILD_BRANCH)
+    target_compile_definitions(${perf_tgt} PRIVATE ADC_BUILD_BRANCH="${ADC_BUILD_BRANCH}")
+  endif()
+endforeach()
+
+# Pas d'add_test : les harnais ne sont PAS des tests (mesure, sortie chronometree non deterministe).
+# Le CI ne les verra pas (cibles hors du build par defaut). On les lance a la main / via run_*.sh.
