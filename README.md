@@ -50,7 +50,7 @@ l'arborescence par fichier). Algorithmes et formules : [docs/ALGORITHMS.md](docs
 ## Ecrire un modele : briques ou formules
 
 Un modele decrit une equation (flux, source, valeurs propres, second membre elliptique). Le module `adc`
-offre deux fronts d'ecriture, qui produisent le meme objet cote C++ et se branchent de la meme maniere
+permet d'ecrire un modele de deux facons, qui produisent le meme objet cote C++ et se branchent de la meme maniere
 sur `adc.System` / `adc.AmrSystem` :
 
 - briques : on compose des briques generiques deja compilees (`adc.Model`), sans compilation a la volee.
@@ -61,7 +61,7 @@ Reference complete : [bricks_reference](docs/sphinx/reference/bricks_reference.m
 [dsl_reference](docs/sphinx/reference/dsl_reference.md) ; tutoriel pas a pas :
 [docs/sphinx/getting_started/tutorial.md](docs/sphinx/getting_started/tutorial.md).
 
-### Front 1 : briques (`adc.Model`)
+### Briques (`adc.Model`)
 
 `adc.Model(state, transport, source, elliptic)` compose quatre briques et renvoie une `ModelSpec` (des
 tags lus cote C++ par la fabrique de modeles). Catalogue par slot :
@@ -91,7 +91,7 @@ sim.set_density("ne", ne0)          # ne0 : tableau 2D (densite initiale)
 sim.step_cfl(0.4)
 ```
 
-### Front 2 : formules (`adc.dsl.Model`)
+### Formules (`adc.dsl.Model`)
 
 `adc.dsl.Model` ecrit le meme modele en formules : variables conservatives, primitives, flux, valeurs
 propres, source et contribution elliptique. Le DSL emet du C++, le compile en `.so` et renvoie un
@@ -134,9 +134,9 @@ solve_fields np=1/2/4 #93/#99 valides ; le transport production GPU+MPI multi-ra
 exerce, voir [docs/VALIDATION.md](docs/VALIDATION.md)). Les quatre chemins de modele (natif compose,
 production, aot, prototype) et leurs limites : [docs/DSL_MODEL_DESIGN.md](docs/DSL_MODEL_DESIGN.md).
 
-### Les deux fronts coincident
+### Briques et formules coincident
 
-Briques et formules sont deux fronts d'ecriture du meme modele. Sur le diocotron, la sortie DSL est
+Briques et formules decrivent le meme modele de deux facons. Sur le diocotron, la sortie DSL est
 bit-identique a la composition de briques (cas
 [`adc_cases/diocotron_dsl`](https://github.com/wolf75222/adc_cases/tree/master/diocotron_dsl)), et le
 tutoriel parcourt les deux. Le branchement differe par l'adder : `sim.add_block(...)` prend une
