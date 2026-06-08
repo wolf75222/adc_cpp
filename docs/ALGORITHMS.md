@@ -43,6 +43,7 @@ validations device GH200 : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md). Reference
 - [22. Composition runtime et systeme multi-especes](#22-composition-runtime-et-systeme-multi-especes)
 - [23. DSL symbolique : codegen, JIT, AOT](#23-dsl-symbolique--codegen-jit-aot)
 - [24. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)](#24-le-seam-de-dispatch-serie--openmp--kokkos--mpi)
+- [25. Capacites a qualifier (presentes mais limitees, ou hors master)](#25-capacites-a-qualifier-presentes-mais-limitees-ou-hors-master)
 - [Quel schema ou solveur quand](#quel-schema-ou-solveur-quand)
 - [References](#references)
 
@@ -1698,6 +1699,16 @@ vide donnent 2 boites. Validation : `test_cluster` (bloc plein -> 1 boite, deux 
 gros bloc decoupe par `max_box_size`), `test_regrid` (un niveau fin est cree autour de la region taguee,
 donnees fines interpolees depuis le grossier).
 
+**Export de la geometrie des patchs.** Le `BoxArray` fin issu du clustering est expose a Python par
+`AmrSystem.patch_boxes()` (liste de `(level, ilo, jlo, ihi, jhi)`, coins inclusifs en espace d'indices
+du niveau, ratio 2) et la facade `AmrSystem.patch_rectangles()` (conversion en rectangles physiques
+`(x0, y0, w, h)` sur `[0, L]^2`). Meme source que `n_patches()` (le meme `box_array()` global, donc
+rank-independent et MPI-safe) ; c'est une lecture entre les pas, sans cout sur le chemin chaud. Cable
+sur les deux moteurs (mono-bloc `AmrCouplerMP` et multi-bloc `AmrRuntime`). Permet de tracer les vrais
+patchs (par exemple un GIF du raffinement) sans reconstruire un proxy. Validation :
+`test_amr_patch_boxes` (cardinal egal a `n_patches`, coins coherents en index et en physique, mono et
+multi-bloc).
+
 
 ---
 
@@ -1994,7 +2005,11 @@ function residual<Model>(U, R, aux_in, n, dx, dy, periodic, lim, riem, recon_pri
 
 **Contraintes / remarques.** Le JIT type-erased coute un saut indirect par cellule (hors hot path
 haute performance) ; l'AOT marshale recopie les tableaux a chaque appel mais reste mono-rang ; l'AOT
-natif est le seul chemin zero-copie / GPU / MPI / AMR. La parite est verrouillee a chaque niveau.
+natif est le seul chemin zero-copie / GPU / MPI / AMR. Le chemin natif charge un `.so` via un loader
+([`runtime/native_loader.hpp`](../include/adc/runtime/native_loader.hpp)) qui compare une cle ABI
+(`abi_key` : signature des en-tetes, compilateur, standard C++) entre le `.so` du modele et le module
+deja charge ; une divergence est refusee proprement (pas de chargement d'un `.so` incompatible). La
+parite est verrouillee a chaque niveau.
 **Validation.** Cote C++ : `test_dynamic_model` (modele type-erased == Euler statique),
 `test_block_builder` (fermetures de bloc instanciables hors System), `test_compiled_model_parity`
 (AOT natif == bloc natif sur CPU/Serial), `test_amr_compiled_model` (AOT natif sur hierarchie AMR).
@@ -2070,6 +2085,33 @@ toute la suite ; specifiquement les tests MPI de la section 20 (`test_mpi_fillbo
 GH200 (GPU_RUNTIME_PORT.md) qui confirment que serie, OpenMP et Kokkos donnent les memes resultats
 (au choix FP de la somme Kokkos pres, documente).
 
+
+---
+
+## 25. Capacites a qualifier (presentes mais limitees, ou hors master)
+
+Ce qui existe avec une portee restreinte, ou ce qui est ecrit/concu sans etre sur `master` a la date de
+cette page. Le but est de ne pas presenter une capacite partielle comme complete.
+
+- Flux HLL au runtime. La brique `HLLFlux` existe dans le coeur (section 2). L'exposition runtime
+  `riemann="hll"` pour un modele a 3 variables (vitesses d'onde sans pression) est sur une branche
+  (PR #239), pas encore sur `master`.
+- GaussPolicy restart/evolve. Politique experimentale (reimposer Gauss a chaque pas, ou conserver le
+  `phi` evolue par Schur) sur une branche (PR #237) ; l'experience associee est ecartee. Pas sur
+  `master`.
+- Schur global sur AMR. Le pas source condense par Schur (section 13) n'a pas de pendant AMR en
+  production : un design existe (PR #232), l'implementation non. Sur AMR, le Poisson est resolu au
+  niveau grossier puis injecte vers le fin, sans solve elliptique composite multi-niveaux.
+- FFT distribuee sous System. `DistributedFFTSolver` (section 10) existe et est teste a part, mais
+  `System` en MPI np > 1 refuse la FFT proprement (pas de routage automatique) ; utiliser la
+  multigrille geometrique.
+- Poisson polaire. `PolarPoissonSolver` (FFT en theta, Thomas en r, section 16) est mono-rang et
+  mono-boite. Le chemin tensoriel/Krylov polaire (Schur polaire) leve cette limite sur son perimetre.
+- Cut-cell et fidelite Hoffart. Le cut-cell (sections 14, 15) est une capacite numerique du coeur ; il
+  n'est pas presente comme une correction prouvee des taux de croissance du benchmark Hoffart (cf.
+  [HOFFART_FIDELITY.md](HOFFART_FIDELITY.md)).
+- Energie sous Schur. Le pas Schur (section 13) ajuste l'energie cinetique si un role `Energy` est
+  declare ; le cas isotherme n'utilise pas l'equation d'energie.
 
 ---
 
