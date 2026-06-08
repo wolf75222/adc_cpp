@@ -80,8 +80,13 @@
 ///   Memes differences centrees que la divergence du RHS (coherence terme a terme a la precision du
 ///   solve, comme le SchurReconstructKernel cartesien utilise grad centre).
 ///
-/// PORTEE : mono-rang, boite UNIQUE couvrant l'anneau (comme PolarTensorKrylovSolver #210 et
-///   PolarPoissonSolver). Multi-box / MPI = HORS scope (etape 2b). Garde-fou DUR si n_ranks() > 1.
+/// PORTEE : MULTI-RANG MPI par decoupage AZIMUTAL (theta seul), comme PolarTensorKrylovSolver (#210).
+///   Le corps de step() itere deja sur local_size() partout et passe par fill_ghosts (echange de halos
+///   MPI + CL physique) pour tous les champs (bz_/a_rr_/a_tt_/a_rt_/a_tr_/fr_/ft_/phi/state) : il est
+///   structurellement distribue. Le solve elliptique (PolarTensorKrylovSolver) supporte le multi-rang
+///   sous la contrainte de decoupage theta (chaque box couvre la plage radiale complete pour le
+///   preconditionneur RadialLine ; le garde-fou check_radial_columns du solveur l'impose). Mono-rang /
+///   boite unique : chemin BIT-IDENTIQUE. Multi-box / device = differe (Extend).
 ///
 /// DEVICE. Tous les kernels sont des FONCTEURS NOMMES device-clean (recette #93 : pas de lambda etendue
 ///   premiere-instanciee cross-TU, limite nvcc #64/#97). Les tampons sont ALLOUES UNE FOIS a la
@@ -309,9 +314,11 @@ class PolarCondensedSchurSourceStepper {
         phi_n_(ba, dm_, 1, 1),
         vr_n_(ba, dm_, 1, 0), vt_n_(ba, dm_, 1, 0),
         vr_t_(ba, dm_, 1, 0), vt_t_(ba, dm_, 1, 0) {
-    if (n_ranks() != 1)
-      throw std::runtime_error(
-          "PolarCondensedSchurSourceStepper : non supporte en MPI (n_ranks>1) a l'etape 2b (mono-rang).");
+    // MULTI-RANG MPI (decoupage theta seul) : plus de garde-fou mono-rang. La contrainte de layout
+    // (chaque box couvre la plage radiale complete, exigee par le preconditionneur RadialLine du solve
+    // elliptique) est verifiee par le PolarTensorKrylovSolver construit dans step() (check_radial_columns)
+    // -> une erreur claire est levee sur tous les rangs si le decoupage coupe r. Mono-rang / boite unique :
+    // chemin inchange (le check passe trivialement, all_reduce = identite en serie).
     if (c_rho_ < 0 || c_mx_ < 0 || c_my_ < 0)
       throw std::runtime_error(
           "PolarCondensedSchurSourceStepper : le bloc fluide doit exposer les roles Density, MomentumX "

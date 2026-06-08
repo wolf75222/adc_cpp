@@ -939,12 +939,15 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   if (P->cfg.geometry != "cartesian" && !polar)
     throw std::runtime_error("System::set_source_stage : etage source condense supporte les geometries "
                              "cartesienne et polaire (recu '" + P->cfg.geometry + "')");
-  // Le pendant POLAIRE exige le mono-rang (PolarTensorKrylovSolver / PolarPoissonSolver = boite unique
-  // couvrant l'anneau ; cf. PolarCondensedSchurSourceStepper, garde-fou dur du constructeur). On le
-  // diagnostique ICI, cote facade, avant toute construction.
-  if (polar && n_ranks() != 1)
-    throw std::runtime_error("System::set_source_stage : l'etage source condense POLAIRE est mono-rang "
-                             "(n_ranks>1 non supporte a l'etape 2c ; le solveur polaire = boite unique).");
+  // L'etage source condense POLAIRE est desormais MULTI-RANG MPI (PolarTensorKrylovSolver / Schur
+  // polaire distribues par decoupage AZIMUTAL ; garde-fou de layout check_radial_columns dans le
+  // solveur). Cote FACADE, le System construit pour l'instant UNE box couvrant l'anneau (P->ba mono-box),
+  // donc sous MPI la box vit sur rang 0 et les autres rangs ont local_size()==0 : le solve reste CORRECT
+  // (collectifs dot/project_mean appeles sur tous les rangs, contributions nulles des rangs vides) et
+  // BIT-IDENTIQUE au mono-rang, mais sans parallelisme reel a ce niveau. Le decoupage theta effectif
+  // (vrai scaling multi-rang) s'exerce au niveau de l'API C++ (PolarCondensedSchurSourceStepper avec un
+  // BoxArray decoupe en theta) ; la repartition theta cote facade est differee (Extend). Aucun garde-fou
+  // mono-rang ici : le PolarTensorKrylovSolver leve une erreur claire si jamais le layout coupe r.
   // CONTRAT roles : le bloc doit exposer Density / MomentumX / MomentumY (Energy optionnel). On lit le
   // descripteur CONSERVATIF du bloc (peuple par add_block / les .so a roles, dont le DSL compile qui
   // declare les electrons en roles). Un role requis absent leve une erreur EXPLICITE ICI (avant le pas)

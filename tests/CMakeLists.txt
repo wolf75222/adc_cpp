@@ -497,6 +497,22 @@ if(ADC_HAS_MPI)
                      ${MPIEXEC_POSTFLAGS})
   endforeach()
 
+  # --- Schur POLAIRE multi-rang : PolarTensorKrylovSolver / etage Schur polaire sous MPI (decoupage
+  # AZIMUTAL). Le solveur polaire etait MONO-RANG (garde-fou dur n_ranks>1) ; il est desormais distribue
+  # par decoupage en theta (chaque box couvre la plage radiale complete pour le precond RadialLine), avec
+  # produits scalaires collectifs (all_reduce) et projection de jauge (pure-Neumann) all_reduite. Le test
+  # verifie, sur une MMS polaire (Dirichlet ET pure-Neumann), que la solution discrete -- et son erreur L2
+  # GLOBALE vs l'exact -- est INVARIANTE au decoupage theta ET au nombre de rangs (mono-box vs theta-split,
+  # ecart ~ reassociation FP des all_reduce), et que les iterations BiCGStab sont identiques sur tous les
+  # rangs (critere d'arret collectif). np=1 = parite multi-box mono-rang ; np=2/4 = cross-rang MPI.
+  add_executable(test_mpi_polar_schur test_mpi_polar_schur.cpp)
+  target_link_libraries(test_mpi_polar_schur PRIVATE adc::adc)
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_polar_schur_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_polar_schur> ${MPIEXEC_POSTFLAGS})
+  endforeach()
+
   adc_add_mpi_test(test_mpi_smoke 4)
   adc_add_mpi_test(test_mpi_array_reduce 4)
   adc_add_mpi_test(test_mpi_fillboundary 4)
