@@ -154,9 +154,9 @@ Les valeurs possibles :
   `"weno5"` (WENO5-Z, ordre 5 en zone lisse, stencil 5 points / 3 ghosts, capture sans
   oscillation pres d'un front). `weno5` n'est expose que par le chemin natif `add_block` et les
   backends compiles `aot`/`production` (le chemin JIT `prototype` le rejette) ;
-- flux de Riemann : `"rusanov"` (le plus robuste, defaut du transport scalaire), `"hllc"`,
+- flux de Riemann : `"rusanov"` (le plus stable, defaut du transport scalaire), `"hllc"`,
   `"roe"`. HLLC et Roe exigent un transport compressible (4 variables + pression) ;
-- reconstruction : `"conservative"` ou `"primitive"`. Le primitif est plus robuste pour Euler
+- reconstruction : `"conservative"` ou `"primitive"`. Le primitif est plus stable pour Euler
   (positivite de `rho` et `p`).
 
 Cote C++, les limiteurs sont des politiques dans `numerics/reconstruction.hpp` (`NoSlope`,
@@ -249,7 +249,7 @@ la cadence : le pas stable inclut le facteur stride et substeps,
 > transporte pas la cadence et rejette `stride > 1` (route explicite, pas d'ignore silencieux) ;
 > `add_block` (natif) et `backend='production'` supportent le stride.
 
-Le multirate s'obtient donc simplement en reglant `stride` (et `substeps`) par bloc. Detail :
+Le multirate s'obtient en reglant `stride` (et `substeps`) par bloc. Detail :
 [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) section 7.
 
 ## Conditions initiales

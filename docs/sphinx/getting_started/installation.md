@@ -81,7 +81,7 @@ cmake -S . -B build-omp    -DADC_USE_OPENMP=ON     # OpenMP autonome (DEPRECIE -
 cmake -S . -B build-hdf5   -DADC_USE_HDF5=ON      # DataWriter HDF5 (sortie parallele)
 ```
 
-Options reelles (cf. `CMakeLists.txt`) :
+Options (cf. `CMakeLists.txt`) :
 
 | Option CMake | Defaut | Role |
 |---|---|---|

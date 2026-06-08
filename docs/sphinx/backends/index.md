@@ -37,7 +37,7 @@ Cuda de Kokkos.
 > Python n'exerce les chemins Kokkos, OpenMP, Cuda ou MPI. Le multi-thread, le GPU et le
 > distribue se pilotent depuis la facade C++ (`System` / `AmrSystem`), pas depuis Python.
 
-## Les options CMake reelles
+## Les options CMake
 
 Verifiees dans [`CMakeLists.txt`](../../../CMakeLists.txt) :
 

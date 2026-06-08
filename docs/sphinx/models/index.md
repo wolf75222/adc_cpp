@@ -240,7 +240,7 @@ inter-especes.
   symboliquement les primitives ; on fournit l'inverse explicitement). Il genere `to_conservative`.
 
 L'operateur spatial peut alors reconstruire en variables primitives (`rho`, `u`, `p`) plutot que
-conservatives, plus robuste pour Euler (positivite de `rho` et `p`) ; voir le choix
+conservatives, plus stable pour Euler (positivite de `rho` et `p`) ; voir le choix
 `variables="primitive"` de `adc.FiniteVolume` et les details dans [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
 
 ## Flux, sources, valeurs propres, RHS elliptique

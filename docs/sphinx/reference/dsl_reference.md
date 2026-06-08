@@ -252,7 +252,7 @@ Semantique des arguments :
 |---|---|---|---|---|---|---|---|---|
 | `prototype` | JIT (`compile_so`) | `add_dynamic_block` | `IModel` virtuel, residu hote, Rusanov ordre 1 seul | oui | non | non | non | iteration rapide / debug |
 | `aot` | AOT (`compile_aot`) | `add_compiled_block` | `.so` ABI plate, chemin de production (HLLC/Roe, ordre 2, WENO5) mais grille locale mono-rang a marshaling (non zero-copie) | oui | non | non | non | defaut ; debug / bench CPU ; seul a porter les params runtime |
-| `production` | natif (`compile_native`) | `add_native_block` | loader `.so` qui inline `add_compiled_model<ProdModel>` sur le `grid_context()` reel -> zero-copie, meme chemin que `add_block`, foncteurs nommes | oui | oui | via `AmrSystem` | rapporte `False` (hote non-Kokkos) | recommande en MPI / AMR |
+| `production` | natif (`compile_native`) | `add_native_block` | loader `.so` qui inline `add_compiled_model<ProdModel>` sur le `grid_context()` -> zero-copie, meme chemin que `add_block`, foncteurs nommes | oui | oui | via `AmrSystem` | rapporte `False` (hote non-Kokkos) | recommande en MPI / AMR |
 
 Le defaut du code est `backend="aot"` : il faut demander explicitement `"production"` pour le chemin
 natif zero-copie. Les capacites sont materialisees dans `_BACKEND_CAPS` :
@@ -261,6 +261,14 @@ natif est device-clean en C++ (valide GH200, foncteurs nommes), mais la validati
 Python sur un module bati Kokkos/CUDA reste une etape dediee et le module hote teste en CI n'est pas
 bati GPU. Ces capacites sont des drapeaux de diagnostic, verifies au branchement (`add_equation`) ou
 a l'execution, et non un argument `device=` fige a la compilation.
+
+### Modeles hybrides (natif + DSL)
+
+On peut melanger des briques natives et des briques DSL partielles dans un seul modele via
+`adc.CompositeModel(transport, source, elliptic)`, qui renvoie un `dsl.HybridModel` ; son
+`.compile(backend="aot")` rend un `CompiledModel` branchable par `add_equation`. Au moins un slot doit
+etre une brique DSL (sinon utiliser `adc.Model(...)`). Catalogue des briques et exemple :
+[reference des briques](bricks_reference.md).
 
 ### Cle d'ABI (production)
 

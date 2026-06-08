@@ -1,6 +1,6 @@
 # Premier run
 
-Le plus petit programme `adc` reel : on construit un systeme periodique, on y pose un bloc
+Le plus petit programme `adc` : on construit un systeme periodique, on y pose un bloc
 diocotron compose de briques natives, on branche le Poisson de systeme, on pose une condition
 initiale numpy, on avance de quelques pas et on relit la densite. Copiable tel quel (il suppose
 seulement que le module est [installe](installation.md) et importable).

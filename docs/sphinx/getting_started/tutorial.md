@@ -56,7 +56,7 @@ avec le meme interpreteur, `numpy` installe. Sinon `ModuleNotFoundError: adc._ad
 
 ## Etape 5 : Importer et detecter le backend
 
-Le script importe `adc` et le DSL, puis affiche le backend reellement execute (serie pour un
+Le script importe `adc` et le DSL, puis affiche le backend execute (serie pour un
 module Python ; cf. [Verifier son backend](backend.md)).
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py

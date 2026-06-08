@@ -10,7 +10,7 @@ Le parcours conseille, dans l'ordre :
 - [Installation](installation.md) : build CMake du coeur, du module Python, et le piege de
   l'interpreteur (le `.so` compile est lie a une version de Python).
 - [Premier run](first_run.md) : le plus petit exemple Python, copiable tel quel.
-- [Verifier son backend](backend.md) : savoir quel backend parallele tourne vraiment
+- [Verifier son backend](backend.md) : savoir quel backend parallele tourne
   (serie par defaut ; Kokkos / MPI sont des configs de build ; GPU = ROMEO uniquement).
 - [Organisation des depots](organisation.md) : `adc_cpp` (la lib, agnostique) vs `adc_cases`
   (les scenarios nommes : diocotron, euler_poisson...).

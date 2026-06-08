@@ -189,6 +189,22 @@ sim.add_equation("gas", compiled,
 Le slot transport fixe le layout (`n_vars`, noms conservatifs, primitives, gamma) ; une brique
 DSL de source / elliptique doit declarer le meme `n_vars`. Detail : [page modeles](../models/index.md).
 
+### PythonFlux : flux ecrit en Python (prototypage hote)
+
+`adc.PythonFlux(flux, max_wave_speed)` est un backend de prototypage : l'utilisateur fournit le flux
+physique `flux(U, dir)` et la vitesse d'onde `max_wave_speed(U)` en numpy, et `PythonFlux` assemble le
+residu `-div(F*)` par flux de Rusanov (ordre 1, domaine periodique) sur tout le tableau. C'est un
+chemin hote pur (jamais un kernel Kokkos), hors du hot path GPU / MPI ; il sert a iterer sur un flux
+inedit sans recompiler (motif du cas `custom_scheme`, avec `adc.System` comme oracle de Poisson). Pour
+la production, composer un flux compile (`adc.CompressibleFlux`, `adc.ExB`, ou un modele DSL).
+
+```python
+import adc
+pf = adc.PythonFlux(flux=mon_flux, max_wave_speed=ma_vitesse)
+dUdt = pf.residual(U, dx)              # -div(F*) par Rusanov ordre 1, periodique
+dt = pf.cfl_dt(U, h, cfl=0.4)          # dt = cfl * h / max_wave_speed(U)
+```
+
 ## Schemas spatiaux (Spatial / FiniteVolume)
 
 Le schema spatial est porte par le bloc (argument `spatial=` de `add_block` / `add_equation`),
@@ -202,7 +218,7 @@ minmod=False, vanleer=False, weno5=False, primitive=False)` :
 |---|---|---|
 | `limiter` | `"none"`, `"minmod"`, `"vanleer"`, `"weno5"` | Reconstruction MUSCL (none / minmod / vanleer, 2 ghosts) ou WENO5-Z. `weno5` = ordre 5 en zone lisse, stencil 5 points -> 3 ghosts ; seul le chemin natif `add_block` (et les backends `aot` / `production` / AMR) l'exposent ; le backend `prototype` (JIT) le rejette. Raccourcis booleens `none=` / `minmod=` / `vanleer=` / `weno5=`. |
 | `flux` | `"rusanov"`, `"hllc"`, `"roe"` | Flux numerique de Riemann. `hllc` / `roe` exigent un transport compressible et une primitive `p` declaree (sur un modele compile) ; sans `p`, le branchement leve une `ValueError`. |
-| `recon` | `"conservative"`, `"primitive"` | Variables reconstruites. `primitive` est plus robuste pour Euler (positivite de `rho` et `p`). Raccourci `primitive=`. |
+| `recon` | `"conservative"`, `"primitive"` | Variables reconstruites. `primitive` est plus stable pour Euler (positivite de `rho` et `p`). Raccourci `primitive=`. |
 
 `adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")` est la fabrique
 de surface stable : elle remappe sur `adc.Spatial`. Le flux numerique s'y nomme `riemann` (et non
@@ -378,7 +394,7 @@ bloc. En multi-blocs le nom du bloc indexe `set_density(name)` / `mass(name)` / 
 | `mass` / `density` | `mass()` / `mass(name)` ; `density()` / `density(name)` -> `(nx, nx)` | Nom vide -> 1er bloc ; en multi-blocs le nom indexe le bloc. |
 | `potential` | `potential()` -> `(n, n)` | phi du niveau grossier (Poisson de systeme partage). |
 | `patch_boxes` | `patch_boxes()` (recent) | Empreintes index-space des patchs fins : liste de `(level, ilo, jlo, ihi, jhi)`, coins inclusifs, dans l'espace d'indices du niveau (`n << level` cellules/direction, ratio 2). Rank-independent (MPI-safe). |
-| `patch_rectangles` | `patch_rectangles()` (recent) | Convertit `patch_boxes()` en rectangles physiques `(x0, y0, w, h)` dans `[0, L]^2` (un par patch fin). Pratique pour tracer les patchs reels (p.ex. `matplotlib.Rectangle`). |
+| `patch_rectangles` | `patch_rectangles()` (recent) | Convertit `patch_boxes()` en rectangles physiques `(x0, y0, w, h)` dans `[0, L]^2` (un par patch fin). Pratique pour tracer les patchs (p.ex. `matplotlib.Rectangle`). |
 
 ```{note}
 `patch_boxes()` / `patch_rectangles()` exposent la geometrie des patchs fins (ajout

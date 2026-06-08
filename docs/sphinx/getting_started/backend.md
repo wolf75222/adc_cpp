@@ -2,7 +2,7 @@
 
 Le meme code source de `adc_cpp` cible plusieurs backends de parallelisme, choisis a la
 compilation : serie, OpenMP (deprecie), Kokkos (CPU Serial/OpenMP, GPU CUDA/HIP) et MPI. Cette
-page explique comment savoir lequel tourne reellement, car la reponse n'est pas toujours celle
+page explique comment savoir lequel tourne, car la reponse n'est pas toujours celle
 qu'on croit.
 
 ## La regle d'or : le backend est fixe a la compilation
@@ -24,14 +24,14 @@ documente dans la matrice [`BACKEND_COVERAGE.md`](https://github.com/wolf75222/a
 Le tutoriel l'affiche d'ailleurs au demarrage : il sonde quelques attributs optionnels du module
 (`backend`, `parallel_backend`, `build_info`) et, faute d'un tel attribut, retombe explicitement
 sur la mention "serial (defaut)". Le module ne ment pas sur son parallelisme ; il n'expose
-simplement pas (encore) de drapeau de backend cote Python. Le seul diagnostic d'ABI exporte est
+pas (encore) de drapeau de backend cote Python. Le seul diagnostic d'ABI exporte est
 `adc.abi_key()` (compilateur + standard C++ + signature des en-tetes), qui sert au DSL natif,
 pas a identifier le backend de dispatch.
 
-Pour du parallelisme reel, c'est la facade C++ qu'il faut compiler avec le backend voulu, et
+Pour du parallelisme, c'est la facade C++ qu'il faut compiler avec le backend voulu, et
 y porter le calcul cote C++ (tests, executables, ou un cas `adc_cases` compile en natif).
 
-## Couverture reelle des backends
+## Couverture des backends
 
 | Backend | Comment l'obtenir | Ou il est valide |
 |---|---|---|

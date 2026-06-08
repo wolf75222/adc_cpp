@@ -2,39 +2,39 @@
 """Tutoriel canonique adc_cpp : instabilite diocotron reduite (derive E x B), de bout en bout.
 
 Ce script est la SOURCE de verite du tutoriel A->Z de la documentation Sphinx : la page
-``getting_started/tutorial`` l'inclut par ``literalinclude`` (le code de la doc N'EST PAS recopie
-a la main). Il est volontairement AUTONOME : il ne depend que de ``adc`` (le module compile),
-``numpy`` et ``matplotlib`` -- aucune dependance au paquet applicatif ``adc_cases``.
+`getting_started/tutorial` l'inclut par `literalinclude` (le code de la doc N'EST PAS recopie
+a la main). Il est volontairement AUTONOME : il ne depend que de `adc` (le module compile),
+`numpy` et `matplotlib` -- aucune dependance au paquet applicatif `adc_cases`.
 
 Ce qu'il fait, dans l'ordre du tutoriel
 ---------------------------------------
-1. importe ``adc`` et detecte le backend reellement execute ;
-2. ECRIT LE MODELE EN FORMULES avec ``adc.dsl.Model`` (variable conservative, champs auxiliaires
+1. importe `adc` et detecte le backend execute ;
+2. ECRIT LE MODELE EN FORMULES avec `adc.dsl.Model` (variable conservative, champs auxiliaires
    phi/grad, flux d'advection E x B, valeurs propres, second membre elliptique) ;
-3. COMPILE le modele : essaie le backend ``production`` (chemin natif zero-copie, prefere) puis
-   retombe sur ``aot`` (numeriquement identique, host-marshale) -- exactement comme les cas reels ;
-4. construit un ``adc.System`` periodique, choisit le schema (MUSCL minmod + Rusanov, explicite),
+3. COMPILE le modele : essaie le backend `production` (chemin natif zero-copie, prefere) puis
+   retombe sur `aot` (numeriquement identique, host-marshale) -- exactement comme les cas ;
+4. construit un `adc.System` periodique, choisit le schema (MUSCL minmod + Rusanov, explicite),
    branche le Poisson de systeme (densite de charge, multigrille) et pose la condition initiale ;
 5. integre en temps en capturant des diagnostics (amplitude de la perturbation, masse) ;
 6. produit les figures : une COURBE (amplitude vs temps), une CARTE 2D (densite finale), un GIF, et
-   une COMPARAISON uniforme/AMR (``adc.AmrSystem`` raffine vs grille uniforme) ;
+   une COMPARAISON uniforme/AMR (`adc.AmrSystem` raffine vs grille uniforme) ;
 7. ecrit un enregistrement de provenance (SHA adc_cpp, backend, resolution, commande) a cote des
    figures, pour que chaque asset soit reproductible.
 
 Physique (modele REDUIT, pas le systeme Euler-Poisson complet)
 --------------------------------------------------------------
-Une seule variable conservative, la densite ``n``, advectee par la derive E x B
-``v = (-d_y phi / B0, d_x phi / B0)`` (a divergence nulle), ou ``phi`` resout le Poisson de systeme
-``-lap phi = alpha (n - n_i0)`` (fond ionique neutralisant ``n_i0``). Conventions ancrees dans le
-coeur : ``include/adc/physics/hyperbolic.hpp`` (``ExBVelocity``) et ``.../elliptic.hpp``
-(``BackgroundDensity``). C'est le benchmark de NORMALISATION du diocotron, pas une reproduction du
-systeme complet (cf. ``adc_cases/diocotron`` et ``docs/HOFFART_FIDELITY.md``).
+Une seule variable conservative, la densite `n`, advectee par la derive E x B
+`v = (-d_y phi / B0, d_x phi / B0)` (a divergence nulle), ou `phi` resout le Poisson de systeme
+`-lap phi = alpha (n - n_i0)` (fond ionique neutralisant `n_i0`). Conventions ancrees dans le
+coeur : `include/adc/physics/hyperbolic.hpp` (`ExBVelocity`) et `.../elliptic.hpp`
+(`BackgroundDensity`). C'est le benchmark de NORMALISATION du diocotron, pas une reproduction du
+systeme complet (cf. `adc_cases/diocotron` et `docs/HOFFART_FIDELITY.md`).
 
 Usage
 -----
     python diocotron_tutorial.py [--n 96] [--steps 60] [--outdir _assets] [--quick]
 
-``--quick`` reduit la resolution et le nombre de pas pour un passage de fumee rapide (CI doc).
+`--quick` reduit la resolution et le nombre de pas pour un passage de fumee rapide (CI doc).
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ ADC_INCLUDE = os.environ.get("ADC_INCLUDE", str(REPO_ROOT / "include"))
 # --- 2. Le modele, ECRIT EN FORMULES (adc.dsl.Model) -----------------------------------------------
 def diocotron_model(n_i0: float) -> "dsl.Model":
     """Modele diocotron reduit en formules symboliques, reproduisant les briques natives
-    ``ExBVelocity`` (transport) et ``BackgroundDensity`` (elliptique). ``n_i0`` = fond ionique
+    `ExBVelocity` (transport) et `BackgroundDensity` (elliptique). `n_i0` = fond ionique
     neutralisant (moyenne de la densite, pour la solubilite du Poisson periodique)."""
     m = dsl.Model("diocotron_tutorial")
 
@@ -89,8 +89,8 @@ def diocotron_model(n_i0: float) -> "dsl.Model":
 def native_diocotron_model(n_i0: float):
     """Le MEME diocotron, mais compose de briques natives au lieu de formules : Scalar (etat) +
     ExB (transport E x B) + NoSource + BackgroundDensity (second membre elliptique alpha (n - n_i0)).
-    C'est l'autre facon d'ecrire un modele -- on prouve plus bas (``native_vs_dsl``) qu'elle produit
-    un etat BIT-IDENTIQUE aux formules. Conventions C++ : ``ExBVelocity`` et ``BackgroundDensity``."""
+    C'est l'autre facon d'ecrire un modele -- on prouve plus bas (`native_vs_dsl`) qu'elle produit
+    un etat BIT-IDENTIQUE aux formules. Conventions C++ : `ExBVelocity` et `BackgroundDensity`."""
     return adc.Model(state=adc.Scalar(),
                      transport=adc.ExB(B0=B0),
                      source=adc.NoSource(),
@@ -100,7 +100,7 @@ def native_diocotron_model(n_i0: float):
 # --- 4. Condition initiale (bande de charge perturbee, mode azimutal) -------------------------------
 def band_density(n: int, L: float = 1.0, amp: float = 1.0, width: float = 0.05,
                  mode: int = 2, disp: float = 0.02, floor: float = 1.0) -> np.ndarray:
-    """Bande horizontale de charge perturbee sinusoidalement le long de x (convention ``ne[j, i]``).
+    """Bande horizontale de charge perturbee sinusoidalement le long de x (convention `ne[j, i]`).
 
         ne(x, y) = floor + amp exp(-(y - y0)^2 / width^2),  y0 = 0.5 L + disp cos(2 pi mode x / L).
     """
@@ -121,14 +121,14 @@ def perturbation_amplitude(density: np.ndarray) -> float:
 
 # --- 3+4. Compilation + branchement : production (natif) si possible, sinon aot (identique) ----------
 def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Path):
-    """Compile le modele DSL ET le branche dans un ``adc.System`` periodique.
+    """Compile le modele DSL ET le branche dans un `adc.System` periodique.
 
-    Essaie d'abord ``production`` (chemin natif zero-copie ``add_native_block``, la cible du plan),
-    puis retombe sur ``aot`` (``add_compiled_block``, numeriquement identique, host-marshale) --
-    exactement la strategie des cas reels (cf. ``adc_cases/diocotron_dsl``). Le chemin natif exige
-    que le module ``_adc`` et le ``.so`` du modele aient ETE COMPILES AVEC LES MEMES EN-TETES adc
+    Essaie d'abord `production` (chemin natif zero-copie `add_native_block`, la cible du plan),
+    puis retombe sur `aot` (`add_compiled_block`, numeriquement identique, host-marshale) --
+    exactement la strategie des cas (cf. `adc_cases/diocotron_dsl`). Le chemin natif exige
+    que le module `_adc` et le `.so` du modele aient ETE COMPILES AVEC LES MEMES EN-TETES adc
     (garde d'ABI) ; un module frais (construit comme dans getting_started/installation) prend le
-    chemin natif, sinon le ``aot`` s'applique. Renvoie (sim, backend_retenu)."""
+    chemin natif, sinon le `aot` s'applique. Renvoie (sim, backend_retenu)."""
     last = None
     for backend in ("production", "aot"):
         try:
@@ -149,7 +149,7 @@ def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Pat
 
 
 def run(sim, steps: int, cfl: float, capture_every: int):
-    """Integre ``steps`` pas, capture des trames + l'amplitude au fil du temps."""
+    """Integre `steps` pas, capture des trames + l'amplitude au fil du temps."""
     frames = [np.asarray(sim.density("ne")).copy()]
     times = [sim.time()]
     amps = [perturbation_amplitude(frames[0])]
@@ -206,7 +206,7 @@ def make_figures(frames, times, amps, ne0, L, outdir: Path):
 
 # --- 6bis. Comparaison uniforme vs AMR --------------------------------------------------------------
 def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
-    """Rejoue la MEME physique sur une grille uniforme et sur ``adc.AmrSystem`` (raffinement adaptatif),
+    """Rejoue la MEME physique sur une grille uniforme et sur `adc.AmrSystem` (raffinement adaptatif),
     et trace les deux densites finales cote a cote. On utilise la composition NATIVE de briques pour
     cette comparaison (les deux chemins, uniforme et AMR, partagent exactement le meme modele)."""
     import matplotlib
@@ -240,11 +240,11 @@ def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
 
 # --- 6ter. La meme physique, deux fronts : briques == DSL (bit-identique) ---------------------------
 def native_vs_dsl(dsl_final: np.ndarray, ne0, n_i0, L, steps, cfl, outdir: Path):
-    """Rejoue la MEME physique en BRIQUES natives (``native_diocotron_model``) sur la meme grille / le
+    """Rejoue la MEME physique en BRIQUES natives (`native_diocotron_model`) sur la meme grille / le
     meme schema / le meme nombre de pas que le run DSL, et compare l'etat final aux FORMULES. Les deux
     fronts d'ecriture (briques et formules) produisent un noyau numerique IDENTIQUE : l'ecart est nul a
-    la precision binaire. Trace les deux cartes cote a cote avec ``max|ecart|`` en titre, et renvoie
-    cet ecart (asserte nul dans ``main``)."""
+    la precision binaire. Trace les deux cartes cote a cote avec `max|ecart|` en titre, et renvoie
+    cet ecart (asserte nul dans `main`)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -278,7 +278,7 @@ def git_sha(path: Path) -> str:
 
 
 def detect_backend_runtime() -> str:
-    """Backend de parallelisme reellement compile dans le module (cf. getting_started/backend)."""
+    """Backend de parallelisme compile dans le module (cf. getting_started/backend)."""
     for attr in ("backend", "parallel_backend", "build_info"):
         val = getattr(adc, attr, None)
         if callable(val):

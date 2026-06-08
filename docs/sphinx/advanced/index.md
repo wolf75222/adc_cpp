@@ -199,7 +199,7 @@ source condense.
 
 - Conception detaillee (les cinq niveaux, la non-symetrie de l'operateur tensoriel, la
   question du solveur Krylov) : [SCHUR_CONDENSATION_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/SCHUR_CONDENSATION_DESIGN.md)
-  (banniere : `IMPLEMENTE` ; le document est la spec d'origine, lu comme historique de
+  (banniere : `implemente` ; le document est la spec d'origine, lu comme historique de
   conception).
 - Proprietes de conservation du chemin Schur cartesien (valeurs mesurees) :
   [CONSERVATION_SUMMARY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CONSERVATION_SUMMARY.md).
@@ -284,7 +284,7 @@ concept PhysicalModel =
 
 Toutes ces methodes doivent etre `ADC_HD` (host/device) si elles sont appelees dans des
 kernels. L'extension optionnelle `HasPrimitiveVars` ajoute `to_primitive` / `to_conservative`
-(reconstruction en variables primitives, plus robuste pour Euler : positivite de rho et p),
+(reconstruction en variables primitives, plus stable pour Euler : positivite de rho et p),
 et `HyperbolicPhysicalModel` ajoute le descripteur de variables (`conservative_vars()` /
 `primitive_vars()`). Une fois la brique conforme, elle se compose dans un `CompositeModel`
 et s'expose au runtime comme les briques existantes.
@@ -329,7 +329,7 @@ cout de lancement de chaque kernel ecrase le calcul utile), et sur GPU la latenc
 lancement domine (ni un GPU plus large ni des GPU en plus n'aident, d'autant que le layout
 `System` est mono-box).
 
-> **Regle du proprietaire.** Aucun refactor de performance sans profil montrant le goulot.
+Pas de refactor de performance sans un profil montrant le goulot.
 > `PROFILE_RESULTS.md` rapporte les mesures et pointe une cible (le dispatch du V-cycle sur
 > les niveaux grossiers) ; il n'applique aucune optimisation.
 

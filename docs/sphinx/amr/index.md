@@ -189,7 +189,7 @@ DSL production multi-bloc (`test_amr_multiblock_compiled`), IMEX (`test_amr_mult
 sources couplees (`test_amr_multiblock_coupled_source`), substeps (`test_amr_multiblock_substeps`),
 regrid d'union (`test_amr_multiblock_regrid_union`) et parite MPI np=1/2/4
 (`test_mpi_amr_twoblock_parity`). Detail : [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) section 8 et
-le bandeau "STATUT : IMPLEMENTE" en tete de [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
+le bandeau "STATUT : implemente" en tete de [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
 
 ## Limites actuelles
 
@@ -199,7 +199,7 @@ Ce que l'AMR ne fait pas encore.
   reconstruit que le niveau le plus fin ; au-dela de 2 niveaux, le regrid multi-niveaux n'existe
   pas encore, meme en mono-bloc.
 - **Poisson "coarse + inject".** Le Poisson est resolu sur le grossier puis injecte vers le
-  fin, ce n'est pas un vrai solve elliptique multi-niveaux (composite). C'est suffisant pour
+  fin, ce n'est pas un solve elliptique composite multi-niveaux. C'est suffisant pour
   l'observable diocotron (qui vit sur un cercle median resolu par le grossier) mais a connaitre.
 - **Pas d'etage Schur global sur AMR.** Le splitting source condense par Schur (`adc.Split`,
   `CondensedSchur`) n'a pas de pendant AMR : `AmrSystem.add_block` / `add_equation` le
@@ -219,7 +219,7 @@ Ce que l'AMR ne fait pas encore.
 - **Cut-cell / polaire hors scope AMR.** Les parois cut-cell et la geometrie polaire sont des
   chantiers du `System` (mono-niveau) ; elles ne sont pas portees sur la hierarchie AMR.
 
-Frontiere de conception (Phase 2 / Phase 3) : criteres de raffinement par bloc, vrai solve
+Frontiere de conception (Phase 2 / Phase 3) : criteres de raffinement par bloc, solve
 elliptique composite multi-niveaux, et (beaucoup plus loin) hierarchies distinctes par espece
 avec projections conservatives. Detail :
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) section 7.
