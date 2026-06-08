@@ -33,6 +33,9 @@ Couplage inter-especes (#131, #167) :
     add_collision / add_thermal_exchange cote C++. compile(verify_conservation=True) controle
     la propriete symboliquement sur l'ensemble des termes (add et add_pair).
 """
+import os
+import shutil
+
 import numpy as np
 
 
@@ -182,6 +185,68 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
     tag = hashlib.sha256(rest).hexdigest()[:16]
     fname = "%s-%s.so" % ((model_hash or "nohash")[:16], tag)
     return os.path.join(adc_cache_dir(), fname)
+
+
+def _native_kokkos_root():
+    """Racine Kokkos optionnelle pour compiler les loaders DSL production avec le MEME backend que le
+    module _adc. Sans cette variable, comportement historique (serie) conserve. cf. _native_kokkos_flags."""
+    for key in ("ADC_KOKKOS_ROOT", "Kokkos_ROOT", "KOKKOS_ROOT"):
+        root = os.environ.get(key)
+        if root and os.path.isfile(os.path.join(root, "include", "Kokkos_Core.hpp")):
+            return root
+    return None
+
+
+def _native_feature_key():
+    """Traits qui changent le code inline du loader natif et doivent donc entrer dans le cache (sinon
+    un .so SERIE en cache serait reutilise sur un module Kokkos -> fallback serie silencieux)."""
+    return "kokkos=%s" % ("on" if _native_kokkos_root() else "off")
+
+
+def _env_truthy(value):
+    return str(value or "").strip().lower() in ("1", "on", "true", "yes", "y")
+
+
+def _native_kokkos_compiler(cxx):
+    """Compilateur effectif du loader natif. CUDA doit etre EXPLICITE (ADC_KOKKOS_CXX=<nvcc_wrapper>
+    ou ADC_KOKKOS_USE_NVCC_WRAPPER=1) : beaucoup d'installs Kokkos OpenMP fournissent aussi un
+    nvcc_wrapper, le choisir d'office casserait les jobs CPU sans nvcc. Pour Kokkos OpenMP, l'hote suffit."""
+    if cxx:
+        return cxx
+    env = os.environ.get("ADC_KOKKOS_CXX")
+    if env:
+        return env
+    root = _native_kokkos_root()
+    wrapper = os.path.join(root, "bin", "nvcc_wrapper") if root else ""
+    if wrapper and os.path.exists(wrapper) and _env_truthy(os.environ.get("ADC_KOKKOS_USE_NVCC_WRAPPER")):
+        return wrapper
+    return shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+
+
+def _native_kokkos_flags():
+    """Flags compile/link pour que le loader DSL production instancie add_compiled_model AVEC Kokkos.
+
+    Le loader contient les templates header-only (make_block / assemble_rhs / for_each_cell). Compile
+    sans ADC_HAS_KOKKOS alors que _adc l'est AVEC Kokkos, le bloc DSL reste zero-copie mais ses kernels
+    sont instancies sur le fallback SERIE (ne scale pas threads/GPU). ADC_KOKKOS_ROOT force la parite."""
+    root = _native_kokkos_root()
+    if not root:
+        return [], []
+    inc = os.path.join(root, "include")
+    compile_flags = ["-DADC_HAS_KOKKOS", "-DKOKKOS_DEPENDENCE", "-I", inc]
+    # NE PAS linker libkokkos* DANS le .so : le module _adc a deja charge le runtime Kokkos, un
+    # SINGLETON (registre global des execution spaces), et add_native_block le promeut en portee
+    # globale (RTLD_GLOBAL). Linker une 2e copie de Kokkos dans le loader donne deux runtimes : le
+    # calcul tourne, mais a la sortie Kokkos::finalize() abort "Execution space instance to be removed
+    # couldn't be found!" (SIGABRT, atexit). On laisse donc les symboles Kokkos INDEFINIS dans le .so
+    # (resolus au chargement contre le module, comme install_block/grid_context). Seuls -fopenmp (le
+    # backend OpenMP du noyau genere) + -ldl/-pthread restent. Validation ROMEO : DSL warm scale et
+    # sortie propre (exit 0), ratio ~0.96x les briques.
+    link_flags = ["-ldl", "-pthread"]
+    if "nvcc_wrapper" not in os.path.basename(_native_kokkos_compiler(None) or ""):
+        compile_flags.append("-fopenmp")
+        link_flags.append("-fopenmp")
+    return compile_flags, link_flags
 
 
 # --- Canal aux : disposition canonique --------------------------------------
@@ -1170,15 +1235,30 @@ class HyperbolicModel:
         if include is None:
             include = adc_include()
         src = self.emit_cpp_native_loader(name=name, target=target)
-        cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        cc = _native_kokkos_compiler(cxx)
         if not cc:
             raise RuntimeError("compile_native : aucun compilateur C++ trouve")
         sig = adc_header_signature(include)
-        # Les symboles System hors-ligne (install_block/grid_context/ensure_aux_width) sont resolus au
-        # CHARGEMENT contre le module _adc deja charge (add_native_block le promeut en portee globale).
         # -DADC_HEADER_SIG : MEME signature que le build du module (concordance des cles d'ABI).
-        flags = ["-shared", "-fPIC", "-std=" + std, "-O2",
-                 "-DADC_HEADER_SIG=\"%s\"" % sig]
+        #
+        # (1) PARITE DE BACKEND (le plus important pour le scaling) : si _adc est compile avec Kokkos
+        # (OpenMP/CUDA), le loader DOIT l'etre aussi. Les templates header-only (assemble_rhs /
+        # for_each_cell) compiles SANS -DADC_HAS_KOKKOS s'instancient sur le fallback SERIE : le bloc
+        # DSL reste zero-copie mais ne scale PAS avec les threads/GPU (mesure ROMEO : DSL warm ~341 ms
+        # invariant threads=1/4/8 alors que le natif scale 292->239->177). _native_kokkos_flags() ajoute
+        # -DADC_HAS_KOKKOS + includes/libs Kokkos + -fopenmp quand ADC_KOKKOS_ROOT (ou Kokkos_ROOT)
+        # pointe une install ; sinon comportement historique serie. Le compilateur suit le backend :
+        # g++ (OpenMP) par defaut, nvcc_wrapper SEULEMENT si explicite (CUDA).
+        #
+        # (2) PARITE D'OPTIMISATION : a -O2 sans -DNDEBUG le noyau genere est ~1.48x le natif (asserts
+        # hot-loop + vecto faible) ; -O3 -DNDEBUG => parite (mesure ROMEO CV<1%, ratio 1.04x). Ces
+        # flags n'affectent NI l'ABI NI la portabilite. $ADC_DSL_OPTFLAGS surcharge (ex. ajouter
+        # -march=native : le .so etant JIT-compile sur la machine -> ~0.88x du natif generique ; non
+        # defaut car cache .so partage reutilise sur une micro-archi differente = risque illegal-instr).
+        kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+        optflags = os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG").split()
+        flags = ["-shared", "-fPIC", "-std=" + std, *optflags,
+                 "-DADC_HEADER_SIG=\"%s\"" % sig, *kokkos_compile_flags]
         # macOS/Apple-ld : il FAUT autoriser explicitement les indefinis (resolus a l'execution). Sur
         # ELF/Linux, -shared autorise deja les indefinis ; '-undefined dynamic_lookup' n'est PAS une
         # option ld GNU (elle creerait un symbole indefini parasite 'dynamic_lookup'), donc darwin SEUL.
@@ -1188,7 +1268,8 @@ class HyperbolicModel:
             cpp = os.path.join(tmp, "model_native.cpp")
             with open(cpp, "w") as f:
                 f.write(src)
-            subprocess.run([cc, *flags, "-I", include, cpp, "-o", so_path], check=True)
+            subprocess.run([cc, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
+                           check=True)
         return so_path
 
     def compile_or_jit(self, so_path, include=None, mode="jit", name=None, cxx=None, std="c++20",
@@ -1366,9 +1447,15 @@ class HyperbolicModel:
         # recompilation. Cache MISS -> compilation dans le chemin keye (donc stockee pour la prochaine
         # fois). so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
         if so_path is None:
-            eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+            # Pour le chemin natif (production), le compilateur/backend suit Kokkos reel, et la
+            # feature-key (kokkos on/off) entre dans la cle de cache : un .so SERIE ne doit pas etre
+            # reutilise sur un module Kokkos (sinon fallback serie silencieux, le bloc ne scale pas).
+            native = (backend == "production")
+            eff_cxx = (_native_kokkos_compiler(cxx) if native
+                       else cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
             abi_key = _abi_key_python(include, eff_cxx, std)
-            so_path = _cache_so_path(self._model_hash(), abi_key, backend, target, name)
+            cache_backend = (backend + ";" + _native_feature_key()) if native else backend
+            so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
                 return so_path  # cache HIT : .so deja compilee pour cette cle, on la reutilise telle quelle
 
@@ -1749,7 +1836,11 @@ class Model:
             raise ValueError("compile : target='amr_system' n'existe que pour backend='production' "
                              "(chemin natif AMR) ; recu backend=%r" % (backend,))
         eff_std = std if std is not None else (loader_cxx_std() if mode == "native" else "c++20")
-        eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        native = (mode == "native")
+        # natif : compilateur/backend suivant Kokkos reel (cf. compile_native), pour que la cle de
+        # cache calculee ici CONCORDE avec le .so reellement produit par le moteur.
+        eff_cxx = (_native_kokkos_compiler(cxx) if native
+                   else cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
         if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
             include = adc_include()
 
@@ -1768,7 +1859,10 @@ class Model:
         # compilation. so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
         cache_hit = False
         if so_path is None:
-            so_path = _cache_so_path(model_hash, abi_key, backend, target, name)
+            # feature-key kokkos dans la cle (cf. compile_native) : un .so SERIE n'est pas reutilise
+            # sur un module Kokkos. DOIT matcher la cle du moteur, sinon recompilations a repetition.
+            cache_backend = (backend + ";" + _native_feature_key()) if native else backend
+            so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             cache_hit = os.path.exists(so_path)
 
         if cache_hit:
@@ -2205,31 +2299,43 @@ class HybridModel:
         if std is None:  # le loader natif partage l'ABI du module (norme derivee du loader : c++20 sous
             # Kokkos, c++23 sinon, cf. loader_cxx_std/compile_native) ; jit/aot restent en c++20.
             std = loader_cxx_std() if mode == "native" else "c++20"
-        eff_cxx = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        # NATIF (production) : meme parite que compile_native -- compilateur suivant le backend Kokkos
+        # (g++ par defaut, nvcc_wrapper si explicite), -O3 -DNDEBUG, flags Kokkos sans linker libkokkos
+        # (runtime unique), feature-key kokkos dans le cache. jit/aot restent inchanges (-O2, hote).
+        native = (mode == "native")
+        eff_cxx = (_native_kokkos_compiler(cxx) if native
+                   else cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
         if not eff_cxx:
             raise RuntimeError("HybridModel.compile : aucun compilateur C++ trouve")
         model_hash = self._model_hash()
         abi_key = _abi_key_python(include, eff_cxx, std)
         if so_path is None:
-            so_path = _cache_so_path(model_hash, abi_key, "hybrid-" + backend, target, name)
+            cache_backend = (("hybrid-" + backend + ";" + _native_feature_key()) if native
+                             else "hybrid-" + backend)
+            so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
                 return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
 
-        flags = ["-shared", "-fPIC", "-std=" + std, "-O2"]
+        optflags = os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG").split() if native else ["-O2"]
+        flags = ["-shared", "-fPIC", "-std=" + std, *optflags]
+        kokkos_link_flags = []
         if mode == "jit":
             source = self._emit_jit_source()
         elif mode == "aot":
             source = self._emit_aot_source()
-        else:  # native : bake la signature des en-tetes (concordance des cles d'ABI) ; indefinis resolus
-            source = self._emit_native_source(target=target)  # au chargement contre le module _adc deja charge.
+        else:  # native : signature en-tetes + parite backend Kokkos (cf. compile_native / _native_kokkos_flags)
+            source = self._emit_native_source(target=target)  # indefinis resolus au chargement (module _adc)
             flags.append('-DADC_HEADER_SIG="%s"' % adc_header_signature(include))
+            kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+            flags += kokkos_compile_flags
             if sys.platform == "darwin":  # Apple-ld : autoriser explicitement les indefinis (cf. compile_native)
                 flags += ["-undefined", "dynamic_lookup"]
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_hybrid.cpp")
             with open(cpp, "w") as f:
                 f.write(source)
-            subprocess.run([eff_cxx, *flags, "-I", include, cpp, "-o", so_path], check=True)
+            subprocess.run([eff_cxx, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
+                           check=True)
         return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
 
     def _compiled_model(self, so_path, backend, target, abi_key, model_hash, cxx, std):
