@@ -97,20 +97,27 @@
 /// BiCGStab a une empreinte memoire FIXE (r, rhat, p, v, s, t, + les preconditionnes phat/shat) et ne
 /// stocke pas de base de Krylov croissante.
 ///
-/// PORTEE : MULTI-RANG MPI par decoupage AZIMUTAL (theta seul). Les produits scalaires (dot/norme L2)
-/// sont collectifs (all_reduce via mf_arith::dot) et local_size()==0-safe ; la matvec passe par
-/// fill_ghosts (echange de halos MPI + CL physique) ; la projection de jauge project_mean est all_reduit
-/// sur tous les rangs (numerateur + denominateur). Le preconditionneur RadialLine (Thomas en r) exige
-/// qu'une LIGNE RADIALE entiere (colonne i=0..nr-1 a theta fixe) tienne dans UNE box (sinon le sweep
-/// sequentiel en r franchirait une frontiere de box/rang) : on impose donc que CHAQUE box couvre la
-/// PLAGE RADIALE COMPLETE du domaine (decoupage en theta uniquement). C'est le compromis le plus SIMPLE
-/// et CORRECT (mirroir de l'exigence "colonne complete" du solveur FFT direct) ; un decoupage qui coupe
-/// r est REFUSE par un garde-fou explicite (au lieu d'un resultat faux silencieux). Le decoupage theta
-/// est legitime : theta est la direction PERIODIQUE et le mode azimutal porteur du diocotron ; couper r
-/// (peu de cellules, fort couplage radial) serait de toute facon contre-productif. Si un decoupage qui
-/// coupe r est requis, le repli Jacobi (PolarPrecond::Jacobi, par cellule, MPI-trivial) reste valide
-/// sans contrainte de layout. MONO-RANG / BOITE UNIQUE : chemin BIT-IDENTIQUE (all_reduce = identite en
-/// serie ; la boucle local_size() = la boucle fab(0) quand il n'y a qu'une box couvrant tout l'anneau).
+/// PORTEE : MULTI-RANG MPI ET MULTI-BOX (plusieurs boites PAR RANG) par decoupage AZIMUTAL (theta seul)
+/// pour le precond RadialLine, ou par PAVAGE 2D LIBRE (r ET theta) pour le precond Jacobi. Les produits
+/// scalaires (dot/norme L2) sont collectifs (all_reduce via mf_arith::dot) et local_size()==0-safe ; ils
+/// bouclent sur TOUTES les boites locales (mf_arith). La matvec passe par fill_ghosts (echange de halos
+/// MPI + CL physique) qui remplit aussi les COINS DIAGONAUX p(i+-1, j+-1) entre boites adjacentes -- lus
+/// par les TERMES CROISES a_rt/a_tr du stencil a 9 POINTS (fill_boundary enumere les 8 directions de
+/// shift, fill_physical_bc etend la CL radiale dans la halo theta : sans ce coin, le terme croise serait
+/// FAUX au bord de box, cf. test_polar_schur_multibox). La projection de jauge project_mean accumule
+/// sum/vol sur TOUTES les boites locales puis all_reduit (numerateur + denominateur). Le precond
+/// RadialLine (Thomas en r) exige qu'une LIGNE RADIALE entiere (colonne i=0..nr-1 a theta fixe) tienne
+/// dans UNE box (sinon le sweep sequentiel en r franchirait une frontiere de box) : on impose donc que
+/// CHAQUE box couvre la PLAGE RADIALE COMPLETE du domaine (decoupage en theta uniquement, MAIS un nombre
+/// QUELCONQUE de boites theta par rang). M^{-1} est alors BLOC-DIAGONAL en box (aucune communication le
+/// long de r) ; les tridiagonales sont par BOX LOCALE (line_*_[li]). Un decoupage qui coupe r SOUS
+/// RadialLine est REFUSE par un garde-fou explicite (check_radial_columns, au lieu d'un faux silencieux).
+/// Le repli Jacobi (PolarPrecond::Jacobi, par cellule) n'a AUCUNE contrainte de layout : il accepte un
+/// PAVAGE 2D complet (coupe r ET theta), au prix d'un nombre d'iterations croissant en 1/h^2. Le
+/// decoupage theta est de toute facon legitime : theta est la direction PERIODIQUE et le mode azimutal
+/// porteur du diocotron ; couper r (peu de cellules, fort couplage radial) serait contre-productif.
+/// MONO-RANG / BOITE UNIQUE : chemin BIT-IDENTIQUE (all_reduce = identite en serie ; la boucle
+/// local_size() = la boucle fab(0) quand il n'y a qu'une box couvrant tout l'anneau).
 ///
 /// ADDITIF : aucun chemin existant n'est touche. Le PolarPoissonSolver scalaire DIRECT reste INTOUCHE
 /// (chemin separe) ; le Schur CARTESIEN reste BIT-IDENTIQUE. Ce header est OPT-IN (etape 2b = wiring

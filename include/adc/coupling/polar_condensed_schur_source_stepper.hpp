@@ -80,13 +80,17 @@
 ///   Memes differences centrees que la divergence du RHS (coherence terme a terme a la precision du
 ///   solve, comme le SchurReconstructKernel cartesien utilise grad centre).
 ///
-/// PORTEE : MULTI-RANG MPI par decoupage AZIMUTAL (theta seul), comme PolarTensorKrylovSolver (#210).
-///   Le corps de step() itere deja sur local_size() partout et passe par fill_ghosts (echange de halos
-///   MPI + CL physique) pour tous les champs (bz_/a_rr_/a_tt_/a_rt_/a_tr_/fr_/ft_/phi/state) : il est
-///   structurellement distribue. Le solve elliptique (PolarTensorKrylovSolver) supporte le multi-rang
-///   sous la contrainte de decoupage theta (chaque box couvre la plage radiale complete pour le
-///   preconditionneur RadialLine ; le garde-fou check_radial_columns du solveur l'impose). Mono-rang /
-///   boite unique : chemin BIT-IDENTIQUE. Multi-box / device = differe (Extend).
+/// PORTEE : MULTI-RANG MPI ET MULTI-BOX (plusieurs boites PAR RANG) par decoupage AZIMUTAL (theta seul),
+///   comme PolarTensorKrylovSolver (#210). Le corps de step() itere deja sur local_size() partout et
+///   passe par fill_ghosts (echange de halos MPI + CL physique, COINS DIAGONAUX inclus pour les termes
+///   croises du stencil a 9 points) pour tous les champs (bz_/a_rr_/a_tt_/a_rt_/a_tr_/fr_/ft_/phi/state)
+///   : il est structurellement distribue et multi-box. Le solve elliptique (PolarTensorKrylovSolver)
+///   supporte le multi-rang ET le multi-box sous la contrainte de decoupage theta (chaque box couvre la
+///   plage radiale complete pour le preconditionneur RadialLine ; le garde-fou check_radial_columns du
+///   solveur l'impose -- repli Jacobi sans contrainte pour un pavage 2D coupant r). Mono-rang / boite
+///   unique : chemin BIT-IDENTIQUE. Validation multi-box : test_polar_schur_multibox (parite multi-box
+///   vs mono-box bit-proche, termes croises ET pavage 2D Jacobi). Device : tous les kernels du chemin
+///   sont des foncteurs NOMMES device-clean (recette #93) ; validation GH200 = ci-full.
 ///
 /// DEVICE. Tous les kernels sont des FONCTEURS NOMMES device-clean (recette #93 : pas de lambda etendue
 ///   premiere-instanciee cross-TU, limite nvcc #64/#97). Les tampons sont ALLOUES UNE FOIS a la

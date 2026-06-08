@@ -66,6 +66,14 @@ adc_add_test(test_polar_poisson_mms)
 # PAS branche dans System.step (etape 2b = SchurReconstructKernel polaire + wiring). Additif : le
 # PolarPoissonSolver scalaire direct et le Schur cartesien restent INTOUCHES.
 adc_add_test(test_polar_tensor_elliptic_mms)
+# Extension MULTI-BOX (plusieurs boites PAR RANG) du Schur polaire tensoriel. B2 a rendu le solveur
+# multi-rang (decoupage theta seul, UNE box couvrant l'anneau par rang) mais ne testait que A=I. Ce test
+# cible le MULTI-BOX intra-rang avec TENSEUR (termes croises a_rt/a_tr) : (A) parite theta-split 8 boites
+# vs mono-box [RadialLine] -- exerce le COIN du 9-points cross-box (ghosts diagonaux des termes croises) ;
+# (B) parite pavage 2D coupant r ET theta vs mono-box [Jacobi] -- chemin multi-box COMPLET (Jacobi sans
+# contrainte de layout) ; (C) garde-fou : layout coupant r sous RadialLine doit lever, OK sous Jacobi ;
+# (D) parite Neumann (jauge project_mean multi-box). Solves/normes COLLECTIFS -> correct aussi sous MPI.
+adc_add_test(test_polar_schur_multibox)
 # Voie A etape 2b : ETAGE SOURCE condense par Schur en geometrie POLAIRE
 # (PolarCondensedSchurSourceStepper). Pendant POLAIRE du CondensedSchurSourceStepper cartesien (#126) :
 # assemble le tenseur condense A = I + theta^2 dt^2 alpha rho B^{-1} (re-etiquetage polaire r/theta du

@@ -96,7 +96,11 @@ struct BCFaceYHiKernel {
 
 /// Remplit les ghosts HORS domaine des faces NON periodiques de @p mf selon @p bc (Foextrap ou
 /// Dirichlet), sur toutes les composantes. No-op si pas de ghost ou tout periodique. PRECONDITION :
-/// fill_boundary a deja rempli l'interieur/periodique (les faces y lisent les ghosts x pour les coins).
+/// fill_boundary a deja rempli l'interieur/periodique (les faces x lisent les ghosts y/theta deja
+/// remplis pour etendre la CL radiale dans la halo, et les faces y lisent les ghosts x pour les coins).
+/// COINS du stencil a 9 points : la CL des faces x est etendue a la plage j ETENDUE (ghosts y/theta
+/// inclus), de sorte que le coin (x-physique CROISE y-periodique/voisin) -- lu par les termes croises
+/// d'un operateur a 9 points (ex. PolarTensorKrylovSolver) -- soit correct meme en MULTI-BOX.
 inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
                              const BCRec& bc) {
   const int ng = mf.n_grow();
@@ -117,19 +121,35 @@ inline void fill_physical_bc(MultiFab& mf, const Box2D& domain,
     const Box2D v = F.box();
     Array4 a = F.array();
 
-    // --- faces x, sur la plage j valide ---
+    // --- faces x, sur la plage j ETENDUE (j-ghosts inclus) ---
+    // On etend la plage j aux GHOSTS en y/theta (j de v.lo[1]-ng a v.hi[1]+ng) au lieu de la seule
+    // plage VALIDE. Raison (coin du stencil a 9 points, multi-box) : un terme CROISE (a_rt/a_tr de
+    // l'operateur polaire) lit les voisins DIAGONAUX p(i+-1, j+-1) -> le ghost de COIN (x-physique
+    // CROISE y-ghost) doit etre rempli. Quand y/theta est PERIODIQUE ou borde une box VOISINE,
+    // fill_boundary a deja rempli la ligne j-ghost pour les colonnes x INTERIEURES ; la reflexion
+    // x-physique (qui lit a(lo, j) / a(2 lo - i - 1, j) a la MEME j) etend donc correctement le bord
+    // radial dans la halo y. Sans cette extension, le coin (x-ghost, y-ghost) reste a 0 et le terme
+    // croise est FAUX au bord de box (divergence multi-box, cf. test_polar_schur_multibox). La plage
+    // VALIDE seule suffisait en 5-points (pas de lecture diagonale) ; ce coin n'etait jamais lu.
+    // NOTE : un coin DOUBLE-physique (x ET y non periodiques) est ensuite ECRASE par la passe y (i
+    // etendu, plus bas, qui s'execute APRES) -> comportement cartesien inchange (y l'emporte). En
+    // y-physique on lit ici a(lo, j-ghost) potentiellement non rempli, mais le resultat est ecrase :
+    // sans effet sur la valeur finale du coin. Mono-box theta periodique : seuls les coins
+    // (precedemment a 0, jamais lus en 5-points) changent -> bit-identique pour tout stencil <=
+    // 9-points dont le 5-points cartesien (la nouvelle valeur de coin n'est lue que par un 9-points).
+    const int jglo = v.lo[1] - ng, jghi = v.hi[1] + ng;
     if (bc.xlo != BCType::Periodic && v.lo[0] == domain.lo[0]) {
       const int lo = domain.lo[0];
       const bool foe = bc.xlo == BCType::Foextrap;
       const Real val = bc.xlo_val;
-      for_each_cell(Box2D{{lo - ng, v.lo[1]}, {lo - 1, v.hi[1]}},
+      for_each_cell(Box2D{{lo - ng, jglo}, {lo - 1, jghi}},
                     detail::BCFaceXLoKernel{a, nc, lo, foe, val});
     }
     if (bc.xhi != BCType::Periodic && v.hi[0] == domain.hi[0]) {
       const int hi = domain.hi[0];
       const bool foe = bc.xhi == BCType::Foextrap;
       const Real val = bc.xhi_val;
-      for_each_cell(Box2D{{hi + 1, v.lo[1]}, {hi + ng, v.hi[1]}},
+      for_each_cell(Box2D{{hi + 1, jglo}, {hi + ng, jghi}},
                     detail::BCFaceXHiKernel{a, nc, hi, foe, val});
     }
 
