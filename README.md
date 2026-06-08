@@ -49,33 +49,105 @@ type ; section 13 : arborescence detaillee fichier par fichier).
 Algorithmes et formules : [docs/ALGORITHMS.md](docs/ALGORITHMS.md).
 Profil : [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
-## DSL symbolique : ecrire un modele en formules Python
+## Ecrire un modele : deux fronts (briques OU formules)
 
-Outre la composition de briques (`adc.Model`), on peut ecrire un modele en formules cote Python avec
-`adc.dsl.Model` : on declare les variables conservatives, le flux physique, les valeurs propres, la
-source et la contribution elliptique. Le DSL emet du C++, compile en `.so`, et renvoie un
-`CompiledModel` a brancher sur le systeme.
+Un modele decrit UNE equation (flux, source, valeurs propres, second membre elliptique). Le module
+`adc` offre deux fronts d'ecriture interchangeables, qui produisent le meme objet calculatoire cote
+coeur C++ et se branchent de la meme maniere sur `adc.System` / `adc.AmrSystem` :
+
+- **briques** -- on COMPOSE des briques generiques deja compilees (`adc.Model`) ; aucune compilation
+  a la volee, parite production totale.
+- **formules (DSL)** -- on ECRIT le modele en formules symboliques (`adc.dsl.Model`), traduit en C++
+  puis compile en `.so`.
+
+Les deux fronts sont des compositions des MEMES briques generiques ; le coeur reste agnostique au
+scenario (il ne nomme ni diocotron, ni Euler-Poisson, ni deux-fluides). Reference complete :
+**[reference/bricks_reference](docs/sphinx/reference/bricks_reference.md)**,
+**[reference/dsl_reference](docs/sphinx/reference/dsl_reference.md)** ; tutoriel pas a pas :
+**[docs/sphinx/getting_started/tutorial.md](docs/sphinx/getting_started/tutorial.md)**.
+
+### Front 1 -- briques (`adc.Model`)
+
+`adc.Model(state, transport, source, elliptic)` compose quatre briques generiques et renvoie une
+`ModelSpec` (des tags lus cote C++ par la fabrique de modeles). Catalogue des briques par slot, tel
+qu'expose par `adc.*` (structs C++ dans `include/adc/physics/`) :
+
+| Slot | Briques |
+|---|---|
+| `state` | `adc.Scalar()` ; `adc.FluidState(kind="compressible", gamma=)` ; `adc.FluidState(kind="isothermal", cs2=)` |
+| `transport` | `adc.ExB(B0=)` ; `adc.CompressibleFlux()` ; `adc.IsothermalFlux()` |
+| `source` | `adc.NoSource()` ; `adc.PotentialForce(charge=)` ; `adc.GravityForce()` |
+| `elliptic` | `adc.BackgroundDensity(alpha=, n0=)` ; `adc.ChargeDensity(charge=)` ; `adc.GravityCoupling(sign=, four_pi_G=, rho0=)` |
+
+`adc.Model(...)` valide l'appariement etat <-> transport (`Scalar` avec `ExB` ; `FluidState`
+compressible avec `CompressibleFlux` ; isotherme avec `IsothermalFlux`) ; un appariement incoherent
+leve une `ValueError`. Exemple -- le diocotron reduit (densite scalaire advectee par la derive ExB,
+fond neutralisant) :
 
 ```python
 import adc
-m = adc.dsl.Model("euler")
-rho, rhou, rhov, E = m.conservative_vars("rho", "rho_u", "rho_v", "E")
-g = m.param("gamma", 1.4)
-u = m.primitive("u", rhou / rho)
-p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u*u + u*u)))
-m.flux(x=[rhou, rhou*u + p, rhou*u, (E + p)*u],
-       y=[rhov, rhov*u, rhov*u + p, (E + p)*u])
-compiled = m.compile(backend="production")   # mis en cache par hash
-sim = adc.System(n=192, periodic=True)
-sim.add_equation("gas", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc"),
-                 time=adc.Explicit())
-sim.run(t_end=0.2, cfl=0.4)
+model = adc.Model(state=adc.Scalar(),
+                  transport=adc.ExB(B0=1.0),
+                  source=adc.NoSource(),
+                  elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+sim = adc.System(n=96, L=1.0, periodic=True)
+sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim.set_poisson(rhs="charge_density", solver="geometric_mg")
+sim.set_density("ne", ne0)          # ne0 : tableau 2D (densite initiale)
+sim.step_cfl(0.4)
 ```
 
-Le backend RECOMMANDE est `backend="production"` (chemin natif zero-copie ; GPU np=1 GH200 #97 + MPI solve_fields np=1/2/4 #93/#99 valides ; transport production GPU+MPI multi-rang pas encore exerce -- voir Validation). Les
-quatre chemins de modele (natif compose, production, aot, prototype) et les limites honnetes :
-**[docs/DSL_MODEL_DESIGN.md](docs/DSL_MODEL_DESIGN.md)**.
+### Front 2 -- formules (`adc.dsl.Model`)
+
+`adc.dsl.Model` ecrit le MEME modele en formules : on declare les variables conservatives, les
+primitives, le flux, les valeurs propres, la source et la contribution elliptique ; le DSL emet du
+C++, compile en `.so` et renvoie un `CompiledModel`. Le meme diocotron en formules :
+
+```python
+import adc
+from adc import dsl
+
+B0, ALPHA = 1.0, 1.0
+
+def diocotron_model(n_i0):
+    m = dsl.Model("diocotron")
+    (n,) = m.conservative_vars("n")        # densite scalaire transportee
+    m.aux("phi")
+    grad_x = m.aux("grad_x")
+    grad_y = m.aux("grad_y")
+    vx = (-grad_y) / B0                     # derive E x B
+    vy = grad_x / B0
+    m.flux(x=[n * vx], y=[n * vy])
+    m.eigenvalues(x=[vx], y=[vy])
+    m.primitive_vars(n=n)
+    m.conservative_from([n])
+    m.elliptic_rhs(ALPHA * (n - n_i0))      # = adc.BackgroundDensity(alpha, n0)
+    m.check()
+    return m
+
+compiled = diocotron_model(n_i0).compile(backend="production")   # mis en cache par hash
+sim = adc.System(n=96, L=1.0, periodic=True)
+sim.add_equation("ne", model=compiled,
+                 spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 time=adc.Explicit())
+sim.set_poisson(rhs="charge_density", solver="geometric_mg")
+sim.set_density("ne", ne0)
+sim.step_cfl(0.4)
+```
+
+Le backend RECOMMANDE est `backend="production"` (chemin natif zero-copie ; GPU np=1 GH200 #97 + MPI
+solve_fields np=1/2/4 #93/#99 valides ; transport production GPU+MPI multi-rang pas encore exerce --
+voir Validation). Les quatre chemins de modele (natif compose, production, aot, prototype) et les
+limites honnetes : **[docs/DSL_MODEL_DESIGN.md](docs/DSL_MODEL_DESIGN.md)**.
+
+### Les deux fronts coincident
+
+Briques et formules sont deux front-ends interchangeables du meme modele : sur le diocotron, la
+sortie DSL est bit-identique a la composition de briques (cas
+[`adc_cases/diocotron_dsl`](https://github.com/wolf75222/adc_cases/tree/master/diocotron_dsl)), et le
+tutoriel parcourt les deux fronts. Le branchement differe seulement par l'adder :
+`sim.add_block(...)` prend une `ModelSpec` native (briques), `sim.add_equation(...)` aiguille un
+`CompiledModel` (DSL `.so`) vers l'adder natif / aot / prototype selon son backend.
 
 ## Systemes multi-especes
 
@@ -118,6 +190,10 @@ Construction : `cmake -B build-py -DADC_BUILD_PYTHON=ON && cmake --build build-p
 > ne fonctionne QUE sous l'interpreteur correspondant (p.ex. un Python 3.12 anaconda/conda qui a
 > AUSSI numpy), avec le dossier `python/` du build sur `sys.path` (`build-py/python` ou
 > `build-master/python`). Sous le `python3` systeme il echoue avec `ModuleNotFoundError: adc._adc`.
+
+L'ecriture d'un modele (briques `adc.Model` ou formules `adc.dsl.Model`) est decrite plus haut,
+section "Ecrire un modele : deux fronts". Un exemple plus complet -- electrons Euler compressibles,
+mur circulaire Dirichlet, source IMEX -- assemble en briques :
 
 ```python
 import adc

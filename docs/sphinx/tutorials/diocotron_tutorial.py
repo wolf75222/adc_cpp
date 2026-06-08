@@ -85,6 +85,18 @@ def diocotron_model(n_i0: float) -> "dsl.Model":
     return m
 
 
+# --- 2bis. Le MEME modele, compose de briques natives (l'autre front d'ecriture) --------------------
+def native_diocotron_model(n_i0: float):
+    """Le MEME diocotron, mais compose de briques natives au lieu de formules : Scalar (etat) +
+    ExB (transport E x B) + NoSource + BackgroundDensity (second membre elliptique alpha (n - n_i0)).
+    C'est l'autre facon d'ecrire un modele -- on prouve plus bas (``native_vs_dsl``) qu'elle produit
+    un etat BIT-IDENTIQUE aux formules. Conventions C++ : ``ExBVelocity`` et ``BackgroundDensity``."""
+    return adc.Model(state=adc.Scalar(),
+                     transport=adc.ExB(B0=B0),
+                     source=adc.NoSource(),
+                     elliptic=adc.BackgroundDensity(alpha=ALPHA, n0=n_i0))
+
+
 # --- 4. Condition initiale (bande de charge perturbee, mode azimutal) -------------------------------
 def band_density(n: int, L: float = 1.0, amp: float = 1.0, width: float = 0.05,
                  mode: int = 2, disp: float = 0.02, floor: float = 1.0) -> np.ndarray:
@@ -201,19 +213,14 @@ def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    def native_block():
-        # Modele diocotron compose de briques natives : Scalar + ExBVelocity + BackgroundDensity.
-        return adc.Model(state=adc.Scalar(),
-                         transport=adc.ExB(B0=B0),
-                         source=adc.NoSource(),
-                         elliptic=adc.BackgroundDensity(alpha=ALPHA, n0=n_i0))
-
     su = adc.System(n=ne0.shape[0], L=L, periodic=True)
-    su.add_block("ne", model=native_block(), spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    su.add_block("ne", model=native_diocotron_model(n_i0), spatial=adc.Spatial(minmod=True),
+                 time=adc.Explicit())
     su.set_poisson(rhs="charge_density", solver="geometric_mg"); su.set_density("ne", ne0)
 
     sa = adc.AmrSystem(n=ne0.shape[0], L=L, periodic=True)
-    sa.add_block("ne", model=native_block(), spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    sa.add_block("ne", model=native_diocotron_model(n_i0), spatial=adc.Spatial(minmod=True),
+                 time=adc.Explicit())
     sa.set_refinement(0.05)
     sa.set_poisson(rhs="charge_density", solver="geometric_mg"); sa.set_density("ne", ne0)
 
@@ -229,6 +236,37 @@ def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
     fig.tight_layout(); fig.savefig(outdir / "diocotron_uniform_vs_amr.png", dpi=120)
     plt.close(fig)
     return float(np.max(np.abs(da - du)))
+
+
+# --- 6ter. La meme physique, deux fronts : briques == DSL (bit-identique) ---------------------------
+def native_vs_dsl(dsl_final: np.ndarray, ne0, n_i0, L, steps, cfl, outdir: Path):
+    """Rejoue la MEME physique en BRIQUES natives (``native_diocotron_model``) sur la meme grille / le
+    meme schema / le meme nombre de pas que le run DSL, et compare l'etat final aux FORMULES. Les deux
+    fronts d'ecriture (briques et formules) produisent un noyau numerique IDENTIQUE : l'ecart est nul a
+    la precision binaire. Trace les deux cartes cote a cote avec ``max|ecart|`` en titre, et renvoie
+    cet ecart (asserte nul dans ``main``)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    sb = adc.System(n=ne0.shape[0], L=L, periodic=True)
+    sb.add_block("ne", model=native_diocotron_model(n_i0), spatial=adc.Spatial(minmod=True),
+                 time=adc.Explicit())
+    sb.set_poisson(rhs="charge_density", solver="geometric_mg")
+    sb.set_density("ne", ne0)
+    for _ in range(steps):
+        sb.step_cfl(cfl)
+    native_final = np.asarray(sb.density("ne"))
+
+    max_delta = float(np.max(np.abs(native_final - dsl_final)))
+    fig, ax = plt.subplots(1, 2, figsize=(7.6, 3.6))
+    for a, d, t in ((ax[0], native_final, "briques natives"), (ax[1], dsl_final, "formules (DSL)")):
+        im = a.imshow(d.T, origin="lower", cmap="magma", extent=[0, L, 0, L])
+        a.set_title(t); a.set_xlabel("x"); a.set_ylabel("y"); fig.colorbar(im, ax=a, fraction=0.046)
+    fig.suptitle(f"diocotron : meme physique, deux fronts (max|briques - DSL| = {max_delta:.0e})")
+    fig.tight_layout(); fig.savefig(outdir / "diocotron_native_vs_dsl.png", dpi=120)
+    plt.close(fig)
+    return max_delta
 
 
 def git_sha(path: Path) -> str:
@@ -287,6 +325,13 @@ def main() -> None:
     assert mass_drift < 1e-9, "masse non conservee (transport advectif periodique)"
 
     make_figures(frames, times, amps, ne0, L, outdir)
+
+    # La MEME physique en briques natives : on prouve que les deux fronts d'ecriture (formules DSL et
+    # briques) produisent un etat BIT-IDENTIQUE (meme noyau numerique), puis on trace les deux cartes.
+    nd_delta = native_vs_dsl(frames[-1], ne0, n_i0, L, args.steps, args.cfl, outdir)
+    print(f"equivalence briques/DSL : max|delta| = {nd_delta:.3e}")
+    assert nd_delta == 0.0, "briques et formules DSL devraient etre bit-identiques (max|delta| != 0)"
+
     amr_delta = uniform_vs_amr(ne0, n_i0, L, args.steps, args.cfl, outdir)
     print(f"comparaison uniforme/AMR : max|delta| = {amr_delta:.3e}")
 
@@ -302,9 +347,10 @@ def main() -> None:
         "python": sys.version.split()[0],
         "adc_module": adc.__file__,
         "assets": ["diocotron_growth.png", "diocotron_cover.png", "diocotron.gif",
-                   "diocotron_uniform_vs_amr.png"],
+                   "diocotron_native_vs_dsl.png", "diocotron_uniform_vs_amr.png"],
         "growth_factor": growth,
         "mass_drift": mass_drift,
+        "native_dsl_max_delta": nd_delta,
         "amr_uniform_max_delta": amr_delta,
     }
     (outdir / "provenance.json").write_text(json.dumps(provenance, indent=2))

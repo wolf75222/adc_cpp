@@ -176,6 +176,36 @@ couverture pour les exports statiques).
 
 ![Densite finale du diocotron (image de couverture PNG).](../tutorials/_assets/diocotron_cover.png)
 
+## Etape 14bis -- La meme physique, deux fronts (briques == DSL)
+
+Le modele a ete ecrit ici **en formules** (`adc.dsl.Model`, Etape 7). Mais le coeur sait aussi
+composer un modele **a partir de briques natives** : `adc.Model(state, transport, source, elliptic)`.
+Les deux fronts d'ecriture sont **interchangeables** -- ce sont deux facons de decrire la MEME
+physique, et elles produisent un noyau numerique **identique**. On l'ecrit en briques :
+
+```{literalinclude} ../tutorials/diocotron_tutorial.py
+:language: python
+:pyobject: native_diocotron_model
+```
+
+puis on rejoue la meme grille / le meme schema / le meme nombre de pas, et on compare l'etat final
+des deux fronts :
+
+```{literalinclude} ../tutorials/diocotron_tutorial.py
+:language: python
+:pyobject: native_vs_dsl
+```
+
+L'ecart est **nul a la precision binaire** (`max|briques - DSL| = 0`, `np.array_equal`) : les
+formules DSL reproduisent exactement les conventions des briques `ExBVelocity` et `BackgroundDensity`.
+Une divergence (meme $10^{-15}$) trahirait une formule fausse (signe de la derive, borne d'onde,
+second membre). Le catalogue complet des briques est dans la
+[reference des briques](../reference/bricks_reference.md), et celui du DSL dans la
+[reference du DSL](../reference/dsl_reference.md) ; le cas applicatif `tutorial/` de `adc_cases`
+pousse la demonstration a **trois** fronts (helper specialise inclus).
+
+![Densite finale : la meme physique en briques natives (gauche) et en formules DSL (droite) ; ecart maximal nul.](../tutorials/_assets/diocotron_native_vs_dsl.png)
+
 ## Etape 15 -- Uniforme vs AMR
 
 On rejoue la MEME physique sur une grille uniforme (`adc.System`) et sur une hierarchie raffinee

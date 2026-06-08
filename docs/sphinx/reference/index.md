@@ -19,6 +19,8 @@ sont cote application (depot `adc_cases`).
 :maxdepth: 1
 
 api_python
+bricks_reference
+dsl_reference
 api_cpp
 backend_matrix
 limitations
