@@ -402,9 +402,16 @@ sans casser l'existant, en retro-compat bit-exacte (`n_aux` defaut = 3 -> strict
       MIGRATION : cas hoffart_euler_poisson_dsl + schur_magnetized_cartesian versionnes sur adc_cases/master
       (#13, reproduction-candidate), plus rien sur branche side. Docs honnetes (#10 diocotron, #221/#223 doc
       refonte ASCII-ifiees en attente apres #225).
-      SIGNAL GEOMETRIE EN COURS (ROMEO 647507, square/staircase/cutcell n=256 t_end=2) : dira si cutcell
-      remonte le taux vers les cibles. Si oui -> campagne complete n=384/512 t_end=10. AUCUNE revendication
-      de reproduction du modele complet avant ces chiffres.
+      SIGNAL GEOMETRIE TOMBE (ROMEO 647507) -- VERDICT (docs/HOFFART_GEOMETRY_VERDICT.md) : square = staircase
+      = cutcell donnent le MEME taux (-95/-95/-82%, diff ~1e-11 = arrondi). Le cut-cell/masque de disque au
+      BORD R=16 NE CORRIGE PAS le taux (l'anneau vit a r0/r1, profond a l'interieur ; les coins hors R sont
+      inertes ; le mur Poisson impose deja le disque). DE PLUS le deficit est RESOLUTION-INDEPENDANT (n=256 =
+      n=384) -> ce n'est PAS une diffusion de maille (qui diminuerait avec n) NI le bord externe -> suspect =
+      STRUCTUREL (normalisation/echelle/couplage du system-schur complet ; taux brut ~0.037 = plateau). Le
+      reduit (resolution-DEPENDANT, recupere en polaire l=4 exact) se comporte differemment. Le cut-cell T5
+      reste une vraie capacite (mauvais outil pour CE verrou). PROCHAIN PAS = diagnostic normalisation/structure
+      du complet (comparer system-schur complet vs reduit ExB sur meme setup), PAS gros GPU ni nouvelle
+      geometrie. AUCUNE reproduction du modele complet revendiquee.
 
 - [x] **M1 -- NORMALISATION TROUVEE (juin 2026)** : `gamma_norm = gamma_raw * 2pi/rhobar` (facteur du
       projet). Verifie sur le chemin POLAIRE ExB (echelle papier 6:8:16, top-hat, WENO5/SSPRK3, n=128) :
