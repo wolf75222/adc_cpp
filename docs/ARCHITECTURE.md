@@ -10,6 +10,22 @@ coeur est agnostique au modele : il ne nomme aucun scenario, il fournit des briq
 `CompositeModel`. Les couches sont orthogonales (physique, numerique, donnees/maillage, execution,
 temps/couplage) et une couche haute ne depend jamais d'un detail d'execution.
 
+
+## Sommaire
+
+- [Vue d ensemble](#vue-d-ensemble)
+- [Les couches](#les-couches)
+- [Conventions de grille](#conventions-de-grille)
+- [Stencil AMR coarse-fine (reflux)](#stencil-amr-coarse-fine-reflux)
+- [Pipeline d un pas de temps](#pipeline-d-un-pas-de-temps)
+- [Proprietes verifiees](#proprietes-verifiees)
+- [Backends](#backends)
+- [Thread safety](#thread-safety)
+- [Utiliser la bibliotheque](#utiliser-la-bibliotheque)
+- [Limitations](#limitations)
+- [Arborescence](#arborescence)
+
+---
 ## Vue d ensemble
 
 Le diagramme ci-dessous montre les modules publics de [`include/adc/`](../include/adc), les
@@ -307,7 +323,7 @@ resout le Poisson de systeme dont le second membre est la somme des briques elli
 (composantes 1 et 2), plus eventuellement $B_z$ et $T_e$. Le transport d un bloc, lui, lit cet aux :
 `advance_transport` aiguille vers la fermeture `s.advance` (chemin plein) ou ses variantes disque, et
 cette fermeture fait `fill_ghosts` puis `assemble_rhs` (reconstruction limitee + flux numerique ->
-$R = -\operatorname{div} F + S$) a chaque etage SSPRK (cf.
+$R = -\mathrm{div} F + S$) a chaque etage SSPRK (cf.
 [`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/ssprk.hpp), `SSPRK2Step` /
 `SSPRK3`). Le pas $dt$ retourne par `step_cfl` est le min sur les blocs evolutifs de
 $cfl \cdot h \cdot \mathrm{substeps}_b / (\mathrm{stride}_b \cdot w_b)$, avec $h = \min(dx, dy)$ en
@@ -367,7 +383,7 @@ D abord le regrid periodique : si `regrid_every > 0` et que le macro-pas tombe s
 partir de l union des tags de tous les blocs plus le tag de $|\nabla\phi|$, applique un seul nouveau
 layout fin a tous les blocs et a l aux partage. Ensuite `solve_fields` : il fait d abord un
 `average_down` par bloc (fin -> grossier), assemble le second membre somme co-localise
-($f = \sum_b \mathtt{elliptic\_rhs}_b(U_b)$), resout le Poisson grossier par multigrille geometrique,
+($f = \sum_b r_b(U_b)$ (chaque $r_b$ = `elliptic_rhs` du bloc)), resout le Poisson grossier par multigrille geometrique,
 derive l aux grossier ($\phi$, $\nabla\phi$ via `field_postprocess`), puis injecte l aux du grossier
 vers les niveaux fins (`coupler_inject_aux_mb`). Le transport de chaque bloc DU est alors `advance`
 (transport explicite : `advance_amr` = Berger-Oliger + reflux conservatif + `average_down`) ou
@@ -531,8 +547,7 @@ silencieusement), ou sont des frontieres de portee assumees.
   aussi une paroi, un `eps(x)` variable, l'anisotropie et le terme de reaction kappa (cas reserves a
   `geometric_mg`).
 
-- Polaire : scalaire ExB, mono-rang. La geometrie polaire (anneau global $r \in [r_{min}, r_{max}] \times
-  \theta \in [0, 2\pi)$, `PolarGeometry`) cable dans `System::step` porte le transport ExB scalaire
+- Polaire : scalaire ExB, mono-rang. La geometrie polaire (anneau global $r \in [r_{min}, r_{max}] \times \theta \in [0, 2\pi)$, `PolarGeometry`) cable dans `System::step` porte le transport ExB scalaire
   (`CompositeModel<ExBVelocityPolar, NoSource, ChargeDensity>`, voir
   [`include/adc/physics/hyperbolic.hpp`](../include/adc/physics/hyperbolic.hpp)). Le Poisson polaire direct
   `PolarPoissonSolver` ([`include/adc/numerics/elliptic/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar_poisson_solver.hpp))

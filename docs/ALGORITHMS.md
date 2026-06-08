@@ -16,14 +16,46 @@ Architecture (couches, seam de dispatch, frontiere bibliotheque/application) :
 validations device GH200 : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md). References :
 [BIBLIOGRAPHY.md](BIBLIOGRAPHY.md).
 
+## Sommaire
+
+- [Equations modele](#equations-modele)
+- [1. Volumes finis : Godunov ordre 1](#1-volumes-finis--godunov-ordre-1)
+- [2. Flux numeriques : Rusanov, HLL, HLLC, Roe](#2-flux-numeriques--rusanov-hll-hllc-roe)
+- [3. Reconstruction MUSCL (ordre 2) et WENO5-Z (ordre 5)](#3-reconstruction-muscl-ordre-2-et-weno5-z-ordre-5)
+- [4. Integration en temps : SSPRK, integrateurs objets, integrateur utilisateur](#4-integration-en-temps--ssprk-integrateurs-objets-integrateur-utilisateur)
+- [5. Sources raides : IMEX asymptotic-preserving et IMEX partiel](#5-sources-raides--imex-asymptotic-preserving-et-imex-partiel)
+- [6. Splitting d'operateurs : Lie et Strang](#6-splitting-doperateurs--lie-et-strang)
+- [7. Multirate : sous-cyclage, cadence, pas adaptatif](#7-multirate--sous-cyclage-cadence-pas-adaptatif)
+- [8. Terme parabolique : diffusion en flux de face](#8-terme-parabolique--diffusion-en-flux-de-face)
+- [9. Elliptique : multigrille geometrique](#9-elliptique--multigrille-geometrique)
+- [10. Elliptique : Poisson spectral (FFT), mono-rang et distribue](#10-elliptique--poisson-spectral-fft-mono-rang-et-distribue)
+- [11. Elliptique etendu : eps(x), Helmholtz/ecrante, anisotrope](#11-elliptique-etendu--epsx-helmholtzecrante-anisotrope)
+- [12. Elliptique a tenseur plein : Krylov matrice-libre (BiCGStab)](#12-elliptique-a-tenseur-plein--krylov-matrice-libre-bicgstab)
+- [13. Source implicite condensee : condensation de Schur](#13-source-implicite-condensee--condensation-de-schur)
+- [14. Bord embedded : cut-cell Shortley-Weller](#14-bord-embedded--cut-cell-shortley-weller)
+- [15. Domaine disque : masque, transport masque, transport cut-cell](#15-domaine-disque--masque-transport-masque-transport-cut-cell)
+- [16. Geometrie polaire : transport et Poisson sur anneau (r, theta)](#16-geometrie-polaire--transport-et-poisson-sur-anneau-r-theta)
+- [17. AMR : sous-cyclage Berger-Oliger + reflux conservatif](#17-amr--sous-cyclage-berger-oliger--reflux-conservatif)
+- [18. AMR multi-patch : reflux coverage-aware, distribue MPI](#18-amr-multi-patch--reflux-coverage-aware-distribue-mpi)
+- [19. Clustering Berger-Rigoutsos et regrid](#19-clustering-berger-rigoutsos-et-regrid)
+- [20. Maillage distribue : BoxArray global, halos, equilibrage](#20-maillage-distribue--boxarray-global-halos-equilibrage)
+- [21. Canal aux extensible](#21-canal-aux-extensible)
+- [22. Composition runtime et systeme multi-especes](#22-composition-runtime-et-systeme-multi-especes)
+- [23. DSL symbolique : codegen, JIT, AOT](#23-dsl-symbolique--codegen-jit-aot)
+- [24. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)](#24-le-seam-de-dispatch-serie--openmp--kokkos--mpi)
+- [Quel schema ou solveur quand](#quel-schema-ou-solveur-quand)
+- [References](#references)
+
+---
+
 ## Equations modele
 
 Le coeur resout, sur maillage cartesien adaptatif (et, en option, sur anneau polaire ou sous-domaine
 disque immerge), la forme generique
 
-$$\partial_t U + \operatorname{div} F(U, \mathrm{aux}) = S(U, \mathrm{aux}) \qquad \text{(hyperbolique, par bloc)}$$
+$$\partial_t U + \mathrm{div} F(U, \mathrm{aux}) = S(U, \mathrm{aux}) \qquad \text{(hyperbolique, par bloc)}$$
 
-$$\operatorname{div}(\varepsilon\,\nabla \phi) - \kappa\,\phi = f(U) \qquad \text{(elliptique, partage)}$$
+$$\mathrm{div}(\varepsilon\,\nabla \phi) - \kappa\,\phi = f(U) \qquad \text{(elliptique, partage)}$$
 
 La partie hyperbolique `U` et la partie elliptique `phi` se couplent a chaque pas par le canal `aux`
 (contrat de base `(phi, grad_x, grad_y)`, extensible a `B_z`, `T_e`). Un modele est une composition
@@ -129,7 +161,7 @@ scalaire, sans couplage) :
 $$\hat F_{i+1/2} = \tfrac12\big(F(U_L)+F(U_R)\big) - \tfrac12\,\alpha\,(U_R - U_L),
 \qquad \alpha = \max\big(s_L(U_L), s_R(U_R)\big),$$
 
-ou $s_{L,R} = \texttt{max\_wave\_speed}$ de chaque etat ; Rusanov ne demande que ce membre, donc
+ou $s_{L,R}$ (`max_wave_speed`) de chaque etat ; Rusanov ne demande que ce membre, donc
 s'applique a tout `PhysicalModel` de base. HLL utilise les estimees de Davis
 $s_L = \min(s_L^{gauche}, s_L^{droit})$, $s_R = \max(s_R^{gauche}, s_R^{droit})$ via `hll_speeds`, et
 retombe sur le flux amont en regime supersonique :
@@ -223,7 +255,7 @@ $$a = U_i - U_{i-1} \quad (\text{difference arriere}),\qquad b = U_{i+1} - U_i \
 
 et rend une pente limitee $\sigma_i = \mathrm{lim}(a,b)$. Les trois limiteurs MUSCL sont :
 
-$$\mathrm{minmod}(a,b) = \begin{cases} \operatorname{sgn}(a)\,\min(|a|,|b|) & ab>0\\ 0 & ab\le 0\end{cases},
+$$\mathrm{minmod}(a,b) = \begin{cases} \mathrm{sgn}(a)\,\min(|a|,|b|) & ab>0\\ 0 & ab\le 0\end{cases},
 \qquad
 \mathrm{vanleer}(a,b) = \begin{cases} \dfrac{2ab}{a+b} & ab>0\\ 0 & ab\le 0\end{cases},$$
 
@@ -343,11 +375,11 @@ en bout).
 **Intuition.** Strong-Stability-Preserving Runge-Kutta : chaque etage est une combinaison convexe
 d'Euler explicites, donc toute propriete de stabilite (TVD, positivite, bornes) tenue par un pas
 d'Euler avant sous CFL est tenue par le schema entier, a l'ordre 2 ou 3. Le schema en temps est un
-objet de premier plan ($\texttt{take\_step}$) que le coupleur appelle, plutot que du SSPRK inline
+objet de premier plan (`take_step`) que le coupleur appelle, plutot que du SSPRK inline
 duplique dans chaque coupleur ; le meme contrat permet a un cas d'apporter son propre integrateur.
 
 **Formule / discretisation.** Methode des lignes : l'espace donne $\dot U = L(U)$ avec
-$L(U) = -\operatorname{div} F(U) + S(U)$, evalue par $\texttt{rhs}(U, R) \Rightarrow R = L(U)$.
+$L(U) = -\mathrm{div} F(U) + S(U)$, evalue par $\texttt{rhs}(U, R) \Rightarrow R = L(U)$.
 Euler avant : $U^{n+1} = U^n + \Delta t\, L(U^n)$.
 
 SSPRK2 (Shu-Osher, 2 etages, ordre 2, equivalent a Heun) :
@@ -734,7 +766,7 @@ $$+\nu\,\Delta_h U_{i,j} = \nu\left(
   \frac{U_{i+1,j} - 2U_{i,j} + U_{i-1,j}}{dx^2}
 + \frac{U_{i,j+1} - 2U_{i,j} + U_{i,j-1}}{dy^2}\right),$$
 
-ajoute composante par composante au residu $R = -\operatorname{div}\hat F + S$. Le coeur `assemble_rhs`
+ajoute composante par composante au residu $R = -\mathrm{div}\hat F + S$. Le coeur `assemble_rhs`
 ecrit directement ce stencil a 5 points (chemin sans AMR) ; `compute_face_fluxes` produit la forme en
 flux de face (chemin reflux AMR). Les deux donnent un residu bit-identique a la machine.
 
@@ -993,15 +1025,13 @@ pointeurs de coefficient du niveau fin sont aussi exposes (`op_eps`, `op_kappa`,
 pour que le solveur de Krylov reutilise un operateur coherent avec le residu MG.
 
 **Contraintes / remarques.** Les trois extensions sont composables : $\epsilon(x)$ et $\kappa(x)$
-ensemble, ou $\mathrm{diag}(\epsilon_x, \epsilon_y)$ avec $\kappa$. Donner $\epsilon_x \equiv
-\epsilon_y$ redonne l'isotrope ; ne pas appeler `set_reaction` redonne Poisson pur ; aucun appel =>
+ensemble, ou $\mathrm{diag}(\epsilon_x, \epsilon_y)$ avec $\kappa$. Donner $\epsilon_x \equiv \epsilon_y$ redonne l'isotrope ; ne pas appeler `set_reaction` redonne Poisson pur ; aucun appel =>
 chemin historique strictement bit-identique. Le choix harmonique (et non arithmetique) pour la face
 preserve la continuite du flux normal a un saut de milieu et reste d'ordre 2 pour un $\epsilon$
 lisse. L'echantillonnage par niveau (au lieu de restreindre depuis le fin) donne le coefficient
 exact a chaque resolution grossiere, ce qui conserve l'ordre 2 du V-cycle.
 **Validation.** `test_variable_epsilon` ($\epsilon(x)$, MMS ordre 2), `test_screened_poisson`
-(Helmholtz / ecrante, MMS ordre 2), `test_anisotropic_epsilon` (anisotrope $\epsilon_x \neq
-\epsilon_y$, MMS ordre 2). Les trois chemins sont aussi exerces cote Python (`test_poisson_eps`,
+(Helmholtz / ecrante, MMS ordre 2), `test_anisotropic_epsilon` (anisotrope $\epsilon_x \neq \epsilon_y$, MMS ordre 2). Les trois chemins sont aussi exerces cote Python (`test_poisson_eps`,
 `test_poisson_screened`, `test_poisson_eps_aniso`) et valides bit-identiques sur GH200
 (cf. GPU_RUNTIME_PORT.md, round 2).
 
@@ -1014,7 +1044,7 @@ exact a chaque resolution grossiere, ce qui conserve l'ordre 2 du V-cycle.
 
 **Formule / discretisation.** On resout $A\,\phi = f$ avec, dans la convention de [`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson_operator.hpp) et de `GeometricMG`,
 
-$$L_{\mathrm{int}}(\phi) = \operatorname{div}(A\,\nabla\phi) - \kappa\,\phi, \qquad A = \begin{pmatrix} A_{xx} & A_{xy} \\ A_{yx} & A_{yy}\end{pmatrix},$$
+$$L_{\mathrm{int}}(\phi) = \mathrm{div}(A\,\nabla\phi) - \kappa\,\phi, \qquad A = \begin{pmatrix} A_{xx} & A_{xy} \\ A_{yx} & A_{yy}\end{pmatrix},$$
 
 la matvec etant `apply_laplacian` (calcul exact de $L_{\mathrm{int}}$) et le residu $r = f - L_{\mathrm{int}}(\phi)$, bit-coherent avec `poisson_residual`. BiCGStab est matrice-libre : aucune matrice n'est assemblee, seul le produit $A\,d$ est requis, applique par `for_each_cell`. Le preconditionneur est $M^{-1} =$ ($N$ V-cycles de `GeometricMG`) sur le bloc diagonal symetrique (termes croises $A_{xy}/A_{yx}$ largues). La partie antisymetrique etant en $O(\theta^2 dt^2 \alpha)$, petite a CFL source raisonnable, le preconditionneur symetrique capture l'essentiel du spectre.
 
@@ -1089,7 +1119,7 @@ $$B = \begin{pmatrix} 1 & -w \\ w & 1 \end{pmatrix}, \qquad B^{-1} = \frac{1}{\d
 
 ferme et toujours inversible (aucun appel a `std::`, quatre additions/multiplications, device-safe). Avec $c = \theta^2 dt^2 \alpha$ (Hoffart et al., arXiv:2510.11808), l'operateur condense s'ecrit
 
-$$L_{\mathrm{schur}}(\phi) = -\Delta\phi - c\operatorname{div}(\rho\, B^{-1}\nabla\phi) = -\operatorname{div}\!\big((I + c\,\rho\, B^{-1})\,\nabla\phi\big),$$
+$$L_{\mathrm{schur}}(\phi) = -\Delta\phi - c\mathrm{div}(\rho\, B^{-1}\nabla\phi) = -\mathrm{div}\!\big((I + c\,\rho\, B^{-1})\,\nabla\phi\big),$$
 
 ce qui identifie le tenseur plein $A = I + c\,\rho\, B^{-1}$, soit, par cellule,
 
@@ -1097,13 +1127,13 @@ $$\varepsilon_x = 1 + c\rho\,B^{-1}_{11},\quad \varepsilon_y = 1 + c\rho\,B^{-1}
 
 Le terme de masse $\kappa$ reste nul (la condensation ne produit pas de Helmholtz). En $B_z = 0$ : $w = 0$, $B^{-1} = I$, donc $a_{xy} = a_{yx} = 0$ et $\varepsilon_x = \varepsilon_y = 1 + c\rho$ ; si de plus $c = 0$, $A = I$ et $L_{\mathrm{schur}}$ degenere exactement en le Laplacien canonique. Le second membre condense est
 
-$$\mathrm{rhs} = -\Delta\phi^n - \theta\, dt\, \alpha \operatorname{div}(\rho\, B^{-1} v^n), \qquad v^n = (m_x, m_y)/\rho,$$
+$$\mathrm{rhs} = -\Delta\phi^n - \theta\, dt\, \alpha \mathrm{div}(\rho\, B^{-1} v^n), \qquad v^n = (m_x, m_y)/\rho,$$
 
 ou $-\Delta\phi^n$ est le Laplacien 5 points canonique negue et la divergence du flux explicite $F = \rho B^{-1} v^n = B^{-1}(m_x, m_y)$ (applique a la quantite de mouvement, ce qui evite la division par $\rho$) est centree d'ordre 2 :
 
-$$\operatorname{div} F(i,j) = \frac{F_x(i{+}1,j) - F_x(i{-}1,j)}{2\,dx} + \frac{F_y(i,j{+}1) - F_y(i,j{-}1)}{2\,dy}.$$
+$$\mathrm{div} F(i,j) = \frac{F_x(i{+}1,j) - F_x(i{-}1,j)}{2\,dx} + \frac{F_y(i,j{+}1) - F_y(i,j{-}1)}{2\,dy}.$$
 
-L'operateur condense est en general a tenseur plein (d'ou le solveur de Krylov, section 12). Convention de signe du solve : `TensorKrylovSolver` resout $L_{\mathrm{int}} = +\operatorname{div}(A\nabla\phi)$, donc $L_{\mathrm{schur}} = -L_{\mathrm{int}}$ et l'etage passe $\mathrm{rhs}_{\mathrm{kry}} = -\mathrm{rhs}_{\mathrm{schur}}$ au solveur. Apres resolution, la vitesse est reconstruite par $v^{n+\theta} = B^{-1}(v^n - \theta\, dt\,\nabla\phi^{n+\theta})$ (gradient centre, coherent avec la divergence du RHS), puis extrapolee du theta-stage au pas plein par $U^{n+1} = U^n + \tfrac{1}{\theta}(U^{n+\theta} - U^n)$. L'energie, si le role Energy est present, n'est mise a jour que par l'increment d'energie cinetique $E^{n+1} = E^n + \tfrac{1}{2}\rho^n(|v^{n+1}|^2 - |v^n|^2)$, la rotation de Lorentz ne travaillant pas et $\rho$ etant gelee.
+L'operateur condense est en general a tenseur plein (d'ou le solveur de Krylov, section 12). Convention de signe du solve : `TensorKrylovSolver` resout $L_{\mathrm{int}} = +\mathrm{div}(A\nabla\phi)$, donc $L_{\mathrm{schur}} = -L_{\mathrm{int}}$ et l'etage passe $\mathrm{rhs}_{\mathrm{kry}} = -\mathrm{rhs}_{\mathrm{schur}}$ au solveur. Apres resolution, la vitesse est reconstruite par $v^{n+\theta} = B^{-1}(v^n - \theta\, dt\,\nabla\phi^{n+\theta})$ (gradient centre, coherent avec la divergence du RHS), puis extrapolee du theta-stage au pas plein par $U^{n+1} = U^n + \tfrac{1}{\theta}(U^{n+\theta} - U^n)$. L'energie, si le role Energy est present, n'est mise a jour que par l'increment d'energie cinetique $E^{n+1} = E^n + \tfrac{1}{2}\rho^n(|v^{n+1}|^2 - |v^n|^2)$, la rotation de Lorentz ne travaillant pas et $\rho$ etant gelee.
 
 ```
 function CondensedSchurSourceStepper.step(state, phi, bz_field, c_bz, theta, dt):
@@ -1214,8 +1244,7 @@ transport EB consomme (section 15) : geometrie d'ouverture bit-coherente entre P
 
 **Contraintes / remarques.** Le clamp $\theta \ge 10^{-3}$ borne $w_{\mathrm{diag}}$ (sans lui une
 face rasante ferait diverger le poids et casserait la diagonale-dominance du lisseur). Compatible avec
-l'operateur anisotrope (les poids cut-cell se composent avec les coefficients $\varepsilon_x,
-\varepsilon_y$). Validation : `test_cut_cell` (cut-cell vs escalier sur solution manufacturee, gain
+l'operateur anisotrope (les poids cut-cell se composent avec les coefficients $\varepsilon_x, \varepsilon_y$). Validation : `test_cut_cell` (cut-cell vs escalier sur solution manufacturee, gain
 d'ordre), `test_cut_cell_anisotropic` (cut-cell + operateur anisotrope), `test_cut_cell_anisotropic_multibox`
 (multi-box mono-rang), `test_mpi_cutcell_multibox` (multi-box distribue np=1/2/4 ; verrou de
 non-regression du bug `average_down` hors bornes sur hierarchie MG degeneree). Pour l'elliptique sur
@@ -1599,7 +1628,7 @@ $a$ est la projection $s_a[k] = \sum_{\text{ligne/col } k} \mathrm{tag}$. Un tro
 $k \in [\mathrm{mb}, \mathrm{len}-\mathrm{mb}]$ avec $s_a[k] = 0$, le plus proche du centre. A defaut, on
 prend l'inflexion : Laplacien discret $D[k] = s[k+1] - 2 s[k] + s[k-1]$, et on coupe a l'indice qui
 maximise $|D[k] - D[k-1]|$. A defaut encore, on coupe au milieu de la plus grande dimension splittable.
-Le critere de splittabilite est $n_a \ge 2\,\mathrm{mb}$ avec $\mathrm{mb} = \max(1, \texttt{min\_box\_size})$.
+Le critere de splittabilite est $n_a \ge 2\,\mathrm{mb}$ avec $\mathrm{mb} = \max(1, b)$ avec $b$ = `min_box_size`.
 Apres acceptation, chaque boite brute est chopee en sous-boites de cote $\le$ `max_box_size`. Au regrid,
 les boites grossieres sont raffinees par `refine(ref_ratio)` dans l'espace d'indices du niveau fin.
 
@@ -1786,7 +1815,7 @@ l'historique quand `n_aux = 3` (les composantes extra valent 0, jamais lues).
 effective lue par l'operateur spatial et allouee par le runtime est
 
 $$\mathrm{naux}(M) =
-  \begin{cases} M\text{::n\_aux} & \text{si } M \text{ le declare}\\ 3 & \text{sinon}\end{cases}$$
+  \begin{cases} M\text{::n}_\text{aux} & \text{si } M \text{ le declare}\\ 3 & \text{sinon}\end{cases}$$
 
 evaluee a la compilation par `aux_comps<M>()`. Une brique magnetisee pose `n_aux = 4` : `B_z` occupe
 la composante 3, fonction pure de la position echantillonnee par niveau ; `T_e` (composante 4) est
