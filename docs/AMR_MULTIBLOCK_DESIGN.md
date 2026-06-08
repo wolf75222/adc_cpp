@@ -1,3 +1,5 @@
+> **STATUT : IMPLÉMENTÉ.** Le multi-bloc AMR est livré (`AmrSystem.multi_block()`/`build_multi()`, AmrCouplerMP, regrid union-tags #195/#199/#205, 7 tests capstone). Ce document décrit un état passé ('façade mono-bloc') ; lire comme historique de conception.
+
 # Conception : AMR multi-blocs sur une hierarchie partagee (capstone multi-especes)
 
 DESIGN-ONLY. Aucune implementation. Ce document est une SPEC raisonnee, honnete sur ses

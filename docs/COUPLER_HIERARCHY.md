@@ -16,8 +16,6 @@ Coupler<Model, Elliptic>                  -- mono-modele, mono-niveau
     |        |
     |        +-- SystemDriver<System, RhsAsm, Elliptic>    -- idem, AVANCE (= SystemCoupler)
     |
-    +-- AmrCoupler<Model, Elliptic>       -- mono-modele, AMR mono-box  (DEPRECIE)
-    |
     +-- AmrCouplerMP<Model, Elliptic>     -- mono-modele, AMR multi-box + regrid BR
     |
     +-- AmrSystemCoupler<System,RhsAsm,Elliptic>   -- multi-especes, AMR (= AmrSystemDriver)
@@ -147,22 +145,12 @@ Le header `elliptic_rhs.hpp` fournit :
 
 ---
 
-## 4. AmrCoupler -- mono-modele, AMR mono-box (DEPRECIE)
+## 4. AmrCoupler -- SUPPRIME (#164)
 
-**Fichier :** `include/adc/coupling/amr_coupler.hpp`
-
-**Instanciation :** `adc::AmrCoupler<Model, Elliptic = GeometricMG>`
-
-**Statut :** DEPRECIE. Le commentaire d'en-tete (`amr_coupler.hpp:1-7`) indique :
-"Aucun #include dans le coeur, les tests ou les bindings Python ; remplace en
-production par AmrCouplerMP, dont le mono-box est le cas degenere bit-identique."
-Conserve pour compatibilite documentaire ; a retirer apres migration complete.
-
-### Ce qu'il fait
-
-Meme sequence qu'`AmrCouplerMP` mais sans support multi-box et sans regrid :
-`sync_down -> compute_aux -> advance_amr`. La hierarchie des niveaux est portee par
-`AmrLevelStack<AmrLevelMP>`, les diagnostics (masse, derive) par `amr_diagnostics.hpp`.
+L'ancien coupleur AMR E x B mono-box `adc::AmrCoupler<Model, Elliptic>`
+(`include/adc/coupling/amr_coupler.hpp`) a ete **supprime (#164)**. Son role est
+entierement repris par `AmrCouplerMP` (section 5), dont le mono-box est le cas
+degenere bit-identique (garde de validation `test_amr_multilevel_multipatch`).
 
 ---
 
@@ -174,8 +162,9 @@ Meme sequence qu'`AmrCouplerMP` mais sans support multi-box et sans regrid :
 
 ### Role
 
-Coupleur AMR E x B mono-modele, multi-patch a chaque niveau. Remplace `AmrCoupler`
-en production. Le mono-box est le cas degenere bit-identique (garde de validation
+Coupleur AMR E x B mono-modele, multi-patch a chaque niveau. Seul coupleur AMR
+mono-modele en production (l'ancien `AmrCoupler` mono-box a ete supprime, #164).
+Le mono-box est le cas degenere bit-identique (garde de validation
 `test_amr_multilevel_multipatch`).
 
 ### Sequence d'un pas (`step`)
@@ -399,7 +388,6 @@ et la construction de `AmrLevelStack`).
 | `Coupler<M,E>` | 1 | 1 (uniforme) | oui (dans le coupleur) | oui | stable |
 | `SystemAssembler<Sys,Rhs,E>` | N | 1 (uniforme) | oui (Poisson systeme + aux) | NON | stable |
 | `SystemDriver<Sys,Rhs,E>` (= `SystemCoupler`) | N | 1 (uniforme) | via `SystemAssembler` possede | oui | stable |
-| `AmrCoupler<M,E>` | 1 | N (mono-box) | oui | oui | DEPRECIE |
 | `AmrCouplerMP<M,E>` | 1 | N (multi-box) | oui | oui | stable |
 | `AmrSystemCoupler<Sys,Rhs,E>` (= `AmrSystemDriver`) | N | N (multi-box) | oui | oui | stable |
 | `CondensedSchurSourceStepper` | 1 bloc fluide | 1 (uniforme) | operateur Schur | etage source seul | experimental (PR #126) |
@@ -421,7 +409,6 @@ de conception (`amr_system_coupler.hpp:371-375`) la signale comme reportee.
 | `detail::coupler_grad_phi` | `coupling/coupler.hpp` | 61 |
 | `SystemAssembler` | `coupling/system_coupler.hpp` | 63 |
 | `SystemDriver` / `SystemCoupler` | `coupling/system_coupler.hpp` | 169, 360 |
-| `AmrCoupler` (DEPRECIE) | `coupling/amr_coupler.hpp` | 65 |
 | `AmrCouplerMP` | `coupling/amr_coupler_mp.hpp` | 225 |
 | `detail::coupler_inject_aux_mb` | `coupling/amr_coupler_mp.hpp` | 56 |
 | `AmrSystemCoupler` / `AmrSystemDriver` | `coupling/amr_system_coupler.hpp` | 70, 374 |

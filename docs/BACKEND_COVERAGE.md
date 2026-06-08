@@ -319,14 +319,15 @@ Valide sur le noeud x64cpu de ROMEO (`Kokkos_ENABLE_OPENMP=ON`, OpenMPI, build c
 
 ## 4. Bilan chiffre
 
-Base de comptage (au 2026-06-07) : 103 cibles ctest C++ hors bloc MPI (84 `adc_add_test` +
-19 `add_executable` runtime, dont les 7 capstones AMR multi-blocs de la section 1g-bis), +
-10 `add_executable` dans le bloc `ADC_HAS_MPI` (chacun rejoue np=1/2/4), + 55 tests Python.
+Base de comptage (au 2026-06-07, régénérable via `docs/gen_test_counts.py`) : 109 cibles ctest
+C++ hors bloc MPI (91 `adc_add_test` + 18 `add_executable` runtime, dont les 7 capstones AMR
+multi-blocs de la section 1g-bis), + 11 `add_executable` dans le bloc `ADC_HAS_MPI` (chacun
+rejoue np=1/2/4), + 60 tests Python.
 
 | Statut | Nombre de cellules (approx.) |
 |--------|------------------------------|
-| **ci-fast** | ~158 (103 C++ hors-MPI x Serial + 55 Python x Serial) |
-| **ci-full** | ~227 (103 C++ x Kokkos Serial + 103 x Kokkos OpenMP ; ~21 entrees MPI CPU) |
+| **ci-fast** | ~169 (109 C++ hors-MPI x Serial + 60 Python x Serial) |
+| **ci-full** | ~239 (109 C++ x Kokkos Serial + 109 x Kokkos OpenMP ; ~21 entrees MPI CPU) |
 | **ROMEO** | ~55 (harnesses GPU mono et multi-GPU couvrant ~15 groupes fonctionnels) |
 | **self-skip** | ~350 (tests serial/Kokkos-Serial sur colonnes MPI, et MPI-only sur colonnes sans MPI) |
 | **?** | Kokkos Cuda des tests runtime non encore exerces sur device (dont la section 1g-bis AMR multi-blocs) + MPI+Kokkos Cuda de la majorite des tests MPI + tout le bloc Python hors Serial |

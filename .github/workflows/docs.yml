@@ -42,7 +42,7 @@ jobs:
       - name: Build module Python adc
         continue-on-error: true
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_PYTHON=ON -DADC_USE_EIGEN=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_PYTHON=ON
           cmake --build build --target adc_py -j 2
 
       - name: Install Sphinx

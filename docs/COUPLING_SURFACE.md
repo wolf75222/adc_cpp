@@ -34,9 +34,9 @@ Portees par `adc.System` cote Python ; internes au C++ du noyau.
 
 ### `amr_coupler_mp.hpp` -- `adc::AmrCouplerMP<Model, Elliptic>`
 
-Coupleur AMR E x B multi-patch : meme role qu'`AmrCoupler` mais hierarchie
-multi-box par niveau (moteur `advance_amr`, reflux coverage-aware, regrid
-Berger-Rigoutsos). Chemin de production mono-modele AMR.
+Coupleur AMR E x B multi-patch : hierarchie multi-box par niveau (moteur
+`advance_amr`, reflux coverage-aware, regrid Berger-Rigoutsos). Chemin de
+production mono-modele AMR (l'ancien `AmrCoupler` mono-box a ete supprime, #164).
 **Classification : INTERNE**
 
 ### `amr_system_coupler.hpp` -- `adc::AmrSystemCoupler<System, RhsAssembler, Elliptic>`, alias `adc::AmrSystemDriver`
@@ -115,14 +115,10 @@ facade vers `System::step` prevu en PR5.
 
 ## Classe depreciée (DEPRECIE)
 
-### `amr_coupler.hpp` -- `adc::AmrCoupler<Model, Elliptic>`
-
-**DEPRECIE.** Coupleur AMR E x B mono-box (mono-modele). Aucun `#include`
-dans le noyau, les tests ou les bindings Python. Remplace en production par
-`AmrCouplerMP` (`amr_coupler_mp.hpp`), dont le mono-box est le cas degenere
-bit-identique. Conserve pour reference historique (documente dans
-`docs/ARCHITECTURE.md`) ; a retirer apres migration complete.
-**Remplacement recommande : `adc::AmrCouplerMP` (`amr_coupler_mp.hpp`)**
+> Note : l'ancien `amr_coupler.hpp` / `adc::AmrCoupler<Model, Elliptic>`
+> (coupleur AMR E x B mono-box) a ete **supprime (#164)**. Son role est entierement
+> repris par `AmrCouplerMP` (`amr_coupler_mp.hpp`), dont le mono-box est le cas
+> degenere bit-identique.
 
 ### `spectral_coupler.hpp` -- `adc::SpectralCoupler<Model>`
 

@@ -1,3 +1,5 @@
+> **STATUT : IMPLÉMENTÉ.** Ce document est la spec de conception d'origine. L'étage Schur condensé est livré (`CondensedSchur`, `schur_condensation.hpp`, exposé Python `adc.CondensedSchur` ; tests test_schur_via_system / test_schur_conservation). Lire ce fichier comme historique de conception, pas comme état courant.
+
 # Conception : source implicite condensee par Schur (reproduction arXiv:2510.11808)
 
 DESIGN-ONLY, aucune implementation. Ce document est une SPEC raisonnee, honnete sur ses

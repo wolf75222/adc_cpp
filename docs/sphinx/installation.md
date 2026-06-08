@@ -14,7 +14,7 @@ git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build          # 71 ctests coeur
+ctest --test-dir build          # suite coeur (decompte a jour : docs/BACKEND_COVERAGE.md)
 ```
 
 ## Module Python

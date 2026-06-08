@@ -112,6 +112,11 @@ On definit un type qui satisfait `PhysicalModel`, on l'instancie dans un `Couple
 
 Construction : `cmake -B build-py -DADC_BUILD_PYTHON=ON && cmake --build build-py --target _adc -j`.
 
+> L'extension compilee est **epinglee a l'interpreteur** (`_adc.cpython-312`). `import adc`
+> ne fonctionne QUE sous l'interpreteur correspondant (p.ex. un Python 3.12 anaconda/conda qui a
+> AUSSI numpy), avec le dossier `python/` du build sur `sys.path` (`build-py/python` ou
+> `build-master/python`). Sous le `python3` systeme il echoue avec `ModuleNotFoundError: adc._adc`.
+
 ```python
 import adc
 sim = adc.System(n=192, periodic=False)
@@ -126,10 +131,13 @@ sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet",
 sim.step_cfl(0.4)
 ```
 
-`adc.AmrSystem` compose un bloc sur une hierarchie raffinee (API proche de `System` plus
-`set_refinement`). Limites honnetes d'`AmrSystem` : mono-bloc, IMEX source locale OK (Gap 2 #132,
-backward_euler_source / mf_apply_source_treatment) mais Schur global sur AMR et AMR multi-blocs
-restent a faire ; `AmrSystem.potential()` binding SHIPPE (python/bindings.cpp:272, `#135`).
+`adc.AmrSystem` compose un ou plusieurs blocs sur une hierarchie raffinee (API proche de `System`
+plus `set_refinement`). Etat actuel d'`AmrSystem` : mono- ET multi-bloc (`add_native_block` /
+`add_compiled_block` repetes, capstone #195/#199/#205, cadence de regrid via `regrid_every` +
+`set_refinement`/`set_phi_refinement`), reflux conservatif, recon
+`conservative|primitive`, flux `rusanov|hllc|roe`, IMEX source locale (Gap 2 #132,
+backward_euler_source / mf_apply_source_treatment). Reste hors-perimetre : pas de Schur global sur
+AMR. `AmrSystem.potential()` binding SHIPPE (python/bindings.cpp:332, `#135`).
 Detail des adders et chemins avances : **[docs/DSL_MODEL_DESIGN.md](docs/DSL_MODEL_DESIGN.md)**.
 
 ## Ecosysteme
@@ -164,7 +172,6 @@ documentaires (`paths-ignore: docs/**`, `**.md`).
 | `ADC_USE_OPENMP` | `OFF` | dispatch OpenMP autonome, **deprecie** (utiliser Kokkos) |
 | `ADC_USE_MPI` | `OFF` | backend distribue (comm, halos, FFT) |
 | `ADC_USE_HDF5` | `OFF` | DataWriter HDF5 parallele |
-| `ADC_USE_EIGEN` | `ON` | cible d'analyse host `adc_eigen` (utilisee par adc_cases) |
 
 ## Organisation du depot
 

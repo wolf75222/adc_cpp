@@ -28,7 +28,8 @@ Recapitulatif rapide ; le detail par section suit (les balises SHIPPE/GAP y sont
 
 SHIPPE (ne plus lire comme "cible") :
 - **Phase A** (#89/#90) : `dsl.Model` facade (`dsl.py:Model`), `Param` nomme (`dsl.py:Param`,
-  mode `const` ; `runtime` leve `NotImplementedError`), `CompiledModel` (`dsl.py:CompiledModel`,
+  mode `const` inline ; mode `runtime` SHIPPE sur `aot`, P7-b, cf. bullet "Params runtime"),
+  `CompiledModel` (`dsl.py:CompiledModel`,
   porte `abi_key`/`model_hash`/`cxx`/`std`), `System.add_equation` (`__init__.py:add_equation`,
   dispatch `ModelSpec`->`add_block` vs `CompiledModel`->adder du backend), `adc.FiniteVolume(limiter=,
   riemann=, variables=)` (`__init__.py:FiniteVolume`), `System.run(t_end, cfl)` (`__init__.py:run`).
@@ -72,9 +73,12 @@ GAP (encore cible / differe) :
   `System.set_block_params(name, values)` change la valeur au RUNTIME sans recompiler. Les backends
   "prototype"/"production" compilent un param runtime comme sa valeur de DECLARATION (figee : le modele
   y est default-construit, pas d'injection). Les params `const` restent INLINES (bit-identiques).
-- **LIMITES `AmrSystem` (reelles, a garder honnete)** : mono-bloc (pas multi-espece), IMEX source
+- **`AmrSystem` mono- ET multi-bloc** : le multi-blocs est SHIPPE (N blocs co-localises sur UNE
+  hierarchie AMR partagee via le moteur `AmrRuntime`, Poisson de systeme a second membre SOMME, regrid
+  d'union des tags, DSL production multi-bloc ; cf. `AmrSystem` `__init__.py` et `amr_system.cpp`
+  `build_multi`). LIMITES `AmrSystem` ENCORE REELLES (a garder honnete) : IMEX source
   locale OK (Gap 2 #132, backward_euler_source / mf_apply_source_treatment) mais Schur global sur
-  AMR et AMR multi-blocs restent a faire, multi-box natif non cable cote facade, et
+  AMR reste a faire, et
   HLLC/Roe/`primitive` REJETES cote facade Python AMR. Ce rejet est PUREMENT FACADE : le moteur C++
   (`amr_dsl_block.hpp`/`make_block`) les supporte deja ; seule la facade Python ne les expose pas
   encore sur AMR.
@@ -400,16 +404,18 @@ materialisee cote code dans `_BACKEND_CAPS` (`dsl.py`), lu par `CompiledModel.ca
 |---|---|---|---|---|---|---|
 | `prototype` (JIT, `add_dynamic_block`) | oui (residu hote Rusanov o1) | non | non | non | non | non (C++ dispatch virtuel, sans GIL) |
 | `aot` (`add_compiled_block`) | oui (production o2, HLLC/Roe, WENO5 #102) | non | non | non | non | non |
-| `production` (natif `add_native_block`, #85/#92) | oui | oui (np=1/2/4 #99/#93) | oui via `AmrSystem` (#92, mono-bloc) | oui (GH200 np=1 #97 ; device-MPI np=1/2/4 #93) | oui | non |
+| `production` (natif `add_native_block`, #85/#92) | oui | oui (np=1/2/4 #99/#93) | oui via `AmrSystem` (#92, mono- ET multi-bloc) | oui (GH200 np=1 #97 ; device-MPI np=1/2/4 #93) | oui | non |
 
 > SHIPPE (#85 System, #92 AmrSystem). `production` n'est PLUS l'alias d'`aot`.
-> `_BACKEND_CAPS["production"]` (`dsl.py`) declare `{cpu, mpi, gpu}=True`. La GPU et le MPI ne
-> sont plus "en cours" : System production GPU `np=1` VALIDE GH200 (#97), `solve_fields` MPI
-> `np=1/2/4` VALIDE CPU/CI (#99), device-MPI production `geometric_mg` VALIDE GH200 `np=1/2/4`
-> (#93). L'AMR est SHIPPE via `AmrSystem.add_native_block` (#92) mais reste BORNE (mono-bloc, pas
-> multi-espece, explicite, multi-box natif non cable cote facade, et HLLC/Roe/`primitive` rejetes
-> cote facade Python AMR alors que le moteur C++ les porte). Ces capacites sont des drapeaux de
-> diagnostic verifies au branchement/execution, pas figes a la compilation (point 7).
+> `_BACKEND_CAPS["production"]` (`dsl.py`) declare `{cpu, mpi, amr}=True` ; `gpu` est rapporte `False`
+> cote Python (le module hote teste en CI n'est pas bati Kokkos/CUDA -- la capacite GPU du chemin natif
+> est validee cote C++ GH200, pas exposee comme `True` depuis ce build). System production GPU `np=1`
+> VALIDE GH200 (#97), `solve_fields` MPI `np=1/2/4` VALIDE CPU/CI (#99), device-MPI production
+> `geometric_mg` VALIDE GH200 `np=1/2/4` (#93). L'AMR est SHIPPE via `AmrSystem.add_native_block`
+> (#92) : mono- ET multi-bloc (hierarchie partagee `AmrRuntime`, DSL production multi-bloc). Reste
+> BORNE (explicite, HLLC/Roe/`primitive` rejetes cote facade Python AMR alors que le moteur C++ les
+> porte). Ces capacites sont des drapeaux de diagnostic verifies au branchement/execution, pas figes a
+> la compilation (point 7).
 
 > RAPPEL MPI. `fft` n'est PAS supporte sous `System` en MPI `np>1` : refus dur SHIPPE (#106, plus
 > de segfault), employer `geometric_mg`. Un `DistributedFFTSolver` existe (teste a part) mais n'est
@@ -471,9 +477,10 @@ le reste est renommage/remap d'arguments. GAP de sucre restant : `adc.DirichletW
 
 > STATUT global. Phase A SHIPPE (#89/#90). Phase B SHIPPE (#85 `System`, #92 `AmrSystem`).
 > Phase C (validation Python device/MPI) SHIPPE (#97/#99/#93). Phase D (`AmrSystem` en production)
-> SHIPPE (#92/#105) mais BORNE (limites mono-bloc/explicite/facade, voir 0bis). Seule la Phase E
-> (params runtime) reste un GAP. Le sequencement ci-dessous est conserve pour la tracabilite ; les
-> balises par phase indiquent l'etat reel.
+> SHIPPE (#92/#105), mono- ET multi-bloc, mais BORNE (limites explicite/facade, voir 0bis). Phase E
+> (params runtime) est SHIPPE sur le backend `aot` (P7-b ; `kind="runtime"` + `set_block_params`). Le
+> sequencement ci-dessous est conserve pour la tracabilite ; les balises par phase indiquent l'etat
+> reel.
 
 Regroupe par dependance. Chaque etape note son WRITE-SET de fichiers.
 
@@ -521,15 +528,17 @@ Livree. C'est du cablage de dispatch (pas de numerique nouvelle).
    Python nouveau (tests). RAPPEL : `fft` reste refuse sous System MPI `np>1` (#106), employer
    `geometric_mg`.
 
-### Phase D : `AmrSystem` en production -- SHIPPE (#92/#105), BORNE
+### Phase D : `AmrSystem` en production -- SHIPPE (#92/#105), mono- ET multi-bloc, BORNE
 
 10. SHIPPE. `add_equation`/`add_native_block` cote `adc.AmrSystem` (`__init__.py:AmrSystem`) routent
     vers le pendant AMR natif `add_compiled_model(AmrSystem&)` (`amr_dsl_block.hpp`) ;
     `m.compile(target="amr_system")` est cable (#92). WENO5 + Rusanov + reconstruction conservative
     valides sur ce chemin (#105 ; parite `add_native_block` == `add_compiled_model` == `add_block`,
-    `dmax=0`). LIMITES ENCORE REELLES (a garder honnetes) : `AmrSystem` n'est PAS a parite avec
-    `System` (mono-bloc, pas multi-espece, IMEX source locale OK Gap 2 #132 mais Schur global sur
-    AMR et AMR multi-blocs restent a faire, multi-box natif non cable cote facade) ;
+    `dmax=0`). `AmrSystem` est desormais mono- ET multi-bloc : le multi-blocs (N blocs co-localises sur
+    UNE hierarchie partagee `AmrRuntime`, Poisson de systeme a second membre SOMME, regrid d'union des
+    tags, DSL production multi-bloc) est SHIPPE (`amr_system.cpp` `build_multi`). LIMITES ENCORE
+    REELLES (a garder honnetes) : `AmrSystem` n'est PAS a parite totale avec `System` (IMEX source
+    locale OK Gap 2 #132 mais Schur global sur AMR reste a faire) ;
     HLLC/Roe/`primitive` sont REJETES cote facade Python AMR alors que le moteur C++ les supporte
     deja (rejet PUREMENT facade). `AmrSystem.potential()` : binding SHIPPE (bindings.cpp:272,
     `#135`). WRITE-SET : `python/adc/__init__.py` (facade `AmrSystem`).
@@ -585,10 +594,13 @@ Livree. C'est du cablage de dispatch (pas de numerique nouvelle).
   WENO5 desormais sur tous les chemins (.so #102, natif AMR #105).
 - C (9) : SHIPPE (#97/#99/#93). Validation device/MPI DEPUIS Python (System GPU np=1, solve_fields
   MPI np=1/2/4, device-MPI geometric_mg np=1/2/4). `fft` refuse sous System MPI np>1 (#106).
-- D (10) : SHIPPE (#92/#105) mais BORNE : AMR mono-bloc, IMEX source locale OK (#132) mais Schur
-  global et multi-blocs restent a faire, multi-box natif non cable facade, HLLC/Roe/primitive
-  rejetes cote facade (moteur C++ OK). `AmrSystem.potential()` : SHIPPE (#135).
-- E (11) : GAP, phase 2, seul item exigeant un changement d'ABI/codegen (param runtime).
+- D (10) : SHIPPE (#92/#105), mono- ET multi-bloc (hierarchie partagee `AmrRuntime`, DSL production
+  multi-bloc, regrid d'union des tags), mais BORNE : explicite, IMEX source locale OK (#132) mais Schur
+  global sur AMR reste a faire, HLLC/Roe/primitive rejetes cote facade (moteur C++ OK).
+  `AmrSystem.potential()` : SHIPPE (#135).
+- E (11) : SHIPPE (P7-b) sur le backend `aot` : `m.param(kind="runtime")` emet `params.get(<indice>)`
+  (membre `adc::RuntimeParams`) et `System.set_block_params` change la valeur au runtime SANS
+  recompiler. Les backends `prototype`/`production` figent un param runtime a sa valeur de declaration.
 - F (12) : PROTOTYPE (branche, non mergee). Composition HYBRIDE native + DSL dans un modele
   (`adc.CompositeModel`) ; backends aot/production/jit, cible system/amr_system, aux B_z/T_e, couplage
   inter-especes par role, parite MPI np=1/2/4. Reste : validation GPU. AUCUN changement C++ (option B).

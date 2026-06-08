@@ -1620,11 +1620,15 @@ class Model:
     def param(self, name, value, kind="const"):
         """Parametre NOMME utilisable dans les formules. Mode (a) (`kind="const"`, defaut) : constante
         figee a la compilation, inlinee au codegen ; stockee dans m.params (introspection /
-        reproductibilite). Mode (b) (`kind="runtime"`) : NotImplementedError (Phase E).
+        reproductibilite). Mode (b) (`kind="runtime"`, P7-b) : SUPPORTE sur le backend "aot" -- le param
+        emet `params.get(<indice>)` (membre adc::RuntimeParams) et sa valeur peut etre CHANGEE au runtime
+        via System.set_block_params(name, values) SANS recompiler (la valeur de declaration sert de
+        defaut) ; cf. CompiledModel.runtime_param_names. Les backends "prototype"/"production" figent un
+        param runtime a sa valeur de declaration.
 
         CAS gamma : si name == "gamma", appelle AUSSI set_gamma(value) pour que la metadonnee ABI
         reste coherente (sinon le System retombe sur 1.4)."""
-        p = Param(name, value, kind=kind)  # leve NotImplementedError si kind == "runtime"
+        p = Param(name, value, kind=kind)  # 'runtime' -> RuntimeParamRef (P7-b), 'const' -> inline
         self.params[name] = p
         if name == "gamma":
             self._m.set_gamma(p.value)

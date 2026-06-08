@@ -23,14 +23,13 @@ et [docs/COUPLING_SURFACE.md](COUPLING_SURFACE.md) (classification complete du c
 | Classe | Surface | Remarque |
 |---|---|---|
 | `System` (Python) | **API** | facade composition Python, point d'entree principal |
-| `AmrSystem` (Python) | **API** | facade AMR Python (mono-bloc, explicite) |
+| `AmrSystem` (Python) | **API** | facade AMR Python (mono- ET multi-bloc, explicite ET IMEX) |
 | `adc.dsl.Model` / `adc.Model` | **API** | DSL Python + assemblage de briques natives |
 | `adc.FiniteVolume` / `adc.Explicit` / `adc.IMEX` | **API** | objets de configuration passes aux facades |
 | `Coupler<M,E>` | interne | coupleur mono-modele mono-niveau, non expose en Python |
 | `SystemCoupler` / `SystemDriver` | interne | ordonnanceur multi-especes mono-niveau |
 | `AmrCouplerMP` | interne | driver AMR mono-modele multi-box |
 | `AmrSystemCoupler` / `AmrSystemDriver` | interne | driver AMR multi-especes |
-| `amr_coupler.hpp::AmrCoupler` | **legacy** | remplace par `AmrCouplerMP` (mono-box = cas degenere) |
 | `spectral_coupler.hpp::SpectralCoupler` | **legacy** | orchestre `DistributedFFTSolver`, non route dans `System` MPI np>1 |
 | `amr_multilevel.hpp` / `amr_reflux.hpp` | **legacy** | reference Fab2D mono-box, verite-terrain de `advance_amr` |
 
@@ -98,8 +97,9 @@ etre calcule dans un `PhysicalModel` : c'est une responsabilite de l'assembleur 
 ## 2. Couche 1 : physique (local, device-callable)
 
 Le concept `PhysicalModel` (`core/physical_model.hpp`) n'expose que des fonctions locales :
-`flux`, `source`, `max_wave_speed`, `wave_speeds`, `elliptic_rhs`, toutes `ADC_HD`. Aucun
-acces au stockage ou au parallelisme.
+`flux`, `source`, `max_wave_speed`, `elliptic_rhs`, toutes `ADC_HD`. Aucun
+acces au stockage ou au parallelisme. (`wave_speeds` est une methode optionnelle de brique,
+pas une exigence du concept.)
 
 ```cpp
 struct EulerPoisson {                       // bon : local, device-callable
@@ -115,12 +115,12 @@ briques generiques, les noms de scenario (diocotron, Euler-Poisson...) vivant co
 
 | Axe | Briques (exemples) | Role |
 |---|---|---|
-| etat / transport | `ExB` (1 var), `Euler` / `CompressibleFlux` (4 var), `IsothermalFlux` (3 var) | `flux(U, aux, dir)` + `max_wave_speed` |
+| etat / transport | `ExBVelocity` (1 var), `Euler` / `CompressibleFlux` (4 var), `IsothermalFlux` (3 var) | `flux(U, aux, dir)` + `max_wave_speed` |
 | source | `NoSource`, `PotentialForce(charge)`, `GravityForce` | `source(U, aux)` (force du champ) |
 | elliptique | `ChargeDensity`, `BackgroundDensity`, `GravityCoupling(sign)` | `elliptic_rhs(U)` (second membre de Poisson) |
 
 Deux chemins de couplage coexistent sous le MEME operateur spatial, sans specialisation : la
-derive E x B exerce le chemin **aux vers flux** (le potentiel entre par le flux `ExB`) ;
+derive E x B exerce le chemin **aux vers flux** (le potentiel entre par le flux `ExBVelocity`) ;
 Euler-Poisson le chemin **aux vers source** (le potentiel entre par `PotentialForce`/`GravityForce`,
 le flux reste celui d'Euler). Le canal `aux` a un contrat de BASE `(phi, grad_x, grad_y)` mais est
 desormais EXTENSIBLE : `load_aux<NComp>` / `aux_comps<Model>()` lisent des composantes supplementaires
@@ -234,7 +234,7 @@ desambiguiser).
 politique et appelle l'operateur adapte ; il ne connait pas la formule du flux. Le temps
 compose des operateurs, il ne possede pas la physique.
 
-`coupling/` (`Coupler`, `SystemCoupler`, `AmrCoupler`, `AmrCouplerMP`,
+`coupling/` (`Coupler`, `SystemCoupler`, `AmrCouplerMP`,
 `SpectralCoupler`, `coupling_policy`) orchestre fluide <-> Poisson. Regle stricte
 pour eviter la classe-dieu :
 
@@ -254,7 +254,7 @@ responsabilites sont sorties en composants nommes : la hierarchie (stockage des 
 aux) dans `coupling/amr_level_storage.hpp` (`AmrLevelStack<Level>`), le regrid
 Berger-Rigoutsos dans `coupling/amr_regrid_coupler.hpp` (`amr_regrid_finest`), les
 diagnostics (masse, vitesse de derive) dans `coupling/amr_diagnostics.hpp` (`amr_mass`,
-`amr_max_drift_speed`). `AmrCoupler` / `AmrCouplerMP` ne gardent que l'enchainement
+`amr_max_drift_speed`). `AmrCouplerMP` ne garde que l'enchainement
 `sync_down -> compute_aux -> step` plus la delegation de `regrid()`. L'extraction est
 structurelle et bit-identique (equivalence `max|dUc|` a `0` et conservation de masse a
 l'arrondi inchangees).
@@ -285,7 +285,7 @@ Relocalise depuis le README. Chaque entree nomme le header, le type ou la foncti
 | [`core::{EquationBlock,CoupledSystem}`](include/adc/core/equation_block.hpp) | bundle par espece (modele + schema spatial + politique temps + BC) et systeme de N especes |
 | [`physics::bricks` / `composite`](include/adc/physics/bricks.hpp) | briques generiques (etat, transport, source, elliptique) composees en `CompositeModel` |
 | [`numerics::{RusanovFlux,HLLFlux,HLLCFlux,RoeFlux}`](include/adc/numerics/numerical_flux.hpp) | flux numeriques (politiques `ADC_HD`) |
-| [`numerics::reconstruction`](include/adc/numerics/reconstruction.hpp) | MUSCL ordre 2 (NoSlope / Minmod / VanLeer) + WENO5Z |
+| [`numerics::reconstruction`](include/adc/numerics/reconstruction.hpp) | MUSCL ordre 2 (NoSlope / Minmod / VanLeer) + Weno5 |
 | [`numerics::assemble_rhs` / `compute_face_fluxes`](include/adc/numerics/spatial_operator.hpp) | `R = -div F + S`, flux de face pour le reflux (diffusion incluse) ; GPU via `for_each_cell` |
 | [`numerics::time::{TimePolicy,SSPRK2,SSPRK3}`](include/adc/numerics/time/time_integrator.hpp) | par bloc : explicite / implicite / IMEX, sous-pas (`substeps`) ET cadence (`stride`) |
 | [`numerics::time::{ForwardEuler,SSPRK2Step,SSPRK3Step}`](include/adc/numerics/time/time_steppers.hpp) | integrateurs en temps OBJETS (`take_step(rhs, U, dt)`) ; l'utilisateur peut fournir le sien |
@@ -374,12 +374,13 @@ Berger-Rigoutsos, regrid, sous-cyclage, average-down et reflux conservatif. Les 
 importants sont explicites : `FluxRegister` accumule les flux de face, `CoverageMask`
 evite les doubles corrections, `DistributionMapping` porte l'ownership des boxes.
 
-**Couplage.** `AmrCoupler` et `AmrCouplerMP` restent les drivers AMR mono-modele. Le
+**Couplage.** `AmrCouplerMP` reste le driver AMR mono-modele. Le
 `SystemCoupler` couvre le mono-niveau multi-blocs ; `AmrSystemCoupler` porte le systeme
-multi-especes sur AMR (Poisson grossier + reflux par bloc). La facade `AmrSystem` n'est PAS a
-parite avec `System` : MONO-bloc, explicite, sans reconstruction primitive ni flux de Roe.
-L'etape suivante est de faire porter pleinement la meme notion d'`EquationBlock` par le moteur
-AMR, au lieu de dupliquer la logique par cas physique.
+multi-especes sur AMR (Poisson grossier + reflux par bloc). La facade `AmrSystem` supporte
+desormais mono- ET multi-bloc (`multi_block()` / `build_multi()` / `set_regrid`),
+reconstruction conservative | primitive, flux Riemann rusanov | hllc | roe, integrateur
+explicite ET IMEX ; 7 tests capstone (`test_amr_system_twoblock`, `test_amr_multiblock_*`),
+regrid union-tags #199. Nuance honnete restante : pas d'etage Schur GLOBAL sur AMR.
 
 **Tests coeur.** Les invariants AMR couverts dans ce depot sont le raffinement, la hierarchie,
 le clustering, le regrid, le reflux, le masque de couverture, les diagnostics AMR et le load
@@ -439,9 +440,11 @@ bit-identique a la reference prouve que la refactorisation n'a rien casse. Ca ne
 que le comportement est numeriquement correct. Les deux sont necessaires.
 
 Fait aujourd'hui dans `adc_cpp` :
-- Tests : 71 ctests coeur par defaut (`ctest --test-dir build`), joues en CI sur deux builds
-  (Release serie ET Kokkos backend Serial) ; +21 entrees ctest MPI quand `-DADC_USE_MPI=ON`
-  (np=1/2/4, bit-identiques). Le module Python ajoute 26 tests (bindings + DSL).
+- Tests : ctests coeur par defaut (`ctest --test-dir build`), joues en CI sur deux builds
+  (Release serie ET Kokkos backend Serial) ; entrees ctest MPI quand `-DADC_USE_MPI=ON`
+  (np=1/2/4, bit-identiques) ; tests Python supplementaires (bindings + DSL). Le decompte exact
+  des tests est regenere dans [BACKEND_COVERAGE.md](BACKEND_COVERAGE.md) (source de verite) ;
+  ne pas coder en dur ici.
 - Numerique coeur : maillage, halos, AMR, reflux, multigrille, Poisson (dont eps(x) variable,
   Helmholtz/ecrante, anisotrope, cut-cell), discretisations, flux de Roe, WENO5-Z, IMEX/AP,
   splitting, multirate, `EquationBlock`, `CoupledSystem`, `SystemCoupler`, canal aux extensible
@@ -506,7 +509,7 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 
 ### `numerics/` : numerique local (couche 2)
 - `numerical_flux.hpp` : flux de Riemann en politique (template) : Rusanov / HLL / HLLC / Roe.
-- `reconstruction.hpp` : reconstruction d'interface : NoSlope / MUSCL (Minmod, VanLeer, MC) / WENO5-Z.
+- `reconstruction.hpp` : reconstruction d'interface : NoSlope / MUSCL (Minmod, VanLeer) / WENO5-Z.
 - `spatial_operator.hpp` : `assemble_rhs` (R = -div F + S) + `compute_face_fluxes` (flux de face pour le reflux).
 - `spatial_discretisation.hpp` : assemblage du couple (reconstruction x flux) par bloc.
 
@@ -544,7 +547,7 @@ c'est, et pourquoi il est la. Descriptions tirees du doc-comment de chaque en-te
 
 ### `runtime/` : facades runtime + DSL (assise des bindings)
 - `system.hpp` : facade `System` (composition multi-blocs mono-niveau, Poisson partage).
-- `amr_system.hpp` : facade `AmrSystem` (un bloc sur hierarchie raffinee ; mono-bloc, explicite, PAS a parite avec `System`).
+- `amr_system.hpp` : facade `AmrSystem` (mono- ET multi-bloc sur hierarchie raffinee ; recon conservative | primitive, flux rusanov | hllc | roe, explicite ET IMEX ; reste hors parite : pas d'etage Schur global).
 - `model_spec.hpp` / `model_factory.hpp` : spec de briques -> `CompositeModel` (le coeur ne nomme aucun scenario).
 - `block_builder.hpp` : fermetures de bloc instanciables hors `System` (fondation backend AOT).
 - `grid_context.hpp` : contexte de grille reel (maillage + CL + aux) partage par les chemins de bloc.
