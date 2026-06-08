@@ -55,6 +55,6 @@ surtout un travail de RESIDENCE des donnees, pas une reecriture des noyaux de ca
 
 - Le decoupage en depots (lib vs scenarios) : [Organisation des depots](organisation.md).
 - L'architecture detaillee, les seams et les decisions de design : la reference contributeur
-  [`ARCHITECTURE.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) (section 1, « cinq couches orthogonales ») et
+  [`ARCHITECTURE.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) (section 1, "cinq couches orthogonales") et
   [`CHOICES.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/CHOICES.md).
 - Les algorithmes (flux, MUSCL/WENO, multigrille, reflux AMR) : [`ALGORITHMS.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).

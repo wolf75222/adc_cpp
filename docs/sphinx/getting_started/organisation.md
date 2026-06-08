@@ -2,7 +2,7 @@
 
 Le projet se decoupe en **deux depots** avec une frontiere nette : la bibliotheque generique
 d'un cote, les scenarios nommes de l'autre. Comprendre cette separation evite de chercher
-« le diocotron » au mauvais endroit.
+"le diocotron" au mauvais endroit.
 
 ## `adc_cpp` -- la bibliotheque (le coeur)
 
@@ -21,7 +21,7 @@ connait que des briques generiques (`Scalar` / `FluidState`, `ExB` / `Compressib
 `NoSource` / `PotentialForce`, `BackgroundDensity` / `ChargeDensity`...) que l'on compose en un
 modele via `adc.Model(state, transport, source, elliptic)`, ou que l'on ecrit en formules via
 `adc.dsl.Model`. Il n'y a ni `diocotron`, ni `euler_poisson` dans `adc_cpp`. Voir
-[`ARCHITECTURE.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) (« Le coeur est AGNOSTIQUE au modele »).
+[`ARCHITECTURE.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) ("Le coeur est AGNOSTIQUE au modele").
 
 Cette regle vaut aussi pour les integrateurs sur mesure : le schema deux-fluides
 asymptotic-preserving, qui n'est PAS une brique composable bloc a bloc mais un SCENARIO, a quitte
@@ -58,7 +58,7 @@ La dependance est strictement descendante : `adc_cases` consomme `adc_cpp` (le m
 les en-tetes `adc::adc` via `FetchContent` pour les scenarios compiles a la volee). **Il n'y a
 aucune dependance inverse** : le coeur ne connait pas les cas.
 
-En pratique : un nouveau modele « bien connu » (un diocotron, un Euler-Poisson) se code dans
+En pratique : un nouveau modele "bien connu" (un diocotron, un Euler-Poisson) se code dans
 `adc_cases` par composition de briques. Une nouvelle BRIQUE generique (un nouveau flux, une
 nouvelle fermeture elliptique) se code dans `adc_cpp`. Le [tutoriel A->Z](tutorial.md) reste, lui,
 volontairement AUTONOME : il n'importe que `adc`, `numpy` et `matplotlib`, et recree le modele

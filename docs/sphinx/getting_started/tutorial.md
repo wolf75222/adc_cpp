@@ -172,7 +172,7 @@ couverture pour les exports statiques).
 ![Evolution temporelle de la densite du diocotron (animation).](../tutorials/_assets/diocotron.gif)
 
 *Image de couverture statique (la densite finale), affichee la ou le GIF ne s'anime pas
-— exports PDF/print :*
+-- exports PDF/print :*
 
 ![Densite finale du diocotron (image de couverture PNG).](../tutorials/_assets/diocotron_cover.png)
 

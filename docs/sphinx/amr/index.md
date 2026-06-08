@@ -19,8 +19,8 @@ tutoriel A->Z compare d'ailleurs les deux chemins sur la meme physique (cf.
 ## Hierarchie partagee
 
 Tous les blocs vivent sur **une seule** hierarchie AMR : memes boites, meme repartition MPI
-(`DistributionMapping`), memes pas d'espace par niveau. C'est le modele « une hierarchie
-commune portant plusieurs champs », jamais une hierarchie par espece. La version courante
+(`DistributionMapping`), memes pas d'espace par niveau. C'est le modele "une hierarchie
+commune portant plusieurs champs", jamais une hierarchie par espece. La version courante
 porte deux niveaux (ratio de raffinement 2 : le niveau fin a un pas `dx/2`).
 
 - **Mono-bloc** (un seul `add_block`) : chemin historique `AmrCouplerMP`, avec regrid dynamique
@@ -72,7 +72,7 @@ marquees, l'algorithme trouve un petit nombre de boites rectangulaires qui les c
 trop de gaspillage (coupe recursive sur la signature des marques). La cadence est portee par
 `regrid_every` (re-raffinement tous les N macro-pas ; `0` = jamais apres l'initialisation).
 
-Deux criteres sont exposes et se **composent** (OU cellule a cellule, « union des tags ») :
+Deux criteres sont exposes et se **composent** (OU cellule a cellule, "union des tags") :
 
 - `set_refinement(threshold)` : **densite par bloc**. Raffine la ou la densite (composante 0)
   d'un bloc depasse `threshold`. Critere de base, valable mono- et multi-blocs.
@@ -184,12 +184,12 @@ Des **sources couplees** inter-especes (ionisation, collisions) peuvent etre bra
 `add_coupled_source` : elles sont lues cellule a cellule (meme `(i, j)`, aucune interpolation
 inter-especes, grace a la hierarchie partagee) et, construites a contributions exactement
 opposees, conservent la masse de paire a la precision machine. Le multi-blocs est valide par une
-batterie de tests dits « capstone » : deux blocs a schemas differents (`test_amr_system_twoblock`),
+batterie de tests dits "capstone" : deux blocs a schemas differents (`test_amr_system_twoblock`),
 DSL production multi-bloc (`test_amr_multiblock_compiled`), IMEX (`test_amr_multiblock_imex`),
 sources couplees (`test_amr_multiblock_coupled_source`), substeps (`test_amr_multiblock_substeps`),
 regrid d'union (`test_amr_multiblock_regrid_union`) et parite MPI np=1/2/4
 (`test_mpi_amr_twoblock_parity`). Detail : [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) section 8 et
-le bandeau « STATUT : IMPLEMENTE » en tete de [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
+le bandeau "STATUT : IMPLEMENTE" en tete de [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
 
 ## Limites actuelles
 
@@ -198,13 +198,13 @@ Cette section est volontairement honnete : ce que l'AMR **ne** fait **pas** enco
 - **Deux niveaux seulement.** La hierarchie est grossier + un niveau fin (ratio 2). Le regrid ne
   reconstruit que le niveau le plus fin ; au-dela de 2 niveaux, le regrid multi-niveaux n'existe
   pas encore, meme en mono-bloc.
-- **Poisson « coarse + inject ».** Le Poisson est resolu sur le **grossier** puis injecte vers le
+- **Poisson "coarse + inject".** Le Poisson est resolu sur le **grossier** puis injecte vers le
   fin, ce n'est pas un vrai solve elliptique multi-niveaux (composite). C'est suffisant pour
   l'observable diocotron (qui vit sur un cercle median resolu par le grossier) mais a connaitre.
 - **Pas d'etage Schur GLOBAL sur AMR.** Le splitting source condense par Schur (`adc.Split`,
   `CondensedSchur`) n'a **pas** de pendant AMR : `AmrSystem.add_block` / `add_equation` le
   rejettent explicitement. Pour cet etage, utiliser un `System` non raffine.
-- **Multirate par le chemin compile : restreint.** Sur le chemin DSL « production » (`.so`),
+- **Multirate par le chemin compile : restreint.** Sur le chemin DSL "production" (`.so`),
   `add_equation` **rejette** explicitement `stride > 1` et le masque IMEX partiel
   (`implicit_vars` / `implicit_roles`) : l'ABI plate du loader ne les transporte pas, et ils
   seraient pris a leurs valeurs par defaut en silence. Pour un `.so` multirate ou a masque IMEX
@@ -220,6 +220,6 @@ Cette section est volontairement honnete : ce que l'AMR **ne** fait **pas** enco
   chantiers du `System` (mono-niveau) ; elles ne sont pas portees sur la hierarchie AMR.
 
 Frontiere de conception (Phase 2 / Phase 3) : criteres de raffinement par bloc, vrai solve
-elliptique composite multi-niveaux, et — beaucoup plus loin — hierarchies distinctes par espece
+elliptique composite multi-niveaux, et -- beaucoup plus loin -- hierarchies distinctes par espece
 avec projections conservatives. Detail :
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) section 7.
