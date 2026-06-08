@@ -148,6 +148,14 @@ static void fill_smooth_rhs(MultiFab& rhs, const Geometry& geom) {
   }
 }
 
+// Checkpoint de debug rang-tagge (gate par $ADC_DBG) pour localiser un deadlock multi-rang.
+static void dbg(const char* m) {
+  if (std::getenv("ADC_DBG")) {
+    std::fprintf(stderr, "[r%d] %s\n", my_rank(), m);
+    std::fflush(stderr);
+  }
+}
+
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
 
@@ -206,14 +214,21 @@ int main(int argc, char** argv) {
   if (workload == "transport") {
     SafeEuler model{Euler{kGamma}, NoSource{}, ChargeDensity{0.0}};
     MultiFab U(ba, dm, SafeEuler::n_vars, 2), aux(ba, dm, kAuxBaseComps, 1);
+    { char b[96]; std::snprintf(b, sizeof b, "mesh boxes=%d local=%d", ba.size(), U.local_size()); dbg(b); }
     U.set_val(Real(0));
     aux.set_val(Real(0));
     init_blob(U, geom);
+    dbg("init fill_boundary BEGIN");
     fill_boundary(U, dom, per);
+    dbg("init fill_boundary END");
     const double dt = 0.4 * (1.0 / n) / std::sqrt(kGamma * 1.1 / 1.0);  // dt fixe deterministe
     double hh = 0, tt = 0, aa = 0, rr = 0;
-    for (int s = 0; s < warmup; ++s)
+    dbg("warmup BEGIN");
+    for (int s = 0; s < warmup; ++s) {
       transport_step(model, U, aux, geom, dom, per, dt, ba, dm, hh, tt, aa, rr);
+      { char b[64]; std::snprintf(b, sizeof b, "warmup step %d done", s); dbg(b); }
+    }
+    dbg("warmup END");
     for (int s = 0; s < steps; ++s) {
       double h = 0, t = 0, a = 0, r = 0;
       const auto s0 = Clock::now();
@@ -309,6 +324,16 @@ int main(int argc, char** argv) {
   // lanceur fait croitre n avec les ressources ; cells/s global doit alors rester ~constant.
   const long long cells = static_cast<long long>(n) * n;
   const double cells_per_s = med > 0 ? double(cells) / (med / 1e3) : 0.0;
+  // FIX DEADLOCK np>=2 : rmax() == all_reduce_max() est une COLLECTIVE -> TOUS les rangs doivent
+  // l'appeler, le MEME nombre de fois. Les appeler dans le printf sous `if (my_rank()==0)` ne les
+  // exécutait que sur le rang 0 -> les autres rangs filaient vers comm_finalize() -> rang 0 bloqué
+  // à jamais dans MPI_Allreduce. On hisse donc TOUTES les réductions hors du bloc rang 0.
+  const double halos_ms = 1e3 * rmax(halos_acc) / steps;
+  const double transport_ms = 1e3 * rmax(transport_acc) / steps;
+  const double poisson_ms = 1e3 * rmax(poisson_acc) / steps;
+  const double reduction_ms = 1e3 * rmax(reduction_acc) / steps;
+  const double alloc_ms = 1e3 * rmax(alloc_acc) / steps;
+  const double diag_ms = 1e3 * rmax(diag_s);
 
   if (my_rank() == 0) {
     std::printf(
@@ -323,9 +348,7 @@ int main(int argc, char** argv) {
         "\"cells_per_s\":%.6e,\"invariants\":%s}\n",
         ADC_BUILD_SHA, ADC_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(), threads, 0,
         workload.c_str(), scaling.c_str(), n, n, ba.size(), max_grid, warmup, steps, med, p10, p90,
-        cv, 1e3 * rmax(halos_acc) / steps, 1e3 * rmax(transport_acc) / steps,
-        1e3 * rmax(poisson_acc) / steps, 1e3 * rmax(reduction_acc) / steps,
-        1e3 * rmax(alloc_acc) / steps, 1e3 * rmax(diag_s), cells_per_s, invbuf);
+        cv, halos_ms, transport_ms, poisson_ms, reduction_ms, alloc_ms, diag_ms, cells_per_s, invbuf);
   }
 
   comm_finalize();

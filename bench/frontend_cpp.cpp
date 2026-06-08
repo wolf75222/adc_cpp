@@ -377,6 +377,10 @@ int main(int argc, char** argv) {
   const double cv = mean > 0 ? std::sqrt(var) / mean : 0.0;
 
   const double med_max = rmax(med);
+  // rmax() == all_reduce_max() = COLLECTIVE : TOUS les rangs l'appellent (jamais sous if(rank0),
+  // sinon deadlock). On hisse p10/p90 hors du printf rang 0.
+  const double p10_max = rmax(p10);
+  const double p90_max = rmax(p90);
   const long long cells = static_cast<long long>(n) * n;
   const double cells_per_s = med_max > 0 ? (double(cells) * n_ranks() / (med_max / 1e3)) : 0.0;
 
@@ -405,7 +409,7 @@ int main(int argc, char** argv) {
         ADC_BUILD_SHA, ADC_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(),
         std::atoi(std::getenv("OMP_NUM_THREADS") ? std::getenv("OMP_NUM_THREADS") : "1"), 0, n, n, n,
         poisson.c_str(), dt, warmup, steps, t_model_build, t_addblock, t_state_init, t_first_step,
-        t_warmup, t_run_loop, t_diag, total_cold, med_max, rmax(p10), rmax(p90), cv, poisson_ms,
+        t_warmup, t_run_loop, t_diag, total_cold, med_max, p10_max, p90_max, cv, poisson_ms,
         aux_ms, halos_ms, transport_ms, reduction_ms, fence_ms, alloc_ms, cells_per_s, inv.mass,
         inv.rho_min, inv.p_min, inv.nan ? "true" : "false");
   }
