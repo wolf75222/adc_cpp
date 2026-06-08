@@ -132,6 +132,7 @@ struct AmrSystem::Impl {
   std::function<double()> max_speed_fn;
   std::function<double()> mass_fn;
   std::function<int()> n_patches_fn;
+  std::function<std::vector<PatchBox>()> patch_boxes_fn;
   std::function<std::vector<double>()> density_fn;
   std::function<std::vector<double>()> potential_fn;
   // --- chemin multi-blocs (AmrRuntime, hierarchie partagee + Poisson somme) ---
@@ -194,6 +195,7 @@ struct AmrSystem::Impl {
     max_speed_fn = std::move(h.max_speed);
     mass_fn = std::move(h.mass);
     n_patches_fn = std::move(h.n_patches);
+    patch_boxes_fn = std::move(h.patch_boxes);
     density_fn = std::move(h.density);
     potential_fn = std::move(h.potential);
     built = true;
@@ -654,6 +656,11 @@ int AmrSystem::n_patches() {
   p_->ensure_built();
   if (p_->runtime) return p_->runtime->n_patches();
   return p_->n_patches_fn();
+}
+std::vector<PatchBox> AmrSystem::patch_boxes() {
+  p_->ensure_built();
+  if (p_->runtime) return p_->runtime->patch_boxes();  // MULTI-BLOCS : moteur AmrRuntime
+  return p_->patch_boxes_fn();                          // MONO-BLOC : hook AmrCouplerMP
 }
 double AmrSystem::mass() { return mass(std::string()); }
 double AmrSystem::mass(const std::string& name) {

@@ -14,6 +14,7 @@
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, mf_average_down_mb
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
+#include <adc/mesh/patch_box.hpp>  // PatchBox : empreinte index-space d'un patch fin (patch_boxes())
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fill_boundary.hpp>
 #include <adc/mesh/geometry.hpp>
@@ -672,6 +673,23 @@ class AmrRuntime {
   int n_patches() const {
     const auto& L = *blocks_[0].levels;
     return L.size() >= 2 ? static_cast<int>(L[1].U.box_array().size()) : 0;
+  }
+
+  // Empreintes index-space des patchs fins (level + coins lo/hi inclusifs), pour TOUS les niveaux
+  // fins. Lecture seule du BoxArray GLOBAL (toutes boites/tous rangs) deja stocke -> rank-independent,
+  // zero communication, AUCUN cout chemin chaud (query entre les pas). Mirroir de n_patches() : la
+  // meme box_array() qui donne le COMPTE donne les BOITES. Bloc 0 representatif (layout PARTAGE, garde
+  // same_layout_or_throw). Boucle k = 1..nlev-1 : un seul niveau fin aujourd'hui (ratio 2), correct si
+  // un futur ajoute des niveaux (le champ level desambiguise le pas dx = L / (n << level) cote Python).
+  std::vector<PatchBox> patch_boxes() const {
+    const auto& L = *blocks_[0].levels;
+    std::vector<PatchBox> out;
+    for (int k = 1; k < static_cast<int>(L.size()); ++k) {
+      const auto& bxs = L[k].U.box_array().boxes();
+      for (const Box2D& b : bxs)
+        out.push_back(PatchBox{k, b.lo[0], b.lo[1], b.hi[0], b.hi[1]});
+    }
+    return out;
   }
 
  private:

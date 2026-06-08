@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/mesh/patch_box.hpp>    // PatchBox : empreinte index-space d'un patch fin (patch_boxes())
 #include <adc/mesh/physical_bc.hpp>  // BCRec
 #include <adc/runtime/export.hpp>    // ADC_EXPORT : set_compiled_block resolu par le loader natif AMR
 #include <adc/runtime/model_spec.hpp>
@@ -99,6 +100,11 @@ struct AmrCompiledHooks {
   std::function<int()> n_patches;         ///< nombre de patchs fins
   std::function<std::vector<double>()> density;  ///< densite grossiere, n*n row-major
   std::function<std::vector<double>()> potential;  ///< phi du niveau grossier, n*n row-major
+  // AJOUTE EN QUEUE (additif, ne deplace aucun champ existant) : empreintes index-space des patchs
+  // fins. Mirroir de n_patches (meme box_array(), le COMPTE devient les BOITES). Le loader .so qui
+  // construit ce struct est garde par adc_native_abi_key : un .so genere AVANT cet ajout doit etre
+  // recompile (le garde le diagnostique deja clairement) ; l'ajout en queue le rend purement additif.
+  std::function<std::vector<PatchBox>()> patch_boxes;  ///< empreintes index-space des patchs fins
 };
 
 /// Builder DIFFERE d'un bloc COMPILE sur la hierarchie multi-blocs : recoit le layout PARTAGE (cree
@@ -290,6 +296,14 @@ class AmrSystem {
   double time() const;
   int n_blocks() const;           ///< nombre de blocs (1 = mono-bloc AmrCouplerMP ; >= 2 = AmrRuntime)
   int n_patches();                ///< nombre de patchs fins courants (de la hierarchie partagee)
+  /// Empreintes index-space des patchs fins courants : un PatchBox (level, ilo, jlo, ihi, jhi) par
+  /// box fine, pour TOUS les niveaux fins (level >= 1). Coins INCLUSIFS dans l'espace d'indices du
+  /// niveau (n << level cellules/direction, ratio 2). MEME source que n_patches() (le BoxArray fin
+  /// GLOBAL, toutes boites/tous rangs -> rank-independent, MPI-safe, zero communication). C'est une
+  /// QUERY (entre les pas) : lecture seule des boites deja stockees, AUCUN cout chemin chaud. La
+  /// conversion en [0, L]^2 se fait cote Python (qui connait n via nx() et L). Force le build
+  /// paresseux (ensure_built) comme n_patches()/mass()/density().
+  std::vector<PatchBox> patch_boxes();
   double mass();                  ///< masse du 1er bloc sur le grossier (conservee au reflux)
   double mass(const std::string& name);     ///< masse du bloc nomme sur le grossier (conservee PAR BLOC)
   std::vector<double> density();  ///< densite grossiere du 1er bloc (composante 0), n*n row-major

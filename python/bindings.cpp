@@ -330,6 +330,18 @@ PYBIND11_MODULE(_adc, m) {
       .def("time", &AmrSystem::time)
       .def("n_blocks", &AmrSystem::n_blocks)
       .def("n_patches", &AmrSystem::n_patches)
+      // Empreintes index-space des patchs fins : liste de tuples (level, ilo, jlo, ihi, jhi), coins
+      // INCLUSIFS, dans l'espace d'indices du niveau (n << level cellules/direction, ratio 2). MEME
+      // source que n_patches() (le BoxArray fin GLOBAL) -> rank-independent, MPI-safe. Query entre les
+      // pas, zero cout chemin chaud. Le wrapper Python convertit en [0, L]^2 (il connait n via nx() et
+      // L) ; cf. AmrSystem.patch_rectangles() cote facade.
+      .def("patch_boxes",
+           [](AmrSystem& s) {
+             py::list out;
+             for (const adc::PatchBox& b : s.patch_boxes())
+               out.append(py::make_tuple(b.level, b.ilo, b.jlo, b.ihi, b.jhi));
+             return out;
+           })
       // mass / density : surcharge par NOM de bloc (multi-blocs ; nom vide -> 1er bloc, compat
       // mono-bloc ou nom cosmetique). Le nom INDEXE le bloc en multi-blocs (chaque bloc a sa masse /
       // densite, conservees PAR BLOC au reflux). Sans argument -> 1er bloc (retro-compat mono-bloc).

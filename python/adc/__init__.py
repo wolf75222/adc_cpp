@@ -1240,6 +1240,26 @@ class AmrSystem:
             for k, v in cfg_kw.items():
                 setattr(config, k, v)
         self._s = _AmrSystem(config)
+        self._L = float(config.L)  # cote de [0, L]^2 (pour patch_rectangles : index -> physique)
+
+    def patch_rectangles(self):
+        """Rectangles physiques (x0, y0, largeur, hauteur) des patchs fins courants, dans [0, L]^2.
+
+        Convertit patch_boxes() (espace d'indices, coins inclusifs) en coordonnees physiques. Le pas
+        du niveau est dx = L / (n << level) (ratio 2 par niveau) ; un patch [ilo..ihi] x [jlo..jhi]
+        couvre (ihi - ilo + 1) cellules en x depuis x0 = ilo * dx (et de meme en y). Convention de
+        grille ne[j, i] -> indice 0 = x (i), indice 1 = y (j), coherent avec density() et un imshow
+        d'extent [0, L, 0, L]. Pratique pour tracer les VRAIS patchs (ex. matplotlib Rectangle) sans
+        reconstruire un proxy de densite. Renvoie une liste de (x0, y0, w, h), un par patch fin (tous
+        niveaux fins confondus). Query (entre les pas) : declenche le build paresseux comme
+        n_patches(), aucun cout sur le chemin chaud.
+        """
+        n, L = self._s.nx(), self._L
+        rects = []
+        for level, ilo, jlo, ihi, jhi in self._s.patch_boxes():
+            dx = L / (n << level)
+            rects.append((ilo * dx, jlo * dx, (ihi - ilo + 1) * dx, (jhi - jlo + 1) * dx))
+        return rects
 
     def add_block(self, name, model, spatial=None, time=None):
         spatial = spatial if spatial is not None else Spatial()

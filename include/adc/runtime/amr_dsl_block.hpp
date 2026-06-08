@@ -116,6 +116,19 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
     auto& L = cpl->levels();
     return L.size() >= 2 ? static_cast<int>(L[1].U.box_array().size()) : 0;
   };
+  // Empreintes index-space des patchs fins (pendant mono-bloc de AmrRuntime::patch_boxes). Capture le
+  // MEME cpl que les autres hooks (aucun nouveau souci de duree de vie), lit le BoxArray deja
+  // materialise -> query entre les pas, zero cout chemin chaud (h.step intouche).
+  h.patch_boxes = [cpl] {
+    auto& L = cpl->levels();
+    std::vector<adc::PatchBox> out;
+    for (std::size_t k = 1; k < L.size(); ++k) {
+      const auto& bxs = L[k].U.box_array().boxes();
+      for (const adc::Box2D& b : bxs)
+        out.push_back(adc::PatchBox{static_cast<int>(k), b.lo[0], b.lo[1], b.hi[0], b.hi[1]});
+    }
+    return out;
+  };
   const int nn = bp.n;
   const bool repl = !bp.distribute_coarse;
   h.density = [cpl, nn, repl] { return coupler_read_coarse(cpl->coarse(), nn, repl); };
