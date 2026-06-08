@@ -1,3 +1,5 @@
+> **ARCHIVE -- document non-normatif.** Plan/spec interne conservee pour l'historique. La source de verite courante est le code + les docs canoniques (ARCHITECTURE.md, ALGORITHMS.md, BACKEND_COVERAGE.md). Ne pas s'y fier comme etat courant.
+
 # Plan d'extraction de python/system.cpp
 
 PLAN UNIQUEMENT. Ce document ne modifie aucun code. Il identifie quatre candidats

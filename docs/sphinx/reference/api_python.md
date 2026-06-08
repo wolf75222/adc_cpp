@@ -42,6 +42,17 @@ signatures `add_block` / `add_equation` que `System` ; la cadence du regrid est 
    :members:
 ```
 
+## Geometrie et maillage
+
+`adc.System` tourne en geometrie cartesienne par defaut ; la geometrie polaire / disque se
+choisit via les champs `geometry`, `nr`, `ntheta`, `r_min`, `r_max` de `SystemConfig` (cf.
+[Sujets avances](../advanced/index.md), section geometrie). Les classes de maillage exposees :
+
+```{eval-rst}
+.. autoclass:: adc.CartesianMesh
+.. autoclass:: adc.PolarMesh
+```
+
 ## Modeles natifs : composition de briques
 
 Un modele NATIF est assemble par `adc.Model(state, transport, source, elliptic)` a partir de

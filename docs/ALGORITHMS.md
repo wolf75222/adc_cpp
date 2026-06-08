@@ -15,7 +15,8 @@ Architecture (couches, seam de dispatch, frontiere lib/application) :
 validations device GH200 : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md). References :
 [BIBLIOGRAPHY.md](BIBLIOGRAPHY.md).
 
-Le coeur resout, sur maillage cartesien adaptatif, la forme generique
+Le coeur resout, sur maillage cartesien adaptatif (et, en opt-in, sur anneau polaire ou sous-domaine
+disque immerge), la forme generique
 
 ```
 d U / d t  +  div F(U, aux)  =  S(U, aux)        (hyperbolique, par bloc)
@@ -25,7 +26,9 @@ div(eps grad phi) - kappa phi = f(U)             (elliptique, partage)
 ou la partie hyperbolique `U` et la partie elliptique `phi` sont couplees a chaque pas par le
 canal `aux` (contrat de base `(phi, grad_x, grad_y)`, extensible). Un modele est une
 composition `CompositeModel<Transport, Source, Elliptic>` ; le couplage entre par le FLUX (aux
-lu dans `F`) ou par la SOURCE (aux lu dans `S`), sous le meme operateur spatial.
+lu dans `F`) ou par la SOURCE (aux lu dans `S`), sous le meme operateur spatial. Les briques de
+reconstruction, flux et source sont REUTILISEES verbatim entre les geometries (cartesien, polaire,
+cut-cell EB) ; seules les metriques et les divergences changent.
 
 ## 1. Volumes finis : Godunov ordre 1
 
@@ -150,10 +153,18 @@ transport d'un bloc IMEX est bien avance explicitement).
 on les applique en SEQUENCE plutot que simultanement. Lie (ordre 1) les enchaine, Strang (ordre 2)
 symetrise la sequence (`R(dt/2) . pas-central . R(dt/2)`).
 
-**Code.** `numerics/time/splitting.hpp::lie_step` / `strang_step`.
+**Code.** `numerics/time/splitting.hpp::lie_step` / `strang_step` (briques generiques `T(dt)` /
+`S(dt)`). L'orchestrateur de production les expose par `SplitScheme::Lie` / `Strang`
+(`runtime/system_stepper.hpp` : `SystemStepper::step` pour Lie, `step_strang` pour Strang, #217),
+ou la phase TRANSPORT et la phase SOURCE (explicite, IMEX, ou etage condense par Schur) sont
+symetrisees a `dt/2` autour du transport central. La consistance impose de re-resoudre l'elliptique
+entre les demi-pas source (sinon `S` lit un `phi` perime et l'ordre 2 tombe).
 
-**Validation.** `test_splitting` : ordre du splitting mesure sur un systeme lineaire 2x2 NON
-commutant dont le flot exact est connu (Lie ordre 1, Strang ordre 2 verifies par la pente).
+**Validation.** `test_splitting` : ordre du splitting des briques `lie_step`/`strang_step` mesure sur
+un systeme lineaire 2x2 NON commutant dont le flot exact est connu (Lie ordre 1, Strang ordre 2
+verifies par la pente). `test_strang_splitting` : MEME mesure d'ordre sur le VRAI orchestrateur
+(`SystemStepper::step` vs `step_strang`), plus un compte d'appels au solve elliptique qui verrouille
+la consistance phi. Cote Python : `test_strang_split`.
 
 ## 7. Multirate : sous-cyclage, cadence, pas adaptatif
 
@@ -259,7 +270,59 @@ ordre 2). Ces trois chemins sont aussi exerces cote Python (`test_poisson_eps`,
 `test_poisson_screened`, `test_poisson_eps_aniso`) et valides bit-identiques sur GH200
 (cf. GPU_RUNTIME_PORT.md, round 2).
 
-## 12. Bord embedded : cut-cell Shortley-Weller
+## 12. Elliptique a tenseur plein : Krylov matrice-libre (BiCGStab)
+
+**Intuition.** Quand l'operateur elliptique porte des termes CROISES `Axy != Ayx` (operateur non
+auto-adjoint, p.ex. la rotation `B^{-1}` issue de la condensation de Schur), la multigrille
+geometrique seule (concue pour un operateur symetrique) ne converge plus. Il faut un solveur de
+Krylov NON symetrique, preconditionne par le V-cycle MG sur la PARTIE symetrique de l'operateur.
+
+**Formule.** BiCGStab matrice-libre sur `A phi = f` : aucune matrice assemblee, seul le produit
+`matvec(d) = A d` est requis (applique par `for_each_cell`). Preconditionneur `M^{-1} = N` V-cycles
+de `GeometricMG` sur le bloc diagonal symetrique. Warm-start : `phi()` entrant sert de point de
+depart. Les conditions de Dirichlet inhomogene sont AFFINES : `c_bc = apply_operator(0)` est calcule
+une fois par solve (`prepare_solve`) et soustrait, car BiCGStab applique la matvec a des DIRECTIONS
+de correction, pas a l'iterate.
+
+**Code.** `numerics/elliptic/krylov_solver.hpp::TensorKrylovSolver` (BiCGStab preconditionne par
+N V-cycles MG). `solve()` = `solve(1e-10, 200)` ; `solve(rel_tol, max_iters)` rend un `KrylovResult`
+(`iters`, residu relatif final, drapeau de convergence). L'operateur et le preconditionneur sont
+deux objets SEPARES (`assert(&op != &precond)`) : les confondre ecraserait l'iterate et le second
+membre du solve.
+
+**Validation.** `test_krylov_solver` : (A) sur le Laplacien canonique (`Axy=Ayx=0`), BiCGStab
+converge vers la MEME solution que `GeometricMG` (a la tolerance) ; (B) sur un operateur a termes
+croises non triviaux, BiCGStab converge la ou le V-cycle MG SEUL stagne ou diverge. Sous MPI le
+nombre d'iterations et la convergence sont invariants au nombre de rangs (critere d'arret reduit
+par `all_reduce`).
+
+## 13. Source implicite condensee : condensation de Schur
+
+**Intuition.** Une source RAIDE qui couple potentiel, vitesse et force de Lorentz (diocotron a
+`omega_c` eleve) ne peut pas etre traitee composante par composante : la rotation cyclotron couple
+les deux composantes de vitesse, et le potentiel reagit au deplacement de charge. On theta-discretise
+la source implicite et on ELIMINE algebriquement la vitesse (via l'inverse `B^{-1}` de la rotation
+2x2, ferme) pour ne resoudre qu'une elliptique sur le SEUL potentiel `phi^{n+theta}` (complement de
+Schur), puis on reconstruit la vitesse.
+
+**Formule.** Pour la source theta-implicite, l'inconnue condensee est `phi^{n+theta}`. L'operateur
+condense est `A_op = L_canonique + c * (terme croise de B^{-1})`, ou `c = theta^2 dt^2 alpha`
+(Hoffart et al., arXiv:2510.11808). `B^{-1}` est la rotation-dilatation 2x2 fermee, seul
+`w = theta dt B_z` y entre. L'operateur condense est en general a TENSEUR PLEIN (d'ou le solveur de
+Krylov, section 12) ; `kappa = 0` (pas de terme de masse).
+
+**Code.** `coupling/schur_condensation.hpp` BATIT l'operateur tensoriel `A_op` et le second membre
+condense (il ne resout NI ne reconstruit) ; `numerics/lorentz_eliminator.hpp` fournit le `B^{-1}`
+2x2 ferme. `coupling/condensed_schur_source_stepper.hpp::CondensedSchurSourceStepper` est l'etage
+source de production (#126), opt-in via `adc.Split(source=CondensedSchur)` : a chaque pas, le bloc
+fait son transport explicite puis remplace la source explicite / IMEX par cet etage condense, resolu
+en C++ (`System`, cf. `runtime/system.hpp` set_source_stage).
+
+**Validation.** `test_schur_condensation` (l'operateur et le RHS condenses sont corrects),
+`test_condensed_schur_source_stepper` (l'etage source condense avance correctement). Cote Python :
+`test_schur_split`, `test_schur_via_system`, `test_schur_conservation`.
+
+## 14. Bord embedded : cut-cell Shortley-Weller
 
 **Intuition.** Une paroi non alignee sur la grille (conducteur circulaire) n'est pas un escalier :
 la cut-cell Shortley-Weller corrige le stencil au bord pour placer la condition de Dirichlet a la
@@ -271,9 +334,103 @@ par le V-cycle on-device. Compatible avec l'operateur anisotrope.
 **Validation.** `test_cut_cell` (cut-cell vs escalier sur solution manufacturee),
 `test_cut_cell_anisotropic` (cut-cell + operateur anisotrope), `test_cut_cell_anisotropic_multibox`
 (domaine multi-box mono-rang), `test_mpi_cutcell_multibox` (multi-box distribue np=1/2/4, verrou de
-non-regression du bug average_down hors bornes sur hierarchie MG degenere).
+non-regression du bug average_down hors bornes sur hierarchie MG degenere). Pour l'elliptique sur un
+disque immerge, `test_poisson_disc` exerce le solveur (convergence + amelioration a la resolution).
 
-## 13. AMR : sous-cyclage Berger-Oliger + reflux conservatif
+## 15. Domaine disque : masque, transport masque, transport cut-cell
+
+**Intuition.** Un sous-domaine de transport DISQUE (anneau de diocotron) impose une frontiere
+circulaire non alignee sur la grille cartesienne. Trois modes, du plus simple au plus precis :
+`none` (masque materialise mais ignore, bit-identique au plein cartesien), `staircase` (frontiere
+crenelee, porte de face 0/1), `cutcell` / embedded-boundary (apertures `alpha_f` + fraction de
+volume `kappa`, frontiere lisse, ordre 2 a l'interieur).
+
+**Formule (forme conservative EB).** Cellule `(i,j)` de volume `kappa dx dy` :
+
+```
+R = S - (1/kappa) [ (alpha_xp Fx_{i+1} - alpha_xm Fx_i)/dx
+                  + (alpha_yp Fy_{j+1} - alpha_ym Fy_i)/dy ]
+      - (1/kappa) (alpha_wall |wall| / (dx dy)) F_wall
+```
+
+Le flux de paroi immergee est un no-penetration `F_wall = 0` (pendant FV du mur conducteur). La face
+PARTAGEE entre deux cellules actives a la MEME ouverture des deux cotes
+(`alpha_xp(i) == alpha_xm(i+1)`), donc les flux telescopent : la masse `sum n_ij kappa_ij dx dy` est
+conservee A LA MACHINE. STABILITE PETITE CELLULE : `kappa_eff = max(kappa, kappa_min)` (defaut
+`1e-2`) borne l'amplification `1/kappa` (clamp de volume, "volume merging" implicite), au prix d'une
+legere non-conservation LOCALE sur les cellules les plus coupees ; la masse GLOBALE reste exacte (le
+clamp n'agit que sur le denominateur).
+
+**Code.** `System::set_disc_domain(cx, cy, R, mode)` (#216, `runtime/system.hpp`, defini dans
+`python/system.cpp`) pose un `DiscDomain` (`runtime/wall_predicate.hpp`, `level_set`) et le mode de
+transport ; `set_geometry_mode(mode)` bascule le mode seul. `disc_mask()` materialise le masque
+(tout-actif si aucun disque). Le stepper aiguille chaque bloc : `assemble_rhs` (plein),
+`assemble_rhs_masked` (`numerics/spatial_operator.hpp`, porte 0/1) ou `assemble_rhs_eb`
+(`numerics/spatial_operator_eb.hpp`, EB). Les apertures et `kappa` viennent de `cut_fraction.hpp`
+(MEME geometrie que la cut-cell elliptique) ; la reconstruction et le flux numerique sont REUTILISES
+verbatim depuis l'operateur cartesien.
+
+**Validation.** `test_disc_domain_mask` (le masque disque, bornes et tout-actif sans disque),
+`test_eb_transport` (transport cut-cell EB : conservation et frontiere lisse). Cote Python :
+`test_disc_domain_mask`.
+
+## 16. Geometrie polaire : transport et Poisson sur anneau (r, theta)
+
+**Intuition.** Pour un anneau de diocotron, la grille cartesienne paie un sur-taux structurel aux
+bords de l'anneau. Une grille POLAIRE annulaire `r in [r_min, r_max] x theta in [0, 2pi)` aligne la
+geometrie sur le probleme : theta est periodique, r est physique (parois). Transport et Poisson
+polaires reutilisent les MEMES briques de reconstruction, flux et source que le cartesien, seules les
+metriques changent.
+
+**Formule (transport, FV conservatif).** Flux radiaux ponderes par `r` (face radiale = `r * Fr`),
+flux azimutaux directs ; divergence en coordonnees polaires. La source geometrique
+(`-rho v_theta^2/r`, courbure croisee) est portee en cellule. Paroi radiale solide (`wall_radial`)
+-> flux radial nul aux faces de bord -> masse `sum n r dr dtheta` conservee A LA MACHINE.
+
+**Formule (Poisson, FFT-en-theta + tridiag-en-r).** theta etant periodique a coefficient constant,
+la FFT diagonalise EXACTEMENT `d_theta^2` : le mode DFT `m` a la valeur propre spectrale `-k(m)^2`
+(et non le stencil 2 points, approximation O(dtheta^2)). Le terme azimutal en cellule est
+`(-k(m)^2 / r_i^2) phi_hat(i,m)`, diagonal en `m`. Le terme radial est volumes finis ordre 2 :
+
+```
+(1/r_i) [ r_{i+1/2}(phi_{i+1}-phi_i)/dr - r_{i-1/2}(phi_i-phi_{i-1})/dr ] / dr
+```
+
+donc, par mode `m`, un systeme tridiagonal en r resolu par Thomas (sous-diag `a_i = r_{i-1/2}/(r_i
+dr^2)`, sur-diag `c_i = r_{i+1/2}/(r_i dr^2)`, diag `b_i = -(a_i+c_i) - k(m)^2/r_i^2`). BC radiales
+Dirichlet / Neumann homogene (par `BCRec.xlo/.xhi`). Mode `m=0` + deux bords Neumann : jauge fixee en
+epinglant `phi_hat(0,0)=0`.
+
+**Code.** `mesh/geometry.hpp::PolarGeometry` (anneau, opt-in via `adc.PolarMesh` ;
+`cfg.geometry == "polar"` cote `python/system.cpp`). Transport :
+`numerics/spatial_operator_polar.hpp::assemble_rhs_polar<Limiter, NumericalFlux>`
+(`recon_prim`, `wall_radial`), instancie via `runtime/block_builder_polar.hpp` et branche dans
+`System::step` pour `geometry == "polar"`. Poisson :
+`numerics/elliptic/polar_poisson_solver.hpp::PolarPoissonSolver` (FFT-en-theta + Thomas-en-r ;
+modele le concept `PolarEllipticSolver` `rhs()/phi()/solve()/residual()/geom()`). L'aux est derive en
+base LOCALE `(e_r, e_theta)` : `aux[1] = d phi/dr`, `aux[2] = (1/r) d phi/d theta`
+(`block_builder_polar.hpp`, `System::solve_fields_polar`). PORTEE : mono-rang, boite unique couvrant
+l'anneau (garde-fou DUR si `n_ranks()>1` ou `ba.size()!=1`).
+
+**Operateur polaire tensoriel + Schur polaire.** Quand la source implicite couplee passe en polaire
+(diocotron a `omega_c` eleve), la FFT-en-theta du `PolarPoissonSolver` ne s'applique plus (operateur
+a coefficient NON constant en theta). `numerics/elliptic/polar_tensor_operator.hpp::PolarTensorKrylovSolver`
+resout alors par BiCGStab matrice-libre preconditionne (Jacobi ou RadialLine), pendant polaire du
+`TensorKrylovSolver` cartesien ; `coupling/polar_condensed_schur_source_stepper.hpp::PolarCondensedSchurSourceStepper`
+est le pendant polaire du `CondensedSchurSourceStepper` (#212). Le Schur polaire est leve en
+multi-rang MPI (#227).
+
+**Validation.** `test_polar_transport_mms` / `test_polar_mms_vr` (MMS transport polaire ordre 2),
+`test_polar_ring_advection` (advection d'anneau), `test_polar_fluid_transport`,
+`test_polar_lorentz_source`, `test_polar_conservation_radial_flux` (paroi radiale, masse conservee),
+`test_polar_poisson_mms` (PolarPoissonSolver, ordre 2 radial), `test_polar_tensor_elliptic_mms`
+(operateur tensoriel polaire), `test_polar_condensed_schur_source_stepper`, `test_mpi_polar_schur`
+(Schur polaire multi-rang). `test_polar_system_step` valide le chemin `System::step` polaire complet
+(field-solve + aux en base locale + SSPRK3 transport + paroi). Cote Python : `test_polar_system`,
+`test_polar_diocotron`, `test_polar_rejections`, `test_polar_schur_via_system`,
+`test_polar_conservation_radial_flux`, `test_polar_teardown_stability`.
+
+## 17. AMR : sous-cyclage Berger-Oliger + reflux conservatif
 
 **Intuition.** Raffiner seulement la ou il le faut. Un niveau fin (pas `dx/2`) recouvre une
 sous-region ; pour respecter sa CFL il fait `r` sous-pas de `dt/r` pendant que le grossier fait 1
@@ -299,7 +456,7 @@ flux de face, `CoverageMask` evite les doubles corrections.
 grossier doit etre echantillonne AVANT d'avancer le grossier ; l'average_down doit preceder la
 mesure de masse initiale.
 
-## 14. AMR multi-patch : reflux coverage-aware, distribue MPI
+## 18. AMR multi-patch : reflux coverage-aware, distribue MPI
 
 **Intuition.** Un niveau fin n'est pas une seule boite mais un ENSEMBLE de patchs. Deux subtilites :
 (a) au joint entre deux patchs voisins (interface fin-fin), il ne faut PAS refluxer ; (b) la
@@ -317,7 +474,7 @@ compile a foncteurs nommes est invariant au decoupage en boites ET au nombre de 
 `dmax=0`), `test_mpi_amr_distributed_coarse` (grossier reparti == replique bit a bit, np=1/2/4).
 **Pieges.** Sans masque de couverture, le joint fin-fin serait reflue deux fois -> non-conservation.
 
-## 15. Clustering Berger-Rigoutsos et regrid
+## 19. Clustering Berger-Rigoutsos et regrid
 
 **Intuition.** Etant donne les cellules marquees (fort gradient), trouver un petit nombre de boites
 rectangulaires qui les couvrent sans trop de gaspillage. L'algorithme coupe recursivement une
@@ -336,7 +493,7 @@ donnees fines interpolees depuis le grossier). **Pieges.** Le proper nesting (ch
 strictement interieur a la couverture parente) doit etre impose apres le clustering, sinon le
 ghost-fill inter-niveaux echoue.
 
-## 16. Maillage distribue : BoxArray global, halos, equilibrage
+## 20. Maillage distribue : BoxArray global, halos, equilibrage
 
 **Intuition.** Le AMR distribue exige que tous les rangs connaissent toutes les boites (BoxArray
 GLOBAL) pour calculer la couverture multi-patch correctement, mais que chaque rang n'alloue que
@@ -354,7 +511,7 @@ send-recv), degenere en serie.
 `test_mpi_fft_distributed` (FFT par bandes), `test_mpi_redistribute`, `test_mpi_array_reduce`,
 `test_mpi_coupler_inject` (np=4, bit-identiques np=1/2/4).
 
-## 17. Canal aux extensible
+## 21. Canal aux extensible
 
 **Intuition.** Le couplage hyperbolique-elliptique passe par un canal `aux` de contrat de BASE
 `(phi, grad_x, grad_y)` (3 composantes). Certains modeles ont besoin de champs SUPPLEMENTAIRES : un
@@ -372,7 +529,7 @@ compose propage la largeur aux de ses briques), `test_aux_coupler_bz` / `test_au
 long des chemins coupleur, systeme, AMR, multi-box), `test_aux_te` (T_e derive p/rho),
 `test_aux_single_source` (une source unique genere `load_aux` + marshaling, tous champs couverts).
 
-## 18. Composition runtime et systeme multi-especes
+## 22. Composition runtime et systeme multi-especes
 
 **Intuition.** Python compose QUOI (un bloc par espece : modele compose + schema spatial + politique
 temporelle), le C++ calcule par CELLULE. N especes interagissent dans le SECOND MEMBRE elliptique
@@ -389,7 +546,7 @@ un `CompositeModel` depuis une spec de briques (le coeur ne nomme aucun scenario
 (l'assembleur assemble, le driver avance), `test_amr_system_coupler`, `test_system_hardening`,
 `test_variable_role` (adresser une composante par son ROLE physique plutot que par indice).
 
-## 19. DSL symbolique : codegen, JIT, AOT
+## 23. DSL symbolique : codegen, JIT, AOT
 
 **Intuition.** Un mini-DSL cote Python decrit un modele en FORMULES et l'emet en brique C++ : flux,
 source, second membre elliptique, avec elimination de sous-expressions communes (CSE). Trois
@@ -412,7 +569,7 @@ recon, roles, aux), exerces par la suite `ctest` du module Python. Sur GH200, le
 nommes est valide bit-identique (cf. GPU_RUNTIME_PORT.md, phase 9) ; `add_compiled_model` a lambdas
 etendues bute encore sur une limite nvcc (cf. GPU_RUNTIME_PORT.md, phase 8).
 
-## 20. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)
+## 24. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)
 
 Pas un algorithme numerique mais le point de bascule qui les rend tous portables. Detail dans
 [ARCHITECTURE.md](ARCHITECTURE.md) section 4 (couche execution). En bref :

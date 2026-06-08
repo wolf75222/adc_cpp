@@ -10,6 +10,8 @@
 
 <p align="center">
   <img src="docs/anim_romeo_diocotron_amr3.gif" alt="Instabilite diocotron AMR 3 niveaux sur ROMEO" width="640">
+  <br><sub>3 niveaux AMR sur ROMEO (moteur C++ multi-niveaux). Version locale reproductible (facade
+  Python, 1 niveau fin) : <a href="https://github.com/wolf75222/adc_cases/tree/master/diocotron_amr"><code>adc_cases/diocotron_amr</code></a> (<code>make_hero_gif.py</code>).</sub>
 </p>
 
 <div align="center">
