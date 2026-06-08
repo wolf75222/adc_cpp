@@ -207,6 +207,50 @@ bool operator!=(const ManagedAllocator<A>&, const ManagedAllocator<B>&) noexcept
 template <class T>
 using fab_allocator = ManagedAllocator<T>;
 
+// Allocateur des TAMPONS DE COMMUNICATION MPI (sbuf/rbuf de fill_boundary), DISTINCT de
+// fab_allocator : surtout PAS de memoire managee/device ici. Une MPI CUDA-aware (sur ROMEO :
+// OpenMPI 4.1.7, PML ob1 + BTL smcuda) detecte un pointeur device/managed (cuPointerGetAttribute)
+// et tente un transfert device->device par CUDA IPC (cuIpcOpenMemHandle). Sous isolation cgroup GPU
+// (srun --gpus-per-task=1, chaque rang ne voit QUE son GPU comme device 0), l'IPC handle exporte par
+// le pair pointe un GPU invisible -> l'ouverture ne peut pas aboutir -> DEADLOCK du rendez-vous.
+// On alloue donc en memoire HOTE EPINGLEE (Kokkos::SharedHostPinnedSpace) : accessible du device
+// (les kernels pack/unpack for_each ecrivent dedans directement, comme SharedSpace) MAIS vue comme
+// memoire HOTE par MPI -> chemin hote normal, JAMAIS d'IPC, robuste quel que soit l'env de lancement.
+// Backend hote Kokkos : SharedHostPinnedSpace == HostSpace (rien ne change). Voir fill_boundary.hpp.
+static_assert(Kokkos::has_shared_host_pinned_space,
+              "adc : le backend Kokkos doit fournir SharedHostPinnedSpace (memoire hote epinglee) "
+              "pour les tampons de communication MPI de fill_boundary");
+
+/// Adaptateur std::allocator_traits sur Kokkos::SharedHostPinnedSpace (hote epingle, device-accessible).
+/// Stateless. Utiliser l'alias `comm_allocator<T>`. PAS de pool a free differe (a la difference de
+/// ManagedArena) : fill_boundary_end pose donc un device_fence() apres l'unpack avant que les tampons
+/// ne soient liberes (les kernels d'unpack lisent rbuf de facon asynchrone).
+template <class T>
+struct PinnedAllocator {
+  using value_type = T;
+  PinnedAllocator() noexcept = default;
+  template <class U>
+  PinnedAllocator(const PinnedAllocator<U>&) noexcept {}
+
+  T* allocate(std::size_t n) {
+    if (n == 0) return nullptr;
+    detail::ensure_kokkos_initialized();  // kokkos_malloc exige Kokkos initialise
+    void* p = Kokkos::kokkos_malloc<Kokkos::SharedHostPinnedSpace>("adc_comm", n * sizeof(T));
+    if (!p) throw std::bad_alloc();
+    return static_cast<T*>(p);
+  }
+  void deallocate(T* p, std::size_t) noexcept {
+    if (p) Kokkos::kokkos_free<Kokkos::SharedHostPinnedSpace>(p);
+  }
+};
+template <class A, class B>
+bool operator==(const PinnedAllocator<A>&, const PinnedAllocator<B>&) noexcept { return true; }
+template <class A, class B>
+bool operator!=(const PinnedAllocator<A>&, const PinnedAllocator<B>&) noexcept { return false; }
+
+template <class T>
+using comm_allocator = PinnedAllocator<T>;
+
 }  // namespace adc
 
 #else
@@ -214,6 +258,10 @@ using fab_allocator = ManagedAllocator<T>;
 namespace adc {
 template <class T>
 using fab_allocator = std::allocator<T>;
+
+// Hors Kokkos : tampons MPI en memoire hote ordinaire (build CPU inchange, byte-identique a avant).
+template <class T>
+using comm_allocator = std::allocator<T>;
 
 // Stub hors memoire unifiee : pas de pool, pas de stats (build CPU inchange).
 inline ArenaStats arena_stats() { return ArenaStats{}; }

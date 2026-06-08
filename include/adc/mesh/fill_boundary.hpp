@@ -115,10 +115,14 @@ struct HaloExchange {
     Box2D region;
   };
   std::vector<std::vector<Job>> recv;         // jobs de reception (deballage)
-  // Tampons en MEMOIRE UNIFIEE (fab_allocator = SharedSpace sous Kokkos, std::allocator sinon) :
-  // pack/unpack en for_each (device sous Kokkos), et on passe le pointeur unifie DIRECTEMENT a MPI ;
-  // une MPI CUDA-aware detecte l'UVM et fait du device-to-device (GPUDirect), sans rebond hote.
-  std::vector<std::vector<Real, fab_allocator<Real>>> sbuf, rbuf;  // vivants jusqu'a end
+  // Tampons en memoire HOTE EPINGLEE (comm_allocator = Kokkos::SharedHostPinnedSpace sous Kokkos,
+  // std::allocator sinon), PAS managee. Le pack/unpack en for_each (device sous Kokkos) ecrit/lit
+  // dedans directement car le pinned host est device-accessible ; MAIS le pointeur passe a MPI est
+  // vu comme de l'HOTE (cuPointerGetAttribute = HOST), donc une MPI CUDA-aware (BTL smcuda) ne tente
+  // PAS de CUDA IPC dessus. Un pointeur manage/UVM, lui, declenchait l'IPC, qui DEADLOCKE entre deux
+  // GPU isoles par cgroup (srun --gpus-per-task=1 : chaque rang ne voit que son GPU comme device 0,
+  // cuIpcOpenMemHandle du buffer du pair impossible). Cf. core/allocator.hpp (comm_allocator).
+  std::vector<std::vector<Real, comm_allocator<Real>>> sbuf, rbuf;  // vivants jusqu'a end
   std::vector<MPI_Request> reqs;
   int nc = 0;
 #endif
@@ -259,8 +263,8 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
 #ifdef ADC_HAS_MPI
   if (h.reqs.empty()) return;
   MPI_Waitall(static_cast<int>(h.reqs.size()), h.reqs.data(), MPI_STATUSES_IGNORE);
-  // UNPACK device (for_each) depuis les tampons unifies recus. Waitall garantit le transfert
-  // termine ; le kernel lance ensuite lit la memoire unifiee (coherente). Pas de rebond hote.
+  // UNPACK device (for_each) depuis les tampons HOTE EPINGLE recus. Waitall garantit le transfert
+  // termine ; le kernel lance ensuite lit le pinned host (device-accessible, coherent).
   for (std::size_t r = 0; r < h.recv.size(); ++r) {
     if (h.rbuf[r].empty()) continue;
     const Real* rb = h.rbuf[r].data();
@@ -276,6 +280,10 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
       base += rsz * ncl;
     }
   }
+  // Les kernels d'unpack ci-dessus sont ASYNC (device) et lisent h.rbuf ; comm_allocator (pinned
+  // host) libere IMMEDIATEMENT a la destruction de h (pas de free differe a la ManagedArena). On
+  // draine donc le device AVANT que les tampons epingles ne soient liberes -> pas de use-after-free.
+  device_fence();
 #else
   (void)mf;
   (void)h;
