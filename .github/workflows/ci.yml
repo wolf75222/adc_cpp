@@ -31,10 +31,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Un nouveau push sur une meme branche/PR annule le run precedent encore en vol :
-  # on n'immobilise pas les runners lents sur une revision deja perimee.
+  # Sur une PR, un nouveau push annule le run precedent encore en vol : on n'immobilise
+  # pas les runners lents sur une revision deja perimee.
+  # Sur un push master (et nightly/dispatch), on n'annule PAS : des merges rapproches se
+  # couperaient mutuellement leurs builds Kokkos lents (interruption SIGTERM, exit 143),
+  # marquant master en faux rouge alors que le code est sain. Chaque validation post-merge
+  # va donc a son terme (les runs se mettent en file au lieu de s'annuler).
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Calcule si la suite COMPLETE (MPI + Kokkos) doit tourner. Plein si :
