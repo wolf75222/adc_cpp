@@ -68,6 +68,19 @@ adc_add_test(test_poisson_fft)
 adc_add_test(test_elliptic_operator)
 adc_add_test(test_elliptic_problem)
 adc_add_test(test_elliptic_composite_rhs)
+# Solveur Poisson COMPOSITE FAC 2 niveaux (coarse + 1 patch fin, ghosts C-F bilineaires + correction de
+# flux C-F two-way) : test MMS montrant que le patch fin REDUIT l'erreur elliptique vs coarse-only (le
+# verrou de fidelite AMR -- les patchs raffinent le couplage elliptique, pas seulement le transport).
+adc_add_test(test_composite_fac_poisson)
+# Composite FAC a COEFFICIENT VARIABLE div(eps grad phi)=f (operateur condense Schur B_z=0, eps=1+c rho) :
+# MMS montrant que le patch fin reduit l'erreur (phi + grad phi) avec un coefficient variable.
+adc_add_test(test_composite_fac_variable_eps)
+# Composite FAC a TENSEUR PLEIN div(A grad phi)=f, A=diag(eps,eps)+[[0,a_xy],[a_yx,0]], a_yx=-a_xy
+# (operateur condense Schur B_z!=0, non auto-adjoint) : MMS, le patch fin reduit l'erreur (phi + grad phi).
+adc_add_test(test_composite_fac_tensor)
+# Poisson AMR COMPOSITE branche dans AmrCouplerMP (set_composite_poisson) : le patch fin pose dans l'aux
+# un grad phi resolu a la finesse (vs grad grossier injecte d'Option A) -> verrou de fidelite AMR.
+adc_add_test(test_amr_composite_poisson)
 adc_add_test(test_poisson_disc)
 adc_add_test(test_solve_robust)
 adc_add_test(test_cut_cell)

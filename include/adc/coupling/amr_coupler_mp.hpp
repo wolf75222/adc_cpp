@@ -5,6 +5,7 @@
 #include <adc/coupling/amr_level_storage.hpp>    // AmrLevelStack
 #include <adc/coupling/amr_regrid_coupler.hpp>   // amr_regrid_finest (Berger-Rigoutsos)
 #include <adc/coupling/coupler.hpp>  // detail::coupler_eval_rhs (f = model.elliptic_rhs(U))
+#include <adc/numerics/elliptic/composite_fac_poisson.hpp>  // solveur Poisson COMPOSITE FAC 2 niveaux (opt-in)
 #include <adc/numerics/elliptic/elliptic_solver.hpp>
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, amr_step_multilevel_multipatch, mf_*_mb
@@ -312,10 +313,24 @@ class AmrCouplerMP {
     for (int k = stack_.nlev() - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
   }
 
+  /// OPT-IN : remplace le Poisson AMR Option A (solve grossier + injection grad constant par morceaux)
+  /// par un solve elliptique COMPOSITE FAC (le patch fin RAFFINE l'elliptique). Cf. CompositeFacPoisson.
+  /// Perimetre Phase 2 : 2 niveaux, UN patch fin mono-box interieur, grossier replique (mono-rang).
+  /// Hors de ce cadre, compute_aux retombe sur Option A (bit-identique).
+  void set_composite_poisson(bool v) { composite_poisson_ = v; }
+  bool composite_poisson() const { return composite_poisson_; }
+
   void compute_aux() {  // Poisson grossier + grad phi + injection vers les fins
     auto& L = stack_.L();
     const Box2D& dom = stack_.domain();
     const Real dx = geom_.dx(), dy = geom_.dy();
+    // CHEMIN COMPOSITE (opt-in) : le patch fin raffine VRAIMENT l'elliptique. Cadre supporte = 2 niveaux,
+    // UN patch fin mono-box, grossier replique (Phase 2). Sinon Option A ci-dessous (bit-identique).
+    if (composite_poisson_ && replicated_coarse_ && stack_.nlev() == 2 &&
+        L[1].U.box_array().size() == 1) {
+      compute_aux_composite();
+      return;
+    }
     // second membre via le modele (pas de formule recopiee) : f = elliptic_rhs(U)
     detail::coupler_eval_rhs(L[0].U, mg_.rhs(), model_);
     mg_.solve();  // laisse phi avec ses ghosts remplis (dernier gs_rb_sweep -> fill_ghosts)
@@ -432,11 +447,49 @@ class AmrCouplerMP {
   }
 
  private:
+  /// Pas Poisson COMPOSITE FAC (chemin opt-in). Solve l'elliptique sur grossier + patch fin couple par
+  /// FAC, puis pose aux PAR NIVEAU depuis le phi DE CHAQUE NIVEAU : aux fin = (phi_f, grad fin) ou grad
+  /// fin = diff centree sur phi_f (resolu a la finesse), PAS l'injection grad grossier constant d'Option A.
+  void compute_aux_composite() {
+    auto& L = stack_.L();
+    const Box2D& dom = stack_.domain();
+    const Box2D fine_box = L[1].U.box_array()[0];
+    if (!fac_built_ || !same_box(fac_fine_box_, fine_box)) {
+      fac_ = std::make_shared<CompositeFacPoisson>(geom_, mg_.box_array(), mg_.bc(), fine_box, 2);
+      fac_fine_box_ = fine_box;
+      fac_built_ = true;
+    }
+    // f = elliptic_rhs(U) PAR NIVEAU : le fin a son PROPRE second membre raffine (pas une injection).
+    detail::coupler_eval_rhs(L[0].U, fac_->rhs_coarse(), model_);
+    detail::coupler_eval_rhs(L[1].U, fac_->rhs_fine(), model_);
+    fac_->solve();
+    device_fence();
+    // aux niveau 0 (grossier) : phi + grad depuis phi_coarse (memes stencils centres que le chemin Option A).
+    fill_ghosts(fac_->phi_coarse(), dom, mg_.bc());
+    detail::coupler_grad_phi(fac_->phi_coarse(), stack_.aux(0), Real(1) / (Real(2) * geom_.dx()),
+                             Real(1) / (Real(2) * geom_.dy()));
+    fill_boundary(stack_.aux(0), dom, Periodicity{true, true});
+    // aux niveau 1 (fin) : phi + grad depuis phi_fine -> grad FIN (diff centree fine, lit les ghosts C-F
+    // bilineaires) = le gain de fidelite vs le grad grossier constant injecte par Option A.
+    detail::coupler_grad_phi(fac_->phi_fine(), stack_.aux(1), Real(1) / (Real(2) * L[1].dx),
+                             Real(1) / (Real(2) * L[1].dy));
+  }
+
+  static bool same_box(const Box2D& a, const Box2D& b) {
+    return a.lo[0] == b.lo[0] && a.lo[1] == b.lo[1] && a.hi[0] == b.hi[0] && a.hi[1] == b.hi[1];
+  }
+
   Model model_;
   Geometry geom_;
   Elliptic mg_;
   AmrLevelStack<AmrLevelMP> stack_;
   bool replicated_coarse_;  // niveau 0 replique (true) ou multi-box reparti (false, de-replication)
+  // Chemin Poisson COMPOSITE FAC (opt-in, set_composite_poisson). fac_ construit paresseusement sur le
+  // patch fin courant (reconstruit si le patch change apres regrid). Defaut OFF -> Option A bit-identique.
+  bool composite_poisson_ = false;
+  bool fac_built_ = false;
+  std::shared_ptr<CompositeFacPoisson> fac_;
+  Box2D fac_fine_box_{};
 };
 
 }  // namespace adc
