@@ -151,6 +151,11 @@ adc_add_test(test_condensed_schur_source_stepper)
 # mono-niveau avec l'etage uniforme #126 (un seul niveau couvrant tout le domaine -> bit-pour-bit),
 # relation implicite reconstruite, source non triviale, garde multi-niveau (suivi Etape 4).
 adc_add_test(test_amr_condensed_schur_source_stepper)
+# Etage source condense par Schur COMPOSITE multi-niveau (Phase 3c) : sur une hierarchie 2 niveaux
+# (grossier + 1 patch fin), le patch fin RAFFINE l'elliptique (operateur tensoriel Schur resolu par FAC)
+# + reconstruction des vitesses par niveau + cascade average_down. Verifie finitude, source non triviale,
+# rho gelee, coherence average_down (couvert = moyenne fine), stabilite a grand dt.
+adc_add_test(test_amr_condensed_schur_composite)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)

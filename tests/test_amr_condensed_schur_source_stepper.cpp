@@ -232,21 +232,25 @@ int main(int argc, char** argv) {
   const double dmom = max_diff(levels[0].U, mom0, vars.size);
   chk(std::isfinite(dmom) && dmom > 1e-6, "la source modifie l'etat (dmom > 1e-6)");
 
-  // (D) GARDE multi-niveau : deux niveaux -> erreur claire (suivi Etape 4).
+  // (D) GARDE Phase 4 : > 2 niveaux (ou multi-patch) -> erreur claire (l'etage composite est cable pour
+  // 2 niveaux + UN patch fin mono-box ; le multi-patch / MPI est la Phase 4). Le cas 2-niveaux-1-patch
+  // VALIDE est exerce a part dans test_amr_condensed_schur_composite.
   {
-    MultiFab fine(S.ba, S.dm, vars.size, 1), cphi(S.ba, S.dm, 1, 1);
-    copy_all(fine, mom0, vars.size);
+    MultiFab f1(S.ba, S.dm, vars.size, 1), f2(S.ba, S.dm, vars.size, 1), cphi(S.ba, S.dm, 1, 1);
+    copy_all(f1, mom0, vars.size);
+    copy_all(f2, mom0, vars.size);
     copy_all(cphi, phi_ref, 1);
-    std::vector<AmrLevelMP> two;
-    two.push_back(AmrLevelMP{std::move(levels[0].U), &bz, S.geom.dx(), S.geom.dy()});
-    two.push_back(AmrLevelMP{std::move(fine), &bz, S.geom.dx() / 2, S.geom.dy() / 2});
+    std::vector<AmrLevelMP> three;  // 3 niveaux -> hors du cadre 2-niveaux du composite
+    three.push_back(AmrLevelMP{std::move(levels[0].U), &bz, S.geom.dx(), S.geom.dy()});
+    three.push_back(AmrLevelMP{std::move(f1), &bz, S.geom.dx() / 2, S.geom.dy() / 2});
+    three.push_back(AmrLevelMP{std::move(f2), &bz, S.geom.dx() / 4, S.geom.dy() / 4});
     bool threw = false;
     try {
-      amr.step(two, cphi, bz, 0, theta, dt);
+      amr.step(three, cphi, bz, 0, theta, dt);
     } catch (const std::exception&) {
       threw = true;
     }
-    chk(threw, "hierarchie 2 niveaux -> erreur claire (multi-niveau = Etape 4)");
+    chk(threw, "hierarchie > 2 niveaux -> erreur claire (multi-patch/MPI = Phase 4)");
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
