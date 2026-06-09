@@ -134,6 +134,10 @@ adc_add_test(test_schur_condensation)
 # implicite reconstruite, (B) la stabilite Schur vs explosion explicite, (C) l'accord avec une
 # reference RK4 fine-dt (ordre 1). (entree serie ; entrees MPI np=1/2/4 dans le bloc ADC_HAS_MPI plus bas)
 adc_add_test(test_condensed_schur_source_stepper)
+# Etage source condense par Schur sur HIERARCHIE AMR (AmrCondensedSchurSourceStepper) : PARITE
+# mono-niveau avec l'etage uniforme #126 (un seul niveau couvrant tout le domaine -> bit-pour-bit),
+# relation implicite reconstruite, source non triviale, garde multi-niveau (suivi Etape 4).
+adc_add_test(test_amr_condensed_schur_source_stepper)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_spatial_discretisation)
