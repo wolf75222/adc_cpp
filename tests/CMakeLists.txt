@@ -7,6 +7,36 @@ function(adc_add_test name)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+# Coupe l'optimisation (-O0) sur une cible de test qui compile python/system.cpp (le runtime System avec le
+# dispatch ModelSpec). make_block y instancie, POUR CHAQUE CompositeModel resolu (~33 : transport x source x
+# elliptique), TOUTES les familles de flux qui compilent -- rusanov/hll/hllc/roe x 4 limiteurs, chacune un
+# build_block d'une dizaine de foncteurs device. Sous le backend Kokkos a -O3, l'inlining de ces centaines
+# d'instanciations fait exploser la RSS de cc1plus au-dela des ~7 Go du runner GitHub (build a --parallel 2 :
+# DEUX TU lourdes concurrentes dont la somme franchit le plafond) ; la TU stalle sans diagnostic puis
+# l'OOM-reclaim tue le job (exit 143). L'ajout de HLL (#239) a fait franchir le seuil aux cibles qui compilent
+# system.cpp. -O0 coupe l'optimisation (et son inlining) -- le poste memoire dominant : il effondre la RSS de
+# cc1plus ET supprime le thrashing memoire qui ralentissait deja le build. -O1 a ete essaye d'abord mais s'est
+# revele MARGINAL (PR #259 : le job Kokkos OpenMP passait, mais Serial -- runner plus serre -- restait
+# OOM-reclaime au meme endroit) ; -O0 donne la marge decisive. SANS changer les resultats : ces tests
+# comparent deux chemins (AOT add_compiled_model vs natif add_block) PORTES PAR LA MEME CIBLE, donc les deux
+# basculent a -O0 ensemble -> codegen identique -> parite bit-a-bit preservee. Le code de PRODUCTION (lib
+# adc::adc, module Python _adc) reste a -O3. GCC/Clang uniquement et configs optimisees seulement (Debug deja
+# a -O0). Ces tests sont des controles de CORRECTION sur des grilles minuscules (n=48) : le runtime a -O0 est
+# negligeable.
+# Pool de compilation Ninja de taille 1 : les TU lourdes capees ne se compilent JAMAIS a deux en meme temps.
+# C'est la garantie STRUCTURELLE contre l'OOM (la cause racine = somme de DEUX TU lourdes concurrentes sous
+# --parallel 2). Avec -O0 + ce pool, le pic memoire est borne par UNE seule TU lourde -O0 (~qq Go) + au plus
+# une TU normale non capee de l'autre slot ninja : largement sous les ~7 Go du runner, quel que soit
+# l'ordonnancement. Honore par le generateur Ninja (la CI) ; ignore sans effet par Make. La propriete GLOBALE
+# JOB_POOLS n'est definie nulle part ailleurs (verifie) -> pas de clobber.
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_tu=1)
+
+function(adc_cap_opt_for_kokkos_ram target)
+  target_compile_options(${target} PRIVATE
+    $<$<AND:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O0>)
+  set_target_properties(${target} PROPERTIES JOB_POOL_COMPILE adc_heavy_tu)
+endfunction()
+
 # --- maillage / conteneurs ---
 adc_add_test(test_box2d)
 adc_add_test(test_fab2d)
@@ -151,6 +181,7 @@ adc_add_test(test_eb_transport)
 add_executable(test_facade_routing test_facade_routing.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_facade_routing PRIVATE adc::adc ${CMAKE_DL_LIBS})
+adc_cap_opt_for_kokkos_ram(test_facade_routing)  # system.cpp + Kokkos -O3 -> OOM cc1plus (cf. helper)
 add_test(NAME test_facade_routing COMMAND test_facade_routing)
 
 # --- canal aux extensible (n_aux + load_aux<NComp>) : champ extra B_z lu et peuple ---
@@ -250,6 +281,7 @@ adc_add_test(test_weno5_ssprk3)
 add_executable(test_compiled_model_parity test_compiled_model_parity.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_compiled_model_parity PRIVATE adc::adc ${CMAKE_DL_LIBS})
+adc_cap_opt_for_kokkos_ram(test_compiled_model_parity)  # system.cpp + add_compiled_model<Euler> + Kokkos -O3 -> OOM
 add_test(NAME test_compiled_model_parity COMMAND test_compiled_model_parity)
 
 # --- WENO5 sur le chemin compile natif (add_compiled_model) == bloc natif (add_block) ---
@@ -259,6 +291,7 @@ add_test(NAME test_compiled_model_parity COMMAND test_compiled_model_parity)
 add_executable(test_weno5_compiled_model test_weno5_compiled_model.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_weno5_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS})
+adc_cap_opt_for_kokkos_ram(test_weno5_compiled_model)  # system.cpp + add_compiled_model<Euler> + Kokkos -O3 -> OOM
 add_test(NAME test_weno5_compiled_model COMMAND test_weno5_compiled_model)
 
 # --- parite bloc compile AOT (add_compiled_model) == bloc natif (add_block) COTE AMR ---
@@ -280,6 +313,7 @@ add_executable(test_amr_potential test_amr_potential.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_amr_potential PRIVATE adc::adc ${CMAKE_DL_LIBS})
+adc_cap_opt_for_kokkos_ram(test_amr_potential)  # compile aussi system.cpp (dispatch +HLL) ; parite a tolerance MG
 add_test(NAME test_amr_potential COMMAND test_amr_potential)
 
 # --- chemin "production" NATIF cote AMR : AmrSystem::add_native_block (DSL Phase D) ---
