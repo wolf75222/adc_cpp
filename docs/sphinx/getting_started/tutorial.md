@@ -28,31 +28,46 @@ cd adc_cpp
 
 ## Etape 2 : Dependances
 
-- Compilateur C++23 (AppleClang 16+, GCC 13+, Clang 17+), CMake >= 3.20.
+- Compilateur C++23 (AppleClang 16+, GCC 13+, Clang 17+), CMake >= 3.20, Ninja.
 - Python >= 3.10 avec `numpy` (et `matplotlib` pour les figures du tutoriel).
 - Catch2 / pybind11 sont recuperes automatiquement par CMake.
 
 Detail et options : [Installation](installation.md).
 
-## Etape 3 : Build serie (coeur + tests)
+## Etape 3 : Build du module Python
+
+Le coeur est header-only ; pour ce tutoriel on ne construit que l'extension Python `_adc`,
+sans la suite de tests C++. Le build tient alors en quelques minutes :
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+cmake -S . -B build-py -G Ninja \
+  -DADC_BUILD_PYTHON=ON \
+  -DADC_BUILD_TESTS=OFF \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPython_EXECUTABLE=$(which python3.12)
+cmake --build build-py --target _adc -j$(sysctl -n hw.logicalcpu)
 ```
 
-## Etape 4 : Build du module Python
+`-DADC_BUILD_TESTS=OFF` saute la suite Catch2 et `--target _adc` ne compile que l'extension. Le
+build complet (coeur + tests, pour contribuer) est dans [Installation](installation.md).
+
+## Etape 4 : Variables d'environnement
 
 ```bash
-cmake -S . -B build-py -DADC_BUILD_PYTHON=ON -DPython_EXECUTABLE=$(which python3.12)
-cmake --build build-py -j
-export PYTHONPATH=$PWD/python:$PWD/build-py/python
+export PYTHONPATH=$PWD/build-py/python
+export ADC_INCLUDE=$PWD/include
+export ADC_CACHE_DIR=$PWD/.adc_cache
 ```
 
-L'extension `_adc` est liee a une version de Python (le suffixe `cpython-312`) : importez `adc`
-avec le meme interpreteur, `numpy` installe. Sinon `ModuleNotFoundError: adc._adc` (cf.
-[le piege interpreteur](installation.md)).
+- `PYTHONPATH` : importer le paquet `adc` construit. Le build y depose `__init__.py`, `dsl.py`
+  et l'extension `_adc`, donc ce seul chemin suffit.
+- `ADC_INCLUDE` : laisser le DSL compiler ses `.so` contre les en-tetes du depot (backend
+  `production`).
+- `ADC_CACHE_DIR` : garder les `.so` generes par le DSL en cache pour les relances.
+
+L'extension `_adc` porte le suffixe ABI de l'interpreteur qui l'a construite (`cpython-312`) :
+importez `adc` avec ce meme `python3.12`, `numpy` installe, sinon `ModuleNotFoundError: adc._adc`
+(cf. [le piege interpreteur](installation.md)).
 
 ## Etape 5 : Importer et detecter le backend
 
@@ -93,7 +108,7 @@ variable referencee est declaree.
 
 Puis on compile le modele en `.so` et on le branche : le script tente d'abord le backend
 `production` (chemin natif zero-copie, prefere en MPI/AMR), puis retombe sur `aot` (numeriquement
-identique, marshale cote hote), exactement la strategie des cas applicatifs. Le defaut de
+identique, marshale cote hote), comme dans les cas applicatifs. Le defaut de
 `m.compile(...)` est `aot` ; `production` exige que `_adc` et le `.so` aient ete compiles avec les
 memes en-tetes adc (garde d'ABI). C'est aussi ici qu'on choisit le schema spatial (volumes finis,
 limiteur minmod, flux de Rusanov), le temps (explicite) et le Poisson de systeme.
@@ -223,21 +238,46 @@ maximal en titre.
 
 ## Etape 16 : Kokkos OpenMP (parallelisme CPU)
 
-Le module Python distribue tourne en serie parce que la CI le construit sans Kokkos, pas parce que
-Python serait bride : `import adc` pilote, et le calcul par cellule herite du backend compile dans
-`adc` (voir [Verifier son backend](backend.md)). Pour exploiter plusieurs coeurs, c'est donc la
-facade C++ qu'on recompile avec le backend Kokkos (device OpenMP), pas un drapeau de script :
+Il n'y a pas de parametre Python du type `threads=8`. `import adc` pilote la simulation, mais le
+calcul par cellule herite du backend avec lequel `_adc` a ete compile (voir
+[Verifier son backend](backend.md)). Le nombre de coeurs depend donc du build de `_adc` et des
+variables OpenMP au lancement, pas d'un drapeau de script ; le module distribue tourne en serie
+parce que la CI le construit sans Kokkos.
+
+Pour le multi-thread, on rebuild le module avec le backend Kokkos OpenMP, contre un Kokkos installe
+avec OpenMP (`Kokkos_ENABLE_OPENMP=ON` au build de Kokkos) et pointe par `$KOKKOS_ROOT` :
 
 ```bash
-cmake -S . -B build-kokkos -DADC_USE_KOKKOS=ON \
-      -DKokkos_ENABLE_OPENMP=ON
-cmake --build build-kokkos -j
-ctest --test-dir build-kokkos --output-on-failure
+cmake -S . -B build-py-kokkos -G Ninja \
+  -DADC_BUILD_PYTHON=ON \
+  -DADC_BUILD_TESTS=OFF \
+  -DADC_USE_KOKKOS=ON \
+  -DKokkos_ROOT="$KOKKOS_ROOT" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPython_EXECUTABLE=$(which python3.12)
+cmake --build build-py-kokkos --target _adc -j$(sysctl -n hw.logicalcpu)
 ```
 
-Le seam `for_each_cell` bascule alors sur l'espace d'execution OpenMP de Kokkos pour tout ce qui
-lie `adc`. La CI valide ce backend (job ci-full, `Kokkos_ENABLE_OPENMP=ON`). Le backend OpenMP
-autonome (`-DADC_USE_OPENMP=ON`) existe mais est deprecie au profit de Kokkos.
+Au lancement, on pointe `PYTHONPATH` sur ce build et on fixe le nombre de threads OpenMP :
+
+```bash
+export PYTHONPATH=$PWD/build-py-kokkos/python
+export ADC_INCLUDE=$PWD/include
+export ADC_CACHE_DIR=$PWD/.adc_cache_kokkos
+export ADC_KOKKOS_ROOT="$KOKKOS_ROOT"   # le .so DSL production est alors compile AVEC Kokkos
+
+OMP_NUM_THREADS=8 OMP_PROC_BIND=false python docs/sphinx/tutorials/diocotron_tutorial.py
+```
+
+`ADC_KOKKOS_ROOT` est le point cle pour le DSL `backend="production"` : sans lui, le `.so` genere
+reste zero-copie mais ses noyaux retombent sur le backend serie et ne scalent pas. Avec lui, le
+loader est compile avec le meme Kokkos que `_adc`, donc les `OMP_NUM_THREADS` coeurs servent (cf.
+[`dsl.py`](https://github.com/wolf75222/adc_cpp/blob/master/python/adc/dsl.py)).
+
+Piege courant : lancer `OMP_NUM_THREADS=8 python ...` contre un `_adc` compile en serie ne change
+quasiment rien ; il faut d'abord le build Kokkos ci-dessus. La facade C++ (hors Python) se valide
+a part avec `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_OPENMP=ON` puis `ctest` (job CI ci-full). Le
+backend OpenMP autonome (`-DADC_USE_OPENMP=ON`) existe mais est deprecie au profit de Kokkos.
 
 ## Etape 17 : MPI (parallelisme distribue)
 

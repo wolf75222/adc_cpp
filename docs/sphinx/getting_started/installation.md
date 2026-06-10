@@ -8,7 +8,7 @@ pip : le module s'utilise via `PYTHONPATH`.
 
 - Compilateur C++23 (AppleClang 16+, GCC 13+, Clang 17+). Sous Kokkos/CUDA on retombe a
   C++20 (CUDA 12.x ne propose pas `-std=c++23` ; tout le coeur compile en C++20).
-- CMake >= 3.20.
+- CMake >= 3.20 (et Ninja pour le build rapide du module Python ci-dessous).
 - Python >= 3.10 pour le module (3.12 recommande, voir le piege interpreteur ci-dessous).
 - Catch2 / pybind11 sont recuperes automatiquement par `FetchContent` s'ils sont absents.
 
@@ -30,18 +30,22 @@ main) plutot qu'un nombre fige ici.
 ## Module Python
 
 Le module `adc` (les bindings pybind11 de la lib) se construit avec `-DADC_BUILD_PYTHON=ON` et
-s'utilise via `PYTHONPATH` :
+s'utilise via `PYTHONPATH`. Pour un build rapide, on coupe la suite de tests C++
+(`-DADC_BUILD_TESTS=OFF`) et on ne compile que l'extension (`--target _adc`) :
 
 ```bash
-cmake -S . -B build-py -DADC_BUILD_PYTHON=ON
-cmake --build build-py -j
-export PYTHONPATH=$PWD/python:$PWD/build-py/python
-python3 -c "import adc; print(adc.__doc__.splitlines()[0])"
+cmake -S . -B build-py -G Ninja \
+  -DADC_BUILD_PYTHON=ON -DADC_BUILD_TESTS=OFF \
+  -DCMAKE_BUILD_TYPE=Release -DPython_EXECUTABLE=$(which python3.12)
+cmake --build build-py --target _adc -j
+export PYTHONPATH=$PWD/build-py/python
+python3.12 -c "import adc; print(adc.__doc__.splitlines()[0])"
 ```
 
-Deux chemins doivent etre sur `PYTHONPATH` : `python/` (le paquet pur `adc` : `__init__.py`,
-`dsl.py`) et `build-py/python/` (l'extension compilee `_adc`). Le paquet `adc` importe `_adc`
-depuis le second.
+Un seul chemin suffit sur `PYTHONPATH` : la configuration copie les sources du paquet
+(`__init__.py`, `dsl.py`, `integrate.py`) dans `build-py/python/adc/`, a cote de l'extension
+compilee `_adc`. Les sources vivent dans `python/` ; si vous les editez sans relancer le build,
+ajoutez `python/` devant pour les prendre en compte.
 
 ### Le piege de l'interpreteur (a lire avant de debugger un `ImportError`)
 
@@ -60,7 +64,7 @@ incompatible). Pour eviter cela :
 
 - pinnez l'interpreteur au moment du build :
   `cmake -S . -B build-py -DADC_BUILD_PYTHON=ON -DPython_EXECUTABLE=$(which python3.12)` ;
-- importez `adc` avec exactement ce meme `python3.12` ;
+- importez `adc` avec ce meme `python3.12` ;
 - assurez-vous que `numpy` est present dans cet interpreteur.
 
 Sur macOS, plusieurs Python coexistent souvent (framework Python.org, conda, brew) ; le

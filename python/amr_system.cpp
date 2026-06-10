@@ -500,12 +500,12 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   p_->blocks.push_back(std::move(b));
 }
 
-void AmrSystem::set_compiled_block(int ncomp, double gamma, int substeps,
-                                   std::function<AmrCompiledHooks(const AmrBuildParams&)> mono_builder,
-                                   AmrCompiledBlockBuilder multi_builder, const std::string& name,
-                                   bool recon_prim, bool imex, int stride,
-                                   const std::vector<std::string>& implicit_vars,
-                                   const std::vector<std::string>& implicit_roles) {
+ADC_EXPORT void AmrSystem::set_compiled_block(
+    int ncomp, double gamma, int substeps,
+    std::function<AmrCompiledHooks(const AmrBuildParams&)> mono_builder,
+    AmrCompiledBlockBuilder multi_builder, const std::string& name, bool recon_prim, bool imex,
+    int stride, const std::vector<std::string>& implicit_vars,
+    const std::vector<std::string>& implicit_roles) {
   (void)ncomp;  // le nombre de variables est porte par le Model concret (Model::n_vars) dans les
                 // builders type-erases ; le parametre reste pour la symetrie d'API avec System.
   if (p_->built)

@@ -20,9 +20,37 @@ Les noms de scenarios (diocotron, electron_euler...) sont des compositions cote
 application (cf. adc_cases). Aucun nom de scenario ici.
 """
 
-from ._adc import (SystemConfig, ModelSpec, System as _System,
-                   AmrSystemConfig, AmrSystem as _AmrSystem,
-                   abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+import os as _os
+import sys as _sys
+
+# Le backend DSL "production" charge ensuite un loader .so par dlopen. Ce loader
+# resout des symboles C++ exportes par l'extension _adc (System::install_block,
+# grid_context, ensure_aux_width, etc.). CPython charge normalement les extensions
+# en RTLD_LOCAL sur Unix/macOS ; les symboles restent alors invisibles au loader et
+# add_native_block echoue au dlopen ("symbol not found in flat namespace"). On
+# charge donc _adc en RTLD_GLOBAL, puis on restaure les flags pour les imports
+# suivants. Le module deja charge conserve sa portee globale.
+if hasattr(_sys, "setdlopenflags") and hasattr(_sys, "getdlopenflags"):
+    _adc_old_dlopenflags = _sys.getdlopenflags()
+    _adc_global_dlopenflags = _adc_old_dlopenflags
+    if hasattr(_os, "RTLD_NOW"):
+        _adc_global_dlopenflags |= _os.RTLD_NOW
+    if hasattr(_os, "RTLD_GLOBAL"):
+        _adc_global_dlopenflags |= _os.RTLD_GLOBAL
+    _sys.setdlopenflags(_adc_global_dlopenflags)
+    try:
+        from ._adc import (SystemConfig, ModelSpec, System as _System,
+                           AmrSystemConfig, AmrSystem as _AmrSystem,
+                           abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+    finally:
+        _sys.setdlopenflags(_adc_old_dlopenflags)
+    del _adc_old_dlopenflags, _adc_global_dlopenflags
+else:
+    from ._adc import (SystemConfig, ModelSpec, System as _System,
+                       AmrSystemConfig, AmrSystem as _AmrSystem,
+                       abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+
+del _os, _sys
 
 # L'API PUBLIQUE n'expose QUE des briques composables (System, AmrSystem, Model...) : aucun
 # scenario physique nomme. L'integrateur AP deux-fluides (schema asymptotic-preserving, non

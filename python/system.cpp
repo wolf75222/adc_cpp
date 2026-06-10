@@ -95,7 +95,7 @@ inline std::vector<int> resolve_implicit_components(const std::string& block,
 
 // Cle d'ABI du MODULE (figee a la compilation de cette TU). Definie ici pour que le module _adc
 // l'exporte (ADC_EXPORT) : add_native_block la compare a la cle baked dans le loader .so.
-std::string abi_key() { return detail::abi_key_string(); }
+ADC_EXPORT std::string abi_key() { return detail::abi_key_string(); }
 
 // Methode statique pratique (binding Python + add_native_block) : delegue a la cle libre du module.
 std::string System::abi_key() { return adc::abi_key(); }
@@ -546,15 +546,17 @@ void System::add_block(const std::string& name, const ModelSpec& model,
 
 // Contexte de grille reel (maillage + CL + aux) : sert au gabarit add_compiled_model pour fabriquer
 // les fermetures d'un modele compile AOT sur les vrais champs du System (parite native, sans marshaling).
-GridContext System::grid_context() { return p_->grid_ctx(); }
+ADC_EXPORT GridContext System::grid_context() { return p_->grid_ctx(); }
 
 // Installe un bloc a partir de fermetures deja fabriquees (par dispatch_model cote add_block, ou par
 // block_builder cote add_compiled_model). Centralise la creation de l'espece (U, noms, schema).
-void System::install_block(const std::string& name, int ncomp,
-                           const VariableSet& cons_vars, const VariableSet& prim_vars, double gamma,
-                           BlockClosures closures, std::function<Real(const MultiFab&)> max_speed,
-                           std::function<void(const MultiFab&, MultiFab&)> poisson_rhs,
-                           int substeps, bool evolve, int stride) {
+ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
+                                      const VariableSet& cons_vars,
+                                      const VariableSet& prim_vars, double gamma,
+                                      BlockClosures closures,
+                                      std::function<Real(const MultiFab&)> max_speed,
+                                      std::function<void(const MultiFab&, MultiFab&)> poisson_rhs,
+                                      int substeps, bool evolve, int stride) {
   if (stride < 1) throw std::runtime_error("System::install_block : stride >= 1");
   Impl* P = p_.get();
   P->sp.push_back(Impl::Species{name, MultiFab(P->ba, P->dm, ncomp, 2), ncomp, substeps, evolve,
@@ -573,7 +575,7 @@ void System::install_block(const std::string& name, int ncomp,
 // Reallocation width-aware de l'etat d'un bloc (delegue a Impl::set_block_ghosts). Exposee
 // (ADC_EXPORT) pour que le gabarit en-tete add_compiled_model (chemin natif, loader .so) puisse
 // elargir le bloc compile a block_n_ghost(limiter) -- 3 pour weno5 -- comme le fait add_block.
-void System::set_block_ghosts(const std::string& name, int n_ghost) {
+ADC_EXPORT void System::set_block_ghosts(const std::string& name, int n_ghost) {
   p_->set_block_ghosts(name, n_ghost);
 }
 
@@ -797,7 +799,7 @@ void System::set_reaction_field(const std::vector<double>& kappa) {
   p_->fields_.ell_.reset();  // operateur reconstruit avec - kappa phi au prochain solve_fields
 }
 
-void System::ensure_aux_width(int ncomp) { p_->ensure_aux_width(ncomp); }
+ADC_EXPORT void System::ensure_aux_width(int ncomp) { p_->ensure_aux_width(ncomp); }
 
 void System::set_magnetic_field(const std::vector<double>& bz) {
   // Taille attendue du champ B_z(x) row-major (axe lent = 2nd indice de box, axe rapide = 1er) :
@@ -1240,8 +1242,8 @@ void System::set_density(const std::string& name, const std::vector<double>& rho
     }
 }
 
-void System::set_block_conversion(const std::string& name, CellConvert prim_to_cons,
-                                  CellConvert cons_to_prim) {
+ADC_EXPORT void System::set_block_conversion(const std::string& name, CellConvert prim_to_cons,
+                                             CellConvert cons_to_prim) {
   Impl::Species& s = p_->find(name);
   s.prim_to_cons = std::move(prim_to_cons);
   s.cons_to_prim = std::move(cons_to_prim);

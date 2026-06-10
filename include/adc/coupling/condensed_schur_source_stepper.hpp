@@ -183,9 +183,10 @@ struct CopyBzKernel {
 ///
 /// CYCLE DE VIE : construit UNE fois sur un layout (BoxArray + DistributionMapping + Geometry) fixe ;
 /// alloue tous ses tampons a la construction (operateur GeometricMG + preconditionneur + champs A_op,
-/// RHS, phi^n, v^n, grad). step() les REUTILISE sans reallocation. Le solveur de Krylov est cree par
-/// appel (il ne porte que des tampons fixes lui aussi ; sa construction n'alloue qu'une poignee de
-/// MultiFab sur le meme layout). theta/dt peuvent changer entre appels (parametres de step()).
+/// RHS, phi^n, v^n, grad, + le solveur de Krylov kry_ et sa poignee de MultiFab). step() les REUTILISE
+/// sans reallocation : kry_.solve() recalcule la TOTALITE de son etat par-solve (prepare_solve, r0,
+/// directions de descente), donc le tampon persistant est bit-identique a l'ancienne construction d'un
+/// TensorKrylovSolver par appel. theta/dt peuvent changer entre appels (parametres de step()).
 class CondensedSchurSourceStepper {
  public:
   /// @p vars  : descripteur du bloc fluide ; DOIT exposer Density / MomentumX / MomentumY (Energy
@@ -230,7 +231,8 @@ class CondensedSchurSourceStepper {
         bz_(ba, dm_, 1, 1),
         vx_n_(ba, dm_, 1, 0), vy_n_(ba, dm_, 1, 0),
         vx_t_(ba, dm_, 1, 0), vy_t_(ba, dm_, 1, 0),
-        phi_n_(ba, dm_, 1, 1) {
+        phi_n_(ba, dm_, 1, 1),
+        kry_(op_, precond_, n_precond_) {
     if (c_rho_ < 0 || c_mx_ < 0 || c_my_ < 0)
       throw std::runtime_error(
           "CondensedSchurSourceStepper : le bloc fluide doit exposer les roles Density, MomentumX "
@@ -276,8 +278,11 @@ class CondensedSchurSourceStepper {
     // warm start : phi^n -> op_.phi() ; rhs = -rhs_schur.
     copy_comp0(op_.phi(), phi);
     negate_into(op_.rhs(), rhs_schur_);
-    TensorKrylovSolver kry(op_, precond_, n_precond_);
-    last_result_ = kry.solve(krylov_tol_, krylov_max_iters_);
+    // kry_ est un MEMBRE persistant (ses ~10 MultiFab sont alloues UNE fois a la construction, plus
+    // par appel) : solve() recalcule la totalite de son etat par-solve (prepare_solve, r0, directions),
+    // donc le resultat est BIT-IDENTIQUE a l'ancienne construction d'un TensorKrylovSolver local ici.
+    // Tolerances configurables via set_krylov (audit 2026-06) ; defauts = 1e-10/400 historiques.
+    last_result_ = kry_.solve(krylov_tol_, krylov_max_iters_);
     copy_comp0(phi, op_.phi());  // phi <- phi^{n+theta}
 
     // 3) RECONSTRUIRE v^{n+theta} = B^{-1}(v^n - theta dt grad phi^{n+theta}) ; mom = rho v.
@@ -391,6 +396,11 @@ class CondensedSchurSourceStepper {
   KrylovResult last_result_;  ///< diagnostic du dernier solve
   Real krylov_tol_ = Real(1e-10);  ///< tolerance du solve (defaut historique, cf. set_krylov)
   int krylov_max_iters_ = 400;     ///< budget d'iterations (defaut historique, cf. set_krylov)
+  // Solveur de Krylov PERSISTANT (BiCGStab + precond MG). Alloue ses tampons (r/rhat/p/v/s/t/phat/
+  // shat + offsets de CL) UNE fois ; step() reutilise kry_ sans reallocation. DOIT etre declare APRES
+  // op_/precond_/n_precond_ (qu'il reference) : ordre d'init (apres eux) et de destruction (avant eux)
+  // corrects. Bit-identique a l'ancienne construction par appel (solve() reinitialise tout son etat).
+  TensorKrylovSolver kry_;
 };
 
 }  // namespace adc
