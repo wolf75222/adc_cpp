@@ -26,27 +26,70 @@
 ///                     manuel) -> jeton litteral "unknown" : la cle reste stable et comparable, elle
 ///                     ne capture alors que compilateur + standard (degradation gracieuse, jamais UB
 ///                     silencieux car les deux cotes voient le meme "unknown" s'ils sont batis pareil).
+///   - kokkos=0|1    : ADC_HAS_KOKKOS de l'unite. Ce macro CHANGE le layout de types traverses a la
+///                     frontiere (allocator.hpp : backing Fab malloc vs pool Kokkos::SharedSpace ;
+///                     types.hpp : ADC_HD) : un loader serie sur un module Kokkos (ou l'inverse)
+///                     etait auparavant ACCEPTE par la cle -> fallback serie muet dans un sens, UB
+///                     dans l'autre. Desormais la divergence est rejetee explicitement ; la parite se
+///                     retablit via ADC_KOKKOS_ROOT (cf. dsl._native_kokkos_flags) ou un module serie.
+///   - stdlib=...    : bibliotheque standard C++ liee (libc++ _LIBCPP_VERSION / libstdc++ __GLIBCXX__).
+///                     Deux toolchains peuvent partager __VERSION__ ET __cplusplus mais lier des
+///                     stdlib aux ABI INCOMPATIBLES (std::string/std::function traversent la
+///                     frontiere du loader). Detecte le panachage clang -stdlib=libc++ vs libstdc++
+///                     (mix conda/systeme). Les macros sont visibles ici car <string> est inclus.
 
 #ifndef ADC_HEADER_SIG
 #define ADC_HEADER_SIG "unknown"
 #endif
 
-// Indirection pour stringifier la valeur d'une macro (et non son nom).
+// Indirection pour stringifier la valeur d'une macro (et non son nom). Definie AVANT les jetons
+// qui l'utilisent (l'expansion se fait a l'usage, mais autant rester lisible).
 #define ADC_ABI_STR_(x) #x
 #define ADC_ABI_STR(x) ADC_ABI_STR_(x)
+
+// Jeton Kokkos : evalue PAR UNITE (module _adc d'un cote, loader .so genere de l'autre).
+#ifdef ADC_HAS_KOKKOS
+#define ADC_ABI_KOKKOS "1"
+#else
+#define ADC_ABI_KOKKOS "0"
+#endif
+
+// Jeton stdlib : identite + version de la bibliotheque standard liee. _LIBCPP_VERSION /
+// __GLIBCXX__ ne sont definis qu'apres inclusion d'un en-tete de la stdlib (<string> ci-dessus).
+#if defined(_LIBCPP_VERSION)
+#define ADC_ABI_STDLIB "libc++_" ADC_ABI_STR(_LIBCPP_VERSION)
+#elif defined(__GLIBCXX__)
+#define ADC_ABI_STDLIB "libstdc++_" ADC_ABI_STR(__GLIBCXX__)
+#else
+#define ADC_ABI_STDLIB "unknown"
+#endif
+
+// Cle d'ABI de l'UNITE DE TRADUCTION courante, en LITTERAL pur concatene par le preprocesseur :
+// "compiler=<__VERSION__>;std=<__cplusplus>;headers=<ADC_HEADER_SIG>;kokkos=<0|1>;stdlib=<...>".
+// Tous les jetons sont des litteraux de chaine (__VERSION__ et ADC_HEADER_SIG en sont deja), donc
+// la cle est figee dans le .rodata de CHAQUE TU au preprocessing -- AUCUN appel de fonction.
+//
+// POURQUOI un litteral et pas une fonction inline (bug CI reel, ELF/Linux) : un loader .so est
+// charge RTLD_GLOBAL et une fonction `inline` (liaison faible, visibilite par defaut) qui
+// fabriquerait la cle serait INTERPOSEE par l'editeur de liens dynamique vers la copie du module
+// deja charge -- le loader renverrait alors la cle DU MODULE et le garde-fou comparerait la cle du
+// module a elle-meme (tautologie : ABI jamais rejetee). Que l'interposition se produise dependait
+// du seuil d'inlining du compilateur (la fonction courte etait inlinee -> cle locale correcte ;
+// allongee par kokkos=/stdlib=, gcc -O2 a cesse de l'inliner -> interposition -> garde neutralise,
+// attrape par test_amr_native_loader). Un litteral ne traverse aucun symbole : pas d'interposition.
+// NB : les parsers (dsl._adc_cxx_std_from_module / module_header_signature) scannent par prefixe
+// de jeton ("std=", "headers=") -> insensibles a l'AJOUT de jetons en queue.
+#define ADC_ABI_KEY_LITERAL                                                          \
+  "compiler=" __VERSION__ ";std=" ADC_ABI_STR(__cplusplus) ";headers=" ADC_HEADER_SIG \
+  ";kokkos=" ADC_ABI_KOKKOS ";stdlib=" ADC_ABI_STDLIB
 
 namespace adc {
 namespace detail {
 
-/// Cle d'ABI de l'UNITE DE TRADUCTION courante, calculee a SA compilation par le preprocesseur :
-/// "compiler=<__VERSION__>;std=<__cplusplus>;headers=<ADC_HEADER_SIG>". inline => chaque TU qui
-/// inclut cet en-tete (le module _adc ET un loader .so genere) calcule sa PROPRE cle ; deux TU
-/// baties avec la meme toolchain et les memes en-tetes obtiennent la MEME chaine. C'est sur cette
-/// identite que repose la comparaison add_native_block (cle du loader vs abi_key() du module).
-inline std::string abi_key_string() {
-  return std::string("compiler=") + __VERSION__ + ";std=" + ADC_ABI_STR(__cplusplus) +
-         ";headers=" + ADC_HEADER_SIG;
-}
+/// Cle d'ABI de la TU courante (cf. ADC_ABI_KEY_LITERAL). Conservee pour le cote MODULE
+/// (abi_key() hors-ligne dans system.cpp) ; un LOADER genere doit renvoyer ADC_ABI_KEY_LITERAL
+/// directement (litteral local a sa TU, insensible a l'interposition ELF -- cf. ci-dessus).
+inline std::string abi_key_string() { return ADC_ABI_KEY_LITERAL; }
 
 }  // namespace detail
 

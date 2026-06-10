@@ -119,10 +119,9 @@ std::string loader_source() {
 namespace adc_generated {
 using ProdModel = adc::CompositeModel<adc::Euler, adc::NoSource, adc::BackgroundDensity>;
 }
-extern "C" const char* adc_native_abi_key() {
-  static const std::string k = adc::detail::abi_key_string();
-  return k.c_str();
-}
+// LITTERAL preprocesseur (PAS abi_key_string() : une inline serait interposee, ELF/RTLD_GLOBAL,
+// vers la copie du module deja charge -> cle du module renvoyee -> garde d'ABI tautologique).
+extern "C" const char* adc_native_abi_key() { return ADC_ABI_KEY_LITERAL; }
 extern "C" void adc_install_native_amr(void* sys, const char* name, const char* limiter,
                                        const char* riemann, const char* recon, const char* time,
                                        double gamma, int substeps) {

@@ -5,6 +5,9 @@ function(adc_add_test name)
   add_executable(${name} ${name}.cpp)
   target_link_libraries(${name} PRIVATE adc::adc)
   add_test(NAME ${name} COMMAND ${name})
+  # LABELS : selection par sous-ensemble (`ctest -L core`). TIMEOUT : un test qui hang (classe
+  # deadlock deja rencontree cote MPI) echoue de maniere ciblee au lieu de bloquer le runner.
+  set_tests_properties(${name} PROPERTIES LABELS "core" TIMEOUT 600)
 endfunction()
 
 # Coupe l'optimisation (-O0) sur une cible de test qui compile python/system.cpp (le runtime System avec le
@@ -526,6 +529,9 @@ if(ADC_HAS_MPI)
     add_test(NAME ${name}
              COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${nproc}
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:${name}> ${MPIEXEC_POSTFLAGS})
+    # `ctest -L mpi` pour ne (re)jouer que le sous-ensemble distribue ; TIMEOUT car un deadlock
+    # MPI (classe de bug reelle, cf. fill_boundary) bloquerait sinon le runner entier.
+    set_tests_properties(${name} PROPERTIES LABELS "mpi" TIMEOUT 600)
   endfunction()
   # Schur PR3 : le solveur de Krylov (BiCGStab) rejoue sous MPI np=1/2/4. Les produits scalaires
   # (dot) sont COLLECTIFS (all_reduce_sum), donc le critere d'arret se declenche a la MEME iteration

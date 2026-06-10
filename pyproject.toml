@@ -1,0 +1,44 @@
+# Paquet Python `adc` construit par scikit-build-core : `pip install .` PILOTE le CMakeLists
+# existant (source unique de verite) et installe le module dans site-packages -> `import adc`
+# SANS PYTHONPATH. C'est le pattern standard des projets jumeaux (doc pybind11, pyAMReX, WarpX).
+#
+#   pip install .                                   # module SERIE
+#   ADC_USE_KOKKOS=ON Kokkos_ROOT=$CONDA_PREFIX \
+#     pip install . --no-build-isolation -v         # module PARALLELE (Kokkos de l'env conda)
+#
+# Les backends se choisissent par VARIABLES D'ENVIRONNEMENT (ADC_USE_KOKKOS / ADC_USE_MPI /
+# ADC_USE_OPENMP / ADC_USE_HDF5, lues par le CMakeLists ; <Pkg>_ROOT est lu nativement par
+# find_package). Le flux developpeur presets+PYTHONPATH (cmake --preset python...) reste
+# disponible et inchange. Threads au runtime : adc.set_threads().
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "adc-cpp"
+dynamic = ["version"]
+description = "Solveur advection-diffusion-couplage hyperbolique-elliptique sur AMR (bindings Python du coeur header-only adc_cpp)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",  # requis par adc.dsl (evaluateur hote) ; l'import du paquet est lazy sans lui
+]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.21"
+# Le paquet PUR (adc/__init__.py, dsl.py, integrate.py) est copie tel quel dans la wheel ;
+# l'extension _adc est ajoutee par la regle install(TARGETS _adc ...) de python/CMakeLists.txt.
+wheel.packages = ["python/adc"]
+build-dir = "build/{wheel_tag}"  # cache de build persistant : reinstall/editable rapides
+
+[tool.scikit-build.cmake.define]
+ADC_BUILD_PYTHON = "ON"
+ADC_BUILD_TESTS = "OFF"
+
+# Version = celle du project() CMake (source unique). (?m) : VERSION en debut de ligne du bloc
+# project, pour ne PAS matcher cmake_minimum_required(VERSION 3.21).
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "CMakeLists.txt"
+regex = '(?m)^\s*VERSION (?P<value>\d+\.\d+\.\d+)'

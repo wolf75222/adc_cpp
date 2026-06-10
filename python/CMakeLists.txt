@@ -6,7 +6,25 @@
 #   cmake -B build-py -DADC_BUILD_PYTHON=ON && cmake --build build-py --target _adc
 #   PYTHONPATH=build-py/python python3 -c "import adc; print(adc.System)"
 
-pybind11_add_module(_adc bindings.cpp system.cpp amr_system.cpp)
+# LTO du module _adc. OFF par defaut : le LTO (re)optimise au LINK et rallongerait fortement le build
+# -- le backend -O3 est deja le goulot (cf. BUILD_PROFILING.md) -- pour un gain runtime marginal sur ce
+# code de dispatch type-erased (la frontiere de bloc passe par std::function, opaque au LTO). Il est par
+# ailleurs numeriquement neutre (pas -ffast-math). OFF => NO_EXTRAS : pybind11 N'ESSAIE PAS le LTO, donc
+# plus de test "Performing Test HAS_FLTO - Failed" parasite, et le build est rapide/previsible. ON =>
+# THIN_LTO (clang) pour un binaire "release perf" PONCTUEL ; exige une toolchain dont le linker accepte
+# -flto=thin (sur macOS, plutot la chaine clang conda complete que le melange AppleClang + linker conda).
+option(ADC_PY_LTO "LTO (ThinLTO) sur le module _adc (OFF = build rapide, recommande)" OFF)
+if(ADC_PY_LTO)
+  pybind11_add_module(_adc THIN_LTO bindings.cpp system.cpp amr_system.cpp)
+else()
+  # NO_EXTRAS empeche pybind11 d'ACTIVER le LTO sur _adc. C'est NECESSAIRE, pas cosmetique : des que
+  # le test HAS_FLTO passe (cas du pybind11 de l'env, p.ex. conda), pybind11_add_module activerait le
+  # ThinLTO par defaut -> link/codegen au LINK -> build nettement plus long (le backend -O3 est deja le
+  # goulot). On re-applique la visibilite cachee (seule "extra" qui compte ici) pour rester identique au
+  # binaire produit jusqu'ici ; le chemin DSL "production" exporte quand meme ses symboles via ADC_EXPORT.
+  pybind11_add_module(_adc NO_EXTRAS bindings.cpp system.cpp amr_system.cpp)
+  set_target_properties(_adc PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endif()
 target_link_libraries(_adc PRIVATE adc::adc ${CMAKE_DL_LIBS})  # dl : add_dynamic_block (dlopen)
 target_compile_features(_adc PRIVATE cxx_std_${ADC_CXX_STD})
 
@@ -16,6 +34,17 @@ target_compile_features(_adc PRIVATE cxx_std_${ADC_CXX_STD})
 # CMakeLists.txt racine). On expose la valeur (entier 20/23) au binding, qui la publie en
 # adc._adc.__cxx_std__ ; dsl.compile/compile_native en derivent le std natif au lieu de figer c++23.
 target_compile_definitions(_adc PRIVATE ADC_CXX_STD=${ADC_CXX_STD})
+
+# Version du projet (source unique : project(VERSION) racine), exposee en adc.__version__.
+target_compile_definitions(_adc PRIVATE ADC_VERSION="${PROJECT_VERSION}")
+
+# Chemin du COMPILATEUR du build, bake dans le module (expose en adc._adc.__cxx_compiler__). Le DSL
+# backend="production" compile a l'execution un loader .so dont la cle d'ABI encode __VERSION__ du
+# compilateur : le SEUL compilateur garanti compatible est CELUI-CI. Sans ce baking, dsl.py retombait
+# sur `which c++` du PATH -- dans un env conda active, c'est souvent un autre compilateur (vieux gcc/
+# clang) qui rejette -std=c++23 (bug reel : "error: invalid value 'c++23'") ou, pire, compile avec un
+# __VERSION__ different -> rejet ABI. dsl.py prefere ce chemin s'il existe encore sur la machine.
+target_compile_definitions(_adc PRIVATE ADC_CXX_COMPILER="${CMAKE_CXX_COMPILER}")
 
 # Signature de l'arbre d'en-tetes du coeur, BAKED dans la cle d'ABI du module (adc/runtime/abi_key.hpp
 # via -DADC_HEADER_SIG). Le backend DSL "production" (dsl.compile_native) recalcule la MEME signature
@@ -44,6 +73,14 @@ message(STATUS "adc Python module: signature en-tetes ADC_HEADER_SIG=${_adc_head
 # L'extension va dans le paquet adc/ ; on y copie aussi les sources Python du paquet.
 set(ADC_PY_PKG ${CMAKE_CURRENT_BINARY_DIR}/adc)
 set_target_properties(_adc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ADC_PY_PKG})
+
+# Build PIP (scikit-build-core definit SKBUILD) : la wheel embarque le paquet pur python/adc/
+# (wheel.packages du pyproject) ; ICI on n'installe QUE l'extension compilee a cote, dans
+# site-packages/adc/. Resultat : `pip install .` -> `import adc` SANS PYTHONPATH (pattern
+# pyAMReX/WarpX). Le flux dev presets+PYTHONPATH reste inchange (SKBUILD absent).
+if(SKBUILD)
+  install(TARGETS _adc LIBRARY DESTINATION adc)
+endif()
 foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()

@@ -28,46 +28,45 @@ cd adc_cpp
 
 ## Etape 2 : Dependances
 
-- Compilateur C++23 (AppleClang 16+, GCC 13+, Clang 17+), CMake >= 3.20, Ninja.
-- Python >= 3.10 avec `numpy` (et `matplotlib` pour les figures du tutoriel).
-- Catch2 / pybind11 sont recuperes automatiquement par CMake.
+- Compilateur C++23 (AppleClang 16+, GCC 13+, Clang 17+).
+- CMake >= 3.21, Ninja, Python >= 3.10 avec `numpy` (et `matplotlib` pour les figures) --
+  le plus simple est l'env conda du depot : `conda env create -f environment.yml && conda
+  activate adc`. pybind11 est pris dans l'env, sinon recupere par CMake.
 
 Detail et options : [Installation](installation.md).
 
 ## Etape 3 : Build du module Python
 
-Le coeur est header-only ; pour ce tutoriel on ne construit que l'extension Python `_adc`,
-sans la suite de tests C++. Le build tient alors en quelques minutes :
+Le coeur est header-only ; seul le module Python `adc` se compile (quelques minutes). Deux
+voies equivalentes :
 
 ```bash
-cmake -S . -B build-py -G Ninja \
-  -DADC_BUILD_PYTHON=ON \
-  -DADC_BUILD_TESTS=OFF \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DPython_EXECUTABLE=$(which python3.12)
-cmake --build build-py --target _adc -j$(sysctl -n hw.logicalcpu)
+# Voie utilisateur : installe dans site-packages, rien a exporter ensuite.
+pip install .
+
+# Voie developpeur : build dans l'arbre (re-build incremental rapide apres une edition C++).
+cmake --preset python && cmake --build --preset python
 ```
 
-`-DADC_BUILD_TESTS=OFF` saute la suite Catch2 et `--target _adc` ne compile que l'extension. Le
-build complet (coeur + tests, pour contribuer) est dans [Installation](installation.md).
+Le build complet (coeur + tests, pour contribuer) est dans [Installation](installation.md).
 
 ## Etape 4 : Variables d'environnement
 
 ```bash
-export PYTHONPATH=$PWD/build-py/python
+export PYTHONPATH=$PWD/build-py/python   # voie developpeur seulement (inutile apres pip install)
 export ADC_INCLUDE=$PWD/include
 export ADC_CACHE_DIR=$PWD/.adc_cache
 ```
 
-- `PYTHONPATH` : importer le paquet `adc` construit. Le build y depose `__init__.py`, `dsl.py`
-  et l'extension `_adc`, donc ce seul chemin suffit.
-- `ADC_INCLUDE` : laisser le DSL compiler ses `.so` contre les en-tetes du depot (backend
-  `production`).
-- `ADC_CACHE_DIR` : garder les `.so` generes par le DSL en cache pour les relances.
+- `ADC_INCLUDE` : le DSL (backend `production`) compile ses `.so` contre les en-tetes du depot.
+- `ADC_CACHE_DIR` : garde les `.so` generes en cache pour les relances (optionnel ; defaut
+  `~/.cache/adc/dsl`, deja hors source).
+- `PYTHONPATH` : uniquement pour la voie developpeur ; le build depose le paquet complet dans
+  `build-py/python`, ce seul chemin suffit.
 
-L'extension `_adc` porte le suffixe ABI de l'interpreteur qui l'a construite (`cpython-312`) :
-importez `adc` avec ce meme `python3.12`, `numpy` installe, sinon `ModuleNotFoundError: adc._adc`
-(cf. [le piege interpreteur](installation.md)).
+L'extension est epinglee a l'interpreteur qui l'a construite (`cpython-312`) : importer avec le
+meme python. En cas d'erreur d'import, le message indique la cause et la commande de
+reconstruction ; `python -c "import adc; adc.doctor()"` verifie tout l'environnement.
 
 ## Etape 5 : Importer et detecter le backend
 
@@ -245,7 +244,20 @@ variables OpenMP au lancement, pas d'un drapeau de script ; le module distribue 
 parce que la CI le construit sans Kokkos.
 
 Pour le multi-thread, on rebuild le module avec le backend Kokkos OpenMP, contre un Kokkos installe
-avec OpenMP (`Kokkos_ENABLE_OPENMP=ON` au build de Kokkos) et pointe par `$KOKKOS_ROOT` :
+avec OpenMP (`Kokkos_ENABLE_OPENMP=ON` au build de Kokkos).
+
+**Chemin conda (recommande)** -- la racine de l'env est `$CONDA_PREFIX` (conda ne pose JAMAIS de
+variable `$KOKKOS_ROOT`) et le preset `python-parallel` est deja cable dessus ; si le kokkos de
+l'env est Serial-only, `scripts/kokkos_openmp_conda.sh` installe d'abord un Kokkos OpenMP (~2 min) :
+
+```bash
+conda activate adc
+bash scripts/kokkos_openmp_conda.sh        # si besoin : Kokkos OpenMP dans $CONDA_PREFIX
+cmake --preset python-parallel && cmake --build --preset python-parallel
+```
+
+**Chemin Kokkos custom / cluster** (install hors conda, p.ex. ROMEO/Spack) : definir soi-meme
+`KOKKOS_ROOT=<prefix de l'install Kokkos>` puis :
 
 ```bash
 cmake -S . -B build-py-kokkos -G Ninja \
@@ -258,15 +270,16 @@ cmake -S . -B build-py-kokkos -G Ninja \
 cmake --build build-py-kokkos --target _adc -j$(sysctl -n hw.logicalcpu)
 ```
 
-Au lancement, on pointe `PYTHONPATH` sur ce build et on fixe le nombre de threads OpenMP :
+Au lancement, on pointe `PYTHONPATH` sur ce build et on fixe le nombre de threads
+(`adc.set_threads(8)` cote Python equivaut a l'export `OMP_NUM_THREADS`) :
 
 ```bash
 export PYTHONPATH=$PWD/build-py-kokkos/python
 export ADC_INCLUDE=$PWD/include
 export ADC_CACHE_DIR=$PWD/.adc_cache_kokkos
-export ADC_KOKKOS_ROOT="$KOKKOS_ROOT"   # le .so DSL production est alors compile AVEC Kokkos
+export ADC_KOKKOS_ROOT="$CONDA_PREFIX"  # chemin conda ; ($KOKKOS_ROOT en chemin custom/cluster)
 
-OMP_NUM_THREADS=8 OMP_PROC_BIND=false python docs/sphinx/tutorials/diocotron_tutorial.py
+OMP_NUM_THREADS=8 python docs/sphinx/tutorials/diocotron_tutorial.py
 ```
 
 `ADC_KOKKOS_ROOT` est le point cle pour le DSL `backend="production"` : sans lui, le `.so` genere
@@ -284,9 +297,8 @@ backend OpenMP autonome (`-DADC_USE_OPENMP=ON`) existe mais est deprecie au prof
 De meme, le distribue s'obtient a la compilation, et se lance via `mpirun` :
 
 ```bash
-cmake -S . -B build-mpi -DADC_USE_MPI=ON
-cmake --build build-mpi -j
-ctest --test-dir build-mpi --output-on-failure       # rejoue np=1/2/4 via mpirun
+cmake --preset mpi && cmake --build --preset mpi     # OpenMPI de l'env conda
+ctest --preset mpi                                   # rejoue np=1/2/4 via mpirun
 ```
 
 `comm.hpp` passe alors par `MPI_Comm_rank/size` + collectives. MPI et Kokkos se combinent (un GPU

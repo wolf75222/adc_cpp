@@ -1,0 +1,95 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "conda",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{CONDA_PREFIX}",
+        "rhs": ""
+      }
+    },
+
+    {
+      "name": "python",
+      "inherits": "conda",
+      "displayName": "Module Python _adc (SERIE, CPU 1 thread)",
+      "description": "Build du seul module _adc, sans tests. Exige l'env conda ACTIF (conda activate adc) : l'interpreteur est pinne sur celui de l'env.",
+      "binaryDir": "${sourceDir}/build-py",
+      "cacheVariables": {
+        "ADC_BUILD_PYTHON": "ON",
+        "ADC_BUILD_TESTS": "OFF",
+        "Python_ROOT_DIR": "$env{CONDA_PREFIX}"
+      }
+    },
+    {
+      "name": "python-parallel",
+      "inherits": "python",
+      "displayName": "Module Python _adc (PARALLELE, dispatch Kokkos)",
+      "description": "Comme 'python' mais via Kokkos ($CONDA_PREFIX). ATTENTION : le kokkos conda-forge est souvent Serial-only -> verifier 'Kokkos found ... = (OPENMP...)' au configure ; sinon `bash scripts/kokkos_openmp_conda.sh` installe un Kokkos OpenMP dans l'env (~2 min). Threads au runtime : adc.set_threads().",
+      "binaryDir": "${sourceDir}/build-py-kokkos",
+      "cacheVariables": {
+        "ADC_USE_KOKKOS": "ON",
+        "Kokkos_ROOT": "$env{CONDA_PREFIX}"
+      }
+    },
+
+    {
+      "name": "serial",
+      "inherits": "base",
+      "displayName": "Coeur + tests C++ (SERIE)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "ADC_BUILD_TESTS": "ON" }
+    },
+    {
+      "name": "parallel",
+      "inherits": "conda",
+      "displayName": "Coeur + tests C++ (PARALLELE, dispatch Kokkos)",
+      "description": "Kokkos pris dans l'env conda actif ; cf. preset python-parallel pour la note kokkos conda Serial-only.",
+      "binaryDir": "${sourceDir}/build-kokkos",
+      "cacheVariables": {
+        "ADC_BUILD_TESTS": "ON",
+        "ADC_USE_KOKKOS": "ON",
+        "Kokkos_ROOT": "$env{CONDA_PREFIX}"
+      }
+    },
+    {
+      "name": "mpi",
+      "inherits": "conda",
+      "displayName": "Coeur + tests C++ (MPI distribue)",
+      "description": "OpenMPI pris dans l'env conda actif (conda activate adc).",
+      "binaryDir": "${sourceDir}/build-mpi",
+      "cacheVariables": {
+        "ADC_BUILD_TESTS": "ON",
+        "ADC_USE_MPI": "ON",
+        "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "python",          "configurePreset": "python",          "targets": ["_adc"] },
+    { "name": "python-parallel", "configurePreset": "python-parallel", "targets": ["_adc"] },
+    { "name": "serial",          "configurePreset": "serial" },
+    { "name": "parallel",        "configurePreset": "parallel" },
+    { "name": "mpi",             "configurePreset": "mpi" }
+  ],
+
+  "testPresets": [
+    { "name": "serial",   "configurePreset": "serial",   "output": { "outputOnFailure": true } },
+    { "name": "parallel", "configurePreset": "parallel", "output": { "outputOnFailure": true } },
+    { "name": "mpi",      "configurePreset": "mpi",      "output": { "outputOnFailure": true } }
+  ]
+}

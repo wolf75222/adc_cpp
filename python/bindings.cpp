@@ -10,6 +10,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <adc/core/kokkos_env.hpp>  // Kokkos_Core sous ADC_HAS_KOKKOS (kokkos_is_initialized)
 #include <adc/runtime/abi_key.hpp>  // adc::abi_key : cle d'ABI exposee au DSL (chemin "production")
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/system.hpp>
@@ -74,6 +75,47 @@ PYBIND11_MODULE(_adc, m) {
   // d'ABI (qui, elle, encode toujours __cplusplus). 202002L -> 20, au-dela -> 23.
   m.attr("__cxx_std__") = static_cast<int>(__cplusplus > 202002L ? 23 : 20);
 #endif
+
+  // Backend de calcul COMPILE dans le module : True si _adc a ete construit avec Kokkos
+  // (-DADC_USE_KOKKOS=ON -> ADC_HAS_KOKKOS), donc capable de multi-thread (device OpenMP) / GPU.
+  // adc.set_threads / adc.parallel_info s'en servent pour avertir qu'un module SERIE ignore le
+  // reglage de threads. Un build serie expose False ; pas de faux negatif.
+#ifdef ADC_HAS_KOKKOS
+  m.attr("__has_kokkos__") = true;
+#else
+  m.attr("__has_kokkos__") = false;
+#endif
+
+  // Chemin du COMPILATEUR qui a construit ce module (ADC_CXX_COMPILER, injecte par CMake). La cle
+  // d'ABI encodant __VERSION__, le DSL "production" DOIT recompiler ses loaders avec CE compilateur :
+  // dsl.py le prefere au `which c++` du PATH (qui, dans un env conda, designe souvent un autre
+  // compilateur -> "-std=c++23 invalide" ou rejet ABI). Build manuel sans -D : chaine vide, dsl.py
+  // retombe alors sur sa detection historique.
+#ifdef ADC_CXX_COMPILER
+  m.attr("__cxx_compiler__") = ADC_CXX_COMPILER;
+#else
+  m.attr("__cxx_compiler__") = "";
+#endif
+
+  // Version du projet (ADC_VERSION = PROJECT_VERSION CMake, source unique). Reexposee en
+  // adc.__version__ par le paquet ; "unknown" sur un build manuel sans -D.
+#ifdef ADC_VERSION
+  m.attr("__version__") = ADC_VERSION;
+#else
+  m.attr("__version__") = "unknown";
+#endif
+
+  // Etat REEL de l'init Kokkos (lazy : 1re allocation de Fab, par N'IMPORTE quel chemin --
+  // System, AmrSystem, .so DSL...). adc.set_threads s'appuie dessus plutot que sur un drapeau
+  // Python qui ne voyait que System/AmrSystem : le warning "trop tard" devient fiable.
+  // Build serie : toujours False (rien a initialiser, le reglage de threads est sans objet).
+  m.def("kokkos_is_initialized", []() {
+#ifdef ADC_HAS_KOKKOS
+    return Kokkos::is_initialized();
+#else
+    return false;
+#endif
+  }, "True si le runtime Kokkos du module est deja initialise (set_threads arrive alors trop tard).");
 
   py::class_<SystemConfig>(m, "SystemConfig")
       .def(py::init<>())
