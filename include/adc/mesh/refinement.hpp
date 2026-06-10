@@ -10,6 +10,7 @@
 /// d'AMReX) ; mono-rang = copies directes, multi-rang = jobs enumeres deterministiquement (tag 1).
 
 #pragma once
+#include <cassert>
 #include <cstdlib>
 #include <cstdio>
 
@@ -161,9 +162,14 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
 /// Moyenne CONSERVATIVE fin -> grossier (ratio r) : coarse(I, J) = moyenne des r^2 cellules fines du
 /// bloc. Ecrit les cellules de coarse couvertes par fine (via parallel_copy depuis une grille
 /// fine-coarsen locale) ; copie min(ncomp). Conserve l'integrale (somme * dV) du fin sur la zone couverte.
-inline void average_down(const MultiFab& fine, MultiFab& coarse, int r) {
+// Variante a TAMPON FOURNI : @p cfine est la grille "fin coarsen" (layout coarsen(fine.box_array(), r),
+// dmap = fine.dmap(), >= min(ncomp) composantes, 0 ghost) ALLOUEE par l'appelant et reutilisee a chaque
+// appel (chemin chaud du V-cycle MG : evite une allocation MultiFab par restriction). Calcul STRICTEMENT
+// identique a la variante allouante ci-dessous.
+inline void average_down(const MultiFab& fine, MultiFab& coarse, int r, MultiFab& cfine) {
   const int nc = std::min(fine.ncomp(), coarse.ncomp());
-  MultiFab cfine(coarsen(fine.box_array(), r), fine.dmap(), fine.ncomp(), 0);
+  assert(cfine.box_array().size() == fine.box_array().size() && cfine.ncomp() >= nc &&
+         "average_down(scratch) : cfine doit etre coarsen(fine, r) sur la dmap du fin");
   const Real inv = Real(1) / (r * r);
   for (int li = 0; li < fine.local_size(); ++li) {
     const ConstArray4 F = fine.fab(li).const_array();
@@ -179,13 +185,21 @@ inline void average_down(const MultiFab& fine, MultiFab& coarse, int r) {
   }
   parallel_copy(coarse, cfine);
 }
+inline void average_down(const MultiFab& fine, MultiFab& coarse, int r) {
+  MultiFab cfine(coarsen(fine.box_array(), r), fine.dmap(), fine.ncomp(), 0);
+  average_down(fine, coarse, r, cfine);
+}
 
 /// Interpolation grossier -> fin (ratio r) par injection CONSTANTE par morceaux : chaque cellule fine
 /// (y compris ghosts de la box) recoit la valeur de sa cellule grossiere (coarsen_index). Copie
 /// min(ncomp). Amene d'abord les valeurs grossieres sur une grille fine-coarsen locale (parallel_copy).
-inline void interpolate(const MultiFab& coarse, MultiFab& fine, int r) {
+// Variante a TAMPON FOURNI : @p cfine est la grille "fin coarsen" (meme contrat de layout que
+// average_down ci-dessus) allouee par l'appelant et reutilisee (chemin chaud du V-cycle MG : evite une
+// allocation par prolongation). Calcul STRICTEMENT identique a la variante allouante.
+inline void interpolate(const MultiFab& coarse, MultiFab& fine, int r, MultiFab& cfine) {
   const int nc = std::min(fine.ncomp(), coarse.ncomp());
-  MultiFab cfine(coarsen(fine.box_array(), r), fine.dmap(), fine.ncomp(), 0);
+  assert(cfine.box_array().size() == fine.box_array().size() && cfine.ncomp() >= nc &&
+         "interpolate(scratch) : cfine doit etre coarsen(fine, r) sur la dmap du fin");
   parallel_copy(cfine, coarse);  // amene les valeurs grossieres sur la grille fine-coarsen
   for (int li = 0; li < fine.local_size(); ++li) {
     Array4 F = fine.fab(li).array();
@@ -196,6 +210,10 @@ inline void interpolate(const MultiFab& coarse, MultiFab& fine, int r) {
         F(i, j, c) = C(coarsen_index(i, r), coarsen_index(j, r), c);
       });
   }
+}
+inline void interpolate(const MultiFab& coarse, MultiFab& fine, int r) {
+  MultiFab cfine(coarsen(fine.box_array(), r), fine.dmap(), fine.ncomp(), 0);
+  interpolate(coarse, fine, r, cfine);
 }
 
 }  // namespace adc

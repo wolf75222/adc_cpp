@@ -109,6 +109,16 @@ class GeometricMG {
       Geometry gc{g.domain.coarsen(2), g.xlo, g.xhi, g.ylo, g.yhi};
       add_level(gc, coarsen(lev_.back().ba, 2));
     }
+    // Tampons de V-cycle (corr/cfine) alloues UNE fois pour chaque niveau NON-bottom. cfine adopte le
+    // layout exact que average_down/interpolate auraient alloue en interne : coarsen(L.ba, 2) sur la dmap
+    // FINE (L.dm), 0 ghost. Il est REUTILISE pour la restriction (average_down(L.res, C.rhs)) ET la
+    // prolongation (interpolate(C.phi, L.corr)) du meme niveau (usages disjoints dans le temps -> un seul
+    // tampon suffit). Le bottom n'en a pas besoin (retour anticipe de vcycle_rec) et sa coarsen serait
+    // degeneree (raison meme de l'arret du coarsening) -> non alloue.
+    for (int l = 0; l + 1 < static_cast<int>(lev_.size()); ++l) {
+      lev_[l].corr  = MultiFab(lev_[l].ba, lev_[l].dm, 1, 0);
+      lev_[l].cfine = MultiFab(coarsen(lev_[l].ba, 2), lev_[l].dm, 1, 0);
+    }
     if (active_) {
       // chaque niveau evalue son propre masque depuis le cercle physique
       for (auto& L : lev_) {
@@ -488,6 +498,11 @@ class GeometricMG {
     BoxArray ba;
     DistributionMapping dm;
     MultiFab phi, rhs, res, mask, coef, eps, kappa, eps_y, a_xy, a_yx;
+    // Tampons de V-cycle REUTILISES, alloues une fois par le constructeur pour les niveaux NON-bottom :
+    // corr = correction prolongee (layout du niveau) ; cfine = grille "fin coarsen" partagee par la
+    // restriction (average_down) et la prolongation (interpolate) du niveau. Le bottom les laisse vides
+    // (vcycle_rec y retourne avant de les toucher, et sa coarsen serait degeneree).
+    MultiFab corr, cfine;
   };
 
   const MultiFab* mask_ptr(int l) { return active_ ? &lev_[l].mask : nullptr; }
@@ -519,7 +534,7 @@ class GeometricMG {
     lev_.push_back(MGLevel{g, ba, dm, MultiFab(ba, dm, 1, 1),
                            MultiFab(ba, dm, 1, 0), MultiFab(ba, dm, 1, 0),
                            MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{},
-                           MultiFab{}, MultiFab{}});
+                           MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}});
   }
 
   void vcycle_rec(int l, const BCRec& bc) {
@@ -549,16 +564,15 @@ class GeometricMG {
     poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep, kp, ey, axy, ayx);
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres poisson_residual");
     MGLevel& C = lev_[l + 1];
-    average_down(L.res, C.rhs, 2);  // restriction du residu
+    average_down(L.res, C.rhs, 2, L.cfine);  // restriction du residu (tampon cfine reutilise)
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres average_down");
     C.phi.set_val(0.0);
     vcycle_rec(l + 1, homogeneous(bc));
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres recursion grossiere");
 
-    MultiFab corr(L.ba, L.dm, 1, 0);
-    interpolate(C.phi, corr, 2);  // prolongation de la correction
+    interpolate(C.phi, L.corr, 2, L.cfine);  // prolongation de la correction (tampons corr/cfine reutilises)
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres interpolate");
-    saxpy(L.phi, Real(1), corr);
+    saxpy(L.phi, Real(1), L.corr);
     if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres saxpy");
     if (mk) zero_conductor(L.phi, L.mask);  // refige le conducteur
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu2_, mk, ck, ep, kp, ey);
