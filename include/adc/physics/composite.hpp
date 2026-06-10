@@ -83,6 +83,29 @@ struct CompositeModel {
   {
     return hyp.polar_geom_source(u, r);
   }
+
+  /// BORNES DE PAS optionnelles (audit 2026-06, cf. core/physical_model.hpp) : forwardees
+  /// conditionnellement comme pressure / wave_speeds, sinon le compose ne les expose pas et la
+  /// politique de pas reste l'historique. stability_speed / stability_dt viennent de la brique
+  /// HYPERBOLIQUE (c'est elle que le DSL emet) ; source_frequency vient de la brique SOURCE (c'est
+  /// la source qui connait sa frequence de relaxation/collision).
+  ADC_HD Real stability_speed(const State& u, const Aux& a, int dir) const
+    requires requires(const Hyperbolic h, const State s, const Aux aa, int d) {
+      h.stability_speed(s, aa, d);
+    }
+  {
+    return hyp.stability_speed(u, a, dir);
+  }
+  ADC_HD Real stability_dt(const State& u, const Aux& a) const
+    requires requires(const Hyperbolic h, const State s, const Aux aa) { h.stability_dt(s, aa); }
+  {
+    return hyp.stability_dt(u, a);
+  }
+  ADC_HD Real source_frequency(const State& u, const Aux& a) const
+    requires requires(const Source sc, const State s, const Aux aa) { sc.frequency(s, aa); }
+  {
+    return src.frequency(u, a);
+  }
 };
 
 }  // namespace adc

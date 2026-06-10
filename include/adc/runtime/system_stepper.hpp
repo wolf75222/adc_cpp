@@ -2,6 +2,7 @@
 
 #include <adc/core/state.hpp>     // kAuxBaseComps (canal B_z lu par l'etage source condense)
 #include <adc/core/types.hpp>     // Real
+#include <adc/parallel/comm.hpp>  // all_reduce_min (bornes globales : dt identique sur tous les rangs)
 #include <adc/runtime/grid_context.hpp>  // GeometryMode (aiguillage du transport disque)
 
 #include <stdexcept>  // std::runtime_error (mode disque demande sans avance disque sur un bloc)
@@ -9,6 +10,7 @@
 #include <algorithm>  // std::min, std::max (CFL : pas physique min de la grille, dt min sur les blocs)
 #include <cmath>      // std::isfinite, std::ceil (step_cfl / step_adaptive)
 #include <limits>     // std::numeric_limits (CFL par bloc : dt = min sur les blocs)
+#include <string>     // last_dt_bound (nom de la borne active du dernier step_cfl)
 #include <vector>
 
 /// @file
@@ -257,9 +259,26 @@ class SystemStepper {
     for (int s = 0; s < nsteps; ++s) step(dt);
   }
 
-  /// Un macro-pas a dt CFL : dt = min sur les blocs evolutifs de cfl*h*substeps_b/(stride_b*w_b), puis
-  /// avance comme step. @return le dt utilise. SUBSTEPS-AWARE (post-#121) : bit-identique a l'ancienne
+  /// Un macro-pas a dt CFL : dt = min sur les blocs evolutifs des BORNES de pas du bloc, puis avance
+  /// comme step. @return le dt utilise. SUBSTEPS-AWARE (post-#121) : bit-identique a l'ancienne
   /// formule seulement pour substeps=1 (cf. note retro-compatibilite).
+  ///
+  /// POLITIQUE DE PAS (audit 2026-06, chantier step_cfl) : la borne de TRANSPORT historique
+  /// dt <= cfl*h*substeps_b/(stride_b*w_b) reste le socle, mais le pas AGREGE desormais, par bloc :
+  ///   - la borne de FREQUENCE DE SOURCE (s.source_frequency, trait HasSourceFrequency) :
+  ///     sous-pas effectif stride*dt/substeps <= cfl/mu -> dt <= cfl*substeps/(stride*mu), SANS h
+  ///     (une source locale borne en 1/temps, pas en longueur/temps) ;
+  ///   - le PAS ADMISSIBLE direct (s.stability_dt, trait HasStabilityDt) :
+  ///     stride*dt/substeps <= dt_adm -> dt <= dt_adm*substeps/stride, SANS cfl (le modele declare
+  ///     deja un pas admissible) ;
+  ///   - la vitesse de CFL elle-meme peut etre la vitesse de STABILITE declaree (trait
+  ///     HasStabilitySpeed) : s.max_speed est alors cable sur stability_speed (cf. make_max_speed).
+  /// Puis les bornes GLOBALES (P->dt_bounds_ : couplage multi-blocs, Schur/Poisson, AMR/scheduler,
+  /// posees par System::add_dt_bound) : dt <= fn() chacune, une evaluation HOTE par pas (pas de
+  /// callback par cellule). Un bloc/un systeme SANS bornes optionnelles garde un pas STRICTEMENT
+  /// identique a l'historique (les fonctions vides ne sont pas interrogees). La borne ACTIVE du
+  /// dernier pas est consultable via last_dt_bound() ("transport:<bloc>", "source_frequency:<bloc>",
+  /// "stability_dt:<bloc>", "global:<label>", "degenerate").
   double step_cfl(double cfl) {
     Impl* P = owner_;
     P->solve_fields();
@@ -284,14 +303,51 @@ class SystemStepper {
     // Pour reproduire un run calibre avec l'ancienne formule, utiliser step(dt) avec le dt historique
     // explicite, PAS step_cfl.
     double dt = std::numeric_limits<double>::infinity();
+    std::string reason = "degenerate";
     for (auto& s : P->sp) {
       if (!s.evolve) continue;  // bloc gele : ne contraint pas le pas
-      const Real w = std::max(s.max_speed(s.U), Real(1e-30));
-      const double dt_b = cfl * static_cast<double>(h) * static_cast<double>(s.substeps) /
-                          (static_cast<double>(s.stride) * static_cast<double>(w));
-      dt = std::min(dt, dt_b);
+      const Real w = std::max(s.max_speed(s.U), kCflSpeedFloor);
+      double dt_b = cfl * static_cast<double>(h) * static_cast<double>(s.substeps) /
+                    (static_cast<double>(s.stride) * static_cast<double>(w));
+      const char* why = "transport";
+      // Borne de FREQUENCE DE SOURCE (optionnelle ; mu <= 0 = ne contraint pas).
+      if (s.source_frequency) {
+        const Real mu = s.source_frequency(s.U);
+        if (mu > Real(0)) {
+          const double dt_src = cfl * static_cast<double>(s.substeps) /
+                                (static_cast<double>(s.stride) * static_cast<double>(mu));
+          if (dt_src < dt_b) { dt_b = dt_src; why = "source_frequency"; }
+        }
+      }
+      // PAS ADMISSIBLE direct (optionnel ; <= 0 = ne contraint pas ; cfl NON applique).
+      if (s.stability_dt) {
+        const Real db = s.stability_dt(s.U);
+        if (db > Real(0)) {
+          const double dt_adm = static_cast<double>(db) * static_cast<double>(s.substeps) /
+                                static_cast<double>(s.stride);
+          if (dt_adm < dt_b) { dt_b = dt_adm; why = "stability_dt"; }
+        }
+      }
+      if (dt_b < dt) { dt = dt_b; reason = std::string(why) + ":" + s.name; }
     }
-    if (!std::isfinite(dt)) dt = cfl * static_cast<double>(h) / 1e-30;  // tous geles : pas degenere
+    // Bornes GLOBALES (System::add_dt_bound) : couplage multi-blocs, Schur/Poisson, AMR/scheduler.
+    // Une evaluation HOTE par pas et par borne ; <= 0 ou non finie = ne contraint pas ce pas
+    // (neutralisee en +inf AVANT le min global). ALL_REDUCE_MIN obligatoire : la callback est
+    // evaluee PAR RANG (elle peut lire un etat rank-local) ; sans le min global chaque rang
+    // choisirait un dt different -> collectifs du pas desynchronises (Krylov / fill_boundary) ->
+    // deadlock MPI. En serie all_reduce_min est l'identite (bit-identique).
+    for (const auto& g : P->dt_bounds_) {
+      if (!g.fn) continue;
+      double v = g.fn();
+      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+      v = all_reduce_min(v);
+      if (v < dt) { dt = v; reason = "global:" + g.label; }
+    }
+    if (!std::isfinite(dt)) {
+      dt = cfl * static_cast<double>(h) / static_cast<double>(kCflSpeedFloor);  // tous geles : pas degenere
+      reason = "degenerate";
+    }
+    last_dt_reason_ = std::move(reason);
     for (auto& s : P->sp) {
       if (!s.evolve) continue;
       if (!stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
@@ -308,6 +364,11 @@ class SystemStepper {
   /// Un macro-pas MULTIRATE : le macro-pas = pas stable du bloc le plus LENT ; chaque bloc plus rapide
   /// est sous-cycle n_b = ceil(stride_b * w_b / w_min) fois. aux fige sur le macro-pas (couplage
   /// once-per-step). @return le macro-pas.
+  ///
+  /// BORNES OPTIONNELLES (audit 2026-06) : comme step_cfl, le macro-pas est ensuite REDUIT par les
+  /// bornes de bloc (source_frequency / stability_dt, appliquees au sous-pas effectif
+  /// stride_b*macro_dt/n_b -- n_b ne depend pas de dt, donc la clameur est exacte) et par les bornes
+  /// GLOBALES (P->dt_bounds_). Sans bornes optionnelles, macro_dt est STRICTEMENT historique.
   double step_adaptive(double cfl) {
     Impl* P = owner_;
     P->solve_fields();
@@ -323,11 +384,44 @@ class SystemStepper {
       wb.push_back(w);
       if (s.evolve) wmin = std::min(wmin, w);
     }
-    if (wmin >= Real(1e30)) wmin = Real(1e-30);  // aucun bloc evolutif (tous geles)
+    if (wmin >= Real(1e30)) wmin = kCflSpeedFloor;  // aucun bloc evolutif (tous geles)
     const Real h = P->polar_
                        ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
                        : std::min(P->geom.dx(), P->geom.dy());
-    const double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
+    double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
+    // Bornes de bloc OPTIONNELLES : chaque bloc sous-cycle n_b fois son pas effectif
+    // stride_b*macro_dt ; le sous-pas stride_b*macro_dt/n_b doit verifier les bornes de source /
+    // pas admissible du bloc. n_b (formule identique a la boucle d'avance ci-dessous) ne depend
+    // pas de macro_dt : la clameur est faite AVANT l'avance, n_b reste coherent.
+    for (std::size_t b = 0; b < P->sp.size(); ++b) {
+      auto& s = P->sp[b];
+      if (!s.evolve) continue;
+      if (!s.source_frequency && !s.stability_dt) continue;
+      int n = static_cast<int>(std::ceil(static_cast<double>(s.stride) *
+                                         static_cast<double>(wb[b] / wmin)));
+      if (n < 1) n = 1;
+      if (s.source_frequency) {
+        const Real mu = s.source_frequency(s.U);
+        if (mu > Real(0))
+          macro_dt = std::min(macro_dt, cfl * static_cast<double>(n) /
+                                            (static_cast<double>(s.stride) * static_cast<double>(mu)));
+      }
+      if (s.stability_dt) {
+        const Real db = s.stability_dt(s.U);
+        if (db > Real(0))
+          macro_dt = std::min(macro_dt, static_cast<double>(db) * static_cast<double>(n) /
+                                            static_cast<double>(s.stride));
+      }
+    }
+    // Bornes GLOBALES (System::add_dt_bound), comme step_cfl (meme all_reduce_min : dt identique
+    // sur tous les rangs, cf. le commentaire de step_cfl).
+    for (const auto& g : P->dt_bounds_) {
+      if (!g.fn) continue;
+      double v = g.fn();
+      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+      v = all_reduce_min(v);
+      if (v < macro_dt) macro_dt = v;
+    }
     for (std::size_t b = 0; b < P->sp.size(); ++b) {
       auto& s = P->sp[b];
       if (!s.evolve) continue;  // bloc gele : non avance
@@ -348,9 +442,15 @@ class SystemStepper {
     return macro_dt;
   }
 
+  /// Nom de la borne ACTIVE (celle qui a fixe dt) du dernier step_cfl : "transport:<bloc>",
+  /// "source_frequency:<bloc>", "stability_dt:<bloc>", "global:<label>", "degenerate", ou "" si
+  /// aucun step_cfl n'a encore tourne. Diagnostic (System::last_dt_bound).
+  const std::string& last_dt_reason() const { return last_dt_reason_; }
+
  private:
   Impl* owner_;
   SplitScheme scheme_ = SplitScheme::Lie;  // defaut Lie (Godunov) : bit-identique a l'historique
+  std::string last_dt_reason_;             // borne active du dernier step_cfl (diagnostic)
 };
 
 }  // namespace stepper

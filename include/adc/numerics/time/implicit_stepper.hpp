@@ -6,6 +6,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/numerics/spatial_operator.hpp>  // load_state, load_aux
 
+#include <algorithm>  // std::max (agregation du rapport Newton, hote)
 #include <concepts>
 
 // Pas implicite / IMEX d'un bloc : le CONTRAT (au lieu du callback nu).
@@ -82,12 +83,59 @@ ADC_HD inline bool is_implicit_component(const ImplicitMask<N>& mask, int c) {
   return model_is_implicit<Model>(c);
 }
 
+/// Options du Newton local de la source implicite (backward-Euler). Les DEFAUTS reproduisent
+/// EXACTEMENT le comportement historique : 2 iterations FIXES, aucune evaluation de residu
+/// (rel_tol == abs_tol == 0 -> pas de test d'arret, pas de cout supplementaire), pas de la
+/// jacobienne par differences finies h = fd_eps*|w| + fd_eps avec fd_eps = 1e-7 (la constante
+/// historiquement codee en dur). POD device-clean (passe PAR VALEUR dans le kernel).
+///  - max_iters : budget d'iterations Newton (historique : 2).
+///  - rel_tol / abs_tol : critere d'arret ||F||_inf <= abs_tol + rel_tol*||F0||_inf, evalue par
+///    CELLULE en tete d'iteration. 0/0 (defaut) = desactive -> boucle historique bit-identique.
+///  - fd_eps : pas (relatif ET plancher absolu) de la jacobienne par differences finies.
+struct NewtonOptions {
+  int max_iters = 2;
+  Real rel_tol = Real(0);
+  Real abs_tol = Real(0);
+  Real fd_eps = Real(1e-7);
+};
+
+/// Statistique de SORTIE du Newton d'UNE cellule (POD device, ecrit dans le scratch diagnostics) :
+/// res = ||F||_inf a la sortie ; iters = iterations consommees ; failed = 1 si la cellule a echoue
+/// (residu non fini, pivot degenere/non fini, ou tolerance active non atteinte au budget), 0 sinon.
+struct NewtonCellStat {
+  Real res = Real(0);
+  Real iters = Real(0);
+  Real failed = Real(0);
+};
+
+/// Rapport AGREGE (bloc entier, tous sous-pas d'une avance) du Newton de la source implicite.
+/// Rempli par backward_euler_source quand un rapport est demande (diagnostics OPT-IN) ; reductions
+/// max/somme sur les cellules + all_reduce MPI. reset() en tete d'avance par l'appelant.
+struct NewtonReport {
+  bool enabled = false;        ///< un rapport a ete calcule (au moins un sous-pas instrumente)
+  bool converged = true;       ///< aucune cellule en echec sur l'avance
+  Real max_residual = Real(0); ///< max cellules/sous-pas de ||F||_inf a la sortie
+  Real max_iters_used = Real(0);  ///< max cellules/sous-pas des iterations consommees
+  double n_failed = 0;         ///< nb (cellules x sous-pas) en echec (non-fini / pivot / non-convergence)
+  void reset() { *this = NewtonReport{}; }
+};
+
+/// Fini ? (device-safe, sans <cmath> : NaN echoue x == x ; +-inf echoue les bornes). Utilise par le
+/// chemin Newton INSTRUMENTE seulement (le chemin par defaut ne teste rien, bit-identique).
+ADC_HD inline bool newton_finite(Real x) {
+  return x == x && x < Real(1e300) && x > Real(-1e300);
+}
+
 namespace detail {
 // Resolution dense J x = b sur le bloc de tete n x n (n <= N), pivot partiel. J et b
 // detruits. N est constexpr (= Model::n_vars) -> tableau fixe, pas d'allocation,
 // device-callable ; n (<= N) est le nombre de variables implicites (IMEX partiel).
+// @return true si tous les pivots sont finis et non nuls ; false sinon (pivot degenere : la
+// numerique reste STRICTEMENT celle d'origine -- la division produit inf/NaN comme avant, seul le
+// drapeau est nouveau ; les appelants historiques ignorent le retour, bit-identique).
 template <int N>
-ADC_HD inline void solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
+ADC_HD inline bool solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
+  bool ok = true;
   for (int p = 0; p < n; ++p) {
     int piv = p;
     Real best = J[p][p] < 0 ? -J[p][p] : J[p][p];
@@ -100,6 +148,7 @@ ADC_HD inline void solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
       const Real t = b[p]; b[p] = b[piv]; b[piv] = t;
     }
     const Real d = J[p][p];
+    if (d == Real(0) || !newton_finite(d)) ok = false;
     for (int r = 0; r < n; ++r) {
       if (r == p) continue;
       const Real f = J[r][p] / d;
@@ -108,6 +157,7 @@ ADC_HD inline void solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
     }
   }
   for (int p = 0; p < n; ++p) x[p] = b[p] / J[p][p];
+  return ok;
 }
 
 // Resout W tel que W = Un + dt*S(W,a) en forward-backward Euler (IMEX partiel) :
@@ -121,7 +171,8 @@ ADC_HD inline void solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
 template <class Model>
 ADC_HD inline typename Model::State newton_source_solve(
     const Model& m, const typename Model::State& Un, const Aux& a, Real dt,
-    int iters, const ImplicitMask<Model::n_vars>& mask = {}) {
+    const NewtonOptions& opts, const ImplicitMask<Model::n_vars>& mask = {},
+    NewtonCellStat* stat = nullptr) {
   constexpr int N = Model::n_vars;
   int impl[N];  // indices des composantes implicites (les m_impl premieres slots utiles)
   int m_impl = 0;
@@ -135,19 +186,73 @@ ADC_HD inline typename Model::State newton_source_solve(
     for (int c = 0; c < N; ++c)
       if (!is_implicit_component<Model>(mask, c)) W[c] = Un[c] + dt * S_in[c];
   }
-  // (2) implicite : Newton sur le sous-systeme des composantes implicites.
-  for (int it = 0; it < iters; ++it) {
+  const bool tol_active = opts.rel_tol > Real(0) || opts.abs_tol > Real(0);
+  if (!tol_active && stat == nullptr) {
+    // (2a) CHEMIN HISTORIQUE (defaut) : iterations FIXES, aucun test, aucune evaluation de residu
+    // supplementaire -> BIT-IDENTIQUE a l'historique pour les defauts (max_iters=2, fd_eps=1e-7).
+    for (int it = 0; it < opts.max_iters; ++it) {
+      const typename Model::State S0 = m.source(W, a);
+      Real F[N];
+      for (int r = 0; r < m_impl; ++r) {
+        const int c = impl[r];
+        F[r] = W[c] - Un[c] - dt * S0[c];
+      }
+      Real J[N][N];
+      for (int cc = 0; cc < m_impl; ++cc) {
+        const int col = impl[cc];
+        const Real wc = W[col] < 0 ? -W[col] : W[col];
+        const Real h = opts.fd_eps * wc + opts.fd_eps;
+        typename Model::State Wp = W;
+        Wp[col] += h;
+        const typename Model::State Sp = m.source(Wp, a);
+        for (int rr = 0; rr < m_impl; ++rr) {
+          const int row = impl[rr];
+          const Real dSdW = (Sp[row] - S0[row]) / h;
+          J[rr][cc] = (row == col ? Real(1) : Real(0)) - dt * dSdW;
+        }
+      }
+      Real delta[N];
+      solve_dense<N>(J, F, delta, m_impl);
+      for (int r = 0; r < m_impl; ++r) W[impl[r]] -= delta[r];
+    }
+    return W;
+  }
+  // (2b) CHEMIN INSTRUMENTE (tolerances actives et/ou stat demande) : meme Newton, plus le critere
+  // d'arret ||F||_inf <= abs_tol + rel_tol*||F0||_inf en tete d'iteration, la detection de residu
+  // non fini / pivot degenere, et la statistique de sortie. Une evaluation de source SUPPLEMENTAIRE
+  // peut avoir lieu a la sortie (residu honnete apres la derniere mise a jour).
+  //
+  // INVARIANT OBSERVATEUR PUR (revue adverse) : tolerances INACTIVES + stat demande (le mode
+  // newton_diagnostics) -> l'ETAT W est STRICTEMENT identique au chemin (2a), Y COMPRIS sur une
+  // cellule degeneree : la detection (residu non fini, pivot degenere) MARQUE failed pour le
+  // rapport mais ne change PAS le flux de controle (pas de break, mise a jour appliquee comme
+  // (2a), propagation inf/NaN identique). Un diagnostic qui modifierait la trajectoire ne serait
+  // pas representatif du run reel. Le SEUL arret anticipe est la CONVERGENCE sous tolerance
+  // (tol_active), comportement opt-in explicitement non historique.
+  Real res = Real(0), res0 = Real(0);
+  int used = 0;
+  bool failed = false;
+  bool converged = (m_impl == 0);  // rien d'implicite : trivialement converge
+  for (int it = 0; it < opts.max_iters; ++it) {
     const typename Model::State S0 = m.source(W, a);
     Real F[N];
+    res = Real(0);
     for (int r = 0; r < m_impl; ++r) {
       const int c = impl[r];
       F[r] = W[c] - Un[c] - dt * S0[c];
+      const Real av = F[r] < 0 ? -F[r] : F[r];
+      if (av > res) res = av;
+    }
+    if (!newton_finite(res)) failed = true;  // marque SANS break : trajectoire (2a) preservee
+    if (tol_active) {
+      if (it == 0) res0 = res;
+      if (res <= opts.abs_tol + opts.rel_tol * res0) { converged = true; break; }
     }
     Real J[N][N];
     for (int cc = 0; cc < m_impl; ++cc) {
       const int col = impl[cc];
       const Real wc = W[col] < 0 ? -W[col] : W[col];
-      const Real h = Real(1e-7) * wc + Real(1e-7);
+      const Real h = opts.fd_eps * wc + opts.fd_eps;
       typename Model::State Wp = W;
       Wp[col] += h;
       const typename Model::State Sp = m.source(Wp, a);
@@ -158,10 +263,43 @@ ADC_HD inline typename Model::State newton_source_solve(
       }
     }
     Real delta[N];
-    solve_dense<N>(J, F, delta, m_impl);
+    const bool ok = solve_dense<N>(J, F, delta, m_impl);
+    if (!ok) failed = true;  // pivot degenere : marque SANS break, division inf/NaN comme (2a)
     for (int r = 0; r < m_impl; ++r) W[impl[r]] -= delta[r];
+    used = it + 1;
+  }
+  // Sortie par epuisement du budget : recalculer le residu APRES la derniere mise a jour (rapport
+  // honnete ; le residu de boucle precede la mise a jour). Une evaluation de source en plus,
+  // uniquement sur ce chemin instrumente.
+  if (!failed && used == opts.max_iters && m_impl > 0) {
+    const typename Model::State S0 = m.source(W, a);
+    res = Real(0);
+    for (int r = 0; r < m_impl; ++r) {
+      const int c = impl[r];
+      const Real fr = W[c] - Un[c] - dt * S0[c];
+      const Real av = fr < 0 ? -fr : fr;
+      if (av > res) res = av;
+    }
+    if (!newton_finite(res)) failed = true;
+    else if (tol_active) converged = res <= opts.abs_tol + opts.rel_tol * res0;
+  }
+  if (stat) {
+    stat->res = res;
+    stat->iters = Real(used);
+    stat->failed = (failed || (tol_active && !converged)) ? Real(1) : Real(0);
   }
   return W;
+}
+
+/// COMPATIBILITE : ancienne signature a budget d'iterations nu (iters). Equivaut a NewtonOptions
+/// {max_iters = iters} (tolerances inactives, fd_eps historique) -> chemin (2a), bit-identique.
+template <class Model>
+ADC_HD inline typename Model::State newton_source_solve(
+    const Model& m, const typename Model::State& Un, const Aux& a, Real dt,
+    int iters, const ImplicitMask<Model::n_vars>& mask = {}) {
+  NewtonOptions opts;
+  opts.max_iters = iters;
+  return newton_source_solve(m, Un, a, dt, opts, mask, nullptr);
 }
 }  // namespace detail
 
@@ -176,31 +314,119 @@ struct BackwardEulerSourceKernel {
   ConstArray4 uc, ax;
   Array4 u;
   Real dt;
-  int it;
+  NewtonOptions opts;  // options Newton (POD, par valeur) ; defauts = historique bit-identique
   ImplicitMask<Model::n_vars> mask;  // masque de bloc (POD, par valeur) ; inactif = defaut modele
   ADC_HD void operator()(int i, int j) const {
     const typename Model::State Un = load_state<Model>(uc, i, j);
     const Aux a = load_aux<aux_comps<Model>()>(ax, i, j);
-    const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, it, mask);
+    const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, opts, mask, nullptr);
     for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = W[c];
   }
 };
+
+// Variante INSTRUMENTEE : meme Newton, mais ecrit la statistique de sortie de CHAQUE cellule dans
+// le scratch st (comp 0 = ||F||_inf, 1 = iterations, 2 = echec 0/1). FONCTEUR NOMME (meme contrat
+// device cross-TU que BackwardEulerSourceKernel). Utilisee uniquement quand un rapport est demande.
+template <class Model>
+struct BackwardEulerSourceStatKernel {
+  Model m;
+  ConstArray4 uc, ax;
+  Array4 u, st;
+  Real dt;
+  NewtonOptions opts;
+  ImplicitMask<Model::n_vars> mask;
+  ADC_HD void operator()(int i, int j) const {
+    const typename Model::State Un = load_state<Model>(uc, i, j);
+    const Aux a = load_aux<aux_comps<Model>()>(ax, i, j);
+    NewtonCellStat s{};
+    const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, opts, mask, &s);
+    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = W[c];
+    st(i, j, 0) = s.res;
+    st(i, j, 1) = s.iters;
+    st(i, j, 2) = s.failed;
+  }
+};
+
+/// Noyaux de REDUCTION du scratch diagnostics (max / somme d'une composante). FONCTEURS NOMMES
+/// passes directement a reduce_max_cell / reduce_sum_cell (chemin device-clean, cf. for_each.hpp).
+struct NewtonStatMaxKernel {
+  ConstArray4 st;
+  int comp;
+  ADC_HD void operator()(int i, int j, Real& acc) const {
+    const Real v = st(i, j, comp);
+    if (v > acc) acc = v;
+  }
+};
+struct NewtonStatSumKernel {
+  ConstArray4 st;
+  int comp;
+  ADC_HD void operator()(int i, int j, Real& acc) const { acc += st(i, j, comp); }
+};
 }  // namespace detail
 
-// W = U + dt * model.source(W, aux), resolu EN PLACE par Newton local (jacobienne
-// par differences finies). Voir l'en-tete du fichier pour la stabilite. @p mask : masque implicite
-// PORTE PAR LE BLOC (override du defaut modele) ; inactif (defaut) -> comportement bit-identique.
+// W = U + dt * model.source(W, aux), resolu EN PLACE par Newton local (jacobienne par differences
+// finies), pilote par une politique NewtonOptions (tolerances / fd_eps / budget d'iterations).
+// @p mask : masque implicite PORTE PAR LE BLOC (override du defaut modele) ; inactif (defaut) ->
+// comportement bit-identique. @p report : diagnostics OPT-IN -- s'il est non nul, le Newton passe
+// par le chemin instrumente (statistique par cellule dans un scratch, reductions max/somme +
+// all_reduce MPI) et AGREGE dans *report (max residu, max iterations, nb d'echecs ; reset() a la
+// charge de l'appelant en tete d'avance). report == nullptr ET tolerances inactives -> chemin
+// historique strictement bit-identique, zero allocation, zero evaluation supplementaire.
+template <class Model>
+void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
+                           Real dt, const NewtonOptions& opts,
+                           const ImplicitMask<Model::n_vars>& mask = {},
+                           NewtonReport* report = nullptr) {
+  if (report == nullptr) {
+    for (int li = 0; li < U.local_size(); ++li) {
+      Array4 u = U.fab(li).array();
+      const ConstArray4 uc = U.fab(li).const_array();
+      const ConstArray4 ax = aux.fab(li).const_array();
+      const Box2D b = U.box(li);
+      for_each_cell(b, detail::BackwardEulerSourceKernel<Model>{model, uc, ax, u, dt, opts, mask});
+    }
+    return;
+  }
+  // Chemin DIAGNOSTICS : scratch par-cellule (res, iters, failed) puis reductions. L'allocation du
+  // scratch est locale a l'appel (diagnostics opt-in : le cout n'existe que si demande).
+  MultiFab stats(U.box_array(), U.dmap(), 3, 0);
+  for (int li = 0; li < U.local_size(); ++li) {
+    Array4 u = U.fab(li).array();
+    Array4 st = stats.fab(li).array();
+    const ConstArray4 uc = U.fab(li).const_array();
+    const ConstArray4 ax = aux.fab(li).const_array();
+    const Box2D b = U.box(li);
+    for_each_cell(b, detail::BackwardEulerSourceStatKernel<Model>{model, uc, ax, u, st, dt, opts,
+                                                                  mask});
+  }
+  Real rmax = Real(0), imax = Real(0), nfail = Real(0);
+  for (int li = 0; li < stats.local_size(); ++li) {
+    const ConstArray4 st = stats.fab(li).const_array();
+    const Box2D b = stats.box(li);
+    rmax = std::max(rmax, reduce_max_cell(b, detail::NewtonStatMaxKernel{st, 0}));
+    imax = std::max(imax, reduce_max_cell(b, detail::NewtonStatMaxKernel{st, 1}));
+    nfail += reduce_sum_cell(b, detail::NewtonStatSumKernel{st, 2});
+  }
+  rmax = static_cast<Real>(all_reduce_max(static_cast<double>(rmax)));
+  imax = static_cast<Real>(all_reduce_max(static_cast<double>(imax)));
+  const double nfail_g = all_reduce_sum(static_cast<double>(nfail));
+  report->enabled = true;
+  report->max_residual = std::max(report->max_residual, rmax);
+  report->max_iters_used = std::max(report->max_iters_used, imax);
+  report->n_failed += nfail_g;
+  if (nfail_g > 0 || !newton_finite(rmax)) report->converged = false;
+}
+
+/// COMPATIBILITE : ancienne signature a budget d'iterations nu (iters = 2 historique). Equivaut a
+/// NewtonOptions{max_iters = iters} sans rapport -> chemin historique bit-identique. Conservee pour
+/// les appelants existants (coupleurs AMR, ImplicitSourceStepper, tests).
 template <class Model>
 void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
                            Real dt, int iters = 2,
                            const ImplicitMask<Model::n_vars>& mask = {}) {
-  for (int li = 0; li < U.local_size(); ++li) {
-    Array4 u = U.fab(li).array();
-    const ConstArray4 uc = U.fab(li).const_array();
-    const ConstArray4 ax = aux.fab(li).const_array();
-    const Box2D b = U.box(li);
-    for_each_cell(b, detail::BackwardEulerSourceKernel<Model>{model, uc, ax, u, dt, iters, mask});
-  }
+  NewtonOptions opts;
+  opts.max_iters = iters;
+  backward_euler_source(model, aux, U, dt, opts, mask, nullptr);
 }
 
 // Stepper implicite par defaut : backward-Euler (Newton) sur la source du modele.

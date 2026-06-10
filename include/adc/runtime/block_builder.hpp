@@ -84,13 +84,16 @@ struct AdvanceImex {
   GridContext ctx;
   bool recon_prim;
   ImplicitMask<Model::n_vars> mask{};
+  NewtonOptions nopts{};            // options Newton du bloc (defauts = historique : 2 iters, 1e-7)
+  NewtonReport* nreport = nullptr;  // diagnostics OPT-IN (adresse stable, possedee par System::Impl)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                   recon_prim};
+    if (nreport) nreport->reset();  // rapport AGREGE sur les n sous-pas de CETTE avance
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);     // demi-pas explicite : transport sans source
-      backward_euler_source(m, *ctx.aux, U, h, 2, mask);  // source implicite (rappel raide)
+      backward_euler_source(m, *ctx.aux, U, h, nopts, mask, nreport);  // source implicite (rappel raide)
     }
   }
 };
@@ -191,13 +194,16 @@ struct AdvanceImexMasked {
   const MultiFab* mask;
   bool recon_prim;
   ImplicitMask<Model::n_vars> mask_impl{};
+  NewtonOptions nopts{};
+  NewtonReport* nreport = nullptr;
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalMasked<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m},
                                                                         &ctx, mask, recon_prim};
+    if (nreport) nreport->reset();
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);
-      backward_euler_source(m, *ctx.aux, U, h, 2, mask_impl);
+      backward_euler_source(m, *ctx.aux, U, h, nopts, mask_impl, nreport);
     }
   }
 };
@@ -211,13 +217,16 @@ struct AdvanceImexEb {
   const DiscDomain* disc;
   bool recon_prim;
   ImplicitMask<Model::n_vars> mask_impl{};
+  NewtonOptions nopts{};
+  NewtonReport* nreport = nullptr;
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalEb<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                     disc, recon_prim};
+    if (nreport) nreport->reset();
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);
-      backward_euler_source(m, *ctx.aux, U, h, 2, mask_impl);
+      backward_euler_source(m, *ctx.aux, U, h, nopts, mask_impl, nreport);
     }
   }
 };
@@ -255,19 +264,22 @@ ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) 
 template <class Limiter, class Flux, class Model>
 BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
                           const std::string& method = "ssprk2",
-                          const std::vector<int>& implicit_components = {}) {
+                          const std::vector<int>& implicit_components = {},
+                          const NewtonOptions& newton_opts = {},
+                          NewtonReport* newton_report = nullptr) {
   const MultiFab* disc_mask = ctx.disc_mask;
   const detail::DiscDomain* disc = ctx.disc;
   BlockClosures bc;
   const ImplicitMask<Model::n_vars> impl_mask = make_implicit_mask<Model::n_vars>(implicit_components);
   if (imex) {
-    bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask};
+    bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask,
+                                                           newton_opts, newton_report};
     if (disc_mask)
-      bc.advance_masked =
-          detail::AdvanceImexMasked<Limiter, Flux, Model>{m, ctx, disc_mask, recon_prim, impl_mask};
+      bc.advance_masked = detail::AdvanceImexMasked<Limiter, Flux, Model>{
+          m, ctx, disc_mask, recon_prim, impl_mask, newton_opts, newton_report};
     if (disc)
-      bc.advance_eb =
-          detail::AdvanceImexEb<Limiter, Flux, Model>{m, ctx, disc, recon_prim, impl_mask};
+      bc.advance_eb = detail::AdvanceImexEb<Limiter, Flux, Model>{
+          m, ctx, disc, recon_prim, impl_mask, newton_opts, newton_report};
   } else if (method == "ssprk3") {
     bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim};
     if (disc_mask)
@@ -303,12 +315,14 @@ template <class Model>
 BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
                          const GridContext& ctx, bool imex, bool recon_prim,
                          const std::string& method = "ssprk2",
-                         const std::vector<int>& implicit_components = {}) {
+                         const std::vector<int>& implicit_components = {},
+                         const NewtonOptions& newton_opts = {},
+                         NewtonReport* newton_report = nullptr) {
   if (riem == "rusanov") {
-    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-    if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+    if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
     throw std::runtime_error("System : limiter inconnu '" + lim + "'");
   }
   if (riem == "hll") {
@@ -323,10 +337,10 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
     if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
                     mm.wave_speeds(s, a, 0, r, r);
                   }) {
-      if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'hll' exige des vitesses d'onde signees "
@@ -337,10 +351,10 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
   if (riem == "hllc") {
     if constexpr (Model::n_vars == 4 &&
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'hllc' exige un transport compressible "
@@ -350,10 +364,10 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
   if (riem == "roe") {
     if constexpr (Model::n_vars == 4 &&
                   requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
-      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
-      if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components);
+      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
+      if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("System : flux 'roe' exige un transport compressible "
@@ -386,6 +400,31 @@ struct MaxSpeed {
   Real operator()(const MultiFab& U) const { return max_wave_speed_mf(m, U, *ctx.aux); }
 };
 
+/// Foncteur vitesse de STABILITE max du bloc (trait HasStabilitySpeed) : remplace MaxSpeed dans la
+/// CFL quand le modele declare stability_speed (les solveurs de Riemann gardent max_wave_speed).
+template <class Model>
+struct MaxStabilitySpeed {
+  Model m;
+  GridContext ctx;
+  Real operator()(const MultiFab& U) const { return max_stability_speed_mf(m, U, *ctx.aux); }
+};
+
+/// Foncteur frequence de source max du bloc (trait HasSourceFrequency, borne dt <= cfl/mu sans h).
+template <class Model>
+struct MaxSourceFreq {
+  Model m;
+  GridContext ctx;
+  Real operator()(const MultiFab& U) const { return max_source_frequency_mf(m, U, *ctx.aux); }
+};
+
+/// Foncteur pas admissible min du bloc (trait HasStabilityDt ; 0 = aucune cellule ne contraint).
+template <class Model>
+struct MinStabilityDt {
+  Model m;
+  GridContext ctx;
+  Real operator()(const MultiFab& U) const { return min_stability_dt_mf(m, U, *ctx.aux); }
+};
+
 /// Foncteur contribution Poisson : rhs += elliptic_rhs(U) (boucle HOTE pure, pas de kernel device).
 template <class Model>
 struct PoissonRhs {
@@ -403,10 +442,37 @@ struct PoissonRhs {
 };
 }  // namespace detail
 
-/// Fermeture de vitesse d'onde max du bloc (pour le pas CFL).
+/// Fermeture de la vitesse utilisee par le pas CFL du bloc. Si le modele declare le trait OPTIONNEL
+/// stability_speed (HasStabilitySpeed), c'est ELLE qui pilote la CFL (lambda* de stabilite) ; sinon
+/// fallback STRICT sur max_wave_speed (comportement historique, bit-identique). Les solveurs de
+/// Riemann lisent toujours max_wave_speed : ce choix ne change que la politique de pas.
 template <class Model>
 std::function<Real(const MultiFab&)> make_max_speed(const Model& m, const GridContext& ctx) {
-  return detail::MaxSpeed<Model>{m, ctx};
+  if constexpr (HasStabilitySpeed<Model>)
+    return detail::MaxStabilitySpeed<Model>{m, ctx};
+  else
+    return detail::MaxSpeed<Model>{m, ctx};
+}
+
+/// Fermeture de la frequence de source max du bloc (borne dt <= cfl * substeps / (stride * mu)).
+/// VIDE (std::function nulle) si le modele ne declare pas le trait -> le stepper l'ignore
+/// (comportement historique).
+template <class Model>
+std::function<Real(const MultiFab&)> make_source_frequency(const Model& m, const GridContext& ctx) {
+  if constexpr (HasSourceFrequency<Model>)
+    return detail::MaxSourceFreq<Model>{m, ctx};
+  else
+    return {};
+}
+
+/// Fermeture du pas admissible min du bloc (borne dt <= stability_dt * substeps / stride, SANS
+/// cfl). VIDE si le modele ne declare pas le trait -> ignoree par le stepper (historique).
+template <class Model>
+std::function<Real(const MultiFab&)> make_stability_dt(const Model& m, const GridContext& ctx) {
+  if constexpr (HasStabilityDt<Model>)
+    return detail::MinStabilityDt<Model>{m, ctx};
+  else
+    return {};
 }
 
 /// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs(U) (boucle hote).

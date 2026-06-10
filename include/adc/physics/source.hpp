@@ -14,6 +14,14 @@
 
 namespace adc {
 
+// CONTRAT OPTIONNEL frequency(U, aux) -> Real (audit 2026-06, chantier step_cfl) : une brique
+// source peut declarer sa FREQUENCE locale mu [1/s] (taux de relaxation/collision/reaction). Quand
+// la brique l'expose, CompositeModel la forwarde (source_frequency) et System::step_cfl impose la
+// borne dt <= cfl * substeps / (stride * max_cellules(mu)) -- la "deuxieme CFL" (source) du
+// meeting, distincte de la CFL de transport (pas de h : une source borne en 1/temps). Une brique
+// SANS frequency (toutes celles de ce fichier aujourd'hui) ne contraint pas le pas (historique).
+// Doit etre ADC_HD (evaluee dans un kernel de reduction).
+
 /// Pas de source : S(U, aux) = 0. Brique neutre (modele sans couplage potentiel/gravite).
 /// Device-callable, aucun etat interne.
 struct NoSource {

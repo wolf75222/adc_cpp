@@ -414,7 +414,7 @@ class PolarCondensedSchurSourceStepper {
       kry.set_coefficients(&a_rr_, &a_tt_);
     copy_comp0(kry.phi(), phi);  // warm start : phi^n -> kry.phi()
     copy_comp0(kry.rhs(), rhs_);
-    last_result_ = kry.solve(Real(1e-10), 600);
+    last_result_ = kry.solve(krylov_tol_, krylov_max_iters_);
     copy_comp0(phi, kry.phi());  // phi <- phi^{n+theta}
 
     // 3) RECONSTRUIRE v^{n+theta} = B^{-1}(v^n - theta dt grad_polar phi^{n+theta}) ; mom = rho v.
@@ -461,6 +461,16 @@ class PolarCondensedSchurSourceStepper {
   /// Diagnostic du dernier solve (iterations BiCGStab, residu relatif, convergence).
   const PolarKrylovResult& last_solve() const { return last_result_; }
 
+  /// Tolerance / budget d'iterations du solve Krylov polaire. DEFAUTS = constantes historiques
+  /// (1e-10, 600), rendues configurables par l'audit 2026-06. @throws std::invalid_argument.
+  void set_krylov(Real tol, int max_iters) {
+    if (!(tol > Real(0)) || max_iters < 1)
+      throw std::invalid_argument(
+          "PolarCondensedSchurSourceStepper::set_krylov : tol > 0, max_iters >= 1");
+    krylov_tol_ = tol;
+    krylov_max_iters_ = max_iters;
+  }
+
   int density_comp() const { return c_rho_; }
   int momentum_x_comp() const { return c_mx_; }
   int momentum_y_comp() const { return c_my_; }
@@ -504,6 +514,8 @@ class PolarCondensedSchurSourceStepper {
   MultiFab vr_n_, vt_n_;                ///< v^n (extrait au debut de step)
   MultiFab vr_t_, vt_t_;                ///< v^{n+theta} puis v^{n+1}
   PolarKrylovResult last_result_;       ///< diagnostic du dernier solve
+  Real krylov_tol_ = Real(1e-10);       ///< tolerance du solve (defaut historique, cf. set_krylov)
+  int krylov_max_iters_ = 600;          ///< budget d'iterations (defaut historique, cf. set_krylov)
 };
 
 }  // namespace adc

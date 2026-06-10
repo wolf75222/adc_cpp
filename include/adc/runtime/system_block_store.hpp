@@ -117,6 +117,13 @@ class SystemBlockStore {
     // l'init par agregat positionnel des autres membres reste inchangee.
     std::function<void(MultiFab&, Real, int)> advance_masked;  // residu via assemble_rhs_masked (Staircase)
     std::function<void(MultiFab&, Real, int)> advance_eb;      // residu via assemble_rhs_eb (CutCell)
+    // BORNES DE PAS OPTIONNELLES du bloc (audit 2026-06, chantier step_cfl). VIDES (defaut) -> le
+    // stepper ne les interroge pas : politique de pas STRICTEMENT historique (transport seul,
+    // bit-identique). Posees par set_block_dt_bounds quand le modele declare les traits
+    // HasSourceFrequency / HasStabilityDt (cf. core/physical_model.hpp pour la semantique).
+    // Trailing + defaut vide : l'init par agregat positionnel des autres membres reste inchangee.
+    std::function<Real(const MultiFab&)> source_frequency;  // max cellules de mu [1/s] (0 = ne contraint pas)
+    std::function<Real(const MultiFab&)> stability_dt;      // min cellules du pas admissible (0 = ne contraint pas)
   };
 
   /// Registre ORDONNE des blocs (UNIQUE source de verite). PUBLIC : Impl l'aliase en `sp` pour les

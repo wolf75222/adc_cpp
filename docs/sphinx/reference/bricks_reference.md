@@ -217,7 +217,7 @@ minmod=False, vanleer=False, weno5=False, primitive=False)` :
 | Argument | Valeurs | Detail |
 |---|---|---|
 | `limiter` | `"none"`, `"minmod"`, `"vanleer"`, `"weno5"` | Reconstruction MUSCL (none / minmod / vanleer, 2 ghosts) ou WENO5-Z. `weno5` = ordre 5 en zone lisse, stencil 5 points -> 3 ghosts ; seul le chemin natif `add_block` (et les backends `aot` / `production` / AMR) l'exposent ; le backend `prototype` (JIT) le rejette. Raccourcis booleens `none=` / `minmod=` / `vanleer=` / `weno5=`. |
-| `flux` | `"rusanov"`, `"hllc"`, `"roe"` | Flux numerique de Riemann. `hllc` / `roe` exigent un transport compressible et une primitive `p` declaree (sur un modele compile) ; sans `p`, le branchement leve une `ValueError`. |
+| `flux` | `"rusanov"`, `"hll"`, `"hllc"`, `"roe"` | Flux numerique de Riemann. `rusanov` = generique minimal (seul `max_wave_speed` requis). `hll` = generique a ondes signees : exige `model.wave_speeds` (modele natif isotherme / compressible, ou modele DSL avec primitive `p` declaree) ; c'est le chemin recommande pour un modele NON Euler a ondes signees (`hll` + `minmod`). `hllc` / `roe` = **Euler 2D seulement** (4 variables + pression gaz parfait) ; ils exigent un transport compressible et une primitive `p` declaree (sur un modele compile) ; sans `p`, le branchement leve une `ValueError`. |
 | `recon` | `"conservative"`, `"primitive"` | Variables reconstruites. `primitive` est plus stable pour Euler (positivite de `rho` et `p`). Raccourci `primitive=`. |
 
 `adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")` est la fabrique

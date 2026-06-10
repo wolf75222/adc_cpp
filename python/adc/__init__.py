@@ -33,9 +33,9 @@ __all__ = [
     "System", "SystemConfig", "AmrSystem", "AmrSystemConfig", "Model", "CompositeModel",
     "CartesianMesh", "PolarMesh",
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",
-    "NoSource", "PotentialForce", "GravityForce",
+    "NoSource", "PotentialForce", "GravityForce", "MagneticLorentzForce", "PotentialMagneticForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
-    "Spatial", "FiniteVolume", "Explicit", "IMEX", "SourceImplicit", "Implicit",
+    "Spatial", "FiniteVolume", "Explicit", "IMEX", "SourceImplicit", "SourceImplicitBE", "Implicit",
     "Split", "Strang", "CondensedSchur", "Role", "integrate",
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
@@ -154,6 +154,32 @@ class GravityForce:
     """Force gravitationnelle rho g (+ travail si 4 var)."""
 
 
+class MagneticLorentzForce:
+    """Force de Lorentz MAGNETIQUE q (v x B_z) sur la quantite de mouvement (brique C++ native
+    adc::MagneticLorentzForce, exposee a l'API Python par l'audit 2026-06).
+
+    Regime EXPLICITE (omega_c modere) : terme ponctuel algebrique, sans travail (F . v = 0, energie
+    inchangee). Lit B_z dans le canal aux (composante canonique 3) : appeler
+    ``sim.set_magnetic_field(Bz)`` pour le peupler. Exige un transport fluide >= 3 variables (qdm
+    sur 2 axes) ; rejete sur un scalaire. Le regime RAIDE (omega_c grand) passe par l'etage condense
+    adc.CondensedSchur (Schur), PAS par cette brique explicite.
+
+    ``charge`` = q/m, signe inclus (meme convention que PotentialForce)."""
+
+    def __init__(self, charge=1.0):
+        self.charge = float(charge)
+
+
+class PotentialMagneticForce:
+    """Force electrostatique + Lorentz magnetique SOMMEES : (q/m) rho E + q (v x B_z) (brique C++
+    native CompositeSource<PotentialForce, MagneticLorentzForce>, la force complete du diocotron
+    magnetise). Meme q/m pour les deux forces (meme espece). Lit B_z (set_magnetic_field) ; exige un
+    transport fluide >= 3 variables. ``charge`` = q/m, signe inclus."""
+
+    def __init__(self, charge=1.0):
+        self.charge = float(charge)
+
+
 # --- Briques de second membre elliptique ------------------------------------
 class ChargeDensity:
     """Densite de charge f = q n."""
@@ -219,8 +245,13 @@ def Model(state, transport, source, elliptic):
         spec.source = "potential"; spec.qom = source.charge
     elif isinstance(source, GravityForce):
         spec.source = "gravity"
+    elif isinstance(source, MagneticLorentzForce):
+        spec.source = "magnetic"; spec.qom = source.charge
+    elif isinstance(source, PotentialMagneticForce):
+        spec.source = "potential_magnetic"; spec.qom = source.charge
     else:
-        raise ValueError("source : NoSource | PotentialForce | GravityForce")
+        raise ValueError("source : NoSource | PotentialForce | GravityForce | MagneticLorentzForce "
+                         "| PotentialMagneticForce")
 
     if isinstance(elliptic, ChargeDensity):
         spec.elliptic = "charge"; spec.q = elliptic.charge
@@ -274,8 +305,19 @@ def _native_to_brick(obj, role):
                                    min_vars=3)
         if isinstance(obj, GravityForce):
             return dsl.NativeBrick("adc::GravityForce", "source", min_vars=3)
-        raise ValueError("adc.CompositeModel source : NoSource | PotentialForce | GravityForce "
-                         "(natif) ou dsl.SourceBrick(...).compile()")
+        if isinstance(obj, MagneticLorentzForce):
+            # n_aux=4 : la brique lit B_z (canal aux canonique 3) -> le composite dimensionne l'aux.
+            return dsl.NativeBrick("adc::MagneticLorentzForce", "source",
+                                   fields={"qom": obj.charge}, min_vars=3, n_aux=4)
+        if isinstance(obj, PotentialMagneticForce):
+            # Champs IMBRIQUES de CompositeSource (membres publics a / b) : l'emit du NativeBrick
+            # ecrit `a.qom = ...; b.qom = ...;` dans le constructeur du struct derive.
+            return dsl.NativeBrick(
+                "adc::CompositeSource<adc::PotentialForce, adc::MagneticLorentzForce>", "source",
+                fields={"a.qom": obj.charge, "b.qom": obj.charge}, min_vars=3, n_aux=4)
+        raise ValueError("adc.CompositeModel source : NoSource | PotentialForce | GravityForce | "
+                         "MagneticLorentzForce | PotentialMagneticForce (natif) ou "
+                         "dsl.SourceBrick(...).compile()")
     if role == "elliptic":
         if isinstance(obj, ChargeDensity):
             return dsl.NativeBrick("adc::ChargeDensity", "elliptic", fields={"q": obj.charge},
@@ -428,7 +470,14 @@ class Spatial:
       weno5 = WENO5-Z, ordre 5 en zone lisse, stencil 5 points (3 ghosts), capture sans oscillation
       pres d'un front ; seul le chemin natif ``add_block`` l'expose (les chemins compiles .so
       allouent 2 ghosts -> rejet explicite).
-    - ``flux`` : "rusanov" | "hllc" | "roe" (hllc/roe exigent un transport compressible).
+    - ``flux`` : "rusanov" | "hll" | "hllc" | "roe".
+      rusanov = generique minimal (ne demande que max_wave_speed, tout modele).
+      hll = generique a ondes signees (exige model.wave_speeds : modele natif isotherme/compressible,
+      ou modele DSL declarant une primitive 'p') ; moins diffusif que rusanov, sans exiger de
+      pression ni n_vars == 4. C'est le chemin recommande pour un modele NON Euler a ondes signees
+      (systeme de moments, isotherme) : ``hll`` + ``minmod``.
+      hllc / roe = EULER 2D SEULEMENT (4 variables rho/rho_u/rho_v/E + pression gaz parfait) ;
+      ce ne sont PAS des solveurs generiques (cf. EulerHLLCFlux2D / EulerRoeFlux2D cote C++).
     - ``recon`` : "conservative" | "primitive" (variables reconstruites ; primitif plus robuste
       pour Euler : positivite de rho et p ; raccourci primitive=).
     """
@@ -457,7 +506,8 @@ def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"):
     DSL m.flux) pour ne pas collisionner les deux sens. Mapping des arguments :
 
     - ``limiter`` -> Spatial.limiter ("none" | "minmod" | "vanleer" | "weno5")
-    - ``riemann`` -> Spatial.flux ("rusanov" | "hllc" | "roe")
+    - ``riemann`` -> Spatial.flux ("rusanov" | "hll" | "hllc" | "roe") ; "hll" est le chemin
+      generique a ondes signees (exige model.wave_speeds), "hllc"/"roe" sont Euler 2D seulement
     - ``variables`` -> Spatial.recon ("conservative" | "primitive")
 
     cf. docs/DSL_MODEL_DESIGN.md section 6. Renvoie un Spatial (consomme tel quel par add_block /
@@ -570,18 +620,39 @@ class IMEX:
     - ``implicit_roles`` : meme masque mais par ROLE physique ("density", "momentum_x", "energy", ...)
       au lieu du nom (cf. System.variable_roles). Union avec implicit_vars. Ex.
       adc.IMEX(implicit_roles=["MomentumX", "MomentumY", "Energy"]).
+    - ``newton_max_iters`` : budget d'iterations du Newton local (defaut 2 = constante historique).
+    - ``newton_rel_tol`` / ``newton_abs_tol`` : critere d'arret par cellule
+      ||F||_inf <= abs_tol + rel_tol*||F0||_inf (0/0 = desactive, boucle historique bit-identique).
+    - ``newton_fd_eps`` : pas de la jacobienne par differences finies (defaut 1e-7 = historique).
+    - ``newton_diagnostics`` : active le rapport Newton (sim.newton_report(name) -> dict
+      {enabled, converged, max_residual, max_iters_used, n_failed}), agrege sur la derniere avance
+      du bloc. OPT-IN : defaut False = zero cout supplementaire.
+
+    NOMENCLATURE (audit 2026-06) : le schema cable est exactement ForwardEuler(transport sans
+    source) + backward-Euler local sur la source ("SourceImplicitBE"). Ce n'est PAS une famille
+    IMEX-RK / ARK (pas de choix de tableau de Butcher, ``method=`` de l'explicite ne s'applique pas
+    au demi-pas IMEX) ; une vraie famille IMEXRK serait un chantier futur distinct.
     """
 
     kind = "imex"
 
-    def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None):
+    def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None,
+                 newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
+                 newton_fd_eps=1e-7, newton_diagnostics=False):
         if int(substeps) < 1:
             raise ValueError("IMEX : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
             raise ValueError("IMEX : stride >= 1 (recu %r)" % (stride,))
+        if int(newton_max_iters) < 1:
+            raise ValueError("IMEX : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
         self.substeps = int(substeps)
         self.stride = int(stride)
         self.implicit_vars, self.implicit_roles = _norm_implicit("IMEX", implicit_vars, implicit_roles)
+        self.newton_max_iters = int(newton_max_iters)
+        self.newton_rel_tol = float(newton_rel_tol)
+        self.newton_abs_tol = float(newton_abs_tol)
+        self.newton_fd_eps = float(newton_fd_eps)
+        self.newton_diagnostics = bool(newton_diagnostics)
 
 
 class SourceImplicit:
@@ -616,15 +687,30 @@ class SourceImplicit:
 
     kind = "imex"  # meme chemin C++ que IMEX (ImplicitSourceStepper)
 
-    def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None):
+    def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None,
+                 newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
+                 newton_fd_eps=1e-7, newton_diagnostics=False):
         if int(substeps) < 1:
             raise ValueError("SourceImplicit : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
             raise ValueError("SourceImplicit : stride >= 1 (recu %r)" % (stride,))
+        if int(newton_max_iters) < 1:
+            raise ValueError("SourceImplicit : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
         self.substeps = int(substeps)
         self.stride = int(stride)
         self.implicit_vars, self.implicit_roles = _norm_implicit(
             "SourceImplicit", implicit_vars, implicit_roles)
+        self.newton_max_iters = int(newton_max_iters)
+        self.newton_rel_tol = float(newton_rel_tol)
+        self.newton_abs_tol = float(newton_abs_tol)
+        self.newton_fd_eps = float(newton_fd_eps)
+        self.newton_diagnostics = bool(newton_diagnostics)
+
+
+# Nom PRECIS du schema cable par IMEX / SourceImplicit (audit 2026-06) : transport ForwardEuler
+# sans source + backward-Euler LOCAL sur la source (Newton par cellule). Alias STRICT de
+# SourceImplicit (meme objet) : a employer quand on veut nommer l'hypothese dans un script.
+SourceImplicitBE = SourceImplicit
 
 
 def Implicit(dt_ratio=1, substeps=None, stride=1):
@@ -708,11 +794,21 @@ class CondensedSchur:
       roles / champs. Ils EXPRIMENT l'intention ; la resolution role -> composante est faite cote C++
       (le bloc lit ses propres VariableRole). Tolerent adc.Role.* (recommande), un nom de role stable,
       ou un nom de variable du bloc. momentum est un couple (x, y).
+    - ``krylov_tol`` / ``krylov_max_iters`` : tolerance et budget du solve Krylov (BiCGStab) de
+      l'etage. None (defauts) = constantes historiques (1e-10 ; 400 en cartesien, 600 en polaire),
+      rendues configurables par l'audit 2026-06 (constantes numeriques explicites).
     """
 
     def __init__(self, kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
                  density=Role.Density, momentum=(Role.MomentumX, Role.MomentumY),
-                 energy=None, magnetic_field="B_z", potential="phi"):
+                 energy=None, magnetic_field="B_z", potential="phi",
+                 krylov_tol=None, krylov_max_iters=None):
+        self.krylov_tol = float(krylov_tol) if krylov_tol is not None else 0.0
+        self.krylov_max_iters = int(krylov_max_iters) if krylov_max_iters is not None else 0
+        if krylov_tol is not None and not (0.0 < self.krylov_tol < 1.0):
+            raise ValueError("CondensedSchur : krylov_tol doit etre dans (0, 1) (recu %r)" % (krylov_tol,))
+        if krylov_max_iters is not None and self.krylov_max_iters < 1:
+            raise ValueError("CondensedSchur : krylov_max_iters >= 1 (recu %r)" % (krylov_max_iters,))
         if kind != "electrostatic_lorentz":
             raise ValueError(
                 "CondensedSchur : kind 'electrostatic_lorentz' (seul supporte) ; recu %r" % (kind,))
@@ -885,11 +981,17 @@ class System:
             raise TypeError(
                 "System.add_block : adc.Split (etage source condense par Schur) n'est supporte que par "
                 "add_equation (qui branche l'etage source) ; utiliser add_equation(..., time=adc.Split(...)).")
-        # Masque implicite porte par la politique temporelle (IMEX/SourceImplicit) ; vide sur les autres
-        # politiques (Explicit). Resolu/valide cote C++ (System::add_block) contre les noms/roles du bloc.
+        # Masque implicite + options Newton portes par la politique temporelle (IMEX/SourceImplicit) ;
+        # defauts neutres sur les autres politiques (Explicit). Resolus/valides cote C++
+        # (System::add_block) contre les noms/roles du bloc.
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1), evolve, getattr(time, "stride", 1),
-                          getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
+                          getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
+                          getattr(time, "newton_max_iters", 2),
+                          getattr(time, "newton_rel_tol", 0.0),
+                          getattr(time, "newton_abs_tol", 0.0),
+                          getattr(time, "newton_fd_eps", 1e-7),
+                          getattr(time, "newton_diagnostics", False))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
                      evolve=True, stride=None):
@@ -926,7 +1028,9 @@ class System:
             self.add_equation(name, model, spatial=spatial, time=time.hyperbolic,
                               substeps=substeps, names=names, evolve=evolve, stride=stride)
             src = time.source
-            self._s.set_source_stage(name, src.kind, src.theta, src.alpha)
+            self._s.set_source_stage(name, src.kind, src.theta, src.alpha,
+                                     getattr(src, "krylov_tol", 0.0),
+                                     getattr(src, "krylov_max_iters", 0))
             self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
             return
 
@@ -939,7 +1043,12 @@ class System:
         if isinstance(model, ModelSpec):
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                               nsub, evolve, nstride,
-                              getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
+                              getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
+                              getattr(time, "newton_max_iters", 2),
+                              getattr(time, "newton_rel_tol", 0.0),
+                              getattr(time, "newton_abs_tol", 0.0),
+                              getattr(time, "newton_fd_eps", 1e-7),
+                              getattr(time, "newton_diagnostics", False))
             return
 
         # Masque implicite (IMEX) : seul le chemin natif compose (ModelSpec -> add_block) le cable. Les
@@ -950,6 +1059,18 @@ class System:
                 "add_equation : implicit_vars / implicit_roles (masque IMEX par bloc) ne sont supportes "
                 "que sur un modele compose adc.Model(...) (-> add_block). Le modele compile (.so) ne "
                 "transporte pas le masque ; utiliser un adc.Model(...) natif.")
+        # Memes regles pour les options/diagnostics Newton (IMEX) : non transportees par l'ABI des .so.
+        # Des valeurs non-defaut seraient ignorees EN SILENCE -> rejet explicite.
+        if (getattr(time, "newton_max_iters", 2) != 2
+                or getattr(time, "newton_rel_tol", 0.0) != 0.0
+                or getattr(time, "newton_abs_tol", 0.0) != 0.0
+                or getattr(time, "newton_fd_eps", 1e-7) != 1e-7
+                or getattr(time, "newton_diagnostics", False)):
+            raise ValueError(
+                "add_equation : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/"
+                "diagnostics) ne sont supportees que sur un modele compose adc.Model(...) "
+                "(-> add_block). L'ABI du modele compile (.so) ne les transporte pas ; utiliser un "
+                "adc.Model(...) natif.")
 
         if not isinstance(model, dsl.CompiledModel):
             raise TypeError("add_equation : model doit etre un adc.Model(...) (ModelSpec) ou un "
@@ -971,6 +1092,11 @@ class System:
                 "add_equation : riemann '%s' exige une pression : declarer une primitive 'p' "
                 "(m.primitive('p', ...)) dans le modele ; sinon utiliser riemann='rusanov'"
                 % spatial.flux)
+        # HLL : PAS de garde Python sur prim_names ici -- la brique generee emet wave_speeds des
+        # qu'une primitive 'p' est DECLAREE (m.primitive('p', ...)), meme HORS layout primitive_vars
+        # (cas isotherme 3-var Hoffart : prim_names = rho/u/v sans 'p', HLL pourtant disponible).
+        # Le requires-gate C++ de make_block rejette deja avec le remede exact quand wave_speeds
+        # manque ("declarer une primitive 'p' / des eigenvalues").
 
         # Aiguillage AUTORITAIRE par l'adder du CompiledModel (fixe par le backend, cf. dsl._BACKENDS) :
         # prototype -> add_dynamic_block, aot -> add_compiled_block, production -> add_native_block (#85).
@@ -1208,8 +1334,83 @@ class System:
         prim = self._s.get_primitive_state(name)  # (ncomp, n, n)
         return {nm: prim[c] for c, nm in enumerate(names)}
 
+    def check_model(self, block, raise_on_error=True, rtol=1e-8, atol=1e-10):
+        """Verification RUNTIME generique d'un bloc installe (audit 2026-06, chantier 6) : controle
+        sur l'ETAT COURANT du bloc (quel que soit le backend : natif compose, .so JIT/AOT/production) :
+
+        - etat U fini ;
+        - residu -div F + S fini (exerce flux + source + reconstruction de bout en bout) ;
+        - positivite des composantes a role Density (via variable_roles) ;
+        - positivite de la primitive de role Pressure / nommee 'p' (via get_primitive_state) ;
+        - round-trip cons -> prim -> cons ~= identite (conversions du modele coherentes ;
+          l'etat est SAUVE puis RESTAURE, le bloc n'est pas modifie).
+
+        Pendant RUNTIME de dsl.Model.check_model (qui verifie les FORMULES avant compilation).
+        @return dict {"ok", "failures", "block"} ; raise_on_error=True (defaut) leve ValueError."""
+        import numpy as np
+        failures = []
+        nv = self._s.n_vars(block)
+        U = np.asarray(self._s.get_state(block), dtype=float)
+        if not np.all(np.isfinite(U)):
+            failures.append("etat U non fini")
+        self._s.solve_fields()  # aux a jour : le residu lit phi / grad phi
+        R = np.asarray(self._s.eval_rhs(block), dtype=float)
+        if not np.all(np.isfinite(R)):
+            failures.append("residu -div F + S non fini (flux/source/reconstruction)")
+        ncell = U.size // max(nv, 1)
+        Uc = U.reshape(nv, ncell)
+        roles = [r.lower() for r in self._s.variable_roles(block, "conservative")]
+        names = list(self._s.variable_names(block, "conservative"))
+        for i, r in enumerate(roles):
+            if r == "density" and not bool(np.all(Uc[i] > 0)):
+                failures.append("composante '%s' (role Density) non strictement positive" % names[i])
+        prim_roles = [r.lower() for r in self._s.variable_roles(block, "primitive")]
+        prim_names = list(self._s.variable_names(block, "primitive"))
+        try:
+            P = np.asarray(self._s.get_primitive_state(block), dtype=float)
+            if not np.all(np.isfinite(P)):
+                failures.append("etat primitif non fini (to_primitive)")
+            else:
+                for i, (r, nm) in enumerate(zip(prim_roles, prim_names)):
+                    if (r == "pressure" or nm == "p") and not bool(np.all(P[i] > 0)):
+                        failures.append("primitive '%s' (pression) non strictement positive" % nm)
+                # round-trip cons -> prim -> cons : etat sauve puis restaure (aucune mutation nette).
+                U0 = U.copy()
+                self._s.set_primitive_state(block, P)
+                U1 = np.asarray(self._s.get_state(block), dtype=float)
+                self._s.set_state(block, U0)
+                if not np.allclose(U1, U0, rtol=rtol, atol=atol):
+                    err = float(np.max(np.abs(U1 - U0)))
+                    failures.append("round-trip to_conservative(to_primitive(U)) != U "
+                                    "(ecart max %g : conversions du modele incoherentes)" % err)
+        except RuntimeError as ex:  # bloc sans conversions (chemins .so anterieurs) : on le signale
+            failures.append("conversions cons<->prim indisponibles sur ce bloc (%s)" % ex)
+        report = {"ok": not failures, "failures": failures, "block": block}
+        if failures and raise_on_error:
+            raise ValueError("System.check_model('%s') : %d echec(s) :\n  - %s"
+                             % (block, len(failures), "\n  - ".join(failures)))
+        return report
+
     def __getattr__(self, attr):
         return getattr(self._s, attr)
+
+
+def _reject_newton_options_amr(label, time):
+    """REJETTE explicitement les options Newton (adc.IMEX/SourceImplicit) sur les chemins AMR :
+    AmrSystem::add_block ne les transporte pas et le pas IMEX par niveau garde iters=2 fige, sans
+    rapport -- les honorer demanderait de plomber le binding, la signature C++ et les fermetures
+    AMR (suivi distinct). Les ignorer EN SILENCE violerait la convention 'pas d'option acceptee
+    puis ignoree' (cf. System.add_equation qui rejette les memes options sur les .so). Defauts
+    (2 / 0 / 0 / 1e-7 / False) : aucun rejet, comportement historique inchange."""
+    if (getattr(time, "newton_max_iters", 2) != 2
+            or getattr(time, "newton_rel_tol", 0.0) != 0.0
+            or getattr(time, "newton_abs_tol", 0.0) != 0.0
+            or getattr(time, "newton_fd_eps", 1e-7) != 1e-7
+            or getattr(time, "newton_diagnostics", False)):
+        raise ValueError(
+            "%s : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/diagnostics) ne sont "
+            "pas transportees sur AMR (le pas IMEX par niveau utilise iters=2 fige, sans rapport). "
+            "Utiliser un System mono-niveau pour piloter le Newton, ou laisser les defauts." % label)
 
 
 class AmrSystem:
@@ -1273,6 +1474,8 @@ class AmrSystem:
                 "supporte que par add_equation (qui branche l'etage source) ; utiliser "
                 "add_equation(..., time=adc.Strang(hyperbolic=adc.Explicit(...), "
                 "source=adc.CondensedSchur(...))).")
+        # Options Newton NON transportees sur AMR : rejet explicite (cf. _reject_newton_options_amr).
+        _reject_newton_options_amr("AmrSystem.add_block", time)
         # On thread substeps/stride (multirate, capstone iv) ET le masque IMEX partiel implicit_vars /
         # implicit_roles (capstone vii : adc.IMEX(implicit_vars=...)). Resolus / valides cote C++
         # (AmrSystem::add_block) contre les noms/roles du bloc : vides -> backward-Euler plein, et
@@ -1328,6 +1531,16 @@ class AmrSystem:
         if isinstance(time, Split):
             self.add_equation(name, model, spatial=spatial, time=time.hyperbolic, substeps=substeps)
             src = time.source
+            # krylov_tol / krylov_max_iters de CondensedSchur NON transportes par le chemin amr-schur
+            # (AmrSystem::set_source_stage ne les expose pas) : REJET explicite plutot que de laisser
+            # le solve Schur global AMR garder les defauts EN SILENCE (meme convention que le rejet
+            # stride/masque sur le .so). Defauts (None -> 0/0) : aucun rejet, comportement inchange.
+            if getattr(src, "krylov_tol", 0.0) or getattr(src, "krylov_max_iters", 0):
+                raise ValueError(
+                    "AmrSystem.add_equation : krylov_tol / krylov_max_iters de adc.CondensedSchur ne "
+                    "sont pas transportes par le chemin amr-schur (le solve Schur global AMR garderait "
+                    "les defauts en silence). Laisser les defauts, ou utiliser System (mono-niveau) qui "
+                    "les cable.")
             self._s.set_source_stage(name, src.kind, src.theta, src.alpha)
             self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
             return
@@ -1341,6 +1554,7 @@ class AmrSystem:
         # masque demande en explicite ou en mono-bloc leve une erreur claire cote C++,
         # amr_system.cpp:325-328 / :283-287). Ne PAS dupliquer ces gardes ici.
         if isinstance(model, ModelSpec):
+            _reject_newton_options_amr("AmrSystem.add_equation", time)
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                               nsub, getattr(time, "stride", 1),
                               getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))

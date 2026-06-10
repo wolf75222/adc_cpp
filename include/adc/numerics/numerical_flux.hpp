@@ -6,11 +6,18 @@
 /// qui rend le flux numerique a l'interface entre l'etat gauche (UL, aux AL) et droit (UR, AR)
 /// dans la direction dir (0 = x, 1 = y). Etats et auxiliaires passes par valeur ; aucun virtuel.
 ///
-/// Hierarchie de precision (coupe des ondes intermediaires) :
-///   RusanovFlux  : Lax-Friedrichs local ; ne demande que max_wave_speed.
-///   HLLFlux      : 2 ondes (Davis) ; requiert model.wave_speeds (vitesses signees sL, sR).
-///   HLLCFlux     : 3 ondes (+ onde de contact) ; requiert model.pressure et wave_speeds.
-///   RoeFlux      : decomposition complete en ondes ; requiert model.pressure ; Euler 2D seulement.
+/// Hierarchie de precision (coupe des ondes intermediaires) ET de generalite :
+///   RusanovFlux  : GENERIQUE minimal ; ne demande que max_wave_speed (tout PhysicalModel).
+///   HLLFlux      : GENERIQUE avec ondes signees ; requiert model.wave_speeds (sL, sR).
+///   HLLCFlux     : EULER 2D SEULEMENT (n_vars == 4, layout rho/m/E, pression) -- alias
+///                  EulerHLLCFlux2D. Comportement indefini sur tout autre modele.
+///   RoeFlux      : EULER 2D GAZ PARFAIT SEULEMENT (eigenstructure Euler codee en dur, gamma-1
+///                  deduit de l'EOS gaz parfait, entropy fix de Harten eps = 0.1*c -- une politique
+///                  d'entropie SPECIFIQUE Euler/Roe) -- alias EulerRoeFlux2D.
+///
+/// Pour un modele NON Euler (systeme de moments, isotherme, scalaire...), le chemin generique est
+/// RusanovFlux, ou HLLFlux des que le modele expose wave_speeds. Un Roe generique exigerait un
+/// contrat d'eigenstructure complet (roe_average, eigenvectors, entropy fix) que le coeur n'a pas.
 ///
 /// INVARIANT device : pas de vtable, pas de std:: dans les chemins critiques (std::sqrt
 /// est authorise dans RoeFlux pour la moyenne de Roe, device-clean sous Kokkos/nvcc).
@@ -168,6 +175,11 @@ struct HLLCFlux {
   }
 };
 
+/// Largeur du lissage de l'entropy fix de Harten du RoeFlux, en fraction de la vitesse du son de
+/// Roe (eps = kRoeEntropyFixFraction * c). Constante DOCUMENTEE plutot que cachee dans le noyau ;
+/// SPECIFIQUE Euler/Roe (cf. le commentaire dans RoeFlux::operator()).
+inline constexpr Real kRoeEntropyFixFraction = Real(0.1);
+
 // Roe (linearisation de Roe + correction d'entropie de Harten sur les ondes acoustiques). Capture
 // nettement contacts et chocs (comme HLLC), mais via la decomposition complete en ondes : pour un
 // etat supersonique, F* = flux amont EXACT (propriete de Roe : F_R - F_L = A_roe (U_R - U_L)).
@@ -213,8 +225,12 @@ struct RoeFlux {
     const Real a3 = rho * dut;                              // cisaillement, un
     const Real a5 = (dp + rho * c * dun) / (Real(2) * c2);  // onde un + c
 
-    // |valeur propre| avec correction d'entropie de Harten sur les ondes acoustiques (1, 5)
-    const Real eps = Real(0.1) * c;
+    // |valeur propre| avec correction d'entropie de Harten sur les ondes acoustiques (1, 5).
+    // kRoeEntropyFixFraction = 0.1 est une POLITIQUE D'ENTROPIE EULER/ROE-SPECIFIQUE (largeur du
+    // lissage parabolique en fraction de la vitesse du son de Roe, valeur usuelle de la litterature) :
+    // elle n'a pas de sens pour un autre systeme hyperbolique et ne doit pas etre presentee comme
+    // un parametre generique du coeur.
+    const Real eps = kRoeEntropyFixFraction * c;
     auto absfix = [eps](Real l) {
       const Real al = l < 0 ? -l : l;
       return al < eps ? Real(0.5) * (l * l / eps + eps) : al;
@@ -238,5 +254,12 @@ struct RoeFlux {
     return F;
   }
 };
+
+/// Alias EXPLICITES du domaine de validite : HLLCFlux et RoeFlux sont des solveurs EULER 2D
+/// (n_vars == 4, layout rho/m_x/m_y/E, pression gaz parfait), PAS des solveurs generiques.
+/// Les noms courts restent pour compatibilite (make_block et les .so generes les referencent) ;
+/// le code neuf qui veut nommer l'hypothese peut employer ces alias.
+using EulerHLLCFlux2D = HLLCFlux;
+using EulerRoeFlux2D = RoeFlux;
 
 }  // namespace adc

@@ -642,12 +642,12 @@ class AmrRuntime {
     solve_fields();  // aux a jour : max_speed de chaque bloc le lit sur le grossier courant
     Real dt = std::numeric_limits<Real>::infinity();
     for (auto& b : blocks_) {
-      const Real w = std::max(b.max_speed((*b.levels)[0].U, aux_[0]), Real(1e-30));
+      const Real w = std::max(b.max_speed((*b.levels)[0].U, aux_[0]), kCflSpeedFloor);
       const Real dt_b = cfl * h * static_cast<Real>(b.substeps) /
                         (static_cast<Real>(b.stride) * w);
       if (dt_b < dt) dt = dt_b;
     }
-    if (!std::isfinite(dt)) dt = cfl * h / Real(1e-30);  // garde-fou (aucun bloc : impossible ici)
+    if (!std::isfinite(dt)) dt = cfl * h / kCflSpeedFloor;  // garde-fou (aucun bloc : impossible ici)
     step(dt);
     return dt;
   }

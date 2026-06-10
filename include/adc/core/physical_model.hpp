@@ -93,6 +93,61 @@ concept PhysicalModel =
       { m.elliptic_rhs(u) } -> std::convertible_to<Real>;
     };
 
+// ---------------------------------------------------------------------------------------------
+// BORNES DE PAS DE TEMPS OPTIONNELLES du contrat modele (audit 2026-06, chantier "step_cfl").
+//
+// Historiquement, step_cfl ne connaissait QUE la borne de transport hyperbolique
+// dt <= cfl * h / max_wave_speed. Or un modele peut imposer d'autres bornes : frequence de source
+// (collision/reaction, mu = eig(dS/dU), unite 1/temps, SANS h), ou directement un pas admissible
+// (formule couplee transport-source non reductible). Ces trois traits OPTIONNELS permettent au
+// modele de les declarer ; un modele qui n'en declare aucun garde STRICTEMENT le comportement
+// historique (fallback max_wave_speed, bit-identique).
+//
+// SEMANTIQUE (toutes les bornes s'appliquent au SOUS-PAS EFFECTIF stride*dt/substeps du bloc,
+// cf. SystemStepper::step_cfl) :
+//  - stability_speed(U, aux, dir) : vitesse de stabilite lambda* [longueur/temps] qui REMPLACE
+//    max_wave_speed dans la reduction CFL du bloc (dt <= cfl * h / max_cellules(lambda*)). Pour
+//    quand la vitesse pertinente pour la STABILITE n'est pas la vitesse d'onde physique (borne
+//    conservative declaree, vitesse modifiee par un couplage...). Les solveurs de Riemann, eux,
+//    continuent de lire max_wave_speed (precision != stabilite).
+//  - source_frequency(U, aux) : frequence locale mu [1/temps] de la source/du couplage local ;
+//    impose dt <= cfl / max_cellules(mu) -- PAS de h (la borne de source est sans dimension
+//    d'espace). Raccourci pour relaxation/collision/reaction explicites.
+//  - stability_dt(U, aux) : pas ADMISSIBLE direct [temps] par cellule ; impose
+//    dt <= min_cellules(stability_dt). Le cfl N'EST PAS applique (le modele declare deja un pas
+//    admissible ; appliquer cfl en plus melangerait deux marges). C'est la forme la plus generale.
+//
+// STABILITE vs PRECISION : ces traits declarent des bornes de STABILITE. Une source traitee en
+// implicite (SourceImplicit/IMEX) peut ne plus imposer de borne de stabilite tout en gardant une
+// contrainte de PRECISION : c'est au modele de choisir ce que stability_dt/source_frequency
+// retournent dans ce cas (ou de ne pas les declarer). Les bornes NON locales (couplage
+// multi-blocs, Schur/Poisson, AMR/scheduler) ne passent PAS par ces traits cellule-par-cellule :
+// elles passent par System::add_dt_bound (borne globale hote, une evaluation par pas).
+//
+// PRODUCTION GPU/MPI : comme flux/source, ces methodes doivent etre ADC_HD (evaluees dans des
+// kernels de reduction) -- une callback Python par cellule n'est pas un chemin de production ;
+// le DSL les compile (m.stability_speed(...) / m.stability_dt(...)).
+// ---------------------------------------------------------------------------------------------
+
+/// Trait OPTIONNEL : vitesse de stabilite lambda* remplacant max_wave_speed dans la CFL du bloc.
+template <class M>
+concept HasStabilitySpeed =
+    requires(const M m, const typename M::State u, const Aux a, int dir) {
+      { m.stability_speed(u, a, dir) } -> std::convertible_to<Real>;
+    };
+
+/// Trait OPTIONNEL : frequence locale de source mu [1/s] (borne dt <= cfl / max mu, sans h).
+template <class M>
+concept HasSourceFrequency = requires(const M m, const typename M::State u, const Aux a) {
+  { m.source_frequency(u, a) } -> std::convertible_to<Real>;
+};
+
+/// Trait OPTIONNEL : pas admissible direct par cellule (borne dt <= min stability_dt, sans cfl).
+template <class M>
+concept HasStabilityDt = requires(const M m, const typename M::State u, const Aux a) {
+  { m.stability_dt(u, a) } -> std::convertible_to<Real>;
+};
+
 /// Extension OPTIONNELLE d'un PhysicalModel : variables primitives + conversions cons<->prim. Permet a
 // l'operateur spatial de reconstruire en variables primitives (rho, u, p) plutot que
 // conservatives (plus robuste pour Euler : positivite de rho et p), et centralise le

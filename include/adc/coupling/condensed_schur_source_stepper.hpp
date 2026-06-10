@@ -262,7 +262,7 @@ class CondensedSchurSourceStepper {
     copy_comp0(op_.phi(), phi);
     negate_into(op_.rhs(), rhs_schur_);
     TensorKrylovSolver kry(op_, precond_, n_precond_);
-    last_result_ = kry.solve(Real(1e-10), 400);
+    last_result_ = kry.solve(krylov_tol_, krylov_max_iters_);
     copy_comp0(phi, op_.phi());  // phi <- phi^{n+theta}
 
     // 3) RECONSTRUIRE v^{n+theta} = B^{-1}(v^n - theta dt grad phi^{n+theta}) ; mom = rho v.
@@ -314,6 +314,16 @@ class CondensedSchurSourceStepper {
   /// Diagnostic du dernier solve (iterations BiCGStab, residu relatif, convergence).
   const KrylovResult& last_solve() const { return last_result_; }
 
+  /// Tolerance / budget d'iterations du solve Krylov de l'etage (BiCGStab). DEFAUTS = constantes
+  /// historiques (1e-10, 400), rendues configurables par l'audit 2026-06 (constantes numeriques
+  /// explicites). @throws std::invalid_argument hors domaine.
+  void set_krylov(Real tol, int max_iters) {
+    if (!(tol > Real(0)) || max_iters < 1)
+      throw std::invalid_argument("CondensedSchurSourceStepper::set_krylov : tol > 0, max_iters >= 1");
+    krylov_tol_ = tol;
+    krylov_max_iters_ = max_iters;
+  }
+
   int density_comp() const { return c_rho_; }
   int momentum_x_comp() const { return c_mx_; }
   int momentum_y_comp() const { return c_my_; }
@@ -364,6 +374,8 @@ class CondensedSchurSourceStepper {
   MultiFab vx_t_, vy_t_;      ///< v^{n+theta} puis v^{n+1} (reconstruction + extrapolation)
   MultiFab phi_n_;            ///< phi^n fige (extrapolation) ; alloue au premier advance_source
   KrylovResult last_result_;  ///< diagnostic du dernier solve
+  Real krylov_tol_ = Real(1e-10);  ///< tolerance du solve (defaut historique, cf. set_krylov)
+  int krylov_max_iters_ = 400;     ///< budget d'iterations (defaut historique, cf. set_krylov)
 };
 
 }  // namespace adc

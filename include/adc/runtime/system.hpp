@@ -60,8 +60,10 @@ class System {
 
   /// Ajoute un bloc d'equation (une espece).
   /// @param model    composition de briques (transport/source/elliptic + parametres)
-  /// @param limiter  reconstruction : "none" | "minmod" | "vanleer"
-  /// @param riemann  flux numerique : "rusanov" | "hllc" (hllc exige un transport a pression)
+  /// @param limiter  reconstruction : "none" | "minmod" | "vanleer" | "weno5"
+  /// @param riemann  flux numerique : "rusanov" (generique minimal) | "hll" (generique, exige
+  ///                 model.wave_speeds) | "hllc" | "roe" (hllc/roe : EULER 2D seulement, 4 variables
+  ///                 + pression gaz parfait)
   /// @param recon    variables reconstruites : "conservative" | "primitive" (Euler : primitif
   ///                 plus robuste, positivite de rho et p)
   /// @param time     "explicit" (SSPRK2) | "imex" (transport explicite, source implicite)
@@ -87,6 +89,17 @@ class System {
   /// @param implicit_roles IMEX seulement : meme masque implicite mais par ROLE physique ("density",
   ///                 "momentum_x", "energy", ...) au lieu du nom (cf. variable_roles). Union avec
   ///                 implicit_vars. Un role absent du bloc leve une erreur EXPLICITE.
+  /// @param newton_max_iters IMEX seulement : budget d'iterations du Newton local de la source
+  ///                 implicite (backward-Euler). Defaut 2 = la constante historique (bit-identique).
+  /// @param newton_rel_tol / newton_abs_tol IMEX seulement : critere d'arret par CELLULE
+  ///                 ||F||_inf <= abs_tol + rel_tol*||F0||_inf, evalue en tete d'iteration.
+  ///                 0/0 (defaut) = desactive -> boucle historique a iterations fixes, bit-identique.
+  /// @param newton_fd_eps IMEX seulement : pas (relatif + plancher) de la jacobienne par differences
+  ///                 finies (defaut 1e-7 = la constante historique).
+  /// @param newton_diagnostics IMEX seulement : active le rapport Newton du bloc (residu max,
+  ///                 iterations max, cellules en echec -- non-fini / pivot degenere / non-convergence),
+  ///                 agrege sur les sous-pas de chaque avance et consultable via newton_report(name).
+  ///                 OPT-IN : false (defaut) = chemin historique sans aucun cout supplementaire.
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
@@ -94,7 +107,22 @@ class System {
                  const std::string& time = "explicit", int substeps = 1,
                  bool evolve = true, int stride = 1,
                  const std::vector<std::string>& implicit_vars = {},
-                 const std::vector<std::string>& implicit_roles = {});
+                 const std::vector<std::string>& implicit_roles = {},
+                 int newton_max_iters = 2, double newton_rel_tol = 0.0,
+                 double newton_abs_tol = 0.0, double newton_fd_eps = 1e-7,
+                 bool newton_diagnostics = false);
+
+  /// Rapport du Newton de la source implicite (IMEX) d'un bloc, AGREGE sur les sous-pas de la
+  /// DERNIERE avance du bloc. N'existe que si le bloc a ete ajoute avec newton_diagnostics=true
+  /// (erreur explicite sinon). Copie a plat (pas de dependance au header numerique).
+  struct SourceNewtonReport {
+    bool enabled;          ///< un rapport a ete calcule (au moins une avance IMEX jouee)
+    bool converged;        ///< aucune cellule en echec sur la derniere avance
+    double max_residual;   ///< max cellules/sous-pas de ||F||_inf a la sortie du Newton
+    double max_iters_used; ///< max cellules/sous-pas des iterations consommees
+    double n_failed;       ///< nb (cellules x sous-pas) en echec (non-fini / pivot / non-convergence)
+  };
+  SourceNewtonReport newton_report(const std::string& name) const;
 
   /// Ajoute un bloc dont le modele est CHARGE A L'EXECUTION depuis une bibliotheque partagee (.so)
   /// generee par le DSL (emit_cpp_brick -> ModelAdapter -> fabrique extern "C"). Le .so doit exposer
@@ -114,7 +142,7 @@ class System {
   /// hote, dispatch virtuel IModel, Rusanov ordre 1), ce bloc tourne le chemin de PRODUCTION : la .so
   /// execute assemble_rhs<Limiter, Flux> (HLLC/Roe au choix, ordre 2) et SSPRK2/IMEX du coeur sur le
   /// modele genere ; seuls des tableaux plats transitent (ABI extern "C", cf. compiled_block_abi.hpp).
-  /// @param limiter "none" | "minmod" | "vanleer"   @param riemann "rusanov" | "hllc" | "roe"
+  /// @param limiter "none" | "minmod" | "vanleer"   @param riemann "rusanov" | "hll" | "hllc" | "roe"
   /// @param recon   "conservative" | "primitive"    @param time "explicit" | "imex"
   void add_compiled_block(const std::string& name, const std::string& so_path,
                           const std::string& limiter = "minmod",
@@ -142,7 +170,7 @@ class System {
   /// /grid_context/ensure_aux_width, exportees ADC_EXPORT), la frontiere n'est PAS une ABI plate :
   /// loader et module DOIVENT partager la meme ABI C++. add_native_block lit la cle d'ABI du loader
   /// (adc_native_abi_key) et la COMPARE a abi_key() ; un ecart leve une erreur EXPLICITE (pas d'UB).
-  /// @param limiter "none" | "minmod" | "vanleer"   @param riemann "rusanov" | "hllc" | "roe"
+  /// @param limiter "none" | "minmod" | "vanleer"   @param riemann "rusanov" | "hll" | "hllc" | "roe"
   /// @param recon   "conservative" | "primitive"    @param time "explicit" | "imex"
   /// @param gamma   indice adiabatique du bloc (set_density / couplages inter-especes)
   /// @param stride  cadence du bloc (1 = chaque pas, defaut ; cf. add_block)
@@ -304,6 +332,30 @@ class System {
   ADC_EXPORT void set_block_conversion(const std::string& name, CellConvert prim_to_cons,
                                        CellConvert cons_to_prim);
 
+  /// Installe les BORNES DE PAS optionnelles d'un bloc (apres install_block) : reduction de la
+  /// frequence de source max (trait HasSourceFrequency, borne dt <= cfl*substeps/(stride*mu)) et du
+  /// pas admissible min (trait HasStabilityDt, borne dt <= dt_adm*substeps/stride, sans cfl).
+  /// Fonctions VIDES = le bloc n'impose pas la borne (politique de pas historique, bit-identique).
+  /// Appelee par add_block et par le gabarit add_compiled_model (cf. dsl_block.hpp) avec les
+  /// fermetures compilees de block_builder (make_source_frequency / make_stability_dt).
+  /// ADC_EXPORT : resolue par le loader natif a travers le dlopen.
+  ADC_EXPORT void set_block_dt_bounds(const std::string& name,
+                                      std::function<Real(const MultiFab&)> source_frequency,
+                                      std::function<Real(const MultiFab&)> stability_dt);
+
+  /// Ajoute une borne GLOBALE de pas de temps, evaluee UNE fois par pas (hote) par step_cfl /
+  /// step_adaptive : dt <= fn() quand fn() > 0 et fini (sinon la borne ne contraint pas ce pas).
+  /// C'est le crochet des contraintes NON locales-cellule : couplage multi-blocs, etage
+  /// Schur/Poisson, AMR/scheduler, ou une politique utilisateur (rampe de demarrage...). @p label
+  /// nomme la borne dans last_dt_bound() ("global:<label>"). Une callback Python est acceptable ICI
+  /// (une evaluation par pas, jamais par cellule).
+  void add_dt_bound(const std::string& label, std::function<double()> fn);
+
+  /// Nom de la borne ACTIVE (celle qui a fixe dt) du dernier step_cfl : "transport:<bloc>",
+  /// "source_frequency:<bloc>", "stability_dt:<bloc>", "global:<label>", "degenerate" (aucun bloc
+  /// evolutif), ou "" si aucun step_cfl n'a tourne. Diagnostic de la politique de pas.
+  std::string last_dt_bound() const;
+
   /// Ajoute un couplage d'IONISATION (operator-split) : taux k n_e n_g ; un neutre devient un ion
   /// et un electron. Masse transferee du neutre vers l'ion (n_i + n_g conserve). Les trois blocs
   /// doivent exister. Premiere brique de source inter-especes (sur la densite, comp 0).
@@ -337,8 +389,11 @@ class System {
   /// @param theta theta-schema in (0,1] (0.5 = Crank-Nicolson, 1 = Euler retrograde).
   /// @param alpha constante de couplage electrostatique du sous-systeme source (d_t(-Lap phi) =
   ///              -alpha div(rho v)).
+  /// @param krylov_tol / krylov_max_iters : tolerance et budget du solve Krylov (BiCGStab) de
+  ///              l'etage. <= 0 (defauts) = constantes historiques du stepper (1e-10 ; 400 en
+  ///              cartesien, 600 en polaire) -- rendues configurables par l'audit 2026-06.
   void set_source_stage(const std::string& name, const std::string& kind, double theta,
-                        double alpha);
+                        double alpha, double krylov_tol = 0.0, int krylov_max_iters = 0);
 
   /// POLITIQUE DE SPLITTING en temps du macro-pas (transport hyperbolique H + etage source S) :
   ///  - "lie"    (defaut) : H(dt) ; S(dt) une fois (Godunov, 1er ordre). BIT-IDENTIQUE a l'historique.

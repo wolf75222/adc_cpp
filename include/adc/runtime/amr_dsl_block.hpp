@@ -446,6 +446,24 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
 /// dispatch_amr_compiled (hllc/roe exigent un transport compressible a 4 variables + pression).
 /// Pendant multi-blocs de dispatch_amr_compiled. @p implicit_components : masque IMEX partiel porte
 /// par le bloc (indices des composantes implicites ; vide = backward-Euler plein), thread a build_amr_block.
+/// REJET explicite des bornes de pas optionnelles (traits HasStabilitySpeed / HasSourceFrequency /
+/// HasStabilityDt) sur les chemins AMR : AmrRuntime::step_cfl est encore transport-only
+/// (max_wave_speed seul) et n'interrogerait pas ces bornes -- un modele qui les declare verrait sa
+/// borne DISPARAITRE EN SILENCE en passant de System a AmrSystem (le run peut exploser). On echoue
+/// donc TOT, a la construction du bloc, avec le remede. Cabler les bornes sur AMR = suivi distinct
+/// (cf. docs/GENERICITY_2026-06.md, points non generalises). Un modele sans trait : aucun effet.
+template <class Model>
+void reject_dt_bound_traits_amr(const char* where) {
+  if constexpr (HasStabilitySpeed<Model> || HasSourceFrequency<Model> || HasStabilityDt<Model>) {
+    throw std::runtime_error(
+        std::string(where) +
+        " : ce modele declare une borne de pas optionnelle (stability_speed / source_frequency / "
+        "stability_dt) qui n'est PAS encore cablee sur AMR (step_cfl AMR = transport seul) ; la "
+        "borne serait ignoree en silence. Utiliser System (mono-niveau), ou retirer la borne du "
+        "modele pour l'AMR.");
+  }
+}
+
 template <class Model>
 AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const std::string& riem,
                                    const SharedAmrLayout& S, const std::string& name,
@@ -453,6 +471,7 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                                    double gamma, int substeps, bool recon_prim, bool imex,
                                    int stride = 1,
                                    const std::vector<int>& implicit_components = {}) {
+  reject_dt_bound_traits_amr<Model>("add_block(AmrSystem, multi-blocs)");
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
@@ -467,6 +486,30 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
                                                        substeps, recon_prim, imex, stride, implicit_components);
     throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+  }
+  if (riem == "hll") {
+    // HLL : 2 ondes signees, generique des que le modele expose wave_speeds (PAS de pression ni
+    // n_vars == 4 exiges) -- MEME garde que System::make_block (alignement de surface System/AMR).
+    if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
+                    mm.wave_speeds(s, a, 0, r, r);
+                  }) {
+      if (lim == "none")
+        return build_amr_block<Model, NoSlope, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                        substeps, recon_prim, imex, stride, implicit_components);
+      if (lim == "minmod")
+        return build_amr_block<Model, Minmod, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                       substeps, recon_prim, imex, stride, implicit_components);
+      if (lim == "vanleer")
+        return build_amr_block<Model, VanLeer, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                        substeps, recon_prim, imex, stride, implicit_components);
+      if (lim == "weno5")
+        return build_amr_block<Model, Weno5, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                      substeps, recon_prim, imex, stride, implicit_components);
+      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+    } else {
+      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hll' exige des vitesses "
+                               "d'onde signees (model.wave_speeds) ; ce transport -> 'rusanov'");
+    }
   }
   if (riem == "hllc") {
     if constexpr (Model::n_vars == 4 &&
@@ -505,7 +548,7 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
     }
   }
   throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux Riemann inconnu '" + riem +
-                           "' (rusanov|hllc|roe)");
+                           "' (rusanov|hll|hllc|roe)");
 }
 
 /// Dispatch du schema spatial (limiteur x flux Riemann) -> build_amr_compiled. Memes gardes que
@@ -513,6 +556,7 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
 template <class Model>
 AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
                                        const std::string& riem, const AmrBuildParams& bp) {
+  reject_dt_bound_traits_amr<Model>("add_compiled_model(AmrSystem)");
   if (riem == "rusanov") {
     if (lim == "none") return build_amr_compiled<Model, NoSlope, RusanovFlux>(m, bp);
     if (lim == "minmod") return build_amr_compiled<Model, Minmod, RusanovFlux>(m, bp);
@@ -523,6 +567,23 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     // ne lit pas hors bornes. Cable sur AMR au MEME titre que none/minmod (rusanov uniquement).
     if (lim == "weno5") return build_amr_compiled<Model, Weno5, RusanovFlux>(m, bp);
     throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+  }
+  if (riem == "hll") {
+    // HLL : generique des que le modele expose wave_speeds (le DSL les emet des qu'une primitive
+    // 'p' est declaree) -- MEME garde que System::make_block (alignement de surface System/AMR).
+    if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
+                    mm.wave_speeds(s, a, 0, r, r);
+                  }) {
+      if (lim == "none") return build_amr_compiled<Model, NoSlope, HLLFlux>(m, bp);
+      if (lim == "minmod") return build_amr_compiled<Model, Minmod, HLLFlux>(m, bp);
+      if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, HLLFlux>(m, bp);
+      if (lim == "weno5") return build_amr_compiled<Model, Weno5, HLLFlux>(m, bp);
+      throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+    } else {
+      throw std::runtime_error("add_compiled_model(AmrSystem) : flux 'hll' exige des vitesses "
+                               "d'onde signees (model.wave_speeds : declarer une primitive 'p') ; "
+                               "ce transport -> 'rusanov'");
+    }
   }
   if (riem == "hllc") {
     if constexpr (Model::n_vars == 4 &&
@@ -549,7 +610,7 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     }
   }
   throw std::runtime_error("add_compiled_model(AmrSystem) : flux Riemann inconnu '" + riem +
-                           "' (rusanov|hllc|roe)");
+                           "' (rusanov|hll|hllc|roe)");
 }
 
 }  // namespace detail

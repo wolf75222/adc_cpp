@@ -562,6 +562,8 @@ class HyperbolicModel:
         self._eig = {}          # "x" / "y" -> liste d'Expr (valeurs propres)
         self._source = None     # liste d'Expr (une par composante) ou None
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
+        self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
+        self._stab_dt = None     # Expr : pas ADMISSIBLE direct dt(U, aux) (None = pas de borne)
         self.prim_state = []    # noms ordonnes de l'etat primitif (layout de Prim) ; pour le codegen
         self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
         self.cons_roles = None  # override explicite des roles conservatifs (sinon mapping canonique)
@@ -598,6 +600,27 @@ class HyperbolicModel:
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
+
+    def stability_speed(self, expr):
+        """Vitesse de STABILITE lambda* (expression des cons / prims / aux) : pilote la CFL du bloc
+        a la place de max(|eigenvalues|). Emise comme ``stability_speed(U, aux, dir)`` (trait C++
+        ``HasStabilitySpeed``) : System::step_cfl l'utilise alors pour la borne de transport
+        dt <= cfl*h/lambda*, tandis que les solveurs de Riemann continuent de lire max_wave_speed
+        (stabilite != precision). SANS appel, le FALLBACK est strictement l'historique :
+        max(abs(eigenvalues)) via max_wave_speed. Compilee comme flux/source (pas de callback Python
+        par cellule : compatible production GPU/MPI). LIMITE : System seulement -- AmrSystem REJETTE
+        explicitement un modele portant cette borne (step_cfl AMR transport-only, non cable)."""
+        self._stab_speed = _wrap(expr)
+
+    def stability_dt(self, expr_dt):
+        """Pas ADMISSIBLE direct dt(U, aux) (expression > 0, en unites de temps) : borne locale du
+        pas, emise comme ``stability_dt(U, aux)`` (trait C++ ``HasStabilityDt``). System::step_cfl
+        impose dt <= min_cellules(stability_dt) * substeps / stride (le cfl n'est PAS applique : le
+        modele declare deja un pas admissible). Forme la plus generale (source raide, couplage local,
+        formule transport+source non reductible). SANS appel, aucune borne supplementaire (politique
+        de pas historique). Compilee comme flux/source (production GPU/MPI). LIMITE : System
+        seulement -- AmrSystem REJETTE explicitement un modele portant cette borne (non cable)."""
+        self._stab_dt = _wrap(expr_dt)
 
     def set_gamma(self, gamma):
         """Indice adiabatique du bloc (EOS compressible). Transporte par le .so genere via le symbole
@@ -671,7 +694,8 @@ class HyperbolicModel:
         known = set(self.cons_names) | set(self.prim_defs) | set(self.aux_names)
         used = set()
         groups = [self._flux.get("x", []), self._flux.get("y", []),
-                  self._eig.get("x", []), self._eig.get("y", []), self._source or []]
+                  self._eig.get("x", []), self._eig.get("y", []), self._source or [],
+                  [e for e in (self._stab_speed, self._stab_dt) if e is not None]]
         for e in self.prim_defs.values():
             used |= e.deps()
         for grp in groups:
@@ -683,6 +707,116 @@ class HyperbolicModel:
         if missing:
             raise ValueError("modele '%s' : variables non definies %s" % (self.name, sorted(missing)))
         return True
+
+    def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
+                    raise_on_error=True):
+        """Verification NUMERIQUE generique du modele symbolique (audit 2026-06, chantier 6) :
+        evalue les formules sur des etats echantillons et controle, quand la piece existe :
+
+        - flux fini (les deux directions) ;
+        - source finie ;
+        - elliptic_rhs fini ;
+        - valeurs propres finies et reelles ; max_wave_speed fini et >= 0 ;
+        - coherence wave_speeds <-> max_wave_speed : max(|lambda_min|, |lambda_max|) <= mws ;
+        - round-trip to_conservative(to_primitive(U)) ~= U (si prim_state + cons_from declares) ;
+        - positivite des composantes a role Density (et de la primitive 'p' si declaree) sur les
+          echantillons (qui sont generes positifs pour ces roles).
+
+        @p samples : tableau (n_vars, N) d'etats conservatifs a tester ; None -> N = n_samples etats
+        aleatoires (seed fixe, reproductible) : composantes a role Density dans [0.1, 2], les autres
+        dans [-1, 1] ; une composante a role Energy recoit 1 + |cinetique| pour rester physique.
+        @p aux : dict nom -> valeur(s) des champs auxiliaires (defaut : zeros).
+        @return dict {"ok": bool, "failures": [str], "n_samples": N}. raise_on_error=True (defaut)
+        leve ValueError listant les echecs. PRE-COMPILATION : verifie les FORMULES (le .so compile
+        emet exactement ces formules) ; le pendant RUNTIME sur un bloc installe est
+        System.check_model(block)."""
+        self.check()  # dependances declarees (leve si une variable n'existe pas)
+        rng = np.random.default_rng(seed)
+        nv = self.n_vars
+        roles = roles_for(self.cons_names, self.cons_roles)
+        if samples is None:
+            U = rng.uniform(-1.0, 1.0, size=(nv, int(n_samples)))
+            kinetic = np.zeros(int(n_samples))
+            for i, r in enumerate(roles):
+                if r == "Density":
+                    U[i] = rng.uniform(0.1, 2.0, size=int(n_samples))
+            for i, r in enumerate(roles):
+                if r in ("MomentumX", "MomentumY"):
+                    kinetic += U[i] ** 2
+            for i, r in enumerate(roles):
+                if r == "Energy":
+                    U[i] = 1.0 + kinetic  # au-dessus du cinetique : pression > 0 pour un gaz parfait
+        else:
+            U = np.asarray(samples, dtype=float)
+            if U.ndim != 2 or U.shape[0] != nv:
+                raise ValueError("check_model : samples doit etre (n_vars=%d, N)" % nv)
+        a = {n: np.zeros(U.shape[1]) for n in self.aux_names}
+        if aux:
+            for k, v in aux.items():
+                a[k] = np.broadcast_to(np.asarray(v, dtype=float), (U.shape[1],)).copy()
+        failures = []
+
+        def finite(x):
+            return bool(np.all(np.isfinite(np.asarray(x, dtype=float))))
+
+        for d, dn in ((0, "x"), (1, "y")):
+            if not finite(self.flux(U, a, d)):
+                failures.append("flux %s non fini sur les echantillons" % dn)
+        if self._source is not None and not finite(self.source_value(U, a)):
+            failures.append("source non finie sur les echantillons")
+        if self._elliptic is not None:
+            env = self._env(U, a)
+            if not finite(self._elliptic.eval(env)):
+                failures.append("elliptic_rhs non fini sur les echantillons")
+        env = self._env(U, a)
+        for d in ("x", "y"):
+            for k, e in enumerate(self._eig.get(d, [])):
+                lam = np.asarray(e.eval(env), dtype=float)
+                if np.iscomplexobj(lam):
+                    failures.append("valeur propre %s[%d] complexe (systeme non hyperbolique ?)" % (d, k))
+                elif not finite(lam):
+                    failures.append("valeur propre %s[%d] non finie" % (d, k))
+        for d, dn in ((0, "x"), (1, "y")):
+            mws = self.max_wave_speed(U, a, d)
+            if not np.isfinite(mws) or mws < 0:
+                failures.append("max_wave_speed %s non fini ou negatif (%r)" % (dn, mws))
+            else:
+                # coherence wave_speeds <-> max_wave_speed (memes valeurs propres au codegen) :
+                # les extremes signes doivent etre couverts par la borne de Rusanov.
+                eigs = [np.asarray(e.eval(env), dtype=float) for e in self._eig["x" if d == 0 else "y"]]
+                ext = max(float(np.max(np.abs(np.asarray(l)))) for l in eigs)
+                if ext > mws * (1.0 + rtol) + atol:
+                    failures.append("wave_speeds %s incoherentes avec max_wave_speed (%g > %g)"
+                                    % (dn, ext, mws))
+        # round-trip cons -> prim -> cons (quand les deux sens sont declares)
+        if self.prim_state and self.cons_from is not None:
+            penv = {nm: np.broadcast_to(np.asarray(env[nm], dtype=float), (U.shape[1],))
+                    for nm in self.prim_state}
+            U2 = np.stack([np.broadcast_to(np.asarray(e.eval(penv), dtype=float), (U.shape[1],))
+                           for e in self.cons_from], axis=0)
+            if not finite(U2):
+                failures.append("to_conservative(to_primitive(U)) non fini")
+            elif not np.allclose(U2, U, rtol=rtol, atol=atol):
+                err = float(np.max(np.abs(U2 - U)))
+                failures.append("round-trip to_conservative(to_primitive(U)) != U (ecart max %g : "
+                                "conversions incoherentes)" % err)
+        # positivite : roles Density (conservatif) et primitive 'p' (pression) si declares
+        for i, r in enumerate(roles):
+            if r == "Density" and not bool(np.all(U[i] > 0)):
+                failures.append("composante '%s' (role Density) non strictement positive sur les "
+                                "echantillons" % self.cons_names[i])
+        if "p" in self.prim_defs:
+            p = np.asarray(env["p"], dtype=float)
+            if not finite(p):
+                failures.append("primitive 'p' (pression) non finie")
+            elif not bool(np.all(p > 0)):
+                failures.append("primitive 'p' (pression) non strictement positive sur des etats "
+                                "physiques (EOS suspecte)")
+        report = {"ok": not failures, "failures": failures, "n_samples": int(U.shape[1])}
+        if failures and raise_on_error:
+            raise ValueError("check_model('%s') : %d echec(s) :\n  - %s"
+                             % (self.name, len(failures), "\n  - ".join(failures)))
+        return report
 
     # --- parametres RUNTIME (P7-b) : collecte + attribution d'indices + membre genere -------------
     def _all_exprs(self):
@@ -926,6 +1060,25 @@ class HyperbolicModel:
             S.append("    } else {")
             S += eig_minmax(wcpps[nx:], "      ")
             S += ["    }", "  }", ""]
+
+        # Bornes de pas OPTIONNELLES (m.stability_speed / m.stability_dt) : emises comme les traits
+        # C++ HasStabilitySpeed / HasStabilityDt (cf. adc/core/physical_model.hpp). Une seule
+        # expression (isotrope) : dir est ignore. SANS appel, rien n'est emis -> fallback strict
+        # max_wave_speed (politique de pas historique).
+        if self._stab_speed is not None:
+            S.append("  ADC_HD adc::Real stability_speed(const State& U, %s, int dir) const {"
+                     % aux_param)
+            S.append("    (void)dir;  // borne isotrope : une seule expression pour les deux directions")
+            S += cons_locals() + prim_locals() + aux_locals()
+            stl, scpps = self._codegen_exprs([self._stab_speed], cse)
+            S += stl
+            S += ["    return %s;" % scpps[0], "  }", ""]
+        if self._stab_dt is not None:
+            S.append("  ADC_HD adc::Real stability_dt(const State& U, %s) const {" % aux_param)
+            S += cons_locals() + prim_locals() + aux_locals()
+            dtl, dcpps = self._codegen_exprs([self._stab_dt], cse)
+            S += dtl
+            S += ["    return %s;" % dcpps[0], "  }", ""]
 
         S.append("  ADC_HD Prim to_primitive(const State& U) const {")
         S += cons_locals() + prim_locals()
@@ -1342,6 +1495,8 @@ class HyperbolicModel:
         parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
         parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
         parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
+        parts.append("stab_speed=%s" % (repr(m._stab_speed) if m._stab_speed is not None else ""))
+        parts.append("stab_dt=%s" % (repr(m._stab_dt) if m._stab_dt is not None else ""))
         parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
         parts.append("gamma=%r" % m.gamma)
         # Les params entrent dans le hash par (nom, valeur de DECLARATION, kind). La valeur d'un param
@@ -1745,6 +1900,18 @@ class Model:
         """Valeurs propres (vitesses caracteristiques) par direction (delegue a set_eigenvalues)."""
         self._m.set_eigenvalues(x, y)
 
+    def stability_speed(self, expr):
+        """Vitesse de STABILITE lambda* pilotant la CFL du bloc (OPTIONNEL ; delegue a
+        HyperbolicModel.stability_speed). Fallback sans appel : max(abs(eigenvalues)), strictement
+        l'historique. Compilee comme flux/source (production GPU/MPI, pas de callback par cellule)."""
+        self._m.stability_speed(expr)
+
+    def stability_dt(self, expr_dt):
+        """Pas ADMISSIBLE direct dt(U, aux) borne locale du pas (OPTIONNEL ; delegue a
+        HyperbolicModel.stability_dt). Le cfl n'est pas applique a cette borne. Fallback sans appel :
+        aucune borne supplementaire (politique de pas historique)."""
+        self._m.stability_dt(expr_dt)
+
     def source(self, s):
         """Terme source S(U, aux), une expression par composante (optionnel ; delegue a set_source)."""
         self._m.set_source(s)
@@ -1777,6 +1944,15 @@ class Model:
     def check(self):
         """Verifie les dependances (variables referencees declarees). Leve ValueError sinon."""
         return self._m.check()
+
+    def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
+                    raise_on_error=True):
+        """Verification NUMERIQUE generique du modele (flux/source/elliptic finis, valeurs propres
+        reelles et finies, coherence wave_speeds/max_wave_speed, round-trip cons<->prim, positivite
+        Density/'p') sur des etats echantillons. Delegue a HyperbolicModel.check_model (cf. sa doc).
+        A appeler AVANT compile() ; le pendant runtime d'un bloc installe est System.check_model."""
+        return self._m.check_model(samples=samples, n_samples=n_samples, seed=seed, aux=aux,
+                                   rtol=rtol, atol=atol, raise_on_error=raise_on_error)
 
     # --- introspection (lecture seule, deleguee au modele backing) ---
     @property

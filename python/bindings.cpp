@@ -6,6 +6,7 @@
 // Explicit, IMEX, System) est ajoute par le paquet Python adc/__init__.py.
 // Construit seulement avec -DADC_BUILD_PYTHON=ON.
 
+#include <pybind11/functional.h>  // std::function<double()> <- callable Python (add_dt_bound)
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -119,7 +120,26 @@ PYBIND11_MODULE(_adc, m) {
            // NOM (implicit_vars) ou par ROLE physique (implicit_roles). Vides (defaut) -> defaut modele,
            // bit-identique. Resolus cote C++ contre les noms/roles du bloc (erreur sur un nom/role absent).
            py::arg("implicit_vars") = std::vector<std::string>{},
-           py::arg("implicit_roles") = std::vector<std::string>{})
+           py::arg("implicit_roles") = std::vector<std::string>{},
+           // Options du Newton de la source implicite IMEX (defauts = constantes historiques 2 / 1e-7,
+           // bit-identique). newton_diagnostics=True active le rapport (newton_report(name)).
+           py::arg("newton_max_iters") = 2, py::arg("newton_rel_tol") = 0.0,
+           py::arg("newton_abs_tol") = 0.0, py::arg("newton_fd_eps") = 1e-7,
+           py::arg("newton_diagnostics") = false)
+      // Rapport Newton (diagnostics IMEX OPT-IN) : dict {enabled, converged, max_residual,
+      // max_iters_used, n_failed}, agrege sur les sous-pas de la DERNIERE avance du bloc.
+      .def("newton_report",
+           [](const System& s, const std::string& name) {
+             const System::SourceNewtonReport r = s.newton_report(name);
+             py::dict d;
+             d["enabled"] = r.enabled;
+             d["converged"] = r.converged;
+             d["max_residual"] = r.max_residual;
+             d["max_iters_used"] = r.max_iters_used;
+             d["n_failed"] = r.n_failed;
+             return d;
+           },
+           py::arg("name"))
       // Bloc dont le modele est charge a l'execution depuis un .so genere par le DSL (chemin hote).
       .def("add_dynamic_block", &System::add_dynamic_block, py::arg("name"), py::arg("so_path"),
            py::arg("substeps") = 1, py::arg("names") = std::vector<std::string>{},
@@ -147,10 +167,21 @@ PYBIND11_MODULE(_adc, m) {
       // la source explicite / IMEX du bloc par l'etage condense C++ (CondensedSchurSourceStepper, #126)
       // apres le transport hyperbolique. kind='electrostatic_lorentz'. Defaut (sans appel) inchange.
       .def("set_source_stage", &System::set_source_stage, py::arg("name"), py::arg("kind"),
-           py::arg("theta"), py::arg("alpha"))
+           py::arg("theta"), py::arg("alpha"),
+           // Tolerance / budget du solve Krylov de l'etage (audit 2026-06) : <= 0 = defauts
+           // historiques du stepper (1e-10 ; 400 cartesien / 600 polaire).
+           py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0)
       // Politique de splitting en temps : "lie" (defaut, bit-identique) ou "strang" (H(dt/2) S(dt)
       // H(dt/2), 2e ordre). Cf. System::set_time_scheme / SystemStepper::step_strang.
       .def("set_time_scheme", &System::set_time_scheme, py::arg("scheme"))
+      // Borne GLOBALE de pas de temps (audit step_cfl) : fn() evaluee UNE fois par pas (hote) par
+      // step_cfl / step_adaptive ; dt <= fn() quand fn() > 0 et fini. Crochet des contraintes non
+      // locales-cellule (couplage, Schur/Poisson, scheduler, rampe utilisateur). Une callback
+      // Python est acceptable ici (jamais par cellule).
+      .def("add_dt_bound", &System::add_dt_bound, py::arg("label"), py::arg("fn"))
+      // Borne ACTIVE du dernier step_cfl : "transport:<bloc>" | "source_frequency:<bloc>" |
+      // "stability_dt:<bloc>" | "global:<label>" | "degenerate" | "" (aucun pas CFL encore).
+      .def("last_dt_bound", &System::last_dt_bound)
       // Politique de la loi de Gauss (R0, repro Hoffart) : "restart" (defaut, re-resout Poisson chaque
       // pas, bit-identique) ou "evolve" (apres phi^0, plus de re-solve ; l'etage Schur fait evoluer phi
       // sans restart, comme le papier). Cf. System::set_gauss_policy.
