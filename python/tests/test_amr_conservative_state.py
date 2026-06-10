@@ -2,12 +2,13 @@
 rho_v) au lieu de la densite seule (qty de mouvement = 0). C'est le Probleme 2 de la reproduction
 Hoffart (arXiv:2510.11808) cote AMR : la vitesse de derive v0 du papier doit etre posee a l'init.
 
-Le chemin C++ (build_amr_compiled, seed du grossier) ecrit l'etat complet via coupler_write_coarse_state
-puis le prolonge aux niveaux fins (injection constante de TOUTES les composantes). MONO-BLOC.
+Le chemin C++ (build_amr_compiled / build_amr_block, seed du grossier) ecrit l'etat complet via
+coupler_write_coarse_state puis le prolonge aux niveaux fins (injection constante de TOUTES les
+composantes). Mono-bloc ET multi-blocs natif (vague 3) ; loaders .so multi-blocs = rejet explicite.
 
 On verifie :
  (G) GARDES (sans compilateur) : ndim != 3 rejete au binding ; etat vide rejete ; taille non multiple
-     de n*n rejetee ; set_conservative_state sur un systeme MULTI-BLOCS leve au build (mono-bloc only).
+     de n*n rejetee ; multi-blocs natif ACCEPTE au build et tourne fini (cable vague 3).
  (A) NO-DEFAULT-CHANGE : set_conservative_state([rho, 0, 0]) == set_density([rho]) a la cellule pres
      (modele isotherme 3-var, AUCUNE energie -> pas de bruit gamma -> BIT-IDENTIQUE, dmax == 0).
  (D) CONSERVATION : depuis un etat porteur de qty de mouvement, la masse est conservee sur N pas.
@@ -94,14 +95,17 @@ s.set_density("gas", rho); s.step(1e-4)  # force le build
 chk(raises(lambda: s.set_conservative_state("gas", np.stack([rho, 0 * rho, 0 * rho, rho]))),
     "(G) set_conservative_state apres build rejete")
 
-# MULTI-BLOCS : set_conservative_state sur l'un des blocs -> leve au build (mono-bloc only).
+# MULTI-BLOCS natif : CABLE depuis la vague 3 (l'etat complet seede le grossier via
+# coupler_write_coarse_state) -- le build N'EST PLUS un rejet ; le pas tourne fini.
+# (test_v3_features (C) prouve en plus que la qty de mouvement seedee advecte.)
 s = _amr(n)
 s.add_block("a", _euler_spec(), time=adc.Explicit())
 s.add_block("b", _euler_spec(), time=adc.Explicit())
 s.set_conservative_state("a", np.stack([rho, 0 * rho, 0 * rho, rho / (GAMMA - 1.0)]))
 s.set_density("b", rho)
-chk(raises(lambda: s.step(1e-4)),
-    "(G) set_conservative_state + multi-blocs -> rejet au build (mono-bloc only)")
+s.step(1e-4)
+chk(np.all(np.isfinite(np.asarray(s.density("a")))),
+    "(G) set_conservative_state + multi-blocs natif -> accepte au build, pas fini (vague 3)")
 
 # --- (A)/(D)/(E) : necessitent un compilateur (modele isotherme 3-var compile production) -----------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")

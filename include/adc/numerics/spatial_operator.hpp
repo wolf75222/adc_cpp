@@ -210,6 +210,103 @@ inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
   return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
 }
 
+// ============================================================================
+// REDUCTIONS DES BORNES DE PAS OPTIONNELLES (audit 2026-06, chantier step_cfl).
+// Pendants de max_wave_speed_mf pour les traits HasStabilitySpeed / HasSourceFrequency /
+// HasStabilityDt (cf. core/physical_model.hpp). Memes conventions : reduction par le seam
+// (device sous Kokkos), all_reduce MPI (sans quoi chaque rang choisirait un dt different).
+// Instanciees UNIQUEMENT pour un modele declarant le trait (if constexpr cote block_builder) :
+// zero codegen, zero cout pour un modele historique.
+// ============================================================================
+
+namespace detail {
+/// StabilitySpeedKernel : max cellules/directions de model.stability_speed (remplace
+/// MaxWaveSpeedKernel quand le trait est declare). Foncteur nomme (device-clean cross-TU).
+template <class Model>
+struct StabilitySpeedKernel {
+  Model model;
+  ConstArray4 u, a;
+  ADC_HD void operator()(int i, int j, Real& acc) const {
+    const auto s = load_state<Model>(u, i, j);
+    const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
+    const Real wx = model.stability_speed(s, ax, 0);
+    const Real wy = model.stability_speed(s, ax, 1);
+    const Real w = wx > wy ? wx : wy;
+    if (w > acc) acc = w;
+  }
+};
+
+/// SourceFrequencyKernel : max cellules de model.source_frequency (mu >= 0, 1/s).
+template <class Model>
+struct SourceFrequencyKernel {
+  Model model;
+  ConstArray4 u, a;
+  ADC_HD void operator()(int i, int j, Real& acc) const {
+    const auto s = load_state<Model>(u, i, j);
+    const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
+    const Real mu = model.source_frequency(s, ax);
+    if (mu > acc) acc = mu;
+  }
+};
+
+/// InvStabilityDtKernel : max cellules de 1/model.stability_dt. On reduit l'INVERSE (une
+/// frequence) parce que le seam ne fournit qu'une reduction MAX initialisee a 0 (reduce_max_cell) :
+/// min(dt) == 1/max(1/dt) pour des dt > 0. Un stability_dt <= 0 ou non fini est ignore (ne
+/// contraint pas) -- le modele signale "pas de borne ici" en retournant +inf.
+template <class Model>
+struct InvStabilityDtKernel {
+  Model model;
+  ConstArray4 u, a;
+  ADC_HD void operator()(int i, int j, Real& acc) const {
+    const auto s = load_state<Model>(u, i, j);
+    const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
+    const Real db = model.stability_dt(s, ax);
+    if (db > Real(0)) {
+      const Real inv = Real(1) / db;
+      if (inv > acc) acc = inv;
+    }
+  }
+};
+}  // namespace detail
+
+/// Max global de la vitesse de STABILITE (trait HasStabilitySpeed) -- pendant de max_wave_speed_mf.
+template <class Model>
+inline Real max_stability_speed_mf(const Model& model, const MultiFab& U, const MultiFab& aux) {
+  Real m = 0;
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 a = aux.fab(li).const_array();
+    m = std::max(m, reduce_max_cell(U.box(li), detail::StabilitySpeedKernel<Model>{model, u, a}));
+  }
+  return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
+}
+
+/// Max global de la frequence de source (trait HasSourceFrequency). 0 si la source ne contraint pas.
+template <class Model>
+inline Real max_source_frequency_mf(const Model& model, const MultiFab& U, const MultiFab& aux) {
+  Real m = 0;
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 a = aux.fab(li).const_array();
+    m = std::max(m, reduce_max_cell(U.box(li), detail::SourceFrequencyKernel<Model>{model, u, a}));
+  }
+  return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
+}
+
+/// Min global du pas admissible declare (trait HasStabilityDt), via max(1/dt) (cf.
+/// InvStabilityDtKernel). @return 0 si AUCUNE cellule ne contraint (le bloc n'impose pas de borne).
+template <class Model>
+inline Real min_stability_dt_mf(const Model& model, const MultiFab& U, const MultiFab& aux) {
+  Real inv = 0;
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 a = aux.fab(li).const_array();
+    inv = std::max(inv, reduce_max_cell(U.box(li), detail::InvStabilityDtKernel<Model>{model, u, a}));
+  }
+  inv = static_cast<Real>(all_reduce_max(static_cast<double>(inv)));
+  return inv > Real(0) ? Real(1) / inv : Real(0);
+}
+
 /// rusanov_flux : compat libre, delegue a RusanovFlux{} (politique de numerical_flux.hpp).
 ///
 /// Conserve pour les references serie (demos GPU, tests unitaires) qui apellent rusanov_flux

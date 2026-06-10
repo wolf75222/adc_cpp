@@ -173,12 +173,22 @@ def _adc_module():
 
 def loader_cxx_compiler():
     """Chemin du compilateur qui a CONSTRUIT le module _adc (bake par CMake en __cxx_compiler__),
-    ou None s'il est inconnu (vieux module, build manuel) ou absent de cette machine."""
+    ou None s'il est inconnu (vieux module, build manuel) ou absent de cette machine.
+
+    macOS : CMake bake souvent le c++ INTERNE de la toolchain Xcode / CommandLineTools
+    (.../XcodeDefault.xctoolchain/usr/bin/c++), qui invoque clang SANS sysroot SDK -> tout .so
+    DSL echoue sur \"'string' file not found\". Le shim /usr/bin/c++ (xcrun) execute LE MEME
+    clang en resolvant le SDK : meme __VERSION__, donc meme cle d'ABI -- on prefere donc le shim
+    (piege et remede identiques a compile_loader des tests C++ natifs)."""
+    import sys
     mod = _adc_module()
     cc = getattr(mod, "__cxx_compiler__", "") if mod is not None else ""
-    if cc and os.path.isfile(cc) and os.access(cc, os.X_OK):
-        return cc
-    return None
+    if not (cc and os.path.isfile(cc) and os.access(cc, os.X_OK)):
+        return None
+    if sys.platform == "darwin" and (".xctoolchain/" in cc or "/CommandLineTools/" in cc) \
+            and os.path.isfile("/usr/bin/c++"):
+        return "/usr/bin/c++"
+    return cc
 
 
 def module_header_signature():
@@ -809,6 +819,11 @@ class HyperbolicModel:
         self._eig = {}          # "x" / "y" -> liste d'Expr (valeurs propres)
         self._source = None     # liste d'Expr (une par composante) ou None
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
+        self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
+        self._stab_dt = None     # Expr : pas ADMISSIBLE direct dt(U, aux) (None = pas de borne)
+        self._src_freq = None    # Expr : frequence mu(U, aux) de la SOURCE (None = pas de borne)
+        self._src_jac = None     # [[Expr]] n x n : Jacobien ANALYTIQUE dS/dU (None = diff. finies)
+        self._hllc = False       # True : emettre la capability HLLC (contact_speed + star state)
         self.prim_state = []    # noms ordonnes de l'etat primitif (layout de Prim) ; pour le codegen
         self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
         self.cons_roles = None  # override explicite des roles conservatifs (sinon mapping canonique)
@@ -845,6 +860,57 @@ class HyperbolicModel:
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
+
+    def stability_speed(self, expr):
+        """Vitesse de STABILITE lambda* (expression des cons / prims / aux) : pilote la CFL du bloc
+        a la place de max(|eigenvalues|). Emise comme ``stability_speed(U, aux, dir)`` (trait C++
+        ``HasStabilitySpeed``) : System::step_cfl l'utilise alors pour la borne de transport
+        dt <= cfl*h/lambda*, tandis que les solveurs de Riemann continuent de lire max_wave_speed
+        (stabilite != precision). SANS appel, le FALLBACK est strictement l'historique :
+        max(abs(eigenvalues)) via max_wave_speed. Compilee comme flux/source (pas de callback Python
+        par cellule : compatible production GPU/MPI). Cablee sur System ET AmrSystem (mono et
+        multi-blocs ; cote AMR la reduction est evaluee sur le niveau GROSSIER, la ou vit la CFL)."""
+        self._stab_speed = _wrap(expr)
+
+    def stability_dt(self, expr_dt):
+        """Pas ADMISSIBLE direct dt(U, aux) (expression > 0, en unites de temps) : borne locale du
+        pas, emise comme ``stability_dt(U, aux)`` (trait C++ ``HasStabilityDt``). System::step_cfl
+        impose dt <= min_cellules(stability_dt) * substeps / stride (le cfl n'est PAS applique : le
+        modele declare deja un pas admissible). Forme la plus generale (source raide, couplage local,
+        formule transport+source non reductible). SANS appel, aucune borne supplementaire (politique
+        de pas historique). Compilee comme flux/source (production GPU/MPI). Cablee sur System ET
+        AmrSystem (mono et multi-blocs ; cote AMR evaluee sur le niveau GROSSIER)."""
+        self._stab_dt = _wrap(expr_dt)
+
+    def source_frequency(self, expr_mu):
+        """FREQUENCE locale mu(U, aux) [1/temps] de la SOURCE (relaxation, collision, reaction) :
+        la 'deuxieme CFL' du meeting -- borne dt <= cfl * substeps / (stride * max_cellules(mu)),
+        SANS pas d'espace (une source borne en 1/temps). Emise comme ``frequency(U, aux)`` sur la
+        BRIQUE DE SOURCE generee (contrat C++ des briques source, cf. physics/source.hpp) ;
+        CompositeModel la forwarde (trait HasSourceFrequency) et System/AmrSystem::step_cfl
+        l'agregent. EXIGE set_source/m.source (la frequence est une propriete de la source).
+        SANS appel, la source ne contraint pas le pas (historique). Compilee (production GPU/MPI)."""
+        self._src_freq = _wrap(expr_mu)
+
+    def source_jacobian(self, rows):
+        """JACOBIEN ANALYTIQUE de la source : dS/dU, matrice n_vars x n_vars d'expressions
+        (rows[r][c] = dS_r/dU_c, en fonction des cons / prims / aux). Emis comme
+        ``jacobian(U, aux, J)`` sur la brique de SOURCE generee, forwarde par CompositeModel
+        (trait C++ ``HasSourceJacobian``) : le Newton de la source implicite (IMEX /
+        SourceImplicitBE) l'utilise A LA PLACE des differences finies -- exactitude (plus de bruit
+        fd_eps) et evaluations de source economisees. EXIGE m.source. SANS appel : differences
+        finies historiques, bit-identique."""
+        self._src_jac = [[_wrap(e) for e in row] for row in rows]
+
+    def enable_hllc(self):
+        """Emet la CAPABILITY HLLC (audit vague 3) : ``contact_speed`` (Toro) + ``hllc_star_state``
+        GENERES depuis les ROLES du bloc (Density / MomentumX / MomentumY, Energy optionnel) et la
+        primitive 'p' -- le solveur HLLC contact-resolving du coeur (trait C++ HasHLLCStructure)
+        devient alors disponible pour CE modele, MEME hors Euler 4 variables (isotherme 3-var,
+        moments avec scalaires passifs : toute composante sans role particulier est advectee
+        passivement dans l'etat etoile, Us[c] = fac*U[c]/rho). EXIGE : roles Density/MomentumX/
+        MomentumY declares + primitive 'p' (erreur explicite a l'emission sinon)."""
+        self._hllc = True
 
     def set_gamma(self, gamma):
         """Indice adiabatique du bloc (EOS compressible). Transporte par le .so genere via le symbole
@@ -918,7 +984,10 @@ class HyperbolicModel:
         known = set(self.cons_names) | set(self.prim_defs) | set(self.aux_names)
         used = set()
         groups = [self._flux.get("x", []), self._flux.get("y", []),
-                  self._eig.get("x", []), self._eig.get("y", []), self._source or []]
+                  self._eig.get("x", []), self._eig.get("y", []), self._source or [],
+                  [e for e in (self._stab_speed, self._stab_dt, self._src_freq)
+                   if e is not None],
+                  [e for row in (self._src_jac or []) for e in row]]
         for e in self.prim_defs.values():
             used |= e.deps()
         for grp in groups:
@@ -929,7 +998,127 @@ class HyperbolicModel:
         missing = used - known
         if missing:
             raise ValueError("modele '%s' : variables non definies %s" % (self.name, sorted(missing)))
+        # source_frequency est une propriete de la SOURCE (emise sur la brique source generee) :
+        # la declarer sans source serait perdue EN SILENCE -> erreur explicite.
+        if self._src_freq is not None and self._source is None:
+            raise ValueError("modele '%s' : source_frequency(...) declare sans source "
+                             "(appeler m.source([...]) -- la frequence est emise sur la brique de "
+                             "source generee)" % self.name)
+        if self._src_jac is not None and self._source is None:
+            raise ValueError("modele '%s' : source_jacobian(...) declare sans source "
+                             "(appeler m.source([...]) -- le Jacobien est emis sur la brique de "
+                             "source generee)" % self.name)
         return True
+
+    def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
+                    raise_on_error=True):
+        """Verification NUMERIQUE generique du modele symbolique (audit 2026-06, chantier 6) :
+        evalue les formules sur des etats echantillons et controle, quand la piece existe :
+
+        - flux fini (les deux directions) ;
+        - source finie ;
+        - elliptic_rhs fini ;
+        - valeurs propres finies et reelles ; max_wave_speed fini et >= 0 ;
+        - coherence wave_speeds <-> max_wave_speed : max(|lambda_min|, |lambda_max|) <= mws ;
+        - round-trip to_conservative(to_primitive(U)) ~= U (si prim_state + cons_from declares) ;
+        - positivite des composantes a role Density (et de la primitive 'p' si declaree) sur les
+          echantillons (qui sont generes positifs pour ces roles).
+
+        @p samples : tableau (n_vars, N) d'etats conservatifs a tester ; None -> N = n_samples etats
+        aleatoires (seed fixe, reproductible) : composantes a role Density dans [0.1, 2], les autres
+        dans [-1, 1] ; une composante a role Energy recoit 1 + |cinetique| pour rester physique.
+        @p aux : dict nom -> valeur(s) des champs auxiliaires (defaut : zeros).
+        @return dict {"ok": bool, "failures": [str], "n_samples": N}. raise_on_error=True (defaut)
+        leve ValueError listant les echecs. PRE-COMPILATION : verifie les FORMULES (le .so compile
+        emet exactement ces formules) ; le pendant RUNTIME sur un bloc installe est
+        System.check_model(block)."""
+        self.check()  # dependances declarees (leve si une variable n'existe pas)
+        rng = np.random.default_rng(seed)
+        nv = self.n_vars
+        roles = roles_for(self.cons_names, self.cons_roles)
+        if samples is None:
+            U = rng.uniform(-1.0, 1.0, size=(nv, int(n_samples)))
+            kinetic = np.zeros(int(n_samples))
+            for i, r in enumerate(roles):
+                if r == "Density":
+                    U[i] = rng.uniform(0.1, 2.0, size=int(n_samples))
+            for i, r in enumerate(roles):
+                if r in ("MomentumX", "MomentumY"):
+                    kinetic += U[i] ** 2
+            for i, r in enumerate(roles):
+                if r == "Energy":
+                    U[i] = 1.0 + kinetic  # au-dessus du cinetique : pression > 0 pour un gaz parfait
+        else:
+            U = np.asarray(samples, dtype=float)
+            if U.ndim != 2 or U.shape[0] != nv:
+                raise ValueError("check_model : samples doit etre (n_vars=%d, N)" % nv)
+        a = {n: np.zeros(U.shape[1]) for n in self.aux_names}
+        if aux:
+            for k, v in aux.items():
+                a[k] = np.broadcast_to(np.asarray(v, dtype=float), (U.shape[1],)).copy()
+        failures = []
+
+        def finite(x):
+            return bool(np.all(np.isfinite(np.asarray(x, dtype=float))))
+
+        for d, dn in ((0, "x"), (1, "y")):
+            if not finite(self.flux(U, a, d)):
+                failures.append("flux %s non fini sur les echantillons" % dn)
+        if self._source is not None and not finite(self.source_value(U, a)):
+            failures.append("source non finie sur les echantillons")
+        if self._elliptic is not None:
+            env = self._env(U, a)
+            if not finite(self._elliptic.eval(env)):
+                failures.append("elliptic_rhs non fini sur les echantillons")
+        env = self._env(U, a)
+        for d in ("x", "y"):
+            for k, e in enumerate(self._eig.get(d, [])):
+                lam = np.asarray(e.eval(env), dtype=float)
+                if np.iscomplexobj(lam):
+                    failures.append("valeur propre %s[%d] complexe (systeme non hyperbolique ?)" % (d, k))
+                elif not finite(lam):
+                    failures.append("valeur propre %s[%d] non finie" % (d, k))
+        for d, dn in ((0, "x"), (1, "y")):
+            mws = self.max_wave_speed(U, a, d)
+            if not np.isfinite(mws) or mws < 0:
+                failures.append("max_wave_speed %s non fini ou negatif (%r)" % (dn, mws))
+            else:
+                # coherence wave_speeds <-> max_wave_speed (memes valeurs propres au codegen) :
+                # les extremes signes doivent etre couverts par la borne de Rusanov.
+                eigs = [np.asarray(e.eval(env), dtype=float) for e in self._eig["x" if d == 0 else "y"]]
+                ext = max(float(np.max(np.abs(np.asarray(l)))) for l in eigs)
+                if ext > mws * (1.0 + rtol) + atol:
+                    failures.append("wave_speeds %s incoherentes avec max_wave_speed (%g > %g)"
+                                    % (dn, ext, mws))
+        # round-trip cons -> prim -> cons (quand les deux sens sont declares)
+        if self.prim_state and self.cons_from is not None:
+            penv = {nm: np.broadcast_to(np.asarray(env[nm], dtype=float), (U.shape[1],))
+                    for nm in self.prim_state}
+            U2 = np.stack([np.broadcast_to(np.asarray(e.eval(penv), dtype=float), (U.shape[1],))
+                           for e in self.cons_from], axis=0)
+            if not finite(U2):
+                failures.append("to_conservative(to_primitive(U)) non fini")
+            elif not np.allclose(U2, U, rtol=rtol, atol=atol):
+                err = float(np.max(np.abs(U2 - U)))
+                failures.append("round-trip to_conservative(to_primitive(U)) != U (ecart max %g : "
+                                "conversions incoherentes)" % err)
+        # positivite : roles Density (conservatif) et primitive 'p' (pression) si declares
+        for i, r in enumerate(roles):
+            if r == "Density" and not bool(np.all(U[i] > 0)):
+                failures.append("composante '%s' (role Density) non strictement positive sur les "
+                                "echantillons" % self.cons_names[i])
+        if "p" in self.prim_defs:
+            p = np.asarray(env["p"], dtype=float)
+            if not finite(p):
+                failures.append("primitive 'p' (pression) non finie")
+            elif not bool(np.all(p > 0)):
+                failures.append("primitive 'p' (pression) non strictement positive sur des etats "
+                                "physiques (EOS suspecte)")
+        report = {"ok": not failures, "failures": failures, "n_samples": int(U.shape[1])}
+        if failures and raise_on_error:
+            raise ValueError("check_model('%s') : %d echec(s) :\n  - %s"
+                             % (self.name, len(failures), "\n  - ".join(failures)))
+        return report
 
     # --- parametres RUNTIME (P7-b) : collecte + attribution d'indices + membre genere -------------
     def _all_exprs(self):
@@ -1174,6 +1363,70 @@ class HyperbolicModel:
             S += eig_minmax(wcpps[nx:], "      ")
             S += ["    }", "  }", ""]
 
+        # CAPABILITY HLLC (m.enable_hllc, audit vague 3) : contact_speed (Toro) + hllc_star_state
+        # GENERES depuis les ROLES du bloc (aucun indice litteral : Density/MomentumX/MomentumY
+        # resolus, Energy optionnelle, toute autre composante advectee passivement Us[c]=fac*U[c]/r).
+        # Le coeur (HasHLLCStructure) applique alors l'algorithme HLLC generique -- y compris sur un
+        # modele NON Euler (isotherme 3-var, moments + scalaires passifs). Sans appel : rien d'emis.
+        if self._hllc:
+            roles_l = roles_for(self.cons_names, self.cons_roles)
+            if "p" not in self.prim_defs:
+                raise ValueError("enable_hllc : la primitive 'p' (pression) doit etre declaree "
+                                 "(m.primitive('p', ...)) -- contact_speed/star state en dependent")
+            try:
+                iD = roles_l.index("Density")
+                iX = roles_l.index("MomentumX")
+                iY = roles_l.index("MomentumY")
+            except ValueError:
+                raise ValueError("enable_hllc : roles Density / MomentumX / MomentumY requis "
+                                 "(declarer conservative_vars(..., roles=[...])) ; roles actuels %r"
+                                 % (roles_l,))
+            iE = roles_l.index("Energy") if "Energy" in roles_l else -1
+            S.append("  // CAPABILITY HLLC generee depuis les ROLES (enable_hllc) : algorithme")
+            S.append("  // contact-resolving generique du coeur (HasHLLCStructure), aucun layout fige.")
+            S.append("  ADC_HD adc::Real contact_speed(const State& UL, const State& UR, "
+                     "adc::Real pL, adc::Real pR, adc::Real sL, adc::Real sR, int dir) const {")
+            S.append("    const int in_ = dir == 0 ? %d : %d;" % (iX, iY))
+            S.append("    const adc::Real rL = UL[%d], rR = UR[%d];" % (iD, iD))
+            S.append("    const adc::Real unL = UL[in_] / rL, unR = UR[in_] / rR;")
+            S.append("    return (pR - pL + rL * unL * (sL - unL) - rR * unR * (sR - unR)) /")
+            S.append("           (rL * (sL - unL) - rR * (sR - unR));")
+            S += ["  }", ""]
+            S.append("  ADC_HD State hllc_star_state(const State& U, adc::Real p, adc::Real s, "
+                     "adc::Real sStar, int dir) const {")
+            S.append("    const int in_ = dir == 0 ? %d : %d;" % (iX, iY))
+            S.append("    const adc::Real r = U[%d];" % iD)
+            S.append("    const adc::Real un = U[in_] / r;")
+            S.append("    const adc::Real fac = r * (s - un) / (s - sStar);")
+            S.append("    State Us{};")
+            S.append("    for (int c = 0; c < %d; ++c) Us[c] = fac * (U[c] / r);  "
+                     "// defaut : advection passive" % nc)
+            S.append("    Us[%d] = fac;" % iD)
+            S.append("    Us[in_] = fac * sStar;")
+            if iE >= 0:
+                S.append("    Us[%d] = fac * (U[%d] / r + (sStar - un) * (sStar + p / "
+                         "(r * (s - un))));" % (iE, iE))
+            S += ["    return Us;", "  }", ""]
+
+        # Bornes de pas OPTIONNELLES (m.stability_speed / m.stability_dt) : emises comme les traits
+        # C++ HasStabilitySpeed / HasStabilityDt (cf. adc/core/physical_model.hpp). Une seule
+        # expression (isotrope) : dir est ignore. SANS appel, rien n'est emis -> fallback strict
+        # max_wave_speed (politique de pas historique).
+        if self._stab_speed is not None:
+            S.append("  ADC_HD adc::Real stability_speed(const State& U, %s, int dir) const {"
+                     % aux_param)
+            S.append("    (void)dir;  // borne isotrope : une seule expression pour les deux directions")
+            S += cons_locals() + prim_locals() + aux_locals()
+            stl, scpps = self._codegen_exprs([self._stab_speed], cse)
+            S += stl
+            S += ["    return %s;" % scpps[0], "  }", ""]
+        if self._stab_dt is not None:
+            S.append("  ADC_HD adc::Real stability_dt(const State& U, %s) const {" % aux_param)
+            S += cons_locals() + prim_locals() + aux_locals()
+            dtl, dcpps = self._codegen_exprs([self._stab_dt], cse)
+            S += dtl
+            S += ["    return %s;" % dcpps[0], "  }", ""]
+
         S.append("  ADC_HD Prim to_primitive(const State& U) const {")
         S += cons_locals() + prim_locals()
         S.append("    Prim P{};")
@@ -1256,7 +1509,36 @@ class HyperbolicModel:
         S += stl
         S.append("    adc::StateVec<%d> S{};" % nc)
         S += ["    S[%d] = %s;" % (i, c) for i, c in enumerate(scpps)]
-        S += ["    return S;", "  }", "};", "}  // namespace %s" % namespace]
+        S += ["    return S;", "  }"]
+        # FREQUENCE de la source (m.source_frequency, audit vague 2) : emise comme frequency(U, a)
+        # -- le contrat OPTIONNEL des briques source (cf. physics/source.hpp), forwarde par
+        # CompositeModel (HasSourceFrequency) et agrege par step_cfl. Sans appel : rien d'emis.
+        if self._src_freq is not None:
+            S.append("")
+            S.append("  ADC_HD adc::Real frequency(const adc::StateVec<%d>& U, const adc::Aux& a) "
+                     "const {" % nc)
+            S += cons_locals() + prim_locals() + aux_locals()
+            ftl, fcpps = self._codegen_exprs([self._src_freq], cse)
+            S += ftl
+            S += ["    return %s;" % fcpps[0], "  }"]
+        # JACOBIEN ANALYTIQUE (m.source_jacobian, audit vague 3) : emis comme jacobian(U, a, J),
+        # forwarde par CompositeModel (HasSourceJacobian) -> le Newton implicite remplace les
+        # differences finies. Sans appel : rien d'emis (FD historiques, bit-identique).
+        if self._src_jac is not None:
+            if len(self._src_jac) != nc or any(len(r) != nc for r in self._src_jac):
+                raise ValueError("source_jacobian : matrice %dx%d attendue (dS_r/dU_c)" % (nc, nc))
+            S.append("")
+            S.append("  ADC_HD void jacobian(const adc::StateVec<%d>& U, const adc::Aux& a, "
+                     "adc::Real (&J)[%d][%d]) const {" % (nc, nc, nc))
+            S += cons_locals() + prim_locals() + aux_locals()
+            flat = [e for row in self._src_jac for e in row]
+            jtl, jcpps = self._codegen_exprs(flat, cse)
+            S += jtl
+            for r in range(nc):
+                for c in range(nc):
+                    S.append("    J[%d][%d] = %s;" % (r, c, jcpps[r * nc + c]))
+            S += ["  }"]
+        S += ["};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
 
     def _emit_bricks(self, name=None):
@@ -1266,6 +1548,16 @@ class HyperbolicModel:
         Renvoie (nv, code_des_briques, type_composite)."""
         nm = name or (self.name.capitalize() + "Gen")
         nv = self.n_vars
+        # Garde-fou du CODEGEN (pas seulement de check(), que compile() n'appelle pas) : une
+        # frequence ou un jacobien de source sans m.source(...) serait PURGE en silence par la
+        # branche NoSource ci-dessous -- rejet explicite (regle : jamais d'option ignoree).
+        if self._source is None:
+            if self._src_freq is not None:
+                raise ValueError("source_frequency(...) declare sans source : appelez "
+                                 "m.source([...]) (la frequence est emise sur la brique de source)")
+            if self._src_jac is not None:
+                raise ValueError("source_jacobian(...) declare sans source : appelez "
+                                 "m.source([...]) (le jacobien est emis sur la brique de source)")
         parts = [self.emit_cpp_brick(name=nm + "Hyp")]
         if self._source is not None:  # brique de source generee, sinon NoSource
             parts.append(self.emit_cpp_source(name=nm + "Src"))
@@ -1603,6 +1895,12 @@ class HyperbolicModel:
         parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
         parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
         parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
+        parts.append("stab_speed=%s" % (repr(m._stab_speed) if m._stab_speed is not None else ""))
+        parts.append("stab_dt=%s" % (repr(m._stab_dt) if m._stab_dt is not None else ""))
+        parts.append("src_freq=%s" % (repr(m._src_freq) if m._src_freq is not None else ""))
+        parts.append("src_jac=%s" % (";".join(repr(e) for row in m._src_jac for e in row)
+                                     if m._src_jac is not None else ""))
+        parts.append("hllc=%d" % (1 if m._hllc else 0))
         parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
         parts.append("gamma=%r" % m.gamma)
         # Les params entrent dans le hash par (nom, valeur de DECLARATION, kind). La valeur d'un param
@@ -1869,7 +2167,9 @@ class CompiledModel:
     et les diagnostics. cf. DSL_MODEL_DESIGN.md section 3."""
 
     def __init__(self, so_path, backend, adder, cons_names, cons_roles, prim_names, n_vars,
-                 gamma, n_aux, params, caps, abi_key, model_hash, cxx, std, target="system"):
+                 gamma, n_aux, params, caps, abi_key, model_hash, cxx, std, target="system",
+                 hllc=False):
+        self.has_hllc = bool(hllc)   # capability HLLC emise (enable_hllc) : hllc dispo hors Euler 4-var
         self.so_path = so_path
         self.backend = backend       # "prototype" | "aot" | "production"
         self.target = target         # "system" | "amr_system" : facade visee (loader natif AMR si amr_system)
@@ -2005,9 +2305,47 @@ class Model:
         """Valeurs propres (vitesses caracteristiques) par direction (delegue a set_eigenvalues)."""
         self._m.set_eigenvalues(x, y)
 
+    def stability_speed(self, expr):
+        """Vitesse de STABILITE lambda* pilotant la CFL du bloc (OPTIONNEL ; delegue a
+        HyperbolicModel.stability_speed). Fallback sans appel : max(abs(eigenvalues)), strictement
+        l'historique. Compilee comme flux/source (production GPU/MPI, pas de callback par cellule)."""
+        self._m.stability_speed(expr)
+
+    def stability_dt(self, expr_dt):
+        """Pas ADMISSIBLE direct dt(U, aux) borne locale du pas (OPTIONNEL ; delegue a
+        HyperbolicModel.stability_dt). Le cfl n'est pas applique a cette borne. Fallback sans appel :
+        aucune borne supplementaire (politique de pas historique)."""
+        self._m.stability_dt(expr_dt)
+
     def source(self, s):
         """Terme source S(U, aux), une expression par composante (optionnel ; delegue a set_source)."""
         self._m.set_source(s)
+
+    def source_frequency(self, expr_mu):
+        """Frequence locale mu(U, aux) [1/s] de la source -- la borne de pas 'source' du meeting
+        (dt <= cfl*substeps/(stride*max mu), sans pas d'espace). Emise sur la brique de SOURCE
+        generee (frequency(U, aux)), forwarde par CompositeModel, agregee par System/AmrSystem
+        step_cfl. EXIGE m.source([...]). Delegue a HyperbolicModel.source_frequency."""
+        self._m.source_frequency(expr_mu)
+
+    def source_jacobian(self, rows):
+        """Jacobien ANALYTIQUE dS/dU de la source (rows[r][c] = dS_r/dU_c, matrice n_vars x n_vars
+        d'expressions) : le Newton implicite (IMEX/SourceImplicitBE) l'utilise a la place des
+        differences finies. EXIGE m.source. Delegue a HyperbolicModel.source_jacobian."""
+        self._m.source_jacobian(rows)
+
+    def implicit_source(self, jacobian=None):
+        """Declaration GROUPEE de l'implicite local (audit vague 3, sucre) : le RESIDU est deja
+        implique par m.source (backward-Euler : F = W - U^n - dt*S(W)) ; @p jacobian (optionnel) =
+        matrice dS/dU analytique (cf. source_jacobian). Sans jacobian : differences finies."""
+        if jacobian is not None:
+            self._m.source_jacobian(jacobian)
+
+    def enable_hllc(self):
+        """Emet la capability HLLC (contact_speed + hllc_star_state generes depuis les ROLES +
+        primitive 'p') : riemann='hllc' devient disponible pour ce modele MEME hors Euler 4
+        variables. Delegue a HyperbolicModel.enable_hllc."""
+        self._m.enable_hllc()
 
     def elliptic_rhs(self, e):
         """Contribution au second membre elliptique (couplage Poisson ; delegue a set_elliptic_rhs)."""
@@ -2037,6 +2375,15 @@ class Model:
     def check(self):
         """Verifie les dependances (variables referencees declarees). Leve ValueError sinon."""
         return self._m.check()
+
+    def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
+                    raise_on_error=True):
+        """Verification NUMERIQUE generique du modele (flux/source/elliptic finis, valeurs propres
+        reelles et finies, coherence wave_speeds/max_wave_speed, round-trip cons<->prim, positivite
+        Density/'p') sur des etats echantillons. Delegue a HyperbolicModel.check_model (cf. sa doc).
+        A appeler AVANT compile() ; le pendant runtime d'un bloc installe est System.check_model."""
+        return self._m.check_model(samples=samples, n_samples=n_samples, seed=seed, aux=aux,
+                                   rtol=rtol, atol=atol, raise_on_error=raise_on_error)
 
     # --- introspection (lecture seule, deleguee au modele backing) ---
     @property
@@ -2140,7 +2487,7 @@ class Model:
             n_vars=m.n_vars, gamma=m.gamma, n_aux=aux_n_aux(m.aux_names),
             params=self.params, caps=_BACKEND_CAPS[backend],
             abi_key=abi_key, model_hash=model_hash,
-            cxx=eff_cxx, std=eff_std)
+            cxx=eff_cxx, std=eff_std, hllc=m._hllc)
 
 
 # === Phase B (prototype) : composition HYBRIDE brique native + brique DSL dans UN modele ========
@@ -2607,7 +2954,7 @@ class HybridModel:
             target=target, cons_names=self.cons_names, cons_roles=self.cons_roles,
             prim_names=self.prim_names, n_vars=self.n_vars, gamma=self.gamma, n_aux=self.n_aux,
             params={}, caps=_BACKEND_CAPS[backend], abi_key=abi_key, model_hash=model_hash,
-            cxx=cxx, std=std)
+            cxx=cxx, std=std, hllc=getattr(self, "_hllc", False))
 
 
 # --- Source COUPLEE generique inter-especes (P5 phase 1, splitting EXPLICITE) -----------------------
@@ -2690,9 +3037,10 @@ class CompiledCoupledSource:
     integrateur Python. Aucun .so : le couplage est interprete cote C++ (machine a pile device)."""
 
     def __init__(self, name, backend, in_blocks, in_roles, consts, out_blocks, out_roles,
-                 prog_ops, prog_args, prog_lens, terms, reg_order):
+                 prog_ops, prog_args, prog_lens, terms, reg_order, frequency=0.0):
         self.name = name
         self.backend = backend
+        self.frequency = float(frequency)  # mu [1/s] declare (0 = pas de borne de pas)
         self.in_blocks = list(in_blocks)
         self.in_roles = list(in_roles)        # canoniques (lowercase, frontiere C++)
         self.consts = list(consts)
@@ -2748,6 +3096,18 @@ class CoupledSource:
         # l'autre -expr (Neg) -> echange conservatif par construction. verify_conservation=True les
         # revisite a la compilation pour CONTROLER la propriete (et detecter une rupture cote add manuel).
         self._pairs = []
+        self._frequency = 0.0  # mu [1/s] declare (borne de pas du couplage ; 0 = pas de borne)
+
+    def frequency(self, mu):
+        """FREQUENCE CONSERVATIVE declaree mu [1/s] du couplage (audit vague 3) : borne de pas
+        dt <= cfl / mu agregee par System/AmrSystem::step_cfl (raison 'coupled_source:<nom>').
+        Les couplages sont appliques UNE fois par MACRO-pas (splitting, apply_couplings(dt)) :
+        la borne porte donc sur le macro-dt, SANS facteur substeps/stride. V1 : constante declaree
+        choisie conservative (cf. meeting : lambda*/mu 'constante ou runtime-param choisie assez
+        conservative') ; une frequence PAR CELLULE evaluee en bytecode est un raffinement ulterieur.
+        mu <= 0 = pas de borne (historique). Renvoie self (chainable)."""
+        self._frequency = float(mu)
+        return self
 
     # --- construction symbolique ----------------------------------------------------------------
     def block(self, name):
@@ -2958,4 +3318,4 @@ class CoupledSource:
             name=self.name, backend=backend, in_blocks=in_blocks, in_roles=in_roles,
             consts=list(self._consts), out_blocks=out_blocks, out_roles=out_roles,
             prog_ops=prog_ops, prog_args=prog_args, prog_lens=prog_lens,
-            terms=self._terms, reg_order=self._reg_order)
+            terms=self._terms, reg_order=self._reg_order, frequency=self._frequency)

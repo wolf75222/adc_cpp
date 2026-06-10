@@ -18,8 +18,10 @@
 ///        (anneau (r, theta)). Pendant POLAIRE du CondensedSchurSourceStepper cartesien (#126,
 ///        condensed_schur_source_stepper.hpp), pour la source implicite couplee potentiel / vitesse /
 ///        Lorentz (Hoffart et al., arXiv:2510.11808) d'un fluide magnetise RAIDE sur un maillage
-///        annulaire. C'est un etage SOURCE AUTONOME (transport gele) ; il NE remplace PAS System::step
-///        et ne s'y branche PAS (cablage facade = ulterieur).
+///        annulaire. C'est un etage SOURCE AUTONOME (transport gele). CABLE dans la facade depuis la
+///        Voie A etape 2c : System::set_source_stage le construit quand la geometrie est polaire et
+///        SystemStepper::run_source_stage l'invoque apres le transport (cf. python/system.cpp) --
+///        l'ancienne mention "ne se branche pas" etait perimee (audit 2026-06).
 ///
 /// CHEMIN SEPARE, additif (Voie A etape 2b). Le Schur CARTESIEN reste BIT-IDENTIQUE
 /// (condensed_schur_source_stepper.hpp INTOUCHE) ; ce header ne touche aucun chemin existant. Il COMPOSE
@@ -296,11 +298,24 @@ class PolarCondensedSchurSourceStepper {
   PolarCondensedSchurSourceStepper(const VariableSet& vars, const PolarGeometry& geom,
                                    const BoxArray& ba, const BCRec& bcPhi, Real alpha,
                                    PolarPrecond precond = PolarPrecond::RadialLine)
+      : PolarCondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
+                                         vars.index_of(VariableRole::MomentumX),
+                                         vars.index_of(VariableRole::MomentumY),
+                                         vars.index_of(VariableRole::Energy), geom, ba, bcPhi,
+                                         alpha, precond) {}
+
+  /// Variante a COMPOSANTES EXPLICITES (audit vague 3, parite avec le stepper cartesien) :
+  /// l'appelant DESIGNE les composantes (rho, m_r, m_theta[, E]) -- bloc a noms libres / roles
+  /// Custom. Le ctor canonique ci-dessus DELEGUE ici (resolution par roles inchangee).
+  PolarCondensedSchurSourceStepper(const VariableSet& vars, int c_rho, int c_mx, int c_my, int c_E,
+                                   const PolarGeometry& geom, const BoxArray& ba,
+                                   const BCRec& bcPhi, Real alpha,
+                                   PolarPrecond precond = PolarPrecond::RadialLine)
       : vars_(vars),
-        c_rho_(vars.index_of(VariableRole::Density)),
-        c_mx_(vars.index_of(VariableRole::MomentumX)),
-        c_my_(vars.index_of(VariableRole::MomentumY)),
-        c_E_(vars.index_of(VariableRole::Energy)),
+        c_rho_(c_rho),
+        c_mx_(c_mx),
+        c_my_(c_my),
+        c_E_(c_E),
         alpha_(alpha),
         geom_(geom),
         bcPhi_(bcPhi),
@@ -414,7 +429,7 @@ class PolarCondensedSchurSourceStepper {
       kry.set_coefficients(&a_rr_, &a_tt_);
     copy_comp0(kry.phi(), phi);  // warm start : phi^n -> kry.phi()
     copy_comp0(kry.rhs(), rhs_);
-    last_result_ = kry.solve(Real(1e-10), 600);
+    last_result_ = kry.solve(krylov_tol_, krylov_max_iters_);
     copy_comp0(phi, kry.phi());  // phi <- phi^{n+theta}
 
     // 3) RECONSTRUIRE v^{n+theta} = B^{-1}(v^n - theta dt grad_polar phi^{n+theta}) ; mom = rho v.
@@ -461,6 +476,16 @@ class PolarCondensedSchurSourceStepper {
   /// Diagnostic du dernier solve (iterations BiCGStab, residu relatif, convergence).
   const PolarKrylovResult& last_solve() const { return last_result_; }
 
+  /// Tolerance / budget d'iterations du solve Krylov polaire. DEFAUTS = constantes historiques
+  /// (1e-10, 600), rendues configurables par l'audit 2026-06. @throws std::invalid_argument.
+  void set_krylov(Real tol, int max_iters) {
+    if (!(tol > Real(0)) || max_iters < 1)
+      throw std::invalid_argument(
+          "PolarCondensedSchurSourceStepper::set_krylov : tol > 0, max_iters >= 1");
+    krylov_tol_ = tol;
+    krylov_max_iters_ = max_iters;
+  }
+
   int density_comp() const { return c_rho_; }
   int momentum_x_comp() const { return c_mx_; }
   int momentum_y_comp() const { return c_my_; }
@@ -504,6 +529,8 @@ class PolarCondensedSchurSourceStepper {
   MultiFab vr_n_, vt_n_;                ///< v^n (extrait au debut de step)
   MultiFab vr_t_, vt_t_;                ///< v^{n+theta} puis v^{n+1}
   PolarKrylovResult last_result_;       ///< diagnostic du dernier solve
+  Real krylov_tol_ = Real(1e-10);       ///< tolerance du solve (defaut historique, cf. set_krylov)
+  int krylov_max_iters_ = 600;          ///< budget d'iterations (defaut historique, cf. set_krylov)
 };
 
 }  // namespace adc

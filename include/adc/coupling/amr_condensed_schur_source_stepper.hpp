@@ -31,12 +31,13 @@
 /// couvertes (invariant #169). Un etat constant en espace (mono-niveau) degenere EXACTEMENT en l'etage
 /// uniforme : c'est le critere de parite (Etape 2).
 ///
-/// PERIMETRE DE CETTE VERSION (Etape 2, parite System d'abord). Le chemin MONO-NIVEAU est complet et
-/// bit-identique a l'etage uniforme. Le chemin MULTI-NIVEAU (reconstruction des vitesses fines a partir
-/// du grad injecte + cascade average_down) est un suivi dedie (Etape 4) : step() le REFUSE
-/// explicitement (erreur claire) plutot que d'appliquer la source au seul grossier en silence (les
-/// cellules fines ne sentiraient pas la source -> faux). On valide d'abord la parite mono-niveau contre
-/// l'etage uniforme #126, comme demande.
+/// PERIMETRE (mis a jour audit 2026-06, apres #266 / Phase 3c). Le chemin MONO-NIVEAU est complet
+/// et bit-identique a l'etage uniforme #126. Le chemin MULTI-NIVEAU est IMPLEMENTE en Phase 3c
+/// (etage source condense COMPOSITE : l'elliptique tensoriel Schur est resolu par FAC sur
+/// grossier + fin, reconstruction des vitesses PAR NIVEAU puis cascade average_down -- cf.
+/// step_multilevel), dans le CADRE 2 niveaux + UN patch fin mono-box + grossier replique
+/// (mono-rang). Au-dela (multi-patch, > 2 niveaux, MPI, multi-blocs), step() REFUSE explicitement
+/// (erreur claire) plutot que d'appliquer une source partielle en silence : c'est la Phase 4.
 ///
 /// CYCLE DE VIE / DEVICE / MPI. Construit UNE fois sur le layout GROSSIER (BoxArray + Geometry + CL
 /// Poisson) ; tous les tampons de l'etage uniforme grossier sont alloues a la construction et reutilises
@@ -59,16 +60,33 @@ class AmrCondensedSchurSourceStepper {
   AmrCondensedSchurSourceStepper(const VariableSet& vars, const Geometry& coarse_geom,
                                  const BoxArray& coarse_ba, const BCRec& bcPhi, Real alpha,
                                  int n_precond_vcycles = 1)
+      : AmrCondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
+                                       vars.index_of(VariableRole::MomentumX),
+                                       vars.index_of(VariableRole::MomentumY),
+                                       vars.index_of(VariableRole::Energy), coarse_geom, coarse_ba,
+                                       bcPhi, alpha, n_precond_vcycles) {}
+
+  /// Variante a COMPOSANTES EXPLICITES (audit vague 3, parite avec les steppers System) : roles
+  /// transportes par l'ABI au lieu d'etre resolus canoniquement. Le ctor canonique DELEGUE ici.
+  AmrCondensedSchurSourceStepper(const VariableSet& vars, int c_rho, int c_mx, int c_my, int c_E,
+                                 const Geometry& coarse_geom, const BoxArray& coarse_ba,
+                                 const BCRec& bcPhi, Real alpha, int n_precond_vcycles = 1)
       : vars_(vars),
         coarse_geom_(coarse_geom),
         coarse_ba_(coarse_ba),
         bcPhi_(bcPhi),
         alpha_(alpha),
-        c_rho_(vars.index_of(VariableRole::Density)),
-        c_mx_(vars.index_of(VariableRole::MomentumX)),
-        c_my_(vars.index_of(VariableRole::MomentumY)),
-        c_E_(vars.index_of(VariableRole::Energy)),
-        coarse_(vars, coarse_geom, coarse_ba, bcPhi, alpha, n_precond_vcycles) {}
+        c_rho_(c_rho),
+        c_mx_(c_mx),
+        c_my_(c_my),
+        c_E_(c_E),
+        coarse_(vars, c_rho, c_mx, c_my, c_E, coarse_geom, coarse_ba, bcPhi, alpha,
+                n_precond_vcycles) {}
+
+  /// Tolerance / budget du solve Krylov de l'etage GROSSIER (delegue a l'etage uniforme #126 ;
+  /// defauts historiques 1e-10 / 400). Le solve COMPOSITE multi-niveau (FAC, Phase 3c) garde ses
+  /// tolerances propres (suivi Phase 4).
+  void set_krylov(Real tol, int max_iters) { coarse_.set_krylov(tol, max_iters); }
 
   /// true si le modele porte un role Energy (mise a jour d'energie active dans l'etage grossier).
   bool has_energy() const { return coarse_.energy_comp() >= 0; }

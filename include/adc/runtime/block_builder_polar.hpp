@@ -286,6 +286,62 @@ std::function<Real(const MultiFab&)> make_max_speed_polar(const Model& m, const 
   return detail::PolarMaxSpeed<Model>{m, aux};
 }
 
+namespace detail {
+/// Fermetures de BORNES DE PAS optionnelles du bloc POLAIRE (StabilityPolicy, audit vague 3) :
+/// memes reductions device que le cartesien (noyaux PONCTUELS sans hypothese de geometrie -- la
+/// geometrie n'entre que par le pas physique h du stepper, min(dr, r_min*dtheta)). Foncteurs
+/// NOMMES (meme contrat device cross-TU que PolarMaxSpeed).
+template <class Model>
+struct PolarStabilitySpeed {
+  Model m;
+  const MultiFab* aux;
+  Real operator()(const MultiFab& U) const { return max_stability_speed_mf(m, U, *aux); }
+};
+template <class Model>
+struct PolarSourceFreq {
+  Model m;
+  const MultiFab* aux;
+  Real operator()(const MultiFab& U) const { return max_source_frequency_mf(m, U, *aux); }
+};
+template <class Model>
+struct PolarStabilityDt {
+  Model m;
+  const MultiFab* aux;
+  Real operator()(const MultiFab& U) const { return min_stability_dt_mf(m, U, *aux); }
+};
+}  // namespace detail
+
+/// Vitesse de CFL du bloc POLAIRE : lambda* (trait HasStabilitySpeed) si le modele le declare,
+/// sinon max_wave_speed (PolarMaxSpeed historique, bit-identique) -- MEME politique que
+/// make_max_speed cartesien.
+template <class Model>
+std::function<Real(const MultiFab&)> make_cfl_speed_polar(const Model& m, const MultiFab* aux) {
+  if constexpr (HasStabilitySpeed<Model>)
+    return detail::PolarStabilitySpeed<Model>{m, aux};
+  else
+    return detail::PolarMaxSpeed<Model>{m, aux};
+}
+
+/// Frequence de source max du bloc POLAIRE (trait HasSourceFrequency) ; VIDE sans trait (le
+/// stepper ne l'interroge pas, politique de pas historique).
+template <class Model>
+std::function<Real(const MultiFab&)> make_source_frequency_polar(const Model& m,
+                                                                 const MultiFab* aux) {
+  if constexpr (HasSourceFrequency<Model>)
+    return detail::PolarSourceFreq<Model>{m, aux};
+  else
+    return {};
+}
+
+/// Pas admissible min du bloc POLAIRE (trait HasStabilityDt) ; VIDE sans trait.
+template <class Model>
+std::function<Real(const MultiFab&)> make_stability_dt_polar(const Model& m, const MultiFab* aux) {
+  if constexpr (HasStabilityDt<Model>)
+    return detail::PolarStabilityDt<Model>{m, aux};
+  else
+    return {};
+}
+
 /// Contribution du bloc au second membre du Poisson POLAIRE : rhs += elliptic_rhs(U) (boucle hote).
 template <class Model>
 std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs_polar(const Model& m) {

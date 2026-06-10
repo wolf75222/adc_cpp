@@ -70,6 +70,12 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
   // recompile contre cet en-tete (cle d'ABI verifiee) les transporte donc aussi.
   auto conv = make_cell_convert(model);
   sys.set_block_conversion(name, std::move(conv.first), std::move(conv.second));
+  // Bornes de pas OPTIONNELLES du modele (traits HasSourceFrequency / HasStabilityDt, cf.
+  // core/physical_model.hpp) : compilees ici comme flux/source (un modele DSL declarant
+  // m.source_frequency(...) / m.stability_dt(...) les transporte donc jusqu'au step_cfl du System).
+  // Fonctions VIDES si le modele ne declare pas les traits -> politique de pas historique. La
+  // vitesse de STABILITE (HasStabilitySpeed) est deja portee par make_max_speed ci-dessus.
+  sys.set_block_dt_bounds(name, make_source_frequency(model, ctx), make_stability_dt(model, ctx));
   // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par install_block.
   // On reallue l'etat du bloc avec block_n_ghost(limiter) -- MEME mecanisme qu'add_block (PR #88) --
   // pour que fill_boundary + assemble_rhs ne lisent pas hors bornes sur les vrais MultiFab du System.

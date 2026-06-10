@@ -295,6 +295,14 @@ foreach(t
     test_polar_schur_via_system  # System POLAIRE -> run_source_stage -> etage Schur condense POLAIRE (Voie A etape 2c -> PR6), briques natives
     test_schur_conservation   # conservation discrete masse/momentum/energie + positivite du chemin cartesien-fluide-Schur (briques natives, no AOT)
     test_disc_domain_mask     # chantier T2 : contrat masque de domaine disque (inerte par defaut) -- disc_mask() tout-actif, inertie de step(), masque == level set, garde-fous
+    test_fv_hll_minmod        # chemin generique HLL+minmod VISIBLE : FiniteVolume(riemann="hll") sur isotherme 3-var (non Euler), System + AMR, rejets explicites (hll sans wave_speeds, hllc hors Euler)
+    test_newton_options       # options/diagnostics Newton IMEX (audit ch.2) : no-default-change bit-identique, rapport (residu/iters/echecs), tolerance, rejets explicites
+    test_dt_bounds            # politique de pas generique (audit ch.1) : add_dt_bound/last_dt_bound, fallback transport historique, DSL stability_speed/stability_dt (auto-skip sans compilateur)
+    test_check_model          # check_model generique (audit ch.6) : formules DSL (finitude/round-trip/positivite) + bloc installe (residu fini, roles, etat restaure)
+    test_magnetic_bricks      # briques magnetiques exposees (audit ch.5) : MagneticLorentzForce / PotentialMagneticForce via adc.Model, residu quantitatif q B m, rejet scalaire
+    test_schur_roles          # roles/champs Schur transportes dans l'ABI (vague 2) : descripteurs par nom == canonique bit-identique, rejets explicites (inconnu/polaire/amr)
+    test_io_checkpoint        # IO v1 (vague 2) : checkpoint/restart bit-identique (stride=2 via macro_step), write npz/vtk, rejets composition/grille
+    test_v3_features          # vague 3 : CoupledSource.frequency, options Newton AMR (multi natif / rejets mono+diagnostics), set_conservative_state multi-blocs, enable_hllc + source_jacobian DSL (auto-skip)
     test_native_abi_std)      # regression ABI : le std du modele natif (backend="production") suit le loader (c++20 sous Kokkos, c++23 sinon) -> add_native_block charge sans "ABI incompatible"
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)

@@ -169,9 +169,29 @@ struct System::Impl {
   // (set_block_params) change le comportement du bloc au prochain pas SANS recompiler. Absent pour un
   // bloc sans param runtime ou pour les autres chemins (natif / dynamique). Pose par add_compiled_block.
   std::map<std::string, std::shared_ptr<std::vector<double>>> block_params_;
+  // Diagnostics Newton (IMEX, OPT-IN) : rapport par bloc, possede ICI en shared_ptr (adresse STABLE
+  // meme quand sp realloue) ; les fermetures AdvanceImex* du bloc ecrivent dedans par pointeur brut.
+  // Absent (cle manquante) pour un bloc sans newton_diagnostics -> newton_report leve une erreur claire.
+  std::map<std::string, std::shared_ptr<NewtonReport>> newton_reports_;
   double t = 0;
   int macro_step_ = 0;  // compteur de macro-pas (0-indexe) : sert au filtre stride par bloc
   std::vector<std::function<void(Real)>> couplings;  // sources couplees inter-especes (splitting)
+  // Bornes GLOBALES de pas de temps (System::add_dt_bound) : evaluees UNE fois par pas (hote) par
+  // step_cfl / step_adaptive. Crochet des contraintes non locales-cellule (couplage multi-blocs,
+  // Schur/Poisson, scheduler). Vide (defaut) -> politique de pas historique, bit-identique.
+  struct GlobalDtBound {
+    std::string label;
+    std::function<double()> fn;
+  };
+  std::vector<GlobalDtBound> dt_bounds_;
+  // Frequences DECLAREES des sources couplees (CoupledSource.frequency, audit vague 3) : les
+  // couplages s'appliquent UNE fois par MACRO-pas (apply_couplings(dt)), la borne porte donc sur
+  // le macro-dt : dt <= cfl / mu, SANS facteur substeps/stride. Vide (defaut) -> aucune borne.
+  struct CoupledFreq {
+    std::string label;
+    double mu;
+  };
+  std::vector<CoupledFreq> coupled_freqs_;
 
   // stride_due (filtre de cadence hold-then-catch-up) EXTRAIT vers stepper_ (SystemStepper, Lot B) :
   // il sert exclusivement a l'avance en temps. macro_step_ (ci-dessus) reste un membre PARTAGE de Impl
@@ -366,10 +386,25 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                        const std::string& limiter, const std::string& riemann,
                        const std::string& recon, const std::string& time, int substeps,
                        bool evolve, int stride, const std::vector<std::string>& implicit_vars,
-                       const std::vector<std::string>& implicit_roles) {
+                       const std::vector<std::string>& implicit_roles,
+                       int newton_max_iters, double newton_rel_tol, double newton_abs_tol,
+                       double newton_fd_eps, bool newton_diagnostics, double newton_damping,
+                       const std::string& newton_fail_policy) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
+  if (newton_max_iters < 1)
+    throw std::runtime_error("System::add_block : newton_max_iters >= 1");
+  if (newton_rel_tol < 0.0 || newton_abs_tol < 0.0 || newton_fd_eps <= 0.0)
+    throw std::runtime_error("System::add_block : newton_rel_tol/abs_tol >= 0 et newton_fd_eps > 0");
+  if (!(newton_damping > 0.0 && newton_damping <= 1.0))
+    throw std::runtime_error("System::add_block : newton_damping dans (0, 1]");
+  int fail_policy = NewtonOptions::kFailNone;
+  if (newton_fail_policy == "warn") fail_policy = NewtonOptions::kFailWarn;
+  else if (newton_fail_policy == "throw") fail_policy = NewtonOptions::kFailThrow;
+  else if (newton_fail_policy != "none")
+    throw std::runtime_error("System::add_block : newton_fail_policy 'none'|'warn'|'throw' (recu '" +
+                             newton_fail_policy + "')");
   // @p time porte le TRAITEMENT et, en explicite, le SCHEMA RK : "explicit"/"ssprk2" = SSPRK2
   // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "imex" = transport explicite + source raide
   // implicite. La math RK reste un FONCTEUR du coeur (build_block).
@@ -388,11 +423,22 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     throw std::runtime_error("System::add_block : implicit_vars / implicit_roles exigent time='imex' "
                              "(le masque implicite ne s'applique qu'au pas de source IMEX ; recu time='" +
                              time + "')");
+  // Memes regles pour les options/diagnostics Newton : elles ne pilotent que le pas de source IMEX.
+  // Des valeurs non-defaut en explicite seraient ignorees EN SILENCE -> erreur explicite.
+  const bool newton_non_default = newton_max_iters != 2 || newton_rel_tol != 0.0 ||
+                                  newton_abs_tol != 0.0 || newton_fd_eps != 1e-7 ||
+                                  newton_diagnostics || newton_damping != 1.0 ||
+                                  fail_policy != NewtonOptions::kFailNone;
+  if (!imex && newton_non_default)
+    throw std::runtime_error("System::add_block : les options Newton (newton_max_iters/rel_tol/"
+                             "abs_tol/fd_eps/diagnostics) exigent time='imex' (recu time='" +
+                             time + "')");
 
   int ncomp = 1;
   BlockClosures clo;
   std::function<Real(const MultiFab&)> max_speed;
   std::function<void(const MultiFab&, MultiFab&)> add_poisson_rhs;
+  std::function<Real(const MultiFab&)> src_freq, stab_dt;  // bornes de pas optionnelles (traits modele)
   CellConvert prim_to_cons, cons_to_prim;  // conversions ponctuelles du modele (set/get_primitive_state)
   VariableSet cons_vs, prim_vs;
   if (P->polar_) {
@@ -416,7 +462,12 @@ void System::add_block(const std::string& name, const ModelSpec& model,
       // a r_min / r_max -> masse Sum n r dr dtheta conservee A LA MACHINE (l'anneau diocotron est borne
       // par deux parois conductrices). C'est la BC qui rend le pas couple conservatif.
       clo = make_block_polar(m, limiter, riemann, pctx, recon_prim, method, /*wall_radial=*/true);
-      max_speed = make_max_speed_polar(m, &P->aux);
+      // StabilityPolicy POLAIRE (audit vague 3) : meme politique que le cartesien -- lambda* de
+      // stabilite (trait) sinon max_wave_speed ; bornes source/pas admissible si declarees,
+      // fermetures VIDES sinon (politique de pas historique, bit-identique).
+      max_speed = make_cfl_speed_polar(m, &P->aux);
+      src_freq = make_source_frequency_polar(m, &P->aux);
+      stab_dt = make_stability_dt_polar(m, &P->aux);
       add_poisson_rhs = make_poisson_rhs_polar(m);
       auto conv = make_cell_convert(m);
       prim_to_cons = std::move(conv.first);
@@ -424,6 +475,22 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     });
   } else {
   const GridContext ctx = P->grid_ctx();
+  // Options du Newton de la source implicite IMEX (defauts = constantes historiques, bit-identique).
+  // Le rapport (diagnostics OPT-IN) vit dans Impl::newton_reports_ en shared_ptr -> adresse STABLE
+  // capturee par les fermetures meme quand sp realloue a un add_block ulterieur.
+  NewtonOptions nopts;
+  nopts.max_iters = newton_max_iters;
+  nopts.rel_tol = static_cast<Real>(newton_rel_tol);
+  nopts.abs_tol = static_cast<Real>(newton_abs_tol);
+  nopts.fd_eps = static_cast<Real>(newton_fd_eps);
+  nopts.damping = static_cast<Real>(newton_damping);
+  nopts.fail_policy = fail_policy;
+  NewtonReport* nreport = nullptr;
+  if (newton_diagnostics) {
+    auto rep = std::make_shared<NewtonReport>();
+    P->newton_reports_[name] = rep;
+    nreport = rep.get();
+  }
   // Le modele est compose a partir des briques designees par la spec ; le visiteur cable les
   // fermetures (constructeurs en en-tete, instanciables AOT). ncomp = n_vars du modele compose ;
   // set_density s'y adapte. Les noms de variables viennent du descripteur Variables porte par le
@@ -433,6 +500,13 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     ncomp = M::n_vars;
     cons_vs = M::conservative_vars();  // noms + ROLES physiques (source unique de verite)
     prim_vs = M::primitive_vars();
+    // LARGEUR AUX du modele compose (n_aux > 3 pour une brique magnetisee lisant B_z) : on elargit
+    // le canal PARTAGE comme le fait add_compiled_model (dsl_block.hpp). Sans cet appel, load_aux<4>
+    // lisait la composante 3 HORS BORNES d'un aux a 3 composantes (B_z silencieusement faux) -- le
+    // chemin natif add_block + source 'magnetic' n'avait jamais ete exerce de bout en bout (audit
+    // 2026-06, exposition Python des briques magnetiques). ensure_aux_width preserve l'ADRESSE de
+    // l'aux (capturee par les fermetures via grid_ctx) et re-applique B_z deja fourni.
+    P->ensure_aux_width(aux_comps<M>());
     // Masque implicite PORTE PAR LE BLOC : resout noms/roles -> indices contre le descripteur du bloc
     // (erreur explicite sur un nom/role absent). Vide -> make_implicit_mask inactif -> defaut modele
     // (bit-identique). Ne joue qu'en IMEX (garde ci-dessus pour l'explicite).
@@ -442,9 +516,14 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     // advance_eb) car ctx (grid_ctx()) porte desormais ctx.disc_mask / ctx.disc (adresses stables des
     // membres de Impl). Elles restent INERTES tant que le System n'est pas mis en mode Staircase /
     // CutCell (cf. step()) : construites a l'ajout, selectionnees seulement sur opt-in.
-    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components);
-    max_speed = make_max_speed(m, ctx);
+    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components, nopts,
+                     nreport);
+    max_speed = make_max_speed(m, ctx);  // stability_speed (trait) ou max_wave_speed (fallback)
     add_poisson_rhs = make_poisson_rhs(m);
+    // Bornes de pas optionnelles (traits HasSourceFrequency / HasStabilityDt) : fonctions VIDES si
+    // le modele ne les declare pas -> step_cfl garde la politique historique (bit-identique).
+    src_freq = make_source_frequency(m, ctx);
+    stab_dt = make_stability_dt(m, ctx);
     // Conversions cons <-> prim DU MODELE (set/get_primitive_state) : memes formules que le flux/CFL.
     auto conv = make_cell_convert(m);
     prim_to_cons = std::move(conv.first);
@@ -457,6 +536,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   install_block(name, ncomp, cons_vs, prim_vs, model.gamma, std::move(clo), std::move(max_speed),
                 std::move(add_poisson_rhs), substeps, evolve, stride);
   set_block_conversion(name, std::move(prim_to_cons), std::move(cons_to_prim));
+  set_block_dt_bounds(name, std::move(src_freq), std::move(stab_dt));
   // GHOSTS du schema : WENO5 lit un stencil 5 points (3 ghosts) > les 2 alloues par defaut dans
   // install_block. On reallue l'etat du bloc avec block_n_ghost(limiter) si besoin (cf. AmrSystem qui
   // alloue avec Limiter::n_ghost, PR #22) pour que fill_ghosts + assemble_rhs ne lisent pas hors
@@ -497,6 +577,48 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
 // elargir le bloc compile a block_n_ghost(limiter) -- 3 pour weno5 -- comme le fait add_block.
 ADC_EXPORT void System::set_block_ghosts(const std::string& name, int n_ghost) {
   p_->set_block_ghosts(name, n_ghost);
+}
+
+// Bornes de pas OPTIONNELLES d'un bloc (traits modele) : posees apres install_block, lues par
+// step_cfl / step_adaptive. Fonctions vides = le bloc n'impose pas la borne (historique).
+void System::set_block_dt_bounds(const std::string& name,
+                                 std::function<Real(const MultiFab&)> source_frequency,
+                                 std::function<Real(const MultiFab&)> stability_dt) {
+  Impl::Species& s = p_->find(name);  // leve si bloc inconnu
+  s.source_frequency = std::move(source_frequency);
+  s.stability_dt = std::move(stability_dt);
+}
+
+// Borne GLOBALE de pas (hote, une evaluation par pas) : couplage multi-blocs, Schur/Poisson,
+// scheduler, politique utilisateur. cf. SystemStepper::step_cfl pour l'agregation.
+void System::add_dt_bound(const std::string& label, std::function<double()> fn) {
+  if (!fn) throw std::runtime_error("System::add_dt_bound : fonction de borne vide");
+  p_->dt_bounds_.push_back(Impl::GlobalDtBound{label, std::move(fn)});
+}
+
+// Borne ACTIVE du dernier step_cfl (diagnostic de la politique de pas). "" avant le premier pas.
+std::string System::last_dt_bound() const { return p_->stepper_.last_dt_reason(); }
+
+// Rapport Newton (diagnostics IMEX OPT-IN) du bloc : copie a plat du NewtonReport agrege par la
+// DERNIERE avance du bloc (reset en tete d'avance par AdvanceImex*). Erreur claire si le bloc n'a
+// pas active newton_diagnostics (pas de rapport silencieusement vide).
+System::SourceNewtonReport System::newton_report(const std::string& name) const {
+  p_->index(name);  // leve si bloc inconnu
+  const auto it = p_->newton_reports_.find(name);
+  if (it == p_->newton_reports_.end())
+    throw std::runtime_error(
+        "System::newton_report : diagnostics Newton non actives pour le bloc '" + name +
+        "' ; ajouter le bloc avec newton_diagnostics=true (adc.IMEX(newton_diagnostics=True) / "
+        "adc.SourceImplicit(newton_diagnostics=True))");
+  const NewtonReport& r = *it->second;
+  return SourceNewtonReport{r.enabled,
+                            r.converged,
+                            static_cast<double>(r.max_residual),
+                            static_cast<double>(r.max_iters_used),
+                            r.n_failed,
+                            r.failed_i,
+                            r.failed_j,
+                            r.failed_comp};
 }
 
 // Corps EXTRAIT VERBATIM vers adc::native_loader::add_dynamic_block (native_loader.hpp) ; instancie
@@ -723,15 +845,22 @@ void System::add_ionization(const std::string& electron, const std::string& ion,
   // neutre vers l'ion (n_i + n_g conserve). Premiere brique de couplage ; le transfert de quantite
   // de mouvement / energie (especes fluides) est un raffinement ulterieur.
   P->couplings.push_back([P, ie, ii, ig, k, de, di, dg](Real dt) {
-    Array4 ue = P->sp[ie].U.fab(0).array();
-    Array4 ui = P->sp[ii].U.fab(0).array();
-    Array4 ug = P->sp[ig].U.fab(0).array();
-    for_each_cell(P->sp[ie].U.box(0), [=] ADC_HD(int i, int j) {  // sur device (lit n_e, n_g)
-      const Real dn = dt * k * ue(i, j, de) * ug(i, j, dg);
-      ug(i, j, dg) -= dn;
-      ui(i, j, di) += dn;
-      ue(i, j, de) += dn;
-    });
+    // MPI / multi-box-safe : iteration sur les fabs LOCAUX (local_size()==0 sur un rang sans box ->
+    // no-op), MEME patron qu'add_coupled_source -- plus de fab(0)/box(0) en dur, qui n'existaient que
+    // sur le rang possedant la box 0 et deviendraient faux si System passait multi-box. Les blocs
+    // partagent la DistributionMapping du System -> meme local_size(), fabs co-localises.
+    MultiFab& Ue = P->sp[ie].U;
+    for (int li = 0; li < Ue.local_size(); ++li) {
+      Array4 ue = Ue.fab(li).array();
+      Array4 ui = P->sp[ii].U.fab(li).array();
+      Array4 ug = P->sp[ig].U.fab(li).array();
+      for_each_cell(Ue.box(li), [=] ADC_HD(int i, int j) {  // sur device (lit n_e, n_g)
+        const Real dn = dt * k * ue(i, j, de) * ug(i, j, dg);
+        ug(i, j, dg) -= dn;
+        ui(i, j, di) += dn;
+        ue(i, j, de) += dn;
+      });
+    }
   });
 }
 
@@ -758,14 +887,18 @@ void System::add_collision(const std::string& a, const std::string& b, double ra
   // l'une vers l'autre. L'echauffement par friction (energie) est un raffinement ulterieur
   // (neglige : convient aux especes isothermes, sans eq. d'energie).
   P->couplings.push_back([P, ia, ib, k, mxa, mya, da, mxb, myb, db](Real dt) {
-    Array4 ua = P->sp[ia].U.fab(0).array();
-    Array4 ub = P->sp[ib].U.fab(0).array();
-    for_each_cell(P->sp[ia].U.box(0), [=] ADC_HD(int i, int j) {  // sur device
-      const Real fx = dt * k * (ua(i, j, mxa) / ua(i, j, da) - ub(i, j, mxb) / ub(i, j, db));
-      ua(i, j, mxa) -= fx; ub(i, j, mxb) += fx;
-      const Real fy = dt * k * (ua(i, j, mya) / ua(i, j, da) - ub(i, j, myb) / ub(i, j, db));
-      ua(i, j, mya) -= fy; ub(i, j, myb) += fy;
-    });
+    // MPI / multi-box-safe : fabs LOCAUX, meme patron qu'add_coupled_source (cf. add_ionization).
+    MultiFab& Ua = P->sp[ia].U;
+    for (int li = 0; li < Ua.local_size(); ++li) {
+      Array4 ua = Ua.fab(li).array();
+      Array4 ub = P->sp[ib].U.fab(li).array();
+      for_each_cell(Ua.box(li), [=] ADC_HD(int i, int j) {  // sur device
+        const Real fx = dt * k * (ua(i, j, mxa) / ua(i, j, da) - ub(i, j, mxb) / ub(i, j, db));
+        ua(i, j, mxa) -= fx; ub(i, j, mxb) += fx;
+        const Real fy = dt * k * (ua(i, j, mya) / ua(i, j, da) - ub(i, j, myb) / ub(i, j, db));
+        ua(i, j, mya) -= fy; ub(i, j, myb) += fy;
+      });
+    }
   });
 }
 
@@ -793,18 +926,22 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
   // sur chaque espece (energie totale conservee) ; les temperatures relaxent. T = p/rho (a une
   // constante pres), p = (gamma-1)(E - 1/2 rho |u|^2). Transfere l'energie INTERNE (u inchange).
   P->couplings.push_back([P, ia, ib, k, ga, gb, ea, mxa, mya, da, eb, mxb, myb, db](Real dt) {
-    Array4 ua = P->sp[ia].U.fab(0).array();
-    Array4 ub = P->sp[ib].U.fab(0).array();
-    for_each_cell(P->sp[ia].U.box(0), [=] ADC_HD(int i, int j) {  // sur device
-      const Real ra = ua(i, j, da), rb = ub(i, j, db);
-      const Real pa = (ga - Real(1)) * (ua(i, j, ea) -
-          Real(0.5) * (ua(i, j, mxa) * ua(i, j, mxa) + ua(i, j, mya) * ua(i, j, mya)) / ra);
-      const Real pb = (gb - Real(1)) * (ub(i, j, eb) -
-          Real(0.5) * (ub(i, j, mxb) * ub(i, j, mxb) + ub(i, j, myb) * ub(i, j, myb)) / rb);
-      const Real q = dt * k * (pa / ra - pb / rb);  // k (T_a - T_b), T = p/rho
-      ua(i, j, ea) -= q;
-      ub(i, j, eb) += q;
-    });
+    // MPI / multi-box-safe : fabs LOCAUX, meme patron qu'add_coupled_source (cf. add_ionization).
+    MultiFab& Ua = P->sp[ia].U;
+    for (int li = 0; li < Ua.local_size(); ++li) {
+      Array4 ua = Ua.fab(li).array();
+      Array4 ub = P->sp[ib].U.fab(li).array();
+      for_each_cell(Ua.box(li), [=] ADC_HD(int i, int j) {  // sur device
+        const Real ra = ua(i, j, da), rb = ub(i, j, db);
+        const Real pa = (ga - Real(1)) * (ua(i, j, ea) -
+            Real(0.5) * (ua(i, j, mxa) * ua(i, j, mxa) + ua(i, j, mya) * ua(i, j, mya)) / ra);
+        const Real pb = (gb - Real(1)) * (ub(i, j, eb) -
+            Real(0.5) * (ub(i, j, mxb) * ub(i, j, mxb) + ub(i, j, myb) * ub(i, j, myb)) / rb);
+        const Real q = dt * k * (pa / ra - pb / rb);  // k (T_a - T_b), T = p/rho
+        ua(i, j, ea) -= q;
+        ub(i, j, eb) += q;
+      });
+    }
   });
 }
 
@@ -815,7 +952,8 @@ void System::add_coupled_source(const std::vector<std::string>& in_blocks,
                                 const std::vector<std::string>& out_roles,
                                 const std::vector<int>& prog_ops,
                                 const std::vector<int>& prog_args,
-                                const std::vector<int>& prog_lens) {
+                                const std::vector<int>& prog_lens,
+                                double frequency, const std::string& label) {
   Impl* P = p_.get();
   const int n_in = static_cast<int>(in_blocks.size());
   const int n_const = static_cast<int>(consts.size());
@@ -894,6 +1032,11 @@ void System::add_coupled_source(const std::vector<std::string>& in_blocks,
   // repartie en round-robin), donc meme local_size() et meme indexation locale -> on iterait en parallele
   // sur les fabs locaux. Conversion en valeurs CAPTUREES (pas de reference a 'this' du lambda C++).
   std::vector<Real> kconsts(consts.begin(), consts.end());
+  // Frequence declaree du couplage (audit vague 3) : enregistree pour la borne de pas de step_cfl /
+  // step_adaptive (dt <= cfl/mu sur le MACRO-pas). <= 0 = pas de borne (historique). Poussee APRES
+  // toute la validation (qui leve) : un couplage rejete ne doit laisser AUCUNE borne fantome --
+  // sinon un script qui try/except l'echec garderait un pas bride sans physique correspondante.
+  if (frequency > 0.0) P->coupled_freqs_.push_back(Impl::CoupledFreq{label, frequency});
   P->couplings.push_back(
       [P, ins, outs, kconsts, n_in, n_const, n_terms](Real dt) {
         // MPI-safe : iteration sur les fabs LOCAUX du premier bloc d'entree (ou de sortie si aucune
@@ -922,7 +1065,10 @@ void System::add_coupled_source(const std::vector<std::string>& in_blocks,
 }
 
 void System::set_source_stage(const std::string& name, const std::string& kind, double theta,
-                              double alpha) {
+                              double alpha, double krylov_tol, int krylov_max_iters,
+                              const std::string& density, const std::string& momentum_x,
+                              const std::string& momentum_y, const std::string& energy,
+                              int bz_aux_component) {
   Impl* P = p_.get();
   Impl::Species& s = P->find(name);  // leve si bloc inconnu
   // SEUL kind cable pour l'instant : ElectrostaticLorentzCondensation (cf. CondensedSchurSourceStepper).
@@ -933,6 +1079,11 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   if (!(theta > 0.0 && theta <= 1.0))
     throw std::runtime_error("System::set_source_stage : theta doit etre dans (0, 1] (recu " +
                              std::to_string(theta) + ")");
+  // Tolerance / budget du solve Krylov de l'etage (audit 2026-06 : les constantes 1e-10 / 400 (cart)
+  // / 600 (polaire) ne sont plus figees). krylov_tol <= 0 / krylov_max_iters <= 0 = "defaut
+  // historique du stepper" (on ne touche pas au reglage du stepper construit).
+  if (krylov_tol > 0.0 && !(krylov_tol < 1.0))
+    throw std::runtime_error("System::set_source_stage : krylov_tol doit etre dans (0, 1)");
   // GEOMETRIE : l'etage source condense est cable en CARTESIEN (CondensedSchurSourceStepper, #126) ET en
   // POLAIRE (PolarCondensedSchurSourceStepper, #212, Voie A etape 2c). Le dispatch ci-dessous construit le
   // stepper adapte a la geometrie du System. Toute autre geometrie est REJETEE explicitement (pas
@@ -955,16 +1106,42 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   // declare les electrons en roles). Un role requis absent leve une erreur EXPLICITE ICI (avant le pas)
   // -- le constructeur du stepper la leverait aussi, mais on diagnostique cote bloc nomme.
   const VariableSet& vs = s.cons_vars;
-  auto require_role = [&](VariableRole role, const char* label) {
-    if (vs.index_of(role) < 0)
-      throw std::runtime_error(
-          "System::set_source_stage : le bloc '" + name + "' n'expose pas le role " + label +
-          " requis par adc.CondensedSchur (le modele doit declarer Density / MomentumX / MomentumY ; "
-          "Energy optionnel). Verifier les roles du modele (variable_roles).");
+  // RESOLUTION DES DESCRIPTEURS (audit vague 2 : roles/champs transportes dans l'ABI). Un
+  // descripteur VIDE = role canonique (historique, bit-identique). Sinon : nom de ROLE stable
+  // d'abord (role_from_name), puis nom de VARIABLE du bloc. Echec = erreur explicite avec remede.
+  auto resolve_field = [&](const std::string& spec, VariableRole canonical,
+                           const char* label) -> int {
+    if (spec.empty()) {
+      const int idx = vs.index_of(canonical);
+      if (idx < 0)
+        throw std::runtime_error(
+            "System::set_source_stage : le bloc '" + name + "' n'expose pas le role " + label +
+            " requis par adc.CondensedSchur (le modele doit declarer Density / MomentumX / "
+            "MomentumY ; Energy optionnel), et aucun descripteur explicite n'est fourni (passer "
+            "density=/momentum=... avec un nom de role ou de variable du bloc).");
+      return idx;
+    }
+    const VariableRole r = role_from_name(spec);
+    if (r != VariableRole::Custom) {
+      const int idx = vs.index_of(r);
+      if (idx < 0)
+        throw std::runtime_error("System::set_source_stage : le bloc '" + name +
+                                 "' n'expose pas le role '" + spec + "' (" + label + ")");
+      return idx;
+    }
+    for (std::size_t i = 0; i < vs.names.size(); ++i)
+      if (vs.names[i] == spec) return static_cast<int>(i);
+    throw std::runtime_error("System::set_source_stage : '" + spec +
+                             "' n'est ni un role stable ni une variable du bloc '" + name +
+                             "' (" + label + ")");
   };
-  require_role(VariableRole::Density, "Density");
-  require_role(VariableRole::MomentumX, "MomentumX");
-  require_role(VariableRole::MomentumY, "MomentumY");
+  const int c_rho = resolve_field(density, VariableRole::Density, "Density");
+  const int c_mx = resolve_field(momentum_x, VariableRole::MomentumX, "MomentumX");
+  const int c_my = resolve_field(momentum_y, VariableRole::MomentumY, "MomentumY");
+  const int c_E = (energy == "none")
+                      ? -1
+                      : (energy.empty() ? vs.index_of(VariableRole::Energy)
+                                        : resolve_field(energy, VariableRole::Energy, "Energy"));
   // B_z OBLIGATOIRE : l'etage de Lorentz lit Omega = B_z. On exige set_magnetic_field appele
   // (bz_field_ renseigne) et on elargit le canal aux au canal B_z (kAuxBaseComps) pour que apply_bz le
   // peuple et que solve_fields en remplisse les ghosts. Un B_z absent leve une erreur EXPLICITE.
@@ -972,7 +1149,11 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
     throw std::runtime_error(
         "System::set_source_stage : le bloc '" + name + "' n'a pas de champ B_z (aux Omega) ; "
         "adc.CondensedSchur exige set_magnetic_field(B_z) (le terme de Lorentz lit Omega = B_z).");
-  P->ensure_aux_width(kAuxBaseComps + 1);  // garantit le canal B_z dans l'aux partage + re-applique B_z
+  // Canal aux du champ magnetique : canonique (kAuxBaseComps) par defaut, redirigeable par
+  // bz_aux_component (descripteur transporte). NOTE : apply_bz peuple le canal CANONIQUE ; une
+  // composante differente suppose que l'appelant la peuple lui-meme (champ aux derive/custom).
+  const int c_bz = bz_aux_component >= 0 ? bz_aux_component : kAuxBaseComps;
+  P->ensure_aux_width(c_bz + 1);  // garantit le canal dans l'aux partage + re-applique B_z
   // Construit l'etage source condense sur le layout REEL du System (ba/dm/geom) avec la CL du Poisson.
   // Le stepper alloue ses tampons UNE fois ; step() les reutilise (cf. son cycle de vie). alpha =
   // constante de couplage electrostatique du sous-systeme source.
@@ -980,14 +1161,26 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
     // POLAIRE (Voie A etape 2c) : PolarCondensedSchurSourceStepper sur l'anneau pgeom_, MEME CL Poisson
     // (Dirichlet/Neumann radiale, theta toujours periodique cote solveur). Preconditionneur RadialLine
     // (defaut). run_source_stage l'invoque exactement comme le cartesien (signature step() identique).
-    // schur reste nullptr (chemin cartesien intouche).
+    // schur reste nullptr (chemin cartesien intouche). Composantes EXPLICITES resolues ci-dessus
+    // (descripteurs vides -> roles canoniques -> bit-identique) : le stepper POLAIRE accepte les
+    // overrides depuis la vague 3 (ctor a composantes explicites, parite cartesien).
     s.schur_polar = std::make_shared<PolarCondensedSchurSourceStepper>(
-        vs, P->pgeom_, P->ba, P->fields_.poisson_bc(), static_cast<Real>(alpha));
+        vs, c_rho, c_mx, c_my, c_E, P->pgeom_, P->ba, P->fields_.poisson_bc(),
+        static_cast<Real>(alpha));
+    if (krylov_tol > 0.0 || krylov_max_iters > 0)
+      s.schur_polar->set_krylov(krylov_tol > 0.0 ? static_cast<Real>(krylov_tol) : Real(1e-10),
+                                krylov_max_iters > 0 ? krylov_max_iters : 600);
   } else {
-    // CARTESIEN (#126) : INCHANGE, bit-identique. n_precond_vcycles = defaut (1).
-    s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, P->geom, P->ba, P->fields_.poisson_bc(),
+    // CARTESIEN (#126) : composantes EXPLICITES resolues ci-dessus (descripteurs vides -> roles
+    // canoniques -> memes indices que l'historique, bit-identique).
+    s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, c_rho, c_mx, c_my, c_E, P->geom,
+                                                            P->ba, P->fields_.poisson_bc(),
                                                             static_cast<Real>(alpha));
+    if (krylov_tol > 0.0 || krylov_max_iters > 0)
+      s.schur->set_krylov(krylov_tol > 0.0 ? static_cast<Real>(krylov_tol) : Real(1e-10),
+                          krylov_max_iters > 0 ? krylov_max_iters : 400);
   }
+  s.schur_bz_comp = c_bz;
   s.schur_theta = theta;
 }
 
@@ -1116,6 +1309,45 @@ void System::step(double dt) { p_->stepper_.step(dt); }
 void System::advance(double dt, int nsteps) { p_->stepper_.advance(dt, nsteps); }
 double System::step_cfl(double cfl) { return p_->stepper_.step_cfl(cfl); }
 double System::step_adaptive(double cfl) { return p_->stepper_.step_adaptive(cfl); }
+
+// Horloge du systeme (IO v1, audit vague 2) : macro_step est REQUIS par le restart (la cadence
+// stride hold-then-catch-up lit macro_step % stride ; t seul ne suffit pas).
+int System::macro_step() const { return p_->macro_step_; }
+
+// Restauration du potentiel phi (IO v1, restart) : ecrit les cellules VALIDES de la composante 0 du
+// phi du solveur (warm start multigrille ; etat physique en gauss_policy="evolve"). Mono-box
+// (meme convention de marshaling que potential / set_density).
+void System::set_potential(const std::vector<double>& phi) {
+  Impl* P = p_.get();
+  device_fence();
+  if (P->polar_) {
+    P->fields_.ensure_elliptic_polar();
+    MultiFab& ph = P->fields_.pell_->phi();
+    const Box2D v = ph.box(0);
+    if (static_cast<int>(phi.size()) != v.nx() * v.ny())
+      throw std::runtime_error("System::set_potential : taille != nr*ntheta");
+    Array4 a = ph.fab(0).array();
+    std::size_t k = 0;
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i) a(i, j, 0) = phi[k++];
+    return;
+  }
+  P->fields_.ensure_elliptic();
+  MultiFab& ph = P->fields_.ell_phi();
+  const Box2D v = ph.box(0);
+  if (static_cast<int>(phi.size()) != v.nx() * v.ny())
+    throw std::runtime_error("System::set_potential : taille != n*n");
+  Array4 a = ph.fab(0).array();
+  std::size_t k = 0;
+  for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i) a(i, j, 0) = phi[k++];
+}
+void System::set_clock(double t, int macro_step) {
+  if (macro_step < 0)
+    throw std::runtime_error("System::set_clock : macro_step >= 0 (restart)");
+  p_->t = t;
+  p_->macro_step_ = macro_step;
+}
 
 std::vector<double> System::eval_rhs(const std::string& name) {
   Impl::Species& s = p_->find(name);

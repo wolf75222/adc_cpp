@@ -196,11 +196,26 @@ class CondensedSchurSourceStepper {
   /// @p n_precond_vcycles : N V-cycles MG par application du preconditionneur BiCGStab (1 ou 2).
   CondensedSchurSourceStepper(const VariableSet& vars, const Geometry& geom, const BoxArray& ba,
                               const BCRec& bcPhi, Real alpha, int n_precond_vcycles = 1)
+      : CondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
+                                    vars.index_of(VariableRole::MomentumX),
+                                    vars.index_of(VariableRole::MomentumY),
+                                    vars.index_of(VariableRole::Energy), geom, ba, bcPhi, alpha,
+                                    n_precond_vcycles) {}
+
+  /// Variante a COMPOSANTES EXPLICITES (audit 2026-06, vague 2 : roles/champs transportes dans
+  /// l'ABI). L'appelant DESIGNE les composantes (rho, mx, my[, E]) au lieu de laisser le stepper
+  /// resoudre les roles canoniques -- pour un bloc dont le descripteur n'expose pas Density/
+  /// MomentumX/MomentumY (noms libres, roles Custom) ou range ses champs ailleurs. @p c_E < 0 =
+  /// pas d'energie. Le ctor canonique ci-dessus DELEGUE ici (resolution par roles inchangee,
+  /// bit-identique).
+  CondensedSchurSourceStepper(const VariableSet& vars, int c_rho, int c_mx, int c_my, int c_E,
+                              const Geometry& geom, const BoxArray& ba, const BCRec& bcPhi,
+                              Real alpha, int n_precond_vcycles = 1)
       : vars_(vars),
-        c_rho_(vars.index_of(VariableRole::Density)),
-        c_mx_(vars.index_of(VariableRole::MomentumX)),
-        c_my_(vars.index_of(VariableRole::MomentumY)),
-        c_E_(vars.index_of(VariableRole::Energy)),
+        c_rho_(c_rho),
+        c_mx_(c_mx),
+        c_my_(c_my),
+        c_E_(c_E),
         alpha_(alpha),
         geom_(geom),
         bcPhi_(bcPhi),
@@ -266,7 +281,8 @@ class CondensedSchurSourceStepper {
     // kry_ est un MEMBRE persistant (ses ~10 MultiFab sont alloues UNE fois a la construction, plus
     // par appel) : solve() recalcule la totalite de son etat par-solve (prepare_solve, r0, directions),
     // donc le resultat est BIT-IDENTIQUE a l'ancienne construction d'un TensorKrylovSolver local ici.
-    last_result_ = kry_.solve(Real(1e-10), 400);
+    // Tolerances configurables via set_krylov (audit 2026-06) ; defauts = 1e-10/400 historiques.
+    last_result_ = kry_.solve(krylov_tol_, krylov_max_iters_);
     copy_comp0(phi, op_.phi());  // phi <- phi^{n+theta}
 
     // 3) RECONSTRUIRE v^{n+theta} = B^{-1}(v^n - theta dt grad phi^{n+theta}) ; mom = rho v.
@@ -318,6 +334,16 @@ class CondensedSchurSourceStepper {
   /// Diagnostic du dernier solve (iterations BiCGStab, residu relatif, convergence).
   const KrylovResult& last_solve() const { return last_result_; }
 
+  /// Tolerance / budget d'iterations du solve Krylov de l'etage (BiCGStab). DEFAUTS = constantes
+  /// historiques (1e-10, 400), rendues configurables par l'audit 2026-06 (constantes numeriques
+  /// explicites). @throws std::invalid_argument hors domaine.
+  void set_krylov(Real tol, int max_iters) {
+    if (!(tol > Real(0)) || max_iters < 1)
+      throw std::invalid_argument("CondensedSchurSourceStepper::set_krylov : tol > 0, max_iters >= 1");
+    krylov_tol_ = tol;
+    krylov_max_iters_ = max_iters;
+  }
+
   int density_comp() const { return c_rho_; }
   int momentum_x_comp() const { return c_mx_; }
   int momentum_y_comp() const { return c_my_; }
@@ -368,6 +394,8 @@ class CondensedSchurSourceStepper {
   MultiFab vx_t_, vy_t_;      ///< v^{n+theta} puis v^{n+1} (reconstruction + extrapolation)
   MultiFab phi_n_;            ///< phi^n fige (extrapolation) ; alloue au premier advance_source
   KrylovResult last_result_;  ///< diagnostic du dernier solve
+  Real krylov_tol_ = Real(1e-10);  ///< tolerance du solve (defaut historique, cf. set_krylov)
+  int krylov_max_iters_ = 400;     ///< budget d'iterations (defaut historique, cf. set_krylov)
   // Solveur de Krylov PERSISTANT (BiCGStab + precond MG). Alloue ses tampons (r/rhat/p/v/s/t/phat/
   // shat + offsets de CL) UNE fois ; step() reutilise kry_ sans reallocation. DOIT etre declare APRES
   // op_/precond_/n_precond_ (qu'il reference) : ordre d'init (apres eux) et de destruction (avant eux)

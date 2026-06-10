@@ -40,4 +40,12 @@ namespace adc {
 
 using Real = double;
 
+/// PLANCHER de vitesse des politiques de pas CFL (audit 2026-06, constante explicite au lieu du
+/// litteral 1e-30 disperse) : w = max(vitesse_reduite, kCflSpeedFloor) evite la division par zero
+/// quand un bloc n'a aucune onde (transport fige / champ nul). ATTENTION : un systeme dont TOUTES
+/// les vitesses sont nulles recoit alors un pas ~cfl*h/1e-30, enorme -- c'est le comportement
+/// historique assume (un tel pas ne transporte rien) ; le diagnostiquer via last_dt_bound() ==
+/// "degenerate" cote System. Partagee par System::step_cfl/step_adaptive et AmrRuntime::step_cfl.
+inline constexpr Real kCflSpeedFloor = Real(1e-30);
+
 }  // namespace adc

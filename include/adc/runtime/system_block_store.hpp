@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/core/state.hpp>       // kAuxBaseComps (canal aux par defaut de l'etage Schur : B_z)
 #include <adc/core/types.hpp>       // Real
 #include <adc/core/variables.hpp>   // VariableSet (descripteur a roles porte par chaque bloc)
 #include <adc/mesh/box2d.hpp>       // Box2D
@@ -100,6 +101,10 @@ class SystemBlockStore {
     // chemin cartesien reste BIT-IDENTIQUE (schur_polar == nullptr quand le System est cartesien).
     std::shared_ptr<PolarCondensedSchurSourceStepper> schur_polar;
     double schur_theta = 0.5;  // theta-schema de l'etage source (0.5 = Crank-Nicolson)
+    // Composante du canal aux lue comme champ magnetique Omega = B_z par l'etage Schur (audit
+    // vague 2 : champ TRANSPORTE dans l'ABI au lieu du litteral kAuxBaseComps fige). Defaut =
+    // kAuxBaseComps (canal canonique B_z), bit-identique ; set_source_stage peut le rediriger.
+    int schur_bz_comp = kAuxBaseComps;
     // ETAGE SOURCE GENERIQUE (optionnel) : un callable (U, dt) qui avance EN PLACE l'etage source du
     // bloc. nullptr (defaut) = aucun etage source generique (chemin BIT-IDENTIQUE). run_source_stage le
     // joue UNIQUEMENT si aucun etage Schur condense (schur / schur_polar) n'est cable, donc il ne change
@@ -117,6 +122,13 @@ class SystemBlockStore {
     // l'init par agregat positionnel des autres membres reste inchangee.
     std::function<void(MultiFab&, Real, int)> advance_masked;  // residu via assemble_rhs_masked (Staircase)
     std::function<void(MultiFab&, Real, int)> advance_eb;      // residu via assemble_rhs_eb (CutCell)
+    // BORNES DE PAS OPTIONNELLES du bloc (audit 2026-06, chantier step_cfl). VIDES (defaut) -> le
+    // stepper ne les interroge pas : politique de pas STRICTEMENT historique (transport seul,
+    // bit-identique). Posees par set_block_dt_bounds quand le modele declare les traits
+    // HasSourceFrequency / HasStabilityDt (cf. core/physical_model.hpp pour la semantique).
+    // Trailing + defaut vide : l'init par agregat positionnel des autres membres reste inchangee.
+    std::function<Real(const MultiFab&)> source_frequency;  // max cellules de mu [1/s] (0 = ne contraint pas)
+    std::function<Real(const MultiFab&)> stability_dt;      // min cellules du pas admissible (0 = ne contraint pas)
   };
 
   /// Registre ORDONNE des blocs (UNIQUE source de verite). PUBLIC : Impl l'aliase en `sp` pour les

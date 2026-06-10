@@ -6,11 +6,29 @@
 /// qui rend le flux numerique a l'interface entre l'etat gauche (UL, aux AL) et droit (UR, AR)
 /// dans la direction dir (0 = x, 1 = y). Etats et auxiliaires passes par valeur ; aucun virtuel.
 ///
-/// Hierarchie de precision (coupe des ondes intermediaires) :
-///   RusanovFlux  : Lax-Friedrichs local ; ne demande que max_wave_speed.
-///   HLLFlux      : 2 ondes (Davis) ; requiert model.wave_speeds (vitesses signees sL, sR).
-///   HLLCFlux     : 3 ondes (+ onde de contact) ; requiert model.pressure et wave_speeds.
-///   RoeFlux      : decomposition complete en ondes ; requiert model.pressure ; Euler 2D seulement.
+/// Hierarchie de precision (coupe des ondes intermediaires) ET de generalite :
+///   RusanovFlux  : GENERIQUE minimal ; ne demande que max_wave_speed (tout PhysicalModel).
+///   HLLFlux      : GENERIQUE avec ondes signees ; requiert model.wave_speeds (sL, sR).
+///   HLLCFlux     : EULER 2D SEULEMENT (n_vars == 4, layout rho/m/E, pression) -- alias
+///                  EulerHLLCFlux2D. Comportement indefini sur tout autre modele.
+///   RoeFlux      : EULER 2D GAZ PARFAIT SEULEMENT (eigenstructure Euler codee en dur, gamma-1
+///                  deduit de l'EOS gaz parfait, entropy fix de Harten eps = 0.1*c -- une politique
+///                  d'entropie SPECIFIQUE Euler/Roe) -- alias EulerRoeFlux2D.
+///
+/// Pour un modele NON Euler (systeme de moments, isotherme, scalaire...), le chemin generique est
+/// RusanovFlux, ou HLLFlux des que le modele expose wave_speeds.
+///
+/// CAPABILITIES RIEMANN (audit 2026-06, generalisation long terme) : HLLC et Roe ne sont plus des
+/// algorithmes Euler-only DEGUISES en generiques -- ce sont des ALGORITHMES generiques dont la
+/// STRUCTURE PHYSIQUE est fournie par le modele via des traits optionnels :
+///   - HasHLLCStructure : le modele fournit contact_speed (vitesse de l'onde de contact) et
+///     hllc_star_state (son etat etoile). HLLCFlux devient alors un solveur contact-resolving
+///     GENERIQUE (l'algorithme F* = F_k + s_k (U*_k - U_k) ne connait plus le layout).
+///   - HasRoeDissipation : le modele fournit sa dissipation de Roe complete
+///     d = |A_roe| (U_R - U_L) (linearisation, eigenstructure et entropy fix INCLUS, qui sont des
+///     proprietes du MODELE, pas du coeur). RoeFlux devient F = 1/2 (F_L + F_R) - 1/2 d.
+/// Le chemin Euler 2D canonique (n_vars == 4 + pressure, sans hooks) reste l'implementation
+/// historique BIT-IDENTIQUE : les capabilities ne font qu'OUVRIR ces solveurs aux autres systemes.
 ///
 /// INVARIANT device : pas de vtable, pas de std:: dans les chemins critiques (std::sqrt
 /// est authorise dans RoeFlux pour la moyenne de Roe, device-clean sous Kokkos/nvcc).
@@ -20,7 +38,8 @@
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 
-#include <cmath>  // std::sqrt (RoeFlux : moyenne de Roe) ; libstdc++ ne le tire pas transitivement
+#include <cmath>     // std::sqrt (RoeFlux : moyenne de Roe) ; libstdc++ ne le tire pas transitivement
+#include <concepts>  // capabilities Riemann (HasHLLCStructure / HasRoeDissipation)
 
 // Flux numerique a une interface, exprime en POLITIQUE (template), au meme titre
 // que le limiteur de reconstruction. assemble_rhs<Limiter, NumericalFlux> choisit
@@ -115,9 +134,42 @@ struct HLLFlux {
   }
 };
 
+// ---------------------------------------------------------------------------------------------
+// CAPABILITIES RIEMANN : traits OPTIONNELS par lesquels un modele NON Euler fournit la structure
+// physique exigee par un solveur contact-resolving (HLLC) ou Roe-like. cf. l'en-tete du fichier.
+// ---------------------------------------------------------------------------------------------
+
+/// Capability HLLC : le modele fournit la vitesse de l'onde de CONTACT et l'ETAT ETOILE du cote k.
+///  - contact_speed(UL, UR, pL, pR, sL, sR, dir) -> s* (vitesse de l'onde intermediaire) ;
+///  - hllc_star_state(U, p, s, s_star, dir) -> U*_k (etat etoile du cote k, s = sL ou sR).
+/// Avec pressure + wave_speeds, HLLCFlux applique alors l'algorithme GENERIQUE
+/// F* = F_k + s_k (U*_k - U_k) sans aucune hypothese de layout. Les deux methodes doivent etre
+/// ADC_HD (appelees dans les kernels).
+template <class M>
+concept HasHLLCStructure =
+    requires(const M m, const typename M::State u, const typename M::State v, const Aux a, Real p,
+             Real q, Real sl, Real sr, Real ss, int dir) {
+      { m.pressure(u) } -> std::convertible_to<Real>;
+      m.wave_speeds(u, a, dir, sl, sr);  // vitesses signees (hll_speeds, bornes des ondes externes)
+      { m.contact_speed(u, v, p, q, sl, sr, dir) } -> std::convertible_to<Real>;
+      { m.hllc_star_state(u, p, sl, ss, dir) } -> std::same_as<typename M::State>;
+    };
+
+/// Capability Roe : le modele fournit sa dissipation de Roe COMPLETE
+/// d = |A_roe(UL, UR)| (UR - UL) -- moyenne de Roe, decomposition en ondes, entropy fix inclus
+/// (ce sont des proprietes du systeme physique, pas du coeur). RoeFlux devient alors
+/// F = 1/2 (F_L + F_R) - 1/2 d, sans aucune hypothese Euler. ADC_HD requis.
+template <class M>
+concept HasRoeDissipation =
+    requires(const M m, const typename M::State ul, const Aux al, const typename M::State ur,
+             const Aux ar, int dir) {
+      { m.roe_dissipation(ul, al, ur, ar, dir) } -> std::same_as<typename M::State>;
+    };
+
 // HLLC (HLL + onde de Contact) : restitue l'onde de contact (Toro), donc capture
 // nettement la discontinuite de densite. Requiert model.pressure et wave_speeds.
-// n_vars == 4 attendu (Euler 2D) : indices normal/tangentiel selon dir.
+// CHEMIN CANONIQUE : n_vars == 4 (Euler 2D), indices normal/tangentiel selon dir.
+// CHEMIN CAPABILITY (HasHLLCStructure) : algorithme generique, structure fournie par le modele.
 /// HLLCFlux (HLL + onde de Contact, Toro) : 3 ondes, capture la discontinuite de densite.
 ///
 /// Requiert model.pressure et model.wave_speeds. Cible Euler 2D (n_vars == 4) ;
@@ -131,6 +183,28 @@ struct HLLCFlux {
                                           const Aux& AL,
                                           const typename Model::State& UR,
                                           const Aux& AR, int dir) const {
+    // CHEMIN CAPABILITY (HasHLLCStructure) : algorithme HLLC GENERIQUE -- la vitesse de contact et
+    // les etats etoiles viennent du MODELE, le coeur n'assume ni layout ni EOS. Un modele Euler
+    // canonique SANS hooks prend la branche historique ci-dessous, bit-identique.
+    if constexpr (HasHLLCStructure<Model>) {
+      Real sL, sR;
+      hll_speeds(m, UL, AL, UR, AR, dir, sL, sR);
+      const auto FL = m.flux(UL, AL, dir);
+      const auto FR = m.flux(UR, AR, dir);
+      if (sL >= 0) return FL;
+      if (sR <= 0) return FR;
+      const Real pL = m.pressure(UL), pR = m.pressure(UR);
+      const Real sStar = m.contact_speed(UL, UR, pL, pR, sL, sR, dir);
+      typename Model::State F;
+      if (sStar >= 0) {
+        const typename Model::State Us = m.hllc_star_state(UL, pL, sL, sStar, dir);
+        for (int c = 0; c < Model::n_vars; ++c) F[c] = FL[c] + sL * (Us[c] - UL[c]);
+      } else {
+        const typename Model::State Us = m.hllc_star_state(UR, pR, sR, sStar, dir);
+        for (int c = 0; c < Model::n_vars; ++c) F[c] = FR[c] + sR * (Us[c] - UR[c]);
+      }
+      return F;
+    } else {
     const int in = (dir == 0) ? 1 : 2;  // composante de qte de mvt normale
     const int it = (dir == 0) ? 2 : 1;  // tangentielle
     const Real rL = UL[0], rR = UR[0];
@@ -165,8 +239,14 @@ struct HLLCFlux {
       for (int c = 0; c < 4; ++c) F[c] = FR[c] + sR * (Us[c] - UR[c]);
     }
     return F;
+    }  // fin du chemin canonique Euler 2D (else du if constexpr HasHLLCStructure)
   }
 };
+
+/// Largeur du lissage de l'entropy fix de Harten du RoeFlux, en fraction de la vitesse du son de
+/// Roe (eps = kRoeEntropyFixFraction * c). Constante DOCUMENTEE plutot que cachee dans le noyau ;
+/// SPECIFIQUE Euler/Roe (cf. le commentaire dans RoeFlux::operator()).
+inline constexpr Real kRoeEntropyFixFraction = Real(0.1);
 
 // Roe (linearisation de Roe + correction d'entropie de Harten sur les ondes acoustiques). Capture
 // nettement contacts et chocs (comme HLLC), mais via la decomposition complete en ondes : pour un
@@ -186,6 +266,18 @@ struct RoeFlux {
   ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
                                           const Aux& AL, const typename Model::State& UR,
                                           const Aux& AR, int dir) const {
+    // CHEMIN CAPABILITY (HasRoeDissipation) : solveur Roe-like GENERIQUE -- la dissipation
+    // d = |A_roe| (UR - UL) (linearisation + eigenstructure + entropy fix) vient du MODELE.
+    // Un modele Euler canonique SANS hook prend la branche historique ci-dessous, bit-identique.
+    if constexpr (HasRoeDissipation<Model>) {
+      const auto FL = m.flux(UL, AL, dir);
+      const auto FR = m.flux(UR, AR, dir);
+      const typename Model::State d = m.roe_dissipation(UL, AL, UR, AR, dir);
+      typename Model::State F;
+      for (int c = 0; c < Model::n_vars; ++c)
+        F[c] = Real(0.5) * (FL[c] + FR[c]) - Real(0.5) * d[c];
+      return F;
+    } else {
     const int in = (dir == 0) ? 1 : 2;  // qte de mvt normale
     const int it = (dir == 0) ? 2 : 1;  // tangentielle
     const Real rL = UL[0], rR = UR[0];
@@ -213,8 +305,12 @@ struct RoeFlux {
     const Real a3 = rho * dut;                              // cisaillement, un
     const Real a5 = (dp + rho * c * dun) / (Real(2) * c2);  // onde un + c
 
-    // |valeur propre| avec correction d'entropie de Harten sur les ondes acoustiques (1, 5)
-    const Real eps = Real(0.1) * c;
+    // |valeur propre| avec correction d'entropie de Harten sur les ondes acoustiques (1, 5).
+    // kRoeEntropyFixFraction = 0.1 est une POLITIQUE D'ENTROPIE EULER/ROE-SPECIFIQUE (largeur du
+    // lissage parabolique en fraction de la vitesse du son de Roe, valeur usuelle de la litterature) :
+    // elle n'a pas de sens pour un autre systeme hyperbolique et ne doit pas etre presentee comme
+    // un parametre generique du coeur.
+    const Real eps = kRoeEntropyFixFraction * c;
     auto absfix = [eps](Real l) {
       const Real al = l < 0 ? -l : l;
       return al < eps ? Real(0.5) * (l * l / eps + eps) : al;
@@ -236,7 +332,15 @@ struct RoeFlux {
     F[it] = Real(0.5) * (FL[it] + FR[it]) - Real(0.5) * d_mt;
     F[3] = Real(0.5) * (FL[3] + FR[3]) - Real(0.5) * d_E;
     return F;
+    }  // fin du chemin canonique Euler 2D gaz parfait (else du if constexpr HasRoeDissipation)
   }
 };
+
+/// Alias EXPLICITES du domaine de validite : HLLCFlux et RoeFlux sont des solveurs EULER 2D
+/// (n_vars == 4, layout rho/m_x/m_y/E, pression gaz parfait), PAS des solveurs generiques.
+/// Les noms courts restent pour compatibilite (make_block et les .so generes les referencent) ;
+/// le code neuf qui veut nommer l'hypothese peut employer ces alias.
+using EulerHLLCFlux2D = HLLCFlux;
+using EulerRoeFlux2D = RoeFlux;
 
 }  // namespace adc

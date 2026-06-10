@@ -73,6 +73,33 @@ struct CompositeModel {
     hyp.wave_speeds(u, a, dir, smin, smax);
   }
 
+  /// CAPABILITIES Riemann (audit vague 3) : hooks HLLC (contact_speed + hllc_star_state) et Roe
+  /// (roe_dissipation) forwardes depuis la brique HYPERBOLIQUE quand elle les declare (le DSL les
+  /// emet via enable_hllc ; un modele C++ peut les ecrire a la main). Concept-gates comme
+  /// pressure / wave_speeds : sans hooks, le compose ne les expose pas (chemins canoniques /
+  /// rejets explicites inchanges).
+  ADC_HD Real contact_speed(const State& ul, const State& ur, Real pl, Real pr, Real sl, Real sr,
+                            int dir) const
+    requires requires(const Hyperbolic h, const State a_, const State b_, Real p, Real q, Real x,
+                      Real y, int d) { h.contact_speed(a_, b_, p, q, x, y, d); }
+  {
+    return hyp.contact_speed(ul, ur, pl, pr, sl, sr, dir);
+  }
+  ADC_HD State hllc_star_state(const State& u, Real p, Real s, Real sStar, int dir) const
+    requires requires(const Hyperbolic h, const State a_, Real p_, Real s_, Real ss_, int d) {
+      h.hllc_star_state(a_, p_, s_, ss_, d);
+    }
+  {
+    return hyp.hllc_star_state(u, p, s, sStar, dir);
+  }
+  ADC_HD State roe_dissipation(const State& ul, const Aux& al, const State& ur, const Aux& ar,
+                               int dir) const
+    requires requires(const Hyperbolic h, const State a_, const Aux x_, const State b_,
+                      const Aux y_, int d) { h.roe_dissipation(a_, x_, b_, y_, d); }
+  {
+    return hyp.roe_dissipation(ul, al, ur, ar, dir);
+  }
+
   /// Terme source GEOMETRIQUE de courbure polaire, delegue a la brique hyperbolique quand elle
   /// l'expose (fluide polaire : IsothermalFluxPolar). Concept-gate comme pressure / wave_speeds :
   /// si l'hyperbolique ne le fournit pas (transport scalaire ExB polaire), CompositeModel ne
@@ -82,6 +109,40 @@ struct CompositeModel {
     requires requires(const Hyperbolic h, const State s, Real rr) { h.polar_geom_source(s, rr); }
   {
     return hyp.polar_geom_source(u, r);
+  }
+
+  /// BORNES DE PAS optionnelles (audit 2026-06, cf. core/physical_model.hpp) : forwardees
+  /// conditionnellement comme pressure / wave_speeds, sinon le compose ne les expose pas et la
+  /// politique de pas reste l'historique. stability_speed / stability_dt viennent de la brique
+  /// HYPERBOLIQUE (c'est elle que le DSL emet) ; source_frequency vient de la brique SOURCE (c'est
+  /// la source qui connait sa frequence de relaxation/collision).
+  ADC_HD Real stability_speed(const State& u, const Aux& a, int dir) const
+    requires requires(const Hyperbolic h, const State s, const Aux aa, int d) {
+      h.stability_speed(s, aa, d);
+    }
+  {
+    return hyp.stability_speed(u, a, dir);
+  }
+  ADC_HD Real stability_dt(const State& u, const Aux& a) const
+    requires requires(const Hyperbolic h, const State s, const Aux aa) { h.stability_dt(s, aa); }
+  {
+    return hyp.stability_dt(u, a);
+  }
+  ADC_HD Real source_frequency(const State& u, const Aux& a) const
+    requires requires(const Source sc, const State s, const Aux aa) { sc.frequency(s, aa); }
+  {
+    return src.frequency(u, a);
+  }
+
+  /// JACOBIEN ANALYTIQUE de la source (audit vague 3) : forwarde depuis la brique SOURCE quand
+  /// elle declare jacobian(U, aux, J) (J[r][c] = dS_r/dU_c). Le Newton de la source implicite
+  /// l'utilise a la place des differences finies (trait HasSourceJacobian) ; sans la methode,
+  /// rien n'est expose et le Newton garde les differences finies historiques.
+  ADC_HD void source_jacobian(const State& u, const Aux& a, Real (&J)[n_vars][n_vars]) const
+    requires requires(const Source sc, const State s, const Aux aa,
+                      Real (&JJ)[n_vars][n_vars]) { sc.jacobian(s, aa, JJ); }
+  {
+    src.jacobian(u, a, J);
   }
 };
 

@@ -6,6 +6,7 @@
 // Explicit, IMEX, System) est ajoute par le paquet Python adc/__init__.py.
 // Construit seulement avec -DADC_BUILD_PYTHON=ON.
 
+#include <pybind11/functional.h>  // std::function<double()> <- callable Python (add_dt_bound)
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -161,7 +162,34 @@ PYBIND11_MODULE(_adc, m) {
            // NOM (implicit_vars) ou par ROLE physique (implicit_roles). Vides (defaut) -> defaut modele,
            // bit-identique. Resolus cote C++ contre les noms/roles du bloc (erreur sur un nom/role absent).
            py::arg("implicit_vars") = std::vector<std::string>{},
-           py::arg("implicit_roles") = std::vector<std::string>{})
+           py::arg("implicit_roles") = std::vector<std::string>{},
+           // Options du Newton de la source implicite IMEX (defauts = constantes historiques 2 / 1e-7,
+           // bit-identique). newton_diagnostics=True active le rapport (newton_report(name)).
+           py::arg("newton_max_iters") = 2, py::arg("newton_rel_tol") = 0.0,
+           py::arg("newton_abs_tol") = 0.0, py::arg("newton_fd_eps") = 1e-7,
+           py::arg("newton_diagnostics") = false, py::arg("newton_damping") = 1.0,
+           py::arg("newton_fail_policy") = "none")
+      // Rapport Newton (diagnostics IMEX OPT-IN) : dict {enabled, converged, max_residual,
+      // max_iters_used, n_failed, failed_cell, failed_component}, agrege sur les sous-pas de la
+      // DERNIERE avance du bloc. failed_cell = (i, j) d'UNE cellule fautive ou None.
+      .def("newton_report",
+           [](const System& s, const std::string& name) {
+             const System::SourceNewtonReport r = s.newton_report(name);
+             py::dict d;
+             d["enabled"] = r.enabled;
+             d["converged"] = r.converged;
+             d["max_residual"] = r.max_residual;
+             d["max_iters_used"] = r.max_iters_used;
+             d["n_failed"] = r.n_failed;
+             if (r.failed_i >= 0)
+               d["failed_cell"] = py::make_tuple(static_cast<int>(r.failed_i),
+                                                 static_cast<int>(r.failed_j));
+             else
+               d["failed_cell"] = py::none();
+             d["failed_component"] = static_cast<int>(r.failed_comp);
+             return d;
+           },
+           py::arg("name"))
       // Bloc dont le modele est charge a l'execution depuis un .so genere par le DSL (chemin hote).
       .def("add_dynamic_block", &System::add_dynamic_block, py::arg("name"), py::arg("so_path"),
            py::arg("substeps") = 1, py::arg("names") = std::vector<std::string>{},
@@ -189,10 +217,32 @@ PYBIND11_MODULE(_adc, m) {
       // la source explicite / IMEX du bloc par l'etage condense C++ (CondensedSchurSourceStepper, #126)
       // apres le transport hyperbolique. kind='electrostatic_lorentz'. Defaut (sans appel) inchange.
       .def("set_source_stage", &System::set_source_stage, py::arg("name"), py::arg("kind"),
-           py::arg("theta"), py::arg("alpha"))
+           py::arg("theta"), py::arg("alpha"),
+           // Tolerance / budget du solve Krylov de l'etage (audit 2026-06) : <= 0 = defauts
+           // historiques du stepper (1e-10 ; 400 cartesien / 600 polaire).
+           py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0,
+           // Descripteurs des champs (audit vague 2 : roles transportes dans l'ABI) : "" = role
+           // canonique (bit-identique) ; sinon nom de role stable ou de variable du bloc.
+           // bz_aux_component < 0 = canal canonique B_z. Cartesien seulement (polaire : rejet).
+           py::arg("density") = "", py::arg("momentum_x") = "", py::arg("momentum_y") = "",
+           py::arg("energy") = "", py::arg("bz_aux_component") = -1)
       // Politique de splitting en temps : "lie" (defaut, bit-identique) ou "strang" (H(dt/2) S(dt)
       // H(dt/2), 2e ordre). Cf. System::set_time_scheme / SystemStepper::step_strang.
       .def("set_time_scheme", &System::set_time_scheme, py::arg("scheme"))
+      // (System) -- voir aussi AmrSystem.add_coupled_source plus bas pour le pendant AMR.
+      // Borne GLOBALE de pas de temps (audit step_cfl) : fn() evaluee UNE fois par pas (hote) par
+      // step_cfl / step_adaptive ; dt <= fn() quand fn() > 0 et fini. Crochet des contraintes non
+      // locales-cellule (couplage, Schur/Poisson, scheduler, rampe utilisateur). Une callback
+      // Python est acceptable ici (jamais par cellule).
+      .def("add_dt_bound", &System::add_dt_bound, py::arg("label"), py::arg("fn"))
+      // Borne ACTIVE du dernier step_cfl : "transport:<bloc>" | "source_frequency:<bloc>" |
+      // "stability_dt:<bloc>" | "global:<label>" | "degenerate" | "" (aucun pas CFL encore).
+      .def("last_dt_bound", &System::last_dt_bound)
+      // Horloge (IO v1) : macro_step expose + restauration (t, macro_step) pour le restart -- la
+      // cadence stride depend de macro_step % stride, pas seulement de t.
+      .def("macro_step", &System::macro_step)
+      .def("set_clock", &System::set_clock, py::arg("t"), py::arg("macro_step"))
+      .def("set_potential", &System::set_potential, py::arg("phi"))
       // Politique de la loi de Gauss (R0, repro Hoffart) : "restart" (defaut, re-resout Poisson chaque
       // pas, bit-identique) ou "evolve" (apres phi^0, plus de re-solve ; l'etage Schur fait evoluer phi
       // sans restart, comme le papier). Cf. System::set_gauss_policy.
@@ -202,7 +252,10 @@ PYBIND11_MODULE(_adc, m) {
       // splitting explicite apres le transport (meme seam que add_ionization). Sans appel, inchange.
       .def("add_coupled_source", &System::add_coupled_source, py::arg("in_blocks"),
            py::arg("in_roles"), py::arg("consts"), py::arg("out_blocks"), py::arg("out_roles"),
-           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"))
+           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"),
+           // Frequence declaree mu du couplage (CoupledSource.frequency, vague 3) : borne de pas
+           // dt <= cfl/mu sur le macro-pas ; <= 0 = pas de borne (historique).
+           py::arg("frequency") = 0.0, py::arg("label") = "coupled_source")
       .def("variable_names", &System::variable_names, py::arg("name"),
            py::arg("kind") = "conservative")
       .def("variable_roles", &System::variable_roles, py::arg("name"),
@@ -338,7 +391,12 @@ PYBIND11_MODULE(_adc, m) {
            // implicite par NOM (implicit_vars) ou par ROLE physique (implicit_roles). Vides (defaut)
            // -> backward-Euler plein. N'ont de sens qu'en time="imex" et en MULTI-BLOCS (cf. add_block).
            py::arg("implicit_vars") = std::vector<std::string>{},
-           py::arg("implicit_roles") = std::vector<std::string>{})
+           py::arg("implicit_roles") = std::vector<std::string>{},
+           // Options Newton IMEX (vague 3, parite System) : MULTI-BLOCS seulement (mono-bloc :
+           // rejet au build, iters=2 fige cote coupleur). Pas de diagnostics sur AMR.
+           py::arg("newton_max_iters") = 2, py::arg("newton_rel_tol") = 0.0,
+           py::arg("newton_abs_tol") = 0.0, py::arg("newton_fd_eps") = 1e-7,
+           py::arg("newton_damping") = 1.0, py::arg("newton_fail_policy") = "none")
       // Bloc NATIF AMR charge depuis un loader .so genere par le DSL (backend "production",
       // target="amr_system") : le .so inline add_compiled_model(AmrSystem&) -> bloc natif sur la
       // hierarchie AMR (reflux, regrid), cle d'ABI verifiee. cf. AmrSystem::add_native_block. PAS de
@@ -356,6 +414,9 @@ PYBIND11_MODULE(_adc, m) {
       .def("set_poisson", &AmrSystem::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0)
+      // Borne GLOBALE de pas + borne ACTIVE (StabilityPolicy AMR, parite System.add_dt_bound).
+      .def("add_dt_bound", &AmrSystem::add_dt_bound, py::arg("label"), py::arg("fn"))
+      .def("last_dt_bound", &AmrSystem::last_dt_bound)
       // CHEMIN amr-schur (pendant AMR de System.set_magnetic_field / set_source_stage / set_time_scheme).
       // Etage source condense par Schur GLOBAL (electrostatique/Lorentz) sur la hierarchie mono-bloc, au
       // lieu de la source IMEX locale. B_z (terme de Lorentz) accepte un numpy (n, n) aplati.
@@ -366,7 +427,12 @@ PYBIND11_MODULE(_adc, m) {
            },
            py::arg("bz"))
       .def("set_source_stage", &AmrSystem::set_source_stage, py::arg("name"), py::arg("kind"),
-           py::arg("theta"), py::arg("alpha"))
+           py::arg("theta"), py::arg("alpha"),
+           // Reglages transportes (vague 3, parite System) : tolerances Krylov du solve grossier
+           // (<= 0 = defauts 1e-10/400) + descripteurs de champs ("" = role canonique).
+           py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0,
+           py::arg("density") = "", py::arg("momentum_x") = "", py::arg("momentum_y") = "",
+           py::arg("energy") = "")
       .def("set_time_scheme", &AmrSystem::set_time_scheme, py::arg("scheme"))
       .def("set_density",
            [](AmrSystem& s, const std::string& name,
@@ -397,13 +463,15 @@ PYBIND11_MODULE(_adc, m) {
       // ABI plate que System.add_coupled_source. Sans appel, inchange. cf. AmrSystem::add_coupled_source.
       .def("add_coupled_source", &AmrSystem::add_coupled_source, py::arg("in_blocks"),
            py::arg("in_roles"), py::arg("consts"), py::arg("out_blocks"), py::arg("out_roles"),
-           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"))
+           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"),
+           py::arg("frequency") = 0.0, py::arg("label") = "coupled_source")
       .def("step", &AmrSystem::step, py::arg("dt"))
       .def("advance", &AmrSystem::advance, py::arg("dt"), py::arg("nsteps"))
       .def("step_cfl", &AmrSystem::step_cfl, py::arg("cfl"))
       .def("nx", &AmrSystem::nx)
       .def("time", &AmrSystem::time)
       .def("n_blocks", &AmrSystem::n_blocks)
+      .def("block_names", &AmrSystem::block_names)
       .def("n_patches", &AmrSystem::n_patches)
       // Empreintes index-space des patchs fins : liste de tuples (level, ilo, jlo, ihi, jhi), coins
       // INCLUSIFS, dans l'espace d'indices du niveau (n << level cellules/direction, ratio 2). MEME

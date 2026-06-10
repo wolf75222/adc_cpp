@@ -516,6 +516,13 @@ adc_add_test(test_variable_role)
 
 # --- flux de Roe (Euler) + eigenvalues() ---
 adc_add_test(test_roe_flux)
+# Capabilities Riemann (audit 2026-06) : HLLC/Roe generiques par hooks modele (HasHLLCStructure /
+# HasRoeDissipation) -- equivalence bit-pour-bit au chemin canonique Euler + HLLC isotherme 3-var
+# (contact preserve la ou HLL diffuse).
+adc_add_test(test_riemann_capabilities)
+# Newton source implicite generalise (audit vague 2) : convergence non-Euler multi-variables sous
+# tolerances, damping, fail_policy=throw + cellule fautive, diagnostics = observateur pur.
+adc_add_test(test_newton_robustness)
 
 # --- MPI (coeur) : seam comm, reductions, Poisson distribue ---
 if(ADC_HAS_MPI)

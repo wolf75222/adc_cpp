@@ -166,8 +166,48 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
     // FIDELE il faudra un Schur/Poisson COMPOSITE multi-niveau (elliptique condense resolu a la finesse
     // des patchs, MG composite croisant les niveaux) -- infrastructure absente aujourd'hui (GeometricMG
     // coarsen UNE grille, != hierarchie AMR). C'est le verrou de fidelite, a faire APRES la parite mono-niveau.
+    // RESOLUTION des descripteurs de champs (audit vague 3, parite System::set_source_stage) :
+    // "" = role canonique (historique, bit-identique) ; sinon nom de ROLE stable puis nom de
+    // VARIABLE du bloc. Echec = erreur explicite au build (jamais d'ignore silencieux).
+    const VariableSet schur_vs = Model::conservative_vars();
+    auto resolve_schur = [&schur_vs](const std::string& spec, VariableRole canonical,
+                                     const char* label) -> int {
+      if (spec.empty()) {
+        const int idx = schur_vs.index_of(canonical);
+        if (idx < 0)
+          throw std::runtime_error(std::string("AmrSystem::set_source_stage : le bloc n'expose pas "
+                                               "le role ") + label +
+                                   " (declarer les roles, ou passer un descripteur explicite)");
+        return idx;
+      }
+      const VariableRole r = role_from_name(spec);
+      if (r != VariableRole::Custom) {
+        const int idx = schur_vs.index_of(r);
+        if (idx < 0)
+          throw std::runtime_error("AmrSystem::set_source_stage : role '" + spec + "' absent (" +
+                                   label + ")");
+        return idx;
+      }
+      for (std::size_t i = 0; i < schur_vs.names.size(); ++i)
+        if (schur_vs.names[i] == spec) return static_cast<int>(i);
+      throw std::runtime_error("AmrSystem::set_source_stage : '" + spec +
+                               "' n'est ni un role stable ni une variable du bloc (" + label + ")");
+    };
+    const int sc_rho = resolve_schur(bp.schur_density, VariableRole::Density, "Density");
+    const int sc_mx = resolve_schur(bp.schur_momentum_x, VariableRole::MomentumX, "MomentumX");
+    const int sc_my = resolve_schur(bp.schur_momentum_y, VariableRole::MomentumY, "MomentumY");
+    const int sc_E = (bp.schur_energy == "none")
+                         ? -1
+                         : (bp.schur_energy.empty()
+                                ? schur_vs.index_of(VariableRole::Energy)
+                                : resolve_schur(bp.schur_energy, VariableRole::Energy, "Energy"));
     auto schur = std::make_shared<AmrCondensedSchurSourceStepper>(
-        Model::conservative_vars(), g, bac, bp.poisson_bc, static_cast<Real>(bp.schur_alpha));
+        schur_vs, sc_rho, sc_mx, sc_my, sc_E, g, bac, bp.poisson_bc,
+        static_cast<Real>(bp.schur_alpha));
+    if (bp.schur_krylov_tol > 0.0 || bp.schur_krylov_max_iters > 0)
+      schur->set_krylov(bp.schur_krylov_tol > 0.0 ? static_cast<Real>(bp.schur_krylov_tol)
+                                                  : Real(1e-10),
+                        bp.schur_krylov_max_iters > 0 ? bp.schur_krylov_max_iters : 400);
     auto bz_coarse = std::make_shared<MultiFab>(bac, dm, 1, 1);
     amr_write_coarse_bz(*bz_coarse, bp.bz_field, bp.n);
     auto phi_coarse = std::make_shared<MultiFab>(bac, dm, 1, 1);
@@ -212,7 +252,28 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
       ++*step_state;
     };
   }
-  h.max_speed = [cpl] { return static_cast<double>(cpl->max_wave_speed()); };
+  // VITESSE DE CFL : lambda* (trait HasStabilitySpeed) si declare, sinon max_wave_speed du coupleur
+  // (fallback historique bit-identique) -- MEME politique que System/make_max_speed, evaluee sur le
+  // GROSSIER (la CFL mono-bloc AMR vit au pas grossier).
+  if constexpr (HasStabilitySpeed<Model>) {
+    h.max_speed = [cpl, model] {
+      return static_cast<double>(max_stability_speed_mf(model, cpl->coarse(), cpl->aux0()));
+    };
+  } else {
+    h.max_speed = [cpl] { return static_cast<double>(cpl->max_wave_speed()); };
+  }
+  // BORNES DE PAS OPTIONNELLES (StabilityPolicy AMR mono-bloc) : memes reductions que System,
+  // hooks laisses VIDES sans trait (AmrSystem::step_cfl garde alors la formule historique).
+  if constexpr (HasSourceFrequency<Model>) {
+    h.source_frequency = [cpl, model] {
+      return static_cast<double>(max_source_frequency_mf(model, cpl->coarse(), cpl->aux0()));
+    };
+  }
+  if constexpr (HasStabilityDt<Model>) {
+    h.stability_dt = [cpl, model] {
+      return static_cast<double>(min_stability_dt_mf(model, cpl->coarse(), cpl->aux0()));
+    };
+  }
   h.mass = [cpl] { return static_cast<double>(cpl->mass()); };
   h.n_patches = [cpl] {
     auto& L = cpl->levels();
@@ -331,7 +392,9 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
                                 const std::string& name, const std::vector<double>& density,
                                 bool has_density, double gamma, int substeps, bool recon_prim,
                                 bool imex, int stride = 1,
-                                const std::vector<int>& implicit_components = {}) {
+                                const std::vector<int>& implicit_components = {},
+                                const NewtonOptions& nopts = {},
+                                const std::vector<double>* state = nullptr) {
   const int nc = Model::n_vars;
   const int ng = Limiter::n_ghost;  // stencil du limiteur (parite du schema, comme build_amr_compiled)
   const int nlev = S.nlev();
@@ -342,9 +405,12 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
     U.set_val(Real(0));
     levels->push_back(AmrLevelMP{std::move(U), nullptr, S.dx[k], S.dy[k]});
   }
-  // densite initiale (composante 0) sur le grossier + injection piecewise-constante vers les fins,
-  // exactement comme build_amr_compiled. Sans densite : grossier a zero (bloc neutre / fond).
-  if (has_density)
+  // Seed du grossier + injection piecewise-constante vers les fins, exactement comme
+  // build_amr_compiled : ETAT CONSERVATIF COMPLET (set_conservative_state, vague 3 : desormais
+  // cable en multi-blocs, prioritaire) sinon densite (composante 0, reste au repos) sinon zero.
+  if (state && !state->empty())
+    detail::coupler_write_coarse_state((*levels)[0].U, *state, S.n, nc);
+  else if (has_density)
     detail::coupler_write_coarse((*levels)[0].U, density, S.n, nc, gamma);
   for (int k = 1; k < nlev; ++k)
     detail::coupler_inject_coarse_to_fine_mb((*levels)[0].U, (*levels)[k].U, S.replicated_coarse);
@@ -394,15 +460,18 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
     ImplicitMask<Model::n_vars> mask;
     for (int c : implicit_components)
       if (c >= 0 && c < Model::n_vars) { mask.active = true; mask.flag[c] = true; }
-    b.imex_advance = [model, mask](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
-                                   Periodicity per, bool repl) {
+    b.imex_advance = [model, mask, nopts](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
+                                          Periodicity per, bool repl) {
       // (1) transport explicite source-free (-div F seul), reflux porte la conservation hyperbolique.
       advance_amr<Limiter, Flux>(SourceFreeModel<Model>{model}, L, dom, dt, per, repl,
                                  /*recon_prim=*/false, /*imex=*/false);
       // (2) source raide implicite backward-Euler PAR NIVEAU (Newton local, masque de bloc).
       const int nlev_l = static_cast<int>(L.size());
       for (int k = 0; k < nlev_l; ++k)
-        backward_euler_source<Model>(model, *L[k].aux, L[k].U, dt, /*iters=*/2, mask);
+        backward_euler_source<Model>(model, *L[k].aux, L[k].U, dt, nopts, mask);  // options Newton
+                                                                                  // du bloc (vague 3 ;
+                                                                                  // defauts = iters=2
+                                                                                  // historique)
       // (3) INVARIANT DE COUVERTURE (cf. AmrImplicitSourceStepper) : la source implicite a ete resolue
       // niveau par niveau, donc une cellule grossiere COUVERTE porterait une source grossiere fantome
       // au lieu de la moyenne 2x2 de ses enfants. Cascade fin -> grossier pour la coherence (la masse,
@@ -416,9 +485,31 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
   // hote pure). MEME foncteur que System plat (make_poisson_rhs -> detail::PoissonRhs) -> chaque
   // bloc accumule (+=) aux MEMES cellules du grossier partage (co-localisation par cellule).
   b.add_elliptic_rhs = make_poisson_rhs(model);
-  b.max_speed = [model](const MultiFab& U, const MultiFab& aux) {
-    return max_wave_speed_mf(model, U, aux);
-  };
+  // VITESSE DE CFL du bloc : MEME politique que System (make_max_speed) -- lambda* de stabilite
+  // (trait HasStabilitySpeed) si le modele le declare, sinon max_wave_speed (fallback historique,
+  // bit-identique). Les solveurs de Riemann lisent toujours max_wave_speed.
+  if constexpr (HasStabilitySpeed<Model>) {
+    b.max_speed = [model](const MultiFab& U, const MultiFab& aux) {
+      return max_stability_speed_mf(model, U, aux);
+    };
+  } else {
+    b.max_speed = [model](const MultiFab& U, const MultiFab& aux) {
+      return max_wave_speed_mf(model, U, aux);
+    };
+  }
+  // BORNES DE PAS OPTIONNELLES (StabilityPolicy AMR) : memes reductions que System
+  // (max_source_frequency_mf / min_stability_dt_mf), evaluees par AmrRuntime::step_cfl sur le
+  // GROSSIER. Fermetures laissees VIDES quand le modele ne declare pas le trait (bit-identique).
+  if constexpr (HasSourceFrequency<Model>) {
+    b.source_frequency = [model](const MultiFab& U, const MultiFab& aux) {
+      return max_source_frequency_mf(model, U, aux);
+    };
+  }
+  if constexpr (HasStabilityDt<Model>) {
+    b.stability_dt = [model](const MultiFab& U, const MultiFab& aux) {
+      return min_stability_dt_mf(model, U, aux);
+    };
+  }
   const Geometry g = S.geom;
   const bool repl = S.replicated_coarse;
   b.mass = [levels, g, repl] {
@@ -452,34 +543,62 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                                    const std::vector<double>& density, bool has_density,
                                    double gamma, int substeps, bool recon_prim, bool imex,
                                    int stride = 1,
-                                   const std::vector<int>& implicit_components = {}) {
+                                   const std::vector<int>& implicit_components = {},
+                                   const NewtonOptions& nopts = {},
+                                   const std::vector<double>* state = nullptr) {
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                          substeps, recon_prim, imex, stride, implicit_components);
+                                                          substeps, recon_prim, imex, stride, implicit_components, nopts, state);
     if (lim == "minmod")
       return build_amr_block<Model, Minmod, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state);
     if (lim == "vanleer")
       return build_amr_block<Model, VanLeer, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                         substeps, recon_prim, imex, stride, implicit_components);
+                                                         substeps, recon_prim, imex, stride, implicit_components, nopts, state);
     if (lim == "weno5")
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
     throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
   }
+  if (riem == "hll") {
+    // HLL : 2 ondes signees, generique des que le modele expose wave_speeds (PAS de pression ni
+    // n_vars == 4 exiges) -- MEME garde que System::make_block (alignement de surface System/AMR).
+    if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
+                    mm.wave_speeds(s, a, 0, r, r);
+                  }) {
+      if (lim == "none")
+        return build_amr_block<Model, NoSlope, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state);
+      if (lim == "minmod")
+        return build_amr_block<Model, Minmod, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
+      if (lim == "vanleer")
+        return build_amr_block<Model, VanLeer, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state);
+      if (lim == "weno5")
+        return build_amr_block<Model, Weno5, HLLFlux>(m, S, name, density, has_density, gamma,
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state);
+      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+    } else {
+      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hll' exige des vitesses "
+                               "d'onde signees (model.wave_speeds) ; ce transport -> 'rusanov'");
+    }
+  }
   if (riem == "hllc") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasHLLCStructure OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasHLLCStructure<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hllc' exige un transport "
@@ -487,17 +606,19 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
     }
   }
   if (riem == "roe") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasRoeDissipation OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasRoeDissipation<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                     substeps, recon_prim, imex, stride, implicit_components);
+                                                     substeps, recon_prim, imex, stride, implicit_components, nopts, state);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state);
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'roe' exige un transport "
@@ -505,7 +626,7 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
     }
   }
   throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux Riemann inconnu '" + riem +
-                           "' (rusanov|hllc|roe)");
+                           "' (rusanov|hll|hllc|roe)");
 }
 
 /// Dispatch du schema spatial (limiteur x flux Riemann) -> build_amr_compiled. Memes gardes que
@@ -524,9 +645,28 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     if (lim == "weno5") return build_amr_compiled<Model, Weno5, RusanovFlux>(m, bp);
     throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
   }
+  if (riem == "hll") {
+    // HLL : generique des que le modele expose wave_speeds (le DSL les emet des qu'une primitive
+    // 'p' est declaree) -- MEME garde que System::make_block (alignement de surface System/AMR).
+    if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
+                    mm.wave_speeds(s, a, 0, r, r);
+                  }) {
+      if (lim == "none") return build_amr_compiled<Model, NoSlope, HLLFlux>(m, bp);
+      if (lim == "minmod") return build_amr_compiled<Model, Minmod, HLLFlux>(m, bp);
+      if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, HLLFlux>(m, bp);
+      if (lim == "weno5") return build_amr_compiled<Model, Weno5, HLLFlux>(m, bp);
+      throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+    } else {
+      throw std::runtime_error("add_compiled_model(AmrSystem) : flux 'hll' exige des vitesses "
+                               "d'onde signees (model.wave_speeds : declarer une primitive 'p') ; "
+                               "ce transport -> 'rusanov'");
+    }
+  }
   if (riem == "hllc") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasHLLCStructure OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasHLLCStructure<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none") return build_amr_compiled<Model, NoSlope, HLLCFlux>(m, bp);
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, HLLCFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, HLLCFlux>(m, bp);
@@ -537,8 +677,10 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     }
   }
   if (riem == "roe") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasRoeDissipation OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasRoeDissipation<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none") return build_amr_compiled<Model, NoSlope, RoeFlux>(m, bp);
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, RoeFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, RoeFlux>(m, bp);
@@ -549,7 +691,7 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     }
   }
   throw std::runtime_error("add_compiled_model(AmrSystem) : flux Riemann inconnu '" + riem +
-                           "' (rusanov|hllc|roe)");
+                           "' (rusanov|hll|hllc|roe)");
 }
 
 }  // namespace detail
