@@ -392,8 +392,23 @@ def _native_kokkos_root():
 
 def _native_feature_key():
     """Traits qui changent le code inline du loader natif et doivent donc entrer dans le cache (sinon
-    un .so SERIE en cache serait reutilise sur un module Kokkos -> fallback serie silencieux)."""
-    return "kokkos=%s" % ("on" if _native_kokkos_root() else "off")
+    un .so SERIE en cache serait reutilise sur un module Kokkos -> fallback serie silencieux).
+
+    Au-dela du on/off, la cle empreinte KokkosCore_config.h de l'install visee : ce header genere
+    encode la VERSION de Kokkos ET ses backends actifs. Sans lui, changer de Kokkos entre deux runs
+    (mise a jour, bascule Serial->OpenMP au meme prefix) n'invalidait pas le cache -> reutilisation
+    d'un .so compile contre l'ancien Kokkos."""
+    root = _native_kokkos_root()
+    if not root:
+        return "kokkos=off"
+    import hashlib
+    cfg = os.path.join(root, "include", "KokkosCore_config.h")
+    try:
+        with open(cfg, "rb") as f:
+            tag = hashlib.sha256(f.read()).hexdigest()[:12]
+    except OSError:
+        tag = "unknown"
+    return "kokkos=on;kcfg=%s" % tag
 
 
 def _platform_cache_key():

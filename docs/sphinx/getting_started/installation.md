@@ -162,20 +162,33 @@ cmake -S . -B build-gpu -DADC_USE_KOKKOS=ON \
 ## Cluster (Spack, sans root)
 
 Sur ROMEO et assimiles, l'outillage vient des modules/Spack -- pas de conda (`conda env create`
-exige le reseau, souvent absent des noeuds). Configurer sur le noeud de login, compiler dans
-l'allocation :
+exige le reseau, souvent absent des noeuds).
+
+**ROMEO** : un profil machine versionne fait toute la mise en place (env Spack du site,
+CC/CXX, Kokkos, variables du DSL, cache dans le scratch) :
 
 ```bash
-spack load cmake ninja kokkos openmpi
-cmake -S . -B build-kokkos -G Ninja -DADC_USE_KOKKOS=ON \
-      -DKokkos_ROOT=$(spack location -i kokkos)
-# puis dans l'allocation : ninja -C build-kokkos
+cp Tools/machines/romeo/romeo_adc.profile.example ~/romeo_adc.profile
+# editer les lignes '# A ADAPTER' (chemin Kokkos), puis a chaque session/job :
+source ~/romeo_adc.profile                       # ADC_ROMEO_ARCH=armgpu pour le GPU
 ```
 
-GPU Grace-Hopper : suivre
-[GPU_ROMEO.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md). Pour le DSL
-`backend="production"`, exporter `ADC_KOKKOS_ROOT=<prefix Kokkos Spack>` ; le compilateur du
-build est bake dans `_adc`, le DSL le retrouve seul tant qu'il existe sur les noeuds.
+**Autre cluster** : le guide generique
+[HPC_SPACK_GUIDE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/HPC_SPACK_GUIDE.md)
+couvre l'installation de la pile (Spack du site ou bootstrap perso), la compilation ciblee
+microarchitecture et le lancement SLURM avec placement des threads/GPU. Schema minimal :
+
+```bash
+spack load cmake ninja kokkos openmpi            # ou module load <env du site>
+cmake -S . -B build-kokkos -G Ninja -DADC_USE_KOKKOS=ON \
+      -DKokkos_ROOT=$(spack location -i kokkos)
+# configurer sur le LOGIN ; dans l'allocation, relancer seulement : ninja -C build-kokkos
+```
+
+GPU Grace-Hopper : [GPU_ROMEO.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
+Pour le DSL `backend="production"`, exporter `ADC_KOKKOS_ROOT=<prefix Kokkos>` (le profil ROMEO
+le fait) ; le compilateur du build est bake dans `_adc`, le DSL le retrouve seul tant qu'il
+existe sur les noeuds.
 
 ## Depannage
 

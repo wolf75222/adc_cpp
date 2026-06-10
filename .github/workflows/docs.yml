@@ -31,7 +31,7 @@ jobs:
       - name: System deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libeigen3-dev doxygen graphviz
+          sudo apt-get install -y libeigen3-dev doxygen graphviz ninja-build
 
       - uses: actions/setup-python@v5
         with:
@@ -45,51 +45,12 @@ jobs:
           pip install numpy
           pip install -r docs/sphinx/requirements.txt
 
-      # Garde-fous documentaires (rapide, pur Python, AVANT le build) : em-dash interdits,
-      # ASCII strict des pages Sphinx, termes/anciennes API faux dans les docs normatives,
-      # images referencees existantes. Attrape ce qu'un sphinx-build -W laisse passer (em-dash,
-      # claim faux en prose). Echoue tot, message clair.
-      - name: Doc lint
-        run: python docs/check_docs.py
-
-      # Compile le module `adc` pour qu'autodoc (reference/api_python.md) resolve les
-      # signatures. Non best-effort : `sphinx-build -W` echouera sur les warnings autodoc
-      # si le module n'est pas importable, donc le build doit reussir ici. La cible pybind
-      # est `_adc` (cf. python/CMakeLists.txt : pybind11_add_module(_adc ...)).
-      - name: Build module Python adc
-        run: |
-          # Le module _adc DOIT etre construit contre le MEME Python que celui qui lance Sphinx
-          # (sinon `import adc` echoue sur un mismatch d'ABI cpython-XY -> autodoc stubs -> -W KO).
-          # -DPYBIND11_FINDPYTHON=ON force pybind a utiliser le FindPython moderne (Interpreter ET
-          # Development.Module coherents) ; -DPython_EXECUTABLE epingle l'interpreteur de
-          # setup-python (3.12). Sans ces deux flags, pybind retombe sur le FindPythonLibs classique
-          # et peut lier /usr/bin/python3 (autre version) -> extension inimportable.
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_PYTHON=ON \
-                -DPYBIND11_FINDPYTHON=ON -DPython_EXECUTABLE="$(which python)"
-          cmake --build build --target _adc -j 2
-
-      # Sphinx d'abord : cree docs/_build, ce dont Doxygen a besoin (OUTPUT_DIRECTORY).
-      # -W : transforme les warnings en erreurs (refs cassees, autodoc non resolu).
-      # --keep-going : collecte TOUS les warnings avant d'echouer (diagnostic complet).
-      - name: Build Sphinx
-        run: PYTHONPATH=$PWD/build/python python -m sphinx -W --keep-going -b html docs/sphinx docs/_build/sphinx
-
-      - name: Build Doxygen
-        run: |
-          mkdir -p docs/_build
-          doxygen docs/Doxyfile
-          # Doxygen ecrit <img src="docs/..."> dans le README rendu mais ne copie
-          # pas les images ; on les place sous la sortie HTML pour que les chemins
-          # relatifs resolvent.
-          mkdir -p docs/_build/doxygen/html/docs
-          cp docs/*.png docs/*.gif docs/_build/doxygen/html/docs/ 2>/dev/null || true
-
-      - name: Combine sites (Doxygen sous /cpp/)
-        run: |
-          mkdir -p docs/_site
-          cp -r docs/_build/sphinx/. docs/_site/
-          mkdir -p docs/_site/cpp
-          cp -r docs/_build/doxygen/html/. docs/_site/cpp/
+      # TOUTES les etapes (lint, module _adc pour autodoc, sphinx -W, doxygen, site combine)
+      # vivent dans scripts/build_docs.sh : SOURCE UNIQUE, identique en local et en CI.
+      # Le script construit le module via le preset `python` (pin interpreteur de setup-python
+      # par Python_ROOT_DIR/PATH ; ninja fourni par apt ci-dessus).
+      - name: Build docs (lint + module + sphinx + doxygen)
+        run: bash scripts/build_docs.sh
 
       - uses: actions/upload-pages-artifact@v3
         with:

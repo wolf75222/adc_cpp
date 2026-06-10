@@ -206,7 +206,6 @@ adc_add_test(test_eb_transport)
 add_executable(test_facade_routing test_facade_routing.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_facade_routing PRIVATE adc::adc ${CMAKE_DL_LIBS})
-adc_cap_opt_for_kokkos_ram(test_facade_routing)  # system.cpp + Kokkos -O3 -> OOM cc1plus (cf. helper)
 add_test(NAME test_facade_routing COMMAND test_facade_routing)
 
 # --- canal aux extensible (n_aux + load_aux<NComp>) : champ extra B_z lu et peuple ---
@@ -306,7 +305,6 @@ adc_add_test(test_weno5_ssprk3)
 add_executable(test_compiled_model_parity test_compiled_model_parity.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_compiled_model_parity PRIVATE adc::adc ${CMAKE_DL_LIBS})
-adc_cap_opt_for_kokkos_ram(test_compiled_model_parity)  # system.cpp + add_compiled_model<Euler> + Kokkos -O3 -> OOM
 add_test(NAME test_compiled_model_parity COMMAND test_compiled_model_parity)
 
 # --- WENO5 sur le chemin compile natif (add_compiled_model) == bloc natif (add_block) ---
@@ -316,7 +314,6 @@ add_test(NAME test_compiled_model_parity COMMAND test_compiled_model_parity)
 add_executable(test_weno5_compiled_model test_weno5_compiled_model.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_weno5_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS})
-adc_cap_opt_for_kokkos_ram(test_weno5_compiled_model)  # system.cpp + add_compiled_model<Euler> + Kokkos -O3 -> OOM
 add_test(NAME test_weno5_compiled_model COMMAND test_weno5_compiled_model)
 
 # --- parite bloc compile AOT (add_compiled_model) == bloc natif (add_block) COTE AMR ---
@@ -338,7 +335,6 @@ add_executable(test_amr_potential test_amr_potential.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
 target_link_libraries(test_amr_potential PRIVATE adc::adc ${CMAKE_DL_LIBS})
-adc_cap_opt_for_kokkos_ram(test_amr_potential)  # compile aussi system.cpp (dispatch +HLL) ; parite a tolerance MG
 add_test(NAME test_amr_potential COMMAND test_amr_potential)
 
 # --- chemin "production" NATIF cote AMR : AmrSystem::add_native_block (DSL Phase D) ---
@@ -781,3 +777,22 @@ endif()
 # polaire conforment, ou NON, a chaque concept) ; additif, aucune classe modifiee, donc
 # bit-identique. Ligne unique en fin de fichier pour eviter les conflits de fusion.
 adc_add_test(test_elliptic_interface)
+
+# --- Couverture AUTOMATIQUE du garde memoire (audit CI : 4 cibles capees a la main sur ~39) ----
+# TOUTE cible de ce repertoire qui compile une TU lourde du runtime (python/system.cpp ou
+# python/amr_system.cpp -- les deux instancient le produit combinatoire complet du dispatch,
+# ~1-2 GB de RSS cc1plus a -O3 sous Kokkos) passe par adc_cap_opt_for_kokkos_ram : -O0 cible
+# (correction inchangee, cf. justification en tete de fichier) + pool ninja adc_heavy_tu=1
+# (jamais deux TU lourdes concurrentes). La boucle couvre les cibles FUTURES automatiquement :
+# plus d'appel manuel a oublier. Benefice annexe : build des tests nettement plus rapide
+# (TU lourde a -O0 ~ 40 s contre ~470 s a -O3).
+get_property(_adc_dir_targets DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY BUILDSYSTEM_TARGETS)
+set(_adc_capped 0)
+foreach(_t ${_adc_dir_targets})
+  get_target_property(_t_sources ${_t} SOURCES)
+  if(_t_sources MATCHES "python/(amr_)?system\.cpp")
+    adc_cap_opt_for_kokkos_ram(${_t})
+    math(EXPR _adc_capped "${_adc_capped}+1")
+  endif()
+endforeach()
+message(STATUS "adc tests: ${_adc_capped} cibles a TU lourde capees (-O0 + pool adc_heavy_tu)")
