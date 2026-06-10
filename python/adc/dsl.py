@@ -150,6 +150,196 @@ def _adc_cxx_std_from_module(mod):
     return None
 
 
+# --- Compilateur des .so DSL (frontiere ABI, pendant de loader_cxx_std) -------------------------
+# BUG REEL corrige ici : dans un env conda active, `which c++` designe souvent un AUTRE compilateur
+# que celui qui a construit _adc (vieux gcc/clang du PATH conda). Symptome : la compilation runtime
+# du loader DSL production echoue avec l'erreur brute du compilateur ("error: invalid value 'c++23'
+# in '-std=c++23'") ; et meme si elle passait, la cle d'ABI (qui encode __VERSION__ du compilateur,
+# cf. abi_key.hpp) rejetterait le .so ("ABI incompatible"). Le SEUL compilateur garanti compatible
+# est celui du build de _adc : CMake le bake (ADC_CXX_COMPILER -> _adc.__cxx_compiler__) et on le
+# prefere ici au PATH. $ADC_CXX reste l'override conscient (toolchain conda choisi, wrapper...).
+def _adc_module():
+    """Le module d'extension _adc s'il est chargeable, sinon None (dsl.py reste utilisable seul)."""
+    try:
+        import _adc
+        return _adc
+    except Exception:
+        try:
+            from . import _adc
+            return _adc
+        except Exception:
+            return None
+
+
+def loader_cxx_compiler():
+    """Chemin du compilateur qui a CONSTRUIT le module _adc (bake par CMake en __cxx_compiler__),
+    ou None s'il est inconnu (vieux module, build manuel) ou absent de cette machine."""
+    mod = _adc_module()
+    cc = getattr(mod, "__cxx_compiler__", "") if mod is not None else ""
+    if cc and os.path.isfile(cc) and os.access(cc, os.X_OK):
+        return cc
+    return None
+
+
+def module_header_signature():
+    """Signature d'en-tetes BAKEE dans le module _adc charge (token headers= de abi_key()), ou None
+    si le module n'est pas chargeable / la cle absente ("unknown" d'un build manuel -> None aussi)."""
+    mod = _adc_module()
+    abi = getattr(mod, "abi_key", None) if mod is not None else None
+    if not callable(abi):
+        return None
+    try:
+        key = abi()
+    except Exception:
+        return None
+    for tok in str(key).split(";"):
+        if tok.startswith("headers="):
+            sig = tok[len("headers="):]
+            return sig if sig and sig != "unknown" else None
+    return None
+
+
+def _check_headers_match_module(include):
+    """GARDE PRE-DLOPEN du chemin natif (bug reel) : si les en-tetes sous @p include ont change depuis
+    le build de _adc (pull recent, autre clone...), le loader compile contre eux reference des
+    signatures C++ que le VIEUX module n'exporte pas -> le dlopen d'add_native_block echoue AVANT le
+    garde ABI, avec une erreur cryptique ("symbol not found in flat namespace '__ZN3adc6System13
+    install_block...'"). On compare donc ICI, avant toute compilation, la signature d'en-tetes bakee
+    dans le module a celle de l'arbre @p include, et on echoue avec un remede clair. No-op si le
+    module n'est pas chargeable ou sans signature (build manuel : degradation historique)."""
+    baked = module_header_signature()
+    current = adc_header_signature(include)
+    if baked is not None and current != baked:
+        mod = _adc_module()
+        so = getattr(mod, "__file__", "(inconnu)")
+        raise RuntimeError(
+            "adc.dsl : les en-tetes adc de %r NE CORRESPONDENT PAS a ceux avec lesquels le module "
+            "_adc a ete construit (%s).\n"
+            "  signature en-tetes actuelle : %s\n"
+            "  signature bakee dans _adc   : %s\n"
+            "Cause typique : `git pull` / en-tetes edites APRES le build du module -> le loader DSL "
+            "referencerait des signatures C++ absentes du module (dlopen : 'symbol not found').\n"
+            "Remede : REBATIR le module avec ces en-tetes :\n"
+            "  cmake --preset python && cmake --build --preset python   (ou le build-py habituel)\n"
+            "ou pointer ADC_INCLUDE vers les en-tetes du build qui a produit ce module."
+            % (include, so, current[:16], baked[:16]))
+    return current  # signature de l'arbre @p include, reutilisable (evite un 2e walk+sha256)
+
+
+def check_compiled_matches_module(abi_key):
+    """Garde PRE-DLOPEN au BRANCHEMENT d'un CompiledModel (add_equation -> add_native_block).
+
+    COMPLEMENT INDISPENSABLE de _check_headers_match_module : sur un cache HIT, compile_native ne
+    tourne pas (le .so sort du cache) et la garde de compilation ne protege donc pas ce chemin --
+    un module _adc perime dlopen-erait le .so et echouerait sur le 'symbol not found' cryptique.
+    Ici on compare la signature d'en-tetes EMBARQUEE dans la cle Python du .so ('<sig>|<cxx>|<std>',
+    cf. _abi_key_python, recalculee sur l'arbre include ACTUEL a chaque compile()) a celle bakee
+    dans le module. Pure comparaison de CHAINES (aucun re-hash). No-op si l'une des deux manque
+    (vieux module, CompiledModel construit a la main)."""
+    baked = module_header_signature()
+    if baked is None or not abi_key:
+        return
+    so_sig = str(abi_key).split("|", 1)[0]
+    if so_sig and so_sig != baked:
+        raise RuntimeError(
+            "adc : le modele compile (.so) a ete produit contre des en-tetes adc DIFFERENTS de ceux "
+            "du module _adc charge (signature %s... vs %s... bakee dans le module).\n"
+            "Cause typique : module _adc perime (bati avant un `git pull`) alors que le .so vient "
+            "d'etre (re)compile sur les en-tetes a jour -- le dlopen echouerait avec un 'symbol not "
+            "found' cryptique.\n"
+            "Remede : REBATIR le module puis relancer :\n"
+            "  cmake --preset python && cmake --build --preset python\n"
+            "Diagnostic complet : python -c \"import adc; adc.doctor()\"."
+            % (so_sig[:12], baked[:12]))
+
+
+def _default_cxx(cxx=None):
+    """Resolution CENTRALISEE du compilateur des .so DSL (tous backends). Priorite :
+      1. cxx explicite (argument de l'appelant) ;
+      2. $ADC_CXX (override d'environnement conscient) ;
+      3. le compilateur qui a construit _adc (seul garanti ABI-compatible, cf. ci-dessus) ;
+      4. c++ / g++ / clang++ du PATH (comportement historique, dernier recours)."""
+    return (cxx or os.environ.get("ADC_CXX") or loader_cxx_compiler()
+            or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
+
+
+# Orthographes historiques des memes niveaux de langue : les clang < 17 / gcc < 11 ne connaissent
+# que 'c++2b'/'c++2a'. Meme niveau demande ; sur un VIEUX compilateur __cplusplus peut differer du
+# module -> le cas echeant, rejet ABI explicite en aval (jamais d'UB silencieux).
+_STD_ALIAS = {"c++23": "c++2b", "c++20": "c++2a"}
+
+
+def _run_compile(cmd, what):
+    """Lance la commande de compilation @p cmd en CAPTURANT stderr : en cas d'echec, leve une
+    RuntimeError AUTONOME (commande + sortie compilateur + remedes) au lieu du CalledProcessError
+    brut dont le message ne contient que la ligne de commande (bug reel : l'utilisateur ne voit
+    qu'un 'returned non-zero exit status 1' noye dans le traceback)."""
+    import subprocess
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode != 0:
+        err = (r.stderr or b"").decode(errors="replace").strip()
+        raise RuntimeError(
+            "adc.dsl : la compilation du .so (%s) a echoue (exit %d).\n"
+            "Commande : %s\n"
+            "Sortie du compilateur :\n%s\n"
+            "Pistes : `python -c \"import adc; adc.doctor()\"` diagnostique l'environnement "
+            "(compilateur/norme/en-tetes) ; ADC_CXX force un compilateur precis."
+            % (what, r.returncode, " ".join(cmd), err[:4000] or "(vide)"))
+
+
+_probe_cache = {}  # (cc, std) -> std effectif : evite de re-prober en boucle (N modeles compiles)
+
+
+def _probe_cxx_std(cc, std):
+    """Verifie AVANT compilation que @p cc accepte -std=@p std (probe -fsyntax-only sur source vide).
+
+    Renvoie le std EFFECTIF : @p std s'il passe, sinon son alias historique (c++23 -> c++2b) s'il
+    passe, sinon leve une RuntimeError ACTIONNABLE (compilateur utilise, compilateur du build,
+    solutions) au lieu de l'erreur brute du compilateur. Saute pour nvcc_wrapper (semantique -x
+    differente ; chemin GPU explicite, deja gate par ADC_KOKKOS_CXX/ADC_KOKKOS_USE_NVCC_WRAPPER).
+    Resultat memoise par (cc, std) : un seul probe meme si N modeles sont compiles a la suite."""
+    import subprocess
+    if "nvcc" in os.path.basename(cc or ""):
+        return std
+    cached = _probe_cache.get((cc, std))
+    if cached is not None:
+        return cached
+
+    def accepts(s):
+        try:
+            r = subprocess.run([cc, "-x", "c++", "-std=" + s, "-fsyntax-only", "-"],
+                               input=b"", capture_output=True, timeout=60)
+            return r.returncode == 0, (r.stderr or b"").decode(errors="replace")
+        except Exception as exc:  # introuvable, non executable, timeout : meme diagnostic actionnable
+            return False, str(exc)
+
+    good, err = accepts(std)
+    if good:
+        _probe_cache[(cc, std)] = std
+        return std
+    alias = _STD_ALIAS.get(std)
+    if alias:
+        good_alias, _ = accepts(alias)
+        if good_alias:
+            _probe_cache[(cc, std)] = alias
+            return alias
+    baked = loader_cxx_compiler()
+    raise RuntimeError(
+        "adc.dsl : le compilateur %r ne supporte pas -std=%s (norme requise pour partager l'ABI du "
+        "module _adc).\nSortie du compilateur :\n%s\n"
+        "Compilateur du build de _adc : %s\n"
+        "Solutions :\n"
+        "  - utiliser le compilateur du build : export ADC_CXX=%r (ou cxx=... dans m.compile) ;\n"
+        "  - macOS : mettre a jour Xcode / les Command Line Tools (AppleClang recent) ;\n"
+        "  - conda : `conda install -c conda-forge cxx-compiler` (gcc>=13 / clang>=17) puis "
+        "export ADC_CXX=$CONDA_PREFIX/bin/clang++ (macOS) ou $CONDA_PREFIX/bin/g++ (Linux).\n"
+        "NB : un compilateur DIFFERENT de celui du build peut compiler mais etre ensuite rejete "
+        "('ABI incompatible' : la cle d'ABI encode la version du compilateur) ; preferer celui du build."
+        % (cc, std, (err or "").strip()[:800],
+           baked or "(inconnu : module sans __cxx_compiler__, rebatir _adc pour le baker)",
+           baked or "<chemin/du/compilateur/du/build>"))
+
+
 # --- Cache de build hors source ----------------------------------------------
 # Quand l'appelant ne fournit pas so_path, m.compile(...) ecrit la .so dans un cache PARTAGE hors
 # source (jamais a cote du .cpp temporaire), indexe par une cle stable du modele : model_hash (formules
@@ -181,7 +371,10 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
     lisible (prefixe = identite du modele) et sans collision (suffixe = reste de la cle)."""
     import hashlib
     import os
-    rest = "|".join((abi_key or "", backend or "", target or "", name or "")).encode()
+    # _platform_cache_key : l'arch CPU + les optflags entrent dans la cle (un .so x86_64 ou
+    # -march=native reutilise sur une autre machine via un cache partage = SIGILL silencieux).
+    rest = "|".join((abi_key or "", backend or "", target or "", name or "",
+                     _platform_cache_key())).encode()
     tag = hashlib.sha256(rest).hexdigest()[:16]
     fname = "%s-%s.so" % ((model_hash or "nohash")[:16], tag)
     return os.path.join(adc_cache_dir(), fname)
@@ -203,6 +396,43 @@ def _native_feature_key():
     return "kokkos=%s" % ("on" if _native_kokkos_root() else "off")
 
 
+def _platform_cache_key():
+    """Traits MACHINE qui changent le code binaire du .so sans changer la cle d'ABI C++ (__VERSION__
+    est identique cross-arch) : architecture CPU + flags d'optimisation. Sans eux dans la cle de
+    cache, un .so x86_64 (Rosetta) ou -march=native serait reutilise sur une autre machine/arch via
+    un cache partage (NFS, home synchronise) -> SIGILL (illegal instruction) ou dlopen cryptique."""
+    import platform
+    return "arch=%s;optflags=%s" % (platform.machine(),
+                                    os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG"))
+
+
+def _warn_kokkos_parity():
+    """Avertit (sans bloquer) quand le BACKEND du loader natif divergerait de celui du module _adc :
+    - module Kokkos + loader serie (ADC_KOKKOS_ROOT absent) -> le bloc DSL tombe sur le fallback
+      SERIE en silence : zero-copie mais NE SCALE PAS threads/GPU (mesure ROMEO : DSL warm invariant
+      threads=1/4/8). C'est une degradation de PERF muette, pas un crash -> warning explicite.
+    - module serie + ADC_KOKKOS_ROOT defini -> le loader instancierait -DADC_HAS_KOKKOS contre un
+      module qui ne l'est pas (layouts allocator/types divergents, non couverts par la cle d'ABI).
+    Source de verite : _adc.__has_kokkos__ (bake par le build) vs _native_kokkos_root() (env)."""
+    import warnings
+    mod = _adc_module()
+    has = getattr(mod, "__has_kokkos__", None) if mod is not None else None
+    root = _native_kokkos_root()
+    if has is True and root is None:
+        warnings.warn(
+            "adc.dsl : le module _adc est compile AVEC Kokkos mais ADC_KOKKOS_ROOT n'est pas defini "
+            "-> le bloc DSL 'production' sera compile en SERIE (il tournera, mais ne scalera pas "
+            "avec les threads/GPU). Definir ADC_KOKKOS_ROOT=<install Kokkos du build> pour la parite.",
+            RuntimeWarning, stacklevel=3)
+    elif has is False and root is not None:
+        warnings.warn(
+            "adc.dsl : ADC_KOKKOS_ROOT est defini mais le module _adc est SERIE (compile sans "
+            "-DADC_USE_KOKKOS=ON) -> le loader serait compile avec Kokkos contre un module qui ne "
+            "l'est pas (layouts memoire divergents, non couverts par la cle d'ABI). Retirer "
+            "ADC_KOKKOS_ROOT ou rebatir _adc avec Kokkos (preset python-parallel).",
+            RuntimeWarning, stacklevel=3)
+
+
 def _env_truthy(value):
     return str(value or "").strip().lower() in ("1", "on", "true", "yes", "y")
 
@@ -220,7 +450,9 @@ def _native_kokkos_compiler(cxx):
     wrapper = os.path.join(root, "bin", "nvcc_wrapper") if root else ""
     if wrapper and os.path.exists(wrapper) and _env_truthy(os.environ.get("ADC_KOKKOS_USE_NVCC_WRAPPER")):
         return wrapper
-    return shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+    # Fallback centralise : $ADC_CXX, puis le compilateur du build de _adc (seul ABI-compatible
+    # garanti pour un loader natif), puis le PATH (historique). cf. _default_cxx.
+    return _default_cxx(None)
 
 
 def _native_kokkos_flags():
@@ -1364,15 +1596,16 @@ class HyperbolicModel:
         if include is None:
             include = adc_include()
         src = self.emit_cpp_so_source(name=name)
-        cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        cc = _default_cxx(cxx)
         if not cc:
             raise RuntimeError("compile_so : aucun compilateur C++ trouve")
+        std = _probe_cxx_std(cc, std)  # erreur ACTIONNABLE si le std n'est pas supporte (vs erreur brute)
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model.cpp")
             with open(cpp, "w") as f:
                 f.write(src)
-            subprocess.run([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include, cpp,
-                            "-o", so_path], check=True)
+            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include, cpp,
+                          "-o", so_path], "backend jit, compile_so")
         return so_path
 
     def emit_cpp_aot_source(self, name=None):
@@ -1404,15 +1637,16 @@ class HyperbolicModel:
         if include is None:
             include = adc_include()
         src = self.emit_cpp_aot_source(name=name)
-        cc = cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+        cc = _default_cxx(cxx)
         if not cc:
             raise RuntimeError("compile_aot : aucun compilateur C++ trouve")
+        std = _probe_cxx_std(cc, std)  # erreur ACTIONNABLE si le std n'est pas supporte (vs erreur brute)
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_aot.cpp")
             with open(cpp, "w") as f:
                 f.write(src)
-            subprocess.run([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include, cpp,
-                            "-o", so_path], check=True)
+            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include, cpp,
+                          "-o", so_path], "backend aot, compile_aot")
         return so_path
 
     def emit_cpp_native_loader(self, name=None, target="system"):
@@ -1436,9 +1670,12 @@ class HyperbolicModel:
 
         Symboles extern "C" emis :
 
-        - adc_native_abi_key() : cle d'ABI figee a la compilation DU LOADER (adc::detail::
-          abi_key_string()). add_native_block la compare a abi_key() du module -> erreur explicite
-          si en-tetes / compilateur / standard divergent (pas d'UB silencieux a la frontiere C++).
+        - adc_native_abi_key() : cle d'ABI figee a la compilation DU LOADER, emise comme LITTERAL
+          preprocesseur (ADC_ABI_KEY_LITERAL) et PAS via la fonction inline abi_key_string() : sous
+          ELF/RTLD_GLOBAL, une inline (liaison faible) serait interposee vers la copie du module et
+          le loader renverrait la cle DU MODULE (garde tautologique, jamais de rejet -- bug CI reel
+          quand gcc cesse d'inliner). add_native_block la compare a abi_key() du module -> erreur
+          explicite si en-tetes / compilateur / standard divergent (pas d'UB silencieux).
           Commune aux deux cibles.
         - adc_install_native (target="system") OU adc_install_native_amr (target="amr_system") :
           reinterpret_cast<adc::System*|adc::AmrSystem*>(sys) puis add_compiled_model<ProdModel>(...).
@@ -1450,7 +1687,7 @@ class HyperbolicModel:
             raise ValueError("emit_cpp_native_loader : target 'system' | 'amr_system' (recu %r)"
                              % (target,))
         nv, bricks, composite = self._emit_bricks(name)
-        head = ('#include <adc/runtime/abi_key.hpp>\n'         # detail::abi_key_string (cle figee a la compil)
+        head = ('#include <adc/runtime/abi_key.hpp>\n'         # ADC_ABI_KEY_LITERAL (cle figee a la compil)
                 '#include <adc/physics/bricks.hpp>\n'          # CompositeModel + NoSource + briques
                 '#include <adc/core/variables.hpp>\n'
                 '#include <string>\n')
@@ -1458,9 +1695,10 @@ class HyperbolicModel:
         # selectivement pour ne pas tirer la machinerie AMR dans un loader System (et inversement).
         head += ('#include <adc/runtime/dsl_block.hpp>\n' if target == "system"
                  else '#include <adc/runtime/amr_dsl_block.hpp>\n')
+        # LITTERAL preprocesseur, pas d'appel a abi_key_string() : une inline serait interposee
+        # (ELF/RTLD_GLOBAL) vers la copie du module -> cle du module renvoyee -> garde tautologique.
         key = ('extern "C" const char* adc_native_abi_key() {\n'
-               '  static const std::string k = adc::detail::abi_key_string();\n'
-               '  return k.c_str();\n'
+               '  return ADC_ABI_KEY_LITERAL;\n'
                '}\n')
         if target == "system":
             install = ('extern "C" void adc_install_native(void* sys, const char* name, const char* limiter,\n'
@@ -1516,11 +1754,19 @@ class HyperbolicModel:
 
         if include is None:
             include = adc_include()
+        # GARDE PRE-DLOPEN : en-tetes != ceux du build de _adc -> erreur claire ICI ("rebatir le
+        # module") au lieu d'un dlopen 'symbol not found' cryptique dans add_native_block. Renvoie la
+        # signature calculee (reutilisee pour -DADC_HEADER_SIG : un seul walk+sha256, pas deux).
+        sig = _check_headers_match_module(include)
+        _warn_kokkos_parity()  # module Kokkos + loader serie (ou l'inverse) -> avertir, ne pas bloquer
         src = self.emit_cpp_native_loader(name=name, target=target)
         cc = _native_kokkos_compiler(cxx)
         if not cc:
             raise RuntimeError("compile_native : aucun compilateur C++ trouve")
-        sig = adc_header_signature(include)
+        # Probe AVANT compilation : si le compilateur ne supporte pas la norme (cas reel : vieux
+        # gcc/clang d'un env conda pris sur le PATH), erreur actionnable au lieu de l'erreur brute
+        # "invalid value 'c++23'". Peut retrograder vers l'orthographe c++2b (meme niveau).
+        std = _probe_cxx_std(cc, std)
         # -DADC_HEADER_SIG : MEME signature que le build du module (concordance des cles d'ABI).
         #
         # (1) PARITE DE BACKEND (le plus important pour le scaling) : si _adc est compile avec Kokkos
@@ -1550,8 +1796,8 @@ class HyperbolicModel:
             cpp = os.path.join(tmp, "model_native.cpp")
             with open(cpp, "w") as f:
                 f.write(src)
-            subprocess.run([cc, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
-                           check=True)
+            _run_compile([cc, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
+                         "backend production, compile_native")
         return so_path
 
     def compile_or_jit(self, so_path, include=None, mode="jit", name=None, cxx=None, std="c++20",
@@ -1739,8 +1985,7 @@ class HyperbolicModel:
             # feature-key (kokkos on/off) entre dans la cle de cache : un .so SERIE ne doit pas etre
             # reutilise sur un module Kokkos (sinon fallback serie silencieux, le bloc ne scale pas).
             native = (backend == "production")
-            eff_cxx = (_native_kokkos_compiler(cxx) if native
-                       else cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
+            eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
             abi_key = _abi_key_python(include, eff_cxx, std)
             cache_backend = (backend + ";" + _native_feature_key()) if native else backend
             so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
@@ -2176,8 +2421,7 @@ class Model:
         native = (mode == "native")
         # natif : compilateur/backend suivant Kokkos reel (cf. compile_native), pour que la cle de
         # cache calculee ici CONCORDE avec le .so reellement produit par le moteur.
-        eff_cxx = (_native_kokkos_compiler(cxx) if native
-                   else cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
+        eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
         if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
             include = adc_include()
 
@@ -2563,16 +2807,17 @@ class HybridModel:
         if target not in ("system", "amr_system"):
             raise ValueError("_emit_native_source : target 'system' | 'amr_system' (recu %r)" % (target,))
         bricks, composite = self._bricks_and_composite()
-        head = ('#include <adc/runtime/abi_key.hpp>\n'        # detail::abi_key_string (cle figee a la compil)
+        head = ('#include <adc/runtime/abi_key.hpp>\n'        # ADC_ABI_KEY_LITERAL (cle figee a la compil)
                 '#include <adc/physics/bricks.hpp>\n'         # CompositeModel + briques natives
                 '#include <adc/core/variables.hpp>\n'
                 '#include <string>\n')
         # Gabarit en-tete de la cible (selectif : ne pas tirer la machinerie AMR dans un loader System).
         head += ('#include <adc/runtime/dsl_block.hpp>\n' if target == "system"
                  else '#include <adc/runtime/amr_dsl_block.hpp>\n')
+        # LITTERAL preprocesseur, pas d'appel a abi_key_string() : une inline serait interposee
+        # (ELF/RTLD_GLOBAL) vers la copie du module -> cle du module renvoyee -> garde tautologique.
         key = ('extern "C" const char* adc_native_abi_key() {\n'
-               '  static const std::string k = adc::detail::abi_key_string();\n'
-               '  return k.c_str();\n'
+               '  return ADC_ABI_KEY_LITERAL;\n'
                '}\n')
         if target == "system":
             install = ('extern "C" void adc_install_native(void* sys, const char* name, const char* limiter,\n'
@@ -2640,10 +2885,13 @@ class HybridModel:
         # (g++ par defaut, nvcc_wrapper si explicite), -O3 -DNDEBUG, flags Kokkos sans linker libkokkos
         # (runtime unique), feature-key kokkos dans le cache. jit/aot restent inchanges (-O2, hote).
         native = (mode == "native")
-        eff_cxx = (_native_kokkos_compiler(cxx) if native
-                   else cxx or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
+        if native:  # garde pre-dlopen : en-tetes != build de _adc -> remede clair (cf. compile_native)
+            _check_headers_match_module(include)
+            _warn_kokkos_parity()
+        eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
         if not eff_cxx:
             raise RuntimeError("HybridModel.compile : aucun compilateur C++ trouve")
+        std = _probe_cxx_std(eff_cxx, std)  # erreur ACTIONNABLE si le std n'est pas supporte
         model_hash = self._model_hash()
         abi_key = _abi_key_python(include, eff_cxx, std)
         if so_path is None:
@@ -2671,8 +2919,8 @@ class HybridModel:
             cpp = os.path.join(tmp, "model_hybrid.cpp")
             with open(cpp, "w") as f:
                 f.write(source)
-            subprocess.run([eff_cxx, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
-                           check=True)
+            _run_compile([eff_cxx, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
+                         "HybridModel, backend " + backend)
         return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
 
     def _compiled_model(self, so_path, backend, target, abi_key, model_hash, cxx, std):

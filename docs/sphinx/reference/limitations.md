@@ -92,9 +92,11 @@ l'historique mais explicitement supersedee par cet audit).
 Le module Python (`adc._adc`) est un `.so` lie a l'interpreteur qui l'a compile (p.ex. un
 `.so` `cpython-312`). Consequences observees :
 
-- l'importer sous un interpreteur d'une autre version (p.ex. un `python3` systeme 3.9) donne
-  `ModuleNotFoundError: adc._adc` ;
-- l'importer sous un 3.12 sans numpy installe echoue sur `import numpy` dans `dsl.py`.
+- l'importer sous un interpreteur d'une autre version (p.ex. un `python3` systeme 3.9) echoue,
+  avec un message qui nomme desormais le tag attendu et la commande de reconstruction ;
+- sans numpy, `import adc` et `adc.System` fonctionnent ; seul `adc.dsl` (evaluateur hote)
+  echoue, avec un message qui demande numpy.
 
 Il faut donc utiliser exactement l'interpreteur 3.12 qui a construit le module (avec numpy), et
-pointer `PYTHONPATH` sur le `build*/python` correspondant. Voir [installation](../getting_started/installation.md).
+pointer `PYTHONPATH` sur le `build*/python` correspondant, ou reinstaller avec le backend voulu
+(`ADC_USE_KOKKOS=ON pip install .`). Voir [installation](../getting_started/installation.md).

@@ -30,6 +30,29 @@ import sys as _sys
 # add_native_block echoue au dlopen ("symbol not found in flat namespace"). On
 # charge donc _adc en RTLD_GLOBAL, puis on restaure les flags pour les imports
 # suivants. Le module deja charge conserve sa portee globale.
+def _explain_missing_extension(exc):
+    """Transforme le ModuleNotFoundError brut sur adc._adc en message ACTIONNABLE (bug recurrent :
+    l'extension est epinglee a l'ABI cpython-3XY de l'interpreteur qui l'a construite ; sous un
+    autre python, l'import echoue sans dire pourquoi). On liste les .so presents a cote du paquet
+    et on compare leur tag a l'interpreteur courant."""
+    import glob
+    here = _os.path.dirname(__file__)
+    sos = sorted(_os.path.basename(p) for p in glob.glob(_os.path.join(here, "_adc.*")))
+    cur = "cpython-%d%d" % (_sys.version_info[0], _sys.version_info[1])
+    if not sos:
+        hint = ("aucune extension _adc.*.so dans %s : le module n'est pas construit. Construire avec "
+                "`cmake --preset python && cmake --build --preset python`, puis PYTHONPATH=<build>/python."
+                % here)
+    elif not any(cur in s for s in sos):
+        hint = ("extension(s) presente(s) : %s, mais l'interpreteur courant est %s (%s). Utiliser le "
+                "python qui a construit le module (env conda `adc`), ou rebatir avec cet interpreteur "
+                "(-DPython_EXECUTABLE=%s)." % (", ".join(sos), cur, _sys.executable, _sys.executable))
+    else:
+        hint = ("l'extension %s correspond a l'interpreteur (%s) mais son import echoue : dependance "
+                "manquante ou .so corrompu ; relancer le build du module." % (", ".join(sos), cur))
+    return ImportError("import adc._adc impossible : %s\n(cause d'origine : %s)" % (hint, exc))
+
+
 if hasattr(_sys, "setdlopenflags") and hasattr(_sys, "getdlopenflags"):
     _adc_old_dlopenflags = _sys.getdlopenflags()
     _adc_global_dlopenflags = _adc_old_dlopenflags
@@ -42,15 +65,201 @@ if hasattr(_sys, "setdlopenflags") and hasattr(_sys, "getdlopenflags"):
         from ._adc import (SystemConfig, ModelSpec, System as _System,
                            AmrSystemConfig, AmrSystem as _AmrSystem,
                            abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+    except ImportError as _e:
+        raise _explain_missing_extension(_e) from _e
     finally:
         _sys.setdlopenflags(_adc_old_dlopenflags)
     del _adc_old_dlopenflags, _adc_global_dlopenflags
 else:
-    from ._adc import (SystemConfig, ModelSpec, System as _System,
-                       AmrSystemConfig, AmrSystem as _AmrSystem,
-                       abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+    try:
+        from ._adc import (SystemConfig, ModelSpec, System as _System,
+                           AmrSystemConfig, AmrSystem as _AmrSystem,
+                           abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+    except ImportError as _e:
+        raise _explain_missing_extension(_e) from _e
 
-del _os, _sys
+del _os, _sys, _explain_missing_extension
+
+# Version du paquet = celle bakee dans l'extension (source unique : project(VERSION) CMake).
+# Vieux module sans l'attribut -> on degrade en "unknown" plutot que de casser l'import.
+try:
+    from ._adc import __version__
+except ImportError:
+    __version__ = "unknown"
+
+
+# --- Parallelisme : un seul knob runtime --------------------------------------------------------
+# Le backend de calcul est COMPILE dans _adc. Le multi-thread (et le GPU) ne sont possibles QUE si
+# _adc a ete construit avec -DADC_USE_KOKKOS=ON (device OpenMP). A l'execution, Kokkos s'initialise
+# PARESSEUSEMENT a la creation du 1er System/AmrSystem et lit OMP_NUM_THREADS a cet instant precis.
+# adc.set_threads(n) ecrit OMP_NUM_THREADS AVANT cette init : un seul appel remplace le rituel
+# `OMP_NUM_THREADS=n python ...`. A appeler juste apres `import adc`, avant de creer le 1er systeme.
+_first_system_built = False
+
+
+def has_kokkos():
+    """True si _adc a ete compile avec Kokkos (multi-thread/GPU possible), False si SERIE.
+
+    None si le module est trop ancien pour exposer l'info (attribut __has_kokkos__ absent)."""
+    from . import _adc
+    return getattr(_adc, "__has_kokkos__", None)
+
+
+def set_threads(n=None):
+    """Fixe le nombre de threads de calcul (backend Kokkos OpenMP) en UNE ligne.
+
+    Equivaut a exporter OMP_NUM_THREADS=n avant de lancer Python, mais sans toucher au shell. N'a
+    d'effet que si _adc a ete compile avec -DADC_USE_KOKKOS=ON (preset 'python-parallel'), et DOIT
+    etre appele AVANT le 1er System/AmrSystem (Kokkos s'initialise paresseusement a ce moment-la et
+    lit OMP_NUM_THREADS une seule fois) :
+
+        import adc
+        adc.set_threads(8)     # 8 threads
+        adc.set_threads()      # tous les coeurs (os.cpu_count())
+        sim = adc.System(n=256)
+
+    Un module SERIE ou un appel tardif sont signales par un avertissement (sans lever d'exception)."""
+    import os
+    import warnings
+    if n is None:                       # defaut : tous les coeurs logiques disponibles
+        n = os.cpu_count() or 1
+    n = int(n)
+    if n < 1:
+        raise ValueError("adc.set_threads : n doit etre >= 1")
+    # Source de verite : l'etat REEL du runtime Kokkos (couvre TOUTES les voies d'init lazy --
+    # System, AmrSystem, .so DSL, usage direct de _adc). Le drapeau Python reste le repli pour
+    # un vieux module sans le binding.
+    from . import _adc
+    _kokkos_started = getattr(_adc, "kokkos_is_initialized", lambda: _first_system_built)()
+    if _kokkos_started or _first_system_built:
+        warnings.warn(
+            "adc.set_threads : appele APRES l'initialisation du runtime (1er System/AmrSystem ou "
+            "1re allocation) -> SANS EFFET. Appeler set_threads juste apres `import adc`.",
+            RuntimeWarning, stacklevel=2)
+        return
+    if has_kokkos() is False:
+        warnings.warn(
+            "adc.set_threads : _adc est SERIE (compile sans -DADC_USE_KOKKOS=ON) -> le reglage de "
+            "threads est ignore au calcul. Reconstruire avec -DADC_USE_KOKKOS=ON "
+            "-DKokkos_ROOT=$CONDA_PREFIX pour le multi-thread.", RuntimeWarning, stacklevel=2)
+    # On ecrit l'env meme en cas de doute (inoffensif) : un .so DSL backend='production' compile avec
+    # Kokkos lira lui aussi OMP_NUM_THREADS a son initialisation.
+    # On positionne DEUX variables pour etre agnostique au backend que Kokkos a compile :
+    #   - OMP_NUM_THREADS  : lu par le device OpenMP (cas usuel) ;
+    #   - KOKKOS_NUM_THREADS : lu par Kokkos::initialize quel que soit le device (OpenMP OU Threads),
+    #     utile si le Kokkos installe (p.ex. conda-forge) utilise le backend Threads et non OpenMP.
+    os.environ["OMP_NUM_THREADS"] = str(n)
+    os.environ["KOKKOS_NUM_THREADS"] = str(n)
+    # OMP_PROC_BIND=false UNIQUEMENT sur macOS (evite les warnings/oversubscription de libomp sur
+    # les Mac de dev). Sur Linux/cluster on n'impose RIEN : desactiver l'affinite y degraderait le
+    # scaling NUMA, et un job SLURM qui exporte OMP_PROC_BIND=close/spread reste maitre (setdefault
+    # ne l'ecraserait pas de toute facon).
+    import sys as _s
+    if _s.platform == "darwin":
+        os.environ.setdefault("OMP_PROC_BIND", "false")
+
+
+def parallel_info():
+    """Etat du parallelisme : backend compile, OMP_NUM_THREADS courant, init Kokkos deja faite."""
+    import os
+    return {
+        "has_kokkos": has_kokkos(),
+        "omp_num_threads": os.environ.get("OMP_NUM_THREADS"),
+        "first_system_built": _first_system_built,
+    }
+
+
+def doctor(verbose=True):
+    """Diagnostic de l'environnement adc en UNE commande : python -c "import adc; adc.doctor()".
+
+    Verifie chaque maillon dont dependent le module ET la compilation runtime du DSL (la classe de
+    bugs "environnement du build != environnement d'execution", p.ex. le `which c++` d'un env conda
+    qui rejette -std=c++23). Renvoie un dict {check: (ok, detail)} ; verbose=True l'affiche."""
+    import os
+    import sys
+    checks = {}
+
+    # 1. interpreteur + extension (piege ABI cpython-3XY)
+    from . import _adc
+    so = getattr(_adc, "__file__", "?")
+    checks["interpreteur"] = (True, "%s (%d.%d) ; extension %s"
+                              % (sys.executable, sys.version_info[0], sys.version_info[1], so))
+
+    # 2. numpy (requis a l'import de adc.dsl)
+    try:
+        import numpy
+        checks["numpy"] = (True, numpy.__version__)
+    except Exception as e:
+        checks["numpy"] = (False, "ABSENT de cet interpreteur (%s) -> `import adc.dsl` echouera. "
+                                  "Installer numpy dans CE python." % e)
+
+    # 3. backend de calcul compile
+    hk = has_kokkos()
+    checks["kokkos"] = (hk is not False,
+                        {True: "module Kokkos (multi-thread possible ; adc.set_threads actif)",
+                         False: "module SERIE (set_threads sans effet ; rebatir preset python-parallel)",
+                         None: "indetermine (vieux module sans __has_kokkos__)"}[hk])
+
+    # 4. compilateur du DSL runtime (le maillon du bug -std=c++23)
+    try:
+        from . import dsl as _dsl
+    except Exception as e:
+        checks["dsl"] = (False, "import adc.dsl impossible (%s)" % e)
+        _dsl = None
+    if _dsl is not None:
+        baked = _dsl.loader_cxx_compiler()
+        cc = _dsl._default_cxx(None)
+        if not cc:
+            checks["compilateur"] = (False, "AUCUN compilateur C++ trouve (ADC_CXX, module, PATH). "
+                                            "Installer Xcode CLT (macOS) ou `conda install cxx-compiler`.")
+        else:
+            origin = ("$ADC_CXX" if os.environ.get("ADC_CXX") == cc
+                      else "bake par le build de _adc" if cc == baked else "PATH (which)")
+            try:
+                std = _dsl._probe_cxx_std(cc, _dsl.loader_cxx_std())
+                checks["compilateur"] = (True, "%s [%s] ; -std=%s accepte" % (cc, origin, std))
+            except RuntimeError as e:
+                checks["compilateur"] = (False, str(e).splitlines()[0])
+            if baked and cc != baked:
+                checks["compilateur_abi"] = (False, "compilateur runtime (%s) != build (%s) -> risque "
+                                                    "de rejet 'ABI incompatible' sur backend "
+                                                    "production. export ADC_CXX=%r pour forcer celui "
+                                                    "du build." % (cc, baked, baked))
+
+        # 5. en-tetes adc (DSL production : la signature doit matcher celle bakee dans _adc)
+        try:
+            inc = _dsl.adc_include()
+            checks["include"] = (True, inc)
+            # 5b. SYNCHRONISATION en-tetes <-> module (bug reel : module bati AVANT un git pull ->
+            # le loader DSL reference des signatures C++ absentes du vieux .so -> dlopen 'symbol
+            # not found' cryptique). On compare la signature bakee a celle de l'arbre actuel.
+            baked_sig = _dsl.module_header_signature()
+            if baked_sig is not None:
+                cur_sig = _dsl.adc_header_signature(inc)
+                if cur_sig == baked_sig:
+                    checks["headers_sync"] = (True, "en-tetes == build du module (sig %s...)"
+                                              % baked_sig[:12])
+                else:
+                    checks["headers_sync"] = (False, "en-tetes MODIFIES depuis le build de _adc "
+                                                     "(module perime) -> rebatir : cmake --build "
+                                                     "build-py --target _adc (sinon : dlopen "
+                                                     "'symbol not found' sur backend production)")
+        except RuntimeError as e:
+            checks["include"] = (False, "en-tetes adc introuvables (definir ADC_INCLUDE) : %s" % e)
+
+    # 6. threads courants
+    checks["threads"] = (True, "OMP_NUM_THREADS=%s ; premier System cree=%s"
+                         % (os.environ.get("OMP_NUM_THREADS", "(defaut)"), _first_system_built))
+
+    if verbose:
+        for cname, (ok, detail) in checks.items():
+            print("[%s] %-16s %s" % ("OK " if ok else "FAIL", cname, detail))
+        if all(ok for ok, _ in checks.values()):
+            print("=> environnement sain : module importable, DSL compilable, ABI coherente.")
+        else:
+            print("=> corriger les FAIL ci-dessus avant d'utiliser le DSL backend='production'.")
+    return checks
+
 
 # L'API PUBLIQUE n'expose QUE des briques composables (System, AmrSystem, Model...) : aucun
 # scenario physique nomme. L'integrateur AP deux-fluides (schema asymptotic-preserving, non
@@ -69,6 +278,7 @@ __all__ = [
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
     "PythonFlux", "dsl", "abi_key", "capabilities",
+    "set_threads", "has_kokkos", "parallel_info", "doctor",
 ]
 
 
@@ -1036,6 +1246,10 @@ class System:
                 raise TypeError("System : mesh doit etre un adc.CartesianMesh / adc.PolarMesh (recu %r)"
                                 % type(mesh).__name__)
             mesh._apply(config)
+        # Marque l'init Kokkos comme imminente : _System(config) alloue des Fabs -> Kokkos s'initialise
+        # (lazy) ici. Apres ce point, adc.set_threads n'a plus d'effet (averti par set_threads).
+        global _first_system_built
+        _first_system_built = True
         self._s = _System(config)  # geometry == 'polar' construit un anneau global (Phase 2b, cf. PolarMesh)
 
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
@@ -1245,6 +1459,9 @@ class System:
                 raise ValueError(
                     "add_equation : names= non supporte sur le chemin natif (production) ; les noms et "
                     "roles sont portes par les metadonnees du modele compile (.so)")
+            # Garde PRE-DLOPEN au branchement : couvre AUSSI le cache HIT (ou compile_native ne tourne
+            # pas) -- un module _adc perime donnerait sinon un dlopen 'symbol not found' cryptique.
+            dsl.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
             gamma = compiled.gamma if compiled.gamma is not None else 1.4
             self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                      spatial.recon, time.kind, gamma, nsub, evolve, nstride)
@@ -1763,6 +1980,10 @@ class AmrSystem:
             config = AmrSystemConfig()
             for k, v in cfg_kw.items():
                 setattr(config, k, v)
+        # cf. System.__init__ : _AmrSystem(config) declenche l'init Kokkos (lazy). set_threads
+        # n'a plus d'effet apres ce point.
+        global _first_system_built
+        _first_system_built = True
         self._s = _AmrSystem(config)
         self._L = float(config.L)  # cote de [0, L]^2 (pour patch_rectangles : index -> physique)
 
@@ -2026,6 +2247,11 @@ class AmrSystem:
                 "(modele natif adc.Model(...), masque cable) ou add_compiled_model(AmrSystem&) en "
                 "direct (C++) qui expose le masque IMEX.")
 
+        # Garde PRE-DLOPEN au branchement (couvre le cache HIT, cf. System.add_equation) : module
+        # _adc perime vs .so compile sur les en-tetes a jour -> erreur actionnable, pas un dlopen
+        # 'symbol not found' cryptique.
+        from . import dsl as _dsl_guard
+        _dsl_guard.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
         gamma = compiled.gamma if compiled.gamma is not None else 1.4
         self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                  spatial.recon, time.kind, gamma, nsub)
@@ -2071,5 +2297,22 @@ class PythonFlux:
         return cfl * h / max(float(self.max_wave_speed(U)), 1e-30)
 
 
-from . import integrate  # noqa: E402  (apres la definition de System)
-from . import dsl  # noqa: E402  mini-DSL symbolique (prototype, interprete CPU ; apres PythonFlux)
+from . import integrate  # noqa: E402  (apres la definition de System ; sans dependance numpy)
+
+
+# adc.dsl PARESSEUX (PEP 562) : dsl.py fait `import numpy` au niveau module (evaluateur hote du
+# prototype). L'import eager rendait numpy obligatoire pour `import adc` ENTIER, alors que le
+# chemin natif (System/add_block) et le backend production n'en ont pas besoin. Avec ce
+# __getattr__, `adc.dsl.Model(...)` et `from adc import dsl` marchent a l'identique, mais numpy
+# n'est requis QU'AU premier usage du DSL -- et son absence donne un message cible (doctor aussi).
+def __getattr__(name):
+    if name == "dsl":
+        import importlib
+        try:
+            return importlib.import_module(".dsl", __name__)
+        except ImportError as exc:
+            raise ImportError(
+                "adc.dsl requiert numpy dans cet interpreteur (evaluateur hote du DSL) : "
+                "`pip install numpy` / `conda install numpy`. Le reste d'adc (System, add_block) "
+                "fonctionne sans. Cause : %s" % exc) from exc
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))

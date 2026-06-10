@@ -9,6 +9,10 @@ cmake-build-*/
 .cache/
 compile_commands.json
 
+# Caches .so du DSL quand ADC_CACHE_DIR pointe DANS le repo (les demos exportent
+# ADC_CACHE_DIR=$PWD/.adc_cache*) ; le defaut ~/.cache/adc/dsl est deja hors source.
+.adc_cache*/
+
 # documentation generee (Doxygen + Sphinx)
 docs/_build/
 docs/sphinx/_generated/

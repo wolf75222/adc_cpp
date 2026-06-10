@@ -135,8 +135,7 @@ cmake --build build-kokkos-omp -j
 **Run.** Borner le nombre de threads sur les petites machines :
 
 ```bash
-OMP_NUM_THREADS=4 OMP_PROC_BIND=false \
-  ctest --test-dir build-kokkos-omp --output-on-failure
+OMP_NUM_THREADS=4 ctest --test-dir build-kokkos-omp --output-on-failure
 ```
 
 **Validation : CI (job `ci-full`).** Job `kokkos-openmp`

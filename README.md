@@ -154,22 +154,25 @@ pas adaptatif multirate (`step_adaptive`) et un integrateur ecrit a la main. Det
 ## Backends CMake
 
 ```bash
-cmake -B build                       # serie
-cmake -B build -DADC_USE_MPI=ON      # distribue (halos + FFT par MPI)
-cmake -B build -DADC_USE_KOKKOS=ON   # CPU multi-thread (device OpenMP), conseille
-cmake -B build -DADC_USE_KOKKOS=ON \
+cmake --preset serial                # serie (ou : cmake -B build)
+cmake --preset mpi                   # distribue (halos + FFT par MPI)
+cmake --preset parallel              # Kokkos CPU (env conda actif)
+cmake -B build-gpu -DADC_USE_KOKKOS=ON \
    -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K   # GPU GH200
 ```
 
-Kokkos est le backend de dispatch conseille (CPU et GPU, un seul code). Le backend OpenMP autonome
-(`ADC_USE_OPENMP`) est deprecie. Detail : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (section 9).
+Chaque option s'accepte aussi en variable d'environnement (`ADC_USE_KOKKOS=ON cmake ...` ou
+`pip install .`) ; un `-D` explicite garde la priorite. Kokkos est le backend de dispatch
+conseille (CPU et GPU, un seul code) ; l'OpenMP autonome (`ADC_USE_OPENMP`) est deprecie.
+Detail : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (section 9).
 
 ## Utiliser le coeur
 
 ```cmake
 include(FetchContent)
 FetchContent_Declare(adc_cpp GIT_REPOSITORY https://github.com/wolf75222/adc_cpp.git)
-FetchContent_MakeAvailable(adc_cpp)
+FetchContent_MakeAvailable(adc_cpp)  # les tests d'adc_cpp ne sont PAS compiles chez le consommateur
+                                    # (ADC_BUILD_TESTS suit PROJECT_IS_TOP_LEVEL)
 target_link_libraries(mon_appli PRIVATE adc::adc)
 ```
 
@@ -178,12 +181,31 @@ On definit un type qui satisfait `PhysicalModel`, on l'instancie dans un `Couple
 
 ## Module Python `adc`
 
-Construction : `cmake -B build-py -DADC_BUILD_PYTHON=ON && cmake --build build-py --target _adc -j`.
+`bash scripts/setup_env.sh` cree l'env conda (CMake, Ninja, NumPy, pybind11, Kokkos) et y
+fige la meilleure toolchain de la plateforme (AppleClang sur macOS, gcc conda sur Linux --
+prioritaire sur un PATH pollue). Ensuite, installation en une commande -- `pip install .`
+pilote le CMakeLists via scikit-build-core, les backends se choisissent par variables
+d'environnement :
 
-> L'extension compilee est epinglee a l'interpreteur (`_adc.cpython-312`). `import adc` ne fonctionne que
-> sous l'interpreteur correspondant (par exemple un Python 3.12 anaconda/conda qui a aussi numpy), avec le
-> dossier `python/` du build sur `sys.path` (`build-py/python` ou `build-master/python`). Sous le `python3`
-> systeme il echoue avec `ModuleNotFoundError: adc._adc`.
+```bash
+pip install .                                                  # serie
+ADC_USE_KOKKOS=ON Kokkos_ROOT=$CONDA_PREFIX pip install . -v  # parallele (Kokkos)
+```
+
+Puis, sans `PYTHONPATH` ni variable a exporter :
+
+```python
+import adc
+adc.set_threads()          # tous les coeurs (ou set_threads(8)) ; avant le 1er System
+sim = adc.System(n=256)    # adc.doctor() diagnostique l'environnement en cas de doute
+```
+
+Pour iterer sur le C++ sans reinstaller : `cmake --preset python` (serie) ou
+`--preset python-parallel` (Kokkos), puis `PYTHONPATH=$PWD/build-py/python` (ou
+`build-py-kokkos/python`). L'extension est epinglee a l'interpreteur qui l'a construite
+(`cpython-312`) : construire et importer avec le meme python -- en cas d'erreur d'import, le
+message indique la cause et la commande de reconstruction. Detail :
+[installation](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/getting_started/installation.md).
 
 L'ecriture d'un modele est decrite plus haut. Exemple plus complet, des electrons Euler compressibles
 avec mur circulaire Dirichlet et source IMEX, en briques :

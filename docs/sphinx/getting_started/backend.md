@@ -80,7 +80,7 @@ Kokkos 4.4.01, `Kokkos_ARCH_HOPPER90`, OpenMPI CUDA-aware), via des harnais SLUR
 recette `srun` type et les preuves (`maxdiff=0` contre le CPU) sont dans
 [`GPU_ROMEO.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md) et [`GPU_RUNTIME_PORT.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md).
 
-## En resume
+## Ce qu'il faut retenir
 
 - Le module `_adc` tel que la CI le construit = backend serie ; Python pilote, le C++ compile calcule.
 - Pour MPI / Kokkos / GPU : recompiler la facade C++ avec le drapeau adequat.
