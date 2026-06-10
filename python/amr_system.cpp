@@ -109,6 +109,11 @@ struct AmrSystem::Impl {
     // B_z sont PORTES PAR LE SYSTEME (Impl), pas le bloc : un seul etage condense en mono-bloc.
     bool schur = false;
     double schur_theta = 0.5, schur_alpha = 1.0;
+    double schur_krylov_tol = 0.0;      // <= 0 = defaut historique (1e-10)
+    int schur_krylov_max_iters = 0;     // <= 0 = defaut historique (400)
+    std::string schur_density, schur_momentum_x, schur_momentum_y, schur_energy;  // "" = canonique
+    NewtonOptions newton{};             // options Newton IMEX (vague 3 ; multi-blocs seulement)
+    bool newton_non_default = false;    // true -> mono-bloc REJETE au build (iters=2 fige cote coupleur)
   };
 
   std::vector<BlockSpec> blocks;
@@ -123,6 +128,8 @@ struct AmrSystem::Impl {
     std::vector<double> consts;
     std::vector<std::string> out_blocks, out_roles;
     std::vector<int> prog_ops, prog_args, prog_lens;
+    double frequency = 0.0;  // mu declare (borne dt <= cfl/mu sur le macro-pas ; 0 = pas de borne)
+    std::string label = "coupled_source";
   };
   std::vector<CoupledSourceSpec> coupled_sources;
 
@@ -220,6 +227,12 @@ struct AmrSystem::Impl {
     bp.schur = b.schur;
     bp.schur_theta = b.schur_theta;
     bp.schur_alpha = b.schur_alpha;
+    bp.schur_krylov_tol = b.schur_krylov_tol;
+    bp.schur_krylov_max_iters = b.schur_krylov_max_iters;
+    bp.schur_density = b.schur_density;
+    bp.schur_momentum_x = b.schur_momentum_x;
+    bp.schur_momentum_y = b.schur_momentum_y;
+    bp.schur_energy = b.schur_energy;
     bp.schur_strang = schur_strang;
     bp.bz_field = bz_field;
     return bp;
@@ -247,16 +260,15 @@ struct AmrSystem::Impl {
   // block_builder, qui capture le Model/Limiter/Flux concret). Le Poisson grossier est SOMME et
   // CO-LOCALISE (Sum_b elliptic_rhs_b(U_b) lu aux memes cellules du grossier partage).
   void build_multi() {
-    // set_conservative_state n'est cable que sur le chemin MONO-BLOC (build_amr_compiled / AmrCouplerMP) :
-    // le seed multi-blocs (compiled_block_builder / dispatch_amr_block sur le layout PARTAGE) ne
-    // transporte pas encore l'etat complet. Plutot que de retomber SILENCIEUSEMENT sur la densite
-    // (qty de mvt = 0, resultat faux), on leve une erreur CLAIRE. Threading multi-blocs = suivi distinct.
+    // set_conservative_state MULTI-BLOCS (audit vague 3) : l'etat complet est desormais THREADE au
+    // builder NATIF (dispatch_amr_block -> build_amr_block, seed coupler_write_coarse_state +
+    // injection vers les fins, prioritaire sur density). Le chemin COMPILE (.so) ne le transporte
+    // pas (ABI du loader figee) -> rejet explicite, jamais un repli densite silencieux.
     for (const auto& b : blocks)
-      if (b.has_state)
+      if (b.has_state && b.is_compiled)
         throw std::runtime_error(
-            "AmrSystem::set_conservative_state n'est supporte qu'en MONO-BLOC (1 add_block) ; "
-            "ce systeme a >= 2 blocs. Utiliser set_density par bloc, ou poser l'etat complet sur le "
-            "chemin multi-blocs (non cable). Bloc concerne : '" + b.name + "'.");
+            "AmrSystem::set_conservative_state : non transporte par le loader .so compile (bloc '" +
+            b.name + "') en multi-blocs ; utiliser un bloc natif adc.Model(...), ou set_density.");
     AmrBuildParams bp = make_build_params();  // geometrie + poisson_bc + wall + ownership communs
     const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
     std::vector<adc::AmrRuntimeBlock> rblocks;
@@ -280,6 +292,12 @@ struct AmrSystem::Impl {
         // bloc natif (le builder L'APPELLE en interne). Il resout LUI-MEME le masque IMEX partiel en
         // indices de composantes contre cons_vars du Model concret (les implicit_vars/roles bruts lui
         // sont passes). Aucun throw : le 2e bloc compile (ou un melange compile + natif) est cable.
+        // Options Newton NON transportees par le builder du loader .so (ABI figee a la generation) :
+        // rejet explicite plutot qu'un iters=2 silencieux (regenerer le loader = suivi dedie).
+        if (b.newton_non_default)
+          throw std::runtime_error(
+              "AmrSystem : les options Newton ne sont pas transportees par le loader .so compile "
+              "(bloc '" + b.name + "') ; utiliser un bloc natif adc.Model(...) en multi-blocs.");
         rblocks.push_back(b.compiled_block_builder(S, b.name, b.density, b.has_density, b.gamma,
                                                    b.substeps, b.recon_prim, b.imex, b.stride,
                                                    b.implicit_vars, b.implicit_roles));
@@ -298,7 +316,9 @@ struct AmrSystem::Impl {
                    : std::vector<int>{};
         rblocks.push_back(detail::dispatch_amr_block(m, b.limiter, b.riemann, S, b.name, b.density,
                                                      b.has_density, b.gamma, b.substeps,
-                                                     b.recon_prim, b.imex, b.stride, impl_components));
+                                                     b.recon_prim, b.imex, b.stride, impl_components,
+                                                     b.newton,
+                                                     b.has_state ? &b.state : nullptr));
       });
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
@@ -307,6 +327,11 @@ struct AmrSystem::Impl {
     // Bornes GLOBALES enregistrees AVANT le build paresseux (add_dt_bound) : transmises au moteur
     // (qui les agrege dans son step_cfl, all_reduce_min). Celles ajoutees APRES passent en direct.
     for (const auto& g : dt_bounds) runtime->add_dt_bound(g.label, g.fn);
+    // Frequences declarees des sources couplees (CoupledSource.frequency, vague 3) : borne de pas
+    // dt <= cfl/mu sur le macro-pas du moteur runtime.
+    for (const auto& cs : coupled_sources)
+      if (cs.frequency > 0.0)
+        runtime->add_coupled_frequency(cs.label, static_cast<Real>(cs.frequency));
     // REGRID D'UNION DES TAGS (capstone Phase 2, C.6) : si regrid_every > 0, on ACTIVE la cadence du
     // moteur et on pose le predicat de tag PAR BLOC (D1). En v1 le critere est COMMUN a tous les blocs
     // (densite, composante 0 > refine_threshold), comme le chemin mono-bloc AmrCouplerMP (qui tague
@@ -363,6 +388,13 @@ struct AmrSystem::Impl {
           "AmrSystem : implicit_vars / implicit_roles (masque IMEX partiel) ne sont cables qu'en "
           "MULTI-BLOCS (>= 2 add_block, moteur runtime). En mono-bloc l'IMEX traite TOUTES les "
           "composantes en implicite (backward-Euler plein) : retirer le masque ou ajouter un 2e bloc.");
+    // Memes regles pour les options Newton (vague 3) : le coupleur mono-bloc (AmrCouplerMP) garde
+    // iters=2 fige -- des options non-defaut y seraient ignorees EN SILENCE -> rejet explicite.
+    if (b.newton_non_default)
+      throw std::runtime_error(
+          "AmrSystem : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/damping/"
+          "fail_policy) ne sont cablees qu'en MULTI-BLOCS (moteur runtime). Le coupleur mono-bloc "
+          "garde iters=2 fige : retirer les options, ajouter un 2e bloc, ou utiliser System.");
     const AmrBuildParams bp = make_build_params();
     if (b.is_compiled) {  // chemin compile : le builder fige les types (Model, Limiter, Flux)
       install(b.compiled_hooks_builder(bp));
@@ -385,12 +417,35 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
                           const std::string& limiter, const std::string& riemann,
                           const std::string& recon, const std::string& time, int substeps,
                           int stride, const std::vector<std::string>& implicit_vars,
-                          const std::vector<std::string>& implicit_roles) {
+                          const std::vector<std::string>& implicit_roles, int newton_max_iters,
+                          double newton_rel_tol, double newton_abs_tol, double newton_fd_eps,
+                          double newton_damping, const std::string& newton_fail_policy) {
   if (p_->built)
     throw std::runtime_error("AmrSystem::add_block : le systeme est deja construit (appeler "
                              "add_block avant tout step/mass/density)");
   if (substeps < 1) throw std::runtime_error("AmrSystem::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("AmrSystem::add_block : stride >= 1");
+  // Options du Newton de la source IMEX (audit vague 3, parite System::add_block). Defauts =
+  // constantes historiques (2 / 0 / 0 / 1e-7 / 1.0 / none), bit-identique. SUPPORT : moteur
+  // MULTI-BLOCS (AmrRuntime) seulement -- le mono-bloc (AmrCouplerMP) garde iters=2 fige, des
+  // options non-defaut y sont REJETEES au build (ensure_built), jamais ignorees.
+  if (newton_max_iters < 1)
+    throw std::runtime_error("AmrSystem::add_block : newton_max_iters >= 1");
+  if (newton_rel_tol < 0.0 || newton_abs_tol < 0.0 || newton_fd_eps <= 0.0)
+    throw std::runtime_error("AmrSystem::add_block : newton_rel_tol/abs_tol >= 0 et newton_fd_eps > 0");
+  if (!(newton_damping > 0.0 && newton_damping <= 1.0))
+    throw std::runtime_error("AmrSystem::add_block : newton_damping dans (0, 1]");
+  int nfail = NewtonOptions::kFailNone;
+  if (newton_fail_policy == "warn") nfail = NewtonOptions::kFailWarn;
+  else if (newton_fail_policy == "throw") nfail = NewtonOptions::kFailThrow;
+  else if (newton_fail_policy != "none")
+    throw std::runtime_error("AmrSystem::add_block : newton_fail_policy 'none'|'warn'|'throw' (recu '" +
+                             newton_fail_policy + "')");
+  const bool newton_non_default = newton_max_iters != 2 || newton_rel_tol != 0.0 ||
+                                  newton_abs_tol != 0.0 || newton_fd_eps != 1e-7 ||
+                                  newton_damping != 1.0 || nfail != NewtonOptions::kFailNone;
+  if (time != "imex" && newton_non_default)
+    throw std::runtime_error("AmrSystem::add_block : les options Newton exigent time='imex'");
   if (time != "explicit" && time != "imex")
     throw std::runtime_error("AmrSystem : time '" + time +
                              "' inconnu sur AMR (explicit|imex)");
@@ -431,6 +486,13 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   b.imex = imex;
   b.implicit_vars = implicit_vars;    // masque IMEX partiel (resolu en indices au build, build_multi)
   b.implicit_roles = implicit_roles;
+  b.newton.max_iters = newton_max_iters;  // options Newton (vague 3 ; multi-blocs seulement)
+  b.newton.rel_tol = static_cast<Real>(newton_rel_tol);
+  b.newton.abs_tol = static_cast<Real>(newton_abs_tol);
+  b.newton.fd_eps = static_cast<Real>(newton_fd_eps);
+  b.newton.damping = static_cast<Real>(newton_damping);
+  b.newton.fail_policy = nfail;
+  b.newton_non_default = newton_non_default;
   b.substeps = substeps;
   b.stride = stride;
   b.gamma = model.gamma;  // indice adiabatique du bloc (Euler), lu par coupler_write_coarse
@@ -685,7 +747,9 @@ void AmrSystem::set_magnetic_field(const std::vector<double>& bz) {
 }
 
 void AmrSystem::set_source_stage(const std::string& name, const std::string& kind, double theta,
-                                 double alpha) {
+                                 double alpha, double krylov_tol, int krylov_max_iters,
+                                 const std::string& density, const std::string& momentum_x,
+                                 const std::string& momentum_y, const std::string& energy) {
   if (p_->built)
     throw std::runtime_error("AmrSystem::set_source_stage : le systeme est deja construit "
                              "(configurer l'etage source avant tout step)");
@@ -718,6 +782,17 @@ void AmrSystem::set_source_stage(const std::string& name, const std::string& kin
   b.schur = true;
   b.schur_theta = theta;
   b.schur_alpha = alpha;
+  // Reglages transportes (vague 3) : tolerances Krylov + descripteurs de champs ("" = canonique).
+  // Resolution/validation des descripteurs AU BUILD contre Model::conservative_vars() (la ou le
+  // type concret est connu), comme les roles canoniques. krylov_tol valide ici (forme).
+  if (krylov_tol > 0.0 && !(krylov_tol < 1.0))
+    throw std::runtime_error("AmrSystem::set_source_stage : krylov_tol doit etre dans (0, 1)");
+  b.schur_krylov_tol = krylov_tol;
+  b.schur_krylov_max_iters = krylov_max_iters;
+  b.schur_density = density;
+  b.schur_momentum_x = momentum_x;
+  b.schur_momentum_y = momentum_y;
+  b.schur_energy = energy;
 }
 
 void AmrSystem::set_time_scheme(const std::string& scheme) {
@@ -740,7 +815,8 @@ void AmrSystem::add_coupled_source(const std::vector<std::string>& in_blocks,
                                    const std::vector<std::string>& out_roles,
                                    const std::vector<int>& prog_ops,
                                    const std::vector<int>& prog_args,
-                                   const std::vector<int>& prog_lens) {
+                                   const std::vector<int>& prog_lens, double frequency,
+                                   const std::string& label) {
   if (p_->built)
     throw std::runtime_error("AmrSystem::add_coupled_source : le systeme est deja construit "
                              "(enregistrer la source avant tout step/mass/density)");
@@ -757,7 +833,8 @@ void AmrSystem::add_coupled_source(const std::vector<std::string>& in_blocks,
   if (out_blocks.empty())
     throw std::runtime_error("AmrSystem::add_coupled_source : aucun terme de source (out_blocks vide)");
   p_->coupled_sources.push_back(Impl::CoupledSourceSpec{in_blocks, in_roles, consts, out_blocks,
-                                                        out_roles, prog_ops, prog_args, prog_lens});
+                                                        out_roles, prog_ops, prog_args, prog_lens,
+                                                        frequency, label});
 }
 
 void AmrSystem::step(double dt) {
@@ -839,6 +916,12 @@ std::string AmrSystem::last_dt_bound() const {
 int AmrSystem::nx() const { return p_->cfg.n; }
 double AmrSystem::time() const { return p_->t; }
 int AmrSystem::n_blocks() const { return static_cast<int>(p_->blocks.size()); }
+std::vector<std::string> AmrSystem::block_names() const {
+  std::vector<std::string> out;
+  out.reserve(p_->blocks.size());
+  for (const auto& b : p_->blocks) out.push_back(b.name);
+  return out;
+}
 int AmrSystem::n_patches() {
   p_->ensure_built();
   if (p_->runtime) return p_->runtime->n_patches();

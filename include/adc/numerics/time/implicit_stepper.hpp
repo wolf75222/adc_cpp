@@ -65,6 +65,19 @@ ADC_HD inline bool model_is_implicit(int c) {
     return true;
 }
 
+// Trait OPTIONNEL : JACOBIEN ANALYTIQUE de la source (audit vague 3, JacobianPolicy). Quand le
+// modele (ou sa brique source, forwardee par CompositeModel) declare
+//   source_jacobian(U, aux, J)  avec  J[r][c] = dS_r/dU_c  (matrice COMPLETE n_vars x n_vars),
+// le Newton de la source implicite l'utilise A LA PLACE des differences finies : exactitude
+// (plus de bruit fd_eps) et n_impl evaluations de source economisees par iteration. Un modele
+// SANS le trait garde les differences finies historiques, bit-identique. ADC_HD requis.
+template <class M>
+concept HasSourceJacobian =
+    requires(const M m, const typename M::State u, const Aux a,
+             Real (&J)[M::n_vars][M::n_vars]) {
+      m.source_jacobian(u, a, J);
+    };
+
 // Masque implicite PORTE PAR LE BLOC / la politique temporelle (et NON par le modele) : carrier POD
 // device-clean (tableau fixe N, passe PAR VALEUR dans le kernel, aucun pointeur hote deref. sur device).
 // Quand actif (active == true), il OVERRIDE le defaut modele (model_is_implicit) : seules les composantes
@@ -218,6 +231,16 @@ ADC_HD inline typename Model::State newton_source_solve(
         F[r] = W[c] - Un[c] - dt * S0[c];
       }
       Real J[N][N];
+      if constexpr (HasSourceJacobian<Model>) {
+        // JACOBIEN ANALYTIQUE (trait, vague 3) : J = I - dt * dS/dU restreint aux implicites.
+        Real dS[N][N];
+        m.source_jacobian(W, a, dS);
+        for (int cc = 0; cc < m_impl; ++cc)
+          for (int rr = 0; rr < m_impl; ++rr) {
+            const int row = impl[rr], col = impl[cc];
+            J[rr][cc] = (row == col ? Real(1) : Real(0)) - dt * dS[row][col];
+          }
+      } else {
       for (int cc = 0; cc < m_impl; ++cc) {
         const int col = impl[cc];
         const Real wc = W[col] < 0 ? -W[col] : W[col];
@@ -230,6 +253,7 @@ ADC_HD inline typename Model::State newton_source_solve(
           const Real dSdW = (Sp[row] - S0[row]) / h;
           J[rr][cc] = (row == col ? Real(1) : Real(0)) - dt * dSdW;
         }
+      }
       }
       Real delta[N];
       solve_dense<N>(J, F, delta, m_impl);
@@ -270,6 +294,16 @@ ADC_HD inline typename Model::State newton_source_solve(
       if (res <= opts.abs_tol + opts.rel_tol * res0) { converged = true; break; }
     }
     Real J[N][N];
+    if constexpr (HasSourceJacobian<Model>) {
+      // JACOBIEN ANALYTIQUE (trait, vague 3) : meme construction que le chemin (2a).
+      Real dS[N][N];
+      m.source_jacobian(W, a, dS);
+      for (int cc = 0; cc < m_impl; ++cc)
+        for (int rr = 0; rr < m_impl; ++rr) {
+          const int row = impl[rr], col = impl[cc];
+          J[rr][cc] = (row == col ? Real(1) : Real(0)) - dt * dS[row][col];
+        }
+    } else {
     for (int cc = 0; cc < m_impl; ++cc) {
       const int col = impl[cc];
       const Real wc = W[col] < 0 ? -W[col] : W[col];
@@ -282,6 +316,7 @@ ADC_HD inline typename Model::State newton_source_solve(
         const Real dSdW = (Sp[row] - S0[row]) / h;
         J[rr][cc] = (row == col ? Real(1) : Real(0)) - dt * dSdW;
       }
+    }
     }
     Real delta[N];
     const bool ok = solve_dense<N>(J, F, delta, m_impl);

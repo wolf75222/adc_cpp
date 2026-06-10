@@ -40,6 +40,16 @@ struct StiffModel {
   ADC_HD Real elliptic_rhs(const State&) const { return 0; }
 };
 
+// StiffModel + JACOBIEN ANALYTIQUE exact (trait HasSourceJacobian, vague 3) : le Newton doit
+// converger vers la MEME racine que les differences finies (l'equation BE est identique).
+struct JacStiffModel : StiffModel {
+  ADC_HD void source_jacobian(const State& u, const Aux&, Real (&J)[3][3]) const {
+    J[0][0] = -k;          J[0][1] = k * u[2];  J[0][2] = k * u[1];
+    J[1][0] = k * Real(0.5); J[1][1] = -k;      J[1][2] = 0;
+    J[2][0] = 0;           J[2][1] = 0;         J[2][2] = -Real(3) * k * u[2] * u[2];
+  }
+};
+
 // Source PATHOLOGIQUE : sqrt(u0 - 10) -> NaN des que u0 < 10 (toutes nos cellules), sur la
 // composante 1 SEULEMENT quand u0 < seuil bas (pour viser UNE cellule fautive).
 struct NanModel {
@@ -221,6 +231,39 @@ int main() {
           }
   }
   std::printf("OK  (4) diagnostics = observateur pur (W bit-identique au chemin historique)\n");
+
+  // --- (5) JACOBIEN ANALYTIQUE (vague 3) : meme racine que les differences finies ---------------
+  static_assert(!adc::HasSourceJacobian<StiffModel>, "StiffModel sans jacobien : FD historiques");
+  static_assert(adc::HasSourceJacobian<JacStiffModel>, "JacStiffModel doit declarer le trait");
+  JacStiffModel jm;
+  adc::MultiFab Uj = make_mf(ba, dm, 3);
+  for (int li = 0; li < Uj.local_size(); ++li) {
+    adc::Array4 d = Uj.fab(li).array();
+    const adc::ConstArray4 s = U0.fab(li).const_array();
+    const adc::Box2D b = Uj.box(li);
+    for (int c = 0; c < 3; ++c)
+      for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i) d(i, j, c) = s(i, j, c);
+  }
+  adc::NewtonReport repj;
+  adc::backward_euler_source(jm, aux, Uj, dt, opts, {}, &repj);
+  double jdiff = 0;
+  for (int li = 0; li < U.local_size(); ++li) {
+    const adc::ConstArray4 a4 = U.fab(li).const_array();
+    const adc::ConstArray4 b4 = Uj.fab(li).const_array();
+    const adc::Box2D b = U.box(li);
+    for (int c = 0; c < 3; ++c)
+      for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          jdiff = std::fmax(jdiff, std::fabs(a4(i, j, c) - b4(i, j, c)));
+  }
+  if (!repj.converged || jdiff > 1e-9) {
+    std::printf("FAIL (5) : jacobien analytique (converged=%d, ecart racine %.3e)\n",
+                int(repj.converged), jdiff);
+    return 1;
+  }
+  std::printf("OK  (5) jacobien analytique : meme racine que les FD (ecart %.1e), iters %.0f\n",
+              jdiff, static_cast<double>(repj.max_iters_used));
 
   std::printf("OK  test_newton_robustness : tout est vert\n");
   return 0;

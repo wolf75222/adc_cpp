@@ -452,6 +452,12 @@ class System {
   /// @param prog_ops   opcodes concatenes de TOUS les termes (machine a pile, cf. CsOp) ;
   /// @param prog_args  arguments paralleles a prog_ops (indice de registre pour PushReg) ;
   /// @param prog_lens  longueur du programme de chaque terme (segmente prog_ops/prog_args dans l'ordre).
+  /// @param frequency  frequence CONSERVATIVE declaree mu [1/s] du couplage (audit vague 3,
+  ///                   CoupledSource.frequency) : borne de pas dt <= cfl / mu agregee par step_cfl /
+  ///                   step_adaptive (les couplages s'appliquent UNE fois par macro-pas, la borne
+  ///                   porte sur le macro-dt, sans facteur substeps/stride). <= 0 (defaut) = pas de
+  ///                   borne, bit-identique.
+  /// @param label      nom du couplage (raison "coupled_source:<label>" de last_dt_bound).
   /// Les blocs / roles inconnus, une capacite depassee ou un programme mal forme levent une erreur
   /// EXPLICITE (avant tout pas). Sans appel, le chemin par defaut reste BIT-IDENTIQUE.
   void add_coupled_source(const std::vector<std::string>& in_blocks,
@@ -461,7 +467,9 @@ class System {
                           const std::vector<std::string>& out_roles,
                           const std::vector<int>& prog_ops,
                           const std::vector<int>& prog_args,
-                          const std::vector<int>& prog_lens);
+                          const std::vector<int>& prog_lens,
+                          double frequency = 0.0,
+                          const std::string& label = "coupled_source");
 
   void solve_fields();   ///< resout Poisson puis derive aux = (phi, grad phi)
   void step(double dt);  ///< solve_fields, puis avance chaque bloc selon son schema

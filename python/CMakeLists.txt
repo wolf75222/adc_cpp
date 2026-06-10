@@ -265,6 +265,7 @@ foreach(t
     test_magnetic_bricks      # briques magnetiques exposees (audit ch.5) : MagneticLorentzForce / PotentialMagneticForce via adc.Model, residu quantitatif q B m, rejet scalaire
     test_schur_roles          # roles/champs Schur transportes dans l'ABI (vague 2) : descripteurs par nom == canonique bit-identique, rejets explicites (inconnu/polaire/amr)
     test_io_checkpoint        # IO v1 (vague 2) : checkpoint/restart bit-identique (stride=2 via macro_step), write npz/vtk, rejets composition/grille
+    test_v3_features          # vague 3 : CoupledSource.frequency, options Newton AMR (multi natif / rejets mono+diagnostics), set_conservative_state multi-blocs, enable_hllc + source_jacobian DSL (auto-skip)
     test_native_abi_std)      # regression ABI : le std du modele natif (backend="production") suit le loader (c++20 sous Kokkos, c++23 sinon) -> add_native_block charge sans "ABI incompatible"
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)

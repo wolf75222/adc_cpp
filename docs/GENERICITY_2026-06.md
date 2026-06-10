@@ -128,35 +128,84 @@ CABLE (le rejet ne reste que la ou l'architecture n'est pas prete, et il est lis
    poisson, schur, backends DSL, io) ; docstrings perimees corrigees (PolarMesh, etage Schur
    polaire "ne se branche pas", perimetre Phase 3c du Schur AMR, CondensedSchur "mono-rang").
 
-## Points encore NON generalises (explicites)
+## Vague 3 (solde : polaire, couplages, DSL HLLC/Jacobien, AMR Newton, Schur polaire/AMR, IO, multi-blocs)
 
-1. **AMR** : pas de `ssprk3` ; coarse/fine suppose ratio 2 ; `set_conservative_state` multi-blocs
-   non cable ; `set_poisson` limite a geometric_mg + rhs charge_density|composite ; les OPTIONS
-   NEWTON (adc.IMEX) et krylov_tol/max_iters + descripteurs de roles (adc.CondensedSchur) restent
-   REJETES explicitement par les facades AmrSystem (iters=2 fige dans les fermetures AMR ; le
-   forwarding complet = plomberie binding + AmrRuntimeBlock + imex_advance, suivi dedie).
+Confirmation au tableau (tuteur) : `dt <= dx/|lambda_max|  <=>  CFL = dt*lambda*/dx` — c'est
+exactement le trait `stability_speed` (lambda* = vitesse de STABILITE, distincte de max_wave_speed
+qui reste la vitesse du solveur de Riemann). La vague 3 etend cette politique partout ou elle
+manquait encore.
+
+1. **Polaire : StabilityPolicy cablee** (block_builder_polar.hpp) : fabriques
+   make_cfl_speed_polar / make_source_frequency_polar / make_stability_dt_polar (foncteurs nommes
+   PolarStabilitySpeed/PolarSourceFreq/PolarStabilityDt, device-clean) ; la branche polaire de
+   System::add_block les installe. Un modele polaire declarant stability_speed / stability_dt /
+   source_frequency borne donc le pas exactement comme en cartesien (memes formules
+   substeps/stride, meme last_dt_bound). Defaut sans trait : max_wave_speed historique,
+   bit-identique.
+2. **CoupledSource.frequency(mu)** : une source couplee DECLARE sa frequence (1/s) ; la borne
+   `dt <= cfl/mu` s'applique au MACRO-pas (les couplages sont appliques une fois par macro-pas,
+   pas par sous-pas) ; raison "coupled_source:<label>". Plomberie System ET AmrSystem
+   (add_coupled_source(frequency=, label=) -> coupled_freqs_ ; AmrRuntime::add_coupled_frequency ;
+   step_cfl mono-bloc agrege aussi). DSL : `dsl.CoupledSource(...).frequency(mu)` transporte par
+   CompiledCoupledSource. Defaut sans frequency : aucun changement.
+3. **DSL emet les hooks HLLC** : `m.enable_hllc()` genere contact_speed + hllc_star_state DEPUIS
+   LES ROLES (Density/MomentumX/MomentumY[/Energy] requis ; les variables hors roles fluides sont
+   traitees en scalaires passifs advectes a la vitesse de contact — generalisation, pas une
+   hypothese Euler). Exige 'p' declare (pression/pseudo-pression). CompiledModel.has_hllc ;
+   CompositeModel forwarde contact_speed/hllc_star_state/roe_dissipation (concept-gates) ;
+   riemann='hllc' accepte sur un 3-var NON Euler via la capability, rejet explicite sans elle.
+   Preuve : HLLC 3-var isotherme tourne fini (test_v3_features D1).
+4. **Jacobien analytique de la source** : trait `HasSourceJacobian` (jacobian(U, aux, J),
+   J[r][c] = dS_r/dU_c) utilise par les DEUX chemins Newton (historique et instrumente) a la place
+   des differences finies (if constexpr, zero cout sans trait). DSL : `m.source_jacobian(rows)`
+   (n x n d'expressions) emis sur la brique source ; sucre `m.implicit_source(source, jacobian=)`.
+   Preuve : meme racine que les FD a 2.8e-17 (C++), meme trajectoire IMEX a 1e-9 (Python).
+5. **Options Newton TRANSPORTEES sur AMR multi-blocs natif** : AmrSystem::add_block accepte les
+   kwargs newton_* ; BlockSpec porte NewtonOptions ; build_amr_block capture les options dans
+   imex_advance (l'iters=2 fige a disparu des fermetures multi-blocs). Restent REJETES
+   explicitement : mono-bloc AMR (fermetures du coupleur historique), loaders .so (ABI), et
+   newton_diagnostics (le rapport agrege reste System-only).
+6. **Schur : roles + krylov configurables sur polaire ET amr-schur** : constructeurs a composantes
+   explicites (le ctor canonique DELEGUE, bit-identique) + set_krylov(tol, iters) sur
+   PolarCondensedSchurSourceStepper (1e-10/600) et AmrCondensedSchurSourceStepper (grossier
+   seulement) ; set_source_stage(density=, momentum_x=, momentum_y=, energy=, bz_aux_component=)
+   resolu role-OU-nom sur les trois facades. AMR : magnetic_field != B_z reste rejete (le
+   composite fin lit B_z par contrat Aux).
+7. **set_conservative_state MULTI-BLOCS** : cable pour les modeles natifs (l'etat complet seede le
+   niveau grossier via coupler_write_coarse_state ; preuve : la quantite de mouvement seedee
+   advecte des le 1er pas). Loaders .so : rejet explicite (pas de chemin d'etat dans l'ABI v1).
+8. **IO etendu** : `sim.write(format='hdf5')` (h5py OPTIONNEL, erreur claire sinon) ;
+   `AmrSystem.write` npz/vtk (champs GROSSIERS de CHAQUE bloc, par nom, + phi + empreintes des
+   patchs fins ; les champs multi-niveaux = PR-IO-3) ; checkpoint/restart AMR = rejet explicite
+   pointant le plan (PR-IO-3).
+
+## Points encore NON generalises (explicites, mis a jour vague 3)
+
+1. **AMR** : pas de `ssprk3` ; coarse/fine suppose ratio 2 ; `set_poisson` limite a geometric_mg +
+   rhs charge_density|composite ; options Newton mono-bloc AMR et loaders .so = rejet explicite
+   (fermetures du coupleur historique / ABI) ; newton_diagnostics/newton_report = System seulement
+   (la reduction arg-max encodee n'est cablee que sur le chemin System).
 2. **AMR Schur Phase 4** : composite limite a 2 niveaux + UN patch fin mono-box + mono-rang ;
    multi-patch, > 2 niveaux, MPI, multi-blocs = Phase 4 (rejet explicite, perimetre documente
-   dans l'en-tete du stepper).
-3. **Polaire** : bornes de pas optionnelles NON cablees (transport max_wave_speed seul) ; flux
-   Rusanov seulement ; overrides de roles Schur rejetes ; Poisson direct mono-rang/mono-box ;
-   decoupage theta non expose par la facade.
+   dans l'en-tete du stepper). set_krylov AMR ne pilote que l'etage grossier.
+3. **Polaire** : flux Rusanov seulement (pas de HLL/HLLC/Roe polaire) ; Poisson direct
+   mono-rang/mono-box (Schur tensoriel = multi-box) ; decoupage theta non expose par la facade.
 4. **Aux** : toujours extensible PAR LISTE CANONIQUE (ADC_AUX_FIELDS + AUX_CANONICAL miroir
    Python), pas d'auxiliaire arbitraire par modele.
 5. **Briques natives layout fluide** : source.hpp / elliptic.hpp lisent toujours u[0]/u[1]/u[2]
    (documente "layout fluide canonique") ; pas de variantes role-aware.
-6. **IMEX-RK** : aucune famille ARK/IMEX-RK ; SourceImplicitBE est le seul schema implicite local.
-   Pas de Jacobien ANALYTIQUE fourni par le modele (differences finies seulement ; le hook DSL
-   m.implicit_source(residual=, jacobian=) reste a faire).
-7. **CoupledSource** : toujours explicite forward-Euler additif, capacites fixes (kCsMaxReg=32...),
-   pas de frequency()/dt_bound() sur les sources couplees DSL (contournement : add_dt_bound).
+6. **IMEX-RK** : aucune famille ARK/IMEX-RK ; SourceImplicitBE est le seul schema implicite local
+   (le Jacobien analytique vague 3 en ameliore la robustesse, pas l'ordre).
+7. **CoupledSource** : toujours explicite forward-Euler additif, capacites fixes (kCsMaxReg=32...) ;
+   frequency(mu) est une CONSTANTE declaree, pas une expression par cellule (une frequence
+   bytecode par cellule = suivi).
 8. **Backends** : `compile(backend="aot")` reste le defaut (decision utilisateur a trancher ;
-   adc.capabilities() publie desormais la matrice) ; registry C++ des tags strings non factorisee
+   adc.capabilities() publie la matrice) ; registry C++ des tags strings non factorisee
    (les tables make_block / dispatch_amr_* / polar restent paralleles, alignees par tests).
 9. **check_model sur CompiledModel** : porte sur les FORMULES (dsl.Model) et le BLOC INSTALLE
    (System) ; un CompiledModel seul (sans son Model d'origine) n'est pas re-verifiable.
-10. **IO** : v1 npz mono-rang System (write vtk/npz + checkpoint/restart bit-identique) ; HDF5
-    agrege/parallele, AMR et champs externes (B_z dans le checkpoint) = PR-IO-3 du plan.
-11. **HLLC/Roe capability cote DSL** : les hooks (contact_speed / hllc_star_state /
-    roe_dissipation) sont un contrat C++ ; le DSL ne les emet pas encore (m.contact_speed(...) /
-    m.roe_dissipation(...) = suivi).
+10. **IO** : System mono-rang (npz/vtk/hdf5 via h5py) ; HDF5 agrege/PARALLELE multi-rangs,
+    checkpoint AMR et champs externes (B_z dans le checkpoint) = PR-IO-3 du plan.
+11. **Roe cote DSL** : `m.enable_hllc()` emet les hooks HLLC ; l'equivalent Roe
+    (m.roe_dissipation(...) ou une linearisation de Roe generee depuis les flux) reste a faire —
+    le contrat C++ HasRoeDissipation est pret.

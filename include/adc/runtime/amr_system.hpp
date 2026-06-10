@@ -102,6 +102,12 @@ struct AmrBuildParams {
   double schur_alpha = 1.0;           ///< constante de couplage electrostatique de l'etage condense
   bool schur_strang = false;          ///< true : splitting Strang H(dt/2) S(dt) H(dt/2) ; false : Lie H(dt) S(dt)
   std::vector<double> bz_field;       ///< champ B_z(x,y) du grossier, n*n row-major (exige par l'etage condense)
+  // Reglages de l'etage condense TRANSPORTES par l'ABI (audit vague 3, append-only comme has_state).
+  double schur_krylov_tol = 0.0;      ///< tolerance du solve Krylov grossier (<= 0 = defaut 1e-10)
+  int schur_krylov_max_iters = 0;     ///< budget d'iterations (<= 0 = defaut 400)
+  // Descripteurs des champs de l'etage ("" = role canonique, bit-identique ; sinon nom de role
+  // stable OU nom de variable du bloc, resolus au build contre Model::conservative_vars()).
+  std::string schur_density, schur_momentum_x, schur_momentum_y, schur_energy;
 };
 
 /// Fermetures type-erased d'un bloc AMR compile, produites par amr_dsl_block::build_amr_compiled et
@@ -189,13 +195,20 @@ class AmrSystem {
   /// @throws std::runtime_error si un bloc est deja defini, si substeps < 1, si stride < 1, si time
   ///         n'est pas dans {explicit, imex}, si recon n'est pas dans {conservative, primitive}, ou si
   ///         un masque implicite est demande hors IMEX / avec un nom-role absent du bloc.
+  /// Options Newton (vague 3, parite System::add_block) : defauts = constantes historiques,
+  /// bit-identique. SUPPORT : moteur MULTI-BLOCS seulement (le coupleur mono-bloc garde iters=2
+  /// fige ; des options non-defaut en mono-bloc sont rejetees au build). Pas de
+  /// newton_diagnostics sur AMR (rapport non expose ; fail_policy warn/throw fonctionnent).
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
                  const std::string& recon = "conservative",
                  const std::string& time = "explicit", int substeps = 1, int stride = 1,
                  const std::vector<std::string>& implicit_vars = {},
-                 const std::vector<std::string>& implicit_roles = {});
+                 const std::vector<std::string>& implicit_roles = {},
+                 int newton_max_iters = 2, double newton_rel_tol = 0.0,
+                 double newton_abs_tol = 0.0, double newton_fd_eps = 1e-7,
+                 double newton_damping = 1.0, const std::string& newton_fail_policy = "none");
 
   /// Enregistre un bloc COMPILE (chemin add_compiled_model, header amr_dsl_block.hpp). DEUX builders
   /// type-erases sont figes ici, pour les DEUX routages de la facade :
@@ -322,7 +335,15 @@ class AmrSystem {
   /// @throws std::runtime_error si le systeme est deja construit, en MULTI-BLOCS, si kind/theta sont
   ///         hors domaine, ou (au build) si le bloc n'expose pas Density/MomentumX/MomentumY ou si
   ///         set_magnetic_field n'a pas ete appele.
-  void set_source_stage(const std::string& name, const std::string& kind, double theta, double alpha);
+  /// @param krylov_tol / krylov_max_iters : tolerance et budget du solve Krylov GROSSIER de
+  ///        l'etage (<= 0 = defauts historiques 1e-10 / 400 ; le solve composite FAC garde ses
+  ///        tolerances propres, Phase 4). @param density / momentum_x / momentum_y / energy :
+  ///        descripteurs des champs ("" = role canonique, bit-identique ; sinon nom de role stable
+  ///        ou de variable du bloc, resolus au build) -- parite avec System::set_source_stage.
+  void set_source_stage(const std::string& name, const std::string& kind, double theta,
+                        double alpha, double krylov_tol = 0.0, int krylov_max_iters = 0,
+                        const std::string& density = "", const std::string& momentum_x = "",
+                        const std::string& momentum_y = "", const std::string& energy = "");
 
   /// Choisit la politique de splitting en temps de l'etage source condense : "lie" (defaut, H(dt) S(dt))
   /// ou "strang" (H(dt/2) S(dt) H(dt/2), 2e ordre). Pendant AMR de System::set_time_scheme. Sans etage
@@ -345,13 +366,17 @@ class AmrSystem {
   ///
   /// @throws std::runtime_error si appele en mono-bloc, si le systeme est deja construit, ou si la
   ///         forme du bytecode / un role / un bloc est invalide (memes gardes que System).
+  /// @param frequency frequence CONSERVATIVE declaree mu [1/s] du couplage (vague 3) : borne
+  ///                  dt <= cfl/mu sur le macro-pas de step_cfl ; <= 0 (defaut) = pas de borne.
+  /// @param label     nom du couplage (raison "coupled_source:<label>" de last_dt_bound).
   void add_coupled_source(const std::vector<std::string>& in_blocks,
                           const std::vector<std::string>& in_roles,
                           const std::vector<double>& consts,
                           const std::vector<std::string>& out_blocks,
                           const std::vector<std::string>& out_roles,
                           const std::vector<int>& prog_ops, const std::vector<int>& prog_args,
-                          const std::vector<int>& prog_lens);
+                          const std::vector<int>& prog_lens, double frequency = 0.0,
+                          const std::string& label = "coupled_source");
 
   void step(double dt);  ///< un macro-pas AMR (regrid periodique inclus)
   void advance(double dt, int nsteps);
@@ -361,6 +386,9 @@ class AmrSystem {
   int nx() const;
   double time() const;
   int n_blocks() const;           ///< nombre de blocs (1 = mono-bloc AmrCouplerMP ; >= 2 = AmrRuntime)
+  /// Noms des blocs dans l'ordre d'ajout (parite System::block_names) : la facade IO itere dessus
+  /// pour ecrire CHAQUE bloc par son nom (un nom vide -> bloc 0, compat mono-bloc historique).
+  std::vector<std::string> block_names() const;
   int n_patches();                ///< nombre de patchs fins courants (de la hierarchie partagee)
   /// Empreintes index-space des patchs fins courants : un PatchBox (level, ilo, jlo, ihi, jhi) par
   /// box fine, pour TOUS les niveaux fins (level >= 1). Coins INCLUSIFS dans l'espace d'indices du

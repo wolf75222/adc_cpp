@@ -678,6 +678,12 @@ class AmrRuntime {
       }
       if (dt_b < dt) { dt = dt_b; last_dt_reason_ = std::string(why) + ":" + b.name; }
     }
+    // Frequences declarees des sources couplees (CoupledSource.frequency) : borne sur le MACRO-pas
+    // (les couplages s'appliquent une fois par macro-pas), dt <= cfl / mu, sans substeps/stride.
+    for (const auto& cs : coupled_freqs_) {
+      const Real dt_cs = cfl / cs.mu;
+      if (dt_cs < dt) { dt = dt_cs; last_dt_reason_ = "coupled_source:" + cs.label; }
+    }
     // Bornes GLOBALES (AmrRuntime::add_dt_bound, parite avec System::add_dt_bound) : evaluees PAR
     // RANG puis reduites all_reduce_min (dt identique sur tous les rangs ; <= 0/non finie = inerte).
     for (const auto& g : dt_bounds_) {
@@ -699,6 +705,13 @@ class AmrRuntime {
   /// step_cfl, all_reduce_min, <= 0/non finie = inerte. Pour couplage/scheduler/politiques user.
   void add_dt_bound(const std::string& label, std::function<double()> fn) {
     dt_bounds_.push_back(GlobalDtBound{label, std::move(fn)});
+  }
+
+  /// Frequence DECLAREE d'une source couplee (CoupledSource.frequency, audit vague 3) : borne de
+  /// pas dt <= cfl / mu sur le MACRO-pas (les couplages s'appliquent une fois par macro-pas).
+  /// mu <= 0 = inerte (pas de borne).
+  void add_coupled_frequency(const std::string& label, Real mu) {
+    if (mu > Real(0)) coupled_freqs_.push_back(CoupledFreqDecl{label, mu});
   }
 
   /// Borne ACTIVE du dernier step_cfl ("transport:<bloc>" / "source_frequency:<bloc>" /
@@ -787,6 +800,12 @@ class AmrRuntime {
     std::function<double()> fn;
   };
   std::vector<GlobalDtBound> dt_bounds_;
+  // Frequences declarees des sources couplees (borne dt <= cfl/mu sur le macro-pas, vague 3).
+  struct CoupledFreqDecl {
+    std::string label;
+    Real mu;
+  };
+  std::vector<CoupledFreqDecl> coupled_freqs_;
   std::string last_dt_reason_;
   std::vector<MultiFab> aux_;  // [niveau], partage par tous les blocs
   std::vector<CoupledSourceSpec> coupled_sources_;  // sources couplees enregistrees (appliquees apres transport)

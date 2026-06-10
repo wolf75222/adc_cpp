@@ -60,16 +60,33 @@ class AmrCondensedSchurSourceStepper {
   AmrCondensedSchurSourceStepper(const VariableSet& vars, const Geometry& coarse_geom,
                                  const BoxArray& coarse_ba, const BCRec& bcPhi, Real alpha,
                                  int n_precond_vcycles = 1)
+      : AmrCondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
+                                       vars.index_of(VariableRole::MomentumX),
+                                       vars.index_of(VariableRole::MomentumY),
+                                       vars.index_of(VariableRole::Energy), coarse_geom, coarse_ba,
+                                       bcPhi, alpha, n_precond_vcycles) {}
+
+  /// Variante a COMPOSANTES EXPLICITES (audit vague 3, parite avec les steppers System) : roles
+  /// transportes par l'ABI au lieu d'etre resolus canoniquement. Le ctor canonique DELEGUE ici.
+  AmrCondensedSchurSourceStepper(const VariableSet& vars, int c_rho, int c_mx, int c_my, int c_E,
+                                 const Geometry& coarse_geom, const BoxArray& coarse_ba,
+                                 const BCRec& bcPhi, Real alpha, int n_precond_vcycles = 1)
       : vars_(vars),
         coarse_geom_(coarse_geom),
         coarse_ba_(coarse_ba),
         bcPhi_(bcPhi),
         alpha_(alpha),
-        c_rho_(vars.index_of(VariableRole::Density)),
-        c_mx_(vars.index_of(VariableRole::MomentumX)),
-        c_my_(vars.index_of(VariableRole::MomentumY)),
-        c_E_(vars.index_of(VariableRole::Energy)),
-        coarse_(vars, coarse_geom, coarse_ba, bcPhi, alpha, n_precond_vcycles) {}
+        c_rho_(c_rho),
+        c_mx_(c_mx),
+        c_my_(c_my),
+        c_E_(c_E),
+        coarse_(vars, c_rho, c_mx, c_my, c_E, coarse_geom, coarse_ba, bcPhi, alpha,
+                n_precond_vcycles) {}
+
+  /// Tolerance / budget du solve Krylov de l'etage GROSSIER (delegue a l'etage uniforme #126 ;
+  /// defauts historiques 1e-10 / 400). Le solve COMPOSITE multi-niveau (FAC, Phase 3c) garde ses
+  /// tolerances propres (suivi Phase 4).
+  void set_krylov(Real tol, int max_iters) { coarse_.set_krylov(tol, max_iters); }
 
   /// true si le modele porte un role Energy (mise a jour d'energie active dans l'etage grossier).
   bool has_energy() const { return coarse_.energy_comp() >= 0; }

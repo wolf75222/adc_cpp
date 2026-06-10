@@ -187,6 +187,7 @@ PYBIND11_MODULE(_adc, m) {
       // Politique de splitting en temps : "lie" (defaut, bit-identique) ou "strang" (H(dt/2) S(dt)
       // H(dt/2), 2e ordre). Cf. System::set_time_scheme / SystemStepper::step_strang.
       .def("set_time_scheme", &System::set_time_scheme, py::arg("scheme"))
+      // (System) -- voir aussi AmrSystem.add_coupled_source plus bas pour le pendant AMR.
       // Borne GLOBALE de pas de temps (audit step_cfl) : fn() evaluee UNE fois par pas (hote) par
       // step_cfl / step_adaptive ; dt <= fn() quand fn() > 0 et fini. Crochet des contraintes non
       // locales-cellule (couplage, Schur/Poisson, scheduler, rampe utilisateur). Une callback
@@ -209,7 +210,10 @@ PYBIND11_MODULE(_adc, m) {
       // splitting explicite apres le transport (meme seam que add_ionization). Sans appel, inchange.
       .def("add_coupled_source", &System::add_coupled_source, py::arg("in_blocks"),
            py::arg("in_roles"), py::arg("consts"), py::arg("out_blocks"), py::arg("out_roles"),
-           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"))
+           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"),
+           // Frequence declaree mu du couplage (CoupledSource.frequency, vague 3) : borne de pas
+           // dt <= cfl/mu sur le macro-pas ; <= 0 = pas de borne (historique).
+           py::arg("frequency") = 0.0, py::arg("label") = "coupled_source")
       .def("variable_names", &System::variable_names, py::arg("name"),
            py::arg("kind") = "conservative")
       .def("variable_roles", &System::variable_roles, py::arg("name"),
@@ -345,7 +349,12 @@ PYBIND11_MODULE(_adc, m) {
            // implicite par NOM (implicit_vars) ou par ROLE physique (implicit_roles). Vides (defaut)
            // -> backward-Euler plein. N'ont de sens qu'en time="imex" et en MULTI-BLOCS (cf. add_block).
            py::arg("implicit_vars") = std::vector<std::string>{},
-           py::arg("implicit_roles") = std::vector<std::string>{})
+           py::arg("implicit_roles") = std::vector<std::string>{},
+           // Options Newton IMEX (vague 3, parite System) : MULTI-BLOCS seulement (mono-bloc :
+           // rejet au build, iters=2 fige cote coupleur). Pas de diagnostics sur AMR.
+           py::arg("newton_max_iters") = 2, py::arg("newton_rel_tol") = 0.0,
+           py::arg("newton_abs_tol") = 0.0, py::arg("newton_fd_eps") = 1e-7,
+           py::arg("newton_damping") = 1.0, py::arg("newton_fail_policy") = "none")
       // Bloc NATIF AMR charge depuis un loader .so genere par le DSL (backend "production",
       // target="amr_system") : le .so inline add_compiled_model(AmrSystem&) -> bloc natif sur la
       // hierarchie AMR (reflux, regrid), cle d'ABI verifiee. cf. AmrSystem::add_native_block. PAS de
@@ -376,7 +385,12 @@ PYBIND11_MODULE(_adc, m) {
            },
            py::arg("bz"))
       .def("set_source_stage", &AmrSystem::set_source_stage, py::arg("name"), py::arg("kind"),
-           py::arg("theta"), py::arg("alpha"))
+           py::arg("theta"), py::arg("alpha"),
+           // Reglages transportes (vague 3, parite System) : tolerances Krylov du solve grossier
+           // (<= 0 = defauts 1e-10/400) + descripteurs de champs ("" = role canonique).
+           py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0,
+           py::arg("density") = "", py::arg("momentum_x") = "", py::arg("momentum_y") = "",
+           py::arg("energy") = "")
       .def("set_time_scheme", &AmrSystem::set_time_scheme, py::arg("scheme"))
       .def("set_density",
            [](AmrSystem& s, const std::string& name,
@@ -407,13 +421,15 @@ PYBIND11_MODULE(_adc, m) {
       // ABI plate que System.add_coupled_source. Sans appel, inchange. cf. AmrSystem::add_coupled_source.
       .def("add_coupled_source", &AmrSystem::add_coupled_source, py::arg("in_blocks"),
            py::arg("in_roles"), py::arg("consts"), py::arg("out_blocks"), py::arg("out_roles"),
-           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"))
+           py::arg("prog_ops"), py::arg("prog_args"), py::arg("prog_lens"),
+           py::arg("frequency") = 0.0, py::arg("label") = "coupled_source")
       .def("step", &AmrSystem::step, py::arg("dt"))
       .def("advance", &AmrSystem::advance, py::arg("dt"), py::arg("nsteps"))
       .def("step_cfl", &AmrSystem::step_cfl, py::arg("cfl"))
       .def("nx", &AmrSystem::nx)
       .def("time", &AmrSystem::time)
       .def("n_blocks", &AmrSystem::n_blocks)
+      .def("block_names", &AmrSystem::block_names)
       .def("n_patches", &AmrSystem::n_patches)
       // Empreintes index-space des patchs fins : liste de tuples (level, ilo, jlo, ihi, jhi), coins
       // INCLUSIFS, dans l'espace d'indices du niveau (n << level cellules/direction, ratio 2). MEME

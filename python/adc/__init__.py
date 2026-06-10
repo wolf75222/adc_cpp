@@ -1137,10 +1137,14 @@ class System:
         # Garde-fou flux numerique : HLLC/Roe exigent une pression -> la brique generee n'emet
         # pressure()/wave_speeds() que si une primitive 'p' est declaree. Sans 'p', make_block ne
         # compile pas le flux : on le diagnostique ici avant la frontiere C++.
-        if spatial.flux in ("hllc", "roe") and "p" not in compiled.prim_names:
+        # hllc : la capability emise (m.enable_hllc -> has_hllc) OUVRE le flux meme hors Euler 4-var
+        # (la garde C++ requires l'accepte) ; sinon la voie canonique exige 'p' dans les primitives.
+        if (spatial.flux in ("hllc", "roe") and "p" not in compiled.prim_names
+                and not (spatial.flux == "hllc" and getattr(compiled, "has_hllc", False))):
             raise ValueError(
                 "add_equation : riemann '%s' exige une pression : declarer une primitive 'p' "
-                "(m.primitive('p', ...)) dans le modele ; sinon utiliser riemann='rusanov'"
+                "(m.primitive('p', ...)) dans le modele, ou pour hllc emettre la capability "
+                "(m.enable_hllc()) ; sinon utiliser riemann='rusanov'"
                 % spatial.flux)
         # HLL : PAS de garde Python sur prim_names ici -- la brique generee emet wave_speeds des
         # qu'une primitive 'p' est DECLAREE (m.primitive('p', ...)), meme HORS layout primitive_vars
@@ -1308,7 +1312,8 @@ class System:
         if isinstance(coupling, dsl.CompiledCoupledSource):
             self._s.add_coupled_source(coupling.in_blocks, coupling.in_roles, coupling.consts,
                                        coupling.out_blocks, coupling.out_roles, coupling.prog_ops,
-                                       coupling.prog_args, coupling.prog_lens)
+                                       coupling.prog_args, coupling.prog_lens,
+                                       getattr(coupling, "frequency", 0.0), coupling.name)
         elif isinstance(coupling, Ionization):
             self.add_ionization(electron=coupling.electron, ion=coupling.ion,
                                 neutral=coupling.neutral, rate=coupling.rate)
@@ -1504,7 +1509,39 @@ class System:
                 f.write("\n".join(lines))
             os.replace(tmp, target)
             return target
-        raise ValueError("write : format 'vtk' | 'npz' (recu %r)" % (format,))
+        if format == "hdf5":
+            # HDF5 AGREGE v1 (vague 3, PR-IO-2 du plan) : un fichier unique, un groupe par bloc,
+            # attributs pour l'horloge/grille. Mono-rang (la facade est mono-box) ; HDF5 PARALLELE
+            # (hyperslabs par rang) = PR-IO-3. h5py optionnel : absent -> erreur claire avec remede.
+            try:
+                import h5py
+            except ImportError:
+                raise RuntimeError(
+                    "write(format='hdf5') : h5py absent (pip/conda install h5py) ; "
+                    "utiliser format='npz' (equivalent, sans dependance) en attendant.")
+            target = path + suffix + ".h5"
+            tmp = target + ".tmp"
+            with h5py.File(tmp, "w") as f:
+                f.attrs["t"] = self._s.time()
+                f.attrs["macro_step"] = self._s.macro_step()
+                f.attrs["nx"] = nxv
+                f.attrs["ny"] = nyv
+                f.attrs["abi_key"] = abi_key()
+                for b in blocks:
+                    nv = self._s.n_vars(b)
+                    g = f.create_group(b)
+                    st = np.asarray(self._s.get_state(b), dtype=np.float64).reshape(nv, nyv, nxv)
+                    g.create_dataset("state", data=st, compression="gzip")
+                    g.attrs["names"] = [s.encode() for s in
+                                        self._s.variable_names(b, "conservative")]
+                    g.attrs["roles"] = [s.encode() for s in
+                                        self._s.variable_roles(b, "conservative")]
+                f.create_dataset("phi", data=np.asarray(self._s.potential(),
+                                                        dtype=np.float64).reshape(nyv, nxv),
+                                 compression="gzip")
+            os.replace(tmp, target)
+            return target
+        raise ValueError("write : format 'vtk' | 'npz' | 'hdf5' (recu %r)" % (format,))
 
     def checkpoint(self, path):
         """CHECKPOINT REDEMARRABLE v1 (npz) : etat COMPLET des blocs + horloge (t, macro_step --
@@ -1586,24 +1623,32 @@ def capabilities():
                 "rusanov": "generique minimal (max_wave_speed seul)",
                 "hll": "generique a ondes signees (model.wave_speeds ; DSL : primitive 'p')",
                 "hllc": "Euler 2D canonique (4 var + pression) OU capability modele "
-                        "HasHLLCStructure (contact_speed + hllc_star_state)",
-                "roe": "Euler 2D gaz parfait canonique OU capability modele HasRoeDissipation",
+                        "HasHLLCStructure -- emise par le DSL via m.enable_hllc() (roles + 'p', "
+                        "y compris 3-var non Euler, scalaires passifs advectes)",
+                "roe": "Euler 2D gaz parfait canonique OU capability modele HasRoeDissipation "
+                       "(C++ ; emission DSL = suivi)",
             },
         },
         "time": {
             "system": ["explicit (ssprk2|ssprk3)", "imex (= SourceImplicitBE)",
                        "split lie|strang + CondensedSchur"],
-            "amr": ["explicit (ssprk2)", "imex (= SourceImplicitBE, iters=2 fige)",
+            "amr": ["explicit (ssprk2)", "imex (= SourceImplicitBE)",
                     "split lie|strang + CondensedSchur (mono-bloc, grossier)"],
             "system_polar": ["explicit (ssprk2|ssprk3)", "split + CondensedSchur polaire"],
-            "newton_options": "System seulement (AMR : rejet explicite)",
+            "newton_options": "System + AMR multi-blocs natif (mono-bloc AMR et loaders .so : "
+                              "rejet explicite) ; jacobien analytique via m.source_jacobian ; "
+                              "newton_diagnostics/newton_report : System seulement",
         },
         "stability_policy": {
             "system": ["transport (max_wave_speed | stability_speed)", "source_frequency",
-                       "stability_dt", "add_dt_bound (global, all_reduce_min)", "last_dt_bound"],
+                       "stability_dt", "coupled_source.frequency", "add_dt_bound (global, "
+                       "all_reduce_min)", "last_dt_bound"],
             "amr": ["transport (max_wave_speed | stability_speed)", "source_frequency",
-                    "stability_dt", "add_dt_bound", "last_dt_bound"],
-            "system_polar": ["transport (max_wave_speed) seulement"],
+                    "stability_dt", "coupled_source.frequency (multi-blocs)", "add_dt_bound",
+                    "last_dt_bound"],
+            "system_polar": ["transport (max_wave_speed | stability_speed)", "source_frequency",
+                             "stability_dt", "coupled_source.frequency", "add_dt_bound",
+                             "last_dt_bound"],
         },
         "poisson": {
             "system_cartesian": ["geometric_mg (paroi, eps(x), aniso, ecrante)",
@@ -1614,10 +1659,12 @@ def capabilities():
         "schur": {
             "system_cartesian": "complet ; roles/champs configurables (density=/momentum=/energy=/"
                                 "magnetic_field=), krylov_tol/max_iters configurables",
-            "system_polar": "roles canoniques seulement (overrides rejetes) ; solveur multi-box "
-                            "C++, facade une box globale",
-            "amr": "mono-bloc ; mono-niveau complet + composite Phase 3c (2 niveaux, 1 patch fin "
-                   "mono-box, mono-rang) ; Phase 4 (multi-patch/>2 niveaux/MPI/multi-blocs) a faire",
+            "system_polar": "roles configurables (density=/momentum=/energy=, vague 3) ; "
+                            "magnetic_field fige B_z ; solveur multi-box C++, facade une box globale",
+            "amr": "mono-bloc ; roles + krylov_tol/max_iters configurables (vague 3, "
+                   "magnetic_field fige B_z grossier) ; mono-niveau complet + composite Phase 3c "
+                   "(2 niveaux, 1 patch fin mono-box, mono-rang) ; Phase 4 (multi-patch/"
+                   ">2 niveaux/MPI/multi-blocs) a faire",
         },
         "backends_dsl": {
             "prototype": {"adder": "add_dynamic_block", "riemann": ["rusanov"],
@@ -1634,33 +1681,31 @@ def capabilities():
                            "stability_hooks": True},
         },
         "io": {
-            "write": ["vtk (.vti cartesien)", "npz"],
+            "write": ["vtk (.vti cartesien)", "npz", "hdf5 (h5py optionnel, agrege mono-rang)",
+                      "AmrSystem.write npz/vtk (grossier + rectangles des patchs)"],
             "checkpoint_restart": "v1 npz mono-rang (System ; etats + phi + t/macro_step ; "
-                                  "composition rejouee par le script) ; AMR/HDF5 parallele = "
-                                  "PR-IO-3 (docs/IO_CHECKPOINT_PLAN.md)",
+                                  "composition rejouee par le script ; reprise bit-identique) ; "
+                                  "AMR (multi-niveaux) et HDF5 parallele = PR-IO-3 "
+                                  "(docs/IO_CHECKPOINT_PLAN.md ; AmrSystem.checkpoint leve)",
+        },
+        "amr_layout": {
+            "set_conservative_state": "mono-bloc ET multi-blocs natifs (vague 3 ; loaders .so : "
+                                      "rejet explicite)",
         },
     }
 
 
-def _reject_newton_options_amr(label, time):
-    """REJETTE explicitement les options Newton (adc.IMEX/SourceImplicit) sur les chemins AMR :
-    AmrSystem::add_block ne les transporte pas et le pas IMEX par niveau garde iters=2 fige, sans
-    rapport -- les honorer demanderait de plomber le binding, la signature C++ et les fermetures
-    AMR (suivi distinct). Les ignorer EN SILENCE violerait la convention 'pas d'option acceptee
-    puis ignoree' (cf. System.add_equation qui rejette les memes options sur les .so). Defauts
-    (2 / 0 / 0 / 1e-7 / False) : aucun rejet, comportement historique inchange."""
-    if (getattr(time, "newton_max_iters", 2) != 2
-            or getattr(time, "newton_rel_tol", 0.0) != 0.0
-            or getattr(time, "newton_abs_tol", 0.0) != 0.0
-            or getattr(time, "newton_fd_eps", 1e-7) != 1e-7
-            or getattr(time, "newton_diagnostics", False)
-            or getattr(time, "newton_damping", 1.0) != 1.0
-            or getattr(time, "newton_fail_policy", "none") != "none"):
+def _reject_newton_diagnostics_amr(label, time):
+    """REJETTE newton_diagnostics sur les chemins AMR (vague 3) : les OPTIONS Newton (max_iters/
+    tolerances/fd_eps/damping/fail_policy) sont desormais TRANSPORTEES par AmrSystem::add_block
+    (moteur multi-blocs ; le mono-bloc les rejette au build cote C++), mais le RAPPORT
+    (newton_report) n'est pas expose par la facade AMR -- l'accepter serait un ignore silencieux.
+    fail_policy='warn'/'throw' fonctionnent sur AMR (detection interne sans rapport)."""
+    if getattr(time, "newton_diagnostics", False):
         raise ValueError(
-            "%s : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/diagnostics/"
-            "damping/fail_policy) ne sont pas transportees sur AMR (le pas IMEX par niveau utilise "
-            "iters=2 fige, sans rapport). Utiliser un System mono-niveau pour piloter le Newton, "
-            "ou laisser les defauts." % label)
+            "%s : newton_diagnostics n'est pas expose sur AMR (pas de newton_report cote "
+            "AmrSystem). Utiliser newton_fail_policy='warn'/'throw' (transportes), ou un System "
+            "mono-niveau pour le rapport complet." % label)
 
 
 class AmrSystem:
@@ -1724,15 +1769,91 @@ class AmrSystem:
                 "supporte que par add_equation (qui branche l'etage source) ; utiliser "
                 "add_equation(..., time=adc.Strang(hyperbolic=adc.Explicit(...), "
                 "source=adc.CondensedSchur(...))).")
-        # Options Newton NON transportees sur AMR : rejet explicite (cf. _reject_newton_options_amr).
-        _reject_newton_options_amr("AmrSystem.add_block", time)
-        # On thread substeps/stride (multirate, capstone iv) ET le masque IMEX partiel implicit_vars /
-        # implicit_roles (capstone vii : adc.IMEX(implicit_vars=...)). Resolus / valides cote C++
-        # (AmrSystem::add_block) contre les noms/roles du bloc : vides -> backward-Euler plein, et
-        # demander un masque en explicite (ou en mono-bloc) leve une erreur claire la-bas.
+        # newton_diagnostics non expose sur AMR (rejet) ; les autres options Newton sont TRANSPORTEES
+        # (multi-blocs ; le mono-bloc les rejette au build cote C++) depuis la vague 3.
+        _reject_newton_diagnostics_amr("AmrSystem.add_block", time)
+        # On thread substeps/stride (multirate, capstone iv), le masque IMEX partiel ET les options
+        # Newton (vague 3). Resolus / valides cote C++ (AmrSystem::add_block) contre les noms/roles
+        # du bloc : vides -> backward-Euler plein, masque/options en explicite ou mono-bloc -> erreur.
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1), getattr(time, "stride", 1),
-                          getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
+                          getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
+                          getattr(time, "newton_max_iters", 2),
+                          getattr(time, "newton_rel_tol", 0.0),
+                          getattr(time, "newton_abs_tol", 0.0),
+                          getattr(time, "newton_fd_eps", 1e-7),
+                          getattr(time, "newton_damping", 1.0),
+                          getattr(time, "newton_fail_policy", "none"))
+
+    def write(self, path, format="npz", step=None):
+        """SORTIE DE VISUALISATION AMR (vague 3) : champs GROSSIERS par bloc + phi + empreintes des
+        patchs fins. format='npz' (densites par bloc, phi, patch_rectangles, t) ou 'vtk' (.vti du
+        GROSSIER : densite par bloc + phi -- les patchs fins sont fournis en npz via leurs
+        rectangles, le multi-resolution VTK = PR-IO-3). @p step : suffixe numerote. @return chemin."""
+        import os
+        import numpy as np
+        n = self._s.nx()
+        suffix = ("_%06d" % int(step)) if step is not None else ""
+        # CHAQUE bloc, par son nom (binding AmrSystem::block_names, parite System) : en multi-blocs,
+        # density() sans nom ne lirait QUE le bloc 0 et perdrait les autres EN SILENCE.
+        names = list(self._s.block_names())
+        if not names:
+            names = [""]
+        if format == "npz":
+            out = {"t": self._s.time(), "n": n,
+                   "patch_rectangles": np.array(self.patch_rectangles(), dtype=np.float64)
+                   if self.patch_rectangles() else np.zeros((0, 4))}
+            for b in names:
+                key = b if b else "block"
+                out["density_" + key] = np.asarray(self.density(b) if b else self.density(),
+                                                   dtype=np.float64)
+            out["phi"] = np.asarray(self.potential(), dtype=np.float64)
+            target = path + suffix + ".npz"
+            tmp = target + ".tmp"
+            with open(tmp, "wb") as f:
+                np.savez_compressed(f, **out)
+            os.replace(tmp, target)
+            return target
+        if format == "vtk":
+            target = path + suffix + ".vti"
+            arrays, labels = [], []
+            for b in names:
+                key = b if b else "block"
+                arrays.append(np.asarray(self.density(b) if b else self.density(),
+                                         dtype=np.float64).reshape(n, n))
+                labels.append("%s_density" % key)
+            arrays.append(np.asarray(self.potential(), dtype=np.float64).reshape(n, n))
+            labels.append("phi")
+            lines = ['<?xml version="1.0"?>',
+                     '<VTKFile type="ImageData" version="0.1" byte_order="LittleEndian">',
+                     '  <ImageData WholeExtent="0 %d 0 %d 0 0" Origin="0 0 0" '
+                     'Spacing="%.17g %.17g 1">' % (n, n, self._L / n, self._L / n),
+                     '    <Piece Extent="0 %d 0 %d 0 0">' % (n, n),
+                     '      <CellData>']
+            for nm, arr in zip(labels, arrays):
+                lines.append('        <DataArray type="Float64" Name="%s" format="ascii">' % nm)
+                lines.append("          " + " ".join("%.17g" % v for v in arr.ravel()))
+                lines.append('        </DataArray>')
+            lines += ['      </CellData>', '    </Piece>', '  </ImageData>', '</VTKFile>', '']
+            tmp = target + ".tmp"
+            with open(tmp, "w") as f:
+                f.write("\n".join(lines))
+            os.replace(tmp, target)
+            return target
+        raise ValueError("AmrSystem.write : format 'npz' | 'vtk' (recu %r)" % (format,))
+
+    def checkpoint(self, path):
+        """NON CABLE sur AMR (PR-IO-3 du plan, docs/IO_CHECKPOINT_PLAN.md) : un checkpoint AMR
+        exige le marshaling de TOUS les niveaux/patchs (etats fins + hierarchie + ownership), absent
+        de la facade. Erreur explicite plutot qu'un checkpoint partiel (grossier seul) silencieux."""
+        raise NotImplementedError(
+            "AmrSystem.checkpoint : non cable (PR-IO-3 : etats multi-niveaux + hierarchie + "
+            "ownership). Utiliser AmrSystem.write (visualisation) ou un System mono-niveau.")
+
+    def restart(self, path):
+        """NON CABLE sur AMR (cf. checkpoint)."""
+        raise NotImplementedError(
+            "AmrSystem.restart : non cable (PR-IO-3). Utiliser un System mono-niveau.")
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None):
         """Ajoute l'UNIQUE equation/bloc AMR en aiguillant sur le TYPE de @p model (DSL Phase D) :
@@ -1781,23 +1902,23 @@ class AmrSystem:
         if isinstance(time, Split):
             self.add_equation(name, model, spatial=spatial, time=time.hyperbolic, substeps=substeps)
             src = time.source
-            # krylov_tol / krylov_max_iters de CondensedSchur NON transportes par le chemin amr-schur
-            # (AmrSystem::set_source_stage ne les expose pas) : REJET explicite plutot que de laisser
-            # le solve Schur global AMR garder les defauts EN SILENCE (meme convention que le rejet
-            # stride/masque sur le .so). Defauts (None -> 0/0) : aucun rejet, comportement inchange.
-            if getattr(src, "krylov_tol", 0.0) or getattr(src, "krylov_max_iters", 0):
+            # Reglages TRANSPORTES par le chemin amr-schur depuis la vague 3 (parite System) :
+            # tolerances Krylov du solve grossier + descripteurs de champs (role stable ou nom de
+            # variable, resolus au build contre le Model concret). magnetic_field reste fige sur
+            # le tampon B_z grossier dedie (amr_write_coarse_bz) : un autre champ aux n'a pas de
+            # pendant AMR -> rejet explicite (pas d'ignore silencieux).
+            if getattr(src, "bz_aux_component", -1) >= 0:
                 raise ValueError(
-                    "AmrSystem.add_equation : krylov_tol / krylov_max_iters de adc.CondensedSchur ne "
-                    "sont pas transportes par le chemin amr-schur (le solve Schur global AMR garderait "
-                    "les defauts en silence). Laisser les defauts, ou utiliser System (mono-niveau) qui "
-                    "les cable.")
-            if getattr(src, "_has_field_overrides", lambda: False)():
-                raise ValueError(
-                    "AmrSystem.add_equation : les descripteurs density/momentum/energy/"
-                    "magnetic_field de adc.CondensedSchur ne sont pas transportes par le chemin "
-                    "amr-schur (roles canoniques seulement). Laisser les defauts, ou utiliser "
-                    "System (mono-niveau) qui les cable.")
-            self._s.set_source_stage(name, src.kind, src.theta, src.alpha)
+                    "AmrSystem.add_equation : magnetic_field != 'B_z' n'est pas transporte par le "
+                    "chemin amr-schur (l'etage AMR lit le tampon B_z grossier dedie). Laisser "
+                    "magnetic_field='B_z', ou utiliser System (mono-niveau).")
+            self._s.set_source_stage(name, src.kind, src.theta, src.alpha,
+                                     getattr(src, "krylov_tol", 0.0),
+                                     getattr(src, "krylov_max_iters", 0),
+                                     getattr(src, "density_spec", ""),
+                                     getattr(src, "momentum_x_spec", ""),
+                                     getattr(src, "momentum_y_spec", ""),
+                                     getattr(src, "energy_spec", ""))
             self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
             return
 
@@ -1810,10 +1931,16 @@ class AmrSystem:
         # masque demande en explicite ou en mono-bloc leve une erreur claire cote C++,
         # amr_system.cpp:325-328 / :283-287). Ne PAS dupliquer ces gardes ici.
         if isinstance(model, ModelSpec):
-            _reject_newton_options_amr("AmrSystem.add_equation", time)
+            _reject_newton_diagnostics_amr("AmrSystem.add_equation", time)
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                               nsub, getattr(time, "stride", 1),
-                              getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []))
+                              getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
+                              getattr(time, "newton_max_iters", 2),
+                              getattr(time, "newton_rel_tol", 0.0),
+                              getattr(time, "newton_abs_tol", 0.0),
+                              getattr(time, "newton_fd_eps", 1e-7),
+                              getattr(time, "newton_damping", 1.0),
+                              getattr(time, "newton_fail_policy", "none"))
             return
 
         if not isinstance(model, dsl.CompiledModel):

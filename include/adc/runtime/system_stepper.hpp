@@ -330,6 +330,15 @@ class SystemStepper {
       }
       if (dt_b < dt) { dt = dt_b; reason = std::string(why) + ":" + s.name; }
     }
+    // Frequences DECLAREES des sources couplees (CoupledSource.frequency) : les couplages
+    // s'appliquent UNE fois par MACRO-pas (apply_couplings(dt)), la borne porte donc sur le
+    // macro-dt directement : dt <= cfl / mu (PAS de facteur substeps/stride -- ceux-ci ne
+    // s'appliquent qu'au transport sous-cycle du bloc, pas au splitting des couplages).
+    for (const auto& cs : P->coupled_freqs_) {
+      if (!(cs.mu > 0.0)) continue;
+      const double dt_cs = cfl / cs.mu;
+      if (dt_cs < dt) { dt = dt_cs; reason = "coupled_source:" + cs.label; }
+    }
     // Bornes GLOBALES (System::add_dt_bound) : couplage multi-blocs, Schur/Poisson, AMR/scheduler.
     // Une evaluation HOTE par pas et par borne ; <= 0 ou non finie = ne contraint pas ce pas
     // (neutralisee en +inf AVANT le min global). ALL_REDUCE_MIN obligatoire : la callback est
@@ -412,6 +421,10 @@ class SystemStepper {
           macro_dt = std::min(macro_dt, static_cast<double>(db) * static_cast<double>(n) /
                                             static_cast<double>(s.stride));
       }
+    }
+    // Frequences declarees des sources couplees (cf. step_cfl) : borne sur le MACRO-pas.
+    for (const auto& cs : P->coupled_freqs_) {
+      if (cs.mu > 0.0) macro_dt = std::min(macro_dt, cfl / cs.mu);
     }
     // Bornes GLOBALES (System::add_dt_bound), comme step_cfl (meme all_reduce_min : dt identique
     // sur tous les rangs, cf. le commentaire de step_cfl).

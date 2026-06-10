@@ -298,11 +298,24 @@ class PolarCondensedSchurSourceStepper {
   PolarCondensedSchurSourceStepper(const VariableSet& vars, const PolarGeometry& geom,
                                    const BoxArray& ba, const BCRec& bcPhi, Real alpha,
                                    PolarPrecond precond = PolarPrecond::RadialLine)
+      : PolarCondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
+                                         vars.index_of(VariableRole::MomentumX),
+                                         vars.index_of(VariableRole::MomentumY),
+                                         vars.index_of(VariableRole::Energy), geom, ba, bcPhi,
+                                         alpha, precond) {}
+
+  /// Variante a COMPOSANTES EXPLICITES (audit vague 3, parite avec le stepper cartesien) :
+  /// l'appelant DESIGNE les composantes (rho, m_r, m_theta[, E]) -- bloc a noms libres / roles
+  /// Custom. Le ctor canonique ci-dessus DELEGUE ici (resolution par roles inchangee).
+  PolarCondensedSchurSourceStepper(const VariableSet& vars, int c_rho, int c_mx, int c_my, int c_E,
+                                   const PolarGeometry& geom, const BoxArray& ba,
+                                   const BCRec& bcPhi, Real alpha,
+                                   PolarPrecond precond = PolarPrecond::RadialLine)
       : vars_(vars),
-        c_rho_(vars.index_of(VariableRole::Density)),
-        c_mx_(vars.index_of(VariableRole::MomentumX)),
-        c_my_(vars.index_of(VariableRole::MomentumY)),
-        c_E_(vars.index_of(VariableRole::Energy)),
+        c_rho_(c_rho),
+        c_mx_(c_mx),
+        c_my_(c_my),
+        c_E_(c_E),
         alpha_(alpha),
         geom_(geom),
         bcPhi_(bcPhi),

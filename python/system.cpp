@@ -184,6 +184,14 @@ struct System::Impl {
     std::function<double()> fn;
   };
   std::vector<GlobalDtBound> dt_bounds_;
+  // Frequences DECLAREES des sources couplees (CoupledSource.frequency, audit vague 3) : les
+  // couplages s'appliquent UNE fois par MACRO-pas (apply_couplings(dt)), la borne porte donc sur
+  // le macro-dt : dt <= cfl / mu, SANS facteur substeps/stride. Vide (defaut) -> aucune borne.
+  struct CoupledFreq {
+    std::string label;
+    double mu;
+  };
+  std::vector<CoupledFreq> coupled_freqs_;
 
   // stride_due (filtre de cadence hold-then-catch-up) EXTRAIT vers stepper_ (SystemStepper, Lot B) :
   // il sert exclusivement a l'avance en temps. macro_step_ (ci-dessus) reste un membre PARTAGE de Impl
@@ -454,7 +462,12 @@ void System::add_block(const std::string& name, const ModelSpec& model,
       // a r_min / r_max -> masse Sum n r dr dtheta conservee A LA MACHINE (l'anneau diocotron est borne
       // par deux parois conductrices). C'est la BC qui rend le pas couple conservatif.
       clo = make_block_polar(m, limiter, riemann, pctx, recon_prim, method, /*wall_radial=*/true);
-      max_speed = make_max_speed_polar(m, &P->aux);
+      // StabilityPolicy POLAIRE (audit vague 3) : meme politique que le cartesien -- lambda* de
+      // stabilite (trait) sinon max_wave_speed ; bornes source/pas admissible si declarees,
+      // fermetures VIDES sinon (politique de pas historique, bit-identique).
+      max_speed = make_cfl_speed_polar(m, &P->aux);
+      src_freq = make_source_frequency_polar(m, &P->aux);
+      stab_dt = make_stability_dt_polar(m, &P->aux);
       add_poisson_rhs = make_poisson_rhs_polar(m);
       auto conv = make_cell_convert(m);
       prim_to_cons = std::move(conv.first);
@@ -937,7 +950,8 @@ void System::add_coupled_source(const std::vector<std::string>& in_blocks,
                                 const std::vector<std::string>& out_roles,
                                 const std::vector<int>& prog_ops,
                                 const std::vector<int>& prog_args,
-                                const std::vector<int>& prog_lens) {
+                                const std::vector<int>& prog_lens,
+                                double frequency, const std::string& label) {
   Impl* P = p_.get();
   const int n_in = static_cast<int>(in_blocks.size());
   const int n_const = static_cast<int>(consts.size());
@@ -1016,6 +1030,11 @@ void System::add_coupled_source(const std::vector<std::string>& in_blocks,
   // repartie en round-robin), donc meme local_size() et meme indexation locale -> on iterait en parallele
   // sur les fabs locaux. Conversion en valeurs CAPTUREES (pas de reference a 'this' du lambda C++).
   std::vector<Real> kconsts(consts.begin(), consts.end());
+  // Frequence declaree du couplage (audit vague 3) : enregistree pour la borne de pas de step_cfl /
+  // step_adaptive (dt <= cfl/mu sur le MACRO-pas). <= 0 = pas de borne (historique). Poussee APRES
+  // toute la validation (qui leve) : un couplage rejete ne doit laisser AUCUNE borne fantome --
+  // sinon un script qui try/except l'echec garderait un pas bride sans physique correspondante.
+  if (frequency > 0.0) P->coupled_freqs_.push_back(Impl::CoupledFreq{label, frequency});
   P->couplings.push_back(
       [P, ins, outs, kconsts, n_in, n_const, n_terms](Real dt) {
         // MPI-safe : iteration sur les fabs LOCAUX du premier bloc d'entree (ou de sortie si aucune
@@ -1114,8 +1133,6 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
                              "' n'est ni un role stable ni une variable du bloc '" + name +
                              "' (" + label + ")");
   };
-  const bool has_overrides = !density.empty() || !momentum_x.empty() || !momentum_y.empty() ||
-                             !energy.empty() || bz_aux_component >= 0;
   const int c_rho = resolve_field(density, VariableRole::Density, "Density");
   const int c_mx = resolve_field(momentum_x, VariableRole::MomentumX, "MomentumX");
   const int c_my = resolve_field(momentum_y, VariableRole::MomentumY, "MomentumY");
@@ -1142,15 +1159,12 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
     // POLAIRE (Voie A etape 2c) : PolarCondensedSchurSourceStepper sur l'anneau pgeom_, MEME CL Poisson
     // (Dirichlet/Neumann radiale, theta toujours periodique cote solveur). Preconditionneur RadialLine
     // (defaut). run_source_stage l'invoque exactement comme le cartesien (signature step() identique).
-    // schur reste nullptr (chemin cartesien intouche). Le stepper POLAIRE ne prend pas encore de
-    // descripteurs explicites : des overrides seraient perdus EN SILENCE -> rejet explicite.
-    if (has_overrides)
-      throw std::runtime_error(
-          "System::set_source_stage (polaire) : les descripteurs density/momentum/energy/"
-          "bz_aux_component ne sont pas cables sur l'etage Schur POLAIRE (resolution par roles "
-          "canoniques seulement) ; retirer les overrides ou utiliser la geometrie cartesienne.");
+    // schur reste nullptr (chemin cartesien intouche). Composantes EXPLICITES resolues ci-dessus
+    // (descripteurs vides -> roles canoniques -> bit-identique) : le stepper POLAIRE accepte les
+    // overrides depuis la vague 3 (ctor a composantes explicites, parite cartesien).
     s.schur_polar = std::make_shared<PolarCondensedSchurSourceStepper>(
-        vs, P->pgeom_, P->ba, P->fields_.poisson_bc(), static_cast<Real>(alpha));
+        vs, c_rho, c_mx, c_my, c_E, P->pgeom_, P->ba, P->fields_.poisson_bc(),
+        static_cast<Real>(alpha));
     if (krylov_tol > 0.0 || krylov_max_iters > 0)
       s.schur_polar->set_krylov(krylov_tol > 0.0 ? static_cast<Real>(krylov_tol) : Real(1e-10),
                                 krylov_max_iters > 0 ? krylov_max_iters : 600);

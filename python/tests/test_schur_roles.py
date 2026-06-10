@@ -75,36 +75,56 @@ try:
 except RuntimeError as e:
     chk("ni un role" in str(e) or "n'expose pas" in str(e), f"erreur explicite : {str(e)[:80]}")
 
-# --- (3) overrides sur l'etage POLAIRE -> rejet explicite ----------------------------
-print("== (3) polaire : overrides rejetes (non cables) ==")
+# --- (3) overrides sur l'etage POLAIRE : ACCEPTES depuis la vague 3 -----------------
+print("== (3) polaire : overrides cables (ctor a composantes explicites) ==")
 psim = adc.System(mesh=adc.PolarMesh(r_min=0.5, r_max=1.0, nr=16, ntheta=16))
 psim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
 psim.set_magnetic_field(4.0 * np.ones(16 * 16))
-try:
-    psim.add_equation("e", model=iso_model(),
-                      spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
-                      time=adc.Split(hyperbolic=adc.Explicit(),
-                                     source=adc.CondensedSchur(theta=1.0, alpha=3.0,
-                                                               density="rho")))
-    chk(False, "overrides polaires auraient du lever")
-except RuntimeError as e:
-    chk("polaire" in str(e).lower(), f"erreur explicite : {str(e)[:80]}")
+psim.add_equation("e", model=iso_model(),
+                  spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                  time=adc.Split(hyperbolic=adc.Explicit(),
+                                 source=adc.CondensedSchur(theta=1.0, alpha=3.0,
+                                                           density="rho",
+                                                           momentum=("rho_u", "rho_v"))))
+rho0p = 1.5 * np.ones(16 * 16)
+psim.set_density("e", rho0p)
+psim.step(1e-3)
+chk(np.all(np.isfinite(np.asarray(psim.get_state("e")))),
+    "polaire + descripteurs par nom : un pas Schur fini (overrides cables)")
 
-# --- (4) overrides sur amr-schur -> rejet explicite ----------------------------------
-print("== (4) amr-schur : overrides rejetes (non cables) ==")
+# --- (4) overrides sur amr-schur : ACCEPTES depuis la vague 3 (krylov + roles) -------
+print("== (4) amr-schur : descripteurs + krylov transportes ==")
 amr = adc.AmrSystem(n=16, L=1.0, periodic=False, regrid_every=0)
 amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
 amr.set_refinement(1e30)
 amr.set_magnetic_field(4.0 * np.ones((16, 16)))
+amr.add_equation("e", model=iso_model(),
+                 spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 time=adc.Split(hyperbolic=adc.Explicit(),
+                                source=adc.CondensedSchur(theta=1.0, alpha=3.0,
+                                                          density="rho",
+                                                          momentum=("rho_u", "rho_v"),
+                                                          krylov_tol=1e-8,
+                                                          krylov_max_iters=200)))
+rho0a, u0a, v0a = smooth(16)
+amr.set_conservative_state("e", np.stack([rho0a, rho0a * u0a, rho0a * v0a]))
+amr.step(1e-3)
+chk(np.all(np.isfinite(np.asarray(amr.density("e")))),
+    "amr-schur + descripteurs par nom + krylov : un pas fini")
+# magnetic_field reste fige sur le tampon B_z grossier dedie -> rejet explicite.
+amr2 = adc.AmrSystem(n=16, L=1.0, periodic=False, regrid_every=0)
+amr2.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
+amr2.set_refinement(1e30)
+amr2.set_magnetic_field(4.0 * np.ones((16, 16)))
 try:
-    amr.add_equation("e", model=iso_model(),
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
-                     time=adc.Split(hyperbolic=adc.Explicit(),
-                                    source=adc.CondensedSchur(theta=1.0, alpha=3.0,
-                                                              density="rho")))
-    chk(False, "overrides amr-schur auraient du lever")
+    amr2.add_equation("e", model=iso_model(),
+                      spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                      time=adc.Split(hyperbolic=adc.Explicit(),
+                                     source=adc.CondensedSchur(theta=1.0, alpha=3.0,
+                                                               magnetic_field="T_e")))
+    chk(False, "magnetic_field != B_z aurait du lever sur AMR")
 except ValueError as e:
-    chk("amr-schur" in str(e), f"erreur explicite : {str(e)[:80]}")
+    chk("B_z" in str(e), f"magnetic_field non transporte : {str(e)[:70]}")
 
 if fails:
     print(f"FAIL test_schur_roles : {fails} echec(s)")
