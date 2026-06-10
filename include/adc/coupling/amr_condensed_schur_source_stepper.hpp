@@ -31,12 +31,13 @@
 /// couvertes (invariant #169). Un etat constant en espace (mono-niveau) degenere EXACTEMENT en l'etage
 /// uniforme : c'est le critere de parite (Etape 2).
 ///
-/// PERIMETRE DE CETTE VERSION (Etape 2, parite System d'abord). Le chemin MONO-NIVEAU est complet et
-/// bit-identique a l'etage uniforme. Le chemin MULTI-NIVEAU (reconstruction des vitesses fines a partir
-/// du grad injecte + cascade average_down) est un suivi dedie (Etape 4) : step() le REFUSE
-/// explicitement (erreur claire) plutot que d'appliquer la source au seul grossier en silence (les
-/// cellules fines ne sentiraient pas la source -> faux). On valide d'abord la parite mono-niveau contre
-/// l'etage uniforme #126, comme demande.
+/// PERIMETRE (mis a jour audit 2026-06, apres #266 / Phase 3c). Le chemin MONO-NIVEAU est complet
+/// et bit-identique a l'etage uniforme #126. Le chemin MULTI-NIVEAU est IMPLEMENTE en Phase 3c
+/// (etage source condense COMPOSITE : l'elliptique tensoriel Schur est resolu par FAC sur
+/// grossier + fin, reconstruction des vitesses PAR NIVEAU puis cascade average_down -- cf.
+/// step_multilevel), dans le CADRE 2 niveaux + UN patch fin mono-box + grossier replique
+/// (mono-rang). Au-dela (multi-patch, > 2 niveaux, MPI, multi-blocs), step() REFUSE explicitement
+/// (erreur claire) plutot que d'appliquer une source partielle en silence : c'est la Phase 4.
 ///
 /// CYCLE DE VIE / DEVICE / MPI. Construit UNE fois sur le layout GROSSIER (BoxArray + Geometry + CL
 /// Poisson) ; tous les tampons de l'etage uniforme grossier sont alloues a la construction et reutilises

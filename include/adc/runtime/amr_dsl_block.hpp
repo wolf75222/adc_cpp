@@ -212,7 +212,28 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
       ++*step_state;
     };
   }
-  h.max_speed = [cpl] { return static_cast<double>(cpl->max_wave_speed()); };
+  // VITESSE DE CFL : lambda* (trait HasStabilitySpeed) si declare, sinon max_wave_speed du coupleur
+  // (fallback historique bit-identique) -- MEME politique que System/make_max_speed, evaluee sur le
+  // GROSSIER (la CFL mono-bloc AMR vit au pas grossier).
+  if constexpr (HasStabilitySpeed<Model>) {
+    h.max_speed = [cpl, model] {
+      return static_cast<double>(max_stability_speed_mf(model, cpl->coarse(), cpl->aux0()));
+    };
+  } else {
+    h.max_speed = [cpl] { return static_cast<double>(cpl->max_wave_speed()); };
+  }
+  // BORNES DE PAS OPTIONNELLES (StabilityPolicy AMR mono-bloc) : memes reductions que System,
+  // hooks laisses VIDES sans trait (AmrSystem::step_cfl garde alors la formule historique).
+  if constexpr (HasSourceFrequency<Model>) {
+    h.source_frequency = [cpl, model] {
+      return static_cast<double>(max_source_frequency_mf(model, cpl->coarse(), cpl->aux0()));
+    };
+  }
+  if constexpr (HasStabilityDt<Model>) {
+    h.stability_dt = [cpl, model] {
+      return static_cast<double>(min_stability_dt_mf(model, cpl->coarse(), cpl->aux0()));
+    };
+  }
   h.mass = [cpl] { return static_cast<double>(cpl->mass()); };
   h.n_patches = [cpl] {
     auto& L = cpl->levels();
@@ -416,9 +437,31 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
   // hote pure). MEME foncteur que System plat (make_poisson_rhs -> detail::PoissonRhs) -> chaque
   // bloc accumule (+=) aux MEMES cellules du grossier partage (co-localisation par cellule).
   b.add_elliptic_rhs = make_poisson_rhs(model);
-  b.max_speed = [model](const MultiFab& U, const MultiFab& aux) {
-    return max_wave_speed_mf(model, U, aux);
-  };
+  // VITESSE DE CFL du bloc : MEME politique que System (make_max_speed) -- lambda* de stabilite
+  // (trait HasStabilitySpeed) si le modele le declare, sinon max_wave_speed (fallback historique,
+  // bit-identique). Les solveurs de Riemann lisent toujours max_wave_speed.
+  if constexpr (HasStabilitySpeed<Model>) {
+    b.max_speed = [model](const MultiFab& U, const MultiFab& aux) {
+      return max_stability_speed_mf(model, U, aux);
+    };
+  } else {
+    b.max_speed = [model](const MultiFab& U, const MultiFab& aux) {
+      return max_wave_speed_mf(model, U, aux);
+    };
+  }
+  // BORNES DE PAS OPTIONNELLES (StabilityPolicy AMR) : memes reductions que System
+  // (max_source_frequency_mf / min_stability_dt_mf), evaluees par AmrRuntime::step_cfl sur le
+  // GROSSIER. Fermetures laissees VIDES quand le modele ne declare pas le trait (bit-identique).
+  if constexpr (HasSourceFrequency<Model>) {
+    b.source_frequency = [model](const MultiFab& U, const MultiFab& aux) {
+      return max_source_frequency_mf(model, U, aux);
+    };
+  }
+  if constexpr (HasStabilityDt<Model>) {
+    b.stability_dt = [model](const MultiFab& U, const MultiFab& aux) {
+      return min_stability_dt_mf(model, U, aux);
+    };
+  }
   const Geometry g = S.geom;
   const bool repl = S.replicated_coarse;
   b.mass = [levels, g, repl] {
@@ -446,24 +489,6 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
 /// dispatch_amr_compiled (hllc/roe exigent un transport compressible a 4 variables + pression).
 /// Pendant multi-blocs de dispatch_amr_compiled. @p implicit_components : masque IMEX partiel porte
 /// par le bloc (indices des composantes implicites ; vide = backward-Euler plein), thread a build_amr_block.
-/// REJET explicite des bornes de pas optionnelles (traits HasStabilitySpeed / HasSourceFrequency /
-/// HasStabilityDt) sur les chemins AMR : AmrRuntime::step_cfl est encore transport-only
-/// (max_wave_speed seul) et n'interrogerait pas ces bornes -- un modele qui les declare verrait sa
-/// borne DISPARAITRE EN SILENCE en passant de System a AmrSystem (le run peut exploser). On echoue
-/// donc TOT, a la construction du bloc, avec le remede. Cabler les bornes sur AMR = suivi distinct
-/// (cf. docs/GENERICITY_2026-06.md, points non generalises). Un modele sans trait : aucun effet.
-template <class Model>
-void reject_dt_bound_traits_amr(const char* where) {
-  if constexpr (HasStabilitySpeed<Model> || HasSourceFrequency<Model> || HasStabilityDt<Model>) {
-    throw std::runtime_error(
-        std::string(where) +
-        " : ce modele declare une borne de pas optionnelle (stability_speed / source_frequency / "
-        "stability_dt) qui n'est PAS encore cablee sur AMR (step_cfl AMR = transport seul) ; la "
-        "borne serait ignoree en silence. Utiliser System (mono-niveau), ou retirer la borne du "
-        "modele pour l'AMR.");
-  }
-}
-
 template <class Model>
 AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const std::string& riem,
                                    const SharedAmrLayout& S, const std::string& name,
@@ -471,7 +496,6 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                                    double gamma, int substeps, bool recon_prim, bool imex,
                                    int stride = 1,
                                    const std::vector<int>& implicit_components = {}) {
-  reject_dt_bound_traits_amr<Model>("add_block(AmrSystem, multi-blocs)");
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
@@ -512,8 +536,10 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
     }
   }
   if (riem == "hllc") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasHLLCStructure OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasHLLCStructure<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLCFlux>(m, S, name, density, has_density, gamma,
                                                         substeps, recon_prim, imex, stride, implicit_components);
@@ -530,8 +556,10 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
     }
   }
   if (riem == "roe") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasRoeDissipation OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasRoeDissipation<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, RoeFlux>(m, S, name, density, has_density, gamma,
                                                        substeps, recon_prim, imex, stride, implicit_components);
@@ -556,7 +584,6 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
 template <class Model>
 AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
                                        const std::string& riem, const AmrBuildParams& bp) {
-  reject_dt_bound_traits_amr<Model>("add_compiled_model(AmrSystem)");
   if (riem == "rusanov") {
     if (lim == "none") return build_amr_compiled<Model, NoSlope, RusanovFlux>(m, bp);
     if (lim == "minmod") return build_amr_compiled<Model, Minmod, RusanovFlux>(m, bp);
@@ -586,8 +613,10 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     }
   }
   if (riem == "hllc") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasHLLCStructure OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasHLLCStructure<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none") return build_amr_compiled<Model, NoSlope, HLLCFlux>(m, bp);
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, HLLCFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, HLLCFlux>(m, bp);
@@ -598,8 +627,10 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     }
   }
   if (riem == "roe") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // Capability HasRoeDissipation OU chemin canonique Euler 2D -- meme gate que System::make_block.
+    if constexpr (HasRoeDissipation<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none") return build_amr_compiled<Model, NoSlope, RoeFlux>(m, bp);
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, RoeFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, RoeFlux>(m, bp);

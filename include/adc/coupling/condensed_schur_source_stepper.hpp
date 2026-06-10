@@ -195,11 +195,26 @@ class CondensedSchurSourceStepper {
   /// @p n_precond_vcycles : N V-cycles MG par application du preconditionneur BiCGStab (1 ou 2).
   CondensedSchurSourceStepper(const VariableSet& vars, const Geometry& geom, const BoxArray& ba,
                               const BCRec& bcPhi, Real alpha, int n_precond_vcycles = 1)
+      : CondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
+                                    vars.index_of(VariableRole::MomentumX),
+                                    vars.index_of(VariableRole::MomentumY),
+                                    vars.index_of(VariableRole::Energy), geom, ba, bcPhi, alpha,
+                                    n_precond_vcycles) {}
+
+  /// Variante a COMPOSANTES EXPLICITES (audit 2026-06, vague 2 : roles/champs transportes dans
+  /// l'ABI). L'appelant DESIGNE les composantes (rho, mx, my[, E]) au lieu de laisser le stepper
+  /// resoudre les roles canoniques -- pour un bloc dont le descripteur n'expose pas Density/
+  /// MomentumX/MomentumY (noms libres, roles Custom) ou range ses champs ailleurs. @p c_E < 0 =
+  /// pas d'energie. Le ctor canonique ci-dessus DELEGUE ici (resolution par roles inchangee,
+  /// bit-identique).
+  CondensedSchurSourceStepper(const VariableSet& vars, int c_rho, int c_mx, int c_my, int c_E,
+                              const Geometry& geom, const BoxArray& ba, const BCRec& bcPhi,
+                              Real alpha, int n_precond_vcycles = 1)
       : vars_(vars),
-        c_rho_(vars.index_of(VariableRole::Density)),
-        c_mx_(vars.index_of(VariableRole::MomentumX)),
-        c_my_(vars.index_of(VariableRole::MomentumY)),
-        c_E_(vars.index_of(VariableRole::Energy)),
+        c_rho_(c_rho),
+        c_mx_(c_mx),
+        c_my_(c_my),
+        c_E_(c_E),
         alpha_(alpha),
         geom_(geom),
         bcPhi_(bcPhi),

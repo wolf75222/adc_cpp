@@ -95,6 +95,45 @@ sim4.add_dt_bound("cap_adapt", lambda: cap)
 dt4 = sim4.step_adaptive(0.4)
 chk(dt4 <= cap + 1e-15, f"macro-pas adaptatif <= borne ({dt4:.3e} <= {cap:.3e})")
 
+# --- (C) AMR : StabilityPolicy cablee (audit vague 2) -------------------------------
+print("== (C1) AMR mono-bloc : transport + borne globale + last_dt_bound ==")
+
+
+def build_amr(n=24):
+    amr = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+    amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
+    amr.set_refinement(1e30)  # mono-niveau : le sujet est la POLITIQUE DE PAS, pas le raffinement
+    amr.add_block("ions", iso_model(), spatial=adc.FiniteVolume(limiter="minmod"),
+                  time=adc.Explicit())
+    amr.set_density("ions", gaussian(n).ravel())
+    return amr
+
+
+amr = build_amr()
+chk(amr.last_dt_bound() == "", "AMR avant tout pas : last_dt_bound() == ''")
+dta = amr.step_cfl(0.4)
+chk(np.isfinite(dta) and dta > 0, f"AMR dt transport fini ({dta:.3e})")
+chk(amr.last_dt_bound() == "transport:ions",
+    f"AMR borne active = transport:ions (recu {amr.last_dt_bound()!r})")
+amr2 = build_amr()
+cap_amr = 0.5 * dta
+amr2.add_dt_bound("cap_amr", lambda: cap_amr)
+dta2 = amr2.step_cfl(0.4)
+chk(abs(dta2 - cap_amr) < 1e-15, f"AMR dt == borne globale ({dta2:.3e})")
+chk(amr2.last_dt_bound() == "global:cap_amr",
+    f"AMR borne active = global:cap_amr (recu {amr2.last_dt_bound()!r})")
+
+print("== (C2) AMR multi-blocs : borne globale via AmrRuntime ==")
+amr3 = build_amr()
+amr3.add_block("e2", iso_model(), spatial=adc.FiniteVolume(limiter="minmod"),
+               time=adc.Explicit())  # 2e bloc -> moteur multi-blocs (AmrRuntime)
+amr3.set_density("e2", gaussian(24).ravel())
+amr3.add_dt_bound("cap_multi", lambda: cap_amr)
+dta3 = amr3.step_cfl(0.4)
+chk(dta3 <= cap_amr + 1e-15, f"AMR multi-blocs dt <= borne ({dta3:.3e})")
+chk(amr3.last_dt_bound() == "global:cap_multi",
+    f"AMR multi-blocs borne active = global:cap_multi (recu {amr3.last_dt_bound()!r})")
+
 # --- (B) DSL stability_speed / stability_dt (avec compilateur) ---------------------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
@@ -106,7 +145,7 @@ if not cxx or not os.path.isdir(INCLUDE):
     sys.exit(0)
 
 
-def scalar_model(name, stab_speed=None, stab_dt=None):
+def scalar_model(name, stab_speed=None, stab_dt=None, src_freq=None):
     """Advection scalaire a vitesse constante (1, 0) : lambda_max = 1 connu analytiquement."""
     m = dsl.Model(name)
     (rho,) = m.conservative_vars("rho", roles=["Density"])
@@ -119,6 +158,9 @@ def scalar_model(name, stab_speed=None, stab_dt=None):
         m.stability_speed(stab_speed + 0.0 * rho)
     if stab_dt is not None:
         m.stability_dt(stab_dt + 0.0 * rho)
+    if src_freq is not None:
+        m.source([0.0 * rho])  # la frequence est une propriete de la SOURCE (brique emise)
+        m.source_frequency(src_freq + 0.0 * rho)
     return m
 
 
@@ -159,6 +201,39 @@ try:
     chk(abs(dtd - 1e-4) < 1e-12, f"dt = 1e-4 ({dtd:.3e})")
     chk(s.last_dt_bound() == "stability_dt:s",
         f"borne active = stability_dt:s (recu {s.last_dt_bound()!r})")
+
+    print("== (B5) m.source_frequency(50) : la 'deuxieme CFL' (source), sans h ==")
+    cm_freq = scalar_model("scal_freq", src_freq=50.0).compile(
+        os.path.join(tmp, "scal_freq.so"), INCLUDE, backend="production")
+    s = build_dsl(cm_freq, n)
+    dtf = s.step_cfl(cfl)
+    chk(abs(dtf - cfl / 50.0) < 1e-12, f"dt = cfl/mu = {cfl / 50.0:.3e} ({dtf:.3e})")
+    chk(s.last_dt_bound() == "source_frequency:s",
+        f"borne active = source_frequency:s (recu {s.last_dt_bound()!r})")
+    try:
+        bad = dsl.Model("freq_sans_source")
+        (r2,) = bad.conservative_vars("rho", roles=["Density"])
+        bad.flux(x=[1.0 * r2], y=[0.0 * r2]); bad.eigenvalues(x=[1.0 + 0.0 * r2], y=[0.0 * r2])
+        bad.primitive_vars(r2); bad.conservative_from([r2]); bad.elliptic_rhs(0.0 * r2)
+        bad.source_frequency(10.0 + 0.0 * r2)
+        bad.check()
+        chk(False, "source_frequency sans source aurait du lever")
+    except ValueError as e:
+        chk("source" in str(e), f"rejet explicite : {str(e)[:70]}")
+
+    print("== (B4) AMR mono-bloc DSL : m.stability_dt cablee (vague 2) ==")
+    cm_dt_amr = scalar_model("scal_dt_amr", stab_dt=1e-4).compile(
+        os.path.join(tmp, "scal_dt_amr.so"), INCLUDE, backend="production", target="amr_system")
+    amr_dsl = adc.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
+    amr_dsl.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
+    amr_dsl.set_refinement(1e30)
+    amr_dsl.add_equation("s", model=cm_dt_amr, spatial=adc.FiniteVolume(limiter="minmod"),
+                         time=adc.Explicit())
+    amr_dsl.set_density("s", gaussian(16).ravel())
+    dt_amr = amr_dsl.step_cfl(cfl)
+    chk(abs(dt_amr - 1e-4) < 1e-12, f"AMR DSL dt = 1e-4 ({dt_amr:.3e})")
+    chk(amr_dsl.last_dt_bound() == "stability_dt:s",
+        f"AMR borne active = stability_dt:s (recu {amr_dsl.last_dt_bound()!r})")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

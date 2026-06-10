@@ -109,12 +109,12 @@ class SystemStepper {
     // le cartesien (#126) : seul le pointeur change. Le chemin cartesien reste BIT-IDENTIQUE (schur_polar
     // == nullptr en cartesien -> on prend la branche schur d'origine, inchangee).
     if (s.schur_polar) {
-      s.schur_polar->step(s.U, owner_->fields_.ell_phi(), owner_->aux, kAuxBaseComps,
+      s.schur_polar->step(s.U, owner_->fields_.ell_phi(), owner_->aux, s.schur_bz_comp,
                           static_cast<Real>(s.schur_theta), eff_dt);
       return;
     }
     if (s.schur) {
-      s.schur->step(s.U, owner_->fields_.ell_phi(), owner_->aux, kAuxBaseComps,
+      s.schur->step(s.U, owner_->fields_.ell_phi(), owner_->aux, s.schur_bz_comp,
                     static_cast<Real>(s.schur_theta), eff_dt);
       return;
     }

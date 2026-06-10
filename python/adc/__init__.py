@@ -40,7 +40,7 @@ __all__ = [
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
-    "PythonFlux", "dsl", "abi_key",
+    "PythonFlux", "dsl", "abi_key", "capabilities",
 ]
 
 
@@ -78,11 +78,20 @@ class PolarMesh:
     rotation azimutale (rapport 73 vs polaire) : porter la direction radiale sur un axe de grille leve
     ce verrou structural du diocotron.
 
-    PORTEE PHASE 2b : le chemin polaire est maintenant BRANCHE dans System.step (transport polaire
-    assemble_rhs_polar + Poisson polaire PolarPoissonSolver + aux derive en base locale (e_r, e_theta)).
-    adc.System(mesh=adc.PolarMesh(...)) construit donc un anneau global et avance dessus. Limites Phase
-    2b : transport ExB scalaire seulement (limiter/riemann fluides leves cote C++), mono-rang (le solveur
-    polaire direct refuse MPI), pas de couplage cartesien<->polaire (anneau global)."""
+    PORTEE (mise a jour audit 2026-06) : le chemin polaire est BRANCHE dans System.step (transport
+    polaire assemble_rhs_polar + Poisson polaire + aux derive en base locale (e_r, e_theta)).
+    adc.System(mesh=adc.PolarMesh(...)) construit un anneau global et avance dessus. TROIS niveaux a
+    ne pas confondre :
+    - transport polaire : ExB scalaire ET fluide isotherme (IsothermalFluxPolar) ; flux Riemann
+      RUSANOV SEULEMENT (hll/hllc/roe leves cote C++) ;
+    - Poisson polaire DIRECT (PolarPoissonSolver) : mono-rang, une box couvrant l'anneau ;
+    - etage Schur polaire TENSORIEL (PolarCondensedSchurSourceStepper, via adc.Split/CondensedSchur) :
+      le solveur C++ est multi-rang/multi-box (decoupage theta), mais la FACADE construit encore une
+      box globale -> sous MPI le solve est collectif et correct sans parallelisme effectif a ce
+      niveau (decoupage theta facade = suivi dedie).
+    Pas de couplage cartesien<->polaire (anneau global). Bornes de pas optionnelles
+    (stability_speed/stability_dt/source_frequency) NON cablees sur le chemin polaire (transport
+    max_wave_speed seulement)."""
 
     def __init__(self, r_min, r_max, nr, ntheta):
         if not (r_max > r_min >= 0.0):
@@ -638,13 +647,19 @@ class IMEX:
 
     def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None,
                  newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
-                 newton_fd_eps=1e-7, newton_diagnostics=False):
+                 newton_fd_eps=1e-7, newton_diagnostics=False, newton_damping=1.0,
+                 newton_fail_policy="none"):
         if int(substeps) < 1:
             raise ValueError("IMEX : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
             raise ValueError("IMEX : stride >= 1 (recu %r)" % (stride,))
         if int(newton_max_iters) < 1:
             raise ValueError("IMEX : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
+        if not (0.0 < float(newton_damping) <= 1.0):
+            raise ValueError("IMEX : newton_damping dans (0, 1] (recu %r)" % (newton_damping,))
+        if newton_fail_policy not in ("none", "warn", "throw"):
+            raise ValueError("IMEX : newton_fail_policy 'none'|'warn'|'throw' (recu %r)"
+                             % (newton_fail_policy,))
         self.substeps = int(substeps)
         self.stride = int(stride)
         self.implicit_vars, self.implicit_roles = _norm_implicit("IMEX", implicit_vars, implicit_roles)
@@ -653,6 +668,8 @@ class IMEX:
         self.newton_abs_tol = float(newton_abs_tol)
         self.newton_fd_eps = float(newton_fd_eps)
         self.newton_diagnostics = bool(newton_diagnostics)
+        self.newton_damping = float(newton_damping)
+        self.newton_fail_policy = str(newton_fail_policy)
 
 
 class SourceImplicit:
@@ -689,13 +706,20 @@ class SourceImplicit:
 
     def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None,
                  newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
-                 newton_fd_eps=1e-7, newton_diagnostics=False):
+                 newton_fd_eps=1e-7, newton_diagnostics=False, newton_damping=1.0,
+                 newton_fail_policy="none"):
         if int(substeps) < 1:
             raise ValueError("SourceImplicit : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
             raise ValueError("SourceImplicit : stride >= 1 (recu %r)" % (stride,))
         if int(newton_max_iters) < 1:
             raise ValueError("SourceImplicit : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
+        if not (0.0 < float(newton_damping) <= 1.0):
+            raise ValueError("SourceImplicit : newton_damping dans (0, 1] (recu %r)"
+                             % (newton_damping,))
+        if newton_fail_policy not in ("none", "warn", "throw"):
+            raise ValueError("SourceImplicit : newton_fail_policy 'none'|'warn'|'throw' (recu %r)"
+                             % (newton_fail_policy,))
         self.substeps = int(substeps)
         self.stride = int(stride)
         self.implicit_vars, self.implicit_roles = _norm_implicit(
@@ -705,6 +729,8 @@ class SourceImplicit:
         self.newton_abs_tol = float(newton_abs_tol)
         self.newton_fd_eps = float(newton_fd_eps)
         self.newton_diagnostics = bool(newton_diagnostics)
+        self.newton_damping = float(newton_damping)
+        self.newton_fail_policy = str(newton_fail_policy)
 
 
 # Nom PRECIS du schema cable par IMEX / SourceImplicit (audit 2026-06) : transport ForwardEuler
@@ -777,8 +803,11 @@ class CondensedSchur:
     GEOMETRIE : cable en CARTESIEN (System(mesh=adc.CartesianMesh(...))) ET en POLAIRE
     (System(mesh=adc.PolarMesh(...)), anneau (r, theta), Voie A etape 2c). Le choix du stepper condense
     (cartesien CondensedSchurSourceStepper / polaire PolarCondensedSchurSourceStepper) est fait cote C++
-    selon la geometrie du System : la MEME adc.CondensedSchur(...) s'utilise dans les deux cas. Le pendant
-    polaire est MONO-RANG (le solveur polaire = boite unique couvrant l'anneau) : n_ranks>1 leve.
+    selon la geometrie du System : la MEME adc.CondensedSchur(...) s'utilise dans les deux cas. Le
+    pendant polaire est MULTI-RANG-SUR (collectifs corrects sous MPI) mais la facade construit encore
+    UNE box globale (sur le rang proprietaire) : correct et bit-identique au mono-rang, sans
+    parallelisme effectif a ce niveau -- le decoupage theta facade est un suivi dedie (mise a jour
+    audit 2026-06 ; l'ancienne mention "n_ranks>1 leve" etait perimee).
 
     QUAND L'UTILISER (CondensedSchur GLOBAL vs adc.SourceImplicit LOCAL). CondensedSchur est un
     implicite GLOBAL : il COUPLE tout le domaine via l'operateur elliptique tensoriel condense
@@ -828,36 +857,41 @@ class CondensedSchur:
         if len(mom) != 2:
             raise ValueError(
                 "CondensedSchur : momentum doit etre un couple (role_x, role_y) (recu %r)" % (momentum,))
-        # Descripteurs roles / champs NON cables : l'ABI C++ set_source_stage ne prend que
-        # (name, kind, theta, alpha) ; l'etage condense HARDCODE les roles conservatifs
-        # (Density / MomentumX / MomentumY, Energy optionnel) et les champs B_z / phi (cf.
-        # System::set_source_stage). Un descripteur different serait IGNORE en silence : on le
-        # REJETTE explicitement (rejet plutot qu'ignore silencieux) tout en gardant la signature
-        # (ces parametres pourront devenir configurables quand le C++ les transportera).
-        if density != Role.Density:
-            raise ValueError(
-                "CondensedSchur : density=%r non configurable (l'etage source C++ hardcode le role "
-                "Density) ; laisser density=adc.Role.Density (defaut)." % (density,))
-        if mom != (Role.MomentumX, Role.MomentumY):
-            raise ValueError(
-                "CondensedSchur : momentum=%r non configurable (l'etage source C++ hardcode les roles "
-                "MomentumX / MomentumY) ; laisser momentum=(adc.Role.MomentumX, adc.Role.MomentumY) "
-                "(defaut)." % (mom,))
-        if energy is not None and energy != Role.Energy:
-            raise ValueError(
-                "CondensedSchur : energy=%r non configurable (l'etage source C++ traite l'energie par "
-                "le role Energy hardcode, optionnel) ; laisser energy=None ou energy=adc.Role.Energy."
-                % (energy,))
-        if magnetic_field != "B_z":
-            raise ValueError(
-                "CondensedSchur : magnetic_field=%r non configurable (l'etage source C++ lit le champ "
-                "B_z hardcode, Omega = B_z) ; laisser magnetic_field='B_z' (defaut)."
-                % (magnetic_field,))
+        # Descripteurs roles / champs TRANSPORTES dans l'ABI C++ (audit vague 2) : density /
+        # momentum / energy acceptent un adc.Role.* (nom de role stable) OU un nom de variable du
+        # bloc ; la resolution role-ou-nom -> composante est faite cote C++ (set_source_stage,
+        # erreur explicite si introuvable). Les DEFAUTS (roles canoniques) gardent le comportement
+        # historique bit-identique. magnetic_field accepte un nom de champ aux canonique
+        # (AUX_CANONICAL : "B_z", "T_e", ...) -> composante aux transportee. potential reste fige
+        # a "phi" (l'etage utilise le potentiel du Poisson de systeme ; un autre champ n'aurait
+        # pas de solveur derriere -> rejet explicite, pas d'ignore silencieux).
+        def _spec(v):
+            return "" if v is None else str(v)
+        # Defauts canoniques -> chaines VIDES cote ABI (le C++ resout alors les roles canoniques,
+        # chemin historique strictement inchange).
+        self.density_spec = "" if density == Role.Density else _spec(density)
+        self.momentum_x_spec = "" if mom[0] == Role.MomentumX else _spec(mom[0])
+        self.momentum_y_spec = "" if mom[1] == Role.MomentumY else _spec(mom[1])
+        if energy is None:
+            self.energy_spec = ""
+        elif energy == Role.Energy:
+            self.energy_spec = ""
+        else:
+            self.energy_spec = _spec(energy)
+        if magnetic_field == "B_z":
+            self.bz_aux_component = -1  # canal canonique (defaut, bit-identique)
+        else:
+            from . import dsl as _dsl
+            if magnetic_field not in _dsl.AUX_CANONICAL:
+                raise ValueError(
+                    "CondensedSchur : magnetic_field=%r inconnu (champs aux canoniques : %s)"
+                    % (magnetic_field, sorted(_dsl.AUX_CANONICAL)))
+            self.bz_aux_component = int(_dsl.AUX_CANONICAL[magnetic_field])
         if potential != "phi":
             raise ValueError(
-                "CondensedSchur : potential=%r non configurable (l'etage source C++ utilise le "
-                "potentiel phi du Poisson de systeme) ; laisser potential='phi' (defaut)."
-                % (potential,))
+                "CondensedSchur : potential=%r non configurable (l'etage source resout le "
+                "potentiel phi du Poisson de systeme ; un autre champ n'aurait pas de solveur "
+                "derriere) ; laisser potential='phi' (defaut)." % (potential,))
         self.kind = kind
         self.theta = float(theta)
         self.alpha = float(alpha)
@@ -866,6 +900,11 @@ class CondensedSchur:
         self.energy = energy
         self.magnetic_field = magnetic_field
         self.potential = potential
+
+    def _has_field_overrides(self):
+        """True si un descripteur non canonique est demande (AMR : rejet explicite, non cable)."""
+        return bool(self.density_spec or self.momentum_x_spec or self.momentum_y_spec
+                    or self.energy_spec or self.bz_aux_component >= 0)
 
 
 class Split:
@@ -991,7 +1030,9 @@ class System:
                           getattr(time, "newton_rel_tol", 0.0),
                           getattr(time, "newton_abs_tol", 0.0),
                           getattr(time, "newton_fd_eps", 1e-7),
-                          getattr(time, "newton_diagnostics", False))
+                          getattr(time, "newton_diagnostics", False),
+                          getattr(time, "newton_damping", 1.0),
+                          getattr(time, "newton_fail_policy", "none"))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
                      evolve=True, stride=None):
@@ -1030,7 +1071,12 @@ class System:
             src = time.source
             self._s.set_source_stage(name, src.kind, src.theta, src.alpha,
                                      getattr(src, "krylov_tol", 0.0),
-                                     getattr(src, "krylov_max_iters", 0))
+                                     getattr(src, "krylov_max_iters", 0),
+                                     getattr(src, "density_spec", ""),
+                                     getattr(src, "momentum_x_spec", ""),
+                                     getattr(src, "momentum_y_spec", ""),
+                                     getattr(src, "energy_spec", ""),
+                                     getattr(src, "bz_aux_component", -1))
             self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
             return
 
@@ -1048,7 +1094,9 @@ class System:
                               getattr(time, "newton_rel_tol", 0.0),
                               getattr(time, "newton_abs_tol", 0.0),
                               getattr(time, "newton_fd_eps", 1e-7),
-                              getattr(time, "newton_diagnostics", False))
+                              getattr(time, "newton_diagnostics", False),
+                          getattr(time, "newton_damping", 1.0),
+                          getattr(time, "newton_fail_policy", "none"))
             return
 
         # Masque implicite (IMEX) : seul le chemin natif compose (ModelSpec -> add_block) le cable. Les
@@ -1065,12 +1113,14 @@ class System:
                 or getattr(time, "newton_rel_tol", 0.0) != 0.0
                 or getattr(time, "newton_abs_tol", 0.0) != 0.0
                 or getattr(time, "newton_fd_eps", 1e-7) != 1e-7
-                or getattr(time, "newton_diagnostics", False)):
+                or getattr(time, "newton_diagnostics", False)
+                or getattr(time, "newton_damping", 1.0) != 1.0
+                or getattr(time, "newton_fail_policy", "none") != "none"):
             raise ValueError(
                 "add_equation : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/"
-                "diagnostics) ne sont supportees que sur un modele compose adc.Model(...) "
-                "(-> add_block). L'ABI du modele compile (.so) ne les transporte pas ; utiliser un "
-                "adc.Model(...) natif.")
+                "diagnostics/damping/fail_policy) ne sont supportees que sur un modele compose "
+                "adc.Model(...) (-> add_block). L'ABI du modele compile (.so) ne les transporte "
+                "pas ; utiliser un adc.Model(...) natif.")
 
         if not isinstance(model, dsl.CompiledModel):
             raise TypeError("add_equation : model doit etre un adc.Model(...) (ModelSpec) ou un "
@@ -1391,8 +1441,205 @@ class System:
                              % (block, len(failures), "\n  - ".join(failures)))
         return report
 
+    # ------------------------------------------------------------------
+    # SORTIES / CHECKPOINT / RESTART v1 (audit 2026-06, IO ; cf. docs/IO_CHECKPOINT_PLAN.md).
+    # Python pur (zero changement du chemin chaud C++), mono-rang ; HDF5 agrege/parallele et AMR =
+    # PR-IO-3. Ecriture ATOMIQUE (fichier .tmp puis os.replace : un crash en cours d'ecriture ne
+    # corrompt jamais un checkpoint precedent).
+    # ------------------------------------------------------------------
+    def write(self, path, format="vtk", step=None, fields=None):
+        """SORTIE DE VISUALISATION : ecrit l'etat courant dans un fichier ouvert (ParaView/numpy).
+
+        - ``format="vtk"`` : ImageData .vti ASCII (cartesien ; ouvert par ParaView / VisIt) -- une
+          CellData par variable conservative de chaque bloc + le potentiel phi.
+        - ``format="npz"`` : np.savez compresse (tout backend / toute geometrie) -- etats par bloc,
+          noms/roles, phi, t, macro_step, grille.
+        @p step : suffixe numerote (path_000123.vti) ; None = path brut + extension.
+        @p fields : sous-ensemble de blocs a ecrire (None = tous).
+        @return le chemin ecrit."""
+        import os
+        import numpy as np
+        blocks = [b for b in self._s.block_names() if fields is None or b in fields]
+        suffix = ("_%06d" % int(step)) if step is not None else ""
+        nxv, nyv = self._s.nx(), self._s.ny()
+        if format == "npz":
+            out = {"t": self._s.time(), "macro_step": self._s.macro_step(),
+                   "nx": nxv, "ny": nyv, "blocks": np.array(blocks)}
+            for b in blocks:
+                nv = self._s.n_vars(b)
+                out["state_" + b] = np.asarray(self._s.get_state(b), dtype=np.float64).reshape(
+                    nv, nyv, nxv)
+                out["names_" + b] = np.array(list(self._s.variable_names(b, "conservative")))
+                out["roles_" + b] = np.array(list(self._s.variable_roles(b, "conservative")))
+            out["phi"] = np.asarray(self._s.potential(), dtype=np.float64).reshape(nyv, nxv)
+            target = path + suffix + ".npz"
+            tmp = target + ".tmp"
+            with open(tmp, "wb") as f:
+                np.savez_compressed(f, **out)
+            os.replace(tmp, target)
+            return target
+        if format == "vtk":
+            target = path + suffix + ".vti"
+            arrays, names = [], []
+            for b in blocks:
+                nv = self._s.n_vars(b)
+                st = np.asarray(self._s.get_state(b), dtype=np.float64).reshape(nv, nyv, nxv)
+                for c, nm in enumerate(self._s.variable_names(b, "conservative")):
+                    arrays.append(st[c]); names.append("%s_%s" % (b, nm))
+            arrays.append(np.asarray(self._s.potential(), dtype=np.float64).reshape(nyv, nxv))
+            names.append("phi")
+            lines = ['<?xml version="1.0"?>',
+                     '<VTKFile type="ImageData" version="0.1" byte_order="LittleEndian">',
+                     '  <ImageData WholeExtent="0 %d 0 %d 0 0" Origin="0 0 0" '
+                     'Spacing="%.17g %.17g 1">' % (nxv, nyv, 1.0 / nxv, 1.0 / nyv),
+                     '    <Piece Extent="0 %d 0 %d 0 0">' % (nxv, nyv),
+                     '      <CellData>']
+            for nm, arr in zip(names, arrays):
+                lines.append('        <DataArray type="Float64" Name="%s" format="ascii">' % nm)
+                lines.append("          " + " ".join("%.17g" % v for v in arr.ravel()))
+                lines.append('        </DataArray>')
+            lines += ['      </CellData>', '    </Piece>', '  </ImageData>', '</VTKFile>', '']
+            tmp = target + ".tmp"
+            with open(tmp, "w") as f:
+                f.write("\n".join(lines))
+            os.replace(tmp, target)
+            return target
+        raise ValueError("write : format 'vtk' | 'npz' (recu %r)" % (format,))
+
+    def checkpoint(self, path):
+        """CHECKPOINT REDEMARRABLE v1 (npz) : etat COMPLET des blocs + horloge (t, macro_step --
+        OBLIGATOIRE pour la cadence stride) + grille + provenance (abi_key). CONTRAT (cf.
+        docs/IO_CHECKPOINT_PLAN.md) : restart NE reconstruit PAS la composition -- le script
+        utilisateur rejoue ses add_block/set_poisson/couplages puis appelle sim.restart(path), qui
+        VERIFIE la coherence (blocs, tailles) et leve une erreur explicite sinon. @return le chemin."""
+        import os
+        import numpy as np
+        blocks = list(self._s.block_names())
+        out = {"adc_checkpoint_version": 1,
+               "t": self._s.time(), "macro_step": self._s.macro_step(),
+               "nx": self._s.nx(), "ny": self._s.ny(),
+               "abi_key": abi_key(), "blocks": np.array(blocks)}
+        for b in blocks:
+            nv = self._s.n_vars(b)
+            out["ncomp_" + b] = nv
+            out["state_" + b] = np.asarray(self._s.get_state(b), dtype=np.float64)
+            out["names_" + b] = np.array(list(self._s.variable_names(b, "conservative")))
+        # phi : warm start du multigrille (reprise BIT-IDENTIQUE) ; ETAT physique si
+        # gauss_policy="evolve" (phi n'y est plus re-derive de rho).
+        out["phi"] = np.asarray(self._s.potential(), dtype=np.float64)
+        target = path if path.endswith(".npz") else path + ".npz"
+        tmp = target + ".tmp"
+        with open(tmp, "wb") as f:
+            np.savez_compressed(f, **out)
+        os.replace(tmp, target)
+        return target
+
+    def restart(self, path):
+        """REPREND un checkpoint v1 : VERIFIE la composition (memes blocs, memes tailles -- erreur
+        explicite sinon, jamais de reprise silencieusement fausse), restaure l'etat de chaque bloc
+        puis l'horloge (t, macro_step : la cadence stride reprend exactement). La COMPOSITION
+        (add_block / set_poisson / set_magnetic_field / couplages) doit avoir ete rejouee par le
+        script AVANT l'appel (contrat v1, cf. checkpoint)."""
+        import numpy as np
+        target = path if path.endswith(".npz") else path + ".npz"
+        d = np.load(target, allow_pickle=False)
+        if int(d["adc_checkpoint_version"]) != 1:
+            raise ValueError("restart : version de checkpoint %r non supportee (attendu 1)"
+                             % (d["adc_checkpoint_version"],))
+        if int(d["nx"]) != self._s.nx() or int(d["ny"]) != self._s.ny():
+            raise ValueError("restart : grille du checkpoint (%d x %d) != systeme (%d x %d)"
+                             % (int(d["nx"]), int(d["ny"]), self._s.nx(), self._s.ny()))
+        chk_blocks = [str(b) for b in d["blocks"]]
+        cur_blocks = list(self._s.block_names())
+        if chk_blocks != cur_blocks:
+            raise ValueError("restart : blocs du checkpoint %r != composition courante %r "
+                             "(rejouer la MEME composition avant restart)" % (chk_blocks, cur_blocks))
+        for b in chk_blocks:
+            if int(d["ncomp_" + b]) != self._s.n_vars(b):
+                raise ValueError("restart : bloc '%s' a %d composantes dans le checkpoint, %d ici"
+                                 % (b, int(d["ncomp_" + b]), self._s.n_vars(b)))
+            self._s.set_state(b, np.asarray(d["state_" + b], dtype=np.float64))
+        # phi AVANT l'horloge : warm start du solveur restaure (reprise bit-identique ; etat
+        # physique en gauss_policy="evolve").
+        if "phi" in d:
+            self._s.set_potential(np.asarray(d["phi"], dtype=np.float64).ravel())
+        self._s.set_clock(float(d["t"]), int(d["macro_step"]))
+
     def __getattr__(self, attr):
         return getattr(self._s, attr)
+
+
+def capabilities():
+    """MATRICE OFFICIELLE des capacites par facade / geometrie / backend (audit 2026-06, vague 2).
+
+    Source de verite UNIQUE consultable par les scripts et la doc (les audits ont montre que System,
+    AMR, polaire et les backends DSL divergeaient silencieusement). Les entrees refletent les GATES
+    reellement codees (make_block / dispatch_amr_* / block_builder_polar / dsl._BACKENDS) ; les
+    combinaisons hors matrice levent une erreur explicite cote C++ (jamais d'ignore silencieux).
+    """
+    return {
+        "riemann": {
+            "system_cartesian": ["rusanov", "hll", "hllc", "roe"],
+            "system_polar": ["rusanov"],
+            "amr": ["rusanov", "hll", "hllc", "roe"],
+            "notes": {
+                "rusanov": "generique minimal (max_wave_speed seul)",
+                "hll": "generique a ondes signees (model.wave_speeds ; DSL : primitive 'p')",
+                "hllc": "Euler 2D canonique (4 var + pression) OU capability modele "
+                        "HasHLLCStructure (contact_speed + hllc_star_state)",
+                "roe": "Euler 2D gaz parfait canonique OU capability modele HasRoeDissipation",
+            },
+        },
+        "time": {
+            "system": ["explicit (ssprk2|ssprk3)", "imex (= SourceImplicitBE)",
+                       "split lie|strang + CondensedSchur"],
+            "amr": ["explicit (ssprk2)", "imex (= SourceImplicitBE, iters=2 fige)",
+                    "split lie|strang + CondensedSchur (mono-bloc, grossier)"],
+            "system_polar": ["explicit (ssprk2|ssprk3)", "split + CondensedSchur polaire"],
+            "newton_options": "System seulement (AMR : rejet explicite)",
+        },
+        "stability_policy": {
+            "system": ["transport (max_wave_speed | stability_speed)", "source_frequency",
+                       "stability_dt", "add_dt_bound (global, all_reduce_min)", "last_dt_bound"],
+            "amr": ["transport (max_wave_speed | stability_speed)", "source_frequency",
+                    "stability_dt", "add_dt_bound", "last_dt_bound"],
+            "system_polar": ["transport (max_wave_speed) seulement"],
+        },
+        "poisson": {
+            "system_cartesian": ["geometric_mg (paroi, eps(x), aniso, ecrante)",
+                                 "fft (periodique, n = 2^k, eps constant, mono-box)"],
+            "system_polar": ["polar direct (mono-rang, une box)"],
+            "amr": ["geometric_mg seulement ; rhs charge_density|composite"],
+        },
+        "schur": {
+            "system_cartesian": "complet ; roles/champs configurables (density=/momentum=/energy=/"
+                                "magnetic_field=), krylov_tol/max_iters configurables",
+            "system_polar": "roles canoniques seulement (overrides rejetes) ; solveur multi-box "
+                            "C++, facade une box globale",
+            "amr": "mono-bloc ; mono-niveau complet + composite Phase 3c (2 niveaux, 1 patch fin "
+                   "mono-box, mono-rang) ; Phase 4 (multi-patch/>2 niveaux/MPI/multi-blocs) a faire",
+        },
+        "backends_dsl": {
+            "prototype": {"adder": "add_dynamic_block", "riemann": ["rusanov"],
+                          "limiter": ["none", "minmod", "vanleer"], "stride": False,
+                          "evolve_false": False, "mpi": False, "amr": False},
+            "aot": {"adder": "add_compiled_block", "riemann": ["rusanov", "hll", "hllc", "roe"],
+                    "limiter": ["none", "minmod", "vanleer", "weno5"], "stride": False,
+                    "evolve_false": False, "mpi": False, "amr": False,
+                    "runtime_params": True},
+            "production": {"adder": "add_native_block",
+                           "riemann": ["rusanov", "hll", "hllc", "roe"],
+                           "limiter": ["none", "minmod", "vanleer", "weno5"], "stride": True,
+                           "evolve_false": True, "mpi": True, "amr": "target='amr_system'",
+                           "stability_hooks": True},
+        },
+        "io": {
+            "write": ["vtk (.vti cartesien)", "npz"],
+            "checkpoint_restart": "v1 npz mono-rang (System ; etats + phi + t/macro_step ; "
+                                  "composition rejouee par le script) ; AMR/HDF5 parallele = "
+                                  "PR-IO-3 (docs/IO_CHECKPOINT_PLAN.md)",
+        },
+    }
 
 
 def _reject_newton_options_amr(label, time):
@@ -1406,11 +1653,14 @@ def _reject_newton_options_amr(label, time):
             or getattr(time, "newton_rel_tol", 0.0) != 0.0
             or getattr(time, "newton_abs_tol", 0.0) != 0.0
             or getattr(time, "newton_fd_eps", 1e-7) != 1e-7
-            or getattr(time, "newton_diagnostics", False)):
+            or getattr(time, "newton_diagnostics", False)
+            or getattr(time, "newton_damping", 1.0) != 1.0
+            or getattr(time, "newton_fail_policy", "none") != "none"):
         raise ValueError(
-            "%s : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/diagnostics) ne sont "
-            "pas transportees sur AMR (le pas IMEX par niveau utilise iters=2 fige, sans rapport). "
-            "Utiliser un System mono-niveau pour piloter le Newton, ou laisser les defauts." % label)
+            "%s : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/diagnostics/"
+            "damping/fail_policy) ne sont pas transportees sur AMR (le pas IMEX par niveau utilise "
+            "iters=2 fige, sans rapport). Utiliser un System mono-niveau pour piloter le Newton, "
+            "ou laisser les defauts." % label)
 
 
 class AmrSystem:
@@ -1541,6 +1791,12 @@ class AmrSystem:
                     "sont pas transportes par le chemin amr-schur (le solve Schur global AMR garderait "
                     "les defauts en silence). Laisser les defauts, ou utiliser System (mono-niveau) qui "
                     "les cable.")
+            if getattr(src, "_has_field_overrides", lambda: False)():
+                raise ValueError(
+                    "AmrSystem.add_equation : les descripteurs density/momentum/energy/"
+                    "magnetic_field de adc.CondensedSchur ne sont pas transportes par le chemin "
+                    "amr-schur (roles canoniques seulement). Laisser les defauts, ou utiliser "
+                    "System (mono-niveau) qui les cable.")
             self._s.set_source_stage(name, src.kind, src.theta, src.alpha)
             self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
             return

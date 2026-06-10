@@ -349,29 +349,42 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
     }
   }
   if (riem == "hllc") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // CHEMINS HLLC : (a) capability HasHLLCStructure (le modele fournit contact_speed +
+    // hllc_star_state -> algorithme contact-resolving GENERIQUE, aucun layout assume), OU
+    // (b) chemin CANONIQUE Euler 2D (n_vars == 4 + pressure, implementation historique
+    // bit-identique). Sans l'un des deux, rejet explicite avec le remede capability.
+    if constexpr (HasHLLCStructure<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
-      throw std::runtime_error("System : flux 'hllc' exige un transport compressible "
-                               "(4 variables + pression) ; ce transport -> 'rusanov'");
+      throw std::runtime_error("System : flux 'hllc' exige un transport compressible Euler 2D "
+                               "(4 variables + pression) OU la capability HLLC du modele "
+                               "(pressure + wave_speeds + contact_speed + hllc_star_state, cf. "
+                               "HasHLLCStructure) ; ce transport -> 'hll'/'rusanov'");
     }
   }
   if (riem == "roe") {
-    if constexpr (Model::n_vars == 4 &&
-                  requires(const Model mm, typename Model::State s) { mm.pressure(s); }) {
+    // CHEMINS ROE : (a) capability HasRoeDissipation (le modele fournit sa dissipation de Roe
+    // complete d = |A_roe| dU -> solveur Roe-like GENERIQUE), OU (b) chemin CANONIQUE Euler 2D
+    // gaz parfait (historique bit-identique). Sans l'un des deux, rejet explicite.
+    if constexpr (HasRoeDissipation<Model> ||
+                  (Model::n_vars == 4 &&
+                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       throw std::runtime_error("System : limiter inconnu '" + lim + "'");
     } else {
-      throw std::runtime_error("System : flux 'roe' exige un transport compressible "
-                               "(4 variables + pression) ; ce transport -> 'rusanov'");
+      throw std::runtime_error("System : flux 'roe' exige un transport compressible Euler 2D "
+                               "(4 variables + pression) OU la capability Roe du modele "
+                               "(roe_dissipation, cf. HasRoeDissipation) ; ce transport -> "
+                               "'hll'/'rusanov'");
     }
   }
   throw std::runtime_error("System : flux Riemann inconnu '" + riem + "' (rusanov|hll|hllc|roe)");

@@ -380,7 +380,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                        bool evolve, int stride, const std::vector<std::string>& implicit_vars,
                        const std::vector<std::string>& implicit_roles,
                        int newton_max_iters, double newton_rel_tol, double newton_abs_tol,
-                       double newton_fd_eps, bool newton_diagnostics) {
+                       double newton_fd_eps, bool newton_diagnostics, double newton_damping,
+                       const std::string& newton_fail_policy) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
@@ -388,6 +389,14 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     throw std::runtime_error("System::add_block : newton_max_iters >= 1");
   if (newton_rel_tol < 0.0 || newton_abs_tol < 0.0 || newton_fd_eps <= 0.0)
     throw std::runtime_error("System::add_block : newton_rel_tol/abs_tol >= 0 et newton_fd_eps > 0");
+  if (!(newton_damping > 0.0 && newton_damping <= 1.0))
+    throw std::runtime_error("System::add_block : newton_damping dans (0, 1]");
+  int fail_policy = NewtonOptions::kFailNone;
+  if (newton_fail_policy == "warn") fail_policy = NewtonOptions::kFailWarn;
+  else if (newton_fail_policy == "throw") fail_policy = NewtonOptions::kFailThrow;
+  else if (newton_fail_policy != "none")
+    throw std::runtime_error("System::add_block : newton_fail_policy 'none'|'warn'|'throw' (recu '" +
+                             newton_fail_policy + "')");
   // @p time porte le TRAITEMENT et, en explicite, le SCHEMA RK : "explicit"/"ssprk2" = SSPRK2
   // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "imex" = transport explicite + source raide
   // implicite. La math RK reste un FONCTEUR du coeur (build_block).
@@ -410,7 +419,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   // Des valeurs non-defaut en explicite seraient ignorees EN SILENCE -> erreur explicite.
   const bool newton_non_default = newton_max_iters != 2 || newton_rel_tol != 0.0 ||
                                   newton_abs_tol != 0.0 || newton_fd_eps != 1e-7 ||
-                                  newton_diagnostics;
+                                  newton_diagnostics || newton_damping != 1.0 ||
+                                  fail_policy != NewtonOptions::kFailNone;
   if (!imex && newton_non_default)
     throw std::runtime_error("System::add_block : les options Newton (newton_max_iters/rel_tol/"
                              "abs_tol/fd_eps/diagnostics) exigent time='imex' (recu time='" +
@@ -460,6 +470,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   nopts.rel_tol = static_cast<Real>(newton_rel_tol);
   nopts.abs_tol = static_cast<Real>(newton_abs_tol);
   nopts.fd_eps = static_cast<Real>(newton_fd_eps);
+  nopts.damping = static_cast<Real>(newton_damping);
+  nopts.fail_policy = fail_policy;
   NewtonReport* nreport = nullptr;
   if (newton_diagnostics) {
     auto rep = std::make_shared<NewtonReport>();
@@ -584,8 +596,14 @@ System::SourceNewtonReport System::newton_report(const std::string& name) const 
         "' ; ajouter le bloc avec newton_diagnostics=true (adc.IMEX(newton_diagnostics=True) / "
         "adc.SourceImplicit(newton_diagnostics=True))");
   const NewtonReport& r = *it->second;
-  return SourceNewtonReport{r.enabled, r.converged, static_cast<double>(r.max_residual),
-                            static_cast<double>(r.max_iters_used), r.n_failed};
+  return SourceNewtonReport{r.enabled,
+                            r.converged,
+                            static_cast<double>(r.max_residual),
+                            static_cast<double>(r.max_iters_used),
+                            r.n_failed,
+                            r.failed_i,
+                            r.failed_j,
+                            r.failed_comp};
 }
 
 // Corps EXTRAIT VERBATIM vers adc::native_loader::add_dynamic_block (native_loader.hpp) ; instancie
@@ -1026,7 +1044,10 @@ void System::add_coupled_source(const std::vector<std::string>& in_blocks,
 }
 
 void System::set_source_stage(const std::string& name, const std::string& kind, double theta,
-                              double alpha, double krylov_tol, int krylov_max_iters) {
+                              double alpha, double krylov_tol, int krylov_max_iters,
+                              const std::string& density, const std::string& momentum_x,
+                              const std::string& momentum_y, const std::string& energy,
+                              int bz_aux_component) {
   Impl* P = p_.get();
   Impl::Species& s = P->find(name);  // leve si bloc inconnu
   // SEUL kind cable pour l'instant : ElectrostaticLorentzCondensation (cf. CondensedSchurSourceStepper).
@@ -1064,16 +1085,44 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   // declare les electrons en roles). Un role requis absent leve une erreur EXPLICITE ICI (avant le pas)
   // -- le constructeur du stepper la leverait aussi, mais on diagnostique cote bloc nomme.
   const VariableSet& vs = s.cons_vars;
-  auto require_role = [&](VariableRole role, const char* label) {
-    if (vs.index_of(role) < 0)
-      throw std::runtime_error(
-          "System::set_source_stage : le bloc '" + name + "' n'expose pas le role " + label +
-          " requis par adc.CondensedSchur (le modele doit declarer Density / MomentumX / MomentumY ; "
-          "Energy optionnel). Verifier les roles du modele (variable_roles).");
+  // RESOLUTION DES DESCRIPTEURS (audit vague 2 : roles/champs transportes dans l'ABI). Un
+  // descripteur VIDE = role canonique (historique, bit-identique). Sinon : nom de ROLE stable
+  // d'abord (role_from_name), puis nom de VARIABLE du bloc. Echec = erreur explicite avec remede.
+  auto resolve_field = [&](const std::string& spec, VariableRole canonical,
+                           const char* label) -> int {
+    if (spec.empty()) {
+      const int idx = vs.index_of(canonical);
+      if (idx < 0)
+        throw std::runtime_error(
+            "System::set_source_stage : le bloc '" + name + "' n'expose pas le role " + label +
+            " requis par adc.CondensedSchur (le modele doit declarer Density / MomentumX / "
+            "MomentumY ; Energy optionnel), et aucun descripteur explicite n'est fourni (passer "
+            "density=/momentum=... avec un nom de role ou de variable du bloc).");
+      return idx;
+    }
+    const VariableRole r = role_from_name(spec);
+    if (r != VariableRole::Custom) {
+      const int idx = vs.index_of(r);
+      if (idx < 0)
+        throw std::runtime_error("System::set_source_stage : le bloc '" + name +
+                                 "' n'expose pas le role '" + spec + "' (" + label + ")");
+      return idx;
+    }
+    for (std::size_t i = 0; i < vs.names.size(); ++i)
+      if (vs.names[i] == spec) return static_cast<int>(i);
+    throw std::runtime_error("System::set_source_stage : '" + spec +
+                             "' n'est ni un role stable ni une variable du bloc '" + name +
+                             "' (" + label + ")");
   };
-  require_role(VariableRole::Density, "Density");
-  require_role(VariableRole::MomentumX, "MomentumX");
-  require_role(VariableRole::MomentumY, "MomentumY");
+  const bool has_overrides = !density.empty() || !momentum_x.empty() || !momentum_y.empty() ||
+                             !energy.empty() || bz_aux_component >= 0;
+  const int c_rho = resolve_field(density, VariableRole::Density, "Density");
+  const int c_mx = resolve_field(momentum_x, VariableRole::MomentumX, "MomentumX");
+  const int c_my = resolve_field(momentum_y, VariableRole::MomentumY, "MomentumY");
+  const int c_E = (energy == "none")
+                      ? -1
+                      : (energy.empty() ? vs.index_of(VariableRole::Energy)
+                                        : resolve_field(energy, VariableRole::Energy, "Energy"));
   // B_z OBLIGATOIRE : l'etage de Lorentz lit Omega = B_z. On exige set_magnetic_field appele
   // (bz_field_ renseigne) et on elargit le canal aux au canal B_z (kAuxBaseComps) pour que apply_bz le
   // peuple et que solve_fields en remplisse les ghosts. Un B_z absent leve une erreur EXPLICITE.
@@ -1081,7 +1130,11 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
     throw std::runtime_error(
         "System::set_source_stage : le bloc '" + name + "' n'a pas de champ B_z (aux Omega) ; "
         "adc.CondensedSchur exige set_magnetic_field(B_z) (le terme de Lorentz lit Omega = B_z).");
-  P->ensure_aux_width(kAuxBaseComps + 1);  // garantit le canal B_z dans l'aux partage + re-applique B_z
+  // Canal aux du champ magnetique : canonique (kAuxBaseComps) par defaut, redirigeable par
+  // bz_aux_component (descripteur transporte). NOTE : apply_bz peuple le canal CANONIQUE ; une
+  // composante differente suppose que l'appelant la peuple lui-meme (champ aux derive/custom).
+  const int c_bz = bz_aux_component >= 0 ? bz_aux_component : kAuxBaseComps;
+  P->ensure_aux_width(c_bz + 1);  // garantit le canal dans l'aux partage + re-applique B_z
   // Construit l'etage source condense sur le layout REEL du System (ba/dm/geom) avec la CL du Poisson.
   // Le stepper alloue ses tampons UNE fois ; step() les reutilise (cf. son cycle de vie). alpha =
   // constante de couplage electrostatique du sous-systeme source.
@@ -1089,20 +1142,29 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
     // POLAIRE (Voie A etape 2c) : PolarCondensedSchurSourceStepper sur l'anneau pgeom_, MEME CL Poisson
     // (Dirichlet/Neumann radiale, theta toujours periodique cote solveur). Preconditionneur RadialLine
     // (defaut). run_source_stage l'invoque exactement comme le cartesien (signature step() identique).
-    // schur reste nullptr (chemin cartesien intouche).
+    // schur reste nullptr (chemin cartesien intouche). Le stepper POLAIRE ne prend pas encore de
+    // descripteurs explicites : des overrides seraient perdus EN SILENCE -> rejet explicite.
+    if (has_overrides)
+      throw std::runtime_error(
+          "System::set_source_stage (polaire) : les descripteurs density/momentum/energy/"
+          "bz_aux_component ne sont pas cables sur l'etage Schur POLAIRE (resolution par roles "
+          "canoniques seulement) ; retirer les overrides ou utiliser la geometrie cartesienne.");
     s.schur_polar = std::make_shared<PolarCondensedSchurSourceStepper>(
         vs, P->pgeom_, P->ba, P->fields_.poisson_bc(), static_cast<Real>(alpha));
     if (krylov_tol > 0.0 || krylov_max_iters > 0)
       s.schur_polar->set_krylov(krylov_tol > 0.0 ? static_cast<Real>(krylov_tol) : Real(1e-10),
                                 krylov_max_iters > 0 ? krylov_max_iters : 600);
   } else {
-    // CARTESIEN (#126) : INCHANGE, bit-identique. n_precond_vcycles = defaut (1).
-    s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, P->geom, P->ba, P->fields_.poisson_bc(),
+    // CARTESIEN (#126) : composantes EXPLICITES resolues ci-dessus (descripteurs vides -> roles
+    // canoniques -> memes indices que l'historique, bit-identique).
+    s.schur = std::make_shared<CondensedSchurSourceStepper>(vs, c_rho, c_mx, c_my, c_E, P->geom,
+                                                            P->ba, P->fields_.poisson_bc(),
                                                             static_cast<Real>(alpha));
     if (krylov_tol > 0.0 || krylov_max_iters > 0)
       s.schur->set_krylov(krylov_tol > 0.0 ? static_cast<Real>(krylov_tol) : Real(1e-10),
                           krylov_max_iters > 0 ? krylov_max_iters : 400);
   }
+  s.schur_bz_comp = c_bz;
   s.schur_theta = theta;
 }
 
@@ -1231,6 +1293,45 @@ void System::step(double dt) { p_->stepper_.step(dt); }
 void System::advance(double dt, int nsteps) { p_->stepper_.advance(dt, nsteps); }
 double System::step_cfl(double cfl) { return p_->stepper_.step_cfl(cfl); }
 double System::step_adaptive(double cfl) { return p_->stepper_.step_adaptive(cfl); }
+
+// Horloge du systeme (IO v1, audit vague 2) : macro_step est REQUIS par le restart (la cadence
+// stride hold-then-catch-up lit macro_step % stride ; t seul ne suffit pas).
+int System::macro_step() const { return p_->macro_step_; }
+
+// Restauration du potentiel phi (IO v1, restart) : ecrit les cellules VALIDES de la composante 0 du
+// phi du solveur (warm start multigrille ; etat physique en gauss_policy="evolve"). Mono-box
+// (meme convention de marshaling que potential / set_density).
+void System::set_potential(const std::vector<double>& phi) {
+  Impl* P = p_.get();
+  device_fence();
+  if (P->polar_) {
+    P->fields_.ensure_elliptic_polar();
+    MultiFab& ph = P->fields_.pell_->phi();
+    const Box2D v = ph.box(0);
+    if (static_cast<int>(phi.size()) != v.nx() * v.ny())
+      throw std::runtime_error("System::set_potential : taille != nr*ntheta");
+    Array4 a = ph.fab(0).array();
+    std::size_t k = 0;
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i) a(i, j, 0) = phi[k++];
+    return;
+  }
+  P->fields_.ensure_elliptic();
+  MultiFab& ph = P->fields_.ell_phi();
+  const Box2D v = ph.box(0);
+  if (static_cast<int>(phi.size()) != v.nx() * v.ny())
+    throw std::runtime_error("System::set_potential : taille != n*n");
+  Array4 a = ph.fab(0).array();
+  std::size_t k = 0;
+  for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i) a(i, j, 0) = phi[k++];
+}
+void System::set_clock(double t, int macro_step) {
+  if (macro_step < 0)
+    throw std::runtime_error("System::set_clock : macro_step >= 0 (restart)");
+  p_->t = t;
+  p_->macro_step_ = macro_step;
+}
 
 std::vector<double> System::eval_rhs(const std::string& name) {
   Impl::Species& s = p_->find(name);

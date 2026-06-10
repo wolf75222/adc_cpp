@@ -100,6 +100,12 @@ class System {
   ///                 iterations max, cellules en echec -- non-fini / pivot degenere / non-convergence),
   ///                 agrege sur les sous-pas de chaque avance et consultable via newton_report(name).
   ///                 OPT-IN : false (defaut) = chemin historique sans aucun cout supplementaire.
+  /// @param newton_damping IMEX seulement : amortissement de la mise a jour Newton W -= damping*delta
+  ///                 dans (0, 1]. 1 (defaut) = Newton plein, bit-identique.
+  /// @param newton_fail_policy IMEX seulement : reaction aux cellules en echec -- "none" (defaut,
+  ///                 enregistrer seulement), "warn" (avertissement stderr par avance), "throw"
+  ///                 (erreur dure avec la cellule fautive). != "none" active la detection (chemin
+  ///                 instrumente, observateur pur : W inchange).
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
@@ -110,7 +116,8 @@ class System {
                  const std::vector<std::string>& implicit_roles = {},
                  int newton_max_iters = 2, double newton_rel_tol = 0.0,
                  double newton_abs_tol = 0.0, double newton_fd_eps = 1e-7,
-                 bool newton_diagnostics = false);
+                 bool newton_diagnostics = false, double newton_damping = 1.0,
+                 const std::string& newton_fail_policy = "none");
 
   /// Rapport du Newton de la source implicite (IMEX) d'un bloc, AGREGE sur les sous-pas de la
   /// DERNIERE avance du bloc. N'existe que si le bloc a ete ajoute avec newton_diagnostics=true
@@ -121,6 +128,9 @@ class System {
     double max_residual;   ///< max cellules/sous-pas de ||F||_inf a la sortie du Newton
     double max_iters_used; ///< max cellules/sous-pas des iterations consommees
     double n_failed;       ///< nb (cellules x sous-pas) en echec (non-fini / pivot / non-convergence)
+    double failed_i;       ///< i d'UNE cellule fautive (-1 si aucune ; index max encode)
+    double failed_j;       ///< j de la meme cellule (-1 si aucune)
+    double failed_comp;    ///< composante conservee du pire residu de cette cellule (-1 inconnu)
   };
   SourceNewtonReport newton_report(const std::string& name) const;
 
@@ -392,8 +402,20 @@ class System {
   /// @param krylov_tol / krylov_max_iters : tolerance et budget du solve Krylov (BiCGStab) de
   ///              l'etage. <= 0 (defauts) = constantes historiques du stepper (1e-10 ; 400 en
   ///              cartesien, 600 en polaire) -- rendues configurables par l'audit 2026-06.
+  /// @param density / momentum_x / momentum_y / energy : DESCRIPTEURS des champs de l'etage (audit
+  ///              vague 2 : roles transportes dans l'ABI au lieu d'etre figes). Chaine VIDE
+  ///              (defaut) = role canonique (Density / MomentumX / MomentumY / Energy optionnel),
+  ///              bit-identique. Sinon : un NOM DE ROLE stable ("density", "momentum_x", ...) ou
+  ///              un NOM DE VARIABLE du bloc -- pour un bloc a noms libres / roles Custom.
+  ///              energy = "none" desactive la mise a jour d'energie. CARTESIEN seulement (le
+  ///              stepper polaire ne prend pas encore d'override -> rejet explicite).
+  /// @param bz_aux_component : composante du canal aux lue comme champ magnetique Omega (audit
+  ///              vague 2). < 0 (defaut) = canal canonique B_z (kAuxBaseComps), bit-identique.
   void set_source_stage(const std::string& name, const std::string& kind, double theta,
-                        double alpha, double krylov_tol = 0.0, int krylov_max_iters = 0);
+                        double alpha, double krylov_tol = 0.0, int krylov_max_iters = 0,
+                        const std::string& density = "", const std::string& momentum_x = "",
+                        const std::string& momentum_y = "", const std::string& energy = "",
+                        int bz_aux_component = -1);
 
   /// POLITIQUE DE SPLITTING en temps du macro-pas (transport hyperbolique H + etage source S) :
   ///  - "lie"    (defaut) : H(dt) ; S(dt) une fois (Godunov, 1er ordre). BIT-IDENTIQUE a l'historique.
@@ -476,6 +498,14 @@ class System {
   /// @name Diagnostics
   /// @{
   int nx() const;
+  /// Compteur de MACRO-PAS (0-indexe ; incremente par step / step_cfl / step_adaptive). Necessaire
+  /// au checkpoint/restart : la cadence stride (hold-then-catch-up) depend de macro_step % stride,
+  /// pas seulement du temps t (audit 2026-06, IO v1).
+  int macro_step() const;
+  /// RESTAURE l'horloge (t, macro_step) -- reserve au RESTART (sim.restart). Restaurer macro_step
+  /// est OBLIGATOIRE pour reprendre la cadence stride exactement ; un restart qui ne reposerait que
+  /// t desynchroniserait les blocs a stride > 1. @throws si macro_step < 0.
+  void set_clock(double t, int macro_step);
   /// Extent de l'axe LENT du champ (lignes du tableau (ny, nx) row-major rendu par density / potential
   /// / get_state). Cartesien : ny() == nx() == n (carre, INCHANGE). Polaire (anneau) : ny() == ntheta
   /// (axe azimutal lent) tandis que nx() == nr (axe radial rapide) -- avec nr != ntheta le champ fait
@@ -492,6 +522,11 @@ class System {
   double mass(const std::string& name) const;
   std::vector<double> density(const std::string& name) const;  ///< ny*nx row-major (j lent, i rapide)
   std::vector<double> potential();                             ///< phi, ny*nx row-major (j lent, i rapide)
+  /// RESTAURE le potentiel phi (IO v1, reserve au restart) : sans lui le multigrille repartirait
+  /// d'un phi vierge et la reprise ne serait pas bit-identique (warm start perdu) ; en
+  /// gauss_policy="evolve", phi EST l'etat physique et sa restauration est indispensable. Champ
+  /// ny*nx row-major (meme layout que potential()).
+  void set_potential(const std::vector<double>& phi);
   /// @}
 
  private:

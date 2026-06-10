@@ -119,6 +119,12 @@ struct AmrCompiledHooks {
   // construit ce struct est garde par adc_native_abi_key : un .so genere AVANT cet ajout doit etre
   // recompile (le garde le diagnostique deja clairement) ; l'ajout en queue le rend purement additif.
   std::function<std::vector<PatchBox>()> patch_boxes;  ///< empreintes index-space des patchs fins
+  // AJOUTES EN QUEUE (StabilityPolicy AMR, audit 2026-06, additif comme patch_boxes) : bornes de
+  // pas OPTIONNELLES du bloc, evaluees sur le GROSSIER par AmrSystem::step_cfl mono-bloc. VIDES si
+  // le modele ne declare pas les traits HasSourceFrequency / HasStabilityDt (bit-identique). Le
+  // garde adc_native_abi_key force la regeneration des .so anterieurs (ajout purement additif).
+  std::function<double()> source_frequency;  ///< max grossier de mu [1/s] (0 = ne contraint pas)
+  std::function<double()> stability_dt;      ///< min grossier du pas admissible (0 = ne contraint pas)
 };
 
 /// Builder DIFFERE d'un bloc COMPILE sur la hierarchie multi-blocs : recoit le layout PARTAGE (cree
@@ -143,6 +149,15 @@ class AmrSystem {
   ~AmrSystem();
   AmrSystem(AmrSystem&&) noexcept;
   AmrSystem& operator=(AmrSystem&&) noexcept;
+
+  /// Borne GLOBALE de pas de temps (pendant AMR de System::add_dt_bound) : fn() evaluee UNE fois
+  /// par step_cfl (hote), all_reduce_min (dt identique sur tous les rangs), <= 0 / non finie =
+  /// inerte ce pas. Crochet des contraintes non locales (couplage, scheduler, rampe utilisateur).
+  void add_dt_bound(const std::string& label, std::function<double()> fn);
+
+  /// Borne ACTIVE du dernier step_cfl : "transport:<bloc>" | "source_frequency:<bloc>" |
+  /// "stability_dt:<bloc>" | "global:<label>" | "degenerate" | "" (aucun pas CFL encore).
+  std::string last_dt_bound() const;
 
   /// Ajoute un bloc porte sur l'AMR. Memes parametres de schema spatial que System
   /// (limiter x riemann x recon), appliques a chaque niveau/patch de la hierarchie. Le PREMIER

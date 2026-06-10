@@ -8,6 +8,8 @@
 
 #include <algorithm>  // std::max (agregation du rapport Newton, hote)
 #include <concepts>
+#include <cstdio>     // std::snprintf / fprintf (fail_policy : message hote, jamais en kernel)
+#include <stdexcept>  // std::runtime_error (fail_policy = throw, hote apres reductions)
 
 // Pas implicite / IMEX d'un bloc : le CONTRAT (au lieu du callback nu).
 //
@@ -92,31 +94,49 @@ ADC_HD inline bool is_implicit_component(const ImplicitMask<N>& mask, int c) {
 ///  - rel_tol / abs_tol : critere d'arret ||F||_inf <= abs_tol + rel_tol*||F0||_inf, evalue par
 ///    CELLULE en tete d'iteration. 0/0 (defaut) = desactive -> boucle historique bit-identique.
 ///  - fd_eps : pas (relatif ET plancher absolu) de la jacobienne par differences finies.
+///  - damping : facteur d'amortissement de la mise a jour W -= damping * delta. 1 (defaut) =
+///    Newton plein, bit-identique (multiplication par 1.0 exacte en IEEE). < 1 = Newton amorti
+///    (source tres raide / mauvais conditionnement : robustesse au prix de la vitesse).
+///  - fail_policy : reaction HOTE (apres reduction) a des cellules en echec --
+///    kFailNone (defaut) = enregistrer seulement (historique) ; kFailWarn = un avertissement
+///    stderr par avance ; kFailThrow = std::runtime_error avec la cellule fautive. != kFailNone
+///    force le chemin instrumente (detection necessaire) -- pur observateur, W inchange.
 struct NewtonOptions {
+  static constexpr int kFailNone = 0;
+  static constexpr int kFailWarn = 1;
+  static constexpr int kFailThrow = 2;
   int max_iters = 2;
   Real rel_tol = Real(0);
   Real abs_tol = Real(0);
   Real fd_eps = Real(1e-7);
+  Real damping = Real(1);
+  int fail_policy = kFailNone;
 };
 
 /// Statistique de SORTIE du Newton d'UNE cellule (POD device, ecrit dans le scratch diagnostics) :
 /// res = ||F||_inf a la sortie ; iters = iterations consommees ; failed = 1 si la cellule a echoue
-/// (residu non fini, pivot degenere/non fini, ou tolerance active non atteinte au budget), 0 sinon.
+/// (residu non fini, pivot degenere/non fini, ou tolerance active non atteinte au budget), 0 sinon ;
+/// comp = indice de la COMPOSANTE conservee portant le residu max a la sortie (-1 si rien d'implicite).
 struct NewtonCellStat {
   Real res = Real(0);
   Real iters = Real(0);
   Real failed = Real(0);
+  Real comp = Real(-1);
 };
 
 /// Rapport AGREGE (bloc entier, tous sous-pas d'une avance) du Newton de la source implicite.
 /// Rempli par backward_euler_source quand un rapport est demande (diagnostics OPT-IN) ; reductions
 /// max/somme sur les cellules + all_reduce MPI. reset() en tete d'avance par l'appelant.
+/// CELLULE FAUTIVE : (failed_i, failed_j, failed_comp) designent UNE cellule en echec -- celle
+/// d'index encode MAXIMAL (j puis i), suffisante pour aller voir l'etat ; -1 si aucune. failed_comp
+/// est la composante conservee portant le pire residu de CETTE cellule.
 struct NewtonReport {
   bool enabled = false;        ///< un rapport a ete calcule (au moins un sous-pas instrumente)
   bool converged = true;       ///< aucune cellule en echec sur l'avance
   Real max_residual = Real(0); ///< max cellules/sous-pas de ||F||_inf a la sortie
   Real max_iters_used = Real(0);  ///< max cellules/sous-pas des iterations consommees
   double n_failed = 0;         ///< nb (cellules x sous-pas) en echec (non-fini / pivot / non-convergence)
+  double failed_i = -1, failed_j = -1, failed_comp = -1;  ///< une cellule fautive (-1 si aucune)
   void reset() { *this = NewtonReport{}; }
 };
 
@@ -213,7 +233,7 @@ ADC_HD inline typename Model::State newton_source_solve(
       }
       Real delta[N];
       solve_dense<N>(J, F, delta, m_impl);
-      for (int r = 0; r < m_impl; ++r) W[impl[r]] -= delta[r];
+      for (int r = 0; r < m_impl; ++r) W[impl[r]] -= opts.damping * delta[r];
     }
     return W;
   }
@@ -231,6 +251,7 @@ ADC_HD inline typename Model::State newton_source_solve(
   // (tol_active), comportement opt-in explicitement non historique.
   Real res = Real(0), res0 = Real(0);
   int used = 0;
+  int worst_comp = -1;  // composante conservee portant le residu max a la sortie (diagnostic)
   bool failed = false;
   bool converged = (m_impl == 0);  // rien d'implicite : trivialement converge
   for (int it = 0; it < opts.max_iters; ++it) {
@@ -241,7 +262,7 @@ ADC_HD inline typename Model::State newton_source_solve(
       const int c = impl[r];
       F[r] = W[c] - Un[c] - dt * S0[c];
       const Real av = F[r] < 0 ? -F[r] : F[r];
-      if (av > res) res = av;
+      if (av > res) { res = av; worst_comp = c; }
     }
     if (!newton_finite(res)) failed = true;  // marque SANS break : trajectoire (2a) preservee
     if (tol_active) {
@@ -265,7 +286,7 @@ ADC_HD inline typename Model::State newton_source_solve(
     Real delta[N];
     const bool ok = solve_dense<N>(J, F, delta, m_impl);
     if (!ok) failed = true;  // pivot degenere : marque SANS break, division inf/NaN comme (2a)
-    for (int r = 0; r < m_impl; ++r) W[impl[r]] -= delta[r];
+    for (int r = 0; r < m_impl; ++r) W[impl[r]] -= opts.damping * delta[r];
     used = it + 1;
   }
   // Sortie par epuisement du budget : recalculer le residu APRES la derniere mise a jour (rapport
@@ -278,7 +299,7 @@ ADC_HD inline typename Model::State newton_source_solve(
       const int c = impl[r];
       const Real fr = W[c] - Un[c] - dt * S0[c];
       const Real av = fr < 0 ? -fr : fr;
-      if (av > res) res = av;
+      if (av > res) { res = av; worst_comp = c; }
     }
     if (!newton_finite(res)) failed = true;
     else if (tol_active) converged = res <= opts.abs_tol + opts.rel_tol * res0;
@@ -287,6 +308,7 @@ ADC_HD inline typename Model::State newton_source_solve(
     stat->res = res;
     stat->iters = Real(used);
     stat->failed = (failed || (tol_active && !converged)) ? Real(1) : Real(0);
+    stat->comp = Real(worst_comp);
   }
   return W;
 }
@@ -325,8 +347,12 @@ struct BackwardEulerSourceKernel {
 };
 
 // Variante INSTRUMENTEE : meme Newton, mais ecrit la statistique de sortie de CHAQUE cellule dans
-// le scratch st (comp 0 = ||F||_inf, 1 = iterations, 2 = echec 0/1). FONCTEUR NOMME (meme contrat
-// device cross-TU que BackwardEulerSourceKernel). Utilisee uniquement quand un rapport est demande.
+// le scratch st (comp 0 = ||F||_inf, 1 = iterations, 2 = echec 0/1, 3 = CELLULE FAUTIVE ENCODEE).
+// Encodage comp 3 : -1 si la cellule n'a pas echoue ; sinon (j*2^20 + i)*16 + (comp_fautive + 1) --
+// entier exact en double jusqu'a ~2^44 (i, j < 2^20), de sorte qu'une reduction MAX rend UNE cellule
+// fautive (la plus grande en index) decodable cote hote sans reduction arg-max dediee. FONCTEUR
+// NOMME (meme contrat device cross-TU que BackwardEulerSourceKernel). Utilisee uniquement quand un
+// rapport ou une fail_policy est demande.
 template <class Model>
 struct BackwardEulerSourceStatKernel {
   Model m;
@@ -344,6 +370,9 @@ struct BackwardEulerSourceStatKernel {
     st(i, j, 0) = s.res;
     st(i, j, 1) = s.iters;
     st(i, j, 2) = s.failed;
+    st(i, j, 3) = s.failed > Real(0)
+                      ? (Real(j) * Real(1048576) + Real(i)) * Real(16) + (s.comp + Real(1))
+                      : Real(-1);
   }
 };
 
@@ -377,7 +406,10 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
                            Real dt, const NewtonOptions& opts,
                            const ImplicitMask<Model::n_vars>& mask = {},
                            NewtonReport* report = nullptr) {
-  if (report == nullptr) {
+  // Chemin RAPIDE (historique) : ni rapport demande ni fail_policy active -> aucun scratch, aucune
+  // reduction, kernel historique bit-identique. Une fail_policy != kFailNone EXIGE la detection,
+  // donc le chemin instrumente (qui reste un OBSERVATEUR PUR de W).
+  if (report == nullptr && opts.fail_policy == NewtonOptions::kFailNone) {
     for (int li = 0; li < U.local_size(); ++li) {
       Array4 u = U.fab(li).array();
       const ConstArray4 uc = U.fab(li).const_array();
@@ -387,9 +419,9 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
     }
     return;
   }
-  // Chemin DIAGNOSTICS : scratch par-cellule (res, iters, failed) puis reductions. L'allocation du
-  // scratch est locale a l'appel (diagnostics opt-in : le cout n'existe que si demande).
-  MultiFab stats(U.box_array(), U.dmap(), 3, 0);
+  // Chemin DIAGNOSTICS : scratch par-cellule (res, iters, failed, cellule encodee) puis reductions.
+  // L'allocation du scratch est locale a l'appel (diagnostics/fail_policy opt-in).
+  MultiFab stats(U.box_array(), U.dmap(), 4, 0);
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
     Array4 st = stats.fab(li).array();
@@ -399,22 +431,47 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
     for_each_cell(b, detail::BackwardEulerSourceStatKernel<Model>{model, uc, ax, u, st, dt, opts,
                                                                   mask});
   }
-  Real rmax = Real(0), imax = Real(0), nfail = Real(0);
+  Real rmax = Real(0), imax = Real(0), nfail = Real(0), enc = Real(-1);
   for (int li = 0; li < stats.local_size(); ++li) {
     const ConstArray4 st = stats.fab(li).const_array();
     const Box2D b = stats.box(li);
     rmax = std::max(rmax, reduce_max_cell(b, detail::NewtonStatMaxKernel{st, 0}));
     imax = std::max(imax, reduce_max_cell(b, detail::NewtonStatMaxKernel{st, 1}));
     nfail += reduce_sum_cell(b, detail::NewtonStatSumKernel{st, 2});
+    enc = std::max(enc, reduce_max_cell(b, detail::NewtonStatMaxKernel{st, 3}));
   }
   rmax = static_cast<Real>(all_reduce_max(static_cast<double>(rmax)));
   imax = static_cast<Real>(all_reduce_max(static_cast<double>(imax)));
   const double nfail_g = all_reduce_sum(static_cast<double>(nfail));
-  report->enabled = true;
-  report->max_residual = std::max(report->max_residual, rmax);
-  report->max_iters_used = std::max(report->max_iters_used, imax);
-  report->n_failed += nfail_g;
-  if (nfail_g > 0 || !newton_finite(rmax)) report->converged = false;
+  const double enc_g = all_reduce_max(static_cast<double>(enc));
+  double fi = -1, fj = -1, fc = -1;
+  if (nfail_g > 0 && enc_g >= 0) {  // decode la cellule fautive d'index maximal (cf. StatKernel)
+    const long long k = static_cast<long long>(enc_g);
+    fc = static_cast<double>(k % 16) - 1.0;  // -1 = composante inconnue (rien d'implicite)
+    const long long cell = k / 16;
+    fi = static_cast<double>(cell % 1048576);
+    fj = static_cast<double>(cell / 1048576);
+  }
+  if (report) {
+    report->enabled = true;
+    report->max_residual = std::max(report->max_residual, rmax);
+    report->max_iters_used = std::max(report->max_iters_used, imax);
+    report->n_failed += nfail_g;
+    if (nfail_g > 0) { report->failed_i = fi; report->failed_j = fj; report->failed_comp = fc; }
+    if (nfail_g > 0 || !newton_finite(rmax)) report->converged = false;
+  }
+  // FAIL_POLICY (hote, apres reductions -- les kernels device ne levent jamais) : reaction aux
+  // cellules en echec. kFailWarn : un avertissement stderr (rang 0). kFailThrow : erreur dure avec
+  // la cellule fautive (le pas est ABANDONNE en l'etat ; a l'appelant de decider quoi en faire).
+  if (nfail_g > 0 && opts.fail_policy != NewtonOptions::kFailNone) {
+    char msg[256];
+    std::snprintf(msg, sizeof(msg),
+                  "Newton source implicite : %.0f cellule(s) en echec (residu max %.3e ; cellule "
+                  "(%g, %g), composante %g)",
+                  nfail_g, static_cast<double>(rmax), fi, fj, fc);
+    if (opts.fail_policy == NewtonOptions::kFailThrow) throw std::runtime_error(msg);
+    if (my_rank() == 0) std::fprintf(stderr, "[adc] AVERTISSEMENT %s\n", msg);
+  }
 }
 
 /// COMPATIBILITE : ancienne signature a budget d'iterations nu (iters = 2 historique). Equivaut a

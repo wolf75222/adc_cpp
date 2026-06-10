@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/core/state.hpp>       // kAuxBaseComps (canal aux par defaut de l'etage Schur : B_z)
 #include <adc/core/types.hpp>       // Real
 #include <adc/core/variables.hpp>   // VariableSet (descripteur a roles porte par chaque bloc)
 #include <adc/mesh/box2d.hpp>       // Box2D
@@ -100,6 +101,10 @@ class SystemBlockStore {
     // chemin cartesien reste BIT-IDENTIQUE (schur_polar == nullptr quand le System est cartesien).
     std::shared_ptr<PolarCondensedSchurSourceStepper> schur_polar;
     double schur_theta = 0.5;  // theta-schema de l'etage source (0.5 = Crank-Nicolson)
+    // Composante du canal aux lue comme champ magnetique Omega = B_z par l'etage Schur (audit
+    // vague 2 : champ TRANSPORTE dans l'ABI au lieu du litteral kAuxBaseComps fige). Defaut =
+    // kAuxBaseComps (canal canonique B_z), bit-identique ; set_source_stage peut le rediriger.
+    int schur_bz_comp = kAuxBaseComps;
     // ETAGE SOURCE GENERIQUE (optionnel) : un callable (U, dt) qui avance EN PLACE l'etage source du
     // bloc. nullptr (defaut) = aucun etage source generique (chemin BIT-IDENTIQUE). run_source_stage le
     // joue UNIQUEMENT si aucun etage Schur condense (schur / schur_polar) n'est cable, donc il ne change

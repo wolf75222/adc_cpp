@@ -125,9 +125,11 @@ PYBIND11_MODULE(_adc, m) {
            // bit-identique). newton_diagnostics=True active le rapport (newton_report(name)).
            py::arg("newton_max_iters") = 2, py::arg("newton_rel_tol") = 0.0,
            py::arg("newton_abs_tol") = 0.0, py::arg("newton_fd_eps") = 1e-7,
-           py::arg("newton_diagnostics") = false)
+           py::arg("newton_diagnostics") = false, py::arg("newton_damping") = 1.0,
+           py::arg("newton_fail_policy") = "none")
       // Rapport Newton (diagnostics IMEX OPT-IN) : dict {enabled, converged, max_residual,
-      // max_iters_used, n_failed}, agrege sur les sous-pas de la DERNIERE avance du bloc.
+      // max_iters_used, n_failed, failed_cell, failed_component}, agrege sur les sous-pas de la
+      // DERNIERE avance du bloc. failed_cell = (i, j) d'UNE cellule fautive ou None.
       .def("newton_report",
            [](const System& s, const std::string& name) {
              const System::SourceNewtonReport r = s.newton_report(name);
@@ -137,6 +139,12 @@ PYBIND11_MODULE(_adc, m) {
              d["max_residual"] = r.max_residual;
              d["max_iters_used"] = r.max_iters_used;
              d["n_failed"] = r.n_failed;
+             if (r.failed_i >= 0)
+               d["failed_cell"] = py::make_tuple(static_cast<int>(r.failed_i),
+                                                 static_cast<int>(r.failed_j));
+             else
+               d["failed_cell"] = py::none();
+             d["failed_component"] = static_cast<int>(r.failed_comp);
              return d;
            },
            py::arg("name"))
@@ -170,7 +178,12 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("theta"), py::arg("alpha"),
            // Tolerance / budget du solve Krylov de l'etage (audit 2026-06) : <= 0 = defauts
            // historiques du stepper (1e-10 ; 400 cartesien / 600 polaire).
-           py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0)
+           py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0,
+           // Descripteurs des champs (audit vague 2 : roles transportes dans l'ABI) : "" = role
+           // canonique (bit-identique) ; sinon nom de role stable ou de variable du bloc.
+           // bz_aux_component < 0 = canal canonique B_z. Cartesien seulement (polaire : rejet).
+           py::arg("density") = "", py::arg("momentum_x") = "", py::arg("momentum_y") = "",
+           py::arg("energy") = "", py::arg("bz_aux_component") = -1)
       // Politique de splitting en temps : "lie" (defaut, bit-identique) ou "strang" (H(dt/2) S(dt)
       // H(dt/2), 2e ordre). Cf. System::set_time_scheme / SystemStepper::step_strang.
       .def("set_time_scheme", &System::set_time_scheme, py::arg("scheme"))
@@ -182,6 +195,11 @@ PYBIND11_MODULE(_adc, m) {
       // Borne ACTIVE du dernier step_cfl : "transport:<bloc>" | "source_frequency:<bloc>" |
       // "stability_dt:<bloc>" | "global:<label>" | "degenerate" | "" (aucun pas CFL encore).
       .def("last_dt_bound", &System::last_dt_bound)
+      // Horloge (IO v1) : macro_step expose + restauration (t, macro_step) pour le restart -- la
+      // cadence stride depend de macro_step % stride, pas seulement de t.
+      .def("macro_step", &System::macro_step)
+      .def("set_clock", &System::set_clock, py::arg("t"), py::arg("macro_step"))
+      .def("set_potential", &System::set_potential, py::arg("phi"))
       // Politique de la loi de Gauss (R0, repro Hoffart) : "restart" (defaut, re-resout Poisson chaque
       // pas, bit-identique) ou "evolve" (apres phi^0, plus de re-solve ; l'etage Schur fait evoluer phi
       // sans restart, comme le papier). Cf. System::set_gauss_policy.
@@ -345,6 +363,9 @@ PYBIND11_MODULE(_adc, m) {
       .def("set_poisson", &AmrSystem::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
            py::arg("wall") = "none", py::arg("wall_radius") = 0.0)
+      // Borne GLOBALE de pas + borne ACTIVE (StabilityPolicy AMR, parite System.add_dt_bound).
+      .def("add_dt_bound", &AmrSystem::add_dt_bound, py::arg("label"), py::arg("fn"))
+      .def("last_dt_bound", &AmrSystem::last_dt_bound)
       // CHEMIN amr-schur (pendant AMR de System.set_magnetic_field / set_source_stage / set_time_scheme).
       // Etage source condense par Schur GLOBAL (electrostatique/Lorentz) sur la hierarchie mono-bloc, au
       // lieu de la source IMEX locale. B_z (terme de Lorentz) accepte un numpy (n, n) aplati.

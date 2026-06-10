@@ -9,6 +9,7 @@
 #include <algorithm>  // std::find, std::sort (resolution du masque IMEX partiel : indices uniques tries)
 #include <cmath>
 #include <cstddef>
+#include <limits>  // std::numeric_limits (bornes globales de pas : neutralisation en +inf avant le min)
 #include <dlfcn.h>  // dlopen/dlsym : chargement du loader natif AMR genere (.so)
 #include <functional>
 #include <memory>
@@ -151,6 +152,18 @@ struct AmrSystem::Impl {
   std::function<std::vector<PatchBox>()> patch_boxes_fn;
   std::function<std::vector<double>()> density_fn;
   std::function<std::vector<double>()> potential_fn;
+  // Bornes de pas OPTIONNELLES du bloc mono (StabilityPolicy AMR, audit 2026-06) : hooks VIDES si
+  // le modele ne declare pas les traits -> step_cfl mono-bloc garde la formule historique.
+  std::function<double()> source_frequency_fn;
+  std::function<double()> stability_dt_fn;
+  // Bornes GLOBALES (AmrSystem::add_dt_bound) : enregistrees AVANT le build paresseux, transmises
+  // au moteur multi-blocs a sa construction ; lues directement par le step_cfl mono-bloc.
+  struct GlobalDtBound {
+    std::string label;
+    std::function<double()> fn;
+  };
+  std::vector<GlobalDtBound> dt_bounds;
+  std::string last_dt_reason;  // borne ACTIVE du dernier step_cfl mono-bloc (multi : via runtime)
   // --- chemin multi-blocs (AmrRuntime, hierarchie partagee + Poisson somme) ---
   std::shared_ptr<adc::AmrRuntime> runtime;
   double t = 0;
@@ -222,6 +235,8 @@ struct AmrSystem::Impl {
     patch_boxes_fn = std::move(h.patch_boxes);
     density_fn = std::move(h.density);
     potential_fn = std::move(h.potential);
+    source_frequency_fn = std::move(h.source_frequency);  // vides sans trait (bit-identique)
+    stability_dt_fn = std::move(h.stability_dt);
     built = true;
   }
 
@@ -289,6 +304,9 @@ struct AmrSystem::Impl {
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
                                                 std::move(rblocks), S.base_per, S.replicated_coarse,
                                                 S.wall);
+    // Bornes GLOBALES enregistrees AVANT le build paresseux (add_dt_bound) : transmises au moteur
+    // (qui les agrege dans son step_cfl, all_reduce_min). Celles ajoutees APRES passent en direct.
+    for (const auto& g : dt_bounds) runtime->add_dt_bound(g.label, g.fn);
     // REGRID D'UNION DES TAGS (capstone Phase 2, C.6) : si regrid_every > 0, on ACTIVE la cadence du
     // moteur et on pose le predicat de tag PAR BLOC (D1). En v1 le critere est COMMUN a tous les blocs
     // (densite, composante 0 > refine_threshold), comme le chemin mono-bloc AmrCouplerMP (qui tague
@@ -768,11 +786,54 @@ double AmrSystem::step_cfl(double cfl) {
     p_->t += dt;
     return dt;
   }
-  // MONO-BLOC (AmrCouplerMP, intouche) : formule historique dt = cfl*h/w_max (bit-identique).
-  const double h = cfl * hx / p_->max_speed_fn();
+  // MONO-BLOC (AmrCouplerMP) : borne TRANSPORT historique dt = cfl*h/w_max (formule INCHANGEE,
+  // bit-identique sans bornes optionnelles), puis agregation StabilityPolicy (audit 2026-06) :
+  //  - bornes du BLOC (hooks source_frequency / stability_dt, VIDES sans trait modele) appliquees
+  //    au SOUS-PAS effectif dt/substeps (step_fn decoupe dt en substeps morceaux ; pas de stride
+  //    mono-bloc) : dt <= cfl*substeps/mu et dt <= dt_adm*substeps ;
+  //  - bornes GLOBALES (add_dt_bound), all_reduce_min comme System (dt identique tous rangs).
+  double h = cfl * hx / p_->max_speed_fn();
+  p_->last_dt_reason = "transport:" + p_->blocks[0].name;
+  const double sub = static_cast<double>(p_->blocks[0].substeps);
+  if (p_->source_frequency_fn) {
+    const double mu = p_->source_frequency_fn();
+    if (mu > 0.0) {
+      const double dt_src = cfl * sub / mu;
+      if (dt_src < h) { h = dt_src; p_->last_dt_reason = "source_frequency:" + p_->blocks[0].name; }
+    }
+  }
+  if (p_->stability_dt_fn) {
+    const double db = p_->stability_dt_fn();
+    if (db > 0.0) {
+      const double dt_adm = db * sub;
+      if (dt_adm < h) { h = dt_adm; p_->last_dt_reason = "stability_dt:" + p_->blocks[0].name; }
+    }
+  }
+  for (const auto& g : p_->dt_bounds) {
+    if (!g.fn) continue;
+    double v = g.fn();
+    if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+    v = all_reduce_min(v);
+    if (v < h) { h = v; p_->last_dt_reason = "global:" + g.label; }
+  }
   p_->step_fn(h);
   p_->t += h;
   return h;
+}
+
+// Borne GLOBALE de pas (pendant AMR de System::add_dt_bound) : enregistree AVANT ou APRES le build
+// (mono-bloc : lue par step_cfl a chaque pas ; multi-blocs : transmise au moteur, ou ajoutee a chaud
+// s'il existe deja). fn() est evaluee PAR RANG puis reduite all_reduce_min cote consommateur.
+void AmrSystem::add_dt_bound(const std::string& label, std::function<double()> fn) {
+  if (!fn) throw std::runtime_error("AmrSystem::add_dt_bound : fonction de borne vide");
+  p_->dt_bounds.push_back(Impl::GlobalDtBound{label, fn});
+  if (p_->runtime) p_->runtime->add_dt_bound(label, std::move(fn));
+}
+
+// Borne ACTIVE du dernier step_cfl ("" avant le premier pas CFL).
+std::string AmrSystem::last_dt_bound() const {
+  if (p_->runtime) return p_->runtime->last_dt_bound();
+  return p_->last_dt_reason;
 }
 
 int AmrSystem::nx() const { return p_->cfg.n; }

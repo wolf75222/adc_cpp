@@ -564,6 +564,7 @@ class HyperbolicModel:
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
         self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
         self._stab_dt = None     # Expr : pas ADMISSIBLE direct dt(U, aux) (None = pas de borne)
+        self._src_freq = None    # Expr : frequence mu(U, aux) de la SOURCE (None = pas de borne)
         self.prim_state = []    # noms ordonnes de l'etat primitif (layout de Prim) ; pour le codegen
         self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
         self.cons_roles = None  # override explicite des roles conservatifs (sinon mapping canonique)
@@ -608,8 +609,8 @@ class HyperbolicModel:
         dt <= cfl*h/lambda*, tandis que les solveurs de Riemann continuent de lire max_wave_speed
         (stabilite != precision). SANS appel, le FALLBACK est strictement l'historique :
         max(abs(eigenvalues)) via max_wave_speed. Compilee comme flux/source (pas de callback Python
-        par cellule : compatible production GPU/MPI). LIMITE : System seulement -- AmrSystem REJETTE
-        explicitement un modele portant cette borne (step_cfl AMR transport-only, non cable)."""
+        par cellule : compatible production GPU/MPI). Cablee sur System ET AmrSystem (mono et
+        multi-blocs ; cote AMR la reduction est evaluee sur le niveau GROSSIER, la ou vit la CFL)."""
         self._stab_speed = _wrap(expr)
 
     def stability_dt(self, expr_dt):
@@ -618,9 +619,19 @@ class HyperbolicModel:
         impose dt <= min_cellules(stability_dt) * substeps / stride (le cfl n'est PAS applique : le
         modele declare deja un pas admissible). Forme la plus generale (source raide, couplage local,
         formule transport+source non reductible). SANS appel, aucune borne supplementaire (politique
-        de pas historique). Compilee comme flux/source (production GPU/MPI). LIMITE : System
-        seulement -- AmrSystem REJETTE explicitement un modele portant cette borne (non cable)."""
+        de pas historique). Compilee comme flux/source (production GPU/MPI). Cablee sur System ET
+        AmrSystem (mono et multi-blocs ; cote AMR evaluee sur le niveau GROSSIER)."""
         self._stab_dt = _wrap(expr_dt)
+
+    def source_frequency(self, expr_mu):
+        """FREQUENCE locale mu(U, aux) [1/temps] de la SOURCE (relaxation, collision, reaction) :
+        la 'deuxieme CFL' du meeting -- borne dt <= cfl * substeps / (stride * max_cellules(mu)),
+        SANS pas d'espace (une source borne en 1/temps). Emise comme ``frequency(U, aux)`` sur la
+        BRIQUE DE SOURCE generee (contrat C++ des briques source, cf. physics/source.hpp) ;
+        CompositeModel la forwarde (trait HasSourceFrequency) et System/AmrSystem::step_cfl
+        l'agregent. EXIGE set_source/m.source (la frequence est une propriete de la source).
+        SANS appel, la source ne contraint pas le pas (historique). Compilee (production GPU/MPI)."""
+        self._src_freq = _wrap(expr_mu)
 
     def set_gamma(self, gamma):
         """Indice adiabatique du bloc (EOS compressible). Transporte par le .so genere via le symbole
@@ -695,7 +706,8 @@ class HyperbolicModel:
         used = set()
         groups = [self._flux.get("x", []), self._flux.get("y", []),
                   self._eig.get("x", []), self._eig.get("y", []), self._source or [],
-                  [e for e in (self._stab_speed, self._stab_dt) if e is not None]]
+                  [e for e in (self._stab_speed, self._stab_dt, self._src_freq)
+                   if e is not None]]
         for e in self.prim_defs.values():
             used |= e.deps()
         for grp in groups:
@@ -706,6 +718,12 @@ class HyperbolicModel:
         missing = used - known
         if missing:
             raise ValueError("modele '%s' : variables non definies %s" % (self.name, sorted(missing)))
+        # source_frequency est une propriete de la SOURCE (emise sur la brique source generee) :
+        # la declarer sans source serait perdue EN SILENCE -> erreur explicite.
+        if self._src_freq is not None and self._source is None:
+            raise ValueError("modele '%s' : source_frequency(...) declare sans source "
+                             "(appeler m.source([...]) -- la frequence est emise sur la brique de "
+                             "source generee)" % self.name)
         return True
 
     def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
@@ -1162,7 +1180,19 @@ class HyperbolicModel:
         S += stl
         S.append("    adc::StateVec<%d> S{};" % nc)
         S += ["    S[%d] = %s;" % (i, c) for i, c in enumerate(scpps)]
-        S += ["    return S;", "  }", "};", "}  // namespace %s" % namespace]
+        S += ["    return S;", "  }"]
+        # FREQUENCE de la source (m.source_frequency, audit vague 2) : emise comme frequency(U, a)
+        # -- le contrat OPTIONNEL des briques source (cf. physics/source.hpp), forwarde par
+        # CompositeModel (HasSourceFrequency) et agrege par step_cfl. Sans appel : rien d'emis.
+        if self._src_freq is not None:
+            S.append("")
+            S.append("  ADC_HD adc::Real frequency(const adc::StateVec<%d>& U, const adc::Aux& a) "
+                     "const {" % nc)
+            S += cons_locals() + prim_locals() + aux_locals()
+            ftl, fcpps = self._codegen_exprs([self._src_freq], cse)
+            S += ftl
+            S += ["    return %s;" % fcpps[0], "  }"]
+        S += ["};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
 
     def _emit_bricks(self, name=None):
@@ -1497,6 +1527,7 @@ class HyperbolicModel:
         parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
         parts.append("stab_speed=%s" % (repr(m._stab_speed) if m._stab_speed is not None else ""))
         parts.append("stab_dt=%s" % (repr(m._stab_dt) if m._stab_dt is not None else ""))
+        parts.append("src_freq=%s" % (repr(m._src_freq) if m._src_freq is not None else ""))
         parts.append("n_aux=%d" % aux_n_aux(m.aux_names))
         parts.append("gamma=%r" % m.gamma)
         # Les params entrent dans le hash par (nom, valeur de DECLARATION, kind). La valeur d'un param
@@ -1915,6 +1946,13 @@ class Model:
     def source(self, s):
         """Terme source S(U, aux), une expression par composante (optionnel ; delegue a set_source)."""
         self._m.set_source(s)
+
+    def source_frequency(self, expr_mu):
+        """Frequence locale mu(U, aux) [1/s] de la source -- la borne de pas 'source' du meeting
+        (dt <= cfl*substeps/(stride*max mu), sans pas d'espace). Emise sur la brique de SOURCE
+        generee (frequency(U, aux)), forwarde par CompositeModel, agregee par System/AmrSystem
+        step_cfl. EXIGE m.source([...]). Delegue a HyperbolicModel.source_frequency."""
+        self._m.source_frequency(expr_mu)
 
     def elliptic_rhs(self, e):
         """Contribution au second membre elliptique (couplage Poisson ; delegue a set_elliptic_rhs)."""

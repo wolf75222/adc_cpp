@@ -18,8 +18,10 @@
 ///        (anneau (r, theta)). Pendant POLAIRE du CondensedSchurSourceStepper cartesien (#126,
 ///        condensed_schur_source_stepper.hpp), pour la source implicite couplee potentiel / vitesse /
 ///        Lorentz (Hoffart et al., arXiv:2510.11808) d'un fluide magnetise RAIDE sur un maillage
-///        annulaire. C'est un etage SOURCE AUTONOME (transport gele) ; il NE remplace PAS System::step
-///        et ne s'y branche PAS (cablage facade = ulterieur).
+///        annulaire. C'est un etage SOURCE AUTONOME (transport gele). CABLE dans la facade depuis la
+///        Voie A etape 2c : System::set_source_stage le construit quand la geometrie est polaire et
+///        SystemStepper::run_source_stage l'invoque apres le transport (cf. python/system.cpp) --
+///        l'ancienne mention "ne se branche pas" etait perimee (audit 2026-06).
 ///
 /// CHEMIN SEPARE, additif (Voie A etape 2b). Le Schur CARTESIEN reste BIT-IDENTIQUE
 /// (condensed_schur_source_stepper.hpp INTOUCHE) ; ce header ne touche aucun chemin existant. Il COMPOSE

@@ -165,8 +165,19 @@ struct AmrRuntimeBlock {
   /// partage). La SOMME des contributions de tous les blocs forme le RHS du Poisson de systeme.
   std::function<void(const MultiFab&, MultiFab&)> add_elliptic_rhs;
 
-  /// Vitesse d'onde max du bloc sur le grossier (pour le pas CFL substeps-aware d'une PR future).
+  /// Vitesse pilotant la CFL du bloc sur le grossier. Par defaut max_wave_speed (historique) ;
+  /// quand le modele declare le trait HasStabilitySpeed, c'est lambda* (stability_speed) que la
+  /// fermeture reduit -- MEME politique que System (make_max_speed), cf. build_amr_block.
   std::function<Real(const MultiFab&, const MultiFab&)> max_speed;
+
+  /// BORNES DE PAS OPTIONNELLES du bloc (StabilityPolicy AMR, audit 2026-06) : evaluees sur le
+  /// GROSSIER (niveau 0, la ou vit la CFL AMR -- cf. step_cfl : h = dx_coarse). VIDES (defaut) ->
+  /// step_cfl garde la borne transport seule, bit-identique. Remplies par build_amr_block /
+  /// build_amr_compiled quand le modele declare HasSourceFrequency / HasStabilityDt (memes
+  /// semantiques que System : mu en 1/s -> dt <= cfl*substeps/(stride*mu), sans h ; pas admissible
+  /// direct -> dt <= dt_adm*substeps/stride, sans cfl).
+  std::function<Real(const MultiFab&, const MultiFab&)> source_frequency;
+  std::function<Real(const MultiFab&, const MultiFab&)> stability_dt;
 
   /// Masse de la composante 0 du grossier du bloc (somme u*dV ; reduite cross-rang si reparti).
   std::function<Real()> mass;
@@ -641,16 +652,58 @@ class AmrRuntime {
   Real step_cfl(Real cfl, Real h) {
     solve_fields();  // aux a jour : max_speed de chaque bloc le lit sur le grossier courant
     Real dt = std::numeric_limits<Real>::infinity();
+    last_dt_reason_ = "degenerate";
     for (auto& b : blocks_) {
       const Real w = std::max(b.max_speed((*b.levels)[0].U, aux_[0]), kCflSpeedFloor);
-      const Real dt_b = cfl * h * static_cast<Real>(b.substeps) /
-                        (static_cast<Real>(b.stride) * w);
-      if (dt_b < dt) dt = dt_b;
+      Real dt_b = cfl * h * static_cast<Real>(b.substeps) /
+                  (static_cast<Real>(b.stride) * w);
+      const char* why = "transport";
+      // BORNES OPTIONNELLES du bloc (StabilityPolicy AMR, audit 2026-06) : memes formules
+      // substeps/stride que SystemStepper::step_cfl, evaluees sur le GROSSIER. Fermetures vides
+      // (modele sans trait) -> non interrogees, borne transport seule (bit-identique).
+      if (b.source_frequency) {
+        const Real mu = b.source_frequency((*b.levels)[0].U, aux_[0]);
+        if (mu > Real(0)) {
+          const Real dt_src = cfl * static_cast<Real>(b.substeps) /
+                              (static_cast<Real>(b.stride) * mu);
+          if (dt_src < dt_b) { dt_b = dt_src; why = "source_frequency"; }
+        }
+      }
+      if (b.stability_dt) {
+        const Real db = b.stability_dt((*b.levels)[0].U, aux_[0]);
+        if (db > Real(0)) {
+          const Real dt_adm = db * static_cast<Real>(b.substeps) / static_cast<Real>(b.stride);
+          if (dt_adm < dt_b) { dt_b = dt_adm; why = "stability_dt"; }
+        }
+      }
+      if (dt_b < dt) { dt = dt_b; last_dt_reason_ = std::string(why) + ":" + b.name; }
     }
-    if (!std::isfinite(dt)) dt = cfl * h / kCflSpeedFloor;  // garde-fou (aucun bloc : impossible ici)
+    // Bornes GLOBALES (AmrRuntime::add_dt_bound, parite avec System::add_dt_bound) : evaluees PAR
+    // RANG puis reduites all_reduce_min (dt identique sur tous les rangs ; <= 0/non finie = inerte).
+    for (const auto& g : dt_bounds_) {
+      if (!g.fn) continue;
+      double v = g.fn();
+      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+      v = all_reduce_min(v);
+      if (static_cast<Real>(v) < dt) { dt = static_cast<Real>(v); last_dt_reason_ = "global:" + g.label; }
+    }
+    if (!std::isfinite(dt)) {
+      dt = cfl * h / kCflSpeedFloor;  // garde-fou (aucun bloc : impossible ici)
+      last_dt_reason_ = "degenerate";
+    }
     step(dt);
     return dt;
   }
+
+  /// Borne GLOBALE de pas (pendant AMR de System::add_dt_bound) : fn() evaluee une fois par
+  /// step_cfl, all_reduce_min, <= 0/non finie = inerte. Pour couplage/scheduler/politiques user.
+  void add_dt_bound(const std::string& label, std::function<double()> fn) {
+    dt_bounds_.push_back(GlobalDtBound{label, std::move(fn)});
+  }
+
+  /// Borne ACTIVE du dernier step_cfl ("transport:<bloc>" / "source_frequency:<bloc>" /
+  /// "stability_dt:<bloc>" / "global:<label>" / "degenerate" / "" avant le premier pas).
+  const std::string& last_dt_bound() const { return last_dt_reason_; }
 
   /// Potentiel grossier (composante 0 de l'aux partage) en champ n*n row-major. Resout les champs
   /// si besoin (pendant de AmrSystem::potential), puis lit aux(0). Identique pour tous les blocs.
@@ -728,6 +781,13 @@ class AmrRuntime {
   bool replicated_coarse_;
   GeometricMG mg_;
   std::vector<AmrRuntimeBlock> blocks_;
+  // Bornes GLOBALES de pas (add_dt_bound, parite System) + borne ACTIVE du dernier step_cfl.
+  struct GlobalDtBound {
+    std::string label;
+    std::function<double()> fn;
+  };
+  std::vector<GlobalDtBound> dt_bounds_;
+  std::string last_dt_reason_;
   std::vector<MultiFab> aux_;  // [niveau], partage par tous les blocs
   std::vector<CoupledSourceSpec> coupled_sources_;  // sources couplees enregistrees (appliquees apres transport)
   // REGRID D'UNION DES TAGS (capstone Phase 2, C.6). regrid_every_ == 0 -> hierarchie FIGEE (defaut,

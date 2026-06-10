@@ -91,33 +91,72 @@ changements silencieux).
   checkpoint (t, macro_step, grille, blocs, U, aux/B_z, params, stride/substeps), contraintes HPC
   (pas un fichier/processus ; HDF5 agrege puis parallele), decoupage en 3 PR.
 
+## Vague 2 (correction d'intention : GENERALISER, pas seulement marquer)
+
+La premiere vague traitait plusieurs chemins non couverts par REJET explicite ; la vague 2 les
+CABLE (le rejet ne reste que la ou l'architecture n'est pas prete, et il est liste plus bas).
+
+1. **StabilityPolicy sur AMR** : AmrRuntimeBlock et les hooks mono-bloc portent
+   source_frequency/stability_dt ; build_amr_block/_compiled routent la vitesse de CFL via
+   stability_speed (trait) ; AmrRuntime::step_cfl ET le step_cfl mono-bloc agregent les bornes
+   (formules substeps/stride identiques a System) ; AmrSystem::add_dt_bound / last_dt_bound
+   (parite System, all_reduce_min). Un modele DSL m.stability_dt(...) compile
+   target='amr_system' contraint donc le pas AMR (test B4).
+2. **Capabilities Riemann** : HLLC et Roe ne sont plus des algorithmes Euler-only deguises --
+   `HasHLLCStructure` (pressure + wave_speeds + contact_speed + hllc_star_state) et
+   `HasRoeDissipation` (d = |A_roe| dU, entropy fix inclus) permettent a UN MODELE de fournir sa
+   structure ; le coeur applique l'algorithme generique (F* = F_k + s_k (U*_k - U_k) ;
+   F = 1/2(F_L+F_R) - 1/2 d). Le chemin canonique Euler 2D reste l'implementation historique
+   bit-identique. Gates System ET AMR elargies. Preuves : hooks-Euler == canonique a 1e-13 ;
+   HLLC isotherme 3-var preserve EXACTEMENT un cisaillement stationnaire la ou HLL le diffuse.
+3. **Newton** : damping (0,1], fail_policy none|warn|throw (hote, apres reductions ; observateur
+   pur), cellule fautive (i, j) + composante via reduction encodee (rapport + message du throw).
+   Preuve non-Euler : relaxation non lineaire 3 variables converge sous tolerances ; pathologie
+   NaN sur UNE cellule -> throw avec (i, j) exacts.
+4. **DSL m.source_frequency(expr)** : emise comme `frequency(U, aux)` sur la brique de SOURCE
+   generee (le contrat optionnel de physics/source.hpp), forwardee par CompositeModel, agregee
+   par step_cfl ("source_frequency:<bloc>"). Exige m.source (erreur explicite sinon).
+5. **Schur roles dans l'ABI** : set_source_stage transporte density/momentum_x/momentum_y/energy
+   (nom de role stable OU nom de variable) + bz_aux_component ; le stepper cartesien gagne un
+   constructeur a composantes explicites (le ctor canonique y DELEGUE, bit-identique) ;
+   adc.CondensedSchur(density=..., momentum=(...), magnetic_field=...) forwarde au lieu de
+   rejeter. Defauts = roles canoniques, bit-identique.
+6. **IO v1** : sim.write(path, format='vtk'|'npz', step=), sim.checkpoint / sim.restart (npz,
+   ecriture atomique) ; bindings macro_step() / set_clock() / set_potential() -- la reprise est
+   BIT-IDENTIQUE (y compris cadence stride via macro_step, et warm start MG via phi restaure).
+7. **adc.capabilities()** : matrice de verite unique (riemann x facade, time, stability_policy,
+   poisson, schur, backends DSL, io) ; docstrings perimees corrigees (PolarMesh, etage Schur
+   polaire "ne se branche pas", perimetre Phase 3c du Schur AMR, CondensedSchur "mono-rang").
+
 ## Points encore NON generalises (explicites)
 
-1. **AMR** : step_cfl AMR reste transport-only (pas de bornes source/stability/globales) ; mono-bloc
-   AMR garde la formule historique `cfl*h/w_max` ; pas de `ssprk3` AMR ; coarse/fine suppose ratio 2.
-   Le `hll` est le seul alignement AMR fait ici. CONVENTION "pas d'ignore silencieux" appliquee
-   (revue adverse) : un modele declarant stability_speed/source_frequency/stability_dt est REJETE
-   explicitement par les dispatchers AMR ; les options Newton (adc.IMEX) et krylov_tol/max_iters
-   (adc.CondensedSchur) sont REJETEES par les facades AmrSystem (non transportees).
-2. **Polaire** : les bornes de pas optionnelles ne sont pas cablees sur le chemin polaire
-   (make_block_polar ne fabrique pas source_frequency/stability_dt ; fallback transport historique).
-   Polar reste Rusanov-only cote flux.
-3. **Aux** : toujours extensible PAR LISTE CANONIQUE (ADC_AUX_FIELDS + AUX_CANONICAL miroir Python),
-   pas d'auxiliaire arbitraire par modele.
-4. **Briques natives layout fluide** : source.hpp / elliptic.hpp lisent toujours u[0]/u[1]/u[2]
+1. **AMR** : pas de `ssprk3` ; coarse/fine suppose ratio 2 ; `set_conservative_state` multi-blocs
+   non cable ; `set_poisson` limite a geometric_mg + rhs charge_density|composite ; les OPTIONS
+   NEWTON (adc.IMEX) et krylov_tol/max_iters + descripteurs de roles (adc.CondensedSchur) restent
+   REJETES explicitement par les facades AmrSystem (iters=2 fige dans les fermetures AMR ; le
+   forwarding complet = plomberie binding + AmrRuntimeBlock + imex_advance, suivi dedie).
+2. **AMR Schur Phase 4** : composite limite a 2 niveaux + UN patch fin mono-box + mono-rang ;
+   multi-patch, > 2 niveaux, MPI, multi-blocs = Phase 4 (rejet explicite, perimetre documente
+   dans l'en-tete du stepper).
+3. **Polaire** : bornes de pas optionnelles NON cablees (transport max_wave_speed seul) ; flux
+   Rusanov seulement ; overrides de roles Schur rejetes ; Poisson direct mono-rang/mono-box ;
+   decoupage theta non expose par la facade.
+4. **Aux** : toujours extensible PAR LISTE CANONIQUE (ADC_AUX_FIELDS + AUX_CANONICAL miroir
+   Python), pas d'auxiliaire arbitraire par modele.
+5. **Briques natives layout fluide** : source.hpp / elliptic.hpp lisent toujours u[0]/u[1]/u[2]
    (documente "layout fluide canonique") ; pas de variantes role-aware.
-5. **IMEX-RK** : aucune famille ARK/IMEX-RK ; SourceImplicitBE est le seul schema implicite local.
-   Pas de Jacobien analytique fourni par le modele (differences finies seulement).
-6. **CoupledSource** : toujours explicite forward-Euler additif, capacites fixes (kCsMaxReg=32...),
-   pas de frequency()/dt_bound() sur les sources couplees DSL (la borne GLOBALE add_dt_bound sert
-   de contournement manuel).
-7. **Newton AMR / coupleurs** : les chemins AMR (amr_system_coupler, amr_subcycling) gardent
-   iters=2 via la surcharge de compatibilite ; options/diagnostics non plomb es sur AMR.
-8. **Backends** : la matrice de capacites par backend (prototype/aot/production x System/AMR) reste
-   a publier ; `compile(backend="aot")` reste le defaut (decision a trancher : passer a
-   "production" est un changement de comportement utilisateur).
-9. **check_model sur CompiledModel** : la verification porte sur les FORMULES (dsl.Model) et le
-   BLOC INSTALLE (System) ; un CompiledModel seul (sans son Model d'origine) n'est pas re-verifiable.
-10. **Sorties/checkpoint** : non implementees (plan seulement).
-11. **Roe generique** : volontairement NON tente (exigerait un contrat d'eigenstructure complet :
-    roe_average, eigenvectors, entropy fix par modele).
+6. **IMEX-RK** : aucune famille ARK/IMEX-RK ; SourceImplicitBE est le seul schema implicite local.
+   Pas de Jacobien ANALYTIQUE fourni par le modele (differences finies seulement ; le hook DSL
+   m.implicit_source(residual=, jacobian=) reste a faire).
+7. **CoupledSource** : toujours explicite forward-Euler additif, capacites fixes (kCsMaxReg=32...),
+   pas de frequency()/dt_bound() sur les sources couplees DSL (contournement : add_dt_bound).
+8. **Backends** : `compile(backend="aot")` reste le defaut (decision utilisateur a trancher ;
+   adc.capabilities() publie desormais la matrice) ; registry C++ des tags strings non factorisee
+   (les tables make_block / dispatch_amr_* / polar restent paralleles, alignees par tests).
+9. **check_model sur CompiledModel** : porte sur les FORMULES (dsl.Model) et le BLOC INSTALLE
+   (System) ; un CompiledModel seul (sans son Model d'origine) n'est pas re-verifiable.
+10. **IO** : v1 npz mono-rang System (write vtk/npz + checkpoint/restart bit-identique) ; HDF5
+    agrege/parallele, AMR et champs externes (B_z dans le checkpoint) = PR-IO-3 du plan.
+11. **HLLC/Roe capability cote DSL** : les hooks (contact_speed / hllc_star_state /
+    roe_dissipation) sont un contrat C++ ; le DSL ne les emet pas encore (m.contact_speed(...) /
+    m.roe_dissipation(...) = suivi).
