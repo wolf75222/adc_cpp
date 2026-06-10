@@ -17,6 +17,7 @@
 #include <adc/runtime/amr_runtime.hpp>  // AmrRuntimeBlock (registre multi-blocs type-erase)
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/block_builder.hpp>  // detail::make_poisson_rhs (rhs += elliptic_rhs(U))
+#include <adc/runtime/dispatch_tags.hpp>  // registry UNIQUE des tags (validate_limiter/riemann)
 
 #include <algorithm>  // std::find, std::sort (resolution du masque IMEX partiel d'un bloc compile)
 #include <functional>
@@ -546,6 +547,11 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                                    const std::vector<int>& implicit_components = {},
                                    const NewtonOptions& nopts = {},
                                    const std::vector<double>* state = nullptr) {
+  // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : memes tags acceptes /
+  // rejetes qu'avant, messages identiques. Le dispatch template if/else qui suit est INCHANGE ; les
+  // gardes de capabilite (hllc/roe : Euler 2D ou capability) restent des `if constexpr` PAR MODELE.
+  validate_riemann(riem, /*polar=*/false, "add_block(AmrSystem, multi-blocs)");
+  validate_limiter(lim, "add_block(AmrSystem, multi-blocs)");
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
@@ -559,7 +565,7 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
     if (lim == "weno5")
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state);
-    throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+    throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
   }
   if (riem == "hll") {
     // HLL : 2 ondes signees, generique des que le modele expose wave_speeds (PAS de pression ni
@@ -579,7 +585,7 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, HLLFlux>(m, S, name, density, has_density, gamma,
                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
-      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+      throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hll' exige des vitesses "
                                "d'onde signees (model.wave_speeds) ; ce transport -> 'rusanov'");
@@ -599,7 +605,13 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLCFlux>(m, S, name, density, has_density, gamma,
                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state);
-      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+      // weno5 : PARITE avec System::make_block (qui route hllc+weno5). Avant ce chantier la branche
+      // hllc AMR n'avait pas de cas weno5 -> "limiter inconnu" la ou System buildait : divergence de
+      // table corrigee (build_amr_block supporte Weno5, deja cable sur rusanov/hll).
+      if (lim == "weno5")
+        return build_amr_block<Model, Weno5, HLLCFlux>(m, S, name, density, has_density, gamma,
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
+      throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hllc' exige un transport "
                                "compressible (4 variables + pression)");
@@ -619,14 +631,18 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, RoeFlux>(m, S, name, density, has_density, gamma,
                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state);
-      throw std::runtime_error("add_block(AmrSystem, multi-blocs) : limiter inconnu '" + lim + "'");
+      // weno5 : PARITE avec System::make_block (qui route roe+weno5). Meme correction de divergence
+      // de table que la branche hllc ci-dessus.
+      if (lim == "weno5")
+        return build_amr_block<Model, Weno5, RoeFlux>(m, S, name, density, has_density, gamma,
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state);
+      throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'roe' exige un transport "
                                "compressible (4 variables + pression)");
     }
   }
-  throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux Riemann inconnu '" + riem +
-                           "' (rusanov|hll|hllc|roe)");
+  throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "flux", riem);
 }
 
 /// Dispatch du schema spatial (limiteur x flux Riemann) -> build_amr_compiled. Memes gardes que
@@ -634,6 +650,10 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
 template <class Model>
 AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
                                        const std::string& riem, const AmrBuildParams& bp) {
+  // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : memes tags acceptes /
+  // rejetes qu'avant. Dispatch template if/else INCHANGE ; gardes de capabilite hllc/roe par modele.
+  validate_riemann(riem, /*polar=*/false, "add_compiled_model(AmrSystem)");
+  validate_limiter(lim, "add_compiled_model(AmrSystem)");
   if (riem == "rusanov") {
     if (lim == "none") return build_amr_compiled<Model, NoSlope, RusanovFlux>(m, bp);
     if (lim == "minmod") return build_amr_compiled<Model, Minmod, RusanovFlux>(m, bp);
@@ -643,7 +663,7 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
     // regrid HERITE n_grow() (amr_regrid_finest : ngf = L[fk].U.n_grow()), donc le stencil 5 points
     // ne lit pas hors bornes. Cable sur AMR au MEME titre que none/minmod (rusanov uniquement).
     if (lim == "weno5") return build_amr_compiled<Model, Weno5, RusanovFlux>(m, bp);
-    throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+    throw_registry_dispatch_mismatch("add_compiled_model(AmrSystem)", "limiteur", lim);
   }
   if (riem == "hll") {
     // HLL : generique des que le modele expose wave_speeds (le DSL les emet des qu'une primitive
@@ -655,7 +675,7 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, HLLFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, HLLFlux>(m, bp);
       if (lim == "weno5") return build_amr_compiled<Model, Weno5, HLLFlux>(m, bp);
-      throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+      throw_registry_dispatch_mismatch("add_compiled_model(AmrSystem)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_compiled_model(AmrSystem) : flux 'hll' exige des vitesses "
                                "d'onde signees (model.wave_speeds : declarer une primitive 'p') ; "
@@ -670,7 +690,11 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
       if (lim == "none") return build_amr_compiled<Model, NoSlope, HLLCFlux>(m, bp);
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, HLLCFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, HLLCFlux>(m, bp);
-      throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+      // weno5 : PARITE avec System::make_block (qui route hllc+weno5). Avant ce chantier la branche
+      // hllc du chemin compile n'avait pas de cas weno5 (build_amr_compiled supporte pourtant Weno5,
+      // deja cable sur rusanov/hll) -> "limiter inconnu" la ou System buildait : divergence corrigee.
+      if (lim == "weno5") return build_amr_compiled<Model, Weno5, HLLCFlux>(m, bp);
+      throw_registry_dispatch_mismatch("add_compiled_model(AmrSystem)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_compiled_model(AmrSystem) : flux 'hllc' exige un transport "
                                "compressible (4 variables + pression)");
@@ -684,14 +708,16 @@ AmrCompiledHooks dispatch_amr_compiled(const Model& m, const std::string& lim,
       if (lim == "none") return build_amr_compiled<Model, NoSlope, RoeFlux>(m, bp);
       if (lim == "minmod") return build_amr_compiled<Model, Minmod, RoeFlux>(m, bp);
       if (lim == "vanleer") return build_amr_compiled<Model, VanLeer, RoeFlux>(m, bp);
-      throw std::runtime_error("add_compiled_model(AmrSystem) : limiter inconnu '" + lim + "'");
+      // weno5 : PARITE avec System::make_block (qui route roe+weno5). Meme correction de divergence
+      // de table que la branche hllc ci-dessus.
+      if (lim == "weno5") return build_amr_compiled<Model, Weno5, RoeFlux>(m, bp);
+      throw_registry_dispatch_mismatch("add_compiled_model(AmrSystem)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_compiled_model(AmrSystem) : flux 'roe' exige un transport "
                                "compressible (4 variables + pression)");
     }
   }
-  throw std::runtime_error("add_compiled_model(AmrSystem) : flux Riemann inconnu '" + riem +
-                           "' (rusanov|hll|hllc|roe)");
+  throw_registry_dispatch_mismatch("add_compiled_model(AmrSystem)", "flux", riem);
 }
 
 }  // namespace detail

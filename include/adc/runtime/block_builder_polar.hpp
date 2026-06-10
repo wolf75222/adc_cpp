@@ -11,6 +11,7 @@
 #include <adc/numerics/time/time_steppers.hpp>      // SSPRK2Step / SSPRK3Step (math RK du coeur)
 #include <adc/parallel/comm.hpp>                     // all_reduce_max (reduction collective MPI-safe)
 #include <adc/physics/bricks.hpp>                    // ExBVelocityPolar, CompositeModel, briques source/elliptic
+#include <adc/runtime/dispatch_tags.hpp>             // registry UNIQUE des tags (validate_limiter/riemann)
 #include <adc/runtime/grid_context.hpp>              // BlockClosures (en-tete leger)
 #include <adc/runtime/model_factory.hpp>             // detail::dispatch_source / dispatch_elliptic (REUTILISES)
 #include <adc/runtime/model_spec.hpp>
@@ -88,8 +89,15 @@ template <class Visitor>
 void dispatch_model_polar(const ModelSpec& m, Visitor&& visitor) {
   dispatch_transport_polar(m, [&](auto tr) {
     using TR = decltype(tr);
+    // Resolution AUTOMATIQUE par roles (audit §5), IDENTIQUE au cartesien (bind_variable_roles de
+    // model_factory.hpp). ExBVelocityPolar (densite=0) / IsothermalFluxPolar (rho=0, m_x=1, m_y=2,
+    // herite d'IsothermalFlux) declarent des roles canoniques -> indices resolus == defauts ->
+    // bit-identique. Resolu a la construction (hote) ; jamais en device.
+    const VariableSet cons = TR::conservative_vars();
     dispatch_source<TR::n_vars>(m, [&](auto src) {
       dispatch_elliptic(m, [&](auto ell) {
+        bind_variable_roles(src, cons);
+        bind_variable_roles(ell, cons);
         visitor(CompositeModel<TR, decltype(src), decltype(ell)>{tr, src, ell});
       });
     });
@@ -267,16 +275,16 @@ template <class Model>
 BlockClosures make_block_polar(const Model& m, const std::string& lim, const std::string& riem,
                                const PolarGridContext& ctx, bool recon_prim,
                                const std::string& method, bool wall_radial) {
-  if (riem != "rusanov")
-    throw std::runtime_error(
-        "System (polaire) : flux Riemann '" + riem +
-        "' non supporte (polaire -> 'rusanov' ; HLLC/Roe supposent n_vars==4 (Euler avec energie), "
-        "sans objet pour l'ExB scalaire ou le fluide isotherme polaire)");
+  // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : message polaire IDENTIQUE
+  // a l'ancien throw inline (seul rusanov est cable en polaire ; HLLC/Roe supposent n_vars==4). Le
+  // dispatch des limiteurs qui suit est INCHANGE ; son throw final devient une garde d'incoherence.
+  validate_riemann(riem, /*polar=*/true, "System (polaire)");
+  validate_limiter(lim, "System (polaire)");
   if (lim == "none") return build_block_polar<NoSlope, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);
   if (lim == "minmod") return build_block_polar<Minmod, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);
   if (lim == "vanleer") return build_block_polar<VanLeer, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);
   if (lim == "weno5") return build_block_polar<Weno5, RusanovFlux>(m, ctx, recon_prim, method, wall_radial);
-  throw std::runtime_error("System (polaire) : limiter inconnu '" + lim + "'");
+  throw_registry_dispatch_mismatch("System (polaire)", "limiteur", lim);
 }
 
 /// Fermeture de vitesse d'onde max du bloc POLAIRE (pour le pas CFL). @p aux pointe l'aux du System

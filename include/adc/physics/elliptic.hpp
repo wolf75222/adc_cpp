@@ -15,24 +15,33 @@ namespace adc {
 /// Densite de charge f = q n. Second membre elliptique du bloc ions ou electrons.
 ///
 /// CONTRAT : brique ELLIPTIQUE ponctuelle, device-callable (ADC_HD), aucun etat global.
-/// Lit uniquement u[0] (densite). Signe de q inclus (ion : q=+1, electron : q=-1).
+/// Lit uniquement la densite. Signe de q inclus (ion : q=+1, electron : q=-1).
+///
+/// ROLE-AWARE (audit §5) : c_rho membre, defaut = layout canonique (densite en composante 0), resolu
+/// par model_factory via TR::conservative_vars().index_of(Density). Canonique == defaut pour tout
+/// transport natif -> STRICTEMENT bit-identique. int POD -> rhs reste device-clean.
 struct ChargeDensity {
   Real q = 1;
+  int c_rho = 0;  // defaut = densite en composante 0 (bit-identique)
   template <class State>
   ADC_HD Real rhs(const State& u) const {
-    return q * u[0];
+    return q * u[c_rho];
   }
 };
 
 /// Fond neutralisant f = alpha (n - n0). Modelise un fond de neutralisation fixe de densite n0.
 ///
 /// CONTRAT : brique ELLIPTIQUE ponctuelle, device-callable (ADC_HD), aucun etat global.
-/// Lit uniquement u[0]. alpha = charge effective du fond ; n0 = densite du fond neutre.
+/// Lit uniquement la densite. alpha = charge effective du fond ; n0 = densite du fond neutre.
+///
+/// ROLE-AWARE (audit §5) : c_rho membre, defaut = composante 0, resolu par model_factory via le role
+/// Density du transport. Canonique == defaut -> bit-identique. Voir ChargeDensity.
 struct BackgroundDensity {
   Real alpha = 1, n0 = 0;
+  int c_rho = 0;  // defaut = densite en composante 0 (bit-identique)
   template <class State>
   ADC_HD Real rhs(const State& u) const {
-    return alpha * (u[0] - n0);
+    return alpha * (u[c_rho] - n0);
   }
 };
 
@@ -40,11 +49,15 @@ struct BackgroundDensity {
 ///
 /// CONTRAT : brique ELLIPTIQUE ponctuelle, device-callable (ADC_HD), aucun etat global.
 /// sign = +1 gravite (Poisson standard), sign = -1 plasma (signe de Gauss). rho0 = fond.
+///
+/// ROLE-AWARE (audit §5) : c_rho membre, defaut = composante 0, resolu par model_factory via le role
+/// Density du transport. Canonique == defaut -> bit-identique. Voir ChargeDensity.
 struct GravityCoupling {
   Real sign = 1, four_pi_G = 1, rho0 = 1;
+  int c_rho = 0;  // defaut = densite en composante 0 (bit-identique)
   template <class State>
   ADC_HD Real rhs(const State& u) const {
-    return sign * four_pi_G * (u[0] - rho0);
+    return sign * four_pi_G * (u[c_rho] - rho0);
   }
 };
 

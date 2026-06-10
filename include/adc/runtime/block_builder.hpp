@@ -11,6 +11,7 @@
 #include <adc/numerics/spatial_operator_eb.hpp>  // assemble_rhs_eb (cut-cell EB) + detail::DiscLevelSet (T5-PR2)
 #include <adc/numerics/time/implicit_stepper.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
+#include <adc/runtime/dispatch_tags.hpp>  // registry UNIQUE des tags (validate_limiter/riemann, limiter_n_ghost)
 #include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (en-tete leger partage)
 #include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (level set device-callable du disque)
 
@@ -318,12 +319,20 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
                          const std::vector<int>& implicit_components = {},
                          const NewtonOptions& newton_opts = {},
                          NewtonReport* newton_report = nullptr) {
+  // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : memes acceptations /
+  // rejets de tags qu'avant, messages identiques (validate_* reprend la formulation historique). Le
+  // dispatch if/else qui suit est INCHANGE (Limiter / Flux sont des types compile-time) ; ses throws
+  // finaux "limiter/flux inconnu" deviennent inatteignables -> remplaces par une garde d'incoherence
+  // registry/dispatch. Les gardes de CAPABILITE (hll/hllc/roe sur un modele sans onde / sans pression)
+  // restent des `if constexpr` PAR MODELE ci-dessous, avec leurs messages "exige ..." inchanges.
+  validate_riemann(riem, /*polar=*/false, "System");
+  validate_limiter(lim, "System");
   if (riem == "rusanov") {
     if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
     if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
     if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
     if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
-    throw std::runtime_error("System : limiter inconnu '" + lim + "'");
+    throw_registry_dispatch_mismatch("System", "limiteur", lim);
   }
   if (riem == "hll") {
     // HLL (Harten-Lax-van Leer, 2 ondes) : moins diffusif que Rusanov (dissipation ~ |sR-sL| signee au
@@ -341,7 +350,7 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
       if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
-      throw std::runtime_error("System : limiter inconnu '" + lim + "'");
+      throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
       throw std::runtime_error("System : flux 'hll' exige des vitesses d'onde signees "
                                "(model.wave_speeds : declarer une primitive 'p' / des eigenvalues) ; "
@@ -360,7 +369,7 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
       if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
-      throw std::runtime_error("System : limiter inconnu '" + lim + "'");
+      throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
       throw std::runtime_error("System : flux 'hllc' exige un transport compressible Euler 2D "
                                "(4 variables + pression) OU la capability HLLC du modele "
@@ -379,7 +388,7 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
       if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
       if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report);
-      throw std::runtime_error("System : limiter inconnu '" + lim + "'");
+      throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
       throw std::runtime_error("System : flux 'roe' exige un transport compressible Euler 2D "
                                "(4 variables + pression) OU la capability Roe du modele "
@@ -387,7 +396,7 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
                                "'hll'/'rusanov'");
     }
   }
-  throw std::runtime_error("System : flux Riemann inconnu '" + riem + "' (rusanov|hll|hllc|roe)");
+  throw_registry_dispatch_mismatch("System", "flux", riem);
 }
 
 /// Nombre de ghosts requis par le schema spatial @p lim (source unique : Limiter::n_ghost). Sert a
@@ -395,11 +404,15 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
 /// ne lise pas hors bornes -- cf. comment AmrSystem alloue avec Limiter::n_ghost (PR #22). Defaut 2
 /// (MUSCL) pour un limiteur inconnu : c'est l'allocation historique, donc bit-identique.
 inline int block_n_ghost(const std::string& lim) {
-  if (lim == "none") return NoSlope::n_ghost;
-  if (lim == "minmod") return Minmod::n_ghost;
-  if (lim == "vanleer") return VanLeer::n_ghost;
-  if (lim == "weno5") return Weno5::n_ghost;
-  return 2;  // fallback MUSCL (allocation historique ; le dispatch make_block levera sur un lim invalide)
+  // Source UNIQUE : limiter_n_ghost(lim) (registry dispatch_tags.hpp). Le defaut 2 (MUSCL) pour un
+  // limiteur inconnu est porte par le registry -> meme allocation historique, bit-identique. Les
+  // static_assert ci-dessous (cette TU voit ET le registry ET les types) garantissent que la table
+  // kLimiters ne derive jamais des constantes ::n_ghost reelles.
+  static_assert(limiter_n_ghost_ct("none") == NoSlope::n_ghost, "kLimiters[none].n_ghost derive");
+  static_assert(limiter_n_ghost_ct("minmod") == Minmod::n_ghost, "kLimiters[minmod].n_ghost derive");
+  static_assert(limiter_n_ghost_ct("vanleer") == VanLeer::n_ghost, "kLimiters[vanleer].n_ghost derive");
+  static_assert(limiter_n_ghost_ct("weno5") == Weno5::n_ghost, "kLimiters[weno5].n_ghost derive");
+  return limiter_n_ghost(lim);
 }
 
 namespace detail {

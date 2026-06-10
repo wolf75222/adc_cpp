@@ -196,8 +196,16 @@ manquait encore.
    mono-rang/mono-box (Schur tensoriel = multi-box) ; decoupage theta non expose par la facade.
 4. **Aux** : toujours extensible PAR LISTE CANONIQUE (ADC_AUX_FIELDS + AUX_CANONICAL miroir
    Python), pas d'auxiliaire arbitraire par modele.
-5. **Briques natives layout fluide** : source.hpp / elliptic.hpp lisent toujours u[0]/u[1]/u[2]
-   (documente "layout fluide canonique") ; pas de variantes role-aware.
+5. **Briques natives ROLE-AWARE (fait)** : source.hpp (PotentialForce / GravityForce /
+   MagneticLorentzForce) et elliptic.hpp (ChargeDensity / BackgroundDensity / GravityCoupling)
+   portent desormais des MEMBRES d'indices (c_rho / c_mx / c_my / c_E, entiers POD -> device-clean),
+   resolus A LA CONSTRUCTION (hote) par model_factory.hpp (bind_variable_roles) via
+   TR::conservative_vars().index_of(role). Resolution AUTOMATIQUE et transparente (aucun parametre
+   utilisateur nouveau). Defauts = layout fluide canonique -> pour tout transport NATIF (Euler /
+   Isothermal / ExB, roles canoniques) les indices resolus == les defauts -> STRICTEMENT bit-identique
+   (cable aussi en polaire, dispatch_model_polar). LIMITE : depuis l'API publique les briques natives
+   ne se composent qu'avec ces transports CANONIQUES ; un layout permute ne rencontre une brique native
+   que via un chemin C++ direct (verrou : detection `requires` du binder + registre des roles).
 6. **IMEX-RK** : aucune famille ARK/IMEX-RK ; SourceImplicitBE est le seul schema implicite local
    (le Jacobien analytique vague 3 en ameliore la robustesse, pas l'ordre).
 7. **CoupledSource** : toujours explicite forward-Euler additif, capacites fixes (kCsMaxReg=32...).
@@ -206,8 +214,16 @@ manquait encore.
    RESTE : la borne AMR ne voit pas une sous-estimation locale de mu sous un patch fin (evaluee sur
    le grossier, choix assume).
 8. **Backends** : `compile(backend="aot")` reste le defaut (decision utilisateur a trancher ;
-   adc.capabilities() publie la matrice) ; registry C++ des tags strings non factorisee
-   (les tables make_block / dispatch_amr_* / polar restent paralleles, alignees par tests).
+   adc.capabilities() publie la matrice). **Registry des tags FACTORISE (fait)** : la VALIDATION des
+   tags (limiteurs + flux de Riemann) et les n_ghost sont desormais une SOURCE UNIQUE
+   (include/adc/runtime/dispatch_tags.hpp : kLimiters / kRiemanns + validate_limiter / validate_riemann
+   / limiter_n_ghost). make_block, dispatch_amr_block, dispatch_amr_compiled et make_block_polar
+   valident D'ABORD via ce registre (messages historiques preserves, par contexte) ; leurs throws de
+   tag finaux deviennent une garde d'incoherence registry/dispatch. RESIDU : le DISPATCH lui-meme
+   reste un template if/else par call-site (les types Limiter / Flux sont compile-time, non tabulables
+   sans X-macro lourde) ; la table ne porte donc que les chaines + n_ghost, pas l'aiguillage de type.
+   Bug de divergence corrige au passage : les branches hllc / roe AMR ont gagne le cas weno5 (parite
+   stricte avec System).
 9. **check_model sur CompiledModel** : porte sur les FORMULES (dsl.Model) et le BLOC INSTALLE
    (System) ; un CompiledModel seul (sans son Model d'origine) n'est pas re-verifiable.
 10. **IO** : System mono-rang (npz/vtk/hdf5 via h5py) ; HDF5 agrege/PARALLELE multi-rangs,

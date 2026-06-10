@@ -35,18 +35,25 @@ struct NoSource {
 /// sur l'energie si 4 variables). E = -grad phi = -(aux.grad_x, aux.grad_y).
 ///
 /// CONTRAT : brique SOURCE ponctuelle, device-callable (ADC_HD), aucun etat global.
-/// Formule : s[1] += qom*rho*Ex, s[2] += qom*rho*Ey, s[3] += qom*(rho_u*Ex + rho_v*Ey)
-/// (le terme travail s[3] n'est actif que si State::size() == 4 : Euler compressible).
-/// Invariant : u[0] = rho (composante 0 = densite, indice stable entre briques).
+/// Formule : s[c_mx] += qom*rho*Ex, s[c_my] += qom*rho*Ey, s[c_E] += qom*(rho_u*Ex + rho_v*Ey)
+/// (le terme travail c_E n'est actif que si State::size() == 4 : Euler compressible).
+///
+/// ROLE-AWARE (audit §5) : les indices de composantes (densite c_rho, qdm c_mx/c_my, energie c_E)
+/// sont des MEMBRES, par defaut le layout fluide CANONIQUE (rho=0, m_x=1, m_y=2, E=3). model_factory
+/// les RESOUT a la construction (hote) via TR::conservative_vars().index_of(role) ; pour tout
+/// transport NATIF (Euler/Isothermal, roles canoniques) les indices resolus == ces defauts ->
+/// STRICTEMENT bit-identique. Entiers POD -> apply reste device-clean (lecture u[c_rho], jamais de
+/// resolution en device). Aucun parametre utilisateur nouveau : resolution automatique, transparente.
 struct PotentialForce {
   Real qom = 1;  // q/m (signe inclus)
+  int c_rho = 0, c_mx = 1, c_my = 2, c_E = 3;  // defauts = layout fluide canonique (bit-identique)
   template <class State>
   ADC_HD State apply(const State& u, const Aux& a) const {
     const Real Ex = -a.grad_x, Ey = -a.grad_y;
     State s{};
-    s[1] = qom * u[0] * Ex;
-    s[2] = qom * u[0] * Ey;
-    if constexpr (State::size() == 4) s[3] = qom * (u[1] * Ex + u[2] * Ey);
+    s[c_mx] = qom * u[c_rho] * Ex;
+    s[c_my] = qom * u[c_rho] * Ey;
+    if constexpr (State::size() == 4) s[c_E] = qom * (u[c_mx] * Ex + u[c_my] * Ey);
     return s;
   }
 };
@@ -54,17 +61,22 @@ struct PotentialForce {
 /// Force gravitationnelle rho g (+ travail si 4 variables). g = -grad phi.
 ///
 /// CONTRAT : brique SOURCE ponctuelle, device-callable (ADC_HD), aucun etat global.
-/// Formule : s[1] += rho*gx, s[2] += rho*gy, s[3] += rho_u*gx + rho_v*gy
-/// (le terme travail s[3] n'est actif que si State::size() == 4 : Euler compressible).
+/// Formule : s[c_mx] += rho*gx, s[c_my] += rho*gy, s[c_E] += rho_u*gx + rho_v*gy
+/// (le terme travail c_E n'est actif que si State::size() == 4 : Euler compressible).
 /// Pas de coefficient q/m (contrairement a PotentialForce) : g est la gravite directement.
+///
+/// ROLE-AWARE (audit §5) : c_rho/c_mx/c_my/c_E membres, defauts = layout canonique (rho=0, m_x=1,
+/// m_y=2, E=3), resolus par model_factory via les roles du transport. Indices canoniques == defauts
+/// pour tout transport natif -> bit-identique. Voir PotentialForce pour le contrat complet.
 struct GravityForce {
+  int c_rho = 0, c_mx = 1, c_my = 2, c_E = 3;  // defauts = layout fluide canonique (bit-identique)
   template <class State>
   ADC_HD State apply(const State& u, const Aux& a) const {
     const Real gx = -a.grad_x, gy = -a.grad_y;
     State s{};
-    s[1] = u[0] * gx;
-    s[2] = u[0] * gy;
-    if constexpr (State::size() == 4) s[3] = u[1] * gx + u[2] * gy;
+    s[c_mx] = u[c_rho] * gx;
+    s[c_my] = u[c_rho] * gy;
+    if constexpr (State::size() == 4) s[c_E] = u[c_mx] * gx + u[c_my] * gy;
     return s;
   }
 };
@@ -88,15 +100,20 @@ struct GravityForce {
 struct MagneticLorentzForce {
   Real qom = 1;             // q/m (signe inclus)
   static constexpr int n_aux = 4;  // lit B_z (canal aux extra, indice canonique 3)
+  // ROLE-AWARE (audit §5) : seules les composantes de QDM sont lues/ecrites (la force magnetique ne
+  // touche ni la densite ni l'energie -- travail nul). c_mx/c_my membres, defauts = layout canonique
+  // (m_x=1, m_y=2), resolus par model_factory via les roles du transport. Canonique == defauts ->
+  // bit-identique. Entiers POD -> device-clean.
+  int c_mx = 1, c_my = 2;
   template <class State>
   ADC_HD State apply(const State& u, const Aux& a) const {
     static_assert(State::size() >= 3,
                   "MagneticLorentzForce : exige un transport fluide >= 3 variables (qdm sur 2 axes)");
     const Real c = qom * a.B_z;
     State s{};
-    s[1] = c * u[2];   // +qom B_z m_(y/theta)
-    s[2] = -c * u[1];  // -qom B_z m_(x/r)
-    // s[3] (energie) reste 0 : v x B est perpendiculaire a v, travail nul.
+    s[c_mx] = c * u[c_my];   // +qom B_z m_(y/theta)
+    s[c_my] = -c * u[c_mx];  // -qom B_z m_(x/r)
+    // l'energie reste 0 : v x B est perpendiculaire a v, travail nul.
     return s;
   }
 };
