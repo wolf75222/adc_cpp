@@ -392,28 +392,13 @@ jobs:
           export PYTHONPATH="$PWD/build-kokkos-py/python"
           # Le test cle de regression + les suites production qui compilent un modele au runtime et
           # le branchent par add_native_block (System et AMR). Sous Kokkos, loader = c++20.
-          #
-          # TOLERANCE CIBLEE (issue #271) : test_dsl_production_amr passe TOUTES ses assertions
-          # ("tout est vert") puis le process abort (SIGABRT 134, free(): corrupted unsorted
-          # chunks) dans le TEARDOWN glibc -- fin de vie croisee module Kokkos + loader .so
-          # RTLD_GLOBAL + atexit Kokkos::finalize, premiere exposition en CI depuis la parite
-          # ADC_KOKKOS_ROOT. On accepte ce seul couple (test, rc=134) SI ET SEULEMENT SI la
-          # sortie contient le verdict vert, avec un ::warning:: visible ; tout autre echec
-          # reste fatal. A retirer avec le fix de #271.
+          # Le teardown est redevenu STRICT : le SIGABRT post-succes de test_dsl_production_amr
+          # (issue #271, arenes statiques des loaders detruites avant les finalize hooks Kokkos)
+          # est corrige a la racine (ManagedArena = singleton jamais detruit, allocator.hpp) --
+          # la tolerance ciblee rc=134 est retiree, tout echec redevient fatal.
           for t in test_native_abi_std test_dsl_production test_dsl_production_amr; do
             echo "::group::$t"
-            set +e
-            out=$(python3 "python/tests/$t.py" 2>&1); rc=$?
-            set -e
-            printf '%s\n' "$out"
-            if [ $rc -ne 0 ]; then
-              if [ "$t" = "test_dsl_production_amr" ] && [ $rc -eq 134 ] \
-                 && printf '%s' "$out" | grep -q "tout est vert"; then
-                echo "::warning::$t : assertions toutes vertes, SIGABRT au teardown tolere (issue #271)"
-              else
-                echo "::endgroup::"; exit $rc
-              fi
-            fi
+            python3 "python/tests/$t.py"
             echo "::endgroup::"
           done
 

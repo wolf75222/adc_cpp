@@ -92,9 +92,22 @@ static_assert(Kokkos::has_shared_space,
 /// release_all() manuellement.
 class ManagedArena {
  public:
+  // Singleton de DUREE DE VIE PROCESSUS, JAMAIS detruit (fuite intentionnelle d'un objet et de
+  // ses tables -- l'OS reclame tout a l'exit). POURQUOI pas une statique locale ordinaire (bug
+  // reel, issue #271, gdb sur CI glibc) : instance() est inline et le module pybind11 _adc est
+  // compile en visibilite HIDDEN -> chaque loader .so du DSL (dlopen, jamais decharge) possede SA
+  // copie de la statique (verifie par LD_DEBUG=bindings : tous les symboles ManagedArena du .so
+  // se lient au .so lui-meme). A l'exit, les destructeurs de ces copies (enregistres TARD, donc
+  // executes TOT, LIFO) detruisaient les tables AVANT le Kokkos::finalize de l'atexit du module
+  // (enregistre tot, execute tard), dont les finalize hooks rappelaient release_all() sur des
+  // arenes DETRUITES -> frees de pointeurs poubelle -> "free(): corrupted unsorted chunks" /
+  // SIGSEGV au teardown. Avec le singleton jamais detruit, l'instance reste valide a TOUT moment
+  // de la fin du process : plus aucune dependance a l'ordre des handlers d'exit. Les blocs du
+  // pool restent rendus a Kokkos par release_all (hook de finalize) ; seules les TABLES (maps de
+  // pointeurs) sont fuites, par construction.
   static ManagedArena& instance() {
-    static ManagedArena a;
-    return a;
+    static ManagedArena* a = new ManagedArena();
+    return *a;
   }
 
   void* allocate(std::size_t bytes) {
