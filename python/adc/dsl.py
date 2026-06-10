@@ -173,12 +173,22 @@ def _adc_module():
 
 def loader_cxx_compiler():
     """Chemin du compilateur qui a CONSTRUIT le module _adc (bake par CMake en __cxx_compiler__),
-    ou None s'il est inconnu (vieux module, build manuel) ou absent de cette machine."""
+    ou None s'il est inconnu (vieux module, build manuel) ou absent de cette machine.
+
+    macOS : CMake bake souvent le c++ INTERNE de la toolchain Xcode / CommandLineTools
+    (.../XcodeDefault.xctoolchain/usr/bin/c++), qui invoque clang SANS sysroot SDK -> tout .so
+    DSL echoue sur \"'string' file not found\". Le shim /usr/bin/c++ (xcrun) execute LE MEME
+    clang en resolvant le SDK : meme __VERSION__, donc meme cle d'ABI -- on prefere donc le shim
+    (piege et remede identiques a compile_loader des tests C++ natifs)."""
+    import sys
     mod = _adc_module()
     cc = getattr(mod, "__cxx_compiler__", "") if mod is not None else ""
-    if cc and os.path.isfile(cc) and os.access(cc, os.X_OK):
-        return cc
-    return None
+    if not (cc and os.path.isfile(cc) and os.access(cc, os.X_OK)):
+        return None
+    if sys.platform == "darwin" and (".xctoolchain/" in cc or "/CommandLineTools/" in cc) \
+            and os.path.isfile("/usr/bin/c++"):
+        return "/usr/bin/c++"
+    return cc
 
 
 def module_header_signature():
