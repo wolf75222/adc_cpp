@@ -2,14 +2,19 @@
 
 Date : 2026-06-11
 
-> **Statut (2026-06-12).** Plan revu par un panel multi-agent (vérification du code +
-> critique + vote). Verdict : **spike-first** — un gate de faisabilité (verrou device
-> Kokkos `SharedSpace` host==device ; justification de valeur face à un natif déjà plus
-> capable) doit être franchi avant tout codage lourd. Les 7 décisions ouvertes (§10) sont
-> tranchées à l'unanimité (CPU/MPI-first, `distribute_coarse=false`→erreur, interp C/F
-> constante, reflux adc gardé, FAC opt-in scalaire, regrid couverture/nesting, restart hors
-> scope). Suivi : milestone Linear « Backend AMR SAMRAI », épic gate **ADC-126** ; document
-> de décision à produire dans `SAMRAI_BACKEND_DECISION.md` (ADC-130).
+**Statut (2026-06-12).** Plan revu par un panel multi-agent (vérification du code +
+> critique + vote). Verdict : **spike-first** — un gate doit être franchi avant tout codage
+> lourd : (1) **faisabilité technique** (verrou device Kokkos `SharedSpace` host==device →
+> v1 CPU/MPI-only) ; (2) **preuve de la valeur visée = scaling** (point de croisement chiffré
+> natif vs SAMRAI : SAMRAI lève les plafonds coarse-répliqué / `DistributionMapping`
+> round-robin / collectives globales ; le natif reste plus capable côté *physique*
+> elliptique aniso/Schur). Les 7 décisions ouvertes (§10) sont tranchées à l'unanimité
+> (CPU/MPI-first, `distribute_coarse=false`→erreur, interp C/F constante, reflux adc gardé,
+> regrid couverture/nesting, restart hors scope). **Conséquence** : l'elliptique distribué
+> (HYPRE/FAC scalaire) est *scaling-critique* — poteau long, pas optionnel ; M8 = palier de
+> parité seulement. Suivi : milestone Linear « Backend AMR SAMRAI » — gate **ADC-126**,
+> valeur **ADC-130**, benchmark scaling **ADC-162** ; décision dans
+> `SAMRAI_BACKEND_DECISION.md`.
 
 Objectif : brancher SAMRAI comme backend AMR optionnel dans `adc_cpp`, sans casser les API
 publiques C++/Python existantes ni les tests de parite du backend natif.
