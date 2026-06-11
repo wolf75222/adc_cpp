@@ -158,6 +158,13 @@ if(ADC_USE_KOKKOS)
   target_link_libraries(adc INTERFACE Kokkos::kokkos)
   target_compile_definitions(adc INTERFACE ADC_HAS_KOKKOS)
   set(ADC_HAS_KOKKOS ON)
+  # Pool Ninja taille 1 partage par les cibles a TU geante du module (python/_adc,
+  # bench/scaling_amr) : serialisation anti-OOM de leurs compiles sous Kokkos, cf.
+  # python/CMakeLists.txt. Declare ICI et UNE SEULE fois : un nom de pool duplique dans la
+  # propriete GLOBALE JOB_POOLS rend build.ninja invalide ("ninja: error: duplicate pool").
+  # Les consommateurs ne posent que JOB_POOL_COMPILE. (tests/ garde son pool distinct
+  # adc_heavy_tu, declare dans tests/CMakeLists.txt.)
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_module_tu=1)
   message(STATUS "Kokkos found : for_each_cell dispatch backend = Kokkos (${Kokkos_DEVICES})")
   if(ADC_USE_OPENMP)
     message(STATUS "  note: OpenMP aussi actif ; le seam for_each_cell donne la priorite a Kokkos")

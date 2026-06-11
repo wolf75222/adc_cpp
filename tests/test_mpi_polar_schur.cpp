@@ -210,6 +210,10 @@ static double err_l2_global(const MultiFab& phi, const PolarGeometry& g, Problem
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
+  // Code de sortie : declare AVANT le scope accolade Kokkos (il est lu par le return APRES la
+  // fermeture du scope). Le declarer dedans ne compile pas des que ADC_HAS_KOKKOS est defini
+  // (cas MPI + Kokkos) -- defaut invisible tant que le job MPI compilait sans Kokkos.
+  long fails = 0;
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
   {
@@ -219,7 +223,6 @@ int main(int argc, char** argv) {
   Box2D dom = Box2D::from_extents(nr, nth);
   PolarGeometry g{dom, kRmin, kRmax};
 
-  long fails = 0;
   auto chk = [&](bool c, const char* w) {
     if (!c) { if (me == 0) std::printf("  ECHEC %s (np=%d)\n", w, np); ++fails; }
   };

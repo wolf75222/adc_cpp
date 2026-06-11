@@ -30,8 +30,9 @@ endfunction()
 # C'est la garantie STRUCTURELLE contre l'OOM (la cause racine = somme de DEUX TU lourdes concurrentes sous
 # --parallel 2). Avec -O0 + ce pool, le pic memoire est borne par UNE seule TU lourde -O0 (~qq Go) + au plus
 # une TU normale non capee de l'autre slot ninja : largement sous les ~7 Go du runner, quel que soit
-# l'ordonnancement. Honore par le generateur Ninja (la CI) ; ignore sans effet par Make. La propriete GLOBALE
-# JOB_POOLS n'est definie nulle part ailleurs (verifie) -> pas de clobber.
+# l'ordonnancement. Honore par le generateur Ninja (la CI) ; ignore sans effet par Make. APPEND sur la
+# propriete GLOBALE JOB_POOLS (le CMakeLists racine y declare aussi adc_heavy_module_tu, nom DISTINCT :
+# chaque pool ne doit etre declare qu'UNE fois, sinon "ninja: error: duplicate pool").
 set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_tu=1)
 
 function(adc_cap_opt_for_kokkos_ram target)

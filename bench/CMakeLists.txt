@@ -33,6 +33,13 @@ target_link_libraries(scaling_step PRIVATE adc::adc)
 add_executable(scaling_amr scaling_amr.cpp ${CMAKE_SOURCE_DIR}/python/amr_system.cpp)
 target_link_libraries(scaling_amr PRIVATE adc::adc)
 target_include_directories(scaling_amr PRIVATE ${CMAKE_SOURCE_DIR}/python)
+# RAM CI : amr_system.cpp est une des TU geantes du module (cf. python/CMakeLists.txt) ; sous
+# Kokkos a -O3 sa compile pese plusieurs GB. Meme pool serie taille 1 que le module (declare
+# dans le CMakeLists racine, bloc Kokkos) pour qu'un build bench+python ne puisse pas cumuler
+# deux geants en parallele sur un runner CI.
+if(ADC_HAS_KOKKOS)
+  set_target_properties(scaling_amr PROPERTIES JOB_POOL_COMPILE adc_heavy_module_tu)
+endif()
 
 foreach(perf_tgt frontend_cpp scaling_step scaling_amr)
   if(ADC_BUILD_SHA)

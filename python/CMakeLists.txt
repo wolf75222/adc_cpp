@@ -28,6 +28,22 @@ endif()
 target_link_libraries(_adc PRIVATE adc::adc ${CMAKE_DL_LIBS})  # dl : add_dynamic_block (dlopen)
 target_compile_features(_adc PRIVATE cxx_std_${ADC_CXX_STD})
 
+# RAM CI : sous Kokkos, cc1plus a -O3 sur les TU geantes du module (system.cpp / amr_system.cpp =
+# facades completes, briques + AMR instanciees) pese plusieurs GB CHACUNE ; des que DEUX compilent
+# en parallele (preset ci-kokkos-python, jobs: 2), le runner GitHub est tue par famine memoire
+# ("runner received a shutdown signal", exit 143). Cas reel post vague ADC-63..71 (job "Kokkos
+# (OpenMP)", step build du module) : bindings.cpp sort du ccache en ~20 s, puis system.cpp et
+# amr_system.cpp partent ENSEMBLE (jobs: 2, miss ccache) et le runner meurt ~9 min plus tard --
+# la veille, la meme paire concurrente passait encore (runs verts a 15-23 min) : la vague a fait
+# deborder le pic cumule. On serialise donc les compiles DU MODULE par un pool Ninja taille 1
+# (declare dans le CMakeLists racine, bloc Kokkos), pattern adc_heavy_tu de tests/CMakeLists.txt.
+# -O3 est CONSERVE : c'est le module de production, seule la CONCURRENCE change (binaire
+# identique). Scope ADC_HAS_KOKKOS : hors Kokkos les TU sont bien plus legeres, on garde le build
+# local parallele. Sans effet hors generateur Ninja (JOB_POOL_COMPILE y est ignore).
+if(ADC_HAS_KOKKOS)
+  set_target_properties(_adc PROPERTIES JOB_POOL_COMPILE adc_heavy_module_tu)
+endif()
+
 # Norme C++ du LOADER baked dans le module : le DSL backend="production" doit compiler le modele
 # natif avec EXACTEMENT cette norme, sinon __cplusplus diverge -> cle d'ABI differente -> rejet par
 # add_native_block. ADC_CXX_STD vaut 20 sous Kokkos (CUDA 12.x sans -std=c++23) et 23 sinon (cf.
