@@ -395,9 +395,8 @@ Dans le repo, "MPI" et "Kokkos" sont deux axes differents :
 
 | Nom court | Build | Ce que ca valide |
 |---|---|---|
-| Serie CPU | `ADC_USE_MPI=OFF`, `ADC_USE_KOKKOS=OFF` | reference hote, boucle sequentielle. |
-| MPI CPU | `ADC_USE_MPI=ON`, `ADC_USE_KOKKOS=OFF` | decomposition par rangs/processus, halos, reductions, rangs sans donnees. |
-| Kokkos CPU Serial | `ADC_USE_KOKKOS=ON` avec device Serial | meme code Kokkos, mais CPU mono-thread ; bon garde-fou CI. |
+| MPI CPU | `ADC_USE_MPI=ON`, device Kokkos Serial/OpenMP | decomposition par rangs/processus, halos, reductions, rangs sans donnees. |
+| Kokkos CPU Serial | `ADC_USE_KOKKOS=ON` avec device Serial | seul backend on-node en mono-thread ; reference et garde-fou CI. |
 | Kokkos CPU OpenMP | `ADC_USE_KOKKOS=ON` avec device OpenMP | parallelisme local CPU multi-thread via Kokkos. |
 | Kokkos GPU | `ADC_USE_KOKKOS=ON` avec device Cuda/HIP | kernels cellules sur GPU, souvent `np=1`. |
 | MPI + Kokkos CPU | `ADC_USE_MPI=ON`, `ADC_USE_KOKKOS=ON`, device Serial/OpenMP | MPI entre rangs + execution locale Kokkos CPU. |
@@ -419,20 +418,22 @@ rang MPI 1 -> kernels Kokkos sur CPU/GPU local
 
 Ce qui semble deja en place :
 
-- options CMake separees : `ADC_USE_MPI` et `ADC_USE_KOKKOS` ;
+- axe MPI optionnel (`ADC_USE_MPI`) et axe on-node Kokkos obligatoire (`ADC_USE_KOKKOS` ON par
+  defaut ; configurer avec OFF est une erreur fatale CMake) ;
 - `for_each_cell` / reductions Kokkos pour les boucles locales ;
 - `comm.hpp` pour rangs, barriers, all-reduce ;
 - halos MPI dans `fill_boundary`, avec tampons en memoire unifiee sous Kokkos ;
 - harnais GPU sous `python/tests/gpu/`, dont des cas MPI + Kokkos Cuda ;
-- CI reguliere couvrant au minimum Release, MPI CPU et Kokkos Serial.
+- CI reguliere couvrant au minimum Kokkos Serial (gate PR) et, en mode complet, MPI + Kokkos Serial
+  et Kokkos OpenMP.
 
 Ce qui reste a rendre systematique :
 
 - un tableau de couverture par sous-systeme, pas seulement par PR ;
-- des labels CTest par backend (`serial`, `mpi`, `kokkos-serial`, `kokkos-openmp`,
+- des labels CTest par backend (`mpi`, `kokkos-serial`, `kokkos-openmp`,
   `kokkos-cuda`, `mpi-kokkos-cuda`) ;
-- une validation Kokkos OpenMP CPU explicite, car elle n'est pas strictement identique a Kokkos
-  Serial ni au backend OpenMP historique ;
+- une validation Kokkos OpenMP CPU explicite, car son espace d'execution n'est pas strictement
+  identique a Kokkos Serial (reassociation des reductions par tuile) ;
 - une validation device-MPI reguliere sur ROMEO/GH200, au moins nightly ou manuelle standardisee.
 
 ### 8.3 Matrice de validation par couche
@@ -455,14 +456,14 @@ Ce qui reste a rendre systematique :
 1. **Inventaire tests/backend**
    - Ajouter ou verifier des labels CTest.
    - Produire un tableau `docs/BACKEND_COVERAGE.md` :
-     `test -> serial/MPI/Kokkos Serial/Kokkos OpenMP/Kokkos Cuda/MPI+Cuda`.
+     `test -> Kokkos Serial/MPI CPU/Kokkos OpenMP/Kokkos Cuda/MPI+Cuda`.
    - Marquer les tests qui s'auto-skip sous Kokkos ou MPI, pour eviter les faux verts.
 
 2. **Kokkos CPU OpenMP**
    - Ajouter une configuration de build Kokkos OpenMP.
    - Lancer les tests de base : `for_each`, reductions, `MultiFab`, `fill_boundary`, `System`,
      `GeometricMG`, `advance_amr`.
-   - Comparer aux resultats serie avec tolerance numerique, pas forcement bit-identique.
+   - Comparer aux resultats Kokkos Serial avec tolerance numerique, pas forcement bit-identique.
 
 3. **MPI + Kokkos CPU**
    - Build combine `ADC_USE_MPI=ON` + `ADC_USE_KOKKOS=ON` avec device Serial puis OpenMP.
@@ -509,11 +510,10 @@ Un chemin "valide" doit preciser :
 
 Qualite minimale pour merger une feature backend :
 
-1. test serie ou CPU de reference ;
-2. test Kokkos Serial ;
-3. test MPI CPU si le code touche `MultiFab`, halos, reductions ou AMR ;
-4. test Cuda ou justification explicite si le code est appele depuis un chemin device ;
-5. pas de callback Python cellule par cellule dans le hot path.
+1. test Kokkos Serial de reference ;
+2. test MPI CPU si le code touche `MultiFab`, halos, reductions ou AMR ;
+3. test Cuda ou justification explicite si le code est appele depuis un chemin device ;
+4. pas de callback Python cellule par cellule dans le hot path.
 
 ## 9. Audit de la documentation
 
@@ -610,7 +610,7 @@ Pour eviter les divergences :
    - Corriger les phrases "AMR pas IMEX" pour tenir compte de #132.
 
 2. **Creer `docs/BACKEND_COVERAGE.md`**
-   - Tableau par test/groupe : Serie, MPI CPU, Kokkos Serial, Kokkos OpenMP, Kokkos Cuda,
+   - Tableau par test/groupe : Kokkos Serial, MPI CPU, Kokkos OpenMP, Kokkos Cuda,
      MPI + Kokkos Cuda.
    - Noter quels tests sont CI, quels tests sont ROMEO manuels, quels tests self-skip.
 

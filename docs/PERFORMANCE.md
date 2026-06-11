@@ -43,23 +43,25 @@ de la convergence). Cout : couplage 1er ordre au lieu de 2e. Accessible via la
 `CouplingPolicy` du coeur : `OncePerStepCoupling` au lieu de `PerStage`
 (`coupling/coupling_policy.hpp`).
 
-### 2. OpenMP par-kernel : PERDANT ici (ne pas activer tel quel)
+### 2. Multi-thread par-kernel (espace Kokkos OpenMP) : PERDANT ici
 
-| build | 1 thread | 4 threads | 8 threads |
+| espace Kokkos | 1 thread | 4 threads | 8 threads |
 | --- | --- | --- | --- |
-| OpenMP (PerStage) | 100 | 91 | 119 |
+| Kokkos OpenMP (PerStage) | 100 | 91 | 119 |
 
-A comparer aux **52 ms en serie sans OpenMP**. Deux raisons, confirmees a la mesure :
+A comparer aux **52 ms en Kokkos Serial**. Deux raisons, confirmees a la mesure :
 - l'outlining de chaque `for_each_cell` en region parallele **casse l'inlining** des
-  boucles chaudes (1 thread OpenMP = 2x plus lent que la serie pure) ;
+  boucles chaudes (Kokkos OpenMP a 1 thread = 2x plus lent que Kokkos Serial) ;
 - la multigrille est **memory-bound et latency-bound** (parcours sequentiel des
   niveaux, GS red-black), mauvais candidat pour du fork/join par noyau.
 
 Sans garde-fou, c'etait **x47 plus lent** (fork/join de 8 threads sur des boites 2x2
-des niveaux grossiers). Corrige : `for_each_cell` porte une clause
-`#pragma omp parallel for if (n_cells >= 4096)` -> serie sous le seuil. OpenMP n'est
-toujours pas un gain ici, mais n'est plus un piege. Le bon grain serait de
-paralleliser AU-DESSUS de la boucle de niveaux (region consolidee), pas par noyau.
+des niveaux grossiers). Corrige : `for_each_cell` bascule sur une boucle hote
+sequentielle (sous l'espace Kokkos hote) en-dessous d'un seuil de mailles -> pas de
+fork/join pour les boites minuscules. Cette bascule est INTERNE au chemin Kokkos.
+Kokkos OpenMP n'est toujours pas un gain ici, mais n'est plus un piege. Le bon grain
+serait de paralleliser AU-DESSUS de la boucle de niveaux (region consolidee), pas par
+noyau.
 
 ## Poisson par FFT pour le periodique : FAIT, ~5x
 
@@ -86,7 +88,7 @@ OncePerStep.
 ## Banc `bench_amr` : deux-fluides AP + coupleur AMR multi-patch
 
 `examples/bench_amr.cpp`, chronometre sans I/O (M1 Pro, 8 coeurs = 6 perf + 2 efficiency,
-Release -O3 -DNDEBUG, backend OpenMP). Run : `OMP_NUM_THREADS=k ./build-omp/bin/bench_amr n nsteps`.
+Release -O3 -DNDEBUG, espace Kokkos OpenMP). Run : `OMP_NUM_THREADS=k ./build-omp/bin/bench_amr n nsteps`.
 
 **Deux-fluides AP mono-grille** (2 especes Rusanov + continuite + Poisson multigrille).
 Le scaling OpenMP DEPEND DE LA TAILLE :

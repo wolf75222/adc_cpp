@@ -3,8 +3,8 @@
 ///
 /// Free functions a portee de namespace (meme raison que detail:: dans coupler.hpp : seam GPU, un
 /// lambda etendu ne peut pas vivre dans une methode privee). amr_mass_mb passe par le seam reducteur
-/// (for_each_cell_reduce_sum : vraie reduction device sous Kokkos, boucle hote lexicographique en
-/// serie/OpenMP, bit-identique sur ces backends). amr_max_drift_speed_mb reste une boucle hote
+/// (for_each_cell_reduce_sum : vraie reduction Kokkos, Kokkos::Sum reassociee par tuile --
+/// deterministe/idempotent). amr_max_drift_speed_mb reste une boucle hote
 /// (std::hypot non confirme device sous nvcc ; le router casserait le dernier bit). Les variantes
 /// mono-box (...) se ramenent aux variantes _mb (un seul fab couvrant le domaine, bit a bit). AUCUNE
 /// reduction MPI ici : le coupleur decide d'all_reduce selon sa politique d'ownership.
@@ -24,8 +24,8 @@
 // seam GPU, un lambda etendu ne peut pas vivre dans une methode privee).
 //
 // amr_mass passe par le seam reducteur (for_each_cell_reduce_sum) : vraie reduction
-// device sous Kokkos, boucle hote lexicographique (j externe, i interne) en serie /
-// OpenMP, donc bit-identique a l'ancienne somme sur ces backends (cf. for_each.hpp).
+// Kokkos (Kokkos::Sum), reassociee par tuile -- deterministe/idempotent mais pas
+// bit-identique a une somme lexicographique ecrite a la main (cf. for_each.hpp).
 // amr_max_drift_speed reste une boucle hote : son noyau utilise std::hypot, dont
 // l'appelabilite device sous Kokkos/nvcc n'est pas verifiee ici, et le remplacer par
 // sqrt(gx^2+gy^2) changerait le dernier bit. A router par le seam APRES confirmation

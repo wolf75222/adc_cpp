@@ -42,7 +42,7 @@ validations device GH200 : [GPU_RUNTIME_PORT.md](GPU_RUNTIME_PORT.md). Reference
 - [21. Canal aux extensible](#21-canal-aux-extensible)
 - [22. Composition runtime et systeme multi-especes](#22-composition-runtime-et-systeme-multi-especes)
 - [23. DSL symbolique : codegen, JIT, AOT](#23-dsl-symbolique--codegen-jit-aot)
-- [24. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)](#24-le-seam-de-dispatch-serie--openmp--kokkos--mpi)
+- [24. Le seam de dispatch (Kokkos : Serial / OpenMP / Cuda / MPI)](#24-le-seam-de-dispatch-kokkos--serial--openmp--cuda--mpi)
 - [25. Capacites a qualifier (presentes mais limitees, ou hors master)](#25-capacites-a-qualifier-presentes-mais-limitees-ou-hors-master)
 - [Quel schema ou solveur quand](#quel-schema-ou-solveur-quand)
 - [References](#references)
@@ -103,7 +103,7 @@ garde par le concept `DiffusiveModel`) s'ajoute, soit en differences centrees 5 
 ```
 function assemble_rhs(model, U, aux, geom, R, recon_prim):   # R = -div Fhat + S
     dx, dy = geom.dx(), geom.dy()
-    for box li in U:                                          # seam for_each_cell : serie / OpenMP / Kokkos
+    for box li in U:                                          # seam for_each_cell : Kokkos (Serial / OpenMP / Cuda)
         for each valid cell (i, j):
             Ac  = load_aux(aux, i, j)                         # [phi, grad_x, grad_y, extra...]
             # face x gauche (i-1/2) et droite (i+1/2)
@@ -1453,7 +1453,7 @@ si `n_ranks() > 1` ou `ba.size() != 1`, leve sur tous les rangs (pas d'interbloc
 (diocotron = peu de modes azimutaux), `dtheta` n'intervient pas dans la valeur propre. Le tridiag est
 diagonale-dominant (terme azimutal $\le 0$, BC repliees) -> Thomas stable sans pivotage. La residence
 hote du RHS est synchronisee (`sync_host`) avant toute lecture hote (kernel device eventuellement en
-vol ; no-op en serie/OpenMP, `device_fence` cible sous Kokkos Cuda). PolarTensorKrylovSolver :
+vol ; no-op sous espace Kokkos hote (Serial/OpenMP), `device_fence` cible sous Kokkos Cuda). PolarTensorKrylovSolver :
 RadialLine $\sim$ nombre d'iterations a croissance moderee (isotrope $\times 2$ par doublement de grille,
 tenseur $\times 2.4$) ; Jacobi croit en $1/h^2$ (sanity check / repli). Le terme croise et le couplage
 azimutal ne sont pas dans le preconditionneur (limite honnete, raffinement ulterieur possible).
@@ -2018,51 +2018,52 @@ type-erased, recon, roles, aux). Sur GH200, le chemin a foncteurs nommes est val
 (GPU_RUNTIME_PORT.md, phase 9) ; `add_compiled_model` a lambdas etendues bute encore sur une limite
 nvcc (phase 8).
 
-## 24. Le seam de dispatch (serie / OpenMP / Kokkos / MPI)
+## 24. Le seam de dispatch (Kokkos : Serial / OpenMP / Cuda / MPI)
 
 **Intuition.** Pas un algorithme numerique mais le point de bascule qui les rend tous portables.
-`for_each_cell(box, f)` dispatche la boucle sur les cellules d'une `Box2D` vers serie, OpenMP, ou
-Kokkos selon le backend choisi A LA compilation ; les operateurs (assemble_rhs, V-cycle, coupleurs)
-ne voient jamais le backend et on n'ecrit aucun kernel CUDA a la main. Detail dans
+`for_each_cell(box, f)` dispatche la boucle sur les cellules d'une `Box2D` vers Kokkos, seul backend
+on-node ; l'espace d'execution (Serial sequentiel, OpenMP multi-thread, Cuda/HIP GPU) se choisit A
+L'INSTALLATION DE KOKKOS, pas par un drapeau adc. Les operateurs (assemble_rhs, V-cycle, coupleurs)
+ne voient jamais l'espace d'execution et on n'ecrit aucun kernel CUDA a la main. Detail dans
 [ARCHITECTURE.md](ARCHITECTURE.md) section 4 (couche execution).
 
 **Formule / discretisation.** Le foncteur `f(i, j)` est pris par valeur et ne capture que des
 handles `Array4` (POD), jamais le `Fab` ni rien de virtuel : exactement la contrainte d'un kernel
-device. Sous Kokkos il devient `parallel_for(MDRangePolicy<Rank<2>, IndexType<int>>)` (indices
-signes pour les boites de ghosts a bornes negatives) ; sous OpenMP `#pragma omp parallel for
-collapse(2)` ; sinon une double boucle sequentielle. Bit-identite : `for_each_cell` n'a aucune
+device. Il devient toujours `Kokkos::parallel_for(MDRangePolicy<Rank<2>, IndexType<int>>)` (indices
+signes pour les boites de ghosts a bornes negatives), instancie pour l'espace d'execution Kokkos
+choisi a l'install (Serial, OpenMP ou Cuda/HIP) ; aucun `#pragma omp` ni double boucle ecrite a la
+main n'est un chemin de production. Bit-identite : `for_each_cell` n'a aucune
 dependance inter-iteration (chaque `f(i,j)` ecrit la seule cellule `(i,j)` et lit des cellules qu'il
 n'ecrit pas dans le meme appel : smoother GS rouge-noir, residu/restriction/prolongation ecrivent
 une destination distincte), donc le resultat est independant de l'ordre. Les reductions portent un
-choix FP : la somme Kokkos reassocie l'addition (non associative en IEEE754), donc `sum` n'est pas
-bit-identique a la boucle hote sous Kokkos ; serie et OpenMP gardent la boucle sequentielle (pas de
-`reduction(+:)`) donc restent exacts. Le max est exact partout (associatif/commutatif, sans
-arrondi). Un seuil `ADC_FOREACH_SERIAL_THRESHOLD` (defaut 4096 cellules) bascule en serie les
+choix FP : la somme `Kokkos::Sum` reassocie l'addition par tuile (non associative en IEEE754), donc
+`sum` est deterministe/idempotent (memes donnees, meme espace Kokkos -> memes bits) mais n'est PAS
+bit-identique a une somme lexicographique ecrite a la main, et ceci vaut pour TOUS les espaces (Serial,
+OpenMP, Cuda) puisqu'il n'y a qu'un seul chemin Kokkos. Le max est exact partout (associatif/commutatif,
+sans arrondi). Un seuil `ADC_FOREACH_SERIAL_THRESHOLD` (defaut 4096 cellules) bascule sur une petite
+boucle hote sequentielle (optimisation INTERNE au chemin Kokkos, pas un backend separe) les
 petites boites (niveaux grossiers du V-cycle ~2x2..32x32) ou le fork/join ecraserait le calcul, mais
 uniquement si l'espace d'execution Kokkos par defaut est l'espace hote (`if constexpr` : sur device,
 parallel_for quelle que soit la taille, sinon course de donnees).
 
 ```
-function for_each_cell(box b, f):                    # for_each.hpp
-    if Kokkos and DefaultExecSpace == DefaultHostExecSpace:   # if constexpr
+function for_each_cell(box b, f):                    # for_each.hpp  (#error sans ADC_HAS_KOKKOS)
+    if DefaultExecSpace == DefaultHostExecSpace:     # if constexpr (espace Kokkos hote)
         if (b.nx * b.ny) < foreach_serial_threshold():
-            for j in b: for i in b: f(i, j)          # boucle hote, bit-identique
+            for j in b: for i in b: f(i, j)          # petite boucle hote, INTERNE au chemin Kokkos
             return
-    if Kokkos:  parallel_for( MDRangePolicy<Rank<2>, IndexType<int>>(lo, hi+1), f )
-    elif OpenMP: #pragma omp parallel for collapse(2) if(nx*ny >= 4096)
-                 for j: for i: f(i, j)
-    else:        for j: for i: f(i, j)
+    Kokkos::parallel_for( MDRangePolicy<Rank<2>, IndexType<int>>(lo, hi+1), f )  # Serial/OpenMP/Cuda
 
 function for_each_cell_reduce_sum(b, f):             # Kokkos::Sum deterministe par tuile
-    Kokkos:  parallel_reduce(..., acc += f(i,j), Sum<Real>)   # non bit-id a la serie
-    else:    acc = 0 ; for j: for i: acc += f(i, j)           # serie/OpenMP exacts
+    Kokkos::parallel_reduce(..., acc += f(i,j), Sum<Real>)   # reassocie : non bit-id a une somme lexicographique
 
 function sync_host():  device_fence()                # avant un acces hote (memoire unifiee)
 function sync_device(): pass                          # no-op sous SharedSpace (scaffolding)
 ```
 
-**Code.** [`mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp) : `for_each_cell` (dispatch
-Kokkos / OpenMP / serie, garde `if constexpr` device, seuil `foreach_serial_threshold`),
+**Code.** [`mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp) : `for_each_cell` (`Kokkos::parallel_for`
+sur l'espace d'execution choisi a l'install, `#error` sans `ADC_HAS_KOKKOS`, garde `if constexpr` device,
+seuil `foreach_serial_threshold` pour la petite boucle hote interne),
 `for_each_cell_reduce_sum` / `_max` (reducteurs `Kokkos::Sum` / `Max` deterministes), les variantes
 a foncteur reducteur `reduce_sum_cell` / `reduce_max_cell` (passees directement a `parallel_reduce`
 sans lambda d'enveloppe, chemin device-clean cross-TU pour un noyau Model-template), et le seam de
@@ -2073,17 +2074,17 @@ Les fabs et la reduction `sum(MultiFab)` (all-reduce sur tous les rangs) vivent 
 `all_reduce_sum_inplace`, `all_reduce_or_inplace`, `barrier`, `comm_init` / `comm_finalize`), qui
 degenerent en identite serie.
 
-**Contraintes / remarques.** Le passage CPU -> GPU ne change aucun site d'appel : on remplace le
-backend ici, la physique reste inchangee. Le foncteur doit etre device-callable sous Kokkos (annote
-`ADC_HD`, capture des POD par valeur) ; capturer un objet a vtable ou un `Fab` casse le device. La
-bascule serie du seuil n'est sure que sous execution hote (le `if constexpr` s'evapore sur device,
-zero surcout, chemin GPU strictement inchange). Discipline GPU : `device_fence()` (via `sync_host`)
-entre un kernel device et une boucle hote sur la meme memoire unifiee, sinon course
-ecriture-hote / kernel (cf. CHOICES.md). **Validation.** Le seam est exerce transversalement par
-toute la suite ; specifiquement les tests MPI de la section 20 (`test_mpi_fillboundary`,
-`test_mpi_poisson`, `test_mpi_array_reduce`, np=1/2/4 bit-identiques) et les validations device
-GH200 (GPU_RUNTIME_PORT.md) qui confirment que serie, OpenMP et Kokkos donnent les memes resultats
-(au choix FP de la somme Kokkos pres, documente).
+**Contraintes / remarques.** Le passage CPU -> GPU ne change aucun site d'appel : on change l'espace
+d'execution Kokkos a l'install, la physique reste inchangee. Le foncteur doit etre device-callable
+sous Kokkos (annote `ADC_HD`, capture des POD par valeur) ; capturer un objet a vtable ou un `Fab`
+casse le device. La bascule sur la petite boucle hote du seuil n'est sure que sous espace Kokkos hote
+(le `if constexpr` s'evapore sur device, zero surcout, chemin GPU strictement inchange). Discipline
+GPU : `device_fence()` (via `sync_host`) entre un kernel device et une boucle hote sur la meme memoire
+unifiee, sinon course ecriture-hote / kernel (cf. CHOICES.md). **Validation.** Le seam est exerce
+transversalement par toute la suite ; specifiquement les tests MPI de la section 20
+(`test_mpi_fillboundary`, `test_mpi_poisson`, `test_mpi_array_reduce`, np=1/2/4 bit-identiques) et les
+validations device GH200 (GPU_RUNTIME_PORT.md) qui confirment que les espaces Kokkos Serial, OpenMP et
+Cuda donnent les memes resultats (au choix FP de la somme Kokkos pres, documente).
 
 
 ---

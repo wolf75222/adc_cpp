@@ -108,10 +108,10 @@ Deux faits chiffres aggravent ce constat :
    mesuree : le V-cycle multigrille descend jusqu'a des grilles grossieres minuscules (2x2, 4x4, ...)
    et lance un `Kokkos::parallel_for` PAR balayage de lissage sur chacune ; sur une boite de quelques
    cellules, le cout d'ouverture de la region parallele (fork/join OpenMP, ou lancement de kernel)
-   ecrase le calcul utile. Le chemin SERIE de `for_each.hpp` a deja un garde-fou pour ca
-   (`if (n_cells >= 4096)` avant `#pragma omp parallel for`, avec un commentaire mentionnant une
-   "regression x40 mesuree sans le seuil") ; le chemin KOKKOS, lui, n'a PAS de seuil equivalent et
-   dispatche un kernel quelle que soit la taille de la boite.
+   ecrase le calcul utile. `for_each_cell` (chemin Kokkos, le seul) bascule deja, sous un seuil de
+   taille de boite, vers une boucle hote SEQUENTIELLE executee SOUS l'espace hote Kokkos (une
+   optimisation interne au chemin Kokkos, pas un backend separe) ; mais ce seuil ne couvre pas le
+   lissage multigrille, qui dispatche un kernel quelle que soit la taille de la boite.
 
 2. **Sur GPU, le Poisson coute encore 261 ms/pas (GH200) et ne profite d'aucun GPU supplementaire.**
    Kokkos Cuda mono-GPU : 263.5 ms/pas, poisson 99.1 %. MPI + Kokkos Cuda np=2 et np=4 : 288.0 et
@@ -134,10 +134,10 @@ precisement le COMPORTEMENT DE DISPATCH DE SON V-CYCLE SUR LES NIVEAUX GROSSIERS
 parallele. Pistes a explorer, par ordre de rapport (gain attendu / risque), a chiffrer chacune par une
 nouvelle mesure AVANT tout code :
 
-1. **Seuil de dispatch parallele pour les petites boites (chemin Kokkos), pendant du garde
-   `n_cells >= 4096` deja present en serie.** C'est la cause directement mesuree de la regression
-   multi-thread/GPU du V-cycle. A valider : un seuil sous lequel le lissage des niveaux grossiers
-   s'execute en serie (ou en un seul kernel fusionne) restaure-t-il le scaling du poisson sans changer
+1. **Etendre au lissage multigrille le seuil de bascule vers la boucle hote sequentielle deja present
+   dans `for_each_cell`.** C'est la cause directement mesuree de la regression multi-thread/GPU du
+   V-cycle. A valider : un seuil sous lequel le lissage des niveaux grossiers s'execute via la boucle
+   hote sequentielle (ou en un seul kernel fusionne) restaure-t-il le scaling du poisson sans changer
    le resultat numerique ? Mesure decisive : re-profiler poisson a t=1/4/8 et sur GH200 avec le seuil.
 
 2. **Cout fixe par `solve()` : tolerance et nombre de V-cycles.** `GeometricMG::solve()` par defaut

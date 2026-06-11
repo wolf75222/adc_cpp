@@ -1,6 +1,20 @@
 # Tests du COEUR : maillage, AMR, elliptique, integrateurs generiques. Aucun ne
 # depend d'un modele physique (ceux-la vivent dans adc_cases). Lient adc::adc seul.
 
+# BUILD CI RAPIDE (-O0 sur les TESTS). Sous le backend Kokkos, l'instanciation + l'inlining a -O3 des
+# centaines de foncteurs device (assemble_rhs / make_block / for_each_cell) dans les ~242 cibles de test
+# rend le build du gate tres long (plusieurs dizaines de minutes) et gourmand en RAM. Les tests sont des
+# CONTROLES DE CORRECTION sur des grilles minuscules : leur niveau d'optimisation n'a aucune importance.
+# Avec ADC_TESTS_FAST_O0=ON (pose par la CI), on compile TOUTES les cibles de ce dossier a -O0 -> build
+# bien plus rapide et borne en memoire, codegen identique entre cibles (parite preservee). Le code de
+# PRODUCTION (lib adc::adc dans le module _adc, bench/) reste a -O3 : ce drapeau ne touche QUE tests/.
+# GCC/Clang et configs optimisees uniquement (Debug est deja -O0).
+option(ADC_TESTS_FAST_O0 "Compile les executables de test a -O0 (build CI rapide ; tests = correction)" OFF)
+if(ADC_TESTS_FAST_O0)
+  add_compile_options(
+    $<$<AND:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O0>)
+endif()
+
 function(adc_add_test name)
   add_executable(${name} ${name}.cpp)
   target_link_libraries(${name} PRIVATE adc::adc)
@@ -278,6 +292,18 @@ adc_add_test(test_polar_mms_vr)
 # terme geometrique est INDISPENSABLE ; (B) convergence MMS d'ordre 2 du systeme 3 var complet (v_r
 # != 0) ; (C) conservation de la masse a ~machine (paroi radiale). Host / Serial-safe (UNE box).
 adc_add_test(test_polar_fluid_transport)
+
+# Exemption FAST_O0 des tests d'INTEGRATION LONGUE polaires : ils avancent une advection sur de
+# nombreux pas (94 s et ~35 s a -O3) ; a -O0 ils passent a 600+ s et 215 s -- le premier depasse
+# le TIMEOUT anti-hang de 600 s (cas reel : job MPI + Kokkos Serial, ctest #92 Timeout). On les
+# remonte a -O2 : place APRES le add_compile_options(-O0) de tete de fichier, le dernier -O gagne.
+# Toujours des controles de correction (rien d'autre ne change) ; no-op quand FAST_O0 est OFF.
+if(ADC_TESTS_FAST_O0)
+  foreach(_t test_polar_ring_advection test_polar_fluid_transport)
+    target_compile_options(${_t} PRIVATE
+      $<$<AND:$<CONFIG:Release,RelWithDebInfo,MinSizeRel>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O2>)
+  endforeach()
+endif()
 
 # --- FORCE DE LORENTZ MAGNETIQUE v x B_z NATIVE pour le fluide isotherme polaire (3 var) : brique de
 # SOURCE MagneticLorentzForce (physics/source.hpp) + composition CompositeSource<PotentialForce,

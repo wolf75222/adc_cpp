@@ -4,13 +4,13 @@
 # AUTOMATIQUEMENT du backend choisi pour la lib (ADC_HAS_KOKKOS + Kokkos::kokkos, ADC_HAS_MPI +
 # MPI::MPI_CXX) configure dans le CMakeLists racine -- aucun find_package redondant ici.
 #
-# Construire :
-#   Serie CPU          : cmake -B build-bench -DADC_BUILD_BENCH=ON
+# Construire (Kokkos-only : -DADC_USE_KOKKOS=ON obligatoire ; la cible se choisit a l'install Kokkos) :
+#   Kokkos Serial CPU   : cmake -B build-bench -DADC_BUILD_BENCH=ON -DADC_USE_KOKKOS=ON -DKokkos_ROOT=$K
 #   Kokkos OpenMP       : cmake -B build-bench -DADC_BUILD_BENCH=ON -DADC_USE_KOKKOS=ON \
-#                              -DKokkos_ROOT=$K -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper (ou g++)
-#   Kokkos Cuda (GH200) : idem avec un Kokkos installe Cuda (nvcc_wrapper)
-#   MPI CPU             : cmake -B build-bench -DADC_BUILD_BENCH=ON -DADC_USE_MPI=ON
-#   MPI + Kokkos Cuda   : -DADC_BUILD_BENCH=ON -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON ...
+#                              -DKokkos_ROOT=$K  (Kokkos installe ENABLE_OPENMP)
+#   Kokkos Cuda (GH200) : idem avec un Kokkos installe Cuda + -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper
+#   MPI + Kokkos Serial : cmake -B build-bench -DADC_BUILD_BENCH=ON -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON -DKokkos_ROOT=$K
+#   MPI + Kokkos Cuda   : -DADC_BUILD_BENCH=ON -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON -DKokkos_ROOT=$K ...
 # Lancer : ./build-bench/bin/profile_step [--n 256 --steps 50 --solver geometric_mg --limiter minmod]
 #   sous MPI : mpirun -np 2 ./build-bench/bin/profile_step ...
 
@@ -28,8 +28,8 @@ target_link_libraries(scaling_step PRIVATE adc::adc)
 
 # Scaling AMR synthetique (4 bulles, AmrSystem + add_compiled_model). AmrSystem est une classe
 # COMPILEE (PIMPL) : on lie son implementation python/amr_system.cpp (comme le test integre
-# amrmpi_integrated). Initialise Kokkos quand le backend est Kokkos (#ifdef ADC_HAS_KOKKOS) ; tourne
-# aussi en serie pour la validation locale.
+# amrmpi_integrated). Kokkos etant le seul backend, ADC_HAS_KOKKOS est toujours defini et Kokkos est
+# toujours initialise (le #ifdef ADC_HAS_KOKKOS reste pour la lisibilite du cycle de vie).
 add_executable(scaling_amr scaling_amr.cpp ${CMAKE_SOURCE_DIR}/python/amr_system.cpp)
 target_link_libraries(scaling_amr PRIVATE adc::adc)
 target_include_directories(scaling_amr PRIVATE ${CMAKE_SOURCE_DIR}/python)

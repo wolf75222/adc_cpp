@@ -62,13 +62,17 @@ def build_legacy_scalar():
 
 
 def compile_src(src, so_path, std="c++20"):
-    cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+    # adc_cpp est Kokkos-only : le .so legacy inclut compiled_block_abi.hpp -> for_each (#error sans
+    # Kokkos). adc_loader_build_flags fournit compilateur + flags Kokkos (+ macOS -undefined dynamic_lookup),
+    # symboles Kokkos resolus contre _adc au chargement.
+    from adc.dsl import adc_loader_build_flags
+    cc, kflags_c, kflags_l = adc_loader_build_flags()
     with tempfile.TemporaryDirectory() as tmp:
         cpp = os.path.join(tmp, "legacy.cpp")
         with open(cpp, "w") as f:
             f.write(src)
-        subprocess.run([cxx, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", INCLUDE, cpp,
-                        "-o", so_path], check=True)
+        subprocess.run([cc, "-shared", "-fPIC", "-std=" + std, "-O2", *kflags_c, "-I", INCLUDE, cpp,
+                        "-o", so_path, *kflags_l], check=True)
     return so_path
 
 

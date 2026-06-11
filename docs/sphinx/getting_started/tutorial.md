@@ -240,8 +240,8 @@ maximal en titre.
 Il n'y a pas de parametre Python du type `threads=8`. `import adc` pilote la simulation, mais le
 calcul par cellule herite du backend avec lequel `_adc` a ete compile (voir
 [Verifier son backend](backend.md)). Le nombre de coeurs depend donc du build de `_adc` et des
-variables OpenMP au lancement, pas d'un drapeau de script ; le module distribue tourne en serie
-parce que la CI le construit sans Kokkos.
+variables OpenMP au lancement, pas d'un drapeau de script ; le module distribue tourne en Kokkos Serial
+parce que la CI le construit ainsi (adc_cpp est Kokkos-only).
 
 Pour le multi-thread, on rebuild le module avec le backend Kokkos OpenMP, contre un Kokkos installe
 avec OpenMP (`Kokkos_ENABLE_OPENMP=ON` au build de Kokkos).
@@ -282,15 +282,17 @@ export ADC_KOKKOS_ROOT="$CONDA_PREFIX"  # chemin conda ; ($KOKKOS_ROOT en chemin
 OMP_NUM_THREADS=8 python docs/sphinx/tutorials/diocotron_tutorial.py
 ```
 
-`ADC_KOKKOS_ROOT` est le point cle pour le DSL `backend="production"` : sans lui, le `.so` genere
-reste zero-copie mais ses noyaux retombent sur le backend serie et ne scalent pas. Avec lui, le
-loader est compile avec le meme Kokkos que `_adc`, donc les `OMP_NUM_THREADS` coeurs servent (cf.
+`ADC_KOKKOS_ROOT` est le point cle pour le DSL `backend="production"` : le module `_adc` etant
+compile AVEC Kokkos, un loader compile sans (cle d'ABI `kokkos=0` vs `kokkos=1`) est REJETE avec un
+message explicite -- plus de repli serie muet. Avec lui, le loader est compile avec le meme Kokkos
+que `_adc`, donc les `OMP_NUM_THREADS` coeurs servent (cf.
 [`dsl.py`](https://github.com/wolf75222/adc_cpp/blob/master/python/adc/dsl.py)).
 
 Piege courant : lancer `OMP_NUM_THREADS=8 python ...` contre un `_adc` compile en serie ne change
 quasiment rien ; il faut d'abord le build Kokkos ci-dessus. La facade C++ (hors Python) se valide
-a part avec `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_OPENMP=ON` puis `ctest` (job CI ci-full). Le
-backend OpenMP autonome (`-DADC_USE_OPENMP=ON`) existe mais est deprecie au profit de Kokkos.
+a part contre un Kokkos OpenMP (`-DKokkos_ROOT=<install OpenMP>`) puis `ctest` (job CI ci-full).
+Il n'y a plus de backend OpenMP autonome : Serial, OpenMP et Cuda sont des espaces d'execution
+Kokkos choisis a l'install de Kokkos.
 
 ## Etape 17 : MPI (parallelisme distribue)
 

@@ -4,12 +4,16 @@
 # optimisation : ce script ne fait que MESURER. Le harnais est HORS du build par defaut (option
 # ADC_BUILD_BENCH=OFF) ; ce script l'active explicitement, donc le CI n'est jamais touche.
 #
+# adc_cpp est Kokkos-only : TOUS les modes configurent -DADC_USE_KOKKOS=ON (-DKokkos_ROOT=<Kroot>).
+# Le serie passe par une install Kokkos Serial, le multi-thread par Kokkos OpenMP, le GPU par Cuda.
+#
 # Usage :
-#   bench/run_bench.sh serie                 # Serie CPU (defaut)
-#   bench/run_bench.sh kokkos-omp  <Kroot>   # Kokkos OpenMP (Kokkos installe avec ENABLE_OPENMP)
+#   bench/run_bench.sh serie       <Kroot>   # Kokkos Serial CPU (Kokkos installe ENABLE_SERIAL)
+#   bench/run_bench.sh kokkos-omp  <Kroot>   # Kokkos OpenMP (Kokkos installe ENABLE_OPENMP)
 #   bench/run_bench.sh kokkos-cuda <Kroot>   # Kokkos Cuda  (nvcc_wrapper ; GH200)
-#   bench/run_bench.sh mpi          [NP]     # MPI CPU (NP rangs, defaut 2)
+#   bench/run_bench.sh mpi   <Kroot> [NP]    # MPI + Kokkos Serial (NP rangs, defaut 2)
 #   bench/run_bench.sh mpi-cuda <Kroot> [NP] # MPI + Kokkos Cuda (NP rangs, 1 GPU/rang)
+# (Pour serie et mpi, <Kroot> peut aussi venir de $KOKKOS_ROOT / $ADC_KOKKOS_ROOT.)
 #
 # Variables : N (grille, defaut 256), STEPS (50), WARMUP (5), SOLVER (geometric_mg), LIMITER (minmod).
 set -euo pipefail
@@ -28,8 +32,11 @@ run_bin() {  # $1 = build dir, $2... = lanceur eventuel (mpirun ...)
 
 case "$MODE" in
   serie)
+    KROOT="${2:-${KOKKOS_ROOT:-${ADC_KOKKOS_ROOT:-}}}"
+    [ -n "$KROOT" ] || { echo "serie: Kokkos_ROOT (install Serial) requis en \$2 ou \$KOKKOS_ROOT" >&2; exit 2; }
     B="$ROOT/build-bench-serie"
-    cmake -S "$ROOT" -B "$B" -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_TESTS=OFF -DADC_BUILD_BENCH=ON >/dev/null
+    cmake -S "$ROOT" -B "$B" -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_TESTS=OFF -DADC_BUILD_BENCH=ON \
+      -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" >/dev/null
     cmake --build "$B" --target profile_step -j 2 >/dev/null
     run_bin "$B"
     ;;
@@ -50,10 +57,12 @@ case "$MODE" in
     run_bin "$B"
     ;;
   mpi)
-    NP="${2:-2}"
+    KROOT="${2:-${KOKKOS_ROOT:-${ADC_KOKKOS_ROOT:-}}}"
+    [ -n "$KROOT" ] || { echo "mpi: Kokkos_ROOT (install Serial) requis en \$2 ou \$KOKKOS_ROOT" >&2; exit 2; }
+    NP="${3:-2}"
     B="$ROOT/build-bench-mpi"
     cmake -S "$ROOT" -B "$B" -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_TESTS=OFF -DADC_BUILD_BENCH=ON \
-      -DADC_USE_MPI=ON >/dev/null
+      -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" >/dev/null
     cmake --build "$B" --target profile_step -j 2 >/dev/null
     run_bin "$B" mpirun -np "$NP"
     ;;

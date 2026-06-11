@@ -35,6 +35,7 @@ Couplage inter-especes (#131, #167) :
 """
 import os
 import shutil
+import sys
 
 import numpy as np
 
@@ -419,12 +420,31 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
 
 
 def _native_kokkos_root():
-    """Racine Kokkos optionnelle pour compiler les loaders DSL production avec le MEME backend que le
-    module _adc. Sans cette variable, comportement historique (serie) conserve. cf. _native_kokkos_flags."""
+    """Racine Kokkos pour compiler les loaders DSL avec le MEME backend que le module _adc.
+
+    adc_cpp est KOKKOS-ONLY : tout .so DSL qui inclut les en-tetes adc (aot, native) DOIT etre compile
+    avec Kokkos (for_each.hpp #error sinon). Le root est lu depuis ADC_KOKKOS_ROOT / Kokkos_ROOT /
+    KOKKOS_ROOT ; None s'il n'est pas trouve (l'appelant leve alors une erreur explicite)."""
     for key in ("ADC_KOKKOS_ROOT", "Kokkos_ROOT", "KOKKOS_ROOT"):
         root = os.environ.get(key)
         if root and os.path.isfile(os.path.join(root, "include", "Kokkos_Core.hpp")):
             return root
+    return None
+
+
+def _libomp_prefix():
+    """Prefixe Homebrew libomp sur macOS (pour -Xpreprocessor -fopenmp), ou None. AppleClang ne gere
+    pas `-fopenmp` seul : il faut -Xpreprocessor -fopenmp + l'include/lib de libomp (cf. CMakeLists)."""
+    if sys.platform != "darwin":
+        return None
+    import subprocess
+    try:
+        p = subprocess.run(["brew", "--prefix", "libomp"], capture_output=True, text=True)
+        prefix = p.stdout.strip()
+        if prefix and os.path.isdir(os.path.join(prefix, "lib")):
+            return prefix
+    except (OSError, subprocess.SubprocessError):
+        pass
     return None
 
 
@@ -529,9 +549,40 @@ def _native_kokkos_flags():
     # sortie propre (exit 0), ratio ~0.96x les briques.
     link_flags = ["-ldl", "-pthread"]
     if "nvcc_wrapper" not in os.path.basename(_native_kokkos_compiler(None) or ""):
-        compile_flags.append("-fopenmp")
-        link_flags.append("-fopenmp")
+        # OpenMP requis pour l'espace d'exec Kokkos OpenMP (inoffensif/ignore sous Kokkos Serial).
+        if sys.platform == "darwin":
+            # macOS / AppleClang : `-fopenmp` seul est rejete -> -Xpreprocessor -fopenmp (+ include
+            # libomp Homebrew si present). On NE LIE PAS libomp (-lomp) dans le .so : une 2e copie de
+            # libomp donne DEUX runtimes OpenMP ("mutex lock failed: Invalid argument" a l'execution).
+            # Les symboles omp_*/__kmpc_* se resolvent au chargement (flat namespace, -undefined
+            # dynamic_lookup pose par compile_aot/compile_native) contre le libomp deja charge par _adc.
+            libomp = _libomp_prefix()
+            compile_flags += ["-Xpreprocessor", "-fopenmp"]
+            if libomp is not None:
+                compile_flags += ["-I", os.path.join(libomp, "include")]
+        else:
+            # ELF/Linux : libgomp est partagee par soname (pas de double-runtime), -fopenmp des deux cotes.
+            compile_flags.append("-fopenmp")
+            link_flags.append("-fopenmp")
     return compile_flags, link_flags
+
+
+def adc_loader_build_flags(cxx=None):
+    """Drapeaux pour compiler HORS CMake un .so qui INCLUT les en-tetes adc et sera charge dans le
+    module _adc (loaders DSL, tests d'ABI). adc_cpp etant Kokkos-only, le .so DOIT etre compile avec
+    Kokkos (for_each.hpp #error sinon). Renvoie (compilateur, flags_compile, flags_lien) : Kokkos +
+    (macOS) -undefined dynamic_lookup. Les symboles Kokkos restent INDEFINIS, resolus au chargement
+    contre le runtime Kokkos deja charge par _adc (pas de 2e copie). Leve si aucun Kokkos installe n'est
+    visible via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial suffit sur CPU)."""
+    if _native_kokkos_root() is None:
+        raise RuntimeError(
+            "adc_loader_build_flags : adc_cpp est Kokkos-only -- pointe un Kokkos installe via "
+            "ADC_KOKKOS_ROOT (ou Kokkos_ROOT), p.ex. `export ADC_KOKKOS_ROOT=/chemin/vers/kokkos`.")
+    cc = _native_kokkos_compiler(cxx)
+    cflags, lflags = _native_kokkos_flags()
+    if sys.platform == "darwin":
+        cflags = list(cflags) + ["-undefined", "dynamic_lookup"]
+    return cc, cflags, lflags
 
 
 # --- Canal aux : disposition canonique --------------------------------------
@@ -2231,25 +2282,40 @@ class HyperbolicModel:
         dispatch virtuel, Rusanov hote), le bloc tourne ici le chemin de PRODUCTION (flux HLLC/Roe au
         choix, ordre 2, SSPRK2/IMEX) sur le modele genere -- numerique identique a un bloc natif.
         include = dossier des en-tetes adc (None -> auto-detecte via adc_include()) ; cxx = compilateur.
-        Renvoie so_path."""
+        Renvoie so_path.
+
+        KOKKOS-ONLY : le modele AOT inclut les en-tetes adc (multifab/for_each), qui ne compilent PAS
+        sans ADC_HAS_KOKKOS. On compile donc le .so AVEC Kokkos (memes flags que le loader natif), ce qui
+        aligne en plus son ABI sur le module _adc (lui aussi Kokkos). Un Kokkos installe doit etre visible
+        via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial suffit sur CPU)."""
         import os
-        import shutil
         import subprocess
         import tempfile
 
         if include is None:
             include = adc_include()
         src = self.emit_cpp_aot_source(name=name)
-        cc = _default_cxx(cxx)
+        if _native_kokkos_root() is None:
+            raise RuntimeError(
+                "compile_aot : adc_cpp est Kokkos-only -- le modele AOT inclut les en-tetes adc qui "
+                "exigent Kokkos. Pointe un Kokkos installe via ADC_KOKKOS_ROOT (ou Kokkos_ROOT), p.ex. "
+                "`export ADC_KOKKOS_ROOT=/chemin/vers/kokkos` (Serial suffit sur CPU).")
+        cc = _native_kokkos_compiler(cxx)
         if not cc:
             raise RuntimeError("compile_aot : aucun compilateur C++ trouve")
         std = _probe_cxx_std(cc, std)  # erreur ACTIONNABLE si le std n'est pas supporte (vs erreur brute)
+        kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+        # Comme le loader natif, le .so AOT laisse les symboles Kokkos INDEFINIS (resolus au chargement
+        # contre le runtime Kokkos deja charge par _adc -- pas de 2e copie). macOS/Apple-ld exige alors
+        # -undefined dynamic_lookup (sur ELF/Linux -shared l'autorise deja ; l'option n'est PAS du ld GNU).
+        link_extra = ["-undefined", "dynamic_lookup"] if sys.platform == "darwin" else []
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_aot.cpp")
             with open(cpp, "w") as f:
                 f.write(src)
-            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include, cpp,
-                          "-o", so_path], "backend aot, compile_aot")
+            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include]
+                         + kokkos_compile_flags + link_extra + [cpp, "-o", so_path] + kokkos_link_flags,
+                         "backend aot, compile_aot")
         return so_path
 
     def emit_cpp_native_loader(self, name=None, target="system"):
@@ -2605,13 +2671,13 @@ class HyperbolicModel:
         # recompilation. Cache MISS -> compilation dans le chemin keye (donc stockee pour la prochaine
         # fois). so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
         if so_path is None:
-            # Pour le chemin natif (production), le compilateur/backend suit Kokkos reel, et la
-            # feature-key (kokkos on/off) entre dans la cle de cache : un .so SERIE ne doit pas etre
-            # reutilise sur un module Kokkos (sinon fallback serie silencieux, le bloc ne scale pas).
-            native = (backend == "production")
-            eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
+            # Les backends qui compilent les en-tetes adc (production NATIF et aot) suivent Kokkos reel
+            # (compilateur + feature-key kokkos dans la cle de cache) : sous Kokkos-only, leur .so est
+            # toujours compile AVEC Kokkos (cf. compile_aot / compile_native), la cle doit le refleter.
+            kokkos_like = backend in ("production", "aot")
+            eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
             abi_key = _abi_key_python(include, eff_cxx, std)
-            cache_backend = (backend + ";" + _native_feature_key()) if native else backend
+            cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
             so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
                 return so_path  # cache HIT : .so deja compilee pour cette cle, on la reutilise telle quelle
@@ -3129,10 +3195,10 @@ class Model:
             raise ValueError("compile : target='amr_system' n'existe que pour backend='production' "
                              "(chemin natif AMR) ; recu backend=%r" % (backend,))
         eff_std = std if std is not None else (loader_cxx_std() if mode == "native" else "c++20")
-        native = (mode == "native")
-        # natif : compilateur/backend suivant Kokkos reel (cf. compile_native), pour que la cle de
-        # cache calculee ici CONCORDE avec le .so reellement produit par le moteur.
-        eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
+        # native ET aot (mode "compile") compilent les en-tetes adc -> Kokkos reel (compilateur +
+        # feature-key kokkos) pour que la cle de cache CONCORDE avec le .so produit (cf. compile_aot).
+        kokkos_like = mode in ("native", "compile")
+        eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
         if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
             include = adc_include()
 
@@ -3153,7 +3219,7 @@ class Model:
         if so_path is None:
             # feature-key kokkos dans la cle (cf. compile_native) : un .so SERIE n'est pas reutilise
             # sur un module Kokkos. DOIT matcher la cle du moteur, sinon recompilations a repetition.
-            cache_backend = (backend + ";" + _native_feature_key()) if native else backend
+            cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
             so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             cache_hit = os.path.exists(so_path)
 
@@ -3602,10 +3668,11 @@ class HybridModel:
         if std is None:  # le loader natif partage l'ABI du module (norme derivee du loader : c++20 sous
             # Kokkos, c++23 sinon, cf. loader_cxx_std/compile_native) ; jit/aot restent en c++20.
             std = loader_cxx_std() if mode == "native" else "c++20"
-        # NATIF (production) : meme parite que compile_native -- compilateur suivant le backend Kokkos
-        # (g++ par defaut, nvcc_wrapper si explicite), -O3 -DNDEBUG, flags Kokkos sans linker libkokkos
-        # (runtime unique), feature-key kokkos dans le cache. jit/aot restent inchanges (-O2, hote).
+        # NATIF (production) : compilateur suivant le backend Kokkos (g++ par defaut, nvcc_wrapper si
+        # explicite), flags Kokkos sans linker libkokkos (runtime unique), feature-key kokkos dans le
+        # cache. jit/aot hybrides restent inchanges (-O2, hote). kokkos_like sert la cle de cache.
         native = (mode == "native")
+        kokkos_like = native
         if native:  # garde pre-dlopen : en-tetes != build de _adc -> remede clair (cf. compile_native)
             _check_headers_match_module(include)
             _warn_kokkos_parity()
@@ -3616,7 +3683,7 @@ class HybridModel:
         model_hash = self._model_hash()
         abi_key = _abi_key_python(include, eff_cxx, std)
         if so_path is None:
-            cache_backend = (("hybrid-" + backend + ";" + _native_feature_key()) if native
+            cache_backend = (("hybrid-" + backend + ";" + _native_feature_key()) if kokkos_like
                              else "hybrid-" + backend)
             so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             if os.path.exists(so_path):

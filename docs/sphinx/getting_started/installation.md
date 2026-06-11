@@ -23,7 +23,7 @@ pose a la main avant un build garde la priorite.
 Equivalent manuel, sans le choix de toolchain : `conda env create -f environment.yml`.
 Mise a jour : relancer le script (ou `conda env update -f environment.yml --prune`).
 L'interpreteur de l'env construit et importe le module : pas de divergence d'ABI cpython.
-C++23 requis hors Kokkos, C++20 sous Kokkos/CUDA.
+Norme : C++20 (Kokkos, seul backend on-node, est compile sous nvcc pour la cible Cuda).
 
 ## Module Python
 
@@ -35,8 +35,8 @@ choisissent par variables d'environnement, mappees sur les options CMake :
 
 ```bash
 conda activate adc
-pip install .                                                  # serie
-ADC_USE_KOKKOS=ON Kokkos_ROOT=$CONDA_PREFIX pip install . -v  # parallele (Kokkos)
+pip install .                                  # Kokkos Serial (FetchContent si non installe)
+Kokkos_ROOT=$CONDA_PREFIX pip install . -v     # reutilise le Kokkos de l'env (OpenMP si dispo)
 ADC_USE_MPI=ON pip install . -v                                # MPI
 ```
 
@@ -70,8 +70,8 @@ reinstallations sont incrementales.
 Pour iterer sur le C++ sans reinstaller, les presets construisent le module dans l'arbre :
 
 ```bash
-cmake --preset python          && cmake --build --preset python            # serie
-cmake --preset python-parallel && cmake --build --preset python-parallel   # Kokkos
+cmake --preset python          && cmake --build --preset python            # Kokkos Serial
+cmake --preset python-parallel && cmake --build --preset python-parallel   # Kokkos conda (OpenMP)
 export PYTHONPATH=$PWD/build-py/python        # ou build-py-kokkos/python
 ```
 
@@ -86,8 +86,8 @@ cmake --build build-py --target _adc -j
 
 ### Threads
 
-Le nombre de threads n'est pas un argument du modele : il faut un module construit avec Kokkos
-(`python-parallel` ou `ADC_USE_KOKKOS=ON`), puis un reglage AVANT la premiere allocation --
+Le nombre de threads n'est pas un argument du modele : il faut un module construit contre un Kokkos
+OpenMP (preset `python-parallel`), puis un reglage AVANT la premiere allocation --
 Kokkos s'initialise a ce moment-la et lit l'environnement une seule fois :
 
 ```python
@@ -96,15 +96,15 @@ adc.set_threads(8)       # = OMP_NUM_THREADS + KOKKOS_NUM_THREADS, sans toucher 
 sim = adc.System(n=256)
 ```
 
-Module serie ou appel trop tardif : un avertissement le signale et le reglage est ignore.
+Module Kokkos Serial ou appel trop tardif : un avertissement le signale et le reglage est ignore.
 `adc.parallel_info()` donne l'etat courant. Pour que le DSL `backend="production"` scale aussi,
 exporter `ADC_KOKKOS_ROOT` (meme racine Kokkos que le build du module).
 
 ## Coeur C++ et tests
 
 ```bash
-cmake --preset serial   && cmake --build --preset serial   && ctest --preset serial
-cmake --preset parallel && cmake --build --preset parallel && ctest --preset parallel  # Kokkos
+cmake --preset serial   && cmake --build --preset serial   && ctest --preset serial   # Kokkos Serial
+cmake --preset parallel && cmake --build --preset parallel && ctest --preset parallel  # Kokkos conda
 cmake --preset mpi      && cmake --build --preset mpi      && ctest --preset mpi
 ```
 
@@ -127,8 +127,7 @@ Le decompte des tests par backend est tenu dans
 |---|---|---|
 | `ADC_BUILD_TESTS` | `ON` en top-level, `OFF` en sous-projet | suite de tests (`tests/`) |
 | `ADC_BUILD_PYTHON` | `OFF` | module pybind11 `adc` |
-| `ADC_USE_KOKKOS` | `OFF` | dispatch Kokkos (CPU OpenMP + GPU), recommande |
-| `ADC_USE_OPENMP` | `OFF` | OpenMP autonome, deprecie (utiliser Kokkos) |
+| `ADC_USE_KOKKOS` | `ON` | seul backend on-node, **obligatoire** (`OFF` = erreur fatale) ; FetchContent si non installe |
 | `ADC_USE_MPI` | `OFF` | seam `comm` distribue |
 | `ADC_USE_HDF5` | `OFF` | `DataWriter` HDF5 |
 | `ADC_BUILD_BENCH` | `OFF` | harnais de profilage (`bench/`) |
@@ -136,10 +135,13 @@ Le decompte des tests par backend est tenu dans
 | `ADC_PY_LTO` | `OFF` | ThinLTO du module (`OFF` = build rapide) |
 | `ADC_USE_CCACHE` | `ON` | ccache si present (ignore sous nvcc) |
 
-Chaque option est aussi lisible depuis l'environnement (`ADC_USE_KOKKOS=ON pip install .`) ;
+Chaque option est aussi lisible depuis l'environnement (`Kokkos_ROOT=... pip install .`) ;
 un `-D` explicite garde la priorite. Le backend est une propriete de la cible `adc` : tout ce
-qui la lie en herite, aucun drapeau dans le code. Un seul backend de dispatch a la fois
-(Kokkos ou OpenMP autonome).
+qui la lie en herite, aucun drapeau dans le code. adc_cpp est **Kokkos-only** : il n'y a plus de
+backend OpenMP autonome ni de build non-Kokkos ; Serial, OpenMP et Cuda sont des espaces
+d'execution Kokkos choisis a l'install (ou au fetch) de Kokkos, pas des drapeaux adc distincts.
+**Kokkos n'a pas besoin d'etre pre-installe** : introuvable, il est recupere + construit
+automatiquement (FetchContent, tarball de release verifie par SHA256).
 
 **Kokkos via conda** : le paquet `kokkos` de conda-forge est generalement compile avec le seul
 backend Serial. Le build passe, mais ne scale pas en threads -- verifier le message

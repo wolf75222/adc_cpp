@@ -1,8 +1,8 @@
 # Architecture de adc_cpp
 
-adc_cpp est le coeur C++23 header-only pour les systemes hyperbolique-elliptique couples sur
-maillage adaptatif (AMR), ecrit pour MPI + Kokkos (le backend OpenMP autonome est deprecie au
-profit de Kokkos avec device OpenMP). Les briques physiques generiques
+adc_cpp est le coeur C++20 header-only pour les systemes hyperbolique-elliptique couples sur
+maillage adaptatif (AMR), ecrit pour MPI + Kokkos (Kokkos est le SEUL backend on-node : Serial /
+OpenMP / Cuda selon l'install ; le backend OpenMP autonome a ete retire). Les briques physiques generiques
 ([`include/adc/physics/`](../include/adc/physics)) et les bindings Python de la lib (module
 `adc`, extension compilee `_adc`, facades de composition `System` / `AmrSystem`) vivent ici ; le
 depot voisin `adc_cases` ne contient que des cas d'utilisation Python qui importent ce module. Le
@@ -31,9 +31,10 @@ temps/couplage) et une couche haute ne depend jamais d'un detail d'execution.
 Le diagramme ci-dessous montre les modules publics de [`include/adc/`](../include/adc), les
 dependances externes reelles, et les consommateurs du coeur. Les fleches sont les inclusions
 effectivement presentes dans les en-tetes (verifiees par `grep '#include <adc/...>'`). Les aretes
-externes sont conditionnelles : Kokkos et MPI sont optionnels (`ADC_USE_KOKKOS`, `ADC_USE_MPI`),
-pybind11 ne sert que le module Python. Le coeur reste utilisable en serie pure sans aucune des
-deux. Note de fidelite : le projet n'embarque ni Eigen, ni fftw, ni Catch2 ; la FFT de
+externes : **Kokkos est obligatoire** (le seul backend on-node : `ADC_USE_KOKKOS` ON par defaut,
+trouve par `find_package` ou recupere par FetchContent) ; MPI est optionnel (`ADC_USE_MPI`) ;
+pybind11 ne sert que le module Python. Le sequentiel passe par Kokkos Serial, pas par une boucle
+hote sans Kokkos. Note de fidelite : le projet n'embarque ni Eigen, ni fftw, ni Catch2 ; la FFT de
 [`numerics/elliptic/poisson_fft.hpp`](../include/adc/numerics/elliptic/poisson_fft.hpp) est ecrite
 a la main, et les tests sont des programmes `int main` qui lient `adc::adc` (pas de framework
 tiers).
@@ -54,9 +55,9 @@ flowchart TD
     runtime["runtime<br/>System, AmrSystem,<br/>model_factory, DSL/native"]
   end
 
-  subgraph ext["dependances externes (optionnelles)"]
+  subgraph ext["dependances externes"]
     direction TB
-    kokkos["Kokkos (option)"]
+    kokkos["Kokkos (obligatoire)"]
     mpi["MPI (option)"]
     pybind["pybind11"]
   end
@@ -457,22 +458,23 @@ La bibliotheque distingue deux filets (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE
 
 ## Backends
 
-Les backends (OpenMP, MPI, HDF5, Kokkos) sont une propriete de la bibliotheque, pas un drapeau par cible. Ils sont attaches a la cible d'interface `adc` : tout ce qui lie `adc` (tests du coeur, applications downstream) herite du backend choisi a la configuration. On configure une seule fois (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 9) :
+Les backends (Kokkos, MPI, HDF5) sont une propriete de la bibliotheque, pas un drapeau par cible. Ils sont attaches a la cible d'interface `adc` : tout ce qui lie `adc` (tests du coeur, applications downstream) herite du backend choisi a la configuration. Kokkos est le SEUL backend on-node et il est obligatoire (le serie passe par Kokkos Serial, pas par une boucle C++ manuelle). On configure une seule fois (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 9) :
 
 ```
-cmake -B build                       # serie
-cmake -B build -DADC_USE_OPENMP=ON   # CPU multi-thread (_OPENMP), deprecie -> Kokkos
-cmake -B build -DADC_USE_MPI=ON      # distribue (ADC_HAS_MPI + MPI::MPI_CXX)
-cmake -B build -DADC_USE_KOKKOS=ON   # GPU / CPU portable (ADC_HAS_KOKKOS), recommande
+# Kokkos est obligatoire mais PAS forcement pre-installe : trouve s'il existe (-DKokkos_ROOT),
+# sinon recupere + construit automatiquement (FetchContent). La cible on-node = options Kokkos_ENABLE_*.
+cmake -B build                                       # serie : Kokkos fetch+build auto (Serial defaut)
+cmake -B build -DKokkos_ENABLE_OPENMP=ON             # CPU multi-thread (Kokkos OpenMP, fetch)
+cmake -B build -DKokkos_ROOT=$K                       # reutilise une install Kokkos existante
+cmake -B build -DKokkos_ROOT=$K -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper  # GPU Cuda (install nvcc_wrapper)
+cmake -B build -DADC_USE_MPI=ON                       # + distribue (ADC_HAS_MPI + MPI::MPI_CXX)
 ```
 
-**Kokkos : le dispatch CPU+GPU recommande.** Kokkos couvre le CPU multi-thread (Serial / OpenMP) ET le GPU (Cuda) avec un seul code, sans aucun kernel CUDA ecrit a la main. C'est le backend recommande pour une cible recherche/hpc mono-config comme ROMEO/GH200. Sous Kokkos, la norme retombe a C++20 (nvcc CUDA 12.x) ; les kernels marques `ADC_HD` et le seam `for_each_cell` sont alors compiles pour le backend choisi. La CI joue le backend Kokkos en Serial (job Release Kokkos-Serial) et, depuis le job `ci-full`, en Kokkos OpenMP (`Kokkos_ENABLE_OPENMP=ON`, 91/91 ctest). La CI ne construit jamais `-DKokkos_ENABLE_CUDA=ON` : toutes les cellules Kokkos Cuda sont donc ROMEO (validation manuelle GH200) ou inconnues.
+**Kokkos : le seul backend on-node.** Kokkos couvre le sequentiel (Serial), le CPU multi-thread (OpenMP) ET le GPU (Cuda/HIP) avec un seul code, sans aucun kernel CUDA ecrit a la main ni `#pragma omp`. La cible se choisit par les options `Kokkos_ENABLE_SERIAL` / `Kokkos_ENABLE_OPENMP` / `Kokkos_ENABLE_CUDA` -- a la config (chemin FetchContent) ou a l'install de Kokkos (chemin `-DKokkos_ROOT`), pas par un drapeau adc. Kokkos est OBLIGATOIRE mais n'a pas besoin d'etre pre-installe : CMake fait `find_package(Kokkos)` puis, a defaut, le recupere via FetchContent (version `ADC_KOKKOS_FETCH_VERSION`, defaut 4.4.01, tarball verifie par SHA256). Configurer sans Kokkos (`-DADC_USE_KOKKOS=OFF`) est une erreur fatale, et le seam `for_each_cell` ne compile pas sans `ADC_HAS_KOKKOS`. La norme est C++20 (nvcc CUDA 12.x ne propose pas `-std=c++23`) ; les kernels marques `ADC_HD` et le seam `for_each_cell` sont compiles pour l'espace d'execution choisi. La CI joue Kokkos Serial (gate `build-and-test`, C++ + Python) et, depuis le job `ci-full`, Kokkos OpenMP (`Kokkos_ENABLE_OPENMP=ON`). La CI ne construit jamais `-DKokkos_ENABLE_CUDA=ON` : toutes les cellules Kokkos Cuda sont donc ROMEO (validation manuelle GH200) ou inconnues.
 
-**OpenMP autonome : deprecie.** Le chemin OpenMP natif (`-DADC_USE_OPENMP=ON`, garde `_OPENMP` dans `for_each_cell`) existe encore mais est deprecie au profit de Kokkos, qui fournit le meme multi-thread CPU et en plus le GPU avec un seul code source.
+**MPI : distribue, optionnel.** `-DADC_USE_MPI=ON` definit `ADC_HAS_MPI` et lie `MPI::MPI_CXX`. Le bloc `if(ADC_HAS_MPI)` du CMake compile les tests MPI-only (section 1h de [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md)), chacun rejoue a np=1/2/4. Hors MPI (un seul process), le seam `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) degenere en identite (rang 0, taille 1, all-reduce et barrier no-op), si bien qu'un binaire lie MPI mais lance mono-process se comporte comme un run mono-rang. MPI + Kokkos Cuda multi-GPU est valide sur ROMEO pour 10 tests Krylov/Schur/MPI-noyau (rank-invariant np=1/2/4, `dmax=0`).
 
-**MPI : distribue, optionnel.** `-DADC_USE_MPI=ON` definit `ADC_HAS_MPI` et lie `MPI::MPI_CXX`. Le bloc `if(ADC_HAS_MPI)` du CMake compile les tests MPI-only (section 1h de [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md)), chacun rejoue a np=1/2/4. Hors MPI, le seam `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) degenere en identite serie (rang 0, taille 1, all-reduce et barrier no-op), si bien qu'un binaire lie MPI mais lance mono-process se comporte comme la serie. MPI + Kokkos Cuda multi-GPU est valide sur ROMEO pour 10 tests Krylov/Schur/MPI-noyau (rank-invariant np=1/2/4, `dmax=0`).
-
-**Le seam `for_each_cell`.** Le point de couture qui rend tout cela possible est `for_each_cell(box, f)` dans [`include/adc/mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp). Il exprime une politique d'execution, pas de la logique numerique : il prend une `Box` et un lambda `ADC_HD(i, j)`, et se compile en boucle serie, en boucle `_OPENMP`, ou en `Kokkos::parallel_for` (Cuda) selon le backend. La logique numerique reste dans le lambda (couche 2 : discretisation), jamais dans le seam ; le faire grossir en `for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)` recreerait un framework opaque. Un operateur de grille voit une vue locale `Array4` + `Box`, mais ni la `DistributionMapping` ni la politique de boucle. Les reductions partagent la meme philosophie : `for_each_cell_reduce_sum` / `_max` portent les reducteurs `Kokkos::Sum` / `Max` deterministes (bit-identiques en serie/OpenMP ; sous Kokkos le `sum` reassocie le dernier bit, le `max` reste exact).
+**Le seam `for_each_cell`.** Le point de couture qui rend tout cela possible est `for_each_cell(box, f)` dans [`include/adc/mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp). Il exprime une politique d'execution, pas de la logique numerique : il prend une `Box` et un lambda `ADC_HD(i, j)`, et se compile en `Kokkos::parallel_for` (Serial / OpenMP / Cuda selon l'install Kokkos). La logique numerique reste dans le lambda (couche 2 : discretisation), jamais dans le seam ; le faire grossir en `for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)` recreerait un framework opaque. Un operateur de grille voit une vue locale `Array4` + `Box`, mais ni la `DistributionMapping` ni la politique de boucle. Les reductions partagent la meme philosophie : `for_each_cell_reduce_sum` / `_max` portent les reducteurs `Kokkos::Sum` / `Max` deterministes (le `sum` reassocie l'addition par tuile -- deterministe/idempotent mais non bit-identique a une somme lexicographique, pour tous les espaces Kokkos ; le `max` reste exact).
 
 ## Thread safety
 

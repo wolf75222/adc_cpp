@@ -15,7 +15,7 @@ project(adc_cpp
 # -D, mais propage l'environnement ; <Pkg>_ROOT est lu nativement par find_package). La graine
 # d'env ne joue QUE si l'option n'est pas posee en cache/-D (CMP0077 NEW : la variable normale
 # prime sur option()) -> -DADC_USE_X=... reste prioritaire, rien d'hardcode.
-foreach(_adc_opt ADC_BUILD_TESTS ADC_BUILD_PYTHON ADC_USE_KOKKOS ADC_USE_OPENMP ADC_USE_MPI ADC_USE_HDF5)
+foreach(_adc_opt ADC_BUILD_TESTS ADC_BUILD_PYTHON ADC_USE_KOKKOS ADC_USE_MPI ADC_USE_HDF5)
   if(DEFINED ENV{${_adc_opt}} AND NOT DEFINED ${_adc_opt} AND NOT DEFINED CACHE{${_adc_opt}})
     set(${_adc_opt} "$ENV{${_adc_opt}}")
     message(STATUS "adc: option ${_adc_opt}=$ENV{${_adc_opt}} (heritee de l'environnement)")
@@ -34,30 +34,44 @@ option(ADC_BUILD_PYTHON   "Build the pybind11 Python module `adc`" OFF)
 # passe JAMAIS ce drapeau, donc bench/ n'est ni configure ni compile en CI. Active a la main par
 # -DADC_BUILD_BENCH=ON pour mesurer le cout par phase d'un pas (cf. bench/, docs/PROFILE_RESULTS.md).
 option(ADC_BUILD_BENCH    "Build the standalone profiling harness (bench/, OFF by default)" OFF)
-# Backends de dispatch on-node : KOKKOS est le chemin recommande (il couvre OpenMP CPU ET
-# GPU CUDA/HIP via un seul code portable). ADC_USE_OPENMP (backend OpenMP autonome) est
-# DEPRECIE : prefere ADC_USE_KOKKOS (Kokkos avec device OPENMP donne le meme parallelisme CPU
-# et ouvre le GPU). On le garde pour compat / comparaison, avec un avertissement.
-option(ADC_USE_KOKKOS     "Enable the Kokkos dispatch backend (CPU OpenMP + GPU CUDA/HIP, recommande)" OFF)
-option(ADC_USE_OPENMP     "[DEPRECIE -> ADC_USE_KOKKOS] backend OpenMP autonome (CPU seul)" OFF)
+# Backend de dispatch on-node : KOKKOS EST LE SEUL backend on-node, et il est OBLIGATOIRE.
+# Un meme code source Kokkos couvre les trois cibles on-node via l'espace d'execution choisi
+# A L'INSTALLATION DE KOKKOS (pas par un drapeau adc) :
+#   - sequentiel       : Kokkos Serial  (Kokkos_ENABLE_SERIAL=ON)
+#   - CPU multi-thread : Kokkos OpenMP  (Kokkos_ENABLE_OPENMP=ON)
+#   - GPU              : Kokkos Cuda/HIP (Kokkos_ENABLE_CUDA=ON / Kokkos_ENABLE_HIP=ON)
+# Il n'y a PLUS de backend OpenMP autonome (ADC_USE_OPENMP), plus de `#pragma omp`, plus de
+# boucle hote manuelle comme chemin de production : tout le parallelisme on-node passe par le
+# seam for_each_cell -> Kokkos (cf. include/adc/mesh/for_each.hpp).
+#
+# Kokkos n'a PAS besoin d'etre pre-installe : on utilise une install existante si elle est trouvee
+# (-DKokkos_ROOT=..., p.ex. cache CI / module ROMEO), SINON on le RECUPERE + construit a la volee
+# (FetchContent). Un simple `cmake -B build` marche donc sur une machine sans Kokkos.
+option(ADC_USE_KOKKOS     "Enable Kokkos backend (the only on-node backend, mandatory)" ON)
 option(ADC_USE_MPI        "Enable the MPI backend (distributed comm seam)" OFF)
 option(ADC_USE_HDF5       "Enable the HDF5 DataWriter (parallel output)" OFF)
+# Version de Kokkos recuperee par FetchContent quand aucune install n'est trouvee (release tarball +
+# verification SHA256). Surchargeables ensemble (changer la version impose de changer le SHA256, sinon
+# la verification d'integrite echoue). Le SHA256 est publie sur la page des releases Kokkos.
+set(ADC_KOKKOS_FETCH_VERSION "4.4.01" CACHE STRING "Kokkos release version fetched when no install is found")
+set(ADC_KOKKOS_FETCH_SHA256
+    "3413f0cb39912128d91424ebd92e8832009e7eeaf6fa8da58e99b0d37860d972"
+    CACHE STRING "SHA256 of kokkos-<ADC_KOKKOS_FETCH_VERSION>.tar.gz (empty = skip integrity check)")
 
-if(ADC_USE_OPENMP AND NOT ADC_USE_KOKKOS)
-  message(WARNING "ADC_USE_OPENMP est DEPRECIE : Kokkos (ADC_USE_KOKKOS=ON, device OPENMP) "
-                  "couvre le meme parallelisme CPU et ouvre le GPU. Conserve pour compat.")
-endif()
-if(ADC_USE_OPENMP AND ADC_USE_KOKKOS)
-  message(FATAL_ERROR "Choisir UN backend de dispatch : ADC_USE_KOKKOS OU ADC_USE_OPENMP, pas les deux.")
+# Kokkos-only : configurer sans Kokkos est une ERREUR FATALE (le seam for_each_cell ne compile
+# pas sans ADC_HAS_KOKKOS). Le serie passe par Kokkos Serial, pas par une boucle C++ manuelle.
+# (Pas besoin d'installer Kokkos a la main : il est recupere via FetchContent si introuvable.)
+if(NOT ADC_USE_KOKKOS)
+  message(FATAL_ERROR
+    "adc_cpp is Kokkos-only: configure with -DADC_USE_KOKKOS=ON. Kokkos est trouve s'il est installe "
+    "(-DKokkos_ROOT=...) ou recupere + construit automatiquement (FetchContent). Le backend OpenMP "
+    "autonome a ete retire.")
 endif()
 
-# Norme C++ : 23 par defaut. Sous Kokkos+nvcc on retombe a 20 (CUDA 12.x ne propose
-# pas -std=c++23) ; tout le coeur compile en C++20 (le seul usage >20 est cote hote).
-if(ADC_USE_KOKKOS)
-  set(ADC_CXX_STD 20)
-else()
-  set(ADC_CXX_STD 23)
-endif()
+# Norme C++ : 20. Kokkos etant obligatoire et compile sous nvcc pour la cible Cuda (CUDA 12.x
+# ne propose pas -std=c++23), tout le coeur compile en C++20 (le seul usage >20 etait cote hote
+# et ne sert plus depuis le retrait du chemin non-Kokkos).
+set(ADC_CXX_STD 20)
 set(CMAKE_CXX_STANDARD ${ADC_CXX_STD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -108,11 +122,11 @@ target_include_directories(adc INTERFACE
 target_compile_features(adc INTERFACE cxx_std_${ADC_CXX_STD})
 
 # Hints libomp pour AppleClang (qui ne trouve pas libomp seul) : env conda ACTIF (paquet
-# llvm-openmp, cf. environment.yml) d'abord, sinon Homebrew. Servent a DEUX consommateurs :
-# (1) ADC_USE_OPENMP (find_package(OpenMP) direct) et (2) ADC_USE_KOKKOS quand le Kokkos vise
-# a ete compile avec le backend OpenMP -- son KokkosConfig.cmake fait find_dependency(OpenMP
-# REQUIRED) et echouerait sur macOS sans ces hints (cas reel : Kokkos OpenMP installe dans
-# l'env conda par scripts/kokkos_openmp_conda.sh). Macro idempotente, no-op hors APPLE.
+# llvm-openmp) d'abord, sinon Homebrew. Sous Kokkos-only il reste UN consommateur : une install
+# Kokkos batie avec Kokkos_ENABLE_OPENMP propage find_dependency(OpenMP REQUIRED) via son
+# KokkosConfig.cmake -- sans ces hints, find_package(Kokkos) echouerait sur macOS. Ce N'EST PAS
+# le backend OpenMP autonome (retire) : uniquement la plomberie de DECOUVERTE de libomp.
+# Macro idempotente, no-op hors APPLE ; invoquee AVANT la resolution de Kokkos ci-dessous.
 macro(adc_apple_libomp_hints)
   if(APPLE AND NOT OpenMP_CXX_FOUND)
     set(LIBOMP_PREFIX "")
@@ -133,43 +147,50 @@ macro(adc_apple_libomp_hints)
   endif()
 endmacro()
 
-if(ADC_USE_OPENMP)
-  adc_apple_libomp_hints()
-  # COMPONENTS CXX : le projet active aussi le langage C (pour MPI::MPI_C), mais on
-  # n'utilise OpenMP que cote C++. Sans cette restriction, find_package exigerait
-  # OpenMP_C (que les hints Homebrew ne configurent pas) et echouerait sur macOS.
-  find_package(OpenMP REQUIRED COMPONENTS CXX)
-  target_link_libraries(adc INTERFACE OpenMP::OpenMP_CXX)
-endif()
-
-# Kokkos : backend de dispatch PORTABLE (CPU multi-thread / GPU). Comme MPI, c'est
-# une propriete de la BIBLIOTHEQUE, pas un drapeau qu'on rebadge par cible : on
-# l'attache a l'interface `adc`, donc TOUT ce qui lie adc (la facade compilee src/,
-# les tests, les exemples) herite de ADC_HAS_KOKKOS + Kokkos::kokkos et bascule le
-# seam for_each_cell sur l'espace d'execution par defaut (p.ex. Cuda sur GH200).
-# La facade libadc se compile alors DIRECTEMENT pour le GPU. Configurer ainsi :
-#   cmake -DADC_USE_KOKKOS=ON -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K
-set(ADC_HAS_KOKKOS OFF)
-if(ADC_USE_KOKKOS)
-  # Un Kokkos compile avec le backend OpenMP fait find_dependency(OpenMP REQUIRED) dans son
-  # KokkosConfig.cmake : sur macOS/AppleClang il faut les hints libomp AVANT le find_package.
-  adc_apple_libomp_hints()
-  find_package(Kokkos REQUIRED)
-  target_link_libraries(adc INTERFACE Kokkos::kokkos)
-  target_compile_definitions(adc INTERFACE ADC_HAS_KOKKOS)
-  set(ADC_HAS_KOKKOS ON)
-  # Pool Ninja taille 1 partage par les cibles a TU geante du module (python/_adc,
-  # bench/scaling_amr) : serialisation anti-OOM de leurs compiles sous Kokkos, cf.
-  # python/CMakeLists.txt. Declare ICI et UNE SEULE fois : un nom de pool duplique dans la
-  # propriete GLOBALE JOB_POOLS rend build.ninja invalide ("ninja: error: duplicate pool").
-  # Les consommateurs ne posent que JOB_POOL_COMPILE. (tests/ garde son pool distinct
-  # adc_heavy_tu, declare dans tests/CMakeLists.txt.)
-  set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_module_tu=1)
-  message(STATUS "Kokkos found : for_each_cell dispatch backend = Kokkos (${Kokkos_DEVICES})")
-  if(ADC_USE_OPENMP)
-    message(STATUS "  note: OpenMP aussi actif ; le seam for_each_cell donne la priorite a Kokkos")
+# Resolution de Kokkos (cf. wiki Kokkos "Integrating Kokkos into your CMake project", methode 4 :
+# supporter a la fois un Kokkos externe ET embarque). find_package D'ABORD (CONFIG, version mini 4.2,
+# QUIET) pour reutiliser une install existante (cache CI, module ROMEO, Homebrew, -DKokkos_ROOT=...).
+# A DEFAUT, FetchContent recupere le tarball de release (verifie par SHA256) et le construit dans
+# l'arbre de build -> aucune install manuelle requise. La cible on-node se choisit par les options
+# Kokkos (Kokkos_ENABLE_SERIAL / _OPENMP / _CUDA / _HIP) -- defaut Serial pour un CPU mono-thread
+# universel. Quel que soit le chemin, la cible importee `Kokkos::kokkos` est creee et attachee a adc.
+# (On garde la forme explicite if/else plutot que FetchContent FIND_PACKAGE_ARGS, qui exige CMake>=3.24
+# alors que ce projet cible 3.20. CMAKE_DISABLE_FIND_PACKAGE_Kokkos=ON force le chemin FetchContent.)
+# La version mini 4.2 accepte les versions plus recentes, y compris 5.x (Homebrew 5.1.1, p.ex.).
+adc_apple_libomp_hints()
+find_package(Kokkos 4.2 QUIET CONFIG)
+if(Kokkos_FOUND)
+  message(STATUS "Kokkos trouve (install ${Kokkos_VERSION}) : for_each_cell backend = Kokkos (${Kokkos_DEVICES})")
+else()
+  message(STATUS "Kokkos introuvable -> FetchContent (release ${ADC_KOKKOS_FETCH_VERSION}). "
+                 "Cible on-node via -DKokkos_ENABLE_SERIAL/_OPENMP/_CUDA (defaut : Serial).")
+  include(FetchContent)
+  # Defaut hors-config : au moins Serial, pour un CPU mono-thread fonctionnel sur toute machine.
+  # (Si l'utilisateur a deja passe une option Kokkos_ENABLE_*, on la respecte.)
+  if(NOT DEFINED Kokkos_ENABLE_SERIAL AND NOT DEFINED Kokkos_ENABLE_OPENMP
+     AND NOT DEFINED Kokkos_ENABLE_CUDA AND NOT DEFINED Kokkos_ENABLE_HIP)
+    set(Kokkos_ENABLE_SERIAL ON CACHE BOOL "Kokkos Serial backend (defaut adc FetchContent)" FORCE)
   endif()
+  set(_adc_kokkos_url
+      "https://github.com/kokkos/kokkos/releases/download/${ADC_KOKKOS_FETCH_VERSION}/kokkos-${ADC_KOKKOS_FETCH_VERSION}.tar.gz")
+  if(ADC_KOKKOS_FETCH_SHA256)
+    FetchContent_Declare(Kokkos URL "${_adc_kokkos_url}" URL_HASH SHA256=${ADC_KOKKOS_FETCH_SHA256})
+  else()
+    FetchContent_Declare(Kokkos URL "${_adc_kokkos_url}")  # pas de SHA256 : verification d'integrite desactivee
+  endif()
+  FetchContent_MakeAvailable(Kokkos)
+  message(STATUS "Kokkos recupere (FetchContent ${ADC_KOKKOS_FETCH_VERSION}) : devices = ${Kokkos_DEVICES}")
 endif()
+target_link_libraries(adc INTERFACE Kokkos::kokkos)
+target_compile_definitions(adc INTERFACE ADC_HAS_KOKKOS)
+set(ADC_HAS_KOKKOS ON)
+# Pool Ninja taille 1 partage par les cibles a TU geante du module (python/_adc,
+# bench/scaling_amr) : serialisation anti-OOM de leurs compiles sous Kokkos, cf.
+# python/CMakeLists.txt. Declare ICI et UNE SEULE fois : un nom de pool duplique dans la
+# propriete GLOBALE JOB_POOLS rend build.ninja invalide ("ninja: error: duplicate pool").
+# Les consommateurs ne posent que JOB_POOL_COMPILE. (tests/ garde son pool distinct
+# adc_heavy_tu, declare dans tests/CMakeLists.txt.)
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_module_tu=1)
 
 # MPI : backend distribue, confine au seam comm (parallel/comm.hpp). Optionnel :
 # par defaut OFF, le build et les tests restent serie (comm.hpp = rang unique).

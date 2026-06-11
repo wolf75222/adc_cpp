@@ -98,10 +98,11 @@ Carte par module et par fichier : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). 
 
 ### Prerequis
 
-- C++23 (C++20 sous Kokkos + nvcc) : AppleClang 16+, GCC 13+, Clang 17+
-- CMake >= 3.20 (le build se pilote par presets, `CMakePresets.json`)
+- C++20 : AppleClang 16+, GCC 13+, Clang 17+ (nvcc_wrapper pour la cible Cuda)
+- CMake >= 3.21 (le build se pilote par presets, `CMakePresets.json`)
+- Kokkos 4.2+ : le SEUL backend on-node, **obligatoire** -- mais **pas besoin de le pre-installer** :
+  s'il n'est pas trouve, CMake le recupere + construit automatiquement (FetchContent)
 - MPI *(optionnel, `-DADC_USE_MPI=ON` : halos + FFT distribuee)*
-- Kokkos 4.4+ *(optionnel, `-DADC_USE_KOKKOS=ON` : dispatch CPU OpenMP + GPU CUDA / HIP)*
 - HDF5 parallele *(optionnel, `-DADC_USE_HDF5=ON` : DataWriter)*
 - Python 3.12 + numpy *(optionnel, bindings `adc` ; env conda via `scripts/setup_env.sh`)*
 
@@ -119,15 +120,17 @@ ctest --preset serial
 
 ### Backends
 
-Le dispatch on-node passe par un seul seam (`for_each_cell`). Kokkos est le backend conseille (CPU et
-GPU, un seul code) ; le backend OpenMP autonome (`ADC_USE_OPENMP`) est deprecie.
+adc_cpp est **Kokkos-only** : le dispatch on-node passe par un seul seam (`for_each_cell`) compile
+vers Kokkos, et il n'existe plus de build non-Kokkos (le backend OpenMP autonome `ADC_USE_OPENMP` a
+ete retire ; le serie passe par Kokkos Serial). La cible on-node se choisit par les options Kokkos
+(`Kokkos_ENABLE_SERIAL` / `_OPENMP` / `_CUDA` / `_HIP`) -- a la config (chemin FetchContent) ou a
+l'install du Kokkos pointe par `-DKokkos_ROOT`.
 
 ```bash
-cmake --preset serial      # serie                              -> build/
-cmake --preset mpi         # distribue (halos + FFT par MPI)    -> build-mpi/
-cmake --preset parallel    # Kokkos CPU (env conda actif)       -> build-kokkos/
-cmake -B build-gpu -DADC_USE_KOKKOS=ON \
-      -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K  # GPU GH200 (ROMEO)
+cmake --preset serial      # Kokkos Serial (FetchContent si non installe) -> build/
+cmake --preset mpi         # + distribue (halos + FFT par MPI)            -> build-mpi/
+cmake --preset parallel    # Kokkos CPU multi-thread (env conda actif)    -> build-kokkos/
+cmake -B build-gpu -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper -DKokkos_ROOT=$K  # GPU GH200 (ROMEO)
 ```
 
 Chaque option s'accepte aussi en variable d'environnement (`ADC_USE_KOKKOS=ON cmake ...`, ou via
@@ -140,13 +143,12 @@ Chaque option s'accepte aussi en variable d'environnement (`ADC_USE_KOKKOS=ON cm
 | `ADC_BUILD_TESTS` | `ON` | suite CTest du coeur |
 | `ADC_BUILD_PYTHON` | `OFF` | module pybind11 `adc` |
 | `ADC_USE_MPI` | `OFF` | backend distribue (comm, halos, FFT) |
-| `ADC_USE_KOKKOS` | `OFF` | dispatch Kokkos (CPU OpenMP + GPU), conseille |
-| `ADC_USE_OPENMP` | `OFF` | dispatch OpenMP autonome, **deprecie** (utiliser Kokkos) |
+| `ADC_USE_KOKKOS` | `ON` | backend on-node Kokkos, **obligatoire** (OFF = erreur fatale) |
 | `ADC_USE_HDF5` | `OFF` | DataWriter HDF5 parallele |
 | `ADC_BUILD_BENCH` | `OFF` | harnais de profilage (`bench/`) |
 
-La CI (presets `ci-*`) couvre Release serie (+ suite Python), MPI (bit-identique np=1/2/4) et Kokkos en
-Serial et en OpenMP, tout en CPU. Les chemins CUDA (Kokkos GPU, MPI + GPU) sont valides a la main sur
+La CI (presets `ci-*`) couvre Kokkos Serial (gate de chaque PR : C++ + suite Python), MPI + Kokkos
+Serial (bit-identique np=1/2/4, en `ci-full`) et Kokkos OpenMP (en `ci-full`), tout en CPU. Les chemins CUDA (Kokkos GPU, MPI + GPU) sont valides a la main sur
 ROMEO GH200, jamais en CI ; couverture detaillee : [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Utiliser le coeur depuis un projet C++

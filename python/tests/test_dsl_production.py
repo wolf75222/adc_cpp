@@ -146,22 +146,21 @@ def _compile_wrong_abi(model, dst_so, cxx):
     le .so produit est valide (signe par le compilateur) mais sa cle d'ABI differe de celle du module,
     ce qui doit declencher le rejet d'add_native_block. Renvoie le chemin du .so."""
     import subprocess
-    import sys
     import tempfile
+    from adc.dsl import adc_loader_build_flags
     src = model.emit_cpp_native_loader()
-    flags = ["-shared", "-fPIC", "-std=c++23", "-O2",
-             "-DADC_HEADER_SIG=\"deadbeef_signature_volontairement_fausse\""]
-    # -undefined dynamic_lookup est un drapeau de l'editeur de liens Darwin (macOS) :
-    # requis la pour autoriser les symboles non definis dans la .so de test. Sous Linux
-    # les .so partagees admettent deja les symboles non definis, et ce drapeau est
-    # invalide (ld: bad value) -> ne l'ajouter que sur Darwin (sinon le test casse en CI Linux/Kokkos).
-    if sys.platform == "darwin":
-        flags += ["-undefined", "dynamic_lookup"]
+    # adc_cpp est Kokkos-only : le loader inclut les en-tetes adc (for_each), il faut donc Kokkos +
+    # (macOS) -undefined dynamic_lookup. adc_loader_build_flags fournit compilateur + flags ; on garde
+    # une SIGNATURE D'EN-TETES FAUSSE (-DADC_HEADER_SIG bidon) pour que le .so compile mais soit REJETE
+    # a l'ABI par add_native_block (le but du test).
+    cc, kflags_c, kflags_l = adc_loader_build_flags(cxx)
+    flags = ["-shared", "-fPIC", "-std=c++20", "-O2",
+             "-DADC_HEADER_SIG=\"deadbeef_signature_volontairement_fausse\"", *kflags_c]
     with tempfile.TemporaryDirectory() as t:
         cpp = os.path.join(t, "wrong.cpp")
         with open(cpp, "w") as f:
             f.write(src)
-        subprocess.run([cxx, *flags, "-I", INCLUDE, cpp, "-o", dst_so], check=True)
+        subprocess.run([cc, *flags, "-I", INCLUDE, cpp, "-o", dst_so, *kflags_l], check=True)
     return dst_so
 
 

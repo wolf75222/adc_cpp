@@ -16,9 +16,10 @@ aucun scenario : il fournit des briques generiques que l'on compose.
 - Une pile de maillage `from scratch` : conteneurs `Box` / `BoxArray` / `MultiFab` /
   `Geometry`, et une hierarchie AMR block-structured multi-niveaux et multi-patch
   (clustering Berger-Rigoutsos, reflux coverage-aware).
-- Un seam de parallelisme unique. Le meme code source bascule serie / OpenMP / Kokkos
-  (CPU multi-thread et GPU CUDA/HIP) / MPI a la compilation, via le seam `for_each_cell`
-  et la couche `comm`. On n'ecrit aucun kernel CUDA a la main : Kokkos abstrait le materiel.
+- Un seam de parallelisme unique. Le meme code source bascule entre les espaces d'execution
+  Kokkos (Serial sequentiel / OpenMP CPU multi-thread / Cuda-HIP GPU, choisis a l'install de
+  Kokkos) et, en option, MPI pour le distribue, via le seam `for_each_cell` et la couche
+  `comm`. On n'ecrit aucun kernel CUDA a la main : Kokkos abstrait le materiel.
 - Deux solveurs de Poisson : multigrille geometrique (`GeometricMG`, V-cycle Gauss-Seidel
   red-black) et FFT spectrale directe (`PoissonFFTSolver`).
 - Des bindings Python via pybind11. Le module `adc` est la facade de composition : Python
@@ -33,7 +34,7 @@ couche basse l'execute, sans dependance descendante :
 | **Physique** | lois locales : flux, equation d'etat, sources, fermetures (device-callable) |
 | **Numerique** | reconstruction, flux de Riemann, operateur elliptique, conditions aux limites |
 | **Maillage / donnees** | `Box`, `BoxArray`, `MultiFab`, `Geometry`, hierarchie AMR |
-| **Execution** | seams : `for_each_cell` (serie / OpenMP / Kokkos), `comm` (MPI), allocateur |
+| **Execution** | seams : `for_each_cell` (Kokkos : Serial / OpenMP / Cuda), `comm` (MPI), allocateur |
 | **Temps / couplage** | SSPRK, IMEX, splitting, reflux / average-down / subcyclage |
 
 Le point cle : le modele physique ne depend jamais du backend parallele. Porter sur GPU est
@@ -41,13 +42,18 @@ surtout un travail de residence des donnees, pas une reecriture des noyaux de ca
 
 ## Perimetre honnete
 
-- Le coeur cible MPI + Kokkos. Le backend OpenMP autonome existe mais est deprecie au profit
-  de Kokkos (device OpenMP), qui couvre le meme parallelisme CPU et ouvre le GPU.
+- Kokkos est le seul backend on-node, et il est obligatoire (`-DADC_USE_KOKKOS=ON`, ON par
+  defaut ; configurer sans Kokkos est une erreur fatale CMake). La cible se choisit a
+  l'installation de Kokkos : sequentiel (Serial), CPU multi-thread (OpenMP) ou GPU (Cuda/HIP).
+  Le backend OpenMP autonome (l'option `ADC_USE_OPENMP`) a ete retire ; MPI reste optionnel
+  pour le distribue.
 - Le GPU (NVIDIA GH200) est valide manuellement sur ROMEO, pas en CI : les runners n'ont pas
-  de GPU. La CI tourne sur CPU (Release, MPI, Kokkos Serial, Kokkos OpenMP). Voir
-  [Verifier son backend](backend.md).
-- Le module Python (`_adc`) est compile pour le backend Serial : il ne route pas vers Kokkos
-  ni MPI. Le parallelisme s'obtient en compilant la facade C++ avec les drapeaux correspondants.
+  de GPU. La CI tourne sur CPU : le gate obligatoire des PR (`build-and-test`) compile en
+  Kokkos Serial (C++ + module Python), et le mode `ci-full` ajoute MPI + Kokkos Serial et
+  Kokkos OpenMP. Voir [Verifier son backend](backend.md).
+- Le module Python (`_adc`) est compile en Kokkos Serial : il ne route pas vers MPI. Le CPU
+  multi-thread ou le GPU s'obtiennent en compilant la facade contre une install Kokkos OpenMP
+  ou Cuda/HIP ; le distribue, en ajoutant `-DADC_USE_MPI=ON`.
 - Le tutoriel diocotron est un modele reduit (une densite advectee par la derive E x B), le
   benchmark de normalisation, pas une reproduction du systeme Euler-Poisson complet.
 

@@ -14,7 +14,7 @@
 //   - un bascule Poisson (--poisson on|off) : off = transport pur (signal frontend propre, defaut) ;
 //     on = solve elliptique inerte (charge=0) a chaque pas, regime MG-domine (idiome two_euler).
 //
-// Compile/lance avec le MEME backend que la lib (Serie / Kokkos OpenMP / Cuda) et sous MPI (np>1)
+// Compile/lance avec le MEME backend que la lib (Kokkos Serial / OpenMP / Cuda) et sous MPI (np>1)
 // sans changement, via bench/run_frontend.sh. ZERO optimisation : on ne fait que MESURER.
 
 #include <adc/mesh/box_array.hpp>

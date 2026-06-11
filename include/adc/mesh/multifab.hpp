@@ -7,7 +7,8 @@
 /// for (int li = 0; li < mf.local_size(); ++li) { auto a = mf.fab(li).array(); for_each_cell(...); }.
 /// sync_host()/sync_device() encodent l'intention d'acces (residence des donnees, cf. for_each.hpp) ;
 /// sous memoire unifiee sync_host = device_fence() cible, sync_device = no-op. sum() reduit sur tous
-/// les rangs (all_reduce) : non bit-identique entre backends sous Kokkos, exact en serie/OpenMP.
+/// les rangs (all_reduce) : Kokkos::Sum reassocie par tuile (deterministe/idempotent, non bit-identique
+/// a une somme lexicographique).
 
 #pragma once
 
@@ -117,17 +118,17 @@ class MultiFab {
 
 // Somme des cellules valides de la composante comp, reduite sur tous les rangs
 // (all-reduce). Chaque fab local est reduit par for_each_cell_reduce_sum (vraie
-// reduction device sous Kokkos, boucle hote en serie/OpenMP), puis on agrege les
-// fabs locaux par somme hote (peu de fabs, ordre stable par rang) avant
-// MPI_Allreduce ; en serie all_reduce_sum est l'identite.
+// reduction Kokkos, Kokkos::Sum), puis on agrege les fabs locaux par somme hote
+// (peu de fabs, ordre stable par rang) avant MPI_Allreduce ; sans MPI (un seul
+// rang) all_reduce_sum est l'identite.
 //
 // Plus de device_fence() en tete : sous Kokkos parallel_reduce est bloquant cote
-// hote et absorbe la barriere. NOTE FP : sous Kokkos l'ordre de sommation par
-// tuile differe de la boucle hote ; sum n'est donc PLUS bit-identique a l'ancien
-// sum sur ce backend (ecart au dernier bit). En serie et OpenMP il reste exact.
+// hote et absorbe la barriere. NOTE FP : Kokkos::Sum reassocie la somme par tuile,
+// donc sum n'est PAS bit-identique a une somme lexicographique ecrite a la main
+// (deterministe/idempotent toutefois : memes donnees, meme espace Kokkos -> memes bits).
 /// Somme des cellules VALIDES de la composante comp, reduite sur TOUS les rangs (all_reduce).
-/// COLLECTIF sous MPI. NOTE FP : non bit-identique a la boucle hote sous Kokkos (reassociation par
-/// tuile) ; exact en serie/OpenMP.
+/// COLLECTIF sous MPI. NOTE FP : Kokkos::Sum reassocie par tuile (deterministe/idempotent, non
+/// bit-identique a une somme lexicographique).
 inline Real sum(const MultiFab& mf, int comp = 0) {
   Real s = 0;
   for (int li = 0; li < mf.local_size(); ++li) {

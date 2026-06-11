@@ -36,13 +36,16 @@ jonction. Inspiré du design de PLUTO (voir BIBLIOGRAPHY).
 
 ## D-3. Le seam `for_each_cell` (dispatch unique)
 
-**Décision.** Une seule primitive de boucle `for_each_cell(box, lambda ADC_HD)` dispatche
-vers série / `#pragma omp` / `Kokkos::parallel_for`. `Array4` POD device-callable,
-`device_fence()`, `comm.hpp` pour MPI.
+**Décision.** Une seule primitive de boucle `for_each_cell(box, lambda ADC_HD)` se compile
+en `Kokkos::parallel_for` (espace d'exécution Serial / OpenMP / Cuda selon l'install Kokkos).
+`Array4` POD device-callable, `device_fence()`, `comm.hpp` pour MPI.
 
-**Pourquoi.** La physique est écrite une fois et tourne partout. Le backend est une
-**propriété de la cible `adc`** (target_compile_definitions INTERFACE), pas un drapeau par
-solveur : changer de backend = reconfigurer CMake, rien dans le code.
+**Pourquoi.** La physique est écrite une fois et tourne partout. Kokkos est le seul backend
+on-node et il est obligatoire (`-DADC_USE_KOKKOS=ON`, ON par défaut) ; le seam ne compile pas
+sans `ADC_HAS_KOKKOS`. Le backend reste une **propriété de la cible `adc`**
+(target_compile_definitions INTERFACE), pas un drapeau par solveur : la cible on-node se
+choisit à l'installation de Kokkos (`Kokkos_ENABLE_SERIAL` / `_OPENMP` / `_CUDA`), rien dans
+le code.
 
 **Coût.** Discipline de fences GPU (toute fonction kernel-device puis boucle-hôte sur la
 même mémoire unifiée doit `device_fence()` entre les deux). Le bug le plus subtil rencontré.

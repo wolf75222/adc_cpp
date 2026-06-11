@@ -150,8 +150,9 @@ class SpectralCoupler {
 
   // masse totale (all-reduce).
   double mass() const {
-    // seam reducteur (bande locale = 1 fab -> bit-identique a l'ancienne somme hote en
-    // serie/OpenMP) ; parallel_reduce absorbe la barriere, plus de device_fence en tete.
+    // seam reducteur (bande locale = 1 fab) ; Kokkos::Sum reassocie la somme par tuile
+    // (deterministe/idempotent mais non bit-identique a une somme lexicographique) ;
+    // parallel_reduce absorbe la barriere, plus de device_fence en tete.
     const ConstArray4 u = U_.fab(0).const_array();
     const Real s = for_each_cell_reduce_sum(U_.box(0), [u] ADC_HD(int i, int j) { return u(i, j); });
     return all_reduce_sum(static_cast<double>(s)) * dx_ * dy_;

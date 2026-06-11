@@ -130,7 +130,8 @@ class PolarPoissonSolver {
     // residence hote du RHS valide AVANT toute lecture hote, exactement comme les autres lecteurs
     // hote du repo (cf. le seam sync_host()/device_fence() de for_each.hpp / MultiFab). Sous Kokkos
     // Cuda = un device_fence() cible (sans quoi : donnee perimee -> cudaErrorIllegalInstruction). Sous
-    // Serie/OpenMP (memoire non Kokkos) = no-op : comportement BIT-IDENTIQUE a l'ancien.
+    // Kokkos Serial/OpenMP (execution hote, memoire unifiee) = fence sans effet observable (aucun kernel
+    // device en vol a drainer).
     rhs_.sync_host();
     const int nr = geom_.domain.nx();
     const int nth = geom_.domain.ny();
@@ -241,7 +242,7 @@ class PolarPoissonSolver {
     // Comme solve() : evaluation HOTE (FFT + stencil sur des pointeurs hote). On rend la residence hote
     // du RHS valide avant lecture (kernel device eventuellement en vol). phi_ est ecrit cote hote par
     // solve(), mais on fence aussi par symetrie/robustesse si residual() est appele independamment. Sous
-    // Serie/OpenMP = no-op (bit-identique) ; sous Kokkos Cuda = device_fence() cible.
+    // Kokkos Serial/OpenMP (execution hote) = fence sans effet observable ; sous Kokkos Cuda = device_fence() cible.
     rhs_.sync_host();
     phi_.sync_host();
     const int nr = geom_.domain.nx();

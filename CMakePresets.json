@@ -1,6 +1,10 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -21,7 +25,6 @@
         "rhs": ""
       }
     },
-
     {
       "name": "python",
       "inherits": "conda",
@@ -45,13 +48,14 @@
         "Kokkos_ROOT": "$env{CONDA_PREFIX}"
       }
     },
-
     {
       "name": "serial",
       "inherits": "base",
       "displayName": "Coeur + tests C++ (SERIE)",
       "binaryDir": "${sourceDir}/build",
-      "cacheVariables": { "ADC_BUILD_TESTS": "ON" }
+      "cacheVariables": {
+        "ADC_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "parallel",
@@ -77,20 +81,21 @@
         "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}"
       }
     },
-
     {
       "name": "ci-serial",
       "inherits": "base",
-      "displayName": "CI : Release + tests (runner ubuntu, deps apt)",
-      "description": "Source de verite des flags du job 'Release' de ci.yml. ccache auto-detecte (ADC_USE_CCACHE).",
+      "displayName": "Release + tests (Kokkos Serial via FetchContent si aucun Kokkos installe)",
+      "description": "adc_cpp est Kokkos-only : sans Kokkos_ROOT, le CMakeLists racine recupere et construit Kokkos (Serial) par FetchContent. Plus utilise par ci.yml (le gate emploie ci-kokkos).",
       "binaryDir": "${sourceDir}/build",
-      "cacheVariables": { "ADC_BUILD_TESTS": "ON" }
+      "cacheVariables": {
+        "ADC_BUILD_TESTS": "ON"
+      }
     },
     {
       "name": "ci-python",
       "inherits": "base",
       "displayName": "CI : module Python _adc (serie)",
-      "description": "Job 'Build + test Python module' de ci.yml. Tests C++ coupes : ce job ne lance que les tests python/tests/*.py.",
+      "description": "Module _adc seul (tests C++ coupes). Kokkos-only : FetchContent si aucun Kokkos installe. Plus utilise par ci.yml (le gate emploie ci-kokkos-python).",
       "binaryDir": "${sourceDir}/build-py",
       "cacheVariables": {
         "ADC_BUILD_PYTHON": "ON",
@@ -100,24 +105,38 @@
     {
       "name": "ci-mpi",
       "inherits": "base",
-      "displayName": "CI : Release + tests, backend MPI",
+      "displayName": "CI : Release + tests, MPI + Kokkos Serial",
       "binaryDir": "${sourceDir}/build-mpi",
       "cacheVariables": {
         "ADC_BUILD_TESTS": "ON",
-        "ADC_USE_MPI": "ON"
+        "ADC_USE_MPI": "ON",
+        "ADC_USE_KOKKOS": "ON",
+        "Kokkos_ROOT": "$env{KOKKOS_PREFIX}",
+        "ADC_TESTS_FAST_O0": "ON"
+      },
+      "description": "MPI distribue + Kokkos Serial on-node (adc_cpp est Kokkos-only). Kokkos pointe par $KOKKOS_PREFIX, comme ci-kokkos.",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{KOKKOS_PREFIX}",
+        "rhs": ""
       }
     },
     {
       "name": "ci-kokkos",
       "inherits": "base",
       "displayName": "CI : Release + tests, backend Kokkos",
-      "description": "Kokkos pointe par la variable d'environnement KOKKOS_PREFIX (posee par le job : install mise en cache). Sert aux jobs Kokkos Serial ET OpenMP (seule l'install Kokkos differe).",
+      "description": "Kokkos pointe par la variable d'environnement KOKKOS_PREFIX (posee par le job : install mise en cache). Sert au gate (Serial) ET au job OpenMP (seule l'install Kokkos differe). ADC_TESTS_FAST_O0 : tests a -O0 (controles de correction ; build rapide, RAM bornee).",
       "binaryDir": "${sourceDir}/build-kokkos",
-      "condition": { "type": "notEquals", "lhs": "$env{KOKKOS_PREFIX}", "rhs": "" },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{KOKKOS_PREFIX}",
+        "rhs": ""
+      },
       "cacheVariables": {
         "ADC_BUILD_TESTS": "ON",
         "ADC_USE_KOKKOS": "ON",
-        "Kokkos_ROOT": "$env{KOKKOS_PREFIX}"
+        "Kokkos_ROOT": "$env{KOKKOS_PREFIX}",
+        "ADC_TESTS_FAST_O0": "ON"
       }
     },
     {
@@ -143,32 +162,121 @@
       }
     }
   ],
-
   "buildPresets": [
-    { "name": "python",          "configurePreset": "python",          "targets": ["_adc"] },
-    { "name": "python-parallel", "configurePreset": "python-parallel", "targets": ["_adc"] },
-    { "name": "serial",          "configurePreset": "serial" },
-    { "name": "parallel",        "configurePreset": "parallel" },
-    { "name": "mpi",             "configurePreset": "mpi" },
-
-    { "name": "ci-serial",        "configurePreset": "ci-serial",        "jobs": 2 },
-    { "name": "ci-python",        "configurePreset": "ci-python",        "jobs": 2, "targets": ["_adc"] },
-    { "name": "ci-mpi",           "configurePreset": "ci-mpi",           "jobs": 2 },
-    { "name": "ci-kokkos",        "configurePreset": "ci-kokkos",        "jobs": 2 },
-    { "name": "ci-kokkos-python", "configurePreset": "ci-kokkos-python", "jobs": 2, "targets": ["_adc"] },
-    { "name": "ci-bench",         "configurePreset": "ci-bench",         "jobs": 2 }
+    {
+      "name": "python",
+      "configurePreset": "python",
+      "targets": [
+        "_adc"
+      ]
+    },
+    {
+      "name": "python-parallel",
+      "configurePreset": "python-parallel",
+      "targets": [
+        "_adc"
+      ]
+    },
+    {
+      "name": "serial",
+      "configurePreset": "serial"
+    },
+    {
+      "name": "parallel",
+      "configurePreset": "parallel"
+    },
+    {
+      "name": "mpi",
+      "configurePreset": "mpi"
+    },
+    {
+      "name": "ci-serial",
+      "configurePreset": "ci-serial",
+      "jobs": 2
+    },
+    {
+      "name": "ci-python",
+      "configurePreset": "ci-python",
+      "jobs": 2,
+      "targets": [
+        "_adc"
+      ]
+    },
+    {
+      "name": "ci-mpi",
+      "configurePreset": "ci-mpi",
+      "jobs": 2
+    },
+    {
+      "name": "ci-kokkos",
+      "configurePreset": "ci-kokkos",
+      "jobs": 2
+    },
+    {
+      "name": "ci-kokkos-python",
+      "configurePreset": "ci-kokkos-python",
+      "jobs": 2,
+      "targets": [
+        "_adc"
+      ]
+    },
+    {
+      "name": "ci-bench",
+      "configurePreset": "ci-bench",
+      "jobs": 2
+    }
   ],
-
   "testPresets": [
-    { "name": "serial",   "configurePreset": "serial",   "output": { "outputOnFailure": true } },
-    { "name": "parallel", "configurePreset": "parallel", "output": { "outputOnFailure": true } },
-    { "name": "mpi",      "configurePreset": "mpi",      "output": { "outputOnFailure": true } },
-
-    { "name": "ci-serial", "configurePreset": "ci-serial", "output": { "outputOnFailure": true },
-      "execution": { "jobs": 2 } },
-    { "name": "ci-mpi",    "configurePreset": "ci-mpi",    "output": { "outputOnFailure": true },
-      "execution": { "jobs": 2 } },
-    { "name": "ci-kokkos", "configurePreset": "ci-kokkos", "output": { "outputOnFailure": true },
-      "execution": { "jobs": 2 } }
+    {
+      "name": "serial",
+      "configurePreset": "serial",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "parallel",
+      "configurePreset": "parallel",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "mpi",
+      "configurePreset": "mpi",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-serial",
+      "configurePreset": "ci-serial",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2
+      }
+    },
+    {
+      "name": "ci-mpi",
+      "configurePreset": "ci-mpi",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2
+      }
+    },
+    {
+      "name": "ci-kokkos",
+      "configurePreset": "ci-kokkos",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2
+      }
+    }
   ]
 }

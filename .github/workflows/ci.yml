@@ -1,11 +1,14 @@
 name: CI
 
-# Strategie fast/full :
-#  - ci-fast (sur pull_request) : Release + son ctest + module Python + tests Python.
-#    C'est le gate OBLIGATOIRE des PR, rapide grace aux caches (ccache + pip).
-#  - ci-full (push master, nightly cron, workflow_dispatch, ou PR portant le label
-#    `ci-full`) : Release + MPI + Kokkos-Serial + Python, la suite COMPLETE.
-# Aucun test n'est supprime : seuls les declencheurs et le cache changent.
+# adc_cpp est KOKKOS-ONLY : Kokkos est le seul backend on-node (Serial / OpenMP / Cuda selon
+# l'install Kokkos). Il n'existe plus de build non-Kokkos -- TOUS les jobs configurent avec
+# -DADC_USE_KOKKOS=ON. La matrice :
+#  - build-and-test (sur pull_request, gate OBLIGATOIRE) : Kokkos SERIAL, ctest C++ + module
+#    Python + tests Python. Rapide grace aux caches (Kokkos installe + ccache + pip).
+#  - ci-full (push master, nightly cron, workflow_dispatch, ou PR portant le label `ci-full`) :
+#    ajoute MPI (+ Kokkos Serial) et Kokkos OpenMP, la suite COMPLETE.
+# Aucun test n'est supprime : seuls les declencheurs et le cache changent. Le serie passe par
+# Kokkos Serial (Kokkos_ENABLE_SERIAL=ON), le multi-thread par Kokkos OpenMP (Kokkos_ENABLE_OPENMP).
 on:
   push:
     branches: [master]
@@ -17,7 +20,7 @@ on:
   pull_request:
     # Types par defaut (opened, synchronize, reopened) PLUS labeled : poser le label
     # `ci-full` sur une PR re-declenche le workflow, et set-mode bascule alors en plein
-    # (MPI + Kokkos). Sans `labeled`, ajouter un label ne relance aucun run.
+    # (MPI + Kokkos OpenMP). Sans `labeled`, ajouter un label ne relance aucun run.
     types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - '**.md'
@@ -41,13 +44,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Calcule si la suite COMPLETE (MPI + Kokkos) doit tourner. Plein si :
+  # Calcule si la suite COMPLETE (MPI + Kokkos OpenMP) doit tourner. Plein si :
   #  - push sur master, OU
   #  - run nocturne (schedule), OU
   #  - declenchement manuel (workflow_dispatch), OU
-  #  - PR portant le label `ci-full` (l'integrateur exige la validation MPI/Kokkos
+  #  - PR portant le label `ci-full` (l'integrateur exige la validation MPI/Kokkos OpenMP
   #    sur une PR a risque avant merge).
-  # Sinon (PR ordinaire) : gate rapide seul (Release + Python).
+  # Sinon (PR ordinaire) : gate rapide seul (Kokkos Serial : C++ + Python).
   set-mode:
     name: mode (fast/full)
     runs-on: ubuntu-latest
@@ -67,19 +70,24 @@ jobs:
             full=true
           fi
           echo "full=$full" >> "$GITHUB_OUTPUT"
-          echo "Mode plein (MPI + Kokkos) : $full (event=${{ github.event_name }})"
+          echo "Mode plein (MPI + Kokkos OpenMP) : $full (event=${{ github.event_name }})"
 
   build-and-test:
-    name: ubuntu-latest / Release
+    name: ubuntu-latest / Kokkos Serial (C++ + Python)
     runs-on: ubuntu-latest
-    # Pas de `needs: set-mode` : Release + Python tournent dans TOUS les modes (fast comme
-    # full), donc ce job demarre tout de suite, en parallele du calcul de mode. Seuls mpi
-    # et kokkos dependent de set-mode (ils ne tournent qu'en plein).
+    # Pas de `needs: set-mode` : ce gate Kokkos Serial tourne dans TOUS les modes (fast comme
+    # full), donc il demarre tout de suite, en parallele du calcul de mode. Seuls mpi et
+    # kokkos-openmp dependent de set-mode (ils ne tournent qu'en plein).
 
     env:
       # ccache borne : evite que le cache enfle sans fin entre les runs.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 500M
+      CCACHE_MAXSIZE: 2G
+      # Prefixe FIXE ou Kokkos est installe ; mis en cache (le gros gain : pas de
+      # reconstruction de Kokkos a chaque run). Version EXACTE : 4.4.01, Serial, PIC
+      # (la PIC est exigee pour lier le module Python _adc).
+      KOKKOS_VERSION: 4.4.01
+      KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
       - uses: actions/checkout@v5
@@ -91,30 +99,56 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libeigen3-dev ninja-build ccache
 
+      # Cache du Kokkos DEJA INSTALLE (Serial, PIC), cle sur la version exacte + compilateur.
+      # Sur hit, on saute entierement la reconstruction de Kokkos (le gros poste de temps).
+      - name: Cache Kokkos install (Serial ${{ env.KOKKOS_VERSION }})
+        id: kokkos-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KOKKOS_PREFIX }}
+          key: kokkos-${{ runner.os }}-${{ env.KOKKOS_VERSION }}-serial-cxx20-gcc-pic
+
+      - name: Build + install Kokkos (Serial, PIC)
+        # Reconstruit Kokkos UNIQUEMENT sur cache miss ; sinon on reutilise le prefixe en cache.
+        # PIC : le module Python _adc (extension partagee) lie Kokkos, donc le code Kokkos doit
+        # etre position-independent.
+        if: steps.kokkos-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 -b ${KOKKOS_VERSION} https://github.com/kokkos/kokkos.git /tmp/kokkos
+          cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
+            -DCMAKE_INSTALL_PREFIX="${KOKKOS_PREFIX}" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build /tmp/kbuild --parallel 4 --target install
+
       # ccache : cle la plus specifique (os+job+ref+sha) en ecriture, restore-keys
       # du plus precis au plus large (meme job sur la branche -> sur master -> n'importe).
-      - name: Cache ccache (Release)
+      - name: Cache ccache (Kokkos Serial)
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-release-${{ github.ref }}-${{ github.sha }}
+          key: ccache-${{ runner.os }}-kokkos-serial-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ runner.os }}-release-${{ github.ref }}-
-            ccache-${{ runner.os }}-release-refs/heads/master-
-            ccache-${{ runner.os }}-release-
+            ccache-${{ runner.os }}-kokkos-serial-${{ github.ref }}-
+            ccache-${{ runner.os }}-kokkos-serial-refs/heads/master-
+            ccache-${{ runner.os }}-kokkos-serial-
 
-      # Flags du build : CMakePresets.json (preset ci-serial) = SOURCE UNIQUE DE VERITE,
-      # partagee avec le dev local. ccache est auto-detecte par le CMakeLists (ADC_USE_CCACHE).
-      # Le parallelisme (jobs: 2, build comme ctest) vit dans les build/testPresets : les TU
-      # lourdes (~1-2 GB RAM chacune) tueraient le runner GitHub (~7 GB) en -j illimite.
-      - name: Configure
-        run: cmake --preset ci-serial
+      # Flags du build : CMakePresets.json (preset ci-kokkos) = SOURCE UNIQUE DE VERITE, partagee
+      # avec le dev local ; Kokkos_ROOT vient de $KOKKOS_PREFIX (install en cache ci-dessus) et
+      # ccache est auto-detecte par le CMakeLists (ADC_USE_CCACHE). Le preset pose aussi
+      # ADC_TESTS_FAST_O0=ON : sous Kokkos, l'inlining -O3 des foncteurs device dans les ~242
+      # cibles de test rendait le build du gate enorme. Les tests sont des controles de correction
+      # sur grilles minuscules -> compiles a -O0 (build rapide, RAM bornee ; la lib de production
+      # et _adc restent a -O3) ; le pool Ninja adc_heavy_tu=1 serialise en plus les TU system.cpp
+      # (cf. tests/CMakeLists.txt). Parallelisme borne (jobs: 2) dans les build/testPresets.
+      - name: Configure (backend Kokkos Serial)
+        run: cmake --preset ci-kokkos
 
       - name: Build
-        run: cmake --build --preset ci-serial
+        run: cmake --build --preset ci-kokkos
 
       - name: Test
-        run: ctest --preset ci-serial
+        run: ctest --preset ci-kokkos
 
       - uses: actions/setup-python@v6
         with:
@@ -131,25 +165,27 @@ jobs:
             ccache-${{ runner.os }}-python-refs/heads/master-
             ccache-${{ runner.os }}-python-
 
-      - name: Build + test Python module `adc`
+      - name: Build + test Python module `adc` (backend Kokkos Serial)
         # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On construit
-        # l'extension _adc puis on exerce TOUTE la suite python/tests/test_*.py par
+        # l'extension _adc AVEC Kokkos puis on exerce TOUTE la suite python/tests/test_*.py par
         # AUTO-DECOUVERTE (find ... | xargs -P 2) : la liste ne peut plus se perimer et un
-        # nouveau test livre par une PR soeur est pris automatiquement. L'ensemble decouvert
-        # est un SUR-ENSEMBLE de l'ancienne liste manuelle (verifie : tous les anciens
-        # test_*.py sont matches, plus quelques tests deja presents jamais cables a la main).
+        # nouveau test livre par une PR soeur est pris automatiquement.
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache-py
-          CCACHE_MAXSIZE: 500M
+          CCACHE_MAXSIZE: 2G
         run: |
           pip install --upgrade pip numpy
-          cmake --preset ci-python
-          cmake --build --preset ci-python
-          export PYTHONPATH="$PWD/build-py/python"
+          cmake --preset ci-kokkos-python
+          cmake --build --preset ci-kokkos-python
+          export PYTHONPATH="$PWD/build-kokkos-py/python"
+          # adc_cpp est Kokkos-only : les tests DSL qui compilent un loader/.so (aot, production, ABI)
+          # incluent les en-tetes adc (-> for_each, #error sans Kokkos). Ils lisent le Kokkos a utiliser
+          # via Kokkos_ROOT / ADC_KOKKOS_ROOT : on pointe le MEME Kokkos Serial que le module _adc.
+          export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
           find python/tests -maxdepth 1 -name 'test_*.py' -print0 | sort -z \
             | xargs -0 -P 2 -I {} bash -c 'echo "::group::{}"; python3 "{}"; echo "::endgroup::"'
 
-      - name: ccache stats (Release)
+      - name: ccache stats (Kokkos Serial)
         if: always()
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -162,7 +198,7 @@ jobs:
         run: ccache -s
 
   mpi:
-    name: ubuntu-latest / MPI
+    name: ubuntu-latest / MPI + Kokkos Serial
     runs-on: ubuntu-latest
     needs: set-mode
     # Suite complete uniquement (push master / nightly / dispatch / PR label `ci-full`).
@@ -170,7 +206,9 @@ jobs:
 
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 500M
+      CCACHE_MAXSIZE: 2G
+      KOKKOS_VERSION: 4.4.01
+      KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
       - uses: actions/checkout@v5
@@ -182,6 +220,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libeigen3-dev libopenmpi-dev openmpi-bin ninja-build ccache
 
+      # Meme install Kokkos Serial (PIC) que le gate ; cle de cache partagee.
+      - name: Cache Kokkos install (Serial ${{ env.KOKKOS_VERSION }})
+        id: kokkos-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KOKKOS_PREFIX }}
+          key: kokkos-${{ runner.os }}-${{ env.KOKKOS_VERSION }}-serial-cxx20-gcc-pic
+
+      - name: Build + install Kokkos (Serial, PIC)
+        if: steps.kokkos-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 -b ${KOKKOS_VERSION} https://github.com/kokkos/kokkos.git /tmp/kokkos
+          cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
+            -DCMAKE_INSTALL_PREFIX="${KOKKOS_PREFIX}" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build /tmp/kbuild --parallel 4 --target install
+
       - name: Cache ccache (MPI)
         uses: actions/cache@v4
         with:
@@ -192,8 +248,9 @@ jobs:
             ccache-${{ runner.os }}-mpi-refs/heads/master-
             ccache-${{ runner.os }}-mpi-
 
-      - name: Configure + build (MPI)
-        # Flags : preset ci-mpi (source unique, cf. CMakePresets.json). ccache auto-detecte.
+      - name: Configure + build (MPI + Kokkos Serial)
+        # Flags : preset ci-mpi (source unique, cf. CMakePresets.json) ; Kokkos_ROOT vient de
+        # $KOKKOS_PREFIX (env du job, install en cache). ccache auto-detecte.
         run: |
           cmake --preset ci-mpi
           cmake --build --preset ci-mpi
@@ -210,90 +267,20 @@ jobs:
         if: always()
         run: ccache -s
 
-  kokkos:
-    name: ubuntu-latest / Kokkos (Serial)
-    runs-on: ubuntu-latest
-    needs: set-mode
-    # Teste le backend KOKKOS sur CPU (Serial). Indispensable : le build SANS Kokkos (job Release)
-    # ne couvre PAS le chemin kokkos_malloc / for_each Kokkos. C'est ce trou qui avait laisse passer
-    # la regression d'init (allocation d'un Fab avant l'init paresseuse de Kokkos).
-    # Suite complete uniquement (push master / nightly / dispatch / PR label `ci-full`).
-    if: needs.set-mode.outputs.full == 'true'
-
-    env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 500M
-      # Prefixe FIXE ou Kokkos est installe ; mis en cache (le gros gain : pas de
-      # reconstruction de Kokkos a chaque run). Version EXACTE : 4.4.01, Serial.
-      KOKKOS_VERSION: 4.4.01
-      KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
-
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libeigen3-dev ninja-build ccache
-
-      # Cache du Kokkos DEJA INSTALLE, cle sur la version exacte + serial + compilateur.
-      # Sur hit, on saute entierement la reconstruction de Kokkos (le gros poste de temps).
-      - name: Cache Kokkos install (Serial ${{ env.KOKKOS_VERSION }})
-        id: kokkos-cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.KOKKOS_PREFIX }}
-          key: kokkos-${{ runner.os }}-${{ env.KOKKOS_VERSION }}-serial-cxx20-gcc
-
-      - name: Cache ccache (Kokkos)
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-kokkos-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-kokkos-${{ github.ref }}-
-            ccache-${{ runner.os }}-kokkos-refs/heads/master-
-            ccache-${{ runner.os }}-kokkos-
-
-      - name: Build + install Kokkos (Serial)
-        # Reconstruit Kokkos UNIQUEMENT sur cache miss ; sinon on reutilise le prefixe en cache.
-        if: steps.kokkos-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 -b ${KOKKOS_VERSION} https://github.com/kokkos/kokkos.git /tmp/kokkos
-          cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
-            -DCMAKE_INSTALL_PREFIX="${KOKKOS_PREFIX}" -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build /tmp/kbuild --parallel 2 --target install
-
-      - name: Configure + build (backend Kokkos)
-        # Flags : preset ci-kokkos ; Kokkos_ROOT vient de $KOKKOS_PREFIX (env du job, install en cache).
-        run: |
-          cmake --preset ci-kokkos
-          cmake --build --preset ci-kokkos
-
-      - name: Test (ctest, backend Kokkos Serial)
-        run: ctest --preset ci-kokkos
-
-      - name: ccache stats (Kokkos)
-        if: always()
-        run: ccache -s
-
   kokkos-openmp:
     name: ubuntu-latest / Kokkos (OpenMP)
     runs-on: ubuntu-latest
     needs: set-mode
-    # Teste le backend KOKKOS sur CPU avec l'execution space OpenMP. Ferme le blanc
-    # "Kokkos OpenMP = zero coverage" signale dans docs/BACKEND_COVERAGE.md section 5.
+    # Teste le backend KOKKOS avec l'espace d'execution OpenMP (CPU multi-thread). Le gate
+    # build-and-test couvre deja Kokkos Serial (mono-thread) ; ce job ferme le multi-thread.
     # Suite complete uniquement (push master / nightly / dispatch / PR label `ci-full`).
     if: needs.set-mode.outputs.full == 'true'
 
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 500M
-      # Prefixe SEPARE du job kokkos-serial pour eviter toute collision de cache.
-      # Meme version de Kokkos, backend OpenMP.
+      CCACHE_MAXSIZE: 2G
+      # Prefixe SEPARE du Kokkos Serial pour eviter toute collision de cache.
+      # Meme version de Kokkos, espace d'execution OpenMP.
       KOKKOS_VERSION: 4.4.01
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-openmp-install
 
@@ -336,7 +323,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${KOKKOS_PREFIX}" -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build /tmp/kbuild-omp --parallel 2 --target install
+          cmake --build /tmp/kbuild-omp --parallel 4 --target install
 
       - name: Configure + build (backend Kokkos OpenMP)
         # MEME preset ci-kokkos que le job Serial (binaryDir build-kokkos) : seule l'install
@@ -372,7 +359,7 @@ jobs:
       - name: Build module Python `adc` (backend Kokkos OpenMP)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
-          CCACHE_MAXSIZE: 500M
+          CCACHE_MAXSIZE: 2G
         run: |
           pip install --upgrade pip numpy
           cmake --preset ci-kokkos-python
@@ -390,6 +377,9 @@ jobs:
           ADC_KOKKOS_ROOT: ${{ env.KOKKOS_PREFIX }}
         run: |
           export PYTHONPATH="$PWD/build-kokkos-py/python"
+          # Kokkos-only : ces tests compilent un loader/.so qui inclut les en-tetes adc (-> for_each).
+          # Ils lisent le Kokkos via Kokkos_ROOT / ADC_KOKKOS_ROOT : MEME install Kokkos OpenMP que _adc.
+          export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
           # Le test cle de regression + les suites production qui compilent un modele au runtime et
           # le branchent par add_native_block (System et AMR). Sous Kokkos, loader = c++20.
           # Le teardown est redevenu STRICT : le SIGABRT post-succes de test_dsl_production_amr

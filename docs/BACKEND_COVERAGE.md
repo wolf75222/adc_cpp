@@ -12,17 +12,17 @@
 
 | Symbole | Signification |
 |---------|---------------|
-| **ci-fast** | Tourne dans le job **Release** (ubuntu-latest, g++, Release, pas de Kokkos/MPI). Declenchement : tout `pull_request` ordinaire. |
-| **ci-full** | Tourne en mode plein (push `master`, nightly cron, `workflow_dispatch`, ou PR labellisee `ci-full`). Comprend les jobs **MPI** (`-DADC_USE_MPI=ON`) et **Kokkos-Serial** (`-DADC_USE_KOKKOS=ON`, Kokkos 4.4.01 Serial CPU). |
+| **ci-fast** | Tourne dans le gate OBLIGATOIRE **build-and-test** (ubuntu-latest, g++, Release, Kokkos Serial : `-DADC_USE_KOKKOS=ON`, Kokkos 4.4.01 `Kokkos_ENABLE_SERIAL=ON`, C++ + module Python). Declenchement : tout `pull_request` ordinaire. |
+| **ci-full** | Tourne en mode plein (push `master`, nightly cron, `workflow_dispatch`, ou PR labellisee `ci-full`). Ajoute les jobs **MPI** (`-DADC_USE_MPI=ON` + Kokkos Serial) et **Kokkos-OpenMP** (`-DADC_USE_KOKKOS=ON`, Kokkos 4.4.01 `Kokkos_ENABLE_OPENMP=ON`, CPU multi-thread). |
 | **ROMEO** | Valide manuellement sur GH200 (noeud `armgpu`, Kokkos 4.4.01, `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`, OpenMPI CUDA-aware). Harness cite entre parentheses. Evidence dans `docs/GPU_ROMEO.md` et/ou `docs/GPU_RUNTIME_PORT.md`. |
 | **self-skip** | Le test detecte l'absence du backend et retourne sans erreur (exit 0). Note : dans la colonne **MPI CPU**, un test non-MPI (sections 1a-1g) marque "self-skip" signifie en realite "tourne a np=1 dans le build MPI (lie MPI, mono-process)" -- il EST compile et lance dans le job `mpi`, hors du bloc `if(ADC_HAS_MPI)` du CMake. Ce n'est PAS un vrai skip : le binaire s'execute, il ignore simplement les appels MPI facultatifs. |
 | **?** | Inconnu / pas exerce -- voir section Gaps. |
 
 Colonnes :
 
-- **Serial** : build sans Kokkos ni MPI (Release job, g++ / clang).
-- **MPI CPU** : build `-DADC_USE_MPI=ON` sans Kokkos, CPU uniquement (MPI job).
-- **Kokkos Serial** : build `-DADC_USE_KOKKOS=ON` avec `Kokkos_ENABLE_SERIAL=ON`, CPU (Kokkos job).
+- **Serial** : gate `build-and-test`, `-DADC_USE_KOKKOS=ON` avec `Kokkos_ENABLE_SERIAL=ON`, CPU mono-thread, sans MPI (g++). C'est le chemin Kokkos Serial du gate obligatoire (ci-fast).
+- **MPI CPU** : build `-DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON` (Kokkos Serial), CPU uniquement (MPI job).
+- **Kokkos Serial** : meme backend Kokkos Serial que la colonne Serial. Le gate `build-and-test` tourne dans TOUS les modes (fast comme full), donc Kokkos Serial est aussi couvert chaque fois que ci-full s'execute.
 - **Kokkos OpenMP** : build `-DADC_USE_KOKKOS=ON` avec `Kokkos_ENABLE_OPENMP=ON`, CPU.
 - **Kokkos Cuda (GH200)** : build Kokkos + `Kokkos_ARCH_HOPPER90`, un GPU par rang.
 - **MPI + Kokkos Cuda** : meme build + OpenMPI CUDA-aware, `srun -n {1,2,4} --gpus-per-task=1`.
@@ -212,10 +212,13 @@ backends CPU que la section 1g ; non encore exerces sur device (colonnes Cuda = 
 
 ## 2. Tests Python (`python/tests/test_*.py`)
 
-Tous exercent le module `_adc` (pybind11) : le binding Python ne route que vers le backend **Serial**
-(pas de CMake `-DADC_USE_KOKKOS=ON` dans le job Python de la CI, pas de MPI). Ils tournent dans le job
-**Release** (ci-fast et ci-full identiques : le job Python est dans `build-and-test`, pas dans `mpi` ni
-`kokkos`).
+Tous exercent le module `_adc` (pybind11), construit **avec Kokkos** (le module Python est lie au
+backend Kokkos comme tout ce qui lie `adc` ; Kokkos est obligatoire). La suite COMPLETE tourne dans
+le gate `build-and-test`, ou le module est compile en **Kokkos Serial**
+(`-DADC_BUILD_PYTHON=ON -DADC_USE_KOKKOS=ON`, sans MPI) ; ci-fast et ci-full y sont identiques pour
+la suite Python (pas dans `mpi`). En ci-full, le job `kokkos-openmp` recompile le module en **Kokkos
+OpenMP** mais n'y rejoue qu'un sous-ensemble cible (garde-fou ABI std : `test_native_abi_std`,
+`test_dsl_production`, `test_dsl_production_amr`).
 
 | Test Python | Serial | MPI CPU | Kokkos Serial | Kokkos OpenMP | Kokkos Cuda | MPI+Kokkos Cuda |
 |-------------|--------|---------|---------------|---------------|-------------|-----------------|
@@ -326,11 +329,11 @@ rejoue np=1/2/4), + 60 tests Python.
 
 | Statut | Nombre de cellules (approx.) |
 |--------|------------------------------|
-| **ci-fast** | ~169 (109 C++ hors-MPI x Serial + 60 Python x Serial) |
+| **ci-fast** | ~169 (109 C++ hors-MPI x Kokkos Serial [gate] + 60 Python x Kokkos Serial [gate]) |
 | **ci-full** | ~239 (109 C++ x Kokkos Serial + 109 x Kokkos OpenMP ; ~21 entrees MPI CPU) |
 | **ROMEO** | ~55 (harnesses GPU mono et multi-GPU couvrant ~15 groupes fonctionnels) |
-| **self-skip** | ~350 (tests serial/Kokkos-Serial sur colonnes MPI, et MPI-only sur colonnes sans MPI) |
-| **?** | Kokkos Cuda des tests runtime non encore exerces sur device (dont la section 1g-bis AMR multi-blocs) + MPI+Kokkos Cuda de la majorite des tests MPI + tout le bloc Python hors Serial |
+| **self-skip** | ~350 (tests Kokkos-Serial sur colonnes MPI, et MPI-only sur colonnes sans MPI) |
+| **?** | Kokkos Cuda des tests runtime non encore exerces sur device (dont la section 1g-bis AMR multi-blocs) + MPI+Kokkos Cuda de la majorite des tests MPI + tout le bloc Python hors gate Kokkos Serial |
 
 ---
 
@@ -360,9 +363,11 @@ rejoue np=1/2/4), + 60 tests Python.
    `test_mpi_fft_distributed`, `test_mpi_system_fft`, `test_mpi_hybrid_mbox_parity`,
    `test_amr_system_bz_multibox` (MPI+Cuda).
 
-3. **Tests Python sous Kokkos / MPI** -- le module `_adc` n'est construit en CI qu'en mode Serial
-   (Release, pas de Kokkos ni MPI). Aucun test Python ne couvre le chemin Kokkos Serial, OpenMP, Cuda
-   ou MPI.
+3. **Tests Python sous Kokkos OpenMP (suite complete) / MPI / Cuda** -- le module `_adc` est construit
+   avec Kokkos (obligatoire) : la suite COMPLETE tourne sous Kokkos Serial dans le gate
+   `build-and-test`. Sous Kokkos OpenMP, seul un sous-ensemble ABI (`test_native_abi_std`,
+   `test_dsl_production`, `test_dsl_production_amr`) est rejoue (job `kokkos-openmp`). Aucun test
+   Python ne couvre encore Kokkos OpenMP en entier, ni Kokkos Cuda, ni MPI.
 
 4. **Chemin `add_compiled_model` sur Kokkos Cuda** -- `test_compiled_model_parity` et ses variantes
    (`test_weno5_compiled_model`, `test_amr_compiled_model`, ...) ne sont pas valides sur device. La

@@ -9,9 +9,8 @@ structure ; ne pas dupliquer le tableau detaille ici (il evolue a chaque ajout d
 
 | Backend | Build | Ou il tourne |
 |---------|-------|--------------|
-| **Serial** | sans Kokkos ni MPI (g++ / clang) | CI job Release (`ci-fast`, toute PR). |
-| **MPI CPU** | `-DADC_USE_MPI=ON`, sans Kokkos | CI job MPI (`ci-full`), `mpirun` np=1/2/4. |
-| **Kokkos Serial** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_SERIAL=ON` | CI job Kokkos (`ci-full`). |
+| **Kokkos Serial** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_SERIAL=ON` | CI gate `build-and-test` (toute PR), C++ + module Python. |
+| **MPI + Kokkos Serial** | `-DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON` | CI job MPI (`ci-full`), `mpirun` np=1/2/4. |
 | **Kokkos OpenMP** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_OPENMP=ON` | CI job `ci-full` (active depuis #155). |
 | **Kokkos Cuda (GH200)** | Kokkos + `Kokkos_ARCH_HOPPER90`, un GPU par rang | ROMEO manuel uniquement (jamais en CI). |
 | **MPI + Kokkos Cuda** | build precedent + OpenMPI CUDA-aware | ROMEO manuel (`srun -n {1,2,4}`). |
@@ -27,11 +26,12 @@ SBATCH. Voir [GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/mas
 ## Comment lire la matrice
 
 Le tableau de [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md) croise chaque test (C++ ctest et
-Python) avec les six backends ci-dessus. La legende y distingue notamment :
+Python) avec les backends ci-dessus. La legende y distingue notamment :
 
-- **ci-fast** : tourne sur toute PR (job Release).
-- **ci-full** : tourne en mode plein (push `master`, nightly, PR labellisee), inclut MPI et
-  Kokkos Serial/OpenMP.
+- **build-and-test** : gate OBLIGATOIRE sur toute PR ; compile en Kokkos Serial (C++ + module
+  Python).
+- **ci-full** : tourne en mode plein (push `master`, nightly, PR labellisee), ajoute MPI + Kokkos
+  Serial et Kokkos OpenMP.
 - **ROMEO** : valide manuellement sur GH200 ; le harness exact est cite entre parentheses, avec
   l'evidence chiffree (p.ex. `dmax=0`).
 - **self-skip** : le test detecte l'absence du backend et sort proprement (exit 0).
@@ -40,8 +40,8 @@ Python) avec les six backends ci-dessus. La legende y distingue notamment :
 
 ## Points saillants
 
-- Les tests Python n'exercent que le backend Serial : le module `_adc` est construit en CI
-  sans Kokkos ni MPI. Aucun test Python ne couvre Kokkos / MPI / Cuda.
+- Les tests Python n'exercent que Kokkos Serial : le module `_adc` est construit en CI en
+  Kokkos Serial, sans MPI ni Cuda. Aucun test Python ne couvre MPI ou Cuda.
 - La voie FFT Poisson (`PoissonFFTSolver`) est refusee sous MPI (single-rank par design) ;
   un test verrouille cette non-regression.
 - Les colonnes Kokkos Cuda et MPI + Kokkos Cuda sont soit `ROMEO` (validees a la main),
