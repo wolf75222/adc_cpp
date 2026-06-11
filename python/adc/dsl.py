@@ -1095,6 +1095,12 @@ def diff(expr, var, defs=None):
             return _s_neg(go(e.a))
         if isinstance(e, Sqrt):
             return _s_div(go(e.a), _s_mul(Const(2.0), Sqrt(e.a)))
+        if isinstance(e, Abs):
+            # d|u| = (u / |u|) u' -- derivee exacte hors du pli u = 0 (les planchers lisses
+            # max(x, eps) = ((x+eps) + |x-eps|)/2 des modeles 'robust' y donnent exactement
+            # l'indicatrice attendue) ; AU pli, u/|u| vaut NaN : singularite de mesure nulle,
+            # documentee (comme la division des quotients).
+            return _s_mul(_s_div(e.a, Abs(e.a)), go(e.a))
         if isinstance(e, Pow):
             if not _is_const(go(e.b), 0.0):
                 raise NotImplementedError(
@@ -1190,6 +1196,8 @@ class HyperbolicModel:
         self._eig = {}          # "x" / "y" -> liste d'Expr (valeurs propres)
         self._wave_speeds = None  # {"x"/"y": (smin Expr, smax Expr)} : vitesses SIGNEES explicites
                                   # (set_wave_speeds) ; None = derive des eigenvalues si 'p' (historique)
+        self._ws_jacobian = None  # {"x"/"y": [[Expr]]} + meta (eig, blocks) : vitesses signees EXACTES
+                                  # par valeurs propres du jacobien de flux (set_wave_speeds_from_jacobian)
         self._source = None     # liste d'Expr (une par composante) ou None
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
         self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
@@ -1297,8 +1305,99 @@ class HyperbolicModel:
         if len(x) != 2 or len(y) != 2:
             raise ValueError("set_wave_speeds : attendu x=(smin, smax) et y=(smin, smax) "
                              "(recu x=%d expression(s), y=%d)" % (len(x), len(y)))
+        if self._ws_jacobian is not None:
+            raise ValueError("set_wave_speeds : set_wave_speeds_from_jacobian deja declare -- un "
+                             "seul fournisseur de wave_speeds")
         self._wave_speeds = {"x": (_wrap(x[0]), _wrap(x[1])),
                              "y": (_wrap(y[0]), _wrap(y[1]))}
+
+    def set_wave_speeds_from_jacobian(self, x=None, y=None, eig="numeric", blocks=None):
+        """Vitesses d'onde signees EXACTES : smin/smax = extremes des valeurs propres du jacobien
+        de flux A = dF/dU, calcules NUMERIQUEMENT par cellule (adc::real_eig_minmax, QR de Francis
+        sur tampon pile, repli Gershgorin sur non-convergence = borne externe sure). Emet
+        ``wave_speeds(U, aux, dir, smin, smax)`` (gate HLL du coeur) et, sans set_eigenvalues,
+        ``max_wave_speed`` = max(|smin|, |smax|) sur les memes blocs.
+
+        @p x, @p y : matrices n_vars x n_vars d'expressions dA[i][j] = dF_dir[i]/dU[j]. None
+        (defaut) = AUTODIFF du flux declare via flux_jacobian(dir) (dsl.diff, primitives
+        developpees par la regle de chaine) -- le jacobien ne peut alors pas se desynchroniser du
+        flux. Fournir x/y explicites n'a de sens que pour court-circuiter l'autodiff (formes
+        simplifiees a la main) ; check_model les confronte alors aux differences finies du flux.
+
+        @p eig : "numeric" (defaut) = entrees du jacobien emises en formules, valeurs propres par
+        bloc a l'execution ; "fd" = jacobien construit PAR COLONNES aux differences finies du flux
+        COMPILE ((flux(U + eps e_k) - flux(U))/eps, eps = 1e-6 |U[0]| + 1e-30, miroir de la
+        branche flagsym != 1 du MATLAB de reference) -- bring-up/debug generique, jamais
+        production (troncature O(eps)).
+
+        @p blocks : None (defaut) = UN bloc plein n_vars x n_vars, seul mode inconditionnellement
+        correct. Sinon, liste de LISTES D'INDICES (eventuellement non contigus, p.ex.
+        [[0, 1, 4], [2, 3]]) appliquee aux DEUX directions, ou dict {"x": [...], "y": [...]}
+        (les structures bloc-triangulaires de dFx/dU et dFy/dU different en general : pour un
+        systeme de moments, les chaines en x sont contigues et celles en y ne le sont pas).
+        Les extremes sont pris sur l'union des spectres des sous-blocs diagonaux A[idx][idx].
+        CONTRAT : l'appelant AFFIRME que A est bloc-(inferieure-)triangulaire selon cette
+        partition (a permutation pres) -- sur une matrice quelconque les extremes de sous-blocs
+        NE BORNENT PAS le spectre (contre-exemple [[0, k], [k, 0]] : spectre +-k, sous-blocs 1x1
+        nuls). Des indices peuvent etre omis (lignes/colonnes porteuses d'aucune valeur propre
+        extreme, cf. le bloc saute du MATLAB de reference).
+
+        Diagnostics : la non-convergence QR retombe en silence sur la borne de Gershgorin du bloc
+        (PLUS LARGE, jamais fausse -- HLL reste stable, seulement plus diffusif) ; une perte
+        d'hyperbolicite (valeurs propres complexes) n'est pas signalee par cellule -- la verifier
+        hors ligne (check_model, golden type eigenvalues15_2D)."""
+        if self._wave_speeds is not None:
+            raise ValueError("set_wave_speeds_from_jacobian : set_wave_speeds deja declare -- un "
+                             "seul fournisseur de wave_speeds")
+        if eig not in ("numeric", "fd"):
+            raise ValueError("set_wave_speeds_from_jacobian : eig 'numeric' | 'fd' (recu %r)" % (eig,))
+        nv = self.n_vars
+        if (x is None) != (y is None):
+            raise ValueError("set_wave_speeds_from_jacobian : fournir x ET y, ou aucun (autodiff)")
+        if eig == "fd" and x is not None:
+            raise ValueError("set_wave_speeds_from_jacobian : eig='fd' construit le jacobien aux "
+                             "differences finies du flux compile -- x/y n'ont pas de sens ici")
+        rows = {}
+        if eig == "numeric":
+            if x is None:
+                if not self._flux:
+                    raise ValueError("set_wave_speeds_from_jacobian : appeler set_flux(...) d'abord "
+                                     "(autodiff du jacobien)")
+                rows = {"x": self.flux_jacobian(0), "y": self.flux_jacobian(1)}
+            else:
+                for key, mat in (("x", x), ("y", y)):
+                    if len(mat) != nv or any(len(r) != nv for r in mat):
+                        raise ValueError("set_wave_speeds_from_jacobian : jacobien %s attendu "
+                                         "%d x %d" % (key, nv, nv))
+                    rows[key] = [[_wrap(e) for e in r] for r in mat]
+        def norm_blocks(blk, label):
+            blk = [list(int(i) for i in b) for b in blk]
+            seen = set()
+            for b in blk:
+                if not b:
+                    raise ValueError("set_wave_speeds_from_jacobian : bloc vide (%s)" % label)
+                for i in b:
+                    if not (0 <= i < nv):
+                        raise ValueError("set_wave_speeds_from_jacobian : indice %d hors [0, %d) "
+                                         "(%s)" % (i, nv, label))
+                    if i in seen:
+                        raise ValueError("set_wave_speeds_from_jacobian : indice %d present dans "
+                                         "deux blocs (%s)" % (i, label))
+                    seen.add(i)
+            return blk
+
+        if blocks is None:
+            per_dir = {"x": [list(range(nv))], "y": [list(range(nv))]}
+        elif isinstance(blocks, dict):
+            if set(blocks) != {"x", "y"}:
+                raise ValueError("set_wave_speeds_from_jacobian : blocks dict attendu avec les "
+                                 "cles 'x' et 'y' (recu %r)" % sorted(blocks))
+            per_dir = {k: norm_blocks(blocks[k], k) for k in ("x", "y")}
+        else:
+            shared = norm_blocks(blocks, "x et y")
+            per_dir = {"x": shared, "y": [list(b) for b in shared]}
+        self._ws_jacobian = {"rows": rows or None, "eig": eig, "blocks": per_dir,
+                             "explicit": x is not None}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
 
@@ -1491,12 +1590,53 @@ class HyperbolicModel:
         (set_wave_speeds), miroir exact de l'emission C++."""
         env = self._env(U, aux)
         key = "x" if dir == 0 else "y"
+        if not self._eig.get(key) and self._ws_jacobian is not None:
+            lo, hi = self._ws_jacobian_value(U, env, key)
+            return max(float(np.max(np.abs(lo))), float(np.max(np.abs(hi))))
         exprs = self._eig.get(key) or (list(self._wave_speeds[key])
                                        if self._wave_speeds is not None else None)
         if not exprs:
-            raise ValueError("max_wave_speed : ni set_eigenvalues(...) ni set_wave_speeds(...) "
-                             "declares sur le modele '%s'" % self.name)
+            raise ValueError("max_wave_speed : ni set_eigenvalues(...) ni set_wave_speeds(...) ni "
+                             "set_wave_speeds_from_jacobian(...) declares sur le modele '%s'"
+                             % self.name)
         return max(float(np.max(np.abs(np.asarray(e.eval(env))))) for e in exprs)
+
+    def _ws_jacobian_value(self, U, env, key):
+        """Evaluateur numpy du chemin jacobien : extremes des parties reelles des valeurs propres
+        des sous-blocs, par echantillon (miroir du wave_speeds emis ; np.linalg.eigvals)."""
+        ws = self._ws_jacobian
+        nv = self.n_vars
+        nsmp = int(np.asarray(U[0]).reshape(-1).shape[0])
+        if ws["eig"] == "fd":
+            base = np.stack([np.broadcast_to(np.asarray(c.eval(env), dtype=float), (nsmp,))
+                             if hasattr(c, "eval") else np.full((nsmp,), float(c))
+                             for c in (self._flux[key])], axis=0)
+            J = np.empty((nsmp, nv, nv))
+            Uflat = np.stack([np.broadcast_to(np.asarray(env[c], dtype=float), (nsmp,))
+                              for c in self.cons_names], axis=0)
+            for k in range(nv):
+                eps = 1e-6 * np.abs(Uflat[0]) + 1e-30
+                Up = Uflat.copy()
+                Up[k] += eps
+                envp = self._env(Up, {n: env[n] for n in self.aux_names} if self.aux_names else None)
+                Fp = np.stack([np.broadcast_to(np.asarray(c.eval(envp), dtype=float), (nsmp,))
+                               for c in self._flux[key]], axis=0)
+                J[:, :, k] = ((Fp - base) / eps).T
+        else:
+            rows = ws["rows"][key]
+            J = np.empty((nsmp, nv, nv))
+            for i in range(nv):
+                for j in range(nv):
+                    J[:, i, j] = np.broadcast_to(
+                        np.asarray(rows[i][j].eval(env), dtype=float), (nsmp,))
+        lo = np.full((nsmp,), np.inf)
+        hi = np.full((nsmp,), -np.inf)
+        for b in ws["blocks"][key]:
+            idx = np.asarray(b)
+            lam = np.linalg.eigvals(J[:, idx[:, None], idx[None, :]])
+            lo = np.minimum(lo, lam.real.min(axis=1))
+            hi = np.maximum(hi, lam.real.max(axis=1))
+        return lo, hi
 
     def wave_speeds_value(self, U, aux, dir):
         """Evaluateur numpy des vitesses signees (smin, smax) -- miroir du wave_speeds emis :
@@ -1508,6 +1648,8 @@ class HyperbolicModel:
             lo, hi = self._wave_speeds[key]
             return (np.asarray(lo.eval(env), dtype=float),
                     np.asarray(hi.eval(env), dtype=float))
+        if self._ws_jacobian is not None:
+            return self._ws_jacobian_value(U, env, key)
         eigs = [np.asarray(e.eval(env), dtype=float) for e in self._eig.get(key, [])]
         if not eigs:
             raise ValueError("wave_speeds_value : ni set_wave_speeds(...) ni set_eigenvalues(...) "
@@ -1544,6 +1686,9 @@ class HyperbolicModel:
                   [e for row in (self._src_jac or []) for e in row]]
         if self._wave_speeds is not None:
             groups.append(list(self._wave_speeds["x"]) + list(self._wave_speeds["y"]))
+        if self._ws_jacobian is not None and self._ws_jacobian["rows"] is not None:
+            for d in ("x", "y"):
+                groups.append([e for row in self._ws_jacobian["rows"][d] for e in row])
         if self._roe_rows is not None:
             groups.append(self._roe_rows["x"])
             groups.append(self._roe_rows["y"])
@@ -1708,6 +1853,9 @@ class HyperbolicModel:
         if self._wave_speeds is not None:  # vitesses signees explicites : params runtime inclus
             for d in ("x", "y"):
                 out += list(self._wave_speeds[d])
+        if self._ws_jacobian is not None and self._ws_jacobian["rows"] is not None:
+            for d in ("x", "y"):  # entrees du jacobien : params runtime inclus
+                out += [e for row in self._ws_jacobian["rows"][d] for e in row]
         if self._source is not None:
             out += [_wrap(e) for e in self._source]
         if self.cons_from is not None:
@@ -1826,9 +1974,10 @@ class HyperbolicModel:
         if len(self._flux.get("x", [])) != self.n_vars or len(self._flux.get("y", [])) != self.n_vars:
             raise ValueError("emit_cpp_brick : flux attendu avec %d composantes par direction"
                              % self.n_vars)
-        if not self._eig and self._wave_speeds is None:
-            raise ValueError("emit_cpp_brick : appeler set_eigenvalues(...) ou "
-                             "set_wave_speeds(...) d'abord (source de max_wave_speed / CFL)")
+        if not self._eig and self._wave_speeds is None and self._ws_jacobian is None:
+            raise ValueError("emit_cpp_brick : appeler set_eigenvalues(...), set_wave_speeds(...) "
+                             "ou set_wave_speeds_from_jacobian(...) d'abord (source de "
+                             "max_wave_speed / CFL)")
         nm = name or (self.name.capitalize() + "Gen")
         nc, npr = self.n_vars, len(self.prim_state)
 
@@ -1866,6 +2015,69 @@ class HyperbolicModel:
                 lines.append("%sif (lam%d_ > smax) smax = lam%d_;" % (ind, k, k))
             return lines
 
+        def ws_jac_pieces(key):
+            # chemin jacobien 'numeric' : CSE des entrees NON NULLES des sous-blocs de la
+            # direction @p key ; les zeros structurels (10 lignes unite d'un systeme de moments,
+            # creux quelconque) sont emis en litteraux sans passer par le CSE.
+            ws = self._ws_jacobian
+            rows = ws["rows"][key]
+            entries, zeros = [], []
+            for bi, b in enumerate(ws["blocks"][key]):
+                for r, gi in enumerate(b):
+                    for c, gj in enumerate(b):
+                        e = rows[gi][gj]
+                        if isinstance(e, Const) and e.value == 0.0:
+                            zeros.append((bi, r, c))
+                        else:
+                            entries.append((bi, r, c, e))
+            tl, cpps = self._codegen_exprs([e for (_, _, _, e) in entries], cse)
+            fill = {}
+            for (bi, r, c, _), cpp in zip(entries, cpps):
+                fill.setdefault(bi, []).append((r, c, cpp))
+            for (bi, r, c) in zeros:
+                fill.setdefault(bi, []).append((r, c, "adc::Real(0)"))
+            return tl, fill
+
+        def ws_jac_body(ind, lo, hi, key="x", fill=None):
+            # corps du calcul jacobien -> extremes (@p lo/@p hi : noms des destinations).
+            # eig='fd' : jacobien par colonnes aux differences finies du flux COMPILE ;
+            # eig='numeric' : remplissage des sous-blocs depuis @p fill. @p key : direction
+            # (choisit la partition de blocs).
+            ws = self._ws_jacobian
+            nv = self.n_vars
+            L = []
+            if ws["eig"] == "fd":
+                L.append("%sconst State F0_ = flux(U, a, dir);" % ind)
+                L.append("%sadc::Real Jf_[%d][%d];" % (ind, nv, nv))
+                L.append("%sconst adc::Real eps_ = adc::Real(1e-6) * (U[0] < 0 ? -U[0] : U[0])"
+                         " + adc::Real(1e-30);" % ind)
+                L.append("%sfor (int k_ = 0; k_ < %d; ++k_) {" % (ind, nv))
+                L.append("%s  State Up_ = U;" % ind)
+                L.append("%s  Up_[k_] += eps_;" % ind)
+                L.append("%s  const State Fk_ = flux(Up_, a, dir);" % ind)
+                L.append("%s  for (int i_ = 0; i_ < %d; ++i_) Jf_[i_][k_] = (Fk_[i_] - F0_[i_])"
+                         " / eps_;" % (ind, nv))
+                L.append("%s}" % ind)
+            for bi, b in enumerate(ws["blocks"][key]):
+                nb = len(b)
+                L.append("%s{" % ind)
+                L.append("%s  adc::Real Jb_[%d][%d];" % (ind, nb, nb))
+                if ws["eig"] == "fd":
+                    for r, gi in enumerate(b):
+                        for c, gj in enumerate(b):
+                            L.append("%s  Jb_[%d][%d] = Jf_[%d][%d];" % (ind, r, c, gi, gj))
+                else:
+                    for (r, c, cpp) in sorted(fill.get(bi, [])):
+                        L.append("%s  Jb_[%d][%d] = %s;" % (ind, r, c, cpp))
+                L.append("%s  const adc::EigBounds eb_ = adc::real_eig_minmax(Jb_);" % ind)
+                if bi == 0:
+                    L.append("%s  %s = eb_.lmin; %s = eb_.lmax;" % (ind, lo, hi))
+                else:
+                    L.append("%s  if (eb_.lmin < %s) %s = eb_.lmin;" % (ind, lo, lo))
+                    L.append("%s  if (eb_.lmax > %s) %s = eb_.lmax;" % (ind, hi, hi))
+                L.append("%s}" % ind)
+            return L
+
         cnames = ", ".join('"%s"' % c for c in self.cons_names)
         pnames = ", ".join('"%s"' % p for p in self.prim_state)
         # Roles physiques paralleles aux noms : initialiseur C++ d'adc::VariableSet::roles. Emis SI au
@@ -1889,6 +2101,8 @@ class HyperbolicModel:
         ]
         if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
             S.append("#include <adc/runtime/runtime_params.hpp>")
+        if self._ws_jacobian is not None:  # valeurs propres de blocs denses (wave_speeds exacts)
+            S.append("#include <adc/numerics/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
@@ -1918,7 +2132,12 @@ class HyperbolicModel:
         S += ["      F[%d] = %s;" % (i, fcpps[nc + i]) for i in range(nc)]
         S += ["    }", "    return F;", "  }", ""]
 
-        S.append("  ADC_HD adc::Real max_wave_speed(const State& U, %s, int dir) const {" % aux_param)
+        # en mode jacobien 'fd' SANS eigenvalues, max_wave_speed appelle flux(U, a, dir) : le
+        # parametre Aux doit etre nomme meme si aucune formule ne lit d'aux.
+        jac_fd = self._ws_jacobian is not None and self._ws_jacobian["eig"] == "fd"
+        mws_aux_param = "const Aux& a" if (jac_fd and not self._eig) else aux_param
+        S.append("  ADC_HD adc::Real max_wave_speed(const State& U, %s, int dir) const {"
+                 % mws_aux_param)
         S += cons_locals() + prim_locals() + aux_locals()
         if self._eig:
             # source historique : max(|eigenvalues|), bit-identique.
@@ -1930,7 +2149,7 @@ class HyperbolicModel:
             S.append("    } else {")
             S += eig_reduce(ecpps[nx:], "      ")
             S += ["    }", "  }", ""]
-        else:
+        elif self._wave_speeds is not None:
             # SANS eigenvalues : borne de Rusanov / CFL derivee des vitesses SIGNEES explicites,
             # max(|smin|, |smax|) -- la paire borne le spectre par contrat de set_wave_speeds.
             ws = self._wave_speeds
@@ -1941,6 +2160,32 @@ class HyperbolicModel:
             S.append("    } else {")
             S += eig_reduce(wcpps[2:], "      ")
             S += ["    }", "  }", ""]
+        else:
+            # SANS eigenvalues : borne de Rusanov / CFL = max(|smin|, |smax|) des extremes du
+            # spectre du jacobien (memes blocs que wave_speeds : Rusanov et HLL partagent la
+            # meme verite).
+            S.append("    adc::Real lo_ = adc::Real(0), hi_ = adc::Real(0);")
+            jac_same_blocks = self._ws_jacobian["blocks"]["x"] == self._ws_jacobian["blocks"]["y"]
+            if self._ws_jacobian["eig"] == "fd" and jac_same_blocks:
+                S += ws_jac_body("    ", "lo_", "hi_")
+            elif self._ws_jacobian["eig"] == "fd":
+                S.append("    if (dir == 0) {")
+                S += ws_jac_body("      ", "lo_", "hi_", "x")
+                S.append("    } else {")
+                S += ws_jac_body("      ", "lo_", "hi_", "y")
+                S.append("    }")
+            else:
+                ptx, pty = ws_jac_pieces("x"), ws_jac_pieces("y")
+                S.append("    if (dir == 0) {")
+                S += ptx[0]
+                S += ws_jac_body("      ", "lo_", "hi_", "x", ptx[1])
+                S.append("    } else {")
+                S += pty[0]
+                S += ws_jac_body("      ", "lo_", "hi_", "y", pty[1])
+                S.append("    }")
+            S.append("    const adc::Real alo_ = lo_ < 0 ? -lo_ : lo_;")
+            S.append("    const adc::Real ahi_ = hi_ < 0 ? -hi_ : hi_;")
+            S += ["    return alo_ > ahi_ ? alo_ : ahi_;", "  }", ""]
 
         # pression : emise SI une primitive 'p' (pression) est declaree (convention compressible) ;
         # requise par les flux HLLC / Roe canoniques (make_block : requires { m.pressure(s); }).
@@ -1968,6 +2213,33 @@ class HyperbolicModel:
             S.append("    } else {")
             S.append("      smin = %s; smax = %s;" % (wcpps[2], wcpps[3]))
             S += ["    }", "  }", ""]
+        elif self._ws_jacobian is not None:
+            # vitesses EXACTES par valeurs propres du jacobien (cf. set_wave_speeds_from_jacobian :
+            # 'numeric' = entrees en formules, 'fd' = colonnes aux differences finies du flux
+            # compile ; extremes par sous-blocs via adc::real_eig_minmax, repli Gershgorin sur).
+            ws_aux = aux_param if self._ws_jacobian["eig"] != "fd" else "const Aux& a"
+            S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
+                     "adc::Real& smax) const {" % ws_aux)
+            S += cons_locals() + prim_locals() + aux_locals()
+            ws_same_blocks = self._ws_jacobian["blocks"]["x"] == self._ws_jacobian["blocks"]["y"]
+            if self._ws_jacobian["eig"] == "fd" and ws_same_blocks:
+                S += ws_jac_body("    ", "smin", "smax")
+            elif self._ws_jacobian["eig"] == "fd":
+                S.append("    if (dir == 0) {")
+                S += ws_jac_body("      ", "smin", "smax", "x")
+                S.append("    } else {")
+                S += ws_jac_body("      ", "smin", "smax", "y")
+                S.append("    }")
+            else:
+                ptx, pty = ws_jac_pieces("x"), ws_jac_pieces("y")
+                S.append("    if (dir == 0) {")
+                S += ptx[0]
+                S += ws_jac_body("      ", "smin", "smax", "x", ptx[1])
+                S.append("    } else {")
+                S += pty[0]
+                S += ws_jac_body("      ", "smin", "smax", "y", pty[1])
+                S.append("    }")
+            S += ["  }", ""]
         elif "p" in self.prim_defs:
             nx = len(self._eig["x"])
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
@@ -2222,6 +2494,8 @@ class HyperbolicModel:
         ]
         if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
             S.append("#include <adc/runtime/runtime_params.hpp>")
+        if self._ws_jacobian is not None:  # valeurs propres de blocs denses (wave_speeds exacts)
+            S.append("#include <adc/numerics/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
@@ -2673,6 +2947,14 @@ class HyperbolicModel:
         if getattr(m, "_wave_speeds", None) is not None:
             parts.append("wave_speeds=%s" % ";".join(repr(e) for k in ("x", "y")
                                                      for e in m._wave_speeds[k]))
+        if getattr(m, "_ws_jacobian", None) is not None:
+            ws = m._ws_jacobian
+            parts.append("ws_jac=%s|%s|%s" % (
+                ws["eig"],
+                "//".join(";".join(",".join(str(i) for i in b) for b in ws["blocks"][k])
+                          for k in ("x", "y")),
+                ";".join(repr(e) for k in ("x", "y") for row in ws["rows"][k] for e in row)
+                if ws["rows"] is not None else ""))
         
         parts.append("n_aux=%d" % aux_total_n_aux(m.aux_names, m.aux_extra_names))
         # Champs aux NOMMES (aux_field, ADC-70) : leur ORDRE fixe l'indice (AUX_NAMED_BASE + k) -> ils
@@ -3151,10 +3433,19 @@ class Model:
         Delegue a set_wave_speeds ; cf. HyperbolicModel.set_wave_speeds."""
         self._m.set_wave_speeds(x, y)
 
+    def wave_speeds_from_jacobian(self, x=None, y=None, eig="numeric", blocks=None):
+        """Vitesses d'onde signees EXACTES par valeurs propres du jacobien de flux (delegue a
+        set_wave_speeds_from_jacobian, voir son contrat complet) : x/y = dF/dU en Expr (None =
+        AUTODIFF du flux declare via flux_jacobian) ; eig = 'numeric' | 'fd' (differences finies
+        du flux compile, debug) ; blocks = listes d'indices des sous-blocs diagonaux (None = bloc
+        plein, seul mode inconditionnellement correct -- les blocs AFFIRMENT une structure
+        bloc-triangulaire)."""
+        self._m.set_wave_speeds_from_jacobian(x=x, y=y, eig=eig, blocks=blocks)
+
     def eval_wave_speeds(self, U, aux, dir):
         """EVALUATEUR numpy des vitesses signees (smin, smax) emises (delegue a
-        HyperbolicModel.wave_speeds_value) : paire explicite si declaree, sinon min/max des
-        eigenvalues."""
+        HyperbolicModel.wave_speeds_value) : paire explicite, jacobien (eig numpy par blocs) ou
+        min/max des eigenvalues."""
         return self._m.wave_speeds_value(U, aux, dir)
 
     def stability_speed(self, expr):
@@ -3376,7 +3667,8 @@ class Model:
             cxx=eff_cxx, std=eff_std, hllc=m._hllc,
             roe=(m._roe or getattr(m, '_roe_rows', None) is not None),
             aux_extra_names=m.aux_extra_names,
-            wave_speeds=(m._wave_speeds is not None or "p" in m.prim_defs))
+            wave_speeds=(m._wave_speeds is not None or m._ws_jacobian is not None
+                         or "p" in m.prim_defs))
         # Trace de la politique 'auto' (ADC-63) : None si le backend etait explicite. Diagnostic,
         # jamais un choix muet -- cm.backend dit ce qui a ete construit, ceci dit POURQUOI.
         cm.backend_auto_reason = auto_reason
@@ -3818,15 +4110,24 @@ class HybridModel:
         if std is None:  # le loader natif partage l'ABI du module (norme derivee du loader : c++20 sous
             # Kokkos, c++23 sinon, cf. loader_cxx_std/compile_native) ; jit/aot restent en c++20.
             std = loader_cxx_std() if mode == "native" else "c++20"
-        # NATIF (production) : compilateur suivant le backend Kokkos (g++ par defaut, nvcc_wrapper si
-        # explicite), flags Kokkos sans linker libkokkos (runtime unique), feature-key kokkos dans le
-        # cache. jit/aot hybrides restent inchanges (-O2, hote). kokkos_like sert la cle de cache.
+        # NATIF (production) ET AOT : compilateur suivant le backend Kokkos (g++ par defaut,
+        # nvcc_wrapper si explicite), flags Kokkos sans linker libkokkos (runtime unique), feature-key
+        # kokkos dans le cache. KOKKOS-ONLY : l'aot hybride inclut les en-tetes adc
+        # (compiled_block_abi.hpp -> multifab/for_each) qui exigent ADC_HAS_KOKKOS, memes flags que
+        # compile_aot ; seul le jit (prototype) reste hote pur (-O2, dynamic_model/bricks sans
+        # multifab). kokkos_like sert aussi la cle de cache.
         native = (mode == "native")
-        kokkos_like = native
+        kokkos_like = native or mode == "aot"
+        if mode == "aot" and _native_kokkos_root() is None:
+            raise RuntimeError(
+                "HybridModel.compile : adc_cpp est Kokkos-only -- le modele AOT inclut les en-tetes "
+                "adc qui exigent Kokkos. Pointe un Kokkos installe via ADC_KOKKOS_ROOT (ou "
+                "Kokkos_ROOT), p.ex. `export ADC_KOKKOS_ROOT=/chemin/vers/kokkos` (Serial suffit "
+                "sur CPU).")
         if native:  # garde pre-dlopen : en-tetes != build de _adc -> remede clair (cf. compile_native)
             _check_headers_match_module(include)
             _warn_kokkos_parity()
-        eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
+        eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
         if not eff_cxx:
             raise RuntimeError("HybridModel.compile : aucun compilateur C++ trouve")
         std = _probe_cxx_std(eff_cxx, std)  # erreur ACTIONNABLE si le std n'est pas supporte
@@ -3845,7 +4146,14 @@ class HybridModel:
         if mode == "jit":
             source = self._emit_jit_source()
         elif mode == "aot":
+            # Comme compile_aot : flags Kokkos sans linker libkokkos (le module _adc a deja charge le
+            # runtime, singleton), symboles indefinis resolus au chargement ; Apple-ld exige alors
+            # -undefined dynamic_lookup (sur ELF/Linux -shared les autorise deja).
             source = self._emit_aot_source()
+            kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+            flags += kokkos_compile_flags
+            if sys.platform == "darwin":
+                flags += ["-undefined", "dynamic_lookup"]
         else:  # native : signature en-tetes + parite backend Kokkos (cf. compile_native / _native_kokkos_flags)
             source = self._emit_native_source(target=target)  # indefinis resolus au chargement (module _adc)
             flags.append('-DADC_HEADER_SIG="%s"' % adc_header_signature(include))
