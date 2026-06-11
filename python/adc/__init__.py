@@ -1513,8 +1513,10 @@ class System:
         # primitive_vars (cas isotherme 3-var Hoffart : prim_names = rho/u/v sans 'p'). Garde
         # PRECOCE ici : le requires-gate C++ de make_block ne se declenche qu'au PREMIER usage
         # (eval_rhs / step, construction paresseuse des fermetures) -- on diagnostique a
-        # l'installation, comme hllc/roe. getattr defaut True : un modele sans le flag (chemins
-        # non-DSL) retombe sur le gate C++, comportement historique.
+        # l'installation, comme hllc/roe. getattr defaut True = ceinture-bretelles : CompiledModel
+        # fixe TOUJOURS has_wave_speeds (Model.compile depuis 'p'/paire ; HybridModel depuis la
+        # brique transport, True pour une brique native = inconnu) -- le defaut ne s'applique qu'a
+        # un objet etranger sans le flag, qui retombe alors sur le gate C++ (historique).
         if spatial.flux == "hll" and not getattr(compiled, "has_wave_speeds", True):
             raise ValueError(
                 "add_equation : riemann 'hll' exige des vitesses d'onde signees : declarer "

@@ -1461,6 +1461,7 @@ class HyperbolicModel:
         if not eigs:
             raise ValueError("wave_speeds_value : ni set_wave_speeds(...) ni set_eigenvalues(...) "
                              "declares sur le modele '%s'" % self.name)
+        eigs = list(np.broadcast_arrays(*eigs)) if len(eigs) > 1 else eigs  # formes mixtes (lambda constante)
         return (np.min(np.stack(eigs), axis=0), np.max(np.stack(eigs), axis=0))
 
     def source_value(self, U, aux):
@@ -3389,7 +3390,8 @@ class CompiledBrick:
     niveau du composite (un seul .so) ; cet objet porte la brique deja GENEREE et figee."""
 
     def __init__(self, kind, struct_src, type_name, n_vars=None, n_aux=AUX_BASE_COMPS,
-                 cons_names=None, cons_roles=None, prim_names=None, gamma=None, hash_part=""):
+                 cons_names=None, cons_roles=None, prim_names=None, gamma=None, hash_part="",
+                 wave_speeds=True):
         self.kind = kind                 # 'hyperbolic' | 'source' | 'elliptic'
         self.struct_src = struct_src     # texte C++ du struct (namespace adc_generated { struct ... })
         self.type_name = type_name       # type qualifie a placer dans CompositeModel<...>
@@ -3400,6 +3402,9 @@ class CompiledBrick:
         self.prim_names = list(prim_names) if prim_names else []
         self.gamma = gamma
         self.hash_part = hash_part       # tranche de hash stable (formules) pour la cle de cache composite
+        # wave_speeds emis par le struct (brique hyperbolique DSL : 'p' OU paire explicite) ; True par
+        # defaut = inconnu (brique native) : on laisse le requires-gate C++ trancher (historique).
+        self.has_wave_speeds = bool(wave_speeds)
 
     def __repr__(self):
         return "CompiledBrick(kind=%r, type=%r, n_vars=%r)" % (self.kind, self.type_name, self.n_vars)
@@ -3444,6 +3449,13 @@ class HyperbolicBrick:
     def aux(self, name): return self._m.aux(name)
     def flux(self, x, y): self._m.set_flux(x, y)
     def eigenvalues(self, x, y): self._m.set_eigenvalues(x, y)
+
+    def wave_speeds(self, x, y):
+        """Vitesses d'onde SIGNEES explicites (smin, smax) par direction, SANS exiger 'p' --
+        meme contrat que Model.wave_speeds (le struct de brique passe par emit_cpp_brick, qui
+        emet wave_speeds depuis la paire ; le CompositeModel hybride la forwarde au gate HLL)."""
+        self._m.set_wave_speeds(x, y)
+
     def conservative_from(self, exprs): self._m.set_conservative_from(exprs)
     def gamma(self, value): self._m.set_gamma(value)
     def check(self): return self._m.check()
@@ -3458,7 +3470,8 @@ class HyperbolicBrick:
             n_vars=self._m.n_vars, cons_names=list(self._m.cons_names),
             cons_roles=roles_for(self._m.cons_names, self._m.cons_roles),
             prim_names=list(self._m.prim_state), gamma=self._m.gamma,
-            n_aux=aux_n_aux(self._m.aux_names), hash_part=self._m._model_hash())
+            n_aux=aux_n_aux(self._m.aux_names), hash_part=self._m._model_hash(),
+            wave_speeds=("p" in self._m.prim_defs or self._m._wave_speeds is not None))
 
 
 class SourceBrick:
@@ -3550,6 +3563,7 @@ class HybridModel:
         self.prim_names = list(hyp["prim_names"])
         self.gamma = hyp["gamma"]
         self.n_aux = max(hyp["n_aux"], src["n_aux"], ell["n_aux"])
+        self._has_wave_speeds = bool(hyp.get("wave_speeds", True))
         self._slots = (hyp, src, ell)
 
     @staticmethod
@@ -3563,7 +3577,8 @@ class HybridModel:
                      n_vars=prov.n_vars, min_vars=prov.n_vars, n_aux=prov.n_aux)
             if role == "hyperbolic":
                 d.update(cons_names=prov.cons_names, cons_roles=prov.cons_roles,
-                         prim_names=prov.prim_names, gamma=prov.gamma)
+                         prim_names=prov.prim_names, gamma=prov.gamma,
+                         wave_speeds=getattr(prov, "has_wave_speeds", True))
             return d
         if isinstance(prov, NativeBrick):
             if prov.kind != role:
@@ -3575,7 +3590,8 @@ class HybridModel:
             if role == "hyperbolic":
                 names = prov.var_names or []
                 d.update(cons_names=list(names), cons_roles=roles_for(names),
-                         prim_names=list(prov.prim_names or names), gamma=prov.gamma)
+                         prim_names=list(prov.prim_names or names), gamma=prov.gamma,
+                         wave_speeds=True)  # natif : inconnu, le requires-gate C++ tranche (historique)
             return d
         raise TypeError("HybridModel : slot %r doit etre une brique native (adc.* / NativeBrick) ou une "
                         "brique DSL compilee (CompiledBrick) ; recu %r" % (role, type(prov).__name__))
@@ -3785,7 +3801,8 @@ class HybridModel:
             prim_names=self.prim_names, n_vars=self.n_vars, gamma=self.gamma, n_aux=self.n_aux,
             params={}, caps=_BACKEND_CAPS[backend], abi_key=abi_key, model_hash=model_hash,
             cxx=cxx, std=std, hllc=getattr(self, "_hllc", False),
-            roe=getattr(self, "_roe", False))
+            roe=getattr(self, "_roe", False),
+            wave_speeds=getattr(self, "_has_wave_speeds", True))
 
 
 # --- Source COUPLEE generique inter-especes (P5 phase 1, splitting EXPLICITE) -----------------------

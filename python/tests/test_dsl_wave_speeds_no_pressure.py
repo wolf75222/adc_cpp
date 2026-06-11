@@ -39,7 +39,14 @@ from adc import dsl
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
-A, B = 1.5, 0.7  # vitesses des ondes en x / y (constantes, asymetriques pour pieger un swap d'axe)
+A, B = 1.5, 0.7    # vitesses des ondes en x / y (constantes, asymetriques pour pieger un swap d'axe)
+# Paire SIGNEE ASYMETRIQUE (smin != -smax) : avec une paire symetrique, le flux HLL se reduit
+# ALGEBRIQUEMENT a Rusanov ((sR FL - sL FR + sL sR dU)/(sR-sL) == (FL+FR)/2 - (s/2) dU quand
+# sL = -sR = -s) et le test ne discriminerait pas le chemin HLL (revue adverse). Les facteurs
+# ci-dessous cassent la symetrie tout en MAJORANT le spectre vrai {-a, +a} (smin <= -a, smax >= +a
+# n'est PAS requis par HLL : la paire declaree est le contrat, la reference numpy la recalcule).
+WSX = (-0.5, 1.0)  # (smin_x, smax_x) = (-0.5*a, 1.0*a)
+WSY = (-1.0, 0.25)  # (smin_y, smax_y) = (-1.0*b, 0.25*b)
 
 
 def chk(cond, label):
@@ -64,7 +71,7 @@ def toy_model(name="acoustic2"):
     a = m.param("a", A)
     b = m.param("b", B)
     m.flux(x=[a * q2, a * q1], y=[b * q2, b * q1])
-    m.wave_speeds(x=(-1.0 * a, 1.0 * a), y=(-1.0 * b, 1.0 * b))
+    m.wave_speeds(x=(WSX[0] * a, WSX[1] * a), y=(WSY[0] * b, WSY[1] * b))
     m.primitive_vars(q1, q2)
     m.conservative_from([q1, q2])
     return m
@@ -89,15 +96,17 @@ def expected_rhs(U, n, riemann):
     dx = 1.0 / n
     rhs = np.zeros_like(U)
     for d, axis in ((0, 2), (1, 1)):
-        s = A if d == 0 else B  # |smin| = |smax| = s des deux cotes (constantes)
+        base = A if d == 0 else B
+        klo, khi = WSX if d == 0 else WSY
+        sL, sR = klo * base, khi * base       # paire signee ASYMETRIQUE, constante des deux cotes
+        alpha = max(abs(sL), abs(sR))         # rusanov : max(|smin|, |smax|) (= max_wave_speed emis)
         UL = U
-        UR = np.roll(U, -1, axis=axis)   # voisin de droite le long de l'axe
+        UR = np.roll(U, -1, axis=axis)        # voisin de droite le long de l'axe
         FL, FR = phys_flux(UL, d), phys_flux(UR, d)
         if riemann == "hll":
-            sL, sR = -s, s  # min/max de Davis sur les deux cotes (sL < 0 < sR partout)
             F = (sR * FL - sL * FR + sL * sR * (UR - UL)) / (sR - sL)
-        else:  # rusanov : alpha = max(mws_L, mws_R) = s
-            F = 0.5 * (FL + FR) - 0.5 * s * (UR - UL)
+        else:
+            F = 0.5 * (FL + FR) - 0.5 * alpha * (UR - UL)
         rhs -= (F - np.roll(F, 1, axis=axis)) / dx
     return rhs
 
@@ -106,11 +115,14 @@ print("== (1) facade + evaluateurs numpy (sans compilateur) ==")
 m = toy_model()
 U0 = toy_state(8)
 lo, hi = m.eval_wave_speeds(U0, {}, 0)
-chk(np.allclose(lo, -A) and np.allclose(hi, A), "eval_wave_speeds x = paire declaree (-a, +a)")
+chk(np.allclose(lo, WSX[0] * A) and np.allclose(hi, WSX[1] * A),
+    "eval_wave_speeds x = paire declaree (asymetrique)")
 lo, hi = m.eval_wave_speeds(U0, {}, 1)
-chk(np.allclose(lo, -B) and np.allclose(hi, B), "eval_wave_speeds y = paire declaree (-b, +b)")
+chk(np.allclose(lo, WSY[0] * B) and np.allclose(hi, WSY[1] * B),
+    "eval_wave_speeds y = paire declaree (asymetrique)")
 mws = m._m.max_wave_speed(U0.reshape(2, -1), {}, 0)
-chk(abs(mws - A) < 1e-14, "max_wave_speed interprete = max(|smin|, |smax|) SANS eigenvalues")
+chk(abs(mws - max(abs(WSX[0]), abs(WSX[1])) * A) < 1e-14,
+    "max_wave_speed interprete = max(|smin|, |smax|) SANS eigenvalues")
 rep = m.check_model(samples=U0.reshape(2, -1))
 chk(rep["ok"], "check_model passe (finitude + coherence ws <-> max_wave_speed)")
 
@@ -136,6 +148,8 @@ compiled = toy_model().compile(os.path.join(tmp, "acoustic2.so"), INCLUDE, backe
 chk(getattr(compiled, "has_wave_speeds", False), "compiled.has_wave_speeds (paire explicite, sans 'p')")
 
 n = 32
+dis = float(np.max(np.abs(expected_rhs(toy_state(n), n, "hll") - expected_rhs(toy_state(n), n, "rusanov"))))
+chk(dis > 1e-3, f"les references HLL et Rusanov DIFFERENT (dmax = {dis:.3e}) : le test discrimine")
 for label, riemann in (("(3) riemann='hll'", "hll"), ("(4) riemann='rusanov'", "rusanov")):
     print(f"== {label} : eval_rhs == reference numpy ==")
     sim = adc.System(n=n, L=1.0, periodic=True)
@@ -185,6 +199,57 @@ msg = err_msg(lambda: sim.add_equation(
     "gasp", model=c_p, spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
     time=adc.Explicit()))
 chk(msg == "", f"hll accepte sur le modele avec 'p' (historique, message='{msg[:40]}')")
+
+print("== (7) briques hybrides : flag has_wave_speeds propage (sans compilateur machine) ==")
+# HyperbolicBrick.compile passe par emit_cpp_brick : le struct de brique emet wave_speeds selon
+# les MEMES regles ('p' OU paire explicite). CompiledBrick.has_wave_speeds porte l'info jusqu'au
+# CompiledModel hybride (HybridModel._compiled_model) -- sans quoi la garde precoce hll
+# bloquerait a tort un hybride compressible (revue adverse).
+bp = dsl.HyperbolicBrick("hybp")
+hrho, hmx, hmy = bp.conservative_vars("rho", "m_x", "m_y",
+                                      roles=["Density", "MomentumX", "MomentumY"])
+hu = bp.primitive("u", hmx / hrho)
+hv = bp.primitive("v", hmy / hrho)
+hp = bp.primitive("p", 1.0 * hrho)
+bp.flux(x=[hmx, hmx * hu + hp, hmx * hv], y=[hmy, hmy * hu, hmy * hv + hp])
+bp.eigenvalues(x=[hu - 1.0, hu, hu + 1.0], y=[hv - 1.0, hv, hv + 1.0])
+bp.primitive_vars(hrho, hu, hv)
+bp.conservative_from([hrho, hrho * hu, hrho * hv])
+cbp = bp.compile()
+chk(cbp.has_wave_speeds and "wave_speeds" in cbp.struct_src,
+    "brique AVEC 'p' : has_wave_speeds vrai, struct emet wave_speeds")
+
+bn = dsl.HyperbolicBrick("hybn")
+hc, = bn.conservative_vars("c")
+bn.flux(x=[1.0 * hc], y=[0.0 * hc])
+bn.eigenvalues(x=[1.0 + 0.0 * hc], y=[0.0 * hc])
+bn.primitive_vars(hc)
+bn.conservative_from([hc])
+cbn = bn.compile()
+chk((not cbn.has_wave_speeds) and "wave_speeds" not in cbn.struct_src,
+    "brique SANS 'p' ni paire : has_wave_speeds faux, struct sans wave_speeds")
+
+bw = dsl.HyperbolicBrick("hybw")
+hq, = bw.conservative_vars("q")
+bw.flux(x=[2.0 * hq], y=[0.5 * hq])
+bw.wave_speeds(x=(0.0 * hq, 2.0 + 0.0 * hq), y=(0.0 * hq, 0.5 + 0.0 * hq))
+bw.primitive_vars(hq)
+bw.conservative_from([hq])
+cbw = bw.compile()
+chk(cbw.has_wave_speeds and "wave_speeds" in cbw.struct_src,
+    "brique a PAIRE explicite sans 'p' : has_wave_speeds vrai (miroir HyperbolicBrick.wave_speeds)")
+
+print("== (8) wave_speeds_value : formes mixtes (valeur propre constante + dependante de l'etat) ==")
+mm = dsl.Model("mixshape")
+w1, w2 = mm.conservative_vars("w1", "w2")
+mm.flux(x=[w2, w1], y=[w2, w1])
+mm.eigenvalues(x=[1.0 + 0.0 * w1, w1], y=[0.0 * w1, w2])  # melange scalaire-constant / tableau
+mm.primitive_vars(w1, w2)
+mm.conservative_from([w1, w2])
+Um = toy_state(4).reshape(2, -1)
+lo_m, hi_m = mm.eval_wave_speeds(Um, {}, 0)
+chk(np.all(np.isfinite(lo_m)) and np.all(np.isfinite(hi_m)) and np.all(lo_m <= hi_m),
+    "min/max sur valeurs propres a formes mixtes (broadcast, pas de crash np.stack)")
 
 print("FAILS =", fails)
 sys.exit(1 if fails else 0)
