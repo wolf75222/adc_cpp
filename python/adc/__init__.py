@@ -1708,7 +1708,7 @@ class System:
     # PR-IO-3. Ecriture ATOMIQUE (fichier .tmp puis os.replace : un crash en cours d'ecriture ne
     # corrompt jamais un checkpoint precedent).
     # ------------------------------------------------------------------
-    def write(self, path, format="vtk", step=None, fields=None):
+    def write(self, path, format="vtk", step=None, fields=None, parallel=False):
         """SORTIE DE VISUALISATION : ecrit l'etat courant dans un fichier ouvert (ParaView/numpy).
 
         - ``format="vtk"`` : ImageData .vti ASCII (cartesien ; ouvert par ParaView / VisIt) -- une
@@ -1717,16 +1717,26 @@ class System:
           noms/roles, phi, t, macro_step, grille.
         @p step : suffixe numerote (path_000123.vti) ; None = path brut + extension.
         @p fields : sous-ensemble de blocs a ecrire (None = tous).
+        @p parallel : ecriture HDF5 PARALLELE par hyperslabs (opt-in, format='hdf5' SEULEMENT). Defaut
+          False = chemin gather rang-0 ci-dessous, STRICTEMENT inchange. True = chaque rang ecrit SES
+          boites dans un fichier unique via h5py(mpio) -- exige h5py compile MPI + mpi4py (sinon erreur
+          CLAIRE avec remede, jamais d'ecriture silencieuse degradee). Cf. _write_hdf5_parallel.
         @return le chemin ecrit.
 
         MULTI-RANGS (MPI np>1) : les champs sont rassembles via les accesseurs GLOBAUX collectifs
         (state_global / potential_global -- chaque rang DOIT donc appeler write), puis SEUL le rang 0
         ecrit le fichier (un fichier unique, identique au mono-rang). Le System etant mono-box (une
         box couvrant tout le domaine, sur le rang 0), le gather est exact. Les autres rangs rendent le
-        chemin sans I/O. HDF5 PARALLELE (hyperslabs par rang) = PR-IO-3."""
+        chemin sans I/O. HDF5 PARALLELE (hyperslabs par rang) : parallel=True (cf. _write_hdf5_parallel ;
+        vrai parallelisme seulement en MULTI-BOX, le System cartesien etant mono-box)."""
         import os
         import numpy as np
         from . import _adc
+        if parallel and format != "hdf5":
+            raise ValueError(
+                "write : parallel=True n'est supporte que pour format='hdf5' (ecriture par "
+                "hyperslabs) ; format=%r passe par le chemin gather rang-0 (parallel=False)."
+                % (format,))
         rank0 = (_adc.my_rank() == 0)
         blocks = [b for b in self._s.block_names() if fields is None or b in fields]
         suffix = ("_%06d" % int(step)) if step is not None else ""
@@ -1780,10 +1790,15 @@ class System:
             os.replace(tmp, target)
             return target
         if format == "hdf5":
+            if parallel:
+                # HDF5 PARALLELE par hyperslabs (PR-IO-3, opt-in) : chaque rang ecrit SES boites dans
+                # un fichier unique (h5py mpio), pas de gather global. Chemin SEPARE -- le chemin serie
+                # ci-dessous reste STRICTEMENT inchange.
+                return self._write_hdf5_parallel(path + suffix + ".h5", blocks, nxv, nyv)
             # HDF5 AGREGE v1 (vague 3, PR-IO-2 du plan) : un fichier unique, un groupe par bloc,
             # attributs pour l'horloge/grille. Multi-rangs : gather collectif (state_global /
             # potential_global) puis ecriture rang 0 (un fichier unique). HDF5 PARALLELE (hyperslabs
-            # par rang) = PR-IO-3. h5py optionnel : absent -> erreur claire avec remede.
+            # par rang) = parallel=True (branche ci-dessus). h5py optionnel : absent -> erreur claire.
             # Gather COLLECTIF (tous rangs) AVANT la garde rang-0.
             states = {b: np.asarray(self._s.state_global(b), dtype=np.float64).reshape(
                 self._s.n_vars(b), nyv, nxv) for b in blocks}
@@ -1816,7 +1831,101 @@ class System:
             return target
         raise ValueError("write : format 'vtk' | 'npz' | 'hdf5' (recu %r)" % (format,))
 
-    def checkpoint(self, path):
+    def _write_hdf5_parallel(self, target, blocks, nxv, nyv):
+        """ECRITURE HDF5 PARALLELE par hyperslabs (write(format='hdf5', parallel=True)) -- PR-IO-3.
+
+        CHEMIN OPT-IN, separe du chemin serie (gather rang-0) qui reste intouche. Au lieu de rassembler
+        tout le champ sur le rang 0, chaque rang ECRIT SES BOITES dans un fichier UNIQUE ouvert en
+        collectif (h5py driver='mpio'). Les datasets globaux (ncomp, ny, nx) par bloc + phi (ny, nx)
+        sont crees COLLECTIVEMENT, les metadonnees (t, macro_step, nx, ny, abi_key, noms/roles) ecrites
+        collectivement, puis chaque rang ecrit ses hyperslabs dset[:, jlo:jhi+1, ilo:ihi+1] en I/O
+        INDEPENDANTE (boites disjointes ; un rang sans box n'ecrit rien).
+
+        VRAI PARALLELISME = MULTI-BOX seulement. Le System cartesien est MONO-BOX (une box couvrant le
+        domaine, sur le rang 0) : sous np>1 le rang 0 ecrit l'unique box et les autres rangs ne portent
+        aucune box -- le gain hyperslab apparait sur une geometrie multi-box (cf. AMR, ADC-65). La
+        mecanique reste CORRECTE dans le cas general (iteration sur tous les fabs locaux). phi est
+        resolu/rassemble COLLECTIVEMENT (potential_global, all_reduce) puis ecrit par le seul rang 0
+        (champ scalaire complet, dataset contigu).
+
+        DATASETS CONTIGUS (pas de gzip) : le HDF5 parallele n'autorise pas l'ecriture independante de
+        datasets chunk-filtres. Le chemin serie garde gzip ; les VALEURS relues sont identiques champ a
+        champ (parallel=True sous np=1 == parallel=False, verifie par test_hdf5_parallel).
+
+        JAMAIS SILENCIEUX : h5py absent, h5py sans MPI, ou mpi4py absent -> RuntimeError avec remede
+        (installer h5py compile MPI + mpi4py, ou parallel=False)."""
+        import os
+        import numpy as np
+        from . import _adc
+        # h5py D'ABORD, PUIS le test du support MPI : un h5py present mais SANS MPI doit donner
+        # l'erreur ciblee (remede), independamment de la presence de mpi4py.
+        try:
+            import h5py
+        except ImportError:
+            raise RuntimeError(
+                "write(format='hdf5', parallel=True) : h5py absent. Remede : installer h5py compile "
+                "MPI (HDF5 parallele), ou parallel=False (gather global + ecriture rang-0).")
+        if not h5py.get_config().mpi:
+            raise RuntimeError(
+                "write(format='hdf5', parallel=True) : h5py present mais SANS support MPI "
+                "(h5py.get_config().mpi == False). Remede : installer h5py compile MPI (HDF5 "
+                "parallele), ou parallel=False (gather global + ecriture rang-0).")
+        try:
+            from mpi4py import MPI
+        except ImportError:
+            raise RuntimeError(
+                "write(format='hdf5', parallel=True) : mpi4py absent (requis pour l'ouverture mpio). "
+                "Remede : installer mpi4py, ou parallel=False (gather global + ecriture rang-0).")
+        # Garde-fou : module _adc construit AVANT les accesseurs locaux (build anterieur a ADC-66).
+        if not hasattr(self._s, "local_boxes"):
+            raise RuntimeError(
+                "write(format='hdf5', parallel=True) : le module _adc charge n'expose pas "
+                "local_boxes/local_state (build anterieur a l'ecriture par hyperslabs). Remede : "
+                "reconstruire adc_cpp, ou parallel=False.")
+        comm = MPI.COMM_WORLD
+        rank0 = (_adc.my_rank() == 0)
+        # phi : resolu + rassemble COLLECTIVEMENT (tous rangs ; potential_global fait l'all_reduce),
+        # ecrit ensuite par le seul rang 0 (champ scalaire global, dataset contigu).
+        phi_g = np.asarray(self._s.potential_global(), dtype=np.float64).reshape(nyv, nxv)
+        # Descripteurs identiques sur tous les rangs (composition partagee) : pre-calcules pour des
+        # operations collectives coherentes (create_dataset / attrs).
+        ncomp = {b: self._s.n_vars(b) for b in blocks}
+        names = {b: [s.encode() for s in self._s.variable_names(b, "conservative")] for b in blocks}
+        roles = {b: [s.encode() for s in self._s.variable_roles(b, "conservative")] for b in blocks}
+        tmp = target + ".tmp"
+        # Ouverture COLLECTIVE (tous les rangs ouvrent le meme fichier via mpio).
+        f = h5py.File(tmp, "w", driver="mpio", comm=comm)
+        try:
+            # Metadonnees collectives -- identiques au chemin serie.
+            f.attrs["t"] = self._s.time()
+            f.attrs["macro_step"] = self._s.macro_step()
+            f.attrs["nx"] = nxv
+            f.attrs["ny"] = nyv
+            f.attrs["abi_key"] = abi_key()
+            for b in blocks:
+                g = f.create_group(b)  # collectif
+                # Dataset GLOBAL (ncomp, ny, nx) CONTIGU (pas de gzip : ecriture independante interdite
+                # sur dataset chunk-filtre en parallele).
+                dset = g.create_dataset("state", shape=(ncomp[b], nyv, nxv), dtype="f8")  # collectif
+                g.attrs["names"] = names[b]
+                g.attrs["roles"] = roles[b]
+                # Chaque rang ecrit SES boites locales en hyperslabs (I/O independante : boites
+                # disjointes, un rang sans box -> boucle vide). local_state rend deja (ncomp, bny, bnx).
+                for li, (ilo, jlo, ihi, jhi) in enumerate(self._s.local_boxes(b)):
+                    dset[:, jlo:jhi + 1, ilo:ihi + 1] = np.asarray(
+                        self._s.local_state(b, li), dtype=np.float64)
+            phi_d = f.create_dataset("phi", shape=(nyv, nxv), dtype="f8")  # collectif
+            if rank0:
+                phi_d[...] = phi_g  # champ global deja rassemble : ecrit par le seul rang 0
+        finally:
+            f.close()  # collectif
+        comm.Barrier()  # tous les rangs ont ferme AVANT le rename atomique
+        if rank0:
+            os.replace(tmp, target)
+        comm.Barrier()  # le rename est visible (FS partage) avant tout retour
+        return target
+
+    def checkpoint(self, path, parallel=False):
         """CHECKPOINT REDEMARRABLE v1 (npz) : etat COMPLET des blocs + horloge (t, macro_step --
         OBLIGATOIRE pour la cadence stride) + grille + provenance (abi_key). CONTRAT (cf.
         docs/IO_CHECKPOINT_PLAN.md) : restart NE reconstruit PAS la composition -- le script
@@ -1826,10 +1935,24 @@ class System:
         MULTI-RANGS (MPI np>1) : les etats sont rassembles par les accesseurs GLOBAUX collectifs
         (state_global / potential_global -- tous les rangs DOIVENT appeler checkpoint), puis SEUL le
         rang 0 ecrit le fichier UNIQUE (identique au mono-rang). Le couple checkpoint/restart reste
-        bit-identique sous np>1 (System mono-box : tout l'etat vit sur le rang 0, gather exact)."""
+        bit-identique sous np>1 (System mono-box : tout l'etat vit sur le rang 0, gather exact).
+
+        @p parallel : le checkpoint v1 reste TOUJOURS gather-rang-0 (format npz, pas HDF5). L'ecriture
+        par hyperslabs (parallel=True) ne s'applique qu'a la SORTIE de visualisation
+        write(format='hdf5') : un checkpoint npz n'a ni datasets HDF5 ni decoupage par boites. Passer
+        parallel=True leve donc une erreur EXPLICITE (jamais d'ecriture silencieuse degradee) : pour une
+        sortie parallele, utiliser write(format='hdf5', parallel=True) ; un checkpoint HDF5 parallele
+        redemarrable est un chantier ulterieur (PR-IO-3, cf. docs/IO_CHECKPOINT_PLAN.md)."""
         import os
         import numpy as np
         from . import _adc
+        if parallel:
+            raise NotImplementedError(
+                "checkpoint(parallel=True) : le checkpoint v1 est un npz gather-rang-0 (format non "
+                "HDF5, pas de decoupage par boites). L'ecriture par hyperslabs ne concerne que "
+                "write(format='hdf5', parallel=True) (sortie de visualisation). Un checkpoint HDF5 "
+                "parallele redemarrable reste a faire (PR-IO-3, docs/IO_CHECKPOINT_PLAN.md) ; pour "
+                "l'instant : checkpoint(parallel=False).")
         blocks = list(self._s.block_names())
         out = {"adc_checkpoint_version": 1,
                "t": self._s.time(), "macro_step": self._s.macro_step(),
@@ -1977,11 +2100,16 @@ def capabilities():
                            "stability_hooks": True},
         },
         "io": {
-            "write": ["vtk (.vti cartesien)", "npz", "hdf5 (h5py optionnel, agrege mono-rang)",
+            "write": ["vtk (.vti cartesien)", "npz",
+                      "hdf5 (h5py optionnel, agrege gather rang-0 par defaut)",
+                      "hdf5 parallele (write(parallel=True) : hyperslabs par rang via h5py mpio + "
+                      "mpi4py ; opt-in, erreur claire si h5py sans MPI ; vrai parallelisme en "
+                      "MULTI-BOX, System cartesien mono-box)",
                       "AmrSystem.write npz/vtk (grossier + rectangles des patchs)"],
-            "checkpoint_restart": "v1 npz mono-rang (System ; etats + phi + t/macro_step ; "
-                                  "composition rejouee par le script ; reprise bit-identique) ; "
-                                  "AMR (multi-niveaux) et HDF5 parallele = PR-IO-3 "
+            "checkpoint_restart": "v1 npz mono-rang/gather-rang-0 (System ; etats + phi + t/macro_step ; "
+                                  "composition rejouee par le script ; reprise bit-identique ; "
+                                  "checkpoint(parallel=True) leve, reste npz gather-rang-0) ; "
+                                  "AMR (multi-niveaux) et CHECKPOINT HDF5 parallele = PR-IO-3 "
                                   "(docs/IO_CHECKPOINT_PLAN.md ; AmrSystem.checkpoint leve)",
         },
         "amr_layout": {

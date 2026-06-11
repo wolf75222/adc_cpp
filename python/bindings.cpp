@@ -386,6 +386,23 @@ PYBIND11_MODULE(_adc, m) {
            },
            py::arg("name"))
       .def("potential_global", [](System& s) { return to_2d(s.potential_global(), s.ny(), s.nx()); })
+      // Accesseurs LOCAUX par fab (NON collectifs) : ecriture HDF5 PARALLELE par hyperslabs (PR-IO-3,
+      // sim.write(format='hdf5', parallel=True)). local_boxes rend la liste des boites locales
+      // (ilo, jlo, ihi, jhi) en indices GLOBAUX ; local_state rend l'etat du fab li remodele
+      // (n_vars, bny, bnx) pour un hyperslab dset[:, jlo:jhi+1, ilo:ihi+1]. Un rang sans box rend une
+      // liste vide. Le System etant mono-box, le vrai parallelisme n'apparait que sur une geometrie
+      // multi-box (cf. AMR) ; l'API reste correcte dans le cas general.
+      .def("local_boxes", &System::local_boxes, py::arg("name"))
+      .def("local_state",
+           [](const System& s, const std::string& name, int li) {
+             const auto boxes = s.local_boxes(name);
+             if (li < 0 || li >= static_cast<int>(boxes.size()))
+               throw std::out_of_range("System.local_state : indice de fab local hors bornes");
+             const int bnx = boxes[li][2] - boxes[li][0] + 1;  // ihi - ilo + 1
+             const int bny = boxes[li][3] - boxes[li][1] + 1;  // jhi - jlo + 1
+             return to_3d(s.local_state(name, li), s.n_vars(name), bny, bnx);
+           },
+           py::arg("name"), py::arg("li"))
       .def_static("abi_key", &System::abi_key,
                   "Cle d'ABI du module (cf. adc.abi_key) ; comparee a celle d'un loader natif.");
 

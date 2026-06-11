@@ -317,12 +317,21 @@ est cable l'est reellement ; ce qui ne l'est pas est documente avec fichier:lign
    positivite par roles, round-trip des conversions) ; etat de fumee par ROLES par defaut,
    state= pour un regime precis. Reste : les FORMULES d'un .so sans son dsl.Model d'origine ne
    sont pas re-derivables (le source symbolique n'est pas embarque dans le .so — assume).
-10. **IO** : System `write` / `checkpoint` / `restart` sont desormais **MULTI-RANGS** (vague 4,
-    ci-dessous) -- gather GLOBAL collectif (all_reduce_sum_inplace) + ecriture rang-0 + scatter
-    MPI-safe (System MONO-BOX : tout l'etat vit sur le rang 0, gather exact ; bit-identique au
-    mono-rang). RESTE = PR-IO-3 : **HDF5 PARALLELE** (hyperslabs par rang, vs l'actuel gather rang-0),
-    **checkpoint AMR** (rejet explicite, ABI des etats fins par patch manquante -- liste precise dans
-    le message de `AmrSystem.checkpoint`), champs externes (B_z dans le checkpoint).
+10. **IO** : System `write` / `checkpoint` / `restart` sont **MULTI-RANGS** (vague 4) -- gather GLOBAL
+    collectif (all_reduce_sum_inplace) + ecriture rang-0 + scatter MPI-safe (System MONO-BOX : tout
+    l'etat vit sur le rang 0, gather exact ; bit-identique au mono-rang). **HDF5 PARALLELE par
+    hyperslabs : FAIT cote System `write` (ADC-66 / PR-IO-3)** -- `sim.write(format="hdf5",
+    parallel=True)` OPT-IN : datasets globaux `(ncomp, ny, nx)` crees collectivement via h5py(mpio),
+    chaque rang ecrit SES boites en hyperslabs (accesseurs C++ minimaux NON collectifs
+    `System::local_boxes` / `System::local_state` ; `python/system.cpp` + `system.hpp` + bindings).
+    `parallel=False` (defaut) STRICTEMENT inchange ; h5py absent / sans MPI / mpi4py absent ->
+    RuntimeError CLAIR avec remede (jamais d'ecriture silencieuse). Le System cartesien etant MONO-BOX,
+    le VRAI parallelisme par hyperslabs n'apparait qu'en MULTI-BOX (documente honnetement). Test :
+    `python/tests/test_hdf5_parallel.py` (np=1 : equivalence parallel True==False champ a champ ;
+    erreur claire si h5py sans MPI ; regression du chemin serie). RESTE = PR-IO-3 : **HDF5 PARALLELE
+    AMR** (un groupe/dataset par niveau + boites, ADC-65), **checkpoint redemarrable HDF5 parallele**
+    (le checkpoint reste npz gather-rang-0 ; `checkpoint(parallel=True)` leve), **checkpoint AMR**
+    (rejet explicite, ABI des etats fins par patch manquante), champs externes (B_z dans le checkpoint).
 11. **Roe cote DSL** : FAIT (solde) — `m.enable_roe()` emet `roe_dissipation` depuis les ROLES :
     avec Energy = transcription exacte de l'algebre canonique Euler du coeur (parite BIT-EXACTE
     constatee sur 8 pas), sans Energy = meme decomposition avec c = sqrt(p/rho) moyenne a la Roe,

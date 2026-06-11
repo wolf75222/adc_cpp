@@ -1577,4 +1577,41 @@ std::vector<double> System::potential_global() {
   return out;
 }
 
+// --- accesseurs LOCAUX par fab (NON collectifs) : ecriture HDF5 parallele par hyperslabs (PR-IO-3) --
+// Pendant local des accesseurs _global : ils n'agregent rien (aucune comm MPI), ils exposent par rang
+// les boites LOCALES (en indices GLOBAUX, tels que portes par la box du fab) et l'etat de chaque fab.
+// La facade sim.write(format='hdf5', parallel=True) cree les datasets globaux puis chaque rang ecrit
+// SES boites en hyperslabs. Un rang sans box -> local_size()==0 -> liste vide (jamais de fab(0) en dur).
+std::vector<std::array<int, 4>> System::local_boxes(const std::string& name) const {
+  device_fence();
+  const Impl::Species& s = p_->find(name);
+  std::vector<std::array<int, 4>> out;
+  out.reserve(s.U.local_size());
+  for (int li = 0; li < s.U.local_size(); ++li) {
+    const Box2D v = s.U.box(li);
+    out.push_back({v.lo[0], v.lo[1], v.hi[0], v.hi[1]});  // (ilo, jlo, ihi, jhi) GLOBAUX
+  }
+  return out;
+}
+std::vector<double> System::local_state(const std::string& name, int li) const {
+  device_fence();
+  const Impl::Species& s = p_->find(name);
+  if (li < 0 || li >= s.U.local_size())
+    throw std::out_of_range("System::local_state : indice de fab local hors bornes (0.." +
+                            std::to_string(s.U.local_size() - 1) + ")");
+  const int nc = s.ncomp;
+  const ConstArray4 u = s.U.fab(li).const_array();
+  const Box2D v = s.U.box(li);
+  const int bnx = v.nx(), bny = v.ny();  // dimensions de la box LOCALE (cellules valides)
+  std::vector<double> out(static_cast<std::size_t>(nc) * bnx * bny, 0.0);
+  // Layout = state_global rapporte a la box locale : (c*bny + jl)*bnx + il, composante-majeur, donc
+  // remodelable en (nc, bny, bnx) pour un hyperslab dset[:, jlo:jhi+1, ilo:ihi+1].
+  for (int c = 0; c < nc; ++c)
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        out[(static_cast<std::size_t>(c) * bny + (j - v.lo[1])) * bnx + (i - v.lo[0])] =
+            static_cast<double>(u(i, j, c));
+  return out;
+}
+
 }  // namespace adc

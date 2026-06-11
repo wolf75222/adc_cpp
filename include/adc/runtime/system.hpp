@@ -5,6 +5,7 @@
 #include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (seam bloc compile AOT)
 #include <adc/runtime/model_spec.hpp>
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -559,6 +560,22 @@ class System {
   std::vector<double> density_global(const std::string& name) const;  ///< comp0, ny*nx global
   std::vector<double> state_global(const std::string& name) const;    ///< U, ncomp*ny*nx global
   std::vector<double> potential_global();                             ///< phi, ny*nx global
+  /// @}
+
+  /// @name Accesseurs LOCAUX par fab -- ecriture HDF5 PARALLELE par hyperslabs (IO PR-IO-3, opt-in)
+  /// Pendant local des accesseurs _global : au lieu de rassembler tout le champ par all_reduce_sum,
+  /// ils exposent par rang la liste des boites LOCALES et l'etat de CHAQUE fab. La facade HDF5
+  /// parallele (sim.write(format='hdf5', parallel=True)) cree les datasets GLOBAUX puis chaque rang
+  /// ecrit SES boites en hyperslabs -- pas de gather global. Ils sont NON COLLECTIFS (purement
+  /// locaux : aucune comm MPI ; un rang sans box rend une liste vide). Le System cartesien est
+  /// MONO-BOX (une box couvrant le domaine, sur le rang 0) : local_boxes rend donc UNE box sur le
+  /// rang 0 et rien ailleurs -- le vrai parallelisme par hyperslabs n'apparait que sur une geometrie
+  /// MULTI-BOX (cf. AMR). L'API reste correcte dans le cas general (iteration sur tous les fabs
+  /// locaux, indices GLOBAUX dans la box). Layout de local_state IDENTIQUE a state_global mais
+  /// rapporte a la box locale : (c*bny + (j - jlo))*bnx + (i - ilo), composante-majeur.
+  /// @{
+  std::vector<std::array<int, 4>> local_boxes(const std::string& name) const;  ///< (ilo,jlo,ihi,jhi) par fab local
+  std::vector<double> local_state(const std::string& name, int li) const;      ///< U du fab li, plat (ncomp*bny*bnx)
   /// @}
   /// @}
 

@@ -49,8 +49,16 @@ serialiser des fermetures C++/Python.
    - V2 (MPI moyen) : HDF5 sequentiel par AGREGATION (rang 0 collecte par morceaux, ecrit en
      streaming) — pas de dependance MPI-IO, memoire bornee.
    - V3 (production GPFS/Lustre, cf. ROMEO) : HDF5 PARALLELE (h5py-mpi / HDF5 natif) avec un
-     dataset par bloc, hyperslabs par rang. Le build l'active par option CMake (`ADC_HDF5`),
-     l'API Python ne change pas.
+     dataset GLOBAL par bloc, hyperslabs par rang. **FAIT cote System (write) : ADC-66 /
+     PR-IO-3.** OPT-IN par `sim.write(format="hdf5", parallel=True)` : ouverture collective
+     `h5py.File(driver="mpio", comm=COMM_WORLD)`, datasets globaux `(ncomp, ny, nx)` crees
+     collectivement, chaque rang ecrit SES boites en hyperslabs. PAS de flag CMake ni de dependance
+     C++ HDF5 : tout passe par h5py-mpi cote Python (absent / sans MPI -> erreur CLAIRE avec remede,
+     jamais d'ecriture silencieuse) ; le seul ajout C++ est une paire d'accesseurs minimaux NON
+     collectifs `System::local_boxes` / `System::local_state`. `parallel=False` (defaut) = chemin V1
+     gather rang-0 INCHANGE. **Le System cartesien etant MONO-BOX** (une box, rang 0), le vrai
+     parallelisme par hyperslabs n'apparait que sur une geometrie MULTI-BOX -- l'AMR (un
+     groupe/dataset par niveau + boites) reste a faire (ADC-65).
 2. **Layout** : datasets `(ncomp, ny, nx)` (composante-majeur, coherent avec `get_state`),
    attributs HDF5 pour les metadonnees (t, macro_step, config, noms/roles de variables).
    AMR : un groupe par niveau + boites (format inspire des plotfiles AMReX, mais HDF5).
@@ -67,7 +75,11 @@ serialiser des fermetures C++/Python.
 2. **PR-IO-2** : `sim.checkpoint(path)` / `sim.restart(path)` Python (npz ou hdf5 si h5py present),
    contrat de verification ci-dessus. EXIGE d'exposer `macro_step()` cote bindings (trivial) et un
    `set_time(t, macro_step)` controle (restaure la cadence stride).
-3. **PR-IO-3** : HDF5 agrege/parallele + AMR (multi-niveau) + gros runs ROMEO.
+3. **PR-IO-3** : HDF5 agrege/parallele + AMR (multi-niveau) + gros runs ROMEO. HDF5 agrege (V1) =
+   FAIT (PR-IO-2). HDF5 PARALLELE par hyperslabs cote System `write` = **FAIT (ADC-66)** :
+   `sim.write(format="hdf5", parallel=True)` (h5py mpio + mpi4py, opt-in ; accesseurs C++ minimaux
+   `local_boxes`/`local_state`). RESTE : AMR multi-niveau (ADC-65), et un CHECKPOINT redemarrable
+   HDF5 parallele (le checkpoint reste npz gather-rang-0 ; `checkpoint(parallel=True)` leve).
 
 ## Non-objectifs (explicites)
 
