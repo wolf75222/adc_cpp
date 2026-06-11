@@ -1507,11 +1507,19 @@ class System:
                 "(m.primitive('p', ...)) dans le modele, ou emettre la capability "
                 "(m.enable_hllc() / m.enable_roe()) ; sinon utiliser riemann='rusanov'"
                 % spatial.flux)
-        # HLL : PAS de garde Python sur prim_names ici -- la brique generee emet wave_speeds des
-        # qu'une primitive 'p' est DECLAREE (m.primitive('p', ...)), meme HORS layout primitive_vars
-        # (cas isotherme 3-var Hoffart : prim_names = rho/u/v sans 'p', HLL pourtant disponible).
-        # Le requires-gate C++ de make_block rejette deja avec le remede exact quand wave_speeds
-        # manque ("declarer une primitive 'p' / des eigenvalues").
+        # HLL : la brique generee emet wave_speeds soit depuis la paire EXPLICITE
+        # m.wave_speeds(x=, y=) (SANS primitive 'p' : moments, isotherme..., cf. has_wave_speeds),
+        # soit des qu'une primitive 'p' est DECLAREE (m.primitive('p', ...)), meme HORS layout
+        # primitive_vars (cas isotherme 3-var Hoffart : prim_names = rho/u/v sans 'p'). Garde
+        # PRECOCE ici : le requires-gate C++ de make_block ne se declenche qu'au PREMIER usage
+        # (eval_rhs / step, construction paresseuse des fermetures) -- on diagnostique a
+        # l'installation, comme hllc/roe. getattr defaut True : un modele sans le flag (chemins
+        # non-DSL) retombe sur le gate C++, comportement historique.
+        if spatial.flux == "hll" and not getattr(compiled, "has_wave_speeds", True):
+            raise ValueError(
+                "add_equation : riemann 'hll' exige des vitesses d'onde signees : declarer "
+                "m.wave_speeds(x=(smin, smax), y=(smin, smax)) (sans pression), ou une primitive "
+                "'p' (m.primitive('p', ...)) ; sinon utiliser riemann='rusanov'")
 
         # Aiguillage AUTORITAIRE par l'adder du CompiledModel (fixe par le backend, cf. dsl._BACKENDS) :
         # prototype -> add_dynamic_block, aot -> add_compiled_block, production -> add_native_block (#85).
@@ -2202,7 +2210,8 @@ def capabilities():
             "amr": ["rusanov", "hll", "hllc", "roe"],
             "notes": {
                 "rusanov": "generique minimal (max_wave_speed seul)",
-                "hll": "generique a ondes signees (model.wave_speeds ; DSL : primitive 'p') ; "
+                "hll": "generique a ondes signees (model.wave_speeds ; DSL : m.wave_speeds(x=, y=) "
+                       "explicites SANS primitive 'p', ou chemin historique eigenvalues + 'p') ; "
                        "polaire : eligible au fluide isotherme (IsothermalFluxPolar), pas a l'ExB "
                        "scalaire (pas de wave_speeds) -- meme gate que le cartesien",
                 "hllc": "Euler 2D canonique (4 var + pression) OU capability modele "
@@ -2753,6 +2762,13 @@ class AmrSystem:
                 "(m.primitive('p', ...)) dans le modele, ou emettre la capability "
                 "(m.enable_hllc() / m.enable_roe()) ; sinon utiliser riemann='rusanov'"
                 % spatial.flux)
+        # HLL : meme garde precoce que System.add_equation (wave_speeds emis par paire explicite
+        # m.wave_speeds(x=, y=) OU primitive 'p' ; le gate C++ ne se declenche qu'au premier usage).
+        if spatial.flux == "hll" and not getattr(compiled, "has_wave_speeds", True):
+            raise ValueError(
+                "AmrSystem.add_equation : riemann 'hll' exige des vitesses d'onde signees : declarer "
+                "m.wave_speeds(x=(smin, smax), y=(smin, smax)) (sans pression), ou une primitive "
+                "'p' (m.primitive('p', ...)) ; sinon utiliser riemann='rusanov'")
 
         # L'ABI plate du loader .so (adc_install_native_amr / add_native_block) ne transporte NI la
         # cadence multirate (stride) NI le masque IMEX partiel (implicit_vars / implicit_roles) :

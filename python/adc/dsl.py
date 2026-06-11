@@ -888,21 +888,42 @@ def _cpp_cse(e, cse_map):
 
 def _cse_emit(roots, real, indent):
     """Retourne (lignes_de_locales, [C++ par racine]). Les sous-expressions compound vues >= 2 fois
-    deviennent des locales ``cseK_``. roots : liste d'Expr."""
+    deviennent des locales ``cseK_``. roots : liste d'Expr.
+
+    Memo par id() : un OBJET Expr partage (DAG, p.ex. intermediaires reutilises d'un gros modele)
+    n'est parcouru qu'une fois ; ses occurrences suivantes re-creditent le compteur de son
+    sous-arbre sans re-marche. Sans memo le parcours coute O(nombre de CHEMINS racine-feuille),
+    exponentiel sur un DAG profond (flux polynomial de polynomes). Equivalence stricte avec la
+    re-marche historique : memes comptages, memes tailles, meme ORDRE d'insertion des cles
+    (post-ordre de la premiere visite) -> C++ emis bit-identique."""
     counts, rep, size = {}, {}, {}
+    memo = {}  # id(e) -> (taille, {cle: occurrences} du sous-arbre, en post-ordre d'insertion)
 
     def visit(e):
         if isinstance(e, (Const, Var)):
-            return 1
-        k = _key(e)
-        s = 1 + sum(visit(c) for c in _children(e))
-        counts[k] = counts.get(k, 0) + 1
-        rep.setdefault(k, e)
-        size[k] = s
-        return s
+            return 1, None
+        sub = memo.get(id(e))
+        if sub is None:
+            k = _key(e)
+            s, cnt = 1, {}
+            for c in _children(e):
+                cs, ccnt = visit(c)
+                s += cs
+                if ccnt:
+                    for ck, cc in ccnt.items():
+                        cnt[ck] = cnt.get(ck, 0) + cc
+            cnt[k] = cnt.get(k, 0) + 1  # post-ordre : enfants d'abord, comme la re-marche historique
+            rep.setdefault(k, e)
+            size[k] = s
+            sub = (s, cnt)
+            memo[id(e)] = sub
+        return sub
 
     for r in roots:
-        visit(r)
+        _, cnt = visit(r)
+        if cnt:
+            for k, c in cnt.items():
+                counts[k] = counts.get(k, 0) + c
     cand = sorted((k for k, c in counts.items() if c >= 2), key=lambda k: size[k])
     cse_map, lines = {}, []
     for i, k in enumerate(cand):
@@ -1116,6 +1137,8 @@ class HyperbolicModel:
         self.aux_extra_names = []  # champs aux NOMMES (aux_field) : ordre = indice AUX_NAMED_BASE + k
         self._flux = {}         # "x" / "y" -> liste d'Expr (une par composante conservative)
         self._eig = {}          # "x" / "y" -> liste d'Expr (valeurs propres)
+        self._wave_speeds = None  # {"x"/"y": (smin Expr, smax Expr)} : vitesses SIGNEES explicites
+                                  # (set_wave_speeds) ; None = derive des eigenvalues si 'p' (historique)
         self._source = None     # liste d'Expr (une par composante) ou None
         self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
         self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
@@ -1207,6 +1230,24 @@ class HyperbolicModel:
 
     def set_flux(self, x, y): self._flux = {"x": list(x), "y": list(y)}
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
+
+    def set_wave_speeds(self, x, y):
+        """Vitesses d'onde SIGNEES explicites par direction : x = (smin_x, smax_x), y = (smin_y,
+        smax_y), expressions des cons / prims / aux. Emet ``wave_speeds(U, aux, dir, smin, smax)``
+        sur la brique generee SANS exiger de primitive 'p' : riemann='hll' devient disponible pour
+        un modele sans pression (systeme de moments, isotherme...). Le coeur ne gate HLL que sur
+        requires { m.wave_speeds(...) } (block_builder.hpp) : aucun changement C++.
+
+        Prioritaire sur le chemin historique (primitive 'p' -> wave_speeds = min/max des
+        eigenvalues) quand les deux existent. SANS appel : emission strictement historique.
+        Si set_eigenvalues n'est PAS appele, max_wave_speed (Rusanov / CFL) est derive de
+        max(|smin|, |smax|) sur les deux expressions de la direction."""
+        x, y = tuple(x), tuple(y)
+        if len(x) != 2 or len(y) != 2:
+            raise ValueError("set_wave_speeds : attendu x=(smin, smax) et y=(smin, smax) "
+                             "(recu x=%d expression(s), y=%d)" % (len(x), len(y)))
+        self._wave_speeds = {"x": (_wrap(x[0]), _wrap(x[1])),
+                             "y": (_wrap(y[0]), _wrap(y[1]))}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
 
@@ -1394,10 +1435,33 @@ class HyperbolicModel:
         return np.stack([np.broadcast_to(c.eval(env), U[0].shape) for c in comps], axis=0)
 
     def max_wave_speed(self, U, aux, dir):
-        """max_k max_cellules ``|lambda_k|`` : borne de Rusanov / CFL."""
+        """max_k max_cellules ``|lambda_k|`` : borne de Rusanov / CFL. Source : eigenvalues
+        (historique) ; SANS set_eigenvalues, max(|smin|, |smax|) des vitesses signees explicites
+        (set_wave_speeds), miroir exact de l'emission C++."""
         env = self._env(U, aux)
-        eigs = self._eig["x" if dir == 0 else "y"]
-        return max(float(np.max(np.abs(np.asarray(e.eval(env))))) for e in eigs)
+        key = "x" if dir == 0 else "y"
+        exprs = self._eig.get(key) or (list(self._wave_speeds[key])
+                                       if self._wave_speeds is not None else None)
+        if not exprs:
+            raise ValueError("max_wave_speed : ni set_eigenvalues(...) ni set_wave_speeds(...) "
+                             "declares sur le modele '%s'" % self.name)
+        return max(float(np.max(np.abs(np.asarray(e.eval(env))))) for e in exprs)
+
+    def wave_speeds_value(self, U, aux, dir):
+        """Evaluateur numpy des vitesses signees (smin, smax) -- miroir du wave_speeds emis :
+        paire explicite (set_wave_speeds) si declaree, sinon min/max des eigenvalues (chemin
+        historique, qui exige 'p' pour etre EMIS mais reste evaluable ici)."""
+        env = self._env(U, aux)
+        key = "x" if dir == 0 else "y"
+        if self._wave_speeds is not None:
+            lo, hi = self._wave_speeds[key]
+            return (np.asarray(lo.eval(env), dtype=float),
+                    np.asarray(hi.eval(env), dtype=float))
+        eigs = [np.asarray(e.eval(env), dtype=float) for e in self._eig.get(key, [])]
+        if not eigs:
+            raise ValueError("wave_speeds_value : ni set_wave_speeds(...) ni set_eigenvalues(...) "
+                             "declares sur le modele '%s'" % self.name)
+        return (np.min(np.stack(eigs), axis=0), np.max(np.stack(eigs), axis=0))
 
     def source_value(self, U, aux):
         """Terme source (numpy (n_vars, ...)), ou zeros si non defini."""
@@ -1426,6 +1490,8 @@ class HyperbolicModel:
                   [e for e in (self._stab_speed, self._stab_dt, self._src_freq)
                    if e is not None],
                   [e for row in (self._src_jac or []) for e in row]]
+        if self._wave_speeds is not None:
+            groups.append(list(self._wave_speeds["x"]) + list(self._wave_speeds["y"]))
         if self._roe_rows is not None:
             groups.append(self._roe_rows["x"])
             groups.append(self._roe_rows["y"])
@@ -1528,15 +1594,24 @@ class HyperbolicModel:
                     failures.append("valeur propre %s[%d] complexe (systeme non hyperbolique ?)" % (d, k))
                 elif not finite(lam):
                     failures.append("valeur propre %s[%d] non finie" % (d, k))
+        if self._wave_speeds is not None:
+            for d in ("x", "y"):
+                lo = np.asarray(self._wave_speeds[d][0].eval(env), dtype=float)
+                hi = np.asarray(self._wave_speeds[d][1].eval(env), dtype=float)
+                if not (finite(lo) and finite(hi)):
+                    failures.append("wave_speeds %s (explicites) non finies" % d)
+                elif bool(np.any(lo > hi)):
+                    failures.append("wave_speeds %s (explicites) : smin > smax sur des echantillons" % d)
         for d, dn in ((0, "x"), (1, "y")):
             mws = self.max_wave_speed(U, a, d)
             if not np.isfinite(mws) or mws < 0:
                 failures.append("max_wave_speed %s non fini ou negatif (%r)" % (dn, mws))
             else:
-                # coherence wave_speeds <-> max_wave_speed (memes valeurs propres au codegen) :
-                # les extremes signes doivent etre couverts par la borne de Rusanov.
-                eigs = [np.asarray(e.eval(env), dtype=float) for e in self._eig["x" if d == 0 else "y"]]
-                ext = max(float(np.max(np.abs(np.asarray(l)))) for l in eigs)
+                # coherence wave_speeds <-> max_wave_speed : les extremes SIGNES effectivement emis
+                # (paire explicite si declaree, sinon eigenvalues) doivent etre couverts par la
+                # borne de Rusanov / CFL.
+                lo, hi = self.wave_speeds_value(U, a, d)
+                ext = max(float(np.max(np.abs(lo))), float(np.max(np.abs(hi))))
                 if ext > mws * (1.0 + rtol) + atol:
                     failures.append("wave_speeds %s incoherentes avec max_wave_speed (%g > %g)"
                                     % (dn, ext, mws))
@@ -1578,6 +1653,9 @@ class HyperbolicModel:
         for d in ("x", "y"):
             out += self._flux.get(d, [])
             out += self._eig.get(d, [])
+        if self._wave_speeds is not None:  # vitesses signees explicites : params runtime inclus
+            for d in ("x", "y"):
+                out += list(self._wave_speeds[d])
         if self._source is not None:
             out += [_wrap(e) for e in self._source]
         if self.cons_from is not None:
@@ -1696,8 +1774,9 @@ class HyperbolicModel:
         if len(self._flux.get("x", [])) != self.n_vars or len(self._flux.get("y", [])) != self.n_vars:
             raise ValueError("emit_cpp_brick : flux attendu avec %d composantes par direction"
                              % self.n_vars)
-        if not self._eig:
-            raise ValueError("emit_cpp_brick : appeler set_eigenvalues(...) d'abord")
+        if not self._eig and self._wave_speeds is None:
+            raise ValueError("emit_cpp_brick : appeler set_eigenvalues(...) ou "
+                             "set_wave_speeds(...) d'abord (source de max_wave_speed / CFL)")
         nm = name or (self.name.capitalize() + "Gen")
         nc, npr = self.n_vars, len(self.prim_state)
 
@@ -1789,23 +1868,56 @@ class HyperbolicModel:
 
         S.append("  ADC_HD adc::Real max_wave_speed(const State& U, %s, int dir) const {" % aux_param)
         S += cons_locals() + prim_locals() + aux_locals()
-        nx = len(self._eig["x"])
-        etl, ecpps = self._codegen_exprs(self._eig["x"] + self._eig["y"], cse)
-        S += etl
-        S.append("    if (dir == 0) {")
-        S += eig_reduce(ecpps[:nx], "      ")
-        S.append("    } else {")
-        S += eig_reduce(ecpps[nx:], "      ")
-        S += ["    }", "  }", ""]
+        if self._eig:
+            # source historique : max(|eigenvalues|), bit-identique.
+            nx = len(self._eig["x"])
+            etl, ecpps = self._codegen_exprs(self._eig["x"] + self._eig["y"], cse)
+            S += etl
+            S.append("    if (dir == 0) {")
+            S += eig_reduce(ecpps[:nx], "      ")
+            S.append("    } else {")
+            S += eig_reduce(ecpps[nx:], "      ")
+            S += ["    }", "  }", ""]
+        else:
+            # SANS eigenvalues : borne de Rusanov / CFL derivee des vitesses SIGNEES explicites,
+            # max(|smin|, |smax|) -- la paire borne le spectre par contrat de set_wave_speeds.
+            ws = self._wave_speeds
+            wtl, wcpps = self._codegen_exprs(list(ws["x"]) + list(ws["y"]), cse)
+            S += wtl
+            S.append("    if (dir == 0) {")
+            S += eig_reduce(wcpps[:2], "      ")
+            S.append("    } else {")
+            S += eig_reduce(wcpps[2:], "      ")
+            S += ["    }", "  }", ""]
 
-        # pression + vitesses d'onde signees : emises SI une primitive 'p' (pression) est declaree
-        # (convention compressible). Elles rendent la brique generee compatible avec les flux HLLC /
-        # Roe (make_block les exige via requires { m.pressure(s); } + m.wave_speeds). Sans 'p' (p.ex.
-        # transport scalaire ExB) elles ne sont pas emises : le modele reste limite a Rusanov, inchange.
+        # pression : emise SI une primitive 'p' (pression) est declaree (convention compressible) ;
+        # requise par les flux HLLC / Roe canoniques (make_block : requires { m.pressure(s); }).
         if "p" in self.prim_defs:
             S.append("  ADC_HD adc::Real pressure(const State& U) const {")
             S += cons_locals() + prim_locals()
             S += ["    return p;", "  }", ""]
+
+        # vitesses d'onde SIGNEES wave_speeds(U, aux, dir, smin, smax) : gate HLL du coeur
+        # (block_builder.hpp requires { m.wave_speeds(...) }). Deux sources, par priorite :
+        #   1. paire EXPLICITE set_wave_speeds (smin, smax par direction) -- INDEPENDANTE de 'p' :
+        #      un modele sans pression (moments, isotherme...) accede a riemann='hll' ;
+        #   2. historique : min/max des eigenvalues, emise SEULEMENT si 'p' est declaree
+        #      (convention compressible HLLC / Roe, bit-identique a l'existant).
+        # Sans aucune des deux (p.ex. transport scalaire ExB) : rien d'emis, Rusanov seul, inchange.
+        if self._wave_speeds is not None:
+            ws = self._wave_speeds
+            S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
+                     "adc::Real& smax) const {" % aux_param)
+            S += cons_locals() + prim_locals() + aux_locals()
+            wtl, wcpps = self._codegen_exprs(list(ws["x"]) + list(ws["y"]), cse)
+            S += wtl
+            S.append("    if (dir == 0) {")
+            S.append("      smin = %s; smax = %s;" % (wcpps[0], wcpps[1]))
+            S.append("    } else {")
+            S.append("      smin = %s; smax = %s;" % (wcpps[2], wcpps[3]))
+            S += ["    }", "  }", ""]
+        elif "p" in self.prim_defs:
+            nx = len(self._eig["x"])
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
                      "adc::Real& smax) const {" % aux_param)
             S += cons_locals() + prim_locals() + aux_locals()
@@ -2489,6 +2601,11 @@ class HyperbolicModel:
         if getattr(m, "_roe_rows", None) is not None:
             parts.append("roe_rows=%s" % ";".join(repr(e) for k in ("x", "y")
                                                   for e in m._roe_rows[k]))
+        # vitesses signees EXPLICITES (set_wave_speeds) : meme politique conditionnelle (sans appel,
+        # hash strictement identique a l'historique -> cache .so des modeles existants preserve).
+        if getattr(m, "_wave_speeds", None) is not None:
+            parts.append("wave_speeds=%s" % ";".join(repr(e) for k in ("x", "y")
+                                                     for e in m._wave_speeds[k]))
         
         parts.append("n_aux=%d" % aux_total_n_aux(m.aux_names, m.aux_extra_names))
         # Champs aux NOMMES (aux_field, ADC-70) : leur ORDRE fixe l'indice (AUX_NAMED_BASE + k) -> ils
@@ -2767,9 +2884,10 @@ class CompiledModel:
 
     def __init__(self, so_path, backend, adder, cons_names, cons_roles, prim_names, n_vars,
                  gamma, n_aux, params, caps, abi_key, model_hash, cxx, std, target="system",
-                 hllc=False, roe=False, aux_extra_names=None):
+                 hllc=False, roe=False, aux_extra_names=None, wave_speeds=False):
         self.has_hllc = bool(hllc)   # capability HLLC emise (enable_hllc) : hllc dispo hors Euler 4-var
         self.has_roe = bool(roe)     # hook ROE emis (enable_roe roles OU m.roe_dissipation fournie) : roe dispo hors Euler 4-var
+        self.has_wave_speeds = bool(wave_speeds)  # wave_speeds emis (paire explicite OU 'p') : hll dispo
         self.so_path = so_path
         self.backend = backend       # "prototype" | "aot" | "production"
         self.target = target         # "system" | "amr_system" : facade visee (loader natif AMR si amr_system)
@@ -2956,6 +3074,21 @@ class Model:
     def eigenvalues(self, x, y):
         """Valeurs propres (vitesses caracteristiques) par direction (delegue a set_eigenvalues)."""
         self._m.set_eigenvalues(x, y)
+
+    def wave_speeds(self, x, y):
+        """Vitesses d'onde SIGNEES explicites par direction : x = (smin_x, smax_x), y = (smin_y,
+        smax_y). Emet ``wave_speeds(U, aux, dir, smin, smax)`` sur la brique SANS exiger de
+        primitive 'p' : riemann='hll' devient disponible pour un modele sans pression (systeme de
+        moments, isotherme...). Prioritaire sur le chemin historique (eigenvalues + 'p') ; si
+        eigenvalues n'est pas declare, max_wave_speed (Rusanov / CFL) derive de max(|smin|, |smax|).
+        Delegue a set_wave_speeds ; cf. HyperbolicModel.set_wave_speeds."""
+        self._m.set_wave_speeds(x, y)
+
+    def eval_wave_speeds(self, U, aux, dir):
+        """EVALUATEUR numpy des vitesses signees (smin, smax) emises (delegue a
+        HyperbolicModel.wave_speeds_value) : paire explicite si declaree, sinon min/max des
+        eigenvalues."""
+        return self._m.wave_speeds_value(U, aux, dir)
 
     def stability_speed(self, expr):
         """Vitesse de STABILITE lambda* pilotant la CFL du bloc (OPTIONNEL ; delegue a
@@ -3175,7 +3308,8 @@ class Model:
             abi_key=abi_key, model_hash=model_hash,
             cxx=eff_cxx, std=eff_std, hllc=m._hllc,
             roe=(m._roe or getattr(m, '_roe_rows', None) is not None),
-            aux_extra_names=m.aux_extra_names)
+            aux_extra_names=m.aux_extra_names,
+            wave_speeds=(m._wave_speeds is not None or "p" in m.prim_defs))
         # Trace de la politique 'auto' (ADC-63) : None si le backend etait explicite. Diagnostic,
         # jamais un choix muet -- cm.backend dit ce qui a ete construit, ceci dit POURQUOI.
         cm.backend_auto_reason = auto_reason
