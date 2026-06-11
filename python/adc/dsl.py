@@ -3818,15 +3818,24 @@ class HybridModel:
         if std is None:  # le loader natif partage l'ABI du module (norme derivee du loader : c++20 sous
             # Kokkos, c++23 sinon, cf. loader_cxx_std/compile_native) ; jit/aot restent en c++20.
             std = loader_cxx_std() if mode == "native" else "c++20"
-        # NATIF (production) : compilateur suivant le backend Kokkos (g++ par defaut, nvcc_wrapper si
-        # explicite), flags Kokkos sans linker libkokkos (runtime unique), feature-key kokkos dans le
-        # cache. jit/aot hybrides restent inchanges (-O2, hote). kokkos_like sert la cle de cache.
+        # NATIF (production) ET AOT : compilateur suivant le backend Kokkos (g++ par defaut,
+        # nvcc_wrapper si explicite), flags Kokkos sans linker libkokkos (runtime unique), feature-key
+        # kokkos dans le cache. KOKKOS-ONLY : l'aot hybride inclut les en-tetes adc
+        # (compiled_block_abi.hpp -> multifab/for_each) qui exigent ADC_HAS_KOKKOS, memes flags que
+        # compile_aot ; seul le jit (prototype) reste hote pur (-O2, dynamic_model/bricks sans
+        # multifab). kokkos_like sert aussi la cle de cache.
         native = (mode == "native")
-        kokkos_like = native
+        kokkos_like = native or mode == "aot"
+        if mode == "aot" and _native_kokkos_root() is None:
+            raise RuntimeError(
+                "HybridModel.compile : adc_cpp est Kokkos-only -- le modele AOT inclut les en-tetes "
+                "adc qui exigent Kokkos. Pointe un Kokkos installe via ADC_KOKKOS_ROOT (ou "
+                "Kokkos_ROOT), p.ex. `export ADC_KOKKOS_ROOT=/chemin/vers/kokkos` (Serial suffit "
+                "sur CPU).")
         if native:  # garde pre-dlopen : en-tetes != build de _adc -> remede clair (cf. compile_native)
             _check_headers_match_module(include)
             _warn_kokkos_parity()
-        eff_cxx = _native_kokkos_compiler(cxx) if native else _default_cxx(cxx)
+        eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
         if not eff_cxx:
             raise RuntimeError("HybridModel.compile : aucun compilateur C++ trouve")
         std = _probe_cxx_std(eff_cxx, std)  # erreur ACTIONNABLE si le std n'est pas supporte
@@ -3845,7 +3854,14 @@ class HybridModel:
         if mode == "jit":
             source = self._emit_jit_source()
         elif mode == "aot":
+            # Comme compile_aot : flags Kokkos sans linker libkokkos (le module _adc a deja charge le
+            # runtime, singleton), symboles indefinis resolus au chargement ; Apple-ld exige alors
+            # -undefined dynamic_lookup (sur ELF/Linux -shared les autorise deja).
             source = self._emit_aot_source()
+            kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+            flags += kokkos_compile_flags
+            if sys.platform == "darwin":
+                flags += ["-undefined", "dynamic_lookup"]
         else:  # native : signature en-tetes + parite backend Kokkos (cf. compile_native / _native_kokkos_flags)
             source = self._emit_native_source(target=target)  # indefinis resolus au chargement (module _adc)
             flags.append('-DADC_HEADER_SIG="%s"' % adc_header_signature(include))
