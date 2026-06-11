@@ -103,15 +103,20 @@ def main():
         R1 = np.array(sys._s.eval_rhs("gas")).reshape(3, n, n)
         sys._s.set_block_params("gas", [4.0])  # CHANGE le param au RUNTIME, meme .so
         R4 = np.array(sys._s.eval_rhs("gas")).reshape(3, n, n)
-        # La pression p = cs2*rho n'entre que dans la composante quantite de mouvement (rho_u, rho_v) du
-        # flux ; le residu de qte de mvt = -div(p + ...) scale donc LINEAIREMENT avec cs2 sur la partie
-        # pression. Le residu de densite (composante 0) ne depend PAS de cs2 (flux = rho*u, u=0 ici).
+        # Avec u=0, deux effets DISTINCTS de cs2, tous deux exacts au runtime (verifies pointwise) :
+        #  - qte de mvt : rho_u=0 partout -> AUCUNE dissipation Rusanov sur rho_u ; le flux se reduit a la
+        #    pression p=cs2*rho, donc le residu = -div(cs2*rho) scale LINEAIREMENT en cs2 (1 -> 4 => x4) ;
+        #  - densite : le flux advectif rho*u est nul, mais la DISSIPATION de Rusanov vaut
+        #    -0.5*c*(rho_R-rho_L) avec c=sqrt(cs2) et rho NON uniforme -> le residu scale en sqrt(cs2)
+        #    (1 -> 4 => x2). (L'ancienne assertion "densite independante de cs2" oubliait cette
+        #    dissipation : fausse des que rho n'est pas uniforme, cf. ADC-104.)
         assert np.max(np.abs(R1[1])) > 1e-3, "residu qte de mvt trivial (cs2=1)"
-        assert np.max(np.abs(R4[1])) > np.max(np.abs(R1[1])) * 2.0, \
-            "augmenter cs2 (1 -> 4) doit AUGMENTER le residu de qte de mvt (effet runtime absent ?)"
-        assert np.max(np.abs(R1[0] - R4[0])) < 1e-14, \
-            "le residu de densite ne doit PAS dependre de cs2 (vitesse nulle)"
-        print("OK  (2) set_block_params change eval_rhs SANS recompiler (residu qte mvt cs2=1 vs cs2=4)")
+        assert np.allclose(R4[1], 4.0 * R1[1], rtol=1e-9, atol=1e-12), \
+            "residu de qte de mvt = -div(cs2*rho) doit scaler en cs2 (x4 quand cs2 1 -> 4) au runtime"
+        assert np.max(np.abs(R1[0])) > 1e-3, "residu de densite trivial : etat non uniforme attendu"
+        assert np.allclose(R4[0], 2.0 * R1[0], rtol=1e-9, atol=1e-12), \
+            "residu de densite (dissipation Rusanov ~ sqrt(cs2)) doit scaler x2 quand cs2 1 -> 4 au runtime"
+        print("OK  (2) set_block_params change eval_rhs SANS recompiler : qte mvt ~cs2 (x4), densite ~sqrt(cs2) (x2)")
 
         # (3) PAS DE RECOMPILATION : recompiler le MEME modele (sans so_path) -> cache HIT (meme chemin).
         m2 = _build_iso("runtime", 1.0)

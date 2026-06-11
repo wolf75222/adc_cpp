@@ -91,15 +91,19 @@ def expect_raises(exc, fn, label):
 
 
 def pure_python_checks():
-    # Param nomme + identite ; runtime rejete
+    # Param nomme + identite ; runtime SUPPORTE (P7-b)
     m = build_euler()
     g = m.params["gamma"]
     assert isinstance(g, dsl.Param) and g.name == "gamma" and abs(g.value - GAMMA) < 1e-12 \
         and g.kind == "const", "Param identite"
     assert abs(float(g) - GAMMA) < 1e-12, "Param float()"
-    expect_raises(NotImplementedError, lambda: m.param("kappa", 1.0, kind="runtime"),
-                  "param runtime")
-    print("OK  Param nomme (name/value/kind) + runtime rejete")
+    # P7-b : les parametres runtime sont desormais implementes (cf. test_dsl_runtime_params). L'ancienne
+    # assertion "runtime rejete -> NotImplementedError" etait perimee depuis l'arrivee de la feature et
+    # echouait en silence (CI auto-decouverte avalant l'echec, cf. ADC-104).
+    kp = m.param("kappa", 1.0, kind="runtime")
+    assert isinstance(kp, dsl.Param) and kp.name == "kappa" and kp.kind == "runtime" \
+        and abs(kp.value - 1.0) < 1e-12, "param runtime supporte (Param kind='runtime')"
+    print("OK  Param nomme (name/value/kind) + runtime supporte (P7-b)")
 
     # flux declarateur vs eval_flux evaluateur : noms distincts, methodes distinctes
     assert m.flux is not m.eval_flux, "flux et eval_flux doivent etre distincts"
