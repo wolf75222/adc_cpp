@@ -2,6 +2,7 @@
 // Moteur de sous-cyclage multi-patch N-niveaux : amr_step_2level_multipatch,
 // subcycle_level_mp, amr_step_multilevel_multipatch, AmrLevelMP, RegMP.
 
+#include <adc/mesh/mf_arith.hpp>  // saxpy, lincomb (etages SSPRK3, foncteurs nommes device-clean)
 #include <adc/mesh/refinement.hpp>  // coarsen, parallel_copy
 #include <adc/numerics/time/amr_flux_helpers.hpp>
 #include <adc/numerics/time/amr_patch_range.hpp>
@@ -315,16 +316,92 @@ struct RegMP {
 
 namespace detail {  // moteur N-niveaux multi-patch INTERNE ; la facade publique est advance_amr
 
+// Remplit les ghosts d'un niveau AMR : niveau 0 = CL du domaine de base (fill_boundary) ; niveau
+// > 0 = ghosts grossier-fin temps-interpoles depuis le parent a la position frac (mf_fill_fine_ghosts_mb)
+// PUIS halos fin-fin (fill_boundary). Factorise de la tete de subcycle_level_mp, REUTILISE par
+// l'avance SSPRK3 qui doit reremplir les ghosts AVANT chaque evaluation de flux d'etage. Le parent
+// n'est REPLIQUE que pour lev == 1 (niveau 0 replique), sinon reparti (parallel_copy interne).
+inline void ssprk3_refill_level_ghosts(MultiFab& U, int lev, const Box2D& base_dom,
+                                       Periodicity base_per, const MultiFab* pOld,
+                                       const MultiFab* pNew, Real frac, bool coarse_replicated) {
+  if (lev == 0) {
+    fill_boundary(U, base_dom, base_per);
+  } else {
+    mf_fill_fine_ghosts_mb(U, *pOld, *pNew, frac, (lev == 1) && coarse_replicated);
+    const Box2D fdom = Box2D::from_extents(base_dom.nx() << lev, base_dom.ny() << lev);
+    fill_boundary(U, fdom, Periodicity{false, false});
+  }
+}
+
+// SSPRK3 (Shu-Osher, 3 etages, ordre 3) a UN niveau AMR. (1) Avance lv.U de t a t+dt :
+//   U1 = U0 + dt L(U0) ; U2 = 3/4 U0 + 1/4 (U1 + dt L(U1)) ; U_new = 1/3 U0 + 2/3 (U2 + dt L(U2))
+// avec L(U) = -div F(U) + S(U) (source EXPLICITE par etage, evaluee au meme etat que le flux : vrai
+// SSPRK methode-des-lignes, cf. mf_eval_rhs -- l'IMEX n'est PAS supporte, rejet en amont). (2) Remplit
+// (fx, fy) du FLUX EFFECTIF du pas    Feff = 1/6 F(U0) + 1/6 F(U1) + 2/3 F(U2)    qui est EXACTEMENT
+// le flux de transport vu par l'etat final (U_new = U0 - dt div Feff + dt Seff). C'est ce flux que le
+// reflux conservatif doit enregistrer (cote grossier g.c* et cote fin g.f*), d'ou son ecriture dans
+// (fx, fy) la ou le chemin Euler y laisse l'unique flux F(U0). En ENTREE (fx, fy) contiennent deja
+// F(U0) (etage 0, calcule par l'appelant avant l'appel). Entre etages, les ghosts sont remis a jour
+// par ssprk3_refill_level_ghosts au MEME frac : le bord grossier-fin est GELE sur le sous-pas (les
+// niveaux ne croisent pas leurs etages, cf. en-tete subcycle_level_mp / sous-cyclage). saxpy/lincomb
+// et le foncteur RHS sont des kernels device-clean (foncteurs nommes), pas de lambda etendue.
+template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
+void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx, MultiFab& fy,
+                          bool recon_prim, int lev, const Box2D& base_dom, Periodicity base_per,
+                          const MultiFab* pOld, const MultiFab* pNew, Real frac,
+                          bool coarse_replicated) {
+  const int nc = lv.U.ncomp();
+  MultiFab U0 = lv.U;  // etat de depart t (combinaisons convexes de Shu-Osher)
+  MultiFab R(lv.U.box_array(), lv.U.dmap(), nc, 0);
+  MultiFab Fxs(fx.box_array(), fx.dmap(), nc, 0), Fys(fy.box_array(), fy.dmap(), nc, 0);  // flux d'etage
+
+  // --- etage 0 : F(U0) deja dans (fx, fy), R0 = -div F0 + S(U0) ---
+  mf_eval_rhs(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, R);
+  saxpy(lv.U, dt, R);                          // lv.U = U1 = U0 + dt R0
+  lincomb(fx, Real(1) / 6, fx, Real(0), fx);   // Feff <- 1/6 F0 (aliasing point a point, sans danger)
+  lincomb(fy, Real(1) / 6, fy, Real(0), fy);
+
+  // --- etage 1 : F(U1) ---
+  ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated);
+  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim);
+  device_fence();
+  mf_eval_rhs(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, R);  // R1 = -div F1 + S(U1)
+  saxpy(lv.U, dt, R);                                         // lv.U = U1 + dt R1
+  lincomb(lv.U, Real(3) / 4, U0, Real(1) / 4, lv.U);          // lv.U = U2
+  saxpy(fx, Real(1) / 6, Fxs);                                // Feff += 1/6 F1
+  saxpy(fy, Real(1) / 6, Fys);
+
+  // --- etage 2 : F(U2) ---
+  ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated);
+  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim);
+  device_fence();
+  mf_eval_rhs(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, R);  // R2 = -div F2 + S(U2)
+  saxpy(lv.U, dt, R);                                         // lv.U = U2 + dt R2
+  lincomb(lv.U, Real(1) / 3, U0, Real(2) / 3, lv.U);          // lv.U = U_new (t + dt)
+  saxpy(fx, Real(2) / 3, Fxs);                                // Feff += 2/3 F2
+  saxpy(fy, Real(2) / 3, Fys);
+  device_fence();  // (fx, fy) = Feff et lv.U = U_new coherents pour les lectures hote (parentRegs/reflux)
+}
+
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real dt,
                        const Box2D& base_dom, Periodicity base_per, const MultiFab* pOld,
                        const MultiFab* pNew, Real frac, std::vector<RegMP>* parentRegs,
                        bool coarse_replicated = true, bool recon_prim = false,
-                       bool imex = false, const NewtonOptions& nopts = {}) {
+                       bool imex = false, const NewtonOptions& nopts = {},
+                       AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
+  // SSPRK3 + IMEX : combinaison NON VALIDEE (la source raide implicite par etage SSP n'a pas ete
+  // verifiee), rejetee EXPLICITEMENT plutot que jouee en silence. La facade ne peut pas la produire
+  // (time.kind est un selecteur unique : "ssprk3" XOR "imex"), garde de defense en profondeur ici.
+  if (tmethod == AmrTimeMethod::kSsprk3 && imex)
+    throw std::runtime_error(
+        "subcycle_level_mp : SSPRK3 + IMEX non supporte (combinaison non validee) ; utiliser "
+        "time='ssprk3' (source explicite par etage) ou time='imex' (Euler avant + source implicite)");
   const SubcyclingSchedule sched(2);
   const int nc = L[lev].U.ncomp();
   AmrLevelMP& lv = L[lev];
   const int np = lv.U.local_size();
+  const bool ssprk3 = (tmethod == AmrTimeMethod::kSsprk3);
 
   if (lev == 0) {
     fill_boundary(lv.U, base_dom, base_per);
@@ -350,6 +427,23 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, recon_prim);
   device_fence();
 
+  // SSPRK3 : on AVANCE D'ABORD lv.U de t a t+dt (3 etages) ET on remplace (fx, fy) -- qui contiennent
+  // l'unique flux F(U0) du chemin Euler -- par le FLUX EFFECTIF Feff = 1/6 F0 + 1/6 F1 + 2/3 F2. Tout
+  // le reste de la fonction (registre du parent, registres des enfants, flux grossier sauve, reflux)
+  // lit (fx, fy) et l'etat avance EXACTEMENT comme en Euler : enregistrer Feff (au lieu de F0) rend le
+  // reflux conservatif pour le pas SSP complet (le cote grossier g.c* = Feff grossier, le cote fin
+  // g.f* = somme des Feff fins sous-cycles, et la correction -(g.f - g.c*dt)/dx remplace bien le flux
+  // grossier effectif par le flux fin effectif). L'etat de depart est sauve AVANT l'avance pour
+  // l'interpolation temporelle des enfants (role grossier). En Euler (ssprk3 == false) ce bloc est
+  // saute et l'avance reste celle d'origine, en place plus bas -> strictement bit-identique.
+  const bool is_leaf = (lev + 1 >= static_cast<int>(L.size()));
+  MultiFab ssp_U_old;  // etat t (capture pre-avance) ; rempli seulement pour SSPRK3 + role grossier
+  if (ssprk3) {
+    if (!is_leaf) ssp_U_old = lv.U;  // les enfants interpolent entre cet etat (t) et lv.U avance (t+dt)
+    ssprk3_advance_level<Limiter, NumericalFlux>(m, lv, dt, fx, fy, recon_prim, lev, base_dom,
+                                                 base_per, pOld, pNew, frac, coarse_replicated);
+  }
+
   if (parentRegs) {  // role FIN : flux fins de CE niveau dans le registre du parent
     for (int li = 0; li < np; ++li) {
       RegMP& g = (*parentRegs)[li];
@@ -371,9 +465,11 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     }
   }
 
-  if (lev + 1 >= static_cast<int>(L.size())) {  // feuille
-    mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
-    mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // source explicite ou IMEX (options Newton)
+  if (is_leaf) {  // feuille
+    if (!ssprk3) {  // Euler avant (chemin historique) ; SSPRK3 a deja avance lv.U ci-dessus
+      mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
+      mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // source explicite ou IMEX (options Newton)
+    }
     return;
   }
 
@@ -453,13 +549,18 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     }
   }
 
-  MultiFab U_old = lv.U;  // etat t (interp temporelle pour les enfants)
-  mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
-  mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // source explicite ou IMEX (options Newton)
-  for (int s = 0; s < sched.count(); ++s)
+  // etat t pour l'interpolation temporelle des enfants. SSPRK3 : lv.U est DEJA avance (l'avance a eu
+  // lieu plus haut, dans ssprk3_advance_level), l'etat t est la copie pre-avance ssp_U_old ; Euler :
+  // lv.U est encore l'etat t ici (l'avance est juste en dessous), donc U_old = lv.U (copie historique).
+  MultiFab U_old = ssprk3 ? ssp_U_old : lv.U;
+  if (!ssprk3) {  // Euler avant (chemin historique) ; SSPRK3 a deja avance lv.U
+    mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
+    mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // source explicite ou IMEX (options Newton)
+  }
+  for (int s = 0; s < sched.count(); ++s)  // chaque sous-pas fin = un pas SSP complet (tmethod propage)
     subcycle_level_mp<Limiter, NumericalFlux>(m, L, lev + 1, sched.dt_sub(dt), base_dom, base_per,
                                               &U_old, &lv.U, sched.frac(s), &regs,
-                                              coarse_replicated, recon_prim, imex, nopts);
+                                              coarse_replicated, recon_prim, imex, nopts, tmethod);
   mf_average_down_mb(L[lev + 1].U, lv.U);  // point 3 distribue (parallel_copy)
 
   // Point 4 distribue : reflux coverage-aware. La cellule grossiere bordante peut appartenir
@@ -495,9 +596,10 @@ void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
                                     const Box2D& dom, Real dt,
                                     Periodicity per = Periodicity{true, true},
                                     bool coarse_replicated = true, bool recon_prim = false,
-                                    bool imex = false, const NewtonOptions& nopts = {}) {
+                                    bool imex = false, const NewtonOptions& nopts = {},
+                                    AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
   subcycle_level_mp<Limiter, NumericalFlux>(m, L, 0, dt, dom, per, nullptr, nullptr, Real(0), nullptr,
-                                            coarse_replicated, recon_prim, imex, nopts);
+                                            coarse_replicated, recon_prim, imex, nopts, tmethod);
 }
 
 }  // namespace detail (moteur N-niveaux multi-patch)

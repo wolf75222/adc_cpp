@@ -115,6 +115,11 @@ struct AmrBuildParams {
   // constantes historiques (2 / 0 / 0 / 1e-7 / 1.0 / none) -> backward_euler_source chemin (2a)
   // bit-identique. Consomme par build_amr_compiled (la fermeture mono-bloc le passe a cpl->step).
   NewtonOptions newton_options{};
+  // METHODE TEMPORELLE du bloc, transportee sous forme d'ENTIER par l'ABI plate (0 == kEuler avant
+  // historique, 1 == kSsprk3). AJOUTE EN FIN DE STRUCT (append-only, meme raison que has_state /
+  // schur_* / newton_options : un loader .so anterieur ne lit pas ce champ et retombe SILENCIEUSEMENT
+  // sur 0 == kEuler -- pas de corruption). Consomme par build_amr_compiled (mono-bloc -> cpl->step).
+  int time_method = 0;  // adc::AmrTimeMethod : 0 kEuler (defaut), 1 kSsprk3
 };
 
 /// Fermetures type-erased d'un bloc AMR compile, produites par amr_dsl_block::build_amr_compiled et

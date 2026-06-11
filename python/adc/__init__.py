@@ -2197,7 +2197,8 @@ def capabilities():
                        "imexrk_ars222 (famille IMEX-RK, schema ARS(2,2,2), ordre 2 ; cartesien seul ; "
                        "source pleinement implicite)",
                        "split lie|strang + CondensedSchur"],
-            "amr": ["explicit (ssprk2)", "imex (= SourceImplicitBE)",
+            "amr": ["explicit (Euler avant par sous-pas)", "ssprk3 (ordre 3 + reflux par etage)",
+                    "imex (= SourceImplicitBE)",
                     "split lie|strang + CondensedSchur (mono-bloc, grossier)"],
             "system_polar": ["explicit (ssprk2|ssprk3)", "split + CondensedSchur polaire"],
             "newton_options": "options (max_iters/tol/fd_eps/damping/fail_policy) : System + AMR "

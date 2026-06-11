@@ -234,6 +234,16 @@ add_test(NAME test_ssprk3_production
 set_tests_properties(test_ssprk3_production PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# SSPRK3 (ordre 3) sur AMR avec REFLUX PAR ETAGE (ADC-64) : adc.Explicit(ssprk3=True) cable mono-bloc
+# (AmrCouplerMP) ET multi-blocs (AmrRuntime), reflux du FLUX EFFECTIF Feff = 1/6 F0 + 1/6 F1 + 2/3 F2.
+# (a) mono + multi tournent finis + masse conservee avec patchs fins ; (b) defaut euler bit-identique ;
+# (c) erreur L1 temporelle ssprk3 << euler au meme dt (reference Richardson) ; (d) imex+ssprk3 rejete ;
+# (e) loader .so + ssprk3 rejete (ABI plate). Test PUR Python (aucune compilation .so), toujours execute.
+add_test(NAME test_amr_ssprk3
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_amr_ssprk3.py)
+set_tests_properties(test_amr_ssprk3 PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Politique de la loi de Gauss (R0, repro Hoffart) : System.set_gauss_policy "restart" (defaut,
 # re-resout Poisson chaque pas, bit-identique) vs "evolve" (apres phi^0, plus de re-solve : l'etage
 # Schur fait evoluer phi sans restart). API + NO-DEFAULT-CHANGE (defaut == restart) + evolve actif et

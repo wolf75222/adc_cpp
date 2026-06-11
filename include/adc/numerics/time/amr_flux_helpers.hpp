@@ -14,6 +14,47 @@
 
 namespace adc {
 
+// Methode temporelle d'un pas AMR (sous-cyclage Berger-Oliger). kEuler (DEFAUT) = avance Euler
+// avant a chaque sous-pas (chemin historique, strictement bit-identique) ; kSsprk3 = SSPRK3
+// (Shu-Osher, 3 etages, ordre 3) avec reflux par etage (flux effectif convexe). L'enum est passe
+// PAR VALEUR (POD) le long du chemin advance_amr -> subcycle_level_mp ; l'ABI plate du loader .so
+// le transporte sous forme d'entier (AmrBuildParams::time_method), 0 == kEuler.
+enum class AmrTimeMethod : int { kEuler = 0, kSsprk3 = 1 };
+
+// Foncteur NOMME device-clean (meme recette que mf_arith.hpp : premiere instanciation possible
+// depuis une TU loader externe, ou une lambda etendue fait buter nvcc) du RHS methode-des-lignes
+// a UN niveau AMR : R = -div(Fx,Fy) + S(U, aux), evalue a UN MEME etat. C'est la divergence de
+// mf_advance_faces (signe oppose, sans dt) FUSIONNEE avec la source de mf_apply_source. Sert
+// UNIQUEMENT aux etages SSPRK3 (mf_eval_rhs), ou L(U) = -div F + S doit etre pris au meme etat
+// d'etage (vrai SSPRK methode-des-lignes), contrairement au splitting transport-puis-source du
+// chemin Euler. Sans source (modele a S == 0) R se reduit a -div F.
+template <class Model>
+struct AmrSspRhsKernel {
+  Model m;
+  ConstArray4 u, ax, fx, fy;
+  Array4 R;
+  Real dx, dy;
+  ADC_HD void operator()(int i, int j) const {
+    const auto S = m.source(load_state<Model>(u, i, j), load_aux<aux_comps<Model>()>(ax, i, j));
+    for (int c = 0; c < Model::n_vars; ++c)
+      R(i, j, c) = -((fx(i + 1, j, c) - fx(i, j, c)) / dx + (fy(i, j + 1, c) - fy(i, j, c)) / dy) +
+                   S[c];
+  }
+};
+
+// R <- -div(Fx,Fy) + S(U, aux) sur les cellules valides (RHS methode-des-lignes a UN niveau, evalue
+// a l'etat U). Pendant "combine" de mf_advance_faces + mf_apply_source pour les etages SSPRK3 (le
+// flux d'etage Fx/Fy est suppose deja calcule par compute_face_fluxes a l'etat U).
+template <class Model>
+inline void mf_eval_rhs(const Model& m, const MultiFab& U, const MultiFab& aux, const MultiFab& Fx,
+                        const MultiFab& Fy, Real dx, Real dy, MultiFab& R) {
+  for (int li = 0; li < U.local_size(); ++li)
+    for_each_cell(U.box(li),
+                  AmrSspRhsKernel<Model>{m, U.fab(li).const_array(), aux.fab(li).const_array(),
+                                         Fx.fab(li).const_array(), Fy.fab(li).const_array(),
+                                         R.fab(li).array(), dx, dy});
+}
+
 // U <- U - dt div(Fx,Fy) sur les cellules valides (GPU via for_each_cell).
 inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy,
                              Real dx, Real dy, Real dt) {

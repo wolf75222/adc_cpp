@@ -156,6 +156,10 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   // backward_euler_source. DEFAUT {} (newton_options non pose) = constantes historiques (2 iters) ->
   // chemin (2a) bit-identique. Capturees PAR VALEUR (POD) dans la fermeture h.step.
   const NewtonOptions nopts = bp.newton_options;
+  // METHODE TEMPORELLE mono-bloc : entier de l'ABI plate (bp.time_method) -> AmrTimeMethod, threade a
+  // cpl->step -> advance_amr. 0 (defaut / loader .so anterieur) = kEuler historique, bit-identique.
+  const AmrTimeMethod tmethod =
+      bp.time_method == 1 ? AmrTimeMethod::kSsprk3 : AmrTimeMethod::kEuler;
   auto step_state = std::make_shared<int>(0);  // compteur de pas partage par la fermeture
   if (bp.schur) {
     // CHEMIN amr-schur : etage source condense GLOBAL (electrostatique/Lorentz) au lieu de la source
@@ -250,13 +254,14 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
       ++*step_state;
     };
   } else {
-    h.step = [cpl, crit, sub, rprim, imex, regrid_every, step_state, nopts](double dt) {
+    h.step = [cpl, crit, sub, rprim, imex, regrid_every, step_state, nopts, tmethod](double dt) {
       if (regrid_every > 0 && *step_state > 0 && *step_state % regrid_every == 0) cpl->regrid(crit);
       const double h2 = dt / sub;
       // OPTIONS NEWTON threadees au coupleur (mono-bloc) : nopts={} par defaut => iters=2 historique,
       // bit-identique ; nopts non-defaut (set_density + adc.IMEX(newton_*)) pilote le Newton local.
+      // tmethod (kEuler defaut) selectionne SSPRK3 si demande (time='ssprk3') ; kEuler bit-identique.
       for (int s = 0; s < sub; ++s)
-        cpl->template step<AmrDiscLF<Limiter, Flux>>(h2, rprim, imex, nopts);
+        cpl->template step<AmrDiscLF<Limiter, Flux>>(h2, rprim, imex, nopts, tmethod);
       ++*step_state;
     };
   }
@@ -429,7 +434,8 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
                                 const std::vector<int>& implicit_components = {},
                                 const NewtonOptions& nopts = {},
                                 const std::vector<double>* state = nullptr,
-                                bool newton_diagnostics = false) {
+                                bool newton_diagnostics = false,
+                                AmrTimeMethod time_method = AmrTimeMethod::kEuler) {
   const int nc = Model::n_vars;
   const int ng = Limiter::n_ghost;  // stencil du limiteur (parite du schema, comme build_amr_compiled)
   const int nlev = S.nlev();
@@ -470,9 +476,12 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
   // de AmrSystemCoupler::step) et reste neutralisable / testable la-bas. FONCTEUR implicite :
   // advance_amr<Limiter, Flux> est une fonction template nommee (pas de lambda etendue cross-TU) ;
   // on la capture dans une std::function depuis CETTE TU (recette device-clean #64/#97).
-  b.advance = [model, rprim](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
-                             Periodicity per, bool repl) {
-    advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, /*imex=*/false);
+  // tmethod (kEuler defaut) selectionne SSPRK3 (time='ssprk3') pour le transport explicite du bloc ;
+  // kEuler -> Euler avant historique, bit-identique. La source explicite reste portee par advance_amr.
+  b.advance = [model, rprim, time_method](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
+                                          Periodicity per, bool repl) {
+    advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, /*imex=*/false, NewtonOptions{},
+                               time_method);
   };
   // imex_advance (capstone vii) : UN pas de Lie [transport source-free ; source implicite] dont la
   // SEMANTIQUE calque la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper),
@@ -593,7 +602,8 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                                    const std::vector<int>& implicit_components = {},
                                    const NewtonOptions& nopts = {},
                                    const std::vector<double>* state = nullptr,
-                                   bool newton_diagnostics = false) {
+                                   bool newton_diagnostics = false,
+                                   AmrTimeMethod time_method = AmrTimeMethod::kEuler) {
   // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : memes tags acceptes /
   // rejetes qu'avant, messages identiques. Le dispatch template if/else qui suit est INCHANGE ; les
   // gardes de capabilite (hllc/roe : Euler 2D ou capability) restent des `if constexpr` PAR MODELE.
@@ -602,16 +612,16 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                          substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                          substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
     if (lim == "minmod")
       return build_amr_block<Model, Minmod, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
     if (lim == "vanleer")
       return build_amr_block<Model, VanLeer, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                         substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                         substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
     if (lim == "weno5")
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
     throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
   }
   if (riem == "hll") {
@@ -622,16 +632,16 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                   }) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hll' exige des vitesses "
@@ -645,19 +655,19 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                    requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       // weno5 : PARITE avec System::make_block (qui route hllc+weno5). Avant ce chantier la branche
       // hllc AMR n'avait pas de cas weno5 -> "limiter inconnu" la ou System buildait : divergence de
       // table corrigee (build_amr_block supporte Weno5, deja cable sur rusanov/hll).
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'hllc' exige un transport "
@@ -671,18 +681,18 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                    requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                     substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                     substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       // weno5 : PARITE avec System::make_block (qui route roe+weno5). Meme correction de divergence
       // de table que la branche hllc ci-dessus.
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
       throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-blocs)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-blocs) : flux 'roe' exige un transport "
@@ -824,6 +834,13 @@ void add_compiled_model(AmrSystem& sys, const std::string& name, Model model,
                         int stride = 1, const std::vector<std::string>& implicit_vars = {},
                         const std::vector<std::string>& implicit_roles = {}) {
   if (substeps < 1) throw std::runtime_error("add_compiled_model(AmrSystem) : substeps >= 1");
+  // SSPRK3 N'EST PAS transporte par le chemin COMPILE : ni le mono_builder ni le multi_builder ne
+  // figent AmrBuildParams::time_method / ne passent AmrTimeMethod a dispatch_amr_block (l'ABI plate du
+  // loader .so ne marshale pas la methode). Rejet EXPLICITE plutot qu'un repli kEuler silencieux ; un
+  // bloc SSPRK3 doit etre NATIF (AmrSystem::add_block / dispatch_amr_block, qui le thread).
+  if (time == "ssprk3")
+    throw std::runtime_error("add_compiled_model(AmrSystem) : time='ssprk3' non transporte par le "
+                             "chemin compile (.so) ; utiliser un bloc natif adc.Model(...).");
   if (time != "explicit" && time != "imex")
     throw std::runtime_error("add_compiled_model(AmrSystem) : time '" + time +
                              "' inconnu (explicit|imex)");

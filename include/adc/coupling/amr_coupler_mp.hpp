@@ -499,12 +499,15 @@ class AmrCouplerMP {
   /// 1e-7, ...) -> chemin (2a) BIT-IDENTIQUE a l'ancien appel. Sans effet si imex==false. Le masque
   /// IMEX partiel n'est PAS porte par ce chemin mono-bloc (backward-Euler plein), seules les OPTIONS
   /// le sont (AmrSystem mono-bloc cable les options Newton mais pas le masque ni les diagnostics).
+  /// @p tmethod : methode temporelle (kEuler par defaut = Euler avant historique bit-identique ;
+  /// kSsprk3 = SSPRK3 ordre 3 + reflux par etage). kSsprk3 exige imex == false (rejet sinon).
   template <class Disc = FirstOrder>
-  void step(Real dt, bool recon_prim = false, bool imex = false, const NewtonOptions& nopts = {}) {
+  void step(Real dt, bool recon_prim = false, bool imex = false, const NewtonOptions& nopts = {},
+            AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
     update();
     advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
         model_, stack_.L(), stack_.domain(), dt, Periodicity{true, true}, replicated_coarse_,
-        recon_prim, imex, nopts);
+        recon_prim, imex, nopts, tmethod);
   }
 
   /// AVANCE DE TRANSPORT SEULE (hyperbolique), SANS update() ni source. Pendant de step() prive de

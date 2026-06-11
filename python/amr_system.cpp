@@ -115,6 +115,10 @@ struct AmrSystem::Impl {
     NewtonOptions newton{};             // options Newton IMEX (vague 3 ; mono-bloc ET multi-blocs)
     bool newton_non_default = false;    // true -> options non-defaut (loader .so REJETE : ABI plate)
     bool newton_diagnostics = false;    // rapport newton_report : MULTI-BLOCS natif (mono/.so REJETES)
+    // METHODE TEMPORELLE du bloc (time == "ssprk3" -> kSsprk3). 0 == kEuler avant historique (defaut),
+    // 1 == kSsprk3 (ordre 3 + reflux par etage). Materialise en AmrTimeMethod au build (mono-bloc via
+    // make_build_params -> bp.time_method ; multi-blocs via dispatch_amr_block). Exclusif d'imex.
+    int time_method = 0;
   };
 
   std::vector<BlockSpec> blocks;
@@ -244,6 +248,7 @@ struct AmrSystem::Impl {
     bp.substeps = b.substeps;
     bp.recon_prim = b.recon_prim;
     bp.imex = b.imex;
+    bp.time_method = b.time_method;  // SSPRK3 (1) / Euler avant (0) -> build_amr_compiled -> cpl->step
     bp.refine_threshold = refine_threshold;
     bp.poisson_bc = poisson_bc();
     bp.wall = wall_active();
@@ -363,12 +368,16 @@ struct AmrSystem::Impl {
             b.imex ? resolve_implicit_components(b.name, M::conservative_vars(), b.implicit_vars,
                                                  b.implicit_roles)
                    : std::vector<int>{};
+        // METHODE TEMPORELLE du bloc (kSsprk3 si time='ssprk3') threadee a dispatch_amr_block ->
+        // build_amr_block -> fermeture advance -> advance_amr. 0 == kEuler avant historique, bit-identique.
+        const AmrTimeMethod tmethod =
+            b.time_method == 1 ? AmrTimeMethod::kSsprk3 : AmrTimeMethod::kEuler;
         rblocks.push_back(detail::dispatch_amr_block(m, b.limiter, b.riemann, S, b.name, b.density,
                                                      b.has_density, b.gamma, b.substeps,
                                                      b.recon_prim, b.imex, b.stride, impl_components,
                                                      b.newton,
                                                      b.has_state ? &b.state : nullptr,
-                                                     b.newton_diagnostics));
+                                                     b.newton_diagnostics, tmethod));
       });
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
@@ -514,19 +523,23 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   // (coupleur) et les loaders .so le rejettent (au build / a la facade), jamais un rapport vide.
   if (time != "imex" && newton_diagnostics)
     throw std::runtime_error("AmrSystem::add_block : newton_diagnostics exige time='imex'");
-  if (time != "explicit" && time != "imex") {
+  // time == "ssprk3" : SSPRK3 (ordre 3 + reflux par etage), transport explicite -> EXCLUSIF d'imex
+  // (selecteur unique time.kind, parite avec System). La source raide implicite (imex) ne se combine
+  // PAS avec SSPRK3 (combinaison non validee) : le moteur la rejette aussi en defense en profondeur.
+  if (time != "explicit" && time != "imex" && time != "ssprk3") {
     if (time == "imexrk_ars222")
       throw std::runtime_error(
           "AmrSystem : time 'imexrk_ars222' (famille IMEX-RK, schema ARS(2,2,2)) non cable sur AMR "
-          "(perimetre = System cartesien). Utiliser 'explicit'|'imex' sur AMR, ou un System "
-          "cartesien pour l'IMEX-RK.");
+          "(perimetre = System cartesien). Utiliser 'explicit'|'ssprk3'|'imex' sur AMR, ou un "
+          "System cartesien pour l'IMEX-RK.");
     throw std::runtime_error("AmrSystem : time '" + time +
-                             "' inconnu sur AMR (explicit|imex)");
+                             "' inconnu sur AMR (explicit|ssprk3|imex)");
   }
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("AmrSystem : recon inconnu '" + recon +
                              "' (conservative|primitive)");
   const bool imex = (time == "imex");
+  const int time_method = (time == "ssprk3") ? 1 : 0;  // adc::AmrTimeMethod (0 kEuler, 1 kSsprk3)
   // Le MASQUE IMEX partiel (implicit_vars / implicit_roles) ne s'applique qu'au pas de source IMEX :
   // le demander en explicite est une ERREUR (pas d'ignore silencieux ; meme garde que System::add_block).
   if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))
@@ -558,6 +571,7 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   b.riemann = riemann;
   b.recon_prim = (recon == "primitive");
   b.imex = imex;
+  b.time_method = time_method;        // SSPRK3 (1) ou Euler avant (0) ; threade au build (mono/multi)
   b.implicit_vars = implicit_vars;    // masque IMEX partiel (resolu en indices au build, build_multi)
   b.implicit_roles = implicit_roles;
   b.newton.max_iters = newton_max_iters;  // options Newton (vague 3 ; multi-blocs seulement)
@@ -642,6 +656,16 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("AmrSystem::add_native_block : recon 'conservative' | 'primitive' "
                              "(recu '" + recon + "')");
+  // time == "ssprk3" : SSPRK3 N'EST PAS transporte par l'ABI plate du loader .so AMR -- l'installateur
+  // extern "C" (adc_install_native_amr) ne marshale que la CHAINE time, et le gabarit add_compiled_model
+  // qu'il inline ne mappe que {explicit, imex} (il ne fige PAS AmrBuildParams::time_method). Plutot que de
+  // RETOMBER SILENCIEUSEMENT sur kEuler (option ignoree), on REJETTE explicitement ici : un bloc SSPRK3
+  // doit passer par un bloc NATIF adc.Model(...) (AmrSystem.add_block), pas par un loader .so compile.
+  if (time == "ssprk3")
+    throw std::runtime_error(
+        "AmrSystem::add_native_block : time='ssprk3' non transporte par le loader .so compile (ABI "
+        "plate : seul {explicit, imex} est marshale) ; utiliser un bloc natif adc.Model(...) avec "
+        "adc.Explicit(ssprk3=True) via AmrSystem.add_block.");
   if (time != "explicit" && time != "imex")
     throw std::runtime_error("AmrSystem::add_native_block : time 'explicit' | 'imex' sur AMR (recu '" +
                              time + "')");
