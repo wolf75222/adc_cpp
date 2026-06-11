@@ -272,8 +272,8 @@ __all__ = [
     "Scalar", "FluidState", "ExB", "CompressibleFlux", "IsothermalFlux",
     "NoSource", "PotentialForce", "GravityForce", "MagneticLorentzForce", "PotentialMagneticForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
-    "Spatial", "FiniteVolume", "Explicit", "IMEX", "SourceImplicit", "SourceImplicitBE", "Implicit",
-    "Split", "Strang", "CondensedSchur", "Role", "integrate",
+    "Spatial", "FiniteVolume", "Explicit", "IMEX", "IMEXRK", "SourceImplicit", "SourceImplicitBE",
+    "Implicit", "Split", "Strang", "CondensedSchur", "Role", "integrate",
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
@@ -1002,6 +1002,67 @@ class SourceImplicit:
 # sans source + backward-Euler LOCAL sur la source (Newton par cellule). Alias STRICT de
 # SourceImplicit (meme objet) : a employer quand on veut nommer l'hypothese dans un script.
 SourceImplicitBE = SourceImplicit
+
+
+class IMEXRK:
+    """Famille IMEX-RK (Implicit-Explicit Runge-Kutta), schema ARS(2,2,2), ORDRE 2.
+
+    Schema d'Ascher-Ruuth-Spiteri (1997) : le transport hyperbolique L = -div F est traite par le
+    tableau EXPLICITE, la source raide S par le tableau IMPLICITE (backward-Euler LOCAL par cellule,
+    Newton, comme adc.IMEX) -- mais avec des etages couples qui montent l'ORDRE GLOBAL A 2 (transport
+    ET source), la ou adc.IMEX reste un ForwardEuler(transport) + backward-Euler(source) d'ordre 1.
+
+    Coefficients : gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma). Tableaux (stiffly accurate) :
+    explicite A_E = [[0,0,0],[gamma,0,0],[delta,1-delta,0]], b_E = [delta,1-delta,0] ;
+    implicite A_I = [[0,0,0],[0,gamma,0],[0,1-gamma,gamma]], b_I = [0,1-gamma,gamma].
+
+    FAMILLE DISTINCTE de adc.IMEX (kind="imexrk_ars222" != "imex") : le defaut adc.IMEX (backward-Euler
+    local, ordre 1) est INCHANGE / bit-identique. PERIMETRE : System CARTESIEN seulement -- l'AMR, le
+    polaire, les modeles compiles (.so : prototype/aot/production) et les splittings Strang/Schur la
+    REJETTENT explicitement (utiliser adc.IMEX / adc.Explicit sur ces chemins).
+
+    - ``scheme`` : "ars222" (seul schema cable ; un autre nom leve une erreur explicite).
+    - ``substeps=N`` : sous-pas par macro-pas (cf. adc.Explicit). Defaut 1.
+    - ``stride=M`` : cadence du bloc, semantique hold-then-catch-up (cf. adc.Explicit). Defaut 1.
+    - ``newton_*`` : MEMES options que adc.IMEX (max_iters/rel_tol/abs_tol/fd_eps/damping/fail_policy/
+      diagnostics) -- elles parametrent les DEUX solves implicites d'etage du schema. Defauts =
+      constantes historiques (max_iters=2, fd_eps=1e-7), sans cout supplementaire.
+
+    SOURCE PLEINEMENT IMPLICITE : contrairement a adc.IMEX, IMEXRK n'expose PAS implicit_vars /
+    implicit_roles (la relation de coherence d'etage ARS(2,2,2) suppose un solve homogene). Un masque
+    partiel est rejete cote C++ ; pour un IMEX partiel par composante, utiliser adc.IMEX.
+    """
+
+    kind = "imexrk_ars222"
+
+    def __init__(self, scheme="ars222", substeps=1, stride=1,
+                 newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
+                 newton_fd_eps=1e-7, newton_diagnostics=False, newton_damping=1.0,
+                 newton_fail_policy="none"):
+        if scheme != "ars222":
+            raise ValueError("IMEXRK : scheme 'ars222' (seul schema IMEX-RK cable ; recu %r)"
+                             % (scheme,))
+        if int(substeps) < 1:
+            raise ValueError("IMEXRK : substeps >= 1 (recu %r)" % (substeps,))
+        if int(stride) < 1:
+            raise ValueError("IMEXRK : stride >= 1 (recu %r)" % (stride,))
+        if int(newton_max_iters) < 1:
+            raise ValueError("IMEXRK : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
+        if not (0.0 < float(newton_damping) <= 1.0):
+            raise ValueError("IMEXRK : newton_damping dans (0, 1] (recu %r)" % (newton_damping,))
+        if newton_fail_policy not in ("none", "warn", "throw"):
+            raise ValueError("IMEXRK : newton_fail_policy 'none'|'warn'|'throw' (recu %r)"
+                             % (newton_fail_policy,))
+        self.scheme = str(scheme)
+        self.substeps = int(substeps)
+        self.stride = int(stride)
+        self.newton_max_iters = int(newton_max_iters)
+        self.newton_rel_tol = float(newton_rel_tol)
+        self.newton_abs_tol = float(newton_abs_tol)
+        self.newton_fd_eps = float(newton_fd_eps)
+        self.newton_diagnostics = bool(newton_diagnostics)
+        self.newton_damping = float(newton_damping)
+        self.newton_fail_policy = str(newton_fail_policy)
 
 
 def Implicit(dt_ratio=1, substeps=None, stride=1):
@@ -2067,6 +2128,8 @@ def capabilities():
         },
         "time": {
             "system": ["explicit (ssprk2|ssprk3)", "imex (= SourceImplicitBE)",
+                       "imexrk_ars222 (famille IMEX-RK, schema ARS(2,2,2), ordre 2 ; cartesien seul ; "
+                       "source pleinement implicite)",
                        "split lie|strang + CondensedSchur"],
             "amr": ["explicit (ssprk2)", "imex (= SourceImplicitBE)",
                     "split lie|strang + CondensedSchur (mono-bloc, grossier)"],

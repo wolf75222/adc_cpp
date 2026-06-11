@@ -497,9 +497,15 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   // (coupleur) et les loaders .so le rejettent (au build / a la facade), jamais un rapport vide.
   if (time != "imex" && newton_diagnostics)
     throw std::runtime_error("AmrSystem::add_block : newton_diagnostics exige time='imex'");
-  if (time != "explicit" && time != "imex")
+  if (time != "explicit" && time != "imex") {
+    if (time == "imexrk_ars222")
+      throw std::runtime_error(
+          "AmrSystem : time 'imexrk_ars222' (famille IMEX-RK, schema ARS(2,2,2)) non cable sur AMR "
+          "(perimetre = System cartesien). Utiliser 'explicit'|'imex' sur AMR, ou un System "
+          "cartesien pour l'IMEX-RK.");
     throw std::runtime_error("AmrSystem : time '" + time +
                              "' inconnu sur AMR (explicit|imex)");
+  }
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("AmrSystem : recon inconnu '" + recon +
                              "' (conservative|primitive)");

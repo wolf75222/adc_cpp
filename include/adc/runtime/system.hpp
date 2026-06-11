@@ -76,7 +76,10 @@ class System {
   ///                 + pression gaz parfait)
   /// @param recon    variables reconstruites : "conservative" | "primitive" (Euler : primitif
   ///                 plus robuste, positivite de rho et p)
-  /// @param time     "explicit" (SSPRK2) | "imex" (transport explicite, source implicite)
+  /// @param time     "explicit" (SSPRK2) | "ssprk3" | "imex" (transport explicite, source implicite
+  ///                 backward-Euler local, ordre 1) | "imexrk_ars222" (famille IMEX-RK, schema
+  ///                 ARS(2,2,2), ordre 2, cartesien seul ; source PLEINEMENT implicite -> incompatible
+  ///                 avec implicit_vars/implicit_roles)
   /// @param substeps sous-pas par macro-pas : le bloc avance N fois par macro-pas, chaque
   ///                 sous-pas de longueur dt/N (electrons rapides : substeps=10, pas dt/10).
   /// @param stride   cadence du bloc, semantique HOLD-THEN-CATCH-UP : 1 = chaque macro-pas (defaut,

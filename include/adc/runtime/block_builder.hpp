@@ -15,6 +15,7 @@
 #include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (en-tete leger partage)
 #include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (level set device-callable du disque)
 
+#include <cmath>  // std::sqrt (coefficients ARS(2,2,2) : gamma = 1 - 1/sqrt(2), hote)
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -95,6 +96,83 @@ struct AdvanceImex {
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);     // demi-pas explicite : transport sans source
       backward_euler_source(m, *ctx.aux, U, h, nopts, mask, nreport);  // source implicite (rappel raide)
+    }
+  }
+};
+
+/// Avance IMEX-RK ARS(2,2,2) (Ascher, Ruuth, Spiteri 1997 ; " Implicit-explicit Runge-Kutta methods
+/// for time-dependent partial differential equations ", Appl. Numer. Math. 25) : transport explicite
+/// (L = -div F) couple a la source raide implicite (backward-Euler LOCAL par cellule), ORDRE 2. C'est
+/// une famille DISTINCTE et PARALLELE a AdvanceImex (qui reste le backward-Euler d'ordre 1 par defaut,
+/// INTOUCHE et bit-identique). Coefficients : gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma).
+///
+/// Tableaux (stiffly accurate, partie implicite SDIRK ; c = [0, gamma, 1] pour les deux) :
+///   explicite : A_E = [[0, 0, 0], [gamma, 0, 0], [delta, 1-delta, 0]],  b_E = [delta, 1-delta, 0]
+///   implicite : A_I = [[0, 0, 0], [0, gamma, 0], [0, 1-gamma, gamma]],  b_I = [0, 1-gamma, gamma]
+///
+/// b_E == derniere ligne de A_E et b_I == derniere ligne de A_I -> schema STIFFLY ACCURATE -> la
+/// solution finale EST le dernier etage (U^{n+1} = U^(3)), aucune recombinaison finale. Avec L = le
+/// transport SourceFreeModel et S = la source du modele complet, la recurrence par etage est :
+///   U^(1) = U^n                                        (1re ligne de A_I nulle : aucun solve, S^(1) inutilise)
+///   L1    = L(U^n)
+///   U^(2) = U^n + dt*gamma*L1 + dt*gamma*S(U^(2))       (solve implicite : backward_euler_source au pas
+///                                                        dt*gamma sur la base U^n + dt*gamma*L1)
+///   L2    = L(U^(2))
+///   U^(3) = U^n + dt*delta*L1 + dt*(1-delta)*L2 + dt*(1-gamma)*S^(2) + dt*gamma*S(U^(3))
+///   U^{n+1} = U^(3)
+/// Le terme dt*gamma*S^(2) n'est PAS reevalue : par construction du solve d'etage 2,
+/// dt*gamma*S^(2) = U^(2) - base2 (l'increment du solve), donc dt*(1-gamma)*S^(2) = ((1-gamma)/gamma) *
+/// (U^(2) - base2). AUCUN noyau de source supplementaire : on REUTILISE BlockRhsEval<SourceFreeModel>
+/// (transport, MEME mecanisme que le demi-pas explicite d'AdvanceImex), backward_euler_source (solve
+/// implicite local) et saxpy/lincomb (etages). Device-clean (aucun nouveau kernel).
+///
+/// SOURCE PLEINEMENT IMPLICITE : le masque IMEX partiel n'est PAS cable ici (la relation de coherence
+/// dt*gamma*S^(2) = U^(2) - base2 suppose un solve d'etage homogene ; un traitement forward-backward
+/// par composante melangerait les tableaux explicite/implicite). System::add_block rejette donc
+/// implicit_vars/implicit_roles avec time='imexrk_ars222'. Les options Newton (nopts) sont, elles,
+/// transportees : elles parametrent les DEUX solves implicites d'etage.
+///
+/// Les MultiFab d'etage sont alloues UNE FOIS par avance (hors boucle de sous-pas) : Un (U^n), L1/L2
+/// (residus de transport), base2 (base de l'etage 2, relue a l'etage 3) sans ghost (lus en cellules
+/// valides) ; work (etat d'etage) avec les ghosts de U (il passe au residu de transport).
+template <class Limiter, class Flux, class Model>
+struct AdvanceImexRkArs222 {
+  Model m;
+  GridContext ctx;
+  bool recon_prim;
+  NewtonOptions nopts{};            // options Newton des solves d'etage (defauts = historique)
+  NewtonReport* nreport = nullptr;  // diagnostics OPT-IN (adresse stable, possedee par System::Impl)
+  void operator()(MultiFab& U, Real dt, int n) const {
+    const Real h = dt / static_cast<Real>(n);
+    const Real gamma = Real(1) - Real(1) / std::sqrt(Real(2));
+    const Real delta = Real(1) - Real(1) / (Real(2) * gamma);
+    const Real cS2 = (Real(1) - gamma) / gamma;  // facteur de (U^(2) - base2) a l'etage 3
+    const ImplicitMask<Model::n_vars> mask{};    // source PLEINEMENT implicite (masque inactif)
+    // Residu de transport SANS source (L = -div F) : MEME mecanisme que le demi-pas explicite d'AdvanceImex.
+    const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
+                                                                  recon_prim};
+    const int nc = U.ncomp();
+    MultiFab Un(U.box_array(), U.dmap(), nc, 0);     // U^n
+    MultiFab L1(U.box_array(), U.dmap(), nc, 0);     // L(U^n)
+    MultiFab L2(U.box_array(), U.dmap(), nc, 0);     // L(U^(2))
+    MultiFab base2(U.box_array(), U.dmap(), nc, 0);  // U^n + dt*gamma*L1
+    MultiFab work(U.box_array(), U.dmap(), nc, U.n_grow());  // etat d'etage (passe au transport)
+    if (nreport) nreport->reset();  // rapport AGREGE sur les sous-pas ET les 2 solves d'etage
+    for (int s = 0; s < n; ++s) {
+      // Etage 1 : U^(1) = U^n ; L1 = L(U^n).
+      lincomb(Un, Real(1), U, Real(0), U);            // Un = U^n (cellules valides)
+      rhs(U, L1);                                      // L1 = L(U^n)  (fill_ghosts(U) + assemble_rhs)
+      // Etage 2 : U^(2) = base2 + dt*gamma*S(U^(2)),  base2 = U^n + dt*gamma*L1.
+      lincomb(base2, Real(1), Un, h * gamma, L1);      // base2 = U^n + dt*gamma*L1
+      lincomb(work, Real(1), base2, Real(0), base2);   // work = base2
+      backward_euler_source(m, *ctx.aux, work, h * gamma, nopts, mask, nreport);  // work = U^(2)
+      rhs(work, L2);                                   // L2 = L(U^(2))
+      // Etage 3 : U <- base3 = U^n + dt*delta*L1 + dt*(1-delta)*L2 + ((1-gamma)/gamma)*(U^(2) - base2).
+      lincomb(U, Real(1), Un, h * delta, L1);          // U = U^n + dt*delta*L1
+      saxpy(U, h * (Real(1) - delta), L2);             // + dt*(1-delta)*L2
+      saxpy(U, cS2, work);                             // + ((1-gamma)/gamma)*U^(2)
+      saxpy(U, -cS2, base2);                           // - ((1-gamma)/gamma)*base2  -> U = base3
+      backward_euler_source(m, *ctx.aux, U, h * gamma, nopts, mask, nreport);  // U = U^(3) = U^{n+1}
     }
   }
 };
@@ -253,6 +331,9 @@ ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) 
 /// non des lambdas : le chemin add_compiled_model (premiere instanciation depuis une TU externe)
 /// s'emet alors proprement sous nvcc. @p method ne joue QUE sur l'avance explicite (l'IMEX garde son
 /// demi-pas ForwardEuler + source implicite) ; "ssprk2" reproduit l'avance historique (bit-identique).
+/// En IMEX (@p imex), @p method "imexrk_ars222" selectionne la famille IMEX-RK ARS(2,2,2) (ordre 2,
+/// avance PARALLELE a AdvanceImex, cartesien plein seul) ; toute autre valeur garde l'IMEX historique
+/// backward-Euler (ordre 1, bit-identique).
 /// @p implicit_components : indices des variables conservees a traiter en IMPLICITE dans la source IMEX
 /// (masque PORTE PAR LE BLOC, override du defaut modele). VIDE (defaut) -> masque inactif -> defaut
 /// modele is_implicit -> bit-identique. Sans effet hors IMEX (l'explicite n'a pas de pas implicite).
@@ -273,14 +354,25 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
   BlockClosures bc;
   const ImplicitMask<Model::n_vars> impl_mask = make_implicit_mask<Model::n_vars>(implicit_components);
   if (imex) {
-    bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask,
-                                                           newton_opts, newton_report};
-    if (disc_mask)
-      bc.advance_masked = detail::AdvanceImexMasked<Limiter, Flux, Model>{
-          m, ctx, disc_mask, recon_prim, impl_mask, newton_opts, newton_report};
-    if (disc)
-      bc.advance_eb = detail::AdvanceImexEb<Limiter, Flux, Model>{
-          m, ctx, disc, recon_prim, impl_mask, newton_opts, newton_report};
+    if (method == "imexrk_ars222") {
+      // FAMILLE IMEX-RK, schema ARS(2,2,2) (ordre 2) : avance PARALLELE a AdvanceImex, source PLEINEMENT
+      // implicite (impl_mask ignore : la facade rejette deja un masque partiel avec ce schema). CARTESIEN
+      // PLEIN UNIQUEMENT : on ne fabrique PAS d'avance disque (advance_masked / advance_eb restent vides)
+      // -> un mode geometrie disque sur ce bloc leve une erreur EXPLICITE au pas
+      // (SystemStepper::advance_transport_n), jamais un cartesien silencieux.
+      bc.advance = detail::AdvanceImexRkArs222<Limiter, Flux, Model>{m, ctx, recon_prim, newton_opts,
+                                                                     newton_report};
+    } else {
+      // IMEX historique (backward-Euler local, ordre 1) : INTOUCHE, bit-identique.
+      bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask,
+                                                             newton_opts, newton_report};
+      if (disc_mask)
+        bc.advance_masked = detail::AdvanceImexMasked<Limiter, Flux, Model>{
+            m, ctx, disc_mask, recon_prim, impl_mask, newton_opts, newton_report};
+      if (disc)
+        bc.advance_eb = detail::AdvanceImexEb<Limiter, Flux, Model>{
+            m, ctx, disc, recon_prim, impl_mask, newton_opts, newton_report};
+    }
   } else if (method == "ssprk3") {
     bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim};
     if (disc_mask)

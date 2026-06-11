@@ -385,8 +385,9 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   // dans l'ABI extern "C" du .so. "ssprk3" n'est donc PAS supporte ici (l'avance resterait SSPRK2,
   // silencieusement) -> on le rejette. SSPRK3 est expose par le chemin natif add_block.
   if (time != "explicit" && time != "imex")
-    throw std::runtime_error("System::add_compiled_block : time 'explicit' | 'imex' (ssprk3 -> "
-                             "add_block ; le chemin AOT n'expose que SSPRK2)");
+    throw std::runtime_error("System::add_compiled_block : time 'explicit' | 'imex' (ssprk3 et la "
+                             "famille IMEX-RK ARS(2,2,2) -> add_block natif ; le chemin AOT n'expose "
+                             "que SSPRK2 + backward-Euler local)");
   // WENO5 (stencil 5 points, 3 ghosts) est desormais EXPOSE par le chemin AOT : la grille locale du
   // .so alloue block_n_ghost(limiter) (compiled_block_abi.hpp), 3 pour weno5, donc assemble_rhs ne lit
   // pas hors bornes. limiter est valide par make_block dans le .so (none|minmod|vanleer|weno5).
@@ -607,7 +608,8 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
                              recon + "')");
   if (time != "explicit" && time != "ssprk3" && time != "imex")
     throw std::runtime_error("System::add_native_block : time 'explicit' | 'ssprk3' | 'imex' (recu '" +
-                             time + "')");
+                             time + "' ; la famille IMEX-RK ARS(2,2,2) n'est cablee que sur un modele "
+                             "compose adc.Model(...) -> add_block natif)");
   // WENO5 (stencil 5 points, 3 ghosts) est desormais EXPOSE par le chemin natif : le loader inline
   // add_compiled_model qui, apres install_block, reallue l'etat du bloc a block_n_ghost(limiter) (3
   // pour weno5) -- MEME mecanisme qu'add_block. assemble_rhs ne lit donc pas hors bornes. limiter est

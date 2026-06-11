@@ -511,22 +511,37 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                              newton_fail_policy + "')");
   // @p time porte le TRAITEMENT et, en explicite, le SCHEMA RK : "explicit"/"ssprk2" = SSPRK2
   // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "imex" = transport explicite + source raide
-  // implicite. La math RK reste un FONCTEUR du coeur (build_block).
-  if (time != "explicit" && time != "ssprk2" && time != "ssprk3" && time != "imex")
-    throw std::runtime_error("System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'imex' (recu '" +
-                             time + "')");
+  // implicite backward-Euler local (ordre 1), "imexrk_ars222" = famille IMEX-RK schema ARS(2,2,2)
+  // (ordre 2, avance PARALLELE distincte, cartesien seul). La math RK reste un FONCTEUR du coeur
+  // (build_block). "imex" et "imexrk_ars222" partagent le drapeau @c imex ; @c method les distingue.
+  if (time != "explicit" && time != "ssprk2" && time != "ssprk3" && time != "imex" &&
+      time != "imexrk_ars222")
+    throw std::runtime_error(
+        "System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'imex'|'imexrk_ars222' (recu '" + time +
+        "')");
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_block : recon 'conservative' | 'primitive' (recu '" +
                              recon + "')");
-  const bool imex = (time == "imex");
+  const bool imexrk = (time == "imexrk_ars222");
+  const bool imex = (time == "imex" || imexrk);  // les deux passent par le pas implicite de source
   const bool recon_prim = (recon == "primitive");
-  const std::string method = (time == "ssprk3") ? "ssprk3" : "ssprk2";
+  const std::string method = imexrk ? std::string("imexrk_ars222")
+                                     : ((time == "ssprk3") ? std::string("ssprk3")
+                                                           : std::string("ssprk2"));
   // Le masque implicite (implicit_vars / implicit_roles) ne s'applique qu'au pas de source IMEX. Le
   // demander en explicite est une ERREUR (pas d'ignore silencieux) : l'explicite n'a pas de pas implicite.
   if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))
     throw std::runtime_error("System::add_block : implicit_vars / implicit_roles exigent time='imex' "
                              "(le masque implicite ne s'applique qu'au pas de source IMEX ; recu time='" +
                              time + "')");
+  // IMEX-RK ARS(2,2,2) : source PLEINEMENT implicite (la relation de coherence d'etage suppose un solve
+  // homogene). Un masque partiel y serait SILENCIEUSEMENT ignore -> on le rejette explicitement. Le
+  // masque partiel reste disponible sur time='imex' (backward-Euler local).
+  if (imexrk && (!implicit_vars.empty() || !implicit_roles.empty()))
+    throw std::runtime_error(
+        "System::add_block : implicit_vars / implicit_roles (masque IMEX partiel) non supportes par "
+        "time='imexrk_ars222' (sa source est PLEINEMENT implicite). Utiliser time='imex' pour un "
+        "masque partiel, ou retirer implicit_vars / implicit_roles.");
   // Memes regles pour les options/diagnostics Newton : elles ne pilotent que le pas de source IMEX.
   // Des valeurs non-defaut en explicite seraient ignorees EN SILENCE -> erreur explicite.
   const bool newton_non_default = newton_max_iters != 2 || newton_rel_tol != 0.0 ||
@@ -553,9 +568,9 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     // explicitement plutot que de jouer le seul transport en silence.
     if (imex)
       throw std::runtime_error(
-          "System::add_block (polaire) : time='imex' non supporte (anneau : couplage par source "
-          "locale explicite, pas de source raide a traiter en implicite a cette etape). Utiliser "
-          "'explicit'/'ssprk2'/'ssprk3'.");
+          "System::add_block (polaire) : time='" + time + "' (IMEX / IMEX-RK ARS(2,2,2)) non supporte "
+          "(anneau : couplage par source locale explicite, pas de source raide a traiter en implicite "
+          "a cette etape). Utiliser 'explicit'/'ssprk2'/'ssprk3'.");
     const PolarGridContext pctx = P->grid_ctx_polar();
     detail::dispatch_model_polar(model, [&](auto m) {
       using M = decltype(m);

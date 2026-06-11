@@ -298,6 +298,7 @@ foreach(t
     test_disc_domain_mask     # chantier T2 : contrat masque de domaine disque (inerte par defaut) -- disc_mask() tout-actif, inertie de step(), masque == level set, garde-fous
     test_fv_hll_minmod        # chemin generique HLL+minmod VISIBLE : FiniteVolume(riemann="hll") sur isotherme 3-var (non Euler), System + AMR, rejets explicites (hll sans wave_speeds, hllc hors Euler)
     test_newton_options       # options/diagnostics Newton IMEX (audit ch.2) : no-default-change bit-identique, rapport (residu/iters/echecs), tolerance, rejets explicites
+    test_imexrk               # famille IMEX-RK schema ARS(2,2,2) (ADC-69) : ordre 2 (gyration cyclotron, ratio ~4 vs IMEX ~2), stabilite raide omega*dt=50, defaut IMEX distinct/inchange, rejets AMR/polaire/Strang/masque partiel
     test_dt_bounds            # politique de pas generique (audit ch.1) : add_dt_bound/last_dt_bound, fallback transport historique, DSL stability_speed/stability_dt (auto-skip sans compilateur)
     test_check_model          # check_model generique (audit ch.6) : formules DSL (finitude/round-trip/positivite) + bloc installe (residu fini, roles, etat restaure)
     test_magnetic_bricks      # briques magnetiques exposees (audit ch.5) : MagneticLorentzForce / PotentialMagneticForce via adc.Model, residu quantitatif q B m, rejet scalaire

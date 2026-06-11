@@ -311,8 +311,22 @@ est cable l'est reellement ; ce qui ne l'est pas est documente avec fichier:lign
    (cable aussi en polaire, dispatch_model_polar). LIMITE : depuis l'API publique les briques natives
    ne se composent qu'avec ces transports CANONIQUES ; un layout permute ne rencontre une brique native
    que via un chemin C++ direct (verrou : detection `requires` du binder + registre des roles).
-6. **IMEX-RK** : aucune famille ARK/IMEX-RK ; SourceImplicitBE est le seul schema implicite local
-   (le Jacobien analytique vague 3 en ameliore la robustesse, pas l'ordre).
+6. **IMEX-RK (fait, ARS(2,2,2))** : la famille IMEX-RK EXISTE desormais — `adc.IMEXRK(scheme="ars222")`
+   cable le schema d'Ascher-Ruuth-Spiteri (1997), **ordre 2** (transport explicite L = -div F couple a
+   la source raide implicite par un tableau a etages). gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma) ;
+   tableaux stiffly accurate (b == derniere ligne de A) -> U^{n+1} = dernier etage. Cote C++ :
+   `detail::AdvanceImexRkArs222` (block_builder.hpp), avance PARALLELE a `AdvanceImex` — il REUTILISE
+   `BlockRhsEval<SourceFreeModel>` (transport), `backward_euler_source` (solve implicite local) et
+   saxpy/lincomb, AUCUN nouveau kernel device ; la contribution de source d'etage 2 est recuperee par la
+   relation de coherence `dt*gamma*S^(2) = U^(2) - base2` (pas de noyau de source en plus). PERIMETRE =
+   **System cartesien** : `time="imexrk_ars222"` est rejete explicitement sur AMR, polaire, les loaders
+   .so (prototype/aot/production) et les splittings Strang/Schur (hyperbolique != Explicit). Le defaut
+   `adc.IMEX` (= SourceImplicitBE, backward-Euler local, ordre 1) reste le seul schema implicite local
+   et est **INCHANGE / bit-identique** (kind "imex" != "imexrk_ars222", chemins C++ distincts). LIMITE :
+   la source IMEX-RK est PLEINEMENT implicite (la relation de coherence d'etage suppose un solve
+   homogene) -> incompatible avec un masque partiel `implicit_vars`/`implicit_roles` (rejet explicite ;
+   pour un IMEX partiel par composante, rester sur `adc.IMEX`). Le Jacobien analytique
+   (`m.source_jacobian`, vague 3) ameliore aussi les solves d'etage IMEX-RK.
 7. **CoupledSource** : toujours explicite forward-Euler additif, capacites fixes (kCsMaxReg=32...).
    frequency(mu) accepte desormais une CONSTANTE (chemin historique) OU une Expr -> frequence PAR
    CELLULE mu(U) en bytecode, reduite (MAX) a chaque pas (cf. sec. 2 ; AMR : borne sur le grossier).
