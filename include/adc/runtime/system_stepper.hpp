@@ -147,6 +147,23 @@ class SystemStepper {
     }
   }
 
+  /// PROJECTION PONCTUELLE post-pas (ADC-177) : U <- project(U, aux) par bloc, appliquee UNE fois a
+  /// la FIN de chaque macro-pas ENTIER (apres transport + etage source + couplages ; jamais par etage
+  /// RK), sur les cellules VALIDES seulement. Les GHOSTS ne sont pas projetes : chaque consommateur
+  /// de ghosts (residu de transport) refait fill_ghosts en tete d'evaluation (cf. BlockRhsEval), donc
+  /// l'etat fantome est reconstruit du valide projete au pas suivant -- aucun fill_boundary ici.
+  /// Appliquee a TOUS les blocs evolutifs munis d'une projection, y compris les blocs TENUS par leur
+  /// cadence stride : leur etat peut avoir change via les couplages, et une projection etant
+  /// IDEMPOTENTE par contrat (cf. HasPointwiseProjection), la re-application sur un etat deja projete
+  /// est neutre. Bloc sans projection (s.project vide) : jamais interroge -- cout nul, les 4 pas
+  /// (step / step_strang / step_cfl / step_adaptive) restent bit-identiques a l'historique.
+  void apply_projections() {
+    for (auto& s : owner_->sp) {
+      if (!s.evolve) continue;  // bloc gele : fond fixe jamais modifie, rien a projeter
+      if (s.project) s.project(s.U);
+    }
+  }
+
   /// ETAGE SOURCE condense par Schur (OPT-IN, cf. set_source_stage). No-op si le bloc n'a pas d'etage
   /// source (s.schur == nullptr) : le chemin par defaut reste BIT-IDENTIQUE. Sinon, APRES le transport
   /// hyperbolique du bloc (deja joue par s.advance), on joue l'etage source AUTONOME
@@ -246,6 +263,7 @@ class SystemStepper {
       run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
     }
     apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres transport
+    apply_projections();  // projection ponctuelle POST-PAS ENTIER (ADC-177) ; no-op sans projection
     P->t += dt;
     P->macro_step_++;
   }
@@ -305,6 +323,9 @@ class SystemStepper {
       advance_transport_half(s, eff_dt);
     }
     apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres le pas symetrique
+    // Projection ponctuelle POST-PAS ENTIER (ADC-177) : UNE application apres le pas Strang complet
+    // H(dt/2) S(dt) H(dt/2), jamais entre les etages (semantique post-pas, pas post-etage).
+    apply_projections();
     P->t += dt;
     P->macro_step_++;
   }
@@ -428,6 +449,7 @@ class SystemStepper {
       run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
     }
     apply_couplings(Real(dt));
+    apply_projections();  // projection ponctuelle POST-PAS ENTIER (ADC-177) ; no-op sans projection
     P->t += dt;
     P->macro_step_++;
     return dt;
@@ -516,6 +538,7 @@ class SystemStepper {
       run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
     }
     apply_couplings(Real(macro_dt));
+    apply_projections();  // projection ponctuelle POST-MACRO-PAS (ADC-177), pas par sous-cycle
     P->t += macro_dt;
     P->macro_step_++;
     return macro_dt;

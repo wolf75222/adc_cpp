@@ -133,6 +133,11 @@ class SystemBlockStore {
     // Trailing + defaut vide : l'init par agregat positionnel des autres membres reste inchangee.
     std::function<Real(const MultiFab&)> source_frequency;  // max cellules de mu [1/s] (0 = ne contraint pas)
     std::function<Real(const MultiFab&)> stability_dt;      // min cellules du pas admissible (0 = ne contraint pas)
+    // PROJECTION PONCTUELLE post-pas (ADC-177) : U <- project(U, aux) sur les cellules VALIDES,
+    // appliquee par le stepper a la FIN de chaque macro-pas ENTIER (apres transport + etage source +
+    // couplages ; jamais par etage RK). VIDE (defaut) -> jamais interrogee (cout nul, chemin
+    // bit-identique). Trailing + defaut vide : l'init par agregat positionnel reste inchangee.
+    std::function<void(MultiFab&)> project;
   };
 
   /// Registre ORDONNE des blocs (UNIQUE source de verite). PUBLIC : Impl l'aliase en `sp` pour les

@@ -2,6 +2,7 @@
 
 #include <adc/core/types.hpp>
 #include <adc/mesh/box_array.hpp>
+#include <adc/mesh/for_each.hpp>  // for_each_cell (projection ponctuelle post-pas, ADC-177)
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
@@ -190,6 +191,39 @@ struct HotspotFn {
   GridContext ctx;
   void operator()(const MultiFab& U, Real& w, int& i, int& j) const {
     max_wave_speed_hotspot_mf(m, U, *ctx.aux, ctx.dom.nx(), w, i, j);
+  }
+};
+
+/// Kernel device de la PROJECTION PONCTUELLE post-pas (ADC-177) :
+/// U(i, j) <- m.project(U(i, j), aux(i, j)). FONCTEUR NOMME (meme contrat device que BlockRhsEval).
+/// Lecture et ecriture sur le MEME fab : acces strictement ponctuel (aucun voisin lu), donc aucune
+/// dependance inter-cellule -- parallelisable sans tampon.
+template <class Model>
+struct ProjectCellKernel {
+  Model m;
+  Array4 u;        // ecriture (etat du bloc)
+  ConstArray4 uc;  // lecture (meme fab, vue const)
+  ConstArray4 a;   // aux du System (phi, grad phi, champs extra)
+  ADC_HD void operator()(int i, int j) const {
+    const typename Model::State p =
+        m.project(load_state<Model>(uc, i, j), load_aux<aux_comps<Model>()>(a, i, j));
+    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = p[c];
+  }
+};
+
+/// Foncteur HOTE de la projection ponctuelle : for_each_cell du kernel sur les cellules VALIDES de
+/// chaque fab local. Les GHOSTS ne sont pas projetes : tout consommateur de ghosts (residu de
+/// transport) refait fill_ghosts en tete d'evaluation (cf. BlockRhsEval), donc l'etat fantome est
+/// reconstruit du valide projete au pas suivant -- aucun fill_boundary necessaire ici.
+template <class Model>
+struct PointwiseProject {
+  Model m;
+  GridContext ctx;
+  void operator()(MultiFab& U) const {
+    for (int li = 0; li < U.local_size(); ++li)
+      for_each_cell(U.box(li),
+                    ProjectCellKernel<Model>{m, U.fab(li).array(), U.fab(li).const_array(),
+                                             ctx.aux->fab(li).const_array()});
   }
 };
 
@@ -430,6 +464,12 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
   }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor};
   bc.hotspot = detail::HotspotFn<Model>{m, ctx};  // diagnostic dt_hotspot (ADC-182), hors chemin chaud
+  // PROJECTION PONCTUELLE post-pas (ADC-177) : fabriquee SEULEMENT si le modele declare le trait
+  // (HasPointwiseProjection, cf. core/physical_model.hpp) ; vide sinon -> le stepper ne l'interroge
+  // jamais (chemin historique bit-identique). Partagee par add_block ET add_compiled_model (les deux
+  // passent par make_block) : un .so 'production' la transporte donc nativement.
+  if constexpr (HasPointwiseProjection<Model>)
+    bc.project = detail::PointwiseProject<Model>{m, ctx};
   return bc;
 }
 

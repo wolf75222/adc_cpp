@@ -699,6 +699,9 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
   P->sp.back().advance_masked = std::move(closures.advance_masked);
   P->sp.back().advance_eb = std::move(closures.advance_eb);
   P->sp.back().hotspot = std::move(closures.hotspot);  // diagnostic dt_hotspot (ADC-182)
+  // Projection ponctuelle post-pas (ADC-177) : vide sauf si le modele declare le trait
+  // HasPointwiseProjection (make_block). Vide -> le stepper ne l'interroge pas (bit-identique).
+  P->sp.back().project = std::move(closures.project);
 }
 
 // Reallocation width-aware de l'etat d'un bloc (delegue a Impl::set_block_ghosts). Exposee
