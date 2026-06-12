@@ -17,6 +17,13 @@ On verifie :
      silencieux : le cache ne s'applique qu'au flux HLL).
  (4) GARDE temps : wave_speed_cache=True avec un traitement IMEX -> erreur explicite (cable sur
      l'avance explicite seulement).
+ (5) GARDE geometrie disque : wave_speed_cache=True avec un mode de transport disque (staircase /
+     cutcell, via set_disc_domain / set_geometry_mode) -> erreur explicite dans LES DEUX ORDRES
+     (cache puis disque, disque puis cache). Le cache n'est cable que sur l'avance cartesienne pleine.
+
+NOTE : la PREUVE D'ENGAGEMENT (le cache appelle wave_speeds par cellule, pas par face) vit dans le
+test C++ tests/test_wave_speed_cache_engagement.cpp (compteur de wave_speeds, calls_on < calls_off) :
+les verifs ON==OFF ci-dessous reussiraient meme si le cache devenait un no-op silencieux.
 Modele natif IsothermalFlux (expose wave_speeds) : aucun compilateur requis.
 """
 import sys
@@ -103,6 +110,37 @@ print("== (4) garde temps : cache + IMEX -> erreur ==")
 msg = err_msg(lambda: make_sim(cache=True, riemann="hll", time=adc.IMEX()))
 chk("wave_speed_cache" in msg,
     f"IMEX + cache rejete ({msg[:60]}...)")
+
+print("== (5) garde geometrie disque : cache + transport staircase/cutcell -> erreur ==")
+# Le cache n'est cable que sur l'avance cartesienne PLEINE : un mode disque (set_disc_domain /
+# set_geometry_mode) emprunte advance_masked / advance_eb qui l'ignorent -> rejet explicite, pas
+# d'ignore muet. On exerce les DEUX ordres (cache d'abord puis disque, et disque d'abord puis cache).
+
+
+def make_disc_sim_then_mode():
+    sim = make_sim(cache=True)  # bloc cache (cartesien plein)
+    sim.set_disc_domain(0.5, 0.5, 0.3, mode="staircase")  # doit lever (cache deja actif)
+
+
+def make_mode_then_cache():
+    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim.set_disc_domain(0.5, 0.5, 0.3, mode="cutcell")  # mode disque d'abord
+    sim.add_block("ions",
+                  adc.Model(state=adc.FluidState("isothermal", cs2=CS2),
+                            transport=adc.IsothermalFlux(),
+                            source=adc.NoSource(),
+                            elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
+                  spatial=adc.FiniteVolume(limiter="none", riemann="hll",
+                                           wave_speed_cache=True),  # doit lever (mode disque actif)
+                  time=adc.Explicit())
+
+
+msg = err_msg(make_disc_sim_then_mode)
+chk("wave_speed_cache" in msg and ("staircase" in msg or "disque" in msg),
+    f"cache puis set_disc_domain(staircase) rejete ({msg[:60]}...)")
+msg = err_msg(make_mode_then_cache)
+chk("wave_speed_cache" in msg and "disque" in msg,
+    f"set_disc_domain(cutcell) puis add_block(cache) rejete ({msg[:60]}...)")
 
 print("FAILS =", fails)
 sys.exit(1 if fails else 0)
