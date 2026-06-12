@@ -33,7 +33,7 @@ basculer tel ou tel job en bloquant.
 
 | Job | Outil | Config | Preset / option |
 | --- | --- | --- | --- |
-| `format` | clang-format | `.clang-format` | — (pas de build) |
+| `format` | clang-format | `.clang-format` | -- (pas de build) |
 | `warnings` | gcc `-Wall -Wextra …` | `cmake/AdcDevTooling.cmake` | preset `ci-warnings` (`ADC_ENABLE_WARNINGS`) |
 | `tidy` | clang-tidy | `.clang-tidy` | preset `ci-kokkos` (compile DB) |
 | `sanitizers` | ASan + UBSan | `cmake/AdcDevTooling.cmake` | preset `ci-asan` (`ADC_ENABLE_SANITIZERS`) |
@@ -70,6 +70,6 @@ run-clang-tidy -p build 'tests/.*\.cpp'
 
 ## Hors scope (extensions futures)
 
-- Balayage `clang-format` de toute la base (reformat massif) — PR séparée.
-- Passage en `-Werror` / blocage des PR — après assainissement.
+- Balayage `clang-format` de toute la base (reformat massif) -- PR séparée.
+- Passage en `-Werror` / blocage des PR -- après assainissement.
 - TSan, couverture, include-what-you-use, cppcheck.
