@@ -185,15 +185,50 @@ int main() {
         "N=3 non normale (hors-diagonale 1e6) : spectre = diagonale");
   }
 
+  std::printf("== bloc compagnon quasi-degenere (cap defaut converge, pas de repli) ==\n");
+  {
+    // Bloc compagnon 5x5 reel d'un cas HyQMOM : superdiagonale de 1, derniere ligne = coefficients.
+    // Spectre quasi-double (paires ~+-1.7326 et ~+-1.7527 + ~0.01) : la deflation QR rampe et
+    // demande ~42 iterations. Sous l'ancien cap 30 ce bloc repliait en silence (Gershgorin ~+-15.6,
+    // vitesse d'onde sur-estimee ~9x) ; le defaut a 100 le fait converger avec marge.
+    // Reference numpy (np.linalg.eigvals) : min Re = -1.732589689893011, max Re = 1.752707143107345.
+    Real A[5][5];
+    for (int i = 0; i < 5; ++i)
+      for (int j = 0; j < 5; ++j) A[i][j] = Real(0);
+    for (int i = 0; i < 4; ++i) A[i][i + 1] = Real(1);
+    const Real last[5] = {Real(0.0927583829495191), Real(-9.220453484757002),
+                          Real(-0.18326928704092538), Real(6.072635227251581),
+                          Real(0.05029363303583967)};
+    for (int j = 0; j < 5; ++j) A[4][j] = last[j];
+    bool fb = true;  // doit etre remis a false : aucun repli attendu au cap defaut
+    const EigBounds b = real_eig_minmax(A, /*max_iter_per_eig=*/100, &fb);
+    // Tolerance ABSOLUE 1e-6 (et non 1e-9) : la paire superieure est QUASI-DOUBLE, son
+    // conditionnement non symetrique est ~eps^(1/2) (~1.5e-8) -- exiger 1e-9 contredirait le
+    // contrat documente dans l'en-tete. 1e-6 reste a 7 ordres de grandeur du repli (~+-15.6).
+    chk(b.converged && !fb, "compagnon quasi-degenere : converge au cap defaut, fallback = false");
+    chk(std::fabs(b.lmin - Real(-1.732589689893011)) < Real(1e-6)
+            && std::fabs(b.lmax - Real(1.752707143107345)) < Real(1e-6),
+        "min/max corrects (vs numpy) : pas le repli Gershgorin");
+    chk(b.max_im < Real(1e-6), "spectre essentiellement reel (max_im ~ 0)");
+    // Verrou du DEFAUT : meme bloc appele SANS cap explicite (donc avec le defaut de la signature).
+    // Ce bloc demande ~42 iterations ; si le defaut regressait sous ce seuil (p.ex. l'ancien 30) il
+    // replirait en silence et bdef.converged passerait a false. Epingle le defaut a >= 42.
+    const EigBounds bdef = real_eig_minmax(A);
+    chk(bdef.converged && std::fabs(bdef.lmin - Real(-1.732589689893011)) < Real(1e-6)
+            && std::fabs(bdef.lmax - Real(1.752707143107345)) < Real(1e-6),
+        "cap par DEFAUT suffit a converger (une regression 100->30 ferait echouer ce test)");
+  }
+
   std::printf("== contrat de repli (cap = 0 -> Gershgorin) ==\n");
   {
     const Real roots[5] = {Real(-3), Real(-1), Real(0), Real(2), Real(5)};
     Real A[5][5];
     companion(roots, A);
-    const EigBounds b = real_eig_minmax(A, /*max_iter_per_eig=*/0);
+    bool fb = false;  // doit passer a true : le parametre de sortie reporte le repli
+    const EigBounds b = real_eig_minmax(A, /*max_iter_per_eig=*/0, &fb);
     // Gershgorin ENCADRE le vrai spectre [-3, 5] et le flag dit la verite.
-    chk(!b.converged && b.lmin <= Real(-3) && b.lmax >= Real(5),
-        "cap 0 : converged = false, bornes de Gershgorin englobantes");
+    chk(!b.converged && fb && b.lmin <= Real(-3) && b.lmax >= Real(5),
+        "cap 0 : converged = false, fallback = true, bornes de Gershgorin englobantes");
     Real glo, ghi;
     adc::detail::gershgorin_bounds(A, glo, ghi);
     chk(b.lmin == glo && b.lmax == ghi, "le repli EST la borne de Gershgorin (contrat documente)");
