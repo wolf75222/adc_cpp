@@ -251,7 +251,7 @@ jobs:
 
       # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On construit l'extension
       # _adc AVEC Kokkos (preset ci-kokkos-python, jobs: 4 ; CMAKE_LINKER_TYPE=MOLD en -D ici uniquement)
-      # puis on exerce TOUTE la suite python/tests/test_*.py par AUTO-DECOUVERTE (find ... | xargs -P 2) :
+      # puis on exerce TOUTE la suite python/tests/test_*.py par AUTO-DECOUVERTE (find ... | xargs -P 4, runners publics 4 vCPU) :
       # la liste ne peut plus se perimer et un nouveau test livre par une PR soeur est pris automatiquement.
       # SECONDS chronometre configure+build puis tests, ecrits dans GITHUB_STEP_SUMMARY (baseline ADC-171).
       - name: Build + test module Python `adc` (Kokkos Serial)
@@ -268,7 +268,7 @@ jobs:
           export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
           SECONDS=0
           find python/tests -maxdepth 1 -name 'test_*.py' -print0 | sort -z \
-            | xargs -0 -P 2 -I {} bash -c 'echo "::group::{}"; python3 "{}"; echo "::endgroup::"'
+            | xargs -0 -P 4 -I {} bash -c 'echo "::group::{}"; python3 "{}"; echo "::endgroup::"'
           test_s=$SECONDS
           {
             echo "### gate-python (module _adc, Kokkos Serial)"
