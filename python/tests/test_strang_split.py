@@ -7,9 +7,10 @@ docs/HOFFART_STEP_SEQUENCE.md, include/adc/runtime/system_stepper.hpp (SystemSte
 le test C++ tests/test_strang_splitting.cpp (ordre temporel observe ~2 vs ~1).
 
 On valide :
-  (a) API / opt-in : adc.Strang existe, EST une sous-classe de adc.Split (donc soumise aux memes
-      gardes : rejet sur add_block / AmrSystem), expose .scheme == "strang" (Split -> "lie"), est
-      exportee dans adc.__all__.
+  (a) API / opt-in : adc.Strang existe, EST une sous-classe de adc.Split (donc soumise a la meme
+      garde : rejet sur add_block, System ET AmrSystem), expose .scheme == "strang" (Split -> "lie"),
+      est exportee dans adc.__all__. NB : AmrSystem.add_equation SUPPORTE Strang/Lie depuis le chemin
+      amr-schur (#265, set_source_stage + set_time_scheme) ; seul add_block continue de rejeter.
   (b) RUN C++ (si compilateur) : un fluide isotherme magnetise tourne avec time=adc.Strang(...) ;
       etat FINI, densite gelee dans la source, quantite de mvt qui EVOLUE (source engagee).
   (c) STRANG != LIE sur le chemin moteur : a setup et dt IDENTIQUES, le run Strang et le run Split
@@ -119,16 +120,20 @@ def check_api():
     # adc.Strang herite des memes briques que Split (hyperbolique + source condensee).
     chk(isinstance(s.source, adc.CondensedSchur) and isinstance(s.hyperbolic, adc.Explicit),
         "(a) adc.Strang porte hyperbolique Explicit + source CondensedSchur")
-    # Garde heritee : Strang (etant un Split) est rejete sur add_block et sur AmrSystem.
+    # Garde heritee : Strang (etant un Split) est rejete sur add_block, sur System ET sur AmrSystem --
+    # l'etage source condense par Schur n'est cable que par add_equation (qui branche set_source_stage),
+    # jamais par add_block (qui jouerait le seul transport et PERDRAIT la source en silence). Depuis le
+    # chemin amr-schur (#265), AmrSystem.add_equation(time=adc.Strang(...)) est au contraire SUPPORTE
+    # (cf. test_amr_schur_via_system.py pour la couverture positive sur AMR) : seul add_block rejette.
     sys_ = adc.System(n=8, L=1.0, periodic=False)
     e_blk = raises(TypeError, sys_.add_block, "x", scalar_native_model(), time=strang())
     chk("Split" in str(e_blk) or "Schur" in str(e_blk),
         "(a) System.add_block(time=adc.Strang(...)) -> rejet (heritage Split)")
     amr = adc.AmrSystem(n=8, L=1.0, periodic=True)
-    e_amr = raises((TypeError, ValueError), amr.add_equation, "x", scalar_native_model(),
+    e_amr = raises((TypeError, ValueError), amr.add_block, "x", scalar_native_model(),
                    time=strang())
     chk("Split" in str(e_amr) or "Schur" in str(e_amr),
-        "(a) AmrSystem.add_equation(time=adc.Strang(...)) -> rejet (heritage Split)")
+        "(a) AmrSystem.add_block(time=adc.Strang(...)) -> rejet (heritage Split)")
 
 
 def vel_mom(sim):
@@ -147,7 +152,17 @@ def main():
         return
 
     n, L, dt = 32, 1.0, 2.0e-3
-    compiled = isothermal_magnetized().compile(backend="aot", include=INCLUDE)
+    # adc_cpp est Kokkos-only (#263) : le .so AOT inclut les en-tetes adc (multifab/for_each) qui ne
+    # compilent QUE sous ADC_HAS_KOKKOS, donc compile_aot exige un Kokkos installe (ADC_KOKKOS_ROOT).
+    # Sans lui, on saute proprement (b)/(c) -- meme convention que test_time_euler.py / test_dsl_aot.
+    try:
+        compiled = isothermal_magnetized().compile(backend="aot", include=INCLUDE)
+    except RuntimeError as ex:
+        if "Kokkos" in str(ex):
+            print("skip  Kokkos introuvable -> (b)/(c) sautes (%s)" % str(ex).splitlines()[0][:70])
+            print("test_strang_split : OK (rien a compiler)")
+            return
+        raise
 
     # (b) RUN Strang : etat fini, quantite de mvt qui evolue (etage source engage sous Strang).
     sim_s = build_sim(compiled, strang(theta=1.0, alpha=3.0), n=n, L=L)
