@@ -107,11 +107,17 @@ if(WIN32)
   if(MSVC)
     target_compile_options(_adc PRIVATE /bigobj)
   endif()
-  # 3) Import library _adc.lib DEPOSEE A COTE du .pyd : adc.dsl._adc_import_lib() la cherche la pour
-  #    linker la .dll DSL. ARCHIVE_OUTPUT_DIRECTORY pilote la .lib (LIBRARY = le .pyd, deja sur ADC_PY_PKG).
-  #    Les variantes _<CONFIG> couvrent les generateurs multi-config (Visual Studio) qui, sinon, suffixent
-  #    un sous-dossier Release/ et placeraient _adc.lib hors du paquet.
+  # 3) .pyd (LIBRARY, un MODULE) ET import lib _adc.lib (ARCHIVE) DEPOSES dans le paquet adc/. CRUCIAL
+  #    sous generateur multi-config (Visual Studio) : LIBRARY_OUTPUT_DIRECTORY seul (ligne plus haut) se
+  #    voit suffixer un sous-dossier Release/ -> _adc.pyd atterrirait dans adc/Release/ (donc `import adc`
+  #    ne trouverait pas _adc) et _adc.lib hors du .pyd (dsl._adc_import_lib() la cherche A COTE du module).
+  #    Les variantes _<CONFIG> NE sont PAS re-suffixees -> on force .pyd + .lib (+ DLL deployees ci-dessous)
+  #    dans le MEME dossier adc/, pour tout generateur. Mono-config (Ninja/Make, Linux/Mac) : deja le cas.
   set_target_properties(_adc PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY                ${ADC_PY_PKG}
+    LIBRARY_OUTPUT_DIRECTORY_RELEASE        ${ADC_PY_PKG}
+    LIBRARY_OUTPUT_DIRECTORY_DEBUG          ${ADC_PY_PKG}
+    LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${ADC_PY_PKG}
     ARCHIVE_OUTPUT_DIRECTORY                ${ADC_PY_PKG}
     ARCHIVE_OUTPUT_DIRECTORY_RELEASE        ${ADC_PY_PKG}
     ARCHIVE_OUTPUT_DIRECTORY_DEBUG          ${ADC_PY_PKG}
