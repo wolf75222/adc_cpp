@@ -6,6 +6,11 @@ signatures et les commentaires d'en-tete) est generee par **Doxygen** depuis les
 
 - **Site Doxygen :** <https://wolf75222.github.io/adc_cpp/cpp/>
 
+La meme reference est aussi embarquee dans ce site (entree "API C++ embarquee" de la barre
+laterale, ou <https://wolf75222.github.io/adc_cpp/doxygen/>) : pages generees par doxysphinx,
+integrees a la navigation et a la recherche Sphinx. Le site Doxygen brut reste publie sous
+`/cpp/` a l'identique.
+
 La configuration Doxygen vit dans le depot : [`docs/Doxyfile`](../../Doxyfile). La regenerer
 localement produit le HTML sous le repertoire de sortie configure :
 

@@ -55,6 +55,17 @@ exclude_patterns = [
     ".DS_Store",
 ]
 
+# Reference C++ embarquee (doxysphinx) : scripts/build_docs.sh (mode complet) genere
+# docs/sphinx/doxygen/ (doxygen puis doxysphinx, repertoire gitignore) AVANT le build
+# sphinx ; les pages .rst generees sont toutes :orphan: et l'entree de navigation vit
+# dans index.md (toctree "doxygen/index"). En mode rapide (--sphinx ou sphinx-build
+# direct) le repertoire peut etre absent : on exclut alors le sous-arbre et on supprime
+# UNIQUEMENT les warnings de toctree vers ce document absent/exclu, pour que -W reste
+# vert dans les deux modes.
+if not (Path(__file__).parent / "doxygen" / "index.rst").is_file():
+    exclude_patterns.append("doxygen")
+    suppress_warnings = ["toc.excluded", "toc.not_readable"]
+
 html_theme = "furo"
 html_title = f"adc_cpp {release}"
 html_theme_options = {

@@ -17,6 +17,7 @@ compile_commands.json
 docs/_build/
 docs/sphinx/_generated/
 docs/sphinx/__pycache__/
+docs/sphinx/doxygen/
 
 # Python bytecode
 __pycache__/

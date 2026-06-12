@@ -54,6 +54,7 @@ reference/index
 :maxdepth: 1
 :caption: Reference C++
 
+API C++ embarquee <doxygen/index>
 C++ API (Doxygen) <https://wolf75222.github.io/adc_cpp/cpp/>
 ```
 
