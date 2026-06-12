@@ -107,10 +107,33 @@ endforeach()
 # ADC_BUILD_TESTS=OFF. Lance avec le MEME interpreteur que celui ayant compile _adc.
 # Le test vit dans python/tests/ (pas python/) : sinon sys.path[0] (dossier du script)
 # contiendrait le paquet source adc/ et masquerait le paquet construit.
+#
+# Environnement commun a TOUS les tests python ci-dessous. Outre PYTHONPATH (le paquet adc
+# construit), on transmet ADC_KOKKOS_ROOT aux tests qui compilent un .so DSL a la volee
+# (AOT / "production") : depuis le passage Kokkos-only (#263), compile_aot/compile_native incluent
+# les en-tetes adc qui EXIGENT Kokkos et LEVENT une RuntimeError si aucune racine Kokkos n'est
+# visible (ADC_KOKKOS_ROOT / Kokkos_ROOT / KOKKOS_ROOT ; cf. adc.dsl._native_kokkos_root). Sans
+# elle, un `ctest` nu echoue sur test_dsl_{aot,jit}_*, test_dsl_production*, test_dsl_hybrid*,
+# test_dsl_coupled_source* -- ce que ci.yml masquait en exportant la variable a la main. On la derive
+# de l'install Kokkos resolu par find_package (cible Kokkos::kokkos) pour que `ctest` soit AUTONOME.
+# Reste vide pour un Kokkos FetchContent (pas d'install <root>/include) : on retombe alors sur
+# PYTHONPATH seul et l'env du dev/CI tranche, comportement historique inchange.
+set(_adc_py_test_env "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+if(ADC_HAS_KOKKOS AND TARGET Kokkos::kokkos)
+  get_target_property(_adc_kokkos_incs Kokkos::kokkos INTERFACE_INCLUDE_DIRECTORIES)
+  foreach(_inc IN LISTS _adc_kokkos_incs)
+    if(EXISTS "${_inc}/Kokkos_Core.hpp")
+      get_filename_component(_adc_kokkos_root "${_inc}/.." ABSOLUTE)
+      list(APPEND _adc_py_test_env "ADC_KOKKOS_ROOT=${_adc_kokkos_root}")
+      break()
+    endif()
+  endforeach()
+endif()
+
 add_test(NAME test_bindings
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bindings.py)
 set_tests_properties(test_bindings PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Methode temporelle explicite "euler" (ForwardEuler, ADC-174) : identite de Shu-Osher
 # bit-exacte (ssprk2 == 0.5 U0 + 0.5 euler(euler(.))), no-default-change, rejet AMR.
@@ -131,7 +154,7 @@ set_tests_properties(test_dt_hotspot PROPERTIES
 add_test(NAME test_dsl
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)
 set_tests_properties(test_dsl PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Generateur generique de modeles de moments 2D (adc.moments) : l'algebre M->C->S->C'->M'
 # est derivee en boucles sur l'AST, seule la fermeture est fournie (ADC-164). Oracle
@@ -146,7 +169,7 @@ set_tests_properties(test_dsl_moments PROPERTIES
 add_test(NAME test_dsl_codegen
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_codegen.py)
 set_tests_properties(test_dsl_codegen PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Emballage en brique compilee : compile la brique generee contre les en-tetes adc, verifie le
 # concept HyperbolicModel et l'egalite avec adc::Euler (4 var, sans aux) et adc::ExBVelocity
@@ -154,70 +177,70 @@ set_tests_properties(test_dsl_codegen PROPERTIES
 add_test(NAME test_dsl_brick
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_brick.py)
 set_tests_properties(test_dsl_brick PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Codegen de la SOURCE : la brique de source generee == adc::PotentialForce ecrite a la main.
 add_test(NAME test_dsl_source
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_source.py)
 set_tests_properties(test_dsl_source PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Composition : CompositeModel<EulerGen, NoSource, ChargeDensity> satisfait PhysicalModel et egale
 # la version ecrite a la main.
 add_test(NAME test_dsl_compose
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_compose.py)
 set_tests_properties(test_dsl_compose PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # JIT-lite end-to-end : formules Python -> .hpp genere -> g++ compile un driver volumes-finis ->
 # residu Rusanov identique a adc::Euler.
 add_test(NAME test_dsl_jit
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_jit.py)
 set_tests_properties(test_dsl_jit PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Codegen elliptique : la brique de second membre generee == adc::ChargeDensity.
 add_test(NAME test_dsl_elliptic
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_elliptic.py)
 set_tests_properties(test_dsl_elliptic PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # CSE : cse=True et cse=False donnent le meme resultat ; la version CSE factorise (moins de sqrt).
 add_test(NAME test_dsl_cse
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_cse.py)
 set_tests_properties(test_dsl_cse PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # JIT reel : flux genere compile en .so, charge dans le process (ctypes), == interprete numpy.
 add_test(NAME test_dsl_jitlib
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_jitlib.py)
 set_tests_properties(test_dsl_jitlib PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Dispatch type-erased a l'execution : brique generee -> .so -> dlopen -> adc::IModel<4> == adc::Euler.
 add_test(NAME test_dsl_dynamic
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_dynamic.py)
 set_tests_properties(test_dsl_dynamic PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Bloc dynamique de bout en bout : DSL -> compile_so -> System.add_dynamic_block -> eval_rhs/step.
 add_test(NAME test_dsl_block
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_block.py)
 set_tests_properties(test_dsl_block PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Bloc dynamique COUPLE : euler_poisson en formules -> .so (CompositeModel) -> add_dynamic_block ;
 # elliptic_rhs cable au Poisson (== compile) + eval_rhs == flux + source de gravite.
 add_test(NAME test_dsl_coupled
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_coupled.py)
 set_tests_properties(test_dsl_coupled PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Backend AOT : euler_poisson compile_or_jit(mode="compile") -> add_compiled_block == bloc natif.
 add_test(NAME test_dsl_aot
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_aot.py)
 set_tests_properties(test_dsl_aot PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Backend NATIF "production" : euler_poisson compile(backend="production") -> loader .so qui inline
 # add_compiled_model<ProdModel> -> add_native_block. Parite BIT-IDENTIQUE au bloc natif add_block
@@ -225,7 +248,7 @@ set_tests_properties(test_dsl_aot PROPERTIES
 add_test(NAME test_dsl_production
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_production.py)
 set_tests_properties(test_dsl_production PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Backend NATIF "production" cote AMR (DSL Phase D) : euler compile(backend="production",
 # target="amr_system") -> loader .so inline add_compiled_model(AmrSystem&) -> AmrSystem.add_native_block.
@@ -235,7 +258,7 @@ set_tests_properties(test_dsl_production PROPERTIES
 add_test(NAME test_dsl_production_amr
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_production_amr.py)
 set_tests_properties(test_dsl_production_amr PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # AmrSystem::set_conservative_state (etat conservatif initial COMPLET sur AMR, mono-bloc) : demarrer
 # l'AMR depuis l'etat de derive (rho, rho*u, rho*v) au lieu de m=0. Gardes (ndim/vide/taille/multi-bloc),
@@ -244,26 +267,26 @@ set_tests_properties(test_dsl_production_amr PROPERTIES
 add_test(NAME test_amr_conservative_state
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_amr_conservative_state.py)
 set_tests_properties(test_amr_conservative_state PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Choix de reconstruction (ordre) du bloc dynamique : recon none/minmod/vanleer == reference MUSCL numpy.
 add_test(NAME test_dsl_recon
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_recon.py)
 set_tests_properties(test_dsl_recon PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Operateur elliptique a permittivite constante : phi(eps=2) == phi(eps=1)/2.
 add_test(NAME test_poisson_eps
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_poisson_eps.py)
 set_tests_properties(test_poisson_eps PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # WENO5-Z + SSPRK3 exposes depuis l'API : adc.Spatial(limiter="weno5") + adc.Explicit(method="ssprk3")
 # end-to-end, defaut SSPRK2 inchange (bit-identique), garde-fous sur les chemins compiles (.so).
 add_test(NAME test_weno5_ssprk3
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_weno5_ssprk3.py)
 set_tests_properties(test_weno5_ssprk3 PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # SSPRK3 sur le chemin de PRODUCTION (loader natif .so), pas seulement add_block : add_native_block
 # accepte time="ssprk3" et add_compiled_model threade le schema RK jusqu'au make_block du .so. Garde
@@ -272,7 +295,7 @@ set_tests_properties(test_weno5_ssprk3 PROPERTIES
 add_test(NAME test_ssprk3_production
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ssprk3_production.py)
 set_tests_properties(test_ssprk3_production PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # SSPRK3 (ordre 3) sur AMR avec REFLUX PAR ETAGE (ADC-64) : adc.Explicit(ssprk3=True) cable mono-bloc
 # (AmrCouplerMP) ET multi-blocs (AmrRuntime), reflux du FLUX EFFECTIF Feff = 1/6 F0 + 1/6 F1 + 2/3 F2.
@@ -282,7 +305,7 @@ set_tests_properties(test_ssprk3_production PROPERTIES
 add_test(NAME test_amr_ssprk3
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_amr_ssprk3.py)
 set_tests_properties(test_amr_ssprk3 PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Politique de la loi de Gauss (R0, repro Hoffart) : System.set_gauss_policy "restart" (defaut,
 # re-resout Poisson chaque pas, bit-identique) vs "evolve" (apres phi^0, plus de re-solve : l'etage
@@ -291,7 +314,7 @@ set_tests_properties(test_amr_ssprk3 PROPERTIES
 add_test(NAME test_gauss_policy
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gauss_policy.py)
 set_tests_properties(test_gauss_policy PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # Flux HLL expose pour les modeles a vitesses d'onde signees SANS exiger une pression (3-var) :
 # make_block accepte riemann="hll" des que model.wave_speeds existe (requires-gate, pas n_vars==4 ni
@@ -300,7 +323,7 @@ set_tests_properties(test_gauss_policy PROPERTIES
 add_test(NAME test_hll_isothermal
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hll_isothermal.py)
 set_tests_properties(test_hll_isothermal PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # WENO5 sur les chemins .so / CompiledModel : add_compiled_block (AOT) ET add_native_block (production)
 # allouent block_n_ghost(limiter)=3 ghosts -> weno5 accepte ; parite eval_rhs/potentiel au bloc natif
@@ -309,14 +332,14 @@ set_tests_properties(test_hll_isothermal PROPERTIES
 add_test(NAME test_weno5_compiledmodel
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_weno5_compiledmodel.py)
 set_tests_properties(test_weno5_compiledmodel PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # DSL Phase A : API utilisateur stable (dsl.Model + Param + CompiledModel + add_equation +
 # FiniteVolume + run). Erreurs explicites + aot/production end-to-end (production -> add_native_block).
 add_test(NAME test_dsl_phase_a
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_phase_a.py)
 set_tests_properties(test_dsl_phase_a PROPERTIES
-  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+  ENVIRONMENT "${_adc_py_test_env}")
 
 # --- Garde-fou : tests des chantiers aux extensible / EPM / roles, jusqu'ici lances en CI
 # (ci.yml) mais PAS enregistres en ctest -> on les rend visibles a `ctest` (et donc enforces
@@ -364,9 +387,26 @@ foreach(t
     test_dsl_autodiff_roe     # ADC-68 voie FOURNIE : dsl.diff (autodiff Expr) + m.flux_jacobian + m.roe_dissipation(x=,y=) (left/right) reproduisant le Roe isotherme a la main == enable_roe (~1e-12) ; (a)(b)(d) symboliques, (c) compile (auto-skip)
     test_coupled_freq_expr    # frequence PAR CELLULE des sources couplees (GENERICITY 7) : constante (regression), Expr mu(U)=k*rho (dt==cfl/(k*max rho)), suivi d'etat, rejet (bloc,role) non declare, AMR grossier
     test_backend_auto         # ADC-63 : backend par defaut 'auto' = production si parite toolchain etablie, aot sinon (raison posee, jamais muet) ; explicite inchange (auto-skip)
-    test_native_abi_std)      # regression ABI : le std du modele natif (backend="production") suit le loader (c++20 sous Kokkos, c++23 sinon) -> add_native_block charge sans "ABI incompatible"
+    test_native_abi_std       # regression ABI : le std du modele natif (backend="production") suit le loader (c++20 sous Kokkos, c++23 sinon) -> add_native_block charge sans "ABI incompatible"
+    # --- ADC-104 : tests DSL livres mais jamais enregistres en ctest. Ils etaient orphelins du grep
+    # litteral (masques par l'interpolation tests/${t}.py de cette boucle) et NE tournaient PAS en
+    # ctest ; en CI ils etaient bien lances par auto-decouverte (find|xargs) mais l'echec etait
+    # AVALE (le `bash -c '...; python3 {}; echo'` se termine sur un echo -> exit 0). Aucun garde-fou,
+    # donc -- c'est ce trou qui a laisse passer la regression Kokkos-only #295.
+    # NB : test_dsl_hybrid et test_dsl_hybrid_bz (hybride AOT) sont VOLONTAIREMENT differes ici : ils
+    # echouent sur master tant que le correctif #295 (ADC-103 : flags Kokkos sur le chemin aot de
+    # HybridModel.compile) n'est pas merge. Ils seront enregistres dans le suivi gate sur #295 (un
+    # garde-fou vert ne peut pas preceder le correctif qu'il protege). Les hybrides du chemin
+    # "production" (hybrid_amr, hybrid_coupling) passent deja et sont enregistres ci-dessous. ---
+    test_dsl_hybrid_amr       # hybride cote AMR : CompositeModel.compile(backend="production", target="amr_system") (.so), rejets aot/system, auto-skip
+    test_dsl_hybrid_coupling  # hybride couple ions/elec : transport DSL + elliptic natif ChargeDensity compile production (.so), auto-skip
+    test_dsl_coupled_source   # source COUPLEE inter-especes par le DSL (CoupledSource.compile(backend="production"), .so) == reference numpy forward-Euler
+    test_dsl_coupled_source_conservation  # echange CONSERVATIF par paire (add_pair) compile production (.so) : masse totale invariante ~1e-12, rejets
+    test_dsl_coupled_role_error  # verrou rejet role inconnu : ValueError cote DSL (pur Python) + RuntimeError cote add_coupled_source (compile production, .so)
+    test_dsl_runtime_params   # parametres RUNTIME du DSL : const inline vs params.get(0) seede, cache keye model_hash+abi, compile AOT (.so), auto-skip
+    test_dsl_wave_speeds_no_pressure)  # m.wave_speeds(x=,y=) sans primitive 'p' -> riemann='hll' ; modele jouet acoustique, compile AOT (.so), auto-skip via dsl._default_cxx
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
   set_tests_properties(${t} PROPERTIES
-    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+    ENVIRONMENT "${_adc_py_test_env}")
 endforeach()
