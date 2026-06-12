@@ -21,7 +21,13 @@ On verifie :
      adc_compiled_has_projection / adc_compiled_project_p) ;
  (5) GARDES : backend 'prototype' (JIT) rejette m.projection (ValueError explicite) ; un loader
      production target='amr_system' avec projection est REJETE par add_native_block (AmrSystem)
-     avec une erreur claire (hook non cable sur AMR : perimetre suivant).
+     avec une erreur claire (hook non cable sur AMR : perimetre suivant) ;
+ (6) PROJECTION LISANT L'AUX (production + aot) : un plancher par cellule q1 <- max(q1, w) ou w est un
+     champ aux NOMME (set_aux_field) -- l'etat post-pas == transport puis projection numpy AVEC le meme
+     w (egalite bit-exacte, W asymetrique => valide la convention d'index) ; un plancher 5.0 force
+     q1==5 partout (preuve que l'aux marshalee est CONSOMMEE, pas un canal a vide). Exerce les deux
+     sites de marshaling aux : compiled_block_abi::pointwise_project (aot) et la fermeture project du
+     native_loader (production).
 """
 import os
 import shutil
@@ -61,6 +67,24 @@ def build_model(tag, projection):
         # clamp de positivite + masque par signe : branches par cellule SANS if (abs / sign).
         m.projection([(q0 + dsl.abs_(q0)) / 2.0,
                       q1 * 0.5 * (dsl.sign(q0) + 1.0)])
+    return m
+
+
+def build_aux_model(tag):
+    """Transport jouet 2 variables AVEC une projection qui LIT l'aux : plancher par cellule
+    q1 <- max(q1, w), ou w est un champ aux NOMME (aux_field) fixe par bloc via set_aux_field.
+    max(a, b) = (a + b + |a - b|) / 2 -> branche par cellule SANS if (idempotent : max(max,w)=max).
+    Exerce le marshaling aux des DEUX chemins compiles (compiled_block_abi::pointwise_project en aot,
+    fermeture project du native_loader en production) : sans aux lue, ces branches tournaient a vide."""
+    m = dsl.HyperbolicModel("toyauxproj_" + tag)
+    q0, q1 = m.conservative_vars("q0", "q1")
+    m.set_flux(x=[A_X * q0, A_X * q1], y=[A_Y * q0, A_Y * q1])
+    m.set_eigenvalues(x=[dsl.Const(A_X)], y=[dsl.Const(A_Y)])
+    m.set_primitive_state("q0", "q1")  # primitives = conservatives (transport pur)
+    m.set_conservative_from([q0, q1])
+    w = m.aux_field("wfloor")  # champ aux NOMME -> composante dsl.AUX_NAMED_BASE, fixee par set_aux_field
+    floored = (q1 + w + dsl.abs_(q1 - w)) / 2.0  # max(q1, w) sans branche
+    m.projection([q0, floored])
     return m
 
 
@@ -104,6 +128,34 @@ def reference_states(so_nohook, adder, m_clamp, nsteps=NSTEPS):
         s.set_state("toy", cur)
         s.step(DT)
         cur = m_clamp.projection_value(np.array(s.get_state("toy")).reshape(2, N, N))
+        out.append(cur)
+    return out
+
+
+def run_states_aux(so, adder, w, nsteps=NSTEPS):
+    """Comme run_states mais fixe d'abord le champ aux NOMME 'wfloor' (composante AUX_NAMED_BASE).
+    Le champ est STATIQUE et PERSISTE d'un pas a l'autre : un seul set_aux_field_component suffit."""
+    s = make_sys(so, adder)
+    s._s.set_aux_field_component(dsl.AUX_NAMED_BASE, np.asarray(w, dtype=float).reshape(-1))
+    out = []
+    for _ in range(nsteps):
+        s.step(DT)
+        out.append(np.array(s.get_state("toy")).reshape(2, N, N))
+    return out
+
+
+def reference_states_aux(so_nohook, adder, m_aux, w, nsteps=NSTEPS):
+    """Reference POST-PAS pour une projection LISANT l'aux : transport SANS hook (so_nohook ne lit pas
+    w -> identique), puis projection numpy avec le MEME champ aux (aux={'wfloor': w}). Le meme tableau
+    w sert ici et a set_aux_field_component : meme convention [ligne=y, colonne=x] des deux cotes."""
+    s = make_sys(so_nohook, adder)
+    cur = initial_state(N)
+    out = []
+    for _ in range(nsteps):
+        s.set_state("toy", cur)
+        s.step(DT)
+        cur = m_aux.projection_value(np.array(s.get_state("toy")).reshape(2, N, N),
+                                     aux={"wfloor": np.asarray(w, dtype=float)})
         out.append(cur)
     return out
 
@@ -189,6 +241,38 @@ def main():
             time="explicit", gamma=1.4, substeps=1))
         chk("projection" in msg and "AMR" in msg,
             "target amr_system rejete explicitement : %s" % msg[:90])
+
+        print("== (6) projection LISANT l'aux : champ aux marshale ET consomme (production + aot) ==")
+        m_aux = build_aux_model("floor")
+        # Plancher par cellule q1 <- max(q1, W). W ASYMETRIQUE (ligne != colonne) dans [0.3, 0.9] :
+        # actif la ou W > q1 (q1 dans [0.5, 0.9]), inactif ailleurs -> exerce LES DEUX branches du max
+        # et VALIDE la convention d'index (un transpose aux casserait l'egalite bit-exacte).
+        ix = np.arange(N)
+        JJ, II = np.meshgrid(ix, ix, indexing="ij")           # JJ = ligne (y), II = colonne (x)
+        W = 0.6 + 0.3 * np.sin(2 * np.pi * (II + 0.5) / N) * np.cos(2 * np.pi * (JJ + 0.5) / N)
+        W_hi = np.full((N, N), 5.0)                            # plancher >> q1 : signature non ambigue
+        none_so = {"native": so_none, "aot": so_none_a}        # transport sans hook (ne lit pas W)
+        none_st = {"native": st_none, "aot": run_states(so_none_a, "aot")}
+        for backend, adder in (("production", "native"), ("aot", "aot")):
+            so_aux = m_aux.compile(os.path.join(tmp, "toy_aux_%s.so" % backend), INCLUDE,
+                                   backend=backend)
+            st_aux = run_states_aux(so_aux, adder, W)
+            st_ref = reference_states_aux(none_so[adder], adder, m_aux, W)
+            d = max(float(np.max(np.abs(a - b))) for a, b in zip(st_aux, st_ref))
+            chk(all(np.allclose(a, b, rtol=0.0, atol=1e-15) for a, b in zip(st_aux, st_ref)),
+                "%s : etat post-pas == transport puis plancher(aux) numpy (ecart max %.2e)"
+                % (backend, d))
+            # le plancher LIT reellement W : q1 est releve dans au moins une cellule vs le run sans hook.
+            d_active = max(float(np.max(np.abs(a[1] - b[1])))
+                           for a, b in zip(st_aux, none_st[adder]))
+            chk(d_active > 1e-6, "%s : le plancher aux modifie q1 (ecart %.2e)" % (backend, d_active))
+            # ADVERSARIAL : un plancher 5.0 (>> q1) force q1 == 5 partout a chaque pas. Si l'aux etait
+            # ignoree (marshaling a vide), q1 resterait le transport (~[0.5, 0.9]) -> ce chk tomberait.
+            st_hi = run_states_aux(so_aux, adder, W_hi)
+            chk(all(np.allclose(s[1], 5.0, rtol=0.0, atol=1e-12) for s in st_hi),
+                "%s : plancher aux=5.0 -> q1==5 a chaque pas (aux lu, jamais ignore)" % backend)
+            chk(all(float(np.max(np.abs(a[0] - b[0]))) == 0.0 for a, b in zip(st_hi, none_st[adder])),
+                "%s : q0 inchange (projection identite sur q0, aux ne touche que q1)" % backend)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
