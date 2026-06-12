@@ -427,4 +427,9 @@ endforeach()
 add_test(NAME test_mg_cold_tolerance
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mg_cold_tolerance.py)
 set_tests_properties(test_mg_cold_tolerance PROPERTIES
+# Flags d'optimisation du backend AOT (compile_aot) : memes flags que le natif ($ADC_DSL_OPTFLAGS,
+# defaut -O3 -DNDEBUG) + cle de cache integrant les flags. Hermetique pour les volets flags/cache ; la parite end-to-end s'auto-saute sans compilateur / Kokkos.
+add_test(NAME test_aot_optflags
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_optflags.py)
+set_tests_properties(test_aot_optflags PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
