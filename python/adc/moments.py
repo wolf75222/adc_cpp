@@ -51,7 +51,11 @@ def _pow(e, k):
 
 
 def _is_zero(e):
-    return isinstance(e, (int, float)) and float(e) == 0.0
+    # Zero NUMERIQUE (int/float) ou zero SYMBOLIQUE (dsl.Const(0.0)) : une fermeture peut rendre
+    # l'un ou l'autre ; les deux suppriment le terme du flux genere (primitive morte non emise).
+    if isinstance(e, (int, float)):
+        return float(e) == 0.0
+    return isinstance(e, dsl.Const) and e.value == 0.0
 
 
 def gaussian_closure(order):
