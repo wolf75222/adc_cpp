@@ -497,7 +497,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                        const std::vector<std::string>& implicit_roles,
                        int newton_max_iters, double newton_rel_tol, double newton_abs_tol,
                        double newton_fd_eps, bool newton_diagnostics, double newton_damping,
-                       const std::string& newton_fail_policy, double positivity_floor) {
+                       const std::string& newton_fail_policy, double positivity_floor,
+                       bool wave_speed_cache) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
@@ -532,6 +533,22 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   const bool imexrk = (time == "imexrk_ars222");
   const bool imex = (time == "imex" || imexrk);  // les deux passent par le pas implicite de source
   const bool recon_prim = (recon == "primitive");
+  // Cache des vitesses d'onde (opt-in) : ne s'engage que pour le flux HLL et l'avance explicite. Le
+  // demander ailleurs serait SILENCIEUSEMENT sans effet -> erreur explicite (pas d'ignore muet). Le
+  // chemin polaire a sa propre fabrique (make_block_polar) sans ce cache.
+  if (wave_speed_cache) {
+    if (riemann != "hll")
+      throw std::runtime_error("System::add_block : wave_speed_cache exige riemann='hll' (le cache de "
+                               "vitesses d'onde ne s'applique qu'au flux HLL ; recu riemann='" +
+                               riemann + "')");
+    if (imex)
+      throw std::runtime_error("System::add_block : wave_speed_cache non supporte avec time='" + time +
+                               "' (cable sur l'avance explicite ; utiliser time "
+                               "'explicit'/'ssprk2'/'ssprk3'/'euler')");
+    if (P->polar_)
+      throw std::runtime_error("System::add_block : wave_speed_cache non supporte sur la geometrie "
+                               "polaire (anneau)");
+  }
   const std::string method = imexrk ? std::string("imexrk_ars222")
                                      : ((time == "ssprk3") ? std::string("ssprk3")
                                         : (time == "euler") ? std::string("euler")
@@ -645,7 +662,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     // membres de Impl). Elles restent INERTES tant que le System n'est pas mis en mode Staircase /
     // CutCell (cf. step()) : construites a l'ajout, selectionnees seulement sur opt-in.
     clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components, nopts,
-                     nreport, static_cast<Real>(positivity_floor));
+                     nreport, static_cast<Real>(positivity_floor), wave_speed_cache);
     max_speed = make_max_speed(m, ctx);  // stability_speed (trait) ou max_wave_speed (fallback)
     add_poisson_rhs = make_poisson_rhs(m);
     // Bornes de pas optionnelles (traits HasSourceFrequency / HasStabilityDt) : fonctions VIDES si

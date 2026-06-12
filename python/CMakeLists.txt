@@ -370,3 +370,10 @@ foreach(t
   set_tests_properties(${t} PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 endforeach()
+
+# ADC-199 : cache opt-in des vitesses d'onde HLL -- bit-identite NoSlope+HLL (ON==OFF), defaut inchange,
+# gardes (riemann!=hll / IMEX rejetes). Modele natif IsothermalFlux, aucun compilateur requis.
+add_test(NAME test_wave_speed_cache
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_wave_speed_cache.py)
+set_tests_properties(test_wave_speed_cache PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")

@@ -181,7 +181,11 @@ PYBIND11_MODULE(_adc, m) {
            // Limiteur de POSITIVITE Zhang-Shu (ADC-76) : plancher de densite des etats de face
            // reconstruits (scaling conservatif vers la moyenne de cellule). 0 (defaut) = inactif,
            // chemin bit-identique. Exige un modele exposant le role Density.
-           py::arg("positivity_floor") = 0.0)
+           py::arg("positivity_floor") = 0.0,
+           // Cache des vitesses d'onde HLL (opt-in) : evalue model.wave_speeds une fois par cellule au
+           // lieu de par face. riemann='hll' + explicite seulement (erreur explicite sinon). NoSlope +
+           // recon conservatif -> bit-identique au chemin par face. False (defaut) = chemin inchange.
+           py::arg("wave_speed_cache") = false)
       // Rapport Newton (diagnostics IMEX OPT-IN) : dict {enabled, converged, max_residual,
       // max_iters_used, n_failed, failed_cell, failed_component}, agrege sur les sous-pas de la
       // DERNIERE avance du bloc. failed_cell = (i, j) d'UNE cellule fautive ou None.

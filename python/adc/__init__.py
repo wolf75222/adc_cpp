@@ -759,11 +759,17 @@ class Spatial:
       cellule pour que rho_face >= floor. 0/None (defaut) = inactif, chemin bit-identique.
       Motive par le saut top-hat contraste 1e6 du diocotron Hoffart, ou WENO5 reconstruit une
       densite negative -> NaN. Exige un modele exposant le role Density.
+    - ``wave_speed_cache`` : flux='hll' + temps explicite SEULEMENT. Pre-calcule model.wave_speeds
+      UNE fois par cellule et direction (au lieu de par face) puis borne chaque face par min/max des
+      deux cellules voisines. Gain net quand wave_speeds est couteux (hierarchie de moments). Avec
+      limiter='none' + recon='conservative' c'est BIT-IDENTIQUE au chemin par face ; avec un limiteur
+      d'ordre 2+ c'est une borne de Davis sur les valeurs de cellule (resultat different, opt-in
+      assume). False (defaut) = chemin par face inchange. Refuse si flux != 'hll' ou temps IMEX.
     """
 
     def __init__(self, limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
                  minmod=False, vanleer=False, weno5=False, primitive=False,
-                 positivity_floor=None):
+                 positivity_floor=None, wave_speed_cache=False):
         if none:
             limiter = "none"
         elif minmod:
@@ -782,10 +788,11 @@ class Spatial:
             raise ValueError("Spatial : positivity_floor >= 0 (0/None = inactif ; recu %r)"
                              % (positivity_floor,))
         self.positivity_floor = pf
+        self.wave_speed_cache = bool(wave_speed_cache)
 
 
 def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative",
-                 positivity_floor=None):
+                 positivity_floor=None, wave_speed_cache=False):
     """Schema volumes finis (surface stable Phase A) : remappe sur l'objet Spatial existant.
 
     Le flux NUMERIQUE de Riemann s'appelle ``riemann`` (NON ``flux``, reserve au flux PHYSIQUE du modele
@@ -798,9 +805,10 @@ def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative",
 
     cf. docs/DSL_MODEL_DESIGN.md section 6. Renvoie un Spatial (consomme tel quel par add_block /
     add_equation). adc.Spatial reste disponible a l'identique. ``positivity_floor`` (ADC-76) :
-    plancher de densite des etats de face (limiteur Zhang-Shu), None/0 = inactif."""
+    plancher de densite des etats de face (limiteur Zhang-Shu), None/0 = inactif.
+    ``wave_speed_cache`` : cache des vitesses d'onde HLL (riemann='hll' + explicite), cf. Spatial."""
     return Spatial(limiter=limiter, flux=riemann, recon=variables,
-                   positivity_floor=positivity_floor)
+                   positivity_floor=positivity_floor, wave_speed_cache=wave_speed_cache)
 
 
 class Explicit:
@@ -1385,7 +1393,8 @@ class System:
                           getattr(time, "newton_diagnostics", False),
                           getattr(time, "newton_damping", 1.0),
                           getattr(time, "newton_fail_policy", "none"),
-                          getattr(spatial, "positivity_floor", 0.0))
+                          getattr(spatial, "positivity_floor", 0.0),
+                          getattr(spatial, "wave_speed_cache", False))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
                      evolve=True, stride=None):
@@ -1450,7 +1459,8 @@ class System:
                               getattr(time, "newton_diagnostics", False),
                           getattr(time, "newton_damping", 1.0),
                           getattr(time, "newton_fail_policy", "none"),
-                          getattr(spatial, "positivity_floor", 0.0))
+                          getattr(spatial, "positivity_floor", 0.0),
+                          getattr(spatial, "wave_speed_cache", False))
             return
 
         # Masque implicite (IMEX) : seul le chemin natif compose (ModelSpec -> add_block) le cable. Les
@@ -2430,6 +2440,12 @@ class AmrSystem:
             raise ValueError(
                 "AmrSystem.add_block : positivity_floor non supporte sur le chemin AMR (chantier "
                 "separe) ; retirer positivity_floor ou utiliser le System uniforme.")
+        # wave_speed_cache (ADC-199) n'est PAS cable sur le chemin AMR (AmrSystem::add_block ne le
+        # transporte pas) : rejet explicite plutot qu'un cache ignore en silence.
+        if getattr(spatial, "wave_speed_cache", False):
+            raise ValueError(
+                "AmrSystem.add_block : wave_speed_cache non supporte sur le chemin AMR (chantier "
+                "separe) ; retirer wave_speed_cache ou utiliser le System uniforme.")
         # On thread substeps/stride (multirate, capstone iv), le masque IMEX partiel, les OPTIONS Newton
         # ET newton_diagnostics (vague 3, solde). Resolus / valides cote C++ (AmrSystem::add_block) contre
         # les noms/roles du bloc : vides -> backward-Euler plein. Les options sont cablees en mono-bloc

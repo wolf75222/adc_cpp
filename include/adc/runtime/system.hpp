@@ -119,6 +119,13 @@ class System {
   ///                 enregistrer seulement), "warn" (avertissement stderr par avance), "throw"
   ///                 (erreur dure avec la cellule fautive). != "none" active la detection (chemin
   ///                 instrumente, observateur pur : W inchange).
+  /// @param wave_speed_cache riemann='hll' + explicite SEULEMENT : pre-calcule model.wave_speeds UNE
+  ///                 fois par cellule et direction dans un scratch, puis borne chaque face par min/max
+  ///                 des deux cellules voisines, au lieu de rappeler wave_speeds par face. Gain net si
+  ///                 wave_speeds est couteux (hierarchie de moments). Avec recon='conservative' + limiteur
+  ///                 'none' c'est BIT-IDENTIQUE au chemin par face ; avec un limiteur d'ordre 2+ c'est une
+  ///                 borne de Davis sur les valeurs de cellule (resultat different). false (defaut) =
+  ///                 chemin par face inchange. Refuse si riemann != 'hll' ou time IMEX (erreur explicite).
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
@@ -131,7 +138,7 @@ class System {
                  double newton_abs_tol = 0.0, double newton_fd_eps = 1e-7,
                  bool newton_diagnostics = false, double newton_damping = 1.0,
                  const std::string& newton_fail_policy = "none",
-                 double positivity_floor = 0.0);
+                 double positivity_floor = 0.0, bool wave_speed_cache = false);
 
   /// Rapport du Newton de la source implicite (IMEX) d'un bloc, AGREGE sur les sous-pas de la
   /// DERNIERE avance du bloc. N'existe que si le bloc a ete ajoute avec newton_diagnostics=true

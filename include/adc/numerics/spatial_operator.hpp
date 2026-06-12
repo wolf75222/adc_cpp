@@ -770,6 +770,156 @@ void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
 }
 
 // ============================================================================
+// CACHE DES VITESSES D'ONDE HLL (OPT-IN -- chemin par defaut strictement intouche)
+// ============================================================================
+// Le flux HLL borne chaque face par les vitesses de signal des DEUX cellules adjacentes (estimees de
+// Davis, cf. hll_speeds). Le chemin par defaut rappelle model.wave_speeds par face : pour un modele
+// dont les vitesses d'onde sont couteuses (hierarchie de moments + factorisations a chaque appel),
+// wave_speeds est recalcule plusieurs fois par cellule et par etage RK. Ce chemin OPT-IN evalue
+// wave_speeds UNE fois par cellule et par direction dans un scratch (4 composantes lo_x/hi_x/lo_y/hi_y),
+// puis assemble le residu en lisant le scratch : la vitesse de face i-1/2 devient min/max des vitesses
+// signees des deux cellules voisines (union sur les voisins, comme la reference par cellule).
+//
+// SEMANTIQUE : avec NoSlope (etats reconstruits = valeurs de cellule), wave_speeds recoit les MEMES
+// entrees que le chemin par face -> residu BIT-IDENTIQUE a assemble_rhs<.., HLLFlux>. Avec une
+// reconstruction d'ordre 2+ (minmod / vanleer / weno5), le chemin par face evalue wave_speeds sur les
+// etats RECONSTRUITS alors que le cache l'evalue sur les valeurs de CELLULE : c'est une borne de Davis
+// differente (sur les moyennes de cellule), PAS bit-identique -- choix volontaire, jamais par defaut.
+
+namespace detail {
+/// WaveSpeedCacheKernel : evalue model.wave_speeds par cellule dans les deux directions et stocke
+/// (lo_x, hi_x, lo_y, hi_y) dans un scratch a 4 composantes. Foncteur nomme (device-clean cross-TU,
+/// meme contrainte d'emission que MaxWaveSpeedKernel). ADC_HD.
+template <class Model>
+struct WaveSpeedCacheKernel {
+  Model model;
+  ConstArray4 u, a;
+  Array4 ws;
+  ADC_HD void operator()(int i, int j) const {
+    const auto s = load_state<Model>(u, i, j);
+    const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
+    Real lox, hix, loy, hiy;
+    model.wave_speeds(s, ax, 0, lox, hix);
+    model.wave_speeds(s, ax, 1, loy, hiy);
+    ws(i, j, 0) = lox;
+    ws(i, j, 1) = hix;
+    ws(i, j, 2) = loy;
+    ws(i, j, 3) = hiy;
+  }
+};
+}  // namespace detail
+
+/// fill_wave_speed_cache : remplit le scratch des vitesses d'onde par cellule (lo_x, hi_x, lo_y, hi_y).
+///
+/// Evalue sur la boite VALIDE elargie d'un ghost (grow(v, 1)) : la vitesse de face d'une cellule valide
+/// lit la vitesse cachee de sa voisine, donc le scratch doit couvrir un ghost de chaque cote. @p cache
+/// doit avoir le MEME layout que @p U (memes BoxArray / DistributionMapping), 4 composantes et >= 1
+/// ghost. @p U porte ses ghosts deja remplis (fill_ghosts) ; @p aux porte au moins 1 ghost (lu aux
+/// cellules voisines, comme assemble_rhs).
+template <class Model>
+inline void fill_wave_speed_cache(const Model& model, const MultiFab& U, const MultiFab& aux,
+                                  MultiFab& cache) {
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 a = aux.fab(li).const_array();
+    Array4 ws = cache.fab(li).array();
+    for_each_cell(U.box(li).grow(1), detail::WaveSpeedCacheKernel<Model>{model, u, a, ws});
+  }
+}
+
+namespace detail {
+/// AssembleRhsHllCachedKernel : noyau du residu R = -div Fhat + S pour le flux HLL avec vitesses
+/// d'onde PRE-CALCULEES par cellule (scratch @c ws, 4 composantes). Reconstruction et flux numerique
+/// IDENTIQUES a AssembleRhsKernel<.., HLLFlux> ; seule la source des vitesses de signal change : au
+/// lieu de hll_speeds (rappel de model.wave_speeds par face), chaque face borne sL/sR par min/max des
+/// vitesses cachees de ses deux cellules adjacentes -- exactement les estimees de Davis du chemin par
+/// face quand les etats reconstruits valent les valeurs de cellule (NoSlope). Foncteur nomme
+/// (device-clean cross-TU). ADC_HD.
+template <class Limiter, class Model>
+struct AssembleRhsHllCachedKernel {
+  Model model;
+  ConstArray4 u, ax, ws;
+  Array4 r;
+  Real dx, dy;
+  Limiter lim;
+  bool recon_prim;
+  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  int pos_comp = 0;          ///< composante du role Density (resolue par l'appelant hote)
+  ADC_HD void operator()(int i, int j) const {
+    const Aux Ac = load_aux<aux_comps<Model>()>(ax, i, j);
+    const Aux Axm = load_aux<aux_comps<Model>()>(ax, i - 1, j);
+    const Aux Axp = load_aux<aux_comps<Model>()>(ax, i + 1, j);
+    const Aux Aym = load_aux<aux_comps<Model>()>(ax, i, j - 1);
+    const Aux Ayp = load_aux<aux_comps<Model>()>(ax, i, j + 1);
+
+    // faces x : reconstruction des etats de part et d'autre de chaque face
+    const auto Lxm = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxm = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxp = reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxp = reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    // vitesses de signal de face = union (min des lo, max des hi) des deux cellules adjacentes : la
+    // cellule de GAUCHE est toujours la voisine d'indice inferieur (memes operandes/ordre que hll_speeds).
+    const Real sLxm = ws(i - 1, j, 0) < ws(i, j, 0) ? ws(i - 1, j, 0) : ws(i, j, 0);
+    const Real sRxm = ws(i - 1, j, 1) > ws(i, j, 1) ? ws(i - 1, j, 1) : ws(i, j, 1);
+    const Real sLxp = ws(i, j, 0) < ws(i + 1, j, 0) ? ws(i, j, 0) : ws(i + 1, j, 0);
+    const Real sRxp = ws(i, j, 1) > ws(i + 1, j, 1) ? ws(i, j, 1) : ws(i + 1, j, 1);
+    const auto Fxm = hll_flux_with_speeds(model, Lxm, Axm, Rxm, Ac, 0, sLxm, sRxm);
+    const auto Fxp = hll_flux_with_speeds(model, Lxp, Ac, Rxp, Axp, 0, sLxp, sRxp);
+
+    // faces y (composantes 2 = lo_y, 3 = hi_y du scratch)
+    const auto Lym = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rym = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lyp = reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Ryp = reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const Real sLym = ws(i, j - 1, 2) < ws(i, j, 2) ? ws(i, j - 1, 2) : ws(i, j, 2);
+    const Real sRym = ws(i, j - 1, 3) > ws(i, j, 3) ? ws(i, j - 1, 3) : ws(i, j, 3);
+    const Real sLyp = ws(i, j, 2) < ws(i, j + 1, 2) ? ws(i, j, 2) : ws(i, j + 1, 2);
+    const Real sRyp = ws(i, j, 3) > ws(i, j + 1, 3) ? ws(i, j, 3) : ws(i, j + 1, 3);
+    const auto Fym = hll_flux_with_speeds(model, Lym, Aym, Rym, Ac, 1, sLym, sRym);
+    const auto Fyp = hll_flux_with_speeds(model, Lyp, Ac, Ryp, Ayp, 1, sLyp, sRyp);
+
+    const auto S = model.source(load_state<Model>(u, i, j), Ac);
+    for (int c = 0; c < Model::n_vars; ++c)
+      r(i, j, c) = S[c] - (Fxp[c] - Fxm[c]) / dx - (Fyp[c] - Fym[c]) / dy;
+
+    // Terme parabolique (Fickien) : identique a AssembleRhsKernel, garde par DiffusiveModel.
+    if constexpr (DiffusiveModel<Model>) {
+      const Real nu = model.diffusivity();
+      const Real idx2 = Real(1) / (dx * dx), idy2 = Real(1) / (dy * dy);
+      for (int c = 0; c < Model::n_vars; ++c)
+        r(i, j, c) += nu * ((u(i + 1, j, c) - 2 * u(i, j, c) + u(i - 1, j, c)) * idx2 +
+                            (u(i, j + 1, c) - 2 * u(i, j, c) + u(i, j - 1, c)) * idy2);
+    }
+  }
+};
+}  // namespace detail
+
+/// assemble_rhs_hll_cached<Limiter> : residu R = -div Fhat + S au flux HLL, vitesses d'onde
+/// PRE-CALCULEES par cellule (OPT-IN). Deux passes : (1) fill_wave_speed_cache remplit @p cache sur
+/// grow(valide, 1) ; (2) le noyau lit le scratch et borne chaque face par min/max des deux cellules.
+/// @p cache doit avoir le layout de @p U, 4 composantes, >= 1 ghost (re-alloue par l'appelant).
+/// Avec NoSlope : BIT-IDENTIQUE a assemble_rhs<NoSlope, HLLFlux> (cf. l'en-tete de section). Le
+/// modele DOIT exposer wave_speeds (garanti par le dispatch HLL).
+template <class Limiter = NoSlope, class Model>
+void assemble_rhs_hll_cached(const Model& model, const MultiFab& U, const MultiFab& aux,
+                             const Geometry& geom, MultiFab& R, MultiFab& cache,
+                             bool recon_prim = false, Real pos_floor = Real(0)) {
+  const Real dx = geom.dx(), dy = geom.dy();
+  const Limiter lim{};
+  const int pos_comp = detail::positivity_comp<Model>(pos_floor);
+  fill_wave_speed_cache(model, U, aux, cache);
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 ax = aux.fab(li).const_array();
+    const ConstArray4 ws = cache.fab(li).const_array();
+    Array4 r = R.fab(li).array();
+    const Box2D v = R.box(li);
+    for_each_cell(v, detail::AssembleRhsHllCachedKernel<Limiter, Model>{
+                         model, u, ax, ws, r, dx, dy, lim, recon_prim, pos_floor, pos_comp});
+  }
+}
+
+// ============================================================================
 // MASQUE DE DOMAINE (chantier T2, conservatif, OPT-IN -- chemin par defaut intouche)
 // ============================================================================
 // Le masque rend le transport FV conscient d'un sous-domaine ACTIF (p.ex. le disque du papier).

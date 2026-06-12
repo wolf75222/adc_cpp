@@ -17,8 +17,10 @@
 
 #include <cmath>  // std::sqrt (coefficients ARS(2,2,2) : gamma = 1 - 1/sqrt(2), hote)
 #include <functional>
+#include <memory>       // std::shared_ptr (scratch partage du cache de vitesses d'onde HLL, opt-in)
 #include <stdexcept>
 #include <string>
+#include <type_traits>  // std::is_same_v (engagement du cache uniquement pour le flux HLL)
 #include <utility>
 #include <vector>
 
@@ -55,8 +57,23 @@ struct BlockRhsEval {
   const GridContext* ctx;
   bool recon_prim;
   Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  /// Scratch des vitesses d'onde par cellule (cache HLL, opt-in). nullptr (defaut) -> chemin par face
+  /// strictement inchange. Non nul UNIQUEMENT pour le flux HLL (cf. build_block) : la branche cachee
+  /// n'est instanciee que pour Flux == HLLFlux, donc model.wave_speeds y est toujours present.
+  std::shared_ptr<MultiFab> ws_cache;
   void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx->dom, ctx->bc);
+    if constexpr (std::is_same_v<Flux, HLLFlux>) {
+      if (ws_cache) {
+        // Re-alloue le scratch au layout courant (4 composantes, 1 ghost) : couvre une regrid AMR ou
+        // un premier appel (shared_ptr vers un MultiFab vide). Sinon reutilise l'allocation existante.
+        if (ws_cache->local_size() != U.local_size() || ws_cache->ncomp() != 4)
+          *ws_cache = MultiFab(U.box_array(), U.dmap(), 4, 1);
+        assemble_rhs_hll_cached<Limiter>(model, U, *ctx->aux, ctx->geom, R, *ws_cache, recon_prim,
+                                         pos_floor);
+        return;
+      }
+    }
     assemble_rhs<Limiter, Flux>(model, U, *ctx->aux, ctx->geom, R, recon_prim, pos_floor);
   }
 };
@@ -71,9 +88,10 @@ struct AdvanceExplicit {
   GridContext ctx;
   bool recon_prim;
   Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  std::shared_ptr<MultiFab> ws_cache;  ///< cache de vitesses d'onde HLL (opt-in) ; nullptr -> par face
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
-    const BlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim, pos_floor};
+    const BlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim, pos_floor, ws_cache};
     for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
   }
 };
@@ -199,9 +217,10 @@ struct RhsInto {
   GridContext ctx;
   bool recon_prim;
   Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  std::shared_ptr<MultiFab> ws_cache;  ///< cache de vitesses d'onde HLL (opt-in) ; nullptr -> par face
   void operator()(MultiFab& U, MultiFab& R) const {
-    fill_ghosts(U, ctx.dom, ctx.bc);
-    assemble_rhs<Limiter, Flux>(m, U, *ctx.aux, ctx.geom, R, recon_prim, pos_floor);
+    // Delegue a BlockRhsEval (fill_ghosts + assemble_rhs OU chemin cache) : source unique du residu.
+    BlockRhsEval<Limiter, Flux, Model>{m, &ctx, recon_prim, pos_floor, ws_cache}(U, R);
   }
 };
 
@@ -372,11 +391,17 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
                           const std::string& method = "ssprk2",
                           const std::vector<int>& implicit_components = {},
                           const NewtonOptions& newton_opts = {},
-                          NewtonReport* newton_report = nullptr, Real pos_floor = Real(0)) {
+                          NewtonReport* newton_report = nullptr, Real pos_floor = Real(0),
+                          bool wave_speed_cache = false) {
   const MultiFab* disc_mask = ctx.disc_mask;
   const detail::DiscDomain* disc = ctx.disc;
   BlockClosures bc;
   const ImplicitMask<Model::n_vars> impl_mask = make_implicit_mask<Model::n_vars>(implicit_components);
+  // Scratch PARTAGE du cache de vitesses d'onde HLL (opt-in) : un seul MultiFab pour l'avance explicite
+  // et rhs_into (jamais appelees en concurrence). nullptr quand l'option est OFF -> BlockRhsEval garde
+  // le chemin par face (bit-identique). Alloue au layout reel au premier appel (cf. BlockRhsEval).
+  std::shared_ptr<MultiFab> ws_cache =
+      wave_speed_cache ? std::make_shared<MultiFab>() : std::shared_ptr<MultiFab>{};
   if (imex) {
     if (method == "imexrk_ars222") {
       // FAMILLE IMEX-RK, schema ARS(2,2,2) (ordre 2) : avance PARALLELE a AdvanceImex, source PLEINEMENT
@@ -398,8 +423,8 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
             m, ctx, disc, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
     }
   } else if (method == "euler") {
-    bc.advance =
-        detail::AdvanceExplicit<Limiter, Flux, Model, ForwardEuler>{m, ctx, recon_prim, pos_floor};
+    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, ForwardEuler>{m, ctx, recon_prim,
+                                                                             pos_floor, ws_cache};
     if (disc_mask)
       bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, ForwardEuler>{
           m, ctx, disc_mask, recon_prim, pos_floor};
@@ -407,8 +432,8 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
       bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, ForwardEuler>{
           m, ctx, disc, recon_prim, pos_floor};
   } else if (method == "ssprk3") {
-    bc.advance =
-        detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim, pos_floor};
+    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim,
+                                                                           pos_floor, ws_cache};
     if (disc_mask)
       bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, SSPRK3Step>{
           m, ctx, disc_mask, recon_prim, pos_floor};
@@ -416,8 +441,8 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
       bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, SSPRK3Step>{
           m, ctx, disc, recon_prim, pos_floor};
   } else if (method == "ssprk2") {
-    bc.advance =
-        detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK2Step>{m, ctx, recon_prim, pos_floor};
+    bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK2Step>{m, ctx, recon_prim,
+                                                                           pos_floor, ws_cache};
     if (disc_mask)
       bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, SSPRK2Step>{
           m, ctx, disc_mask, recon_prim, pos_floor};
@@ -428,7 +453,7 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
     throw std::runtime_error("System : methode temporelle explicite inconnue '" + method +
                              "' (euler|ssprk2|ssprk3)");
   }
-  bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor};
+  bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor, ws_cache};
   bc.hotspot = detail::HotspotFn<Model>{m, ctx};  // diagnostic dt_hotspot (ADC-182), hors chemin chaud
   return bc;
 }
@@ -446,7 +471,8 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
                          const std::string& method = "ssprk2",
                          const std::vector<int>& implicit_components = {},
                          const NewtonOptions& newton_opts = {},
-                         NewtonReport* newton_report = nullptr, Real pos_floor = Real(0)) {
+                         NewtonReport* newton_report = nullptr, Real pos_floor = Real(0),
+                         bool wave_speed_cache = false) {
   // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : memes acceptations /
   // rejets de tags qu'avant, messages identiques (validate_* reprend la formulation historique). Le
   // dispatch if/else qui suit est INCHANGE (Limiter / Flux sont des types compile-time) ; ses throws
@@ -474,10 +500,12 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
     if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
                     mm.wave_speeds(s, a, 0, r, r);
                   }) {
-      if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+      // wave_speed_cache (opt-in) forwarde UNIQUEMENT ici : le cache de vitesses d'onde ne s'engage que
+      // pour le flux HLL (BlockRhsEval garde par Flux == HLLFlux). rusanov/hllc/roe l'ignorent.
+      if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+      if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+      if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+      if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
       throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
       throw std::runtime_error("System : flux 'hll' exige des vitesses d'onde signees "
