@@ -360,8 +360,10 @@ class AmrSystem {
   /// build, ou seul Model::n_vars est connu). Prioritaire sur set_density : permet de demarrer l'AMR
   /// depuis l'etat de derive du papier (rho, rho*u, rho*v) au lieu de m=0 (Probleme 2). La conversion
   /// primitif -> conservatif (rho_u = rho*u) est faite cote Python (l'appelant fournit deja le
-  /// conservatif). MONO-BLOC uniquement : un systeme multi-blocs (>= 2 add_block) leve au build (le
-  /// threading de l'etat sur le chemin AmrRuntime multi-blocs est un suivi distinct).
+  /// conservatif). Cable sur les blocs NATIFS (mono-bloc comme multi-blocs : threade au builder natif,
+  /// seed du grossier puis injection aux fins) ; en multi-blocs @p name indexe le bloc cible. Un bloc
+  /// COMPILE (.so) porteur d'un etat leve au build en multi-blocs (le loader .so ne transporte pas
+  /// l'etat) : utiliser un bloc natif adc.Model(...) ou set_density.
   /// @throws std::runtime_error si le systeme est deja construit, si U est vide, ou si sa taille
   ///         n'est pas un multiple de n*n.
   void set_conservative_state(const std::string& name, const std::vector<double>& U);

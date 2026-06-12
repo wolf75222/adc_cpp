@@ -14,11 +14,12 @@
 // grille grossiere et la grille fine ; le reflux corrige les cellules grossieres
 // adjacentes pour retablir la conservation exacte (FluxRegister, facon AMReX).
 //
-// Version minimale et testable : 1 composante (advection), vitesse constante
-// (aux uniforme), Euler explicite, ratio 2, une box fine rectangulaire stricte-
-// ment interieure au domaine grossier periodique. Le sous-cyclage en temps et le
-// couplage Poisson composite (FAC) viendront ensuite ; le test de conservation
-// valide ici l'arithmetique du reflux.
+// Version minimale et testable : 1 composante (advection), aux variable en
+// espace, Euler explicite, ratio 2, sous-cyclage Berger-Oliger (r=2 sous-pas
+// de dt/2, ghosts fins interpoles en temps), une box fine rectangulaire
+// strictement interieure au domaine grossier periodique. Le couplage Poisson
+// composite (FAC) est traite a part (elliptic/composite_fac_poisson.hpp) ; le
+// test de conservation valide ici l'arithmetique du reflux.
 
 namespace adc {
 

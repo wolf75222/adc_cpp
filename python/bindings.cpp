@@ -67,7 +67,7 @@ PYBIND11_MODULE(_adc, m) {
   m.def("abi_key", &adc::abi_key,
         "Cle d'ABI du module (compilateur, standard C++, signature des en-tetes adc).");
 
-  // Rang / nombre de rangs MPI du communicateur (1 / 0 en serie ou MPI non initialise, cf.
+  // Rang / nombre de rangs MPI du communicateur (0 / 1 en serie ou MPI non initialise, cf.
   // adc/parallel/comm.hpp). Exposes pour que la facade IO (sim.write / sim.checkpoint) n'ecrive le
   // fichier que sur le rang 0 apres un gather collectif (state_global / potential_global).
   m.def("my_rank", &adc::my_rank, "Rang MPI du processus (0 en serie).");
@@ -237,7 +237,7 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("krylov_tol") = 0.0, py::arg("krylov_max_iters") = 0,
            // Descripteurs des champs (audit vague 2 : roles transportes dans l'ABI) : "" = role
            // canonique (bit-identique) ; sinon nom de role stable ou de variable du bloc.
-           // bz_aux_component < 0 = canal canonique B_z. Cartesien seulement (polaire : rejet).
+           // bz_aux_component < 0 = canal canonique B_z. Honore en cartesien comme en polaire.
            py::arg("density") = "", py::arg("momentum_x") = "", py::arg("momentum_y") = "",
            py::arg("energy") = "", py::arg("bz_aux_component") = -1)
       // Politique de splitting en temps : "lie" (defaut, bit-identique) ou "strang" (H(dt/2) S(dt)

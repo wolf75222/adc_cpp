@@ -131,11 +131,12 @@ ADC_HD inline bool eb_cell_active(const LevelSet& ls, Real xc, Real yc) {
 /// Convention FV EB :
 ///   - voisin INACTIF (ls(xn,yn) >= 0) : la face touche le mur immerge -> FERMEE (alpha = 0,
 ///     no-penetration). C'est la generalisation de la porte 0/1 de T2 : l'inactif ferme la face.
-///   - voisin ACTIF : l'ouverture est la fraction lineaire de la face dans le disque, reprise A
-///     L'IDENTIQUE de la primitive partagee cut_distance (donc bit-coherente avec le mur elliptique) :
-///     alpha = cut_distance(lc, ln, h) / h, dans [1e-3, 1]. Loin du bord les deux ls < 0 -> alpha = 1
-///     (face pleine) ; pres du bord la face partagee de deux cellules actives peut etre partiellement
-///     ouverte des que le level set du VOISIN remonte vers 0.
+///   - voisin ACTIF (ln < 0) : l'ouverture reutilise A L'IDENTIQUE la primitive partagee cut_distance
+///     (donc bit-coherente avec le mur elliptique), alpha = cut_distance(lc, ln, h) / h. Mais pour un
+///     voisin actif cut_distance prend la branche "voisin interieur" et rend h -> alpha = 1 EXACTEMENT,
+///     loin comme pres du bord : la face partagee de deux cellules actives est toujours PLEINE. Les
+///     ouvertures de face sont donc BINAIRES {0, 1} ; c'est la FRACTION DE VOLUME kappa in (0, 1], et
+///     non l'ouverture des faces internes, qui porte la geometrie de coupe (cf. NOTE alpha_f du @file).
 /// SYMETRIE (cle de la conservation) : cut_distance(lc, ln, h) ne depend que de (lc, ln) ; la face
 /// partagee vue de la cellule i (centre lc, voisin ln) et vue de la cellule i+1 (centre ln, voisin lc)
 /// donne la MEME ouverture des que les deux sont actives (ln < 0 : la branche "voisin interieur" rend
