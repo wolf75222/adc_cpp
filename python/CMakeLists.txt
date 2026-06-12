@@ -97,7 +97,7 @@ set_target_properties(_adc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ADC_PY_PKG})
 if(SKBUILD)
   install(TARGETS _adc LIBRARY DESTINATION adc)
 endif()
-foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py)
+foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py adc/moments.py)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()
 
@@ -116,6 +116,15 @@ set_tests_properties(test_bindings PROPERTIES
 add_test(NAME test_dsl
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)
 set_tests_properties(test_dsl PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# Generateur generique de modeles de moments 2D (adc.moments) : l'algebre M->C->S->C'->M'
+# est derivee en boucles sur l'AST, seule la fermeture est fournie (ADC-164). Oracle
+# d'Isserlis independant + autodiff/eig + robust + lorentz_sources ; la partie compilee
+# (AOT + System hll) s'auto-saute sans compilateur ou sans Kokkos.
+add_test(NAME test_dsl_moments
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_moments.py)
+set_tests_properties(test_dsl_moments PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
 # Codegen C++ du DSL : compile la fonction flux generee et la compare a l'interprete numpy.

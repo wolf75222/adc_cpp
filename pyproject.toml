@@ -27,7 +27,7 @@ dependencies = [
 [tool.scikit-build]
 minimum-version = "0.10"
 cmake.version = ">=3.21"
-# Le paquet PUR (adc/__init__.py, dsl.py, integrate.py) est copie tel quel dans la wheel ;
+# Le paquet PUR (adc/__init__.py, dsl.py, integrate.py, moments.py) est copie tel quel dans la wheel ;
 # l'extension _adc est ajoutee par la regle install(TARGETS _adc ...) de python/CMakeLists.txt.
 wheel.packages = ["python/adc"]
 build-dir = "build/{wheel_tag}"  # cache de build persistant : reinstall/editable rapides
