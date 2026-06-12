@@ -429,6 +429,40 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
     return os.path.join(adc_cache_dir(), fname)
 
 
+# Registre EN PROCESS du backend deja ecrit a chaque chemin .so resolu (cle = chemin absolu, valeur =
+# backend). Il modelise un cache que ni le chemin so_path explicite ni la cle du cache hors-source ne
+# representaient : le cache de HANDLES du chargeur dynamique (dlopen / dyld), keye PAR CHEMIN et AVEUGLE
+# au contenu du fichier. Sur macOS notamment, dlopen('/x/m.so') deja charge renvoie le MEME handle meme
+# si le fichier a ete recompile entre-temps : recompiler un .so 'production' SUR un chemin ou un .so
+# 'aot' a deja ete charge fait resservir l'ancien handle aot (add_native_block -> 'adc_native_abi_key
+# absent'). La cle du cache hors-source inclut deja le backend (chemins distincts par backend, donc pas
+# de collision) ; le chemin so_path EXPLICITE, lui, est fige par l'appelant -> deux backends s'y
+# ecrasent. On l'evite en redirigeant vers un frere DISTINCT par backend des qu'un autre backend occupe
+# deja ce chemin dans le process. RAZ a chaque process (l'etat dlopen l'est aussi) ; un nouveau process
+# relit le fichier courant, donc recompiler au meme chemin entre deux process reste sans danger.
+_process_so_backend = {}
+
+
+def _backend_distinct_so_path(so_path, backend):
+    """Renvoie un chemin .so sur pour @p backend : so_path inchange si aucun AUTRE backend ne l'occupe
+    deja dans ce process, sinon un frere distinct (insere '.<backend>' avant l'extension) pour que
+    dlopen recharge un handle neuf au lieu de resservir l'ancien (cf. _process_so_backend). Ne touche
+    pas le disque ni le registre ; l'appelant enregistre le backend du chemin RETENU apres compilation."""
+    import os
+    prev = _process_so_backend.get(os.path.abspath(so_path))
+    if prev is not None and prev != backend:
+        root, ext = os.path.splitext(so_path)
+        so_path = "%s.%s%s" % (root, backend, ext or ".so")
+    return so_path
+
+
+def _record_so_backend(so_path, backend):
+    """Memorise (en process) le backend ecrit a @p so_path : sert la prochaine resolution de chemin a
+    detecter une reutilisation cross-backend du MEME chemin (cf. _backend_distinct_so_path)."""
+    import os
+    _process_so_backend[os.path.abspath(so_path)] = backend
+
+
 def _native_kokkos_root():
     """Racine Kokkos pour compiler les loaders DSL avec le MEME backend que le module _adc.
 
@@ -3151,10 +3185,18 @@ class HyperbolicModel:
             cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
             so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
+                _record_so_backend(so_path, backend)
                 return so_path  # cache HIT : .so deja compilee pour cette cle, on la reutilise telle quelle
+        else:
+            # so_path EXPLICITE : le cache hors-source ne s'applique pas, mais le cache de handles dlopen
+            # (en process, par chemin) si -- recompiler un autre backend SUR ce chemin ferait resservir
+            # l'ancien handle. On redirige vers un frere distinct par backend si besoin (cf. dlopen).
+            so_path = _backend_distinct_so_path(so_path, backend)
 
-        return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
-                                  target=target)
+        out_path = self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
+                                       target=target)
+        _record_so_backend(out_path, backend)
+        return out_path
 
     @classmethod
     def adder_for(cls, backend):
@@ -3724,8 +3766,13 @@ class Model:
         else:
             # Compilation (moteurs inchanges, garde-fous require_metadata/backend/target de
             # HyperbolicModel.compile : le loader emet adc_install_native_amr pour target="amr_system").
+            # HyperbolicModel.compile redirige deja un so_path explicite occupe par un autre backend en
+            # process (cf. _backend_distinct_so_path) et renvoie le chemin RETENU -> on le propage.
             out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
                                  require_metadata=require_metadata, target=target)
+        # Le chemin keye (cache HIT) ou le chemin retenu par le moteur portent le backend ecrit : on le
+        # memorise pour qu'une reutilisation cross-backend du MEME chemin en process soit detectee.
+        _record_so_backend(out_path, backend)
 
         adder = HyperbolicModel.adder_for(backend)
         cons_roles = roles_for(m.cons_names, m.cons_roles)
@@ -4214,7 +4261,13 @@ class HybridModel:
                              else "hybrid-" + backend)
             so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
+                _record_so_backend(so_path, "hybrid-" + backend)
                 return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
+        else:
+            # so_path EXPLICITE : eviter qu'un AUTRE backend deja charge a ce chemin en process ne soit
+            # resservi par le cache de handles dlopen (cf. _backend_distinct_so_path). Le backend hybride
+            # est distinct du backend non-hybride de meme nom (ABI differente) -> prefixe 'hybrid-'.
+            so_path = _backend_distinct_so_path(so_path, "hybrid-" + backend)
 
         # aot ET natif tournent le chemin de production -> memes flags d'optimisation (cf. _dsl_optflags) ;
         # seul le jit/prototype reste a -O2 (residu hote Rusanov, perf hors sujet).
@@ -4245,6 +4298,7 @@ class HybridModel:
                 f.write(source)
             _run_compile([eff_cxx, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
                          "HybridModel, backend " + backend)
+        _record_so_backend(so_path, "hybrid-" + backend)
         return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
 
     def _compiled_model(self, so_path, backend, target, abi_key, model_hash, cxx, std):
