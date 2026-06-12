@@ -412,7 +412,10 @@ foreach(t
     test_dsl_coupled_source_conservation  # echange CONSERVATIF par paire (add_pair) compile production (.so) : masse totale invariante ~1e-12, rejets
     test_dsl_coupled_role_error  # verrou rejet role inconnu : ValueError cote DSL (pur Python) + RuntimeError cote add_coupled_source (compile production, .so)
     test_dsl_runtime_params   # parametres RUNTIME du DSL : const inline vs params.get(0) seede, cache keye model_hash+abi, compile AOT (.so), auto-skip
-    test_dsl_wave_speeds_no_pressure)  # m.wave_speeds(x=,y=) sans primitive 'p' -> riemann='hll' ; modele jouet acoustique, compile AOT (.so), auto-skip via dsl._default_cxx
+    test_dsl_wave_speeds_no_pressure  # m.wave_speeds(x=,y=) sans primitive 'p' -> riemann='hll' ; modele jouet acoustique, compile AOT (.so), auto-skip via dsl._default_cxx
+    # ADC-178 : second test "wave speeds" encore orphelin apres #298 (vitesses d'onde par valeurs
+    # propres du jacobien de flux) ; on le rend visible a ctest. Compile AOT (.so) -> auto-skip sans compilateur.
+    test_dsl_wave_speeds_jacobian)    # vitesses d'onde par valeurs propres du jacobien de flux (real_eig_minmax) ; compile AOT (.so), auto-skip via dsl._default_cxx
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
   set_tests_properties(${t} PROPERTIES
