@@ -1,0 +1,41 @@
+name: no-ai-authors
+
+# Garde-fou : aucun commit avec auteur, committer ou co-auteur IA (Claude/Copilot/Anthropic)
+# n'entre dans le depot. Le merge squash GitHub hoiste les trailers Co-authored-by des commits
+# de branche : ce job bloque la contamination a la source, quelle que soit la machine.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: refuser les auteurs et co-auteurs IA
+        env:
+          EV: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          if [ "$EV" = "pull_request" ]; then
+            git fetch -q origin "$BASE"
+            range="origin/$BASE..HEAD"
+          elif [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -q '^0*$' && git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null; then
+            range="$BEFORE..$AFTER"
+          else
+            range="HEAD~20..HEAD"
+          fi
+          bad=$(git log "$range" --format='%h|%aN <%aE>|%cN <%cE>|%(trailers:key=Co-authored-by,valueonly)' 2>/dev/null \
+                | grep -iE 'claude|copilot|anthropic' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::commit(s) avec auteur/committer/co-auteur IA (interdit) :"
+            echo "$bad"
+            echo "Reecrire le message (retirer le trailer Co-authored-by) ou corriger l'identite git."
+            exit 1
+          fi
+          echo "aucun auteur/co-auteur IA dans $range"
