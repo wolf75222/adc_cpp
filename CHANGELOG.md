@@ -18,6 +18,15 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) ; versionnemen
 
 ## [Non publie]
 
+### Ajoute
+
+- **Outillage qualite / analyse statique** (ADC-105) : workflow CI dedie `.github/workflows/quality.yml`,
+  hors du chemin critique des PR (cron hebdomadaire dimanche + `workflow_dispatch` + label `quality`).
+  Cinq jobs *informatifs* (non bloquants) : `clang-format` (`.clang-format`), warnings stricts
+  (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), sanitizers ASan+UBSan (`ADC_ENABLE_SANITIZERS`,
+  presets `ci-warnings`/`ci-asan`) et CodeQL. Options CMake OFF par defaut (cible `adc_dev_options`
+  vide) -> `ci.yml`, les builds locaux et `adc_cases` sont inchanges. Voir `docs/QUALITY_TOOLING.md`.
+
 ## [0.1.0] - 2026-06-10
 
 Premiere version numerotee (auparavant `0.0.1` jamais exposee ; Doxygen/Sphinx annoncaient

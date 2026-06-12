@@ -1,0 +1,52 @@
+name: 'Setup Kokkos (Serial, PIC)'
+description: >
+  Installe les deps de build (Eigen, Ninja, ccache) et une install Kokkos Serial PIC MISE EN CACHE,
+  puis expose son prefixe via l'output `kokkos-prefix`. La cle de cache est IDENTIQUE a celle du gate
+  ci.yml (kokkos-<os>-<version>-serial-cxx20-gcc-pic) : quality.yml reutilise le Kokkos deja construit
+  par le gate (et inversement), evitant toute reconstruction. Factorise les etapes repetees par les
+  jobs warnings / tidy / sanitizers / codeql de quality.yml.
+
+inputs:
+  kokkos-version:
+    description: 'Version de release Kokkos a installer'
+    default: '4.4.01'
+  extra-apt:
+    description: 'Paquets apt supplementaires (separes par des espaces), p.ex. clang-tidy'
+    default: ''
+
+outputs:
+  kokkos-prefix:
+    description: 'Prefixe d''install Kokkos (a exporter en KOKKOS_PREFIX pour les presets ci-*)'
+    value: ${{ steps.paths.outputs.prefix }}
+
+runs:
+  using: composite
+  steps:
+    - id: paths
+      shell: bash
+      run: echo "prefix=${{ github.workspace }}/.kokkos-install" >> "$GITHUB_OUTPUT"
+
+    - name: Install deps
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libeigen3-dev ninja-build ccache ${{ inputs.extra-apt }}
+
+    # Meme cle que ci.yml -> cache partage avec le gate (gros gain : pas de reconstruction Kokkos).
+    - name: Cache Kokkos install (Serial ${{ inputs.kokkos-version }})
+      id: kokkos-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.prefix }}
+        key: kokkos-${{ runner.os }}-${{ inputs.kokkos-version }}-serial-cxx20-gcc-pic
+
+    - name: Build + install Kokkos (Serial, PIC)
+      if: steps.kokkos-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone --depth 1 -b ${{ inputs.kokkos-version }} https://github.com/kokkos/kokkos.git /tmp/kokkos
+        cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
+          -DCMAKE_INSTALL_PREFIX="${{ steps.paths.outputs.prefix }}" -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        cmake --build /tmp/kbuild --parallel 4 --target install

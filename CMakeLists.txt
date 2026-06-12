@@ -219,6 +219,12 @@ if(ADC_USE_HDF5)
   message(STATUS "HDF5 found (${HDF5_VERSION}, parallel=${HDF5_IS_PARALLEL}) : enabling DataWriter")
 endif()
 
+# Outillage QUALITE opt-in (warnings stricts, sanitizers) porte par la cible INTERFACE
+# `adc_dev_options`, lie en PRIVATE par les SEULES cibles internes (tests/, module _adc). Inclus ICI :
+# apres la resolution de Kokkos, AVANT add_subdirectory(tests)/add_subdirectory(python) qui le lient.
+# Tout est OFF par defaut (cible vide) -> aucun impact sur ci.yml, les builds locaux ni `adc_cases`.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AdcDevTooling.cmake)
+
 # adc_cpp = COEUR de la bibliotheque (generique, header-only). Les modeles
 # physiques, les facades compilees (libadc), les bindings Python et les exemples
 # vivent dans le depot applicatif separe adc_cases, qui consomme adc::adc via

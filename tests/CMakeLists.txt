@@ -17,7 +17,10 @@ endif()
 
 function(adc_add_test name)
   add_executable(${name} ${name}.cpp)
-  target_link_libraries(${name} PRIVATE adc::adc)
+  # adc_dev_options : cible INTERFACE vide par defaut (cf. cmake/AdcDevTooling.cmake) ; ne porte des
+  # flags QUE si ADC_ENABLE_WARNINGS / ADC_ENABLE_SANITIZERS sont ON (workflow quality.yml). PRIVATE :
+  # n'affecte que la compilation/edition de liens de ce test, jamais l'API publique adc::adc.
+  target_link_libraries(${name} PRIVATE adc::adc adc_dev_options)
   add_test(NAME ${name} COMMAND ${name})
   # LABELS : selection par sous-ensemble (`ctest -L core`). TIMEOUT : un test qui hang (classe
   # deadlock deja rencontree cote MPI) echoue de maniere ciblee au lieu de bloquer le runner.

@@ -1,0 +1,28 @@
+# EditorConfig — coherent avec .clang-format (C++ : 2 espaces, LF). https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{hpp,h,cpp,cc,cxx,c}]
+indent_style = space
+indent_size = 2
+
+[{CMakeLists.txt,*.cmake}]
+indent_style = space
+indent_size = 2
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+# Markdown : les deux espaces de fin = saut de ligne dur, ne pas les trimmer.
+[*.md]
+trim_trailing_whitespace = false

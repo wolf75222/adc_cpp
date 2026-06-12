@@ -1,0 +1,291 @@
+name: Quality
+
+# Analyse statique / qualite de code, VOLONTAIREMENT hors du chemin critique des PR : ce workflow
+# ne tourne JAMAIS sur un push ni sur une PR ordinaire (c'est ci.yml qui garde les PR). Il agrege
+# cinq familles d'outils :
+#   - format       : clang-format --dry-run (style maison, .clang-format)             [non bloquant]
+#   - warnings     : build avec -Wall -Wextra -Wpedantic ... (ADC_ENABLE_WARNINGS)    [non bloquant]
+#   - tidy         : run-clang-tidy sur les TU de tests/ (.clang-tidy)                 [non bloquant]
+#   - sanitizers   : ctest sous ASan + UBSan (ADC_ENABLE_SANITIZERS, preset ci-asan)  [non bloquant]
+#   - codeql       : code scanning C++ GitHub (repo public = gratuit)                 [-> onglet Security]
+#
+# DECLENCHEURS :
+#   - schedule : une fois par semaine (dimanche 04:00 UTC, decale du nightly ci-full a 03:17) ;
+#   - workflow_dispatch : a la demande ;
+#   - pull_request (labeled) FILTRE sur le label `quality` : poser le label `quality` sur une PR a
+#     risque lance la passe complete sur cette PR (opt-in ; cf. job set-mode).
+# POLITIQUE : informatif d'abord. Aucune option CMake n'est ON par defaut ; les jobs ne cassent pas
+# le run sur un finding (pas de -Werror) -> on observe l'etat reel, on durcit ensuite.
+on:
+  schedule:
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+  pull_request:
+    # `labeled` declenche sur l'AJOUT de n'importe quel label ; le filtre sur `quality` est fait
+    # dans set-mode (un run sans le bon label se termine immediatement, sans build).
+    types: [labeled]
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Decide si la passe qualite doit tourner : true sur schedule / workflow_dispatch, ou sur une PR
+  # portant le label `quality`. Sinon (label autre sur une PR) : run=false -> tous les jobs sont skip.
+  set-mode:
+    name: mode (run/skip)
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        run: |
+          run=false
+          if [ "${{ github.event_name }}" = "schedule" ] \
+             || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            run=true
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && [ "${{ contains(github.event.pull_request.labels.*.name, 'quality') }}" = "true" ]; then
+            run=true
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "Passe qualite : $run (event=${{ github.event_name }})"
+
+  # --- clang-format : verification de style, sans build ------------------------------------------
+  format:
+    name: clang-format (style, informatif)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: clang-format --dry-run (non bloquant)
+        run: |
+          echo "$(clang-format --version)"
+          mapfile -t files < <(find include python tests -type f \
+            \( -name '*.hpp' -o -name '*.h' -o -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' \) | sort)
+          bad=0
+          : > format-diff.patch
+          for f in "${files[@]}"; do
+            if ! diff -u "$f" <(clang-format --style=file "$f") >> format-diff.patch; then
+              echo "::warning file=$f::clang-format : non conforme au style (.clang-format)"
+              bad=$((bad+1))
+            fi
+          done
+          {
+            echo "### clang-format"
+            echo ""
+            echo "- Fichiers analyses : ${#files[@]}"
+            echo "- Non conformes : **$bad**"
+            echo ""
+            echo "_Informatif : applique localement avec_ \`clang-format -i <fichier>\` _ou_ \`git clang-format\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Non conformes : $bad / ${#files[@]} (run non bloquant)"
+      - name: Upload diff de format
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-format-diff
+          path: format-diff.patch
+          if-no-files-found: ignore
+
+  # --- Warnings stricts : build avec -Wall -Wextra ... -------------------------------------------
+  warnings:
+    name: warnings stricts (build, informatif)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+      - name: Cache ccache (quality/warnings)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-quality-warnings-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-quality-warnings-
+            ccache-${{ runner.os }}-kokkos-serial-
+      - name: Build avec warnings stricts
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          cmake --preset ci-warnings
+          # Non bloquant : meme si une cible echouait, on collecte les warnings (le gate ci.yml
+          # reste l'autorite sur la compilabilite). Le code retour est ignore (set +e).
+          set +e
+          cmake --build --preset ci-warnings 2>&1 | tee build-warnings.log
+          echo "::remove-matcher owner=adc-gcc-warnings::"
+      - name: Resume warnings
+        if: always()
+        run: |
+          n=$(grep -c "warning:" build-warnings.log || true)
+          {
+            echo "### Warnings compilateur stricts"
+            echo ""
+            echo "- Occurrences \`warning:\` : **$n**"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log de build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warnings-build-log
+          path: build-warnings.log
+          if-no-files-found: ignore
+
+  # --- clang-tidy : analyse statique sur les TU de tests/ ----------------------------------------
+  tidy:
+    name: clang-tidy (analyse statique, informatif)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+        with:
+          extra-apt: clang-tidy
+      - name: Configure (export compile_commands.json)
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: cmake --preset ci-kokkos
+      - name: run-clang-tidy (non bloquant)
+        run: |
+          echo "$(clang-tidy --version | head -1)"
+          # Nom du wrapper variable selon la version apt (run-clang-tidy / run-clang-tidy-18 ...).
+          RCT=$(command -v run-clang-tidy || command -v run-clang-tidy-18 \
+                || command -v run-clang-tidy-19 || echo run-clang-tidy)
+          echo "wrapper : $RCT"
+          # Le HeaderFilter de .clang-tidy limite deja les diagnostics a include/adc/. On analyse les
+          # TU de tests/ (elles tirent l'essentiel des en-tetes du coeur). -extra-arg : la DB porte des
+          # flags gcc -> on neutralise les options inconnues du frontend clang.
+          set +e
+          "$RCT" -p build-kokkos -quiet \
+            -extra-arg=-Wno-unknown-warning-option -extra-arg=-Wno-unknown-attributes \
+            "$(pwd)/tests/.*\.cpp" 2>&1 | tee tidy.log
+          n=$(grep -c "warning:" tidy.log || true)
+          {
+            echo "### clang-tidy"
+            echo ""
+            echo "- Diagnostics (\`warning:\`) sur les en-tetes du coeur : **$n**"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload rapport clang-tidy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-tidy-report
+          path: tidy.log
+          if-no-files-found: ignore
+
+  # --- Sanitizers : ctest sous ASan + UBSan ------------------------------------------------------
+  sanitizers:
+    name: sanitizers ASan+UBSan (ctest, informatif)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      # Kokkos n'est pas instrumente -> on coupe LSan (singletons Kokkos) et les faux positifs de
+      # frontiere instrumente/non instrumente. halt_on_error=0 : on collecte tous les rapports.
+      ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0:abort_on_error=0:halt_on_error=0
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+      - name: Cache ccache (quality/asan)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-quality-asan-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-quality-asan-
+      # ASan recent + noyau recent : sans cet ajustement, l'adresse de la shadow memory peut
+      # entrer en collision ("Shadow memory range interleaves with an existing memory mapping").
+      - name: Detendre l'ASLR (compat ASan)
+        run: sudo sysctl vm.mmap_rnd_bits=28 || true
+      - name: Build + ctest sous ASan/UBSan (non bloquant)
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: |
+          cmake --preset ci-asan
+          cmake --build --preset ci-asan
+          set +e
+          ctest --preset ci-asan --output-on-failure 2>&1 | tee asan.log
+          rc=${PIPESTATUS[0]}
+          {
+            echo "### Sanitizers (ASan + UBSan)"
+            echo ""
+            if [ "$rc" -eq 0 ]; then
+              echo "- ctest : **vert** sous instrumentation."
+            else
+              echo "- ctest : **$rc** test(s) en echec / rapport sanitizer (voir l'artefact \`asan-log\`)."
+              echo "::warning::sanitizers : au moins un test a signale un probleme sous ASan/UBSan (run informatif, non bloquant)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log sanitizers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-log
+          path: asan.log
+          if-no-files-found: ignore
+
+  # --- CodeQL : code scanning C++ (repo public = gratuit) ----------------------------------------
+  codeql:
+    name: CodeQL (code scanning C++)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          queries: security-and-quality
+      # Build OBSERVE par le traceur CodeQL : ccache OFF (-DADC_USE_CCACHE=OFF) sinon les hits ccache
+      # masquent des TU au traceur. L'install Kokkos reste en cache (actions/cache), donc pas de
+      # reconstruction de Kokkos.
+      - name: Build du coeur + tests (trace CodeQL)
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: |
+          cmake --preset ci-kokkos -DADC_USE_CCACHE=OFF
+          cmake --build --preset ci-kokkos
+      - name: Analyse CodeQL
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:c-cpp"

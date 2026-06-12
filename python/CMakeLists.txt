@@ -25,7 +25,7 @@ else()
   pybind11_add_module(_adc NO_EXTRAS bindings.cpp system.cpp amr_system.cpp)
   set_target_properties(_adc PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 endif()
-target_link_libraries(_adc PRIVATE adc::adc ${CMAKE_DL_LIBS})  # dl : add_dynamic_block (dlopen)
+target_link_libraries(_adc PRIVATE adc::adc adc_dev_options ${CMAKE_DL_LIBS})  # dl : add_dynamic_block (dlopen) ; adc_dev_options : warnings/sanitizers opt-in (vide par defaut, cf. cmake/AdcDevTooling.cmake)
 target_compile_features(_adc PRIVATE cxx_std_${ADC_CXX_STD})
 
 # RAM CI : sous Kokkos, cc1plus a -O3 sur les TU geantes du module (system.cpp / amr_system.cpp =

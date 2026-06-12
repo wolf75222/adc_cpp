@@ -1,0 +1,29 @@
+# Style C++ de adc_cpp. Cale au plus pres du style maison observe : indentation 2 espaces,
+# accolades attachees (`namespace adc {`), references/pointeurs colles au type (`Real& x`),
+# Doxygen `///`. Base Google, ajustements minimaux.
+#
+# IMPORTANT (informatif d'abord) :
+#  - ReflowComments: false  -> on NE retouche PAS les longs commentaires Doxygen francais existants.
+#  - SortIncludes: false    -> on NE reordonne PAS les blocs d'include groupes a la main (adc, puis std).
+# Le job `format` de quality.yml ne fait que SIGNALER les ecarts (clang-format --dry-run, non bloquant).
+---
+Language: Cpp
+BasedOnStyle: Google
+Standard: c++20
+ColumnLimit: 100
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+ReflowComments: false
+SortIncludes: false
+SortUsingDeclarations: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+SpacesBeforeTrailingComments: 2
+IndentPPDirectives: None
+NamespaceIndentation: None
+FixNamespaceComments: true

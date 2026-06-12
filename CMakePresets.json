@@ -160,6 +160,27 @@
         "ADC_BUILD_BENCH": "ON",
         "ADC_BUILD_TESTS": "OFF"
       }
+    },
+    {
+      "name": "ci-warnings",
+      "inherits": "ci-kokkos",
+      "displayName": "CI qualite : build avec warnings stricts (ADC_ENABLE_WARNINGS)",
+      "description": "Herite de ci-kokkos (Kokkos pointe par $KOKKOS_PREFIX). Active les warnings stricts sur les cibles internes via adc_dev_options. Informatif : pas de -Werror. Job 'warnings' de quality.yml.",
+      "binaryDir": "${sourceDir}/build-kokkos-warnings",
+      "cacheVariables": {
+        "ADC_ENABLE_WARNINGS": "ON"
+      }
+    },
+    {
+      "name": "ci-asan",
+      "inherits": "ci-kokkos",
+      "displayName": "CI qualite : ASan + UBSan (ADC_ENABLE_SANITIZERS)",
+      "description": "Herite de ci-kokkos. RelWithDebInfo (-g, traces symbolisees) + ASan/UBSan sur les cibles internes (adc_dev_options) ; tests a -O0 (ADC_TESTS_FAST_O0 herite). Job 'sanitizers' de quality.yml.",
+      "binaryDir": "${sourceDir}/build-kokkos-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ADC_ENABLE_SANITIZERS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -224,6 +245,16 @@
       "name": "ci-bench",
       "configurePreset": "ci-bench",
       "jobs": 2
+    },
+    {
+      "name": "ci-warnings",
+      "configurePreset": "ci-warnings",
+      "jobs": 2
+    },
+    {
+      "name": "ci-asan",
+      "configurePreset": "ci-asan",
+      "jobs": 2
     }
   ],
   "testPresets": [
@@ -271,6 +302,16 @@
     {
       "name": "ci-kokkos",
       "configurePreset": "ci-kokkos",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2
+      }
+    },
+    {
+      "name": "ci-asan",
+      "configurePreset": "ci-asan",
       "output": {
         "outputOnFailure": true
       },

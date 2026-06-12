@@ -1,0 +1,40 @@
+# clang-tidy — analyse statique du coeur adc_cpp.
+#
+# Informatif d'abord : WarningsAsErrors vide (rien ne bloque le run). HeaderFilterRegex limite les
+# diagnostics aux en-tetes du coeur (include/adc/...) -> on ne remonte pas le bruit de Kokkos, Eigen,
+# pybind11, ni de la STL. Familles activees larges, checks notoirement bruyants desactives un a un.
+#
+# Lance par le job `tidy` de quality.yml : run-clang-tidy -p build-kokkos sur les TU de tests/.
+---
+Checks: >
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  readability-*,
+  cppcoreguidelines-*,
+  misc-*,
+  portability-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-use-nodiscard,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -readability-named-parameter,
+  -readability-uppercase-literal-suffix,
+  -readability-math-missing-parentheses,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-avoid-do-while,
+  -misc-non-private-member-variables-in-classes,
+  -misc-include-cleaner,
+  -misc-no-recursion,
+  -bugprone-easily-swappable-parameters
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/adc/.*'
+FormatStyle: file
