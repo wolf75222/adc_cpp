@@ -1396,13 +1396,18 @@ class HyperbolicModel:
             for b in blk:
                 if not b:
                     raise ValueError("set_wave_speeds_from_jacobian : bloc vide (%s)" % label)
+                local = set()
                 for i in b:
                     if not (0 <= i < nv):
                         raise ValueError("set_wave_speeds_from_jacobian : indice %d hors [0, %d) "
                                          "(%s)" % (i, nv, label))
+                    if i in local:
+                        raise ValueError("set_wave_speeds_from_jacobian : indice %d present deux "
+                                         "fois dans le meme bloc (%s)" % (i, label))
                     if i in seen:
                         raise ValueError("set_wave_speeds_from_jacobian : indice %d present dans "
                                          "deux blocs (%s)" % (i, label))
+                    local.add(i)
                     seen.add(i)
             return blk
 
@@ -1658,6 +1663,30 @@ class HyperbolicModel:
             hi = np.maximum(hi, lam.real.max(axis=1))
         return lo, hi
 
+    def _flux_jacobian_spectral_radius(self, U, aux, dir):
+        """Rayon spectral max_cellules max_k |Re(lambda_k)| du jacobien dense COMPLET A = dF_dir/dU,
+        evalue aux differences finies CENTRALES sur le flux interprete. Independant de toute
+        partition declaree (set_wave_speeds_from_jacobian blocks=...) : sert de borne de reference
+        non circulaire face a max_wave_speed. Rend None si un etat perturbe sort du domaine (flux
+        non fini) -- on ne peut alors pas conclure."""
+        nv = self.n_vars
+        U = np.asarray(U, dtype=float)
+        nsmp = U.shape[1]
+        J = np.empty((nsmp, nv, nv))
+        for j in range(nv):
+            eps = 1e-6 * np.abs(U[j]) + 1e-7
+            Up = U.copy(); Up[j] = Up[j] + eps
+            Um = U.copy(); Um[j] = Um[j] - eps
+            Fp = self.flux(Up, aux, dir)
+            Fm = self.flux(Um, aux, dir)
+            if not (bool(np.all(np.isfinite(Fp))) and bool(np.all(np.isfinite(Fm)))):
+                return None
+            for i in range(nv):
+                J[:, i, j] = (np.broadcast_to(Fp[i], (nsmp,))
+                              - np.broadcast_to(Fm[i], (nsmp,))) / (2.0 * eps)
+        lam = np.linalg.eigvals(J)
+        return float(np.max(np.abs(lam.real)))
+
     def wave_speeds_value(self, U, aux, dir):
         """Evaluateur numpy des vitesses signees (smin, smax) -- miroir du wave_speeds emis :
         paire explicite (set_wave_speeds) si declaree, sinon min/max des eigenvalues (chemin
@@ -1744,7 +1773,7 @@ class HyperbolicModel:
         return True
 
     def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
-                    raise_on_error=True):
+                    raise_on_error=True, jac_rtol=1e-3, jac_atol=1e-9):
         """Verification NUMERIQUE generique du modele symbolique (audit 2026-06, chantier 6) :
         evalue les formules sur des etats echantillons et controle, quand la piece existe :
 
@@ -1753,9 +1782,17 @@ class HyperbolicModel:
         - elliptic_rhs fini ;
         - valeurs propres finies et reelles ; max_wave_speed fini et >= 0 ;
         - coherence wave_speeds <-> max_wave_speed : max(|lambda_min|, |lambda_max|) <= mws ;
+        - encadrement NON CIRCULAIRE du spectre : le rayon spectral du jacobien dense complet du
+          flux (differences finies centrales, independant de toute partition blocks=) ne depasse
+          pas max_wave_speed -- attrape une partition set_wave_speeds_from_jacobian qui ne borne
+          pas les valeurs propres (mws sous-estime, CFL non sure) la ou la coherence ci-dessus,
+          derivee de la MEME partition, reste vraie ;
         - round-trip to_conservative(to_primitive(U)) ~= U (si prim_state + cons_from declares) ;
         - positivite des composantes a role Density (et de la primitive 'p' si declaree) sur les
           echantillons (qui sont generes positifs pour ces roles).
+
+        @p jac_rtol, @p jac_atol : tolerances de l'encadrement spectral (radius <= mws*(1+jac_rtol)
+        + jac_atol) ; relachees pour absorber le bruit des differences finies du jacobien.
 
         @p samples : tableau (n_vars, N) d'etats conservatifs a tester ; None -> N = n_samples etats
         aleatoires (seed fixe, reproductible) : composantes a role Density dans [0.1, 2], les autres
@@ -1832,6 +1869,18 @@ class HyperbolicModel:
                 if ext > mws * (1.0 + rtol) + atol:
                     failures.append("wave_speeds %s incoherentes avec max_wave_speed (%g > %g)"
                                     % (dn, ext, mws))
+                # encadrement NON CIRCULAIRE : le rayon spectral du jacobien dense du flux (FD
+                # centrales, sans partition) doit etre majore par max_wave_speed. Une partition
+                # blocks= qui n'est pas reellement bloc-triangulaire rend des extremes de
+                # sous-blocs qui NE bornent PAS le spectre -> mws trop petit, detecte ici.
+                if self._flux:
+                    radius = self._flux_jacobian_spectral_radius(U, a, d)
+                    if radius is not None and radius > mws * (1.0 + jac_rtol) + jac_atol:
+                        failures.append(
+                            "partition %s : max_wave_speed (%g) n'encadre pas le spectre du "
+                            "jacobien de flux (rayon spectral %g) -- la partition blocks= de "
+                            "set_wave_speeds_from_jacobian ne borne pas les valeurs propres, la "
+                            "borne de Rusanov/CFL est sous-estimee" % (dn, mws, radius))
         # round-trip cons -> prim -> cons (quand les deux sens sont declares)
         if self.prim_state and self.cons_from is not None:
             penv = {nm: np.broadcast_to(np.asarray(env[nm], dtype=float), (U.shape[1],))
@@ -3600,13 +3649,15 @@ class Model:
         return self._m.check()
 
     def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
-                    raise_on_error=True):
+                    raise_on_error=True, jac_rtol=1e-3, jac_atol=1e-9):
         """Verification NUMERIQUE generique du modele (flux/source/elliptic finis, valeurs propres
-        reelles et finies, coherence wave_speeds/max_wave_speed, round-trip cons<->prim, positivite
-        Density/'p') sur des etats echantillons. Delegue a HyperbolicModel.check_model (cf. sa doc).
-        A appeler AVANT compile() ; le pendant runtime d'un bloc installe est System.check_model."""
+        reelles et finies, coherence wave_speeds/max_wave_speed, encadrement non circulaire du
+        spectre par le jacobien dense, round-trip cons<->prim, positivite Density/'p') sur des
+        etats echantillons. Delegue a HyperbolicModel.check_model (cf. sa doc). A appeler AVANT
+        compile() ; le pendant runtime d'un bloc installe est System.check_model."""
         return self._m.check_model(samples=samples, n_samples=n_samples, seed=seed, aux=aux,
-                                   rtol=rtol, atol=atol, raise_on_error=raise_on_error)
+                                   rtol=rtol, atol=atol, raise_on_error=raise_on_error,
+                                   jac_rtol=jac_rtol, jac_atol=jac_atol)
 
     # --- introspection (lecture seule, deleguee au modele backing) ---
     @property

@@ -370,3 +370,10 @@ foreach(t
   set_tests_properties(${t} PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 endforeach()
+
+# check_model : encadrement NON CIRCULAIRE du spectre par le jacobien dense (ADC-196) -- partition
+# blocks= qui ne borne pas les valeurs propres detectee + message doublon intra/inter-bloc. Pur Python.
+add_test(NAME test_check_model_partition
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_check_model_partition.py)
+set_tests_properties(test_check_model_partition PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
