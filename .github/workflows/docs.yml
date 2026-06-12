@@ -1,13 +1,18 @@
 name: Docs
 
-# Publie la doc (Sphinx + Doxygen) sur GitHub Pages. Opt-in seulement :
-#   - le message de commit contient "[docs]"
-#   - ou declenchement manuel (workflow_dispatch)
-# Le job installe Sphinx + Doxygen et compile le module Python (~quelques min) ;
-# la plupart des commits ne touchent pas la doc, d'ou le marqueur opt-in.
+# Deux lanes :
+#   - doclint (pull_request touchant docs/) : doc-lint rapide, fraicheur en avertissement, aucun build.
+#   - build + deploy (Pages) : opt-in -- message de commit avec "[docs]" ou workflow_dispatch ; installe
+#     Sphinx + Doxygen et compile le module Python (~quelques min). La plupart des commits ne touchent
+#     pas la doc, d'ou le marqueur opt-in pour la publication.
 on:
   push:
     branches: [master]
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'scripts/build_docs.sh'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 concurrency:
@@ -20,13 +25,34 @@ permissions:
   id-token: write
 
 jobs:
+  # Lane PR : doc-lint rapide (presence + liens + fraicheur en avertissement). Aucun build
+  # Sphinx/Doxygen ici -- check_docs.py est pur stdlib + git, il lui faut juste l'historique
+  # complet (fetch-depth: 0) pour evaluer la fraicheur. --freshness-warn-only => jamais bloquant
+  # sur un doc en retard ; presence et lints restent durs.
+  doclint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Doc-lint (presence + liens + fraicheur warn-only)
+        run: python docs/check_docs.py --freshness-warn-only
+
   build:
     if: |
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, '[docs]')
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 = historique complet, requis par la fraicheur de check_docs.py
+      # (sinon git_state() voit un clone shallow et saute le check).
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: System deps
         run: |
