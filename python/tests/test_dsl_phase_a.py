@@ -3,7 +3,7 @@ FiniteVolume + run). PUR-PYTHON au-dessus de HyperbolicModel : aucune numerique 
 docs/DSL_MODEL_DESIGN.md.
 
 Deux niveaux :
-(1) PUR-PYTHON (aucun compilateur requis) : Param nomme + runtime rejete, flux vs eval_flux distincts,
+(1) PUR-PYTHON (aucun compilateur requis) : Param nomme + runtime supporte (P7-b), flux vs eval_flux distincts,
     primitive_vars kwargs (layout ordonne, rho conservatif rejoint le layout sans etre redefini),
     FiniteVolume(riemann=), et les erreurs explicites (backend inconnu, target amr_system, weno5 sur
     .so, names= longueur, hllc sans pression, names= sur production natif).
