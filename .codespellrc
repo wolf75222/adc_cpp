@@ -1,0 +1,15 @@
+# Config codespell (lu automatiquement par `codespell` dans ce dossier).
+#
+# Politique : informatif d'abord. La lane PR (.github/workflows/docs-pr.yml) lance
+# codespell en continue-on-error -- un faux positif n'echoue jamais une PR. La doc est
+# en francais SANS accents (convention adc_cpp), donc codespell, dont le dictionnaire est
+# anglais, prend beaucoup de mots francais corrects (moteur, projet, methode, ...) pour des
+# fautes. Ces mots sont listes une fois pour toutes dans docs/codespell_ignore.txt (liste
+# curee a zero faux positif sur docs/ + README.md) ; un vrai typo y reste visible.
+#
+# skip : on ne scanne JAMAIS les arbres generes (build*, _build, _site, doxygen, _generated),
+# la liste d'ignore elle-meme, ni les binaires (images). Le scope reel (docs README.md) est
+# passe en argument par le workflow.
+[codespell]
+skip = ./.git,*/build*,*/_build*,*/_site*,*/doxygen*,*/_generated*,*/codespell_ignore.txt,*.png,*.gif,*.svg,*.pdf,*.ico
+ignore-words = docs/codespell_ignore.txt

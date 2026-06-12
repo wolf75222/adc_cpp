@@ -320,3 +320,18 @@ if(ADC_INSTALL)
                 ${CMAKE_CURRENT_BINARY_DIR}/adcConfigVersion.cmake
           DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/adc)
 endif()
+
+# --- Cible documentation (top-level UNIQUEMENT) ---------------------------------------------
+# `cmake --build <dir> --target docs` lance scripts/build_docs.sh (lint + Sphinx + Doxygen + site
+# combine). HORS de la cible ALL : jamais construite par un build standard ni par le CI de code ;
+# c'est un raccourci de confort, equivalent a `bash scripts/build_docs.sh` depuis la racine. Le
+# script verifie LUI-MEME ses dependances (sphinx, doxygen, graphviz) et sort proprement si l'une
+# manque -> aucune logique CMake en plus ici. Top-level seulement : un consommateur (FetchContent /
+# add_subdirectory) n'herite pas de cette cible de commodite.
+if(PROJECT_IS_TOP_LEVEL)
+  add_custom_target(docs
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_docs.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    USES_TERMINAL
+    COMMENT "Build de la documentation (Sphinx + Doxygen) via scripts/build_docs.sh")
+endif()
