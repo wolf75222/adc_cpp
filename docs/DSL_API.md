@@ -135,6 +135,17 @@ Points importants :
 - Roles physiques (`Density`, `MomentumX`, `MomentumY`, ...) : requis pour les couplages
   inter-especes et pour que le `System` retrouve les grandeurs par role. A fournir a
   `conservative_vars(roles=...)` ou a `m.compile(require_metadata=True)`.
+- `m.projection([...])` (ADC-177) : PROJECTION PONCTUELLE post-pas `U <- P(U, aux)`, une expression
+  par composante conservative, emise comme le trait C++ `HasPointwiseProjection` et compilee comme
+  flux/source (CSE comprise) -- remplace le callback Python par cellule. SEMANTIQUE : appliquee par
+  le System UNE fois a la FIN de chaque macro-pas ENTIER (apres transport + etage source +
+  couplages ; jamais par etage RK, y compris en Strang), sur les cellules VALIDES seulement (les
+  ghosts sont refaits par le `fill_ghosts` de tete du pas suivant -- pas de `fill_boundary` dans le
+  hook). CONTRAT : P idempotente (une vraie projection) et ponctuelle (aucun voisin) ; les clamps
+  s'ecrivent SANS branche, en max/min via `dsl.abs_` / `dsl.sign` (derivables par `dsl.diff`), p.ex.
+  positivite `(q + abs_(q))/2`. Backends : `aot` et `production` cote `System` ; `prototype` (JIT)
+  et `target="amr_system"` REJETTENT explicitement (le hook n'est pas cable sur le pas AMR --
+  l'application par niveau apres le reflux du pas est le perimetre suivant).
 
 ---
 
