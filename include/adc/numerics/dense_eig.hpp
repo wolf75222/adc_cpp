@@ -19,7 +19,11 @@
 /// le REPLI de Gershgorin sur la matrice ENTIERE (converged = false) : un encadrement EXTERNE
 /// toujours valide de toutes les parties reelles (sL <= toutes les vitesses <= sR, donc un flux
 /// HLL stable, simplement plus diffusif). Si le repli se declenche, lmin/lmax ne sont PAS les
-/// valeurs propres : tout bit-match contre une reference eig est alors caduc.
+/// valeurs propres et max_im vaut 0 par CONVENTION (rien n'a ete calcule, ce n'est PAS un signal
+/// de spectre reel) : tout bit-match contre une reference eig est alors caduc. converged (ou le
+/// parametre de sortie fallback) tranche : ne jamais lire lmin/lmax/max_im sans l'avoir consulte.
+/// Le cap par defaut (100) est dimensionne pour que les blocs compagnons quasi-degeneres usuels
+/// convergent ; le repli reste le filet de securite pour les cas hors gabarit.
 ///
 /// HYPERBOLICITE : max_im rend le plus grand |Im(lambda)| rencontre. Un systeme hyperbolique a
 /// un spectre reel (max_im ~ 0) ; un modele qui perd l'hyperbolicite ne recoit pas une vitesse
@@ -48,7 +52,9 @@ namespace adc {
 struct EigBounds {
   Real lmin;      ///< plus petite partie reelle (ou borne basse de Gershgorin si !converged)
   Real lmax;      ///< plus grande partie reelle (ou borne haute de Gershgorin si !converged)
-  Real max_im;    ///< plus grand |Im(lambda)| rencontre (0 = spectre reel : hyperbolique)
+  Real max_im;    ///< plus grand |Im(lambda)| rencontre (0 = spectre reel : hyperbolique). N'a ce
+                  ///< sens QUE si converged : sous repli il vaut 0 par CONVENTION (le spectre n'est
+                  ///< pas calcule), surtout pas un signal d'hyperbolicite -- lire converged d'abord.
   bool converged; ///< false -> repli Gershgorin (encadrement externe valide, PAS le spectre)
 };
 
@@ -265,12 +271,20 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
 /// Extremes des PARTIES REELLES du spectre d'un petit bloc dense @p A, plus grand |Im| rencontre
 /// et indicateur de convergence (cf. l'en-tete du fichier pour le contrat complet : repli de
 /// Gershgorin sur non-convergence, max_im comme detecteur de perte d'hyperbolicite).
-/// @p max_iter_per_eig : cap d'iterations QR par bloc actif (defaut 30, l'heuristique EISPACK).
-/// 0 force le repli DES QU'UN bloc actif >= 3 existe (utile pour tester le contrat de
+/// @p max_iter_per_eig : cap d'iterations QR par bloc actif (defaut 100). L'heuristique EISPACK
+/// historique (30) ne suffit pas sur les blocs compagnons quasi-degeneres (valeurs propres
+/// quasi-doubles) ou la deflation rampe : un tel bloc 5x5 demande ~42 iterations, sous 30 il
+/// repliait en silence (vitesse d'onde sur-estimee ~9x). 100 laisse plus du double de marge ; le
+/// surcout n'est paye QUE par les blocs pathologiques (les cas sains convergent en quelques
+/// iterations). 0 force le repli DES QU'UN bloc actif >= 3 existe (utile pour tester le contrat de
 /// l'appelant) ; une matrice qui se deflate entierement en blocs 1x1 / 2x2 (quasi-triangulaire)
 /// n'itere jamais et converge meme a cap 0.
+/// @p fallback : si non nul, recoit true quand le repli de Gershgorin s'est declenche (spectre NON
+/// calcule), false sinon. Defaut nullptr -> comportement inchange pour tout appelant existant ;
+/// miroir de !EigBounds::converged, pour qui ne veut que le drapeau (ex. OR sur plusieurs blocs).
 template <int N>
-ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_eig = 30) {
+ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_eig = 100,
+                                        bool* fallback = nullptr) {
   static_assert(N >= 1, "real_eig_minmax : N >= 1");
   static_assert(N <= 16, "real_eig_minmax : bloc limite a 16x16 (tampon pile O(N^2) par thread "
                          "device, ~2 Ko ; au-dela, un solveur dense avec allocation est plus "
@@ -278,7 +292,6 @@ ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_
   EigBounds b{Real(0), Real(0), Real(0), true};
   if constexpr (N == 1) {
     b.lmin = b.lmax = A[0][0];
-    return b;
   } else if constexpr (N == 2) {  // forme fermee : trace / determinant
     const Real tr2 = Real(0.5) * (A[0][0] + A[1][1]);
     const Real disc = Real(0.25) * (A[0][0] - A[1][1]) * (A[0][0] - A[1][1]) + A[0][1] * A[1][0];
@@ -290,20 +303,22 @@ ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_
       b.lmin = b.lmax = tr2;
       b.max_im = std::sqrt(-disc);
     }
-    return b;
   } else {
     Real H[N][N];  // copie de travail (A n'est pas modifiee)
     for (int i = 0; i < N; ++i)
       for (int j = 0; j < N; ++j) H[i][j] = A[i][j];
     detail::hessenberg_reduce(H);
-    if (detail::hqr_minmax(H, b.lmin, b.lmax, b.max_im, max_iter_per_eig)) return b;
-    // non-convergence : encadrement externe de Gershgorin sur la matrice D'ORIGINE (la copie de
-    // travail est dans un etat intermediaire) -- borne sure, pas le spectre.
-    detail::gershgorin_bounds(A, b.lmin, b.lmax);
-    b.max_im = Real(0);
-    b.converged = false;
-    return b;
+    if (!detail::hqr_minmax(H, b.lmin, b.lmax, b.max_im, max_iter_per_eig)) {
+      // non-convergence : encadrement externe de Gershgorin sur la matrice D'ORIGINE (la copie de
+      // travail est dans un etat intermediaire) -- borne sure, pas le spectre. max_im force a 0
+      // par CONVENTION (rien n'a ete calcule), jamais a interpreter comme un spectre reel.
+      detail::gershgorin_bounds(A, b.lmin, b.lmax);
+      b.max_im = Real(0);
+      b.converged = false;
+    }
   }
+  if (fallback) *fallback = !b.converged;
+  return b;
 }
 
 }  // namespace adc
