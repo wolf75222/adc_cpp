@@ -213,12 +213,12 @@
     {
       "name": "ci-serial",
       "configurePreset": "ci-serial",
-      "jobs": 2
+      "jobs": 4
     },
     {
       "name": "ci-python",
       "configurePreset": "ci-python",
-      "jobs": 2,
+      "jobs": 4,
       "targets": [
         "_adc"
       ]
@@ -226,17 +226,17 @@
     {
       "name": "ci-mpi",
       "configurePreset": "ci-mpi",
-      "jobs": 2
+      "jobs": 4
     },
     {
       "name": "ci-kokkos",
       "configurePreset": "ci-kokkos",
-      "jobs": 2
+      "jobs": 4
     },
     {
       "name": "ci-kokkos-python",
       "configurePreset": "ci-kokkos-python",
-      "jobs": 2,
+      "jobs": 4,
       "targets": [
         "_adc"
       ]
@@ -244,17 +244,17 @@
     {
       "name": "ci-bench",
       "configurePreset": "ci-bench",
-      "jobs": 2
+      "jobs": 4
     },
     {
       "name": "ci-warnings",
       "configurePreset": "ci-warnings",
-      "jobs": 2
+      "jobs": 4
     },
     {
       "name": "ci-asan",
       "configurePreset": "ci-asan",
-      "jobs": 2
+      "jobs": 4
     }
   ],
   "testPresets": [
@@ -286,7 +286,7 @@
         "outputOnFailure": true
       },
       "execution": {
-        "jobs": 2
+        "jobs": 4
       }
     },
     {
@@ -296,7 +296,7 @@
         "outputOnFailure": true
       },
       "execution": {
-        "jobs": 2
+        "jobs": 4
       }
     },
     {
@@ -306,7 +306,7 @@
         "outputOnFailure": true
       },
       "execution": {
-        "jobs": 2
+        "jobs": 4
       }
     },
     {
@@ -316,7 +316,7 @@
         "outputOnFailure": true
       },
       "execution": {
-        "jobs": 2
+        "jobs": 4
       }
     }
   ]

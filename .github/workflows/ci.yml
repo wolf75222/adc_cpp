@@ -2,11 +2,17 @@ name: CI
 
 # adc_cpp est KOKKOS-ONLY : Kokkos est le seul backend on-node (Serial / OpenMP / Cuda selon
 # l'install Kokkos). Il n'existe plus de build non-Kokkos -- TOUS les jobs configurent avec
-# -DADC_USE_KOKKOS=ON. La matrice :
-#  - build-and-test (sur pull_request, gate OBLIGATOIRE) : Kokkos SERIAL, ctest C++ + module
-#    Python + tests Python. Rapide grace aux caches (Kokkos installe + ccache + pip).
+# -DADC_USE_KOKKOS=ON. Topologie (ADC-171) :
+#  - changes : routage par chemins (dorny/paths-filter). Calcule deux drapeaux cpp / python a
+#    partir des fichiers modifies pour ne lancer que le gate utile sur une pull_request.
+#  - gate-cpp + gate-python (sur pull_request, gate OBLIGATOIRE) : Kokkos SERIAL, scindes et
+#    tournant EN PARALLELE. gate-cpp = ctest C++ ; gate-python = module _adc + suite python/tests.
+#    Avant ADC-171 c'etait UN seul job sequentiel (build C++ -> module Python -> tests Python) ;
+#    le split + jobs 4 + mold raccourcissent le chemin critique, et le routage epargne le gate
+#    inutile (une PR pur-Python ne paie que gate-python). Rapides grace aux caches (Kokkos
+#    installe + ccache + pip).
 #  - ci-full (push master, nightly cron, workflow_dispatch, ou PR portant le label `ci-full`) :
-#    ajoute MPI (+ Kokkos Serial) et Kokkos OpenMP, la suite COMPLETE.
+#    ajoute MPI (+ Kokkos Serial) et Kokkos OpenMP, la suite COMPLETE. INCHANGE par ADC-171.
 # Aucun test n'est supprime : seuls les declencheurs et le cache changent. Le serie passe par
 # Kokkos Serial (Kokkos_ENABLE_SERIAL=ON), le multi-thread par Kokkos OpenMP (Kokkos_ENABLE_OPENMP).
 on:
@@ -43,7 +49,46 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  # dorny/paths-filter lit la liste des fichiers modifies de la PR via l'API (pull-requests: read)
+  # et le code est recupere par checkout (contents: read). Aucun job n'ecrit quoi que ce soit :
+  # pas de permission en ecriture accordee.
+  contents: read
+  pull-requests: read
+
 jobs:
+  # Routage par chemins : calcule deux drapeaux (cpp / python) a partir des fichiers modifies, pour
+  # ne payer que le gate pertinent sur une pull_request. Sur push (et tout evenement non-PR), les
+  # gates tournent de toute facon -- ces drapeaux ne servent qu'a court-circuiter le gate non
+  # concerne sur une PR (une PR pur-Python ne lance que gate-python).
+  changes:
+    name: routage (chemins modifies)
+    runs-on: ubuntu-latest
+    outputs:
+      cpp: ${{ steps.filter.outputs.cpp }}
+      python: ${{ steps.filter.outputs.python }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - id: filter
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
+        with:
+          filters: |
+            cpp:
+              - 'include/**'
+              - 'tests/**'
+              - 'cmake/**'
+              - 'CMakeLists.txt'
+              - 'CMakePresets.json'
+              - 'python/system.cpp'
+              - 'python/amr_system.cpp'
+              - 'python/bindings.cpp'
+              - 'python/CMakeLists.txt'
+              - '.github/workflows/ci.yml'
+            python:
+              - 'python/**'
+
   # Calcule si la suite COMPLETE (MPI + Kokkos OpenMP) doit tourner. Plein si :
   #  - push sur master, OU
   #  - run nocturne (schedule), OU
@@ -72,21 +117,23 @@ jobs:
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "Mode plein (MPI + Kokkos OpenMP) : $full (event=${{ github.event_name }})"
 
-  build-and-test:
-    name: ubuntu-latest / Kokkos Serial (C++ + Python)
+  # GATE C++ (ADC-171). Ex-moitie C++ du job sequentiel build-and-test, isole pour tourner EN
+  # PARALLELE de gate-python. Pas de `needs: set-mode` (le gate Serial tourne dans tous les modes) ;
+  # `needs: changes` sert UNIQUEMENT au routage par chemins sur pull_request.
+  gate-cpp:
+    name: ubuntu-latest / Kokkos Serial (C++)
     runs-on: ubuntu-latest
-    # Pas de `needs: set-mode` : ce gate Kokkos Serial tourne dans TOUS les modes (fast comme
-    # full), donc il demarre tout de suite, en parallele du calcul de mode. Seuls mpi et
-    # kokkos-openmp dependent de set-mode (ils ne tournent qu'en plein).
+    needs: changes
+    # Tout evenement non-PR (push master / nightly / dispatch) lance le gate ; sur pull_request,
+    # uniquement si un chemin C++ a bouge (changes.outputs.cpp).
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.cpp == 'true' }}
 
     env:
       # ccache borne : evite que le cache enfle sans fin entre les runs.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
-      # Prefixe FIXE ou Kokkos est installe ; mis en cache (le gros gain : pas de
-      # reconstruction de Kokkos a chaque run). Version EXACTE : 4.4.01, Serial, PIC
-      # (la PIC est exigee pour lier le module Python _adc).
-      KOKKOS_VERSION: 4.4.01
+      # Prefixe FIXE ou Kokkos est installe par l'action composite (meme chemin que kokkos-prefix) ;
+      # mis en cache (le gros gain : pas de reconstruction de Kokkos a chaque run). Serial, PIC.
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
@@ -94,35 +141,18 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libeigen3-dev ninja-build ccache
-
-      # Cache du Kokkos DEJA INSTALLE (Serial, PIC), cle sur la version exacte + compilateur.
-      # Sur hit, on saute entierement la reconstruction de Kokkos (le gros poste de temps).
-      - name: Cache Kokkos install (Serial ${{ env.KOKKOS_VERSION }})
-        id: kokkos-cache
-        uses: actions/cache@v4
+      # Action composite : apt deps (Eigen / Ninja / ccache) + mold, et install Kokkos Serial PIC
+      # MISE EN CACHE sous la cle kokkos-<os>-4.4.01-serial-cxx20-gcc-pic -- IDENTIQUE aux jobs full
+      # et a quality.yml, donc Kokkos n'est jamais reconstruit. mold (editeur de liens rapide) n'est
+      # ajoute qu'ici via extra-apt : il n'entre PAS dans les presets (portables pour le dev local mac).
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
         with:
-          path: ${{ env.KOKKOS_PREFIX }}
-          key: kokkos-${{ runner.os }}-${{ env.KOKKOS_VERSION }}-serial-cxx20-gcc-pic
-
-      - name: Build + install Kokkos (Serial, PIC)
-        # Reconstruit Kokkos UNIQUEMENT sur cache miss ; sinon on reutilise le prefixe en cache.
-        # PIC : le module Python _adc (extension partagee) lie Kokkos, donc le code Kokkos doit
-        # etre position-independent.
-        if: steps.kokkos-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 -b ${KOKKOS_VERSION} https://github.com/kokkos/kokkos.git /tmp/kokkos
-          cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
-            -DCMAKE_INSTALL_PREFIX="${KOKKOS_PREFIX}" -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build /tmp/kbuild --parallel 4 --target install
+          extra-apt: mold
 
       # ccache : cle la plus specifique (os+job+ref+sha) en ecriture, restore-keys
       # du plus precis au plus large (meme job sur la branche -> sur master -> n'importe).
+      # Cle INCHANGEE depuis l'ancien job build-and-test (kokkos-serial).
       - name: Cache ccache (Kokkos Serial)
         uses: actions/cache@v4
         with:
@@ -138,63 +168,119 @@ jobs:
       # ccache est auto-detecte par le CMakeLists (ADC_USE_CCACHE). Le preset pose aussi
       # ADC_TESTS_FAST_O0=ON : sous Kokkos, l'inlining -O3 des foncteurs device dans les ~242
       # cibles de test rendait le build du gate enorme. Les tests sont des controles de correction
-      # sur grilles minuscules -> compiles a -O0 (build rapide, RAM bornee ; la lib de production
-      # et _adc restent a -O3) ; le pool Ninja adc_heavy_tu=1 serialise en plus les TU system.cpp
-      # (cf. tests/CMakeLists.txt). Parallelisme borne (jobs: 2) dans les build/testPresets.
-      - name: Configure (backend Kokkos Serial)
-        run: cmake --preset ci-kokkos
+      # sur grilles minuscules -> compiles a -O0 (build rapide ; la lib de production et _adc restent
+      # a -O3) ; le pool Ninja adc_heavy_tu=1 serialise en plus les TU system.cpp et borne la RAM
+      # (cf. tests/CMakeLists.txt). Parallelisme jobs: 4 (runner public = 4 vCPU) dans les presets.
+      # CMAKE_LINKER_TYPE=MOLD : mold pose en -D ICI uniquement (hors presets, cf. extra-apt mold).
+      # SECONDS chronometre configure+build puis tests, ecrits dans GITHUB_STEP_SUMMARY (baseline ADC-171).
+      - name: Configure + build + test (Kokkos Serial)
+        run: |
+          SECONDS=0
+          cmake --preset ci-kokkos -DCMAKE_LINKER_TYPE=MOLD
+          cmake --build --preset ci-kokkos
+          build_s=$SECONDS
+          SECONDS=0
+          ctest --preset ci-kokkos
+          test_s=$SECONDS
+          {
+            echo "### gate-cpp (Kokkos Serial, C++)"
+            echo ""
+            echo "| Phase | Duree (s) |"
+            echo "| --- | --- |"
+            echo "| configure + build | ${build_s} |"
+            echo "| tests (ctest) | ${test_s} |"
+            echo ""
+            echo "Hit-rate ccache :"
+            echo '```'
+            ccache -s | grep -i hits || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build
-        run: cmake --build --preset ci-kokkos
+      - name: ccache stats (Kokkos Serial)
+        if: always()
+        run: ccache -s
 
-      - name: Test
-        run: ctest --preset ci-kokkos
+  # GATE PYTHON (ADC-171). Ex-moitie Python du job sequentiel build-and-test : construit le module
+  # _adc AVEC Kokkos puis exerce la suite python/tests. Tourne EN PARALLELE de gate-cpp.
+  gate-python:
+    name: ubuntu-latest / Kokkos Serial (Python)
+    runs-on: ubuntu-latest
+    needs: changes
+    # Tout evenement non-PR lance le gate ; sur pull_request, des qu'un chemin C++ (cpp) OU Python
+    # (python) a bouge -- une PR pur-Python ne paie donc QUE ce job, pas gate-cpp.
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true' }}
+
+    env:
+      # ccache dedie au module Python (.ccache-py) : meme separation que l'ancien job build-and-test.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-py
+      CCACHE_MAXSIZE: 2G
+      KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      # Meme action composite que gate-cpp : apt deps + mold + Kokkos Serial PIC en cache (cle
+      # partagee kokkos-<os>-4.4.01-serial-cxx20-gcc-pic -> aucune reconstruction).
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+        with:
+          extra-apt: mold
 
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
 
+      # ccache du module Python : cle INCHANGEE depuis l'ancien job build-and-test (python).
       - name: Cache ccache (Python module)
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/.ccache-py
+          path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-python-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
             ccache-${{ runner.os }}-python-${{ github.ref }}-
             ccache-${{ runner.os }}-python-refs/heads/master-
             ccache-${{ runner.os }}-python-
 
-      - name: Build + test Python module `adc` (backend Kokkos Serial)
-        # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On construit
-        # l'extension _adc AVEC Kokkos puis on exerce TOUTE la suite python/tests/test_*.py par
-        # AUTO-DECOUVERTE (find ... | xargs -P 2) : la liste ne peut plus se perimer et un
-        # nouveau test livre par une PR soeur est pris automatiquement.
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache-py
-          CCACHE_MAXSIZE: 2G
+      # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On construit l'extension
+      # _adc AVEC Kokkos (preset ci-kokkos-python, jobs: 4 ; CMAKE_LINKER_TYPE=MOLD en -D ici uniquement)
+      # puis on exerce TOUTE la suite python/tests/test_*.py par AUTO-DECOUVERTE (find ... | xargs -P 2) :
+      # la liste ne peut plus se perimer et un nouveau test livre par une PR soeur est pris automatiquement.
+      # SECONDS chronometre configure+build puis tests, ecrits dans GITHUB_STEP_SUMMARY (baseline ADC-171).
+      - name: Build + test module Python `adc` (Kokkos Serial)
         run: |
           pip install --upgrade pip numpy
-          cmake --preset ci-kokkos-python
+          SECONDS=0
+          cmake --preset ci-kokkos-python -DCMAKE_LINKER_TYPE=MOLD
           cmake --build --preset ci-kokkos-python
+          build_s=$SECONDS
           export PYTHONPATH="$PWD/build-kokkos-py/python"
           # adc_cpp est Kokkos-only : les tests DSL qui compilent un loader/.so (aot, production, ABI)
           # incluent les en-tetes adc (-> for_each, #error sans Kokkos). Ils lisent le Kokkos a utiliser
           # via Kokkos_ROOT / ADC_KOKKOS_ROOT : on pointe le MEME Kokkos Serial que le module _adc.
           export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
+          SECONDS=0
           find python/tests -maxdepth 1 -name 'test_*.py' -print0 | sort -z \
             | xargs -0 -P 2 -I {} bash -c 'echo "::group::{}"; python3 "{}"; echo "::endgroup::"'
-
-      - name: ccache stats (Kokkos Serial)
-        if: always()
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache
-        run: ccache -s
+          test_s=$SECONDS
+          {
+            echo "### gate-python (module _adc, Kokkos Serial)"
+            echo ""
+            echo "| Phase | Duree (s) |"
+            echo "| --- | --- |"
+            echo "| configure + build | ${build_s} |"
+            echo "| tests (python) | ${test_s} |"
+            echo ""
+            echo "Hit-rate ccache :"
+            echo '```'
+            ccache -s | grep -i hits || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: ccache stats (Python module)
         if: always()
-        env:
-          CCACHE_DIR: ${{ github.workspace }}/.ccache-py
         run: ccache -s
 
   mpi:
