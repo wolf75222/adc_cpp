@@ -516,15 +516,16 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     throw std::runtime_error("System::add_block : newton_fail_policy 'none'|'warn'|'throw' (recu '" +
                              newton_fail_policy + "')");
   // @p time porte le TRAITEMENT et, en explicite, le SCHEMA RK : "explicit"/"ssprk2" = SSPRK2
-  // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "imex" = transport explicite + source raide
+  // (defaut historique), "ssprk3" = SSPRK3 (ordre 3), "euler" = ForwardEuler (ordre 1, fidelite aux
+  // references premier ordre -- validation), "imex" = transport explicite + source raide
   // implicite backward-Euler local (ordre 1), "imexrk_ars222" = famille IMEX-RK schema ARS(2,2,2)
   // (ordre 2, avance PARALLELE distincte, cartesien seul). La math RK reste un FONCTEUR du coeur
   // (build_block). "imex" et "imexrk_ars222" partagent le drapeau @c imex ; @c method les distingue.
-  if (time != "explicit" && time != "ssprk2" && time != "ssprk3" && time != "imex" &&
-      time != "imexrk_ars222")
+  if (time != "explicit" && time != "ssprk2" && time != "ssprk3" && time != "euler" &&
+      time != "imex" && time != "imexrk_ars222")
     throw std::runtime_error(
-        "System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'imex'|'imexrk_ars222' (recu '" + time +
-        "')");
+        "System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'euler'|'imex'|'imexrk_ars222' (recu '" +
+        time + "')");
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_block : recon 'conservative' | 'primitive' (recu '" +
                              recon + "')");
@@ -533,7 +534,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   const bool recon_prim = (recon == "primitive");
   const std::string method = imexrk ? std::string("imexrk_ars222")
                                      : ((time == "ssprk3") ? std::string("ssprk3")
-                                                           : std::string("ssprk2"));
+                                        : (time == "euler") ? std::string("euler")
+                                                            : std::string("ssprk2"));
   // Le masque implicite (implicit_vars / implicit_roles) ne s'applique qu'au pas de source IMEX. Le
   // demander en explicite est une ERREUR (pas d'ignore silencieux) : l'explicite n'a pas de pas implicite.
   if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))

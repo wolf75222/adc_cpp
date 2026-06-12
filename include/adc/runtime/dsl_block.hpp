@@ -50,12 +50,15 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
   const bool imex = (time == "imex");
   const bool recon_prim = (recon == "primitive");
   // Schema RK EXPLICITE marshale par le chemin de production (add_native_block -> adc_install_native
-  // -> ce gabarit) : "ssprk3" (3 etages, ordre 3, moins dissipatif, a apparier a weno5) vs "ssprk2"
+  // -> ce gabarit) : "ssprk3" (3 etages, ordre 3, moins dissipatif, a apparier a weno5), "euler"
+  // (ForwardEuler, ordre 1 : fidelite aux references premier ordre, validation) vs "ssprk2"
   // (defaut historique, bit-identique). N'a d'effet QUE sur l'avance explicite -- l'IMEX garde son
   // demi-pas ForwardEuler + source implicite, donc method est ignore quand imex. On aligne ainsi le
   // .so de production sur le chemin natif add_block (system.cpp) qui exposait deja ssprk3 ; toute
   // autre chaine ("explicit"/inconnue) retombe sur ssprk2 (add_native_block valide la chaine amont).
-  const std::string method = (time == "ssprk3") ? "ssprk3" : "ssprk2";
+  const std::string method = (time == "ssprk3") ? "ssprk3"
+                             : (time == "euler") ? "euler"
+                                                 : "ssprk2";
   // Le bloc peut lire des champs auxiliaires supplementaires (aux_comps<Model> > 3, p.ex. B_z d'une
   // source magnetisee) : on elargit le canal aux PARTAGE du System AVANT de capturer son adresse,
   // pour que la fermeture lise un aux assez large. Modele de base (3) -> no-op, inchange.

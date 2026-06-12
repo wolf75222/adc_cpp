@@ -338,7 +338,8 @@ ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) 
 }
 
 /// Fermetures (avance + residu) pour un schema spatial (Limiter x Flux) fige. La math RK vient des
-/// TimeStepper du coeur : en explicite SSPRK2 (defaut) ou SSPRK3 selon @p method ; ForwardEuler +
+/// TimeStepper du coeur : en explicite SSPRK2 (defaut), SSPRK3 ou ForwardEuler ("euler", ordre 1,
+/// fidelite aux references premier ordre -- validation, jamais defaut) selon @p method ; ForwardEuler +
 /// backward_euler_source en IMEX. Les fermetures sont des FONCTEURS NOMMES (cf. namespace detail) et
 /// non des lambdas : le chemin add_compiled_model (premiere instanciation depuis une TU externe)
 /// s'emet alors proprement sous nvcc. @p method ne joue QUE sur l'avance explicite (l'IMEX garde son
@@ -385,6 +386,15 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
         bc.advance_eb = detail::AdvanceImexEb<Limiter, Flux, Model>{
             m, ctx, disc, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
     }
+  } else if (method == "euler") {
+    bc.advance =
+        detail::AdvanceExplicit<Limiter, Flux, Model, ForwardEuler>{m, ctx, recon_prim, pos_floor};
+    if (disc_mask)
+      bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, ForwardEuler>{
+          m, ctx, disc_mask, recon_prim, pos_floor};
+    if (disc)
+      bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, ForwardEuler>{
+          m, ctx, disc, recon_prim, pos_floor};
   } else if (method == "ssprk3") {
     bc.advance =
         detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim, pos_floor};
@@ -405,7 +415,7 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
           m, ctx, disc, recon_prim, pos_floor};
   } else {
     throw std::runtime_error("System : methode temporelle explicite inconnue '" + method +
-                             "' (ssprk2|ssprk3)");
+                             "' (euler|ssprk2|ssprk3)");
   }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor};
   return bc;
@@ -415,7 +425,7 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
 /// par requires : exigent un transport a 4 variables exposant pressure (sinon erreur explicite).
 /// "weno5" = reconstruction WENO5-Z (ordre 5, stencil 5 points, 3 ghosts) ; spatial_operator route
 /// sur weno5z quand Limiter::n_ghost >= 3 (l'appelant doit allouer 3 ghosts, cf. block_n_ghost).
-/// @p method choisit l'avance EXPLICITE (ssprk2 par defaut, ssprk3 optionnel) ; sans effet en IMEX.
+/// @p method choisit l'avance EXPLICITE (ssprk2 par defaut, ssprk3 | euler optionnels) ; sans effet en IMEX.
 /// @p implicit_components : masque implicite IMEX porte par le bloc (indices ; vide = defaut modele,
 /// bit-identique). cf. build_block.
 template <class Model>

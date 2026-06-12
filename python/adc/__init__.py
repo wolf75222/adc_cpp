@@ -823,14 +823,15 @@ class Explicit:
                  transporte PAS la cadence et REJETTE stride > 1 (route explicite, pas d'ignore silencieux) ;
                  add_block (natif) et backend='production' supportent le stride.
     method     : "ssprk2" (defaut, Shu-Osher 2 etages ordre 2) | "ssprk3" (3 etages ordre 3,
-                 moins dissipatif, a apparier a weno5). Raccourci ssprk3=True.
+                 moins dissipatif, a apparier a weno5) | "euler" (ForwardEuler, ordre 1 : fidelite
+                 aux references premier ordre, validation seulement). Raccourci ssprk3=True.
     """
 
     def __init__(self, substeps=1, method="ssprk2", stride=1, *, ssprk3=False):
         if ssprk3:
             method = "ssprk3"
-        if method not in ("ssprk2", "ssprk3"):
-            raise ValueError("Explicit : method 'ssprk2' | 'ssprk3' (recu %r)" % (method,))
+        if method not in ("ssprk2", "ssprk3", "euler"):
+            raise ValueError("Explicit : method 'ssprk2' | 'ssprk3' | 'euler' (recu %r)" % (method,))
         if int(substeps) < 1:
             raise ValueError("Explicit : substeps >= 1 (recu %r)" % (substeps,))
         if int(stride) < 1:
@@ -838,8 +839,9 @@ class Explicit:
         self.substeps = int(substeps)
         self.stride = int(stride)
         self.method = method
-        # kind transmis a la facade compilee : "explicit" (SSPRK2, defaut bit-identique) ou "ssprk3".
-        self.kind = "ssprk3" if method == "ssprk3" else "explicit"
+        # kind transmis a la facade compilee : "explicit" (SSPRK2, defaut bit-identique), "ssprk3"
+        # ou "euler" (ordre 1, fidelite aux references premier ordre -- validation, jamais defaut).
+        self.kind = method if method in ("ssprk3", "euler") else "explicit"
 
 
 def _role_to_stable(name):

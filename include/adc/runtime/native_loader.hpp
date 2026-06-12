@@ -382,12 +382,14 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_compiled_block : recon 'conservative' | 'primitive'");
   // NB : le chemin AOT (.so) marshale time->imex sans schema RK explicite : seul SSPRK2 est cable
-  // dans l'ABI extern "C" du .so. "ssprk3" n'est donc PAS supporte ici (l'avance resterait SSPRK2,
-  // silencieusement) -> on le rejette. SSPRK3 est expose par le chemin natif add_block.
+  // dans l'ABI extern "C" du .so. "ssprk3" et "euler" ne sont donc PAS supportes ici (l'avance
+  // resterait SSPRK2, silencieusement) -> on les rejette ; les exposer exigerait d'etendre l'ABI du
+  // .so (hors scope ADC-174). Ils sont portes par add_block natif ET backend='production'
+  // (add_native_block : le gabarit marshale method jusqu'au make_block du loader).
   if (time != "explicit" && time != "imex")
-    throw std::runtime_error("System::add_compiled_block : time 'explicit' | 'imex' (ssprk3 et la "
-                             "famille IMEX-RK ARS(2,2,2) -> add_block natif ; le chemin AOT n'expose "
-                             "que SSPRK2 + backward-Euler local)");
+    throw std::runtime_error("System::add_compiled_block : time 'explicit' | 'imex' (ssprk3, euler et "
+                             "la famille IMEX-RK ARS(2,2,2) -> add_block natif ou backend='production' ; "
+                             "le chemin AOT n'expose que SSPRK2 + backward-Euler local)");
   // WENO5 (stencil 5 points, 3 ghosts) est desormais EXPOSE par le chemin AOT : la grille locale du
   // .so alloue block_n_ghost(limiter) (compiled_block_abi.hpp), 3 pour weno5, donc assemble_rhs ne lit
   // pas hors bornes. limiter est valide par make_block dans le .so (none|minmod|vanleer|weno5).
@@ -605,19 +607,19 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
   if (stride < 1) throw std::runtime_error("System::add_native_block : stride >= 1");
   // Validation AMONT du schema (comme add_block / add_compiled_block) : add_compiled_model interprete
   // imex = (time=="imex"), recon_prim = (recon=="primitive") et le schema RK explicite
-  // method = (time=="ssprk3") ? ssprk3 : ssprk2 ; une chaine inconnue retomberait SILENCIEUSEMENT sur
+  // method = ssprk3 | euler | ssprk2 selon time ; une chaine inconnue retomberait SILENCIEUSEMENT sur
   // explicit/ssprk2/conservatif. On rejette donc une faute de frappe ICI plutot que de tourner un
-  // schema different de celui demande. "ssprk3" est desormais ACCEPTE (ordre 3, moins dissipatif, a
-  // apparier a weno5) : le gabarit add_compiled_model le marshale jusqu'au make_block du .so, comme le
-  // chemin natif add_block. limiter/riemann sont valides par make_block dans le loader (exception
+  // schema different de celui demande. "ssprk3" (ordre 3, a apparier a weno5) et "euler" (ForwardEuler,
+  // ordre 1 : fidelite aux references premier ordre, validation -- ADC-174) sont ACCEPTES : le gabarit
+  // add_compiled_model les marshale jusqu'au make_block du .so, comme le chemin natif add_block. limiter/riemann sont valides par make_block dans le loader (exception
   // claire, ABI partagee verifiee plus bas).
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_native_block : recon 'conservative' | 'primitive' (recu '" +
                              recon + "')");
-  if (time != "explicit" && time != "ssprk3" && time != "imex")
-    throw std::runtime_error("System::add_native_block : time 'explicit' | 'ssprk3' | 'imex' (recu '" +
-                             time + "' ; la famille IMEX-RK ARS(2,2,2) n'est cablee que sur un modele "
-                             "compose adc.Model(...) -> add_block natif)");
+  if (time != "explicit" && time != "ssprk3" && time != "euler" && time != "imex")
+    throw std::runtime_error("System::add_native_block : time 'explicit' | 'ssprk3' | 'euler' | 'imex' "
+                             "(recu '" + time + "' ; la famille IMEX-RK ARS(2,2,2) n'est cablee que sur "
+                             "un modele compose adc.Model(...) -> add_block natif)");
   // WENO5 (stencil 5 points, 3 ghosts) est desormais EXPOSE par le chemin natif : le loader inline
   // add_compiled_model qui, apres install_block, reallue l'etat du bloc a block_n_ghost(limiter) (3
   // pour weno5) -- MEME mecanisme qu'add_block. assemble_rhs ne lit donc pas hors bornes. limiter est

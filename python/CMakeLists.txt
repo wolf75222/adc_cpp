@@ -112,6 +112,14 @@ add_test(NAME test_bindings
 set_tests_properties(test_bindings PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Methode temporelle explicite "euler" (ForwardEuler, ADC-174) : identite de Shu-Osher
+# bit-exacte (ssprk2 == 0.5 U0 + 0.5 euler(euler(.))), no-default-change, rejet AMR.
+# Modele natif pur transport : aucun compilateur requis.
+add_test(NAME test_time_euler
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_euler.py)
+set_tests_properties(test_time_euler PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Test du mini-DSL symbolique (adc.dsl) : pur Python (interprete CPU), meme PYTHONPATH.
 add_test(NAME test_dsl
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)
