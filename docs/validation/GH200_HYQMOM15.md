@@ -93,18 +93,25 @@ inter-iteration, donc bit-identique attendu hors reductions. `real_eig_minmax` e
 code source `ADC_HD` instancie host d'un cote, device de l'autre.
 
 20 pas du MEME etat initial `ic_128.raw`, dump binaire de l'etat final (15 moments + phi),
-compares par `compare_snap` (job 654862, noeud romeo-a057) :
+compares par `compare_snap`. Run initial job 654862 ; REPRODUIT byte-pour-byte par le
+`parity181.sbatch` versionne (job 654998, romeo-a057, les DEUX variantes recompilees depuis
+les sources du depot, brique + IC regeneres) :
 
 ```
 === RUN DEVICE (Cuda) 20 pas ===  [fin] 20 pas, t=0.01594, derive de masse 1.63e-13
 === RUN HOST (Serial) 20 pas ===  [fin] 20 pas, t=0.01594, derive de masse 1.64e-13
 === COMPARE snap_000020.raw (device vs host) ===
+n_a=128 t_a=0.015936559201338053 k_a=20
+n_b=128 t_b=0.015936559201338029 k_b=20
 dt_clock (|t_a-t_b|) = 2.429e-17
 payload doubles      = 262144   (15*128^2 moments + 128^2 potentiel)
-bit-identiques       = 27710 (10.57%)
-max |a-b|            = 3.450573e-13   (index 256884 -> dans le potentiel phi)
+bit-identiques       = 27710 (10.5705%)
+max |a-b|            = 3.450573e-13   (index 256884 -> maximum dans le potentiel phi)
 max rel              = 6.456023e-10
 ```
+
+Les `t` complets (17 chiffres) montrent l'ecart d'horloge `...338053` vs `...338029` : c'est
+l'evidence ~1 ULP citee plus bas, invisible dans le `%.3e` de `dt`.
 
 Lecture :
 
@@ -136,7 +143,7 @@ Lecture :
   solveur de vitesses (objet de ADC-181) n'est pas la SOURCE de la divergence, il propage
   fidelement l'etat qu'on lui donne.
 
-## 3. Multi-GPU MPI (substrat halos, job 654863) et perimetre
+## 3. Multi-GPU MPI (substrat halos, jobs 654863 puis 654999) et perimetre
 
 Le driver hyqmom15 utilise `adc::System` (mono-boite, mono-rang) : il n'a PAS de
 decomposition de domaine MPI. La correction multi-GPU du modele se factorise en deux
@@ -151,8 +158,10 @@ forme le bloc jacobien, rend min/max du spectre), sa correction multi-GPU se RED
 (1) deja validee ici et (2) deja validee independamment (fix halos CUDA-IPC #254 ;
 parite multi-box np=1/2/4 #59).
 
-Corroboration sur CE noeud, post-#254, du substrat halos multi-GPU (harnais
-`gpu_amr_bz_mpi_validate`, B_z par niveau AMR multi-box distribue, un GH200 par rang) :
+Corroboration sur CE noeud, post-#254, du substrat halos multi-GPU (harnais versionne
+`python/tests/gpu/gpu_amr_bz_mpi_validate.cpp`, B_z par niveau AMR multi-box distribue, un
+GH200 par rang). Re-execute par `mpi181.sbatch` (job 654999, romeo-a057), chiffres identiques
+au run initial 654863 :
 
 ```
 np=1 exec=Cuda : mass=2.10017927603615240 csum=537.645894665255014 csumsq=1129.79422430042723 cmax=2.19619397662556448 | bz_bad=0
@@ -176,14 +185,14 @@ reste a livrer pour fermer entierement la branche 3 de l'issue.
 `real_eig_minmax` itere un nombre de fois DEPENDANT DES DONNEES par cellule (deflation QR) :
 des threads d'un meme warp peuvent iterer un nombre de fois different (divergence warp).
 Mesure indicative temps/pas (device GH200 vs hote Serial du meme noeud romeo-a057, n=128,
-50 pas, job 654869) :
+50 pas, job 654998, meme run que la parite ci-dessus) :
 
 ```
-device(Cuda) : 50 pas en  2.579 s -> 0.0516 s/pas (19.4 pas/s)
-host(Serial) : 50 pas en 35.045 s -> 0.7009 s/pas ( 1.4 pas/s)
+device(Cuda) : 50 pas en  2.664 s -> 0.0533 s/pas (18.8 pas/s)
+host(Serial) : 50 pas en 35.212 s -> 0.7042 s/pas ( 1.4 pas/s)
 ```
 
-Le device est ~13.6x plus rapide qu'un coeur Grace seul a n=128 (comparaison
+Le device est ~13.2x plus rapide qu'un coeur Grace seul a n=128 (comparaison
 throughput, pas un cout de divergence isole : le device emploie le GPU entier, l'hote
 un coeur). Aucun ralentissement pathologique : la boucle QR par cellule ne fait pas
 diverger le pas device, et le run de 24706 pas (section 1) confirme la stabilite.
