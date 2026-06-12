@@ -1,4 +1,4 @@
-# Sorties / checkpoint / restart — plan de design (audit 2026-06, chantier 7)
+# Sorties / checkpoint / restart -- plan de design (audit 2026-06, chantier 7)
 
 Statut : **PLAN** (API cible + contraintes HPC + decoupage en PR). Rien n'est cable dans ce
 document ; il fixe le contrat AVANT l'implementation pour eviter une API de sortie ad hoc par cas
@@ -47,7 +47,7 @@ serialiser des fermetures C++/Python.
      (reutilise le marshaling `copy_state` existant). Suffisant pour les cas locaux actuels
      (System = une box).
    - V2 (MPI moyen) : HDF5 sequentiel par AGREGATION (rang 0 collecte par morceaux, ecrit en
-     streaming) — pas de dependance MPI-IO, memoire bornee.
+     streaming) -- pas de dependance MPI-IO, memoire bornee.
    - V3 (production GPFS/Lustre, cf. ROMEO) : HDF5 PARALLELE (h5py-mpi / HDF5 natif) avec un
      dataset GLOBAL par bloc, hyperslabs par rang. **FAIT cote System (write) : ADC-66 /
      PR-IO-3.** OPT-IN par `sim.write(format="hdf5", parallel=True)` : ouverture collective

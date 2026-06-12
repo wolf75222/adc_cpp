@@ -1,4 +1,4 @@
-# Audit toolchain & robustesse d'installation — état des lieux (2026-06-10)
+# Audit toolchain & robustesse d'installation -- état des lieux (2026-06-10)
 
 **Déclencheur :** trois bugs réels chez des utilisateurs tiers (machines de collègues), tous de la
 même classe « **environnement du build ≠ environnement d'exécution** » :
@@ -12,7 +12,7 @@ même classe « **environnement du build ≠ environnement d'exécution** » :
 Audit mené par workflow multi-agents (4 lentilles : `dsl.py`, CMake, classe de bugs env, réalité
 conda-forge) + **contre-vérification adversariale** des findings critiques. Fait notable : les deux
 findings HIGH sur le compilateur/std ont été *réfutés* par les vérificateurs **parce que les fixes
-livrés pendant l'audit les corrigeaient déjà** — confirmation indépendante des causes racines.
+livrés pendant l'audit les corrigeaient déjà** -- confirmation indépendante des causes racines.
 
 ---
 
@@ -46,7 +46,7 @@ erreur **actionnable** (compilateur utilisé, compilateur du build, 3 remèdes).
 - L'import de `adc._adc` qui échoue donne désormais un message actionnable (extension absente /
   mauvais interpréteur cpython-3XY, avec le remède exact) au lieu du `ModuleNotFoundError` brut.
 
-## 4. Parité Kokkos & cache (.so) — durcissements
+## 4. Parité Kokkos & cache (.so) -- durcissements
 
 - **Confirmé par vérif adversariale** : la clé d'ABI C++ n'encode PAS `ADC_HAS_KOKKOS` (layouts
   `allocator.hpp`/`types.hpp` divergents = UB potentiel) ni libc++/libstdc++. Chantier C++ proposé
@@ -54,12 +54,12 @@ erreur **actionnable** (compilateur utilisé, compilateur du build, 3 remèdes).
   `_adc.__has_kokkos__` et `ADC_KOKKOS_ROOT` divergent (module Kokkos + loader série = perf muette ;
   l'inverse = risque réel).
 - Clé de cache des `.so` : ajout de **l'architecture CPU + `ADC_DSL_OPTFLAGS`**
-  (`_platform_cache_key`) — un `.so` x86_64/`-march=native` ne sera plus réutilisé sur une autre
+  (`_platform_cache_key`) -- un `.so` x86_64/`-march=native` ne sera plus réutilisé sur une autre
   machine via un cache partagé (SIGILL silencieux).
 
 ## 5. Réalité conda-forge (lentille réseau ; à reconfirmer au premier `env create`)
 
-- **`cxx-compiler`** : clang 19 (osx-arm64) / gcc 14 (linux-64) — **tous deux C++23-capables**.
+- **`cxx-compiler`** : clang 19 (osx-arm64) / gcc 14 (linux-64) -- **tous deux C++23-capables**.
   Un toolchain C++23 garanti par conda est donc possible, MAIS en mode **tout-conda cohérent**
   (bâtir `_adc` avec lui ET `ADC_CXX=$CONDA_PREFIX/bin/...` ; ne pas mélanger avec AppleClang).
 - **`kokkos` conda-forge = backend Serial UNIQUEMENT** (pas d'OpenMP ; CUDA = paquet séparé).
