@@ -16,6 +16,10 @@ Le parcours conseille, dans l'ordre :
   (les scenarios nommes : diocotron, euler_poisson...).
 - [Tutoriel A->Z](tutorial.md) : le tutoriel canonique en 18 etapes, de `git clone` a la
   comparaison uniforme/AMR, avec figures et GIF generes.
+- [Windows (WSL2)](windows_wsl2.md) : guide de zero pour un PC Windows 11, du `wsl --install`
+  a un cas `adc_cases`, avec les ecarts par rapport au chemin Linux.
+- [Windows natif](windows_native.md) : statut et feuille de route du portage natif (sans WSL2) ;
+  perimetre v1/v2 et etat reel.
 
 Pour la reference de conception (contributeurs), chaque page renvoie aux documents `docs/*.md`
 du depot ; cette section les resume pour un nouvel utilisateur sans les dupliquer.
@@ -30,4 +34,6 @@ first_run
 backend
 organisation
 tutorial
+windows_wsl2
+windows_native
 ```
