@@ -1,4 +1,4 @@
-# Genericite — decisions de design et limites restantes (audit 2026-06)
+# Genericite -- decisions de design et limites restantes (audit 2026-06)
 
 Reponse aux trois audits du 2026-06-09 (MEETING_AUDIT / HARDCODED_GENERIC_AUDIT /
 CPP_FULL_REPO_AUDIT) : ce document resume CE QUI A ETE CHANGE, POURQUOI sous cette forme, et ce qui
@@ -9,14 +9,14 @@ changements silencieux).
 ## 1. step_cfl / step_adaptive : politique de pas a bornes agregees
 
 - **Traits OPTIONNELS du contrat modele** (core/physical_model.hpp) :
-  `stability_speed(U, aux, dir)` (lambda* remplacant max_wave_speed dans la CFL — stabilite !=
+  `stability_speed(U, aux, dir)` (lambda* remplacant max_wave_speed dans la CFL -- stabilite !=
   precision, les solveurs de Riemann gardent max_wave_speed), `source_frequency(U, aux)` (mu en
   1/s, borne SANS h : la "deuxieme CFL" du meeting), `stability_dt(U, aux)` (pas admissible direct,
   cfl NON applique). Reductions device (max / max / min-via-inverse) dans spatial_operator.hpp,
   fermetures dans block_builder.hpp, forwarding conditionnel dans CompositeModel.
 - **Sous-pas effectif** : toutes les bornes s'appliquent a `stride*dt/substeps` (memes facteurs que
   la borne transport historique).
-- **Bornes GLOBALES** : `System::add_dt_bound(label, fn)` — une evaluation HOTE par pas (callback
+- **Bornes GLOBALES** : `System::add_dt_bound(label, fn)` -- une evaluation HOTE par pas (callback
   Python acceptable ICI, jamais par cellule), pour couplage multi-blocs / Schur / scheduler / rampe
   utilisateur. `step_adaptive` les honore aussi (clameur du macro-pas, conservative).
 - **Diagnostic** : `System::last_dt_bound()` nomme la borne ACTIVE du dernier step_cfl
@@ -66,7 +66,7 @@ changements silencieux).
   adc.Model(...) (factory C++ "magnetic"/"potential_magnetic" deja prete) et dans le chemin hybride
   (_native_to_brick, y compris CompositeSource via champs imbriques a.qom/b.qom).
 - **Bug latent corrige** : System::add_block (chemin natif) n'appelait JAMAIS
-  `ensure_aux_width(aux_comps<M>())` — un modele natif a n_aux=4 (brique magnetique) lisait B_z
+  `ensure_aux_width(aux_comps<M>())` -- un modele natif a n_aux=4 (brique magnetique) lisait B_z
   HORS BORNES d'un aux a 3 composantes (valeurs poubelle silencieuses). Le test quantitatif
   (residu == q*B*m exactement sur etat uniforme) verrouille le cablage.
 
@@ -130,7 +130,7 @@ CABLE (le rejet ne reste que la ou l'architecture n'est pas prete, et il est lis
 
 ## Vague 3 (solde : polaire, couplages, DSL HLLC/Jacobien, AMR Newton, Schur polaire/AMR, IO, multi-blocs)
 
-Confirmation au tableau (tuteur) : `dt <= dx/|lambda_max|  <=>  CFL = dt*lambda*/dx` — c'est
+Confirmation au tableau (tuteur) : `dt <= dx/|lambda_max|  <=>  CFL = dt*lambda*/dx` -- c'est
 exactement le trait `stability_speed` (lambda* = vitesse de STABILITE, distincte de max_wave_speed
 qui reste la vitesse du solveur de Riemann). La vague 3 etend cette politique partout ou elle
 manquait encore.
@@ -154,7 +154,7 @@ manquait encore.
    le NIVEAU GROSSIER des blocs d'entree. Constante = chemin historique, bit-identique.
 3. **DSL emet les hooks HLLC** : `m.enable_hllc()` genere contact_speed + hllc_star_state DEPUIS
    LES ROLES (Density/MomentumX/MomentumY[/Energy] requis ; les variables hors roles fluides sont
-   traitees en scalaires passifs advectes a la vitesse de contact — generalisation, pas une
+   traitees en scalaires passifs advectes a la vitesse de contact -- generalisation, pas une
    hypothese Euler). Exige 'p' declare (pression/pseudo-pression). CompiledModel.has_hllc ;
    CompositeModel forwarde contact_speed/hllc_star_state/roe_dissipation (concept-gates) ;
    riemann='hllc' accepte sur un 3-var NON Euler via la capability, rejet explicite sans elle.
@@ -322,11 +322,11 @@ est cable l'est reellement ; ce qui ne l'est pas est documente avec fichier:lign
    (cable aussi en polaire, dispatch_model_polar). LIMITE : depuis l'API publique les briques natives
    ne se composent qu'avec ces transports CANONIQUES ; un layout permute ne rencontre une brique native
    que via un chemin C++ direct (verrou : detection `requires` du binder + registre des roles).
-6. **IMEX-RK (fait, ARS(2,2,2))** : la famille IMEX-RK EXISTE desormais — `adc.IMEXRK(scheme="ars222")`
+6. **IMEX-RK (fait, ARS(2,2,2))** : la famille IMEX-RK EXISTE desormais -- `adc.IMEXRK(scheme="ars222")`
    cable le schema d'Ascher-Ruuth-Spiteri (1997), **ordre 2** (transport explicite L = -div F couple a
    la source raide implicite par un tableau a etages). gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma) ;
    tableaux stiffly accurate (b == derniere ligne de A) -> U^{n+1} = dernier etage. Cote C++ :
-   `detail::AdvanceImexRkArs222` (block_builder.hpp), avance PARALLELE a `AdvanceImex` — il REUTILISE
+   `detail::AdvanceImexRkArs222` (block_builder.hpp), avance PARALLELE a `AdvanceImex` -- il REUTILISE
    `BlockRhsEval<SourceFreeModel>` (transport), `backward_euler_source` (solve implicite local) et
    saxpy/lincomb, AUCUN nouveau kernel device ; la contribution de source d'etage 2 est recuperee par la
    relation de coherence `dt*gamma*S^(2) = U^(2) - base2` (pas de noyau de source en plus). PERIMETRE =
@@ -343,7 +343,7 @@ est cable l'est reellement ; ce qui ne l'est pas est documente avec fichier:lign
    CELLULE mu(U) en bytecode, reduite (MAX) a chaque pas (cf. sec. 2 ; AMR : borne sur le grossier).
    RESTE : la borne AMR ne voit pas une sous-estimation locale de mu sous un patch fin (evaluee sur
    le grossier, choix assume).
-8. **Backends** : DECISION ACTEE (ADC-63) — le defaut devient `backend="auto"` : PRODUCTION
+8. **Backends** : DECISION ACTEE (ADC-63) -- le defaut devient `backend="auto"` : PRODUCTION
    (loader natif zero-copie) quand la parite toolchain avec le module _adc est etablie (module
    chargeable + compilateur bake + signature d'en-tetes concordante), AOT sinon (defaut
    historique sur, sans module). Jamais muet : CompiledModel.backend dit ce qui a ete construit,
@@ -359,11 +359,11 @@ est cable l'est reellement ; ce qui ne l'est pas est documente avec fichier:lign
    sans X-macro lourde) ; la table ne porte donc que les chaines + n_ghost, pas l'aiguillage de type.
    Bug de divergence corrige au passage : les branches hllc / roe AMR ont gagne le cas weno5 (parite
    stricte avec System).
-9. **check_model sur CompiledModel** : FAIT (solde) — `CompiledModel.check_runtime(n=, state=)`
+9. **check_model sur CompiledModel** : FAIT (solde) -- `CompiledModel.check_runtime(n=, state=)`
    installe le .so dans un System EPHEMERE et delegue a System.check_model (etat/residu finis,
    positivite par roles, round-trip des conversions) ; etat de fumee par ROLES par defaut,
    state= pour un regime precis. Reste : les FORMULES d'un .so sans son dsl.Model d'origine ne
-   sont pas re-derivables (le source symbolique n'est pas embarque dans le .so — assume).
+   sont pas re-derivables (le source symbolique n'est pas embarque dans le .so -- assume).
 10. **IO** : System `write` / `checkpoint` / `restart` sont **MULTI-RANGS** (vague 4) -- gather GLOBAL
     collectif (all_reduce_sum_inplace) + ecriture rang-0 + scatter MPI-safe (System MONO-BOX : tout
     l'etat vit sur le rang 0, gather exact ; bit-identique au mono-rang). **HDF5 PARALLELE par
@@ -379,21 +379,21 @@ est cable l'est reellement ; ce qui ne l'est pas est documente avec fichier:lign
     AMR** (un groupe/dataset par niveau + boites, ADC-65), **checkpoint redemarrable HDF5 parallele**
     (le checkpoint reste npz gather-rang-0 ; `checkpoint(parallel=True)` leve), **checkpoint AMR**
     (rejet explicite, ABI des etats fins par patch manquante), champs externes (B_z dans le checkpoint).
-11. **Roe cote DSL** : FAIT (solde) — DEUX voies complementaires pour le hook `roe_dissipation`
+11. **Roe cote DSL** : FAIT (solde) -- DEUX voies complementaires pour le hook `roe_dissipation`
     (trait `HasRoeDissipation`, le coeur faisant F = 1/2(FL+FR) - 1/2 d).
-    - **Voie ROLES** — `m.enable_roe()` emet `roe_dissipation` depuis les ROLES : avec Energy =
+    - **Voie ROLES** -- `m.enable_roe()` emet `roe_dissipation` depuis les ROLES : avec Energy =
       transcription exacte de l'algebre canonique Euler du coeur (parite BIT-EXACTE constatee sur
       8 pas), sans Energy = meme decomposition avec c = sqrt(p/rho) moyenne a la Roe, composantes
       hors roles fluides = scalaires passifs sur l'onde entropique (test_dsl_roe : cisaillement
       stationnaire preserve exactement en 3-var).
-    - **Voie FOURNIE** — `m.roe_dissipation(x=rows_x, y=rows_y)` : pour un modele ARBITRAIRE (hors
+    - **Voie FOURNIE** -- `m.roe_dissipation(x=rows_x, y=rows_y)` : pour un modele ARBITRAIRE (hors
       familles a roles fluides), l'utilisateur fournit lui-meme les n lignes d_i de son
       eigenstructure (meme esprit que `m.source_jacobian`), ecrites en `dsl.left(...)`/`dsl.right(...)`
       des deux etats UL/UR (une variable nue, sans marqueur, leve). L'**autodiff symbolique** du DSL
       assiste cette ecriture : `dsl.diff(expr, var)` derive l'arbre Expr (linearite, produit,
       quotient, chaine pow/sqrt ; primitives developpees par leur definition ; noeud inconnu ->
       NotImplementedError), et `m.flux_jacobian(dir)` en deduit le Jacobien de flux A = dF/dU. La
-      DIAGONALISATION symbolique automatique de A (eigenstructure generale) reste hors perimetre —
+      DIAGONALISATION symbolique automatique de A (eigenstructure generale) reste hors perimetre --
       hors de portee d'une emission generique honnete : la voie fournie la delegue a l'utilisateur.
 
     Les deux voies sont EXCLUSIVES (un seul fournisseur du hook ; les declarer ensemble leve) et

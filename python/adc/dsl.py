@@ -804,7 +804,7 @@ def sqrt(x):
 
 
 class Abs(Expr):
-    """Valeur absolue |a| (p.ex. |lambda_k| d'une dissipation de Roe). Emise std::fabs au codegen
+    """Valeur absolue ``|a|`` (p.ex. ``|lambda_k|`` d'une dissipation de Roe). Emise std::fabs au codegen
     (egale au ternaire a<0?-a:a hors -0.0). Non derivable par dsl.diff (pas de noeud signe)."""
     def __init__(self, a): self.a = a
     def eval(self, env): return np.abs(self.a.eval(env))
@@ -1320,7 +1320,7 @@ class HyperbolicModel:
         Prioritaire sur le chemin historique (primitive 'p' -> wave_speeds = min/max des
         eigenvalues) quand les deux existent. SANS appel : emission strictement historique.
         Si set_eigenvalues n'est PAS appele, max_wave_speed (Rusanov / CFL) est derive de
-        max(|smin|, |smax|) sur les deux expressions de la direction."""
+        ``max(|smin|, |smax|)`` sur les deux expressions de la direction."""
         x, y = tuple(x), tuple(y)
         if len(x) != 2 or len(y) != 2:
             raise ValueError("set_wave_speeds : attendu x=(smin, smax) et y=(smin, smax) "
@@ -1336,7 +1336,7 @@ class HyperbolicModel:
         de flux A = dF/dU, calcules NUMERIQUEMENT par cellule (adc::real_eig_minmax, QR de Francis
         sur tampon pile, repli Gershgorin sur non-convergence = borne externe sure). Emet
         ``wave_speeds(U, aux, dir, smin, smax)`` (gate HLL du coeur) et, sans set_eigenvalues,
-        ``max_wave_speed`` = max(|smin|, |smax|) sur les memes blocs.
+        ``max_wave_speed`` = ``max(|smin|, |smax|)`` sur les memes blocs.
 
         @p x, @p y : matrices n_vars x n_vars d'expressions dA[i][j] = dF_dir[i]/dU[j]. None
         (defaut) = AUTODIFF du flux declare via flux_jacobian(dir) (dsl.diff, primitives
@@ -1346,7 +1346,7 @@ class HyperbolicModel:
 
         @p eig : "numeric" (defaut) = entrees du jacobien emises en formules, valeurs propres par
         bloc a l'execution ; "fd" = jacobien construit PAR COLONNES aux differences finies du flux
-        COMPILE ((flux(U + eps e_k) - flux(U))/eps, eps = 1e-6 |U[0]| + 1e-30, miroir de la
+        COMPILE ((flux(U + eps e_k) - flux(U))/eps, ``eps = 1e-6 |U[0]| + 1e-30``, miroir de la
         branche flagsym != 1 du MATLAB de reference) -- bring-up/debug generique, jamais
         production (troncature O(eps)).
 
@@ -1423,7 +1423,7 @@ class HyperbolicModel:
 
     def stability_speed(self, expr):
         """Vitesse de STABILITE lambda* (expression des cons / prims / aux) : pilote la CFL du bloc
-        a la place de max(|eigenvalues|). Emise comme ``stability_speed(U, aux, dir)`` (trait C++
+        a la place de ``max(|eigenvalues|)``. Emise comme ``stability_speed(U, aux, dir)`` (trait C++
         ``HasStabilitySpeed``) : System::step_cfl l'utilise alors pour la borne de transport
         dt <= cfl*h/lambda*, tandis que les solveurs de Riemann continuent de lire max_wave_speed
         (stabilite != precision). SANS appel, le FALLBACK est strictement l'historique :
@@ -1475,13 +1475,13 @@ class HyperbolicModel:
 
     def enable_roe(self):
         """Emet la CAPABILITY ROE (solde de l'audit, GENERICITY_2026-06.md point 11) :
-        ``roe_dissipation(UL, AL, UR, AR, dir)`` = |A_roe| (UR - UL) GENEREE depuis les ROLES du
+        ``roe_dissipation(UL, AL, UR, AR, dir)`` = ``|A_roe| (UR - UL)`` GENEREE depuis les ROLES du
         bloc -- le solveur Roe-like du coeur (trait C++ HasRoeDissipation, F = 1/2(FL+FR) - 1/2 d)
         devient disponible pour CE modele, MEME hors Euler 4 variables :
 
         - roles Density/MomentumX/MomentumY + Energy : algebre de Roe du gaz parfait, TRANSCRIPTION
           exacte du chemin canonique C++ (moyennes ponderees sqrt(rho), gamma-1 deduit de
-          p/(E - 1/2 rho |v|^2), correction d'entropie de Harten sur les ondes acoustiques) ;
+          ``p/(E - 1/2 rho |v|^2)``, correction d'entropie de Harten sur les ondes acoustiques) ;
         - roles Density/MomentumX/MomentumY SANS Energy (isotherme / pseudo-pression) : meme
           decomposition sans la ligne d'energie, vitesse du son LOCALE c = sqrt(p/rho) moyennee
           a la Roe (generalisation standard hors gaz parfait) ;
@@ -1606,7 +1606,7 @@ class HyperbolicModel:
 
     def max_wave_speed(self, U, aux, dir):
         """max_k max_cellules ``|lambda_k|`` : borne de Rusanov / CFL. Source : eigenvalues
-        (historique) ; SANS set_eigenvalues, max(|smin|, |smax|) des vitesses signees explicites
+        (historique) ; SANS set_eigenvalues, ``max(|smin|, |smax|)`` des vitesses signees explicites
         (set_wave_speeds), miroir exact de l'emission C++."""
         env = self._env(U, aux)
         key = "x" if dir == 0 else "y"
@@ -1752,14 +1752,14 @@ class HyperbolicModel:
         - source finie ;
         - elliptic_rhs fini ;
         - valeurs propres finies et reelles ; max_wave_speed fini et >= 0 ;
-        - coherence wave_speeds <-> max_wave_speed : max(|lambda_min|, |lambda_max|) <= mws ;
+        - coherence wave_speeds <-> max_wave_speed : ``max(|lambda_min|, |lambda_max|) <= mws`` ;
         - round-trip to_conservative(to_primitive(U)) ~= U (si prim_state + cons_from declares) ;
         - positivite des composantes a role Density (et de la primitive 'p' si declaree) sur les
           echantillons (qui sont generes positifs pour ces roles).
 
         @p samples : tableau (n_vars, N) d'etats conservatifs a tester ; None -> N = n_samples etats
         aleatoires (seed fixe, reproductible) : composantes a role Density dans [0.1, 2], les autres
-        dans [-1, 1] ; une composante a role Energy recoit 1 + |cinetique| pour rester physique.
+        dans [-1, 1] ; une composante a role Energy recoit ``1 + |cinetique|`` pour rester physique.
         @p aux : dict nom -> valeur(s) des champs auxiliaires (defaut : zeros).
         @return dict {"ok": bool, "failures": [str], "n_samples": N}. raise_on_error=True (defaut)
         leve ValueError listant les echecs. PRE-COMPILATION : verifie les FORMULES (le .so compile
@@ -3480,7 +3480,7 @@ class Model:
         smax_y). Emet ``wave_speeds(U, aux, dir, smin, smax)`` sur la brique SANS exiger de
         primitive 'p' : riemann='hll' devient disponible pour un modele sans pression (systeme de
         moments, isotherme...). Prioritaire sur le chemin historique (eigenvalues + 'p') ; si
-        eigenvalues n'est pas declare, max_wave_speed (Rusanov / CFL) derive de max(|smin|, |smax|).
+        eigenvalues n'est pas declare, max_wave_speed (Rusanov / CFL) derive de ``max(|smin|, |smax|)``.
         Delegue a set_wave_speeds ; cf. HyperbolicModel.set_wave_speeds."""
         self._m.set_wave_speeds(x, y)
 
@@ -3542,7 +3542,7 @@ class Model:
         self._m.enable_hllc()
 
     def enable_roe(self):
-        """Emet la capability ROE (roe_dissipation = |A_roe| dU generee depuis les ROLES +
+        """Emet la capability ROE (roe_dissipation = ``|A_roe| dU`` generee depuis les ROLES +
         primitive 'p') : riemann='roe' devient disponible pour ce modele MEME hors Euler 4
         variables (sans Energy : c = sqrt(p/rho) moyennee a la Roe ; composantes hors roles
         fluides = scalaires passifs sur l'onde entropique). Delegue a HyperbolicModel.enable_roe."""

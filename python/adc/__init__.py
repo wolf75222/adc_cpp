@@ -320,6 +320,7 @@ class PolarMesh:
     polaire assemble_rhs_polar + Poisson polaire + aux derive en base locale (e_r, e_theta)).
     adc.System(mesh=adc.PolarMesh(...)) construit un anneau global et avance dessus. TROIS niveaux a
     ne pas confondre :
+
     - transport polaire : ExB scalaire ET fluide isotherme (IsothermalFluxPolar) ; flux Riemann
       'rusanov' (defaut, tout transport) ET 'hll' (fluide isotherme seulement -- gate model.wave_speeds,
       identique au cartesien ; l'ExB scalaire ne fournit pas de wave_speeds -> 'hll' leve un rejet
@@ -333,6 +334,7 @@ class PolarMesh:
     (chaque boite couvre tout le rayon et une bande azimutale ; theta_boxes doit DIVISER ntheta et
     rester <= ntheta) et le TRANSPORT polaire (assemble_rhs_polar + fill_ghosts collectif) tourne
     multi-box. MATRICE des capacites multi-box :
+
     - TRANSPORT polaire (System transport, get/set state, eval_rhs, density) : multi-box OK
       (assemblage par boite + halos collectifs ; l'etat global est reconstruit a la lecture) ;
     - Poisson polaire DIRECT (PolarPoissonSolver) : MONO-BOX ONLY. Un System a theta_boxes>1 qui
@@ -341,6 +343,7 @@ class PolarMesh:
       une box) : utiliser theta_boxes=1 OU l'etage Schur tensoriel ;
     - etage Schur tensoriel polaire (adc.Split + adc.CondensedSchur) : multi-box (solveur C++
       multi-box ; le decoupage theta est desormais pilotable par theta_boxes).
+
     Mono-rang (le Poisson polaire direct refuse MPI). Pas de couplage cartesien<->polaire (anneau
     global). Bornes de pas optionnelles (stability_speed/stability_dt/source_frequency) NON cablees
     sur le chemin polaire (transport max_wave_speed seulement). Cf. docs/GENERICITY_2026-06.md
@@ -1900,13 +1903,13 @@ class System:
           CellData par variable conservative de chaque bloc + le potentiel phi.
         - ``format="npz"`` : np.savez compresse (tout backend / toute geometrie) -- etats par bloc,
           noms/roles, phi, t, macro_step, grille.
-        @p step : suffixe numerote (path_000123.vti) ; None = path brut + extension.
-        @p fields : sous-ensemble de blocs a ecrire (None = tous).
-        @p parallel : ecriture HDF5 PARALLELE par hyperslabs (opt-in, format='hdf5' SEULEMENT). Defaut
+        - @p step : suffixe numerote (path_000123.vti) ; None = path brut + extension.
+        - @p fields : sous-ensemble de blocs a ecrire (None = tous).
+        - @p parallel : ecriture HDF5 PARALLELE par hyperslabs (opt-in, format='hdf5' SEULEMENT). Defaut
           False = chemin gather rang-0 ci-dessous, STRICTEMENT inchange. True = chaque rang ecrit SES
           boites dans un fichier unique via h5py(mpio) -- exige h5py compile MPI + mpi4py (sinon erreur
           CLAIRE avec remede, jamais d'ecriture silencieuse degradee). Cf. _write_hdf5_parallel.
-        @return le chemin ecrit.
+        - @return le chemin ecrit.
 
         MULTI-RANGS (MPI np>1) : les champs sont rassembles via les accesseurs GLOBAUX collectifs
         (state_global / potential_global -- chaque rang DOIT donc appeler write), puis SEUL le rang 0
