@@ -33,15 +33,18 @@ namespace adc {
 
 class PoissonFFTSolver {
  public:
+  /// @p spectral : symbole du Laplacien (false = stencil 5-points discret, defaut bit-identique ;
+  /// true = symbole continu -(kx^2+ky^2), fidelite aux references spectrales -- cf. PoissonFFT).
   PoissonFFTSolver(const Geometry& geom, const BoxArray& ba,
-                   const BCRec& = BCRec{}, std::function<bool(Real, Real)> = {})
+                   const BCRec& = BCRec{}, std::function<bool(Real, Real)> = {},
+                   bool spectral = false)
       : geom_(geom),
         dm_(ba.size(), n_ranks()),
         phi_(ba, dm_, 1, 1),
         rhs_(ba, dm_, 1, 0),
         res_(ba, dm_, 1, 0),
         fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
-             geom.yhi - geom.ylo) {
+             geom.yhi - geom.ylo, spectral) {
     // Garde-fou DUR (actif en Release, NDEBUG ne le retire PAS) : ce solveur direct est mono-rang /
     // boite unique. Sous DistributionMapping de systeme a n_ranks()>1, certains rangs n'ont aucune
     // box locale (local_size()==0) et solve() dereferencerait fab(0) inexistant -> SIGSEGV. L'ancien
@@ -76,6 +79,12 @@ class PoissonFFTSolver {
     for (int j = 0; j < Ny; ++j)
       for (int i = 0; i < Nx; ++i)
         p(v.lo[0] + i, v.lo[1] + j) = phil[static_cast<std::size_t>(j) * Nx + i];
+    // GHOSTS de phi : la derivation de l'aux (grad phi centre, solve_fields) lit les voisins
+    // i±1/j±1, donc les ghosts du bord de domaine. GeometricMG les remplit en lissant ; ce
+    // solveur direct ecrit SEULEMENT les cellules valides -> sans cet echange, le gradient du
+    // bord lirait des ghosts perimes (bug latent revele par une source electrique branchee sur
+    // 'fft' : Ex faux sur l'anneau de bord). Periodique pur par construction (gardes du ctor).
+    fill_boundary(phi_, geom_.domain, Periodicity{true, true});
   }
 
   // Residu discret ||lap(phi) - rhs|| (~ arrondi pour ce solveur direct).
