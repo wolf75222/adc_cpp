@@ -496,7 +496,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                        bool evolve, int stride, const std::vector<std::string>& implicit_vars,
                        const std::vector<std::string>& implicit_roles,
                        const NewtonOptions& newton, bool newton_diagnostics,
-                       double positivity_floor) {
+                       double positivity_floor, bool wave_speed_cache) {
   Impl* P = p_.get();
   if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
@@ -533,6 +533,22 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   const bool imexrk = (time == "imexrk_ars222");
   const bool imex = (time == "imex" || imexrk);  // both go through the implicit source step
   const bool recon_prim = (recon == "primitive");
+  // Wave speed cache (opt-in): only engages for the HLL flux and the explicit advance. Requesting it
+  // elsewhere would be SILENTLY without effect -> explicit error (no silent ignore). The polar path has
+  // its own factory (make_block_polar) without this cache.
+  if (wave_speed_cache) {
+    if (riemann != "hll")
+      throw std::runtime_error("System::add_block : wave_speed_cache requires riemann='hll' (the wave "
+                               "speed cache only applies to the HLL flux ; received riemann='" +
+                               riemann + "')");
+    if (imex)
+      throw std::runtime_error("System::add_block : wave_speed_cache not supported with time='" + time +
+                               "' (wired on the explicit advance ; use time "
+                               "'explicit'/'ssprk2'/'ssprk3'/'euler')");
+    if (P->polar_)
+      throw std::runtime_error("System::add_block : wave_speed_cache not supported on the polar "
+                               "geometry (ring)");
+  }
   const std::string method = imexrk ? std::string("imexrk_ars222")
                                      : ((time == "ssprk3") ? std::string("ssprk3")
                                         : (time == "euler") ? std::string("euler")
@@ -641,7 +657,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     // the Impl members). They stay INERT as long as the System is not put in Staircase /
     // CutCell mode (cf. step()): built at add time, selected only on opt-in.
     clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components, nopts,
-                     nreport, static_cast<Real>(positivity_floor));
+                     nreport, static_cast<Real>(positivity_floor), wave_speed_cache);
     max_speed = make_max_speed(m, ctx);  // stability_speed (trait) or max_wave_speed (fallback)
     add_poisson_rhs = make_poisson_rhs(m);
     // Optional step bounds (HasSourceFrequency / HasStabilityDt traits): EMPTY functions if

@@ -185,7 +185,7 @@ PYBIND11_MODULE(_adc, m) {
               const std::vector<std::string>& implicit_roles, int newton_max_iters,
               double newton_rel_tol, double newton_abs_tol, double newton_fd_eps,
               bool newton_diagnostics, double newton_damping, const std::string& newton_fail_policy,
-              double positivity_floor) {
+              double positivity_floor, bool wave_speed_cache) {
              NewtonOptions newton;
              newton.max_iters = newton_max_iters;
              newton.rel_tol = static_cast<Real>(newton_rel_tol);
@@ -194,7 +194,8 @@ PYBIND11_MODULE(_adc, m) {
              newton.damping = static_cast<Real>(newton_damping);
              newton.fail_policy = newton_fail_policy_from_string(newton_fail_policy, "System::add_block");
              s.add_block(name, model, limiter, riemann, recon, time, substeps, evolve, stride,
-                         implicit_vars, implicit_roles, newton, newton_diagnostics, positivity_floor);
+                         implicit_vars, implicit_roles, newton, newton_diagnostics, positivity_floor,
+                         wave_speed_cache);
            },
            py::arg("name"), py::arg("model"),
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
@@ -215,7 +216,11 @@ PYBIND11_MODULE(_adc, m) {
            // Zhang-Shu POSITIVITY limiter (ADC-76): density floor of the reconstructed face states
            // (conservative scaling toward the cell mean). 0 (default) = inactive,
            // bit-identical path. Requires a model exposing the Density role.
-           py::arg("positivity_floor") = 0.0)
+           py::arg("positivity_floor") = 0.0,
+           // HLL wave speed cache (opt-in): evaluates model.wave_speeds once per cell instead of per
+           // face. riemann='hll' + explicit only (explicit error otherwise). NoSlope + conservative
+           // recon -> bit-identical to the per-face path. False (default) = path unchanged.
+           py::arg("wave_speed_cache") = false)
       // Newton report (IMEX diagnostics OPT-IN): dict {enabled, converged, max_residual,
       // max_iters_used, n_failed, failed_cell, failed_component}, aggregated over the substeps of the
       // LAST advance of the block. failed_cell = (i, j) of ONE faulty cell or None.

@@ -85,6 +85,30 @@ ADC_HD inline void hll_speeds(const Model& m, const typename Model::State& UL,
   sR = hL > hR ? hL : hR;
 }
 
+/// hll_flux_with_speeds: HLL flux from ALREADY estimated signal speeds (sL, sR).
+///
+/// Body of HLLFlux AFTER hll_speeds: same supersonic branches (FL if sL >= 0, FR if sR <= 0), same
+/// HLL combination. Extracted as a free function for the OPT-IN path that pre-computes the wave speeds
+/// PER CELL (cache) then bounds each face by min/max of the two adjacent cells, instead of recalling
+/// model.wave_speeds per face (cf. assemble_rhs_hll_cached). For reconstructed states equal to the
+/// cell values (NoSlope) this path is ALGEBRAICALLY identical to HLLFlux. ADC_HD.
+template <class Model>
+ADC_HD inline typename Model::State hll_flux_with_speeds(const Model& m,
+                                                         const typename Model::State& UL,
+                                                         const Aux& AL,
+                                                         const typename Model::State& UR,
+                                                         const Aux& AR, int dir, Real sL, Real sR) {
+  const auto FL = m.flux(UL, AL, dir);
+  const auto FR = m.flux(UR, AR, dir);
+  if (sL >= 0) return FL;
+  if (sR <= 0) return FR;
+  typename Model::State F;
+  const Real inv = Real(1) / (sR - sL);
+  for (int c = 0; c < Model::n_vars; ++c)
+    F[c] = (sR * FL[c] - sL * FR[c] + sL * sR * (UR[c] - UL[c])) * inv;
+  return F;
+}
+
 /// HLLFlux (Harten-Lax-van Leer): 2 signal speeds, less diffusive than Rusanov.
 ///
 /// Requires model.wave_speeds (signed speeds sL, sR). Less diffusive than Rusanov on shocks and
@@ -99,15 +123,7 @@ struct HLLFlux {
                                           const Aux& AR, int dir) const {
     Real sL, sR;
     hll_speeds(m, UL, AL, UR, AR, dir, sL, sR);
-    const auto FL = m.flux(UL, AL, dir);
-    const auto FR = m.flux(UR, AR, dir);
-    if (sL >= 0) return FL;
-    if (sR <= 0) return FR;
-    typename Model::State F;
-    const Real inv = Real(1) / (sR - sL);
-    for (int c = 0; c < Model::n_vars; ++c)
-      F[c] = (sR * FL[c] - sL * FR[c] + sL * sR * (UR[c] - UL[c])) * inv;
-    return F;
+    return hll_flux_with_speeds(m, UL, AL, UR, AR, dir, sL, sR);
   }
 };
 

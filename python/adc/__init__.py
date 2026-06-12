@@ -763,11 +763,18 @@ class Spatial:
       so that rho_face >= floor. 0/None (default) = inactive, bit-identical path.
       Motivated by the top-hat jump of contrast 1e6 in the Hoffart diocotron, where WENO5 reconstructs a
       negative density -> NaN. Requires a model exposing the Density role.
+    - ``wave_speed_cache``: flux='hll' + explicit time ONLY. Pre-computes model.wave_speeds ONCE per
+      cell and direction (instead of per face) then bounds each face by min/max of the two neighbor
+      cells. Net gain when wave_speeds is expensive (moment hierarchy). With limiter='none' +
+      recon='conservative' it is BIT-IDENTICAL to the per-face path; with a 2nd-order+ limiter it is a
+      Davis bound on the cell values (different result, opt-in assumed). False (default) = per-face path
+      unchanged. Wired on the FULL cartesian advance only: refused if flux != 'hll', IMEX time, polar
+      geometry, or a staircase/cutcell disc transport mode is active (set_disc_domain / set_geometry_mode).
     """
 
     def __init__(self, limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
                  minmod=False, vanleer=False, weno5=False, primitive=False,
-                 positivity_floor=None):
+                 positivity_floor=None, wave_speed_cache=False):
         if none:
             limiter = "none"
         elif minmod:
@@ -786,10 +793,11 @@ class Spatial:
             raise ValueError("Spatial: positivity_floor >= 0 (0/None = inactive; received %r)"
                              % (positivity_floor,))
         self.positivity_floor = pf
+        self.wave_speed_cache = bool(wave_speed_cache)
 
 
 def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative",
-                 positivity_floor=None):
+                 positivity_floor=None, wave_speed_cache=False):
     """Finite-volume scheme (stable surface Phase A): remaps onto the existing Spatial object.
 
     The NUMERICAL Riemann flux is named ``riemann`` (NOT ``flux``, reserved for the PHYSICAL flux of the
@@ -802,9 +810,10 @@ def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative",
 
     cf. docs/DSL_MODEL_DESIGN.md section 6. Returns a Spatial (consumed as-is by add_block /
     add_equation). adc.Spatial stays available identically. ``positivity_floor`` (ADC-76):
-    density floor of the face states (Zhang-Shu limiter), None/0 = inactive."""
+    density floor of the face states (Zhang-Shu limiter), None/0 = inactive.
+    ``wave_speed_cache``: HLL wave speed cache (riemann='hll' + explicit), cf. Spatial."""
     return Spatial(limiter=limiter, flux=riemann, recon=variables,
-                   positivity_floor=positivity_floor)
+                   positivity_floor=positivity_floor, wave_speed_cache=wave_speed_cache)
 
 
 class Explicit:
@@ -1410,7 +1419,8 @@ class System:
                           getattr(time, "newton_diagnostics", False),
                           getattr(time, "newton_damping", 1.0),
                           getattr(time, "newton_fail_policy", "none"),
-                          getattr(spatial, "positivity_floor", 0.0))
+                          getattr(spatial, "positivity_floor", 0.0),
+                          getattr(spatial, "wave_speed_cache", False))
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
                      evolve=True, stride=None):
@@ -1475,7 +1485,8 @@ class System:
                               getattr(time, "newton_diagnostics", False),
                           getattr(time, "newton_damping", 1.0),
                           getattr(time, "newton_fail_policy", "none"),
-                          getattr(spatial, "positivity_floor", 0.0))
+                          getattr(spatial, "positivity_floor", 0.0),
+                          getattr(spatial, "wave_speed_cache", False))
             return
 
         # Implicit mask (IMEX): only the composed native path (ModelSpec -> add_block) wires it. The
@@ -2481,6 +2492,12 @@ class AmrSystem:
             raise ValueError(
                 "AmrSystem.add_block : positivity_floor not supported on the AMR path (separate "
                 "work item) ; remove positivity_floor or use the uniform System.")
+        # wave_speed_cache (ADC-199) is NOT wired on the AMR path (AmrSystem::add_block does not
+        # transport it) : explicit rejection rather than a silently ignored cache.
+        if getattr(spatial, "wave_speed_cache", False):
+            raise ValueError(
+                "AmrSystem.add_block : wave_speed_cache not supported on the AMR path (separate "
+                "work item) ; remove wave_speed_cache or use the uniform System.")
         # We thread substeps/stride (multirate, capstone iv), the partial IMEX mask, the Newton OPTIONS
         # AND newton_diagnostics (wave 3, settle). Resolved / validated on the C++ side (AmrSystem::add_block)
         # against the block names/roles : empty -> full backward-Euler. The options are wired in single-block

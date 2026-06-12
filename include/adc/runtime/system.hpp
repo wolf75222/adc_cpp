@@ -132,6 +132,15 @@ class System {
   ///                 aggregated over the substeps of each advance and available via newton_report(name).
   ///                 OPT-IN: false (default) = historical path with no extra cost. Stays
   ///                 flat (a separate bool, outside the homogeneous family of convergence options).
+  /// @param wave_speed_cache riemann='hll' + explicit ONLY: pre-computes model.wave_speeds ONCE per cell
+  ///                 and direction in a scratch, then bounds each face by min/max of the two neighbor
+  ///                 cells, instead of recalling wave_speeds per face. Net gain when wave_speeds is
+  ///                 expensive (moment hierarchy). With recon='conservative' + limiter 'none' it is
+  ///                 BIT-IDENTICAL to the per-face path; with a 2nd-order+ limiter it is a Davis bound on
+  ///                 the cell values (different result). false (default) = per-face path unchanged. Wired
+  ///                 on the FULL cartesian advance only: refused if riemann != 'hll', time IMEX, polar
+  ///                 geometry, or a staircase/cutcell disc transport mode is active (explicit error,
+  ///                 never a silent ignore).
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
@@ -141,7 +150,7 @@ class System {
                  const std::vector<std::string>& implicit_vars = {},
                  const std::vector<std::string>& implicit_roles = {},
                  const NewtonOptions& newton = {}, bool newton_diagnostics = false,
-                 double positivity_floor = 0.0);
+                 double positivity_floor = 0.0, bool wave_speed_cache = false);
 
   /// Report of the implicit source Newton (IMEX) of a block, AGGREGATED over the substeps of the
   /// LAST advance of the block. Only exists if the block was added with newton_diagnostics=true
