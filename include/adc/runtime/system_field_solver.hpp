@@ -229,7 +229,8 @@ class SystemFieldSolver {
   }
   /// Construit PARESSEUSEMENT le solveur elliptique cartesien (ell_) selon p_solver : GeometricMG
   /// (porte eps(x)/aniso/kappa s'ils sont fournis) ou PoissonFFTSolver (coefficient constant, mono-rang,
-  /// sans paroi). No-op si ell_ existe deja. @throws std::runtime_error sur rhs/solver inconnu ou
+  /// sans paroi ; kind 'fft' = stencil discret, 'fft_spectral' = symbole continu spectral).
+  /// No-op si ell_ existe deja. @throws std::runtime_error sur rhs/solver inconnu ou
   /// combinaison non supportee (fft + MPI/paroi/eps variable/kappa ; kappa + eps constante != 1).
   void ensure_elliptic() {
     if (ell_) return;
@@ -244,7 +245,7 @@ class SystemFieldSolver {
                                "briques elliptiques par bloc)");
     const BCRec pbc = poisson_bc();
     std::function<bool(Real, Real)> active = wall_active();
-    if (p_solver == "fft") {
+    if (p_solver == "fft" || p_solver == "fft_spectral") {
       // FFT directe mono-rang : sous MPI (n_ranks>1) System repartit UNE box en round-robin, donc
       // des rangs ont local_size()==0 et PoissonFFTSolver::solve() dereferencerait fab(0) inexistant
       // (SIGSEGV, l'ancien assert disparaissait en Release). On REFUSE explicitement ici, sur TOUS
@@ -257,17 +258,20 @@ class SystemFieldSolver {
             "solveur fft non supporte en MPI (n_ranks>1) : utiliser geometric_mg ou le solveur fft "
             "distribue");
       if (active)
-        throw std::runtime_error("System : solver 'fft' incompatible avec une paroi -> 'geometric_mg'");
+        throw std::runtime_error("System : solver '" + p_solver + "' incompatible avec une paroi -> 'geometric_mg'");
       if (has_eps_field_)
-        throw std::runtime_error("System : solver 'fft' a coefficient CONSTANT, incompatible avec un "
+        throw std::runtime_error("System : solver '" + p_solver + "' a coefficient CONSTANT, incompatible avec un "
                                  "champ eps(x) variable -> utiliser solver='geometric_mg'");
       if (has_eps_xy_field_)
-        throw std::runtime_error("System : solver 'fft' a coefficient CONSTANT, incompatible avec une "
+        throw std::runtime_error("System : solver '" + p_solver + "' a coefficient CONSTANT, incompatible avec une "
                                  "permittivite ANISOTROPE eps_x(x), eps_y(x) -> utiliser solver='geometric_mg'");
       if (has_kappa_field_)
-        throw std::runtime_error("System : solver 'fft' (Poisson pur) incompatible avec un terme de "
+        throw std::runtime_error("System : solver '" + p_solver + "' (Poisson pur) incompatible avec un terme de "
                                  "reaction kappa(x) -> utiliser solver='geometric_mg'");
-      ell_.emplace(std::in_place_type<PoissonFFTSolver>, owner_->geom, owner_->ba, pbc, active);
+      // 'fft_spectral' : meme plomberie, symbole CONTINU -(kx^2+ky^2) (fidelite aux references
+      // spectrales, ex. poisson_fft.m de RIEMOM2D) ; 'fft' garde le stencil discret (bit-identique).
+      ell_.emplace(std::in_place_type<PoissonFFTSolver>, owner_->geom, owner_->ba, pbc, active,
+                   p_solver == "fft_spectral");
     } else if (p_solver == "geometric_mg") {
       ell_.emplace(std::in_place_type<GeometricMG>, owner_->geom, owner_->ba, pbc, std::move(active));
       if (has_eps_field_) apply_epsilon_field();    // operateur div(eps grad phi) a eps(x) variable
@@ -281,7 +285,7 @@ class SystemFieldSolver {
                                  "non supporte ; utiliser eps = 1 ou un champ eps(x) (set_epsilon_field)");
     } else {
       throw std::runtime_error("System::set_poisson : solver '" + p_solver +
-                               "' inconnu (geometric_mg|fft)");
+                               "' inconnu (geometric_mg|fft|fft_spectral)");
     }
   }
   /// Installe le champ eps(x) (n*n row-major) sur le GeometricMG : l'operateur passe a

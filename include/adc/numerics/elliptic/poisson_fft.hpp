@@ -4,7 +4,7 @@
 
 #include <cmath>
 #include <complex>
-#include <numbers>  // std::numbers::pi (portable ; std::numbers::pi n'est pas standard, absent sous MSVC)
+#include <numbers>  // std::numbers::pi (M_PI n est pas standard, absent sous MSVC)
 #include <utility>
 #include <vector>
 
@@ -27,7 +27,8 @@
 //
 // Valeur propre du stencil 5-points sous la DFT :
 //   lambda(kx,ky) = (2cos(2*pi*kx/Nx) - 2)/dx^2 + (2cos(2*pi*ky/Ny) - 2)/dy^2
-// (mode kx=ky=0 : lambda=0 -> phi_hat=0, moyenne nulle). Comme on emploie la
+// (mode kx=ky=0 : lambda=0 -> phi_hat=0, moyenne nulle). Variante spectral=true :
+// symbole CONTINU -(kx^2+ky^2) (frequences signees), cf. doc du constructeur. Comme on emploie la
 // valeur propre DISCRETE, la solution satisfait le Laplacien 5-points a
 // l'arrondi : coherent avec les gradients par differences finies du transport.
 
@@ -91,7 +92,13 @@ inline void fft1d(cplx* a, int n, bool inv) {
 
 class PoissonFFT {
  public:
-  PoissonFFT(int Nx, int Ny, double Lx, double Ly)
+  /// @p spectral : false (defaut) = valeur propre du stencil 5-points DISCRET (coherent avec les
+  /// gradients du transport, bit-identique au comportement historique). true = symbole CONTINU
+  /// lambda(k) = -(kx^2 + ky^2) avec frequences signees k in [0..N/2-1, -N/2..-1] * (2pi/L) --
+  /// exactement la convention des solveurs spectraux de reference (ex. poisson_fft.m de RIEMOM2D) ;
+  /// la solution est alors le Poisson SPECTRAL (exact sur les sinusoides), qui differe du stencil
+  /// discret par O(h^2).
+  PoissonFFT(int Nx, int Ny, double Lx, double Ly, bool spectral = false)
       : Nx_(Nx),
         Ny_(Ny),
         np_(n_ranks()),
@@ -99,7 +106,8 @@ class PoissonFFT {
         nyl_(Ny / np_),
         nxl_(Nx / np_),
         dx_(Lx / Nx),
-        dy_(Ly / Ny) {}
+        dy_(Ly / Ny),
+        spectral_(spectral) {}
 
   int ny_local() const { return nyl_; }  // lignes (y) possedees par ce rang
   int nx() const { return Nx_; }
@@ -119,10 +127,15 @@ class PoissonFFT {
 
     for (int il = 0; il < nxl_; ++il) {
       const int kx = rank_ * nxl_ + il;
-      const double lx = (2.0 * std::cos(2.0 * std::numbers::pi * kx / Nx_) - 2.0) / (dx_ * dx_);
+      const int kxs = (kx < (Nx_ + 1) / 2) ? kx : kx - Nx_;  // frequence signee (Nyquist -> -N/2)
+      const double wx = 2.0 * std::numbers::pi * kxs / (Nx_ * dx_);
+      const double lx = spectral_ ? -(wx * wx)
+                                  : (2.0 * std::cos(2.0 * std::numbers::pi * kx / Nx_) - 2.0) / (dx_ * dx_);
       for (int ky = 0; ky < Ny_; ++ky) {
-        const double ly =
-            (2.0 * std::cos(2.0 * std::numbers::pi * ky / Ny_) - 2.0) / (dy_ * dy_);
+        const int kys = (ky < (Ny_ + 1) / 2) ? ky : ky - Ny_;
+        const double wy = 2.0 * std::numbers::pi * kys / (Ny_ * dy_);
+        const double ly = spectral_ ? -(wy * wy)
+                                    : (2.0 * std::cos(2.0 * std::numbers::pi * ky / Ny_) - 2.0) / (dy_ * dy_);
         const double lam = lx + ly;
         cplx& v = B[il * Ny_ + ky];
         v = (std::abs(lam) < 1e-14) ? cplx(0.0, 0.0) : v / lam;
@@ -184,6 +197,7 @@ class PoissonFFT {
 
   int Nx_, Ny_, np_, rank_, nyl_, nxl_;
   double dx_, dy_;
+  bool spectral_ = false;
 };
 
 }  // namespace adc

@@ -701,7 +701,9 @@ def elliptic(unknown="phi", operator=None, rhs=None, output=None):
 
 
 class EllipticSolver:
-    """Solveur elliptique : 'geometric_mg' (tout cas, paroi) | 'fft' (periodique, n = 2^k)."""
+    """Solveur elliptique : 'geometric_mg' (tout cas, paroi) | 'fft' (periodique, n = 2^k, stencil
+    discret) | 'fft_spectral' (periodique, symbole continu -(kx^2+ky^2) : fidelite aux references
+    spectrales type poisson_fft.m, exact sur les sinusoides)."""
 
     def __init__(self, kind="geometric_mg"):
         self.kind = kind
@@ -2258,7 +2260,8 @@ def capabilities():
         },
         "poisson": {
             "system_cartesian": ["geometric_mg (paroi, eps(x), aniso, ecrante)",
-                                 "fft (periodique, n = 2^k, eps constant, mono-box)"],
+                                 "fft (periodique, n = 2^k, eps constant, mono-box)",
+                                 "fft_spectral (idem fft, symbole continu spectral)"],
             "system_polar": ["polar direct (mono-rang, une box) -- REJET AMONT clair si theta_boxes>1"],
             "amr": ["geometric_mg seulement ; rhs charge_density|composite"],
         },

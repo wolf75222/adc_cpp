@@ -150,6 +150,14 @@ add_test(NAME test_dt_hotspot
 set_tests_properties(test_dt_hotspot PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Poisson FFT a symbole spectral continu (ADC-175) : oracle sinusoide discriminant
+# (spectral ~1e-12, fft discret / MG = fenetre O(h^2) -> no-default-change mesure), rejets.
+# Modele natif : aucun compilateur requis.
+add_test(NAME test_poisson_fft_spectral
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_poisson_fft_spectral.py)
+set_tests_properties(test_poisson_fft_spectral PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Test du mini-DSL symbolique (adc.dsl) : pur Python (interprete CPU), meme PYTHONPATH.
 add_test(NAME test_dsl
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)
