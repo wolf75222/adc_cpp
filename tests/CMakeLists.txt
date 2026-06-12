@@ -332,6 +332,12 @@ adc_add_test(test_weno5_ssprk3)
 #     (floor=0 bit-identique), garantie rho_face >= floor sur le top-hat 1e6, rejet sans role Density ---
 adc_add_test(test_positivity_floor)
 
+# --- cache des vitesses d'onde HLL (opt-in) : PREUVE D'ENGAGEMENT par comptage de model.wave_speeds.
+#     make_block(none, hll) OFF vs ON sur N pas SSPRK2 : bit-exact (0 ulp) + calls_on < calls_off
+#     (le cache evalue par cellule, le chemin par face rappelle par face). Attrape un retour en no-op
+#     silencieux (calls_on == calls_off) que la bit-identite ON==OFF du test Python ne verrait pas. ---
+adc_add_test(test_wave_speed_cache_engagement)
+
 # --- parite bloc compile AOT (add_compiled_model) == bloc natif (add_block) ---
 # Compile le runtime System (python/system.cpp) avec le test : add_compiled_model branche un
 # CompositeModel connu a la compilation sur la grille reelle, comme un bloc natif (sans marshaling).
