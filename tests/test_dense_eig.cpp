@@ -210,6 +210,13 @@ int main() {
             && std::fabs(b.lmax - Real(1.752707143107345)) < Real(1e-6),
         "min/max corrects (vs numpy) : pas le repli Gershgorin");
     chk(b.max_im < Real(1e-6), "spectre essentiellement reel (max_im ~ 0)");
+    // Verrou du DEFAUT : meme bloc appele SANS cap explicite (donc avec le defaut de la signature).
+    // Ce bloc demande ~42 iterations ; si le defaut regressait sous ce seuil (p.ex. l'ancien 30) il
+    // replirait en silence et bdef.converged passerait a false. Epingle le defaut a >= 42.
+    const EigBounds bdef = real_eig_minmax(A);
+    chk(bdef.converged && std::fabs(bdef.lmin - Real(-1.732589689893011)) < Real(1e-6)
+            && std::fabs(bdef.lmax - Real(1.752707143107345)) < Real(1e-6),
+        "cap par DEFAUT suffit a converger (une regression 100->30 ferait echouer ce test)");
   }
 
   std::printf("== contrat de repli (cap = 0 -> Gershgorin) ==\n");
