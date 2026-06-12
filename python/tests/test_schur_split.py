@@ -130,10 +130,12 @@ def scalar_native_model():
 
 
 def check_condensed_schur_descriptors():
-    """(e) FINDING 6 : les descripteurs roles / champs de adc.CondensedSchur NE sont PAS transportes
-    au C++ (set_source_stage ne prend que name/kind/theta/alpha ; l'etage condense hardcode les roles
-    Density/MomentumX/MomentumY et les champs B_z / phi). Un descripteur != defaut serait IGNORE en
-    silence : on verifie qu'il est REJETE (ValueError), et que le chemin par defaut construit toujours."""
+    """(e) Descripteurs roles / champs de adc.CondensedSchur. Les roles density / momentum / energy sont
+    TRANSPORTES a l'ABI C++ (audit vague 2 : *_spec resolus au build contre les VariableRole du bloc ;
+    couverture de transport dediee dans test_schur_roles.py), donc un adc.Role.* / nom != defaut est
+    desormais ACCEPTE au constructeur (la facade ne valide plus la semantique : le build C++ leve si le
+    role/nom est introuvable). Seuls magnetic_field (champ aux CANONIQUE obligatoire) et potential (fige
+    a 'phi' : pas de solveur derriere un autre champ) sont REJETES des le constructeur."""
     # Defaut explicite ET implicite : doivent construire SANS lever (parite stricte avec l'existant).
     adc.CondensedSchur()
     adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
@@ -145,20 +147,30 @@ def check_condensed_schur_descriptors():
     adc.CondensedSchur(energy=adc.Role.Energy)
     chk(True, "(e) CondensedSchur(energy=adc.Role.Energy) tolere (valeur hardcodee C++)")
 
-    e_density = raises(ValueError, lambda: adc.CondensedSchur(density=adc.Role.Energy))
-    raises(ValueError, lambda: adc.CondensedSchur(momentum=(adc.Role.VelocityX, adc.Role.VelocityY)))
-    raises(ValueError, lambda: adc.CondensedSchur(energy=adc.Role.Scalar))
+    # Roles density / momentum != defaut TRANSPORTES (vague 2) : ACCEPTES, exposent un *_spec non vide
+    # (resolution role -> composante cote C++) ; les defauts canoniques gardent des specs VIDES (chemin
+    # historique C++ bit-identique).
+    cs = adc.CondensedSchur(density=adc.Role.Energy,
+                            momentum=(adc.Role.VelocityX, adc.Role.VelocityY))
+    chk(bool(cs.density_spec) and bool(cs.momentum_x_spec) and bool(cs.momentum_y_spec),
+        "(e) CondensedSchur(density/momentum != defaut) -> accepte et transporte (*_spec non vides)")
+    chk(adc.CondensedSchur().density_spec == "" and adc.CondensedSchur().momentum_x_spec == "",
+        "(e) CondensedSchur defaut -> specs VIDES (chemin canonique C++ inchange)")
+
+    # magnetic_field non canonique ET potential != 'phi' restent REJETES au constructeur (messages clairs).
     e_bz = raises(ValueError, lambda: adc.CondensedSchur(magnetic_field="B_custom"))
     e_phi = raises(ValueError, lambda: adc.CondensedSchur(potential="psi"))
-    chk("density" in str(e_density) and "B_z" in str(e_bz) and "phi" in str(e_phi),
-        "(e) CondensedSchur(descripteur != defaut) -> ValueError (5 descripteurs, messages clairs)")
+    chk("magnetic_field" in str(e_bz) and "potential" in str(e_phi),
+        "(e) magnetic_field non canonique / potential != 'phi' -> ValueError (messages clairs)")
 
 
 def check_amr_split_rejected():
-    """(f) FINDING 5 : adc.Split (etage source condense par Schur) n'a PAS de pendant AMR
-    (set_source_stage n'est cable que sur System). AmrSystem.add_block ET add_equation doivent le
-    REJETER explicitement (sinon Split, exposant .kind/.substeps, passerait comme un transport seul et
-    la source condensee serait perdue en silence). On exige le MEME rejet que System.add_block."""
+    """(f) adc.Split / adc.Strang (etage source condense par Schur) n'est cable QUE par add_equation
+    (qui branche set_source_stage APRES l'ajout du bloc). AmrSystem.add_block doit donc le REJETER
+    explicitement (sinon Split, exposant .kind/.substeps, passerait comme un transport seul et la source
+    condensee serait perdue en silence) -- MEME rejet que System.add_block. Depuis le chemin amr-schur
+    (#265), AmrSystem.add_equation(time=adc.Split(...)) est au contraire SUPPORTE (set_source_stage +
+    set_time_scheme ; couverture positive dans test_amr_schur_via_system.py) : seul add_block rejette."""
     n, L = 16, 1.0
     split = adc.Split(hyperbolic=adc.Explicit(),
                       source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5))
@@ -168,11 +180,6 @@ def check_amr_split_rejected():
     e1 = raises((TypeError, ValueError), amr1.add_block, "ne", model=model, time=split)
     chk("Split" in str(e1) or "Schur" in str(e1),
         "(f) AmrSystem.add_block(time=adc.Split(...)) -> rejet explicite (Split/Schur)")
-
-    amr2 = adc.AmrSystem(n=n, L=L, periodic=True)
-    e2 = raises((TypeError, ValueError), amr2.add_equation, "ne", model=model, time=split)
-    chk("Split" in str(e2) or "Schur" in str(e2),
-        "(f) AmrSystem.add_equation(time=adc.Split(...)) -> rejet explicite (Split/Schur)")
 
     # DEFAUT INCHANGE : un bloc AMR en adc.Explicit pur s'ajoute toujours sans lever.
     amr_ok = adc.AmrSystem(n=n, L=L, periodic=True)
@@ -194,7 +201,19 @@ def main():
         return
 
     n, L = 32, 1.0
-    compiled = isothermal_magnetized().compile(backend="aot", include=INCLUDE)
+    # adc_cpp est Kokkos-only (#263) : le .so AOT inclut les en-tetes adc (multifab/for_each) qui ne
+    # compilent QUE sous ADC_HAS_KOKKOS, donc compile_aot exige un Kokkos installe (ADC_KOKKOS_ROOT).
+    # Sans lui, on saute proprement la portion compilee -- meme convention que test_time_euler.py.
+    try:
+        compiled = isothermal_magnetized().compile(backend="aot", include=INCLUDE)
+    except RuntimeError as ex:
+        if "Kokkos" not in str(ex):
+            raise
+        print("skip  Kokkos introuvable -> portion compilee sautee (%s)" % str(ex).splitlines()[0][:70])
+        if fails:  # ne pas masquer un echec des gardes pures Python (e)/(f) deja exercees
+            raise SystemExit("test_schur_split : %d verification(s) en echec" % fails)
+        print("test_schur_split : OK (rien a compiler)")
+        return
 
     # ------------------------------------------------------------------------------------------
     # (a) RUN : l'etage source C++ engage le couplage. rho gelee, mom evolue, etat fini.
