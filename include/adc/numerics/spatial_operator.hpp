@@ -529,6 +529,24 @@ inline int positivity_comp(Real pos_floor) {
         "positivity_floor > 0 : modele sans introspection VariableSet (conservative_vars)");
   }
 }
+
+/// require_reconstruction_ghosts<Limiter> : GARDE STRUCTURELLE d'entree des operateurs spatiaux FV.
+/// Le stencil de reconstruction d'un limiteur lit jusqu'a Limiter::n_ghost cellules AU-DELA de la
+/// boite valide : on reconstruit les cellules VOISINES i+-1 de chaque cellule valide, ce qui lit
+/// i+-2 pour un MUSCL a 2 ghosts (Minmod / VanLeer) et i+-3 pour WENO5. Si l'etat ne porte pas cette
+/// largeur de ghost, la lecture sort du buffer du Fab (heap-buffer-overflow, UB silencieux : indice
+/// lineaire negatif). On EXIGE le contrat des l'entree -- erreur CLAIRE plutot qu'une lecture hors
+/// bornes -- exactement la regle deja appliquee a l'ALLOCATION (Limiter::n_ghost) cote AMR et
+/// block_builder (cf. python/system.cpp et PR #22). aux / masque ne sont lus qu'a i+-1 (1 ghost),
+/// largeur strictement inferieure : ce sont les ghosts de l'ETAT qui dimensionnent le stencil.
+template <class Limiter>
+inline void require_reconstruction_ghosts(const MultiFab& U) {
+  if (U.n_grow() < Limiter::n_ghost)
+    throw std::runtime_error(
+        "operateur spatial : l'etat doit porter au moins Limiter::n_ghost couches de ghost "
+        "(le stencil de reconstruction lit i+-Limiter::n_ghost au bord de la boite valide) ; "
+        "allouer la MultiFab d'etat avec ce nombre de ghosts.");
+}
 }  // namespace detail
 
 /// xface_box / yface_box : boites de face normales a x (resp. y) associees a une boite de cellules.
@@ -661,6 +679,7 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& aux,
                          MultiFab& Fx, MultiFab& Fy, Real dx = 0, Real dy = 0,
                          bool recon_prim = false, Real pos_floor = Real(0)) {
+  detail::require_reconstruction_ghosts<Limiter>(U);  // ghost de l'etat >= stencil (sinon OOB)
   const Limiter lim{};
   const NumericalFlux nflux{};
   const int pos_comp = detail::positivity_comp<Model>(pos_floor);
@@ -755,6 +774,7 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
                   const Geometry& geom, MultiFab& R, bool recon_prim = false,
                   Real pos_floor = Real(0)) {
+  detail::require_reconstruction_ghosts<Limiter>(U);  // ghost de l'etat >= stencil (sinon OOB)
   const Real dx = geom.dx(), dy = geom.dy();
   const Limiter lim{};
   const NumericalFlux nflux{};
@@ -864,6 +884,7 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void assemble_rhs_masked(const Model& model, const MultiFab& U, const MultiFab& aux,
                          const MultiFab& mask, const Geometry& geom, MultiFab& R,
                          bool recon_prim = false, Real pos_floor = Real(0)) {
+  detail::require_reconstruction_ghosts<Limiter>(U);  // ghost de l'etat >= stencil (sinon OOB)
   const Real dx = geom.dx(), dy = geom.dy();
   const Limiter lim{};
   const NumericalFlux nflux{};

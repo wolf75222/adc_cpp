@@ -78,7 +78,11 @@ int main() {
   const Advect model{0.7, -0.4};  // vitesse constante quelconque, div v = 0
 
   // Etat initial : bosse lisse (recouvrement avec le disque). Aux nul (flux ignore aux).
-  MultiFab U(ba, dm, 1, 1), aux(ba, dm, kAuxBaseComps, 1);
+  // U porte Minmod::n_ghost (= 2) couches de ghost : les deux chemins exerces ici (assemble_rhs et
+  // assemble_rhs_masked, instancies avec Minmod) reconstruisent les cellules voisines i+-1 -> lecture
+  // i+-2 au bord de la boite valide. Avec 1 seul ghost cette lecture sortait du buffer (ADC-163,
+  // heap-buffer-overflow ASan). aux / masque ne sont lus qu'a i+-1 -> 1 ghost suffit.
+  MultiFab U(ba, dm, 1, Minmod::n_ghost), aux(ba, dm, kAuxBaseComps, 1);
   aux.set_val(0.0);
   {
     Array4 a = U.fab(0).array();
