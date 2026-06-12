@@ -834,6 +834,16 @@ void add_compiled_model(AmrSystem& sys, const std::string& name, Model model,
                         int stride = 1, const std::vector<std::string>& implicit_vars = {},
                         const std::vector<std::string>& implicit_roles = {}) {
   if (substeps < 1) throw std::runtime_error("add_compiled_model(AmrSystem): substeps >= 1");
+  // PROJECTION PONCTUELLE post-pas (ADC-177) : NON CABLEE sur AmrSystem a ce stade. Le hook vit dans
+  // SystemStepper (System plat) ; le pas AMR (coupleur mono-bloc / AmrRuntime) ne l'applique pas, et
+  // son interaction avec le reflux / regrid (application niveau par niveau APRES le reflux du pas)
+  // reste a specifier -- perimetre suivant. Rejet EXPLICITE plutot qu'un modele dont la projection
+  // serait silencieusement ignoree (regle : jamais d'option ignoree).
+  if constexpr (HasPointwiseProjection<Model>)
+    throw std::runtime_error(
+        "add_compiled_model(AmrSystem) : le modele declare une projection ponctuelle post-pas "
+        "(m.projection, ADC-177), non cablee sur AMR a ce stade ; utiliser un System plat ou "
+        "retirer la projection (suite : application par niveau apres le reflux du pas)");
   // SSPRK3 IS NOT carried by the COMPILED path: neither the mono_builder nor the multi_builder
   // freezes AmrBuildParams::time_method / passes AmrTimeMethod to dispatch_amr_block (the flat ABI of the
   // .so loader does not marshal the method). EXPLICIT rejection rather than a silent kEuler fallback; an
