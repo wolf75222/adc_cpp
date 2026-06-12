@@ -125,7 +125,9 @@ class System {
   ///                 wave_speeds est couteux (hierarchie de moments). Avec recon='conservative' + limiteur
   ///                 'none' c'est BIT-IDENTIQUE au chemin par face ; avec un limiteur d'ordre 2+ c'est une
   ///                 borne de Davis sur les valeurs de cellule (resultat different). false (defaut) =
-  ///                 chemin par face inchange. Refuse si riemann != 'hll' ou time IMEX (erreur explicite).
+  ///                 chemin par face inchange. Cable sur l'avance cartesienne PLEINE seulement : refuse si
+  ///                 riemann != 'hll', time IMEX, geometrie polaire, ou un mode de transport disque
+  ///                 staircase/cutcell actif (erreur explicite, jamais d'ignore silencieux).
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",

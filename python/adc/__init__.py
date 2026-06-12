@@ -764,7 +764,9 @@ class Spatial:
       deux cellules voisines. Gain net quand wave_speeds est couteux (hierarchie de moments). Avec
       limiter='none' + recon='conservative' c'est BIT-IDENTIQUE au chemin par face ; avec un limiteur
       d'ordre 2+ c'est une borne de Davis sur les valeurs de cellule (resultat different, opt-in
-      assume). False (defaut) = chemin par face inchange. Refuse si flux != 'hll' ou temps IMEX.
+      assume). False (defaut) = chemin par face inchange. Cable sur l'avance cartesienne PLEINE
+      seulement : refuse si flux != 'hll', temps IMEX, geometrie polaire, ou un mode de transport
+      disque staircase/cutcell actif (set_disc_domain / set_geometry_mode).
     """
 
     def __init__(self, limiter="minmod", flux="rusanov", recon="conservative", *, none=False,

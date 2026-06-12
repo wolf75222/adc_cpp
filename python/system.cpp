@@ -151,6 +151,11 @@ struct System::Impl {
   detail::DiscDomain disc_;
   bool disc_set_ = false;
   MultiFab disc_mask_;  // 0/1 cellule-centre, meme layout que les blocs (ba/dm), 1 ghost ; vide tant que !disc_set_
+  // Au moins un bloc a demande wave_speed_cache (ADC-199, cache HLL opt-in). Le cache n'est cable que sur
+  // l'avance cartesienne PLEINE (advance) ; les avances disque (advance_masked / advance_eb) ne le portent
+  // pas. Ce drapeau verrouille le passage en mode de transport disque (staircase/cutcell) -> rejet explicite
+  // dans set_disc_domain / set_geometry_mode plutot qu'un cache ignore en silence.
+  bool ws_cache_block_ = false;
   // MODE DE GEOMETRIE DE TRANSPORT (chantier T5-PR3, cablage du disque dans step()). None (defaut) :
   // transport plein cartesien (assemble_rhs) -> BIT-IDENTIQUE. Staircase : assemble_rhs_masked (masque
   // 0/1). CutCell : assemble_rhs_eb (cut-cell EB). Le stepper lit ce mode pour AIGUILLER l'avance de
@@ -548,6 +553,14 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     if (P->polar_)
       throw std::runtime_error("System::add_block : wave_speed_cache non supporte sur la geometrie "
                                "polaire (anneau)");
+    // Mode de transport DISQUE deja actif : le stepper aiguille vers advance_masked / advance_eb, qui ne
+    // portent pas le cache -> le demander serait SANS EFFET. Rejet explicite (pas d'ignore muet). L'ordre
+    // inverse (set_disc_domain APRES un bloc cache) est rejete par set_disc_domain / set_geometry_mode.
+    if (P->disc_set_ && P->geometry_mode_ != GeometryMode::None)
+      throw std::runtime_error("System::add_block : wave_speed_cache incompatible avec un mode de "
+                               "transport disque actif (staircase/cutcell) ; le cache n'est cable que "
+                               "sur l'avance cartesienne pleine (retirer wave_speed_cache ou mode='none')");
+    P->ws_cache_block_ = true;  // un bloc demande le cache -> verrouille le passage en mode disque
   }
   const std::string method = imexrk ? std::string("imexrk_ars222")
                                      : ((time == "ssprk3") ? std::string("ssprk3")
@@ -873,6 +886,13 @@ void System::set_disc_domain(double cx, double cy, double R, const std::string& 
     throw std::runtime_error("System::set_disc_domain : rayon R > 0 requis");
   // Valide le mode AVANT toute mutation (un mode inconnu ne doit pas laisser le disque a moitie pose).
   const GeometryMode gmode = parse_geometry_mode(mode, "System::set_disc_domain");
+  // wave_speed_cache (ADC-199) n'est cable que sur l'avance cartesienne pleine : un mode disque
+  // (staircase/cutcell) emprunte advance_masked / advance_eb qui ignorent le cache -> rejet explicite.
+  if (gmode != GeometryMode::None && P->ws_cache_block_)
+    throw std::runtime_error("System::set_disc_domain : mode '" + mode +
+                             "' incompatible avec wave_speed_cache (un bloc a active le cache de vitesses "
+                             "d'onde HLL, cable seulement sur l'avance cartesienne pleine ; retirer "
+                             "wave_speed_cache ou utiliser mode='none')");
   P->disc_ = detail::DiscDomain{cx, cy, R};
   P->disc_set_ = true;
   // Materialise le masque 0/1 cellule-centre (1 ghost, pour que le transport mask-aware lise les
@@ -904,6 +924,13 @@ void System::set_geometry_mode(const std::string& mode) {
     throw std::runtime_error(
         "System::set_geometry_mode : mode '" + mode +
         "' demande sans disque fixe ; appeler set_disc_domain(cx, cy, R) d'abord");
+  // wave_speed_cache (ADC-199) n'est pas porte par les avances disque -> rejet explicite (cf.
+  // set_disc_domain) plutot qu'un cache silencieusement ignore en mode staircase/cutcell.
+  if (gmode != GeometryMode::None && P->ws_cache_block_)
+    throw std::runtime_error("System::set_geometry_mode : mode '" + mode +
+                             "' incompatible avec wave_speed_cache (un bloc a active le cache de vitesses "
+                             "d'onde HLL, cable seulement sur l'avance cartesienne pleine ; retirer "
+                             "wave_speed_cache ou utiliser mode='none')");
   P->geometry_mode_ = gmode;
 }
 
