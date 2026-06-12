@@ -821,14 +821,16 @@ void System::add_native_block(const std::string& name, const std::string& so_pat
 
 void System::set_poisson(const std::string& rhs, const std::string& solver,
                          const std::string& bc, const std::string& wall, double wall_radius,
-                         double epsilon) {
+                         double epsilon, double abs_tol) {
   if (epsilon == 0.0) throw std::runtime_error("System::set_poisson : epsilon != 0 requis");
+  if (abs_tol < 0.0) throw std::runtime_error("System::set_poisson : abs_tol >= 0 requis");
   p_->fields_.p_rhs = rhs;
   p_->fields_.p_solver = solver;
   p_->fields_.p_bc = bc;
   p_->fields_.p_wall = wall;
   p_->fields_.p_wall_radius = wall_radius;
   p_->fields_.p_eps_ = static_cast<Real>(epsilon);
+  p_->fields_.p_abs_tol_ = static_cast<Real>(abs_tol);  // plancher absolu du V-cycle (0 = relatif seul)
   p_->fields_.ell_.reset();
 }
 

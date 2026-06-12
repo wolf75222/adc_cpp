@@ -281,7 +281,8 @@ PYBIND11_MODULE(_adc, m) {
       .def("block_gamma", &System::block_gamma, py::arg("name"))
       .def("set_poisson", &System::set_poisson, py::arg("rhs") = "charge_density",
            py::arg("solver") = "geometric_mg", py::arg("bc") = "auto",
-           py::arg("wall") = "none", py::arg("wall_radius") = 0.0, py::arg("epsilon") = 1.0)
+           py::arg("wall") = "none", py::arg("wall_radius") = 0.0, py::arg("epsilon") = 1.0,
+           py::arg("abs_tol") = 0.0)
       // Domaine de transport DISQUE (chantiers T2 / T5-PR3) : materialise un masque 0/1 cellule-centre
       // (cellule active si son centre est dans hypot(x-cx, y-cy) - R < 0) et CABLE le transport selon
       // mode= : 'none' (defaut, transport plein cartesien, bit-identique meme avec le disque pose),

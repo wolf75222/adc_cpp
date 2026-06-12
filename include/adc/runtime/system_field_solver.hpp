@@ -93,6 +93,11 @@ class SystemFieldSolver {
   std::string p_wall = "none";
   double p_wall_radius = 0.0;
   Real p_eps_ = 1;  // permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps
+  // Plancher ABSOLU du critere d'arret du V-cycle GeometricMG (memes unites que le residu). Defaut 0 :
+  // critere purement relatif (comportement historique bit-identique). Pose > 0 (echelle du probleme),
+  // il fait sortir SANS cycler les solve_fields HORS PAS sur un etat deja converge (diagnostics, oracles,
+  // restart). Inerte pour le solveur FFT (direct, sans tolerance iterative).
+  Real p_abs_tol_ = 0;
   bool has_eps_field_ = false;          // permittivite VARIABLE eps(x) fournie (porte par l'operateur)
   std::vector<double> p_eps_field_;     // champ eps(x), n*n row-major (si has_eps_field_)
   bool has_eps_xy_field_ = false;       // permittivite ANISOTROPE eps_x(x), eps_y(x) (operateur div(diag(eps_x,eps_y) grad phi))
@@ -274,6 +279,7 @@ class SystemFieldSolver {
                    p_solver == "fft_spectral");
     } else if (p_solver == "geometric_mg") {
       ell_.emplace(std::in_place_type<GeometricMG>, owner_->geom, owner_->ba, pbc, std::move(active));
+      std::get<GeometricMG>(*ell_).set_abs_tol(p_abs_tol_);  // plancher absolu du V-cycle (0 = relatif seul)
       if (has_eps_field_) apply_epsilon_field();    // operateur div(eps grad phi) a eps(x) variable
       if (has_eps_xy_field_) apply_epsilon_anisotropic_field();  // div(diag(eps_x, eps_y) grad phi)
       if (has_kappa_field_) apply_reaction_field();  // terme - kappa phi (Poisson ecrante / Helmholtz)

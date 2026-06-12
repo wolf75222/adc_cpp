@@ -385,27 +385,45 @@ class GeometricMG {
 
   void vcycle() { vcycle_rec(0, bc_); }
 
-  // V-cycles jusqu'a residu relatif < rel_tol (ou max_cycles). Renvoie le
-  // nombre de cycles effectues. phi est conserve entre appels (warm start).
-  int solve(Real rel_tol, int max_cycles) {
+  // V-cycles jusqu'a residu sous le plancher mixte (ou max_cycles). Renvoie le nombre
+  // de cycles effectues. phi est conserve entre appels (warm start).
+  //
+  // Critere d'arret MIXTE relatif/absolu (convention hypre/AMReX) :
+  //   residu <= max(rel_tol * r0, abs_tol)
+  // abs_tol est un plancher ABSOLU sur la norme du residu (MEMES unites que current_residual(),
+  // donc rapporte a l'echelle du probleme par l'appelant qui la connait : aucune constante magique
+  // n'est cuite ici). Defaut 0 -> max(rel_tol*r0, 0) = rel_tol*r0, soit le critere relatif
+  // historique a l'identique. Le plancher evite de sur-resoudre un etat DEJA converge (r0 minuscule,
+  // typique d'un solve HORS PAS sur etat inchange) : early-exit sans cycler si r0 est sous abs_tol.
+  int solve(Real rel_tol, int max_cycles, Real abs_tol = Real(0)) {
     detail::mg_trace_mark("solve: avant current_residual initial");
     const Real r0 = current_residual();
     detail::mg_trace_mark("solve: apres current_residual initial");
-    if (r0 <= Real(0)) return 0;
+    if (r0 <= abs_tol) return 0;  // deja sous le plancher (ou nul) ; abs_tol=0 -> ancien test r0<=0
+    const Real stop = (rel_tol * r0 > abs_tol) ? rel_tol * r0 : abs_tol;  // max(rel_tol*r0, abs_tol)
     for (int c = 1; c <= max_cycles; ++c) {
       detail::mg_trace_mark("solve: avant vcycle");
       vcycle();
       detail::mg_trace_mark("solve: apres vcycle");
-      if (current_residual() <= rel_tol * r0) return c;
+      if (current_residual() <= stop) return c;
     }
     return max_cycles;
   }
 
   // Interface du concept EllipticSolver : solve() sans argument (tolerance par
   // defaut) et residual() (alias de current_residual). Permet aux coupleurs de
-  // dependre du concept, pas de GeometricMG en dur.
-  void solve() { solve(Real(1e-8), 50); }
+  // dependre du concept, pas de GeometricMG en dur. Propage abs_tol_ (plancher
+  // absolu, defaut 0 -> critere relatif historique a l'identique) au critere mixte.
+  void solve() { solve(Real(1e-8), 50, abs_tol_); }
   Real residual() { return current_residual(); }
+
+  // Plancher ABSOLU sur le residu utilise par le solve() sans argument (chemin du concept
+  // EllipticSolver, emprunte par les coupleurs / le runtime). Memes unites que residual().
+  // Defaut 0 : le critere reste purement relatif (comportement historique bit-identique).
+  // Le poser > 0 (a une valeur rapportee a l'echelle du probleme, ex. eps * ||rhs||) fait sortir
+  // sans cycler les solves HORS PAS sur un etat deja converge (residu initial sous le plancher).
+  void set_abs_tol(Real abs_tol) { abs_tol_ = abs_tol; }
+  Real abs_tol() const { return abs_tol_; }
 
   // Solve DURCI pour le bord embedded a haute resolution. Sur grille fine, le V-cycle
   // geometrique diverge parfois pres de la paroi conductrice : le coarsening est
@@ -588,6 +606,7 @@ class GeometricMG {
   bool has_eps_y_ = false;
   bool has_kappa_ = false;
   bool has_cross_ = false;  // coefficients hors-diagonaux Axy/Ayx (tenseur PLEIN) actifs
+  Real abs_tol_ = Real(0);  // plancher absolu du solve() sans argument (0 = critere relatif seul)
   std::function<Real(Real, Real)> levelset_;
   std::vector<MGLevel> lev_;
 };

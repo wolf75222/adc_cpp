@@ -251,10 +251,14 @@ class System {
   /// @param epsilon permittivite CONSTANTE de l'operateur div(eps grad phi) = f. eps != 1 resout
   ///                eps lap phi = f (i.e. lap phi = f/eps). Pour une permittivite eps(x) VARIABLE,
   ///                cf. set_epsilon_field (operateur a coefficients variables, GeometricMG).
+  /// @param abs_tol plancher ABSOLU du critere d'arret du V-cycle GeometricMG (memes unites que le
+  ///                residu). Defaut 0 : critere purement relatif, comportement historique inchange.
+  ///                Pose > 0 (echelle du probleme), il fait sortir sans cycler les solve_fields HORS
+  ///                PAS sur un etat deja converge. Sans effet sur le solveur FFT (direct).
   void set_poisson(const std::string& rhs = "charge_density",
                    const std::string& solver = "geometric_mg",
                    const std::string& bc = "auto", const std::string& wall = "none",
-                   double wall_radius = 0.0, double epsilon = 1.0);
+                   double wall_radius = 0.0, double epsilon = 1.0, double abs_tol = 0.0);
 
   /// Fixe le DOMAINE DE TRANSPORT comme un DISQUE de centre (@p cx, @p cy) et de rayon @p R
   /// (chantier T2, CONTRAT inerte par defaut). Materialise un masque 0/1 cellule-centre (cellule
