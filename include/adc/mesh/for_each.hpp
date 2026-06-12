@@ -268,6 +268,20 @@ Real reduce_max_cell(const Box2D& b, F f) {
   return result;
 }
 
+// Variante MIN : pendant exact de reduce_max_cell pour Kokkos::Min (diagnostic dt_hotspot,
+// ADC-182 : reduction du plus petit indice encode parmi les cellules qui egalent le max).
+template <class F>
+Real reduce_min_cell(const Box2D& b, F f) {
+  detail::ensure_kokkos_initialized();
+  Real result = 0;
+  Kokkos::parallel_reduce(
+      "adc_reduce_min_cell",
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+      f, Kokkos::Min<Real>{result});
+  return result;
+}
+
 // Variante SOMME a FONCTEUR REDUCTEUR : pendant exact de reduce_max_cell pour Kokkos::Sum. @p f
 // recoit (i, j, Real& acc) et accumule (acc += valeur), passe DIRECTEMENT a parallel_reduce SANS
 // lambda etendue d'enveloppe (a la difference de for_each_cell_reduce_sum, qui en pose une). C'est

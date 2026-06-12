@@ -120,6 +120,13 @@ add_test(NAME test_time_euler
 set_tests_properties(test_time_euler PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Diagnostic dt_hotspot (ADC-182) : cellule dominante de la CFL (cellule chaude plantee,
+# coherence w == cfl*h/dt, no-default-change bit-identique, determinisme, garde). Natif.
+add_test(NAME test_dt_hotspot
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dt_hotspot.py)
+set_tests_properties(test_dt_hotspot PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Test du mini-DSL symbolique (adc.dsl) : pur Python (interprete CPU), meme PYTHONPATH.
 add_test(NAME test_dsl
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl.py)

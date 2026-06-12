@@ -517,6 +517,10 @@ class System {
 
   /// Avance d'un pas a dt = cfl * h / vitesse d'onde max du systeme. @return le dt utilise.
   double step_cfl(double cfl);
+  /// Diagnostic (ADC-182) : {w, i, j} de la cellule GLOBALE qui domine la borne CFL de
+  /// transport du bloc -- pour localiser une erosion de realisabilite / un dt qui s'effondre.
+  /// A la demande, hors chemin chaud (step/step_cfl inchanges).
+  std::array<double, 3> dt_hotspot(const std::string& name);
 
   /// Avance d'un macro-pas MULTIRATE : le bloc le plus lent fixe le macro-pas, chaque bloc
   /// plus rapide est sous-cycle n = ceil(w_bloc / w_min) fois. @return le macro-pas.

@@ -182,6 +182,17 @@ struct AdvanceImexRkArs222 {
 };
 
 /// Residu fige (fill_ghosts + assemble_rhs) installe comme rhs_into du bloc.
+/// Foncteur du diagnostic dt_hotspot (ADC-182) : cellule dominante de la CFL du bloc.
+/// HOTE (les reductions internes sont device) ; nomme, comme MaxSpeed.
+template <class Model>
+struct HotspotFn {
+  Model m;
+  GridContext ctx;
+  void operator()(const MultiFab& U, Real& w, int& i, int& j) const {
+    max_wave_speed_hotspot_mf(m, U, *ctx.aux, ctx.dom.nx(), w, i, j);
+  }
+};
+
 template <class Limiter, class Flux, class Model>
 struct RhsInto {
   Model m;
@@ -418,6 +429,7 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
                              "' (euler|ssprk2|ssprk3)");
   }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor};
+  bc.hotspot = detail::HotspotFn<Model>{m, ctx};  // diagnostic dt_hotspot (ADC-182), hors chemin chaud
   return bc;
 }
 
@@ -541,6 +553,7 @@ struct MaxSpeed {
   GridContext ctx;
   Real operator()(const MultiFab& U) const { return max_wave_speed_mf(m, U, *ctx.aux); }
 };
+
 
 /// Foncteur vitesse de STABILITE max du bloc (trait HasStabilitySpeed) : remplace MaxSpeed dans la
 /// CFL quand le modele declare stability_speed (les solveurs de Riemann gardent max_wave_speed).

@@ -334,6 +334,10 @@ class SystemStepper {
   /// identique a l'historique (les fonctions vides ne sont pas interrogees). La borne ACTIVE du
   /// dernier pas est consultable via last_dt_bound() ("transport:<bloc>", "source_frequency:<bloc>",
   /// "stability_dt:<bloc>", "global:<label>", "degenerate").
+  /// NOTE CONVENTION 2D (audit ADC-182) : la vitesse par cellule est w = max(wx, wy) -- PAS la
+  /// somme. En non-splitte 2D le nombre de Courant effectif atteint donc 2*cfl quand wx ~ wy :
+  /// cfl = 0.4 (defaut des cas) reste < 1 (sur), c'est aussi la convention des references par
+  /// balayage (pas_HLL) ; cfl >= 0.5 en 2D non-splitte est MARGINAL -- a eviter sans etude.
   double step_cfl(double cfl) {
     Impl* P = owner_;
     P->solve_fields();

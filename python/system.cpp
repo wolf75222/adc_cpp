@@ -698,6 +698,7 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
   // cartesien avec disc_mask_/disc_ fournis). Vides -> le stepper retombe sur advance (bit-identique).
   P->sp.back().advance_masked = std::move(closures.advance_masked);
   P->sp.back().advance_eb = std::move(closures.advance_eb);
+  P->sp.back().hotspot = std::move(closures.hotspot);  // diagnostic dt_hotspot (ADC-182)
 }
 
 // Reallocation width-aware de l'etat d'un bloc (delegue a Impl::set_block_ghosts). Exposee
@@ -726,6 +727,21 @@ void System::add_dt_bound(const std::string& label, std::function<double()> fn) 
 
 // Borne ACTIVE du dernier step_cfl (diagnostic de la politique de pas). "" avant le premier pas.
 std::string System::last_dt_bound() const { return p_->stepper_.last_dt_reason(); }
+
+// Diagnostic dt_hotspot (ADC-182) : la cellule GLOBALE (i, j) qui domine la borne CFL de
+// transport du bloc @p name, et sa vitesse w = max(wx, wy). A LA DEMANDE (deux passes de
+// reduction, cf. max_wave_speed_hotspot_mf) -- step/step_cfl n'y touchent pas. Bloc sans
+// fermeture (chemins historiques non recables, p.ex. dynamique) -> erreur EXPLICITE.
+std::array<double, 3> System::dt_hotspot(const std::string& name) {
+  Impl::Species& s = p_->find(name);
+  if (!s.hotspot)
+    throw std::runtime_error("System::dt_hotspot : bloc '" + name +
+                             "' sans diagnostic hotspot (chemin d'ajout non recable)");
+  Real w = 0;
+  int i = -1, j = -1;
+  s.hotspot(s.U, w, i, j);
+  return {static_cast<double>(w), static_cast<double>(i), static_cast<double>(j)};
+}
 
 // Rapport Newton (diagnostics IMEX OPT-IN) du bloc : copie a plat du NewtonReport agrege par la
 // DERNIERE avance du bloc (reset en tete d'avance par AdvanceImex*). Erreur claire si le bloc n'a

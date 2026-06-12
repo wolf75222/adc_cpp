@@ -122,6 +122,10 @@ class SystemBlockStore {
     // l'init par agregat positionnel des autres membres reste inchangee.
     std::function<void(MultiFab&, Real, int)> advance_masked;  // residu via assemble_rhs_masked (Staircase)
     std::function<void(MultiFab&, Real, int)> advance_eb;      // residu via assemble_rhs_eb (CutCell)
+    // DIAGNOSTIC dt_hotspot (ADC-182) : (U, w, i, j) -> cellule GLOBALE dominant la borne CFL de
+    // transport du bloc + sa vitesse w = max(wx, wy). A LA DEMANDE seulement (System::dt_hotspot) :
+    // jamais interrogee par step/step_cfl (chemin chaud bit-identique). Trailing + defaut vide.
+    std::function<void(const MultiFab&, Real&, int&, int&)> hotspot;
     // BORNES DE PAS OPTIONNELLES du bloc (audit 2026-06, chantier step_cfl). VIDES (defaut) -> le
     // stepper ne les interroge pas : politique de pas STRICTEMENT historique (transport seul,
     // bit-identique). Posees par set_block_dt_bounds quand le modele declare les traits

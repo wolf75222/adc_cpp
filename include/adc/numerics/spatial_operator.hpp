@@ -228,6 +228,63 @@ inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
   return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
 }
 
+namespace detail {
+/// Localisation de la cellule DOMINANTE de la CFL (diagnostic dt_hotspot, ADC-182) : scan
+/// d'EGALITE du w recalcule -- meme foncteur et memes donnees que MaxWaveSpeedKernel, donc
+/// bit-egal au max retourne par max_wave_speed_mf -- qui encode l'indice GLOBAL j*nx + i en
+/// Real (exact tant que nx*ny < 2^53) et reduit au MIN (premiere cellule en ordre
+/// lexicographique : deterministe). Foncteur NOMME (instanciation cross-TU sous nvcc).
+template <class Model>
+struct WaveSpeedMatchKernel {
+  Model model;
+  ConstArray4 u, a;
+  Real target;
+  Real nx;  // stride d'encodage (nx du DOMAINE, indices globaux)
+  ADC_HD void operator()(int i, int j, Real& acc) const {
+    const auto s = load_state<Model>(u, i, j);
+    const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
+    const Real wx = model.max_wave_speed(s, ax, 0);
+    const Real wy = model.max_wave_speed(s, ax, 1);
+    const Real w = wx > wy ? wx : wy;
+    if (w == target) {
+      const Real idx = static_cast<Real>(j) * nx + static_cast<Real>(i);
+      if (idx < acc) acc = idx;
+    }
+  }
+};
+}  // namespace detail
+
+/// Diagnostic dt_hotspot (ADC-182) : la cellule (indices GLOBAUX) qui domine la borne CFL de
+/// transport du bloc, et sa vitesse w = max(wx, wy). A LA DEMANDE uniquement -- deux passes
+/// completes (max puis localisation par egalite bit-exacte), step_cfl n'y touche pas
+/// (bit-identique). MPI : all_reduce du max puis all_reduce_min de l'indice encode (+inf chez
+/// les rangs non detenteurs). @p nx : largeur du domaine (encodage j*nx + i).
+template <class Model>
+inline void max_wave_speed_hotspot_mf(const Model& model, const MultiFab& U,
+                                      const MultiFab& aux, int nx,
+                                      Real& w_out, int& i_out, int& j_out) {
+  const Real w = max_wave_speed_mf(model, U, aux);
+  Real best = std::numeric_limits<Real>::infinity();
+  for (int li = 0; li < U.local_size(); ++li) {
+    const ConstArray4 u = U.fab(li).const_array();
+    const ConstArray4 a = aux.fab(li).const_array();
+    best = std::min(best, reduce_min_cell(U.box(li), detail::WaveSpeedMatchKernel<Model>{
+                                              model, u, a, w, static_cast<Real>(nx)}));
+  }
+  best = static_cast<Real>(all_reduce_min(static_cast<double>(best)));
+  w_out = w;
+  // identite de Kokkos::Min = max_real (finie) : un rang/une boite sans cellule egalant le
+  // max laisse cette valeur -> on ne decode que si un indice REEL a ete encode.
+  if (best >= Real(0) && best < std::numeric_limits<Real>::max() * Real(0.5)) {
+    const long long idx = static_cast<long long>(best);
+    i_out = static_cast<int>(idx % nx);
+    j_out = static_cast<int>(idx / nx);
+  } else {  // domaine vide / etat degenere : pas de cellule (w peut etre 0)
+    i_out = -1;
+    j_out = -1;
+  }
+}
+
 // ============================================================================
 // REDUCTIONS DES BORNES DE PAS OPTIONNELLES (audit 2026-06, chantier step_cfl).
 // Pendants de max_wave_speed_mf pour les traits HasStabilitySpeed / HasSourceFrequency /

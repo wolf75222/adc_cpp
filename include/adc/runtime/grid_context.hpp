@@ -60,6 +60,10 @@ struct BlockClosures {
   std::function<void(MultiFab&, Real, int)> advance_masked;  ///< idem, residu via assemble_rhs_masked
   std::function<void(MultiFab&, Real, int)> advance_eb;      ///< idem, residu via assemble_rhs_eb
   std::function<void(MultiFab&, MultiFab&)> rhs_into;  ///< R <- -div F + S (Poisson fige)
+  /// Diagnostic dt_hotspot (ADC-182) : (U, w, i, j) -> cellule GLOBALE dominant la CFL de
+  /// transport et sa vitesse. OPTIONNELLE (vide = bloc sans diagnostic, p.ex. chemins
+  /// historiques non recables) ; jamais appelee par step/step_cfl (hors chemin chaud).
+  std::function<void(const MultiFab&, Real&, int&, int&)> hotspot;
 };
 
 }  // namespace adc
