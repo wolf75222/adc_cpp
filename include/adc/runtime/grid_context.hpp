@@ -64,6 +64,10 @@ struct BlockClosures {
   /// transport et sa vitesse. OPTIONNELLE (vide = bloc sans diagnostic, p.ex. chemins
   /// historiques non recables) ; jamais appelee par step/step_cfl (hors chemin chaud).
   std::function<void(const MultiFab&, Real&, int&, int&)> hotspot;
+  /// PROJECTION PONCTUELLE post-pas (ADC-177) : U <- project(U, aux) sur les cellules VALIDES du
+  /// bloc, appliquee par le stepper a la FIN de chaque macro-pas ENTIER (jamais par etage RK).
+  /// OPTIONNELLE (vide = bloc sans projection : jamais interrogee, cout nul, bit-identique).
+  std::function<void(MultiFab&)> project;
 };
 
 }  // namespace adc

@@ -590,6 +590,30 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
     };
   else if (c2p_fn)
     block.cons_to_prim = [lib, c2p_fn](const double* in, double* out) { c2p_fn(in, out, 1); };
+  // PROJECTION PONCTUELLE post-pas (ADC-177) : symboles OPTIONNELS de l'ABI etendue
+  // (adc_compiled_has_projection / adc_compiled_project_p). Un .so genere avant ce chantier ne les
+  // expose pas -> aucune projection installee (chemin historique, bit-identique). has==1 sans la
+  // fonction de projection = .so incoherent -> erreur EXPLICITE plutot qu'un hook silencieusement
+  // ignore. Le stepper applique la fermeture a la FIN de chaque macro-pas entier (cf. SystemStepper).
+  auto has_proj_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h, "adc_compiled_has_projection"));
+  if (has_proj_fn && has_proj_fn() != 0) {
+    using proj_fn_t = void (*)(double*, const double*, int, const double*, int);
+    auto proj_fn = reinterpret_cast<proj_fn_t>(adc::dynlib::sym(h, "adc_compiled_project_p"));
+    // Pas de close(h) ici : le shared_ptr `lib` possede deja le handle (fermeture a sa destruction).
+    if (!proj_fn)
+      throw std::runtime_error(
+          "add_compiled_block : adc_compiled_has_projection() == 1 mais adc_compiled_project_p "
+          "absent du .so (regenerer via dsl.compile(backend='aot'))");
+    block.project = [P, lib, proj_fn, pv, nv, n](MultiFab& U) {
+      // Meme garde MPI que les autres fermetures marshalees : rang sans box locale -> no-op
+      // unilateral (pas de collectif ici, aucun risque d'interblocage).
+      if (U.local_size() == 0) return;
+      std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
+      proj_fn(u.data(), a.data(), n, pv ? pv->data() : nullptr,
+              pv ? static_cast<int>(pv->size()) : 0);
+      P->write_state(U, nv, u);
+    };
+  }
   // P7-b : enregistrer le bloc PARTAGE des params runtime APRES les validations (toutes passees ici) :
   // set_block_params le retrouvera par nom, et les fermetures du bloc partagent le meme shared_ptr.
   if (pv) P->block_params_[name] = pv;

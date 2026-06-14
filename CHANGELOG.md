@@ -26,6 +26,12 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) ; versionnemen
   (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), sanitizers ASan+UBSan (`ADC_ENABLE_SANITIZERS`,
   presets `ci-warnings`/`ci-asan`) et CodeQL. Options CMake OFF par defaut (cible `adc_dev_options`
   vide) -> `ci.yml`, les builds locaux et `adc_cases` sont inchanges. Voir `docs/QUALITY_TOOLING.md`.
+- Hook generique de PROJECTION PONCTUELLE post-pas (ADC-177) : `m.projection([...])` cote DSL
+  (trait C++ `HasPointwiseProjection`, compile comme flux/source), applique par `System` a la fin
+  de chaque macro-pas entier (jamais par etage RK) sur les cellules valides de chaque bloc --
+  remplace le callback Python par cellule (backends `aot` et `production` ; `prototype` et
+  `target="amr_system"` rejettent explicitement). `dsl.sign(x)` (selections par masques sans
+  branche, derivable). Cf. `docs/DSL_API.md` section 5.
 
 ## [0.1.0] - 2026-06-10
 

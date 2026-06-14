@@ -266,6 +266,54 @@ void to_primitive(const double* U, double* P, int n, const double* pvals = nullp
   }
 }
 
+/// PROJECTION PONCTUELLE post-pas (ADC-177) : U(k) <- model.project(U(k), aux(k)) sur les n*n
+/// cellules, tableaux plats composante-majeur (meme disposition que to_conservative). PONCTUELLE :
+/// aucun maillage ni ghost, simple boucle de cellules ; l'aux est marshale par cellule depuis le
+/// tableau plat (composantes canoniques via ADC_AUX_FIELDS + champs nommes, miroir de load_aux).
+/// Modele SANS trait HasPointwiseProjection -> no-op (le loader ne devrait jamais l'appeler :
+/// adc_compiled_has_projection() rend 0).
+template <class Model>
+void pointwise_project(double* U, const double* aux_in, int n, const double* pvals = nullptr,
+                       int npar = 0) {
+  if constexpr (HasPointwiseProjection<Model>) {
+    constexpr int NV = Model::n_vars;
+    constexpr int naux = aux_comps<Model>();
+    const std::size_t nn = static_cast<std::size_t>(n) * n;
+    Model model = make_model_with_params<Model>(pvals, npar);  // P7-b : params runtime (no-op si const)
+    for (std::size_t k = 0; k < nn; ++k) {
+      typename Model::State u{};
+      for (int c = 0; c < NV; ++c)
+        u[c] = static_cast<Real>(U[static_cast<std::size_t>(c) * nn + k]);
+      Aux a{};
+      if (aux_in) {
+        a.phi = static_cast<Real>(aux_in[k]);
+        a.grad_x = static_cast<Real>(aux_in[nn + k]);
+        a.grad_y = static_cast<Real>(aux_in[2 * nn + k]);
+        // Champs extra canoniques depuis la SOURCE UNIQUE ADC_AUX_FIELDS (cf. native_loader) : une
+        // composante n'est lue que si le modele la consomme (naux) -- le System marshale toujours au
+        // moins naux composantes (ensure_aux_width a l'ajout du bloc).
+#define ADC_AUX_MARSHAL(name, idx) \
+  if constexpr (naux > (idx)) a.name = static_cast<Real>(aux_in[(idx) * nn + k]);
+        ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
+#undef ADC_AUX_MARSHAL
+        // Champs aux NOMMES (aux_field, ADC-70) : composantes a partir de kAuxNamedBase, miroir de
+        // load_aux (borne deroulee et clampee a kAuxMaxExtra, jamais d'acces hors tableau).
+        if constexpr (naux > kAuxNamedBase) {
+          constexpr int n_extra =
+              (naux - kAuxNamedBase) < kAuxMaxExtra ? (naux - kAuxNamedBase) : kAuxMaxExtra;
+          for (int x = 0; x < n_extra; ++x)
+            a.extra[x] = static_cast<Real>(aux_in[static_cast<std::size_t>(kAuxNamedBase + x) * nn + k]);
+        }
+      }
+      const typename Model::State p = model.project(u, a);
+      for (int c = 0; c < NV; ++c)
+        U[static_cast<std::size_t>(c) * nn + k] = static_cast<double>(p[c]);
+    }
+  } else {
+    (void)U; (void)aux_in; (void)n; (void)pvals; (void)npar;
+  }
+}
+
 /// Second membre elliptique f(U) du bloc (le System l'ajoute a sa somme de Poisson).
 template <class Model>
 void poisson_rhs(const double* U, double* rhs_out, int n, const double* pvals = nullptr,
@@ -297,6 +345,13 @@ void poisson_rhs(const double* U, double* rhs_out, int n, const double* pvals = 
 /// PREFERE les symboles `_p` quand ils sont presents ; un vieux .so sans eux retombe sur les symboles
 /// historiques (aucun param runtime). Les symboles historiques delegent aux memes templates avec
 /// pvals=nullptr/npar=0 -> bit-identite stricte du chemin params-const.
+///
+/// ADC-177 (PROJECTION PONCTUELLE post-pas) : symboles OPTIONNELS adc_compiled_has_projection()
+/// (1 si le modele declare le trait HasPointwiseProjection, 0 sinon) et adc_compiled_project_p
+/// (U <- project(U, aux) sur les tableaux plats). Un vieux .so ne les expose pas -> le loader
+/// n'installe aucune projection (bit-identique). Un .so NEUF charge par un VIEUX module : la
+/// projection serait ignoree (le vieux loader n'interroge pas ces symboles) -- combinaison exclue en
+/// pratique, dsl.py et le module _adc etant livres ensemble (cf. docs/DSL_API.md).
 #define ADC_DEFINE_COMPILED_BLOCK(MODEL)                                                            \
   extern "C" int adc_model_nvars() { return MODEL::n_vars; }                                        \
   extern "C" int adc_compiled_naux() { return adc::aux_comps<MODEL>(); }                            \
@@ -360,4 +415,11 @@ void poisson_rhs(const double* U, double* rhs_out, int n, const double* pvals = 
   extern "C" void adc_compiled_to_primitive_p(const double* U, double* P, int n,                    \
                                               const double* pvals, int npar) {                      \
     adc::compiled_block::to_primitive<MODEL>(U, P, n, pvals, npar);                                 \
+  }                                                                                                 \
+  extern "C" int adc_compiled_has_projection() {                                                    \
+    return adc::HasPointwiseProjection<MODEL> ? 1 : 0;                                              \
+  }                                                                                                 \
+  extern "C" void adc_compiled_project_p(double* U, const double* aux, int n,                       \
+                                         const double* pvals, int npar) {                           \
+    adc::compiled_block::pointwise_project<MODEL>(U, aux, n, pvals, npar);                          \
   }

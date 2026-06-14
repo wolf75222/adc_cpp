@@ -818,6 +818,25 @@ def abs_(x):
     return Abs(_wrap(x))
 
 
+class Sign(Expr):
+    """Signe de a : -1, 0 ou 1 (np.sign cote interprete). Emis au codegen comme le ternaire SANS
+    branche (a > 0) - (a < 0) (exact en adc::Real). Sert aux selections par masques des branches par
+    cellule (ADC-177 : clamps de projection en max/min via abs/sign, sans if). Derivee nulle presque
+    partout (saut en 0, mesure nulle), cf. dsl.diff."""
+    def __init__(self, a): self.a = a
+    def eval(self, env): return np.sign(self.a.eval(env))
+    def deps(self): return self.a.deps()
+    def to_cpp(self):
+        s = self.a.to_cpp()
+        return "(adc::Real(%s > 0) - adc::Real(%s < 0))" % (s, s)
+    def _str(self): return "sign(%s)" % self.a
+
+
+def sign(x):
+    """Signe symbolique (-1 / 0 / 1) : selections par masques sans branche par cellule."""
+    return Sign(_wrap(x))
+
+
 class StateRef(Expr):
     """Marqueur d'ETAT pour la dissipation de Roe a DEUX etats (m.roe_dissipation) : la
     sous-expression encadree s'evalue sur l'etat GAUCHE UL (side='L', dsl.left) ou DROIT UR
@@ -903,7 +922,7 @@ class RuntimeParamRef(Expr):
 def _children(e):
     if isinstance(e, _Bin):
         return (e.a, e.b)
-    if isinstance(e, (Neg, Sqrt, Abs)):
+    if isinstance(e, (Neg, Sqrt, Abs, Sign)):
         return (e.a,)
     if isinstance(e, StateRef):
         return (e.expr,)  # marqueur left/right : un seul enfant (decouverte de params runtime, etc.)
@@ -923,6 +942,8 @@ def _key(e):
         return ("sqrt", _key(e.a))
     if isinstance(e, Abs):
         return ("abs", _key(e.a))
+    if isinstance(e, Sign):
+        return ("sign", _key(e.a))
     if isinstance(e, StateRef):
         return ("state", e.side, _key(e.expr))  # defensif : les lignes Roe ne passent pas par la CSE
     return (e.op, tuple(_key(c) for c in _children(e)))  # _Bin (Add/Sub/Mul/Div/Pow)
@@ -942,6 +963,9 @@ def _cpp_expand(e, cse_map):
         return "std::sqrt(%s)" % _cpp_cse(e.a, cse_map)
     if isinstance(e, Abs):
         return "std::fabs(%s)" % _cpp_cse(e.a, cse_map)
+    if isinstance(e, Sign):
+        s = _cpp_cse(e.a, cse_map)  # l'enfant peut etre une locale CSE : evalue UNE fois
+        return "(adc::Real(%s > 0) - adc::Real(%s < 0))" % (s, s)
     if isinstance(e, Pow):
         return "std::pow(%s, %s)" % (_cpp_cse(e.a, cse_map), _cpp_cse(e.b, cse_map))
     if isinstance(e, _Bin):
@@ -1121,6 +1145,10 @@ def diff(expr, var, defs=None):
             # l'indicatrice attendue) ; AU pli, u/|u| vaut NaN : singularite de mesure nulle,
             # documentee (comme la division des quotients).
             return _s_mul(_s_div(e.a, Abs(e.a)), go(e.a))
+        if isinstance(e, Sign):
+            # d sign(u) = 0 presque partout (saut en u = 0, mesure nulle -- meme convention que le
+            # pli de Abs : singularite documentee, jamais rencontree par les clamps sur un ouvert).
+            return Const(0.0)
         if isinstance(e, Pow):
             if not _is_const(go(e.b), 0.0):
                 raise NotImplementedError(
@@ -1194,6 +1222,9 @@ def _cpp_roe(e, prefix):
         return "std::sqrt(%s)" % _cpp_roe(e.a, prefix)
     if isinstance(e, Abs):
         return "std::fabs(%s)" % _cpp_roe(e.a, prefix)
+    if isinstance(e, Sign):
+        s = _cpp_roe(e.a, prefix)
+        return "(adc::Real(%s > 0) - adc::Real(%s < 0))" % (s, s)
     if isinstance(e, Pow):
         return "std::pow(%s, %s)" % (_cpp_roe(e.a, prefix), _cpp_roe(e.b, prefix))
     if isinstance(e, _Bin):
@@ -1223,6 +1254,7 @@ class HyperbolicModel:
         self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
         self._stab_dt = None     # Expr : pas ADMISSIBLE direct dt(U, aux) (None = pas de borne)
         self._src_freq = None    # Expr : frequence mu(U, aux) de la SOURCE (None = pas de borne)
+        self._proj = None        # [Expr] : PROJECTION ponctuelle post-pas U <- P(U, aux) (ADC-177)
         self._src_jac = None     # [[Expr]] n x n : Jacobien ANALYTIQUE dS/dU (None = diff. finies)
         self._hllc = False       # True : emettre la capability HLLC (contact_speed + star state)
         self._roe = False        # True : emettre la capability ROE (roe_dissipation depuis les roles)
@@ -1451,6 +1483,35 @@ class HyperbolicModel:
         l'agregent. EXIGE set_source/m.source (la frequence est une propriete de la source).
         SANS appel, la source ne contraint pas le pas (historique). Compilee (production GPU/MPI)."""
         self._src_freq = _wrap(expr_mu)
+
+    def projection(self, exprs):
+        """PROJECTION PONCTUELLE post-pas (ADC-177) : U <- P(U, aux), une expression par composante
+        conservative (en fonction des cons / prims / aux). Emise comme ``project(U, aux)`` sur la
+        brique hyperbolique generee (trait C++ ``HasPointwiseProjection``) ; le System l'applique sur
+        les cellules VALIDES de chaque bloc a la FIN de chaque macro-pas ENTIER (apres transport +
+        etage source + couplages ; jamais par etage RK -- semantique POST-PAS). CONTRAT : P doit etre
+        une PROJECTION (idempotente : P(P(U)) == P(U)) et PONCTUELLE (aucune lecture de voisin). Les
+        formules de realisabilite restent cote cas ; les clamps s'ecrivent SANS branche, en max/min
+        via abs_ / sign : p.ex. positivite q >= 0 : (q + abs_(q)) / 2. Compilee comme flux/source
+        (CSE comprise, production GPU/MPI -- remplace le callback Python par cellule). Backends
+        'aot' (add_compiled_block) et 'production' System (add_native_block) ; le backend 'prototype'
+        et target='amr_system' la REJETTENT explicitement (jamais d'ignore silencieux). SANS appel :
+        aucun hook emis, chemin bit-identique."""
+        exprs = [_wrap(e) for e in exprs]
+        if len(exprs) != self.n_vars:
+            raise ValueError("projection : %d expressions attendues (une par composante "
+                             "conservative), recu %d" % (self.n_vars, len(exprs)))
+        self._proj = exprs
+
+    def projection_value(self, U, aux=None):
+        """EVALUATEUR numpy de la projection ponctuelle emise (miroir exact du project(U, aux) C++) :
+        U (n_vars, ...) -> U projete. Reference de test / prototypage hote. ValueError si
+        projection([...]) n'a pas ete appelee."""
+        if self._proj is None:
+            raise ValueError("projection_value : appeler projection([...]) d'abord")
+        env = self._env(U, aux)
+        shape = np.asarray(U[0]).shape
+        return np.stack([np.broadcast_to(e.eval(env), shape) for e in self._proj], axis=0)
 
     def source_jacobian(self, rows):
         """JACOBIEN ANALYTIQUE de la source : dS/dU, matrice n_vars x n_vars d'expressions
@@ -1703,6 +1764,7 @@ class HyperbolicModel:
                   self._eig.get("x", []), self._eig.get("y", []), self._source or [],
                   [e for e in (self._stab_speed, self._stab_dt, self._src_freq)
                    if e is not None],
+                  self._proj or [],  # projection ponctuelle post-pas (ADC-177)
                   [e for row in (self._src_jac or []) for e in row]]
         if self._wave_speeds is not None:
             groups.append(list(self._wave_speeds["x"]) + list(self._wave_speeds["y"]))
@@ -2451,6 +2513,18 @@ class HyperbolicModel:
             S += dtl
             S += ["    return %s;" % dcpps[0], "  }", ""]
 
+        # PROJECTION PONCTUELLE post-pas (m.projection, ADC-177) : emise comme le trait C++
+        # HasPointwiseProjection (project(U, aux) -> State), appliquee par le stepper a la FIN de
+        # chaque macro-pas entier. SANS appel, rien d'emis -> aucun hook (chemin bit-identique).
+        if self._proj is not None:
+            S.append("  ADC_HD State project(const State& U, %s) const {" % aux_param)
+            S += cons_locals() + prim_locals() + aux_locals()
+            ptl, pcpps = self._codegen_exprs(self._proj, cse)
+            S += ptl
+            S.append("    State Up{};")
+            S += ["    Up[%d] = %s;" % (i, c) for i, c in enumerate(pcpps)]
+            S += ["    return Up;", "  }", ""]
+
         S.append("  ADC_HD Prim to_primitive(const State& U) const {")
         S += cons_locals() + prim_locals()
         S.append("    Prim P{};")
@@ -2630,6 +2704,13 @@ class HyperbolicModel:
         GenSrc, GenEll> derriere une fabrique extern "C" (adc_model_nvars / adc_make_model /
         adc_destroy_model via adc::ModelAdapter). C'est ce que compile_so compile et que
         System.add_dynamic_block charge comme bloc couple a DISPATCH VIRTUEL (prototypage hote)."""
+        # PROJECTION ponctuelle (ADC-177) : le chemin JIT (IModel, dispatch virtuel) ne la transporte
+        # pas -- elle serait IGNOREE en silence (le bloc dynamique n'a pas de hook post-pas). Rejet
+        # explicite (regle : jamais d'option ignoree) ; backends 'aot' / 'production' la portent.
+        if self._proj is not None:
+            raise ValueError("backend 'prototype' (JIT, IModel) : projection ponctuelle "
+                             "(m.projection) non transportee par ce chemin ; utiliser "
+                             "backend='aot' ou 'production'")
         nv, bricks, composite = self._emit_bricks(name)
         return ('#include <adc/runtime/dynamic_model.hpp>\n'
                 '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
@@ -2986,6 +3067,10 @@ class HyperbolicModel:
         parts.append("src_freq=%s" % (repr(m._src_freq) if m._src_freq is not None else ""))
         parts.append("src_jac=%s" % (";".join(repr(e) for row in m._src_jac for e in row)
                                      if m._src_jac is not None else ""))
+        # Projection ponctuelle post-pas (ADC-177) : ajoutee au hash UNIQUEMENT si declaree (sans
+        # appel, hash strictement identique a l'historique -> cle de cache .so preservee).
+        if getattr(m, "_proj", None) is not None:
+            parts.append("proj=%s" % ";".join(repr(e) for e in m._proj))
         parts.append("hllc=%d" % (1 if m._hllc else 0))
         parts.append("roe=%d" % (1 if getattr(m, "_roe", False) else 0))
         # roe_dissipation FOURNIE : ajoute au hash UNIQUEMENT si presente (sans appel, hash inchange
@@ -3527,6 +3612,19 @@ class Model:
         d'expressions) : le Newton implicite (IMEX/SourceImplicitBE) l'utilise a la place des
         differences finies. EXIGE m.source. Delegue a HyperbolicModel.source_jacobian."""
         self._m.source_jacobian(rows)
+
+    def projection(self, exprs):
+        """PROJECTION PONCTUELLE post-pas U <- P(U, aux) (ADC-177, OPTIONNEL) : une expression par
+        composante conservative, appliquee par le System a la FIN de chaque macro-pas ENTIER (jamais
+        par etage RK) sur les cellules valides. CONTRAT : idempotente et ponctuelle ; clamps en
+        max/min via abs_/sign. Backends 'aot'/'production' (System) ; 'prototype' et AMR rejetes.
+        Delegue a HyperbolicModel.projection (cf. son contrat complet)."""
+        self._m.projection(exprs)
+
+    def projection_value(self, U, aux=None):
+        """EVALUATEUR numpy de la projection emise (reference de test ; delegue a
+        HyperbolicModel.projection_value)."""
+        return self._m.projection_value(U, aux)
 
     def implicit_source(self, jacobian=None):
         """Declaration GROUPEE de l'implicite local (audit vague 3, sucre) : le RESIDU est deja
