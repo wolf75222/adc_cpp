@@ -95,6 +95,12 @@ amr/index
 :caption: Running
 
 backends/index
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Advanced topics
+
 advanced/index
 ```
 

@@ -578,3 +578,66 @@ mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
+
+[docs."docs/sphinx/advanced/poisson-solvers.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/multigrid-poisson.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/spectral-fft-poisson.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/coupled-inter-species-sources.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/condensed-schur-source-stage.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/compilation-production-aot-prototype.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/performance-and-profiling.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/polar-disc-geometry.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/advanced/cpp-extension-native-brick.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
