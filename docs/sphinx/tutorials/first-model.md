@@ -4,7 +4,7 @@ Go from nothing to a real run: build the `adc` Python module, run the smallest m
 diocotron, a scalar density advected by the E x B drift), and see it produce output.
 
 This is the shortest path. The model is the
-[reduced diocotron from the presentation](../getting_started/presentation.md): one density `n`
+[reduced diocotron from the presentation](../getting-started/overview.md): one density `n`
 transported by the E x B drift, with the potential `phi` supplied at each step by a system Poisson
 `-lap phi = alpha (n - n_i0)`. The drift is `v = (-d_y phi / B0, d_x phi / B0)`. This is the
 diocotron normalization benchmark, not the full Euler-Poisson system.
@@ -13,7 +13,7 @@ diocotron normalization benchmark, not the full Euler-Poisson system.
 
 - A C++23 compiler (AppleClang 16+, GCC 13+, or Clang 17+), CMake 3.21 or newer, Ninja, and
   Python 3.10 or newer with `numpy` and `matplotlib`. The simplest way to get all of these is the
-  repository conda env, set up in [Installation](../getting_started/installation.md).
+  repository conda env, set up in [Installation](../getting-started/installation.md).
 - A clone of the repository. If you do not have one, run the clone step below.
 
 ## Steps
@@ -96,8 +96,8 @@ and the Poisson right-hand side. They are set near the top of the script:
 The same physics can also be composed from native bricks with `adc.Model(state, transport, source,
 elliptic)`. The DSL formulas and the native bricks are two ways to describe the same physics and
 produce an identical numerical kernel. The brick catalog is in the
-[native brick reference](../reference/bricks_reference.md), and the formula syntax is in the
-[symbolic DSL reference](../reference/dsl_reference.md).
+[native brick reference](../reference/native-bricks.md), and the formula syntax is in the
+[symbolic DSL reference](../reference/symbolic-dsl.md).
 
 ## Expected result
 

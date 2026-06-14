@@ -6,7 +6,7 @@ run it, and confirm it produces a result bit-identical to the same model built f
 ## Prerequisites
 
 - A built `adc` Python module. If you have not built it yet, follow
-  [Installation](../getting_started/installation.md). For this tutorial, use the build from
+  [Installation](../getting-started/installation.md). For this tutorial, use the build from
   `cmake --preset python` or `pip install .`; the Kokkos Serial backend is enough.
 - `numpy` and `matplotlib` in the same Python environment.
 - The repository headers on disk, because the DSL compiles a `.so` against them. The `production`
@@ -80,7 +80,7 @@ verifies that every referenced variable is declared.
 the imports. The argument `n_i0` is the neutralizing ionic background; the script fixes it to the
 mean of the initial density so the periodic Poisson is solvable. The full list of declarators
 (`conservative_vars`, `aux`, `flux`, `eigenvalues`, `primitive_vars`, `conservative_from`,
-`elliptic_rhs`, `param`, `check`) is in the [symbolic DSL reference](../reference/dsl_reference.md).
+`elliptic_rhs`, `param`, `check`) is in the [symbolic DSL reference](../reference/symbolic-dsl.md).
 
 ## Step 4: Compile the model to a `.so` and build the System
 
@@ -97,7 +97,7 @@ Poisson (right-hand side = charge density, geometric multigrid).
 ```
 
 The three backends (`prototype`, `aot`, `production`) and their MPI / AMR / GPU coverage are
-described in the [symbolic DSL reference](../reference/dsl_reference.md). For a first local run, the
+described in the [symbolic DSL reference](../reference/symbolic-dsl.md). For a first local run, the
 fallback to `aot` is expected and fine; both backends produce the same numerics.
 
 ## Step 5: Run the script end to end
@@ -164,8 +164,8 @@ formulas reproduce exactly the conventions of the native `ExB` and `BackgroundDe
 ## Next
 
 - Compare a uniform grid against an adaptive hierarchy by reading the `uniform_vs_amr` part of the
-  [A->Z tutorial](../getting_started/tutorial.md), which replays this same model on `adc.AmrSystem`.
-- Browse the [native brick catalog](../reference/bricks_reference.md) to see which models you can
+  [A->Z tutorial](../getting-started/tutorial.md), which replays this same model on `adc.AmrSystem`.
+- Browse the [native brick catalog](../reference/native-bricks.md) to see which models you can
   compose without writing formulas.
-- Read the [symbolic DSL reference](../reference/dsl_reference.md) for the complete declarator and
+- Read the [symbolic DSL reference](../reference/symbolic-dsl.md) for the complete declarator and
   backend tables, including runtime parameters and hybrid native-plus-DSL models.

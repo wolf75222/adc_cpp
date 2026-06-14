@@ -17,7 +17,7 @@ remain the contributor reference and are linked where useful.
 :maxdepth: 2
 :caption: Getting started
 
-getting_started/index
+getting-started/index
 ```
 
 ```{toctree}
@@ -144,9 +144,9 @@ Three orthogonal axes (concept `PhysicalModel`, policy `NumericalFlux`, concept
 - `for_each_cell`: serial / OpenMP / Kokkos; `comm.hpp`: MPI collectives, see
   [Parallel backends](backends/index.md).
 
-New here? Start with the [presentation](getting_started/presentation.md),
-[install](getting_started/installation.md), then follow the
-[A->Z tutorial](getting_started/tutorial.md).
+New here? Start with the [overview](getting-started/overview.md),
+[install](getting-started/installation.md), then follow the
+[A->Z tutorial](getting-started/tutorial.md).
 
 ## Links
 

@@ -5,7 +5,7 @@ This guide shows how to pick the Kokkos execution space for a run: `Serial`
 execution space is fixed at compile time, not a runtime flag: you choose it by
 pointing the build at a matching Kokkos install and reconfiguring. This guide
 assumes you can build `adc_cpp` and run `ctest`; if not, start with
-[Installation](../getting_started/installation.md). For the
+[Installation](../getting-started/installation.md). For the
 configuration-by-configuration reference, see
 [Parallel backends](../backends/index.md).
 

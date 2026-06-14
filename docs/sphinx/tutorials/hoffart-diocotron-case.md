@@ -5,7 +5,7 @@ the diocotron instability benchmark of Hoffart et al. (arXiv:2510.11808, Sec 5.3
 
 ## Prerequisites
 
-- The `adc` Python module, built from adc_cpp. See [Installation](../getting_started/installation.md).
+- The `adc` Python module, built from adc_cpp. See [Installation](../getting-started/installation.md).
 - A local clone of adc_cases.
 
 ## Run it

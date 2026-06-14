@@ -268,7 +268,7 @@ You can mix native bricks and partial DSL bricks in a single model via
 `adc.CompositeModel(transport, source, elliptic)`, which returns a `dsl.HybridModel` ; its
 `.compile(backend="aot")` returns a `CompiledModel` attachable via `add_equation`. At least one slot must
 be a DSL brick (otherwise use `adc.Model(...)`). Brick catalog and example :
-[brick reference](bricks_reference.md).
+[brick reference](native-bricks.md).
 
 ### ABI key (production)
 

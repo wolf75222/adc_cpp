@@ -2,10 +2,10 @@
 
 > **Status: native Windows works for the CPU** -- Serial, OpenMP, the `adc` Python module
 > (`import adc`, `System`, `AmrSystem`), **DSL production** (`.dll`, bit-identical results) and
-> compilation of custom C++ (`adc_cases.common.native`). **The GPU stays on [WSL2](windows_wsl2.md)**
+> compilation of custom C++ (`adc_cases.common.native`). **The GPU stays on [WSL2](windows-wsl2.md)**
 > (Kokkos CUDA is not supported natively on Windows).
 
-This page complements the [WSL2](windows_wsl2.md) guide. WSL2 remains the simplest path and the only
+This page complements the [WSL2](windows-wsl2.md) guide. WSL2 remains the simplest path and the only
 one that covers the **GPU**. The native path is useful if you want to avoid WSL2 for CPU work.
 
 ## Toolchain
@@ -79,6 +79,6 @@ same way.
 
 ## Limitations
 - **Native CUDA GPU: not available** (Kokkos has no native CUDA support on Windows -- neither VS+CUDA, nor
-  nvcc-as-CXX for lack of a Windows `nvcc_wrapper`). The GPU goes through [WSL2](windows_wsl2.md).
+  nvcc-as-CXX for lack of a Windows `nvcc_wrapper`). The GPU goes through [WSL2](windows-wsl2.md).
 - CMake industrialization (shared Kokkos option, install of the import libs, clang-cl presets) to finalize
   so that these builds are reproducible from a single command.

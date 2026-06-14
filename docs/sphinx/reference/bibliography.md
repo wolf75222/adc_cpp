@@ -38,7 +38,7 @@ reader-oriented summary.
 - **Hoffart**, 2025, **arXiv:2510.11808** -- isothermal two-fluid model and magnetized
   Euler-Poisson, validation target for the asymptotic-preserving scheme (application scenario,
   `adc_cases/two_fluid_ap/`). See the reproduction limit of the full model in
-  [limitations](limitations.md).
+  [limitations](known-limitations.md).
 
 ## Performance methodology
 

@@ -88,5 +88,5 @@ all transport dynamics stay in the hyperbolic phase of the splitting. It is opt-
 in as the source phase of a Strang step. One scope boundary is worth noting: the condensed
 Schur stage runs on the single-level grid, not on the AMR hierarchy, where the elliptic part
 is solved at the coarse level and injected to the fine levels. See the
-[limitations reference](../reference/limitations.md) and the
+[limitations reference](../reference/known-limitations.md) and the
 [advanced topics](../advanced/index.md) for the implementation details and elliptic solvers.

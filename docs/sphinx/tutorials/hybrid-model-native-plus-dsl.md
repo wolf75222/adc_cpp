@@ -12,12 +12,12 @@ physics already exists as a native brick and part is best expressed symbolically
 ## Before you start
 
 - A built `adc` Python module and the DSL toolchain (adc headers plus a C++ compiler). See the
-  [installation guide](../getting_started/installation.md).
+  [installation guide](../getting-started/installation.md).
 - The three model-writing fronts (native bricks, DSL, hybrid) from the
   [models overview](../models/index.md).
 - The hybrid composition rule below uses the brick names from the
-  [brick reference](../reference/bricks_reference.md) and the DSL bricks from the
-  [DSL reference](../reference/dsl_reference.md).
+  [brick reference](../reference/native-bricks.md) and the DSL bricks from the
+  [DSL reference](../reference/symbolic-dsl.md).
 
 ## How a CompositeModel is built
 
@@ -115,10 +115,10 @@ transport and a DSL source or elliptic brick.
   the layout.
 - The hybrid path targets the `aot` backend. For the backend matrix (CPU, MPI, AMR) and the
   difference between `prototype`, `aot`, and `production`, see the
-  [DSL reference](../reference/dsl_reference.md).
+  [DSL reference](../reference/symbolic-dsl.md).
 
 ## Next
 
 To write a complete model as formulas from scratch, read the
-[DSL reference](../reference/dsl_reference.md). For the full list of native bricks you can place in
-a composite slot, read the [brick reference](../reference/bricks_reference.md).
+[DSL reference](../reference/symbolic-dsl.md). For the full list of native bricks you can place in
+a composite slot, read the [brick reference](../reference/native-bricks.md).

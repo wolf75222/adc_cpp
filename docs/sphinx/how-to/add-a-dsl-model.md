@@ -4,7 +4,7 @@ Express a model's physics as symbolic formulas with `adc.dsl.Model`, compile it 
 and attach it to a `System`. Use this when you want to declare the flux, eigenvalues, source and
 elliptic right-hand side directly, instead of composing native bricks. This page assumes you can
 already build the Python module and run a case. For the syntax of every declarator, see the
-[DSL reference](../reference/dsl_reference.md); for the concepts, see
+[DSL reference](../reference/symbolic-dsl.md); for the concepts, see
 [fluxes, sources and eigenvalues](../concepts/fluxes-sources-eigenvalues.md).
 
 ## Before you start
@@ -99,7 +99,7 @@ generated `.so` between runs (default `~/.cache/adc/dsl`).
 ## Next steps
 
 - Pick the backend for your run (`prototype`, `aot`, `production`) in the
-  [DSL reference](../reference/dsl_reference.md).
+  [DSL reference](../reference/symbolic-dsl.md).
 - Mix native bricks with DSL bricks in one model with the
-  [brick reference](../reference/bricks_reference.md).
+  [brick reference](../reference/native-bricks.md).
 - Run the model on a refined hierarchy in the [simulation guide](../simulation/index.md).

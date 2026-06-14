@@ -5,14 +5,14 @@ Curated reference for the `adc` module (pybind11 bindings of `libadc` plus the o
 in the compiled C++ lib (no numpy loop on the hot path, GPU/MPI preserved).
 
 Only the public surface is documented here (internal symbols are not listed). For
-annotated walkthroughs, see the [quickstart](../getting_started/first_run.md); named compositions
+annotated walkthroughs, see the [quickstart](../getting-started/first-run.md); named compositions
 (scenarios) live in the [`adc_cases`](https://github.com/wolf75222/adc_cases) repository.
 
 ```{note}
 The `autoclass` / `autofunction` blocks below only render if the `adc` module has been
 built (`-DADC_BUILD_PYTHON=ON`) and is importable at doc build time. See
-[installation](../getting_started/installation.md) and the [quickstart](../getting_started/first_run.md); watch out for the interpreter
-footgun (the `.so` is linked to a specific cpython), detailed in [limitations](limitations.md).
+[installation](../getting-started/installation.md) and the [quickstart](../getting-started/first-run.md); watch out for the interpreter
+footgun (the `.so` is linked to a specific cpython), detailed in [limitations](known-limitations.md).
 ```
 
 ## System: compose, configure, advance
@@ -157,6 +157,6 @@ model (produced by `adc.CompositeModel(...)`).
 ```{note}
 Compilation backends (`m.compile(..., backend=...)`, default `aot`): `prototype` and `aot`
 are CPU-only (no MPI/AMR/GPU); `production` is CPU + MPI + AMR. See
-[backend matrix](backend_matrix.md) and [limitations](limitations.md). DSL design:
+[backend matrix](backend-matrix.md) and [limitations](known-limitations.md). DSL design:
 [DSL_API.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_API.md), [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).
 ```

@@ -231,5 +231,5 @@ sim.step_cfl(0.4)
 print(sim.density("ne").shape)   # (64, 64)
 ```
 
-If these lines run, the install is good. Next: [first run](first_run.md) then
+If these lines run, the install is good. Next: [first run](first-run.md) then
 [A->Z tutorial](tutorial.md).

@@ -45,4 +45,4 @@ to link for the core, you include the headers. The three design axes are orthogo
 `include/adc/coupling/amr_coupler_mp.hpp`.)
 
 For the test coverage of these components by backend, see
-[backend matrix](backend_matrix.md).
+[backend matrix](backend-matrix.md).

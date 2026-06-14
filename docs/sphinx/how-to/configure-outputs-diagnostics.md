@@ -67,4 +67,4 @@ sim.solve_fields()
 ## Next steps
 
 - Set the initial fields a run starts from with [the simulation guide](../simulation/index.md).
-- Work an end-to-end run in [the tutorial](../getting_started/tutorial.md).
+- Work an end-to-end run in [the tutorial](../getting-started/tutorial.md).

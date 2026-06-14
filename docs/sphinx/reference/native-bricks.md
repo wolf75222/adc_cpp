@@ -3,7 +3,7 @@
 This page is the exhaustive registry of `adc`'s composable native bricks: each brick,
 its signature, its parameters, what it declares or adds, and its constraints. It is the
 detailed complement of the [models page](../models/index.md) (which presents the three ways
-to write a model) and of the [Python API](api_python.md) (curated autodoc) ; here the detail at
+to write a model) and of the [Python API](python-api.md) (curated autodoc) ; here the detail at
 the parameter level.
 
 A native model is a composition of four role bricks via

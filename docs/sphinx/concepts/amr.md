@@ -79,4 +79,4 @@ The hierarchy is deliberately two levels with ratio 2; multi-level regrid does n
 yet. The Poisson solve is "coarse plus inject", not a multi-level composite elliptic
 solve, which is enough for an observable that lives on cells the coarse already resolves.
 The Schur-condensed source stage has no AMR counterpart, so for that path you use a non-
-refined `System`. See [limitations](../reference/limitations.md) for the full list.
+refined `System`. See [limitations](../reference/known-limitations.md) for the full list.

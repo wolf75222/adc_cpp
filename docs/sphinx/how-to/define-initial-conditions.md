@@ -66,4 +66,4 @@ drift stays near machine roundoff.
 ## Next steps
 
 - [Configure a simulation](../simulation/index.md) for the spatial scheme, time policy and Poisson.
-- [A->Z tutorial](../getting_started/tutorial.md) for an end-to-end diocotron run.
+- [A->Z tutorial](../getting-started/tutorial.md) for an end-to-end diocotron run.

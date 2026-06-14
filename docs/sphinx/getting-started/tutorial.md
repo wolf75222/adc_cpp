@@ -214,8 +214,8 @@ The difference is zero to binary precision (`max|briques - DSL| = 0`, `np.array_
 DSL formulas reproduce exactly the conventions of the `ExBVelocity` and `BackgroundDensity` bricks.
 A divergence (even $10^{-15}$) would betray a wrong formula (sign of the drift, wave bound,
 right-hand side). The full brick catalog is in the
-[brick reference](../reference/bricks_reference.md), and the DSL one in the
-[DSL reference](../reference/dsl_reference.md); the `tutorial/` application case in `adc_cases`
+[brick reference](../reference/native-bricks.md), and the DSL one in the
+[DSL reference](../reference/symbolic-dsl.md); the `tutorial/` application case in `adc_cases`
 pushes the demonstration to three fronts (specialized helper included).
 
 ![Final density: the same physics in native bricks (left) and in DSL formulas (right); maximum difference zero.](../tutorials/_assets/diocotron_native_vs_dsl.png)
@@ -317,7 +317,7 @@ per rank) for the GPU. The GPU itself requires ROMEO: `-DADC_USE_KOKKOS=ON` +
   momentum equation, no energy), and it is not a reproduction of the Hoffart
   configuration. It is the diocotron normalization benchmark. The fidelity to the
   full system is discussed in [`HOFFART_FIDELITY.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/HOFFART_FIDELITY.md); the
-  full scenarios live in `adc_cases` (see [Repository organization](organisation.md)).
+  full scenarios live in `adc_cases` (see [Repository organization](repository-layout.md)).
 - **Serial backend.** The Python run is serial (see steps 16-17 and [backend](backend.md)); the
   figures are produced at low resolution to stay fast and reproducible.
 - **Indicative AMR comparison.** `uniform_vs_amr` illustrates the use of `AmrSystem`; the

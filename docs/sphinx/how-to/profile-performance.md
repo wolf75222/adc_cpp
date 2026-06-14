@@ -6,8 +6,8 @@ seams (without touching the hot path) and times each phase separately. Use it to
 the bottleneck; do not refactor for performance without a profile that shows it.
 
 This task assumes you have a working build. For installing and a first run, see
-[the installation guide](../getting_started/installation.md) and
-[the tutorial](../getting_started/tutorial.md).
+[the installation guide](../getting-started/installation.md) and
+[the tutorial](../getting-started/tutorial.md).
 
 ## What the harness measures
 

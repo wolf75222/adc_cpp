@@ -69,7 +69,7 @@ Per-platform backend coverage and known pitfalls (macOS, CUDA, conda, CI runners
 ## Installation
 
 Three ways. Build-from-source details live in the
-[installation guide](docs/sphinx/getting_started/installation.md) rather than inline here.
+[installation guide](docs/sphinx/getting-started/installation.md) rather than inline here.
 
 C++ core, via CMake presets:
 
@@ -129,9 +129,9 @@ sim.step_cfl(0.4)
 
 `adc.AmrSystem` composes one or more blocks on a refined hierarchy (`set_refinement`, regrid,
 conservative reflux, composite FAC elliptic and a Schur-condensed source stage). Step-by-step
-tutorial (bricks and formulas): [getting_started/tutorial](docs/sphinx/getting_started/tutorial.md).
-Reference: [bricks_reference](docs/sphinx/reference/bricks_reference.md),
-[dsl_reference](docs/sphinx/reference/dsl_reference.md).
+tutorial (bricks and formulas): [getting-started/tutorial](docs/sphinx/getting-started/tutorial.md).
+Reference: [native-bricks](docs/sphinx/reference/native-bricks.md),
+[symbolic-dsl](docs/sphinx/reference/symbolic-dsl.md).
 
 ## Documentation
 

@@ -12,12 +12,12 @@ bricks. To write physics that has no native brick, you use the symbolic DSL inst
 
 In this tutorial you build the reduced diocotron model: a single electron density `n`, advected by
 the E x B drift, coupled to a scalar Poisson with a neutralizing background. You reuse the exact
-brick model that the [A->Z tutorial](../getting_started/tutorial.md) validates against the DSL.
+brick model that the [A->Z tutorial](../getting-started/tutorial.md) validates against the DSL.
 
 ## Prerequisites
 
 - A working install of the `adc` Python module. If you do not have one, follow
-  [Installation](../getting_started/installation.md). For a first local run, use the Kokkos Serial
+  [Installation](../getting-started/installation.md). For a first local run, use the Kokkos Serial
   backend (the default of `pip install .`).
 - `numpy`.
 - Basic familiarity with the model concept; see
@@ -44,7 +44,7 @@ pip install .
 ```
 
 The full build, the developer build tree, and the optional environment variables are covered in
-[Installation](../getting_started/installation.md).
+[Installation](../getting-started/installation.md).
 
 ## Step 2: Start a Python session and import `adc`
 
@@ -96,7 +96,7 @@ ALPHA = 1.0
 `adc.Model(...)` validates the four roles as it builds them. The state and the transport must
 agree: `Scalar` requires `ExB`. An inconsistent pairing (for example `Scalar` with a fluid flux)
 raises a `ValueError` immediately. The full brick catalog, with every signature and constraint, is
-the [native bricks reference](../reference/bricks_reference.md).
+the [native bricks reference](../reference/native-bricks.md).
 
 ## Step 4: Create the system
 
@@ -157,7 +157,7 @@ sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Expl
 
 `add_block` dispatches on the model type: the `ModelSpec` returned by `adc.Model(...)` goes to the
 native block adder. The spatial schemes and time integrators are listed in the
-[native bricks reference](../reference/bricks_reference.md).
+[native bricks reference](../reference/native-bricks.md).
 
 ## Step 7: Set the system Poisson
 
@@ -226,15 +226,15 @@ and AMR runs.
 ## Troubleshooting
 
 - `ValueError` at `adc.Model(...)`: the four roles are inconsistent. `Scalar` must be paired with
-  `ExB`; check the pairing against the [native bricks reference](../reference/bricks_reference.md).
+  `ExB`; check the pairing against the [native bricks reference](../reference/native-bricks.md).
 - `ImportError` on `import adc`: the module is not built or not on the path. The error message gives
   the cause and the rebuild command; run `python -c "import adc; adc.doctor()"` to check the
-  environment, and see [Installation](../getting_started/installation.md).
+  environment, and see [Installation](../getting-started/installation.md).
 
 ## Next
 
-- Read the full [native bricks reference](../reference/bricks_reference.md) for every brick, its
+- Read the full [native bricks reference](../reference/native-bricks.md) for every brick, its
   signature, and its constraints.
-- Write physics that has no native brick with the [symbolic DSL](../reference/dsl_reference.md).
+- Write physics that has no native brick with the [symbolic DSL](../reference/symbolic-dsl.md).
 - Run the complete diocotron simulation, with figures and the uniform/AMR comparison, in the
-  [A->Z tutorial](../getting_started/tutorial.md).
+  [A->Z tutorial](../getting-started/tutorial.md).

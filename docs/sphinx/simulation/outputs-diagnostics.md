@@ -34,5 +34,5 @@ oracle):
 - `sim.eval_rhs(name)`: evaluates the right-hand side `R = -div F + S` of the block (the spatial `dU/dt`),
   `(ncomp, n, n)`, for a user-provided time integrator.
 
-Condensed API reference: [api](../reference/api_python.md). Complete recipes (figures, AMR):
-[examples](../getting_started/organisation.md). A->Z tutorial: [tutoriels](../getting_started/tutorial.md).
+Condensed API reference: [api](../reference/python-api.md). Complete recipes (figures, AMR):
+[examples](../getting-started/repository-layout.md). A->Z tutorial: [tutoriels](../getting-started/tutorial.md).

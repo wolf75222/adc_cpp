@@ -86,4 +86,4 @@ identical-layout requirement, which the construction guard enforces up front. Di
 hierarchies per species, with conservative projections between them, are a design
 frontier and not available today; see the
 [ARCHITECTURE guide](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md)
-and [current limitations](../reference/limitations.md).
+and [current limitations](../reference/known-limitations.md).

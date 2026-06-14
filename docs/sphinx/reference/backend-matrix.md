@@ -20,7 +20,7 @@ CI never builds `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_CUDA=ON`. All GPU validatio
 (single-GPU Cuda or multi-GPU MPI) is done manually on the ROMEO supercomputer (GH200
 node), not in CI. The GPU harnesses live in `python/tests/gpu/` and are launched by
 SBATCH. See [GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md) and the
-[limitations](limitations.md) page.
+[limitations](known-limitations.md) page.
 ```
 
 ## How to read the matrix

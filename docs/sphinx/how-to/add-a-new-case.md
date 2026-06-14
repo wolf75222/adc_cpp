@@ -4,7 +4,7 @@ A *case* is a named scenario that builds a model, wires it into an `adc.System`,
 initial data, and runs the time loop. Cases are not part of `adc_cpp`: they live in the
 companion `adc_cases` repository, one folder per case, each importing the installed `adc`
 Python package. This guide assumes you can already build and import `adc`; if not, start
-with the [installation guide](../getting_started/installation.md).
+with the [installation guide](../getting-started/installation.md).
 
 The convention is one folder per case under `adc_cases`. The folder holds a runnable
 Python script that imports `adc`, composes a model, plugs it into a system, and steps it.
@@ -62,5 +62,5 @@ Python script that imports `adc`, composes a model, plugs it into a system, and 
 
 ## Next steps
 
-- Follow the [tutorial](../getting_started/tutorial.md) for the full reduced-diocotron walkthrough.
+- Follow the [tutorial](../getting-started/tutorial.md) for the full reduced-diocotron walkthrough.
 - Read the [models overview](../models/index.md) to choose between native bricks, the DSL, and a hybrid model.

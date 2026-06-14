@@ -59,7 +59,7 @@ mostly a data-residence task, not a rewrite of the compute kernels.
 
 ## Going further
 
-- The repository split (lib vs scenarios): [Repository organization](organisation.md).
+- The repository split (lib vs scenarios): [Repository organization](repository-layout.md).
 - The detailed architecture, the seams and the design decisions: the contributor reference
   [`ARCHITECTURE.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) (section 1, "five orthogonal layers") and
   [`CHOICES.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/CHOICES.md).

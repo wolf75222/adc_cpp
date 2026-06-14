@@ -66,5 +66,5 @@ built with cut-cells rather than a plain square, which would keep the production
 while sharpening the boundary.
 
 For the precise wording of these edges and their status, see the
-[known limitations](../reference/limitations.md). For how a model is composed and plugged
+[known limitations](../reference/known-limitations.md). For how a model is composed and plugged
 into a `System`, see [Models](../models/index.md).

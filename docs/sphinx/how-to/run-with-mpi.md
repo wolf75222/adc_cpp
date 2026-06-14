@@ -62,4 +62,4 @@ OMP_NUM_THREADS=4 OMPI_MCA_rmaps_base_oversubscribe=true ctest --test-dir build-
 
 - To run multi-GPU on ROMEO, see the [parallel backends page](../backends/index.md).
 - For the Python `adc` module, which is serial only and does not exercise the MPI
-  paths, see the [installation page](../getting_started/installation.md).
+  paths, see the [installation page](../getting-started/installation.md).

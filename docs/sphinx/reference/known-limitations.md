@@ -99,4 +99,4 @@ The Python module (`adc._adc`) is a `.so` linked to the interpreter that compile
 
 You must therefore use exactly the 3.12 interpreter that built the module (with numpy), and
 point `PYTHONPATH` at the corresponding `build*/python`, or reinstall with the wanted backend
-(`ADC_USE_KOKKOS=ON pip install .`). See [installation](../getting_started/installation.md).
+(`ADC_USE_KOKKOS=ON pip install .`). See [installation](../getting-started/installation.md).

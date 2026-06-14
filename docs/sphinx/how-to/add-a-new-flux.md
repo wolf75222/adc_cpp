@@ -7,7 +7,7 @@ different fluxes. For the math behind these solvers, see
 [fluxes, sources and eigenvalues](../concepts/fluxes-sources-eigenvalues.md).
 
 This page assumes you already have a model and a `System`. If not, start with the
-[tutorial](../getting_started/tutorial.md).
+[tutorial](../getting-started/tutorial.md).
 
 ## Choose a flux
 
@@ -37,7 +37,7 @@ sim.add_block("gas", model=model, spatial=adc.FiniteVolume(limiter="minmod", rie
 ```
 
 For the full list of limiters, fluxes and reconstruction variables, see the
-[native bricks reference](../reference/bricks_reference.md).
+[native bricks reference](../reference/native-bricks.md).
 
 ## Declare a pressure for hllc or roe
 
@@ -51,11 +51,11 @@ expose `pressure` and `wave_speeds`. See
 The native `add_block` path supports every flux. On a compiled DSL model, the `prototype`
 backend accepts `rusanov` only and rejects the other fluxes with a `ValueError`; the `aot` and
 `production` backends accept all four. A wrong choice fails fast at plug time, never silently.
-For the per-backend matrix, see the [backend matrix](../reference/backend_matrix.md).
+For the per-backend matrix, see the [backend matrix](../reference/backend-matrix.md).
 
 ## Where to go next
 
 To add a flux that no native brick provides, write it as a hyperbolic brick in the DSL and
 compile it: see [write a model with the DSL](../tutorials/write-a-model-with-dsl.md). To prototype
 a flux in host Python without recompiling, see the `PythonFlux` entry in the
-[native bricks reference](../reference/bricks_reference.md).
+[native bricks reference](../reference/native-bricks.md).

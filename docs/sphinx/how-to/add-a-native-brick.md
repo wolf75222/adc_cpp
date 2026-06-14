@@ -10,12 +10,12 @@ write that slot as a symbolic formula instead (see
 [Write a model with the DSL](../tutorials/write-a-model-with-dsl.md)).
 
 For the full registry of bricks, signatures, parameters and constraints, see the
-[native bricks reference](../reference/bricks_reference.md).
+[native bricks reference](../reference/native-bricks.md).
 
 ## Before you begin
 
 Build and import `adc`. For a first local run, use the Kokkos Serial backend (see
-[Installation](../getting_started/installation.md)). The bricks in this recipe run on the
+[Installation](../getting-started/installation.md)). The bricks in this recipe run on the
 native `add_block` path, which preserves MPI, AMR and GPU.
 
 ## Steps
@@ -64,4 +64,4 @@ model.
 - To keep some native bricks and write only one slot as formulas, see
   [Write a model with bricks](../tutorials/write-a-model-with-bricks.md).
 - For every brick parameter and constraint, see the
-  [native bricks reference](../reference/bricks_reference.md).
+  [native bricks reference](../reference/native-bricks.md).

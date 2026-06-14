@@ -36,7 +36,7 @@ patterns = ["_generated/**", "tutorials/_assets*/**", "doxygen/**", "__pycache__
 
 # --- Prise en main (getting_started) ---------------------------------------------------------------
 
-[docs."docs/sphinx/getting_started/installation.md"]
+[docs."docs/sphinx/getting-started/installation.md"]
 owner = "Romain"
 mode = "strict"
 depends_on = ["CMakePresets.json", "pyproject.toml", "scripts/setup_env.sh", "environment.yml", "CMakeLists.txt", "scripts/kokkos_openmp_conda.sh"]
@@ -44,7 +44,7 @@ tested_by = []
 testable = true
 reviewed = "b0f433f4988f286c2d4b5eef83789cf5099c6f46"
 
-[docs."docs/sphinx/getting_started/first_run.md"]
+[docs."docs/sphinx/getting-started/first-run.md"]
 owner = "Romain"
 mode = "strict"
 depends_on = ["python/adc/__init__.py", "include/adc/physics/bricks.hpp", "include/adc/runtime/system.hpp"]
@@ -52,7 +52,7 @@ tested_by = []
 testable = true
 reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
-[docs."docs/sphinx/getting_started/tutorial.md"]
+[docs."docs/sphinx/getting-started/tutorial.md"]
 owner = "Romain"
 mode = "strict"
 depends_on = ["docs/sphinx/tutorials/diocotron_tutorial.py", "python/adc/dsl.py", "include/adc/physics/hyperbolic.hpp", "include/adc/physics/elliptic.hpp", "include/adc/runtime/dsl_block.hpp"]
@@ -60,7 +60,7 @@ tested_by = ["docs/sphinx/tutorials/diocotron_tutorial.py"]
 testable = true
 reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
-[docs."docs/sphinx/getting_started/backend.md"]
+[docs."docs/sphinx/getting-started/backend.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["CMakePresets.json", "scripts/kokkos_openmp_conda.sh", "python/adc/__init__.py"]
@@ -68,7 +68,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/getting_started/organisation.md"]
+[docs."docs/sphinx/getting-started/repository-layout.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["CMakeLists.txt", "include/adc", "python/adc"]
@@ -76,21 +76,21 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/getting_started/presentation.md"]
+[docs."docs/sphinx/getting-started/overview.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
 
-[docs."docs/sphinx/getting_started/index.md"]
+[docs."docs/sphinx/getting-started/index.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
 
-[docs."docs/sphinx/getting_started/windows_native.md"]
+[docs."docs/sphinx/getting-started/windows-native.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["CMakePresets.json", "CMakeLists.txt"]
@@ -98,7 +98,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/getting_started/windows_wsl2.md"]
+[docs."docs/sphinx/getting-started/windows-wsl2.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["scripts/setup_env.sh", "environment.yml", "CMakePresets.json"]
@@ -166,7 +166,7 @@ depends_on = []
 tested_by = []
 testable = false
 
-[docs."docs/sphinx/reference/api_cpp.md"]
+[docs."docs/sphinx/reference/cpp-api.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["docs/Doxyfile", "include/adc"]
@@ -174,7 +174,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/reference/api_python.md"]
+[docs."docs/sphinx/reference/python-api.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["python/adc", "python/bindings.cpp", "python/system.cpp", "python/amr_system.cpp"]
@@ -182,7 +182,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/reference/backend_matrix.md"]
+[docs."docs/sphinx/reference/backend-matrix.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["CMakePresets.json", "docs/BACKEND_COVERAGE.md"]
@@ -190,7 +190,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/reference/bricks_reference.md"]
+[docs."docs/sphinx/reference/native-bricks.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["include/adc/physics", "include/adc/physics/bricks.hpp"]
@@ -198,7 +198,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/reference/dsl_reference.md"]
+[docs."docs/sphinx/reference/symbolic-dsl.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = ["python/adc/dsl.py", "include/adc/runtime/dsl_block.hpp"]
@@ -214,7 +214,7 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
-[docs."docs/sphinx/reference/limitations.md"]
+[docs."docs/sphinx/reference/known-limitations.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = []
@@ -727,6 +727,13 @@ tested_by = []
 testable = false
 
 [docs."docs/sphinx/development/numerical-validation.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/getting-started/quickstart.md"]
 owner = "Romain"
 mode = "warning"
 depends_on = []

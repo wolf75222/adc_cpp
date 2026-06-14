@@ -106,4 +106,4 @@ only when the net force vanishes by symmetry; under a real electrostatic or Lore
 it is not conserved by construction, which is the expected behavior of this class of
 scheme. The AMR path solves Poisson at the coarse level and injects the field to the
 fine levels rather than running a global Schur condensation across the hierarchy; see
-[Limitations](../reference/limitations.md).
+[Limitations](../reference/known-limitations.md).

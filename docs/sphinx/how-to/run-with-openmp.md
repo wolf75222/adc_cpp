@@ -6,7 +6,7 @@ single thread and you want to use the cores of one machine.
 
 The backend is fixed at compile time, not chosen at runtime, so changing it means reconfiguring
 and recompiling. This recipe assumes you already build `adc_cpp` with the Kokkos Serial backend;
-see [Installation](../getting_started/installation.md) if you do not. For the full list of
+see [Installation](../getting-started/installation.md) if you do not. For the full list of
 parallel configurations, see the [parallel backends](../backends/index.md) page.
 
 The Python `adc` module stays serial. The `_adc` extension is built in Kokkos Serial only, so a
@@ -51,4 +51,4 @@ for a fixed thread count but not bit-identical to a lexicographic sum; the max r
 - To add distributed ranks on top of OpenMP, combine `-DADC_USE_MPI=ON` with the same OpenMP Kokkos
   install, described on the [parallel backends](../backends/index.md) page.
 - To check which execution space a build actually runs, read
-  [Checking your backend](../getting_started/backend.md).
+  [Checking your backend](../getting-started/backend.md).

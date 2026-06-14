@@ -7,7 +7,7 @@ model, see [The physical model](../concepts/physical-model.md). For the full ste
 walkthrough of each front, follow the two write-a-model tutorials linked below.
 
 This page assumes you have already built the `adc` Python module. If you have not, follow the
-[installation guide](../getting_started/installation.md) first.
+[installation guide](../getting-started/installation.md) first.
 
 ## Choose a writing front
 
@@ -23,8 +23,8 @@ the same way. Pick the front by whether the bricks you need already exist:
   [Write a model with the DSL](../tutorials/write-a-model-with-dsl.md).
 
 The two fronts are interchangeable and produce an identical numerical kernel. The full brick
-catalog is in the [brick reference](../reference/bricks_reference.md), and the formula declarators
-are in the [DSL reference](../reference/dsl_reference.md).
+catalog is in the [brick reference](../reference/native-bricks.md), and the formula declarators
+are in the [DSL reference](../reference/symbolic-dsl.md).
 
 ## Define the model
 
@@ -46,7 +46,7 @@ compiled = diocotron_model(n_i0).compile(backend="production")
 Replace `production` with `aot` for a marshaled, mono-rank `.so` for CPU debug or bench. The
 default backend of `m.compile` is `aot`, so request `production` explicitly for the native
 zero-copy path under MPI or AMR. For the backend trade-offs, see the
-[backend matrix](../reference/backend_matrix.md).
+[backend matrix](../reference/backend-matrix.md).
 
 ## Run the model
 
