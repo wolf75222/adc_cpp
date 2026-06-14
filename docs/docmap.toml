@@ -42,7 +42,7 @@ mode = "strict"
 depends_on = ["CMakePresets.json", "pyproject.toml", "scripts/setup_env.sh", "environment.yml", "CMakeLists.txt", "scripts/kokkos_openmp_conda.sh"]
 tested_by = []
 testable = true
-reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
+reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
 [docs."docs/sphinx/getting_started/first_run.md"]
 owner = "Romain"
@@ -50,7 +50,7 @@ mode = "strict"
 depends_on = ["python/adc/__init__.py", "python/system.cpp", "include/adc/physics/bricks.hpp", "include/adc/runtime/system.hpp"]
 tested_by = []
 testable = true
-reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
+reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
 [docs."docs/sphinx/getting_started/tutorial.md"]
 owner = "Romain"
@@ -58,7 +58,7 @@ mode = "strict"
 depends_on = ["docs/sphinx/tutorials/diocotron_tutorial.py", "python/adc/dsl.py", "include/adc/physics/hyperbolic.hpp", "include/adc/physics/elliptic.hpp", "include/adc/runtime/dsl_block.hpp"]
 tested_by = ["docs/sphinx/tutorials/diocotron_tutorial.py"]
 testable = true
-reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
+reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
 [docs."docs/sphinx/getting_started/backend.md"]
 owner = "Romain"
