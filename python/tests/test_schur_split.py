@@ -151,9 +151,11 @@ def check_condensed_schur_descriptors():
     # (resolution role -> composante cote C++) ; les defauts canoniques gardent des specs VIDES (chemin
     # historique C++ bit-identique).
     cs = adc.CondensedSchur(density=adc.Role.Energy,
-                            momentum=(adc.Role.VelocityX, adc.Role.VelocityY))
-    chk(bool(cs.density_spec) and bool(cs.momentum_x_spec) and bool(cs.momentum_y_spec),
-        "(e) CondensedSchur(density/momentum != defaut) -> accepte et transporte (*_spec non vides)")
+                            momentum=(adc.Role.VelocityX, adc.Role.VelocityY),
+                            energy=adc.Role.Scalar)
+    chk(bool(cs.density_spec) and bool(cs.momentum_x_spec) and bool(cs.momentum_y_spec)
+        and bool(cs.energy_spec),
+        "(e) CondensedSchur(density/momentum/energy != defaut) -> accepte et transporte (*_spec non vides)")
     chk(adc.CondensedSchur().density_spec == "" and adc.CondensedSchur().momentum_x_spec == "",
         "(e) CondensedSchur defaut -> specs VIDES (chemin canonique C++ inchange)")
 
@@ -197,6 +199,8 @@ def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
         print("skip  compilateur ou en-tetes adc absents -> test_schur_split saute (%s)" % INCLUDE)
+        if fails:  # ne pas masquer un echec des gardes pures Python (e)/(f) sans compilateur
+            raise SystemExit("test_schur_split : %d verification(s) en echec" % fails)
         print("test_schur_split : OK (rien a compiler)")
         return
 
