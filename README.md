@@ -50,6 +50,7 @@ modele peut declarer `n_aux` pour lire des champs supplementaires (`B_z`, `T_e`)
 - [Ce que fournit le coeur](#ce-que-fournit-le-coeur)
 - [Ecosysteme](#ecosysteme)
 - [Documentation](#documentation)
+- [Plateformes supportees](#plateformes-supportees)
 - [Quick start](#quick-start)
   - [Prerequis](#prerequis)
   - [Build et tests](#build-et-tests)
@@ -96,6 +97,35 @@ Carte par module et par fichier : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). 
   (matrice backends / tests).
 - Politique de qualite documentaire : [DOC_QUALITY](docs/DOC_QUALITY.md) (taxonomie des docs,
   decisions d'outillage, guide de mise a jour).
+
+## Plateformes supportees
+
+Le coeur vise trois cibles de premier rang -- la CI Linux (gate de chaque PR), le poste de dev macOS
+et la production GPU sur ROMEO -- plus une cible Windows en cours via WSL2. Couverture backend detaillee
+par cible : [docs/BACKEND_COVERAGE.md](docs/BACKEND_COVERAGE.md).
+
+| Plateforme | Role | Compilateur(s) | Backends valides |
+|---|---|---|---|
+| `x86_64-linux` (ubuntu-latest) | CI (gate + quality) | gcc (defaut runner), clang (job tidy ; fuzz des la vague 2 qualite) | Kokkos Serial + OpenMP, MPI |
+| `aarch64-darwin` (macOS) | dev local | AppleClang (build) ; LLVM Homebrew pour clang-format/clang-tidy/fuzzing | Kokkos Serial + OpenMP, MPI conda |
+| `aarch64-linux + CUDA` (GH200 / cluster ROMEO) | production HPC | gcc + nvcc CUDA 12.x | Kokkos CUDA, MPI multi-GPU |
+| `WSL2 Ubuntu` (Windows 11) | en cours (epic ADC-90) | comme Linux | port Windows v1 |
+
+### Pieges connus par plateforme
+
+- **macOS** : l'ASan du LLVM Homebrew deadlocke AVANT `main` (initialisation re-entrante via dyld) ;
+  `MallocNanoZone=0` ne suffit pas. L'ASan d'AppleClang, lui, fonctionne (preset `ci-asan`, cf.
+  [docs/QUALITY_TOOLING.md](docs/QUALITY_TOOLING.md)). Pour le fuzzing local (harnais `fuzz/`,
+  livre par la vague 2 qualite), passer `-DADC_FUZZ_SANITIZERS=undefined` au configure.
+- **nvcc CUDA 12.x** : pas de `-std=c++23` -> forcer `ADC_CXX_STD=20` sous Kokkos (impacte la cle
+  d'ABI du DSL).
+- **conda-forge** : le paquet Kokkos est souvent Serial-only -> `scripts/kokkos_openmp_conda.sh`
+  installe un Kokkos OpenMP dans l'env conda actif.
+- **Runners GitHub** : MPI exige l'oversubscribe (`OMPI_MCA_rmaps_base_oversubscribe=true`,
+  `PRTE_MCA_rmaps_default_mapping_policy=:oversubscribe`).
+
+Hors perimetre : pas de 32 bits, pas de big-endian, arithmetique flottante IEEE 754 supposee ; le
+portage Windows natif est differe en v2 (epic ADC-90).
 
 ## Quick start
 
