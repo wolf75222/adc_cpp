@@ -1,18 +1,21 @@
 name: Docs
 
-# Deux lanes :
-#   - doclint (pull_request touchant docs/) : doc-lint rapide, fraicheur en avertissement, aucun build.
-#   - build + deploy (Pages) : opt-in -- message de commit avec "[docs]" ou workflow_dispatch ; installe
-#     Sphinx + Doxygen et compile le module Python (~quelques min). La plupart des commits ne touchent
-#     pas la doc, d'ou le marqueur opt-in pour la publication.
+# Lane LOURDE de la documentation : build Sphinx + Doxygen + module Python `_adc`, puis
+# deploiement Pages. Elle ne tourne PAS sur les PR ordinaires -- c'est docs-pr.yml (lane legere,
+# sans build) qui garde les PR. DECLENCHEURS :
+#   - push master AVEC "[docs]" dans le message de commit : publie la doc du nouveau master ;
+#   - workflow_dispatch : build + validation a la demande (deploie seulement depuis master) ;
+#   - schedule (dimanche 05:00 UTC, decale de quality.yml a 04:00 et du nightly ci-full a 03:17) :
+#     rebuild hebdo pour attraper toute derive d'environnement (image runner, deps). Un gate
+#     anti-gaspillage saute le gros build si master n'a pas bouge depuis le dernier build docs reussi.
+# scripts/build_docs.sh est la SOURCE UNIQUE des etapes (identique en local et en CI). Apres le
+# build, deux passes INFORMATIVES non bloquantes : linkcheck (liens, externes flaky toleres) et
+# rejeu des exemples de doc (docs/run_doc_examples.py, scripts du champ tested_by du docmap).
 on:
   push:
     branches: [master]
-  pull_request:
-    paths:
-      - 'docs/**'
-      - 'scripts/build_docs.sh'
-      - '.github/workflows/docs.yml'
+  schedule:
+    - cron: '0 5 * * 0'
   workflow_dispatch:
 
 concurrency:
@@ -23,70 +26,112 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # actions: read => le gate cron lit la liste des runs de docs.yml via l'API (gh api).
+  actions: read
 
 jobs:
-  # Lane PR : doc-lint rapide (presence + liens + fraicheur en avertissement). Aucun build
-  # Sphinx/Doxygen ici -- check_docs.py est pur stdlib + git, il lui faut juste l'historique
-  # complet (fetch-depth: 0) pour evaluer la fraicheur. --freshness-warn-only => jamais bloquant
-  # sur un doc en retard ; presence et lints restent durs.
-  doclint:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Doc-lint (presence + liens + fraicheur warn-only)
-        run: python docs/check_docs.py --freshness-warn-only
-
   build:
     if: |
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       contains(github.event.head_commit.message, '[docs]')
     runs-on: ubuntu-latest
+    # built = 'true' UNIQUEMENT si l'artefact a reellement ete produit (build non saute par le gate
+    # cron). deploy s'y conditionne pour ne JAMAIS publier sans build.
+    outputs:
+      built: ${{ steps.mark.outputs.built }}
     steps:
-      # fetch-depth: 0 = historique complet, requis par la fraicheur de check_docs.py
-      # (sinon git_state() voit un clone shallow et saute le check).
+      # Gate anti-gaspillage, schedule UNIQUEMENT. Sur un cron, on ne relance le gros build que si
+      # master a bouge depuis le dernier run docs.yml REUSSI : on lit le head_sha de ce run via
+      # l'API GitHub et on le compare au sha courant. Identique -> skip=true, et TOUS les steps
+      # suivants (jusqu'a l'upload) sont sautes -> deploy ne tourne pas (pas d'artefact).
+      # Hors schedule, ce step ne tourne pas : steps.gate.outputs.skip reste vide ('' != 'true'),
+      # donc les steps suivants tournent normalement (push [docs] / dispatch = build inconditionnel).
+      # En cas de pepin API, on retombe sur skip=false (fail-open : on construit).
+      - name: Gate cron (skip si master inchange)
+        id: gate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/docs.yml/runs?branch=master&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""' || echo "")
+          echo "Dernier build docs reussi sur master : ${last:-<aucun>}"
+          echo "SHA courant                          : ${{ github.sha }}"
+          if [ -n "$last" ] && [ "$last" = "${{ github.sha }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "master inchange depuis le dernier build docs reussi -> on saute le gros build."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # fetch-depth: 0 = historique complet, requis par la fraicheur de check_docs.py (appele par
+      # build_docs.sh) -- sinon git_state() voit un clone shallow et saute le check.
       - uses: actions/checkout@v5
+        if: steps.gate.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - name: System deps
+        if: steps.gate.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y libeigen3-dev doxygen graphviz ninja-build
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true'
         with:
           python-version: '3.12'
 
-      # numpy est requis a l'import du module (dsl.py fait `import numpy`) et par
-      # autodoc ; on l'installe avant de compiler/importer adc.
+      # numpy est requis a l'IMPORT du module (dsl.py fait `import numpy`) et par autodoc.
+      # matplotlib (+ Pillow, tire en dependance) est requis par le tutoriel diocotron que
+      # docs/run_doc_examples.py rejoue : make_figures() importe matplotlib et ecrit un GIF via
+      # PillowWriter. On installe avant de compiler/importer adc.
       - name: Python deps
+        if: steps.gate.outputs.skip != 'true'
         run: |
           pip install --upgrade pip
-          pip install numpy
+          pip install numpy matplotlib
           pip install -r docs/sphinx/requirements.txt
 
-      # TOUTES les etapes (lint, module _adc pour autodoc, sphinx -W, doxygen, site combine)
-      # vivent dans scripts/build_docs.sh : SOURCE UNIQUE, identique en local et en CI.
-      # Le script construit le module via le preset `python` (pin interpreteur de setup-python
-      # par Python_ROOT_DIR/PATH ; ninja fourni par apt ci-dessus).
+      # TOUTES les etapes (lint, module _adc pour autodoc, sphinx -W, doxygen, site combine) vivent
+      # dans scripts/build_docs.sh : SOURCE UNIQUE, identique en local et en CI. Le script construit
+      # le module via le preset `python` (pin interpreteur de setup-python ; ninja fourni par apt).
       - name: Build docs (lint + module + sphinx + doxygen)
+        if: steps.gate.outputs.skip != 'true'
         run: bash scripts/build_docs.sh
 
+      # INFORMATIF : verification des liens. Les liens externes flaky ne cassent rien (continue-on-error).
+      - name: Linkcheck (informatif)
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: python -m sphinx -b linkcheck docs/sphinx docs/_build/linkcheck
+
+      # INFORMATIF : rejeu des scripts d'exemple references par tested_by (docmap), en --quick. Le
+      # module build-py vient d'etre construit par build_docs.sh ; run_doc_examples.py le localise seul.
+      - name: Exemples de doc (informatif)
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: python docs/run_doc_examples.py --timeout 600
+
+      # Marqueur : l'artefact a ete produit (build reel, non saute par le gate). deploy s'y conditionne.
+      - name: Marqueur build effectif
+        id: mark
+        if: steps.gate.outputs.skip != 'true'
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-pages-artifact@v3
+        if: steps.gate.outputs.skip != 'true'
         with:
           path: docs/_site
 
   deploy:
     needs: build
-    # Ne PUBLIE que depuis master : un workflow_dispatch sur une branche construit et
-    # valide la doc (job build) SANS pousser un build non-mergé sur le site Pages live.
-    if: ${{ github.ref == 'refs/heads/master' }}
+    # Ne PUBLIE que depuis master ET seulement si le build a reellement produit l'artefact
+    # (built == 'true' : ni saute par le gate cron, ni echoue). Un workflow_dispatch sur une branche
+    # construit et valide la doc (job build) SANS pousser un build non-merge sur le site Pages live.
+    if: ${{ github.ref == 'refs/heads/master' && needs.build.outputs.built == 'true' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages

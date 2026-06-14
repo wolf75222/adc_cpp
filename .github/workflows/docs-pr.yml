@@ -1,0 +1,73 @@
+name: Docs PR
+
+# Lane PR LEGERE pour la documentation. Politique : informatif d'abord, JAMAIS de build.
+#
+# Cette lane tourne sur chaque pull_request qui touche la doc ou ses sources, et reste tenue a
+# l'ecart du chemin critique : un seul job, aucun compilateur, aucun module Python. Elle separe
+# nettement deux niveaux d'exigence :
+#   - DUR (peut echouer la PR)   : docs/check_docs.py (presence + liens + termes interdits + ASCII).
+#     La fraicheur est en --freshness-warn-only -> un doc en retard avertit mais ne bloque pas.
+#   - INFORMATIF (continue-on-error) : codespell (orthographe) et markdownlint (style markdown).
+#     Outils anglais sur une doc francaise sans accents : on les garde non bloquants, leur bruit
+#     est deja curieusement reduit par .codespellrc + docs/codespell_ignore.txt et
+#     .markdownlint-cli2.jsonc.
+#
+# Le build Sphinx + Doxygen complet vit dans docs.yml (lane lourde : push master [docs], dispatch,
+# cron hebdo), pas ici.
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'include/**'
+      - 'python/**'
+      - 'scripts/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'pyproject.toml'
+      - 'README.md'
+      - '.github/workflows/docs*.yml'
+
+concurrency:
+  # Un nouveau push sur la PR annule le run precedent encore en vol : lane legere, rien a proteger.
+  group: docs-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  doc-pr:
+    name: doc-lint + linters (informatif)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # fetch-depth: 0 = historique complet, requis par la fraicheur de check_docs.py (sinon
+      # git_state() voit un clone shallow et saute le check).
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # DUR : presence docmap + liens + termes interdits + ASCII strict. La fraicheur est
+      # degradee en avertissement (--freshness-warn-only) : un depends_on commite apres la
+      # relecture ne bloque pas une PR, il sera repris dans la lane lourde / par le proprietaire.
+      - name: Doc-lint (presence + liens + fraicheur warn-only)
+        run: python docs/check_docs.py --freshness-warn-only
+
+      # INFORMATIF : orthographe. Config .codespellrc (skip des arbres generes + binaires,
+      # ignore-words = docs/codespell_ignore.txt). Scope explicite : docs + README.
+      - name: codespell (orthographe, informatif)
+        continue-on-error: true
+        run: |
+          pip install --upgrade pip
+          pip install codespell==2.4.2
+          codespell docs README.md
+
+      # INFORMATIF : style markdown. La config .markdownlint-cli2.jsonc porte les globs
+      # (docs/**/*.md + README.md), les ignores et les regles desactivees (justifiees).
+      - name: markdownlint (style markdown, informatif)
+        continue-on-error: true
+        run: npx -y markdownlint-cli2@0.22.1

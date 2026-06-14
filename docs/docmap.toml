@@ -24,6 +24,11 @@
 #   reviewed    optionnel : sha acquittant la fraicheur ("relu a jour a ce commit"). A l'echelle de
 #               cette carte, toutes les entrees avec depends_on sont baselinees sur origin/master au
 #               moment de la PR (71f02e7) ; un futur commit touchant un depends_on les reactivera.
+#               Exception : les trois pages dependant de CMakeLists.txt (installation, organisation,
+#               windows_native) sont re-baselinees sur le commit de cette PR qui ajoute la cible
+#               'docs' a CMakeLists.txt. Cette cible est un raccourci de confort hors ALL (equivalent
+#               a `bash scripts/build_docs.sh`), sans effet sur le contenu de ces pages ; les relire
+#               apres le touch revient donc a acquitter la fraicheur sur ce commit.
 
 [exclude]
 patterns = ["_generated/**", "tutorials/_assets*/**", "doxygen/**", "__pycache__/**"]
@@ -37,7 +42,7 @@ mode = "strict"
 depends_on = ["CMakePresets.json", "pyproject.toml", "scripts/setup_env.sh", "environment.yml", "CMakeLists.txt", "scripts/kokkos_openmp_conda.sh"]
 tested_by = []
 testable = true
-reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
+reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
 [docs."docs/sphinx/getting_started/first_run.md"]
 owner = "Romain"
@@ -45,7 +50,7 @@ mode = "strict"
 depends_on = ["python/adc/__init__.py", "python/system.cpp", "include/adc/physics/bricks.hpp", "include/adc/runtime/system.hpp"]
 tested_by = []
 testable = true
-reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
+reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
 [docs."docs/sphinx/getting_started/tutorial.md"]
 owner = "Romain"
@@ -53,7 +58,7 @@ mode = "strict"
 depends_on = ["docs/sphinx/tutorials/diocotron_tutorial.py", "python/adc/dsl.py", "include/adc/physics/hyperbolic.hpp", "include/adc/physics/elliptic.hpp", "include/adc/runtime/dsl_block.hpp"]
 tested_by = ["docs/sphinx/tutorials/diocotron_tutorial.py"]
 testable = true
-reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
+reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
 
 [docs."docs/sphinx/getting_started/backend.md"]
 owner = "Romain"
