@@ -40,6 +40,26 @@ nothing; the full build runs on the weekly cron and on manual dispatch.
   an isolated `git worktree` off `master`.
 - Minimal diffs, scoped to the issue; no incidental reformatting.
 
+## Pull Request Guidelines
+
+Keep the PR focused on one logical change. Open a Linear issue first for large work: new
+model architecture, DSL change, AMR refactor, change of numerical defaults, new GPU/MPI
+backend, boundary conditions, physical normalization. Do not mix refactoring, formatting,
+documentation and numerical changes in one PR; formatting goes in its own PR (`style:
+clang-format the solver module`).
+
+Before requesting review: read your own diff, build and test locally, add or update tests
+for behavior changes, update documentation for user-facing changes. For a change to a
+solver, model, flux, Poisson, AMR, backend or the DSL, include numerical validation
+(reference case, observed quantity, expected value, tolerance, reason) so a reviewer can
+tell a normal difference from a silent model change.
+
+The PR template asks five questions: what changed, why, how, how it was tested (with the
+commands run), and what to focus on. For a multi-file PR, give a suggested review order.
+Commit messages are local and technical (imperative, with a scope, e.g. `flux: add HLL
+state reconstruction helper`); the PR description carries the full context. Avoid `fix`,
+`wip`, `update`.
+
 ## Guardrails
 
 - **No AI author, committer or co-author** (Claude, Copilot, Anthropic, ...) anywhere in

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/wolf75222/adc_cpp/security/advisories/new
+    about: Do not open a public issue for a vulnerability. Report it privately (see SECURITY.md).
