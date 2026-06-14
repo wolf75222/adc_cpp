@@ -40,6 +40,14 @@ nothing; the full build runs on the weekly cron and on manual dispatch.
   an isolated `git worktree` off `master`.
 - Minimal diffs, scoped to the issue; no incidental reformatting.
 
+## Versioning
+
+`adc_cpp` follows Semantic Versioning. The public API under guarantee, the bump rules
+(PATCH / MINOR / MAJOR) and the release steps are in [docs/VERSIONING.md](docs/VERSIONING.md).
+Two things on every notable PR: keep the version single-sourced (`project(VERSION)` in
+`CMakeLists.txt`, never duplicated), and add a line to the `## [Unreleased]` section of
+[CHANGELOG.md](CHANGELOG.md) under Added / Changed / Fixed (Keep a Changelog, ISO dates).
+
 ## Pull Request Guidelines
 
 Keep the PR focused on one logical change. Open a Linear issue first for large work: new
