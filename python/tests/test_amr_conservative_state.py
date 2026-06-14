@@ -73,6 +73,11 @@ print("== (G) gardes de set_conservative_state ==")
 n = 32
 rho = _bump(n)
 
+# n == 0 (settable depuis Python) -> rejet a la CONSTRUCTION (nn = n*n = 0 ferait une division par
+# zero dans set_conservative_state, U.size() % nn). On le refuse au point de configuration.
+chk(raises(lambda: adc.AmrSystem(n=0, L=1.0, periodic=True)),
+    "(G) AmrSystem(n=0) rejete a la construction (n >= 1 requis)")
+
 # ndim != 3 (densite 2D passee par erreur) -> rejet au binding.
 s = _amr(n); s.add_block("gas", _euler_spec(), time=adc.Explicit())
 chk(raises(lambda: s.set_conservative_state("gas", rho)),

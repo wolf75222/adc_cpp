@@ -479,7 +479,16 @@ struct AmrSystem::Impl {
   }
 };
 
-AmrSystem::AmrSystem(const AmrSystemConfig& c) : p_(std::make_unique<Impl>(c)) {}
+AmrSystem::AmrSystem(const AmrSystemConfig& c) : p_(std::make_unique<Impl>(c)) {
+  // Garde de configuration AMONT : n >= 1 (cellules du grossier par direction). n settable depuis
+  // Python (AmrSystemConfig.n est def_readwrite, le ctor ne validait pas) ; n == 0 ferait nn = n*n = 0
+  // puis une division par zero (UB) dans set_conservative_state (U.size() % nn) et un grossier vide
+  // partout en aval. On le refuse ICI, seul point couvrant tous les usages de cfg.n.
+  if (p_->cfg.n < 1)
+    throw std::runtime_error("AmrSystem::AmrSystem : n >= 1 requis (cellules du grossier par "
+                             "direction) ; recu n = " +
+                             std::to_string(p_->cfg.n));
+}
 AmrSystem::~AmrSystem() = default;
 AmrSystem::AmrSystem(AmrSystem&&) noexcept = default;
 AmrSystem& AmrSystem::operator=(AmrSystem&&) noexcept = default;

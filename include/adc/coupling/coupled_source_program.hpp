@@ -16,6 +16,7 @@
 #include <adc/core/types.hpp>
 #include <adc/mesh/fab2d.hpp>  // Array4 (POD device-copyable)
 
+#include <cassert>
 #include <cmath>
 
 // Interprete de SOURCE COUPLEE generique (P5 phase 1, splitting EXPLICITE).
@@ -72,6 +73,11 @@ struct CsProgram {
   /// Evalue le programme sur les registres @p reg (charges pour la cellule). Pile LOCALE a capacite
   /// fixe, aucun heap -> ADC_HD device-callable. PRECONDITION : programme bien forme (verifie cote
   /// Python) ; renvoie le sommet final, ou Real(0) si la pile est vide.
+  ///
+  /// Bornes de pile DEFENSIVES (programme suppose bien forme cote Python, mais on ne lit jamais hors
+  /// bornes sur device) : un PushReg n'empile que si sp < kCsMaxStack (debordement borne) ; un operateur
+  /// binaire (resp. unaire) exige sp >= 2 (resp. >= 1) avant de depiler, sinon il est ignore (sous-flux
+  /// borne, aucun acces st[sp<0]). En debug, un assert signale le programme mal forme.
   ADC_HD Real eval(const Real* reg) const {
     Real st[kCsMaxStack];
     int sp = 0;
@@ -80,13 +86,13 @@ struct CsProgram {
         case CsOp::PushReg:
           if (sp < kCsMaxStack) st[sp++] = reg[arg[k]];
           break;
-        case CsOp::Add: { Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a + b; } break;
-        case CsOp::Sub: { Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a - b; } break;
-        case CsOp::Mul: { Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a * b; } break;
-        case CsOp::Div: { Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a / b; } break;
-        case CsOp::Neg: { Real a = st[--sp]; st[sp++] = -a; } break;
-        case CsOp::Pow: { Real b = st[--sp]; Real a = st[--sp]; st[sp++] = std::pow(a, b); } break;
-        case CsOp::Sqrt: { Real a = st[--sp]; st[sp++] = std::sqrt(a); } break;
+        case CsOp::Add: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a + b; } break;
+        case CsOp::Sub: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a - b; } break;
+        case CsOp::Mul: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a * b; } break;
+        case CsOp::Div: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a / b; } break;
+        case CsOp::Neg: { assert(sp >= 1); if (sp < 1) break; Real a = st[--sp]; st[sp++] = -a; } break;
+        case CsOp::Pow: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = std::pow(a, b); } break;
+        case CsOp::Sqrt: { assert(sp >= 1); if (sp < 1) break; Real a = st[--sp]; st[sp++] = std::sqrt(a); } break;
       }
     }
     return sp > 0 ? st[sp - 1] : Real(0);

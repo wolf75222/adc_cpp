@@ -256,7 +256,8 @@ inline void apply_polar_tensor(const MultiFab& phi, const PolarGeometry& geom, M
   // CONTRAT : a_rr/a_tt requis (les coefficients diagonaux du stencil sont toujours lus). Un cas isotrope
   // fournit des champs CONSTANTS a 1 (PolarTensorKrylovSolver le fait via ses stores internes). a_rt/a_tr
   // optionnels (termes croises). On ne peut pas deref un nullptr en kernel -> garde-fou a l'entree.
-  assert(a_rr && a_tt && "apply_polar_tensor : a_rr et a_tt requis (champs a 1 si isotrope)");
+  if (!a_rr || !a_tt)
+    throw std::runtime_error("apply_polar_tensor : a_rr et a_tt requis (champs a 1 si isotrope)");
   const Real dr = geom.dr();
   const Real idr = Real(1) / dr;
   const Real idth = Real(1) / geom.dtheta();

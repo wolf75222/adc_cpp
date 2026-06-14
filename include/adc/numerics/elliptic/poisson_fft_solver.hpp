@@ -120,8 +120,12 @@ class DistributedFFTSolver {
         fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
              geom.yhi - geom.ylo) {
     const int np = n_ranks();
-    assert(geom.domain.ny() % np == 0 &&
-           "DistributedFFTSolver : Ny doit etre divisible par n_ranks()");
+    // Garde-fou DUR (actif en Release) : nyl_ = Ny / np est deja calcule dans la liste d'init.
+    // Si Ny n'est pas divisible par np, les bandes seraient mal dimensionnees et solve() lirait
+    // hors bornes. L'ancien assert disparaissait sous NDEBUG. Aligne sur PoissonFFTSolver (throw).
+    if (geom.domain.ny() % np != 0)
+      throw std::runtime_error(
+          "DistributedFFTSolver : Ny doit etre divisible par n_ranks()");
     std::vector<Box2D> slabs;
     for (int r = 0; r < np; ++r)
       slabs.push_back(Box2D{{0, r * nyl_}, {Nx_ - 1, (r + 1) * nyl_ - 1}});

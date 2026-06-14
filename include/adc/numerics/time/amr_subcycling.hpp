@@ -7,6 +7,8 @@
 #include <adc/numerics/time/amr_flux_helpers.hpp>
 #include <adc/numerics/time/amr_patch_range.hpp>
 
+#include <cassert>  // assert (invariant parent-replique : mf_find_box toujours trouve)
+
 namespace adc {
 
 // --- MULTI-PATCH (plusieurs boxes fines par niveau) ---
@@ -520,6 +522,9 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     if (replicated_parent) {
       for (int J = g.J0; J <= g.J1; ++J) {
         const int bL = mf_find_box(lv.U, g.I0, J), bR = mf_find_box(lv.U, g.I1, J);
+        // invariant parent-replique : parent entierement local (cf. supra), mf_find_box trouve
+        // toujours la box ; un -1 indexerait fab(-1) (segfault). Le cas reparti passe par l'else.
+        assert(bL >= 0 && bR >= 0 && "subcycle_level_mp : invariant parent-replique viole (box grossiere x introuvable)");
         const ConstArray4 FXL = fx.fab(bL).const_array(), FXR = fx.fab(bR).const_array();
         for (int k = 0; k < nc; ++k) {
           g.cL[(J - g.J0) * nc + k] = FXL(g.I0, J, k);
@@ -528,6 +533,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
       }
       for (int I = g.I0; I <= g.I1; ++I) {
         const int bB = mf_find_box(lv.U, I, g.J0), bT = mf_find_box(lv.U, I, g.J1);
+        // meme invariant parent-replique que ci-dessus (faces y) : box grossiere toujours trouvee.
+        assert(bB >= 0 && bT >= 0 && "subcycle_level_mp : invariant parent-replique viole (box grossiere y introuvable)");
         const ConstArray4 FYB = fy.fab(bB).const_array(), FYT = fy.fab(bT).const_array();
         for (int k = 0; k < nc; ++k) {
           g.cB[(I - g.I0) * nc + k] = FYB(I, g.J0, k);
