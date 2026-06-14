@@ -39,6 +39,22 @@ inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
   }
 }
 
+namespace detail {
+// Foncteur NOMME device-clean (lambda etendue -> bute nvcc en cross-TU) : moyenne fin -> grossier
+// (ratio 2) d'une box fine sur l'empreinte grossiere PatchRange. Corps bit-identique a l'ancienne
+// lambda de mf_average_down_multi.
+struct AvgDownMultiKernel {
+  ConstArray4 f;
+  Array4 c;
+  int nc;
+  ADC_HD void operator()(int I, int J) const {
+    for (int k = 0; k < nc; ++k)
+      c(I, J, k) = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                 f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
+  }
+};
+}  // namespace detail
+
 // moyenne fin -> grossier sur l'empreinte de CHAQUE box fine (multi-box).
 inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
   const int nc = Uc.ncomp();
@@ -46,11 +62,7 @@ inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
   for (int li = 0; li < Uf.local_size(); ++li) {
     const ConstArray4 f = Uf.fab(li).const_array();
     const PatchRange pr(Uf.box(li));
-    for_each_cell(pr.box(), [=] ADC_HD(int I, int J) {
-      for (int k = 0; k < nc; ++k)
-        c(I, J, k) = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
-                                   f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
-    });
+    for_each_cell(pr.box(), detail::AvgDownMultiKernel{f, c, nc});
   }
 }
 
