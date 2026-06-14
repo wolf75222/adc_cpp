@@ -81,6 +81,12 @@ models/index
 :caption: Simulation
 
 simulation/index
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: AMR
+
 amr/index
 ```
 
