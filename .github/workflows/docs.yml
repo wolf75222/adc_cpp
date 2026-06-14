@@ -36,6 +36,11 @@ jobs:
       github.event_name == 'schedule' ||
       contains(github.event.head_commit.message, '[docs]')
     runs-on: ubuntu-latest
+    env:
+      # ccache borne, persiste entre runs (cf. step Cache ccache) : le 1er build reste long,
+      # les suivants reutilisent les .o (module ET Kokkos compile par FetchContent).
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
     steps:
       # fetch-depth: 0 = historique complet, requis par la fraicheur de check_docs.py (appele par
       # build_docs.sh) -- sinon git_state() voit un clone shallow et saute le check.
@@ -46,7 +51,7 @@ jobs:
       - name: System deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libeigen3-dev doxygen graphviz ninja-build
+          sudo apt-get install -y libeigen3-dev doxygen graphviz ninja-build lld ccache
 
       - uses: actions/setup-python@v5
         with:
@@ -62,10 +67,25 @@ jobs:
           pip install numpy matplotlib
           pip install -r docs/sphinx/requirements.txt
 
+      # Cache ccache persistant : le preset auto-detecte ccache (ADC_USE_CCACHE=ON). Persister
+      # ~/.ccache evite de tout recompiler (module + Kokkos FetchContent) a chaque run hebdo.
+      - name: Cache ccache (docs)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-docs-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-docs-${{ runner.os }}-
+
       # TOUTES les etapes (lint, module _adc pour autodoc, sphinx -W, doxygen, site combine) vivent
       # dans scripts/build_docs.sh : SOURCE UNIQUE, identique en local et en CI. Le script construit
-      # le module via le preset `python` (pin interpreteur de setup-python ; ninja fourni par apt).
+      # le module via le preset ci-python (pin interpreteur de setup-python ; ninja fourni par apt).
+      # LDFLAGS=-fuse-ld=lld : le link du module avec le ld BFD du runner echoue ("failed to set
+      # dynamic section sizes: bad value") sur la grosse .so ; lld (installe ci-dessus) n'a pas ce
+      # bug. CMake seede ses *_LINKER_FLAGS depuis LDFLAGS au configure du preset.
       - name: Build docs (lint + module + sphinx + doxygen)
+        env:
+          LDFLAGS: -fuse-ld=lld
         run: bash scripts/build_docs.sh
 
       # INFORMATIF : verification des liens. Les liens externes flaky ne cassent rien (continue-on-error).
