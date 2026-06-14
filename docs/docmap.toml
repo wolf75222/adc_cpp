@@ -42,7 +42,7 @@ mode = "strict"
 depends_on = ["CMakePresets.json", "pyproject.toml", "scripts/setup_env.sh", "environment.yml", "CMakeLists.txt", "scripts/kokkos_openmp_conda.sh"]
 tested_by = []
 testable = true
-reviewed = "16c928ea027fda0260ab639378f5398612ee4d51"
+reviewed = "6526688ad882c01ebc5eda737b082cefac490348"
 
 [docs."docs/sphinx/getting_started/first_run.md"]
 owner = "Romain"
