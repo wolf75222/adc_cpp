@@ -347,3 +347,10 @@ mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
+
+[docs."docs/sphinx/development/documentation.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
