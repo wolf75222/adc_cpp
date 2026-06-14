@@ -25,6 +25,56 @@ namespace adc {
 // xface_box / yface_box : fournis par operator/spatial_operator.hpp (inclus ci-dessus),
 // memes conventions de boites de face. On ne les redefinit pas ici.
 
+namespace detail {
+
+// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels device du reflux AMR. Memes raisons que le
+// reste du chemin maillage/temps (recette AmrSspRhsKernel, fill_boundary) : ces kernels sont premiere-
+// instancies depuis une TU loader externe, ou une lambda etendue fait buter l'emission du kernel device
+// sous nvcc. Corps strictement identique aux lambdas precedentes -> bit-identique CPU et device.
+
+/// Flux de Rusanov a la face gauche (axe x) de la cellule (i,j).
+template <class Model>
+struct RusanovFaceXKernel {
+  Model m;
+  ConstArray4 u, ax;
+  Array4 F;
+  ADC_HD void operator()(int i, int j) const {
+    typename Model::State UL{}, UR{};
+    UL[0] = u(i - 1, j);
+    UR[0] = u(i, j);
+    F(i, j) = rusanov_flux(m, UL, load_aux<aux_comps<Model>()>(ax, i - 1, j), UR,
+                           load_aux<aux_comps<Model>()>(ax, i, j), 0)[0];
+  }
+};
+
+/// Flux de Rusanov a la face basse (axe y) de la cellule (i,j).
+template <class Model>
+struct RusanovFaceYKernel {
+  Model m;
+  ConstArray4 u, ax;
+  Array4 F;
+  ADC_HD void operator()(int i, int j) const {
+    typename Model::State UL{}, UR{};
+    UL[0] = u(i, j - 1);
+    UR[0] = u(i, j);
+    F(i, j) = rusanov_flux(m, UL, load_aux<aux_comps<Model>()>(ax, i, j - 1), UR,
+                           load_aux<aux_comps<Model>()>(ax, i, j), 1)[0];
+  }
+};
+
+/// Euler explicite 1 composante : U -= dt div(F) sur la cellule (i,j).
+struct AdvanceFab1cKernel {
+  Array4 uu;
+  ConstArray4 FX, FY;
+  double dx, dy, dt;
+  ADC_HD void operator()(int i, int j) const {
+    uu(i, j) -= dt * ((FX(i + 1, j) - FX(i, j)) / dx +
+                      (FY(i, j + 1) - FY(i, j)) / dy);
+  }
+};
+
+}  // namespace detail
+
 // flux de Rusanov premier ordre, 1 composante, aux variable en espace (Fab2D a
 // 3 composantes [phi, gx, gy], ghosts remplis), sur un Fab2D.
 // fx(i,j) = flux a la face gauche de la cellule i ; fy(i,j) = face basse de j.
@@ -35,23 +85,11 @@ void compute_fluxes_1c(const Model& m, const Fab2D& U, const Fab2D& aux,
   const ConstArray4 ax = aux.const_array();
   {
     Array4 F = fx.array();
-    for_each_cell(fx.box(), [=] ADC_HD(int i, int j) {
-      typename Model::State UL{}, UR{};
-      UL[0] = u(i - 1, j);
-      UR[0] = u(i, j);
-      F(i, j) = rusanov_flux(m, UL, load_aux<aux_comps<Model>()>(ax, i - 1, j), UR,
-                             load_aux<aux_comps<Model>()>(ax, i, j), 0)[0];
-    });
+    for_each_cell(fx.box(), detail::RusanovFaceXKernel<Model>{m, u, ax, F});
   }
   {
     Array4 F = fy.array();
-    for_each_cell(fy.box(), [=] ADC_HD(int i, int j) {
-      typename Model::State UL{}, UR{};
-      UL[0] = u(i, j - 1);
-      UR[0] = u(i, j);
-      F(i, j) = rusanov_flux(m, UL, load_aux<aux_comps<Model>()>(ax, i, j - 1), UR,
-                             load_aux<aux_comps<Model>()>(ax, i, j), 1)[0];
-    });
+    for_each_cell(fy.box(), detail::RusanovFaceYKernel<Model>{m, u, ax, F});
   }
 }
 
@@ -63,10 +101,7 @@ void advance_fab_1c(const Model& m, Fab2D& U, const Fab2D& aux, double dx,
   Array4 uu = U.array();
   const ConstArray4 FX = fx.const_array();
   const ConstArray4 FY = fy.const_array();
-  for_each_cell(U.box(), [=] ADC_HD(int i, int j) {
-    uu(i, j) -= dt * ((FX(i + 1, j) - FX(i, j)) / dx +
-                      (FY(i, j + 1) - FY(i, j)) / dy);
-  });
+  for_each_cell(U.box(), detail::AdvanceFab1cKernel{uu, FX, FY, dx, dy, dt});
 }
 
 // ghosts periodiques pour un Fab2D unique couvrant le domaine.

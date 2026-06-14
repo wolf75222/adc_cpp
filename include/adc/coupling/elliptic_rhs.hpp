@@ -32,6 +32,21 @@
 
 namespace adc {
 
+namespace detail {
+
+/// Foncteur NOMME (et non lambda ADC_HD) du RHS mono-modele : f(i,j,0) = model.elliptic_rhs(U).
+template <class Model>
+struct SingleModelEllipticRhsKernel {
+  Model m;
+  ConstArray4 s;
+  Array4 f;
+  ADC_HD void operator()(int i, int j) const {
+    f(i, j, 0) = m.elliptic_rhs(load_state<Model>(s, i, j));
+  }
+};
+
+}  // namespace detail
+
 /// Assembleur de RHS MONO-modele : rhs(.,.,0) = model.elliptic_rhs(U) sur les cellules valides.
 /// @tparam Model : PhysicalModel exposant elliptic_rhs(State).
 template <class Model>
@@ -45,12 +60,25 @@ struct SingleModelEllipticRhs {
       Array4 f = rhs.fab(li).array();
       const Box2D v = rhs.box(li);
       const Model m = model;
-      for_each_cell(v, [=] ADC_HD(int i, int j) {
-        f(i, j, 0) = m.elliptic_rhs(load_state<Model>(s, i, j));
-      });
+      for_each_cell(v, detail::SingleModelEllipticRhsKernel<Model>{m, s, f});
     }
   }
 };
+
+namespace detail {
+
+/// Foncteur NOMME (et non lambda ADC_HD) du RHS deux champs : r(i,j,0) = a0 u0 + a1 u1.
+struct TwoFieldChargeDensityRhsKernel {
+  Array4 r;
+  ConstArray4 u0, u1;
+  Real a0, a1;
+  int c0, c1;
+  ADC_HD void operator()(int i, int j) const {
+    r(i, j, 0) = a0 * u0(i, j, c0) + a1 * u1(i, j, c1);
+  }
+};
+
+}  // namespace detail
 
 /// RHS deux champs : rhs = q0 * U0(.,.,comp0) + q1 * U1(.,.,comp1) (densite de charge a deux especes).
 struct TwoFieldChargeDensityRhs {
@@ -68,9 +96,7 @@ struct TwoFieldChargeDensityRhs {
       const Box2D b = rhs.box(li);
       const Real a0 = q0, a1 = q1;
       const int c0 = comp0, c1 = comp1;
-      for_each_cell(b, [=] ADC_HD(int i, int j) {
-        r(i, j, 0) = a0 * u0(i, j, c0) + a1 * u1(i, j, c1);
-      });
+      for_each_cell(b, detail::TwoFieldChargeDensityRhsKernel{r, u0, u1, a0, a1, c0, c1});
     }
   }
 };
@@ -109,6 +135,19 @@ struct SpeciesCharge {
   int comp = 0;
 };
 
+namespace detail {
+
+/// Foncteur NOMME (et non lambda ADC_HD) de l'accumulation : r(i,j,0) += a * u(i,j,c).
+struct AddScaledComponentKernel {
+  Array4 r;
+  ConstArray4 u;
+  Real a;
+  int c;
+  ADC_HD void operator()(int i, int j) const { r(i, j, 0) += a * u(i, j, c); }
+};
+
+}  // namespace detail
+
 // rhs += q * U(.,.,comp) sur les cellules valides. Brique d'accumulation du RHS
 // elliptique a N especes (suppose layouts identiques entre U et rhs).
 /// rhs(.,.,0) += q * U(.,.,comp) sur les cellules valides. Brique d'accumulation du RHS a N especes
@@ -121,7 +160,7 @@ inline void add_scaled_component(const MultiFab& U, Real q, int comp,
     const Box2D b = rhs.box(li);
     const Real a = q;
     const int c = comp;
-    for_each_cell(b, [=] ADC_HD(int i, int j) { r(i, j, 0) += a * u(i, j, c); });
+    for_each_cell(b, detail::AddScaledComponentKernel{r, u, a, c});
   }
 }
 

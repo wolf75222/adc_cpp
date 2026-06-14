@@ -159,6 +159,29 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
 #endif
 }
 
+namespace detail {
+
+// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels de transfert AMR. Memes raisons que le
+// reste du chemin maillage/elliptique (cf. fill_boundary.hpp) : refinement est premiere-instancie depuis
+// le V-cycle MG tire d'une TU externe ; une lambda etendue y fait buter l'emission du kernel device sous
+// nvcc. Corps strictement identique aux anciennes lambdas -> bit-identique CPU et device.
+
+/// Moyenne CONSERVATIVE d'un bloc r x r : C(I, J, c) = (somme des r^2 cellules fines) * inv.
+struct AverageDownKernel {
+  ConstArray4 F;
+  Array4 C;
+  Real inv;
+  int r, c;
+  ADC_HD void operator()(int I, int J) const {
+    Real s = 0;
+    for (int b = 0; b < r; ++b)
+      for (int a = 0; a < r; ++a) s += F(r * I + a, r * J + b, c);
+    C(I, J, c) = s * inv;
+  }
+};
+
+}  // namespace detail
+
 /// Moyenne CONSERVATIVE fin -> grossier (ratio r) : coarse(I, J) = moyenne des r^2 cellules fines du
 /// bloc. Ecrit les cellules de coarse couvertes par fine (via parallel_copy depuis une grille
 /// fine-coarsen locale) ; copie min(ncomp). Conserve l'integrale (somme * dV) du fin sur la zone couverte.
@@ -176,12 +199,7 @@ inline void average_down(const MultiFab& fine, MultiFab& coarse, int r, MultiFab
     Array4 C = cfine.fab(li).array();
     const Box2D cb = cfine.fab(li).box();
     for (int c = 0; c < nc; ++c)
-      for_each_cell(cb, [=] ADC_HD(int I, int J) {
-        Real s = 0;
-        for (int b = 0; b < r; ++b)
-          for (int a = 0; a < r; ++a) s += F(r * I + a, r * J + b, c);
-        C(I, J, c) = s * inv;
-      });
+      for_each_cell(cb, detail::AverageDownKernel{F, C, inv, r, c});
   }
   parallel_copy(coarse, cfine);
 }
@@ -189,6 +207,20 @@ inline void average_down(const MultiFab& fine, MultiFab& coarse, int r) {
   MultiFab cfine(coarsen(fine.box_array(), r), fine.dmap(), fine.ncomp(), 0);
   average_down(fine, coarse, r, cfine);
 }
+
+namespace detail {
+
+/// Injection CONSTANTE par morceaux : F(i, j, c) recoit la valeur de sa cellule grossiere couvrante.
+struct InterpolateKernel {
+  Array4 F;
+  ConstArray4 C;
+  int r, c;
+  ADC_HD void operator()(int i, int j) const {
+    F(i, j, c) = C(coarsen_index(i, r), coarsen_index(j, r), c);
+  }
+};
+
+}  // namespace detail
 
 /// Interpolation grossier -> fin (ratio r) par injection CONSTANTE par morceaux : chaque cellule fine
 /// (y compris ghosts de la box) recoit la valeur de sa cellule grossiere (coarsen_index). Copie
@@ -206,9 +238,7 @@ inline void interpolate(const MultiFab& coarse, MultiFab& fine, int r, MultiFab&
     const ConstArray4 C = cfine.fab(li).const_array();
     const Box2D fb = fine.fab(li).box();
     for (int c = 0; c < nc; ++c)
-      for_each_cell(fb, [=] ADC_HD(int i, int j) {
-        F(i, j, c) = C(coarsen_index(i, r), coarsen_index(j, r), c);
-      });
+      for_each_cell(fb, detail::InterpolateKernel{F, C, r, c});
   }
 }
 inline void interpolate(const MultiFab& coarse, MultiFab& fine, int r) {

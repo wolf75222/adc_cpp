@@ -55,6 +55,19 @@ inline void mf_eval_rhs(const Model& m, const MultiFab& U, const MultiFab& aux, 
                                          R.fab(li).array(), dx, dy});
 }
 
+/// Foncteur NOMME device-clean : U <- U - dt div(Fx,Fy) sur une cellule valide.
+struct AmrAdvanceFacesKernel {
+  Array4 u;
+  ConstArray4 fx, fy;
+  Real dx, dy, dt;
+  int nc;
+  ADC_HD void operator()(int i, int j) const {
+    for (int c = 0; c < nc; ++c)
+      u(i, j, c) -= dt * ((fx(i + 1, j, c) - fx(i, j, c)) / dx +
+                          (fy(i, j + 1, c) - fy(i, j, c)) / dy);
+  }
+};
+
 // U <- U - dt div(Fx,Fy) sur les cellules valides (GPU via for_each_cell).
 inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy,
                              Real dx, Real dy, Real dt) {
@@ -62,11 +75,7 @@ inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
     const ConstArray4 fx = Fx.fab(li).const_array(), fy = Fy.fab(li).const_array();
-    for_each_cell(U.box(li), [=] ADC_HD(int i, int j) {
-      for (int c = 0; c < nc; ++c)
-        u(i, j, c) -= dt * ((fx(i + 1, j, c) - fx(i, j, c)) / dx +
-                            (fy(i, j + 1, c) - fy(i, j, c)) / dy);
-    });
+    for_each_cell(U.box(li), AmrAdvanceFacesKernel{u, fx, fy, dx, dy, dt, nc});
   }
 }
 
@@ -76,17 +85,28 @@ inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy
 // nulle (transport scalaire pur) ceci ajoute dt*0 : bit-identique. La DIFFUSION, elle, est portee
 // par compute_face_fluxes comme FLUX de face Fickien (-nu grad u), donc vue par le
 // reflux et conservative aux interfaces coarse-fine : ce n'est PAS une source locale.
+/// Foncteur NOMME device-clean (template Model, cf. AmrSspRhsKernel) : U <- U + dt S(U, aux)
+/// sur une cellule valide.
+template <class Model>
+struct AmrApplySourceKernel {
+  Model m;
+  Array4 u;
+  ConstArray4 uc, ax;
+  Real dt;
+  ADC_HD void operator()(int i, int j) const {
+    const auto S = m.source(load_state<Model>(uc, i, j),
+                            load_aux<aux_comps<Model>()>(ax, i, j));
+    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) += dt * S[c];
+  }
+};
+
 template <class Model>
 inline void mf_apply_source(const Model& m, MultiFab& U, const MultiFab& aux, Real dt) {
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
     const ConstArray4 uc = U.fab(li).const_array();
     const ConstArray4 ax = aux.fab(li).const_array();
-    for_each_cell(U.box(li), [=] ADC_HD(int i, int j) {
-      const auto S = m.source(load_state<Model>(uc, i, j),
-                              load_aux<aux_comps<Model>()>(ax, i, j));
-      for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) += dt * S[c];
-    });
+    for_each_cell(U.box(li), AmrApplySourceKernel<Model>{m, u, uc, ax, dt});
   }
 }
 
@@ -121,17 +141,25 @@ inline void mf_apply_source_treatment(const Model& m, MultiFab& U, const MultiFa
     mf_apply_source(m, U, aux, dt);        // Euler avant historique (bit-identique)
 }
 
+/// Foncteur NOMME device-clean : moyenne 2x2 fin -> grossier sur une cellule grossiere.
+struct AmrAverageDownKernel {
+  ConstArray4 f;
+  Array4 c;
+  int nc;
+  ADC_HD void operator()(int I, int J) const {
+    for (int k = 0; k < nc; ++k)
+      c(I, J, k) = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                 f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
+  }
+};
+
 // moyenne fin -> grossier (ratio 2) sur la region couverte (coords grossieres).
 inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
                             int CJ0, int CJ1) {
   const int nc = Uc.ncomp();
   const ConstArray4 f = Uf.fab(0).const_array();
   Array4 c = Uc.fab(0).array();
-  for_each_cell(Box2D{{CI0, CJ0}, {CI1, CJ1}}, [=] ADC_HD(int I, int J) {
-    for (int k = 0; k < nc; ++k)
-      c(I, J, k) = Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
-                                 f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k));
-  });
+  for_each_cell(Box2D{{CI0, CJ0}, {CI1, CJ1}}, AmrAverageDownKernel{f, c, nc});
 }
 
 // Helper coarse-fine de premier niveau (revue, point ghosts) : remplit UNE cellule ghost

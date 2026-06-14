@@ -86,6 +86,25 @@ struct FieldPostProcess {
   bool store_phi = true;           // phi en composante 0 (convention coupler)
 };
 
+namespace detail {
+// Derive aux = (phi, s grad phi) a partir de phi (field_postprocess). Foncteur nomme
+// (et non lambda ADC_HD) : memes raisons que le chemin elliptique (#93) -- ce kernel est
+// premiere-instancie depuis une TU externe et une lambda etendue y fait buter l'emission
+// du kernel device sous nvcc. Corps identique a l'ancienne lambda -> bit-identique.
+struct FieldPostprocessKernel {
+  bool store_phi;
+  Array4 a;
+  ConstArray4 p;
+  int gx;
+  Real s, cx, cy;
+  ADC_HD void operator()(int i, int j) const {
+    if (store_phi) a(i, j, 0) = p(i, j);
+    a(i, j, gx) = s * (p(i + 1, j) - p(i - 1, j)) * cx;
+    a(i, j, gx + 1) = s * (p(i, j + 1) - p(i, j - 1)) * cy;
+  }
+};
+}  // namespace detail
+
 // Derive le champ a partir de phi selon spec. Le corps reproduit EXACTEMENT
 // detail::coupler_grad_phi (coupler.hpp) : meme ordre d'operations, meme facteur
 // multiplicatif *cx / *cy, le signe s = +1 (Plus) ou -1 (Minus) etant le seul
@@ -101,11 +120,7 @@ inline void field_postprocess(const MultiFab& phi, MultiFab& out, Real cx,
     Array4 a = out.fab(li).array();
     const Box2D v = out.box(li);
     const int gx = store_phi ? 1 : 0;  // decalage de composante si phi stocke
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
-      if (store_phi) a(i, j, 0) = p(i, j);
-      a(i, j, gx) = s * (p(i + 1, j) - p(i - 1, j)) * cx;
-      a(i, j, gx + 1) = s * (p(i, j + 1) - p(i, j - 1)) * cy;
-    });
+    for_each_cell(v, detail::FieldPostprocessKernel{store_phi, a, p, gx, s, cx, cy});
   }
 }
 
