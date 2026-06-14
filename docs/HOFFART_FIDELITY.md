@@ -2,18 +2,18 @@
 
 Cross-check of the ADC `hoffart_euler_poisson_dsl` case (adc_cases branch `feat/normalization-and-schur-measurement`) plus the master engine against Hoffart, Maier, Shadid, Tomas, "structure-preserving FE for magnetic Euler-Poisson" (arXiv:2510.11808, Sec 5.3 diocotron test).
 
-> ⚠️ MAJ T3 (juin 2026) : deux lignes de ce tableau étaient obsolètes, corrigées ci-dessous.
-> (1) « Time splitting = Lie, not Strang » : le chemin `system-schur` est désormais en Strang
-> (SSPRK3 + CondensedSchur, adc_cpp #230 et adc_cases #21). (2) « Growth-rate targets : the full-model
-> RAW slope SHOULD be directly comparable with no factor » : incorrect. Le solveur numérique
-> (complet ou réduit) mesure dans l'horloge ExB-naturelle ; la cible papier est en horloge `omega_d`
-> cyclique. La conversion `gamma_paper = gamma_raw_sim · 2π/rhobar` s'applique au modèle complet
-> aussi (`alpha/|Omega| = 1/rho_max = 1`, donc full et réduit partagent le champ de dérive). Après
-> mapping des fenêtres papier en temps sim (`t_sim = 2π/rhobar · t_paper`) et ce facteur, le full
-> system-schur cartésien reproduit le papier à −9.1 % (l=3), −1.9 % (l=4), +0.04 % (l=5) ; cf.
-> adc_cases `hoffart_euler_poisson_dsl/RESULTS_SYSTEM_SCHUR.md` §9, `T2_NORMALIZATION_AUDIT.md`. Le
-> « déficit structurel −95 % » était un artefact de métrologie (fenêtres papier sur temps sim brut,
-> donc transitoire). Métrologie partielle : résidu ~0-9 % = bord d'anneau cartésien + résolution + fenêtre.
+> Update T3 (June 2026): two rows of this table were obsolete, corrected below.
+> (1) "Time splitting = Lie, not Strang": the `system-schur` path is now Strang
+> (SSPRK3 + CondensedSchur, adc_cpp #230 and adc_cases #21). (2) "Growth-rate targets: the full-model
+> RAW slope SHOULD be directly comparable with no factor": incorrect. The numerical solver
+> (full or reduced) measures in the ExB-natural clock; the paper target is in the cyclic `omega_d`
+> clock. The conversion `gamma_paper = gamma_raw_sim * 2pi/rhobar` applies to the full model
+> too (`alpha/|Omega| = 1/rho_max = 1`, so full and reduced share the drift field). After
+> mapping the paper windows to sim time (`t_sim = 2pi/rhobar * t_paper`) and this factor, the full
+> system-schur Cartesian reproduces the paper at -9.1 % (l=3), -1.9 % (l=4), +0.04 % (l=5); cf.
+> adc_cases `hoffart_euler_poisson_dsl/RESULTS_SYSTEM_SCHUR.md` section 9, `T2_NORMALIZATION_AUDIT.md`. The
+> "-95 % structural deficit" was a metrology artifact (paper windows on raw sim time,
+> hence transient). Metrology partial: residual ~0-9 % = Cartesian ring-edge + resolution + window.
 
 ## The 5 fidelity statuses the owner tracks
 

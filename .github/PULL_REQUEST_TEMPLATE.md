@@ -1,23 +1,23 @@
-<!-- Titre de PR : ADC-NN Description courte -->
+<!-- PR title: ADC-NN Short description -->
 
 Fixes ADC-NN
 
-## Quoi / pourquoi
+## What / why
 
-<!-- Resume court : ce que change la PR et pourquoi. -->
+<!-- Short summary: what the PR changes and why. -->
 
 ## Validation
 
-<!-- Cocher ce qui a ete lance. -->
+<!-- Tick what was run. -->
 
-- [ ] Preset(s) CI lances localement : `serial` / `python` / `mpi` / `parallel` (preciser)
-- [ ] `ctest --preset <x>` vert (ou tests Python concernes)
-- [ ] Pas de regression sur le perimetre touche
+- [ ] CI preset(s) run locally: `serial` / `python` / `mpi` / `parallel` (state which)
+- [ ] `ctest --preset <x>` green (or the relevant Python tests)
+- [ ] No regression on the touched scope
 
-## Non validable localement
+## Not verifiable locally
 
-<!-- Ce qui n'a pas pu etre verifie sur cette machine (GPU / GH200 / MPI multi-noeud, etc.). -->
+<!-- What this machine could not check (GPU / GH200 / multi-node MPI, etc.). -->
 
-## Risques / points d'attention
+## Risks / attention
 
-<!-- Tolerances numeriques, derive attendue, garde-fous, suivi eventuel. -->
+<!-- Numerical tolerances, expected drift, safeguards, follow-up. -->

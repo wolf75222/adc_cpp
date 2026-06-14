@@ -13,17 +13,17 @@ time/coupling) and a high layer never depends on an execution detail.
 
 ## Contents
 
-- [Overview](#vue-d-ensemble)
-- [The layers](#les-couches)
-- [Grid conventions](#conventions-de-grille)
-- [AMR coarse-fine stencil (reflux)](#stencil-amr-coarse-fine-reflux)
-- [Pipeline of a time step](#pipeline-d-un-pas-de-temps)
-- [Verified properties](#proprietes-verifiees)
+- [Overview](#overview)
+- [The layers](#the-layers)
+- [Grid conventions](#grid-conventions)
+- [AMR coarse-fine stencil (reflux)](#amr-coarse-fine-stencil-reflux)
+- [Pipeline of a time step](#pipeline-of-a-time-step)
+- [Verified properties](#verified-properties)
 - [Backends](#backends)
 - [Thread safety](#thread-safety)
-- [Using the library](#utiliser-la-bibliotheque)
+- [Using the library](#using-the-library)
 - [Limitations](#limitations)
-- [Tree](#arborescence)
+- [Tree](#tree)
 
 ---
 ## Overview
