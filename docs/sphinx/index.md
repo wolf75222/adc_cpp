@@ -52,6 +52,24 @@ concepts/polar-disc-geometry
 ```
 
 ```{toctree}
+:maxdepth: 1
+:caption: How-to guides
+
+how-to/add-a-new-model
+how-to/add-a-native-brick
+how-to/add-a-dsl-model
+how-to/add-a-new-flux
+how-to/add-a-new-case
+how-to/define-initial-conditions
+how-to/configure-outputs-diagnostics
+how-to/run-with-openmp
+how-to/run-with-mpi
+how-to/run-with-kokkos
+how-to/run-on-gh200
+how-to/profile-performance
+```
+
+```{toctree}
 :maxdepth: 2
 :caption: Writing a model
 

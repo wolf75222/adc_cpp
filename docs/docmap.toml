@@ -410,3 +410,87 @@ mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
+
+[docs."docs/sphinx/how-to/add-a-new-model.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/add-a-native-brick.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/add-a-dsl-model.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/add-a-new-flux.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/add-a-new-case.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/define-initial-conditions.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/configure-outputs-diagnostics.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/run-with-openmp.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/run-with-mpi.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/run-with-kokkos.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/run-on-gh200.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/how-to/profile-performance.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
