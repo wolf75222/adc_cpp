@@ -21,6 +21,23 @@ getting_started/index
 ```
 
 ```{toctree}
+:maxdepth: 1
+:caption: Concepts
+
+concepts/hyperbolic-elliptic-systems
+concepts/physical-model
+concepts/conservative-primitive-variables
+concepts/fluxes-sources-eigenvalues
+concepts/elliptic-rhs
+concepts/poisson
+concepts/time-integration
+concepts/strang-schur-imex
+concepts/amr
+concepts/multi-block-multi-species
+concepts/polar-disc-geometry
+```
+
+```{toctree}
 :maxdepth: 2
 :caption: Writing a model
 
