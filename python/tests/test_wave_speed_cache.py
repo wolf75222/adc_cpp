@@ -142,5 +142,32 @@ msg = err_msg(make_mode_then_cache)
 chk("wave_speed_cache" in msg and "disque" in msg,
     f"set_disc_domain(cutcell) puis add_block(cache) rejete ({msg[:60]}...)")
 
+print("== (6) garde backend compile : cache + add_equation(modele .so) -> erreur ==")
+# Le cache n'est cable que sur le chemin natif compose (add_block). Les trois adders de modele
+# compile (.so) -- prototype/aot/production -- ne transportent pas le flag : il serait ignore en
+# silence. On verifie le rejet explicite via des CompiledModel FACTICES (la garde leve AVANT la
+# frontiere C++ / le dlopen, donc aucun .so reel ni compilateur requis).
+import adc.dsl as dsl  # noqa: E402
+
+# aot et production : l'ABI du .so transporte hll mais PAS le cache -> rejet explicite attendu.
+# (Le backend 'prototype' rejette deja hll en amont -- rusanov ordre 1 uniquement -- donc le cache
+#  n'y est jamais ignore en silence ; pas de cas dedie.)
+for backend, adder in (("aot", "add_compiled_block"),
+                       ("production", "add_native_block")):
+    fake = dsl.CompiledModel(so_path="/inexistant.so", backend=backend, adder=adder,
+                             cons_names=["rho"], cons_roles=["Density"], prim_names=["rho"],
+                             n_vars=1, gamma=(None if backend == "production" else 1.4),
+                             n_aux=0, params={}, caps={}, abi_key="k", model_hash="h",
+                             cxx="c++", std="c++20")
+    fake.has_wave_speeds = True  # le cache cible les modeles a vitesses d'onde (passe la garde hll)
+
+    def add_eq_cache(fk=fake):
+        s = adc.System(n=16, L=1.0, periodic=True)
+        s.add_equation("g", fk, spatial=adc.FiniteVolume(limiter="none", riemann="hll",
+                                                         wave_speed_cache=True),
+                       time=adc.Explicit())
+    m6 = err_msg(add_eq_cache)
+    chk("wave_speed_cache" in m6, f"backend {backend} + cache rejete ({m6[:55]}...)")
+
 print("FAILS =", fails)
 sys.exit(1 if fails else 0)

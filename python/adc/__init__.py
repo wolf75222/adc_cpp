@@ -1573,6 +1573,9 @@ class System:
                     "add_equation : positivity_floor non supporte sur backend 'prototype' (residu "
                     "hote dedie, sans reconstruction haut-ordre) ; utiliser backend='aot'/'production' "
                     "ou un modele compose adc.Model(...) -> add_block.")
+            # NB wave_speed_cache (ADC-199) : pas de garde dediee ici -- le cache exige riemann='hll',
+            # deja rejete plus haut sur 'prototype' (rusanov ordre 1 uniquement) -> jamais ignore en
+            # silence sur ce backend.
             self._s.add_dynamic_block(name, compiled.so_path, nsub, names_arg, spatial.limiter)
             return
         if adder == "add_compiled_block":
@@ -1598,6 +1601,14 @@ class System:
                     "transporte pas evolve ; le bloc serait avance en silence). Utiliser "
                     "backend='production' (chemin natif, evolve cable) ou un modele natif compose "
                     "adc.Model(...) -> add_block(..., evolve=False) (ou add_background) pour un champ gele.")
+            # wave_speed_cache (ADC-199) : l'ABI du .so AOT ne transporte pas le cache de vitesses
+            # d'onde -> il serait ignore en silence. Rejet explicite (le cache n'est cable que sur
+            # add_block natif compose).
+            if getattr(spatial, "wave_speed_cache", False):
+                raise ValueError(
+                    "add_equation : wave_speed_cache non supporte sur backend 'aot' (l'ABI du .so AOT ne "
+                    "transporte pas le cache de vitesses d'onde HLL ; il serait ignore en silence). "
+                    "Utiliser un modele natif compose adc.Model(...) -> add_block.")
             self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                        spatial.recon, time.kind, nsub, names_arg,
                                        getattr(spatial, "positivity_floor", 0.0))
@@ -1612,6 +1623,15 @@ class System:
                     "roles sont portes par les metadonnees du modele compile (.so)")
             # Garde PRE-DLOPEN au branchement : couvre AUSSI le cache HIT (ou compile_native ne tourne
             # pas) -- un module _adc perime donnerait sinon un dlopen 'symbol not found' cryptique.
+            # wave_speed_cache (ADC-199) : l'ABI add_native_block ne transporte pas (encore) le cache
+            # de vitesses d'onde -> il serait ignore en silence. Rejet explicite AVANT la frontiere
+            # C++ (et avant le check ABI : message clair plutot qu'une erreur de dlopen). Le cache est
+            # cable sur le chemin natif compose add_block (System.add_block).
+            if getattr(spatial, "wave_speed_cache", False):
+                raise ValueError(
+                    "add_equation : wave_speed_cache non supporte sur backend 'production' (l'ABI "
+                    "add_native_block ne transporte pas le cache de vitesses d'onde HLL ; il serait "
+                    "ignore en silence). Utiliser un modele natif compose adc.Model(...) -> add_block.")
             dsl.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
             gamma = compiled.gamma if compiled.gamma is not None else 1.4
             self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
