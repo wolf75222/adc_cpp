@@ -22,6 +22,16 @@ getting_started/index
 
 ```{toctree}
 :maxdepth: 1
+:caption: Tutorials
+
+tutorials/first-model
+tutorials/write-a-model-with-bricks
+tutorials/write-a-model-with-dsl
+tutorials/hybrid-model-native-plus-dsl
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Concepts
 
 concepts/hyperbolic-elliptic-systems
