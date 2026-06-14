@@ -51,7 +51,11 @@ if [ -z "$PYMOD" ]; then
   PRESET=python
   [ -z "${CONDA_PREFIX:-}" ] && PRESET=ci-python
   echo "    (aucun build existant : cmake --preset $PRESET)"
-  cmake --preset "$PRESET"
+  # CMAKE_POSITION_INDEPENDENT_CODE=ON : le module _adc est une extension partagee qui lie Kokkos
+  # en statique ; le Kokkos recupere par FetchContent (preset ci-python) doit donc etre compile
+  # -fPIC, sinon le link de la .so echoue (relocations R_X86_64_PC32 / TPOFF32 contre les symboles
+  # Kokkos). ci.yml fait l'equivalent en buildant Kokkos PIC a part (cle de cache "...-pic").
+  cmake --preset "$PRESET" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
   cmake --build --preset "$PRESET"
   PYMOD="$PWD/build-py/python"
 fi
