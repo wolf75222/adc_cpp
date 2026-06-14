@@ -10,6 +10,7 @@
 ![CI](https://img.shields.io/badge/CI-Release%20%7C%20MPI%20%7C%20Kokkos%20%7C%20Python-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+![License](https://img.shields.io/badge/license-BSD--3-green)
 
 </div>
 
@@ -233,3 +234,7 @@ Pour coupler N especes (ions, electrons, neutres), chacune a son `PhysicalModel`
 sa politique temporelle. Les interactions vivent dans le second membre elliptique (`ChargeDensityRhs`) et
 dans la source (`CoupledSource`), jamais dans le flux. Le scheduler gere sous-pas, cadence, IMEX partiel
 et pas adaptatif multirate (`step_adaptive`). Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## License
+
+BSD-3-Clause. Voir [LICENSE](LICENSE).
