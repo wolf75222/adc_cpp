@@ -416,8 +416,14 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
     import os
     # _platform_cache_key : l'arch CPU + les optflags entrent dans la cle (un .so x86_64 ou
     # -march=native reutilise sur une autre machine via un cache partage = SIGILL silencieux).
-    rest = "|".join((abi_key or "", backend or "", target or "", name or "",
-                     _platform_cache_key())).encode()
+    parts = [abi_key or "", backend or "", target or "", name or "", _platform_cache_key()]
+    # Marqueur de schema aot : les .so aot d'avant l'alignement des flags sur le natif etaient batis a
+    # -O2 en dur alors que la cle annoncait deja les optflags du natif -> les ecarter pour qu'un cache
+    # partage ne reserve pas un binaire -O2 perime. Le natif/jit, dont la cle reflete deja leur binaire,
+    # gardent un nom de fichier INCHANGE (marqueur ajoute seulement pour aot).
+    if (backend or "").split(";", 1)[0] in ("aot", "hybrid-aot"):
+        parts.append("aot-optflags")
+    rest = "|".join(parts).encode()
     tag = hashlib.sha256(rest).hexdigest()[:16]
     fname = "%s-%s.so" % ((model_hash or "nohash")[:16], tag)
     return os.path.join(adc_cache_dir(), fname)
@@ -473,6 +479,18 @@ def _native_feature_key():
     return "kokkos=on;kcfg=%s" % tag
 
 
+# Flags d'optimisation partages par les .so DSL qui executent le chemin de PRODUCTION (aot et natif).
+# Defaut -O3 -DNDEBUG : asserts hot-loop desarmes + vecto pleine -> parite avec un bloc natif (a -O2
+# sans -DNDEBUG le noyau genere est ~1.48x). $ADC_DSL_OPTFLAGS surcharge ; n'affecte NI l'ABI NI la
+# portabilite. Le seul .so qui reste a -O2 est le JIT/prototype (residu hote Rusanov, perf hors sujet).
+_DSL_OPTFLAGS_DEFAULT = "-O3 -DNDEBUG"
+
+
+def _dsl_optflags():
+    """Liste de flags d'optimisation des .so DSL de production (cf. _DSL_OPTFLAGS_DEFAULT)."""
+    return os.environ.get("ADC_DSL_OPTFLAGS", _DSL_OPTFLAGS_DEFAULT).split()
+
+
 def _platform_cache_key():
     """Traits MACHINE qui changent le code binaire du .so sans changer la cle d'ABI C++ (__VERSION__
     est identique cross-arch) : architecture CPU + flags d'optimisation. Sans eux dans la cle de
@@ -480,7 +498,7 @@ def _platform_cache_key():
     un cache partage (NFS, home synchronise) -> SIGILL (illegal instruction) ou dlopen cryptique."""
     import platform
     return "arch=%s;optflags=%s" % (platform.machine(),
-                                    os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG"))
+                                    os.environ.get("ADC_DSL_OPTFLAGS", _DSL_OPTFLAGS_DEFAULT))
 
 
 def _warn_kokkos_parity():
@@ -2720,7 +2738,9 @@ class HyperbolicModel:
             cpp = os.path.join(tmp, "model_aot.cpp")
             with open(cpp, "w") as f:
                 f.write(src)
-            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include]
+            # Memes flags d'optimisation que le natif (chemin de production identique) : a -O2 sans
+            # -DNDEBUG le noyau marshale est ~1.48x. $ADC_DSL_OPTFLAGS surcharge (cf. _dsl_optflags).
+            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, *_dsl_optflags(), "-I", include]
                          + kokkos_compile_flags + link_extra + [cpp, "-o", so_path] + kokkos_link_flags,
                          "backend aot, compile_aot")
         return so_path
@@ -2901,7 +2921,7 @@ class HyperbolicModel:
                         "/Fe:" + so_path, "/Fo" + tmp + os.sep,
                         "/link"] + kokkos_link_flags + [adc_lib])
             else:
-                optflags = os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG").split()
+                optflags = _dsl_optflags()
                 flags = ["-shared", "-fPIC", "-std=" + std, *optflags,
                          "-DADC_HEADER_SIG=\"%s\"" % sig, *kokkos_compile_flags]
                 # macOS/Apple-ld : autoriser explicitement les indefinis (resolus a l'execution).
@@ -4196,7 +4216,9 @@ class HybridModel:
             if os.path.exists(so_path):
                 return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
 
-        optflags = os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG").split() if native else ["-O2"]
+        # aot ET natif tournent le chemin de production -> memes flags d'optimisation (cf. _dsl_optflags) ;
+        # seul le jit/prototype reste a -O2 (residu hote Rusanov, perf hors sujet).
+        optflags = _dsl_optflags() if kokkos_like else ["-O2"]
         flags = ["-shared", "-fPIC", "-std=" + std, *optflags]
         kokkos_link_flags = []
         if mode == "jit":
