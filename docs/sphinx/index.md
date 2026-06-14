@@ -78,7 +78,7 @@ models/index
 
 ```{toctree}
 :maxdepth: 2
-:caption: Simulating
+:caption: Simulation
 
 simulation/index
 amr/index
