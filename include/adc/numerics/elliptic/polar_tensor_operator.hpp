@@ -350,6 +350,16 @@ class PolarTensorKrylovSolver {
     a_tt_ = &a_tt_store_;
   }
 
+  // REGLE DES CINQ (C.21) : les pointeurs courants a_rr_/a_tt_ aliasent les stores internes
+  // a_rr_store_/a_tt_store_ ou des champs externes. Une copie/move PAR DEFAUT laisserait ces
+  // pointeurs viser les stores de l'objet SOURCE (dangling/UB). Le solveur est TOUJOURS utilise comme
+  // variable LOCALE de portee (jamais copie, move, stocke en conteneur ni retourne par valeur) : on
+  // SUPPRIME les quatre operations plutot que d'ecrire un move re-pointant les stores (inutile ici).
+  PolarTensorKrylovSolver(const PolarTensorKrylovSolver&) = delete;
+  PolarTensorKrylovSolver& operator=(const PolarTensorKrylovSolver&) = delete;
+  PolarTensorKrylovSolver(PolarTensorKrylovSolver&&) = delete;
+  PolarTensorKrylovSolver& operator=(PolarTensorKrylovSolver&&) = delete;
+
   // --- contrat PolarEllipticSolver / PolarLinearSolver ---
   MultiFab& rhs() { return rhs_; }
   MultiFab& phi() { return phi_; }

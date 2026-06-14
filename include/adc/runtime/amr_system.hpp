@@ -181,6 +181,11 @@ class AmrSystem {
  public:
   explicit AmrSystem(const AmrSystemConfig& cfg);
   ~AmrSystem();
+  // REGLE DES CINQ (C.21) : move-only (PIMPL unique_ptr). La copie etait deja IMPLICITEMENT supprimee
+  // (move ctor declare) ; on la rend EXPLICITE pour l'intention. Aucun changement d'API (la copie etait
+  // deja inutilisable).
+  AmrSystem(const AmrSystem&) = delete;
+  AmrSystem& operator=(const AmrSystem&) = delete;
   AmrSystem(AmrSystem&&) noexcept;
   AmrSystem& operator=(AmrSystem&&) noexcept;
 

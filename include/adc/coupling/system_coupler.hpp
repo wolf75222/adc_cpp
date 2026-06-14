@@ -67,6 +67,14 @@ struct ScopedBlockState {
     block.state = &stage_state;
   }
 
+  // REGLE DES CINQ (C.21) : scope-guard a effet de bord dans le dtor (restaure block.state). Copie/move
+  // PAR DEFAUT -> double restauration ou restauration depuis une copie morte. Jamais copie ni move
+  // (toujours une variable locale de portee) : on supprime les quatre operations.
+  ScopedBlockState(const ScopedBlockState&) = delete;
+  ScopedBlockState& operator=(const ScopedBlockState&) = delete;
+  ScopedBlockState(ScopedBlockState&&) = delete;
+  ScopedBlockState& operator=(ScopedBlockState&&) = delete;
+
   ~ScopedBlockState() { block.state = old_state; }
 };
 }  // namespace detail
