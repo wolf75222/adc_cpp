@@ -9,6 +9,8 @@
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/model_spec.hpp>
 
+#include "test_harness.hpp"  // adc::test::Checker (style verbose) + raises partages
+
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -19,19 +21,7 @@
 #endif
 
 using namespace adc;
-
-// Renvoie true si f() leve un std::runtime_error (le refus attendu).
-template <class F>
-static bool raises(F&& f) {
-  try {
-    f();
-  } catch (const std::runtime_error&) {
-    return true;
-  } catch (...) {
-    return false;
-  }
-  return false;
-}
+using adc::test::raises;  // true si l'appelable leve std::runtime_error (le refus attendu)
 
 // Bloc ExB scalaire minimal valide (diocotron-like), pour exercer les chemins de refus.
 static ModelSpec exb_spec() {
@@ -49,11 +39,8 @@ int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
 #endif
-  int fails = 0;
-  auto chk = [&](bool c, const char* w) {
-    std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
-  };
+  adc::test::Checker checker{adc::test::Checker::Style::Verbose};  // imprime [OK ]/[XX ] par ligne
+  auto chk = [&](bool c, const char* w) { checker(c, w); };
 
   AmrSystemConfig cfg;
   cfg.n = 16;
@@ -153,9 +140,9 @@ int main(int argc, char** argv) {
       }),
       "mono-bloc + regrid_every > 0 reste autorise (regrid AmrCouplerMP intact)");
 
-  if (fails == 0)
+  if (checker.fails() == 0)
     std::printf("OK test_amr_system_contract (refus explicite des parametres non cables)\n");
   else
-    std::printf("FAIL test_amr_system_contract : %d echec(s)\n", fails);
-  return fails == 0 ? 0 : 1;
+    std::printf("FAIL test_amr_system_contract : %d echec(s)\n", checker.fails());
+  return checker.failed();
 }

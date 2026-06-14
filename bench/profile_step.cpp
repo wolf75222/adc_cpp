@@ -38,6 +38,8 @@
 #include <adc/parallel/comm.hpp>
 #include <adc/physics/bricks.hpp>  // CompositeModel, ExBVelocity, NoSource, ChargeDensity
 
+#include "common.hpp"  // adc::bench::{timed, PhaseTimers, eat} (briques de mesure partagees)
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -50,7 +52,9 @@
 #include <vector>
 
 using namespace adc;
-using Clock = std::chrono::steady_clock;
+using adc::bench::Clock;        // std::chrono::steady_clock (horloge des harnais)
+using adc::bench::PhaseTimers;  // accumulateur de temps par phase (poisson/aux/halos/transport/...)
+using adc::bench::timed;        // chronometre une phase (device_fence avant/apres)
 static constexpr double kPi = 3.14159265358979323846;
 
 // Modele DIOCOTRON : advection scalaire ExB (n_vars=1) + pas de source + densite de charge q n au
@@ -58,37 +62,6 @@ static constexpr double kPi = 3.14159265358979323846;
 // et que System branche par add_block ; le chemin numerique (assemble_rhs<Limiter, Rusanov>, SSPRK2,
 // GeometricMG) est identique.
 using Diocotron = CompositeModel<ExBVelocity, NoSource, ChargeDensity>;
-
-// Un accumulateur de temps par phase (en secondes), agrege sur les pas chronometres.
-struct PhaseTimers {
-  double poisson = 0, aux_derive = 0, halos = 0, transport = 0, reduction = 0, fence = 0,
-         alloc_tmp = 0;
-  void add(const PhaseTimers& o) {
-    poisson += o.poisson;
-    aux_derive += o.aux_derive;
-    halos += o.halos;
-    transport += o.transport;
-    reduction += o.reduction;
-    fence += o.fence;
-    alloc_tmp += o.alloc_tmp;
-  }
-  double total() const {
-    return poisson + aux_derive + halos + transport + reduction + fence + alloc_tmp;
-  }
-};
-
-// Chronometre une phase : device_fence() AVANT et APRES pour que le temps capture l'execution device
-// reelle (sous Kokkos Cuda les kernels sont async ; sans fence on mesurerait le seul temps de
-// SOUMISSION, pas l'execution). En serie / OpenMP device_fence est un no-op : on mesure le mur direct.
-template <class F>
-double timed(F&& f) {
-  device_fence();
-  const auto t0 = Clock::now();
-  f();
-  device_fence();
-  const auto t1 = Clock::now();
-  return std::chrono::duration<double>(t1 - t0).count();
-}
 
 // Initialise un anneau de densite (profil diocotron : couronne de charge module azimutalement).
 static void init_ring(MultiFab& U, const Geometry& geom) {
@@ -247,26 +220,14 @@ int main(int argc, char** argv) {
   double cfl = 0.4;
   std::string solver = "geometric_mg", limiter = "minmod", bcmode = "periodic";
   for (int a = 1; a < argc; ++a) {
-    auto eat = [&](const char* key, auto& out) {
-      if (std::strcmp(argv[a], key) == 0 && a + 1 < argc) {
-        using T = std::decay_t<decltype(out)>;
-        if constexpr (std::is_same_v<T, std::string>)
-          out = argv[++a];
-        else if constexpr (std::is_same_v<T, double>)
-          out = std::atof(argv[++a]);
-        else
-          out = std::atoi(argv[++a]);
-        return true;
-      }
-      return false;
-    };
-    if (eat("--n", n)) continue;
-    if (eat("--steps", steps)) continue;
-    if (eat("--warmup", warmup)) continue;
-    if (eat("--cfl", cfl)) continue;
-    if (eat("--solver", solver)) continue;
-    if (eat("--limiter", limiter)) continue;
-    if (eat("--bc", bcmode)) continue;
+    using adc::bench::eat;  // consomme un argument "--cle valeur" (avance a, convertit selon le type)
+    if (eat(argc, argv, a, "--n", n)) continue;
+    if (eat(argc, argv, a, "--steps", steps)) continue;
+    if (eat(argc, argv, a, "--warmup", warmup)) continue;
+    if (eat(argc, argv, a, "--cfl", cfl)) continue;
+    if (eat(argc, argv, a, "--solver", solver)) continue;
+    if (eat(argc, argv, a, "--limiter", limiter)) continue;
+    if (eat(argc, argv, a, "--bc", bcmode)) continue;
   }
   const bool periodic = (bcmode == "periodic");
 

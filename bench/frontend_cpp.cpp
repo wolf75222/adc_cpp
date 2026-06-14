@@ -31,6 +31,8 @@
 #include <adc/physics/bricks.hpp>  // CompositeModel, NoSource, ChargeDensity, kAuxBaseComps
 #include <adc/physics/euler.hpp>   // Euler (brique hyperbolique compressible 4 var)
 
+#include "common.hpp"  // adc::bench::{timed, PhaseTimers, percentile, eat} (briques de mesure partagees)
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -42,7 +44,10 @@
 #include <vector>
 
 using namespace adc;
-using Clock = std::chrono::steady_clock;
+using adc::bench::Clock;        // std::chrono::steady_clock (horloge des harnais)
+using adc::bench::PhaseTimers;  // accumulateur de temps par phase (total() inutilise ici)
+using adc::bench::timed;        // chronometre une phase (device_fence avant/apres)
+using adc::bench::percentile;   // percentile interpole des temps par pas
 
 // ====================================================================================================
 // CONTRAT DU CAS SUR -- ces constantes DOIVENT coincider bit-a-bit avec adc_cases/perf/frontend_compare.py
@@ -72,32 +77,6 @@ inline double dt_for(int n) { return kCflForDt * (kL / n) / wmax(); }
 #endif
 
 using SafeEuler = CompositeModel<Euler, NoSource, ChargeDensity>;
-
-// Accumulateur de temps par phase (s), agrege sur les pas chronometres (identique a profile_step).
-struct PhaseTimers {
-  double poisson = 0, aux_derive = 0, halos = 0, transport = 0, reduction = 0, fence = 0,
-         alloc_tmp = 0;
-  void add(const PhaseTimers& o) {
-    poisson += o.poisson;
-    aux_derive += o.aux_derive;
-    halos += o.halos;
-    transport += o.transport;
-    reduction += o.reduction;
-    fence += o.fence;
-    alloc_tmp += o.alloc_tmp;
-  }
-};
-
-// Chronometre une phase, fence avant/apres pour capturer l'execution device reelle (no-op en serie).
-template <class F>
-double timed(F&& f) {
-  device_fence();
-  const auto t0 = Clock::now();
-  f();
-  device_fence();
-  const auto t1 = Clock::now();
-  return std::chrono::duration<double>(t1 - t0).count();
-}
 
 // Etat conservatif U = (rho, rho u, rho v, E) : bulle de pression lisse au centre, gaz au repos.
 // Pendant C++ EXACT de adc_cases.common.initial_conditions.euler_pressure_blob (convention field[j,i]
@@ -247,16 +226,6 @@ static Invariants diagnose(const SafeEuler& model, const MultiFab& U) {
   return inv;
 }
 
-// Percentile lineaire d'un echantillon trie (q dans [0,1]).
-static double percentile(std::vector<double> v, double q) {
-  if (v.empty()) return 0.0;
-  std::sort(v.begin(), v.end());
-  const double idx = q * (v.size() - 1);
-  const size_t lo = static_cast<size_t>(idx);
-  const size_t hi = std::min(lo + 1, v.size() - 1);
-  return v[lo] + (idx - lo) * (v[hi] - v[lo]);
-}
-
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
 
@@ -264,26 +233,14 @@ int main(int argc, char** argv) {
   std::string poisson = "off", backend = "serial", machine = "unknown";
   double dt_override = -1.0;
   for (int a = 1; a < argc; ++a) {
-    auto eat = [&](const char* key, auto& out) {
-      if (std::strcmp(argv[a], key) == 0 && a + 1 < argc) {
-        using T = std::decay_t<decltype(out)>;
-        if constexpr (std::is_same_v<T, std::string>)
-          out = argv[++a];
-        else if constexpr (std::is_same_v<T, double>)
-          out = std::atof(argv[++a]);
-        else
-          out = std::atoi(argv[++a]);
-        return true;
-      }
-      return false;
-    };
-    if (eat("--n", n)) continue;
-    if (eat("--steps", steps)) continue;
-    if (eat("--warmup", warmup)) continue;
-    if (eat("--poisson", poisson)) continue;
-    if (eat("--dt", dt_override)) continue;
-    if (eat("--backend", backend)) continue;  // libelle informatif (le vrai backend = celui du build)
-    if (eat("--machine", machine)) continue;
+    using adc::bench::eat;  // consomme un argument "--cle valeur" (avance a, convertit selon le type)
+    if (eat(argc, argv, a, "--n", n)) continue;
+    if (eat(argc, argv, a, "--steps", steps)) continue;
+    if (eat(argc, argv, a, "--warmup", warmup)) continue;
+    if (eat(argc, argv, a, "--poisson", poisson)) continue;
+    if (eat(argc, argv, a, "--dt", dt_override)) continue;
+    if (eat(argc, argv, a, "--backend", backend)) continue;  // libelle informatif (le vrai backend = celui du build)
+    if (eat(argc, argv, a, "--machine", machine)) continue;
   }
   const bool with_poisson = (poisson == "on");
   const double dt = (dt_override > 0) ? dt_override : safecase::dt_for(n);
