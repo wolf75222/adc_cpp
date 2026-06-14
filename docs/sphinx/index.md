@@ -83,6 +83,6 @@ Nouveau venu ? Commencez par la [presentation](getting_started/presentation.md),
 
 - Code source : <https://github.com/wolf75222/adc_cpp>
 - Reference C++ Doxygen : [/cpp/](https://wolf75222.github.io/adc_cpp/cpp/)
-- Solveurs soeurs (sur `pde_core_cpp`) : [euler_cpp](https://github.com/wolf75222/euler_cpp),
-  [advection_cpp](https://github.com/wolf75222/advection_cpp)
+- Solveurs soeurs sur le socle [pde_core_cpp](https://github.com/wolf75222/pde_core_cpp) :
+  euler_cpp et advection_cpp (depots prives)
 - Scenarios applicatifs : [adc_cases](https://github.com/wolf75222/adc_cases)
