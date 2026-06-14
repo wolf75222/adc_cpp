@@ -1,9 +1,9 @@
-# Doxygen config pour adc_cpp. Reglages non-defaut seulement ; lancer depuis la racine :
+# Doxygen config for adc_cpp. Non-default settings only; run from the repo root:
 #   doxygen docs/Doxyfile   ->   docs/_build/doxygen/html/index.html
 
 PROJECT_NAME           = "adc_cpp"
 PROJECT_NUMBER         = "0.1.0"
-PROJECT_BRIEF          = "C++23 mini-AMReX maison : hyperbolique-elliptique couple sur AMR (diocotron, deux-fluides), seam serie/OpenMP/Kokkos/MPI"
+PROJECT_BRIEF          = "Model-free C++23 core for coupled hyperbolic-elliptic systems on adaptive (AMR) meshes, with MPI and GPU (Kokkos) backends"
 
 OUTPUT_DIRECTORY       = docs/_build/doxygen
 INPUT                  = include README.md
@@ -20,7 +20,33 @@ WARN_IF_UNDOCUMENTED   = NO
 
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
-HTML_EXTRA_STYLESHEET  = docs/doxygen_custom.css
+GENERATE_LATEX         = NO
+
+# Modern theme: doxygen-awesome-css (MIT, vendored under docs/doxygen-awesome-css/).
+# The doxygen_custom.css override (image sizing on the main page) is kept and loaded last.
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
-GENERATE_LATEX         = NO
+FULL_SIDEBAR           = NO
+HTML_COLORSTYLE        = LIGHT
+HTML_DYNAMIC_SECTIONS  = YES
+HTML_EXTRA_STYLESHEET  = docs/doxygen-awesome-css/doxygen-awesome.css \
+                         docs/doxygen-awesome-css/doxygen-awesome-sidebar-only.css \
+                         docs/doxygen_custom.css
+
+# Diagrams: graphviz/dot graphs (the value of a concept/template-heavy C++23 API is
+# largely in the graphs). graphviz is installed in the docs CI job.
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+UML_LOOK               = YES
+TEMPLATE_RELATIONS     = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+DOT_GRAPH_MAX_NODES    = 100
