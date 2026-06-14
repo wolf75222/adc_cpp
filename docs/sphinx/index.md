@@ -28,6 +28,10 @@ tutorials/first-model
 tutorials/write-a-model-with-bricks
 tutorials/write-a-model-with-dsl
 tutorials/hybrid-model-native-plus-dsl
+tutorials/euler-poisson-case
+tutorials/hoffart-diocotron-case
+tutorials/self-gravitating-euler-poisson
+tutorials/isothermal-two-fluid-ap
 ```
 
 ```{toctree}

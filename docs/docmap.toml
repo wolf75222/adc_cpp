@@ -382,3 +382,31 @@ mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
+
+[docs."docs/sphinx/tutorials/euler-poisson-case.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/tutorials/hoffart-diocotron-case.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/tutorials/self-gravitating-euler-poisson.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/tutorials/isothermal-two-fluid-ap.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
