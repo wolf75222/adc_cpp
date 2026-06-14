@@ -1,44 +1,44 @@
-# Tutoriel A->Z
+# A->Z Tutorial
 
-Ce tutoriel mene une simulation diocotron complete, de `git clone` jusqu'aux figures, au GIF
-et a la comparaison uniforme/AMR. Tout le code montre ci-dessous provient d'un script unique et
-reproductible, [`diocotron_tutorial.py`](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py) : la doc l'inclut
-par `literalinclude` (le code n'est jamais recopie a la main). Le script est autonome ; il ne
-depend que de `adc`, `numpy` et `matplotlib`, pas de `adc_cases`, et s'execute ainsi :
+This tutorial runs a complete diocotron simulation, from `git clone` to the figures, the GIF
+and the uniform/AMR comparison. All the code shown below comes from a single, reproducible
+script, [`diocotron_tutorial.py`](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py): the doc includes it
+via `literalinclude` (the code is never copied by hand). The script is self-contained; it depends
+only on `adc`, `numpy` and `matplotlib`, not on `adc_cases`, and runs as follows:
 
 ```bash
 python docs/sphinx/tutorials/diocotron_tutorial.py            # --n 96 --steps 60
 python docs/sphinx/tutorials/diocotron_tutorial.py --quick    # passage de fumee rapide
 ```
 
-:::{admonition} Physique : modele reduit
+:::{admonition} Physics: reduced model
 :class: note
-Une seule densite `n`, advectee par la derive E x B `v = (-d_y phi / B0, d_x phi / B0)` (a
-divergence nulle), ou `phi` resout le Poisson de systeme `-lap phi = alpha (n - n_i0)`. C'est le
-benchmark de normalisation du diocotron, pas une reproduction du systeme Euler-Poisson
-complet. Voir les [limites honnetes](#limites-honnetes) en fin de page.
+A single density `n`, advected by the E x B drift `v = (-d_y phi / B0, d_x phi / B0)` (with
+zero divergence), where `phi` solves the system Poisson `-lap phi = alpha (n - n_i0)`. This is the
+diocotron normalization benchmark, not a reproduction of the full Euler-Poisson
+system. See the [honest limitations](#limites-honnetes) at the end of the page.
 :::
 
-## Etape 1 : Cloner le depot
+## Step 1: Clone the repository
 
 ```bash
 git clone https://github.com/wolf75222/adc_cpp.git
 cd adc_cpp
 ```
 
-## Etape 2 : Dependances
+## Step 2: Dependencies
 
-- Compilateur C++23 (AppleClang 16+, GCC 13+, Clang 17+).
-- CMake >= 3.21, Ninja, Python >= 3.10 avec `numpy` (et `matplotlib` pour les figures) --
-  le plus simple est l'env conda du depot : `conda env create -f environment.yml && conda
-  activate adc`. pybind11 est pris dans l'env, sinon recupere par CMake.
+- C++23 compiler (AppleClang 16+, GCC 13+, Clang 17+).
+- CMake >= 3.21, Ninja, Python >= 3.10 with `numpy` (and `matplotlib` for the figures);
+  the simplest way is the repository conda env: `conda env create -f environment.yml && conda
+  activate adc`. pybind11 is taken from the env, otherwise fetched by CMake.
 
-Detail et options : [Installation](installation.md).
+Detail and options: [Installation](installation.md).
 
-## Etape 3 : Build du module Python
+## Step 3: Build the Python module
 
-Le coeur est header-only ; seul le module Python `adc` se compile (quelques minutes). Deux
-voies equivalentes :
+The core is header-only; only the Python module `adc` is compiled (a few minutes). Two
+equivalent paths:
 
 ```bash
 # Voie utilisateur : installe dans site-packages, rien a exporter ensuite.
@@ -48,9 +48,9 @@ pip install .
 cmake --preset python && cmake --build --preset python
 ```
 
-Le build complet (coeur + tests, pour contribuer) est dans [Installation](installation.md).
+The full build (core + tests, for contributing) is in [Installation](installation.md).
 
-## Etape 4 : Variables d'environnement
+## Step 4: Environment variables
 
 ```bash
 export PYTHONPATH=$PWD/build-py/python   # voie developpeur seulement (inutile apres pip install)
@@ -58,20 +58,20 @@ export ADC_INCLUDE=$PWD/include
 export ADC_CACHE_DIR=$PWD/.adc_cache
 ```
 
-- `ADC_INCLUDE` : le DSL (backend `production`) compile ses `.so` contre les en-tetes du depot.
-- `ADC_CACHE_DIR` : garde les `.so` generes en cache pour les relances (optionnel ; defaut
-  `~/.cache/adc/dsl`, deja hors source).
-- `PYTHONPATH` : uniquement pour la voie developpeur ; le build depose le paquet complet dans
-  `build-py/python`, ce seul chemin suffit.
+- `ADC_INCLUDE`: the DSL (backend `production`) compiles its `.so` against the repository headers.
+- `ADC_CACHE_DIR`: caches the generated `.so` for reruns (optional; default
+  `~/.cache/adc/dsl`, already out of source).
+- `PYTHONPATH`: only for the developer path; the build drops the full package into
+  `build-py/python`, this single path is enough.
 
-L'extension est epinglee a l'interpreteur qui l'a construite (`cpython-312`) : importer avec le
-meme python. En cas d'erreur d'import, le message indique la cause et la commande de
-reconstruction ; `python -c "import adc; adc.doctor()"` verifie tout l'environnement.
+The extension is pinned to the interpreter that built it (`cpython-312`): import with the
+same python. On an import error, the message gives the cause and the rebuild
+command; `python -c "import adc; adc.doctor()"` checks the whole environment.
 
-## Etape 5 : Importer et detecter le backend
+## Step 5: Import and detect the backend
 
-Le script importe `adc` et le DSL, puis affiche le backend execute (serie pour un
-module Python ; cf. [Verifier son backend](backend.md)).
+The script imports `adc` and the DSL, then prints the running backend (serial for a
+Python module; see [Check your backend](backend.md)).
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
@@ -83,172 +83,172 @@ module Python ; cf. [Verifier son backend](backend.md)).
 :pyobject: detect_backend_runtime
 ```
 
-## Etape 6 : Les parametres physiques du modele
+## Step 6: The physical parameters of the model
 
-Deux constantes pilotent le modele reduit ; elles doivent rester coherentes entre les formules
-du flux et le second membre du Poisson.
+Two constants drive the reduced model; they must stay consistent between the flux formulas
+and the right-hand side of the Poisson.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :lines: 55-60
 ```
 
-## Etape 7 : Ecrire le modele en formules (DSL) et le compiler
+## Step 7: Write the model as formulas (DSL) and compile it
 
-On ecrit le modele symboliquement avec `adc.dsl.Model` : la variable conservative `n`, les champs
-auxiliaires `phi` / `grad_x` / `grad_y` fournis par le solveur, le flux d'advection E x B, les
-valeurs propres, et le second membre elliptique `alpha (n - n_i0)`. `m.check()` verifie que toute
-variable referencee est declaree.
+We write the model symbolically with `adc.dsl.Model`: the conservative variable `n`, the
+auxiliary fields `phi` / `grad_x` / `grad_y` provided by the solver, the E x B advection flux, the
+eigenvalues, and the elliptic right-hand side `alpha (n - n_i0)`. `m.check()` verifies that every
+referenced variable is declared.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: diocotron_model
 ```
 
-Puis on compile le modele en `.so` et on le branche : le script tente d'abord le backend
-`production` (chemin natif zero-copie, prefere en MPI/AMR), puis retombe sur `aot` (numeriquement
-identique, marshale cote hote), comme dans les cas applicatifs. Le defaut de
-`m.compile(...)` est `aot` ; `production` exige que `_adc` et le `.so` aient ete compiles avec les
-memes en-tetes adc (garde d'ABI). C'est aussi ici qu'on choisit le schema spatial (volumes finis,
-limiteur minmod, flux de Rusanov), le temps (explicite) et le Poisson de systeme.
+Then we compile the model into a `.so` and wire it in: the script first tries the
+`production` backend (native zero-copy path, preferred under MPI/AMR), then falls back to `aot`
+(numerically identical, marshaled host-side), as in the application cases. The default of
+`m.compile(...)` is `aot`; `production` requires that `_adc` and the `.so` were compiled with the
+same adc headers (ABI guard). This is also where we choose the spatial scheme (finite volume,
+minmod limiter, Rusanov flux), the time (explicit) and the system Poisson.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: compile_and_build
 ```
 
-## Etape 8 : Construire le System
+## Step 8: Build the System
 
-`adc.System(n=, L=, periodic=True)` cree le coupleur ; `add_equation` aiguille sur le type du
-modele (un `CompiledModel` part sur l'adder du backend). Tout cela est cable dans
-`compile_and_build` ci-dessus.
+`adc.System(n=, L=, periodic=True)` creates the coupler; `add_equation` dispatches on the model
+type (a `CompiledModel` goes to the backend adder). All of this is wired in
+`compile_and_build` above.
 
-## Etape 9 : La condition initiale
+## Step 9: The initial condition
 
-Une bande horizontale de charge, perturbee sinusoidalement le long de `x` (mode azimutal 2) :
-c'est ce qui porte l'instabilite. Convention `ne[j, i]` (indexing numpy `'xy'`), tableau contigu.
+A horizontal band of charge, perturbed sinusoidally along `x` (azimuthal mode 2):
+this is what carries the instability. Convention `ne[j, i]` (numpy `'xy'` indexing), contiguous array.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: band_density
 ```
 
-La densite est posee via `sim.set_density("ne", ne0)` (dans `compile_and_build`), apres avoir
-fixe le fond ionique neutralisant `n_i0 = ne0.mean()` (solubilite du Poisson periodique).
+The density is set via `sim.set_density("ne", ne0)` (in `compile_and_build`), after fixing
+the neutralizing ionic background `n_i0 = ne0.mean()` (solvability of the periodic Poisson).
 
-## Etape 10 : Volumes finis, temps, Poisson
+## Step 10: Finite volume, time, Poisson
 
-Ces trois choix sont passes a `add_equation` / `set_poisson` (etape 7) :
+These three choices are passed to `add_equation` / `set_poisson` (step 7):
 
-- spatial : `adc.FiniteVolume(limiter="minmod", riemann="rusanov")`, reconstruction MUSCL
-  minmod + flux de Riemann de Rusanov ;
-- temps : `adc.Explicit()` ;
-- Poisson : `sim.set_poisson(rhs="charge_density", solver="geometric_mg")`, second membre =
-  densite de charge, solveur multigrille geometrique.
+- spatial: `adc.FiniteVolume(limiter="minmod", riemann="rusanov")`, MUSCL minmod
+  reconstruction + Rusanov Riemann flux;
+- time: `adc.Explicit()`;
+- Poisson: `sim.set_poisson(rhs="charge_density", solver="geometric_mg")`, right-hand side =
+  charge density, geometric multigrid solver.
 
-## Etape 11 : Integrer en temps
+## Step 11: Integrate in time
 
-On avance `steps` pas a CFL fixe (`sim.step_cfl(cfl)`), en capturant des trames, l'instant et
-l'amplitude L2 de la perturbation au fil du temps.
+We advance `steps` steps at fixed CFL (`sim.step_cfl(cfl)`), capturing frames, the time and
+the L2 amplitude of the perturbation over time.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: run
 ```
 
-## Etape 12 : Diagnostics
+## Step 12: Diagnostics
 
-L'amplitude de la perturbation est l'ecart a la moyenne le long de `x` (la bande non perturbee
-est uniforme en `x` ; ce qui en devie porte l'instabilite). Le script verifie en fin de run que
-l'instabilite a cru et que la masse est conservee (transport advectif periodique).
+The amplitude of the perturbation is the deviation from the mean along `x` (the unperturbed band
+is uniform in `x`; what deviates from it carries the instability). At the end of the run the script
+checks that the instability has grown and that mass is conserved (periodic advective transport).
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: perturbation_amplitude
 ```
 
-## Etape 13 : La courbe de croissance
+## Step 13: The growth curve
 
-`make_figures` trace l'amplitude (echelle log) en fonction du temps, a cote de la densite finale.
+`make_figures` plots the amplitude (log scale) as a function of time, next to the final density.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: make_figures
 ```
 
-![Croissance de l'instabilite diocotron : amplitude L2 (echelle log) vs temps, et densite finale.](../tutorials/_assets/diocotron_growth.png)
+![Growth of the diocotron instability: L2 amplitude (log scale) vs time, and final density.](../tutorials/_assets/diocotron_growth.png)
 
-## Etape 14 : Le GIF
+## Step 14: The GIF
 
-La meme fonction `make_figures` assemble l'evolution de la densite en GIF (et une image PNG de
-couverture pour les exports statiques).
+The same `make_figures` function assembles the density evolution into a GIF (and a PNG cover
+image for static exports).
 
-![Evolution temporelle de la densite du diocotron (animation).](../tutorials/_assets/diocotron.gif)
+![Time evolution of the diocotron density (animation).](../tutorials/_assets/diocotron.gif)
 
-*Image de couverture statique (la densite finale), affichee la ou le GIF ne s'anime pas,
-exports PDF/print :*
+*Static cover image (the final density), shown where the GIF does not animate,
+PDF/print exports:*
 
-![Densite finale du diocotron (image de couverture PNG).](../tutorials/_assets/diocotron_cover.png)
+![Final density of the diocotron (PNG cover image).](../tutorials/_assets/diocotron_cover.png)
 
-## Etape 14bis : La meme physique, deux fronts (briques == DSL)
+## Step 14bis: The same physics, two fronts (bricks == DSL)
 
-Le modele a ete ecrit ici en formules (`adc.dsl.Model`, Etape 7). Mais le coeur sait aussi
-composer un modele a partir de briques natives : `adc.Model(state, transport, source, elliptic)`.
-Les deux fronts d'ecriture sont interchangeables : ce sont deux facons de decrire la meme
-physique, et elles produisent un noyau numerique identique. On l'ecrit en briques :
+The model was written here as formulas (`adc.dsl.Model`, Step 7). But the core can also
+compose a model from native bricks: `adc.Model(state, transport, source, elliptic)`.
+The two writing fronts are interchangeable: they are two ways of describing the same
+physics, and they produce an identical numerical kernel. We write it in bricks:
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: native_diocotron_model
 ```
 
-puis on rejoue la meme grille / le meme schema / le meme nombre de pas, et on compare l'etat final
-des deux fronts :
+then we replay the same grid / the same scheme / the same number of steps, and compare the final
+state of the two fronts:
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: native_vs_dsl
 ```
 
-L'ecart est nul a la precision binaire (`max|briques - DSL| = 0`, `np.array_equal`) : les
-formules DSL reproduisent exactement les conventions des briques `ExBVelocity` et `BackgroundDensity`.
-Une divergence (meme $10^{-15}$) trahirait une formule fausse (signe de la derive, borne d'onde,
-second membre). Le catalogue complet des briques est dans la
-[reference des briques](../reference/bricks_reference.md), et celui du DSL dans la
-[reference du DSL](../reference/dsl_reference.md) ; le cas applicatif `tutorial/` de `adc_cases`
-pousse la demonstration a trois fronts (helper specialise inclus).
+The difference is zero to binary precision (`max|briques - DSL| = 0`, `np.array_equal`): the
+DSL formulas reproduce exactly the conventions of the `ExBVelocity` and `BackgroundDensity` bricks.
+A divergence (even $10^{-15}$) would betray a wrong formula (sign of the drift, wave bound,
+right-hand side). The full brick catalog is in the
+[brick reference](../reference/bricks_reference.md), and the DSL one in the
+[DSL reference](../reference/dsl_reference.md); the `tutorial/` application case in `adc_cases`
+pushes the demonstration to three fronts (specialized helper included).
 
-![Densite finale : la meme physique en briques natives (gauche) et en formules DSL (droite) ; ecart maximal nul.](../tutorials/_assets/diocotron_native_vs_dsl.png)
+![Final density: the same physics in native bricks (left) and in DSL formulas (right); maximum difference zero.](../tutorials/_assets/diocotron_native_vs_dsl.png)
 
-## Etape 15 : Uniforme vs AMR
+## Step 15: Uniform vs AMR
 
-On rejoue la meme physique sur une grille uniforme (`adc.System`) et sur une hierarchie raffinee
-(`adc.AmrSystem`), avec exactement le meme modele compose en briques natives. `AmrSystem` raffine
-la ou la densite depasse un seuil (`set_refinement(0.05)`) ; la cadence de regrid est portee par
-`AmrSystemConfig.regrid_every`. Les deux densites finales sont tracees cote a cote, avec l'ecart
-maximal en titre.
+We replay the same physics on a uniform grid (`adc.System`) and on a refined hierarchy
+(`adc.AmrSystem`), with exactly the same model composed in native bricks. `AmrSystem` refines
+where the density exceeds a threshold (`set_refinement(0.05)`); the regrid cadence is carried by
+`AmrSystemConfig.regrid_every`. The two final densities are plotted side by side, with the maximum
+difference in the title.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python
 :pyobject: uniform_vs_amr
 ```
 
-![Densite finale : grille uniforme (gauche) vs hierarchie AMR raffinee (droite).](../tutorials/_assets/diocotron_uniform_vs_amr.png)
+![Final density: uniform grid (left) vs refined AMR hierarchy (right).](../tutorials/_assets/diocotron_uniform_vs_amr.png)
 
-## Etape 16 : Kokkos OpenMP (parallelisme CPU)
+## Step 16: Kokkos OpenMP (CPU parallelism)
 
-Il n'y a pas de parametre Python du type `threads=8`. `import adc` pilote la simulation, mais le
-calcul par cellule herite du backend avec lequel `_adc` a ete compile (voir
-[Verifier son backend](backend.md)). Le nombre de coeurs depend donc du build de `_adc` et des
-variables OpenMP au lancement, pas d'un drapeau de script ; le module distribue tourne en Kokkos Serial
-parce que la CI le construit ainsi (adc_cpp est Kokkos-only).
+There is no Python parameter of the form `threads=8`. `import adc` drives the simulation, but the
+per-cell computation inherits the backend with which `_adc` was compiled (see
+[Check your backend](backend.md)). The number of cores therefore depends on the build of `_adc` and the
+OpenMP variables at launch, not on a script flag; the distributed module runs in Kokkos Serial
+because the CI builds it that way (adc_cpp is Kokkos-only).
 
-Pour le multi-thread, on rebuild le module avec le backend Kokkos OpenMP, contre un Kokkos installe
-avec OpenMP (`Kokkos_ENABLE_OPENMP=ON` au build de Kokkos).
+For multi-threading, we rebuild the module with the Kokkos OpenMP backend, against a Kokkos installed
+with OpenMP (`Kokkos_ENABLE_OPENMP=ON` at the Kokkos build).
 
-**Chemin conda (recommande)** -- la racine de l'env est `$CONDA_PREFIX` (conda ne pose JAMAIS de
-variable `$KOKKOS_ROOT`) et le preset `python-parallel` est deja cable dessus ; si le kokkos de
-l'env est Serial-only, `scripts/kokkos_openmp_conda.sh` installe d'abord un Kokkos OpenMP (~2 min) :
+**Conda path (recommended)** -- the env root is `$CONDA_PREFIX` (conda NEVER sets a
+`$KOKKOS_ROOT` variable) and the `python-parallel` preset is already wired to it; if the env's kokkos
+is Serial-only, `scripts/kokkos_openmp_conda.sh` first installs a Kokkos OpenMP (~2 min):
 
 ```bash
 conda activate adc
@@ -256,8 +256,8 @@ bash scripts/kokkos_openmp_conda.sh        # si besoin : Kokkos OpenMP dans $CON
 cmake --preset python-parallel && cmake --build --preset python-parallel
 ```
 
-**Chemin Kokkos custom / cluster** (install hors conda, p.ex. ROMEO/Spack) : definir soi-meme
-`KOKKOS_ROOT=<prefix de l'install Kokkos>` puis :
+**Custom / cluster Kokkos path** (install outside conda, e.g. ROMEO/Spack): set
+`KOKKOS_ROOT=<prefix de l'install Kokkos>` yourself, then:
 
 ```bash
 cmake -S . -B build-py-kokkos -G Ninja \
@@ -270,8 +270,8 @@ cmake -S . -B build-py-kokkos -G Ninja \
 cmake --build build-py-kokkos --target _adc -j$(sysctl -n hw.logicalcpu)
 ```
 
-Au lancement, on pointe `PYTHONPATH` sur ce build et on fixe le nombre de threads
-(`adc.set_threads(8)` cote Python equivaut a l'export `OMP_NUM_THREADS`) :
+At launch, point `PYTHONPATH` at this build and set the number of threads
+(`adc.set_threads(8)` on the Python side is equivalent to exporting `OMP_NUM_THREADS`):
 
 ```bash
 export PYTHONPATH=$PWD/build-py-kokkos/python
@@ -282,54 +282,54 @@ export ADC_KOKKOS_ROOT="$CONDA_PREFIX"  # chemin conda ; ($KOKKOS_ROOT en chemin
 OMP_NUM_THREADS=8 python docs/sphinx/tutorials/diocotron_tutorial.py
 ```
 
-`ADC_KOKKOS_ROOT` est le point cle pour le DSL `backend="production"` : le module `_adc` etant
-compile AVEC Kokkos, un loader compile sans (cle d'ABI `kokkos=0` vs `kokkos=1`) est REJETE avec un
-message explicite -- plus de repli serie muet. Avec lui, le loader est compile avec le meme Kokkos
-que `_adc`, donc les `OMP_NUM_THREADS` coeurs servent (cf.
+`ADC_KOKKOS_ROOT` is the key point for the DSL `backend="production"`: since the `_adc` module is
+compiled WITH Kokkos, a loader compiled without (ABI key `kokkos=0` vs `kokkos=1`) is REJECTED with an
+explicit message -- no more silent serial fallback. With it, the loader is compiled with the same Kokkos
+as `_adc`, so the `OMP_NUM_THREADS` cores are used (see
 [`dsl.py`](https://github.com/wolf75222/adc_cpp/blob/master/python/adc/dsl.py)).
 
-Piege courant : lancer `OMP_NUM_THREADS=8 python ...` contre un `_adc` compile en serie ne change
-quasiment rien ; il faut d'abord le build Kokkos ci-dessus. La facade C++ (hors Python) se valide
-a part contre un Kokkos OpenMP (`-DKokkos_ROOT=<install OpenMP>`) puis `ctest` (job CI ci-full).
-Il n'y a plus de backend OpenMP autonome : Serial, OpenMP et Cuda sont des espaces d'execution
-Kokkos choisis a l'install de Kokkos.
+Common pitfall: running `OMP_NUM_THREADS=8 python ...` against an `_adc` compiled in serial changes
+almost nothing; you must first do the Kokkos build above. The C++ facade (outside Python) is validated
+separately against a Kokkos OpenMP (`-DKokkos_ROOT=<install OpenMP>`) then `ctest` (CI job ci-full).
+There is no longer a standalone OpenMP backend: Serial, OpenMP and Cuda are Kokkos execution
+spaces chosen at the Kokkos install.
 
-## Etape 17 : MPI (parallelisme distribue)
+## Step 17: MPI (distributed parallelism)
 
-De meme, le distribue s'obtient a la compilation, et se lance via `mpirun` :
+Likewise, the distributed mode is obtained at compile time, and launched via `mpirun`:
 
 ```bash
 cmake --preset mpi && cmake --build --preset mpi     # OpenMPI de l'env conda
 ctest --preset mpi                                   # rejoue np=1/2/4 via mpirun
 ```
 
-`comm.hpp` passe alors par `MPI_Comm_rank/size` + collectives. MPI et Kokkos se combinent (un GPU
-par rang) pour le GPU. Le GPU lui-meme exige ROMEO : `-DADC_USE_KOKKOS=ON` +
-`Kokkos_ARCH_HOPPER90` + `nvcc_wrapper`, valide manuellement sur GH200 (jamais en CI). Voir
-[Verifier son backend](backend.md) et [`GPU_ROMEO.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
+`comm.hpp` then goes through `MPI_Comm_rank/size` + collectives. MPI and Kokkos combine (one GPU
+per rank) for the GPU. The GPU itself requires ROMEO: `-DADC_USE_KOKKOS=ON` +
+`Kokkos_ARCH_HOPPER90` + `nvcc_wrapper`, validated manually on GH200 (never in CI). See
+[Check your backend](backend.md) and [`GPU_ROMEO.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
 
 (limites-honnetes)=
 
-## Etape 18 : Limites honnetes
+## Step 18: Honest limitations
 
-- **Modele reduit.** Ce tutoriel transporte une densite par la derive E x B couplee a un Poisson
-  scalaire (`alpha (n - n_i0)`). Ce n'est pas le systeme Euler-Poisson complet (pas
-  d'equation de quantite de mouvement, pas d'energie), et ce n'est pas une reproduction de la
-  configuration de Hoffart. C'est le benchmark de normalisation du diocotron. La fidelite au
-  systeme complet est discutee dans [`HOFFART_FIDELITY.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/HOFFART_FIDELITY.md) ; les
-  scenarios complets vivent dans `adc_cases` (cf. [Organisation des depots](organisation.md)).
-- **Backend serie.** Le run Python est serie (cf. etapes 16-17 et [backend](backend.md)) ; les
-  figures sont produites a basse resolution pour rester rapides et reproductibles.
-- **Comparaison AMR indicative.** `uniform_vs_amr` illustre l'usage de `AmrSystem` ; l'ecart
-  uniforme/AMR rapporte en titre mesure la coherence, pas une etude de convergence.
+- **Reduced model.** This tutorial transports a density by the E x B drift coupled to a scalar
+  Poisson (`alpha (n - n_i0)`). This is not the full Euler-Poisson system (no
+  momentum equation, no energy), and it is not a reproduction of the Hoffart
+  configuration. It is the diocotron normalization benchmark. The fidelity to the
+  full system is discussed in [`HOFFART_FIDELITY.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/HOFFART_FIDELITY.md); the
+  full scenarios live in `adc_cases` (see [Repository organization](organisation.md)).
+- **Serial backend.** The Python run is serial (see steps 16-17 and [backend](backend.md)); the
+  figures are produced at low resolution to stay fast and reproducible.
+- **Indicative AMR comparison.** `uniform_vs_amr` illustrates the use of `AmrSystem`; the
+  uniform/AMR difference reported in the title measures consistency, not a convergence study.
 
-Chaque asset est accompagne d'un enregistrement de provenance
-([`_assets/provenance.json`](../tutorials/_assets/provenance.json) : SHA `adc_cpp`, backend,
-resolution, commande) pour la reproductibilite.
+Each asset comes with a provenance record
+([`_assets/provenance.json`](../tutorials/_assets/provenance.json): `adc_cpp` SHA, backend,
+resolution, command) for reproducibility.
 
-## Le script complet
+## The full script
 
-Pour reference, le script integral, dans son orchestration :
+For reference, the complete script, in its orchestration:
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
 :language: python

@@ -1,14 +1,14 @@
 # Windows (WSL2)
 
-Ce guide part de zero sur un PC **Windows 11** et conduit jusqu'a un cas `adc_cases` qui
-tourne, sans connaissance prealable du projet. Le chemin recommande est **WSL2 Ubuntu** :
-tout l'outillage Linux deja documente ([Installation](installation.md)) s'applique tel quel
-une fois dans WSL2. Le Windows natif n'est pas un objectif (le coeur a besoin d'une toolchain
-Linux ; cf. epic Port Windows).
+This guide starts from scratch on a **Windows 11** PC and leads up to a running
+`adc_cases` case, with no prior knowledge of the project. The recommended path is **WSL2 Ubuntu**:
+all the Linux tooling already documented ([Installation](installation.md)) applies as is
+once inside WSL2. Native Windows is not a goal (the core needs a Linux
+toolchain; see epic Port Windows).
 
-Les ecarts par rapport aux chemins Linux/macOS/ROMEO sont signales par **(ecart Windows)**.
+The differences from the Linux/macOS/ROMEO paths are marked **(Windows difference)**.
 
-## 1. Prerequis
+## 1. Prerequisites
 
 ### WSL2 + Ubuntu
 
@@ -17,19 +17,19 @@ wsl --install            # depuis PowerShell admin ; installe Ubuntu, redemarre
 wsl -l -v                # verifier : Ubuntu, VERSION 2
 ```
 
-Tout le reste se fait **dans le terminal Ubuntu** (WSL2), pas dans PowerShell.
+Everything else happens **in the Ubuntu terminal** (WSL2), not in PowerShell.
 
-### GPU NVIDIA (optionnel, pour le CUDA)
+### NVIDIA GPU (optional, for CUDA)
 
-Aucun driver a installer cote WSL : le driver **Windows** NVIDIA expose le GPU a WSL2. Verifier
-depuis Ubuntu :
+No driver to install on the WSL side: the NVIDIA **Windows** driver exposes the GPU to WSL2. Check
+from Ubuntu:
 
 ```bash
 nvidia-smi               # doit lister le GPU (ex. RTX 3090, driver 591.86, CUDA 13.x)
 ```
 
-Si `nvidia-smi` repond, le passthrough GPU fonctionne. Le toolkit CUDA s'installe **cote WSL**
-via conda (section GPU), pas besoin de l'installer globalement.
+If `nvidia-smi` responds, GPU passthrough works. The CUDA toolkit is installed **on the WSL side**
+via conda (GPU section), no need to install it globally.
 
 ### conda (Miniforge)
 
@@ -40,11 +40,11 @@ bash /tmp/mf.sh -b -p "$HOME/miniforge3"
 "$HOME/miniforge3/bin/conda" init bash && exec bash
 ```
 
-### Cloner les depots dans le FS WSL
+### Clone the repositories into the WSL FS
 
-**(ecart Windows)** Cloner dans le systeme de fichiers **WSL** (`~/dev/...`), **pas** dans
-`/mnt/c/...` : les I/O sur le disque Windows monte sont beaucoup plus lentes et ralentissent
-fortement les builds C++.
+**(Windows difference)** Clone into the **WSL** file system (`~/dev/...`), **not** into
+`/mnt/c/...`: I/O on the mounted Windows disk is much slower and significantly slows down
+the C++ builds.
 
 ```bash
 mkdir -p ~/dev/Stage_Romain && cd ~/dev/Stage_Romain
@@ -52,32 +52,32 @@ git clone <url>/adc_cpp.git
 git clone <url>/adc_cases.git
 ```
 
-## 2. Environnement de build
+## 2. Build environment
 
-Identique au Linux documente : depuis `adc_cpp/`,
+Same as the documented Linux: from `adc_cpp/`,
 
 ```bash
 bash scripts/setup_env.sh     # cree l'env `adc` + gcc 14 conda (CC/CXX figes)
 conda activate adc
 ```
 
-### (ecart Windows) Kokkos conda = variante CUDA par defaut
+### (Windows difference) Kokkos conda = CUDA variant by default
 
-conda-forge sert desormais `kokkos` en **build CUDA** par defaut. Son `KokkosConfig.cmake`
-exige `CUDAToolkit` : sans toolkit CUDA installe, **tous** les presets echouent au configure
-avec `Could NOT find CUDAToolkit (missing CUDA_CUDART)` (meme `serial`, car `find_package(Kokkos)`
-prend le kokkos conda via `CMAKE_PREFIX_PATH`).
+conda-forge now serves `kokkos` as a **CUDA build** by default. Its `KokkosConfig.cmake`
+requires `CUDAToolkit`: without a CUDA toolkit installed, **all** presets fail at configure
+with `Could NOT find CUDAToolkit (missing CUDA_CUDART)` (even `serial`, because `find_package(Kokkos)`
+picks up the conda kokkos via `CMAKE_PREFIX_PATH`).
 
-Pour le **dev CPU**, fixer la variante CPU de Kokkos (elle embarque OpenMP + Serial) :
+For **CPU dev**, pin the CPU variant of Kokkos (it embeds OpenMP + Serial):
 
 ```bash
 conda install -n adc -c conda-forge "kokkos=*=*hbbfbac7*"   # build sans 'cuda' dans le hash
 # (verifier : `conda list kokkos` ne doit PAS afficher un build 'cuda12...')
 ```
 
-Le GPU se traite dans un env dedie (section 5), pour ne pas melanger CPU et CUDA.
+The GPU is handled in a dedicated env (section 5), so as not to mix CPU and CUDA.
 
-## 3. Coeur C++ et tests
+## 3. C++ core and tests
 
 ```bash
 conda activate adc
@@ -86,12 +86,12 @@ cmake --build --preset serial -j 6      # (ecart Windows) borner -j !
 ctest --preset serial                   # attendu : 100% tests passed
 ```
 
-**(ecart Windows)** WSL2 plafonne la RAM (souvent ~50% de l'hote, ex. 15 Go). Les grosses
-unites `system.cpp` / `amr_system.cpp` a -O3 peuvent faire **OOM `cc1plus`** a parallelisme
-plein. Borner a `-j 6` (~2,5 Go/job) evite l'OOM. ccache (fourni par l'env) accelere les
-rebuilds ulterieurs.
+**(Windows difference)** WSL2 caps the RAM (often ~50% of the host, e.g. 15 GB). The large
+`system.cpp` / `amr_system.cpp` units at -O3 can cause **OOM `cc1plus`** at full
+parallelism. Bounding to `-j 6` (~2.5 GB/job) avoids the OOM. ccache (provided by the env) speeds up
+later rebuilds.
 
-CPU multi-thread (Kokkos OpenMP) :
+CPU multi-thread (Kokkos OpenMP):
 
 ```bash
 cmake --preset parallel
@@ -99,14 +99,14 @@ cmake --build --preset parallel -j 6
 OMP_NUM_THREADS=4 ctest --preset parallel
 ```
 
-MPI (CPU, optionnel) :
+MPI (CPU, optional):
 
 ```bash
 cmake --preset mpi && cmake --build --preset mpi -j 6
 OMPI_MCA_btl_smcuda_use_cuda_ipc=0 ctest --preset mpi
 ```
 
-## 4. Module Python et cas `adc_cases`
+## 4. Python module and `adc_cases` cases
 
 ```bash
 conda activate adc
@@ -125,17 +125,17 @@ python tutorial/equivalence.py
 python tutorial/run.py
 ```
 
-### (ecart Windows) DSL + module Kokkos : `ADC_KOKKOS_ROOT`
+### (Windows difference) DSL + Kokkos module: `ADC_KOKKOS_ROOT`
 
-Quand `_adc` est compile **avec Kokkos**, le backend DSL `production` (qui compile un `.so` du
-modele a l'execution) doit l'etre aussi, sinon le garde ABI le rejette (`kokkos=0` != `1`) et
-aucun backend DSL ne compile. Exporter `ADC_KOKKOS_ROOT=$CONDA_PREFIX` avant de lancer un cas
-qui utilise le DSL. Avec un module **serie** (preset `python`, sans Kokkos), ce n'est pas requis.
+When `_adc` is compiled **with Kokkos**, the `production` DSL backend (which compiles a `.so` of the
+model at runtime) must be too, otherwise the ABI guard rejects it (`kokkos=0` != `1`) and
+no DSL backend compiles. Export `ADC_KOKKOS_ROOT=$CONDA_PREFIX` before running a case
+that uses the DSL. With a **serial** module (preset `python`, without Kokkos), this is not required.
 
-## 5. GPU CUDA (WSL2)
+## 5. CUDA GPU (WSL2)
 
-Le GPU est valide dans un **env conda dedie** `adc-gpu` (kokkos CUDA + toolkit CUDA), separe de
-l'env `adc` (CPU) pour ne pas melanger les deux Kokkos.
+The GPU is validated in a **dedicated conda env** `adc-gpu` (kokkos CUDA + CUDA toolkit), separate from
+the `adc` (CPU) env so as not to mix the two Kokkos.
 
 ```bash
 mamba create -y -n adc-gpu -c conda-forge \
@@ -143,15 +143,15 @@ mamba create -y -n adc-gpu -c conda-forge \
 conda activate adc-gpu
 ```
 
-**(ecart Windows)** Le `kokkos` CUDA de conda-forge est compile pour `sm_80` ; il tourne sur
-une RTX 3090 (`sm_86`) en compatibilite (Kokkos emet un avertissement de perf, le calcul est
-correct). Pour un binaire natif `sm_86`, recompiler Kokkos CUDA a la main.
+**(Windows difference)** The conda-forge CUDA `kokkos` is compiled for `sm_80`; it runs on
+an RTX 3090 (`sm_86`) in compatibility mode (Kokkos emits a perf warning, the computation is
+correct). For a native `sm_86` binary, recompile Kokkos CUDA by hand.
 
-**(gotcha)** Les scripts d'activation conda de `cuda-nvcc` referencent `NVCC_PREPEND_FLAGS`
-sans valeur ; sous `set -u`/`nounset` ils tuent le shell. Exporter avant toute activation :
+**(gotcha)** The conda activation scripts of `cuda-nvcc` reference `NVCC_PREPEND_FLAGS`
+without a value; under `set -u`/`nounset` they kill the shell. Export before any activation:
 `export NVCC_PREPEND_FLAGS="" NVCC_APPEND_FLAGS=""`.
 
-Le build adc GPU utilise `nvcc_wrapper` comme compilateur C++ :
+The adc GPU build uses `nvcc_wrapper` as the C++ compiler:
 
 ```bash
 cmake -S . -B build-cuda -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -159,15 +159,15 @@ cmake -S . -B build-cuda -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$CONDA_PREFIX" -DADC_BUILD_TESTS=ON
 ```
 
-### Statut GPU verifie (WSL2, RTX 3090)
+### Verified GPU status (WSL2, RTX 3090)
 
-- **Harness Kokkos CUDA minimal : OK.** Un `parallel_reduce` Kokkos s'execute sur le GPU
-  (`DefaultExecutionSpace = Cuda`, resultat correct).
-- **Cas adc GPU dedie : OK.** Un petit programme utilisant le **seam de calcul d'adc**
-  (`Fab2D` / `Array4` / `for_each_cell` / `for_each_cell_reduce_sum`) avec une lambda
-  **top-level** compile sous `nvcc_wrapper` et tourne sur le GPU ; valide contre un **oracle CPU**
-  (chaque cellule == formule analytique, reduction GPU == somme hote). Le coeur d'adc est donc
-  device-clean sur le GPU local.
+- **Minimal Kokkos CUDA harness: OK.** A Kokkos `parallel_reduce` runs on the GPU
+  (`DefaultExecutionSpace = Cuda`, correct result).
+- **Dedicated adc GPU case: OK.** A small program using the **adc compute seam**
+  (`Fab2D` / `Array4` / `for_each_cell` / `for_each_cell_reduce_sum`) with a **top-level**
+  lambda compiles under `nvcc_wrapper` and runs on the GPU; validated against a **CPU oracle**
+  (each cell == analytical formula, GPU reduction == host sum). The adc core is therefore
+  device-clean on the local GPU.
 
 ```bash
 # exemple : compiler un programme adc GPU dedie
@@ -175,25 +175,25 @@ cmake -S <prog> -B build -G Ninja -DCMAKE_CXX_COMPILER="$CONDA_PREFIX/bin/nvcc_w
   -DADC_INC=<adc_cpp>/include   # + target_compile_definitions(... ADC_HAS_KOKKOS)
 ```
 
-- **(limite)** Compiler la **suite `ctest` C++ complete sous nvcc reste KO** : certains fichiers
-  de test emploient des lambdas device **imbriquees dans d'autres lambdas**, que nvcc refuse
-  (`__wrapper__device_stub_..._ParallelFor<...> does not match any template declaration`). Ce n'est
-  PAS le coeur adc (le cas dedie ci-dessus le prouve) ni le Kokkos conda (un harness
-  `MDRangePolicy<Rank<2>>` minimal passe) ; c'est le pattern cote test. La suite `ctest` sous nvcc
-  n'est verte sur aucune plateforme : **valider le GPU par programmes dedies** (ou le module
-  `_adc` / cas Python), comme sur ROMEO.
-- **(perf)** Le `kokkos` CUDA conda est compile pour `sm_80` ; il tourne sur une RTX 3090
-  (`sm_86`) en compatibilite (avertissement Kokkos). Pour un binaire natif `sm_86`, recompiler
-  Kokkos CUDA avec `Kokkos_ARCH_AMPERE86=ON`.
+- **(limitation)** Compiling the **full C++ `ctest` suite under nvcc is still KO**: some test
+  files use device lambdas **nested inside other lambdas**, which nvcc refuses
+  (`__wrapper__device_stub_..._ParallelFor<...> does not match any template declaration`). This is
+  NOT the adc core (the dedicated case above proves it) nor the conda Kokkos (a minimal
+  `MDRangePolicy<Rank<2>>` harness passes); it is the pattern on the test side. The `ctest` suite under nvcc
+  is not green on any platform: **validate the GPU through dedicated programs** (or the
+  `_adc` module / Python cases), as on ROMEO.
+- **(perf)** The conda CUDA `kokkos` is compiled for `sm_80`; it runs on an RTX 3090
+  (`sm_86`) in compatibility mode (Kokkos warning). For a native `sm_86` binary, recompile
+  Kokkos CUDA with `Kokkos_ARCH_AMPERE86=ON`.
 
-## 6. Recapitulatif des ecarts Windows
+## 6. Summary of Windows differences
 
-| Sujet | Linux/Mac/ROMEO | Windows (WSL2) |
+| Topic | Linux/Mac/ROMEO | Windows (WSL2) |
 |---|---|---|
-| OS de build | natif | WSL2 Ubuntu (pas de natif Windows) |
-| Emplacement repo | n'importe ou | FS WSL (`~/dev`), **pas** `/mnt/c` |
-| Kokkos conda | suppose Serial-only | **CUDA par defaut** -> pinner variante CPU `hbbfbac7` |
-| Parallelisme build | machine-dependant | borner `-j 6` (RAM WSL ~15 Go, OOM sinon) |
-| GPU | ROMEO (Spack, GH200) | WSL2 local (env `adc-gpu`, kokkos `sm_80` sur `sm_86`) |
-| DSL + module Kokkos | idem | exporter `ADC_KOKKOS_ROOT=$CONDA_PREFIX` |
-| MPI | idem | `OMPI_MCA_btl_smcuda_use_cuda_ipc=0` |
+| Build OS | native | WSL2 Ubuntu (no native Windows) |
+| Repo location | anywhere | WSL FS (`~/dev`), **not** `/mnt/c` |
+| Kokkos conda | assumes Serial-only | **CUDA by default** -> pin CPU variant `hbbfbac7` |
+| Build parallelism | machine-dependent | bound `-j 6` (WSL RAM ~15 GB, OOM otherwise) |
+| GPU | ROMEO (Spack, GH200) | local WSL2 (env `adc-gpu`, kokkos `sm_80` on `sm_86`) |
+| DSL + Kokkos module | same | export `ADC_KOKKOS_ROOT=$CONDA_PREFIX` |
+| MPI | same | `OMPI_MCA_btl_smcuda_use_cuda_ipc=0` |

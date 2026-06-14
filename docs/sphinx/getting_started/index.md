@@ -1,28 +1,28 @@
-# Prise en main
+# Getting started
 
-Cette section est le guide utilisateur de `adc_cpp` : elle part de zero (qu'est-ce que
-c'est, comment le construire) et conduit jusqu'a une simulation diocotron complete,
-reproductible de bout en bout. Elle ne presuppose ni connaissance du coeur C++, ni du DSL.
+This section is the user guide for `adc_cpp`: it starts from zero (what it is,
+how to build it) and goes all the way to a complete diocotron simulation,
+reproducible end to end. It assumes no knowledge of the C++ core or the DSL.
 
-Le parcours conseille, dans l'ordre :
+The recommended path, in order:
 
-- [Presentation](presentation.md) : ce qu'est `adc_cpp`, son perimetre honnete, ses couches.
-- [Installation](installation.md) : build CMake du coeur, du module Python, et le piege de
-  l'interpreteur (le `.so` compile est lie a une version de Python).
-- [Premier run](first_run.md) : le plus petit exemple Python, copiable tel quel.
-- [Verifier son backend](backend.md) : savoir quel backend parallele tourne
-  (serie par defaut ; Kokkos / MPI sont des configs de build ; GPU = ROMEO uniquement).
-- [Organisation des depots](organisation.md) : `adc_cpp` (la lib, agnostique) vs `adc_cases`
-  (les scenarios nommes : diocotron, euler_poisson...).
-- [Tutoriel A->Z](tutorial.md) : le tutoriel canonique en 18 etapes, de `git clone` a la
-  comparaison uniforme/AMR, avec figures et GIF generes.
-- [Windows (WSL2)](windows_wsl2.md) : guide de zero pour un PC Windows 11, du `wsl --install`
-  a un cas `adc_cases`, avec les ecarts par rapport au chemin Linux.
-- [Windows natif](windows_native.md) : statut et feuille de route du portage natif (sans WSL2) ;
-  perimetre v1/v2 et etat reel.
+- [Presentation](presentation.md): what `adc_cpp` is, its honest scope, its layers.
+- [Installation](installation.md): CMake build of the core, of the Python module, and the pitfall of
+  the interpreter (the compiled `.so` is tied to a Python version).
+- [First run](first_run.md): the smallest Python example, copyable as is.
+- [Checking your backend](backend.md): knowing which parallel backend is running
+  (serial by default; Kokkos / MPI are build configs; GPU = ROMEO only).
+- [Repository organization](organisation.md): `adc_cpp` (the library, agnostic) vs `adc_cases`
+  (the named scenarios: diocotron, euler_poisson...).
+- [Tutorial A->Z](tutorial.md): the canonical tutorial in 18 steps, from `git clone` to the
+  uniform/AMR comparison, with generated figures and GIF.
+- [Windows (WSL2)](windows_wsl2.md): a from-scratch guide for a Windows 11 PC, from `wsl --install`
+  to an `adc_cases` case, with the differences from the Linux path.
+- [Native Windows](windows_native.md): status and roadmap of the native port (without WSL2);
+  v1/v2 scope and actual state.
 
-Pour la reference de conception (contributeurs), chaque page renvoie aux documents `docs/*.md`
-du depot ; cette section les resume pour un nouvel utilisateur sans les dupliquer.
+For the design reference (contributors), each page points to the `docs/*.md` documents
+of the repository; this section summarizes them for a new user without duplicating them.
 
 ```{toctree}
 :maxdepth: 1

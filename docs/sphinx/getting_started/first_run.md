@@ -1,9 +1,9 @@
-# Premier run
+# First run
 
-Le plus petit programme `adc` : on construit un systeme periodique, on y pose un bloc
-diocotron compose de briques natives, on branche le Poisson de systeme, on pose une condition
-initiale numpy, on avance de quelques pas et on relit la densite. Copiable tel quel (il suppose
-seulement que le module est [installe](installation.md) et importable).
+The smallest `adc` program: we build a periodic system, we place in it a
+diocotron block composed of native bricks, we wire in the system Poisson, we set a numpy
+initial condition, we advance a few steps and we read the density back. Copyable as is (it assumes
+only that the module is [installed](installation.md) and importable).
 
 ```python
 import numpy as np
@@ -46,17 +46,17 @@ print("masse    =", sim.mass("ne"))             # conservee par le transport adv
 print("densite  =", sim.density("ne").shape)    # (96, 96)
 ```
 
-Ce que font les appels cles :
+What the key calls do:
 
-- `adc.System(n=, L=, periodic=)` cree le systeme/coupleur (domaine carre par defaut).
-- `adc.Model(state=, transport=, source=, elliptic=)` compose un modele a partir de briques
-  natives. Ici : `Scalar` + `ExB` + `NoSource` + `BackgroundDensity`. C'est exactement le
-  modele diocotron reduit, mais le coeur ne le nomme pas.
-- `set_poisson(rhs="charge_density", solver="geometric_mg")` : `rhs` vaut `charge_density` ou
-  `composite` ; `solver` se passe par mot-cle (`geometric_mg` ou la FFT).
-- `set_density(name, arr2d)` pose un tableau `(n, n)` contigu ; `step_cfl(cfl)` avance d'un pas
-  au CFL donne ; `density(name)` / `mass(name)` / `time()` lisent l'etat.
+- `adc.System(n=, L=, periodic=)` creates the system/coupler (square domain by default).
+- `adc.Model(state=, transport=, source=, elliptic=)` composes a model from native
+  bricks. Here: `Scalar` + `ExB` + `NoSource` + `BackgroundDensity`. This is exactly the
+  reduced diocotron model, but the core does not name it.
+- `set_poisson(rhs="charge_density", solver="geometric_mg")`: `rhs` is either `charge_density` or
+  `composite`; `solver` is passed by keyword (`geometric_mg` or the FFT).
+- `set_density(name, arr2d)` sets a contiguous `(n, n)` array; `step_cfl(cfl)` advances one step
+  at the given CFL; `density(name)` / `mass(name)` / `time()` read the state.
 
-Pour passer du modele compose en briques au modele ecrit en formules (DSL `adc.dsl.Model`),
-au raffinement adaptatif (`adc.AmrSystem`), aux figures et au GIF, suivez le
-[tutoriel A->Z](tutorial.md).
+To move from the model composed of bricks to the model written in formulas (DSL `adc.dsl.Model`),
+to adaptive refinement (`adc.AmrSystem`), to the figures and the GIF, follow the
+[A->Z tutorial](tutorial.md).

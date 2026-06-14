@@ -1,94 +1,94 @@
-# Modeles
+# Models
 
-Un *modele* dans `adc` decrit une equation : ses formules ponctuelles (flux, source,
-vitesses d'onde, second membre elliptique). Il existe trois facons d'ecrire un modele, qui
-produisent toutes le meme objet calculatoire cote coeur C++ et se branchent de la meme maniere sur
-un `adc.System` :
+A *model* in `adc` describes an equation: its pointwise formulas (flux, source,
+wave speeds, elliptic right-hand side). There are three ways to write a model, which
+all produce the same computational object on the C++ core side and plug into
+an `adc.System` the same way:
 
-1. **Modele avec briques (natif)** : on compose des briques generiques deja compilees
-   (`adc.Model(state, transport, source, elliptic)`). C'est la voie la plus directe pour assembler
-   un modele existant : aucune compilation a la volee, parite production totale (MPI/AMR/GPU).
-2. **Modele DSL** : on ecrit le modele en formules symboliques (`adc.dsl.Model`), puis on le
-   compile en un `.so`. C'est la voie quand le modele voulu n'existe pas comme brique native.
-3. **Modele hybride** : on melange, dans un seul modele, des briques natives et des briques DSL
-   partielles (`adc.CompositeModel`). C'est l'entre-deux : reutiliser une brique native pour un
-   slot et ecrire l'autre en formules.
+1. **Model with bricks (native)**: you compose generic bricks that are already compiled
+   (`adc.Model(state, transport, source, elliptic)`). This is the most direct way to assemble
+   an existing model: no just-in-time compilation, full production parity (MPI/AMR/GPU).
+2. **DSL model**: you write the model as symbolic formulas (`adc.dsl.Model`), then you
+   compile it into a `.so`. This is the way when the model you want does not exist as a native brick.
+3. **Hybrid model**: you mix, within a single model, native bricks and partial DSL bricks
+   (`adc.CompositeModel`). This is the middle ground: reuse a native brick for one
+   slot and write the other one as formulas.
 
-Ces trois objets sont des compositions de briques generiques. Le coeur reste agnostique au
-scenario : il ne nomme aucun cas physique (diocotron, Euler-Poisson, deux-fluides...) ; ce sont des
-compositions cote application. Pour le detail des methodes numeriques (reconstruction MUSCL/WENO,
-flux de Riemann, integrateurs SSPRK/IMEX, Poisson multigrille), voir
-[ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md). Pour l'architecture en couches (modele / maillage / dispatch /
-integrateur), voir [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md).
+These three objects are compositions of generic bricks. The core stays agnostic to the
+scenario: it does not name any physical case (diocotron, Euler-Poisson, two-fluid...); those are
+compositions on the application side. For the details of the numerical methods (MUSCL/WENO reconstruction,
+Riemann flux, SSPRK/IMEX integrators, multigrid Poisson), see
+[ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md). For the layered architecture (model / mesh / dispatch /
+integrator), see [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md).
 
-## PhysicalModel : le concept
+## PhysicalModel: the concept
 
-Toutes les briques satisfont le meme contrat C++, le concept `adc::PhysicalModel`
-([include/adc/core/physical_model.hpp](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/core/physical_model.hpp)). Un
-`PhysicalModel` decrit une equation comme un jeu de fonctions pures d'etats ponctuels, rien de
-plus. C'est le seul axe "quoi calculer" de l'architecture, separe de l'axe "ou / comment iterer"
-(maillage + dispatch) et de l'axe "dans quel ordre" (integrateur + coupleur, cf.
+All bricks satisfy the same C++ contract, the `adc::PhysicalModel` concept
+([include/adc/core/physical_model.hpp](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/core/physical_model.hpp)). A
+`PhysicalModel` describes an equation as a set of pure functions of pointwise states, nothing
+more. It is the only "what to compute" axis of the architecture, separate from the "where / how to iterate"
+axis (mesh + dispatch) and from the "in what order" axis (integrator + coupler, cf.
 [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md)).
 
-Le contrat minimal exige quatre fonctions :
+The minimal contract requires four functions:
 
-- `flux(U, aux, dir)` : le flux physique dans la direction `dir` (0 = x, 1 = y) ;
-- `max_wave_speed(U, aux, dir)` : la plus grande vitesse d'onde (pour le CFL et le solveur de
-  Riemann) ;
-- `source(U, aux)` : le terme source ponctuel ;
-- `elliptic_rhs(U)` : le second membre de l'equation elliptique (densite de charge / de masse selon
-  le modele).
+- `flux(U, aux, dir)`: the physical flux in the direction `dir` (0 = x, 1 = y);
+- `max_wave_speed(U, aux, dir)`: the largest wave speed (for the CFL and the Riemann
+  solver);
+- `source(U, aux)`: the pointwise source term;
+- `elliptic_rhs(U)`: the right-hand side of the elliptic equation (charge / mass density depending on
+  the model).
 
-Point d'unification : `flux` et `source` recoivent `aux` (le canal `adc::Aux` : potentiel `phi`,
-gradient `grad_x`/`grad_y`, et champs etendus optionnels `B_z`, `T_e`). C'est ce qui place sous un
-meme operateur spatial le transport a derive (l'`aux` est lu dans le flux) et le fluide compressible
-auto-gravitant (l'`aux` est lu dans la source).
+Unification point: `flux` and `source` receive `aux` (the `adc::Aux` channel: potential `phi`,
+gradient `grad_x`/`grad_y`, and optional extended fields `B_z`, `T_e`). This is what places under a
+single spatial operator the drift transport (the `aux` is read in the flux) and the self-gravitating
+compressible fluid (the `aux` is read in the source).
 
-Une brique hyperbolique complete satisfait en plus `adc::HyperbolicPhysicalModel` : elle porte
-les variables (conservatives et primitives) et les conversions `to_primitive` / `to_conservative`,
-parce que variables, conversions et flux sont physiquement lies (un flux est ecrit pour une
-disposition de variables donnee). C'est cette brique-la que l'on ecrit, native ou DSL.
+A complete hyperbolic brick additionally satisfies `adc::HyperbolicPhysicalModel`: it carries
+the variables (conservative and primitive) and the conversions `to_primitive` / `to_conservative`,
+because variables, conversions and flux are physically linked (a flux is written for a given
+variable layout). This is the brick that you write, native or DSL.
 
-## Modele avec briques (composition native)
+## Model with bricks (native composition)
 
-`adc.Model(state, transport, source, elliptic)` compose un modele a partir de quatre briques
-generiques deja compilees et renvoie une `ModelSpec` (des tags lus cote C++ par la fabrique de
-modeles). Python compose les objets ; le calcul cellule par cellule reste C++ compile (pas de numpy,
-GPU/MPI conserves). Les briques disponibles, telles qu'exposees par `adc.*` (et leurs structs C++ dans
-[include/adc/physics/](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/physics/)) :
+`adc.Model(state, transport, source, elliptic)` composes a model from four generic
+bricks that are already compiled and returns a `ModelSpec` (tags read on the C++ side by the model
+factory). Python composes the objects; the cell-by-cell computation stays compiled C++ (no numpy,
+GPU/MPI preserved). The available bricks, as exposed by `adc.*` (and their C++ structs in
+[include/adc/physics/](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/physics/)):
 
-**Etat** (`state=`)
-- `adc.Scalar()` : etat scalaire (1 variable, p.ex. une densite transportee).
-- `adc.FluidState(kind="compressible", gamma=1.4)` : Euler compressible (l'indice `gamma`).
-- `adc.FluidState(kind="isothermal", cs2=0.5)` : Euler isotherme (la vitesse du son `cs2`).
+**State** (`state=`)
+- `adc.Scalar()`: scalar state (1 variable, e.g. a transported density).
+- `adc.FluidState(kind="compressible", gamma=1.4)`: compressible Euler (the index `gamma`).
+- `adc.FluidState(kind="isothermal", cs2=0.5)`: isothermal Euler (the sound speed `cs2`).
 
 **Transport** (`transport=`)
-- `adc.ExB(B0=1.0)` : advection scalaire par la derive ExB (champ magnetique `B0`),
-  `adc::ExBVelocity` dans `physics/hyperbolic.hpp`.
-- `adc.CompressibleFlux()` : flux d'Euler compressible (`gamma` vient de l'etat),
-  `adc::CompressibleFlux` (alias d'`adc::Euler`).
-- `adc.IsothermalFlux()` : flux d'Euler isotherme (`cs2` vient de l'etat), `adc::IsothermalFlux`.
+- `adc.ExB(B0=1.0)`: scalar advection by the ExB drift (magnetic field `B0`),
+  `adc::ExBVelocity` in `physics/hyperbolic.hpp`.
+- `adc.CompressibleFlux()`: compressible Euler flux (`gamma` comes from the state),
+  `adc::CompressibleFlux` (alias of `adc::Euler`).
+- `adc.IsothermalFlux()`: isothermal Euler flux (`cs2` comes from the state), `adc::IsothermalFlux`.
 
 **Source** (`source=`)
-- `adc.NoSource()` : pas de source, `adc::NoSource` dans `physics/source.hpp`.
-- `adc.PotentialForce(charge=1.0)` : force du potentiel `(q/m) rho E` sur la quantite de mouvement
-  (plus travail si 4 variables), `adc::PotentialForce`.
-- `adc.GravityForce()` : force gravitationnelle `rho g`, `adc::GravityForce`.
+- `adc.NoSource()`: no source, `adc::NoSource` in `physics/source.hpp`.
+- `adc.PotentialForce(charge=1.0)`: potential force `(q/m) rho E` on the momentum
+  (plus work if 4 variables), `adc::PotentialForce`.
+- `adc.GravityForce()`: gravitational force `rho g`, `adc::GravityForce`.
 
-**Second membre elliptique** (`elliptic=`)
-- `adc.ChargeDensity(charge=1.0)` : densite de charge `f = q n`, `adc::ChargeDensity` dans
+**Elliptic right-hand side** (`elliptic=`)
+- `adc.ChargeDensity(charge=1.0)`: charge density `f = q n`, `adc::ChargeDensity` in
   `physics/elliptic.hpp`.
-- `adc.BackgroundDensity(alpha=1.0, n0=0.0)` : fond neutralisant `f = alpha (n - n0)`,
+- `adc.BackgroundDensity(alpha=1.0, n0=0.0)`: neutralizing background `f = alpha (n - n0)`,
   `adc::BackgroundDensity`.
-- `adc.GravityCoupling(sign=1.0, four_pi_G=1.0, rho0=1.0)` : couplage self-consistant
-  `f = sign * 4piG (rho - rho0)` (`sign = +1` gravite, `-1` plasma), `adc::GravityCoupling`.
+- `adc.GravityCoupling(sign=1.0, four_pi_G=1.0, rho0=1.0)`: self-consistent coupling
+  `f = sign * 4piG (rho - rho0)` (`sign = +1` gravity, `-1` plasma), `adc::GravityCoupling`.
 
-`adc.Model(...)` valide la coherence etat <-> transport (Scalar avec ExB ; FluidState compressible
-avec CompressibleFlux ; isotherme avec IsothermalFlux) : un appariement incoherent leve une
-`ValueError` immediate.
+`adc.Model(...)` validates the state <-> transport consistency (Scalar with ExB; compressible FluidState
+with CompressibleFlux; isothermal with IsothermalFlux): an inconsistent pairing raises an
+immediate `ValueError`.
 
-Exemple, le modele diocotron reduit (densite scalaire advectee par ExB, fond neutralisant), tel
-qu'utilise dans le tutoriel pour la comparaison uniforme/AMR :
+Example, the reduced diocotron model (scalar density advected by ExB, neutralizing background), as
+used in the tutorial for the uniform/AMR comparison:
 
 ```python
 import adc
@@ -107,21 +107,21 @@ sim.set_density("ne", ne0)          # ne0 : tableau 2D (densite initiale)
 sim.step_cfl(0.4)
 ```
 
-La meme `ModelSpec` se branche aussi sur `adc.AmrSystem` (raffinement adaptatif) sans changer le
-modele : `sa.add_block("ne", model=model, ...)`.
+The same `ModelSpec` also plugs into `adc.AmrSystem` (adaptive refinement) without changing the
+model: `sa.add_block("ne", model=model, ...)`.
 
-## Modele DSL (ecrit en formules)
+## DSL model (written as formulas)
 
-`adc.dsl.Model` permet d'ecrire un modele en formules symboliques : Python compose un arbre
-d'expressions (les operateurs `+`, `-`, `*`, `/`, `**`, `adc.dsl.sqrt` construisent l'arbre, pas une
-fonction appelee par cellule), que le DSL traduit en C++ compilable. On declare les variables
-conservatives, les primitives (par des formules), le flux, les valeurs propres, la source et la
-contribution elliptique, puis on compile.
+`adc.dsl.Model` lets you write a model as symbolic formulas: Python composes an expression
+tree (the operators `+`, `-`, `*`, `/`, `**`, `adc.dsl.sqrt` build the tree, not a
+function called per cell), which the DSL translates into compilable C++. You declare the conservative
+variables, the primitives (via formulas), the flux, the eigenvalues, the source and the
+elliptic contribution, then you compile.
 
-Voici le modele diocotron reduit du tutoriel canonique
-([docs/sphinx/tutorials/diocotron_tutorial.py](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py)), ecrit en
-formules ; il reproduit exactement les briques natives `ExBVelocity` (transport) et
-`BackgroundDensity` (elliptique) :
+Here is the reduced diocotron model of the canonical tutorial
+([docs/sphinx/tutorials/diocotron_tutorial.py](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py)), written as
+formulas; it reproduces exactly the native bricks `ExBVelocity` (transport) and
+`BackgroundDensity` (elliptic):
 
 ```python
 import adc
@@ -161,28 +161,28 @@ sim.set_density("ne", ne0)
 sim.step_cfl(0.4)
 ```
 
-Details et points de vigilance du DSL (parametres nommes `m.param`, roles physiques,
-`require_metadata`, cache du `.so`) : voir la reference courte [DSL_API.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_API.md) et la
-conception [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).
+DSL details and points to watch (parameters named `m.param`, physical roles,
+`require_metadata`, `.so` cache): see the short reference [DSL_API.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_API.md) and the
+design [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).
 
-## Modele hybride (briques native + DSL dans un seul modele)
+## Hybrid model (native brick + DSL within a single model)
 
-`adc.Model(...)` compose des briques 100 % natives ; `adc.dsl.Model(...)` genere un modele 100 %
-DSL. `adc.CompositeModel(transport, source, elliptic)` comble l'entre-deux : melanger, dans un seul
-modele, des briques natives (`adc.ExB`, `adc.PotentialForce`, `adc.ChargeDensity`...) et des briques
-DSL partielles compilees (`adc.dsl.HyperbolicBrick`, `adc.dsl.SourceBrick`, `adc.dsl.EllipticBrick`
-suivies de `.compile()`).
+`adc.Model(...)` composes 100% native bricks; `adc.dsl.Model(...)` generates a 100%
+DSL model. `adc.CompositeModel(transport, source, elliptic)` fills the middle ground: mixing, within a single
+model, native bricks (`adc.ExB`, `adc.PotentialForce`, `adc.ChargeDensity`...) and partial compiled
+DSL bricks (`adc.dsl.HyperbolicBrick`, `adc.dsl.SourceBrick`, `adc.dsl.EllipticBrick`
+followed by `.compile()`).
 
-Chaque slot accepte soit une brique native, soit une brique DSL partielle compilee. Au moins un
-slot doit etre DSL : une composition tout-native s'ecrit avec `adc.Model(...)`, sinon
-`CompositeModel` leve une `ValueError`. Le melange est compile en un `.so` composite (prototype :
-backend `aot`), sur le meme chemin de production qu'un modele DSL complet ; la numerique native est
-reutilisee a l'identique (un struct derive cuit les parametres natifs `qom`, `q`, `cs2`... dans le
-type ; aucune re-derivation). Le slot transport fixe le layout (`n_vars`, noms conservatifs,
-primitives, gamma) ; une brique DSL de source / elliptique doit declarer le meme `n_vars`.
+Each slot accepts either a native brick or a partial compiled DSL brick. At least one
+slot must be DSL: an all-native composition is written with `adc.Model(...)`, otherwise
+`CompositeModel` raises a `ValueError`. The mix is compiled into a composite `.so` (prototype:
+`aot` backend), on the same production path as a complete DSL model; the native numerics are
+reused identically (a derived struct bakes the native parameters `qom`, `q`, `cs2`... into the
+type; no re-derivation). The transport slot fixes the layout (`n_vars`, conservative names,
+primitives, gamma); a DSL source / elliptic brick must declare the same `n_vars`.
 
-Exemple, transport DSL isotherme + source native + elliptique native (extrait de
-`python/tests/test_dsl_hybrid.py`) :
+Example, isothermal DSL transport + native source + native elliptic (excerpt from
+`python/tests/test_dsl_hybrid.py`):
 
 ```python
 import adc
@@ -217,95 +217,94 @@ sim.add_equation("gas", compiled,
                  names=["rho", "rho_u", "rho_v"])
 ```
 
-Le melange fonctionne dans les deux sens (transport natif + source/elliptique DSL aussi). Source :
-[DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md) section "composition hybride" et
+The mix works both ways (native transport + DSL source/elliptic too). Source:
+[DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md) section "composition hybride" and
 `python/tests/test_dsl_hybrid.py`.
 
-## Variables conservatives / primitives
+## Conservative / primitive variables
 
-Un modele DSL distingue deux jeux de variables, avec des roles physiques qui permettent au systeme
-de retrouver une grandeur par son sens (et non par un indice litteral), indispensable aux couplages
-inter-especes.
+A DSL model distinguishes two sets of variables, with physical roles that let the system
+find a quantity by its meaning (and not by a literal index), essential to inter-species couplings.
 
-- `m.conservative_vars("rho", "mx", "my", roles=["Density", "MomentumX", "MomentumY"])` declare les
-  variables conservatives (l'etat evolue `U`) et renvoie un tuple de `Var` a depacker. Le `roles=`
-  est optionnel ; sans lui, un mapping canonique nom -> role s'applique (`rho`/`n` -> `Density`,
-  `rho_u` -> `MomentumX`, `E` -> `Energy`...). Un nom non reconnu reste `Custom`.
-- `m.primitive(name, expr)` definit une primitive par sa formule (en fonction des conservatives ou
-  des primitives precedentes), p.ex. `u = m.primitive("u", mx / rho)`.
-- `m.primitive_vars(rho=rho, ux=mx/rho, ...)` (forme kwargs) definit chaque primitive et fixe le
-  layout ordonne de `Prim` (l'ordre des kwargs). La forme positionnelle
-  `m.primitive_vars(rho, u, v, p)` fixe juste le layout a partir de noms deja definis.
-- `m.conservative_from([rho, rho*u, rho*v])` donne l'inverse `Prim -> U` (le DSL ne sait pas inverser
-  symboliquement les primitives ; on fournit l'inverse explicitement). Il genere `to_conservative`.
+- `m.conservative_vars("rho", "mx", "my", roles=["Density", "MomentumX", "MomentumY"])` declares the
+  conservative variables (the evolved state `U`) and returns a tuple of `Var` to unpack. The `roles=`
+  is optional; without it, a canonical name -> role mapping applies (`rho`/`n` -> `Density`,
+  `rho_u` -> `MomentumX`, `E` -> `Energy`...). An unrecognized name stays `Custom`.
+- `m.primitive(name, expr)` defines a primitive by its formula (as a function of the conservatives or
+  of the previous primitives), e.g. `u = m.primitive("u", mx / rho)`.
+- `m.primitive_vars(rho=rho, ux=mx/rho, ...)` (kwargs form) defines each primitive and fixes the
+  ordered layout of `Prim` (the order of the kwargs). The positional form
+  `m.primitive_vars(rho, u, v, p)` just fixes the layout from already-defined names.
+- `m.conservative_from([rho, rho*u, rho*v])` gives the inverse `Prim -> U` (the DSL does not know how to invert
+  the primitives symbolically; you provide the inverse explicitly). It generates `to_conservative`.
 
-L'operateur spatial peut alors reconstruire en variables primitives (`rho`, `u`, `p`) plutot que
-conservatives, plus stable pour Euler (positivite de `rho` et `p`) ; voir le choix
-`variables="primitive"` de `adc.FiniteVolume` et les details dans [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
+The spatial operator can then reconstruct in primitive variables (`rho`, `u`, `p`) rather than
+conservative, more stable for Euler (positivity of `rho` and `p`); see the
+`variables="primitive"` choice of `adc.FiniteVolume` and the details in [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
 
-## Flux, sources, valeurs propres, RHS elliptique
+## Flux, sources, eigenvalues, elliptic RHS
 
-Ces quatre declarateurs sont le coeur du modele DSL ; ils correspondent un a un aux fonctions du
-concept `adc::PhysicalModel` lues par le coeur.
+These four declarators are the core of the DSL model; they correspond one to one to the functions of the
+`adc::PhysicalModel` concept read by the core.
 
-- `m.flux(x=[...], y=[...])` : le **flux physique** `F(U, aux, dir)`, une expression par composante
-  conservative et par direction. L'operateur spatial l'evalue aux interfaces puis le passe au
-  solveur de Riemann (Rusanov / HLLC / Roe selon `riemann=`). A ne pas confondre avec
-  `m.eval_flux(U, aux, dir)`, qui est l'evaluateur numpy (debug / proto hote), ni avec le flux
-  numerique `riemann=` de `adc.FiniteVolume`.
-- `m.eigenvalues(x=[...], y=[...])` : les **valeurs propres** (vitesses caracteristiques) par
-  direction. Le coeur en tire `max_wave_speed` (borne de Rusanov et pas de temps CFL) ; si une
-  primitive `p` (pression) est declaree, la brique generee expose aussi `pressure` / `wave_speeds`,
-  ce qui la rend compatible avec les flux HLLC / Roe (qui exigent une pression).
-- `m.source([...])` : le **terme source** `S(U, aux)`, une expression par composante (optionnel). Il
-  lit l'etat exterieur par le canal `adc::Aux` (p.ex. `grad_x` / `grad_y` pour une force de
-  potentiel `-rho grad phi`).
-- `m.elliptic_rhs(expr)` : la **contribution au second membre elliptique**, qui couple le bloc au
-  Poisson de systeme (densite de charge `q n`, fond `alpha (n - n0)`, gravite...). Le Poisson de
-  systeme somme les contributions de tous les blocs.
+- `m.flux(x=[...], y=[...])`: the **physical flux** `F(U, aux, dir)`, one expression per conservative
+  component and per direction. The spatial operator evaluates it at the interfaces then passes it to the
+  Riemann solver (Rusanov / HLLC / Roe according to `riemann=`). Not to be confused with
+  `m.eval_flux(U, aux, dir)`, which is the numpy evaluator (debug / host proto), nor with the numerical
+  flux `riemann=` of `adc.FiniteVolume`.
+- `m.eigenvalues(x=[...], y=[...])`: the **eigenvalues** (characteristic speeds) per
+  direction. The core derives `max_wave_speed` from it (Rusanov bound and CFL time step); if a
+  primitive `p` (pressure) is declared, the generated brick also exposes `pressure` / `wave_speeds`,
+  which makes it compatible with the HLLC / Roe fluxes (which require a pressure).
+- `m.source([...])`: the **source term** `S(U, aux)`, one expression per component (optional). It
+  reads the exterior state through the `adc::Aux` channel (e.g. `grad_x` / `grad_y` for a potential
+  force `-rho grad phi`).
+- `m.elliptic_rhs(expr)`: the **contribution to the elliptic right-hand side**, which couples the block to
+  the system Poisson (charge density `q n`, background `alpha (n - n0)`, gravity...). The system
+  Poisson sums the contributions of all the blocks.
 
-`m.check()` verifie que toute variable referencee (dans les primitives, le flux, les valeurs
-propres, la source, l'elliptique) est bien declaree (conservative / primitive / aux), et leve une
-`ValueError` factuelle sinon. Pour la signification physique et la discretisation de chaque operateur
-(reconstruction, Riemann, multigrille), voir [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
+`m.check()` verifies that every referenced variable (in the primitives, the flux, the eigenvalues,
+the source, the elliptic) is indeed declared (conservative / primitive / aux), and raises a
+factual `ValueError` otherwise. For the physical meaning and the discretization of each operator
+(reconstruction, Riemann, multigrid), see [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
 
-## Compilation : production / AOT / prototype
+## Compilation: production / AOT / prototype
 
-`m.compile(backend=..., target=...)` traduit le modele symbolique en un `.so` et renvoie un
-`CompiledModel` (qui porte `so_path`, `backend`, l'`adder` a employer, les noms/roles/gamma/n_aux,
-la `abi_key` et le `model_hash`). Le `.so` est mis en cache par `model_hash` : un modele inchange
-n'est pas recompile. Le defaut est `backend="aot"` ; il faut donc demander explicitement
-`"production"` pour le chemin natif zero-copie.
+`m.compile(backend=..., target=...)` translates the symbolic model into a `.so` and returns a
+`CompiledModel` (which carries `so_path`, `backend`, the `adder` to use, the names/roles/gamma/n_aux,
+the `abi_key` and the `model_hash`). The `.so` is cached by `model_hash`: an unchanged model
+is not recompiled. The default is `backend="aot"`; you therefore have to explicitly request
+`"production"` for the native zero-copy path.
 
-Trois backends, materialises cote code dans `_BACKEND_CAPS` (`python/adc/dsl.py`) :
+Three backends, materialized on the code side in `_BACKEND_CAPS` (`python/adc/dsl.py`):
 
 | backend | CPU | MPI | AMR | GPU | role |
 |---|---|---|---|---|---|
-| `production` | oui | oui (np=1/2/4) | via `AmrSystem` | rapporte `False` cote Python | recommande en MPI/AMR ; loader natif zero-copie (`add_native_block`) |
-| `aot` | oui | non | non | non | defaut ; `.so` a marshaling, mono-rang, debug/bench CPU. Porte les params runtime (`set_block_params`) |
-| `prototype` | oui (Rusanov o1) | non | non | non | JIT prototype, dispatch virtuel hote ; ne pas utiliser en production |
+| `production` | yes | yes (np=1/2/4) | via `AmrSystem` | reports `False` on the Python side | recommended in MPI/AMR ; native zero-copy loader (`add_native_block`) |
+| `aot` | yes | no | no | no | default ; `.so` with marshaling, mono-rank, CPU debug/bench. Carries the runtime params (`set_block_params`) |
+| `prototype` | yes (Rusanov o1) | no | no | no | JIT prototype, host virtual dispatch ; do not use in production |
 
-`_BACKEND_CAPS["production"]` declare `{cpu, mpi, amr} = True`. Le chemin natif `production` partage
-le moteur de `add_block` (halos `fill_boundary`, donc MPI-capable par construction) et a un pendant
-AMR (`m.compile(backend="production", target="amr_system")` -> `AmrSystem.add_native_block`). `gpu`
-est rapporte `False` par prudence : le chemin natif est device-clean en C++ (valide GH200), mais la
-validation end-to-end depuis Python sur un module bati Kokkos/CUDA reste une etape dediee ; le module
-hote teste en CI n'est pas bati GPU.
+`_BACKEND_CAPS["production"]` declares `{cpu, mpi, amr} = True`. The native `production` path shares
+the engine of `add_block` (`fill_boundary` halos, hence MPI-capable by construction) and has an AMR
+counterpart (`m.compile(backend="production", target="amr_system")` -> `AmrSystem.add_native_block`). `gpu`
+is reported `False` out of caution: the native path is device-clean in C++ (validated on GH200), but the
+end-to-end validation from Python on a module built with Kokkos/CUDA remains a dedicated step; the
+host module tested in CI is not built for GPU.
 
-Ces capacites sont des drapeaux de diagnostic, verifies au branchement (`add_equation`) ou a
-l'execution, pas figes comme un argument `device=` de compilation (un `.so` peut compiler sans que
-le module hote soit device-capable). Les garde-fous levent une `ValueError` au plus tot :
+These capabilities are diagnostic flags, checked at plugging time (`add_equation`) or at
+runtime, not fixed like a `device=` compilation argument (a `.so` can compile without
+the host module being device-capable). The safeguards raise a `ValueError` as early as possible:
 
-- backend inconnu (hors `prototype`/`aot`/`production`) ;
-- `target="amr_system"` avec un backend autre que `production` (pas de chemin `.so` AMR hors natif) ;
-- `compile(backend="prototype", require_metadata=True)` (le JIT ne transporte pas les metadonnees
-  utiles) ;
-- cote branchement : `riemann` HLLC/Roe sans pression `p` declaree, `names=` sur le chemin natif
-  `production` (les noms viennent des metadonnees du `.so`).
+- unknown backend (other than `prototype`/`aot`/`production`);
+- `target="amr_system"` with a backend other than `production` (no AMR `.so` path outside native);
+- `compile(backend="prototype", require_metadata=True)` (the JIT does not carry the useful
+  metadata);
+- on the plugging side: `riemann` HLLC/Roe without a declared pressure `p`, `names=` on the native
+  `production` path (the names come from the `.so` metadata).
 
-Pour brancher le `CompiledModel`, `System.add_equation` aiguille selon le type : une `ModelSpec`
-(`adc.Model(...)`) -> `add_block` (natif) ; un `CompiledModel` -> l'adder du backend
-(`add_dynamic_block` pour `prototype`, `add_compiled_block` pour `aot`, `add_native_block` pour
-`production`). Detail complet : [DSL_API.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_API.md) et
-[DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md). Couverture des backends sur GPU/MPI/AMR :
+To plug the `CompiledModel`, `System.add_equation` routes by type: a `ModelSpec`
+(`adc.Model(...)`) -> `add_block` (native); a `CompiledModel` -> the backend's adder
+(`add_dynamic_block` for `prototype`, `add_compiled_block` for `aot`, `add_native_block` for
+`production`). Full detail: [DSL_API.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_API.md) and
+[DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md). Coverage of the backends on GPU/MPI/AMR:
 [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).

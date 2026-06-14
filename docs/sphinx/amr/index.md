@@ -1,41 +1,41 @@
-# AMR (raffinement adaptatif)
+# AMR (adaptive refinement)
 
-`adc.AmrSystem` est le pendant raffine de `adc.System` : un ou plusieurs blocs (especes)
-portes sur une hierarchie AMR block-structured (a boites rectangulaires, type AMReX /
-FLASH / SAMRAI). La grille est raffinee la ou la solution le demande, et seulement la. Cette
-page resume comment piloter l'AMR depuis Python ; pour les details de conception voir
+`adc.AmrSystem` is the refined counterpart of `adc.System`: one or more blocks (species)
+carried on a block-structured AMR hierarchy (with rectangular boxes, AMReX /
+FLASH / SAMRAI style). The mesh is refined where the solution requires it, and only there. This
+page summarizes how to drive the AMR from Python; for design details see
 [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) (section 8), [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md)
-(sections 13-15) et les notes de design
+(sections 13-15) and the design notes
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) /
 [AMR_REGRID_UNION_TAGS_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_REGRID_UNION_TAGS_DESIGN.md).
 
-L'API est identique a celle de `System` (memes `add_block` / `add_equation` /
-`set_poisson` / `set_density` / `step_cfl`) : on raffine un cas existant en changeant
-`adc.System(...)` en `adc.AmrSystem(...)` et en ajoutant un critere de raffinement. Le
-tutoriel A->Z compare d'ailleurs les deux chemins sur la meme physique (cf.
-[tutorials/diocotron_tutorial.py](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py), fonction
+The API is identical to that of `System` (same `add_block` / `add_equation` /
+`set_poisson` / `set_density` / `step_cfl`): you refine an existing case by changing
+`adc.System(...)` into `adc.AmrSystem(...)` and adding a refinement criterion. The
+A->Z tutorial moreover compares the two paths on the same physics (cf.
+[tutorials/diocotron_tutorial.py](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py), function
 `uniform_vs_amr`).
 
-## Hierarchie partagee
+## Shared hierarchy
 
-Tous les blocs vivent sur une seule hierarchie AMR : memes boites, meme repartition MPI
-(`DistributionMapping`), memes pas d'espace par niveau. C'est le modele "une hierarchie
-commune portant plusieurs champs", jamais une hierarchie par espece. La version courante
-porte deux niveaux (ratio de raffinement 2 : le niveau fin a un pas `dx/2`).
+All blocks live on a single AMR hierarchy: same boxes, same MPI distribution
+(`DistributionMapping`), same space steps per level. This is the model "a common hierarchy
+carrying several fields", never one hierarchy per species. The current version
+carries two levels (refinement ratio 2: the fine level has a step `dx/2`).
 
-- **Mono-bloc** (un seul `add_block`) : chemin historique `AmrCouplerMP`, avec regrid dynamique
-  et reflux conservatif. Bit-identique a ce qu'il a toujours produit.
-- **Multi-blocs** (deux `add_block` ou plus) : N blocs co-localises sur la hierarchie
-  partagee (moteur `AmrRuntime`). Un seul canal auxiliaire par niveau (`phi`, `grad phi`)
-  et un seul Poisson grossier dont le second membre est la somme co-localisee des briques
-  elliptiques des blocs (`f = somme_b q_b n_b`, lues aux memes cellules). La conservation est
-  assuree par bloc (reflux + average-down). En multi-blocs, le nom du bloc indexe
-  `set_density(name)`, `mass(name)` et `density(name)`.
+- **Single-block** (a single `add_block`): historical path `AmrCouplerMP`, with dynamic regrid
+  and conservative reflux. Bit-identical to what it has always produced.
+- **Multi-block** (two or more `add_block`): N blocks co-located on the shared
+  hierarchy (engine `AmrRuntime`). A single auxiliary channel per level (`phi`, `grad phi`)
+  and a single coarse Poisson whose right-hand side is the co-located sum of the elliptic
+  bricks of the blocks (`f = somme_b q_b n_b`, read at the same cells). Conservation is
+  ensured per block (reflux + average-down). In multi-block, the block name indexes
+  `set_density(name)`, `mass(name)` and `density(name)`.
 
-Un garde-fou (`same_layout_or_throw`) verifie a la construction que tous les blocs partagent
-exactement le meme layout par niveau (boites, ordre, repartition, `dx`/`dy`) : c'est la
-precondition de l'aux unique et du Poisson unique. Detail : [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md)
-section 8, [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) sections 1-2, et le coeur
+A guard (`same_layout_or_throw`) verifies at construction that all blocks share
+exactly the same layout per level (boxes, order, distribution, `dx`/`dy`): this is the
+precondition of the single aux and the single Poisson. Detail: [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md)
+section 8, [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) sections 1-2, and the core
 `include/adc/runtime/amr_system.hpp`.
 
 ```python
@@ -60,39 +60,39 @@ print("patchs fins :", sim.n_patches(), "| masse :", sim.mass("ne"))
 rho = sim.density("ne")               # densite grossiere (n, n)
 ```
 
-`adc.AmrSystem(n=, L=, periodic=)` est un raccourci : on peut aussi passer un
-`adc.AmrSystemConfig` (champs `n`, `L`, `periodic`, `regrid_every`, `distribute_coarse`,
-`coarse_max_grid`) si l'on veut regler la cadence de regrid ou la repartition du grossier.
+`adc.AmrSystem(n=, L=, periodic=)` is a shortcut: you can also pass an
+`adc.AmrSystemConfig` (fields `n`, `L`, `periodic`, `regrid_every`, `distribute_coarse`,
+`coarse_max_grid`) if you want to tune the regrid cadence or the distribution of the coarse.
 
 ## Tagging / regrid
 
-Le raffinement est pilote par des criteres de tag evalues sur le niveau parent. La grille
-fine est ensuite reconstruite par clustering Berger-Rigoutsos : etant donne les cellules
-marquees, l'algorithme trouve un petit nombre de boites rectangulaires qui les couvrent sans
-trop de gaspillage (coupe recursive sur la signature des marques). La cadence est portee par
-`regrid_every` (re-raffinement tous les N macro-pas ; `0` = jamais apres l'initialisation).
+Refinement is driven by tag criteria evaluated on the parent level. The fine
+grid is then rebuilt by Berger-Rigoutsos clustering: given the tagged cells,
+the algorithm finds a small number of rectangular boxes that cover them without
+too much waste (recursive cut on the signature of the marks). The cadence is carried by
+`regrid_every` (re-refinement every N macro-steps; `0` = never after initialization).
 
-Deux criteres sont exposes et se composent (OU cellule a cellule, "union des tags") :
+Two criteria are exposed and compose (OR cell by cell, "union of tags"):
 
-- `set_refinement(threshold)` : densite par bloc. Raffine la ou la densite (composante 0)
-  d'un bloc depasse `threshold`. Critere de base, valable mono- et multi-blocs.
-- `set_phi_refinement(grad_threshold)` : gradient du potentiel `|grad phi|`. Raffine la ou
-  la norme du gradient du potentiel electrostatique depasse `grad_threshold` (criteres physique
-  du diocotron : le bord d'anneau suit le gradient du potentiel, pas la densite seule).
-  Multi-blocs uniquement ; desactive par defaut (`grad_threshold <= 0`). A appeler avant
-  le premier pas.
+- `set_refinement(threshold)`: density per block. Refines where the density (component 0)
+  of a block exceeds `threshold`. Base criterion, valid for single- and multi-block.
+- `set_phi_refinement(grad_threshold)`: gradient of the potential `|grad phi|`. Refines where
+  the norm of the gradient of the electrostatic potential exceeds `grad_threshold` (physical criterion
+  of the diocotron: the ring edge follows the gradient of the potential, not the density alone).
+  Multi-block only; disabled by default (`grad_threshold <= 0`). To be called before
+  the first step.
 
-En multi-blocs, la hierarchie partagee est re-grillee a partir de l'union des tags de tous
-les blocs (plus le tag de `phi` s'il est actif) : un seul critere collectif, un seul clustering,
-un seul nouveau layout partage, puis prolongation / restriction / reflux par bloc sur ce
-layout. La masse de chaque bloc est conservee a travers le regrid. Avec `regrid_every == 0` la
-hierarchie multi-blocs reste figee (regrid jamais appele, bit-identique a une hierarchie
-statique). Sous MPI, l'union des tags est reduite cross-rang (`all_reduce_or`) avant le
-clustering, sinon les boites fines differeraient d'un rang a l'autre.
+In multi-block, the shared hierarchy is regridded from the union of the tags of all
+the blocks (plus the tag of `phi` if it is active): a single collective criterion, a single clustering,
+a single new shared layout, then prolongation / restriction / reflux per block on this
+layout. The mass of each block is conserved across the regrid. With `regrid_every == 0` the
+multi-block hierarchy stays frozen (regrid never called, bit-identical to a static
+hierarchy). Under MPI, the union of the tags is reduced cross-rank (`all_reduce_or`) before the
+clustering, otherwise the fine boxes would differ from one rank to another.
 
-Algorithme detaille : [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) section 15 (clustering + regrid) et
-[AMR_REGRID_UNION_TAGS_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_REGRID_UNION_TAGS_DESIGN.md) (etapes R0-R8 de
-l'union des tags).
+Detailed algorithm: [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) section 15 (clustering + regrid) and
+[AMR_REGRID_UNION_TAGS_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_REGRID_UNION_TAGS_DESIGN.md) (steps R0-R8 of
+the union of tags).
 
 ```python
 sim = adc.AmrSystem(n=128, L=1.0, periodic=True)
@@ -102,58 +102,58 @@ sim.set_refinement(0.05)         # union des tags de densite (electrons OU ions)
 sim.set_phi_refinement(0.5)      # + |grad phi| (multi-blocs ; bord d'anneau)
 ```
 
-> La cadence de regrid (`regrid_every`) se regle via le `AmrSystemConfig` :
-> `sim = adc.AmrSystem(adc.AmrSystemConfig())` puis `config.regrid_every = 20`, ou en passant
-> `regrid_every=20` au constructeur (kwargs de config). Avec un seuil de densite a sa valeur par
-> defaut (aucun tag), la grille reste inchangee.
+> The regrid cadence (`regrid_every`) is tuned via the `AmrSystemConfig`:
+> `sim = adc.AmrSystem(adc.AmrSystemConfig())` then `config.regrid_every = 20`, or by passing
+> `regrid_every=20` to the constructor (config kwargs). With a density threshold at its default
+> value (no tag), the grid stays unchanged.
 
 ## Prolongation / restriction
 
-Les transferts entre niveaux sont les deux operateurs conservatifs classiques :
+The transfers between levels are the two classical conservative operators:
 
-- **Restriction** (`average_down`, fin -> grossier) : chaque cellule grossiere recoit la
-  moyenne des cellules fines qu'elle recouvre. C'est ce qui garde le grossier coherent sous
-  un patch fin (et ce qui evite qu'un diagnostic de masse sur le seul grossier compte une valeur
-  fantome sous le patch).
-- **Prolongation / injection** (`interpolate`, grossier -> fin) : un nouveau patch fin est
-  rempli par interpolation depuis le parent la ou il n'existait pas encore, et par report
-  des donnees fines existantes la ou l'ancien patch couvre le nouveau. Cette injection est
-  conservative (la moyenne des enfants reconstruits egale le parent).
+- **Restriction** (`average_down`, fine -> coarse): each coarse cell receives the
+  average of the fine cells it covers. This is what keeps the coarse consistent under
+  a fine patch (and what prevents a mass diagnostic on the coarse alone from counting a phantom
+  value under the patch).
+- **Prolongation / injection** (`interpolate`, coarse -> fine): a new fine patch is
+  filled by interpolation from the parent where it did not yet exist, and by carrying over
+  the existing fine data where the old patch covers the new one. This injection is
+  conservative (the average of the reconstructed children equals the parent).
 
-A l'avance en temps, le grossier fait un pas `dt` pendant que le niveau fin fait `r` sous-pas de
-`dt/r` (sous-cyclage Berger-Oliger), chacun respectant sa propre CFL. Les ghosts coarse-fine du
-niveau fin sont remplis par interpolation espace-temps depuis le grossier. Code coeur :
-`mesh/refinement.hpp` (`average_down` / `interpolate`), moteur `numerics/time/amr_reflux_mf.hpp`
-(`advance_amr`). Detail : [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) section 13.
+When advancing in time, the coarse takes one step `dt` while the fine level takes `r` substeps of
+`dt/r` (Berger-Oliger subcycling), each respecting its own CFL. The coarse-fine ghosts of the
+fine level are filled by space-time interpolation from the coarse. Core code:
+`mesh/refinement.hpp` (`average_down` / `interpolate`), engine `numerics/time/amr_reflux_mf.hpp`
+(`advance_amr`). Detail: [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) section 13.
 
 ## Reflux
 
-A l'interface entre un niveau fin et le grossier, les deux niveaux calculent des flux de face
-differents : la conservation serait cassee si on n'y prenait garde. Le reflux corrige la
-maille grossiere par la difference entre le flux fin (integre sur les `r` sous-pas) et le flux
-grossier :
+At the interface between a fine level and the coarse, the two levels compute different face fluxes:
+conservation would be broken if no care were taken. The reflux corrects the
+coarse cell by the difference between the fine flux (integrated over the `r` substeps) and the coarse
+flux:
 
 $$U_c \mathrel{-}= \frac{1}{\Delta x_c}\Big(\textstyle\sum_s \Delta t_f\,\bar F_f^{(s)} - \Delta t_c\,F_c\Big)$$
 
-Le reflux est coverage-aware : un masque de couverture (`CoverageMask`) bati sur le BoxArray
-global evite la double correction au joint entre deux patchs fins voisins (interface fin-fin, ou
-il ne faut pas refluxer) et dirige la correction vers la bonne boite parente quand le grossier
-est lui-meme multi-box. En multi-blocs, chaque bloc a ses propres registres de flux : la
-conservation est verifiee bloc par bloc. Sous MPI, le registre de flux est rassemble par
-`all_reduce_sum` et le reflux distant passe par `parallel_copy`. Roles promus en types :
-`FluxRegister` (accumulation des flux de face), `CoverageMask` (cellules couvertes). Detail :
+The reflux is coverage-aware: a coverage mask (`CoverageMask`) built on the global BoxArray
+avoids the double correction at the joint between two neighboring fine patches (fine-fine interface, where
+it must not reflux) and directs the correction to the right parent box when the coarse
+is itself multi-box. In multi-block, each block has its own flux registers: conservation
+is verified block by block. Under MPI, the flux register is gathered by
+`all_reduce_sum` and the remote reflux goes through `parallel_copy`. Roles promoted to types:
+`FluxRegister` (accumulation of face fluxes), `CoverageMask` (covered cells). Detail:
 [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) sections 13-14, [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md)
 section 8.
 
-## Multi-blocs
+## Multi-block
 
-`AmrSystem` est une facade multi-blocs : on appelle `add_block` (briques natives) ou
-`add_equation` (modele DSL compile) une fois par espece, exactement comme sur `System`. Tous les
-blocs partagent la hierarchie, l'aux et le Poisson grossier (second membre somme co-localise),
-mais chacun garde son propre schema spatial (limiter x flux x reconstruction), son traitement
-temporel (`explicit` ou `imex`), et son multirate (`substeps` / `stride`). Le moteur runtime est
-`AmrRuntime` (registre type-erase par nom de bloc), pendant raffine du moteur multi-blocs
-mono-niveau de `System`.
+`AmrSystem` is a multi-block facade: you call `add_block` (native bricks) or
+`add_equation` (compiled DSL model) once per species, exactly as on `System`. All the
+blocks share the hierarchy, the aux and the coarse Poisson (co-located summed right-hand side),
+but each keeps its own spatial scheme (limiter x flux x reconstruction), its temporal
+treatment (`explicit` or `imex`), and its multirate (`substeps` / `stride`). The runtime engine is
+`AmrRuntime` (type-erased registry by block name), refined counterpart of the multi-block
+single-level engine of `System`.
 
 ```python
 sim = adc.AmrSystem(n=96, L=1.0, periodic=True)
@@ -180,46 +180,46 @@ sim.advance(0.001, 8)
 print("blocs :", sim.n_blocks(), "| masse e- :", sim.mass("electrons"))
 ```
 
-Des sources couplees inter-especes (ionisation, collisions) peuvent etre branchees via
-`add_coupled_source` : elles sont lues cellule a cellule (meme `(i, j)`, aucune interpolation
-inter-especes, grace a la hierarchie partagee) et, construites a contributions exactement
-opposees, conservent la masse de paire a la precision machine. Le multi-blocs est valide par une
-batterie de tests dits "capstone" : deux blocs a schemas differents (`test_amr_system_twoblock`),
-DSL production multi-bloc (`test_amr_multiblock_compiled`), IMEX (`test_amr_multiblock_imex`),
-sources couplees (`test_amr_multiblock_coupled_source`), substeps (`test_amr_multiblock_substeps`),
-regrid d'union (`test_amr_multiblock_regrid_union`) et parite MPI np=1/2/4
-(`test_mpi_amr_twoblock_parity`). Detail : [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) section 8 et
-le bandeau "STATUT : implemente" en tete de [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
+Inter-species coupled sources (ionization, collisions) can be wired in via
+`add_coupled_source`: they are read cell by cell (same `(i, j)`, no interpolation
+between species, thanks to the shared hierarchy) and, built with exactly opposite
+contributions, conserve the pair mass to machine precision. The multi-block is validated by a
+battery of tests called "capstone": two blocks with different schemes (`test_amr_system_twoblock`),
+production multi-block DSL (`test_amr_multiblock_compiled`), IMEX (`test_amr_multiblock_imex`),
+coupled sources (`test_amr_multiblock_coupled_source`), substeps (`test_amr_multiblock_substeps`),
+union regrid (`test_amr_multiblock_regrid_union`) and MPI parity np=1/2/4
+(`test_mpi_amr_twoblock_parity`). Detail: [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md) section 8 and
+the banner "STATUT : implemente" at the top of [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
 
-## Limites actuelles
+## Current limits
 
-Ce que l'AMR ne fait pas encore.
+What the AMR does not do yet.
 
-- **Deux niveaux seulement.** La hierarchie est grossier + un niveau fin (ratio 2). Le regrid ne
-  reconstruit que le niveau le plus fin ; au-dela de 2 niveaux, le regrid multi-niveaux n'existe
-  pas encore, meme en mono-bloc.
-- **Poisson "coarse + inject".** Le Poisson est resolu sur le grossier puis injecte vers le
-  fin, ce n'est pas un solve elliptique composite multi-niveaux. C'est suffisant pour
-  l'observable diocotron (qui vit sur un cercle median resolu par le grossier) mais a connaitre.
-- **Pas d'etage Schur global sur AMR.** Le splitting source condense par Schur (`adc.Split`,
-  `CondensedSchur`) n'a pas de pendant AMR : `AmrSystem.add_block` / `add_equation` le
-  rejettent explicitement. Pour cet etage, utiliser un `System` non raffine.
-- **Multirate par le chemin compile : restreint.** Sur le chemin DSL "production" (`.so`),
-  `add_equation` rejette explicitement `stride > 1` et le masque IMEX partiel
-  (`implicit_vars` / `implicit_roles`) : l'ABI plate du loader ne les transporte pas, et ils
-  seraient pris a leurs valeurs par defaut en silence. Pour un `.so` multirate ou a masque IMEX
-  partiel, passer par `add_block` natif (`adc.Model(...)`), qui les expose.
-- **Solveur elliptique.** Sur AMR, le solveur est toujours le multigrille geometrique
-  (`geometric_mg`) ; pas de FFT. Le second membre est la somme des briques elliptiques des blocs.
-- **Validation : ce qui est teste vs ROMEO seulement.** L'AMR multi-blocs est couvert par les
-  tests CPU (Serial / OpenMP) et la parite MPI np=1/2/4 dans ce depot. La validation GPU
-  (GH200) des chemins AMR est faite manuellement sur ROMEO (le chemin est device-clean par
-  construction, foncteurs nommes) ; voir [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md) pour le
-  croisement test / backend ligne par ligne.
-- **Cut-cell / polaire hors scope AMR.** Les parois cut-cell et la geometrie polaire sont des
-  chantiers du `System` (mono-niveau) ; elles ne sont pas portees sur la hierarchie AMR.
+- **Two levels only.** The hierarchy is coarse + one fine level (ratio 2). The regrid only
+  rebuilds the finest level; beyond 2 levels, multi-level regrid does not exist
+  yet, even in single-block.
+- **Poisson "coarse + inject".** The Poisson is solved on the coarse then injected toward the
+  fine, it is not a multi-level composite elliptic solve. This is sufficient for
+  the diocotron observable (which lives on a median circle resolved by the coarse) but worth knowing.
+- **No global Schur source stage on AMR.** The Schur-condensed source splitting (`adc.Split`,
+  `CondensedSchur`) has no AMR counterpart: `AmrSystem.add_block` / `add_equation`
+  reject it explicitly. For this stage, use a non-refined `System`.
+- **Multirate via the compiled path: restricted.** On the "production" DSL path (`.so`),
+  `add_equation` explicitly rejects `stride > 1` and the partial IMEX mask
+  (`implicit_vars` / `implicit_roles`): the flat ABI of the loader does not carry them, and they
+  would silently be taken at their default values. For a multirate or partial-IMEX-mask `.so`,
+  go through native `add_block` (`adc.Model(...)`), which exposes them.
+- **Elliptic solver.** On AMR, the solver is always the geometric multigrid
+  (`geometric_mg`); no FFT. The right-hand side is the sum of the elliptic bricks of the blocks.
+- **Validation: what is tested vs ROMEO only.** The multi-block AMR is covered by the
+  CPU tests (Serial / OpenMP) and the MPI parity np=1/2/4 in this repository. The GPU validation
+  (GH200) of the AMR paths is done manually on ROMEO (the path is device-clean by
+  construction, named functors); see [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md) for the
+  test / backend cross-reference line by line.
+- **Cut-cell / polar out of AMR scope.** The cut-cell walls and the polar geometry are
+  worksites of the `System` (single-level); they are not carried on the AMR hierarchy.
 
-Frontiere de conception (Phase 2 / Phase 3) : criteres de raffinement par bloc, solve
-elliptique composite multi-niveaux, et (beaucoup plus loin) hierarchies distinctes par espece
-avec projections conservatives. Detail :
+Design frontier (Phase 2 / Phase 3): per-block refinement criteria, multi-level composite
+elliptic solve, and (much further out) distinct hierarchies per species
+with conservative projections. Detail:
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) section 7.

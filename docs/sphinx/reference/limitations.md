@@ -1,102 +1,102 @@
-# Limitations connues
+# Known limitations
 
-Liste honnete et consolidee des limites actuelles d'`adc_cpp`, pour eviter toute attente
-erronee. Chaque point renvoie a la source de verite correspondante. Ce ne sont pas des bugs :
-ce sont les bords du perimetre valide a ce jour.
+An honest and consolidated list of `adc_cpp`'s current limits, to avoid any wrong
+expectations. Each item points to the corresponding source of truth. These are not bugs:
+they are the edges of the scope validated to date.
 
-## GPU : valide manuellement sur ROMEO, pas en CI
+## GPU: validated manually on ROMEO, not in CI
 
-La CI ne construit jamais `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_CUDA=ON`. Toute la validation
-GPU (Kokkos Cuda mono-GPU, et MPI + Kokkos Cuda multi-GPU) est faite a la main sur le
-supercalculateur ROMEO (noeud GH200, `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`, OpenMPI
-CUDA-aware), via des harnesses SBATCH dans `python/tests/gpu/` (exclus du glob CI). Une mention
-"GPU-valide" signifie donc "manuellement sur ROMEO GH200", avec l'evidence chiffree citee dans
-[GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md) et [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).
-Plusieurs cellules GPU de la matrice restent `?` (non encore exercees sur device) ; voir la
-section "Lacunes notables" du document source.
+CI never builds `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_CUDA=ON`. All GPU validation
+(Kokkos Cuda single-GPU, and MPI + Kokkos Cuda multi-GPU) is done by hand on the
+ROMEO supercomputer (GH200 node, `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`, OpenMPI
+CUDA-aware), via SBATCH harnesses in `python/tests/gpu/` (excluded from the CI glob). A
+"GPU-validated" mention therefore means "manually on ROMEO GH200", with the quantified evidence cited in
+[GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md) and [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).
+Several GPU cells of the matrix remain `?` (not yet exercised on device); see the
+"Lacunes notables" section of the source document.
 
-## DSL : parite asserte seulement si un compilateur C++23 est present
+## DSL: parity asserted only if a C++23 compiler is present
 
-Le DSL symbolique (`adc.dsl`) compile un modele en `.so` a l'execution (backends `aot` /
-`production`) en invoquant le compilateur C++ contre les en-tetes d'`adc_cpp`. La verification
-de parite (DSL vs brique native) repose donc sur la presence d'un compilateur C++23 fonctionnel
-sur la machine. Sans toolchain C++23, la compilation des modeles DSL echoue ; seuls les chemins
-purement natifs (`adc.Model(...)` / `add_block`) restent disponibles.
+The symbolic DSL (`adc.dsl`) compiles a model to a `.so` at runtime (backends `aot` /
+`production`) by invoking the C++ compiler against `adc_cpp`'s headers. The parity
+verification (DSL vs native brick) therefore relies on the presence of a working C++23 compiler
+on the machine. Without a C++23 toolchain, compilation of DSL models fails; only the
+purely native paths (`adc.Model(...)` / `add_block`) remain available.
 
-## Backends du DSL : prototype/aot sont CPU-only
+## DSL backends: prototype/aot are CPU-only
 
-`m.compile(..., backend=...)` (defaut `aot`) :
+`m.compile(..., backend=...)` (default `aot`):
 
-- `prototype` (JIT) et `aot` (host-marshale) sont CPU-only : pas de MPI, pas d'AMR, pas de
-  GPU, mono-rang. Leur ABI `.so` plate ne transporte ni le `stride` (cadence multirate) ni
-  `evolve=False` ni le masque IMEX partiel ; ces options sont rejetees explicitement (route
-  explicite plutot qu'ignore silencieux).
-- `production` est le seul branchable sur AMR (`AmrSystem.add_equation` exige
-  `backend='production'`, `target='amr_system'`) et le seul qui passe par le chemin natif
-  zero-copie ; meme la, depuis Python, le `stride` et le masque IMEX partiel sont rejetes sur le
-  chemin `.so` (l'ABI du loader ne les transporte pas). Detail dans
+- `prototype` (JIT) and `aot` (host-marshaled) are CPU-only: no MPI, no AMR, no
+  GPU, single-rank. Their flat `.so` ABI carries neither the `stride` (multirate cadence) nor
+  `evolve=False` nor the partial IMEX mask; these options are rejected explicitly (explicit
+  route rather than silent ignore).
+- `production` is the only one pluggable on AMR (`AmrSystem.add_equation` requires
+  `backend='production'`, `target='amr_system'`) and the only one that goes through the native
+  zero-copy path; even there, from Python, the `stride` and the partial IMEX mask are rejected on the
+  `.so` path (the loader ABI does not carry them). Detail in
   [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).
 
-## Poisson FFT : refuse sous MPI
+## Poisson FFT: refused under MPI
 
-Le solveur Poisson spectral (`PoissonFFTSolver`) est mono-rang par conception. Sous MPI (`n_ranks >
-1`), la voie FFT est refusee avec une erreur collective ; un test verrouille cette
-non-regression. Pour un Poisson distribue MPI, utiliser le multigrille geometrique
+The spectral Poisson solver (`PoissonFFTSolver`) is single-rank by design. Under MPI (`n_ranks >
+1`), the FFT path is refused with a collective error; a test locks this
+non-regression. For a distributed MPI Poisson, use the geometric multigrid
 (`geometric_mg`).
 
-## AMR : pas de Schur global
+## AMR: no global Schur
 
-L'etage source condense par Schur (`adc.CondensedSchur` via `adc.Split` / `adc.Strang`) n'a pas
-de pendant AMR. `set_source_stage` n'est cable que sur `System` (cartesien ou polaire), pas sur
-`AmrSystem` : `AmrSystem.add_block` et `AmrSystem.add_equation` rejettent explicitement une
-politique `adc.Split`/`adc.Strang`. Pour le couplage Lorentz electrostatique condense, utiliser
-un `System` non raffine. Conception :
+The Schur-condensed source stage (`adc.CondensedSchur` via `adc.Split` / `adc.Strang`) has no
+AMR counterpart. `set_source_stage` is wired only on `System` (cartesian or polar), not on
+`AmrSystem`: `AmrSystem.add_block` and `AmrSystem.add_equation` explicitly reject an
+`adc.Split`/`adc.Strang` policy. For the condensed electrostatic Lorentz coupling, use
+a non-refined `System`. Design:
 [SCHUR_CONDENSATION_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/SCHUR_CONDENSATION_DESIGN.md),
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
 
-## Geometrie polaire : mono-rang, ExB scalaire seulement
+## Polar geometry: single-rank, scalar ExB only
 
-Le maillage polaire (`adc.PolarMesh`, anneau global (r, theta)) est branche dans `System.step`
-(transport polaire + Poisson polaire + aux en base locale e_r/e_theta), mais avec des bords
-nets :
+The polar mesh (`adc.PolarMesh`, global ring (r, theta)) is wired into `System.step`
+(polar transport + polar Poisson + aux in local e_r/e_theta basis), but with sharp
+edges:
 
-- transport ExB scalaire uniquement : limiteur / Riemann fluides ne sont pas leves cote
-  polaire ;
-- mono-rang : le solveur polaire direct (boite unique couvrant l'anneau) refuse MPI
-  (`n_ranks > 1` leve) ; le pendant polaire de `CondensedSchur` est lui aussi mono-rang ;
-- pas de couplage cartesien <-> polaire : l'anneau polaire est un domaine global a part.
+- scalar ExB transport only: fluid limiter / Riemann are not lifted on the
+  polar side;
+- single-rank: the direct polar solver (single box covering the ring) refuses MPI
+  (`n_ranks > 1` raised); the polar counterpart of `CondensedSchur` is also single-rank;
+- no cartesian <-> polar coupling: the polar ring is a separate global domain.
 
-## Deux-fluides AP : scenario dans adc_cases, pas une brique du coeur
+## Two-fluid AP: scenario in adc_cases, not a core brick
 
-L'integrateur asymptotic-preserving deux-fluides isotherme n'est pas une brique composable du
-coeur : c'est un scenario. Sa stabilisation AP couple la raideur au pas de temps dans
-l'elliptique, ce que la composition `System` ne reproduit pas. Sa physique C++ vit dans
-`adc_cases/two_fluid_ap/` (`two_fluid_ap.hpp`), compilee a la volee contre les en-tetes
-generiques d'`adc_cpp` ; le module `_adc` ne l'expose pas et `adc` ne le reexporte pas.
+The two-fluid isothermal asymptotic-preserving integrator is not a composable brick of the
+core: it is a scenario. Its AP stabilization couples the stiffness to the time step in
+the elliptic, which `System` composition does not reproduce. Its C++ physics lives in
+`adc_cases/two_fluid_ap/` (`two_fluid_ap.hpp`), compiled on the fly against the generic
+headers of `adc_cpp`; the `_adc` module does not expose it and `adc` does not re-export it.
 
-## Modele complet de Hoffart : reproduction non etablie
+## Hoffart full model: reproduction not established
 
-La reproduction quantitative du modele Euler-Poisson magnetise complet de Hoffart et al.
-(arXiv:2510.11808) n'est pas etablie a ce jour. Le chemin reduit ExB-scalaire (polaire) atteint
-le taux de croissance cible du diocotron, mais le modele complet cartesien (`run.py`
-`system-schur`) ne reproduit pas la croissance du papier : ses runs courts ecrasent le taux. Le
-verrou identifie est la geometrie (le carre cartesien + mur de Poisson circulaire diffuse le
-bord d'anneau) ; la piste retenue est un domaine disque conservatif (cut-cell), non un carre.
-Etat detaille et statuts par aspect dans
-[HOFFART_FIDELITY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/HOFFART_FIDELITY.md) (la roadmap
-[FULL_MODEL_VALIDATION_ROADMAP.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/FULL_MODEL_VALIDATION_ROADMAP.md) est conservee pour
-l'historique mais explicitement supersedee par cet audit).
+The quantitative reproduction of Hoffart et al.'s full magnetized Euler-Poisson model
+(arXiv:2510.11808) is not established to date. The reduced ExB-scalar (polar) path reaches
+the diocotron's target growth rate, but the cartesian full model (`run.py`
+`system-schur`) does not reproduce the paper's growth: its short runs crush the rate. The
+identified lock is the geometry (the cartesian square + circular Poisson wall diffuses the
+ring edge); the chosen lead is a conservative disk domain (cut-cell), not a square.
+Detailed state and per-aspect statuses in
+[HOFFART_FIDELITY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/HOFFART_FIDELITY.md) (the roadmap
+[FULL_MODEL_VALIDATION_ROADMAP.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/FULL_MODEL_VALIDATION_ROADMAP.md) is kept for
+history but explicitly superseded by this audit).
 
-## Footgun d'import : le module est lie a un cpython precis
+## Import footgun: the module is tied to a specific cpython
 
-Le module Python (`adc._adc`) est un `.so` lie a l'interpreteur qui l'a compile (p.ex. un
-`.so` `cpython-312`). Consequences observees :
+The Python module (`adc._adc`) is a `.so` linked to the interpreter that compiled it (e.g. a
+`cpython-312` `.so`). Observed consequences:
 
-- l'importer sous un interpreteur d'une autre version (p.ex. un `python3` systeme 3.9) echoue,
-  avec un message qui nomme desormais le tag attendu et la commande de reconstruction ;
-- sans numpy, `import adc` et `adc.System` fonctionnent ; seul `adc.dsl` (evaluateur hote)
-  echoue, avec un message qui demande numpy.
+- importing it under an interpreter of another version (e.g. a system `python3` 3.9) fails,
+  with a message that now names the expected tag and the rebuild command;
+- without numpy, `import adc` and `adc.System` work; only `adc.dsl` (host evaluator)
+  fails, with a message that asks for numpy.
 
-Il faut donc utiliser exactement l'interpreteur 3.12 qui a construit le module (avec numpy), et
-pointer `PYTHONPATH` sur le `build*/python` correspondant, ou reinstaller avec le backend voulu
-(`ADC_USE_KOKKOS=ON pip install .`). Voir [installation](../getting_started/installation.md).
+You must therefore use exactly the 3.12 interpreter that built the module (with numpy), and
+point `PYTHONPATH` at the corresponding `build*/python`, or reinstall with the wanted backend
+(`ADC_USE_KOKKOS=ON pip install .`). See [installation](../getting_started/installation.md).

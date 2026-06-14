@@ -1,19 +1,19 @@
-# Sujets avances
+# Advanced topics
 
-Cette page rassemble les fonctionnalites qui depassent la boucle diocotron de base
-(transport E x B + Poisson) : solveurs elliptiques generalises, sources couplees
-inter-especes, etage source condense par Schur, geometrie polaire / disque, extension
-du coeur en C++, et profilage de performance.
+This page gathers the features that go beyond the basic diocotron loop
+(E x B transport + Poisson): generalized elliptic solvers, coupled inter-species
+sources, Schur-condensed source stage, polar / disc geometry, extending the
+core in C++, and performance profiling.
 
-Chaque section resume l'essentiel pour un utilisateur et renvoie vers la reference
-contributeur (`docs/*.md`) pour le detail algorithmique et les preuves de validation.
-Les API montrees ici sont verifiees contre le code du depot (bindings, tests, en-tetes).
+Each section summarizes the essentials for a user and points to the contributor
+reference (`docs/*.md`) for the algorithmic detail and the validation proofs.
+The APIs shown here are checked against the repository code (bindings, tests, headers).
 
-## Poisson : solveurs elliptiques
+## Poisson: elliptic solvers
 
-L'etage elliptique resout `lap(phi) = f` (ou une generalisation) a chaque pas, et c'est
-le coeur du couplage : `f` depend de la densite, et `phi` (via `grad phi`) pilote la
-derive. Le solveur se choisit par mot-cle dans `set_poisson` :
+The elliptic stage solves `lap(phi) = f` (or a generalization) at each step, and it is
+the core of the coupling: `f` depends on the density, and `phi` (via `grad phi`) drives the
+drift. The solver is chosen by keyword in `set_poisson`:
 
 ```python
 import adc
@@ -23,33 +23,33 @@ sim = adc.System(n=128, L=1.0, periodic=True)
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto")
 ```
 
-Le `solver=` accepte `"geometric_mg"` (defaut) ou `"fft"`. Le `rhs=` vaut
-`"charge_density"` (second membre `q n`) ou `"composite"` (somme des contributions de
-blocs). `bc=` vaut `"auto"`, `"periodic"`, `"dirichlet"`.
+The `solver=` accepts `"geometric_mg"` (default) or `"fft"`. The `rhs=` is
+`"charge_density"` (right-hand side `q n`) or `"composite"` (sum of block
+contributions). `bc=` is `"auto"`, `"periodic"`, `"dirichlet"`.
 
-### GeometricMG (multigrille geometrique)
+### GeometricMG (geometric multigrid)
 
-`GeometricMG` est le solveur par defaut : un V-cycle multigrille avec lisseur
-Gauss-Seidel rouge-noir (le coloriage rend chaque balayage independant des donnees,
-donc parallelisable et device-clean). Le cycle lisse `nu1` fois, restreint le residu sur
-une grille deux fois plus grossiere (`average_down`), recurse, prolonge la correction,
-relisse `nu2` fois. Cout O(N), convergence quasi independante du maillage. Le coarsening
-s'arrete proprement des qu'une boite ne se divise plus exactement (garde-fou
-`coarsen(2).refine(2) == b`), ce qui evite les hierarchies degenerees sous AMR / multi-box.
+`GeometricMG` is the default solver: a multigrid V-cycle with a red-black
+Gauss-Seidel smoother (the coloring makes each sweep independent of the data,
+so parallelizable and device-clean). The cycle smooths `nu1` times, restricts the residual onto
+a grid twice as coarse (`average_down`), recurses, prolongs the correction,
+smooths again `nu2` times. Cost O(N), convergence nearly independent of the mesh. The coarsening
+stops cleanly as soon as a box no longer divides exactly (safeguard
+`coarsen(2).refine(2) == b`), which avoids degenerate hierarchies under AMR / multi-box.
 
-Le meme operateur multigrille couvre trois generalisations du Laplacien, toutes opt-in
-et bit-identiques au chemin historique tant qu'on ne les active pas. Cote C++
-(`GeometricMG`, `numerics/elliptic/geometric_mg.hpp`) :
+The same multigrid operator covers three generalizations of the Laplacian, all opt-in
+and bit-identical to the historical path as long as they are not activated. On the C++ side
+(`GeometricMG`, `numerics/elliptic/geometric_mg.hpp`):
 
-- `set_epsilon(eps)`, permittivite variable `div(eps(x) grad phi) = f` (moyenne
-  harmonique aux faces) ;
-- `set_reaction(kappa)`, operateur ecrante / Helmholtz `div(eps grad phi) - kappa phi = f`
-  (ecrantage de Debye, `kappa = 1 / lambda_D^2`) ;
-- `set_epsilon_anisotropic(eps_x, eps_y)`, milieu tensoriel diagonal `div(diag(eps_x, eps_y) grad phi) = f`.
+- `set_epsilon(eps)`, variable permittivity `div(eps(x) grad phi) = f` (harmonic
+  mean at faces);
+- `set_reaction(kappa)`, screened / Helmholtz operator `div(eps grad phi) - kappa phi = f`
+  (Debye screening, `kappa = 1 / lambda_D^2`);
+- `set_epsilon_anisotropic(eps_x, eps_y)`, diagonal tensor medium `div(diag(eps_x, eps_y) grad phi) = f`.
 
-Ces trois reglages sont composables ; `eps_x == eps_y` redonne l'isotrope, ne pas appeler
-`set_reaction` redonne Poisson pur. Cote Python, ils sont exposes par champ NumPy
-au niveau du `System` (les coefficients vivent dans les `for_each_cell` device du smoother) :
+These three settings are composable; `eps_x == eps_y` gives back the isotropic case, not calling
+`set_reaction` gives back pure Poisson. On the Python side, they are exposed by NumPy field
+at the `System` level (the coefficients live in the device `for_each_cell` of the smoother):
 
 ```python
 import numpy as np
@@ -62,50 +62,50 @@ sim.set_reaction_field(kappa)                    # - kappa phi
 sim.set_epsilon_anisotropic_field(eps_x, eps_y)  # diag(eps_x, eps_y)
 ```
 
-### Poisson spectral (FFT)
+### Spectral Poisson (FFT)
 
-Sur un domaine periodique, le Laplacien est diagonal en Fourier :
-`phi_hat(k) = -rhs_hat(k) / (k_x^2 + k_y^2)`, mode `k=0` epingle a 0 (jauge). Une FFT
-directe + division + FFT inverse resout Poisson exactement (residu machine), sans
-iteration. Deux variantes existent, toutes deux modeles du concept `EllipticSolver` :
+On a periodic domain, the Laplacian is diagonal in Fourier:
+`phi_hat(k) = -rhs_hat(k) / (k_x^2 + k_y^2)`, mode `k=0` pinned to 0 (gauge). A direct
+FFT + division + inverse FFT solves Poisson exactly (machine residual), without
+iteration. Two variants exist, both models of the `EllipticSolver` concept:
 
-- `PoissonFFTSolver` (`numerics/elliptic/poisson_fft_solver.hpp`), mono-rang, boite
-  unique. Son constructeur leve un `std::runtime_error` des que `n_ranks() != 1` ou que
-  `ba.size() != 1`. Ce garde-fou est delibere et actif en Release (`NDEBUG` ne le retire
-  pas) : ce solveur direct dereferencerait `fab(0)` sur un rang sans box (segfault). En
-  serie, c'est le solveur exact et le plus rapide pour un domaine periodique.
-- `DistributedFFTSolver` (meme en-tete), FFT distribuee par bandes (slabs) : 1 bande
-  par rang, transposee parallele par `MPI_Alltoall`. C'est le pendant MPI du FFT direct,
-  utilisable comme `Coupler<Model, DistributedFFTSolver>`. Contraintes : `Ny` divisible par
-  `n_ranks()`, `Nx`/`Ny` puissances de 2 (un correctif gere `n` non puissance de 2 cote
-  mono-rang). En serie (`n_ranks() == 1`) une seule bande couvre le domaine, identique a
+- `PoissonFFTSolver` (`numerics/elliptic/poisson_fft_solver.hpp`), single-rank, single
+  box. Its constructor raises a `std::runtime_error` as soon as `n_ranks() != 1` or
+  `ba.size() != 1`. This safeguard is deliberate and active in Release (`NDEBUG` does not remove
+  it): this direct solver would dereference `fab(0)` on a rank without a box (segfault). In
+  serial, it is the exact and fastest solver for a periodic domain.
+- `DistributedFFTSolver` (same header), FFT distributed by slabs: 1 slab
+  per rank, parallel transpose by `MPI_Alltoall`. It is the MPI counterpart of the direct FFT,
+  usable as `Coupler<Model, DistributedFFTSolver>`. Constraints: `Ny` divisible by
+  `n_ranks()`, `Nx`/`Ny` powers of 2 (a fix handles `n` not a power of 2 on the
+  single-rank side). In serial (`n_ranks() == 1`) a single slab covers the domain, identical to
   `PoissonFFTSolver`.
 
-MG et FFT inversent prouvablement le meme Laplacien discret : le meme operateur canonique
-`poisson_residual` applique a leurs deux solutions donne des residus a l'arrondi
-(`~1e-14`) et des solutions identiques a `~1e-16`. Le piege du FFT : il exige le
-periodique, et le second membre doit etre a moyenne nulle (sinon `phi` derive).
+MG and FFT provably invert the same discrete Laplacian: the same canonical operator
+`poisson_residual` applied to their two solutions gives residuals at round-off
+(`~1e-14`) and solutions identical to `~1e-16`. The FFT pitfall: it requires the
+periodic case, and the right-hand side must be zero-mean (otherwise `phi` drifts).
 
-### Pour aller plus loin
+### Going further
 
-- Algorithmes elliptiques (multigrille, FFT, eps/Helmholtz/anisotrope, cut-cell) :
-  [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md), sections 9 a 12.
-- Les en-tetes : `include/adc/numerics/elliptic/geometric_mg.hpp`,
+- Elliptic algorithms (multigrid, FFT, eps/Helmholtz/anisotropic, cut-cell):
+  [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md), sections 9 to 12.
+- The headers: `include/adc/numerics/elliptic/geometric_mg.hpp`,
   `poisson_fft_solver.hpp`, `poisson_operator.hpp`.
-- Proprietes de conservation du schema couple (masse exacte FV, momentum, energie, valeurs
-  mesurees par les tests) : [CONSERVATION_SUMMARY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CONSERVATION_SUMMARY.md).
+- Conservation properties of the coupled scheme (exact FV mass, momentum, energy, values
+  measured by the tests): [CONSERVATION_SUMMARY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CONSERVATION_SUMMARY.md).
 
-## Sources couplees inter-especes
+## Coupled inter-species sources
 
-Au-dela du transport et de la source locale d'un bloc, on peut decrire un couplage
-inter-especes (ionisation, collisions, echange thermique) en formules, sans ecrire de
-C++ et sans callback Python par cellule. Le DSL `adc.dsl.CoupledSource` transporte la
-formule en bytecode pile-machine, interprete cote C++ dans un `for_each_cell` device
-(donc MPI-safe et GPU-clean). L'etage est applique par splitting explicite, apres le
+Beyond transport and a block's local source, one can describe an inter-species
+coupling (ionization, collisions, thermal exchange) in formulas, without writing any
+C++ and without a per-cell Python callback. The DSL `adc.dsl.CoupledSource` carries the
+formula as stack-machine bytecode, interpreted on the C++ side in a device `for_each_cell`
+(so MPI-safe and GPU-clean). The stage is applied by explicit splitting, after the
 transport.
 
-L'exemple canonique est une ionisation a trois especes
-(`d_t n_e = +k n_e n_g`, `d_t n_i = +k n_e n_g`, `d_t n_g = -k n_e n_g`) :
+The canonical example is a three-species ionization
+(`d_t n_e = +k n_e n_g`, `d_t n_i = +k n_e n_g`, `d_t n_g = -k n_e n_g`):
 
 ```python
 import adc
@@ -124,34 +124,34 @@ compiled = src.compile(backend="production")
 sim.add_coupling(compiled)   # branche l'etage sur System.add_coupled_source
 ```
 
-`sim.add_coupling(...)` accepte aussi les couplages nommes `adc.Ionization` /
-`adc.Collision` / `adc.ThermalExchange` (formule figee). Sans appel a `add_coupling`, le
-`System` reste bit-identique (l'etage est inerte par defaut).
+`sim.add_coupling(...)` also accepts the named couplings `adc.Ionization` /
+`adc.Collision` / `adc.ThermalExchange` (fixed formula). Without a call to `add_coupling`, the
+`System` stays bit-identical (the stage is inert by default).
 
-La compilation produit une ABI plate (`in_blocks`, `in_roles`, `consts`, `out_blocks`,
-`out_roles`, `prog_ops`, `prog_args`, `prog_lens`) : du bytecode, jamais un callback
-Python. Le test verifie que la trajectoire suit bit-pour-bit une reference NumPy
-forward-Euler de la meme ODE, et que les invariants attendus tiennent (`n_i + n_g`
-conserve, `n_e - n_i` constant : chaque ionisation cree une paire e/i).
+The compilation produces a flat ABI (`in_blocks`, `in_roles`, `consts`, `out_blocks`,
+`out_roles`, `prog_ops`, `prog_args`, `prog_lens`): bytecode, never a Python
+callback. The test checks that the trajectory follows bit-for-bit a NumPy forward-Euler
+reference of the same ODE, and that the expected invariants hold (`n_i + n_g`
+conserved, `n_e - n_i` constant: each ionization creates an e/i pair).
 
-### Pour aller plus loin
+### Going further
 
-- Classification public / interne / deprecie des classes de couplage (dont le concept
-  `CoupledSourceFor` et l'evaluateur bytecode `CoupledSourceProgram`) :
+- Public / internal / deprecated classification of the coupling classes (including the concept
+  `CoupledSourceFor` and the bytecode evaluator `CoupledSourceProgram`):
   [COUPLING_SURFACE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/COUPLING_SURFACE.md).
-- Test de reference : `python/tests/test_dsl_coupled_source.py` (et la variante de
-  conservation `test_dsl_coupled_source_conservation.py`).
+- Reference test: `python/tests/test_dsl_coupled_source.py` (and the conservation
+  variant `test_dsl_coupled_source_conservation.py`).
 
-## Schur : etage source condense
+## Schur: condensed source stage
 
-L'integrateur `adc.CondensedSchur` reproduit le splitting d'Hoffart et al.
-(arXiv:2510.11808) pour la source raide potentiel / vitesse / force de Lorentz du systeme
-Euler-Poisson magnetise. La cle : la condensation de Schur elimine algebriquement la
-vitesse du sous-systeme implicite, ce qui reduit l'etage source a un solve elliptique
-(operateur tensoriel `-div(A grad phi)` avec `A = rho B^{-1}`, en general non symetrique)
-suivi d'une reconstruction explicite de la vitesse.
+The integrator `adc.CondensedSchur` reproduces the splitting of Hoffart et al.
+(arXiv:2510.11808) for the stiff potential / velocity / Lorentz-force source of the
+magnetized Euler-Poisson system. The key: Schur condensation algebraically eliminates the
+velocity from the implicit subsystem, which reduces the source stage to an elliptic solve
+(tensor operator `-div(A grad phi)` with `A = rho B^{-1}`, in general non-symmetric)
+followed by an explicit reconstruction of the velocity.
 
-On le compose avec un etage transport explicite via `adc.Split` :
+It is composed with an explicit transport stage via `adc.Split`:
 
 ```python
 import adc
@@ -173,52 +173,52 @@ sim.add_equation(
 )
 ```
 
-Le modele doit exposer les roles `Density`, `MomentumX`, `MomentumY` (un fluide isotherme
-natif `adc.FluidState(kind="isothermal") + adc.IsothermalFlux()` les fournit). L'etage est
-entierement C++ (`CondensedSchurSourceStepper`, expose `adc.CondensedSchur`) : aucun
-callback Python par cellule.
+The model must expose the roles `Density`, `MomentumX`, `MomentumY` (a native isothermal
+fluid `adc.FluidState(kind="isothermal") + adc.IsothermalFlux()` provides them). The stage is
+entirely C++ (`CondensedSchurSourceStepper`, exposed as `adc.CondensedSchur`): no
+per-cell Python callback.
 
-> **Roles hardcodes cote C++.** Les descripteurs de role / champ ne sont pas reglables
-> depuis Python. `adc.CondensedSchur(...)` accepte `kind`, `theta`, `alpha`, mais passer
-> `density=`, `momentum=`, `energy=`, `magnetic_field=` ou `potential=` leve une erreur :
-> l'etage source C++ fixe ces roles en dur. C'est volontaire (le contrat de
-> `CondensedSchurSourceStepper` est fige).
+> **Roles hardcoded on the C++ side.** The role / field descriptors are not configurable
+> from Python. `adc.CondensedSchur(...)` accepts `kind`, `theta`, `alpha`, but passing
+> `density=`, `momentum=`, `energy=`, `magnetic_field=` or `potential=` raises an error:
+> the C++ source stage fixes these roles hard. This is intentional (the contract of
+> `CondensedSchurSourceStepper` is frozen).
 
-`adc.Strang` est l'extension 2e ordre de `adc.Split` (sequence transport / source /
-transport). Le defaut est inchange : un bloc en `adc.Explicit` pur ne voit jamais l'etage
-source condense.
+`adc.Strang` is the 2nd-order extension of `adc.Split` (transport / source /
+transport sequence). The default is unchanged: a block in pure `adc.Explicit` never sees the
+condensed source stage.
 
-> **CondensedSchur (global) vs SourceImplicit (local).** Ne pas confondre. `adc.CondensedSchur`
-> assemble et resout un operateur elliptique couplant tout le domaine (pour un couplage raide
-> non local : Lorentz / electrostatique). `adc.SourceImplicit` (= IMEX source-only) est
-> local : l'implicite ne couple que les composantes d'une meme cellule (relaxation, reactions,
-> friction), sans solve elliptique, donc bien moins cher. Une source raide locale n'a pas
-> besoin de Schur.
+> **CondensedSchur (global) vs SourceImplicit (local).** Do not confuse them. `adc.CondensedSchur`
+> assembles and solves an elliptic operator coupling the whole domain (for a stiff non-local
+> coupling: Lorentz / electrostatic). `adc.SourceImplicit` (= IMEX source-only) is
+> local: the implicit only couples the components of the same cell (relaxation, reactions,
+> friction), without an elliptic solve, so much cheaper. A local stiff source does not
+> need Schur.
 
-### Pour aller plus loin
+### Going further
 
-- Conception detaillee (les cinq niveaux, la non-symetrie de l'operateur tensoriel, la
-  question du solveur Krylov) : [SCHUR_CONDENSATION_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/SCHUR_CONDENSATION_DESIGN.md)
-  (banniere : `implemente` ; le document est la spec d'origine, lu comme historique de
-  conception).
-- Proprietes de conservation du chemin Schur cartesien (valeurs mesurees) :
+- Detailed design (the five levels, the non-symmetry of the tensor operator, the
+  question of the Krylov solver): [SCHUR_CONDENSATION_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/SCHUR_CONDENSATION_DESIGN.md)
+  (banner: `implemente`; the document is the original spec, read as a design
+  history).
+- Conservation properties of the Cartesian Schur path (measured values):
   [CONSERVATION_SUMMARY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CONSERVATION_SUMMARY.md).
-- Tests : `python/tests/test_schur_via_system.py` (chemin `System -> run_source_stage`,
-  briques natives, CI-safe), `test_schur_conservation.py`.
+- Tests: `python/tests/test_schur_via_system.py` (path `System -> run_source_stage`,
+  native bricks, CI-safe), `test_schur_conservation.py`.
 
-## Geometrie polaire / disque
+## Polar / disc geometry
 
-Par defaut le domaine est cartesien carre. Deux mecanismes distincts portent une
-geometrie non cartesienne.
+By default the domain is square Cartesian. Two distinct mechanisms carry a
+non-Cartesian geometry.
 
-### Anneau polaire global
+### Global polar ring
 
-Le choix de geometrie vit dans un objet maillage passe en `mesh=` (jamais dans
-`FiniteVolume`, qui ne porte que reconstruction + flux + variables). `adc.PolarMesh`
-decrit un anneau global `r in [r_min, r_max] x theta in [0, 2pi)`, `nr x ntheta` cellules,
-theta periodique, parois physiques en `r_min` / `r_max`. La grille polaire leve le verrou
-structural du diocotron sur grille cartesienne (le proto Phase-0 a mesure un rapport 73
-sur la diffusion du gradient radial).
+The geometry choice lives in a mesh object passed in `mesh=` (never in
+`FiniteVolume`, which only carries reconstruction + flux + variables). `adc.PolarMesh`
+describes a global ring `r in [r_min, r_max] x theta in [0, 2pi)`, `nr x ntheta` cells,
+periodic theta, physical walls at `r_min` / `r_max`. The polar grid lifts the structural
+lock of the diocotron on a Cartesian grid (the Phase-0 proto measured a ratio of 73
+on the diffusion of the radial gradient).
 
 ```python
 import adc
@@ -227,46 +227,46 @@ mesh = adc.PolarMesh(r_min=0.3, r_max=1.0, nr=128, ntheta=256)  # axe 0 = radial
 sim = adc.System(mesh=mesh)   # construit un anneau global et avance dessus
 ```
 
-Le `SystemConfig` porte alors `geometry="polar"`, `nr`, `ntheta`, `r_min`, `r_max`. Cote
-C++, le chemin polaire est branche dans `System.step` (transport `assemble_rhs_polar` +
-Poisson `PolarPoissonSolver` + derive de l'aux en base locale `(e_r, e_theta)`).
+The `SystemConfig` then carries `geometry="polar"`, `nr`, `ntheta`, `r_min`, `r_max`. On the
+C++ side, the polar path is wired into `System.step` (transport `assemble_rhs_polar` +
+Poisson `PolarPoissonSolver` + drift of the aux in the local basis `(e_r, e_theta)`).
 
-> **Portee polaire.** Le chemin polaire est limite : transport ExB scalaire /
-> isotherme seulement (les flux fluides complets ne sont pas portes), mono-rang (le
-> `PolarPoissonSolver` direct, FFT-en-theta + tridiagonale-en-r par Thomas, refuse MPI
-> et leve sur `n_ranks() > 1` ou `ba.size() != 1`), pas de couplage cartesien <-> polaire
-> (c'est un anneau global). `nr >= 3` (stencil radial decentre d'ordre 2 aux parois),
-> `ntheta >= 1`. `adc.CondensedSchur` est cable en polaire (le stepper condense polaire est
-> choisi cote C++ selon la geometrie).
+> **Polar scope.** The polar path is limited: scalar / isothermal ExB transport
+> only (the full fluid fluxes are not ported), single-rank (the
+> direct `PolarPoissonSolver`, FFT-in-theta + tridiagonal-in-r by Thomas, refuses MPI
+> and raises on `n_ranks() > 1` or `ba.size() != 1`), no Cartesian <-> polar coupling
+> (it is a global ring). `nr >= 3` (2nd-order one-sided radial stencil at the walls),
+> `ntheta >= 1`. `adc.CondensedSchur` is wired in polar (the polar condensed stepper is
+> chosen on the C++ side according to the geometry).
 
-### Masque disque (transport cartesien)
+### Disc mask (Cartesian transport)
 
-Sur grille cartesienne, on peut restreindre le transport a un disque
-`hypot(x-cx, y-cy) - R < 0` :
+On a Cartesian grid, one can restrict the transport to a disc
+`hypot(x-cx, y-cy) - R < 0`:
 
 ```python
 sim.set_disc_domain(cx=0.5, cy=0.5, R=0.40)   # cellule active si son centre est dans le disque
 mask = sim.disc_mask()                         # masque 0/1 (ny, nx) row-major, pour verification
 ```
 
-Sans `set_disc_domain`, le masque est tout actif et le chemin de transport reste
-bit-identique. Le masque disque est refuse en geometrie polaire (l'anneau est deja borne
-par ses parois radiales `r_min` / `r_max`).
+Without `set_disc_domain`, the mask is fully active and the transport path stays
+bit-identical. The disc mask is refused in polar geometry (the ring is already bounded
+by its radial walls `r_min` / `r_max`).
 
-### Pour aller plus loin
+### Going further
 
-- Bindings : `python/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
+- Bindings: `python/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
   `set_disc_domain`, `disc_mask`).
-- Solveur polaire : `include/adc/numerics/elliptic/polar_poisson_solver.hpp`.
+- Polar solver: `include/adc/numerics/elliptic/polar_poisson_solver.hpp`.
 
-## Extension C++ : ajouter une brique native
+## C++ extension: adding a native brick
 
-Le coeur est agnostique au modele : il ne nomme aucun scenario. Un modele physique est une
-composition de briques generiques (etat, transport, source, elliptique), et le calcul
-cellule par cellule reste du C++ compile.
+The core is model-agnostic: it names no scenario. A physical model is a
+composition of generic bricks (state, transport, source, elliptic), and the per-cell
+computation stays compiled C++.
 
-Pour ecrire une nouvelle brique native, on satisfait le concept `PhysicalModel`
-(`include/adc/core/physical_model.hpp`). Le contrat minimal :
+To write a new native brick, one satisfies the `PhysicalModel` concept
+(`include/adc/core/physical_model.hpp`). The minimal contract:
 
 ```cpp
 template <class M>
@@ -282,32 +282,32 @@ concept PhysicalModel =
     };
 ```
 
-Toutes ces methodes doivent etre `ADC_HD` (host/device) si elles sont appelees dans des
-kernels. L'extension optionnelle `HasPrimitiveVars` ajoute `to_primitive` / `to_conservative`
-(reconstruction en variables primitives, plus stable pour Euler : positivite de rho et p),
-et `HyperbolicPhysicalModel` ajoute le descripteur de variables (`conservative_vars()` /
-`primitive_vars()`). Une fois la brique conforme, elle se compose dans un `CompositeModel`
-et s'expose au runtime comme les briques existantes.
+All these methods must be `ADC_HD` (host/device) if they are called in
+kernels. The optional extension `HasPrimitiveVars` adds `to_primitive` / `to_conservative`
+(reconstruction in primitive variables, more stable for Euler: positivity of rho and p),
+and `HyperbolicPhysicalModel` adds the variable descriptor (`conservative_vars()` /
+`primitive_vars()`). Once the brick is compliant, it composes into a `CompositeModel`
+and is exposed at runtime like the existing bricks.
 
-### Pour aller plus loin
+### Going further
 
-- Les cinq couches orthogonales, la carte des modules, l'etage elliptique
-  (probleme / operateur / solveur / post-traitement) : [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md).
-- Les choix de conception (concepts + policies, seam `for_each_cell`, `EllipticSolver`) :
+- The five orthogonal layers, the map of the modules, the elliptic stage
+  (problem / operator / solver / post-processing): [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md).
+- The design choices (concepts + policies, `for_each_cell` seam, `EllipticSolver`):
   [CHOICES.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CHOICES.md).
-- Le concept et ses extensions : `include/adc/core/physical_model.hpp` ;
-  la composition de reference : `include/adc/physics/composite.hpp`.
+- The concept and its extensions: `include/adc/core/physical_model.hpp`;
+  the reference composition: `include/adc/physics/composite.hpp`.
 
-## Performance et profiling
+## Performance and profiling
 
-Le depot embarque un harnais de profilage : `bench/profile_step.cpp`, pilote par
-`bench/run_bench.sh`. Il reconstruit un pas de temps representatif du diocotron a partir
-des seams publics (sans toucher le hot path) et chronometre chaque phase
+The repository ships a profiling harness: `bench/profile_step.cpp`, driven by
+`bench/run_bench.sh`. It rebuilds a time step representative of the diocotron from
+the public seams (without touching the hot path) and times each phase
 (`transport`, `poisson`, `halos`, `aux_derive`, `reduction`, `fence`, `alloc_tmp`)
-encadree de `device_fence()` pour capturer l'execution device sous Kokkos.
+bracketed by `device_fence()` to capture the device execution under Kokkos.
 
-Le harnais est hors du build par defaut (`ADC_BUILD_BENCH=OFF`) : le CI ne le
-configure ni ne le compile jamais. On l'active explicitement :
+The harness is out of the default build (`ADC_BUILD_BENCH=OFF`): the CI never
+configures or compiles it. It is enabled explicitly:
 
 ```sh
 bench/run_bench.sh serie                  # Serie CPU
@@ -316,26 +316,26 @@ bench/run_bench.sh mpi          2         # MPI CPU, 2 rangs
 bench/run_bench.sh mpi-cuda    <Kroot> 4  # MPI + Kokkos Cuda (GH200), 4 rangs
 ```
 
-Il accepte `--n --steps --warmup --cfl --solver {geometric_mg|fft} --limiter
+It accepts `--n --steps --warmup --cfl --solver {geometric_mg|fft} --limiter
 {none|minmod|vanleer|weno5} --bc {periodic|dirichlet}`.
 
-Constat principal du profil : sur les six backends mesures, la phase `poisson` domine
-le pas a 96 a 99.9 %. Le transport, les halos, les reductions et les allocations
-temporaires sont chacun `< 1 ms` par pas (ensemble `< 1.1 %` du pas en serie). Le verrou de
-performance est, sans ambiguite, le solve elliptique (`GeometricMG::solve()`, appele a
-chaque pas). Deux faits aggravants mesures : le Poisson ne profite pas du parallelisme
-on-node (il regresse, le V-cycle descend jusqu'a des grilles minuscules 2x2, 4x4, et le
-cout de lancement de chaque kernel ecrase le calcul utile), et sur GPU la latence de
-lancement domine (ni un GPU plus large ni des GPU en plus n'aident, d'autant que le layout
-`System` est mono-box).
+Main finding of the profile: on the six measured backends, the `poisson` phase dominates
+the step at 96 to 99.9 %. The transport, the halos, the reductions and the temporary
+allocations are each `< 1 ms` per step (together `< 1.1 %` of the step in serial). The
+performance lock is, unambiguously, the elliptic solve (`GeometricMG::solve()`, called at
+each step). Two measured aggravating facts: Poisson does not benefit from the on-node
+parallelism (it regresses, the V-cycle descends down to tiny grids 2x2, 4x4, and the
+launch cost of each kernel crushes the useful computation), and on GPU the launch latency
+dominates (neither a larger GPU nor more GPUs help, all the more so as the `System`
+layout is single-box).
 
-Pas de refactor de performance sans un profil montrant le goulot.
-> `PROFILE_RESULTS.md` rapporte les mesures et pointe une cible (le dispatch du V-cycle sur
-> les niveaux grossiers) ; il n'applique aucune optimisation.
+No performance refactor without a profile showing the bottleneck.
+> `PROFILE_RESULTS.md` reports the measurements and points to a target (the V-cycle dispatch on
+> the coarse levels); it applies no optimization.
 
-### Pour aller plus loin
+### Going further
 
-- Profil complet (tableau phase x backend, plateformes exactes M-series + GH200, pistes a
-  investiguer) : [PROFILE_RESULTS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/PROFILE_RESULTS.md).
-- `docs/PERFORMANCE.md` existe mais porte des mesures historiques (anciens pilotes
-  applicatifs, M1) : ne pas le lire comme la perf actuelle.
+- Full profile (phase x backend table, exact platforms M-series + GH200, leads to
+  investigate): [PROFILE_RESULTS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/PROFILE_RESULTS.md).
+- `docs/PERFORMANCE.md` exists but carries historical measurements (old application
+  drivers, M1): do not read it as the current performance.

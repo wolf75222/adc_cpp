@@ -1,37 +1,37 @@
 # Installation
 
-Le coeur d'`adc_cpp` est header-only : rien a compiler pour le consommer en C++. Ce qui se
-construit, c'est la suite de tests (C++) et le module Python `adc` (pybind11) -- soit par
-`pip install .`, soit par CMake directement.
+The core of `adc_cpp` is header-only: nothing to compile to consume it in C++. What gets
+built is the test suite (C++) and the Python module `adc` (pybind11), either through
+`pip install .` or through CMake directly.
 
-## Environnement conda
+## conda environment
 
-Une commande cree l'env `adc` (outillage complet : CMake, Ninja, ccache, Python 3.12, NumPy,
-pybind11, Kokkos, OpenMPI, libomp) **et y fige la meilleure toolchain de la plateforme** :
+A single command creates the `adc` env (full tooling: CMake, Ninja, ccache, Python 3.12, NumPy,
+pybind11, Kokkos, OpenMPI, libomp) **and pins the best toolchain for the platform in it**:
 
 ```bash
 bash scripts/setup_env.sh
 conda activate adc
 ```
 
-Sur macOS, le script fixe `CC`/`CXX` sur AppleClang dans l'env meme (exportes a chaque
-activation, prioritaires sur le PATH) : un clang LLVM vanilla qui trainerait en tete de PATH
-compile les grosses unites du module plus de 15 fois plus lentement, sans message. Sur Linux,
-il installe `cxx-compiler` (gcc 14, C++23) -- toolchain complete sans droits root. Un `CC`/`CXX`
-pose a la main avant un build garde la priorite.
+On macOS, the script sets `CC`/`CXX` to AppleClang inside the env itself (exported on each
+activation, taking priority over the PATH): a vanilla LLVM clang sitting at the head of PATH
+compiles the large units of the module more than 15 times slower, with no message. On Linux,
+it installs `cxx-compiler` (gcc 14, C++23), a full toolchain without root rights. A `CC`/`CXX`
+set by hand before a build keeps priority.
 
-Equivalent manuel, sans le choix de toolchain : `conda env create -f environment.yml`.
-Mise a jour : relancer le script (ou `conda env update -f environment.yml --prune`).
-L'interpreteur de l'env construit et importe le module : pas de divergence d'ABI cpython.
-Norme : C++20 (Kokkos, seul backend on-node, est compile sous nvcc pour la cible Cuda).
+Manual equivalent, without the toolchain choice: `conda env create -f environment.yml`.
+Update: re-run the script (or `conda env update -f environment.yml --prune`).
+The env interpreter builds and imports the module: no cpython ABI divergence.
+Standard: C++20 (Kokkos, the only on-node backend, is compiled under nvcc for the Cuda target).
 
-## Module Python
+## Python module
 
-### Utilisateur : `pip install .`
+### User: `pip install .`
 
-`pip install .` pilote le CMakeLists via scikit-build-core (`pyproject.toml`) et installe le
-paquet dans `site-packages` : `import adc` marche ensuite sans `PYTHONPATH`. Les backends se
-choisissent par variables d'environnement, mappees sur les options CMake :
+`pip install .` drives the CMakeLists through scikit-build-core (`pyproject.toml`) and installs the
+package into `site-packages`: `import adc` then works without `PYTHONPATH`. Backends are
+chosen through environment variables, mapped onto the CMake options:
 
 ```bash
 conda activate adc
@@ -40,7 +40,7 @@ Kokkos_ROOT=$CONDA_PREFIX pip install . -v     # reutilise le Kokkos de l'env (O
 ADC_USE_MPI=ON pip install . -v                                # MPI
 ```
 
-Puis, en Python :
+Then, in Python:
 
 ```python
 import adc
@@ -50,24 +50,24 @@ adc.set_threads()      # tous les coeurs -- ou set_threads(8) ; AVANT le 1er Sys
 sim = adc.System(n=256)
 ```
 
-`pip install -e .` (editable) convient au dev ; le cache de build persiste sous `build/`, les
-reinstallations sont incrementales.
+`pip install -e .` (editable) suits dev; the build cache persists under `build/`, and
+reinstalls are incremental.
 
-**Build lent ?** Trois verifications, dans l'ordre :
+**Slow build?** Three checks, in order:
 
-1. le compilateur. Sur macOS, un clang LLVM (Homebrew) en tete de PATH compile les grosses
-   unites du module 4 a 5 fois plus lentement qu'AppleClang (mesure : plus d'une heure au lieu
-   de ~8 min). Le configure l'indique ; pour forcer AppleClang :
-   `CXX=/usr/bin/clang++ pip install .` ;
-2. ccache. Fourni par l'env conda et detecte automatiquement : les recompilations d'un fichier
-   deja vu deviennent quasi instantanees ;
-3. les reinstallations. Le cache sous `build/` rend `pip install .` incremental : seul ce qui a
-   change recompile. Le premier build complet reste long (deux grosses unites a `-O3`) -- c'est
-   le cout d'un module optimise, paye une fois.
+1. the compiler. On macOS, an LLVM clang (Homebrew) at the head of PATH compiles the large
+   units of the module 4 to 5 times slower than AppleClang (measured: over an hour instead
+   of ~8 min). The configure step reports it; to force AppleClang:
+   `CXX=/usr/bin/clang++ pip install .`;
+2. ccache. Provided by the conda env and detected automatically: recompiling a file
+   already seen becomes nearly instant;
+3. reinstalls. The cache under `build/` makes `pip install .` incremental: only what
+   changed recompiles. The first full build stays long (two large units at `-O3`), which is
+   the cost of an optimized module, paid once.
 
-### Developpeur : presets + PYTHONPATH
+### Developer: presets + PYTHONPATH
 
-Pour iterer sur le C++ sans reinstaller, les presets construisent le module dans l'arbre :
+To iterate on the C++ without reinstalling, the presets build the module in the tree:
 
 ```bash
 cmake --preset python          && cmake --build --preset python            # Kokkos Serial
@@ -75,8 +75,8 @@ cmake --preset python-parallel && cmake --build --preset python-parallel   # Kok
 export PYTHONPATH=$PWD/build-py/python        # ou build-py-kokkos/python
 ```
 
-Un seul chemin suffit : la configuration copie les sources du paquet a cote de l'extension.
-Equivalent sans preset :
+A single path is enough: the configuration copies the package sources next to the extension.
+Equivalent without preset:
 
 ```bash
 cmake -S . -B build-py -G Ninja -DADC_BUILD_PYTHON=ON -DADC_BUILD_TESTS=OFF \
@@ -86,9 +86,9 @@ cmake --build build-py --target _adc -j
 
 ### Threads
 
-Le nombre de threads n'est pas un argument du modele : il faut un module construit contre un Kokkos
-OpenMP (preset `python-parallel`), puis un reglage AVANT la premiere allocation --
-Kokkos s'initialise a ce moment-la et lit l'environnement une seule fois :
+The number of threads is not a model argument: you need a module built against a Kokkos
+OpenMP (preset `python-parallel`), then a setting BEFORE the first allocation,
+Kokkos initializes at that moment and reads the environment only once:
 
 ```python
 import adc
@@ -96,11 +96,11 @@ adc.set_threads(8)       # = OMP_NUM_THREADS + KOKKOS_NUM_THREADS, sans toucher 
 sim = adc.System(n=256)
 ```
 
-Module Kokkos Serial ou appel trop tardif : un avertissement le signale et le reglage est ignore.
-`adc.parallel_info()` donne l'etat courant. Pour que le DSL `backend="production"` scale aussi,
-exporter `ADC_KOKKOS_ROOT` (meme racine Kokkos que le build du module).
+Kokkos Serial module or a call made too late: a warning signals it and the setting is ignored.
+`adc.parallel_info()` gives the current state. For the DSL `backend="production"` to scale too,
+export `ADC_KOKKOS_ROOT` (same Kokkos root as the module build).
 
-## Coeur C++ et tests
+## C++ core and tests
 
 ```bash
 cmake --preset serial   && cmake --build --preset serial   && ctest --preset serial   # Kokkos Serial
@@ -108,9 +108,9 @@ cmake --preset parallel && cmake --build --preset parallel && ctest --preset par
 cmake --preset mpi      && cmake --build --preset mpi      && ctest --preset mpi
 ```
 
-Chaque preset ecrit dans son dossier (`build`, `build-kokkos`, `build-mpi`) ; les presets
-parallele/MPI exigent l'env conda actif (ils lisent `$CONDA_PREFIX` et refusent de se
-configurer sans). `ctest -L mpi` ou `-L core` selectionne un sous-ensemble. Equivalent manuel :
+Each preset writes into its own folder (`build`, `build-kokkos`, `build-mpi`); the
+parallel/MPI presets require the conda env active (they read `$CONDA_PREFIX` and refuse to
+configure without it). `ctest -L mpi` or `-L core` selects a subset. Manual equivalent:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -118,35 +118,35 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Le decompte des tests par backend est tenu dans
+The per-backend test count is kept in
 [`BACKEND_COVERAGE.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).
 
 ## Backends
 
-| Option CMake | Defaut | Role |
+| CMake option | Default | Role |
 |---|---|---|
-| `ADC_BUILD_TESTS` | `ON` en top-level, `OFF` en sous-projet | suite de tests (`tests/`) |
-| `ADC_BUILD_PYTHON` | `OFF` | module pybind11 `adc` |
-| `ADC_USE_KOKKOS` | `ON` | seul backend on-node, **obligatoire** (`OFF` = erreur fatale) ; FetchContent si non installe |
-| `ADC_USE_MPI` | `OFF` | seam `comm` distribue |
-| `ADC_USE_HDF5` | `OFF` | `DataWriter` HDF5 |
-| `ADC_BUILD_BENCH` | `OFF` | harnais de profilage (`bench/`) |
-| `ADC_INSTALL` | `ON` en top-level | regles `cmake --install` + `find_package(adc)` |
-| `ADC_PY_LTO` | `OFF` | ThinLTO du module (`OFF` = build rapide) |
-| `ADC_USE_CCACHE` | `ON` | ccache si present (ignore sous nvcc) |
+| `ADC_BUILD_TESTS` | `ON` at top-level, `OFF` in a subproject | test suite (`tests/`) |
+| `ADC_BUILD_PYTHON` | `OFF` | pybind11 module `adc` |
+| `ADC_USE_KOKKOS` | `ON` | only on-node backend, **required** (`OFF` = fatal error); FetchContent if not installed |
+| `ADC_USE_MPI` | `OFF` | distributed `comm` seam |
+| `ADC_USE_HDF5` | `OFF` | HDF5 `DataWriter` |
+| `ADC_BUILD_BENCH` | `OFF` | profiling harness (`bench/`) |
+| `ADC_INSTALL` | `ON` at top-level | `cmake --install` rules + `find_package(adc)` |
+| `ADC_PY_LTO` | `OFF` | ThinLTO of the module (`OFF` = fast build) |
+| `ADC_USE_CCACHE` | `ON` | ccache if present (ignored under nvcc) |
 
-Chaque option est aussi lisible depuis l'environnement (`Kokkos_ROOT=... pip install .`) ;
-un `-D` explicite garde la priorite. Le backend est une propriete de la cible `adc` : tout ce
-qui la lie en herite, aucun drapeau dans le code. adc_cpp est **Kokkos-only** : il n'y a plus de
-backend OpenMP autonome ni de build non-Kokkos ; Serial, OpenMP et Cuda sont des espaces
-d'execution Kokkos choisis a l'install (ou au fetch) de Kokkos, pas des drapeaux adc distincts.
-**Kokkos n'a pas besoin d'etre pre-installe** : introuvable, il est recupere + construit
-automatiquement (FetchContent, tarball de release verifie par SHA256).
+Each option is also readable from the environment (`Kokkos_ROOT=... pip install .`);
+an explicit `-D` keeps priority. The backend is a property of the `adc` target: everything
+that links it inherits it, no flag in the code. adc_cpp is **Kokkos-only**: there is no longer a
+standalone OpenMP backend nor a non-Kokkos build; Serial, OpenMP and Cuda are Kokkos
+execution spaces chosen at install (or fetch) of Kokkos, not separate adc flags.
+**Kokkos does not need to be pre-installed**: if not found, it is fetched + built
+automatically (FetchContent, release tarball verified by SHA256).
 
-**Kokkos via conda** : le paquet `kokkos` de conda-forge est generalement compile avec le seul
-backend Serial. Le build passe, mais ne scale pas en threads -- verifier le message
-`Kokkos found ... = (...)` au configure. Pour un Kokkos Serial+OpenMP dans l'env (~2 min,
-meme compilateur que le projet) :
+**Kokkos via conda**: the `kokkos` package from conda-forge is generally compiled with the
+Serial backend only. The build passes, but does not scale with threads, check the message
+`Kokkos found ... = (...)` at configure. For a Kokkos Serial+OpenMP in the env (~2 min,
+same compiler as the project):
 
 ```bash
 bash scripts/kokkos_openmp_conda.sh
@@ -154,20 +154,20 @@ cmake --preset python-parallel && cmake --build --preset python-parallel
 export ADC_KOKKOS_ROOT="$CONDA_PREFIX"
 ```
 
-**GPU** : `nvcc_wrapper` comme compilateur, valide sur ROMEO (pas via conda) :
+**GPU**: `nvcc_wrapper` as the compiler, validated on ROMEO (not via conda):
 
 ```bash
 cmake -S . -B build-gpu -DADC_USE_KOKKOS=ON \
       -DCMAKE_CXX_COMPILER=$KOKKOS/bin/nvcc_wrapper -DKokkos_ROOT=$KOKKOS
 ```
 
-## Cluster (Spack, sans root)
+## Cluster (Spack, without root)
 
-Sur ROMEO et assimiles, l'outillage vient des modules/Spack -- pas de conda (`conda env create`
-exige le reseau, souvent absent des noeuds).
+On ROMEO and similar systems, the tooling comes from modules/Spack, not conda (`conda env create`
+requires the network, often absent from the nodes).
 
-**ROMEO** : un profil machine versionne fait toute la mise en place (env Spack du site,
-CC/CXX, Kokkos, variables du DSL, cache dans le scratch) :
+**ROMEO**: a versioned machine profile does the whole setup (site Spack env,
+CC/CXX, Kokkos, DSL variables, cache in the scratch):
 
 ```bash
 cp Tools/machines/romeo/romeo_adc.profile.example ~/romeo_adc.profile
@@ -175,10 +175,10 @@ cp Tools/machines/romeo/romeo_adc.profile.example ~/romeo_adc.profile
 source ~/romeo_adc.profile                       # ADC_ROMEO_ARCH=armgpu pour le GPU
 ```
 
-**Autre cluster** : le guide generique
+**Other cluster**: the generic guide
 [HPC_SPACK_GUIDE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/HPC_SPACK_GUIDE.md)
-couvre l'installation de la pile (Spack du site ou bootstrap perso), la compilation ciblee
-microarchitecture et le lancement SLURM avec placement des threads/GPU. Schema minimal :
+covers installing the stack (site Spack or your own bootstrap), microarchitecture-targeted
+compilation and SLURM launch with thread/GPU placement. Minimal schema:
 
 ```bash
 spack load cmake ninja kokkos openmpi            # ou module load <env du site>
@@ -187,33 +187,33 @@ cmake -S . -B build-kokkos -G Ninja -DADC_USE_KOKKOS=ON \
 # configurer sur le LOGIN ; dans l'allocation, relancer seulement : ninja -C build-kokkos
 ```
 
-GPU Grace-Hopper : [GPU_ROMEO.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
-Pour le DSL `backend="production"`, exporter `ADC_KOKKOS_ROOT=<prefix Kokkos>` (le profil ROMEO
-le fait) ; le compilateur du build est bake dans `_adc`, le DSL le retrouve seul tant qu'il
-existe sur les noeuds.
+Grace-Hopper GPU: [GPU_ROMEO.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
+For the DSL `backend="production"`, export `ADC_KOKKOS_ROOT=<prefix Kokkos>` (the ROMEO profile
+does it); the build compiler is baked into `_adc`, the DSL finds it on its own as long as it
+exists on the nodes.
 
-## Depannage
+## Troubleshooting
 
-Premier reflexe, quel que soit le symptome :
+First reflex, whatever the symptom:
 
 ```bash
 python -c "import adc; adc.doctor()"
 ```
 
-Chaque ligne verifie un maillon (interpreteur/ABI, numpy, Kokkos, compilateur du DSL et sa
-norme, synchronisation en-tetes/module, threads) et donne le remede en cas d'echec.
+Each line checks a link (interpreter/ABI, numpy, Kokkos, DSL compiler and its
+standard, header/module sync, threads) and gives the remedy on failure.
 
-**`ImportError` sur `adc._adc`** : l'extension est epinglee a l'interpreteur qui l'a construite
-(suffixe `cpython-312`). Le message d'erreur indique desormais la cause exacte (extension
-absente, ou mauvais interpreteur) et la commande de reconstruction. Regle simple : construire
-et importer avec le meme python -- celui de l'env conda.
+**`ImportError` on `adc._adc`**: the extension is pinned to the interpreter that built it
+(suffix `cpython-312`). The error message now indicates the exact cause (extension
+absent, or wrong interpreter) and the rebuild command. Simple rule: build
+and import with the same python, the one from the conda env.
 
-**`error: invalid value 'c++23'` ou `ABI incompatible` (DSL production)** : le loader `.so`
-compile a l'execution doit partager la toolchain du module. Trois protections couvrent ce cas :
-le compilateur du build est bake dans le module et prefere au PATH (`cxx=` explicite >
-`$ADC_CXX` > compilateur du build > PATH), la norme est testee avant compilation (repli
-`c++2b`), et l'erreur restante explique quoi faire. Un module perime vis-a-vis des en-tetes
-(apres un `git pull`) est detecte avant le chargement, avec la commande de rebuild.
+**`error: invalid value 'c++23'` or `ABI incompatible` (DSL production)**: the `.so` loader
+compiled at runtime must share the module toolchain. Three protections cover this case:
+the build compiler is baked into the module and preferred over the PATH (`cxx=` explicit >
+`$ADC_CXX` > build compiler > PATH), the standard is tested before compilation (fallback
+`c++2b`), and the remaining error explains what to do. A module stale with respect to the headers
+(after a `git pull`) is detected before loading, with the rebuild command.
 
 ## Verification
 
@@ -231,5 +231,5 @@ sim.step_cfl(0.4)
 print(sim.density("ne").shape)   # (64, 64)
 ```
 
-Si ces lignes s'executent, l'installation est bonne. Suite : [premier run](first_run.md) puis
-[tutoriel A->Z](tutorial.md).
+If these lines run, the install is good. Next: [first run](first_run.md) then
+[A->Z tutorial](tutorial.md).

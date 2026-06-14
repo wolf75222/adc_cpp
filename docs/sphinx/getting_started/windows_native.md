@@ -1,27 +1,27 @@
-# Windows natif (sans WSL2)
+# Native Windows (without WSL2)
 
-> **Statut : le Windows natif fonctionne pour le CPU** -- Serial, OpenMP, module Python `adc`
-> (`import adc`, `System`, `AmrSystem`), **DSL production** (`.dll`, resultats bit-identiques) et
-> compilation de C++ custom (`adc_cases.common.native`). **Le GPU reste sur [WSL2](windows_wsl2.md)**
-> (Kokkos CUDA n'est pas supporte en natif Windows).
+> **Status: native Windows works for the CPU** -- Serial, OpenMP, the `adc` Python module
+> (`import adc`, `System`, `AmrSystem`), **DSL production** (`.dll`, bit-identical results) and
+> compilation of custom C++ (`adc_cases.common.native`). **The GPU stays on [WSL2](windows_wsl2.md)**
+> (Kokkos CUDA is not supported natively on Windows).
 
-Cette page complete le guide [WSL2](windows_wsl2.md). WSL2 reste le chemin le plus simple et le seul
-qui couvre le **GPU**. Le natif est utile si tu veux eviter WSL2 pour du travail CPU.
+This page complements the [WSL2](windows_wsl2.md) guide. WSL2 remains the simplest path and the only
+one that covers the **GPU**. The native path is useful if you want to avoid WSL2 for CPU work.
 
 ## Toolchain
 
 - **Visual Studio 2022** (MSVC, `cl.exe`, C++23 via `/std:c++20`/`/std:c++latest`) + **CMake**.
-- **LLVM/clang-cl** (`winget install LLVM.LLVM`) **uniquement pour OpenMP** : MSVC garde
-  `_OPENMP=2.0` meme avec `/openmp:llvm`, donc Kokkos OpenMP (>=3.0) exige clang-cl (qui rapporte 5.1).
-- **Python** (Miniforge conseille) + `numpy`, `pybind11`.
-- Toute compilation au runtime (DSL `production`, `adc_cases.common.native`) lance `cl`/`clang-cl` :
-  lancer Python depuis un invite **"x64 Native Tools"** (vcvars) pour avoir `INCLUDE`/`LIB`.
+- **LLVM/clang-cl** (`winget install LLVM.LLVM`) **only for OpenMP**: MSVC keeps
+  `_OPENMP=2.0` even with `/openmp:llvm`, so Kokkos OpenMP (>=3.0) requires clang-cl (which reports 5.1).
+- **Python** (Miniforge recommended) + `numpy`, `pybind11`.
+- Any compilation at runtime (DSL `production`, `adc_cases.common.native`) launches `cl`/`clang-cl`:
+  launch Python from an **"x64 Native Tools"** prompt (vcvars) to have `INCLUDE`/`LIB`.
 
-## Kokkos en DLL partagee (cle du natif)
+## Kokkos as a shared DLL (key to the native path)
 
-Le DSL et `adc_cases.common.native` generent une `.dll` qui partage le runtime Kokkos du module
-`_adc` : il faut donc **Kokkos en bibliotheque partagee** (un seul runtime, sinon double-singleton ->
-crash). MSVC n'exporte pas les symboles Kokkos par defaut -> utiliser `WINDOWS_EXPORT_ALL_SYMBOLS` :
+The DSL and `adc_cases.common.native` generate a `.dll` that shares the Kokkos runtime of the `_adc`
+module: you therefore need **Kokkos as a shared library** (a single runtime, otherwise double-singleton ->
+crash). MSVC does not export the Kokkos symbols by default -> use `WINDOWS_EXPORT_ALL_SYMBOLS`:
 
 ```bat
 :: Serial (CPU sequentiel) -- compilateur cl
@@ -37,10 +37,10 @@ cmake -S kokkos -B build-omp -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COM
 cmake --build build-omp --target install
 ```
 
-`kokkos*.dll` doit etre chargeable au runtime : le placer **a cote du `.pyd`** (Python 3.8+
-n'utilise plus le `PATH` pour les dependances d'extension) ou via `os.add_dll_directory(...)`.
+`kokkos*.dll` must be loadable at runtime: place it **next to the `.pyd`** (Python 3.8+
+no longer uses the `PATH` for extension dependencies) or via `os.add_dll_directory(...)`.
 
-## Module Python `_adc`
+## Python module `_adc`
 
 ```bat
 cmake -S adc_cpp -B build-pywin -G "Visual Studio 17 2022" -A x64 ^
@@ -48,37 +48,37 @@ cmake -S adc_cpp -B build-pywin -G "Visual Studio 17 2022" -A x64 ^
   -DPython_EXECUTABLE=...\python.exe -DCMAKE_CXX_FLAGS="/DADC_EXPORT_BUILDING_MODULE /DNOMINMAX /bigobj"
 cmake --build build-pywin --config Release --target _adc
 ```
-`/DADC_EXPORT_BUILDING_MODULE` exporte les methodes `System` (`__declspec(dllexport)`, cf.
-`export.hpp`) -> produit l'**import library `_adc.lib`** contre laquelle la `.dll` DSL se lie. Copier
-`_adc.cp3XX-win_amd64.pyd`, `_adc.lib` et `kokkos*.dll` a cote de `python/adc/`.
+`/DADC_EXPORT_BUILDING_MODULE` exports the `System` methods (`__declspec(dllexport)`, see
+`export.hpp`) -> produces the **import library `_adc.lib`** against which the DSL `.dll` links. Copy
+`_adc.cp3XX-win_amd64.pyd`, `_adc.lib` and `kokkos*.dll` next to `python/adc/`.
 
 ```python
 import adc; adc.doctor(); s = adc.System(n=64); a = adc.AmrSystem(n=64)   # OK natif
 ```
 
-## DSL production (`.dll`) et `adc_cases`
+## DSL production (`.dll`) and `adc_cases`
 
-`model.compile(..., backend="production")` compile une `.dll` (cl/clang-cl, `/LD`, liee a
-`kokkoscore.lib` + `_adc.lib`) que `System.add_native_block` charge (`LoadLibraryW`) -- pas de
-`RTLD_GLOBAL` Unix, les symboles `_adc` sont resolus au lien via `_adc.lib`. Valide bit-identique au
-chemin briques. `adc_cases.common.native.build_shared` produit des `.dll` standalone (ctypes) de la
-meme facon.
+`model.compile(..., backend="production")` compiles a `.dll` (cl/clang-cl, `/LD`, linked to
+`kokkoscore.lib` + `_adc.lib`) that `System.add_native_block` loads (`LoadLibraryW`) -- no Unix
+`RTLD_GLOBAL`, the `_adc` symbols are resolved at link time via `_adc.lib`. Validated bit-identical to the
+brick path. `adc_cases.common.native.build_shared` produces standalone `.dll` files (ctypes) in the
+same way.
 
-> Attention : Les `.cpp` custom des cas doivent exporter leurs entry points en `__declspec(dllexport)` sous
-> Windows (`extern "C"` seul n'exporte pas sous `/LD`).
+> Warning: The custom `.cpp` files of the cases must export their entry points as `__declspec(dllexport)` on
+> Windows (`extern "C"` alone does not export under `/LD`).
 
-## Ecarts notables vs Linux
+## Notable differences vs Linux
 
-| Sujet | Linux/WSL2 | Windows natif |
+| Topic | Linux/WSL2 | Native Windows |
 |---|---|---|
-| Chargement dynamique | `dlopen`/`RTLD_GLOBAL` | `LoadLibraryW` + **import library** (`_adc.lib`) |
-| Kokkos cross-`.dll` | symboles via `RTLD_GLOBAL` | **Kokkos en DLL partagee** (`WINDOWS_EXPORT_ALL_SYMBOLS`) |
-| OpenMP | gcc/clang `-fopenmp` | **clang-cl** (MSVC `_OPENMP` bloque a 2.0) |
-| Compilation DSL au runtime | g++/clang sur le `PATH` | `cl`/`clang-cl` -> **env vcvars requis** |
-| GPU CUDA | oui (WSL2, sm_86) | **non** (Kokkos CUDA non supporte natif) -> utiliser WSL2 |
+| Dynamic loading | `dlopen`/`RTLD_GLOBAL` | `LoadLibraryW` + **import library** (`_adc.lib`) |
+| Kokkos cross-`.dll` | symbols via `RTLD_GLOBAL` | **Kokkos as a shared DLL** (`WINDOWS_EXPORT_ALL_SYMBOLS`) |
+| OpenMP | gcc/clang `-fopenmp` | **clang-cl** (MSVC `_OPENMP` capped at 2.0) |
+| DSL compilation at runtime | g++/clang on the `PATH` | `cl`/`clang-cl` -> **vcvars env required** |
+| GPU CUDA | yes (WSL2, sm_86) | **no** (Kokkos CUDA not supported natively) -> use WSL2 |
 
-## Limites
-- **GPU CUDA natif : non disponible** (Kokkos n'a pas de support CUDA natif Windows -- ni VS+CUDA, ni
-  nvcc-as-CXX faute de `nvcc_wrapper` Windows). Le GPU passe par [WSL2](windows_wsl2.md).
-- Industrialisation CMake (option Kokkos shared, install des import libs, presets clang-cl) a finaliser
-  pour rendre ces builds reproductibles d'une commande.
+## Limitations
+- **Native CUDA GPU: not available** (Kokkos has no native CUDA support on Windows -- neither VS+CUDA, nor
+  nvcc-as-CXX for lack of a Windows `nvcc_wrapper`). The GPU goes through [WSL2](windows_wsl2.md).
+- CMake industrialization (shared Kokkos option, install of the import libs, clang-cl presets) to finalize
+  so that these builds are reproducible from a single command.

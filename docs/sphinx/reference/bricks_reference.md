@@ -1,114 +1,114 @@
-# Reference : les briques natives (composition)
+# Reference : the native bricks (composition)
 
-Cette page est le registre exhaustif des briques natives composables d'`adc` : chaque brique,
-sa signature, ses parametres, ce qu'elle declare ou ajoute, et ses contraintes. C'est le
-complement detaille de la [page modeles](../models/index.md) (qui presente les trois facons
-d'ecrire un modele) et de l'[API Python](api_python.md) (autodoc curee) ; ici le detail au
-niveau du parametre.
+This page is the exhaustive registry of `adc`'s composable native bricks: each brick,
+its signature, its parameters, what it declares or adds, and its constraints. It is the
+detailed complement of the [models page](../models/index.md) (which presents the three ways
+to write a model) and of the [Python API](api_python.md) (curated autodoc) ; here the detail at
+the parameter level.
 
-Un modele natif est une composition de quatre briques de role via
-`adc.Model(state=, transport=, source=, elliptic=)` : la math cellule par cellule reste C++
-compile (pas de boucle numpy sur le hot path, GPU/MPI conserves), Python ne fait qu'assembler
-des objets. Le coeur reste agnostique au scenario : aucun nom physique (diocotron,
-Euler-Poisson, deux-fluides) ne vit dans `adc` ; les compositions nommees vivent dans
-[`adc_cases`](https://github.com/wolf75222/adc_cases). `adc.Model(...)` valide la coherence
-etat <-> transport et reporte les parametres dans une `ModelSpec` (des tags lus cote C++ par la
-fabrique de modeles) ; un appariement incoherent leve une `ValueError` immediate.
+A native model is a composition of four role bricks via
+`adc.Model(state=, transport=, source=, elliptic=)` : the cell-by-cell math stays compiled
+C++ (no numpy loop on the hot path, GPU/MPI preserved), Python only assembles
+objects. The core stays agnostic to the scenario : no physical name (diocotron,
+Euler-Poisson, two-fluid) lives in `adc` ; the named compositions live in
+[`adc_cases`](https://github.com/wolf75222/adc_cases). `adc.Model(...)` validates the
+state <-> transport coherence and reports the parameters into a `ModelSpec` (tags read on the C++ side by the
+model factory) ; an incoherent pairing raises an immediate `ValueError`.
 
-## Etat (state)
+## State (state)
 
-La brique d'etat fixe le nombre de variables conservatives, leurs noms / primitives, et impose
-la brique de transport compatible. C'est l'argument `state=` de `adc.Model(...)`.
+The state brick fixes the number of conservative variables, their names / primitives, and imposes
+the compatible transport brick. It is the `state=` argument of `adc.Model(...)`.
 
-| Brique | Signature | Variables declarees | Transport requis |
+| Brick | Signature | Declared variables | Required transport |
 |---|---|---|---|
-| `Scalar` | `adc.Scalar()` | 1 variable conservative `n` (densite transportee) ; primitif = conservatif (`n`). | `ExB` |
-| `FluidState` (compressible) | `adc.FluidState(kind="compressible", gamma=1.4)` | 4 variables `[rho, rho_u, rho_v, E]`, primitives `[rho, u, v, p]` ; porte `gamma` (reporte dans `spec.gamma`). | `CompressibleFlux` |
-| `FluidState` (isotherme) | `adc.FluidState(kind="isothermal", cs2=0.5)` | 3 variables `[rho, rho_u, rho_v]`, primitives `[rho, u, v]` ; porte `cs2` (reporte dans `spec.cs2`). | `IsothermalFlux` |
+| `Scalar` | `adc.Scalar()` | 1 conservative variable `n` (transported density) ; primitive = conservative (`n`). | `ExB` |
+| `FluidState` (compressible) | `adc.FluidState(kind="compressible", gamma=1.4)` | 4 variables `[rho, rho_u, rho_v, E]`, primitives `[rho, u, v, p]` ; carries `gamma` (reported into `spec.gamma`). | `CompressibleFlux` |
+| `FluidState` (isothermal) | `adc.FluidState(kind="isothermal", cs2=0.5)` | 3 variables `[rho, rho_u, rho_v]`, primitives `[rho, u, v]` ; carries `cs2` (reported into `spec.cs2`). | `IsothermalFlux` |
 
-`FluidState(kind=...)` n'accepte que `"compressible"` ou `"isothermal"` (toute autre valeur leve
-une `ValueError`). Les arguments `gamma` / `cs2` sont stockes meme quand le `kind` ne les utilise
-pas ; seul celui du `kind` choisi est reporte dans la spec.
+`FluidState(kind=...)` only accepts `"compressible"` or `"isothermal"` (any other value raises
+a `ValueError`). The `gamma` / `cs2` arguments are stored even when the `kind` does not use them
+; only the one of the chosen `kind` is reported into the spec.
 
 ## Transport
 
-La brique de transport ecrit le flux physique hyperbolique. C'est l'argument `transport=` de
-`adc.Model(...)`. Les parametres physiques (`gamma`, `cs2`) viennent de l'etat, pas du transport.
+The transport brick writes the hyperbolic physical flux. It is the `transport=` argument of
+`adc.Model(...)`. The physical parameters (`gamma`, `cs2`) come from the state, not from the transport.
 
-| Brique | Signature | Physique | Etat requis |
+| Brick | Signature | Physics | Required state |
 |---|---|---|---|
-| `ExB` | `adc.ExB(B0=1.0)` | Advection scalaire par la derive E x B, `v = (-d_y phi, d_x phi) / B0`. Pose `spec.transport="exb"`, `spec.B0`. Struct C++ `adc::ExBVelocity`. | `Scalar` |
-| `CompressibleFlux` | `adc.CompressibleFlux()` | Flux d'Euler compressible (`gamma` vient de `FluidState`). Pose `spec.transport="compressible"`. Struct C++ `adc::CompressibleFlux` (alias `adc::Euler`). | `FluidState(compressible)` |
-| `IsothermalFlux` | `adc.IsothermalFlux()` | Flux d'Euler isotherme (`cs2` vient de `FluidState`). Pose `spec.transport="isothermal"`. Struct C++ `adc::IsothermalFlux`. | `FluidState(isothermal)` |
+| `ExB` | `adc.ExB(B0=1.0)` | Scalar advection by the E x B drift, `v = (-d_y phi, d_x phi) / B0`. Sets `spec.transport="exb"`, `spec.B0`. C++ struct `adc::ExBVelocity`. | `Scalar` |
+| `CompressibleFlux` | `adc.CompressibleFlux()` | Compressible Euler flux (`gamma` comes from `FluidState`). Sets `spec.transport="compressible"`. C++ struct `adc::CompressibleFlux` (alias `adc::Euler`). | `FluidState(compressible)` |
+| `IsothermalFlux` | `adc.IsothermalFlux()` | Isothermal Euler flux (`cs2` comes from `FluidState`). Sets `spec.transport="isothermal"`. C++ struct `adc::IsothermalFlux`. | `FluidState(isothermal)` |
 
-Il n'existe aucune autre brique de transport native. Pour un flux hyperbolique inedit, on passe
-par le DSL (`adc.dsl.HyperbolicBrick`, cf. [page modeles](../models/index.md)).
+There is no other native transport brick. For a novel hyperbolic flux, you go
+through the DSL (`adc.dsl.HyperbolicBrick`, cf. [models page](../models/index.md)).
 
 ## Source
 
-La brique de source ajoute le terme source ponctuel `S(U, aux)` au RHS du bloc. C'est l'argument
-`source=` de `adc.Model(...)`. Elle lit l'etat exterieur par le canal `adc::Aux` (potentiel
+The source brick adds the pointwise source term `S(U, aux)` to the block's RHS. It is the
+`source=` argument of `adc.Model(...)`. It reads the external state through the `adc::Aux` channel (potential
 `phi`, gradients `grad_x` / `grad_y`).
 
-| Brique | Signature | Ajoute au RHS | Variables min. |
+| Brick | Signature | Adds to the RHS | Min. variables |
 |---|---|---|---|
-| `NoSource` | `adc.NoSource()` | rien. Pose `spec.source="none"`. Struct C++ `adc::NoSource`. | 1 |
-| `PotentialForce` | `adc.PotentialForce(charge=1.0)` | Force du potentiel `(q/m) rho E` sur la quantite de mouvement (+ terme de travail si 4 variables). Pose `spec.source="potential"`, `spec.qom=charge`. Struct C++ `adc::PotentialForce`. | 3 |
-| `GravityForce` | `adc.GravityForce()` | Force gravitationnelle `rho g` (+ travail si 4 variables). Pose `spec.source="gravity"`. Struct C++ `adc::GravityForce`. | 3 |
+| `NoSource` | `adc.NoSource()` | nothing. Sets `spec.source="none"`. C++ struct `adc::NoSource`. | 1 |
+| `PotentialForce` | `adc.PotentialForce(charge=1.0)` | Potential force `(q/m) rho E` on the momentum (+ work term if 4 variables). Sets `spec.source="potential"`, `spec.qom=charge`. C++ struct `adc::PotentialForce`. | 3 |
+| `GravityForce` | `adc.GravityForce()` | Gravitational force `rho g` (+ work if 4 variables). Sets `spec.source="gravity"`. C++ struct `adc::GravityForce`. | 3 |
 
-Note : `PotentialForce(charge=...)` nomme le parametre `charge` cote Python mais le reporte dans
-`spec.qom` (rapport charge/masse `q/m`) cote C++.
+Note : `PotentialForce(charge=...)` names the parameter `charge` on the Python side but reports it into
+`spec.qom` (charge/mass ratio `q/m`) on the C++ side.
 
-### Couplages inter-especes (add_coupling)
+### Inter-species couplings (add_coupling)
 
-Les couplages inter-especes ne sont pas des sources `Model(source=)` : ils sont passes a
-`System.add_coupling(...)`, appliques en operator-split apres le transport (pas integres dans le
-RHS du bloc). Ils relient deux blocs (ou trois pour l'ionisation) par leur nom.
+Inter-species couplings are not `Model(source=)` sources : they are passed to
+`System.add_coupling(...)`, applied in operator-split after the transport (not integrated into the
+block's RHS). They link two blocks (or three for ionization) by their name.
 
-| Brique | Signature | Effet | Cible |
+| Brick | Signature | Effect | Target |
 |---|---|---|---|
-| `Ionization` | `adc.Ionization(electron, ion, neutral, rate)` | Ionisation `n_g -> n_i + n_e`, taux `k n_e n_g` ; masse transferee du neutre vers l'ion. Route vers `add_ionization`. | 3 blocs (electron, ion, neutre) |
-| `Collision` | `adc.Collision(a, b, rate)` | Friction inter-especes : force `k (u_a - u_b)`, quantite de mouvement conservee. Route vers `add_collision`. | blocs fluides (>= 3 variables) |
-| `ThermalExchange` | `adc.ThermalExchange(a, b, rate)` | Echange thermique `k (T_a - T_b)`, energie conservee. Route vers `add_thermal_exchange`. | blocs Euler (4 variables) |
+| `Ionization` | `adc.Ionization(electron, ion, neutral, rate)` | Ionization `n_g -> n_i + n_e`, rate `k n_e n_g` ; mass transferred from the neutral to the ion. Routes to `add_ionization`. | 3 blocks (electron, ion, neutral) |
+| `Collision` | `adc.Collision(a, b, rate)` | Inter-species friction : force `k (u_a - u_b)`, momentum conserved. Routes to `add_collision`. | fluid blocks (>= 3 variables) |
+| `ThermalExchange` | `adc.ThermalExchange(a, b, rate)` | Thermal exchange `k (T_a - T_b)`, energy conserved. Routes to `add_thermal_exchange`. | Euler blocks (4 variables) |
 
-`add_coupling` accepte aussi un `dsl.CompiledCoupledSource` (couplage generique decrit en
-formules, transporte en bytecode et interprete cote C++) ; cf. [page modeles](../models/index.md).
+`add_coupling` also accepts a `dsl.CompiledCoupledSource` (generic coupling described in
+formulas, carried as bytecode and interpreted on the C++ side) ; cf. [models page](../models/index.md).
 
-## Second membre elliptique (elliptic)
+## Elliptic right-hand side (elliptic)
 
-La brique elliptique fixe la contribution du bloc au second membre du Poisson de systeme. C'est
-l'argument `elliptic=` de `adc.Model(...)`. Le Poisson de systeme somme les contributions de
-tous les blocs.
+The elliptic brick fixes the block's contribution to the right-hand side of the system Poisson. It is
+the `elliptic=` argument of `adc.Model(...)`. The system Poisson sums the contributions of
+all the blocks.
 
-| Brique | Signature | Contribution au RHS elliptique |
+| Brick | Signature | Contribution to the elliptic RHS |
 |---|---|---|
-| `ChargeDensity` | `adc.ChargeDensity(charge=1.0)` | Densite de charge `f = q n`. Pose `spec.elliptic="charge"`, `spec.q=charge`. Struct C++ `adc::ChargeDensity`. |
-| `BackgroundDensity` | `adc.BackgroundDensity(alpha=1.0, n0=0.0)` | Fond neutralisant `f = alpha (n - n0)`. Pose `spec.elliptic="background"`, `spec.alpha`, `spec.n0`. Struct C++ `adc::BackgroundDensity`. |
-| `GravityCoupling` | `adc.GravityCoupling(sign=1.0, four_pi_G=1.0, rho0=1.0)` | Couplage self-consistant `f = sign 4piG (rho - rho0)` (`sign=+1` gravite, `sign=-1` plasma). Pose `spec.elliptic="gravity"`, `spec.sign`, `spec.four_pi_G`, `spec.rho0`. Struct C++ `adc::GravityCoupling`. |
+| `ChargeDensity` | `adc.ChargeDensity(charge=1.0)` | Charge density `f = q n`. Sets `spec.elliptic="charge"`, `spec.q=charge`. C++ struct `adc::ChargeDensity`. |
+| `BackgroundDensity` | `adc.BackgroundDensity(alpha=1.0, n0=0.0)` | Neutralizing background `f = alpha (n - n0)`. Sets `spec.elliptic="background"`, `spec.alpha`, `spec.n0`. C++ struct `adc::BackgroundDensity`. |
+| `GravityCoupling` | `adc.GravityCoupling(sign=1.0, four_pi_G=1.0, rho0=1.0)` | Self-consistent coupling `f = sign 4piG (rho - rho0)` (`sign=+1` gravity, `sign=-1` plasma). Sets `spec.elliptic="gravity"`, `spec.sign`, `spec.four_pi_G`, `spec.rho0`. C++ struct `adc::GravityCoupling`. |
 
 (briques-epm)=
-### Briques EPM : l'operateur de Poisson est lui-meme composable
+### EPM bricks : the Poisson operator is itself composable
 
-Le modele elliptique (EPM, EllipticPhysicalModel) n'est pas un cas hard-code : c'est une
-composition de briques (inconnue + operateur + second membre + sortie). Le Poisson en est
-l'instance courante. Ces briques se composent via `adc.elliptic(...)` puis se branchent via
+The elliptic model (EPM, EllipticPhysicalModel) is not a hard-coded case : it is a
+composition of bricks (unknown + operator + right-hand side + output). The Poisson is its
+current instance. These bricks compose via `adc.elliptic(...)` then plug in via
 `System.add_elliptic_model(...)`.
 
-| Brique / fabrique | Signature | Role |
+| Brick / factory | Signature | Role |
 |---|---|---|
-| `DivEpsGrad` | `adc.DivEpsGrad(epsilon=1.0)` | Operateur `D = div(eps grad .)`. `eps=1` -> Poisson ; `eps != 1` constant supporte (`eps lap phi = f`). `eps(x)` variable se branche via `set_epsilon_field`. |
-| `div_eps_grad` | `adc.div_eps_grad(epsilon=1.0)` | Fabrique : renvoie un `DivEpsGrad`. |
-| `CompositeRhs` | `adc.CompositeRhs()` | Second membre generique `f = somme_s elliptic_rhs_s(u_s)` : la somme des briques elliptiques portees par les blocs. Ne suppose aucune forme particuliere. |
-| `composite_rhs` | `adc.composite_rhs()` | Fabrique : renvoie un `CompositeRhs`. |
-| `ChargeDensitySource` | `adc.ChargeDensitySource()` (sous-classe de `CompositeRhs`) | Cas usuel : tous les blocs portent une densite de charge, donc `f = somme_s q_s n_s`. Alias historique de `CompositeRhs` (meme calcul, la somme des briques). |
-| `charge_density` | `adc.charge_density()` | Fabrique : renvoie un `ChargeDensitySource`. |
-| `ElectricFieldFromPotential` | `adc.ElectricFieldFromPotential()` | Sortie / post-traitement `E = -grad phi`, reinjecte dans l'`aux` des modeles hyperboliques. |
-| `electric_field_from_potential` | `adc.electric_field_from_potential()` | Fabrique : renvoie un `ElectricFieldFromPotential`. |
-| `EllipticModel` | `adc.EllipticModel(unknown, operator, rhs, output)` | Porte les 4 slots de l'EPM (inconnue + operateur + second membre + sortie). |
-| `elliptic` | `adc.elliptic(unknown="phi", operator=None, rhs=None, output=None)` | Compose un EPM. Defauts : `operator=DivEpsGrad()`, `rhs=CompositeRhs()`, `output=ElectricFieldFromPotential()`. |
-| `EllipticSolver` | `adc.EllipticSolver(kind="geometric_mg")` | Choix du solveur : `"geometric_mg"` (tout cas, parois) ou `"fft"` (periodique, `n = 2^k`). |
+| `DivEpsGrad` | `adc.DivEpsGrad(epsilon=1.0)` | Operator `D = div(eps grad .)`. `eps=1` -> Poisson ; `eps != 1` constant supported (`eps lap phi = f`). Variable `eps(x)` plugs in via `set_epsilon_field`. |
+| `div_eps_grad` | `adc.div_eps_grad(epsilon=1.0)` | Factory : returns a `DivEpsGrad`. |
+| `CompositeRhs` | `adc.CompositeRhs()` | Generic right-hand side `f = sum_s elliptic_rhs_s(u_s)` : the sum of the elliptic bricks carried by the blocks. Assumes no particular form. |
+| `composite_rhs` | `adc.composite_rhs()` | Factory : returns a `CompositeRhs`. |
+| `ChargeDensitySource` | `adc.ChargeDensitySource()` (subclass of `CompositeRhs`) | Usual case : all the blocks carry a charge density, so `f = sum_s q_s n_s`. Historical alias of `CompositeRhs` (same computation, the sum of the bricks). |
+| `charge_density` | `adc.charge_density()` | Factory : returns a `ChargeDensitySource`. |
+| `ElectricFieldFromPotential` | `adc.ElectricFieldFromPotential()` | Output / post-processing `E = -grad phi`, reinjected into the `aux` of the hyperbolic models. |
+| `electric_field_from_potential` | `adc.electric_field_from_potential()` | Factory : returns an `ElectricFieldFromPotential`. |
+| `EllipticModel` | `adc.EllipticModel(unknown, operator, rhs, output)` | Carries the 4 slots of the EPM (unknown + operator + right-hand side + output). |
+| `elliptic` | `adc.elliptic(unknown="phi", operator=None, rhs=None, output=None)` | Composes an EPM. Defaults : `operator=DivEpsGrad()`, `rhs=CompositeRhs()`, `output=ElectricFieldFromPotential()`. |
+| `EllipticSolver` | `adc.EllipticSolver(kind="geometric_mg")` | Solver choice : `"geometric_mg"` (any case, walls) or `"fft"` (periodic, `n = 2^k`). |
 
-Le Poisson canonique s'ecrit donc :
+The canonical Poisson is thus written :
 
 ```python
 poisson = adc.elliptic(
@@ -119,12 +119,12 @@ poisson = adc.elliptic(
 ```
 
 `System.add_elliptic_model(name, model, solver=None, bc="auto", wall="none", wall_radius=0.0)`
-cable cet EPM : il valide que `operator` est un `DivEpsGrad` (sinon `NotImplementedError` :
-seul `div_eps_grad` est supporte, diffusion / projection demanderaient un autre solveur) et que
-`rhs` est un `CompositeRhs` (sinon `NotImplementedError`), puis forwarde a `set_poisson(...)`.
-Le token de second membre est `"charge_density"` quand `rhs` est exactement un
-`ChargeDensitySource`, sinon `"composite"` (memes numeriques C++ : la somme des briques
-elliptiques par bloc). `add_elliptic_model(...)` est donc la forme explicite de `set_poisson` :
+wires this EPM : it validates that `operator` is a `DivEpsGrad` (otherwise `NotImplementedError` :
+only `div_eps_grad` is supported, diffusion / projection would require another solver) and that
+`rhs` is a `CompositeRhs` (otherwise `NotImplementedError`), then forwards to `set_poisson(...)`.
+The right-hand side token is `"charge_density"` when `rhs` is exactly a
+`ChargeDensitySource`, otherwise `"composite"` (same C++ numerics : the sum of the elliptic
+bricks per block). `add_elliptic_model(...)` is thus the explicit form of `set_poisson` :
 
 ```python
 # ces deux appels sont equivalents (memes numeriques) :
@@ -140,16 +140,16 @@ sim.add_elliptic_model(
 )
 ```
 
-## Composer un modele
+## Composing a model
 
-`adc.Model(state, transport, source, elliptic)` renvoie une `ModelSpec` (l'objet modele 100 %
-natif, consomme par `add_block` / `add_equation`). La validation des quatre roles :
+`adc.Model(state, transport, source, elliptic)` returns a `ModelSpec` (the 100 %
+native model object, consumed by `add_block` / `add_equation`). The validation of the four roles :
 
-- `state` doit etre `Scalar` ou `FluidState(...)` (sinon `ValueError`) ;
-- la coherence etat <-> transport est imposee : `Scalar` exige `ExB` ; `FluidState(compressible)`
-  exige `CompressibleFlux` ; `FluidState(isothermal)` exige `IsothermalFlux` ;
-- `source` doit etre `NoSource` / `PotentialForce` / `GravityForce` ;
-- `elliptic` doit etre `ChargeDensity` / `BackgroundDensity` / `GravityCoupling`.
+- `state` must be `Scalar` or `FluidState(...)` (otherwise `ValueError`) ;
+- the state <-> transport coherence is imposed : `Scalar` requires `ExB` ; `FluidState(compressible)`
+  requires `CompressibleFlux` ; `FluidState(isothermal)` requires `IsothermalFlux` ;
+- `source` must be `NoSource` / `PotentialForce` / `GravityForce` ;
+- `elliptic` must be `ChargeDensity` / `BackgroundDensity` / `GravityCoupling`.
 
 ```python
 model = adc.Model(
@@ -160,19 +160,19 @@ model = adc.Model(
 )
 ```
 
-### CompositeModel : modele hybride natif + DSL
+### CompositeModel : hybrid native + DSL model
 
-`adc.CompositeModel(transport, source, elliptic, name="hybrid")` melange, dans un seul modele,
-des briques natives (`adc.ExB`, `adc.PotentialForce`, `adc.ChargeDensity`...) et des briques DSL
-partielles compilees (`adc.dsl.HyperbolicBrick(...).compile()`, `SourceBrick`, `EllipticBrick`).
-Chaque slot accepte soit une brique native, soit une brique DSL compilee.
+`adc.CompositeModel(transport, source, elliptic, name="hybrid")` mixes, in a single model,
+native bricks (`adc.ExB`, `adc.PotentialForce`, `adc.ChargeDensity`...) and partial compiled DSL
+bricks (`adc.dsl.HyperbolicBrick(...).compile()`, `SourceBrick`, `EllipticBrick`).
+Each slot accepts either a native brick or a compiled DSL brick.
 
-- Au moins un slot doit etre une brique DSL : une composition tout-native s'ecrit avec
-  `adc.Model(...)` (sinon `CompositeModel` leve une `ValueError`).
-- Une brique placee dans le mauvais slot leve une `ValueError` (le slot est verifie).
-- `CompositeModel(...)` renvoie un `dsl.HybridModel` ; on appelle `.compile(backend="aot")` pour
-  un `CompiledModel` branchable via `System.add_equation`. Prototype : seul `backend="aot"` est
-  cable.
+- At least one slot must be a DSL brick : an all-native composition is written with
+  `adc.Model(...)` (otherwise `CompositeModel` raises a `ValueError`).
+- A brick placed in the wrong slot raises a `ValueError` (the slot is checked).
+- `CompositeModel(...)` returns a `dsl.HybridModel` ; you call `.compile(backend="aot")` for
+  a `CompiledModel` pluggable via `System.add_equation`. Prototype : only `backend="aot"` is
+  wired.
 
 ```python
 m = adc.CompositeModel(
@@ -186,17 +186,17 @@ sim.add_equation("gas", compiled,
                  names=["rho", "rho_u", "rho_v"])
 ```
 
-Le slot transport fixe le layout (`n_vars`, noms conservatifs, primitives, gamma) ; une brique
-DSL de source / elliptique doit declarer le meme `n_vars`. Detail : [page modeles](../models/index.md).
+The transport slot fixes the layout (`n_vars`, conservative names, primitives, gamma) ; a source / elliptic
+DSL brick must declare the same `n_vars`. Detail : [models page](../models/index.md).
 
-### PythonFlux : flux ecrit en Python (prototypage hote)
+### PythonFlux : flux written in Python (host prototyping)
 
-`adc.PythonFlux(flux, max_wave_speed)` est un backend de prototypage : l'utilisateur fournit le flux
-physique `flux(U, dir)` et la vitesse d'onde `max_wave_speed(U)` en numpy, et `PythonFlux` assemble le
-residu `-div(F*)` par flux de Rusanov (ordre 1, domaine periodique) sur tout le tableau. C'est un
-chemin hote pur (jamais un kernel Kokkos), hors du hot path GPU / MPI ; il sert a iterer sur un flux
-inedit sans recompiler (motif du cas `custom_scheme`, avec `adc.System` comme oracle de Poisson). Pour
-la production, composer un flux compile (`adc.CompressibleFlux`, `adc.ExB`, ou un modele DSL).
+`adc.PythonFlux(flux, max_wave_speed)` is a prototyping backend : the user provides the physical flux
+`flux(U, dir)` and the wave speed `max_wave_speed(U)` in numpy, and `PythonFlux` assembles the
+residual `-div(F*)` by Rusanov flux (order 1, periodic domain) over the whole array. It is a
+pure host path (never a Kokkos kernel), outside the GPU / MPI hot path ; it serves to iterate on a novel flux
+without recompiling (pattern of the `custom_scheme` case, with `adc.System` as Poisson oracle). For
+production, compose a compiled flux (`adc.CompressibleFlux`, `adc.ExB`, or a DSL model).
 
 ```python
 import adc
@@ -205,24 +205,24 @@ dUdt = pf.residual(U, dx)              # -div(F*) par Rusanov ordre 1, periodiqu
 dt = pf.cfl_dt(U, h, cfl=0.4)          # dt = cfl * h / max_wave_speed(U)
 ```
 
-## Schemas spatiaux (Spatial / FiniteVolume)
+## Spatial schemes (Spatial / FiniteVolume)
 
-Le schema spatial est porte par le bloc (argument `spatial=` de `add_block` / `add_equation`),
-non par le modele. Il combine reconstruction (limiteur) + flux numerique de Riemann + variables
-reconstruites.
+The spatial scheme is carried by the block (`spatial=` argument of `add_block` / `add_equation`),
+not by the model. It combines reconstruction (limiter) + Riemann numerical flux + reconstructed
+variables.
 
 `adc.Spatial(limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
 minmod=False, vanleer=False, weno5=False, primitive=False)` :
 
-| Argument | Valeurs | Detail |
+| Argument | Values | Detail |
 |---|---|---|
-| `limiter` | `"none"`, `"minmod"`, `"vanleer"`, `"weno5"` | Reconstruction MUSCL (none / minmod / vanleer, 2 ghosts) ou WENO5-Z. `weno5` = ordre 5 en zone lisse, stencil 5 points -> 3 ghosts ; seul le chemin natif `add_block` (et les backends `aot` / `production` / AMR) l'exposent ; le backend `prototype` (JIT) le rejette. Raccourcis booleens `none=` / `minmod=` / `vanleer=` / `weno5=`. |
-| `flux` | `"rusanov"`, `"hll"`, `"hllc"`, `"roe"` | Flux numerique de Riemann. `rusanov` = generique minimal (seul `max_wave_speed` requis). `hll` = generique a ondes signees : exige `model.wave_speeds` (modele natif isotherme / compressible, ou modele DSL avec primitive `p` declaree) ; c'est le chemin recommande pour un modele NON Euler a ondes signees (`hll` + `minmod`). `hllc` / `roe` = **Euler 2D seulement** (4 variables + pression gaz parfait) ; ils exigent un transport compressible et une primitive `p` declaree (sur un modele compile) ; sans `p`, le branchement leve une `ValueError`. |
-| `recon` | `"conservative"`, `"primitive"` | Variables reconstruites. `primitive` est plus stable pour Euler (positivite de `rho` et `p`). Raccourci `primitive=`. |
+| `limiter` | `"none"`, `"minmod"`, `"vanleer"`, `"weno5"` | MUSCL reconstruction (none / minmod / vanleer, 2 ghosts) or WENO5-Z. `weno5` = order 5 in smooth zone, 5-point stencil -> 3 ghosts ; only the native `add_block` path (and the `aot` / `production` / AMR backends) expose it ; the `prototype` backend (JIT) rejects it. Boolean shortcuts `none=` / `minmod=` / `vanleer=` / `weno5=`. |
+| `flux` | `"rusanov"`, `"hll"`, `"hllc"`, `"roe"` | Riemann numerical flux. `rusanov` = minimal generic (only `max_wave_speed` required). `hll` = generic with signed waves : requires `model.wave_speeds` (native isothermal / compressible model, or DSL model with primitive `p` declared) ; it is the recommended path for a NON Euler model with signed waves (`hll` + `minmod`). `hllc` / `roe` = **2D Euler only** (4 variables + perfect gas pressure) ; they require a compressible transport and a primitive `p` declared (on a compiled model) ; without `p`, the wiring raises a `ValueError`. |
+| `recon` | `"conservative"`, `"primitive"` | Reconstructed variables. `primitive` is more stable for Euler (positivity of `rho` and `p`). Shortcut `primitive=`. |
 
-`adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")` est la fabrique
-de surface stable : elle remappe sur `adc.Spatial`. Le flux numerique s'y nomme `riemann` (et non
-`flux`, reserve au flux physique du modele DSL `m.flux`, pour ne pas collisionner les deux sens) :
+`adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")` is the stable
+surface factory : it remaps onto `adc.Spatial`. The numerical flux is named `riemann` there (and not
+`flux`, reserved for the physical flux of the DSL model `m.flux`, so as not to collide the two senses) :
 
 | `FiniteVolume(...)` | -> | `Spatial(...)` |
 |---|---|---|
@@ -230,183 +230,183 @@ de surface stable : elle remappe sur `adc.Spatial`. Le flux numerique s'y nomme 
 | `riemann` | -> | `Spatial.flux` |
 | `variables` | -> | `Spatial.recon` |
 
-`FiniteVolume(...)` renvoie un `Spatial` (consomme tel quel) ; `adc.Spatial` reste disponible a
-l'identique.
+`FiniteVolume(...)` returns a `Spatial` (consumed as is) ; `adc.Spatial` stays available
+identically.
 
 ```{note}
-Les seuls limiteurs existants sont none / minmod / vanleer / weno5 ; aucun autre limiteur n'est
-expose.
+The only existing limiters are none / minmod / vanleer / weno5 ; no other limiter is
+exposed.
 ```
 
-## Traitement temporel (time)
+## Temporal treatment (time)
 
-Le traitement temporel est porte par le bloc (argument `time=`), pas par le modele : le meme
-modele se reutilise avec des politiques distinctes.
+The temporal treatment is carried by the block (`time=` argument), not by the model : the same
+model is reused with distinct policies.
 
-| Brique | Signature | Detail |
+| Brick | Signature | Detail |
 |---|---|---|
-| `Explicit` | `adc.Explicit(substeps=1, method="ssprk2", stride=1, *, ssprk3=False)` | Integration explicite. `method="ssprk2"` (Shu-Osher 2 etages ordre 2, defaut bit-identique) ou `"ssprk3"` (3 etages ordre 3, moins dissipatif, a apparier a weno5) ; raccourci `ssprk3=True`. Expose `.kind` = `"explicit"` ou `"ssprk3"`. |
-| `IMEX` | `adc.IMEX(substeps=1, stride=1, implicit_vars=None, implicit_roles=None)` | Transport explicite (SSPRK) + source raide implicite (backward-Euler, Newton cellule-local). Pas un solveur implicite global PDE. `kind="imex"`. |
-| `SourceImplicit` | `adc.SourceImplicit(substeps=1, stride=1, implicit_vars=None, implicit_roles=None)` | Nom clair du schema IMEX source-only ; `kind="imex"` (meme chemin C++ que `IMEX`, bit-identique). La doc contraste local (cette brique) vs global (`CondensedSchur`). |
-| `Implicit` | `adc.Implicit(dt_ratio=1, substeps=None, stride=1)` | Obsolete : alias d'`IMEX`. Emet un `DeprecationWarning` (le nom suggere a tort un solveur implicite global) et renvoie un `IMEX(...)`. Utiliser `SourceImplicit` / `IMEX`. |
-| `Split` | `adc.Split(hyperbolic=None, source=None)` | Politique de splitting explicite / implicite : etage transport `adc.Explicit` (defaut `Explicit()`) + etage source separe `adc.CondensedSchur` (requis). `scheme="lie"` (Godunov, 1er ordre). Relaie `kind` / `method` / `substeps` / `stride` de l'etage hyperbolique. Cable uniquement par `add_equation` (rejete par `add_block`). |
-| `Strang` | `adc.Strang(hyperbolic=None, source=None)` | Sous-classe de `Split` : splitting de Strang (symetrique, 2e ordre) `H(dt/2); S(dt); H(dt/2)`. Pose `scheme="strang"` ; re-resout les champs entre les etages. |
-| `CondensedSchur` | voir ci-dessous | Etage source condense par Schur (global). C'est le `source=` d'un `Split` / `Strang`. |
-| `Role` | constantes | Roles physiques : `Density`, `MomentumX`, `MomentumY`, `MomentumZ`, `Energy`, `VelocityX/Y/Z`, `Pressure`, `Temperature`, `Scalar` (cles stables snake_case). Sert dans `CondensedSchur` et les masques IMEX. |
+| `Explicit` | `adc.Explicit(substeps=1, method="ssprk2", stride=1, *, ssprk3=False)` | Explicit integration. `method="ssprk2"` (Shu-Osher 2-stage order 2, bit-identical default) or `"ssprk3"` (3-stage order 3, less dissipative, to pair with weno5) ; shortcut `ssprk3=True`. Exposes `.kind` = `"explicit"` or `"ssprk3"`. |
+| `IMEX` | `adc.IMEX(substeps=1, stride=1, implicit_vars=None, implicit_roles=None)` | Explicit transport (SSPRK) + implicit stiff source (backward-Euler, cell-local Newton). Not a global implicit PDE solver. `kind="imex"`. |
+| `SourceImplicit` | `adc.SourceImplicit(substeps=1, stride=1, implicit_vars=None, implicit_roles=None)` | Clear name of the source-only IMEX scheme ; `kind="imex"` (same C++ path as `IMEX`, bit-identical). The doc contrasts local (this brick) vs global (`CondensedSchur`). |
+| `Implicit` | `adc.Implicit(dt_ratio=1, substeps=None, stride=1)` | Obsolete : alias of `IMEX`. Emits a `DeprecationWarning` (the name wrongly suggests a global implicit solver) and returns an `IMEX(...)`. Use `SourceImplicit` / `IMEX`. |
+| `Split` | `adc.Split(hyperbolic=None, source=None)` | Explicit / implicit splitting policy : transport stage `adc.Explicit` (default `Explicit()`) + separate source stage `adc.CondensedSchur` (required). `scheme="lie"` (Godunov, 1st order). Relays `kind` / `method` / `substeps` / `stride` of the hyperbolic stage. Wired only by `add_equation` (rejected by `add_block`). |
+| `Strang` | `adc.Strang(hyperbolic=None, source=None)` | Subclass of `Split` : Strang splitting (symmetric, 2nd order) `H(dt/2); S(dt); H(dt/2)`. Sets `scheme="strang"` ; re-solves the fields between the stages. |
+| `CondensedSchur` | see below | Schur-condensed source stage (global). It is the `source=` of a `Split` / `Strang`. |
+| `Role` | constants | Physical roles : `Density`, `MomentumX`, `MomentumY`, `MomentumZ`, `Energy`, `VelocityX/Y/Z`, `Pressure`, `Temperature`, `Scalar` (stable snake_case keys). Serves in `CondensedSchur` and the IMEX masks. |
 
-### CondensedSchur (etage source global)
+### CondensedSchur (global source stage)
 
 `adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0, density=Role.Density,
 momentum=(Role.MomentumX, Role.MomentumY), energy=None, magnetic_field="B_z", potential="phi")`
-est l'etage source condense de Schur (Hoffart et al., arXiv:2510.11808). Il assemble l'operateur
-elliptique condense `A = I + theta^2 dt^2 alpha rho B^{-1}`, le resout (BiCGStab preconditionne
-MG) et reconstruit la vitesse. Tout est C++ (aucun callback Python par cellule).
+is the Schur-condensed source stage (Hoffart et al., arXiv:2510.11808). It assembles the condensed
+elliptic operator `A = I + theta^2 dt^2 alpha rho B^{-1}`, solves it (preconditioned BiCGStab
+MG) and reconstructs the velocity. Everything is C++ (no per-cell Python callback).
 
-| Parametre | Contrainte |
+| Parameter | Constraint |
 |---|---|
-| `kind` | seul `"electrostatic_lorentz"` (toute autre valeur leve une `ValueError`). |
-| `theta` | theta-schema dans `(0, 1]` (`0.5` Crank-Nicolson, `1` Euler retrograde). |
-| `alpha` | constante de couplage electrostatique du sous-systeme source. |
-| `density` / `momentum` / `energy` / `magnetic_field` / `potential` | Descripteurs de roles / champs. Tous rejetes s'ils s'ecartent du defaut : l'etage source C++ fige en dur les roles `Density` / `MomentumX` / `MomentumY` (`Energy` optionnel) et les champs `B_z` / `phi`. La signature est gardee pour quand le C++ les transportera, mais un descripteur different leve une `ValueError` (rejet plutot qu'ignore silencieux). |
+| `kind` | only `"electrostatic_lorentz"` (any other value raises a `ValueError`). |
+| `theta` | theta-scheme in `(0, 1]` (`0.5` Crank-Nicolson, `1` backward Euler). |
+| `alpha` | electrostatic coupling constant of the source subsystem. |
+| `density` / `momentum` / `energy` / `magnetic_field` / `potential` | Role / field descriptors. All rejected if they depart from the default : the C++ source stage hard-fixes the roles `Density` / `MomentumX` / `MomentumY` (`Energy` optional) and the fields `B_z` / `phi`. The signature is kept for when the C++ will carry them, but a different descriptor raises a `ValueError` (rejection rather than silent ignore). |
 
-`CondensedSchur` exige du bloc les roles `Density` / `MomentumX` / `MomentumY` et un champ `B_z`
-(`set_magnetic_field`) ; un role / `B_z` manquant leve une erreur explicite a `add_equation`. Il
-est cable en cartesien et en polaire ; le pendant polaire est mono-rang (`n_ranks > 1` leve).
+`CondensedSchur` requires from the block the roles `Density` / `MomentumX` / `MomentumY` and a `B_z` field
+(`set_magnetic_field`) ; a missing role / `B_z` raises an explicit error at `add_equation`. It
+is wired in cartesian and in polar ; the polar counterpart is single-rank (`n_ranks > 1` raises).
 
-### Multirate : substeps et stride
+### Multirate : substeps and stride
 
-`substeps` et `stride` sont orthogonaux (valables sur `Explicit` / `IMEX` / `SourceImplicit`) :
+`substeps` and `stride` are orthogonal (valid on `Explicit` / `IMEX` / `SourceImplicit`) :
 
-- `substeps=N` : le bloc avance N fois par macro-pas, chaque sous-pas de longueur `dt/N`
-  (electrons rapides : `substeps=10`). Defaut 1 = bit-identique a l'historique.
-- `stride=M` : cadence hold-then-catch-up (rattrapage en fin de fenetre). Le bloc est tenu tant
-  que `(macro_step + 1) % M != 0`, puis avance d'un pas effectif `M dt` quand
-  `(macro_step + 1) % M == 0` (bloc lent, p.ex. neutres : `stride=20`). Entre deux rattrapages, son
-  etat perime (derniere densite / charge avancee, figee) contribue quand meme au Poisson de
-  systeme et aux sources couplees. `step_cfl` honore la cadence : `dt <= cfl h substeps / (stride w)`.
+- `substeps=N` : the block advances N times per macro-step, each substep of length `dt/N`
+  (fast electrons : `substeps=10`). Default 1 = bit-identical to the history.
+- `stride=M` : hold-then-catch-up cadence (catch-up at window end). The block is held as long as
+  `(macro_step + 1) % M != 0`, then advances by an effective step `M dt` when
+  `(macro_step + 1) % M == 0` (slow block, e.g. neutrals : `stride=20`). Between two catch-ups, its
+  stale state (last advanced density / charge, frozen) still contributes to the system Poisson and to
+  the coupled sources. `step_cfl` honors the cadence : `dt <= cfl h substeps / (stride w)`.
 
-### Masque IMEX (implicit_vars / implicit_roles)
+### IMEX mask (implicit_vars / implicit_roles)
 
-`implicit_vars` (noms de variables conservees) et `implicit_roles` (roles physiques, normalises
-en cles stables via `Role`) listent les composantes traitees en implicite dans le pas de source ;
-le reste reste explicite. Le masque est porte par la politique temporelle / le bloc, pas par le
-modele -> le meme modele se reutilise avec des traitements implicites distincts. Defaut `[]`
-(union vide) = defaut du modele, bit-identique. La resolution noms / roles -> indices et la
-validation (nom / role absent du bloc) sont C++-side (source unique de verite). Une chaine seule
-est toleree (`implicit_vars="rho_u"` -> `["rho_u"]`).
+`implicit_vars` (conserved variable names) and `implicit_roles` (physical roles, normalized
+into stable keys via `Role`) list the components treated implicitly in the source step ;
+the rest stays explicit. The mask is carried by the temporal policy / the block, not by the
+model -> the same model is reused with distinct implicit treatments. Default `[]`
+(empty union) = model default, bit-identical. The names / roles -> indices resolution and the
+validation (name / role absent from the block) are C++-side (single source of truth). A bare string
+is tolerated (`implicit_vars="rho_u"` -> `["rho_u"]`).
 
-### Garde-fous par backend
+### Per-backend safeguards
 
-| Chemin | Stride > 1 | evolve=False | weno5 | flux non-rusanov | masque IMEX |
+| Path | Stride > 1 | evolve=False | weno5 | non-rusanov flux | IMEX mask |
 |---|---|---|---|---|---|
-| `add_block` natif (`ModelSpec`) | supporte | supporte | supporte | supporte | supporte |
-| `add_equation` backend `production` | supporte | supporte | supporte | supporte | rejete (`.so` natif) |
-| `add_equation` backend `aot` | rejete | rejete | supporte | supporte | rejete |
-| `add_equation` backend `prototype` | (substeps seul) | rejete | rejete | rejete (rusanov seul) | rejete |
+| native `add_block` (`ModelSpec`) | supported | supported | supported | supported | supported |
+| `add_equation` `production` backend | supported | supported | supported | supported | rejected (native `.so`) |
+| `add_equation` `aot` backend | rejected | rejected | supported | supported | rejected |
+| `add_equation` `prototype` backend | (substeps only) | rejected | rejected | rejected (rusanov only) | rejected |
 
-Les rejets sont explicites (`ValueError`), jamais un ignore silencieux : l'ABI `.so` de ces
-backends ne transporte pas l'argument concerne (cadence, `evolve`, masque), donc le bloc
-tournerait a la valeur par defaut sans le dire. `Split` / `Strang` sont rejetes par `add_block`
-(seul `add_equation` branche l'etage source `set_source_stage`).
+The rejections are explicit (`ValueError`), never a silent ignore : the `.so` ABI of these
+backends does not carry the argument concerned (cadence, `evolve`, mask), so the block
+would run at the default value without saying so. `Split` / `Strang` are rejected by `add_block`
+(only `add_equation` wires the source stage `set_source_stage`).
 
-## Maillage (mesh)
+## Mesh (mesh)
 
-Le choix de la geometrie vit dans un objet maillage passe en `mesh=` a `adc.System(...)`, pas
-dans le schema (`adc.FiniteVolume` reste reconstruction + Riemann + variables, sans argument de
-geometrie). Le maillage est applique apres `**cfg_kw`, donc `mesh=` prevaut sur les `n=` / `L=`
-passes en mots-cles.
+The choice of geometry lives in a mesh object passed as `mesh=` to `adc.System(...)`, not
+in the scheme (`adc.FiniteVolume` stays reconstruction + Riemann + variables, without a geometry
+argument). The mesh is applied after `**cfg_kw`, so `mesh=` prevails over the `n=` / `L=`
+passed as keywords.
 
-| Brique | Signature | Effet |
+| Brick | Signature | Effect |
 |---|---|---|
-| `CartesianMesh` | `adc.CartesianMesh(n=64, L=1.0, periodic=True)` | Domaine carre `[0, L]^2`, `n x n` cellules (defaut implicite). `adc.System(mesh=adc.CartesianMesh(n, L, periodic))` est strictement equivalent (bit-identique) a `adc.System(n=n, L=L, periodic=periodic)`. Pose `config.geometry="cartesian"`, `n`, `L`, `periodic`. |
-| `PolarMesh` | `adc.PolarMesh(r_min, r_max, nr, ntheta)` | Anneau global `r in [r_min, r_max] x theta in [0, 2pi)`, `nr x ntheta` cellules. theta periodique, r porte une condition aux limites physique (direction 0 = radiale, 1 = azimutale). Pose `config.geometry="polar"`, `nr`, `ntheta`, `r_min`, `r_max`, et `config.n = nr` (taille par defaut des diagnostics). |
+| `CartesianMesh` | `adc.CartesianMesh(n=64, L=1.0, periodic=True)` | Square domain `[0, L]^2`, `n x n` cells (implicit default). `adc.System(mesh=adc.CartesianMesh(n, L, periodic))` is strictly equivalent (bit-identical) to `adc.System(n=n, L=L, periodic=periodic)`. Sets `config.geometry="cartesian"`, `n`, `L`, `periodic`. |
+| `PolarMesh` | `adc.PolarMesh(r_min, r_max, nr, ntheta)` | Global ring `r in [r_min, r_max] x theta in [0, 2pi)`, `nr x ntheta` cells. theta periodic, r carries a physical boundary condition (direction 0 = radial, 1 = azimutal). Sets `config.geometry="polar"`, `nr`, `ntheta`, `r_min`, `r_max`, and `config.n = nr` (default size of the diagnostics). |
 
-Validation de `PolarMesh` : `r_max > r_min >= 0` (sinon `ValueError`), `nr >= 3` (le stencil
-radial decentre d'ordre 2 aux parois lirait `phi` hors bornes sinon), `ntheta >= 1`.
+`PolarMesh` validation : `r_max > r_min >= 0` (otherwise `ValueError`), `nr >= 3` (the order-2 upwind radial
+stencil at the walls would otherwise read `phi` out of bounds), `ntheta >= 1`.
 
-Limites du chemin polaire (Phase 2b, branche dans `System.step` : transport polaire + Poisson
-polaire + aux en base locale `e_r` / `e_theta`) : transport ExB scalaire seulement (limiter /
-riemann fluides leves cote C++), mono-rang (le solveur polaire direct refuse MPI), pas de couplage
-cartesien <-> polaire (anneau global).
+Limits of the polar path (Phase 2b, wired in `System.step` : polar transport + polar Poisson
++ aux in local basis `e_r` / `e_theta`) : scalar ExB transport only (fluid limiter / riemann raised on
+the C++ side), single-rank (the direct polar solver refuses MPI), no cartesian <-> polar coupling (global
+ring).
 
-### Champs de configuration
+### Configuration fields
 
-`SystemConfig` (champs readwrite) : `n`, `L`, `periodic`, `geometry`, `nr`, `ntheta`, `r_min`,
+`SystemConfig` (readwrite fields) : `n`, `L`, `periodic`, `geometry`, `nr`, `ntheta`, `r_min`,
 `r_max`.
 
-`AmrSystemConfig` (champs readwrite) : `n`, `L`, `regrid_every`, `periodic`, `distribute_coarse`,
-`coarse_max_grid`. `regrid_every == 0` -> hierarchie figee (regrid jamais appele, bit-identique).
+`AmrSystemConfig` (readwrite fields) : `n`, `L`, `regrid_every`, `periodic`, `distribute_coarse`,
+`coarse_max_grid`. `regrid_every == 0` -> frozen hierarchy (regrid never called, bit-identical).
 
-## System / AmrSystem : methodes
+## System / AmrSystem : methods
 
-Le wrapper Python definit quelques methodes (composition, primitives, EPM, disque) ; tout le
-reste est delegue a la facade C++ compilee via `__getattr__`. Reference compacte.
+The Python wrapper defines a few methods (composition, primitives, EPM, disc) ; all the
+rest is delegated to the compiled C++ facade via `__getattr__`. Compact reference.
 
 ### System
 
-| Methode | Signature | Role |
+| Method | Signature | Role |
 |---|---|---|
-| `add_block` | `add_block(name, model, spatial=None, time=None, evolve=True)` | Ajoute un bloc a partir d'une `ModelSpec`. Defauts `Spatial()` / `Explicit()`. Rejette `Split` / `Strang` (utiliser `add_equation`). |
-| `add_equation` | `add_equation(name, model, spatial=None, time=None, substeps=None, names=None, evolve=True, stride=None)` | Aiguille sur le type : `ModelSpec` -> `add_block` ; `CompiledModel` -> l'adder du backend (`add_dynamic_block` prototype / `add_compiled_block` aot / `add_native_block` production) ; gere `Split` / `Strang` (etage hyperbolique puis `set_source_stage` + `set_time_scheme`). Applique les garde-fous backend. |
-| `run` | `run(t_end, cfl=0.4, max_steps=1_000_000)` | Sucre `while time() < t_end: step_cfl(cfl)` ; renvoie le nombre de pas. |
-| `add_background` | `add_background(name, model, density, spatial=None)` | Espece gelee = `add_block(evolve=False)` + `set_density`. |
-| `add_elliptic_model` | `add_elliptic_model(name, model, solver=None, bc="auto", wall="none", wall_radius=0.0)` | Cable un EPM (valide `DivEpsGrad` + `CompositeRhs`) ; forwarde a `set_poisson`. |
-| `set_disc_domain` | `set_disc_domain(cx, cy, R, mode="none")` | Domaine de transport en disque ; `mode` : `"none"` (masque pose, transport plein cartesien, bit-identique) / `"staircase"` (transport masque conservatif) / `"cutcell"` (cut-cell / embedded-boundary). Cartesien seulement. |
-| `set_geometry_mode` | `set_geometry_mode(mode)` | Bascule le mode de transport disque sans redefinir le disque. |
-| `disc_mask` | `disc_mask()` | Masque 0/1 cellule-centre `(ny, nx)` (diagnostic). |
-| `add_coupling` | `add_coupling(coupling)` | Route `Ionization` / `Collision` / `ThermalExchange` ou un `CompiledCoupledSource`. |
-| `block_names` | `block_names()` | Noms des blocs dans l'ordre (inclut les blocs dynamiques / compiles). |
-| `set_primitive_state` | `set_primitive_state(name, **prims)` | Initialise un bloc depuis ses primitives nommees (`rho` / `u` / `v` / `p`), assemblees `(ncomp, n, n)` dans l'ordre du modele, converties en conservatif cote C++. |
-| `get_primitive_state` | `get_primitive_state(name)` | Inverse : renvoie un dict `{nom_primitive: (n, n)}`. |
-| `abi_key` | `System.abi_key()` (statique) | Cle d'ABI du module. |
+| `add_block` | `add_block(name, model, spatial=None, time=None, evolve=True)` | Adds a block from a `ModelSpec`. Defaults `Spatial()` / `Explicit()`. Rejects `Split` / `Strang` (use `add_equation`). |
+| `add_equation` | `add_equation(name, model, spatial=None, time=None, substeps=None, names=None, evolve=True, stride=None)` | Switches on the type : `ModelSpec` -> `add_block` ; `CompiledModel` -> the backend's adder (`add_dynamic_block` prototype / `add_compiled_block` aot / `add_native_block` production) ; handles `Split` / `Strang` (hyperbolic stage then `set_source_stage` + `set_time_scheme`). Applies the backend safeguards. |
+| `run` | `run(t_end, cfl=0.4, max_steps=1_000_000)` | Sugar `while time() < t_end: step_cfl(cfl)` ; returns the number of steps. |
+| `add_background` | `add_background(name, model, density, spatial=None)` | Frozen species = `add_block(evolve=False)` + `set_density`. |
+| `add_elliptic_model` | `add_elliptic_model(name, model, solver=None, bc="auto", wall="none", wall_radius=0.0)` | Wires an EPM (validates `DivEpsGrad` + `CompositeRhs`) ; forwards to `set_poisson`. |
+| `set_disc_domain` | `set_disc_domain(cx, cy, R, mode="none")` | Disc transport domain ; `mode` : `"none"` (mask set, full cartesian transport, bit-identical) / `"staircase"` (conservative masked transport) / `"cutcell"` (cut-cell / embedded-boundary). Cartesian only. |
+| `set_geometry_mode` | `set_geometry_mode(mode)` | Switches the disc transport mode without redefining the disc. |
+| `disc_mask` | `disc_mask()` | Cell-centered 0/1 mask `(ny, nx)` (diagnostic). |
+| `add_coupling` | `add_coupling(coupling)` | Routes `Ionization` / `Collision` / `ThermalExchange` or a `CompiledCoupledSource`. |
+| `block_names` | `block_names()` | Block names in order (includes dynamic / compiled blocks). |
+| `set_primitive_state` | `set_primitive_state(name, **prims)` | Initializes a block from its named primitives (`rho` / `u` / `v` / `p`), assembled `(ncomp, n, n)` in the model's order, converted to conservative on the C++ side. |
+| `get_primitive_state` | `get_primitive_state(name)` | Inverse : returns a dict `{nom_primitive: (n, n)}`. |
+| `abi_key` | `System.abi_key()` (static) | Module ABI key. |
 
-Methodes de la facade C++ atteintes par `__getattr__` (avec defauts) :
+C++ facade methods reached by `__getattr__` (with defaults) :
 
-- `set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto", wall="none", wall_radius=0.0, epsilon=1.0)` : `bc` p.ex. `"dirichlet"` ; `wall` p.ex. `"circle"` + `wall_radius`.
-- `set_density(name, rho)` : `rho` tableau `n x n`.
+- `set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto", wall="none", wall_radius=0.0, epsilon=1.0)` : `bc` e.g. `"dirichlet"` ; `wall` e.g. `"circle"` + `wall_radius`.
+- `set_density(name, rho)` : `rho` array `n x n`.
 - `set_epsilon_field(eps)`, `set_epsilon_anisotropic_field(eps_x, eps_y)`, `set_reaction_field(kappa)`, `set_magnetic_field(bz)`, `set_electron_temperature_from(name)`.
 - `set_source_stage(name, kind, theta, alpha)`, `set_time_scheme(scheme)` (`"lie"` / `"strang"`).
 - `add_coupled_source(in_blocks, in_roles, consts, out_blocks, out_roles, prog_ops, prog_args, prog_lens)`.
-- `add_dynamic_block` / `add_compiled_block` / `add_native_block` / `set_block_params` : adders de backend (utilises en interne par `add_equation`).
+- `add_dynamic_block` / `add_compiled_block` / `add_native_block` / `set_block_params` : backend adders (used internally by `add_equation`).
 - `add_ionization(electron, ion, neutral, rate)` / `add_collision(a, b, rate)` / `add_thermal_exchange(a, b, rate)`.
 - `variable_names(name, kind="conservative")` / `variable_roles(name, kind="conservative")` / `block_gamma(name)` / `n_vars(name)`.
 - `solve_fields()` ; `step(dt)` ; `advance(dt, nsteps)` ; `step_cfl(cfl)` ; `step_adaptive(cfl)`.
-- `eval_rhs(name)` / `get_state(name)` / `set_state(name, u)` : primitives d'integrateur Python custom.
+- `eval_rhs(name)` / `get_state(name)` / `set_state(name, u)` : primitives of a custom Python integrator.
 - `nx()` ; `ny()` ; `time()` ; `n_species()` ; `mass(name)` ; `density(name)` -> `(ny, nx)` ; `potential()` -> `(ny, nx)`.
 
 ### AmrSystem
 
-`adc.AmrSystem` est le pendant raffine : un ou plusieurs blocs portes sur une hierarchie AMR
-partagee, avec un Poisson de systeme a second membre somme `somme_b q_b n_b` et conservation par
-bloc. En multi-blocs le nom du bloc indexe `set_density(name)` / `mass(name)` / `density(name)`.
+`adc.AmrSystem` is the refined counterpart : one or several blocks carried on a shared AMR
+hierarchy, with a system Poisson with summed right-hand side `sum_b q_b n_b` and per-block
+conservation. In multi-blocks the block name indexes `set_density(name)` / `mass(name)` / `density(name)`.
 
-| Methode | Signature | Role |
+| Method | Signature | Role |
 |---|---|---|
-| `add_block` | `add_block(name, model, spatial=None, time=None)` | Rejette `Split` ; threade substeps / stride + masque IMEX vers le C++. |
-| `add_equation` | `add_equation(name, model, spatial=None, time=None, substeps=None)` | `ModelSpec` -> `add_block` (forwarde stride + masque) ; un `CompiledModel` doit etre `backend="production"`, `target="amr_system"` -> `add_native_block`. Rejette stride > 1 et masque IMEX sur le `.so` production (ABI plate) ; exige `p` pour hllc / roe. Recon primitive + flux roe / hllc + weno5 sont cables sur AMR (parite avec `add_block`). |
-| `set_refinement` | `set_refinement(threshold)` | Tag la ou la densite du bloc (composante 0) depasse `threshold`. |
-| `set_phi_refinement` | `set_phi_refinement(grad_threshold)` | Ajoute un tag base sur `|grad phi|` a l'union de regrid (multi-blocs + `regrid_every > 0` ; `<= 0` desactive, defaut). |
-| `set_poisson` | `set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto", wall="none", wall_radius=0.0)` | Poisson de systeme (pas d'argument `epsilon` sur ce chemin). |
-| `set_density` | `set_density(name, rho)` | Densite initiale d'un bloc. |
-| `add_coupled_source` | `add_coupled_source(...)` | Source couplee generique (bytecode). |
-| `step` / `advance` / `step_cfl` | `step(dt)` / `advance(dt, nsteps)` / `step_cfl(cfl)` | Avance. |
-| `nx` / `time` / `n_blocks` / `n_patches` | (sans argument) | Diagnostics scalaires. `n_blocks()` = nombre de blocs ; `n_patches()` = nombre de patchs fins. |
-| `mass` / `density` | `mass()` / `mass(name)` ; `density()` / `density(name)` -> `(nx, nx)` | Nom vide -> 1er bloc ; en multi-blocs le nom indexe le bloc. |
-| `potential` | `potential()` -> `(n, n)` | phi du niveau grossier (Poisson de systeme partage). |
-| `patch_boxes` | `patch_boxes()` (recent) | Empreintes index-space des patchs fins : liste de `(level, ilo, jlo, ihi, jhi)`, coins inclusifs, dans l'espace d'indices du niveau (`n << level` cellules/direction, ratio 2). Rank-independent (MPI-safe). |
-| `patch_rectangles` | `patch_rectangles()` (recent) | Convertit `patch_boxes()` en rectangles physiques `(x0, y0, w, h)` dans `[0, L]^2` (un par patch fin). Pratique pour tracer les patchs (p.ex. `matplotlib.Rectangle`). |
+| `add_block` | `add_block(name, model, spatial=None, time=None)` | Rejects `Split` ; threads substeps / stride + IMEX mask to the C++. |
+| `add_equation` | `add_equation(name, model, spatial=None, time=None, substeps=None)` | `ModelSpec` -> `add_block` (forwards stride + mask) ; a `CompiledModel` must be `backend="production"`, `target="amr_system"` -> `add_native_block`. Rejects stride > 1 and IMEX mask on the production `.so` (flat ABI) ; requires `p` for hllc / roe. Primitive recon + roe / hllc flux + weno5 are wired on AMR (parity with `add_block`). |
+| `set_refinement` | `set_refinement(threshold)` | Tags where the block density (component 0) exceeds `threshold`. |
+| `set_phi_refinement` | `set_phi_refinement(grad_threshold)` | Adds a tag based on `|grad phi|` to the regrid union (multi-blocks + `regrid_every > 0` ; `<= 0` disables, default). |
+| `set_poisson` | `set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto", wall="none", wall_radius=0.0)` | System Poisson (no `epsilon` argument on this path). |
+| `set_density` | `set_density(name, rho)` | Initial density of a block. |
+| `add_coupled_source` | `add_coupled_source(...)` | Generic coupled source (bytecode). |
+| `step` / `advance` / `step_cfl` | `step(dt)` / `advance(dt, nsteps)` / `step_cfl(cfl)` | Advance. |
+| `nx` / `time` / `n_blocks` / `n_patches` | (no argument) | Scalar diagnostics. `n_blocks()` = number of blocks ; `n_patches()` = number of fine patches. |
+| `mass` / `density` | `mass()` / `mass(name)` ; `density()` / `density(name)` -> `(nx, nx)` | Empty name -> 1st block ; in multi-blocks the name indexes the block. |
+| `potential` | `potential()` -> `(n, n)` | phi of the coarse level (shared system Poisson). |
+| `patch_boxes` | `patch_boxes()` (recent) | Index-space footprints of the fine patches : list of `(level, ilo, jlo, ihi, jhi)`, inclusive corners, in the index space of the level (`n << level` cells/direction, ratio 2). Rank-independent (MPI-safe). |
+| `patch_rectangles` | `patch_rectangles()` (recent) | Converts `patch_boxes()` into physical rectangles `(x0, y0, w, h)` in `[0, L]^2` (one per fine patch). Convenient for drawing the patches (e.g. `matplotlib.Rectangle`). |
 
 ```{note}
-`patch_boxes()` / `patch_rectangles()` exposent la geometrie des patchs fins (ajout
-recent). Si le module `adc` bati sur votre branche est anterieur a cet ajout, ces methodes
-peuvent ne pas exister encore ; elles sont listees ici pour la reference complete de l'API.
+`patch_boxes()` / `patch_rectangles()` expose the geometry of the fine patches (recent
+addition). If the `adc` module built on your branch is earlier than this addition, these methods
+may not exist yet ; they are listed here for the complete reference of the API.
 ```
 
-## Exemple complet : un diocotron depuis les briques
+## Complete example : a diocotron from the bricks
 
-Un diocotron reduit = une densite electronique scalaire advectee par E x B, avec un fond
-neutralisant, et un Poisson a mur conducteur circulaire. Construit entierement a partir de
-briques natives (aucun helper `models.diocotron`) :
+A reduced diocotron = a scalar electron density advected by E x B, with a neutralizing
+background, and a Poisson with a circular conducting wall. Built entirely from
+native bricks (no `models.diocotron` helper) :
 
 ```python
 import numpy as np
@@ -460,6 +460,6 @@ ne = sim.density("ne")                    # (n, n)
 print("phi range:", float(phi.min()), float(phi.max()))
 ```
 
-La meme `ModelSpec` se branche sur `adc.AmrSystem` (raffinement adaptatif) sans changer le
-modele : `sa.add_block("ne", model=model, ...)`. Pour la forme explicite de `set_poisson` (via un
-EPM compose), voir la section [Briques EPM](#briques-epm).
+The same `ModelSpec` plugs onto `adc.AmrSystem` (adaptive refinement) without changing the
+model : `sa.add_block("ne", model=model, ...)`. For the explicit form of `set_poisson` (via a
+composed EPM), see the section [EPM bricks](#briques-epm).

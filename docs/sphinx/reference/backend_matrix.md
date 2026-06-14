@@ -1,52 +1,52 @@
-# Matrice des backends
+# Backend matrix
 
-`adc_cpp` compile le meme code numerique vers plusieurs backends via un seam de dispatch
-unique. La couverture de tests par backend est tenue a jour dans un document unique, qui est la
-source de verite : [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md). Cette page en resume la
-structure ; ne pas dupliquer le tableau detaille ici (il evolue a chaque ajout de test).
+`adc_cpp` compiles the same numerical code to several backends through a single
+dispatch seam. The per-backend test coverage is maintained in a single document, which is the
+source of truth: [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md). This page summarizes its
+structure; do not duplicate the detailed table here (it changes with every test added).
 
-## Les backends
+## The backends
 
-| Backend | Build | Ou il tourne |
+| Backend | Build | Where it runs |
 |---------|-------|--------------|
-| **Kokkos Serial** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_SERIAL=ON` | CI gate `build-and-test` (toute PR), C++ + module Python. |
+| **Kokkos Serial** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_SERIAL=ON` | CI gate `build-and-test` (every PR), C++ + Python module. |
 | **MPI + Kokkos Serial** | `-DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON` | CI job MPI (`ci-full`), `mpirun` np=1/2/4. |
-| **Kokkos OpenMP** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_OPENMP=ON` | CI job `ci-full` (active depuis #155). |
-| **Kokkos Cuda (GH200)** | Kokkos + `Kokkos_ARCH_HOPPER90`, un GPU par rang | ROMEO manuel uniquement (jamais en CI). |
-| **MPI + Kokkos Cuda** | build precedent + OpenMPI CUDA-aware | ROMEO manuel (`srun -n {1,2,4}`). |
+| **Kokkos OpenMP** | `-DADC_USE_KOKKOS=ON`, `Kokkos_ENABLE_OPENMP=ON` | CI job `ci-full` (enabled since #155). |
+| **Kokkos Cuda (GH200)** | Kokkos + `Kokkos_ARCH_HOPPER90`, one GPU per rank | ROMEO manual only (never in CI). |
+| **MPI + Kokkos Cuda** | previous build + OpenMPI CUDA-aware | ROMEO manual (`srun -n {1,2,4}`). |
 
 ```{important}
-La CI ne construit jamais `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_CUDA=ON`. Toute validation GPU
-(Cuda mono-GPU ou MPI multi-GPU) est faite manuellement sur le supercalculateur ROMEO (noeud
-GH200), pas dans la CI. Les harnesses GPU vivent dans `python/tests/gpu/` et sont lances par
-SBATCH. Voir [GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md) et la page
-[limitations](limitations.md).
+CI never builds `-DADC_USE_KOKKOS=ON -DKokkos_ENABLE_CUDA=ON`. All GPU validation
+(single-GPU Cuda or multi-GPU MPI) is done manually on the ROMEO supercomputer (GH200
+node), not in CI. The GPU harnesses live in `python/tests/gpu/` and are launched by
+SBATCH. See [GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md) and the
+[limitations](limitations.md) page.
 ```
 
-## Comment lire la matrice
+## How to read the matrix
 
-Le tableau de [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md) croise chaque test (C++ ctest et
-Python) avec les backends ci-dessus. La legende y distingue notamment :
+The table in [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md) cross-references each test (C++ ctest and
+Python) with the backends above. The legend distinguishes in particular:
 
-- **build-and-test** : gate OBLIGATOIRE sur toute PR ; compile en Kokkos Serial (C++ + module
-  Python).
-- **ci-full** : tourne en mode plein (push `master`, nightly, PR labellisee), ajoute MPI + Kokkos
-  Serial et Kokkos OpenMP.
-- **ROMEO** : valide manuellement sur GH200 ; le harness exact est cite entre parentheses, avec
-  l'evidence chiffree (p.ex. `dmax=0`).
-- **self-skip** : le test detecte l'absence du backend et sort proprement (exit 0).
-- **?** : non exerce ; ces cellules sont listees dans la section "Lacunes notables" du
-  document source.
+- **build-and-test**: REQUIRED gate on every PR; compiles in Kokkos Serial (C++ + Python
+  module).
+- **ci-full**: runs in full mode (push `master`, nightly, labeled PR), adds MPI + Kokkos
+  Serial and Kokkos OpenMP.
+- **ROMEO**: validated manually on GH200; the exact harness is cited in parentheses, with
+  the numerical evidence (e.g. `dmax=0`).
+- **self-skip**: the test detects the absence of the backend and exits cleanly (exit 0).
+- **?**: not exercised; these cells are listed in the "Notable gaps" section of the
+  source document.
 
-## Points saillants
+## Highlights
 
-- Les tests Python n'exercent que Kokkos Serial : le module `_adc` est construit en CI en
-  Kokkos Serial, sans MPI ni Cuda. Aucun test Python ne couvre MPI ou Cuda.
-- La voie FFT Poisson (`PoissonFFTSolver`) est refusee sous MPI (single-rank par design) ;
-  un test verrouille cette non-regression.
-- Les colonnes Kokkos Cuda et MPI + Kokkos Cuda sont soit `ROMEO` (validees a la main),
-  soit `?`. Le detail des gaps GPU restants est dans la section "Lacunes notables" du document
-  source.
+- The Python tests only exercise Kokkos Serial: the `_adc` module is built in CI in
+  Kokkos Serial, without MPI or Cuda. No Python test covers MPI or Cuda.
+- The FFT Poisson path (`PoissonFFTSolver`) is rejected under MPI (single-rank by design);
+  a test locks this non-regression.
+- The Kokkos Cuda and MPI + Kokkos Cuda columns are either `ROMEO` (validated by hand),
+  or `?`. The detail of the remaining GPU gaps is in the "Notable gaps" section of the source
+  document.
 
-Pour le decompte chiffre (cibles ctest, entrees MPI, tests Python) et la liste exhaustive des
-gaps, se referer directement a [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).
+For the numerical counts (ctest targets, MPI entries, Python tests) and the exhaustive list of
+gaps, refer directly to [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).

@@ -1,47 +1,47 @@
-# Bibliographie
+# Bibliography
 
-Les references qui ont informe la conception et l'implementation d'`adc_cpp` (codes AMR /
-plasma consultes, manuels, articles cles). Aucun n'a ete copie ; chacun a apporte une idee. La
-liste complete, annotee, est tenue dans [BIBLIOGRAPHY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BIBLIOGRAPHY.md) ; ci-dessous un
-resume oriente lecteur.
+The references that informed the design and implementation of `adc_cpp` (AMR /
+plasma codes consulted, manuals, key articles). None was copied; each contributed an idea. The
+full, annotated list is kept in [BIBLIOGRAPHY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BIBLIOGRAPHY.md); below is a
+reader-oriented summary.
 
-## Codes AMR / plasma consultes
+## AMR / plasma codes consulted
 
-- **AMReX** (Zhang et al. 2019, JOSS 4(37)) -- framework AMR block-structured de reference dont
-  la pile mesh d'`adc_cpp` est un mini-clone ecrit *from scratch* (MultiFab, BoxArray, Geometry,
+- **AMReX** (Zhang et al. 2019, JOSS 4(37)) -- reference block-structured AMR framework whose
+  mesh stack `adc_cpp` reimplements as a mini-clone written *from scratch* (MultiFab, BoxArray, Geometry,
   FillBoundary, FluxRegister, MLMG ~ GeometricMG).
-- **WarpX** -- code PIC-AMR electromagnetique (sur AMReX), contexte du couplage
-  hyperbolique-elliptique sur AMR pour les plasmas non neutres.
-- **Athena++ / PLUTO** -- frameworks hydro/MHD ; le design a axes orthogonaux de PLUTO
-  (equation x reconstruction x Riemann x integrateur) a inspire le decoupage concept-template
-  d'`adc_cpp`.
+- **WarpX** -- electromagnetic PIC-AMR code (on AMReX), the context for hyperbolic-elliptic
+  coupling on AMR for non-neutral plasmas.
+- **Athena++ / PLUTO** -- hydro/MHD frameworks; PLUTO's orthogonal-axes design
+  (equation x reconstruction x Riemann x integrator) inspired the concept-template
+  split of `adc_cpp`.
 
-## Manuels
+## Manuals
 
-- **Birdsall & Langdon**, *Plasma Physics via Computer Simulation*, 1985 -- derive E x B,
-  instabilite diocotron.
-- **Chen**, *Introduction to Plasma Physics and Controlled Fusion*, 3e ed., 2016 -- cote
-  repulsif d'Euler-Poisson (plasma).
-- **Binney & Tremaine**, *Galactic Dynamics*, 2e ed., 2008 -- instabilite de Jeans, cote
-  attractif d'Euler-Poisson (gravite).
-- **Toro**, *Riemann Solvers and Numerical Methods for Fluid Dynamics*, 3e ed., 2009 --
-  solveurs de Riemann (Rusanov, HLL, HLLC), reconstruction MUSCL.
-- **Trottenberg, Oosterlee & Schuller**, *Multigrid*, 2001 -- V-cycle, lisseur Gauss-Seidel
-  rouge-noir.
+- **Birdsall & Langdon**, *Plasma Physics via Computer Simulation*, 1985 -- E x B drift,
+  diocotron instability.
+- **Chen**, *Introduction to Plasma Physics and Controlled Fusion*, 3rd ed., 2016 -- the
+  repulsive side of Euler-Poisson (plasma).
+- **Binney & Tremaine**, *Galactic Dynamics*, 2nd ed., 2008 -- Jeans instability, the
+  attractive side of Euler-Poisson (gravity).
+- **Toro**, *Riemann Solvers and Numerical Methods for Fluid Dynamics*, 3rd ed., 2009 --
+  Riemann solvers (Rusanov, HLL, HLLC), MUSCL reconstruction.
+- **Trottenberg, Oosterlee & Schuller**, *Multigrid*, 2001 -- V-cycle, red-black
+  Gauss-Seidel smoother.
 
-## Articles cles
+## Key articles
 
-- **Berger & Oliger**, 1984, JCP 53 -- sous-cyclage en temps des niveaux fins.
-- **Berger & Colella**, 1989, JCP 82 -- reflux (FluxRegister), conservation a l'interface
-  grossier-fin.
-- **Berger & Rigoutsos**, 1991, IEEE Trans. SMC 21 -- clustering par signature pour le regrid.
-- **Hoffart**, 2025, **arXiv:2510.11808** -- modele deux-fluides isotherme et Euler-Poisson
-  magnetise, cible de validation du schema asymptotic-preserving (scenario applicatif,
-  `adc_cases/two_fluid_ap/`). Voir la limite de reproduction du modele complet dans
+- **Berger & Oliger**, 1984, JCP 53 -- time subcycling of fine levels.
+- **Berger & Colella**, 1989, JCP 82 -- reflux (FluxRegister), conservation at the
+  coarse-fine interface.
+- **Berger & Rigoutsos**, 1991, IEEE Trans. SMC 21 -- signature clustering for the regrid.
+- **Hoffart**, 2025, **arXiv:2510.11808** -- isothermal two-fluid model and magnetized
+  Euler-Poisson, validation target for the asymptotic-preserving scheme (application scenario,
+  `adc_cases/two_fluid_ap/`). See the reproduction limit of the full model in
   [limitations](limitations.md).
 
-## Methodologie performance
+## Performance methodology
 
-- **Bryant & O'Hallaron**, *Computer Systems: A Programmer's Perspective*, 3e ed., 2016 --
-  profiler d'abord, identifier le goulot, transformer, re-mesurer (voir
+- **Bryant & O'Hallaron**, *Computer Systems: A Programmer's Perspective*, 3rd ed., 2016 --
+  profile first, identify the bottleneck, transform, re-measure (see
   [PROFILE_RESULTS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/PROFILE_RESULTS.md)).
