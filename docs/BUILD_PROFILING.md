@@ -32,7 +32,7 @@ The ~41 s at `-O0` are the incompressible cost (parsing + frontend + unoptimized
 
 ## 1. Scope & method
 
-- **Build files read:** [`CMakeLists.txt`](CMakeLists.txt), [`python/CMakeLists.txt`](python/CMakeLists.txt), [`tests/CMakeLists.txt`](tests/CMakeLists.txt), [`.github/workflows/ci.yml`](.github/workflows/ci.yml), [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+- **Build files read:** [`CMakeLists.txt`](../CMakeLists.txt), [`python/CMakeLists.txt`](../python/CMakeLists.txt), [`tests/CMakeLists.txt`](../tests/CMakeLists.txt), [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`.github/workflows/docs.yml`](../.github/workflows/docs.yml).
 - **Reused builds** (main folder `Documents/Stage_Romain/adc_cpp/`, same code base, Release/AppleClang/serial): `build-docs`, `build-audit` (Ninja, usable `.ninja_log`), `build-master`, `build-py` (Makefiles, stale). **No file deleted, no clean build.**
 - **Clean measurements:** isolated compilation, **single-threaded**, output to `/tmp`, flags taken verbatim from the test build (`-O3 -DNDEBUG -std=c++2b -arch arm64 -isysroot ... -I include`), with `-ftime-trace` for the internal breakdown.
 
@@ -173,7 +173,7 @@ python/amr_system.cpp  compilé 14×
 grep -E '^(ADC_USE_|ADC_BUILD_|CMAKE_BUILD_TYPE|CMAKE_CXX_COMPILER):' <build>/CMakeCache.txt
 
 # Durées par cible depuis les .ninja_log (format: start_ms end_ms mtime output hash ; durée = end-start)
-#   parsées en Python (dédup par output, tri décroissant) — cf. §3
+#   parsées en Python (dédup par output, tri décroissant) -- cf. §3
 
 # Flags exacts d'une TU lourde (depuis build.ninja du build de tests Ninja)
 sed -n '2550,2556p' <build-audit>/build.ninja      # → -O3 -DNDEBUG -std=c++2b -arch arm64 -isysroot … -I include

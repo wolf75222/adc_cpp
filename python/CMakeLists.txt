@@ -7,7 +7,7 @@
 #   PYTHONPATH=build-py/python python3 -c "import adc; print(adc.System)"
 
 # LTO du module _adc. OFF par defaut : le LTO (re)optimise au LINK et rallongerait fortement le build
-# -- le backend -O3 est deja le goulot (cf. BUILD_PROFILING.md) -- pour un gain runtime marginal sur ce
+# -- le backend -O3 est deja le goulot (cf. docs/BUILD_PROFILING.md) -- pour un gain runtime marginal sur ce
 # code de dispatch type-erased (la frontiere de bloc passe par std::function, opaque au LTO). Il est par
 # ailleurs numeriquement neutre (pas -ffast-math). OFF => NO_EXTRAS : pybind11 N'ESSAIE PAS le LTO, donc
 # plus de test "Performing Test HAS_FLTO - Failed" parasite, et le build est rapide/previsible. ON =>
