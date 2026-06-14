@@ -19,7 +19,13 @@
 /// Invariants :
 /// - chaque champ garde le nom, le type et le defaut de l'ancien parametre a plat homonyme ;
 /// - ces PODs vivent AU-DESSUS de la couche ABI (compiled_block_abi.hpp / native_loader.hpp) : ils ne
-///   traversent jamais la frontiere extern "C" d'un loader .so, donc abi_key() reste inchangee.
+///   traversent jamais la frontiere extern "C" d'un loader .so. L'ABI SEMANTIQUE extern "C"
+///   (residual / advance, structs traversant le loader) reste donc INCHANGEE. En revanche le LITTERAL
+///   abi_key() CHANGE : il embarque le jeton headers=ADC_HEADER_SIG (sha256 conservateur du chemin et
+///   du contenu de CHAQUE en-tete sous include/, cf. abi_key.hpp et python/CMakeLists.txt) ; le seul
+///   fait d'AJOUTER cet en-tete et d'EDITER system.hpp / amr_system.hpp deplace ADC_HEADER_SIG. C'est
+///   ATTENDU et inoffensif : aucune ABI semantique ne change, mais add_native_block rejettera les .so
+///   AOT generes avant ce changement (signature divergente) -> une regeneration unique des .so perimes.
 
 namespace adc {
 
