@@ -73,7 +73,7 @@ struct EquationBlock {
   const MultiFab& U() const { return *state; }
 };
 
-/// Concept minimal pour les blocs d'equation : State, Spatial, Time, name, state, U().
+/// Concept minimal pour les blocs d'equation : Model, Spatial, Time, name, state, U().
 /// Permet au CoupledSystem et au scheduler de manipuler un bloc sans connaitre ses types
 /// concrets. Verifie que `state` est convertible en `MultiFab*` et que U() retourne MultiFab&.
 template <class B>

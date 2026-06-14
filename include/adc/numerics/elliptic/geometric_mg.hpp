@@ -439,8 +439,8 @@ class GeometricMG {
   //      max_cycles), donc identique aux runs deja stables ;
   //   2. SEULEMENT si le residu final EXCEDE le residu initial (vraie divergence,
   //      ratio > 1 ; pas une simple stagnation ratio < 1, qu'on garde telle quelle pour
-  //      rester bit-identique) : on durcit le lissage de facon STICKY (nu double, conserve
-  //      pour les pas suivants, le warm start repartant alors au lissage durci) et on
+  //      rester bit-identique) : on durcit le lissage LOCALEMENT au solve (nu double,
+  //      nu1_/nu2_ restaures au retour, les pas suivants repartent au lissage nominal) et on
   //      REPART A FROID (phi=0, le warm start portait l'etat diverge), jusqu'a convergence
   //      ou saturation de nu. Plus de lissage rend le V-cycle contractant (le GS domine la
   //      correction grossiere incoherente) : cf. balayage, nu=2 diverge a nc=640, nu>=4

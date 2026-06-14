@@ -392,7 +392,7 @@ class CondensedSchurSourceStepper {
   MultiFab bz_;               ///< B_z au centre (tampon interne, 1 ghost)
   MultiFab vx_n_, vy_n_;      ///< v^n (extrait au debut de step)
   MultiFab vx_t_, vy_t_;      ///< v^{n+theta} puis v^{n+1} (reconstruction + extrapolation)
-  MultiFab phi_n_;            ///< phi^n fige (extrapolation) ; alloue au premier advance_source
+  MultiFab phi_n_;            ///< phi^n fige (extrapolation) ; alloue a la construction, copie au debut de step
   KrylovResult last_result_;  ///< diagnostic du dernier solve
   Real krylov_tol_ = Real(1e-10);  ///< tolerance du solve (defaut historique, cf. set_krylov)
   int krylov_max_iters_ = 400;     ///< budget d'iterations (defaut historique, cf. set_krylov)

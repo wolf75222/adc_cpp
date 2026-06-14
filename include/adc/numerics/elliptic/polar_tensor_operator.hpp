@@ -378,8 +378,9 @@ class PolarTensorKrylovSolver {
 
   void solve() { solve(Real(1e-10), 400); }
 
-  /// BiCGStab preconditionne Jacobi. phi() = inconnue (warm start), rhs() = second membre. Rend
-  /// iterations + residu relatif + convergence.
+  /// BiCGStab MATRICE-LIBRE preconditionne par precond_ (RadialLine par defaut, Jacobi en repli) ;
+  /// fixe la jauge (project_mean) quand pin_gauge_ (cas pur Neumann/periodique singulier). phi() =
+  /// inconnue (warm start), rhs() = second membre. Rend iterations + residu relatif + convergence.
   PolarKrylovResult solve(Real rel_tol, int max_iters) {
     ensure_coeffs();
     prepare_offset();  // c_bc = apply_operator(0) (part inhomogene de bord Dirichlet) une fois

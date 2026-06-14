@@ -216,7 +216,7 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
   };
   h.sbuf.assign(np, {});
   h.rbuf.assign(np, {});
-  // PACK device (for_each, parallele sous Kokkos) dans les tampons unifies. Disposition par job :
+  // PACK device (for_each, parallele sous Kokkos) dans les tampons hote epingle. Disposition par job :
   // c-majeur puis (jj, ii), IDENTIQUE a l'ancien ordre k++ -> tampon bit-identique au chemin hote
   // (les ctests MPI CPU restent bit-identiques np=1/2/4). Le rang pair enumere dans le meme ordre,
   // donc sbuf[A->B] et rbuf[B<-A] s'alignent sans negocier les tailles.
@@ -239,7 +239,7 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
   for (int r = 0; r < np; ++r)  // allouer les tampons de reception
     if (!h.recv[r].empty()) h.rbuf[r].resize(buf_size(h.recv[r]));
   device_fence();  // les kernels de pack (et les copies locales) doivent finir avant que MPI ne lise sbuf
-  for (int r = 0; r < np; ++r) {  // postage non-bloquant ; MPI recoit des pointeurs UNIFIES (GPUDirect si CUDA-aware)
+  for (int r = 0; r < np; ++r) {  // postage non-bloquant ; MPI recoit des pointeurs HOTE EPINGLE (vus HOST, pas de GPUDirect/CUDA IPC)
     if (!h.sbuf[r].empty()) {
       h.reqs.emplace_back();
       MPI_Isend(h.sbuf[r].data(), static_cast<int>(h.sbuf[r].size()), MPI_DOUBLE, r, 0,
