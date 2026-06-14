@@ -20,7 +20,19 @@ for _cand in (_repo / "build-py" / "python", _repo / "build" / "python",
 project = "adc_cpp"
 author = "Romain Despoullains"
 copyright = "2026, Romain Despoullains"
-release = "0.1.0"
+def _version_from_cmake(_path: Path) -> str | None:
+    import re
+
+    try:
+        _txt = _path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    _m = re.search(r"project\s*\(\s*adc_cpp\b.*?VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", _txt, re.S)
+    return _m.group(1) if _m else None
+
+
+# Single source of the version: project(VERSION) in CMakeLists.txt (see docs/VERSIONING.md).
+release = _version_from_cmake(_repo / "CMakeLists.txt") or "0.0.0"
 version = release
 
 extensions = [

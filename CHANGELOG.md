@@ -7,9 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 - **Single source**: `project(VERSION x.y.z)` in `CMakeLists.txt`. Everything derives from it:
   `adc.__version__` (bakes `ADC_VERSION` into `_adc`), the pip wheel (regex in `pyproject.toml`),
-  `adcConfigVersion.cmake` (install/export). NEVER duplicate the number elsewhere; `docs/Doxyfile`
-  (`PROJECT_NUMBER`) and `docs/sphinx/conf.py` (`release`) must follow by hand on a bump (TODO:
-  generate them; until then, the three files are the checklist).
+  `adcConfigVersion.cmake` (install/export). NEVER duplicate the number elsewhere; the docs build
+  derives it too (`scripts/build_docs.sh` injects `PROJECT_NUMBER`, `docs/sphinx/conf.py` reads
+  `project(VERSION)`), so nothing is bumped by hand outside `CMakeLists.txt`.
 - **Bump**: PATCH = fixes with no API change; MINOR = backward-compatible API/brick additions;
   MAJOR (post-1.0) = API or ABI break of the DSL production path.
 - **Tag**: set `git tag vX.Y.Z` on master when the bumping PR merges, then `git push --tags`.
@@ -26,6 +26,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), ASan+UBSan sanitizers (`ADC_ENABLE_SANITIZERS`,
   `ci-warnings`/`ci-asan` presets) and CodeQL. CMake options OFF by default (empty `adc_dev_options`
   target), so `ci.yml`, local builds and `adc_cases` are unchanged. See `docs/QUALITY_TOOLING.md`.
+
+### Changed
+
+- **Docs version single-sourced** (ADC-233): the docs build derives the version from
+  `project(VERSION)` in `CMakeLists.txt` (`scripts/build_docs.sh` injects the Doxygen
+  `PROJECT_NUMBER`, `docs/sphinx/conf.py` reads it), so Doxygen and Sphinx no longer drift.
 
 ## [0.1.0] - 2026-06-10
 
