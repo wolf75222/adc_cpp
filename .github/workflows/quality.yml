@@ -96,6 +96,19 @@ jobs:
           name: clang-format-diff
           path: format-diff.patch
           if-no-files-found: ignore
+      - name: Garde racine (allowlist, informatif)
+        if: always()
+        run: |
+          # Avertit si un artefact inattendu apparait a la racine du depot (fichiers traques).
+          # La racine ne doit contenir que les configs build/outillage, README/CHANGELOG/
+          # LICENSE/CONTRIBUTING/SECURITY et les dotfiles qualite.
+          bad=$(git ls-files | grep -vE '/' | grep -iE '\.(csv|log|png|jpe?g|gif|tmp|o|so|dylib|zip|tar|gz|bak)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::warning::artefact(s) inattendu(s) a la racine (deplacer dans docs/ ou supprimer) :"
+            echo "$bad"
+          else
+            echo "racine propre (aucun artefact a la racine)"
+          fi
 
   # --- Warnings stricts : build avec -Wall -Wextra ... -------------------------------------------
   warnings:
