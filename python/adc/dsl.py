@@ -1004,6 +1004,42 @@ def _cse_emit(roots, real, indent):
     return lines, [_cpp_cse(r, cse_map) for r in roots]
 
 
+# --- Hoist de la reciproque (OPT-IN) -----------------------------------------
+# Sans -ffast-math, le compilateur ne peut pas remplacer N divisions par un meme denominateur
+# par 1 reciproque + N multiplications (l'arrondi changerait). On le fait au codegen, sur option :
+# pour un denominateur conservatif recurrent (>= 2 usages dans les primitives vivantes d'une
+# methode), emettre une fois inv_<nom> = 1 / <nom> et remplacer ses divisions par des produits.
+# Restreint aux denominateurs VARIABLE CONSERVATIVE : calculables juste apres les locales cons,
+# avant les primitives. OPT-IN car l'arrondi change (non bit-identique a la sortie par defaut).
+def _count_cons_denoms(e, cons_set, counts):
+    """Recense les denominateurs Var-conservatifs de @p e dans @p counts (nom -> occurrences)."""
+    if isinstance(e, Div) and isinstance(e.b, Var) and e.b.name in cons_set:
+        counts[e.b.name] = counts.get(e.b.name, 0) + 1
+    for c in _children(e):
+        _count_cons_denoms(c, cons_set, counts)
+
+
+def _recip_rewrite(e, inv_set):
+    """Reecrit @p e : toute division par un Var conservatif de @p inv_set devient un produit par
+    sa reciproque hissee inv_<nom>. Reconstruit de NOUVEAUX noeuds (ne mute pas le modele)."""
+    if isinstance(e, Div):
+        a = _recip_rewrite(e.a, inv_set)
+        if isinstance(e.b, Var) and e.b.name in inv_set:
+            return Mul(a, Var("inv_" + e.b.name, "hoist"))
+        return Div(a, _recip_rewrite(e.b, inv_set))
+    if isinstance(e, _Bin):
+        return type(e)(_recip_rewrite(e.a, inv_set), _recip_rewrite(e.b, inv_set))
+    if isinstance(e, Neg):
+        return Neg(_recip_rewrite(e.a, inv_set))
+    if isinstance(e, Sqrt):
+        return Sqrt(_recip_rewrite(e.a, inv_set))
+    if isinstance(e, Abs):
+        return Abs(_recip_rewrite(e.a, inv_set))
+    if isinstance(e, StateRef):
+        return StateRef(e.side, _recip_rewrite(e.expr, inv_set))
+    return e
+
+
 # --- Differentiation symbolique (autodiff de l'arbre Expr) -------------------
 # dsl.diff(expr, var) derive l'arbre noeud par noeud : linearite (+, -), produit (a*b)' = a'b + ab',
 # quotient (a/b)' = (a'b - ab')/b^2, puissance (a^n)' = n a^(n-1) a' (exposant constant), racine
@@ -1941,6 +1977,56 @@ class HyperbolicModel:
             return _cse_emit(list(exprs), real, indent)
         return [], [e.to_cpp() for e in exprs]
 
+    def _live_prims(self, exprs, seed=()):
+        """Noms des primitives transitivement referencees par @p exprs (et les noms @p seed).
+        Fermeture sur prim_defs : une primitive vivante tire ses propres dependances primitives.
+        Sert a n'emettre dans une methode que les primitives effectivement utilisees (elimination
+        de code mort) : les expressions vivantes restent identiques, donc les valeurs bit-identiques."""
+        prim = self.prim_defs
+        live = set()
+        stack = [n for n in seed if n in prim]
+        for e in exprs:
+            stack.extend(d for d in e.deps() if d in prim)
+        while stack:
+            nm = stack.pop()
+            if nm in live:
+                continue
+            live.add(nm)
+            stack.extend(d for d in prim[nm].deps() if d in prim)
+        return live
+
+    def _prim_block(self, live=None, hoist=False):
+        """Lignes ``const adc::Real <prim> = ...;`` d'une methode. @p live (defaut None = toutes) :
+        ne declare que les primitives vivantes. @p hoist : hisse en tete la reciproque des
+        denominateurs conservatifs recurrents (>= 2 usages) et remplace ces divisions par des
+        produits (OPT-IN, change l'arrondi). Sans @p hoist et avec live=None, sortie historique."""
+        items = [(p, e) for p, e in self.prim_defs.items() if live is None or p in live]
+        if not hoist:
+            return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in items]
+        cons_set = set(self.cons_names)
+        counts = {}
+        for _, e in items:
+            _count_cons_denoms(e, cons_set, counts)
+        inv = [n for n in self.cons_names if counts.get(n, 0) >= 2]  # ordre cons stable
+        inv_set = set(inv)
+        lines = ["    const adc::Real inv_%s = adc::Real(1) / %s;" % (n, n) for n in inv]
+        lines += ["    const adc::Real %s = %s;" % (p, _recip_rewrite(e, inv_set).to_cpp())
+                  for p, e in items]
+        return lines
+
+    def _jac_entries(self):
+        """Entrees (Expr) des sous-blocs jacobiens des deux directions (chemin wave_speeds
+        'numeric'). Pilote l'elimination de code mort de max_wave_speed / wave_speeds."""
+        ws = self._ws_jacobian
+        out = []
+        for key in ("x", "y"):
+            rows = ws["rows"][key]
+            for b in ws["blocks"][key]:
+                for gi in b:
+                    for gj in b:
+                        out.append(rows[gi][gj])
+        return out
+
     def emit_cpp(self, func=None, cse=True):
         """Genere une fonction C++ compilable calculant le flux physique a partir de l'arbre
         symbolique (chaque noeud Expr sait s'ecrire en C++ via to_cpp).
@@ -1974,7 +2060,8 @@ class HyperbolicModel:
         out += ["  }", "}"]
         return "\n".join(out) + "\n"
 
-    def emit_cpp_brick(self, name=None, namespace="adc_generated", cse=True):
+    def emit_cpp_brick(self, name=None, namespace="adc_generated", cse=True,
+                       hoist_reciprocals=False):
         """Genere une BRIQUE C++ satisfaisant le concept adc::HyperbolicModel (emballage : etape
         2bis). Le struct produit utilise StateVec / Aux / ADC_HD / Variables et expose flux,
         max_wave_speed, to_primitive, to_conservative, conservative_vars, primitive_vars : il peut
@@ -2004,8 +2091,9 @@ class HyperbolicModel:
         def cons_locals():
             return ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
 
-        def prim_locals():
-            return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
+        def prim_locals(live=None):
+            # FILTRE sur les primitives vivantes (live) + hoist OPT-IN ; sans live, sortie complete.
+            return self._prim_block(live, hoist_reciprocals)
 
         def aux_locals():
             return self._aux_locals_lines()  # canonique (a.<n>) + nommes (a.extra_field(k)), ADC-70
@@ -2142,7 +2230,8 @@ class HyperbolicModel:
             "",
             "  ADC_HD State flux(const State& U, %s, int dir) const {" % aux_param,
         ]
-        S += cons_locals() + prim_locals() + aux_locals()
+        S += cons_locals() + prim_locals(self._live_prims(self._flux["x"] + self._flux["y"])) \
+            + aux_locals()
         ftl, fcpps = self._codegen_exprs(self._flux["x"] + self._flux["y"], cse)
         S += ftl
         S.append("    State F{};")
@@ -2158,7 +2247,15 @@ class HyperbolicModel:
         mws_aux_param = "const Aux& a" if (jac_fd and not self._eig) else aux_param
         S.append("  ADC_HD adc::Real max_wave_speed(const State& U, %s, int dir) const {"
                  % mws_aux_param)
-        S += cons_locals() + prim_locals() + aux_locals()
+        if self._eig:
+            mws_drv = self._eig["x"] + self._eig["y"]
+        elif self._wave_speeds is not None:
+            mws_drv = list(self._wave_speeds["x"]) + list(self._wave_speeds["y"])
+        elif self._ws_jacobian["eig"] == "fd":
+            mws_drv = []  # chemin fd : max_wave_speed appelle flux(), aucune primitive directe
+        else:
+            mws_drv = self._jac_entries()
+        S += cons_locals() + prim_locals(self._live_prims(mws_drv)) + aux_locals()
         if self._eig:
             # source historique : max(|eigenvalues|), bit-identique.
             nx = len(self._eig["x"])
@@ -2211,7 +2308,7 @@ class HyperbolicModel:
         # requise par les flux HLLC / Roe canoniques (make_block : requires { m.pressure(s); }).
         if "p" in self.prim_defs:
             S.append("  ADC_HD adc::Real pressure(const State& U) const {")
-            S += cons_locals() + prim_locals()
+            S += cons_locals() + prim_locals(self._live_prims([], seed=["p"]))
             S += ["    return p;", "  }", ""]
 
         # vitesses d'onde SIGNEES wave_speeds(U, aux, dir, smin, smax) : gate HLL du coeur
@@ -2225,7 +2322,8 @@ class HyperbolicModel:
             ws = self._wave_speeds
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
                      "adc::Real& smax) const {" % aux_param)
-            S += cons_locals() + prim_locals() + aux_locals()
+            S += cons_locals() \
+                + prim_locals(self._live_prims(list(ws["x"]) + list(ws["y"]))) + aux_locals()
             wtl, wcpps = self._codegen_exprs(list(ws["x"]) + list(ws["y"]), cse)
             S += wtl
             S.append("    if (dir == 0) {")
@@ -2240,7 +2338,8 @@ class HyperbolicModel:
             ws_aux = aux_param if self._ws_jacobian["eig"] != "fd" else "const Aux& a"
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
                      "adc::Real& smax) const {" % ws_aux)
-            S += cons_locals() + prim_locals() + aux_locals()
+            ws_drv = [] if self._ws_jacobian["eig"] == "fd" else self._jac_entries()
+            S += cons_locals() + prim_locals(self._live_prims(ws_drv)) + aux_locals()
             ws_same_blocks = self._ws_jacobian["blocks"]["x"] == self._ws_jacobian["blocks"]["y"]
             if self._ws_jacobian["eig"] == "fd" and ws_same_blocks:
                 S += ws_jac_body("    ", "smin", "smax")
@@ -2264,7 +2363,8 @@ class HyperbolicModel:
             nx = len(self._eig["x"])
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
                      "adc::Real& smax) const {" % aux_param)
-            S += cons_locals() + prim_locals() + aux_locals()
+            S += cons_locals() \
+                + prim_locals(self._live_prims(self._eig["x"] + self._eig["y"])) + aux_locals()
             wtl, wcpps = self._codegen_exprs(self._eig["x"] + self._eig["y"], cse)
             S += wtl
             S.append("    if (dir == 0) {")
@@ -2440,19 +2540,19 @@ class HyperbolicModel:
             S.append("  ADC_HD adc::Real stability_speed(const State& U, %s, int dir) const {"
                      % aux_param)
             S.append("    (void)dir;  // borne isotrope : une seule expression pour les deux directions")
-            S += cons_locals() + prim_locals() + aux_locals()
+            S += cons_locals() + prim_locals(self._live_prims([self._stab_speed])) + aux_locals()
             stl, scpps = self._codegen_exprs([self._stab_speed], cse)
             S += stl
             S += ["    return %s;" % scpps[0], "  }", ""]
         if self._stab_dt is not None:
             S.append("  ADC_HD adc::Real stability_dt(const State& U, %s) const {" % aux_param)
-            S += cons_locals() + prim_locals() + aux_locals()
+            S += cons_locals() + prim_locals(self._live_prims([self._stab_dt])) + aux_locals()
             dtl, dcpps = self._codegen_exprs([self._stab_dt], cse)
             S += dtl
             S += ["    return %s;" % dcpps[0], "  }", ""]
 
         S.append("  ADC_HD Prim to_primitive(const State& U) const {")
-        S += cons_locals() + prim_locals()
+        S += cons_locals() + prim_locals(self._live_prims([], seed=self.prim_state))
         S.append("    Prim P{};")
         S += ["    P[%d] = %s;" % (i, p) for i, p in enumerate(self.prim_state)]
         S += ["    return P;", "  }", ""]
@@ -2474,7 +2574,8 @@ class HyperbolicModel:
         S += ["};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
 
-    def emit_cpp_source(self, name=None, namespace="adc_generated", cse=True):
+    def emit_cpp_source(self, name=None, namespace="adc_generated", cse=True,
+                        hoist_reciprocals=False):
         """Genere une BRIQUE de SOURCE C++ composable (au sens adc) depuis self._source.
 
         Le struct produit expose apply(U, a) renvoyant le terme source S(U, aux), avec une ligne par
@@ -2498,8 +2599,9 @@ class HyperbolicModel:
         def cons_locals():
             return ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
 
-        def prim_locals():
-            return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
+        def prim_locals(live=None):
+            # FILTRE sur les primitives vivantes (live) + hoist OPT-IN ; sans live, sortie complete.
+            return self._prim_block(live, hoist_reciprocals)
 
         def aux_locals():
             return self._aux_locals_lines()  # canonique (a.<n>) + nommes (a.extra_field(k)), ADC-70
@@ -2529,9 +2631,10 @@ class HyperbolicModel:
             S.append("  static constexpr int n_aux = %d;" % na)
         S.append("  ADC_HD adc::StateVec<%d> apply(const adc::StateVec<%d>& U, const adc::Aux& a) const {"
                  % (nc, nc))
-        S += cons_locals() + prim_locals() + aux_locals()
+        src_exprs = [_wrap(e) for e in self._source]
+        S += cons_locals() + prim_locals(self._live_prims(src_exprs)) + aux_locals()
         # _wrap : une composante peut etre un litteral Python (p.ex. 0.0), promu en Const.
-        stl, scpps = self._codegen_exprs([_wrap(e) for e in self._source], cse)
+        stl, scpps = self._codegen_exprs(src_exprs, cse)
         S += stl
         S.append("    adc::StateVec<%d> S{};" % nc)
         S += ["    S[%d] = %s;" % (i, c) for i, c in enumerate(scpps)]
@@ -2543,7 +2646,7 @@ class HyperbolicModel:
             S.append("")
             S.append("  ADC_HD adc::Real frequency(const adc::StateVec<%d>& U, const adc::Aux& a) "
                      "const {" % nc)
-            S += cons_locals() + prim_locals() + aux_locals()
+            S += cons_locals() + prim_locals(self._live_prims([self._src_freq])) + aux_locals()
             ftl, fcpps = self._codegen_exprs([self._src_freq], cse)
             S += ftl
             S += ["    return %s;" % fcpps[0], "  }"]
@@ -2556,8 +2659,8 @@ class HyperbolicModel:
             S.append("")
             S.append("  ADC_HD void jacobian(const adc::StateVec<%d>& U, const adc::Aux& a, "
                      "adc::Real (&J)[%d][%d]) const {" % (nc, nc, nc))
-            S += cons_locals() + prim_locals() + aux_locals()
             flat = [e for row in self._src_jac for e in row]
+            S += cons_locals() + prim_locals(self._live_prims(flat)) + aux_locals()
             jtl, jcpps = self._codegen_exprs(flat, cse)
             S += jtl
             for r in range(nc):
@@ -2567,10 +2670,11 @@ class HyperbolicModel:
         S += ["};", "}  // namespace %s" % namespace]
         return "\n".join(S) + "\n"
 
-    def _emit_bricks(self, name=None):
+    def _emit_bricks(self, name=None, hoist_reciprocals=False):
         """Genere les briques (hyperbolique + source + elliptique) et le type CompositeModel<...>
         partages par les DEUX backends (JIT IModel et AOT). Source / elliptique OPTIONNELS : sans
         set_source -> adc::NoSource ; sans set_elliptic_rhs -> rhs nul (pas de couplage Poisson).
+        @p hoist_reciprocals : option codegen propagee aux briques (cf. emit_cpp_brick).
         Renvoie (nv, code_des_briques, type_composite)."""
         nm = name or (self.name.capitalize() + "Gen")
         nv = self.n_vars
@@ -2584,14 +2688,14 @@ class HyperbolicModel:
             if self._src_jac is not None:
                 raise ValueError("source_jacobian(...) declare sans source : appelez "
                                  "m.source([...]) (le jacobien est emis sur la brique de source)")
-        parts = [self.emit_cpp_brick(name=nm + "Hyp")]
+        parts = [self.emit_cpp_brick(name=nm + "Hyp", hoist_reciprocals=hoist_reciprocals)]
         if self._source is not None:  # brique de source generee, sinon NoSource
-            parts.append(self.emit_cpp_source(name=nm + "Src"))
+            parts.append(self.emit_cpp_source(name=nm + "Src", hoist_reciprocals=hoist_reciprocals))
             src_type = "adc_generated::%sSrc" % nm
         else:
             src_type = "adc::NoSource"
         if self._elliptic is not None:  # brique elliptique generee, sinon rhs nul (pas de couplage)
-            parts.append(self.emit_cpp_elliptic(name=nm + "Ell"))
+            parts.append(self.emit_cpp_elliptic(name=nm + "Ell", hoist_reciprocals=hoist_reciprocals))
         else:
             parts.append(
                 "namespace adc_generated { struct %sEll {\n"
@@ -2625,12 +2729,12 @@ class HyperbolicModel:
                     % ",".join(self.aux_extra_names))
         return out
 
-    def emit_cpp_so_source(self, name=None):
+    def emit_cpp_so_source(self, name=None, hoist_reciprocals=False):
         """Source de la bibliotheque JIT (backend "jit") : le MODELE COMPLET en CompositeModel<GenHyp,
         GenSrc, GenEll> derriere une fabrique extern "C" (adc_model_nvars / adc_make_model /
         adc_destroy_model via adc::ModelAdapter). C'est ce que compile_so compile et que
         System.add_dynamic_block charge comme bloc couple a DISPATCH VIRTUEL (prototypage hote)."""
-        nv, bricks, composite = self._emit_bricks(name)
+        nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
         return ('#include <adc/runtime/dynamic_model.hpp>\n'
                 '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
                 '#include <adc/core/variables.hpp>\n'
@@ -2641,7 +2745,8 @@ class HyperbolicModel:
                 + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv
                 + self._emit_metadata("adc_generated::JitModel"))
 
-    def compile_so(self, so_path, include=None, name=None, cxx=None, std="c++20"):
+    def compile_so(self, so_path, include=None, name=None, cxx=None, std="c++20",
+                   hoist_reciprocals=False):
         """JIT : genere le MODELE COMPLET (emit_cpp_so_source) et compile une bibliotheque partagee
         chargeable par System.add_dynamic_block (dlopen). Le .so expose un CompositeModel<hyperbolique,
         source, elliptique> : le bloc dynamique applique le flux ET la source, et contribue au Poisson
@@ -2656,7 +2761,7 @@ class HyperbolicModel:
 
         if include is None:
             include = adc_include()
-        src = self.emit_cpp_so_source(name=name)
+        src = self.emit_cpp_so_source(name=name, hoist_reciprocals=hoist_reciprocals)
         cc = _default_cxx(cxx)
         if not cc:
             raise RuntimeError("compile_so : aucun compilateur C++ trouve")
@@ -2669,12 +2774,12 @@ class HyperbolicModel:
                           "-o", so_path], "backend jit, compile_so")
         return so_path
 
-    def emit_cpp_aot_source(self, name=None):
+    def emit_cpp_aot_source(self, name=None, hoist_reciprocals=False):
         """Source de la bibliotheque AOT (backend "compile") : le MODELE COMPLET en CompositeModel<...>
         derriere l'ABI extern "C" de compiled_block_abi.hpp. Le .so EXECUTE le chemin de PRODUCTION
         (assemble_rhs<Limiter, Flux>, SSPRK2/IMEX du coeur) sur le modele genere : numerique inlinee,
         identique a un bloc natif add_block. Oppose au backend "jit" (IModel, dispatch virtuel)."""
-        nv, bricks, composite = self._emit_bricks(name)
+        nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
         return ('#include <adc/runtime/compiled_block_abi.hpp>\n'
                 '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
                 '#include <adc/core/variables.hpp>\n'
@@ -2683,7 +2788,8 @@ class HyperbolicModel:
                 + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n'
                 + self._emit_metadata("adc_generated::AotModel"))  # alias sans virgule (macro metadata)
 
-    def compile_aot(self, so_path, include=None, name=None, cxx=None, std="c++20"):
+    def compile_aot(self, so_path, include=None, name=None, cxx=None, std="c++20",
+                    hoist_reciprocals=False):
         """Backend "compile" (AOT) : genere le MODELE COMPLET (emit_cpp_aot_source) et compile une .so
         chargeable par System.add_compiled_block. Contrairement au backend "jit" (compile_so : IModel,
         dispatch virtuel, Rusanov hote), le bloc tourne ici le chemin de PRODUCTION (flux HLLC/Roe au
@@ -2701,7 +2807,7 @@ class HyperbolicModel:
 
         if include is None:
             include = adc_include()
-        src = self.emit_cpp_aot_source(name=name)
+        src = self.emit_cpp_aot_source(name=name, hoist_reciprocals=hoist_reciprocals)
         if _native_kokkos_root() is None:
             raise RuntimeError(
                 "compile_aot : adc_cpp est Kokkos-only -- le modele AOT inclut les en-tetes adc qui "
@@ -2725,7 +2831,7 @@ class HyperbolicModel:
                          "backend aot, compile_aot")
         return so_path
 
-    def emit_cpp_native_loader(self, name=None, target="system"):
+    def emit_cpp_native_loader(self, name=None, target="system", hoist_reciprocals=False):
         """Source du LOADER NATIF (backend "production") : le MODELE COMPLET en CompositeModel<...>
         derriere une ABI extern "C" MINCE.
 
@@ -2762,7 +2868,7 @@ class HyperbolicModel:
         if target not in ("system", "amr_system"):
             raise ValueError("emit_cpp_native_loader : target 'system' | 'amr_system' (recu %r)"
                              % (target,))
-        nv, bricks, composite = self._emit_bricks(name)
+        nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
         # En-tetes std EN TETE (avant tout namespace). MSVC : un #include <std> tandis qu'un namespace
         # adc est ouvert fait voir std comme adc::std (erreurs <vector>) ; g++ tolere car deja inclus via
         # guard. Les hisser ici rend les #include std internes aux briques inoffensifs (no-op guard).
@@ -2819,7 +2925,8 @@ class HyperbolicModel:
                 + install
                 + self._emit_metadata("adc_generated::ProdModel"))  # noms/roles/gamma (diagnostic, comme AOT/JIT)
 
-    def compile_native(self, so_path, include=None, name=None, cxx=None, std="c++23", target="system"):
+    def compile_native(self, so_path, include=None, name=None, cxx=None, std="c++23", target="system",
+                       hoist_reciprocals=False):
         """Backend "production" : genere le LOADER NATIF (emit_cpp_native_loader) et le compile en une
         .so chargeable par System.add_native_block (target="system") ou AmrSystem.add_native_block
         (target="amr_system"). Le .so inline add_compiled_model<ProdModel> : le bloc tourne le chemin
@@ -2851,7 +2958,8 @@ class HyperbolicModel:
         # signature calculee (reutilisee pour -DADC_HEADER_SIG : un seul walk+sha256, pas deux).
         sig = _check_headers_match_module(include)
         _warn_kokkos_parity()  # module Kokkos + loader serie (ou l'inverse) -> avertir, ne pas bloquer
-        src = self.emit_cpp_native_loader(name=name, target=target)
+        src = self.emit_cpp_native_loader(name=name, target=target,
+                                          hoist_reciprocals=hoist_reciprocals)
         cc = _native_kokkos_compiler(cxx)
         if not cc:
             raise RuntimeError("compile_native : aucun compilateur C++ trouve")
@@ -2912,7 +3020,7 @@ class HyperbolicModel:
         return so_path
 
     def compile_or_jit(self, so_path, include=None, mode="jit", name=None, cxx=None, std="c++20",
-                       target="system"):
+                       target="system", hoist_reciprocals=False):
         """API unifiee (facade de l'ideal m.compile_or_jit()) choisissant le backend :
 
         - mode="jit" -> compile_so (IModel, dispatch virtuel : prototypage hote, a brancher via
@@ -2929,14 +3037,17 @@ class HyperbolicModel:
             if target != "system":
                 raise ValueError("compile_or_jit : target='amr_system' non supporte en mode 'jit' "
                                  "(le chemin AMR n'existe que pour mode='native')")
-            return self.compile_so(so_path, include, name=name, cxx=cxx, std=std)
+            return self.compile_so(so_path, include, name=name, cxx=cxx, std=std,
+                                   hoist_reciprocals=hoist_reciprocals)
         if mode == "compile":
             if target != "system":
                 raise ValueError("compile_or_jit : target='amr_system' non supporte en mode 'compile' "
                                  "(le chemin AMR n'existe que pour mode='native')")
-            return self.compile_aot(so_path, include, name=name, cxx=cxx, std=std)
+            return self.compile_aot(so_path, include, name=name, cxx=cxx, std=std,
+                                    hoist_reciprocals=hoist_reciprocals)
         if mode == "native":
-            return self.compile_native(so_path, include, name=name, cxx=cxx, std=std, target=target)
+            return self.compile_native(so_path, include, name=name, cxx=cxx, std=std, target=target,
+                                       hoist_reciprocals=hoist_reciprocals)
         raise ValueError("compile_or_jit : mode 'jit' | 'compile' | 'native' (recu %r)" % mode)
 
     # --- facade de production : un point d'entree unique par INTENTION (backend) -----------------
@@ -3050,7 +3161,7 @@ class HyperbolicModel:
                 % (self.name, " ni ".join(missing)))
 
     def compile(self, so_path=None, include=None, backend="auto", name=None, cxx=None, std=None,
-                require_metadata=False, target="system"):
+                require_metadata=False, target="system", hoist_reciprocals=False):
         """Facade de compilation par INTENTION : compile le modele en une .so via le moteur designe
         par @p backend et renvoie son chemin. Wrappe les moteurs existants (compile_so / compile_aot /
         compile_native) SANS changer la numerique ; preserve de bout en bout noms, VariableRole, gamma,
@@ -3129,12 +3240,14 @@ class HyperbolicModel:
             eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
             abi_key = _abi_key_python(include, eff_cxx, std)
             cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
+            if hoist_reciprocals:  # codegen distinct -> cle distincte (pas de collision avec la sortie par defaut)
+                cache_backend += ";hoist"
             so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
                 return so_path  # cache HIT : .so deja compilee pour cette cle, on la reutilise telle quelle
 
         return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
-                                  target=target)
+                                  target=target, hoist_reciprocals=hoist_reciprocals)
 
     @classmethod
     def adder_for(cls, backend):
@@ -3147,7 +3260,8 @@ class HyperbolicModel:
                              % (backend, sorted(cls._BACKENDS)))
         return cls._BACKENDS[backend][1]
 
-    def emit_cpp_elliptic(self, name=None, namespace="adc_generated", cse=True):
+    def emit_cpp_elliptic(self, name=None, namespace="adc_generated", cse=True,
+                          hoist_reciprocals=False):
         """Genere une BRIQUE de SECOND MEMBRE elliptique composable depuis self._elliptic.
 
         Le struct produit expose rhs(U) -> Real (densite de charge, fond, gravite...), meme forme que
@@ -3177,7 +3291,7 @@ class HyperbolicModel:
             "  ADC_HD adc::Real rhs(const State& U) const {",
         ]
         out += ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
-        out += ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
+        out += self._prim_block(self._live_prims([self._elliptic]), hoist_reciprocals)
         tl, cpps = self._codegen_exprs([self._elliptic], cse)
         out += tl
         out += ["    return %s;" % cpps[0], "  }", "};", "}  // namespace %s" % namespace]
@@ -3626,7 +3740,7 @@ class Model:
         return self._m._model_hash(params=self.params)
 
     def compile(self, so_path=None, include=None, backend="auto", target="system", name=None,
-                cxx=None, std=None, require_metadata=False):
+                cxx=None, std=None, require_metadata=False, hoist_reciprocals=False):
         """Compile le modele en un CompiledModel (Phase A). Delegue la GENERATION + compilation a
         HyperbolicModel.compile (moteurs inchanges : compile_so / compile_aot / compile_native), puis
         empaquette le .so avec les metadonnees deja connues (pas de relecture du .so).
@@ -3696,6 +3810,8 @@ class Model:
             # feature-key kokkos dans la cle (cf. compile_native) : un .so SERIE n'est pas reutilise
             # sur un module Kokkos. DOIT matcher la cle du moteur, sinon recompilations a repetition.
             cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
+            if hoist_reciprocals:  # codegen distinct -> cle distincte (cf. HyperbolicModel.compile)
+                cache_backend += ";hoist"
             so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             cache_hit = os.path.exists(so_path)
 
@@ -3705,7 +3821,8 @@ class Model:
             # Compilation (moteurs inchanges, garde-fous require_metadata/backend/target de
             # HyperbolicModel.compile : le loader emet adc_install_native_amr pour target="amr_system").
             out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
-                                 require_metadata=require_metadata, target=target)
+                                 require_metadata=require_metadata, target=target,
+                                 hoist_reciprocals=hoist_reciprocals)
 
         adder = HyperbolicModel.adder_for(backend)
         cons_roles = roles_for(m.cons_names, m.cons_roles)

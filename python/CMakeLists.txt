@@ -427,4 +427,9 @@ endforeach()
 add_test(NAME test_mg_cold_tolerance
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mg_cold_tolerance.py)
 set_tests_properties(test_mg_cold_tolerance PROPERTIES
+# ADC-200 : elimination des primitives mortes (filtrage par usage) + hoist OPT-IN de la reciproque.
+# Brique de moments autonome compilee header-only (sans Kokkos) : flux == reference Python, hoist OFF defaut.
+add_test(NAME test_codegen_dead_prims
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_codegen_dead_prims.py)
+set_tests_properties(test_codegen_dead_prims PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
