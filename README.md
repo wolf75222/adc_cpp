@@ -93,6 +93,8 @@ Carte par module et par fichier : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). 
 - Canoniques : [ARCHITECTURE](docs/ARCHITECTURE.md) (couches, modules, AMR), [ALGORITHMS](docs/ALGORITHMS.md)
   (methodes, formules), [VALIDATION](docs/VALIDATION.md), [BACKEND_COVERAGE](docs/BACKEND_COVERAGE.md)
   (matrice backends / tests).
+- Politique de qualite documentaire : [DOC_QUALITY](docs/DOC_QUALITY.md) (taxonomie des docs,
+  decisions d'outillage, guide de mise a jour).
 
 ## Quick start
 
