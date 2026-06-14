@@ -14,7 +14,7 @@ piece (`fichier:ligne` cites). Lecture seule, aucun fichier source modifie.
 
 Docs lies : [`CODEBASE_AUDIT.md`](CODEBASE_AUDIT.md) (audit de maintenabilite, 6 juin 2026),
 [`QUALITY_TOOLING.md`](QUALITY_TOOLING.md) (analyse statique, milestone *Qualite de code & CI
-durcie*, epic ADC-105). Le `CODEBASE_AUDIT.md` et le `.clang-format` renvoient a
+durcie*, epic ADC-105). Le `CODEBASE_AUDIT.md` renvoie a
 `CODE_DOCUMENTATION_CONVENTION.md`, **present dans l'arbre de travail mais non commite**
 (donc hors suivi de version, a committer ; voir D9).
 
@@ -46,7 +46,7 @@ Pratique du depot et regle proposee :
 | Membres publics de POD | sans suffixe (`Box2D::lo/hi`, `Euler::gamma` `physics/euler.hpp:40`) | sans suffixe | les trois |
 | Constantes litterales | `kCamelCase` (`kTwoPi` `mesh/geometry.hpp:72`, `kMaxRuntimeParams` `runtime/runtime_params.hpp:34`) | `kCamelCase` | Google |
 | Constantes-traits de concept | `snake_case` (`n_vars` `physics/euler.hpp:38`) | `snake_case`, nom impose par `requires` | contrainte |
-| Macros | `ADC_` + `SCREAMING_SNAKE` ; `ADC_HD` 338x, `ADC_EXPORT` 29x | `ADC_` + `SCREAMING_SNAKE` | les trois (NL.9) |
+| Macros | `ADC_` + `SCREAMING_SNAKE` ; `ADC_HD` 338x, `ADC_EXPORT` 24x (hors sa definition) | `ADC_` + `SCREAMING_SNAKE` | les trois (NL.9) |
 | Fichiers | `.hpp` `snake_case` ; 110/110, zero `.h`/`.cc` | `.hpp` `snake_case` ; `.cpp` pour les TU | Google (adapte) |
 | Namespaces | minuscules ; `adc`, `adc::detail` 45 occ. (`amr/cluster.hpp:49`) | `adc` public, `adc::detail` interne | les trois |
 | Parametres template | `PascalCase` descriptif (`Model` 127x) ; lettre pour l'arithmetique (`M`, `N`) | idem | aucun |
@@ -66,7 +66,9 @@ Statut : propose.
 Divergence : Google et LLVM imposent `#ifndef ..._H_` et proscrivent `#pragma once` ; CG (SF.8)
 demande un guard sans imposer la forme et tolere `#pragma once`.
 
-Pratique du depot : `#pragma once` dans 110/110 en-tetes, zero `#ifndef`. Unanime.
+Pratique du depot : `#pragma once` dans 110/110 en-tetes, zero `#ifndef` en garde d'inclusion (les
+seuls `#ifndef` servent la compilation conditionnelle : `ADC_HAS_KOKKOS`, `ADC_HEADER_SIG`,
+`NOMINMAX`/`WIN32_LEAN_AND_MEAN`). Unanime.
 
 Decision proposee : `#pragma once` en premiere ligne de chaque en-tete.
 
@@ -98,8 +100,9 @@ Statut : propose.
 Divergence : Google et LLVM interdisent les exceptions (LLVM compile `-fno-exceptions`) ; CG les
 recommande pour signaler l'echec (E.2, E.3).
 
-Pratique du depot : exceptions host dominantes, 134 `throw std::runtime_error`, 5
-`std::invalid_argument`, zero `std::logic_error` ; message prefixe par un contexte puis ` : `
+Pratique du depot : exceptions host dominantes (`throw std::runtime_error` : 134 dans `include/adc`,
+305 bindings Python inclus ; 3 `std::invalid_argument`, zero `std::logic_error`) ; message prefixe
+par un contexte puis ` : `
 (`runtime/native_loader.hpp:210`, `runtime/wall_predicate.hpp:33`). Zero `std::expected`,
 `std::optional` marginal (3).
 
@@ -195,8 +198,8 @@ Decision proposee : Doxygen `///` (balises `@`) pour l'API, `//` pour l'interne,
 les membres ; `/// @file` + `/// @brief` sur chaque fichier ; proscrire `/** */` ; `@param` pour les
 parametres et `@return` des qu'une fonction renvoie une valeur signifiante ; francais sans accents
 (ASCII). Supprimer le double en-tete prose au fil des touches. **Committer
-`CODE_DOCUMENTATION_CONVENTION.md`** (cible des liens, presente dans l'arbre de travail mais non
-commitee, donc hors suivi de version) pour reparer les liens, ou rediriger ces liens
+`CODE_DOCUMENTATION_CONVENTION.md`** (cible du lien depuis `CODEBASE_AUDIT.md`, presente dans l'arbre
+de travail mais non commitee, donc hors suivi de version) pour reparer le lien, ou rediriger ce lien
 vers la presente note.
 
 Justification : le depot a deja choisi Doxygen `///` (position LLVM) et le francais ASCII ; il reste a

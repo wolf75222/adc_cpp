@@ -8,7 +8,7 @@ d'audit : coeur/AMR/parallele/physique, maillage, numerique (3 lots), couplage (
 `include/adc/**/*.hpp`, `python/*.cpp`, `tests/**/*.cpp`, `python/tests/**/*.cpp`, `bench/*.cpp`,
 `CMakeLists.txt`, `CMakePresets.json`, `.clang-format`, `.clang-tidy` et les scripts de build.
 
-Methode : relecture par sous-systeme, chaque unite confiee a une passe dediee. Chaque constat
+Methode : relecture par sous-systeme, une unite a la fois. Chaque constat
 non cosmetique a ete verifie sur piece (lecture du `file:line` cite, du site jumeau et de la
 convention de fait du depot avant classification). Les constats qui se sont reveles infondes ou
 survendus a la verification ont ete soit retires, soit retrogrades en severite : 6 constats ont
@@ -22,9 +22,9 @@ Ce document est un audit de style et de conformite, pas une roadmap scientifique
 maintenabilite. Il complete :
 - [`CODEBASE_AUDIT.md`](CODEBASE_AUDIT.md) : audit de maintenabilite et de responsabilites.
 - `CODE_DOCUMENTATION_CONVENTION.md` : convention de commentaires/Doxygen. ATTENTION : ce fichier
-  est reference par `CODEBASE_AUDIT.md` et par `.clang-format` mais n'a jamais ete commite : il
-  n'existe que dans l'arbre de travail principal, donc le lien est mort pour tout clone frais de
-  `master`. A committer (suivi via ADC-125).
+  est reference par `CODEBASE_AUDIT.md` mais n'a jamais ete commite : il n'existe que dans l'arbre
+  de travail principal, donc le lien est mort pour tout clone frais de `master`. A committer
+  (suivi via ADC-125).
 - `CODING_STANDARDS_DECISIONS.md` : registre des arbitrages entre Google / Core Guidelines / LLVM
   pour le profil cible. C'est la que doivent etre actes les choix de la section 3 ; cet audit en
   suppose le contenu et le designe comme la source de verite des conventions.
@@ -57,6 +57,9 @@ sous NDEBUG) sont LATENTS : neutralises par l'usage actuel mais a durcir.
 ## 2. Synthese chiffree
 
 180 constats retenus apres verification (6 rejetes en plus, cf. note de cloture en fin de section 6).
+Le tableau ci-dessous fait foi pour le decompte ; les sections 4.x enumerent les constats
+representatifs par sous-systeme et regroupent les ecarts repetitifs, si bien que le comptage litteral
+des puces y derive de un a deux items par section.
 
 | Sous-systeme | Fichiers | Lignes | Bloquant | Important | Cosmetique | Total |
 |---|---|---|---|---|---|---|
@@ -449,7 +452,10 @@ les regroupements de parametres en POD.
 
 ## 6. Suites a donner (priorisees)
 
-Bloquants d'abord, puis dette structurelle a fort effet de levier, puis cosmetique outille.
+Bloquants d'abord, puis dette structurelle a fort effet de levier, puis cosmetique outille. Ces
+suites sont tracees dans le milestone *Revue & audit qualite du code* : ADC-209 (1), ADC-210 (2 et 3),
+ADC-211 (4 et 6), ADC-212 (5), ADC-213 (7), ADC-214 (8), ADC-215 (9), ADC-216 (10), ADC-217 (11),
+ADC-219 (12) ; le critere d'acceptation #5 (ecarts bloquants corriges ou traces) est ainsi clos.
 
 1. `box_hash.hpp:71-73` : passer la cle et `bins_` a `std::int64_t`, caster `bx` avant le decalage.
    Gate du port Windows natif. A tracer en issue (lie a l'epic ADC-90).
