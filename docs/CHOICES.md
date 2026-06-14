@@ -1,97 +1,97 @@
-# Choix de conception
+# Design choices
 
-Les décisions d'architecture d'`adc_cpp`, avec leur contexte et leur coût. Complète
-[ARCHITECTURE.md](ARCHITECTURE.md) (qui décrit l'état) en disant *pourquoi*.
-
----
-
-## D-1. Pile AMR écrite *from scratch*, pas sur `pde_core_cpp`
-
-**Contexte.** `euler_cpp` et `advection_cpp` dépendent de `pde_core_cpp` (primitives AMR
-partagées via FetchContent). Une option était de faire pareil pour `adc_cpp`.
-
-**Décision.** Pile MultiFab + BoxArray + DistributionMapping + seam écrite entièrement dans
-`include/adc/`, indépendante.
-
-**Pourquoi.** Le couplage hyperbolique-elliptique sur AMR distribué (diocotron, deux-fluides
-plasma) demande une couche mesh proche d'AMReX (MultiFab distribué, FluxRegister, FillPatch)
-que `pde_core_cpp` n'avait pas. La construire from scratch fige une pile AMR maîtrisée de
-bout en bout, but pédagogique du stage.
-
-**Coût.** Duplication conceptuelle avec AMReX ; pas d'optimisations matures (MFIter, EB
-courbe). Assumé : on reste lisible et portable plutôt qu'optimal.
+The architecture decisions of `adc_cpp`, with their context and their cost. Complements
+[ARCHITECTURE.md](ARCHITECTURE.md) (which describes the state) by saying *why*.
 
 ---
 
-## D-2. Trois axes orthogonaux + concepts
+## D-1. AMR stack written *from scratch*, not on top of `pde_core_cpp`
 
-**Décision.** `PhysicalModel` (concept), `NumericalFlux` (policy), `EllipticSolver`
-(concept), couplage. Un solveur = un point dans ce produit.
+**Context.** `euler_cpp` and `advection_cpp` depend on `pde_core_cpp` (AMR primitives
+shared via FetchContent). One option was to do the same for `adc_cpp`.
 
-**Pourquoi.** Ajouter un flux (HLLC), un elliptique (FFT), ou un modèle (deux-fluides) sans
-toucher le reste. `compute_face_fluxes<Limiter, NumericalFlux, Model>` est le point de
-jonction. Inspiré du design de PLUTO (voir BIBLIOGRAPHY).
+**Decision.** MultiFab + BoxArray + DistributionMapping + seam stack written entirely in
+`include/adc/`, independent.
 
----
+**Why.** The hyperbolic-elliptic coupling on distributed AMR (diocotron, two-fluid
+plasma) requires a mesh layer close to AMReX (distributed MultiFab, FluxRegister, FillPatch)
+that `pde_core_cpp` did not have. Building it from scratch freezes an AMR stack mastered
+end to end, the pedagogical goal of the internship.
 
-## D-3. Le seam `for_each_cell` (dispatch unique)
-
-**Décision.** Une seule primitive de boucle `for_each_cell(box, lambda ADC_HD)` se compile
-en `Kokkos::parallel_for` (espace d'exécution Serial / OpenMP / Cuda selon l'install Kokkos).
-`Array4` POD device-callable, `device_fence()`, `comm.hpp` pour MPI.
-
-**Pourquoi.** La physique est écrite une fois et tourne partout. Kokkos est le seul backend
-on-node et il est obligatoire (`-DADC_USE_KOKKOS=ON`, ON par défaut) ; le seam ne compile pas
-sans `ADC_HAS_KOKKOS`. Le backend reste une **propriété de la cible `adc`**
-(target_compile_definitions INTERFACE), pas un drapeau par solveur : la cible on-node se
-choisit à l'installation de Kokkos (`Kokkos_ENABLE_SERIAL` / `_OPENMP` / `_CUDA`), rien dans
-le code.
-
-**Coût.** Discipline de fences GPU (toute fonction kernel-device puis boucle-hôte sur la
-même mémoire unifiée doit `device_fence()` entre les deux). Le bug le plus subtil rencontré.
+**Cost.** Conceptual duplication with AMReX; no mature optimizations (MFIter, curved EB).
+Accepted: we stay readable and portable rather than optimal.
 
 ---
 
-## D-4. MultiFab / BoxArray / DistributionMapping façon AMReX
+## D-2. Three orthogonal axes + concepts
 
-**Décision.** BoxArray **global** (tous les rangs connaissent toutes les boîtes),
-DistributionMapping (propriétaire par boîte, équilibrage SFC), MultiFab n'allouant que les
-fabs locaux.
+**Decision.** `PhysicalModel` (concept), `NumericalFlux` (policy), `EllipticSolver`
+(concept), coupling. A solver = one point in this product.
 
-**Pourquoi.** C'est le modèle qui rend l'AMR distribué possible et la couverture multi-patch
-correcte sous n'importe quelle distribution (la couverture se calcule du BoxArray global).
-
----
-
-## D-5. `EllipticSolver` concept : multigrille ET FFT
-
-**Décision.** `GeometricMG` (itératif, warm-start, on-device) et `PoissonFFTSolver`
-(direct, périodique) modèlent le même concept ; le coupleur est générique dessus.
-
-**Pourquoi.** Le bon solveur dépend de la charge (mesuré : FFT gagne ~4.8x sur Euler-Poisson
-Poisson-dominé, MG gagne ~2.4x sur le deux-fluides transport-dominé). Le concept laisse
-choisir sans réécrire le coupleur.
+**Why.** Add a flux (HLLC), an elliptic (FFT), or a model (two-fluid) without
+touching the rest. `compute_face_fluxes<Limiter, NumericalFlux, Model>` is the junction
+point. Inspired by the design of PLUTO (see BIBLIOGRAPHY).
 
 ---
 
-## D-6. Façade runtime de composition + bindings
+## D-3. The `for_each_cell` seam (single dispatch)
 
-**Décision.** Les bindings (`python/bindings.cpp`) exposent des façades de COMPOSITION à
-l'exécution (`System`, `AmrSystem`), pas des solveurs nommés. Un modèle est une composition de
-briques génériques (`adc.Model(state, transport, source, elliptic)`) assemblée par le
-`model_factory` ; aucun scénario n'est nommé dans la lib.
+**Decision.** A single loop primitive `for_each_cell(box, lambda ADC_HD)` compiles
+to `Kokkos::parallel_for` (Serial / OpenMP / Cuda execution space depending on the Kokkos install).
+Device-callable POD `Array4`, `device_fence()`, `comm.hpp` for MPI.
 
-**Pourquoi.** Une surface stable et bindable, jamais `Coupler<Model, Elliptic>` au-dehors. Le
-cœur générique reste header-only ; la façade runtime (`runtime/system.hpp`) donne une API Python
-propre et une frontière de compilation. Les solveurs nommés concrets ont disparu au profit de la
-composition agnostique : les noms de scénario vivent côté application (`adc_cases`).
+**Why.** The physics is written once and runs everywhere. Kokkos is the only on-node
+backend and it is required (`-DADC_USE_KOKKOS=ON`, ON by default); the seam does not compile
+without `ADC_HAS_KOKKOS`. The backend remains a **property of the `adc` target**
+(target_compile_definitions INTERFACE), not a per-solver flag: the on-node target is
+chosen at the Kokkos install (`Kokkos_ENABLE_SERIAL` / `_OPENMP` / `_CUDA`), nothing in
+the code.
+
+**Cost.** GPU fence discipline (any kernel-device function then host-loop on the
+same unified memory must `device_fence()` between the two). The most subtle bug encountered.
 
 ---
 
-## D-7. Pile Fab2D de référence gardée comme oracle de test
+## D-4. MultiFab / BoxArray / DistributionMapping in the AMReX style
 
-**Décision.** L'ancienne pile mono-box `Fab2D` (`amr_reflux.hpp`, `amr_multilevel.hpp`)
-n'est plus en production mais reste compilée et testée.
+**Decision.** **Global** BoxArray (all ranks know all boxes),
+DistributionMapping (per-box owner, SFC balancing), MultiFab allocating only the
+local fabs.
 
-**Pourquoi.** Elle sert d'**oracle** : chaque brique MultiFab est prouvée bit-identique à
-elle (`test_amr_*_mf`). Refonte sûre par équivalence plutôt que par confiance.
+**Why.** This is the model that makes distributed AMR possible and the multi-patch coverage
+correct under any distribution (the coverage is computed from the global BoxArray).
+
+---
+
+## D-5. `EllipticSolver` concept: multigrid AND FFT
+
+**Decision.** `GeometricMG` (iterative, warm-start, on-device) and `PoissonFFTSolver`
+(direct, periodic) model the same concept; the coupler is generic over it.
+
+**Why.** The right solver depends on the load (measured: FFT wins ~4.8x on Poisson-dominated
+Euler-Poisson, MG wins ~2.4x on the transport-dominated two-fluid). The concept lets
+you choose without rewriting the coupler.
+
+---
+
+## D-6. Runtime composition facade + bindings
+
+**Decision.** The bindings (`python/bindings.cpp`) expose runtime COMPOSITION facades
+(`System`, `AmrSystem`), not named solvers. A model is a composition of
+generic bricks (`adc.Model(state, transport, source, elliptic)`) assembled by the
+`model_factory`; no scenario is named in the lib.
+
+**Why.** A stable and bindable surface, never `Coupler<Model, Elliptic>` on the outside. The
+generic core stays header-only; the runtime facade (`runtime/system.hpp`) gives a clean Python
+API and a compilation boundary. The concrete named solvers have disappeared in favor of
+agnostic composition: the scenario names live on the application side (`adc_cases`).
+
+---
+
+## D-7. Reference Fab2D stack kept as a test oracle
+
+**Decision.** The old mono-box `Fab2D` stack (`amr_reflux.hpp`, `amr_multilevel.hpp`)
+is no longer in production but stays compiled and tested.
+
+**Why.** It serves as an **oracle**: every MultiFab brick is proven bit-identical to
+it (`test_amr_*_mf`). Safe rework by equivalence rather than by trust.

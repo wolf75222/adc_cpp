@@ -1,11 +1,11 @@
-# DSL_API -- Reference courte du DSL Python (adc.dsl)
+# DSL_API -- Short reference of the Python DSL (adc.dsl)
 
-Document de reference UTILISATEUR. Pour la conception, le raisonnement et l'historique,
-voir [docs/DSL_MODEL_DESIGN.md](DSL_MODEL_DESIGN.md).
+USER reference document. For design, reasoning and history,
+see [docs/DSL_MODEL_DESIGN.md](DSL_MODEL_DESIGN.md).
 
 ---
 
-## 1. Ecrire un modele symbolique
+## 1. Writing a symbolic model
 
 ```python
 import adc
@@ -39,7 +39,7 @@ g = m.param("gamma", 1.4)
 
 ---
 
-## 2. Compiler
+## 2. Compile
 
 ```python
 # Le DEFAUT de m.compile(...) est backend="aot" : il faut donc demander explicitement
@@ -49,19 +49,19 @@ compiled = m.compile(backend="production", target="system")
 compiled_amr = m.compile(backend="production", target="amr_system")
 ```
 
-Backends disponibles (`backend=` ; DEFAUT = `aot`) :
+Available backends (`backend=` ; DEFAULT = `aot`) :
 
-| backend | CPU | MPI | AMR | GPU | Remarque |
+| backend | CPU | MPI | AMR | GPU | Note |
 |---|---|---|---|---|---|
-| `production` | oui | oui (np=1/2/4) | via `AmrSystem` | GH200 (cote C++) | **recommande** en MPI/AMR ; natif zero-copie. `_BACKEND_CAPS["production"]["gpu"]` est rapporte `False` cote Python (le module hote teste n'est pas bati Kokkos/CUDA) |
-| `aot` | oui | non | non | non | **DEFAUT** ; `.so` a marshaling ; debug/bench CPU. Porte aussi les params runtime (`set_block_params`) |
-| `prototype` | oui (Rusanov o1) | non | non | non | JIT proto ; ne pas utiliser en production |
+| `production` | yes | yes (np=1/2/4) | via `AmrSystem` | GH200 (C++ side) | **recommended** in MPI/AMR ; native zero-copy. `_BACKEND_CAPS["production"]["gpu"]` is reported `False` on the Python side (the tested host module is not built with Kokkos/CUDA) |
+| `aot` | yes | no | no | no | **DEFAULT** ; marshaling `.so` ; CPU debug/bench. Also carries runtime params (`set_block_params`) |
+| `prototype` | yes (Rusanov o1) | no | no | no | JIT proto ; do not use in production |
 
-Le `.so` est mis en cache par `model_hash` : un modele inchange n'est pas recompile.
+The `.so` is cached by `model_hash` : an unchanged model is not recompiled.
 
 ---
 
-## 3. Brancher sur System / AmrSystem
+## 3. Wiring onto System / AmrSystem
 
 ```python
 sim = adc.System(n=256, periodic=True)
@@ -85,30 +85,30 @@ amr.add_equation("fluide",
                  time=adc.Explicit(substeps=1))
 ```
 
-Points importants :
-- `riemann=` nomme le flux NUMERIQUE (`rusanov`/`hllc`/`roe`) ; `m.flux(...)` est le flux PHYSIQUE.
-- `fft` n'est pas supporte sous `System` en MPI `np>1` : employer `geometric_mg`.
-- `backend="production"` avec `target="amr_system"` : `AmrSystem` est mono- ET multi-bloc,
-  explicite ; HLLC/Roe/`primitive` sont rejetes cote facade Python AMR (le moteur C++ les supporte,
-  mais le binding Python ne les expose pas encore sur ce chemin).
+Important points :
+- `riemann=` names the NUMERICAL flux (`rusanov`/`hllc`/`roe`) ; `m.flux(...)` is the PHYSICAL flux.
+- `fft` is not supported under `System` in MPI `np>1` : use `geometric_mg`.
+- `backend="production"` with `target="amr_system"` : `AmrSystem` is single- AND multi-block,
+  explicit ; HLLC/Roe/`primitive` are rejected on the Python AMR facade side (the C++ engine supports them,
+  but the Python binding does not expose them yet on this path).
 
 ---
 
-## 4. Cache et reproductibilite
+## 4. Cache and reproducibility
 
-`m.compile()` retourne un objet `CompiledModel` qui porte :
-- `so_path` : chemin du `.so` compile.
-- `model_hash` : hash stable (formules + roles + params) -- cle de cache.
-- `abi_key` : cle compilateur/std/en-tetes -- refus explicite si incompatible au chargement.
-- `params` : dict des parametres nommes declares via `m.param(...)`.
+`m.compile()` returns a `CompiledModel` object that carries :
+- `so_path` : path of the compiled `.so`.
+- `model_hash` : stable hash (formulas + roles + params) -- cache key.
+- `abi_key` : compiler/std/headers key -- explicit refusal if incompatible at load time.
+- `params` : dict of named parameters declared via `m.param(...)`.
 
 ---
 
-## 5. Points de vigilance
+## 5. Points of attention
 
-- `m.param(name, value)` : par defaut (`kind="const"`) constante INLINEE a la compilation ; changer
-  la valeur exige un nouvel appel a `m.compile()`. Le mode `runtime` (`kind="runtime"`) est SUPPORTE
-  sur le backend `aot` : la valeur est modifiable SANS recompiler via `System.set_block_params`.
+- `m.param(name, value)` : by default (`kind="const"`) constant INLINED at compile time ; changing
+  the value requires a new call to `m.compile()`. The `runtime` mode (`kind="runtime"`) is SUPPORTED
+  on the `aot` backend : the value is modifiable WITHOUT recompiling via `System.set_block_params`.
 
   ```python
   m = dsl.Model("iso")
@@ -130,18 +130,18 @@ Points importants :
                    spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"))
   sim.set_block_params("gas", [4.0])                   # change cs2 au RUNTIME, sans recompiler
   ```
-- `adc.PythonFlux` : outil de TEST numpy hote, hors hot path GPU/MPI. Ne jamais utiliser en
+- `adc.PythonFlux` : numpy host TEST tool, outside the GPU/MPI hot path. Never use in
   production.
-- Roles physiques (`Density`, `MomentumX`, `MomentumY`, ...) : requis pour les couplages
-  inter-especes et pour que le `System` retrouve les grandeurs par role. A fournir a
-  `conservative_vars(roles=...)` ou a `m.compile(require_metadata=True)`.
+- Physical roles (`Density`, `MomentumX`, `MomentumY`, ...) : required for inter-species
+  couplings and for the `System` to recover quantities by role. To be supplied to
+  `conservative_vars(roles=...)` or to `m.compile(require_metadata=True)`.
 
 ---
 
-## 6. Demonstrateurs de reference (adc_cases, ci=true)
+## 6. Reference demonstrators (adc_cases, ci=true)
 
-| Cas | Fichier |
+| Case | File |
 |---|---|
-| ExB mono-espece DSL | `diocotron_dsl/run.py` |
-| Deux especes DSL | `two_species_dsl/run.py` |
-| Isotherme magnetique DSL | `magnetic_isothermal_dsl/run.py` |
+| Single-species ExB DSL | `diocotron_dsl/run.py` |
+| Two species DSL | `two_species_dsl/run.py` |
+| Magnetic isothermal DSL | `magnetic_isothermal_dsl/run.py` |

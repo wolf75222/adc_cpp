@@ -1,72 +1,72 @@
 # Changelog
 
-Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) ; versionnement
-[SemVer](https://semver.org/lang/fr/) (0.y.z tant que l'API publique bouge encore).
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
+[SemVer](https://semver.org/lang/en/) (0.y.z while the public API still moves).
 
-## Politique de version
+## Versioning policy
 
-- **Source unique** : `project(VERSION x.y.z)` dans `CMakeLists.txt`. Tout en derive :
-  `adc.__version__` (bake `ADC_VERSION` dans `_adc`), la wheel pip (regex du `pyproject.toml`),
-  `adcConfigVersion.cmake` (install/export). Ne JAMAIS dupliquer le numero ailleurs --
-  `docs/Doxyfile` (`PROJECT_NUMBER`) et `docs/sphinx/conf.py` (`release`) doivent suivre a la
-  main lors d'un bump (TODO : les generer ; en attendant, les trois fichiers sont la checklist).
-- **Bump** : PATCH = correctifs sans changement d'API ; MINOR = ajouts d'API/briques retrocompatibles ;
-  MAJOR (post-1.0) = rupture d'API ou d'ABI du chemin DSL production.
-- **Tag** : poser `git tag vX.Y.Z` sur master au merge de la PR qui bumpe, puis `git push --tags`.
-- A chaque PR notable : une ligne dans `[Non publie]` ci-dessous ; au bump, la section devient
-  `[x.y.z] - AAAA-MM-JJ`.
+- **Single source**: `project(VERSION x.y.z)` in `CMakeLists.txt`. Everything derives from it:
+  `adc.__version__` (bakes `ADC_VERSION` into `_adc`), the pip wheel (regex in `pyproject.toml`),
+  `adcConfigVersion.cmake` (install/export). NEVER duplicate the number elsewhere; `docs/Doxyfile`
+  (`PROJECT_NUMBER`) and `docs/sphinx/conf.py` (`release`) must follow by hand on a bump (TODO:
+  generate them; until then, the three files are the checklist).
+- **Bump**: PATCH = fixes with no API change; MINOR = backward-compatible API/brick additions;
+  MAJOR (post-1.0) = API or ABI break of the DSL production path.
+- **Tag**: set `git tag vX.Y.Z` on master when the bumping PR merges, then `git push --tags`.
+- On every notable PR: one line in `[Unreleased]` below; on a bump, the section becomes
+  `[x.y.z] - YYYY-MM-DD`.
 
-## [Non publie]
+## [Unreleased]
 
-### Ajoute
+### Added
 
-- **Outillage qualite / analyse statique** (ADC-105) : workflow CI dedie `.github/workflows/quality.yml`,
-  hors du chemin critique des PR (cron hebdomadaire dimanche + `workflow_dispatch` + label `quality`).
-  Cinq jobs *informatifs* (non bloquants) : `clang-format` (`.clang-format`), warnings stricts
-  (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), sanitizers ASan+UBSan (`ADC_ENABLE_SANITIZERS`,
-  presets `ci-warnings`/`ci-asan`) et CodeQL. Options CMake OFF par defaut (cible `adc_dev_options`
-  vide) -> `ci.yml`, les builds locaux et `adc_cases` sont inchanges. Voir `docs/QUALITY_TOOLING.md`.
+- **Quality tooling / static analysis** (ADC-105): dedicated CI workflow `.github/workflows/quality.yml`,
+  off the PR critical path (weekly Sunday cron + `workflow_dispatch` + `quality` label). Five
+  *informative* (non-blocking) jobs: `clang-format` (`.clang-format`), strict warnings
+  (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), ASan+UBSan sanitizers (`ADC_ENABLE_SANITIZERS`,
+  `ci-warnings`/`ci-asan` presets) and CodeQL. CMake options OFF by default (empty `adc_dev_options`
+  target), so `ci.yml`, local builds and `adc_cases` are unchanged. See `docs/QUALITY_TOOLING.md`.
 
 ## [0.1.0] - 2026-06-10
 
-Premiere version numerotee (auparavant `0.0.1` jamais exposee ; Doxygen/Sphinx annoncaient
-deja 0.1.0 -- ce bump aligne la source unique CMake dessus).
+First numbered release (previously `0.0.1`, never exposed; Doxygen/Sphinx already announced
+0.1.0, and this bump aligns the CMake single source with it).
 
-### Ajoute
-- `pip install .` via scikit-build-core : module dans site-packages, sans PYTHONPATH ;
-  backends par variables d'environnement (`ADC_USE_KOKKOS=ON Kokkos_ROOT=... pip install .`).
-- `find_package(adc)` : regles d'installation/export du coeur header-only (`ADC_INSTALL`).
-- `adc.__version__`, `adc.doctor()` (diagnostic complet), `adc.set_threads()` /
+### Added
+- `pip install .` via scikit-build-core: module in site-packages, no PYTHONPATH; backends via
+  environment variables (`ADC_USE_KOKKOS=ON Kokkos_ROOT=... pip install .`).
+- `find_package(adc)`: install/export rules for the header-only core (`ADC_INSTALL`).
+- `adc.__version__`, `adc.doctor()` (full diagnostic), `adc.set_threads()` /
   `adc.parallel_info()` / `adc.has_kokkos()`, `_adc.kokkos_is_initialized()`.
-- Presets CMake (`python`, `python-parallel`, `serial`, `parallel`, `mpi` + serie `ci-*`
-  utilisee par la CI : source unique des flags).
-- Environnement conda (`environment.yml`) + `scripts/setup_env.sh` (toolchain par plateforme
-  figee dans l'env) + `pixi.toml` (lockfile reproductible multi-plateforme).
-- `scripts/kokkos_openmp_conda.sh` (Kokkos Serial+OpenMP dans l'env conda, ~2 min) ;
-  `scripts/build_docs.sh` (lint + Sphinx + Doxygen + site en une commande) ;
-  profil machine `Tools/machines/romeo/romeo_adc.profile.example`.
-- Cle d'ABI du chemin DSL production etendue : jetons `kokkos=` et `stdlib=` (divergences
-  auparavant indetectees), en litteral preprocesseur (insensible a l'interposition ELF).
-- Gardes toolchain runtime du DSL : compilateur du build bake (`__cxx_compiler__`) et prefere
-  au PATH, probe de norme (`c++23`->`c++2b`), garde pre-dlopen module/en-tetes (y compris sur
-  cache HIT), erreurs de compilation remontees avec la sortie compilateur.
+- CMake presets (`python`, `python-parallel`, `serial`, `parallel`, `mpi` plus the `ci-*` series
+  used by CI: single source of the flags).
+- Conda environment (`environment.yml`) plus `scripts/setup_env.sh` (per-platform toolchain
+  pinned in the env) plus `pixi.toml` (reproducible cross-platform lockfile).
+- `scripts/kokkos_openmp_conda.sh` (Kokkos Serial+OpenMP in the conda env, ~2 min);
+  `scripts/build_docs.sh` (lint + Sphinx + Doxygen + site in one command); machine profile
+  `Tools/machines/romeo/romeo_adc.profile.example`.
+- Extended ABI key of the DSL production path: `kokkos=` and `stdlib=` tokens (divergences
+  previously undetected), as a preprocessor literal (insensitive to ELF interposition).
+- DSL runtime toolchain guards: build compiler baked in (`__cxx_compiler__`) and preferred over
+  PATH, standard probe (`c++23`->`c++2b`), pre-dlopen module/header guard (including on cache HIT),
+  compilation errors surfaced with the compiler output.
 
-### Modifie
-- `ADC_BUILD_TESTS` suit `PROJECT_IS_TOP_LEVEL` : un consommateur FetchContent ne compile plus
-  la suite de tests.
-- `import adc` fonctionne sans numpy (`adc.dsl` paresseux, erreur ciblee a l'usage).
-- Cache des `.so` DSL : cle machine-aware (arch + optflags) et empreinte de l'install Kokkos
-  (`KokkosCore_config.h`) -- un Kokkos different invalide le cache.
-- Tests : labels ctest (`core`/`mpi`) + timeouts ; garde memoire `-O0` + pool ninja etendu
-  automatiquement a toute cible compilant `system.cpp`/`amr_system.cpp` (39 objets).
-- `pybind11` pris dans l'environnement avant tout FetchContent ; ccache auto-detecte ;
-  option `ADC_PY_LTO` (OFF par defaut).
+### Changed
+- `ADC_BUILD_TESTS` follows `PROJECT_IS_TOP_LEVEL`: a FetchContent consumer no longer builds the
+  test suite.
+- `import adc` works without numpy (`adc.dsl` is lazy, with a targeted error at use).
+- DSL `.so` cache: machine-aware key (arch + optflags) and fingerprint of the Kokkos install
+  (`KokkosCore_config.h`); a different Kokkos invalidates the cache.
+- Tests: ctest labels (`core`/`mpi`) plus timeouts; memory guard `-O0` plus the ninja pool
+  extended automatically to any target compiling `system.cpp`/`amr_system.cpp` (39 objects).
+- `pybind11` taken from the environment before any FetchContent; ccache auto-detected;
+  `ADC_PY_LTO` option (OFF by default).
 
-### Corrige
-- Trois bugs utilisateurs reels du chemin DSL production : compilateur du PATH conda rejetant
-  `-std=c++23`, module perime -> dlopen `symbol not found` cryptique, `CalledProcessError`
-  sans la sortie du compilateur.
-- `find_package(Kokkos)` echouait sur macOS face a un Kokkos OpenMP (hints libomp poses avant
-  le `find_dependency(OpenMP)` de KokkosConfig).
-- Doc : contradiction pip/PYTHONPATH, mention Catch2 fantome, `$KOKKOS_ROOT` non defini dans
-  le tutoriel, claim numpy perime, versions incoherentes (0.0.1 vs 0.1.0).
+### Fixed
+- Three real user bugs of the DSL production path: conda PATH compiler rejecting `-std=c++23`,
+  stale module leading to a cryptic dlopen `symbol not found`, `CalledProcessError` without the
+  compiler output.
+- `find_package(Kokkos)` failed on macOS against a Kokkos OpenMP (libomp hints set before
+  KokkosConfig's `find_dependency(OpenMP)`).
+- Docs: pip/PYTHONPATH contradiction, phantom Catch2 mention, `$KOKKOS_ROOT` undefined in the
+  tutorial, stale numpy claim, inconsistent versions (0.0.1 vs 0.1.0).

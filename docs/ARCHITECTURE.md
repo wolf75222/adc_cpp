@@ -1,43 +1,43 @@
-# Architecture de adc_cpp
+# Architecture of adc_cpp
 
-adc_cpp est le coeur C++20 header-only pour les systemes hyperbolique-elliptique couples sur
-maillage adaptatif (AMR), ecrit pour MPI + Kokkos (Kokkos est le SEUL backend on-node : Serial /
-OpenMP / Cuda selon l'install ; le backend OpenMP autonome a ete retire). Les briques physiques generiques
-([`include/adc/physics/`](../include/adc/physics)) et les bindings Python de la lib (module
-`adc`, extension compilee `_adc`, facades de composition `System` / `AmrSystem`) vivent ici ; le
-depot voisin `adc_cases` ne contient que des cas d'utilisation Python qui importent ce module. Le
-coeur est agnostique au modele : il ne nomme aucun scenario, il fournit des briques composees en
-`CompositeModel`. Les couches sont orthogonales (physique, numerique, donnees/maillage, execution,
-temps/couplage) et une couche haute ne depend jamais d'un detail d'execution.
+adc_cpp is the header-only C++20 core for coupled hyperbolic-elliptic systems on
+adaptive mesh (AMR), written for MPI + Kokkos (Kokkos is the ONLY on-node backend: Serial /
+OpenMP / Cuda depending on the install; the standalone OpenMP backend was removed). The generic physics bricks
+([`include/adc/physics/`](../include/adc/physics)) and the library's Python bindings (module
+`adc`, compiled extension `_adc`, composition facades `System` / `AmrSystem`) live here; the
+neighboring repository `adc_cases` only contains Python use cases that import this module. The
+core is model-agnostic: it names no scenario, it provides bricks composed in
+`CompositeModel`. The layers are orthogonal (physics, numerics, data/mesh, execution,
+time/coupling) and a high layer never depends on an execution detail.
 
 
-## Sommaire
+## Contents
 
-- [Vue d ensemble](#vue-d-ensemble)
-- [Les couches](#les-couches)
-- [Conventions de grille](#conventions-de-grille)
-- [Stencil AMR coarse-fine (reflux)](#stencil-amr-coarse-fine-reflux)
-- [Pipeline d un pas de temps](#pipeline-d-un-pas-de-temps)
-- [Proprietes verifiees](#proprietes-verifiees)
+- [Overview](#vue-d-ensemble)
+- [The layers](#les-couches)
+- [Grid conventions](#conventions-de-grille)
+- [AMR coarse-fine stencil (reflux)](#stencil-amr-coarse-fine-reflux)
+- [Pipeline of a time step](#pipeline-d-un-pas-de-temps)
+- [Verified properties](#proprietes-verifiees)
 - [Backends](#backends)
 - [Thread safety](#thread-safety)
-- [Utiliser la bibliotheque](#utiliser-la-bibliotheque)
+- [Using the library](#utiliser-la-bibliotheque)
 - [Limitations](#limitations)
-- [Arborescence](#arborescence)
+- [Tree](#arborescence)
 
 ---
-## Vue d ensemble
+## Overview
 
-Le diagramme ci-dessous montre les modules publics de [`include/adc/`](../include/adc), les
-dependances externes reelles, et les consommateurs du coeur. Les fleches sont les inclusions
-effectivement presentes dans les en-tetes (verifiees par `grep '#include <adc/...>'`). Les aretes
-externes : **Kokkos est obligatoire** (le seul backend on-node : `ADC_USE_KOKKOS` ON par defaut,
-trouve par `find_package` ou recupere par FetchContent) ; MPI est optionnel (`ADC_USE_MPI`) ;
-pybind11 ne sert que le module Python. Le sequentiel passe par Kokkos Serial, pas par une boucle
-hote sans Kokkos. Note de fidelite : le projet n'embarque ni Eigen, ni fftw, ni Catch2 ; la FFT de
-[`numerics/elliptic/poisson_fft.hpp`](../include/adc/numerics/elliptic/poisson_fft.hpp) est ecrite
-a la main, et les tests sont des programmes `int main` qui lient `adc::adc` (pas de framework
-tiers).
+The diagram below shows the public modules of [`include/adc/`](../include/adc), the
+real external dependencies, and the consumers of the core. The arrows are the inclusions
+actually present in the headers (verified by `grep '#include <adc/...>'`). The
+external edges: **Kokkos is required** (the only on-node backend: `ADC_USE_KOKKOS` ON by default,
+found by `find_package` or fetched by FetchContent); MPI is optional (`ADC_USE_MPI`);
+pybind11 only serves the Python module. The sequential path goes through Kokkos Serial, not through a host loop
+without Kokkos. Fidelity note: the project embeds neither Eigen, nor fftw, nor Catch2; the FFT of
+[`numerics/elliptic/poisson_fft.hpp`](../include/adc/numerics/elliptic/poisson_fft.hpp) is written
+by hand, and the tests are `int main` programs that link `adc::adc` (no third-party
+framework).
 
 ```mermaid
 flowchart TD
@@ -121,116 +121,116 @@ flowchart TD
 ```
 
 
-## Les couches
+## The layers
 
-adc_cpp s'organise en cinq couches orthogonales. Une couche haute exprime le probleme, une couche basse l'execute ; une couche haute ne depend jamais d'un detail d'execution. La separation structurante : les conteneurs (ce qui stocke) sont distincts de la politique d'execution (comment on boucle et on communique).
+adc_cpp is organized into five orthogonal layers. A high layer expresses the problem, a low layer executes it; a high layer never depends on an execution detail. The structuring separation: the containers (what stores) are distinct from the execution policy (how one loops and communicates).
 
-**Physique (local, device-callable).** Le concept `PhysicalModel` ([`include/adc/core/physical_model.hpp`](../include/adc/core/physical_model.hpp)) n'expose que des lois locales et ponctuelles, toutes `ADC_HD` : `flux`, `source`, `max_wave_speed`, `elliptic_rhs`. Aucun acces au stockage ni au parallelisme ; pas d'allocation dans les boucles chaudes, pas de `std::function`, pas de polymorphisme dynamique. Le coeur est agnostique au modele : un modele est une composition (`CompositeModel`, [`include/adc/physics/composite.hpp`](../include/adc/physics/composite.hpp)) de briques generiques ([`include/adc/physics/bricks.hpp`](../include/adc/physics/bricks.hpp)) sur trois axes (transport / source / elliptique), les noms de scenario vivant cote application. Le canal `aux` porte `(phi, grad_x, grad_y)` et est extensible (`B_z`, `T_e`). La geometrie (cartesien / polaire / disque) est un axe de config du maillage, pas du modele.
+**Physics (local, device-callable).** The `PhysicalModel` concept ([`include/adc/core/physical_model.hpp`](../include/adc/core/physical_model.hpp)) only exposes local and pointwise laws, all `ADC_HD`: `flux`, `source`, `max_wave_speed`, `elliptic_rhs`. No access to storage nor to parallelism; no allocation in hot loops, no `std::function`, no dynamic polymorphism. The core is model-agnostic: a model is a composition (`CompositeModel`, [`include/adc/physics/composite.hpp`](../include/adc/physics/composite.hpp)) of generic bricks ([`include/adc/physics/bricks.hpp`](../include/adc/physics/bricks.hpp)) on three axes (transport / source / elliptic), the scenario names living on the application side. The `aux` channel carries `(phi, grad_x, grad_y)` and is extensible (`B_z`, `T_e`). The geometry (cartesian / polar / disk) is a config axis of the mesh, not of the model.
 
-**Numerique / discretisation.** La logique numerique locale : flux de Riemann ([`include/adc/numerics/numerical_flux.hpp`](../include/adc/numerics/numerical_flux.hpp) : Rusanov / HLL / HLLC / Roe, politiques `ADC_HD`), reconstruction MUSCL + WENO5-Z ([`include/adc/numerics/reconstruction.hpp`](../include/adc/numerics/reconstruction.hpp)), l'operateur elliptique ([`include/adc/numerics/elliptic/`](../include/adc/numerics/elliptic/)) et les CL logiques ([`include/adc/mesh/physical_bc.hpp`](../include/adc/mesh/physical_bc.hpp)). On distingue les politiques point-wise (flux, reconstruction, stencil : prennent des etats, ne voient aucun conteneur) des operateurs de grille (`assemble_rhs`, [`include/adc/numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp)) qui bouclent sur une `Box` via une vue locale `Array4` mais ignorent la decomposition en boxes/rangs et le backend. Les variantes de geometrie sont purement additives : [`spatial_operator_eb.hpp`](../include/adc/numerics/spatial_operator_eb.hpp) (cut-cell) et [`spatial_operator_polar.hpp`](../include/adc/numerics/spatial_operator_polar.hpp), le cartesien restant bit-identique.
+**Numerics / discretization.** The local numerical logic: Riemann flux ([`include/adc/numerics/numerical_flux.hpp`](../include/adc/numerics/numerical_flux.hpp): Rusanov / HLL / HLLC / Roe, `ADC_HD` policies), MUSCL + WENO5-Z reconstruction ([`include/adc/numerics/reconstruction.hpp`](../include/adc/numerics/reconstruction.hpp)), the elliptic operator ([`include/adc/numerics/elliptic/`](../include/adc/numerics/elliptic/)) and the logical BCs ([`include/adc/mesh/physical_bc.hpp`](../include/adc/mesh/physical_bc.hpp)). We distinguish the point-wise policies (flux, reconstruction, stencil: they take states, see no container) from the grid operators (`assemble_rhs`, [`include/adc/numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp)) which loop over a `Box` via a local view `Array4` but ignore the decomposition into boxes/ranks and the backend. The geometry variants are purely additive: [`spatial_operator_eb.hpp`](../include/adc/numerics/spatial_operator_eb.hpp) (cut-cell) and [`spatial_operator_polar.hpp`](../include/adc/numerics/spatial_operator_polar.hpp), the cartesian remaining bit-identical.
 
-**Maillage / donnees.** Ce qui stocke : `box2d`, `box_array` ([`include/adc/mesh/box_array.hpp`](../include/adc/mesh/box_array.hpp)), `distribution_mapping` ([`include/adc/mesh/distribution_mapping.hpp`](../include/adc/mesh/distribution_mapping.hpp)), `multifab` ([`include/adc/mesh/multifab.hpp`](../include/adc/mesh/multifab.hpp)), `geometry` (cartesien + `PolarGeometry`, [`include/adc/mesh/geometry.hpp`](../include/adc/mesh/geometry.hpp)) et la hierarchie AMR. Ces conteneurs portent les champs distribues et leurs halos ; ils ne savent pas comment on boucle ni on communique.
+**Mesh / data.** What stores: `box2d`, `box_array` ([`include/adc/mesh/box_array.hpp`](../include/adc/mesh/box_array.hpp)), `distribution_mapping` ([`include/adc/mesh/distribution_mapping.hpp`](../include/adc/mesh/distribution_mapping.hpp)), `multifab` ([`include/adc/mesh/multifab.hpp`](../include/adc/mesh/multifab.hpp)), `geometry` (cartesian + `PolarGeometry`, [`include/adc/mesh/geometry.hpp`](../include/adc/mesh/geometry.hpp)) and the AMR hierarchy. These containers carry the distributed fields and their halos; they do not know how one loops nor communicates.
 
-**Execution (seams).** La politique d'execution, reduite a des seams qui ne voient que des vues minimales (Box2D, `Array4`, scalaire, rang), jamais `BoxArray` ni `DistributionMapping` : `for_each_cell` ([`include/adc/mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp), dispatch serie / OpenMP / Kokkos) prend une box et un lambda `ADC_HD(i, j)` ; la vue POD `Array4` ([`include/adc/mesh/fab2d.hpp`](../include/adc/mesh/fab2d.hpp)) est identique host/device ; `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) fait rang/size, all-reduce, barrier (identite serie / MPI) ; l'allocateur ([`include/adc/core/allocator.hpp`](../include/adc/core/allocator.hpp)) gere le stockage des Fab. L'echange de halos (`fill_boundary`) et les reductions / `saxpy` (`mf_arith`) ne sont pas cette couche : ce sont des operateurs de grille qui orchestrent les seams.
+**Execution (seams).** The execution policy, reduced to seams that only see minimal views (Box2D, `Array4`, scalar, rank), never `BoxArray` nor `DistributionMapping`: `for_each_cell` ([`include/adc/mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp), serial / OpenMP / Kokkos dispatch) takes a box and an `ADC_HD(i, j)` lambda; the POD view `Array4` ([`include/adc/mesh/fab2d.hpp`](../include/adc/mesh/fab2d.hpp)) is identical host/device; `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) does rank/size, all-reduce, barrier (serial / MPI identity); the allocator ([`include/adc/core/allocator.hpp`](../include/adc/core/allocator.hpp)) manages the storage of the Fabs. The halo exchange (`fill_boundary`) and the reductions / `saxpy` (`mf_arith`) are not this layer: they are grid operators that orchestrate the seams.
 
-**Temps / couplage.** La couche qui compose les operateurs sans connaitre leur implementation interne : SSPRK ([`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/ssprk.hpp)), IMEX asymptotic-preserving ([`include/adc/numerics/time/imex.hpp`](../include/adc/numerics/time/imex.hpp)), splitting `lie_step` / `strang_step` ([`include/adc/numerics/time/splitting.hpp`](../include/adc/numerics/time/splitting.hpp)). Une `TimePolicy` ([`include/adc/numerics/time/time_integrator.hpp`](../include/adc/numerics/time/time_integrator.hpp)) nomme, par bloc, le traitement temporel et le nombre de sous-pas ; le scheduler lit cette politique et appelle l'operateur adapte sans connaitre la formule du flux. Le couplage fluide <-> Poisson est porte par une `CouplingPolicy` ([`include/adc/coupling/coupling_policy.hpp`](../include/adc/coupling/coupling_policy.hpp)) qui decide l'ordre des operations et les synchronisations, sans posseder la donnee ni connaitre le backend : `Coupler` mono-modele ([`include/adc/coupling/coupler.hpp`](../include/adc/coupling/coupler.hpp)), `SystemCoupler` multi-especes mono-niveau ([`include/adc/coupling/system_coupler.hpp`](../include/adc/coupling/system_coupler.hpp)), `AmrCouplerMP` AMR multi-box ([`include/adc/coupling/amr_coupler_mp.hpp`](../include/adc/coupling/amr_coupler_mp.hpp)).
+**Time / coupling.** The layer that composes the operators without knowing their internal implementation: SSPRK ([`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/ssprk.hpp)), IMEX asymptotic-preserving ([`include/adc/numerics/time/imex.hpp`](../include/adc/numerics/time/imex.hpp)), splitting `lie_step` / `strang_step` ([`include/adc/numerics/time/splitting.hpp`](../include/adc/numerics/time/splitting.hpp)). A `TimePolicy` ([`include/adc/numerics/time/time_integrator.hpp`](../include/adc/numerics/time/time_integrator.hpp)) names, per block, the temporal treatment and the number of substeps; the scheduler reads this policy and calls the adapted operator without knowing the flux formula. The fluid <-> Poisson coupling is carried by a `CouplingPolicy` ([`include/adc/coupling/coupling_policy.hpp`](../include/adc/coupling/coupling_policy.hpp)) which decides the order of operations and the synchronizations, without owning the data nor knowing the backend: `Coupler` single-model ([`include/adc/coupling/coupler.hpp`](../include/adc/coupling/coupler.hpp)), `SystemCoupler` multi-species single-level ([`include/adc/coupling/system_coupler.hpp`](../include/adc/coupling/system_coupler.hpp)), `AmrCouplerMP` AMR multi-box ([`include/adc/coupling/amr_coupler_mp.hpp`](../include/adc/coupling/amr_coupler_mp.hpp)).
 
 
-## Conventions de grille
+## Grid conventions
 
-Le code separe l'espace d'indices (entier, sans dimension physique) de l'espace physique
-(centres de cellule). L'espace d'indices est porte par [`Box2D`](../include/adc/mesh/box2d.hpp),
-un couple de coins `lo[2]` / `hi[2]` inclusifs (convention AMReX) ; la box est vide des que
-`hi[d] < lo[d]`. La correspondance vers le physique est portee par
-[`Geometry`](../include/adc/mesh/geometry.hpp) (cartesien) et `PolarGeometry` (annulaire), tous
-deux des POD triviaux dont les accesseurs sont annotes `ADC_HD` pour rester appelables depuis un
-kernel device sans rendre de valeur garbage sous nvcc.
+The code separates the index space (integer, without physical dimension) from the physical space
+(cell centers). The index space is carried by [`Box2D`](../include/adc/mesh/box2d.hpp),
+a pair of inclusive corners `lo[2]` / `hi[2]` (AMReX convention); the box is empty as soon as
+`hi[d] < lo[d]`. The correspondence to the physical is carried by
+[`Geometry`](../include/adc/mesh/geometry.hpp) (cartesian) and `PolarGeometry` (annular), both
+trivial PODs whose accessors are annotated `ADC_HD` to stay callable from a
+device kernel without returning garbage value under nvcc.
 
-Trois modules portent une grille, chacun avec sa propre convention. Le tableau ci-dessous fixe
-les notations utilisees dans le reste de cette section.
+Three modules carry a grid, each with its own convention. The table below fixes
+the notations used in the rest of this section.
 
-### Cartesien : `System` cellule au centre, $N_x \times N_y$
+### Cartesian: `System` cell-centered, $N_x \times N_y$
 
-`System` ([`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp)) porte une grille
-unique partagee par tous les blocs (especes). La configuration vit dans `SystemConfig`.
+`System` ([`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp)) carries a single
+grid shared by all the blocks (species). The configuration lives in `SystemConfig`.
 
 | champ `SystemConfig` | role |
 | --- | --- |
-| `n` | cellules par direction, domaine $n \times n$ |
-| `L` | taille du domaine carre $[0, L]^2$ |
-| `periodic` | domaine periodique (sinon sortie libre en transport) |
-| `geometry` | `"cartesian"` (defaut) ou `"polar"` |
+| `n` | cells per direction, domain $n \times n$ |
+| `L` | size of the square domain $[0, L]^2$ |
+| `periodic` | periodic domain (otherwise free outflow in transport) |
+| `geometry` | `"cartesian"` (default) or `"polar"` |
 
-La box d'indices est `Box2D::from_extents(n, n)`, soit $[0, n-1] \times [0, n-1]$. La cellule au
-centre est definie pour tout indice, ghosts compris (indices negatifs) : `Geometry::x_cell(i)`
-rend $x_{lo} + (i + 1/2)\,dx$ avec $dx = (x_{hi} - x_{lo}) / N_x$ et de meme en $y$. La maille est
-donc uniforme et le centre de cellule existe meme hors du domaine valide, ce qui permet de remplir
-les couches de ghosts par simple evaluation.
+The index box is `Box2D::from_extents(n, n)`, i.e. $[0, n-1] \times [0, n-1]$. The cell
+center is defined for any index, ghosts included (negative indices): `Geometry::x_cell(i)`
+returns $x_{lo} + (i + 1/2)\,dx$ with $dx = (x_{hi} - x_{lo}) / N_x$ and likewise in $y$. The mesh is
+therefore uniform and the cell center exists even outside the valid domain, which allows filling
+the ghost layers by simple evaluation.
 
-### Polaire : `System` geometrie `"polar"`, anneau $n_r \times n_\theta$
+### Polar: `System` geometry `"polar"`, ring $n_r \times n_\theta$
 
-Quand `geometry == "polar"`, le meme `System` tourne sur un anneau global $(r, \theta)$ decrit par
-`PolarGeometry`. La convention d'axes est figee : la direction d'indice 0 est radiale (i parcourt
-$r$ de `r_min` a `r_max`), la direction d'indice 1 est azimutale (j parcourt $\theta$ de $0$ a
+When `geometry == "polar"`, the same `System` runs on a global ring $(r, \theta)$ described by
+`PolarGeometry`. The axis convention is fixed: the index-0 direction is radial (i traverses
+$r$ from `r_min` to `r_max`), the index-1 direction is azimuthal (j traverses $\theta$ from $0$ to
 $2\pi$).
 
 | champ `SystemConfig` | role |
 | --- | --- |
-| `nr` | cellules radiales ($0 \Rightarrow$ prend `n`) |
-| `ntheta` | cellules azimutales ($0 \Rightarrow$ prend `n`) |
-| `r_min`, `r_max` | bornes radiales physiques de l'anneau |
+| `nr` | radial cells ($0 \Rightarrow$ takes `n`) |
+| `ntheta` | azimuthal cells ($0 \Rightarrow$ takes `n`) |
+| `r_min`, `r_max` | physical radial bounds of the ring |
 
-La resolution `0 -> n` est cablee cote facade : `polar_nr` / `polar_ntheta` dans
-[`python/system.cpp`](../python/system.cpp) renvoient `c.nr > 0 ? c.nr : c.n` (idem `ntheta`), et la
-box d'indices devient `Box2D::from_extents(polar_nr(c), polar_ntheta(c))`. La maille est uniforme
-en indice : $dr = (r_{max} - r_{min}) / N_r$ et $d\theta = 2\pi / N_\theta$. La maille physique en
-$\theta$ vaut $r\,d\theta$ et croit donc avec $r$ ; c'est l'origine de la metrique $1/r$ de la
-divergence polaire (cf. `assemble_rhs_polar`). `PolarGeometry` distingue centre et face : `r_cell(i)`
-$= r_{min} + (i + 1/2)\,dr$, `r_face(i)` $= r_{min} + i\,dr$ (la face $i = 0$ est exactement
-$r_{min}$, la face $i = N_r$ est $r_{max}$). En polaire, $\theta$ est periodique et $r$ porte une BC
-physique en `r_min` / `r_max` ; la facade pose donc `per_ = {false, false}` et `periodic_ = false`
-lorsque `polar_` est vrai.
+The resolution `0 -> n` is wired on the facade side: `polar_nr` / `polar_ntheta` in
+[`python/system.cpp`](../python/system.cpp) return `c.nr > 0 ? c.nr : c.n` (same for `ntheta`), and the
+index box becomes `Box2D::from_extents(polar_nr(c), polar_ntheta(c))`. The mesh is uniform
+in index: $dr = (r_{max} - r_{min}) / N_r$ and $d\theta = 2\pi / N_\theta$. The physical mesh in
+$\theta$ equals $r\,d\theta$ and therefore grows with $r$; this is the origin of the $1/r$ metric of the
+polar divergence (cf. `assemble_rhs_polar`). `PolarGeometry` distinguishes center and face: `r_cell(i)`
+$= r_{min} + (i + 1/2)\,dr$, `r_face(i)` $= r_{min} + i\,dr$ (the face $i = 0$ is exactly
+$r_{min}$, the face $i = N_r$ is $r_{max}$). In polar, $\theta$ is periodic and $r$ carries a physical BC
+in `r_min` / `r_max`; the facade therefore sets `per_ = {false, false}` and `periodic_ = false`
+when `polar_` is true.
 
-Le polaire est `nr != ntheta` en general (la grille n'est pas carree), contrairement au cartesien
+The polar is `nr != ntheta` in general (the grid is not square), contrary to the cartesian
 $n \times n$.
 
-### AMR : `AmrSystem`, hierarchie de niveaux a extent physique constant
+### AMR: `AmrSystem`, hierarchy of levels at constant physical extent
 
-`AmrSystem` ([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) est le
-pendant raffine de `System` : un ou plusieurs blocs portes sur une hierarchie de niveaux
-(actuellement deux niveaux, ratio 2). La configuration vit dans `AmrSystemConfig`.
+`AmrSystem` ([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) is the
+refined counterpart of `System`: one or more blocks carried over a hierarchy of levels
+(currently two levels, ratio 2). The configuration lives in `AmrSystemConfig`.
 
 | champ `AmrSystemConfig` | role |
 | --- | --- |
-| `n` | cellules du niveau grossier par direction |
-| `L` | taille du domaine carre $[0, L]^2$ |
-| `regrid_every` | re-raffinement tous les $N$ pas ($0 =$ jamais apres l'init) |
-| `periodic` | domaine periodique |
-| `distribute_coarse` | grossier replique (defaut) ou multi-box reparti (strong-scaling) |
-| `coarse_max_grid` | taille de tuile du grossier reparti ($0 \Rightarrow n/2$) |
+| `n` | cells of the coarse level per direction |
+| `L` | size of the square domain $[0, L]^2$ |
+| `regrid_every` | re-refinement every $N$ steps ($0 =$ never after init) |
+| `periodic` | periodic domain |
+| `distribute_coarse` | coarse replicated (default) or multi-box distributed (strong-scaling) |
+| `coarse_max_grid` | tile size of the distributed coarse ($0 \Rightarrow n/2$) |
 
-Le raffinement n'est pas un raffinement de la maille physique : `Geometry::refine(r)` et
-`Box2D::refine(r)` conservent l'extent physique $[x_{lo}, x_{hi}]$ et raffinent l'espace d'indices.
-Une cellule grossiere $[lo, hi]$ devient un bloc $r \times r$ d'indices fins
-$[lo \cdot r,\; hi \cdot r + r - 1]$ ; l'inverse `coarsen(r)` est une division plancher de chaque
-coin, ce qui reste coherent de part et d'autre de zero (ghosts negatifs). Avec un ratio 2, un niveau
-fin a donc une maille $dx_f = dx_c / 2$ a domaine physique inchange.
+The refinement is not a refinement of the physical mesh: `Geometry::refine(r)` and
+`Box2D::refine(r)` preserve the physical extent $[x_{lo}, x_{hi}]$ and refine the index space.
+A coarse cell $[lo, hi]$ becomes a block $r \times r$ of fine indices
+$[lo \cdot r,\; hi \cdot r + r - 1]$; the inverse `coarsen(r)` is a floor division of each
+corner, which stays coherent on both sides of zero (negative ghosts). With a ratio 2, a fine
+level therefore has a mesh $dx_f = dx_c / 2$ at unchanged physical domain.
 
-Le multi-blocs co-localise N especes sur une hierarchie partagee (meme `BoxArray`, meme
-`DistributionMapping`, memes $dx, dy$ par niveau) ; le multi-blocs avec `regrid_every > 0` est refuse
-(la hierarchie est figee). La conservation est garantie par bloc via reflux et average_down, decrits
-ci-dessous.
+The multi-block co-locates N species on a shared hierarchy (same `BoxArray`, same
+`DistributionMapping`, same $dx, dy$ per level); the multi-block with `regrid_every > 0` is refused
+(the hierarchy is frozen). Conservation is guaranteed per block via reflux and average_down, described
+below.
 
-## Stencil AMR coarse-fine (reflux)
+## AMR coarse-fine stencil (reflux)
 
-A une interface 2:1 entre un niveau grossier et un patch fin, le flux numerique calcule cote
-grossier et le flux calcule cote fin ne coincident pas : sans correction, la cellule grossiere
-bordante perdrait la conservation. Le reflux corrige la cellule grossiere bordante en remplacant sa
-contribution de flux grossier par le flux fin time-integre traversant la meme interface physique.
+At a 2:1 interface between a coarse level and a fine patch, the numerical flux computed on the
+coarse side and the flux computed on the fine side do not coincide: without correction, the bordering
+coarse cell would lose conservation. The reflux corrects the bordering coarse cell by replacing its
+coarse flux contribution with the time-integrated fine flux crossing the same physical interface.
 
-Pour le ratio 2 du code, une face grossiere a l'interface est recouverte par deux faces fines.
-Le schema ci-dessous montre une cellule grossiere bordante `Cg` a gauche de l'interface et les deux
-sous-faces fines `f0`, `f1` du patch qui la jouxtent.
+For the ratio 2 of the code, a coarse face at the interface is covered by two fine faces.
+The schema below shows a bordering coarse cell `Cg` to the left of the interface and the two
+fine sub-faces `f0`, `f1` of the patch that adjoin it.
 
 ```mermaid
 graph LR
@@ -250,85 +250,85 @@ graph LR
   Reflux --> Cg
 ```
 
-La mecanique est portee par
-[`amr_reflux_mf.hpp`](../include/adc/numerics/time/amr_reflux_mf.hpp), qui n'est qu'un parapluie
-incluant les sous-entetes ; les types de l'interface vivent dans
-[`amr_patch_range.hpp`](../include/adc/numerics/time/amr_patch_range.hpp) et le sous-cyclage qui les
-pilote dans [`amr_subcycling.hpp`](../include/adc/numerics/time/amr_subcycling.hpp).
+The mechanics is carried by
+[`amr_reflux_mf.hpp`](../include/adc/numerics/time/amr_reflux_mf.hpp), which is only an umbrella
+including the sub-headers; the types of the interface live in
+[`amr_patch_range.hpp`](../include/adc/numerics/time/amr_patch_range.hpp) and the subcycling that
+drives them in [`amr_subcycling.hpp`](../include/adc/numerics/time/amr_subcycling.hpp).
 
-Trois objets se partagent le travail.
+Three objects share the work.
 
-- `FluxRegister` est un buffer grossier a indexation globale sur une region. Chaque rang y ecrit
-  ses contributions locales (0 ailleurs), `gather()` les somme par `all_reduce_sum_inplace`, puis
-  chaque rang lit le total via `at()`. En serie le all-reduce est l'identite, donc bit-identique.
-  `set` ecrase (chemin average_down), `add` additionne en restant borne a la region (chemin reflux).
+- `FluxRegister` is a coarse buffer with global indexing over a region. Each rank writes there
+  its local contributions (0 elsewhere), `gather()` sums them by `all_reduce_sum_inplace`, then
+  each rank reads the total via `at()`. In serial the all-reduce is the identity, hence bit-identical.
+  `set` overwrites (average_down path), `add` accumulates while staying bounded to the region (reflux path).
 
-- `CoverageMask` (et son enveloppe `CoarseFineInterface`) marque, sur la region grossiere, les
-  cellules ombragees par un patch fin. Le masque est bati sur le `BoxArray` global des patchs fins,
-  connu de tous les rangs, donc MPI-safe. `covered(I, J)` empeche le double-reflux d'un joint
-  fin-fin : on ne verse une correction que sur une cellule grossiere bordante non couverte par un
-  autre patch.
+- `CoverageMask` (and its envelope `CoarseFineInterface`) marks, on the coarse region, the
+  cells shadowed by a fine patch. The mask is built on the global `BoxArray` of the fine patches,
+  known by all the ranks, hence MPI-safe. `covered(I, J)` prevents the double-reflux of a
+  fine-fine joint: we only pour a correction onto a bordering coarse cell not covered by an
+  other patch.
 
-- Le registre par patch (`RegMP` ou le `Reg` local du sous-cyclage) stocke, le long du bord de
-  l'empreinte parente $[I_0..I_1] \times [J_0..J_1]$, deux jeux de tableaux : `cL, cR, cB, cT` =
-  flux grossier (sans dt) lu une fois au debut, et `fL, fR, fB, fT` = flux fin time-integre,
-  accumule sous-pas apres sous-pas pendant le sous-cyclage Berger-Oliger.
+- The per-patch register (`RegMP` or the local `Reg` of the subcycling) stores, along the border of
+  the parent footprint $[I_0..I_1] \times [J_0..J_1]$, two sets of arrays: `cL, cR, cB, cT` =
+  coarse flux (without dt) read once at the start, and `fL, fR, fB, fT` = time-integrated fine flux,
+  accumulated substep after substep during the Berger-Oliger subcycling.
 
-L'accumulation du flux fin est exactement la somme des deux sous-faces sur chaque sous-pas :
-le long du bord gauche du patch, `subcycle_level_mp` fait
+The accumulation of the fine flux is exactly the sum of the two sub-faces on each substep:
+along the left border of the patch, `subcycle_level_mp` does
 
 `g.fL[(J - g.J0) * nc + k] += 0.5 * (FX(2*g.I0, 2*J, k) + FX(2*g.I0, 2*J+1, k)) * dt`
 
-(et symetriquement `fR` en `2*g.I1 + 2`, `fB` / `fT` sur les faces $y$). Les deux faces fines sont
-moyennees par le facteur $0.5$, time-integrees par `* dt` du sous-pas, et le `+=` cumule sur les
-deux sous-pas du ratio 2.
+(and symmetrically `fR` at `2*g.I1 + 2`, `fB` / `fT` on the $y$ faces). The two fine faces are
+averaged by the factor $0.5$, time-integrated by `* dt` of the substep, and the `+=` accumulates on the
+two substeps of the ratio 2.
 
-Le versement final est porte par `CoarseFineInterface::route_reflux`. Sur chaque cellule grossiere
-bordante non couverte, il ajoute au registre
+The final pour is carried by `CoarseFineInterface::route_reflux`. On each bordering coarse
+cell not covered, it adds to the register
 
 $$
 \text{ref.add}(I_0 - 1,\, J,\, k) \mathrel{+}= -\frac{f_L - c_L \cdot dt}{dx_c}
 $$
 
-a gauche, $+(f_R - c_R \cdot dt)/dx_c$ a droite, et de meme en $y$ avec $dy_c$ ($f_B$, $f_T$,
-divises par $dy_c$). On voit la structure conservative : $f_\bullet$ est deja la somme des flux
-fins time-integres, $c_\bullet \cdot dt$ est le flux grossier que la cellule a deja encaisse pendant
-le macro-pas, et le signe (negatif a gauche / en bas, positif a droite / en haut) suit la
-convention de divergence du schema. L'empreinte parente est calculee par
-`PatchRange` ($I_0 = lo/2$, $I_1 = (hi-1)/2$), historiquement distincte de `Box2D::coarsen` pour
-preserver l'arithmetique bit-identique. Le average_down (`mf_average_down_multi` /
-`mf_average_down_mb`) ecrase ensuite chaque cellule grossiere couverte par la moyenne $0.25$ des
-quatre cellules fines, fermant la coherence grossier/fin.
+on the left, $+(f_R - c_R \cdot dt)/dx_c$ on the right, and likewise in $y$ with $dy_c$ ($f_B$, $f_T$,
+divided by $dy_c$). One sees the conservative structure: $f_\bullet$ is already the sum of the fine
+time-integrated fluxes, $c_\bullet \cdot dt$ is the coarse flux that the cell has already taken in during
+the macro-step, and the sign (negative on the left / at the bottom, positive on the right / at the top) follows the
+divergence convention of the scheme. The parent footprint is computed by
+`PatchRange` ($I_0 = lo/2$, $I_1 = (hi-1)/2$), historically distinct from `Box2D::coarsen` to
+preserve the bit-identical arithmetic. The average_down (`mf_average_down_multi` /
+`mf_average_down_mb`) then overwrites each covered coarse cell with the $0.25$ average of the
+four fine cells, closing the coarse/fine coherence.
 
 
-## Pipeline d un pas de temps
+## Pipeline of a time step
 
-Le pas de temps a deux incarnations qui partagent la meme grammaire d etapes (resoudre l elliptique,
-peupler l aux, transporter, sourcer) mais des moteurs distincts : `System` sur grille mono-niveau et
-`AmrSystem` sur hierarchie adaptative. La phase de construction (`set_poisson`, `add_block`,
-`set_density`) est identique de loin : elle declare le Poisson de systeme, compose les briques de
-chaque bloc et pose l etat initial. C est le macro-pas qui differe.
+The time step has two incarnations that share the same grammar of steps (solve the elliptic,
+populate the aux, transport, source) but distinct engines: `System` on single-level grid and
+`AmrSystem` on adaptive hierarchy. The construction phase (`set_poisson`, `add_block`,
+`set_density`) is identical from afar: it declares the system Poisson, composes the bricks of
+each block and sets the initial state. It is the macro-step that differs.
 
-### Mono-niveau : `System.step_cfl`
+### Single-level: `System.step_cfl`
 
-Le coeur est `SystemStepper::step_cfl` (et `step`), dans
-[`include/adc/runtime/system_stepper.hpp`](../include/adc/runtime/system_stepper.hpp). L ordre est un
-invariant explicite (cf. le contrat en tete du fichier) : `solve_fields` une fois en tete, puis pour
-chaque bloc DU (cadence stride honoree) un `advance_transport` suivi d un `run_source_stage`
-entrelaces, puis `apply_couplings`, puis `avance le temps` et `avance le compteur de macro-pas`.
+The core is `SystemStepper::step_cfl` (and `step`), in
+[`include/adc/runtime/system_stepper.hpp`](../include/adc/runtime/system_stepper.hpp). The order is an
+explicit invariant (cf. the contract at the head of the file): `solve_fields` once at the head, then for
+each block DU (honored stride cadence) an `advance_transport` followed by a `run_source_stage`
+interleaved, then `apply_couplings`, then `advance the time` and `advance the macro-step counter`.
 
-Le `solve_fields` delegue a `SystemFieldSolver`
-([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)) : il
-resout le Poisson de systeme dont le second membre est la somme des briques elliptiques des blocs
-($f = \sum_b q_b\, n_b$), puis derive l aux. L aux est le canal partage qui porte $\phi$ et $\nabla\phi$
-(composantes 1 et 2), plus eventuellement $B_z$ et $T_e$. Le transport d un bloc, lui, lit cet aux :
-`advance_transport` aiguille vers la fermeture `s.advance` (chemin plein) ou ses variantes disque, et
-cette fermeture fait `fill_ghosts` puis `assemble_rhs` (reconstruction limitee puis flux numerique ->
-$R = -\mathrm{div} F + S$) a chaque etage SSPRK (cf.
+The `solve_fields` delegates to `SystemFieldSolver`
+([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)): it
+solves the system Poisson whose right-hand side is the sum of the elliptic bricks of the blocks
+($f = \sum_b q_b\, n_b$), then derives the aux. The aux is the shared channel that carries $\phi$ and $\nabla\phi$
+(components 1 and 2), plus optionally $B_z$ and $T_e$. The transport of a block, in turn, reads this aux:
+`advance_transport` routes toward the closure `s.advance` (full path) or its disk variants, and
+this closure does `fill_ghosts` then `assemble_rhs` (limited reconstruction then numerical flux ->
+$R = -\mathrm{div} F + S$) at each SSPRK stage (cf.
 [`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/ssprk.hpp), `SSPRK2Step` /
-`SSPRK3`). Le pas $dt$ retourne par `step_cfl` est le min sur les blocs evolutifs de
-$cfl \cdot h \cdot \mathrm{substeps}_b / (\mathrm{stride}_b \cdot w_b)$, avec $h = \min(dx, dy)$ en
-cartesien et $h = \min(dr,\, r_{\min}\, d\theta)$ en polaire.
+`SSPRK3`). The step $dt$ returned by `step_cfl` is the min over the evolutive blocks of
+$cfl \cdot h \cdot \mathrm{substeps}_b / (\mathrm{stride}_b \cdot w_b)$, with $h = \min(dx, dy)$ in
+cartesian and $h = \min(dr,\, r_{\min}\, d\theta)$ in polar.
 
 ```mermaid
 sequenceDiagram
@@ -366,31 +366,31 @@ sequenceDiagram
     System-->>Utilisateur: dt utilise
 ```
 
-Variante Strang (`step_strang`, opt-in via `set_scheme`) : le transport est scinde en
-$H(dt/2)\,;\,S(dt)\,;\,H(dt/2)$ et `solve_fields` est RE-resolu avant chaque etage qui consomme $\phi$
-(le $\phi$ de tete de pas serait perime pour la seconde demi-avance).
+Strang variant (`step_strang`, opt-in via `set_scheme`): the transport is split into
+$H(dt/2)\,;\,S(dt)\,;\,H(dt/2)$ and `solve_fields` is RE-solved before each stage that consumes $\phi$
+(the $\phi$ of the step head would be stale for the second half-advance).
 
-### AMR : `AmrSystem.step`
+### AMR: `AmrSystem.step`
 
-Sur la hierarchie adaptative, `AmrSystem::step`
-([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) force le build paresseux
-puis delegue au moteur multi-blocs `AmrRuntime::step`
-([`include/adc/runtime/amr_runtime.hpp`](../include/adc/runtime/amr_runtime.hpp)) (ou, en mono-bloc, a
-la fermeture `step_fn` d un `AmrCouplerMP`). Le moteur ajoute deux etapes propres a l adaptatif autour
-du meme squelette.
+On the adaptive hierarchy, `AmrSystem::step`
+([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) forces the lazy build
+then delegates to the multi-block engine `AmrRuntime::step`
+([`include/adc/runtime/amr_runtime.hpp`](../include/adc/runtime/amr_runtime.hpp)) (or, in single-block, to
+the closure `step_fn` of an `AmrCouplerMP`). The engine adds two steps proper to the adaptive around
+the same skeleton.
 
-D abord le regrid periodique : si `regrid_every > 0` et que le macro-pas tombe sur la cadence
-(`macro_step_ % regrid_every == 0`, et pas au tout premier pas), `regrid()` re-grille la hierarchie a
-partir de l union des tags de tous les blocs plus le tag de $|\nabla\phi|$, applique un seul nouveau
-layout fin a tous les blocs et a l aux partage. Ensuite `solve_fields` : il fait d abord un
-`average_down` par bloc (fin -> grossier), assemble le second membre somme co-localise
-($f = \sum_b r_b(U_b)$ (chaque $r_b$ = `elliptic_rhs` du bloc)), resout le Poisson grossier par multigrille geometrique,
-derive l aux grossier ($\phi$, $\nabla\phi$ via `field_postprocess`), puis injecte l aux du grossier
-vers les niveaux fins (`coupler_inject_aux_mb`). Le transport de chaque bloc DU est alors `advance`
-(transport explicite : `advance_amr` = Berger-Oliger + reflux conservatif + `average_down`) ou
-`imex_advance` (transport source-free + source raide implicite `backward_euler_source`), sous-cycle
-`substeps` fois sur le pas effectif $\mathrm{stride} \cdot dt$. Enfin `coupled_source_step` applique les
-sources inter-especes par splitting, avant `avance le compteur de macro-pas`.
+First the periodic regrid: if `regrid_every > 0` and the macro-step falls on the cadence
+(`macro_step_ % regrid_every == 0`, and not at the very first step), `regrid()` re-grids the hierarchy
+from the union of the tags of all the blocks plus the tag of $|\nabla\phi|$, applies a single new
+fine layout to all the blocks and to the shared aux. Then `solve_fields`: it first does an
+`average_down` per block (fine -> coarse), assembles the co-located summed right-hand side
+($f = \sum_b r_b(U_b)$ (each $r_b$ = `elliptic_rhs` of the block)), solves the coarse Poisson by geometric multigrid,
+derives the coarse aux ($\phi$, $\nabla\phi$ via `field_postprocess`), then injects the coarse aux
+to the fine levels (`coupler_inject_aux_mb`). The transport of each block DU is then `advance`
+(explicit transport: `advance_amr` = Berger-Oliger + conservative reflux + `average_down`) or
+`imex_advance` (source-free transport + stiff implicit source `backward_euler_source`), subcycled
+`substeps` times on the effective step $\mathrm{stride} \cdot dt$. Finally `coupled_source_step` applies the
+inter-species sources by splitting, before `advance the macro-step counter`.
 
 ```mermaid
 sequenceDiagram
@@ -436,29 +436,29 @@ sequenceDiagram
     AmrSystem->>AmrSystem: avance le temps
 ```
 
-Le parallele entre les deux pipelines est volontaire : `AmrRuntime::solve_fields` reproduit
-`AmrSystemCoupler::solve_fields` (le pendant compile-time), et la sequence (resoudre l elliptique ;
-transporter par bloc en honorant stride/substeps ; sourcer ; avancer le compteur de macro-pas) est la
-meme que celle de `SystemStepper`. La difference tient au moteur de transport (`assemble_rhs` plein
-contre `advance_amr` Berger-Oliger avec reflux et `average_down`), a l injection coarse -> fine de l aux
-et au regrid periodique, propres a la hierarchie.
+The parallel between the two pipelines is deliberate: `AmrRuntime::solve_fields` reproduces
+`AmrSystemCoupler::solve_fields` (the compile-time counterpart), and the sequence (solve the elliptic;
+transport per block honoring stride/substeps; source; advance the macro-step counter) is the
+same as that of `SystemStepper`. The difference lies in the transport engine (`assemble_rhs` full
+versus `advance_amr` Berger-Oliger with reflux and `average_down`), in the coarse -> fine injection of the aux
+and in the periodic regrid, proper to the hierarchy.
 
 
-## Proprietes verifiees
+## Verified properties
 
-La bibliotheque distingue deux filets (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 11) : le bit-identique est un filet logiciel (la refactorisation n'a rien casse), pas une preuve numerique. Les deux sont necessaires. Les proprietes ci-dessous sont celles effectivement mesurees par la suite de tests, pas des objectifs.
+The library distinguishes two safety nets (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 11): the bit-identical is a software net (the refactoring did not break anything), not a numerical proof. Both are necessary. The properties below are those actually measured by the test suite, not objectives.
 
-**Conservation de la masse a l'arrondi.** Le schema volumes finis est conservatif par telescopage des flux ; au reflux coarse-fine (FluxRegister), la masse globale reste conservee a la precision machine. Le test source `python/tests/test_schur_conservation.py` (cf. [`docs/CONSERVATION_SUMMARY.md`](CONSERVATION_SUMMARY.md)) mesure sur 64x64 periodique, anneau axisymetrique, 40 pas un drift relatif de masse de l'ordre de $1.9\times 10^{-16}$ (precision machine), tres en dessous du seuil $10^{-12}$. Cote AMR, l'extraction des coupleurs en ordonnanceurs minces a ete validee a conservation de masse a l'arrondi inchangee (`amr_mass`, section 5 de l'architecture). Le momentum n'est exact ($\sim 5\times 10^{-18}$) que lorsque la force nette est nulle par symetrie discrete ; sous force electrostatique/Lorentz reelle il n'est pas conserve par construction, ce qui est le comportement attendu d'un schema FV (et non d'un schema a forme faible structure-preservante).
+**Mass conservation at round-off.** The finite-volume scheme is conservative by telescoping of the fluxes; at the coarse-fine reflux (FluxRegister), the global mass stays conserved at machine precision. The source test `python/tests/test_schur_conservation.py` (cf. [`docs/CONSERVATION_SUMMARY.md`](CONSERVATION_SUMMARY.md)) measures on 64x64 periodic, axisymmetric ring, 40 steps a relative mass drift of the order of $1.9\times 10^{-16}$ (machine precision), well below the threshold $10^{-12}$. On the AMR side, the extraction of the couplers into thin schedulers has been validated at unchanged mass conservation at round-off (`amr_mass`, section 5 of the architecture). The momentum is only exact ($\sim 5\times 10^{-18}$) when the net force is zero by discrete symmetry; under real electrostatic/Lorentz force it is not conserved by construction, which is the expected behavior of an FV scheme (and not of a structure-preserving weak-form scheme).
 
-**Sorties MPI bit-identiques np=1/2/4.** Le multipatch distribue (FillPatch / FluxRegister 2-niveaux) est bit-identique a la reference mono-process sur les entrees ctest MPI (`-DADC_USE_MPI=ON`, np=1/2/4). Voir [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md) section 1h : `test_mpi_mbox_parity`, `test_mpi_amr_compiled_parity`, `test_krylov_solver`, `test_schur_condensation`, `test_mpi_poisson` et leurs variantes `_np1/2/4` passent en CI dans le job MPI. Caveat honnete documente : un grossier multi-box distribue n'est pas bit-identique sur les sommes globales (l'ordre de reduction FMA change), mais le `max` reste exact et le comportement reste correct.
+**MPI bit-identical outputs np=1/2/4.** The distributed multipatch (FillPatch / FluxRegister 2-level) is bit-identical to the single-process reference on the MPI ctest entries (`-DADC_USE_MPI=ON`, np=1/2/4). See [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md) section 1h: `test_mpi_mbox_parity`, `test_mpi_amr_compiled_parity`, `test_krylov_solver`, `test_schur_condensation`, `test_mpi_poisson` and their `_np1/2/4` variants pass in CI in the MPI job. Honest caveat documented: a distributed multi-box coarse is not bit-identical on the global sums (the FMA reduction order changes), but the `max` stays exact and the behavior stays correct.
 
-**Noyaux device-clean GH200.** Le backend Kokkos Cuda a ete valide sur GH200 (noeud `armgpu`, `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`, OpenMPI CUDA-aware) avec des composants bit-identiques au CPU : System mono-grille, operations de champ AMR (flux_register, diffusion), halos MPI multi-GPU (fill_boundary np=1/2/4, gfails=0), EPM ecrante et anisotrope (`dmax=0`), B_z par niveau AMR (`dmax=0`), chemin compile a foncteurs nommes multi-box et MPI. La validation integree AmrSystem + MPI + GPU est faite (les trois axes dans un seul run, np=1/2/4, `dmax=0`, masse conservee a `0`). Ces harnesses vivent dans `python/tests/gpu/` (hors CI faute de runner GPU) ; le detail est dans [`docs/GPU_RUNTIME_PORT.md`](GPU_RUNTIME_PORT.md). Caveats device : `add_compiled_model` a lambdas etendues n'est pas zero-copie sur device (rebond hote, limite nvcc cross-TU), les sommes additives multi-rang ne sont pas bit-exactes entre np (ordre FMA), et le strong-scaling AMR par grossier reparti est negatif a cette echelle.
+**Device-clean kernels GH200.** The Kokkos Cuda backend has been validated on GH200 (node `armgpu`, `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`, OpenMPI CUDA-aware) with components bit-identical to CPU: single-grid System, AMR field operations (flux_register, diffusion), multi-GPU MPI halos (fill_boundary np=1/2/4, gfails=0), screened and anisotropic EPM (`dmax=0`), B_z per AMR level (`dmax=0`), compiled path with named functors multi-box and MPI. The integrated validation AmrSystem + MPI + GPU is done (the three axes in a single run, np=1/2/4, `dmax=0`, mass conserved at `0`). These harnesses live in `python/tests/gpu/` (out of CI for lack of GPU runner); the detail is in [`docs/GPU_RUNTIME_PORT.md`](GPU_RUNTIME_PORT.md). Device caveats: `add_compiled_model` with extended lambdas is not zero-copy on device (host bounce, nvcc cross-TU limit), the multi-rank additive sums are not bit-exact across np (FMA order), and the AMR strong-scaling by distributed coarse is negative at this scale.
 
-**Parite production == add_block.** Le chemin de production (modele natif compile AOT via `add_compiled_model`) produit le meme resultat que l'assemblage par briques (`add_block`) : la parite du bloc compile AOT est validee sur CPU/Serial (`test_compiled_model_parity`, [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 11). La production System mono-process a ete validee separement (cf. [`docs/VALIDATION.md`](VALIDATION.md)). Limite a connaitre : ce chemin n'est pas encore valide sur Kokkos Cuda (la limite nvcc des lambdas etendues `__host__ __device__` cross-TU est documentee phase 8 de [`docs/GPU_RUNTIME_PORT.md`](GPU_RUNTIME_PORT.md)) ; le contournement par foncteurs nommes existe et est valide device, mais n'a pas ete porte sur `test_compiled_model_parity` lui-meme.
+**Parity production == add_block.** The production path (native model compiled AOT via `add_compiled_model`) produces the same result as the brick assembly (`add_block`): the parity of the AOT compiled block is validated on CPU/Serial (`test_compiled_model_parity`, [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 11). The single-process System production has been validated separately (cf. [`docs/VALIDATION.md`](VALIDATION.md)). Limit to know: this path is not yet validated on Kokkos Cuda (the nvcc limit of the extended `__host__ __device__` lambdas cross-TU is documented phase 8 of [`docs/GPU_RUNTIME_PORT.md`](GPU_RUNTIME_PORT.md)); the workaround by named functors exists and is validated device, but has not been ported to `test_compiled_model_parity` itself.
 
 ## Backends
 
-Les backends (Kokkos, MPI, HDF5) sont une propriete de la bibliotheque, pas un drapeau par cible. Ils sont attaches a la cible d'interface `adc` : tout ce qui lie `adc` (tests du coeur, applications downstream) herite du backend choisi a la configuration. Kokkos est le SEUL backend on-node et il est obligatoire (le serie passe par Kokkos Serial, pas par une boucle C++ manuelle). On configure une seule fois (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 9) :
+The backends (Kokkos, MPI, HDF5) are a property of the library, not a flag per target. They are attached to the interface target `adc`: everything that links `adc` (core tests, downstream applications) inherits the backend chosen at configuration. Kokkos is the ONLY on-node backend and it is required (the serial goes through Kokkos Serial, not through a manual C++ loop). One configures once (cf. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) section 9):
 
 ```
 # Kokkos est obligatoire mais PAS forcement pre-installe : trouve s'il existe (-DKokkos_ROOT),
@@ -470,31 +470,31 @@ cmake -B build -DKokkos_ROOT=$K -DCMAKE_CXX_COMPILER=$K/bin/nvcc_wrapper  # GPU 
 cmake -B build -DADC_USE_MPI=ON                       # + distribue (ADC_HAS_MPI + MPI::MPI_CXX)
 ```
 
-**Kokkos : le seul backend on-node.** Kokkos couvre le sequentiel (Serial), le CPU multi-thread (OpenMP) ET le GPU (Cuda/HIP) avec un seul code, sans aucun kernel CUDA ecrit a la main ni `#pragma omp`. La cible se choisit par les options `Kokkos_ENABLE_SERIAL` / `Kokkos_ENABLE_OPENMP` / `Kokkos_ENABLE_CUDA` -- a la config (chemin FetchContent) ou a l'install de Kokkos (chemin `-DKokkos_ROOT`), pas par un drapeau adc. Kokkos est OBLIGATOIRE mais n'a pas besoin d'etre pre-installe : CMake fait `find_package(Kokkos)` puis, a defaut, le recupere via FetchContent (version `ADC_KOKKOS_FETCH_VERSION`, defaut 4.4.01, tarball verifie par SHA256). Configurer sans Kokkos (`-DADC_USE_KOKKOS=OFF`) est une erreur fatale, et le seam `for_each_cell` ne compile pas sans `ADC_HAS_KOKKOS`. La norme est C++20 (nvcc CUDA 12.x ne propose pas `-std=c++23`) ; les kernels marques `ADC_HD` et le seam `for_each_cell` sont compiles pour l'espace d'execution choisi. La CI joue Kokkos Serial (gate `build-and-test`, C++ + Python) et, depuis le job `ci-full`, Kokkos OpenMP (`Kokkos_ENABLE_OPENMP=ON`). La CI ne construit jamais `-DKokkos_ENABLE_CUDA=ON` : toutes les cellules Kokkos Cuda sont donc ROMEO (validation manuelle GH200) ou inconnues.
+**Kokkos: the only on-node backend.** Kokkos covers the sequential (Serial), the multi-thread CPU (OpenMP) AND the GPU (Cuda/HIP) with a single code, without any CUDA kernel written by hand nor `#pragma omp`. The target is chosen by the options `Kokkos_ENABLE_SERIAL` / `Kokkos_ENABLE_OPENMP` / `Kokkos_ENABLE_CUDA` -- at config (FetchContent path) or at the install of Kokkos (`-DKokkos_ROOT` path), not by an adc flag. Kokkos is REQUIRED but does not need to be pre-installed: CMake does `find_package(Kokkos)` then, failing that, fetches it via FetchContent (version `ADC_KOKKOS_FETCH_VERSION`, default 4.4.01, tarball verified by SHA256). Configuring without Kokkos (`-DADC_USE_KOKKOS=OFF`) is a fatal error, and the seam `for_each_cell` does not compile without `ADC_HAS_KOKKOS`. The standard is C++20 (nvcc CUDA 12.x does not offer `-std=c++23`); the kernels marked `ADC_HD` and the seam `for_each_cell` are compiled for the chosen execution space. CI plays Kokkos Serial (gate `build-and-test`, C++ + Python) and, since the `ci-full` job, Kokkos OpenMP (`Kokkos_ENABLE_OPENMP=ON`). CI never builds `-DKokkos_ENABLE_CUDA=ON`: all the Kokkos Cuda cells are therefore ROMEO (manual GH200 validation) or unknown.
 
-**MPI : distribue, optionnel.** `-DADC_USE_MPI=ON` definit `ADC_HAS_MPI` et lie `MPI::MPI_CXX`. Le bloc `if(ADC_HAS_MPI)` du CMake compile les tests MPI-only (section 1h de [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md)), chacun rejoue a np=1/2/4. Hors MPI (un seul process), le seam `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) degenere en identite (rang 0, taille 1, all-reduce et barrier no-op), si bien qu'un binaire lie MPI mais lance mono-process se comporte comme un run mono-rang. MPI + Kokkos Cuda multi-GPU est valide sur ROMEO pour 10 tests Krylov/Schur/MPI-noyau (rank-invariant np=1/2/4, `dmax=0`).
+**MPI: distributed, optional.** `-DADC_USE_MPI=ON` defines `ADC_HAS_MPI` and links `MPI::MPI_CXX`. The `if(ADC_HAS_MPI)` block of the CMake compiles the MPI-only tests (section 1h of [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md)), each replayed at np=1/2/4. Out of MPI (a single process), the seam `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) degenerates to the identity (rank 0, size 1, all-reduce and barrier no-op), so that a binary linked MPI but launched single-process behaves like a single-rank run. MPI + Kokkos Cuda multi-GPU is validated on ROMEO for 10 Krylov/Schur/MPI-kernel tests (rank-invariant np=1/2/4, `dmax=0`).
 
-**Le seam `for_each_cell`.** Le point de couture qui rend tout cela possible est `for_each_cell(box, f)` dans [`include/adc/mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp). Il exprime une politique d'execution, pas de la logique numerique : il prend une `Box` et un lambda `ADC_HD(i, j)`, et se compile en `Kokkos::parallel_for` (Serial / OpenMP / Cuda selon l'install Kokkos). La logique numerique reste dans le lambda (couche 2 : discretisation), jamais dans le seam ; le faire grossir en `for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)` recreerait un framework opaque. Un operateur de grille voit une vue locale `Array4` + `Box`, mais ni la `DistributionMapping` ni la politique de boucle. Les reductions partagent la meme philosophie : `for_each_cell_reduce_sum` / `_max` portent les reducteurs `Kokkos::Sum` / `Max` deterministes (le `sum` reassocie l'addition par tuile -- deterministe/idempotent mais non bit-identique a une somme lexicographique, pour tous les espaces Kokkos ; le `max` reste exact).
+**The seam `for_each_cell`.** The seam point that makes all this possible is `for_each_cell(box, f)` in [`include/adc/mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp). It expresses an execution policy, not numerical logic: it takes a `Box` and an `ADC_HD(i, j)` lambda, and compiles into `Kokkos::parallel_for` (Serial / OpenMP / Cuda depending on the Kokkos install). The numerical logic stays in the lambda (layer 2: discretization), never in the seam; growing it into `for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)` would recreate an opaque framework. A grid operator sees a local view `Array4` + `Box`, but neither the `DistributionMapping` nor the loop policy. The reductions share the same philosophy: `for_each_cell_reduce_sum` / `_max` carry the deterministic reducers `Kokkos::Sum` / `Max` (the `sum` reassociates the addition by tile -- deterministic/idempotent but not bit-identical to a lexicographic sum, for all the Kokkos spaces; the `max` stays exact).
 
 ## Thread safety
 
-Le modele d'execution est parallelisme de donnees pur, pas de threads partageant un etat mutable arbitraire. Ce qui est sur et ce qui ne l'est pas decoule directement de la separation maillage/donnees vs execution (couches 3-4, section 4 de l'architecture).
+The execution model is pure data parallelism, no threads sharing an arbitrary mutable state. What is safe and what is not follows directly from the mesh/data vs execution separation (layers 3-4, section 4 of the architecture).
 
-**Reentrant / sans etat partage.**
-- Le corps de `for_each_cell` est un lambda `ADC_HD(i, j)` qui ecrit la cellule `(i,j)` de sa propre vue `Array4` locale. Tant que le noyau n'ecrit que sa cellule (idiome FV cellule-par-cellule), il n'y a pas de course : chaque iteration touche une adresse disjointe. C'est la base de la portabilite Serial / OpenMP / Cuda sans verrou.
-- Un operateur de grille recoit une vue locale (`Array4` + `Box`) et ne voit ni la `DistributionMapping`, ni le rang MPI, ni la politique de boucle. Il est donc independant de la decomposition en boxes/rangs et reentrant sur des fabs distincts.
-- Les reductions passent par les reducteurs deterministes `for_each_cell_reduce_sum` / `_max` : l'accumulation est geree par Kokkos (pas d'accumulateur hote partage ecrit en concurrence), ce qui evite les courses de reduction faites a la main.
+**Reentrant / without shared state.**
+- The body of `for_each_cell` is an `ADC_HD(i, j)` lambda that writes the cell `(i,j)` of its own local view `Array4`. As long as the kernel only writes its cell (cell-by-cell FV idiom), there is no race: each iteration touches a disjoint address. This is the basis of the Serial / OpenMP / Cuda portability without lock.
+- A grid operator receives a local view (`Array4` + `Box`) and sees neither the `DistributionMapping`, nor the MPI rank, nor the loop policy. It is therefore independent of the decomposition into boxes/ranks and reentrant on distinct fabs.
+- The reductions go through the deterministic reducers `for_each_cell_reduce_sum` / `_max`: the accumulation is managed by Kokkos (no shared host accumulator written concurrently), which avoids the hand-made reduction races.
 
-**Non partage / a sequencer explicitement.**
-- Memoire unifiee + fence : sur GH200 la memoire est unifiee (un seul buffer). Toute fonction qui lance un kernel device puis lit la meme memoire dans une boucle hote doit appeler `device_fence()` (= `sync_host()`) entre les deux, sinon course hote/device invisible en CI CPU. C'est, d'apres CHOICES.md, le bug le plus subtil du depot. Le choix assume est le fence explicite et separe de l'acces (pas un type a la `Memory<T>` qui cache la barriere dans l'accesseur). Le filet de detection est `romeo/sanitizer.sbatch` (compute-sanitizer) plus le checksum bit-identique CPU vs GPU de `diocotron_amr_kokkos`, qui diverge si un fence manque.
-- Ecritures aux halos : les trois familles de ghosts (physiques, paralleles, coarse-fine) sont des etapes sequencees, pas concurrentes avec le calcul interieur. `fill_ghosts` est une composition explicite `fill_boundary` (echange) puis `fill_physical_bc` (CL au bord) ; elle s'execute entre deux balayages, pas pendant.
-- Communication MPI : le seam `comm` n'est pas concu pour des appels concurrents depuis plusieurs threads sur le meme communicateur ; le pattern est mono-thread par rang, threads/GPU a l'interieur du rang via `for_each_cell`.
+**Not shared / to sequence explicitly.**
+- Unified memory + fence: on GH200 the memory is unified (a single buffer). Any function that launches a device kernel then reads the same memory in a host loop must call `device_fence()` (= `sync_host()`) between the two, otherwise host/device race invisible in CPU CI. This is, according to CHOICES.md, the most subtle bug of the repository. The assumed choice is the explicit fence separate from the access (not a `Memory<T>`-like type that hides the barrier in the accessor). The detection net is `romeo/sanitizer.sbatch` (compute-sanitizer) plus the bit-identical CPU vs GPU checksum of `diocotron_amr_kokkos`, which diverges if a fence is missing.
+- Halo writes: the three families of ghosts (physical, parallel, coarse-fine) are sequenced steps, not concurrent with the interior computation. `fill_ghosts` is an explicit composition `fill_boundary` (exchange) then `fill_physical_bc` (BC at the border); it executes between two sweeps, not during.
+- MPI communication: the seam `comm` is not designed for concurrent calls from several threads on the same communicator; the pattern is single-thread per rank, threads/GPU inside the rank via `for_each_cell`.
 
 
-## Utiliser la bibliotheque
+## Using the library
 
-`adc_cpp` est un coeur header-only. Cote consommateur C++, on le tire par `FetchContent` et on lie la
-cible `adc::adc` ; rien n'est compile a l'avance, l'instanciation a lieu chez l'appelant.
+`adc_cpp` is a header-only core. On the C++ consumer side, one pulls it by `FetchContent` and links the
+target `adc::adc`; nothing is compiled in advance, the instantiation takes place at the caller's.
 
 ```cmake
 include(FetchContent)
@@ -503,67 +503,67 @@ FetchContent_MakeAvailable(adc_cpp)
 target_link_libraries(mon_appli PRIVATE adc::adc)
 ```
 
-Le contrat d'entree est le concept `PhysicalModel`, declare dans
-[`include/adc/core/physical_model.hpp`](../include/adc/core/physical_model.hpp). Un type qui le satisfait
-expose un flux, une source, une vitesse d'onde maximale (`max_wave_speed`) et une contribution au second
-membre elliptique (`elliptic_rhs`), avec `M::Aux == adc::Aux` exige explicitement par le concept. Les
-methodes appelees dans les kernels doivent porter `ADC_HD` (callable device) ; le concept ne le verifie
-pas, c'est un invariant a la charge de l'auteur du modele. On obtient un tel type soit en composant des
-briques generiques en `CompositeModel<Hyperbolic, Source, Elliptic>`
-([`include/adc/physics/composite.hpp`](../include/adc/physics/composite.hpp)), soit en ecrivant son propre
+The entry contract is the `PhysicalModel` concept, declared in
+[`include/adc/core/physical_model.hpp`](../include/adc/core/physical_model.hpp). A type that satisfies it
+exposes a flux, a source, a maximum wave speed (`max_wave_speed`) and a contribution to the elliptic right-hand
+side (`elliptic_rhs`), with `M::Aux == adc::Aux` explicitly required by the concept. The
+methods called in the kernels must carry `ADC_HD` (device callable); the concept does not verify it,
+it is an invariant in the charge of the model author. One obtains such a type either by composing
+generic bricks in `CompositeModel<Hyperbolic, Source, Elliptic>`
+([`include/adc/physics/composite.hpp`](../include/adc/physics/composite.hpp)), or by writing one's own
 struct.
 
-Le modele s'instancie ensuite dans un coupleur, qui ferme la boucle Poisson -> canal `aux` -> avance en
-temps. Pour un domaine mono-niveau, c'est `Coupler<Model, Elliptic = GeometricMG>`
-([`include/adc/coupling/coupler.hpp`](../include/adc/coupling/coupler.hpp)) : le solveur elliptique est un
-parametre de template, `GeometricMG` par defaut. Pour l'AMR multi-patch ExB, c'est
+The model is then instantiated in a coupler, which closes the loop Poisson -> `aux` channel -> advance in
+time. For a single-level domain, it is `Coupler<Model, Elliptic = GeometricMG>`
+([`include/adc/coupling/coupler.hpp`](../include/adc/coupling/coupler.hpp)): the elliptic solver is a
+template parameter, `GeometricMG` by default. For the multi-patch AMR ExB, it is
 `AmrCouplerMP<Model, Elliptic = GeometricMG>`
-([`include/adc/coupling/amr_coupler_mp.hpp`](../include/adc/coupling/amr_coupler_mp.hpp)), qui ordonne les
-operations (Poisson grossier -> `aux = grad phi` -> avance + regrid Berger-Rigoutsos) et sort la
-hierarchie dans `AmrLevelStack`. Le coupleur multi-especes porte sur AMR est `AmrSystemCoupler`
+([`include/adc/coupling/amr_coupler_mp.hpp`](../include/adc/coupling/amr_coupler_mp.hpp)), which orders the
+operations (coarse Poisson -> `aux = grad phi` -> advance + regrid Berger-Rigoutsos) and outputs the
+hierarchy in `AmrLevelStack`. The multi-species coupler carried over AMR is `AmrSystemCoupler`
 ([`include/adc/coupling/amr_system_coupler.hpp`](../include/adc/coupling/amr_system_coupler.hpp)).
 
-Les facades runtime `System` ([`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp)) et
-`AmrSystem` ([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) emballent ces
-coupleurs pour la composition multi-blocs ; ce sont elles qu'exposent les bindings Python.
+The runtime facades `System` ([`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp)) and
+`AmrSystem` ([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) wrap these
+couplers for the multi-block composition; it is they that the Python bindings expose.
 
 ## Limitations
 
-Les limites suivantes sont gardees dans le code (elles levent une erreur claire plutot que de deriver
-silencieusement), ou sont des frontieres de portee assumees.
+The following limits are guarded in the code (they raise a clear error rather than drift
+silently), or are assumed scope boundaries.
 
-- AMR : pas de solve elliptique composite ni de Schur global. Le Poisson est resolu au niveau grossier
-  puis injecte vers le fin ; `AmrSystem` n'a pas d'etage Schur condense (note dans
-  [`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp), et
-  [`amr_system_coupler.hpp`](../include/adc/coupling/amr_system_coupler.hpp) decrit "Poisson grossier +
-  reflux par bloc"). L'operateur tensoriel plein de la condensation de Schur passe par
-  `TensorKrylovSolver`, hors du `GeometricMG` symetrique, et n'est pas branche sur la hierarchie raffinee.
+- AMR: no composite elliptic solve nor global Schur. The Poisson is solved at the coarse level
+  then injected toward the fine; `AmrSystem` has no condensed Schur stage (noted in
+  [`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp), and
+  [`amr_system_coupler.hpp`](../include/adc/coupling/amr_system_coupler.hpp) describes "coarse Poisson +
+  reflux per block"). The full tensor operator of the Schur condensation goes through
+  `TensorKrylovSolver`, outside the symmetric `GeometricMG`, and is not wired on the refined hierarchy.
 
-- FFT sous `System` en MPI np>1 : refusee. `System` repartit une box unique en round-robin ; a np>1
-  certains rangs ont `local_size()==0` et `PoissonFFTSolver::solve()` dereferencerait une box absente.
-  `set_poisson(solver="fft")` leve donc explicitement, sur tous les rangs, si `n_ranks() > 1`
-  ([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)) :
-  "solveur fft non supporte en MPI (n_ranks>1) : utiliser geometric_mg ou le solveur fft distribue". Le
-  periodique distribue existe (`DistributedFFTSolver`, bandes MPI_Alltoall) mais sa decomposition par
-  bandes est incompatible avec la box unique de `System` ; il n'y est pas cable. Le `fft` mono-rang refuse
-  aussi une paroi, un `eps(x)` variable, l'anisotropie et le terme de reaction kappa (cas reserves a
+- FFT under `System` in MPI np>1: refused. `System` distributes a single box in round-robin; at np>1
+  some ranks have `local_size()==0` and `PoissonFFTSolver::solve()` would dereference an absent box.
+  `set_poisson(solver="fft")` therefore raises explicitly, on all the ranks, if `n_ranks() > 1`
+  ([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)):
+  "solveur fft non supporte en MPI (n_ranks>1) : utiliser geometric_mg ou le solveur fft distribue". The
+  distributed periodic exists (`DistributedFFTSolver`, MPI_Alltoall bands) but its band
+  decomposition is incompatible with the single box of `System`; it is not wired there. The single-rank `fft` also refuses
+  a wall, a variable `eps(x)`, the anisotropy and the kappa reaction term (cases reserved to
   `geometric_mg`).
 
-- Polaire : scalaire ExB, mono-rang. La geometrie polaire (anneau global $r \in [r_{min}, r_{max}] \times \theta \in [0, 2\pi)$, `PolarGeometry`) cable dans `System::step` porte le transport ExB scalaire
-  (`CompositeModel<ExBVelocityPolar, NoSource, ChargeDensity>`, voir
-  [`include/adc/physics/hyperbolic.hpp`](../include/adc/physics/hyperbolic.hpp)). Le Poisson polaire direct
+- Polar: scalar ExB, single-rank. The polar geometry (global ring $r \in [r_{min}, r_{max}] \times \theta \in [0, 2\pi)$, `PolarGeometry`) wired in `System::step` carries the scalar ExB transport
+  (`CompositeModel<ExBVelocityPolar, NoSource, ChargeDensity>`, see
+  [`include/adc/physics/hyperbolic.hpp`](../include/adc/physics/hyperbolic.hpp)). The direct polar Poisson
   `PolarPoissonSolver` ([`include/adc/numerics/elliptic/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar_poisson_solver.hpp))
-  est mono-rang, sur une box unique couvrant l'anneau : sa FFT-en-theta + tridiagonale-en-r exige la ligne
-  azimutale complete et la colonne radiale complete sur un meme rang, donc il leve si `n_ranks() > 1` ou si
-  `ba.size() != 1`. La transposee parallele est hors portee a ce stade.
+  is single-rank, on a single box covering the ring: its FFT-in-theta + tridiagonal-in-r requires the
+  complete azimuthal line and the complete radial column on a same rank, so it raises if `n_ranks() > 1` or if
+  `ba.size() != 1`. The parallel transpose is out of scope at this stage.
 
-Ces garde-fous sont volontaires : ils transforment un SIGSEGV en Release (box absente, assert disparu) en
-une erreur lisible.
+These safeguards are deliberate: they transform a SIGSEGV in Release (absent box, assert disappeared) into
+a readable error.
 
-## Arborescence
+## Tree
 
-Coeur header-only sous `include/adc/`, range par couche orthogonale. Une ligne par sous-dossier ; le
-detail fichier par fichier est en section 13.
+Header-only core under `include/adc/`, ordered by orthogonal layer. One line per subfolder; the
+file-by-file detail is in section 13.
 
 ```
 include/adc/
