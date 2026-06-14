@@ -2,6 +2,8 @@
 #   doxygen docs/Doxyfile   ->   docs/_build/doxygen/html/index.html
 
 PROJECT_NAME           = "adc_cpp"
+# Fallback for a direct `doxygen docs/Doxyfile` run; scripts/build_docs.sh injects the real
+# value from project(VERSION) in CMakeLists.txt, so the published docs never drift.
 PROJECT_NUMBER         = "0.1.0"
 PROJECT_BRIEF          = "Model-free C++23 core for coupled hyperbolic-elliptic systems on adaptive (AMR) meshes, with MPI and GPU (Kokkos) backends"
 

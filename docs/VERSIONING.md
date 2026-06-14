@@ -8,8 +8,9 @@ the public API that the version number tracks, and the rules for bumping it.
 The version lives in one place: `project(VERSION x.y.z)` in `CMakeLists.txt`. Everything
 derives from it: `adc.__version__` (baked as `ADC_VERSION` into `_adc`), the pip wheel
 (scikit-build-core regex on `pyproject.toml`), and `adcConfigVersion.cmake`. Do not
-duplicate the number elsewhere. `docs/Doxyfile` (`PROJECT_NUMBER`) and `docs/sphinx/conf.py`
-(`release`) are the two values still bumped by hand until they are generated from the source.
+duplicate the number elsewhere. The docs build derives it too: `scripts/build_docs.sh` injects
+`PROJECT_NUMBER` into Doxygen from `project(VERSION)`, and `docs/sphinx/conf.py` reads the same
+value, so the published docs never drift from `CMakeLists.txt`.
 
 ## Public API (under SemVer guarantee)
 

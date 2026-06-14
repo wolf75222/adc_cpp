@@ -61,6 +61,11 @@ if [ -z "$PYMOD" ]; then
 fi
 echo "    module : $PYMOD"
 
+# Single source of the version (docs/VERSIONING.md): project(VERSION) in CMakeLists.txt,
+# injected into Doxygen (PROJECT_NUMBER) below; conf.py reads the same value for Sphinx.
+ADC_DOCS_VERSION="$(grep -E '^[[:space:]]*VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+echo "    version: ${ADC_DOCS_VERSION:-(unknown)}"
+
 if [ "$ONLY_SPHINX" != "--sphinx" ]; then
   echo "--- 3/5 reference C++ embarquee (doxygen + doxysphinx) ---"
   # Un SEUL Doxyfile : la variante embarquee surcharge par stdin les cles exigees par
@@ -69,6 +74,7 @@ if [ "$ONLY_SPHINX" != "--sphinx" ]; then
   # repertoire est gitignore) pour ne pas trainer de pages orphelines perimees.
   rm -rf docs/sphinx/doxygen
   ( cat docs/Doxyfile
+    echo "PROJECT_NUMBER=$ADC_DOCS_VERSION"
     echo "OUTPUT_DIRECTORY=docs/sphinx"
     echo "HTML_OUTPUT=doxygen"
     echo "GENERATE_TREEVIEW=NO"
@@ -94,7 +100,7 @@ fi
 
 echo "--- 5/5 Doxygen + site combine ---"
 mkdir -p docs/_build
-doxygen docs/Doxyfile
+( cat docs/Doxyfile; echo "PROJECT_NUMBER=$ADC_DOCS_VERSION" ) | doxygen -
 # Doxygen rend le README avec <img src="docs/..."> mais ne copie pas les images.
 mkdir -p docs/_build/doxygen/html/docs
 cp docs/*.png docs/*.gif docs/_build/doxygen/html/docs/ 2>/dev/null || true
