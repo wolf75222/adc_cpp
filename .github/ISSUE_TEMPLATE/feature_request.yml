@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose a capability or change for adc_cpp.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tasks are tracked in Linear; this form is for external proposals, triaged into Linear.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / need
+      description: What is missing or hard today, and for whom.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact on API, numerics or compatibility
