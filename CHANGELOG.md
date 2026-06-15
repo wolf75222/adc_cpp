@@ -20,18 +20,55 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Documentation rebuilt around a Diataxis navigation** (ADC-248): Getting started, Tutorials,
+  Concepts (11 pages, ADC-249), How-to (12 task pages), Simulation, AMR, Running, Advanced topics,
+  Reference and Development sections, plus a Quickstart page and an internal documentation style
+  guide (ADC-250). Pages are kebab-case.
+- **Embedded C++ reference** in the Sphinx site via doxysphinx (ADC-149), with a modern Doxygen
+  theme and full dot diagrams (ADC-239).
+- **Documentation-as-code tooling**: per-page `docmap.toml` with owner and freshness plus an
+  example harness (ADC-147), a doc taxonomy and a stack ADR (ADC-146), and CI doc lanes (a light PR
+  lane and a weekly heavy lane with lld and ccache, ADC-151/225).
 - **Quality tooling / static analysis** (ADC-105): dedicated CI workflow `.github/workflows/quality.yml`,
   off the PR critical path (weekly Sunday cron + `workflow_dispatch` + `quality` label). Five
   *informative* (non-blocking) jobs: `clang-format` (`.clang-format`), strict warnings
   (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), ASan+UBSan sanitizers (`ADC_ENABLE_SANITIZERS`,
   `ci-warnings`/`ci-asan` presets) and CodeQL. CMake options OFF by default (empty `adc_dev_options`
   target), so `ci.yml`, local builds and `adc_cases` are unchanged. See `docs/QUALITY_TOOLING.md`.
+- **Repository health and GitHub hygiene**: BSD-3 `LICENSE` and license declaration, `CONTRIBUTING`,
+  `SECURITY`, `.gitattributes`, PR and issue templates (ADC-223/224/244/246), a root-hygiene guard
+  (ADC-169), Dependabot weekly Actions bumps (ADC-117), a release workflow that turns a `v*` tag
+  into a GitHub Release from this changelog (ADC-234), and `docs/VERSIONING.md` with the bump rules
+  (ADC-232/237).
+- **Shared C++ test harness** (`test_harness.hpp`, `bench/common.hpp`, ADC-215); a Schur-split test
+  with an AMR guard on `add_block` and auto-skip without Kokkos (ADC-207).
+- **CI**: `ci.yml` split into parallel `gate-cpp` / `gate-python` lanes with `mold` and path
+  routing (ADC-171).
 
 ### Changed
 
+- **Documentation translated to English**: the whole Sphinx site (ADC-228), the root design guides
+  and this changelog (ADC-241), the remaining French docs (ADC-245), `CONTRIBUTING` / `SECURITY` /
+  `DOC_QUALITY` (ADC-227), and a restructured English README with a translation glossary
+  (ADC-119/236/218).
+- **BREAKING (C++)**: facade parameters regrouped into a POD struct, source-incompatible for C++
+  callers; the Python API is unchanged (ADC-214).
 - **Docs version single-sourced** (ADC-233): the docs build derives the version from
   `project(VERSION)` in `CMakeLists.txt` (`scripts/build_docs.sh` injects the Doxygen
   `PROJECT_NUMBER`, `docs/sphinx/conf.py` reads it), so Doxygen and Sphinx no longer drift.
+- **Portability (LLP64 / Windows data model)**: `long` to `int64_t` in `mesh/` and the `box_hash`
+  key, removing undefined `<< 32` shifts (ADC-209/216).
+- **Internal C++ cleanups**: rule of five on owning types (ADC-212), bit-exact factorizations of
+  duplicated FV/MG and Newton-Jacobian code (ADC-213), residual extended device lambdas converted
+  to named functors (ADC-210), hardened runtime guards (ADC-211), and a coding-standards and
+  comments audit (ADC-124/125).
+
+### Fixed
+
+- Heap-buffer-overflow masked on disc geometry, caught by a ghost-width guard at FV operator entry
+  (ADC-163).
+- Comment rot: 10 inaccurate comments corrected (ADC-208); broken sister-solver links in the docs
+  index.
 
 ## [0.1.0] - 2026-06-10
 
