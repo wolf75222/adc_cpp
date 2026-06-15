@@ -1,3 +1,5 @@
+> **STATUS: historical.** A maintainability audit from 2026-06-06; its counts and findings reflect that snapshot, not the current code. Items worth acting on are tracked in Linear. Read it as a historical record (class D, see `DOC_QUALITY.md`).
+
 # Maintainability audit of `adc_cpp`
 
 Date: 2026-06-06.  
