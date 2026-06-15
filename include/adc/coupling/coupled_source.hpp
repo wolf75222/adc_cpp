@@ -27,7 +27,7 @@
 // jour les blocs sur un pas dt. Le squelette l'applique par splitting (un pas
 // additif forward-Euler, via SystemCoupler::coupled_source_step) : c'est le point
 // de branchement ou viendront ensuite les sources raides traitees implicitement
-// (cf. integrator/implicit_stepper.hpp) sans changer le contrat.
+// (cf. time/implicit_stepper.hpp) sans changer le contrat.
 //
 // Le contrat est volontairement minimal : `apply(system, aux, dt)`. Les sources
 // concretes (echange lineaire, collisions, ...) vivent dans adc_cases / les tests,

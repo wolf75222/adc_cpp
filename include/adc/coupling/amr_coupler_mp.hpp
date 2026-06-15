@@ -550,13 +550,14 @@ class AmrCouplerMP {
     return all_reduce_max(std::max(v, Real(1e-12)));
   }
 
-  /// @brief Max wave speed over the coarse level via `model.max_wave_speed`.
+  /// @brief Vitesse d'onde max sur le niveau grossier via `model.max_wave_speed`.
   ///
-  /// Model-generic CFL speed (any `PhysicalModel`), unlike `max_drift_speed` which is
-  /// specific to the E x B drift (`model.B0`). For a pure E x B transport it equals the drift speed.
+  /// Vitesse CFL generique au modele (tout `PhysicalModel`), contrairement a `max_drift_speed`
+  /// qui est specifique a la derive E x B (`model.B0`). Pour un transport E x B pur, elle egale
+  /// la vitesse de derive.
   ///
-  /// @returns the max over coarse cells and both directions, reduced across ranks.
-  /// @note `update()` must have run so that `aux(0)` holds the current `grad phi`.
+  /// @return le max sur les cellules grossieres et les deux directions, reduit sur les rangs.
+  /// @note `update()` doit avoir tourne pour que `aux(0)` porte le `grad phi` courant.
   Real max_wave_speed() {
     Real w = Real(1e-12);
     MultiFab& U = stack_.coarse();

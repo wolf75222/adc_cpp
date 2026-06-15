@@ -17,7 +17,7 @@
 
 // Discretisation spatiale : une reconstruction (limiteur) + un flux numerique,
 // regroupes en un type nomme passe en bloc au coupleur. C'est la "methode spatiale"
-// (a distinguer de l'integration en temps, cf. integrator/time_integrator.hpp).
+// (a distinguer de l'integration en temps, cf. time/time_integrator.hpp).
 //
 // Le tuteur : separer la discretisation spatiale de l'integration temporelle, et
 // pouvoir la choisir PAR sous-modele (Rusanov pour les ions, HLLC pour les electrons)
@@ -29,7 +29,7 @@ namespace adc {
 /// SpatialDiscretisation<LimiterT, NumericalFluxT> : tag-type regroupant la politique de
 /// reconstruction et la politique de flux numerique en un seul parametre de template.
 ///
-/// Satisfait SpatialDiscretisationLike. Exposes deux alias Limiter / NumericalFlux
+/// Satisfait SpatialDiscretisationLike. Expose deux alias Limiter / NumericalFlux
 /// consommes par assemble_rhs et compute_face_fluxes.
 template <class LimiterT, class NumericalFluxT = RusanovFlux>
 struct SpatialDiscretisation {

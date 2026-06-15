@@ -1,4 +1,4 @@
-// AmrSystemCoupler (TODO 2.3 / 2.5.4) : un CoupledSystem porte sur AMR.
+// AmrSystemCoupler (jalon 2.3 / 2.5.4) : un CoupledSystem porte sur AMR.
 //
 // Partie A : deux blocs EXPLICITES (schemas spatiaux differents : electrons MUSCL,
 //   ions ordre 1) advectes sur une hierarchie 2 niveaux periodique. On verifie la
@@ -227,7 +227,7 @@ int main() {
         "amr_ion_coarse_produced");
   }
 
-  // --- Partie C : cadence Poisson (TODO 2.2.3) ---
+  // --- Partie C : cadence Poisson (jalon 2.2.3) ---
   // Un bloc explicite a 4 sous-pas. OncePerStep -> phi resolu 1 fois par macro-pas ;
   // PerSubstep -> re-resolu avant chaque sous-pas suivant (1 + 3 = 4 resolutions).
   {

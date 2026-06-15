@@ -68,7 +68,7 @@ PYBIND11_MODULE(_adc, m) {
         "Cle d'ABI du module (compilateur, standard C++, signature des en-tetes adc).");
 
   // Rang / nombre de rangs MPI du communicateur (0 / 1 en serie ou MPI non initialise, cf.
-  // adc/parallel/comm.hpp). Exposes pour que la facade IO (sim.write / sim.checkpoint) n'ecrive le
+  // adc/parallel/comm.hpp). Expose pour que la facade IO (sim.write / sim.checkpoint) n'ecrive le
   // fichier que sur le rang 0 apres un gather collectif (state_global / potential_global).
   m.def("my_rank", &adc::my_rank, "Rang MPI du processus (0 en serie).");
   m.def("n_ranks", &adc::n_ranks, "Nombre de rangs MPI (1 en serie).");

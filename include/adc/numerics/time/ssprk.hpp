@@ -10,7 +10,7 @@
 #include <adc/numerics/time/time_steppers.hpp>  // SSPRK2Step (schema partage)
 
 // Integrateur SSP-RK2 mono-niveau, fonction libre de commodite. Le SCHEMA vit
-// desormais dans integrator/time_steppers.hpp (objet SSPRK2Step) ; ici on ne fait
+// desormais dans time/time_steppers.hpp (objet SSPRK2Step) ; ici on ne fait
 // que fournir l'evaluateur de residu (fill_ghosts + assemble_rhs) et deleguer, pour
 // ne pas dupliquer la combinaison RK. aux est suppose fixe pendant le pas.
 

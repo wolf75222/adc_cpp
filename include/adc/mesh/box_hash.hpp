@@ -1,7 +1,7 @@
 /// @file
 /// @brief BoxHash : hash spatial pour la recherche rapide des boxes intersectant une requete.
 ///
-/// Une grille de bins uniforme (bibliographie sect. 3.3) associe a chaque bin la liste des boxes
+/// Une grille de bins uniforme (technique classique de hachage spatial) associe a chaque bin la liste des boxes
 /// qui le touchent : trouver les boxes dont la region peut intersecter une box requete devient
 /// ~O(1) par requete (la recherche des paires de halos passe de O(N) a ~O(n), n << N). Construit
 /// UNE fois par maillage, reutilisable tant qu'il ne change pas. INVARIANT de non-omission : si une
@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-// Hash spatial (cf. bibliographie sect. 3.3) : une grille de bins uniforme
+// Hash spatial (technique classique de hachage spatial) : une grille de bins uniforme
 // associe a chaque bin la liste des boxes qui le touchent. Trouver les boxes
 // dont la region valide peut intersecter une box requete devient ~O(1) par
 // requete au lieu de balayer tout le BoxArray (la recherche des paires de

@@ -28,10 +28,10 @@
 //     U ; convergence quadratique sinon. Aucune jacobienne a fournir cote modele.
 //   - ImplicitSourceStepper : l'objet-stepper qui branche backward_euler_source sur
 //     l'interface du SystemCoupler. C'est l'analogue "source seule" de
-//     imex_euler_step (integrator/imex.hpp), le pas implicite d'un schema IMEX dont
+//     imex_euler_step (time/imex.hpp), le pas implicite d'un schema IMEX dont
 //     le transport reste explicite (avance par le coeur sur les blocs explicites).
 //
-// IMEX PARTIEL (TODO 2.2) : un modele peut declarer, variable par variable, lesquelles
+// IMEX PARTIEL (jalon 2.2) : un modele peut declarer, variable par variable, lesquelles
 // sont raides (implicites). backward_euler_source traite alors la source en
 // forward-backward Euler : les variables EXPLICITES avancent en Euler avant (a l'etat
 // d'entree), les variables IMPLICITES par Newton sur le SOUS-systeme reduit (les

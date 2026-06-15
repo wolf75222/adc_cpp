@@ -5,7 +5,7 @@
 /// MultiFab, avec wrapping periodique optionnel. Mono-rang : copies memoire directes. Multi-rang
 /// (ADC_HAS_MPI + n_ranks()>1) : metadonnees REPLIQUEES -> chaque rang enumere DETERMINISTIQUEMENT
 /// la meme liste de jobs, donc les tampons coincident sans negocier les tailles (MPI_Isend/Irecv,
-/// tag 0). API en deux phases (recouvrement calcul/comm, sect. 4.3) : fill_boundary_begin poste les
+/// tag 0). API en deux phases (recouvrement calcul/comm classique) : fill_boundary_begin poste les
 /// echanges, fill_boundary_end attend et deballe ; fill_boundary enchaine les deux (bloquant). Les
 /// ghosts HORS domaine sans periodicite ne sont PAS touches ici (ce sont les CL physiques,
 /// physical_bc.hpp). Les kernels de pack/unpack sont des FONCTEURS NOMMES device-clean (limite nvcc).
@@ -98,7 +98,7 @@ struct UnpackKernel {
 
 }  // namespace detail
 
-// Handle d'echange de halos en deux phases (recouvrement calcul/comm, sect. 4.3).
+// Handle d'echange de halos en deux phases (recouvrement calcul/comm classique).
 // fill_boundary_begin fait les copies locales et poste les Isend/Irecv ; entre
 // begin et end on peut avancer l'INTERIEUR (qui ne depend pas des ghosts
 // distants) pendant que les halos transitent ; fill_boundary_end attend la fin
@@ -156,7 +156,7 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
   for (int sx : sxv)
     for (int sy : syv) shifts.push_back({sx, sy});
 
-  // hash spatial : restreint la recherche des boxes voisines (sect. 3.3).
+  // hash spatial : restreint la recherche des boxes voisines (cf. box_hash.hpp).
   const BoxHash hash(ba, suggest_bin(ba));
 
   // --- copies locales (dst locale ET src locale) ---

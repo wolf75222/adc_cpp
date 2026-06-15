@@ -1510,8 +1510,8 @@ void System::set_density(const std::string& name, const std::vector<double>& rho
   Array4 u = s.U.fab(0).array();
   // CONVENTION DE LAYOUT (inchangee vs l'historique) : axe lent = 2nd indice de box (j), axe rapide =
   // 1er (i), i.e. flat[(j-lo) * ni + (i-lo)]. En cartesien ni = n, lo = 0 -> flat[j*n+i] (bit-identique
-  // a avant). En polaire le tableau est donc (nr, ntheta) ligne-par-ligne radiale (i = r lent par
-  // rapport a... non : j = theta lent, i = r rapide), MEME ordre que density()/copy_comp0 -> coherent.
+  // a avant). En polaire le tableau est donc (nr, ntheta) ligne-par-ligne radiale : j = theta (axe
+  // lent), i = r (axe rapide), MEME ordre que density()/copy_comp0 -> coherent.
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
     for (int i = v.lo[0]; i <= v.hi[0]; ++i)
       set_cell(u, i, j, rho[static_cast<std::size_t>(j - v.lo[1]) * ni + (i - v.lo[0])]);

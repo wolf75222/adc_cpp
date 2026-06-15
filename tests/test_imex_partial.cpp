@@ -1,4 +1,4 @@
-// IMEX PARTIEL (TODO 2.2) : un modele declare quelles variables sont implicites.
+// IMEX PARTIEL (jalon 2.2) : un modele declare quelles variables sont implicites.
 //
 // Modele a 2 variables, toutes deux en relaxation S_c = -k_c (u_c - eq_c) :
 //   var 0 RAIDE (k0 grand) -> traitee IMPLICITE ;

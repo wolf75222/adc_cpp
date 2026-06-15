@@ -21,7 +21,8 @@
 ///        volumes finis CONSERVATIFS aux ouvertures de face (apertures alpha_f) et fraction de volume
 ///        kappa derivees de detail::cut_fraction (chantier T5-PR1).
 ///
-/// CONTEXTE (cf. docs/HOFFART_FIDELITY.md ligne 39, verrou "bords d'anneau cartesiens"). Le chemin T2
+/// CONTEXTE (verrou "bords d'anneau cartesiens" ; cf. docs/HOFFART_FIDELITY.md, ligne "Domain (disc of
+/// radius R)" du tableau de fidelite, le "Cartesian-ring-edge lock"). Le chemin T2
 /// (spatial_operator.hpp : assemble_rhs_masked) approche le disque par un MASQUE en ESCALIER : une face
 /// active/inactive est une PORTE 0/1 (flux normal mis a zero), la frontiere est crenelee. Cet operateur
 /// GENERALISE la porte 0/1 a une OUVERTURE alpha_f in [0, 1] (la fraction lineaire de face dans le

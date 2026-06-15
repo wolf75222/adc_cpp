@@ -872,7 +872,7 @@ def _role_to_stable(name):
 def _norm_implicit(label, implicit_vars, implicit_roles):
     """Normalise les listes du masque implicite (noms / roles physiques) en listes de chaines.
 
-    None -> [] (defaut : masque inactif, defaut modele, bit-identique). Une chaine seule est tolerree
+    None -> [] (defaut : masque inactif, defaut modele, bit-identique). Une chaine seule est toleree
     (ex. implicit_vars="rho_u" -> ["rho_u"]). Les roles sont ramenes a la cle STABLE du C++ (snake_case)
     via _role_to_stable -> "MomentumX" et "momentum_x" sont equivalents. Le masque vit cote POLITIQUE
     TEMPORELLE / bloc (et NON le modele) : le MEME modele se reutilise avec des traitements implicites

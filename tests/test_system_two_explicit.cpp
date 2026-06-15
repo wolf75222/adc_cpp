@@ -1,5 +1,5 @@
-// SystemCoupler : deux blocs EXPLICITES heterogenes (TODO 2.5.2) et conditions aux
-// limites PAR BLOC reellement appliquees (TODO 2.1.3).
+// SystemCoupler : deux blocs EXPLICITES heterogenes (jalon 2.5.2) et conditions aux
+// limites PAR BLOC reellement appliquees (jalon 2.1.3).
 //
 // Partie A : deux blocs explicites avec des schemas ET des sous-pas differents
 //   (SSPRK2 1 sous-pas vs SSPRK3 4 sous-pas) avancent chacun selon SA politique.

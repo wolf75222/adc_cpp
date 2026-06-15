@@ -1,4 +1,4 @@
-// EXEMPLE C++ MINIMAL deux especes, SANS Python (TODO 2.4).
+// EXEMPLE C++ MINIMAL deux especes, SANS Python (jalon 2.4).
 //
 // Le test "est-ce qu'un utilisateur peut construire son cas ?" : electrons
 // IMPLICITES (source de relaxation raide) + ions EXPLICITES (SSPRK2) + Poisson
@@ -7,8 +7,8 @@
 // et appelle SystemCoupler ; aucun solveur implicite n'est ecrit a la main (le
 // defaut ImplicitSourceStepper s'en charge).
 //
-// Couvre aussi : RHS Poisson non nul a N blocs (TODO 2.1.1 / 2.5.1) et le defaut
-// implicite inconditionnellement stable sur source raide (TODO 2.2.1 / 2.5.3).
+// Couvre aussi : RHS Poisson non nul a N blocs (jalon 2.1.1 / 2.5.1) et le defaut
+// implicite inconditionnellement stable sur source raide (jalon 2.2.1 / 2.5.3).
 
 #include <adc/core/coupled_system.hpp>
 #include <adc/core/state.hpp>
@@ -106,7 +106,7 @@ int main() {
   chk(std::fabs(sum(Ue) - ne_be * ncell) < Real(1e-9), "electron_implicit_exact");
   chk(sum(Ue) > Real(0) && sum(Ue) < Real(5) * ncell, "electron_implicit_bounded");
 
-  // (3) RHS Poisson a N especes, non nul (TODO 2.1.1 / 2.5.1) : f = n_i - n_e,
+  // (3) RHS Poisson a N especes, non nul (jalon 2.1.1 / 2.5.1) : f = n_i - n_e,
   //     et l'assembleur somme bien sur tous les blocs.
   MultiFab rhs(ba, dm, 1, 0);
   charge(system, rhs);

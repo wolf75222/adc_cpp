@@ -438,7 +438,7 @@ class AmrSystem {
 
   void step(double dt);  ///< un macro-pas AMR (regrid periodique inclus)
   void advance(double dt, int nsteps);
-  /// Avance a dt = cfl * dx_grossier / vitesse d'onde max. @returns le dt utilise.
+  /// Avance a dt = cfl * dx_grossier / vitesse d'onde max. @return le dt utilise.
   double step_cfl(double cfl);
 
   int nx() const;

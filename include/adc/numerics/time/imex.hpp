@@ -7,8 +7,8 @@
 //
 // Pour le vrai fluide compressible magnetise couple a un champ self-consistant
 // (regime du papier Hoffart, arXiv:2510.11808), certains termes sont RAIDES :
-// force de Lorentz, limite de
-// Debye lambda_D -> 0, quasi-neutralite. Les traiter en explicite imposerait
+// force de Lorentz, limite de Debye lambda_D -> 0, quasi-neutralite. Les traiter
+// en explicite imposerait
 // dt ~ raideur (Debye, gyrofrequence) -> impraticable. Un schema IMEX prend ces
 // termes en IMPLICITE et le transport en EXPLICITE. La propriete AP : quand le
 // petit parametre (eps = lambda_D^2, 1/omega_c, ...) -> 0, le schema reste stable

@@ -23,7 +23,7 @@
 
 namespace adc {
 
-// xface_box / yface_box : fournis par operator/spatial_operator.hpp (inclus ci-dessus),
+// xface_box / yface_box : fournis par numerics/spatial_operator.hpp (inclus ci-dessus),
 // memes conventions de boites de face. On ne les redefinit pas ici.
 
 namespace detail {

@@ -111,7 +111,7 @@ inline long foreach_serial_threshold() {
 //   - sync_host()   : "je vais lire/ecrire ces donnees DEPUIS L'HOTE ;
 //                      rends-les valides cote hote". Sous SharedSpace = un
 //                      device_fence() cible (attendre les kernels en vol), donc
-//                      acces hote sur sont sans course.
+//                      les acces hote sont alors sans course (data race).
 //   - sync_device() : "je vais lire/ecrire ces donnees DEPUIS LE DEVICE
 //                      (un kernel) ; rends-les valides cote device". Sous
 //                      SharedSpace les ecritures hote precedentes sont visibles

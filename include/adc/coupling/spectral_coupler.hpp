@@ -125,7 +125,7 @@ class SpectralCoupler {
     advance_fab_1c(model_, U_.fab(0), Uaux_.fab(0), dx_, dy_, dt, fx, fy);
   }
 
-  // vitesse d'onde max (all-reduce), pour la CFL. GENERALISE (TODO 4.3) : via
+  // vitesse d'onde max (all-reduce), pour la CFL. GENERALISE (jalon 4.3) : via
   // model.max_wave_speed au lieu de la derive /B0 codee en dur -> le coupleur spectral
   // n'est plus lie a un flux de derive particulier. NB : pour la derive E x B c'est
   // max(|gx|,|gy|)/B0 (par direction) au lieu de hypot(gx,gy)/B0 ; le dt CFL change donc legerement (a re-valider

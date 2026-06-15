@@ -326,8 +326,8 @@ int main(int argc, char** argv) {
   const double cells_per_s = med > 0 ? double(cells) / (med / 1e3) : 0.0;
   // FIX DEADLOCK np>=2 : rmax() == all_reduce_max() est une COLLECTIVE -> TOUS les rangs doivent
   // l'appeler, le MEME nombre de fois. Les appeler dans le printf sous `if (my_rank()==0)` ne les
-  // exécutait que sur le rang 0 -> les autres rangs filaient vers comm_finalize() -> rang 0 bloqué
-  // à jamais dans MPI_Allreduce. On hisse donc TOUTES les réductions hors du bloc rang 0.
+  // executait que sur le rang 0 -> les autres rangs filaient vers comm_finalize() -> rang 0 bloque
+  // a jamais dans MPI_Allreduce. On hisse donc TOUTES les reductions hors du bloc rang 0.
   const double halos_ms = 1e3 * rmax(halos_acc) / steps;
   const double transport_ms = 1e3 * rmax(transport_acc) / steps;
   const double poisson_ms = 1e3 * rmax(poisson_acc) / steps;

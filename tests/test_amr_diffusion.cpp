@@ -1,4 +1,4 @@
-// Diffusion sur AMR comme FLUX de face (TODO 4) : un DiffusiveModel ajoute le flux
+// Diffusion sur AMR comme FLUX de face (jalon 4) : un DiffusiveModel ajoute le flux
 // Fickien -nu grad u dans compute_face_fluxes. Vu par le reflux, il reste donc
 // CONSERVATIF aux interfaces coarse-fine (un Laplacien direct, hors flux, serait
 // ignore par le reflux et fuirait de la masse a l'interface). On verifie : (1) la

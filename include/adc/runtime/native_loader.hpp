@@ -730,7 +730,7 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
   // Le .so reste charge (RTLD_GLOBAL) pour la duree du process : le bloc installe pointe du code
   // (fermetures de block_builder, foncteurs nommes) qui y vit. On NE le ferme PAS (pas de propriete
   // partagee a accrocher : les fermetures sont copiees dans le registre du System mais leur CODE est
-  // dans le .so). Cohrent avec un binaire de production ou le modele est lie a vie.
+  // dans le .so). Coherent avec un binaire de production ou le modele est lie a vie.
 #endif  // _WIN32 (chemin production POSIX-only ; Windows = throw, cf. ADC-100)
 }
 

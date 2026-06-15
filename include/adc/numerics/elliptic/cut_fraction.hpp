@@ -9,7 +9,8 @@
 ///   - le solveur elliptique (geometric_mg.hpp : poids de Shortley-Weller du mur de Poisson),
 ///   - le futur transport EB (aperture FV des faces du disque).
 /// Les deux DOIVENT lire la MEME geometrie d'ouverture pour que l'aperture FV soit bit-coherente
-/// avec le mur elliptique (cf. docs/HOFFART_FIDELITY.md ligne 39, verrou "bords d'anneau cartesiens").
+/// avec le mur elliptique (verrou "bords d'anneau cartesiens" ; cf. docs/HOFFART_FIDELITY.md,
+/// ligne "Domain (disc of radius R)" du tableau de fidelite, le "Cartesian-ring-edge lock").
 ///
 /// Le level-set canonique est detail::DiscDomain::level_set (wall_predicate.hpp, chantier T2) :
 ///   ls(x, y) = hypot(x - cx, y - cy) - R, < 0 a l'INTERIEUR, signe du bord.

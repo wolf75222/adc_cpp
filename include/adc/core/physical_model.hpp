@@ -42,7 +42,7 @@
 // (aux dans le flux) et le fluide compressible auto-gravitant (aux dans la
 // source) sous un meme operateur spatial.
 //
-// Contrat Aux (tranche, cf. TODO 4) : l'auxiliaire est FIXE a adc::Aux (phi, grad
+// Contrat Aux (tranche, cf. jalon 4) : l'auxiliaire est FIXE a adc::Aux (phi, grad
 // phi). C'est ce que load_aux construit et tout ce que l'operateur spatial fournit ;
 // le concept l'exige donc explicitement (M::Aux == adc::Aux) plutot que de laisser
 // croire qu'un modele pourrait declarer un auxiliaire arbitraire que le code ne

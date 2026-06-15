@@ -1,4 +1,4 @@
-// Source de COUPLAGE inter-especes (TODO 2.1.2).
+// Source de COUPLAGE inter-especes (jalon 2.1.2).
 //
 // model.source(u, aux) est locale au bloc. Une CoupledSource lit PLUSIEURS blocs
 // pour exprimer un echange entre especes. Ici : un echange lineaire qui transfere

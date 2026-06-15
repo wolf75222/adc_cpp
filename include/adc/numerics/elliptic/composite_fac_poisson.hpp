@@ -27,7 +27,7 @@
 /// niveau grossier puis injecte grad phi (constant par morceaux) aux patchs fins : les patchs raffinent
 /// le TRANSPORT mais PAS le couplage elliptique. Un solveur COMPOSITE fait que le patch fin RAFFINE
 /// VRAIMENT la solution elliptique (phi/grad phi plus precis pres du patch). C'est le verrou de fidelite
-/// AMR (cf. le TODO historique amr_reflux.hpp:20 "couplage Poisson composite (FAC) viendront ensuite").
+/// AMR (le couplage Poisson composite (FAC) que amr_reflux.hpp laisse explicitement a ce solveur).
 ///
 /// ALGORITHME FAC 2 niveaux (McCormick), un patch fin INTERIEUR au domaine grossier. Solution composite
 /// phi = phi_f sur le patch, phi_c ailleurs :

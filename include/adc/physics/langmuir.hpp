@@ -28,7 +28,7 @@ namespace adc {
  * Debye lambda_D tend vers 0, quasi-neutralite) : un schema explicite exigerait
  * dt < 1/omega_p, l'IMEX la traite en implicite.
  *
- * Split IMEX (cf. integrator/imex.hpp) :
+ * Split IMEX (cf. time/imex.hpp) :
  *   raide (implicite, A-stable) : S(a,b) = (b, -omega_p^2 a),  paire oscillante
  *   lent (explicite)            : T(a,b) = (0, -c_s^2 k^2 a),  correction acoustique
  *

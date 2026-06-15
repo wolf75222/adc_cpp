@@ -37,7 +37,7 @@ namespace adc {
 /// Acces indexe : block<I>() (temps de compilation). n_blocks = sizeof...(Blocks).
 ///
 /// INVARIANT : les blocs sont possedes par valeur dans le tuple; les MultiFab qu'ils
-/// referenceent (via EquationBlock::state) doivent avoir une duree de vie superieure
+/// referencent (via EquationBlock::state) doivent avoir une duree de vie superieure
 /// a celle du CoupledSystem.
 /// Construction par deduction : CoupledSystem{b1, b2} deduit les types via le guide de
 /// deduction fourni en fin de fichier.

@@ -30,7 +30,7 @@
 #include <vector>
 
 /// @file
-/// @brief AmrSystemCoupler : coupleur de SYSTEME multi-especes sur AMR (TODO 2.3).
+/// @brief AmrSystemCoupler : coupleur de SYSTEME multi-especes sur AMR (jalon 2.3).
 ///
 /// Porte un CoupledSystem sur une hierarchie AMR : chaque bloc a SA hierarchie de niveaux, toutes les
 /// especes PARTAGENT la meme grille AMR, le meme champ aux (phi, grad phi [, B_z, ...]) et le meme
@@ -41,7 +41,7 @@
 /// le verifie au ctor. PoissonCadence choisit la frequence de re-solve de phi (OncePerStep gele vs
 /// PerSubstep). Mono-bloc = chemin bit-identique a l'historique (boucles sur les autres blocs vides).
 
-// Coupleur de SYSTEME sur AMR (TODO 2.3).
+// Coupleur de SYSTEME sur AMR (jalon 2.3).
 //
 // SystemCoupler porte un CoupledSystem mono-niveau. AmrSystemCoupler le porte sur une
 // hierarchie AMR : chaque bloc a SA propre hierarchie de niveaux (un MultiFab par
@@ -59,7 +59,7 @@
 // commune a toutes les especes) -> un seul aux, un seul Poisson. Mono-rang / mono-box
 // par niveau valide (comme AmrCoupler) ; le multi-box reutilise les primitives _mb.
 //
-// CADENCE POISSON (TODO 2.2.3) : quand une espece fait plus de sous-pas qu'une autre, a
+// CADENCE POISSON (jalon 2.2.3) : quand une espece fait plus de sous-pas qu'une autre, a
 // quelle frequence re-resoudre phi ? Le choix est explicite (PoissonCadence) plutot que
 // cable en dur :
 //   OncePerStep (defaut) : phi resolu une fois par macro-pas, GELE pendant l'avance des

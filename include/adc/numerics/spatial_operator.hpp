@@ -384,7 +384,7 @@ inline Real min_stability_dt_mf(const Model& model, const MultiFab& U, const Mul
 
 /// rusanov_flux : compat libre, delegue a RusanovFlux{} (politique de numerical_flux.hpp).
 ///
-/// Conserve pour les references serie (demos GPU, tests unitaires) qui apellent rusanov_flux
+/// Conserve pour les references serie (demos GPU, tests unitaires) qui appellent rusanov_flux
 /// directement. Preferer RusanovFlux{} passe en template pour les nouveaux appels. ADC_HD.
 // Compat : flux de Rusanov en fonction libre, delegue a la politique RusanovFlux
 // (operator/numerical_flux.hpp). Conserve pour les references serie (demos GPU,
@@ -575,7 +575,7 @@ inline Box2D yface_box(const Box2D& v) {
 // redonne EXACTEMENT le residu d'assemble_rhs. Fx, Fy dimensionnes par l'appelant
 // (boites xface_box/yface_box, ncomp = Model::n_vars, 0 ghost). Device-callable.
 //
-// DIFFUSION sur AMR (TODO 4) : pour un DiffusiveModel, on ajoute le flux de FACE
+// DIFFUSION sur AMR (jalon 4) : pour un DiffusiveModel, on ajoute le flux de FACE
 // Fickien F_diff = -nu (u_R - u_L)/h (gradient centre au face, valeurs de cellule).
 // Sa divergence -(Fx(i+1)-Fx(i))/dx redonne EXACTEMENT +nu Lap(u) d'assemble_rhs,
 // mais traite en FLUX : le reflux AMR le voit donc, et la diffusion reste
@@ -668,7 +668,7 @@ struct FaceFluxYKernel {
 // redonne EXACTEMENT le residu d'assemble_rhs. Fx, Fy dimensionnes par l'appelant
 // (boites xface_box/yface_box, ncomp = Model::n_vars, 0 ghost). Device-callable.
 //
-// DIFFUSION sur AMR (TODO 4) : pour un DiffusiveModel, on ajoute le flux de FACE
+// DIFFUSION sur AMR (jalon 4) : pour un DiffusiveModel, on ajoute le flux de FACE
 // Fickien F_diff = -nu (u_R - u_L)/h (gradient centre au face, valeurs de cellule).
 // Sa divergence -(Fx(i+1)-Fx(i))/dx redonne EXACTEMENT +nu Lap(u) d'assemble_rhs,
 // mais traite en FLUX : le reflux AMR le voit donc, et la diffusion reste

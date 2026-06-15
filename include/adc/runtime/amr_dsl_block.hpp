@@ -169,7 +169,7 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
     // ne joue alors AUCUNE source (la source est l'etage condense seul), miroir du chemin uniforme ou le
     // bloc est ajoute avec son seul transport (time.hyperbolic) + l'etage source condense separe.
     //
-    // ⚠️ OPTION A = INTERMEDIAIRE. L'etage condense resout l'elliptique sur le GROSSIER (comme le Poisson
+    // ATTENTION : OPTION A = INTERMEDIAIRE. L'etage condense resout l'elliptique sur le GROSSIER (comme le Poisson
     // AMR compute_aux/solve_fields), puis le grad phi est injecte (constant par morceaux) aux fins : les
     // patchs fins raffinent le TRANSPORT mais PAS le couplage elliptique. Pour une reproduction papier/AMR
     // FIDELE il faudra un Schur/Poisson COMPOSITE multi-niveau (elliptique condense resolu a la finesse

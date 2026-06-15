@@ -38,7 +38,8 @@ inline std::function<bool(Real, Real)> wall_predicate(const std::string& wall,
 /// mur de Poisson : le mur n'agit que sur l'elliptique (cf. wall_predicate / geometric_mg cut_cell),
 /// alors que ce descripteur sert a construire un MASQUE DE DOMAINE cellule-centre pour rendre le
 /// chemin de transport FV conscient du disque (verrou "bords d'anneau cartesiens", cf.
-/// docs/HOFFART_FIDELITY.md ligne 39).
+/// docs/HOFFART_FIDELITY.md, ligne "Domain (disc of radius R)" du tableau de fidelite,
+/// documente comme le "Cartesian-ring-edge lock").
 ///
 /// REUTILISE EXACTEMENT le level set du mur conducteur (geometric_mg.hpp ligne 71) :
 ///   ls(x, y) = hypot(x - cx, y - cy) - R, < 0 a l'INTERIEUR.
