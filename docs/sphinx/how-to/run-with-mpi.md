@@ -61,5 +61,8 @@ OMP_NUM_THREADS=4 OMPI_MCA_rmaps_base_oversubscribe=true ctest --test-dir build-
 ## Next steps
 
 - To run multi-GPU on ROMEO, see the [parallel backends page](../backends/index.md).
-- For the Python `adc` module, which is serial only and does not exercise the MPI
-  paths, see the [installation page](../getting-started/installation.md).
+- A multi-thread (Kokkos OpenMP) Python module is available via the `python-parallel`
+  CMake preset, with the thread count set by `adc.set_threads(n)` right after `import adc`;
+  there is no nvcc/CUDA Python module (GPU is C++-only) and the Python module does not
+  exercise the MPI code paths (MPI is validated through the C++/ctest path). See the
+  [installation page](../getting-started/installation.md).

@@ -11,15 +11,13 @@ Python script that imports `adc`, composes a model, plugs it into a system, and 
 
 ## Steps
 
-1. Build and install `adc` so the case can import it. Use the Kokkos Serial backend for a
-   first local run.
+1. Build and install `adc` so the case can import it. Use the `python` preset, which builds the
+   importable `adc` module. The `serial` preset leaves `ADC_BUILD_PYTHON=OFF`, so `import adc`
+   would later fail. Use the `python-parallel` preset instead for the multi-thread (Kokkos
+   OpenMP) variant.
 
    ```bash
-   cmake --preset serial
-   ```
-
-   ```bash
-   cmake --build --preset serial
+   cmake --preset python && cmake --build --preset python
    ```
 
 2. In your clone of `adc_cases`, create one folder for the case. Replace `CASE_NAME` with a

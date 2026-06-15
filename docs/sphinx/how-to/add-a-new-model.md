@@ -44,8 +44,9 @@ compiled = diocotron_model(n_i0).compile(backend="production")
 ```
 
 Replace `production` with `aot` for a marshaled, mono-rank `.so` for CPU debug or bench. The
-default backend of `m.compile` is `aot`, so request `production` explicitly for the native
-zero-copy path under MPI or AMR. For the backend trade-offs, see the
+default backend of `m.compile` is `auto`, which auto-selects `production` under toolchain parity
+with the installed `_adc`, otherwise falls back to `aot`; the explicit values
+`prototype | aot | production` are still available. For the backend trade-offs, see the
 [backend matrix](../reference/backend-matrix.md).
 
 ## Run the model

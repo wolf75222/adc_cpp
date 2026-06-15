@@ -222,7 +222,7 @@ runtime param is keyed by its name).
 `m.compile(...)` translates the symbolic model into a `.so` and returns a `CompiledModel`. The facade :
 
 ```python
-Model.compile(so_path=None, include=None, backend="aot", target="system",
+Model.compile(so_path=None, include=None, backend="auto", target="system",
               name=None, cxx=None, std=None, require_metadata=False)
 ```
 
@@ -251,11 +251,13 @@ Argument semantics :
 | backend | engine | System adder | numerics | CPU | MPI | AMR | GPU | when |
 |---|---|---|---|---|---|---|---|---|
 | `prototype` | JIT (`compile_so`) | `add_dynamic_block` | virtual `IModel`, host residual, Rusanov order 1 only | yes | no | no | no | fast iteration / debug |
-| `aot` | AOT (`compile_aot`) | `add_compiled_block` | flat ABI `.so`, production path (HLLC/Roe, order 2, WENO5) but local single-rank grid with marshaling (non zero-copy) | yes | no | no | no | default ; debug / CPU bench ; only one to carry runtime params |
+| `aot` | AOT (`compile_aot`) | `add_compiled_block` | flat ABI `.so`, production path (HLLC/Roe, order 2, WENO5) but local single-rank grid with marshaling (non zero-copy) | yes | no | no | no | `auto` fallback ; debug / CPU bench ; only one to carry runtime params |
 | `production` | native (`compile_native`) | `add_native_block` | `.so` loader that inlines `add_compiled_model<ProdModel>` on the `grid_context()` -> zero-copy, same path as `add_block`, named functors | yes | yes | via `AmrSystem` | reports `False` (non-Kokkos host) | recommended in MPI / AMR |
 
-The code default is `backend="aot"` : you must explicitly ask for `"production"` for the
-native zero-copy path. The capabilities are materialized in `_BACKEND_CAPS` :
+The code default is `backend="auto"` : it auto-selects `production` under toolchain parity with
+the installed `_adc` (loadable module + known baked compiler + matching header signature),
+otherwise falls back to `aot`. The explicit values `prototype | aot | production` are still
+available and short-circuit this policy. The capabilities are materialized in `_BACKEND_CAPS` :
 `production` declares `{cpu, mpi, amr} = True`. `gpu` is reported `False` out of caution : the native
 path is device-clean in C++ (validated GH200, named functors), but the end-to-end validation from
 Python on a module built Kokkos/CUDA remains a dedicated step and the host module tested in CI is not

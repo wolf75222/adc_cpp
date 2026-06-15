@@ -25,7 +25,7 @@ purely native paths (`adc.Model(...)` / `add_block`) remain available.
 
 ## DSL backends: prototype/aot are CPU-only
 
-`m.compile(..., backend=...)` (default `aot`):
+`m.compile(..., backend=...)` (default `auto`: selects `production` under toolchain parity, else `aot`):
 
 - `prototype` (JIT) and `aot` (host-marshaled) are CPU-only: no MPI, no AMR, no
   GPU, single-rank. Their flat `.so` ABI carries neither the `stride` (multirate cadence) nor

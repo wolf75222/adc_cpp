@@ -55,10 +55,16 @@ The full build (core + tests, for contributing) is in [Installation](installatio
 ```bash
 export PYTHONPATH=$PWD/build-py/python   # voie developpeur seulement (inutile apres pip install)
 export ADC_INCLUDE=$PWD/include
+export ADC_KOKKOS_ROOT=$CONDA_PREFIX     # install Kokkos pour le backend DSL aot/production (Serial suffit sur CPU)
 export ADC_CACHE_DIR=$PWD/.adc_cache
 ```
 
-- `ADC_INCLUDE`: the DSL (backend `production`) compiles its `.so` against the repository headers.
+- `ADC_INCLUDE`: the DSL (backends `production` / `aot`) compiles its `.so` against the repository headers.
+- `ADC_KOKKOS_ROOT`: adc_cpp is **Kokkos-only**, so the headers the DSL `.so` includes require Kokkos;
+  point this at a Kokkos install (the conda env root `$CONDA_PREFIX`, or a custom prefix -- Serial
+  suffices on CPU). **Without it the model compile fails** with a clear error (`compile_aot/compile_native:
+  adc_cpp is Kokkos-only`) and the backend fallback chain (`production` then `aot`) cannot wire any
+  block. It is the same variable used for the multi-thread build in Step 16.
 - `ADC_CACHE_DIR`: caches the generated `.so` for reruns (optional; default
   `~/.cache/adc/dsl`, already out of source).
 - `PYTHONPATH`: only for the developer path; the build drops the full package into

@@ -80,7 +80,9 @@ Run one GPU harness under SLURM, replacing `HARNESS` with a binary from
 srun -p instant --constraint=armgpu --gres=gpu:1 ./build-cuda/bin/HARNESS
 ```
 
-The Python `adc` module is built in Kokkos Serial only, so `import adc` runs
-sequentially whatever the hardware. Multi-thread and GPU runs are driven from
-the C++ facade, not from Python. To distribute across ranks as well, add
-`-DADC_USE_MPI=ON` and see [Parallel backends](../backends/index.md).
+A multi-thread (Kokkos OpenMP) Python module is available via the `python-parallel`
+CMake preset; set the thread count with `adc.set_threads(n)` right after
+`import adc`. There is no nvcc/CUDA Python module, so GPU runs stay C++-only, and
+the Python module does not exercise the MPI code paths (MPI is validated through
+the C++/ctest path). To distribute across ranks, add `-DADC_USE_MPI=ON` and see
+[Parallel backends](../backends/index.md).

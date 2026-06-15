@@ -1,8 +1,9 @@
 # Configure outputs and diagnostics
 
 This guide shows how to read the fields and diagnostics a run produces from an
-`adc.System` (or `adc.AmrSystem`). The solver does not write files by itself: it returns
-its state as numpy arrays that you read and save from Python. This assumes you already
+`adc.System` (or `adc.AmrSystem`), and how to write them to disk. The facade returns its
+state as numpy arrays that you read and save from Python, and it also provides `sim.write(...)`
+and `sim.checkpoint(...)` to write files directly. This assumes you already
 have a composed and initialized system. To build one, see
 [the simulation guide](../simulation/index.md).
 
@@ -63,6 +64,32 @@ field at a state you did not reach with a time step.
 ```python
 sim.solve_fields()
 ```
+
+## Write fields to disk
+
+Write the current state to a visualization file with `sim.write(path, format="vtk", step=None,
+fields=None, parallel=False)`. The `vtk` format writes a cartesian ImageData `.vti` (one CellData
+array per conservative variable of each block plus the potential `phi`, openable in ParaView /
+VisIt); `npz` writes a compressed `np.savez` archive (any backend, any geometry). The `step`
+argument adds a numbered suffix, and `fields` selects a subset of blocks (`None` writes all).
+
+```python
+sim.write("out/state", format="vtk", step=42)
+```
+
+Write a restartable checkpoint with `sim.checkpoint(path, parallel=False)`. It saves the full
+conservative state of every block plus the clock; reload it with `sim.restart(path)` after you
+have replayed the same composition (`add_block` / `set_poisson` / couplings).
+
+```python
+sim.checkpoint("out/run.ckpt")
+# later, after replaying the composition:
+sim.restart("out/run.ckpt.npz")
+```
+
+`adc.AmrSystem` exposes the same surface with slightly different signatures: `write(path,
+format="npz", step=None)` (npz default; writes coarse per-block fields plus fine-patch
+footprints) and `checkpoint(path)` (single-block, single-rank restartable npz).
 
 ## Next steps
 

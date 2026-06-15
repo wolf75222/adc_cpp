@@ -155,7 +155,9 @@ model (produced by `adc.CompositeModel(...)`).
 ```
 
 ```{note}
-Compilation backends (`m.compile(..., backend=...)`, default `aot`): `prototype` and `aot`
+Compilation backends (`m.compile(..., backend=...)`, default `auto`, which auto-selects
+`production` under toolchain parity with the installed `_adc`, otherwise `aot`; explicit
+`prototype | aot | production` still available): `prototype` and `aot`
 are CPU-only (no MPI/AMR/GPU); `production` is CPU + MPI + AMR. See
 [backend matrix](backend-matrix.md) and [limitations](known-limitations.md). DSL design:
 [DSL_API.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_API.md), [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).

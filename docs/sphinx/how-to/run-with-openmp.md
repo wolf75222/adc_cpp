@@ -9,9 +9,11 @@ and recompiling. This recipe assumes you already build `adc_cpp` with the Kokkos
 see [Installation](../getting-started/installation.md) if you do not. For the full list of
 parallel configurations, see the [parallel backends](../backends/index.md) page.
 
-The Python `adc` module stays serial. The `_adc` extension is built in Kokkos Serial only, so a
-script that does `import adc` runs sequentially whatever the hardware. Multi-thread runs are driven
-from the C++ facade (the tests and executables), not from Python.
+A multi-thread (Kokkos OpenMP) Python module is available too: build it with the
+`python-parallel` CMake preset, then set the thread count from Python with `adc.set_threads(n)`
+called right after `import adc`. The remaining caveats are real: there is no nvcc/CUDA Python
+module (GPU runs are C++-only), and the Python `adc` module does not exercise the MPI code paths
+(MPI is validated through the C++/ctest path).
 
 ## Steps
 

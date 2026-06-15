@@ -35,11 +35,12 @@ fluid `adc.FluidState(kind="isothermal") + adc.IsothermalFlux()` provides them).
 entirely C++ (`CondensedSchurSourceStepper`, exposed as `adc.CondensedSchur`): no
 per-cell Python callback.
 
-> **Roles hardcoded on the C++ side.** The role / field descriptors are not configurable
-> from Python. `adc.CondensedSchur(...)` accepts `kind`, `theta`, `alpha`, but passing
-> `density=`, `momentum=`, `energy=`, `magnetic_field=` or `potential=` raises an error:
-> the C++ source stage fixes these roles hard. This is intentional (the contract of
-> `CondensedSchurSourceStepper` is frozen).
+> **Only `potential=` is non-configurable.** `adc.CondensedSchur(...)` accepts `kind`,
+> `theta`, `alpha`, and the role descriptors `density=`, `momentum=`, `energy=`,
+> `magnetic_field=`: these default to the canonical roles and accept an `adc.Role.*` value or
+> a stable role / aux name. Only `potential=` is fixed: passing anything other than `'phi'`
+> raises an error, because the source stage solves for the potential itself. This is
+> intentional (the contract of `CondensedSchurSourceStepper` is frozen on the potential).
 
 `adc.Strang` is the 2nd-order extension of `adc.Split` (transport / source /
 transport sequence). The default is unchanged: a block in pure `adc.Explicit` never sees the

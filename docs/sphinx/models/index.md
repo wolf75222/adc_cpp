@@ -273,15 +273,16 @@ factual `ValueError` otherwise. For the physical meaning and the discretization 
 `m.compile(backend=..., target=...)` translates the symbolic model into a `.so` and returns a
 `CompiledModel` (which carries `so_path`, `backend`, the `adder` to use, the names/roles/gamma/n_aux,
 the `abi_key` and the `model_hash`). The `.so` is cached by `model_hash`: an unchanged model
-is not recompiled. The default is `backend="aot"`; you therefore have to explicitly request
-`"production"` for the native zero-copy path.
+is not recompiled. The default is `backend="auto"`, which auto-selects `production` under
+toolchain parity with the installed `_adc`, otherwise falls back to `aot`. The explicit values
+`prototype | aot | production` are still available and short-circuit this policy.
 
 Three backends, materialized on the code side in `_BACKEND_CAPS` (`python/adc/dsl.py`):
 
 | backend | CPU | MPI | AMR | GPU | role |
 |---|---|---|---|---|---|
 | `production` | yes | yes (np=1/2/4) | via `AmrSystem` | reports `False` on the Python side | recommended in MPI/AMR ; native zero-copy loader (`add_native_block`) |
-| `aot` | yes | no | no | no | default ; `.so` with marshaling, mono-rank, CPU debug/bench. Carries the runtime params (`set_block_params`) |
+| `aot` | yes | no | no | no | `auto` fallback ; `.so` with marshaling, mono-rank, CPU debug/bench. Carries the runtime params (`set_block_params`) |
 | `prototype` | yes (Rusanov o1) | no | no | no | JIT prototype, host virtual dispatch ; do not use in production |
 
 `_BACKEND_CAPS["production"]` declares `{cpu, mpi, amr} = True`. The native `production` path shares

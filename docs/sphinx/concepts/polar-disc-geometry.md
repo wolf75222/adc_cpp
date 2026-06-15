@@ -45,9 +45,10 @@ Exact geometry comes at the price of reach. The polar path has sharp edges:
 
 - scalar `ExB` transport only; the fluid limiter and Riemann solver are not lifted to
   the polar side, so you cannot run a compressible or isothermal Euler model on it.
-- single-rank only; the direct polar solver covers the ring with a single box and
-  refuses MPI (`n_ranks > 1` is an error). The polar counterpart of the condensed Schur
-  source stage is likewise single-rank.
+- the direct polar Poisson field solve (`PolarPoissonSolver`) is single-rank/single-box:
+  it covers the ring with a single box and refuses MPI (`n_ranks > 1` is an error). The
+  polar condensed Schur source stage, by contrast, is multi-rank/multi-box (theta
+  decomposition).
 - no Cartesian-to-polar coupling; the polar ring is a separate global domain, not a
   region embedded in a Cartesian hierarchy.
 

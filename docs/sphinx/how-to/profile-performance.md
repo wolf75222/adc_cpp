@@ -29,10 +29,12 @@ The reference case is a 256x256 grid, one box, `bc=periodic`, `solver=geometric_
 
 The harness lives in `bench/profile_step.cpp` and is driven by `bench/run_bench.sh`. It
 is out of the default build (`ADC_BUILD_BENCH=OFF`), so the build script enables and
-compiles it for you. Run the serial CPU profile first:
+compiles it for you. Run the serial CPU profile first, passing the Kokkos Serial install root
+as `KROOT` (the build is Kokkos-only; you may instead export `$KOKKOS_ROOT` or
+`$ADC_KOKKOS_ROOT` and omit the argument). Replace `KROOT` with the path to your Kokkos install:
 
 ```sh
-bench/run_bench.sh serie
+bench/run_bench.sh serie KROOT
 ```
 
 To profile the Kokkos OpenMP backend, pass the Kokkos install root. Replace `KROOT` with
@@ -42,10 +44,13 @@ the path to your Kokkos install:
 bench/run_bench.sh kokkos-omp KROOT
 ```
 
-To profile MPI on CPU, pass the number of ranks. Replace `NP` with the rank count:
+To profile MPI on CPU, pass the Kokkos Serial install root as `KROOT` and the rank count as
+`NP` (the third argument). You may instead export `$KOKKOS_ROOT` / `$ADC_KOKKOS_ROOT` and pass
+`NP` as the third argument. Replace `KROOT` with your Kokkos install and `NP` with the rank
+count:
 
 ```sh
-bench/run_bench.sh mpi NP
+bench/run_bench.sh mpi KROOT NP
 ```
 
 The Kokkos Cuda and MPI+Cuda modes (`kokkos-cuda`, `mpi-cuda`) target the ROMEO GH200
