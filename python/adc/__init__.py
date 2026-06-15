@@ -1,9 +1,9 @@
-"""adc : bindings Python de la lib adc_cpp.
+"""adc : Python bindings for the adc_cpp library.
 
-Le coeur expose des BRIQUES generiques compilees (transport, source, second membre
-elliptique) ; un MODELE est une composition de briques, nommee cote application. Python
-compose les briques (objets), le calcul cellule par cellule reste C++ compile (pas de
-numpy, GPU/MPI conserves).
+The core exposes generic compiled BRICKS (transport, source, elliptic right-hand
+side) ; a MODEL is a composition of bricks, named on the application side. Python
+composes the bricks (objects), the cell-by-cell computation stays in compiled C++ (no
+numpy, GPU/MPI preserved).
 
     import adc
     sim = adc.System(n=192, periodic=False)
@@ -16,41 +16,41 @@ numpy, GPU/MPI conserves).
     sim.set_density("ne", ne_numpy)
     sim.step_cfl(0.4)
 
-Les noms de scenarios (diocotron, electron_euler...) sont des compositions cote
-application (cf. adc_cases). Aucun nom de scenario ici.
+The scenario names (diocotron, electron_euler...) are compositions on the
+application side (see adc_cases). No scenario name here.
 """
 
 import os as _os
 import sys as _sys
 
-# Le backend DSL "production" charge ensuite un loader .so par dlopen. Ce loader
-# resout des symboles C++ exportes par l'extension _adc (System::install_block,
-# grid_context, ensure_aux_width, etc.). CPython charge normalement les extensions
-# en RTLD_LOCAL sur Unix/macOS ; les symboles restent alors invisibles au loader et
-# add_native_block echoue au dlopen ("symbol not found in flat namespace"). On
-# charge donc _adc en RTLD_GLOBAL, puis on restaure les flags pour les imports
-# suivants. Le module deja charge conserve sa portee globale.
+# The "production" DSL backend then loads a .so loader via dlopen. This loader
+# resolves C++ symbols exported by the _adc extension (System::install_block,
+# grid_context, ensure_aux_width, etc.). CPython normally loads extensions
+# with RTLD_LOCAL on Unix/macOS ; the symbols then stay invisible to the loader and
+# add_native_block fails at dlopen ("symbol not found in flat namespace"). So we
+# load _adc with RTLD_GLOBAL, then restore the flags for the following imports.
+# The already-loaded module keeps its global scope.
 def _explain_missing_extension(exc):
-    """Transforme le ModuleNotFoundError brut sur adc._adc en message ACTIONNABLE (bug recurrent :
-    l'extension est epinglee a l'ABI cpython-3XY de l'interpreteur qui l'a construite ; sous un
-    autre python, l'import echoue sans dire pourquoi). On liste les .so presents a cote du paquet
-    et on compare leur tag a l'interpreteur courant."""
+    """Turn the raw ModuleNotFoundError on adc._adc into an ACTIONABLE message (recurring bug :
+    the extension is pinned to the cpython-3XY ABI of the interpreter that built it ; under a
+    different python, the import fails without saying why). We list the .so files present next to the package
+    and compare their tag to the current interpreter."""
     import glob
     here = _os.path.dirname(__file__)
     sos = sorted(_os.path.basename(p) for p in glob.glob(_os.path.join(here, "_adc.*")))
     cur = "cpython-%d%d" % (_sys.version_info[0], _sys.version_info[1])
     if not sos:
-        hint = ("aucune extension _adc.*.so dans %s : le module n'est pas construit. Construire avec "
-                "`cmake --preset python && cmake --build --preset python`, puis PYTHONPATH=<build>/python."
+        hint = ("no _adc.*.so extension in %s : the module is not built. Build with "
+                "`cmake --preset python && cmake --build --preset python`, then PYTHONPATH=<build>/python."
                 % here)
     elif not any(cur in s for s in sos):
-        hint = ("extension(s) presente(s) : %s, mais l'interpreteur courant est %s (%s). Utiliser le "
-                "python qui a construit le module (env conda `adc`), ou rebatir avec cet interpreteur "
+        hint = ("extension(s) present : %s, but the current interpreter is %s (%s). Use the "
+                "python that built the module (conda env `adc`), or rebuild with this interpreter "
                 "(-DPython_EXECUTABLE=%s)." % (", ".join(sos), cur, _sys.executable, _sys.executable))
     else:
-        hint = ("l'extension %s correspond a l'interpreteur (%s) mais son import echoue : dependance "
-                "manquante ou .so corrompu ; relancer le build du module." % (", ".join(sos), cur))
-    return ImportError("import adc._adc impossible : %s\n(cause d'origine : %s)" % (hint, exc))
+        hint = ("the extension %s matches the interpreter (%s) but its import fails : missing "
+                "dependency or corrupt .so ; rerun the module build." % (", ".join(sos), cur))
+    return ImportError("import adc._adc failed : %s\n(original cause : %s)" % (hint, exc))
 
 
 if hasattr(_sys, "setdlopenflags") and hasattr(_sys, "getdlopenflags"):
@@ -64,7 +64,7 @@ if hasattr(_sys, "setdlopenflags") and hasattr(_sys, "getdlopenflags"):
     try:
         from ._adc import (SystemConfig, ModelSpec, System as _System,
                            AmrSystemConfig, AmrSystem as _AmrSystem,
-                           abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+                           abi_key)  # module ABI key ("production" DSL path / diagnostic)
     except ImportError as _e:
         raise _explain_missing_extension(_e) from _e
     finally:
@@ -74,93 +74,93 @@ else:
     try:
         from ._adc import (SystemConfig, ModelSpec, System as _System,
                            AmrSystemConfig, AmrSystem as _AmrSystem,
-                           abi_key)  # cle d'ABI du module (chemin DSL "production" / diagnostic)
+                           abi_key)  # module ABI key ("production" DSL path / diagnostic)
     except ImportError as _e:
         raise _explain_missing_extension(_e) from _e
 
 del _os, _sys, _explain_missing_extension
 
-# Version du paquet = celle bakee dans l'extension (source unique : project(VERSION) CMake).
-# Vieux module sans l'attribut -> on degrade en "unknown" plutot que de casser l'import.
+# Package version = the one baked into the extension (single source : project(VERSION) CMake).
+# Old module without the attribute -> degrade to "unknown" rather than breaking the import.
 try:
     from ._adc import __version__
 except ImportError:
     __version__ = "unknown"
 
 
-# --- Parallelisme : un seul knob runtime --------------------------------------------------------
-# Le backend de calcul est COMPILE dans _adc. Le multi-thread (et le GPU) ne sont possibles QUE si
-# _adc a ete construit avec -DADC_USE_KOKKOS=ON (device OpenMP). A l'execution, Kokkos s'initialise
-# PARESSEUSEMENT a la creation du 1er System/AmrSystem et lit OMP_NUM_THREADS a cet instant precis.
-# adc.set_threads(n) ecrit OMP_NUM_THREADS AVANT cette init : un seul appel remplace le rituel
-# `OMP_NUM_THREADS=n python ...`. A appeler juste apres `import adc`, avant de creer le 1er systeme.
+# --- Parallelism : a single runtime knob --------------------------------------------------------
+# The compute backend is COMPILED into _adc. Multi-threading (and the GPU) are possible ONLY if
+# _adc was built with -DADC_USE_KOKKOS=ON (OpenMP device). At runtime, Kokkos initializes
+# LAZILY at the creation of the 1st System/AmrSystem and reads OMP_NUM_THREADS at that exact moment.
+# adc.set_threads(n) writes OMP_NUM_THREADS BEFORE this init : a single call replaces the ritual
+# `OMP_NUM_THREADS=n python ...`. To be called right after `import adc`, before creating the 1st system.
 _first_system_built = False
 
 
 def has_kokkos():
-    """True si _adc a ete compile avec Kokkos (multi-thread/GPU possible), False si SERIE.
+    """True if _adc was compiled with Kokkos (multi-thread/GPU possible), False if SERIAL.
 
-    None si le module est trop ancien pour exposer l'info (attribut __has_kokkos__ absent)."""
+    None if the module is too old to expose the info (attribute __has_kokkos__ absent)."""
     from . import _adc
     return getattr(_adc, "__has_kokkos__", None)
 
 
 def set_threads(n=None):
-    """Fixe le nombre de threads de calcul (backend Kokkos OpenMP) en UNE ligne.
+    """Set the number of compute threads (Kokkos OpenMP backend) in ONE line.
 
-    Equivaut a exporter OMP_NUM_THREADS=n avant de lancer Python, mais sans toucher au shell. N'a
-    d'effet que si _adc a ete compile avec -DADC_USE_KOKKOS=ON (preset 'python-parallel'), et DOIT
-    etre appele AVANT le 1er System/AmrSystem (Kokkos s'initialise paresseusement a ce moment-la et
-    lit OMP_NUM_THREADS une seule fois) :
+    Equivalent to exporting OMP_NUM_THREADS=n before launching Python, but without touching the shell. Has
+    an effect only if _adc was compiled with -DADC_USE_KOKKOS=ON (preset 'python-parallel'), and MUST
+    be called BEFORE the 1st System/AmrSystem (Kokkos initializes lazily at that moment and
+    reads OMP_NUM_THREADS only once) :
 
         import adc
         adc.set_threads(8)     # 8 threads
-        adc.set_threads()      # tous les coeurs (os.cpu_count())
+        adc.set_threads()      # all cores (os.cpu_count())
         sim = adc.System(n=256)
 
-    Un module SERIE ou un appel tardif sont signales par un avertissement (sans lever d'exception)."""
+    A SERIAL module or a late call are flagged by a warning (without raising an exception)."""
     import os
     import warnings
-    if n is None:                       # defaut : tous les coeurs logiques disponibles
+    if n is None:                       # default : all available logical cores
         n = os.cpu_count() or 1
     n = int(n)
     if n < 1:
-        raise ValueError("adc.set_threads : n doit etre >= 1")
-    # Source de verite : l'etat REEL du runtime Kokkos (couvre TOUTES les voies d'init lazy --
-    # System, AmrSystem, .so DSL, usage direct de _adc). Le drapeau Python reste le repli pour
-    # un vieux module sans le binding.
+        raise ValueError("adc.set_threads : n must be >= 1")
+    # Source of truth : the REAL state of the Kokkos runtime (covers ALL lazy init paths --
+    # System, AmrSystem, DSL .so, direct use of _adc). The Python flag stays the fallback for
+    # an old module without the binding.
     from . import _adc
     _kokkos_started = getattr(_adc, "kokkos_is_initialized", lambda: _first_system_built)()
     if _kokkos_started or _first_system_built:
         warnings.warn(
-            "adc.set_threads : appele APRES l'initialisation du runtime (1er System/AmrSystem ou "
-            "1re allocation) -> SANS EFFET. Appeler set_threads juste apres `import adc`.",
+            "adc.set_threads : called AFTER the runtime initialization (1st System/AmrSystem or "
+            "1st allocation) -> NO EFFECT. Call set_threads right after `import adc`.",
             RuntimeWarning, stacklevel=2)
         return
     if has_kokkos() is False:
         warnings.warn(
-            "adc.set_threads : _adc est SERIE (compile sans -DADC_USE_KOKKOS=ON) -> le reglage de "
-            "threads est ignore au calcul. Reconstruire avec -DADC_USE_KOKKOS=ON "
-            "-DKokkos_ROOT=$CONDA_PREFIX pour le multi-thread.", RuntimeWarning, stacklevel=2)
-    # On ecrit l'env meme en cas de doute (inoffensif) : un .so DSL backend='production' compile avec
-    # Kokkos lira lui aussi OMP_NUM_THREADS a son initialisation.
-    # On positionne DEUX variables pour etre agnostique au backend que Kokkos a compile :
-    #   - OMP_NUM_THREADS  : lu par le device OpenMP (cas usuel) ;
-    #   - KOKKOS_NUM_THREADS : lu par Kokkos::initialize quel que soit le device (OpenMP OU Threads),
-    #     utile si le Kokkos installe (p.ex. conda-forge) utilise le backend Threads et non OpenMP.
+            "adc.set_threads : _adc is SERIAL (compiled without -DADC_USE_KOKKOS=ON) -> the thread "
+            "setting is ignored at compute time. Rebuild with -DADC_USE_KOKKOS=ON "
+            "-DKokkos_ROOT=$CONDA_PREFIX for multi-threading.", RuntimeWarning, stacklevel=2)
+    # We write the env even in case of doubt (harmless) : a DSL .so with backend='production' compiled with
+    # Kokkos will also read OMP_NUM_THREADS at its initialization.
+    # We set TWO variables to be agnostic to the backend that Kokkos was compiled with :
+    #   - OMP_NUM_THREADS  : read by the OpenMP device (usual case) ;
+    #   - KOKKOS_NUM_THREADS : read by Kokkos::initialize whatever the device (OpenMP OR Threads),
+    #     useful if the installed Kokkos (e.g. conda-forge) uses the Threads backend and not OpenMP.
     os.environ["OMP_NUM_THREADS"] = str(n)
     os.environ["KOKKOS_NUM_THREADS"] = str(n)
-    # OMP_PROC_BIND=false UNIQUEMENT sur macOS (evite les warnings/oversubscription de libomp sur
-    # les Mac de dev). Sur Linux/cluster on n'impose RIEN : desactiver l'affinite y degraderait le
-    # scaling NUMA, et un job SLURM qui exporte OMP_PROC_BIND=close/spread reste maitre (setdefault
-    # ne l'ecraserait pas de toute facon).
+    # OMP_PROC_BIND=false ONLY on macOS (avoids libomp warnings/oversubscription on
+    # dev Macs). On Linux/cluster we impose NOTHING : disabling affinity there would degrade
+    # NUMA scaling, and a SLURM job that exports OMP_PROC_BIND=close/spread stays in control (setdefault
+    # would not override it anyway).
     import sys as _s
     if _s.platform == "darwin":
         os.environ.setdefault("OMP_PROC_BIND", "false")
 
 
 def parallel_info():
-    """Etat du parallelisme : backend compile, OMP_NUM_THREADS courant, init Kokkos deja faite."""
+    """Parallelism state : compiled backend, current OMP_NUM_THREADS, Kokkos init already done."""
     import os
     return {
         "has_kokkos": has_kokkos(),
@@ -170,102 +170,102 @@ def parallel_info():
 
 
 def doctor(verbose=True):
-    """Diagnostic de l'environnement adc en UNE commande : python -c "import adc; adc.doctor()".
+    """Diagnose the adc environment in ONE command : python -c "import adc; adc.doctor()".
 
-    Verifie chaque maillon dont dependent le module ET la compilation runtime du DSL (la classe de
-    bugs "environnement du build != environnement d'execution", p.ex. le `which c++` d'un env conda
-    qui rejette -std=c++23). Renvoie un dict {check: (ok, detail)} ; verbose=True l'affiche."""
+    Checks each link on which the module AND the runtime compilation of the DSL depend (the class of
+    bugs "build environment != execution environment", e.g. the `which c++` of a conda env
+    that rejects -std=c++23). Returns a dict {check: (ok, detail)} ; verbose=True prints it."""
     import os
     import sys
     checks = {}
 
-    # 1. interpreteur + extension (piege ABI cpython-3XY)
+    # 1. interpreter + extension (cpython-3XY ABI trap)
     from . import _adc
     so = getattr(_adc, "__file__", "?")
     checks["interpreteur"] = (True, "%s (%d.%d) ; extension %s"
                               % (sys.executable, sys.version_info[0], sys.version_info[1], so))
 
-    # 2. numpy (requis a l'import de adc.dsl)
+    # 2. numpy (required at import of adc.dsl)
     try:
         import numpy
         checks["numpy"] = (True, numpy.__version__)
     except Exception as e:
-        checks["numpy"] = (False, "ABSENT de cet interpreteur (%s) -> `import adc.dsl` echouera. "
-                                  "Installer numpy dans CE python." % e)
+        checks["numpy"] = (False, "ABSENT from this interpreter (%s) -> `import adc.dsl` will fail. "
+                                  "Install numpy in THIS python." % e)
 
-    # 3. backend de calcul compile
+    # 3. compiled compute backend
     hk = has_kokkos()
     checks["kokkos"] = (hk is not False,
-                        {True: "module Kokkos (multi-thread possible ; adc.set_threads actif)",
-                         False: "module SERIE (set_threads sans effet ; rebatir preset python-parallel)",
-                         None: "indetermine (vieux module sans __has_kokkos__)"}[hk])
+                        {True: "Kokkos module (multi-thread possible ; adc.set_threads active)",
+                         False: "SERIAL module (set_threads has no effect ; rebuild preset python-parallel)",
+                         None: "undetermined (old module without __has_kokkos__)"}[hk])
 
-    # 4. compilateur du DSL runtime (le maillon du bug -std=c++23)
+    # 4. runtime DSL compiler (the link of the -std=c++23 bug)
     try:
         from . import dsl as _dsl
     except Exception as e:
-        checks["dsl"] = (False, "import adc.dsl impossible (%s)" % e)
+        checks["dsl"] = (False, "import adc.dsl failed (%s)" % e)
         _dsl = None
     if _dsl is not None:
         baked = _dsl.loader_cxx_compiler()
         cc = _dsl._default_cxx(None)
         if not cc:
-            checks["compilateur"] = (False, "AUCUN compilateur C++ trouve (ADC_CXX, module, PATH). "
-                                            "Installer Xcode CLT (macOS) ou `conda install cxx-compiler`.")
+            checks["compilateur"] = (False, "NO C++ compiler found (ADC_CXX, module, PATH). "
+                                            "Install Xcode CLT (macOS) or `conda install cxx-compiler`.")
         else:
             origin = ("$ADC_CXX" if os.environ.get("ADC_CXX") == cc
-                      else "bake par le build de _adc" if cc == baked else "PATH (which)")
+                      else "baked by the _adc build" if cc == baked else "PATH (which)")
             try:
                 std = _dsl._probe_cxx_std(cc, _dsl.loader_cxx_std())
-                checks["compilateur"] = (True, "%s [%s] ; -std=%s accepte" % (cc, origin, std))
+                checks["compilateur"] = (True, "%s [%s] ; -std=%s accepted" % (cc, origin, std))
             except RuntimeError as e:
                 checks["compilateur"] = (False, str(e).splitlines()[0])
             if baked and cc != baked:
-                checks["compilateur_abi"] = (False, "compilateur runtime (%s) != build (%s) -> risque "
-                                                    "de rejet 'ABI incompatible' sur backend "
-                                                    "production. export ADC_CXX=%r pour forcer celui "
-                                                    "du build." % (cc, baked, baked))
+                checks["compilateur_abi"] = (False, "runtime compiler (%s) != build (%s) -> risk "
+                                                    "of 'ABI incompatible' rejection on production "
+                                                    "backend. export ADC_CXX=%r to force the one "
+                                                    "from the build." % (cc, baked, baked))
 
-        # 5. en-tetes adc (DSL production : la signature doit matcher celle bakee dans _adc)
+        # 5. adc headers (production DSL : the signature must match the one baked into _adc)
         try:
             inc = _dsl.adc_include()
             checks["include"] = (True, inc)
-            # 5b. SYNCHRONISATION en-tetes <-> module (bug reel : module bati AVANT un git pull ->
-            # le loader DSL reference des signatures C++ absentes du vieux .so -> dlopen 'symbol
-            # not found' cryptique). On compare la signature bakee a celle de l'arbre actuel.
+            # 5b. SYNCHRONIZATION headers <-> module (real bug : module built BEFORE a git pull ->
+            # the DSL loader references C++ signatures absent from the old .so -> dlopen 'symbol
+            # not found' cryptic). We compare the baked signature to the one of the current tree.
             baked_sig = _dsl.module_header_signature()
             if baked_sig is not None:
                 cur_sig = _dsl.adc_header_signature(inc)
                 if cur_sig == baked_sig:
-                    checks["headers_sync"] = (True, "en-tetes == build du module (sig %s...)"
+                    checks["headers_sync"] = (True, "headers == module build (sig %s...)"
                                               % baked_sig[:12])
                 else:
-                    checks["headers_sync"] = (False, "en-tetes MODIFIES depuis le build de _adc "
-                                                     "(module perime) -> rebatir : cmake --build "
-                                                     "build-py --target _adc (sinon : dlopen "
-                                                     "'symbol not found' sur backend production)")
+                    checks["headers_sync"] = (False, "headers MODIFIED since the _adc build "
+                                                     "(stale module) -> rebuild : cmake --build "
+                                                     "build-py --target _adc (otherwise : dlopen "
+                                                     "'symbol not found' on production backend)")
         except RuntimeError as e:
-            checks["include"] = (False, "en-tetes adc introuvables (definir ADC_INCLUDE) : %s" % e)
+            checks["include"] = (False, "adc headers not found (set ADC_INCLUDE) : %s" % e)
 
-    # 6. threads courants
-    checks["threads"] = (True, "OMP_NUM_THREADS=%s ; premier System cree=%s"
-                         % (os.environ.get("OMP_NUM_THREADS", "(defaut)"), _first_system_built))
+    # 6. current threads
+    checks["threads"] = (True, "OMP_NUM_THREADS=%s ; first System created=%s"
+                         % (os.environ.get("OMP_NUM_THREADS", "(default)"), _first_system_built))
 
     if verbose:
         for cname, (ok, detail) in checks.items():
             print("[%s] %-16s %s" % ("OK " if ok else "FAIL", cname, detail))
         if all(ok for ok, _ in checks.values()):
-            print("=> environnement sain : module importable, DSL compilable, ABI coherente.")
+            print("=> healthy environment : module importable, DSL compilable, ABI coherent.")
         else:
-            print("=> corriger les FAIL ci-dessus avant d'utiliser le DSL backend='production'.")
+            print("=> fix the FAILs above before using the DSL backend='production'.")
     return checks
 
 
-# L'API PUBLIQUE n'expose QUE des briques composables (System, AmrSystem, Model...) : aucun
-# scenario physique nomme. L'integrateur AP deux-fluides (schema asymptotic-preserving, non
-# composable bloc a bloc) a quitte le coeur : ce n'est pas une brique generique mais un SCENARIO,
-# qui vit desormais dans adc_cases (cf. adc_cases/two_fluid_ap/), compile a la volee contre les
-# en-tetes generiques d'adc_cpp. Il n'est donc ni reexporte ici ni present dans le module _adc.
+# The PUBLIC API exposes ONLY composable bricks (System, AmrSystem, Model...) : no named
+# physical scenario. The two-fluid AP integrator (asymptotic-preserving scheme, not
+# composable brick by brick) has left the core : it is not a generic brick but a SCENARIO,
+# which now lives in adc_cases (see adc_cases/two_fluid_ap/), compiled on the fly against
+# the generic headers of adc_cpp. It is therefore neither re-exported here nor present in the _adc module.
 __all__ = [
     "System", "SystemConfig", "AmrSystem", "AmrSystemConfig", "Model", "CompositeModel",
     "CartesianMesh", "PolarMesh",
@@ -282,23 +282,22 @@ __all__ = [
 ]
 
 
-# --- Maillage / geometrie (chantier "grille polaire", Phase 1) --------------
-# Le CHOIX de la geometrie vit dans un objet MAILLAGE, pas dans le schema : adc.FiniteVolume reste
-# reconstruction + flux de Riemann + variables (aucun argument de geometrie). On passe le maillage au
-# systeme via adc.System(mesh=...). adc.CartesianMesh est le defaut implicite (domaine carre, numerique
-# STRICTEMENT inchangee, bit-identique). adc.PolarMesh decrit un anneau global (r, theta).
+# --- Mesh / geometry ("polar grid" project, Phase 1) --------------
+# The CHOICE of geometry lives in a MESH object, not in the scheme : adc.FiniteVolume stays
+# reconstruction + Riemann flux + variables (no geometry argument). The mesh is passed to the
+# system via adc.System(mesh=...). adc.CartesianMesh is the implicit default (square domain, numerics
+# STRICTLY unchanged, bit-identical). adc.PolarMesh describes a global ring (r, theta).
 class CartesianMesh:
-    """Maillage CARTESIEN (defaut implicite) : domaine carre [0, L]^2, n x n cellules.
+    """CARTESIAN mesh (implicit default) : square domain [0, L]^2, n x n cells.
 
-    C'est la geometrie historique : adc.System(mesh=adc.CartesianMesh(n, L, periodic)) est STRICTEMENT
-    equivalent (bit-identique) a adc.System(n=n, L=L, periodic=periodic). Fourni pour la symetrie avec
-    adc.PolarMesh (le choix de geometrie est explicite des deux cotes)."""
+    This is the historical geometry : adc.System(mesh=adc.CartesianMesh(n, L, periodic)) is STRICTLY
+    equivalent (bit-identical) to adc.System(n=n, L=L, periodic=periodic). Provided for symmetry with
+    adc.PolarMesh (the geometry choice is explicit on both sides)."""
 
     def __init__(self, n=64, L=1.0, periodic=True):
         self.n = int(n)
         self.L = float(L)
         self.periodic = bool(periodic)
-
     def _apply(self, config):
         config.geometry = "cartesian"
         config.n = self.n
@@ -307,68 +306,68 @@ class CartesianMesh:
 
 
 class PolarMesh:
-    """Maillage POLAIRE ANNULAIRE GLOBAL (chantier "grille polaire diocotron", Phase 1) : domaine
-    r in [r_min, r_max] x theta in [0, 2pi), nr x ntheta cellules. theta est PERIODIQUE, r porte une
-    condition aux limites PHYSIQUE (paroi / sortie). Convention d'axes : direction 0 = radiale,
-    direction 1 = azimutale (cf. PolarGeometry / assemble_rhs_polar cote C++).
+    """GLOBAL ANNULAR POLAR mesh ("polar diocotron grid" workstream, Phase 1): domain
+    r in [r_min, r_max] x theta in [0, 2pi), nr x ntheta cells. theta is PERIODIC, r carries a
+    PHYSICAL boundary condition (wall / outlet). Axis convention: direction 0 = radial,
+    direction 1 = azimuthal (cf. PolarGeometry / assemble_rhs_polar on the C++ side).
 
-    Le proto Phase-0 a quantifie que la grille cartesienne diffuse le gradient RADIAL d'un anneau en
-    rotation azimutale (rapport 73 vs polaire) : porter la direction radiale sur un axe de grille leve
-    ce verrou structural du diocotron.
+    The Phase-0 prototype quantified that the Cartesian grid diffuses the RADIAL gradient of a ring in
+    azimuthal rotation (ratio 73 vs polar): carrying the radial direction on a grid axis lifts
+    this structural lock of the diocotron.
 
-    PORTEE (mise a jour audit 2026-06) : le chemin polaire est BRANCHE dans System.step (transport
-    polaire assemble_rhs_polar + Poisson polaire + aux derive en base locale (e_r, e_theta)).
-    adc.System(mesh=adc.PolarMesh(...)) construit un anneau global et avance dessus. TROIS niveaux a
-    ne pas confondre :
+    SCOPE (audit update 2026-06): the polar path is WIRED into System.step (polar transport
+    assemble_rhs_polar + polar Poisson + aux drift in the local basis (e_r, e_theta)).
+    adc.System(mesh=adc.PolarMesh(...)) builds a global ring and advances on it. THREE levels not
+    to confuse:
 
-    - transport polaire : ExB scalaire ET fluide isotherme (IsothermalFluxPolar) ; flux Riemann
-      'rusanov' (defaut, tout transport) ET 'hll' (fluide isotherme seulement -- gate model.wave_speeds,
-      identique au cartesien ; l'ExB scalaire ne fournit pas de wave_speeds -> 'hll' leve un rejet
-      clair). 'hllc'/'roe' restent leves cote C++ (Euler 4 var, sans brique polaire) ;
-    - Poisson polaire DIRECT (PolarPoissonSolver) : mono-rang, une box couvrant l'anneau ;
-    - etage Schur polaire TENSORIEL (PolarCondensedSchurSourceStepper, via adc.Split/CondensedSchur) :
-      le solveur C++ est multi-rang/multi-box (decoupage theta).
+    - polar transport: scalar ExB AND isothermal fluid (IsothermalFluxPolar); Riemann flux
+      'rusanov' (default, all transport) AND 'hll' (isothermal fluid only -- gated on model.wave_speeds,
+      identical to the Cartesian one; scalar ExB does not provide wave_speeds -> 'hll' raises a
+      clear rejection). 'hllc'/'roe' remain rejected on the C++ side (Euler 4 vars, no polar brick);
+    - DIRECT polar Poisson (PolarPoissonSolver): single-rank, one box covering the ring;
+    - TENSORIAL polar Schur stage (PolarCondensedSchurSourceStepper, via adc.Split/CondensedSchur):
+      the C++ solver is multi-rank/multi-box (theta split).
 
-    DECOUPAGE THETA DU TRANSPORT (theta_boxes, ADC-67). theta_boxes=1 (defaut) = mono-box,
-    STRICTEMENT bit-identique a l'historique. theta_boxes>1 = l'anneau est decoupe en BANDES theta
-    (chaque boite couvre tout le rayon et une bande azimutale ; theta_boxes doit DIVISER ntheta et
-    rester <= ntheta) et le TRANSPORT polaire (assemble_rhs_polar + fill_ghosts collectif) tourne
-    multi-box. MATRICE des capacites multi-box :
+    THETA SPLIT OF THE TRANSPORT (theta_boxes, ADC-67). theta_boxes=1 (default) = single-box,
+    STRICTLY bit-identical to history. theta_boxes>1 = the ring is split into theta BANDS
+    (each box covers the whole radius and one azimuthal band; theta_boxes must DIVIDE ntheta and
+    stay <= ntheta) and the polar TRANSPORT (assemble_rhs_polar + collective fill_ghosts) runs
+    multi-box. MATRIX of multi-box capabilities:
 
-    - TRANSPORT polaire (System transport, get/set state, eval_rhs, density) : multi-box OK
-      (assemblage par boite + halos collectifs ; l'etat global est reconstruit a la lecture) ;
-    - Poisson polaire DIRECT (PolarPoissonSolver) : MONO-BOX ONLY. Un System a theta_boxes>1 qui
-      resout le champ direct (solve_fields / step / potential, p.ex. un bloc ExB scalaire couple)
-      leve une erreur AMONT claire (le solveur direct exige lignes theta + colonnes r completes sur
-      une box) : utiliser theta_boxes=1 OU l'etage Schur tensoriel ;
-    - etage Schur tensoriel polaire (adc.Split + adc.CondensedSchur) : multi-box (solveur C++
-      multi-box ; le decoupage theta est desormais pilotable par theta_boxes).
+    - polar TRANSPORT (System transport, get/set state, eval_rhs, density): multi-box OK
+      (per-box assembly + collective halos; the global state is reconstructed on read);
+    - DIRECT polar Poisson (PolarPoissonSolver): SINGLE-BOX ONLY. A System with theta_boxes>1 that
+      solves the direct field (solve_fields / step / potential, e.g. a coupled scalar ExB block)
+      raises a clear UPSTREAM error (the direct solver requires complete theta rows + r columns on
+      one box): use theta_boxes=1 OR the tensorial Schur stage;
+    - tensorial polar Schur stage (adc.Split + adc.CondensedSchur): multi-box (multi-box C++
+      solver; the theta split is now driven by theta_boxes).
 
-    Mono-rang (le Poisson polaire direct refuse MPI). Pas de couplage cartesien<->polaire (anneau
-    global). Bornes de pas optionnelles (stability_speed/stability_dt/source_frequency) NON cablees
-    sur le chemin polaire (transport max_wave_speed seulement). Cf. docs/GENERICITY_2026-06.md
-    section 3 et adc.capabilities()['geometry']."""
+    Single-rank (the direct polar Poisson refuses MPI). No Cartesian<->polar coupling (global
+    ring). Optional step bounds (stability_speed/stability_dt/source_frequency) NOT wired
+    on the polar path (transport max_wave_speed only). Cf. docs/GENERICITY_2026-06.md
+    section 3 and adc.capabilities()['geometry']."""
 
     def __init__(self, r_min, r_max, nr, ntheta, theta_boxes=1):
         if not (r_max > r_min >= 0.0):
-            raise ValueError("PolarMesh : exige r_max > r_min >= 0 (anneau)")
-        # nr >= 3 : la derive radiale de l'aux (System.solve_fields_polar) utilise un stencil DECENTRE
-        # d'ordre 2 aux deux parois sur phi (sans ghost) ; nr < 3 lirait phi hors bornes. Un anneau
-        # global a toujours nr >= 3. ntheta >= 1 (la derive azimutale enroule l'indice periodique).
+            raise ValueError("PolarMesh: requires r_max > r_min >= 0 (ring)")
+        # nr >= 3: the radial drift of the aux (System.solve_fields_polar) uses a 2nd-order ONE-SIDED
+        # stencil at both walls on phi (without ghost); nr < 3 would read phi out of bounds. A global
+        # ring always has nr >= 3. ntheta >= 1 (the azimuthal drift wraps the periodic index).
         if nr < 3:
-            raise ValueError("PolarMesh : nr >= 3 (stencil radial decentre d'ordre 2 aux parois)")
+            raise ValueError("PolarMesh: nr >= 3 (2nd-order one-sided radial stencil at the walls)")
         if ntheta < 1:
-            raise ValueError("PolarMesh : ntheta >= 1")
-        # theta_boxes : decoupage du transport en bandes theta (1 = mono-box, defaut). On valide ICI
-        # (cote Python, message clair) ET cote C++ (check_geometry, pour un SystemConfig construit a la
-        # main) : 1 <= theta_boxes <= ntheta ET theta_boxes DIVISE ntheta (bandes azimutales egales).
+            raise ValueError("PolarMesh: ntheta >= 1")
+        # theta_boxes: split of the transport into theta bands (1 = single-box, default). We validate HERE
+        # (Python side, clear message) AND on the C++ side (check_geometry, for a SystemConfig built by
+        # hand): 1 <= theta_boxes <= ntheta AND theta_boxes DIVIDES ntheta (equal azimuthal bands).
         tb = int(theta_boxes)
         if tb < 1:
-            raise ValueError("PolarMesh : theta_boxes >= 1 (1 = mono-box)")
+            raise ValueError("PolarMesh: theta_boxes >= 1 (1 = single-box)")
         if tb > int(ntheta):
-            raise ValueError("PolarMesh : theta_boxes <= ntheta (au moins une cellule azimutale par bande)")
+            raise ValueError("PolarMesh: theta_boxes <= ntheta (at least one azimuthal cell per band)")
         if int(ntheta) % tb != 0:
-            raise ValueError("PolarMesh : theta_boxes doit DIVISER ntheta (bandes azimutales egales)")
+            raise ValueError("PolarMesh: theta_boxes must DIVIDE ntheta (equal azimuthal bands)")
         self.r_min = float(r_min)
         self.r_max = float(r_max)
         self.nr = int(nr)
@@ -382,16 +381,16 @@ class PolarMesh:
         config.r_min = self.r_min
         config.r_max = self.r_max
         config.theta_boxes = self.theta_boxes
-        config.n = self.nr  # n sert de taille par defaut au reste de la config (diagnostics)
+        config.n = self.nr  # n serves as the default size for the rest of the config (diagnostics)
 
 
-# --- Briques d'etat ---------------------------------------------------------
+# --- State bricks ---------------------------------------------------------
 class Scalar:
-    """Etat scalaire (1 variable, p.ex. une densite transportee)."""
+    """Scalar state (1 variable, e.g. a transported density)."""
 
 
 class FluidState:
-    """Etat fluide. kind = "compressible" (gamma) ou "isothermal" (cs2)."""
+    """Fluid state. kind = "compressible" (gamma) or "isothermal" (cs2)."""
 
     def __init__(self, kind="compressible", gamma=1.4, cs2=0.5):
         self.kind = kind
@@ -399,74 +398,74 @@ class FluidState:
         self.cs2 = float(cs2)
 
 
-# --- Briques de transport ---------------------------------------------------
+# --- Transport bricks ---------------------------------------------------
 class ExB:
-    """Advection scalaire par la derive E x B (champ magnetique B0)."""
+    """Scalar advection by the E x B drift (magnetic field B0)."""
 
     def __init__(self, B0=1.0):
         self.B0 = float(B0)
 
 
 class CompressibleFlux:
-    """Flux d'Euler compressible (gamma vient de l'etat FluidState)."""
+    """Compressible Euler flux (gamma comes from the FluidState state)."""
 
 
 class IsothermalFlux:
-    """Flux d'Euler isotherme (cs2 vient de l'etat FluidState)."""
+    """Isothermal Euler flux (cs2 comes from the FluidState state)."""
 
 
-# --- Briques de source ------------------------------------------------------
+# --- Source bricks ------------------------------------------------------
 class NoSource:
-    """Pas de source."""
+    """No source."""
 
 
 class PotentialForce:
-    """Force du potentiel (q/m) rho E sur la quantite de mouvement (+ travail si 4 var)."""
+    """Potential force (q/m) rho E on the momentum (+ work if 4 vars)."""
 
     def __init__(self, charge=1.0):
         self.charge = float(charge)
 
 
 class GravityForce:
-    """Force gravitationnelle rho g (+ travail si 4 var)."""
+    """Gravitational force rho g (+ work if 4 vars)."""
 
 
 class MagneticLorentzForce:
-    """Force de Lorentz MAGNETIQUE q (v x B_z) sur la quantite de mouvement (brique C++ native
-    adc::MagneticLorentzForce, exposee a l'API Python par l'audit 2026-06).
+    """MAGNETIC Lorentz force q (v x B_z) on the momentum (native C++ brick
+    adc::MagneticLorentzForce, exposed to the Python API by the 2026-06 audit).
 
-    Regime EXPLICITE (omega_c modere) : terme ponctuel algebrique, sans travail (F . v = 0, energie
-    inchangee). Lit B_z dans le canal aux (composante canonique 3) : appeler
-    ``sim.set_magnetic_field(Bz)`` pour le peupler. Exige un transport fluide >= 3 variables (qdm
-    sur 2 axes) ; rejete sur un scalaire. Le regime RAIDE (omega_c grand) passe par l'etage condense
-    adc.CondensedSchur (Schur), PAS par cette brique explicite.
+    EXPLICIT regime (moderate omega_c): pointwise algebraic term, no work (F . v = 0, energy
+    unchanged). Reads B_z from the aux channel (canonical component 3): call
+    ``sim.set_magnetic_field(Bz)`` to populate it. Requires a fluid transport >= 3 variables (momentum
+    on 2 axes); rejected on a scalar. The STIFF regime (large omega_c) goes through the condensed stage
+    adc.CondensedSchur (Schur), NOT through this explicit brick.
 
-    ``charge`` = q/m, signe inclus (meme convention que PotentialForce)."""
+    ``charge`` = q/m, sign included (same convention as PotentialForce)."""
 
     def __init__(self, charge=1.0):
         self.charge = float(charge)
 
 
 class PotentialMagneticForce:
-    """Force electrostatique + Lorentz magnetique SOMMEES : (q/m) rho E + q (v x B_z) (brique C++
-    native CompositeSource<PotentialForce, MagneticLorentzForce>, la force complete du diocotron
-    magnetise). Meme q/m pour les deux forces (meme espece). Lit B_z (set_magnetic_field) ; exige un
-    transport fluide >= 3 variables. ``charge`` = q/m, signe inclus."""
+    """Electrostatic force + magnetic Lorentz SUMMED: (q/m) rho E + q (v x B_z) (native C++
+    brick CompositeSource<PotentialForce, MagneticLorentzForce>, the full magnetized diocotron
+    force). Same q/m for both forces (same species). Reads B_z (set_magnetic_field); requires a
+    fluid transport >= 3 variables. ``charge`` = q/m, sign included."""
 
     def __init__(self, charge=1.0):
         self.charge = float(charge)
 
 
-# --- Briques de second membre elliptique ------------------------------------
+# --- Elliptic right-hand-side bricks ------------------------------------
 class ChargeDensity:
-    """Densite de charge f = q n."""
+    """Charge density f = q n."""
 
     def __init__(self, charge=1.0):
         self.charge = float(charge)
 
 
 class BackgroundDensity:
-    """Fond neutralisant f = alpha (n - n0)."""
+    """Neutralizing background f = alpha (n - n0)."""
 
     def __init__(self, alpha=1.0, n0=0.0):
         self.alpha = float(alpha)
@@ -474,7 +473,7 @@ class BackgroundDensity:
 
 
 class GravityCoupling:
-    """Couplage self-consistant f = sign 4piG (rho - rho0). sign = +1 gravite, -1 plasma."""
+    """Self-consistent coupling f = sign 4piG (rho - rho0). sign = +1 gravity, -1 plasma."""
 
     def __init__(self, sign=1.0, four_pi_G=1.0, rho0=1.0):
         self.sign = float(sign)
@@ -483,29 +482,29 @@ class GravityCoupling:
 
 
 def Model(state, transport, source, elliptic):
-    """Compose un modele (ModelSpec) a partir de briques d'etat, transport, source, elliptique.
+    """Compose a model (ModelSpec) from state, transport, source, elliptic bricks.
 
-    Valide la coherence etat <-> transport (Scalar avec ExB ; FluidState compressible avec
-    CompressibleFlux ; isotherme avec IsothermalFlux) et reporte les parametres dans la spec.
+    Validates the state <-> transport consistency (Scalar with ExB; compressible FluidState with
+    CompressibleFlux; isothermal with IsothermalFlux) and carries the parameters into the spec.
     """
     spec = ModelSpec()
 
     if isinstance(state, Scalar):
         if not isinstance(transport, ExB):
-            raise ValueError("Scalar exige transport=ExB(...)")
+            raise ValueError("Scalar requires transport=ExB(...)")
     elif isinstance(state, FluidState):
         if state.kind == "compressible":
             spec.gamma = state.gamma
             if not isinstance(transport, CompressibleFlux):
-                raise ValueError("FluidState(compressible) exige transport=CompressibleFlux()")
+                raise ValueError("FluidState(compressible) requires transport=CompressibleFlux()")
         elif state.kind == "isothermal":
             spec.cs2 = state.cs2
             if not isinstance(transport, IsothermalFlux):
-                raise ValueError("FluidState(isothermal) exige transport=IsothermalFlux()")
+                raise ValueError("FluidState(isothermal) requires transport=IsothermalFlux()")
         else:
-            raise ValueError("FluidState.kind : 'compressible' | 'isothermal'")
+            raise ValueError("FluidState.kind: 'compressible' | 'isothermal'")
     else:
-        raise ValueError("state : adc.Scalar() | adc.FluidState(...)")
+        raise ValueError("state: adc.Scalar() | adc.FluidState(...)")
 
     if isinstance(transport, ExB):
         spec.transport = "exb"; spec.B0 = transport.B0
@@ -514,7 +513,7 @@ def Model(state, transport, source, elliptic):
     elif isinstance(transport, IsothermalFlux):
         spec.transport = "isothermal"
     else:
-        raise ValueError("transport : ExB | CompressibleFlux | IsothermalFlux")
+        raise ValueError("transport: ExB | CompressibleFlux | IsothermalFlux")
 
     if isinstance(source, NoSource):
         spec.source = "none"
@@ -527,7 +526,7 @@ def Model(state, transport, source, elliptic):
     elif isinstance(source, PotentialMagneticForce):
         spec.source = "potential_magnetic"; spec.qom = source.charge
     else:
-        raise ValueError("source : NoSource | PotentialForce | GravityForce | MagneticLorentzForce "
+        raise ValueError("source: NoSource | PotentialForce | GravityForce | MagneticLorentzForce "
                          "| PotentialMagneticForce")
 
     if isinstance(elliptic, ChargeDensity):
@@ -538,24 +537,24 @@ def Model(state, transport, source, elliptic):
         spec.elliptic = "gravity"; spec.sign = elliptic.sign
         spec.four_pi_G = elliptic.four_pi_G; spec.rho0 = elliptic.rho0
     else:
-        raise ValueError("elliptic : ChargeDensity | BackgroundDensity | GravityCoupling")
+        raise ValueError("elliptic: ChargeDensity | BackgroundDensity | GravityCoupling")
 
     return spec
 
 
-# --- Composition HYBRIDE : brique native + brique DSL DANS UN modele --------
-# adc.Model(...) compose des briques 100% natives en une ModelSpec (tags C++) ; adc.dsl.Model(...)
-# genere un modele 100% DSL. adc.CompositeModel(...) comble l'entre-deux : MELANGER, dans UN SEUL
-# modele, des briques NATIVES (adc.ExB / PotentialForce / ChargeDensity ...) et des briques DSL
-# PARTIELLES compilees (adc.dsl.HyperbolicBrick(...).compile() / SourceBrick / EllipticBrick). Le
-# melange est compile en UN .so composite (prototype : backend 'aot'). cf. adc/dsl.py (Phase B).
+# --- HYBRID composition: native brick + DSL brick IN A model --------
+# adc.Model(...) composes 100% native bricks into a ModelSpec (C++ tags); adc.dsl.Model(...)
+# generates a 100% DSL model. adc.CompositeModel(...) fills the in-between: MIX, in ONE SINGLE
+# model, NATIVE bricks (adc.ExB / PotentialForce / ChargeDensity ...) and PARTIAL compiled DSL
+# bricks (adc.dsl.HyperbolicBrick(...).compile() / SourceBrick / EllipticBrick). The
+# mix is compiled into ONE composite .so (prototype: backend 'aot'). cf. adc/dsl.py (Phase B).
 def _native_to_brick(obj, role):
-    """Traduit une brique NATIVE (objet adc.*) en descripteur dsl.NativeBrick pour le slot @p role.
-    Une brique DSL deja compilee (dsl.CompiledBrick) passe telle quelle (apres verification du slot)."""
+    """Translate a NATIVE brick (adc.* object) into a dsl.NativeBrick descriptor for the @p role slot.
+    An already-compiled DSL brick (dsl.CompiledBrick) passes through unchanged (after slot check)."""
     from . import dsl
     if isinstance(obj, dsl.CompiledBrick):
         if obj.kind != role:
-            raise ValueError("adc.CompositeModel : brique DSL de type %r placee dans le slot %r"
+            raise ValueError("adc.CompositeModel: DSL brick of type %r placed in the %r slot"
                              % (obj.kind, role))
         return obj
     if role == "hyperbolic":
@@ -572,8 +571,8 @@ def _native_to_brick(obj, role):
             return dsl.NativeBrick("adc::IsothermalFlux", "hyperbolic", fields={"cs2": cs2},
                                    var_names=["rho", "rho_u", "rho_v"], n_vars=3,
                                    prim_names=["rho", "u", "v"])
-        raise ValueError("adc.CompositeModel transport : ExB | CompressibleFlux | IsothermalFlux "
-                         "(natif) ou dsl.HyperbolicBrick(...).compile()")
+        raise ValueError("adc.CompositeModel transport: ExB | CompressibleFlux | IsothermalFlux "
+                         "(native) or dsl.HyperbolicBrick(...).compile()")
     if role == "source":
         if isinstance(obj, NoSource):
             return dsl.NativeBrick("adc::NoSource", "source", min_vars=1)
@@ -583,17 +582,17 @@ def _native_to_brick(obj, role):
         if isinstance(obj, GravityForce):
             return dsl.NativeBrick("adc::GravityForce", "source", min_vars=3)
         if isinstance(obj, MagneticLorentzForce):
-            # n_aux=4 : la brique lit B_z (canal aux canonique 3) -> le composite dimensionne l'aux.
+            # n_aux=4: the brick reads B_z (canonical aux channel 3) -> the composite sizes the aux.
             return dsl.NativeBrick("adc::MagneticLorentzForce", "source",
                                    fields={"qom": obj.charge}, min_vars=3, n_aux=4)
         if isinstance(obj, PotentialMagneticForce):
-            # Champs IMBRIQUES de CompositeSource (membres publics a / b) : l'emit du NativeBrick
-            # ecrit `a.qom = ...; b.qom = ...;` dans le constructeur du struct derive.
+            # NESTED fields of CompositeSource (public members a / b): the NativeBrick emit
+            # writes `a.qom = ...; b.qom = ...;` in the constructor of the derived struct.
             return dsl.NativeBrick(
                 "adc::CompositeSource<adc::PotentialForce, adc::MagneticLorentzForce>", "source",
                 fields={"a.qom": obj.charge, "b.qom": obj.charge}, min_vars=3, n_aux=4)
-        raise ValueError("adc.CompositeModel source : NoSource | PotentialForce | GravityForce | "
-                         "MagneticLorentzForce | PotentialMagneticForce (natif) ou "
+        raise ValueError("adc.CompositeModel source: NoSource | PotentialForce | GravityForce | "
+                         "MagneticLorentzForce | PotentialMagneticForce (native) or "
                          "dsl.SourceBrick(...).compile()")
     if role == "elliptic":
         if isinstance(obj, ChargeDensity):
@@ -606,69 +605,69 @@ def _native_to_brick(obj, role):
             return dsl.NativeBrick("adc::GravityCoupling", "elliptic",
                                    fields={"sign": obj.sign, "four_pi_G": obj.four_pi_G,
                                            "rho0": obj.rho0}, min_vars=1)
-        raise ValueError("adc.CompositeModel elliptic : ChargeDensity | BackgroundDensity | "
-                         "GravityCoupling (natif) ou dsl.EllipticBrick(...).compile()")
-    raise ValueError("adc.CompositeModel : slot %r inconnu" % (role,))
+        raise ValueError("adc.CompositeModel elliptic: ChargeDensity | BackgroundDensity | "
+                         "GravityCoupling (native) or dsl.EllipticBrick(...).compile()")
+    raise ValueError("adc.CompositeModel: unknown slot %r" % (role,))
 
 
 def CompositeModel(transport, source, elliptic, name="hybrid"):
-    """Compose un modele HYBRIDE melant briques NATIVES et briques DSL PARTIELLES dans UN modele.
+    """Compose a HYBRID model mixing NATIVE bricks and PARTIAL DSL bricks in ONE model.
 
-    Chaque slot (transport / source / elliptic) est SOIT une brique native (adc.ExB(...),
-    adc.PotentialForce(...), adc.ChargeDensity(...) ...), SOIT une brique DSL partielle compilee
+    Each slot (transport / source / elliptic) is EITHER a native brick (adc.ExB(...),
+    adc.PotentialForce(...), adc.ChargeDensity(...) ...), OR a compiled partial DSL brick
     (adc.dsl.HyperbolicBrick(...).compile(), adc.dsl.SourceBrick(...).compile(),
-    adc.dsl.EllipticBrick(...).compile()). AU MOINS un slot doit etre une brique DSL : une composition
-    100% native s'ecrit avec adc.Model(...) (ModelSpec).
+    adc.dsl.EllipticBrick(...).compile()). AT LEAST one slot must be a DSL brick: a
+    100% native composition is written with adc.Model(...) (ModelSpec).
 
-        tr = adc.dsl.HyperbolicBrick("iso") ...        # transport DSL
+        tr = adc.dsl.HyperbolicBrick("iso") ...        # DSL transport
         m  = adc.CompositeModel(transport=tr.compile(),
-                                source=adc.PotentialForce(charge=-1.0),   # source native
-                                elliptic=adc.ChargeDensity(charge=-1.0))  # elliptique native
+                                source=adc.PotentialForce(charge=-1.0),   # native source
+                                elliptic=adc.ChargeDensity(charge=-1.0))  # native elliptic
         co = m.compile(backend="aot")                  # -> CompiledModel
         sim.add_equation("ions", co, spatial=adc.FiniteVolume(), names=[...])
 
-    Renvoie un adc.dsl.HybridModel ; appeler .compile(backend="aot") pour un CompiledModel branchable
-    via System.add_equation. (Prototype : seul le backend 'aot' est cable.)"""
+    Returns an adc.dsl.HybridModel; call .compile(backend="aot") for a CompiledModel pluggable
+    via System.add_equation. (Prototype: only the 'aot' backend is wired.)"""
     from . import dsl
     tr = _native_to_brick(transport, "hyperbolic")
     sr = _native_to_brick(source, "source")
     el = _native_to_brick(elliptic, "elliptic")
     if not any(isinstance(b, dsl.CompiledBrick) for b in (tr, sr, el)):
         raise ValueError(
-            "adc.CompositeModel : composition tout-native ; utiliser adc.Model(...) (ModelSpec) pour "
-            "un modele 100% natif. CompositeModel sert au MELANGE natif + DSL dans un seul modele.")
+            "adc.CompositeModel: all-native composition; use adc.Model(...) (ModelSpec) for "
+            "a 100% native model. CompositeModel is for MIXING native + DSL in a single model.")
     return dsl.HybridModel(tr, sr, el, name=name)
 
 
-# --- Modele elliptique (EPM) : Poisson = une instance composable ------------
-# Le modele elliptique n'est pas un cas special hard-code ; c'est un EllipticPhysicalModel
-# compose de briques (operateur + second membre + sortie). Poisson en est l'instance courante.
+# --- Elliptic model (EPM): Poisson = a composable instance ------------
+# The elliptic model is not a hard-coded special case; it is an EllipticPhysicalModel
+# composed of bricks (operator + right-hand side + output). Poisson is its current instance.
 class DivEpsGrad:
-    """Operateur elliptique D = div(eps grad .). eps constant (1.0 = Poisson). eps(x) variable et
-    d'autres operateurs (diffusion, projection) sont des raffinements (ils toucheraient le solveur)."""
+    """Elliptic operator D = div(eps grad .). eps constant (1.0 = Poisson). Variable eps(x) and
+    other operators (diffusion, projection) are refinements (they would touch the solver)."""
 
     def __init__(self, epsilon=1.0):
         self.epsilon = float(epsilon)
 
 
 class CompositeRhs:
-    """Second membre de systeme f = somme_s elliptic_rhs_s(u_s) : la SOMME des briques elliptiques
-    portees par les blocs. Chaque bloc choisit sa brique (charge q n, fond alpha (n-n0), couplage
-    gravite sign 4piG (rho-rho0)) via Model(elliptic=...) ; ce second membre les assemble. C'est le
-    second membre GENERIQUE de l'EPM : il ne suppose AUCUNE forme particuliere des contributions."""
+    """System right-hand side f = sum_s elliptic_rhs_s(u_s): the SUM of the elliptic bricks
+    carried by the blocks. Each block chooses its brick (charge q n, background alpha (n-n0), gravity
+    coupling sign 4piG (rho-rho0)) via Model(elliptic=...); this right-hand side assembles them. It is the
+    GENERIC right-hand side of the EPM: it assumes NO particular form for the contributions."""
 
 
 class ChargeDensitySource(CompositeRhs):
-    """Cas usuel du second membre composite : tous les blocs portent une densite de charge, donc
-    f = somme_s q_s n_s. Alias historique de CompositeRhs (le calcul reste la somme des briques)."""
+    """Usual case of the composite right-hand side: all blocks carry a charge density, so
+    f = sum_s q_s n_s. Historical alias of CompositeRhs (the computation stays the sum of the bricks)."""
 
 
 class ElectricFieldFromPotential:
-    """Post-traitement : E = -grad phi, reinjecte dans aux des modeles hyperboliques."""
+    """Post-processing: E = -grad phi, reinjected into aux of the hyperbolic models."""
 
 
 class EllipticModel:
-    """EllipticPhysicalModel : inconnue + operateur + second membre + sortie."""
+    """EllipticPhysicalModel: unknown + operator + right-hand side + output."""
 
     def __init__(self, unknown, operator, rhs, output):
         self.unknown = unknown
@@ -686,7 +685,7 @@ def charge_density():
 
 
 def composite_rhs():
-    """Second membre generique f = somme_s elliptic_rhs_s(u_s) (somme des briques par bloc)."""
+    """Generic right-hand side f = sum_s elliptic_rhs_s(u_s) (sum of the per-block bricks)."""
     return CompositeRhs()
 
 
@@ -695,26 +694,26 @@ def electric_field_from_potential():
 
 
 def elliptic(unknown="phi", operator=None, rhs=None, output=None):
-    """Compose un EPM. Poisson = elliptic(operator=div_eps_grad(), rhs=charge_density(),
-    output=electric_field_from_potential()). Le second membre peut etre composite_rhs() (somme
-    GENERIQUE des briques elliptiques par bloc : charge, fond, gravite) ; charge_density() en est
-    le cas usuel (alias)."""
+    """Compose an EPM. Poisson = elliptic(operator=div_eps_grad(), rhs=charge_density(),
+    output=electric_field_from_potential()). The right-hand side can be composite_rhs() (GENERIC
+    sum of the per-block elliptic bricks: charge, background, gravity); charge_density() is
+    the usual case (alias)."""
     return EllipticModel(unknown, operator or DivEpsGrad(), rhs or CompositeRhs(),
                          output or ElectricFieldFromPotential())
 
 
 class EllipticSolver:
-    """Solveur elliptique : 'geometric_mg' (tout cas, paroi) | 'fft' (periodique, n = 2^k, stencil
-    discret) | 'fft_spectral' (periodique, symbole continu -(kx^2+ky^2) : fidelite aux references
-    spectrales type poisson_fft.m, exact sur les sinusoides)."""
+    """Elliptic solver: 'geometric_mg' (any case, wall) | 'fft' (periodic, n = 2^k, discrete
+    stencil) | 'fft_spectral' (periodic, continuous symbol -(kx^2+ky^2): fidelity to spectral
+    references such as poisson_fft.m, exact on sinusoids)."""
 
     def __init__(self, kind="geometric_mg"):
         self.kind = kind
 
 
-# --- Couplages inter-especes (operator-split) : objets passes a sim.add_coupling ---
+# --- Inter-species couplings (operator-split): objects passed to sim.add_coupling ---
 class Ionization:
-    """Ionisation n_g -> n_i + n_e (taux k n_e n_g). Masse transferee du neutre vers l'ion."""
+    """Ionization n_g -> n_i + n_e (rate k n_e n_g). Mass transferred from the neutral to the ion."""
 
     def __init__(self, electron, ion, neutral, rate):
         self.electron = electron
@@ -724,7 +723,7 @@ class Ionization:
 
 
 class Collision:
-    """Friction inter-especes : force k (u_a - u_b), qte de mvt conservee. Blocs fluides (>= 3 var)."""
+    """Inter-species friction: force k (u_a - u_b), momentum conserved. Fluid blocks (>= 3 var)."""
 
     def __init__(self, a, b, rate):
         self.a = a
@@ -733,7 +732,7 @@ class Collision:
 
 
 class ThermalExchange:
-    """Echange thermique k (T_a - T_b), energie conservee. Blocs Euler (4 var)."""
+    """Thermal exchange k (T_a - T_b), energy conserved. Euler blocks (4 var)."""
 
     def __init__(self, a, b, rate):
         self.a = a
@@ -741,29 +740,29 @@ class ThermalExchange:
         self.rate = rate
 
 
-# --- Schema spatial + traitement temporel (par bloc) ------------------------
+# --- Spatial scheme + time treatment (per block) ------------------------
 class Spatial:
-    """Discretisation spatiale : reconstruction (limiteur) + flux numerique de Riemann.
+    """Spatial discretization: reconstruction (limiter) + numerical Riemann flux.
 
-    - ``limiter`` : "none" | "minmod" | "vanleer" | "weno5" (raccourcis none=/minmod=/vanleer=/weno5=).
-      weno5 = WENO5-Z, ordre 5 en zone lisse, stencil 5 points (3 ghosts), capture sans oscillation
-      pres d'un front ; seul le chemin natif ``add_block`` l'expose (les chemins compiles .so
-      allouent 2 ghosts -> rejet explicite).
-    - ``flux`` : "rusanov" | "hll" | "hllc" | "roe".
-      rusanov = generique minimal (ne demande que max_wave_speed, tout modele).
-      hll = generique a ondes signees (exige model.wave_speeds : modele natif isotherme/compressible,
-      ou modele DSL declarant une primitive 'p') ; moins diffusif que rusanov, sans exiger de
-      pression ni n_vars == 4. C'est le chemin recommande pour un modele NON Euler a ondes signees
-      (systeme de moments, isotherme) : ``hll`` + ``minmod``.
-      hllc / roe = EULER 2D SEULEMENT (4 variables rho/rho_u/rho_v/E + pression gaz parfait) ;
-      ce ne sont PAS des solveurs generiques (cf. EulerHLLCFlux2D / EulerRoeFlux2D cote C++).
-    - ``recon`` : "conservative" | "primitive" (variables reconstruites ; primitif plus robuste
-      pour Euler : positivite de rho et p ; raccourci primitive=).
-    - ``positivity_floor`` : plancher de DENSITE des etats de face reconstruits (limiteur de
-      positivite Zhang-Shu, ADC-76) : scaling conservatif de l'etat de face vers la moyenne de
-      cellule pour que rho_face >= floor. 0/None (defaut) = inactif, chemin bit-identique.
-      Motive par le saut top-hat contraste 1e6 du diocotron Hoffart, ou WENO5 reconstruit une
-      densite negative -> NaN. Exige un modele exposant le role Density.
+    - ``limiter``: "none" | "minmod" | "vanleer" | "weno5" (shortcuts none=/minmod=/vanleer=/weno5=).
+      weno5 = WENO5-Z, order 5 in smooth regions, 5-point stencil (3 ghosts), oscillation-free
+      capture near a front; only the native ``add_block`` path exposes it (the compiled .so paths
+      allocate 2 ghosts -> explicit rejection).
+    - ``flux``: "rusanov" | "hll" | "hllc" | "roe".
+      rusanov = minimal generic (requires only max_wave_speed, any model).
+      hll = generic with signed waves (requires model.wave_speeds: native isothermal/compressible model,
+      or a DSL model declaring a primitive 'p'); less diffusive than rusanov, without requiring a
+      pressure or n_vars == 4. This is the recommended path for a NON Euler model with signed waves
+      (moment system, isothermal): ``hll`` + ``minmod``.
+      hllc / roe = EULER 2D ONLY (4 variables rho/rho_u/rho_v/E + ideal-gas pressure);
+      these are NOT generic solvers (cf. EulerHLLCFlux2D / EulerRoeFlux2D on the C++ side).
+    - ``recon``: "conservative" | "primitive" (reconstructed variables; primitive more robust
+      for Euler: positivity of rho and p; shortcut primitive=).
+    - ``positivity_floor``: DENSITY floor of the reconstructed face states (positivity limiter
+      Zhang-Shu, ADC-76): conservative scaling of the face state toward the cell mean
+      so that rho_face >= floor. 0/None (default) = inactive, bit-identical path.
+      Motivated by the top-hat jump of contrast 1e6 in the Hoffart diocotron, where WENO5 reconstructs a
+      negative density -> NaN. Requires a model exposing the Density role.
     """
 
     def __init__(self, limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
@@ -784,80 +783,80 @@ class Spatial:
         self.recon = recon
         pf = 0.0 if positivity_floor is None else float(positivity_floor)
         if not (pf >= 0.0):
-            raise ValueError("Spatial : positivity_floor >= 0 (0/None = inactif ; recu %r)"
+            raise ValueError("Spatial: positivity_floor >= 0 (0/None = inactive; received %r)"
                              % (positivity_floor,))
         self.positivity_floor = pf
 
 
 def FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative",
                  positivity_floor=None):
-    """Schema volumes finis (surface stable Phase A) : remappe sur l'objet Spatial existant.
+    """Finite-volume scheme (stable surface Phase A): remaps onto the existing Spatial object.
 
-    Le flux NUMERIQUE de Riemann s'appelle ``riemann`` (NON ``flux``, reserve au flux PHYSIQUE du modele
-    DSL m.flux) pour ne pas collisionner les deux sens. Mapping des arguments :
+    The NUMERICAL Riemann flux is named ``riemann`` (NOT ``flux``, reserved for the PHYSICAL flux of the
+    DSL model m.flux) so the two meanings do not collide. Argument mapping:
 
     - ``limiter`` -> Spatial.limiter ("none" | "minmod" | "vanleer" | "weno5")
-    - ``riemann`` -> Spatial.flux ("rusanov" | "hll" | "hllc" | "roe") ; "hll" est le chemin
-      generique a ondes signees (exige model.wave_speeds), "hllc"/"roe" sont Euler 2D seulement
+    - ``riemann`` -> Spatial.flux ("rusanov" | "hll" | "hllc" | "roe"); "hll" is the generic
+      signed-wave path (requires model.wave_speeds), "hllc"/"roe" are Euler 2D only
     - ``variables`` -> Spatial.recon ("conservative" | "primitive")
 
-    cf. docs/DSL_MODEL_DESIGN.md section 6. Renvoie un Spatial (consomme tel quel par add_block /
-    add_equation). adc.Spatial reste disponible a l'identique. ``positivity_floor`` (ADC-76) :
-    plancher de densite des etats de face (limiteur Zhang-Shu), None/0 = inactif."""
+    cf. docs/DSL_MODEL_DESIGN.md section 6. Returns a Spatial (consumed as-is by add_block /
+    add_equation). adc.Spatial stays available identically. ``positivity_floor`` (ADC-76):
+    density floor of the face states (Zhang-Shu limiter), None/0 = inactive."""
     return Spatial(limiter=limiter, flux=riemann, recon=variables,
                    positivity_floor=positivity_floor)
 
 
 class Explicit:
-    """Traitement temporel explicite.
+    """Explicit time treatment.
 
-    substeps=N : le bloc avance N fois par macro-pas, chaque sous-pas de longueur dt/N
-                 (electrons rapides : substeps=10). Defaut 1 = comportement historique.
-    stride=M   : cadence du bloc, semantique HOLD-THEN-CATCH-UP (rattrapage en FIN de fenetre).
-                 Le bloc est TENU (non avance) tant que (macro_step + 1) % M != 0, puis avance d'un
-                 pas effectif M*dt au macro-pas ou (macro_step + 1) % M == 0, i.e. a la fin de chaque
-                 fenetre de M macro-pas (bloc lent, p.ex. neutres : stride=20). Il reste ainsi
-                 temporellement COHERENT avec les blocs rapides (jamais avance "dans le futur"). Defaut
-                 1 = chaque macro-pas, bit-identique a l'historique. substeps et stride sont ORTHOGONAUX :
-                 stride=M, substeps=N -> N sous-pas de M*dt/N une fois en fin de fenetre.
-                 COUPLAGE POISSON : entre deux rattrapages, le bloc tenu contribue au second membre du
-                 Poisson de systeme (et aux sources couplees) avec son etat PERIME -- sa derniere densite
-                 /charge avancee, figee jusqu'au prochain rattrapage. step_cfl honore la cadence : le pas
-                 stable inclut le facteur stride (dt <= cfl*h*substeps / (stride*w)).
-                 NB : le backend 'aot' (System.add_equation sur un CompiledModel backend='aot') ne
-                 transporte PAS la cadence et REJETTE stride > 1 (route explicite, pas d'ignore silencieux) ;
-                 add_block (natif) et backend='production' supportent le stride.
-    method     : "ssprk2" (defaut, Shu-Osher 2 etages ordre 2) | "ssprk3" (3 etages ordre 3,
-                 moins dissipatif, a apparier a weno5) | "euler" (ForwardEuler, ordre 1 : fidelite
-                 aux references premier ordre, validation seulement). Raccourci ssprk3=True.
+    substeps=N: the block advances N times per macro-step, each substep of length dt/N
+                 (fast electrons: substeps=10). Default 1 = historical behavior.
+    stride=M   : block cadence, HOLD-THEN-CATCH-UP semantics (catch-up at the END of the window).
+                 The block is HELD (not advanced) while (macro_step + 1) % M != 0, then advances by an
+                 effective step M*dt at the macro-step where (macro_step + 1) % M == 0, i.e. at the end of each
+                 window of M macro-steps (slow block, e.g. neutrals: stride=20). It thus stays
+                 temporally CONSISTENT with the fast blocks (never advanced "into the future"). Default
+                 1 = every macro-step, bit-identical to the historical behavior. substeps and stride are ORTHOGONAL:
+                 stride=M, substeps=N -> N substeps of M*dt/N once at the end of the window.
+                 POISSON COUPLING: between two catch-ups, the held block contributes to the right-hand side of the
+                 system Poisson (and to the coupled sources) with its STALE state -- its last advanced
+                 density/charge, frozen until the next catch-up. step_cfl honors the cadence: the stable
+                 step includes the stride factor (dt <= cfl*h*substeps / (stride*w)).
+                 NB: the 'aot' backend (System.add_equation on a CompiledModel backend='aot') does NOT
+                 carry the cadence and REJECTS stride > 1 (explicit path, no silent ignore);
+                 add_block (native) and backend='production' support the stride.
+    method     : "ssprk2" (default, Shu-Osher 2-stage order 2) | "ssprk3" (3-stage order 3,
+                 less dissipative, to pair with weno5) | "euler" (ForwardEuler, order 1: fidelity
+                 to first-order references, validation only). Shortcut ssprk3=True.
     """
 
     def __init__(self, substeps=1, method="ssprk2", stride=1, *, ssprk3=False):
         if ssprk3:
             method = "ssprk3"
         if method not in ("ssprk2", "ssprk3", "euler"):
-            raise ValueError("Explicit : method 'ssprk2' | 'ssprk3' | 'euler' (recu %r)" % (method,))
+            raise ValueError("Explicit: method 'ssprk2' | 'ssprk3' | 'euler' (received %r)" % (method,))
         if int(substeps) < 1:
-            raise ValueError("Explicit : substeps >= 1 (recu %r)" % (substeps,))
+            raise ValueError("Explicit: substeps >= 1 (received %r)" % (substeps,))
         if int(stride) < 1:
-            raise ValueError("Explicit : stride >= 1 (recu %r)" % (stride,))
+            raise ValueError("Explicit: stride >= 1 (received %r)" % (stride,))
         self.substeps = int(substeps)
         self.stride = int(stride)
         self.method = method
-        # kind transmis a la facade compilee : "explicit" (SSPRK2, defaut bit-identique), "ssprk3"
-        # ou "euler" (ordre 1, fidelite aux references premier ordre -- validation, jamais defaut).
+        # kind passed to the compiled facade: "explicit" (SSPRK2, bit-identical default), "ssprk3"
+        # or "euler" (order 1, fidelity to first-order references -- validation, never default).
         self.kind = method if method in ("ssprk3", "euler") else "explicit"
 
 
 def _role_to_stable(name):
-    """Normalise un nom de role vers la cle STABLE attendue par le C++ (role_from_name) : minuscules
-    snake_case ("momentum_x", "energy"). Tolere les variantes PascalCase de l'enum C++ exposees dans
-    l'API cible (ex. "MomentumX" -> "momentum_x", "Energy" -> "energy") en inserant un '_' avant chaque
-    majuscule interne avant la mise en minuscules. Un nom deja en snake_case ("momentum_x") est inchange."""
+    """Normalize a role name to the STABLE key expected by the C++ (role_from_name): lowercase
+    snake_case ("momentum_x", "energy"). Tolerates the PascalCase variants of the C++ enum exposed in
+    the target API (e.g. "MomentumX" -> "momentum_x", "Energy" -> "energy") by inserting a '_' before each
+    internal uppercase letter before lowercasing. A name already in snake_case ("momentum_x") is unchanged."""
     s = str(name).strip()
     if not s:
         return s
-    if s == s.lower():  # deja snake_case / minuscules : inchange
+    if s == s.lower():  # already snake_case / lowercase: unchanged
         return s
     out = [s[0].lower()]
     for ch in s[1:]:
@@ -870,14 +869,14 @@ def _role_to_stable(name):
 
 
 def _norm_implicit(label, implicit_vars, implicit_roles):
-    """Normalise les listes du masque implicite (noms / roles physiques) en listes de chaines.
+    """Normalize the implicit-mask lists (names / physical roles) into lists of strings.
 
-    None -> [] (defaut : masque inactif, defaut modele, bit-identique). Une chaine seule est toleree
-    (ex. implicit_vars="rho_u" -> ["rho_u"]). Les roles sont ramenes a la cle STABLE du C++ (snake_case)
-    via _role_to_stable -> "MomentumX" et "momentum_x" sont equivalents. Le masque vit cote POLITIQUE
-    TEMPORELLE / bloc (et NON le modele) : le MEME modele se reutilise avec des traitements implicites
-    distincts. La RESOLUTION des noms/roles -> indices et la validation (nom/role absent du bloc) vit
-    cote C++ (System::add_block), seule source de verite des noms/roles du bloc."""
+    None -> [] (default: inactive mask, model default, bit-identical). A bare string is tolerated
+    (e.g. implicit_vars="rho_u" -> ["rho_u"]). The roles are reduced to the STABLE C++ key (snake_case)
+    via _role_to_stable -> "MomentumX" and "momentum_x" are equivalent. The mask lives on the TEMPORAL
+    POLICY / block side (and NOT the model): the SAME model is reused with distinct implicit treatments.
+    The RESOLUTION of names/roles -> indices and the validation (name/role absent from the block) lives
+    on the C++ side (System::add_block), the only source of truth for the block names/roles."""
     def as_list(x, what):
         if x is None:
             return []
@@ -886,7 +885,7 @@ def _norm_implicit(label, implicit_vars, implicit_roles):
         try:
             out = [str(v) for v in x]
         except TypeError:
-            raise ValueError("%s : %s doit etre une liste de chaines (recu %r)" % (label, what, x))
+            raise ValueError("%s: %s must be a list of strings (received %r)" % (label, what, x))
         return out
     names = as_list(implicit_vars, "implicit_vars")
     roles = [_role_to_stable(r) for r in as_list(implicit_roles, "implicit_roles")]
@@ -894,57 +893,56 @@ def _norm_implicit(label, implicit_vars, implicit_roles):
 
 
 class IMEX:
-    """IMEX : transport explicite (SSPRK) + source raide implicite (backward-Euler, Newton local).
+    """IMEX: explicit transport (SSPRK) + stiff implicit source (backward-Euler, local Newton).
 
-    Traitement PARTIEL : seule la SOURCE est implicite (backward-Euler, Newton local a la cellule,
-    via backward_euler_source / ImplicitSourceStepper cote C++). Le TRANSPORT reste explicite
-    (avance par le coeur SSPRK). Ce n'est PAS un solveur implicite global (flux + source + Poisson
-    resolus implicitement / Newton-Krylov) -- ce chantier est une phase future distincte.
+    PARTIAL treatment: only the SOURCE is implicit (backward-Euler, local cell Newton,
+    via backward_euler_source / ImplicitSourceStepper on the C++ side). The TRANSPORT stays explicit
+    (advanced by the SSPRK core). This is NOT a global implicit solver (flux + source + Poisson
+    solved implicitly / Newton-Krylov) -- that work is a distinct future phase.
 
-    - ``substeps=N`` : sous-pas par macro-pas (cf. Explicit). Defaut 1.
-    - ``stride=M`` : cadence du bloc, semantique hold-then-catch-up (cf. Explicit) : le bloc est tenu
-      tant que (macro_step + 1) % M != 0, puis avance d'un pas effectif M*dt en fin de fenetre. Entre
-      deux rattrapages, son etat PERIME contribue au Poisson de systeme. Defaut 1 = chaque macro-pas,
-      bit-identique. Backend 'aot' : stride > 1 rejete (cf. Explicit).
-    - ``implicit_vars`` : noms des variables conservees a traiter en IMPLICITE dans le pas de source ;
-      les autres restent explicites (Euler avant). Le masque est PORTE PAR CETTE POLITIQUE / le bloc,
-      PAS par le modele -> le MEME modele se reutilise avec des traitements implicites differents.
-      Defaut [] (+ implicit_roles []) = defaut du modele (Model::is_implicit, ou tout implicite a
-      defaut), BIT-IDENTIQUE. Resolu cote C++ contre les noms du bloc (un nom absent leve une erreur).
-      Ex. adc.IMEX(implicit_vars=["rho_u", "rho_v"]).
-    - ``implicit_roles`` : meme masque mais par ROLE physique ("density", "momentum_x", "energy", ...)
-      au lieu du nom (cf. System.variable_roles). Union avec implicit_vars. Ex.
+    - ``substeps=N``: substeps per macro-step (cf. Explicit). Default 1.
+    - ``stride=M``: block cadence, hold-then-catch-up semantics (cf. Explicit): the block is held
+      while (macro_step + 1) % M != 0, then advances by an effective step M*dt at the end of the window. Between
+      two catch-ups, its STALE state contributes to the system Poisson. Default 1 = every macro-step,
+      bit-identical. Backend 'aot': stride > 1 rejected (cf. Explicit).
+    - ``implicit_vars``: names of the conserved variables to treat IMPLICITLY in the source step;
+      the others stay explicit (forward Euler). The mask is CARRIED BY THIS POLICY / the block,
+      NOT by the model -> the SAME model is reused with different implicit treatments.
+      Default [] (+ implicit_roles []) = model default (Model::is_implicit, or all implicit by
+      default), BIT-IDENTICAL. Resolved on the C++ side against the block names (an absent name raises an error).
+      E.g. adc.IMEX(implicit_vars=["rho_u", "rho_v"]).
+    - ``implicit_roles``: same mask but by physical ROLE ("density", "momentum_x", "energy", ...)
+      instead of the name (cf. System.variable_roles). Union with implicit_vars. E.g.
       adc.IMEX(implicit_roles=["MomentumX", "MomentumY", "Energy"]).
-    - ``newton_max_iters`` : budget d'iterations du Newton local (defaut 2 = constante historique).
-    - ``newton_rel_tol`` / ``newton_abs_tol`` : critere d'arret par cellule
-      ||F||_inf <= abs_tol + rel_tol*||F0||_inf (0/0 = desactive, boucle historique bit-identique).
-    - ``newton_fd_eps`` : pas de la jacobienne par differences finies (defaut 1e-7 = historique).
-    - ``newton_diagnostics`` : active le rapport Newton (sim.newton_report(name) -> dict
-      {enabled, converged, max_residual, max_iters_used, n_failed}), agrege sur la derniere avance
-      du bloc. OPT-IN : defaut False = zero cout supplementaire.
+    - ``newton_max_iters``: iteration budget of the local Newton (default 2 = historical constant).
+    - ``newton_rel_tol`` / ``newton_abs_tol``: per-cell stopping criterion
+      ||F||_inf <= abs_tol + rel_tol*||F0||_inf (0/0 = disabled, bit-identical historical loop).
+    - ``newton_fd_eps``: step of the finite-difference Jacobian (default 1e-7 = historical).
+    - ``newton_diagnostics``: enables the Newton report (sim.newton_report(name) -> dict
+      {enabled, converged, max_residual, max_iters_used, n_failed}), aggregated over the last advance
+      of the block. OPT-IN: default False = zero extra cost.
 
-    NOMENCLATURE (audit 2026-06) : le schema cable est exactement ForwardEuler(transport sans
-    source) + backward-Euler local sur la source ("SourceImplicitBE"). Ce n'est PAS une famille
-    IMEX-RK / ARK (pas de choix de tableau de Butcher, ``method=`` de l'explicite ne s'applique pas
-    au demi-pas IMEX) ; une vraie famille IMEXRK serait un chantier futur distinct.
+    NOMENCLATURE (audit 2026-06): the wired scheme is exactly ForwardEuler(transport without
+    source) + local backward-Euler on the source ("SourceImplicitBE"). It is NOT an
+    IMEX-RK / ARK family (no choice of Butcher tableau, ``method=`` of the explicit does not apply
+    to the IMEX half-step); a true IMEXRK family would be a distinct future work.
     """
 
     kind = "imex"
-
     def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None,
                  newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
                  newton_fd_eps=1e-7, newton_diagnostics=False, newton_damping=1.0,
                  newton_fail_policy="none"):
         if int(substeps) < 1:
-            raise ValueError("IMEX : substeps >= 1 (recu %r)" % (substeps,))
+            raise ValueError("IMEX: substeps >= 1 (got %r)" % (substeps,))
         if int(stride) < 1:
-            raise ValueError("IMEX : stride >= 1 (recu %r)" % (stride,))
+            raise ValueError("IMEX: stride >= 1 (got %r)" % (stride,))
         if int(newton_max_iters) < 1:
-            raise ValueError("IMEX : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
+            raise ValueError("IMEX: newton_max_iters >= 1 (got %r)" % (newton_max_iters,))
         if not (0.0 < float(newton_damping) <= 1.0):
-            raise ValueError("IMEX : newton_damping dans (0, 1] (recu %r)" % (newton_damping,))
+            raise ValueError("IMEX: newton_damping in (0, 1] (got %r)" % (newton_damping,))
         if newton_fail_policy not in ("none", "warn", "throw"):
-            raise ValueError("IMEX : newton_fail_policy 'none'|'warn'|'throw' (recu %r)"
+            raise ValueError("IMEX: newton_fail_policy 'none'|'warn'|'throw' (got %r)"
                              % (newton_fail_policy,))
         self.substeps = int(substeps)
         self.stride = int(stride)
@@ -959,52 +957,52 @@ class IMEX:
 
 
 class SourceImplicit:
-    """Traitement implicite de la SOURCE raide (backward-Euler, Newton local), transport explicite.
+    """Implicit treatment of the STIFF SOURCE (backward-Euler, local Newton), explicit transport.
 
-    Nom clair pour le schema IMEX source-only : seule la SOURCE est traitee en implicite
-    (backward-Euler resolu par Newton local a la cellule, via backward_euler_source /
-    ImplicitSourceStepper cote C++). Le TRANSPORT reste EXPLICITE (avance par le coeur SSPRK).
+    Clear name for the source-only IMEX scheme: only the SOURCE is treated implicitly
+    (backward-Euler solved by local per-cell Newton, via backward_euler_source /
+    ImplicitSourceStepper on the C++ side). TRANSPORT stays EXPLICIT (advanced by the SSPRK core).
 
-    IMPORTANT -- ce n'est PAS un solveur implicite global PDE. Un solveur implicite global
-    (flux + source + Poisson tous implicites, Newton-Krylov ou Schur global) est un chantier
-    futur distinct. SourceImplicit = IMEX source-only (strictement equivalent a IMEX/adc.Implicit,
-    numerique bit-identique).
+    IMPORTANT -- this is NOT a global implicit PDE solver. A global implicit solver
+    (flux + source + Poisson all implicit, Newton-Krylov or global Schur) is a distinct
+    future effort. SourceImplicit = source-only IMEX (strictly equivalent to IMEX/adc.Implicit,
+    bit-identical numerics).
 
-    QUAND L'UTILISER (SourceImplicit LOCAL vs adc.CondensedSchur GLOBAL) -- ces deux mecanismes
-    traitent une source raide implicitement, mais a des echelles differentes :
+    WHEN TO USE IT (SourceImplicit LOCAL vs adc.CondensedSchur GLOBAL) -- both mechanisms
+    treat a stiff source implicitly, but at different scales:
 
-    - SourceImplicit est LOCAL : l'implicite ne couple que les composantes d'UNE MEME cellule
-      (backward-Euler resolu par Newton a la cellule), il n'y a AUCUN couplage spatial entre
-      cellules. Adapte aux termes raides purement locaux (relaxation, reactions, friction).
-    - adc.CondensedSchur (via adc.Split) est GLOBAL : il assemble et resout un operateur
-      elliptique tensoriel par Schur (Krylov BiCGStab) qui COUPLE tout le domaine. Adapte au
-      couplage Lorentz / electrostatique raide non local (ex. Euler-Poisson magnetise du papier
-      Hoffart, arXiv:2510.11808). Une source raide locale n'a PAS besoin de Schur.
+    - SourceImplicit is LOCAL: the implicit part couples only the components of A SINGLE CELL
+      (backward-Euler solved by per-cell Newton), there is NO spatial coupling between
+      cells. Suited to purely local stiff terms (relaxation, reactions, friction).
+    - adc.CondensedSchur (via adc.Split) is GLOBAL: it assembles and solves a tensor
+      elliptic operator by Schur (Krylov BiCGStab) that COUPLES the whole domain. Suited to
+      non-local stiff Lorentz / electrostatic coupling (e.g. magnetized Euler-Poisson from the
+      Hoffart paper, arXiv:2510.11808). A local stiff source does NOT need Schur.
 
-    - ``substeps=N`` : sous-pas par macro-pas (cf. Explicit). Defaut 1.
-    - ``stride=M`` : cadence du bloc, semantique hold-then-catch-up (cf. Explicit). Defaut 1.
-    - ``implicit_vars`` / ``implicit_roles`` : masque implicite par NOM ou par ROLE physique des
-      variables conservees a traiter en implicite dans le pas de source (cf. IMEX). Masque PORTE PAR
-      CETTE POLITIQUE / le bloc, pas par le modele. Defauts [] = defaut modele, bit-identique.
+    - ``substeps=N``: substeps per macro-step (cf. Explicit). Default 1.
+    - ``stride=M``: block cadence, hold-then-catch-up semantics (cf. Explicit). Default 1.
+    - ``implicit_vars`` / ``implicit_roles``: implicit mask by NAME or by physical ROLE of the
+      conserved variables to treat implicitly in the source step (cf. IMEX). Mask CARRIED BY
+      THIS POLICY / the block, not by the model. Defaults [] = model default, bit-identical.
     """
 
-    kind = "imex"  # meme chemin C++ que IMEX (ImplicitSourceStepper)
+    kind = "imex"  # same C++ path as IMEX (ImplicitSourceStepper)
 
     def __init__(self, substeps=1, stride=1, implicit_vars=None, implicit_roles=None,
                  newton_max_iters=2, newton_rel_tol=0.0, newton_abs_tol=0.0,
                  newton_fd_eps=1e-7, newton_diagnostics=False, newton_damping=1.0,
                  newton_fail_policy="none"):
         if int(substeps) < 1:
-            raise ValueError("SourceImplicit : substeps >= 1 (recu %r)" % (substeps,))
+            raise ValueError("SourceImplicit: substeps >= 1 (got %r)" % (substeps,))
         if int(stride) < 1:
-            raise ValueError("SourceImplicit : stride >= 1 (recu %r)" % (stride,))
+            raise ValueError("SourceImplicit: stride >= 1 (got %r)" % (stride,))
         if int(newton_max_iters) < 1:
-            raise ValueError("SourceImplicit : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
+            raise ValueError("SourceImplicit: newton_max_iters >= 1 (got %r)" % (newton_max_iters,))
         if not (0.0 < float(newton_damping) <= 1.0):
-            raise ValueError("SourceImplicit : newton_damping dans (0, 1] (recu %r)"
+            raise ValueError("SourceImplicit: newton_damping in (0, 1] (got %r)"
                              % (newton_damping,))
         if newton_fail_policy not in ("none", "warn", "throw"):
-            raise ValueError("SourceImplicit : newton_fail_policy 'none'|'warn'|'throw' (recu %r)"
+            raise ValueError("SourceImplicit: newton_fail_policy 'none'|'warn'|'throw' (got %r)"
                              % (newton_fail_policy,))
         self.substeps = int(substeps)
         self.stride = int(stride)
@@ -1019,39 +1017,39 @@ class SourceImplicit:
         self.newton_fail_policy = str(newton_fail_policy)
 
 
-# Nom PRECIS du schema cable par IMEX / SourceImplicit (audit 2026-06) : transport ForwardEuler
-# sans source + backward-Euler LOCAL sur la source (Newton par cellule). Alias STRICT de
-# SourceImplicit (meme objet) : a employer quand on veut nommer l'hypothese dans un script.
+# PRECISE name of the scheme wired by IMEX / SourceImplicit (audit 2026-06): ForwardEuler transport
+# without source + LOCAL backward-Euler on the source (per-cell Newton). STRICT alias of
+# SourceImplicit (same object): to use when you want to name the hypothesis in a script.
 SourceImplicitBE = SourceImplicit
 
 
 class IMEXRK:
-    """Famille IMEX-RK (Implicit-Explicit Runge-Kutta), schema ARS(2,2,2), ORDRE 2.
+    """IMEX-RK family (Implicit-Explicit Runge-Kutta), ARS(2,2,2) scheme, ORDER 2.
 
-    Schema d'Ascher-Ruuth-Spiteri (1997) : le transport hyperbolique L = -div F est traite par le
-    tableau EXPLICITE, la source raide S par le tableau IMPLICITE (backward-Euler LOCAL par cellule,
-    Newton, comme adc.IMEX) -- mais avec des etages couples qui montent l'ORDRE GLOBAL A 2 (transport
-    ET source), la ou adc.IMEX reste un ForwardEuler(transport) + backward-Euler(source) d'ordre 1.
+    Ascher-Ruuth-Spiteri scheme (1997): the hyperbolic transport L = -div F is treated by the
+    EXPLICIT tableau, the stiff source S by the IMPLICIT tableau (LOCAL per-cell backward-Euler,
+    Newton, like adc.IMEX) -- but with coupled stages that raise the GLOBAL ORDER TO 2 (transport
+    AND source), whereas adc.IMEX stays a ForwardEuler(transport) + backward-Euler(source) of order 1.
 
-    Coefficients : gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma). Tableaux (stiffly accurate) :
-    explicite A_E = [[0,0,0],[gamma,0,0],[delta,1-delta,0]], b_E = [delta,1-delta,0] ;
-    implicite A_I = [[0,0,0],[0,gamma,0],[0,1-gamma,gamma]], b_I = [0,1-gamma,gamma].
+    Coefficients: gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma). Tableaus (stiffly accurate):
+    explicit A_E = [[0,0,0],[gamma,0,0],[delta,1-delta,0]], b_E = [delta,1-delta,0];
+    implicit A_I = [[0,0,0],[0,gamma,0],[0,1-gamma,gamma]], b_I = [0,1-gamma,gamma].
 
-    FAMILLE DISTINCTE de adc.IMEX (kind="imexrk_ars222" != "imex") : le defaut adc.IMEX (backward-Euler
-    local, ordre 1) est INCHANGE / bit-identique. PERIMETRE : System CARTESIEN seulement -- l'AMR, le
-    polaire, les modeles compiles (.so : prototype/aot/production) et les splittings Strang/Schur la
-    REJETTENT explicitement (utiliser adc.IMEX / adc.Explicit sur ces chemins).
+    DISTINCT FAMILY from adc.IMEX (kind="imexrk_ars222" != "imex"): the adc.IMEX default (local
+    backward-Euler, order 1) is UNCHANGED / bit-identical. SCOPE: CARTESIAN System only -- AMR, the
+    polar grid, compiled models (.so: prototype/aot/production) and the Strang/Schur splittings
+    REJECT it explicitly (use adc.IMEX / adc.Explicit on those paths).
 
-    - ``scheme`` : "ars222" (seul schema cable ; un autre nom leve une erreur explicite).
-    - ``substeps=N`` : sous-pas par macro-pas (cf. adc.Explicit). Defaut 1.
-    - ``stride=M`` : cadence du bloc, semantique hold-then-catch-up (cf. adc.Explicit). Defaut 1.
-    - ``newton_*`` : MEMES options que adc.IMEX (max_iters/rel_tol/abs_tol/fd_eps/damping/fail_policy/
-      diagnostics) -- elles parametrent les DEUX solves implicites d'etage du schema. Defauts =
-      constantes historiques (max_iters=2, fd_eps=1e-7), sans cout supplementaire.
+    - ``scheme``: "ars222" (only wired scheme; another name raises an explicit error).
+    - ``substeps=N``: substeps per macro-step (cf. adc.Explicit). Default 1.
+    - ``stride=M``: block cadence, hold-then-catch-up semantics (cf. adc.Explicit). Default 1.
+    - ``newton_*``: SAME options as adc.IMEX (max_iters/rel_tol/abs_tol/fd_eps/damping/fail_policy/
+      diagnostics) -- they parametrize BOTH implicit stage solves of the scheme. Defaults =
+      historical constants (max_iters=2, fd_eps=1e-7), without extra cost.
 
-    SOURCE PLEINEMENT IMPLICITE : contrairement a adc.IMEX, IMEXRK n'expose PAS implicit_vars /
-    implicit_roles (la relation de coherence d'etage ARS(2,2,2) suppose un solve homogene). Un masque
-    partiel est rejete cote C++ ; pour un IMEX partiel par composante, utiliser adc.IMEX.
+    FULLY IMPLICIT SOURCE: unlike adc.IMEX, IMEXRK does NOT expose implicit_vars /
+    implicit_roles (the ARS(2,2,2) stage-consistency relation assumes a homogeneous solve). A partial
+    mask is rejected on the C++ side; for a partial per-component IMEX, use adc.IMEX.
     """
 
     kind = "imexrk_ars222"
@@ -1061,18 +1059,18 @@ class IMEXRK:
                  newton_fd_eps=1e-7, newton_diagnostics=False, newton_damping=1.0,
                  newton_fail_policy="none"):
         if scheme != "ars222":
-            raise ValueError("IMEXRK : scheme 'ars222' (seul schema IMEX-RK cable ; recu %r)"
+            raise ValueError("IMEXRK: scheme 'ars222' (only wired IMEX-RK scheme; got %r)"
                              % (scheme,))
         if int(substeps) < 1:
-            raise ValueError("IMEXRK : substeps >= 1 (recu %r)" % (substeps,))
+            raise ValueError("IMEXRK: substeps >= 1 (got %r)" % (substeps,))
         if int(stride) < 1:
-            raise ValueError("IMEXRK : stride >= 1 (recu %r)" % (stride,))
+            raise ValueError("IMEXRK: stride >= 1 (got %r)" % (stride,))
         if int(newton_max_iters) < 1:
-            raise ValueError("IMEXRK : newton_max_iters >= 1 (recu %r)" % (newton_max_iters,))
+            raise ValueError("IMEXRK: newton_max_iters >= 1 (got %r)" % (newton_max_iters,))
         if not (0.0 < float(newton_damping) <= 1.0):
-            raise ValueError("IMEXRK : newton_damping dans (0, 1] (recu %r)" % (newton_damping,))
+            raise ValueError("IMEXRK: newton_damping in (0, 1] (got %r)" % (newton_damping,))
         if newton_fail_policy not in ("none", "warn", "throw"):
-            raise ValueError("IMEXRK : newton_fail_policy 'none'|'warn'|'throw' (recu %r)"
+            raise ValueError("IMEXRK: newton_fail_policy 'none'|'warn'|'throw' (got %r)"
                              % (newton_fail_policy,))
         self.scheme = str(scheme)
         self.substeps = int(substeps)
@@ -1087,22 +1085,22 @@ class IMEXRK:
 
 
 def Implicit(dt_ratio=1, substeps=None, stride=1):
-    """OBSOLETE -- utiliser adc.SourceImplicit(...) ou adc.IMEX(...) a la place.
+    """DEPRECATED -- use adc.SourceImplicit(...) or adc.IMEX(...) instead.
 
-    adc.Implicit etait un alias d'IMEX (source raide implicite via backward-Euler, transport
-    explicite). Le nom "Implicit" est TROMPEUR : il suggere un solveur implicite global PDE
-    (flux + source + Poisson tous implicites / Newton-Krylov), ce qui n'est PAS le cas.
-    adc.SourceImplicit est le nom clair du meme schema (numerique bit-identique).
+    adc.Implicit was an alias of IMEX (implicit stiff source via backward-Euler, explicit
+    transport). The name "Implicit" is MISLEADING: it suggests a global implicit PDE solver
+    (flux + source + Poisson all implicit / Newton-Krylov), which is NOT the case.
+    adc.SourceImplicit is the clear name of the same scheme (bit-identical numerics).
 
-    Conserve pour la retrocompatibilite ; emet un DeprecationWarning. Utiliser :
-      adc.SourceImplicit(substeps=k, stride=s)  -- nouveau nom clair
-      adc.IMEX(substeps=k, stride=s)            -- acronyme officiel
+    Kept for backward compatibility; emits a DeprecationWarning. Use:
+      adc.SourceImplicit(substeps=k, stride=s)  -- new clear name
+      adc.IMEX(substeps=k, stride=s)            -- official acronym
     """
     import warnings
     warnings.warn(
-        "adc.Implicit est obsolete : le nom est trompeur (ce n'est PAS un solveur implicite "
-        "global PDE). Utiliser adc.SourceImplicit(...) (source implicite backward-Euler, "
-        "transport explicite) ou adc.IMEX(...) a la place.",
+        "adc.Implicit is deprecated: the name is misleading (it is NOT a global implicit "
+        "PDE solver). Use adc.SourceImplicit(...) (implicit backward-Euler source, "
+        "explicit transport) or adc.IMEX(...) instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -1110,13 +1108,13 @@ def Implicit(dt_ratio=1, substeps=None, stride=1):
 
 
 class Role:
-    """Roles PHYSIQUES des composantes d'un modele (cf. VariableRole cote C++ / variable_roles).
+    """PHYSICAL roles of a model's components (cf. VariableRole on the C++ side / variable_roles).
 
-    Permet d'adresser une composante par son SENS dans adc.CondensedSchur(density=adc.Role.Density,
-    momentum=(adc.Role.MomentumX, adc.Role.MomentumY), energy=adc.Role.Energy) plutot que par un nom
-    litteral. Les valeurs sont les cles STABLES attendues par le C++ (role_from_name : snake_case). La
-    RESOLUTION role -> composante est faite cote C++ (le bloc lit ses propres VariableRole) : ces
-    constantes servent a EXPRIMER l'intention dans la formule et a valider qu'un role requis est demande.
+    Lets you address a component by its MEANING in adc.CondensedSchur(density=adc.Role.Density,
+    momentum=(adc.Role.MomentumX, adc.Role.MomentumY), energy=adc.Role.Energy) rather than by a literal
+    name. The values are the STABLE keys expected by the C++ (role_from_name: snake_case). The
+    role -> component RESOLUTION is done on the C++ side (the block reads its own VariableRole): these
+    constants serve to EXPRESS the intent in the formula and to validate that a required role is requested.
     """
 
     Density = "density"
@@ -1133,46 +1131,46 @@ class Role:
 
 
 class CondensedSchur:
-    """Etage SOURCE condense par Schur (Hoffart et al., arXiv:2510.11808 ; cf.
-    docs/SCHUR_CONDENSATION_DESIGN.md). NOMME l'algorithme de la source implicite couplee potentiel /
-    vitesse / Lorentz et MAPPE les champs sur les roles physiques du bloc. C'est le `source=` d'une
-    politique temporelle adc.Split (splitting EXPLICITE / IMPLICITE).
+    """SOURCE stage condensed by Schur (Hoffart et al., arXiv:2510.11808; cf.
+    docs/SCHUR_CONDENSATION_DESIGN.md). NAMES the algorithm of the implicit source coupling potential /
+    velocity / Lorentz and MAPS the fields onto the block's physical roles. This is the `source=` of an
+    adc.Split temporal policy (EXPLICIT / IMPLICIT splitting).
 
-    kind="electrostatic_lorentz" (seul pour l'instant) selectionne ElectrostaticLorentzCondensation :
-    l'etage assemble l'operateur elliptique condense A = I + theta^2 dt^2 alpha rho B^{-1}, le resout
-    (BiCGStab preconditionne MG), reconstruit la vitesse v = B^{-1}(v^n - theta dt grad phi) et extrapole
-    au pas plein. Tout est en C++ (CondensedSchurSourceStepper, #126) : AUCUN callback Python par cellule.
+    kind="electrostatic_lorentz" (only one for now) selects ElectrostaticLorentzCondensation:
+    the stage assembles the condensed elliptic operator A = I + theta^2 dt^2 alpha rho B^{-1}, solves it
+    (MG-preconditioned BiCGStab), reconstructs the velocity v = B^{-1}(v^n - theta dt grad phi) and extrapolates
+    to the full step. Everything is in C++ (CondensedSchurSourceStepper, #126): NO per-cell Python callback.
 
-    Le bloc doit exposer les roles Density / MomentumX / MomentumY (Energy optionnel) et un champ B_z
-    (set_magnetic_field) -- un role / B_z manquant leve une erreur EXPLICITE a add_equation. Marche pour
-    un modele en briques natives comme pour un modele DSL compile qui declare ces roles (electrons).
+    The block must expose the Density / MomentumX / MomentumY roles (Energy optional) and a B_z field
+    (set_magnetic_field) -- a missing role / B_z raises an EXPLICIT error at add_equation. Works for
+    a native-brick model as well as for a compiled DSL model that declares these roles (electrons).
 
-    GEOMETRIE : cable en CARTESIEN (System(mesh=adc.CartesianMesh(...))) ET en POLAIRE
-    (System(mesh=adc.PolarMesh(...)), anneau (r, theta), Voie A etape 2c). Le choix du stepper condense
-    (cartesien CondensedSchurSourceStepper / polaire PolarCondensedSchurSourceStepper) est fait cote C++
-    selon la geometrie du System : la MEME adc.CondensedSchur(...) s'utilise dans les deux cas. Le
-    pendant polaire est MULTI-RANG-SUR (collectifs corrects sous MPI) mais la facade construit encore
-    UNE box globale (sur le rang proprietaire) : correct et bit-identique au mono-rang, sans
-    parallelisme effectif a ce niveau -- le decoupage theta facade est un suivi dedie (mise a jour
-    audit 2026-06 ; l'ancienne mention "n_ranks>1 leve" etait perimee).
+    GEOMETRY: wired in CARTESIAN (System(mesh=adc.CartesianMesh(...))) AND in POLAR
+    (System(mesh=adc.PolarMesh(...)), ring (r, theta), Track A step 2c). The choice of the condensed stepper
+    (cartesian CondensedSchurSourceStepper / polar PolarCondensedSchurSourceStepper) is made on the C++ side
+    according to the System geometry: the SAME adc.CondensedSchur(...) is used in both cases. The
+    polar counterpart is MULTI-RANK-SAFE (correct collectives under MPI) but the facade still builds
+    ONE global box (on the owner rank): correct and bit-identical to single-rank, without
+    effective parallelism at this level -- the facade theta decomposition is a dedicated follow-up (update
+    audit 2026-06; the old mention "n_ranks>1 raises" was stale).
 
-    QUAND L'UTILISER (CondensedSchur GLOBAL vs adc.SourceImplicit LOCAL). CondensedSchur est un
-    implicite GLOBAL : il COUPLE tout le domaine via l'operateur elliptique tensoriel condense
-    (resolu par Krylov BiCGStab), pour le couplage Lorentz / electrostatique raide non local. Si la
-    source raide est purement LOCALE (ne couple que les composantes d'une meme cellule, sans couplage
-    spatial : relaxation, reactions, friction), prendre plutot adc.SourceImplicit : c'est moins cher
-    et il n'y a alors AUCUN solve elliptique a faire.
+    WHEN TO USE IT (CondensedSchur GLOBAL vs adc.SourceImplicit LOCAL). CondensedSchur is a
+    GLOBAL implicit: it COUPLES the whole domain via the condensed tensor elliptic operator
+    (solved by Krylov BiCGStab), for non-local stiff Lorentz / electrostatic coupling. If the
+    stiff source is purely LOCAL (couples only the components of a single cell, without spatial
+    coupling: relaxation, reactions, friction), prefer adc.SourceImplicit instead: it is cheaper
+    and there is then NO elliptic solve to do.
 
-    - ``theta`` : theta-schema dans (0, 1] (0.5 = Crank-Nicolson, 1 = Euler retrograde).
-    - ``alpha`` : constante de couplage electrostatique du sous-systeme source
+    - ``theta``: theta-scheme in (0, 1] (0.5 = Crank-Nicolson, 1 = backward Euler).
+    - ``alpha``: electrostatic coupling constant of the source subsystem
       (d_t(-Lap phi) = -alpha div(rho v)).
-    - ``density`` / ``momentum`` / ``energy`` / ``magnetic_field`` / ``potential`` : descripteurs de
-      roles / champs. Ils EXPRIMENT l'intention ; la resolution role -> composante est faite cote C++
-      (le bloc lit ses propres VariableRole). Tolerent adc.Role.* (recommande), un nom de role stable,
-      ou un nom de variable du bloc. momentum est un couple (x, y).
-    - ``krylov_tol`` / ``krylov_max_iters`` : tolerance et budget du solve Krylov (BiCGStab) de
-      l'etage. None (defauts) = constantes historiques (1e-10 ; 400 en cartesien, 600 en polaire),
-      rendues configurables par l'audit 2026-06 (constantes numeriques explicites).
+    - ``density`` / ``momentum`` / ``energy`` / ``magnetic_field`` / ``potential``: role / field
+      descriptors. They EXPRESS the intent; the role -> component resolution is done on the C++ side
+      (the block reads its own VariableRole). They accept adc.Role.* (recommended), a stable role name,
+      or a variable name of the block. momentum is a pair (x, y).
+    - ``krylov_tol`` / ``krylov_max_iters``: tolerance and budget of the stage's Krylov (BiCGStab)
+      solve. None (defaults) = historical constants (1e-10; 400 in cartesian, 600 in polar),
+      made configurable by the 2026-06 audit (explicit numerical constants).
     """
 
     def __init__(self, kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
@@ -1182,40 +1180,40 @@ class CondensedSchur:
         self.krylov_tol = float(krylov_tol) if krylov_tol is not None else 0.0
         self.krylov_max_iters = int(krylov_max_iters) if krylov_max_iters is not None else 0
         if krylov_tol is not None and not (0.0 < self.krylov_tol < 1.0):
-            raise ValueError("CondensedSchur : krylov_tol doit etre dans (0, 1) (recu %r)" % (krylov_tol,))
+            raise ValueError("CondensedSchur: krylov_tol must be in (0, 1) (got %r)" % (krylov_tol,))
         if krylov_max_iters is not None and self.krylov_max_iters < 1:
-            raise ValueError("CondensedSchur : krylov_max_iters >= 1 (recu %r)" % (krylov_max_iters,))
+            raise ValueError("CondensedSchur: krylov_max_iters >= 1 (got %r)" % (krylov_max_iters,))
         if kind != "electrostatic_lorentz":
             raise ValueError(
-                "CondensedSchur : kind 'electrostatic_lorentz' (seul supporte) ; recu %r" % (kind,))
+                "CondensedSchur: kind 'electrostatic_lorentz' (only one supported); got %r" % (kind,))
         if not (0.0 < float(theta) <= 1.0):
-            raise ValueError("CondensedSchur : theta doit etre dans (0, 1] (recu %r)" % (theta,))
-        # momentum doit etre un couple (role_x, role_y) ; une chaine seule (iterable de caracteres)
-        # est rejetee explicitement (sinon tuple("xy") donnerait deux composantes par accident).
+            raise ValueError("CondensedSchur: theta must be in (0, 1] (got %r)" % (theta,))
+        # momentum must be a pair (role_x, role_y); a bare string (iterable of characters)
+        # is rejected explicitly (otherwise tuple("xy") would give two components by accident).
         if isinstance(momentum, str):
             raise ValueError(
-                "CondensedSchur : momentum doit etre un couple (role_x, role_y), pas une chaine (recu %r)"
+                "CondensedSchur: momentum must be a pair (role_x, role_y), not a string (got %r)"
                 % (momentum,))
         try:
             mom = tuple(momentum)
         except TypeError:
             raise ValueError(
-                "CondensedSchur : momentum doit etre un couple (role_x, role_y) (recu %r)" % (momentum,))
+                "CondensedSchur: momentum must be a pair (role_x, role_y) (got %r)" % (momentum,))
         if len(mom) != 2:
             raise ValueError(
-                "CondensedSchur : momentum doit etre un couple (role_x, role_y) (recu %r)" % (momentum,))
-        # Descripteurs roles / champs TRANSPORTES dans l'ABI C++ (audit vague 2) : density /
-        # momentum / energy acceptent un adc.Role.* (nom de role stable) OU un nom de variable du
-        # bloc ; la resolution role-ou-nom -> composante est faite cote C++ (set_source_stage,
-        # erreur explicite si introuvable). Les DEFAUTS (roles canoniques) gardent le comportement
-        # historique bit-identique. magnetic_field accepte un nom de champ aux canonique
-        # (AUX_CANONICAL : "B_z", "T_e", ...) -> composante aux transportee. potential reste fige
-        # a "phi" (l'etage utilise le potentiel du Poisson de systeme ; un autre champ n'aurait
-        # pas de solveur derriere -> rejet explicite, pas d'ignore silencieux).
+                "CondensedSchur: momentum must be a pair (role_x, role_y) (got %r)" % (momentum,))
+        # Role / field descriptors CARRIED in the C++ ABI (audit wave 2): density /
+        # momentum / energy accept an adc.Role.* (stable role name) OR a variable name of the
+        # block; the role-or-name -> component resolution is done on the C++ side (set_source_stage,
+        # explicit error if not found). The DEFAULTS (canonical roles) keep the bit-identical
+        # historical behavior. magnetic_field accepts a canonical aux field name
+        # (AUX_CANONICAL: "B_z", "T_e", ...) -> carried aux component. potential stays fixed
+        # to "phi" (the stage uses the system Poisson potential; another field would have
+        # no solver behind it -> explicit rejection, no silent ignore).
         def _spec(v):
             return "" if v is None else str(v)
-        # Defauts canoniques -> chaines VIDES cote ABI (le C++ resout alors les roles canoniques,
-        # chemin historique strictement inchange).
+        # Canonical defaults -> EMPTY strings on the ABI side (the C++ then resolves the canonical
+        # roles, historical path strictly unchanged).
         self.density_spec = "" if density == Role.Density else _spec(density)
         self.momentum_x_spec = "" if mom[0] == Role.MomentumX else _spec(mom[0])
         self.momentum_y_spec = "" if mom[1] == Role.MomentumY else _spec(mom[1])
@@ -1226,19 +1224,19 @@ class CondensedSchur:
         else:
             self.energy_spec = _spec(energy)
         if magnetic_field == "B_z":
-            self.bz_aux_component = -1  # canal canonique (defaut, bit-identique)
+            self.bz_aux_component = -1  # canonical channel (default, bit-identical)
         else:
             from . import dsl as _dsl
             if magnetic_field not in _dsl.AUX_CANONICAL:
                 raise ValueError(
-                    "CondensedSchur : magnetic_field=%r inconnu (champs aux canoniques : %s)"
+                    "CondensedSchur: magnetic_field=%r unknown (canonical aux fields: %s)"
                     % (magnetic_field, sorted(_dsl.AUX_CANONICAL)))
             self.bz_aux_component = int(_dsl.AUX_CANONICAL[magnetic_field])
         if potential != "phi":
             raise ValueError(
-                "CondensedSchur : potential=%r non configurable (l'etage source resout le "
-                "potentiel phi du Poisson de systeme ; un autre champ n'aurait pas de solveur "
-                "derriere) ; laisser potential='phi' (defaut)." % (potential,))
+                "CondensedSchur: potential=%r not configurable (the source stage solves the "
+                "system Poisson potential phi; another field would have no solver "
+                "behind it); leave potential='phi' (default)." % (potential,))
         self.kind = kind
         self.theta = float(theta)
         self.alpha = float(alpha)
@@ -1247,18 +1245,17 @@ class CondensedSchur:
         self.energy = energy
         self.magnetic_field = magnetic_field
         self.potential = potential
-
     def _has_field_overrides(self):
-        """True si un descripteur non canonique est demande (AMR : rejet explicite, non cable)."""
+        """True if a non-canonical descriptor is requested (AMR: explicit rejection, not wired)."""
         return bool(self.density_spec or self.momentum_x_spec or self.momentum_y_spec
                     or self.energy_spec or self.bz_aux_component >= 0)
 
 
 class Split:
-    """Politique temporelle SPLITTING EXPLICITE / IMPLICITE : un etage de transport hyperbolique
-    EXPLICITE (adc.Explicit, SSPRK) suivi d'un etage SOURCE separe (cf. docs/SCHUR_CONDENSATION_DESIGN.md
-    section 6). C'est l'OPT-IN du chantier Schur : un bloc qui n'emploie PAS adc.Split garde le chemin
-    par defaut (Explicit / IMEX / SourceImplicit), BIT-IDENTIQUE.
+    """Temporal policy EXPLICIT / IMPLICIT SPLITTING: an EXPLICIT hyperbolic transport stage
+    (adc.Explicit, SSPRK) followed by a separate SOURCE stage (cf. docs/SCHUR_CONDENSATION_DESIGN.md
+    section 6). This is the OPT-IN of the Schur work: a block that does NOT use adc.Split keeps the
+    default path (Explicit / IMEX / SourceImplicit), BIT-IDENTICAL.
 
     ::
 
@@ -1267,48 +1264,48 @@ class Split:
             source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, ...),
         )
 
-    - ``hyperbolic`` : adc.Explicit (le transport ; SSPRK2/3, substeps, stride heritent de lui).
-    - ``source`` : adc.CondensedSchur (l'etage source condense, joue APRES le transport). Seul backend
-      source cable pour l'instant.
+    - ``hyperbolic`` : adc.Explicit (the transport; SSPRK2/3, substeps, stride inherit from it).
+    - ``source`` : adc.CondensedSchur (the condensed source stage, runs AFTER the transport). Only
+      source backend wired for now.
     """
 
-    # kind="explicit" : le transport est joue par le chemin explicite du coeur (SSPRK), la source
-    # condensee est branchee EN PLUS via set_source_stage (cf. System.add_equation). Le bloc n'est donc
-    # PAS IMEX (la source raide locale backward-Euler) : sa source est l'etage condense, a part.
+    # kind="explicit": the transport is run by the core explicit path (SSPRK), the condensed source
+    # is plugged IN ADDITION via set_source_stage (cf. System.add_equation). The block is therefore
+    # NOT IMEX (the local stiff source backward-Euler): its source is the condensed stage, apart.
     def __init__(self, hyperbolic=None, source=None):
         hyperbolic = hyperbolic if hyperbolic is not None else Explicit()
         if not isinstance(hyperbolic, Explicit):
             raise TypeError(
-                "Split : hyperbolic doit etre un adc.Explicit (transport explicite SSPRK) ; recu %r"
+                "Split: hyperbolic must be an adc.Explicit (explicit SSPRK transport); got %r"
                 % type(hyperbolic).__name__)
         if source is None:
             raise ValueError(
-                "Split : source= est requis (l'etage source separe) ; ex. "
+                "Split: source= is required (the separate source stage); e.g. "
                 "adc.Split(hyperbolic=adc.Explicit(), source=adc.CondensedSchur(...))")
         if not isinstance(source, CondensedSchur):
             raise TypeError(
-                "Split : source doit etre un adc.CondensedSchur(...) (seul etage source cable) ; recu %r"
+                "Split: source must be an adc.CondensedSchur(...) (only wired source stage); got %r"
                 % type(source).__name__)
         self.hyperbolic = hyperbolic
         self.source = source
-        # Le transport emprunte le chemin explicite du coeur : on relaie le kind / substeps / stride de
-        # l'etage hyperbolique (SSPRK2/3). La source condensee est branchee separement (add_equation).
+        # The transport takes the core explicit path: we relay the kind / substeps / stride of
+        # the hyperbolic stage (SSPRK2/3). The condensed source is plugged separately (add_equation).
         self.kind = hyperbolic.kind
         self.method = hyperbolic.method
         self.substeps = hyperbolic.substeps
         self.stride = hyperbolic.stride
-        # Politique de splitting CABLEE au stepper de systeme (set_time_scheme). adc.Split = "lie"
-        # (Godunov, 1er ordre) : H(dt) puis S(dt) une fois par macro-pas, BIT-IDENTIQUE a l'historique.
-        # adc.Strang surcharge cet attribut a "strang" (cf. ci-dessous).
+        # Splitting policy WIRED to the system stepper (set_time_scheme). adc.Split = "lie"
+        # (Godunov, 1st order): H(dt) then S(dt) once per macro-step, BIT-IDENTICAL to the history.
+        # adc.Strang overrides this attribute to "strang" (cf. below).
         self.scheme = "lie"
 
 
 class Strang(Split):
-    """Politique temporelle SPLITTING DE STRANG (symetrique, 2e ordre) : un macro-pas joue
-    H(dt/2) ; S(dt) ; H(dt/2), ou H est le transport hyperbolique EXPLICITE (adc.Explicit, SSPRK)
-    et S l'etage SOURCE separe (adc.CondensedSchur). C'est l'extension 2e ordre de adc.Split (Lie /
-    Godunov, 1er ordre) : memes briques (transport SSPRK + etage source condense), seul l'ORDRE et la
-    cadence des resolutions de champ changent.
+    """Temporal policy STRANG SPLITTING (symmetric, 2nd order): one macro-step runs
+    H(dt/2); S(dt); H(dt/2), where H is the EXPLICIT hyperbolic transport (adc.Explicit, SSPRK)
+    and S the separate SOURCE stage (adc.CondensedSchur). This is the 2nd-order extension of adc.Split
+    (Lie / Godunov, 1st order): same bricks (SSPRK transport + condensed source stage), only the ORDER
+    and the cadence of field solves change.
 
     ::
 
@@ -1317,13 +1314,13 @@ class Strang(Split):
             source=adc.CondensedSchur(theta=0.5, alpha=alpha),
         )
 
-    Le stepper de systeme RE-RESOUT solve_fields ENTRE les etages (avant chaque demi-avance et avant
-    la source) pour que le transport lise toujours un phi coherent avec la densite courante (le
-    solve_fields UNIQUE de tete, suffisant pour Lie ou une seule avance de transport suit, ne suffit
-    pas a la 2nde demi-avance Strang). cf. docs/HOFFART_STEP_SEQUENCE.md et SystemStepper::step_strang.
+    The system stepper RE-SOLVES solve_fields BETWEEN stages (before each half-advance and before
+    the source) so that the transport always reads a phi consistent with the current density (the
+    SINGLE leading solve_fields, sufficient for Lie or a single transport advance to follow, does not
+    suffice for the 2nd Strang half-advance). cf. docs/HOFFART_STEP_SEQUENCE.md and SystemStepper::step_strang.
 
-    ``hyperbolic`` / ``source`` : identiques a adc.Split. Cable par add_equation (qui branche l'etage
-    source ET appelle set_time_scheme('strang') sur le System)."""
+    ``hyperbolic`` / ``source`` : identical to adc.Split. Wired by add_equation (which plugs the source
+    stage AND calls set_time_scheme('strang') on the System)."""
 
     def __init__(self, hyperbolic=None, source=None):
         super().__init__(hyperbolic=hyperbolic, source=source)
@@ -1331,78 +1328,78 @@ class Strang(Split):
 
 
 class System:
-    """Le systeme/coupleur : compose des blocs, partage un Poisson, avance le tout.
+    """The system/coupler: composes blocks, shares a Poisson, advances the whole.
 
-    add_block prend un modele compose (adc.Model(...)) + des objets Spatial / Explicit / IMEX.
-    Tout le reste (set_poisson, set_density, step, step_cfl, step_adaptive, diagnostics,
-    primitives eval_rhs/get_state/set_state) est transmis a la facade compilee.
+    add_block takes a composed model (adc.Model(...)) + Spatial / Explicit / IMEX objects.
+    Everything else (set_poisson, set_density, step, step_cfl, step_adaptive, diagnostics,
+    primitives eval_rhs/get_state/set_state) is forwarded to the compiled facade.
 
-    GEOMETRIE : le choix vit dans un objet MAILLAGE passe en mesh= (adc.CartesianMesh / adc.PolarMesh),
-    PAS dans le schema (adc.FiniteVolume reste reconstruction + Riemann + variables). Defaut (mesh=None
-    ou adc.CartesianMesh) = domaine carre, bit-identique a l'historique. adc.PolarMesh (anneau global)
-    est BRANCHE dans System.step (Phase 2b) : transport ExB polaire + Poisson polaire + aux en base
-    locale (e_r, e_theta). Limites : transport ExB scalaire, mono-rang, pas de couplage cart<->polaire."""
+    GEOMETRY: the choice lives in a MESH object passed as mesh= (adc.CartesianMesh / adc.PolarMesh),
+    NOT in the scheme (adc.FiniteVolume stays reconstruction + Riemann + variables). Default (mesh=None
+    or adc.CartesianMesh) = square domain, bit-identical to the history. adc.PolarMesh (global ring)
+    is WIRED in System.step (Phase 2b): polar ExB transport + polar Poisson + aux in local basis
+    (e_r, e_theta). Limits: scalar ExB transport, single-rank, no cart<->polar coupling."""
 
     def __init__(self, config=None, mesh=None, **cfg_kw):
         if config is None:
             config = SystemConfig()
             for k, v in cfg_kw.items():
                 setattr(config, k, v)
-        # Le maillage (s'il est fourni) porte le CHOIX de geometrie et ecrase les champs correspondants
-        # de la config. Applique APRES cfg_kw : mesh= prevaut sur les n=/L= passes en mots-cles.
+        # The mesh (if provided) carries the geometry CHOICE and overrides the corresponding fields
+        # of the config. Applied AFTER cfg_kw: mesh= takes precedence over the n=/L= passed as keywords.
         if mesh is not None:
             if not hasattr(mesh, "_apply"):
-                raise TypeError("System : mesh doit etre un adc.CartesianMesh / adc.PolarMesh (recu %r)"
+                raise TypeError("System: mesh must be an adc.CartesianMesh / adc.PolarMesh (got %r)"
                                 % type(mesh).__name__)
             mesh._apply(config)
-        # Marque l'init Kokkos comme imminente : _System(config) alloue des Fabs -> Kokkos s'initialise
-        # (lazy) ici. Apres ce point, adc.set_threads n'a plus d'effet (averti par set_threads).
+        # Mark the Kokkos init as imminent: _System(config) allocates Fabs -> Kokkos initializes
+        # (lazy) here. After this point, adc.set_threads has no further effect (warned by set_threads).
         global _first_system_built
         _first_system_built = True
-        self._s = _System(config)  # geometry == 'polar' construit un anneau global (Phase 2b, cf. PolarMesh)
-        # Table des champs aux NOMMES par bloc (ADC-70 phase 1) : bloc -> {nom: composante canonique}.
-        # Remplie par add_equation depuis CompiledModel.aux_extra_names (la composante du k-ieme nom =
-        # dsl.AUX_NAMED_BASE + k). C'est la FACADE qui detient les noms : le C++ ne manipule que des
-        # indices de composante (set_aux_field_component / aux_field_component). Vide pour un bloc sans
-        # champ aux nomme. cf. set_aux_field / aux_field.
+        self._s = _System(config)  # geometry == 'polar' builds a global ring (Phase 2b, cf. PolarMesh)
+        # Table of NAMED aux fields per block (ADC-70 phase 1): block -> {name: canonical component}.
+        # Filled by add_equation from CompiledModel.aux_extra_names (the component of the k-th name =
+        # dsl.AUX_NAMED_BASE + k). The FACADE holds the names: the C++ only manipulates component
+        # indices (set_aux_field_component / aux_field_component). Empty for a block without a
+        # named aux field. cf. set_aux_field / aux_field.
         self._aux_field_index = {}
 
     def add_block(self, name, model, spatial=None, time=None, evolve=True):
-        """Installe un bloc evolue compose de BRIQUES NATIVES sur le Poisson de systeme partage.
+        """Installs an evolved block composed of NATIVE BRICKS on the shared system Poisson.
 
-        Point d'entree primaire pour un modele compose en Python a partir de briques natives
-        (adc.Model(...)). Pour un modele DSL compile (.so) ou un aiguillage automatique sur le type
-        du modele, utiliser add_equation. Les arguments sont marshales vers la facade C++
-        (System::add_block), qui valide le bloc (noms / roles / masque implicite) contre le modele.
+        Primary entry point for a model composed in Python from native bricks
+        (adc.Model(...)). For a compiled DSL model (.so) or an automatic dispatch on the model type,
+        use add_equation. The arguments are marshaled to the C++ facade
+        (System::add_block), which validates the block (names / roles / implicit mask) against the model.
 
-        @param name nom unique du bloc ; indexe set_density(name) / mass(name) / density(name).
-        @param model un adc.Model(...) (ModelSpec : etat + transport + source + brique elliptique).
-        @param spatial discretisation spatiale, un adc.Spatial(...) / adc.FiniteVolume(...) (defaut
-            minmod + rusanov + conservatif). Porte le limiteur (none / minmod / vanleer / weno5 --
-            weno5 n'est expose QUE par ce chemin natif), le flux de Riemann (rusanov / hll / hllc /
-            roe) et les variables reconstruites (conservative / primitive). positivity_floor est lu
-            ici (limiteur de positivite Zhang-Shu).
-        @param time traitement temporel, un adc.Explicit (defaut) / adc.IMEX / adc.SourceImplicit.
-            Porte substeps (sous-pas par macro-pas), stride (cadence multirate hold-then-catch-up),
-            le masque implicite (implicit_vars / implicit_roles) et les options Newton (IMEX). Tous
-            ces parametres sont transmis tels quels au C++.
-        @param evolve True (defaut) = bloc avance ; False = champ gele (background) qui contribue
-            tout de meme au second membre du Poisson de systeme.
-        @throws TypeError si time est un adc.Split / adc.Strang (etage source condense par Schur),
-            non cable ici : passer par add_equation(..., time=adc.Split(...)).
+        @param name unique block name; indexes set_density(name) / mass(name) / density(name).
+        @param model an adc.Model(...) (ModelSpec: state + transport + source + elliptic brick).
+        @param spatial spatial discretization, an adc.Spatial(...) / adc.FiniteVolume(...) (default
+            minmod + rusanov + conservative). Carries the limiter (none / minmod / vanleer / weno5 --
+            weno5 is exposed ONLY by this native path), the Riemann flux (rusanov / hll / hllc /
+            roe) and the reconstructed variables (conservative / primitive). positivity_floor is read
+            here (Zhang-Shu positivity limiter).
+        @param time temporal treatment, an adc.Explicit (default) / adc.IMEX / adc.SourceImplicit.
+            Carries substeps (sub-steps per macro-step), stride (multirate hold-then-catch-up cadence),
+            the implicit mask (implicit_vars / implicit_roles) and the Newton options (IMEX). All
+            these parameters are forwarded as-is to the C++.
+        @param evolve True (default) = block advances; False = frozen field (background) which still
+            contributes to the right-hand side of the system Poisson.
+        @throws TypeError if time is an adc.Split / adc.Strang (Schur-condensed source stage),
+            not wired here: go through add_equation(..., time=adc.Split(...)).
         """
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
-        # adc.Split (etage source condense) n'est cable que par add_equation (qui branche
-        # set_source_stage apres l'ajout du bloc) : le rejeter ICI plutot que de jouer le seul transport
-        # en silence (la source condensee serait perdue).
+        # adc.Split (condensed source stage) is only wired by add_equation (which plugs
+        # set_source_stage after adding the block): reject it HERE rather than running only the transport
+        # silently (the condensed source would be lost).
         if isinstance(time, Split):
             raise TypeError(
-                "System.add_block : adc.Split (etage source condense par Schur) n'est supporte que par "
-                "add_equation (qui branche l'etage source) ; utiliser add_equation(..., time=adc.Split(...)).")
-        # Masque implicite + options Newton portes par la politique temporelle (IMEX/SourceImplicit) ;
-        # defauts neutres sur les autres politiques (Explicit). Resolus/valides cote C++
-        # (System::add_block) contre les noms/roles du bloc.
+                "System.add_block: adc.Split (Schur-condensed source stage) is only supported by "
+                "add_equation (which plugs the source stage); use add_equation(..., time=adc.Split(...)).")
+        # Implicit mask + Newton options carried by the temporal policy (IMEX/SourceImplicit);
+        # neutral defaults on the other policies (Explicit). Resolved/validated on the C++ side
+        # (System::add_block) against the block's names/roles.
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1), evolve, getattr(time, "stride", 1),
                           getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
@@ -1417,35 +1414,35 @@ class System:
 
     def add_equation(self, name, model, spatial=None, time=None, substeps=None, names=None,
                      evolve=True, stride=None):
-        """Ajoute une equation/bloc en aiguillant sur le TYPE de @p model (DSL Phase A) :
+        """Adds an equation/block by dispatching on the TYPE of @p model (DSL Phase A):
 
-        - un ModelSpec (adc.Model(...)) -> add_block (briques natives composees) ;
-        - un CompiledModel (m.compile(...)) -> l'adder du backend (add_dynamic_block pour prototype,
-          add_compiled_block pour aot, add_native_block pour production), avec les noms/roles/gamma
-          transportes par le .so.
+        - a ModelSpec (adc.Model(...)) -> add_block (composed native bricks);
+        - a CompiledModel (m.compile(...)) -> the backend adder (add_dynamic_block for prototype,
+          add_compiled_block for aot, add_native_block for production), with the names/roles/gamma
+          carried by the .so.
 
-        Centralise le couplage backend <-> adder (un .so AOT ne doit pas etre branche sur
-        add_dynamic_block, et inversement). cf. docs/DSL_MODEL_DESIGN.md section 3.
+        Centralizes the backend <-> adder coupling (an AOT .so must not be plugged into
+        add_dynamic_block, and vice versa). cf. docs/DSL_MODEL_DESIGN.md section 3.
 
-        @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (defaut minmod+rusanov+conservatif).
-        @p time : adc.Explicit / IMEX (defaut Explicit). @p substeps : surcharge time.substeps.
-        @p stride : surcharge time.stride (1 = chaque macro-pas, defaut bit-identique).
-        @p names : noms des composantes (longueur = n_vars du modele compile). @p evolve : bloc avance ;
-        evolve=False (champ gele) n'est cable que sur le chemin natif (ModelSpec -> add_block, backend
-        'production' -> add_native_block). Sur backend 'prototype'/'aot' (l'ABI .so ne transporte pas
-        evolve) un evolve=False est REJETE explicitement -> utiliser un bloc natif (add_background).
+        @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (default minmod+rusanov+conservative).
+        @p time : adc.Explicit / IMEX (default Explicit). @p substeps : overrides time.substeps.
+        @p stride : overrides time.stride (1 = each macro-step, default bit-identical).
+        @p names : component names (length = n_vars of the compiled model). @p evolve : block advances;
+        evolve=False (frozen field) is only wired on the native path (ModelSpec -> add_block, backend
+        'production' -> add_native_block). On backend 'prototype'/'aot' (the .so ABI does not carry
+        evolve) an evolve=False is REJECTED explicitly -> use a native block (add_background).
         """
-        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
 
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
 
-        # --- adc.Split (Lie) / adc.Strang (2e ordre) : splitting EXPLICITE / IMPLICITE, OPT-IN Schur --
-        # Le bloc est d'abord ajoute avec l'etage HYPERBOLIQUE explicite (chemin de production existant,
-        # aucune duplication d'aiguillage), PUIS on branche l'etage SOURCE condense (set_source_stage,
-        # C++). La source est jouee APRES le transport a chaque pas. Le defaut (sans Split) est inchange.
-        # La POLITIQUE de splitting (Lie / Strang) est CABLEE au stepper de systeme via set_time_scheme :
-        # adc.Split -> "lie" (defaut, bit-identique), adc.Strang -> "strang" (H(dt/2) S(dt) H(dt/2)).
+        # --- adc.Split (Lie) / adc.Strang (2nd order): EXPLICIT / IMPLICIT splitting, Schur OPT-IN --
+        # The block is first added with the explicit HYPERBOLIC stage (existing production path,
+        # no dispatch duplication), THEN we plug the condensed SOURCE stage (set_source_stage,
+        # C++). The source is run AFTER the transport at each step. The default (without Split) is unchanged.
+        # The splitting POLICY (Lie / Strang) is WIRED to the system stepper via set_time_scheme:
+        # adc.Split -> "lie" (default, bit-identical), adc.Strang -> "strang" (H(dt/2) S(dt) H(dt/2)).
         if isinstance(time, Split):
             self.add_equation(name, model, spatial=spatial, time=time.hyperbolic,
                               substeps=substeps, names=names, evolve=evolve, stride=stride)
@@ -1458,15 +1455,15 @@ class System:
                                      getattr(src, "momentum_y_spec", ""),
                                      getattr(src, "energy_spec", ""),
                                      getattr(src, "bz_aux_component", -1))
-            self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
+            self._s.set_time_scheme(time.scheme)  # "lie" (Split) or "strang" (Strang)
             return
 
         nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
         nstride = stride if stride is not None else getattr(time, "stride", 1)
 
-        # --- ModelSpec : briques natives composees -> add_block (chemin existant) ---
-        # NB : on appelle _s.add_block DIRECTEMENT avec nsub/nstride (pas self.add_block, dont la
-        # signature n'a pas de substeps -> elle utiliserait time.substeps et IGNORERAIT les overrides).
+        # --- ModelSpec: composed native bricks -> add_block (existing path) ---
+        # NB: we call _s.add_block DIRECTLY with nsub/nstride (not self.add_block, whose
+        # signature has no substeps -> it would use time.substeps and IGNORE the overrides).
         if isinstance(model, ModelSpec):
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                               nsub, evolve, nstride,
@@ -1481,16 +1478,16 @@ class System:
                           getattr(spatial, "positivity_floor", 0.0))
             return
 
-        # Masque implicite (IMEX) : seul le chemin natif compose (ModelSpec -> add_block) le cable. Les
-        # backends compiles (.so : dynamic/aot/production) n'exposent pas l'argument -> on REJETTE un
-        # masque non vide plutot que l'ignorer en silence (cf. le rejet du stride sur backend 'aot').
+        # Implicit mask (IMEX): only the composed native path (ModelSpec -> add_block) wires it. The
+        # compiled backends (.so: dynamic/aot/production) do not expose the argument -> we REJECT a
+        # non-empty mask rather than ignore it silently (cf. the stride rejection on backend 'aot').
         if getattr(time, "implicit_vars", []) or getattr(time, "implicit_roles", []):
             raise ValueError(
-                "add_equation : implicit_vars / implicit_roles (masque IMEX par bloc) ne sont supportes "
-                "que sur un modele compose adc.Model(...) (-> add_block). Le modele compile (.so) ne "
-                "transporte pas le masque ; utiliser un adc.Model(...) natif.")
-        # Memes regles pour les options/diagnostics Newton (IMEX) : non transportees par l'ABI des .so.
-        # Des valeurs non-defaut seraient ignorees EN SILENCE -> rejet explicite.
+                "add_equation: implicit_vars / implicit_roles (per-block IMEX mask) are only supported "
+                "on a composed model adc.Model(...) (-> add_block). The compiled model (.so) does not "
+                "carry the mask; use a native adc.Model(...).")
+        # Same rules for the Newton options/diagnostics (IMEX): not carried by the .so ABI.
+        # Non-default values would be ignored SILENTLY -> explicit rejection.
         if (getattr(time, "newton_max_iters", 2) != 2
                 or getattr(time, "newton_rel_tol", 0.0) != 0.0
                 or getattr(time, "newton_abs_tol", 0.0) != 0.0
@@ -1499,198 +1496,198 @@ class System:
                 or getattr(time, "newton_damping", 1.0) != 1.0
                 or getattr(time, "newton_fail_policy", "none") != "none"):
             raise ValueError(
-                "add_equation : les options Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/"
-                "diagnostics/damping/fail_policy) ne sont supportees que sur un modele compose "
-                "adc.Model(...) (-> add_block). L'ABI du modele compile (.so) ne les transporte "
-                "pas ; utiliser un adc.Model(...) natif.")
+                "add_equation: the Newton options (newton_max_iters/rel_tol/abs_tol/fd_eps/"
+                "diagnostics/damping/fail_policy) are only supported on a composed model "
+                "adc.Model(...) (-> add_block). The compiled model (.so) ABI does not carry "
+                "them; use a native adc.Model(...).")
 
         if not isinstance(model, dsl.CompiledModel):
-            raise TypeError("add_equation : model doit etre un adc.Model(...) (ModelSpec) ou un "
-                            "CompiledModel (m.compile(...)) ; recu %r" % type(model).__name__)
+            raise TypeError("add_equation: model must be an adc.Model(...) (ModelSpec) or a "
+                            "CompiledModel (m.compile(...)); got %r" % type(model).__name__)
 
         compiled = model
-        # Garde-fou noms : longueur explicite verifiee tot (le C++ leve aussi, mais on diagnostique ici).
+        # Names guard: explicit length checked early (the C++ also raises, but we diagnose here).
         if names is not None and len(names) != compiled.n_vars:
-            raise ValueError("add_equation : names= a %d noms mais le bloc '%s' a %d variables"
+            raise ValueError("add_equation: names= has %d names but block '%s' has %d variables"
                              % (len(names), name, compiled.n_vars))
         names_arg = list(names) if names is not None else []
 
-        # Champs aux NOMMES (ADC-70 phase 1) : table nom -> composante du bloc, depuis les noms ORDONNES
-        # du modele compile (le k-ieme nom = composante dsl.AUX_NAMED_BASE + k, miroir de l'emission C++).
-        # Consommee par set_aux_field / aux_field. add_compiled_block / add_native_block / add_dynamic_block
-        # ont deja elargi le canal aux (adc_compiled_naux -> ensure_aux_width), donc la composante existe.
+        # NAMED aux fields (ADC-70 phase 1): table name -> block component, from the ORDERED names
+        # of the compiled model (the k-th name = component dsl.AUX_NAMED_BASE + k, mirror of the C++ emission).
+        # Consumed by set_aux_field / aux_field. add_compiled_block / add_native_block / add_dynamic_block
+        # have already widened the aux channel (adc_compiled_naux -> ensure_aux_width), so the component exists.
         extra = list(getattr(compiled, "aux_extra_names", []) or [])
         self._aux_field_index[name] = {nm: dsl.AUX_NAMED_BASE + k for k, nm in enumerate(extra)}
 
         backend = compiled.backend
-        # Garde-fou flux numerique : HLLC/Roe exigent une pression -> la brique generee n'emet
-        # pressure()/wave_speeds() que si une primitive 'p' est declaree. Sans 'p', make_block ne
-        # compile pas le flux : on le diagnostique ici avant la frontiere C++.
-        # hllc / roe : la capability emise (m.enable_hllc -> has_hllc, m.enable_roe -> has_roe)
-        # OUVRE le flux meme hors Euler 4-var (la garde C++ requires l'accepte) ; sinon la voie
-        # canonique exige 'p' dans les primitives.
+        # Numerical flux guard: HLLC/Roe require a pressure -> the generated brick emits
+        # pressure()/wave_speeds() only if a primitive 'p' is declared. Without 'p', make_block does not
+        # compile the flux: we diagnose it here before the C++ boundary.
+        # hllc / roe: the emitted capability (m.enable_hllc -> has_hllc, m.enable_roe -> has_roe)
+        # OPENS the flux even outside 4-var Euler (the C++ requires-gate accepts it); otherwise the
+        # canonical path requires 'p' in the primitives.
         if (spatial.flux in ("hllc", "roe") and "p" not in compiled.prim_names
                 and not (spatial.flux == "hllc" and getattr(compiled, "has_hllc", False))
                 and not (spatial.flux == "roe" and getattr(compiled, "has_roe", False))):
             raise ValueError(
-                "add_equation : riemann '%s' exige une pression : declarer une primitive 'p' "
-                "(m.primitive('p', ...)) dans le modele, ou emettre la capability "
-                "(m.enable_hllc() / m.enable_roe()) ; sinon utiliser riemann='rusanov'"
+                "add_equation: riemann '%s' requires a pressure: declare a primitive 'p' "
+                "(m.primitive('p', ...)) in the model, or emit the capability "
+                "(m.enable_hllc() / m.enable_roe()); otherwise use riemann='rusanov'"
                 % spatial.flux)
-        # HLL : la brique generee emet wave_speeds soit depuis la paire EXPLICITE
-        # m.wave_speeds(x=, y=) (SANS primitive 'p' : moments, isotherme..., cf. has_wave_speeds),
-        # soit des qu'une primitive 'p' est DECLAREE (m.primitive('p', ...)), meme HORS layout
-        # primitive_vars (cas isotherme 3-var Hoffart : prim_names = rho/u/v sans 'p'). Garde
-        # PRECOCE ici : le requires-gate C++ de make_block ne se declenche qu'au PREMIER usage
-        # (eval_rhs / step, construction paresseuse des fermetures) -- on diagnostique a
-        # l'installation, comme hllc/roe. getattr defaut True = ceinture-bretelles : CompiledModel
-        # fixe TOUJOURS has_wave_speeds (Model.compile depuis 'p'/paire ; HybridModel depuis la
-        # brique transport, True pour une brique native = inconnu) -- le defaut ne s'applique qu'a
-        # un objet etranger sans le flag, qui retombe alors sur le gate C++ (historique).
+        # HLL: the generated brick emits wave_speeds either from the EXPLICIT pair
+        # m.wave_speeds(x=, y=) (WITHOUT primitive 'p': moments, isothermal..., cf. has_wave_speeds),
+        # or as soon as a primitive 'p' is DECLARED (m.primitive('p', ...)), even OUTSIDE the
+        # primitive_vars layout (isothermal 3-var Hoffart case: prim_names = rho/u/v without 'p'). EARLY
+        # guard here: the C++ requires-gate of make_block only triggers at the FIRST use
+        # (eval_rhs / step, lazy construction of the closures) -- we diagnose at
+        # installation, like hllc/roe. getattr default True = belt-and-suspenders: CompiledModel
+        # ALWAYS sets has_wave_speeds (Model.compile from 'p'/pair; HybridModel from the
+        # transport brick, True for a native brick = unknown) -- the default only applies to
+        # a foreign object without the flag, which then falls back on the C++ gate (history).
         if spatial.flux == "hll" and not getattr(compiled, "has_wave_speeds", True):
             raise ValueError(
-                "add_equation : riemann 'hll' exige des vitesses d'onde signees : declarer "
-                "m.wave_speeds(x=(smin, smax), y=(smin, smax)) (sans pression), ou une primitive "
-                "'p' (m.primitive('p', ...)) ; sinon utiliser riemann='rusanov'")
+                "add_equation: riemann 'hll' requires signed wave speeds: declare "
+                "m.wave_speeds(x=(smin, smax), y=(smin, smax)) (without pressure), or a primitive "
+                "'p' (m.primitive('p', ...)); otherwise use riemann='rusanov'")
 
-        # Aiguillage AUTORITAIRE par l'adder du CompiledModel (fixe par le backend, cf. dsl._BACKENDS) :
+        # AUTHORITATIVE dispatch by the CompiledModel adder (fixed by the backend, cf. dsl._BACKENDS):
         # prototype -> add_dynamic_block, aot -> add_compiled_block, production -> add_native_block (#85).
         adder = compiled.adder
         if adder == "add_dynamic_block":
-            # JIT, residu HOTE Rusanov ordre 1 : ne prend que le LIMITER MUSCL (none/minmod/vanleer)
-            # + substeps ; pas de flux HLLC/Roe, pas de recon primitif. WENO5 (stencil 5 points) n'est
-            # PAS un limiteur MUSCL et ce chemin n'execute pas assemble_rhs : on le rejette ICI (les
-            # chemins aot/production, eux, acceptent weno5 -- la grille .so / le bloc natif allouent
+            # JIT, HOST Rusanov order-1 residual: takes only the MUSCL LIMITER (none/minmod/vanleer)
+            # + substeps; no HLLC/Roe flux, no primitive recon. WENO5 (5-point stencil) is
+            # NOT a MUSCL limiter and this path does not run assemble_rhs: we reject it HERE (the
+            # aot/production paths, on the other hand, accept weno5 -- the .so grid / native block allocate
             # block_n_ghost(limiter) = 3 ghosts).
             if spatial.limiter == "weno5":
                 raise ValueError(
-                    "add_equation : limiter 'weno5' non supporte sur backend 'prototype' (JIT, residu "
-                    "hote Rusanov ordre 1, sans assemble_rhs) ; utiliser backend='aot'/'production' "
-                    "(WENO5 cable de bout en bout) ou add_block (modele compose adc.Model(...)).")
+                    "add_equation: limiter 'weno5' not supported on backend 'prototype' (JIT, host "
+                    "Rusanov order-1 residual, without assemble_rhs); use backend='aot'/'production' "
+                    "(WENO5 wired end to end) or add_block (composed model adc.Model(...)).")
             if spatial.flux != "rusanov":
                 raise ValueError(
-                    "add_equation : backend 'prototype' (JIT, residu hote Rusanov ordre 1) n'expose "
-                    "que riemann='rusanov' (recu '%s') ; utiliser backend='aot'/'production' pour "
+                    "add_equation: backend 'prototype' (JIT, host Rusanov order-1 residual) only exposes "
+                    "riemann='rusanov' (got '%s'); use backend='aot'/'production' for "
                     "HLLC/Roe" % spatial.flux)
-            # evolve=False (bloc GELE / fond fixe) n'est PAS cable : l'ABI add_dynamic_block ne
-            # transporte pas evolve (push_dynamic le force a true cote C++) -> le bloc serait avance
-            # en SILENCE. On le REJETTE (rejet plutot qu'ignore silencieux). Pour un champ gele,
-            # utiliser un bloc natif/production (add_background -> add_block(..., evolve=False)).
+            # evolve=False (FROZEN block / fixed background) is NOT wired: the add_dynamic_block ABI does
+            # not carry evolve (push_dynamic forces it to true on the C++ side) -> the block would be
+            # advanced SILENTLY. We REJECT it (rejection rather than silent ignore). For a frozen field,
+            # use a native/production block (add_background -> add_block(..., evolve=False)).
             if not evolve:
                 raise ValueError(
-                    "add_equation : evolve=False non supporte sur backend 'prototype' (l'ABI du .so JIT "
-                    "ne transporte pas evolve ; le bloc serait avance en silence). Utiliser un modele "
-                    "natif compose adc.Model(...) -> add_block(..., evolve=False) (ou add_background) "
-                    "pour un champ gele.")
-            # positivity_floor (ADC-76) n'est PAS cable sur le chemin JIT hote (pas d'assemble_rhs,
-            # residu Rusanov ordre 1 dedie) : rejet explicite plutot qu'un floor ignore en silence.
+                    "add_equation: evolve=False not supported on backend 'prototype' (the JIT .so ABI "
+                    "does not carry evolve; the block would be advanced silently). Use a composed "
+                    "native model adc.Model(...) -> add_block(..., evolve=False) (or add_background) "
+                    "for a frozen field.")
+            # positivity_floor (ADC-76) is NOT wired on the host JIT path (no assemble_rhs,
+            # dedicated Rusanov order-1 residual): explicit rejection rather than a silently ignored floor.
             if getattr(spatial, "positivity_floor", 0.0) > 0.0:
                 raise ValueError(
-                    "add_equation : positivity_floor non supporte sur backend 'prototype' (residu "
-                    "hote dedie, sans reconstruction haut-ordre) ; utiliser backend='aot'/'production' "
-                    "ou un modele compose adc.Model(...) -> add_block.")
+                    "add_equation: positivity_floor not supported on backend 'prototype' (dedicated "
+                    "host residual, without high-order reconstruction); use backend='aot'/'production' "
+                    "or a composed model adc.Model(...) -> add_block.")
             self._s.add_dynamic_block(name, compiled.so_path, nsub, names_arg, spatial.limiter)
             return
         if adder == "add_compiled_block":
-            # AOT host-marshale : limiter x riemann x recon, mono-rang (sans MPI/AMR). L'ABI extern "C"
-            # du .so AOT (add_compiled_block) NE transporte PAS de cadence : le bloc tournerait a stride=1
-            # en SILENCE. On REJETTE donc stride > 1 sur ce backend (route explicite) plutot que de
-            # l'ignorer. Le stride par bloc est cable sur add_block (natif compose) et add_native_block
-            # (backend='production'). On lit time.stride ET l'override stride= (nstride couvre les deux).
+            # AOT host-marshaled: limiter x riemann x recon, single-rank (without MPI/AMR). The extern "C"
+            # ABI of the AOT .so (add_compiled_block) does NOT carry a cadence: the block would run at stride=1
+            # SILENTLY. We therefore REJECT stride > 1 on this backend (explicit route) rather than
+            # ignore it. The per-block stride is wired on add_block (composed native) and add_native_block
+            # (backend='production'). We read time.stride AND the stride= override (nstride covers both).
             if nstride != 1:
                 raise ValueError(
-                    "add_equation : stride=%d non supporte sur backend 'aot' (l'ABI du .so AOT ne "
-                    "transporte pas la cadence ; le bloc tournerait a stride=1 en silence). Utiliser "
-                    "backend='production' (chemin natif, cadence cablee) ou un modele natif compose "
+                    "add_equation: stride=%d not supported on backend 'aot' (the AOT .so ABI does not "
+                    "carry the cadence; the block would run at stride=1 silently). Use "
+                    "backend='production' (native path, cadence wired) or a composed native model "
                     "adc.Model(...) -> add_block." % nstride)
-            # evolve=False (bloc GELE / fond fixe) n'est PAS cable : l'ABI add_compiled_block ne
-            # transporte pas evolve (add_compiled_block le force a true cote C++) -> le bloc serait
-            # avance en SILENCE. On le REJETTE (rejet plutot qu'ignore silencieux). Pour un champ gele,
-            # utiliser backend='production' (add_native_block transporte evolve) ou un modele natif
-            # compose adc.Model(...) -> add_block(..., evolve=False) (ou add_background).
+            # evolve=False (FROZEN block / fixed background) is NOT wired: the add_compiled_block ABI does
+            # not carry evolve (add_compiled_block forces it to true on the C++ side) -> the block would be
+            # advanced SILENTLY. We REJECT it (rejection rather than silent ignore). For a frozen field,
+            # use backend='production' (add_native_block carries evolve) or a composed native model
+            # adc.Model(...) -> add_block(..., evolve=False) (or add_background).
             if not evolve:
                 raise ValueError(
-                    "add_equation : evolve=False non supporte sur backend 'aot' (l'ABI du .so AOT ne "
-                    "transporte pas evolve ; le bloc serait avance en silence). Utiliser "
-                    "backend='production' (chemin natif, evolve cable) ou un modele natif compose "
-                    "adc.Model(...) -> add_block(..., evolve=False) (ou add_background) pour un champ gele.")
+                    "add_equation: evolve=False not supported on backend 'aot' (the AOT .so ABI does not "
+                    "carry evolve; the block would be advanced silently). Use "
+                    "backend='production' (native path, evolve wired) or a composed native model "
+                    "adc.Model(...) -> add_block(..., evolve=False) (or add_background) for a frozen field.")
             self._s.add_compiled_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                        spatial.recon, time.kind, nsub, names_arg,
                                        getattr(spatial, "positivity_floor", 0.0))
             return
         if adder == "add_native_block":
-            # NATIF zero-copie (#85) : bloc installe sur le CONTEXTE REEL du System (meme chemin que
-            # add_block). Prend un gamma, PAS de names= (les noms/roles viennent des metadonnees du .so).
-            # La validation device/MPI end-to-end depuis Python est une PR dediee ulterieure.
+            # NATIVE zero-copy (#85): block installed on the REAL System CONTEXT (same path as
+            # add_block). Takes a gamma, NO names= (the names/roles come from the .so metadata).
+            # End-to-end device/MPI validation from Python is a later dedicated PR.
             if names is not None:
                 raise ValueError(
-                    "add_equation : names= non supporte sur le chemin natif (production) ; les noms et "
-                    "roles sont portes par les metadonnees du modele compile (.so)")
-            # Garde PRE-DLOPEN au branchement : couvre AUSSI le cache HIT (ou compile_native ne tourne
-            # pas) -- un module _adc perime donnerait sinon un dlopen 'symbol not found' cryptique.
+                    "add_equation: names= not supported on the native path (production); the names and "
+                    "roles are carried by the compiled model metadata (.so)")
+            # PRE-DLOPEN guard at plug time: ALSO covers the cache HIT (where compile_native does not
+            # run) -- a stale _adc module would otherwise give a cryptic dlopen 'symbol not found'.
             dsl.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
             gamma = compiled.gamma if compiled.gamma is not None else 1.4
             self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                      spatial.recon, time.kind, gamma, nsub, evolve, nstride,
                                      getattr(spatial, "positivity_floor", 0.0))
             return
-        raise ValueError("add_equation : adder %r inconnu (backend %r)" % (adder, backend))
+        raise ValueError("add_equation: adder %r unknown (backend %r)" % (adder, backend))
 
     def _resolve_aux_field(self, block, name):
-        """Resout (bloc, nom de champ aux NOMME) -> composante canonique du canal aux (ADC-70 phase 1).
-        Regle de resolution : un nom CANONIQUE (phi/grad/B_z/T_e) est REJETE ici -- ces champs ont
-        leurs chemins dedies (B_z -> set_magnetic_field, T_e -> set_electron_temperature_from, phi/grad
-        derives par solve_fields). Sinon on cherche dans la table du bloc (remplie a add_equation depuis
-        le modele compile). Leve ValueError avec un message actionnable sur bloc/nom inconnu."""
-        from . import dsl  # import tardif (cycle dsl <-> __init__)
+        """Resolve (block, NAMED aux field name) -> canonical component of the aux channel (ADC-70 phase 1).
+        Resolution rule: a CANONICAL name (phi/grad/B_z/T_e) is REJECTED here -- these fields have
+        their dedicated paths (B_z -> set_magnetic_field, T_e -> set_electron_temperature_from, phi/grad
+        derived by solve_fields). Otherwise look it up in the block table (filled at add_equation from
+        the compiled model). Raises ValueError with an actionable message on unknown block/name."""
+        from . import dsl  # late import (dsl <-> __init__ cycle)
         if name == "B_z":
             raise ValueError(
-                "set_aux_field : 'B_z' (champ magnetique) se fixe via sim.set_magnetic_field(Bz), "
-                "PAS via set_aux_field (B_z est un champ aux canonique, pas un champ nomme).")
+                "set_aux_field: 'B_z' (magnetic field) is set via sim.set_magnetic_field(Bz), "
+                "NOT via set_aux_field (B_z is a canonical aux field, not a named field).")
         if name == "T_e":
             raise ValueError(
-                "set_aux_field : 'T_e' (temperature electronique) est DERIVE d'un bloc fluide via "
-                "sim.set_electron_temperature_from(bloc), PAS fixe via set_aux_field.")
+                "set_aux_field: 'T_e' (electron temperature) is DERIVED from a fluid block via "
+                "sim.set_electron_temperature_from(block), NOT set via set_aux_field.")
         if name in dsl.AUX_CANONICAL:
             raise ValueError(
-                "set_aux_field : '%s' est un champ aux CANONIQUE (derive par le solveur, non fixable) ; "
-                "set_aux_field ne porte que les champs NOMMES declares par m.aux_field(...)." % name)
+                "set_aux_field: '%s' is a CANONICAL aux field (derived by the solver, not settable); "
+                "set_aux_field only carries the NAMED fields declared by m.aux_field(...)." % name)
         table = self._aux_field_index.get(block)
         if table is None:
             raise ValueError(
-                "set_aux_field : bloc '%s' inconnu (ou ajoute sans champ aux nomme) ; ajouter le bloc "
-                "via add_equation(model=...) avec un modele declarant m.aux_field('%s')." % (block, name))
+                "set_aux_field: block '%s' unknown (or added without a named aux field); add the block "
+                "via add_equation(model=...) with a model declaring m.aux_field('%s')." % (block, name))
         if name not in table:
-            known = sorted(table) if table else "(aucun)"
+            known = sorted(table) if table else "(none)"
             raise ValueError(
-                "set_aux_field : champ aux '%s' non declare par le bloc '%s' ; champs nommes connus : %s"
+                "set_aux_field: aux field '%s' not declared by block '%s'; known named fields: %s"
                 % (name, block, known))
         return table[name]
 
     def set_aux_field(self, block, name, field):
-        """Fixe un champ aux NOMME (ADC-70 phase 1) d'un bloc : @p name doit avoir ete declare par le
-        modele via m.aux_field(name) (et le bloc ajoute par add_equation). @p field : tableau 2D (ny, nx)
-        ou plat (n*n), row-major. Le champ est STATIQUE (fourni par l'utilisateur, comme B_z) et PERSISTE
-        d'un pas a l'autre (solve_fields ne reecrit jamais les composantes nommees). Pour B_z / T_e,
-        utiliser leurs chemins dedies (set_magnetic_field / set_electron_temperature_from)."""
+        """Set a NAMED aux field (ADC-70 phase 1) of a block: @p name must have been declared by the
+        model via m.aux_field(name) (and the block added via add_equation). @p field: 2D array (ny, nx)
+        or flat (n*n), row-major. The field is STATIC (user-supplied, like B_z) and PERSISTS
+        from one step to the next (solve_fields never rewrites named components). For B_z / T_e,
+        use their dedicated paths (set_magnetic_field / set_electron_temperature_from)."""
         import numpy as np
         comp = self._resolve_aux_field(block, name)
         arr = np.asarray(field, dtype=float)
         self._s.set_aux_field_component(comp, arr.reshape(-1))
 
     def aux_field(self, block, name):
-        """Lit un champ aux NOMME (ADC-70 phase 1) d'un bloc -> tableau 2D (ny, nx). Vaut 0 partout tant
-        qu'aucun set_aux_field ne l'a ecrit (canal aux initialise a zero, jamais reecrit par solve_fields
-        au-dela des composantes derivees). @p name : declare par m.aux_field(name)."""
+        """Read a NAMED aux field (ADC-70 phase 1) of a block -> 2D array (ny, nx). Equals 0 everywhere as
+        long as no set_aux_field has written it (aux channel initialized to zero, never rewritten by
+        solve_fields beyond the derived components). @p name: declared by m.aux_field(name)."""
         import numpy as np
         comp = self._resolve_aux_field(block, name)
         return np.asarray(self._s.aux_field_component(comp), dtype=float)
 
     def run(self, t_end, cfl=0.4, max_steps=1_000_000):
-        """Avance jusqu'a t_end par pas CFL (sucre : `while time() < t_end: step_cfl(cfl)`).
+        """Advance up to t_end by CFL steps (sugar: `while time() < t_end: step_cfl(cfl)`).
 
-        @p cfl : nombre de Courant passe a step_cfl. @p max_steps : garde-fou (evite une boucle
-        infinie si dt -> 0). Renvoie le nombre de pas effectues. cf. DSL_MODEL_DESIGN.md section 6."""
+        @p cfl: Courant number passed to step_cfl. @p max_steps: guard (avoids an infinite
+        loop if dt -> 0). Returns the number of steps taken. cf. DSL_MODEL_DESIGN.md section 6."""
         steps = 0
         while self.time() < t_end and steps < max_steps:
             self.step_cfl(cfl)
@@ -1698,87 +1695,87 @@ class System:
         return steps
 
     def add_background(self, name, model, density, spatial=None):
-        """Espece GELEE (non avancee) : un fond fixe qui contribue au Poisson de systeme (et, a
-        venir, aux sources couplees). density : tableau n*n. Equivaut a add_block(evolve=False)
-        suivi de set_density."""
+        """FROZEN species (not advanced): a fixed background that contributes to the system Poisson (and,
+        in the future, to coupled sources). density: n*n array. Equivalent to add_block(evolve=False)
+        followed by set_density."""
         self.add_block(name, model, spatial=spatial, evolve=False)
         self.set_density(name, density)
 
     def add_elliptic_model(self, name, model, solver=None, bc="auto", wall="none",
                            wall_radius=0.0):
-        """EPM : configure le modele elliptique de systeme (Poisson en est l'instance courante).
+        """EPM: configures the system elliptic model (Poisson is its current instance).
         model = adc.elliptic(operator=adc.div_eps_grad(eps), rhs=adc.composite_rhs(),
-        output=adc.electric_field_from_potential()). set_poisson(...) reste le raccourci equivalent.
+        output=adc.electric_field_from_potential()). set_poisson(...) remains the equivalent shortcut.
 
-        Operateur : div(eps grad) a eps CONSTANT (eps != 1 supporte : eps lap phi = f) ; eps(x)
-        variable se branche via set_epsilon_field. Second membre : composite_rhs() = somme GENERIQUE
-        des briques elliptiques portees par les blocs (charge q n, fond alpha (n-n0), couplage gravite
-        sign 4piG (rho-rho0)) ; charge_density() en est le cas usuel. Diffusion / projection (autre
-        operateur) demanderaient un solveur a coefficients variables (raffinement non disponible)."""
+        Operator: div(eps grad) with CONSTANT eps (eps != 1 supported: eps lap phi = f); variable
+        eps(x) is plugged in via set_epsilon_field. Right-hand side: composite_rhs() = GENERIC sum
+        of the elliptic bricks carried by the blocks (charge q n, background alpha (n-n0), gravity
+        coupling sign 4piG (rho-rho0)); charge_density() is its usual case. Diffusion / projection (other
+        operator) would require a variable-coefficient solver (refinement not available)."""
         if not isinstance(model.operator, DivEpsGrad):
-            raise NotImplementedError("add_elliptic_model : seul l'operateur div_eps_grad (Poisson) "
-                                      "est supporte ; diffusion / projection -> raffinement (solveur)")
+            raise NotImplementedError("add_elliptic_model: only the div_eps_grad operator (Poisson) "
+                                      "is supported; diffusion / projection -> refinement (solver)")
         if not isinstance(model.rhs, CompositeRhs):
-            raise NotImplementedError("add_elliptic_model : rhs doit etre composite_rhs() (somme des "
-                                      "briques par bloc) ou charge_density() (son cas usuel)")
+            raise NotImplementedError("add_elliptic_model: rhs must be composite_rhs() (sum of the "
+                                      "per-block bricks) or charge_density() (its usual case)")
         kind = solver.kind if solver is not None else "geometric_mg"
-        # Token honnete : "composite" pour un second membre generique, "charge_density" (alias,
-        # bit-identique) quand tous les blocs portent une densite de charge. Les deux empruntent le
-        # MEME chemin numerique cote C++ (somme des briques elliptiques de chaque bloc).
+        # Honest token: "composite" for a generic right-hand side, "charge_density" (alias,
+        # bit-identical) when all blocks carry a charge density. Both take the
+        # SAME numerical path on the C++ side (sum of each block's elliptic bricks).
         rhs_tok = "charge_density" if type(model.rhs) is ChargeDensitySource else "composite"
         self.set_poisson(rhs=rhs_tok, solver=kind, bc=bc, wall=wall, wall_radius=wall_radius,
                          epsilon=model.operator.epsilon)
 
     def set_disc_domain(self, cx, cy, R, mode="none"):
-        """Fixe le DOMAINE DE TRANSPORT comme un DISQUE de centre (cx, cy) et de rayon R, et CABLE le
-        transport selon mode= (chantiers T2 / T5-PR3). Materialise un masque 0/1 cellule-centre (cellule
-        active quand son centre est dans le disque, level set hypot(x-cx, y-cy) - R < 0, MEME convention
-        que le mur conducteur du Poisson). C'est le pendant volumes-finis du mur elliptique : le papier
-        (Hoffart et al., arXiv:2510.11808) transporte sur un VRAI disque alors qu'ADC transporte sur le
-        carre cartesien plein, le cercle n'agissant que dans la paroi de Poisson (verrou des bords
-        d'anneau cartesiens, cf. docs/HOFFART_FIDELITY.md).
+        """Set the TRANSPORT DOMAIN as a DISC of center (cx, cy) and radius R, and WIRE the
+        transport according to mode= (T2 / T5-PR3 work). Materializes a 0/1 cell-centered mask (cell
+        active when its center is inside the disc, level set hypot(x-cx, y-cy) - R < 0, SAME convention
+        as the conducting wall of Poisson). This is the finite-volume counterpart of the elliptic wall: the paper
+        (Hoffart et al., arXiv:2510.11808) transports on a REAL disc whereas ADC transports on the
+        full Cartesian square, the circle acting only in the Poisson wall (lock from the Cartesian ring
+        edges, cf. docs/HOFFART_FIDELITY.md).
 
-        Le parametre ``mode`` cable le transport :
+        The ``mode`` parameter wires the transport:
 
-        - 'none' (defaut) : le masque est materialise (consultable via disc_mask()) mais le transport
-          reste PLEIN cartesien (assemble_rhs) -> step() BIT-IDENTIQUE meme avec le disque pose ;
-        - 'staircase' : transport masque conservatif (assemble_rhs_masked, porte de face 0/1) ;
-        - 'cutcell' : transport cut-cell / embedded-boundary (assemble_rhs_eb, apertures alpha_f +
-          fraction de volume kappa, frontiere lisse, ordre 2 a l'interieur du disque).
+        - 'none' (default): the mask is materialized (queryable via disc_mask()) but the transport
+          stays FULL Cartesian (assemble_rhs) -> step() BIT-IDENTICAL even with the disc set;
+        - 'staircase': conservative masked transport (assemble_rhs_masked, 0/1 face gate);
+        - 'cutcell': cut-cell / embedded-boundary transport (assemble_rhs_eb, apertures alpha_f +
+          volume fraction kappa, smooth boundary, order 2 inside the disc).
 
-        Le mode est honore sous Lie ET Strang (cf. Split / Strang). R > 0 ; cartesien seulement (le
-        polaire borne deja l'anneau par ses parois radiales -> erreur explicite)."""
+        The mode is honored under Lie AND Strang (cf. Split / Strang). R > 0; Cartesian only (the
+        polar one already bounds the ring by its radial walls -> explicit error)."""
         self._s.set_disc_domain(cx, cy, R, mode)
 
     def set_geometry_mode(self, mode):
-        """Bascule SEULE le mode de transport disque ('none'|'staircase'|'cutcell') sans (re)definir le
-        disque. Un mode != 'none' exige un disque deja fixe (set_disc_domain) -> erreur sinon. Remettre
-        a 'none' restaure le transport plein cartesien (bit-identique)."""
+        """Switch ONLY the disc transport mode ('none'|'staircase'|'cutcell') without (re)defining the
+        disc. A mode != 'none' requires a disc already set (set_disc_domain) -> error otherwise. Setting
+        back to 'none' restores the full Cartesian transport (bit-identical)."""
         self._s.set_geometry_mode(mode)
 
     def disc_mask(self):
-        """Masque de domaine 0/1 cellule-centre, tableau (ny, nx) (diagnostic / verification du
-        contrat). Tout 1.0 tant que set_disc_domain n'a pas ete appele (sous-domaine = domaine
-        entier, chemin par defaut)."""
+        """0/1 cell-centered domain mask, array (ny, nx) (diagnostic / contract
+        verification). All 1.0 as long as set_disc_domain has not been called (subdomain = whole
+        domain, default path)."""
         return self._s.disc_mask()
 
     def add_coupling(self, coupling):
-        """Ajoute un couplage inter-especes (operator-split, applique apres le transport) :
+        """Add an inter-species coupling (operator-split, applied after transport):
 
-        - objet NOMME adc.Ionization / Collision / ThermalExchange -> formule figee
-          (add_ionization / add_collision / add_thermal_exchange) ;
-        - CompiledCoupledSource (adc.dsl.CoupledSource(...).compile(...)) -> source GENERIQUE decrite en
-          formules, transportee en bytecode et interpretee cote C++ (System.add_coupled_source ; aucun
-          callback Python par cellule, MPI-safe)."""
-        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+        - NAMED object adc.Ionization / Collision / ThermalExchange -> fixed formula
+          (add_ionization / add_collision / add_thermal_exchange);
+        - CompiledCoupledSource (adc.dsl.CoupledSource(...).compile(...)) -> GENERIC source described in
+          formulas, carried as bytecode and interpreted on the C++ side (System.add_coupled_source; no
+          per-cell Python callback, MPI-safe)."""
+        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
 
         if isinstance(coupling, dsl.CompiledCoupledSource):
             self._s.add_coupled_source(coupling.in_blocks, coupling.in_roles, coupling.consts,
                                        coupling.out_blocks, coupling.out_roles, coupling.prog_ops,
                                        coupling.prog_args, coupling.prog_lens,
                                        getattr(coupling, "frequency", 0.0), coupling.name,
-                                       # Frequence PAR CELLULE mu(U) (vides = constante seule, cf.
-                                       # CoupledSource.frequency(Expr)). Forwardes a la frontiere C++.
+                                       # PER-CELL frequency mu(U) (empty = constant only, cf.
+                                       # CoupledSource.frequency(Expr)). Forwarded to the C++ boundary.
                                        getattr(coupling, "freq_prog_ops", []),
                                        getattr(coupling, "freq_prog_args", []))
         elif isinstance(coupling, Ionization):
@@ -1789,114 +1786,114 @@ class System:
         elif isinstance(coupling, ThermalExchange):
             self.add_thermal_exchange(coupling.a, coupling.b, coupling.rate)
         else:
-            raise TypeError("add_coupling attend adc.Ionization / Collision / ThermalExchange ou un "
+            raise TypeError("add_coupling expects adc.Ionization / Collision / ThermalExchange or a "
                             "CompiledCoupledSource (adc.dsl.CoupledSource(...).compile(...))")
 
     def block_names(self):
-        """Noms des blocs ajoutes, dans l'ordre (utile a un integrateur Python).
+        """Names of the added blocks, in order (useful for a Python integrator).
 
-        Delegue au registre de blocs C++ (source unique), donc inclut les blocs charges via
-        add_dynamic_block (.so JIT) et add_compiled_block (.so AOT), pas seulement add_block.
+        Delegates to the C++ block registry (single source), so it includes the blocks loaded via
+        add_dynamic_block (.so JIT) and add_compiled_block (.so AOT), not only add_block.
         """
         return list(self._s.block_names())
 
     @staticmethod
     def abi_key():
-        """Cle d'ABI du module (compilateur, standard C++, signature des en-tetes adc). Comparee a
-        celle d'un loader natif par add_native_block. Exposee aussi en tant qu'attribut de classe (le
-        delegue __getattr__ ne couvre que les instances), donc adc.System.abi_key() fonctionne."""
+        """Module ABI key (compiler, C++ standard, signature of the adc headers). Compared to
+        that of a native loader by add_native_block. Also exposed as a class attribute (the
+        __getattr__ delegate only covers instances), so adc.System.abi_key() works."""
         return _System.abi_key()
 
     def set_primitive_state(self, name, **prims):
-        """Initialise un bloc depuis ses variables PRIMITIVES, nommees (rho/u/v/p ...) :
+        """Initialize a block from its PRIMITIVE variables, named (rho/u/v/p ...):
 
             sim.set_primitive_state("electrons", rho=rho0, u=u0, v=v0, p=p0)
 
-        Chaque primitive est un tableau (n, n). Les noms attendus sont ceux de
-        variable_names(name, "primitive") (l'ordre du modele du bloc). Le tableau (ncomp, n, n) est
-        assemble dans cet ordre, puis CONVERTI en variables conservatives par le modele du bloc (cote
-        C++ : compressible E = p/(g-1) + 1/2 rho|v|^2 ; isotherme rho u ; scalaire identite) et ecrit
-        dans l'etat. Pendant ergonomique de set_density (qui ne pose que la densite, reste au repos).
+        Each primitive is an (n, n) array. The expected names are those of
+        variable_names(name, "primitive") (the order of the block model). The (ncomp, n, n) array is
+        assembled in that order, then CONVERTED to conservative variables by the block model (on the
+        C++ side: compressible E = p/(g-1) + 1/2 rho|v|^2; isothermal rho u; scalar identity) and written
+        to the state. Ergonomic counterpart of set_density (which only sets the density, leaving it at rest).
 
-        Leve une erreur claire si un nom de primitive est inconnu pour le bloc, ou s'il en manque."""
-        import numpy as np  # local : numpy n'est requis que pour cet assemblage host
+        Raises a clear error if a primitive name is unknown for the block, or if one is missing."""
+        import numpy as np  # local: numpy is only required for this host assembly
 
         names = list(self._s.variable_names(name, "primitive"))
         n = self.nx()
         unknown = [k for k in prims if k not in names]
         if unknown:
             raise ValueError(
-                "set_primitive_state : primitive(s) inconnue(s) %r pour le bloc '%s' ; "
-                "primitives attendues : %r" % (unknown, name, names))
+                "set_primitive_state: unknown primitive(s) %r for block '%s'; "
+                "expected primitives: %r" % (unknown, name, names))
         missing = [k for k in names if k not in prims]
         if missing:
             raise ValueError(
-                "set_primitive_state : primitive(s) manquante(s) %r pour le bloc '%s' ; "
-                "fournir toutes les primitives : %r" % (missing, name, names))
-        # Assemble (ncomp, n, n) dans l'ORDRE du modele (primitive_vars), pas l'ordre des kwargs.
+                "set_primitive_state: missing primitive(s) %r for block '%s'; "
+                "provide all the primitives: %r" % (missing, name, names))
+        # Assemble (ncomp, n, n) in the model ORDER (primitive_vars), not the kwargs order.
         prim = np.empty((len(names), n, n), dtype=np.float64)
         for c, nm in enumerate(names):
             arr = np.asarray(prims[nm], dtype=np.float64)
             if arr.shape != (n, n):
                 raise ValueError(
-                    "set_primitive_state : primitive '%s' de forme %r, attendu (%d, %d)"
+                    "set_primitive_state: primitive '%s' of shape %r, expected (%d, %d)"
                     % (nm, tuple(arr.shape), n, n))
             prim[c] = arr
         self._s.set_primitive_state(name, prim)
 
     def get_primitive_state(self, name):
-        """Lit l'etat conservatif d'un bloc et le rend en variables PRIMITIVES (diagnostic) :
+        """Read the conservative state of a block and return it in PRIMITIVE variables (diagnostic):
 
             P = sim.get_primitive_state("electrons")   # {"rho": ..., "u": ..., "v": ..., "p": ...}
 
-        Renvoie un dict {nom_primitive: tableau (n, n)} dans l'ordre de variable_names(name,
-        "primitive"). Inverse de set_primitive_state (round-trip exact a la precision machine, la
-        conversion cons <-> prim du modele etant consistante)."""
+        Returns a dict {primitive_name: array (n, n)} in the order of variable_names(name,
+        "primitive"). Inverse of set_primitive_state (exact round-trip to machine precision, the
+        model cons <-> prim conversion being consistent)."""
         names = list(self._s.variable_names(name, "primitive"))
         prim = self._s.get_primitive_state(name)  # (ncomp, n, n)
         return {nm: prim[c] for c, nm in enumerate(names)}
 
     def check_model(self, block, raise_on_error=True, rtol=1e-8, atol=1e-10):
-        """Verification RUNTIME generique d'un bloc installe (audit 2026-06, chantier 6) : controle
-        sur l'ETAT COURANT du bloc (quel que soit le backend : natif compose, .so JIT/AOT/production) :
+        """Generic RUNTIME verification of an installed block (audit 2026-06, work item 6): check
+        on the CURRENT STATE of the block (whatever the backend: native composed, .so JIT/AOT/production):
 
-        - etat U fini ;
-        - residu -div F + S fini (exerce flux + source + reconstruction de bout en bout) ;
-        - positivite des composantes a role Density (via variable_roles) ;
-        - positivite de la primitive de role Pressure / nommee 'p' (via get_primitive_state) ;
-        - round-trip cons -> prim -> cons ~= identite (conversions du modele coherentes ;
-          l'etat est SAUVE puis RESTAURE, le bloc n'est pas modifie).
+        - finite state U;
+        - finite residual -div F + S (exercises flux + source + reconstruction end to end);
+        - positivity of the components with role Density (via variable_roles);
+        - positivity of the primitive with role Pressure / named 'p' (via get_primitive_state);
+        - round-trip cons -> prim -> cons ~= identity (model conversions consistent;
+          the state is SAVED then RESTORED, the block is not modified).
 
-        Pendant RUNTIME de dsl.Model.check_model (qui verifie les FORMULES avant compilation).
-        @return dict {"ok", "failures", "block"} ; raise_on_error=True (defaut) leve ValueError."""
+        RUNTIME counterpart of dsl.Model.check_model (which checks the FORMULAS before compilation).
+        @return dict {"ok", "failures", "block"}; raise_on_error=True (default) raises ValueError."""
         import numpy as np
         failures = []
         nv = self._s.n_vars(block)
         U = np.asarray(self._s.get_state(block), dtype=float)
         if not np.all(np.isfinite(U)):
-            failures.append("etat U non fini")
-        self._s.solve_fields()  # aux a jour : le residu lit phi / grad phi
+            failures.append("state U not finite")
+        self._s.solve_fields()  # aux up to date: the residual reads phi / grad phi
         R = np.asarray(self._s.eval_rhs(block), dtype=float)
         if not np.all(np.isfinite(R)):
-            failures.append("residu -div F + S non fini (flux/source/reconstruction)")
+            failures.append("residual -div F + S not finite (flux/source/reconstruction)")
         ncell = U.size // max(nv, 1)
         Uc = U.reshape(nv, ncell)
         roles = [r.lower() for r in self._s.variable_roles(block, "conservative")]
         names = list(self._s.variable_names(block, "conservative"))
         for i, r in enumerate(roles):
             if r == "density" and not bool(np.all(Uc[i] > 0)):
-                failures.append("composante '%s' (role Density) non strictement positive" % names[i])
+                failures.append("component '%s' (role Density) not strictly positive" % names[i])
         prim_roles = [r.lower() for r in self._s.variable_roles(block, "primitive")]
         prim_names = list(self._s.variable_names(block, "primitive"))
         try:
             P = np.asarray(self._s.get_primitive_state(block), dtype=float)
             if not np.all(np.isfinite(P)):
-                failures.append("etat primitif non fini (to_primitive)")
+                failures.append("primitive state not finite (to_primitive)")
             else:
                 for i, (r, nm) in enumerate(zip(prim_roles, prim_names)):
                     if (r == "pressure" or nm == "p") and not bool(np.all(P[i] > 0)):
-                        failures.append("primitive '%s' (pression) non strictement positive" % nm)
-                # round-trip cons -> prim -> cons : etat sauve puis restaure (aucune mutation nette).
+                        failures.append("primitive '%s' (pressure) not strictly positive" % nm)
+                # round-trip cons -> prim -> cons: state saved then restored (no net mutation).
                 U0 = U.copy()
                 self._s.set_primitive_state(block, P)
                 U1 = np.asarray(self._s.get_state(block), dtype=float)
@@ -1904,57 +1901,57 @@ class System:
                 if not np.allclose(U1, U0, rtol=rtol, atol=atol):
                     err = float(np.max(np.abs(U1 - U0)))
                     failures.append("round-trip to_conservative(to_primitive(U)) != U "
-                                    "(ecart max %g : conversions du modele incoherentes)" % err)
-        except RuntimeError as ex:  # bloc sans conversions (chemins .so anterieurs) : on le signale
-            failures.append("conversions cons<->prim indisponibles sur ce bloc (%s)" % ex)
+                                    "(max gap %g: inconsistent model conversions)" % err)
+        except RuntimeError as ex:  # block without conversions (earlier .so paths): report it
+            failures.append("cons<->prim conversions unavailable on this block (%s)" % ex)
         report = {"ok": not failures, "failures": failures, "block": block}
         if failures and raise_on_error:
-            raise ValueError("System.check_model('%s') : %d echec(s) :\n  - %s"
+            raise ValueError("System.check_model('%s'): %d failure(s):\n  - %s"
                              % (block, len(failures), "\n  - ".join(failures)))
         return report
 
     # ------------------------------------------------------------------
-    # SORTIES / CHECKPOINT / RESTART v1 (audit 2026-06, IO ; cf. docs/IO_CHECKPOINT_PLAN.md).
-    # Python pur (zero changement du chemin chaud C++), mono-rang ; HDF5 agrege/parallele et AMR =
-    # PR-IO-3. Ecriture ATOMIQUE (fichier .tmp puis os.replace : un crash en cours d'ecriture ne
-    # corrompt jamais un checkpoint precedent).
+    # OUTPUTS / CHECKPOINT / RESTART v1 (audit 2026-06, IO; cf. docs/IO_CHECKPOINT_PLAN.md).
+    # Pure Python (zero change to the C++ hot path), single-rank; HDF5 aggregated/parallel and AMR =
+    # PR-IO-3. ATOMIC write (.tmp file then os.replace: a crash mid-write never
+    # corrupts a previous checkpoint).
     # ------------------------------------------------------------------
     def write(self, path, format="vtk", step=None, fields=None, parallel=False):
-        """SORTIE DE VISUALISATION : ecrit l'etat courant dans un fichier ouvert (ParaView/numpy).
+        """VISUALIZATION OUTPUT: writes the current state to an opened file (ParaView/numpy).
 
-        - ``format="vtk"`` : ImageData .vti ASCII (cartesien ; ouvert par ParaView / VisIt) -- une
-          CellData par variable conservative de chaque bloc + le potentiel phi.
-        - ``format="npz"`` : np.savez compresse (tout backend / toute geometrie) -- etats par bloc,
-          noms/roles, phi, t, macro_step, grille.
-        - @p step : suffixe numerote (path_000123.vti) ; None = path brut + extension.
-        - @p fields : sous-ensemble de blocs a ecrire (None = tous).
-        - @p parallel : ecriture HDF5 PARALLELE par hyperslabs (opt-in, format='hdf5' SEULEMENT). Defaut
-          False = chemin gather rang-0 ci-dessous, STRICTEMENT inchange. True = chaque rang ecrit SES
-          boites dans un fichier unique via h5py(mpio) -- exige h5py compile MPI + mpi4py (sinon erreur
-          CLAIRE avec remede, jamais d'ecriture silencieuse degradee). Cf. _write_hdf5_parallel.
-        - @return le chemin ecrit.
+        - ``format="vtk"``: ImageData .vti ASCII (Cartesian; opened by ParaView / VisIt) -- one
+          CellData per conservative variable of each block + the potential phi.
+        - ``format="npz"``: compressed np.savez (any backend / any geometry) -- per-block states,
+          names/roles, phi, t, macro_step, grid.
+        - @p step: numbered suffix (path_000123.vti); None = raw path + extension.
+        - @p fields: subset of blocks to write (None = all).
+        - @p parallel: PARALLEL HDF5 write by hyperslabs (opt-in, format='hdf5' ONLY). Default
+          False = rank-0 gather path below, STRICTLY unchanged. True = each rank writes ITS
+          boxes into a single file via h5py(mpio) -- requires h5py built with MPI + mpi4py (otherwise a
+          CLEAR error with a remedy, never a silent degraded write). Cf. _write_hdf5_parallel.
+        - @return the written path.
 
-        MULTI-RANGS (MPI np>1) : les champs sont rassembles via les accesseurs GLOBAUX collectifs
-        (state_global / potential_global -- chaque rang DOIT donc appeler write), puis SEUL le rang 0
-        ecrit le fichier (un fichier unique, identique au mono-rang). Le System etant mono-box (une
-        box couvrant tout le domaine, sur le rang 0), le gather est exact. Les autres rangs rendent le
-        chemin sans I/O. HDF5 PARALLELE (hyperslabs par rang) : parallel=True (cf. _write_hdf5_parallel ;
-        vrai parallelisme seulement en MULTI-BOX, le System cartesien etant mono-box)."""
+        MULTI-RANK (MPI np>1): the fields are gathered via the GLOBAL collective accessors
+        (state_global / potential_global -- every rank MUST therefore call write), then ONLY rank 0
+        writes the file (a single file, identical to single-rank). The System being mono-box (one
+        box covering the whole domain, on rank 0), the gather is exact. The other ranks return the
+        path without I/O. PARALLEL HDF5 (per-rank hyperslabs): parallel=True (cf. _write_hdf5_parallel;
+        real parallelism only in MULTI-BOX, the Cartesian System being mono-box)."""
         import os
         import numpy as np
         from . import _adc
         if parallel and format != "hdf5":
             raise ValueError(
-                "write : parallel=True n'est supporte que pour format='hdf5' (ecriture par "
-                "hyperslabs) ; format=%r passe par le chemin gather rang-0 (parallel=False)."
+                "write: parallel=True is only supported for format='hdf5' (write by "
+                "hyperslabs); format=%r goes through the rank-0 gather path (parallel=False)."
                 % (format,))
         rank0 = (_adc.my_rank() == 0)
         blocks = [b for b in self._s.block_names() if fields is None or b in fields]
         suffix = ("_%06d" % int(step)) if step is not None else ""
         nxv, nyv = self._s.nx(), self._s.ny()
         if format == "npz":
-            # Gather COLLECTIF (tous les rangs) AVANT la garde rang-0 : state_global / potential_global
-            # font un all_reduce interne et doivent etre appeles par chaque rang.
+            # COLLECTIVE gather (all ranks) BEFORE the rank-0 guard: state_global / potential_global
+            # do an internal all_reduce and must be called by each rank.
             out = {"t": self._s.time(), "macro_step": self._s.macro_step(),
                    "nx": nxv, "ny": nyv, "blocks": np.array(blocks)}
             for b in blocks:
@@ -1966,7 +1963,7 @@ class System:
             out["phi"] = np.asarray(self._s.potential_global(), dtype=np.float64).reshape(nyv, nxv)
             target = path + suffix + ".npz"
             if not rank0:
-                return target  # seul le rang 0 ecrit le fichier (gather deja fait collectivement)
+                return target  # only rank 0 writes the file (gather already done collectively)
             tmp = target + ".tmp"
             with open(tmp, "wb") as f:
                 np.savez_compressed(f, **out)
@@ -1983,7 +1980,7 @@ class System:
             arrays.append(np.asarray(self._s.potential_global(), dtype=np.float64).reshape(nyv, nxv))
             names.append("phi")
             if not rank0:
-                return target  # gather collectif fait ci-dessus ; seul le rang 0 ecrit
+                return target  # collective gather done above; only rank 0 writes
             lines = ['<?xml version="1.0"?>',
                      '<VTKFile type="ImageData" version="0.1" byte_order="LittleEndian">',
                      '  <ImageData WholeExtent="0 %d 0 %d 0 0" Origin="0 0 0" '
@@ -2002,27 +1999,27 @@ class System:
             return target
         if format == "hdf5":
             if parallel:
-                # HDF5 PARALLELE par hyperslabs (PR-IO-3, opt-in) : chaque rang ecrit SES boites dans
-                # un fichier unique (h5py mpio), pas de gather global. Chemin SEPARE -- le chemin serie
-                # ci-dessous reste STRICTEMENT inchange.
+                # PARALLEL HDF5 by hyperslabs (PR-IO-3, opt-in): each rank writes ITS boxes into
+                # a single file (h5py mpio), no global gather. SEPARATE path -- the serial path
+                # below stays STRICTLY unchanged.
                 return self._write_hdf5_parallel(path + suffix + ".h5", blocks, nxv, nyv)
-            # HDF5 AGREGE v1 (vague 3, PR-IO-2 du plan) : un fichier unique, un groupe par bloc,
-            # attributs pour l'horloge/grille. Multi-rangs : gather collectif (state_global /
-            # potential_global) puis ecriture rang 0 (un fichier unique). HDF5 PARALLELE (hyperslabs
-            # par rang) = parallel=True (branche ci-dessus). h5py optionnel : absent -> erreur claire.
-            # Gather COLLECTIF (tous rangs) AVANT la garde rang-0.
+            # AGGREGATED HDF5 v1 (wave 3, plan PR-IO-2): a single file, one group per block,
+            # attributes for the clock/grid. Multi-rank: collective gather (state_global /
+            # potential_global) then rank-0 write (a single file). PARALLEL HDF5 (per-rank
+            # hyperslabs) = parallel=True (branch above). h5py optional: absent -> clear error.
+            # COLLECTIVE gather (all ranks) BEFORE the rank-0 guard.
             states = {b: np.asarray(self._s.state_global(b), dtype=np.float64).reshape(
                 self._s.n_vars(b), nyv, nxv) for b in blocks}
             phi_g = np.asarray(self._s.potential_global(), dtype=np.float64).reshape(nyv, nxv)
             target = path + suffix + ".h5"
             if not rank0:
-                return target  # seul le rang 0 ecrit le fichier
+                return target  # only rank 0 writes the file
             try:
                 import h5py
             except ImportError:
                 raise RuntimeError(
-                    "write(format='hdf5') : h5py absent (pip/conda install h5py) ; "
-                    "utiliser format='npz' (equivalent, sans dependance) en attendant.")
+                    "write(format='hdf5'): h5py missing (pip/conda install h5py); "
+                    "use format='npz' (equivalent, no dependency) in the meantime.")
             tmp = target + ".tmp"
             with h5py.File(tmp, "w") as f:
                 f.attrs["t"] = self._s.time()
@@ -2040,147 +2037,147 @@ class System:
                 f.create_dataset("phi", data=phi_g, compression="gzip")
             os.replace(tmp, target)
             return target
-        raise ValueError("write : format 'vtk' | 'npz' | 'hdf5' (recu %r)" % (format,))
+        raise ValueError("write: format 'vtk' | 'npz' | 'hdf5' (received %r)" % (format,))
 
     def _write_hdf5_parallel(self, target, blocks, nxv, nyv):
-        """ECRITURE HDF5 PARALLELE par hyperslabs (write(format='hdf5', parallel=True)) -- PR-IO-3.
+        """PARALLEL HDF5 WRITE by hyperslabs (write(format='hdf5', parallel=True)) -- PR-IO-3.
 
-        CHEMIN OPT-IN, separe du chemin serie (gather rang-0) qui reste intouche. Au lieu de rassembler
-        tout le champ sur le rang 0, chaque rang ECRIT SES BOITES dans un fichier UNIQUE ouvert en
-        collectif (h5py driver='mpio'). Les datasets globaux (ncomp, ny, nx) par bloc + phi (ny, nx)
-        sont crees COLLECTIVEMENT, les metadonnees (t, macro_step, nx, ny, abi_key, noms/roles) ecrites
-        collectivement, puis chaque rang ecrit ses hyperslabs dset[:, jlo:jhi+1, ilo:ihi+1] en I/O
-        INDEPENDANTE (boites disjointes ; un rang sans box n'ecrit rien).
+        OPT-IN PATH, separate from the serial path (rank-0 gather) which stays untouched. Instead of
+        gathering the whole field on rank 0, each rank WRITES ITS BOXES into a SINGLE file opened
+        collectively (h5py driver='mpio'). The global datasets (ncomp, ny, nx) per block + phi (ny, nx)
+        are created COLLECTIVELY, the metadata (t, macro_step, nx, ny, abi_key, names/roles) written
+        collectively, then each rank writes its hyperslabs dset[:, jlo:jhi+1, ilo:ihi+1] in INDEPENDENT
+        I/O (disjoint boxes ; a rank with no box writes nothing).
 
-        VRAI PARALLELISME = MULTI-BOX seulement. Le System cartesien est MONO-BOX (une box couvrant le
-        domaine, sur le rang 0) : sous np>1 le rang 0 ecrit l'unique box et les autres rangs ne portent
-        aucune box -- le gain hyperslab apparait sur une geometrie multi-box (cf. AMR, ADC-65). La
-        mecanique reste CORRECTE dans le cas general (iteration sur tous les fabs locaux). phi est
-        resolu/rassemble COLLECTIVEMENT (potential_global, all_reduce) puis ecrit par le seul rang 0
-        (champ scalaire complet, dataset contigu).
+        TRUE PARALLELISM = MULTI-BOX only. The cartesian System is MONO-BOX (one box covering the
+        domain, on rank 0) : under np>1 rank 0 writes the single box and the other ranks carry no
+        box -- the hyperslab gain appears on a multi-box geometry (cf. AMR, ADC-65). The mechanics
+        stay CORRECT in the general case (iteration over all local fabs). phi is solved/gathered
+        COLLECTIVELY (potential_global, all_reduce) then written by rank 0 alone (full scalar field,
+        contiguous dataset).
 
-        DATASETS CONTIGUS (pas de gzip) : le HDF5 parallele n'autorise pas l'ecriture independante de
-        datasets chunk-filtres. Le chemin serie garde gzip ; les VALEURS relues sont identiques champ a
-        champ (parallel=True sous np=1 == parallel=False, verifie par test_hdf5_parallel).
+        CONTIGUOUS DATASETS (no gzip) : parallel HDF5 does not allow independent writes to
+        chunk-filtered datasets. The serial path keeps gzip ; the re-read VALUES are identical field by
+        field (parallel=True under np=1 == parallel=False, verified by test_hdf5_parallel).
 
-        JAMAIS SILENCIEUX : h5py absent, h5py sans MPI, ou mpi4py absent -> RuntimeError avec remede
-        (installer h5py compile MPI + mpi4py, ou parallel=False)."""
+        NEVER SILENT : h5py absent, h5py without MPI, or mpi4py absent -> RuntimeError with remedy
+        (install h5py built with MPI + mpi4py, or parallel=False)."""
         import os
         import numpy as np
         from . import _adc
-        # h5py D'ABORD, PUIS le test du support MPI : un h5py present mais SANS MPI doit donner
-        # l'erreur ciblee (remede), independamment de la presence de mpi4py.
+        # h5py FIRST, THEN the MPI support test : an h5py present but WITHOUT MPI must give
+        # the targeted error (remedy), independently of whether mpi4py is present.
         try:
             import h5py
         except ImportError:
             raise RuntimeError(
-                "write(format='hdf5', parallel=True) : h5py absent. Remede : installer h5py compile "
-                "MPI (HDF5 parallele), ou parallel=False (gather global + ecriture rang-0).")
+                "write(format='hdf5', parallel=True) : h5py absent. Remedy : install h5py built with "
+                "MPI (parallel HDF5), or parallel=False (global gather + rank-0 write).")
         if not h5py.get_config().mpi:
             raise RuntimeError(
-                "write(format='hdf5', parallel=True) : h5py present mais SANS support MPI "
-                "(h5py.get_config().mpi == False). Remede : installer h5py compile MPI (HDF5 "
-                "parallele), ou parallel=False (gather global + ecriture rang-0).")
+                "write(format='hdf5', parallel=True) : h5py present but WITHOUT MPI support "
+                "(h5py.get_config().mpi == False). Remedy : install h5py built with MPI (parallel "
+                "HDF5), or parallel=False (global gather + rank-0 write).")
         try:
             from mpi4py import MPI
         except ImportError:
             raise RuntimeError(
-                "write(format='hdf5', parallel=True) : mpi4py absent (requis pour l'ouverture mpio). "
-                "Remede : installer mpi4py, ou parallel=False (gather global + ecriture rang-0).")
-        # Garde-fou : module _adc construit AVANT les accesseurs locaux (build anterieur a ADC-66).
+                "write(format='hdf5', parallel=True) : mpi4py absent (required to open in mpio). "
+                "Remedy : install mpi4py, or parallel=False (global gather + rank-0 write).")
+        # Guard : _adc module built BEFORE the local accessors (build prior to ADC-66).
         if not hasattr(self._s, "local_boxes"):
             raise RuntimeError(
-                "write(format='hdf5', parallel=True) : le module _adc charge n'expose pas "
-                "local_boxes/local_state (build anterieur a l'ecriture par hyperslabs). Remede : "
-                "reconstruire adc_cpp, ou parallel=False.")
+                "write(format='hdf5', parallel=True) : the loaded _adc module does not expose "
+                "local_boxes/local_state (build prior to hyperslab writes). Remedy : "
+                "rebuild adc_cpp, or parallel=False.")
         comm = MPI.COMM_WORLD
         rank0 = (_adc.my_rank() == 0)
-        # phi : resolu + rassemble COLLECTIVEMENT (tous rangs ; potential_global fait l'all_reduce),
-        # ecrit ensuite par le seul rang 0 (champ scalaire global, dataset contigu).
+        # phi : solved + gathered COLLECTIVELY (all ranks ; potential_global does the all_reduce),
+        # then written by rank 0 alone (global scalar field, contiguous dataset).
         phi_g = np.asarray(self._s.potential_global(), dtype=np.float64).reshape(nyv, nxv)
-        # Descripteurs identiques sur tous les rangs (composition partagee) : pre-calcules pour des
-        # operations collectives coherentes (create_dataset / attrs).
+        # Descriptors identical on all ranks (shared composition) : pre-computed for coherent
+        # collective operations (create_dataset / attrs).
         ncomp = {b: self._s.n_vars(b) for b in blocks}
         names = {b: [s.encode() for s in self._s.variable_names(b, "conservative")] for b in blocks}
         roles = {b: [s.encode() for s in self._s.variable_roles(b, "conservative")] for b in blocks}
         tmp = target + ".tmp"
-        # Ouverture COLLECTIVE (tous les rangs ouvrent le meme fichier via mpio).
+        # COLLECTIVE open (all ranks open the same file via mpio).
         f = h5py.File(tmp, "w", driver="mpio", comm=comm)
         try:
-            # Metadonnees collectives -- identiques au chemin serie.
+            # Collective metadata -- identical to the serial path.
             f.attrs["t"] = self._s.time()
             f.attrs["macro_step"] = self._s.macro_step()
             f.attrs["nx"] = nxv
             f.attrs["ny"] = nyv
             f.attrs["abi_key"] = abi_key()
             for b in blocks:
-                g = f.create_group(b)  # collectif
-                # Dataset GLOBAL (ncomp, ny, nx) CONTIGU (pas de gzip : ecriture independante interdite
-                # sur dataset chunk-filtre en parallele).
-                dset = g.create_dataset("state", shape=(ncomp[b], nyv, nxv), dtype="f8")  # collectif
+                g = f.create_group(b)  # collective
+                # GLOBAL dataset (ncomp, ny, nx) CONTIGUOUS (no gzip : independent writes forbidden
+                # on a chunk-filtered dataset in parallel).
+                dset = g.create_dataset("state", shape=(ncomp[b], nyv, nxv), dtype="f8")  # collective
                 g.attrs["names"] = names[b]
                 g.attrs["roles"] = roles[b]
-                # Chaque rang ecrit SES boites locales en hyperslabs (I/O independante : boites
-                # disjointes, un rang sans box -> boucle vide). local_state rend deja (ncomp, bny, bnx).
+                # Each rank writes ITS local boxes as hyperslabs (independent I/O : disjoint
+                # boxes, a rank with no box -> empty loop). local_state already returns (ncomp, bny, bnx).
                 for li, (ilo, jlo, ihi, jhi) in enumerate(self._s.local_boxes(b)):
                     dset[:, jlo:jhi + 1, ilo:ihi + 1] = np.asarray(
                         self._s.local_state(b, li), dtype=np.float64)
-            phi_d = f.create_dataset("phi", shape=(nyv, nxv), dtype="f8")  # collectif
+            phi_d = f.create_dataset("phi", shape=(nyv, nxv), dtype="f8")  # collective
             if rank0:
-                phi_d[...] = phi_g  # champ global deja rassemble : ecrit par le seul rang 0
+                phi_d[...] = phi_g  # global field already gathered : written by rank 0 alone
         finally:
-            f.close()  # collectif
-        comm.Barrier()  # tous les rangs ont ferme AVANT le rename atomique
+            f.close()  # collective
+        comm.Barrier()  # all ranks have closed BEFORE the atomic rename
         if rank0:
             os.replace(tmp, target)
-        comm.Barrier()  # le rename est visible (FS partage) avant tout retour
+        comm.Barrier()  # the rename is visible (shared FS) before any return
         return target
 
     def checkpoint(self, path, parallel=False):
-        """CHECKPOINT REDEMARRABLE v1 (npz) : etat COMPLET des blocs + horloge (t, macro_step --
-        OBLIGATOIRE pour la cadence stride) + grille + provenance (abi_key). CONTRAT (cf.
-        docs/IO_CHECKPOINT_PLAN.md) : restart NE reconstruit PAS la composition -- le script
-        utilisateur rejoue ses add_block/set_poisson/couplages puis appelle sim.restart(path), qui
-        VERIFIE la coherence (blocs, tailles) et leve une erreur explicite sinon. @return le chemin.
+        """RESTARTABLE CHECKPOINT v1 (npz) : COMPLETE block state + clock (t, macro_step --
+        MANDATORY for the stride cadence) + grid + provenance (abi_key). CONTRACT (cf.
+        docs/IO_CHECKPOINT_PLAN.md) : restart does NOT rebuild the composition -- the user
+        script replays its add_block/set_poisson/couplings then calls sim.restart(path), which
+        VERIFIES the consistency (blocks, sizes) and raises an explicit error otherwise. @return the path.
 
-        MULTI-RANGS (MPI np>1) : les etats sont rassembles par les accesseurs GLOBAUX collectifs
-        (state_global / potential_global -- tous les rangs DOIVENT appeler checkpoint), puis SEUL le
-        rang 0 ecrit le fichier UNIQUE (identique au mono-rang). Le couple checkpoint/restart reste
-        bit-identique sous np>1 (System mono-box : tout l'etat vit sur le rang 0, gather exact).
+        MULTI-RANK (MPI np>1) : the states are gathered by the collective GLOBAL accessors
+        (state_global / potential_global -- all ranks MUST call checkpoint), then ONLY
+        rank 0 writes the SINGLE file (identical to mono-rank). The checkpoint/restart pair stays
+        bit-identical under np>1 (mono-box System : all the state lives on rank 0, exact gather).
 
-        @p parallel : le checkpoint v1 reste TOUJOURS gather-rang-0 (format npz, pas HDF5). L'ecriture
-        par hyperslabs (parallel=True) ne s'applique qu'a la SORTIE de visualisation
-        write(format='hdf5') : un checkpoint npz n'a ni datasets HDF5 ni decoupage par boites. Passer
-        parallel=True leve donc une erreur EXPLICITE (jamais d'ecriture silencieuse degradee) : pour une
-        sortie parallele, utiliser write(format='hdf5', parallel=True) ; un checkpoint HDF5 parallele
-        redemarrable est un chantier ulterieur (PR-IO-3, cf. docs/IO_CHECKPOINT_PLAN.md)."""
+        @p parallel : the v1 checkpoint is ALWAYS rank-0 gather (npz format, not HDF5). The hyperslab
+        write (parallel=True) only applies to the visualization OUTPUT
+        write(format='hdf5') : an npz checkpoint has neither HDF5 datasets nor box partitioning. Passing
+        parallel=True therefore raises an EXPLICIT error (never a silently degraded write) : for a
+        parallel output, use write(format='hdf5', parallel=True) ; a restartable parallel HDF5
+        checkpoint is later work (PR-IO-3, cf. docs/IO_CHECKPOINT_PLAN.md)."""
         import os
         import numpy as np
         from . import _adc
         if parallel:
             raise NotImplementedError(
-                "checkpoint(parallel=True) : le checkpoint v1 est un npz gather-rang-0 (format non "
-                "HDF5, pas de decoupage par boites). L'ecriture par hyperslabs ne concerne que "
-                "write(format='hdf5', parallel=True) (sortie de visualisation). Un checkpoint HDF5 "
-                "parallele redemarrable reste a faire (PR-IO-3, docs/IO_CHECKPOINT_PLAN.md) ; pour "
-                "l'instant : checkpoint(parallel=False).")
+                "checkpoint(parallel=True) : the v1 checkpoint is a rank-0 gather npz (non "
+                "HDF5 format, no box partitioning). The hyperslab write only concerns "
+                "write(format='hdf5', parallel=True) (visualization output). A restartable parallel "
+                "HDF5 checkpoint remains to be done (PR-IO-3, docs/IO_CHECKPOINT_PLAN.md) ; for "
+                "now : checkpoint(parallel=False).")
         blocks = list(self._s.block_names())
         out = {"adc_checkpoint_version": 1,
                "t": self._s.time(), "macro_step": self._s.macro_step(),
                "nx": self._s.nx(), "ny": self._s.ny(),
                "abi_key": abi_key(), "blocks": np.array(blocks)}
-        # Gather COLLECTIF (tous rangs) AVANT la garde rang-0.
+        # COLLECTIVE gather (all ranks) BEFORE the rank-0 guard.
         for b in blocks:
             nv = self._s.n_vars(b)
             out["ncomp_" + b] = nv
             out["state_" + b] = np.asarray(self._s.state_global(b), dtype=np.float64)
             out["names_" + b] = np.array(list(self._s.variable_names(b, "conservative")))
-        # phi : warm start du multigrille (reprise BIT-IDENTIQUE) ; ETAT physique si
-        # gauss_policy="evolve" (phi n'y est plus re-derive de rho).
+        # phi : multigrid warm start (BIT-IDENTICAL restart) ; physical STATE if
+        # gauss_policy="evolve" (phi is no longer re-derived from rho there).
         out["phi"] = np.asarray(self._s.potential_global(), dtype=np.float64)
         target = path if path.endswith(".npz") else path + ".npz"
         if _adc.my_rank() != 0:
-            return target  # seul le rang 0 ecrit le checkpoint (gather deja fait)
+            return target  # only rank 0 writes the checkpoint (gather already done)
         tmp = target + ".tmp"
         with open(tmp, "wb") as f:
             np.savez_compressed(f, **out)
@@ -2188,37 +2185,37 @@ class System:
         return target
 
     def restart(self, path):
-        """REPREND un checkpoint v1 : VERIFIE la composition (memes blocs, memes tailles -- erreur
-        explicite sinon, jamais de reprise silencieusement fausse), restaure l'etat de chaque bloc
-        puis l'horloge (t, macro_step : la cadence stride reprend exactement). La COMPOSITION
-        (add_block / set_poisson / set_magnetic_field / couplages) doit avoir ete rejouee par le
-        script AVANT l'appel (contrat v1, cf. checkpoint).
+        """RESUMES a v1 checkpoint : VERIFIES the composition (same blocks, same sizes -- explicit
+        error otherwise, never a silently wrong resume), restores the state of each block
+        then the clock (t, macro_step : the stride cadence resumes exactly). The COMPOSITION
+        (add_block / set_poisson / set_magnetic_field / couplings) must have been replayed by the
+        script BEFORE the call (v1 contract, cf. checkpoint).
 
-        MULTI-RANGS (MPI np>1) : tous les rangs lisent le fichier (systeme de fichiers partage) et
-        appellent set_state / set_potential / set_clock. set_state / set_potential sont MPI-safe (le
-        rang proprietaire -- rang 0, mono-box -- ecrit, les autres font no-op) ; set_clock pose
-        l'horloge sur chaque rang. La reprise est donc bit-identique sous np>1."""
+        MULTI-RANK (MPI np>1) : all ranks read the file (shared file system) and
+        call set_state / set_potential / set_clock. set_state / set_potential are MPI-safe (the
+        owner rank -- rank 0, mono-box -- writes, the others are no-ops) ; set_clock sets
+        the clock on each rank. The resume is therefore bit-identical under np>1."""
         import numpy as np
         target = path if path.endswith(".npz") else path + ".npz"
         d = np.load(target, allow_pickle=False)
         if int(d["adc_checkpoint_version"]) != 1:
-            raise ValueError("restart : version de checkpoint %r non supportee (attendu 1)"
+            raise ValueError("restart : checkpoint version %r not supported (expected 1)"
                              % (d["adc_checkpoint_version"],))
         if int(d["nx"]) != self._s.nx() or int(d["ny"]) != self._s.ny():
-            raise ValueError("restart : grille du checkpoint (%d x %d) != systeme (%d x %d)"
+            raise ValueError("restart : checkpoint grid (%d x %d) != system (%d x %d)"
                              % (int(d["nx"]), int(d["ny"]), self._s.nx(), self._s.ny()))
         chk_blocks = [str(b) for b in d["blocks"]]
         cur_blocks = list(self._s.block_names())
         if chk_blocks != cur_blocks:
-            raise ValueError("restart : blocs du checkpoint %r != composition courante %r "
-                             "(rejouer la MEME composition avant restart)" % (chk_blocks, cur_blocks))
+            raise ValueError("restart : checkpoint blocks %r != current composition %r "
+                             "(replay the SAME composition before restart)" % (chk_blocks, cur_blocks))
         for b in chk_blocks:
             if int(d["ncomp_" + b]) != self._s.n_vars(b):
-                raise ValueError("restart : bloc '%s' a %d composantes dans le checkpoint, %d ici"
+                raise ValueError("restart : block '%s' has %d components in the checkpoint, %d here"
                                  % (b, int(d["ncomp_" + b]), self._s.n_vars(b)))
             self._s.set_state(b, np.asarray(d["state_" + b], dtype=np.float64))
-        # phi AVANT l'horloge : warm start du solveur restaure (reprise bit-identique ; etat
-        # physique en gauss_policy="evolve").
+        # phi BEFORE the clock : warm start of the restored solver (bit-identical restart ; physical
+        # state in gauss_policy="evolve").
         if "phi" in d:
             self._s.set_potential(np.asarray(d["phi"], dtype=np.float64).ravel())
         self._s.set_clock(float(d["t"]), int(d["macro_step"]))
@@ -2228,12 +2225,12 @@ class System:
 
 
 def capabilities():
-    """MATRICE OFFICIELLE des capacites par facade / geometrie / backend (audit 2026-06, vague 2).
+    """OFFICIAL MATRIX of capabilities by facade / geometry / backend (audit 2026-06, wave 2).
 
-    Source de verite UNIQUE consultable par les scripts et la doc (les audits ont montre que System,
-    AMR, polaire et les backends DSL divergeaient silencieusement). Les entrees refletent les GATES
-    reellement codees (make_block / dispatch_amr_* / block_builder_polar / dsl._BACKENDS) ; les
-    combinaisons hors matrice levent une erreur explicite cote C++ (jamais d'ignore silencieux).
+    SINGLE source of truth consultable by scripts and docs (the audits showed that System,
+    AMR, polar and the DSL backends diverged silently). The entries reflect the GATES
+    actually coded (make_block / dispatch_amr_* / block_builder_polar / dsl._BACKENDS) ; the
+    combinations outside the matrix raise an explicit error on the C++ side (never a silent ignore).
     """
     return {
         "riemann": {
@@ -2241,81 +2238,81 @@ def capabilities():
             "system_polar": ["rusanov", "hll"],
             "amr": ["rusanov", "hll", "hllc", "roe"],
             "notes": {
-                "rusanov": "generique minimal (max_wave_speed seul)",
-                "hll": "generique a ondes signees (model.wave_speeds ; DSL : m.wave_speeds(x=, y=) "
-                       "explicites SANS primitive 'p', ou chemin historique eigenvalues + 'p') ; "
-                       "polaire : eligible au fluide isotherme (IsothermalFluxPolar), pas a l'ExB "
-                       "scalaire (pas de wave_speeds) -- meme gate que le cartesien",
-                "hllc": "Euler 2D canonique (4 var + pression) OU capability modele "
-                        "HasHLLCStructure -- emise par le DSL via m.enable_hllc() (roles + 'p', "
-                        "y compris 3-var non Euler, scalaires passifs advectes)",
-                "roe": "Euler 2D gaz parfait canonique OU capability modele HasRoeDissipation "
-                       "-- DEUX voies DSL : (a) m.enable_roe() genere depuis les roles (roles + "
-                       "'p' : avec Energy = algebre canonique transcrite, sans Energy = "
-                       "c=sqrt(p/rho) moyenne Roe, scalaires passifs sur l'onde entropique) ; (b) "
-                       "m.roe_dissipation(x=, y=) FOURNIE par l'utilisateur (eigenstructure propre, "
-                       "left()/right() des deux etats, helper m.flux_jacobian auto-derive). Voies "
-                       "exclusives (un seul fournisseur du hook). has_roe couvre les deux",
+                "rusanov": "minimal generic (max_wave_speed only)",
+                "hll": "generic with signed waves (model.wave_speeds ; DSL : m.wave_speeds(x=, y=) "
+                       "explicit WITHOUT primitive 'p', or historical path eigenvalues + 'p') ; "
+                       "polar : eligible for the isothermal fluid (IsothermalFluxPolar), not for "
+                       "scalar ExB (no wave_speeds) -- same gate as the cartesian one",
+                "hllc": "canonical 2D Euler (4 var + pressure) OR model capability "
+                        "HasHLLCStructure -- emitted by the DSL via m.enable_hllc() (roles + 'p', "
+                        "including 3-var non Euler, passive advected scalars)",
+                "roe": "canonical 2D perfect-gas Euler OR model capability HasRoeDissipation "
+                       "-- TWO DSL paths : (a) m.enable_roe() generated from the roles (roles + "
+                       "'p' : with Energy = transcribed canonical algebra, without Energy = "
+                       "c=sqrt(p/rho) Roe average, passive scalars on the entropy wave) ; (b) "
+                       "m.roe_dissipation(x=, y=) PROVIDED by the user (own eigenstructure, "
+                       "left()/right() of the two states, helper m.flux_jacobian auto-derived). Paths "
+                       "exclusive (a single provider of the hook). has_roe covers both",
             },
         },
         "time": {
             "system": ["explicit (ssprk2|ssprk3)", "imex (= SourceImplicitBE)",
-                       "imexrk_ars222 (famille IMEX-RK, schema ARS(2,2,2), ordre 2 ; cartesien seul ; "
-                       "source pleinement implicite)",
+                       "imexrk_ars222 (IMEX-RK family, ARS(2,2,2) scheme, order 2 ; cartesian only ; "
+                       "fully implicit source)",
                        "split lie|strang + CondensedSchur"],
-            "amr": ["explicit (Euler avant par sous-pas)", "ssprk3 (ordre 3 + reflux par etage)",
+            "amr": ["explicit (forward Euler per substep)", "ssprk3 (order 3 + reflux per stage)",
                     "imex (= SourceImplicitBE)",
-                    "split lie|strang + CondensedSchur (mono-bloc, grossier)"],
-            "system_polar": ["explicit (ssprk2|ssprk3)", "split + CondensedSchur polaire"],
+                    "split lie|strang + CondensedSchur (mono-block, coarse)"],
+            "system_polar": ["explicit (ssprk2|ssprk3)", "split + polar CondensedSchur"],
             "newton_options": "options (max_iters/tol/fd_eps/damping/fail_policy) : System + AMR "
-                              "mono-bloc ET multi-blocs natif (loaders .so : rejet explicite) ; "
-                              "jacobien analytique via m.source_jacobian ; newton_diagnostics/"
-                              "newton_report : System + AMR multi-blocs natif (mono-bloc AMR et "
-                              "loaders .so : rejet explicite)",
+                              "mono-block AND native multi-block (.so loaders : explicit rejection) ; "
+                              "analytic jacobian via m.source_jacobian ; newton_diagnostics/"
+                              "newton_report : System + AMR native multi-block (mono-block AMR and "
+                              ".so loaders : explicit rejection)",
         },
         "stability_policy": {
             "system": ["transport (max_wave_speed | stability_speed)", "source_frequency",
                        "stability_dt", "coupled_source.frequency", "add_dt_bound (global, "
                        "all_reduce_min)", "last_dt_bound"],
             "amr": ["transport (max_wave_speed | stability_speed)", "source_frequency",
-                    "stability_dt", "coupled_source.frequency (multi-blocs)", "add_dt_bound",
+                    "stability_dt", "coupled_source.frequency (multi-block)", "add_dt_bound",
                     "last_dt_bound"],
             "system_polar": ["transport (max_wave_speed | stability_speed)", "source_frequency",
                              "stability_dt", "coupled_source.frequency", "add_dt_bound",
                              "last_dt_bound"],
         },
         "poisson": {
-            "system_cartesian": ["geometric_mg (paroi, eps(x), aniso, ecrante)",
-                                 "fft (periodique, n = 2^k, eps constant, mono-box)",
-                                 "fft_spectral (idem fft, symbole continu spectral)"],
-            "system_polar": ["polar direct (mono-rang, une box) -- REJET AMONT clair si theta_boxes>1"],
-            "amr": ["geometric_mg seulement ; rhs charge_density|composite"],
+            "system_cartesian": ["geometric_mg (wall, eps(x), aniso, screened)",
+                                 "fft (periodic, n = 2^k, constant eps, mono-box)",
+                                 "fft_spectral (same as fft, continuous spectral symbol)"],
+            "system_polar": ["polar direct (mono-rank, one box) -- clear UPSTREAM REJECT if theta_boxes>1"],
+            "amr": ["geometric_mg only ; rhs charge_density|composite"],
         },
         "geometry": {
-            "system_cartesian": "carre n x n ; mono-box (multi-box = AmrSystem ou MPI mono-box)",
-            "system_polar": "anneau (r, theta) global ; theta_boxes=1 mono-box (defaut) OU "
-                            "theta_boxes>1 decoupage en bandes theta (divise ntheta). MATRICE "
+            "system_cartesian": "square n x n ; mono-box (multi-box = AmrSystem or MPI mono-box)",
+            "system_polar": "ring (r, theta) global ; theta_boxes=1 mono-box (default) OR "
+                            "theta_boxes>1 split into theta bands (divides ntheta). MATRIX "
                             "multi-box (ADC-67) : TRANSPORT (assemble_rhs_polar + fill_ghosts "
-                            "collectif) multi-box OK ; Poisson polaire DIRECT mono-box only (rejet "
-                            "amont si theta_boxes>1) ; etage Schur tensoriel polaire multi-box. "
-                            "get/set state (et eval_rhs/density) reconstruisent l'anneau global "
-                            "multi-box ; mono-rang (le Poisson direct refuse MPI).",
-            "amr": "hierarchie de niveaux (BoxArray par niveau, regrid dynamique)",
+                            "collective) multi-box OK ; polar Poisson DIRECT mono-box only (upstream "
+                            "reject if theta_boxes>1) ; polar tensor Schur stage multi-box. "
+                            "get/set state (and eval_rhs/density) reconstruct the global ring "
+                            "multi-box ; mono-rank (the direct Poisson refuses MPI).",
+            "amr": "hierarchy of levels (BoxArray per level, dynamic regrid)",
         },
         "schur": {
-            "system_cartesian": "complet ; roles/champs configurables (density=/momentum=/energy=/"
-                                "magnetic_field=), krylov_tol/max_iters configurables",
-            "system_polar": "roles configurables (density=/momentum=/energy=, vague 3) ; "
-                            "magnetic_field fige B_z ; solveur multi-box C++, facade une box globale",
-            "amr": "mono-bloc ; roles + krylov_tol/max_iters configurables (vague 3, "
-                   "magnetic_field fige B_z grossier) ; mono-niveau complet + composite Phase 3c "
-                   "(2 niveaux, 1 patch fin mono-box, mono-rang) ; Phase 4 (multi-patch/"
-                   ">2 niveaux/MPI/multi-blocs) a faire",
+            "system_cartesian": "complete ; configurable roles/fields (density=/momentum=/energy=/"
+                                "magnetic_field=), configurable krylov_tol/max_iters",
+            "system_polar": "configurable roles (density=/momentum=/energy=, wave 3) ; "
+                            "magnetic_field freezes B_z ; multi-box C++ solver, facade one global box",
+            "amr": "mono-block ; roles + configurable krylov_tol/max_iters (wave 3, "
+                   "magnetic_field freezes coarse B_z) ; complete mono-level + composite Phase 3c "
+                   "(2 levels, 1 fine mono-box patch, mono-rank) ; Phase 4 (multi-patch/"
+                   ">2 levels/MPI/multi-block) to be done",
         },
         "backends_dsl": {
-            "default": "auto (ADC-63) : production si parite toolchain etablie (module charge + "
-                       "compilateur bake + en-tetes concordants), aot sinon ; raison posee sur "
-                       "CompiledModel.backend_auto_reason ; backend explicite = court-circuit",
+            "default": "auto (ADC-63) : production if toolchain parity established (module loaded + "
+                       "baked compiler + matching headers), aot otherwise ; reason set on "
+                       "CompiledModel.backend_auto_reason ; explicit backend = short-circuit",
             "prototype": {"adder": "add_dynamic_block", "riemann": ["rusanov"],
                           "limiter": ["none", "minmod", "vanleer"], "stride": False,
                           "evolve_false": False, "mpi": False, "amr": False},
@@ -2330,46 +2327,45 @@ def capabilities():
                            "stability_hooks": True},
         },
         "io": {
-            "write": ["vtk (.vti cartesien)", "npz",
-                      "hdf5 (h5py optionnel, agrege gather rang-0 par defaut)",
-                      "hdf5 parallele (write(parallel=True) : hyperslabs par rang via h5py mpio + "
-                      "mpi4py ; opt-in, erreur claire si h5py sans MPI ; vrai parallelisme en "
-                      "MULTI-BOX, System cartesien mono-box)",
-                      "AmrSystem.write npz/vtk (grossier + rectangles des patchs)"],
-            "checkpoint_restart": "v1 npz mono-rang/gather-rang-0 (System ; etats + phi + t/macro_step ; "
-                                  "composition rejouee par le script ; reprise bit-identique ; "
-                                  "checkpoint(parallel=True) leve, reste npz gather-rang-0) ; "
-                                  "AMR mono-bloc mono-rang regrid_every=0 (ADC-65 : etat conservatif "
-                                  "complet par niveau + phi warm-start + hierarchie imposee ; reprise "
-                                  "bit-identique) ; AMR multi-blocs / np>1 et CHECKPOINT HDF5 "
-                                  "parallele = suite (docs/IO_CHECKPOINT_PLAN.md ; rejets explicites)",
+            "write": ["vtk (.vti cartesian)", "npz",
+                      "hdf5 (h5py optional, rank-0 gather aggregation by default)",
+                      "parallel hdf5 (write(parallel=True) : hyperslabs per rank via h5py mpio + "
+                      "mpi4py ; opt-in, clear error if h5py without MPI ; true parallelism in "
+                      "MULTI-BOX, mono-box cartesian System)",
+                      "AmrSystem.write npz/vtk (coarse + patch rectangles)"],
+            "checkpoint_restart": "v1 npz mono-rank/rank-0 gather (System ; states + phi + t/macro_step ; "
+                                  "composition replayed by the script ; bit-identical resume ; "
+                                  "checkpoint(parallel=True) raises, stays rank-0 gather npz) ; "
+                                  "AMR mono-block mono-rank regrid_every=0 (ADC-65 : complete "
+                                  "conservative state per level + phi warm-start + imposed hierarchy ; resume "
+                                  "bit-identical) ; AMR multi-block / np>1 and parallel HDF5 "
+                                  "CHECKPOINT = follow-up (docs/IO_CHECKPOINT_PLAN.md ; explicit rejections)",
         },
         "amr_layout": {
-            "set_conservative_state": "mono-bloc ET multi-blocs natifs (vague 3 ; loaders .so : "
-                                      "rejet explicite)",
+            "set_conservative_state": "mono-block AND native multi-block (wave 3 ; .so loaders : "
+                                      "explicit rejection)",
         },
         "aux": {
             "canonical": "phi/grad_x/grad_y (base) + B_z (set_magnetic_field) + T_e "
-                         "(set_electron_temperature_from), liste fermee ADC_AUX_FIELDS/AUX_CANONICAL",
-            "named": "champs NOMMES par modele (ADC-70 phase 1) : m.aux_field('nom') -> composantes "
-                     ">= 5 (kAuxNamedBase) ; set_aux_field(bloc, nom, array) / aux_field(bloc, nom) sur "
-                     "System CARTESIEN ; au plus kAuxMaxExtra=4 par modele ; statiques, persistants",
-            "named_followups": "AMR (canal aux par niveau / regrid), polaire (validation), halos "
-                               "custom par champ, table nom->comp cote C++ Impl (resolution sans "
-                               "Python) = SUIVI ; phase 1 = System cartesien seulement",
+                         "(set_electron_temperature_from), closed list ADC_AUX_FIELDS/AUX_CANONICAL",
+            "named": "fields NAMED by model (ADC-70 phase 1) : m.aux_field('name') -> components "
+                     ">= 5 (kAuxNamedBase) ; set_aux_field(block, name, array) / aux_field(block, name) on "
+                     "CARTESIAN System ; at most kAuxMaxExtra=4 per model ; static, persistent",
+            "named_followups": "AMR (aux channel per level / regrid), polar (validation), custom halos "
+                               "per field, name->comp table on the C++ Impl side (resolution without "
+                               "Python) = FOLLOW-UP ; phase 1 = cartesian System only",
         },
     }
 
-
 def _reject_newton_amr_compiled(label, time):
-    """REJETTE les options/diagnostics Newton sur le chemin AMR COMPILE (.so loader, ABI plate
-    add_native_block / adc_install_native_amr) -- vague 3, solde. Cote NATIF (adc.Model(...)), les
-    OPTIONS Newton sont desormais cablees en mono-bloc (coupleur) ET multi-blocs (moteur), et le
-    RAPPORT newton_diagnostics en multi-blocs natif ; mais l'ABI plate du loader .so ne transporte NI
-    les options (newton_max_iters/rel_tol/abs_tol/fd_eps/damping/fail_policy) NI le rapport. Passees
-    via le loader, elles seraient prises a leurs defauts EN SILENCE (iters=2, pas de rapport). On les
-    REJETTE explicitement (meme esprit que le rejet stride/masque du chemin production AMR). Pour ces
-    parametres : AmrSystem.add_block (modele natif) ou add_compiled_model(AmrSystem&) en direct (C++)."""
+    """REJECTS Newton options/diagnostics on the COMPILED AMR path (.so loader, flat ABI
+    add_native_block / adc_install_native_amr) -- wave 3, settle. On the NATIVE side (adc.Model(...)), the
+    Newton OPTIONS are now wired in single-block (coupler) AND multi-block (engine), and the
+    newton_diagnostics REPORT in native multi-block ; but the flat ABI of the .so loader transports NEITHER
+    the options (newton_max_iters/rel_tol/abs_tol/fd_eps/damping/fail_policy) NOR the report. Passed
+    via the loader, they would be taken at their defaults SILENTLY (iters=2, no report). We
+    REJECT them explicitly (same spirit as the stride/mask rejection of the AMR production path). For these
+    parameters : AmrSystem.add_block (native model) or add_compiled_model(AmrSystem&) directly (C++)."""
     if (getattr(time, "newton_max_iters", 2) != 2
             or getattr(time, "newton_rel_tol", 0.0) != 0.0
             or getattr(time, "newton_abs_tol", 0.0) != 0.0
@@ -2378,33 +2374,33 @@ def _reject_newton_amr_compiled(label, time):
             or getattr(time, "newton_fail_policy", "none") != "none"
             or getattr(time, "newton_diagnostics", False)):
         raise ValueError(
-            "%s : les options/diagnostics Newton (newton_max_iters/rel_tol/abs_tol/fd_eps/damping/"
-            "fail_policy/diagnostics) ne sont pas transportes par le chemin production AMR (loader "
-            ".so, ABI plate add_native_block : ils seraient pris a leurs defauts en silence). "
-            "Utiliser AmrSystem.add_block (modele natif adc.Model(...)) ou add_compiled_model("
-            "AmrSystem&) en direct (C++)." % label)
+            "%s : the Newton options/diagnostics (newton_max_iters/rel_tol/abs_tol/fd_eps/damping/"
+            "fail_policy/diagnostics) are not transported by the AMR production path (loader "
+            ".so, flat ABI add_native_block : they would be taken at their defaults silently). "
+            "Use AmrSystem.add_block (native model adc.Model(...)) or add_compiled_model("
+            "AmrSystem&) directly (C++)." % label)
 
 
 class AmrSystem:
-    """Pendant raffine de System : un ou PLUSIEURS blocs portes sur une hierarchie AMR.
+    """Refined counterpart of System : one or SEVERAL blocks carried on an AMR hierarchy.
 
-    MONO-BLOC (1 add_block) : chemin AmrCouplerMP historique (regrid dynamique, reflux). MULTI-BLOCS
-    (>= 2 add_block) : N blocs co-localises sur UNE hierarchie AMR PARTAGEE (moteur AmrRuntime),
-    Poisson de SYSTEME a second membre SOMME co-localise (Sum_b q_b n_b), conservation PAR BLOC. Les
-    blocs peuvent avoir des SCHEMAS SPATIAUX DIFFERENTS, un TRAITEMENT TEMPOREL par bloc (explicit /
-    imex), du MULTIRATE (substeps / stride), des SOURCES COUPLEES inter-especes et le DSL production
-    multi-bloc. En multi-blocs le NOM du bloc indexe set_density(name) / mass(name) / density(name).
+    SINGLE-BLOCK (1 add_block) : historical AmrCouplerMP path (dynamic regrid, reflux). MULTI-BLOCK
+    (>= 2 add_block) : N blocks co-located on ONE SHARED AMR hierarchy (AmrRuntime engine),
+    SYSTEM Poisson with co-located SUMMED right-hand side (Sum_b q_b n_b), conservation PER BLOCK. The
+    blocks may have DIFFERENT SPATIAL SCHEMES, a per-block TEMPORAL TREATMENT (explicit /
+    imex), MULTIRATE (substeps / stride), COUPLED inter-species SOURCES and the multi-block production
+    DSL. In multi-block the block NAME indexes set_density(name) / mass(name) / density(name).
 
-    REGRID D'UNION DES TAGS (multi-blocs + regrid_every > 0) : la hierarchie partagee est re-grillee a
-    partir de l'UNION des tags de tous les blocs. Deux criteres se composent (OU cellule a cellule) :
+    UNION-OF-TAGS REGRID (multi-block + regrid_every > 0) : the shared hierarchy is re-gridded from
+    the UNION of the tags of all blocks. Two criteria compose (cell-by-cell OR) :
 
-    - DENSITE PAR BLOC (set_refinement(threshold)) : raffine la ou la densite (composante 0) d'un bloc
-      depasse threshold ;
-    - ``grad phi`` (set_phi_refinement(grad_threshold)) : raffine la ou la norme du gradient du potentiel
-      electrostatique depasse grad_threshold (bord d'anneau du diocotron). Desactive par defaut
-      (grad_threshold <= 0). MULTI-BLOCS uniquement.
+    - PER-BLOCK DENSITY (set_refinement(threshold)) : refine where the density (component 0) of a block
+      exceeds threshold ;
+    - ``grad phi`` (set_phi_refinement(grad_threshold)) : refine where the norm of the gradient of the
+      electrostatic potential exceeds grad_threshold (diocotron ring edge). Disabled by default
+      (grad_threshold <= 0). MULTI-BLOCK only.
 
-    regrid_every == 0 -> hierarchie FIGEE (regrid jamais appele, bit-identique).
+    regrid_every == 0 -> FROZEN hierarchy (regrid never called, bit-identical).
     """
 
     def __init__(self, config=None, **cfg_kw):
@@ -2412,27 +2408,27 @@ class AmrSystem:
             config = AmrSystemConfig()
             for k, v in cfg_kw.items():
                 setattr(config, k, v)
-        # cf. System.__init__ : _AmrSystem(config) declenche l'init Kokkos (lazy). set_threads
-        # n'a plus d'effet apres ce point.
+        # cf. System.__init__ : _AmrSystem(config) triggers the Kokkos init (lazy). set_threads
+        # has no more effect after this point.
         global _first_system_built
         _first_system_built = True
         self._s = _AmrSystem(config)
-        self._L = float(config.L)  # cote de [0, L]^2 (pour patch_rectangles : index -> physique)
-        # Cadence regrid (checkpoint/restart ADC-65) : une reprise BIT-IDENTIQUE exige regrid_every == 0
-        # (sinon le regrid post-restart re-divergerait la hierarchie). Memorise pour la garde de restart.
+        self._L = float(config.L)  # side of [0, L]^2 (for patch_rectangles : index -> physical)
+        # Regrid cadence (checkpoint/restart ADC-65) : a BIT-IDENTICAL resume requires regrid_every == 0
+        # (otherwise the post-restart regrid would re-diverge the hierarchy). Memorized for the restart guard.
         self._regrid_every = int(config.regrid_every)
 
     def patch_rectangles(self):
-        """Rectangles physiques (x0, y0, largeur, hauteur) des patchs fins courants, dans [0, L]^2.
+        """Physical rectangles (x0, y0, width, height) of the current fine patches, in [0, L]^2.
 
-        Convertit patch_boxes() (espace d'indices, coins inclusifs) en coordonnees physiques. Le pas
-        du niveau est dx = L / (n << level) (ratio 2 par niveau) ; un patch [ilo..ihi] x [jlo..jhi]
-        couvre (ihi - ilo + 1) cellules en x depuis x0 = ilo * dx (et de meme en y). Convention de
-        grille ne[j, i] -> indice 0 = x (i), indice 1 = y (j), coherent avec density() et un imshow
-        d'extent [0, L, 0, L]. Pratique pour tracer les VRAIS patchs (ex. matplotlib Rectangle) sans
-        reconstruire un proxy de densite. Renvoie une liste de (x0, y0, w, h), un par patch fin (tous
-        niveaux fins confondus). Query (entre les pas) : declenche le build paresseux comme
-        n_patches(), aucun cout sur le chemin chaud.
+        Converts patch_boxes() (index space, inclusive corners) into physical coordinates. The level
+        spacing is dx = L / (n << level) (ratio 2 per level) ; a patch [ilo..ihi] x [jlo..jhi]
+        covers (ihi - ilo + 1) cells in x from x0 = ilo * dx (and likewise in y). Grid convention
+        ne[j, i] -> index 0 = x (i), index 1 = y (j), consistent with density() and an imshow
+        with extent [0, L, 0, L]. Convenient to plot the REAL patches (e.g. matplotlib Rectangle) without
+        rebuilding a density proxy. Returns a list of (x0, y0, w, h), one per fine patch (all
+        fine levels combined). Query (between steps) : triggers the lazy build like
+        n_patches(), no cost on the hot path.
         """
         n, L = self._s.nx(), self._L
         rects = []
@@ -2442,55 +2438,55 @@ class AmrSystem:
         return rects
 
     def add_block(self, name, model, spatial=None, time=None):
-        """Installe un bloc evolue compose de BRIQUES NATIVES sur la hierarchie AMR partagee.
+        """Installs an evolved block composed of NATIVE BRICKS on the shared AMR hierarchy.
 
-        Pendant raffine de System.add_block. Le 1er add_block ouvre le chemin mono-bloc
-        (AmrCouplerMP : regrid dynamique, reflux) ; chaque add_block suivant co-localise un bloc de
-        plus sur LA MEME hierarchie (moteur AmrRuntime, Poisson de systeme a second membre somme).
-        En multi-blocs le nom indexe set_density(name) / mass(name) / density(name). Les arguments
-        sont marshales vers la facade C++ (AmrSystem::add_block), qui valide le bloc contre le modele.
-        Pour un modele DSL compile (.so) ou un aiguillage sur le type du modele, utiliser add_equation.
+        Refined counterpart of System.add_block. The 1st add_block opens the single-block path
+        (AmrCouplerMP : dynamic regrid, reflux) ; each subsequent add_block co-locates one more block
+        on THE SAME hierarchy (AmrRuntime engine, system Poisson with summed right-hand side).
+        In multi-block the name indexes set_density(name) / mass(name) / density(name). The arguments
+        are marshaled to the C++ facade (AmrSystem::add_block), which validates the block against the model.
+        For a compiled DSL model (.so) or a dispatch on the model type, use add_equation.
 
-        @param name nom unique du bloc.
-        @param model un adc.Model(...) (ModelSpec : briques natives composees).
-        @param spatial discretisation spatiale, un adc.Spatial(...) / adc.FiniteVolume(...) (defaut
-            minmod + rusanov + conservatif). Limiteur (none / minmod / vanleer / weno5 ; weno5 = 3
-            ghosts, le coupleur alloue ses niveaux a Limiter::n_ghost et le regrid herite n_grow()),
-            flux de Riemann (rusanov / hll / hllc / roe) et variables reconstruites
+        @param name unique name of the block.
+        @param model an adc.Model(...) (ModelSpec : composed native bricks).
+        @param spatial spatial discretization, an adc.Spatial(...) / adc.FiniteVolume(...) (default
+            minmod + rusanov + conservative). Limiter (none / minmod / vanleer / weno5 ; weno5 = 3
+            ghosts, the coupler allocates its levels at Limiter::n_ghost and the regrid inherits n_grow()),
+            Riemann flux (rusanov / hll / hllc / roe) and reconstructed variables
             (conservative / primitive).
-        @param time traitement temporel, un adc.Explicit (defaut) / adc.IMEX / adc.SourceImplicit.
-            Porte substeps, stride (multirate hold-then-catch-up), le masque implicite (implicit_vars
-            / implicit_roles) et les options Newton, threades vers le C++. newton_diagnostics est
-            cable en multi-blocs natif et rejete au build C++ en mono-bloc (le coupleur n'agrege pas
-            de rapport).
-        @throws TypeError si time est un adc.Split / adc.Strang (etage source condense par Schur) :
-            passer par add_equation(..., time=adc.Strang(...)) (chemin amr-schur).
-        @throws ValueError si spatial.positivity_floor > 0 : le limiteur de positivite (ADC-76) n'est
-            pas cable sur le chemin AMR (rejet explicite plutot qu'un floor ignore en silence).
+        @param time temporal treatment, an adc.Explicit (default) / adc.IMEX / adc.SourceImplicit.
+            Carries substeps, stride (multirate hold-then-catch-up), the implicit mask (implicit_vars
+            / implicit_roles) and the Newton options, threaded to the C++. newton_diagnostics is
+            wired in native multi-block and rejected at the C++ build in single-block (the coupler does not
+            aggregate a report).
+        @throws TypeError if time is an adc.Split / adc.Strang (Schur-condensed source stage) :
+            go through add_equation(..., time=adc.Strang(...)) (amr-schur path).
+        @throws ValueError if spatial.positivity_floor > 0 : the positivity limiter (ADC-76) is not
+            wired on the AMR path (explicit rejection rather than a silently ignored floor).
         """
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
-        # adc.Split / adc.Strang (etage source condense par Schur) n'est cable que par add_equation (qui
-        # branche set_source_stage + set_time_scheme APRES l'ajout du bloc) : on le rejette ICI plutot que
-        # de jouer le seul transport et de PERDRE la source en silence (meme garde que System.add_block).
+        # adc.Split / adc.Strang (Schur-condensed source stage) is only wired by add_equation (which
+        # connects set_source_stage + set_time_scheme AFTER adding the block) : we reject it HERE rather
+        # than playing only the transport and SILENTLY LOSING the source (same guard as System.add_block).
         if isinstance(time, Split):
             raise TypeError(
-                "AmrSystem.add_block : adc.Split / adc.Strang (etage source condense par Schur) n'est "
-                "supporte que par add_equation (qui branche l'etage source) ; utiliser "
+                "AmrSystem.add_block : adc.Split / adc.Strang (Schur-condensed source stage) is "
+                "supported only by add_equation (which connects the source stage) ; use "
                 "add_equation(..., time=adc.Strang(hyperbolic=adc.Explicit(...), "
                 "source=adc.CondensedSchur(...))).")
-        # positivity_floor (ADC-76) n'est PAS cable sur le chemin AMR (AmrSystem::add_block ne le
-        # transporte pas) : rejet explicite plutot qu'un floor ignore en silence.
+        # positivity_floor (ADC-76) is NOT wired on the AMR path (AmrSystem::add_block does not
+        # transport it) : explicit rejection rather than a silently ignored floor.
         if getattr(spatial, "positivity_floor", 0.0) > 0.0:
             raise ValueError(
-                "AmrSystem.add_block : positivity_floor non supporte sur le chemin AMR (chantier "
-                "separe) ; retirer positivity_floor ou utiliser le System uniforme.")
-        # On thread substeps/stride (multirate, capstone iv), le masque IMEX partiel, les OPTIONS Newton
-        # ET newton_diagnostics (vague 3, solde). Resolus / valides cote C++ (AmrSystem::add_block) contre
-        # les noms/roles du bloc : vides -> backward-Euler plein. Les options sont cablees en mono-bloc
-        # (coupleur) ET multi-blocs ; newton_diagnostics est cable en MULTI-BLOCS natif et REJETE au build
-        # C++ en mono-bloc (le coupleur n'agrege pas de rapport) -- pas de filtrage de facade ici (la
-        # facade ne connait pas encore le nombre total de blocs : la decision mono/multi est au build).
+                "AmrSystem.add_block : positivity_floor not supported on the AMR path (separate "
+                "work item) ; remove positivity_floor or use the uniform System.")
+        # We thread substeps/stride (multirate, capstone iv), the partial IMEX mask, the Newton OPTIONS
+        # AND newton_diagnostics (wave 3, settle). Resolved / validated on the C++ side (AmrSystem::add_block)
+        # against the block names/roles : empty -> full backward-Euler. The options are wired in single-block
+        # (coupler) AND multi-block ; newton_diagnostics is wired in native MULTI-BLOCK and REJECTED at the
+        # C++ build in single-block (the coupler does not aggregate a report) -- no facade-side filtering here
+        # (the facade does not yet know the total number of blocks : the single/multi decision is at build).
         self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                           getattr(time, "substeps", 1), getattr(time, "stride", 1),
                           getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
@@ -2503,16 +2499,16 @@ class AmrSystem:
                           getattr(time, "newton_diagnostics", False))
 
     def write(self, path, format="npz", step=None):
-        """SORTIE DE VISUALISATION AMR (vague 3) : champs GROSSIERS par bloc + phi + empreintes des
-        patchs fins. format='npz' (densites par bloc, phi, patch_rectangles, t) ou 'vtk' (.vti du
-        GROSSIER : densite par bloc + phi -- les patchs fins sont fournis en npz via leurs
-        rectangles, le multi-resolution VTK = PR-IO-3). @p step : suffixe numerote. @return chemin."""
+        """AMR VISUALIZATION OUTPUT (wave 3) : COARSE fields per block + phi + footprints of the
+        fine patches. format='npz' (per-block densities, phi, patch_rectangles, t) or 'vtk' (.vti of
+        the COARSE : per-block density + phi -- the fine patches are provided in npz via their
+        rectangles, the multi-resolution VTK = PR-IO-3). @p step : numbered suffix. @return path."""
         import os
         import numpy as np
         n = self._s.nx()
         suffix = ("_%06d" % int(step)) if step is not None else ""
-        # CHAQUE bloc, par son nom (binding AmrSystem::block_names, parite System) : en multi-blocs,
-        # density() sans nom ne lirait QUE le bloc 0 et perdrait les autres EN SILENCE.
+        # EACH block, by its name (binding AmrSystem::block_names, parity with System) : in multi-block,
+        # density() without a name would read ONLY block 0 and would lose the others SILENTLY.
         names = list(self._s.block_names())
         if not names:
             names = [""]
@@ -2557,46 +2553,46 @@ class AmrSystem:
                 f.write("\n".join(lines))
             os.replace(tmp, target)
             return target
-        raise ValueError("AmrSystem.write : format 'npz' | 'vtk' (recu %r)" % (format,))
+        raise ValueError("AmrSystem.write : format 'npz' | 'vtk' (received %r)" % (format,))
 
     def checkpoint(self, path):
-        """CHECKPOINT AMR REDEMARRABLE BIT-IDENTIQUE v1 (npz), MONO-BLOC MONO-RANG (ADC-65). Ecrit
-        l'ETAT CONSERVATIF COMPLET de CHAQUE niveau (toutes composantes ; le grossier ET les patchs
-        fins, cellules valides), le phi de chaque niveau (le niveau 0 = WARM-START du multigrille,
-        load-bearing pour la reprise bit-identique), la HIERARCHIE (patch_boxes), l'horloge (t,
-        macro_step) et la cadence regrid. CONTRAT (parite System.checkpoint) : restart NE reconstruit
-        PAS la composition -- le script rejoue ses add_block/set_poisson/set_refinement/set_density
-        puis appelle sim.restart(path), qui VERIFIE la coherence et leve sinon. @return le chemin.
+        """RESTARTABLE BIT-IDENTICAL AMR CHECKPOINT v1 (npz), SINGLE-BLOCK SINGLE-RANK (ADC-65). Writes
+        the FULL CONSERVATIVE STATE of EACH level (all components ; the coarse AND the fine patches,
+        valid cells), the phi of each level (level 0 = WARM-START of the multigrid,
+        load-bearing for the bit-identical resume), the HIERARCHY (patch_boxes), the clock (t,
+        macro_step) and the regrid cadence. CONTRACT (parity with System.checkpoint) : restart does NOT
+        rebuild the composition -- the script replays its add_block/set_poisson/set_refinement/set_density
+        then calls sim.restart(path), which CHECKS consistency and raises otherwise. @return the path.
 
-        PERIMETRE (rejets EXPLICITES, jamais un checkpoint silencieusement faux/partiel) :
-          - MONO-BLOC seulement : le multi-blocs (moteur AmrRuntime) partage layout ET aux entre blocs
-            et n'expose pas l'etat par niveau/bloc -> suite (les accesseurs C++ rejettent aussi).
-          - MONO-RANG (np == 1) : les accesseurs de niveau lisent les fabs LOCAUX sans gather MPI ;
-            un gather par niveau (BoxArray + DistributionMapping) est une suite.
-          - regrid_every == 0 : une reprise bit-identique exige une hierarchie FIGEE (sinon le regrid
-            re-divergerait apres le restart). On rejette des le checkpoint (echec tot, message clair).
+        SCOPE (EXPLICIT rejections, never a silently wrong/partial checkpoint) :
+          - SINGLE-BLOCK only : multi-block (AmrRuntime engine) shares layout AND aux between blocks
+            and does not expose the per-level/block state -> follow-up (the C++ accessors also reject).
+          - SINGLE-RANK (np == 1) : the level accessors read the LOCAL fabs without an MPI gather ;
+            a per-level gather (BoxArray + DistributionMapping) is a follow-up.
+          - regrid_every == 0 : a bit-identical resume requires a FROZEN hierarchy (otherwise the regrid
+            would re-diverge after the restart). We reject at the checkpoint (early failure, clear message).
 
-        Repli hors perimetre : AmrSystem.write (visualisation) ou un System mono-niveau."""
+        Out-of-scope fallback : AmrSystem.write (visualization) or a single-level System."""
         import os
         import numpy as np
         from . import _adc
         if _adc.n_ranks() != 1:
             raise NotImplementedError(
-                "AmrSystem.checkpoint : MPI np>1 non cable (ADC-65 mono-rang : les etats par niveau "
-                "sont lus sur les fabs LOCAUX, le gather par niveau = suite). Lancer en mono-rang, ou "
-                "utiliser un System mono-niveau (checkpoint/restart bit-identique y compris sous MPI).")
+                "AmrSystem.checkpoint : MPI np>1 not wired (ADC-65 single-rank : the per-level states "
+                "are read on the LOCAL fabs, the per-level gather = follow-up). Run single-rank, or "
+                "use a single-level System (bit-identical checkpoint/restart including under MPI).")
         if self._s.n_blocks() != 1:
             raise NotImplementedError(
-                "AmrSystem.checkpoint : multi-blocs non cable (ADC-65 mono-bloc : le moteur AmrRuntime "
-                "partage layout ET aux entre blocs et n'expose pas l'etat par niveau/bloc = suite). "
-                "Utiliser un seul add_block, ou un System mono-niveau (checkpoint/restart bit-identique).")
+                "AmrSystem.checkpoint : multi-block not wired (ADC-65 single-block : the AmrRuntime engine "
+                "shares layout AND aux between blocks and does not expose the per-level/block state = follow-up). "
+                "Use a single add_block, or a single-level System (bit-identical checkpoint/restart).")
         if self._regrid_every != 0:
             raise ValueError(
-                "AmrSystem.checkpoint : reprise bit-identique cablee pour regrid_every == 0 seulement "
-                "(hierarchie figee) ; ce systeme a regrid_every=%d (le regrid post-restart re-divergerait "
-                "la hierarchie). Reconstruire le systeme avec regrid_every=0." % self._regrid_every)
+                "AmrSystem.checkpoint : bit-identical resume wired for regrid_every == 0 only "
+                "(frozen hierarchy) ; this system has regrid_every=%d (the post-restart regrid would re-diverge "
+                "the hierarchy). Rebuild the system with regrid_every=0." % self._regrid_every)
         nlev = int(self._s.n_levels())
-        pb = self._s.patch_boxes()  # (level, ilo, jlo, ihi, jhi) inclusifs, espace d'indices du niveau
+        pb = self._s.patch_boxes()  # (level, ilo, jlo, ihi, jhi) inclusive, index space of the level
         out = {"adc_amr_checkpoint_version": 1,
                "t": self._s.time(), "macro_step": self._s.macro_step(),
                "n": self._s.nx(), "L": self._L, "regrid_every": self._regrid_every,
@@ -2605,153 +2601,152 @@ class AmrSystem:
                "patch_boxes": (np.asarray(pb, dtype=np.int64) if pb
                                else np.zeros((0, 5), dtype=np.int64))}
         for k in range(nlev):
-            # Etat conservatif COMPLET du niveau k (c*nf*nf + j*nf + i) + phi (nf*nf). Niveau fin : seules
-            # les cellules des patchs sont definies (0 ailleurs) ; le restart ne reecrit que ces cellules.
+            # FULL conservative state of level k (c*nf*nf + j*nf + i) + phi (nf*nf). Fine level : only
+            # the patch cells are defined (0 elsewhere) ; the restart only rewrites those cells.
             out["state_%d" % k] = np.asarray(self._s.level_state(k), dtype=np.float64)
             out["phi_%d" % k] = np.asarray(self._s.level_potential(k), dtype=np.float64)
         target = path if path.endswith(".npz") else path + ".npz"
-        tmp = target + ".tmp"  # ecriture ATOMIQUE (.tmp + os.replace : un crash ne corrompt rien)
+        tmp = target + ".tmp"  # ATOMIC write (.tmp + os.replace : a crash corrupts nothing)
         with open(tmp, "wb") as f:
             np.savez_compressed(f, **out)
         os.replace(tmp, target)
         return target
 
     def restart(self, path):
-        """REPREND un checkpoint AMR v1 (BIT-IDENTIQUE, MONO-BLOC MONO-RANG, ADC-65). VERIFIE la
-        coherence (version, grille, blocs, composantes, regrid_every == 0) puis : (1) IMPOSE la
-        hierarchie fine sauvee (set_hierarchy, au lieu du clustering Berger-Rigoutsos) ; (2) restaure
-        l'etat conservatif COMPLET de chaque niveau TEL QUEL (pas de re-prolongation) ; (3) restaure le
-        phi de chaque niveau (le niveau 0 = warm-start du multigrille -> le 1er solve post-restart
-        repart du meme guess) ; (4) restaure l'horloge (t, macro_step). La COMPOSITION (add_block /
-        set_poisson / set_refinement / set_density) doit avoir ete REJOUEE par le script AVANT l'appel.
+        """RESUMES an AMR v1 checkpoint (BIT-IDENTICAL, SINGLE-BLOCK SINGLE-RANK, ADC-65). CHECKS
+        consistency (version, grid, blocks, components, regrid_every == 0) then : (1) IMPOSES the
+        saved fine hierarchy (set_hierarchy, instead of Berger-Rigoutsos clustering) ; (2) restores
+        the FULL conservative state of each level AS-IS (no re-prolongation) ; (3) restores the
+        phi of each level (level 0 = warm-start of the multigrid -> the 1st solve post-restart
+        starts from the same guess) ; (4) restores the clock (t, macro_step). The COMPOSITION (add_block /
+        set_poisson / set_refinement / set_density) must have been REPLAYED by the script BEFORE the call.
 
-        ORDRE : set_hierarchy AVANT set_level_state (l'imposition du layout precede la restauration des
-        cellules valides) ; phi et horloge ensuite. Le 1er step rejoue update() (sync_down + solve
-        warm-start) puis advance -- les ghosts (grossier ET fins) sont refaits par le step, exactement
-        comme apres un regrid, d'ou la reprise bit-identique sans restaurer de ghosts."""
+        ORDER : set_hierarchy BEFORE set_level_state (imposing the layout precedes restoring the
+        valid cells) ; phi and clock after. The 1st step replays update() (sync_down + warm-start solve)
+        then advance -- the ghosts (coarse AND fine) are remade by the step, exactly
+        like after a regrid, hence the bit-identical resume without restoring any ghosts."""
         import numpy as np
         from . import _adc
         if _adc.n_ranks() != 1:
             raise NotImplementedError(
-                "AmrSystem.restart : MPI np>1 non cable (ADC-65 mono-rang ; cf. checkpoint). Lancer en "
-                "mono-rang, ou utiliser un System mono-niveau.")
+                "AmrSystem.restart : MPI np>1 not wired (ADC-65 single-rank ; cf. checkpoint). Run "
+                "single-rank, or use a single-level System.")
         if self._s.n_blocks() != 1:
             raise NotImplementedError(
-                "AmrSystem.restart : multi-blocs non cable (ADC-65 mono-bloc ; cf. checkpoint). Utiliser "
-                "un seul add_block, ou un System mono-niveau.")
+                "AmrSystem.restart : multi-block not wired (ADC-65 single-block ; cf. checkpoint). Use "
+                "a single add_block, or a single-level System.")
         if self._regrid_every != 0:
             raise ValueError(
-                "AmrSystem.restart : exige regrid_every == 0 (hierarchie figee ; sinon le regrid "
-                "post-restart re-divergerait la hierarchie restauree). Reconstruire le systeme avec "
-                "regrid_every=0 avant restart. (regrid_every courant = %d)" % self._regrid_every)
+                "AmrSystem.restart : requires regrid_every == 0 (frozen hierarchy ; otherwise the regrid "
+                "post-restart would re-diverge the restored hierarchy). Rebuild the system with "
+                "regrid_every=0 before restart. (current regrid_every = %d)" % self._regrid_every)
         target = path if path.endswith(".npz") else path + ".npz"
         d = np.load(target, allow_pickle=False)
         if int(d["adc_amr_checkpoint_version"]) != 1:
-            raise ValueError("restart : version de checkpoint AMR %r non supportee (attendu 1)"
+            raise ValueError("restart : AMR checkpoint version %r not supported (expected 1)"
                              % (d["adc_amr_checkpoint_version"],))
         if int(d["n"]) != self._s.nx():
-            raise ValueError("restart : grille du checkpoint (n=%d) != systeme (n=%d)"
+            raise ValueError("restart : checkpoint grid (n=%d) != system (n=%d)"
                              % (int(d["n"]), self._s.nx()))
         if float(d["L"]) != self._L:
-            raise ValueError("restart : domaine du checkpoint (L=%r) != systeme (L=%r) -- dx different"
+            raise ValueError("restart : checkpoint domain (L=%r) != system (L=%r) -- different dx"
                              % (float(d["L"]), self._L))
         if int(d["regrid_every"]) != 0:
-            raise ValueError("restart : checkpoint pris avec regrid_every=%d != 0 (reprise "
-                             "bit-identique impossible)" % int(d["regrid_every"]))
+            raise ValueError("restart : checkpoint taken with regrid_every=%d != 0 (bit-identical "
+                             "resume impossible)" % int(d["regrid_every"]))
         chk_blocks = [str(b) for b in d["blocks"]]
         cur_blocks = list(self._s.block_names())
         if chk_blocks != cur_blocks:
-            raise ValueError("restart : blocs du checkpoint %r != composition courante %r "
-                             "(rejouer la MEME composition avant restart)" % (chk_blocks, cur_blocks))
+            raise ValueError("restart : checkpoint blocks %r != current composition %r "
+                             "(replay the SAME composition before restart)" % (chk_blocks, cur_blocks))
         if int(d["n_vars"]) != int(self._s.n_vars()):
-            raise ValueError("restart : %d composantes dans le checkpoint, %d ici"
+            raise ValueError("restart : %d components in the checkpoint, %d here"
                              % (int(d["n_vars"]), int(self._s.n_vars())))
         nlev = int(d["n_levels"])
         if nlev != int(self._s.n_levels()):
-            raise ValueError("restart : %d niveaux dans le checkpoint, %d ici (la composition / le "
-                             "raffinement different ?)" % (nlev, int(self._s.n_levels())))
-        # (1) IMPOSER la hierarchie fine sauvee (le coupleur filtre le niveau 1), sauf hierarchie
-        # MONO-NIVEAU (n_levels == 1, p.ex. chemin amr-schur sans patch fin) : rien a imposer alors.
+            raise ValueError("restart : %d levels in the checkpoint, %d here (does the composition / the "
+                             "refinement differ ?)" % (nlev, int(self._s.n_levels())))
+        # (1) IMPOSE the saved fine hierarchy (the coupler filters level 1), except a
+        # SINGLE-LEVEL hierarchy (n_levels == 1, e.g. amr-schur path with no fine patch) : nothing to impose then.
         boxes = [tuple(int(x) for x in row) for row in np.asarray(d["patch_boxes"], dtype=np.int64)]
         if nlev >= 2:
             if not any(b[0] == 1 for b in boxes):
-                raise ValueError("restart : hierarchie a %d niveaux mais aucun patch fin (niveau 1) "
-                                 "dans le checkpoint (incoherent)." % nlev)
+                raise ValueError("restart : %d-level hierarchy but no fine patch (level 1) "
+                                 "in the checkpoint (inconsistent)." % nlev)
             self._s.set_hierarchy(boxes)
-        # (2) restaurer l'etat conservatif COMPLET de chaque niveau TEL QUEL (pas de re-prolongation) ;
-        # set_level_state applatit le tableau et n'ecrit que les cellules valides (les patchs).
+        # (2) restore the FULL conservative state of each level AS-IS (no re-prolongation) ;
+        # set_level_state flattens the array and only writes the valid cells (the patches).
         for k in range(nlev):
             self._s.set_level_state(k, np.asarray(d["state_%d" % k], dtype=np.float64))
-        # (3) restaurer le phi (niveau 0 = warm-start du multigrille : reprise bit-identique).
+        # (3) restore the phi (level 0 = warm-start of the multigrid : bit-identical resume).
         for k in range(nlev):
             self._s.set_level_potential(k, np.asarray(d["phi_%d" % k], dtype=np.float64).ravel())
-        # (4) restaurer l'horloge APRES l'etat (parite System ; macro_step pousse la phase de cadence).
+        # (4) restore the clock AFTER the state (parity with System ; macro_step advances the cadence phase).
         self._s.set_clock(float(d["t"]), int(d["macro_step"]))
-
     def add_equation(self, name, model, spatial=None, time=None, substeps=None):
-        """Ajoute l'UNIQUE equation/bloc AMR en aiguillant sur le TYPE de @p model (DSL Phase D) :
+        """Add the SINGLE AMR equation/block by dispatching on the TYPE of @p model (DSL Phase D):
 
-        - un ModelSpec (adc.Model(...)) -> add_block (briques natives composees sur la hierarchie) ;
-        - un CompiledModel(backend='production', target='amr_system') (m.compile(...)) -> chemin NATIF
-          add_native_block : le loader .so inline add_compiled_model(AmrSystem&), donc le bloc tourne
-          la MEME hierarchie AMR que add_block (reflux conservatif, regrid), ZERO-COPIE.
+        - a ModelSpec (adc.Model(...)) -> add_block (native bricks composed on the hierarchy);
+        - a CompiledModel(backend='production', target='amr_system') (m.compile(...)) -> NATIVE path
+          add_native_block: the .so loader inlines add_compiled_model(AmrSystem&), so the block runs
+          the SAME AMR hierarchy as add_block (conservative reflux, regrid), ZERO-COPY.
 
-        Le traitement temporel est cable a {explicit, imex} : imex traite la source raide en IMPLICITE
-        (backward_euler_source), le transport restant explicite et porte par le reflux conservatif
-        (parite avec l'IMEX du System ; la source etant cellule-locale, le split implicite ne touche pas
-        la conservation aux interfaces grossier-fin). recon "primitive" et flux "roe"/"hllc"/weno5 sont
-        CABLES sur AMR (parite avec add_block ; cf. dispatch_amr_compiled). limiter="weno5" (WENO5-Z,
-        3 ghosts) : le coupleur alloue ses niveaux a Limiter::n_ghost et le regrid herite n_grow(), donc
-        le stencil 5 points ne lit pas hors bornes. cf. DSL_MODEL_DESIGN.md Phase D (point 10).
+        Time handling is wired to {explicit, imex}: imex treats the stiff source IMPLICITLY
+        (backward_euler_source), the remaining transport explicit and carried by the conservative reflux
+        (parity with the System IMEX; the source being cell-local, the implicit split does not touch
+        conservation at the coarse-fine interfaces). recon "primitive" and flux "roe"/"hllc"/weno5 are
+        WIRED on AMR (parity with add_block; cf. dispatch_amr_compiled). limiter="weno5" (WENO5-Z,
+        3 ghosts): the coupler allocates its levels to Limiter::n_ghost and the regrid inherits n_grow(), so
+        the 5-point stencil does not read out of bounds. cf. DSL_MODEL_DESIGN.md Phase D (point 10).
 
-        CADENCE MULTIRATE (stride) et MASQUE IMEX PARTIEL (implicit_vars / implicit_roles) :
+        MULTIRATE CADENCE (stride) and PARTIAL IMEX MASK (implicit_vars / implicit_roles):
 
-        - chemin ModelSpec (adc.Model(...)) : FORWARDES a AmrSystem::add_block, qui les SUPPORTE et les
-          valide (parite avec le wrapper add_block) ;
-        - chemin CompiledModel production (.so) : REJETES explicitement (ValueError). L'ABI plate du
-          loader (add_native_block / adc_install_native_amr) ne les transporte pas ; ils seraient pris a
-          leurs defauts EN SILENCE (stride=1, backward-Euler plein). Pour un .so multirate ou a masque
-          IMEX partiel, utiliser AmrSystem.add_block (natif) ou add_compiled_model(AmrSystem&) en direct
-          (C++), qui exposent stride et le masque.
+        - ModelSpec path (adc.Model(...)): FORWARDED to AmrSystem::add_block, which SUPPORTS and
+          validates them (parity with the add_block wrapper);
+        - CompiledModel production path (.so): explicitly REJECTED (ValueError). The flat ABI of the
+          loader (add_native_block / adc_install_native_amr) does not transport them; they would be taken
+          at their defaults SILENTLY (stride=1, full backward-Euler). For a multirate .so or one with a
+          partial IMEX mask, use AmrSystem.add_block (native) or add_compiled_model(AmrSystem&) directly
+          (C++), which expose stride and the mask.
 
-        @p spatial : adc.FiniteVolume(...) / adc.Spatial(...) (defaut minmod+rusanov+conservatif).
-        @p time : adc.Explicit (defaut) ou adc.IMEX (source raide implicite). @p substeps : surcharge
+        @p spatial: adc.FiniteVolume(...) / adc.Spatial(...) (default minmod+rusanov+conservative).
+        @p time: adc.Explicit (default) or adc.IMEX (implicit stiff source). @p substeps: overrides
         time.substeps.
         """
-        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
 
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
 
-        # positivity_floor (ADC-76) n'est PAS cable sur le chemin AMR (ni AmrSystem::add_block ni
-        # l'ABI du loader amr_system ne le transportent) : rejet explicite, pas d'ignore silencieux.
+        # positivity_floor (ADC-76) is NOT wired on the AMR path (neither AmrSystem::add_block nor
+        # the amr_system loader ABI transport it): explicit rejection, no silent ignore.
         if getattr(spatial, "positivity_floor", 0.0) > 0.0:
             raise ValueError(
-                "AmrSystem.add_equation : positivity_floor non supporte sur le chemin AMR (chantier "
-                "separe) ; retirer positivity_floor ou utiliser le System uniforme.")
+                "AmrSystem.add_equation: positivity_floor not supported on the AMR path (separate "
+                "workstream); remove positivity_floor or use the uniform System.")
 
-        # --- adc.Split (Lie) / adc.Strang (2e ordre) : CHEMIN amr-schur (etage source condense GLOBAL) --
-        # Pendant AMR de System.add_equation (cf. ~ligne 925) : on ajoute d'abord le bloc avec son seul
-        # etage HYPERBOLIQUE explicite (transport SOURCE-FREE ; le modele doit porter une brique source
-        # NoSource), PUIS on branche l'etage SOURCE condense (set_source_stage, C++) et la politique de
-        # splitting (set_time_scheme : "lie" pour Split, "strang" pour Strang). L'etage condense est
-        # GLOBAL (assemble/resout l'operateur electrostatique/Lorentz sur le grossier, en composant
-        # l'etage uniforme), par opposition a la source IMEX LOCALE cellule par cellule de time=adc.IMEX.
-        # PREREQUIS : appeler sim.set_magnetic_field(B_z) AVANT le 1er step (le terme de Lorentz lit
-        # Omega = B_z) ; sinon erreur claire au build. MONO-BLOC uniquement (set_source_stage leve sinon).
+        # --- adc.Split (Lie) / adc.Strang (2nd order): amr-schur PATH (GLOBAL condensed source stage) --
+        # During AMR of System.add_equation (cf. ~line 925): we first add the block with its single
+        # explicit HYPERBOLIC stage (SOURCE-FREE transport; the model must carry a NoSource source
+        # brick), THEN we attach the condensed SOURCE stage (set_source_stage, C++) and the splitting
+        # policy (set_time_scheme: "lie" for Split, "strang" for Strang). The condensed stage is
+        # GLOBAL (assembles/solves the electrostatic/Lorentz operator on the coarse grid, composing
+        # the uniform stage), as opposed to the LOCAL cell-by-cell IMEX source of time=adc.IMEX.
+        # PREREQUISITE: call sim.set_magnetic_field(B_z) BEFORE the 1st step (the Lorentz term reads
+        # Omega = B_z); otherwise a clear error at build. MONO-BLOCK only (set_source_stage raises otherwise).
         if isinstance(time, Split):
             self.add_equation(name, model, spatial=spatial, time=time.hyperbolic, substeps=substeps)
             src = time.source
-            # Reglages TRANSPORTES par le chemin amr-schur depuis la vague 3 (parite System) :
-            # tolerances Krylov du solve grossier + descripteurs de champs (role stable ou nom de
-            # variable, resolus au build contre le Model concret). magnetic_field reste fige sur
-            # le tampon B_z grossier dedie (amr_write_coarse_bz) : un autre champ aux n'a pas de
-            # pendant AMR -> rejet explicite (pas d'ignore silencieux).
+            # Settings TRANSPORTED by the amr-schur path since wave 3 (System parity):
+            # coarse-solve Krylov tolerances + field descriptors (stable role or variable name,
+            # resolved at build against the concrete Model). magnetic_field stays pinned to
+            # the dedicated coarse B_z buffer (amr_write_coarse_bz): another aux field has no
+            # AMR counterpart -> explicit rejection (no silent ignore).
             if getattr(src, "bz_aux_component", -1) >= 0:
                 raise ValueError(
-                    "AmrSystem.add_equation : magnetic_field != 'B_z' n'est pas transporte par le "
-                    "chemin amr-schur (l'etage AMR lit le tampon B_z grossier dedie). Laisser "
-                    "magnetic_field='B_z', ou utiliser System (mono-niveau).")
+                    "AmrSystem.add_equation: magnetic_field != 'B_z' is not transported by the "
+                    "amr-schur path (the AMR stage reads the dedicated coarse B_z buffer). Keep "
+                    "magnetic_field='B_z', or use System (mono-level).")
             self._s.set_source_stage(name, src.kind, src.theta, src.alpha,
                                      getattr(src, "krylov_tol", 0.0),
                                      getattr(src, "krylov_max_iters", 0),
@@ -2759,20 +2754,20 @@ class AmrSystem:
                                      getattr(src, "momentum_x_spec", ""),
                                      getattr(src, "momentum_y_spec", ""),
                                      getattr(src, "energy_spec", ""))
-            self._s.set_time_scheme(time.scheme)  # "lie" (Split) ou "strang" (Strang)
+            self._s.set_time_scheme(time.scheme)  # "lie" (Split) or "strang" (Strang)
             return
 
         nsub = substeps if substeps is not None else getattr(time, "substeps", 1)
 
-        # --- ModelSpec : briques natives composees -> add_block (chemin existant) ---
-        # On FORWARDE stride (multirate, capstone iv) ET le masque IMEX partiel implicit_vars /
-        # implicit_roles (capstone vii), exactement comme le wrapper AmrSystem.add_block ci-dessus :
-        # le C++ AmrSystem::add_block les SUPPORTE et les valide (vides -> backward-Euler plein ; un
-        # masque demande en explicite ou en mono-bloc leve une erreur claire cote C++,
-        # amr_system.cpp:325-328 / :283-287). Ne PAS dupliquer ces gardes ici.
+        # --- ModelSpec: native bricks composed -> add_block (existing path) ---
+        # We FORWARD stride (multirate, capstone iv) AND the partial IMEX mask implicit_vars /
+        # implicit_roles (capstone vii), exactly like the AmrSystem.add_block wrapper above:
+        # the C++ AmrSystem::add_block SUPPORTS and validates them (empty -> full backward-Euler; a
+        # mask requested in explicit or in mono-block raises a clear error on the C++ side,
+        # amr_system.cpp:325-328 / :283-287). Do NOT duplicate these guards here.
         if isinstance(model, ModelSpec):
-            # Modele NATIF : OPTIONS Newton cablees (mono + multi) + newton_diagnostics (multi-blocs natif,
-            # rejete au build C++ en mono-bloc). Pas de filtrage de facade : C++ AmrSystem::add_block valide.
+            # NATIVE model: Newton OPTIONS wired (mono + multi) + newton_diagnostics (native multi-block,
+            # rejected at C++ build in mono-block). No facade filtering: C++ AmrSystem::add_block validates.
             self._s.add_block(name, model, spatial.limiter, spatial.flux, spatial.recon, time.kind,
                               nsub, getattr(time, "stride", 1),
                               getattr(time, "implicit_vars", []), getattr(time, "implicit_roles", []),
@@ -2786,77 +2781,77 @@ class AmrSystem:
             return
 
         if not isinstance(model, dsl.CompiledModel):
-            raise TypeError("AmrSystem.add_equation : model doit etre un adc.Model(...) (ModelSpec) "
-                            "ou un CompiledModel (m.compile(...)) ; recu %r" % type(model).__name__)
+            raise TypeError("AmrSystem.add_equation: model must be an adc.Model(...) (ModelSpec) "
+                            "or a CompiledModel (m.compile(...)); received %r" % type(model).__name__)
 
         compiled = model
-        # Seul le chemin NATIF "production" cible AmrSystem : il inline add_compiled_model(AmrSystem&).
-        # Les .so prototype (JIT) / aot n'ont pas de pendant AMR (add_dynamic_block/add_compiled_block
-        # sont mono-niveau). On exige donc backend='production' + target='amr_system'.
+        # Only the NATIVE "production" path targets AmrSystem: it inlines add_compiled_model(AmrSystem&).
+        # The prototype (JIT) / aot .so have no AMR counterpart (add_dynamic_block/add_compiled_block
+        # are mono-level). We therefore require backend='production' + target='amr_system'.
         if compiled.adder != "add_native_block":
             raise ValueError(
-                "AmrSystem.add_equation : seul un CompiledModel backend='production' (chemin natif) "
-                "est branchable sur AMR ; recu backend=%r (les .so prototype/aot sont mono-niveau, "
-                "sans pendant AMR)" % compiled.backend)
+                "AmrSystem.add_equation: only a CompiledModel backend='production' (native path) "
+                "is attachable on AMR; received backend=%r (the prototype/aot .so are mono-level, "
+                "without AMR counterpart)" % compiled.backend)
         if getattr(compiled, "target", "system") != "amr_system":
             raise ValueError(
-                "AmrSystem.add_equation : le CompiledModel a ete compile pour target='system' ; "
-                "recompiler avec m.compile(..., backend='production', target='amr_system') pour que "
-                "le loader inline add_compiled_model(AmrSystem&) (symbole adc_install_native_amr)")
+                "AmrSystem.add_equation: the CompiledModel was compiled for target='system'; "
+                "recompile with m.compile(..., backend='production', target='amr_system') so that "
+                "the loader inlines add_compiled_model(AmrSystem&) (symbol adc_install_native_amr)")
 
-        # recon "primitive" et flux "roe"/"hllc" sont CABLES sur AMR via dispatch_amr_compiled : le
-        # chemin .so passe recon_prim a AmrBuildParams (consomme par advance_amr/compute_face_fluxes)
-        # et hllc/roe sont instancies sous la MEME garde requires que System::make_block (transport
-        # compressible a 4 variables + pression). Plus de rejet de facade (parite stricte avec
+        # recon "primitive" and flux "roe"/"hllc" are WIRED on AMR via dispatch_amr_compiled: the
+        # .so path passes recon_prim to AmrBuildParams (consumed by advance_amr/compute_face_fluxes)
+        # and hllc/roe are instantiated under the SAME requires guard as System::make_block (compressible
+        # transport with 4 variables + pressure). No more facade rejection (strict parity with
         # add_block, cf. test_amr_riemann_native).
-        # Garde-fou flux numerique (porte de System.add_equation) : HLLC/Roe exigent une pression ; la
-        # brique generee n'emet pressure()/wave_speeds() que si une primitive 'p' est declaree. Sans
-        # 'p', dispatch_amr_compiled retombe sur la branche else (requires non satisfait) et leve une
-        # erreur C++ generique : on diagnostique ICI, clairement, avant la frontiere C++.
+        # Numerical flux guard (gate of System.add_equation): HLLC/Roe require a pressure; the
+        # generated brick only emits pressure()/wave_speeds() if a primitive 'p' is declared. Without
+        # 'p', dispatch_amr_compiled falls back on the else branch (requires not satisfied) and raises a
+        # generic C++ error: we diagnose HERE, clearly, before the C++ boundary.
         if (spatial.flux in ("roe", "hllc") and "p" not in compiled.prim_names
                 and not (spatial.flux == "hllc" and getattr(compiled, "has_hllc", False))
                 and not (spatial.flux == "roe" and getattr(compiled, "has_roe", False))):
             raise ValueError(
-                "AmrSystem.add_equation : riemann '%s' exige une pression : declarer une primitive 'p' "
-                "(m.primitive('p', ...)) dans le modele, ou emettre la capability "
-                "(m.enable_hllc() / m.enable_roe()) ; sinon utiliser riemann='rusanov'"
+                "AmrSystem.add_equation: riemann '%s' requires a pressure: declare a primitive 'p' "
+                "(m.primitive('p', ...)) in the model, or emit the capability "
+                "(m.enable_hllc() / m.enable_roe()); otherwise use riemann='rusanov'"
                 % spatial.flux)
-        # HLL : meme garde precoce que System.add_equation (wave_speeds emis par paire explicite
-        # m.wave_speeds(x=, y=) OU primitive 'p' ; le gate C++ ne se declenche qu'au premier usage).
+        # HLL: same early guard as System.add_equation (wave_speeds emitted by the explicit pair
+        # m.wave_speeds(x=, y=) OR primitive 'p'; the C++ gate only triggers at first use).
         if spatial.flux == "hll" and not getattr(compiled, "has_wave_speeds", True):
             raise ValueError(
-                "AmrSystem.add_equation : riemann 'hll' exige des vitesses d'onde signees : declarer "
-                "m.wave_speeds(x=(smin, smax), y=(smin, smax)) (sans pression), ou une primitive "
-                "'p' (m.primitive('p', ...)) ; sinon utiliser riemann='rusanov'")
+                "AmrSystem.add_equation: riemann 'hll' requires signed wave speeds: declare "
+                "m.wave_speeds(x=(smin, smax), y=(smin, smax)) (without pressure), or a primitive "
+                "'p' (m.primitive('p', ...)); otherwise use riemann='rusanov'")
 
-        # L'ABI plate du loader .so (adc_install_native_amr / add_native_block) ne transporte NI la
-        # cadence multirate (stride) NI le masque IMEX partiel (implicit_vars / implicit_roles) :
-        # add_compiled_model(AmrSystem&) les expose seulement en DIRECT (chemin C++). Passes via le
-        # loader, ils prendraient leurs defauts (stride=1, masque vide = backward-Euler plein) EN
-        # SILENCE. On les REJETTE plutot que de les ignorer (route explicite, meme esprit que le rejet
-        # du stride/masque sur les backends compiles de System.add_equation, cf. ~lignes 886-955).
+        # The flat ABI of the .so loader (adc_install_native_amr / add_native_block) transports NEITHER the
+        # multirate cadence (stride) NOR the partial IMEX mask (implicit_vars / implicit_roles):
+        # add_compiled_model(AmrSystem&) exposes them only DIRECTLY (C++ path). Passed through the
+        # loader, they would take their defaults (stride=1, empty mask = full backward-Euler) SILENTLY.
+        # We REJECT them rather than ignore them (explicit route, same spirit as the rejection
+        # of stride/mask on the compiled backends of System.add_equation, cf. ~lines 886-955).
         nstride = getattr(time, "stride", 1)
         if nstride != 1:
             raise ValueError(
-                "AmrSystem.add_equation : stride=%d non transporte par le chemin production AMR "
-                "(loader .so, ABI plate add_native_block : le bloc tournerait a stride=1 en silence). "
-                "Utiliser AmrSystem.add_block (modele natif adc.Model(...), cadence cablee) ou "
-                "add_compiled_model(AmrSystem&) en direct (C++) qui expose stride." % nstride)
+                "AmrSystem.add_equation: stride=%d not transported by the production AMR path "
+                "(.so loader, flat ABI add_native_block: the block would run at stride=1 silently). "
+                "Use AmrSystem.add_block (native model adc.Model(...), wired cadence) or "
+                "add_compiled_model(AmrSystem&) directly (C++) which exposes stride." % nstride)
         if getattr(time, "implicit_vars", []) or getattr(time, "implicit_roles", []):
             raise ValueError(
-                "AmrSystem.add_equation : implicit_vars / implicit_roles (masque IMEX partiel) non "
-                "transportes par le chemin production AMR (loader .so, ABI plate add_native_block : le "
-                "masque serait vide = backward-Euler plein en silence). Utiliser AmrSystem.add_block "
-                "(modele natif adc.Model(...), masque cable) ou add_compiled_model(AmrSystem&) en "
-                "direct (C++) qui expose le masque IMEX.")
-        # Options / diagnostics Newton : meme ABI plate -> ni les options ni le rapport ne transitent
-        # par le loader .so. Rejet explicite (sinon iters=2 / pas de rapport en silence), parite avec le
-        # rejet stride/masque ci-dessus et avec System.add_equation (backend compile).
+                "AmrSystem.add_equation: implicit_vars / implicit_roles (partial IMEX mask) not "
+                "transported by the production AMR path (.so loader, flat ABI add_native_block: the "
+                "mask would be empty = full backward-Euler silently). Use AmrSystem.add_block "
+                "(native model adc.Model(...), wired mask) or add_compiled_model(AmrSystem&) "
+                "directly (C++) which exposes the IMEX mask.")
+        # Newton options / diagnostics: same flat ABI -> neither the options nor the report transit
+        # through the .so loader. Explicit rejection (otherwise iters=2 / no report silently), parity with
+        # the stride/mask rejection above and with System.add_equation (compiled backend).
         _reject_newton_amr_compiled("AmrSystem.add_equation", time)
 
-        # Garde PRE-DLOPEN au branchement (couvre le cache HIT, cf. System.add_equation) : module
-        # _adc perime vs .so compile sur les en-tetes a jour -> erreur actionnable, pas un dlopen
-        # 'symbol not found' cryptique.
+        # PRE-DLOPEN guard at attach (covers the cache HIT, cf. System.add_equation): module
+        # _adc stale vs .so compiled against the up-to-date headers -> actionable error, not a dlopen
+        # 'symbol not found' cryptic message.
         from . import dsl as _dsl_guard
         _dsl_guard.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
         gamma = compiled.gamma if compiled.gamma is not None else 1.4
@@ -2864,14 +2859,14 @@ class AmrSystem:
                                  spatial.recon, time.kind, gamma, nsub)
 
     def add_coupling(self, coupling):
-        """Ajoute une SOURCE COUPLEE inter-especes generique (adc.dsl.CoupledSource(...).compile(...))
-        sur la hierarchie AMR PARTAGEE (MULTI-BLOCS), pendant raffine de System.add_coupling. La source
-        est transportee en bytecode et interpretee cote C++ (AmrSystem.add_coupled_source ; aucun
-        callback Python par cellule). La frequence du couplage (CoupledSource.frequency) est honoree :
-        constante -> borne dt <= cfl/mu ; Expr -> frequence PAR CELLULE mu(U) evaluee sur le GROSSIER a
-        chaque step_cfl (les vecteurs freq_prog_* sont forwardes). Doit etre appele AVANT le premier
-        step (la source est figee puis injectee au build paresseux du moteur runtime)."""
-        from . import dsl  # import tardif (dsl importe ce module : eviter le cycle a l'import)
+        """Add a generic inter-species COUPLED SOURCE (adc.dsl.CoupledSource(...).compile(...))
+        on the SHARED AMR hierarchy (MULTI-BLOCK), refined counterpart of System.add_coupling. The source
+        is transported as bytecode and interpreted on the C++ side (AmrSystem.add_coupled_source; no
+        per-cell Python callback). The coupling frequency (CoupledSource.frequency) is honored:
+        constant -> dt bound dt <= cfl/mu; Expr -> PER-CELL frequency mu(U) evaluated on the COARSE grid at
+        each step_cfl (the freq_prog_* vectors are forwarded). Must be called BEFORE the first
+        step (the source is frozen then injected at the lazy build of the runtime engine)."""
+        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
 
         if isinstance(coupling, dsl.CompiledCoupledSource):
             self._s.add_coupled_source(coupling.in_blocks, coupling.in_roles, coupling.consts,
@@ -2881,26 +2876,26 @@ class AmrSystem:
                                        getattr(coupling, "freq_prog_ops", []),
                                        getattr(coupling, "freq_prog_args", []))
         else:
-            raise TypeError("AmrSystem.add_coupling attend un CompiledCoupledSource "
-                            "(adc.dsl.CoupledSource(...).compile(...)) : la source couplee AMR est "
-                            "MULTI-BLOCS et decrite en formules")
+            raise TypeError("AmrSystem.add_coupling expects a CompiledCoupledSource "
+                            "(adc.dsl.CoupledSource(...).compile(...)): the AMR coupled source is "
+                            "MULTI-BLOCK and described in formulas")
 
     def __getattr__(self, attr):
         return getattr(self._s, attr)
 
 
 class PythonFlux:
-    """Backend de PROTOTYPAGE (hote, numpy) pour l'interface Flux : l'utilisateur fournit le flux
-    physique et la vitesse d'onde en Python, et PythonFlux assemble le residu -div(F*) par volumes
-    finis (Rusanov, ordre 1, domaine periodique) sur tout le tableau d'un coup.
+    """PROTOTYPING backend (host, numpy) for the Flux interface: the user provides the physical
+    flux and the wave speed in Python, and PythonFlux assembles the residual -div(F*) by finite
+    volumes (Rusanov, order 1, periodic domain) over the whole array at once.
 
-    HORS hot path GPU/MPI : c'est un chemin HOTE pur (numpy), il ne passe JAMAIS par un kernel
-    Kokkos. Pour la production (GPU/MPI), composer un flux COMPILE (brique adc.CompressibleFlux,
-    adc.ExB...). PythonFlux formalise le pattern du cas custom_scheme : iterer vite sur un flux
-    inedit sans recompiler (adc.System servant d'oracle de Poisson si besoin).
+    OUT of the GPU/MPI hot path: this is a pure HOST path (numpy), it NEVER goes through a Kokkos
+    kernel. For production (GPU/MPI), compose a COMPILED flux (adc.CompressibleFlux brick,
+    adc.ExB...). PythonFlux formalizes the pattern of the custom_scheme case: iterate quickly on a
+    novel flux without recompiling (adc.System serving as Poisson oracle if needed).
 
-    flux(U, dir) -> F : U et F sont des numpy (ncomp, n, n) ; dir = 0 (x) ou 1 (y).
-    max_wave_speed(U) -> float : borne pour le flux de Rusanov et le CFL.
+    flux(U, dir) -> F: U and F are numpy (ncomp, n, n); dir = 0 (x) or 1 (y).
+    max_wave_speed(U) -> float: bound for the Rusanov flux and the CFL.
     """
 
     def __init__(self, flux, max_wave_speed):
@@ -2908,32 +2903,32 @@ class PythonFlux:
         self.max_wave_speed = max_wave_speed
 
     def residual(self, U, dx, dy=None):
-        """-div(F*) par flux de Rusanov (ordre 1, periodique). U numpy (ncomp, n, n) ; rend dU/dt."""
+        """-div(F*) by Rusanov flux (order 1, periodic). U numpy (ncomp, n, n); returns dU/dt."""
         import numpy as np
         dy = dx if dy is None else dy
         a = float(self.max_wave_speed(U))
         res = np.zeros_like(U)
-        for axis, h, d in ((2, dx, 0), (1, dy, 1)):  # x = axe 2, y = axe 1
+        for axis, h, d in ((2, dx, 0), (1, dy, 1)):  # x = axis 2, y = axis 1
             F = self.flux(U, d)
             UR = np.roll(U, -1, axis=axis)
             FR = np.roll(F, -1, axis=axis)
-            face = 0.5 * (F + FR) - 0.5 * a * (UR - U)       # flux a la face +d de chaque cellule
-            res -= (face - np.roll(face, 1, axis=axis)) / h  # -div : (F_{i+1/2} - F_{i-1/2}) / h
+            face = 0.5 * (F + FR) - 0.5 * a * (UR - U)       # flux at the +d face of each cell
+            res -= (face - np.roll(face, 1, axis=axis)) / h  # -div: (F_{i+1/2} - F_{i-1/2}) / h
         return res
 
     def cfl_dt(self, U, h, cfl=0.4):
-        """Pas de temps stable : dt = cfl * h / max_wave_speed(U)."""
+        """Stable time step: dt = cfl * h / max_wave_speed(U)."""
         return cfl * h / max(float(self.max_wave_speed(U)), 1e-30)
 
 
-from . import integrate  # noqa: E402  (apres la definition de System ; sans dependance numpy)
+from . import integrate  # noqa: E402  (after the definition of System; without numpy dependency)
 
 
-# adc.dsl PARESSEUX (PEP 562) : dsl.py fait `import numpy` au niveau module (evaluateur hote du
-# prototype). L'import eager rendait numpy obligatoire pour `import adc` ENTIER, alors que le
-# chemin natif (System/add_block) et le backend production n'en ont pas besoin. Avec ce
-# __getattr__, `adc.dsl.Model(...)` et `from adc import dsl` marchent a l'identique, mais numpy
-# n'est requis QU'AU premier usage du DSL -- et son absence donne un message cible (doctor aussi).
+# LAZY adc.dsl (PEP 562): dsl.py does `import numpy` at module level (host evaluator of the
+# prototype). The eager import made numpy mandatory for the ENTIRE `import adc`, whereas the
+# native path (System/add_block) and the production backend do not need it. With this
+# __getattr__, `adc.dsl.Model(...)` and `from adc import dsl` work identically, but numpy
+# is required ONLY AT the first use of the DSL -- and its absence gives a targeted message (doctor too).
 def __getattr__(name):
     if name == "dsl":
         import importlib
@@ -2941,7 +2936,7 @@ def __getattr__(name):
             return importlib.import_module(".dsl", __name__)
         except ImportError as exc:
             raise ImportError(
-                "adc.dsl requiert numpy dans cet interpreteur (evaluateur hote du DSL) : "
-                "`pip install numpy` / `conda install numpy`. Le reste d'adc (System, add_block) "
-                "fonctionne sans. Cause : %s" % exc) from exc
+                "adc.dsl requires numpy in this interpreter (host evaluator of the DSL): "
+                "`pip install numpy` / `conda install numpy`. The rest of adc (System, add_block) "
+                "works without it. Cause: %s" % exc) from exc
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
