@@ -109,6 +109,20 @@ the one independent check, so it stands in for a second pair of eyes; keep it to
 (human or agent) and one pass rather than chasing consensus. Treat every review comment as a
 TODO: resolve it, or reply why not, before closing it.
 
+### By change type
+
+Different changes need a different focus (SWE-at-Google ch.10):
+
+- **New code**: confirm it needs to exist (code is a liability; prefer reuse or deletion). Check
+  the design was agreed, the public surface is tested, an owner exists, and CI runs it.
+- **Behavioral change or optimization**: tests updated for the new behavior; for a numerical
+  change include the validation (reference case, observed quantity, expected value, tolerance,
+  reason); add a benchmark for a performance claim.
+- **Bug fix or rollback**: scoped to the bug only (no drive-by changes), with a regression test
+  that would have caught it, and small enough to roll back cleanly.
+- **Refactor or large-scale change**: behavior-preserving. Review correctness and applicability,
+  and do not expand the scope of an automated change.
+
 ## Guardrails
 
 - **No AI author, committer or co-author** (Claude, Copilot, Anthropic, ...) anywhere in
