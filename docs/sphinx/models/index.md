@@ -21,6 +21,12 @@ Riemann flux, SSPRK/IMEX integrators, multigrid Poisson), see
 [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md). For the layered architecture (model / mesh / dispatch /
 integrator), see [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md).
 
+For one specialized family of models -- velocity-moment hierarchies (kinetic and QMOM
+closures) -- you do not write the formulas by hand: a generator builds the DSL model from a
+single closure. See [moments and closures](../concepts/moments-and-closures.md), the
+[moment models reference](../reference/moment-models.md), and the
+[HyQMOM tutorial](../tutorials/moment-model-hyqmom15.md).
+
 ## PhysicalModel: the concept
 
 All bricks satisfy the same C++ contract, the `adc::PhysicalModel` concept

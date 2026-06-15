@@ -206,6 +206,27 @@ tested_by = []
 testable = false
 reviewed = "71f02e7a2f4475254426eb88e2626202f455d5dc"
 
+[docs."docs/sphinx/reference/moment-models.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/adc/moments.py", "python/adc/dsl.py"]
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/concepts/moments-and-closures.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/adc/moments.py"]
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/tutorials/moment-model-hyqmom15.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/adc/moments.py", "python/adc/dsl.py"]
+tested_by = []
+testable = false
+
 [docs."docs/sphinx/reference/bibliography.md"]
 owner = "Romain"
 mode = "warning"
