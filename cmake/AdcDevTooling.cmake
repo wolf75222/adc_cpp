@@ -32,7 +32,14 @@ if(ADC_ENABLE_WARNINGS)
       -Wall -Wextra -Wpedantic
       -Wshadow -Wnon-virtual-dtor -Woverloaded-virtual
       -Wcast-qual -Wdouble-promotion -Wformat=2
-      -Wunused -Wnull-dereference -Wimplicit-fallthrough)
+      -Wunused -Wnull-dereference -Wimplicit-fallthrough
+      -Wmisleading-indentation)
+    # -Wduplicated-cond / -Wduplicated-branches / -Wlogical-op sont specifiques a GCC : clang et
+    # AppleClang les rejettent ("unknown warning option"). On ne les ajoute donc que sur GNU.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      list(APPEND _adc_warn_flags
+        -Wduplicated-cond -Wduplicated-branches -Wlogical-op)
+    endif()
     # Volontairement EXCLUS au demarrage (trop bruyants sur du code numerique generique) :
     # -Wconversion, -Wsign-conversion, -Wold-style-cast. A reintroduire une fois la base assainie.
     target_compile_options(adc_dev_options INTERFACE
