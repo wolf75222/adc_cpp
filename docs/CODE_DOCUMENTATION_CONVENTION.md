@@ -26,14 +26,14 @@ Each `.hpp` / `.cpp` must start, after `#pragma once` or the required includes, 
 /// @file
 /// @brief Short role of the file.
 ///
-/// Couche : `include/adc/<dossier>`.
-/// Role : ...
-/// Contrat : ...
+/// Layer: `include/adc/<folder>`.
+/// Role: ...
+/// Contract: ...
 ///
-/// Invariants :
-/// - invariant important ;
-/// - contrainte importante ;
-/// - relation avec les autres couches.
+/// Invariants:
+/// - important invariant;
+/// - important constraint;
+/// - relation with the other layers.
 ```
 
 Doxygen requires a `@file` to correctly document the free functions, typedefs, enums and macros
@@ -49,14 +49,14 @@ Each public class or non-trivial struct must have an interface comment. The form
 a mandatory form; keep only the lines useful to the type at hand:
 
 ```cpp
-/// Role court de la classe.
+/// Short role of the class.
 ///
-/// Usage : ...
-/// Contrat : ...
-/// Invariants : ...
-/// Preconditions : ...
-/// Postconditions : ...
-/// Contraintes : ...
+/// Usage: ...
+/// Contract: ...
+/// Invariants: ...
+/// Preconditions: ...
+/// Postconditions: ...
+/// Constraints: ...
 class Foo { ... };
 ```
 
@@ -84,10 +84,10 @@ Comment a function when:
 In a header, the declaration comment describes **usage and contract**:
 
 ```cpp
-/// Installe un bloc evolue sur la hierarchie AMR commune.
-/// @param name nom unique du bloc.
-/// @param substeps nombre de sous-pas ; doit etre >= 1.
-/// @throws std::runtime_error si le nom existe deja.
+/// Installs an evolved block on the common AMR hierarchy.
+/// @param name unique name of the block.
+/// @param substeps number of substeps; must be >= 1.
+/// @throws std::runtime_error if the name already exists.
 ```
 
 In a `.cpp` or in the body of a function, the definition comment describes **the non-trivial
@@ -108,8 +108,8 @@ Avoid:
 Prefer:
 
 ```cpp
-// Tous les rangs doivent appeler ce solve collectif ; les rangs sans fab local font no-op
-// sur les boucles locales mais participent aux reductions.
+// All ranks must call this collective solve; ranks without a local fab no-op
+// on the local loops but participate in the reductions.
 ```
 
 ## 4. Comment levels
@@ -130,8 +130,8 @@ small internal loops. Scientific code needs readable contracts, not noise.
 When the code implements a formula, write the formula once near the kernel or the builder:
 
 ```cpp
-/// Assemble L(phi) = -div(A grad phi) + kappa phi.
-/// A est centre cellule ; les flux de face utilisent la moyenne definie plus bas.
+/// Assembles L(phi) = -div(A grad phi) + kappa phi.
+/// A is cell-centered; the face fluxes use the average defined below.
 ```
 
 If the formula comes from a paper, cite the local document (`docs/SCHUR_CONDENSATION_DESIGN.md`) rather
@@ -149,14 +149,14 @@ Any function called under MPI/Kokkos must make the following two points explicit
 Example:
 
 ```cpp
-/// Collectif : tous les rangs appellent la fonction. Les boucles sur `local_size()` sont no-op
-/// sur les rangs sans box locale.
+/// Collective: all ranks call the function. The loops over `local_size()` are no-op
+/// on the ranks without a local box.
 ```
 
 For Kokkos/CUDA, note the places where named functors are required:
 
 ```cpp
-/// Foncteur nomme : evite les lambdas device cross-TU qui cassent nvcc.
+/// Named functor: avoids the cross-TU device lambdas that break nvcc.
 ```
 
 If a function is collective, say so in its public comment. If it is local, also say so
@@ -168,13 +168,13 @@ ambiguity.
 Documentation and design rule:
 
 ```text
-AMR multi-blocs conservatif = hierarchie commune, cellules co-localisees, regrid par union des tags.
+Conservative multi-block AMR = common hierarchy, co-located cells, regrid by union of tags.
 ```
 
 Never document as a near target:
 
 ```text
-une espece absente localement d'un patch raffine
+a species locally absent from a refined patch
 ```
 
 except with a complete conservative projection plan. Otherwise the coupled sources, the Poisson RHS and
@@ -185,11 +185,11 @@ the reflux are not conservative.
 Python files must have a module docstring:
 
 ```python
-"""Role public du module.
+"""Public role of the module.
 
-Ce module expose ...
-Chemins supportes : ...
-Contraintes : ...
+This module exposes ...
+Supported paths: ...
+Constraints: ...
 """
 ```
 
