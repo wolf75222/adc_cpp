@@ -88,10 +88,10 @@ inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
   if (n == 0 || nranks <= 1) return DistributionMapping(std::move(rank));
 
   const std::vector<int> order = morton_order(ba);
-  long total = ba.num_cells();
+  std::int64_t total = ba.num_cells();
   const double target = double(total) / nranks;  // charge cible par rang
 
-  long acc = 0;
+  std::int64_t acc = 0;
   int r = 0;
   for (int k = 0; k < n; ++k) {
     const int b = order[k];
@@ -119,7 +119,7 @@ inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
   std::sort(order.begin(), order.end(),
             [&](int a, int b) { return ba[a].num_cells() > ba[b].num_cells(); });
 
-  std::vector<long> load(nranks, 0);
+  std::vector<std::int64_t> load(nranks, 0);
   for (int b : order) {
     int r = 0;
     for (int q = 1; q < nranks; ++q)
@@ -134,10 +134,10 @@ inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
 inline double load_imbalance(const BoxArray& ba, const DistributionMapping& dm,
                              int nranks) {
   if (nranks <= 0 || ba.size() == 0) return 1.0;
-  std::vector<long> load(nranks, 0);
+  std::vector<std::int64_t> load(nranks, 0);
   for (int i = 0; i < ba.size(); ++i) load[dm[i]] += ba[i].num_cells();
-  long mx = 0, sum = 0;
-  for (long l : load) {
+  std::int64_t mx = 0, sum = 0;
+  for (std::int64_t l : load) {
     mx = std::max(mx, l);
     sum += l;
   }

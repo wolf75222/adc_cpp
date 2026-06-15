@@ -22,6 +22,7 @@
 #include <adc/core/types.hpp>
 #include <adc/mesh/box2d.hpp>
 
+#include <cstdint>      // std::int64_t : comptes de cellules (portabilite LLP64, no-op LP64)
 #include <cstdlib>      // getenv / strtol : seuil de bascule serie surchargeable (#165)
 #include <type_traits>  // std::is_same_v : garde compile-time exec space hote vs device (#165)
 
@@ -82,14 +83,14 @@ namespace adc {
 // rebalayer le seuil sans recompiler ; defaut 4096 (meme arbitrage fork/join vs calcul
 // que l'ancienne clause if() du chemin OpenMP retire).
 namespace detail {
-inline long foreach_serial_threshold() {
-  static const long thr = [] {
+inline std::int64_t foreach_serial_threshold() {
+  static const std::int64_t thr = []() -> std::int64_t {
     if (const char* e = std::getenv("ADC_FOREACH_SERIAL_THRESHOLD")) {
       char* end = nullptr;
-      const long v = std::strtol(e, &end, 10);
+      const std::int64_t v = std::strtol(e, &end, 10);
       if (end != e && v >= 0) return v;
     }
-    return 4096L;
+    return 4096;
   }();
   return thr;
 }
@@ -172,8 +173,8 @@ void for_each_cell(const Box2D& b, F f) {
   // sweeps, sync_host avant les acces hote) restent en place et inchanges.
   if constexpr (std::is_same_v<Kokkos::DefaultExecutionSpace,
                                Kokkos::DefaultHostExecutionSpace>) {
-    const long n_cells = static_cast<long>(b.hi[0] - b.lo[0] + 1) *
-                         (b.hi[1] - b.lo[1] + 1);
+    const std::int64_t n_cells = static_cast<std::int64_t>(b.hi[0] - b.lo[0] + 1) *
+                                 (b.hi[1] - b.lo[1] + 1);
     if (n_cells < detail::foreach_serial_threshold()) {
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
         for (int i = b.lo[0]; i <= b.hi[0]; ++i) f(i, j);
