@@ -400,3 +400,20 @@ is wired really is; what is not is documented with file:line, never masked).
     `CompiledModel.has_roe` covers both (test_dsl_autodiff_roe: dsl.diff on analytic cases,
     flux_jacobian of the isothermal 3-var, m.roe_dissipation reproducing the hand-written isothermal Roe
     == enable_roe at ~1e-12, rejections).
+
+## Known variation points (watch-items, not defects)
+
+Audit ADC-189 (tracked by ADC-265) flagged two extension frictions that are deliberate trade-offs,
+recorded here so they are not re-discovered later as bugs:
+
+- **Transport dispatch is forked cartesian vs polar.** `runtime/model_factory.hpp`
+  `dispatch_transport` (the cartesian table) and `runtime/block_builder_polar.hpp`
+  `dispatch_transport_polar` (the polar copy) enumerate the transport bricks independently, so adding a
+  transport brick with a polar variant means editing BOTH tables -- the exact drift
+  `runtime/dispatch_tags.hpp` was built to remove for the source/elliptic dispatch. Source and elliptic
+  dispatch are already shared; only transport forks. A future `kTransports` registry with a `polar_ok`
+  flag would let the two tables validate against one source. No behaviour change is implied today.
+- **`ModelSpec` is a flat all-bricks POD.** It co-locates every native brick's parameters, so a new
+  brick parameter touches the central struct, the Python kwargs, and the dispatch. This flatness is a
+  deliberate pybind-friendliness trade-off (one stable struct to bind), not a defect -- a watch-item only
+  if the brick count grows much further.
