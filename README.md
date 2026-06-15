@@ -26,7 +26,7 @@ Reproducible local version (Python facade):
 
 ---
 
-`adc_cpp` is the **engine**: model-free, with a library of generic physics bricks
+`adc_cpp` is a model-free engine with a library of generic physics bricks
 (`include/adc/physics/`) and Python bindings (`adc`). It names no scenario; it provides generic
 bricks composed into a `CompositeModel`. Named scenarios (diocotron, Euler-Poisson, two-fluid)
 live in [`adc_cases`](https://github.com/wolf75222/adc_cases).
