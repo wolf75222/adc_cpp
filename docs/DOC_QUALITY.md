@@ -20,13 +20,18 @@ bottom.
 
 Every page belongs to a class. The class sets the source of truth and the control mode.
 
+For a reader, the canon is the published Sphinx site (`docs/sphinx`) and, for the API, the
+generated reference (class A, extracted from the code). The root `docs/*.md` carry intent and
+rationale (class C) or a past design state (class D); they are authoritative for *why*, not for
+the current code's exact behavior, which class A always reflects.
+
 ### A. Generated reference
 
 The source of truth is the code. The page is produced by extraction; it is not proofread by
 hand, it is rebuilt.
 
-- `docs/sphinx/reference/api_python.md`: autodoc of the `adc` module (signatures, docstrings).
-- `docs/sphinx/reference/api_cpp.md` plus the Doxygen site published under `/cpp/`: the C++
+- `docs/sphinx/reference/python-api.md`: autodoc of the `adc` module (signatures, docstrings).
+- `docs/sphinx/reference/cpp-api.md` plus the Doxygen site published under `/cpp/`: the C++
   API extracted from the headers.
 
 Control: freshness is guaranteed by rebuild. If a signature changes in the code, the page
@@ -38,11 +43,11 @@ The source of truth is a script run in continuous integration. The text never in
 copied code: it pulls the script in via `literalinclude`, so an example that breaks breaks
 the build.
 
-- `docs/sphinx/getting_started/installation.md`
-- `docs/sphinx/getting_started/first_run.md`
-- `docs/sphinx/getting_started/tutorial.md`
-- `docs/sphinx/reference/dsl_reference.md`
-- `docs/sphinx/reference/bricks_reference.md`
+- `docs/sphinx/getting-started/installation.md`
+- `docs/sphinx/getting-started/first-run.md`
+- `docs/sphinx/getting-started/tutorial.md`
+- `docs/sphinx/reference/symbolic-dsl.md`
+- `docs/sphinx/reference/native-bricks.md`
 
 Control: the associated script runs in CI (smoke mode, see below) and the displayed fragment
 is included from that same script. The code on the page and the tested code are the same
@@ -57,12 +62,28 @@ These pages carry a judgment that the code does not hold and are not generated.
 - `docs/ALGORITHMS.md` (methods, formulas)
 - `docs/CHOICES.md` (deliberate trade-offs)
 - `docs/BACKEND_COVERAGE.md` (backend and test matrix)
-- the design notes: `docs/DSL_MODEL_DESIGN.md`, `docs/SCHUR_CONDENSATION_DESIGN.md`, the
-  `docs/AMR_*_DESIGN.md`, and others.
+- design notes for in-progress or recently changed work (architecture rationale). Once a
+  design note's feature has shipped, it moves to class D below.
 
 Control: human review plus a freshness check. Since nothing is regenerated here, freshness
 is tracked by an index (docmap) that raises a warning when a class-C page has not been
 reviewed since a given window.
+
+### D. Historical and archived
+
+Some pages describe a PAST state: a design note written before the feature landed, or a closed
+audit. They are kept for provenance, not as current truth. The current behavior is the code and
+its class-A reference; a class-D page is authoritative only for the intent it recorded at the
+time.
+
+- delivered design notes: `docs/AMR_MULTIBLOCK_DESIGN.md`, `docs/SCHUR_CONDENSATION_DESIGN.md`,
+  the older `*_DESIGN.md`.
+- closed audits and roadmaps: `docs/DOC_REFONTE_AUDIT.md`, `docs/CODEBASE_AUDIT.md`,
+  `docs/PERF_SCALING_TODO.md`, `docs/PERFORMANCE.md` (explicitly historical).
+
+Control: the page carries a banner at the top (for example `STATUS: ... read it as design
+history`) and stays out of the active Sphinx toctree. When a design note's feature ships, move
+it here rather than leaving a future-tense body that contradicts the code.
 
 ## Architecture decisions (ADR)
 
