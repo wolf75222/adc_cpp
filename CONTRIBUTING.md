@@ -31,6 +31,24 @@ The freshness policy (docmap, CI lanes) is described in
 [docs/DOC_QUALITY.md](docs/DOC_QUALITY.md). The light PR lane (`docs-pr.yml`) compiles
 nothing; the full build runs on the weekly cron and on manual dispatch.
 
+## Standards
+
+The conventions are written down; follow the project's decision first, then the upstream guide.
+
+- **C++ style**: Google C++ Style, adapted. The ratified decisions (what we follow, adapt or
+  drop, D1-D15) are in [docs/CODING_STANDARDS_DECISIONS.md](docs/CODING_STANDARDS_DECISIONS.md);
+  `.clang-format` and `.clang-tidy` enforce the mechanical part.
+- **Documentation style**: the internal guide
+  [docs/sphinx/development/documentation.md](docs/sphinx/development/documentation.md) codifies the
+  Google developer documentation style and SWE-at-Google ch.10 (doc treated as code). Write in
+  English (en-US), ASCII for `docs/sphinx/**`, no em-dash; `check_docs.py` and `sphinx -W` enforce
+  it. Page classes and freshness are in [docs/DOC_QUALITY.md](docs/DOC_QUALITY.md).
+- **Templates**: open a PR with [the PR template](.github/PULL_REQUEST_TEMPLATE.md) (its five
+  questions) and file issues with the forms under `.github/ISSUE_TEMPLATE/`.
+- **Automated checks** run before any review: the `ci.yml` gate (build and tests), `quality.yml`
+  (format, warnings, clang-tidy, sanitizers, fuzz, coverage, CodeQL), `no-ai-authors.yml`, and
+  `check_docs.py`. See Code review below for how their results are handled.
+
 ## Workflow
 
 - **Linear** is the source of truth for tasks: one `ADC-NN` issue = one PR.
