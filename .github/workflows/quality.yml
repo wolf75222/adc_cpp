@@ -537,6 +537,7 @@ jobs:
           languages: c-cpp
           build-mode: manual
           queries: security-and-quality
+          config-file: ./.github/codeql/codeql-config.yml
       # Build OBSERVE par le traceur CodeQL : un SOUS-ENSEMBLE de petites cibles de test a -O0
       # (ADC_TESTS_FAST_O0 du preset), choisi pour couvrir les couches d'en-tetes du coeur
       # (mesh / amr / elliptique / numerics) avec un cout d'extraction BORNE.

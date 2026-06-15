@@ -1,0 +1,5 @@
+name: "adc CodeQL config"
+paths-ignore:
+  - ".kokkos-install/**"
+  - "build*/**"
+  - "**/_deps/**"
