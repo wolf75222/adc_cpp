@@ -19,6 +19,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -74,12 +75,12 @@ inline void copy_shifted(Fab2D& dst, const Fab2D& src, const Box2D& region,
 struct PackKernel {
   Real* sb;
   ConstArray4 s;
-  long b0, rsz;
+  std::int64_t b0, rsz;
   int lo0, lo1, rnx, sx, sy, ncl;
   ADC_HD void operator()(int i, int jc) const {
-    const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
+    const std::int64_t off = static_cast<std::int64_t>(jc - lo1) * rnx + (i - lo0);
     for (int c = 0; c < ncl; ++c)
-      sb[b0 + static_cast<long>(c) * rsz + off] = s(i - sx, jc - sy, c);
+      sb[b0 + static_cast<std::int64_t>(c) * rsz + off] = s(i - sx, jc - sy, c);
   }
 };
 
@@ -87,12 +88,12 @@ struct PackKernel {
 struct UnpackKernel {
   const Real* rb;
   Array4 d;
-  long b0, rsz;
+  std::int64_t b0, rsz;
   int lo0, lo1, rnx, ncl;
   ADC_HD void operator()(int i, int jc) const {
-    const long off = static_cast<long>(jc - lo1) * rnx + (i - lo0);
+    const std::int64_t off = static_cast<std::int64_t>(jc - lo1) * rnx + (i - lo0);
     for (int c = 0; c < ncl; ++c)
-      d(i, jc, c) = rb[b0 + static_cast<long>(c) * rsz + off];
+      d(i, jc, c) = rb[b0 + static_cast<std::int64_t>(c) * rsz + off];
   }
 };
 
@@ -210,7 +211,7 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
   }
 
   auto buf_size = [&](const std::vector<Job>& js) {
-    long n = 0;
+    std::int64_t n = 0;
     for (const auto& j : js) n += j.region.num_cells() * nc;
     return n;
   };
@@ -224,13 +225,13 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
     if (send[r].empty()) continue;
     h.sbuf[r].resize(buf_size(send[r]));
     Real* sb = h.sbuf[r].data();
-    long base = 0;
+    std::int64_t base = 0;
     for (const auto& jb : send[r]) {
       const ConstArray4 s = mf.fab(mf.local_index_of(jb.src)).const_array();
       const int lo0 = jb.region.lo[0], lo1 = jb.region.lo[1], rnx = jb.region.nx();
-      const long rsz = static_cast<long>(rnx) * jb.region.ny();
+      const std::int64_t rsz = static_cast<std::int64_t>(rnx) * jb.region.ny();
       const int sx = jb.sx, sy = jb.sy, ncl = nc;
-      const long b0 = base;
+      const std::int64_t b0 = base;
       for_each_cell(jb.region,
                     detail::PackKernel{sb, s, b0, rsz, lo0, lo1, rnx, sx, sy, ncl});
       base += rsz * nc;
@@ -268,13 +269,13 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
   for (std::size_t r = 0; r < h.recv.size(); ++r) {
     if (h.rbuf[r].empty()) continue;
     const Real* rb = h.rbuf[r].data();
-    long base = 0;
+    std::int64_t base = 0;
     for (const auto& jb : h.recv[r]) {
       Array4 d = mf.fab(mf.local_index_of(jb.dst)).array();
       const int lo0 = jb.region.lo[0], lo1 = jb.region.lo[1], rnx = jb.region.nx();
-      const long rsz = static_cast<long>(rnx) * jb.region.ny();
+      const std::int64_t rsz = static_cast<std::int64_t>(rnx) * jb.region.ny();
       const int ncl = h.nc;
-      const long b0 = base;
+      const std::int64_t b0 = base;
       for_each_cell(jb.region,
                     detail::UnpackKernel{rb, d, b0, rsz, lo0, lo1, rnx, ncl});
       base += rsz * ncl;

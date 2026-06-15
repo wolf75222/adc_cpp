@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
@@ -44,7 +45,7 @@ struct TagBox {
   /// Construit une TagBox couvrant b, tous marqueurs a 0 (buffer dimensionne sur b.num_cells()).
   explicit TagBox(const Box2D& b)
       : box(b),
-        t(static_cast<std::size_t>(std::max<long>(0, b.num_cells())), 0) {}
+        t(static_cast<std::size_t>(std::max<std::int64_t>(0, b.num_cells())), 0) {}
 
   /// Acces en ecriture au marqueur (i, j) ; (i, j) DOIT etre dans box (aucun controle de bornes).
   char& operator()(int i, int j) { return t[idx(i, j)]; }
@@ -56,8 +57,8 @@ struct TagBox {
   }
 
   /// Nombre de cellules taguees (somme des marqueurs).
-  long count() const {
-    long c = 0;
+  std::int64_t count() const {
+    std::int64_t c = 0;
     for (char x : t) c += x;
     return c;
   }

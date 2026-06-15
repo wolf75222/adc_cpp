@@ -11,6 +11,7 @@
 
 #pragma once
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <cstdio>
 
@@ -111,7 +112,7 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
   }
 
   auto bufsz = [&](const std::vector<Job>& js) {
-    long n = 0;
+    std::int64_t n = 0;
     for (const auto& j : js) n += j.region.num_cells() * nc;
     return n;
   };
@@ -121,7 +122,7 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
   for (int r = 0; r < np; ++r) {
     if (!send[r].empty()) {
       sbuf[r].resize(bufsz(send[r]));
-      long k = 0;
+      std::int64_t k = 0;
       for (const auto& j : send[r]) {
         const ConstArray4 s = src.fab(src.local_index_of(j.gs)).const_array();
         for (int c = 0; c < nc; ++c)
@@ -145,7 +146,7 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
 
   device_fence();  // GPU : barriere avant l'ecriture HOTE des cellules recues
   for (int r = 0; r < np; ++r) {
-    long k = 0;
+    std::int64_t k = 0;
     for (const auto& j : recv[r]) {
       Array4 d = dst.fab(dst.local_index_of(j.gd)).array();
       for (int c = 0; c < nc; ++c)
