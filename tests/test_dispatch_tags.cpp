@@ -3,8 +3,8 @@
 // est VOLONTAIREMENT LEGER (il n'inclut QUE dispatch_tags.hpp, aucun System / modele) : il verrouille
 //   (1) la MATRICE d'acceptation/rejet de validate_limiter / validate_riemann (cartesien ET polaire),
 //   (2) les n_ghost de limiter_n_ghost (1/2/2/3 + fallback MUSCL 2 sur inconnu),
-//   (3) la presence des FRAGMENTS de messages HISTORIQUES que des tests grepent ("limiter inconnu",
-//       "flux Riemann inconnu", "non supporte" / "polaire") + le prefixe de contexte,
+//   (3) la presence des FRAGMENTS de messages que des tests grepent ("unknown limiter",
+//       "unknown Riemann flux", "unsupported" / "polar") + le prefixe de contexte,
 //   (4) le contenu des tables kLimiters / kRiemanns (noms, n_ghost, polar_ok).
 // Aucune capabilite modele n'est testee ici (hll/hllc/roe sur un transport sans onde / sans pression)
 // : ces gardes sont des `if constexpr` PAR MODELE au call-site, hors perimetre du registry.
@@ -56,14 +56,14 @@ int main() {
   chk(!throws([] { validate_limiter("weno5"); }, msg), "limiter weno5 accepte");
   // rejets : tag inconnu, casse differente, vide.
   chk(throws([] { validate_limiter("bogus"); }, msg), "limiter bogus rejete");
-  chk(contains(msg, "limiter inconnu") && contains(msg, "bogus"),
+  chk(contains(msg, "unknown limiter") && contains(msg, "bogus"),
       "message limiter inconnu contient le fragment + le tag");
   chk(contains(msg, "System"), "message limiter porte le contexte par defaut 'System'");
   chk(throws([] { validate_limiter("WENO5"); }, msg), "limiter WENO5 (casse) rejete");
   chk(throws([] { validate_limiter(""); }, msg), "limiter vide rejete");
   // contexte explicite preserve (parite avec les anciens throws inline des dispatchs).
   (void)throws([] { validate_limiter("x", "add_block(AmrSystem, multi-blocs)"); }, msg);
-  chk(contains(msg, "add_block(AmrSystem, multi-blocs)") && contains(msg, "limiter inconnu"),
+  chk(contains(msg, "add_block(AmrSystem, multi-blocs)") && contains(msg, "unknown limiter"),
       "contexte AMR present dans le message limiter");
 
   // --- (2) validate_riemann CARTESIEN : matrice -----------------------------------------------------
@@ -72,7 +72,7 @@ int main() {
   chk(!throws([] { validate_riemann("hllc"); }, msg), "riemann hllc accepte (cartesien)");
   chk(!throws([] { validate_riemann("roe"); }, msg), "riemann roe accepte (cartesien)");
   chk(throws([] { validate_riemann("bogus"); }, msg), "riemann bogus rejete (cartesien)");
-  chk(contains(msg, "flux Riemann inconnu") && contains(msg, "bogus"),
+  chk(contains(msg, "unknown Riemann flux") && contains(msg, "bogus"),
       "message flux Riemann inconnu contient le fragment + le tag");
   chk(contains(msg, "rusanov|hll|hllc|roe"), "message flux liste les tags valides");
 
@@ -82,15 +82,15 @@ int main() {
   // hll/hllc/roe sont des tags CONNUS mais NON cables en polaire -> rejet avec le message polaire.
   chk(throws([] { validate_riemann("hllc", /*polar=*/true, "System (polaire)"); }, msg),
       "riemann hllc rejete en polaire");
-  chk(contains(msg, "non supporte") && contains(msg, "polaire") && contains(msg, "rusanov"),
-      "message polaire : non supporte / polaire / rusanov");
+  chk(contains(msg, "unsupported") && contains(msg, "polar") && contains(msg, "rusanov"),
+      "message polaire : unsupported / polar / rusanov");
   chk(!throws([] { validate_riemann("hll", /*polar=*/true, "System (polaire)"); }, msg),
       "riemann hll ACCEPTE en polaire (solde audit : gate wave_speeds au call-site)");
   chk(throws([] { validate_riemann("roe", /*polar=*/true, "System (polaire)"); }, msg),
       "riemann roe rejete en polaire");
   chk(throws([] { validate_riemann("bogus", /*polar=*/true, "System (polaire)"); }, msg),
       "riemann inconnu rejete en polaire (meme message)");
-  chk(contains(msg, "non supporte"), "tag inconnu en polaire -> message polaire (parite historique)");
+  chk(contains(msg, "unsupported"), "tag inconnu en polaire -> message polaire (parite historique)");
 
   // --- (4) limiter_n_ghost : largeurs de halo (allocation bit-identique) ----------------------------
   chk(limiter_n_ghost("none") == 1, "n_ghost(none) == 1");

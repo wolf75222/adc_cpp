@@ -85,6 +85,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 - **Docs (Pages) build**: `suppress_warnings = ["docutils"]` set unconditionally in
   `docs/sphinx/conf.py` so `sphinx -W` no longer fails on autodoc-rendered Doxygen `@param`
   docstrings (the meaningful broken-reference and toctree checks stay strict).
+- **`master` gate unblocked** (ADC-281): `test_dispatch_tags` greps the dispatch-registry error
+  fragments, which ADC-272 (#105) had translated to English in `dispatch_tags.hpp` without updating
+  the test -- reconciled the grepped fragments (`unknown limiter` / `unknown Riemann flux` /
+  `unsupported` / `polar`).
 
 ## [0.1.0] - 2026-06-10
 
