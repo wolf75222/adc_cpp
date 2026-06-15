@@ -46,9 +46,21 @@ substantial change is itself a signal worth recording.
 | [STYLE_CONFORMANCE_AUDIT.md](STYLE_CONFORMANCE_AUDIT.md) | conformance to C++ standards | ADC-124 |
 | [COMMENTS_AUDIT.md](COMMENTS_AUDIT.md) | accuracy of comments | ADC-125 |
 | [PERF_SCALING_FRONTENDS_AUDIT_2026-06-08.md](PERF_SCALING_FRONTENDS_AUDIT_2026-06-08.md) | performance and scaling | ADC-193 |
-| [TOOLCHAIN_ROBUSTESSE_AUDIT_2026-06-10.md](TOOLCHAIN_ROBUSTESSE_AUDIT_2026-06-10.md) | toolchain and install robustness | ADC-192 |
+| [TOOLCHAIN_ROBUSTESSE_AUDIT_2026-06-10.md](TOOLCHAIN_ROBUSTESSE_AUDIT_2026-06-10.md) | toolchain and install robustness | toolchain hardening |
+| [CONFORMANCE_AUDIT.md](CONFORMANCE_AUDIT.md) | spec & requirement conformance | ADC-188 |
+| [STL_BOOST_AUDIT.md](STL_BOOST_AUDIT.md) | STL idiom & Boost decision | ADC-192 |
 | [DOC_REFONTE_AUDIT.md](DOC_REFONTE_AUDIT.md) | documentation truth matrix | ADC-146 |
 | [CODING_STANDARDS_DECISIONS.md](CODING_STANDARDS_DECISIONS.md) | adopted conventions (D1-D15) | ADC-124/219 |
+
+## Per-axis status (ADC-188..194)
+
+- ADC-188 -- Conformance to specs & requirements: NEW report [CONFORMANCE_AUDIT.md](CONFORMANCE_AUDIT.md). Contracts mostly hold (step ordering, explicit guards, model-agnostic core); two real spec<->code divergences: stale "multi-block AMR + regrid_every>0 is REFUSED" claim (now implemented/tested) and silent elliptic-Poisson non-convergence.
+- ADC-189 -- Flexible architecture: COVERED by [CODEBASE_AUDIT.md](CODEBASE_AUDIT.md) (+ GENERICITY_2026-06.md). Bricks are unit-testable; the prior P0 god-class is substantially resolved (Lot B). Two Low post-snapshot watch-items tracked as issues.
+- ADC-190 -- Anti-patterns (duplication etc.): PARTIALLY COVERED by [CODEBASE_AUDIT.md](CODEBASE_AUDIT.md) (pre-dates the polar Schur stepper / multi-box theta path). Two net-new Medium duplications tracked as issues.
+- ADC-191 -- Simplification / LOC: PARTIALLY COVERED by [CODEBASE_AUDIT.md](CODEBASE_AUDIT.md) (coarse extraction, now done). Two net-new Low behavior-preserving factor-outs tracked as issues.
+- ADC-192 -- STL & Boost: NEW report [STL_BOOST_AUDIT.md](STL_BOOST_AUDIT.md). Boost = NO (0 hits). STL host code is clean; 3 Low sites tracked. TOOLCHAIN_ROBUSTESSE is build-robustness only, no STL/Boost content.
+- ADC-193 -- Performance: COVERED at campaign altitude by [PERF_SCALING_FRONTENDS_AUDIT_2026-06-08.md](PERF_SCALING_FRONTENDS_AUDIT_2026-06-08.md). Four net-new code-level hotspots (need before/after measurement) tracked as issues.
+- ADC-194 -- Test coverage gaps: tracked via Linear issues; BACKEND_COVERAGE.md is a backend x test matrix, not a functional-gap analysis. Highest risk: MPI IO/checkpoint gather has no multi-rank test (dangling cross-ref to a nonexistent C++ test, verified); positivity floor tested only single-grid serial; matrix stale.
 
 ## Adding an audit
 
