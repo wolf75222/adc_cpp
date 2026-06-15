@@ -13,6 +13,7 @@
 #include <adc/core/types.hpp>  // ADC_HD : nx/ny/length appeles depuis Geometry::dx() dans un kernel device
 
 #include <algorithm>
+#include <cstdint>
 
 // Box2D : l'espace d'indices entier d'une grille cartesienne 2D, cellule au
 // centre. C'est la brique de base de la pile AMR, inspiree du Box d'AMReX.
@@ -51,8 +52,8 @@ struct Box2D {
   /// Hauteur (direction 1). ADC_HD (appele depuis Geometry::dy() en kernel device).
   ADC_HD int ny() const { return length(1); }
   /// Nombre total de cellules (nx*ny, plancher 0 par direction) : 0 si la box est vide.
-  long num_cells() const {
-    return static_cast<long>(std::max(0, nx())) * std::max(0, ny());
+  std::int64_t num_cells() const {
+    return static_cast<std::int64_t>(std::max(0, nx())) * std::max(0, ny());
   }
   /// true si la box ne contient aucune cellule (hi < lo dans une direction).
   bool empty() const { return hi[0] < lo[0] || hi[1] < lo[1]; }

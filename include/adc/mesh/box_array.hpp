@@ -10,6 +10,7 @@
 
 #include <adc/mesh/box2d.hpp>
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -49,8 +50,8 @@ class BoxArray {
   const std::vector<Box2D>& boxes() const { return boxes_; }
 
   /// Nombre total de cellules valides (somme des num_cells de toutes les boxes).
-  long num_cells() const {
-    long n = 0;
+  std::int64_t num_cells() const {
+    std::int64_t n = 0;
     for (const auto& b : boxes_) n += b.num_cells();
     return n;
   }

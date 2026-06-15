@@ -18,6 +18,7 @@
 #include <adc/mesh/box2d.hpp>
 
 #include <cassert>
+#include <cstdint>
 #include <vector>
 
 // Fab2D : donnees mono-grille sur une Box2D, l'equivalent maison du FArrayBox
@@ -42,13 +43,13 @@ namespace adc {
 struct Array4 {
   Real* p{nullptr};
   int nx_tot{0};
-  long comp_stride{0};
+  std::int64_t comp_stride{0};
   int ig0{0}, jg0{0};  // indices globaux du coin bas de la box etendue
 
   /// Reference a la cellule (i, j) de la composante c (indices globaux). ADC_HD. Aucun controle
   /// de bornes (chemin chaud / device) : l'appelant garantit (i, j, c) dans la box etendue.
   ADC_HD Real& operator()(int i, int j, int c = 0) const {
-    return p[c * comp_stride + static_cast<long>(j - jg0) * nx_tot + (i - ig0)];
+    return p[c * comp_stride + static_cast<std::int64_t>(j - jg0) * nx_tot + (i - ig0)];
   }
 };
 
@@ -57,12 +58,12 @@ struct Array4 {
 struct ConstArray4 {
   const Real* p{nullptr};
   int nx_tot{0};
-  long comp_stride{0};
+  std::int64_t comp_stride{0};
   int ig0{0}, jg0{0};
 
   /// Valeur de la cellule (i, j) de la composante c (indices globaux). ADC_HD, aucun controle de bornes.
   ADC_HD Real operator()(int i, int j, int c = 0) const {
-    return p[c * comp_stride + static_cast<long>(j - jg0) * nx_tot + (i - ig0)];
+    return p[c * comp_stride + static_cast<std::int64_t>(j - jg0) * nx_tot + (i - ig0)];
   }
 };
 
@@ -81,7 +82,7 @@ class Fab2D {
         gbox_(valid.grow(ng)),
         nx_tot_(gbox_.nx()),
         ny_tot_(gbox_.ny()),
-        data_(static_cast<long>(nx_tot_) * ny_tot_ * ncomp, Real{0}) {}
+        data_(static_cast<std::int64_t>(nx_tot_) * ny_tot_ * ncomp, Real{0}) {}
 
   /// Box VALIDE (hors ghosts).
   const Box2D& box() const { return valid_; }
@@ -92,7 +93,7 @@ class Fab2D {
   /// Nombre de couches de ghosts.
   int n_ghost() const { return ng_; }
   /// Taille du buffer (nx_tot * ny_tot * ncomp).
-  long size() const { return static_cast<long>(data_.size()); }
+  std::int64_t size() const { return static_cast<std::int64_t>(data_.size()); }
 
   /// Acces HOTE (i, j, c) en ecriture (assert de bornes en debug). Ne pas appeler dans un kernel
   /// device : passer par array() (handle POD).
@@ -103,12 +104,12 @@ class Fab2D {
   /// Handle d'ECRITURE (POD device-copyable) sur ce Fab. Valide tant que le Fab vit.
   Array4 array() {
     return Array4{data_.data(), nx_tot_,
-                  static_cast<long>(nx_tot_) * ny_tot_, gbox_.lo[0], gbox_.lo[1]};
+                  static_cast<std::int64_t>(nx_tot_) * ny_tot_, gbox_.lo[0], gbox_.lo[1]};
   }
   /// Handle de LECTURE (POD device-copyable) sur ce Fab. Valide tant que le Fab vit.
   ConstArray4 const_array() const {
     return ConstArray4{data_.data(), nx_tot_,
-                       static_cast<long>(nx_tot_) * ny_tot_, gbox_.lo[0],
+                       static_cast<std::int64_t>(nx_tot_) * ny_tot_, gbox_.lo[0],
                        gbox_.lo[1]};
   }
 
@@ -120,10 +121,10 @@ class Fab2D {
 
  private:
   // index lineaire (i, j, c) dans le layout composante-lente ; assert de bornes en debug.
-  long idx(int i, int j, int c) const {
+  std::int64_t idx(int i, int j, int c) const {
     assert(gbox_.contains(i, j) && c >= 0 && c < ncomp_);
-    return c * static_cast<long>(nx_tot_) * ny_tot_ +
-           static_cast<long>(j - gbox_.lo[1]) * nx_tot_ + (i - gbox_.lo[0]);
+    return c * static_cast<std::int64_t>(nx_tot_) * ny_tot_ +
+           static_cast<std::int64_t>(j - gbox_.lo[1]) * nx_tot_ + (i - gbox_.lo[0]);
   }
 
   Box2D valid_{};
