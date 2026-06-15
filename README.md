@@ -2,19 +2,18 @@
 
 # adc_cpp
 
-**A model-free C++23 core for coupled hyperbolic-elliptic systems on adaptive (AMR) meshes, with MPI and GPU backends.**
+**A model-free C++23 core for coupled hyperbolic-elliptic systems on adaptive (AMR) meshes.**
 
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?logo=cplusplus)
-![Build](https://img.shields.io/badge/build-CMake%203.21%2B%20(presets)-064F8C?logo=cmake)
-![Backends](https://img.shields.io/badge/backends-MPI%20%7C%20Kokkos%20(CPU%2FGPU)-orange)
+![CMake](https://img.shields.io/badge/CMake-3.21%2B-064F8C?logo=cmake)
+![Backends](https://img.shields.io/badge/backends-MPI%20%7C%20Kokkos-orange)
 ![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/license-BSD--3-green)
 
 </div>
 
 <p align="center">
-  <img src="docs/anim_romeo_diocotron_amr3.gif" alt="Diocotron instability, 3-level AMR, on ROMEO" width="640">
+  <img src="docs/anim_romeo_diocotron_amr3.gif" alt="Diocotron instability, 3-level AMR, on ROMEO" width="480">
 </p>
 
 <div align="center">
