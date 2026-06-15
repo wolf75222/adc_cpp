@@ -1,3 +1,5 @@
+> **STATUS: historical.** The Phase-1 documentation audit (truth matrix); it reflects the state at the time and several of its items have since been acted on. Read it as a historical record (class D, see `DOC_QUALITY.md`).
+
 # Documentation audit adc_cpp / adc_cases -- truth matrix (Phase 1)
 
 > Synthesis document assembled from the 8-agent inventory (adc_cpp prose, Sphinx, three canonical docs verified code-in-hand, real Python/DSL API, adc_cases cases, build/run, tests, assets) plus an adversarial verification pass. Verdicts marked CONFIRMED come from the independent adversarial pass; the others rest on the inventory alone (flagged where the data is thin).
