@@ -27,6 +27,7 @@ getting-started/index
 tutorials/first-model
 tutorials/write-a-model-with-bricks
 tutorials/write-a-model-with-dsl
+tutorials/moment-model-hyqmom15
 tutorials/hybrid-model-native-plus-dsl
 tutorials/euler-poisson-case
 tutorials/hoffart-diocotron-case
@@ -42,6 +43,7 @@ concepts/hyperbolic-elliptic-systems
 concepts/physical-model
 concepts/conservative-primitive-variables
 concepts/fluxes-sources-eigenvalues
+concepts/moments-and-closures
 concepts/elliptic-rhs
 concepts/poisson
 concepts/time-integration
