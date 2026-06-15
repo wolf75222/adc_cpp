@@ -4,18 +4,14 @@
 
 #include <adc/mesh/box2d.hpp>
 
+#include "test_harness.hpp"  // adc::test::Checker (compteur + assertion partages)
+
 #include <cstdio>
 
 using namespace adc;
 
 int main() {
-  int fails = 0;
-  auto chk = [&](bool c, const char* w) {
-    if (!c) {
-      std::printf("FAIL %s\n", w);
-      ++fails;
-    }
-  };
+  adc::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
 
   Box2D b = Box2D::from_extents(4, 3);  // [0..3] x [0..2]
   chk(b.nx() == 4 && b.ny() == 3, "extents");
@@ -44,6 +40,6 @@ int main() {
 
   chk(a.contains(in) && !a.contains(d), "contains_box");
 
-  if (fails == 0) std::printf("OK test_box2d\n");
-  return fails == 0 ? 0 : 1;
+  if (chk.fails() == 0) std::printf("OK test_box2d\n");
+  return chk.failed();
 }

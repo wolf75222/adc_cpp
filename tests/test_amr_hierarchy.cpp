@@ -6,6 +6,8 @@
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/refinement.hpp>
 
+#include "test_harness.hpp"  // adc::test::Checker (compteur + assertion partages)
+
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -13,14 +15,8 @@
 using namespace adc;
 
 int main() {
-  int fails = 0;
-  auto chk = [&](bool c, const char* w) {
-    if (!c) {
-      std::printf("FAIL %s\n", w);
-      ++fails;
-    }
-  };
-  auto close = [](Real x, Real y) { return std::fabs(x - y) < 1e-9; };
+  adc::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
+  auto close = [](Real x, Real y) { return std::fabs(x - y) < 1e-9; };  // tolerance absolue locale
 
   Box2D cdom = Box2D::from_extents(8, 8);  // [0..7]
   AmrHierarchy h(cdom, /*max_grid_size=*/8, /*ncomp=*/1, /*ngrow=*/1,
@@ -49,6 +45,6 @@ int main() {
   chk(close(h.data(1).fab(0)(4, 4, 0), 202.0), "interp_44");    // gc(2,2)
   chk(close(h.data(1).fab(0)(11, 11, 0), 505.0), "interp_1111");  // gc(5,5)
 
-  if (fails == 0) std::printf("OK test_amr_hierarchy\n");
-  return fails == 0 ? 0 : 1;
+  if (chk.fails() == 0) std::printf("OK test_amr_hierarchy\n");
+  return chk.failed();
 }

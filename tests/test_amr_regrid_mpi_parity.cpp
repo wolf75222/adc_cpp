@@ -34,6 +34,8 @@
 #include <adc/runtime/model_spec.hpp>
 #include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
 
+#include "test_harness.hpp"  // adc::test::checksum (somme des carres partagee)
+
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -114,11 +116,7 @@ int main(int argc, char** argv) {
   const double ma = sys.mass("a"), mb = sys.mass("b");
   const int npatch = sys.n_patches();  // nombre de patchs fins = signature du layout fin d'union
 
-  auto checksum = [](const std::vector<double>& v) {
-    double s = 0;
-    for (double x : v) s += x * x;
-    return s;
-  };
+  using adc::test::checksum;  // somme des carres partagee (signature deterministe d'un champ)
   const double ca = checksum(da), cb = checksum(db), cp = checksum(phi);
 
   // (1) CONSISTANCE CROSS-RANG : densite reconstruite globalement + potentiel + n_patches sont des

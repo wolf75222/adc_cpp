@@ -9,25 +9,20 @@
 
 #include <adc/numerics/dense_eig.hpp>
 
+#include "test_harness.hpp"  // adc::test::Checker (style verbose) + close_rel partages
+
 #include <cmath>
 #include <cstdio>
 
 using adc::Real;
 using adc::EigBounds;
 using adc::real_eig_minmax;
+using adc::test::close_rel;  // comparaison relative+absolue partagee (atol defaut 1e-12)
 
-static int fails = 0;
+// Compteur d'echecs partage, en style VERBOSE (imprime chaque ligne [OK ]/[XX ] comme avant).
+static adc::test::Checker g_chk{adc::test::Checker::Style::Verbose};
 
-static void chk(bool ok, const char* label) {
-  std::printf("  [%s] %s\n", ok ? "OK " : "XX ", label);
-  if (!ok) ++fails;
-}
-
-static bool close_rel(Real a, Real b, Real rtol, Real atol = Real(1e-12)) {
-  const Real d = std::fabs(a - b);
-  const Real s = std::fabs(a) > std::fabs(b) ? std::fabs(a) : std::fabs(b);
-  return d <= rtol * s + atol;
-}
+static void chk(bool ok, const char* label) { g_chk(ok, label); }
 
 /// Matrice compagnon (premiere ligne = -coefficients) du polynome unitaire de racines @p roots :
 /// spectre exactement {roots}. p(x) = prod (x - r_k) developpe par produits successifs.
@@ -234,6 +229,6 @@ int main() {
     chk(b.lmin == glo && b.lmax == ghi, "le repli EST la borne de Gershgorin (contrat documente)");
   }
 
-  std::printf("FAILS = %d\n", fails);
-  return fails ? 1 : 0;
+  std::printf("FAILS = %d\n", g_chk.fails());
+  return g_chk.failed();
 }
