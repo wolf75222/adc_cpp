@@ -15,6 +15,7 @@
 option(ADC_ENABLE_WARNINGS   "Compile les cibles internes (tests + _adc) avec des warnings stricts" OFF)
 option(ADC_ENABLE_SANITIZERS "Instrumente les cibles internes (tests + _adc) avec ASan + UBSan"     OFF)
 option(ADC_ENABLE_COVERAGE   "Instrumente les cibles internes (tests + _adc) pour gcov/gcovr"       OFF)
+option(ADC_ENABLE_TSAN       "Instrumente les cibles internes (tests + _adc) avec ThreadSanitizer (races)" OFF)
 
 # Cible TOUJOURS definie (vide si les deux options sont OFF) : tests/ et python/ la lient
 # inconditionnellement, sans garde `if(TARGET ...)`.
@@ -86,5 +87,31 @@ if(ADC_ENABLE_COVERAGE)
   else()
     message(WARNING "adc: ADC_ENABLE_COVERAGE ignore (GCC requis, "
                     "compilateur = ${CMAKE_CXX_COMPILER_ID}).")
+  endif()
+endif()
+
+# --- ThreadSanitizer (TSan) ----------------------------------------------------------------------
+# Detection de data races sur le SEUL backend on-node multi-thread : Kokkos OpenMP (le gate ctest
+# tourne en Serial, ou aucune race ne peut apparaitre). Compile ET link portent -fsanitize=thread.
+# MUTUELLEMENT EXCLUSIF d'ASan : un binaire ne peut embarquer qu'un seul runtime memoire/thread ->
+# erreur claire si les deux options sont ON (presets ci-tsan / ci-asan distincts). Chemin OBLIGATOIRE
+# clang + libomp LLVM : libgomp (gcc) n'est PAS TSan-aware (tempete de faux positifs). Kokkos / libomp
+# sont lies mais NON instrumentes -> faux positifs benins filtres par tsan-suppressions.txt (chaque
+# entree justifiee). Voir le job 'tsan' de quality.yml (OMP_NUM_THREADS, TSAN_OPTIONS).
+if(ADC_ENABLE_TSAN)
+  if(ADC_ENABLE_SANITIZERS)
+    message(FATAL_ERROR "adc: ADC_ENABLE_TSAN et ADC_ENABLE_SANITIZERS (ASan) sont mutuellement "
+                        "exclusifs (un binaire ne porte qu'un runtime). Choisir le preset ci-tsan "
+                        "OU ci-asan, pas les deux.")
+  endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(_adc_tsan_flags -fsanitize=thread -fno-omit-frame-pointer)
+    target_compile_options(adc_dev_options INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:${_adc_tsan_flags}>")
+    target_link_options(adc_dev_options INTERFACE ${_adc_tsan_flags})
+    message(STATUS "adc: ADC_ENABLE_TSAN=ON -> TSan sur les cibles internes "
+                   "(clang + libomp requis ; Kokkos non instrumente, voir tsan-suppressions.txt).")
+  else()
+    message(WARNING "adc: ADC_ENABLE_TSAN ignore (compilateur ${CMAKE_CXX_COMPILER_ID} "
+                    "non supporte pour TSan).")
   endif()
 endif()

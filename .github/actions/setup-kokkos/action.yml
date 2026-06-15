@@ -1,10 +1,11 @@
-name: 'Setup Kokkos (Serial, PIC)'
+name: 'Setup Kokkos (PIC, cached)'
 description: >
-  Installe les deps de build (Eigen, Ninja, ccache) et une install Kokkos Serial PIC MISE EN CACHE,
-  puis expose son prefixe via l'output `kokkos-prefix`. La cle de cache est IDENTIQUE a celle du gate
-  ci.yml (kokkos-<os>-<version>-serial-cxx20-gcc-pic) : quality.yml reutilise le Kokkos deja construit
-  par le gate (et inversement), evitant toute reconstruction. Factorise les etapes repetees par les
-  jobs warnings / tidy / sanitizers / codeql de quality.yml.
+  Installe les deps de build (Eigen, Ninja, ccache) et une install Kokkos PIC MISE EN CACHE (Serial
+  par defaut, OpenMP en option via exec-space), puis expose son prefixe via l'output `kokkos-prefix`.
+  Avec les defauts (serial + gcc) la cle de cache est IDENTIQUE a celle du gate ci.yml
+  (kokkos-<os>-<version>-serial-cxx20-gcc-pic) : quality.yml reutilise le Kokkos deja construit par le
+  gate (et inversement), evitant toute reconstruction. Chaque (exec-space, compiler) a sa propre cle.
+  Factorise les etapes repetees par les jobs warnings / tidy / sanitizers / fuzz / tsan / codeql.
 
 inputs:
   kokkos-version:
@@ -19,6 +20,12 @@ inputs:
       cache historique du gate ci.yml ; clang produit une install SEPAREE (cle distincte), requise
       par le job fuzz (les harnais libFuzzer compilent en clang, on aligne le Kokkos lie).
     default: 'gcc'
+  exec-space:
+    description: >
+      Espace d'execution Kokkos host : serial (defaut) ou openmp. openmp active Kokkos_ENABLE_OPENMP
+      (espace par defaut multi-thread, prioritaire sur Serial) et installe libomp-dev ; requis par le
+      job tsan (sans threads, TSan ne teste rien). Cle de cache distincte (l'install differe).
+    default: 'serial'
 
 outputs:
   kokkos-prefix:
@@ -36,18 +43,22 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y libeigen3-dev ninja-build ccache ${{ inputs.extra-apt }}
+        # exec-space=openmp : le backend OpenMP clang a besoin de libomp LLVM (libgomp gcc n'est pas
+        # TSan-aware, cf. job tsan). En serial, rien de plus.
+        OMP_DEP=""
+        if [ "${{ inputs.exec-space }}" = "openmp" ]; then OMP_DEP="libomp-dev"; fi
+        sudo apt-get install -y libeigen3-dev ninja-build ccache $OMP_DEP ${{ inputs.extra-apt }}
 
-    # Avec compiler=gcc (defaut), la cle est IDENTIQUE a celle du gate ci.yml -> cache partage
-    # (gros gain : pas de reconstruction Kokkos). compiler=clang isole sa propre cle.
-    - name: Cache Kokkos install (Serial ${{ inputs.kokkos-version }}, ${{ inputs.compiler }})
+    # Avec les defauts (serial + gcc), la cle est IDENTIQUE a celle du gate ci.yml -> cache partage
+    # (gros gain : pas de reconstruction Kokkos). Chaque (exec-space, compiler) isole sa propre cle.
+    - name: Cache Kokkos install (${{ inputs.exec-space }} ${{ inputs.kokkos-version }}, ${{ inputs.compiler }})
       id: kokkos-cache
       uses: actions/cache@v4
       with:
         path: ${{ steps.paths.outputs.prefix }}
-        key: kokkos-${{ runner.os }}-${{ inputs.kokkos-version }}-serial-cxx20-${{ inputs.compiler }}-pic
+        key: kokkos-${{ runner.os }}-${{ inputs.kokkos-version }}-${{ inputs.exec-space }}-cxx20-${{ inputs.compiler }}-pic
 
-    - name: Build + install Kokkos (Serial, PIC, ${{ inputs.compiler }})
+    - name: Build + install Kokkos (${{ inputs.exec-space }}, PIC, ${{ inputs.compiler }})
       if: steps.kokkos-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
@@ -55,8 +66,12 @@ runs:
           clang) CXX_BIN=clang++ ;;
           *)     CXX_BIN=g++ ;;
         esac
+        # exec-space=openmp : active le backend OpenMP (espace host par defaut, prioritaire sur Serial)
+        # -> for_each / reductions / packing fill_boundary tournent multi-thread (requis pour TSan).
+        OMP_FLAG=""
+        if [ "${{ inputs.exec-space }}" = "openmp" ]; then OMP_FLAG="-DKokkos_ENABLE_OPENMP=ON"; fi
         git clone --depth 1 -b ${{ inputs.kokkos-version }} https://github.com/kokkos/kokkos.git /tmp/kokkos
-        cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
+        cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON $OMP_FLAG \
           -DCMAKE_INSTALL_PREFIX="${{ steps.paths.outputs.prefix }}" -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_CXX_COMPILER="$CXX_BIN" \
           -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \

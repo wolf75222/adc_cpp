@@ -30,7 +30,7 @@ summary and as artifacts, but they do not make the run fail (no `-Werror`, `clan
 CMake options are **OFF by default** -> `ci.yml`, local builds and `adc_cases` are unchanged. The
 other jobs switch to blocking according to the criteria in the dedicated section.
 
-## The seven jobs
+## The eight jobs
 
 | Job | Tool | Config | Preset / option |
 | --- | --- | --- | --- |
@@ -38,11 +38,12 @@ other jobs switch to blocking according to the criteria in the dedicated section
 | `warnings` | gcc `-Wall -Wextra ...` | `cmake/AdcDevTooling.cmake` | preset `ci-warnings` (`ADC_ENABLE_WARNINGS`) |
 | `tidy` | clang-tidy | `.clang-tidy` | preset `ci-kokkos` (compile DB) |
 | `sanitizers` | ASan + UBSan | `cmake/AdcDevTooling.cmake` | preset `ci-asan` (`ADC_ENABLE_SANITIZERS`) |
+| `tsan` | ThreadSanitizer (races) | `cmake/AdcDevTooling.cmake`, `tsan-suppressions.txt` | preset `ci-tsan` (`ADC_ENABLE_TSAN`, clang + Kokkos OpenMP) |
 | `fuzz` | libFuzzer (90 s/target) | `fuzz/` (invariant harnesses) | preset `ci-fuzz` (`ADC_BUILD_FUZZING`, clang) |
 | `coverage` | gcov + gcovr | `cmake/AdcDevTooling.cmake` | preset `ci-coverage` (`ADC_ENABLE_COVERAGE`) |
 | `codeql` | CodeQL C++ | suite `security-and-quality` | preset `ci-kokkos` (traced build) |
 
-Warnings, sanitizers and coverage are carried by an **`INTERFACE adc_dev_options`** target that
+Warnings, sanitizers, TSan and coverage are carried by an **`INTERFACE adc_dev_options`** target that
 **only** the internal targets link in `PRIVATE` (the ~140 tests via `adc_add_test`, the `_adc`
 module). The public core `adc::adc` is never touched -> no flag leaks to consumers.
 
@@ -63,6 +64,26 @@ the explicit invariants (`abort()` -> reproducible artifact).
 
 Reproduce a CI crash : download the `fuzz-crashes` artifact, then
 `./build-fuzz/bin/<target> <crash-file>` (single, deterministic run).
+
+## ThreadSanitizer (`tsan`)
+
+The `tsan` job runs the whole `ctest` suite under **ThreadSanitizer** on the **Kokkos OpenMP**
+backend -- the angle the other sanitizers miss. The gate's `ctest` runs **Serial** (zero threads, so
+no race can ever appear), yet OpenMP is the on-node production backend : `for_each_cell`, the
+reductions and the `fill_boundary` halo packing are exactly where a race stays latent. Two
+mandatory choices come from how the runtimes behave under TSan :
+
+- **clang + libomp LLVM, never gcc/libgomp.** `libgomp` is not TSan-aware -> a storm of false
+  positives. The `ci-tsan` preset compiles with `clang++`, and `setup-kokkos` (`exec-space: openmp`,
+  `compiler: clang`) installs `libomp-dev` and a Kokkos OpenMP install (separate cache key).
+- **`tsan-suppressions.txt` (repo root) is seeded, not final.** Kokkos and libomp are linked but
+  uninstrumented, so their internals report benign races ; each suppression is justified there, and a
+  race inside `include/adc/` must never be suppressed. The first weekly run triages signal vs noise
+  (`OMP_NUM_THREADS=2`, `TSAN_OPTIONS` points at the file) ; a confirmed race becomes a dedicated
+  High-priority issue.
+
+ASan and TSan are **mutually exclusive** (one memory/thread runtime per binary) : enabling both
+`ADC_ENABLE_SANITIZERS` and `ADC_ENABLE_TSAN` is a hard CMake error -- use `ci-tsan` **or** `ci-asan`.
 
 ## pre-commit (auto-format at commit, opt-in, local)
 
@@ -93,6 +114,13 @@ cmake --preset parallel -DADC_ENABLE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=RelWithDeb
 cmake --build --preset parallel
 ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0 ctest --preset parallel --output-on-failure
 
+# TSan races (clang + Kokkos OpenMP required; mutually exclusive with ASan). KOKKOS_PREFIX must point
+# at an OpenMP-enabled, clang-built Kokkos install (the CI builds one; see setup-kokkos exec-space).
+KOKKOS_PREFIX=<openmp-clang-kokkos> cmake --preset ci-tsan \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++   # or your LLVM clang++
+cmake --build --preset ci-tsan
+OMP_NUM_THREADS=2 TSAN_OPTIONS=suppressions=$PWD/tsan-suppressions.txt ctest --preset ci-tsan --output-on-failure
+
 # clang-tidy (after a configure that exports compile_commands.json)
 run-clang-tidy -p build-kokkos 'tests/.*\.cpp'   # build-kokkos = binaryDir of the parallel/ci-kokkos preset
 
@@ -115,8 +143,9 @@ ruff check python          # see [tool.ruff] in pyproject.toml; --fix to apply
 
 > In CI, the **gcc** jobs (warnings, tidy, sanitizers, coverage, codeql) reuse the Kokkos Serial
 > install **cached** by the gate (`ci.yml`), via the composite action `.github/actions/setup-kokkos`
-> (same `...-gcc-pic` key). The `fuzz` job compiles with **clang** -> separate Kokkos install
-> (`...-clang-pic` key), rebuilt once then cached in turn.
+> (same `...-serial-cxx20-gcc-pic` key). The `fuzz` job compiles with **clang** -> separate Kokkos
+> install (`...-serial-cxx20-clang-pic` key) ; the `tsan` job uses **clang + OpenMP** -> its own
+> (`...-openmp-cxx20-clang-pic` key). Each is rebuilt once then cached in turn.
 
 ## From informative to blocking : switch criteria
 
@@ -129,6 +158,7 @@ we harden.
 | `warnings` | 0 `warning:` on `master` (weekly report) | `-Werror` in the `ci-warnings` preset |
 | `format` | sweep **ADC-118** merged (cleaned base) | the job **fails** on any style deviation |
 | `sanitizers` | 4 **consecutive green** weekly runs | drop the tolerance (`ctest` fatal on a sanitizer report) |
+| `tsan` | suppressions triaged + 4 **consecutive green** weekly runs | drop the tolerance (`ctest` fatal on a TSan report) |
 | `tidy` | one check family clean, family by family | `WarningsAsErrors` on the cleaned families |
 | `fuzz` | from the **first green run** | **BLOCKING** (applied: a fuzz crash is always real) |
 | `coverage` | never | an **observation** metric, not a gate |
@@ -141,4 +171,4 @@ Each switch = a small **dedicated PR**, tracked in **ADC-120**, that changes a s
 - `clang-format` sweep of the whole base (massive reformat) -- **ADC-118** (a quiet window is
   required: it would conflict with all open branches).
 - Switch to `-Werror` / blocking PRs -- after cleanup.
-- TSan, include-what-you-use, cppcheck, OSS-Fuzz / persistent corpus, Python DSL fuzzing.
+- include-what-you-use, cppcheck, OSS-Fuzz / persistent corpus, Python DSL fuzzing.

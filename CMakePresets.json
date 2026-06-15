@@ -183,6 +183,18 @@
       }
     },
     {
+      "name": "ci-tsan",
+      "inherits": "ci-kokkos",
+      "displayName": "CI qualite : ThreadSanitizer (ADC_ENABLE_TSAN, clang + Kokkos OpenMP)",
+      "description": "Job 'tsan' de quality.yml. Clang LLVM + Kokkos OpenMP (cf. setup-kokkos compiler=clang exec-space=openmp) : sans threads TSan ne teste rien, et libgomp (gcc) n'est pas TSan-aware -> clang + libomp obligatoire. RelWithDebInfo (-g, traces) + TSan sur les cibles internes (adc_dev_options) ; tests a -O0 (ADC_TESTS_FAST_O0 herite). Mutuellement exclusif d'ASan (ci-asan).",
+      "binaryDir": "${sourceDir}/build-kokkos-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "ADC_ENABLE_TSAN": "ON"
+      }
+    },
+    {
       "name": "ci-fuzz",
       "inherits": "base",
       "displayName": "CI qualite : harnais libFuzzer (clang, fuzzer+ASan+UBSan)",
@@ -287,6 +299,11 @@
       "jobs": 4
     },
     {
+      "name": "ci-tsan",
+      "configurePreset": "ci-tsan",
+      "jobs": 4
+    },
+    {
       "name": "ci-fuzz",
       "configurePreset": "ci-fuzz",
       "jobs": 2
@@ -357,6 +374,16 @@
       },
       "execution": {
         "jobs": 4
+      }
+    },
+    {
+      "name": "ci-tsan",
+      "configurePreset": "ci-tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2
       }
     },
     {

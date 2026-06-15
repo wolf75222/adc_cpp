@@ -2,11 +2,12 @@ name: Quality
 
 # Analyse statique / qualite de code, VOLONTAIREMENT hors du chemin critique des PR : ce workflow
 # ne tourne JAMAIS sur un push ni sur une PR ordinaire (c'est ci.yml qui garde les PR). Il agrege
-# sept familles d'outils :
+# huit familles d'outils :
 #   - format       : clang-format --dry-run (style maison) + ruff (lint python/)      [non bloquant]
 #   - warnings     : build avec -Wall -Wextra -Wpedantic ... (ADC_ENABLE_WARNINGS)    [non bloquant]
 #   - tidy         : run-clang-tidy sur les TU de tests/ (.clang-tidy)                 [non bloquant]
 #   - sanitizers   : ctest sous ASan + UBSan (ADC_ENABLE_SANITIZERS, preset ci-asan)  [non bloquant]
+#   - tsan         : ctest sous TSan, backend OpenMP (ADC_ENABLE_TSAN, preset ci-tsan)[non bloquant]
 #   - fuzz         : harnais libFuzzer 90 s/cible (ADC_BUILD_FUZZING, preset ci-fuzz) [BLOQUANT]
 #   - coverage     : ctest instrumente gcov + rapport gcovr (ADC_ENABLE_COVERAGE)     [non bloquant]
 #   - codeql       : code scanning C++ GitHub (repo public = gratuit)                 [-> onglet Security]
@@ -280,6 +281,70 @@ jobs:
         with:
           name: asan-log
           path: asan.log
+          if-no-files-found: ignore
+
+  # --- TSan : ctest sous ThreadSanitizer (backend Kokkos OpenMP) ---------------------------------
+  # Seul sanitizer du trio (ASan/UBSan/TSan) qui vise l'angle mort des races : le gate ctest tourne en
+  # Serial (zero thread -> aucune race possible), alors que le backend on-node de production est OpenMP.
+  # Mutuellement exclusif d'ASan -> preset ci-tsan dedie (clang + Kokkos OpenMP, cf. setup-kokkos).
+  tsan:
+    name: TSan races (ctest OpenMP, informatif)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+      # 2 threads suffisent a exposer une race sans subir tout le slowdown TSan (5-15x). Kokkos / libomp
+      # sont lies non instrumentes -> races benignes de leurs internes filtrees par tsan-suppressions.txt
+      # (chaque entree justifiee). second_deadlock_stack=1 : 2e pile sur deadlock potentiel.
+      # halt_on_error=0 : on collecte tous les rapports en un seul run.
+      OMP_NUM_THREADS: '2'
+      TSAN_OPTIONS: second_deadlock_stack=1:halt_on_error=0:suppressions=${{ github.workspace }}/tsan-suppressions.txt
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      # Install Kokkos OpenMP compilee en CLANG (cle de cache distincte) : libgomp (gcc) n'est PAS
+      # TSan-aware (faux positifs en masse) -> clang + libomp LLVM obligatoire.
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+        with:
+          compiler: clang
+          exec-space: openmp
+          extra-apt: clang
+      - name: Cache ccache (quality/tsan)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-quality-tsan-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-quality-tsan-
+      - name: Build + ctest sous TSan (non bloquant)
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: |
+          cmake --preset ci-tsan
+          cmake --build --preset ci-tsan
+          set +e
+          ctest --preset ci-tsan --output-on-failure 2>&1 | tee tsan.log
+          rc=${PIPESTATUS[0]}
+          {
+            echo "### ThreadSanitizer (races, backend OpenMP)"
+            echo ""
+            if [ "$rc" -eq 0 ]; then
+              echo "- ctest : **vert** sous TSan (aucune race hors suppressions)."
+            else
+              echo "- ctest : **$rc** test(s) / rapport(s) TSan (voir l'artefact \`tsan-log\`)."
+              echo "::warning::tsan : au moins un test a signale une race sous TSan (run informatif, non bloquant). Trier signal/bruit avant de conclure (cf. tsan-suppressions.txt)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log TSan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tsan-log
+          path: tsan.log
           if-no-files-found: ignore
 
   # --- Fuzzing libFuzzer : invariants des composants purs du coeur -------------------------------
