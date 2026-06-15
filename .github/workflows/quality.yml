@@ -138,7 +138,7 @@ jobs:
           rc=$?
           set -e
           echo "$out"
-          n=$(printf '%s\n' "$out" | grep -c '^MISSING')
+          n=$(printf '%s\n' "$out" | grep -c '^MISSING' || true)   # grep -c exit 1 si 0 match -> || true (sinon set -e tue l'etape quand la matrice est complete)
           if [ "$rc" -ne 0 ]; then
             echo "::warning::BACKEND_COVERAGE.md : $n test(s) sans ligne dans la matrice (anti-derive, cf. ADC-258)"
           fi
