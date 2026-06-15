@@ -74,9 +74,15 @@ exclude_patterns = [
 # direct) le repertoire peut etre absent : on exclut alors le sous-arbre et on supprime
 # UNIQUEMENT les warnings de toctree vers ce document absent/exclu, pour que -W reste
 # vert dans les deux modes.
+# Autodoc renders the codebase's Doxygen-style docstrings (@param / @p, hanging-indent
+# continuations) as reStructuredText; docutils then emits benign "unexpected indentation" /
+# "block quote ends without a blank line" messages that -W (warnings = errors) would turn into
+# a build failure. Suppress the docutils category in BOTH modes (the meaningful -W checks --
+# broken cross-references, missing toctree entries -- stay strict). See ADC-272.
+suppress_warnings = ["docutils"]
 if not (Path(__file__).parent / "doxygen" / "index.rst").is_file():
     exclude_patterns.append("doxygen")
-    suppress_warnings = ["toc.excluded", "toc.not_readable"]
+    suppress_warnings += ["toc.excluded", "toc.not_readable"]
 
 html_theme = "furo"
 html_title = f"adc_cpp {release}"
