@@ -1,112 +1,112 @@
 #pragma once
 
-#include <adc/core/state.hpp>     // kAuxBaseComps (canal B_z lu par l'etage source condense)
+#include <adc/core/state.hpp>     // kAuxBaseComps (B_z channel read by the condensed source stage)
 #include <adc/core/types.hpp>     // Real
-#include <adc/coupling/coupled_source_program.hpp>  // CoupledFreqKernel (frequence couplee par cellule)
-#include <adc/mesh/for_each.hpp>  // reduce_max_cell (max mu sur les cellules, foncteur device-clean)
-#include <adc/parallel/comm.hpp>  // all_reduce_min/max (bornes globales : dt identique sur tous les rangs)
-#include <adc/runtime/grid_context.hpp>  // GeometryMode (aiguillage du transport disque)
+#include <adc/coupling/coupled_source_program.hpp>  // CoupledFreqKernel (per-cell coupled frequency)
+#include <adc/mesh/for_each.hpp>  // reduce_max_cell (max mu over the cells, device-clean functor)
+#include <adc/parallel/comm.hpp>  // all_reduce_min/max (global bounds: identical dt on all ranks)
+#include <adc/runtime/grid_context.hpp>  // GeometryMode (disk transport dispatch)
 
-#include <stdexcept>  // std::runtime_error (mode disque demande sans avance disque sur un bloc)
+#include <stdexcept>  // std::runtime_error (disk mode requested without disk advance on a block)
 
-#include <algorithm>  // std::min, std::max (CFL : pas physique min de la grille, dt min sur les blocs)
+#include <algorithm>  // std::min, std::max (CFL: min grid physical step, min dt over the blocks)
 #include <cmath>      // std::isfinite, std::ceil (step_cfl / step_adaptive)
-#include <limits>     // std::numeric_limits (CFL par bloc : dt = min sur les blocs)
-#include <string>     // last_dt_bound (nom de la borne active du dernier step_cfl)
+#include <limits>     // std::numeric_limits (per-block CFL: dt = min over the blocks)
+#include <string>     // last_dt_bound (name of the active bound of the last step_cfl)
 #include <vector>
 
 /// @file
-/// @brief SystemStepper : la responsabilite AVANCE EN TEMPS extraite du god-class System::Impl
-///        (audit Lot B, continuation de SystemFieldSolver #176). Extrait VERBATIM de python/system.cpp :
-///        aucune modification de numerique, de la formule CFL, de la cadence stride/substeps, de la
-///        semantique du compteur de macro-pas, des fences, ni de l'ordre (solve_fields ; advance ;
-///        etage source ; couplages). STRICTEMENT bit-identique -- le code est deplace tel quel, seul
-///        l'acces aux membres PARTAGES de Impl (sp, fields_, aux, couplings, t, macro_step_, geom,
-///        pgeom_, polar_) passe par le back-pointer owner_->.
+/// @brief SystemStepper: the TIME ADVANCE responsibility extracted from the god-class System::Impl
+///        (audit Lot B, continuation of SystemFieldSolver #176). Extracted VERBATIM from python/system.cpp:
+///        no change to numerics, to the CFL formula, to the stride/substeps cadence, to the
+///        semantics of the macro-step counter, to the fences, nor to the order (solve_fields; advance;
+///        source stage; couplings). STRICTLY bit-identical -- the code is moved as-is, only
+///        access to the SHARED members of Impl (sp, fields_, aux, couplings, t, macro_step_, geom,
+///        pgeom_, polar_) goes through the back-pointer owner_->.
 ///
-/// CONTRAT / INVARIANTS
-/// - ORCHESTRE l'avance en temps : step(dt), advance(dt, nsteps), step_cfl(cfl), step_adaptive(cfl),
-///   plus les helpers de cadence (stride_due), l'etage source condense (run_source_stage) et les
-///   couplages inter-especes (apply_couplings) que les pas invoquent APRES le transport.
-/// - LIT (sans posseder) via owner_-> : la liste de blocs (sp) et chaque fermeture d'avance (s.advance),
-///   le resolveur elliptique (fields_, pour solve_fields() en tete de pas et fields_.ell_phi() lu par
-///   l'etage source), l'aux PARTAGE et sa composante B_z (kAuxBaseComps), la liste de couplages, le
-///   temps t et le compteur macro_step_ (qu'il fait avancer), la geometrie (geom cartesien / pgeom_
-///   polaire) et le drapeau polar_ pour le pas physique h de la CFL.
-/// - PAS PHYSIQUE h DE LA CFL : cartesien = min(dx, dy) ; POLAIRE = min(dr, r_min * dtheta) (le pas
-///   azimutal r*dtheta est minimal au rayon interieur r_min de l'anneau -> bord le plus contraignant).
-/// - INVARIANT CADENCE MULTIRATE (hold-then-catch-up) : un bloc de cadence M est TENU tant que
-///   (macro_step + 1) % M != 0, puis avance d'un pas effectif M*dt au macro-pas ou (macro_step + 1) % M
-///   == 0 (FIN de fenetre). macro_step_ est incremente UNE fois par macro-pas, APRES l'avance des blocs
-///   et les couplages. NE PAS reordonner solve_fields ; advance ; run_source_stage ; apply_couplings ;
-///   t += dt ; ++macro_step_.
-/// - FORMULE CFL PAR BLOC (substeps-aware, post-#121) : dt <= cfl * h * substeps_b / (stride_b * w_b) ;
-///   le dt global est le min sur les blocs evolutifs. PRESERVEE telle quelle.
+/// CONTRACT / INVARIANTS
+/// - ORCHESTRATES the time advance: step(dt), advance(dt, nsteps), step_cfl(cfl), step_adaptive(cfl),
+///   plus the cadence helpers (stride_due), the Schur-condensed source stage (run_source_stage) and the
+///   inter-species couplings (apply_couplings) that the steps invoke AFTER transport.
+/// - READS (without owning) via owner_->: the block list (sp) and each advance closure (s.advance),
+///   the elliptic solver (fields_, for solve_fields() at the head of the step and fields_.ell_phi() read by
+///   the source stage), the SHARED aux and its B_z component (kAuxBaseComps), the coupling list, the
+///   time t and the macro_step_ counter (which it advances), the geometry (Cartesian geom / polar pgeom_)
+///   and the polar_ flag for the CFL physical step h.
+/// - CFL PHYSICAL STEP h: Cartesian = min(dx, dy); POLAR = min(dr, r_min * dtheta) (the azimuthal step
+///   r*dtheta is minimal at the inner radius r_min of the ring -> most constraining edge).
+/// - MULTIRATE CADENCE INVARIANT (hold-then-catch-up): a block of cadence M is HELD as long as
+///   (macro_step + 1) % M != 0, then advances by an effective step M*dt at the macro-step where
+///   (macro_step + 1) % M == 0 (END of window). macro_step_ is incremented ONCE per macro-step, AFTER the
+///   advance of the blocks and the couplings. DO NOT reorder solve_fields; advance; run_source_stage;
+///   apply_couplings; t += dt; ++macro_step_.
+/// - PER-BLOCK CFL FORMULA (substeps-aware, post-#121): dt <= cfl * h * substeps_b / (stride_b * w_b);
+///   the global dt is the min over the evolving blocks. PRESERVED as is.
 ///
-/// Comme System::Impl reste PRIVE a python/system.cpp, ce helper est un TEMPLATE parametre sur le type
-/// Impl reel (meme technique que system_field_solver / native_loader) : python/system.cpp l'instancie
-/// avec System::Impl apres avoir defini Impl. owner_ est un Impl* (la duree de vie du helper est
-/// sous-jacente a celle de Impl). System::step / advance / step_cfl / step_adaptive deviennent de
-/// simples delegations a stepper_.
+/// Since System::Impl stays PRIVATE to python/system.cpp, this helper is a TEMPLATE parameterized on the
+/// real Impl type (same technique as system_field_solver / native_loader): python/system.cpp instantiates
+/// it with System::Impl after defining Impl. owner_ is an Impl* (the helper lifetime is subordinate to
+/// that of Impl). System::step / advance / step_cfl / step_adaptive become simple delegations to stepper_.
 
 namespace adc {
 namespace stepper {
 
-/// Politique de SPLITTING en temps du macro-pas (transport hyperbolique H + etage source S).
-///  - Lie     : H(dt) ; S(dt) une fois (Godunov, 1er ordre). C'EST LE DEFAUT, bit-identique a
-///              l'historique : un seul solve_fields en tete de pas, advance puis run_source_stage
-///              entrelaces dans la meme boucle de blocs (cf. step()).
-///  - Strang  : H(dt/2) ; S(dt) ; H(dt/2) (symetrique, 2e ordre des que H et S le sont). Necessite
-///              de RE-RESOUDRE solve_fields ENTRE les etages (cf. step()) : voir le commentaire de la
-///              branche Strang et docs/HOFFART_STEP_SEQUENCE.md (le solve_fields UNIQUE de tete ne
-///              suffit pas a la 2e demi-avance, qui lirait sinon un phi perime).
+/// Time SPLITTING policy of the macro-step (hyperbolic transport H + source stage S).
+///  - Lie: H(dt); S(dt) once (Godunov, 1st order). THIS IS THE DEFAULT, bit-identical to
+///              history: a single solve_fields at the head of the step, advance then run_source_stage
+///              interleaved in the same block loop (cf. step()).
+///  - Strang: H(dt/2); S(dt); H(dt/2) (symmetric, 2nd order as soon as H and S are). Requires
+///              RE-SOLVING solve_fields BETWEEN the stages (cf. step()): see the comment of the
+///              Strang branch and docs/HOFFART_STEP_SEQUENCE.md (the SINGLE head solve_fields does not
+///              suffice for the 2nd half-advance, which would otherwise read a stale phi).
 enum class SplitScheme { Lie, Strang };
 
-/// SystemStepper<Impl> : voir contrat ci-dessus. Toutes les methodes sont des MEMBRES car elles
-/// partagent l'orchestration de pas ; les acces a l'etat PARTAGE de Impl passent par owner_-> verbatim.
-/// Template sur Impl pour rester sans dependance sur la definition (privee) de System::Impl.
+/// SystemStepper<Impl>: see the contract above. All methods are MEMBERS because they
+/// share the step orchestration; accesses to the SHARED state of Impl go through owner_-> verbatim.
+/// Templated on Impl to stay free of any dependency on the (private) definition of System::Impl.
 template <class Impl>
 class SystemStepper {
  public:
-  /// @param owner back-pointer vers System::Impl (duree de vie sous-jacente a celle de Impl).
+  /// @param owner back-pointer to System::Impl (lifetime subordinate to that of Impl).
   explicit SystemStepper(Impl* owner) : owner_(owner) {}
 
-  /// Choisit la politique de splitting en temps (defaut Lie = bit-identique). Voir SplitScheme.
+  /// Chooses the time splitting policy (default Lie = bit-identical). See SplitScheme.
   void set_scheme(SplitScheme scheme) { scheme_ = scheme; }
   SplitScheme scheme() const { return scheme_; }
 
-  /// Vrai si un bloc de cadence @p stride RATTRAPE a ce macro-pas (FIN de fenetre).
-  /// SEMANTIQUE STRIDE = HOLD-THEN-CATCH-UP (rattrapage en FIN de fenetre). Un bloc de cadence M est
-  /// TENU (non avance) sur les macro-pas ou (macro_step + 1) % M != 0, puis avance d'un pas effectif
-  /// M*dt au macro-pas ou (macro_step + 1) % M == 0, i.e. a la FIN de sa fenetre de M macro-pas. Au
-  /// macro-pas k, le temps du systeme est (k+1)*dt et le bloc qui RATTRAPE a alors avance du meme
-  /// (k+1)*dt cumule : il est temporellement COHERENT avec les blocs rapides, jamais "dans le futur".
-  /// (L'ancienne semantique avancait au DEBUT de fenetre, macro_step % M == 0 : a k=0 le bloc avancait
-  /// deja M*dt alors que le systeme n'avancait que dt -> bloc anticipe, couplage Poisson/source faux.)
+  /// True if a block of cadence @p stride CATCHES UP at this macro-step (END of window).
+  /// STRIDE SEMANTICS = HOLD-THEN-CATCH-UP (catch-up at the END of the window). A block of cadence M is
+  /// HELD (not advanced) on the macro-steps where (macro_step + 1) % M != 0, then advances by an effective
+  /// step M*dt at the macro-step where (macro_step + 1) % M == 0, i.e. at the END of its window of M
+  /// macro-steps. At macro-step k, the system time is (k+1)*dt and the block that CATCHES UP has then
+  /// advanced by the same cumulative (k+1)*dt: it is temporally CONSISTENT with the fast blocks, never
+  /// "in the future". (The old semantics advanced at the START of the window, macro_step % M == 0: at k=0
+  /// the block already advanced M*dt while the system advanced only dt -> anticipated block, wrong
+  /// Poisson/source coupling.)
   static bool stride_due(int macro_step, int stride) { return (macro_step + 1) % stride == 0; }
 
-  /// Sources de COUPLAGE inter-especes : appliquees par SPLITTING (un pas additif explicite de dt)
-  /// APRES le transport de chaque bloc. Chaque couplage est un for_each_cell (kernel DEVICE) lisant /
-  /// mettant a jour plusieurs blocs au meme point ; ils s'ordonnent apres le transport sur le meme
-  /// espace d'execution, donc plus de device_fence prealable (plus d'acces hote).
+  /// Inter-species COUPLING sources: applied by SPLITTING (one explicit additive step of dt)
+  /// AFTER the transport of each block. Each coupling is a for_each_cell (DEVICE kernel) reading /
+  /// updating several blocks at the same point; they order after the transport on the same
+  /// execution space, hence no prior device_fence (no more host access).
   void apply_couplings(Real dt) {
     if (owner_->couplings.empty()) return;
     for (auto& c : owner_->couplings) c(dt);
   }
 
-  /// Borne de pas des FREQUENCES COUPLEES PAR CELLULE (CoupledSource.frequency avec une Expr,
-  /// raffinement de la frequence CONSTANTE). Pour chaque programme enregistre : reduit le MAX de mu(U)
-  /// sur les fabs LOCAUX du PREMIER bloc d'entree (CoupledFreqKernel, foncteur nomme device-clean ;
-  /// meme convention MPI-safe que apply_couplings), all_reduce_max GLOBAL, puis dt <= cfl / max(mu).
-  /// Met a jour @p dt (et @p reason si non nul) si la borne est plus serree. max(mu) <= 0 = pas de
-  /// borne ce pas. Raison "coupled_source:<label>" -- MEME prefixe que la frequence constante, pour un
-  /// diagnostic uniforme. Pendant PAR CELLULE de la boucle constante de step_cfl / step_adaptive ;
-  /// aucune source par cellule enregistree -> boucle vide, trajectoire bit-identique.
+  /// Step bound from PER-CELL COUPLED FREQUENCIES (CoupledSource.frequency with an Expr,
+  /// refinement of the CONSTANT frequency). For each registered program: reduces the MAX of mu(U)
+  /// over the LOCAL fabs of the FIRST input block (CoupledFreqKernel, named device-clean functor;
+  /// same MPI-safe convention as apply_couplings), GLOBAL all_reduce_max, then dt <= cfl / max(mu).
+  /// Updates @p dt (and @p reason if non-null) if the bound is tighter. max(mu) <= 0 = no
+  /// bound this step. Reason "coupled_source:<label>" -- SAME prefix as the constant frequency, for a
+  /// uniform diagnostic. Per-cell counterpart of the constant loop of step_cfl / step_adaptive;
+  /// no per-cell source registered -> empty loop, bit-identical trajectory.
   ///
-  /// MPI : all_reduce_max est appele par TOUS les rangs, le MEME nombre de fois (coupled_freq_exprs_ est
-  /// identique sur tous les rangs) -> collectif symetrique, dt identique partout (pas de deadlock). Un
-  /// rang sans box locale reduit m=0 (neutre pour MAX). ATTENTION : les Array4 sont reconstruits a
-  /// CHAQUE pas (les fabs peuvent etre realloues), comme apply_couplings.
+  /// MPI: all_reduce_max is called by ALL ranks, the SAME number of times (coupled_freq_exprs_ is
+  /// identical on all ranks) -> symmetric collective, identical dt everywhere (no deadlock). A
+  /// rank with no local box reduces m=0 (neutral for MAX). WARNING: the Array4 are rebuilt at
+  /// EACH step (the fabs may be reallocated), like apply_couplings.
   void apply_coupled_freq_expr_bounds(double cfl, double& dt, std::string* reason) const {
     Impl* P = owner_;
     for (const auto& ce : P->coupled_freq_exprs_) {
@@ -128,15 +128,15 @@ class SystemStepper {
           m = std::max(m, reduce_max_cell(Uref.box(li), kern));
         }
       } else {
-        // Programme SANS champ d'entree (frequence constante exprimee en bytecode) : evalue une fois
-        // sur les seules constantes (aucune box a parcourir) ; identique sur tous les rangs.
+        // Program WITHOUT an input field (constant frequency expressed in bytecode): evaluated once
+        // on the constants alone (no box to traverse); identical on all ranks.
         Real reg[kCsMaxReg];
         const int nc = static_cast<int>(ce.kconsts.size());
         for (int c = 0; c < nc; ++c) reg[c] = ce.kconsts[static_cast<std::size_t>(c)];
         const Real mu0 = ce.prog.eval(reg);
         if (mu0 > Real(0)) m = mu0;
       }
-      const double mu = all_reduce_max(static_cast<double>(m));  // TOUS les rangs (symetrie collective)
+      const double mu = all_reduce_max(static_cast<double>(m));  // ALL ranks (collective symmetry)
       if (mu > 0.0) {
         const double dt_cs = cfl / mu;
         if (dt_cs < dt) {
@@ -147,22 +147,22 @@ class SystemStepper {
     }
   }
 
-  /// ETAGE SOURCE condense par Schur (OPT-IN, cf. set_source_stage). No-op si le bloc n'a pas d'etage
-  /// source (s.schur == nullptr) : le chemin par defaut reste BIT-IDENTIQUE. Sinon, APRES le transport
-  /// hyperbolique du bloc (deja joue par s.advance), on joue l'etage source AUTONOME
-  /// (CondensedSchurSourceStepper, #126) sur l'etat post-transport :
-  ///   - state = s.U (rho gelee dans la source, mom/E mis a jour) ;
-  ///   - phi    = le potentiel du Poisson de systeme (ell_phi(), warm start phi^n issu de solve_fields
-  ///              en tete de step) -- l'etage resout son PROPRE operateur condense et ECRIT phi^{n+1}
-  ///              dedans, il NE rappelle PAS solve_fields (pas de duplication) ;
-  ///   - B_z    = canal aux a l'indice kAuxBaseComps (peuple + ghosts remplis par solve_fields).
-  /// theta/dt du theta-schema ; dt = eff_dt (facteur stride deja inclus par l'appelant, comme s.advance).
+  /// Schur-CONDENSED SOURCE STAGE (OPT-IN, cf. set_source_stage). No-op if the block has no source
+  /// stage (s.schur == nullptr): the default path stays BIT-IDENTICAL. Otherwise, AFTER the hyperbolic
+  /// transport of the block (already played by s.advance), we play the AUTONOMOUS source stage
+  /// (CondensedSchurSourceStepper, #126) on the post-transport state:
+  ///   - state = s.U (rho frozen in the source, mom/E updated);
+  ///   - phi    = the system Poisson potential (ell_phi(), warm start phi^n from solve_fields
+  ///              at the head of step) -- the stage solves its OWN condensed operator and WRITES phi^{n+1}
+  ///              into it, it does NOT call solve_fields again (no duplication);
+  ///   - B_z    = aux channel at index kAuxBaseComps (populated + ghosts filled by solve_fields).
+  /// theta/dt of the theta-scheme; dt = eff_dt (stride factor already included by the caller, like s.advance).
   void run_source_stage(typename Impl::Species& s, Real eff_dt) {
-    // DISPATCH GEOMETRIE (Voie A etape 2c) : un bloc porte AU PLUS UN etage source condense (set_source_stage
-    // construit le cartesien OU le polaire selon la geometrie du System). Le POLAIRE
-    // (PolarCondensedSchurSourceStepper, #212) a la MEME signature step(state, phi, bz, c_bz, theta, dt) que
-    // le cartesien (#126) : seul le pointeur change. Le chemin cartesien reste BIT-IDENTIQUE (schur_polar
-    // == nullptr en cartesien -> on prend la branche schur d'origine, inchangee).
+    // GEOMETRY DISPATCH (Path A step 2c): a block carries AT MOST ONE condensed source stage (set_source_stage
+    // builds the Cartesian OR the polar one depending on the System geometry). The POLAR one
+    // (PolarCondensedSchurSourceStepper, #212) has the SAME step(state, phi, bz, c_bz, theta, dt) signature as
+    // the Cartesian one (#126): only the pointer changes. The Cartesian path stays BIT-IDENTICAL (schur_polar
+    // == nullptr in Cartesian -> we take the original schur branch, unchanged).
     if (s.schur_polar) {
       s.schur_polar->step(s.U, owner_->fields_.ell_phi(), owner_->aux, s.schur_bz_comp,
                           static_cast<Real>(s.schur_theta), eff_dt);
@@ -173,203 +173,203 @@ class SystemStepper {
                     static_cast<Real>(s.schur_theta), eff_dt);
       return;
     }
-    // ETAGE SOURCE GENERIQUE (fallback) : joue UNIQUEMENT si AUCUN etage Schur condense (chemin de
-    // production INTOUCHE, bit-identique). Avance l'etage source du bloc EN PLACE sur eff_dt. nullptr
-    // (defaut) -> no-op, comme avant. Sert au splitting generique (adc.Strang) et aux tests d'ordre.
+    // GENERIC SOURCE STAGE (fallback): plays ONLY if NO condensed Schur stage (production path
+    // UNTOUCHED, bit-identical). Advances the block source stage IN PLACE on eff_dt. nullptr
+    // (default) -> no-op, as before. Used by generic splitting (adc.Strang) and order tests.
     if (s.source_step) s.source_step(s.U, eff_dt);
   }
 
-  /// AVANCE DE TRANSPORT du bloc @p s sur @p dt en @p n sous-pas, AIGUILLEE par le mode de geometrie du
-  /// System (chantier T5-PR3). C'est le SEUL point de cablage du disque dans le pas (les 4 pas -- step,
-  /// step_strang, step_cfl, step_adaptive -- passent par ici) :
-  ///   - None (defaut)             : s.advance (assemble_rhs, plein cartesien). BIT-IDENTIQUE.
-  ///   - Staircase, disque fixe    : s.advance_masked (assemble_rhs_masked, masque 0/1).
-  ///   - CutCell, disque fixe      : s.advance_eb (assemble_rhs_eb, cut-cell EB).
-  /// Un mode disque demande SANS disque fixe (disc_set_ == false) RETOMBE sur s.advance : le mode seul
-  /// (sans set_disc_domain) ne doit pas changer le transport. Un mode disque avec disque fixe mais sur
-  /// un bloc qui N'A PAS fabrique l'avance disque (p.ex. bloc polaire / charge depuis un .so anterieur)
-  /// leve une erreur EXPLICITE plutot que de jouer SILENCIEUSEMENT le chemin plein (le footgun T2 :
-  /// croire le disque actif alors que le transport l'ignore). Les avances disque MIMENT s.advance
-  /// (meme schema RK / IMEX, meme limiteur / flux) ; seul le residu de transport est aiguille.
+  /// TRANSPORT ADVANCE of block @p s over @p dt in @p n substeps, DISPATCHED by the System geometry
+  /// mode (worksite T5-PR3). This is the SOLE wiring point of the disk in the step (the 4 steps -- step,
+  /// step_strang, step_cfl, step_adaptive -- go through here):
+  ///   - None (default): s.advance (assemble_rhs, full Cartesian). BIT-IDENTICAL.
+  ///   - Staircase, fixed disk: s.advance_masked (assemble_rhs_masked, 0/1 mask).
+  ///   - CutCell, fixed disk: s.advance_eb (assemble_rhs_eb, cut-cell EB).
+  /// A disk mode requested WITHOUT a fixed disk (disc_set_ == false) FALLS BACK to s.advance: the mode alone
+  /// (without set_disc_domain) must not change the transport. A disk mode with a fixed disk but on
+  /// a block that DID NOT build the disk advance (e.g. polar block / loaded from an earlier .so)
+  /// raises an EXPLICIT error rather than SILENTLY playing the full path (the T2 footgun:
+  /// believing the disk active while the transport ignores it). The disk advances MIMIC s.advance
+  /// (same RK / IMEX scheme, same limiter / flux); only the transport residual is dispatched.
   void advance_transport_n(typename Impl::Species& s, Real dt, int n) {
     const GeometryMode mode = owner_->geometry_mode_;
     if (mode == GeometryMode::None || !owner_->disc_set_) {
-      s.advance(s.U, dt, n);  // chemin par defaut (ou mode disque sans disque fixe) : BIT-IDENTIQUE
+      s.advance(s.U, dt, n);  // default path (or disk mode without a fixed disk): BIT-IDENTICAL
       return;
     }
     if (mode == GeometryMode::Staircase) {
       if (!s.advance_masked)
         throw std::runtime_error(
-            "SystemStepper : mode geometrie 'staircase' demande mais le bloc '" + s.name +
-            "' n'expose pas d'avance de transport masquee (transport disque non cable pour ce bloc)");
+            "SystemStepper: geometry mode 'staircase' requested but block '" + s.name +
+            "' exposes no masked transport advance (disk transport not wired for this block)");
       s.advance_masked(s.U, dt, n);
       return;
     }
     // CutCell
     if (!s.advance_eb)
       throw std::runtime_error(
-          "SystemStepper : mode geometrie 'cutcell' demande mais le bloc '" + s.name +
-          "' n'expose pas d'avance de transport cut-cell EB (transport disque non cable pour ce bloc)");
+          "SystemStepper: geometry mode 'cutcell' requested but block '" + s.name +
+          "' exposes no cut-cell EB transport advance (disk transport not wired for this block)");
     s.advance_eb(s.U, dt, n);
   }
 
-  /// AVANCE DE TRANSPORT du bloc @p s sur @p eff_dt en s.substeps sous-pas, aiguillee par le mode (cf.
-  /// advance_transport_n). Reutilise s.substeps comme l'ancien s.advance des pas step / step_cfl.
+  /// TRANSPORT ADVANCE of block @p s over @p eff_dt in s.substeps substeps, dispatched by the mode (cf.
+  /// advance_transport_n). Reuses s.substeps as the former s.advance of the step / step_cfl steps.
   void advance_transport(typename Impl::Species& s, Real eff_dt) {
     advance_transport_n(s, eff_dt, s.substeps);
   }
 
-  /// DEMI-avance de transport (Strang) : aiguillage de advance_transport sur @p half_dt = eff_dt/2 --
-  /// le mode disque honore AUSSI le chemin Strang (H(dt/2) S(dt) H(dt/2)).
+  /// HALF transport advance (Strang): dispatch of advance_transport over @p half_dt = eff_dt/2 --
+  /// the disk mode ALSO honors the Strang path (H(dt/2) S(dt) H(dt/2)).
   void advance_transport_half(typename Impl::Species& s, Real eff_dt) {
     advance_transport_n(s, Real(0.5) * eff_dt, s.substeps);
   }
 
-  /// Un macro-pas de longueur @p dt. ORDRE INVARIANT par schema (cf. SplitScheme) :
-  ///  - Lie (defaut, bit-identique) : solve_fields ; pour chaque bloc DU (cadence stride honoree)
-  ///    advance(dt) puis run_source_stage(dt) entrelaces ; couplages ; t += dt ; ++macro_step.
-  ///  - Strang : H(dt/2) ; S(dt) ; H(dt/2), avec un solve_fields RE-RESOLU entre chaque etage
-  ///    (cf. step_strang() et docs/HOFFART_STEP_SEQUENCE.md).
+  /// One macro-step of length @p dt. ORDER INVARIANT per scheme (cf. SplitScheme):
+  ///  - Lie (default, bit-identical): solve_fields; for each DUE block (stride cadence honored)
+  ///    advance(dt) then run_source_stage(dt) interleaved; couplings; t += dt; ++macro_step.
+  ///  - Strang: H(dt/2); S(dt); H(dt/2), with a solve_fields RE-SOLVED between each stage
+  ///    (cf. step_strang() and docs/HOFFART_STEP_SEQUENCE.md).
   void step(double dt) {
     if (scheme_ == SplitScheme::Strang) { step_strang(dt); return; }
     Impl* P = owner_;
-    // COUPLAGE / POISSON : solve_fields assemble f = Sum_s elliptic_rhs_s(U_s) sur l'etat COURANT de
-    // chaque bloc. Un bloc TENU (cadence M, hors fin de fenetre) y contribue avec son etat PERIME (sa
-    // derniere avance, donc figee jusqu'a son prochain rattrapage) : densite / charge stale dans la
-    // somme du Poisson tant qu'il n'a pas rattrape. Choix assume du stride (couplage lache du bloc lent).
+    // COUPLING / POISSON: solve_fields assembles f = Sum_s elliptic_rhs_s(U_s) on the CURRENT state of
+    // each block. A HELD block (cadence M, outside the window end) contributes with its STALE state (its
+    // last advance, thus frozen until its next catch-up): stale density / charge in the Poisson sum as
+    // long as it has not caught up. Assumed stride choice (loose coupling of the slow block).
     P->solve_fields();
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;  // bloc gele : non avance
-      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
-      const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up : pas effectif s.stride * dt
-      advance_transport(s, eff_dt);  // transport AIGUILLE par le mode geometrie (None : assemble_rhs)
-      run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
+      if (!s.evolve) continue;  // frozen block: not advanced
+      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold: not at the stride window end
+      const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up: effective step s.stride * dt
+      advance_transport(s, eff_dt);  // transport DISPATCHED by the geometry mode (None: assemble_rhs)
+      run_source_stage(s, eff_dt);  // OPT-IN: Schur-condensed source stage (no-op otherwise)
     }
-    apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres transport
+    apply_couplings(Real(dt));  // inter-species coupled sources (splitting), after transport
     P->t += dt;
     P->macro_step_++;
   }
 
-  /// Un macro-pas STRANG (symetrique, 2e ordre) : H(dt/2) ; S(dt) ; H(dt/2). Reutilise s.advance pour
-  /// les DEMI-avances de transport et run_source_stage pour l'etage source PLEIN (aucun nouveau stepper).
+  /// One STRANG macro-step (symmetric, 2nd order): H(dt/2); S(dt); H(dt/2). Reuses s.advance for
+  /// the HALF transport advances and run_source_stage for the FULL source stage (no new stepper).
   ///
-  /// CONSISTANCE phi (point critique, cf. docs/HOFFART_STEP_SEQUENCE.md) : le potentiel phi / les champs
-  /// aux (grad phi) que LIT le transport sont peuples par solve_fields a partir de la densite COURANTE.
-  /// Le solve_fields UNIQUE de tete de pas (suffisant pour le splitting de Lie, ou une seule avance de
-  /// transport suit) NE SUFFIT PAS ici : entre la 1re demi-avance et la 2nde, la densite a change (1re
-  /// demi-avance + etage source), donc la 2nde demi-avance lirait un phi PERIME. On RE-RESOUT donc
-  /// solve_fields AVANT chaque etage qui consomme phi :
-  ///   1. solve_fields()  -> phi coherent avec rho^n           (pour H(dt/2))
-  ///   2. H(dt/2)         (s.advance sur eff_dt/2)
-  ///   3. solve_fields()  -> phi coherent avec rho apres H(dt/2) (pour S(dt) : warm start / champ aux)
-  ///   4. S(dt)           (run_source_stage sur eff_dt ; l'etage Schur ECRIT phi^{n+1})
-  ///   5. solve_fields()  -> phi coherent avec rho apres S(dt)   (pour la 2nde H(dt/2))
-  ///   6. H(dt/2)         (s.advance sur eff_dt/2)
-  /// Sans l'etape 5, la 2nde demi-avance lirait soit le phi du Schur (ecrase au pas suivant de toute
-  /// facon) soit un phi de rho perime : la symetrie Strang (donc le 2e ordre) serait rompue. Les etapes
-  /// 1/3/5 sont des solve_fields SYSTEME (somme sur tous les blocs), hors boucle de blocs.
+  /// phi CONSISTENCY (critical point, cf. docs/HOFFART_STEP_SEQUENCE.md): the potential phi / the aux
+  /// fields (grad phi) that the transport READS are populated by solve_fields from the CURRENT density.
+  /// The SINGLE solve_fields at the head of the step (sufficient for Lie splitting, where a single
+  /// transport advance follows) DOES NOT SUFFICE here: between the 1st half-advance and the 2nd, the
+  /// density has changed (1st half-advance + source stage), so the 2nd half-advance would read a STALE
+  /// phi. We thus RE-SOLVE solve_fields BEFORE each stage that consumes phi:
+  ///   1. solve_fields()  -> phi consistent with rho^n            (for H(dt/2))
+  ///   2. H(dt/2)         (s.advance over eff_dt/2)
+  ///   3. solve_fields()  -> phi consistent with rho after H(dt/2) (for S(dt): warm start / aux field)
+  ///   4. S(dt)           (run_source_stage over eff_dt; the Schur stage WRITES phi^{n+1})
+  ///   5. solve_fields()  -> phi consistent with rho after S(dt)   (for the 2nd H(dt/2))
+  ///   6. H(dt/2)         (s.advance over eff_dt/2)
+  /// Without step 5, the 2nd half-advance would read either the Schur phi (overwritten at the next step
+  /// anyway) or a phi of stale rho: the Strang symmetry (thus the 2nd order) would be broken. Steps
+  /// 1/3/5 are SYSTEM solve_fields (sum over all blocks), outside the block loop.
   ///
-  /// CADENCE stride : evaluee UNE fois par macro-pas (stride_due au DEBUT), de sorte que les deux
-  /// demi-avances et l'etage source d'un meme macro-pas concernent le MEME ensemble de blocs DUS. Le
-  /// pas effectif eff_dt = dt * stride (catch-up) est identique a Lie ; seul le transport est scinde en
-  /// deux moities eff_dt/2.
+  /// stride CADENCE: evaluated ONCE per macro-step (stride_due at the START), so that the two
+  /// half-advances and the source stage of one macro-step concern the SAME set of DUE blocks. The
+  /// effective step eff_dt = dt * stride (catch-up) is identical to Lie; only the transport is split
+  /// into two halves eff_dt/2.
   void step_strang(double dt) {
     Impl* P = owner_;
-    // (1) phi coherent avec rho^n, pour la 1re demi-avance de transport.
+    // (1) phi consistent with rho^n, for the 1st transport half-advance.
     P->solve_fields();
-    // (2) H(dt/2) : 1re demi-avance de transport de chaque bloc DU. s.substeps sous-pas (inchange).
-    // Aiguillee par le mode geometrie (None : assemble_rhs ; Staircase/CutCell : operateur disque).
+    // (2) H(dt/2): 1st transport half-advance of each DUE block. s.substeps substeps (unchanged).
+    // Dispatched by the geometry mode (None: assemble_rhs; Staircase/CutCell: disk operator).
     for (auto& s : P->sp) {
       if (!s.evolve) continue;
       if (!stride_due(P->macro_step_, s.stride)) continue;
       const Real eff_dt = Real(dt) * Real(s.stride);
       advance_transport_half(s, eff_dt);
     }
-    // (3) phi RE-RESOLU sur la densite post-H(dt/2), pour l'etage source.
+    // (3) phi RE-SOLVED on the post-H(dt/2) density, for the source stage.
     P->solve_fields();
-    // (4) S(dt) : etage source PLEIN de chaque bloc DU (no-op si pas d'etage Schur, comme Lie).
+    // (4) S(dt): FULL source stage of each DUE block (no-op if no Schur stage, like Lie).
     for (auto& s : P->sp) {
       if (!s.evolve) continue;
       if (!stride_due(P->macro_step_, s.stride)) continue;
       const Real eff_dt = Real(dt) * Real(s.stride);
       run_source_stage(s, eff_dt);
     }
-    // (5) phi RE-RESOLU sur la densite post-source : SANS cette resolution la 2nde demi-avance lirait un
-    //     phi perime (cf. docs/HOFFART_STEP_SEQUENCE.md, le solve_fields de tete unique est insuffisant).
+    // (5) phi RE-SOLVED on the post-source density: WITHOUT this solve the 2nd half-advance would read a
+    //     stale phi (cf. docs/HOFFART_STEP_SEQUENCE.md, the single head solve_fields is insufficient).
     P->solve_fields();
-    // (6) H(dt/2) : 2nde demi-avance de transport, fermant le pas symetrique Strang. MEME aiguillage.
+    // (6) H(dt/2): 2nd transport half-advance, closing the symmetric Strang step. SAME dispatch.
     for (auto& s : P->sp) {
       if (!s.evolve) continue;
       if (!stride_due(P->macro_step_, s.stride)) continue;
       const Real eff_dt = Real(dt) * Real(s.stride);
       advance_transport_half(s, eff_dt);
     }
-    apply_couplings(Real(dt));  // sources couplees inter-especes (splitting), apres le pas symetrique
+    apply_couplings(Real(dt));  // inter-species coupled sources (splitting), after the symmetric step
     P->t += dt;
     P->macro_step_++;
   }
 
-  /// Avance de @p nsteps macro-pas de longueur @p dt (boucle sur step).
+  /// Advances by @p nsteps macro-steps of length @p dt (loop over step).
   void advance(double dt, int nsteps) {
     for (int s = 0; s < nsteps; ++s) step(dt);
   }
 
-  /// Un macro-pas a dt CFL : dt = min sur les blocs evolutifs des BORNES de pas du bloc, puis avance
-  /// comme step. @return le dt utilise. SUBSTEPS-AWARE (post-#121) : bit-identique a l'ancienne
-  /// formule seulement pour substeps=1 (cf. note retro-compatibilite).
+  /// One macro-step at CFL dt: dt = min over the evolving blocks of the block step BOUNDS, then advances
+  /// like step. @return the dt used. SUBSTEPS-AWARE (post-#121): bit-identical to the old
+  /// formula only for substeps=1 (cf. backward-compatibility note).
   ///
-  /// POLITIQUE DE PAS (audit 2026-06, chantier step_cfl) : la borne de TRANSPORT historique
-  /// dt <= cfl*h*substeps_b/(stride_b*w_b) reste le socle, mais le pas AGREGE desormais, par bloc :
-  ///   - la borne de FREQUENCE DE SOURCE (s.source_frequency, trait HasSourceFrequency) :
-  ///     sous-pas effectif stride*dt/substeps <= cfl/mu -> dt <= cfl*substeps/(stride*mu), SANS h
-  ///     (une source locale borne en 1/temps, pas en longueur/temps) ;
-  ///   - le PAS ADMISSIBLE direct (s.stability_dt, trait HasStabilityDt) :
-  ///     stride*dt/substeps <= dt_adm -> dt <= dt_adm*substeps/stride, SANS cfl (le modele declare
-  ///     deja un pas admissible) ;
-  ///   - la vitesse de CFL elle-meme peut etre la vitesse de STABILITE declaree (trait
-  ///     HasStabilitySpeed) : s.max_speed est alors cable sur stability_speed (cf. make_max_speed).
-  /// Puis les bornes GLOBALES (P->dt_bounds_ : couplage multi-blocs, Schur/Poisson, AMR/scheduler,
-  /// posees par System::add_dt_bound) : dt <= fn() chacune, une evaluation HOTE par pas (pas de
-  /// callback par cellule). Un bloc/un systeme SANS bornes optionnelles garde un pas STRICTEMENT
-  /// identique a l'historique (les fonctions vides ne sont pas interrogees). La borne ACTIVE du
-  /// dernier pas est consultable via last_dt_bound() ("transport:<bloc>", "source_frequency:<bloc>",
-  /// "stability_dt:<bloc>", "global:<label>", "degenerate").
-  /// NOTE CONVENTION 2D (audit ADC-182) : la vitesse par cellule est w = max(wx, wy) -- PAS la
-  /// somme. En non-splitte 2D le nombre de Courant effectif atteint donc 2*cfl quand wx ~ wy :
-  /// cfl = 0.4 (defaut des cas) reste < 1 (sur), c'est aussi la convention des references par
-  /// balayage (pas_HLL) ; cfl >= 0.5 en 2D non-splitte est MARGINAL -- a eviter sans etude.
+  /// STEP POLICY (audit 2026-06, step_cfl worksite): the historical TRANSPORT bound
+  /// dt <= cfl*h*substeps_b/(stride_b*w_b) stays the base, but the step now AGGREGATES, per block:
+  ///   - the SOURCE FREQUENCY bound (s.source_frequency, HasSourceFrequency trait):
+  ///     effective substep stride*dt/substeps <= cfl/mu -> dt <= cfl*substeps/(stride*mu), WITHOUT h
+  ///     (a local source bounds in 1/time, not in length/time);
+  ///   - the direct ADMISSIBLE STEP (s.stability_dt, HasStabilityDt trait):
+  ///     stride*dt/substeps <= dt_adm -> dt <= dt_adm*substeps/stride, WITHOUT cfl (the model already
+  ///     declares an admissible step);
+  ///   - the CFL speed itself can be the declared STABILITY speed (HasStabilitySpeed
+  ///     trait): s.max_speed is then wired onto stability_speed (cf. make_max_speed).
+  /// Then the GLOBAL bounds (P->dt_bounds_: multi-block coupling, Schur/Poisson, AMR/scheduler,
+  /// set by System::add_dt_bound): dt <= fn() each, one HOST evaluation per step (no per-cell
+  /// callback). A block / a system WITHOUT optional bounds keeps a step STRICTLY identical to
+  /// history (empty functions are not queried). The ACTIVE bound of the last step is consultable via
+  /// last_dt_bound() ("transport:<block>", "source_frequency:<block>",
+  /// "stability_dt:<block>", "global:<label>", "degenerate").
+  /// 2D CONVENTION NOTE (audit ADC-182): the per-cell speed is w = max(wx, wy) -- NOT the
+  /// sum. In unsplit 2D the effective Courant number thus reaches 2*cfl when wx ~ wy:
+  /// cfl = 0.4 (case default) stays < 1 (safe), this is also the convention of the sweep
+  /// references (HLL step); cfl >= 0.5 in unsplit 2D is MARGINAL -- to avoid without study.
   double step_cfl(double cfl) {
     Impl* P = owner_;
     P->solve_fields();
-    // Pas physique MIN de la grille : cartesien = min(dx, dy) ; POLAIRE = min(dr, r_min * dtheta) (le pas
-    // physique azimutal r*dtheta est minimal au rayon interieur r_min de l'anneau -> bord le plus
-    // contraignant pour la CFL). Le reste de la formule CFL (par bloc, substeps/stride) est inchange.
+    // MIN physical step of the grid: Cartesian = min(dx, dy); POLAR = min(dr, r_min * dtheta) (the
+    // azimuthal physical step r*dtheta is minimal at the inner radius r_min of the ring -> most
+    // constraining edge for the CFL). The rest of the CFL formula (per block, substeps/stride) is unchanged.
     const Real h = P->polar_
                        ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
                        : std::min(P->geom.dx(), P->geom.dy());
-    // CFL PAR BLOC, FACTEUR STRIDE ET SUBSTEPS INCLUS. Un bloc de cadence M avance d'un pas effectif
-    // M*dt en substeps_b sous-pas, donc chaque sous-pas vaut stride_b * dt / substeps_b : la condition
-    // stable par sous-pas est stride_b * dt / substeps_b <= cfl * h / w_b, soit
+    // PER-BLOCK CFL, STRIDE AND SUBSTEPS FACTOR INCLUDED. A block of cadence M advances by an effective
+    // step M*dt in substeps_b substeps, so each substep is worth stride_b * dt / substeps_b: the stable
+    // condition per substep is stride_b * dt / substeps_b <= cfl * h / w_b, that is
     //   dt <= cfl * h * substeps_b / (stride_b * w_b).
-    // Le dt GLOBAL est le min sur les blocs evolutifs (le plus contraignant). Sans cela, le pas calcule
-    // sur w_max seul puis multiplie par M violerait la CFL d'un facteur M sur le bloc a stride.
+    // The GLOBAL dt is the min over the evolving blocks (the most constraining). Without this, the step
+    // computed on w_max alone then multiplied by M would violate the CFL by a factor M on the stride block.
     //
-    // RETRO-COMPATIBILITE (post-#121). La formule est SUBSTEPS-AWARE : avec substeps_b > 1, le dt
-    // retourne est substeps_b fois plus grand que l'ancienne formule dt = cfl*h/(stride*w).
-    // bit-identique seulement pour substeps=1 (a tout stride) ; step_cfl est desormais substeps-aware
-    // (dt = cfl*h*substeps/(stride*w)), donc un run step_cfl avec substeps>1 avance un dt plus grand
-    // qu'avant #121 (pas CFL-maximal, chaque sous-pas est a la limite de stabilite).
-    // Pour reproduire un run calibre avec l'ancienne formule, utiliser step(dt) avec le dt historique
-    // explicite, PAS step_cfl.
+    // BACKWARD COMPATIBILITY (post-#121). The formula is SUBSTEPS-AWARE: with substeps_b > 1, the dt
+    // returned is substeps_b times larger than the old formula dt = cfl*h/(stride*w).
+    // bit-identical only for substeps=1 (at any stride); step_cfl is now substeps-aware
+    // (dt = cfl*h*substeps/(stride*w)), so a step_cfl run with substeps>1 advances a larger dt
+    // than before #121 (CFL-maximal step, each substep at the stability limit).
+    // To reproduce a run calibrated with the old formula, use step(dt) with the explicit historical
+    // dt, NOT step_cfl.
     double dt = std::numeric_limits<double>::infinity();
     std::string reason = "degenerate";
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;  // bloc gele : ne contraint pas le pas
+      if (!s.evolve) continue;  // frozen block: does not constrain the step
       const Real w = std::max(s.max_speed(s.U), kCflSpeedFloor);
       double dt_b = cfl * static_cast<double>(h) * static_cast<double>(s.substeps) /
                     (static_cast<double>(s.stride) * static_cast<double>(w));
       const char* why = "transport";
-      // Borne de FREQUENCE DE SOURCE (optionnelle ; mu <= 0 = ne contraint pas).
+      // SOURCE FREQUENCY bound (optional; mu <= 0 = does not constrain).
       if (s.source_frequency) {
         const Real mu = s.source_frequency(s.U);
         if (mu > Real(0)) {
@@ -378,7 +378,7 @@ class SystemStepper {
           if (dt_src < dt_b) { dt_b = dt_src; why = "source_frequency"; }
         }
       }
-      // PAS ADMISSIBLE direct (optionnel ; <= 0 = ne contraint pas ; cfl NON applique).
+      // Direct ADMISSIBLE STEP (optional; <= 0 = does not constrain; cfl NOT applied).
       if (s.stability_dt) {
         const Real db = s.stability_dt(s.U);
         if (db > Real(0)) {
@@ -389,25 +389,25 @@ class SystemStepper {
       }
       if (dt_b < dt) { dt = dt_b; reason = std::string(why) + ":" + s.name; }
     }
-    // Frequences DECLAREES des sources couplees (CoupledSource.frequency) : les couplages
-    // s'appliquent UNE fois par MACRO-pas (apply_couplings(dt)), la borne porte donc sur le
-    // macro-dt directement : dt <= cfl / mu (PAS de facteur substeps/stride -- ceux-ci ne
-    // s'appliquent qu'au transport sous-cycle du bloc, pas au splitting des couplages).
+    // DECLARED frequencies of the coupled sources (CoupledSource.frequency): the couplings
+    // apply ONCE per MACRO-step (apply_couplings(dt)), so the bound applies to the
+    // macro-dt directly: dt <= cfl / mu (NO substeps/stride factor -- those apply
+    // only to the block subcycled transport, not to the coupling splitting).
     for (const auto& cs : P->coupled_freqs_) {
       if (!(cs.mu > 0.0)) continue;
       const double dt_cs = cfl / cs.mu;
       if (dt_cs < dt) { dt = dt_cs; reason = "coupled_source:" + cs.label; }
     }
-    // Frequences PAR CELLULE (CoupledSource.frequency avec une Expr) : mu(U) reduit (MAX) par cellule a
-    // ce pas, all_reduce_max global, dt <= cfl / max(mu). Meme raison "coupled_source:<label>" que la
-    // constante. Aucune source par cellule -> no-op (bit-identique).
+    // PER-CELL frequencies (CoupledSource.frequency with an Expr): mu(U) reduced (MAX) per cell at
+    // this step, global all_reduce_max, dt <= cfl / max(mu). Same reason "coupled_source:<label>" as the
+    // constant. No per-cell source -> no-op (bit-identical).
     apply_coupled_freq_expr_bounds(cfl, dt, &reason);
-    // Bornes GLOBALES (System::add_dt_bound) : couplage multi-blocs, Schur/Poisson, AMR/scheduler.
-    // Une evaluation HOTE par pas et par borne ; <= 0 ou non finie = ne contraint pas ce pas
-    // (neutralisee en +inf AVANT le min global). ALL_REDUCE_MIN obligatoire : la callback est
-    // evaluee PAR RANG (elle peut lire un etat rank-local) ; sans le min global chaque rang
-    // choisirait un dt different -> collectifs du pas desynchronises (Krylov / fill_boundary) ->
-    // deadlock MPI. En serie all_reduce_min est l'identite (bit-identique).
+    // GLOBAL bounds (System::add_dt_bound): multi-block coupling, Schur/Poisson, AMR/scheduler.
+    // One HOST evaluation per step and per bound; <= 0 or non-finite = does not constrain this step
+    // (neutralized to +inf BEFORE the global min). ALL_REDUCE_MIN mandatory: the callback is
+    // evaluated PER RANK (it may read a rank-local state); without the global min each rank
+    // would choose a different dt -> desynchronized step collectives (Krylov / fill_boundary) ->
+    // MPI deadlock. In serial all_reduce_min is the identity (bit-identical).
     for (const auto& g : P->dt_bounds_) {
       if (!g.fn) continue;
       double v = g.fn();
@@ -416,16 +416,16 @@ class SystemStepper {
       if (v < dt) { dt = v; reason = "global:" + g.label; }
     }
     if (!std::isfinite(dt)) {
-      dt = cfl * static_cast<double>(h) / static_cast<double>(kCflSpeedFloor);  // tous geles : pas degenere
+      dt = cfl * static_cast<double>(h) / static_cast<double>(kCflSpeedFloor);  // all frozen: degenerate step
       reason = "degenerate";
     }
     last_dt_reason_ = std::move(reason);
     for (auto& s : P->sp) {
       if (!s.evolve) continue;
-      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
-      const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up : pas effectif s.stride * dt
-      advance_transport(s, eff_dt);  // transport AIGUILLE par le mode geometrie (None : assemble_rhs)
-      run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
+      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold: not at the stride window end
+      const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up: effective step s.stride * dt
+      advance_transport(s, eff_dt);  // transport DISPATCHED by the geometry mode (None: assemble_rhs)
+      run_source_stage(s, eff_dt);  // OPT-IN: Schur-condensed source stage (no-op otherwise)
     }
     apply_couplings(Real(dt));
     P->t += dt;
@@ -433,38 +433,38 @@ class SystemStepper {
     return dt;
   }
 
-  /// Un macro-pas MULTIRATE : le macro-pas = pas stable du bloc le plus LENT ; chaque bloc plus rapide
-  /// est sous-cycle n_b = ceil(stride_b * w_b / w_min) fois. aux fige sur le macro-pas (couplage
-  /// once-per-step). @return le macro-pas.
+  /// One MULTIRATE macro-step: the macro-step = stable step of the SLOWEST block; each faster block
+  /// is subcycled n_b = ceil(stride_b * w_b / w_min) times. aux frozen over the macro-step (coupling
+  /// once-per-step). @return the macro-step.
   ///
-  /// BORNES OPTIONNELLES (audit 2026-06) : comme step_cfl, le macro-pas est ensuite REDUIT par les
-  /// bornes de bloc (source_frequency / stability_dt, appliquees au sous-pas effectif
-  /// stride_b*macro_dt/n_b -- n_b ne depend pas de dt, donc la clameur est exacte) et par les bornes
-  /// GLOBALES (P->dt_bounds_). Sans bornes optionnelles, macro_dt est STRICTEMENT historique.
+  /// OPTIONAL BOUNDS (audit 2026-06): like step_cfl, the macro-step is then REDUCED by the
+  /// block bounds (source_frequency / stability_dt, applied to the effective substep
+  /// stride_b*macro_dt/n_b -- n_b does not depend on dt, so the clamp is exact) and by the GLOBAL
+  /// bounds (P->dt_bounds_). Without optional bounds, macro_dt is STRICTLY historical.
   double step_adaptive(double cfl) {
     Impl* P = owner_;
     P->solve_fields();
-    // Multirate : macro-pas = pas stable du bloc le plus LENT ; chaque bloc plus rapide est
-    // sous-cycle n_b. aux fige sur le macro-pas (couplage once-per-step). SEMANTIQUE STRIDE =
-    // hold-then-catch-up : un bloc de cadence M est TENU tant que (macro_step + 1) % M != 0, puis
-    // avance d'un pas effectif M*macro_dt en fin de fenetre (cf. stride_due).
+    // Multirate: macro-step = stable step of the SLOWEST block; each faster block is
+    // subcycled n_b. aux frozen over the macro-step (coupling once-per-step). STRIDE SEMANTICS =
+    // hold-then-catch-up: a block of cadence M is HELD as long as (macro_step + 1) % M != 0, then
+    // advances by an effective step M*macro_dt at the window end (cf. stride_due).
     Real wmin = Real(1e30);
     std::vector<Real> wb;
     wb.reserve(P->sp.size());
     for (auto& s : P->sp) {
-      const Real w = s.evolve ? s.max_speed(s.U) : Real(0);  // bloc gele : hors cadence
+      const Real w = s.evolve ? s.max_speed(s.U) : Real(0);  // frozen block: out of cadence
       wb.push_back(w);
       if (s.evolve) wmin = std::min(wmin, w);
     }
-    if (wmin >= Real(1e30)) wmin = kCflSpeedFloor;  // aucun bloc evolutif (tous geles)
+    if (wmin >= Real(1e30)) wmin = kCflSpeedFloor;  // no evolving block (all frozen)
     const Real h = P->polar_
                        ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
                        : std::min(P->geom.dx(), P->geom.dy());
     double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
-    // Bornes de bloc OPTIONNELLES : chaque bloc sous-cycle n_b fois son pas effectif
-    // stride_b*macro_dt ; le sous-pas stride_b*macro_dt/n_b doit verifier les bornes de source /
-    // pas admissible du bloc. n_b (formule identique a la boucle d'avance ci-dessous) ne depend
-    // pas de macro_dt : la clameur est faite AVANT l'avance, n_b reste coherent.
+    // OPTIONAL block bounds: each block subcycles n_b times its effective step
+    // stride_b*macro_dt; the substep stride_b*macro_dt/n_b must satisfy the source / admissible
+    // step bounds of the block. n_b (formula identical to the advance loop below) does not depend
+    // on macro_dt: the clamp is done BEFORE the advance, n_b stays consistent.
     for (std::size_t b = 0; b < P->sp.size(); ++b) {
       auto& s = P->sp[b];
       if (!s.evolve) continue;
@@ -485,15 +485,15 @@ class SystemStepper {
                                             static_cast<double>(s.stride));
       }
     }
-    // Frequences declarees des sources couplees (cf. step_cfl) : borne sur le MACRO-pas.
+    // Declared frequencies of the coupled sources (cf. step_cfl): bound on the MACRO-step.
     for (const auto& cs : P->coupled_freqs_) {
       if (cs.mu > 0.0) macro_dt = std::min(macro_dt, cfl / cs.mu);
     }
-    // Frequences PAR CELLULE (Expr) : MAX de mu(U) par cellule, all_reduce_max, borne sur le macro-pas
-    // (cf. step_cfl). step_adaptive ne piste pas la raison active -> reason = nullptr.
+    // PER-CELL frequencies (Expr): MAX of mu(U) per cell, all_reduce_max, bound on the macro-step
+    // (cf. step_cfl). step_adaptive does not track the active reason -> reason = nullptr.
     apply_coupled_freq_expr_bounds(cfl, macro_dt, nullptr);
-    // Bornes GLOBALES (System::add_dt_bound), comme step_cfl (meme all_reduce_min : dt identique
-    // sur tous les rangs, cf. le commentaire de step_cfl).
+    // GLOBAL bounds (System::add_dt_bound), like step_cfl (same all_reduce_min: identical dt
+    // on all ranks, cf. the step_cfl comment).
     for (const auto& g : P->dt_bounds_) {
       if (!g.fn) continue;
       double v = g.fn();
@@ -503,17 +503,17 @@ class SystemStepper {
     }
     for (std::size_t b = 0; b < P->sp.size(); ++b) {
       auto& s = P->sp[b];
-      if (!s.evolve) continue;  // bloc gele : non avance
-      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold : pas en fin de fenetre stride
-      // Sous-cyclage stable du pas EFFECTIF M*macro_dt : chaque sous-pas doit verifier
-      // M*macro_dt / n <= cfl*h / w_b, i.e. n >= ceil(M * w_b / w_min). Le facteur stride M est donc
-      // porte par le nombre de sous-pas (sans lui, n sur w_b/w_min seul violerait la CFL d'un facteur M).
+      if (!s.evolve) continue;  // frozen block: not advanced
+      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold: not at the stride window end
+      // Stable subcycling of the EFFECTIVE step M*macro_dt: each substep must satisfy
+      // M*macro_dt / n <= cfl*h / w_b, i.e. n >= ceil(M * w_b / w_min). The stride factor M is thus
+      // carried by the number of substeps (without it, n on w_b/w_min alone would violate the CFL by a factor M).
       int n = static_cast<int>(std::ceil(static_cast<double>(s.stride) *
                                          static_cast<double>(wb[b] / wmin)));
       if (n < 1) n = 1;
-      const Real eff_dt = Real(macro_dt) * Real(s.stride);  // catch-up : pas effectif M*macro_dt
-      advance_transport_n(s, eff_dt, n);  // transport AIGUILLE par le mode geometrie (n sous-pas adaptatifs)
-      run_source_stage(s, eff_dt);  // OPT-IN : etage source condense par Schur (no-op sinon)
+      const Real eff_dt = Real(macro_dt) * Real(s.stride);  // catch-up: effective step M*macro_dt
+      advance_transport_n(s, eff_dt, n);  // transport DISPATCHED by the geometry mode (n adaptive substeps)
+      run_source_stage(s, eff_dt);  // OPT-IN: Schur-condensed source stage (no-op otherwise)
     }
     apply_couplings(Real(macro_dt));
     P->t += macro_dt;
@@ -521,15 +521,15 @@ class SystemStepper {
     return macro_dt;
   }
 
-  /// Nom de la borne ACTIVE (celle qui a fixe dt) du dernier step_cfl : "transport:<bloc>",
-  /// "source_frequency:<bloc>", "stability_dt:<bloc>", "global:<label>", "degenerate", ou "" si
-  /// aucun step_cfl n'a encore tourne. Diagnostic (System::last_dt_bound).
+  /// Name of the ACTIVE bound (the one that fixed dt) of the last step_cfl: "transport:<block>",
+  /// "source_frequency:<block>", "stability_dt:<block>", "global:<label>", "degenerate", or "" if
+  /// no step_cfl has run yet. Diagnostic (System::last_dt_bound).
   const std::string& last_dt_reason() const { return last_dt_reason_; }
 
  private:
   Impl* owner_;
-  SplitScheme scheme_ = SplitScheme::Lie;  // defaut Lie (Godunov) : bit-identique a l'historique
-  std::string last_dt_reason_;             // borne active du dernier step_cfl (diagnostic)
+  SplitScheme scheme_ = SplitScheme::Lie;  // default Lie (Godunov): bit-identical to history
+  std::string last_dt_reason_;             // active bound of the last step_cfl (diagnostic)
 };
 
 }  // namespace stepper

@@ -8,20 +8,20 @@
 #include <string>
 
 /// @file
-/// @brief Predicat de paroi (conducteur embedded) partage par les runtimes System et AmrSystem.
-///        Les deux derivaient le meme predicat depuis les memes parametres (wall, rayon, L) ;
-///        seul le prefixe du message d'erreur differait. Centralise ici par extraction PURE :
-///        le corps (cercle centre, comparaison std::hypot < R) est repris a l'identique.
+/// @brief Wall predicate (embedded conductor) shared by the System and AmrSystem runtimes.
+///        Both derived the same predicate from the same parameters (wall, radius, L);
+///        only the error-message prefix differed. Centralized here by PURE extraction:
+///        the body (centered circle, std::hypot < R comparison) is reused identically.
 
 namespace adc {
 namespace detail {
 
-/// Construit le predicat "interieur du conducteur" (paroi embedded pour le solveur de Poisson)
-/// depuis le mode de paroi @p wall, le rayon @p wall_radius et la taille de domaine @p L.
-///   - "none"   : pas de paroi -> predicat vide.
-///   - "circle" : disque centre en (L/2, L/2) de rayon @p wall_radius.
-///   - autre    : erreur, prefixee par @p err_context (p.ex. "System::set_poisson").
-/// Corps repris a l'identique des runtimes System / AmrSystem (bit-identique).
+/// Builds the "inside the conductor" predicate (embedded wall for the Poisson solver)
+/// from the wall mode @p wall, the radius @p wall_radius and the domain size @p L.
+///   - "none": no wall -> empty predicate.
+///   - "circle": disc centered at (L/2, L/2) with radius @p wall_radius.
+///   - other: error, prefixed by @p err_context (e.g. "System::set_poisson").
+/// Body reused identically from the System / AmrSystem runtimes (bit-identical).
 inline std::function<bool(Real, Real)> wall_predicate(const std::string& wall,
                                                       double wall_radius, double L,
                                                       const std::string& err_context) {
@@ -30,46 +30,46 @@ inline std::function<bool(Real, Real)> wall_predicate(const std::string& wall,
     const double cx = 0.5 * L, cy = 0.5 * L, R = wall_radius;
     return [cx, cy, R](Real x, Real y) { return std::hypot(x - cx, y - cy) < R; };
   }
-  throw std::runtime_error(err_context + " : wall inconnu '" + wall + "'");
+  throw std::runtime_error(err_context + ": unknown wall '" + wall + "'");
 }
 
-/// Descripteur de geometrie DISQUE : SOURCE UNIQUE de verite du domaine physique reel du papier
-/// (Hoffart et al., arXiv:2510.11808, Sec 5.3 : disque D de rayon R). C'est le pendant "transport" du
-/// mur de Poisson : le mur n'agit que sur l'elliptique (cf. wall_predicate / geometric_mg cut_cell),
-/// alors que ce descripteur sert a construire un MASQUE DE DOMAINE cellule-centre pour rendre le
-/// chemin de transport FV conscient du disque (verrou "bords d'anneau cartesiens", cf.
-/// docs/HOFFART_FIDELITY.md, ligne "Domain (disc of radius R)" du tableau de fidelite,
-/// documente comme le "Cartesian-ring-edge lock").
+/// DISC geometry descriptor: SINGLE SOURCE of truth for the paper's real physical domain
+/// (Hoffart et al., arXiv:2510.11808, Sec 5.3: disc D of radius R). It is the "transport"
+/// counterpart of the Poisson wall: the wall acts only on the elliptic part (cf. wall_predicate /
+/// geometric_mg cut_cell), whereas this descriptor is used to build a cell-centered DOMAIN MASK to
+/// make the FV transport path aware of the disc ("Cartesian-ring-edge" lock, cf.
+/// docs/HOFFART_FIDELITY.md, line "Domain (disc of radius R)" of the fidelity table,
+/// documented as the "Cartesian-ring-edge lock").
 ///
-/// REUTILISE EXACTEMENT le level set du mur conducteur (geometric_mg.hpp ligne 71) :
-///   ls(x, y) = hypot(x - cx, y - cy) - R, < 0 a l'INTERIEUR.
-/// Une cellule est ACTIVE quand son CENTRE est dans le disque (ls < 0), exactement comme le predicat
-/// d'interieur de GeometricMG (active = ls < 0). Le centre par defaut (cx, cy) = (L/2, L/2) coincide
-/// avec celui de wall_predicate("circle", ...).
+/// REUSES EXACTLY the conductor wall level set (geometric_mg.hpp line 71):
+///   ls(x, y) = hypot(x - cx, y - cy) - R, < 0 INSIDE.
+/// A cell is ACTIVE when its CENTER is inside the disc (ls < 0), exactly like the inside predicate
+/// of GeometricMG (active = ls < 0). The default center (cx, cy) = (L/2, L/2) coincides with that of
+/// wall_predicate("circle", ...).
 ///
-/// CONTRAT (chantier T2, inerte par defaut) : ce descripteur ne change RIEN au comportement par
-/// defaut. Il n'est materialise (mask MultiFab, transport mask-aware) que sur opt-in explicite
-/// (System::set_disc_domain). Tant qu'aucun disque n'est fixe, le masque est "tout actif" et le
-/// chemin FV/AMR/MPI reste BIT-IDENTIQUE.
+/// CONTRACT (T2 work item, inert by default): this descriptor changes NOTHING in the default
+/// behavior. It is materialized (mask MultiFab, mask-aware transport) only on explicit opt-in
+/// (System::set_disc_domain). As long as no disc is set, the mask is "all active" and the
+/// FV/AMR/MPI path stays BIT-IDENTICAL.
 struct DiscDomain {
-  double cx = 0.0;  ///< centre x (defaut L/2 quand construit depuis L)
-  double cy = 0.0;  ///< centre y (defaut L/2 quand construit depuis L)
-  double R = 0.0;   ///< rayon du disque
+  double cx = 0.0;  ///< center x (default L/2 when built from L)
+  double cy = 0.0;  ///< center y (default L/2 when built from L)
+  double R = 0.0;   ///< disc radius
 
-  /// Disque centre dans une boite carree [0, L]^2 de rayon @p radius (meme centre que
-  /// wall_predicate("circle", radius, L) : (L/2, L/2)).
+  /// Disc centered in a square box [0, L]^2 with radius @p radius (same center as
+  /// wall_predicate("circle", radius, L): (L/2, L/2)).
   static DiscDomain centered_in_box(double L, double radius) {
     return DiscDomain{0.5 * L, 0.5 * L, radius};
   }
 
-  /// Level set ls(x, y) = hypot(x - cx, y - cy) - R : < 0 a l'interieur, 0 au bord, > 0 dehors.
-  /// Identique a la convention du mur conducteur (geometric_mg cut_cell).
+  /// Level set ls(x, y) = hypot(x - cx, y - cy) - R: < 0 inside, 0 at the boundary, > 0 outside.
+  /// Identical to the conductor wall convention (geometric_mg cut_cell).
   ADC_HD Real level_set(Real x, Real y) const {
     return static_cast<Real>(std::hypot(static_cast<double>(x) - cx, static_cast<double>(y) - cy) - R);
   }
 
-  /// Cellule ACTIVE : son centre (x, y) est dans le disque (ls < 0). Meme test d'interieur que
-  /// l'active de GeometricMG (ls < 0).
+  /// ACTIVE cell: its center (x, y) is inside the disc (ls < 0). Same inside test as
+  /// the GeometricMG active one (ls < 0).
   ADC_HD bool cell_active(Real x, Real y) const { return level_set(x, y) < Real(0); }
 };
 

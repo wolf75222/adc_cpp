@@ -1,10 +1,10 @@
 #pragma once
 
-#include <adc/core/variables.hpp>  // VariableSet (descripteur a roles porte par chaque bloc)
-#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions (options du Newton de la source IMEX)
-#include <adc/runtime/export.hpp>  // ADC_EXPORT (methodes resolues par le loader natif a travers le dlopen)
-#include <adc/runtime/facade_options.hpp>  // SourceStageOptions / CoupledSourceProgram (PODs de facade, ADC-214)
-#include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (seam bloc compile AOT)
+#include <adc/core/variables.hpp>  // VariableSet (role-bearing descriptor carried by each block)
+#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions (options of the IMEX source Newton)
+#include <adc/runtime/export.hpp>  // ADC_EXPORT (methods resolved by the native loader through dlopen)
+#include <adc/runtime/facade_options.hpp>  // SourceStageOptions / CoupledSourceProgram (facade PODs, ADC-214)
+#include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (AOT-compiled block seam)
 #include <adc/runtime/model_spec.hpp>
 
 #include <array>
@@ -14,55 +14,54 @@
 #include <vector>
 
 /// @file
-/// @brief Composition multi-especes a l'execution : un systeme couple, bloc par bloc.
+/// @brief Runtime multi-species composition: one coupled system, block by block.
 ///
-/// Chaque bloc est une espece (un etat U) decrite par une ModelSpec (composition de briques
-/// generiques : transport + source + second membre elliptique), avec son schema spatial
-/// (limiteur + flux Riemann), son traitement temporel et ses sous-pas. Tous les blocs
-/// partagent un Poisson dont le second membre est la somme des elliptic_rhs par bloc ; la
-/// source S agit par bloc. Le coeur ne nomme aucun scenario ; ceux-ci sont des compositions
-/// definies cote application (adc_cases).
+/// Each block is a species (one state U) described by a ModelSpec (composition of generic
+/// bricks: transport + source + elliptic right-hand side), with its spatial scheme
+/// (limiter + Riemann flux), its time treatment and its substeps. All blocks share a
+/// Poisson whose right-hand side is the sum of the per-block elliptic_rhs; the source S
+/// acts per block. The core names no scenario; scenarios are compositions defined on the
+/// application side (adc_cases).
 ///
-/// Python compose (objets-briques) ; le calcul par cellule (assemble_rhs<L,F>, Newton de la
-/// source implicite, multigrille/FFT) reste C++ compile et fige a l'ajout du bloc. Aucun
-/// callback Python dans le hot path, sauf integrateur temporel ecrit en Python via
+/// Python composes (brick objects); the per-cell computation (assemble_rhs<L,F>, Newton of the
+/// implicit source, multigrid/FFT) stays C++-compiled and is frozen when the block is added. No
+/// Python callback in the hot path, except a time integrator written in Python via
 /// eval_rhs / get_state / set_state.
 
 namespace adc {
 
-/// Maillage et domaine partages par tous les blocs (les parametres physiques sont par bloc,
-/// dans la ModelSpec).
+/// Mesh and domain shared by all blocks (physical parameters are per block, in the ModelSpec).
 ///
-/// GEOMETRIE (chantier "grille polaire", Phase 1) : le CHOIX de la geometrie vit ICI, dans la config
-/// du maillage, PAS dans le schema (FiniteVolume reste reconstruction + Riemann + variables). Defaut
-/// "cartesian" : domaine carre [0,L]^2, comportement et numerique STRICTEMENT INCHANGES (bit-identique).
-/// "polar" decrit un anneau global r in [r_min, r_max] x theta in [0, 2pi) (cf. PolarGeometry) ; il est
-/// porte par adc.PolarMesh cote Python et n'est PAS encore branche dans System::step (Phase 1 livre la
-/// geometrie + l'operateur de transport polaire + sa validation MMS ; le transport polaire a travers
-/// System, qui demanderait aussi le Poisson polaire, est une phase ulterieure). Les champs polaires sont
-/// ignores tant que geometry == "cartesian".
+/// GEOMETRY ("polar grid" work, Phase 1): the CHOICE of geometry lives HERE, in the mesh config,
+/// NOT in the scheme (FiniteVolume stays reconstruction + Riemann + variables). Default
+/// "cartesian": square domain [0,L]^2, behavior and numerics STRICTLY UNCHANGED (bit-identical).
+/// "polar" describes a global ring r in [r_min, r_max] x theta in [0, 2pi) (cf. PolarGeometry); it is
+/// carried by adc.PolarMesh on the Python side and is NOT yet wired into System::step (Phase 1 ships the
+/// geometry + the polar transport operator + its MMS validation; polar transport through
+/// System, which would also require the polar Poisson, is a later phase). Polar fields are
+/// ignored while geometry == "cartesian".
 struct SystemConfig {
-  int n = 64;            ///< cellules par direction (domaine n x n) -- pour polaire : n_r = n_theta = n
-  double L = 1.0;        ///< taille du domaine carre [0,L]^2 (cartesien)
-  bool periodic = true;  ///< domaine periodique, sinon sortie libre en transport (cartesien)
-  // --- geometrie opt-in (Phase 1) : "cartesian" (defaut, bit-identique) | "polar" (anneau global) ---
-  std::string geometry = "cartesian";  ///< choix de geometrie (porte par adc.CartesianMesh / adc.PolarMesh)
-  int nr = 0;            ///< cellules radiales (polaire ; 0 => prend n)
-  int ntheta = 0;        ///< cellules azimutales (polaire ; 0 => prend n)
-  double r_min = 0.0;    ///< rayon interieur de l'anneau (polaire)
-  double r_max = 1.0;    ///< rayon exterieur de l'anneau (polaire)
-  // --- decoupage multi-box du TRANSPORT polaire (decoupage en BANDES theta, ADC-67) -----------------
-  // Nombre de boites de l'anneau, decoupe en theta (chaque boite couvre tout le rayon [0, nr-1] et une
-  // bande azimutale). 1 (defaut) = mono-box STRICTEMENT bit-identique a l'historique. theta_boxes > 1 :
-  // le transport polaire (assemble_rhs_polar + fill_ghosts collectif) tourne multi-box. CONTRAINTES (cf.
-  // PolarMesh / check_geometry) : 1 <= theta_boxes <= ntheta ET theta_boxes divise ntheta. INERTE en
-  // cartesien (le decoupage cartesien passe par AmrSystem / le multi-box MPI mono-box historique).
-  // PORTEE : transport multi-box OK ; Poisson polaire DIRECT mono-box only (rejet AMONT clair si
-  // theta_boxes > 1, cf. ensure_elliptic_polar) ; etage Schur tensoriel polaire multi-box.
-  int theta_boxes = 1;   ///< boites du decoupage theta du transport polaire (1 = mono-box)
+  int n = 64;            ///< cells per direction (n x n domain) -- for polar: n_r = n_theta = n
+  double L = 1.0;        ///< size of the square domain [0,L]^2 (cartesian)
+  bool periodic = true;  ///< periodic domain, otherwise free outflow in transport (cartesian)
+  // --- opt-in geometry (Phase 1): "cartesian" (default, bit-identical) | "polar" (global ring) ---
+  std::string geometry = "cartesian";  ///< geometry choice (carried by adc.CartesianMesh / adc.PolarMesh)
+  int nr = 0;            ///< radial cells (polar; 0 => takes n)
+  int ntheta = 0;        ///< azimuthal cells (polar; 0 => takes n)
+  double r_min = 0.0;    ///< inner radius of the ring (polar)
+  double r_max = 1.0;    ///< outer radius of the ring (polar)
+  // --- multi-box split of the polar TRANSPORT (split into theta BANDS, ADC-67) -----------------
+  // Number of boxes of the ring, split in theta (each box covers the whole radius [0, nr-1] and one
+  // azimuthal band). 1 (default) = mono-box STRICTLY bit-identical to history. theta_boxes > 1:
+  // polar transport (assemble_rhs_polar + collective fill_ghosts) runs multi-box. CONSTRAINTS (cf.
+  // PolarMesh / check_geometry): 1 <= theta_boxes <= ntheta AND theta_boxes divides ntheta. INERT in
+  // cartesian (the cartesian split goes through AmrSystem / the historical mono-box MPI multi-box).
+  // SCOPE: multi-box transport OK; DIRECT polar Poisson mono-box only (clear UPSTREAM rejection if
+  // theta_boxes > 1, cf. ensure_elliptic_polar); polar tensor Schur stage multi-box.
+  int theta_boxes = 1;   ///< boxes of the theta split of polar transport (1 = mono-box)
 };
 
-/// Systeme multi-especes couple, compose a l'execution a partir de briques generiques.
+/// Coupled multi-species system, composed at runtime from generic bricks.
 class System {
  public:
   explicit System(const SystemConfig& cfg);
@@ -70,53 +69,53 @@ class System {
   System(System&&) noexcept;
   System& operator=(System&&) noexcept;
 
-  /// Ajoute un bloc d'equation (une espece).
-  /// @param model    composition de briques (transport/source/elliptic + parametres)
-  /// @param limiter  reconstruction : "none" | "minmod" | "vanleer" | "weno5"
-  /// @param riemann  flux numerique : "rusanov" (generique minimal) | "hll" (generique, exige
-  ///                 model.wave_speeds) | "hllc" | "roe" (hllc/roe : EULER 2D seulement, 4 variables
-  ///                 + pression gaz parfait)
-  /// @param recon    variables reconstruites : "conservative" | "primitive" (Euler : primitif
-  ///                 plus robuste, positivite de rho et p)
-  /// @param time     "explicit" (SSPRK2) | "ssprk3" | "imex" (transport explicite, source implicite
-  ///                 backward-Euler local, ordre 1) | "imexrk_ars222" (famille IMEX-RK, schema
-  ///                 ARS(2,2,2), ordre 2, cartesien seul ; source PLEINEMENT implicite -> incompatible
-  ///                 avec implicit_vars/implicit_roles)
-  /// @param substeps sous-pas par macro-pas : le bloc avance N fois par macro-pas, chaque
-  ///                 sous-pas de longueur dt/N (electrons rapides : substeps=10, pas dt/10).
-  /// @param stride   cadence du bloc, semantique HOLD-THEN-CATCH-UP : 1 = chaque macro-pas (defaut,
-  ///                 bit-identique) ; M > 1 = bloc TENU (non avance) tant que (macro_step + 1) % M != 0,
-  ///                 puis avance d'un pas effectif M*dt au macro-pas ou (macro_step + 1) % M == 0 (fin de
-  ///                 fenetre de M pas), donc temporellement coherent avec les blocs rapides (bloc lent,
-  ///                 p.ex. neutres sur stride=20). substeps et stride sont ORTHOGONAUX : stride=M,
-  ///                 substeps=N -> N sous-pas de M*dt/N, une fois en fin de fenetre. COUPLAGE : entre deux
-  ///                 rattrapages, le bloc tenu entre dans la somme du Poisson avec son etat PERIME (derniere
-  ///                 avance figee). step_cfl honore la cadence (dt <= cfl*h*substeps / (stride*w)).
-  /// @param evolve   false = espece GELEE (fond fixe) : non avancee en temps, mais vue par le
-  ///                 Poisson de systeme (et, a venir, par les sources couplees)
-  /// @param implicit_vars  IMEX seulement : noms des variables conservees a traiter en IMPLICITE dans
-  ///                 le pas de source (backward-Euler) ; les autres restent explicites (Euler avant). Le
-  ///                 masque est PORTE PAR LE BLOC / la politique temporelle (et NON par le modele) : le
-  ///                 MEME modele peut donc etre reutilise avec des traitements implicites differents. VIDE
-  ///                 (defaut) + implicit_roles VIDE -> defaut du modele (Model::is_implicit, ou tout
-  ///                 implicite a defaut de trait) -> bit-identique. Resolu contre les noms conservatifs
-  ///                 du bloc ; un nom absent leve une erreur EXPLICITE.
-  /// @param implicit_roles IMEX seulement : meme masque implicite mais par ROLE physique ("density",
-  ///                 "momentum_x", "energy", ...) au lieu du nom (cf. variable_roles). Union avec
-  ///                 implicit_vars. Un role absent du bloc leve une erreur EXPLICITE.
-  /// @param newton IMEX seulement : options du Newton local de la source implicite (backward-Euler),
-  ///                 regroupees en POD (ADC-214 ; cf. NewtonOptions). max_iters (defaut 2 = constante
-  ///                 historique), rel_tol / abs_tol (critere d'arret par CELLULE
-  ///                 ||F||_inf <= abs_tol + rel_tol*||F0||_inf, 0/0 = desactive -> iterations fixes
-  ///                 historiques), fd_eps (pas de la jacobienne par differences finies, defaut 1e-7),
-  ///                 damping (amortissement W -= damping*delta dans (0, 1], 1 = Newton plein),
-  ///                 fail_policy (kFailNone / kFailWarn / kFailThrow : reaction aux cellules en echec).
-  ///                 Defaut {} = constantes historiques, bit-identique.
-  /// @param newton_diagnostics IMEX seulement : active le rapport Newton du bloc (residu max,
-  ///                 iterations max, cellules en echec -- non-fini / pivot degenere / non-convergence),
-  ///                 agrege sur les sous-pas de chaque avance et consultable via newton_report(name).
-  ///                 OPT-IN : false (defaut) = chemin historique sans aucun cout supplementaire. Reste
-  ///                 a plat (un bool distinct, hors de la famille homogene des options de convergence).
+  /// Adds an equation block (one species).
+  /// @param model    composition of bricks (transport/source/elliptic + parameters)
+  /// @param limiter  reconstruction: "none" | "minmod" | "vanleer" | "weno5"
+  /// @param riemann  numerical flux: "rusanov" (minimal generic) | "hll" (generic, requires
+  ///                 model.wave_speeds) | "hllc" | "roe" (hllc/roe: EULER 2D only, 4 variables
+  ///                 + ideal-gas pressure)
+  /// @param recon    reconstructed variables: "conservative" | "primitive" (Euler: primitive
+  ///                 more robust, positivity of rho and p)
+  /// @param time     "explicit" (SSPRK2) | "ssprk3" | "imex" (explicit transport, local implicit
+  ///                 backward-Euler source, order 1) | "imexrk_ars222" (IMEX-RK family, ARS(2,2,2)
+  ///                 scheme, order 2, cartesian only; source FULLY implicit -> incompatible
+  ///                 with implicit_vars/implicit_roles)
+  /// @param substeps substeps per macro-step: the block advances N times per macro-step, each
+  ///                 substep of length dt/N (fast electrons: substeps=10, step dt/10).
+  /// @param stride   block cadence, HOLD-THEN-CATCH-UP semantics: 1 = every macro-step (default,
+  ///                 bit-identical); M > 1 = block HELD (not advanced) while (macro_step + 1) % M != 0,
+  ///                 then advanced by one effective step M*dt at the macro-step where (macro_step + 1) % M == 0
+  ///                 (end of an M-step window), thus temporally consistent with the fast blocks (slow block,
+  ///                 e.g. neutrals on stride=20). substeps and stride are ORTHOGONAL: stride=M,
+  ///                 substeps=N -> N substeps of M*dt/N, once at the end of the window. COUPLING: between two
+  ///                 catch-ups, the held block enters the Poisson sum with its STALE state (last frozen
+  ///                 advance). step_cfl honors the cadence (dt <= cfl*h*substeps / (stride*w)).
+  /// @param evolve   false = FROZEN species (fixed background): not advanced in time, but seen by the
+  ///                 system Poisson (and, in the future, by coupled sources)
+  /// @param implicit_vars  IMEX only: names of the conservative variables to treat IMPLICITLY in
+  ///                 the source step (backward-Euler); the others stay explicit (forward Euler). The
+  ///                 mask is CARRIED BY THE BLOCK / time policy (and NOT by the model): the
+  ///                 SAME model can thus be reused with different implicit treatments. EMPTY
+  ///                 (default) + EMPTY implicit_roles -> model default (Model::is_implicit, or all
+  ///                 implicit absent a trait) -> bit-identical. Resolved against the conservative names
+  ///                 of the block; an absent name raises an EXPLICIT error.
+  /// @param implicit_roles IMEX only: same implicit mask but by physical ROLE ("density",
+  ///                 "momentum_x", "energy", ...) instead of the name (cf. variable_roles). Union with
+  ///                 implicit_vars. A role absent from the block raises an EXPLICIT error.
+  /// @param newton IMEX only: options of the local Newton of the implicit source (backward-Euler),
+  ///                 grouped in a POD (ADC-214; cf. NewtonOptions). max_iters (default 2 = historical
+  ///                 constant), rel_tol / abs_tol (PER-CELL stopping criterion
+  ///                 ||F||_inf <= abs_tol + rel_tol*||F0||_inf, 0/0 = disabled -> historical fixed
+  ///                 iterations), fd_eps (step of the finite-difference Jacobian, default 1e-7),
+  ///                 damping (damping W -= damping*delta in (0, 1], 1 = full Newton),
+  ///                 fail_policy (kFailNone / kFailWarn / kFailThrow: reaction to failed cells).
+  ///                 Default {} = historical constants, bit-identical.
+  /// @param newton_diagnostics IMEX only: enables the block's Newton report (max residual,
+  ///                 max iterations, failed cells -- non-finite / degenerate pivot / non-convergence),
+  ///                 aggregated over the substeps of each advance and available via newton_report(name).
+  ///                 OPT-IN: false (default) = historical path with no extra cost. Stays
+  ///                 flat (a separate bool, outside the homogeneous family of convergence options).
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
@@ -128,45 +127,45 @@ class System {
                  const NewtonOptions& newton = {}, bool newton_diagnostics = false,
                  double positivity_floor = 0.0);
 
-  /// Rapport du Newton de la source implicite (IMEX) d'un bloc, AGREGE sur les sous-pas de la
-  /// DERNIERE avance du bloc. N'existe que si le bloc a ete ajoute avec newton_diagnostics=true
-  /// (erreur explicite sinon). Copie a plat (pas de dependance au header numerique).
+  /// Report of the implicit source Newton (IMEX) of a block, AGGREGATED over the substeps of the
+  /// LAST advance of the block. Only exists if the block was added with newton_diagnostics=true
+  /// (explicit error otherwise). Flat copy (no dependency on the numerics header).
   struct SourceNewtonReport {
-    bool enabled;          ///< un rapport a ete calcule (au moins une avance IMEX jouee)
-    bool converged;        ///< aucune cellule en echec sur la derniere avance
-    double max_residual;   ///< max cellules/sous-pas de ||F||_inf a la sortie du Newton
-    double max_iters_used; ///< max cellules/sous-pas des iterations consommees
-    double n_failed;       ///< nb (cellules x sous-pas) en echec (non-fini / pivot / non-convergence)
-    double failed_i;       ///< i d'UNE cellule fautive (-1 si aucune ; index max encode)
-    double failed_j;       ///< j de la meme cellule (-1 si aucune)
-    double failed_comp;    ///< composante conservee du pire residu de cette cellule (-1 inconnu)
+    bool enabled;          ///< a report was computed (at least one IMEX advance played)
+    bool converged;        ///< no failed cell on the last advance
+    double max_residual;   ///< max over cells/substeps of ||F||_inf at the Newton exit
+    double max_iters_used; ///< max over cells/substeps of the iterations consumed
+    double n_failed;       ///< number of (cells x substeps) failed (non-finite / pivot / non-convergence)
+    double failed_i;       ///< i of ONE faulty cell (-1 if none; max index encoded)
+    double failed_j;       ///< j of the same cell (-1 if none)
+    double failed_comp;    ///< conservative component of the worst residual of that cell (-1 unknown)
   };
   SourceNewtonReport newton_report(const std::string& name) const;
 
-  /// Ajoute un bloc dont le modele est CHARGE A L'EXECUTION depuis une bibliotheque partagee (.so)
-  /// generee par le DSL (emit_cpp_brick -> ModelAdapter -> fabrique extern "C"). Le .so doit exposer
-  /// adc_model_nvars(), adc_make_model() (renvoie un IModel<NV>*) et adc_destroy_model(void*).
-  /// CHEMIN HOTE (dispatch virtuel, Rusanov a_max global periodique, Euler explicite) : pour
-  /// prototyper un modele inedit, ecrit en formules cote Python, sans recompiler le coeur. cf.
+  /// Adds a block whose model is LOADED AT RUNTIME from a shared library (.so)
+  /// generated by the DSL (emit_cpp_brick -> ModelAdapter -> extern "C" factory). The .so must expose
+  /// adc_model_nvars(), adc_make_model() (returns an IModel<NV>*) and adc_destroy_model(void*).
+  /// HOST PATH (virtual dispatch, global periodic Rusanov a_max, explicit Euler): to
+  /// prototype a brand-new model, written as formulas on the Python side, without recompiling the core. cf.
   /// dynamic_model.hpp.
-  /// @param names noms des variables (introspection) ; defaut u0..u{NV-1}.
-  /// @param recon reconstruction MUSCL des etats de face (conservatif) : "none" (ordre 1) | "minmod"
-  ///              | "vanleer" (ordre 2, TVD). Le choix du FLUX (HLLC/Roe) reste sur le chemin compile.
+  /// @param names variable names (introspection); default u0..u{NV-1}.
+  /// @param recon MUSCL reconstruction of the face states (conservative): "none" (order 1) | "minmod"
+  ///              | "vanleer" (order 2, TVD). The FLUX choice (HLLC/Roe) stays on the compiled path.
   void add_dynamic_block(const std::string& name, const std::string& so_path, int substeps = 1,
                          const std::vector<std::string>& names = {},
                          const std::string& recon = "none");
 
-  /// Ajoute un bloc dont le modele est COMPILE AOT depuis une .so generee par le DSL
-  /// (dsl.compile_aot / compile_or_jit(mode="compile")). A la difference du bloc dynamique (chemin
-  /// hote, dispatch virtuel IModel, Rusanov ordre 1), ce bloc tourne le chemin de PRODUCTION : la .so
-  /// execute assemble_rhs<Limiter, Flux> (HLLC/Roe au choix, ordre 2) et SSPRK2/IMEX du coeur sur le
-  /// modele genere ; seuls des tableaux plats transitent (ABI extern "C", cf. compiled_block_abi.hpp).
-  /// @param limiter "none" | "minmod" | "vanleer" | "weno5" (weno5 : le .so alloue block_n_ghost = 3
+  /// Adds a block whose model is COMPILED AOT from a .so generated by the DSL
+  /// (dsl.compile_aot / compile_or_jit(mode="compile")). Unlike the dynamic block (host
+  /// path, IModel virtual dispatch, order-1 Rusanov), this block runs the PRODUCTION path: the .so
+  /// runs assemble_rhs<Limiter, Flux> (HLLC/Roe by choice, order 2) and the core's SSPRK2/IMEX on the
+  /// generated model; only flat arrays cross (extern "C" ABI, cf. compiled_block_abi.hpp).
+  /// @param limiter "none" | "minmod" | "vanleer" | "weno5" (weno5: the .so allocates block_n_ghost = 3
   ///                ghosts, cf. compiled_block_abi.hpp)
   /// @param riemann "rusanov" | "hll" | "hllc" | "roe"
   /// @param recon   "conservative" | "primitive"
-  /// @param time    "explicit" | "imex" SEULEMENT : l'ABI extern "C" du .so ne cable que SSPRK2 en
-  ///                explicite -- "ssprk3" / "euler" sont rejetes (cf. add_native_block, qui les porte)
+  /// @param time    "explicit" | "imex" ONLY: the .so's extern "C" ABI only wires SSPRK2 in
+  ///                explicit -- "ssprk3" / "euler" are rejected (cf. add_native_block, which carries them)
   void add_compiled_block(const std::string& name, const std::string& so_path,
                           const std::string& limiter = "minmod",
                           const std::string& riemann = "rusanov",
@@ -175,33 +174,33 @@ class System {
                           const std::vector<std::string>& names = {},
                           double positivity_floor = 0.0);
 
-  /// Change les valeurs des parametres RUNTIME d'un bloc AOT (add_compiled_block) SANS recompiler le
-  /// .so (P7-b). @p values est le bloc COMPLET des valeurs (ordre = ordre trie des noms cote DSL, cf.
-  /// CompiledModel.runtime_param_names). Le bloc doit avoir ete ajoute via add_compiled_block ET
-  /// declarer au moins un parametre runtime (dsl.Param(..., kind="runtime")) ; sinon erreur explicite
-  /// (un set_param silencieux sur un bloc sans param runtime masquerait un bug). Effet au prochain pas
-  /// (les fermetures du bloc lisent le bloc de valeurs PARTAGE). @throws std::runtime_error si le bloc
-  /// est inconnu, n'a pas de params runtime, ou si @p values n'a pas la bonne longueur.
+  /// Changes the values of the RUNTIME parameters of an AOT block (add_compiled_block) WITHOUT recompiling the
+  /// .so (P7-b). @p values is the COMPLETE block of values (order = sorted order of the names on the DSL side, cf.
+  /// CompiledModel.runtime_param_names). The block must have been added via add_compiled_block AND
+  /// declare at least one runtime parameter (dsl.Param(..., kind="runtime")); otherwise explicit error
+  /// (a silent set_param on a block without a runtime param would mask a bug). Effect on the next step
+  /// (the block closures read the SHARED block of values). @throws std::runtime_error if the block
+  /// is unknown, has no runtime params, or if @p values does not have the right length.
   void set_block_params(const std::string& name, const std::vector<double>& values);
 
-  /// Ajoute un bloc dont le modele est compile dans un LOADER NATIF .so genere par le DSL
-  /// (dsl.compile_native / compile(backend="production")). C'est le chemin de PRODUCTION : le loader
-  /// inline le gabarit en-tete adc::add_compiled_model<ProdModel>, qui fabrique les fermetures sur le
-  /// CONTEXTE REEL du System (grid_context) et installe le bloc via install_block. Le bloc tourne
-  /// alors EXACTEMENT le chemin natif d'add_block (fill_boundary = halos MPI, assemble_rhs device),
-  /// ZERO-COPIE -- a la difference d'add_compiled_block (.so + marshaling de tableaux plats, ABI
-  /// extern "C" host). Le loader inline appelant des methodes hors-ligne de ce module (install_block
-  /// /grid_context/ensure_aux_width, exportees ADC_EXPORT), la frontiere n'est PAS une ABI plate :
-  /// loader et module DOIVENT partager la meme ABI C++. add_native_block lit la cle d'ABI du loader
-  /// (adc_native_abi_key) et la COMPARE a abi_key() ; un ecart leve une erreur EXPLICITE (pas d'UB).
-  /// @param limiter "none" | "minmod" | "vanleer" | "weno5" (weno5 : add_compiled_model reallue
-  ///                l'etat du bloc a block_n_ghost = 3 ghosts apres install_block, comme add_block)
+  /// Adds a block whose model is compiled into a NATIVE LOADER .so generated by the DSL
+  /// (dsl.compile_native / compile(backend="production")). This is the PRODUCTION path: the loader
+  /// inlines the header template adc::add_compiled_model<ProdModel>, which builds the closures on the
+  /// REAL CONTEXT of the System (grid_context) and installs the block via install_block. The block then
+  /// runs EXACTLY the native path of add_block (fill_boundary = MPI halos, assemble_rhs device),
+  /// ZERO-COPY -- unlike add_compiled_block (.so + marshaling of flat arrays, extern "C" host
+  /// ABI). Since the inline loader calls out-of-line methods of this module (install_block
+  /// /grid_context/ensure_aux_width, exported ADC_EXPORT), the boundary is NOT a flat ABI:
+  /// loader and module MUST share the same C++ ABI. add_native_block reads the loader's ABI key
+  /// (adc_native_abi_key) and COMPARES it to abi_key(); a mismatch raises an EXPLICIT error (no UB).
+  /// @param limiter "none" | "minmod" | "vanleer" | "weno5" (weno5: add_compiled_model reallocates
+  ///                the block state to block_n_ghost = 3 ghosts after install_block, like add_block)
   /// @param riemann "rusanov" | "hll" | "hllc" | "roe"
   /// @param recon   "conservative" | "primitive"
-  /// @param time    "explicit" (SSPRK2) | "ssprk3" | "euler" | "imex" (le gabarit marshale le schema
-  ///                RK explicite jusqu'au make_block du loader, parite avec add_block)
-  /// @param gamma   indice adiabatique du bloc (set_density / couplages inter-especes)
-  /// @param stride  cadence du bloc (1 = chaque pas, defaut ; cf. add_block)
+  /// @param time    "explicit" (SSPRK2) | "ssprk3" | "euler" | "imex" (the template marshals the explicit
+  ///                RK scheme down to the loader's make_block, parity with add_block)
+  /// @param gamma   adiabatic index of the block (set_density / inter-species couplings)
+  /// @param stride  block cadence (1 = every step, default; cf. add_block)
   void add_native_block(const std::string& name, const std::string& so_path,
                         const std::string& limiter = "minmod",
                         const std::string& riemann = "rusanov",
@@ -210,394 +209,394 @@ class System {
                         int substeps = 1, bool evolve = true, int stride = 1,
                         double positivity_floor = 0.0);
 
-  /// Cle d'ABI du module (compilateur + standard C++ + signature des en-tetes adc, figee a la
-  /// compilation). Comparee a la cle baked dans un loader natif .so par add_native_block ; exposee
-  /// aussi cote Python pour que emit_cpp_native_loader (ou un diagnostic) puisse la consulter.
+  /// ABI key of the module (compiler + C++ standard + signature of the adc headers, frozen at
+  /// compilation). Compared to the key baked into a native loader .so by add_native_block; also exposed
+  /// on the Python side so that emit_cpp_native_loader (or a diagnostic) can consult it.
   static std::string abi_key();
 
-  /// @name Seam de bloc COMPILE AOT (parite native, sans marshaling)
-  /// Pour brancher un modele genere par le DSL en COMPOSANT au moment de la COMPILATION (binaire de
-  /// production Kokkos + MPI + AMR), via le gabarit libre adc::add_compiled_model<Model> de
-  /// adc/runtime/dsl_block.hpp : il fabrique les fermetures avec block_builder.hpp sur le CONTEXTE
-  /// REEL du System (grid_context) -- donc le bloc tourne le meme chemin que add_block (fill_boundary
-  /// = halos MPI, assemble_rhs device), sans recopier les tableaux. C'est la difference avec
-  /// add_compiled_block (.so + marshaling hote, prototypage runtime CPU).
+  /// @name AOT-COMPILED block seam (native parity, no marshaling)
+  /// To wire a DSL-generated model by COMPOSING at COMPILATION time (production Kokkos + MPI + AMR
+  /// binary), via the free template adc::add_compiled_model<Model> of
+  /// adc/runtime/dsl_block.hpp: it builds the closures with block_builder.hpp on the REAL
+  /// CONTEXT of the System (grid_context) -- so the block runs the same path as add_block (fill_boundary
+  /// = MPI halos, assemble_rhs device), without copying the arrays. That is the difference with
+  /// add_compiled_block (.so + host marshaling, runtime CPU prototyping).
   /// @{
-  /// VISIBILITE DEFAUT (ADC_EXPORT) : grid_context / install_block / ensure_aux_width sont les
-  /// seules methodes appelees par le gabarit en-tete add_compiled_model. Un loader .so genere (chemin
-  /// DSL "production", cf. emit_cpp_native_loader / add_native_block) inline ce gabarit et doit
-  /// resoudre ces symboles depuis le module _adc deja charge. Compile en -fvisibility=hidden (pybind11),
-  /// le module ne les exporterait pas sans cette annotation et le dlopen du loader echouerait.
-  ADC_EXPORT GridContext grid_context();  ///< maillage + CL + aux REELS du System (aux non possede)
-  /// Installe un bloc a partir de fermetures deja fabriquees (cf. add_compiled_model). Les
-  /// descripteurs cons/prim portent les noms ET les roles (M::conservative_vars()), exploites
-  /// par les couplages inter-especes.
+  /// DEFAULT VISIBILITY (ADC_EXPORT): grid_context / install_block / ensure_aux_width are the
+  /// only methods called by the header template add_compiled_model. A generated loader .so (DSL
+  /// "production" path, cf. emit_cpp_native_loader / add_native_block) inlines this template and must
+  /// resolve these symbols from the already loaded _adc module. Compiled with -fvisibility=hidden (pybind11),
+  /// the module would not export them without this annotation and the loader's dlopen would fail.
+  ADC_EXPORT GridContext grid_context();  ///< REAL mesh + BC + aux of the System (aux not owned)
+  /// Installs a block from already-built closures (cf. add_compiled_model). The
+  /// cons/prim descriptors carry the names AND the roles (M::conservative_vars()), used
+  /// by inter-species couplings.
   ADC_EXPORT void install_block(const std::string& name, int ncomp, const VariableSet& cons_vars,
                      const VariableSet& prim_vars, double gamma, BlockClosures closures,
                      std::function<Real(const MultiFab&)> max_speed,
                      std::function<void(const MultiFab&, MultiFab&)> poisson_rhs, int substeps,
                      bool evolve, int stride = 1);
-  /// Garantit que l'etat U du bloc @p name porte au moins @p n_ghost ghosts (largeur du stencil
-  /// spatial). WENO5 lit 3 ghosts, > les 2 alloues par install_block ; appelee par add_compiled_model
-  /// (en-tete) avec block_n_ghost(limiter) APRES install_block, pour que le chemin compile natif
-  /// (loader .so) accepte weno5 -- MEME mecanisme que add_block. No-op si U a deja assez de ghosts
-  /// (none/minmod/vanleer, <= 2) : allocation et donnees bit-identiques a l'historique. ADC_EXPORT :
-  /// appelee par le gabarit en-tete add_compiled_model -> doit etre exportee pour le loader .so.
+  /// Guarantees that the state U of block @p name carries at least @p n_ghost ghosts (width of the
+  /// spatial stencil). WENO5 reads 3 ghosts, > the 2 allocated by install_block; called by add_compiled_model
+  /// (header) with block_n_ghost(limiter) AFTER install_block, so the native compiled path
+  /// (loader .so) accepts weno5 -- SAME mechanism as add_block. No-op if U already has enough ghosts
+  /// (none/minmod/vanleer, <= 2): allocation and data bit-identical to history. ADC_EXPORT:
+  /// called by the header template add_compiled_model -> must be exported for the loader .so.
   ADC_EXPORT void set_block_ghosts(const std::string& name, int n_ghost);
   /// @}
 
-  /// Configure le Poisson partage.
-  /// @param rhs    seul mode : "charge_density", f = somme_s elliptic_rhs_s(u_s)
-  /// @param solver "geometric_mg" (tout cas, paroi comprise) | "fft" (periodique, n = 2^k)
+  /// Configures the shared Poisson.
+  /// @param rhs    only mode: "charge_density", f = sum_s elliptic_rhs_s(u_s)
+  /// @param solver "geometric_mg" (any case, wall included) | "fft" (periodic, n = 2^k)
   /// @param bc     "auto" | "periodic" | "dirichlet" | "neumann"
-  /// @param wall   "none" | "circle" : paroi conductrice en (L/2, L/2), rayon wall_radius
-  /// @param epsilon permittivite CONSTANTE de l'operateur div(eps grad phi) = f. eps != 1 resout
-  ///                eps lap phi = f (i.e. lap phi = f/eps). Pour une permittivite eps(x) VARIABLE,
-  ///                cf. set_epsilon_field (operateur a coefficients variables, GeometricMG).
-  /// @param abs_tol plancher ABSOLU du critere d'arret du V-cycle GeometricMG (memes unites que le
-  ///                residu). Defaut 0 : critere purement relatif, comportement historique inchange.
-  ///                Pose > 0 (echelle du probleme), il fait sortir sans cycler les solve_fields HORS
-  ///                PAS sur un etat deja converge. Sans effet sur le solveur FFT (direct).
+  /// @param wall   "none" | "circle": conducting wall at (L/2, L/2), radius wall_radius
+  /// @param epsilon CONSTANT permittivity of the operator div(eps grad phi) = f. eps != 1 solves
+  ///                eps lap phi = f (i.e. lap phi = f/eps). For a VARIABLE permittivity eps(x),
+  ///                cf. set_epsilon_field (variable-coefficient operator, GeometricMG).
+  /// @param abs_tol ABSOLUTE floor of the stopping criterion of the GeometricMG V-cycle (same units as the
+  ///                residual). Default 0: purely relative criterion, historical behavior unchanged.
+  ///                Set > 0 (problem scale), it makes solve_fields exit without cycling OUT OF
+  ///                STEP on an already-converged state. No effect on the FFT solver (direct).
   void set_poisson(const std::string& rhs = "charge_density",
                    const std::string& solver = "geometric_mg",
                    const std::string& bc = "auto", const std::string& wall = "none",
                    double wall_radius = 0.0, double epsilon = 1.0, double abs_tol = 0.0);
 
-  /// Fixe le DOMAINE DE TRANSPORT comme un DISQUE de centre (@p cx, @p cy) et de rayon @p R
-  /// (chantier T2, CONTRAT inerte par defaut). Materialise un masque 0/1 cellule-centre (cellule
-  /// active quand son centre est dans le disque, level set hypot(x-cx, y-cy) - R < 0, MEME convention
-  /// que le mur conducteur du Poisson). C'est le pendant FV du mur elliptique : le papier (Hoffart et
-  /// al., arXiv:2510.11808) transporte sur un vrai disque, alors qu'ADC transporte sur le carre
-  /// cartesien plein avec le cercle seulement dans la paroi de Poisson (verrou "bords d'anneau
-  /// cartesiens", cf. docs/HOFFART_FIDELITY.md). Le masque rend possible un transport mask-aware
-  /// CONSERVATIF (flux normal nul aux faces active/inactive).
+  /// Sets the TRANSPORT DOMAIN as a DISC centered at (@p cx, @p cy) with radius @p R
+  /// (T2 work, CONTRACT inert by default). Materializes a 0/1 cell-centered mask (cell
+  /// active when its center is inside the disc, level set hypot(x-cx, y-cy) - R < 0, SAME convention
+  /// as the conducting wall of the Poisson). It is the FV counterpart of the elliptic wall: the paper (Hoffart
+  /// et al., arXiv:2510.11808) transports on a true disc, whereas ADC transports on the full
+  /// cartesian square with the circle only in the Poisson wall ("cartesian ring edges"
+  /// lock, cf. docs/HOFFART_FIDELITY.md). The mask makes possible a CONSERVATIVE mask-aware
+  /// transport (zero normal flux at active/inactive faces).
   ///
-  /// MODE DE TRANSPORT DISQUE (chantier T5-PR3, @p mode) : aiguille l'avance de transport de step() vers
-  /// l'operateur disque correspondant. Defaut "none" -> chemin plein cartesien (assemble_rhs), BIT-
-  /// IDENTIQUE a l'historique meme apres set_disc_domain (le masque est materialise mais le transport
-  /// l'ignore tant que le mode est "none"). "staircase" -> transport masque conservatif (assemble_rhs_
-  /// masked, porte de face 0/1, frontiere crenelee). "cutcell" -> transport cut-cell / embedded-boundary
-  /// (assemble_rhs_eb, apertures alpha_f + fraction de volume kappa, frontiere lisse, ordre 2 interieur).
-  /// Le mode est honore sous Lie ET Strang (cf. set_time_scheme). Un mode != "none" sans bloc cartesien
-  /// transportable leve une erreur EXPLICITE au pas (jamais un transport plein silencieux). Mode inconnu
-  /// -> erreur. R > 0 requis ; cartesien seulement (le polaire borne deja l'anneau par ses parois
-  /// radiales -> erreur explicite).
+  /// DISC TRANSPORT MODE (T5-PR3 work, @p mode): dispatches the transport advance of step() to
+  /// the corresponding disc operator. Default "none" -> full cartesian path (assemble_rhs), BIT-
+  /// IDENTICAL to history even after set_disc_domain (the mask is materialized but transport
+  /// ignores it while the mode is "none"). "staircase" -> conservative masked transport (assemble_rhs_
+  /// masked, 0/1 face gate, jagged boundary). "cutcell" -> cut-cell / embedded-boundary transport
+  /// (assemble_rhs_eb, alpha_f apertures + kappa volume fraction, smooth boundary, order 2 interior).
+  /// The mode is honored under Lie AND Strang (cf. set_time_scheme). A mode != "none" without a transportable
+  /// cartesian block raises an EXPLICIT error at the step (never a silent full transport). Unknown mode
+  /// -> error. R > 0 required; cartesian only (polar already bounds the ring by its radial
+  /// walls -> explicit error).
   void set_disc_domain(double cx, double cy, double R, const std::string& mode = "none");
 
-  /// Fixe SEUL le mode de transport disque (sans (re)definir le disque) : "none" | "staircase" |
-  /// "cutcell". Utile pour basculer le mode apres set_disc_domain, ou pour le remettre a "none"
-  /// (retour au chemin plein cartesien, bit-identique). Demander un mode != "none" sans disque fixe
-  /// (set_disc_domain) leve une erreur EXPLICITE (le mode seul n'a pas de geometrie a appliquer).
+  /// Sets ONLY the disc transport mode (without (re)defining the disc): "none" | "staircase" |
+  /// "cutcell". Useful to toggle the mode after set_disc_domain, or to reset it to "none"
+  /// (back to the full cartesian path, bit-identical). Requesting a mode != "none" without a defined disc
+  /// (set_disc_domain) raises an EXPLICIT error (the mode alone has no geometry to apply).
   void set_geometry_mode(const std::string& mode);
 
-  /// @return le masque de domaine 0/1 cellule-centre, ny*nx row-major (j lent, i rapide). Sans
-  /// set_disc_domain, renvoie un masque TOUT ACTIF (que des 1.0) : le sous-domaine de transport est
-  /// le domaine entier (chemin par defaut). Diagnostic / verification du contrat.
+  /// @return the 0/1 cell-centered domain mask, ny*nx row-major (j slow, i fast). Without
+  /// set_disc_domain, returns an ALL-ACTIVE mask (only 1.0): the transport sub-domain is
+  /// the entire domain (default path). Diagnostic / contract verification.
   std::vector<double> disc_mask() const;
 
-  /// Fixe une permittivite VARIABLE eps(x), champ n*n row-major (> 0), au CENTRE des cellules.
-  /// L'operateur du Poisson de systeme passe a div(eps grad phi) = f, eps PORTE PAR L'OPERATEUR
-  /// (coefficient de face harmonique, ordre 2) sans mise a l'echelle 1/eps du second membre. Seul
-  /// le solveur 'geometric_mg' le supporte ; le demander avec 'fft' (coefficient constant) leve une
-  /// erreur. Prevaut sur la permittivite constante de set_poisson. A appeler avant solve_fields.
+  /// Sets a VARIABLE permittivity eps(x), n*n row-major field (> 0), at the cell CENTER.
+  /// The system Poisson operator becomes div(eps grad phi) = f, eps CARRIED BY THE OPERATOR
+  /// (harmonic face coefficient, order 2) without 1/eps scaling of the right-hand side. Only
+  /// the 'geometric_mg' solver supports it; requesting it with 'fft' (constant coefficient) raises an
+  /// error. Takes precedence over the constant permittivity of set_poisson. Call before solve_fields.
   void set_epsilon_field(const std::vector<double>& eps);
 
-  /// Fixe une permittivite ANISOTROPE eps_x(x), eps_y(x), deux champs n*n row-major (> 0), au CENTRE
-  /// des cellules. L'operateur du Poisson de systeme passe a div(diag(eps_x, eps_y) grad phi) = f :
-  /// les faces normales a x portent eps_x, celles normales a y portent eps_y (coefficients de face
-  /// harmoniques, ordre 2), PORTES PAR L'OPERATEUR sans mise a l'echelle 1/eps du second membre.
-  /// eps_x == eps_y redonne l'operateur isotrope div(eps grad phi). Seul 'geometric_mg' le supporte ;
-  /// le demander avec 'fft' (coefficient constant) leve une erreur. A appeler avant solve_fields.
+  /// Sets an ANISOTROPIC permittivity eps_x(x), eps_y(x), two n*n row-major fields (> 0), at the CENTER
+  /// of the cells. The system Poisson operator becomes div(diag(eps_x, eps_y) grad phi) = f:
+  /// faces normal to x carry eps_x, those normal to y carry eps_y (harmonic face coefficients,
+  /// order 2), CARRIED BY THE OPERATOR without 1/eps scaling of the right-hand side.
+  /// eps_x == eps_y gives back the isotropic operator div(eps grad phi). Only 'geometric_mg' supports it;
+  /// requesting it with 'fft' (constant coefficient) raises an error. Call before solve_fields.
   void set_epsilon_anisotropic_field(const std::vector<double>& eps_x,
                                      const std::vector<double>& eps_y);
 
-  /// Active un terme de REACTION kappa(x) >= 0 : l'operateur du Poisson de systeme passe de
-  /// div(eps grad phi) = f a div(eps grad phi) - kappa phi = f (Poisson ECRANTE / Helmholtz ;
-  /// kappa = 1/lambda_D^2 pour l'ecrantage de Debye). Champ n*n row-major, porte par l'operateur
-  /// GeometricMG (kappa diagonal, restreint aux niveaux grossiers). Seul 'geometric_mg' le supporte
-  /// (erreur avec 'fft'). Composable avec set_epsilon_field. kappa = 0 partout => Poisson inchange.
+  /// Enables a REACTION term kappa(x) >= 0: the system Poisson operator goes from
+  /// div(eps grad phi) = f to div(eps grad phi) - kappa phi = f (SCREENED Poisson / Helmholtz;
+  /// kappa = 1/lambda_D^2 for Debye screening). n*n row-major field, carried by the operator
+  /// GeometricMG (diagonal kappa, restricted to coarse levels). Only 'geometric_mg' supports it
+  /// (error with 'fft'). Composable with set_epsilon_field. kappa = 0 everywhere => Poisson unchanged.
   void set_reaction_field(const std::vector<double>& kappa);
 
-  /// Fixe un champ magnetique hors-plan B_z(x, y) PARTAGE par les blocs, n*n row-major. Peuple la
-  /// composante aux supplementaire (canal B_z) lue par les modeles qui la declarent (n_aux > 3) ;
-  /// inerte si aucun bloc ne lit B_z (canal aux reste a la largeur de base). B_z est statique
-  /// (externe a l'elliptique) : derive_aux ne le touche pas. A appeler apres avoir ajoute le bloc
-  /// (ou avant : la valeur est conservee et appliquee quand le canal aux s'elargit).
+  /// Sets an out-of-plane magnetic field B_z(x, y) SHARED by the blocks, n*n row-major. Populates the
+  /// extra aux component (B_z channel) read by the models that declare it (n_aux > 3);
+  /// inert if no block reads B_z (aux channel stays at base width). B_z is static
+  /// (external to the elliptic): derive_aux does not touch it. Call after having added the block
+  /// (or before: the value is kept and applied when the aux channel widens).
   void set_magnetic_field(const std::vector<double>& bz);
 
-  /// Designe un bloc fluide COMPRESSIBLE (4 var) comme source de la temperature electronique T_e :
-  /// le canal aux T_e (composante canonique suivante) est rempli a T = p/rho de ce bloc, RECALCULE
-  /// a chaque solve_fields. N'a d'effet que si un bloc declare lire T_e (n_aux > 4) ; sinon stocke
-  /// et inerte. C'est le second champ aux SUPPLEMENTAIRE (apres B_z), peuple par DERIVATION d'un
-  /// bloc (et non fourni par l'utilisateur comme B_z).
+  /// Designates a COMPRESSIBLE fluid block (4 var) as the source of the electron temperature T_e:
+  /// the T_e aux channel (next canonical component) is filled with T = p/rho of this block, RECOMPUTED
+  /// at each solve_fields. Has effect only if a block declares it reads T_e (n_aux > 4); otherwise stored
+  /// and inert. It is the second EXTRA aux field (after B_z), populated by DERIVATION from a
+  /// block (and not supplied by the user as B_z is).
   void set_electron_temperature_from(const std::string& name);
 
-  /// Garantit que le canal aux PARTAGE a au moins @p ncomp composantes. Appele par
-  /// add_compiled_model (cf. dsl_block.hpp) avec aux_comps<Model> a l'ajout d'un bloc qui lit des
-  /// champs auxiliaires supplementaires. Reallouer preserve l'ADRESSE de l'aux du System (les
-  /// fermetures de bloc deja installees pointent &aux), et re-applique B_z s'il a ete fourni.
-  /// ADC_EXPORT : appelee par add_compiled_model (en-tete) -> doit etre exportee pour le loader .so.
+  /// Guarantees that the SHARED aux channel has at least @p ncomp components. Called by
+  /// add_compiled_model (cf. dsl_block.hpp) with aux_comps<Model> when adding a block that reads extra
+  /// auxiliary fields. Reallocating preserves the ADDRESS of the System's aux (the already-installed
+  /// block closures point to &aux), and re-applies B_z if it was supplied.
+  /// ADC_EXPORT: called by add_compiled_model (header) -> must be exported for the loader .so.
   ADC_EXPORT void ensure_aux_width(int ncomp);
 
-  /// Fixe un champ aux NOMME (ADC-70 phase 1) sur la composante canonique @p comp (>= kAuxNamedBase
-  /// = 5), tableau row-major n*n (cartesien) / nr*ntheta (polaire). Le System ne connait PAS les
-  /// noms : la FACADE (adc.System.set_aux_field) resout nom -> comp via la table du bloc (issue de
-  /// CompiledModel.aux_extra_names) et appelle ceci. Champ STATIQUE PERSISTANT : stocke (re-applique
-  /// apres une reallocation du canal) et peuple tout de suite si le canal est assez large. @throws si
-  /// comp < kAuxNamedBase (composantes reservees phi/grad/B_z/T_e : chemins dedies), si la taille ne
-  /// correspond pas a la grille, ou si aucun bloc ne declare un champ a cet indice (canal trop etroit).
+  /// Sets a NAMED aux field (ADC-70 phase 1) on the canonical component @p comp (>= kAuxNamedBase
+  /// = 5), row-major n*n (cartesian) / nr*ntheta (polar) array. The System does NOT know the
+  /// names: the FACADE (adc.System.set_aux_field) resolves name -> comp via the block's table (from
+  /// CompiledModel.aux_extra_names) and calls this. PERSISTENT STATIC field: stored (re-applied
+  /// after a channel reallocation) and populated right away if the channel is wide enough. @throws if
+  /// comp < kAuxNamedBase (components reserved for phi/grad/B_z/T_e: dedicated paths), if the size does not
+  /// match the grid, or if no block declares a field at this index (channel too narrow).
   void set_aux_field_component(int comp, const std::vector<double>& field);
 
-  /// Lit un champ aux NOMME (composante @p comp >= kAuxNamedBase) : cellules valides du canal aux,
-  /// row-major n*n (cartesien) / nr*ntheta (polaire). Pendant de potential() pour une composante
-  /// nommee. Vaut 0 partout tant qu'aucun set_aux_field_component n'a ecrit cette composante (le canal
-  /// aux est initialise a zero et solve_fields ne touche jamais les composantes >= kAuxNamedBase).
+  /// Reads a NAMED aux field (component @p comp >= kAuxNamedBase): valid cells of the aux channel,
+  /// row-major n*n (cartesian) / nr*ntheta (polar). Counterpart of potential() for a named
+  /// component. Is 0 everywhere as long as no set_aux_field_component has written this component (the aux
+  /// channel is initialized to zero and solve_fields never touches components >= kAuxNamedBase).
   std::vector<double> aux_field_component(int comp) const;
 
-  /// Fixe la densite d'une espece (composante 0), tableau n*n row-major. Les autres
-  /// composantes (qte de mouvement, energie) sont posees a l'equilibre au repos.
+  /// Sets the density of a species (component 0), n*n row-major array. The other
+  /// components (momentum, energy) are set to the at-rest equilibrium.
   void set_density(const std::string& name, const std::vector<double>& rho);
 
-  /// Initialise l'etat d'un bloc depuis ses variables PRIMITIVES (rho, u, v, p ...) : @p prim est
-  /// un tableau plat ncomp*n*n composante-majeur dans l'ordre de primitive_vars(name). Chaque cellule
-  /// est convertie en variables CONSERVATIVES par la conversion du MODELE du bloc (M.to_conservative),
-  /// puis ecrite dans l'etat. Pendant ergonomique de set_density pour un modele a plusieurs primitives
-  /// (compressible 4 var : p ; isotherme 3 var ; scalaire 1 var : identite). cf. get_primitive_state.
+  /// Initializes the state of a block from its PRIMITIVE variables (rho, u, v, p ...): @p prim is
+  /// a flat ncomp*n*n component-major array in the order of primitive_vars(name). Each cell
+  /// is converted to CONSERVATIVE variables by the block's MODEL conversion (M.to_conservative),
+  /// then written into the state. Ergonomic counterpart of set_density for a model with several primitives
+  /// (compressible 4 var: p; isothermal 3 var; scalar 1 var: identity). cf. get_primitive_state.
   void set_primitive_state(const std::string& name, const std::vector<double>& prim);
 
-  /// Lit l'etat CONSERVATIF du bloc et le convertit en variables PRIMITIVES via la conversion du
-  /// modele (M.to_primitive). @return un tableau plat ncomp*n*n composante-majeur dans l'ordre de
-  /// primitive_vars(name) (diagnostics : vitesses, pression). Round-trip exact avec set_primitive_state.
+  /// Reads the CONSERVATIVE state of the block and converts it to PRIMITIVE variables via the model
+  /// conversion (M.to_primitive). @return a flat ncomp*n*n component-major array in the order of
+  /// primitive_vars(name) (diagnostics: velocities, pressure). Exact round-trip with set_primitive_state.
   std::vector<double> get_primitive_state(const std::string& name);
 
-  /// Type-erase de la conversion PONCTUELLE (une cellule) cons <-> prim d'un bloc : in/out sont des
-  /// tableaux de ncomp doubles. Installee par install_block / add_compiled_model / push_dynamic depuis
-  /// le modele du bloc, consommee par set_primitive_state / get_primitive_state.
+  /// Type-erasure of the POINTWISE (one cell) cons <-> prim conversion of a block: in/out are
+  /// arrays of ncomp doubles. Installed by install_block / add_compiled_model / push_dynamic from
+  /// the block's model, consumed by set_primitive_state / get_primitive_state.
   using CellConvert = std::function<void(const double* in, double* out)>;
-  /// Installe les conversions ponctuelles cons <-> prim d'un bloc (apres install_block). Appelee par
-  /// le gabarit en-tete add_compiled_model (modele compile) ; le chemin natif add_block et le chemin
-  /// dynamique .so les posent directement. ADC_EXPORT : resolue par le loader natif a travers le dlopen.
+  /// Installs the pointwise cons <-> prim conversions of a block (after install_block). Called by
+  /// the header template add_compiled_model (compiled model); the native path add_block and the dynamic
+  /// .so path set them directly. ADC_EXPORT: resolved by the native loader through dlopen.
   ADC_EXPORT void set_block_conversion(const std::string& name, CellConvert prim_to_cons,
                                        CellConvert cons_to_prim);
 
-  /// Installe les BORNES DE PAS optionnelles d'un bloc (apres install_block) : reduction de la
-  /// frequence de source max (trait HasSourceFrequency, borne dt <= cfl*substeps/(stride*mu)) et du
-  /// pas admissible min (trait HasStabilityDt, borne dt <= dt_adm*substeps/stride, sans cfl).
-  /// Fonctions VIDES = le bloc n'impose pas la borne (politique de pas historique, bit-identique).
-  /// Appelee par add_block et par le gabarit add_compiled_model (cf. dsl_block.hpp) avec les
-  /// fermetures compilees de block_builder (make_source_frequency / make_stability_dt).
-  /// ADC_EXPORT : resolue par le loader natif a travers le dlopen.
+  /// Installs the optional STEP BOUNDS of a block (after install_block): reduction of the
+  /// max source frequency (HasSourceFrequency trait, bound dt <= cfl*substeps/(stride*mu)) and of the
+  /// min admissible step (HasStabilityDt trait, bound dt <= dt_adm*substeps/stride, without cfl).
+  /// EMPTY functions = the block imposes no bound (historical step policy, bit-identical).
+  /// Called by add_block and by the template add_compiled_model (cf. dsl_block.hpp) with the
+  /// compiled closures of block_builder (make_source_frequency / make_stability_dt).
+  /// ADC_EXPORT: resolved by the native loader through dlopen.
   ADC_EXPORT void set_block_dt_bounds(const std::string& name,
                                       std::function<Real(const MultiFab&)> source_frequency,
                                       std::function<Real(const MultiFab&)> stability_dt);
 
-  /// Ajoute une borne GLOBALE de pas de temps, evaluee UNE fois par pas (hote) par step_cfl /
-  /// step_adaptive : dt <= fn() quand fn() > 0 et fini (sinon la borne ne contraint pas ce pas).
-  /// C'est le crochet des contraintes NON locales-cellule : couplage multi-blocs, etage
-  /// Schur/Poisson, AMR/scheduler, ou une politique utilisateur (rampe de demarrage...). @p label
-  /// nomme la borne dans last_dt_bound() ("global:<label>"). Une callback Python est acceptable ICI
-  /// (une evaluation par pas, jamais par cellule).
+  /// Adds a GLOBAL time-step bound, evaluated ONCE per step (host) by step_cfl /
+  /// step_adaptive: dt <= fn() when fn() > 0 and finite (otherwise the bound does not constrain this step).
+  /// It is the hook for NON cell-local constraints: multi-block coupling, Schur/Poisson
+  /// stage, AMR/scheduler, or a user policy (startup ramp...). @p label
+  /// names the bound in last_dt_bound() ("global:<label>"). A Python callback is acceptable HERE
+  /// (one evaluation per step, never per cell).
   void add_dt_bound(const std::string& label, std::function<double()> fn);
 
-  /// Nom de la borne ACTIVE (celle qui a fixe dt) du dernier step_cfl : "transport:<bloc>",
-  /// "source_frequency:<bloc>", "stability_dt:<bloc>", "global:<label>", "degenerate" (aucun bloc
-  /// evolutif), ou "" si aucun step_cfl n'a tourne. Diagnostic de la politique de pas.
+  /// Name of the ACTIVE bound (the one that set dt) of the last step_cfl: "transport:<block>",
+  /// "source_frequency:<block>", "stability_dt:<block>", "global:<label>", "degenerate" (no evolving
+  /// block), or "" if no step_cfl has run. Diagnostic of the step policy.
   std::string last_dt_bound() const;
 
-  /// Ajoute un couplage d'IONISATION (operator-split) : taux k n_e n_g ; un neutre devient un ion
-  /// et un electron. Masse transferee du neutre vers l'ion (n_i + n_g conserve). Les trois blocs
-  /// doivent exister. Premiere brique de source inter-especes (sur la densite, comp 0).
+  /// Adds an IONIZATION coupling (operator-split): rate k n_e n_g; a neutral becomes an ion
+  /// and an electron. Mass transferred from the neutral to the ion (n_i + n_g conserved). The three blocks
+  /// must exist. First inter-species source brick (on the density, comp 0).
   void add_ionization(const std::string& electron, const std::string& ion,
                       const std::string& neutral, double rate);
 
-  /// Ajoute une COLLISION / friction inter-especes (operator-split) : force k (u_a - u_b) sur la
-  /// quantite de mouvement, opposee sur chaque espece (qte de mvt totale conservee). Les deux
-  /// blocs doivent etre fluides (>= 3 variables). Echauffement par friction neglige (raffinement).
+  /// Adds an inter-species COLLISION / friction (operator-split): force k (u_a - u_b) on the
+  /// momentum, opposite on each species (total momentum conserved). The two
+  /// blocks must be fluids (>= 3 variables). Frictional heating neglected (refinement).
   void add_collision(const std::string& a, const std::string& b, double rate);
 
-  /// Ajoute un ECHANGE THERMIQUE inter-especes (operator-split) : flux de chaleur k (T_a - T_b)
-  /// sur l'energie, oppose sur chaque espece (energie totale conservee) ; T = p/rho. Les deux
-  /// blocs doivent etre Euler compressible (4 variables, equation d'energie).
+  /// Adds an inter-species THERMAL EXCHANGE (operator-split): heat flux k (T_a - T_b)
+  /// on the energy, opposite on each species (total energy conserved); T = p/rho. The two
+  /// blocks must be compressible Euler (4 variables, energy equation).
   void add_thermal_exchange(const std::string& a, const std::string& b, double rate);
 
-  /// Active un ETAGE SOURCE condense par Schur sur le bloc @p name (splitting EXPLICITE / IMPLICITE,
-  /// cf. docs/SCHUR_CONDENSATION_DESIGN.md sections 5-6). C'est l'OPT-IN de la politique adc.Split(
-  /// hyperbolic=Explicit, source=CondensedSchur) : a chaque pas, le bloc fait son transport
-  /// hyperbolique EXPLICITE comme aujourd'hui, PUIS cet etage source remplace la source explicite /
-  /// IMEX par l'etage condense (CondensedSchurSourceStepper, #126), AUTONOME et resolu en C++ (aucun
-  /// callback Python par cellule). Le chemin par defaut (sans cet appel) reste BIT-IDENTIQUE.
+  /// Enables a Schur-condensed SOURCE STAGE on block @p name (EXPLICIT / IMPLICIT splitting,
+  /// cf. docs/SCHUR_CONDENSATION_DESIGN.md sections 5-6). It is the OPT-IN of the adc.Split(
+  /// hyperbolic=Explicit, source=CondensedSchur) policy: at each step, the block does its EXPLICIT
+  /// hyperbolic transport as today, THEN this source stage replaces the explicit /
+  /// IMEX source by the condensed stage (CondensedSchurSourceStepper, #126), AUTONOMOUS and solved in C++ (no
+  /// per-cell Python callback). The default path (without this call) stays BIT-IDENTICAL.
   ///
-  /// CONTRAT (valide ICI, avant tout pas) : le bloc DOIT exposer les roles Density / MomentumX /
-  /// MomentumY (Energy optionnel) dans son descripteur conservatif ; un role manquant leve une erreur
-  /// EXPLICITE. Le champ B_z doit etre disponible (set_magnetic_field appele) : l'aux est elargi au
-  /// canal B_z et un B_z absent leve une erreur. Le bloc reutilise le potentiel phi du Poisson de
-  /// systeme comme warm start (solve_fields tourne en tete de step), mais l'etage source resout son
-  /// PROPRE operateur elliptique condense (il ne duplique pas solve_fields).
-  /// @param kind  seul "electrostatic_lorentz" pour l'instant (ElectrostaticLorentzCondensation).
-  /// @param theta theta-schema in (0,1] (0.5 = Crank-Nicolson, 1 = Euler retrograde).
-  /// @param alpha constante de couplage electrostatique du sous-systeme source (d_t(-Lap phi) =
+  /// CONTRACT (validated HERE, before any step): the block MUST expose the Density / MomentumX /
+  /// MomentumY roles (Energy optional) in its conservative descriptor; a missing role raises an
+  /// EXPLICIT error. The B_z field must be available (set_magnetic_field called): the aux is widened to
+  /// the B_z channel and an absent B_z raises an error. The block reuses the phi potential of the system
+  /// Poisson as a warm start (solve_fields runs at the head of step), but the source stage solves its
+  /// OWN condensed elliptic operator (it does not duplicate solve_fields).
+  /// @param kind  only "electrostatic_lorentz" for now (ElectrostaticLorentzCondensation).
+  /// @param theta theta-scheme in (0,1] (0.5 = Crank-Nicolson, 1 = backward Euler).
+  /// @param alpha electrostatic coupling constant of the source sub-system (d_t(-Lap phi) =
   ///              -alpha div(rho v)).
-  /// @param opts  reglages regroupes en POD (ADC-214 ; cf. SourceStageOptions) : tolerance / budget du
-  ///              solve Krylov (krylov_tol / krylov_max_iters, <= 0 = defauts historiques 1e-10 ;
-  ///              400 cartesien, 600 polaire), DESCRIPTEURS de champs (density / momentum_x /
-  ///              momentum_y / energy ; "" = role canonique, sinon nom de role stable ou de variable
-  ///              du bloc ; energy == "none" desactive l'energie ; CARTESIEN seulement pour un
-  ///              override, le stepper polaire le rejette), et bz_aux_component (< 0 = canal canonique
-  ///              B_z). Defaut {} = comportement historique bit-identique. Ces champs etaient une
-  ///              longue liste de quatre `std::string` adjacents intervertibles a l'appel.
+  /// @param opts  settings grouped in a POD (ADC-214; cf. SourceStageOptions): tolerance / budget of the
+  ///              Krylov solve (krylov_tol / krylov_max_iters, <= 0 = historical defaults 1e-10;
+  ///              400 cartesian, 600 polar), field DESCRIPTORS (density / momentum_x /
+  ///              momentum_y / energy; "" = canonical role, otherwise stable role name or variable
+  ///              name of the block; energy == "none" disables the energy; CARTESIAN only for an
+  ///              override, the polar stepper rejects it), and bz_aux_component (< 0 = canonical
+  ///              B_z channel). Default {} = historical bit-identical behavior. These fields were a
+  ///              long list of four adjacent `std::string` interchangeable at the call site.
   void set_source_stage(const std::string& name, const std::string& kind, double theta,
                         double alpha, const SourceStageOptions& opts = {});
 
-  /// POLITIQUE DE SPLITTING en temps du macro-pas (transport hyperbolique H + etage source S) :
-  ///  - "lie"    (defaut) : H(dt) ; S(dt) une fois (Godunov, 1er ordre). BIT-IDENTIQUE a l'historique.
-  ///  - "strang"          : H(dt/2) ; S(dt) ; H(dt/2) (symetrique, 2e ordre des que H et S le sont).
-  /// Le schema Strang RE-RESOUT solve_fields entre les etages pour que chaque demi-avance lise un phi
-  /// coherent avec la densite courante (le solve_fields UNIQUE de tete, suffisant pour Lie, ne suffit
-  /// pas a la 2nde demi-avance Strang) ; cf. docs/HOFFART_STEP_SEQUENCE.md et SystemStepper::step_strang.
-  /// Reutilise les MEMES briques (s.advance, etage source) : aucun nouveau stepper. Un schema inconnu
-  /// leve une erreur EXPLICITE. Sans appel, le chemin reste BIT-IDENTIQUE (Lie).
+  /// Time SPLITTING POLICY of the macro-step (hyperbolic transport H + source stage S):
+  ///  - "lie"    (default): H(dt); S(dt) once (Godunov, 1st order). BIT-IDENTICAL to history.
+  ///  - "strang": H(dt/2); S(dt); H(dt/2) (symmetric, 2nd order as soon as H and S are).
+  /// The Strang scheme RE-SOLVES solve_fields between the stages so that each half-advance reads a phi
+  /// consistent with the current density (the SINGLE head solve_fields, sufficient for Lie, does not suffice
+  /// for the 2nd Strang half-advance); cf. docs/HOFFART_STEP_SEQUENCE.md and SystemStepper::step_strang.
+  /// Reuses the SAME bricks (s.advance, source stage): no new stepper. An unknown scheme
+  /// raises an EXPLICIT error. Without a call, the path stays BIT-IDENTICAL (Lie).
   void set_time_scheme(const std::string& scheme);
 
-  /// Politique de la loi de Gauss (chantier R0, reproduction Hoffart). "restart" (defaut) : solve_fields
-  /// re-resout -Delta phi = f a chaque pas (BIT-IDENTIQUE a l'historique). "evolve" : apres le premier
-  /// solve (phi^0), solve_fields ne re-resout plus le Poisson et derive l'aux du phi COURANT que
-  /// l'etage source Schur fait evoluer in-place -> evolution -Delta phi sans restart du papier (Gauss
-  /// imposee qu'a t=0). N'a d'effet qu'avec un etage source condense. Schema inconnu -> erreur explicite.
+  /// Gauss-law policy (R0 work, Hoffart reproduction). "restart" (default): solve_fields
+  /// re-solves -Delta phi = f at each step (BIT-IDENTICAL to history). "evolve": after the first
+  /// solve (phi^0), solve_fields no longer re-solves the Poisson and derives the aux from the CURRENT phi
+  /// that the Schur source stage evolves in-place -> -Delta phi evolution without restart of the paper (Gauss
+  /// imposed only at t=0). Has effect only with a condensed source stage. Unknown scheme -> explicit error.
   void set_gauss_policy(const std::string& policy);
 
-  /// Ajoute une SOURCE COUPLEE GENERIQUE inter-especes decrite par un BYTECODE (adc.dsl.CoupledSource,
-  /// P5 phase 1, splitting EXPLICITE forward-Euler apres le transport). A la difference des couplages
-  /// nommes (add_ionization / add_collision / add_thermal_exchange) qui figent une formule, celle-ci lit
-  /// des champs (bloc, role) en ENTREE et ecrit des termes de source (bloc, role) calcules par des
-  /// EXPRESSIONS symboliques compilees en bytecode postfixe (machine a pile, evaluee dans le meme
-  /// for_each_cell device ; aucun callback Python par cellule). Reutilise EXACTEMENT le seam
-  /// d'application des couplages (P->couplings) ; MPI-safe (iteration sur les fabs locaux,
+  /// Adds a GENERIC inter-species COUPLED SOURCE described by a BYTECODE (adc.dsl.CoupledSource,
+  /// P5 phase 1, EXPLICIT forward-Euler splitting after transport). Unlike the named couplings
+  /// (add_ionization / add_collision / add_thermal_exchange) which freeze a formula, this one reads
+  /// (block, role) fields as INPUT and writes source terms (block, role) computed by symbolic
+  /// EXPRESSIONS compiled to postfix bytecode (stack machine, evaluated in the same
+  /// for_each_cell device; no per-cell Python callback). Reuses EXACTLY the coupling
+  /// application seam (P->couplings); MPI-safe (iteration over the local fabs,
   /// local_size()==0 -> no-op).
   ///
-  /// ABI PLATE (aucun objet C++ ne traverse la frontiere) :
-  /// @param prog      description bytecode du couplage regroupee en POD (ADC-214 ; cf.
-  ///                  CoupledSourceProgram) : in_blocks / in_roles (entrees lues et leurs roles),
-  ///                  consts (parametres .param(), charges apres les entrees), out_blocks / out_roles
-  ///                  (cibles de chaque terme), prog_ops / prog_args / prog_lens (opcodes concatenes
-  ///                  de TOUS les termes, machine a pile cf. CsOp, arguments paralleles, et longueur
-  ///                  par terme), et freq_prog_ops / freq_prog_args (programme OPTIONNEL d'une
-  ///                  frequence PAR CELLULE mu(U), meme machine a pile / table de registres ; VIDES =
-  ///                  frequence constante seule, bit-identique). Ces tableaux etaient une longue liste
-  ///                  de `std::vector` du meme type, intervertibles a l'appel.
-  /// @param frequency  frequence CONSTANTE declaree mu [1/s] du couplage (audit vague 3,
-  ///                   CoupledSource.frequency) : borne de pas dt <= cfl / mu agregee par step_cfl /
-  ///                   step_adaptive (les couplages s'appliquent UNE fois par macro-pas, la borne
-  ///                   porte sur le macro-dt, sans facteur substeps/stride). <= 0 (defaut) = pas de
-  ///                   borne, bit-identique. Reste a plat (un double, hors famille homogene).
-  /// @param label      nom du couplage (raison "coupled_source:<label>" de last_dt_bound). Reste a
-  ///                   plat (une chaine, hors famille homogene). Quand prog.freq_prog_ops/_args sont
-  ///                   non vides, step_cfl / step_adaptive reduit le MAX de mu sur les cellules
-  ///                   (all_reduce_max global) et borne dt <= cfl / max(mu) (raison
-  ///                   "coupled_source:<label>"). max(mu) <= 0 = pas de borne ce pas.
-  /// Les blocs / roles inconnus, une capacite depassee ou un programme mal forme levent une erreur
-  /// EXPLICITE (avant tout pas). Sans appel, le chemin par defaut reste BIT-IDENTIQUE.
+  /// FLAT ABI (no C++ object crosses the boundary):
+  /// @param prog      bytecode description of the coupling grouped in a POD (ADC-214; cf.
+  ///                  CoupledSourceProgram): in_blocks / in_roles (inputs read and their roles),
+  ///                  consts (.param() parameters, loaded after the inputs), out_blocks / out_roles
+  ///                  (targets of each term), prog_ops / prog_args / prog_lens (concatenated opcodes
+  ///                  of ALL terms, stack machine cf. CsOp, parallel arguments, and length
+  ///                  per term), and freq_prog_ops / freq_prog_args (OPTIONAL program of a
+  ///                  PER-CELL frequency mu(U), same stack machine / register table; EMPTY =
+  ///                  constant frequency only, bit-identical). These arrays were a long list
+  ///                  of `std::vector` of the same type, interchangeable at the call site.
+  /// @param frequency  declared CONSTANT frequency mu [1/s] of the coupling (audit wave 3,
+  ///                   CoupledSource.frequency): step bound dt <= cfl / mu aggregated by step_cfl /
+  ///                   step_adaptive (the couplings apply ONCE per macro-step, the bound
+  ///                   is on the macro-dt, without a substeps/stride factor). <= 0 (default) = no
+  ///                   bound, bit-identical. Stays flat (a double, outside the homogeneous family).
+  /// @param label      name of the coupling (reason "coupled_source:<label>" of last_dt_bound). Stays
+  ///                   flat (a string, outside the homogeneous family). When prog.freq_prog_ops/_args are
+  ///                   non-empty, step_cfl / step_adaptive reduces the MAX of mu over the cells
+  ///                   (global all_reduce_max) and bounds dt <= cfl / max(mu) (reason
+  ///                   "coupled_source:<label>"). max(mu) <= 0 = no bound this step.
+  /// Unknown blocks / roles, an exceeded capacity or a malformed program raise an EXPLICIT
+  /// error (before any step). Without a call, the default path stays BIT-IDENTICAL.
   void add_coupled_source(const CoupledSourceProgram& prog, double frequency = 0.0,
                           const std::string& label = "coupled_source");
 
-  void solve_fields();   ///< resout Poisson puis derive aux = (phi, grad phi)
-  void step(double dt);  ///< solve_fields, puis avance chaque bloc selon son schema
+  void solve_fields();   ///< solves Poisson then derives aux = (phi, grad phi)
+  void step(double dt);  ///< solve_fields, then advances each block according to its scheme
   void advance(double dt, int nsteps);
 
-  /// Avance d'un pas a dt = cfl * h / vitesse d'onde max du systeme. @return le dt utilise.
+  /// Advances one step at dt = cfl * h / max wave speed of the system. @return the dt used.
   double step_cfl(double cfl);
-  /// Diagnostic (ADC-182) : {w, i, j} de la cellule GLOBALE qui domine la borne CFL de
-  /// transport du bloc -- pour localiser une erosion de realisabilite / un dt qui s'effondre.
-  /// A la demande, hors chemin chaud (step/step_cfl inchanges).
+  /// Diagnostic (ADC-182): {w, i, j} of the GLOBAL cell that dominates the transport
+  /// CFL bound of the block -- to locate a realizability erosion / a collapsing dt.
+  /// On demand, off the hot path (step/step_cfl unchanged).
   std::array<double, 3> dt_hotspot(const std::string& name);
 
-  /// Avance d'un macro-pas MULTIRATE : le bloc le plus lent fixe le macro-pas, chaque bloc
-  /// plus rapide est sous-cycle n = ceil(w_bloc / w_min) fois. @return le macro-pas.
+  /// Advances one MULTIRATE macro-step: the slowest block sets the macro-step, each block
+  /// that is faster is sub-cycled n = ceil(w_block / w_min) times. @return the macro-step.
   double step_adaptive(double cfl);
 
-  /// @name Primitives pour un integrateur temporel ecrit en Python
+  /// @name Primitives for a time integrator written in Python
   /// solve_fields(); R = eval_rhs(name); U = get_state(name); ...; set_state(name, U).
   /// @{
-  std::vector<double> eval_rhs(const std::string& name);   ///< -div F + S, taille ncomp*n*n
-  std::vector<double> get_state(const std::string& name);  ///< U, ncomp*n*n (composante-majeur)
+  std::vector<double> eval_rhs(const std::string& name);   ///< -div F + S, size ncomp*n*n
+  std::vector<double> get_state(const std::string& name);  ///< U, ncomp*n*n (component-major)
   void set_state(const std::string& name, const std::vector<double>& u);
   int n_vars(const std::string& name) const;
-  /// Noms des variables d'un bloc (introspection) : kind = "conservative" | "primitive".
+  /// Variable names of a block (introspection): kind = "conservative" | "primitive".
   std::vector<std::string> variable_names(const std::string& name,
                                           const std::string& kind = "conservative") const;
-  /// Roles PHYSIQUES des variables d'un bloc (parallele a variable_names) : "density",
-  /// "momentum_x", "energy", ... ou "custom" si le bloc ne renseigne pas ses roles. C'est ce que
-  /// resolvent les couplages inter-especes (index_of(role)) au lieu d'un indice litteral.
+  /// PHYSICAL roles of the variables of a block (parallel to variable_names): "density",
+  /// "momentum_x", "energy", ... or "custom" if the block does not provide its roles. This is what
+  /// the inter-species couplings resolve (index_of(role)) instead of a literal index.
   std::vector<std::string> variable_roles(const std::string& name,
                                           const std::string& kind = "conservative") const;
-  /// Indice adiabatique (gamma) du bloc, lu par les couplages inter-especes (collision, echange
-  /// thermique, T_e). Vaut le defaut historique 1.4 sauf si le bloc le declare (add_block : ModelSpec
-  /// gamma ; bloc compile / dynamique : symbole optionnel adc_compiled_gamma de l'ABI du .so).
+  /// Adiabatic index (gamma) of the block, read by the inter-species couplings (collision, thermal
+  /// exchange, T_e). Equals the historical default 1.4 unless the block declares it (add_block: ModelSpec
+  /// gamma; compiled / dynamic block: optional symbol adc_compiled_gamma of the .so ABI).
   double block_gamma(const std::string& name) const;
   /// @}
 
   /// @name Diagnostics
   /// @{
   int nx() const;
-  /// Compteur de MACRO-PAS (0-indexe ; incremente par step / step_cfl / step_adaptive). Necessaire
-  /// au checkpoint/restart : la cadence stride (hold-then-catch-up) depend de macro_step % stride,
-  /// pas seulement du temps t (audit 2026-06, IO v1).
+  /// MACRO-STEP counter (0-indexed; incremented by step / step_cfl / step_adaptive). Necessary
+  /// for checkpoint/restart: the stride cadence (hold-then-catch-up) depends on macro_step % stride,
+  /// not only on the time t (audit 2026-06, IO v1).
   int macro_step() const;
-  /// RESTAURE l'horloge (t, macro_step) -- reserve au RESTART (sim.restart). Restaurer macro_step
-  /// est OBLIGATOIRE pour reprendre la cadence stride exactement ; un restart qui ne reposerait que
-  /// t desynchroniserait les blocs a stride > 1. @throws si macro_step < 0.
+  /// RESTORES the clock (t, macro_step) -- reserved for the RESTART (sim.restart). Restoring macro_step
+  /// is MANDATORY to resume the stride cadence exactly; a restart that would only restore
+  /// t would desynchronize the blocks at stride > 1. @throws if macro_step < 0.
   void set_clock(double t, int macro_step);
-  /// Extent de l'axe LENT du champ (lignes du tableau (ny, nx) row-major rendu par density / potential
-  /// / get_state). Cartesien : ny() == nx() == n (carre, INCHANGE). Polaire (anneau) : ny() == ntheta
-  /// (axe azimutal lent) tandis que nx() == nr (axe radial rapide) -- avec nr != ntheta le champ fait
-  /// nr*ntheta valeurs, PAS nx()^2 : c'est cette dimension qui dimensionne correctement le tableau
-  /// numpy cote bindings (sans elle, un remodelage (nx, nx) deborde le tampon quand nr != ntheta).
+  /// Extent of the SLOW axis of the field (rows of the (ny, nx) row-major array returned by density / potential
+  /// / get_state). Cartesian: ny() == nx() == n (square, UNCHANGED). Polar (ring): ny() == ntheta
+  /// (slow azimuthal axis) while nx() == nr (fast radial axis) -- with nr != ntheta the field has
+  /// nr*ntheta values, NOT nx()^2: it is this dimension that correctly sizes the numpy
+  /// array on the bindings side (without it, a (nx, nx) reshape overflows the buffer when nr != ntheta).
   int ny() const;
   double time() const;
   int n_species() const;
-  /// Noms des blocs, dans l'ordre d'ajout. SOURCE UNIQUE : le registre de blocs interne, peuple par
-  /// TOUS les chemins d'ajout (add_block / add_dynamic_block / add_compiled_block / install_block).
-  /// Un integrateur ecrit en Python itere dessus, donc il doit voir aussi les blocs charges depuis
-  /// un .so (JIT / AOT) ; les compter par n_species() seul les sauterait.
+  /// Block names, in the order of addition. SINGLE SOURCE: the internal block registry, populated by
+  /// ALL the addition paths (add_block / add_dynamic_block / add_compiled_block / install_block).
+  /// An integrator written in Python iterates over it, so it must also see the blocks loaded from
+  /// a .so (JIT / AOT); counting them by n_species() alone would skip them.
   std::vector<std::string> block_names() const;
   double mass(const std::string& name) const;
-  std::vector<double> density(const std::string& name) const;  ///< ny*nx row-major (j lent, i rapide)
-  std::vector<double> potential();                             ///< phi, ny*nx row-major (j lent, i rapide)
-  /// RESTAURE le potentiel phi (IO v1, reserve au restart) : sans lui le multigrille repartirait
-  /// d'un phi vierge et la reprise ne serait pas bit-identique (warm start perdu) ; en
-  /// gauss_policy="evolve", phi EST l'etat physique et sa restauration est indispensable. Champ
-  /// ny*nx row-major (meme layout que potential()).
+  std::vector<double> density(const std::string& name) const;  ///< ny*nx row-major (j slow, i fast)
+  std::vector<double> potential();                             ///< phi, ny*nx row-major (j slow, i fast)
+  /// RESTORES the potential phi (IO v1, reserved for restart): without it the multigrid would restart
+  /// from a blank phi and the resume would not be bit-identical (warm start lost); in
+  /// gauss_policy="evolve", phi IS the physical state and its restoration is indispensable. Field
+  /// ny*nx row-major (same layout as potential()).
   void set_potential(const std::vector<double>& phi);
 
-  /// @name Accesseurs GLOBAUX (collectifs MPI-safe) -- sorties / checkpoint multi-rangs (IO v1)
-  /// Le System construit UNE box couvrant tout le domaine (cf. ctor : ba mono-box, dm round-robin ->
-  /// box 0 sur le rang 0). Les accesseurs ci-dessus (density / get_state / potential) lisent fab(0) :
-  /// VALABLES sur le rang proprietaire (mono-rang OU rang 0 sous MPI), mais fab(0) est HORS BORNES sur
-  /// un rang sans box (local_size()==0). Les variantes _global remplissent un tampon GLOBAL depuis les
-  /// fabs LOCAUX (en indices GLOBAUX ; rien sur un rang vide) puis all_reduce_sum_inplace -> CHAQUE
-  /// rang detient le champ complet (pattern du reflux AMR, comm.hpp). Elles sont COLLECTIVES : tous les
-  /// rangs DOIVENT les appeler. En mono-rang elles rendent EXACTEMENT le meme tableau que les
-  /// accesseurs non-globaux (all_reduce = identite, box = domaine complet) -> sortie bit-identique.
-  /// La facade IO (sim.write / sim.checkpoint) les utilise puis n'ecrit le fichier que sur le rang 0.
+  /// @name GLOBAL accessors (MPI-safe collectives) -- outputs / multi-rank checkpoint (IO v1)
+  /// The System builds ONE box covering the whole domain (cf. ctor: mono-box ba, round-robin dm ->
+  /// box 0 on rank 0). The accessors above (density / get_state / potential) read fab(0):
+  /// VALID on the owner rank (mono-rank OR rank 0 under MPI), but fab(0) is OUT OF BOUNDS on
+  /// a rank without a box (local_size()==0). The _global variants fill a GLOBAL buffer from the
+  /// LOCAL fabs (in GLOBAL indices; nothing on an empty rank) then all_reduce_sum_inplace -> EACH
+  /// rank holds the complete field (AMR reflux pattern, comm.hpp). They are COLLECTIVE: all the
+  /// ranks MUST call them. On mono-rank they return EXACTLY the same array as the non-global
+  /// accessors (all_reduce = identity, box = complete domain) -> bit-identical output.
+  /// The IO facade (sim.write / sim.checkpoint) uses them then writes the file only on rank 0.
   /// @{
   std::vector<double> density_global(const std::string& name) const;  ///< comp0, ny*nx global
   std::vector<double> state_global(const std::string& name) const;    ///< U, ncomp*ny*nx global
   std::vector<double> potential_global();                             ///< phi, ny*nx global
   /// @}
 
-  /// @name Accesseurs LOCAUX par fab -- ecriture HDF5 PARALLELE par hyperslabs (IO PR-IO-3, opt-in)
-  /// Pendant local des accesseurs _global : au lieu de rassembler tout le champ par all_reduce_sum,
-  /// ils exposent par rang la liste des boites LOCALES et l'etat de CHAQUE fab. La facade HDF5
-  /// parallele (sim.write(format='hdf5', parallel=True)) cree les datasets GLOBAUX puis chaque rang
-  /// ecrit SES boites en hyperslabs -- pas de gather global. Ils sont NON COLLECTIFS (purement
-  /// locaux : aucune comm MPI ; un rang sans box rend une liste vide). Le System cartesien est
-  /// MONO-BOX (une box couvrant le domaine, sur le rang 0) : local_boxes rend donc UNE box sur le
-  /// rang 0 et rien ailleurs -- le vrai parallelisme par hyperslabs n'apparait que sur une geometrie
-  /// MULTI-BOX (cf. AMR). L'API reste correcte dans le cas general (iteration sur tous les fabs
-  /// locaux, indices GLOBAUX dans la box). Layout de local_state IDENTIQUE a state_global mais
-  /// rapporte a la box locale : (c*bny + (j - jlo))*bnx + (i - ilo), composante-majeur.
+  /// @name LOCAL per-fab accessors -- PARALLEL HDF5 write by hyperslabs (IO PR-IO-3, opt-in)
+  /// Local counterpart of the _global accessors: instead of gathering the whole field by all_reduce_sum,
+  /// they expose per rank the list of LOCAL boxes and the state of EACH fab. The parallel HDF5
+  /// facade (sim.write(format='hdf5', parallel=True)) creates the GLOBAL datasets then each rank
+  /// writes ITS boxes as hyperslabs -- no global gather. They are NON COLLECTIVE (purely
+  /// local: no MPI comm; a rank without a box returns an empty list). The cartesian System is
+  /// MONO-BOX (one box covering the domain, on rank 0): local_boxes thus returns ONE box on
+  /// rank 0 and nothing elsewhere -- true hyperslab parallelism appears only on a MULTI-BOX
+  /// geometry (cf. AMR). The API stays correct in the general case (iteration over all the local fabs,
+  /// GLOBAL indices in the box). Layout of local_state IDENTICAL to state_global but
+  /// relative to the local box: (c*bny + (j - jlo))*bnx + (i - ilo), component-major.
   /// @{
-  std::vector<std::array<int, 4>> local_boxes(const std::string& name) const;  ///< (ilo,jlo,ihi,jhi) par fab local
-  std::vector<double> local_state(const std::string& name, int li) const;      ///< U du fab li, plat (ncomp*bny*bnx)
+  std::vector<std::array<int, 4>> local_boxes(const std::string& name) const;  ///< (ilo,jlo,ihi,jhi) per local fab
+  std::vector<double> local_state(const std::string& name, int li) const;      ///< U of fab li, flat (ncomp*bny*bnx)
   /// @}
   /// @}
 

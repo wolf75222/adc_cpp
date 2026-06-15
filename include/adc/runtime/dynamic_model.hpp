@@ -1,28 +1,28 @@
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // aux_comps<M> : largeur aux du modele enrobe
+#include <adc/core/physical_model.hpp>  // aux_comps<M>: aux width of the wrapped model
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 
 #include <memory>
 
 /// @file
-/// @brief Interface de modele TYPE-ERASED : dispatch d'un modele a l'EXECUTION (via vtable).
+/// @brief TYPE-ERASED model interface: runtime dispatch of a model (via vtable).
 ///
-/// Le solveur de production est TEMPLATE : `CompositeModel<Hyperbolic, Source, Elliptic>` est connu a
-/// la compilation, ce qui permet l'inlining et l'execution GPU (Kokkos). Mais un modele GENERE a
-/// l'execution (brique du DSL compilee en .so puis chargee) n'a pas de type connu a la compilation.
-/// `IModel<NV>` fournit le pont : une interface virtuelle (flux + max_wave_speed) qu'un modele
-/// statique quelconque satisfait via `ModelAdapter`.
+/// The production solver is TEMPLATE: `CompositeModel<Hyperbolic, Source, Elliptic>` is known at
+/// compile time, which allows inlining and GPU execution (Kokkos). But a model GENERATED at
+/// runtime (a DSL brick compiled to .so then loaded) has no type known at compile time.
+/// `IModel<NV>` provides the bridge: a virtual interface (flux + max_wave_speed) that any
+/// static model satisfies via `ModelAdapter`.
 ///
-/// CHEMIN HOTE / PROTOTYPAGE uniquement : les appels virtuels ne passent PAS dans un kernel GPU et
-/// coutent un saut indirect par cellule. C'est le pendant COMPILE de `adc.PythonFlux` (un cran plus
-/// rapide, sans GIL). La production GPU/MPI reste le chemin template. Ne pas utiliser dans la boucle
-/// chaude des cas a haute performance.
+/// HOST / PROTOTYPING path only: virtual calls do NOT go into a GPU kernel and cost an indirect
+/// jump per cell. This is the COMPILED counterpart of `adc.PythonFlux` (one notch faster, without
+/// the GIL). GPU/MPI production stays on the template path. Do not use in the hot loop of
+/// high-performance cases.
 
 namespace adc {
 
-/// Modele hyperbolique vu derriere une interface virtuelle (dispatch a l'execution).
+/// Hyperbolic model seen behind a virtual interface (runtime dispatch).
 template <int NV>
 struct IModel {
   using State = StateVec<NV>;
@@ -31,28 +31,28 @@ struct IModel {
   virtual ~IModel() = default;
   virtual State flux(const State& u, const Aux& a, int dir) const = 0;
   virtual Real max_wave_speed(const State& u, const Aux& a, int dir) const = 0;
-  /// Terme source S(U, aux) (defaut : zero, modele sans source).
+  /// Source term S(U, aux) (default: zero, model without source).
   virtual State source(const State&, const Aux&) const { return State{}; }
-  /// Second membre elliptique f(U) du Poisson de systeme (defaut : zero, pas de couplage).
+  /// Elliptic right-hand side f(U) of the system Poisson (default: zero, no coupling).
   virtual Real elliptic_rhs(const State&) const { return Real(0); }
-  /// Conversion conservatif -> primitif (P = M.to_primitive(U)). Le DSL/CompositeModel l'expose
-  /// (brique hyperbolique) ; un modele sans conversion (scalaire pur) la laisse a l'IDENTITE
-  /// (prim == cons), ce qui est exact pour un transport scalaire. Sert au marshaling hote de
-  /// System::get_primitive_state. Prim partage la meme largeur NV que State (cf. concept).
+  /// Conservative -> primitive conversion (P = M.to_primitive(U)). The DSL/CompositeModel exposes it
+  /// (hyperbolic brick); a model without conversion (pure scalar) leaves it as the IDENTITY
+  /// (prim == cons), which is exact for scalar transport. Used by host marshaling of
+  /// System::get_primitive_state. Prim shares the same NV width as State (cf. concept).
   virtual State to_primitive(const State& u) const { return u; }
-  /// Conversion primitif -> conservatif (U = M.to_conservative(P)). Pendant de to_primitive ;
-  /// sert a System::set_primitive_state (init depuis les primitives). Identite par defaut.
+  /// Primitive -> conservative conversion (U = M.to_conservative(P)). Counterpart of to_primitive;
+  /// used by System::set_primitive_state (init from primitives). Identity by default.
   virtual State to_conservative(const State& p) const { return p; }
-  /// Largeur du canal aux que le modele LIT (cf. aux_comps). Permet au runtime System de
-  /// dimensionner et de marshaler le bon nombre de composantes vers le chemin hote (B_z...).
-  /// Defaut : contrat de base (phi/grad), pour un modele qui ne lit pas de champ extra.
+  /// Width of the aux channel that the model READS (cf. aux_comps). Lets the System runtime
+  /// size and marshal the right number of components to the host path (B_z...).
+  /// Default: base contract (phi/grad), for a model that does not read any extra field.
   virtual int n_aux() const { return kAuxBaseComps; }
 };
 
-/// Adapte un modele STATIQUE M en IModel<M::n_vars>. M peut etre une brique hyperbolique (flux +
-/// max_wave_speed) ou un CompositeModel complet (flux + source + elliptic_rhs) : source / elliptic_rhs
-/// sont forwardes QUAND M les expose (sinon valeur par defaut). Permet de charger a l'execution un
-/// modele GENERE par le DSL (CompositeModel<GenHyp, GenSrc, GenEll>) comme un vrai bloc couple.
+/// Adapts a STATIC model M into IModel<M::n_vars>. M may be a hyperbolic brick (flux +
+/// max_wave_speed) or a full CompositeModel (flux + source + elliptic_rhs): source / elliptic_rhs
+/// are forwarded WHEN M exposes them (otherwise default value). Lets a model GENERATED by the DSL
+/// (CompositeModel<GenHyp, GenSrc, GenEll>) be loaded at runtime as a real coupled block.
 template <class M>
 struct ModelAdapter final : IModel<M::n_vars> {
   using State = StateVec<M::n_vars>;
@@ -77,10 +77,10 @@ struct ModelAdapter final : IModel<M::n_vars> {
     else
       return Real(0);
   }
-  // Conversions cons <-> prim forwardees QUAND M les expose (brique hyperbolique : to_primitive /
-  // to_conservative). M::Prim partage la largeur NV de State (contrat HyperbolicPhysicalModel), donc
-  // le retour s'aligne directement sur State. Modele sans conversion (scalaire) -> identite (defaut),
-  // exact pour un transport scalaire (prim == cons).
+  // Conversions cons <-> prim forwarded WHEN M exposes them (hyperbolic brick: to_primitive /
+  // to_conservative). M::Prim shares the NV width of State (HyperbolicPhysicalModel contract), so
+  // the return aligns directly on State. Model without conversion (scalar) -> identity (default),
+  // exact for scalar transport (prim == cons).
   State to_primitive(const State& u) const override {
     if constexpr (requires(const M& mm, const State& s) { mm.to_primitive(s); })
       return model.to_primitive(u);
@@ -93,10 +93,10 @@ struct ModelAdapter final : IModel<M::n_vars> {
     else
       return p;
   }
-  int n_aux() const override { return aux_comps<M>(); }  // p.ex. 4 si une brique lit B_z
+  int n_aux() const override { return aux_comps<M>(); }  // e.g. 4 if a brick reads B_z
 };
 
-/// Fabrique : enrobe un modele statique dans un IModel possede (unique_ptr).
+/// Factory: wraps a static model in an owned IModel (unique_ptr).
 template <class M>
 std::unique_ptr<IModel<M::n_vars>> make_dynamic(M model = {}) {
   return std::make_unique<ModelAdapter<M>>(model);

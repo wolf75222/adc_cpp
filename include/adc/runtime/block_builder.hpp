@@ -11,11 +11,11 @@
 #include <adc/numerics/spatial_operator_eb.hpp>  // assemble_rhs_eb (cut-cell EB) + detail::DiscLevelSet (T5-PR2)
 #include <adc/numerics/time/implicit_stepper.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
-#include <adc/runtime/dispatch_tags.hpp>  // registry UNIQUE des tags (validate_limiter/riemann, limiter_n_ghost)
-#include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (en-tete leger partage)
-#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (level set device-callable du disque)
+#include <adc/runtime/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann, limiter_n_ghost)
+#include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (shared lightweight header)
+#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (device-callable level set of the disc)
 
-#include <cmath>  // std::sqrt (coefficients ARS(2,2,2) : gamma = 1 - 1/sqrt(2), hote)
+#include <cmath>  // std::sqrt (ARS(2,2,2) coefficients: gamma = 1 - 1/sqrt(2), host)
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -23,54 +23,54 @@
 #include <vector>
 
 /// @file
-/// @brief Construit les fermetures d'un bloc (avance en temps + residu + contribution Poisson) a
-///        partir d'un modele COMPILE (CompositeModel) et d'un contexte de grille.
+/// @brief Builds the closures of a block (time advance + residual + Poisson contribution) from a
+///        COMPILED model (CompositeModel) and a grid context.
 ///
-/// Ce code etait dans System::Impl ; il est extrait en en-tete pour que le MEME chemin template
-/// (assemble_rhs<Limiter, Flux>, inlinable et device-ready) soit instanciable depuis une UNITE DE
-/// TRADUCTION EXTERNE. C'est la brique qui permettra a un modele genere par le DSL d'etre compile
-/// AOT (ahead-of-time) puis branche dans le System par le chemin de PRODUCTION (flux HLLC/Roe,
-/// ordre 2, GPU), et non plus seulement par le chemin hote virtuel du bloc dynamique.
+/// This code used to live in System::Impl; it is extracted into a header so that the SAME template
+/// path (assemble_rhs<Limiter, Flux>, inlinable and device-ready) is instantiable from an EXTERNAL
+/// TRANSLATION UNIT. It is the brick that lets a DSL-generated model be compiled AOT (ahead-of-time)
+/// and then plugged into the System via the PRODUCTION path (HLLC/Roe flux, order 2, GPU), no longer
+/// only via the virtual host path of the dynamic block.
 ///
-/// Le System reste l'unique proprietaire du maillage et de l'aux ; GridContext n'en porte que des
-/// copies immuables (domaine, CL, geometrie) et un POINTEUR non possedant vers l'aux (adresse stable,
-/// duree de vie superieure au bloc).
+/// The System remains the sole owner of the mesh and the aux; GridContext only carries immutable
+/// copies of them (domain, BC, geometry) and a non-owning POINTER to the aux (stable address,
+/// lifetime longer than the block).
 
 namespace adc {
 
-// GridContext et BlockClosures : definis dans adc/runtime/grid_context.hpp (en-tete leger, inclus
-// aussi par system.hpp pour exposer grid_context() / install_block() sans tirer la numerique).
+// GridContext and BlockClosures: defined in adc/runtime/grid_context.hpp (lightweight header, also
+// included by system.hpp to expose grid_context() / install_block() without pulling in the numerics).
 
 namespace detail {
-/// Foncteur residu -div F + S (fill_ghosts puis assemble_rhs), passe AUX TimeStepper comme RhsEval.
-/// FONCTEUR NOMME (et non lambda) : c'est lui que take_step recoit et qui declenche l'instanciation
-/// d'assemble_rhs<Limiter, Flux> (et de son AssembleRhsKernel device). Premiere-instancie depuis une
-/// TU EXTERNE (add_compiled_model), une lambda a cette place fait buter nvcc sur l'emission du kernel
-/// device imbrique (Heisenbug : OK Serial + compute-sanitizer, segfault a l'execution Cuda). Une
-/// classe a un contexte d'instanciation stable -> codegen device robuste. Corps identique a l'ancienne
-/// lambda -> residu bit-identique a add_block sur CPU (et, vise, sur device).
+/// Residual functor -div F + S (fill_ghosts then assemble_rhs), passed TO THE TimeStepper as RhsEval.
+/// NAMED FUNCTOR (not a lambda): this is what take_step receives and what triggers the instantiation
+/// of assemble_rhs<Limiter, Flux> (and its device AssembleRhsKernel). First-instantiated from an
+/// EXTERNAL TU (add_compiled_model), a lambda here makes nvcc choke on emitting the nested device
+/// kernel (Heisenbug: OK Serial + compute-sanitizer, segfault at Cuda run time). A class has a stable
+/// instantiation context -> robust device codegen. Body identical to the former lambda -> residual
+/// bit-identical to add_block on CPU (and, intended, on device).
 template <class Limiter, class Flux, class Model>
 struct BlockRhsEval {
   Model model;
   const GridContext* ctx;
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx->dom, ctx->bc);
     assemble_rhs<Limiter, Flux>(model, U, *ctx->aux, ctx->geom, R, recon_prim, pos_floor);
   }
 };
 
-/// Avance EXPLICITE : n sous-pas du stepper @c Stepper (SSPRK2 par defaut, SSPRK3 optionnel) sur le
-/// residu transport+source. Le schema RK est un parametre de template (FONCTEUR NOMME du coeur :
-/// SSPRK2Step / SSPRK3Step) -> meme contrat device-clean que SSPRK2Step. SSPRK2 reproduit a l'identique
-/// l'avance historique (bit-identique).
+/// EXPLICIT advance: n substeps of the @c Stepper stepper (SSPRK2 by default, SSPRK3 optional) on the
+/// transport+source residual. The RK scheme is a template parameter (NAMED FUNCTOR from the core:
+/// SSPRK2Step / SSPRK3Step) -> same device-clean contract as SSPRK2Step. SSPRK2 reproduces the
+/// historical advance exactly (bit-identical).
 template <class Limiter, class Flux, class Model, class Stepper = SSPRK2Step>
 struct AdvanceExplicit {
   Model m;
   GridContext ctx;
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim, pos_floor};
@@ -78,81 +78,81 @@ struct AdvanceExplicit {
   }
 };
 
-/// Avance IMEX : par sous-pas, demi-pas EXPLICITE (transport sans source) + source IMPLICITE raide.
-/// @c mask : masque implicite PORTE PAR LE BLOC (override du defaut modele is_implicit), resolu une
-/// fois a l'ajout du bloc contre ses noms/roles de variables. Masque inactif (defaut) -> backward_euler
-/// retombe sur model_is_implicit -> avance bit-identique a l'historique.
+/// IMEX advance: per substep, EXPLICIT half-step (source-free transport) + stiff IMPLICIT source.
+/// @c mask: implicit mask CARRIED BY THE BLOCK (overrides the model default is_implicit), resolved
+/// once when the block is added against its variable names/roles. Inactive mask (default) ->
+/// backward_euler falls back on model_is_implicit -> advance bit-identical to the historical one.
 template <class Limiter, class Flux, class Model>
 struct AdvanceImex {
   Model m;
   GridContext ctx;
   bool recon_prim;
   ImplicitMask<Model::n_vars> mask{};
-  NewtonOptions nopts{};            // options Newton du bloc (defauts = historique : 2 iters, 1e-7)
-  NewtonReport* nreport = nullptr;  // diagnostics OPT-IN (adresse stable, possedee par System::Impl)
-  Real pos_floor = Real(0);         ///< limiteur de positivite Zhang-Shu (<= 0 : inactif)
+  NewtonOptions nopts{};            // block Newton options (defaults = historical: 2 iters, 1e-7)
+  NewtonReport* nreport = nullptr;  // OPT-IN diagnostics (stable address, owned by System::Impl)
+  Real pos_floor = Real(0);         ///< Zhang-Shu positivity limiter (<= 0: inactive)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                   recon_prim, pos_floor};
-    if (nreport) nreport->reset();  // rapport AGREGE sur les n sous-pas de CETTE avance
+    if (nreport) nreport->reset();  // report AGGREGATED over the n substeps of THIS advance
     for (int s = 0; s < n; ++s) {
-      ForwardEuler{}.take_step(rhs, U, h);     // demi-pas explicite : transport sans source
-      backward_euler_source(m, *ctx.aux, U, h, nopts, mask, nreport);  // source implicite (rappel raide)
+      ForwardEuler{}.take_step(rhs, U, h);     // explicit half-step: source-free transport
+      backward_euler_source(m, *ctx.aux, U, h, nopts, mask, nreport);  // implicit source (stiff relaxation)
     }
   }
 };
 
-/// Avance IMEX-RK ARS(2,2,2) (Ascher, Ruuth, Spiteri 1997 ; " Implicit-explicit Runge-Kutta methods
-/// for time-dependent partial differential equations ", Appl. Numer. Math. 25) : transport explicite
-/// (L = -div F) couple a la source raide implicite (backward-Euler LOCAL par cellule), ORDRE 2. C'est
-/// une famille DISTINCTE et PARALLELE a AdvanceImex (qui reste le backward-Euler d'ordre 1 par defaut,
-/// INTOUCHE et bit-identique). Coefficients : gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma).
+/// IMEX-RK ARS(2,2,2) advance (Ascher, Ruuth, Spiteri 1997; "Implicit-explicit Runge-Kutta methods
+/// for time-dependent partial differential equations", Appl. Numer. Math. 25): explicit transport
+/// (L = -div F) coupled to the stiff implicit source (per-cell LOCAL backward-Euler), ORDER 2. It is a
+/// family DISTINCT from and PARALLEL to AdvanceImex (which remains the default order-1 backward-Euler,
+/// UNTOUCHED and bit-identical). Coefficients: gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma).
 ///
-/// Tableaux (stiffly accurate, partie implicite SDIRK ; c = [0, gamma, 1] pour les deux) :
-///   explicite : A_E = [[0, 0, 0], [gamma, 0, 0], [delta, 1-delta, 0]],  b_E = [delta, 1-delta, 0]
-///   implicite : A_I = [[0, 0, 0], [0, gamma, 0], [0, 1-gamma, gamma]],  b_I = [0, 1-gamma, gamma]
+/// Tableaux (stiffly accurate, implicit part SDIRK; c = [0, gamma, 1] for both):
+///   explicit: A_E = [[0, 0, 0], [gamma, 0, 0], [delta, 1-delta, 0]],  b_E = [delta, 1-delta, 0]
+///   implicit: A_I = [[0, 0, 0], [0, gamma, 0], [0, 1-gamma, gamma]],  b_I = [0, 1-gamma, gamma]
 ///
-/// b_E == derniere ligne de A_E et b_I == derniere ligne de A_I -> schema STIFFLY ACCURATE -> la
-/// solution finale EST le dernier etage (U^{n+1} = U^(3)), aucune recombinaison finale. Avec L = le
-/// transport SourceFreeModel et S = la source du modele complet, la recurrence par etage est :
-///   U^(1) = U^n                                        (1re ligne de A_I nulle : aucun solve, S^(1) inutilise)
+/// b_E == last row of A_E and b_I == last row of A_I -> STIFFLY ACCURATE scheme -> the final solution
+/// IS the last stage (U^{n+1} = U^(3)), no final recombination. With L = the SourceFreeModel transport
+/// and S = the source of the full model, the per-stage recurrence is:
+///   U^(1) = U^n                                        (first row of A_I is zero: no solve, S^(1) unused)
 ///   L1    = L(U^n)
-///   U^(2) = U^n + dt*gamma*L1 + dt*gamma*S(U^(2))       (solve implicite : backward_euler_source au pas
-///                                                        dt*gamma sur la base U^n + dt*gamma*L1)
+///   U^(2) = U^n + dt*gamma*L1 + dt*gamma*S(U^(2))       (implicit solve: backward_euler_source at step
+///                                                        dt*gamma on the base U^n + dt*gamma*L1)
 ///   L2    = L(U^(2))
 ///   U^(3) = U^n + dt*delta*L1 + dt*(1-delta)*L2 + dt*(1-gamma)*S^(2) + dt*gamma*S(U^(3))
 ///   U^{n+1} = U^(3)
-/// Le terme dt*gamma*S^(2) n'est PAS reevalue : par construction du solve d'etage 2,
-/// dt*gamma*S^(2) = U^(2) - base2 (l'increment du solve), donc dt*(1-gamma)*S^(2) = ((1-gamma)/gamma) *
-/// (U^(2) - base2). AUCUN noyau de source supplementaire : on REUTILISE BlockRhsEval<SourceFreeModel>
-/// (transport, MEME mecanisme que le demi-pas explicite d'AdvanceImex), backward_euler_source (solve
-/// implicite local) et saxpy/lincomb (etages). Device-clean (aucun nouveau kernel).
+/// The term dt*gamma*S^(2) is NOT re-evaluated: by construction of the stage-2 solve,
+/// dt*gamma*S^(2) = U^(2) - base2 (the solve increment), so dt*(1-gamma)*S^(2) = ((1-gamma)/gamma) *
+/// (U^(2) - base2). NO extra source kernel: we REUSE BlockRhsEval<SourceFreeModel> (transport, SAME
+/// mechanism as the explicit half-step of AdvanceImex), backward_euler_source (local implicit solve)
+/// and saxpy/lincomb (stages). Device-clean (no new kernel).
 ///
-/// SOURCE PLEINEMENT IMPLICITE : le masque IMEX partiel n'est PAS cable ici (la relation de coherence
-/// dt*gamma*S^(2) = U^(2) - base2 suppose un solve d'etage homogene ; un traitement forward-backward
-/// par composante melangerait les tableaux explicite/implicite). System::add_block rejette donc
-/// implicit_vars/implicit_roles avec time='imexrk_ars222'. Les options Newton (nopts) sont, elles,
-/// transportees : elles parametrent les DEUX solves implicites d'etage.
+/// FULLY IMPLICIT SOURCE: the partial IMEX mask is NOT wired here (the consistency relation
+/// dt*gamma*S^(2) = U^(2) - base2 assumes a homogeneous stage solve; a per-component forward-backward
+/// treatment would mix the explicit/implicit tableaux). System::add_block therefore rejects
+/// implicit_vars/implicit_roles with time='imexrk_ars222'. The Newton options (nopts), on the other
+/// hand, are carried through: they parametrize BOTH implicit stage solves.
 ///
-/// Les MultiFab d'etage sont alloues UNE FOIS par avance (hors boucle de sous-pas) : Un (U^n), L1/L2
-/// (residus de transport), base2 (base de l'etage 2, relue a l'etage 3) sans ghost (lus en cellules
-/// valides) ; work (etat d'etage) avec les ghosts de U (il passe au residu de transport).
+/// The stage MultiFabs are allocated ONCE per advance (outside the substep loop): Un (U^n), L1/L2
+/// (transport residuals), base2 (stage-2 base, re-read at stage 3) without ghosts (read on valid
+/// cells); work (stage state) with the ghosts of U (it is passed to the transport residual).
 template <class Limiter, class Flux, class Model>
 struct AdvanceImexRkArs222 {
   Model m;
   GridContext ctx;
   bool recon_prim;
-  NewtonOptions nopts{};            // options Newton des solves d'etage (defauts = historique)
-  NewtonReport* nreport = nullptr;  // diagnostics OPT-IN (adresse stable, possedee par System::Impl)
-  Real pos_floor = Real(0);         ///< limiteur de positivite Zhang-Shu (<= 0 : inactif)
+  NewtonOptions nopts{};            // Newton options of the stage solves (defaults = historical)
+  NewtonReport* nreport = nullptr;  // OPT-IN diagnostics (stable address, owned by System::Impl)
+  Real pos_floor = Real(0);         ///< Zhang-Shu positivity limiter (<= 0: inactive)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const Real gamma = Real(1) - Real(1) / std::sqrt(Real(2));
     const Real delta = Real(1) - Real(1) / (Real(2) * gamma);
-    const Real cS2 = (Real(1) - gamma) / gamma;  // facteur de (U^(2) - base2) a l'etage 3
-    const ImplicitMask<Model::n_vars> mask{};    // source PLEINEMENT implicite (masque inactif)
-    // Residu de transport SANS source (L = -div F) : MEME mecanisme que le demi-pas explicite d'AdvanceImex.
+    const Real cS2 = (Real(1) - gamma) / gamma;  // factor of (U^(2) - base2) at stage 3
+    const ImplicitMask<Model::n_vars> mask{};    // FULLY implicit source (inactive mask)
+    // Source-free transport residual (L = -div F): SAME mechanism as the explicit half-step of AdvanceImex.
     const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                   recon_prim, pos_floor};
     const int nc = U.ncomp();
@@ -160,18 +160,18 @@ struct AdvanceImexRkArs222 {
     MultiFab L1(U.box_array(), U.dmap(), nc, 0);     // L(U^n)
     MultiFab L2(U.box_array(), U.dmap(), nc, 0);     // L(U^(2))
     MultiFab base2(U.box_array(), U.dmap(), nc, 0);  // U^n + dt*gamma*L1
-    MultiFab work(U.box_array(), U.dmap(), nc, U.n_grow());  // etat d'etage (passe au transport)
-    if (nreport) nreport->reset();  // rapport AGREGE sur les sous-pas ET les 2 solves d'etage
+    MultiFab work(U.box_array(), U.dmap(), nc, U.n_grow());  // stage state (passed to transport)
+    if (nreport) nreport->reset();  // report AGGREGATED over the substeps AND the 2 stage solves
     for (int s = 0; s < n; ++s) {
-      // Etage 1 : U^(1) = U^n ; L1 = L(U^n).
-      lincomb(Un, Real(1), U, Real(0), U);            // Un = U^n (cellules valides)
+      // Stage 1: U^(1) = U^n; L1 = L(U^n).
+      lincomb(Un, Real(1), U, Real(0), U);            // Un = U^n (valid cells)
       rhs(U, L1);                                      // L1 = L(U^n)  (fill_ghosts(U) + assemble_rhs)
-      // Etage 2 : U^(2) = base2 + dt*gamma*S(U^(2)),  base2 = U^n + dt*gamma*L1.
+      // Stage 2: U^(2) = base2 + dt*gamma*S(U^(2)),  base2 = U^n + dt*gamma*L1.
       lincomb(base2, Real(1), Un, h * gamma, L1);      // base2 = U^n + dt*gamma*L1
       lincomb(work, Real(1), base2, Real(0), base2);   // work = base2
       backward_euler_source(m, *ctx.aux, work, h * gamma, nopts, mask, nreport);  // work = U^(2)
       rhs(work, L2);                                   // L2 = L(U^(2))
-      // Etage 3 : U <- base3 = U^n + dt*delta*L1 + dt*(1-delta)*L2 + ((1-gamma)/gamma)*(U^(2) - base2).
+      // Stage 3: U <- base3 = U^n + dt*delta*L1 + dt*(1-delta)*L2 + ((1-gamma)/gamma)*(U^(2) - base2).
       lincomb(U, Real(1), Un, h * delta, L1);          // U = U^n + dt*delta*L1
       saxpy(U, h * (Real(1) - delta), L2);             // + dt*(1-delta)*L2
       saxpy(U, cS2, work);                             // + ((1-gamma)/gamma)*U^(2)
@@ -181,9 +181,9 @@ struct AdvanceImexRkArs222 {
   }
 };
 
-/// Residu fige (fill_ghosts + assemble_rhs) installe comme rhs_into du bloc.
-/// Foncteur du diagnostic dt_hotspot (ADC-182) : cellule dominante de la CFL du bloc.
-/// HOTE (les reductions internes sont device) ; nomme, comme MaxSpeed.
+/// Frozen residual (fill_ghosts + assemble_rhs) installed as the block's rhs_into.
+/// Functor of the dt_hotspot diagnostic (ADC-182): dominant cell of the block CFL.
+/// HOST (the internal reductions are device); named, like MaxSpeed.
 template <class Model>
 struct HotspotFn {
   Model m;
@@ -198,7 +198,7 @@ struct RhsInto {
   Model m;
   GridContext ctx;
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx.dom, ctx.bc);
     assemble_rhs<Limiter, Flux>(m, U, *ctx.aux, ctx.geom, R, recon_prim, pos_floor);
@@ -206,24 +206,25 @@ struct RhsInto {
 };
 
 // ============================================================================
-// ROUTAGE DISQUE (chantier T5-PR3) : evaluateurs de residu DISQUE + avances qui les portent.
+// DISC ROUTING (T5-PR3 work): DISC residual evaluators + the advances that carry them.
 // ============================================================================
-// Le residu de transport d'un bloc passe par BlockRhsEval (assemble_rhs, plein cartesien). Les deux
-// evaluateurs ci-dessous SUBSTITUENT l'operateur disque a assemble_rhs, en lisant la geometrie du
-// System PAR POINTEUR (adresse stable d'un membre de Impl) au moment du pas -- l'ordre add_block /
-// set_disc_domain est donc indifferent. Foncteurs NOMMES (meme contrat device que BlockRhsEval).
+// The transport residual of a block goes through BlockRhsEval (assemble_rhs, full cartesian). The two
+// evaluators below SUBSTITUTE the disc operator for assemble_rhs, reading the System geometry BY
+// POINTER (stable address of an Impl member) at step time -- so the add_block / set_disc_domain order
+// is indifferent. NAMED functors (same device contract as BlockRhsEval).
 
-/// Residu de transport MASQUE (mode Staircase) : fill_ghosts puis assemble_rhs_masked sur le masque
-/// 0/1 cellule-centre du System (lu via @c mask, pointeur vers Impl::disc_mask_, adresse stable). Le
-/// masque a le MEME layout que U (memes ba/dm, 1 ghost). Cellule inactive -> residu 0 ; face vers une
-/// inactive -> flux normal nul (paroi FV). Le flux / la reconstruction sont REUTILISES verbatim.
+/// MASKED transport residual (Staircase mode): fill_ghosts then assemble_rhs_masked on the
+/// cell-centered 0/1 mask of the System (read via @c mask, pointer to Impl::disc_mask_, stable
+/// address). The mask has the SAME layout as U (same ba/dm, 1 ghost). Inactive cell -> residual 0;
+/// face toward an inactive cell -> zero normal flux (FV wall). The flux / reconstruction are REUSED
+/// verbatim.
 template <class Limiter, class Flux, class Model>
 struct BlockRhsEvalMasked {
   Model model;
   const GridContext* ctx;
-  const MultiFab* mask;  // Impl::disc_mask_ (NON possede ; adresse stable)
+  const MultiFab* mask;  // Impl::disc_mask_ (NOT owned; stable address)
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx->dom, ctx->bc);
     assemble_rhs_masked<Limiter, Flux>(model, U, *ctx->aux, *mask, ctx->geom, R, recon_prim,
@@ -231,18 +232,19 @@ struct BlockRhsEvalMasked {
   }
 };
 
-/// Residu de transport CUT-CELL / EB (mode CutCell) : fill_ghosts puis assemble_rhs_eb sur le level
-/// set du disque du System (lu via @c disc, pointeur vers Impl::disc_, adresse stable). Le level set
-/// device-callable est construit ICI sur l'HOTE (detail::disc_level_set(*disc) -> DiscLevelSet, un
-/// FONCTEUR NOMME capturant trois doubles PAR VALEUR) et passe PAR VALEUR a assemble_rhs_eb : le noyau
-/// device ne recoit donc PAS de std::function, il reste device-clean (cf. spatial_operator_eb.hpp).
+/// CUT-CELL / EB transport residual (CutCell mode): fill_ghosts then assemble_rhs_eb on the level
+/// set of the System disc (read via @c disc, pointer to Impl::disc_, stable address). The
+/// device-callable level set is built HERE on the HOST (detail::disc_level_set(*disc) ->
+/// DiscLevelSet, a NAMED FUNCTOR capturing three doubles BY VALUE) and passed BY VALUE to
+/// assemble_rhs_eb: the device kernel therefore receives NO std::function, it stays device-clean
+/// (cf. spatial_operator_eb.hpp).
 template <class Limiter, class Flux, class Model>
 struct BlockRhsEvalEb {
   Model model;
   const GridContext* ctx;
-  const DiscDomain* disc;  // Impl::disc_ (NON possede ; adresse stable)
+  const DiscDomain* disc;  // Impl::disc_ (NOT owned; stable address)
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx->dom, ctx->bc);
     assemble_rhs_eb<Limiter, Flux>(model, U, *ctx->aux, disc_level_set(*disc), ctx->geom, R,
@@ -250,15 +252,15 @@ struct BlockRhsEvalEb {
   }
 };
 
-/// Avance EXPLICITE MASQUEE : n sous-pas du stepper @c Stepper sur le residu de transport MASQUE.
-/// Mime AdvanceExplicit a l'identique (meme math RK, meme limiteur / flux) : seul le residu change.
+/// MASKED EXPLICIT advance: n substeps of the @c Stepper stepper on the MASKED transport residual.
+/// Mimics AdvanceExplicit exactly (same RK math, same limiter / flux): only the residual changes.
 template <class Limiter, class Flux, class Model, class Stepper = SSPRK2Step>
 struct AdvanceExplicitMasked {
   Model m;
   GridContext ctx;
   const MultiFab* mask;
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalMasked<Limiter, Flux, Model> rhs{m, &ctx, mask, recon_prim, pos_floor};
@@ -266,15 +268,15 @@ struct AdvanceExplicitMasked {
   }
 };
 
-/// Avance EXPLICITE CUT-CELL / EB : n sous-pas du stepper @c Stepper sur le residu de transport EB.
-/// Mime AdvanceExplicit a l'identique : seul le residu (assemble_rhs_eb) change.
+/// CUT-CELL / EB EXPLICIT advance: n substeps of the @c Stepper stepper on the EB transport residual.
+/// Mimics AdvanceExplicit exactly: only the residual (assemble_rhs_eb) changes.
 template <class Limiter, class Flux, class Model, class Stepper = SSPRK2Step>
 struct AdvanceExplicitEb {
   Model m;
   GridContext ctx;
   const DiscDomain* disc;
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalEb<Limiter, Flux, Model> rhs{m, &ctx, disc, recon_prim, pos_floor};
@@ -282,11 +284,11 @@ struct AdvanceExplicitEb {
   }
 };
 
-/// Avance IMEX MASQUEE : demi-pas EXPLICITE MASQUE (transport sans source) + source IMPLICITE raide.
-/// Mime AdvanceImex : le transport (forward-Euler) lit le residu MASQUE sans source ; la source
-/// implicite (backward_euler_source) est INCHANGEE (locale par cellule, hors frontiere disque). Une
-/// cellule inactive a un residu de transport nul puis subit la source locale -- comme T2 / EB, seule
-/// la FRONTIERE de transport est fermee, la source reste cellule-locale.
+/// MASKED IMEX advance: MASKED EXPLICIT half-step (source-free transport) + stiff IMPLICIT source.
+/// Mimics AdvanceImex: the transport (forward-Euler) reads the MASKED source-free residual; the
+/// implicit source (backward_euler_source) is UNCHANGED (per-cell local, off the disc boundary). An
+/// inactive cell has a zero transport residual then undergoes the local source -- like T2 / EB, only
+/// the transport BOUNDARY is closed, the source stays cell-local.
 template <class Limiter, class Flux, class Model>
 struct AdvanceImexMasked {
   Model m;
@@ -296,7 +298,7 @@ struct AdvanceImexMasked {
   ImplicitMask<Model::n_vars> mask_impl{};
   NewtonOptions nopts{};
   NewtonReport* nreport = nullptr;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalMasked<Limiter, Flux, SourceFreeModel<Model>> rhs{
@@ -309,8 +311,8 @@ struct AdvanceImexMasked {
   }
 };
 
-/// Avance IMEX CUT-CELL / EB : demi-pas EXPLICITE EB (transport sans source) + source IMPLICITE raide.
-/// Mime AdvanceImex : transport via assemble_rhs_eb, source implicite inchangee (cellule-locale).
+/// CUT-CELL / EB IMEX advance: EB EXPLICIT half-step (source-free transport) + stiff IMPLICIT source.
+/// Mimics AdvanceImex: transport via assemble_rhs_eb, implicit source unchanged (cell-local).
 template <class Limiter, class Flux, class Model>
 struct AdvanceImexEb {
   Model m;
@@ -320,7 +322,7 @@ struct AdvanceImexEb {
   ImplicitMask<Model::n_vars> mask_impl{};
   NewtonOptions nopts{};
   NewtonReport* nreport = nullptr;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalEb<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
@@ -334,39 +336,39 @@ struct AdvanceImexEb {
 };
 }  // namespace detail
 
-/// Construit le masque implicite POD device-clean d'un modele a N variables a partir d'une liste
-/// d'indices de composantes (vide -> masque INACTIF -> defaut modele, bit-identique). Tout indice
-/// hors [0, N) est ignore ici (la validation/le message clair vit cote System::add_block, qui resout
-/// les noms/roles en indices et leve sur un nom/role absent).
+/// Builds the device-clean POD implicit mask of an N-variable model from a list of component indices
+/// (empty -> INACTIVE mask -> model default, bit-identical). Any index outside [0, N) is ignored here
+/// (the validation / clear message lives on the System::add_block side, which resolves names/roles into
+/// indices and throws on an absent name/role).
 template <int N>
 ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) {
   ImplicitMask<N> mask;
-  if (implicit_components.empty()) return mask;  // inactif : defaut modele
+  if (implicit_components.empty()) return mask;  // inactive: model default
   mask.active = true;
   for (int c : implicit_components)
     if (c >= 0 && c < N) mask.flag[c] = true;
   return mask;
 }
 
-/// Fermetures (avance + residu) pour un schema spatial (Limiter x Flux) fige. La math RK vient des
-/// TimeStepper du coeur : en explicite SSPRK2 (defaut), SSPRK3 ou ForwardEuler ("euler", ordre 1,
-/// fidelite aux references premier ordre -- validation, jamais defaut) selon @p method ; ForwardEuler +
-/// backward_euler_source en IMEX. Les fermetures sont des FONCTEURS NOMMES (cf. namespace detail) et
-/// non des lambdas : le chemin add_compiled_model (premiere instanciation depuis une TU externe)
-/// s'emet alors proprement sous nvcc. @p method ne joue QUE sur l'avance explicite (l'IMEX garde son
-/// demi-pas ForwardEuler + source implicite) ; "ssprk2" reproduit l'avance historique (bit-identique).
-/// En IMEX (@p imex), @p method "imexrk_ars222" selectionne la famille IMEX-RK ARS(2,2,2) (ordre 2,
-/// avance PARALLELE a AdvanceImex, cartesien plein seul) ; toute autre valeur garde l'IMEX historique
-/// backward-Euler (ordre 1, bit-identique).
-/// @p implicit_components : indices des variables conservees a traiter en IMPLICITE dans la source IMEX
-/// (masque PORTE PAR LE BLOC, override du defaut modele). VIDE (defaut) -> masque inactif -> defaut
-/// modele is_implicit -> bit-identique. Sans effet hors IMEX (l'explicite n'a pas de pas implicite).
-/// Les avances de transport DISQUE optionnelles (advance_masked / advance_eb) sont fabriquees quand
-/// @p ctx porte la geometrie disque du System (ctx.disc_mask / ctx.disc, chantier T5-PR3) ; sinon elles
-/// restent vides et le stepper retombe sur advance (bit-identique). Adresses STABLES de membres de Impl,
-/// lues PAR POINTEUR au pas -> l'ordre add_block / set_disc_domain est indifferent. Les avances disque
-/// MIMENT advance (meme RK / IMEX, meme limiteur / flux) ; seul le residu de transport est aiguille
-/// (assemble_rhs_masked / _eb).
+/// Closures (advance + residual) for a frozen spatial scheme (Limiter x Flux). The RK math comes from
+/// the core TimeStepper: in explicit, SSPRK2 (default), SSPRK3 or ForwardEuler ("euler", order 1,
+/// fidelity to first-order references -- validation, never default) according to @p method;
+/// ForwardEuler + backward_euler_source in IMEX. The closures are NAMED FUNCTORS (cf. namespace detail)
+/// and not lambdas: the add_compiled_model path (first instantiation from an external TU) then emits
+/// cleanly under nvcc. @p method affects ONLY the explicit advance (IMEX keeps its ForwardEuler
+/// half-step + implicit source); "ssprk2" reproduces the historical advance (bit-identical). In IMEX
+/// (@p imex), @p method "imexrk_ars222" selects the IMEX-RK ARS(2,2,2) family (order 2, advance
+/// PARALLEL to AdvanceImex, full cartesian only); any other value keeps the historical backward-Euler
+/// IMEX (order 1, bit-identical).
+/// @p implicit_components: indices of the conserved variables to handle IMPLICITLY in the IMEX source
+/// (mask CARRIED BY THE BLOCK, overrides the model default). EMPTY (default) -> inactive mask -> model
+/// default is_implicit -> bit-identical. No effect outside IMEX (the explicit has no implicit step).
+/// The optional DISC transport advances (advance_masked / advance_eb) are built when @p ctx carries the
+/// System disc geometry (ctx.disc_mask / ctx.disc, T5-PR3 work); otherwise they stay empty and the
+/// stepper falls back on advance (bit-identical). STABLE addresses of Impl members, read BY POINTER at
+/// step time -> the add_block / set_disc_domain order is indifferent. The disc advances MIMIC advance
+/// (same RK / IMEX, same limiter / flux); only the transport residual is dispatched (assemble_rhs_masked
+/// / _eb).
 template <class Limiter, class Flux, class Model>
 BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
                           const std::string& method = "ssprk2",
@@ -379,15 +381,15 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
   const ImplicitMask<Model::n_vars> impl_mask = make_implicit_mask<Model::n_vars>(implicit_components);
   if (imex) {
     if (method == "imexrk_ars222") {
-      // FAMILLE IMEX-RK, schema ARS(2,2,2) (ordre 2) : avance PARALLELE a AdvanceImex, source PLEINEMENT
-      // implicite (impl_mask ignore : la facade rejette deja un masque partiel avec ce schema). CARTESIEN
-      // PLEIN UNIQUEMENT : on ne fabrique PAS d'avance disque (advance_masked / advance_eb restent vides)
-      // -> un mode geometrie disque sur ce bloc leve une erreur EXPLICITE au pas
-      // (SystemStepper::advance_transport_n), jamais un cartesien silencieux.
+      // IMEX-RK FAMILY, ARS(2,2,2) scheme (order 2): advance PARALLEL to AdvanceImex, FULLY implicit
+      // source (impl_mask ignored: the facade already rejects a partial mask with this scheme). FULL
+      // CARTESIAN ONLY: we do NOT build a disc advance (advance_masked / advance_eb stay empty) -> a
+      // disc geometry mode on this block throws an EXPLICIT error at step time
+      // (SystemStepper::advance_transport_n), never a silent cartesian.
       bc.advance = detail::AdvanceImexRkArs222<Limiter, Flux, Model>{m, ctx, recon_prim, newton_opts,
                                                                      newton_report, pos_floor};
     } else {
-      // IMEX historique (backward-Euler local, ordre 1) : INTOUCHE, bit-identique.
+      // Historical IMEX (local backward-Euler, order 1): UNTOUCHED, bit-identical.
       bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask,
                                                              newton_opts, newton_report, pos_floor};
       if (disc_mask)
@@ -425,21 +427,21 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
       bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, SSPRK2Step>{
           m, ctx, disc, recon_prim, pos_floor};
   } else {
-    throw std::runtime_error("System : methode temporelle explicite inconnue '" + method +
+    throw std::runtime_error("System: unknown explicit time method '" + method +
                              "' (euler|ssprk2|ssprk3)");
   }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor};
-  bc.hotspot = detail::HotspotFn<Model>{m, ctx};  // diagnostic dt_hotspot (ADC-182), hors chemin chaud
+  bc.hotspot = detail::HotspotFn<Model>{m, ctx};  // dt_hotspot diagnostic (ADC-182), off the hot path
   return bc;
 }
 
-/// Dispatch du schema spatial (limiteur x flux Riemann) -> fermetures compilees. HLLC / Roe gardes
-/// par requires : exigent un transport a 4 variables exposant pressure (sinon erreur explicite).
-/// "weno5" = reconstruction WENO5-Z (ordre 5, stencil 5 points, 3 ghosts) ; spatial_operator route
-/// sur weno5z quand Limiter::n_ghost >= 3 (l'appelant doit allouer 3 ghosts, cf. block_n_ghost).
-/// @p method choisit l'avance EXPLICITE (ssprk2 par defaut, ssprk3 | euler optionnels) ; sans effet en IMEX.
-/// @p implicit_components : masque implicite IMEX porte par le bloc (indices ; vide = defaut modele,
-/// bit-identique). cf. build_block.
+/// Dispatch of the spatial scheme (limiter x Riemann flux) -> compiled closures. HLLC / Roe guarded
+/// by requires: they demand a 4-variable transport exposing pressure (otherwise an explicit error).
+/// "weno5" = WENO5-Z reconstruction (order 5, 5-point stencil, 3 ghosts); spatial_operator routes to
+/// weno5z when Limiter::n_ghost >= 3 (the caller must allocate 3 ghosts, cf. block_n_ghost).
+/// @p method chooses the EXPLICIT advance (ssprk2 by default, ssprk3 | euler optional); no effect in IMEX.
+/// @p implicit_components: IMEX implicit mask carried by the block (indices; empty = model default,
+/// bit-identical). cf. build_block.
 template <class Model>
 BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
                          const GridContext& ctx, bool imex, bool recon_prim,
@@ -447,12 +449,12 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
                          const std::vector<int>& implicit_components = {},
                          const NewtonOptions& newton_opts = {},
                          NewtonReport* newton_report = nullptr, Real pos_floor = Real(0)) {
-  // VALIDATION CENTRALISEE (registry dispatch_tags.hpp) AVANT le dispatch : memes acceptations /
-  // rejets de tags qu'avant, messages identiques (validate_* reprend la formulation historique). Le
-  // dispatch if/else qui suit est INCHANGE (Limiter / Flux sont des types compile-time) ; ses throws
-  // finaux "limiter/flux inconnu" deviennent inatteignables -> remplaces par une garde d'incoherence
-  // registry/dispatch. Les gardes de CAPABILITE (hll/hllc/roe sur un modele sans onde / sans pression)
-  // restent des `if constexpr` PAR MODELE ci-dessous, avec leurs messages "exige ..." inchanges.
+  // CENTRALIZED VALIDATION (registry dispatch_tags.hpp) BEFORE the dispatch: same tag acceptances /
+  // rejections as before, identical messages (validate_* keeps the historical wording). The if/else
+  // dispatch that follows is UNCHANGED (Limiter / Flux are compile-time types); its final
+  // "unknown limiter/flux" throws become unreachable -> replaced by a registry/dispatch inconsistency
+  // guard. The CAPABILITY guards (hll/hllc/roe on a model without a wave / without pressure) stay
+  // per-model `if constexpr` below, with their unchanged "requires ..." messages.
   validate_riemann(riem, /*polar=*/false, "System");
   validate_limiter(lim, "System");
   if (riem == "rusanov") {
@@ -463,14 +465,14 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
     throw_registry_dispatch_mismatch("System", "limiteur", lim);
   }
   if (riem == "hll") {
-    // HLL (Harten-Lax-van Leer, 2 ondes) : moins diffusif que Rusanov (dissipation ~ |sR-sL| signee au
-    // lieu de 2*max|v| symetrique), mais ne demande PAS de pression (contrairement a HLLC/Roe) -- seulement
-    // des vitesses d'onde SIGNEES model.wave_speeds. Disponible des qu'un modele expose ses valeurs propres
-    // signees (le DSL emet wave_speeds des qu'une primitive 'p' est declaree, meme isotherme froid p=0 ->
-    // c=0 -> HLL degenere en upwind, toujours moins diffusif que Rusanov au contact). N'EXIGE PAS n_vars==4
-    // ni une pression : utilisable par le modele isotherme 3-var (rho, m_x, m_y) du diocotron Hoffart, la
-    // ou hllc/roe sont rejetes. Gate sur la presence de wave_speeds (sinon erreur CLAIRE, pas un echec de
-    // compilation pour un modele scalaire sans onde signee, p.ex. transport ExB).
+    // HLL (Harten-Lax-van Leer, 2 waves): less diffusive than Rusanov (dissipation ~ signed |sR-sL|
+    // instead of symmetric 2*max|v|), but does NOT require pressure (unlike HLLC/Roe) -- only SIGNED
+    // wave speeds model.wave_speeds. Available as soon as a model exposes its signed eigenvalues (the
+    // DSL emits wave_speeds as soon as a primitive 'p' is declared, even cold isothermal p=0 -> c=0 ->
+    // HLL degenerates to upwind, still less diffusive than Rusanov at the contact). Does NOT REQUIRE
+    // n_vars==4 nor a pressure: usable by the 3-var isothermal model (rho, m_x, m_y) of the Hoffart
+    // diocotron, where hllc/roe are rejected. Gated on the presence of wave_speeds (otherwise a CLEAR
+    // error, not a compilation failure for a scalar model without a signed wave, e.g. ExB transport).
     if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
                     mm.wave_speeds(s, a, 0, r, r);
                   }) {
@@ -480,16 +482,16 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
       if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
       throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
-      throw std::runtime_error("System : flux 'hll' exige des vitesses d'onde signees "
-                               "(model.wave_speeds : declarer une primitive 'p' / des eigenvalues) ; "
-                               "ce transport -> 'rusanov'");
+      throw std::runtime_error("System: flux 'hll' requires signed wave speeds "
+                               "(model.wave_speeds: declare a primitive 'p' / eigenvalues); "
+                               "this transport -> 'rusanov'");
     }
   }
   if (riem == "hllc") {
-    // CHEMINS HLLC : (a) capability HasHLLCStructure (le modele fournit contact_speed +
-    // hllc_star_state -> algorithme contact-resolving GENERIQUE, aucun layout assume), OU
-    // (b) chemin CANONIQUE Euler 2D (n_vars == 4 + pressure, implementation historique
-    // bit-identique). Sans l'un des deux, rejet explicite avec le remede capability.
+    // HLLC PATHS: (a) HasHLLCStructure capability (the model provides contact_speed +
+    // hllc_star_state -> GENERIC contact-resolving algorithm, no assumed layout), OR
+    // (b) the CANONICAL Euler 2D path (n_vars == 4 + pressure, bit-identical historical
+    // implementation). Without either, explicit rejection with the capability remedy.
     if constexpr (HasHLLCStructure<Model> ||
                   (Model::n_vars == 4 &&
                    requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
@@ -499,16 +501,16 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
       if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
       throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
-      throw std::runtime_error("System : flux 'hllc' exige un transport compressible Euler 2D "
-                               "(4 variables + pression) OU la capability HLLC du modele "
+      throw std::runtime_error("System: flux 'hllc' requires a compressible Euler 2D transport "
+                               "(4 variables + pressure) OR the model's HLLC capability "
                                "(pressure + wave_speeds + contact_speed + hllc_star_state, cf. "
-                               "HasHLLCStructure) ; ce transport -> 'hll'/'rusanov'");
+                               "HasHLLCStructure); this transport -> 'hll'/'rusanov'");
     }
   }
   if (riem == "roe") {
-    // CHEMINS ROE : (a) capability HasRoeDissipation (le modele fournit sa dissipation de Roe
-    // complete d = |A_roe| dU -> solveur Roe-like GENERIQUE), OU (b) chemin CANONIQUE Euler 2D
-    // gaz parfait (historique bit-identique). Sans l'un des deux, rejet explicite.
+    // ROE PATHS: (a) HasRoeDissipation capability (the model provides its full Roe dissipation
+    // d = |A_roe| dU -> GENERIC Roe-like solver), OR (b) the CANONICAL ideal-gas Euler 2D path
+    // (bit-identical historical). Without either, explicit rejection.
     if constexpr (HasRoeDissipation<Model> ||
                   (Model::n_vars == 4 &&
                    requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
@@ -518,35 +520,35 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
       if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
       throw_registry_dispatch_mismatch("System", "limiteur", lim);
     } else {
-      throw std::runtime_error("System : flux 'roe' exige un transport compressible Euler 2D "
-                               "(4 variables + pression) OU la capability Roe du modele "
-                               "(roe_dissipation, cf. HasRoeDissipation) ; ce transport -> "
+      throw std::runtime_error("System: flux 'roe' requires a compressible Euler 2D transport "
+                               "(4 variables + pressure) OR the model's Roe capability "
+                               "(roe_dissipation, cf. HasRoeDissipation); this transport -> "
                                "'hll'/'rusanov'");
     }
   }
   throw_registry_dispatch_mismatch("System", "flux", riem);
 }
 
-/// Nombre de ghosts requis par le schema spatial @p lim (source unique : Limiter::n_ghost). Sert a
-/// l'allocation du MultiFab d'etat d'un bloc, pour que le stencil large de WENO5 (5 points, 3 ghosts)
-/// ne lise pas hors bornes -- cf. comment AmrSystem alloue avec Limiter::n_ghost (PR #22). Defaut 2
-/// (MUSCL) pour un limiteur inconnu : c'est l'allocation historique, donc bit-identique.
+/// Number of ghosts required by the spatial scheme @p lim (single source: Limiter::n_ghost). Used for
+/// the allocation of a block state MultiFab, so that the wide WENO5 stencil (5 points, 3 ghosts) does
+/// not read out of bounds -- cf. AmrSystem allocates with Limiter::n_ghost (PR #22). Default 2 (MUSCL)
+/// for an unknown limiter: that is the historical allocation, hence bit-identical.
 inline int block_n_ghost(const std::string& lim) {
-  // Source UNIQUE : limiter_n_ghost(lim) (registry dispatch_tags.hpp). Le defaut 2 (MUSCL) pour un
-  // limiteur inconnu est porte par le registry -> meme allocation historique, bit-identique. Les
-  // static_assert ci-dessous (cette TU voit ET le registry ET les types) garantissent que la table
-  // kLimiters ne derive jamais des constantes ::n_ghost reelles.
-  static_assert(limiter_n_ghost_ct("none") == NoSlope::n_ghost, "kLimiters[none].n_ghost derive");
-  static_assert(limiter_n_ghost_ct("minmod") == Minmod::n_ghost, "kLimiters[minmod].n_ghost derive");
-  static_assert(limiter_n_ghost_ct("vanleer") == VanLeer::n_ghost, "kLimiters[vanleer].n_ghost derive");
-  static_assert(limiter_n_ghost_ct("weno5") == Weno5::n_ghost, "kLimiters[weno5].n_ghost derive");
+  // SINGLE source: limiter_n_ghost(lim) (registry dispatch_tags.hpp). The default 2 (MUSCL) for an
+  // unknown limiter is carried by the registry -> same historical allocation, bit-identical. The
+  // static_asserts below (this TU sees BOTH the registry AND the types) guarantee that the kLimiters
+  // table never drifts from the real::n_ghost constants.
+  static_assert(limiter_n_ghost_ct("none") == NoSlope::n_ghost, "kLimiters[none].n_ghost drifted");
+  static_assert(limiter_n_ghost_ct("minmod") == Minmod::n_ghost, "kLimiters[minmod].n_ghost drifted");
+  static_assert(limiter_n_ghost_ct("vanleer") == VanLeer::n_ghost, "kLimiters[vanleer].n_ghost drifted");
+  static_assert(limiter_n_ghost_ct("weno5") == Weno5::n_ghost, "kLimiters[weno5].n_ghost drifted");
   return limiter_n_ghost(lim);
 }
 
 namespace detail {
-/// Foncteur vitesse d'onde max du bloc (max_wave_speed_mf, reduction par le seam). FONCTEUR NOMME :
-/// max_wave_speed_mf instancie MaxWaveSpeedKernel (deja un foncteur device) ; l'envelopper dans une
-/// classe nommee plutot qu'une lambda preserve le contexte d'instanciation cross-TU sous nvcc.
+/// Block max wave speed functor (max_wave_speed_mf, reduction over the seam). NAMED FUNCTOR:
+/// max_wave_speed_mf instantiates MaxWaveSpeedKernel (already a device functor); wrapping it in a
+/// named class rather than a lambda preserves the cross-TU instantiation context under nvcc.
 template <class Model>
 struct MaxSpeed {
   Model m;
@@ -555,8 +557,8 @@ struct MaxSpeed {
 };
 
 
-/// Foncteur vitesse de STABILITE max du bloc (trait HasStabilitySpeed) : remplace MaxSpeed dans la
-/// CFL quand le modele declare stability_speed (les solveurs de Riemann gardent max_wave_speed).
+/// Block max STABILITY speed functor (HasStabilitySpeed trait): replaces MaxSpeed in the CFL when the
+/// model declares stability_speed (the Riemann solvers keep max_wave_speed).
 template <class Model>
 struct MaxStabilitySpeed {
   Model m;
@@ -564,7 +566,7 @@ struct MaxStabilitySpeed {
   Real operator()(const MultiFab& U) const { return max_stability_speed_mf(m, U, *ctx.aux); }
 };
 
-/// Foncteur frequence de source max du bloc (trait HasSourceFrequency, borne dt <= cfl/mu sans h).
+/// Block max source frequency functor (HasSourceFrequency trait, bound dt <= cfl/mu without h).
 template <class Model>
 struct MaxSourceFreq {
   Model m;
@@ -572,7 +574,7 @@ struct MaxSourceFreq {
   Real operator()(const MultiFab& U) const { return max_source_frequency_mf(m, U, *ctx.aux); }
 };
 
-/// Foncteur pas admissible min du bloc (trait HasStabilityDt ; 0 = aucune cellule ne contraint).
+/// Block min admissible step functor (HasStabilityDt trait; 0 = no cell constrains it).
 template <class Model>
 struct MinStabilityDt {
   Model m;
@@ -580,7 +582,7 @@ struct MinStabilityDt {
   Real operator()(const MultiFab& U) const { return min_stability_dt_mf(m, U, *ctx.aux); }
 };
 
-/// Foncteur contribution Poisson : rhs += elliptic_rhs(U) (boucle HOTE pure, pas de kernel device).
+/// Poisson contribution functor: rhs += elliptic_rhs(U) (pure HOST loop, no device kernel).
 template <class Model>
 struct PoissonRhs {
   Model m;
@@ -597,10 +599,10 @@ struct PoissonRhs {
 };
 }  // namespace detail
 
-/// Fermeture de la vitesse utilisee par le pas CFL du bloc. Si le modele declare le trait OPTIONNEL
-/// stability_speed (HasStabilitySpeed), c'est ELLE qui pilote la CFL (lambda* de stabilite) ; sinon
-/// fallback STRICT sur max_wave_speed (comportement historique, bit-identique). Les solveurs de
-/// Riemann lisent toujours max_wave_speed : ce choix ne change que la politique de pas.
+/// Closure of the speed used by the block CFL step. If the model declares the OPTIONAL stability_speed
+/// trait (HasStabilitySpeed), THAT is what drives the CFL (stability lambda*); otherwise STRICT
+/// fallback on max_wave_speed (historical behavior, bit-identical). The Riemann solvers always read
+/// max_wave_speed: this choice only changes the step policy.
 template <class Model>
 std::function<Real(const MultiFab&)> make_max_speed(const Model& m, const GridContext& ctx) {
   if constexpr (HasStabilitySpeed<Model>)
@@ -609,9 +611,9 @@ std::function<Real(const MultiFab&)> make_max_speed(const Model& m, const GridCo
     return detail::MaxSpeed<Model>{m, ctx};
 }
 
-/// Fermeture de la frequence de source max du bloc (borne dt <= cfl * substeps / (stride * mu)).
-/// VIDE (std::function nulle) si le modele ne declare pas le trait -> le stepper l'ignore
-/// (comportement historique).
+/// Closure of the block max source frequency (bound dt <= cfl * substeps / (stride * mu)). EMPTY (null
+/// std::function) if the model does not declare the trait -> the stepper ignores it (historical
+/// behavior).
 template <class Model>
 std::function<Real(const MultiFab&)> make_source_frequency(const Model& m, const GridContext& ctx) {
   if constexpr (HasSourceFrequency<Model>)
@@ -620,8 +622,8 @@ std::function<Real(const MultiFab&)> make_source_frequency(const Model& m, const
     return {};
 }
 
-/// Fermeture du pas admissible min du bloc (borne dt <= stability_dt * substeps / stride, SANS
-/// cfl). VIDE si le modele ne declare pas le trait -> ignoree par le stepper (historique).
+/// Closure of the block min admissible step (bound dt <= stability_dt * substeps / stride, WITHOUT
+/// cfl). EMPTY if the model does not declare the trait -> ignored by the stepper (historical).
 template <class Model>
 std::function<Real(const MultiFab&)> make_stability_dt(const Model& m, const GridContext& ctx) {
   if constexpr (HasStabilityDt<Model>)
@@ -630,20 +632,20 @@ std::function<Real(const MultiFab&)> make_stability_dt(const Model& m, const Gri
     return {};
 }
 
-/// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs(U) (boucle hote).
+/// Block contribution to the Poisson right-hand side: rhs += elliptic_rhs(U) (host loop).
 template <class Model>
 std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs(const Model& m) {
   return detail::PoissonRhs<Model>{m};
 }
 
-/// Conversions PONCTUELLES (une cellule) cons <-> prim du MODELE, type-erasees sur des tableaux de
-/// Model::n_vars doubles. Premiere = primitif -> conservatif (M.to_conservative, init depuis les
-/// primitives), seconde = conservatif -> primitif (M.to_primitive, diagnostic). Capture le modele par
-/// valeur (fige a l'ajout du bloc). Pour un modele SANS conversion (scalaire pur, pas de brique
-/// hyperbolique) les deux sont l'IDENTITE -- exact pour un transport scalaire (prim == cons).
-/// Model::Prim partage la largeur Model::n_vars de State (contrat HyperbolicPhysicalModel), donc les
-/// tableaux plats s'alignent composante a composante. Partage par add_block (natif) et
-/// add_compiled_model (compile) : la MEME conversion sert les deux chemins.
+/// PER-CELL (one cell) cons <-> prim conversions of the MODEL, type-erased over arrays of
+/// Model::n_vars doubles. First = primitive -> conservative (M.to_conservative, init from the
+/// primitives), second = conservative -> primitive (M.to_primitive, diagnostic). Captures the model by
+/// value (frozen when the block is added). For a model WITHOUT a conversion (pure scalar, no
+/// hyperbolic brick) both are the IDENTITY -- exact for a scalar transport (prim == cons).
+/// Model::Prim shares the Model::n_vars width of State (HyperbolicPhysicalModel contract), so the flat
+/// arrays align component by component. Shared by add_block (native) and add_compiled_model (compiled):
+/// the SAME conversion serves both paths.
 template <class Model>
 std::pair<std::function<void(const double*, double*)>,
           std::function<void(const double*, double*)>>

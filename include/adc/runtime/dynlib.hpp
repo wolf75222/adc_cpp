@@ -1,14 +1,14 @@
 #pragma once
 
 /// @file
-/// @brief Chargement dynamique PORTABLE : `dlopen`/`dlsym`/`dlclose` (POSIX) <-> `LoadLibraryW`/
-///        `GetProcAddress`/`FreeLibrary` (Windows). Surface minimale pour le runtime adc (loader
-///        natif / DSL `.dll`), chantier ADC-99.
+/// @brief PORTABLE dynamic loading: `dlopen`/`dlsym`/`dlclose` (POSIX) <-> `LoadLibraryW`/
+///        `GetProcAddress`/`FreeLibrary` (Windows). Minimal surface for the adc runtime (native
+///        loader / DSL `.dll`), ADC-99.
 ///
-/// POSIX : strictement equivalent a l'usage historique (`RTLD_NOW | RTLD_LOCAL`). Le chemin
-/// "production" du DSL a un besoin SPECIAL (promotion `RTLD_GLOBAL` pour resoudre les symboles de
-/// `_adc` exportes `ADC_EXPORT` a travers le dlopen) qui reste gere a son site d'appel ; cote
-/// Windows l'equivalent passe par `__declspec(dllexport)` (cf. export.hpp) + import library, ADC-100.
+/// POSIX: strictly equivalent to the historical usage (`RTLD_NOW | RTLD_LOCAL`). The DSL
+/// "production" path has a SPECIAL need (`RTLD_GLOBAL` promotion to resolve the symbols of
+/// `_adc` exported as `ADC_EXPORT` through the dlopen) that stays handled at its call site; on the
+/// Windows side the equivalent goes through `__declspec(dllexport)` (cf. export.hpp) + import library, ADC-100.
 
 #include <string>
 
@@ -33,7 +33,7 @@ using handle = HMODULE;
 using handle = void*;
 #endif
 
-/// Suffixe de bibliotheque dynamique de la plateforme.
+/// Platform dynamic library suffix.
 inline const char* suffix() {
 #if defined(_WIN32)
   return ".dll";
@@ -44,10 +44,10 @@ inline const char* suffix() {
 #endif
 }
 
-/// Ouvre une bibliotheque dynamique (@p path en UTF-8). Renvoie un handle nul si echec.
+/// Opens a dynamic library (@p path in UTF-8). Returns a null handle on failure.
 inline handle open(const std::string& path) {
 #if defined(_WIN32)
-  // UTF-8 -> UTF-16 pour LoadLibraryW (chemins Unicode et avec espaces).
+  // UTF-8 -> UTF-16 for LoadLibraryW (Unicode paths and paths with spaces).
   const int n = ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
   std::wstring w(n > 0 ? n - 1 : 0, L'\0');
   if (n > 0) ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
@@ -57,7 +57,7 @@ inline handle open(const std::string& path) {
 #endif
 }
 
-/// Resout @p name dans @p h. Renvoie nullptr si absent.
+/// Resolves @p name in @p h. Returns nullptr if absent.
 inline void* sym(handle h, const char* name) {
 #if defined(_WIN32)
   return reinterpret_cast<void*>(::GetProcAddress(h, name));
@@ -66,7 +66,7 @@ inline void* sym(handle h, const char* name) {
 #endif
 }
 
-/// Ferme @p h (no-op sur handle nul).
+/// Closes @p h (no-op on a null handle).
 inline void close(handle h) {
 #if defined(_WIN32)
   if (h) ::FreeLibrary(h);
@@ -75,10 +75,10 @@ inline void close(handle h) {
 #endif
 }
 
-/// true si @p h est un handle valide.
+/// true if @p h is a valid handle.
 inline bool valid(handle h) { return h != handle{}; }
 
-/// Message de la derniere erreur (best-effort, pour les diagnostics).
+/// Last error message (best-effort, for diagnostics).
 inline std::string last_error() {
 #if defined(_WIN32)
   const DWORD e = ::GetLastError();
