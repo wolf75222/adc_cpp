@@ -28,11 +28,11 @@ on:
     # `ci-full` sur une PR re-declenche le workflow, et set-mode bascule alors en plein
     # (MPI + Kokkos OpenMP). Sans `labeled`, ajouter un label ne relance aucun run.
     types: [opened, synchronize, reopened, labeled]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'tutorials/**'
-      - '.gitignore'
+    # NO paths-ignore on pull_request: the `gate` job is a REQUIRED status check (branch
+    # protection on master). A required check that never runs blocks the PR forever, so the
+    # workflow must trigger on EVERY PR to report `gate`. The internal routing (the `changes`
+    # job + per-job `if:`) still skips the expensive Kokkos builds for doc-only PRs, so the
+    # gate just reports fast. The `push` trigger keeps its paths-ignore (no gate needed there).
   schedule:
     # Suite complete chaque nuit (03:17 UTC) meme sans push, pour attraper toute
     # derive d'environnement (image runner, deps apt) hors du chemin critique des PR.
