@@ -1,11 +1,11 @@
 #pragma once
 
 /// @file
-/// @brief Noyau 0D du mode de Langmuir linearise (LangmuirMode) : brique de TEST/VALIDATION IMEX.
+/// @brief 0D kernel of the linearized Langmuir mode (LangmuirMode): IMEX TEST/VALIDATION brick.
 ///
-/// Conservee comme exemple analytique du schema IMEX (explicit_step / implicit_solve) : le terme
-/// plasma omega_p^2 est raide (traite en implicite, A-stable), la correction acoustique c_s^2 k^2
-/// reste explicite. Non utilisee par adc_cases au 2026-06-06.
+/// Kept as an analytic example of the IMEX scheme (explicit_step / implicit_solve): the plasma
+/// term omega_p^2 is stiff (handled implicitly, A-stable), while the acoustic correction c_s^2 k^2
+/// stays explicit. Not used by adc_cases as of 2026-06-06.
 
 #include <adc/core/types.hpp>
 
@@ -14,50 +14,50 @@
 namespace adc {
 
 /**
- * Mode de Langmuir linearise : noyau 0D du schema asymptotic-preserving deux-fluides.
+ * Linearized Langmuir mode: 0D kernel of the asymptotic-preserving two-fluid scheme.
  *
- * Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) ;
- * conservee comme exemple analytique du schema IMEX (explicit_step / implicit_solve).
+ * TEST/VALIDATION brick (not used by adc_cases as of 2026-06-06);
+ * kept as an analytic example of the IMEX scheme (explicit_step / implicit_solve).
  *
- * Regime raide d'un fluide compressible magnetise couple a un champ self-consistant,
- * papier Hoffart arXiv:2510.11808. Deux-fluides
- * isotherme, electrons mobiles sur fond ionique fixe, un mode de Fourier k. L'amplitude
- * du mode (a = perturbation, b = da/dt) obeit a a'' + (omega_p^2 + c_s^2 k^2) a = 0, soit
- * une oscillation a omega = sqrt(omega_p^2 + c_s^2 k^2) (Bohm-Gross isotherme). La
- * frequence plasma omega_p est le terme raide (tend vers l'infini quand la longueur de
- * Debye lambda_D tend vers 0, quasi-neutralite) : un schema explicite exigerait
- * dt < 1/omega_p, l'IMEX la traite en implicite.
+ * Stiff regime of a compressible magnetized fluid coupled to a self-consistent field,
+ * Hoffart paper arXiv:2510.11808. Isothermal two-fluid, electrons mobile over a fixed
+ * ionic background, a single Fourier mode k. The mode amplitude (a = perturbation,
+ * b = da/dt) obeys a'' + (omega_p^2 + c_s^2 k^2) a = 0, that is an oscillation at
+ * omega = sqrt(omega_p^2 + c_s^2 k^2) (isothermal Bohm-Gross). The plasma frequency
+ * omega_p is the stiff term (it tends to infinity as the Debye length lambda_D tends to 0,
+ * quasi-neutrality): an explicit scheme would require dt < 1/omega_p, the IMEX handles it
+ * implicitly.
  *
- * Split IMEX (cf. time/imex.hpp) :
- *   raide (implicite, A-stable) : S(a,b) = (b, -omega_p^2 a),  paire oscillante
- *   lent (explicite)            : T(a,b) = (0, -c_s^2 k^2 a),  correction acoustique
+ * IMEX split (see time/imex.hpp):
+ *   stiff (implicit, A-stable): S(a,b) = (b, -omega_p^2 a),  oscillating pair
+ *   slow (explicit): T(a,b) = (0, -c_s^2 k^2 a),  acoustic correction
  *
- * L'implicite resout la paire (a,b) ensemble, backward Euler de facteur
- * 1/sqrt(1+omega_p^2 dt^2) < 1 : stable a dt fixe quand omega_p tend vers l'infini (AP).
+ * The implicit part solves the pair (a,b) together, backward Euler with factor
+ * 1/sqrt(1+omega_p^2 dt^2) < 1: stable at fixed dt as omega_p tends to infinity (AP).
  */
 struct LangmuirMode {
-  Real omega_p = 1.0;  ///< frequence plasma (terme raide)
-  Real cs2k2 = 0.0;    ///< c_s^2 k^2 (correction acoustique, lente)
+  Real omega_p = 1.0;  ///< plasma frequency (stiff term)
+  Real cs2k2 = 0.0;    ///< c_s^2 k^2 (acoustic correction, slow)
 
   /**
-   * Pas explicite (terme acoustique lent) en place : (a,b) <- (a,b) + dt T.
+   * Explicit step (slow acoustic term) in place: (a,b) <- (a,b) + dt T.
    *
-   * @param[in]     a  amplitude du mode
-   * @param[in,out] b  vitesse da/dt, mise a jour par T = (0, -cs2k2 a)
-   * @param[in]     dt pas de temps
+   * @param[in]     a  mode amplitude
+   * @param[in,out] b  velocity da/dt, updated by T = (0, -cs2k2 a)
+   * @param[in]     dt time step
    */
   ADC_HD void explicit_step(Real& a, Real& b, Real dt) const {
     b += dt * (-cs2k2 * a);
   }
 
   /**
-   * Pas implicite (terme plasma raide) en place : resout (a,b) = (a*, b*) + dt S.
+   * Implicit step (stiff plasma term) in place: solves (a,b) = (a*, b*) + dt S.
    *
-   * Avec S = (b, -omega_p^2 a), solve 2x2 lineaire analytique (pas de Newton).
+   * With S = (b, -omega_p^2 a), analytic linear 2x2 solve (no Newton).
    *
-   * @param[in,out] a  amplitude du mode
-   * @param[in,out] b  vitesse da/dt
-   * @param[in]     dt pas de temps
+   * @param[in,out] a  mode amplitude
+   * @param[in,out] b  velocity da/dt
+   * @param[in]     dt time step
    */
   ADC_HD void implicit_solve(Real& a, Real& b, Real dt) const {
     const Real as = a, bs = b, w2 = omega_p * omega_p;
@@ -65,7 +65,7 @@ struct LangmuirMode {
     b = bs - dt * w2 * a;
   }
 
-  /// Pulsation propre du mode, omega = sqrt(omega_p^2 + c_s^2 k^2) (Bohm-Gross isotherme).
+  /// Eigenfrequency of the mode, omega = sqrt(omega_p^2 + c_s^2 k^2) (isothermal Bohm-Gross).
   Real omega() const { return std::sqrt(omega_p * omega_p + cs2k2); }
 };
 

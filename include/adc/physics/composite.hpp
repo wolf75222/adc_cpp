@@ -1,44 +1,44 @@
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // HyperbolicPhysicalModel : contrat de la brique hyperbolique
+#include <adc/core/physical_model.hpp>  // HyperbolicPhysicalModel: contract of the hyperbolic brick
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 #include <adc/core/variables.hpp>
 
 /// @file
-/// @brief CompositeModel : assemble (hyperbolique, source, elliptic) en un PhysicalModel compile.
+/// @brief CompositeModel: assembles (hyperbolic, source, elliptic) into one compiled PhysicalModel.
 ///
-/// La brique HYPERBOLIQUE porte Vars + flux + vitesses d'onde + conversions (indissociables) ; source
-/// et elliptique sont des briques SEPAREES (physics/source.hpp, physics/elliptic.hpp), librement
-/// composables. Un scenario nomme est une COMPOSITION choisie depuis l'application (adc_cases).
+/// The HYPERBOLIC brick carries Vars + flux + wave speeds + conversions (inseparable); source
+/// and elliptic are SEPARATE bricks (physics/source.hpp, physics/elliptic.hpp), freely
+/// composable. A named scenario is a COMPOSITION chosen from the application (adc_cases).
 
 namespace adc {
 
-/// Modele physique compose : une brique HYPERBOLIQUE + une source + un second membre elliptique.
-/// Satisfait le concept PhysicalModel ; les Vars (conversions + descripteur), le flux et les
-/// vitesses d'onde viennent de l'hyperbolique ; pressure / wave_speeds sont exposes quand
-/// l'hyperbolique les fournit (necessaire au flux HLLC / Roe).
+/// Composite physical model: one HYPERBOLIC brick + one source + one elliptic right-hand side.
+/// Satisfies the PhysicalModel concept; the Vars (conversions + descriptor), the flux and the
+/// wave speeds come from the hyperbolic; pressure / wave_speeds are exposed when the
+/// hyperbolic provides them (required by the HLLC / Roe flux).
 ///
-/// CONTRAT : CompositeModel est une fonction pure de ses 3 briques, device-callable (ADC_HD).
-/// Aucune MultiFab, aucune allocation, aucun acces global. Toute methode deleguee herite de
-/// l'invariant device-clean de la brique sous-jacente.
+/// CONTRACT: CompositeModel is a pure function of its 3 bricks, device-callable (ADC_HD).
+/// No MultiFab, no allocation, no global access. Every delegated method inherits the
+/// device-clean invariant of the underlying brick.
 ///
-/// Propagation n_aux : n_aux = max(aux_comps<Hyperbolic>, aux_comps<Source>, aux_comps<Elliptic>).
-/// Le systeme dimensionne le canal aux en consequence. Une brique sans n_aux (defaut kAuxBaseComps=3)
-/// ne modifie pas l'historique bit-identique.
+/// n_aux propagation: n_aux = max(aux_comps<Hyperbolic>, aux_comps<Source>, aux_comps<Elliptic>).
+/// The system sizes the aux channel accordingly. A brick without n_aux (default kAuxBaseComps=3)
+/// does not change the bit-identical history.
 template <class Hyperbolic, class Source, class Elliptic>
 struct CompositeModel {
   static_assert(HyperbolicPhysicalModel<Hyperbolic>,
-                "CompositeModel : la 1ere brique doit etre un modele HYPERBOLIQUE (Vars + "
-                "conversions cons<->prim + flux + max_wave_speed), cf. HyperbolicPhysicalModel");
+                "CompositeModel : the 1st brick must be a HYPERBOLIC model (Vars + "
+                "cons<->prim conversions + flux + max_wave_speed), see HyperbolicPhysicalModel");
   using State = StateVec<Hyperbolic::n_vars>;
   using Prim = typename Hyperbolic::Prim;
   using Aux = adc::Aux;
   static constexpr int n_vars = Hyperbolic::n_vars;
-  // Largeur du canal aux du modele compose = MAX des largeurs de ses briques : si une brique (flux
-  // ou source) lit un champ auxiliaire supplementaire (p.ex. une source magnetisee declarant
-  // n_aux=4 pour lire B_z), le compose l'expose au systeme (qui dimensionne alors le canal aux).
-  // Sans brique a champ extra, n_aux = kAuxBaseComps (3) -> strictement identique a l'historique.
+  // Aux channel width of the composite model = MAX of the widths of its bricks: if a brick (flux
+  // or source) reads an extra auxiliary field (e.g. a magnetized source declaring n_aux=4 to read
+  // B_z), the composite exposes it to the system (which then sizes the aux channel).
+  // Without any extra-field brick, n_aux = kAuxBaseComps (3) -> strictly identical to the history.
   static constexpr int n_aux = [] {
     int w = aux_comps<Hyperbolic>();
     if (aux_comps<Source>() > w) w = aux_comps<Source>();
@@ -73,11 +73,11 @@ struct CompositeModel {
     hyp.wave_speeds(u, a, dir, smin, smax);
   }
 
-  /// CAPABILITIES Riemann (audit vague 3) : hooks HLLC (contact_speed + hllc_star_state) et Roe
-  /// (roe_dissipation) forwardes depuis la brique HYPERBOLIQUE quand elle les declare (le DSL les
-  /// emet via enable_hllc ; un modele C++ peut les ecrire a la main). Concept-gates comme
-  /// pressure / wave_speeds : sans hooks, le compose ne les expose pas (chemins canoniques /
-  /// rejets explicites inchanges).
+  /// Riemann CAPABILITIES (audit wave 3): HLLC hooks (contact_speed + hllc_star_state) and Roe
+  /// (roe_dissipation) forwarded from the HYPERBOLIC brick when it declares them (the DSL emits
+  /// them via enable_hllc; a C++ model can write them by hand). Concept-gated like
+  /// pressure / wave_speeds: without hooks, the composite does not expose them (canonical paths /
+  /// explicit rejections unchanged).
   ADC_HD Real contact_speed(const State& ul, const State& ur, Real pl, Real pr, Real sl, Real sr,
                             int dir) const
     requires requires(const Hyperbolic h, const State a_, const State b_, Real p, Real q, Real x,
@@ -100,22 +100,22 @@ struct CompositeModel {
     return hyp.roe_dissipation(ul, al, ur, ar, dir);
   }
 
-  /// Terme source GEOMETRIQUE de courbure polaire, delegue a la brique hyperbolique quand elle
-  /// l'expose (fluide polaire : IsothermalFluxPolar). Concept-gate comme pressure / wave_speeds :
-  /// si l'hyperbolique ne le fournit pas (transport scalaire ExB polaire), CompositeModel ne
-  /// l'expose pas -> assemble_rhs_polar retombe sur 0 (bit-identique). Ne touche PAS le cartesien
-  /// (assemble_rhs ne l'appelle jamais).
+  /// GEOMETRIC source term of polar curvature, delegated to the hyperbolic brick when it
+  /// exposes it (polar fluid: IsothermalFluxPolar). Concept-gated like pressure / wave_speeds:
+  /// if the hyperbolic does not provide it (polar ExB scalar transport), CompositeModel does not
+  /// expose it -> assemble_rhs_polar falls back to 0 (bit-identical). Does NOT touch the cartesian
+  /// (assemble_rhs never calls it).
   ADC_HD State polar_geom_source(const State& u, Real r) const
     requires requires(const Hyperbolic h, const State s, Real rr) { h.polar_geom_source(s, rr); }
   {
     return hyp.polar_geom_source(u, r);
   }
 
-  /// BORNES DE PAS optionnelles (audit 2026-06, cf. core/physical_model.hpp) : forwardees
-  /// conditionnellement comme pressure / wave_speeds, sinon le compose ne les expose pas et la
-  /// politique de pas reste l'historique. stability_speed / stability_dt viennent de la brique
-  /// HYPERBOLIQUE (c'est elle que le DSL emet) ; source_frequency vient de la brique SOURCE (c'est
-  /// la source qui connait sa frequence de relaxation/collision).
+  /// Optional STEP BOUNDS (audit 2026-06, see core/physical_model.hpp): forwarded
+  /// conditionally like pressure / wave_speeds, otherwise the composite does not expose them and the
+  /// step policy stays the history. stability_speed / stability_dt come from the HYPERBOLIC
+  /// brick (it is the one the DSL emits); source_frequency comes from the SOURCE brick (it is
+  /// the source that knows its relaxation/collision frequency).
   ADC_HD Real stability_speed(const State& u, const Aux& a, int dir) const
     requires requires(const Hyperbolic h, const State s, const Aux aa, int d) {
       h.stability_speed(s, aa, d);
@@ -134,10 +134,10 @@ struct CompositeModel {
     return src.frequency(u, a);
   }
 
-  /// JACOBIEN ANALYTIQUE de la source (audit vague 3) : forwarde depuis la brique SOURCE quand
-  /// elle declare jacobian(U, aux, J) (J[r][c] = dS_r/dU_c). Le Newton de la source implicite
-  /// l'utilise a la place des differences finies (trait HasSourceJacobian) ; sans la methode,
-  /// rien n'est expose et le Newton garde les differences finies historiques.
+  /// ANALYTIC JACOBIAN of the source (audit wave 3): forwarded from the SOURCE brick when
+  /// it declares jacobian(U, aux, J) (J[r][c] = dS_r/dU_c). The Newton of the implicit source
+  /// uses it instead of finite differences (HasSourceJacobian trait); without the method,
+  /// nothing is exposed and the Newton keeps the historical finite differences.
   ADC_HD void source_jacobian(const State& u, const Aux& a, Real (&J)[n_vars][n_vars]) const
     requires requires(const Source sc, const State s, const Aux aa,
                       Real (&JJ)[n_vars][n_vars]) { sc.jacobian(s, aa, JJ); }
