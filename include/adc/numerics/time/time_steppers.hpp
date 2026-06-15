@@ -6,46 +6,33 @@
 
 #include <utility>
 
-// Integrateurs en temps comme OBJETS de premier plan (`take_step`), retour tuteur sec.8.2 A.
-//
-// Le schema mathematique (SSPRK, Euler avant, ...) vit ICI, dans le coeur, et le coupleur
-// l'APPELLE, au lieu d'inliner SSPRK dans chaque coupleur. Un integrateur est agnostique
-// du modele et de la discretisation : il ne voit QUE `rhs_eval(U_stage, R)`, la fleche
-// methode-des-lignes qui remplit le residu R = -div F + S, et les operations MultiFab
-// (saxpy/lincomb). C'est exactement le contrat "donner un TimeIntegrator au coupleur,
-// comme on donne un PhysicalModel". L'utilisateur peut fournir le sien : meme signature
-// `take_step(rhs_eval, U, dt)`.
-//
-// Le scratch (R, etages U1/U2/U3) est alloue depuis le layout de U : aucun etat porte.
-// Ces objets remplacent les copies SSPRK de SystemCoupler / ssprk.hpp (dedup).
-
 /// @file
-/// @brief Integrateurs en temps comme OBJETS de premier plan a methode take_step : concept
-///        TimeStepper, et les schemas ForwardEuler, SSPRK2Step, SSPRK3Step (Shu-Osher).
+/// @brief Time integrators as first-class OBJECTS with a take_step method: TimeStepper
+///        concept, and the ForwardEuler, SSPRK2Step, SSPRK3Step (Shu-Osher) schemes.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : faire vivre le schema mathematique dans le coeur, le coupleur l'APPELANT au lieu
-///        d'inliner SSPRK partout. Contrat "donner un TimeIntegrator au coupleur comme on donne
-///        un PhysicalModel" : l'utilisateur peut fournir le sien (meme signature
+/// Layer: `include/adc/numerics/time`.
+/// Role: keep the mathematical scheme alive in the core, with the coupler CALLING it instead
+///        of inlining SSPRK everywhere. The "give a TimeIntegrator to the coupler like you give
+///        a PhysicalModel" contract: the user can provide their own (same signature
 ///        take_step(rhs_eval, U, dt)).
-/// Contrat : un integrateur est agnostique du modele et de la discretisation -- il ne voit que
-///           rhs_eval(U_stage, R) (la fleche methode-des-lignes R = -div F + S) et les operations
-///           MultiFab (saxpy / lincomb).
+/// Contract: an integrator is agnostic of the model and the discretization -- it only sees
+///           rhs_eval(U_stage, R) (the method-of-lines arrow R = -div F + S) and the MultiFab
+///           operations (saxpy / lincomb).
 ///
-/// Invariants :
-/// - aucun etat porte : le scratch (R, etages U1/U2/U3) est alloue depuis le layout de U ;
-/// - SSPRK2Step / SSPRK3Step reproduisent exactement les anciennes copies de SystemCoupler et
-///   ssprk.hpp (bit-identique).
+/// Invariants:
+/// - no carried state: the scratch (R, stages U1/U2/U3) is allocated from the layout of U;
+/// - SSPRK2Step / SSPRK3Step exactly reproduce the old copies in SystemCoupler and
+///   ssprk.hpp (bit-identical).
 
 namespace adc {
 
-// Contrat : un integrateur sait avancer U de dt via un evaluateur de residu.
+// Contract: an integrator knows how to advance U by dt via a residual evaluator.
 template <class I>
 concept TimeStepper = requires(const I integ, MultiFab& U, Real dt) {
   integ.take_step([](MultiFab&, MultiFab&) {}, U, dt);
 };
 
-// Euler avant (ordre 1) : U <- U + dt R(U).
+// Forward Euler (order 1): U <- U + dt R(U).
 struct ForwardEuler {
   template <class RhsEval>
   void take_step(RhsEval&& rhs, MultiFab& U, Real dt) const {
@@ -55,8 +42,8 @@ struct ForwardEuler {
   }
 };
 
-// SSP-RK2 (Shu-Osher, 2 etages, ordre 2). Memes operations que l'ancien
-// SystemCoupler::advance_explicit_ssprk2 / ssprk.hpp::advance_ssprk2 (bit-identique).
+// SSP-RK2 (Shu-Osher, 2 stages, order 2). Same operations as the old
+// SystemCoupler::advance_explicit_ssprk2 / ssprk.hpp::advance_ssprk2 (bit-identical).
 struct SSPRK2Step {
   template <class RhsEval>
   void take_step(RhsEval&& rhs, MultiFab& U, Real dt) const {
@@ -70,8 +57,8 @@ struct SSPRK2Step {
   }
 };
 
-// SSP-RK3 (Shu-Osher, 3 etages, ordre 3). Memes operations que l'ancien
-// SystemCoupler::advance_explicit_ssprk3 (bit-identique).
+// SSP-RK3 (Shu-Osher, 3 stages, order 3). Same operations as the old
+// SystemCoupler::advance_explicit_ssprk3 (bit-identical).
 struct SSPRK3Step {
   template <class RhsEval>
   void take_step(RhsEval&& rhs, MultiFab& U, Real dt) const {

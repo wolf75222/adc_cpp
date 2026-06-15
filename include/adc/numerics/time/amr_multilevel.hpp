@@ -1,70 +1,64 @@
 #pragma once
 
-// DEPRECATED : AMR N-niveaux de reference sur Fab2D mono-box (struct AmrLevel,
-// recursion Berger-Oliger). Aucun #include dans le coeur, les tests ou les bindings
-// Python ; le moteur de production est amr_reflux_mf.hpp (pile MultiFab multi-patch),
-// dont le mono-box est le cas degenere. Conserve comme verite-terrain documentee
-// (docs/ARCHITECTURE.md). A retirer apres migration des references vers amr_reflux_mf.hpp.
-
 #include <adc/numerics/time/amr_reflux.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/fab2d.hpp>
 
 #include <vector>
 
-// AMR multi-niveaux (N niveaux emboites, ratio 2) : sous-cyclage Berger-Oliger
-// recursif avec reflux a chaque interface coarse-fine. Generalise
-// amr_step_2level : chaque niveau qui possede un enfant joue le role du
-// "grossier" de l'etape 2-niveaux vis-a-vis de cet enfant.
+// Multi-level AMR (N nested levels, ratio 2): recursive Berger-Oliger
+// subcycling with reflux at each coarse-fine interface. Generalizes
+// amr_step_2level: each level that owns a child plays the role of the
+// "coarse" of the 2-level step with respect to that child.
 //
-// Hypothese (single-box par niveau) : chaque niveau l>=1 est une seule box
-// rectangulaire, raffinement ratio 2 du sous-domaine [rCI0..rCI1]x[rCJ0..rCJ1]
-// du niveau parent l-1, strictement interieure (>=1 cellule grossiere de marge)
-// pour que les ghosts du fin, coarsenises, retombent dans des cellules valides
-// du parent. Le niveau 0 couvre le domaine periodique.
+// Assumption (single-box per level): each level l>=1 is a single
+// rectangular box, ratio-2 refinement of the subdomain [rCI0..rCI1]x[rCJ0..rCJ1]
+// of the parent level l-1, strictly interior (>=1 coarse cell of margin)
+// so that the fine ghosts, coarsened, fall back into valid cells
+// of the parent. Level 0 covers the periodic domain.
 //
-// Invariants conserves de amr_step_2level, appliques recursivement :
-//   - flux grossier sauve aux 4 faces de l'enfant (x dt du niveau courant) ;
-//   - flux fins accumules dans le registre du parent (x dt de l'enfant), a
-//     chaque sous-pas ;
-//   - average_down enfant -> parent sur la region couverte ;
-//   - reflux : la cellule grossiere adjacente recoit (somme flux fins - flux
-//     grossier x dt) / dx.
-// Resultat : conservation a l'arrondi sur toute la hierarchie, stabilite via le
-// FillPatch espace-temps (ghosts du fin interpoles entre parent ancien/nouveau).
+// Invariants preserved from amr_step_2level, applied recursively:
+//   - coarse flux saved on the 4 faces of the child (x dt of the current level);
+//   - fine fluxes accumulated in the parent register (x dt of the child), at
+//     each substep;
+//   - average_down child -> parent over the covered region;
+//   - reflux: the adjacent coarse cell receives (sum of fine fluxes - coarse
+//     flux x dt) / dx.
+// Result: conservation to roundoff over the whole hierarchy, stability via the
+// space-time FillPatch (fine ghosts interpolated between old/new parent).
 
 /// @file
-/// @brief AMR N-niveaux de REFERENCE sur Fab2D mono-box : struct AmrLevel et la recursion
-///        Berger-Oliger (subcycle_level, amr_step_multilevel). DEPRECATED.
+/// @brief REFERENCE N-level AMR on single-box Fab2D: struct AmrLevel and the Berger-Oliger
+///        recursion (subcycle_level, amr_step_multilevel). DEPRECATED.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : verite-terrain documentee (cf. docs/ARCHITECTURE.md) generalisant amr_step_2level :
-///        chaque niveau qui possede un enfant joue le "grossier" du pas 2-niveaux vis-a-vis de
-///        cet enfant. Conservation a l'arrondi par reflux a chaque interface coarse-fine,
-///        stabilite par FillPatch espace-temps des ghosts fins.
+/// Layer: `include/adc/numerics/time`.
+/// Role: documented ground truth (cf. docs/ARCHITECTURE.md) generalizing amr_step_2level:
+///        each level that owns a child plays the "coarse" of the 2-level step with respect to
+///        that child. Conservation to roundoff via reflux at each coarse-fine interface,
+///        stability via space-time FillPatch of the fine ghosts.
 ///
-/// Invariants :
-/// - DEPRECATED : aucun include dans le coeur, les tests ou les bindings ; le moteur de
-///   production est amr_reflux_mf.hpp (pile MultiFab multi-patch) dont le mono-box est le cas
-///   degenere. A retirer apres migration des references vers amr_reflux_mf.hpp ;
-/// - hypothese single-box : chaque niveau l>=1 est UNE box raffinee ratio 2 d'un sous-domaine
-///   du parent, strictement interieure (>=1 cellule grossiere de marge) ;
-/// - aux detenu ailleurs (pointeur) ; rC* = region raffinee par l'enfant, valable si has_fine.
+/// Invariants:
+/// - DEPRECATED: no include in the core, the tests or the bindings; the production
+///   engine is amr_reflux_mf.hpp (multi-patch MultiFab stack) of which single-box is the
+///   degenerate case. To remove after migration of the references to amr_reflux_mf.hpp;
+/// - single-box assumption: each level l>=1 is ONE ratio-2 refined box of a subdomain
+///   of the parent, strictly interior (>=1 coarse cell of margin);
+/// - aux held elsewhere (pointer); rC* = region refined by the child, valid if has_fine.
 
 namespace adc {
 
-// Un niveau de la hierarchie. aux est detenu ailleurs (recalcule par pas) ;
-// on n'en garde qu'un pointeur. rC* decrit la region (en coords de CE niveau)
-// raffinee par l'enfant l+1 ; valable seulement si has_fine.
+// One level of the hierarchy. aux is held elsewhere (recomputed per step);
+// only a pointer is kept. rC* describes the region (in coords of THIS level)
+// refined by the child l+1; valid only if has_fine.
 struct AmrLevel {
-  Fab2D U;                 // etat, 1 composante, 1 ghost
-  const Fab2D* aux;        // [phi, gx, gy], ghosts remplis
-  double dx, dy;           // pas d'espace de ce niveau
-  int rCI0, rCI1, rCJ0, rCJ1;  // region raffinee par l'enfant (coords locales)
-  bool has_fine;           // existe-t-il un niveau l+1 ?
+  Fab2D U;                 // state, 1 component, 1 ghost
+  const Fab2D* aux;        // [phi, gx, gy], ghosts filled
+  double dx, dy;           // space step of this level
+  int rCI0, rCI1, rCJ0, rCJ1;  // region refined by the child (local coords)
+  bool has_fine;           // does a level l+1 exist?
 };
 
-// Applique U -= dt div(F) a partir de flux deja calcules (ghosts non touches).
+// Applies U -= dt div(F) from already-computed fluxes (ghosts untouched).
 inline void apply_flux_div_1c(Fab2D& U, const Fab2D& fx, const Fab2D& fy,
                               double dx, double dy, double dt) {
   Array4 uu = U.array();
@@ -77,10 +71,10 @@ inline void apply_flux_div_1c(Fab2D& U, const Fab2D& fx, const Fab2D& fy,
                         (FY(i, j + 1) - FY(i, j)) / dy);
 }
 
-// Avance recursivement le niveau lev de dt. pOld/pNew = etats parent
-// (ancien/nouveau) bornant le pas parent ; frac = position temporelle du
-// sous-pas courant dans ce pas (s/r). Le quadruplet preg = registre du parent
-// (accumulateur des flux fins de CE niveau) ; nul si lev == 0.
+// Recursively advances level lev by dt. pOld/pNew = parent states
+// (old/new) bounding the parent step; frac = temporal position of the
+// current substep within that step (s/r). The quadruplet preg = parent register
+// (accumulator of the fine fluxes of THIS level); null if lev == 0.
 template <class Model>
 void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
                     double dt, const Box2D& dom, const Fab2D* pOld,
@@ -90,19 +84,19 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
   const int r = 2;
   AmrLevel& lv = L[lev];
 
-  // --- 1. ghosts : periodiques (niveau 0) ou injection espace-temps ---
+  // --- 1. ghosts: periodic (level 0) or space-time injection ---
   if (lev == 0)
     fill_periodic_fab(lv.U, dom);
   else
     fill_fine_ghosts_t(lv.U, *pOld, *pNew, frac);
 
-  // --- 2. flux de ce niveau (etat de debut de sous-pas) ---
+  // --- 2. fluxes of this level (start-of-substep state) ---
   Fab2D fx(xface_box(lv.U.box()), 1, 0), fy(yface_box(lv.U.box()), 1, 0);
   compute_fluxes_1c(m, lv.U, *lv.aux, fx, fy);
   const ConstArray4 FX = fx.const_array();
   const ConstArray4 FY = fy.const_array();
 
-  // --- 3. contribution au registre du parent (flux fins x dt de ce niveau) ---
+  // --- 3. contribution to the parent register (fine fluxes x dt of this level) ---
   if (lev > 0) {
     const AmrLevel& par = L[lev - 1];
     const int pI0 = par.rCI0, pI1 = par.rCI1, pJ0 = par.rCJ0, pJ1 = par.rCJ1;
@@ -119,14 +113,14 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
   }
 
   if (!lv.has_fine) {
-    apply_flux_div_1c(lv.U, fx, fy, lv.dx, lv.dy, dt);  // feuille : simple avance
+    apply_flux_div_1c(lv.U, fx, fy, lv.dx, lv.dy, dt);  // leaf: plain advance
     return;
   }
 
-  // --- 4. niveau avec enfant : registre local + flux grossier sauve ---
+  // --- 4. level with child: local register + coarse flux saved ---
   const int cI0 = lv.rCI0, cI1 = lv.rCI1, cJ0 = lv.rCJ0, cJ1 = lv.rCJ1;
   const int nI = cI1 - cI0 + 1, nJ = cJ1 - cJ0 + 1;
-  std::vector<double> cL(nJ), cR(nJ), cB(nI), cT(nI);  // flux grossier (sans dt)
+  std::vector<double> cL(nJ), cR(nJ), cB(nI), cT(nI);  // coarse flux (without dt)
   for (int J = cJ0; J <= cJ1; ++J) {
     cL[J - cJ0] = FX(cI0, J);
     cR[J - cJ0] = FX(cI1 + 1, J);
@@ -135,19 +129,19 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
     cB[I - cI0] = FY(I, cJ0);
     cT[I - cI0] = FY(I, cJ1 + 1);
   }
-  std::vector<double> fL(nJ, 0), fR(nJ, 0), fB(nI, 0), fT(nI, 0);  // flux fins
+  std::vector<double> fL(nJ, 0), fR(nJ, 0), fB(nI, 0), fT(nI, 0);  // fine fluxes
 
-  const Fab2D U_old = lv.U;  // etat t (pour l'interp temporelle de l'enfant)
-  apply_flux_div_1c(lv.U, fx, fy, lv.dx, lv.dy, dt);  // lv.U devient l'etat t+dt
+  const Fab2D U_old = lv.U;  // state t (for the child's temporal interp)
+  apply_flux_div_1c(lv.U, fx, fy, lv.dx, lv.dy, dt);  // lv.U becomes the state t+dt
 
-  // --- 5. sous-cyclage de l'enfant : r sous-pas de dt/r ---
+  // --- 5. subcycling of the child: r substeps of dt/r ---
   for (int s = 0; s < r; ++s)
     subcycle_level(m, L, lev + 1, dt / r, dom, &U_old, &lv.U, double(s) / r, &fL,
                    &fR, &fB, &fT);
 
-  average_down_fab(L[lev + 1].U, lv.U, cI0, cI1, cJ0, cJ1);  // sync couvert
+  average_down_fab(L[lev + 1].U, lv.U, cI0, cI1, cJ0, cJ1);  // sync covered
 
-  // --- 6. reflux : flux grossier (x dt) remplace par somme des flux fins ---
+  // --- 6. reflux: coarse flux (x dt) replaced by sum of fine fluxes ---
   Array4 c = lv.U.array();
   for (int J = cJ0; J <= cJ1; ++J) {
     c(cI0 - 1, J) -= (fL[J - cJ0] - cL[J - cJ0] * dt) / lv.dx;
@@ -159,7 +153,7 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
   }
 }
 
-// Driver : un pas dt de la hierarchie complete (niveau 0 = grossier).
+// Driver: one dt step of the complete hierarchy (level 0 = coarse).
 template <class Model>
 void amr_step_multilevel(const Model& m, std::vector<AmrLevel>& L,
                          const Box2D& dom, double dt) {

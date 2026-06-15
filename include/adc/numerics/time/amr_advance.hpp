@@ -1,69 +1,69 @@
 #pragma once
-// Facade unifiee de production : LevelHierarchy, OwnershipPolicy, advance_amr.
 
 #include <adc/numerics/time/amr_subcycling.hpp>
 
 /// @file
-/// @brief Facade unifiee de production du moteur AMR temporel : type LevelHierarchy (hierarchie
-///        AMR comme objet nomme), alias OwnershipPolicy, et entree advance_amr.
+/// @brief Unified production facade for the AMR time engine: LevelHierarchy type (the AMR
+///        hierarchy as a named object), OwnershipPolicy alias, and the advance_amr entry point.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : exposer UNE entree de production, advance_amr, qui delegue au moteur N-niveaux
-///        multi-patch (detail::amr_step_multilevel_multipatch). Deux formes : "pieces" (le
-///        coupleur passe levels/base_dom/... directement) et LevelHierarchy (objet agrege).
-/// Contrat : advance_amr avance la hierarchie d'UN pas dt ; selecteurs figes a l'ajout du bloc
-///           (coarse_replicated, recon_prim, imex, time_method) transmis tels quels au moteur.
+/// Layer: `include/adc/numerics/time`.
+/// Role: expose ONE production entry, advance_amr, that delegates to the N-level multi-patch
+///        engine (detail::amr_step_multilevel_multipatch). Two forms: "pieces" (the coupler
+///        passes levels/base_dom/... directly) and LevelHierarchy (aggregate object).
+/// Contract: advance_amr advances the hierarchy by ONE time step dt; selectors fixed when the
+///           block is added (coarse_replicated, recon_prim, imex, time_method) forwarded as-is
+///           to the engine.
 ///
-/// Invariants :
-/// - coarse_replicated=true (defaut) reproduit le comportement historique ; sans transmission
-///   un grossier de-replique repasserait a tort en replique ;
-/// - recon_prim selectionne la reconstruction primitive (cf. assemble_rhs) au lieu de
-///   conservative ; false (defaut) = strictement bit-identique ;
-/// - kSsprk3 exige imex == false (rejet sinon, applique cote moteur).
+/// Invariants:
+/// - coarse_replicated=true (default) reproduces the historical behavior; without forwarding,
+///   a de-replicated coarse level would wrongly switch back to replicated;
+/// - recon_prim selects the primitive reconstruction (cf. assemble_rhs) instead of conservative;
+///   false (default) = strictly bit-identical;
+/// - kSsprk3 requires imex == false (rejected otherwise, enforced on the engine side).
 
 namespace adc {
 
-// --- Moteur AMR unifie (revue, point 5) ---
-// La hierarchie AMR comme OBJET nomme que le moteur fait avancer, plutot qu'une famille de
-// fonctions amr_step_* dont le cas (2/N niveaux, mono/multi-box) est encode dans le NOM.
-// Entree unifiee : advance_amr(m, LevelHierarchy&, dt), facade fidele du moteur N-niveaux
-// multi-patch (verifie 2 ET 3 niveaux, maxdiff = 0, par test_advance_amr). Les ROLES de la
-// revue, leurs supports actuels (types nommes, ou code restant a promouvoir) :
-//   OwnershipPolicy     = DistributionMapping (qui possede quel patch)        -> alias ci-dessous
-//   AmrLevel            = AmrLevelMP (box + donnees + aux + dx d'un niveau)
-//   PatchRange          = TYPE NOMME : empreinte grossiere [I0..I1]x[J0..J1] d'un patch fin
-//                         (ratio 2), partagee par average_down, couverture et registres
-//   CoarseFineGhost     = TYPE/HELPER NOMME : fill_cf_ghost_cell (interp espace+temps par
-//                         cellule ghost), partage par les trois mf_fill_fine_ghosts_*
-//   CoarseFineInterface = TYPE NOMME : couverture (CoverageMask) + routage bordant du reflux
-//                         (route_reflux), partage par subcycle_level_mp et amr_step_2level_multipatch
-//   FluxRegister        = TYPE NOMME : buffers avg/ref a index global + all_reduce_sum_inplace
-//   SubcyclingSchedule  = TYPE NOMME : cadence Berger-Oliger (ratio r, dt/r, frac s/r) par niveau
-//   RegridPolicy        = amr_regrid_finest (Berger-Rigoutsos), cote coupleur
+// --- Unified AMR engine (review, point 5) ---
+// The AMR hierarchy as a named OBJECT that the engine advances, rather than a family of
+// amr_step_* functions whose case (2/N levels, mono/multi-box) is encoded in the NAME.
+// Unified entry: advance_amr(m, LevelHierarchy&, dt), faithful facade of the N-level
+// multi-patch engine (verified at 2 AND 3 levels, maxdiff = 0, by test_advance_amr). The ROLES
+// from the review, their current backing (named types, or remaining code to promote):
+//   OwnershipPolicy     = DistributionMapping (who owns which patch)            -> alias below
+//   AmrLevel            = AmrLevelMP (box + data + aux + dx of a level)
+//   PatchRange          = NAMED TYPE: coarse footprint [I0..I1]x[J0..J1] of a fine patch
+//                         (ratio 2), shared by average_down, coverage and registers
+//   CoarseFineGhost     = NAMED TYPE/HELPER: fill_cf_ghost_cell (space+time interp per ghost
+//                         cell), shared by the three mf_fill_fine_ghosts_*
+//   CoarseFineInterface = NAMED TYPE: coverage (CoverageMask) + bordering reflux routing
+//                         (route_reflux), shared by subcycle_level_mp and amr_step_2level_multipatch
+//   FluxRegister        = NAMED TYPE: avg/ref buffers at global index + all_reduce_sum_inplace
+//   SubcyclingSchedule  = NAMED TYPE: Berger-Oliger cadence (ratio r, dt/r, frac s/r) per level
+//   RegridPolicy        = amr_regrid_finest (Berger-Rigoutsos), on the coupler side
 using OwnershipPolicy = DistributionMapping;
 
 struct LevelHierarchy {
-  std::vector<AmrLevelMP> levels;    // niveau 0 = grossier, niveaux >0 = patchs fins
-  Box2D base_dom;                    // empreinte du niveau de base
-  Periodicity base_per{true, true};  // CL du domaine de base
-  bool coarse_replicated = true;     // niveau 0 replique (true) ou multi-box reparti (false)
-  bool recon_prim = false;           // reconstruction primitive (cf. compute_face_fluxes)
-  bool imex = false;                 // source raide implicite (backward_euler) au lieu d'Euler avant
-  // OPTIONS NEWTON du pas IMEX (defaut {} = constantes historiques 2 iters / 1e-7 -> bit-identique).
-  // Honorees uniquement quand imex==true ; transmises au backward_euler_source par mf_apply_source_treatment.
+  std::vector<AmrLevelMP> levels;    // level 0 = coarse, levels >0 = fine patches
+  Box2D base_dom;                    // footprint of the base level
+  Periodicity base_per{true, true};  // BC of the base domain
+  bool coarse_replicated = true;     // level 0 replicated (true) or multi-box distributed (false)
+  bool recon_prim = false;           // primitive reconstruction (cf. compute_face_fluxes)
+  bool imex = false;                 // stiff implicit source (backward_euler) instead of forward Euler
+  // NEWTON OPTIONS of the IMEX step (default {} = historical constants 2 iters / 1e-7 -> bit-identical).
+  // Honored only when imex==true; forwarded to backward_euler_source by mf_apply_source_treatment.
   NewtonOptions newton_options{};
-  // METHODE TEMPORELLE : kEuler (defaut, Euler avant par sous-pas, bit-identique a l'historique) ou
-  // kSsprk3 (SSPRK3 ordre 3 + reflux par etage). kSsprk3 exige imex == false (rejet sinon, cf. moteur).
+  // TIME METHOD: kEuler (default, forward Euler per substep, bit-identical to the historical) or
+  // kSsprk3 (SSPRK3 order 3 + per-stage reflux). kSsprk3 requires imex == false (rejected otherwise, cf. engine).
   AmrTimeMethod time_method = AmrTimeMethod::kEuler;
 };
 
-// Entree unifiee de production : avance la hierarchie d'un pas dt. Forme "pieces" (le coupleur
-// possede son propre stack et passe les vecteurs directement) et forme LevelHierarchy. La porte
-// TRANSMET coarse_replicated au moteur ; sans cela un grossier de-replique repasserait en
-// replique (mf_find_box au lieu de parallel_copy). coarse_replicated=true (defaut) -> identique
-// au comportement historique. recon_prim selectionne la reconstruction primitive (variables
-// (rho, u, p)) au lieu de conservative : meme parametre qu'assemble_rhs, fige a l'ajout du bloc ;
-// false (defaut) -> conservative, strictement bit-identique a l'historique.
+// Unified production entry: advances the hierarchy by one time step dt. "pieces" form (the coupler
+// owns its own stack and passes the vectors directly) and LevelHierarchy form. The gate FORWARDS
+// coarse_replicated to the engine; without it a de-replicated coarse level would switch back to
+// replicated (mf_find_box instead of parallel_copy). coarse_replicated=true (default) -> identical
+// to the historical behavior. recon_prim selects the primitive reconstruction (variables
+// (rho, u, p)) instead of conservative: same parameter as assemble_rhs, fixed when the block is added;
+// false (default) -> conservative, strictly bit-identical to the historical.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void advance_amr(const Model& m, std::vector<AmrLevelMP>& levels, const Box2D& base_dom, Real dt,
                  Periodicity base_per = Periodicity{true, true}, bool coarse_replicated = true,

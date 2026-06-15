@@ -6,82 +6,55 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/numerics/spatial_operator.hpp>  // load_state, load_aux
 
-#include <algorithm>  // std::max (agregation du rapport Newton, hote)
+#include <algorithm>  // std::max (Newton report aggregation, host)
 #include <concepts>
-#include <cstdio>     // std::snprintf / fprintf (fail_policy : message hote, jamais en kernel)
-#include <stdexcept>  // std::runtime_error (fail_policy = throw, hote apres reductions)
-
-// Pas implicite / IMEX d'un bloc : le CONTRAT (au lieu du callback nu).
-//
-// SystemCoupler::step avance les blocs explicites SSPRK lui-meme et DELEGUE les
-// blocs implicites / IMEX a un callable `(coupler&, block&, dt, substep, nsub)`.
-// Ce header transforme ce callback anonyme en contrat nomme (ImplicitBlockStepper)
-// et fournit UN DEFAUT pret a l'emploi pour le cas plasma raide le plus courant :
-// une source de relaxation rigide. Objectif tuteur : "un IMEX par defaut, sans que
-// l'utilisateur ecrive Newton".
-//
-//   - backward_euler_source : resout EN PLACE le pas implicite sur la source
-//     LOCALE du modele,  W = U + dt * S(W, aux), par NEWTON local avec jacobienne
-//     par differences finies. Inconditionnellement stable pour une relaxation
-//     lineaire (la ou un simple point-fixe de Picard DIVERGERAIT des que dt*raideur
-//     > 1, justement le regime raide) ; EXACT en une iteration si S est lineaire en
-//     U ; convergence quadratique sinon. Aucune jacobienne a fournir cote modele.
-//   - ImplicitSourceStepper : l'objet-stepper qui branche backward_euler_source sur
-//     l'interface du SystemCoupler. C'est l'analogue "source seule" de
-//     imex_euler_step (time/imex.hpp), le pas implicite d'un schema IMEX dont
-//     le transport reste explicite (avance par le coeur sur les blocs explicites).
-//
-// IMEX PARTIEL (jalon 2.2) : un modele peut declarer, variable par variable, lesquelles
-// sont raides (implicites). backward_euler_source traite alors la source en
-// forward-backward Euler : les variables EXPLICITES avancent en Euler avant (a l'etat
-// d'entree), les variables IMPLICITES par Newton sur le SOUS-systeme reduit (les
-// explicites figees a leur valeur avancee, comme donnee connue). Sans le trait, tout
-// reste implicite -> comportement strictement identique a avant.
+#include <cstdio>     // std::snprintf / fprintf (fail_policy: host message, never in kernel)
+#include <stdexcept>  // std::runtime_error (fail_policy = throw, host after reductions)
 
 /// @file
-/// @brief Pas implicite / IMEX d'un bloc comme CONTRAT nomme. Concept ImplicitBlockStepper,
-///        defaut pret a l'emploi backward_euler_source (Newton local sur la source raide du
-///        modele) et l'objet ImplicitSourceStepper qui le branche sur SystemCoupler::step.
-///        Inclut le masque IMEX partiel (ImplicitMask), le trait jacobien analytique
-///        (HasSourceJacobian) et les options Newton (NewtonOptions / NewtonReport).
+/// @brief Implicit / IMEX block step as a named CONTRACT. Concept ImplicitBlockStepper,
+///        ready-to-use default backward_euler_source (local Newton on the model stiff source)
+///        and the ImplicitSourceStepper object that wires it into SystemCoupler::step.
+///        Includes the partial-IMEX mask (ImplicitMask), the analytic Jacobian trait
+///        (HasSourceJacobian) and the Newton options (NewtonOptions / NewtonReport).
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : offrir "un IMEX par defaut sans que l'utilisateur ecrive Newton". backward_euler_source
-///        resout EN PLACE W = U + dt S(W, aux) par Newton local (jacobienne par differences finies,
-///        ou analytique si le modele declare source_jacobian) ; exact en une iteration si S est
-///        lineaire, convergence quadratique sinon, inconditionnellement stable pour une relaxation
-///        rigide (la ou Picard divergerait des que dt*raideur > 1).
+/// Layer: `include/adc/numerics/time`.
+/// Role: provide "an IMEX by default without the user writing Newton". backward_euler_source
+///        solves IN PLACE W = U + dt S(W, aux) by local Newton (finite-difference Jacobian,
+///        or analytic if the model declares source_jacobian); exact in one iteration if S is
+///        linear, quadratic convergence otherwise, unconditionally stable for a stiff relaxation
+///        (where Picard would diverge as soon as dt*stiffness > 1).
 ///
-/// Invariants :
-/// - la source est LOCALE (cellule par cellule) : pas de couplage de flux, aucun reflux ;
-/// - IMEX PARTIEL : un modele peut declarer variable par variable lesquelles sont raides
-///   (PartiallyImplicitModel::is_implicit), ou un ImplicitMask porte par le BLOC override le
-///   defaut modele. Masque inactif (defaut) -> tout implicite -> bit-identique a avant ;
-/// - NewtonOptions par defaut {} = 2 iterations FIXES, pas de test d'arret, fd_eps=1e-7,
-///   damping=1, fail_policy=kFailNone -> reproduit EXACTEMENT le comportement historique ;
-/// - kernels device = foncteurs NOMMES (BackwardEulerSourceKernel, NewtonStat*Kernel) ;
-///   fail_policy != kFailNone et l'agregation du rapport Newton agissent cote HOTE, apres les
-///   reductions (aucun snprintf/throw en kernel).
+/// Invariants:
+/// - the source is LOCAL (cell by cell): no flux coupling, no reflux;
+/// - PARTIAL IMEX: a model can declare variable by variable which ones are stiff
+///   (PartiallyImplicitModel::is_implicit), or an ImplicitMask carried by the BLOCK overrides the
+///   model default. Inactive mask (default) -> all implicit -> bit-identical to before;
+/// - default NewtonOptions {} = 2 FIXED iterations, no stop test, fd_eps=1e-7,
+///   damping=1, fail_policy=kFailNone -> reproduces EXACTLY the historical behavior;
+/// - device kernels = NAMED functors (BackwardEulerSourceKernel, NewtonStat*Kernel);
+///   fail_policy != kFailNone and Newton report aggregation act HOST side, after the
+///   reductions (no snprintf/throw in kernel).
 
 namespace adc {
 
-// Contrat d'un stepper implicite/IMEX de bloc. Tout objet (ou lambda) qui sait
-// avancer un bloc sur dt en lisant le coupleur (pour aux / phi a jour) et le modele.
+// Contract of an implicit/IMEX block stepper. Any object (or lambda) that knows how to
+// advance a block over dt by reading the coupler (for up-to-date aux / phi) and the model.
 template <class Stepper, class Coupler, class Block>
 concept ImplicitBlockStepper =
     requires(const Stepper st, Coupler& c, Block& b, Real dt, int s, int n) {
       st(c, b, dt, s, n);
     };
 
-// Trait OPTIONNEL : un modele peut declarer quelles variables conservees sont traitees
-// en implicite (les raides). is_implicit(c) -> bool. Un modele SANS ce trait est traite
-// entierement en implicite (defaut historique).
+// OPTIONAL trait: a model can declare which conserved variables are treated
+// implicitly (the stiff ones). is_implicit(c) -> bool. A model WITHOUT this trait is treated
+// fully implicitly (historical default).
 template <class M>
 concept PartiallyImplicitModel = requires(int c) {
   { M::is_implicit(c) } -> std::convertible_to<bool>;
 };
 
-// La composante c du modele est-elle implicite ? Defaut (pas de trait) : toutes le sont.
+// Is component c of the model implicit? Default (no trait): all of them are.
 template <class Model>
 ADC_HD inline bool model_is_implicit(int c) {
   if constexpr (PartiallyImplicitModel<Model>)
@@ -90,12 +63,12 @@ ADC_HD inline bool model_is_implicit(int c) {
     return true;
 }
 
-// Trait OPTIONNEL : JACOBIEN ANALYTIQUE de la source (audit vague 3, JacobianPolicy). Quand le
-// modele (ou sa brique source, forwardee par CompositeModel) declare
-//   source_jacobian(U, aux, J)  avec  J[r][c] = dS_r/dU_c  (matrice COMPLETE n_vars x n_vars),
-// le Newton de la source implicite l'utilise A LA PLACE des differences finies : exactitude
-// (plus de bruit fd_eps) et n_impl evaluations de source economisees par iteration. Un modele
-// SANS le trait garde les differences finies historiques, bit-identique. ADC_HD requis.
+// OPTIONAL trait: ANALYTIC JACOBIAN of the source (review wave 3, JacobianPolicy). When the
+// model (or its source brick, forwarded by CompositeModel) declares
+//   source_jacobian(U, aux, J)  with  J[r][c] = dS_r/dU_c  (FULL n_vars x n_vars matrix),
+// the implicit-source Newton uses it INSTEAD of finite differences: exactness
+// (no more fd_eps noise) and n_impl source evaluations saved per iteration. A model
+// WITHOUT the trait keeps the historical finite differences, bit-identical. ADC_HD required.
 template <class M>
 concept HasSourceJacobian =
     requires(const M m, const typename M::State u, const Aux a,
@@ -103,42 +76,42 @@ concept HasSourceJacobian =
       m.source_jacobian(u, a, J);
     };
 
-// Masque implicite PORTE PAR LE BLOC / la politique temporelle (et NON par le modele) : carrier POD
-// device-clean (tableau fixe N, passe PAR VALEUR dans le kernel, aucun pointeur hote deref. sur device).
-// Quand actif (active == true), il OVERRIDE le defaut modele (model_is_implicit) : seules les composantes
-// flag[c] == true sont avancees en implicite, les autres en explicite (Euler avant). C'est ce qui permet
-// de REUTILISER le MEME modele avec des traitements implicites differents selon le bloc. Inactif (defaut :
-// active == false) -> retombe sur model_is_implicit -> comportement bit-identique a l'historique.
+// Implicit mask CARRIED BY THE BLOCK / time policy (and NOT by the model): device-clean POD carrier
+// (fixed array N, passed BY VALUE into the kernel, no host pointer dereference on device).
+// When active (active == true), it OVERRIDES the model default (model_is_implicit): only the
+// components with flag[c] == true are advanced implicitly, the others explicitly (forward Euler). This is what
+// lets you REUSE the SAME model with different implicit treatments depending on the block. Inactive (default:
+// active == false) -> falls back to model_is_implicit -> behavior bit-identical to the historical one.
 template <int N>
 struct ImplicitMask {
   bool active = false;
   bool flag[N] = {};
 };
 
-// La composante c est-elle implicite, masque de bloc PRIORITAIRE sur le defaut modele ? Le masque inactif
-// (defaut) delegue a model_is_implicit<Model> -> strictement identique a avant ce chantier.
+// Is component c implicit, with the block mask TAKING PRIORITY over the model default? The inactive mask
+// (default) delegates to model_is_implicit<Model> -> strictly identical to before this change.
 template <class Model, int N>
 ADC_HD inline bool is_implicit_component(const ImplicitMask<N>& mask, int c) {
   if (mask.active) return mask.flag[c];
   return model_is_implicit<Model>(c);
 }
 
-/// Options du Newton local de la source implicite (backward-Euler). Les DEFAUTS reproduisent
-/// EXACTEMENT le comportement historique : 2 iterations FIXES, aucune evaluation de residu
-/// (rel_tol == abs_tol == 0 -> pas de test d'arret, pas de cout supplementaire), pas de la
-/// jacobienne par differences finies h = fd_eps*|w| + fd_eps avec fd_eps = 1e-7 (la constante
-/// historiquement codee en dur). POD device-clean (passe PAR VALEUR dans le kernel).
-///  - max_iters : budget d'iterations Newton (historique : 2).
-///  - rel_tol / abs_tol : critere d'arret ||F||_inf <= abs_tol + rel_tol*||F0||_inf, evalue par
-///    CELLULE en tete d'iteration. 0/0 (defaut) = desactive -> boucle historique bit-identique.
-///  - fd_eps : pas (relatif ET plancher absolu) de la jacobienne par differences finies.
-///  - damping : facteur d'amortissement de la mise a jour W -= damping * delta. 1 (defaut) =
-///    Newton plein, bit-identique (multiplication par 1.0 exacte en IEEE). < 1 = Newton amorti
-///    (source tres raide / mauvais conditionnement : robustesse au prix de la vitesse).
-///  - fail_policy : reaction HOTE (apres reduction) a des cellules en echec --
-///    kFailNone (defaut) = enregistrer seulement (historique) ; kFailWarn = un avertissement
-///    stderr par avance ; kFailThrow = std::runtime_error avec la cellule fautive. != kFailNone
-///    force le chemin instrumente (detection necessaire) -- pur observateur, W inchange.
+/// Options of the local Newton of the implicit source (backward-Euler). The DEFAULTS reproduce
+/// EXACTLY the historical behavior: 2 FIXED iterations, no residual evaluation
+/// (rel_tol == abs_tol == 0 -> no stop test, no extra cost), finite-difference
+/// Jacobian step h = fd_eps*|w| + fd_eps with fd_eps = 1e-7 (the constant
+/// historically hard-coded). Device-clean POD (passed BY VALUE into the kernel).
+///  - max_iters: Newton iteration budget (historical: 2).
+///  - rel_tol / abs_tol: stop criterion ||F||_inf <= abs_tol + rel_tol*||F0||_inf, evaluated per
+///    CELL at the start of an iteration. 0/0 (default) = disabled -> bit-identical historical loop.
+///  - fd_eps: step (relative AND absolute floor) of the finite-difference Jacobian.
+///  - damping: damping factor of the update W -= damping * delta. 1 (default) =
+///    full Newton, bit-identical (multiplication by 1.0 exact in IEEE). < 1 = damped Newton
+///    (very stiff source / poor conditioning: robustness at the cost of speed).
+///  - fail_policy: HOST reaction (after reduction) to failed cells --
+///    kFailNone (default) = record only (historical); kFailWarn = one stderr warning
+///    per advance; kFailThrow = std::runtime_error with the offending cell. != kFailNone
+///    forces the instrumented path (detection required) -- a pure observer, W unchanged.
 struct NewtonOptions {
   static constexpr int kFailNone = 0;
   static constexpr int kFailWarn = 1;
@@ -151,10 +124,10 @@ struct NewtonOptions {
   int fail_policy = kFailNone;
 };
 
-/// Statistique de SORTIE du Newton d'UNE cellule (POD device, ecrit dans le scratch diagnostics) :
-/// res = ||F||_inf a la sortie ; iters = iterations consommees ; failed = 1 si la cellule a echoue
-/// (residu non fini, pivot degenere/non fini, ou tolerance active non atteinte au budget), 0 sinon ;
-/// comp = indice de la COMPOSANTE conservee portant le residu max a la sortie (-1 si rien d'implicite).
+/// OUTPUT statistic of the Newton of ONE cell (device POD, written into the diagnostics scratch):
+/// res = ||F||_inf at exit; iters = iterations consumed; failed = 1 if the cell failed
+/// (non-finite residual, degenerate/non-finite pivot, or active tolerance not reached within budget), 0 otherwise;
+/// comp = index of the conserved COMPONENT carrying the max residual at exit (-1 if nothing implicit).
 struct NewtonCellStat {
   Real res = Real(0);
   Real iters = Real(0);
@@ -162,35 +135,35 @@ struct NewtonCellStat {
   Real comp = Real(-1);
 };
 
-/// Rapport AGREGE (bloc entier, tous sous-pas d'une avance) du Newton de la source implicite.
-/// Rempli par backward_euler_source quand un rapport est demande (diagnostics OPT-IN) ; reductions
-/// max/somme sur les cellules + all_reduce MPI. reset() en tete d'avance par l'appelant.
-/// CELLULE FAUTIVE : (failed_i, failed_j, failed_comp) designent UNE cellule en echec -- celle
-/// d'index encode MAXIMAL (j puis i), suffisante pour aller voir l'etat ; -1 si aucune. failed_comp
-/// est la composante conservee portant le pire residu de CETTE cellule.
+/// AGGREGATED report (whole block, all substeps of one advance) of the implicit-source Newton.
+/// Filled by backward_euler_source when a report is requested (OPT-IN diagnostics); max/sum
+/// reductions over the cells + MPI all_reduce. reset() at the start of the advance by the caller.
+/// OFFENDING CELL: (failed_i, failed_j, failed_comp) designate ONE failed cell -- the one
+/// with MAXIMAL encoded index (j then i), enough to go inspect the state; -1 if none. failed_comp
+/// is the conserved component carrying the worst residual of THAT cell.
 struct NewtonReport {
-  bool enabled = false;        ///< un rapport a ete calcule (au moins un sous-pas instrumente)
-  bool converged = true;       ///< aucune cellule en echec sur l'avance
-  Real max_residual = Real(0); ///< max cellules/sous-pas de ||F||_inf a la sortie
-  Real max_iters_used = Real(0);  ///< max cellules/sous-pas des iterations consommees
-  double n_failed = 0;         ///< nb (cellules x sous-pas) en echec (non-fini / pivot / non-convergence)
-  double failed_i = -1, failed_j = -1, failed_comp = -1;  ///< une cellule fautive (-1 si aucune)
+  bool enabled = false;        ///< a report was computed (at least one instrumented substep)
+  bool converged = true;       ///< no failed cell over the advance
+  Real max_residual = Real(0); ///< max over cells/substeps of ||F||_inf at exit
+  Real max_iters_used = Real(0);  ///< max over cells/substeps of iterations consumed
+  double n_failed = 0;         ///< number of (cells x substeps) failed (non-finite / pivot / non-convergence)
+  double failed_i = -1, failed_j = -1, failed_comp = -1;  ///< one offending cell (-1 if none)
   void reset() { *this = NewtonReport{}; }
 };
 
-/// Fini ? (device-safe, sans <cmath> : NaN echoue x == x ; +-inf echoue les bornes). Utilise par le
-/// chemin Newton INSTRUMENTE seulement (le chemin par defaut ne teste rien, bit-identique).
+/// Finite? (device-safe, without <cmath>: NaN fails x == x; +-inf fails the bounds). Used by the
+/// INSTRUMENTED Newton path only (the default path tests nothing, bit-identical).
 ADC_HD inline bool newton_finite(Real x) {
   return x == x && x < Real(1e300) && x > Real(-1e300);
 }
 
 namespace detail {
-// Resolution dense J x = b sur le bloc de tete n x n (n <= N), pivot partiel. J et b
-// detruits. N est constexpr (= Model::n_vars) -> tableau fixe, pas d'allocation,
-// device-callable ; n (<= N) est le nombre de variables implicites (IMEX partiel).
-// @return true si tous les pivots sont finis et non nuls ; false sinon (pivot degenere : la
-// numerique reste STRICTEMENT celle d'origine -- la division produit inf/NaN comme avant, seul le
-// drapeau est nouveau ; les appelants historiques ignorent le retour, bit-identique).
+// Dense solve J x = b on the leading n x n block (n <= N), partial pivoting. J and b
+// destroyed. N is constexpr (= Model::n_vars) -> fixed array, no allocation,
+// device-callable; n (<= N) is the number of implicit variables (partial IMEX).
+// @return true if all pivots are finite and non-zero; false otherwise (degenerate pivot: the
+// numerics stays STRICTLY the original one -- the division produces inf/NaN as before, only the
+// flag is new; historical callers ignore the return, bit-identical).
 template <int N>
 ADC_HD inline bool solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
   bool ok = true;
@@ -218,20 +191,20 @@ ADC_HD inline bool solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
   return ok;
 }
 
-// Assemble la jacobienne Newton du sous-systeme reduit aux composantes implicites :
-//   J[rr][cc] = (row == col ? 1 : 0) - dt * dS_row/dW_col,   row = impl[rr], col = impl[cc].
-// Trait HasSourceJacobian present => jacobien ANALYTIQUE (m.source_jacobian) ; sinon differences
-// finies (pas h = fd_eps*|W| + fd_eps, source perturbee colonne par colonne autour de S0 = S(W)).
-// Corps EXTRAIT mot-pour-mot des deux chemins (2a defauts, 2b instrumente) -> bit-identique ;
-// ADC_HD car appele depuis newton_source_solve (device-callable). S0 = m.source(W, a) deja calcule
-// par l'appelant (reutilise tel quel par les differences finies).
+// Assemble the Newton Jacobian of the subsystem reduced to the implicit components:
+//   J[rr][cc] = (row == col ? 1: 0) - dt * dS_row/dW_col,   row = impl[rr], col = impl[cc].
+// HasSourceJacobian trait present => ANALYTIC Jacobian (m.source_jacobian); otherwise finite
+// differences (step h = fd_eps*|W| + fd_eps, source perturbed column by column around S0 = S(W)).
+// Body EXTRACTED word-for-word from the two paths (2a defaults, 2b instrumented) -> bit-identical;
+// ADC_HD because called from newton_source_solve (device-callable). S0 = m.source(W, a) already computed
+// by the caller (reused as is by the finite differences).
 template <class Model, int N>
 ADC_HD inline void assemble_newton_jacobian(const Model& m, const typename Model::State& W,
                                             const Aux& a, Real dt, const NewtonOptions& opts,
                                             const int impl[N], int m_impl,
                                             const typename Model::State& S0, Real J[N][N]) {
   if constexpr (HasSourceJacobian<Model>) {
-    // JACOBIEN ANALYTIQUE (trait, vague 3) : J = I - dt * dS/dU restreint aux implicites.
+    // ANALYTIC JACOBIAN (trait, wave 3): J = I - dt * dS/dU restricted to the implicit ones.
     Real dS[N][N];
     m.source_jacobian(W, a, dS);
     for (int cc = 0; cc < m_impl; ++cc)
@@ -256,27 +229,27 @@ ADC_HD inline void assemble_newton_jacobian(const Model& m, const typename Model
   }
 }
 
-// Resout W tel que W = Un + dt*S(W,a) en forward-backward Euler (IMEX partiel) :
-//   - composantes EXPLICITES : Euler avant a l'etat d'entree, W_e = Un_e + dt*S_e(Un) ;
-//   - composantes IMPLICITES : Newton sur le sous-systeme reduit, F_i = W_i - Un_i -
-//     dt*S_i(W), jacobienne I - dt*(dS/dW) restreinte aux implicites (colonnes par
-//     differences finies), les explicites figees a leur valeur avancee (donnee connue).
-// QUI est implicite : un masque PORTE PAR LE BLOC (@p mask) prioritaire sur le defaut modele
-// (is_implicit_component). Masque inactif (defaut) + modele sans trait is_implicit : toutes les
-// composantes sont implicites -> backward-Euler plein, strictement identique au comportement d'origine.
+// Solve W such that W = Un + dt*S(W,a) in forward-backward Euler (partial IMEX):
+//   - EXPLICIT components: forward Euler at the input state, W_e = Un_e + dt*S_e(Un);
+//   - IMPLICIT components: Newton on the reduced subsystem, F_i = W_i - Un_i -
+//     dt*S_i(W), Jacobian I - dt*(dS/dW) restricted to the implicit ones (columns by
+//     finite differences), the explicit ones frozen at their advanced value (known data).
+// WHO is implicit: a mask CARRIED BY THE BLOCK (@p mask) taking priority over the model default
+// (is_implicit_component). Inactive mask (default) + model without is_implicit trait: all
+// components are implicit -> full backward-Euler, strictly identical to the original behavior.
 template <class Model>
 ADC_HD inline typename Model::State newton_source_solve(
     const Model& m, const typename Model::State& Un, const Aux& a, Real dt,
     const NewtonOptions& opts, const ImplicitMask<Model::n_vars>& mask = {},
     NewtonCellStat* stat = nullptr) {
   constexpr int N = Model::n_vars;
-  int impl[N];  // indices des composantes implicites (les m_impl premieres slots utiles)
+  int impl[N];  // indices of the implicit components (the first m_impl useful slots)
   int m_impl = 0;
   for (int c = 0; c < N; ++c)
     if (is_implicit_component<Model>(mask, c)) impl[m_impl++] = c;
 
   typename Model::State W = Un;
-  // (1) explicite : Euler avant sur les composantes non implicites (source a l'entree).
+  // (1) explicit: forward Euler on the non-implicit components (source at the input).
   if (m_impl < N) {
     const typename Model::State S_in = m.source(Un, a);
     for (int c = 0; c < N; ++c)
@@ -284,8 +257,8 @@ ADC_HD inline typename Model::State newton_source_solve(
   }
   const bool tol_active = opts.rel_tol > Real(0) || opts.abs_tol > Real(0);
   if (!tol_active && stat == nullptr) {
-    // (2a) CHEMIN HISTORIQUE (defaut) : iterations FIXES, aucun test, aucune evaluation de residu
-    // supplementaire -> BIT-IDENTIQUE a l'historique pour les defauts (max_iters=2, fd_eps=1e-7).
+    // (2a) HISTORICAL PATH (default): FIXED iterations, no test, no extra residual evaluation
+    // -> BIT-IDENTICAL to the historical one for the defaults (max_iters=2, fd_eps=1e-7).
     for (int it = 0; it < opts.max_iters; ++it) {
       const typename Model::State S0 = m.source(W, a);
       Real F[N];
@@ -301,23 +274,23 @@ ADC_HD inline typename Model::State newton_source_solve(
     }
     return W;
   }
-  // (2b) CHEMIN INSTRUMENTE (tolerances actives et/ou stat demande) : meme Newton, plus le critere
-  // d'arret ||F||_inf <= abs_tol + rel_tol*||F0||_inf en tete d'iteration, la detection de residu
-  // non fini / pivot degenere, et la statistique de sortie. Une evaluation de source SUPPLEMENTAIRE
-  // peut avoir lieu a la sortie (residu honnete apres la derniere mise a jour).
+  // (2b) INSTRUMENTED PATH (active tolerances and/or stat requested): same Newton, plus the stop
+  // criterion ||F||_inf <= abs_tol + rel_tol*||F0||_inf at the start of an iteration, the detection of
+  // non-finite residual / degenerate pivot, and the exit statistic. One ADDITIONAL source evaluation
+  // may happen at exit (honest residual after the last update).
   //
-  // INVARIANT OBSERVATEUR PUR (revue adverse) : tolerances INACTIVES + stat demande (le mode
-  // newton_diagnostics) -> l'ETAT W est STRICTEMENT identique au chemin (2a), Y COMPRIS sur une
-  // cellule degeneree : la detection (residu non fini, pivot degenere) MARQUE failed pour le
-  // rapport mais ne change PAS le flux de controle (pas de break, mise a jour appliquee comme
-  // (2a), propagation inf/NaN identique). Un diagnostic qui modifierait la trajectoire ne serait
-  // pas representatif du run reel. Le SEUL arret anticipe est la CONVERGENCE sous tolerance
-  // (tol_active), comportement opt-in explicitement non historique.
+  // PURE-OBSERVER INVARIANT (adversarial review): tolerances INACTIVE + stat requested (the
+  // newton_diagnostics mode) -> the STATE W is STRICTLY identical to path (2a), INCLUDING on a
+  // degenerate cell: the detection (non-finite residual, degenerate pivot) MARKS failed for the
+  // report but does NOT change the control flow (no break, update applied as in
+  // (2a), identical inf/NaN propagation). A diagnostic that would alter the trajectory would not be
+  // representative of the real run. The ONLY early exit is CONVERGENCE under tolerance
+  // (tol_active), explicitly non-historical opt-in behavior.
   Real res = Real(0), res0 = Real(0);
   int used = 0;
-  int worst_comp = -1;  // composante conservee portant le residu max a la sortie (diagnostic)
+  int worst_comp = -1;  // conserved component carrying the max residual at exit (diagnostic)
   bool failed = false;
-  bool converged = (m_impl == 0);  // rien d'implicite : trivialement converge
+  bool converged = (m_impl == 0);  // nothing implicit: trivially converged
   for (int it = 0; it < opts.max_iters; ++it) {
     const typename Model::State S0 = m.source(W, a);
     Real F[N];
@@ -328,7 +301,7 @@ ADC_HD inline typename Model::State newton_source_solve(
       const Real av = F[r] < 0 ? -F[r] : F[r];
       if (av > res) { res = av; worst_comp = c; }
     }
-    if (!newton_finite(res)) failed = true;  // marque SANS break : trajectoire (2a) preservee
+    if (!newton_finite(res)) failed = true;  // marks WITHOUT break: trajectory (2a) preserved
     if (tol_active) {
       if (it == 0) res0 = res;
       if (res <= opts.abs_tol + opts.rel_tol * res0) { converged = true; break; }
@@ -337,13 +310,13 @@ ADC_HD inline typename Model::State newton_source_solve(
     assemble_newton_jacobian<Model, N>(m, W, a, dt, opts, impl, m_impl, S0, J);
     Real delta[N];
     const bool ok = solve_dense<N>(J, F, delta, m_impl);
-    if (!ok) failed = true;  // pivot degenere : marque SANS break, division inf/NaN comme (2a)
+    if (!ok) failed = true;  // degenerate pivot: marks WITHOUT break, inf/NaN division as in (2a)
     for (int r = 0; r < m_impl; ++r) W[impl[r]] -= opts.damping * delta[r];
     used = it + 1;
   }
-  // Sortie par epuisement du budget : recalculer le residu APRES la derniere mise a jour (rapport
-  // honnete ; le residu de boucle precede la mise a jour). Une evaluation de source en plus,
-  // uniquement sur ce chemin instrumente.
+  // Exit by budget exhaustion: recompute the residual AFTER the last update (honest
+  // report; the loop residual precedes the update). One extra source evaluation,
+  // only on this instrumented path.
   if (!failed && used == opts.max_iters && m_impl > 0) {
     const typename Model::State S0 = m.source(W, a);
     res = Real(0);
@@ -365,8 +338,8 @@ ADC_HD inline typename Model::State newton_source_solve(
   return W;
 }
 
-/// COMPATIBILITE : ancienne signature a budget d'iterations nu (iters). Equivaut a NewtonOptions
-/// {max_iters = iters} (tolerances inactives, fd_eps historique) -> chemin (2a), bit-identique.
+/// COMPATIBILITY: old signature with a bare iteration budget (iters). Equivalent to NewtonOptions
+/// {max_iters = iters} (tolerances inactive, historical fd_eps) -> path (2a), bit-identical.
 template <class Model>
 ADC_HD inline typename Model::State newton_source_solve(
     const Model& m, const typename Model::State& Un, const Aux& a, Real dt,
@@ -378,18 +351,18 @@ ADC_HD inline typename Model::State newton_source_solve(
 }  // namespace detail
 
 namespace detail {
-// Noyau device du pas implicite sur la source (Newton local en place). FONCTEUR NOMME (et non lambda
-// etendue) : emission device ROBUSTE quand le noyau Model-template est instancie depuis une TU EXTERNE
-// (chemin IMEX d'un bloc add_compiled_model, via la std::function d'avance de block_builder). Corps
-// identique a l'ancienne lambda -> resultat bit-identique sur CPU.
+// Device kernel of the implicit step on the source (local Newton in place). NAMED FUNCTOR (and not an
+// extended lambda): ROBUST device emission when the Model-template kernel is instantiated from an EXTERNAL TU
+// (IMEX path of an add_compiled_model block, via the advance std::function of block_builder). Body
+// identical to the old lambda -> bit-identical result on CPU.
 template <class Model>
 struct BackwardEulerSourceKernel {
   Model m;
   ConstArray4 uc, ax;
   Array4 u;
   Real dt;
-  NewtonOptions opts;  // options Newton (POD, par valeur) ; defauts = historique bit-identique
-  ImplicitMask<Model::n_vars> mask;  // masque de bloc (POD, par valeur) ; inactif = defaut modele
+  NewtonOptions opts;  // Newton options (POD, by value); defaults = historical bit-identical
+  ImplicitMask<Model::n_vars> mask;  // block mask (POD, by value); inactive = model default
   ADC_HD void operator()(int i, int j) const {
     const typename Model::State Un = load_state<Model>(uc, i, j);
     const Aux a = load_aux<aux_comps<Model>()>(ax, i, j);
@@ -398,13 +371,13 @@ struct BackwardEulerSourceKernel {
   }
 };
 
-// Variante INSTRUMENTEE : meme Newton, mais ecrit la statistique de sortie de CHAQUE cellule dans
-// le scratch st (comp 0 = ||F||_inf, 1 = iterations, 2 = echec 0/1, 3 = CELLULE FAUTIVE ENCODEE).
-// Encodage comp 3 : -1 si la cellule n'a pas echoue ; sinon (j*2^20 + i)*16 + (comp_fautive + 1) --
-// entier exact en double jusqu'a ~2^44 (i, j < 2^20), de sorte qu'une reduction MAX rend UNE cellule
-// fautive (la plus grande en index) decodable cote hote sans reduction arg-max dediee. FONCTEUR
-// NOMME (meme contrat device cross-TU que BackwardEulerSourceKernel). Utilisee uniquement quand un
-// rapport ou une fail_policy est demande.
+// INSTRUMENTED variant: same Newton, but writes the exit statistic of EACH cell into
+// the scratch st (comp 0 = ||F||_inf, 1 = iterations, 2 = failure 0/1, 3 = ENCODED OFFENDING CELL).
+// Encoding comp 3: -1 if the cell did not fail; otherwise (j*2^20 + i)*16 + (offending_comp + 1) --
+// exact integer in double up to ~2^44 (i, j < 2^20), so that a MAX reduction yields ONE offending
+// cell (the largest in index) decodable host side without a dedicated arg-max reduction. NAMED
+// FUNCTOR (same cross-TU device contract as BackwardEulerSourceKernel). Used only when a
+// report or a fail_policy is requested.
 template <class Model>
 struct BackwardEulerSourceStatKernel {
   Model m;
@@ -428,8 +401,8 @@ struct BackwardEulerSourceStatKernel {
   }
 };
 
-/// Noyaux de REDUCTION du scratch diagnostics (max / somme d'une composante). FONCTEURS NOMMES
-/// passes directement a reduce_max_cell / reduce_sum_cell (chemin device-clean, cf. for_each.hpp).
+/// REDUCTION kernels of the diagnostics scratch (max / sum of one component). NAMED FUNCTORS
+/// passed directly to reduce_max_cell / reduce_sum_cell (device-clean path, cf. for_each.hpp).
 struct NewtonStatMaxKernel {
   ConstArray4 st;
   int comp;
@@ -445,22 +418,22 @@ struct NewtonStatSumKernel {
 };
 }  // namespace detail
 
-// W = U + dt * model.source(W, aux), resolu EN PLACE par Newton local (jacobienne par differences
-// finies), pilote par une politique NewtonOptions (tolerances / fd_eps / budget d'iterations).
-// @p mask : masque implicite PORTE PAR LE BLOC (override du defaut modele) ; inactif (defaut) ->
-// comportement bit-identique. @p report : diagnostics OPT-IN -- s'il est non nul, le Newton passe
-// par le chemin instrumente (statistique par cellule dans un scratch, reductions max/somme +
-// all_reduce MPI) et AGREGE dans *report (max residu, max iterations, nb d'echecs ; reset() a la
-// charge de l'appelant en tete d'avance). report == nullptr ET tolerances inactives -> chemin
-// historique strictement bit-identique, zero allocation, zero evaluation supplementaire.
+// W = U + dt * model.source(W, aux), solved IN PLACE by local Newton (finite-difference
+// Jacobian), driven by a NewtonOptions policy (tolerances / fd_eps / iteration budget).
+// @p mask: implicit mask CARRIED BY THE BLOCK (override of the model default); inactive (default) ->
+// bit-identical behavior. @p report: OPT-IN diagnostics -- if non-null, the Newton goes
+// through the instrumented path (per-cell statistic in a scratch, max/sum reductions +
+// MPI all_reduce) and AGGREGATES into *report (max residual, max iterations, number of failures; reset() is
+// the caller's responsibility at the start of the advance). report == nullptr AND tolerances inactive -> historical
+// path strictly bit-identical, zero allocation, zero extra evaluation.
 template <class Model>
 void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
                            Real dt, const NewtonOptions& opts,
                            const ImplicitMask<Model::n_vars>& mask = {},
                            NewtonReport* report = nullptr) {
-  // Chemin RAPIDE (historique) : ni rapport demande ni fail_policy active -> aucun scratch, aucune
-  // reduction, kernel historique bit-identique. Une fail_policy != kFailNone EXIGE la detection,
-  // donc le chemin instrumente (qui reste un OBSERVATEUR PUR de W).
+  // FAST path (historical): neither a report requested nor an active fail_policy -> no scratch, no
+  // reduction, historical kernel bit-identical. A fail_policy != kFailNone REQUIRES the detection,
+  // hence the instrumented path (which remains a PURE OBSERVER of W).
   if (report == nullptr && opts.fail_policy == NewtonOptions::kFailNone) {
     for (int li = 0; li < U.local_size(); ++li) {
       Array4 u = U.fab(li).array();
@@ -471,8 +444,8 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
     }
     return;
   }
-  // Chemin DIAGNOSTICS : scratch par-cellule (res, iters, failed, cellule encodee) puis reductions.
-  // L'allocation du scratch est locale a l'appel (diagnostics/fail_policy opt-in).
+  // DIAGNOSTICS path: per-cell scratch (res, iters, failed, encoded cell) then reductions.
+  // The scratch allocation is local to the call (opt-in diagnostics/fail_policy).
   MultiFab stats(U.box_array(), U.dmap(), 4, 0);
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
@@ -497,9 +470,9 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
   const double nfail_g = all_reduce_sum(static_cast<double>(nfail));
   const double enc_g = all_reduce_max(static_cast<double>(enc));
   double fi = -1, fj = -1, fc = -1;
-  if (nfail_g > 0 && enc_g >= 0) {  // decode la cellule fautive d'index maximal (cf. StatKernel)
+  if (nfail_g > 0 && enc_g >= 0) {  // decode the offending cell with maximal index (cf. StatKernel)
     const long long k = static_cast<long long>(enc_g);
-    fc = static_cast<double>(k % 16) - 1.0;  // -1 = composante inconnue (rien d'implicite)
+    fc = static_cast<double>(k % 16) - 1.0;  // -1 = unknown component (nothing implicit)
     const long long cell = k / 16;
     fi = static_cast<double>(cell % 1048576);
     fj = static_cast<double>(cell / 1048576);
@@ -512,23 +485,23 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
     if (nfail_g > 0) { report->failed_i = fi; report->failed_j = fj; report->failed_comp = fc; }
     if (nfail_g > 0 || !newton_finite(rmax)) report->converged = false;
   }
-  // FAIL_POLICY (hote, apres reductions -- les kernels device ne levent jamais) : reaction aux
-  // cellules en echec. kFailWarn : un avertissement stderr (rang 0). kFailThrow : erreur dure avec
-  // la cellule fautive (le pas est ABANDONNE en l'etat ; a l'appelant de decider quoi en faire).
+  // FAIL_POLICY (host, after reductions -- the device kernels never throw): reaction to the
+  // failed cells. kFailWarn: one stderr warning (rank 0). kFailThrow: hard error with
+  // the offending cell (the step is ABANDONED as is; up to the caller to decide what to do with it).
   if (nfail_g > 0 && opts.fail_policy != NewtonOptions::kFailNone) {
     char msg[256];
     std::snprintf(msg, sizeof(msg),
-                  "Newton source implicite : %.0f cellule(s) en echec (residu max %.3e ; cellule "
-                  "(%g, %g), composante %g)",
+                  "Implicit source Newton: %.0f cell(s) failed (max residual %.3e; cell "
+                  "(%g, %g), component %g)",
                   nfail_g, static_cast<double>(rmax), fi, fj, fc);
     if (opts.fail_policy == NewtonOptions::kFailThrow) throw std::runtime_error(msg);
-    if (my_rank() == 0) std::fprintf(stderr, "[adc] AVERTISSEMENT %s\n", msg);
+    if (my_rank() == 0) std::fprintf(stderr, "[adc] WARNING %s\n", msg);
   }
 }
 
-/// COMPATIBILITE : ancienne signature a budget d'iterations nu (iters = 2 historique). Equivaut a
-/// NewtonOptions{max_iters = iters} sans rapport -> chemin historique bit-identique. Conservee pour
-/// les appelants existants (coupleurs AMR, ImplicitSourceStepper, tests).
+/// COMPATIBILITY: old signature with a bare iteration budget (iters = 2 historical). Equivalent to
+/// NewtonOptions{max_iters = iters} without report -> historical path bit-identical. Kept for
+/// existing callers (AMR couplers, ImplicitSourceStepper, tests).
 template <class Model>
 void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
                            Real dt, int iters = 2,
@@ -538,9 +511,9 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
   backward_euler_source(model, aux, U, dt, opts, mask, nullptr);
 }
 
-// Stepper implicite par defaut : backward-Euler (Newton) sur la source du modele.
-// Modele ImplicitBlockStepper ; passe tel quel a SystemCoupler::step comme callback
-// d'avancee implicite. L'utilisateur n'ecrit aucun solveur.
+// Default implicit stepper: backward-Euler (Newton) on the model source.
+// Models ImplicitBlockStepper; passed as is to SystemCoupler::step as the implicit
+// advance callback. The user writes no solver.
 struct ImplicitSourceStepper {
   int iters = 2;
 

@@ -3,34 +3,20 @@
 #include <adc/core/types.hpp>
 #include <adc/mesh/multifab.hpp>
 
-// Splitting d'operateur : decompose dU/dt = T(U) + S(U) en sous-pas resolus
-// separement. Brique pour traiter une source raide (relaxation, collisions,
-// ionisation) par un integrateur DIFFERENT de celui du transport, sans melanger
-// les deux raideurs. Prerequis a l'ajout de sources chimiques/collisionnelles.
-//
-//   - lie_step (Godunov, 1er ordre)   : T(dt) puis S(dt)
-//   - strang_step (2e ordre)          : S(dt/2), T(dt), S(dt/2)
-//
-// Strang est 2e ordre en temps DES QUE chaque sous-integrateur l'est (l'erreur de
-// commutation [T,S] est en O(dt^3) par pas, O(dt^2) globale). L'integrateur est
-// agnostique : T et S sont des callables (MultiFab&, Real)->void qui avancent leur
-// sous-systeme EN PLACE. C'est l'equivalent maison de StrangSplitting /
-// FractionalTime2OSplitting de MUFFIN.
-
 /// @file
-/// @brief Splitting d'operateur : decompose dU/dt = T(U) + S(U) en sous-pas separes.
-///        lie_step (Godunov, 1er ordre) = T(dt) puis S(dt) ; strang_step (2e ordre) =
+/// @brief Operator splitting: decomposes dU/dt = T(U) + S(U) into separate substeps.
+///        lie_step (Godunov, 1st order) = T(dt) then S(dt); strang_step (2nd order) =
 ///        S(dt/2), T(dt), S(dt/2).
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : traiter une source raide (relaxation, collisions, ionisation) par un integrateur
-///        DIFFERENT de celui du transport, sans melanger les deux raideurs.
-/// Contrat : T et S sont des callables (MultiFab&, Real)->void qui avancent leur sous-systeme
-///           EN PLACE ; l'integrateur est agnostique du contenu.
+/// Layer: `include/adc/numerics/time`.
+/// Role: handle a stiff source (relaxation, collisions, ionization) with an integrator
+///       DIFFERENT from the transport one, without mixing the two stiffnesses.
+/// Contract: T and S are callables (MultiFab&, Real)->void that advance their subsystem
+///           IN PLACE; the integrator is agnostic to the contents.
 ///
-/// Invariants :
-/// - Strang est 2e ordre des que chaque sous-integrateur l'est (erreur de commutation [T,S] en
-///   O(dt^3) par pas, O(dt^2) globale).
+/// Invariants:
+/// - Strang is 2nd order as soon as each sub-integrator is (commutation error [T,S] is
+///   O(dt^3) per step, O(dt^2) globally).
 
 namespace adc {
 

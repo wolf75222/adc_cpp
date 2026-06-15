@@ -1,53 +1,51 @@
 #pragma once
-// Types coarse-fine multi-patch : PatchRange, FluxRegister, CoverageMask, SubcyclingSchedule,
-// CoarseFineInterface + helpers fill/avgdown multi-box et fill periodique local.
 
 #include <adc/numerics/time/amr_flux_helpers.hpp>
-#include <adc/parallel/comm.hpp>  // all_reduce_sum_inplace (reflux multi-patch distribue)
+#include <adc/parallel/comm.hpp>  // all_reduce_sum_inplace (distributed multi-patch reflux)
 
 #include <algorithm>
 
 /// @file
-/// @brief Types nommes de l'interface coarse-fine multi-patch : PatchRange (empreinte grossiere
-///        d'un patch fin), FluxRegister (buffer grossier indexe GLOBAL + all_reduce), CoverageMask
-///        (cellules ombragees par un patch), SubcyclingSchedule (cadence Berger-Oliger) et
-///        CoarseFineInterface (couverture + routage du reflux), avec les helpers fill/avgdown
-///        multi-box (mf_fill_fine_ghosts_multi, mf_average_down_multi, fill_periodic_local).
+/// @brief Named types of the multi-patch coarse-fine interface: PatchRange (coarse footprint
+///        of a fine patch), FluxRegister (GLOBAL-indexed coarse buffer + all_reduce), CoverageMask
+///        (cells shadowed by a patch), SubcyclingSchedule (Berger-Oliger cadence) and
+///        CoarseFineInterface (coverage + reflux routing), with the multi-box fill/avgdown
+///        helpers (mf_fill_fine_ghosts_multi, mf_average_down_multi, fill_periodic_local).
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : promouvoir en TYPES les roles auparavant inlines/dupliques dans le sous-cyclage
-///        multi-patch (amr_subcycling.hpp). Centralisation a arithmetique strictement preservee.
+/// Layer: `include/adc/numerics/time`.
+/// Role: promote to TYPES the roles previously inlined/duplicated in the multi-patch
+///        subcycling (amr_subcycling.hpp). Centralization with strictly preserved arithmetic.
 ///
-/// Invariants :
-/// - PatchRange utilise la borne haute historique (hi-1)/2 (PAS Box2D::coarsen, floor des deux
-///   bornes) -> bit-identique aux empreintes inline d'origine ;
-/// - FluxRegister / CoverageMask sont batis sur le box_array GLOBAL (connu de tous les rangs) :
-///   MPI-safe. Chaque rang remplit ses contributions LOCALES (0 ailleurs), gather() somme par
-///   all_reduce_sum_inplace ; en serie all_reduce est l'identite -> bit a bit identique ;
-/// - CoverageMask empeche le double-reflux d'un joint fin-fin (seules les vraies interfaces
-///   fin-grossier sont corrigees) ;
-/// - AvgDownMultiKernel / route_reflux sont des foncteurs/fonctions NOMMES (pas de lambda
-///   generique) -> surs sous nvcc ;
-/// - fill_periodic_local sert au grossier REPLIQUE (dmap par-rang) : repli purement local sans
-///   plan MPI, lit valide / ecrit ghost (pas de course).
+/// Invariants:
+/// - PatchRange uses the historical upper bound (hi-1)/2 (NOT Box2D::coarsen, floor of both
+///   bounds) -> bit-identical to the original inline footprints;
+/// - FluxRegister / CoverageMask are built on the GLOBAL box_array (known to all ranks):
+///   MPI-safe. Each rank fills its LOCAL contributions (0 elsewhere), gather() sums them via
+///   all_reduce_sum_inplace; in serial all_reduce is the identity -> bit-for-bit identical;
+/// - CoverageMask prevents double-reflux of a fine-fine joint (only true fine-coarse interfaces
+///   are corrected);
+/// - AvgDownMultiKernel / route_reflux are NAMED functors/functions (no generic lambda)
+///   -> safe under nvcc;
+/// - fill_periodic_local serves the REPLICATED coarse (per-rank dmap): purely local folding
+///   without an MPI plan, reads valid / writes ghost (no race).
 
 namespace adc {
 
-// PatchRange (revue, point 5 : role promu en type). Empreinte GROSSIERE [I0..I1]x[J0..J1]
-// d'un patch fin sous ratio 2 : I0 = lo/2, I1 = (hi-1)/2 (patch aligne, lo pair / hi impair).
-// Centralise le calcul d'empreinte repete inline dans average_down, la couverture et l'init
-// des registres de reflux. NB : ce n'est PAS Box2D::coarsen (floor des deux bornes) mais la
-// borne haute (hi-1)/2 historique ; on conserve l'arithmetique exacte (bit-identique).
+// PatchRange (review, point 5: role promoted to a type). COARSE footprint [I0..I1]x[J0..J1]
+// of a fine patch under ratio 2: I0 = lo/2, I1 = (hi-1)/2 (aligned patch, lo even / hi odd).
+// Centralizes the footprint computation repeated inline in average_down, the coverage and the
+// init of the reflux registers. NB: this is NOT Box2D::coarsen (floor of both bounds) but the
+// historical upper bound (hi-1)/2; the exact arithmetic is preserved (bit-identical).
 struct PatchRange {
   int I0, I1, J0, J1;
   explicit PatchRange(const Box2D& fine)
       : I0(fine.lo[0] / 2), I1((fine.hi[0] - 1) / 2),
         J0(fine.lo[1] / 2), J1((fine.hi[1] - 1) / 2) {}
-  Box2D box() const { return Box2D{{I0, J0}, {I1, J1}}; }  // empreinte grossiere (cellules)
+  Box2D box() const { return Box2D{{I0, J0}, {I1, J1}}; }  // coarse footprint (cells)
 };
 
-// ghosts fins multi-box depuis le grossier (interp espace+temps), PUIS fill_boundary
-// (fin-fin) ecrasera les ghosts couverts par une box voisine. coarse mono-box.
+// multi-box fine ghosts from the coarse (space+time interp), THEN fill_boundary
+// (fine-fine) will overwrite the ghosts covered by a neighbor box. coarse mono-box.
 inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
                                       const MultiFab& Uc_new, Real frac) {
   device_fence();
@@ -64,9 +62,9 @@ inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
 }
 
 namespace detail {
-// Foncteur NOMME device-clean (lambda etendue -> bute nvcc en cross-TU) : moyenne fin -> grossier
-// (ratio 2) d'une box fine sur l'empreinte grossiere PatchRange. Corps bit-identique a l'ancienne
-// lambda de mf_average_down_multi.
+// NAMED device-clean functor (extended lambda -> trips nvcc cross-TU): fine -> coarse average
+// (ratio 2) of a fine box over the PatchRange coarse footprint. Body bit-identical to the old
+// lambda of mf_average_down_multi.
 struct AvgDownMultiKernel {
   ConstArray4 f;
   Array4 c;
@@ -79,7 +77,7 @@ struct AvgDownMultiKernel {
 };
 }  // namespace detail
 
-// moyenne fin -> grossier sur l'empreinte de CHAQUE box fine (multi-box).
+// fine -> coarse average over the footprint of EACH fine box (multi-box).
 inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
   const int nc = Uc.ncomp();
   Array4 c = Uc.fab(0).array();
@@ -90,11 +88,11 @@ inline void mf_average_down_multi(const MultiFab& Uf, MultiFab& Uc) {
   }
 }
 
-// Remplissage periodique PUREMENT LOCAL des ghosts d'un grossier mono-box (auto-repli).
-// Equivalent a fill_boundary periodique pour une seule box, mais SANS le plan MPI : sert
-// au grossier REPLIQUE (copie par-rang), dont le DistributionMapping par-rang violerait
-// l'hypothese de metadonnees repliquees de fill_boundary. Lit des cellules valides (indices
-// repliees dans [0,N)) et n'ecrit que des ghosts : pas de course lecture/ecriture.
+// PURELY LOCAL periodic fill of the ghosts of a mono-box coarse (self-folding).
+// Equivalent to a periodic fill_boundary for a single box, but WITHOUT the MPI plan: serves
+// the REPLICATED coarse (per-rank copy), whose per-rank DistributionMapping would violate the
+// replicated-metadata assumption of fill_boundary. Reads valid cells (indices
+// folded into [0,N)) and writes only ghosts: no read/write race.
 inline void fill_periodic_local(MultiFab& mf, const Box2D& dom) {
   device_fence();
   const int nc = mf.ncomp(), NX = dom.nx(), NY = dom.ny();
@@ -109,13 +107,13 @@ inline void fill_periodic_local(MultiFab& mf, const Box2D& dom) {
   }
 }
 
-// FluxRegister (revue, point 2 : role promu en type). Registre grossier a indexation GLOBALE
-// sur une REGION (box, avec origine), pour remonter average_down (ecrasement des cellules
-// couvertes, set) et reflux (addition aux cellules bordantes, add borne) a travers les rangs.
-// Chaque rang remplit ses contributions LOCALES (0 ailleurs), gather() les somme par
-// all_reduce_sum_inplace, puis chaque rang lit le total via at(). En serie all_reduce est
-// l'identite -> bit a bit identique. Region a origine (0,0) = grille grossiere pleine ; region
-// = boite englobante = chemin average_down multi-box. Memes formules d'index qu'avant.
+// FluxRegister (review, point 2: role promoted to a type). Coarse register with GLOBAL indexing
+// over a REGION (box, with origin), to lift average_down (overwrite of covered cells, set)
+// and reflux (addition to bordering cells, bounded add) across ranks.
+// Each rank fills its LOCAL contributions (0 elsewhere), gather() sums them via
+// all_reduce_sum_inplace, then each rank reads the total via at(). In serial all_reduce is
+// the identity -> bit-for-bit identical. Region with origin (0,0) = full coarse grid; region
+// = bounding box = multi-box average_down path. Same index formulas as before.
 struct FluxRegister {
   int I0, J0, NX, NY, nc;
   std::vector<Real> buf;
@@ -127,19 +125,19 @@ struct FluxRegister {
     return (static_cast<std::size_t>(J - J0) * NX + (I - I0)) * nc + k;
   }
   bool in(int I, int J) const { return I >= I0 && I < I0 + NX && J >= J0 && J < J0 + NY; }
-  void set(int I, int J, int k, Real v) { buf[idx(I, J, k)] = v; }  // ecrasement (average_down)
-  void add(int I, int J, int k, Real v) {                          // addition bordante (reflux)
+  void set(int I, int J, int k, Real v) { buf[idx(I, J, k)] = v; }  // overwrite (average_down)
+  void add(int I, int J, int k, Real v) {                          // bordering addition (reflux)
     if (in(I, J)) buf[idx(I, J, k)] += v;
   }
   Real at(int I, int J, int k) const { return buf[idx(I, J, k)]; }
   void gather() { all_reduce_sum_inplace(buf.data(), static_cast<int>(buf.size())); }
 };
 
-// CoverageMask (revue, point 2 : part "couverture" de CoarseFineInterface). Masque grossier
-// sur une REGION disant quelles cellules sont OMBRAGEES par un patch fin. Bati sur le
-// box_array GLOBAL (connu de tous les rangs) -> MPI-safe. mark(box) marque l'empreinte
-// grossiere d'un patch (intersectee a la region) ; covered(I,J) est borne (faux hors region).
-// C'est ce qui empeche le double-reflux d'un joint fin-fin. Memes cellules qu'avant.
+// CoverageMask (review, point 2: "coverage" part of CoarseFineInterface). Coarse mask
+// over a REGION saying which cells are SHADOWED by a fine patch. Built on the
+// GLOBAL box_array (known to all ranks) -> MPI-safe. mark(box) marks the coarse footprint
+// of a patch (intersected with the region); covered(I,J) is bounded (false outside region).
+// This is what prevents the double-reflux of a fine-fine joint. Same cells as before.
 struct CoverageMask {
   int I0, J0, NX, NY;
   std::vector<char> cov;
@@ -147,7 +145,7 @@ struct CoverageMask {
       : I0(region.lo[0]), J0(region.lo[1]),
         NX(region.hi[0] - region.lo[0] + 1), NY(region.hi[1] - region.lo[1] + 1),
         cov(static_cast<std::size_t>(NX) * NY, 0) {}
-  void mark(const Box2D& b) {  // marque les cellules de b intersectees a la region
+  void mark(const Box2D& b) {  // marks the cells of b intersected with the region
     const int i0 = std::max(b.lo[0], I0), i1 = std::min(b.hi[0], I0 + NX - 1);
     const int j0 = std::max(b.lo[1], J0), j1 = std::min(b.hi[1], J0 + NY - 1);
     for (int J = j0; J <= j1; ++J)
@@ -159,42 +157,42 @@ struct CoverageMask {
   }
 };
 
-// SubcyclingSchedule (revue, point 5 : role promu en type). Cadence Berger-Oliger d'un
-// niveau : ratio de raffinement temporel r, sous-pas dt/r, et position temporelle frac(s)
-// = s/r du sous-pas s dans le pas parent. Centralise le `const int r = 2`, `dt / r` et
-// `Real(s) / r` epars dans les boucles de sous-cyclage. Arithmetique strictement preservee :
-// dt_sub(dt) == dt / r et frac(s) == Real(s) / r aux memes types, donc bit-identique.
+// SubcyclingSchedule (review, point 5: role promoted to a type). Berger-Oliger cadence of a
+// level: temporal refinement ratio r, substep dt/r, and temporal position frac(s)
+// = s/r of substep s in the parent step. Centralizes the `const int r = 2`, `dt / r` and
+// `Real(s) / r` scattered across the subcycling loops. Arithmetic strictly preserved:
+// dt_sub(dt) == dt / r and frac(s) == Real(s) / r at the same types, thus bit-identical.
 struct SubcyclingSchedule {
   int r;
   explicit SubcyclingSchedule(int ratio = 2) : r(ratio) {}
-  int count() const { return r; }                       // nombre de sous-pas
-  Real dt_sub(Real dt) const { return dt / r; }         // pas fin = pas parent / r
-  Real frac(int s) const { return Real(s) / r; }        // position temporelle du sous-pas s
+  int count() const { return r; }                       // number of substeps
+  Real dt_sub(Real dt) const { return dt / r; }         // fine step = parent step / r
+  Real frac(int s) const { return Real(s) / r; }        // temporal position of substep s
 };
 
-// CoarseFineInterface (revue, point 2). L'interface grossier-fin d'un niveau : couverture
-// (quelles cellules grossieres sont ombragees par un patch fin, via CoverageMask) + ROUTAGE
-// bordant du reflux (quelle cellule grossiere borde quelle face de patch fin, et la
-// correction conservative qu'on y verse). Centralise les deux logiques inline auparavant
-// dupliquees dans amr_step_2level_multipatch et subcycle_level_mp. Construit le masque sur le
-// box_array() GLOBAL des patchs fins (MPI-safe). route_reflux est un template sur le type de
-// registre (Reg / RegMP, meme disposition de champs) : fonction nommee (pas de lambda
-// generique), donc sure sous nvcc. Arithmetique bit-identique aux corps precedents.
+// CoarseFineInterface (review, point 2). The coarse-fine interface of a level: coverage
+// (which coarse cells are shadowed by a fine patch, via CoverageMask) + bordering ROUTING
+// of the reflux (which coarse cell borders which fine-patch face, and the conservative
+// correction poured into it). Centralizes the two inline logics previously duplicated
+// in amr_step_2level_multipatch and subcycle_level_mp. Builds the mask on the GLOBAL
+// box_array() of the fine patches (MPI-safe). route_reflux is a template on the register
+// type (Reg / RegMP, same field layout): named function (no generic lambda), thus
+// safe under nvcc. Arithmetic bit-identical to the previous bodies.
 struct CoarseFineInterface {
   CoverageMask cmask;
-  // region = empreinte grossiere du niveau (origine (0,0), dims NX x NY) ; fine_ba = patchs
-  // fins GLOBAUX (toutes les boxes, connues de tous les rangs). On marque l'empreinte
-  // grossiere PatchRange de chaque patch.
+  // region = coarse footprint of the level (origin (0,0), dims NX x NY); fine_ba = GLOBAL
+  // fine patches (all the boxes, known to all ranks). We mark the coarse PatchRange footprint
+  // of each patch.
   CoarseFineInterface(const Box2D& coarse_region, const BoxArray& fine_ba)
       : cmask(coarse_region) {
     for (int g = 0; g < fine_ba.size(); ++g) cmask.mark(PatchRange(fine_ba[g]).box());
   }
   bool covered(int I, int J) const { return cmask.covered(I, J); }
 
-  // Verse la correction de reflux d'UN patch fin (registre g, coords parentes) dans le
-  // registre grossier ref : sur chaque cellule grossiere BORDANTE non couverte par un autre
-  // patch, (flux fin time-integre - flux grossier x dt) / dx|dy. Memes formules, meme ordre
-  // (gauche/droite en x, bas/haut en y) que les corps inline d'origine.
+  // Pours the reflux correction of ONE fine patch (register g, parent coords) into the
+  // coarse register ref: on each BORDERING coarse cell not covered by another patch,
+  // (time-integrated fine flux - coarse flux x dt) / dx|dy. Same formulas, same order
+  // (left/right in x, bottom/top in y) as the original inline bodies.
   template <class Reg>
   void route_reflux(const Reg& g, Real dx, Real dy, Real dt, FluxRegister& ref, int nc) const {
     for (int J = g.J0; J <= g.J1; ++J)

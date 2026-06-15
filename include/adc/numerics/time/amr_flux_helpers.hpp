@@ -1,5 +1,4 @@
 #pragma once
-// Helpers MF de base : avance divergence, source, average_down, ghosts coarse-fine (mono-box).
 
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
@@ -8,48 +7,48 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/refinement.hpp>  // coarsen_index
 #include <adc/numerics/spatial_operator.hpp>  // compute_face_fluxes, xface_box, yface_box
-#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source (pas implicite IMEX)
+#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source (IMEX implicit step)
 
 #include <vector>
 
 /// @file
-/// @brief Briques MultiFab de base d'un pas AMR : enum AmrTimeMethod, foncteurs device-clean et
-///        helpers d'avance (divergence de flux, source explicite/IMEX, average_down 2x2,
-///        ghosts coarse-fine espace-temps mono-box), partages par tout le chemin de sous-cyclage.
+/// @brief Basic MultiFab building blocks of an AMR step: AmrTimeMethod enum, device-clean functors and
+///        advance helpers (flux divergence, explicit/IMEX source, 2x2 average_down,
+///        space-time coarse-fine ghosts mono-box), shared by the whole subcycling path.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : fournir les kernels reutilises par amr_level / amr_patch_range / amr_subcycling.
-///        mf_advance_faces (U -= dt div F), mf_apply_source (U += dt S, Euler avant),
-///        mf_apply_source_treatment (explicite OU IMEX backward-Euler selon drapeau runtime),
-///        mf_eval_rhs (R = -div F + S au meme etat, pour les etages SSPRK3), mf_average_down,
+/// Layer: `include/adc/numerics/time`.
+/// Role: provide the kernels reused by amr_level / amr_patch_range / amr_subcycling.
+///        mf_advance_faces (U -= dt div F), mf_apply_source (U += dt S, forward Euler),
+///        mf_apply_source_treatment (explicit OR IMEX backward-Euler per runtime flag),
+///        mf_eval_rhs (R = -div F + S at the same state, for SSPRK3 stages), mf_average_down,
 ///        fill_cf_ghost_cell / mf_fill_fine_ghosts_t.
 ///
-/// Invariants :
-/// - kernels = foncteurs NOMMES (AmrSspRhsKernel, AmrAdvanceFacesKernel, ...) et non lambdas :
-///   premiere instanciation possible depuis une TU loader externe ou une lambda etendue
-///   ferait buter nvcc ;
-/// - la source est CELLULE-LOCALE (aucun flux de face) : elle n'entre pas dans le reflux, donc
-///   le split IMEX ne touche pas la conservation aux interfaces grossier-fin ;
-/// - mf_apply_source_treatment avec nopts={} (defaut) reproduit l'appel historique a 2 iters
-///   Newton -> bit-identique ;
-/// - les chemins device lisent/ecrivent en memoire unifiee : device_fence() avant lecture hote.
+/// Invariants:
+/// - kernels = NAMED functors (AmrSspRhsKernel, AmrAdvanceFacesKernel, ...) and not lambdas:
+///   a first instantiation from an external loader TU or an extended lambda would
+///   make nvcc choke;
+/// - the source is CELL-LOCAL (no face flux): it does not enter the reflux, so
+///   the IMEX split does not touch conservation at coarse-fine interfaces;
+/// - mf_apply_source_treatment with nopts={} (default) reproduces the legacy 2-iter
+///   Newton call -> bit-identical;
+/// - the device paths read/write unified memory: device_fence() before host read.
 
 namespace adc {
 
-// Methode temporelle d'un pas AMR (sous-cyclage Berger-Oliger). kEuler (DEFAUT) = avance Euler
-// avant a chaque sous-pas (chemin historique, strictement bit-identique) ; kSsprk3 = SSPRK3
-// (Shu-Osher, 3 etages, ordre 3) avec reflux par etage (flux effectif convexe). L'enum est passe
-// PAR VALEUR (POD) le long du chemin advance_amr -> subcycle_level_mp ; l'ABI plate du loader .so
-// le transporte sous forme d'entier (AmrBuildParams::time_method), 0 == kEuler.
+// Time method of an AMR step (Berger-Oliger subcycling). kEuler (DEFAULT) = forward Euler
+// advance at each substep (legacy path, strictly bit-identical); kSsprk3 = SSPRK3
+// (Shu-Osher, 3 stages, order 3) with per-stage reflux (convex effective flux). The enum is passed
+// BY VALUE (POD) along the advance_amr -> subcycle_level_mp path; the flat ABI of the .so loader
+// carries it as an integer (AmrBuildParams::time_method), 0 == kEuler.
 enum class AmrTimeMethod : int { kEuler = 0, kSsprk3 = 1 };
 
-// Foncteur NOMME device-clean (meme recette que mf_arith.hpp : premiere instanciation possible
-// depuis une TU loader externe, ou une lambda etendue fait buter nvcc) du RHS methode-des-lignes
-// a UN niveau AMR : R = -div(Fx,Fy) + S(U, aux), evalue a UN MEME etat. C'est la divergence de
-// mf_advance_faces (signe oppose, sans dt) FUSIONNEE avec la source de mf_apply_source. Sert
-// UNIQUEMENT aux etages SSPRK3 (mf_eval_rhs), ou L(U) = -div F + S doit etre pris au meme etat
-// d'etage (vrai SSPRK methode-des-lignes), contrairement au splitting transport-puis-source du
-// chemin Euler. Sans source (modele a S == 0) R se reduit a -div F.
+// Device-clean NAMED functor (same recipe as mf_arith.hpp: a first instantiation possible
+// from an external loader TU, or an extended lambda makes nvcc choke) of the method-of-lines RHS
+// at ONE AMR level: R = -div(Fx,Fy) + S(U, aux), evaluated at ONE SAME state. It is the divergence of
+// mf_advance_faces (opposite sign, without dt) FUSED with the source of mf_apply_source. Used
+// ONLY by the SSPRK3 stages (mf_eval_rhs), where L(U) = -div F + S must be taken at the same
+// stage state (true method-of-lines SSPRK), unlike the transport-then-source splitting of the
+// Euler path. Without a source (model with S == 0) R reduces to -div F.
 template <class Model>
 struct AmrSspRhsKernel {
   Model m;
@@ -64,9 +63,9 @@ struct AmrSspRhsKernel {
   }
 };
 
-// R <- -div(Fx,Fy) + S(U, aux) sur les cellules valides (RHS methode-des-lignes a UN niveau, evalue
-// a l'etat U). Pendant "combine" de mf_advance_faces + mf_apply_source pour les etages SSPRK3 (le
-// flux d'etage Fx/Fy est suppose deja calcule par compute_face_fluxes a l'etat U).
+// R <- -div(Fx,Fy) + S(U, aux) on the valid cells (method-of-lines RHS at ONE level, evaluated
+// at the state U). Fused "combine" of mf_advance_faces + mf_apply_source for the SSPRK3 stages (the
+// stage flux Fx/Fy is assumed already computed by compute_face_fluxes at the state U).
 template <class Model>
 inline void mf_eval_rhs(const Model& m, const MultiFab& U, const MultiFab& aux, const MultiFab& Fx,
                         const MultiFab& Fy, Real dx, Real dy, MultiFab& R) {
@@ -77,7 +76,7 @@ inline void mf_eval_rhs(const Model& m, const MultiFab& U, const MultiFab& aux, 
                                          R.fab(li).array(), dx, dy});
 }
 
-/// Foncteur NOMME device-clean : U <- U - dt div(Fx,Fy) sur une cellule valide.
+/// Device-clean NAMED functor: U <- U - dt div(Fx,Fy) on a valid cell.
 struct AmrAdvanceFacesKernel {
   Array4 u;
   ConstArray4 fx, fy;
@@ -90,7 +89,7 @@ struct AmrAdvanceFacesKernel {
   }
 };
 
-// U <- U - dt div(Fx,Fy) sur les cellules valides (GPU via for_each_cell).
+// U <- U - dt div(Fx,Fy) on the valid cells (GPU via for_each_cell).
 inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy,
                              Real dx, Real dy, Real dt) {
   const int nc = U.ncomp();
@@ -101,14 +100,14 @@ inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy
   }
 }
 
-// U <- U + dt S(U, aux) sur les cellules valides : terme source applique en Euler
-// avant a chaque sous-pas AMR (cellule-local, pas de reflux). Sans cela le chemin AMR
-// (compute_face_fluxes -> divergence) ignorerait model.source. Pour un modele a source
-// nulle (transport scalaire pur) ceci ajoute dt*0 : bit-identique. La DIFFUSION, elle, est portee
-// par compute_face_fluxes comme FLUX de face Fickien (-nu grad u), donc vue par le
-// reflux et conservative aux interfaces coarse-fine : ce n'est PAS une source locale.
-/// Foncteur NOMME device-clean (template Model, cf. AmrSspRhsKernel) : U <- U + dt S(U, aux)
-/// sur une cellule valide.
+// U <- U + dt S(U, aux) on the valid cells: source term applied with forward Euler
+// at each AMR substep (cell-local, no reflux). Without it the AMR path
+// (compute_face_fluxes -> divergence) would ignore model.source. For a model with a null
+// source (pure scalar transport) this adds dt*0: bit-identical. DIFFUSION, in contrast, is carried
+// by compute_face_fluxes as a Fickian face FLUX (-nu grad u), thus seen by the
+// reflux and conservative at coarse-fine interfaces: it is NOT a local source.
+/// Device-clean NAMED functor (template Model, see AmrSspRhsKernel): U <- U + dt S(U, aux)
+/// on a valid cell.
 template <class Model>
 struct AmrApplySourceKernel {
   Model m;
@@ -132,38 +131,38 @@ inline void mf_apply_source(const Model& m, MultiFab& U, const MultiFab& aux, Re
   }
 }
 
-// Traitement temporel de la SOURCE a un sous-pas AMR, apres l'avance de transport
-// (mf_advance_faces, deja sans source car compute_face_fluxes ne porte que model.flux) :
-//   - EXPLICITE (imex == false, DEFAUT) : Euler avant, U += dt S(U, aux) -- l'appel
-//     historique mf_apply_source, donc bit-identique au chemin existant.
-//   - IMEX (imex == true) : source IMPLICITE raide, W = U + dt S(W, aux) resolu EN PLACE par
-//     backward_euler_source (Newton local, jacobienne par differences finies, foncteur device
-//     NOMME BackwardEulerSourceKernel). C'est le pendant AMR de l'avance IMEX du System
-//     (block_builder.hpp::AdvanceImex) : meme demi-pas explicite (le transport est porte par le
-//     reflux conservatif) + meme pas implicite sur la source. La source restant CELLULE-LOCALE
-//     (aucun flux de face), elle n'entre PAS dans les registres de reflux : le split implicite ne
-//     touche donc pas la conservation aux interfaces grossier-fin. Le CHOIX est un drapeau runtime
-//     (pas de lambda injectee dans le chemin device) : il selectionne deux fonctions HOTE, chacune
-//     lancant son propre kernel a foncteur nomme.
+// Temporal treatment of the SOURCE at an AMR substep, after the transport advance
+// (mf_advance_faces, already without source since compute_face_fluxes only carries model.flux):
+//   - EXPLICIT (imex == false, DEFAULT): forward Euler, U += dt S(U, aux) -- the legacy
+//     mf_apply_source call, thus bit-identical to the existing path.
+//   - IMEX (imex == true): stiff IMPLICIT source, W = U + dt S(W, aux) solved IN PLACE by
+//     backward_euler_source (local Newton, finite-difference Jacobian, NAMED device functor
+//     BackwardEulerSourceKernel). It is the AMR counterpart of the System IMEX advance
+//     (block_builder.hpp::AdvanceImex): same explicit half-step (transport is carried by the
+//     conservative reflux) + same implicit step on the source. The source remaining CELL-LOCAL
+//     (no face flux), it does NOT enter the reflux registers: the implicit split thus does
+//     not touch conservation at coarse-fine interfaces. The CHOICE is a runtime flag
+//     (no lambda injected into the device path): it selects two HOST functions, each
+//     launching its own named-functor kernel.
 //
-// OPTIONS NEWTON (@p nopts) : pilotent le Newton local de la source implicite (budget d'iterations,
-// tolerances, fd_eps, damping, fail_policy). DEFAUT {} = constantes historiques (2 iters, 1e-7, ...)
-// -> chemin (2a) bit-identique a l'ancien appel backward_euler_source(m, aux, U, dt). Le mono-bloc AMR
-// (AmrCouplerMP::step) les thread depuis AmrSystem (vague 3 -> options mono-bloc cablees). Le masque
-// IMEX partiel n'est PAS porte par ce chemin (mono-bloc coupleur = backward-Euler plein) : on passe
-// donc le masque par defaut (inactif). Pas de rapport diagnostics ici (report == nullptr implicite).
+// NEWTON OPTIONS (@p nopts): drive the local Newton of the implicit source (iteration budget,
+// tolerances, fd_eps, damping, fail_policy). DEFAULT {} = legacy constants (2 iters, 1e-7, ...)
+// -> path (2a) bit-identical to the old call backward_euler_source(m, aux, U, dt). The AMR mono-block
+// (AmrCouplerMP::step) threads them from AmrSystem (wave 3 -> mono-block options wired). The partial
+// IMEX mask is NOT carried by this path (mono-block coupler = full backward-Euler): so the
+// default mask (inactive) is passed. No diagnostics report here (report == nullptr implicit).
 template <class Model>
 inline void mf_apply_source_treatment(const Model& m, MultiFab& U, const MultiFab& aux, Real dt,
                                       bool imex, const NewtonOptions& nopts = {}) {
   if (imex)
-    // Forme a OPTIONS (Newton pilote par nopts), masque inactif, sans rapport. Defaut nopts={} =>
-    // identique a la forme historique a iters figes (2), donc bit-identique tant que nopts est defaut.
+    // OPTIONS form (Newton driven by nopts), inactive mask, no report. Default nopts={} =>
+    // identical to the legacy form with fixed iters (2), thus bit-identical as long as nopts is default.
     backward_euler_source(m, aux, U, dt, nopts, ImplicitMask<Model::n_vars>{});
   else
-    mf_apply_source(m, U, aux, dt);        // Euler avant historique (bit-identique)
+    mf_apply_source(m, U, aux, dt);        // legacy forward Euler (bit-identical)
 }
 
-/// Foncteur NOMME device-clean : moyenne 2x2 fin -> grossier sur une cellule grossiere.
+/// Device-clean NAMED functor: 2x2 average fine -> coarse on a coarse cell.
 struct AmrAverageDownKernel {
   ConstArray4 f;
   Array4 c;
@@ -175,7 +174,7 @@ struct AmrAverageDownKernel {
   }
 };
 
-// moyenne fin -> grossier (ratio 2) sur la region couverte (coords grossieres).
+// average fine -> coarse (ratio 2) on the covered region (coarse coords).
 inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
                             int CJ0, int CJ1) {
   const int nc = Uc.ncomp();
@@ -184,12 +183,12 @@ inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
   for_each_cell(Box2D{{CI0, CJ0}, {CI1, CJ1}}, AmrAverageDownKernel{f, c, nc});
 }
 
-// Helper coarse-fine de premier niveau (revue, point ghosts) : remplit UNE cellule ghost
-// fine (i,j) par interpolation espace (constant par morceaux : cellule grossiere couvrante)
-// + temps (lineaire entre l'etat parent ancien/nouveau). frac = position temporelle du
-// sous-pas dans le pas parent. Centralise l'arithmetique partagee par mf_fill_fine_ghosts_t
-// (mono-box), mf_fill_fine_ghosts_multi (multi-box) et mf_fill_fine_ghosts_mb (multi-niveau) :
-// une seule formule (1-frac)*co + frac*cn, bit-identique aux trois corps precedents.
+// First-level coarse-fine helper (review, point ghosts): fills ONE fine ghost
+// cell (i,j) by spatial interpolation (piecewise constant: covering coarse cell)
+// + time (linear between the old/new parent state). frac = temporal position of the
+// substep within the parent step. Centralizes the arithmetic shared by mf_fill_fine_ghosts_t
+// (mono-box), mf_fill_fine_ghosts_multi (multi-box) and mf_fill_fine_ghosts_mb (multi-level):
+// a single formula (1-frac)*co + frac*cn, bit-identical to the three previous bodies.
 inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray4& cn,
                                int i, int j, int nc, Real frac) {
   const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
@@ -197,11 +196,11 @@ inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray
     f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
 }
 
-// ghosts du fin = interp espace (constant par morceaux) + temps (lineaire) depuis le
-// grossier ancien/nouveau. frac = position temporelle du sous-pas dans le pas grossier.
+// fine ghosts = spatial interp (piecewise constant) + time (linear) from the
+// old/new coarse. frac = temporal position of the substep within the coarse step.
 inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
                                    const MultiFab& Uc_new, Real frac) {
-  device_fence();  // lecture/ecriture hote sur memoire unifiee
+  device_fence();  // host read/write on unified memory
   const int nc = Uf.ncomp();
   Array4 f = Uf.fab(0).array();
   const ConstArray4 co = Uc_old.fab(0).const_array();

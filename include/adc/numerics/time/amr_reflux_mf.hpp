@@ -1,6 +1,4 @@
 #pragma once
-// Parapluie AMR MultiFab : inclut les sous-entetes dans l'ordre de dependance.
-// Tout inclueur existant de ce header continue de compiler sans modification.
 
 #include <adc/numerics/time/amr_flux_helpers.hpp>   // mf_advance_faces, mf_apply_source*, mf_average_down, fill_cf_ghost_cell, mf_fill_fine_ghosts_t
 #include <adc/numerics/time/amr_level.hpp>          // detail::AmrLevelMF, amr_step_2level_mf, subcycle_level_mf, amr_step_multilevel_mf
@@ -9,10 +7,10 @@
 #include <adc/numerics/time/amr_advance.hpp>        // OwnershipPolicy, LevelHierarchy, advance_amr
 
 /// @file
-/// @brief Parapluie de la pile AMR MultiFab : inclut les sous-entetes numerics/time dans l'ordre
-///        de dependance (flux_helpers -> level -> patch_range -> subcycling -> advance).
+/// @brief Umbrella for the AMR MultiFab stack: includes the numerics/time sub-headers in
+///        dependency order (flux_helpers -> level -> patch_range -> subcycling -> advance).
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : point d'entree unique de l'AMR MultiFab/multi-patch. Tout inclueur existant de ce
-///        header continue de compiler sans modification apres l'eclatement en sous-entetes ;
-///        l'API publique de production reste advance_amr (cf. amr_advance.hpp).
+/// Layer: `include/adc/numerics/time`.
+/// Role: single entry point for the AMR MultiFab/multi-patch stack. Every existing includer of
+///        this header keeps compiling without modification after the split into sub-headers;
+///        the public production API stays advance_amr (see amr_advance.hpp).

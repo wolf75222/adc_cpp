@@ -1,43 +1,30 @@
 #pragma once
 
-// Tags et politiques d'integration en temps.
-//
-// Deux niveaux sont separes :
-//   - le schema mathematique (SSPRK2, SSPRK3, IMEX, implicite utilisateur...) ;
-//   - la politique d'emploi dans un systeme couple : explicite / implicite,
-//     nombre de sous-pas, ou champ prescrit.
-//
-// Le coeur garde les schemas generiques et le scheduler ; les cas choisissent une
-// politique par bloc d'equation. Exemple attendu pour un plasma multi-especes :
-//   electrons : ImplicitTime<UserImplicit, 10>
-//   ions      : ExplicitTime<SSPRK2, 1>
-// sans changer le PhysicalModel local.
-
 /// @file
-/// @brief Tags de schemas (SSPRK2, SSPRK3, UserTimeIntegrator), enum TimeTreatment et politiques
-///        temporelles par bloc : gabarit TimePolicy<Method, Treatment, Substeps, Stride>, ses
-///        traits (TimePolicyTraits) et les alias ExplicitTime / ImplicitTime / IMEXTime /
+/// @brief Scheme tags (SSPRK2, SSPRK3, UserTimeIntegrator), TimeTreatment enum and per-block
+///        time policies: template TimePolicy<Method, Treatment, Substeps, Stride>, its traits
+///        (TimePolicyTraits) and the aliases ExplicitTime / ImplicitTime / IMEXTime /
 ///        PrescribedTime.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : separer DEUX niveaux -- le schema mathematique (SSPRK, IMEX, implicite utilisateur) et
-///        la politique d'emploi dans un systeme couple (explicite/implicite, sous-pas, cadence,
-///        ou champ prescrit). Le coeur garde les schemas generiques et le scheduler ; les cas
-///        choisissent une politique par bloc sans changer le PhysicalModel local.
+/// Layer: `include/adc/numerics/time`.
+/// Role: separate TWO levels -- the mathematical scheme (SSPRK, IMEX, user implicit) and the
+///        usage policy in a coupled system (explicit/implicit, substeps, cadence, or prescribed
+///        field). The core keeps the generic schemes and the scheduler; cases choose a policy
+///        per block without changing the local PhysicalModel.
 ///
-/// Invariants :
-/// - SubstepsT >= 1 et StrideT >= 1 (static_assert) ;
-/// - SubstepsT = sous-pas PLUS FREQUENTS (n pas de dt/n) ; StrideT = cadence PLUS LENTE (avance 1
-///   macro-pas sur StrideT, alors d'un pas StrideT*dt). Les deux sont ORTHOGONAUX ;
-/// - StrideT=1 (defaut) = comportement historique ; TimePolicyTraits du cas par defaut traite un
-///   type quelconque comme Explicit, substeps=1, stride=1.
+/// Invariants:
+/// - SubstepsT >= 1 and StrideT >= 1 (static_assert);
+/// - SubstepsT = MORE FREQUENT substeps (n steps of dt/n); StrideT = SLOWER cadence (advances 1
+///   macro-step every StrideT, thus by a step of StrideT*dt). Both are ORTHOGONAL;
+/// - StrideT=1 (default) = historical behavior; the default TimePolicyTraits treats any type as
+///   Explicit, substeps=1, stride=1.
 
 namespace adc {
 
-struct SSPRK2 {};  // Shu-Osher SSP-RK2 (2 etages, ordre 2)
-struct SSPRK3 {};  // Shu-Osher SSP-RK3 (3 etages, ordre 3)
+struct SSPRK2 {};  // Shu-Osher SSP-RK2 (2 stages, order 2)
+struct SSPRK3 {};  // Shu-Osher SSP-RK3 (3 stages, order 3)
 
-struct UserTimeIntegrator {};  // point d'extension : take_step fourni par le cas
+struct UserTimeIntegrator {};  // extension point: take_step provided by the case
 
 enum class TimeTreatment {
   Explicit,
@@ -46,14 +33,14 @@ enum class TimeTreatment {
   Prescribed
 };
 
-// SubstepsT : sous-pas PLUS FREQUENTS (n pas de dt/n par macro-pas, electrons rapides).
-// StrideT   : cadence PLUS LENTE (le bloc n'avance qu'1 macro-pas sur StrideT, alors d'un
-//   pas de StrideT*dt, un "gaz" lent qu'on ne resout pas a chaque pas, retour tuteur).
-//   Les deux sont orthogonaux ; StrideT=1 = comportement historique.
+// SubstepsT: MORE FREQUENT substeps (n steps of dt/n per macro-step, fast electrons).
+// StrideT: SLOWER cadence (the block advances only 1 macro-step every StrideT, thus by a
+//   step of StrideT*dt, a slow "gas" we do not solve at every step, guardian return).
+//   Both are orthogonal; StrideT=1 = historical behavior.
 template <class MethodT, TimeTreatment TreatmentT, int SubstepsT = 1, int StrideT = 1>
 struct TimePolicy {
-  static_assert(SubstepsT >= 1, "un TimePolicy doit avoir au moins un sous-pas");
-  static_assert(StrideT >= 1, "un TimePolicy doit avoir une cadence (stride) >= 1");
+  static_assert(SubstepsT >= 1, "a TimePolicy must have at least one substep");
+  static_assert(StrideT >= 1, "a TimePolicy must have a cadence (stride) >= 1");
   using Method = MethodT;
   static constexpr TimeTreatment treatment = TreatmentT;
   static constexpr int substeps = SubstepsT;

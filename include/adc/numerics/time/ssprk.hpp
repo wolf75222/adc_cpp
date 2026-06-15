@@ -7,21 +7,16 @@
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>
-#include <adc/numerics/time/time_steppers.hpp>  // SSPRK2Step (schema partage)
-
-// Integrateur SSP-RK2 mono-niveau, fonction libre de commodite. Le SCHEMA vit
-// desormais dans time/time_steppers.hpp (objet SSPRK2Step) ; ici on ne fait
-// que fournir l'evaluateur de residu (fill_ghosts + assemble_rhs) et deleguer, pour
-// ne pas dupliquer la combinaison RK. aux est suppose fixe pendant le pas.
+#include <adc/numerics/time/time_steppers.hpp>  // SSPRK2Step (shared scheme)
 
 /// @file
-/// @brief Fonction libre de commodite advance_ssprk2 : un pas SSP-RK2 mono-niveau qui assemble
-///        l'evaluateur de residu (fill_ghosts + assemble_rhs) et delegue a SSPRK2Step.
+/// @brief Free convenience function advance_ssprk2: one single-level SSP-RK2 step that assembles
+///        the residual evaluator (fill_ghosts + assemble_rhs) and delegates to SSPRK2Step.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : sucre d'appel. Le SCHEMA RK vit dans time_steppers.hpp (objet SSPRK2Step) ; ce header
-///        ne fournit que l'evaluateur de residu et delegue, pour ne pas dupliquer la combinaison.
-/// Contrat : aux est suppose fixe pendant le pas.
+/// Layer: `include/adc/numerics/time`.
+/// Role: call sugar. The RK scheme lives in time_steppers.hpp (SSPRK2Step object); this header
+///        only provides the residual evaluator and delegates, to avoid duplicating the combination.
+/// Contract: aux is assumed fixed during the step.
 
 namespace adc {
 

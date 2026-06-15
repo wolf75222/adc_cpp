@@ -3,50 +3,29 @@
 #include <adc/core/types.hpp>
 #include <adc/mesh/multifab.hpp>
 
-// Integrateur IMEX (implicit-explicit) asymptotic-preserving (AP).
-//
-// Pour le vrai fluide compressible magnetise couple a un champ self-consistant
-// (regime du papier Hoffart, arXiv:2510.11808), certains termes sont RAIDES :
-// force de Lorentz, limite de Debye lambda_D -> 0, quasi-neutralite. Les traiter
-// en explicite imposerait
-// dt ~ raideur (Debye, gyrofrequence) -> impraticable. Un schema IMEX prend ces
-// termes en IMPLICITE et le transport en EXPLICITE. La propriete AP : quand le
-// petit parametre (eps = lambda_D^2, 1/omega_c, ...) -> 0, le schema reste stable
-// a dt FIXE et capture la dynamique limite (equilibre / quasi-neutralite), sans
-// resoudre l'echelle raide.
-//
-// imex_euler_step : IMEX d'Euler (forward-backward), 1er ordre.
-//   U^{n+1} = U^n + dt T(U^n) + dt S(U^{n+1})
-// Texpl(U, dt) : avance le transport EN PLACE (U <- U + dt T(U)), donc apres
-//   l'appel U porte le membre connu U^n + dt T(U^n).
-// Simpl(U, dt) : resout EN PLACE U <- W tel que W = U + dt S(W), ou U (en entree)
-//   est le membre connu. Source lineaire (relaxation) : analytique ; non lineaire
-//   (Lorentz complet) : Newton local. C'est l'analogue de APIMEXTwoFluidIsothermal
-//   de MUFFIN, le pont entre notre modele reduit de derive et la physique complete.
-
 /// @file
-/// @brief Integrateur IMEX (implicit-explicit) asymptotic-preserving : imex_euler_step, pas
-///        d'Euler forward-backward d'ordre 1, U^{n+1} = U^n + dt T(U^n) + dt S(U^{n+1}).
+/// @brief Asymptotic-preserving IMEX (implicit-explicit) integrator: imex_euler_step, order-1
+///        forward-backward Euler step, U^{n+1} = U^n + dt T(U^n) + dt S(U^{n+1}).
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : prendre les termes RAIDES (Lorentz, limite de Debye, quasi-neutralite) en IMPLICITE et
-///        le transport en EXPLICITE. Propriete AP : quand le petit parametre (lambda_D^2, 1/omega_c)
-///        -> 0, le schema reste stable a dt FIXE et capture la dynamique limite.
-/// Contrat : Texpl(U, dt) avance le transport EN PLACE (apres l'appel U porte le membre connu
-///           U^n + dt T(U^n)) ; Simpl(U, dt) resout EN PLACE U <- W avec W = U + dt S(W), U etant
-///           le membre connu (relaxation lineaire : analytique ; Lorentz complet : Newton local).
+/// Layer: `include/adc/numerics/time`.
+/// Role: take the STIFF terms (Lorentz, Debye limit, quasi-neutrality) IMPLICITLY and the
+///       transport EXPLICITLY. AP property: when the small parameter (lambda_D^2, 1/omega_c)
+///       -> 0, the scheme stays stable at FIXED dt and captures the limit dynamics.
+/// Contract: Texpl(U, dt) advances the transport IN PLACE (after the call U holds the known term
+///           U^n + dt T(U^n)); Simpl(U, dt) solves IN PLACE U <- W with W = U + dt S(W), U being
+///           the known term (linear relaxation: analytic; full Lorentz: local Newton).
 ///
-/// Invariants :
-/// - integrateur agnostique du modele : Texpl/Simpl sont des callables (MultiFab&, Real)->void ;
-/// - l'ordre est impose -- explicite PUIS implicite ; aucun etat porte par l'integrateur.
+/// Invariants:
+/// - integrator agnostic of the model: Texpl/Simpl are callables (MultiFab&, Real)->void;
+/// - the order is enforced -- explicit THEN implicit; no state held by the integrator.
 
 namespace adc {
 
 template <class TransportStep, class ImplicitSourceSolve>
 void imex_euler_step(MultiFab& U, Real dt, TransportStep Texpl,
                      ImplicitSourceSolve Simpl) {
-  Texpl(U, dt);  // explicite : U devient le membre connu U^n + dt T(U^n)
-  Simpl(U, dt);  // implicite : resout U = connu + dt S(U) (source raide) en place
+  Texpl(U, dt);  // explicit: U becomes the known term U^n + dt T(U^n)
+  Simpl(U, dt);  // implicit: solves U = known + dt S(U) (stiff source) in place
 }
 
 }  // namespace adc

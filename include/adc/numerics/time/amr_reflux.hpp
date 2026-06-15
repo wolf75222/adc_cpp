@@ -9,52 +9,40 @@
 
 #include <vector>
 
-// AMR dans le temps, brique conservation-critique : advance 2-niveaux avec
-// reflux. Le flux numerique a l'interface coarse-fine est incoherent entre la
-// grille grossiere et la grille fine ; le reflux corrige les cellules grossieres
-// adjacentes pour retablir la conservation exacte (FluxRegister, facon AMReX).
-//
-// Version minimale et testable : 1 composante (advection), aux variable en
-// espace, Euler explicite, ratio 2, sous-cyclage Berger-Oliger (r=2 sous-pas
-// de dt/2, ghosts fins interpoles en temps), une box fine rectangulaire
-// strictement interieure au domaine grossier periodique. Le couplage Poisson
-// composite (FAC) est traite a part (elliptic/composite_fac_poisson.hpp) ; le
-// test de conservation valide ici l'arithmetique du reflux.
-
 /// @file
-/// @brief Brique conservation-critique de reference (Fab2D, 1 composante) : reflux 2-niveaux a la
-///        AMReX. Fournit les flux de Rusanov 1-comp (compute_fluxes_1c), l'avance Euler explicite
-///        (advance_fab_1c), les ghosts periodiques (fill_periodic_fab) et coarse-fine espace-temps
-///        (fill_fine_ghosts_t), average_down_fab, et le pas amr_step_2level.
+/// @brief Reference conservation-critical brick (Fab2D, 1 component): 2-level reflux a la AMReX.
+///        Provides the 1-component Rusanov fluxes (compute_fluxes_1c), the explicit Euler advance
+///        (advance_fab_1c), the periodic ghosts (fill_periodic_fab) and coarse-fine space-time
+///        ghosts (fill_fine_ghosts_t), average_down_fab, and the amr_step_2level step.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : version minimale et testable du reflux AMR. Le flux numerique a l'interface coarse-fine
-///        est incoherent entre grille grossiere et fine ; le reflux corrige les cellules
-///        grossieres adjacentes (FluxRegister) pour retablir la conservation exacte. C'est la
-///        verite-terrain mono-box de la chaine de parite Fab2D -> MF -> MP.
+/// Layer: `include/adc/numerics/time`.
+/// Role: minimal and testable version of the AMR reflux. The numerical flux at the coarse-fine
+///        interface is inconsistent between the coarse and fine grids; the reflux corrects the
+///        adjacent coarse cells (FluxRegister) to restore exact conservation. This is the mono-box
+///        ground-truth of the Fab2D -> MF -> MP parity chain.
 ///
-/// Invariants :
-/// - cas minimal : 1 composante, Euler explicite, ratio 2, sous-cyclage Berger-Oliger (r=2 pas
-///   de dt/2, ghosts fins interpoles en temps), une box fine rectangulaire strictement interieure
-///   au domaine grossier periodique ;
-/// - le couplage Poisson composite (FAC) est traite ailleurs (elliptic/composite_fac_poisson) ;
-/// - kernels device = foncteurs NOMMES (RusanovFaceXKernel, AdvanceFab1cKernel, ...) et non
-///   lambdas ADC_HD : premiere instanciation depuis une TU loader externe ferait buter nvcc ;
-///   corps strictement identique aux lambdas precedentes -> bit-identique CPU et device.
+/// Invariants:
+/// - minimal case: 1 component, explicit Euler, ratio 2, Berger-Oliger subcycling (r=2 substeps
+///   of dt/2, fine ghosts interpolated in time), one rectangular fine box strictly interior to the
+///   periodic coarse domain;
+/// - the composite Poisson coupling (FAC) is handled elsewhere (elliptic/composite_fac_poisson);
+/// - device kernels = NAMED functors (RusanovFaceXKernel, AdvanceFab1cKernel, ...) and not
+///   ADC_HD lambdas: first instantiation from an external loader TU would trip nvcc; body strictly
+///   identical to the previous lambdas -> bit-identical CPU and device.
 
 namespace adc {
 
-// xface_box / yface_box : fournis par numerics/spatial_operator.hpp (inclus ci-dessus),
-// memes conventions de boites de face. On ne les redefinit pas ici.
+// xface_box / yface_box: provided by numerics/spatial_operator.hpp (included above),
+// same face-box conventions. We do not redefine them here.
 
 namespace detail {
 
-// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels device du reflux AMR. Memes raisons que le
-// reste du chemin maillage/temps (recette AmrSspRhsKernel, fill_boundary) : ces kernels sont premiere-
-// instancies depuis une TU loader externe, ou une lambda etendue fait buter l'emission du kernel device
-// sous nvcc. Corps strictement identique aux lambdas precedentes -> bit-identique CPU et device.
+// NAMED FUNCTORS (and not ADC_HD lambdas) for the AMR reflux device kernels. Same reasons as the
+// rest of the mesh/time path (AmrSspRhsKernel, fill_boundary recipe): these kernels are first-
+// instantiated from an external loader TU, where an extended lambda trips the device kernel emission
+// under nvcc. Body strictly identical to the previous lambdas -> bit-identical CPU and device.
 
-/// Flux de Rusanov a la face gauche (axe x) de la cellule (i,j).
+/// Rusanov flux at the left face (x axis) of cell (i,j).
 template <class Model>
 struct RusanovFaceXKernel {
   Model m;
@@ -69,7 +57,7 @@ struct RusanovFaceXKernel {
   }
 };
 
-/// Flux de Rusanov a la face basse (axe y) de la cellule (i,j).
+/// Rusanov flux at the bottom face (y axis) of cell (i,j).
 template <class Model>
 struct RusanovFaceYKernel {
   Model m;
@@ -84,7 +72,7 @@ struct RusanovFaceYKernel {
   }
 };
 
-/// Euler explicite 1 composante : U -= dt div(F) sur la cellule (i,j).
+/// Explicit Euler, 1 component: U -= dt div(F) on cell (i,j).
 struct AdvanceFab1cKernel {
   Array4 uu;
   ConstArray4 FX, FY;
@@ -97,9 +85,9 @@ struct AdvanceFab1cKernel {
 
 }  // namespace detail
 
-// flux de Rusanov premier ordre, 1 composante, aux variable en espace (Fab2D a
-// 3 composantes [phi, gx, gy], ghosts remplis), sur un Fab2D.
-// fx(i,j) = flux a la face gauche de la cellule i ; fy(i,j) = face basse de j.
+// First-order Rusanov flux, 1 component, aux variable in space (Fab2D with
+// 3 components [phi, gx, gy], ghosts filled), on a Fab2D.
+// fx(i,j) = flux at the left face of cell i; fy(i,j) = bottom face of j.
 template <class Model>
 void compute_fluxes_1c(const Model& m, const Fab2D& U, const Fab2D& aux,
                        Fab2D& fx, Fab2D& fy) {
@@ -115,7 +103,7 @@ void compute_fluxes_1c(const Model& m, const Fab2D& U, const Fab2D& aux,
   }
 }
 
-// Euler explicite : U -= dt div(F). Les ghosts de U doivent etre remplis.
+// Explicit Euler: U -= dt div(F). The ghosts of U must be filled.
 template <class Model>
 void advance_fab_1c(const Model& m, Fab2D& U, const Fab2D& aux, double dx,
                     double dy, double dt, Fab2D& fx, Fab2D& fy) {
@@ -126,7 +114,7 @@ void advance_fab_1c(const Model& m, Fab2D& U, const Fab2D& aux, double dx,
   for_each_cell(U.box(), detail::AdvanceFab1cKernel{uu, FX, FY, dx, dy, dt});
 }
 
-// ghosts periodiques pour un Fab2D unique couvrant le domaine.
+// Periodic ghosts for a single Fab2D covering the domain.
 inline void fill_periodic_fab(Fab2D& U, const Box2D& dom) {
   const int ng = U.n_ghost();
   const int nx = dom.nx(), ny = dom.ny();
@@ -143,9 +131,9 @@ inline void fill_periodic_fab(Fab2D& U, const Box2D& dom) {
     }
 }
 
-// ghosts du fin par injection depuis le grossier (ratio 2), interpoles en temps
-// entre l'etat grossier ancien (frac=0) et nouveau (frac=1) : FillPatch
-// espace-temps pour le sous-cyclage Berger-Oliger.
+// Fine ghosts by injection from the coarse (ratio 2), interpolated in time
+// between the old coarse state (frac=0) and the new one (frac=1): space-time
+// FillPatch for the Berger-Oliger subcycling.
 inline void fill_fine_ghosts_t(Fab2D& Uf, const Fab2D& Uco, const Fab2D& Ucn,
                                double frac) {
   const ConstArray4 co = Uco.const_array();
@@ -162,7 +150,7 @@ inline void fill_fine_ghosts_t(Fab2D& Uf, const Fab2D& Uco, const Fab2D& Ucn,
       }
 }
 
-// moyenne fin -> grossier sur la region couverte (ratio 2).
+// Fine -> coarse average over the covered region (ratio 2).
 inline void average_down_fab(const Fab2D& Uf, Fab2D& Uc, int CI0, int CI1,
                              int CJ0, int CJ1) {
   const ConstArray4 f = Uf.const_array();
@@ -173,14 +161,14 @@ inline void average_down_fab(const Fab2D& Uf, Fab2D& Uc, int CI0, int CI1,
                         f(2 * I, 2 * J + 1) + f(2 * I + 1, 2 * J + 1));
 }
 
-// Un pas 2-niveaux conservatif avec sous-cyclage Berger-Oliger (le fin fait
-// r=2 sous-pas de dt/2) et reflux. region fine = cellules grossieres
-// [CI0..CI1] x [CJ0..CJ1] (strictement interieures), raffinees en
-// [2CI0..2CI1+1] x [...]. dom = domaine grossier periodique.
+// One conservative 2-level step with Berger-Oliger subcycling (the fine does
+// r=2 substeps of dt/2) and reflux. Fine region = coarse cells
+// [CI0..CI1] x [CJ0..CJ1] (strictly interior), refined into
+// [2CI0..2CI1+1] x [...]. dom = periodic coarse domain.
 //
-// Registre de flux : on accumule le flux grossier (x dt) et la somme des flux
-// fins (x dt/2 par sous-pas, moyennes spatialement) aux 4 faces de la region
-// fine, puis on corrige les cellules grossieres adjacentes par leur difference.
+// Flux register: we accumulate the coarse flux (x dt) and the sum of the fine
+// fluxes (x dt/2 per substep, spatially averaged) at the 4 faces of the fine
+// region, then we correct the adjacent coarse cells by their difference.
 template <class Model>
 void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
                      double dyc, Fab2D& Uf, int CI0, int CI1, int CJ0, int CJ1,
@@ -189,9 +177,9 @@ void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
   const double dxf = dxc / 2, dyf = dyc / 2, dtf = dt / r;
   const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
 
-  const Fab2D Uc_old = Uc;  // etat grossier au temps t (pour interp temporelle)
+  const Fab2D Uc_old = Uc;  // coarse state at time t (for temporal interp)
 
-  // --- flux grossiers (avant mise a jour) aux 4 faces de la region fine ---
+  // --- coarse fluxes (before update) at the 4 faces of the fine region ---
   fill_periodic_fab(Uc, dom);
   Fab2D fxc(xface_box(Uc.box()), 1, 0), fyc(yface_box(Uc.box()), 1, 0);
   compute_fluxes_1c(m, Uc, auxc, fxc, fyc);
@@ -207,13 +195,13 @@ void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
     cT[I - CI0] = FYc(I, CJ1 + 1);
   }
 
-  advance_fab_1c(m, Uc, auxc, dxc, dyc, dt, fxc, fyc);  // Uc devient l'etat "t+dt"
+  advance_fab_1c(m, Uc, auxc, dxc, dyc, dt, fxc, fyc);  // Uc becomes the "t+dt" state
 
-  // --- sous-cyclage fin : r sous-pas, accumulation des flux fins (x dtf) ---
+  // --- fine subcycling: r substeps, accumulation of fine fluxes (x dtf) ---
   std::vector<double> fL(nJ, 0), fR(nJ, 0), fB(nI, 0), fT(nI, 0);
   Fab2D fxf(xface_box(Uf.box()), 1, 0), fyf(yface_box(Uf.box()), 1, 0);
   for (int s = 0; s < r; ++s) {
-    fill_fine_ghosts_t(Uf, Uc_old, Uc, double(s) / r);  // BC interpolee en temps
+    fill_fine_ghosts_t(Uf, Uc_old, Uc, double(s) / r);  // time-interpolated BC
     compute_fluxes_1c(m, Uf, auxf, fxf, fyf);
     const ConstArray4 FXf = fxf.const_array();
     const ConstArray4 FYf = fyf.const_array();
@@ -230,9 +218,9 @@ void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
     advance_fab_1c(m, Uf, auxf, dxf, dyf, dtf, fxf, fyf);
   }
 
-  average_down_fab(Uf, Uc, CI0, CI1, CJ0, CJ1);  // sync des cellules couvertes
+  average_down_fab(Uf, Uc, CI0, CI1, CJ0, CJ1);  // sync of the covered cells
 
-  // --- reflux : flux grossier (x dt) remplace par somme des flux fins (x dtf) ---
+  // --- reflux: coarse flux (x dt) replaced by sum of fine fluxes (x dtf) ---
   Array4 c = Uc.array();
   for (int J = CJ0; J <= CJ1; ++J) {
     c(CI0 - 1, J) -= (fL[J - CJ0] - cL[J - CJ0] * dt) / dxc;

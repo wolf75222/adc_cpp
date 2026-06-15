@@ -1,57 +1,54 @@
 #pragma once
-// Moteur de sous-cyclage multi-patch N-niveaux : amr_step_2level_multipatch,
-// subcycle_level_mp, amr_step_multilevel_multipatch, AmrLevelMP, RegMP.
-
-#include <adc/mesh/mf_arith.hpp>  // saxpy, lincomb (etages SSPRK3, foncteurs nommes device-clean)
+#include <adc/mesh/mf_arith.hpp>  // saxpy, lincomb (SSPRK3 stages, named device-clean functors)
 #include <adc/mesh/refinement.hpp>  // coarsen, parallel_copy
 #include <adc/numerics/time/amr_flux_helpers.hpp>
 #include <adc/numerics/time/amr_patch_range.hpp>
 
-#include <cassert>  // assert (invariant parent-replique : mf_find_box toujours trouve)
+#include <cassert>  // assert (replicated-parent invariant: mf_find_box always finds it)
 
 /// @file
-/// @brief Moteur de sous-cyclage AMR multi-patch (plusieurs boxes fines par niveau) : pas
-///        2-niveaux (amr_step_2level_multipatch), recursion N-niveaux (detail::subcycle_level_mp,
-///        detail::amr_step_multilevel_multipatch), avance SSPRK3 par etage, helpers multi-box
-///        (mf_fill_fine_ghosts_mb, mf_average_down_mb, mf_find_box, coarsen_grown) et types
-///        AmrLevelMP / RegMP. C'est le moteur derriere advance_amr.
+/// @brief AMR multi-patch subcycling engine (several fine boxes per level): 2-level step
+///        (amr_step_2level_multipatch), N-level recursion (detail::subcycle_level_mp,
+///        detail::amr_step_multilevel_multipatch), SSPRK3 per-stage advance, multi-box helpers
+///        (mf_fill_fine_ghosts_mb, mf_average_down_mb, mf_find_box, coarsen_grown) and types
+///        AmrLevelMP / RegMP. This is the engine behind advance_amr.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : reflux COVERAGE-AWARE facon FluxRegister AMReX -- une cellule grossiere adjacente a un
-///        patch fin n'est corrigee QUE si elle n'est pas couverte par un autre patch (les
-///        interfaces fin-fin sont gerees par fill_boundary).
+/// Layer: `include/adc/numerics/time`.
+/// Role: COVERAGE-AWARE reflux in the style of AMReX FluxRegister -- a coarse cell adjacent to a
+///        fine patch is corrected ONLY if it is not covered by another patch (fine-fine
+///        interfaces are handled by fill_boundary).
 ///
-/// Invariants :
-/// - distribue (MPI) avec REPLICATION GROSSIERE : le grossier mono-box est replique sur chaque
-///   rang (fill periodique local), les patchs fins repartis ; average_down et reflux remontent
-///   par buffers grossiers indexes GLOBAL + all_reduce_sum_inplace, puis chaque rang applique a
-///   sa copie -> toutes restent identiques. En serie c'est bit a bit identique au chemin direct ;
-/// - validation : test_mpi_amr_multipatch (np=1/2/4 bit-identiques) ;
-/// - SSPRK3 reremplit les ghosts AVANT chaque evaluation de flux d'etage (ssprk3_refill_level_ghosts),
-///   et exige imex == false ;
-/// - saxpy/lincomb et les kernels des helpers sont device-clean (foncteurs nommes).
+/// Invariants:
+/// - distributed (MPI) with COARSE REPLICATION: the single-box coarse level is replicated on each
+///   rank (local periodic fill), the fine patches distributed; average_down and reflux gather up
+///   through GLOBAL-indexed coarse buffers + all_reduce_sum_inplace, then each rank applies to
+///   its copy -> all stay identical. In serial this is bit-for-bit identical to the direct path;
+/// - validation: test_mpi_amr_multipatch (np=1/2/4 bit-identical);
+/// - SSPRK3 refills the ghosts BEFORE each stage flux evaluation (ssprk3_refill_level_ghosts),
+///   and requires imex == false;
+/// - saxpy/lincomb and the helper kernels are device-clean (named functors).
 
 namespace adc {
 
-// --- MULTI-PATCH (plusieurs boxes fines par niveau) ---
-// Le niveau fin est un MultiFab a N boxes. Le reflux est COVERAGE-AWARE : il ne
-// corrige une cellule grossiere adjacente a une box fine que si elle n'est PAS
-// couverte par une autre box fine (interface fin-grossier reelle ; les interfaces
-// fin-fin sont gerees par fill_boundary). C'est la logique FluxRegister d'AMReX.
+// --- MULTI-PATCH (several fine boxes per level) ---
+// The fine level is a MultiFab with N boxes. Reflux is COVERAGE-AWARE: it corrects a coarse
+// cell adjacent to a fine box only if it is NOT covered by another fine box (real fine-coarse
+// interface; fine-fine interfaces are handled by fill_boundary). This is AMReX FluxRegister
+// logic.
 
-// Pas 2-niveaux conservatif, niveau fin MULTI-BOX. Uc : grossier mono-box (periodique).
-// Uf : MultiFab a N boxes fines (ratio 2, strictement interieures, alignees grossier).
+// Conservative 2-level step, MULTI-BOX fine level. Uc: single-box coarse (periodic).
+// Uf: MultiFab with N fine boxes (ratio 2, strictly interior, coarse-aligned).
 //
-// Distribue (MPI) avec REPLICATION GROSSIERE. Le grossier mono-box est replique : chaque
-// rang en detient une copie identique (DistributionMapping par-rang, ou init deterministe).
-// L'avance grossiere (fill_boundary self-periodique, flux, advance) tourne identiquement
-// sur chaque copie ; les patchs fins sont, eux, repartis. average_down (ecrasement des
-// cellules couvertes) et reflux (addition aux cellules bordantes) remontent par deux
-// buffers grossiers indexes global + all_reduce_sum_inplace, puis chaque rang applique a sa
-// copie -> toutes restent identiques. En serie c'est bit a bit identique au chemin direct
-// (voir le bloc final). Validation : test_mpi_amr_multipatch (np=1/2/4 bit-identiques). Le
-// grossier est petit (niveau de base), la replication est donc assumee ; le chemin N-niveaux
-// recursif (subcycle_level_mp) reste a generaliser de la meme facon (ROADMAP).
+// Distributed (MPI) with COARSE REPLICATION. The single-box coarse level is replicated: each
+// rank holds an identical copy (per-rank DistributionMapping, or deterministic init). The coarse
+// advance (self-periodic fill_boundary, flux, advance) runs identically on each copy; the fine
+// patches are distributed. average_down (overwrite of covered cells) and reflux (addition to
+// bordering cells) gather up through two global-indexed coarse buffers + all_reduce_sum_inplace,
+// then each rank applies to its copy -> all stay identical. In serial this is bit-for-bit
+// identical to the direct path (see the final block). Validation: test_mpi_amr_multipatch
+// (np=1/2/4 bit-identical). The coarse level is small (base level), so the replication is
+// accepted; the recursive N-level path (subcycle_level_mp) still has to be generalized the same
+// way (ROADMAP).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
                                 Real dyc, MultiFab& Uf, const MultiFab& auxc,
@@ -61,19 +58,19 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   const Real dxf = dxc / 2, dyf = dyc / 2, dtf = sched.dt_sub(dt);
   const int NX = dom.nx(), NY = dom.ny();
 
-  // interface grossier-fin : couverture (cellules grossieres ombragees par un patch fin) +
-  // routage bordant du reflux. Couverture batie sur le BoxArray GLOBAL (toutes les boxes,
-  // connues de tous les rangs) -> correct sous MPI.
+  // coarse-fine interface: coverage (coarse cells shadowed by a fine patch) + bordering reflux
+  // routing. Coverage built on the GLOBAL BoxArray (all boxes, known to all ranks) -> correct
+  // under MPI.
   const CoarseFineInterface cfi(Box2D{{0, 0}, {NX - 1, NY - 1}}, Uf.box_array());
   auto covered = [&](int I, int J) { return cfi.covered(I, J); };
 
   MultiFab Uc_old = Uc;
-  fill_periodic_local(Uc, dom);  // grossier replique -> fill periodique local (pas de plan MPI)
+  fill_periodic_local(Uc, dom);  // replicated coarse -> local periodic fill (no MPI plan)
   MultiFab fxc(BoxArray(std::vector<Box2D>{xface_box(Uc.box(0))}), Uc.dmap(), nc, 0);
   MultiFab fyc(BoxArray(std::vector<Box2D>{yface_box(Uc.box(0))}), Uc.dmap(), nc, 0);
   compute_face_fluxes<Limiter, NumericalFlux>(m, Uc, auxc, fxc, fyc, dxc, dyc);
 
-  // registre par box fine : flux grossier (sans dt) sauve aux 4 faces.
+  // per fine-box register: coarse flux (without dt) saved at the 4 faces.
   struct Reg { int I0, I1, J0, J1; std::vector<Real> cL, cR, cB, cT, fL, fR, fB, fT; };
   std::vector<Reg> regs(Uf.local_size());
   {
@@ -102,12 +99,12 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     }
   }
   mf_advance_faces(Uc, fxc, fyc, dxc, dyc, dt);
-  mf_apply_source(m, Uc, auxc, dt);  // source S(U,aux) au sous-pas
+  mf_apply_source(m, Uc, auxc, dt);  // source S(U,aux) at the substep
 
-  // flux fins multi-box : une face-box par box fine GLOBALE, meme dmap que Uf. Bati sur le
-  // box_array() global (et non les boxes locales) pour que BoxArray et DistributionMapping
-  // aient la meme taille sous MPI : fxf.fab(li) correspond alors a Uf.fab(li) (meme dmap,
-  // meme ordre global). En serie c'est identique (local == global).
+  // multi-box fine fluxes: one face-box per GLOBAL fine box, same dmap as Uf. Built on the global
+  // box_array() (not the local boxes) so that BoxArray and DistributionMapping have the same size
+  // under MPI: fxf.fab(li) then corresponds to Uf.fab(li) (same dmap, same global order). In
+  // serial it is identical (local == global).
   std::vector<Box2D> fxb, fyb;
   for (int g = 0; g < Uf.box_array().size(); ++g) {
     fxb.push_back(xface_box(Uf.box_array()[g]));
@@ -119,7 +116,7 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
 
   for (int s = 0; s < sched.count(); ++s) {
     mf_fill_fine_ghosts_multi(Uf, Uc_old, Uc, sched.frac(s));
-    fill_boundary(Uf, fdom, Periodicity{false, false});  // halos fin-fin
+    fill_boundary(Uf, fdom, Periodicity{false, false});  // fine-fine halos
     compute_face_fluxes<Limiter, NumericalFlux>(m, Uf, auxf, fxf, fyf, dxf, dyf);
     device_fence();
     for (int li = 0; li < Uf.local_size(); ++li) {
@@ -141,29 +138,29 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
         }
     }
     mf_advance_faces(Uf, fxf, fyf, dxf, dyf, dtf);
-    mf_apply_source(m, Uf, auxf, dtf);  // source S(U,aux) au sous-pas
+    mf_apply_source(m, Uf, auxf, dtf);  // source S(U,aux) at the substep
   }
 
-  // average_down + reflux DISTRIBUES, le grossier etant REPLIQUE (chaque rang detient une
-  // copie identique apres l'avance grossiere deterministe). Chaque rang verse, pour ses
-  // patchs fins LOCAUX, dans deux buffers grossiers indexes global :
-  //   avg : la moyenne descendante sur les cellules COUVERTES (semantique ecrasement ;
-  //         une seule contribution par cellule, les patchs etant disjoints) ;
-  //   ref : la correction de reflux sur les cellules BORDANTES non couvertes (addition).
-  // all_reduce_sum -> chaque rang a le total, puis applique a SA copie : couvert = avg,
-  // bordant += ref. Toutes les copies restent identiques. En serie (np=1) l'all-reduce est
-  // l'identite et c'est bit a bit identique au direct (0 + moyenne = moyenne exactement ;
-  // avance + correction). Cout : deux buffers NX*NY*nc par rang (replication grossiere).
+  // DISTRIBUTED average_down + reflux, the coarse level being REPLICATED (each rank holds an
+  // identical copy after the deterministic coarse advance). Each rank deposits, for its LOCAL
+  // fine patches, into two global-indexed coarse buffers:
+  //   avg: the average-down over the COVERED cells (overwrite semantics; a single contribution
+  //        per cell since the patches are disjoint);
+  //   ref: the reflux correction on the uncovered BORDERING cells (addition).
+  // all_reduce_sum -> each rank has the total, then applies to ITS copy: covered = avg,
+  // bordering += ref. All copies stay identical. In serial (np=1) the all-reduce is the identity
+  // and it is bit-for-bit identical to the direct path (0 + average = average exactly; advance +
+  // correction). Cost: two NX*NY*nc buffers per rank (coarse replication).
   device_fence();
-  // registre restreint a l'INTERFACE coarse-fine (boite englobante des empreintes fines,
-  // crue de 1 pour les cellules bordantes du reflux, clampee au domaine) : le all_reduce du
-  // gather passe de O(NX*NY) a O(interface). Bit-identique : les cellules hors interface
-  // etaient nulles (non couvertes, sans face), sautees a l'application.
+  // register restricted to the coarse-fine INTERFACE (bounding box of the fine footprints, grown
+  // by 1 for the bordering reflux cells, clamped to the domain): the gather all_reduce goes from
+  // O(NX*NY) to O(interface). Bit-identical: cells outside the interface were zero (uncovered,
+  // without a face), skipped at application.
   const Box2D fpc = coarsen(Uf.box_array(), 2).bounding_box();
   const Box2D rbox{{std::max(fpc.lo[0] - 1, 0), std::max(fpc.lo[1] - 1, 0)},
                    {std::min(fpc.hi[0] + 1, NX - 1), std::min(fpc.hi[1] + 1, NY - 1)}};
-  FluxRegister avg(rbox, nc);  // moyenne descendante (ecrasement des cellules couvertes)
-  FluxRegister ref(rbox, nc);  // reflux (addition aux cellules bordantes)
+  FluxRegister avg(rbox, nc);  // average-down (overwrite of covered cells)
+  FluxRegister ref(rbox, nc);  // reflux (addition to bordering cells)
   for (int li = 0; li < Uf.local_size(); ++li) {
     const ConstArray4 f = Uf.fab(li).const_array();
     Reg& g = regs[li];
@@ -172,61 +169,60 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
         for (int k = 0; k < nc; ++k)
           avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
                                          f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
-    cfi.route_reflux(g, dxc, dyc, dt, ref, nc);  // reflux bordant coverage-aware
+    cfi.route_reflux(g, dxc, dyc, dt, ref, nc);  // coverage-aware bordering reflux
   }
   avg.gather();
   ref.gather();
-  if (Uc.local_size() > 0) {  // chaque rang detenant une copie du grossier l'applique
+  if (Uc.local_size() > 0) {  // each rank holding a copy of the coarse level applies it
     Array4 c = Uc.fab(0).array();
     const Box2D cb = Uc.box(0);
     for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
       for (int I = cb.lo[0]; I <= cb.hi[0]; ++I) {
-        if (!ref.in(I, J)) continue;  // hors interface : ni moyenne ni reflux (etait 0)
+        if (!ref.in(I, J)) continue;  // outside interface: neither average nor reflux (was 0)
         for (int k = 0; k < nc; ++k) {
-          if (covered(I, J)) c(I, J, k) = avg.at(I, J, k);  // moyenne descendante
-          c(I, J, k) += ref.at(I, J, k);                    // reflux (0 si pas de face)
+          if (covered(I, J)) c(I, J, k) = avg.at(I, J, k);  // average-down
+          c(I, J, k) += ref.at(I, J, k);                    // reflux (0 if no face)
         }
       }
   }
 }
 
-// --- MULTI-PATCH N-NIVEAUX (multi-box a CHAQUE niveau) ---
-// Generalise subcycle_level_mf : chaque niveau est un MultiFab multi-box. Le reflux
-// (registre FluxRegister) est coverage-aware ET route la correction vers la box PARENTE
-// contenant la cellule grossiere adjacente. Se reduit BIT A BIT au chemin mono-box quand
-// chaque niveau n'a qu'une box (garde de validation).
+// --- N-LEVEL MULTI-PATCH (multi-box at EACH level) ---
+// Generalizes subcycle_level_mf: each level is a multi-box MultiFab. Reflux (FluxRegister) is
+// coverage-aware AND routes the correction to the PARENT box containing the adjacent coarse cell.
+// Reduces BIT-FOR-BIT to the single-box path when each level has only one box (validation guard).
 //
-// Etat distribue (MPI) : DISTRIBUE et teste bit a bit identique np=1/2/4
-// (test_mpi_amr_multipatch3, 3 niveaux avec un niveau intermediaire multi-box reparti dont le
-// PARENT d'un patch fin tombe sur un autre rang). Le niveau 0 (grossier) est REPLIQUE comme au
-// 2-niveaux ; les niveaux >0 sont repartis et jouent simultanement le role d'enfant et de
-// parent. Les cinq points supposant le parent local (via mf_find_box) sont resolus :
-//   1. mf_fill_fine_ghosts_mb : parent REPLIQUE (lev==1) lu localement ; parent REPARTI
-//      (lev>=2) amene par parallel_copy (parent -> fine-coarsen) puis interpole ;
-//   2. echantillonnage du registre grossier : parent REPLIQUE lu localement, parent REPARTI
-//      amene par parallel_copy vers une grille FACE enfant-coarsen ;
-//   3. mf_average_down_mb : moyenne versee dans un buffer grossier indexe GLOBAL +
-//      all_reduce_sum, appliquee aux boxes parentes locales (replique : tous ; reparti : le
-//      proprietaire) ;
-//   4. reflux : meme buffer global + all_reduce, application gardee par appartenance locale
-//      de la box parente (pas de double comptage car le parent reparti a un seul proprietaire);
-//   5. couverture : deja batie sur le box_array() global (MPI-safe).
-// En serie all_reduce est l'identite et parallel_copy se reduit a des copies memoire : le
-// chemin distribue execute les memes operations flottantes que le mono-rang -> bit-identique.
-// Note : AmrCouplerMP reste limite au mono-rang au-dela de 2 niveaux distribues, car son
-// injection d'aux parent->enfant (inject_aux_mb) suppose encore le parent local via
-// mf_find_box ; l'integrateur amr_step_multilevel_multipatch, lui, est distribue.
+// Distributed state (MPI): DISTRIBUTED and tested bit-for-bit identical np=1/2/4
+// (test_mpi_amr_multipatch3, 3 levels with a distributed multi-box intermediate level whose fine
+// patch PARENT falls on another rank). Level 0 (coarse) is REPLICATED as in the 2-level case;
+// levels >0 are distributed and play the role of both child and parent simultaneously. The five
+// points assuming a local parent (via mf_find_box) are resolved:
+//   1. mf_fill_fine_ghosts_mb: REPLICATED parent (lev==1) read locally; DISTRIBUTED parent
+//      (lev>=2) brought in by parallel_copy (parent -> fine-coarsen) then interpolated;
+//   2. coarse register sampling: REPLICATED parent read locally, DISTRIBUTED parent brought in by
+//      parallel_copy onto a child-coarsen FACE grid;
+//   3. mf_average_down_mb: average deposited in a GLOBAL-indexed coarse buffer + all_reduce_sum,
+//      applied to the local parent boxes (replicated: all; distributed: the owner);
+//   4. reflux: same global buffer + all_reduce, application guarded by local ownership of the
+//      parent box (no double counting since the distributed parent has a single owner);
+//   5. coverage: already built on the global box_array() (MPI-safe).
+// In serial all_reduce is the identity and parallel_copy reduces to memory copies: the
+// distributed path runs the same floating-point operations as the single-rank one -> bit-
+// identical.
+// Note: AmrCouplerMP remains limited to single-rank beyond 2 distributed levels, because its
+// parent->child aux injection (inject_aux_mb) still assumes the parent is local via mf_find_box;
+// the integrator amr_step_multilevel_multipatch, on the other hand, is distributed.
 
-// box LOCALE (valide) contenant la cellule (I,J), ou -1.
+// LOCAL (valid) box containing cell (I,J), or -1.
 inline int mf_find_box(const MultiFab& mf, int I, int J) {
   for (int li = 0; li < mf.local_size(); ++li)
     if (mf.box(li).contains(I, J)) return li;
   return -1;
 }
 
-// BoxArray des boites enfant GROSSIES de ngrow puis coarsenees (ratio 2). Chaque box
-// couvre toutes les cellules grossieres dont l'enfant a besoin, ghosts compris : c'est la
-// grille fine-coarsen du FillPatch (cf. refinement.hpp::interpolate).
+// BoxArray of the child boxes grown by ngrow then coarsened (ratio 2). Each box covers all the
+// coarse cells the child needs, ghosts included: this is the FillPatch fine-coarsen grid (cf.
+// refinement.hpp::interpolate).
 inline BoxArray coarsen_grown(const BoxArray& ba, int ngrow, int r) {
   std::vector<Box2D> b;
   b.reserve(ba.size());
@@ -234,16 +230,16 @@ inline BoxArray coarsen_grown(const BoxArray& ba, int ngrow, int r) {
   return BoxArray{std::move(b)};
 }
 
-// ghosts fins multi-box depuis un parent MULTI-BOX (interp espace constant + temps lin),
-// DISTRIBUE. Deux cas de parent :
-//  - REPLIQUE (niveau 0, replicated_parent=true) : le parent est entierement local sur chaque
-//    rang, on lit directement via mf_find_box (toujours trouve) ; aucune collective. C'est le
-//    chemin du grossier replique, comme le 2-niveaux (parallel_copy violerait l'hypothese de
-//    metadonnees repliquees du parent, dmap par-rang).
-//  - REPARTI (intermediaire) : le parent peut etre sur un autre rang ; on amene ses regions
-//    valides sur une grille enfant-coarsen LOCALE par parallel_copy (routage MPI gere la), puis
-//    on interpole. Plus aucun echec silencieux remote.
-// En serie les deux chemins sont identiques (parent local partout, parallel_copy = copie memoire).
+// multi-box fine ghosts from a MULTI-BOX parent (constant-space + linear-time interp),
+// DISTRIBUTED. Two parent cases:
+//  - REPLICATED (level 0, replicated_parent=true): the parent is fully local on each rank, read
+//    directly via mf_find_box (always found); no collective. This is the replicated-coarse path,
+//    like the 2-level case (parallel_copy would violate the replicated-metadata assumption of the
+//    parent, per-rank dmap).
+//  - DISTRIBUTED (intermediate): the parent may be on another rank; its valid regions are brought
+//    onto a LOCAL child-coarsen grid by parallel_copy (MPI routing handled there), then
+//    interpolated. No more silent remote failures.
+// In serial both paths are identical (parent local everywhere, parallel_copy = memory copy).
 inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const MultiFab& Pn,
                                    Real frac, bool replicated_parent = true) {
   const int nc = Uf.ncomp(), ng = Uf.n_grow();
@@ -257,7 +253,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
           if (!v.contains(i, j)) {
             const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
             const int pb = mf_find_box(Po, ci, cj);
-            if (pb < 0) continue;  // hors couverture parente -> laisse au fill_boundary
+            if (pb < 0) continue;  // outside parent coverage -> leave to fill_boundary
             const ConstArray4 po = Po.fab(pb).const_array(), pn = Pn.fab(pb).const_array();
             fill_cf_ghost_cell(f, po, pn, i, j, nc, frac);
           }
@@ -266,7 +262,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
   }
   const BoxArray pcoarse_ba = coarsen_grown(Uf.box_array(), ng, 2);
   MultiFab Pco(pcoarse_ba, Uf.dmap(), nc, 0), Pcn(pcoarse_ba, Uf.dmap(), nc, 0);
-  parallel_copy(Pco, Po);  // regions parentes (depuis n'importe quel rang) -> grille locale
+  parallel_copy(Pco, Po);  // parent regions (from any rank) -> local grid
   parallel_copy(Pcn, Pn);
   device_fence();
   for (int li = 0; li < Uf.local_size(); ++li) {
@@ -279,27 +275,26 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
   }
 }
 
-// moyenne fin multi-box -> parent multi-box (chaque cellule routee vers sa box parente),
-// DISTRIBUE. La box parente d'une cellule grossiere peut etre sur un autre rang, et le parent
-// peut etre soit REPLIQUE (niveau 0, chaque rang en a une copie), soit REPARTI (intermediaire,
-// un seul proprietaire). Les deux sont couverts par un buffer grossier indexe GLOBAL :
-// chaque rang verse la moyenne 2x2 de SES patchs fins locaux (0 ailleurs ; patchs disjoints
-// donc une seule contribution par cellule couverte), all_reduce_sum -> chaque rang a le total,
-// puis applique a SES boxes parentes locales (ecrasement). Replique : tous appliquent la meme
-// valeur a leur copie. Reparti : seul le proprietaire applique. En serie all_reduce est
-// l'identite (0 + moyenne = moyenne) -> bit a bit identique au routage direct.
+// multi-box fine average -> multi-box parent (each cell routed to its parent box), DISTRIBUTED.
+// The parent box of a coarse cell may be on another rank, and the parent may be either REPLICATED
+// (level 0, each rank has a copy) or DISTRIBUTED (intermediate, a single owner). Both are covered
+// by a GLOBAL-indexed coarse buffer: each rank deposits the 2x2 average of ITS local fine patches
+// (0 elsewhere; disjoint patches so a single contribution per covered cell), all_reduce_sum ->
+// each rank has the total, then applies to ITS local parent boxes (overwrite). Replicated: all
+// apply the same value to their copy. Distributed: only the owner applies. In serial all_reduce
+// is the identity (0 + average = average) -> bit-for-bit identical to the direct routing.
 inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
   const int nc = std::min(Uf.ncomp(), Uc.ncomp());
-  // boite englobante grossiere (indices GLOBAUX) couvrant toutes les empreintes enfant.
+  // coarse bounding box (GLOBAL indices) covering all the child footprints.
   const BoxArray cba = coarsen(Uf.box_array(), 2);
   Box2D bb{{0, 0}, {-1, -1}};
   for (int g = 0; g < cba.size(); ++g)
     bb = (g == 0) ? cba[g] : Box2D{{std::min(bb.lo[0], cba[g].lo[0]), std::min(bb.lo[1], cba[g].lo[1])},
                                    {std::max(bb.hi[0], cba[g].hi[0]), std::max(bb.hi[1], cba[g].hi[1])}};
-  if (bb.empty()) { all_reduce_sum_inplace(nullptr, 0); return; }  // collective appariee a vide
-  FluxRegister avg(bb, nc);  // moyenne descendante multi-box (region = boite englobante)
-  // couverture GLOBALE (toutes les empreintes enfant) : seules ces cellules sont ecrasees ;
-  // la boite englobante peut contenir des trous entre patchs disjoints qu'il ne faut PAS ecraser.
+  if (bb.empty()) { all_reduce_sum_inplace(nullptr, 0); return; }  // empty matched collective
+  FluxRegister avg(bb, nc);  // multi-box average-down (region = bounding box)
+  // GLOBAL coverage (all child footprints): only these cells are overwritten; the bounding box
+  // may contain holes between disjoint patches that must NOT be overwritten.
   CoverageMask cmask(bb);
   for (int g = 0; g < cba.size(); ++g) cmask.mark(cba[g]);
   auto covered = [&](int I, int J) { return cmask.covered(I, J); };
@@ -324,27 +319,28 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
   }
 }
 
-// un niveau de la hierarchie multi-patch (U + aux multi-box, meme BoxArray).
+// one level of the multi-patch hierarchy (U + multi-box aux, same BoxArray).
 struct AmrLevelMP {
   MultiFab U;
   const MultiFab* aux;
   Real dx, dy;
 };
 
-// registre par patch enfant (coords PARENTES I0..J1). c* = flux grossier (sans dt) ;
-// f* = flux fin time-integre accumule par l'enfant durant le sous-cyclage.
+// per child-patch register (PARENT coords I0..J1). c* = coarse flux (without dt);
+// f* = time-integrated fine flux accumulated by the child during subcycling.
 struct RegMP {
   int I0, I1, J0, J1;
   std::vector<Real> cL, cR, cB, cT, fL, fR, fB, fT;
 };
 
-namespace detail {  // moteur N-niveaux multi-patch INTERNE ; la facade publique est advance_amr
+namespace detail {  // INTERNAL N-level multi-patch engine; the public facade is advance_amr
 
-// Remplit les ghosts d'un niveau AMR : niveau 0 = CL du domaine de base (fill_boundary) ; niveau
-// > 0 = ghosts grossier-fin temps-interpoles depuis le parent a la position frac (mf_fill_fine_ghosts_mb)
-// PUIS halos fin-fin (fill_boundary). Factorise de la tete de subcycle_level_mp, REUTILISE par
-// l'avance SSPRK3 qui doit reremplir les ghosts AVANT chaque evaluation de flux d'etage. Le parent
-// n'est REPLIQUE que pour lev == 1 (niveau 0 replique), sinon reparti (parallel_copy interne).
+// Fills the ghosts of an AMR level: level 0 = base-domain BC (fill_boundary); level > 0 =
+// time-interpolated coarse-fine ghosts from the parent at position frac (mf_fill_fine_ghosts_mb)
+// THEN fine-fine halos (fill_boundary). Factored out of the head of subcycle_level_mp, REUSED by
+// the SSPRK3 advance which must refill the ghosts BEFORE each stage flux evaluation. The parent
+// is REPLICATED only for lev == 1 (replicated level 0), otherwise distributed (internal
+// parallel_copy).
 inline void ssprk3_refill_level_ghosts(MultiFab& U, int lev, const Box2D& base_dom,
                                        Periodicity base_per, const MultiFab* pOld,
                                        const MultiFab* pNew, Real frac, bool coarse_replicated) {
@@ -357,35 +353,36 @@ inline void ssprk3_refill_level_ghosts(MultiFab& U, int lev, const Box2D& base_d
   }
 }
 
-// SSPRK3 (Shu-Osher, 3 etages, ordre 3) a UN niveau AMR. (1) Avance lv.U de t a t+dt :
-//   U1 = U0 + dt L(U0) ; U2 = 3/4 U0 + 1/4 (U1 + dt L(U1)) ; U_new = 1/3 U0 + 2/3 (U2 + dt L(U2))
-// avec L(U) = -div F(U) + S(U) (source EXPLICITE par etage, evaluee au meme etat que le flux : vrai
-// SSPRK methode-des-lignes, cf. mf_eval_rhs -- l'IMEX n'est PAS supporte, rejet en amont). (2) Remplit
-// (fx, fy) du FLUX EFFECTIF du pas    Feff = 1/6 F(U0) + 1/6 F(U1) + 2/3 F(U2)    qui est EXACTEMENT
-// le flux de transport vu par l'etat final (U_new = U0 - dt div Feff + dt Seff). C'est ce flux que le
-// reflux conservatif doit enregistrer (cote grossier g.c* et cote fin g.f*), d'ou son ecriture dans
-// (fx, fy) la ou le chemin Euler y laisse l'unique flux F(U0). En ENTREE (fx, fy) contiennent deja
-// F(U0) (etage 0, calcule par l'appelant avant l'appel). Entre etages, les ghosts sont remis a jour
-// par ssprk3_refill_level_ghosts au MEME frac : le bord grossier-fin est GELE sur le sous-pas (les
-// niveaux ne croisent pas leurs etages, cf. en-tete subcycle_level_mp / sous-cyclage). saxpy/lincomb
-// et le foncteur RHS sont des kernels device-clean (foncteurs nommes), pas de lambda etendue.
+// SSPRK3 (Shu-Osher, 3 stages, order 3) on ONE AMR level. (1) Advance lv.U from t to t+dt:
+//   U1 = U0 + dt L(U0); U2 = 3/4 U0 + 1/4 (U1 + dt L(U1)); U_new = 1/3 U0 + 2/3 (U2 + dt L(U2))
+// with L(U) = -div F(U) + S(U) (EXPLICIT source per stage, evaluated at the same state as the
+// flux: true SSPRK method-of-lines, cf. mf_eval_rhs -- IMEX is NOT supported, rejected upstream).
+// (2) Fills (fx, fy) with the EFFECTIVE FLUX of the step    Feff = 1/6 F(U0) + 1/6 F(U1) + 2/3 F(U2)
+// which is EXACTLY the transport flux seen by the final state (U_new = U0 - dt div Feff + dt Seff).
+// This is the flux the conservative reflux must record (coarse side g.c* and fine side g.f*), hence
+// its write into (fx, fy) where the Euler path leaves the single flux F(U0). On INPUT (fx, fy)
+// already contain F(U0) (stage 0, computed by the caller before the call). Between stages, the
+// ghosts are refreshed by ssprk3_refill_level_ghosts at the SAME frac: the coarse-fine boundary is
+// FROZEN over the substep (the levels do not cross their stages, cf. subcycle_level_mp header /
+// subcycling). saxpy/lincomb and the RHS functor are device-clean kernels (named functors), no
+// extended lambda.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx, MultiFab& fy,
                           bool recon_prim, int lev, const Box2D& base_dom, Periodicity base_per,
                           const MultiFab* pOld, const MultiFab* pNew, Real frac,
                           bool coarse_replicated) {
   const int nc = lv.U.ncomp();
-  MultiFab U0 = lv.U;  // etat de depart t (combinaisons convexes de Shu-Osher)
+  MultiFab U0 = lv.U;  // starting state t (Shu-Osher convex combinations)
   MultiFab R(lv.U.box_array(), lv.U.dmap(), nc, 0);
-  MultiFab Fxs(fx.box_array(), fx.dmap(), nc, 0), Fys(fy.box_array(), fy.dmap(), nc, 0);  // flux d'etage
+  MultiFab Fxs(fx.box_array(), fx.dmap(), nc, 0), Fys(fy.box_array(), fy.dmap(), nc, 0);  // stage flux
 
-  // --- etage 0 : F(U0) deja dans (fx, fy), R0 = -div F0 + S(U0) ---
+  // --- stage 0: F(U0) already in (fx, fy), R0 = -div F0 + S(U0) ---
   mf_eval_rhs(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, R);
   saxpy(lv.U, dt, R);                          // lv.U = U1 = U0 + dt R0
-  lincomb(fx, Real(1) / 6, fx, Real(0), fx);   // Feff <- 1/6 F0 (aliasing point a point, sans danger)
+  lincomb(fx, Real(1) / 6, fx, Real(0), fx);   // Feff <- 1/6 F0 (pointwise aliasing, safe)
   lincomb(fy, Real(1) / 6, fy, Real(0), fy);
 
-  // --- etage 1 : F(U1) ---
+  // --- stage 1: F(U1) ---
   ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated);
   compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim);
   device_fence();
@@ -395,7 +392,7 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
   saxpy(fx, Real(1) / 6, Fxs);                                // Feff += 1/6 F1
   saxpy(fy, Real(1) / 6, Fys);
 
-  // --- etage 2 : F(U2) ---
+  // --- stage 2: F(U2) ---
   ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated);
   compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim);
   device_fence();
@@ -404,7 +401,7 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
   lincomb(lv.U, Real(1) / 3, U0, Real(2) / 3, lv.U);          // lv.U = U_new (t + dt)
   saxpy(fx, Real(2) / 3, Fxs);                                // Feff += 2/3 F2
   saxpy(fy, Real(2) / 3, Fys);
-  device_fence();  // (fx, fy) = Feff et lv.U = U_new coherents pour les lectures hote (parentRegs/reflux)
+  device_fence();  // (fx, fy) = Feff and lv.U = U_new consistent for host reads (parentRegs/reflux)
 }
 
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
@@ -414,13 +411,13 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
                        bool coarse_replicated = true, bool recon_prim = false,
                        bool imex = false, const NewtonOptions& nopts = {},
                        AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
-  // SSPRK3 + IMEX : combinaison NON VALIDEE (la source raide implicite par etage SSP n'a pas ete
-  // verifiee), rejetee EXPLICITEMENT plutot que jouee en silence. La facade ne peut pas la produire
-  // (time.kind est un selecteur unique : "ssprk3" XOR "imex"), garde de defense en profondeur ici.
+  // SSPRK3 + IMEX: combination NOT VALIDATED (the per-stage implicit stiff source under SSP has
+  // not been verified), rejected EXPLICITLY rather than run silently. The facade cannot produce it
+  // (time.kind is a single selector: "ssprk3" XOR "imex"), defense-in-depth guard here.
   if (tmethod == AmrTimeMethod::kSsprk3 && imex)
     throw std::runtime_error(
-        "subcycle_level_mp : SSPRK3 + IMEX non supporte (combinaison non validee) ; utiliser "
-        "time='ssprk3' (source explicite par etage) ou time='imex' (Euler avant + source implicite)");
+        "subcycle_level_mp: SSPRK3 + IMEX unsupported (combination not validated); use "
+        "time='ssprk3' (explicit source per stage) or time='imex' (forward Euler + implicit source)");
   const SubcyclingSchedule sched(2);
   const int nc = L[lev].U.ncomp();
   AmrLevelMP& lv = L[lev];
@@ -430,17 +427,17 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   if (lev == 0) {
     fill_boundary(lv.U, base_dom, base_per);
   } else {
-    // parent (niveau lev-1) REPLIQUE seulement s'il s'agit du niveau 0 (lev == 1) ; sinon
-    // reparti -> FillPatch par parallel_copy.
+    // parent (level lev-1) REPLICATED only if it is level 0 (lev == 1); otherwise distributed ->
+    // FillPatch by parallel_copy.
     mf_fill_fine_ghosts_mb(lv.U, *pOld, *pNew, frac,
                            /*replicated_parent=*/(lev == 1) && coarse_replicated);
     const Box2D fdom = Box2D::from_extents(base_dom.nx() << lev, base_dom.ny() << lev);
-    fill_boundary(lv.U, fdom, Periodicity{false, false});  // halos fin-fin
+    fill_boundary(lv.U, fdom, Periodicity{false, false});  // fine-fine halos
   }
 
-  // face-box par box GLOBALE + meme dmap (cf. amr_step_2level_multipatch) : BoxArray et
-  // DistributionMapping de meme taille sous MPI, fx.fab(li) <-> lv.U.fab(li). Identique en
-  // serie (local == global).
+  // face-box per GLOBAL box + same dmap (cf. amr_step_2level_multipatch): BoxArray and
+  // DistributionMapping of the same size under MPI, fx.fab(li) <-> lv.U.fab(li). Identical in
+  // serial (local == global).
   std::vector<Box2D> fxb, fyb;
   for (int g = 0; g < lv.U.box_array().size(); ++g) {
     fxb.push_back(xface_box(lv.U.box_array()[g]));
@@ -451,24 +448,25 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, recon_prim);
   device_fence();
 
-  // SSPRK3 : on AVANCE D'ABORD lv.U de t a t+dt (3 etages) ET on remplace (fx, fy) -- qui contiennent
-  // l'unique flux F(U0) du chemin Euler -- par le FLUX EFFECTIF Feff = 1/6 F0 + 1/6 F1 + 2/3 F2. Tout
-  // le reste de la fonction (registre du parent, registres des enfants, flux grossier sauve, reflux)
-  // lit (fx, fy) et l'etat avance EXACTEMENT comme en Euler : enregistrer Feff (au lieu de F0) rend le
-  // reflux conservatif pour le pas SSP complet (le cote grossier g.c* = Feff grossier, le cote fin
-  // g.f* = somme des Feff fins sous-cycles, et la correction -(g.f - g.c*dt)/dx remplace bien le flux
-  // grossier effectif par le flux fin effectif). L'etat de depart est sauve AVANT l'avance pour
-  // l'interpolation temporelle des enfants (role grossier). En Euler (ssprk3 == false) ce bloc est
-  // saute et l'avance reste celle d'origine, en place plus bas -> strictement bit-identique.
+  // SSPRK3: we FIRST advance lv.U from t to t+dt (3 stages) AND replace (fx, fy) -- which contain
+  // the single flux F(U0) of the Euler path -- with the EFFECTIVE FLUX Feff = 1/6 F0 + 1/6 F1 +
+  // 2/3 F2. All the rest of the function (parent register, child registers, saved coarse flux,
+  // reflux) reads (fx, fy) and the advanced state EXACTLY as in Euler: recording Feff (instead of
+  // F0) makes the reflux conservative for the full SSP step (the coarse side g.c* = coarse Feff,
+  // the fine side g.f* = sum of the subcycled fine Feff, and the correction -(g.f - g.c*dt)/dx
+  // correctly replaces the effective coarse flux with the effective fine flux). The starting state
+  // is saved BEFORE the advance for the temporal interpolation of the children (coarse role). In
+  // Euler (ssprk3 == false) this block is skipped and the advance stays the original one, in place
+  // below -> strictly bit-identical.
   const bool is_leaf = (lev + 1 >= static_cast<int>(L.size()));
-  MultiFab ssp_U_old;  // etat t (capture pre-avance) ; rempli seulement pour SSPRK3 + role grossier
+  MultiFab ssp_U_old;  // state t (pre-advance capture); filled only for SSPRK3 + coarse role
   if (ssprk3) {
-    if (!is_leaf) ssp_U_old = lv.U;  // les enfants interpolent entre cet etat (t) et lv.U avance (t+dt)
+    if (!is_leaf) ssp_U_old = lv.U;  // the children interpolate between this state (t) and advanced lv.U (t+dt)
     ssprk3_advance_level<Limiter, NumericalFlux>(m, lv, dt, fx, fy, recon_prim, lev, base_dom,
                                                  base_per, pOld, pNew, frac, coarse_replicated);
   }
 
-  if (parentRegs) {  // role FIN : flux fins de CE niveau dans le registre du parent
+  if (parentRegs) {  // FINE role: fine fluxes of THIS level into the parent register
     for (int li = 0; li < np; ++li) {
       RegMP& g = (*parentRegs)[li];
       const ConstArray4 FX = fx.fab(li).const_array(), FY = fy.fab(li).const_array();
@@ -489,33 +487,32 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     }
   }
 
-  if (is_leaf) {  // feuille
-    if (!ssprk3) {  // Euler avant (chemin historique) ; SSPRK3 a deja avance lv.U ci-dessus
+  if (is_leaf) {  // leaf
+    if (!ssprk3) {  // forward Euler (legacy path); SSPRK3 already advanced lv.U above
       mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
-      mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // source explicite ou IMEX (options Newton)
+      mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // explicit or IMEX source (Newton options)
     }
     return;
   }
 
-  // role GROSSIER pour lev+1 : interface grossier-fin (couverture GLOBALE MPI-safe + routage
-  // bordant du reflux) + registres + flux grossier sauve.
+  // COARSE role for lev+1: coarse-fine interface (GLOBAL MPI-safe coverage + bordering reflux
+  // routing) + registers + saved coarse flux.
   const int NX = base_dom.nx() << lev, NY = base_dom.ny() << lev;
   const CoarseFineInterface cfi(Box2D{{0, 0}, {NX - 1, NY - 1}}, L[lev + 1].U.box_array());
   auto covered = [&](int I, int J) { return cfi.covered(I, J); };
 
-  // Point 2 distribue : le flux grossier fx/fy vit sur la dmap du PARENT (lv.U), donc fx.fab
-  // est sur le rang proprietaire de la box parente, pas forcement celui de l'enfant. Deux cas :
-  //  - parent REPLIQUE (lev == 0) : fx/fy entierement locaux, on echantillonne directement via
-  //    mf_find_box (toujours trouve) ; aucune collective (parallel_copy violerait la
-  //    replication du parent) ;
-  //  - parent REPARTI (lev >= 1) : on amene les flux grossiers necessaires sur une grille FACE
-  //    enfant-coarsen (dmap de l'enfant) par parallel_copy, chaque enfant lit alors localement.
-  // Le niveau 0 n'est REPLIQUE que si coarse_replicated : a la de-replication (grossier multi-box
-  // reparti), il devient REPARTI comme les niveaux fins, et mf_find_box(lv.U, I, J) renverrait -1
-  // pour une cellule grossiere bordante possedee par un rang DISTANT (-> fab(-1), segfault). On
-  // route alors vers le chemin parallel_copy (empreinte grossiere par enfant), MPI-correct.
+  // Distributed point 2: the coarse flux fx/fy lives on the PARENT dmap (lv.U), so fx.fab is on
+  // the rank owning the parent box, not necessarily the child's. Two cases:
+  //  - REPLICATED parent (lev == 0): fx/fy fully local, sampled directly via mf_find_box (always
+  //    found); no collective (parallel_copy would violate parent replication);
+  //  - DISTRIBUTED parent (lev >= 1): the needed coarse fluxes are brought onto a child-coarsen
+  //    FACE grid (child dmap) by parallel_copy, each child then reads locally.
+  // Level 0 is REPLICATED only if coarse_replicated: at de-replication (distributed multi-box
+  // coarse level), it becomes DISTRIBUTED like the fine levels, and mf_find_box(lv.U, I, J) would
+  // return -1 for a bordering coarse cell owned by a REMOTE rank (-> fab(-1), segfault). We then
+  // route to the parallel_copy path (per-child coarse footprint), MPI-correct.
   const bool replicated_parent = (lev == 0) && coarse_replicated;
-  const BoxArray cba = coarsen(L[lev + 1].U.box_array(), 2);  // empreinte grossiere par enfant
+  const BoxArray cba = coarsen(L[lev + 1].U.box_array(), 2);  // per-child coarse footprint
   MultiFab cfx, cfy;
   if (!replicated_parent) {
     std::vector<Box2D> cfxb, cfyb;
@@ -525,7 +522,7 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     }
     cfx = MultiFab(BoxArray(std::move(cfxb)), L[lev + 1].U.dmap(), nc, 0);
     cfy = MultiFab(BoxArray(std::move(cfyb)), L[lev + 1].U.dmap(), nc, 0);
-    parallel_copy(cfx, fx);  // flux grossier aux faces -> grille enfant-coarsen locale
+    parallel_copy(cfx, fx);  // coarse face fluxes -> local child-coarsen grid
     parallel_copy(cfy, fy);
   }
   device_fence();
@@ -544,9 +541,9 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     if (replicated_parent) {
       for (int J = g.J0; J <= g.J1; ++J) {
         const int bL = mf_find_box(lv.U, g.I0, J), bR = mf_find_box(lv.U, g.I1, J);
-        // invariant parent-replique : parent entierement local (cf. supra), mf_find_box trouve
-        // toujours la box ; un -1 indexerait fab(-1) (segfault). Le cas reparti passe par l'else.
-        assert(bL >= 0 && bR >= 0 && "subcycle_level_mp : invariant parent-replique viole (box grossiere x introuvable)");
+        // replicated-parent invariant: parent fully local (cf. above), mf_find_box always finds
+        // the box; a -1 would index fab(-1) (segfault). The distributed case goes through the else.
+        assert(bL >= 0 && bR >= 0 && "subcycle_level_mp: replicated-parent invariant violated (coarse box x not found)");
         const ConstArray4 FXL = fx.fab(bL).const_array(), FXR = fx.fab(bR).const_array();
         for (int k = 0; k < nc; ++k) {
           g.cL[(J - g.J0) * nc + k] = FXL(g.I0, J, k);
@@ -555,8 +552,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
       }
       for (int I = g.I0; I <= g.I1; ++I) {
         const int bB = mf_find_box(lv.U, I, g.J0), bT = mf_find_box(lv.U, I, g.J1);
-        // meme invariant parent-replique que ci-dessus (faces y) : box grossiere toujours trouvee.
-        assert(bB >= 0 && bT >= 0 && "subcycle_level_mp : invariant parent-replique viole (box grossiere y introuvable)");
+        // same replicated-parent invariant as above (y faces): coarse box always found.
+        assert(bB >= 0 && bT >= 0 && "subcycle_level_mp: replicated-parent invariant violated (coarse box y not found)");
         const ConstArray4 FYB = fy.fab(bB).const_array(), FYT = fy.fab(bT).const_array();
         for (int k = 0; k < nc; ++k) {
           g.cB[(I - g.I0) * nc + k] = FYB(I, g.J0, k);
@@ -578,48 +575,49 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     }
   }
 
-  // etat t pour l'interpolation temporelle des enfants. SSPRK3 : lv.U est DEJA avance (l'avance a eu
-  // lieu plus haut, dans ssprk3_advance_level), l'etat t est la copie pre-avance ssp_U_old ; Euler :
-  // lv.U est encore l'etat t ici (l'avance est juste en dessous), donc U_old = lv.U (copie historique).
+  // state t for the temporal interpolation of the children. SSPRK3: lv.U is ALREADY advanced (the
+  // advance happened above, in ssprk3_advance_level), the state t is the pre-advance copy
+  // ssp_U_old; Euler: lv.U is still the state t here (the advance is just below), so U_old = lv.U
+  // (legacy copy).
   MultiFab U_old = ssprk3 ? ssp_U_old : lv.U;
-  if (!ssprk3) {  // Euler avant (chemin historique) ; SSPRK3 a deja avance lv.U
+  if (!ssprk3) {  // forward Euler (legacy path); SSPRK3 already advanced lv.U
     mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
-    mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // source explicite ou IMEX (options Newton)
+    mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // explicit or IMEX source (Newton options)
   }
-  for (int s = 0; s < sched.count(); ++s)  // chaque sous-pas fin = un pas SSP complet (tmethod propage)
+  for (int s = 0; s < sched.count(); ++s)  // each fine substep = one full SSP step (tmethod propagated)
     subcycle_level_mp<Limiter, NumericalFlux>(m, L, lev + 1, sched.dt_sub(dt), base_dom, base_per,
                                               &U_old, &lv.U, sched.frac(s), &regs,
                                               coarse_replicated, recon_prim, imex, nopts, tmethod);
-  mf_average_down_mb(L[lev + 1].U, lv.U);  // point 3 distribue (parallel_copy)
+  mf_average_down_mb(L[lev + 1].U, lv.U);  // distributed point 3 (parallel_copy)
 
-  // Point 4 distribue : reflux coverage-aware. La cellule grossiere bordante peut appartenir
-  // a une box parente REMOTE. On verse, pour chaque enfant LOCAL, la correction (cL/fL deja
-  // locaux apres parallel_copy) dans un buffer grossier indexe GLOBAL, all_reduce -> chaque
-  // rang a le registre complet, puis chaque rang applique a SES boxes parentes locales (le
-  // parent etant reparti, chaque cellule n'a qu'un proprietaire : pas de double comptage).
-  // En serie all_reduce est l'identite et l'application directe -> bit a bit identique.
+  // Distributed point 4: coverage-aware reflux. The bordering coarse cell may belong to a REMOTE
+  // parent box. For each LOCAL child, we deposit the correction (cL/fL already local after
+  // parallel_copy) into a GLOBAL-indexed coarse buffer, all_reduce -> each rank has the full
+  // register, then each rank applies to ITS local parent boxes (the parent being distributed,
+  // each cell has only one owner: no double counting). In serial all_reduce is the identity and
+  // application is direct -> bit-for-bit identical.
   device_fence();
-  // registre restreint a l'INTERFACE : boite englobante des empreintes fines (coarsen du
-  // niveau lev+1), crue de 1, clampee au niveau lev. all_reduce O(interface), bit-identique.
+  // register restricted to the INTERFACE: bounding box of the fine footprints (coarsen of level
+  // lev+1), grown by 1, clamped to level lev. all_reduce O(interface), bit-identical.
   const Box2D fpcn = coarsen(L[lev + 1].U.box_array(), 2).bounding_box();
   const Box2D rbox{{std::max(fpcn.lo[0] - 1, 0), std::max(fpcn.lo[1] - 1, 0)},
                    {std::min(fpcn.hi[0] + 1, NX - 1), std::min(fpcn.hi[1] + 1, NY - 1)}};
-  FluxRegister ref(rbox, nc);  // reflux N-niveaux (interface)
+  FluxRegister ref(rbox, nc);  // N-level reflux (interface)
   for (int lc = 0; lc < static_cast<int>(regs.size()); ++lc)
-    cfi.route_reflux(regs[lc], lv.dx, lv.dy, dt, ref, nc);  // reflux bordant coverage-aware
+    cfi.route_reflux(regs[lc], lv.dx, lv.dy, dt, ref, nc);  // coverage-aware bordering reflux
   ref.gather();
-  for (int pb = 0; pb < lv.U.local_size(); ++pb) {  // application aux boxes parentes locales
+  for (int pb = 0; pb < lv.U.local_size(); ++pb) {  // application to the local parent boxes
     Array4 c = lv.U.fab(pb).array();
     const Box2D pbx = lv.U.box(pb);
     for (int J = pbx.lo[1]; J <= pbx.hi[1]; ++J)
       for (int I = pbx.lo[0]; I <= pbx.hi[0]; ++I) {
-        if (!ref.in(I, J)) continue;  // hors interface : reflux nul
+        if (!ref.in(I, J)) continue;  // outside interface: zero reflux
         for (int k = 0; k < nc; ++k) c(I, J, k) += ref.at(I, J, k);
       }
   }
 }
 
-// Driver : un pas dt de la hierarchie multi-patch N-niveaux (niveau 0 = grossier).
+// Driver: one dt step of the N-level multi-patch hierarchy (level 0 = coarse).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
                                     const Box2D& dom, Real dt,
@@ -631,6 +629,6 @@ void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
                                             coarse_replicated, recon_prim, imex, nopts, tmethod);
 }
 
-}  // namespace detail (moteur N-niveaux multi-patch)
+}  // namespace detail (N-level multi-patch engine)
 
 }  // namespace adc

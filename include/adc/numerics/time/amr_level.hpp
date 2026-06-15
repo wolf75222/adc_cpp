@@ -1,44 +1,33 @@
 #pragma once
-// Oracle AMR mono-box MultiFab (detail::AmrLevelMF + subcycle_level_mf) : validation MF->MP.
-
 #include <adc/numerics/time/amr_flux_helpers.hpp>
 
 /// @file
-/// @brief Pile AMR MultiFab mono-box : struct detail::AmrLevelMF et le moteur recursif
-///        (amr_step_2level_mf, subcycle_level_mf, amr_step_multilevel_mf). ORACLE DE TEST,
-///        hors production.
+/// @brief Single-box MultiFab AMR stack: struct detail::AmrLevelMF and the recursive
+///        engine (amr_step_2level_mf, subcycle_level_mf, amr_step_multilevel_mf). TEST
+///        ORACLE, out of production.
 ///
-/// Couche : `include/adc/numerics/time`.
-/// Role : moteur AMR MONO-BOX d'origine, conserve en detail:: comme oracle de validation.
-///        Maillon intermediaire de la chaine de parite Fab2D (amr_reflux.hpp) -> MF (ici) ->
-///        MP (amr_subcycling.hpp), qui prouve le moteur multi-patch bit-identique au mono-box
-///        jusqu'a N niveaux (ce que le test Fab2D 2-niveaux/1-comp/Rusanov seul ne couvre pas).
-/// Contrat : un pas conservatif a sous-cyclage Berger-Oliger (ratio 2, dt/2 par sous-pas) avec
-///           reflux a chaque interface coarse-fine ; CL periodiques au niveau 0.
+/// Layer: `include/adc/numerics/time`.
+/// Role: original SINGLE-BOX AMR engine, kept in detail:: as a validation oracle.
+///       Intermediate link of the Fab2D (amr_reflux.hpp) -> MF (here) -> MP
+///       (amr_subcycling.hpp) parity chain, which proves the multi-patch engine
+///       bit-identical to the single-box one up to N levels (which the Fab2D
+///       2-level/1-comp/Rusanov-only test does not cover).
+/// Contract: one conservative step with Berger-Oliger subcycling (ratio 2, dt/2 per
+///           substep) with reflux at each coarse-fine interface; periodic BCs at level 0.
 ///
-/// Invariants :
-/// - plus appele en production (AmrCoupler passe par advance_amr) ;
-/// - gardes de parite : test_amr_reflux_mf (vs Fab2D), test_amr_multilevel_mf,
-///   test_amr_multilevel_multipatch garde 1 (MP vs MF, max|dUc| == 0) ;
-/// - aux detenu ailleurs (pointeur) ; rC* = region (coords de CE niveau) raffinee par l'enfant,
-///   valable seulement si has_fine.
+/// Invariants:
+/// - no longer called in production (AmrCoupler goes through advance_amr);
+/// - parity guards: test_amr_reflux_mf (vs Fab2D), test_amr_multilevel_mf,
+///   test_amr_multilevel_multipatch guard 1 (MP vs MF, max|dUc| == 0);
+/// - aux held elsewhere (pointer); rC* = region (coords of THIS level) refined by the
+///   child, valid only if has_fine.
 
 namespace adc {
 
-// === PILE MF : ORACLE DE TEST, HORS PRODUCTION ===================================
-// amr_step_2level_mf / amr_step_multilevel_mf + AmrLevelMF : le moteur AMR MONO-BOX
-// d'origine. Plus appele en production (AmrCoupler passe par advance_amr, le moteur
-// unifie multi-patch). Conserve en detail:: comme ORACLE de validation : la chaine
-// Fab2D (amr_reflux.hpp::amr_step_2level) -> MF (ici) -> MP (detail::subcycle_level_mp)
-// prouve le moteur MP bit-identique au mono-box, jusqu'a N niveaux (ce que Fab2D seul,
-// 2-niveaux/1-comp/Rusanov, ne couvre pas). Gardes : test_amr_reflux_mf (vs Fab2D),
-// test_amr_multilevel_mf, test_amr_multilevel_multipatch garde 1 (MP vs MF, max|dUc|=0).
-// Les helpers partages restent a portee adc:: (mf_advance_faces, mf_average_down,
-// mf_fill_fine_ghosts_t), utilises aussi par les tests d'init.
 namespace detail {
 
-// Un niveau de la hierarchie MultiFab. aux detenu ailleurs (pointeur). rC* = region
-// (coords de CE niveau) raffinee par l'enfant ; valable si has_fine.
+// One level of the MultiFab hierarchy. aux held elsewhere (pointer). rC* = region
+// (coords of THIS level) refined by the child; valid if has_fine.
 struct AmrLevelMF {
   MultiFab U;
   const MultiFab* aux;
@@ -47,9 +36,9 @@ struct AmrLevelMF {
   bool has_fine;
 };
 
-// Un pas 2-niveaux conservatif. Uc : grossier (domaine periodique, ghosts pour le
-// Limiter). Uf : fin (box raffinee). auxc/auxf : (phi, grad phi) prescrits, ghosts
-// remplis. dt = pas grossier ; le fin fait r=2 sous-pas de dt/2 puis reflux.
+// One conservative 2-level step. Uc: coarse (periodic domain, ghosts for the
+// Limiter). Uf: fine (refined box). auxc/auxf: (phi, grad phi) prescribed, ghosts
+// filled. dt = coarse step; the fine one does r=2 substeps of dt/2 then reflux.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
                         Real dyc, MultiFab& Uf, int CI0, int CI1, int CJ0, int CJ1,
@@ -57,9 +46,9 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
   const int r = 2, nc = Uc.ncomp();
   const Real dxf = dxc / 2, dyf = dyc / 2, dtf = dt / r;
   const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
-  MultiFab Uc_old = Uc;  // etat grossier au temps t (interp temporelle des ghosts fins)
+  MultiFab Uc_old = Uc;  // coarse state at time t (temporal interp of fine ghosts)
 
-  // --- flux grossiers aux 4 faces de la region fine (avant maj) ---
+  // --- coarse fluxes at the 4 faces of the fine region (before update) ---
   fill_boundary(Uc, dom, Periodicity{true, true});
   MultiFab fxc(BoxArray(std::vector<Box2D>{xface_box(Uc.box(0))}), Uc.dmap(), nc, 0);
   MultiFab fyc(BoxArray(std::vector<Box2D>{yface_box(Uc.box(0))}), Uc.dmap(), nc, 0);
@@ -79,10 +68,10 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
         cT[(I - CI0) * nc + k] = FY(I, CJ1 + 1, k);
       }
   }
-  mf_advance_faces(Uc, fxc, fyc, dxc, dyc, dt);  // Uc -> etat t+dt
-  mf_apply_source(m, Uc, auxc, dt);  // source S(U,aux) au sous-pas
+  mf_advance_faces(Uc, fxc, fyc, dxc, dyc, dt);  // Uc -> state t+dt
+  mf_apply_source(m, Uc, auxc, dt);  // source S(U,aux) at the substep
 
-  // --- sous-cyclage fin : r sous-pas, accumulation des flux fins (x dtf) ---
+  // --- fine subcycling: r substeps, accumulation of fine fluxes (x dtf) ---
   std::vector<Real> fL(nJ * nc, 0), fR(nJ * nc, 0), fB(nI * nc, 0), fT(nI * nc, 0);
   MultiFab fxf(BoxArray(std::vector<Box2D>{xface_box(Uf.box(0))}), Uf.dmap(), nc, 0);
   MultiFab fyf(BoxArray(std::vector<Box2D>{yface_box(Uf.box(0))}), Uf.dmap(), nc, 0);
@@ -106,12 +95,12 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
             (FY(2 * I, 2 * CJ1 + 2, k) + FY(2 * I + 1, 2 * CJ1 + 2, k)) * dtf;
       }
     mf_advance_faces(Uf, fxf, fyf, dxf, dyf, dtf);
-    mf_apply_source(m, Uf, auxf, dtf);  // source S(U,aux) au sous-pas
+    mf_apply_source(m, Uf, auxf, dtf);  // source S(U,aux) at the substep
   }
 
-  mf_average_down(Uf, Uc, CI0, CI1, CJ0, CJ1);  // sync des cellules couvertes
+  mf_average_down(Uf, Uc, CI0, CI1, CJ0, CJ1);  // sync of covered cells
 
-  // --- reflux : flux grossier (x dt) remplace par somme des flux fins (x dtf) ---
+  // --- reflux: coarse flux (x dt) replaced by sum of fine fluxes (x dtf) ---
   device_fence();
   Array4 c = Uc.fab(0).array();
   for (int J = CJ0; J <= CJ1; ++J)
@@ -126,11 +115,11 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
     }
 }
 
-// --- recursion N-niveaux (pendant MultiFab de amr_multilevel.hpp) ---
+// --- N-level recursion (MultiFab counterpart of amr_multilevel.hpp) ---
 
-// Avance recursivement le niveau lev de dt (sous-cyclage Berger-Oliger r=2 + reflux).
-// pOld/pNew = etats parent bornant le pas ; preg* = registre du parent (flux fins de
-// CE niveau), nul si lev==0. Generique (Limiter, NumericalFlux, N comp), seam GPU.
+// Recursively advances level lev by dt (Berger-Oliger subcycling r=2 + reflux).
+// pOld/pNew = parent states bounding the step; preg* = parent register (fine fluxes of
+// THIS level), null if lev==0. Generic (Limiter, NumericalFlux, N comp), GPU seam.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real dt,
                        const Box2D& dom, const MultiFab* pOld, const MultiFab* pNew,
@@ -149,7 +138,7 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
   MultiFab fy(BoxArray(std::vector<Box2D>{yface_box(lv.U.box(0))}), lv.U.dmap(), nc, 0);
   compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy);
 
-  if (lev > 0) {  // contribution au registre du parent (flux fins x dt)
+  if (lev > 0) {  // contribution to the parent register (fine fluxes x dt)
     device_fence();
     const ConstArray4 FX = fx.fab(0).const_array(), FY = fy.fab(0).const_array();
     const AmrLevelMF& par = L[lev - 1];
@@ -171,12 +160,12 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
   }
 
   if (!lv.has_fine) {
-    mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);  // feuille
-    mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) au sous-pas
+    mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);  // leaf
+    mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) at the substep
     return;
   }
 
-  // niveau avec enfant : registre local + flux grossier sauve (sans dt)
+  // level with a child: local register + coarse flux saved (without dt)
   const int cI0 = lv.rCI0, cI1 = lv.rCI1, cJ0 = lv.rCJ0, cJ1 = lv.rCJ1;
   const int nI = cI1 - cI0 + 1, nJ = cJ1 - cJ0 + 1;
   std::vector<Real> cL(nJ * nc), cR(nJ * nc), cB(nI * nc), cT(nI * nc);
@@ -196,9 +185,9 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
   }
   std::vector<Real> fL(nJ * nc, 0), fR(nJ * nc, 0), fB(nI * nc, 0), fT(nI * nc, 0);
 
-  MultiFab U_old = lv.U;  // etat t (interp temporelle de l'enfant)
+  MultiFab U_old = lv.U;  // state t (temporal interp of the child)
   mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);  // lv.U -> t+dt
-  mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) au sous-pas
+  mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) at the substep
 
   for (int s = 0; s < r; ++s)
     subcycle_level_mf<Limiter, NumericalFlux>(m, L, lev + 1, dt / r, dom, &U_old,
@@ -220,7 +209,7 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
     }
 }
 
-// Driver : un pas dt de la hierarchie complete (niveau 0 = grossier).
+// Driver: one dt step of the full hierarchy (level 0 = coarse).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void amr_step_multilevel_mf(const Model& m, std::vector<AmrLevelMF>& L,
                             const Box2D& dom, Real dt) {
@@ -228,6 +217,6 @@ void amr_step_multilevel_mf(const Model& m, std::vector<AmrLevelMF>& L,
                                             Real(0), nullptr, nullptr, nullptr, nullptr);
 }
 
-}  // namespace detail (oracle MF mono-box : Fab2D -> MF -> MP)
+}  // namespace detail (single-box MF oracle: Fab2D -> MF -> MP)
 
 }  // namespace adc
