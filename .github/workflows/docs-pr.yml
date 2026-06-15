@@ -45,11 +45,11 @@ jobs:
     steps:
       # fetch-depth: 0 = historique complet, requis par la fraicheur de check_docs.py (sinon
       # git_state() voit un clone shallow et saute le check).
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 

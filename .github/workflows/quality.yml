@@ -66,7 +66,7 @@ jobs:
     needs: set-mode
     if: needs.set-mode.outputs.run == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - name: Install clang-format
@@ -107,7 +107,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload diff de format
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clang-format-diff
           path: format-diff.patch
@@ -136,13 +136,13 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: kokkos
         uses: ./.github/actions/setup-kokkos
       - name: Cache ccache (quality/warnings)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-quality-warnings-${{ github.sha }}
@@ -171,7 +171,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload log de build
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: warnings-build-log
           path: build-warnings.log
@@ -187,7 +187,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: kokkos
@@ -220,7 +220,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload rapport clang-tidy
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clang-tidy-report
           path: tidy.log
@@ -240,13 +240,13 @@ jobs:
       ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0:abort_on_error=0:halt_on_error=0
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: kokkos
         uses: ./.github/actions/setup-kokkos
       - name: Cache ccache (quality/asan)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-quality-asan-${{ github.sha }}
@@ -277,7 +277,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload log sanitizers
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: asan-log
           path: asan.log
@@ -302,7 +302,7 @@ jobs:
       OMP_NUM_THREADS: '2'
       TSAN_OPTIONS: second_deadlock_stack=1:halt_on_error=0:suppressions=${{ github.workspace }}/tsan-suppressions.txt
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       # Install Kokkos OpenMP compilee en CLANG (cle de cache distincte) : libgomp (gcc) n'est PAS
@@ -314,7 +314,7 @@ jobs:
           exec-space: openmp
           extra-apt: clang
       - name: Cache ccache (quality/tsan)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-quality-tsan-${{ github.sha }}
@@ -341,7 +341,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload log TSan
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tsan-log
           path: tsan.log
@@ -361,7 +361,7 @@ jobs:
       ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0
       UBSAN_OPTIONS: print_stacktrace=1
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       # Install Kokkos compilee en CLANG (cle de cache distincte de celle du gate gcc) : les
@@ -372,7 +372,7 @@ jobs:
           compiler: clang
           extra-apt: clang
       - name: Cache ccache (quality/fuzz)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-quality-fuzz-${{ github.sha }}
@@ -420,7 +420,7 @@ jobs:
           fi
       - name: Upload entrees de crash
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashes
           path: fuzz-artifacts/
@@ -436,13 +436,13 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: kokkos
         uses: ./.github/actions/setup-kokkos
       - name: Cache ccache (quality/coverage)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-quality-coverage-${{ github.sha }}
@@ -482,7 +482,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload rapport de couverture
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage-report/
@@ -502,13 +502,13 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: kokkos
         uses: ./.github/actions/setup-kokkos
       - name: Initialise CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: c-cpp
           build-mode: manual
@@ -539,6 +539,6 @@ jobs:
             test_poisson_smoother test_geometric_mg test_poisson_fft \
             test_elliptic_operator
       - name: Analyse CodeQL
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:c-cpp"

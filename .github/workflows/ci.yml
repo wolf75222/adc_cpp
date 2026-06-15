@@ -68,11 +68,11 @@ jobs:
       cpp: ${{ steps.filter.outputs.cpp }}
       python: ${{ steps.filter.outputs.python }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - id: filter
-        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
             cpp:
@@ -142,7 +142,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -159,7 +159,7 @@ jobs:
       # du plus precis au plus large (meme job sur la branche -> sur master -> n'importe).
       # Cle INCHANGEE depuis l'ancien job build-and-test (kokkos-serial).
       - name: Cache ccache (Kokkos Serial)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-kokkos-serial-${{ github.ref }}-${{ github.sha }}
@@ -222,7 +222,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -240,7 +240,7 @@ jobs:
 
       # ccache du module Python : cle INCHANGEE depuis l'ancien job build-and-test (python).
       - name: Cache ccache (Python module)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-python-${{ github.ref }}-${{ github.sha }}
@@ -331,7 +331,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -343,7 +343,7 @@ jobs:
       # Meme install Kokkos Serial (PIC) que le gate ; cle de cache partagee.
       - name: Cache Kokkos install (Serial ${{ env.KOKKOS_VERSION }})
         id: kokkos-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.KOKKOS_PREFIX }}
           key: kokkos-${{ runner.os }}-${{ env.KOKKOS_VERSION }}-serial-cxx20-gcc-pic
@@ -359,7 +359,7 @@ jobs:
           cmake --build /tmp/kbuild --parallel 4 --target install
 
       - name: Cache ccache (MPI)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-mpi-${{ github.ref }}-${{ github.sha }}
@@ -405,7 +405,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-openmp-install
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -418,13 +418,13 @@ jobs:
       # La cle inclut "openmp" pour ne pas entrer en collision avec le cache serial.
       - name: Cache Kokkos install (OpenMP ${{ env.KOKKOS_VERSION }})
         id: kokkos-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.KOKKOS_PREFIX }}
           key: kokkos-${{ runner.os }}-${{ env.KOKKOS_VERSION }}-openmp-cxx20-gcc-pic
 
       - name: Cache ccache (Kokkos OpenMP)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-kokkos-openmp-${{ github.ref }}-${{ github.sha }}
@@ -531,7 +531,7 @@ jobs:
       CCACHE_MAXSIZE: 500M
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -541,7 +541,7 @@ jobs:
           sudo apt-get install -y libeigen3-dev ninja-build ccache
 
       - name: Cache ccache (bench)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ runner.os }}-bench-${{ github.ref }}-${{ github.sha }}
