@@ -125,6 +125,30 @@ jobs:
           else
             echo "racine propre (aucun artefact a la racine)"
           fi
+      - name: Couverture matrice backend (BACKEND_COVERAGE.md, informatif)
+        if: always()
+        run: |
+          # gen_test_counts.py --check-matrix liste les tests disque (tests/test_*.cpp +
+          # python/tests/test_*.py) absents de la matrice : elle se veut source unique de
+          # couverture, un test sans ligne est un trou (et la derive qui la rend perimee).
+          # Non bloquant (set +e) : informatif jusqu'a ce que la matrice soit complete (cf. ADC-258),
+          # puis a basculer bloquant (politique ADC-120).
+          set +e
+          out=$(python3 docs/gen_test_counts.py --check-matrix)
+          rc=$?
+          set -e
+          echo "$out"
+          n=$(printf '%s\n' "$out" | grep -c '^MISSING' || true)   # grep -c exit 1 si 0 match -> || true (sinon set -e tue l'etape quand la matrice est complete)
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::BACKEND_COVERAGE.md : $n test(s) sans ligne dans la matrice (anti-derive, cf. ADC-258)"
+          fi
+          {
+            echo "### Couverture matrice backend"
+            echo ""
+            echo "- Tests absents de \`docs/BACKEND_COVERAGE.md\` : **$n**"
+            echo ""
+            echo "_Informatif : ajouter la ligne du test dans la matrice (cf. ADC-258) ; bloquant une fois complete._"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # --- Warnings stricts : build avec -Wall -Wextra ... -------------------------------------------
   warnings:
