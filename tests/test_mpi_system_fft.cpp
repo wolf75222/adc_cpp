@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
     }
     chk(threw, "npN_fft_refused");
     // Message clair et explicite (sous-chaine stable du libelle verbatim).
-    chk(msg.find("fft non supporte en MPI") != std::string::npos, "npN_clear_message");
+    chk(msg.find("fft solver unsupported under MPI") != std::string::npos, "npN_clear_message");
     std::printf("[rank %d/%d] np=%d fft refuse (attendu) : %s\n", me, np, np,
                 threw ? msg.c_str() : "(pas d'exception !)");
 
