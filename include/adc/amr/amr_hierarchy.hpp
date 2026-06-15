@@ -1,17 +1,17 @@
 /// @file
-/// @brief AmrHierarchy : la pile de niveaux de raffinement (conteneur de la hierarchie AMR).
+/// @brief AmrHierarchy: the stack of refinement levels (container of the AMR hierarchy).
 ///
-/// Couche : `include/adc/amr` (primitives geometriques AMR).
-/// Role : porte, par niveau, le domaine en espace d'indices, le BoxArray et le champ MultiFab.
-/// Niveau 0 = le plus grossier ; ratio de raffinement entier fixe (2 par defaut).
-/// Contrat : conteneur pur ; le PEUPLEMENT des niveaux fins (tagging + clustering Berger-Rigoutsos)
-/// est l'affaire de regrid.hpp. Ici on fournit l'ajout/remplacement explicite d'un niveau, suffisant
-/// pour un raffinement statique.
+/// Layer: `include/adc/amr` (AMR geometric primitives).
+/// Role: carries, per level, the domain in index space, the BoxArray and the MultiFab field.
+/// Level 0 = the coarsest; fixed integer refinement ratio (2 by default).
+/// Contract: pure container; POPULATING the fine levels (tagging + Berger-Rigoutsos clustering)
+/// is the job of regrid.hpp. Here we provide the explicit add/replace of a level, sufficient
+/// for static refinement.
 ///
-/// Invariants :
-/// - domain(lev) == domain(lev-1).refine(ref_ratio) : domaines emboites par le ratio fixe ;
-/// - les trois vecteurs (domain_, ba_, data_) ont toujours la meme taille = num_levels() ;
-/// - remplacer ou nettoyer un niveau invalide et supprime tous les niveaux plus fins.
+/// Invariants:
+/// - domain(lev) == domain(lev-1).refine(ref_ratio): domains nested by the fixed ratio;
+/// - the three vectors (domain_, ba_, data_) always have the same size = num_levels();
+/// - replacing or clearing a level invalidates and removes all finer levels.
 
 #pragma once
 
@@ -25,31 +25,23 @@
 #include <utility>
 #include <vector>
 
-// AmrHierarchy : la pile de niveaux raffines. Niveau 0 = le plus grossier.
-// Ratio de raffinement entier fixe (2 par defaut). Chaque niveau porte son
-// domaine en espace d'indices, son BoxArray et son champ MultiFab.
-//
-// La construction des niveaux fins (a partir du tagging et du clustering
-// Berger-Rigoutsos) est l'etape suivante (regrid). Ici on fournit le conteneur
-// et l'ajout explicite d'un niveau, suffisant pour un raffinement statique.
-
 namespace adc {
 
-/// Pile de niveaux raffinis (domaine + BoxArray + MultiFab par niveau), niveau 0 le plus grossier.
+/// Stack of refined levels (domain + BoxArray + MultiFab per level), level 0 the coarsest.
 ///
-/// Usage : construite avec le seul niveau 0 (grossier), puis etoffee par add_level / install_level
-/// (statique) ou par regrid_level (dynamique).
-/// Contrat : ref_ratio entier fixe ; domain(lev) decoule de domain(lev-1) par refine(ref_ratio).
-/// Invariants : domain_, ba_ et data_ restent de longueur num_levels() ; install/clear tronquent les
-/// niveaux plus fins pour garder la pile coherente.
+/// Usage: built with only level 0 (coarse), then expanded by add_level / install_level
+/// (static) or by regrid_level (dynamic).
+/// Contract: fixed integer ref_ratio; domain(lev) follows from domain(lev-1) by refine(ref_ratio).
+/// Invariants: domain_, ba_ and data_ stay of length num_levels(); install/clear truncate the
+/// finer levels to keep the stack consistent.
 class AmrHierarchy {
  public:
-  /// Construit la hierarchie avec son seul niveau 0 (grossier).
-  /// @param coarse_domain domaine du niveau 0 en espace d'indices (coins lo/hi INCLUSIFS).
-  /// @param max_grid_size taille max de box pour le decoupage en BoxArray.
-  /// @param ncomp nombre de composantes du champ par cellule.
-  /// @param ngrow nombre de couches de ghosts du MultiFab.
-  /// @param ref_ratio ratio de raffinement entier entre niveaux consecutifs (2 par defaut).
+  /// Builds the hierarchy with only its level 0 (coarse).
+  /// @param coarse_domain domain of level 0 in index space (INCLUSIVE lo/hi corners).
+  /// @param max_grid_size max box size for the split into BoxArray.
+  /// @param ncomp number of field components per cell.
+  /// @param ngrow number of ghost layers of the MultiFab.
+  /// @param ref_ratio integer refinement ratio between consecutive levels (2 by default).
   AmrHierarchy(const Box2D& coarse_domain, int max_grid_size, int ncomp,
                int ngrow, int ref_ratio = 2)
       : ref_ratio_(ref_ratio), ncomp_(ncomp), ngrow_(ngrow) {
@@ -60,9 +52,9 @@ class AmrHierarchy {
                        ngrow);
   }
 
-  /// Ajoute un niveau fin defini par son BoxArray (en espace d'indices fin).
-  /// @param fine_ba boxes du nouveau niveau, exprimees dans l'espace d'indices raffine.
-  /// Le domaine du niveau est deduit par refine(ref_ratio) du domaine du niveau precedent.
+  /// Adds a fine level defined by its BoxArray (in fine index space).
+  /// @param fine_ba boxes of the new level, expressed in the refined index space.
+  /// The level domain is deduced by refine(ref_ratio) from the previous level domain.
   void add_level(const BoxArray& fine_ba) {
     const int lev = num_levels();
     domain_.push_back(domain_[lev - 1].refine(ref_ratio_));
@@ -71,11 +63,11 @@ class AmrHierarchy {
                        ncomp_, ngrow_);
   }
 
-  /// Installe (ajoute ou remplace) un niveau fin a l'indice lev. Utilise par le regrid.
-  /// @param lev indice du niveau a installer ; doit verifier 1 <= lev <= num_levels().
-  /// @param fine_ba boxes du niveau dans l'espace d'indices raffine.
-  /// @param data MultiFab deja construit pour ce niveau (transfere par move).
-  /// Remplacer un niveau existant INVALIDE et supprime tous les niveaux plus fins.
+  /// Installs (adds or replaces) a fine level at index lev. Used by the regrid.
+  /// @param lev index of the level to install; must satisfy 1 <= lev <= num_levels().
+  /// @param fine_ba boxes of the level in the refined index space.
+  /// @param data MultiFab already built for this level (transferred by move).
+  /// Replacing an existing level INVALIDATES and removes all finer levels.
   void install_level(int lev, const BoxArray& fine_ba, MultiFab data) {
     assert(lev >= 1 && lev <= num_levels());
     const Box2D dom = domain_[lev - 1].refine(ref_ratio_);
@@ -93,7 +85,7 @@ class AmrHierarchy {
     }
   }
 
-  /// Supprime tous les niveaux strictement plus fins que lev (no-op si lev est deja le plus fin).
+  /// Removes all levels strictly finer than lev (no-op if lev is already the finest).
   void clear_above(int lev) {
     if (lev + 1 < num_levels()) {
       domain_.resize(lev + 1);
@@ -102,22 +94,22 @@ class AmrHierarchy {
     }
   }
 
-  /// Nombre de niveaux presents (>= 1 : le niveau 0 existe toujours).
+  /// Number of levels present (>= 1: level 0 always exists).
   int num_levels() const { return static_cast<int>(data_.size()); }
-  /// Ratio de raffinement entier entre niveaux consecutifs.
+  /// Integer refinement ratio between consecutive levels.
   int ref_ratio() const { return ref_ratio_; }
-  /// Nombre de composantes du champ par cellule.
+  /// Number of field components per cell.
   int ncomp() const { return ncomp_; }
-  /// Nombre de couches de ghosts des MultiFab.
+  /// Number of ghost layers of the MultiFab.
   int n_grow() const { return ngrow_; }
 
-  /// Domaine du niveau lev en espace d'indices (coins lo/hi INCLUSIFS).
+  /// Domain of level lev in index space (INCLUSIVE lo/hi corners).
   const Box2D& domain(int lev) const { return domain_[lev]; }
-  /// BoxArray (decoupage en boxes) du niveau lev.
+  /// BoxArray (split into boxes) of level lev.
   const BoxArray& boxes(int lev) const { return ba_[lev]; }
-  /// Champ du niveau lev (acces mutable).
+  /// Field of level lev (mutable access).
   MultiFab& data(int lev) { return data_[lev]; }
-  /// Champ du niveau lev (acces const).
+  /// Field of level lev (const access).
   const MultiFab& data(int lev) const { return data_[lev]; }
 
  private:

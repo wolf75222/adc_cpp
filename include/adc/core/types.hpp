@@ -1,32 +1,21 @@
 #pragma once
 
 /// @file
-/// @brief Types scalaires de base et macro ADC_HD (portabilite host+device). Socle minimal
-///        sans dependance externe; la bascule vers pde_core::Real attendra le maillage distribue.
+/// @brief Base scalar types and the ADC_HD macro (host+device portability). Minimal foundation
+///        with no external dependency; the switch to pde_core::Real waits for the distributed mesh.
 ///
-/// `Real` : alias double centralise. Tout le calcul numerique l'utilise; ne pas ecrire `double`
-/// directement dans la couche physique ou les kernels.
+/// `Real`: centralized double alias. All numerical computation uses it; do not write `double`
+/// directly in the physics layer or the kernels.
 ///
-/// `ADC_HD` : annotation portant les fonctions appelees dans les kernels Kokkos sur host ET device.
-/// - Kokkos  : KOKKOS_FUNCTION (portable Cuda/HIP/SYCL/CPU, sans syntaxe CUDA manuelle).
-///   KOKKOS_FUNCTION est prefere a KOKKOS_INLINE_FUNCTION pour ne pas ajouter d'`inline` implicite
-///   sur les sites deja notes `ADC_HD inline ...`.
-/// - CUDA/HIP directs (sans Kokkos) : __host__ __device__.
-/// - CPU pur : expansion vide.
-/// INVARIANT : ADC_HD ne peut entourer que du code device-clean (pas d'objet hote,
-/// pas de std::vector, pas de vtable).
+/// `ADC_HD`: annotation for functions called inside Kokkos kernels on host AND device.
+/// - Kokkos: KOKKOS_FUNCTION (portable Cuda/HIP/SYCL/CPU, without manual CUDA syntax).
+///   KOKKOS_FUNCTION is preferred over KOKKOS_INLINE_FUNCTION so as not to add an implicit `inline`
+///   on sites already marked `ADC_HD inline ...`.
+/// - Direct CUDA/HIP (without Kokkos): __host__ __device__.
+/// - Pure CPU: empty expansion.
+/// INVARIANT: ADC_HD can only wrap device-clean code (no host object,
+/// no std::vector, no vtable).
 
-// Types scalaires de base. Volontairement local et minimal pour garder le
-// premier socle sans dependance externe. La bascule vers pde_core::Real
-// (partage avec advection_cpp / euler_cpp / poisson_cpp) se fera quand le
-// maillage distribue arrivera, pas avant.
-
-// ADC_HD : annotation host+device pour les accesseurs appeles dans les kernels.
-// Sous Kokkos on delegue a KOKKOS_FUNCTION (le pendant PORTABLE de __host__ __device__ :
-// Cuda, HIP, SYCL... le meme code source vise CPU et GPU selon le backend) -> aucune syntaxe
-// CUDA ecrite a la main. KOKKOS_FUNCTION (et non KOKKOS_INLINE_FUNCTION) reproduit exactement
-// l'ancien comportement (pas de 'inline' ajoute, pour les sites ecrits 'ADC_HD inline ...').
-// Hors Kokkos : repli compilateur device, sinon vide (build CPU inchange).
 #if defined(ADC_HAS_KOKKOS)
 #include <Kokkos_Macros.hpp>
 #define ADC_HD KOKKOS_FUNCTION
@@ -40,12 +29,12 @@ namespace adc {
 
 using Real = double;
 
-/// PLANCHER de vitesse des politiques de pas CFL (audit 2026-06, constante explicite au lieu du
-/// litteral 1e-30 disperse) : w = max(vitesse_reduite, kCflSpeedFloor) evite la division par zero
-/// quand un bloc n'a aucune onde (transport fige / champ nul). ATTENTION : un systeme dont TOUTES
-/// les vitesses sont nulles recoit alors un pas ~cfl*h/1e-30, enorme -- c'est le comportement
-/// historique assume (un tel pas ne transporte rien) ; le diagnostiquer via last_dt_bound() ==
-/// "degenerate" cote System. Partagee par System::step_cfl/step_adaptive et AmrRuntime::step_cfl.
+/// Speed FLOOR for the CFL step policies (audit 2026-06, explicit constant instead of the
+/// scattered literal 1e-30): w = max(reduced_speed, kCflSpeedFloor) avoids the division by zero
+/// when a block has no wave (frozen transport / null field). WARNING: a system in which ALL
+/// the speeds are null then receives a step ~cfl*h/1e-30, enormous -- that is the historical
+/// behavior assumed (such a step transports nothing); diagnose it via last_dt_bound() ==
+/// "degenerate" on the System side. Shared by System::step_cfl/step_adaptive and AmrRuntime::step_cfl.
 inline constexpr Real kCflSpeedFloor = Real(1e-30);
 
 }  // namespace adc

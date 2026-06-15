@@ -9,44 +9,27 @@
 #include <vector>
 
 /// @file
-/// @brief Equilibrage de charge AMR : construit un DistributionMapping (box -> rang) a partir d'un
-///        BoxArray, par courbe de remplissage Z-order (SFC) ou par knapsack LPT.
+/// @brief AMR load balancing: builds a DistributionMapping (box -> rank) from a
+///        BoxArray, using a Z-order space-filling curve (SFC) or LPT knapsack.
 ///
-/// Couche : `include/adc/parallel`.
-/// Role : repartir les boxes sur les rangs en repliquant les metadonnees (facon AMReX). Deux
-/// strategies : make_sfc_distribution (segments contigus de charge egale le long de la courbe de
-/// Morton -> localite spatiale) et make_knapsack_distribution (box la plus lourde au rang le moins
-/// charge -> minimise le desequilibre maximal). load_imbalance mesure le ratio charge max / charge
-/// moyenne. Outillage Morton expose : part1by1, morton_key, morton_order.
-/// Contrat : le poids d'une box est son nombre de cellules (proxy du cout de calcul).
+/// Layer: `include/adc/parallel`.
+/// Role: distribute boxes over ranks with replicated metadata (AMReX style). Two
+/// strategies: make_sfc_distribution (contiguous segments of equal load along the
+/// Morton curve -> spatial locality) and make_knapsack_distribution (heaviest box
+/// to the least loaded rank -> minimizes the maximum imbalance). load_imbalance
+/// measures the max load / average load ratio. Morton tooling exposed: part1by1,
+/// morton_key, morton_order.
+/// Contract: a box weight is its cell count (proxy for compute cost).
 ///
-/// Invariants :
-/// - fonctions PURES, sans MPI : testables en serie ; elles alimenteront le seam comm une fois un
-///   backend MPI branche ;
-/// - SFC garantit qu'avec nboxes >= nranks chaque rang recoit au moins une box ;
-/// - cas degeneres (n == 0, nranks <= 1) : tout est assigne au rang 0.
-
-// Equilibrage de charge pour l'AMR a metadonnees repliquees (facon AMReX,
-// cf. la bibliographie sect. 4.2). Deux strategies construisent un
-// DistributionMapping a partir d'un BoxArray et d'un nombre de rangs :
-//
-//   - Z-order (courbe de remplissage de l'espace, SFC) : on ordonne les boxes
-//     le long de la courbe de Morton, puis on coupe en segments contigus de
-//     charge egale. Avantage : localite spatiale (les boxes d'un rang sont
-//     voisines), donc moins de communication ; Burstedde et al. mesurent ~11,5
-//     voisins distincts meme a 200 000 coeurs.
-//
-//   - Knapsack (LPT, longest-processing-time) : on assigne chaque box, par
-//     poids decroissant, au rang le moins charge. Avantage : minimise le
-//     desequilibre maximal ; inconvenient : ignore la localite.
-//
-// Le poids d'une box est son nombre de cellules (proxy du cout de calcul). Ces
-// algos sont purs (pas de MPI) : testables en serie, ils alimenteront le seam
-// comm quand un vrai backend MPI sera branche.
+/// Invariants:
+/// - PURE functions, no MPI: testable in serial; they will feed the comm seam once
+///   an MPI backend is wired in;
+/// - SFC guarantees that with nboxes >= nranks each rank receives at least one box;
+/// - degenerate cases (n == 0, nranks <= 1): everything is assigned to rank 0.
 
 namespace adc {
 
-// Etale les bits de x (16 bits utiles) sur les positions paires d'un 64 bits.
+// Spread the bits of x (16 useful bits) onto the even positions of a 64-bit word.
 inline std::uint64_t part1by1(std::uint64_t x) {
   x &= 0xffffffffULL;
   x = (x | (x << 16)) & 0x0000ffff0000ffffULL;
@@ -57,13 +40,13 @@ inline std::uint64_t part1by1(std::uint64_t x) {
   return x;
 }
 
-// Cle de Morton (Z-order) entrelacant (x, y) : x sur les bits pairs, y impairs.
+// Morton key (Z-order) interleaving (x, y): x on the even bits, y on the odd bits.
 inline std::uint64_t morton_key(std::uint32_t x, std::uint32_t y) {
   return part1by1(x) | (part1by1(y) << 1);
 }
 
-// Indices des boxes tries le long de la courbe de Morton (coin bas, decale par
-// le bounding box pour rester positif).
+// Box indices sorted along the Morton curve (low corner, shifted by the bounding
+// box to stay positive).
 inline std::vector<int> morton_order(const BoxArray& ba) {
   const int n = ba.size();
   std::vector<int> order(n);
@@ -79,8 +62,8 @@ inline std::vector<int> morton_order(const BoxArray& ba) {
   return order;
 }
 
-// Distribution Z-order : segments contigus de charge ~egale le long de la SFC.
-// Garantit qu'avec nboxes >= nranks chaque rang recoit au moins une box.
+// Z-order distribution: contiguous segments of ~equal load along the SFC.
+// Guarantees that with nboxes >= nranks each rank receives at least one box.
 inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
                                                  int nranks) {
   const int n = ba.size();
@@ -89,7 +72,7 @@ inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
 
   const std::vector<int> order = morton_order(ba);
   std::int64_t total = ba.num_cells();
-  const double target = double(total) / nranks;  // charge cible par rang
+  const double target = double(total) / nranks;  // target load per rank
 
   std::int64_t acc = 0;
   int r = 0;
@@ -97,8 +80,8 @@ inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
     const int b = order[k];
     rank[b] = r;
     acc += ba[b].num_cells();
-    // avance de rang si la part visee est atteinte ET qu'il reste assez de
-    // boxes pour donner au moins une box a chaque rang restant.
+    // advance to the next rank if the target share is reached AND enough boxes
+    // remain to give at least one box to each remaining rank.
     const int boxes_left = n - 1 - k;
     const int ranks_left = nranks - 1 - r;
     if (r < nranks - 1 && acc >= target * (r + 1) && boxes_left >= ranks_left)
@@ -107,7 +90,7 @@ inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
   return DistributionMapping(std::move(rank));
 }
 
-// Distribution knapsack (LPT) : box la plus lourde -> rang le moins charge.
+// Knapsack distribution (LPT): heaviest box -> least loaded rank.
 inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
                                                       int nranks) {
   const int n = ba.size();
@@ -130,7 +113,7 @@ inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
   return DistributionMapping(std::move(rank));
 }
 
-// Desequilibre = charge max / charge moyenne (1.0 = parfait).
+// Imbalance = max load / average load (1.0 = perfect).
 inline double load_imbalance(const BoxArray& ba, const DistributionMapping& dm,
                              int nranks) {
   if (nranks <= 0 || ba.size() == 0) return 1.0;

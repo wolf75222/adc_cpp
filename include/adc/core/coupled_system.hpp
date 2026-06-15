@@ -1,17 +1,17 @@
 /// @file
-/// @brief CoupledSystem : collection heterogene de blocs d'equations (multi-especes, multi-schemas).
+/// @brief CoupledSystem: heterogeneous collection of equation blocks (multi-species, multi-scheme).
 ///
-/// CoupledSystem<Blocks...> est un tuple de blocs typables statiquement. Il ne resout rien
-/// seul : il fournit un objet nomme a la couche assembler/scheduler pour iterer sur N blocs
-/// (for_each_block) et les couplages (Poisson, collisions, sources croisees).
+/// CoupledSystem<Blocks...> is a statically typed tuple of blocks. It solves nothing
+/// on its own: it provides a named object to the assembler/scheduler layer to iterate over N blocks
+/// (for_each_block) and the couplings (Poisson, collisions, cross sources).
 ///
-/// `CoupledSystemLike` : concept utilise par la facade AmrSystemCoupler et les schedulers.
-/// Evite de passer CoupledSystem<...> concret dans du code generique qui n'a besoin que de
-/// for_each_block et n_blocks.
+/// `CoupledSystemLike`: concept used by the AmrSystemCoupler facade and the schedulers.
+/// Avoids passing the concrete CoupledSystem<...> into generic code that only needs
+/// for_each_block and n_blocks.
 ///
-/// INVARIANT nvcc/EDG : for_each_block n'accepte pas de lambda generique dans un
-/// requires-clause (lambda etendue en contexte non evalue -> erreur EDG). Le concept
-/// utilise donc le foncteur nomme detail::ForEachBlockProbe.
+/// nvcc/EDG INVARIANT: for_each_block does not accept a generic lambda in a
+/// requires-clause (extended lambda in an unevaluated context -> EDG error). The concept
+/// therefore uses the named functor detail::ForEachBlockProbe.
 
 #pragma once
 
@@ -22,25 +22,17 @@
 #include <type_traits>
 #include <utility>
 
-// CoupledSystem : collection de blocs d'equations.
-//
-// Il ne resout rien tout seul. Il donne un objet nomme a la couche
-// assembler/scheduler : plusieurs U, plusieurs modeles, plusieurs methodes.
-// Les politiques de couplage (Poisson, collisions, sources croisees) peuvent
-// ensuite lire tous les blocs au lieu d'etre enfermees dans un seul PhysicalModel.
-
 namespace adc {
 
-/// Collection heterogene de blocs d'equations, parametree par leurs types exacts.
+/// Heterogeneous collection of equation blocks, parameterized by their exact types.
 ///
-/// Iteration sur tous les blocs : for_each_block(f) appelle f(block) pour chaque bloc.
-/// Acces indexe : block<I>() (temps de compilation). n_blocks = sizeof...(Blocks).
+/// Iteration over all blocks: for_each_block(f) calls f(block) for each block.
+/// Indexed access: block<I>() (compile time). n_blocks = sizeof...(Blocks).
 ///
-/// INVARIANT : les blocs sont possedes par valeur dans le tuple; les MultiFab qu'ils
-/// referencent (via EquationBlock::state) doivent avoir une duree de vie superieure
-/// a celle du CoupledSystem.
-/// Construction par deduction : CoupledSystem{b1, b2} deduit les types via le guide de
-/// deduction fourni en fin de fichier.
+/// INVARIANT: the blocks are owned by value in the tuple; the MultiFab they
+/// reference (via EquationBlock::state) must outlive the CoupledSystem.
+/// Construction by deduction: CoupledSystem{b1, b2} deduces the types via the deduction
+/// guide provided at the end of the file.
 template <EquationBlockLike... Blocks>
 struct CoupledSystem {
   static constexpr std::size_t n_blocks = sizeof...(Blocks);
@@ -75,23 +67,23 @@ struct CoupledSystem {
 };
 
 namespace detail {
-/// Sonde no-op NOMMEE pour le concept CoupledSystemLike. Une lambda generique dans le
-// requires-clause (s.for_each_block([](auto&){})) fait buter le frontend nvcc/EDG : une
-// lambda etendue en contexte NON EVALUE n'est pas instanciable cote device -> la facade
-// AmrSystemCoupler<CoupledSystemLike System> ne s'instancie pas sous Cuda (le chemin B_z-AMR
-// device passait alors par advance_amr en direct). Un FONCTEUR NOMME contourne (meme recette
-// que les foncteurs nommes de block_builder.hpp, #64) sans changer la semantique cote hote.
+/// NAMED no-op probe for the CoupledSystemLike concept. A generic lambda in the
+// requires-clause (s.for_each_block([](auto&){})) trips the nvcc/EDG frontend: an
+// extended lambda in an UNEVALUATED context is not instantiable on the device side -> the
+// AmrSystemCoupler<CoupledSystemLike System> facade does not instantiate under Cuda (the B_z-AMR
+// device path then went through advance_amr directly). A NAMED FUNCTOR works around this (same recipe
+// as the named functors in block_builder.hpp, #64) without changing the host-side semantics.
 struct ForEachBlockProbe {
   template <class B>
   void operator()(B&) const {}
 };
 }  // namespace detail
 
-/// Concept minimal pour les systemes couples : n_blocks et for_each_block avec un foncteur nomme.
-/// Satisfait par CoupledSystem<...>. Utilise par AmrSystemCoupler et les schedulers pour eviter
-/// de parametriser sur le type CoupledSystem<...> concret.
-/// NOTE nvcc : ne pas passer de lambda generique ici (EDG : lambda etendue non evaluable);
-/// utiliser ForEachBlockProbe ou un foncteur nomme.
+/// Minimal concept for coupled systems: n_blocks and for_each_block with a named functor.
+/// Satisfied by CoupledSystem<...>. Used by AmrSystemCoupler and the schedulers to avoid
+/// parameterizing on the concrete CoupledSystem<...> type.
+/// nvcc NOTE: do not pass a generic lambda here (EDG: extended lambda not evaluable);
+/// use ForEachBlockProbe or a named functor.
 template <class S>
 concept CoupledSystemLike = requires(S s) {
   { S::n_blocks } -> std::convertible_to<std::size_t>;

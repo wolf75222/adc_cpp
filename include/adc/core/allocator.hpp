@@ -1,62 +1,38 @@
 /// @file
-/// @brief Allocateur du stockage Fab2D, selectionnable a la compilation.
+/// @brief Fab2D storage allocator, selectable at compile time.
 ///
-/// Deux strategies selon le build :
-///   - Kokkos (ADC_HAS_KOKKOS) : `ManagedAllocator<T>` backed par `ManagedArena` (pool de
-///     blocs en memoire unifiee Kokkos::SharedSpace). std::vector<T, ManagedAllocator<T>>
-///     conserve la semantique valeur (copie profonde dans une nouvelle allocation managee).
-///   - CPU pur : `std::allocator<T>` -- byte-identique a l'ancien comportement.
+/// Two strategies depending on the build:
+///   - Kokkos (ADC_HAS_KOKKOS): `ManagedAllocator<T>` backed by `ManagedArena` (a pool of
+///     blocks in Kokkos::SharedSpace unified memory). std::vector<T, ManagedAllocator<T>>
+///     keeps value semantics (deep copy into a new managed allocation).
+///   - Pure CPU: `std::allocator<T>` -- byte-identical to the old behavior.
 ///
-/// `fab_allocator<T>` est l'alias canonique a utiliser; ne pas instancier ManagedAllocator
-/// directement dans le code numerique.
+/// `fab_allocator<T>` is the canonical alias to use; do not instantiate ManagedAllocator
+/// directly in numerical code.
 ///
-/// INVARIANT securite async : un bloc libere passe dans `pending_` (ManagedArena) et n'est
-/// reutilise qu'apres la prochaine Kokkos::fence en lot. Cela reproduit la barriere implicite
-/// de cudaFree de facon portable. Voir ManagedArena::deallocate et ManagedArena::allocate.
+/// Async safety INVARIANT: a freed block goes into `pending_` (ManagedArena) and is only
+/// reused after the next batched Kokkos::fence. This reproduces the implicit barrier
+/// of cudaFree in a portable way. See ManagedArena::deallocate and ManagedArena::allocate.
 
 #pragma once
 
 #include <cstddef>
 #include <memory>
 
-// Allocateur du stockage Fab2D, selectionnable a la compilation.
-//
-//   - Kokkos (ADC_HAS_KOKKOS) : memoire UNIFIEE PORTABLE via Kokkos::SharedSpace (alias
-//     CudaUVMSpace / HIPManagedSpace / SYCLSharedUSMSpace / HostSpace selon le backend ; AUCUNE
-//     API CUDA ecrite a la main), accessible de facon coherente depuis l'hote ET le device. Sur GH200
-//     (Grace+Hopper, NVLink-C2C) c'est materiellement coherent : un meme buffer
-//     sert au code hote (operator(), boucles) ET aux kernels device lances par
-//     for_each_cell, sans deep_copy ni migration. Et std::vector conserve sa
-//     SEMANTIQUE VALEUR (copie profonde dans une nouvelle allocation managee),
-//     donc les algorithmes qui copient un Fab (reflux, average_down) restent
-//     corrects.
-//   - sinon : std::allocator (hote). Le build CPU est byte-identique a avant.
-//
-// ARENA (pool memoire) : un kokkos_malloc<SharedSpace> par petit Fab temporaire est lent
-// (synchronisation, mise en place de la table de pages). Les etages d'integration
-// (SSPRK) et les niveaux de la multigrille allouent/liberent en boucle des Fabs de
-// MEMES tailles. ManagedArena est un cache : a la liberation on RECYCLE le bloc
-// (free-list par taille en octets) au lieu de le rendre tout de suite ; a l'allocation
-// on reutilise un bloc libre de la meme taille s'il existe. Apres un rodage (les
-// premieres tailles distinctes), les pas suivants ne font plus aucun
-// kokkos_malloc. C'est l'Arena d'AMReX / l'allocateur a cache de PyTorch. La
-// semantique valeur est intacte : chaque vecteur possede un bloc distinct ; le pool
-// est un singleton partage, donc l'allocateur reste sans etat (stateless).
-
 namespace adc {
 
-/// Statistiques du pool ManagedArena : hits/misses/fences et octets retenus.
-/// Lecture sans effets de bord via adc::arena_stats() (snapshot sous verrou).
+/// ManagedArena pool statistics: hits/misses/fences and retained bytes.
+/// Side-effect-free read via adc::arena_stats() (snapshot under lock).
 struct ArenaStats {
-  long hits = 0;       // allocations servies par le pool (pas de kokkos_malloc)
-  long misses = 0;     // allocations ayant declenche un kokkos_malloc<SharedSpace>
-  long fences = 0;     // barrieres Kokkos::fence en lot (recyclage des blocs en attente)
-  std::size_t reserved_bytes = 0;  // total managee detenu par le pool
+  long hits = 0;       // allocations served by the pool (no kokkos_malloc)
+  long misses = 0;     // allocations that triggered a kokkos_malloc<SharedSpace>
+  long fences = 0;     // batched Kokkos::fence barriers (recycling pending blocks)
+  std::size_t reserved_bytes = 0;  // total managed memory held by the pool
 };
 }  // namespace adc
 
 #if defined(ADC_HAS_KOKKOS)
-#include <adc/core/kokkos_env.hpp>  // detail::ensure_kokkos_initialized : Kokkos init AVANT kokkos_malloc
+#include <adc/core/kokkos_env.hpp>  // detail::ensure_kokkos_initialized: Kokkos init BEFORE kokkos_malloc
 #include <Kokkos_Core.hpp>
 
 #include <mutex>
@@ -67,44 +43,44 @@ struct ArenaStats {
 namespace adc {
 
 static_assert(Kokkos::has_shared_space,
-              "adc : le backend Kokkos doit fournir SharedSpace (memoire unifiee) pour le Fab "
-              "device ; activer un backend Cuda/HIP/SYCL (ou un backend hote, ou SharedSpace est HostSpace)");
+              "adc: the Kokkos backend must provide SharedSpace (unified memory) for the device "
+              "Fab; enable a Cuda/HIP/SYCL backend (or a host backend, where SharedSpace is HostSpace)");
 
-// Cache d'allocations en memoire unifiee (Kokkos::SharedSpace), free-list par taille (octets).
+// Cache of unified-memory allocations (Kokkos::SharedSpace), free-list by size (bytes).
 //
-// SECURITE async : un kernel peut encore lire/ecrire un Fab au moment de sa destruction. Avant on
-// s'appuyait sur la synchro implicite de cudaFree ; ici on reproduit cette barriere mais EN LOT et
-// PORTABLE (Kokkos::fence) : un bloc libere va dans `pending_` (pas encore reutilisable) ; quand une
-// allocation manque de bloc pret, un seul Kokkos::fence() draine le device et bascule TOUS les
-// pending vers `ready_`. Un bloc de `ready_` a donc forcement vu sa derniere utilisation device
-// terminee avant que l'hote (value-init du vector) ne le reecrive.
-/// Pool de memoire unifiee (Kokkos::SharedSpace) avec free-list par taille (octets).
+// Async SAFETY: a kernel may still read/write a Fab at the moment of its destruction. Previously we
+// relied on the implicit synchronization of cudaFree; here we reproduce that barrier but BATCHED and
+// PORTABLE (Kokkos::fence): a freed block goes into `pending_` (not yet reusable); when an
+// allocation lacks a ready block, a single Kokkos::fence() drains the device and moves ALL
+// pending blocks to `ready_`. A block from `ready_` has therefore necessarily had its last device
+// use finished before the host (value-init of the vector) overwrites it.
+/// Unified-memory pool (Kokkos::SharedSpace) with a free-list by size (bytes).
 ///
-/// Singleton (ManagedArena::instance()). Stateless du point de vue de std::allocator :
-/// tous les ManagedAllocator<T> partagent le meme pool, l'operateur == renvoie true.
+/// Singleton (ManagedArena::instance()). Stateless from std::allocator's point of view:
+/// all ManagedAllocator<T> share the same pool, operator == returns true.
 ///
-/// INVARIANT async : un bloc rendu par deallocate() passe en `pending_` et n'est
-/// reutilise qu'apres Kokkos::fence() en lot (dans allocate(), si la free-list ready_
-/// est vide). Un bloc de `ready_` a donc forcement ete vu finalize par le device.
+/// Async INVARIANT: a block returned by deallocate() goes into `pending_` and is only
+/// reused after a batched Kokkos::fence() (in allocate(), if the ready_ free-list
+/// is empty). A block from `ready_` has therefore necessarily been seen finalized by the device.
 ///
-/// Cycle de vie : les blocs ne sont jamais retournes a Kokkos au fil du calcul; seul
-/// release_all() (hook Kokkos::finalize) les rend via kokkos_free. Ne pas appeler
-/// release_all() manuellement.
+/// Lifecycle: blocks are never returned to Kokkos during the computation; only
+/// release_all() (Kokkos::finalize hook) returns them via kokkos_free. Do not call
+/// release_all() manually.
 class ManagedArena {
  public:
-  // Singleton de DUREE DE VIE PROCESSUS, JAMAIS detruit (fuite intentionnelle d'un objet et de
-  // ses tables -- l'OS reclame tout a l'exit). POURQUOI pas une statique locale ordinaire (bug
-  // reel, issue #271, gdb sur CI glibc) : instance() est inline et le module pybind11 _adc est
-  // compile en visibilite HIDDEN -> chaque loader .so du DSL (dlopen, jamais decharge) possede SA
-  // copie de la statique (verifie par LD_DEBUG=bindings : tous les symboles ManagedArena du .so
-  // se lient au .so lui-meme). A l'exit, les destructeurs de ces copies (enregistres TARD, donc
-  // executes TOT, LIFO) detruisaient les tables AVANT le Kokkos::finalize de l'atexit du module
-  // (enregistre tot, execute tard), dont les finalize hooks rappelaient release_all() sur des
-  // arenes DETRUITES -> frees de pointeurs poubelle -> "free(): corrupted unsorted chunks" /
-  // SIGSEGV au teardown. Avec le singleton jamais detruit, l'instance reste valide a TOUT moment
-  // de la fin du process : plus aucune dependance a l'ordre des handlers d'exit. Les blocs du
-  // pool restent rendus a Kokkos par release_all (hook de finalize) ; seules les TABLES (maps de
-  // pointeurs) sont fuites, par construction.
+  // PROCESS-LIFETIME singleton, NEVER destroyed (intentional leak of an object and of
+  // its tables -- the OS reclaims everything at exit). WHY not an ordinary local static (real bug,
+  // issue #271, gdb on CI glibc): instance() is inline and the pybind11 module _adc is
+  // compiled with HIDDEN visibility -> each DSL .so loader (dlopen, never unloaded) has ITS
+  // own copy of the static (verified with LD_DEBUG=bindings: all ManagedArena symbols of the .so
+  // bind to the .so itself). At exit, the destructors of these copies (registered LATE, hence
+  // run EARLY, LIFO) destroyed the tables BEFORE the module's atexit Kokkos::finalize
+  // (registered early, run late), whose finalize hooks called release_all() back on
+  // DESTROYED arenas -> frees of garbage pointers -> "free(): corrupted unsorted chunks" /
+  // SIGSEGV at teardown. With the never-destroyed singleton, the instance stays valid at ANY moment
+  // of the process shutdown: no longer any dependency on the order of exit handlers. The pool
+  // blocks are still returned to Kokkos by release_all (finalize hook); only the TABLES (maps of
+  // pointers) are leaked, by construction.
   static ManagedArena& instance() {
     static ManagedArena* a = new ManagedArena();
     return *a;
@@ -112,17 +88,18 @@ class ManagedArena {
 
   void* allocate(std::size_t bytes) {
     if (bytes == 0) return nullptr;
-    // CRUCIAL : un Fab peut etre construit AVANT tout for_each (donc avant l'init paresseuse cote
-    // kernel). kokkos_malloc exige Kokkos initialise -> on garantit l'init ICI aussi. Sans cela, le
-    // build Kokkos plante des la 1ere allocation (regression identifiee sur build-kokkos). Hors lock.
+    // CRUCIAL: a Fab can be constructed BEFORE any for_each (hence before the lazy init on the
+    // kernel side). kokkos_malloc requires Kokkos initialized -> we guarantee the init HERE too.
+    // Without this, the Kokkos build crashes at the very first allocation (regression identified on
+    // build-kokkos). Outside the lock.
     detail::ensure_kokkos_initialized();
     std::lock_guard<std::mutex> lk(m_);
-    std::call_once(hook_once_, [] {  // rendre les blocs a Kokkos::finalize (sinon allocation "fuitee")
+    std::call_once(hook_once_, [] {  // return the blocks at Kokkos::finalize (otherwise "leaked" allocation)
       Kokkos::push_finalize_hook([] { ManagedArena::instance().release_all(); });
     });
     if (void* p = pop_ready(bytes)) return p;
     if (pending_count_ > 0) {
-      Kokkos::fence();  // barriere en lot, portable (draine les kernels en vol ; ancien cudaDeviceSynchronize)
+      Kokkos::fence();  // batched, portable barrier (drains in-flight kernels; former cudaDeviceSynchronize)
       ++fences_;
       for (auto& kv : pending_) {
         auto& r = ready_[kv.first];
@@ -132,15 +109,15 @@ class ManagedArena {
       pending_count_ = 0;
       if (void* p = pop_ready(bytes)) return p;
     }
-    void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>("adc_fab", bytes);  // memoire unifiee portable
+    void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>("adc_fab", bytes);  // portable unified memory
     if (!p) throw std::bad_alloc();
     ++misses_;
     reserved_ += bytes;
     return p;
   }
 
-  // Bloc libere : en attente (pas reutilisable avant la prochaine barriere en lot). Pas de
-  // kokkos_free immediat (le pool vit jusqu'a la fin du process ; release_all rend tout a finalize).
+  // Freed block: pending (not reusable before the next batched barrier). No
+  // immediate kokkos_free (the pool lives until the end of the process; release_all returns everything at finalize).
   void deallocate(void* p, std::size_t bytes) {
     if (!p) return;
     std::lock_guard<std::mutex> lk(m_);
@@ -148,9 +125,9 @@ class ManagedArena {
     ++pending_count_;
   }
 
-  // Hook de Kokkos::finalize : libere tous les blocs (ready + pending) via kokkos_free AVANT l'arret
-  // des espaces memoire, pour ne laisser aucune allocation Kokkos non rendue (le pool ne free jamais
-  // en cours de route). Appele une seule fois, hors de toute allocation concurrente.
+  // Kokkos::finalize hook: frees all blocks (ready + pending) via kokkos_free BEFORE the memory
+  // spaces shut down, so as to leave no unreturned Kokkos allocation (the pool never frees
+  // along the way). Called only once, outside any concurrent allocation.
   void release_all() {
     std::lock_guard<std::mutex> lk(m_);
     for (auto& kv : ready_)
@@ -180,9 +157,9 @@ class ManagedArena {
   }
 
   std::mutex m_;
-  std::once_flag hook_once_;  // enregistrement unique du finalize hook Kokkos
-  std::unordered_map<std::size_t, std::vector<void*>> ready_;    // surs, reutilisables
-  std::unordered_map<std::size_t, std::vector<void*>> pending_;  // liberes, a drainer
+  std::once_flag hook_once_;  // single registration of the Kokkos finalize hook
+  std::unordered_map<std::size_t, std::vector<void*>> ready_;    // safe, reusable
+  std::unordered_map<std::size_t, std::vector<void*>> pending_;  // freed, to drain
   long pending_count_ = 0;
   long hits_ = 0, misses_ = 0, fences_ = 0;
   std::size_t reserved_ = 0;
@@ -190,9 +167,9 @@ class ManagedArena {
 
 inline ArenaStats arena_stats() { return ManagedArena::instance().stats(); }
 
-/// Adaptateur std::allocator_traits backed par ManagedArena.
-/// Stateless : tous les ManagedAllocator<T> sont egaux (pool singleton partage).
-/// Utiliser l'alias `fab_allocator<T>` plutot que ce template directement.
+/// std::allocator_traits adapter backed by ManagedArena.
+/// Stateless: all ManagedAllocator<T> are equal (shared singleton pool).
+/// Use the alias `fab_allocator<T>` rather than this template directly.
 template <class T>
 struct ManagedAllocator {
   using value_type = T;
@@ -210,7 +187,7 @@ struct ManagedAllocator {
 
 template <class A, class B>
 bool operator==(const ManagedAllocator<A>&, const ManagedAllocator<B>&) noexcept {
-  return true;  // sans etat : tous egaux (pool singleton partage)
+  return true;  // stateless: all equal (shared singleton pool)
 }
 template <class A, class B>
 bool operator!=(const ManagedAllocator<A>&, const ManagedAllocator<B>&) noexcept {
@@ -220,24 +197,24 @@ bool operator!=(const ManagedAllocator<A>&, const ManagedAllocator<B>&) noexcept
 template <class T>
 using fab_allocator = ManagedAllocator<T>;
 
-// Allocateur des TAMPONS DE COMMUNICATION MPI (sbuf/rbuf de fill_boundary), DISTINCT de
-// fab_allocator : surtout PAS de memoire managee/device ici. Une MPI CUDA-aware (sur ROMEO :
-// OpenMPI 4.1.7, PML ob1 + BTL smcuda) detecte un pointeur device/managed (cuPointerGetAttribute)
-// et tente un transfert device->device par CUDA IPC (cuIpcOpenMemHandle). Sous isolation cgroup GPU
-// (srun --gpus-per-task=1, chaque rang ne voit QUE son GPU comme device 0), l'IPC handle exporte par
-// le pair pointe un GPU invisible -> l'ouverture ne peut pas aboutir -> DEADLOCK du rendez-vous.
-// On alloue donc en memoire HOTE EPINGLEE (Kokkos::SharedHostPinnedSpace) : accessible du device
-// (les kernels pack/unpack for_each ecrivent dedans directement, comme SharedSpace) MAIS vue comme
-// memoire HOTE par MPI -> chemin hote normal, JAMAIS d'IPC, robuste quel que soit l'env de lancement.
-// Backend hote Kokkos : SharedHostPinnedSpace == HostSpace (rien ne change). Voir fill_boundary.hpp.
+// Allocator for the MPI COMMUNICATION BUFFERS (sbuf/rbuf of fill_boundary), DISTINCT from
+// fab_allocator: definitely NO managed/device memory here. A CUDA-aware MPI (on ROMEO:
+// OpenMPI 4.1.7, PML ob1 + BTL smcuda) detects a device/managed pointer (cuPointerGetAttribute)
+// and attempts a device->device transfer via CUDA IPC (cuIpcOpenMemHandle). Under GPU cgroup
+// isolation (srun --gpus-per-task=1, each rank sees ONLY its GPU as device 0), the IPC handle exported by
+// the peer points to an invisible GPU -> the open cannot succeed -> DEADLOCK of the rendezvous.
+// So we allocate in PINNED HOST memory (Kokkos::SharedHostPinnedSpace): accessible from the device
+// (the pack/unpack for_each kernels write into it directly, like SharedSpace) BUT seen as
+// HOST memory by MPI -> normal host path, NEVER IPC, robust whatever the launch environment.
+// Kokkos host backend: SharedHostPinnedSpace == HostSpace (nothing changes). See fill_boundary.hpp.
 static_assert(Kokkos::has_shared_host_pinned_space,
-              "adc : le backend Kokkos doit fournir SharedHostPinnedSpace (memoire hote epinglee) "
-              "pour les tampons de communication MPI de fill_boundary");
+              "adc: the Kokkos backend must provide SharedHostPinnedSpace (pinned host memory) "
+              "for the MPI communication buffers of fill_boundary");
 
-/// Adaptateur std::allocator_traits sur Kokkos::SharedHostPinnedSpace (hote epingle, device-accessible).
-/// Stateless. Utiliser l'alias `comm_allocator<T>`. PAS de pool a free differe (a la difference de
-/// ManagedArena) : fill_boundary_end pose donc un device_fence() apres l'unpack avant que les tampons
-/// ne soient liberes (les kernels d'unpack lisent rbuf de facon asynchrone).
+/// std::allocator_traits adapter over Kokkos::SharedHostPinnedSpace (pinned host, device-accessible).
+/// Stateless. Use the alias `comm_allocator<T>`. NO deferred-free pool (unlike
+/// ManagedArena): fill_boundary_end therefore places a device_fence() after the unpack before the buffers
+/// are freed (the unpack kernels read rbuf asynchronously).
 template <class T>
 struct PinnedAllocator {
   using value_type = T;
@@ -247,7 +224,7 @@ struct PinnedAllocator {
 
   T* allocate(std::size_t n) {
     if (n == 0) return nullptr;
-    detail::ensure_kokkos_initialized();  // kokkos_malloc exige Kokkos initialise
+    detail::ensure_kokkos_initialized();  // kokkos_malloc requires Kokkos initialized
     void* p = Kokkos::kokkos_malloc<Kokkos::SharedHostPinnedSpace>("adc_comm", n * sizeof(T));
     if (!p) throw std::bad_alloc();
     return static_cast<T*>(p);
@@ -272,11 +249,11 @@ namespace adc {
 template <class T>
 using fab_allocator = std::allocator<T>;
 
-// Hors Kokkos : tampons MPI en memoire hote ordinaire (build CPU inchange, byte-identique a avant).
+// Outside Kokkos: MPI buffers in ordinary host memory (CPU build unchanged, byte-identical to before).
 template <class T>
 using comm_allocator = std::allocator<T>;
 
-// Stub hors memoire unifiee : pas de pool, pas de stats (build CPU inchange).
+// Stub outside unified memory: no pool, no stats (CPU build unchanged).
 inline ArenaStats arena_stats() { return ArenaStats{}; }
 }  // namespace adc
 

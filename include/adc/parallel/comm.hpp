@@ -1,31 +1,23 @@
 #pragma once
 
 /// @file
-/// @brief Seam parallele : abstraction MPI minimale (rang/taille + collectifs) avec repli serie.
+/// @brief Parallel seam: minimal MPI abstraction (rank/size + collectives) with serial fallback.
 ///
-/// Couche : `include/adc/parallel`.
-/// Role : exposer my_rank()/n_ranks() et un jeu fixe de reductions globales (somme/min/max sur
-/// double et long, somme-en-place sur tableau de double, OU-en-place sur tableau de marqueurs)
-/// derriere une facade unique. Sans ADC_HAS_MPI tout est compile en identite serie ; le reste du
-/// code ne voit jamais MPI_COMM_WORLD ni mpi.h directement.
-/// Contrat : toutes les collectives operent sur MPI_COMM_WORLD ; chaque rang doit les appeler
-/// dans le meme ordre (sinon deadlock). Les briques sum_inplace / or_inplace alimentent
-/// respectivement le reflux AMR multi-patch et le rassemblement des tags de regrid avant
-/// clustering ; all_reduce_min garantit un dt global identique sur tous les rangs.
+/// Layer: `include/adc/parallel`.
+/// Role: expose my_rank()/n_ranks() and a fixed set of global reductions (sum/min/max on
+/// double and long, in-place sum on a double array, in-place OR on a marker array)
+/// behind a single facade. Without ADC_HAS_MPI everything compiles to a serial identity; the rest
+/// of the code never sees MPI_COMM_WORLD nor mpi.h directly.
+/// Contract: every collective operates on MPI_COMM_WORLD; each rank must call them
+/// in the same order (otherwise deadlock). The sum_inplace / or_inplace bricks feed
+/// respectively the multi-patch AMR reflux and the gathering of regrid tags before
+/// clustering; all_reduce_min guarantees a global dt identical on all ranks.
 ///
-/// Invariants :
-/// - meme compile avec MPI, si MPI n'est pas initialise my_rank()=0 / n_ranks()=1 (comm_active()
-///   teste Initialized && !Finalized) ; appeler comm_init() au debut de main() pour un run distribue ;
-/// - les fonctions all_reduce_* sont COLLECTIVES : tous les rangs participent ou aucun ;
-/// - en mode serie chaque fonction est l'identite (no-op ou retour de l'argument).
-
-// Le seam parallele. Sans ADC_HAS_MPI : rang unique (serie). Avec ADC_HAS_MPI :
-// MPI_Comm_rank/size + collectives sur MPI_COMM_WORLD. Tout le reste du code
-// passe par my_rank() / n_ranks() / all_reduce_* et ignore le backend.
-//
-// Robustesse : meme compile avec MPI, si MPI n'est pas initialise (ex. un test
-// serie linke contre adc), my_rank() rend 0 et n_ranks() rend 1. Il faut donc
-// appeler comm_init() au debut de main() pour les runs reellement distribues.
+/// Invariants:
+/// - even compiled with MPI, if MPI is not initialized my_rank()=0 / n_ranks()=1 (comm_active()
+///   tests Initialized && !Finalized); call comm_init() at the start of main() for a distributed run;
+/// - the all_reduce_* functions are COLLECTIVE: all ranks participate or none;
+/// - in serial mode each function is the identity (no-op or returns the argument).
 
 #ifdef ADC_HAS_MPI
 #include <mpi.h>
@@ -86,10 +78,10 @@ inline double all_reduce_max(double x) {
   return r;
 }
 
-// Min global (pendant de all_reduce_max). Brique des bornes GLOBALES de pas de temps
-// (System::add_dt_bound) : la callback hote est evaluee PAR RANG, le min global garantit un dt
-// IDENTIQUE sur tous les rangs (sans quoi les collectifs du pas -- Krylov, fill_boundary --
-// divergeraient -> deadlock). En serie : identite.
+// Global min (counterpart of all_reduce_max). Brick for GLOBAL time step bounds
+// (System::add_dt_bound): the host callback is evaluated PER RANK, the global min guarantees a dt
+// IDENTICAL on all ranks (otherwise the collectives of the step -- Krylov, fill_boundary --
+// would diverge -> deadlock). In serial: identity.
 inline double all_reduce_min(double x) {
   if (!comm_active()) return x;
   double r = x;
@@ -97,9 +89,9 @@ inline double all_reduce_min(double x) {
   return r;
 }
 
-// Somme element par element d'un tableau, en place, sur tous les rangs. Brique de
-// base du reflux AMR multi-patch distribue : chaque rang remplit les contributions de
-// ses patchs locaux (0 ailleurs), all-reduce -> chaque rang a le registre complet.
+// Element-by-element sum of an array, in place, on all ranks. Base brick of the
+// distributed multi-patch AMR reflux: each rank fills the contributions of
+// its local patches (0 elsewhere), all-reduce -> each rank has the complete register.
 inline void all_reduce_sum_inplace(double* buf, int n) {
   if (!comm_active() || n <= 0) return;
   MPI_Allreduce(MPI_IN_PLACE, buf, n, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
@@ -112,18 +104,18 @@ inline long all_reduce_sum(long x) {
   return r;
 }
 
-// OU logique element par element d'un tableau de marqueurs (0/1), en place, sur tous les rangs.
-// Brique du regrid AMR a GROSSIER REPARTI : chaque rang ne tague QUE ses boites grossieres
-// locales (tag_cells iterant sur local_size()), donc personne ne voit la grille de tags complete ;
-// l'OU global rassemble les tags sur chaque rang avant le clustering Berger-Rigoutsos, qui produit
-// alors des patchs fins IDENTIQUES partout (sinon la BoxArray fine differerait par rang -> MPI
-// desynchronise). Cf. la note de tag_box.hpp ("les tags repartis seront rassembles avant clustering").
+// Element-by-element logical OR of a marker array (0/1), in place, on all ranks.
+// Brick of the DISTRIBUTED-COARSE AMR regrid: each rank tags ONLY its local coarse
+// boxes (tag_cells iterating over local_size()), so nobody sees the complete tag grid;
+// the global OR gathers the tags on each rank before the Berger-Rigoutsos clustering, which then
+// produces IDENTICAL fine patches everywhere (otherwise the fine BoxArray would differ per rank -> MPI
+// desynchronized). See the note in tag_box.hpp ("the distributed tags will be gathered before clustering").
 inline void all_reduce_or_inplace(char* buf, int n) {
   if (!comm_active() || n <= 0) return;
   MPI_Allreduce(MPI_IN_PLACE, buf, n, MPI_CHAR, MPI_BOR, MPI_COMM_WORLD);
 }
 
-#else  // ----- serie -----
+#else  // ----- serial -----
 
 inline bool comm_active() { return false; }
 inline void comm_init(int* = nullptr, char*** = nullptr) {}
@@ -135,8 +127,8 @@ inline double all_reduce_sum(double x) { return x; }
 inline double all_reduce_max(double x) { return x; }
 inline double all_reduce_min(double x) { return x; }
 inline long all_reduce_sum(long x) { return x; }
-inline void all_reduce_sum_inplace(double*, int) {}  // serie : identite
-inline void all_reduce_or_inplace(char*, int) {}     // serie : identite
+inline void all_reduce_sum_inplace(double*, int) {}  // serial: identity
+inline void all_reduce_or_inplace(char*, int) {}     // serial: identity
 
 #endif
 

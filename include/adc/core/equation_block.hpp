@@ -1,17 +1,17 @@
 /// @file
-/// @brief EquationBlock : association (modele, champ U, schema spatial, politique temporelle, BC).
-///        Niveau d'abstraction au-dessus de PhysicalModel.
+/// @brief EquationBlock: association (model, field U, spatial scheme, time policy, BC).
+///        Abstraction level above PhysicalModel.
 ///
-/// Un PhysicalModel decrit une loi locale ponctuelle. Un EquationBlock dit comment cette loi
-/// est portee par la simulation : quel MultiFab U, quelle discretisation spatiale (SpatialT),
-/// quelle politique temporelle (TimeT), quelles conditions aux limites (BCRec).
+/// A PhysicalModel describes a local pointwise law. An EquationBlock says how this law
+/// is carried by the simulation: which MultiFab U, which spatial discretisation (SpatialT),
+/// which time policy (TimeT), which boundary conditions (BCRec).
 ///
-/// INVARIANT : `state` n'est jamais null apres construction (pointe vers le MultiFab passe au
-/// constructeur). L'EquationBlock ne possede pas le MultiFab; la duree de vie du MultiFab doit
-/// exceder celle du bloc.
+/// INVARIANT: `state` is never null after construction (points to the MultiFab passed to the
+/// constructor). The EquationBlock does not own the MultiFab; the MultiFab lifetime must
+/// exceed that of the block.
 ///
-/// `EquationBlockLike` : concept minimal permettant au CoupledSystem et au scheduler de
-/// manipuler un bloc sans connaitre ses types concrets (ModelT, SpatialT, TimeT).
+/// `EquationBlockLike`: minimal concept letting the CoupledSystem and the scheduler
+/// manipulate a block without knowing its concrete types (ModelT, SpatialT, TimeT).
 
 #pragma once
 
@@ -24,37 +24,27 @@
 #include <concepts>
 #include <string_view>
 
-// Niveau d'abstraction au-dessus de PhysicalModel.
-//
-// Un PhysicalModel decrit une loi locale. Un EquationBlock dit comment cette loi
-// est portee par la simulation : quel champ U, quelle discretisation spatiale,
-// quelle politique temporelle, quelles conditions aux limites.
-//
-// C'est la brique manquante pour exprimer "electrons implicites en 10 sous-pas,
-// ions explicites en 1 sous-pas, schemas spatiaux differents" sans melanger ces
-// choix dans le modele physique.
-
 namespace adc {
 
-/// Association d'un PhysicalModel avec son champ U (MultiFab), son schema spatial, sa
-/// politique temporelle et ses conditions aux limites.
+/// Association of a PhysicalModel with its field U (MultiFab), its spatial scheme, its
+/// time policy and its boundary conditions.
 ///
-/// Parametres templates :
-///   ModelT  : doit satisfaire PhysicalModel.
-///   SpatialT: doit satisfaire SpatialDiscretisationLike (defaut FirstOrder).
-///   TimeT   : politique temporelle (defaut ExplicitTime<SSPRK2>).
+/// Template parameters:
+///   ModelT: must satisfy PhysicalModel.
+///   SpatialT: must satisfy SpatialDiscretisationLike (default FirstOrder).
+///   TimeT: time policy (default ExplicitTime<SSPRK2>).
 ///
-/// INVARIANT : `state != nullptr` apres construction. L'EquationBlock ne possede PAS
-/// le MultiFab; la duree de vie du MultiFab doit exceder celle du bloc.
-/// Ne pas stocker dans un conteneur par valeur si le MultiFab est alloue dynamiquement
-/// et pourrait etre deplace (le pointeur deviendrait invalide).
+/// INVARIANT: `state != nullptr` after construction. The EquationBlock does NOT own
+/// the MultiFab; the MultiFab lifetime must exceed that of the block.
+/// Do not store in a container by value if the MultiFab is dynamically allocated
+/// and could be moved (the pointer would become invalid).
 template <class ModelT, class SpatialT = FirstOrder,
           class TimeT = ExplicitTime<SSPRK2>>
 struct EquationBlock {
   static_assert(PhysicalModel<ModelT>,
-                "EquationBlock attend un ModelT qui modele PhysicalModel");
+                "EquationBlock expects a ModelT that models PhysicalModel");
   static_assert(SpatialDiscretisationLike<SpatialT>,
-                "EquationBlock attend une discretisation spatiale nommee");
+                "EquationBlock expects a named spatial discretisation");
 
   using Model = ModelT;
   using Spatial = SpatialT;
@@ -73,9 +63,9 @@ struct EquationBlock {
   const MultiFab& U() const { return *state; }
 };
 
-/// Concept minimal pour les blocs d'equation : Model, Spatial, Time, name, state, U().
-/// Permet au CoupledSystem et au scheduler de manipuler un bloc sans connaitre ses types
-/// concrets. Verifie que `state` est convertible en `MultiFab*` et que U() retourne MultiFab&.
+/// Minimal concept for equation blocks: Model, Spatial, Time, name, state, U().
+/// Lets the CoupledSystem and the scheduler manipulate a block without knowing its
+/// concrete types. Checks that `state` is convertible to `MultiFab*` and that U() returns MultiFab&.
 template <class B>
 concept EquationBlockLike = requires(B b) {
   typename B::Model;

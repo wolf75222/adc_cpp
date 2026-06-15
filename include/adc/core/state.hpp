@@ -1,33 +1,33 @@
 /// @file
-/// @brief Types ponctuels de la couche physique : StateVec<N> (etat conserve) et Aux (champs
-///        auxiliaires issus du solveur elliptique). Les indices canoniques de Aux sont definis ici
-///        et doivent rester en phase avec AUX_CANONICAL dans python/adc/dsl.py (duplication
-///        inherente : Python ne lit pas les en-tetes C++).
+/// @brief Pointwise types of the physics layer: StateVec<N> (conserved state) and Aux (auxiliary
+///        fields from the elliptic solver). The canonical indices of Aux are defined here
+///        and must stay in sync with AUX_CANONICAL in python/adc/dsl.py (inherent
+///        duplication: Python does not read C++ headers).
 
 #pragma once
 
 #include <adc/core/types.hpp>
 
-// State et Aux : les deux types ponctuels manipules par la couche physique.
+// State and Aux: the two pointwise types handled by the physics layer.
 //
-// Regle d'architecture : ce sont des agregats trivialement copiables (POD).
-// Un PhysicalModel ne voit jamais autre chose que ca. Aucune box, aucun rang
-// MPI, aucune vue Kokkos n'entre ici. C'est ce qui rend la physique portable :
-// le meme code compile pour CPU et device parce qu'il ne touche a aucun
-// parallelisme.
+// Architecture rule: these are trivially copyable aggregates (POD).
+// A PhysicalModel never sees anything else. No box, no MPI rank,
+// no Kokkos view enters here. This is what makes the physics portable:
+// the same code compiles for CPU and device because it touches no
+// parallelism.
 
 namespace adc {
 
-/// Vecteur d'etat conserve de taille fixe, connue a la compilation.
+/// Conserved state vector of fixed size, known at compile time.
 ///
-/// Exemples : StateVec<1> pour un scalaire (advection), StateVec<4> pour Euler 2D.
-/// La valeur N pilote PhysicalModel::n_vars.
+/// Examples: StateVec<1> for a scalar (advection), StateVec<4> for 2D Euler.
+/// The value N drives PhysicalModel::n_vars.
 ///
-/// INVARIANT device : tableau C brut (`Real v[N]`), pas std::array; trivialement
-/// copiable, device-clean (ADC_HD). Aucun constructeur non-trivial.
+/// device INVARIANT: raw C array (`Real v[N]`), not std::array; trivially
+/// copyable, device-clean (ADC_HD). No non-trivial constructor.
 template <int N>
 struct StateVec {
-  Real v[N]{};  // tableau C : trivialement utilisable sur device (pas std::array)
+  Real v[N]{};  // C array: trivially usable on device (not std::array)
 
   ADC_HD Real& operator[](int i) { return v[i]; }
   ADC_HD Real operator[](int i) const { return v[i]; }
@@ -56,119 +56,116 @@ ADC_HD StateVec<N> operator*(Real s, StateVec<N> a) {
 }
 /// @}
 
-// Champs auxiliaires derives de la resolution elliptique : le potentiel et
-// son gradient au point. C'est le canal unique par lequel le couplage entre
-// dans la physique. Il alimente A LA FOIS le flux (transport a derive : la
-// vitesse E x B vient de grad phi) et la source (fluide compressible
-// auto-gravitant : S = -rho grad phi). Cette dualite est ce qui permet a un seul
-// operateur spatial de servir les deux problemes cibles.
+// Auxiliary fields derived from the elliptic solve: the potential and
+// its gradient at the point. This is the single channel through which the coupling enters
+// the physics. It feeds BOTH the flux (drift transport: the
+// E x B velocity comes from grad phi) and the source (self-gravitating
+// compressible fluid: S = -rho grad phi). This duality is what lets a single
+// spatial operator serve both target problems.
 //
-// Canal aux EXTENSIBLE (cf. aux_comps()/load_aux dans spatial_operator.hpp). Les trois
-// premieres composantes sont le contrat de BASE, identique a l'historique :
+// EXTENSIBLE aux channel (cf. aux_comps()/load_aux in spatial_operator.hpp). The first three
+// components are the BASE contract, identical to the legacy layout:
 //   [0] = phi, [1] = grad_x, [2] = grad_y.
-// Les suivantes sont des champs auxiliaires SUPPLEMENTAIRES, optionnels, dans un ordre
-// canonique fixe ([3] = B_z, [4] = T_e, ...). Un modele declare combien de composantes il lit
-// via un membre statique n_aux (defaut kAuxBaseComps = 3) ; un modele sans n_aux ne lit jamais
-// les champs extra et reste strictement bit-identique. Les champs extra valent 0 par defaut :
-// load_aux ne les ecrase que si le modele les demande.
+// The following ones are ADDITIONAL auxiliary fields, optional, in a fixed
+// canonical order ([3] = B_z, [4] = T_e, ...). A model declares how many components it reads
+// via a static member n_aux (default kAuxBaseComps = 3); a model without n_aux never reads
+// the extra fields and stays strictly bit-identical. The extra fields default to 0:
+// load_aux overwrites them only if the model requests them.
 //
-/// SOURCE UNIQUE de la disposition des champs aux EXTRA (X-macro). C'est le SEUL endroit
-/// listant {membre, indice} pour les champs au-dela du contrat de base.
-/// INVARIANT Python-C++ : les indices ici doivent rester identiques a AUX_CANONICAL dans
-/// python/adc/dsl.py ({"phi":0,"grad_x":1,"grad_y":2,"B_z":3,"T_e":4}). Modifier l'un
-/// exige de modifier l'autre simultanement. La duplication est inherente : Python ne lit
-/// pas les en-tetes C++.
-// SOURCE UNIQUE de la disposition des champs aux EXTRA (X-macro). C'est le SEUL endroit
-// listant {membre, indice} pour les champs au-dela du contrat de base. load_aux (lecture
-// device, spatial_operator.hpp) ET le marshaling hote (python/system.cpp) en sont GENERES,
-// donc ajouter un champ aux extra se fait ICI et NULLE PART AILLEURS. Cela ferme le trou
-// historique (#51 : T_e ajoute au struct + load_aux mais oublie dans le marshaling JIT ->
-// lu comme 0 en silence). Chaque entree : X(membre, indice). L'indice DOIT etre >= 3
-// (les composantes 0..2 sont phi/grad_x/grad_y, cablees dans le constructeur de base) et
-// suivre la disposition canonique partagee avec AUX_CANONICAL cote DSL (python/adc/dsl.py),
-// duplication inherente : Python ne lit pas les en-tetes C++. Pour ajouter un champ :
-// 1 ligne ici (et la ligne miroir dans AUX_CANONICAL). Pur preprocesseur -> device-clean
-// (nvcc/Kokkos), aucune reflection C++26.
+/// SINGLE SOURCE of the layout of the EXTRA aux fields (X-macro). This is the ONLY place
+/// listing {member, index} for the fields beyond the base contract.
+/// Python-C++ INVARIANT: the indices here must stay identical to AUX_CANONICAL in
+/// python/adc/dsl.py ({"phi":0,"grad_x":1,"grad_y":2,"B_z":3,"T_e":4}). Modifying one
+/// requires modifying the other at the same time. The duplication is inherent: Python does not
+/// read C++ headers. load_aux (device read, spatial_operator.hpp) AND the host marshaling
+/// (python/system.cpp) are GENERATED from it, so adding an extra aux field is done HERE and
+/// NOWHERE ELSE. This closes the historical gap (#51: T_e added to the struct + load_aux but
+/// forgotten in the JIT marshaling -> read as 0 silently). Each entry: X(member, index). The
+/// index MUST be >= 3 (components 0..2 are phi/grad_x/grad_y, wired in the base constructor) and
+/// follow the canonical layout shared with AUX_CANONICAL on the DSL side (python/adc/dsl.py),
+/// inherent duplication: Python does not read C++ headers. To add a field:
+/// 1 line here (and the mirror line in AUX_CANONICAL). Pure preprocessor -> device-clean
+/// (nvcc/Kokkos), no C++26 reflection.
 #define ADC_AUX_FIELDS(X) \
   X(B_z, 3)               \
   X(T_e, 4)
 
-// Nombre MAXIMAL de champs aux NOMMES (declares par un modele via aux_field("...") cote DSL, ADC-70
-// phase 1) qu'un Aux peut transporter. Borne FIXE : Aux reste un POD trivialement copiable (tableau C
-// brut, device-clean) -- aucune allocation, pas de std::vector. Mettre a jour ICI et AUX_NAMED_MAX
-// cote DSL (python/adc/dsl.py) si on veut plus de quatre champs nommes par modele.
+// MAXIMUM number of NAMED aux fields (declared by a model via aux_field("...") on the DSL side,
+// ADC-70 phase 1) that an Aux can carry. FIXED bound: Aux stays a trivially copyable POD (raw C
+// array, device-clean) -- no allocation, no std::vector. Update HERE and AUX_NAMED_MAX
+// on the DSL side (python/adc/dsl.py) if more than four named fields per model are wanted.
 inline constexpr int kAuxMaxExtra = 4;
 
-/// @brief Champs auxiliaires PONCTUELS partages avec la physique : canal de couplage unique.
+/// @brief POINTWISE auxiliary fields shared with the physics: single coupling channel.
 ///
-/// Role : porter au point les sorties du solveur elliptique et les champs fournis par le systeme,
-/// que la physique consomme A LA FOIS dans le flux (transport a derive : vitesse E x B = grad phi)
-/// et dans la source (fluide auto-gravitant : S = -rho grad phi).
+/// Role: carry to the point the outputs of the elliptic solver and the fields provided by the system,
+/// which the physics consumes BOTH in the flux (drift transport: E x B velocity = grad phi)
+/// and in the source (self-gravitating fluid: S = -rho grad phi).
 ///
-/// Usage : un PhysicalModel lit phi/grad_x/grad_y (contrat de BASE, composantes 0..2, toujours
-/// presentes). Les champs EXTRA canoniques (B_z = comp 3, T_e = comp 4) et les champs NOMMES par
-/// le modele (extra[k] <-> composante kAuxNamedBase + k) ne sont charges QUE si le modele declare
-/// un membre statique n_aux assez grand ; un modele sans n_aux reste strictement bit-identique.
-/// Lire un champ nomme via extra_field(k) (lecture bornee, renvoie 0 hors borne).
+/// Usage: a PhysicalModel reads phi/grad_x/grad_y (BASE contract, components 0..2, always
+/// present). The canonical EXTRA fields (B_z = comp 3, T_e = comp 4) and the fields NAMED by
+/// the model (extra[k] <-> component kAuxNamedBase + k) are loaded ONLY if the model declares
+/// a static member n_aux large enough; a model without n_aux stays strictly bit-identical.
+/// Read a named field via extra_field(k) (bounded read, returns 0 out of bounds).
 ///
-/// Contrat : POD trivialement copiable, device-clean (tableau C brut, aucune allocation) ;
-/// la disposition des champs EXTRA est generee depuis la X-macro ADC_AUX_FIELDS (source unique).
+/// Contract: trivially copyable POD, device-clean (raw C array, no allocation);
+/// the layout of the EXTRA fields is generated from the X-macro ADC_AUX_FIELDS (single source).
 ///
-/// Invariants :
-/// - tous les champs au-dela du contrat de base valent 0 par defaut (load_aux ne les ecrase que
-///   sur demande du modele) ;
-/// - les indices doivent rester en phase avec AUX_CANONICAL / AUX_NAMED_BASE cote DSL
-///   (python/adc/dsl.py) : duplication inherente, Python ne lit pas les en-tetes C++ ;
-/// - kAuxMaxExtra borne le nombre de champs nommes pour garder le POD a taille fixe.
+/// Invariants:
+/// - all fields beyond the base contract default to 0 (load_aux overwrites them only
+///   on the model's request);
+/// - the indices must stay in sync with AUX_CANONICAL / AUX_NAMED_BASE on the DSL side
+///   (python/adc/dsl.py): inherent duplication, Python does not read C++ headers;
+/// - kAuxMaxExtra bounds the number of named fields to keep the POD at fixed size.
 struct Aux {
-  Real phi{};     // potentiel       (composante aux 0)
-  Real grad_x{};  // d phi / d x     (composante aux 1)
-  Real grad_y{};  // d phi / d y     (composante aux 2)
-  // Membres EXTRA generes depuis ADC_AUX_FIELDS (source unique). B_z = champ B hors-plan
-  // fourni par le systeme (comp 3) ; T_e = temperature electronique p/rho d'un bloc fluide
-  // (comp 4). Tous optionnels, a 0 par defaut.
+  Real phi{};     // potential       (aux component 0)
+  Real grad_x{};  // d phi / d x     (aux component 1)
+  Real grad_y{};  // d phi / d y     (aux component 2)
+  // EXTRA members generated from ADC_AUX_FIELDS (single source). B_z = out-of-plane B field
+  // provided by the system (comp 3); T_e = electron temperature p/rho of a fluid block
+  // (comp 4). All optional, defaulting to 0.
 #define ADC_AUX_DECL(name, idx) Real name{};
   ADC_AUX_FIELDS(ADC_AUX_DECL)
 #undef ADC_AUX_DECL
-  // Champs aux NOMMES par le modele (ADC-70 phase 1). Composantes du canal aux a partir de
-  // kAuxNamedBase (= 5, juste apres T_e) : extra[k] <-> composante (kAuxNamedBase + k). A 0 par
-  // defaut ; load_aux ne les charge QUE si le modele declare n_aux > kAuxNamedBase (if constexpr,
-  // zero cout au defaut). Lu dans une formule DSL via aux.extra_field(k).
+  // Aux fields NAMED by the model (ADC-70 phase 1). Components of the aux channel starting at
+  // kAuxNamedBase (= 5, right after T_e): extra[k] <-> component (kAuxNamedBase + k). Defaulting to
+  // 0; load_aux loads them ONLY if the model declares n_aux > kAuxNamedBase (if constexpr,
+  // zero cost by default). Read in a DSL formula via aux.extra_field(k).
   Real extra[kAuxMaxExtra]{};
 
-  /// Lecture BORNEE d'un champ aux nomme (composante kAuxNamedBase + k). Renvoie 0 hors borne : la
-  /// brique generee n'appelle jamais extra_field avec un k que le modele n'a pas declare, mais la
-  /// garde rend l'acces sur (toujours device-clean, pas de branche dynamique sur k connu au codegen).
+  /// BOUNDED read of a named aux field (component kAuxNamedBase + k). Returns 0 out of bounds: the
+  /// generated brick never calls extra_field with a k that the model did not declare, but the
+  /// guard makes the access safe (still device-clean, no dynamic branch on a k known at codegen).
   ADC_HD Real extra_field(int k) const {
     return (k >= 0 && k < kAuxMaxExtra) ? extra[k] : Real(0);
   }
 };
 
-// Largeur du canal aux du contrat de base (phi, grad phi). Un modele lisant des champs
-// supplementaires declare un n_aux plus grand ; cf. aux_comps()/load_aux().
+// Width of the aux channel of the base contract (phi, grad phi). A model reading additional
+// fields declares a larger n_aux; cf. aux_comps()/load_aux().
 inline constexpr int kAuxBaseComps = 3;
 
-// Premiere composante des champs aux NOMMES (ADC-70 phase 1) : juste APRES les champs canoniques
-// B_z (3) et T_e (4), donc indice 5. Un modele declarant K champs nommes pose n_aux = kAuxNamedBase +
-// K ; extra[k] est la composante (kAuxNamedBase + k). Place APRES le canal canonique pour que les
-// noms utilisateur n'empietent jamais sur B_z / T_e (qui gardent leurs chemins dedies
-// set_magnetic_field / set_electron_temperature_from). MIROIR Python : AUX_NAMED_BASE (dsl.py).
-inline constexpr int kAuxNamedBase = kAuxBaseComps + 2;  // = 5 (apres B_z=3, T_e=4)
+// First component of the NAMED aux fields (ADC-70 phase 1): right AFTER the canonical fields
+// B_z (3) and T_e (4), so index 5. A model declaring K named fields sets n_aux = kAuxNamedBase +
+// K; extra[k] is component (kAuxNamedBase + k). Placed AFTER the canonical channel so that user
+// names never encroach on B_z / T_e (which keep their dedicated paths
+// set_magnetic_field / set_electron_temperature_from). Python MIRROR: AUX_NAMED_BASE (dsl.py).
+inline constexpr int kAuxNamedBase = kAuxBaseComps + 2;  // = 5 (after B_z=3, T_e=4)
 
-// Garde-fou : la base des champs nommes doit etre STRICTEMENT au-dela du dernier champ canonique
-// extra (le plus grand indice d'ADC_AUX_FIELDS + 1). Si on ajoute un champ canonique au-dela de T_e,
-// ce static_assert force a remonter kAuxNamedBase (et AUX_NAMED_BASE cote DSL) en consequence.
+// Safeguard: the base of the named fields must be STRICTLY beyond the last canonical extra
+// field (the largest index of ADC_AUX_FIELDS + 1). If a canonical field is added beyond T_e,
+// this static_assert forces raising kAuxNamedBase (and AUX_NAMED_BASE on the DSL side) accordingly.
 #define ADC_AUX_NAMED_BASE_CHECK(name, idx) \
   static_assert(kAuxNamedBase > (idx),      \
-      "kAuxNamedBase doit etre au-dela du champ aux canonique '" #name "'");
+      "kAuxNamedBase must be beyond the canonical aux field '" #name "'");
 ADC_AUX_FIELDS(ADC_AUX_NAMED_BASE_CHECK)
 #undef ADC_AUX_NAMED_BASE_CHECK
 
-// Garde-fou : les indices declares dans ADC_AUX_FIELDS sont strictement EXTRA (>= base) et
-// commencent juste apres le contrat de base. Verifie a la compilation que la table reste
-// coherente avec kAuxBaseComps (le 1er champ extra est a l'indice kAuxBaseComps).
+// Safeguard: the indices declared in ADC_AUX_FIELDS are strictly EXTRA (>= base) and
+// start right after the base contract. Checked at compile time that the table stays
+// consistent with kAuxBaseComps (the 1st extra field is at index kAuxBaseComps).
 #define ADC_AUX_IDX_CHECK(name, idx) static_assert((idx) >= kAuxBaseComps, \
-    "champ aux extra '" #name "' : indice doit etre >= kAuxBaseComps (3)");
+    "extra aux field '" #name "': index must be >= kAuxBaseComps (3)");
 ADC_AUX_FIELDS(ADC_AUX_IDX_CHECK)
 #undef ADC_AUX_IDX_CHECK
 
