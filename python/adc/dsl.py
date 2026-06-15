@@ -1,9 +1,9 @@
-"""adc.dsl : mini-DSL SYMBOLIQUE de modeles physiques.
+"""adc.dsl : SYMBOLIC mini-DSL for physical models.
 
-Python ECRIT les formules (variables nommees, expressions), pas une fonction appelee par cellule.
-Les operations (+, -, *, /, **, adc.dsl.sqrt) construisent un ARBRE d'expressions. Un
-HyperbolicModel declare ses variables conservatives, ses primitives (definies par des formules),
-son flux, ses valeurs propres, sa source et sa contribution elliptique.
+Python WRITES the formulas (named variables, expressions), not a function called per cell.
+The operations (+, -, *, /, **, adc.dsl.sqrt) build an expression TREE. A
+HyperbolicModel declares its conservative variables, its primitives (defined by formulas),
+its flux, its eigenvalues, its source and its elliptic contribution.
 
     e = adc.dsl.HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
@@ -12,26 +12,26 @@ son flux, ses valeurs propres, sa source et sa contribution elliptique.
     e.set_flux(x=[rhou, rhou*u + p, ...], y=[...])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[...])
 
-Backends disponibles via m.compile(backend=..., target=...) :
-  - "prototype" : evaluateur JIT NumPy/hote, Rusanov ordre 1, TEST uniquement (hote seul) ;
-  - "aot"       : genere un .so ABI plate (debug ABI), compilation ahead-of-time ;
-  - "production": loader natif zero-copie (add_native_block), RECOMMANDE par defaut ; chemin
-                  device-clean (foncteurs nommes, valide GH200, #97/#93) et MPI/AMR-ready.
+Backends available via m.compile(backend=..., target=...) :
+  - "prototype" : NumPy/host JIT evaluator, first-order Rusanov, TEST only (host alone) ;
+  - "aot"       : generates a flat-ABI .so (debug ABI), ahead-of-time compilation ;
+  - "production": zero-copy native loader (add_native_block), RECOMMENDED by default ; device-clean
+                  path (named functors, validated GH200, #97/#93) and MPI/AMR-ready.
 
-Cible (target=) :
-  - "System"    : systeme mono-niveau ;
-  - "AmrSystem" : systeme AMR cable (#92/#105), uniquement avec backend "production".
+Target (target=) :
+  - "System"    : single-level system ;
+  - "AmrSystem" : AMR-wired system (#92/#105), only with backend "production".
 
-Ergonomie :
-  - m.compile() auto-detecte les includes adc et cache le .so par (model_hash, abi_key) (#103).
-  - Les roles physiques (gamma, n_aux, B_z, T_e) sont preserves et transmis au C++.
+Ergonomics :
+  - m.compile() auto-detects the adc includes and caches the .so by (model_hash, abi_key) (#103).
+  - The physical roles (gamma, n_aux, B_z, T_e) are preserved and passed through to the C++.
 
-Couplage inter-especes (#131, #167) :
-  - CoupledSource decrit un echange entre blocs par formules DSL (source croisee arbitraire).
-  - CoupledSource.add_pair(block_a, block_b, role, expr) garantit la conservation par
-    construction (+expr sur A, -expr sur B, MEME sous-arbre) ; equivalent DSL de
-    add_collision / add_thermal_exchange cote C++. compile(verify_conservation=True) controle
-    la propriete symboliquement sur l'ensemble des termes (add et add_pair).
+Inter-species coupling (#131, #167) :
+  - CoupledSource describes an exchange between blocks via DSL formulas (arbitrary cross source).
+  - CoupledSource.add_pair(block_a, block_b, role, expr) guarantees conservation by
+    construction (+expr on A, -expr on B, SAME subtree) ; DSL equivalent of
+    add_collision / add_thermal_exchange on the C++ side. compile(verify_conservation=True) checks
+    the property symbolically over all the terms (add and add_pair).
 """
 import os
 import shutil
@@ -40,19 +40,19 @@ import sys
 import numpy as np
 
 
-# --- Signature de l'arbre d'en-tetes du coeur (cle d'ABI du chemin "production") -------------
-# Le backend "production" (compile_native) emet un loader .so qui inline le gabarit en-tete
-# adc::add_compiled_model et appelle des methodes hors-ligne du module _adc deja charge. Loader et
-# module DOIVENT partager la meme ABI C++ (memes en-tetes, compilateur, standard). On materialise la
-# "signature des en-tetes" dans la cle d'ABI (adc/runtime/abi_key.hpp, jeton ADC_HEADER_SIG) ; le
-# build du module la bake (CMake) et compile_native la rebake (flag -D) en la calculant a l'IDENTIQUE.
-# Le calcul DOIT etre bit-pour-bit identique cote CMake (python/CMakeLists.txt) et ici : sha256 du
-# concatene trie "<relpath>\n<sha256(contenu)>\n" de chaque .hpp/.h sous include/. cf. abi_key.hpp.
+# --- Signature of the core header tree (ABI key of the "production" path) -------------
+# The "production" backend (compile_native) emits a .so loader that inlines the header template
+# adc::add_compiled_model and calls off-line methods of the already-loaded _adc module. Loader and
+# module MUST share the same C++ ABI (same headers, compiler, standard). We materialize the
+# "header signature" in the ABI key (adc/runtime/abi_key.hpp, token ADC_HEADER_SIG) ; the
+# module build bakes it (CMake) and compile_native re-bakes it (-D flag) by computing it IDENTICALLY.
+# The computation MUST be bit-for-bit identical on the CMake side (python/CMakeLists.txt) and here : sha256 of the
+# sorted concatenation "<relpath>\n<sha256(content)>\n" of each .hpp/.h under include/. cf. abi_key.hpp.
 def adc_header_signature(include):
-    """Signature stable de l'arbre d'en-tetes adc sous @p include : sha256 du concatene trie
-    "<chemin relatif>\\n<sha256 du contenu>\\n" de chaque .hpp/.h. MIROIR EXACT du calcul CMake
-    (python/CMakeLists.txt) : si un en-tete change, la signature change des deux cotes, donc la cle
-    d'ABI diverge et add_native_block leve une erreur explicite (jamais d'UB silencieux)."""
+    """Stable signature of the adc header tree under @p include : sha256 of the sorted concatenation
+    "<relative path>\\n<sha256 of content>\\n" of each .hpp/.h. EXACT MIRROR of the CMake computation
+    (python/CMakeLists.txt) : if a header changes, the signature changes on both sides, so the ABI
+    key diverges and add_native_block raises an explicit error (never silent UB)."""
     import hashlib
     import os
     entries = []
@@ -60,7 +60,7 @@ def adc_header_signature(include):
         for fn in files:
             if fn.endswith((".hpp", ".h")):
                 p = os.path.join(root, fn)
-                rel = os.path.relpath(p, include).replace(os.sep, "/")  # CMake ecrit les chemins en '/' (meme Windows)
+                rel = os.path.relpath(p, include).replace(os.sep, "/")  # CMake writes paths with '/' (even on Windows)
                 with open(p, "rb") as f:
                     digest = hashlib.sha256(f.read()).hexdigest()
                 entries.append("%s\n%s\n" % (rel, digest))
@@ -68,20 +68,20 @@ def adc_header_signature(include):
     return hashlib.sha256(blob).hexdigest()
 
 
-# --- Auto-detection du dossier include adc -----------------------------------
-# Pour rendre m.compile(...) ergonomique, le dossier des en-tetes adc est deduit automatiquement
-# quand l'appelant ne le passe pas. MIROIR de adc_cases/common/native.py::adc_include : on essaie
-# $ADC_INCLUDE (override explicite), puis on remonte depuis le paquet `adc` installe (build-py/python/
-# adc/ -> ../../../include), puis le depot voisin ../adc_cpp/include. Critere de validite : le fichier
-# canonique adc/mesh/multifab.hpp existe. Pas d'import dur de adc ici (le module dsl peut etre charge
-# hors paquet) : on resout `adc.__file__` paresseusement.
+# --- Auto-detection of the adc include directory -----------------------------------
+# To make m.compile(...) ergonomic, the adc headers directory is deduced automatically
+# when the caller does not pass it. MIRROR of adc_cases/common/native.py::adc_include : we try
+# $ADC_INCLUDE (explicit override), then we climb from the installed `adc` package (build-py/python/
+# adc/ -> ../../../include), then the neighboring repo ../adc_cpp/include. Validity criterion : the
+# canonical file adc/mesh/multifab.hpp exists. No hard import of adc here (the dsl module may be loaded
+# outside the package) : we resolve `adc.__file__` lazily.
 def adc_include():
-    """Dossier include/ d'adc_cpp (en-tetes header-only du coeur), auto-detecte.
+    """include/ directory of adc_cpp (header-only headers of the core), auto-detected.
 
-    Priorite : $ADC_INCLUDE (override), sinon depuis le paquet `adc` installe
-    (.../adc -> ../../../include), sinon le depot voisin (.../adc_cpp/include depuis ce module).
-    Exige que adc/mesh/multifab.hpp existe. Leve RuntimeError si introuvable (diagnostic listant les
-    candidats), pour ne JAMAIS compiler contre un include silencieusement faux."""
+    Priority : $ADC_INCLUDE (override), otherwise from the installed `adc` package
+    (.../adc -> ../../../include), otherwise the neighboring repo (.../adc_cpp/include from this module).
+    Requires that adc/mesh/multifab.hpp exists. Raises RuntimeError if not found (diagnostic listing the
+    candidates), so as to NEVER compile against a silently wrong include."""
     import os
     here = os.path.dirname(os.path.abspath(__file__))           # .../python/adc
     candidates = []
@@ -94,36 +94,36 @@ def adc_include():
         candidates.append(os.path.normpath(os.path.join(pkg, "..", "..", "..", "include")))
     except Exception:
         pass
-    # depuis ce fichier (python/adc/dsl.py) : python/adc -> python -> racine depot -> include
+    # from this file (python/adc/dsl.py) : python/adc -> python -> repo root -> include
     candidates.append(os.path.normpath(os.path.join(here, "..", "..", "include")))
     for c in candidates:
         if c and os.path.isfile(os.path.join(c, "adc", "mesh", "multifab.hpp")):
             return c
     raise RuntimeError(
-        "en-tetes adc introuvables (cherche adc/mesh/multifab.hpp). "
-        "Passer include=<adc_cpp>/include ou definir ADC_INCLUDE. Candidats essayes : "
+        "adc headers not found (looking for adc/mesh/multifab.hpp). "
+        "Pass include=<adc_cpp>/include or set ADC_INCLUDE. Candidates tried : "
         + ", ".join(repr(c) for c in candidates))
 
 
-# --- Norme C++ du loader natif (frontiere ABI du chemin "production") ----------
-# Le backend "production" genere un loader .so qui inline add_compiled_model<> et appelle des methodes
-# hors-ligne du module _adc DEJA charge. La cle d'ABI (adc/runtime/abi_key.hpp) encode __cplusplus :
-# le loader et le module doivent donc partager la MEME norme C++, sinon add_native_block rejette
-# ("ABI incompatible"). Le module bake sa norme reelle (ADC_CXX_STD : 20 sous Kokkos car CUDA 12.x
-# n'a pas -std=c++23, 23 sinon) et l'expose en _adc.__cxx_std__. On en derive le flag -std attendu du
-# modele natif AU LIEU de figer c++23 (qui cassait le chemin natif sous Kokkos/GH200, ou le module est
-# en c++20). MIROIR direct du build, donc jamais d'ecart silencieux entre loader et modele.
+# --- C++ standard of the native loader (ABI boundary of the "production" path) ----------
+# The "production" backend generates a .so loader that inlines add_compiled_model<> and calls off-line
+# methods of the ALREADY-loaded _adc module. The ABI key (adc/runtime/abi_key.hpp) encodes __cplusplus :
+# the loader and the module must therefore share the SAME C++ standard, otherwise add_native_block rejects
+# ("incompatible ABI"). The module bakes its real standard (ADC_CXX_STD : 20 under Kokkos because CUDA 12.x
+# has no -std=c++23, 23 otherwise) and exposes it as _adc.__cxx_std__. We derive the expected -std flag of the
+# native model from it INSTEAD OF freezing c++23 (which broke the native path under Kokkos/GH200, where the module is
+# in c++20). Direct MIRROR of the build, so never a silent gap between loader and model.
 def loader_cxx_std():
-    """Flag '-std=c++NN' que le modele natif (backend="production") DOIT utiliser pour partager l'ABI
-    du module _adc charge. Source de verite : _adc.__cxx_std__ (entier 20/23 baked par le build, =
-    ADC_CXX_STD : 20 sous Kokkos, 23 sinon). Fallbacks gracieux si l'attribut manque (vieux module) :
-    on parse __cplusplus depuis _adc.abi_key() (>202002L -> c++23, sinon c++20) ; faute de tout cela,
-    on retombe sur le defaut historique c++23 (cas hote non-Kokkos, inchange)."""
+    """Flag '-std=c++NN' that the native model (backend="production") MUST use to share the ABI
+    of the loaded _adc module. Source of truth : _adc.__cxx_std__ (integer 20/23 baked by the build, =
+    ADC_CXX_STD : 20 under Kokkos, 23 otherwise). Graceful fallbacks if the attribute is missing (old module) :
+    we parse __cplusplus from _adc.abi_key() (>202002L -> c++23, otherwise c++20) ; failing all that,
+    we fall back to the historical default c++23 (non-Kokkos host case, unchanged)."""
     try:
         import _adc
     except Exception:
         try:
-            from . import _adc  # paquet adc : l'extension est un sous-module
+            from . import _adc  # adc package : the extension is a submodule
         except Exception:
             _adc = None
     std = _adc_cxx_std_from_module(_adc) if _adc is not None else None
@@ -131,12 +131,12 @@ def loader_cxx_std():
 
 
 def _adc_cxx_std_from_module(mod):
-    """Norme C++ du module @p mod sous forme 'c++NN', ou None si indeterminable. Priorite a l'entier
-    __cxx_std__ (baked par le build) ; sinon on extrait std=<__cplusplus> de la cle d'ABI."""
+    """C++ standard of the module @p mod as 'c++NN', or None if undeterminable. Priority to the integer
+    __cxx_std__ (baked by the build) ; otherwise we extract std=<__cplusplus> from the ABI key."""
     n = getattr(mod, "__cxx_std__", None)
     if isinstance(n, int) and n in (20, 23):
         return "c++%d" % n
-    # Fallback : parser "...;std=<__cplusplus>;..." de la cle d'ABI (vieux module sans __cxx_std__).
+    # Fallback : parse "...;std=<__cplusplus>;..." from the ABI key (old module without __cxx_std__).
     abi_key = getattr(mod, "abi_key", None)
     if callable(abi_key):
         try:
@@ -151,16 +151,16 @@ def _adc_cxx_std_from_module(mod):
     return None
 
 
-# --- Compilateur des .so DSL (frontiere ABI, pendant de loader_cxx_std) -------------------------
-# BUG REEL corrige ici : dans un env conda active, `which c++` designe souvent un AUTRE compilateur
-# que celui qui a construit _adc (vieux gcc/clang du PATH conda). Symptome : la compilation runtime
-# du loader DSL production echoue avec l'erreur brute du compilateur ("error: invalid value 'c++23'
-# in '-std=c++23'") ; et meme si elle passait, la cle d'ABI (qui encode __VERSION__ du compilateur,
-# cf. abi_key.hpp) rejetterait le .so ("ABI incompatible"). Le SEUL compilateur garanti compatible
-# est celui du build de _adc : CMake le bake (ADC_CXX_COMPILER -> _adc.__cxx_compiler__) et on le
-# prefere ici au PATH. $ADC_CXX reste l'override conscient (toolchain conda choisi, wrapper...).
+# --- Compiler of the DSL .so files (ABI boundary, counterpart of loader_cxx_std) -------------------------
+# REAL BUG fixed here : in an active conda env, `which c++` often points to ANOTHER compiler
+# than the one that built _adc (old gcc/clang from the conda PATH). Symptom : the runtime compilation
+# of the production DSL loader fails with the raw compiler error ("error: invalid value 'c++23'
+# in '-std=c++23'") ; and even if it passed, the ABI key (which encodes __VERSION__ of the compiler,
+# cf. abi_key.hpp) would reject the .so ("incompatible ABI"). The ONLY guaranteed-compatible compiler
+# is the one from the _adc build : CMake bakes it (ADC_CXX_COMPILER -> _adc.__cxx_compiler__) and we
+# prefer it here over the PATH. $ADC_CXX remains the conscious override (chosen conda toolchain, wrapper...).
 def _adc_module():
-    """Le module d'extension _adc s'il est chargeable, sinon None (dsl.py reste utilisable seul)."""
+    """The _adc extension module if it is loadable, otherwise None (dsl.py stays usable alone)."""
     try:
         import _adc
         return _adc
@@ -173,14 +173,14 @@ def _adc_module():
 
 
 def loader_cxx_compiler():
-    """Chemin du compilateur qui a CONSTRUIT le module _adc (bake par CMake en __cxx_compiler__),
-    ou None s'il est inconnu (vieux module, build manuel) ou absent de cette machine.
+    """Path of the compiler that BUILT the _adc module (baked by CMake as __cxx_compiler__),
+    or None if it is unknown (old module, manual build) or absent from this machine.
 
-    macOS : CMake bake souvent le c++ INTERNE de la toolchain Xcode / CommandLineTools
-    (.../XcodeDefault.xctoolchain/usr/bin/c++), qui invoque clang SANS sysroot SDK -> tout .so
-    DSL echoue sur \"'string' file not found\". Le shim /usr/bin/c++ (xcrun) execute LE MEME
-    clang en resolvant le SDK : meme __VERSION__, donc meme cle d'ABI -- on prefere donc le shim
-    (piege et remede identiques a compile_loader des tests C++ natifs)."""
+    macOS : CMake often bakes the INTERNAL c++ of the Xcode / CommandLineTools toolchain
+    (.../XcodeDefault.xctoolchain/usr/bin/c++), which invokes clang WITHOUT an SDK sysroot -> every DSL
+    .so fails on \"'string' file not found\". The /usr/bin/c++ shim (xcrun) runs THE SAME
+    clang while resolving the SDK : same __VERSION__, hence same ABI key -- so we prefer the shim
+    (pitfall and remedy identical to compile_loader of the native C++ tests)."""
     import sys
     mod = _adc_module()
     cc = getattr(mod, "__cxx_compiler__", "") if mod is not None else ""
@@ -193,8 +193,8 @@ def loader_cxx_compiler():
 
 
 def module_header_signature():
-    """Signature d'en-tetes BAKEE dans le module _adc charge (token headers= de abi_key()), ou None
-    si le module n'est pas chargeable / la cle absente ("unknown" d'un build manuel -> None aussi)."""
+    """Header signature BAKED into the loaded _adc module (token headers= of abi_key()), or None
+    if the module is not loadable / the key is absent ("unknown" from a manual build -> None too)."""
     mod = _adc_module()
     abi = getattr(mod, "abi_key", None) if mod is not None else None
     if not callable(abi):
@@ -211,139 +211,139 @@ def module_header_signature():
 
 
 def resolve_auto_backend(include=None):
-    """Politique du backend PAR DEFAUT (backend='auto', decision actee -- ADC-63).
+    """DEFAULT backend policy (backend='auto', decision recorded -- ADC-63).
 
-    'production' (loader natif zero-copie, parite stricte add_block) DES QUE la parite
-    toolchain avec le module _adc est etablie : module chargeable + compilateur bake connu +
-    signature d'en-tetes de @p include == celle bakee dans le module. SINON 'aot' (defaut
-    historique : host-marshale, fonctionne sans module ni parite). Jamais silencieux : renvoie
-    (backend, raison) et les facades posent la raison sur CompiledModel.backend_auto_reason.
-    Un backend EXPLICITE passe par l'appelant court-circuite cette politique (inchange)."""
+    'production' (zero-copy native loader, strict add_block parity) AS SOON AS the
+    toolchain parity with the _adc module is established : module loadable + known baked compiler +
+    header signature of @p include == the one baked into the module. OTHERWISE 'aot' (historical
+    default : host-marshaled, works without module or parity). Never silent : returns
+    (backend, reason) and the facades set the reason on CompiledModel.backend_auto_reason.
+    An EXPLICIT backend passed by the caller short-circuits this policy (unchanged)."""
     mod = _adc_module()
     if mod is None:
-        return "aot", "module _adc non chargeable (le chemin production exige le module)"
+        return "aot", "_adc module not loadable (the production path requires the module)"
     if not loader_cxx_compiler():
-        return "aot", "compilateur du module inconnu (vieux module ou build manuel)"
+        return "aot", "module compiler unknown (old module or manual build)"
     baked = module_header_signature()
     if not baked:
-        return "aot", "signature d'en-tetes absente du module (build manuel)"
+        return "aot", "header signature absent from the module (manual build)"
     try:
         inc = include if include is not None else adc_include()
         sig = adc_header_signature(inc)
-    except Exception as e:  # en-tetes introuvables / illisibles -> defaut sur
-        return "aot", "en-tetes adc introuvables pour la parite (%s)" % e
+    except Exception as e:  # headers not found / unreadable -> fall back on default
+        return "aot", "adc headers not found for parity (%s)" % e
     if sig != baked:
-        return "aot", ("en-tetes != module (rebatir le module ou pointer les en-tetes du build ; "
-                       "production refuserait, cf. _check_headers_match_module)")
-    return "production", "parite toolchain etablie (module + compilateur bake + en-tetes concordants)"
+        return "aot", ("headers != module (rebuild the module or point at the build headers ; "
+                       "production would refuse, cf. _check_headers_match_module)")
+    return "production", "toolchain parity established (module + baked compiler + matching headers)"
 
 
 def _check_headers_match_module(include):
-    """GARDE PRE-DLOPEN du chemin natif (bug reel) : si les en-tetes sous @p include ont change depuis
-    le build de _adc (pull recent, autre clone...), le loader compile contre eux reference des
-    signatures C++ que le VIEUX module n'exporte pas -> le dlopen d'add_native_block echoue AVANT le
-    garde ABI, avec une erreur cryptique ("symbol not found in flat namespace '__ZN3adc6System13
-    install_block...'"). On compare donc ICI, avant toute compilation, la signature d'en-tetes bakee
-    dans le module a celle de l'arbre @p include, et on echoue avec un remede clair. No-op si le
-    module n'est pas chargeable ou sans signature (build manuel : degradation historique)."""
+    """PRE-DLOPEN GUARD of the native path (real bug) : if the headers under @p include have changed since
+    the build of _adc (recent pull, another clone...), the loader compiled against them references
+    C++ signatures that the OLD module does not export -> the dlopen of add_native_block fails BEFORE the
+    ABI guard, with a cryptic error ("symbol not found in flat namespace '__ZN3adc6System13
+    install_block...'"). So we compare HERE, before any compilation, the header signature baked
+    into the module with that of the @p include tree, and we fail with a clear remedy. No-op if the
+    module is not loadable or has no signature (manual build : historical degradation)."""
     baked = module_header_signature()
     current = adc_header_signature(include)
     if baked is not None and current != baked:
         mod = _adc_module()
-        so = getattr(mod, "__file__", "(inconnu)")
+        so = getattr(mod, "__file__", "(unknown)")
         raise RuntimeError(
-            "adc.dsl : les en-tetes adc de %r NE CORRESPONDENT PAS a ceux avec lesquels le module "
-            "_adc a ete construit (%s).\n"
-            "  signature en-tetes actuelle : %s\n"
-            "  signature bakee dans _adc   : %s\n"
-            "Cause typique : `git pull` / en-tetes edites APRES le build du module -> le loader DSL "
-            "referencerait des signatures C++ absentes du module (dlopen : 'symbol not found').\n"
-            "Remede : REBATIR le module avec ces en-tetes :\n"
-            "  cmake --preset python && cmake --build --preset python   (ou le build-py habituel)\n"
-            "ou pointer ADC_INCLUDE vers les en-tetes du build qui a produit ce module."
+            "adc.dsl : the adc headers of %r DO NOT MATCH those with which the _adc module "
+            "was built (%s).\n"
+            "  current header signature : %s\n"
+            "  signature baked in _adc  : %s\n"
+            "Typical cause : `git pull` / headers edited AFTER the module build -> the DSL loader "
+            "would reference C++ signatures absent from the module (dlopen : 'symbol not found').\n"
+            "Remedy : REBUILD the module with these headers :\n"
+            "  cmake --preset python && cmake --build --preset python   (or the usual build-py)\n"
+            "or point ADC_INCLUDE at the headers of the build that produced this module."
             % (include, so, current[:16], baked[:16]))
-    return current  # signature de l'arbre @p include, reutilisable (evite un 2e walk+sha256)
+    return current  # signature of the @p include tree, reusable (avoids a 2nd walk+sha256)
 
 
 def check_compiled_matches_module(abi_key):
-    """Garde PRE-DLOPEN au BRANCHEMENT d'un CompiledModel (add_equation -> add_native_block).
+    """PRE-DLOPEN guard at the WIRING of a CompiledModel (add_equation -> add_native_block).
 
-    COMPLEMENT INDISPENSABLE de _check_headers_match_module : sur un cache HIT, compile_native ne
-    tourne pas (le .so sort du cache) et la garde de compilation ne protege donc pas ce chemin --
-    un module _adc perime dlopen-erait le .so et echouerait sur le 'symbol not found' cryptique.
-    Ici on compare la signature d'en-tetes EMBARQUEE dans la cle Python du .so ('<sig>|<cxx>|<std>',
-    cf. _abi_key_python, recalculee sur l'arbre include ACTUEL a chaque compile()) a celle bakee
-    dans le module. Pure comparaison de CHAINES (aucun re-hash). No-op si l'une des deux manque
-    (vieux module, CompiledModel construit a la main)."""
+    INDISPENSABLE COMPLEMENT of _check_headers_match_module : on a cache HIT, compile_native does not
+    run (the .so comes out of the cache) and the compilation guard therefore does not protect this path --
+    a stale _adc module would dlopen the .so and fail on the cryptic 'symbol not found'.
+    Here we compare the header signature EMBEDDED in the Python key of the .so ('<sig>|<cxx>|<std>',
+    cf. _abi_key_python, recomputed on the CURRENT include tree at each compile()) with the one baked
+    into the module. Pure STRING comparison (no re-hash). No-op if either of the two is missing
+    (old module, CompiledModel built by hand)."""
     baked = module_header_signature()
     if baked is None or not abi_key:
         return
     so_sig = str(abi_key).split("|", 1)[0]
     if so_sig and so_sig != baked:
         raise RuntimeError(
-            "adc : le modele compile (.so) a ete produit contre des en-tetes adc DIFFERENTS de ceux "
-            "du module _adc charge (signature %s... vs %s... bakee dans le module).\n"
-            "Cause typique : module _adc perime (bati avant un `git pull`) alors que le .so vient "
-            "d'etre (re)compile sur les en-tetes a jour -- le dlopen echouerait avec un 'symbol not "
-            "found' cryptique.\n"
-            "Remede : REBATIR le module puis relancer :\n"
+            "adc : the compiled model (.so) was produced against adc headers DIFFERENT from those "
+            "of the loaded _adc module (signature %s... vs %s... baked in the module).\n"
+            "Typical cause : stale _adc module (built before a `git pull`) while the .so has just "
+            "been (re)compiled on the up-to-date headers -- the dlopen would fail with a cryptic "
+            "'symbol not found'.\n"
+            "Remedy : REBUILD the module then re-run :\n"
             "  cmake --preset python && cmake --build --preset python\n"
-            "Diagnostic complet : python -c \"import adc; adc.doctor()\"."
+            "Full diagnostic : python -c \"import adc; adc.doctor()\"."
             % (so_sig[:12], baked[:12]))
 
 
 def _default_cxx(cxx=None):
-    """Resolution CENTRALISEE du compilateur des .so DSL (tous backends). Priorite :
-      1. cxx explicite (argument de l'appelant) ;
-      2. $ADC_CXX (override d'environnement conscient) ;
-      3. le compilateur qui a construit _adc (seul garanti ABI-compatible, cf. ci-dessus) ;
-      4. c++ / g++ / clang++ du PATH (comportement historique, dernier recours)."""
+    """CENTRALIZED resolution of the DSL .so compiler (all backends). Priority :
+      1. explicit cxx (caller argument) ;
+      2. $ADC_CXX (conscious environment override) ;
+      3. the compiler that built _adc (the only one guaranteed ABI-compatible, cf. above) ;
+      4. c++ / g++ / clang++ from the PATH (historical behavior, last resort)."""
     return (cxx or os.environ.get("ADC_CXX") or loader_cxx_compiler()
             or shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"))
 
 
-# Orthographes historiques des memes niveaux de langue : les clang < 17 / gcc < 11 ne connaissent
-# que 'c++2b'/'c++2a'. Meme niveau demande ; sur un VIEUX compilateur __cplusplus peut differer du
-# module -> le cas echeant, rejet ABI explicite en aval (jamais d'UB silencieux).
+# Historical spellings of the same language levels : clang < 17 / gcc < 11 know
+# only 'c++2b'/'c++2a'. Same level requested ; on an OLD compiler __cplusplus may differ from the
+# module -> if applicable, explicit ABI rejection downstream (never silent UB).
 _STD_ALIAS = {"c++23": "c++2b", "c++20": "c++2a"}
 
 
 def _run_compile(cmd, what):
-    """Lance la commande de compilation @p cmd en CAPTURANT stderr : en cas d'echec, leve une
-    RuntimeError AUTONOME (commande + sortie compilateur + remedes) au lieu du CalledProcessError
-    brut dont le message ne contient que la ligne de commande (bug reel : l'utilisateur ne voit
-    qu'un 'returned non-zero exit status 1' noye dans le traceback)."""
+    """Run the compilation command @p cmd CAPTURING stderr : on failure, raises a
+    SELF-CONTAINED RuntimeError (command + compiler output + remedies) instead of the raw
+    CalledProcessError whose message contains only the command line (real bug : the user sees
+    only a 'returned non-zero exit status 1' drowned in the traceback)."""
     import subprocess
     r = subprocess.run(cmd, capture_output=True)
     if r.returncode != 0:
         err = (r.stderr or b"").decode(errors="replace").strip()
-        out = (r.stdout or b"").decode(errors="replace").strip()  # MSVC cl ecrit les erreurs sur STDOUT
+        out = (r.stdout or b"").decode(errors="replace").strip()  # MSVC cl writes errors on STDOUT
         err = (err + "\n" + out).strip() if out else err
         raise RuntimeError(
-            "adc.dsl : la compilation du .so (%s) a echoue (exit %d).\n"
-            "Commande : %s\n"
-            "Sortie du compilateur :\n%s\n"
-            "Pistes : `python -c \"import adc; adc.doctor()\"` diagnostique l'environnement "
-            "(compilateur/norme/en-tetes) ; ADC_CXX force un compilateur precis."
-            % (what, r.returncode, " ".join(cmd), err[:4000] or "(vide)"))
+            "adc.dsl: compiling the .so (%s) failed (exit %d).\n"
+            "Command: %s\n"
+            "Compiler output:\n%s\n"
+            "Hints: `python -c \"import adc; adc.doctor()\"` diagnoses the environment "
+            "(compiler/standard/headers); ADC_CXX forces a specific compiler."
+            % (what, r.returncode, " ".join(cmd), err[:4000] or "(empty)"))
 
 
-_probe_cache = {}  # (cc, std) -> std effectif : evite de re-prober en boucle (N modeles compiles)
+_probe_cache = {}  # (cc, std) -> effective std: avoids re-probing repeatedly (N compiled models)
 
 
 def _probe_cxx_std(cc, std):
-    """Verifie AVANT compilation que @p cc accepte -std=@p std (probe -fsyntax-only sur source vide).
+    """Checks BEFORE compilation that @p cc accepts -std=@p std (probe -fsyntax-only on empty source).
 
-    Renvoie le std EFFECTIF : @p std s'il passe, sinon son alias historique (c++23 -> c++2b) s'il
-    passe, sinon leve une RuntimeError ACTIONNABLE (compilateur utilise, compilateur du build,
-    solutions) au lieu de l'erreur brute du compilateur. Saute pour nvcc_wrapper (semantique -x
-    differente ; chemin GPU explicite, deja gate par ADC_KOKKOS_CXX/ADC_KOKKOS_USE_NVCC_WRAPPER).
-    Resultat memoise par (cc, std) : un seul probe meme si N modeles sont compiles a la suite."""
+    Returns the EFFECTIVE std: @p std if it passes, otherwise its historical alias (c++23 -> c++2b) if
+    it passes, otherwise raises an ACTIONABLE RuntimeError (compiler used, build compiler,
+    solutions) instead of the raw compiler error. Skipped for nvcc_wrapper (different -x
+    semantics; explicit GPU path, already gated by ADC_KOKKOS_CXX/ADC_KOKKOS_USE_NVCC_WRAPPER).
+    Result memoized per (cc, std): a single probe even if N models are compiled in a row."""
     import subprocess
     if "nvcc" in os.path.basename(cc or ""):
         return std
     if sys.platform == "win32":
-        return std  # cl/clang-cl : sonde -fsyntax-only inapplicable ; std traduit en /std: au compile
+        return std  # cl/clang-cl: -fsyntax-only probe inapplicable; std translated to /std: at compile
     cached = _probe_cache.get((cc, std))
     if cached is not None:
         return cached
@@ -353,7 +353,7 @@ def _probe_cxx_std(cc, std):
             r = subprocess.run([cc, "-x", "c++", "-std=" + s, "-fsyntax-only", "-"],
                                input=b"", capture_output=True, timeout=60)
             return r.returncode == 0, (r.stderr or b"").decode(errors="replace")
-        except Exception as exc:  # introuvable, non executable, timeout : meme diagnostic actionnable
+        except Exception as exc:  # not found, not executable, timeout: same actionable diagnostic
             return False, str(exc)
 
     good, err = accepts(std)
@@ -368,34 +368,34 @@ def _probe_cxx_std(cc, std):
             return alias
     baked = loader_cxx_compiler()
     raise RuntimeError(
-        "adc.dsl : le compilateur %r ne supporte pas -std=%s (norme requise pour partager l'ABI du "
-        "module _adc).\nSortie du compilateur :\n%s\n"
-        "Compilateur du build de _adc : %s\n"
-        "Solutions :\n"
-        "  - utiliser le compilateur du build : export ADC_CXX=%r (ou cxx=... dans m.compile) ;\n"
-        "  - macOS : mettre a jour Xcode / les Command Line Tools (AppleClang recent) ;\n"
-        "  - conda : `conda install -c conda-forge cxx-compiler` (gcc>=13 / clang>=17) puis "
-        "export ADC_CXX=$CONDA_PREFIX/bin/clang++ (macOS) ou $CONDA_PREFIX/bin/g++ (Linux).\n"
-        "NB : un compilateur DIFFERENT de celui du build peut compiler mais etre ensuite rejete "
-        "('ABI incompatible' : la cle d'ABI encode la version du compilateur) ; preferer celui du build."
+        "adc.dsl: the compiler %r does not support -std=%s (standard required to share the ABI of "
+        "the _adc module).\nCompiler output:\n%s\n"
+        "Compiler of the _adc build: %s\n"
+        "Solutions:\n"
+        "  - use the build compiler: export ADC_CXX=%r (or cxx=... in m.compile);\n"
+        "  - macOS: update Xcode / the Command Line Tools (recent AppleClang);\n"
+        "  - conda: `conda install -c conda-forge cxx-compiler` (gcc>=13 / clang>=17) then "
+        "export ADC_CXX=$CONDA_PREFIX/bin/clang++ (macOS) or $CONDA_PREFIX/bin/g++ (Linux).\n"
+        "NB: a compiler DIFFERENT from the build one may compile but then be rejected "
+        "('ABI incompatible': the ABI key encodes the compiler version); prefer the build one."
         % (cc, std, (err or "").strip()[:800],
-           baked or "(inconnu : module sans __cxx_compiler__, rebatir _adc pour le baker)",
-           baked or "<chemin/du/compilateur/du/build>"))
+           baked or "(unknown: module without __cxx_compiler__, rebuild _adc to bake it)",
+           baked or "<path/to/build/compiler>"))
 
 
-# --- Cache de build hors source ----------------------------------------------
-# Quand l'appelant ne fournit pas so_path, m.compile(...) ecrit la .so dans un cache PARTAGE hors
-# source (jamais a cote du .cpp temporaire), indexe par une cle stable du modele : model_hash (formules
-# + roles + n_aux + params) ET abi_key (signature des en-tetes + compilateur + std). Deux compilations
-# du MEME modele (meme cle) reutilisent la .so en cache (cache HIT, pas de recompilation) ; changer le
-# modele OU un parametre OU la toolchain change la cle -> nouvelle .so (cache MISS, recompilation). Le
-# nom de fichier porte la cle, donc plusieurs variantes coexistent sans collision. cf. la meme idee
-# dans adc_cases/common/native.py (cle d'ABI = compilateur + flags + signature des en-tetes).
+# --- Out-of-source build cache -----------------------------------------------
+# When the caller does not provide so_path, m.compile(...) writes the .so into a SHARED out-of-source
+# cache (never next to the temporary .cpp), indexed by a stable model key: model_hash (formulas
+# + roles + n_aux + params) AND abi_key (header signature + compiler + std). Two compilations
+# of the SAME model (same key) reuse the cached .so (cache HIT, no recompilation); changing the
+# model OR a parameter OR the toolchain changes the key -> new .so (cache MISS, recompilation). The
+# file name carries the key, so several variants coexist without collision. cf. the same idea
+# in adc_cases/common/native.py (ABI key = compiler + flags + header signature).
 def adc_cache_dir():
-    """Dossier de cache des .so generees par m.compile() sans so_path explicite.
+    """Cache directory for the .so files generated by m.compile() without an explicit so_path.
 
-    $ADC_CACHE_DIR (override), sinon $XDG_CACHE_HOME/adc/dsl, sinon ~/.cache/adc/dsl. Cree au besoin.
-    Hors source par construction (jamais dans l'arbre du depot), donc rien a ignorer cote git."""
+    $ADC_CACHE_DIR (override), else $XDG_CACHE_HOME/adc/dsl, else ~/.cache/adc/dsl. Created as needed.
+    Out-of-source by construction (never inside the repo tree), so nothing to ignore on the git side."""
     import os
     base = os.environ.get("ADC_CACHE_DIR")
     if not base:
@@ -406,16 +406,16 @@ def adc_cache_dir():
 
 
 def _cache_so_path(model_hash, abi_key, backend, target, name):
-    """Chemin .so en cache pour ce (model_hash, abi_key, backend, target, name).
+    """Cached .so path for this (model_hash, abi_key, backend, target, name).
 
-    La cle de cache combine model_hash (le QUOI : formules/roles/params) et abi_key (le COMMENT :
-    en-tetes + compilateur + std), plus backend/target/name qui changent le code emis (loader natif
-    vs AOT vs JIT, System vs AmrSystem). Le nom de fichier est <model_hash[:16]>-<sha(reste)[:16]>.so :
-    lisible (prefixe = identite du modele) et sans collision (suffixe = reste de la cle)."""
+    The cache key combines model_hash (the WHAT: formulas/roles/params) and abi_key (the HOW:
+    headers + compiler + std), plus backend/target/name which change the emitted code (native loader
+    vs AOT vs JIT, System vs AmrSystem). The file name is <model_hash[:16]>-<sha(rest)[:16]>.so:
+    readable (prefix = model identity) and collision-free (suffix = rest of the key)."""
     import hashlib
     import os
-    # _platform_cache_key : l'arch CPU + les optflags entrent dans la cle (un .so x86_64 ou
-    # -march=native reutilise sur une autre machine via un cache partage = SIGILL silencieux).
+    # _platform_cache_key: the CPU arch + the optflags enter the key (a .so x86_64 or
+    # -march=native reused on another machine via a shared cache = silent SIGILL).
     rest = "|".join((abi_key or "", backend or "", target or "", name or "",
                      _platform_cache_key())).encode()
     tag = hashlib.sha256(rest).hexdigest()[:16]
@@ -424,11 +424,11 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
 
 
 def _native_kokkos_root():
-    """Racine Kokkos pour compiler les loaders DSL avec le MEME backend que le module _adc.
+    """Kokkos root to compile the DSL loaders with the SAME backend as the _adc module.
 
-    adc_cpp est KOKKOS-ONLY : tout .so DSL qui inclut les en-tetes adc (aot, native) DOIT etre compile
-    avec Kokkos (for_each.hpp #error sinon). Le root est lu depuis ADC_KOKKOS_ROOT / Kokkos_ROOT /
-    KOKKOS_ROOT ; None s'il n'est pas trouve (l'appelant leve alors une erreur explicite)."""
+    adc_cpp is KOKKOS-ONLY: every DSL .so that includes the adc headers (aot, native) MUST be compiled
+    with Kokkos (for_each.hpp #error otherwise). The root is read from ADC_KOKKOS_ROOT / Kokkos_ROOT /
+    KOKKOS_ROOT; None if not found (the caller then raises an explicit error)."""
     for key in ("ADC_KOKKOS_ROOT", "Kokkos_ROOT", "KOKKOS_ROOT"):
         root = os.environ.get(key)
         if root and os.path.isfile(os.path.join(root, "include", "Kokkos_Core.hpp")):
@@ -437,8 +437,8 @@ def _native_kokkos_root():
 
 
 def _libomp_prefix():
-    """Prefixe Homebrew libomp sur macOS (pour -Xpreprocessor -fopenmp), ou None. AppleClang ne gere
-    pas `-fopenmp` seul : il faut -Xpreprocessor -fopenmp + l'include/lib de libomp (cf. CMakeLists)."""
+    """Homebrew libomp prefix on macOS (for -Xpreprocessor -fopenmp), or None. AppleClang does not
+    handle `-fopenmp` alone: it needs -Xpreprocessor -fopenmp + the libomp include/lib (cf. CMakeLists)."""
     if sys.platform != "darwin":
         return None
     import subprocess
@@ -453,13 +453,13 @@ def _libomp_prefix():
 
 
 def _native_feature_key():
-    """Traits qui changent le code inline du loader natif et doivent donc entrer dans le cache (sinon
-    un .so SERIE en cache serait reutilise sur un module Kokkos -> fallback serie silencieux).
+    """Traits that change the inline code of the native loader and must therefore enter the cache (else
+    a cached SERIAL .so would be reused on a Kokkos module -> silent serial fallback).
 
-    Au-dela du on/off, la cle empreinte KokkosCore_config.h de l'install visee : ce header genere
-    encode la VERSION de Kokkos ET ses backends actifs. Sans lui, changer de Kokkos entre deux runs
-    (mise a jour, bascule Serial->OpenMP au meme prefix) n'invalidait pas le cache -> reutilisation
-    d'un .so compile contre l'ancien Kokkos."""
+    Beyond on/off, the key fingerprints KokkosCore_config.h of the targeted install: this generated
+    header encodes the Kokkos VERSION AND its active backends. Without it, changing Kokkos between two
+    runs (update, switch Serial->OpenMP at the same prefix) would not invalidate the cache -> reuse
+    of a .so compiled against the old Kokkos."""
     root = _native_kokkos_root()
     if not root:
         return "kokkos=off"
@@ -474,39 +474,40 @@ def _native_feature_key():
 
 
 def _platform_cache_key():
-    """Traits MACHINE qui changent le code binaire du .so sans changer la cle d'ABI C++ (__VERSION__
-    est identique cross-arch) : architecture CPU + flags d'optimisation. Sans eux dans la cle de
-    cache, un .so x86_64 (Rosetta) ou -march=native serait reutilise sur une autre machine/arch via
-    un cache partage (NFS, home synchronise) -> SIGILL (illegal instruction) ou dlopen cryptique."""
+    """MACHINE traits that change the binary code of the .so without changing the C++ ABI key (__VERSION__
+    is identical cross-arch): CPU architecture + optimization flags. Without them in the cache
+    key, a .so x86_64 (Rosetta) or -march=native would be reused on another machine/arch via
+    a shared cache (NFS, synchronized home) -> SIGILL (illegal instruction) or cryptic dlopen."""
     import platform
     return "arch=%s;optflags=%s" % (platform.machine(),
                                     os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG"))
 
 
 def _warn_kokkos_parity():
-    """Avertit (sans bloquer) quand le BACKEND du loader natif divergerait de celui du module _adc :
-    - module Kokkos + loader serie (ADC_KOKKOS_ROOT absent) -> le bloc DSL tombe sur le fallback
-      SERIE en silence : zero-copie mais NE SCALE PAS threads/GPU (mesure ROMEO : DSL warm invariant
-      threads=1/4/8). C'est une degradation de PERF muette, pas un crash -> warning explicite.
-    - module serie + ADC_KOKKOS_ROOT defini -> le loader instancierait -DADC_HAS_KOKKOS contre un
-      module qui ne l'est pas (layouts allocator/types divergents, non couverts par la cle d'ABI).
-    Source de verite : _adc.__has_kokkos__ (bake par le build) vs _native_kokkos_root() (env)."""
+    """Warns (without blocking) when the BACKEND of the native loader would diverge from that of the _adc
+    module:
+    - Kokkos module + serial loader (ADC_KOKKOS_ROOT missing) -> the DSL block falls back to the
+      SERIAL path silently: zero-copy but DOES NOT SCALE with threads/GPU (ROMEO measurement: DSL warm
+      invariant threads=1/4/8). This is a silent PERF degradation, not a crash -> explicit warning.
+    - serial module + ADC_KOKKOS_ROOT defined -> the loader would instantiate -DADC_HAS_KOKKOS against a
+      module that is not (divergent allocator/type layouts, not covered by the ABI key).
+    Source of truth: _adc.__has_kokkos__ (baked by the build) vs _native_kokkos_root() (env)."""
     import warnings
     mod = _adc_module()
     has = getattr(mod, "__has_kokkos__", None) if mod is not None else None
     root = _native_kokkos_root()
     if has is True and root is None:
         warnings.warn(
-            "adc.dsl : le module _adc est compile AVEC Kokkos mais ADC_KOKKOS_ROOT n'est pas defini "
-            "-> le bloc DSL 'production' sera compile en SERIE (il tournera, mais ne scalera pas "
-            "avec les threads/GPU). Definir ADC_KOKKOS_ROOT=<install Kokkos du build> pour la parite.",
+            "adc.dsl: the _adc module is compiled WITH Kokkos but ADC_KOKKOS_ROOT is not defined "
+            "-> the 'production' DSL block will be compiled SERIAL (it will run, but will not scale "
+            "with threads/GPU). Set ADC_KOKKOS_ROOT=<build Kokkos install> for parity.",
             RuntimeWarning, stacklevel=3)
     elif has is False and root is not None:
         warnings.warn(
-            "adc.dsl : ADC_KOKKOS_ROOT est defini mais le module _adc est SERIE (compile sans "
-            "-DADC_USE_KOKKOS=ON) -> le loader serait compile avec Kokkos contre un module qui ne "
-            "l'est pas (layouts memoire divergents, non couverts par la cle d'ABI). Retirer "
-            "ADC_KOKKOS_ROOT ou rebatir _adc avec Kokkos (preset python-parallel).",
+            "adc.dsl: ADC_KOKKOS_ROOT is defined but the _adc module is SERIAL (compiled without "
+            "-DADC_USE_KOKKOS=ON) -> the loader would be compiled with Kokkos against a module that is "
+            "not (divergent memory layouts, not covered by the ABI key). Remove "
+            "ADC_KOKKOS_ROOT or rebuild _adc with Kokkos (preset python-parallel).",
             RuntimeWarning, stacklevel=3)
 
 
@@ -515,9 +516,9 @@ def _env_truthy(value):
 
 
 def _native_kokkos_compiler(cxx):
-    """Compilateur effectif du loader natif. CUDA doit etre EXPLICITE (ADC_KOKKOS_CXX=<nvcc_wrapper>
-    ou ADC_KOKKOS_USE_NVCC_WRAPPER=1) : beaucoup d'installs Kokkos OpenMP fournissent aussi un
-    nvcc_wrapper, le choisir d'office casserait les jobs CPU sans nvcc. Pour Kokkos OpenMP, l'hote suffit."""
+    """Effective compiler of the native loader. CUDA must be EXPLICIT (ADC_KOKKOS_CXX=<nvcc_wrapper>
+    or ADC_KOKKOS_USE_NVCC_WRAPPER=1): many Kokkos OpenMP installs also provide a
+    nvcc_wrapper, choosing it by default would break CPU jobs without nvcc. For Kokkos OpenMP, the host suffices."""
     if cxx:
         return cxx
     env = os.environ.get("ADC_KOKKOS_CXX")
@@ -527,14 +528,14 @@ def _native_kokkos_compiler(cxx):
     wrapper = os.path.join(root, "bin", "nvcc_wrapper") if root else ""
     if wrapper and os.path.exists(wrapper) and _env_truthy(os.environ.get("ADC_KOKKOS_USE_NVCC_WRAPPER")):
         return wrapper
-    # Fallback centralise : $ADC_CXX, puis le compilateur du build de _adc (seul ABI-compatible
-    # garanti pour un loader natif), puis le PATH (historique). cf. _default_cxx.
+    # Centralized fallback: $ADC_CXX, then the _adc build compiler (the only ABI-compatible one
+    # guaranteed for a native loader), then the PATH (historical). cf. _default_cxx.
     return _default_cxx(None)
 
 
 def _adc_import_lib():
-    """(Windows, ADC-100) Chemin de l'import library _adc.lib (symboles System ADC_EXPORT) contre
-    laquelle linker la .dll DSL. Cherchee a cote du module _adc. None si absente."""
+    """(Windows, ADC-100) Path of the import library _adc.lib (System ADC_EXPORT symbols) against
+    which to link the DSL .dll. Searched next to the _adc module. None if absent."""
     mod = _adc_module()
     if mod is None:
         return None
@@ -544,60 +545,60 @@ def _adc_import_lib():
 
 
 def _native_kokkos_flags():
-    """Flags compile/link pour que le loader DSL production instancie add_compiled_model AVEC Kokkos.
+    """Compile/link flags so the production DSL loader instantiates add_compiled_model WITH Kokkos.
 
-    Le loader contient les templates header-only (make_block / assemble_rhs / for_each_cell). Compile
-    sans ADC_HAS_KOKKOS alors que _adc l'est AVEC Kokkos, le bloc DSL reste zero-copie mais ses kernels
-    sont instancies sur le fallback SERIE (ne scale pas threads/GPU). ADC_KOKKOS_ROOT force la parite."""
+    The loader contains the header-only templates (make_block / assemble_rhs / for_each_cell). Compiled
+    without ADC_HAS_KOKKOS while _adc is built WITH Kokkos, the DSL block stays zero-copy but its kernels
+    are instantiated on the SERIAL fallback (does not scale threads/GPU). ADC_KOKKOS_ROOT forces parity."""
     root = _native_kokkos_root()
     if not root:
         return [], []
     inc = os.path.join(root, "include")
     if sys.platform == "win32":
-        # MSVC/clang-cl : Kokkos en DLL PARTAGEE -> linker l'import lib kokkoscore.lib (UN seul runtime ;
-        # _adc charge la meme kokkoscore.dll). cl accepte -D/-I. Pas de -fopenmp/-ldl/-pthread (POSIX).
+        # MSVC/clang-cl: Kokkos as a SHARED DLL -> link the import lib kokkoscore.lib (ONE single runtime;
+        # _adc loads the same kokkoscore.dll). cl accepts -D/-I. No -fopenmp/-ldl/-pthread (POSIX).
         return (["-DADC_HAS_KOKKOS", "-DKOKKOS_DEPENDENCE", "-I", inc],
                 [os.path.join(root, "lib", "kokkoscore.lib")])
     compile_flags = ["-DADC_HAS_KOKKOS", "-DKOKKOS_DEPENDENCE", "-I", inc]
-    # NE PAS linker libkokkos* DANS le .so : le module _adc a deja charge le runtime Kokkos, un
-    # SINGLETON (registre global des execution spaces), et add_native_block le promeut en portee
-    # globale (RTLD_GLOBAL). Linker une 2e copie de Kokkos dans le loader donne deux runtimes : le
-    # calcul tourne, mais a la sortie Kokkos::finalize() abort "Execution space instance to be removed
-    # couldn't be found!" (SIGABRT, atexit). On laisse donc les symboles Kokkos INDEFINIS dans le .so
-    # (resolus au chargement contre le module, comme install_block/grid_context). Seuls -fopenmp (le
-    # backend OpenMP du noyau genere) + -ldl/-pthread restent. Validation ROMEO : DSL warm scale et
-    # sortie propre (exit 0), ratio ~0.96x les briques.
+    # Do NOT link libkokkos* INTO the .so: the _adc module has already loaded the Kokkos runtime, a
+    # SINGLETON (global registry of execution spaces), and add_native_block promotes it to global
+    # scope (RTLD_GLOBAL). Linking a 2nd copy of Kokkos into the loader gives two runtimes: the
+    # computation runs, but on exit Kokkos::finalize() aborts "Execution space instance to be removed
+    # couldn't be found!" (SIGABRT, atexit). So we leave the Kokkos symbols UNDEFINED in the .so
+    # (resolved at load time against the module, like install_block/grid_context). Only -fopenmp (the
+    # OpenMP backend of the generated kernel) + -ldl/-pthread remain. ROMEO validation: DSL warm scales and
+    # clean exit (exit 0), ratio ~0.96x the bricks.
     link_flags = ["-ldl", "-pthread"]
     if "nvcc_wrapper" not in os.path.basename(_native_kokkos_compiler(None) or ""):
-        # OpenMP requis pour l'espace d'exec Kokkos OpenMP (inoffensif/ignore sous Kokkos Serial).
+        # OpenMP required for the Kokkos OpenMP exec space (harmless/ignored under Kokkos Serial).
         if sys.platform == "darwin":
-            # macOS / AppleClang : `-fopenmp` seul est rejete -> -Xpreprocessor -fopenmp (+ include
-            # libomp Homebrew si present). On NE LIE PAS libomp (-lomp) dans le .so : une 2e copie de
-            # libomp donne DEUX runtimes OpenMP ("mutex lock failed: Invalid argument" a l'execution).
-            # Les symboles omp_*/__kmpc_* se resolvent au chargement (flat namespace, -undefined
-            # dynamic_lookup pose par compile_aot/compile_native) contre le libomp deja charge par _adc.
+            # macOS / AppleClang: `-fopenmp` alone is rejected -> -Xpreprocessor -fopenmp (+ include
+            # Homebrew libomp if present). We do NOT link libomp (-lomp) into the .so: a 2nd copy of
+            # libomp gives TWO OpenMP runtimes ("mutex lock failed: Invalid argument" at runtime).
+            # The omp_*/__kmpc_* symbols resolve at load time (flat namespace, -undefined
+            # dynamic_lookup set by compile_aot/compile_native) against the libomp already loaded by _adc.
             libomp = _libomp_prefix()
             compile_flags += ["-Xpreprocessor", "-fopenmp"]
             if libomp is not None:
                 compile_flags += ["-I", os.path.join(libomp, "include")]
         else:
-            # ELF/Linux : libgomp est partagee par soname (pas de double-runtime), -fopenmp des deux cotes.
+            # ELF/Linux: libgomp is shared by soname (no double-runtime), -fopenmp on both sides.
             compile_flags.append("-fopenmp")
             link_flags.append("-fopenmp")
     return compile_flags, link_flags
 
 
 def adc_loader_build_flags(cxx=None):
-    """Drapeaux pour compiler HORS CMake un .so qui INCLUT les en-tetes adc et sera charge dans le
-    module _adc (loaders DSL, tests d'ABI). adc_cpp etant Kokkos-only, le .so DOIT etre compile avec
-    Kokkos (for_each.hpp #error sinon). Renvoie (compilateur, flags_compile, flags_lien) : Kokkos +
-    (macOS) -undefined dynamic_lookup. Les symboles Kokkos restent INDEFINIS, resolus au chargement
-    contre le runtime Kokkos deja charge par _adc (pas de 2e copie). Leve si aucun Kokkos installe n'est
-    visible via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial suffit sur CPU)."""
+    """Flags to compile OUTSIDE CMake a .so that INCLUDES the adc headers and will be loaded into the
+    _adc module (DSL loaders, ABI tests). adc_cpp being Kokkos-only, the .so MUST be compiled with
+    Kokkos (for_each.hpp #error otherwise). Returns (compiler, compile_flags, link_flags): Kokkos +
+    (macOS) -undefined dynamic_lookup. The Kokkos symbols stay UNDEFINED, resolved at load time
+    against the Kokkos runtime already loaded by _adc (no 2nd copy). Raises if no installed Kokkos is
+    visible via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial suffices on CPU)."""
     if _native_kokkos_root() is None:
         raise RuntimeError(
-            "adc_loader_build_flags : adc_cpp est Kokkos-only -- pointe un Kokkos installe via "
-            "ADC_KOKKOS_ROOT (ou Kokkos_ROOT), p.ex. `export ADC_KOKKOS_ROOT=/chemin/vers/kokkos`.")
+            "adc_loader_build_flags: adc_cpp is Kokkos-only -- point to an installed Kokkos via "
+            "ADC_KOKKOS_ROOT (or Kokkos_ROOT), e.g. `export ADC_KOKKOS_ROOT=/path/to/kokkos`.")
     cc = _native_kokkos_compiler(cxx)
     cflags, lflags = _native_kokkos_flags()
     if sys.platform == "darwin":
@@ -605,64 +606,64 @@ def adc_loader_build_flags(cxx=None):
     return cc, cflags, lflags
 
 
-# --- Canal aux : disposition canonique --------------------------------------
-# Les champs auxiliaires nommes (aux('...')) sont des COMPOSANTES a indice FIXE du canal aux
-# (cf. adc::Aux / kAuxBaseComps cote C++). phi/grad_x/grad_y = contrat de BASE (3 composantes) ;
-# les suivants (B_z, ...) ELARGISSENT le canal -> la brique generee declare alors n_aux pour que
-# le systeme dimensionne et peuple le canal partage (cf. CompositeModel::n_aux, ensure_aux_width).
+# --- Aux channel: canonical layout ------------------------------------------
+# The named auxiliary fields (aux('...')) are FIXED-index COMPONENTS of the aux channel
+# (cf. adc::Aux / kAuxBaseComps on the C++ side). phi/grad_x/grad_y = BASE contract (3 components);
+# the following ones (B_z, ...) WIDEN the channel -> the generated brick then declares n_aux so that
+# the system sizes and populates the shared channel (cf. CompositeModel::n_aux, ensure_aux_width).
 #
-# DUPLICATION INHERENTE C++ <-> Python : la table ci-dessous DOIT rester le MIROIR de la source
-# unique C++ ADC_AUX_FIELDS (include/adc/core/state.hpp), d'ou sont generes load_aux (lecture
-# device) et le marshaling hote (python/system.cpp). Python ne lit pas les en-tetes C++, donc on
-# ne peut pas la generer : ajouter un champ aux extra = 1 ligne ici ET 1 ligne dans ADC_AUX_FIELDS,
-# avec le MEME {nom, indice}. C'est le seul recopie restant ; les 3 sites C++ sont desormais unifies.
+# INHERENT C++ <-> Python DUPLICATION: the table below MUST stay the MIRROR of the single C++
+# source ADC_AUX_FIELDS (include/adc/core/state.hpp), from which load_aux (device read)
+# and the host marshaling (python/system.cpp) are generated. Python does not read the C++ headers, so
+# we cannot generate it: adding an extra aux field = 1 line here AND 1 line in ADC_AUX_FIELDS,
+# with the SAME {name, index}. This is the only remaining duplication; the 3 C++ sites are now unified.
 AUX_CANONICAL = {"phi": 0, "grad_x": 1, "grad_y": 2, "B_z": 3, "T_e": 4}
 AUX_BASE_COMPS = 3
 
-# Champs aux NOMMES par le modele (ADC-70 phase 1) : m.aux_field("nom"). Composantes a partir de
-# AUX_NAMED_BASE (= 5, juste apres T_e=4) -- le k-ieme nom declare est la composante AUX_NAMED_BASE + k,
-# lue en C++ via aux.extra_field(k). MIROIRS de kAuxNamedBase / kAuxMaxExtra (include/adc/core/state.hpp,
-# source unique C++). Decouple les noms utilisateur du canal canonique : B_z / T_e gardent leurs indices
-# 3 / 4 et leurs chemins dedies (set_magnetic_field / set_electron_temperature_from).
+# Aux fields NAMED by the model (ADC-70 phase 1): m.aux_field("name"). Components starting from
+# AUX_NAMED_BASE (= 5, just after T_e=4) -- the k-th declared name is component AUX_NAMED_BASE + k,
+# read in C++ via aux.extra_field(k). MIRRORS of kAuxNamedBase / kAuxMaxExtra (include/adc/core/state.hpp,
+# single C++ source). Decouples the user names from the canonical channel: B_z / T_e keep their indices
+# 3 / 4 and their dedicated paths (set_magnetic_field / set_electron_temperature_from).
 AUX_NAMED_BASE = 5
-AUX_NAMED_MAX = 4  # nombre maximal de champs aux nommes par modele (= kAuxMaxExtra cote C++)
+AUX_NAMED_MAX = 4  # maximum number of named aux fields per model (= kAuxMaxExtra on the C++ side)
 
-# Borne du nombre de parametres RUNTIME par bloc (P7-b). MIROIR de kMaxRuntimeParams
-# (include/adc/runtime/runtime_params.hpp) : le porteur C++ RuntimeParams a un tableau de cette taille
-# FIXE (device-copiable sans allocation), donc un modele depassant la borne est rejete au codegen.
+# Bound on the number of RUNTIME parameters per block (P7-b). MIRROR of kMaxRuntimeParams
+# (include/adc/runtime/runtime_params.hpp): the C++ carrier RuntimeParams has an array of this FIXED
+# size (device-copiable without allocation), so a model exceeding the bound is rejected at codegen.
 _K_MAX_RUNTIME_PARAMS = 32
 
 
 def aux_n_aux(aux_names):
-    """Largeur du canal aux requise par ces champs CANONIQUES : max(3, plus grand indice + 1).
-    Leve ValueError sur un nom inconnu (un champ aux canonique DOIT etre une composante de adc::Aux)."""
+    """Aux channel width required by these CANONICAL fields: max(3, largest index + 1).
+    Raises ValueError on an unknown name (a canonical aux field MUST be a component of adc::Aux)."""
     w = AUX_BASE_COMPS
     for nm in aux_names:
         if nm not in AUX_CANONICAL:
-            raise ValueError("champ aux '%s' inconnu : attendus %s (composantes de adc::Aux)"
+            raise ValueError("unknown aux field '%s': expected %s (components of adc::Aux)"
                              % (nm, sorted(AUX_CANONICAL)))
         w = max(w, AUX_CANONICAL[nm] + 1)
     return w
 
 
 def aux_total_n_aux(aux_names, aux_extra_names):
-    """Largeur TOTALE du canal aux : max de la largeur canonique (aux_n_aux) et, si des champs NOMMES
-    (aux_field) sont declares, AUX_NAMED_BASE + nombre de noms (le dernier nomme = composante
-    AUX_NAMED_BASE + len-1). Sans champ nomme -> aux_n_aux (chemin historique, bit-identique)."""
+    """TOTAL width of the aux channel: max of the canonical width (aux_n_aux) and, if NAMED fields
+    (aux_field) are declared, AUX_NAMED_BASE + number of names (the last name = component
+    AUX_NAMED_BASE + len-1). Without a named field -> aux_n_aux (historical path, bit-identical)."""
     w = aux_n_aux(aux_names)
     if aux_extra_names:
         w = max(w, AUX_NAMED_BASE + len(aux_extra_names))
     return w
 
 
-# --- Roles physiques : nom de variable -> VariableRole ----------------------
-# Mapping CANONIQUE nom -> role physique (cf. adc::VariableRole / role_name cote C++). Permet a une
-# brique generee de DECLARER le SENS de ses composantes (densite, qte de mvt, energie...) au lieu de
-# roles vides, pour que les couplages inter-especes (System::add_collision / add_thermal_exchange)
-# resolvent par index_of(role) plutot que par un indice litteral. Les noms usuels des modeles fluides
-# (rho, rho_u, u, p, E, n...) sont reconnus ; un nom inconnu reste 'Custom'. Un modele peut imposer
-# ses roles explicitement (conservative_vars(..., roles=[...]) / set_primitive_state(..., roles=[...]))
-# pour un layout non standard. Cle = nom EXACT de la variable, valeur = membre de adc::VariableRole.
+# --- Physical roles: variable name -> VariableRole -------------------------
+# CANONICAL mapping name -> physical role (cf. adc::VariableRole / role_name on the C++ side). Lets a
+# generated brick DECLARE the MEANING of its components (density, momentum, energy...) instead of
+# empty roles, so that inter-species couplings (System::add_collision / add_thermal_exchange)
+# resolve via index_of(role) rather than via a literal index. The usual names of fluid models
+# (rho, rho_u, u, p, E, n...) are recognized; an unknown name stays 'Custom'. A model can impose
+# its roles explicitly (conservative_vars(..., roles=[...]) / set_primitive_state(..., roles=[...]))
+# for a non-standard layout. Key = EXACT variable name, value = member of adc::VariableRole.
 CANONICAL_ROLES = {
     "rho": "Density", "n": "Density", "density": "Density",
     "rho_u": "MomentumX", "rhou": "MomentumX", "mom_x": "MomentumX", "mx": "MomentumX",
@@ -677,25 +678,25 @@ CANONICAL_ROLES = {
 
 
 def role_of(name):
-    """Role physique CANONIQUE du nom @p name (membre de adc::VariableRole), 'Custom' si inconnu."""
+    """CANONICAL physical role of name @p name (member of adc::VariableRole), 'Custom' if unknown."""
     return CANONICAL_ROLES.get(name, "Custom")
 
 
 def roles_for(names, override=None):
-    """Liste des roles (membres adc::VariableRole) paralleles a @p names. @p override (optionnel) :
-    liste de meme longueur fixant explicitement les roles (chaine 'Density'... ou None pour retomber
-    sur le mapping canonique du nom). Sert aux layouts non standard ou les noms ne suffisent pas."""
+    """List of roles (adc::VariableRole members) parallel to @p names. @p override (optional):
+    list of the same length explicitly fixing the roles (string 'Density'... or None to fall back
+    on the canonical mapping of the name). Used for non-standard layouts where names are not enough."""
     if override is None:
         return [role_of(nm) for nm in names]
     if len(override) != len(names):
-        raise ValueError("roles : %d roles pour %d variables" % (len(override), len(names)))
+        raise ValueError("roles: %d roles for %d variables" % (len(override), len(names)))
     return [(r if r is not None else role_of(nm)) for nm, r in zip(names, override)]
 
 
-# --- Arbre d'expressions ----------------------------------------------------
+# --- Expression tree -------------------------------------------------------
 class Expr:
-    """Noeud d'expression symbolique. Les operateurs construisent l'arbre ; eval(env) l'applique a
-    des tableaux numpy (env : nom -> tableau ou scalaire)."""
+    """Symbolic expression node. Operators build the tree; eval(env) applies it to
+    numpy arrays (env: name -> array or scalar)."""
 
     def __add__(self, o): return Add(self, _wrap(o))
     def __radd__(self, o): return Add(_wrap(o), self)
@@ -706,8 +707,8 @@ class Expr:
     def __truediv__(self, o): return Div(self, _wrap(o))
     def __rtruediv__(self, o): return Div(_wrap(o), self)
     def __neg__(self): return Neg(self)
-    def __pos__(self): return self  # +expr = identite (l'API CoupledSource ecrit +k*ne*ng)
-    def __abs__(self): return Abs(self)  # abs(expr) -> |expr| (valeur absolue, p.ex. |lambda| de Roe)
+    def __pos__(self): return self  # +expr = identity (the CoupledSource API writes +k*ne*ng)
+    def __abs__(self): return Abs(self)  # abs(expr) -> |expr| (absolute value, e.g. |lambda| of Roe)
     def __pow__(self, o): return Pow(self, _wrap(o))
 
     def eval(self, env): raise NotImplementedError
@@ -719,9 +720,9 @@ class Expr:
 def _wrap(o):
     if isinstance(o, Expr):
         return o
-    # Un Param expose son NOEUD d'arbre interne (_node : Const pour 'const', RuntimeParamRef pour
-    # 'runtime'). On le promeut par ce noeud, PAS par float(o) : sinon sqrt(param_runtime) /
-    # dsl.sqrt(param) inlinerait la valeur de declaration (Const) au lieu d'emettre params.get(...).
+    # A Param exposes its internal tree NODE (_node: Const for 'const', RuntimeParamRef for
+    # 'runtime'). We promote it via that node, NOT via float(o): otherwise sqrt(param_runtime) /
+    # dsl.sqrt(param) would inline the declaration value (Const) instead of emitting params.get(...).
     node = getattr(o, "_node", None)
     if isinstance(node, Expr):
         return node
@@ -736,12 +737,12 @@ class Const(Expr):
 
 
 class Var(Expr):
-    """Variable nommee : conservative, primitive, auxiliaire (champ) ou constante."""
+    """Named variable: conservative, primitive, auxiliary (field) or constant."""
 
     def __init__(self, name, kind): self.name = name; self.kind = kind
     def eval(self, env):
         if self.name not in env:
-            raise KeyError("variable '%s' (%s) absente de l'environnement" % (self.name, self.kind))
+            raise KeyError("variable '%s' (%s) missing from the environment" % (self.name, self.kind))
         return env[self.name]
     def deps(self): return {self.name}
     def to_cpp(self): return self.name
@@ -799,13 +800,13 @@ class Sqrt(Expr):
 
 
 def sqrt(x):
-    """Racine carree symbolique."""
+    """Symbolic square root."""
     return Sqrt(_wrap(x))
 
 
 class Abs(Expr):
-    """Valeur absolue ``|a|`` (p.ex. ``|lambda_k|`` d'une dissipation de Roe). Emise std::fabs au codegen
-    (egale au ternaire a<0?-a:a hors -0.0). Non derivable par dsl.diff (pas de noeud signe)."""
+    """Absolute value ``|a|`` (e.g. ``|lambda_k|`` of a Roe dissipation). Emitted as std::fabs at codegen
+    (equal to the ternary a<0?-a:a outside -0.0). Not differentiable by dsl.diff (no sign node)."""
     def __init__(self, a): self.a = a
     def eval(self, env): return np.abs(self.a.eval(env))
     def deps(self): return self.a.deps()
@@ -814,22 +815,22 @@ class Abs(Expr):
 
 
 def abs_(x):
-    """Valeur absolue symbolique (equivalent de abs(expr) ; nom suffixe pour ne pas masquer abs)."""
+    """Symbolic absolute value (equivalent of abs(expr); suffixed name so as not to shadow abs)."""
     return Abs(_wrap(x))
 
 
 class StateRef(Expr):
-    """Marqueur d'ETAT pour la dissipation de Roe a DEUX etats (m.roe_dissipation) : la
-    sous-expression encadree s'evalue sur l'etat GAUCHE UL (side='L', dsl.left) ou DROIT UR
-    (side='R', dsl.right). A la codegen du hook roe_dissipation(UL, AL, UR, AR, dir), left(e) emet e
-    avec les locales calculees depuis UL, right(e) depuis UR. N'a de sens QUE dans les lignes
-    fournies a m.roe_dissipation : l'interprete numpy ne le traite pas (la dissipation deux etats est
-    compilee en C++, pas evaluee a l'hote). deps() = deps de la sous-expression (controle des
-    dependances)."""
+    """STATE marker for the TWO-state Roe dissipation (m.roe_dissipation): the
+    enclosed sub-expression evaluates on the LEFT state UL (side='L', dsl.left) or RIGHT state UR
+    (side='R', dsl.right). At codegen of the hook roe_dissipation(UL, AL, UR, AR, dir), left(e) emits e
+    with the locals computed from UL, right(e) from UR. Has meaning ONLY in the lines
+    given to m.roe_dissipation: the numpy interpreter does not handle it (the two-state dissipation is
+    compiled into C++, not evaluated on the host). deps() = deps of the sub-expression (dependency
+    checking)."""
 
     def __init__(self, side, expr):
         if side not in ("L", "R"):
-            raise ValueError("StateRef : side doit etre 'L' (UL) ou 'R' (UR), recu %r" % (side,))
+            raise ValueError("StateRef: side must be 'L' (UL) or 'R' (UR), got %r" % (side,))
         self.side = side
         self.expr = _wrap(expr)
 
@@ -838,36 +839,36 @@ class StateRef(Expr):
 
     def eval(self, env):
         raise NotImplementedError(
-            "StateRef (dsl.left / dsl.right) ne s'evalue pas par l'interprete numpy : la dissipation "
-            "de Roe a deux etats est EMISE en C++ (m.roe_dissipation), pas interpretee a l'hote.")
+            "StateRef (dsl.left / dsl.right) is not evaluated by the numpy interpreter: the two-state "
+            "Roe dissipation is EMITTED in C++ (m.roe_dissipation), not interpreted on the host.")
 
     def _str(self):
         return "%s(%s)" % ("left" if self.side == "L" else "right", self.expr)
 
 
 def left(expr):
-    """Marque @p expr comme evaluee sur l'etat GAUCHE UL (dissipation de Roe, m.roe_dissipation)."""
+    """Marks @p expr as evaluated on the LEFT state UL (Roe dissipation, m.roe_dissipation)."""
     return StateRef("L", expr)
 
 
 def right(expr):
-    """Marque @p expr comme evaluee sur l'etat DROIT UR (dissipation de Roe, m.roe_dissipation)."""
+    """Marks @p expr as evaluated on the RIGHT state UR (Roe dissipation, m.roe_dissipation)."""
     return StateRef("R", expr)
 
 
 class RuntimeParamRef(Expr):
-    """Reference a un parametre RUNTIME (P7-b) dans l'arbre d'expressions. A la difference d'un Const
-    (param const inline EN DUR), ce noeud emet `params.get(<indice>)` au codegen : la brique generee
-    LIT la valeur dans son membre adc::RuntimeParams au lieu de l'avoir cuite. La valeur peut donc etre
-    CHANGEE au runtime sans recompiler le .so (cf. include/adc/runtime/runtime_params.hpp).
+    """Reference to a RUNTIME parameter (P7-b) in the expression tree. Unlike a Const
+    (const param inlined HARD), this node emits `params.get(<index>)` at codegen: the generated brick
+    READS the value from its adc::RuntimeParams member instead of having it baked in. The value can thus
+    be CHANGED at runtime without recompiling the .so (cf. include/adc/runtime/runtime_params.hpp).
 
-    @c index : indice STABLE du parametre dans le bloc RuntimeParams (attribue par le modele a la
-    compilation, ordre trie des noms) ; -1 tant qu'il n'est pas assigne. @c value : valeur de
-    DECLARATION (utilisee par l'interprete numpy eval et comme defaut du membre genere -> sans appel
-    set au runtime, le bloc se comporte comme avec un param const de cette valeur).
+    @c index: STABLE index of the parameter in the RuntimeParams block (assigned by the model at
+    compilation, sorted order of names); -1 as long as it is not assigned. @c value: DECLARATION
+    value (used by the numpy eval interpreter and as the default of the generated member -> without a
+    set call at runtime, the block behaves as with a const param of this value).
 
-    Cle structurelle de CSE (cf. _key) : le NOM (deux refs au meme param runtime partagent la meme
-    locale CSE) ; la valeur de declaration n'entre pas dans la cle (elle est runtime, pas structurelle)."""
+    Structural CSE key (cf. _key): the NAME (two refs to the same runtime param share the same
+    CSE local); the declaration value does not enter the key (it is runtime, not structural)."""
 
     def __init__(self, name, value, index=-1):
         self.name = name
@@ -875,38 +876,38 @@ class RuntimeParamRef(Expr):
         self.index = index
 
     def eval(self, env):
-        # Interprete numpy (proto hote / debug) : la valeur de declaration tient lieu de valeur courante
-        # (le chemin numpy ne passe pas par RuntimeParams ; il sert au prototypage, pas a la production).
+        # Numpy interpreter (host proto / debug): the declaration value stands in for the current value
+        # (the numpy path does not go through RuntimeParams; it serves prototyping, not production).
         return self.value
 
     def deps(self):
-        # Un parametre runtime n'est PAS une variable d'environnement (cons/prim/aux) : il vient du canal
-        # RuntimeParams, donc rien a verifier dans check() (comme un Const).
+        # A runtime parameter is NOT an environment variable (cons/prim/aux): it comes from the
+        # RuntimeParams channel, so nothing to check in check() (like a Const).
         return set()
 
     def to_cpp(self):
         if self.index < 0:
             raise RuntimeError(
-                "RuntimeParamRef('%s') : indice non assigne au codegen (appeler la compilation via "
-                "dsl.Model qui attribue les indices runtime)" % self.name)
+                "RuntimeParamRef('%s'): index not assigned at codegen (call the compilation via "
+                "dsl.Model which assigns the runtime indices)" % self.name)
         return "params.get(%d)" % self.index
 
     def _str(self):
         return "rparam(%s)" % self.name
 
 
-# --- Elimination des sous-expressions communes (CSE) -------------------------
-# Le codegen inline chaque sous-expression a chaque apparition (H, c... recalcules). La CSE detecte
-# les sous-expressions COMPOUND (non feuilles) apparaissant plusieurs fois et les sort en variables
-# locales 'cseK_', en ordre de dependance (les plus petites d'abord). Repose sur une cle STRUCTURELLE
-# par noeud : deux sous-arbres identiques ont la meme cle, donc la meme locale.
+# --- Common subexpression elimination (CSE) --------------------------------
+# The codegen inlines each sub-expression at every occurrence (H, c... recomputed). CSE detects
+# the COMPOUND (non-leaf) sub-expressions appearing multiple times and hoists them into local
+# variables 'cseK_', in dependency order (the smallest first). Relies on a STRUCTURAL key
+# per node: two identical subtrees have the same key, hence the same local.
 def _children(e):
     if isinstance(e, _Bin):
         return (e.a, e.b)
     if isinstance(e, (Neg, Sqrt, Abs)):
         return (e.a,)
     if isinstance(e, StateRef):
-        return (e.expr,)  # marqueur left/right : un seul enfant (decouverte de params runtime, etc.)
+        return (e.expr,)  # left/right marker: a single child (discovery of runtime params, etc.)
     return ()
 
 
@@ -914,7 +915,7 @@ def _key(e):
     if isinstance(e, Const):
         return ("const", e.value)
     if isinstance(e, RuntimeParamRef):
-        return ("rparam", e.name)  # cle = nom : deux refs au meme param runtime partagent la locale CSE
+        return ("rparam", e.name)  # key = name: two refs to the same runtime param share the CSE local
     if isinstance(e, Var):
         return ("var", e.name)
     if isinstance(e, Neg):
@@ -924,16 +925,16 @@ def _key(e):
     if isinstance(e, Abs):
         return ("abs", _key(e.a))
     if isinstance(e, StateRef):
-        return ("state", e.side, _key(e.expr))  # defensif : les lignes Roe ne passent pas par la CSE
+        return ("state", e.side, _key(e.expr))  # defensive: the Roe lines do not go through CSE
     return (e.op, tuple(_key(c) for c in _children(e)))  # _Bin (Add/Sub/Mul/Div/Pow)
 
 
 def _cpp_expand(e, cse_map):
-    """C++ du noeud e en developpant SON niveau ; les enfants passent par _cpp_cse (-> locales CSE)."""
+    """C++ of node e expanding ITS level; the children go through _cpp_cse (-> CSE locals)."""
     if isinstance(e, Const):
         return repr(e.value)
     if isinstance(e, RuntimeParamRef):
-        return e.to_cpp()  # params.get(<indice>) : lit le membre RuntimeParams de la brique
+        return e.to_cpp()  # params.get(<index>): reads the brick's RuntimeParams member
     if isinstance(e, Var):
         return e.name
     if isinstance(e, Neg):
@@ -946,11 +947,11 @@ def _cpp_expand(e, cse_map):
         return "std::pow(%s, %s)" % (_cpp_cse(e.a, cse_map), _cpp_cse(e.b, cse_map))
     if isinstance(e, _Bin):
         return "(%s %s %s)" % (_cpp_cse(e.a, cse_map), e.op, _cpp_cse(e.b, cse_map))
-    raise TypeError("expression non geree par le codegen : %r" % (e,))
+    raise TypeError("expression not handled by the codegen: %r" % (e,))
 
 
 def _cpp_cse(e, cse_map):
-    """C++ de e ; si e correspond a une locale CSE deja definie, renvoie son nom."""
+    """C++ of e; if e matches an already-defined CSE local, returns its name."""
     k = _key(e)
     if k in cse_map:
         return cse_map[k]
@@ -958,17 +959,17 @@ def _cpp_cse(e, cse_map):
 
 
 def _cse_emit(roots, real, indent):
-    """Retourne (lignes_de_locales, [C++ par racine]). Les sous-expressions compound vues >= 2 fois
-    deviennent des locales ``cseK_``. roots : liste d'Expr.
+    """Return (local_declaration_lines, [C++ per root]). Compound subexpressions seen >= 2 times
+    become ``cseK_`` locals. roots: list of Expr.
 
-    Memo par id() : un OBJET Expr partage (DAG, p.ex. intermediaires reutilises d'un gros modele)
-    n'est parcouru qu'une fois ; ses occurrences suivantes re-creditent le compteur de son
-    sous-arbre sans re-marche. Sans memo le parcours coute O(nombre de CHEMINS racine-feuille),
-    exponentiel sur un DAG profond (flux polynomial de polynomes). Equivalence stricte avec la
-    re-marche historique : memes comptages, memes tailles, meme ORDRE d'insertion des cles
-    (post-ordre de la premiere visite) -> C++ emis bit-identique."""
+    Memo by id(): a shared Expr OBJECT (DAG, e.g. intermediates reused from a large model)
+    is traversed only once; its later occurrences re-credit the counter of its
+    subtree without re-walking. Without the memo the traversal costs O(number of root-to-leaf PATHS),
+    exponential on a deep DAG (polynomial flux of polynomials). Strictly equivalent to the
+    historical re-walk: same counts, same sizes, same key INSERTION ORDER
+    (post-order of the first visit) -> emitted C++ is bit-identical."""
     counts, rep, size = {}, {}, {}
-    memo = {}  # id(e) -> (taille, {cle: occurrences} du sous-arbre, en post-ordre d'insertion)
+    memo = {}  # id(e) -> (size, {key: occurrences} of the subtree, in post-order of insertion)
 
     def visit(e):
         if isinstance(e, (Const, Var)):
@@ -983,7 +984,7 @@ def _cse_emit(roots, real, indent):
                 if ccnt:
                     for ck, cc in ccnt.items():
                         cnt[ck] = cnt.get(ck, 0) + cc
-            cnt[k] = cnt.get(k, 0) + 1  # post-ordre : enfants d'abord, comme la re-marche historique
+            cnt[k] = cnt.get(k, 0) + 1  # post-order: children first, like the historical re-walk
             rep.setdefault(k, e)
             size[k] = s
             sub = (s, cnt)
@@ -1004,16 +1005,16 @@ def _cse_emit(roots, real, indent):
     return lines, [_cpp_cse(r, cse_map) for r in roots]
 
 
-# --- Differentiation symbolique (autodiff de l'arbre Expr) -------------------
-# dsl.diff(expr, var) derive l'arbre noeud par noeud : linearite (+, -), produit (a*b)' = a'b + ab',
-# quotient (a/b)' = (a'b - ab')/b^2, puissance (a^n)' = n a^(n-1) a' (exposant constant), racine
-# sqrt(a)' = a'/(2 sqrt(a)), oppose. Sert a construire le Jacobien de flux A = dF/dU (flux_jacobian)
-# que l'utilisateur emploie pour ecrire sa dissipation de Roe (m.roe_dissipation). Une primitive
-# DEFINIE est derivee PAR SA DEFINITION (regle de chaine) ; une occurrence NON derivee reste un
-# symbole (emission lisible), seule la DERIVEE descend jusqu'aux conservatives. Noeud inconnu ->
-# NotImplementedError (jamais de zero silencieux). Simplifications minimales (0*x, 1*x, x+0).
+# --- Symbolic differentiation (autodiff of the Expr tree) -------------------
+# dsl.diff(expr, var) differentiates the tree node by node: linearity (+, -), product (a*b)' = a'b + ab',
+# quotient (a/b)' = (a'b - ab')/b^2, power (a^n)' = n a^(n-1) a' (constant exponent), root
+# sqrt(a)' = a'/(2 sqrt(a)), negation. Used to build the flux Jacobian A = dF/dU (flux_jacobian)
+# that the user employs to write its Roe dissipation (m.roe_dissipation). A DEFINED primitive
+# is differentiated BY ITS DEFINITION (chain rule); a NON differentiated occurrence stays a
+# symbol (readable emission), only the DERIVATIVE descends to the conservatives. Unknown node ->
+# NotImplementedError (never a silent zero). Minimal simplifications (0*x, 1*x, x+0).
 def _is_const(e, val=None):
-    """Vrai si e est une constante numerique (Const) ; si @p val est donne, egale a val."""
+    """True if e is a numeric constant (Const); if @p val is given, equal to val."""
     return isinstance(e, Const) and (val is None or e.value == val)
 
 
@@ -1068,7 +1069,7 @@ def _s_div(a, b):
 
 
 def _s_pow(a, b):
-    # b : exposant (Expr), ici suppose INDEPENDANT de la variable de derivation.
+    # b: exponent (Expr), here assumed INDEPENDENT of the differentiation variable.
     if _is_const(b, 0.0):
         return Const(1.0)
     if _is_const(b, 1.0):
@@ -1077,17 +1078,17 @@ def _s_pow(a, b):
 
 
 def diff(expr, var, defs=None):
-    """Derivee symbolique de @p expr par rapport a @p var (nom de variable ou Var).
+    """Symbolic derivative of @p expr with respect to @p var (variable name or Var).
 
-    @p defs (optionnel) : dictionnaire {nom de primitive: Expr de definition}. Quand la derivation
-    rencontre une primitive DEFINIE, elle derive sa DEFINITION (regle de chaine) -- les primitives
-    sont developpees jusqu'aux conservatives sans substitution manuelle. Une primitive de meme nom
-    que @p var est traitee comme la variable independante (derivee 1). Sans defs, toute variable
-    autre que @p var est independante (derivee 0).
+    @p defs (optional): dictionary {primitive name: definition Expr}. When the differentiation
+    meets a DEFINED primitive, it differentiates its DEFINITION (chain rule) -- the primitives
+    are expanded down to the conservatives without manual substitution. A primitive with the same name
+    as @p var is treated as the independent variable (derivative 1). Without defs, any variable
+    other than @p var is independent (derivative 0).
 
-    @return un Expr simplifie minimalement (0*x, 1*x, x+0, ... elimines pour une emission lisible).
-    Leve NotImplementedError sur un noeud non derivable (en nommant son type) ou une puissance dont
-    l'exposant depend de @p var (necessiterait un logarithme, noeud absent du DSL)."""
+    @return an Expr minimally simplified (0*x, 1*x, x+0, ... removed for a readable emission).
+    Raises NotImplementedError on a non differentiable node (naming its type) or a power whose
+    exponent depends on @p var (would need a logarithm, a node absent from the DSL)."""
     target = var.name if isinstance(var, Var) else str(var)
     d = defs or {}
 
@@ -1095,13 +1096,13 @@ def diff(expr, var, defs=None):
         if isinstance(e, Const):
             return Const(0.0)
         if isinstance(e, RuntimeParamRef):
-            return Const(0.0)  # parametre runtime : constant vis-a-vis de l'etat conservatif
+            return Const(0.0)  # runtime parameter: constant with respect to the conservative state
         if isinstance(e, Var):
             if e.name == target:
                 return Const(1.0)
             if e.name in d:
-                return go(d[e.name])  # primitive definie -> derivee de sa definition (chaine)
-            return Const(0.0)         # autre variable, independante de var
+                return go(d[e.name])  # defined primitive -> derivative of its definition (chain)
+            return Const(0.0)         # another variable, independent of var
         if isinstance(e, Add):
             return _s_add(go(e.a), go(e.b))
         if isinstance(e, Sub):
@@ -1116,53 +1117,53 @@ def diff(expr, var, defs=None):
         if isinstance(e, Sqrt):
             return _s_div(go(e.a), _s_mul(Const(2.0), Sqrt(e.a)))
         if isinstance(e, Abs):
-            # d|u| = (u / |u|) u' -- derivee exacte hors du pli u = 0 (les planchers lisses
-            # max(x, eps) = ((x+eps) + |x-eps|)/2 des modeles 'robust' y donnent exactement
-            # l'indicatrice attendue) ; AU pli, u/|u| vaut NaN : singularite de mesure nulle,
-            # documentee (comme la division des quotients).
+            # d|u| = (u / |u|) u' -- exact derivative away from the fold u = 0 (the smooth floors
+            # max(x, eps) = ((x+eps) + |x-eps|)/2 of the 'robust' models give there exactly
+            # the expected indicator); AT the fold, u/|u| is NaN: a zero-measure singularity,
+            # documented (like the division of quotients).
             return _s_mul(_s_div(e.a, Abs(e.a)), go(e.a))
         if isinstance(e, Pow):
             if not _is_const(go(e.b), 0.0):
                 raise NotImplementedError(
-                    "dsl.diff : derivee de a**b avec exposant dependant de '%s' (necessite un "
-                    "logarithme, noeud absent du DSL)" % target)
-            # exposant constant vis-a-vis de var : (a^b)' = b a^(b-1) a'
+                    "dsl.diff: derivative of a**b with exponent depending on '%s' (needs a "
+                    "logarithm, a node absent from the DSL)" % target)
+            # constant exponent with respect to var: (a^b)' = b a^(b-1) a'
             return _s_mul(_s_mul(e.b, _s_pow(e.a, _s_sub(e.b, Const(1.0)))), go(e.a))
-        raise NotImplementedError("dsl.diff : noeud non derivable %s (%r)" % (type(e).__name__, e))
+        raise NotImplementedError("dsl.diff: non differentiable node %s (%r)" % (type(e).__name__, e))
 
     return go(_wrap(expr))
 
 
 def _dir_key(direction):
-    """Normalise une direction en 'x' / 'y' (accepte 0/'x'/'X' et 1/'y'/'Y'). Leve sinon."""
+    """Normalize a direction into 'x' / 'y' (accepts 0/'x'/'X' and 1/'y'/'Y'). Raises otherwise."""
     if direction in (0, "x", "X"):
         return "x"
     if direction in (1, "y", "Y"):
         return "y"
-    raise ValueError("direction invalide %r (attendu 0/'x' ou 1/'y')" % (direction,))
+    raise ValueError("invalid direction %r (expected 0/'x' or 1/'y')" % (direction,))
 
 
-# --- Dissipation de Roe FOURNIE par l'utilisateur (m.roe_dissipation) ---------
-# Les lignes d_i sont ecrites en termes de left(...)/right(...) de variables/primitives + constantes.
-# _roe_validate controle qu'aucune variable n'apparait HORS marqueur (etat indetermine) et qu'aucun
-# marqueur n'est imbrique ; _cpp_roe rend le C++ en resolvant left/right par un prefixe de locale
-# (L_ pour UL, R_ pour UR).
+# --- Roe dissipation PROVIDED by the user (m.roe_dissipation) ---------
+# The lines d_i are written in terms of left(...)/right(...) of variables/primitives + constants.
+# _roe_validate checks that no variable appears OUTSIDE a marker (undetermined state) and that no
+# marker is nested; _cpp_roe renders the C++ by resolving left/right through a local prefix
+# (L_ for UL, R_ for UR).
 def _roe_validate(e, in_marker):
-    """Controle structurel d'une ligne de roe_dissipation. Leve ValueError si une variable est hors
-    marqueur left()/right() (etat indetermine) ou si un marqueur est imbrique. Const / parametre
-    runtime : autorises partout (sans etat). N'evalue rien (utilisable avant l'attribution des
-    indices runtime)."""
+    """Structural check of a roe_dissipation line. Raises ValueError if a variable is outside a
+    left()/right() marker (undetermined state) or if a marker is nested. Const / runtime
+    parameter: allowed everywhere (without state). Evaluates nothing (usable before the assignment of
+    the runtime indices)."""
     if isinstance(e, StateRef):
         if in_marker:
-            raise ValueError("m.roe_dissipation : marqueur left()/right() imbrique interdit "
-                             "(une sous-expression appartient a un seul etat)")
+            raise ValueError("m.roe_dissipation: nested left()/right() marker forbidden "
+                             "(a subexpression belongs to a single state)")
         _roe_validate(e.expr, True)
         return
     if isinstance(e, Var):
         if not in_marker:
             raise ValueError(
-                "m.roe_dissipation : variable '%s' hors marqueur ; encadrer chaque variable ou "
-                "primitive par dsl.left(...) (etat UL) ou dsl.right(...) (etat UR)" % e.name)
+                "m.roe_dissipation: variable '%s' outside marker; wrap each variable or "
+                "primitive with dsl.left(...) (state UL) or dsl.right(...) (state UR)" % e.name)
         return
     if isinstance(e, (Const, RuntimeParamRef)):
         return
@@ -1171,13 +1172,13 @@ def _roe_validate(e, in_marker):
 
 
 def _cpp_roe(e, prefix):
-    """C++ d'une expression de ligne roe_dissipation. @p prefix : None au niveau racine (aucun etat
-    actif -> une variable nue est une erreur), 'L_' / 'R_' dans un marqueur (les variables prennent
-    ce prefixe de locale). Sert AUSSI a rendre une definition de primitive avec un prefixe d'etat
-    (e ne contient alors pas de StateRef). Suppose _roe_validate deja passe (erreurs defensives)."""
+    """C++ of a roe_dissipation line expression. @p prefix: None at the root level (no active
+    state -> a bare variable is an error), 'L_' / 'R_' inside a marker (the variables take
+    that local prefix). ALSO used to render a primitive definition with a state prefix
+    (e then contains no StateRef). Assumes _roe_validate already passed (defensive errors)."""
     if isinstance(e, StateRef):
         if prefix is not None:
-            raise ValueError("m.roe_dissipation : marqueur left()/right() imbrique interdit")
+            raise ValueError("m.roe_dissipation: nested left()/right() marker forbidden")
         return _cpp_roe(e.expr, e.side + "_")
     if isinstance(e, Const):
         return repr(e.value)
@@ -1185,7 +1186,7 @@ def _cpp_roe(e, prefix):
         return e.to_cpp()
     if isinstance(e, Var):
         if prefix is None:
-            raise ValueError("m.roe_dissipation : variable '%s' hors marqueur left()/right()"
+            raise ValueError("m.roe_dissipation: variable '%s' outside left()/right() marker"
                              % e.name)
         return prefix + e.name
     if isinstance(e, Neg):
@@ -1198,196 +1199,196 @@ def _cpp_roe(e, prefix):
         return "std::pow(%s, %s)" % (_cpp_roe(e.a, prefix), _cpp_roe(e.b, prefix))
     if isinstance(e, _Bin):
         return "(%s %s %s)" % (_cpp_roe(e.a, prefix), e.op, _cpp_roe(e.b, prefix))
-    raise TypeError("m.roe_dissipation : expression non geree par le codegen : %r" % (e,))
+    raise TypeError("m.roe_dissipation: expression not handled by the codegen: %r" % (e,))
 
 
-# --- Modele hyperbolique declaratif -----------------------------------------
+# --- Declarative hyperbolic model -----------------------------------------
 class HyperbolicModel:
-    """Modele hyperbolique ecrit en FORMULES : variables conservatives, primitives (definies par
-    des expressions), flux, valeurs propres, source, contribution elliptique. cf. module docstring."""
+    """Hyperbolic model written as FORMULAS: conservative variables, primitives (defined by
+    expressions), flux, eigenvalues, source, elliptic contribution. cf. module docstring."""
 
     def __init__(self, name):
         self.name = name
         self.cons_names = []
-        self.prim_defs = {}     # nom -> Expr (en fonction des cons / prims precedents / aux)
-        self.aux_names = []      # champs aux CANONIQUES lus (phi/grad/B_z/T_e), cf. AUX_CANONICAL
-        self.aux_extra_names = []  # champs aux NOMMES (aux_field) : ordre = indice AUX_NAMED_BASE + k
-        self._flux = {}         # "x" / "y" -> liste d'Expr (une par composante conservative)
-        self._eig = {}          # "x" / "y" -> liste d'Expr (valeurs propres)
-        self._wave_speeds = None  # {"x"/"y": (smin Expr, smax Expr)} : vitesses SIGNEES explicites
-                                  # (set_wave_speeds) ; None = derive des eigenvalues si 'p' (historique)
-        self._ws_jacobian = None  # {"x"/"y": [[Expr]]} + meta (eig, blocks) : vitesses signees EXACTES
-                                  # par valeurs propres du jacobien de flux (set_wave_speeds_from_jacobian)
-        self._source = None     # liste d'Expr (une par composante) ou None
-        self._elliptic = None   # Expr (contribution au second membre elliptique) ou None
-        self._stab_speed = None  # Expr : vitesse de STABILITE lambda* (None = fallback eigenvalues)
-        self._stab_dt = None     # Expr : pas ADMISSIBLE direct dt(U, aux) (None = pas de borne)
-        self._src_freq = None    # Expr : frequence mu(U, aux) de la SOURCE (None = pas de borne)
-        self._src_jac = None     # [[Expr]] n x n : Jacobien ANALYTIQUE dS/dU (None = diff. finies)
-        self._hllc = False       # True : emettre la capability HLLC (contact_speed + star state)
-        self._roe = False        # True : emettre la capability ROE (roe_dissipation depuis les roles)
-        self._roe_rows = None    # {"x": [Expr], "y": [Expr]} : roe_dissipation FOURNIE (hors roles)
-        self.prim_state = []    # noms ordonnes de l'etat primitif (layout de Prim) ; pour le codegen
-        self.cons_from = None   # liste d'Expr : conservatif en fonction des primitives (to_conservative)
-        self.cons_roles = None  # override explicite des roles conservatifs (sinon mapping canonique)
-        self.prim_roles = None  # override explicite des roles primitifs (sinon mapping canonique)
-        self.gamma = None       # indice adiabatique du bloc (EOS), lu par les couplages inter-especes
-                                # cote System. None -> symbole adc_compiled_gamma non emis (le System
-                                # retombe alors sur son defaut historique 1.4, retro-compat stricte).
+        self.prim_defs = {}     # name -> Expr (in terms of the cons / previous prims / aux)
+        self.aux_names = []      # CANONICAL aux fields read (phi/grad/B_z/T_e), cf. AUX_CANONICAL
+        self.aux_extra_names = []  # NAMED aux fields (aux_field): order = index AUX_NAMED_BASE + k
+        self._flux = {}         # "x" / "y" -> list of Expr (one per conservative component)
+        self._eig = {}          # "x" / "y" -> list of Expr (eigenvalues)
+        self._wave_speeds = None  # {"x"/"y": (smin Expr, smax Expr)}: explicit SIGNED speeds
+                                  # (set_wave_speeds); None = derived from the eigenvalues if 'p' (historical)
+        self._ws_jacobian = None  # {"x"/"y": [[Expr]]} + meta (eig, blocks): EXACT signed speeds
+                                  # from the eigenvalues of the flux jacobian (set_wave_speeds_from_jacobian)
+        self._source = None     # list of Expr (one per component) or None
+        self._elliptic = None   # Expr (contribution to the elliptic right-hand side) or None
+        self._stab_speed = None  # Expr: STABILITY speed lambda* (None = fallback eigenvalues)
+        self._stab_dt = None     # Expr: direct ADMISSIBLE step dt(U, aux) (None = no bound)
+        self._src_freq = None    # Expr: frequency mu(U, aux) of the SOURCE (None = no bound)
+        self._src_jac = None     # [[Expr]] n x n: ANALYTIC Jacobian dS/dU (None = finite differences)
+        self._hllc = False       # True: emit the HLLC capability (contact_speed + star state)
+        self._roe = False        # True: emit the ROE capability (roe_dissipation from the roles)
+        self._roe_rows = None    # {"x": [Expr], "y": [Expr]}: roe_dissipation PROVIDED (outside roles)
+        self.prim_state = []    # ordered names of the primitive state (Prim layout); for the codegen
+        self.cons_from = None   # list of Expr: conservative in terms of the primitives (to_conservative)
+        self.cons_roles = None  # explicit override of the conservative roles (otherwise canonical mapping)
+        self.prim_roles = None  # explicit override of the primitive roles (otherwise canonical mapping)
+        self.gamma = None       # adiabatic index of the block (EOS), read by the inter-species couplings
+                                # on the System side. None -> symbol adc_compiled_gamma not emitted (the System
+                                # then falls back to its historical default 1.4, strict backward compatibility).
 
     def cons(self, name):
         self.cons_names.append(name)
         return Var(name, "cons")
 
     def conservative_vars(self, *names, roles=None):
-        """Declare les variables conservatives. @p roles (optionnel) : liste de meme longueur fixant
-        explicitement le role physique de chaque composante (chaine 'Density'/'MomentumX'... ou None
-        pour retomber sur le mapping canonique du nom) ; sert a un layout non standard ou les noms ne
-        suffisent pas a deduire le sens. Sans roles, le mapping canonique nom -> role s'applique."""
+        """Declare the conservative variables. @p roles (optional): list of the same length explicitly
+        setting the physical role of each component (string 'Density'/'MomentumX'... or None
+        to fall back on the canonical mapping of the name); useful for a non-standard layout where the names
+        do not suffice to deduce the meaning. Without roles, the canonical name -> role mapping applies."""
         if roles is not None and len(roles) != len(names):
-            raise ValueError("conservative_vars : %d roles pour %d variables" % (len(roles), len(names)))
+            raise ValueError("conservative_vars: %d roles for %d variables" % (len(roles), len(names)))
         self.cons_roles = list(roles) if roles is not None else None
         return tuple(self.cons(n) for n in names)
 
     def primitive(self, name, expr):
-        """Definit une primitive par sa formule (en fonction des cons / primitives precedentes)."""
+        """Define a primitive by its formula (in terms of the cons / previous primitives)."""
         self.prim_defs[name] = _wrap(expr)
         return Var(name, "prim")
 
     def aux(self, name):
-        """Champ auxiliaire CANONIQUE (p.ex. grad_x, grad_y, B_z, T_e) fourni a l'execution. Le nom
-        DOIT etre une clef de AUX_CANONICAL. Pour un champ NOMME arbitraire, voir aux_field."""
+        """CANONICAL auxiliary field (e.g. grad_x, grad_y, B_z, T_e) provided at execution. The name
+        MUST be a key of AUX_CANONICAL. For an arbitrary NAMED field, see aux_field."""
         self.aux_names.append(name)
         return Var(name, "aux")
 
     def aux_field(self, name):
-        """Champ auxiliaire NOMME (ADC-70 phase 1) fourni a l'execution par bloc via
-        System.set_aux_field(bloc, name, array). Contrairement a aux(...) (composantes CANONIQUES
-        phi/grad/B_z/T_e), name est ARBITRAIRE : le k-ieme appel reserve la composante
-        AUX_NAMED_BASE + k du canal aux (lue en C++ via aux.extra_field(k)). Renvoie une Var
-        utilisable dans flux / source / eigenvalues / elliptic_rhs comme toute autre variable aux.
+        """NAMED auxiliary field (ADC-70 phase 1) provided at execution per block via
+        System.set_aux_field(bloc, name, array). Unlike aux(...) (CANONICAL components
+        phi/grad/B_z/T_e), name is ARBITRARY: the k-th call reserves component
+        AUX_NAMED_BASE + k of the aux channel (read in C++ via aux.extra_field(k)). Returns a Var
+        usable in flux / source / eigenvalues / elliptic_rhs like any other aux variable.
 
-        Au plus AUX_NAMED_MAX champs nommes par modele (borne FIXE cote C++, Aux POD). Un nom deja
-        canonique (B_z, T_e, phi...) est REJETE : ces champs ont leurs chemins dedies (aux('B_z') +
-        set_magnetic_field, etc.) ; un doublon de nom nomme est aussi rejete."""
-        # Le nom devient une LOCALE C++ dans la formule generee (cf. _aux_locals_lines) ET la cle de la
-        # table de la facade : il doit etre un identifiant C++ valide (lettres/chiffres/_, pas un
-        # chiffre en tete). Rejet explicite plutot qu'un .so qui ne compile pas.
+        At most AUX_NAMED_MAX named fields per model (FIXED bound on the C++ side, Aux POD). A name already
+        canonical (B_z, T_e, phi...) is REJECTED: those fields have their dedicated paths (aux('B_z') +
+        set_magnetic_field, etc.); a duplicate named name is also rejected."""
+        # The name becomes a C++ LOCAL in the generated formula (cf. _aux_locals_lines) AND the key of the
+        # facade table: it must be a valid C++ identifier (letters/digits/_, not a
+        # leading digit). Explicit rejection rather than a .so that does not compile.
         if not (isinstance(name, str) and name.isidentifier()):
-            raise ValueError("aux_field(%r) : nom invalide (identifiant C++ attendu : "
-                             "lettres/chiffres/_, sans chiffre initial)" % (name,))
+            raise ValueError("aux_field(%r): invalid name (C++ identifier expected: "
+                             "letters/digits/_, without a leading digit)" % (name,))
         if name in AUX_CANONICAL:
             raise ValueError(
-                "aux_field('%s') : '%s' est un champ aux CANONIQUE ; utiliser aux('%s') (et le "
-                "chemin dedie, p.ex. set_magnetic_field pour B_z, set_electron_temperature_from "
-                "pour T_e)" % (name, name, name))
+                "aux_field('%s') : '%s' is a CANONICAL aux field; use aux('%s') (and the "
+                "dedicated path, e.g. set_magnetic_field for B_z, set_electron_temperature_from "
+                "for T_e)" % (name, name, name))
         if name in self.aux_extra_names:
-            raise ValueError("aux_field('%s') : champ deja declare" % name)
+            raise ValueError("aux_field('%s') : field already declared" % name)
         if len(self.aux_extra_names) >= AUX_NAMED_MAX:
-            raise ValueError("aux_field('%s') : au plus %d champs aux nommes par modele "
-                             "(borne kAuxMaxExtra cote C++)" % (name, AUX_NAMED_MAX))
+            raise ValueError("aux_field('%s') : at most %d named aux fields per model "
+                             "(kAuxMaxExtra bound on the C++ side)" % (name, AUX_NAMED_MAX))
         self.aux_extra_names.append(name)
         return Var(name, "aux")
 
     def _aux_locals_lines(self):
-        """Locales C++ pour les champs aux lus dans une formule : canonique '<n>' <- a.<n> ;
-        nomme '<n>' <- a.extra_field(k) (k = position dans aux_extra_names). Le nom de la locale est
-        IDENTIQUE a celui que l'Expr emet (Var.to_cpp), donc la formule la reference directement."""
+        """C++ locals for the aux fields read in a formula: canonical '<n>' <- a.<n> ;
+        named '<n>' <- a.extra_field(k) (k = position in aux_extra_names). The local name is
+        IDENTICAL to the one the Expr emits (Var.to_cpp), so the formula references it directly."""
         lines = ["    const adc::Real %s = a.%s;" % (n, n) for n in self.aux_names]
         lines += ["    const adc::Real %s = a.extra_field(%d);" % (n, k)
                   for k, n in enumerate(self.aux_extra_names)]
         return lines
 
     def _reads_aux(self):
-        """Vrai si une formule lit un champ aux (canonique ou nomme) : pilote le nommage du parametre
-        Aux ('a' vs anonyme) pour ne pas declencher d'avertissement de parametre inutilise."""
+        """True if a formula reads an aux field (canonical or named): drives the naming of the Aux
+        parameter ('a' vs anonymous) so as not to trigger an unused-parameter warning."""
         return bool(self.aux_names) or bool(self.aux_extra_names)
 
     def _total_n_aux(self):
-        """Largeur TOTALE du canal aux du modele (canonique + champs nommes)."""
+        """TOTAL width of the model's aux channel (canonical + named fields)."""
         return aux_total_n_aux(self.aux_names, self.aux_extra_names)
 
     def set_flux(self, x, y): self._flux = {"x": list(x), "y": list(y)}
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
 
     def set_wave_speeds(self, x, y):
-        """Vitesses d'onde SIGNEES explicites par direction : x = (smin_x, smax_x), y = (smin_y,
-        smax_y), expressions des cons / prims / aux. Emet ``wave_speeds(U, aux, dir, smin, smax)``
-        sur la brique generee SANS exiger de primitive 'p' : riemann='hll' devient disponible pour
-        un modele sans pression (systeme de moments, isotherme...). Le coeur ne gate HLL que sur
-        requires { m.wave_speeds(...) } (block_builder.hpp) : aucun changement C++.
+        """Explicit SIGNED wave speeds per direction: x = (smin_x, smax_x), y = (smin_y,
+        smax_y), expressions of cons / prims / aux. Emits ``wave_speeds(U, aux, dir, smin, smax)``
+        on the generated brick WITHOUT requiring a primitive 'p': riemann='hll' becomes available for
+        a pressureless model (moment system, isothermal...). The core only gates HLL on
+        requires { m.wave_speeds(...) } (block_builder.hpp): no C++ change.
 
-        Prioritaire sur le chemin historique (primitive 'p' -> wave_speeds = min/max des
-        eigenvalues) quand les deux existent. SANS appel : emission strictement historique.
-        Si set_eigenvalues n'est PAS appele, max_wave_speed (Rusanov / CFL) est derive de
-        ``max(|smin|, |smax|)`` sur les deux expressions de la direction."""
+        Takes priority over the historical path (primitive 'p' -> wave_speeds = min/max of
+        eigenvalues) when both exist. WITHOUT a call: strictly historical emission.
+        If set_eigenvalues is NOT called, max_wave_speed (Rusanov / CFL) is derived from
+        ``max(|smin|, |smax|)`` over the two expressions of the direction."""
         x, y = tuple(x), tuple(y)
         if len(x) != 2 or len(y) != 2:
-            raise ValueError("set_wave_speeds : attendu x=(smin, smax) et y=(smin, smax) "
-                             "(recu x=%d expression(s), y=%d)" % (len(x), len(y)))
+            raise ValueError("set_wave_speeds : expected x=(smin, smax) and y=(smin, smax) "
+                             "(got x=%d expression(s), y=%d)" % (len(x), len(y)))
         if self._ws_jacobian is not None:
-            raise ValueError("set_wave_speeds : set_wave_speeds_from_jacobian deja declare -- un "
-                             "seul fournisseur de wave_speeds")
+            raise ValueError("set_wave_speeds : set_wave_speeds_from_jacobian already declared -- one "
+                             "single wave_speeds provider")
         self._wave_speeds = {"x": (_wrap(x[0]), _wrap(x[1])),
                              "y": (_wrap(y[0]), _wrap(y[1]))}
 
     def set_wave_speeds_from_jacobian(self, x=None, y=None, eig="numeric", blocks=None):
-        """Vitesses d'onde signees EXACTES : smin/smax = extremes des valeurs propres du jacobien
-        de flux A = dF/dU, calcules NUMERIQUEMENT par cellule (adc::real_eig_minmax, QR de Francis
-        sur tampon pile, repli Gershgorin sur non-convergence = borne externe sure). Emet
-        ``wave_speeds(U, aux, dir, smin, smax)`` (gate HLL du coeur) et, sans set_eigenvalues,
-        ``max_wave_speed`` = ``max(|smin|, |smax|)`` sur les memes blocs.
+        """EXACT signed wave speeds: smin/smax = extremes of the flux jacobian's eigenvalues
+        A = dF/dU, computed NUMERICALLY per cell (adc::real_eig_minmax, Francis QR
+        on a stack buffer, Gershgorin fallback on non-convergence = safe outer bound). Emits
+        ``wave_speeds(U, aux, dir, smin, smax)`` (core HLL gate) and, without set_eigenvalues,
+        ``max_wave_speed`` = ``max(|smin|, |smax|)`` over the same blocks.
 
-        @p x, @p y : matrices n_vars x n_vars d'expressions dA[i][j] = dF_dir[i]/dU[j]. None
-        (defaut) = AUTODIFF du flux declare via flux_jacobian(dir) (dsl.diff, primitives
-        developpees par la regle de chaine) -- le jacobien ne peut alors pas se desynchroniser du
-        flux. Fournir x/y explicites n'a de sens que pour court-circuiter l'autodiff (formes
-        simplifiees a la main) ; check_model les confronte alors aux differences finies du flux.
+        @p x, @p y : n_vars x n_vars matrices of expressions dA[i][j] = dF_dir[i]/dU[j]. None
+        (default) = AUTODIFF of the declared flux via flux_jacobian(dir) (dsl.diff, primitives
+        expanded by the chain rule) -- the jacobian can then not desynchronize from the
+        flux. Providing explicit x/y only makes sense to bypass autodiff (hand-simplified
+        forms); check_model then confronts them against the flux finite differences.
 
-        @p eig : "numeric" (defaut) = entrees du jacobien emises en formules, valeurs propres par
-        bloc a l'execution ; "fd" = jacobien construit PAR COLONNES aux differences finies du flux
-        COMPILE ((flux(U + eps e_k) - flux(U))/eps, ``eps = 1e-6 |U[0]| + 1e-30``, miroir de la
-        branche flagsym != 1 du MATLAB de reference) -- bring-up/debug generique, jamais
-        production (troncature O(eps)).
+        @p eig : "numeric" (default) = jacobian entries emitted as formulas, per-block
+        eigenvalues at runtime; "fd" = jacobian built BY COLUMNS from the finite differences of the
+        COMPILED flux ((flux(U + eps e_k) - flux(U))/eps, ``eps = 1e-6 |U[0]| + 1e-30``, mirror of the
+        flagsym != 1 branch of the reference MATLAB) -- generic bring-up/debug, never
+        production (O(eps) truncation).
 
-        @p blocks : None (defaut) = UN bloc plein n_vars x n_vars, seul mode inconditionnellement
-        correct. Sinon, liste de LISTES D'INDICES (eventuellement non contigus, p.ex.
-        [[0, 1, 4], [2, 3]]) appliquee aux DEUX directions, ou dict {"x": [...], "y": [...]}
-        (les structures bloc-triangulaires de dFx/dU et dFy/dU different en general : pour un
-        systeme de moments, les chaines en x sont contigues et celles en y ne le sont pas).
-        Les extremes sont pris sur l'union des spectres des sous-blocs diagonaux A[idx][idx].
-        CONTRAT : l'appelant AFFIRME que A est bloc-(inferieure-)triangulaire selon cette
-        partition (a permutation pres) -- sur une matrice quelconque les extremes de sous-blocs
-        NE BORNENT PAS le spectre (contre-exemple [[0, k], [k, 0]] : spectre +-k, sous-blocs 1x1
-        nuls). Des indices peuvent etre omis (lignes/colonnes porteuses d'aucune valeur propre
-        extreme, cf. le bloc saute du MATLAB de reference).
+        @p blocks : None (default) = ONE full n_vars x n_vars block, the only unconditionally
+        correct mode. Otherwise, a list of INDEX LISTS (possibly non-contiguous, e.g.
+        [[0, 1, 4], [2, 3]]) applied to BOTH directions, or a dict {"x": [...], "y": [...]}
+        (the block-triangular structures of dFx/dU and dFy/dU differ in general: for a
+        moment system, the chains in x are contiguous and those in y are not).
+        The extremes are taken over the union of the spectra of the diagonal sub-blocks A[idx][idx].
+        CONTRACT: the caller ASSERTS that A is block-(lower-)triangular according to this
+        partition (up to permutation) -- on an arbitrary matrix the sub-block extremes
+        DO NOT BOUND the spectrum (counter-example [[0, k], [k, 0]]: spectrum +-k, 1x1 sub-blocks
+        zero). Indices may be omitted (rows/columns carrying no extreme eigenvalue,
+        cf. the skipped block of the reference MATLAB).
 
-        Diagnostics : la non-convergence QR retombe en silence sur la borne de Gershgorin du bloc
-        (PLUS LARGE, jamais fausse -- HLL reste stable, seulement plus diffusif) ; une perte
-        d'hyperbolicite (valeurs propres complexes) n'est pas signalee par cellule -- la verifier
-        hors ligne (check_model, golden type eigenvalues15_2D)."""
+        Diagnostics: QR non-convergence silently falls back to the block's Gershgorin bound
+        (WIDER, never wrong -- HLL stays stable, only more diffusive); a loss
+        of hyperbolicity (complex eigenvalues) is not reported per cell -- verify it
+        offline (check_model, golden type eigenvalues15_2D)."""
         if self._wave_speeds is not None:
-            raise ValueError("set_wave_speeds_from_jacobian : set_wave_speeds deja declare -- un "
-                             "seul fournisseur de wave_speeds")
+            raise ValueError("set_wave_speeds_from_jacobian : set_wave_speeds already declared -- one "
+                             "single wave_speeds provider")
         if eig not in ("numeric", "fd"):
-            raise ValueError("set_wave_speeds_from_jacobian : eig 'numeric' | 'fd' (recu %r)" % (eig,))
+            raise ValueError("set_wave_speeds_from_jacobian : eig 'numeric' | 'fd' (got %r)" % (eig,))
         nv = self.n_vars
         if (x is None) != (y is None):
-            raise ValueError("set_wave_speeds_from_jacobian : fournir x ET y, ou aucun (autodiff)")
+            raise ValueError("set_wave_speeds_from_jacobian : provide x AND y, or neither (autodiff)")
         if eig == "fd" and x is not None:
-            raise ValueError("set_wave_speeds_from_jacobian : eig='fd' construit le jacobien aux "
-                             "differences finies du flux compile -- x/y n'ont pas de sens ici")
+            raise ValueError("set_wave_speeds_from_jacobian : eig='fd' builds the jacobian from "
+                             "finite differences of the compiled flux -- x/y make no sense here")
         rows = {}
         if eig == "numeric":
             if x is None:
                 if not self._flux:
-                    raise ValueError("set_wave_speeds_from_jacobian : appeler set_flux(...) d'abord "
-                                     "(autodiff du jacobien)")
+                    raise ValueError("set_wave_speeds_from_jacobian : call set_flux(...) first "
+                                     "(jacobian autodiff)")
                 rows = {"x": self.flux_jacobian(0), "y": self.flux_jacobian(1)}
             else:
                 for key, mat in (("x", x), ("y", y)):
                     if len(mat) != nv or any(len(r) != nv for r in mat):
-                        raise ValueError("set_wave_speeds_from_jacobian : jacobien %s attendu "
+                        raise ValueError("set_wave_speeds_from_jacobian : jacobian %s expected "
                                          "%d x %d" % (key, nv, nv))
                     rows[key] = [[_wrap(e) for e in r] for r in mat]
         def norm_blocks(blk, label):
@@ -1395,14 +1396,14 @@ class HyperbolicModel:
             seen = set()
             for b in blk:
                 if not b:
-                    raise ValueError("set_wave_speeds_from_jacobian : bloc vide (%s)" % label)
+                    raise ValueError("set_wave_speeds_from_jacobian : empty block (%s)" % label)
                 for i in b:
                     if not (0 <= i < nv):
-                        raise ValueError("set_wave_speeds_from_jacobian : indice %d hors [0, %d) "
+                        raise ValueError("set_wave_speeds_from_jacobian : index %d out of [0, %d) "
                                          "(%s)" % (i, nv, label))
                     if i in seen:
-                        raise ValueError("set_wave_speeds_from_jacobian : indice %d present dans "
-                                         "deux blocs (%s)" % (i, label))
+                        raise ValueError("set_wave_speeds_from_jacobian : index %d present in "
+                                         "two blocks (%s)" % (i, label))
                     seen.add(i)
             return blk
 
@@ -1410,11 +1411,11 @@ class HyperbolicModel:
             per_dir = {"x": [list(range(nv))], "y": [list(range(nv))]}
         elif isinstance(blocks, dict):
             if set(blocks) != {"x", "y"}:
-                raise ValueError("set_wave_speeds_from_jacobian : blocks dict attendu avec les "
-                                 "cles 'x' et 'y' (recu %r)" % sorted(blocks))
+                raise ValueError("set_wave_speeds_from_jacobian : blocks dict expected with "
+                                 "keys 'x' and 'y' (got %r)" % sorted(blocks))
             per_dir = {k: norm_blocks(blocks[k], k) for k in ("x", "y")}
         else:
-            shared = norm_blocks(blocks, "x et y")
+            shared = norm_blocks(blocks, "x and y")
             per_dir = {"x": shared, "y": [list(b) for b in shared]}
         self._ws_jacobian = {"rows": rows or None, "eig": eig, "blocks": per_dir,
                              "explicit": x is not None}
@@ -1422,175 +1423,175 @@ class HyperbolicModel:
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
 
     def stability_speed(self, expr):
-        """Vitesse de STABILITE lambda* (expression des cons / prims / aux) : pilote la CFL du bloc
-        a la place de ``max(|eigenvalues|)``. Emise comme ``stability_speed(U, aux, dir)`` (trait C++
-        ``HasStabilitySpeed``) : System::step_cfl l'utilise alors pour la borne de transport
-        dt <= cfl*h/lambda*, tandis que les solveurs de Riemann continuent de lire max_wave_speed
-        (stabilite != precision). SANS appel, le FALLBACK est strictement l'historique :
-        max(abs(eigenvalues)) via max_wave_speed. Compilee comme flux/source (pas de callback Python
-        par cellule : compatible production GPU/MPI). Cablee sur System ET AmrSystem (mono et
-        multi-blocs ; cote AMR la reduction est evaluee sur le niveau GROSSIER, la ou vit la CFL)."""
+        """STABILITY speed lambda* (expression of cons / prims / aux): drives the block CFL
+        instead of ``max(|eigenvalues|)``. Emitted as ``stability_speed(U, aux, dir)`` (C++ trait
+        ``HasStabilitySpeed``): System::step_cfl then uses it for the transport bound
+        dt <= cfl*h/lambda*, while the Riemann solvers keep reading max_wave_speed
+        (stability != accuracy). WITHOUT a call, the FALLBACK is strictly historical:
+        max(abs(eigenvalues)) via max_wave_speed. Compiled like flux/source (no per-cell Python
+        callback: compatible with GPU/MPI production). Wired into System AND AmrSystem (mono and
+        multi-block; on the AMR side the reduction is evaluated on the COARSE level, where the CFL lives)."""
         self._stab_speed = _wrap(expr)
 
     def stability_dt(self, expr_dt):
-        """Pas ADMISSIBLE direct dt(U, aux) (expression > 0, en unites de temps) : borne locale du
-        pas, emise comme ``stability_dt(U, aux)`` (trait C++ ``HasStabilityDt``). System::step_cfl
-        impose dt <= min_cellules(stability_dt) * substeps / stride (le cfl n'est PAS applique : le
-        modele declare deja un pas admissible). Forme la plus generale (source raide, couplage local,
-        formule transport+source non reductible). SANS appel, aucune borne supplementaire (politique
-        de pas historique). Compilee comme flux/source (production GPU/MPI). Cablee sur System ET
-        AmrSystem (mono et multi-blocs ; cote AMR evaluee sur le niveau GROSSIER)."""
+        """Direct ADMISSIBLE step dt(U, aux) (expression > 0, in time units): local step
+        bound, emitted as ``stability_dt(U, aux)`` (C++ trait ``HasStabilityDt``). System::step_cfl
+        imposes dt <= min_cells(stability_dt) * substeps / stride (the cfl is NOT applied: the
+        model already declares an admissible step). The most general form (stiff source, local coupling,
+        non-reducible transport+source formula). WITHOUT a call, no additional bound (historical
+        step policy). Compiled like flux/source (GPU/MPI production). Wired into System AND
+        AmrSystem (mono and multi-block; on the AMR side evaluated on the COARSE level)."""
         self._stab_dt = _wrap(expr_dt)
 
     def source_frequency(self, expr_mu):
-        """FREQUENCE locale mu(U, aux) [1/temps] de la SOURCE (relaxation, collision, reaction) :
-        la 'deuxieme CFL' du meeting -- borne dt <= cfl * substeps / (stride * max_cellules(mu)),
-        SANS pas d'espace (une source borne en 1/temps). Emise comme ``frequency(U, aux)`` sur la
-        BRIQUE DE SOURCE generee (contrat C++ des briques source, cf. physics/source.hpp) ;
-        CompositeModel la forwarde (trait HasSourceFrequency) et System/AmrSystem::step_cfl
-        l'agregent. EXIGE set_source/m.source (la frequence est une propriete de la source).
-        SANS appel, la source ne contraint pas le pas (historique). Compilee (production GPU/MPI)."""
+        """Local FREQUENCY mu(U, aux) [1/time] of the SOURCE (relaxation, collision, reaction):
+        the 'second CFL' of the meeting -- bound dt <= cfl * substeps / (stride * max_cells(mu)),
+        WITHOUT a space step (a source bounded in 1/time). Emitted as ``frequency(U, aux)`` on the
+        generated SOURCE BRICK (C++ contract of source bricks, cf. physics/source.hpp);
+        CompositeModel forwards it (HasSourceFrequency trait) and System/AmrSystem::step_cfl
+        aggregate it. REQUIRES set_source/m.source (the frequency is a property of the source).
+        WITHOUT a call, the source does not constrain the step (historical). Compiled (GPU/MPI production)."""
         self._src_freq = _wrap(expr_mu)
 
     def source_jacobian(self, rows):
-        """JACOBIEN ANALYTIQUE de la source : dS/dU, matrice n_vars x n_vars d'expressions
-        (rows[r][c] = dS_r/dU_c, en fonction des cons / prims / aux). Emis comme
-        ``jacobian(U, aux, J)`` sur la brique de SOURCE generee, forwarde par CompositeModel
-        (trait C++ ``HasSourceJacobian``) : le Newton de la source implicite (IMEX /
-        SourceImplicitBE) l'utilise A LA PLACE des differences finies -- exactitude (plus de bruit
-        fd_eps) et evaluations de source economisees. EXIGE m.source. SANS appel : differences
-        finies historiques, bit-identique."""
+        """ANALYTICAL JACOBIAN of the source: dS/dU, n_vars x n_vars matrix of expressions
+        (rows[r][c] = dS_r/dU_c, as a function of cons / prims / aux). Emitted as
+        ``jacobian(U, aux, J)`` on the generated SOURCE brick, forwarded by CompositeModel
+        (C++ trait ``HasSourceJacobian``): the Newton of the implicit source (IMEX /
+        SourceImplicitBE) uses it INSTEAD of finite differences -- exactness (no more
+        fd_eps noise) and saved source evaluations. REQUIRES m.source. WITHOUT a call: historical
+        finite differences, bit-identical."""
         self._src_jac = [[_wrap(e) for e in row] for row in rows]
 
     def enable_hllc(self):
-        """Emet la CAPABILITY HLLC (audit vague 3) : ``contact_speed`` (Toro) + ``hllc_star_state``
-        GENERES depuis les ROLES du bloc (Density / MomentumX / MomentumY, Energy optionnel) et la
-        primitive 'p' -- le solveur HLLC contact-resolving du coeur (trait C++ HasHLLCStructure)
-        devient alors disponible pour CE modele, MEME hors Euler 4 variables (isotherme 3-var,
-        moments avec scalaires passifs : toute composante sans role particulier est advectee
-        passivement dans l'etat etoile, Us[c] = fac*U[c]/rho). EXIGE : roles Density/MomentumX/
-        MomentumY declares + primitive 'p' (erreur explicite a l'emission sinon)."""
+        """Emits the HLLC CAPABILITY (audit wave 3): ``contact_speed`` (Toro) + ``hllc_star_state``
+        GENERATED from the block's ROLES (Density / MomentumX / MomentumY, Energy optional) and the
+        primitive 'p' -- the core's contact-resolving HLLC solver (C++ trait HasHLLCStructure)
+        then becomes available for THIS model, EVEN outside 4-variable Euler (3-var isothermal,
+        moments with passive scalars: any component without a particular role is advected
+        passively in the star state, Us[c] = fac*U[c]/rho). REQUIRES: roles Density/MomentumX/
+        MomentumY declared + primitive 'p' (explicit error at emission otherwise)."""
         self._hllc = True
         return self
 
     def enable_roe(self):
-        """Emet la CAPABILITY ROE (solde de l'audit, GENERICITY_2026-06.md point 11) :
-        ``roe_dissipation(UL, AL, UR, AR, dir)`` = ``|A_roe| (UR - UL)`` GENEREE depuis les ROLES du
-        bloc -- le solveur Roe-like du coeur (trait C++ HasRoeDissipation, F = 1/2(FL+FR) - 1/2 d)
-        devient disponible pour CE modele, MEME hors Euler 4 variables :
+        """Emits the ROE CAPABILITY (audit balance, GENERICITY_2026-06.md point 11):
+        ``roe_dissipation(UL, AL, UR, AR, dir)`` = ``|A_roe| (UR - UL)`` GENERATED from the block's
+        ROLES -- the core's Roe-like solver (C++ trait HasRoeDissipation, F = 1/2(FL+FR) - 1/2 d)
+        becomes available for THIS model, EVEN outside 4-variable Euler:
 
-        - roles Density/MomentumX/MomentumY + Energy : algebre de Roe du gaz parfait, TRANSCRIPTION
-          exacte du chemin canonique C++ (moyennes ponderees sqrt(rho), gamma-1 deduit de
-          ``p/(E - 1/2 rho |v|^2)``, correction d'entropie de Harten sur les ondes acoustiques) ;
-        - roles Density/MomentumX/MomentumY SANS Energy (isotherme / pseudo-pression) : meme
-          decomposition sans la ligne d'energie, vitesse du son LOCALE c = sqrt(p/rho) moyennee
-          a la Roe (generalisation standard hors gaz parfait) ;
-        - toute composante HORS roles fluides est traitee en SCALAIRE PASSIF porte par l'onde
-          entropique (ligne identique a la quantite de mouvement tangentielle, phi = q/rho).
+        - roles Density/MomentumX/MomentumY + Energy: ideal-gas Roe algebra, exact
+          TRANSCRIPTION of the canonical C++ path (sqrt(rho)-weighted averages, gamma-1 deduced from
+          ``p/(E - 1/2 rho |v|^2)``, Harten entropy fix on the acoustic waves);
+        - roles Density/MomentumX/MomentumY WITHOUT Energy (isothermal / pseudo-pressure): same
+          decomposition without the energy row, LOCAL sound speed c = sqrt(p/rho) Roe-averaged
+          (standard generalization outside ideal gas);
+        - any component OUTSIDE the fluid roles is treated as a PASSIVE SCALAR carried by the
+          entropy wave (row identical to the tangential momentum, phi = q/rho).
 
-        EXIGE : roles Density/MomentumX/MomentumY declares + primitive 'p' (erreur explicite a
-        l'emission sinon). Sans appel : rien d'emis, riemann='roe' reste Euler-4-var-only.
+        REQUIRES: roles Density/MomentumX/MomentumY declared + primitive 'p' (explicit error at
+        emission otherwise). Without a call: nothing emitted, riemann='roe' stays Euler-4-var-only.
 
-        EXCLUSIF de m.roe_dissipation : la capability depuis les roles et la dissipation FOURNIE par
-        l'utilisateur sont deux fournisseurs du MEME hook roe_dissipation -- les declarer toutes deux
-        leve (un seul fournisseur)."""
+        EXCLUSIVE with m.roe_dissipation: the capability from the roles and the dissipation PROVIDED by
+        the user are two providers of the SAME roe_dissipation hook -- declaring both
+        raises (one single provider)."""
         if self._roe_rows is not None:
-            raise ValueError("enable_roe : roe_dissipation(...) deja fournie -- un seul fournisseur "
-                             "du hook roe_dissipation (capability depuis les roles OU fournie)")
+            raise ValueError("enable_roe : roe_dissipation(...) already provided -- one single provider "
+                             "of the roe_dissipation hook (capability from the roles OR provided)")
         self._roe = True
 
     def roe_dissipation(self, x, y):
-        """Dissipation de Roe FOURNIE par l'utilisateur (hors familles a roles fluides) : n_vars
-        expressions par direction (lignes d_i), emises comme le hook C++
-        ``roe_dissipation(UL, AL, UR, AR, dir)`` = d (trait HasRoeDissipation ; le coeur fait
-        F = 1/2(FL+FR) - 1/2 d, cf. RoeFlux). C'est le pendant 'fourni' de m.enable_roe (genere
-        depuis les ROLES) : ici l'utilisateur ecrit SON eigenstructure -- meme esprit que
-        m.source_jacobian (fourni, pas invente). Le helper m.flux_jacobian(dir) (A = dF/dU
-        auto-derive par dsl.diff) assiste cette ecriture.
+        """Roe dissipation PROVIDED by the user (outside the fluid-role families): n_vars
+        expressions per direction (rows d_i), emitted as the C++ hook
+        ``roe_dissipation(UL, AL, UR, AR, dir)`` = d (HasRoeDissipation trait; the core does
+        F = 1/2(FL+FR) - 1/2 d, cf. RoeFlux). It is the 'provided' counterpart of m.enable_roe (generated
+        from the ROLES): here the user writes THEIR eigenstructure -- same spirit as
+        m.source_jacobian (provided, not invented). The helper m.flux_jacobian(dir) (A = dF/dU
+        auto-derived by dsl.diff) assists this writing.
 
-        VOCABULAIRE DEUX ETATS : chaque variable/primitive doit etre encadree par dsl.left(...) (etat
-        UL) ou dsl.right(...) (etat UR) ; une moyenne de Roe se note donc explicitement
+        TWO-STATE VOCABULARY: each variable/primitive must be wrapped by dsl.left(...) (state
+        UL) or dsl.right(...) (state UR); a Roe average is therefore written explicitly
         (left(sqrt(rho))*left(u) + right(sqrt(rho))*right(u)) / (left(sqrt(rho)) + right(sqrt(rho))).
-        Une variable NUE (sans marqueur) leve a la declaration (etat indetermine).
+        A BARE variable (without a marker) raises at declaration (undetermined state).
 
-        @p x, @p y : listes de n_vars expressions (lignes pour dir=0 et dir=1). DEUX jeux EXPLICITES
-        (pas de mapping de roles ici) : a dir=0 la composante normale est l'axe x, a dir=1 l'axe y.
+        @p x, @p y : lists of n_vars expressions (rows for dir=0 and dir=1). TWO EXPLICIT sets
+        (no role mapping here): at dir=0 the normal component is the x axis, at dir=1 the y axis.
 
-        Garde-fous : longueur n_vars par direction ; chaque variable sous left/right ; conflit avec
-        enable_roe (un seul fournisseur du hook) -> erreur. SANS appel : rien d'emis (bit-identique).
-        Requiert le backend 'aot' ou 'production' (le hook est emis dans la brique generee)."""
+        Guards: length n_vars per direction; each variable under left/right; conflict with
+        enable_roe (one single provider of the hook) -> error. WITHOUT a call: nothing emitted (bit-identical).
+        Requires the 'aot' or 'production' backend (the hook is emitted in the generated brick)."""
         if self._roe:
-            raise ValueError("roe_dissipation : enable_roe() deja appele -- un seul fournisseur du "
-                             "hook roe_dissipation (capability depuis les roles OU fournie)")
+            raise ValueError("roe_dissipation : enable_roe() already called -- one single provider of the "
+                             "roe_dissipation hook (capability from the roles OR provided)")
         rx, ry = list(x), list(y)
         if len(rx) != self.n_vars or len(ry) != self.n_vars:
-            raise ValueError("roe_dissipation : %d expressions attendues par direction (recu x=%d, "
+            raise ValueError("roe_dissipation : %d expressions expected per direction (got x=%d, "
                              "y=%d)" % (self.n_vars, len(rx), len(ry)))
         rows = {"x": [_wrap(e) for e in rx], "y": [_wrap(e) for e in ry]}
         for key in ("x", "y"):
             for e in rows[key]:
-                _roe_validate(e, False)  # rejette toute variable hors marqueur left()/right()
+                _roe_validate(e, False)  # rejects any variable outside a left()/right() marker
         self._roe_rows = rows
 
     def flux_jacobian(self, dir):
-        """Jacobien de flux A = dF_dir/dU : matrice n_vars x n_vars d'expressions, A[i][j] =
-        d(flux_dir[i])/d(cons[j]), auto-derivee des flux declares (via dsl.diff avec substitution des
-        primitives). HELPER de CONSTRUCTION (l'utilisateur s'en sert pour ecrire m.roe_dissipation) :
-        N'EMET RIEN par lui-meme. @p dir : 0/'x' (axe x) ou 1/'y' (axe y). EXIGE set_flux(...).
+        """Flux jacobian A = dF_dir/dU : n_vars x n_vars matrix of expressions, A[i][j] =
+        d(flux_dir[i])/d(cons[j]), auto-derived from the declared fluxes (via dsl.diff with primitive
+        substitution). CONSTRUCTION HELPER (the user uses it to write m.roe_dissipation):
+        EMITS NOTHING by itself. @p dir : 0/'x' (x axis) or 1/'y' (y axis). REQUIRES set_flux(...).
 
-        Les primitives sont developpees par leur definition (chaine) ; une primitive non derivee
-        reste un symbole dans le resultat (l'evaluer numeriquement exige un env contenant ses valeurs,
-        p.ex. HyperbolicModel._env)."""
+        The primitives are expanded by their definition (chain); a non-derived primitive
+        stays a symbol in the result (evaluating it numerically requires an env containing its values,
+        e.g. HyperbolicModel._env)."""
         if not self._flux:
-            raise ValueError("flux_jacobian : appeler set_flux(...) d'abord")
+            raise ValueError("flux_jacobian : call set_flux(...) first")
         key = _dir_key(dir)
         comps = self._flux.get(key, [])
         if len(comps) != self.n_vars:
-            raise ValueError("flux_jacobian : flux %s attendu avec %d composantes (recu %d)"
+            raise ValueError("flux_jacobian : flux %s expected with %d components (got %d)"
                              % (key, self.n_vars, len(comps)))
         defs = self.prim_defs
         return [[diff(comps[i], self.cons_names[j], defs) for j in range(self.n_vars)]
                 for i in range(self.n_vars)]
 
     def left(self, expr):
-        """Marque @p expr comme evaluee sur l'etat GAUCHE UL (sucre pour dsl.left, m.roe_dissipation)."""
+        """Marks @p expr as evaluated on the LEFT state UL (sugar for dsl.left, m.roe_dissipation)."""
         return left(expr)
 
     def right(self, expr):
-        """Marque @p expr comme evaluee sur l'etat DROIT UR (sucre pour dsl.right, m.roe_dissipation)."""
+        """Marks @p expr as evaluated on the RIGHT state UR (sugar for dsl.right, m.roe_dissipation)."""
         return right(expr)
 
     def set_gamma(self, gamma):
-        """Indice adiabatique du bloc (EOS compressible). Transporte par le .so genere via le symbole
-        optionnel adc_compiled_gamma, pour que les couplages inter-especes du System (collision,
-        echange thermique, T_e) utilisent le BON gamma au lieu du defaut historique 1.4. Sans appel,
-        aucun symbole gamma n'est emis (retro-compat : le System garde son defaut)."""
+        """Adiabatic index of the block (compressible EOS). Carried by the generated .so via the
+        optional symbol adc_compiled_gamma, so that the System's inter-species couplings (collision,
+        thermal exchange, T_e) use the RIGHT gamma instead of the historical default 1.4. Without a call,
+        no gamma symbol is emitted (backward compat: the System keeps its default)."""
         self.gamma = float(gamma)
 
     def set_primitive_state(self, *vars_or_names, roles=None):
-        """Declare le layout ORDONNE de l'etat primitif (Prim) : noms des composantes, dans l'ordre.
-        Necessaire au codegen brique (to_primitive remplit Prim dans cet ordre). Chaque nom doit
-        etre une variable conservative ou une primitive deja definie. @p roles (optionnel) : meme
-        convention que conservative_vars (override explicite par composante, None = mapping canonique)."""
+        """Declares the ORDERED layout of the primitive state (Prim): component names, in order.
+        Necessary for the brick codegen (to_primitive fills Prim in this order). Each name must
+        be a conservative variable or an already-defined primitive. @p roles (optional): same
+        convention as conservative_vars (explicit per-component override, None = canonical mapping)."""
         self.prim_state = [v.name if isinstance(v, Var) else str(v) for v in vars_or_names]
         if roles is not None and len(roles) != len(self.prim_state):
-            raise ValueError("set_primitive_state : %d roles pour %d variables"
+            raise ValueError("set_primitive_state : %d roles for %d variables"
                              % (len(roles), len(self.prim_state)))
         self.prim_roles = list(roles) if roles is not None else None
 
     def set_conservative_from(self, exprs):
-        """Formules du conservatif en fonction des primitives (une par variable conservative, dans
-        l'ordre de conservative_vars). Sert a generer to_conservative : le DSL ne sait pas inverser
-        symboliquement les primitives, l'utilisateur fournit donc l'inverse explicitement."""
+        """Formulas of the conservative state as a function of the primitives (one per conservative
+        variable, in conservative_vars order). Used to generate to_conservative: the DSL cannot invert
+        the primitives symbolically, so the user provides the inverse explicitly."""
         self.cons_from = [_wrap(e) for e in exprs]
 
     @property
     def n_vars(self): return len(self.cons_names)
 
-    # --- evaluation (interprete CPU, numpy) ---
+    # --- evaluation (CPU interpreter, numpy) ---
     def _env(self, U, aux):
-        """Environnement : cons (depuis U), aux (fournis), puis primitives derivees (ordre
-        d'insertion = ordre de dependance)."""
+        """Environment: cons (from U), aux (provided), then derived primitives (insertion
+        order = dependency order)."""
         env = {self.cons_names[i]: U[i] for i in range(len(self.cons_names))}
         if aux:
             env.update(aux)
@@ -1599,15 +1600,15 @@ class HyperbolicModel:
         return env
 
     def flux(self, U, aux, dir):
-        """Flux physique dans la direction dir (0=x, 1=y). U : numpy (n_vars, ...)."""
+        """Physical flux in direction dir (0=x, 1=y). U: numpy (n_vars, ...)."""
         env = self._env(U, aux)
         comps = self._flux["x" if dir == 0 else "y"]
         return np.stack([np.broadcast_to(c.eval(env), U[0].shape) for c in comps], axis=0)
 
     def max_wave_speed(self, U, aux, dir):
-        """max_k max_cellules ``|lambda_k|`` : borne de Rusanov / CFL. Source : eigenvalues
-        (historique) ; SANS set_eigenvalues, ``max(|smin|, |smax|)`` des vitesses signees explicites
-        (set_wave_speeds), miroir exact de l'emission C++."""
+        """max_k max_cells ``|lambda_k|``: Rusanov / CFL bound. Source: eigenvalues
+        (legacy); WITHOUT set_eigenvalues, ``max(|smin|, |smax|)`` of the explicit signed speeds
+        (set_wave_speeds), an exact mirror of the C++ emission."""
         env = self._env(U, aux)
         key = "x" if dir == 0 else "y"
         if not self._eig.get(key) and self._ws_jacobian is not None:
@@ -1616,14 +1617,14 @@ class HyperbolicModel:
         exprs = self._eig.get(key) or (list(self._wave_speeds[key])
                                        if self._wave_speeds is not None else None)
         if not exprs:
-            raise ValueError("max_wave_speed : ni set_eigenvalues(...) ni set_wave_speeds(...) ni "
-                             "set_wave_speeds_from_jacobian(...) declares sur le modele '%s'"
+            raise ValueError("max_wave_speed: neither set_eigenvalues(...) nor set_wave_speeds(...) nor "
+                             "set_wave_speeds_from_jacobian(...) declared on model '%s'"
                              % self.name)
         return max(float(np.max(np.abs(np.asarray(e.eval(env))))) for e in exprs)
 
     def _ws_jacobian_value(self, U, env, key):
-        """Evaluateur numpy du chemin jacobien : extremes des parties reelles des valeurs propres
-        des sous-blocs, par echantillon (miroir du wave_speeds emis ; np.linalg.eigvals)."""
+        """Numpy evaluator of the jacobian path: extremes of the real parts of the eigenvalues
+        of the sub-blocks, per sample (mirror of the emitted wave_speeds; np.linalg.eigvals)."""
         ws = self._ws_jacobian
         nv = self.n_vars
         nsmp = int(np.asarray(U[0]).reshape(-1).shape[0])
@@ -1659,9 +1660,9 @@ class HyperbolicModel:
         return lo, hi
 
     def wave_speeds_value(self, U, aux, dir):
-        """Evaluateur numpy des vitesses signees (smin, smax) -- miroir du wave_speeds emis :
-        paire explicite (set_wave_speeds) si declaree, sinon min/max des eigenvalues (chemin
-        historique, qui exige 'p' pour etre EMIS mais reste evaluable ici)."""
+        """Numpy evaluator of the signed speeds (smin, smax) -- mirror of the emitted wave_speeds:
+        explicit pair (set_wave_speeds) if declared, otherwise min/max of the eigenvalues (legacy
+        path, which requires 'p' to be EMITTED but remains evaluable here)."""
         env = self._env(U, aux)
         key = "x" if dir == 0 else "y"
         if self._wave_speeds is not None:
@@ -1672,21 +1673,21 @@ class HyperbolicModel:
             return self._ws_jacobian_value(U, env, key)
         eigs = [np.asarray(e.eval(env), dtype=float) for e in self._eig.get(key, [])]
         if not eigs:
-            raise ValueError("wave_speeds_value : ni set_wave_speeds(...) ni set_eigenvalues(...) "
-                             "declares sur le modele '%s'" % self.name)
-        eigs = list(np.broadcast_arrays(*eigs)) if len(eigs) > 1 else eigs  # formes mixtes (lambda constante)
+            raise ValueError("wave_speeds_value: neither set_wave_speeds(...) nor set_eigenvalues(...) "
+                             "declared on model '%s'" % self.name)
+        eigs = list(np.broadcast_arrays(*eigs)) if len(eigs) > 1 else eigs  # mixed shapes (constant lambda)
         return (np.min(np.stack(eigs), axis=0), np.max(np.stack(eigs), axis=0))
 
     def source_value(self, U, aux):
-        """Terme source (numpy (n_vars, ...)), ou zeros si non defini."""
+        """Source term (numpy (n_vars, ...)), or zeros if not defined."""
         if self._source is None:
             return np.zeros_like(U)
         env = self._env(U, aux)
         return np.stack([np.broadcast_to(s.eval(env), U[0].shape) for s in self._source], axis=0)
 
     def to_python_flux(self, aux=None):
-        """Produit un adc.PythonFlux (backend hote) a partir des formules : le modele TOURNE
-        (interprete CPU). aux : dict nom -> tableau (champs auxiliaires), fige pour ce flux."""
+        """Produces an adc.PythonFlux (host backend) from the formulas: the model RUNS
+        (interpreted on CPU). aux: dict name -> array (auxiliary fields), frozen for this flux."""
         import adc
         a = aux or {}
         return adc.PythonFlux(
@@ -1694,10 +1695,10 @@ class HyperbolicModel:
             lambda U: max(self.max_wave_speed(U, a, 0), self.max_wave_speed(U, a, 1)))
 
     def check(self):
-        """Verifie que toute variable referencee (primitives, flux, valeurs propres, source) est
-        bien declaree (cons / prim / aux). Leve ValueError sinon (verification de dependances)."""
+        """Checks that every referenced variable (primitives, flux, eigenvalues, source) is
+        properly declared (cons / prim / aux). Raises ValueError otherwise (dependency check)."""
         known = (set(self.cons_names) | set(self.prim_defs) | set(self.aux_names)
-                 | set(self.aux_extra_names))  # champs aux nommes (aux_field) : ADC-70
+                 | set(self.aux_extra_names))  # named aux fields (aux_field): ADC-70
         used = set()
         groups = [self._flux.get("x", []), self._flux.get("y", []),
                   self._eig.get("x", []), self._eig.get("y", []), self._source or [],
@@ -1721,23 +1722,23 @@ class HyperbolicModel:
             used |= self._elliptic.deps()
         missing = used - known
         if missing:
-            raise ValueError("modele '%s' : variables non definies %s" % (self.name, sorted(missing)))
-        # source_frequency est une propriete de la SOURCE (emise sur la brique source generee) :
-        # la declarer sans source serait perdue EN SILENCE -> erreur explicite.
+            raise ValueError("model '%s': undefined variables %s" % (self.name, sorted(missing)))
+        # source_frequency is a property of the SOURCE (emitted on the generated source brick):
+        # declaring it without a source would be SILENTLY lost -> explicit error.
         if self._src_freq is not None and self._source is None:
-            raise ValueError("modele '%s' : source_frequency(...) declare sans source "
-                             "(appeler m.source([...]) -- la frequence est emise sur la brique de "
-                             "source generee)" % self.name)
+            raise ValueError("model '%s': source_frequency(...) declared without a source "
+                             "(call m.source([...]) -- the frequency is emitted on the generated "
+                             "source brick)" % self.name)
         if self._src_jac is not None and self._source is None:
-            raise ValueError("modele '%s' : source_jacobian(...) declare sans source "
-                             "(appeler m.source([...]) -- le Jacobien est emis sur la brique de "
-                             "source generee)" % self.name)
-        # roe_dissipation et enable_roe sont deux fournisseurs du MEME hook : exclusifs (defensif ;
-        # deja rejete a la declaration). Re-controle structurel des lignes (left/right) au passage.
+            raise ValueError("model '%s': source_jacobian(...) declared without a source "
+                             "(call m.source([...]) -- the Jacobian is emitted on the generated "
+                             "source brick)" % self.name)
+        # roe_dissipation and enable_roe are two providers of the SAME hook: exclusive (defensive;
+        # already rejected at declaration). Structural re-check of the rows (left/right) along the way.
         if self._roe_rows is not None:
             if self._roe:
-                raise ValueError("modele '%s' : enable_roe() et roe_dissipation(...) declares "
-                                 "ensemble -- un seul fournisseur du hook roe_dissipation" % self.name)
+                raise ValueError("model '%s': enable_roe() and roe_dissipation(...) declared "
+                                 "together -- a single provider of the roe_dissipation hook" % self.name)
             for key in ("x", "y"):
                 for e in self._roe_rows[key]:
                     _roe_validate(e, False)
@@ -1745,27 +1746,27 @@ class HyperbolicModel:
 
     def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
                     raise_on_error=True):
-        """Verification NUMERIQUE generique du modele symbolique (audit 2026-06, chantier 6) :
-        evalue les formules sur des etats echantillons et controle, quand la piece existe :
+        """Generic NUMERICAL verification of the symbolic model (audit 2026-06, work item 6):
+        evaluates the formulas on sample states and checks, when the piece exists:
 
-        - flux fini (les deux directions) ;
-        - source finie ;
-        - elliptic_rhs fini ;
-        - valeurs propres finies et reelles ; max_wave_speed fini et >= 0 ;
-        - coherence wave_speeds <-> max_wave_speed : ``max(|lambda_min|, |lambda_max|) <= mws`` ;
-        - round-trip to_conservative(to_primitive(U)) ~= U (si prim_state + cons_from declares) ;
-        - positivite des composantes a role Density (et de la primitive 'p' si declaree) sur les
-          echantillons (qui sont generes positifs pour ces roles).
+        - finite flux (both directions);
+        - finite source;
+        - finite elliptic_rhs;
+        - finite and real eigenvalues; finite max_wave_speed and >= 0;
+        - consistency wave_speeds <-> max_wave_speed: ``max(|lambda_min|, |lambda_max|) <= mws``;
+        - round-trip to_conservative(to_primitive(U)) ~= U (if prim_state + cons_from declared);
+        - positivity of the Density-role components (and of the primitive 'p' if declared) on the
+          samples (which are generated positive for these roles).
 
-        @p samples : tableau (n_vars, N) d'etats conservatifs a tester ; None -> N = n_samples etats
-        aleatoires (seed fixe, reproductible) : composantes a role Density dans [0.1, 2], les autres
-        dans [-1, 1] ; une composante a role Energy recoit ``1 + |cinetique|`` pour rester physique.
-        @p aux : dict nom -> valeur(s) des champs auxiliaires (defaut : zeros).
-        @return dict {"ok": bool, "failures": [str], "n_samples": N}. raise_on_error=True (defaut)
-        leve ValueError listant les echecs. PRE-COMPILATION : verifie les FORMULES (le .so compile
-        emet exactement ces formules) ; le pendant RUNTIME sur un bloc installe est
+        @p samples: array (n_vars, N) of conservative states to test; None -> N = n_samples random
+        states (fixed seed, reproducible): Density-role components in [0.1, 2], the others
+        in [-1, 1]; an Energy-role component gets ``1 + |kinetic|`` to stay physical.
+        @p aux: dict name -> value(s) of the auxiliary fields (default: zeros).
+        @return dict {"ok": bool, "failures": [str], "n_samples": N}. raise_on_error=True (default)
+        raises ValueError listing the failures. PRE-COMPILATION: checks the FORMULAS (the compiled .so
+        emits exactly these formulas); the RUNTIME counterpart on an installed block is
         System.check_model(block)."""
-        self.check()  # dependances declarees (leve si une variable n'existe pas)
+        self.check()  # declared dependencies (raises if a variable does not exist)
         rng = np.random.default_rng(seed)
         nv = self.n_vars
         roles = roles_for(self.cons_names, self.cons_roles)
@@ -1780,11 +1781,11 @@ class HyperbolicModel:
                     kinetic += U[i] ** 2
             for i, r in enumerate(roles):
                 if r == "Energy":
-                    U[i] = 1.0 + kinetic  # au-dessus du cinetique : pression > 0 pour un gaz parfait
+                    U[i] = 1.0 + kinetic  # above the kinetic: pressure > 0 for an ideal gas
         else:
             U = np.asarray(samples, dtype=float)
             if U.ndim != 2 or U.shape[0] != nv:
-                raise ValueError("check_model : samples doit etre (n_vars=%d, N)" % nv)
+                raise ValueError("check_model: samples must be (n_vars=%d, N)" % nv)
         a = {n: np.zeros(U.shape[1]) for n in (self.aux_names + self.aux_extra_names)}
         if aux:
             for k, v in aux.items():
@@ -1796,85 +1797,85 @@ class HyperbolicModel:
 
         for d, dn in ((0, "x"), (1, "y")):
             if not finite(self.flux(U, a, d)):
-                failures.append("flux %s non fini sur les echantillons" % dn)
+                failures.append("flux %s non-finite on the samples" % dn)
         if self._source is not None and not finite(self.source_value(U, a)):
-            failures.append("source non finie sur les echantillons")
+            failures.append("source non-finite on the samples")
         if self._elliptic is not None:
             env = self._env(U, a)
             if not finite(self._elliptic.eval(env)):
-                failures.append("elliptic_rhs non fini sur les echantillons")
+                failures.append("elliptic_rhs non-finite on the samples")
         env = self._env(U, a)
         for d in ("x", "y"):
             for k, e in enumerate(self._eig.get(d, [])):
                 lam = np.asarray(e.eval(env), dtype=float)
                 if np.iscomplexobj(lam):
-                    failures.append("valeur propre %s[%d] complexe (systeme non hyperbolique ?)" % (d, k))
+                    failures.append("eigenvalue %s[%d] complex (non-hyperbolic system?)" % (d, k))
                 elif not finite(lam):
-                    failures.append("valeur propre %s[%d] non finie" % (d, k))
+                    failures.append("eigenvalue %s[%d] non-finite" % (d, k))
         if self._wave_speeds is not None:
             for d in ("x", "y"):
                 lo = np.asarray(self._wave_speeds[d][0].eval(env), dtype=float)
                 hi = np.asarray(self._wave_speeds[d][1].eval(env), dtype=float)
                 if not (finite(lo) and finite(hi)):
-                    failures.append("wave_speeds %s (explicites) non finies" % d)
+                    failures.append("wave_speeds %s (explicit) non-finite" % d)
                 elif bool(np.any(lo > hi)):
-                    failures.append("wave_speeds %s (explicites) : smin > smax sur des echantillons" % d)
+                    failures.append("wave_speeds %s (explicit): smin > smax on some samples" % d)
         for d, dn in ((0, "x"), (1, "y")):
             mws = self.max_wave_speed(U, a, d)
             if not np.isfinite(mws) or mws < 0:
-                failures.append("max_wave_speed %s non fini ou negatif (%r)" % (dn, mws))
+                failures.append("max_wave_speed %s non-finite or negative (%r)" % (dn, mws))
             else:
-                # coherence wave_speeds <-> max_wave_speed : les extremes SIGNES effectivement emis
-                # (paire explicite si declaree, sinon eigenvalues) doivent etre couverts par la
-                # borne de Rusanov / CFL.
+                # consistency wave_speeds <-> max_wave_speed: the SIGNED extremes actually emitted
+                # (explicit pair if declared, otherwise eigenvalues) must be covered by the
+                # Rusanov / CFL bound.
                 lo, hi = self.wave_speeds_value(U, a, d)
                 ext = max(float(np.max(np.abs(lo))), float(np.max(np.abs(hi))))
                 if ext > mws * (1.0 + rtol) + atol:
-                    failures.append("wave_speeds %s incoherentes avec max_wave_speed (%g > %g)"
+                    failures.append("wave_speeds %s inconsistent with max_wave_speed (%g > %g)"
                                     % (dn, ext, mws))
-        # round-trip cons -> prim -> cons (quand les deux sens sont declares)
+        # round-trip cons -> prim -> cons (when both directions are declared)
         if self.prim_state and self.cons_from is not None:
             penv = {nm: np.broadcast_to(np.asarray(env[nm], dtype=float), (U.shape[1],))
                     for nm in self.prim_state}
             U2 = np.stack([np.broadcast_to(np.asarray(e.eval(penv), dtype=float), (U.shape[1],))
                            for e in self.cons_from], axis=0)
             if not finite(U2):
-                failures.append("to_conservative(to_primitive(U)) non fini")
+                failures.append("to_conservative(to_primitive(U)) non-finite")
             elif not np.allclose(U2, U, rtol=rtol, atol=atol):
                 err = float(np.max(np.abs(U2 - U)))
-                failures.append("round-trip to_conservative(to_primitive(U)) != U (ecart max %g : "
-                                "conversions incoherentes)" % err)
-        # positivite : roles Density (conservatif) et primitive 'p' (pression) si declares
+                failures.append("round-trip to_conservative(to_primitive(U)) != U (max deviation %g: "
+                                "inconsistent conversions)" % err)
+        # positivity: Density roles (conservative) and primitive 'p' (pressure) if declared
         for i, r in enumerate(roles):
             if r == "Density" and not bool(np.all(U[i] > 0)):
-                failures.append("composante '%s' (role Density) non strictement positive sur les "
-                                "echantillons" % self.cons_names[i])
+                failures.append("component '%s' (Density role) not strictly positive on the "
+                                "samples" % self.cons_names[i])
         if "p" in self.prim_defs:
             p = np.asarray(env["p"], dtype=float)
             if not finite(p):
-                failures.append("primitive 'p' (pression) non finie")
+                failures.append("primitive 'p' (pressure) non-finite")
             elif not bool(np.all(p > 0)):
-                failures.append("primitive 'p' (pression) non strictement positive sur des etats "
-                                "physiques (EOS suspecte)")
+                failures.append("primitive 'p' (pressure) not strictly positive on physical "
+                                "states (suspicious EOS)")
         report = {"ok": not failures, "failures": failures, "n_samples": int(U.shape[1])}
         if failures and raise_on_error:
-            raise ValueError("check_model('%s') : %d echec(s) :\n  - %s"
+            raise ValueError("check_model('%s'): %d failure(s):\n  - %s"
                              % (self.name, len(failures), "\n  - ".join(failures)))
         return report
 
-    # --- parametres RUNTIME (P7-b) : collecte + attribution d'indices + membre genere -------------
+    # --- RUNTIME parameters (P7-b): collection + index assignment + generated member -------------
     def _all_exprs(self):
-        """Toutes les Expr du modele (primitives, flux, valeurs propres, source, elliptique,
-        cons_from). Sert a decouvrir les noeuds RuntimeParamRef caches dans l'arbre."""
+        """All the Expr of the model (primitives, flux, eigenvalues, source, elliptic,
+        cons_from). Used to discover the RuntimeParamRef nodes hidden in the tree."""
         out = list(self.prim_defs.values())
         for d in ("x", "y"):
             out += self._flux.get(d, [])
             out += self._eig.get(d, [])
-        if self._wave_speeds is not None:  # vitesses signees explicites : params runtime inclus
+        if self._wave_speeds is not None:  # explicit signed speeds: runtime params included
             for d in ("x", "y"):
                 out += list(self._wave_speeds[d])
         if self._ws_jacobian is not None and self._ws_jacobian["rows"] is not None:
-            for d in ("x", "y"):  # entrees du jacobien : params runtime inclus
+            for d in ("x", "y"):  # jacobian entries: runtime params included
                 out += [e for row in self._ws_jacobian["rows"][d] for e in row]
         if self._source is not None:
             out += [_wrap(e) for e in self._source]
@@ -1882,14 +1883,14 @@ class HyperbolicModel:
             out += list(self.cons_from)
         if self._elliptic is not None:
             out.append(self._elliptic)
-        if self._roe_rows is not None:  # lignes Roe fournies : decouvrir leurs params runtime (via StateRef)
+        if self._roe_rows is not None:  # Roe rows provided: discover their runtime params (via StateRef)
             out += self._roe_rows["x"] + self._roe_rows["y"]
         return out
 
     def runtime_param_nodes(self):
-        """Noeuds RuntimeParamRef PRESENTS dans les formules, dedupliques par nom (un meme param peut
-        apparaitre plusieurs fois mais partage le MEME objet noeud). Ordre TRIE par nom (indice stable
-        = position dans cette liste, miroir de RuntimeParams cote C++)."""
+        """RuntimeParamRef nodes PRESENT in the formulas, deduplicated by name (the same param may
+        appear several times but shares the SAME node object). Order SORTED by name (stable index
+        = position in this list, mirror of RuntimeParams on the C++ side)."""
         seen = {}
 
         def walk(e):
@@ -1904,24 +1905,24 @@ class HyperbolicModel:
         return [seen[k] for k in sorted(seen)]
 
     def assign_runtime_indices(self):
-        """Attribue a chaque RuntimeParamRef son indice STABLE (ordre trie des noms) et renvoie la liste
-        ordonnee des noeuds. APPELE avant tout codegen de brique : sans cet appel, to_cpp() leverait
-        (indice -1). Idempotent (reaffecte les memes indices). Rejette un modele depassant la borne C++
-        kMaxRuntimeParams (sinon le tableau de taille fixe deborderait)."""
+        """Assigns to each RuntimeParamRef its STABLE index (sorted order of names) and returns the
+        ordered list of nodes. CALLED before any brick codegen: without this call, to_cpp() would raise
+        (index -1). Idempotent (reassigns the same indices). Rejects a model exceeding the C++ bound
+        kMaxRuntimeParams (otherwise the fixed-size array would overflow)."""
         nodes = self.runtime_param_nodes()
         if len(nodes) > _K_MAX_RUNTIME_PARAMS:
             raise ValueError(
-                "modele '%s' : %d parametres runtime > borne kMaxRuntimeParams=%d "
-                "(include/adc/runtime/runtime_params.hpp) ; reduire le nombre de params runtime"
+                "model '%s': %d runtime parameters > kMaxRuntimeParams bound=%d "
+                "(include/adc/runtime/runtime_params.hpp); reduce the number of runtime params"
                 % (self.name, len(nodes), _K_MAX_RUNTIME_PARAMS))
         for k, node in enumerate(nodes):
             node.index = k
         return nodes
 
     def _runtime_params_member(self):
-        """Ligne C++ declarant le membre RuntimeParams d'une brique generee, initialise aux valeurs de
-        DECLARATION (defaut sans appel set au runtime). Chaine vide si le modele n'a aucun param runtime
-        (brique strictement identique a l'historique -> bit-identite des params const preservee)."""
+        """C++ line declaring the RuntimeParams member of a generated brick, initialized to the
+        DECLARATION values (default without a runtime set call). Empty string if the model has no runtime
+        param (brick strictly identical to history -> bit-identity of const params preserved)."""
         nodes = self.assign_runtime_indices()
         if not nodes:
             return ""
@@ -1930,31 +1931,31 @@ class HyperbolicModel:
                 "l'execution\n" % (len(nodes), vals))
 
     def has_runtime_params(self):
-        """Vrai si au moins une formule lit un parametre runtime (kind='runtime')."""
+        """True if at least one formula reads a runtime parameter (kind='runtime')."""
         return bool(self.runtime_param_nodes())
 
-    # --- codegen (etape 2 : arbre symbolique -> C++ compilable) ---
+    # --- codegen (step 2 : symbolic tree -> compilable C++) ---
     def _codegen_exprs(self, exprs, cse, real="adc::Real", indent="    "):
-        """(lignes de locales CSE, [C++ par expr]). Si cse, factorise les sous-expressions communes
-        (H, c...) en locales ``cseK_`` ; sinon inline chaque expression via to_cpp."""
+        """(CSE local lines, [C++ per expr]). If cse, factor the common subexpressions
+        (H, c...) into ``cseK_`` locals ; otherwise inline each expression via to_cpp."""
         if cse:
             return _cse_emit(list(exprs), real, indent)
         return [], [e.to_cpp() for e in exprs]
 
     def emit_cpp(self, func=None, cse=True):
-        """Genere une fonction C++ compilable calculant le flux physique a partir de l'arbre
-        symbolique (chaque noeud Expr sait s'ecrire en C++ via to_cpp).
+        """Generates a compilable C++ function computing the physical flux from the symbolic
+        tree (each Expr node knows how to write itself in C++ via to_cpp).
 
-        Signature produite : template <class Real> void <func>_flux(const Real* U, Real* F, int dir).
-        Constantes inlinees ; chaque primitive devient une variable locale. cse=True (defaut) factorise
-        les sous-expressions communes (H, c...) en locales ``cseK_`` ; cse=False les recalcule inline.
+        Produced signature : template <class Real> void <func>_flux(const Real* U, Real* F, int dir).
+        Constants inlined ; each primitive becomes a local variable. cse=True (default) factors
+        the common subexpressions (H, c...) into ``cseK_`` locals ; cse=False recomputes them inline.
 
-        Etape (2) du DSL (cf. docs/ARCHITECTURE_CIBLE.md sect. 3) : C++ HOTE (templatable sur Real)."""
+        Step (2) of the DSL (see docs/ARCHITECTURE_CIBLE.md sect. 3) : HOST C++ (templatable on Real)."""
         name = func or self.name
         if not self._flux:
-            raise ValueError("emit_cpp : appeler set_flux(...) d'abord")
+            raise ValueError("emit_cpp : call set_flux(...) first")
         if len(self._flux.get("x", [])) != self.n_vars or len(self._flux.get("y", [])) != self.n_vars:
-            raise ValueError("emit_cpp : flux attendu avec %d composantes par direction" % self.n_vars)
+            raise ValueError("emit_cpp : flux expected with %d components per direction" % self.n_vars)
         nc = self.n_vars
         out = [
             "// genere depuis le modele symbolique '%s' (adc.dsl.emit_cpp)" % self.name,
@@ -1975,28 +1976,28 @@ class HyperbolicModel:
         return "\n".join(out) + "\n"
 
     def emit_cpp_brick(self, name=None, namespace="adc_generated", cse=True):
-        """Genere une BRIQUE C++ satisfaisant le concept adc::HyperbolicModel (emballage : etape
-        2bis). Le struct produit utilise StateVec / Aux / ADC_HD / Variables et expose flux,
-        max_wave_speed, to_primitive, to_conservative, conservative_vars, primitive_vars : il peut
-        donc entrer dans un CompositeModel et tourner dans le solveur compile.
+        """Generates a C++ BRICK satisfying the adc::HyperbolicModel concept (wrapping : step
+        2bis). The produced struct uses StateVec / Aux / ADC_HD / Variables and exposes flux,
+        max_wave_speed, to_primitive, to_conservative, conservative_vars, primitive_vars : it can
+        therefore enter a CompositeModel and run in the compiled solver.
 
-        Exige set_primitive_state(...) (layout de Prim) et set_conservative_from([...]) (to_conservative,
-        que le DSL ne sait pas inverser tout seul). cse=True (defaut) factorise les sous-expressions
-        communes (H, c...) en locales ``cseK_``. Reste a faire (cf. ARCHITECTURE_CIBLE.md sect. 3) :
-        codegen Kokkos/CUDA, JIT."""
+        Requires set_primitive_state(...) (Prim layout) and set_conservative_from([...]) (to_conservative,
+        which the DSL cannot invert on its own). cse=True (default) factors the common
+        subexpressions (H, c...) into ``cseK_`` locals. Still to do (see ARCHITECTURE_CIBLE.md sect. 3) :
+        Kokkos/CUDA codegen, JIT."""
         if not self.prim_state:
-            raise ValueError("emit_cpp_brick : appeler set_primitive_state(...) d'abord")
+            raise ValueError("emit_cpp_brick : call set_primitive_state(...) first")
         if self.cons_from is None or len(self.cons_from) != self.n_vars:
-            raise ValueError("emit_cpp_brick : set_conservative_from([...]) attendu (%d expressions)"
+            raise ValueError("emit_cpp_brick : set_conservative_from([...]) expected (%d expressions)"
                              % self.n_vars)
         if not self._flux:
-            raise ValueError("emit_cpp_brick : appeler set_flux(...) d'abord")
+            raise ValueError("emit_cpp_brick : call set_flux(...) first")
         if len(self._flux.get("x", [])) != self.n_vars or len(self._flux.get("y", [])) != self.n_vars:
-            raise ValueError("emit_cpp_brick : flux attendu avec %d composantes par direction"
+            raise ValueError("emit_cpp_brick : flux expected with %d components per direction"
                              % self.n_vars)
         if not self._eig and self._wave_speeds is None and self._ws_jacobian is None:
-            raise ValueError("emit_cpp_brick : appeler set_eigenvalues(...), set_wave_speeds(...) "
-                             "ou set_wave_speeds_from_jacobian(...) d'abord (source de "
+            raise ValueError("emit_cpp_brick : call set_eigenvalues(...), set_wave_speeds(...) "
+                             "or set_wave_speeds_from_jacobian(...) first (source of "
                              "max_wave_speed / CFL)")
         nm = name or (self.name.capitalize() + "Gen")
         nc, npr = self.n_vars, len(self.prim_state)
@@ -2008,15 +2009,15 @@ class HyperbolicModel:
             return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
 
         def aux_locals():
-            return self._aux_locals_lines()  # canonique (a.<n>) + nommes (a.extra_field(k)), ADC-70
+            return self._aux_locals_lines()  # canonical (a.<n>) + named (a.extra_field(k)), ADC-70
 
-        # parametre Aux nomme 'a' uniquement si une formule lit un champ auxiliaire (canonique OU
-        # nomme ; sinon anonyme, pour ne pas declencher d'avertissement de parametre inutilise).
+        # Aux parameter named 'a' only if a formula reads an auxiliary field (canonical OR
+        # named ; otherwise anonymous, so as not to trigger an unused-parameter warning).
         aux_param = "const Aux& a" if self._reads_aux() else "const Aux&"
 
         def eig_reduce(cpps, ind):
-            # cpps : C++ deja genere (eventuellement CSE) des valeurs propres. Noms internes a suffixe
-            # '_' : ne masquent ni une variable utilisateur ni le parametre Aux 'a' (cf. revue adverse).
+            # cpps : C++ already generated (possibly CSE) for the eigenvalues. Internal names suffixed
+            # '_' : they shadow neither a user variable nor the Aux parameter 'a' (see adversarial review).
             lines = ["%sconst adc::Real lam%d_ = %s;" % (ind, k, c) for k, c in enumerate(cpps)]
             lines.append("%sadc::Real mws_ = lam0_ < 0 ? -lam0_ : lam0_;" % ind)
             for k in range(1, len(cpps)):
@@ -2026,8 +2027,8 @@ class HyperbolicModel:
             return lines
 
         def eig_minmax(cpps, ind):
-            # vitesses d'onde signees : smin = plus petite, smax = plus grande valeur propre (pour
-            # HLLC / Roe). Memes noms internes a suffixe '_' que eig_reduce.
+            # signed wave speeds : smin = smallest, smax = largest eigenvalue (for
+            # HLLC / Roe). Same internal names suffixed '_' as eig_reduce.
             lines = ["%sconst adc::Real lam%d_ = %s;" % (ind, k, c) for k, c in enumerate(cpps)]
             lines.append("%ssmin = lam0_; smax = lam0_;" % ind)
             for k in range(1, len(cpps)):
@@ -2036,9 +2037,9 @@ class HyperbolicModel:
             return lines
 
         def ws_jac_pieces(key):
-            # chemin jacobien 'numeric' : CSE des entrees NON NULLES des sous-blocs de la
-            # direction @p key ; les zeros structurels (10 lignes unite d'un systeme de moments,
-            # creux quelconque) sont emis en litteraux sans passer par le CSE.
+            # 'numeric' jacobian path : CSE of the NON-ZERO entries of the sub-blocks of
+            # direction @p key ; the structural zeros (10 identity rows of a moment system,
+            # arbitrary sparsity) are emitted as literals without going through the CSE.
             ws = self._ws_jacobian
             rows = ws["rows"][key]
             entries, zeros = [], []
@@ -2059,10 +2060,10 @@ class HyperbolicModel:
             return tl, fill
 
         def ws_jac_body(ind, lo, hi, key="x", fill=None):
-            # corps du calcul jacobien -> extremes (@p lo/@p hi : noms des destinations).
-            # eig='fd' : jacobien par colonnes aux differences finies du flux COMPILE ;
-            # eig='numeric' : remplissage des sous-blocs depuis @p fill. @p key : direction
-            # (choisit la partition de blocs).
+            # body of the jacobian computation -> extremes (@p lo/@p hi : destination names).
+            # eig='fd' : column-wise jacobian by finite differences of the COMPILED flux ;
+            # eig='numeric' : fill of the sub-blocks from @p fill. @p key : direction
+            # (chooses the block partition).
             ws = self._ws_jacobian
             nv = self.n_vars
             L = []
@@ -2100,28 +2101,28 @@ class HyperbolicModel:
 
         cnames = ", ".join('"%s"' % c for c in self.cons_names)
         pnames = ", ".join('"%s"' % p for p in self.prim_state)
-        # Roles physiques paralleles aux noms : initialiseur C++ d'adc::VariableSet::roles. Emis SI au
-        # moins une composante a un role reconnu (sinon roles vides -> brique identique a l'historique,
-        # les couplages retombent sur les indices de fallback). Les roles permettent a System de
-        # resoudre les couplages inter-especes par index_of(role) au lieu d'un indice litteral.
+        # Physical roles parallel to the names : C++ initializer of adc::VariableSet::roles. Emitted IF at
+        # least one component has a recognized role (otherwise empty roles -> brick identical to history,
+        # couplings fall back on the fallback indices). The roles let System
+        # resolve inter-species couplings by index_of(role) instead of a literal index.
         def roles_init(roles):
             if all(r == "Custom" for r in roles):
-                return None  # aucun role utile : on n'emet pas le 4e champ (retro-compat stricte)
+                return None  # no useful role : we do not emit the 4th field (strict back-compat)
             return ", ".join("adc::VariableRole::%s" % r for r in roles)
 
         croles = roles_init(roles_for(self.cons_names, self.cons_roles))
         proles = roles_init(roles_for(self.prim_state, self.prim_roles))
-        # P7-b : attribuer les indices runtime AVANT tout to_cpp() (un RuntimeParamRef leve sinon).
+        # P7-b : assign the runtime indices BEFORE any to_cpp() (a RuntimeParamRef raises otherwise).
         rt_member = self._runtime_params_member()
         S = [
-            "#include <cmath>",  # std::sqrt / std::pow : brique autosuffisante (g++ ne tire pas cmath)
+            "#include <cmath>",  # std::sqrt / std::pow : self-sufficient brick (g++ does not pull cmath)
             "// brique HYPERBOLIQUE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_brick)."
             % self.name,
             "// Satisfait adc::HyperbolicModel : flux + max_wave_speed + conversions + descripteurs.",
         ]
-        if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
+        if rt_member:  # RuntimeParams header only if a formula reads a runtime param
             S.append("#include <adc/runtime/runtime_params.hpp>")
-        if self._ws_jacobian is not None:  # valeurs propres de blocs denses (wave_speeds exacts)
+        if self._ws_jacobian is not None:  # eigenvalues of dense blocks (exact wave_speeds)
             S.append("#include <adc/numerics/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
@@ -2131,11 +2132,11 @@ class HyperbolicModel:
             "  using Aux   = adc::Aux;",
             "  static constexpr int n_vars = %d;" % nc,
         ]
-        if rt_member:  # membre adc::RuntimeParams params{count, {defauts}} (P7-b)
+        if rt_member:  # member adc::RuntimeParams params{count, {defaults}} (P7-b)
             S.append(rt_member.rstrip("\n"))
-        # n_aux si une formule (flux / valeurs propres) lit un champ aux supplementaire : canonique
-        # (B_z...) OU nomme (aux_field -> kAuxNamedBase + k). Sans champ extra -> pas de n_aux emis,
-        # brique strictement bit-identique a l'historique.
+        # n_aux if a formula (flux / eigenvalues) reads an extra aux field : canonical
+        # (B_z...) OR named (aux_field -> kAuxNamedBase + k). Without an extra field -> no n_aux emitted,
+        # brick strictly bit-identical to history.
         if self._total_n_aux() > AUX_BASE_COMPS:
             S.append("  static constexpr int n_aux = %d;" % self._total_n_aux())
         S += [
@@ -2152,15 +2153,15 @@ class HyperbolicModel:
         S += ["      F[%d] = %s;" % (i, fcpps[nc + i]) for i in range(nc)]
         S += ["    }", "    return F;", "  }", ""]
 
-        # en mode jacobien 'fd' SANS eigenvalues, max_wave_speed appelle flux(U, a, dir) : le
-        # parametre Aux doit etre nomme meme si aucune formule ne lit d'aux.
+        # in 'fd' jacobian mode WITHOUT eigenvalues, max_wave_speed calls flux(U, a, dir) : the
+        # Aux parameter must be named even if no formula reads an aux.
         jac_fd = self._ws_jacobian is not None and self._ws_jacobian["eig"] == "fd"
         mws_aux_param = "const Aux& a" if (jac_fd and not self._eig) else aux_param
         S.append("  ADC_HD adc::Real max_wave_speed(const State& U, %s, int dir) const {"
                  % mws_aux_param)
         S += cons_locals() + prim_locals() + aux_locals()
         if self._eig:
-            # source historique : max(|eigenvalues|), bit-identique.
+            # historical source : max(|eigenvalues|), bit-identical.
             nx = len(self._eig["x"])
             etl, ecpps = self._codegen_exprs(self._eig["x"] + self._eig["y"], cse)
             S += etl
@@ -2170,8 +2171,8 @@ class HyperbolicModel:
             S += eig_reduce(ecpps[nx:], "      ")
             S += ["    }", "  }", ""]
         elif self._wave_speeds is not None:
-            # SANS eigenvalues : borne de Rusanov / CFL derivee des vitesses SIGNEES explicites,
-            # max(|smin|, |smax|) -- la paire borne le spectre par contrat de set_wave_speeds.
+            # WITHOUT eigenvalues : Rusanov / CFL bound derived from the explicit SIGNED wave speeds,
+            # max(|smin|, |smax|) -- the pair bounds the spectrum by set_wave_speeds contract.
             ws = self._wave_speeds
             wtl, wcpps = self._codegen_exprs(list(ws["x"]) + list(ws["y"]), cse)
             S += wtl
@@ -2181,9 +2182,9 @@ class HyperbolicModel:
             S += eig_reduce(wcpps[2:], "      ")
             S += ["    }", "  }", ""]
         else:
-            # SANS eigenvalues : borne de Rusanov / CFL = max(|smin|, |smax|) des extremes du
-            # spectre du jacobien (memes blocs que wave_speeds : Rusanov et HLL partagent la
-            # meme verite).
+            # WITHOUT eigenvalues : Rusanov / CFL bound = max(|smin|, |smax|) of the jacobian
+            # spectrum extremes (same blocks as wave_speeds : Rusanov and HLL share the
+            # same truth).
             S.append("    adc::Real lo_ = adc::Real(0), hi_ = adc::Real(0);")
             jac_same_blocks = self._ws_jacobian["blocks"]["x"] == self._ws_jacobian["blocks"]["y"]
             if self._ws_jacobian["eig"] == "fd" and jac_same_blocks:
@@ -2207,20 +2208,20 @@ class HyperbolicModel:
             S.append("    const adc::Real ahi_ = hi_ < 0 ? -hi_ : hi_;")
             S += ["    return alo_ > ahi_ ? alo_ : ahi_;", "  }", ""]
 
-        # pression : emise SI une primitive 'p' (pression) est declaree (convention compressible) ;
-        # requise par les flux HLLC / Roe canoniques (make_block : requires { m.pressure(s); }).
+        # pressure : emitted IF a primitive 'p' (pressure) is declared (compressible convention) ;
+        # required by the canonical HLLC / Roe fluxes (make_block : requires { m.pressure(s); }).
         if "p" in self.prim_defs:
             S.append("  ADC_HD adc::Real pressure(const State& U) const {")
             S += cons_locals() + prim_locals()
             S += ["    return p;", "  }", ""]
 
-        # vitesses d'onde SIGNEES wave_speeds(U, aux, dir, smin, smax) : gate HLL du coeur
-        # (block_builder.hpp requires { m.wave_speeds(...) }). Deux sources, par priorite :
-        #   1. paire EXPLICITE set_wave_speeds (smin, smax par direction) -- INDEPENDANTE de 'p' :
-        #      un modele sans pression (moments, isotherme...) accede a riemann='hll' ;
-        #   2. historique : min/max des eigenvalues, emise SEULEMENT si 'p' est declaree
-        #      (convention compressible HLLC / Roe, bit-identique a l'existant).
-        # Sans aucune des deux (p.ex. transport scalaire ExB) : rien d'emis, Rusanov seul, inchange.
+        # SIGNED wave speeds wave_speeds(U, aux, dir, smin, smax) : HLL gate of the core
+        # (block_builder.hpp requires { m.wave_speeds(...) }). Two sources, by priority :
+        #   1. EXPLICIT pair set_wave_speeds (smin, smax per direction) -- INDEPENDENT of 'p' :
+        #      a model without pressure (moments, isothermal...) gets access to riemann='hll' ;
+        #   2. historical : min/max of the eigenvalues, emitted ONLY if 'p' is declared
+        #      (compressible HLLC / Roe convention, bit-identical to the existing one).
+        # Without either of the two (e.g. ExB scalar transport) : nothing emitted, Rusanov alone, unchanged.
         if self._wave_speeds is not None:
             ws = self._wave_speeds
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
@@ -2234,9 +2235,9 @@ class HyperbolicModel:
             S.append("      smin = %s; smax = %s;" % (wcpps[2], wcpps[3]))
             S += ["    }", "  }", ""]
         elif self._ws_jacobian is not None:
-            # vitesses EXACTES par valeurs propres du jacobien (cf. set_wave_speeds_from_jacobian :
-            # 'numeric' = entrees en formules, 'fd' = colonnes aux differences finies du flux
-            # compile ; extremes par sous-blocs via adc::real_eig_minmax, repli Gershgorin sur).
+            # EXACT speeds via jacobian eigenvalues (see set_wave_speeds_from_jacobian :
+            # 'numeric' = entries as formulas, 'fd' = columns by finite differences of the compiled
+            # flux ; extremes per sub-block via adc::real_eig_minmax, safe Gershgorin fallback).
             ws_aux = aux_param if self._ws_jacobian["eig"] != "fd" else "const Aux& a"
             S.append("  ADC_HD void wave_speeds(const State& U, %s, int dir, adc::Real& smin, "
                      "adc::Real& smax) const {" % ws_aux)
@@ -2273,23 +2274,23 @@ class HyperbolicModel:
             S += eig_minmax(wcpps[nx:], "      ")
             S += ["    }", "  }", ""]
 
-        # CAPABILITY HLLC (m.enable_hllc, audit vague 3) : contact_speed (Toro) + hllc_star_state
-        # GENERES depuis les ROLES du bloc (aucun indice litteral : Density/MomentumX/MomentumY
-        # resolus, Energy optionnelle, toute autre composante advectee passivement Us[c]=fac*U[c]/r).
-        # Le coeur (HasHLLCStructure) applique alors l'algorithme HLLC generique -- y compris sur un
-        # modele NON Euler (isotherme 3-var, moments + scalaires passifs). Sans appel : rien d'emis.
+        # CAPABILITY HLLC (m.enable_hllc, audit wave 3): contact_speed (Toro) + hllc_star_state
+        # GENERATED from the block ROLES (no literal index: Density/MomentumX/MomentumY
+        # resolved, Energy optional, any other component advected passively Us[c]=fac*U[c]/r).
+        # The core (HasHLLCStructure) then applies the generic HLLC algorithm -- including on a
+        # NON Euler model (isothermal 3-var, moments + passive scalars). Without a call: nothing emitted.
         if self._hllc:
             roles_l = roles_for(self.cons_names, self.cons_roles)
             if "p" not in self.prim_defs:
-                raise ValueError("enable_hllc : la primitive 'p' (pression) doit etre declaree "
-                                 "(m.primitive('p', ...)) -- contact_speed/star state en dependent")
+                raise ValueError("enable_hllc: the primitive 'p' (pressure) must be declared "
+                                 "(m.primitive('p', ...)) -- contact_speed/star state depend on it")
             try:
                 iD = roles_l.index("Density")
                 iX = roles_l.index("MomentumX")
                 iY = roles_l.index("MomentumY")
             except ValueError:
-                raise ValueError("enable_hllc : roles Density / MomentumX / MomentumY requis "
-                                 "(declarer conservative_vars(..., roles=[...])) ; roles actuels %r"
+                raise ValueError("enable_hllc: roles Density / MomentumX / MomentumY required "
+                                 "(declare conservative_vars(..., roles=[...])); current roles %r"
                                  % (roles_l,))
             iE = roles_l.index("Energy") if "Energy" in roles_l else -1
             S.append("  // CAPABILITY HLLC generee depuis les ROLES (enable_hllc) : algorithme")
@@ -2318,25 +2319,25 @@ class HyperbolicModel:
                          "(r * (s - un))));" % (iE, iE))
             S += ["    return Us;", "  }", ""]
 
-        # CAPABILITY ROE (m.enable_roe, solde de l'audit) : roe_dissipation = |A_roe| (UR - UL)
-        # GENEREE depuis les ROLES. Avec Energy : TRANSCRIPTION exacte de l'algebre canonique
-        # Euler du coeur (numerical_flux.hpp), gamma-1 deduit de p/(E - 1/2 rho |v|^2) -- parite
-        # numerique attendue avec le chemin historique. Sans Energy : meme decomposition sans la
-        # ligne E, c = sqrt(p/rho) par cote puis moyenne de Roe (generalisation standard). Les
-        # composantes HORS roles fluides sont des scalaires passifs portes par l'onde entropique
-        # (ligne tangentielle, phi = q/rho). Le coeur (HasRoeDissipation) fait F = 1/2(FL+FR) - d/2.
+        # CAPABILITY ROE (m.enable_roe, audit balance): roe_dissipation = |A_roe| (UR - UL)
+        # GENERATED from the ROLES. With Energy: exact TRANSCRIPTION of the core canonical Euler
+        # algebra (numerical_flux.hpp), gamma-1 deduced from p/(E - 1/2 rho |v|^2) -- numerical
+        # parity expected with the historical path. Without Energy: same decomposition without the
+        # E line, c = sqrt(p/rho) per side then Roe average (standard generalization). The
+        # components OUTSIDE the fluid roles are passive scalars carried by the entropy wave
+        # (tangential line, phi = q/rho). The core (HasRoeDissipation) does F = 1/2(FL+FR) - d/2.
         if self._roe:
             roles_l = roles_for(self.cons_names, self.cons_roles)
             if "p" not in self.prim_defs:
-                raise ValueError("enable_roe : la primitive 'p' (pression) doit etre declaree "
-                                 "(m.primitive('p', ...)) -- la linearisation de Roe en depend")
+                raise ValueError("enable_roe: the primitive 'p' (pressure) must be declared "
+                                 "(m.primitive('p', ...)) -- the Roe linearization depends on it")
             try:
                 iD = roles_l.index("Density")
                 iX = roles_l.index("MomentumX")
                 iY = roles_l.index("MomentumY")
             except ValueError:
-                raise ValueError("enable_roe : roles Density / MomentumX / MomentumY requis "
-                                 "(declarer conservative_vars(..., roles=[...])) ; roles actuels %r"
+                raise ValueError("enable_roe: roles Density / MomentumX / MomentumY required "
+                                 "(declare conservative_vars(..., roles=[...])); current roles %r"
                                  % (roles_l,))
             iE = roles_l.index("Energy") if "Energy" in roles_l else -1
             passives = [c for c in range(nc) if c not in (iD, iX, iY, iE)]
@@ -2402,21 +2403,21 @@ class HyperbolicModel:
                 S.append("    }")
             S += ["    return d;", "  }", ""]
 
-        # CAPABILITY ROE FOURNIE (m.roe_dissipation) : pendant 'utilisateur' de enable_roe. Les lignes
-        # d_i viennent de l'utilisateur (son eigenstructure), ecrites en left()/right() des deux etats.
-        # On emet le MEME hook roe_dissipation(UL, AL, UR, AR, dir) que la voie roles (trait
-        # HasRoeDissipation, le coeur fait F = 1/2(FL+FR) - 1/2 d). left(e) -> e sur les locales L_
-        # (calculees depuis UL), right(e) -> locales R_ (depuis UR). _roe_rows et _roe sont exclusifs
-        # (garde-fou a la declaration et dans check()).
+        # CAPABILITY ROE PROVIDED (m.roe_dissipation): 'user' counterpart of enable_roe. The d_i
+        # rows come from the user (their eigenstructure), written with left()/right() of both states.
+        # We emit the SAME hook roe_dissipation(UL, AL, UR, AR, dir) as the roles path (trait
+        # HasRoeDissipation, the core does F = 1/2(FL+FR) - 1/2 d). left(e) -> e on the L_ locals
+        # (computed from UL), right(e) -> R_ locals (from UR). _roe_rows and _roe are exclusive
+        # (guard at declaration and in check()).
         if self._roe_rows is not None:
-            has_aux = bool(self.aux_names)  # parametres Aux nommes aL/aR uniquement si des aux existent
+            has_aux = bool(self.aux_names)  # Aux parameters named aL/aR only if some aux exist
             aL = "const adc::Aux& aL" if has_aux else "const adc::Aux&"
             aR = "const adc::Aux& aR" if has_aux else "const adc::Aux&"
             S.append("  // CAPABILITY ROE FOURNIE (m.roe_dissipation) : dissipation d ecrite par")
             S.append("  // l'utilisateur via left()/right() des deux etats ; hook HasRoeDissipation.")
             S.append("  ADC_HD State roe_dissipation(const State& UL, %s, const State& UR, %s, "
                      "int dir) const {" % (aL, aR))
-            # locales des DEUX etats : conservatives, primitives (def avec prefixe), puis aux lus.
+            # locals of BOTH states: conservatives, primitives (def with prefix), then aux read.
             for side, U, av in (("L_", "UL", "aL"), ("R_", "UR", "aR")):
                 S += ["    const adc::Real %s%s = %s[%d];" % (side, c, U, i)
                       for i, c in enumerate(self.cons_names)]
@@ -2432,10 +2433,10 @@ class HyperbolicModel:
             S += ["      d[%d] = %s;" % (i, _cpp_roe(self._roe_rows["y"][i], None)) for i in range(nc)]
             S += ["    }", "    return d;", "  }", ""]
 
-        # Bornes de pas OPTIONNELLES (m.stability_speed / m.stability_dt) : emises comme les traits
-        # C++ HasStabilitySpeed / HasStabilityDt (cf. adc/core/physical_model.hpp). Une seule
-        # expression (isotrope) : dir est ignore. SANS appel, rien n'est emis -> fallback strict
-        # max_wave_speed (politique de pas historique).
+        # OPTIONAL step bounds (m.stability_speed / m.stability_dt): emitted like the C++
+        # traits HasStabilitySpeed / HasStabilityDt (cf. adc/core/physical_model.hpp). A single
+        # expression (isotropic): dir is ignored. WITHOUT a call, nothing emitted -> strict fallback
+        # max_wave_speed (historical step policy).
         if self._stab_speed is not None:
             S.append("  ADC_HD adc::Real stability_speed(const State& U, %s, int dir) const {"
                      % aux_param)
@@ -2475,23 +2476,23 @@ class HyperbolicModel:
         return "\n".join(S) + "\n"
 
     def emit_cpp_source(self, name=None, namespace="adc_generated", cse=True):
-        """Genere une BRIQUE de SOURCE C++ composable (au sens adc) depuis self._source.
+        """Generate a composable C++ SOURCE BRICK (in the adc sense) from self._source.
 
-        Le struct produit expose apply(U, a) renvoyant le terme source S(U, aux), avec une ligne par
-        composante conservative (S[i] = self._source[i].to_cpp()). Il a la meme forme que les briques
-        de source ecrites a la main (NoSource, PotentialForce dans adc/model/bricks.hpp) et peut donc
-        entrer comme parametre Source d'un CompositeModel.
+        The produced struct exposes apply(U, a) returning the source term S(U, aux), with one line per
+        conservative component (S[i] = self._source[i].to_cpp()). It has the same form as the source
+        bricks written by hand (NoSource, PotentialForce in adc/model/bricks.hpp) and can therefore
+        enter as the Source parameter of a CompositeModel.
 
-        CONVENTION : les noms auxiliaires (poses via aux(...)) doivent etre des CHAMPS de adc::Aux,
-        car ils sont lus directement comme a.<nom> (p.ex. aux('grad_x') -> a.grad_x, aux('grad_y') ->
-        a.grad_y). Cette convention est la meme que celle des briques manuelles, ou la source ne lit
-        l'etat exterieur que par le canal adc::Aux (potentiel et son gradient).
+        CONVENTION: the auxiliary names (set via aux(...)) must be FIELDS of adc::Aux,
+        because they are read directly as a.<name> (e.g. aux('grad_x') -> a.grad_x, aux('grad_y') ->
+        a.grad_y). This convention is the same as that of the manual bricks, where the source reads
+        the outer state only through the adc::Aux channel (potential and its gradient).
 
-        Style identique a emit_cpp_brick (constantes inlinees, cons -> locals, primitives -> locals ;
-        en plus, aux -> locals) ; cse=True factorise les sous-expressions communes. Leve ValueError si
-        set_source(...) n'a pas ete appele."""
+        Style identical to emit_cpp_brick (inlined constants, cons -> locals, primitives -> locals;
+        plus, aux -> locals); cse=True factors the common sub-expressions. Raises ValueError if
+        set_source(...) has not been called."""
         if self._source is None:
-            raise ValueError("emit_cpp_source : appeler set_source([...]) d'abord")
+            raise ValueError("emit_cpp_source: call set_source([...]) first")
         nm = name or (self.name.capitalize() + "Source")
         nc = self.n_vars
 
@@ -2502,43 +2503,43 @@ class HyperbolicModel:
             return ["    const adc::Real %s = %s;" % (p, e.to_cpp()) for p, e in self.prim_defs.items()]
 
         def aux_locals():
-            return self._aux_locals_lines()  # canonique (a.<n>) + nommes (a.extra_field(k)), ADC-70
+            return self._aux_locals_lines()  # canonical (a.<n>) + named (a.extra_field(k)), ADC-70
 
-        na = self._total_n_aux()  # largeur aux requise (B_z / T_e / champs nommes -> > 3)
-        rt_member = self._runtime_params_member()  # P7-b : indices runtime AVANT tout to_cpp()
+        na = self._total_n_aux()  # required aux width (B_z / T_e / named fields -> > 3)
+        rt_member = self._runtime_params_member()  # P7-b: runtime indices BEFORE any to_cpp()
         S = [
-            "#include <cmath>",  # autosuffisant pour std::sqrt / std::pow
+            "#include <cmath>",  # self-sufficient for std::sqrt / std::pow
             "// brique de SOURCE generee depuis le modele symbolique '%s' (adc.dsl.emit_cpp_source)."
             % self.name,
             "// apply(U, a) -> terme source S(U, aux) ; noms aux = champs de adc::Aux (grad_x, grad_y).",
         ]
-        if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
+        if rt_member:  # RuntimeParams header only if a formula reads a runtime param
             S.append("#include <adc/runtime/runtime_params.hpp>")
-        if self._ws_jacobian is not None:  # valeurs propres de blocs denses (wave_speeds exacts)
+        if self._ws_jacobian is not None:  # dense-block eigenvalues (exact wave_speeds)
             S.append("#include <adc/numerics/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
         ]
-        if rt_member:  # membre adc::RuntimeParams params{count, {defauts}} (P7-b)
+        if rt_member:  # adc::RuntimeParams params{count, {defaults}} member (P7-b)
             S.append(rt_member.rstrip("\n"))
-        # Si une formule lit un champ aux SUPPLEMENTAIRE (B_z...), declarer n_aux : CompositeModel le
-        # propage (max sur les briques) et le systeme dimensionne/peuple le canal aux partage. Sans
-        # champ extra -> pas de n_aux emis -> brique strictement identique a l'historique.
+        # If a formula reads an EXTRA aux field (B_z...), declare n_aux: CompositeModel
+        # propagates it (max over the bricks) and the system sizes/populates the shared aux channel.
+        # Without an extra field -> no n_aux emitted -> brick strictly identical to the historical one.
         if na > AUX_BASE_COMPS:
             S.append("  static constexpr int n_aux = %d;" % na)
         S.append("  ADC_HD adc::StateVec<%d> apply(const adc::StateVec<%d>& U, const adc::Aux& a) const {"
                  % (nc, nc))
         S += cons_locals() + prim_locals() + aux_locals()
-        # _wrap : une composante peut etre un litteral Python (p.ex. 0.0), promu en Const.
+        # _wrap: a component may be a Python literal (e.g. 0.0), promoted to Const.
         stl, scpps = self._codegen_exprs([_wrap(e) for e in self._source], cse)
         S += stl
         S.append("    adc::StateVec<%d> S{};" % nc)
         S += ["    S[%d] = %s;" % (i, c) for i, c in enumerate(scpps)]
         S += ["    return S;", "  }"]
-        # FREQUENCE de la source (m.source_frequency, audit vague 2) : emise comme frequency(U, a)
-        # -- le contrat OPTIONNEL des briques source (cf. physics/source.hpp), forwarde par
-        # CompositeModel (HasSourceFrequency) et agrege par step_cfl. Sans appel : rien d'emis.
+        # Source FREQUENCY (m.source_frequency, audit wave 2): emitted as frequency(U, a)
+        # -- the OPTIONAL contract of the source bricks (cf. physics/source.hpp), forwarded by
+        # CompositeModel (HasSourceFrequency) and aggregated by step_cfl. Without a call: nothing emitted.
         if self._src_freq is not None:
             S.append("")
             S.append("  ADC_HD adc::Real frequency(const adc::StateVec<%d>& U, const adc::Aux& a) "
@@ -2547,12 +2548,12 @@ class HyperbolicModel:
             ftl, fcpps = self._codegen_exprs([self._src_freq], cse)
             S += ftl
             S += ["    return %s;" % fcpps[0], "  }"]
-        # JACOBIEN ANALYTIQUE (m.source_jacobian, audit vague 3) : emis comme jacobian(U, a, J),
-        # forwarde par CompositeModel (HasSourceJacobian) -> le Newton implicite remplace les
-        # differences finies. Sans appel : rien d'emis (FD historiques, bit-identique).
+        # ANALYTIC JACOBIAN (m.source_jacobian, audit wave 3): emitted as jacobian(U, a, J),
+        # forwarded by CompositeModel (HasSourceJacobian) -> the implicit Newton replaces the
+        # finite differences. Without a call: nothing emitted (historical FD, bit-identical).
         if self._src_jac is not None:
             if len(self._src_jac) != nc or any(len(r) != nc for r in self._src_jac):
-                raise ValueError("source_jacobian : matrice %dx%d attendue (dS_r/dU_c)" % (nc, nc))
+                raise ValueError("source_jacobian: expected %dx%d matrix (dS_r/dU_c)" % (nc, nc))
             S.append("")
             S.append("  ADC_HD void jacobian(const adc::StateVec<%d>& U, const adc::Aux& a, "
                      "adc::Real (&J)[%d][%d]) const {" % (nc, nc, nc))
@@ -2568,29 +2569,29 @@ class HyperbolicModel:
         return "\n".join(S) + "\n"
 
     def _emit_bricks(self, name=None):
-        """Genere les briques (hyperbolique + source + elliptique) et le type CompositeModel<...>
-        partages par les DEUX backends (JIT IModel et AOT). Source / elliptique OPTIONNELS : sans
-        set_source -> adc::NoSource ; sans set_elliptic_rhs -> rhs nul (pas de couplage Poisson).
-        Renvoie (nv, code_des_briques, type_composite)."""
+        """Generate the bricks (hyperbolic + source + elliptic) and the CompositeModel<...> type
+        shared by BOTH backends (JIT IModel and AOT). Source / elliptic OPTIONAL: without
+        set_source -> adc::NoSource; without set_elliptic_rhs -> zero rhs (no Poisson coupling).
+        Returns (nv, bricks_code, composite_type)."""
         nm = name or (self.name.capitalize() + "Gen")
         nv = self.n_vars
-        # Garde-fou du CODEGEN (pas seulement de check(), que compile() n'appelle pas) : une
-        # frequence ou un jacobien de source sans m.source(...) serait PURGE en silence par la
-        # branche NoSource ci-dessous -- rejet explicite (regle : jamais d'option ignoree).
+        # CODEGEN guard (not only check(), which compile() does not call): a source
+        # frequency or jacobian without m.source(...) would be silently PURGED by the
+        # NoSource branch below -- explicit rejection (rule: never an ignored option).
         if self._source is None:
             if self._src_freq is not None:
-                raise ValueError("source_frequency(...) declare sans source : appelez "
-                                 "m.source([...]) (la frequence est emise sur la brique de source)")
+                raise ValueError("source_frequency(...) declared without source: call "
+                                 "m.source([...]) (the frequency is emitted on the source brick)")
             if self._src_jac is not None:
-                raise ValueError("source_jacobian(...) declare sans source : appelez "
-                                 "m.source([...]) (le jacobien est emis sur la brique de source)")
+                raise ValueError("source_jacobian(...) declared without source: call "
+                                 "m.source([...]) (the jacobian is emitted on the source brick)")
         parts = [self.emit_cpp_brick(name=nm + "Hyp")]
-        if self._source is not None:  # brique de source generee, sinon NoSource
+        if self._source is not None:  # source brick generated, otherwise NoSource
             parts.append(self.emit_cpp_source(name=nm + "Src"))
             src_type = "adc_generated::%sSrc" % nm
         else:
             src_type = "adc::NoSource"
-        if self._elliptic is not None:  # brique elliptique generee, sinon rhs nul (pas de couplage)
+        if self._elliptic is not None:  # elliptic brick generated, otherwise zero rhs (no coupling)
             parts.append(self.emit_cpp_elliptic(name=nm + "Ell"))
         else:
             parts.append(
@@ -2602,53 +2603,53 @@ class HyperbolicModel:
         return nv, "".join(parts), composite
 
     def _emit_metadata(self, model_alias):
-        """Symboles OPTIONNELS de metadonnees du bloc .so, lus par dlsym cote System. PARTAGES par les
-        deux backends (JIT et AOT). Les NOMS + ROLES sont toujours emis (ADC_EXPORT_BLOCK_METADATA) :
-        ils viennent du VariableSet du modele (source unique de verite), le System les lit au lieu du
-        fallback u0.. / pas de roles. Le GAMMA n'est emis (ADC_EXPORT_BLOCK_GAMMA) que si set_gamma(...)
-        a ete appele ; sinon aucun symbole gamma -> le System garde son defaut 1.4 (retro-compat).
+        """OPTIONAL metadata symbols of the .so block, read by dlsym on the System side. SHARED by both
+        backends (JIT and AOT). The NAMES + ROLES are always emitted (ADC_EXPORT_BLOCK_METADATA):
+        they come from the model's VariableSet (single source of truth), the System reads them instead of
+        the u0.. fallback / no roles. The GAMMA is emitted (ADC_EXPORT_BLOCK_GAMMA) only if set_gamma(...)
+        has been called; otherwise no gamma symbol -> the System keeps its default 1.4 (backward-compat).
 
-        @p model_alias doit etre un alias SANS virgule de niveau superieur (le preprocesseur decoupe
-        les arguments de macro sur les virgules) : les callers passent un `using ... = CompositeModel<...>`."""
+        @p model_alias must be an alias WITHOUT a top-level comma (the preprocessor splits
+        macro arguments on commas): callers pass a `using ... = CompositeModel<...>`."""
         out = "\nADC_EXPORT_BLOCK_METADATA(%s)\n" % model_alias
         if self.gamma is not None:
             out += "ADC_EXPORT_BLOCK_GAMMA(%r)\n" % self.gamma
-        # Table des noms d'aux NOMMES (aux_field, ADC-70), CSV ordonne (ordre = indice AUX_NAMED_BASE +
-        # k). Symbole OPTIONNEL, motif des noms/roles : rend le .so AUTO-DESCRIPTIF (un loader C++
-        # pourrait resoudre nom -> composante ; cote Python la table vit deja dans CompiledModel). Emis
-        # SEULEMENT si le modele declare des champs nommes -> retro-compatible (.so sans champ nomme
-        # inchange, symbole absent).
+        # Table of NAMED aux names (aux_field, ADC-70), ordered CSV (order = AUX_NAMED_BASE +
+        # k index). OPTIONAL symbol, names/roles pattern: makes the .so SELF-DESCRIBING (a C++ loader
+        # could resolve name -> component; on the Python side the table already lives in CompiledModel).
+        # Emitted ONLY if the model declares named fields -> backward-compatible (.so without a named
+        # field unchanged, symbol absent).
         if self.aux_extra_names:
-            # Noms = identifiants C++ valides (valides dans aux_field) -> CSV sans guillemet, litteral
-            # C sur (uniquement [A-Za-z0-9_,]).
+            # Names = valid C++ identifiers (validated in aux_field) -> CSV without quotes, safe C
+            # literal (only [A-Za-z0-9_,]).
             out += ('extern "C" const char* adc_compiled_aux_extra_names() { return "%s"; }\n'
                     % ",".join(self.aux_extra_names))
         return out
 
     def emit_cpp_so_source(self, name=None):
-        """Source de la bibliotheque JIT (backend "jit") : le MODELE COMPLET en CompositeModel<GenHyp,
-        GenSrc, GenEll> derriere une fabrique extern "C" (adc_model_nvars / adc_make_model /
-        adc_destroy_model via adc::ModelAdapter). C'est ce que compile_so compile et que
-        System.add_dynamic_block charge comme bloc couple a DISPATCH VIRTUEL (prototypage hote)."""
+        """Source of the JIT library (backend "jit"): the FULL MODEL as CompositeModel<GenHyp,
+        GenSrc, GenEll> behind an extern "C" factory (adc_model_nvars / adc_make_model /
+        adc_destroy_model via adc::ModelAdapter). This is what compile_so compiles and what
+        System.add_dynamic_block loads as a coupled block with VIRTUAL DISPATCH (host prototyping)."""
         nv, bricks, composite = self._emit_bricks(name)
         return ('#include <adc/runtime/dynamic_model.hpp>\n'
-                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
+                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
                 '#include <adc/core/variables.hpp>\n'
                 + bricks
-                + '\nnamespace adc_generated { using JitModel = %s; }\n' % composite  # alias sans virgule (macro metadata)
+                + '\nnamespace adc_generated { using JitModel = %s; }\n' % composite  # comma-free alias (metadata macro)
                 + 'extern "C" int adc_model_nvars() { return %d; }\n' % nv
                 + 'extern "C" void* adc_make_model() { return new adc::ModelAdapter<adc_generated::JitModel>(); }\n'
                 + 'extern "C" void adc_destroy_model(void* p) { delete static_cast<adc::IModel<%d>*>(p); }\n' % nv
                 + self._emit_metadata("adc_generated::JitModel"))
 
     def compile_so(self, so_path, include=None, name=None, cxx=None, std="c++20"):
-        """JIT : genere le MODELE COMPLET (emit_cpp_so_source) et compile une bibliotheque partagee
-        chargeable par System.add_dynamic_block (dlopen). Le .so expose un CompositeModel<hyperbolique,
-        source, elliptique> : le bloc dynamique applique le flux ET la source, et contribue au Poisson
-        de systeme via elliptic_rhs (vrai bloc couple, plus seulement transport). include = dossier des
-        en-tetes adc (None -> auto-detecte via adc_include()) ; cxx = compilateur (defaut
-        c++/g++/clang++). Renvoie so_path. Exige set_primitive_state(...) et
-        set_conservative_from([...]) (comme emit_cpp_brick)."""
+        """JIT: generate the FULL MODEL (emit_cpp_so_source) and compile a shared library
+        loadable by System.add_dynamic_block (dlopen). The .so exposes a CompositeModel<hyperbolic,
+        source, elliptic>: the dynamic block applies the flux AND the source, and contributes to the
+        system Poisson via elliptic_rhs (a real coupled block, no longer just transport). include = adc
+        headers directory (None -> auto-detected via adc_include()); cxx = compiler (default
+        c++/g++/clang++). Returns so_path. Requires set_primitive_state(...) and
+        set_conservative_from([...]) (like emit_cpp_brick)."""
         import os
         import shutil
         import subprocess
@@ -2659,8 +2660,8 @@ class HyperbolicModel:
         src = self.emit_cpp_so_source(name=name)
         cc = _default_cxx(cxx)
         if not cc:
-            raise RuntimeError("compile_so : aucun compilateur C++ trouve")
-        std = _probe_cxx_std(cc, std)  # erreur ACTIONNABLE si le std n'est pas supporte (vs erreur brute)
+            raise RuntimeError("compile_so: no C++ compiler found")
+        std = _probe_cxx_std(cc, std)  # ACTIONABLE error if the std is not supported (vs raw error)
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model.cpp")
             with open(cpp, "w") as f:
@@ -2670,31 +2671,31 @@ class HyperbolicModel:
         return so_path
 
     def emit_cpp_aot_source(self, name=None):
-        """Source de la bibliotheque AOT (backend "compile") : le MODELE COMPLET en CompositeModel<...>
-        derriere l'ABI extern "C" de compiled_block_abi.hpp. Le .so EXECUTE le chemin de PRODUCTION
-        (assemble_rhs<Limiter, Flux>, SSPRK2/IMEX du coeur) sur le modele genere : numerique inlinee,
-        identique a un bloc natif add_block. Oppose au backend "jit" (IModel, dispatch virtuel)."""
+        """Source of the AOT library (backend "compile"): the FULL MODEL as CompositeModel<...>
+        behind the extern "C" ABI of compiled_block_abi.hpp. The .so RUNS the PRODUCTION path
+        (assemble_rhs<Limiter, Flux>, the core's SSPRK2/IMEX) on the generated model: inlined numerics,
+        identical to a native add_block block. As opposed to the "jit" backend (IModel, virtual dispatch)."""
         nv, bricks, composite = self._emit_bricks(name)
         return ('#include <adc/runtime/compiled_block_abi.hpp>\n'
-                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + briques
+                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
                 '#include <adc/core/variables.hpp>\n'
                 + bricks
                 + '\nnamespace adc_generated { using AotModel = %s; }\n' % composite
                 + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n'
-                + self._emit_metadata("adc_generated::AotModel"))  # alias sans virgule (macro metadata)
+                + self._emit_metadata("adc_generated::AotModel"))  # comma-free alias (metadata macro)
 
     def compile_aot(self, so_path, include=None, name=None, cxx=None, std="c++20"):
-        """Backend "compile" (AOT) : genere le MODELE COMPLET (emit_cpp_aot_source) et compile une .so
-        chargeable par System.add_compiled_block. Contrairement au backend "jit" (compile_so : IModel,
-        dispatch virtuel, Rusanov hote), le bloc tourne ici le chemin de PRODUCTION (flux HLLC/Roe au
-        choix, ordre 2, SSPRK2/IMEX) sur le modele genere -- numerique identique a un bloc natif.
-        include = dossier des en-tetes adc (None -> auto-detecte via adc_include()) ; cxx = compilateur.
-        Renvoie so_path.
+        """Backend "compile" (AOT): generate the FULL MODEL (emit_cpp_aot_source) and compile a .so
+        loadable by System.add_compiled_block. Unlike the "jit" backend (compile_so: IModel,
+        virtual dispatch, host Rusanov), the block here runs the PRODUCTION path (HLLC/Roe flux at
+        will, order 2, SSPRK2/IMEX) on the generated model -- numerics identical to a native block.
+        include = adc headers directory (None -> auto-detected via adc_include()); cxx = compiler.
+        Returns so_path.
 
-        KOKKOS-ONLY : le modele AOT inclut les en-tetes adc (multifab/for_each), qui ne compilent PAS
-        sans ADC_HAS_KOKKOS. On compile donc le .so AVEC Kokkos (memes flags que le loader natif), ce qui
-        aligne en plus son ABI sur le module _adc (lui aussi Kokkos). Un Kokkos installe doit etre visible
-        via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial suffit sur CPU)."""
+        KOKKOS-ONLY: the AOT model includes the adc headers (multifab/for_each), which do NOT compile
+        without ADC_HAS_KOKKOS. So we compile the .so WITH Kokkos (same flags as the native loader), which
+        also aligns its ABI with the _adc module (also Kokkos). An installed Kokkos must be visible
+        via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial is enough on CPU)."""
         import os
         import subprocess
         import tempfile
@@ -2704,17 +2705,17 @@ class HyperbolicModel:
         src = self.emit_cpp_aot_source(name=name)
         if _native_kokkos_root() is None:
             raise RuntimeError(
-                "compile_aot : adc_cpp est Kokkos-only -- le modele AOT inclut les en-tetes adc qui "
-                "exigent Kokkos. Pointe un Kokkos installe via ADC_KOKKOS_ROOT (ou Kokkos_ROOT), p.ex. "
-                "`export ADC_KOKKOS_ROOT=/chemin/vers/kokkos` (Serial suffit sur CPU).")
+                "compile_aot: adc_cpp is Kokkos-only -- the AOT model includes the adc headers which "
+                "require Kokkos. Point at an installed Kokkos via ADC_KOKKOS_ROOT (or Kokkos_ROOT), e.g. "
+                "`export ADC_KOKKOS_ROOT=/path/to/kokkos` (Serial is enough on CPU).")
         cc = _native_kokkos_compiler(cxx)
         if not cc:
-            raise RuntimeError("compile_aot : aucun compilateur C++ trouve")
-        std = _probe_cxx_std(cc, std)  # erreur ACTIONNABLE si le std n'est pas supporte (vs erreur brute)
+            raise RuntimeError("compile_aot: no C++ compiler found")
+        std = _probe_cxx_std(cc, std)  # ACTIONABLE error if the std is not supported (vs raw error)
         kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
-        # Comme le loader natif, le .so AOT laisse les symboles Kokkos INDEFINIS (resolus au chargement
-        # contre le runtime Kokkos deja charge par _adc -- pas de 2e copie). macOS/Apple-ld exige alors
-        # -undefined dynamic_lookup (sur ELF/Linux -shared l'autorise deja ; l'option n'est PAS du ld GNU).
+        # Like the native loader, the AOT .so leaves the Kokkos symbols UNDEFINED (resolved at load
+        # against the Kokkos runtime already loaded by _adc -- no 2nd copy). macOS/Apple-ld then requires
+        # -undefined dynamic_lookup (on ELF/Linux -shared already allows it; the option is NOT GNU ld's).
         link_extra = ["-undefined", "dynamic_lookup"] if sys.platform == "darwin" else []
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_aot.cpp")
@@ -2726,60 +2727,60 @@ class HyperbolicModel:
         return so_path
 
     def emit_cpp_native_loader(self, name=None, target="system"):
-        """Source du LOADER NATIF (backend "production") : le MODELE COMPLET en CompositeModel<...>
-        derriere une ABI extern "C" MINCE.
+        """Source of the NATIVE LOADER (backend "production"): the FULL MODEL as CompositeModel<...>
+        behind a THIN extern "C" ABI.
 
-        A la difference du backend "aot" (emit_cpp_aot_source : ABI plate de tableaux, le .so
-        recalcule tout sur une grille locale et marshale les tableaux), le loader natif NE porte PAS
-        la numerique : il se contente d'INSTALLER le modele genere comme bloc NATIF de la facade deja
-        construite, via le gabarit en-tete adc::add_compiled_model<ProdModel>. Ce gabarit fabrique les
-        fermetures sur le CONTEXTE REEL de la facade -> le bloc tourne ensuite le MEME chemin que
-        add_block, ZERO-COPIE, device-clean (foncteurs nommes).
+        Unlike the "aot" backend (emit_cpp_aot_source: flat array ABI, where the .so
+        recomputes everything on a local grid and marshals the arrays), the native loader does NOT carry
+        the numerics: it merely INSTALLS the generated model as a NATIVE block of the already-built
+        facade, via the header template adc::add_compiled_model<ProdModel>. That template builds the
+        closures on the facade's REAL CONTEXT -> the block then runs the SAME path as
+        add_block, ZERO-COPY, device-clean (named functors).
 
-        @p target : "system" (defaut) | "amr_system". Choisit la facade visee et donc la SURCHARGE
-        add_compiled_model appelee :
+        @p target: "system" (default) | "amr_system". Selects the targeted facade and thus the
+        add_compiled_model OVERLOAD called:
 
-        - "system" : adc::System -> add_compiled_model(System&, ..., evolve) ; bloc plat
-          mono-niveau (fermetures sur grid_context, chemin de production de add_block).
-        - "amr_system" : adc::AmrSystem -> add_compiled_model(AmrSystem&, ...) ; bloc unique porte
-          sur la hierarchie AMR (reflux conservatif, regrid). PAS de parametre evolve (AMR mono-bloc).
+        - "system": adc::System -> add_compiled_model(System&, ..., evolve); flat single-level
+          block (closures on grid_context, add_block production path).
+        - "amr_system": adc::AmrSystem -> add_compiled_model(AmrSystem&, ...); single block carried
+          over the AMR hierarchy (conservative reflux, regrid). NO evolve parameter (single-block AMR).
 
-        Symboles extern "C" emis :
+        Emitted extern "C" symbols:
 
-        - adc_native_abi_key() : cle d'ABI figee a la compilation DU LOADER, emise comme LITTERAL
-          preprocesseur (ADC_ABI_KEY_LITERAL) et PAS via la fonction inline abi_key_string() : sous
-          ELF/RTLD_GLOBAL, une inline (liaison faible) serait interposee vers la copie du module et
-          le loader renverrait la cle DU MODULE (garde tautologique, jamais de rejet -- bug CI reel
-          quand gcc cesse d'inliner). add_native_block la compare a abi_key() du module -> erreur
-          explicite si en-tetes / compilateur / standard divergent (pas d'UB silencieux).
-          Commune aux deux cibles.
-        - adc_install_native (target="system") OU adc_install_native_amr (target="amr_system") :
-          reinterpret_cast<adc::System*|adc::AmrSystem*>(sys) puis add_compiled_model<ProdModel>(...).
-          Le schema transite en arguments plats (chaines + double + int) ; aucun objet C++ ne
-          traverse l'ABI dans CE sens (seul le facade* est repris par reference cote loader, d'ou
-          l'exigence d'ABI identique verifiee par la cle). Symbole DISTINCT par cible : un loader
-          System ne peut pas etre branche sur AmrSystem.add_native_block, et inversement."""
+        - adc_native_abi_key(): ABI key frozen at the LOADER's compilation, emitted as a preprocessor
+          LITERAL (ADC_ABI_KEY_LITERAL) and NOT via the inline function abi_key_string(): under
+          ELF/RTLD_GLOBAL, an inline (weak linkage) would be interposed toward the module's copy and
+          the loader would return the MODULE's key (tautological guard, never a rejection -- a real CI
+          bug when gcc stops inlining). add_native_block compares it to the module's abi_key() -> explicit
+          error if headers / compiler / standard diverge (no silent UB).
+          Common to both targets.
+        - adc_install_native (target="system") OR adc_install_native_amr (target="amr_system"):
+          reinterpret_cast<adc::System*|adc::AmrSystem*>(sys) then add_compiled_model<ProdModel>(...).
+          The scheme passes through flat arguments (strings + double + int); no C++ object
+          crosses the ABI in THIS direction (only the facade* is taken by reference on the loader side, hence
+          the requirement of an identical ABI verified by the key). DISTINCT symbol per target: a System
+          loader cannot be wired onto AmrSystem.add_native_block, and vice versa."""
         if target not in ("system", "amr_system"):
-            raise ValueError("emit_cpp_native_loader : target 'system' | 'amr_system' (recu %r)"
+            raise ValueError("emit_cpp_native_loader: target 'system' | 'amr_system' (got %r)"
                              % (target,))
         nv, bricks, composite = self._emit_bricks(name)
-        # En-tetes std EN TETE (avant tout namespace). MSVC : un #include <std> tandis qu'un namespace
-        # adc est ouvert fait voir std comme adc::std (erreurs <vector>) ; g++ tolere car deja inclus via
-        # guard. Les hisser ici rend les #include std internes aux briques inoffensifs (no-op guard).
+        # std headers FIRST (before any namespace). MSVC: a #include <std> while an adc namespace
+        # is open makes std seen as adc::std (<vector> errors); g++ tolerates it because already included via
+        # guard. Hoisting them here makes the brick-internal #include std harmless (no-op guard).
         head = ('#include <cmath>\n'
                 '#include <vector>\n'
                 '#include <array>\n'
                 '#include <cstddef>\n'
                 '#include <string>\n'
-                '#include <adc/runtime/abi_key.hpp>\n'         # ADC_ABI_KEY_LITERAL (cle figee a la compil)
-                '#include <adc/physics/bricks.hpp>\n'          # CompositeModel + NoSource + briques
+                '#include <adc/runtime/abi_key.hpp>\n'         # ADC_ABI_KEY_LITERAL (key frozen at compile)
+                '#include <adc/physics/bricks.hpp>\n'          # CompositeModel + NoSource + bricks
                 '#include <adc/core/variables.hpp>\n')
-        # Gabarit en-tete de la cible : dsl_block.hpp (System) ou amr_dsl_block.hpp (AmrSystem). Inclus
-        # selectivement pour ne pas tirer la machinerie AMR dans un loader System (et inversement).
+        # Header template of the target: dsl_block.hpp (System) or amr_dsl_block.hpp (AmrSystem). Included
+        # selectively so as not to pull the AMR machinery into a System loader (and vice versa).
         head += ('#include <adc/runtime/dsl_block.hpp>\n' if target == "system"
                  else '#include <adc/runtime/amr_dsl_block.hpp>\n')
-        # LITTERAL preprocesseur, pas d'appel a abi_key_string() : une inline serait interposee
-        # (ELF/RTLD_GLOBAL) vers la copie du module -> cle du module renvoyee -> garde tautologique.
+        # preprocessor LITERAL, no call to abi_key_string(): an inline would be interposed
+        # (ELF/RTLD_GLOBAL) toward the module's copy -> module's key returned -> tautological guard.
         key = ('#if defined(_WIN32)\n'
                '#define ADC_LOADER_API extern "C" __declspec(dllexport)\n'
                '#else\n'
@@ -2789,9 +2790,9 @@ class HyperbolicModel:
                '  return ADC_ABI_KEY_LITERAL;\n'
                '}\n')
         if target == "system":
-            # pos_floor (ADC-76, limiteur de positivite Zhang-Shu) : argument plat final, marshale
-            # jusqu'au make_block du loader via add_compiled_model. Vieille signature = vieux .so =
-            # rejete par la cle d'ABI (les en-tetes ont change), jamais un layout d'arguments errone.
+            # pos_floor (ADC-76, Zhang-Shu positivity limiter): final flat argument, marshaled
+            # down to the loader's make_block via add_compiled_model. Old signature = old .so =
+            # rejected by the ABI key (the headers changed), never a wrong argument layout.
             install = ('ADC_LOADER_API void adc_install_native(void* sys, const char* name, const char* limiter,\n'
                        '                                    const char* riemann, const char* recon,\n'
                        '                                    const char* time, double gamma, int substeps,\n'
@@ -2802,7 +2803,7 @@ class HyperbolicModel:
                        '                                                    substeps, evolve != 0, stride,\n'
                        '                                                    pos_floor);\n'
                        '}\n')
-        else:  # amr_system : surcharge AmrSystem (pas de parametre evolve, AMR mono-bloc)
+        else:  # amr_system: AmrSystem overload (no evolve parameter, single-block AMR)
             install = ('ADC_LOADER_API void adc_install_native_amr(void* sys, const char* name,\n'
                        '                                        const char* limiter, const char* riemann,\n'
                        '                                        const char* recon, const char* time,\n'
@@ -2814,30 +2815,30 @@ class HyperbolicModel:
                        '}\n')
         return (head
                 + bricks
-                + '\nnamespace adc_generated { using ProdModel = %s; }\n' % composite  # alias sans virgule
+                + '\nnamespace adc_generated { using ProdModel = %s; }\n' % composite  # comma-free alias
                 + key
                 + install
-                + self._emit_metadata("adc_generated::ProdModel"))  # noms/roles/gamma (diagnostic, comme AOT/JIT)
+                + self._emit_metadata("adc_generated::ProdModel"))  # names/roles/gamma (diagnostic, like AOT/JIT)
 
     def compile_native(self, so_path, include=None, name=None, cxx=None, std="c++23", target="system"):
-        """Backend "production" : genere le LOADER NATIF (emit_cpp_native_loader) et le compile en une
-        .so chargeable par System.add_native_block (target="system") ou AmrSystem.add_native_block
-        (target="amr_system"). Le .so inline add_compiled_model<ProdModel> : le bloc tourne le chemin
-        NATIF zero-copie (parite stricte avec add_block / add_compiled_model<>).
+        """Backend "production": generate the NATIVE LOADER (emit_cpp_native_loader) and compile it into a
+        .so loadable by System.add_native_block (target="system") or AmrSystem.add_native_block
+        (target="amr_system"). The .so inlines add_compiled_model<ProdModel>: the block runs the
+        NATIVE zero-copy path (strict parity with add_block / add_compiled_model<>).
 
-        @p target : "system" (defaut) | "amr_system" (cf. emit_cpp_native_loader). Selectionne la
-        facade visee et donc le gabarit en-tete + le symbole d'installation emis.
+        @p target: "system" (default) | "amr_system" (cf. emit_cpp_native_loader). Selects the
+        targeted facade and thus the header template + the installation symbol emitted.
 
-        Le loader appelle des methodes hors-ligne du module _adc (install_block / grid_context /
-        ensure_aux_width cote System ; set_compiled_block cote AmrSystem) DEFINIES ailleurs : on compile
-        donc avec '-undefined dynamic_lookup' (macOS) pour autoriser ces indefinis (resolus a
-        l'execution contre le module deja charge ; cf. add_native_block). On bake aussi
-        -DADC_HEADER_SIG=<signature> a l'IDENTIQUE du module pour que les cles d'ABI concordent quand
-        les en-tetes concordent. std : un std different du module changerait __cplusplus donc la cle ->
-        rejet explicite ; les appelants (Model.compile/HybridModel.compile) defaultent donc sur la
-        norme du loader (loader_cxx_std : c++20 sous Kokkos, c++23 sinon) et non sur c++23 en dur.
-        include = dossier des en-tetes adc (None -> auto-detecte via adc_include()) ; cxx = compilateur.
-        Renvoie so_path."""
+        The loader calls out-of-line methods of the _adc module (install_block / grid_context /
+        ensure_aux_width on the System side; set_compiled_block on the AmrSystem side) DEFINED elsewhere: so we
+        compile with '-undefined dynamic_lookup' (macOS) to allow these undefined ones (resolved at
+        runtime against the already-loaded module; cf. add_native_block). We also bake
+        -DADC_HEADER_SIG=<signature> IDENTICAL to the module's so that the ABI keys match when
+        the headers match. std: a std different from the module would change __cplusplus hence the key ->
+        explicit rejection; the callers (Model.compile/HybridModel.compile) therefore default to the
+        loader's standard (loader_cxx_std: c++20 under Kokkos, c++23 otherwise) and not c++23 hard-coded.
+        include = adc headers directory (None -> auto-detected via adc_include()); cxx = compiler.
+        Returns so_path."""
         import os
         import shutil
         import subprocess
@@ -2846,55 +2847,55 @@ class HyperbolicModel:
 
         if include is None:
             include = adc_include()
-        # GARDE PRE-DLOPEN : en-tetes != ceux du build de _adc -> erreur claire ICI ("rebatir le
-        # module") au lieu d'un dlopen 'symbol not found' cryptique dans add_native_block. Renvoie la
-        # signature calculee (reutilisee pour -DADC_HEADER_SIG : un seul walk+sha256, pas deux).
+        # PRE-DLOPEN GUARD: headers != those of the _adc build -> clear error HERE ("rebuild the
+        # module") instead of a cryptic dlopen 'symbol not found' in add_native_block. Returns the
+        # computed signature (reused for -DADC_HEADER_SIG: a single walk+sha256, not two).
         sig = _check_headers_match_module(include)
-        _warn_kokkos_parity()  # module Kokkos + loader serie (ou l'inverse) -> avertir, ne pas bloquer
+        _warn_kokkos_parity()  # Kokkos module + serial loader (or the reverse) -> warn, do not block
         src = self.emit_cpp_native_loader(name=name, target=target)
         cc = _native_kokkos_compiler(cxx)
         if not cc:
-            raise RuntimeError("compile_native : aucun compilateur C++ trouve")
-        # Probe AVANT compilation : si le compilateur ne supporte pas la norme (cas reel : vieux
-        # gcc/clang d'un env conda pris sur le PATH), erreur actionnable au lieu de l'erreur brute
-        # "invalid value 'c++23'". Peut retrograder vers l'orthographe c++2b (meme niveau).
+            raise RuntimeError("compile_native: no C++ compiler found")
+        # Probe BEFORE compilation: if the compiler does not support the standard (real case: old
+        # gcc/clang of a conda env picked from the PATH), an actionable error instead of the raw error
+        # "invalid value 'c++23'". May fall back to the c++2b spelling (same level).
         std = _probe_cxx_std(cc, std)
-        # -DADC_HEADER_SIG : MEME signature que le build du module (concordance des cles d'ABI).
+        # -DADC_HEADER_SIG: SAME signature as the module build (ABI key concordance).
         #
-        # (1) PARITE DE BACKEND (le plus important pour le scaling) : si _adc est compile avec Kokkos
-        # (OpenMP/CUDA), le loader DOIT l'etre aussi. Les templates header-only (assemble_rhs /
-        # for_each_cell) compiles SANS -DADC_HAS_KOKKOS s'instancient sur le fallback SERIE : le bloc
-        # DSL reste zero-copie mais ne scale PAS avec les threads/GPU (mesure ROMEO : DSL warm ~341 ms
-        # invariant threads=1/4/8 alors que le natif scale 292->239->177). _native_kokkos_flags() ajoute
-        # -DADC_HAS_KOKKOS + includes/libs Kokkos + -fopenmp quand ADC_KOKKOS_ROOT (ou Kokkos_ROOT)
-        # pointe une install ; sinon comportement historique serie. Le compilateur suit le backend :
-        # g++ (OpenMP) par defaut, nvcc_wrapper SEULEMENT si explicite (CUDA).
+        # (1) BACKEND PARITY (most important for scaling): if _adc is compiled with Kokkos
+        # (OpenMP/CUDA), the loader MUST be too. The header-only templates (assemble_rhs /
+        # for_each_cell) compiled WITHOUT -DADC_HAS_KOKKOS instantiate on the SERIAL fallback: the
+        # DSL block stays zero-copy but does NOT scale with threads/GPU (ROMEO measurement: DSL warm ~341 ms
+        # invariant for threads=1/4/8 whereas the native scales 292->239->177). _native_kokkos_flags() adds
+        # -DADC_HAS_KOKKOS + Kokkos includes/libs + -fopenmp when ADC_KOKKOS_ROOT (or Kokkos_ROOT)
+        # points at an install; otherwise the historical serial behavior. The compiler follows the backend:
+        # g++ (OpenMP) by default, nvcc_wrapper ONLY if explicit (CUDA).
         #
-        # (2) PARITE D'OPTIMISATION : a -O2 sans -DNDEBUG le noyau genere est ~1.48x le natif (asserts
-        # hot-loop + vecto faible) ; -O3 -DNDEBUG => parite (mesure ROMEO CV<1%, ratio 1.04x). Ces
-        # flags n'affectent NI l'ABI NI la portabilite. $ADC_DSL_OPTFLAGS surcharge (ex. ajouter
-        # -march=native : le .so etant JIT-compile sur la machine -> ~0.88x du natif generique ; non
-        # defaut car cache .so partage reutilise sur une micro-archi differente = risque illegal-instr).
+        # (2) OPTIMIZATION PARITY: at -O2 without -DNDEBUG the generated kernel is ~1.48x the native
+        # (hot-loop asserts + weak vectorization); -O3 -DNDEBUG => parity (ROMEO measurement CV<1%, ratio 1.04x). These
+        # flags affect NEITHER the ABI NOR portability. $ADC_DSL_OPTFLAGS overrides (e.g. add
+        # -march=native: the .so being JIT-compiled on the machine -> ~0.88x the generic native; not
+        # default because a shared .so cache reused on a different micro-arch = illegal-instr risk).
         kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_native.cpp")
-            # Windows : baker ADC_HEADER_SIG via #define EN TETE de la source (le quoting d'un macro
-            # string en ligne de commande cl est ingerable) ; POSIX garde le -D historique ci-dessous.
+            # Windows: bake ADC_HEADER_SIG via #define AT THE TOP of the source (quoting an inline
+            # macro string on the cl command line is unmanageable); POSIX keeps the historical -D below.
             src_eff = ('#define ADC_HEADER_SIG "%s"\n' % sig + src) if sys.platform == "win32" else src
             with open(cpp, "w") as f:
                 f.write(src_eff)
             if sys.platform == "win32":
-                # MSVC/clang-cl (ADC-100) : .dll liee contre kokkoscore.lib (Kokkos PARTAGE) + _adc.lib
-                # (symboles System ADC_EXPORT). cl accepte -D/-I ; sortie /Fe ; libs apres /link. Pas de
-                # RTLD_GLOBAL : les indefinis sont resolus au LINK de la .dll (import libraries).
+                # MSVC/clang-cl (ADC-100): .dll linked against kokkoscore.lib (Kokkos SHARED) + _adc.lib
+                # (System ADC_EXPORT symbols). cl accepts -D/-I; output /Fe; libs after /link. No
+                # RTLD_GLOBAL: undefined symbols are resolved at the .dll LINK step (import libraries).
                 adc_lib = _adc_import_lib()
                 if not adc_lib:
                     raise RuntimeError(
-                        "compile_native : _adc.lib introuvable a cote du module _adc (necessaire pour "
-                        "lier la .dll DSL ; rebatir _adc avec ADC_EXPORT_BUILDING_MODULE).")
-                # /DNOMINMAX : windows.h (tire par dynlib.hpp) ne doit pas definir min/max (casse la STL).
-                # /bigobj : gros TU template. PAS de /Zc:__cplusplus : garder __cplusplus aligne sur le
-                # build du module (sinon la cle d'ABI diverge).
+                        "compile_native: _adc.lib not found next to the _adc module (required to "
+                        "link the DSL .dll; rebuild _adc with ADC_EXPORT_BUILDING_MODULE).")
+                # /DNOMINMAX: windows.h (pulled by dynlib.hpp) must not define min/max (breaks the STL).
+                # /bigobj: large template TU. NO /Zc:__cplusplus: keep __cplusplus aligned with the
+                # module build (otherwise the ABI key diverges).
                 cl_flags = ["/nologo", "/LD", "/std:" + std, "/O2", "/DNDEBUG", "/EHsc",
                             "/permissive-", "/Zc:preprocessor", "/DNOMINMAX", "/bigobj"] + kokkos_compile_flags
                 cmd = ([cc] + cl_flags + ["-I", include, cpp,
@@ -2904,7 +2905,7 @@ class HyperbolicModel:
                 optflags = os.environ.get("ADC_DSL_OPTFLAGS", "-O3 -DNDEBUG").split()
                 flags = ["-shared", "-fPIC", "-std=" + std, *optflags,
                          "-DADC_HEADER_SIG=\"%s\"" % sig, *kokkos_compile_flags]
-                # macOS/Apple-ld : autoriser explicitement les indefinis (resolus a l'execution).
+                # macOS/Apple-ld: explicitly allow undefined symbols (resolved at runtime).
                 if sys.platform == "darwin":
                     flags += ["-undefined", "dynamic_lookup"]
                 cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags]
@@ -2913,48 +2914,48 @@ class HyperbolicModel:
 
     def compile_or_jit(self, so_path, include=None, mode="jit", name=None, cxx=None, std="c++20",
                        target="system"):
-        """API unifiee (facade de l'ideal m.compile_or_jit()) choisissant le backend :
+        """Unified API (facade of the ideal m.compile_or_jit()) selecting the backend:
 
-        - mode="jit" -> compile_so (IModel, dispatch virtuel : prototypage hote, a brancher via
-          System.add_dynamic_block) ;
-        - mode="compile" -> compile_aot (chemin de production AOT, numerique identique au natif : a
-          brancher via System.add_compiled_block) ;
-        - mode="native" -> compile_native (loader natif zero-copie : add_compiled_model<> via
-          System.add_native_block ou AmrSystem.add_native_block ; chemin "production").
+        - mode="jit" -> compile_so (IModel, virtual dispatch: host prototyping, to be wired via
+          System.add_dynamic_block);
+        - mode="compile" -> compile_aot (AOT production path, numerically identical to native: to be
+          wired via System.add_compiled_block);
+        - mode="native" -> compile_native (native zero-copy loader: add_compiled_model<> via
+          System.add_native_block or AmrSystem.add_native_block; "production" path).
 
-        @p target : "system" (defaut) | "amr_system". UNIQUEMENT consomme par mode="native" (choix de
-        la facade visee, cf. compile_native). Les autres modes (jit/compile) ne ciblent que System ;
-        un target="amr_system" y est rejete (le chemin .so AMR n'existe que pour le backend natif)."""
+        @p target: "system" (default) | "amr_system". ONLY consumed by mode="native" (choice of
+        the target facade, cf. compile_native). The other modes (jit/compile) target only System;
+        a target="amr_system" there is rejected (the AMR .so path exists only for the native backend)."""
         if mode == "jit":
             if target != "system":
-                raise ValueError("compile_or_jit : target='amr_system' non supporte en mode 'jit' "
-                                 "(le chemin AMR n'existe que pour mode='native')")
+                raise ValueError("compile_or_jit: target='amr_system' not supported in mode 'jit' "
+                                 "(the AMR path exists only for mode='native')")
             return self.compile_so(so_path, include, name=name, cxx=cxx, std=std)
         if mode == "compile":
             if target != "system":
-                raise ValueError("compile_or_jit : target='amr_system' non supporte en mode 'compile' "
-                                 "(le chemin AMR n'existe que pour mode='native')")
+                raise ValueError("compile_or_jit: target='amr_system' not supported in mode 'compile' "
+                                 "(the AMR path exists only for mode='native')")
             return self.compile_aot(so_path, include, name=name, cxx=cxx, std=std)
         if mode == "native":
             return self.compile_native(so_path, include, name=name, cxx=cxx, std=std, target=target)
-        raise ValueError("compile_or_jit : mode 'jit' | 'compile' | 'native' (recu %r)" % mode)
+        raise ValueError("compile_or_jit: mode 'jit' | 'compile' | 'native' (received %r)" % mode)
 
-    # --- facade de production : un point d'entree unique par INTENTION (backend) -----------------
-    # Aiguillage du backend de compilation par INTENTION plutot que par detail d'implementation. Chaque
-    # entree designe l'un des moteurs existants (compile_so / compile_aot) ET l'adder System a employer
-    # cote execution -- couple ici pour qu'un caller ne branche pas un .so AOT sur add_dynamic_block (ou
-    # l'inverse), ce qui chargerait mais avec une ABI/numerique incoherente.
-    #   "prototype"  -> compile_so  (JIT, IModel, dispatch virtuel, Rusanov hote ordre 1 ; iteration
-    #                   rapide, a brancher via System.add_dynamic_block) ;
-    #   "aot"        -> compile_aot (AOT, chemin de PRODUCTION host-marshale : assemble_rhs<Limiter,
-    #                   Flux>, HLLC/Roe, ordre 2, SSPRK2/IMEX sur une grille LOCALE du .so ; numerique
-    #                   identique au natif mais tableaux marshales, via add_compiled_block) ;
-    #   "production" -> compile_native (LOADER NATIF) : le .so inline add_compiled_model<ProdModel>, qui
-    #                   installe le modele genere comme bloc NATIF du System (fermetures sur le contexte
-    #                   REEL grid_context). Le bloc tourne ZERO-COPIE le MEME chemin qu'add_block (pas de
-    #                   marshaling) ; device-clean par construction (foncteurs nommes de block_builder).
-    #                   A brancher via System.add_native_block (cle d'ABI verifiee). C'est le chemin
-    #                   prepare pour un vrai backend de production (codegen Kokkos/CUDA = PR ulterieure).
+    # --- production facade: a single entry point per INTENTION (backend) -----------------
+    # Routes the compilation backend by INTENTION rather than by implementation detail. Each
+    # entry designates one of the existing engines (compile_so / compile_aot) AND the System adder to use
+    # at runtime -- coupled here so that a caller does not wire an AOT .so onto add_dynamic_block (or
+    # vice versa), which would load but with an inconsistent ABI/numerics.
+    #   "prototype"  -> compile_so  (JIT, IModel, virtual dispatch, host first-order Rusanov; fast
+    #                   iteration, to be wired via System.add_dynamic_block);
+    #   "aot"        -> compile_aot (AOT, host-marshaled PRODUCTION path: assemble_rhs<Limiter,
+    #                   Flux>, HLLC/Roe, second order, SSPRK2/IMEX on a LOCAL grid of the .so; numerics
+    #                   identical to native but marshaled arrays, via add_compiled_block);
+    #   "production" -> compile_native (NATIVE LOADER): the .so inlines add_compiled_model<ProdModel>, which
+    #                   installs the generated model as a NATIVE System block (closures over the REAL
+    #                   grid_context). The block runs ZERO-COPY the SAME path as add_block (no
+    #                   marshaling); device-clean by construction (named functors from block_builder).
+    #                   To be wired via System.add_native_block (ABI key verified). This is the path
+    #                   prepared for a real production backend (Kokkos/CUDA codegen = later PR).
     _BACKENDS = {
         "prototype": ("jit", "add_dynamic_block"),
         "aot": ("compile", "add_compiled_block"),
@@ -2962,10 +2963,10 @@ class HyperbolicModel:
     }
 
     def _model_hash(self, params=None):
-        """Hash stable du modele : formules (flux/eig/source/elliptic/primitives/cons_from) + roles +
-        n_aux + gamma (+ params NOMMES eventuels). Source unique du hash, reutilisee par Model._model_hash
-        (qui passe ses Param). Sert a identifier/reutiliser un .so deja compile (cle de cache) et a tracer
-        le run. Repose sur repr(Expr) (stable, structurel) ; insensible a l'ordre des dict (tries)."""
+        """Stable hash of the model: formulas (flux/eig/source/elliptic/primitives/cons_from) + roles +
+        n_aux + gamma (+ any NAMED params). Single source of the hash, reused by Model._model_hash
+        (which passes its Param). Serves to identify/reuse an already compiled .so (cache key) and to trace
+        the run. Relies on repr(Expr) (stable, structural); insensitive to dict ordering (sorted)."""
         import hashlib
         m = self
         parts = []
@@ -2988,13 +2989,13 @@ class HyperbolicModel:
                                      if m._src_jac is not None else ""))
         parts.append("hllc=%d" % (1 if m._hllc else 0))
         parts.append("roe=%d" % (1 if getattr(m, "_roe", False) else 0))
-        # roe_dissipation FOURNIE : ajoute au hash UNIQUEMENT si presente (sans appel, hash inchange
-        # -> bit-identite de la cle de cache des modeles existants preservee).
+        # roe_dissipation PROVIDED: added to the hash ONLY if present (without a call, hash unchanged
+        # -> bit-identity of the cache key for existing models preserved).
         if getattr(m, "_roe_rows", None) is not None:
             parts.append("roe_rows=%s" % ";".join(repr(e) for k in ("x", "y")
                                                   for e in m._roe_rows[k]))
-        # vitesses signees EXPLICITES (set_wave_speeds) : meme politique conditionnelle (sans appel,
-        # hash strictement identique a l'historique -> cache .so des modeles existants preserve).
+        # EXPLICIT signed wave speeds (set_wave_speeds): same conditional policy (without a call,
+        # hash strictly identical to the historical one -> .so cache of existing models preserved).
         if getattr(m, "_wave_speeds", None) is not None:
             parts.append("wave_speeds=%s" % ";".join(repr(e) for k in ("x", "y")
                                                      for e in m._wave_speeds[k]))
@@ -3006,171 +3007,171 @@ class HyperbolicModel:
                           for k in ("x", "y")),
                 ";".join(repr(e) for k in ("x", "y") for row in ws["rows"][k] for e in row)
                 if ws["rows"] is not None else ""))
-        
+
         parts.append("n_aux=%d" % aux_total_n_aux(m.aux_names, m.aux_extra_names))
-        # Champs aux NOMMES (aux_field, ADC-70) : leur ORDRE fixe l'indice (AUX_NAMED_BASE + k) -> ils
-        # entrent dans le hash (deux modeles ne differant que par un nom/ordre d'aux nomme sont
-        # distincts). N'ajoute la cle QUE si des champs nommes existent : un modele sans aux_field garde
-        # ainsi un hash STRICTEMENT identique a l'historique (cache .so + tracabilite preserves).
+        # NAMED aux fields (aux_field, ADC-70): their ORDER fixes the index (AUX_NAMED_BASE + k) -> they
+        # enter the hash (two models differing only by a named-aux name/order are distinct). Adds the key
+        # ONLY if named fields exist: a model without aux_field thus keeps a STRICTLY identical hash to
+        # the historical one (.so cache + traceability preserved).
         if m.aux_extra_names:
             parts.append("aux_extra=%s" % ",".join(m.aux_extra_names))
         parts.append("gamma=%r" % m.gamma)
-        # Les params entrent dans le hash par (nom, valeur de DECLARATION, kind). La valeur d'un param
-        # RUNTIME (P7-b) y figure car elle SEEDE le defaut du membre RuntimeParams genere (donc deux .so
-        # a defaut different sont distincts) ; le "sans recompilation" de P7-b porte sur set_block_params
-        # a l'EXECUTION, pas sur un nouvel appel compile() a valeur de declaration changee.
+        # Params enter the hash via (name, DECLARATION value, kind). The value of a RUNTIME param
+        # (P7-b) appears there because it SEEDS the default of the generated RuntimeParams member (so two
+        # .so with a different default are distinct); the "no recompilation" of P7-b applies to
+        # set_block_params at RUNTIME, not to a new compile() call with a changed declaration value.
         params = params or {}
         parts.append("params=%s" % ";".join("%s=%r:%s" % (k, params[k].value, params[k].kind)
                                              for k in sorted(params)))
         return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
     def _check_require_metadata(self, require_metadata, backend):
-        """Garde-fous require_metadata (pur-Python, deterministes sur le modele + backend). Factorises
-        pour etre appeles AVANT le cache (cote HyperbolicModel ET Model) : un cache HIT ne doit jamais
-        masquer une exigence de metadonnees. Sans require_metadata, no-op."""
+        """require_metadata guard rails (pure-Python, deterministic on the model + backend). Factored out
+        to be called BEFORE the cache (in HyperbolicModel AND Model): a cache HIT must never
+        mask a metadata requirement. Without require_metadata, no-op."""
         if not require_metadata:
             return
-        # backend "prototype" (add_dynamic_block, dispatch VIRTUEL, Rusanov hote ordre 1) : PAS un chemin
-        # de production device-clean -> demander les metadonnees dessus est incoherent (erreur claire).
+        # backend "prototype" (add_dynamic_block, VIRTUAL dispatch, host first-order Rusanov): NOT a
+        # device-clean production path -> requesting metadata on it is inconsistent (clear error).
         if backend == "prototype":
             raise ValueError(
-                "compile : backend 'prototype' (JIT, dispatch virtuel hote) incompatible avec "
-                "require_metadata=True ; utiliser backend='aot' ou 'production' pour le chemin "
-                "device-clean a metadonnees garanties")
+                "compile: backend 'prototype' (JIT, host virtual dispatch) incompatible with "
+                "require_metadata=True; use backend='aot' or 'production' for the "
+                "device-clean path with guaranteed metadata")
         missing = []
         roles = roles_for(self.cons_names, self.cons_roles)
         if all(r == "Custom" for r in roles):
-            missing.append("roles physiques (conservative_vars(..., roles=[...]) ou noms canoniques)")
+            missing.append("physical roles (conservative_vars(..., roles=[...]) or canonical names)")
         if self.gamma is None:
             missing.append("gamma (set_gamma(...))")
         if missing:
             raise ValueError(
-                "compile(require_metadata=True) : le modele '%s' ne fournit pas %s ; le .so "
-                "retomberait sur le fallback du System (roles 'custom' / gamma 1.4)"
-                % (self.name, " ni ".join(missing)))
+                "compile(require_metadata=True): model '%s' does not provide %s; the .so "
+                "would fall back to the System fallback (roles 'custom' / gamma 1.4)"
+                % (self.name, " nor ".join(missing)))
 
     def compile(self, so_path=None, include=None, backend="auto", name=None, cxx=None, std=None,
                 require_metadata=False, target="system"):
-        """Facade de compilation par INTENTION : compile le modele en une .so via le moteur designe
-        par @p backend et renvoie son chemin. Wrappe les moteurs existants (compile_so / compile_aot /
-        compile_native) SANS changer la numerique ; preserve de bout en bout noms, VariableRole, gamma,
-        n_aux, B_z et T_e (les memes briques + metadonnees ABI que compile_or_jit).
+        """Compilation facade by INTENTION: compiles the model into a .so via the engine designated
+        by @p backend and returns its path. Wraps the existing engines (compile_so / compile_aot /
+        compile_native) WITHOUT changing the numerics; preserves end-to-end names, VariableRole, gamma,
+        n_aux, B_z and T_e (the same bricks + ABI metadata as compile_or_jit).
 
-        ERGONOMIE (ne change pas la numerique) :
-          - @p include None -> auto-detecte (adc_include() : $ADC_INCLUDE, paquet adc installe, depot
-            voisin) ; passer include= reste possible (retro-compat) ;
-          - @p so_path None -> compile dans un cache hors source (adc_cache_dir()), avec un nom de
-            fichier keye sur model_hash + abi_key (+ backend/target/name). Sur un cache HIT (.so deja
-            presente pour cette cle), AUCUNE recompilation : la .so en cache est reutilisee telle quelle.
-            Sur un cache MISS (modele/parametre/toolchain change -> cle differente), recompilation puis
-            stockage. Passer so_path= force ce chemin et compile toujours (retro-compat stricte).
+        ERGONOMICS (does not change the numerics):
+          - @p include None -> auto-detected (adc_include(): $ADC_INCLUDE, installed adc package, neighbor
+            repository); passing include= remains possible (back-compat);
+          - @p so_path None -> compiles into an out-of-source cache (adc_cache_dir()), with a file name
+            keyed on model_hash + abi_key (+ backend/target/name). On a cache HIT (.so already
+            present for this key), NO recompilation: the cached .so is reused as is.
+            On a cache MISS (model/parameter/toolchain change -> different key), recompilation then
+            storage. Passing so_path= forces this path and always compiles (strict back-compat).
 
-        @p backend :
-          "prototype"  -> JIT (compile_so) : iteration rapide, dispatch virtuel hote (Rusanov ordre 1),
-                          a brancher cote System via add_dynamic_block ;
-          "aot"        -> AOT (compile_aot) : chemin de production host-marshale, numerique identique au
-                          bloc natif, a brancher via add_compiled_block ;
-          "production" -> NATIF (compile_native) : loader .so inline add_compiled_model<ProdModel>, bloc
-                          natif zero-copie (parite stricte add_block / add_compiled_model<>), a brancher
-                          via add_native_block (cle d'ABI verifiee). Chemin device-clean prepare.
+        @p backend:
+          "prototype"  -> JIT (compile_so): fast iteration, host virtual dispatch (first-order Rusanov),
+                          to be wired on the System side via add_dynamic_block;
+          "aot"        -> AOT (compile_aot): host-marshaled production path, numerics identical to the
+                          native block, to be wired via add_compiled_block;
+          "production" -> NATIVE (compile_native): .so loader inlining add_compiled_model<ProdModel>, native
+                          zero-copy block (strict parity add_block / add_compiled_model<>), to be wired
+                          via add_native_block (ABI key verified). Device-clean path prepared.
 
-        @p target : "system" (defaut) | "amr_system". Seul le backend "production" cible AmrSystem
-        (System.add_native_block vs AmrSystem.add_native_block) ; un target="amr_system" sur les autres
-        backends est rejete (pas de chemin .so AMR hors natif, cf. compile_or_jit).
+        @p target: "system" (default) | "amr_system". Only the "production" backend targets AmrSystem
+        (System.add_native_block vs AmrSystem.add_native_block); a target="amr_system" on the other
+        backends is rejected (no AMR .so path outside native, cf. compile_or_jit).
 
-        @p std : standard C++. Defaut None -> norme DU LOADER pour "production" (loader_cxx_std :
-        c++20 sous Kokkos car CUDA 12.x n'a pas -std=c++23, c++23 sinon ; le loader natif partage l'ABI
-        du module, un std different changerait __cplusplus donc la cle d'ABI -> rejet explicite par
-        add_native_block), "c++20" pour les autres (inchange).
+        @p std: C++ standard. Default None -> THE LOADER's standard for "production" (loader_cxx_std:
+        c++20 under Kokkos because CUDA 12.x has no -std=c++23, c++23 otherwise; the native loader shares
+        the module's ABI, a different std would change __cplusplus hence the ABI key -> explicit rejection
+        by add_native_block), "c++20" for the others (unchanged).
 
-        @p require_metadata (defaut False) : si True, exige que le .so transporte des roles physiques
-        utiles ET un gamma explicite (set_gamma), faute de quoi le System retomberait sur le fallback
-        (roles 'custom' / gamma 1.4) -- regression silencieuse des couplages inter-especes. Sert a un
-        pipeline de production qui veut une erreur EXPLICITE plutot qu'un fallback muet.
+        @p require_metadata (default False): if True, requires that the .so carry useful physical roles
+        AND an explicit gamma (set_gamma), failing which the System would fall back to the fallback
+        (roles 'custom' / gamma 1.4) -- silent regression of inter-species couplings. Serves a
+        production pipeline that wants an EXPLICIT error rather than a silent fallback.
 
-        Leve ValueError sur un backend inconnu ou une feature incompatible avec le backend demande
-        (plutot qu'un echec obscur a l'execution). Renvoie so_path.
+        Raises ValueError on an unknown backend or a feature incompatible with the requested backend
+        (rather than an obscure failure at runtime). Returns so_path.
 
-        Pour connaitre l'adder System a employer : voir adder_for(backend)."""
+        To know which System adder to use: see adder_for(backend)."""
         import os
         import shutil
-        # DEFAUT 'auto' (ADC-63) : production si la parite toolchain avec le module est etablie,
-        # aot sinon (defaut historique). Un backend explicite court-circuite (inchange).
+        # DEFAULT 'auto' (ADC-63): production if toolchain parity with the module is established,
+        # aot otherwise (historical default). An explicit backend short-circuits (unchanged).
         if backend == "auto":
             backend, _auto_reason = resolve_auto_backend(include)
         if backend not in self._BACKENDS:
-            raise ValueError("compile : backend %r inconnu (attendus %s + 'auto')"
+            raise ValueError("compile: backend %r unknown (expected %s + 'auto')"
                              % (backend, sorted(self._BACKENDS)))
         if target not in ("system", "amr_system"):
-            raise ValueError("compile : target 'system' | 'amr_system' (recu %r)" % (target,))
+            raise ValueError("compile: target 'system' | 'amr_system' (received %r)" % (target,))
         mode, adder = self._BACKENDS[backend]
         if target == "amr_system" and mode != "native":
-            raise ValueError("compile : target='amr_system' n'existe que pour backend='production' "
-                             "(chemin natif AMR) ; recu backend=%r" % (backend,))
-        if std is None:  # defaut par backend : le natif partage l'ABI du module (c++20 sous Kokkos,
-            # c++23 sinon -- derive du loader, cf. loader_cxx_std), les autres restent en c++20.
+            raise ValueError("compile: target='amr_system' exists only for backend='production' "
+                             "(native AMR path); received backend=%r" % (backend,))
+        if std is None:  # default per backend: native shares the module's ABI (c++20 under Kokkos,
+            # c++23 otherwise -- derived from the loader, cf. loader_cxx_std), the others stay on c++20.
             std = loader_cxx_std() if mode == "native" else "c++20"
-        if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
+        if include is None:  # ergonomics: auto-detection of the adc headers directory
             include = adc_include()
 
-        # Garde-fous metadonnees (avant tout cache : ils ne dependent que du modele + backend, et un
-        # cache HIT ne doit pas les masquer).
+        # Metadata guard rails (before any cache: they depend only on the model + backend, and a
+        # cache HIT must not mask them).
         self._check_require_metadata(require_metadata, backend)
 
-        # CACHE hors source quand so_path est omis : nom de fichier keye sur model_hash + abi_key
-        # (+ backend/target/name). Cache HIT (.so deja presente pour cette cle) -> reutilisation sans
-        # recompilation. Cache MISS -> compilation dans le chemin keye (donc stockee pour la prochaine
-        # fois). so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
+        # Out-of-source CACHE when so_path is omitted: file name keyed on model_hash + abi_key
+        # (+ backend/target/name). Cache HIT (.so already present for this key) -> reuse without
+        # recompilation. Cache MISS -> compilation in the keyed path (thus stored for next
+        # time). Explicit so_path -> forced path, always recompiled (strict back-compat).
         if so_path is None:
-            # Les backends qui compilent les en-tetes adc (production NATIF et aot) suivent Kokkos reel
-            # (compilateur + feature-key kokkos dans la cle de cache) : sous Kokkos-only, leur .so est
-            # toujours compile AVEC Kokkos (cf. compile_aot / compile_native), la cle doit le refleter.
+            # The backends that compile the adc headers (native production and aot) follow the real Kokkos
+            # (compiler + kokkos feature-key in the cache key): under Kokkos-only, their .so is
+            # always compiled WITH Kokkos (cf. compile_aot / compile_native), the key must reflect it.
             kokkos_like = backend in ("production", "aot")
             eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
             abi_key = _abi_key_python(include, eff_cxx, std)
             cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
             so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
-                return so_path  # cache HIT : .so deja compilee pour cette cle, on la reutilise telle quelle
+                return so_path  # cache HIT: .so already compiled for this key, reused as is
 
         return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
                                   target=target)
 
     @classmethod
     def adder_for(cls, backend):
-        """Nom de la methode System a employer pour brancher la .so produite par compile(backend=...) :
-        'add_dynamic_block' (prototype/JIT), 'add_compiled_block' (aot) ou 'add_native_block'
-        (production/natif). Couple le backend de compilation a son adder pour eviter une frontiere
-        ABI incoherente. ValueError si inconnu."""
+        """Name of the System method to use to wire the .so produced by compile(backend=...):
+        'add_dynamic_block' (prototype/JIT), 'add_compiled_block' (aot) or 'add_native_block'
+        (production/native). Couples the compilation backend to its adder to avoid an inconsistent
+        ABI boundary. ValueError if unknown."""
         if backend not in cls._BACKENDS:
-            raise ValueError("adder_for : backend %r inconnu (attendus %s)"
+            raise ValueError("adder_for: backend %r unknown (expected %s)"
                              % (backend, sorted(cls._BACKENDS)))
         return cls._BACKENDS[backend][1]
 
     def emit_cpp_elliptic(self, name=None, namespace="adc_generated", cse=True):
-        """Genere une BRIQUE de SECOND MEMBRE elliptique composable depuis self._elliptic.
+        """Generates a composable elliptic RIGHT-HAND SIDE BRICK from self._elliptic.
 
-        Le struct produit expose rhs(U) -> Real (densite de charge, fond, gravite...), meme forme que
-        les briques manuelles (ChargeDensity, BackgroundDensity dans adc/model/bricks.hpp) : il entre
-        comme parametre Elliptic d'un CompositeModel. Constantes inlinees, cons/primitives -> locals,
-        cse=True factorise les sous-expressions communes. ValueError si set_elliptic_rhs(...) absent."""
+        The produced struct exposes rhs(U) -> Real (charge density, background, gravity...), same shape as
+        the manual bricks (ChargeDensity, BackgroundDensity in adc/model/bricks.hpp): it enters
+        as the Elliptic parameter of a CompositeModel. Inlined constants, cons/primitives -> locals,
+        cse=True factors out common sub-expressions. ValueError if set_elliptic_rhs(...) is missing."""
         if self._elliptic is None:
-            raise ValueError("emit_cpp_elliptic : appeler set_elliptic_rhs(...) d'abord")
+            raise ValueError("emit_cpp_elliptic: call set_elliptic_rhs(...) first")
         nm = name or (self.name.capitalize() + "Elliptic")
-        rt_member = self._runtime_params_member()  # P7-b : indices runtime AVANT tout to_cpp()
+        rt_member = self._runtime_params_member()  # P7-b: runtime indices BEFORE any to_cpp()
         out = [
-            "#include <cmath>",  # autosuffisant pour std::sqrt / std::pow
+            "#include <cmath>",  # self-sufficient for std::sqrt / std::pow
             "// brique de SECOND MEMBRE elliptique generee depuis '%s' (adc.dsl.emit_cpp_elliptic)."
             % self.name,
             "// rhs(U) -> Real : second membre f(U) de l'operateur elliptique (p.ex. densite de charge).",
         ]
-        if rt_member:  # en-tete RuntimeParams uniquement si une formule lit un param runtime
+        if rt_member:  # RuntimeParams header only if a formula reads a runtime param
             out.append("#include <adc/runtime/runtime_params.hpp>")
         out += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
         ]
-        if rt_member:  # membre adc::RuntimeParams params{count, {defauts}} (P7-b)
+        if rt_member:  # member adc::RuntimeParams params{count, {defaults}} (P7-b)
             out.append(rt_member.rstrip("\n"))
         out += [
             "  template <class State>",
@@ -3184,73 +3185,73 @@ class HyperbolicModel:
         return "\n".join(out) + "\n"
 
 
-# === Phase A : facade utilisateur pure-Python =================================
-# La surface STABLE que l'utilisateur ecrit (dsl.Model / Param / CompiledModel). Pur sucre :
-# aucune numerique nouvelle, aucun changement de moteur. dsl.Model COMPOSE un HyperbolicModel prive
-# (_m) et delegue chaque appel a une methode existante ; Param est une constante NOMMEE qui s'inline
-# au codegen ; CompiledModel empaquette le .so + les metadonnees deja connues cote Python (pas de
-# relecture du .so). cf. docs/DSL_MODEL_DESIGN.md (Phase A).
+# === Phase A: pure-Python user facade =================================
+# The STABLE surface the user writes (dsl.Model / Param / CompiledModel). Pure sugar:
+# no new numerics, no engine change. dsl.Model COMPOSES a private HyperbolicModel
+# (_m) and delegates each call to an existing method; Param is a NAMED constant that inlines
+# at codegen; CompiledModel packages the .so + the metadata already known on the Python side (no
+# re-reading of the .so). cf. docs/DSL_MODEL_DESIGN.md (Phase A).
 
-# Caracteristiques HONNETES par backend (cf. DSL_MODEL_DESIGN.md section 5). Sert au diagnostic et
-# aux garde-fous device/MPI/AMR (verifies au branchement/execution, pas figes a la compilation).
+# HONEST characteristics per backend (cf. DSL_MODEL_DESIGN.md section 5). Serves diagnostics and
+# the device/MPI/AMR guard rails (checked at wiring/execution, not frozen at compilation).
 _BACKEND_CAPS = {
-    # backend : (cpu, mpi, amr, gpu)  -- True/False selon ce que le chemin SUPPORTE aujourd'hui
+    # backend: (cpu, mpi, amr, gpu)  -- True/False according to what the path SUPPORTS today
     "prototype": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
     "aot": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
-    # production = chemin NATIF (add_native_block, #85) : meme moteur que add_block, donc MPI-capable
-    # par construction (halos fill_boundary). amr=True : le loader natif a desormais un pendant AMR
+    # production = NATIVE path (add_native_block, #85): same engine as add_block, hence MPI-capable
+    # by construction (halos fill_boundary). amr=True: the native loader now has an AMR counterpart
     # (m.compile(backend='production', target='amr_system') -> AmrSystem.add_native_block, DSL Phase D)
-    # qui inline add_compiled_model(AmrSystem&) -> MEME hierarchie AMR que AmrSystem.add_block (reflux,
-    # regrid). gpu=False par PRUDENCE : le chemin natif est device-clean en C++ (GH200) mais la
-    # validation end-to-end depuis Python (add_native_block sur device) est une PR dediee (DSL sect. 5).
+    # which inlines add_compiled_model(AmrSystem&) -> SAME AMR hierarchy as AmrSystem.add_block (reflux,
+    # regrid). gpu=False out of CAUTION: the native path is device-clean in C++ (GH200) but the
+    # end-to-end validation from Python (add_native_block on device) is a dedicated PR (DSL sect. 5).
     "production": {"cpu": True, "mpi": True, "amr": True, "gpu": False},
 }
 
 
 class Param:
-    """Parametre NOMME d'un modele DSL, utilisable comme une Expr dans les formules.
+    """NAMED parameter of a DSL model, usable like an Expr in formulas.
 
-    Mode (a), constante figee a la compilation : `kind="const"` (defaut). Le codegen INLINE toute
-    constante (Const.to_cpp -> repr(value)), donc le param s'inline en Const(value) au codegen (valeur
-    ecrite EN DUR dans le .so) tout en gardant son IDENTITE (name/value/kind) pour l'introspection
-    (m.params), les diagnostics et la reproductibilite. INCHANGE par P7-b : bit-identique a l'historique.
+    Mode (a), constant fixed at compilation: `kind="const"` (default). The codegen INLINES every
+    constant (Const.to_cpp -> repr(value)), so the param inlines as Const(value) at codegen (value
+    written HARD-CODED in the .so) while keeping its IDENTITY (name/value/kind) for introspection
+    (m.params), diagnostics and reproducibility. UNCHANGED by P7-b: bit-identical to the history.
 
-    Mode (b), parametre RUNTIME (modifiable SANS recompiler) : `kind="runtime"` (P7-b). Au codegen, le
-    param emet `params.get(<indice>)` (lecture d'un membre adc::RuntimeParams de la brique) au lieu
-    d'une constante ; sa valeur est transportee au runtime par l'ABI du .so AOT et peut etre CHANGEE
-    (block.set_param / System.set_block_params) sans recompiler. La valeur passee a la declaration sert
-    de DEFAUT (sans appel set, le bloc se comporte comme avec un param const de cette valeur).
-    SUPPORTE par le backend "aot" (add_compiled_block). Les backends "prototype" (JIT) et "production"
-    (natif) compilent un param runtime comme sa valeur de declaration (figee) : un set_param y est sans
-    effet, l'API le signale (cf. CompiledModel.runtime_param_names / System.set_block_params).
+    Mode (b), RUNTIME parameter (modifiable WITHOUT recompiling): `kind="runtime"` (P7-b). At codegen, the
+    param emits `params.get(<index>)` (read of an adc::RuntimeParams member of the brick) instead
+    of a constant; its value is carried at runtime by the AOT .so ABI and can be CHANGED
+    (block.set_param / System.set_block_params) without recompiling. The value passed at declaration serves
+    as the DEFAULT (without a set call, the block behaves as with a const param of that value).
+    SUPPORTED by the "aot" backend (add_compiled_block). The "prototype" (JIT) and "production"
+    (native) backends compile a runtime param as its declaration value (fixed): a set_param there has no
+    effect, the API reports it (cf. CompiledModel.runtime_param_names / System.set_block_params).
 
-    Param N'HERITE PAS d'Expr (voir NB ci-dessous) : il EXPOSE les memes hooks d'arbre
-    (`eval`/`to_cpp`/`deps`) et les operateurs en DELEGANT a un NOEUD interne (Const pour 'const',
-    RuntimeParamRef pour 'runtime'), donc `g * (E - ...)` construit directement l'arbre attendu. La
-    valeur n'est pas une variable d'environnement -> aucune dependance a verifier dans check()."""
+    Param DOES NOT INHERIT from Expr (see NB below): it EXPOSES the same tree hooks
+    (`eval`/`to_cpp`/`deps`) and operators by DELEGATING to an internal NODE (Const for 'const',
+    RuntimeParamRef for 'runtime'), so `g * (E - ...)` builds the expected tree directly. The
+    value is not an environment variable -> no dependency to check in check()."""
 
-    # NB : Param N'HERITE PAS d'Expr pour eviter d'embarquer son etat (name/kind) dans la cle
-    # structurelle de CSE ; il EXPOSE plutot les hooks d'arbre en deleguant a un noeud interne.
+    # NB: Param DOES NOT INHERIT from Expr to avoid embedding its state (name/kind) in the CSE
+    # structural key; it EXPOSES the tree hooks instead by delegating to an internal node.
     def __init__(self, name, value, kind="const"):
         if kind not in ("const", "runtime"):
-            raise ValueError("Param : kind 'const' | 'runtime' (recu %r)" % (kind,))
+            raise ValueError("Param: kind 'const' | 'runtime' (got %r)" % (kind,))
         self.name = name
         self.value = float(value)
         self.kind = kind
         if kind == "runtime":
-            # Noeud RUNTIME PARTAGE : toutes les apparitions du param dans les formules pointent ce meme
-            # objet, donc fixer son .index a la compilation (Model._assign_runtime_indices) suffit a
-            # router toutes ses lectures vers params.get(<indice>). index=-1 tant que non assigne.
+            # SHARED RUNTIME node: all occurrences of the param in formulas point to this same
+            # object, so setting its .index at compilation (Model._assign_runtime_indices) is enough to
+            # route all its reads to params.get(<index>). index=-1 while not assigned.
             self._node = RuntimeParamRef(self.name, self.value)
         else:
-            self._node = Const(self.value)  # s'inline au codegen : valeur ecrite EN DUR dans le .so
+            self._node = Const(self.value)  # inlines at codegen: value written HARD-CODED in the .so
 
-    # --- hooks d'arbre (delegues au noeud interne) : Param utilisable comme une Expr ---
+    # --- tree hooks (delegated to the internal node): Param usable like an Expr ---
     def eval(self, env): return self._node.eval(env)
     def to_cpp(self): return self._node.to_cpp()
-    def deps(self): return set()  # ni const ni runtime n'ont de dependance (rien a verifier dans check())
+    def deps(self): return set()  # neither const nor runtime has a dependency (nothing to check in check())
 
-    # --- operateurs : Param se combine comme une Expr (promotion via _wrap du noeud interne) ---
+    # --- operators: Param combines like an Expr (promotion via _wrap of the internal node) ---
     def __add__(self, o): return Add(self._node, _wrap(o))
     def __radd__(self, o): return Add(_wrap(o), self._node)
     def __sub__(self, o): return Sub(self._node, _wrap(o))
@@ -3260,7 +3261,7 @@ class Param:
     def __truediv__(self, o): return Div(self._node, _wrap(o))
     def __rtruediv__(self, o): return Div(_wrap(o), self._node)
     def __neg__(self): return Neg(self._node)
-    def __pos__(self): return self._node  # +param = identite (Expr), pour +k*ne*ng
+    def __pos__(self): return self._node  # +param = identity (Expr), for +k*ne*ng
     def __pow__(self, o): return Pow(self._node, _wrap(o))
 
     def __float__(self): return self.value
@@ -3268,76 +3269,76 @@ class Param:
 
 
 def RuntimeParam(name, value):
-    """Sucre : un parametre RUNTIME (modifiable sans recompiler). Equivaut a Param(name, value,
-    kind='runtime'). cf. Param mode (b) et include/adc/runtime/runtime_params.hpp (P7-b)."""
+    """Sugar: a RUNTIME parameter (modifiable without recompiling). Equivalent to Param(name, value,
+    kind='runtime'). cf. Param mode (b) and include/adc/runtime/runtime_params.hpp (P7-b)."""
     return Param(name, value, kind="runtime")
 
 
 class CompiledModel:
-    """Resultat de `m.compile(...)` : empaquette le `.so` produit + TOUT ce qu'il faut pour le
-    brancher correctement (dispatch adder, diagnostic ABI, reproductibilite). Remplace le couple
-    historique (str so_path, adder_for(backend)) par un objet unique.
+    """Result of `m.compile(...)`: packages the produced `.so` + EVERYTHING needed to wire it
+    correctly (dispatch adder, ABI diagnostic, reproducibility). Replaces the historical pair
+    (str so_path, adder_for(backend)) with a single object.
 
-    Les metadonnees ne sont PAS relues du `.so` : Python detient deja noms/roles/gamma/n_aux/params
-    (le HyperbolicModel les porte) ; CompiledModel les expose juste pour le dispatch (add_equation)
-    et les diagnostics. cf. DSL_MODEL_DESIGN.md section 3."""
+    The metadata is NOT re-read from the `.so`: Python already holds names/roles/gamma/n_aux/params
+    (the HyperbolicModel carries them); CompiledModel just exposes them for dispatch (add_equation)
+    and diagnostics. cf. DSL_MODEL_DESIGN.md section 3."""
 
     def __init__(self, so_path, backend, adder, cons_names, cons_roles, prim_names, n_vars,
                  gamma, n_aux, params, caps, abi_key, model_hash, cxx, std, target="system",
                  hllc=False, roe=False, aux_extra_names=None, wave_speeds=False):
-        self.has_hllc = bool(hllc)   # capability HLLC emise (enable_hllc) : hllc dispo hors Euler 4-var
-        self.has_roe = bool(roe)     # hook ROE emis (enable_roe roles OU m.roe_dissipation fournie) : roe dispo hors Euler 4-var
-        self.has_wave_speeds = bool(wave_speeds)  # wave_speeds emis (paire explicite OU 'p') : hll dispo
+        self.has_hllc = bool(hllc)   # HLLC capability emitted (enable_hllc): hllc available beyond 4-var Euler
+        self.has_roe = bool(roe)     # ROE hook emitted (enable_roe roles OR m.roe_dissipation provided): roe available beyond 4-var Euler
+        self.has_wave_speeds = bool(wave_speeds)  # wave_speeds emitted (explicit pair OR 'p'): hll available
         self.so_path = so_path
         self.backend = backend       # "prototype" | "aot" | "production"
-        self.target = target         # "system" | "amr_system" : facade visee (loader natif AMR si amr_system)
-        self.adder = adder           # nom de methode (Amr)System : add_dynamic_block / add_compiled_block / add_native_block
+        self.target = target         # "system" | "amr_system": targeted facade (native AMR loader if amr_system)
+        self.adder = adder           # method name (Amr)System: add_dynamic_block / add_compiled_block / add_native_block
         self.cons_names = list(cons_names)
         self.cons_roles = list(cons_roles)
         self.prim_names = list(prim_names)
         self.n_vars = int(n_vars)
-        self.gamma = gamma           # None = defaut historique 1.4 cote System
+        self.gamma = gamma           # None = historical default 1.4 on the System side
         self.n_aux = int(n_aux)
-        # Noms des champs aux NOMMES (aux_field, ADC-70), ORDONNES : indice de la composante = position
-        # AUX_NAMED_BASE + k. La facade System.add_equation en construit la table nom -> composante par
-        # bloc, consommee par System.set_aux_field / aux_field. Vide pour un modele sans champ nomme.
+        # Names of the NAMED aux fields (aux_field, ADC-70), ORDERED: component index = position
+        # AUX_NAMED_BASE + k. The System.add_equation facade builds the name -> component table per
+        # block from it, consumed by System.set_aux_field / aux_field. Empty for a model without a named field.
         self.aux_extra_names = list(aux_extra_names) if aux_extra_names else []
         self.params = dict(params)   # {name: Param}
         self.caps = dict(caps)       # {cpu/mpi/amr/gpu: bool}
-        self.abi_key = abi_key       # cle ABI miroir d'adc_header_signature + compilateur/std
-        self.model_hash = model_hash  # hash stable formules+roles+n_aux+params
+        self.abi_key = abi_key       # ABI key mirroring adc_header_signature + compiler/std
+        self.model_hash = model_hash  # stable hash formulas+roles+n_aux+params
         self.cxx = cxx
         self.std = std
 
     @property
     def runtime_param_names(self):
-        """Noms des parametres RUNTIME du modele (kind='runtime'), TRIES : c'est l'ORDRE des indices
-        cote C++ (RuntimeParams) ET l'ordre attendu par System.set_block_params(name, values) (P7-b).
-        Vide si le modele n'a que des params const."""
+        """Names of the model's RUNTIME parameters (kind='runtime'), SORTED: this is the ORDER of the
+        indices on the C++ side (RuntimeParams) AND the order expected by System.set_block_params(name, values) (P7-b).
+        Empty if the model has only const params."""
         return sorted(k for k, p in self.params.items() if getattr(p, "kind", "const") == "runtime")
 
     def runtime_param_values(self):
-        """Valeurs de DECLARATION des params runtime, paralleles a runtime_param_names (defaut tant
-        qu'aucun set_block_params n'a ete appele)."""
+        """DECLARATION values of the runtime params, parallel to runtime_param_names (default as long
+        as no set_block_params has been called)."""
         return [self.params[k].value for k in self.runtime_param_names]
 
     def check_runtime(self, n=16, state=None, raise_on_error=True, rtol=1e-8, atol=1e-10):
-        """Re-verification RUNTIME d'un CompiledModel SEUL (solde audit, GENERICITY pt 9) : sans le
-        dsl.Model d'origine, les FORMULES ne sont plus re-verifiables (check_model symbolique), mais
-        le .so, lui, l'est -- on l'installe dans un System EPHEMERE (n x n periodique, Poisson
-        neutre, minmod+rusanov) et on delegue a System.check_model (etat fini, residu -div F + S
-        fini, positivite par roles, round-trip des conversions DU MODELE).
+        """RUNTIME re-verification of a CompiledModel ALONE (audit balance, GENERICITY pt 9): without the
+        original dsl.Model, the FORMULAS are no longer re-verifiable (symbolic check_model), but
+        the .so itself is -- we install it in an EPHEMERAL System (n x n periodic, neutral
+        Poisson, minmod+rusanov) and delegate to System.check_model (finite state, residual -div F + S
+        finite, positivity by roles, round-trip of THE MODEL conversions).
 
-        @p state : dict {nom de variable conservative: ndarray (n, n)} pour controler l'etat teste.
-        None -> etat de FUMEE par ROLES (Density = 1 + bosse gaussienne, Momentum* = 0,
-        Energy = 2.5, autres composantes = 0.5) -- suffisant pour exercer flux/source/conversions ;
-        fournir state= pour un regime physique precis. @return le dict de System.check_model."""
+        @p state: dict {conservative variable name: ndarray (n, n)} to control the tested state.
+        None -> SMOKE state by ROLES (Density = 1 + gaussian bump, Momentum* = 0,
+        Energy = 2.5, other components = 0.5) -- enough to exercise flux/source/conversions;
+        provide state= for a precise physical regime. @return the dict from System.check_model."""
         import numpy as np
         if getattr(self, "target", "system") != "system":
             raise ValueError(
-                "CompiledModel.check_runtime : seul target='system' est re-verifiable dans un "
-                "System ephemere ; un loader target='amr_system' se controle installe dans son "
-                "AmrSystem (invariants des tests AMR), pas isolement.")
+                "CompiledModel.check_runtime: only target='system' is re-verifiable in an "
+                "ephemeral System; a target='amr_system' loader is checked installed in its "
+                "AmrSystem (AMR test invariants), not in isolation.")
         from . import System, FiniteVolume, Explicit
         sim = System(n=int(n), L=1.0, periodic=True)
         sim.set_poisson()
@@ -3370,68 +3371,68 @@ class CompiledModel:
 
 
 def _abi_key_python(include, cxx, std):
-    """Cle d'ABI cote Python, MIROIR de adc::detail::abi_key_string (compilateur + standard +
-    signature des en-tetes). Rend la verification + le diagnostic disponibles cote Python AVANT le
-    chargement du .so (le chemin natif compare la sienne cote C++). Forme stable et lisible :
-    "<sig en-tetes>|<cxx>|<std>". include absent -> signature vide (diagnostic degrade, pas d'UB)."""
+    """ABI key on the Python side, MIRROR of adc::detail::abi_key_string (compiler + standard +
+    header signature). Makes the verification + diagnostic available on the Python side BEFORE
+    loading the .so (the native path compares its own on the C++ side). Stable and readable form:
+    "<header sig>|<cxx>|<std>". include absent -> empty signature (degraded diagnostic, no UB)."""
     import os
     sig = adc_header_signature(include) if include and os.path.isdir(include) else ""
     return "%s|%s|%s" % (sig, cxx or "", std or "")
 
 
 class Model:
-    """Facade STABLE de modele DSL (Phase A). COMPOSE un HyperbolicModel prive (_m, composition et
-    NON heritage) et delegue chaque appel a une methode existante : aucune numerique nouvelle.
+    """STABLE facade of a DSL model (Phase A). COMPOSES a private HyperbolicModel (_m, composition and
+    NOT inheritance) and delegates each call to an existing method: no new numerics.
 
         m = adc.dsl.Model("euler")
         rho, rhou, rhov, E = m.conservative_vars("rho", "rho_u", "rho_v", "E")
-        g = m.param("gamma", 1.4)                 # constante NOMMEE, inlinee au codegen
+        g = m.param("gamma", 1.4)                 # NAMED constant, inlined at codegen
         u = m.primitive("u", rhou / rho)
         p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u*u + ...)))
-        m.flux(x=[...], y=[...])                   # DECLARATEUR symbolique du flux physique
-        m.eval_flux(U, aux, dir)                   # EVALUATEUR numpy (debug), nom DISTINCT
-        m.primitive_vars(rho=rho, u=u, v=v, p=p)   # layout Prim ordonne (ordre des kwargs)
+        m.flux(x=[...], y=[...])                   # symbolic DECLARATOR of the physical flux
+        m.eval_flux(U, aux, dir)                   # numpy EVALUATOR (debug), DISTINCT name
+        m.primitive_vars(rho=rho, u=u, v=v, p=p)   # ordered Prim layout (kwargs order)
         compiled = m.compile(so_path, include, backend="aot")  # -> CompiledModel
 
     cf. docs/DSL_MODEL_DESIGN.md sections 1-3."""
 
     def __init__(self, name):
         self._m = HyperbolicModel(name)
-        self.params = {}   # name -> Param (introspection / reproductibilite)
+        self.params = {}   # name -> Param (introspection / reproducibility)
 
     @property
     def name(self): return self._m.name
 
-    # --- declaration des variables (delegation directe a HyperbolicModel) ---
+    # --- variable declaration (direct delegation to HyperbolicModel) ---
     def conservative_vars(self, *names, roles=None):
-        """Declare les variables conservatives. @p roles : meme convention que HyperbolicModel."""
+        """Declares the conservative variables. @p roles: same convention as HyperbolicModel."""
         return self._m.conservative_vars(*names, roles=roles)
 
     def primitive(self, name, expr):
-        """Definit une primitive par sa formule (en fonction des cons / primitives precedentes)."""
+        """Defines a primitive by its formula (as a function of the cons / preceding primitives)."""
         return self._m.primitive(name, expr)
 
     def primitive_vars(self, *vars, roles=None, **named):
-        """Declare les primitives ET le layout ORDONNE de Prim. Deux formes :
+        """Declares the primitives AND the ORDERED layout of Prim. Two forms:
 
-        - KWARGS (style cible) : `primitive_vars(rho=expr, u=expr, v=expr, p=expr)` : chaque kwarg
-          DEFINIT une primitive (m.primitive(name, expr)) ET fixe le layout de Prim dans l'ordre
-          d'insertion des kwargs (Python 3.7+ : ordre garanti). @p roles (liste) optionnel.
-        - POSITIONNELLE : `primitive_vars(rho, u, v, p, roles=...)` : noms/Var deja definis, fixe
-          juste le layout (delegue a set_primitive_state, comme HyperbolicModel).
+        - KWARGS (target style): `primitive_vars(rho=expr, u=expr, v=expr, p=expr)`: each kwarg
+          DEFINES a primitive (m.primitive(name, expr)) AND fixes the layout of Prim in the
+          insertion order of the kwargs (Python 3.7+: order guaranteed). @p roles (list) optional.
+        - POSITIONAL: `primitive_vars(rho, u, v, p, roles=...)`: names/Var already defined, fixes
+          only the layout (delegates to set_primitive_state, like HyperbolicModel).
 
-        Les deux formes sont exclusives (melanger kwargs nommes et positionnels leve)."""
+        The two forms are exclusive (mixing named kwargs and positional raises)."""
         if named and vars:
-            raise ValueError("primitive_vars : melanger forme positionnelle et kwargs nommes "
-                             "(choisir l'une ; les kwargs definissent ET ordonnent les primitives)")
+            raise ValueError("primitive_vars: mixing positional form and named kwargs "
+                             "(choose one; kwargs define AND order the primitives)")
         if named:
-            # kwargs : definir chaque primitive, puis fixer le layout dans l'ordre d'insertion.
-            # Une primitive n'est PAS (re)definie si le kwarg est la Var de MEME nom -- sinon le codegen
-            # emettrait `const Real x = x;` (auto-init -> NaN). Deux cas de self-reference, tous deux
-            # laisses REJOINDRE le layout sans redefinition (style cible primitive_vars(rho=rho, u=u, ...)) :
-            #  - nom DEJA CONSERVATIF (ex. rho=rho : la densite, primitive == conservative) ;
-            #  - Var PRIMITIVE DEJA DEFINIE de meme nom (ex. u=u quand u vient de m.primitive('u', ...)).
-            # Sinon (kwarg = expression, ex. p=cs2*rho ou u=mx/rho) la primitive est definie normalement.
+            # kwargs: define each primitive, then fix the layout in insertion order.
+            # A primitive is NOT (re)defined if the kwarg is the Var of the SAME name -- otherwise the codegen
+            # would emit `const Real x = x;` (auto-init -> NaN). Two cases of self-reference, both
+            # left to JOIN the layout without redefinition (target style primitive_vars(rho=rho, u=u, ...)):
+            #  - name ALREADY CONSERVATIVE (e.g. rho=rho: the density, primitive == conservative);
+            #  - PRIMITIVE Var ALREADY DEFINED of the same name (e.g. u=u when u comes from m.primitive('u', ...)).
+            # Otherwise (kwarg = expression, e.g. p=cs2*rho or u=mx/rho) the primitive is defined normally.
             ordered = list(named.keys())
             for nm in ordered:
                 val = named[nm]
@@ -3441,154 +3442,154 @@ class Model:
                 self._m.primitive(nm, val)
             self._m.set_primitive_state(*ordered, roles=roles)
             return tuple(Var(nm, "prim") for nm in ordered)
-        # forme positionnelle : fixe le layout a partir de noms/Var deja definis.
+        # positional form: fixes the layout from already-defined names/Var.
         self._m.set_primitive_state(*vars, roles=roles)
         return None
 
     def aux(self, name):
-        """Champ auxiliaire CANONIQUE (doit etre une clef de AUX_CANONICAL : phi/grad_x/grad_y/B_z/T_e)."""
+        """CANONICAL auxiliary field (must be a key of AUX_CANONICAL: phi/grad_x/grad_y/B_z/T_e)."""
         return self._m.aux(name)
 
     def aux_field(self, name):
-        """Champ auxiliaire NOMME (ADC-70 phase 1) fourni par bloc via System.set_aux_field(bloc, name,
-        array). name est ARBITRAIRE (identifiant) ; le k-ieme appel reserve la composante du canal aux
-        AUX_NAMED_BASE + k (lue en C++ via aux.extra_field(k)). Au plus AUX_NAMED_MAX par modele.
-        Renvoie une Var utilisable dans flux / source / eigenvalues. Delegue a HyperbolicModel.aux_field."""
+        """NAMED auxiliary field (ADC-70 phase 1) provided by a block via System.set_aux_field(block, name,
+        array). name is ARBITRARY (identifier); the k-th call reserves the aux channel component
+        AUX_NAMED_BASE + k (read in C++ via aux.extra_field(k)). At most AUX_NAMED_MAX per model.
+        Returns a Var usable in flux / source / eigenvalues. Delegates to HyperbolicModel.aux_field."""
         return self._m.aux_field(name)
 
     def conservative_from(self, exprs):
-        """Inverse prim -> cons (le DSL ne sait pas inverser symboliquement)."""
+        """Inverse prim -> cons (the DSL cannot invert symbolically)."""
         self._m.set_conservative_from(exprs)
 
-    # --- flux : DECLARATEUR symbolique vs EVALUATEUR numpy (noms DISTINCTS, decision tranchee) ---
+    # --- flux: symbolic DECLARATOR vs numpy EVALUATOR (DISTINCT names, settled decision) ---
     def flux(self, x, y):
-        """DECLARATEUR symbolique du flux physique (delegue a set_flux). x/y : listes d'Expr, une
-        par composante conservative. NE PAS confondre avec l'evaluateur numpy eval_flux."""
+        """Symbolic DECLARATOR of the physical flux (delegates to set_flux). x/y: lists of Expr, one
+        per conservative component. DO NOT confuse with the numpy evaluator eval_flux."""
         self._m.set_flux(x, y)
 
     def eval_flux(self, U, aux, dir):
-        """EVALUATEUR numpy du flux physique (debug / proto hote ; delegue a HyperbolicModel.flux).
-        U : numpy (n_vars, ...) ; aux : dict nom -> tableau ; dir : 0=x, 1=y."""
+        """numpy EVALUATOR of the physical flux (debug / host proto; delegates to HyperbolicModel.flux).
+        U: numpy (n_vars, ...); aux: dict name -> array; dir: 0=x, 1=y."""
         return self._m.flux(U, aux, dir)
 
     def eigenvalues(self, x, y):
-        """Valeurs propres (vitesses caracteristiques) par direction (delegue a set_eigenvalues)."""
+        """Eigenvalues (characteristic speeds) per direction (delegates to set_eigenvalues)."""
         self._m.set_eigenvalues(x, y)
 
     def wave_speeds(self, x, y):
-        """Vitesses d'onde SIGNEES explicites par direction : x = (smin_x, smax_x), y = (smin_y,
-        smax_y). Emet ``wave_speeds(U, aux, dir, smin, smax)`` sur la brique SANS exiger de
-        primitive 'p' : riemann='hll' devient disponible pour un modele sans pression (systeme de
-        moments, isotherme...). Prioritaire sur le chemin historique (eigenvalues + 'p') ; si
-        eigenvalues n'est pas declare, max_wave_speed (Rusanov / CFL) derive de ``max(|smin|, |smax|)``.
-        Delegue a set_wave_speeds ; cf. HyperbolicModel.set_wave_speeds."""
+        """Explicit SIGNED wave speeds per direction: x = (smin_x, smax_x), y = (smin_y,
+        smax_y). Emits ``wave_speeds(U, aux, dir, smin, smax)`` on the brick WITHOUT requiring a
+        primitive 'p': riemann='hll' becomes available for a model without pressure (moment
+        system, isothermal...). Takes priority over the historical path (eigenvalues + 'p'); if
+        eigenvalues is not declared, max_wave_speed (Rusanov / CFL) derives from ``max(|smin|, |smax|)``.
+        Delegates to set_wave_speeds; cf. HyperbolicModel.set_wave_speeds."""
         self._m.set_wave_speeds(x, y)
 
     def wave_speeds_from_jacobian(self, x=None, y=None, eig="numeric", blocks=None):
-        """Vitesses d'onde signees EXACTES par valeurs propres du jacobien de flux (delegue a
-        set_wave_speeds_from_jacobian, voir son contrat complet) : x/y = dF/dU en Expr (None =
-        AUTODIFF du flux declare via flux_jacobian) ; eig = 'numeric' | 'fd' (differences finies
-        du flux compile, debug) ; blocks = listes d'indices des sous-blocs diagonaux (None = bloc
-        plein, seul mode inconditionnellement correct -- les blocs AFFIRMENT une structure
-        bloc-triangulaire)."""
+        """EXACT signed wave speeds from the eigenvalues of the flux jacobian (delegates to
+        set_wave_speeds_from_jacobian, see its full contract): x/y = dF/dU as Expr (None =
+        AUTODIFF of the declared flux via flux_jacobian); eig = 'numeric' | 'fd' (finite differences
+        of the compiled flux, debug); blocks = lists of indices of the diagonal sub-blocks (None = full
+        block, the only unconditionally correct mode -- the blocks ASSERT a
+        block-triangular structure)."""
         self._m.set_wave_speeds_from_jacobian(x=x, y=y, eig=eig, blocks=blocks)
 
     def eval_wave_speeds(self, U, aux, dir):
-        """EVALUATEUR numpy des vitesses signees (smin, smax) emises (delegue a
-        HyperbolicModel.wave_speeds_value) : paire explicite, jacobien (eig numpy par blocs) ou
-        min/max des eigenvalues."""
+        """numpy EVALUATOR of the emitted signed speeds (smin, smax) (delegates to
+        HyperbolicModel.wave_speeds_value): explicit pair, jacobian (numpy eig per blocks) or
+        min/max of the eigenvalues."""
         return self._m.wave_speeds_value(U, aux, dir)
 
     def stability_speed(self, expr):
-        """Vitesse de STABILITE lambda* pilotant la CFL du bloc (OPTIONNEL ; delegue a
-        HyperbolicModel.stability_speed). Fallback sans appel : max(abs(eigenvalues)), strictement
-        l'historique. Compilee comme flux/source (production GPU/MPI, pas de callback par cellule)."""
+        """STABILITY speed lambda* driving the block CFL (OPTIONAL; delegates to
+        HyperbolicModel.stability_speed). Fallback without a call: max(abs(eigenvalues)), strictly
+        the historical behavior. Compiled like flux/source (production GPU/MPI, no per-cell callback)."""
         self._m.stability_speed(expr)
 
     def stability_dt(self, expr_dt):
-        """Pas ADMISSIBLE direct dt(U, aux) borne locale du pas (OPTIONNEL ; delegue a
-        HyperbolicModel.stability_dt). Le cfl n'est pas applique a cette borne. Fallback sans appel :
-        aucune borne supplementaire (politique de pas historique)."""
+        """Direct ADMISSIBLE step dt(U, aux) local bound of the step (OPTIONAL; delegates to
+        HyperbolicModel.stability_dt). The cfl is not applied to this bound. Fallback without a call:
+        no additional bound (historical step policy)."""
         self._m.stability_dt(expr_dt)
 
     def source(self, s):
-        """Terme source S(U, aux), une expression par composante (optionnel ; delegue a set_source)."""
+        """Source term S(U, aux), one expression per component (optional; delegates to set_source)."""
         self._m.set_source(s)
 
     def source_frequency(self, expr_mu):
-        """Frequence locale mu(U, aux) [1/s] de la source -- la borne de pas 'source' du meeting
-        (dt <= cfl*substeps/(stride*max mu), sans pas d'espace). Emise sur la brique de SOURCE
-        generee (frequency(U, aux)), forwarde par CompositeModel, agregee par System/AmrSystem
-        step_cfl. EXIGE m.source([...]). Delegue a HyperbolicModel.source_frequency."""
+        """Local frequency mu(U, aux) [1/s] of the source -- the 'source' step bound from the meeting
+        (dt <= cfl*substeps/(stride*max mu), without a space step). Emitted on the generated SOURCE
+        brick (frequency(U, aux)), forwarded by CompositeModel, aggregated by System/AmrSystem
+        step_cfl. REQUIRES m.source([...]). Delegates to HyperbolicModel.source_frequency."""
         self._m.source_frequency(expr_mu)
 
     def source_jacobian(self, rows):
-        """Jacobien ANALYTIQUE dS/dU de la source (rows[r][c] = dS_r/dU_c, matrice n_vars x n_vars
-        d'expressions) : le Newton implicite (IMEX/SourceImplicitBE) l'utilise a la place des
-        differences finies. EXIGE m.source. Delegue a HyperbolicModel.source_jacobian."""
+        """ANALYTIC Jacobian dS/dU of the source (rows[r][c] = dS_r/dU_c, an n_vars x n_vars
+        matrix of expressions): the implicit Newton (IMEX/SourceImplicitBE) uses it instead of
+        finite differences. REQUIRES m.source. Delegates to HyperbolicModel.source_jacobian."""
         self._m.source_jacobian(rows)
 
     def implicit_source(self, jacobian=None):
-        """Declaration GROUPEE de l'implicite local (audit vague 3, sucre) : le RESIDU est deja
-        implique par m.source (backward-Euler : F = W - U^n - dt*S(W)) ; @p jacobian (optionnel) =
-        matrice dS/dU analytique (cf. source_jacobian). Sans jacobian : differences finies."""
+        """GROUPED declaration of the local implicit (wave 3 audit, sugar): the RESIDUAL is already
+        implied by m.source (backward-Euler: F = W - U^n - dt*S(W)); @p jacobian (optional) =
+        analytic dS/dU matrix (cf. source_jacobian). Without jacobian: finite differences."""
         if jacobian is not None:
             self._m.source_jacobian(jacobian)
 
     def enable_hllc(self):
-        """Emet la capability HLLC (contact_speed + hllc_star_state generes depuis les ROLES +
-        primitive 'p') : riemann='hllc' devient disponible pour ce modele MEME hors Euler 4
-        variables. Delegue a HyperbolicModel.enable_hllc."""
+        """Emits the HLLC capability (contact_speed + hllc_star_state generated from the ROLES +
+        primitive 'p'): riemann='hllc' becomes available for this model EVEN outside 4-variable
+        Euler. Delegates to HyperbolicModel.enable_hllc."""
         self._m.enable_hllc()
 
     def enable_roe(self):
-        """Emet la capability ROE (roe_dissipation = ``|A_roe| dU`` generee depuis les ROLES +
-        primitive 'p') : riemann='roe' devient disponible pour ce modele MEME hors Euler 4
-        variables (sans Energy : c = sqrt(p/rho) moyennee a la Roe ; composantes hors roles
-        fluides = scalaires passifs sur l'onde entropique). Delegue a HyperbolicModel.enable_roe."""
+        """Emits the ROE capability (roe_dissipation = ``|A_roe| dU`` generated from the ROLES +
+        primitive 'p'): riemann='roe' becomes available for this model EVEN outside 4-variable
+        Euler (without Energy: c = sqrt(p/rho) averaged Roe-style; components outside the fluid
+        roles = passive scalars on the entropy wave). Delegates to HyperbolicModel.enable_roe."""
         self._m.enable_roe()
 
     def roe_dissipation(self, x, y):
-        """Dissipation de Roe FOURNIE par l'utilisateur (hors roles fluides) : n_vars expressions par
-        direction (x=, y=), ecrites en m.left(...)/m.right(...) (ou dsl.left/right) des deux etats,
-        emises comme le hook C++ roe_dissipation(UL, AL, UR, AR, dir). Pendant 'fourni' de enable_roe
-        (un seul fournisseur : les deux ensemble levent). Le helper m.flux_jacobian assiste l'ecriture.
-        Delegue a HyperbolicModel.roe_dissipation (cf. sa doc)."""
+        """Roe dissipation PROVIDED by the user (outside the fluid roles): n_vars expressions per
+        direction (x=, y=), written with m.left(...)/m.right(...) (or dsl.left/right) of the two states,
+        emitted as the C++ hook roe_dissipation(UL, AL, UR, AR, dir). During the 'provided' mode of enable_roe
+        (a single provider: supplying both together raises). The helper m.flux_jacobian assists the writing.
+        Delegates to HyperbolicModel.roe_dissipation (cf. its doc)."""
         self._m.roe_dissipation(x, y)
 
     def flux_jacobian(self, dir):
-        """Jacobien de flux A = dF_dir/dU (matrice n_vars x n_vars d'Expr, A[i][j]=d(F_i)/d(U_j)),
-        auto-derive des flux declares par dsl.diff (primitives developpees). HELPER de construction
-        de m.roe_dissipation, n'emet rien. @p dir : 0/'x' ou 1/'y'. Delegue a HyperbolicModel."""
+        """Flux Jacobian A = dF_dir/dU (an n_vars x n_vars matrix of Expr, A[i][j]=d(F_i)/d(U_j)),
+        auto-derived from the fluxes declared via dsl.diff (expanded primitives). HELPER for building
+        m.roe_dissipation, emits nothing. @p dir: 0/'x' or 1/'y'. Delegates to HyperbolicModel."""
         return self._m.flux_jacobian(dir)
 
     def left(self, expr):
-        """Marque @p expr comme evaluee sur l'etat GAUCHE UL (m.roe_dissipation). Sucre pour dsl.left."""
+        """Marks @p expr as evaluated on the LEFT state UL (m.roe_dissipation). Sugar for dsl.left."""
         return left(expr)
 
     def right(self, expr):
-        """Marque @p expr comme evaluee sur l'etat DROIT UR (m.roe_dissipation). Sucre pour dsl.right."""
+        """Marks @p expr as evaluated on the RIGHT state UR (m.roe_dissipation). Sugar for dsl.right."""
         return right(expr)
 
     def elliptic_rhs(self, e):
-        """Contribution au second membre elliptique (couplage Poisson ; delegue a set_elliptic_rhs)."""
+        """Contribution to the elliptic right-hand side (Poisson coupling; delegates to set_elliptic_rhs)."""
         self._m.set_elliptic_rhs(e)
 
     def gamma(self, value):
-        """Indice adiabatique (EOS), porte par ADC_EXPORT_BLOCK_GAMMA (delegue a set_gamma)."""
+        """Adiabatic index (EOS), carried by ADC_EXPORT_BLOCK_GAMMA (delegates to set_gamma)."""
         self._m.set_gamma(value)
 
     def param(self, name, value, kind="const"):
-        """Parametre NOMME utilisable dans les formules. Mode (a) (`kind="const"`, defaut) : constante
-        figee a la compilation, inlinee au codegen ; stockee dans m.params (introspection /
-        reproductibilite). Mode (b) (`kind="runtime"`, P7-b) : SUPPORTE sur le backend "aot" -- le param
-        emet `params.get(<indice>)` (membre adc::RuntimeParams) et sa valeur peut etre CHANGEE au runtime
-        via System.set_block_params(name, values) SANS recompiler (la valeur de declaration sert de
-        defaut) ; cf. CompiledModel.runtime_param_names. Les backends "prototype"/"production" figent un
-        param runtime a sa valeur de declaration.
+        """NAMED parameter usable in the formulas. Mode (a) (`kind="const"`, default): constant
+        frozen at compile time, inlined at codegen; stored in m.params (introspection /
+        reproducibility). Mode (b) (`kind="runtime"`, P7-b): SUPPORTED on the "aot" backend -- the param
+        emits `params.get(<index>)` (member of adc::RuntimeParams) and its value can be CHANGED at runtime
+        via System.set_block_params(name, values) WITHOUT recompiling (the declaration value serves as the
+        default); cf. CompiledModel.runtime_param_names. The "prototype"/"production" backends freeze a
+        runtime param at its declaration value.
 
-        CAS gamma : si name == "gamma", appelle AUSSI set_gamma(value) pour que la metadonnee ABI
-        reste coherente (sinon le System retombe sur 1.4)."""
+        gamma CASE: if name == "gamma", ALSO calls set_gamma(value) so that the ABI metadata
+        stays consistent (otherwise the System falls back to 1.4)."""
         p = Param(name, value, kind=kind)  # 'runtime' -> RuntimeParamRef (P7-b), 'const' -> inline
         self.params[name] = p
         if name == "gamma":
@@ -3596,19 +3597,19 @@ class Model:
         return p
 
     def check(self):
-        """Verifie les dependances (variables referencees declarees). Leve ValueError sinon."""
+        """Checks the dependencies (referenced variables are declared). Raises ValueError otherwise."""
         return self._m.check()
 
     def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
                     raise_on_error=True):
-        """Verification NUMERIQUE generique du modele (flux/source/elliptic finis, valeurs propres
-        reelles et finies, coherence wave_speeds/max_wave_speed, round-trip cons<->prim, positivite
-        Density/'p') sur des etats echantillons. Delegue a HyperbolicModel.check_model (cf. sa doc).
-        A appeler AVANT compile() ; le pendant runtime d'un bloc installe est System.check_model."""
+        """Generic NUMERICAL verification of the model (finite flux/source/elliptic, real and finite
+        eigenvalues, wave_speeds/max_wave_speed consistency, cons<->prim round-trip, positivity of
+        Density/'p') on sample states. Delegates to HyperbolicModel.check_model (cf. its doc).
+        To be called BEFORE compile(); the runtime counterpart of an installed block is System.check_model."""
         return self._m.check_model(samples=samples, n_samples=n_samples, seed=seed, aux=aux,
                                    rtol=rtol, atol=atol, raise_on_error=raise_on_error)
 
-    # --- introspection (lecture seule, deleguee au modele backing) ---
+    # --- introspection (read-only, delegated to the backing model) ---
     @property
     def cons_names(self): return self._m.cons_names
 
@@ -3619,91 +3620,91 @@ class Model:
     def n_vars(self): return self._m.n_vars
 
     def _model_hash(self):
-        """Hash stable du modele : formules (flux/eig/source/elliptic/primitives/cons_from) + roles +
-        n_aux + params NOMMES (m.params). Sert a identifier/reutiliser un .so deja compile (cle de
-        cache) et a tracer le run. Delegue au calcul partage HyperbolicModel._model_hash en lui passant
-        les Param de la facade (sinon deux modeles ne differant que par un param auraient le meme hash)."""
+        """Stable hash of the model: formulas (flux/eig/source/elliptic/primitives/cons_from) + roles +
+        n_aux + NAMED params (m.params). Used to identify/reuse an already-compiled .so (cache key)
+        and to trace the run. Delegates to the shared computation HyperbolicModel._model_hash, passing it
+        the Param of the facade (otherwise two models differing only by a param would have the same hash)."""
         return self._m._model_hash(params=self.params)
 
     def compile(self, so_path=None, include=None, backend="auto", target="system", name=None,
                 cxx=None, std=None, require_metadata=False):
-        """Compile le modele en un CompiledModel (Phase A). Delegue la GENERATION + compilation a
-        HyperbolicModel.compile (moteurs inchanges : compile_so / compile_aot / compile_native), puis
-        empaquette le .so avec les metadonnees deja connues (pas de relecture du .so).
+        """Compiles the model into a CompiledModel (Phase A). Delegates the GENERATION + compilation to
+        HyperbolicModel.compile (engines unchanged: compile_so / compile_aot / compile_native), then
+        packages the .so with the already-known metadata (no re-reading of the .so).
 
-        - ``backend`` : "prototype" | "aot" | "production" (cf. HyperbolicModel.compile).
-        - ``target`` : "system" (defaut) | "amr_system" (DSL Phase D). "amr_system" exige
-          backend="production" (le loader natif inline add_compiled_model(AmrSystem&), seul chemin
-          .so AMR ; cf. compile_or_jit) -> a brancher via AmrSystem.add_equation. Un autre backend
-          avec target="amr_system" leve ValueError (pas de chemin AMR hors natif).
+        - ``backend``: "prototype" | "aot" | "production" (cf. HyperbolicModel.compile).
+        - ``target``: "system" (default) | "amr_system" (DSL Phase D). "amr_system" requires
+          backend="production" (the native loader inlines add_compiled_model(AmrSystem&), the only
+          .so AMR path; cf. compile_or_jit) -> to be wired via AmrSystem.add_equation. Another backend
+          with target="amr_system" raises ValueError (no AMR path outside native).
 
-        PAS d'argument ``device`` : les capacites GPU/MPI/AMR sont verifiees au branchement
-        (add_equation) / a l'execution, pas figees a la compilation (DSL_MODEL_DESIGN.md point 7).
+        NO ``device`` argument: the GPU/MPI/AMR capabilities are checked at wiring time
+        (add_equation) / at execution, not frozen at compile time (DSL_MODEL_DESIGN.md point 7).
 
-        ERGONOMIE (ne change pas la numerique) :
+        ERGONOMICS (does not change the numerics):
 
-        - ``include`` None -> auto-detecte (adc_include()) ; passer include= reste possible ;
-        - ``so_path`` None -> .so dans un cache hors source (adc_cache_dir()), nom de fichier keye sur
-          model_hash (PARAMS COMPRIS) + abi_key (+ backend/target/name). Cache HIT (.so deja presente)
-          -> reutilisation sans recompilation ; cache MISS (modele/param/toolchain change) ->
-          recompilation + stockage. Passer so_path= force ce chemin et recompile (retro-compat).
+        - ``include`` None -> auto-detected (adc_include()); passing include= remains possible;
+        - ``so_path`` None -> .so in an out-of-source cache (adc_cache_dir()), file name keyed on
+          model_hash (PARAMS INCLUDED) + abi_key (+ backend/target/name). Cache HIT (.so already present)
+          -> reuse without recompilation; cache MISS (model/param/toolchain change) ->
+          recompilation + storage. Passing so_path= forces that path and recompiles (backward-compat).
 
-        Renvoie un CompiledModel portant so_path, backend, target, adder, noms/roles/gamma/n_aux/params,
+        Returns a CompiledModel carrying so_path, backend, target, adder, names/roles/gamma/n_aux/params,
         caps, abi_key, model_hash, cxx, std."""
         import os
         import shutil
-        # DEFAUT 'auto' (ADC-63) : production si parite toolchain etablie, aot sinon. La raison
-        # est posee sur le CompiledModel (backend_auto_reason) -- jamais un choix muet.
+        # 'auto' DEFAULT (ADC-63): production if toolchain parity is established, aot otherwise. The reason
+        # is recorded on the CompiledModel (backend_auto_reason) -- never a silent choice.
         auto_reason = None
         if backend == "auto":
             backend, auto_reason = resolve_auto_backend(include)
         if backend not in HyperbolicModel._BACKENDS:
-            raise ValueError("compile : backend %r inconnu (attendus %s + 'auto')"
+            raise ValueError("compile: unknown backend %r (expected %s + 'auto')"
                              % (backend, sorted(HyperbolicModel._BACKENDS)))
         if target not in ("system", "amr_system"):
-            raise ValueError("compile : target 'system' | 'amr_system' (recu %r)" % (target,))
+            raise ValueError("compile: target 'system' | 'amr_system' (got %r)" % (target,))
 
         m = self._m
-        # std effectif : meme defaut par backend que HyperbolicModel.compile. Le natif suit la norme
-        # du loader (c++20 sous Kokkos, c++23 sinon, cf. loader_cxx_std) ; les autres restent c++20.
+        # effective std: same per-backend default as HyperbolicModel.compile. The native one follows the
+        # loader's standard (c++20 under Kokkos, c++23 otherwise, cf. loader_cxx_std); the others stay c++20.
         mode = HyperbolicModel._BACKENDS[backend][0]
         if target == "amr_system" and mode != "native":
-            raise ValueError("compile : target='amr_system' n'existe que pour backend='production' "
-                             "(chemin natif AMR) ; recu backend=%r" % (backend,))
+            raise ValueError("compile: target='amr_system' only exists for backend='production' "
+                             "(native AMR path); got backend=%r" % (backend,))
         eff_std = std if std is not None else (loader_cxx_std() if mode == "native" else "c++20")
-        # native ET aot (mode "compile") compilent les en-tetes adc -> Kokkos reel (compilateur +
-        # feature-key kokkos) pour que la cle de cache CONCORDE avec le .so produit (cf. compile_aot).
+        # native AND aot (mode "compile") compile the adc headers -> real Kokkos (compiler +
+        # kokkos feature-key) so that the cache key MATCHES the produced .so (cf. compile_aot).
         kokkos_like = mode in ("native", "compile")
         eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
-        if include is None:  # ergonomie : auto-detection du dossier d'en-tetes adc
+        if include is None:  # ergonomics: auto-detection of the adc headers folder
             include = adc_include()
 
-        # Garde-fous metadonnees AVANT le cache (un HIT ne doit pas les masquer ; cf.
+        # Metadata guards BEFORE the cache (a HIT must not mask them; cf.
         # HyperbolicModel._check_require_metadata).
         m._check_require_metadata(require_metadata, backend)
 
-        # model_hash PARAMS-COMPRIS (celui porte par le CompiledModel) ET cle d'ABI : tous deux servent
-        # aussi de cle de cache, donc on les calcule ici pour les reutiliser (coherence cle/metadonnees).
+        # PARAMS-INCLUDED model_hash (the one carried by the CompiledModel) AND the ABI key: both also
+        # serve as cache keys, so we compute them here to reuse them (key/metadata consistency).
         model_hash = self._model_hash()
         abi_key = _abi_key_python(include, eff_cxx, eff_std)
 
-        # CACHE hors source quand so_path est omis : on RESOUT le chemin keye ici (avec le hash
-        # params-compris) et on le passe explicitement au moteur -- le cache de HyperbolicModel.compile
-        # utiliserait sinon le hash SANS params (la facade Model ajoute les Param). HIT -> on saute la
-        # compilation. so_path explicite -> chemin force, toujours recompile (retro-compat stricte).
+        # OUT-OF-SOURCE cache when so_path is omitted: we RESOLVE the keyed path here (with the
+        # params-included hash) and pass it explicitly to the engine -- the cache of HyperbolicModel.compile
+        # would otherwise use the hash WITHOUT params (the Model facade adds the Param). HIT -> we skip the
+        # compilation. Explicit so_path -> forced path, always recompiles (strict backward-compat).
         cache_hit = False
         if so_path is None:
-            # feature-key kokkos dans la cle (cf. compile_native) : un .so SERIE n'est pas reutilise
-            # sur un module Kokkos. DOIT matcher la cle du moteur, sinon recompilations a repetition.
+            # kokkos feature-key in the key (cf. compile_native): a SERIAL .so is not reused
+            # on a Kokkos module. MUST match the engine's key, otherwise repeated recompilations.
             cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
             so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             cache_hit = os.path.exists(so_path)
 
         if cache_hit:
-            out_path = so_path  # .so deja compilee pour cette cle : pas de recompilation
+            out_path = so_path  # .so already compiled for this key: no recompilation
         else:
-            # Compilation (moteurs inchanges, garde-fous require_metadata/backend/target de
-            # HyperbolicModel.compile : le loader emet adc_install_native_amr pour target="amr_system").
+            # Compilation (engines unchanged, require_metadata/backend/target guards of
+            # HyperbolicModel.compile: the loader emits adc_install_native_amr for target="amr_system").
             out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
                                  require_metadata=require_metadata, target=target)
 
@@ -3720,58 +3721,58 @@ class Model:
             aux_extra_names=m.aux_extra_names,
             wave_speeds=(m._wave_speeds is not None or m._ws_jacobian is not None
                          or "p" in m.prim_defs))
-        # Trace de la politique 'auto' (ADC-63) : None si le backend etait explicite. Diagnostic,
-        # jamais un choix muet -- cm.backend dit ce qui a ete construit, ceci dit POURQUOI.
+        # Trace of the 'auto' policy (ADC-63): None if the backend was explicit. Diagnostic,
+        # never a silent choice -- cm.backend says what was built, this says WHY.
         cm.backend_auto_reason = auto_reason
         return cm
 
 
-# === Phase B (prototype) : composition HYBRIDE brique native + brique DSL dans UN modele ========
-# Jusqu'ici, melanger natif et DSL se faisait au niveau du SYSTEME (un bloc natif add_block + un bloc
-# DSL add_equation). On ne pouvait pas melanger une brique native et une brique DSL DANS UN SEUL
-# modele. Ce prototype l'autorise, dans les DEUX sens (transport DSL + source/elliptic natifs, ET
-# transport natif + source/elliptic DSL).
+# === Phase B (prototype): HYBRID composition of a native brick + a DSL brick in ONE model ========
+# Until now, mixing native and DSL was done at the SYSTEM level (a native add_block block + a DSL
+# add_equation block). One could not mix a native brick and a DSL brick INSIDE A SINGLE
+# model. This prototype allows it, in BOTH directions (DSL transport + native source/elliptic, AND
+# native transport + DSL source/elliptic).
 #
-# ARCHITECTURE (option B) : le coeur C++ COMPOSE deja sans effort des types de briques heterogenes --
-# adc::CompositeModel<Hyperbolic, Source, Elliptic> accepte n'importe quel type conforme a son slot,
-# natif (include/adc/physics/) ou genere par le DSL, et physics/bricks.hpp est deja inclus par tous
-# les backends. Le melange est donc genere a la compilation du COMPOSITE final : un seul .so, sur le
-# MEME chemin que les modeles DSL complets (numerique inlinee, identique a un bloc natif). Pas de .so
-# par brique ni d'ABI virtuelle partielle (ce serait l'option A : dispatch virtuel hote, sans inline
-# GPU -- ecartee).
+# ARCHITECTURE (option B): the C++ core already COMPOSES heterogeneous brick types effortlessly --
+# adc::CompositeModel<Hyperbolic, Source, Elliptic> accepts any type conforming to its slot,
+# native (include/adc/physics/) or generated by the DSL, and physics/bricks.hpp is already included by all
+# the backends. The mix is therefore generated at the compilation of the final COMPOSITE: a single .so, on the
+# SAME path as full DSL models (inlined numerics, identical to a native block). No .so
+# per brick nor a partial virtual ABI (that would be option A: host virtual dispatch, without GPU
+# inlining -- discarded).
 #
-# La seule subtilite : les backends ne transportent que le TYPE de modele (default-construit), donc
-# les PARAMETRES d'une brique native (qom, q, cs2...) doivent etre CUITS dans le type. On emet pour
-# cela un petit struct derive qui fixe les champs publics dans son constructeur (hote) :
+# The only subtlety: the backends carry only the model TYPE (default-constructed), so
+# the PARAMETERS of a native brick (qom, q, cs2...) must be BAKED into the type. For this we emit
+# a small derived struct that fixes the public fields in its constructor (host):
 #   namespace adc_generated { struct NatSrc : adc::PotentialForce { NatSrc() { qom = adc::Real(-1.0); } }; }
-# Il herite EXACTEMENT la numerique native (vrai chemin natif, zero re-derivation) et satisfait le
-# contrat du slot. Sans parametre -> simple alias `using`.
+# It inherits EXACTLY the native numerics (true native path, zero re-derivation) and satisfies the
+# slot contract. Without a parameter -> a simple `using` alias.
 #
-# Etat PROTOTYPE : backend "aot" (add_compiled_block, .so autosuffisant, chemin de production
-# host-marshale). Les backends "production" (natif zero-copie) et "prototype" (JIT) hybrides, la
-# propagation fine des roles/gamma/n_aux et la cible amr_system arrivent dans les PRs suivantes.
+# PROTOTYPE state: "aot" backend (add_compiled_block, self-sufficient .so, production host-marshaled
+# path). The hybrid "production" (native zero-copy) and "prototype" (JIT) backends, the
+# fine propagation of roles/gamma/n_aux and the amr_system target arrive in the following PRs.
 
 
 class NativeBrick:
-    """Descripteur d'une brique NATIVE (include/adc/physics/) pour la composition hybride.
+    """Descriptor of a NATIVE brick (include/adc/physics/) for hybrid composition.
 
-    Porte le type C++ de la brique, les PARAMETRES a cuire dans le type (champ public -> valeur) et,
-    pour une brique hyperbolique, le layout de variables (noms conservatifs, n_vars, primitives,
-    gamma). emit(struct_name) rend le texte C++ a coudre dans le .so composite : un struct derive qui
-    fixe les parametres (ou un simple alias `using` si la brique n'a aucun parametre).
+    Carries the C++ type of the brick, the PARAMETERS to bake into the type (public field -> value) and,
+    for a hyperbolic brick, the variable layout (conservative names, n_vars, primitives,
+    gamma). emit(struct_name) returns the C++ text to sew into the composite .so: a derived struct that
+    fixes the parameters (or a simple `using` alias if the brick has no parameter).
 
-    - ``kind`` : 'hyperbolic' | 'source' | 'elliptic' (slot vise).
-    - ``fields`` : dict {nom de champ C++ public -> valeur} ; ORDRE preserve (insertion).
-    - ``var_names`` / ``n_vars`` / ``prim_names`` / ``gamma`` : metadonnees du layout (slot
-      hyperbolique seulement).
-    - ``min_vars`` : nombre minimal de variables qu'exige une brique TEMPLATEE (source/elliptic) ;
-      p.ex. PotentialForce indexe s[1]/s[2] donc exige >= 3 variables. Verifie par HybridModel.
-    - ``n_aux`` : largeur du canal aux que la brique LIT (>= 3 si elle lit B_z/T_e)."""
+    - ``kind``: 'hyperbolic' | 'source' | 'elliptic' (target slot).
+    - ``fields``: dict {public C++ field name -> value}; ORDER preserved (insertion).
+    - ``var_names`` / ``n_vars`` / ``prim_names`` / ``gamma``: layout metadata (hyperbolic
+      slot only).
+    - ``min_vars``: minimal number of variables that a TEMPLATED brick (source/elliptic) requires;
+      e.g. PotentialForce indexes s[1]/s[2] so it requires >= 3 variables. Checked by HybridModel.
+    - ``n_aux``: width of the aux channel that the brick READS (>= 3 if it reads B_z/T_e)."""
 
     def __init__(self, cpp_type, kind, fields=None, var_names=None, n_vars=None, prim_names=None,
                  gamma=None, min_vars=1, n_aux=AUX_BASE_COMPS):
         if kind not in ("hyperbolic", "source", "elliptic"):
-            raise ValueError("NativeBrick : kind 'hyperbolic' | 'source' | 'elliptic' (recu %r)" % (kind,))
+            raise ValueError("NativeBrick: kind 'hyperbolic' | 'source' | 'elliptic' (got %r)" % (kind,))
         self.cpp_type = cpp_type
         self.kind = kind
         self.fields = dict(fields or {})
@@ -3783,9 +3784,9 @@ class NativeBrick:
         self.n_aux = n_aux
 
     def emit(self, struct_name, namespace="adc_generated"):
-        """Texte C++ de la brique cousue dans le .so composite. Sans parametre -> alias `using`
-        (zero cout) ; avec parametres -> struct derive qui les fixe dans son constructeur hote
-        (les valeurs sont ECRITES EN DUR, comme une constante DSL inlinee)."""
+        """C++ text of the brick sewn into the composite .so. Without a parameter -> `using` alias
+        (zero cost); with parameters -> a derived struct that fixes them in its host constructor
+        (the values are WRITTEN HARD, like an inlined DSL constant)."""
         if not self.fields:
             return "namespace %s { using %s = %s; }\n" % (namespace, struct_name, self.cpp_type)
         sets = " ".join("%s = adc::Real(%s);" % (k, repr(float(v))) for k, v in self.fields.items())
@@ -3794,25 +3795,25 @@ class NativeBrick:
 
 
 class CompiledBrick:
-    """Resultat de <brique DSL partielle>.compile() : le C++ d'UNE brique (le struct genere) + ses
-    metadonnees, pret a etre cousu dans un CompositeModel hybride. La compilation MACHINE se fait au
-    niveau du composite (un seul .so) ; cet objet porte la brique deja GENEREE et figee."""
+    """Result of <partial DSL brick>.compile(): the C++ of ONE brick (the generated struct) + its
+    metadata, ready to be sewn into a hybrid CompositeModel. The MACHINE compilation happens at the
+    level of the composite (a single .so); this object carries the brick already GENERATED and frozen."""
 
     def __init__(self, kind, struct_src, type_name, n_vars=None, n_aux=AUX_BASE_COMPS,
                  cons_names=None, cons_roles=None, prim_names=None, gamma=None, hash_part="",
                  wave_speeds=True):
         self.kind = kind                 # 'hyperbolic' | 'source' | 'elliptic'
-        self.struct_src = struct_src     # texte C++ du struct (namespace adc_generated { struct ... })
-        self.type_name = type_name       # type qualifie a placer dans CompositeModel<...>
-        self.n_vars = n_vars             # layout (hyperbolique) ou nombre de variables declare (src/ell)
+        self.struct_src = struct_src     # C++ text of the struct (namespace adc_generated { struct ... })
+        self.type_name = type_name       # qualified type to place in CompositeModel<...>
+        self.n_vars = n_vars             # layout (hyperbolic) or declared number of variables (src/ell)
         self.n_aux = n_aux
         self.cons_names = list(cons_names) if cons_names else []
         self.cons_roles = list(cons_roles) if cons_roles else []
         self.prim_names = list(prim_names) if prim_names else []
         self.gamma = gamma
-        self.hash_part = hash_part       # tranche de hash stable (formules) pour la cle de cache composite
-        # wave_speeds emis par le struct (brique hyperbolique DSL : 'p' OU paire explicite) ; True par
-        # defaut = inconnu (brique native) : on laisse le requires-gate C++ trancher (historique).
+        self.hash_part = hash_part       # stable hash slice (formulas) for the composite cache key
+        # wave_speeds emitted by the struct (DSL hyperbolic brick: 'p' OR explicit pair); True by
+        # default = unknown (native brick): we let the C++ requires-gate decide (historical).
         self.has_wave_speeds = bool(wave_speeds)
 
     def __repr__(self):
@@ -3820,24 +3821,24 @@ class CompiledBrick:
 
 
 class CompiledHyperbolicBrick(CompiledBrick):
-    """Brique hyperbolique DSL compilee (vars/flux/eigenvalues/conversions)."""
+    """Compiled DSL hyperbolic brick (vars/flux/eigenvalues/conversions)."""
     def __init__(self, **kw): super().__init__("hyperbolic", **kw)
 
 
 class CompiledSourceBrick(CompiledBrick):
-    """Brique de source DSL compilee (apply(U, aux))."""
+    """Compiled DSL source brick (apply(U, aux))."""
     def __init__(self, **kw): super().__init__("source", **kw)
 
 
 class CompiledEllipticBrick(CompiledBrick):
-    """Brique de second membre elliptique DSL compilee (rhs(U))."""
+    """Compiled DSL elliptic right-hand side brick (rhs(U))."""
     def __init__(self, **kw): super().__init__("elliptic", **kw)
 
 
 class HyperbolicBrick:
-    """Brique DSL PARTIELLE hyperbolique (variables/flux/valeurs propres/conversions), composable avec
-    des briques natives ou DSL pour la source et l'elliptique. Meme surface que dsl.Model mais limitee
-    au slot hyperbolique. compile() -> CompiledHyperbolicBrick."""
+    """PARTIAL hyperbolic DSL brick (variables/flux/eigenvalues/conversions), composable with
+    native or DSL bricks for the source and the elliptic. Same surface as dsl.Model but limited
+    to the hyperbolic slot. compile() -> CompiledHyperbolicBrick."""
 
     def __init__(self, name):
         self._m = HyperbolicModel(name)
@@ -3852,7 +3853,7 @@ class HyperbolicBrick:
         return self._m.primitive(name, expr)
 
     def primitive_vars(self, *vars, roles=None):
-        """Layout ORDONNE de Prim (forme positionnelle, noms/Var deja definis)."""
+        """ORDERED layout of Prim (positional form, names/Var already defined)."""
         self._m.set_primitive_state(*vars, roles=roles)
 
     def aux(self, name): return self._m.aux(name)
@@ -3860,9 +3861,9 @@ class HyperbolicBrick:
     def eigenvalues(self, x, y): self._m.set_eigenvalues(x, y)
 
     def wave_speeds(self, x, y):
-        """Vitesses d'onde SIGNEES explicites (smin, smax) par direction, SANS exiger 'p' --
-        meme contrat que Model.wave_speeds (le struct de brique passe par emit_cpp_brick, qui
-        emet wave_speeds depuis la paire ; le CompositeModel hybride la forwarde au gate HLL)."""
+        """Explicit SIGNED wave speeds (smin, smax) per direction, WITHOUT requiring 'p' --
+        same contract as Model.wave_speeds (the brick struct goes through emit_cpp_brick, which
+        emits wave_speeds from the pair ; the hybrid CompositeModel forwards it to the HLL gate)."""
         self._m.set_wave_speeds(x, y)
 
     def conservative_from(self, exprs): self._m.set_conservative_from(exprs)
@@ -3870,7 +3871,7 @@ class HyperbolicBrick:
     def check(self): return self._m.check()
 
     def compile(self):
-        """Valide + emet le struct C++ hyperbolique (emit_cpp_brick) -> CompiledHyperbolicBrick."""
+        """Validate + emit the hyperbolic C++ struct (emit_cpp_brick) -> CompiledHyperbolicBrick."""
         self._m.check()
         struct_name = "Hyp" + self._m.name.capitalize()
         struct_src = self._m.emit_cpp_brick(name=struct_name)
@@ -3884,9 +3885,9 @@ class HyperbolicBrick:
 
 
 class SourceBrick:
-    """Brique DSL PARTIELLE de source S(U, aux), composable avec un transport et une elliptique
-    natifs ou DSL. Declare ses conservatives (le layout doit coincider avec le transport) + ses champs
-    aux + la formule de source. compile() -> CompiledSourceBrick."""
+    """PARTIAL DSL brick for a source S(U, aux), composable with a native or DSL transport and
+    elliptic. Declares its conservatives (the layout must match the transport) + its aux fields
+    + the source formula. compile() -> CompiledSourceBrick."""
 
     def __init__(self, name):
         self._m = HyperbolicModel(name)
@@ -3899,9 +3900,9 @@ class SourceBrick:
     def source(self, s): self._m.set_source(s)
 
     def compile(self):
-        """Valide + emet le struct C++ de source (emit_cpp_source) -> CompiledSourceBrick."""
+        """Validate + emit the source C++ struct (emit_cpp_source) -> CompiledSourceBrick."""
         if self._m._source is None:
-            raise ValueError("SourceBrick.compile : appeler source([...]) d'abord")
+            raise ValueError("SourceBrick.compile: call source([...]) first")
         struct_name = "Src" + self._m.name.capitalize()
         struct_src = self._m.emit_cpp_source(name=struct_name)
         return CompiledSourceBrick(
@@ -3911,8 +3912,8 @@ class SourceBrick:
 
 
 class EllipticBrick:
-    """Brique DSL PARTIELLE de second membre elliptique rhs(U), composable avec un transport et une
-    source natifs ou DSL. Declare ses conservatives (layout) + la formule du second membre.
+    """PARTIAL DSL brick for an elliptic right-hand side rhs(U), composable with a native or DSL
+    transport and source. Declares its conservatives (layout) + the right-hand side formula.
     compile() -> CompiledEllipticBrick."""
 
     def __init__(self, name):
@@ -3925,9 +3926,9 @@ class EllipticBrick:
     def elliptic_rhs(self, e): self._m.set_elliptic_rhs(e)
 
     def compile(self):
-        """Valide + emet le struct C++ elliptique (emit_cpp_elliptic) -> CompiledEllipticBrick."""
+        """Validate + emit the elliptic C++ struct (emit_cpp_elliptic) -> CompiledEllipticBrick."""
         if self._m._elliptic is None:
-            raise ValueError("EllipticBrick.compile : appeler elliptic_rhs(...) d'abord")
+            raise ValueError("EllipticBrick.compile: call elliptic_rhs(...) first")
         struct_name = "Ell" + self._m.name.capitalize()
         struct_src = self._m.emit_cpp_elliptic(name=struct_name)
         return CompiledEllipticBrick(
@@ -3936,14 +3937,14 @@ class EllipticBrick:
 
 
 class HybridModel:
-    """Composeur d'un modele HYBRIDE : trois slots (transport, source, elliptic), chacun fourni par une
-    brique NATIVE (NativeBrick) ou DSL (CompiledBrick). Assemble un adc::CompositeModel<...> melange et
-    le compile en UN .so (prototype : backend 'aot'). Renvoie un CompiledModel branchable via
+    """Composer of a HYBRID model: three slots (transport, source, elliptic), each provided by a
+    NATIVE brick (NativeBrick) or a DSL brick (CompiledBrick). Assembles a mixed adc::CompositeModel<...>
+    and compiles it into ONE .so (prototype: backend 'aot'). Returns a CompiledModel pluggable via
     System.add_equation (adder add_compiled_block).
 
-    Le slot transport (hyperbolique) FIXE le layout : n_vars, noms conservatifs, primitives, gamma. Une
-    brique DSL de source/elliptic doit declarer le MEME n_vars ; une brique native templatee (source/
-    elliptic) doit seulement satisfaire son min_vars (p.ex. PotentialForce exige >= 3 variables)."""
+    The transport (hyperbolic) slot FIXES the layout: n_vars, conservative names, primitives, gamma. A
+    DSL source/elliptic brick must declare the SAME n_vars ; a templated native brick (source/
+    elliptic) only needs to satisfy its min_vars (e.g. PotentialForce requires >= 3 variables)."""
 
     def __init__(self, transport, source, elliptic, name="hybrid"):
         self.name = name
@@ -3953,17 +3954,17 @@ class HybridModel:
 
         nv = hyp["n_vars"]
         if nv is None:
-            raise ValueError("HybridModel : le slot transport doit fixer n_vars (brique hyperbolique)")
+            raise ValueError("HybridModel: the transport slot must fix n_vars (hyperbolic brick)")
         for role, slot in (("source", src), ("elliptic", ell)):
             if slot["provider"] == "dsl":
                 if slot["n_vars"] != nv:
                     raise ValueError(
-                        "HybridModel : la brique DSL %s declare %d variables mais le transport en a %d ; "
-                        "aligner conservative_vars(...)" % (role, slot["n_vars"], nv))
+                        "HybridModel: the DSL brick %s declares %d variables but the transport has %d ; "
+                        "align conservative_vars(...)" % (role, slot["n_vars"], nv))
             elif slot["min_vars"] > nv:
                 raise ValueError(
-                    "HybridModel : la brique native %s exige >= %d variables (transport=%d) ; p.ex. une "
-                    "force fluide n'a pas de sens sur un transport scalaire"
+                    "HybridModel: the native brick %s requires >= %d variables (transport=%d) ; e.g. a "
+                    "fluid force makes no sense on a scalar transport"
                     % (role, slot["min_vars"], nv))
 
         self.n_vars = nv
@@ -3977,10 +3978,10 @@ class HybridModel:
 
     @staticmethod
     def _norm(prov, role, native_struct_name):
-        """Normalise un slot (CompiledBrick DSL ou NativeBrick) en dict commun."""
+        """Normalize a slot (DSL CompiledBrick or NativeBrick) into a common dict."""
         if isinstance(prov, CompiledBrick):
             if prov.kind != role:
-                raise ValueError("HybridModel : brique DSL de type %r placee dans le slot %r"
+                raise ValueError("HybridModel: DSL brick of type %r placed in slot %r"
                                  % (prov.kind, role))
             d = dict(provider="dsl", struct_text=prov.struct_src, type_name=prov.type_name,
                      n_vars=prov.n_vars, min_vars=prov.n_vars, n_aux=prov.n_aux)
@@ -3991,7 +3992,7 @@ class HybridModel:
             return d
         if isinstance(prov, NativeBrick):
             if prov.kind != role:
-                raise ValueError("HybridModel : brique native de type %r placee dans le slot %r"
+                raise ValueError("HybridModel: native brick of type %r placed in slot %r"
                                  % (prov.kind, role))
             d = dict(provider="native", struct_text=prov.emit(native_struct_name),
                      type_name="adc_generated::" + native_struct_name,
@@ -4000,18 +4001,18 @@ class HybridModel:
                 names = prov.var_names or []
                 d.update(cons_names=list(names), cons_roles=roles_for(names),
                          prim_names=list(prov.prim_names or names), gamma=prov.gamma,
-                         wave_speeds=True)  # natif : inconnu, le requires-gate C++ tranche (historique)
+                         wave_speeds=True)  # native: unknown, the C++ requires-gate decides (historical)
             return d
-        raise TypeError("HybridModel : slot %r doit etre une brique native (adc.* / NativeBrick) ou une "
-                        "brique DSL compilee (CompiledBrick) ; recu %r" % (role, type(prov).__name__))
+        raise TypeError("HybridModel: slot %r must be a native brick (adc.* / NativeBrick) or a "
+                        "compiled DSL brick (CompiledBrick) ; got %r" % (role, type(prov).__name__))
 
     def _emit_aot_source(self):
-        """Source C++ du .so composite hybride, derriere l'ABI extern \"C\" de compiled_block_abi.hpp
-        (backend aot : meme ABI plate que emit_cpp_aot_source). Les briques (DSL generees ou structs de
-        liaison natifs) sont cousues, puis assemblees en adc::CompositeModel<...>."""
+        """C++ source of the hybrid composite .so, behind the extern \"C\" ABI of compiled_block_abi.hpp
+        (aot backend: same flat ABI as emit_cpp_aot_source). The bricks (generated DSL or native binding
+        structs) are stitched together, then assembled into adc::CompositeModel<...>."""
         hyp, src, ell = self._slots
         parts = ['#include <adc/runtime/compiled_block_abi.hpp>\n',
-                 '#include <adc/physics/bricks.hpp>\n',   # CompositeModel + briques natives
+                 '#include <adc/physics/bricks.hpp>\n',   # CompositeModel + native bricks
                  '#include <adc/core/variables.hpp>\n']   # ADC_EXPORT_BLOCK_METADATA / _GAMMA
         for slot in self._slots:
             if slot["struct_text"]:
@@ -4025,8 +4026,8 @@ class HybridModel:
         return "".join(parts)
 
     def _model_hash(self):
-        """Hash stable du composite : provider + type + texte genere de chaque slot (le texte encode
-        les formules DSL et les parametres natifs cuits). Sert de cle de cache."""
+        """Stable hash of the composite: provider + type + generated text of each slot (the text encodes
+        the DSL formulas and the baked native parameters). Used as a cache key."""
         import hashlib
         parts = ["hybrid", self.name]
         for slot in self._slots:
@@ -4034,7 +4035,7 @@ class HybridModel:
         return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
     def _bricks_and_composite(self):
-        """Texte C++ des briques cousues (DSL generees + structs de liaison natifs) + type composite."""
+        """C++ text of the stitched bricks (generated DSL + native binding structs) + composite type."""
         hyp, src, ell = self._slots
         bricks = "".join(s["struct_text"] for s in self._slots if s["struct_text"])
         composite = ("adc::CompositeModel<%s, %s, %s>"
@@ -4042,19 +4043,19 @@ class HybridModel:
         return bricks, composite
 
     def _emit_metadata(self, alias):
-        """Symboles de metadonnees ABI (noms/roles depuis conservative_vars, gamma optionnel), PARTAGES
-        par les backends. @p alias : un alias SANS virgule de niveau superieur (le preprocesseur decoupe
-        les arguments de macro sur les virgules)."""
+        """ABI metadata symbols (names/roles from conservative_vars, optional gamma), SHARED
+        by the backends. @p alias: an alias WITHOUT a top-level comma (the preprocessor splits
+        macro arguments on commas)."""
         out = '\nADC_EXPORT_BLOCK_METADATA(%s)\n' % alias
         if self.gamma is not None:
             out += 'ADC_EXPORT_BLOCK_GAMMA(%r)\n' % self.gamma
         return out
 
     def _emit_jit_source(self):
-        """Source de la bibliotheque JIT (backend 'prototype') : le composite hybride derriere une
-        fabrique extern \"C\" (adc_make_model via adc::ModelAdapter). Dispatch VIRTUEL hote (residu
-        Rusanov ordre 1) : iteration rapide, a brancher via System.add_dynamic_block. Pendant hybride
-        d'emit_cpp_so_source."""
+        """Source of the JIT library (backend 'prototype'): the hybrid composite behind an
+        extern \"C\" factory (adc_make_model via adc::ModelAdapter). Host VIRTUAL dispatch (order-1
+        Rusanov residual): fast iteration, to be plugged via System.add_dynamic_block. Hybrid
+        counterpart of emit_cpp_so_source."""
         bricks, composite = self._bricks_and_composite()
         return ('#include <adc/runtime/dynamic_model.hpp>\n'
                 '#include <adc/physics/bricks.hpp>\n'
@@ -4068,30 +4069,30 @@ class HybridModel:
                 + self._emit_metadata("adc_generated::JitModel"))
 
     def _emit_native_source(self, target="system"):
-        """Source C++ du LOADER NATIF (backend 'production') : le composite hybride en CompositeModel<...>
-        derriere une ABI extern \"C\" MINCE. Comme emit_cpp_native_loader, le .so ne porte PAS la
-        numerique : il INSTALLE le modele genere comme bloc natif de la facade via add_compiled_model<>,
-        qui fabrique les fermetures sur le CONTEXTE REEL de la facade -> meme chemin que add_block,
-        ZERO-COPIE (MPI par construction, device-clean). adc_native_abi_key() fige la cle d'ABI a la
-        compilation, comparee a abi_key() du module par add_native_block (rejet explicite si
-        en-tetes/compilateur/std divergent).
+        """C++ source of the NATIVE LOADER (backend 'production'): the hybrid composite as CompositeModel<...>
+        behind a THIN extern \"C\" ABI. Like emit_cpp_native_loader, the .so does NOT carry the
+        numerics: it INSTALLS the generated model as a native block of the facade via add_compiled_model<>,
+        which builds the closures on the REAL CONTEXT of the facade -> same path as add_block,
+        ZERO-COPY (MPI by construction, device-clean). adc_native_abi_key() freezes the ABI key at
+        compile time, compared against the module's abi_key() by add_native_block (explicit rejection if
+        headers/compiler/std diverge).
 
-        @p target : 'system' -> adc_install_native (System&, evolve) ; 'amr_system' ->
-        adc_install_native_amr (AmrSystem&, sans evolve) inline add_compiled_model(AmrSystem&) : le bloc
-        tourne la MEME hierarchie AMR que AmrSystem.add_block (reflux, regrid). Symboles DISTINCTS par
-        cible (un loader System n'est pas branchable sur AmrSystem.add_native_block, et inversement)."""
+        @p target: 'system' -> adc_install_native (System&, evolve) ; 'amr_system' ->
+        adc_install_native_amr (AmrSystem&, without evolve) inline add_compiled_model(AmrSystem&): the block
+        runs the SAME AMR hierarchy as AmrSystem.add_block (reflux, regrid). DISTINCT symbols per
+        target (a System loader is not pluggable onto AmrSystem.add_native_block, and vice versa)."""
         if target not in ("system", "amr_system"):
-            raise ValueError("_emit_native_source : target 'system' | 'amr_system' (recu %r)" % (target,))
+            raise ValueError("_emit_native_source: target 'system' | 'amr_system' (got %r)" % (target,))
         bricks, composite = self._bricks_and_composite()
-        head = ('#include <adc/runtime/abi_key.hpp>\n'        # ADC_ABI_KEY_LITERAL (cle figee a la compil)
-                '#include <adc/physics/bricks.hpp>\n'         # CompositeModel + briques natives
+        head = ('#include <adc/runtime/abi_key.hpp>\n'        # ADC_ABI_KEY_LITERAL (key frozen at compile time)
+                '#include <adc/physics/bricks.hpp>\n'         # CompositeModel + native bricks
                 '#include <adc/core/variables.hpp>\n'
                 '#include <string>\n')
-        # Gabarit en-tete de la cible (selectif : ne pas tirer la machinerie AMR dans un loader System).
+        # Header template of the target (selective: do not pull the AMR machinery into a System loader).
         head += ('#include <adc/runtime/dsl_block.hpp>\n' if target == "system"
                  else '#include <adc/runtime/amr_dsl_block.hpp>\n')
-        # LITTERAL preprocesseur, pas d'appel a abi_key_string() : une inline serait interposee
-        # (ELF/RTLD_GLOBAL) vers la copie du module -> cle du module renvoyee -> garde tautologique.
+        # Preprocessor LITERAL, no call to abi_key_string(): an inline would be interposed
+        # (ELF/RTLD_GLOBAL) toward the module's copy -> module key returned -> tautological guard.
         key = ('#if defined(_WIN32)\n'
                '#define ADC_LOADER_API extern "C" __declspec(dllexport)\n'
                '#else\n'
@@ -4101,9 +4102,9 @@ class HybridModel:
                '  return ADC_ABI_KEY_LITERAL;\n'
                '}\n')
         if target == "system":
-            # pos_floor (ADC-76, limiteur de positivite Zhang-Shu) : argument plat final, marshale
-            # jusqu'au make_block du loader via add_compiled_model. Vieille signature = vieux .so =
-            # rejete par la cle d'ABI (les en-tetes ont change), jamais un layout d'arguments errone.
+            # pos_floor (ADC-76, Zhang-Shu positivity limiter): final flat argument, marshaled
+            # down to the loader's make_block via add_compiled_model. Old signature = old .so =
+            # rejected by the ABI key (the headers changed), never a wrong argument layout.
             install = ('ADC_LOADER_API void adc_install_native(void* sys, const char* name, const char* limiter,\n'
                        '                                    const char* riemann, const char* recon,\n'
                        '                                    const char* time, double gamma, int substeps,\n'
@@ -4114,7 +4115,7 @@ class HybridModel:
                        '                                                    substeps, evolve != 0, stride,\n'
                        '                                                    pos_floor);\n'
                        '}\n')
-        else:  # amr_system : surcharge AmrSystem (pas de parametre evolve, AMR mono-bloc)
+        else:  # amr_system: AmrSystem overload (no evolve parameter, mono-block AMR)
             install = ('ADC_LOADER_API void adc_install_native_amr(void* sys, const char* name,\n'
                        '                                        const char* limiter, const char* riemann,\n'
                        '                                        const char* recon, const char* time,\n'
@@ -4130,63 +4131,63 @@ class HybridModel:
 
     def compile(self, backend="aot", so_path=None, include=None, name=None, cxx=None, std=None,
                 target="system"):
-        """Compile le composite hybride en un CompiledModel.
+        """Compile the hybrid composite into a CompiledModel.
 
         ``backend`` :
 
-        - 'prototype' -> add_dynamic_block : JIT, dispatch VIRTUEL hote (Rusanov ordre 1), iteration
-          rapide ; pas de MPI/AMR, pas de flux HLLC/Roe ni recon primitif ;
-        - 'aot' -> add_compiled_block : .so autosuffisant (ABI plate, host-marshale), chemin de
-          production mono-rang ; sans MPI/AMR ;
-        - 'production' -> add_native_block : loader natif zero-copie qui inline add_compiled_model<>, MEME
-          chemin qu'add_block (fermetures sur le contexte reel de la facade), MPI par construction.
-          Les noms/roles/gamma viennent des metadonnees du .so (pas de names=).
+        - 'prototype' -> add_dynamic_block: JIT, host VIRTUAL dispatch (order-1 Rusanov), fast
+          iteration ; no MPI/AMR, no HLLC/Roe flux nor primitive recon ;
+        - 'aot' -> add_compiled_block: self-sufficient .so (flat ABI, host-marshaled), mono-rank
+          production path ; without MPI/AMR ;
+        - 'production' -> add_native_block: zero-copy native loader that inlines add_compiled_model<>, SAME
+          path as add_block (closures on the facade's real context), MPI by construction.
+          The names/roles/gamma come from the .so metadata (no names=).
 
-        ``target`` : 'system' (defaut) | 'amr_system'. 'amr_system' EXIGE backend='production' : le loader
-        inline add_compiled_model(AmrSystem&) (symbole adc_install_native_amr), seul chemin .so AMR ; a
-        brancher via AmrSystem.add_equation. Les autres backends n'ont pas de pendant AMR.
+        ``target`` : 'system' (default) | 'amr_system'. 'amr_system' REQUIRES backend='production': the loader
+        inlines add_compiled_model(AmrSystem&) (symbol adc_install_native_amr), the only AMR .so path ; to be
+        plugged via AmrSystem.add_equation. The other backends have no AMR counterpart.
 
-        so_path None -> cache hors source (cle = model_hash + abi_key + backend + target)."""
+        so_path None -> out-of-source cache (key = model_hash + abi_key + backend + target)."""
         import os
         import shutil
         import subprocess
         import sys
         import tempfile
         if backend not in ("prototype", "aot", "production"):
-            raise ValueError("HybridModel.compile : backend 'prototype' | 'aot' | 'production' (recu %r)"
+            raise ValueError("HybridModel.compile: backend 'prototype' | 'aot' | 'production' (got %r)"
                              % (backend,))
         if target not in ("system", "amr_system"):
-            raise ValueError("HybridModel.compile : target 'system' | 'amr_system' (recu %r)" % (target,))
+            raise ValueError("HybridModel.compile: target 'system' | 'amr_system' (got %r)" % (target,))
         if target == "amr_system" and backend != "production":
-            raise ValueError("HybridModel.compile : target='amr_system' n'existe que pour "
-                             "backend='production' (chemin natif AMR) ; recu backend=%r" % (backend,))
+            raise ValueError("HybridModel.compile: target='amr_system' only exists for "
+                             "backend='production' (native AMR path) ; got backend=%r" % (backend,))
         mode = {"prototype": "jit", "aot": "aot", "production": "native"}[backend]
         if include is None:
             include = adc_include()
-        if std is None:  # le loader natif partage l'ABI du module (norme derivee du loader : c++20 sous
-            # Kokkos, c++23 sinon, cf. loader_cxx_std/compile_native) ; jit/aot restent en c++20.
+        if std is None:  # the native loader shares the module ABI (std derived from the loader: c++20 under
+            # Kokkos, c++23 otherwise, cf. loader_cxx_std/compile_native); jit/aot stay at c++20.
             std = loader_cxx_std() if mode == "native" else "c++20"
-        # NATIF (production) ET AOT : compilateur suivant le backend Kokkos (g++ par defaut,
-        # nvcc_wrapper si explicite), flags Kokkos sans linker libkokkos (runtime unique), feature-key
-        # kokkos dans le cache. KOKKOS-ONLY : l'aot hybride inclut les en-tetes adc
-        # (compiled_block_abi.hpp -> multifab/for_each) qui exigent ADC_HAS_KOKKOS, memes flags que
-        # compile_aot ; seul le jit (prototype) reste hote pur (-O2, dynamic_model/bricks sans
-        # multifab). kokkos_like sert aussi la cle de cache.
+        # NATIVE (production) AND AOT: compiler following the Kokkos backend (g++ by default,
+        # nvcc_wrapper if explicit), Kokkos flags without linking libkokkos (single runtime), feature-key
+        # kokkos in the cache. KOKKOS-ONLY: the hybrid aot includes the adc headers
+        # (compiled_block_abi.hpp -> multifab/for_each) which require ADC_HAS_KOKKOS, same flags as
+        # compile_aot; only the jit (prototype) stays pure host (-O2, dynamic_model/bricks without
+        # multifab). kokkos_like also serves the cache key.
         native = (mode == "native")
         kokkos_like = native or mode == "aot"
         if mode == "aot" and _native_kokkos_root() is None:
             raise RuntimeError(
-                "HybridModel.compile : adc_cpp est Kokkos-only -- le modele AOT inclut les en-tetes "
-                "adc qui exigent Kokkos. Pointe un Kokkos installe via ADC_KOKKOS_ROOT (ou "
-                "Kokkos_ROOT), p.ex. `export ADC_KOKKOS_ROOT=/chemin/vers/kokkos` (Serial suffit "
-                "sur CPU).")
-        if native:  # garde pre-dlopen : en-tetes != build de _adc -> remede clair (cf. compile_native)
+                "HybridModel.compile: adc_cpp is Kokkos-only -- the AOT model includes the adc "
+                "headers which require Kokkos. Point to an installed Kokkos via ADC_KOKKOS_ROOT (or "
+                "Kokkos_ROOT), e.g. `export ADC_KOKKOS_ROOT=/path/to/kokkos` (Serial is enough "
+                "on CPU).")
+        if native:  # pre-dlopen guard: headers != build of _adc -> clear remedy (cf. compile_native)
             _check_headers_match_module(include)
             _warn_kokkos_parity()
         eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
         if not eff_cxx:
-            raise RuntimeError("HybridModel.compile : aucun compilateur C++ trouve")
-        std = _probe_cxx_std(eff_cxx, std)  # erreur ACTIONNABLE si le std n'est pas supporte
+            raise RuntimeError("HybridModel.compile: no C++ compiler found")
+        std = _probe_cxx_std(eff_cxx, std)  # ACTIONABLE error if the std is not supported
         model_hash = self._model_hash()
         abi_key = _abi_key_python(include, eff_cxx, std)
         if so_path is None:
@@ -4202,20 +4203,20 @@ class HybridModel:
         if mode == "jit":
             source = self._emit_jit_source()
         elif mode == "aot":
-            # Comme compile_aot : flags Kokkos sans linker libkokkos (le module _adc a deja charge le
-            # runtime, singleton), symboles indefinis resolus au chargement ; Apple-ld exige alors
-            # -undefined dynamic_lookup (sur ELF/Linux -shared les autorise deja).
+            # Like compile_aot: Kokkos flags without linking libkokkos (the _adc module has already loaded the
+            # runtime, singleton), undefined symbols resolved at load time; Apple-ld then requires
+            # -undefined dynamic_lookup (on ELF/Linux -shared already allows them).
             source = self._emit_aot_source()
             kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
             flags += kokkos_compile_flags
             if sys.platform == "darwin":
                 flags += ["-undefined", "dynamic_lookup"]
-        else:  # native : signature en-tetes + parite backend Kokkos (cf. compile_native / _native_kokkos_flags)
-            source = self._emit_native_source(target=target)  # indefinis resolus au chargement (module _adc)
+        else:  # native: header signature + Kokkos backend parity (cf. compile_native / _native_kokkos_flags)
+            source = self._emit_native_source(target=target)  # undefined symbols resolved at load time (_adc module)
             flags.append('-DADC_HEADER_SIG="%s"' % adc_header_signature(include))
             kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
             flags += kokkos_compile_flags
-            if sys.platform == "darwin":  # Apple-ld : autoriser explicitement les indefinis (cf. compile_native)
+            if sys.platform == "darwin":  # Apple-ld: explicitly allow undefined symbols (cf. compile_native)
                 flags += ["-undefined", "dynamic_lookup"]
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_hybrid.cpp")
@@ -4236,17 +4237,17 @@ class HybridModel:
             wave_speeds=getattr(self, "_has_wave_speeds", True))
 
 
-# --- Source COUPLEE generique inter-especes (P5 phase 1, splitting EXPLICITE) -----------------------
+# --- Generic COUPLED inter-species source (P5 phase 1, EXPLICIT splitting) -----------------------
 #
-# adc.dsl.CoupledSource decrit un couplage ARBITRAIRE entre especes en FORMULES, par-dela les couplages
-# nommes (Ionization / Collision / ThermalExchange) qui figent une formule. On lit des champs (bloc,
-# role) en ENTREE et on ECRIT des termes de source (bloc, role) donnes par des expressions symboliques
-# (memes Expr que le DSL des modeles : +, *, -, /, **, sqrt, params). compile(backend) compile chaque
-# expr en BYTECODE postfixe (machine a pile) que C++ evalue dans le meme for_each_cell device que les
-# couplages nommes -- AUCUN .so ni callback Python par cellule. Applique APRES le transport (split).
+# adc.dsl.CoupledSource describes an ARBITRARY coupling between species as FORMULAS, beyond the named
+# couplings (Ionization / Collision / ThermalExchange) which freeze a formula. We read fields (block,
+# role) as INPUT and WRITE source terms (block, role) given by symbolic expressions
+# (same Expr as the models DSL: +, *, -, /, **, sqrt, params). compile(backend) compiles each
+# expr into postfix BYTECODE (stack machine) that C++ evaluates in the same for_each_cell device as the
+# named couplings -- NO .so nor Python callback per cell. Applied AFTER transport (split).
 
-# Inverse de adc::role_name : nom de role DSL (CamelCase, cf. CANONICAL_ROLES) -> nom canonique
-# lowercase attendu par adc::role_from_name (frontiere C++). Source unique de la correspondance.
+# Inverse of adc::role_name: DSL role name (CamelCase, cf. CANONICAL_ROLES) -> canonical lowercase
+# name expected by adc::role_from_name (C++ boundary). Single source of the correspondence.
 _ROLE_TO_CANONICAL = {
     "Density": "density",
     "MomentumX": "momentum_x", "MomentumY": "momentum_y", "MomentumZ": "momentum_z",
@@ -4257,17 +4258,17 @@ _ROLE_TO_CANONICAL = {
 
 
 def _role_canonical(role):
-    """Nom de role canonique (lowercase, frontiere C++) pour un role DSL. Accepte deja-canonique."""
+    """Canonical role name (lowercase, C++ boundary) for a DSL role. Accepts already-canonical."""
     if role in _ROLE_TO_CANONICAL:
         return _ROLE_TO_CANONICAL[role]
     if role in _ROLE_TO_CANONICAL.values():
         return role
-    raise ValueError("CoupledSource : role %r inconnu (roles : %s)"
+    raise ValueError("CoupledSource: unknown role %r (roles: %s)"
                      % (role, ", ".join(sorted(_ROLE_TO_CANONICAL))))
 
 
-# Opcodes de la machine a pile : MIROIR de adc::CsOp (coupled_source_program.hpp). Valeurs FIGEES
-# (transportees telles quelles par l'ABI Python -> C++).
+# Stack machine opcodes: MIRROR of adc::CsOp (coupled_source_program.hpp). FROZEN values
+# (transported as-is by the Python -> C++ ABI).
 _CS_PUSHREG = 0
 _CS_ADD = 1
 _CS_SUB = 2
@@ -4277,18 +4278,18 @@ _CS_NEG = 5
 _CS_POW = 6
 _CS_SQRT = 7
 
-# Capacites FIGEES, miroir de coupled_source_program.hpp (kCsMaxReg / kCsMaxTerms / kCsMaxProg). On
-# diagnostique cote Python (erreur claire) avant d'atteindre la frontiere C++.
+# FROZEN capacities, mirror of coupled_source_program.hpp (kCsMaxReg / kCsMaxTerms / kCsMaxProg). We
+# diagnose on the Python side (clear error) before reaching the C++ boundary.
 _CS_MAX_REG = 32
 _CS_MAX_TERMS = 16
 _CS_MAX_PROG = 256
 
 
 class _CsField(Var):
-    """Handle symbolique d'un (bloc, role) : c'est une Var (donc une Expr a part entiere) dont le NOM
-    d'environnement '<bloc>::<role>' indexe a la fois l'eval numpy (env) et le registre d'entree au
-    codegen bytecode. Sous-classer Var donne directement operateurs / _wrap / to_cpp / eval / deps, donc
-    `+k * ne * ng` construit l'arbre Expr attendu sans delegation."""
+    """Symbolic handle of a (block, role): it is a Var (hence a full Expr) whose environment NAME
+    '<block>::<role>' indexes both the numpy eval (env) and the input register at the
+    bytecode codegen. Subclassing Var directly gives operators / _wrap / to_cpp / eval / deps, so
+    `+k * ne * ng` builds the expected Expr tree without delegation."""
 
     def __init__(self, block, role):
         super().__init__("%s::%s" % (block, role), "coupled_field")
@@ -4299,8 +4300,8 @@ class _CsField(Var):
 
 
 class _CsBlock:
-    """Aide a la construction : `src.block("electrons").role("density")` -> _CsField. Memorise les
-    (bloc, role) demandes sur la source pour fixer l'ordre des registres d'entree."""
+    """Construction helper: `src.block("electrons").role("density")` -> _CsField. Records the
+    (block, role) requested on the source to fix the order of the input registers."""
 
     def __init__(self, src, name):
         self._src = src
@@ -4311,31 +4312,31 @@ class _CsBlock:
 
 
 class CompiledCoupledSource:
-    """Resultat de CoupledSource.compile(...) : empaquette l'ABI PLATE (bytecode) prete pour
-    System.add_coupled_source, + l'evaluateur numpy de REFERENCE (memes Expr) pour les tests / un
-    integrateur Python. Aucun .so : le couplage est interprete cote C++ (machine a pile device)."""
+    """Result of CoupledSource.compile(...): packages the FLAT ABI (bytecode) ready for
+    System.add_coupled_source, + the REFERENCE numpy evaluator (same Expr) for tests / a Python
+    integrator. No .so: the coupling is interpreted on the C++ side (device stack machine)."""
 
     def __init__(self, name, backend, in_blocks, in_roles, consts, out_blocks, out_roles,
                  prog_ops, prog_args, prog_lens, terms, reg_order, frequency=0.0,
                  freq_prog_ops=None, freq_prog_args=None, frequency_expr=None):
         self.name = name
         self.backend = backend
-        self.frequency = float(frequency)  # mu [1/s] CONSTANTE declaree (0 = pas de borne constante)
+        self.frequency = float(frequency)  # mu [1/s] declared CONSTANT (0 = no constant bound)
         self.in_blocks = list(in_blocks)
-        self.in_roles = list(in_roles)        # canoniques (lowercase, frontiere C++)
+        self.in_roles = list(in_roles)        # canonical (lowercase, C++ boundary)
         self.consts = list(consts)
         self.out_blocks = list(out_blocks)
-        self.out_roles = list(out_roles)      # canoniques
+        self.out_roles = list(out_roles)      # canonical
         self.prog_ops = list(prog_ops)
         self.prog_args = list(prog_args)
         self.prog_lens = list(prog_lens)
-        # Frequence PAR CELLULE mu(U) : bytecode (memes entrees/constantes que la source). VIDES =
-        # frequence constante seule. Transportes a System/AmrSystem.add_coupled_source.
+        # PER-CELL frequency mu(U): bytecode (same inputs/constants as the source). EMPTY =
+        # constant frequency only. Transported to System/AmrSystem.add_coupled_source.
         self.freq_prog_ops = list(freq_prog_ops) if freq_prog_ops else []
         self.freq_prog_args = list(freq_prog_args) if freq_prog_args else []
-        self._frequency_expr = frequency_expr  # Expr de reference (eval numpy pour les tests) ; None si constante
-        self._terms = list(terms)             # [(block, role_canonical, Expr)] : reference numpy
-        self._reg_order = list(reg_order)     # noms d'env '<bloc>::<role>' dans l'ordre des registres
+        self._frequency_expr = frequency_expr  # reference Expr (numpy eval for tests); None if constant
+        self._terms = list(terms)             # [(block, role_canonical, Expr)]: numpy reference
+        self._reg_order = list(reg_order)     # env names '<block>::<role>' in register order
 
     def __repr__(self):
         return ("CompiledCoupledSource(name=%r, backend=%r, n_in=%d, n_const=%d, n_terms=%d)"
@@ -4343,19 +4344,19 @@ class CompiledCoupledSource:
                    len(self.out_blocks)))
 
     def reference_terms(self, fields):
-        """Evalue les termes de source sur des tableaux numpy (REFERENCE pour les tests). @p fields :
-        dict (bloc, role_canonical) -> tableau ; renvoie [(bloc, role_canonical, dS)] avec dS = S
-        (le terme symbolique evalue), AVANT multiplication par dt. Memes Expr que le codegen C++."""
+        """Evaluates the source terms on numpy arrays (REFERENCE for tests). @p fields:
+        dict (block, role_canonical) -> array; returns [(block, role_canonical, dS)] with dS = S
+        (the evaluated symbolic term), BEFORE multiplication by dt. Same Expr as the C++ codegen."""
         env = {}
         for (block, role), arr in fields.items():
             env["%s::%s" % (block, _role_canonical(role))] = arr
         return [(b, r, e.eval(env)) for (b, r, e) in self._terms]
 
     def reference_frequency(self, fields):
-        """Evalue la frequence PAR CELLULE mu(U) sur des tableaux numpy (REFERENCE pour les tests) :
-        memes Expr / table de registres que le bytecode C++. @p fields : dict (bloc, role_canonical) ->
-        tableau ; renvoie le tableau mu (memes formules). Renvoie None si la frequence est CONSTANTE
-        (pas d'Expr) -- utiliser .frequency dans ce cas."""
+        """Evaluates the PER-CELL frequency mu(U) on numpy arrays (REFERENCE for tests):
+        same Expr / register table as the C++ bytecode. @p fields: dict (block, role_canonical) ->
+        array; returns the mu array (same formulas). Returns None if the frequency is CONSTANT
+        (no Expr) -- use .frequency in that case."""
         if self._frequency_expr is None:
             return None
         env = {}
@@ -4365,8 +4366,8 @@ class CompiledCoupledSource:
 
 
 class CoupledSource:
-    """Source COUPLEE generique inter-especes (adc.dsl), Phase 1 (splitting EXPLICITE). Reutilise les
-    Expr du DSL des modeles pour les formules de source ; aucun couplage n'est code en dur.
+    """Generic COUPLED inter-species source (adc.dsl), Phase 1 (EXPLICIT splitting). Reuses the
+    Expr of the models DSL for the source formulas; no coupling is hard-coded.
 
         src = adc.dsl.CoupledSource("ionization")
         ne = src.block("electrons").role("density")
@@ -4376,55 +4377,55 @@ class CoupledSource:
         src.add("neutrals",  role="density", expr=-k * ne * ng)
         sim.add_coupling(src.compile(backend="production"))
 
-    compile(backend) -> CompiledCoupledSource : ABI plate (bytecode) consommee par
-    System.add_coupled_source (cote C++ : machine a pile evaluee dans un for_each_cell device, MPI-safe,
-    foncteur nomme). Le backend (production / prototype) ne change PAS la numerique : le bytecode est
-    interprete cote C++ dans les deux cas (pas de .so par couplage) ; il est conserve pour l'introspection
-    et la parite d'API avec le DSL des modeles."""
+    compile(backend) -> CompiledCoupledSource: flat ABI (bytecode) consumed by
+    System.add_coupled_source (C++ side: stack machine evaluated in a for_each_cell device, MPI-safe,
+    named functor). The backend (production / prototype) does NOT change the numerics: the bytecode is
+    interpreted on the C++ side in both cases (no .so per coupling); it is kept for introspection
+    and API parity with the models DSL."""
 
     def __init__(self, name="coupled_source"):
         self.name = name
-        self._fields = {}    # '<bloc>::<role>' -> _CsField (registre d'entree unique par (bloc, role))
-        self._reg_order = []  # ordre d'apparition des champs d'entree (-> ordre des registres)
-        self._params = {}    # nom -> Param
+        self._fields = {}    # '<block>::<role>' -> _CsField (single input register per (block, role))
+        self._reg_order = []  # order of appearance of the input fields (-> register order)
+        self._params = {}    # name -> Param
         self._terms = []     # [(block, role_canonical, Expr)]
-        # Indices (dans self._terms) des termes EMIS PAR add_pair, par paire : [(idx_gain, idx_perte)].
-        # add_pair garantit que les deux termes portent EXACTEMENT la meme Expr evaluee, l'un +expr,
-        # l'autre -expr (Neg) -> echange conservatif par construction. verify_conservation=True les
-        # revisite a la compilation pour CONTROLER la propriete (et detecter une rupture cote add manuel).
+        # Indices (in self._terms) of the terms EMITTED BY add_pair, by pair: [(idx_gain, idx_loss)].
+        # add_pair guarantees that the two terms carry EXACTLY the same evaluated Expr, one +expr,
+        # the other -expr (Neg) -> conservative exchange by construction. verify_conservation=True
+        # revisits them at compile time to CHECK the property (and detect a breach on the manual add side).
         self._pairs = []
-        self._frequency = 0.0  # mu [1/s] CONSTANTE declaree (borne de pas du couplage ; 0 = pas de borne)
-        # mu(U) PAR CELLULE optionnelle : une Expr (meme vocabulaire que les termes : block().role() +
-        # param()) emise en bytecode au compile() contre la MEME table de registres. None = constante.
+        self._frequency = 0.0  # mu [1/s] declared CONSTANT (coupling step bound; 0 = no bound)
+        # optional PER-CELL mu(U): an Expr (same vocabulary as the terms: block().role() +
+        # param()) emitted into bytecode at compile() against the SAME register table. None = constant.
         self._frequency_expr = None
 
     def frequency(self, mu):
-        """FREQUENCE declaree mu [1/s] du couplage (audit vague 3) : borne de pas dt <= cfl / mu
-        agregee par System/AmrSystem::step_cfl (raison 'coupled_source:<nom>'). Les couplages sont
-        appliques UNE fois par MACRO-pas (splitting, apply_couplings(dt)) : la borne porte sur le
-        macro-dt, SANS facteur substeps/stride. mu <= 0 = pas de borne (historique).
+        """Declared coupling FREQUENCY mu [1/s] (vague 3 audit): step bound dt <= cfl / mu
+        aggregated by System/AmrSystem::step_cfl (reason 'coupled_source:<name>'). Couplings are
+        applied ONCE per MACRO-step (splitting, apply_couplings(dt)): the bound applies to the
+        macro-dt, WITHOUT a substeps/stride factor. mu <= 0 = no bound (historical).
 
-        @p mu accepte DEUX formes :
-          - un nombre (float / int) -> frequence CONSTANTE (chemin historique, bit-identique) ;
-          - une Expr du MEME vocabulaire que les termes (champs block().role() + param()) ->
-            frequence PAR CELLULE mu(U), emise en bytecode au compile() et evaluee par cellule cote
-            C++ (MAX + all_reduce_max -> dt <= cfl / max(mu)). Les champs references DOIVENT etre
-            declares via .block(...).role(...) (comme pour les termes) ; sinon compile() leve une
-            ValueError EXPLICITE (champ utilise sans .block(...).role(...)).
+        @p mu accepts TWO forms:
+          - a number (float / int) -> CONSTANT frequency (historical path, bit-identical);
+          - an Expr of the SAME vocabulary as the terms (fields block().role() + param()) ->
+            PER-CELL frequency mu(U), emitted into bytecode at compile() and evaluated per cell on the
+            C++ side (MAX + all_reduce_max -> dt <= cfl / max(mu)). The referenced fields MUST be
+            declared via .block(...).role(...) (as for the terms); otherwise compile() raises an
+            EXPLICIT ValueError (field used without .block(...).role(...)).
 
-        Renvoie self (chainable)."""
-        # Un Expr/_CsField/Param -> frequence par cellule (bytecode) ; un scalaire -> constante.
+        Returns self (chainable)."""
+        # An Expr/_CsField/Param -> per-cell frequency (bytecode); a scalar -> constant.
         if isinstance(mu, (int, float)) and not isinstance(mu, bool):
             self._frequency = float(mu)
             self._frequency_expr = None
         else:
-            self._frequency_expr = _wrap(mu)  # Expr / _CsField / Param -> noeud d'arbre (cf. _wrap)
-            self._frequency = 0.0             # le bytecode porte la borne ; pas de constante en doublon
+            self._frequency_expr = _wrap(mu)  # Expr / _CsField / Param -> tree node (cf. _wrap)
+            self._frequency = 0.0             # the bytecode carries the bound; no duplicate constant
         return self
 
-    # --- construction symbolique ----------------------------------------------------------------
+    # --- symbolic construction ----------------------------------------------------------------
     def block(self, name):
-        """Handle d'un bloc : .role(role) en tire un champ symbolique (bloc, role)."""
+        """Handle of a block: .role(role) derives a symbolic field (block, role) from it."""
         return _CsBlock(self, name)
 
     def _field(self, block, role):
@@ -4437,57 +4438,57 @@ class CoupledSource:
         return self._fields[key]
 
     def param(self, name, value):
-        """Parametre NOMME constant, utilisable comme une Expr (s'inline comme reel dans le bytecode)."""
+        """NAMED constant parameter, usable like an Expr (inlines as a real in the bytecode)."""
         p = Param(name, value, kind="const")
         self._params[name] = p
         return p
 
     def add(self, block, role=None, expr=None):
-        """Ajoute un TERME de source : d_t (bloc.role) += expr. @p expr est une Expr / _CsField / Param /
-        nombre. Plusieurs add sur le meme (bloc, role) s'ADDITIONNENT (somme de termes sources)."""
+        """Adds a source TERM: d_t (block.role) += expr. @p expr is an Expr / _CsField / Param /
+        number. Several adds on the same (block, role) ADD UP (sum of source terms)."""
         if role is None:
-            raise ValueError("CoupledSource.add : role= requis")
+            raise ValueError("CoupledSource.add: role= required")
         if expr is None:
-            raise ValueError("CoupledSource.add : expr= requis")
-        e = expr if isinstance(expr, Expr) else _wrap(expr)  # _CsField / Var sont deja des Expr ; Param/scalaire -> _wrap
+            raise ValueError("CoupledSource.add: expr= required")
+        e = expr if isinstance(expr, Expr) else _wrap(expr)  # _CsField / Var are already Expr; Param/scalar -> _wrap
         self._terms.append((block, _role_canonical(role), e))
         return self
 
     def add_pair(self, block_a, block_b, role=None, expr=None):
-        """Ajoute un ECHANGE CONSERVATIF de la quantite @p role entre @p block_a et @p block_b, decrit
-        par UNE seule expression @p expr (Expr / _CsField / Param / nombre).
+        """Adds a CONSERVATIVE EXCHANGE of the quantity @p role between @p block_a and @p block_b, described
+        by a SINGLE expression @p expr (Expr / _CsField / Param / number).
 
-        Convention de signe (a retenir) : @p block_a GAGNE +expr, @p block_b PERD -expr, sur la MEME
-        valeur evaluee de @p expr. Autrement dit :
+        Sign convention (to remember): @p block_a GAINS +expr, @p block_b LOSES -expr, on the SAME
+        evaluated value of @p expr. In other words:
 
             d_t (block_a.role) += +expr
             d_t (block_b.role) += -expr
 
-        C'est l'equivalent DSL des couplages NOMMES du C++ (add_collision / add_thermal_exchange), qui
-        calculent UNE valeur et l'appliquent avec deux signes opposes : la somme sur les deux blocs du
-        terme echange est nulle a chaque cellule et a chaque pas, donc la quantite totale sum(role) sur
-        (block_a, block_b) est CONSERVEE par construction -- independamment de la formule choisie, du dt
-        et de l'etat. Choisir @p expr >= 0 pour un transfert de B vers A (A gagne, B perd) ; un signe
-        de expr negatif inverse simplement le sens du transfert (la conservation tient dans tous les cas).
+        It is the DSL equivalent of the NAMED C++ couplings (add_collision / add_thermal_exchange), which
+        compute ONE value and apply it with two opposite signs: the sum over the two blocks of the
+        exchanged term is zero at each cell and at each step, so the total quantity sum(role) over
+        (block_a, block_b) is CONSERVED by construction -- independently of the chosen formula, the dt
+        and the state. Choose @p expr >= 0 for a transfer from B to A (A gains, B loses); a negative
+        sign of expr simply reverses the transfer direction (conservation holds in all cases).
 
-        Contraste avec deux .add(...) ecrits a la main (+expr sur A, -expr sur B) : add_pair garantit que
-        les DEUX legs portent la MEME Expr (le second est exactement Neg du premier), alors qu'a la main
-        rien n'empeche d'ecrire par megarde deux formules legerement differentes -> conservation rompue
-        silencieusement. add_pair retire ce risque ; compile(verify_conservation=True) le controle aussi
-        pour les couplages ecrits a la main.
+        Contrast with two hand-written .add(...) (+expr on A, -expr on B): add_pair guarantees that
+        the TWO legs carry the SAME Expr (the second is exactly Neg of the first), whereas by hand
+        nothing prevents writing two slightly different formulas by mistake -> conservation broken
+        silently. add_pair removes this risk; compile(verify_conservation=True) also checks it
+        for hand-written couplings.
 
-        @p block_a et @p block_b doivent etre distincts. add_pair est purement ADDITIF par-dessus .add :
-        l'API manuelle reste disponible et inchangee. Renvoie self (chainable)."""
+        @p block_a and @p block_b must be distinct. add_pair is purely ADDITIVE on top of .add:
+        the manual API stays available and unchanged. Returns self (chainable)."""
         if role is None:
-            raise ValueError("CoupledSource.add_pair : role= requis")
+            raise ValueError("CoupledSource.add_pair: role= required")
         if expr is None:
-            raise ValueError("CoupledSource.add_pair : expr= requis")
+            raise ValueError("CoupledSource.add_pair: expr= required")
         if block_a == block_b:
-            raise ValueError("CoupledSource.add_pair : block_a et block_b doivent etre distincts "
-                             "(recu %r pour les deux)" % (block_a,))
+            raise ValueError("CoupledSource.add_pair: block_a and block_b must be distinct "
+                             "(received %r for both)" % (block_a,))
         canon = _role_canonical(role)
-        gain = expr if isinstance(expr, Expr) else _wrap(expr)  # +expr (leg gagnant)
-        loss = Neg(gain)                                        # -expr : MEME sous-arbre, signe oppose
+        gain = expr if isinstance(expr, Expr) else _wrap(expr)  # +expr (gaining leg)
+        loss = Neg(gain)                                        # -expr: SAME subtree, opposite sign
         idx_gain = len(self._terms)
         self._terms.append((block_a, canon, gain))
         idx_loss = len(self._terms)
@@ -4495,19 +4496,19 @@ class CoupledSource:
         self._pairs.append((idx_gain, idx_loss))
         return self
 
-    # --- codegen bytecode -----------------------------------------------------------------------
+    # --- bytecode codegen -----------------------------------------------------------------------
     def _emit_program(self, expr, reg_index):
-        """Compile @p expr (arbre Expr) en bytecode postfixe (listes ops/args paralleles) contre la table
-        de registres @p reg_index (nom d'env '<bloc>::<role>' OU valeur constante -> indice de registre).
-        Les constantes (Const / Param inline) deviennent un registre constant dedie. Parcours postfixe
-        (recursion sur la structure de l'arbre) : une Var pousse son registre, un binaire emet ses deux
-        sous-arbres puis l'opcode, etc. -- exactement la semantique de CsProgram::eval cote C++."""
+        """Compile @p expr (Expr tree) into postfix bytecode (parallel ops/args lists) against the
+        register table @p reg_index (env name '<bloc>::<role>' OR constant value -> register index).
+        Constants (Const / inline Param) become a dedicated constant register. Postfix traversal
+        (recursion over the tree structure): a Var pushes its register, a binary emits its two
+        subtrees then the opcode, etc. -- exactly the semantics of CsProgram::eval on the C++ side."""
         ops, args = [], []
 
         def emit(node):
             if isinstance(node, Var):
                 if node.name not in reg_index:
-                    raise ValueError("CoupledSource : champ %r utilise sans .block(...).role(...)"
+                    raise ValueError("CoupledSource: field %r used without .block(...).role(...)"
                                      % node.name)
                 ops.append(_CS_PUSHREG); args.append(reg_index[node.name])
             elif isinstance(node, Const):
@@ -4527,16 +4528,16 @@ class CoupledSource:
             elif isinstance(node, Pow):
                 emit(node.a); emit(node.b); ops.append(_CS_POW); args.append(0)
             else:
-                raise TypeError("CoupledSource : noeud d'expression non supporte en Phase 1 : %r "
-                                "(supporte : +, -, *, /, **, -unaire, sqrt, champ, constante)"
+                raise TypeError("CoupledSource: expression node not supported in Phase 1: %r "
+                                "(supported: +, -, *, /, **, unary -, sqrt, field, constant)"
                                 % type(node).__name__)
 
         emit(expr)
         return ops, args
 
     def _const_reg(self, value, reg_index):
-        """Indice de registre d'une constante @p value (deduplique). Les constantes occupent les
-        registres APRES les champs d'entree (cf. CoupledSourceKernel : r[n_in + c] = consts[c])."""
+        """Register index of a constant @p value (deduplicated). Constants occupy the
+        registers AFTER the input fields (cf. CoupledSourceKernel: r[n_in + c] = consts[c])."""
         key = ("const", float(value))
         if key not in reg_index:
             reg_index[key] = len(self._reg_order) + len(self._consts)
@@ -4545,14 +4546,14 @@ class CoupledSource:
 
     @staticmethod
     def _signed_key(expr):
-        """Cle STRUCTURELLE SIGNEE de @p expr : (signe, cle_du_corps), ou signe vaut +1 / -1 et
-        cle_du_corps est la cle structurelle (_key) de l'expression debarrassee de TOUS ses Neg de tete
-        (le signe replie chaque Neg pele). Deux expressions sont structurellement OPPOSEES ssi elles ont
-        la MEME cle_du_corps et des signes contraires (p.ex. E et Neg(E), ou -E et Neg(-E)=E). Peler
-        TOUS les Neg de tete rend la cle robuste a la paire +expr / -expr d'add_pair MEME quand expr est
-        deja un Neg (add_pair pose loss = Neg(gain), donc un Neg de plus). On ne normalise PAS l'algebre
-        interne (k*ne vs ne*k) : au pire un faux 'non conservatif' sur des formes ecrites differemment,
-        JAMAIS un faux 'conservatif' (le controle reste conservateur, donc sain)."""
+        """SIGNED STRUCTURAL key of @p expr: (sign, body_key), where sign is +1 / -1 and
+        body_key is the structural key (_key) of the expression stripped of ALL its leading Neg
+        (the sign folds in each peeled Neg). Two expressions are structurally OPPOSITE iff they have
+        the SAME body_key and opposite signs (e.g. E and Neg(E), or -E and Neg(-E)=E). Peeling
+        ALL leading Neg makes the key robust to the +expr / -expr pair from add_pair EVEN when expr is
+        already a Neg (add_pair sets loss = Neg(gain), hence one more Neg). We do NOT normalize the
+        internal algebra (k*ne vs ne*k): at worst a false 'non-conservative' on differently written
+        forms, NEVER a false 'conservative' (the check stays conservative, hence sound)."""
         sign = 1
         while isinstance(expr, Neg):
             sign = -sign
@@ -4560,17 +4561,17 @@ class CoupledSource:
         return (sign, _key(expr))
 
     def _verify_conservation(self):
-        """Verifie que, role par role, la somme des termes de source s'ANNULE structurellement : chaque
-        contribution +E sur un bloc est compensee par une contribution -E (meme corps structurel) sur un
-        autre bloc. Leve ValueError EXPLICITE sinon. C'est exactement la propriete que garantit add_pair
-        par construction ; ce controle l'etend aux couplages ecrits a la main (deux .add) et detecte une
-        rupture (formules legerement differentes, signe oublie, terme orphelin). Purement symbolique
-        (aucune evaluation numerique) : meme cle structurelle que la CSE du codegen."""
+        """Verify that, role by role, the sum of the source terms CANCELS structurally: each
+        contribution +E on one block is compensated by a contribution -E (same structural body) on
+        another block. Raises an EXPLICIT ValueError otherwise. This is exactly the property add_pair
+        guarantees by construction; this check extends it to hand-written couplings (two .add) and detects
+        a break (slightly different formulas, forgotten sign, orphan term). Purely symbolic
+        (no numerical evaluation): same structural key as the codegen CSE."""
         from collections import Counter
         per_role = {}
         for (_block, role, expr) in self._terms:
             sign, body = self._signed_key(expr)
-            # Compteur signe par corps structurel : +1 pour +E, -1 pour -E. Tout s'annule => conservatif.
+            # Signed counter per structural body: +1 for +E, -1 for -E. Everything cancels => conservative.
             c = per_role.setdefault(role, Counter())
             c[body] += sign
         offenders = []
@@ -4580,30 +4581,30 @@ class CoupledSource:
                     offenders.append((role, body, net))
         if offenders:
             details = "; ".join(
-                "role '%s' : terme %r non compense (net=%+d)" % (role, body, net)
+                "role '%s': term %r not compensated (net=%+d)" % (role, body, net)
                 for (role, body, net) in offenders)
             raise ValueError(
-                "CoupledSource.compile(verify_conservation=True) : couplage NON conservatif. "
-                "Chaque contribution +E sur un bloc doit etre compensee par -E (meme expression) "
-                "sur un autre bloc (utiliser add_pair pour le garantir). Termes non compenses : "
+                "CoupledSource.compile(verify_conservation=True): NON-conservative coupling. "
+                "Each contribution +E on one block must be compensated by -E (same expression) "
+                "on another block (use add_pair to guarantee it). Uncompensated terms: "
                 + details)
 
     def compile(self, backend="production", verify_conservation=False):
-        """Compile la source en CompiledCoupledSource (ABI plate bytecode). @p backend documente
-        l'intention (parite d'API avec le DSL des modeles) ; la numerique est identique (interprete C++).
+        """Compile the source into a CompiledCoupledSource (flat bytecode ABI). @p backend documents
+        the intent (API parity with the model DSL); the numerics are identical (C++ interpreter).
 
-        @p verify_conservation (opt-in, defaut False) : controle SYMBOLIQUE que le couplage conserve
-        chaque quantite (role) -- la somme des termes de source d'un meme role s'annule structurellement
-        (chaque +E compense par un -E sur un autre bloc). add_pair satisfait cette propriete par
-        construction ; ce mode l'etend aux couplages ecrits a la main (deux .add) et leve une ValueError
-        EXPLICITE si un terme n'est pas compense (formule divergente, signe oublie, terme orphelin).
-        Off par defaut : un couplage volontairement NON conservatif (creation/destruction nette, p.ex.
-        ionisation creant une paire e/i) reste licite sans passer le flag."""
+        @p verify_conservation (opt-in, default False): SYMBOLIC check that the coupling conserves
+        each quantity (role) -- the sum of the source terms of a same role cancels structurally
+        (each +E compensated by a -E on another block). add_pair satisfies this property by
+        construction; this mode extends it to hand-written couplings (two .add) and raises an EXPLICIT
+        ValueError if a term is not compensated (divergent formula, forgotten sign, orphan term).
+        Off by default: a deliberately NON-conservative coupling (net creation/destruction, e.g.
+        ionization creating an e/i pair) stays legal without passing the flag."""
         if not self._terms:
-            raise ValueError("CoupledSource.compile : aucun terme (.add(...) requis)")
+            raise ValueError("CoupledSource.compile: no term (.add(...) required)")
         if verify_conservation:
             self._verify_conservation()
-        # Table de registres : champs d'entree d'abord (ordre d'apparition), constantes ensuite.
+        # Register table: input fields first (order of appearance), constants next.
         reg_index = {key: i for i, key in enumerate(self._reg_order)}
         self._consts = []
         prog_ops, prog_args, prog_lens = [], [], []
@@ -4611,31 +4612,31 @@ class CoupledSource:
         for (block, role, expr) in self._terms:
             ops, args = self._emit_program(expr, reg_index)
             if len(ops) > _CS_MAX_PROG:
-                raise ValueError("CoupledSource : programme du terme (%s.%s) trop long (%d > %d)"
+                raise ValueError("CoupledSource: program of term (%s.%s) too long (%d > %d)"
                                  % (block, role, len(ops), _CS_MAX_PROG))
             prog_ops += ops
             prog_args += args
             prog_lens.append(len(ops))
             out_blocks.append(block)
             out_roles.append(role)
-        # FREQUENCE PAR CELLULE optionnelle : on emet son programme APRES les termes, contre la MEME
-        # table de registres (reg_index) et la MEME liste de constantes (self._consts) -- les champs
-        # references doivent etre declares via .block().role() (sinon _emit_program leve : champ utilise
-        # sans .block(...).role(...)). Les constantes propres a la frequence s'ajoutent apres celles des
-        # termes ; cote C++ elles occupent les memes registres r[n_in ..] (CoupledFreqKernel les charge
-        # comme la source). Frequence constante (ou aucune) -> programme vide (chemin historique).
+        # Optional PER-CELL FREQUENCY: its program is emitted AFTER the terms, against the SAME
+        # register table (reg_index) and the SAME constant list (self._consts) -- the referenced fields
+        # must be declared via .block().role() (otherwise _emit_program raises: field used
+        # without .block(...).role(...)). The frequency's own constants are appended after those of the
+        # terms; on the C++ side they occupy the same registers r[n_in ..] (CoupledFreqKernel loads them
+        # like the source). Constant frequency (or none) -> empty program (historical path).
         freq_prog_ops, freq_prog_args = [], []
         if self._frequency_expr is not None:
             freq_prog_ops, freq_prog_args = self._emit_program(self._frequency_expr, reg_index)
             if len(freq_prog_ops) > _CS_MAX_PROG:
-                raise ValueError("CoupledSource : programme de frequence trop long (%d > %d)"
+                raise ValueError("CoupledSource: frequency program too long (%d > %d)"
                                  % (len(freq_prog_ops), _CS_MAX_PROG))
         n_reg = len(self._reg_order) + len(self._consts)
         if n_reg > _CS_MAX_REG:
-            raise ValueError("CoupledSource : trop de registres (entrees + constantes = %d > %d)"
+            raise ValueError("CoupledSource: too many registers (inputs + constants = %d > %d)"
                              % (n_reg, _CS_MAX_REG))
         if len(out_blocks) > _CS_MAX_TERMS:
-            raise ValueError("CoupledSource : trop de termes de source (%d > %d)"
+            raise ValueError("CoupledSource: too many source terms (%d > %d)"
                              % (len(out_blocks), _CS_MAX_TERMS))
         in_blocks = [self._fields[key].block for key in self._reg_order]
         in_roles = [self._fields[key].role for key in self._reg_order]
