@@ -536,9 +536,10 @@ Delivered. It is dispatch wiring (no new numerics).
     ONE shared hierarchy `AmrRuntime`, system Poisson with SUMMED right-hand side, regrid of the union of
     tags, multi-block production DSL) is SHIPPED (`amr_system.cpp` `build_multi`). LIMITS STILL
     REAL (to keep honest): `AmrSystem` is NOT at full parity with `System` (IMEX local
-    source OK Gap 2 #132 but global Schur on AMR remains to be done);
-    HLLC/Roe/`primitive` are REJECTED on the Python AMR facade side while the C++ engine supports them
-    already (purely facade rejection). `AmrSystem.potential()`: binding SHIPPED (bindings.cpp:272,
+    source OK Gap 2 #132 but global Schur on MULTI-BLOCK AMR remains to be done; mono-block AMR
+    works via `add_equation`);
+    HLLC/Roe/`primitive` are now WIRED on the Python AMR facade with a pressure guard (a declared
+    primitive `p`, or enable_hllc/enable_roe). `AmrSystem.potential()`: binding SHIPPED (bindings.cpp:272,
     `#135`). WRITE-SET: `python/adc/__init__.py` (`AmrSystem` facade).
 
 ### Phase E: `m.param` runtime -- GAP (phase 2, engine change)

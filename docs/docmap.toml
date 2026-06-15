@@ -42,7 +42,7 @@ mode = "strict"
 depends_on = ["CMakePresets.json", "pyproject.toml", "scripts/setup_env.sh", "environment.yml", "CMakeLists.txt", "scripts/kokkos_openmp_conda.sh"]
 tested_by = []
 testable = true
-reviewed = "b0f433f4988f286c2d4b5eef83789cf5099c6f46"
+reviewed = "94697ee4e9b4849f73ef2b6339a693ada2b59800"
 
 [docs."docs/sphinx/getting-started/first-run.md"]
 owner = "Romain"
@@ -50,7 +50,7 @@ mode = "strict"
 depends_on = ["python/adc/__init__.py", "include/adc/physics/bricks.hpp", "include/adc/runtime/system.hpp"]
 tested_by = []
 testable = true
-reviewed = "f25f0b16b8cdd03cc8a735c8d8a2a952a3f9e647"
+reviewed = "94697ee4e9b4849f73ef2b6339a693ada2b59800"
 
 [docs."docs/sphinx/getting-started/tutorial.md"]
 owner = "Romain"

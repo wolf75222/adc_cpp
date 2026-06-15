@@ -55,6 +55,10 @@ FORBIDDEN: list[tuple[str, str]] = [
     (r"monotonized[- ]central", "limiteur MC / monotonized-central inexistant"),
     (r"AmrSystem[^\n]{0,40}mono-bloc", "fausse limitation : AmrSystem est mono- ET multi-bloc"),
     (r"mono-bloc[^\n]{0,40}AmrSystem", "fausse limitation : AmrSystem est mono- ET multi-bloc"),
+    # ADC-255 : garde-fous de regression sur les claims re-verifies contre le code puis corriges.
+    (r"regrid_every > 0` is refused", "fausse limitation : multi-blocs + regrid_every > 0 est SUPPORTE (capstone Phase 2)"),
+    (r"reject(ed)? on the Python AMR facade", "fausse limitation : HLLC/Roe/primitive sont CABLES sur la facade AMR (garde pression p)"),
+    (r"add_equation[^\n]{0,40}(reject|rejette)[^\n]{0,30}(Split|Strang)", "fausse limitation : AmrSystem.add_equation ACCEPTE Split/Strang (Schur AMR mono-bloc)"),
 ]
 
 
