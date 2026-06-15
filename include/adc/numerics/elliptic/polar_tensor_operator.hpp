@@ -19,167 +19,167 @@
 #include <vector>
 
 /// @file
-/// @brief Operateur elliptique POLAIRE a coefficient TENSORIEL anisotrope (termes croises), iteratif.
-///        Voie A etape 2a (brique foundational vers le Schur polaire).
+/// @brief Iterative POLAR elliptic operator with anisotropic TENSOR coefficient (cross terms).
+///        Path A stage 2a (foundational brick toward the polar Schur).
 ///
-/// CONTEXTE. Pour faire le systeme Euler-Poisson COMPLET RAIDE en geometrie POLAIRE (figure 2D
-/// diocotron a omega_c eleve), il faut l'etage Schur condense (CondensedSchurSourceStepper, niveau 4
-/// du splitting Hoffart et al., arXiv:2510.11808) sur le polaire. Le verrou est l'OPERATEUR elliptique :
-/// le Schur condense un operateur TENSORIEL PLEIN A = I + c rho B^{-1} ou B^{-1} est la rotation de
-/// Lorentz, qui injecte des termes CROISES a_rt / a_tr (et un coefficient dependant de theta des que
-/// rho ou B_z varient en theta). Le PolarPoissonSolver DIRECT existant (FFT-en-theta + tridiag-en-r,
-/// polar_poisson_solver.hpp) diagonalise theta par la FFT : il EXIGE un operateur a coefficient CONSTANT
-/// en theta et SANS couplage croise. Il est donc structurellement INCOMPATIBLE avec l'operateur Schur.
-/// Cet operateur-ci est le pendant ITERATIF (matrice-libre) qui accepte le tenseur plein.
+/// CONTEXT. To build the FULL STIFF Euler-Poisson system in POLAR geometry (2D diocotron figure
+/// at high omega_c), the condensed Schur stage (CondensedSchurSourceStepper, level 4 of the Hoffart
+/// et al. splitting, arXiv:2510.11808) is needed on the polar side. The lock is the elliptic OPERATOR:
+/// the Schur condenses a FULL TENSOR operator A = I + c rho B^{-1} where B^{-1} is the Lorentz
+/// rotation, which injects CROSS terms a_rt / a_tr (and a theta-dependent coefficient as soon as
+/// rho or B_z varies in theta). The existing DIRECT PolarPoissonSolver (FFT-in-theta + tridiag-in-r,
+/// polar_poisson_solver.hpp) diagonalizes theta via the FFT: it REQUIRES a coefficient CONSTANT in
+/// theta and WITHOUT cross coupling. It is therefore structurally INCOMPATIBLE with the Schur operator.
+/// This operator is the ITERATIVE (matrix-free) counterpart that accepts the full tensor.
 ///
-/// EQUATION. Sur un anneau (r, theta), r in [r_min, r_max] > 0 (AUCUNE singularite r=0), theta
-/// PERIODIQUE, on resout l'operateur sous forme DIVERGENCE avec metrique polaire et tenseur A dans le
-/// repere physique ORTHONORME (e_r, e_theta) :
+/// EQUATION. On a ring (r, theta), r in [r_min, r_max] > 0 (NO r=0 singularity), theta PERIODIC,
+/// we solve the operator in DIVERGENCE form with polar metric and tensor A in the ORTHONORMAL
+/// physical frame (e_r, e_theta):
 ///   L(phi) = div(A grad phi),   grad phi = (d_r phi, (1/r) d_theta phi),
 ///   div F  = (1/r) d_r(r F_r) + (1/r) d_theta(F_theta),
-///   A = [[a_rr, a_rt], [a_tr, a_tt]]  (eventuellement NON symetrique : a_rt != a_tr).
-/// Le flux est F = A grad phi :
+///   A = [[a_rr, a_rt], [a_tr, a_tt]]  (possibly NON symmetric: a_rt != a_tr).
+/// The flux is F = A grad phi:
 ///   F_r     = a_rr d_r phi + a_rt (1/r) d_theta phi
 ///   F_theta = a_tr d_r phi + a_tt (1/r) d_theta phi
-/// Cas ISOTROPE a_rr=a_tt=1, a_rt=a_tr=0 :
-///   L = (1/r) d_r(r d_r phi) + (1/r^2) d_theta^2 phi   (Laplacien polaire scalaire, cf. PolarPoissonSolver).
+/// ISOTROPIC case a_rr=a_tt=1, a_rt=a_tr=0:
+///   L = (1/r) d_r(r d_r phi) + (1/r^2) d_theta^2 phi   (scalar polar Laplacian, cf. PolarPoissonSolver).
 ///
-/// DISCRETISATION VOLUMES FINIS CONSERVATIVE (ordre 2, comme assemble_rhs_polar / PolarPoissonSolver).
-/// Cellule (i, j) de poids volume r_i dr dtheta. On integre div(F) sur la cellule et on divise par le
-/// poids, ce qui donne sur chaque face le flux porte par sa LONGUEUR FV :
-///   - faces RADIALES i+-1/2 (rayon r_face, poids de face r_face dtheta) :
-///       terme radial DIAGONAL : (1/r_i) [ r_{i+1/2} a_rr^{i+1/2} (phi_{i+1,j}-phi_{i,j})/dr
-///                                        - r_{i-1/2} a_rr^{i-1/2} (phi_{i,j}-phi_{i-1,j})/dr ] / dr ;
-///       terme radial CROISE a_rt (1/r) d_theta phi a la face i+-1/2 (d_theta moyenne sur 4 coins,
-///       1/r_{face} local a la face) ;
-///   - faces AZIMUTALES j+-1/2 (rayon r_i, poids de face dr) :
-///       terme azimutal DIAGONAL : a_tt^{j+-1/2} (phi_{i,j+1}-2 phi+phi_{i,j-1}) / (r_i^2 dtheta^2) ;
-///       terme azimutal CROISE a_tr d_r phi a la face j+-1/2 (d_r moyenne sur 4 coins).
-/// Coefficient de FACE = moyenne ARITHMETIQUE des deux centres adjacents (ordre 2 ; pour le terme
-/// diagonal radial/azimutal d'un milieu lisse l'arithmetique suffit ; le terme croise n'est pas un
-/// flux normal -> arithmetique aussi, cf. poisson_operator.hpp cartesien). Les coefficients a_rr/a_tt/
-/// a_rt/a_tr sont AU CENTRE des cellules (1 composante chacun, ghosts remplis par l'appelant).
+/// CONSERVATIVE FINITE-VOLUME DISCRETIZATION (order 2, like assemble_rhs_polar / PolarPoissonSolver).
+/// Cell (i, j) of volume weight r_i dr dtheta. We integrate div(F) over the cell and divide by the
+/// weight, which gives on each face the flux carried by its FV LENGTH:
+///   - RADIAL faces i+-1/2 (radius r_face, face weight r_face dtheta):
+///       DIAGONAL radial term: (1/r_i) [ r_{i+1/2} a_rr^{i+1/2} (phi_{i+1,j}-phi_{i,j})/dr
+///                                      - r_{i-1/2} a_rr^{i-1/2} (phi_{i,j}-phi_{i-1,j})/dr ] / dr;
+///       CROSS radial term a_rt (1/r) d_theta phi at face i+-1/2 (d_theta averaged over 4 corners,
+///       1/r_{face} local to the face);
+///   - AZIMUTHAL faces j+-1/2 (radius r_i, face weight dr):
+///       DIAGONAL azimuthal term: a_tt^{j+-1/2} (phi_{i,j+1}-2 phi+phi_{i,j-1}) / (r_i^2 dtheta^2);
+///       CROSS azimuthal term a_tr d_r phi at face j+-1/2 (d_r averaged over 4 corners).
+/// FACE coefficient = ARITHMETIC mean of the two adjacent centers (order 2; for the radial/azimuthal
+/// diagonal term of a smooth medium the arithmetic mean suffices; the cross term is not a normal flux
+/// -> arithmetic mean as well, cf. cartesian poisson_operator.hpp). The coefficients a_rr/a_tt/
+/// a_rt/a_tr are at the CENTER of the cells (1 component each, ghosts filled by the caller).
 ///
-/// VALIDITE de la metrique : les faces radiales utilisent r_face(i) > 0 (anneau, r_min > 0) ; aucune
-/// division par r=0. La diagonale du stencil est SOMMEE des poids de face (pour le preconditionneur
-/// Jacobi) ; en isotrope elle redonne EXACTEMENT le stencil polaire scalaire.
+/// METRIC VALIDITY: the radial faces use r_face(i) > 0 (ring, r_min > 0); no division by r=0. The
+/// stencil diagonal is the SUM of the face weights (for the Jacobi preconditioner); in the isotropic
+/// case it gives back EXACTLY the scalar polar stencil.
 ///
-/// CONDITIONS AUX LIMITES. theta PERIODIQUE (ghosts periodiques, fill_ghosts avec ylo/yhi=Periodic).
-/// r_min/r_max : BC PHYSIQUE Dirichlet (valeur a la face, ghost de reflexion 2 v - interne) ou Neumann
-/// homogene (Foextrap, ghost = interne). C'est exactement le fill_ghosts cartesien applique en (r,
-/// theta) (direction d'indice 0 = radiale, 1 = azimutale ; cf. convention PolarGeometry). La donnee
-/// Dirichlet est repliee dans le residu (operateur AFFINE) pour le residu vrai r0, et LINEARISEE
-/// (offset c_bc retranche) pour les matvec en boucle (directions de correction) : meme mecanique que
-/// TensorKrylovSolver cartesien (krylov_solver.hpp).
+/// BOUNDARY CONDITIONS. theta PERIODIC (periodic ghosts, fill_ghosts with ylo/yhi=Periodic).
+/// r_min/r_max: PHYSICAL BC Dirichlet (value at the face, reflection ghost 2 v - interior) or
+/// homogeneous Neumann (Foextrap, ghost = interior). This is exactly the cartesian fill_ghosts applied
+/// in (r, theta) (index direction 0 = radial, 1 = azimuthal; cf. PolarGeometry convention). The
+/// Dirichlet data is folded into the residual (AFFINE operator) for the true residual r0, and
+/// LINEARIZED (offset c_bc subtracted) for the matvec in the loop (correction directions): same
+/// mechanics as the cartesian TensorKrylovSolver (krylov_solver.hpp).
 ///
-/// OPERATEUR SINGULIER (pure Neumann radial + theta periodique, aucune reaction) : la CONSTANTE est dans
-/// le noyau de L_int ; BiCGStab diverge sans traitement. On FIXE LA JAUGE par PROJECTION sur le
-/// sous-espace de MOYENNE FV NULLE (moyenne ponderee r dr dtheta retiree du residu initial, de la
-/// solution, et de chaque direction de correction preconditionnee). C'est le pendant ITERATIF du pinning
-/// de mode 0 du PolarPoissonSolver direct, sans perturber le stencil. Detecte automatiquement (les deux
-/// bords radiaux non-Dirichlet) ; au moins UN bord Dirichlet => operateur inversible, AUCUN pinning,
-/// chemin Dirichlet bit-identique. La solution est alors definie modulo une constante.
+/// SINGULAR OPERATOR (pure radial Neumann + periodic theta, no reaction): the CONSTANT is in the
+/// kernel of L_int; BiCGStab diverges without treatment. We FIX THE GAUGE by PROJECTION onto the
+/// subspace of ZERO FV MEAN (weighted mean r dr dtheta removed from the initial residual, the
+/// solution, and each preconditioned correction direction). This is the ITERATIVE counterpart of the
+/// mode-0 pinning of the direct PolarPoissonSolver, without perturbing the stencil. Detected
+/// automatically (both radial boundaries non-Dirichlet); at least ONE Dirichlet boundary => invertible
+/// operator, NO pinning, bit-identical Dirichlet path. The solution is then defined modulo a constant.
 ///
-/// SOLVEUR : Krylov BiCGStab MATRICE-LIBRE (gere le NON symetrique du terme croise), PRECONDITIONNE par
-/// un preconditionneur SIMPLE (PAS de V-cycle MG : le scoping, avertissement polar_poisson_solver.hpp,
-/// signale que le V-cycle MG STAGNE sur l'anisotropie 1/r^2 polaire ; on s'en tient a Krylov + precond
-/// simple comme demande). Deux preconditionneurs (cf. enum PolarPrecond) :
-///   - Jacobi (diagonal) : le plus simple, mais le nombre d'iterations CROIT comme 1/h^2 (Laplacien mal
-///     conditionne). A grille fine il PLAFONNE sans converger (cf. test, bloc E). Sanity check / repli.
-///   - RadialLine (DEFAUT) : inverse EXACTEMENT la tridiagonale RADIALE du bloc diagonal par ligne theta
-///     (Thomas), diagonale azimutale lumpee. Attaque le couplage radial fort + l'anisotropie 1/r^2 ;
-///     nombre d'iterations FAIBLE et a croissance MODEREE (mesure : isotrope ~ x2 par doublement de
-///     grille, tenseur ~ x2.4). Reste "simple" (aucune hierarchie MG, aucune grille grossiere).
-/// LIMITE HONNETE : le terme CROISE et le couplage AZIMUTAL ne sont PAS dans le preconditionneur (qui
-/// n'inverse que le radial) -> le nombre d'iterations du cas tenseur croit plus vite que l'isotrope.
-/// C'est acceptable pour la brique foundational (convergence SOLIDE, aucune stagnation observee) ; un
-/// preconditionneur azimutal (ligne theta) ou un MG-line robuste serait un raffinement ULTERIEUR.
-/// BiCGStab a une empreinte memoire FIXE (r, rhat, p, v, s, t, + les preconditionnes phat/shat) et ne
-/// stocke pas de base de Krylov croissante.
+/// SOLVER: MATRIX-FREE BiCGStab Krylov (handles the NON symmetric cross term), PRECONDITIONED by a
+/// SIMPLE preconditioner (NO MG V-cycle: the scoping, polar_poisson_solver.hpp warning, reports that
+/// the MG V-cycle STAGNATES on the polar 1/r^2 anisotropy; we stick to Krylov + simple precond as
+/// requested). Two preconditioners (cf. enum PolarPrecond):
+///   - Jacobi (diagonal): the simplest, but the iteration count GROWS like 1/h^2 (ill-conditioned
+///     Laplacian). On a fine grid it PLATEAUS without converging (cf. test, block E). Sanity check / fallback.
+///   - RadialLine (DEFAULT): inverts EXACTLY the RADIAL tridiagonal of the diagonal block per theta
+///     line (Thomas), azimuthal diagonal lumped. Attacks the strong radial coupling + the 1/r^2
+///     anisotropy; LOW iteration count with MODERATE growth (measured: isotropic ~ x2 per grid
+///     doubling, tensor ~ x2.4). Stays "simple" (no MG hierarchy, no coarse grid).
+/// HONEST LIMITATION: the CROSS term and the AZIMUTHAL coupling are NOT in the preconditioner (which
+/// only inverts the radial part) -> the iteration count of the tensor case grows faster than the
+/// isotropic one. This is acceptable for the foundational brick (SOLID convergence, no stagnation
+/// observed); an azimuthal preconditioner (theta line) or a robust MG-line would be a LATER
+/// refinement. BiCGStab has a FIXED memory footprint (r, rhat, p, v, s, t, + the preconditioned
+/// phat/shat) and does not store a growing Krylov basis.
 ///
-/// PORTEE : MULTI-RANG MPI ET MULTI-BOX (plusieurs boites PAR RANG) par decoupage AZIMUTAL (theta seul)
-/// pour le precond RadialLine, ou par PAVAGE 2D LIBRE (r ET theta) pour le precond Jacobi. Les produits
-/// scalaires (dot/norme L2) sont collectifs (all_reduce via mf_arith::dot) et local_size()==0-safe ; ils
-/// bouclent sur TOUTES les boites locales (mf_arith). La matvec passe par fill_ghosts (echange de halos
-/// MPI + CL physique) qui remplit aussi les COINS DIAGONAUX p(i+-1, j+-1) entre boites adjacentes -- lus
-/// par les TERMES CROISES a_rt/a_tr du stencil a 9 POINTS (fill_boundary enumere les 8 directions de
-/// shift, fill_physical_bc etend la CL radiale dans la halo theta : sans ce coin, le terme croise serait
-/// FAUX au bord de box, cf. test_polar_schur_multibox). La projection de jauge project_mean accumule
-/// sum/vol sur TOUTES les boites locales puis all_reduit (numerateur + denominateur). Le precond
-/// RadialLine (Thomas en r) exige qu'une LIGNE RADIALE entiere (colonne i=0..nr-1 a theta fixe) tienne
-/// dans UNE box (sinon le sweep sequentiel en r franchirait une frontiere de box) : on impose donc que
-/// CHAQUE box couvre la PLAGE RADIALE COMPLETE du domaine (decoupage en theta uniquement, MAIS un nombre
-/// QUELCONQUE de boites theta par rang). M^{-1} est alors BLOC-DIAGONAL en box (aucune communication le
-/// long de r) ; les tridiagonales sont par BOX LOCALE (line_*_[li]). Un decoupage qui coupe r SOUS
-/// RadialLine est REFUSE par un garde-fou explicite (check_radial_columns, au lieu d'un faux silencieux).
-/// Le repli Jacobi (PolarPrecond::Jacobi, par cellule) n'a AUCUNE contrainte de layout : il accepte un
-/// PAVAGE 2D complet (coupe r ET theta), au prix d'un nombre d'iterations croissant en 1/h^2. Le
-/// decoupage theta est de toute facon legitime : theta est la direction PERIODIQUE et le mode azimutal
-/// porteur du diocotron ; couper r (peu de cellules, fort couplage radial) serait contre-productif.
-/// MONO-RANG / BOITE UNIQUE : chemin BIT-IDENTIQUE (all_reduce = identite en serie ; la boucle
-/// local_size() = la boucle fab(0) quand il n'y a qu'une box couvrant tout l'anneau).
+/// SCOPE: MULTI-RANK MPI AND MULTI-BOX (several boxes PER RANK) by AZIMUTHAL splitting (theta only)
+/// for the RadialLine precond, or by FREE 2D TILING (r AND theta) for the Jacobi precond. The dot
+/// products (dot/L2 norm) are collective (all_reduce via mf_arith::dot) and local_size()==0-safe;
+/// they loop over ALL the local boxes (mf_arith). The matvec goes through fill_ghosts (MPI halo
+/// exchange + physical BC) which also fills the DIAGONAL CORNERS p(i+-1, j+-1) between adjacent boxes
+/// -- read by the CROSS TERMS a_rt/a_tr of the 9-POINT stencil (fill_boundary enumerates the 8 shift
+/// directions, fill_physical_bc extends the radial BC into the theta halo: without this corner, the
+/// cross term would be WRONG at the box boundary, cf. test_polar_schur_multibox). The gauge projection
+/// project_mean accumulates sum/vol over ALL the local boxes then all_reduces (numerator + denominator).
+/// The RadialLine precond (Thomas in r) requires that a full RADIAL LINE (column i=0..nr-1 at fixed
+/// theta) fit in ONE box (otherwise the sequential sweep in r would cross a box boundary): we therefore
+/// require that EACH box cover the FULL RADIAL RANGE of the domain (splitting in theta only, BUT ANY
+/// number of theta boxes per rank). M^{-1} is then BLOCK-DIAGONAL per box (no communication along r);
+/// the tridiagonals are per LOCAL BOX (line_*_[li]). A splitting that cuts r UNDER RadialLine is
+/// REFUSED by an explicit guard (check_radial_columns, instead of a silent wrong result). The Jacobi
+/// fallback (PolarPrecond::Jacobi, per cell) has NO layout constraint: it accepts a full 2D TILING
+/// (cuts r AND theta), at the cost of an iteration count growing like 1/h^2. The theta splitting is
+/// legitimate anyway: theta is the PERIODIC direction and the azimuthal mode carrying the diocotron;
+/// cutting r (few cells, strong radial coupling) would be counterproductive.
+/// SINGLE-RANK / SINGLE BOX: BIT-IDENTICAL path (all_reduce = identity in serial; the local_size()
+/// loop = the fab(0) loop when there is only one box covering the whole ring).
 ///
-/// ADDITIF : aucun chemin existant n'est touche. Le PolarPoissonSolver scalaire DIRECT reste INTOUCHE
-/// (chemin separe) ; le Schur CARTESIEN reste BIT-IDENTIQUE. Ce header est OPT-IN (etape 2b = wiring
-/// d'un SchurReconstructKernel polaire + d'un coupleur, hors scope ici).
+/// ADDITIVE: no existing path is touched. The DIRECT scalar PolarPoissonSolver stays UNTOUCHED
+/// (separate path); the CARTESIAN Schur stays BIT-IDENTICAL. This header is OPT-IN (stage 2b = wiring
+/// a polar SchurReconstructKernel + a coupler, out of scope here).
 
 namespace adc {
 
 namespace detail {
 
-/// Contribution de FACE RADIALE au stencil diagonal + croise, en (i, j). Renvoie L_int local SANS le
-/// terme azimutal (calcule a part). Foncteur libre device-clean (ADC_HD). Coefficients de face =
-/// moyenne arithmetique ; metrique r_face/r_i ; terme croise a_rt (1/r_face) (d_theta phi)_face.
-/// Termes croises absents (hrt=false) -> seul le terme radial diagonal contribue, bit-identique au
-/// stencil polaire scalaire avec a_rr=1.
+/// RADIAL FACE contribution to the diagonal + cross stencil, at (i, j). Returns the local L_int
+/// WITHOUT the azimuthal term (computed separately). Free device-clean functor (ADC_HD). Face
+/// coefficients = arithmetic mean; metric r_face/r_i; cross term a_rt (1/r_face) (d_theta phi)_face.
+/// Cross terms absent (hrt=false) -> only the diagonal radial term contributes, bit-identical to the
+/// scalar polar stencil with a_rr=1.
 ADC_HD inline Real polar_radial_div(const ConstArray4& p, const ConstArray4& arr,
                                     bool hrt, const ConstArray4& art, int i, int j, Real ri,
                                     Real rfm, Real rfp, Real idr, Real idth) {
-  // Coefficients a_rr de face (moyenne arithmetique des centres adjacents).
+  // Face a_rr coefficients (arithmetic mean of the adjacent centers).
   const Real arr_p = Real(0.5) * (arr(i, j) + arr(i + 1, j));
   const Real arr_m = Real(0.5) * (arr(i, j) + arr(i - 1, j));
-  // Terme radial DIAGONAL : (1/r_i) [ r_{i+1/2} a_rr_p (phi_{i+1}-phi_i)/dr - r_{i-1/2} a_rr_m (phi_i-phi_{i-1})/dr ] / dr.
+  // DIAGONAL radial term: (1/r_i) [ r_{i+1/2} a_rr_p (phi_{i+1}-phi_i)/dr - r_{i-1/2} a_rr_m (phi_i-phi_{i-1})/dr ] / dr.
   Real out = (rfp * arr_p * (p(i + 1, j) - p(i, j)) - rfm * arr_m * (p(i, j) - p(i - 1, j))) *
              (idr * idr / ri);
-  if (hrt) {  // Terme radial CROISE a_rt (1/r_face) d_theta phi a la face i+-1/2 (d_theta moyenne 4 coins).
+  if (hrt) {  // CROSS radial term a_rt (1/r_face) d_theta phi at face i+-1/2 (d_theta averaged over 4 corners).
     const Real art_p = Real(0.5) * (art(i, j) + art(i + 1, j));
     const Real art_m = Real(0.5) * (art(i, j) + art(i - 1, j));
-    // (d_theta phi)_face moyenne sur les 4 coins de la face : 1/(r_face) car grad_theta = (1/r) d_theta phi.
+    // (d_theta phi)_face averaged over the 4 corners of the face: 1/(r_face) because grad_theta = (1/r) d_theta phi.
     const Real dth_p = (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idth);
     const Real dth_m = (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idth);
     // (1/r_i)(1/dr) [ r_{i+1/2} F_cross_p - r_{i-1/2} F_cross_m ], F_cross = a_rt (1/r_face) d_theta phi.
-    // r_face * (1/r_face) = 1 : la metrique r_face annule le 1/r_face du gradient azimutal -> facteur 1.
+    // r_face * (1/r_face) = 1: the r_face metric cancels the 1/r_face of the azimuthal gradient -> factor 1.
     out += (art_p * dth_p - art_m * dth_m) * (idr / ri);
   }
   return out;
 }
 
-/// Contribution de FACE AZIMUTALE au stencil diagonal + croise, en (i, j). Renvoie L_int local du
-/// terme azimutal. Coefficients a_tt de face (arithmetique) ; metrique 1/(r_i^2) ; terme croise a_tr
-/// d_r phi a la face j+-1/2 (d_r moyenne 4 coins).
+/// AZIMUTHAL FACE contribution to the diagonal + cross stencil, at (i, j). Returns the local L_int of
+/// the azimuthal term. Face a_tt coefficients (arithmetic); metric 1/(r_i^2); cross term a_tr d_r phi
+/// at face j+-1/2 (d_r averaged over 4 corners).
 ADC_HD inline Real polar_azimuthal_div(const ConstArray4& p, const ConstArray4& att,
                                        bool htr, const ConstArray4& atr, int i, int j, Real ri,
                                        Real idr, Real idth) {
   const Real inv_r2 = Real(1) / (ri * ri);
   const Real att_p = Real(0.5) * (att(i, j) + att(i, j + 1));
   const Real att_m = Real(0.5) * (att(i, j) + att(i, j - 1));
-  // Terme azimutal DIAGONAL : a_tt^{j+-1/2} (phi_{j+1}-2 phi+phi_{j-1}) / (r_i^2 dtheta^2), forme flux.
+  // DIAGONAL azimuthal term: a_tt^{j+-1/2} (phi_{j+1}-2 phi+phi_{j-1}) / (r_i^2 dtheta^2), flux form.
   Real out = (att_p * (p(i, j + 1) - p(i, j)) - att_m * (p(i, j) - p(i, j - 1))) * (idth * idth * inv_r2);
-  if (htr) {  // Terme azimutal CROISE a_tr d_r phi a la face j+-1/2 (d_r moyenne 4 coins).
+  if (htr) {  // CROSS azimuthal term a_tr d_r phi at face j+-1/2 (d_r averaged over 4 corners).
     const Real atr_p = Real(0.5) * (atr(i, j) + atr(i, j + 1));
     const Real atr_m = Real(0.5) * (atr(i, j) + atr(i, j - 1));
     const Real dr_p = (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idr);
     const Real dr_m = (p(i + 1, j - 1) + p(i + 1, j) - p(i - 1, j - 1) - p(i - 1, j)) * (Real(0.25) * idr);
-    // (1/r_i)(1/dtheta) [ F_cross_p - F_cross_m ], F_cross = a_tr d_r phi. Metrique 1/r_i (poids face dr).
+    // (1/r_i)(1/dtheta) [ F_cross_p - F_cross_m ], F_cross = a_tr d_r phi. Metric 1/r_i (face weight dr).
     out += (atr_p * dr_p - atr_m * dr_m) * (idth / ri);
   }
   return out;
 }
 
-/// Diagonale (coefficient de phi_{i,j}) du stencil POLAIRE diagonal (radial + azimutal), pour le
-/// preconditionneur Jacobi. Termes croises EXCLUS de la diagonale (ils ne touchent pas phi_{i,j} :
-/// les coins i+-1, j+-1 sont hors-diagonaux). Renvoie la valeur (NEGATIVE) du coefficient diagonal de
-/// L_int (somme des -poids de face), comme le stencil scalaire (diag < 0).
+/// Diagonal (coefficient of phi_{i,j}) of the diagonal POLAR stencil (radial + azimuthal), for the
+/// Jacobi preconditioner. Cross terms EXCLUDED from the diagonal (they do not touch phi_{i,j}: the
+/// corners i+-1, j+-1 are off-diagonal). Returns the (NEGATIVE) value of the diagonal coefficient of
+/// L_int (sum of -face weights), like the scalar stencil (diag < 0).
 ADC_HD inline Real polar_diag(const ConstArray4& arr, const ConstArray4& att, int i, int j, Real ri,
                               Real rfm, Real rfp, Real idr, Real idth) {
   const Real arr_p = Real(0.5) * (arr(i, j) + arr(i + 1, j));
@@ -189,13 +189,13 @@ ADC_HD inline Real polar_diag(const ConstArray4& arr, const ConstArray4& att, in
   const Real inv_r2 = Real(1) / (ri * ri);
   const Real rad = (rfp * arr_p + rfm * arr_m) * (idr * idr / ri);
   const Real azi = (att_p + att_m) * (idth * idth * inv_r2);
-  return -(rad + azi);  // coefficient diagonal de L_int (les voisins ont des coefficients positifs)
+  return -(rad + azi);  // diagonal coefficient of L_int (the neighbors have positive coefficients)
 }
 
-/// L_int(phi) = div(A grad phi) en polaire (apply). Foncteur NOMME device-clean (recette #93 : kernel
-/// premiere-instancie cross-TU -> pas de lambda etendue sous nvcc). arr/att toujours fournis (au moins
-/// a_rr=a_tt=1) ; art/atr optionnels (termes croises). r_min/dr/dtheta passes en scalaires (PolarGeometry
-/// accesseurs ADC_HD recalcules en kernel).
+/// L_int(phi) = div(A grad phi) in polar (apply). NAMED device-clean functor (recipe #93: first-
+/// instantiated cross-TU kernel -> no extended lambda under nvcc). arr/att always provided (at least
+/// a_rr=a_tt=1); art/atr optional (cross terms). r_min/dr/dtheta passed as scalars (PolarGeometry
+/// ADC_HD accessors recomputed in the kernel).
 struct PolarApplyKernel {
   ConstArray4 p;
   Array4 L;
@@ -212,26 +212,27 @@ struct PolarApplyKernel {
   }
 };
 
-/// out = (f - L0 phi) / |diag| -- une iteration de Jacobi (relaxation point a point) sur le stencil
-/// DIAGONAL polaire (termes croises exclus du splitting Jacobi : ils restent au second membre via le
-/// residu). out est ECRIT. Foncteur NOMME device-clean. Sert au preconditionneur Jacobi : applique a un
-/// residu z, rend M^{-1} z = diag^{-1} z (forme simple, un balayage). idiag = 1/diag stocke a part.
+/// out = (f - L0 phi) / |diag| -- one Jacobi iteration (point-by-point relaxation) on the DIAGONAL
+/// polar stencil (cross terms excluded from the Jacobi splitting: they stay on the right-hand side via
+/// the residual). out is WRITTEN. NAMED device-clean functor. Used by the Jacobi preconditioner:
+/// applied to a residual z, returns M^{-1} z = diag^{-1} z (simple form, one sweep). idiag = 1/diag
+/// stored separately.
 struct PolarJacobiApplyKernel {
   ConstArray4 z;
   Array4 out;
-  ConstArray4 idiag;  // 1 / coefficient diagonal de L_int (negatif), precalcule
+  ConstArray4 idiag;  // 1 / diagonal coefficient of L_int (negative), precomputed
   ADC_HD void operator()(int i, int j) const { out(i, j) = z(i, j) * idiag(i, j); }
 };
 
-/// Copie composante 0 (dst <- src). Foncteur NOMME device-clean local (le header n'inclut pas
-/// geometric_mg.hpp : on ne depend PAS du V-cycle MG, ecarte volontairement en polaire).
+/// Copy component 0 (dst <- src). Local NAMED device-clean functor (the header does not include
+/// geometric_mg.hpp: we do NOT depend on the MG V-cycle, deliberately discarded in polar).
 struct PolarCopyKernel {
   Array4 d;
   ConstArray4 s;
   ADC_HD void operator()(int i, int j) const { d(i, j) = s(i, j, 0); }
 };
 
-/// Calcule idiag = 1 / diag du stencil polaire diagonal (pour Jacobi). diag = polar_diag (< 0).
+/// Computes idiag = 1 / diag of the diagonal polar stencil (for Jacobi). diag = polar_diag (< 0).
 struct PolarInvDiagKernel {
   ConstArray4 arr, att;
   Array4 idiag;
@@ -247,17 +248,17 @@ struct PolarInvDiagKernel {
 
 }  // namespace detail
 
-/// Applique L_int(phi) = div(A grad phi) en polaire sur tout le MultiFab. Ghosts de @p phi supposes
-/// remplis (theta periodique, r physique). a_rr/a_tt : coefficients diagonaux (1 composante, centres ;
-/// nullptr -> coefficient 1 uniforme, isotrope). a_rt/a_tr : termes croises (nullptr -> absents).
+/// Applies L_int(phi) = div(A grad phi) in polar over the whole MultiFab. Ghosts of @p phi assumed
+/// filled (theta periodic, r physical). a_rr/a_tt: diagonal coefficients (1 component, centers;
+/// nullptr -> uniform coefficient 1, isotropic). a_rt/a_tr: cross terms (nullptr -> absent).
 inline void apply_polar_tensor(const MultiFab& phi, const PolarGeometry& geom, MultiFab& lap,
                                const MultiFab* a_rr, const MultiFab* a_tt, const MultiFab* a_rt,
                                const MultiFab* a_tr) {
-  // CONTRAT : a_rr/a_tt requis (les coefficients diagonaux du stencil sont toujours lus). Un cas isotrope
-  // fournit des champs CONSTANTS a 1 (PolarTensorKrylovSolver le fait via ses stores internes). a_rt/a_tr
-  // optionnels (termes croises). On ne peut pas deref un nullptr en kernel -> garde-fou a l'entree.
+  // CONTRACT: a_rr/a_tt required (the diagonal coefficients of the stencil are always read). An
+  // isotropic case provides fields CONSTANT at 1 (PolarTensorKrylovSolver does this via its internal
+  // stores). a_rt/a_tr optional (cross terms). We cannot deref a nullptr in the kernel -> guard at entry.
   if (!a_rr || !a_tt)
-    throw std::runtime_error("apply_polar_tensor : a_rr et a_tt requis (champs a 1 si isotrope)");
+    throw std::runtime_error("apply_polar_tensor: a_rr and a_tt required (fields at 1 if isotropic)");
   const Real dr = geom.dr();
   const Real idr = Real(1) / dr;
   const Real idth = Real(1) / geom.dtheta();
@@ -275,10 +276,10 @@ inline void apply_polar_tensor(const MultiFab& phi, const PolarGeometry& geom, M
   }
 }
 
-/// Contrat des operateurs elliptiques POLAIRES iteratifs : meme forme que PolarEllipticSolver (cf.
-/// polar_poisson_solver.hpp) + variante a tolerance solve(rel_tol, max_iters) (pendant polaire de
-/// LinearSolver cartesien). On ne redefinit PAS PolarEllipticSolver (defini avec PolarPoissonSolver) :
-/// on l'inclut indirectement via les memes membres. Type de retour de solve(tol,it) NON void.
+/// Contract of the iterative POLAR elliptic operators: same shape as PolarEllipticSolver (cf.
+/// polar_poisson_solver.hpp) + a tolerance variant solve(rel_tol, max_iters) (polar counterpart of the
+/// cartesian LinearSolver). We do NOT redefine PolarEllipticSolver (defined with PolarPoissonSolver):
+/// it is included indirectly via the same members. Return type of solve(tol,it) is NON void.
 template <class S>
 concept PolarLinearSolver = requires(S s, Real tol, int it) {
   { s.rhs() } -> std::same_as<MultiFab&>;
@@ -290,41 +291,42 @@ concept PolarLinearSolver = requires(S s, Real tol, int it) {
   requires !std::same_as<decltype(s.solve(tol, it)), void>;
 };
 
-/// Resultat d'un solve BiCGStab polaire : iterations, residu relatif, convergence. (Meme forme que
-/// KrylovResult cartesien -- on reutilise le type si deja inclus ; sinon on declare le pendant local.)
+/// Result of a polar BiCGStab solve: iterations, relative residual, convergence. (Same shape as the
+/// cartesian KrylovResult -- we reuse the type if already included; otherwise we declare the local
+/// counterpart.)
 struct PolarKrylovResult {
   int iters = 0;
   Real rel_residual = 0;
   bool converged = false;
 };
 
-/// Choix du PRECONDITIONNEUR SIMPLE de BiCGStab (PAS de V-cycle MG -- stagnation sur 1/r^2 polaire,
-/// cf. entete). Deux options, toutes deux "simples" (sans hierarchie multigrille) :
-///   - Jacobi : diagonal pur M^{-1} = diag^{-1}. Le plus simple, mais le nombre d'iterations CROIT
-///     comme 1/h^2 (Laplacien mal conditionne) : utile en sanity check, peu performant a grille fine.
-///   - RadialLine : inverse EXACTEMENT la tridiagonale RADIALE du bloc diagonal par ligne theta
-///     (Thomas, comme le solveur direct), la diagonale du bloc azimutal etant lumpee. Attaque la
-///     direction radiale FORTEMENT couplee (et l'anisotropie 1/r^2 via la diagonale lumpee), laissant
-///     a Krylov le seul couplage azimutal residuel : nombre d'iterations QUASI INDEPENDANT de h.
-///     Reste "simple" (pas de MG, pas de grille grossiere). DEFAUT.
+/// Choice of the SIMPLE BiCGStab PRECONDITIONER (NO MG V-cycle -- stagnation on polar 1/r^2, cf.
+/// header). Two options, both "simple" (no multigrid hierarchy):
+///   - Jacobi: pure diagonal M^{-1} = diag^{-1}. The simplest, but the iteration count GROWS like
+///     1/h^2 (ill-conditioned Laplacian): useful as a sanity check, poor on a fine grid.
+///   - RadialLine: inverts EXACTLY the RADIAL tridiagonal of the diagonal block per theta line
+///     (Thomas, like the direct solver), the azimuthal block diagonal being lumped. Attacks the
+///     STRONGLY coupled radial direction (and the 1/r^2 anisotropy via the lumped diagonal), leaving
+///     to Krylov only the residual azimuthal coupling: iteration count NEARLY INDEPENDENT of h.
+///     Stays "simple" (no MG, no coarse grid). DEFAULT.
 enum class PolarPrecond { Jacobi, RadialLine };
 
-/// Solveur de Krylov BiCGStab MATRICE-LIBRE pour l'operateur elliptique POLAIRE a tenseur PLEIN
-/// L_int(phi) = div(A grad phi), A = [[a_rr, a_rt], [a_tr, a_tt]] eventuellement NON symetrique.
-/// Preconditionneur SIMPLE (Jacobi diagonal ou RadialLine = Thomas radial par ligne theta). PAS de
-/// V-cycle MG (stagnation sur 1/r^2 polaire, cf. entete et PolarPrecond).
+/// MATRIX-FREE BiCGStab Krylov solver for the FULL-tensor POLAR elliptic operator
+/// L_int(phi) = div(A grad phi), A = [[a_rr, a_rt], [a_tr, a_tt]] possibly NON symmetric. SIMPLE
+/// preconditioner (diagonal Jacobi or RadialLine = radial Thomas per theta line). NO MG V-cycle
+/// (stagnation on polar 1/r^2, cf. header and PolarPrecond).
 ///
-/// CYCLE DE VIE : construit sur une PolarGeometry + BoxArray + BCRec (radiale). En MPI multi-rang, le
-/// BoxArray doit etre decoupe en THETA SEULEMENT (chaque box couvre la plage radiale complete) pour le
-/// preconditionneur RadialLine (cf. portee + check_radial_columns) ; le repli Jacobi n'a pas cette
-/// contrainte. rhs()/phi() sont les champs du solve (warm start sur phi()). set_coefficients(...) fixe le
-/// tenseur (pointeurs vers des champs de coefficient AU CENTRE, ghosts remplis par l'appelant avant
-/// solve). En isotrope, appeler sans a_rt/a_tr et fournir a_rr/a_tt = champs a 1 (helper fill_one).
+/// LIFE CYCLE: built on a PolarGeometry + BoxArray + BCRec (radial). In multi-rank MPI, the BoxArray
+/// must be split in THETA ONLY (each box covers the full radial range) for the RadialLine
+/// preconditioner (cf. scope + check_radial_columns); the Jacobi fallback has no such constraint.
+/// rhs()/phi() are the solve fields (warm start on phi()). set_coefficients(...) sets the tensor
+/// (pointers to coefficient fields at the CENTER, ghosts filled by the caller before solve). In the
+/// isotropic case, call without a_rt/a_tr and provide a_rr/a_tt = fields at 1 (fill_one helper).
 class PolarTensorKrylovSolver {
  public:
-  /// @param geom anneau (r, theta) ; @param ba BoxArray (boite unique ou decoupage THETA en MPI/multi-box) ;
-  /// @param bc BC radiale (xlo/xhi), theta periodique.
-  /// @param precond preconditionneur simple (RadialLine par defaut ; Jacobi en repli/sanity check).
+  /// @param geom ring (r, theta); @param ba BoxArray (single box or THETA splitting in MPI/multi-box);
+  /// @param bc radial BC (xlo/xhi), theta periodic.
+  /// @param precond simple preconditioner (RadialLine by default; Jacobi as fallback/sanity check).
   PolarTensorKrylovSolver(const PolarGeometry& geom, const BoxArray& ba, const BCRec& bc,
                           PolarPrecond precond = PolarPrecond::RadialLine)
       : geom_(geom),
@@ -337,38 +339,39 @@ class PolarTensorKrylovSolver {
         phat_(ba, dm_, 1, 1), shat_(ba, dm_, 1, 1),
         idiag_(ba, dm_, 1, 0), op_offset_(ba, dm_, 1, 0),
         a_rr_store_(ba, dm_, 1, 1), a_tt_store_(ba, dm_, 1, 1) {
-    // GARDE-FOU DE LAYOUT (remplace le garde-fou mono-rang) : le preconditionneur RadialLine resout une
-    // tridiagonale RADIALE par ligne theta via un sweep Thomas SEQUENTIEL en r. Ce sweep doit rester
-    // LOCAL a une box (il ne peut pas franchir une frontiere de box/rang). On EXIGE donc que chaque box
-    // du BoxArray couvre la PLAGE RADIALE COMPLETE [domain.lo[0], domain.hi[0]] (decoupage en theta
-    // seulement). Le repli Jacobi (par cellule) n'a pas cette contrainte -> aucun check. Mono-rang boite
-    // unique : la box couvre tout l'anneau, le check passe trivialement (chemin inchange).
+    // LAYOUT GUARD (replaces the single-rank guard): the RadialLine preconditioner solves a RADIAL
+    // tridiagonal per theta line via a SEQUENTIAL Thomas sweep in r. This sweep must stay LOCAL to a
+    // box (it cannot cross a box/rank boundary). We therefore REQUIRE that each box of the BoxArray
+    // cover the FULL RADIAL RANGE [domain.lo[0], domain.hi[0]] (splitting in theta only). The Jacobi
+    // fallback (per cell) has no such constraint -> no check. Single-rank single box: the box covers
+    // the whole ring, the check passes trivially (path unchanged).
     if (precond_ == PolarPrecond::RadialLine) check_radial_columns(ba);
-    // Coefficients diagonaux par defaut = 1 (isotrope) : champs internes a 1, ghosts remplis Foextrap.
+    // Default diagonal coefficients = 1 (isotropic): internal fields at 1, ghosts filled Foextrap.
     a_rr_store_.set_val(Real(1));
     a_tt_store_.set_val(Real(1));
     a_rr_ = &a_rr_store_;
     a_tt_ = &a_tt_store_;
   }
 
-  // REGLE DES CINQ (C.21) : les pointeurs courants a_rr_/a_tt_ aliasent les stores internes
-  // a_rr_store_/a_tt_store_ ou des champs externes. Une copie/move PAR DEFAUT laisserait ces
-  // pointeurs viser les stores de l'objet SOURCE (dangling/UB). Le solveur est TOUJOURS utilise comme
-  // variable LOCALE de portee (jamais copie, move, stocke en conteneur ni retourne par valeur) : on
-  // SUPPRIME les quatre operations plutot que d'ecrire un move re-pointant les stores (inutile ici).
+  // RULE OF FIVE (C.21): the current pointers a_rr_/a_tt_ alias the internal stores
+  // a_rr_store_/a_tt_store_ or external fields. A DEFAULT copy/move would leave these pointers aiming
+  // at the SOURCE object's stores (dangling/UB). The solver is ALWAYS used as a LOCAL scope variable
+  // (never copied, moved, stored in a container, nor returned by value): we DELETE the four
+  // operations rather than write a move re-pointing the stores (useless here).
   PolarTensorKrylovSolver(const PolarTensorKrylovSolver&) = delete;
   PolarTensorKrylovSolver& operator=(const PolarTensorKrylovSolver&) = delete;
   PolarTensorKrylovSolver(PolarTensorKrylovSolver&&) = delete;
   PolarTensorKrylovSolver& operator=(PolarTensorKrylovSolver&&) = delete;
 
-  // --- contrat PolarEllipticSolver / PolarLinearSolver ---
+  // --- PolarEllipticSolver / PolarLinearSolver contract ---
   MultiFab& rhs() { return rhs_; }
   MultiFab& phi() { return phi_; }
   const PolarGeometry& geom() const { return geom_; }
 
-  /// Fixe les coefficients du tenseur A. a_rr/a_tt AU CENTRE (defaut interne = 1 si non appele) ; a_rt/
-  /// a_tr termes croises (nullptr -> absents). Les ghosts des champs fournis sont remplis ICI (coeff_bc :
-  /// periodique theta conserve, radial Foextrap). L'appelant garde la propriete des champs (pointeurs).
+  /// Sets the tensor A coefficients. a_rr/a_tt at the CENTER (internal default = 1 if not called);
+  /// a_rt/a_tr cross terms (nullptr -> absent). The ghosts of the provided fields are filled HERE
+  /// (coeff_bc: theta periodic preserved, radial Foextrap). The caller keeps ownership of the fields
+  /// (pointers).
   void set_coefficients(MultiFab* a_rr, MultiFab* a_tt, MultiFab* a_rt = nullptr,
                         MultiFab* a_tr = nullptr) {
     a_rr_ = a_rr ? a_rr : &a_rr_store_;
@@ -376,10 +379,10 @@ class PolarTensorKrylovSolver {
     a_rt_ = a_rt;
     a_tr_ = a_tr;
     fill_coeff_ghosts();
-    coeffs_ready_ = false;  // idiag a recalculer
+    coeffs_ready_ = false;  // idiag to be recomputed
   }
 
-  /// Residu L2 GLOBAL courant ||rhs - L_int(phi)|| (collectif). prepare une fois si besoin.
+  /// Current GLOBAL L2 residual ||rhs - L_int(phi)|| (collective). Prepares once if needed.
   Real residual() {
     ensure_coeffs();
     apply_operator(phi_, r_);
@@ -389,31 +392,30 @@ class PolarTensorKrylovSolver {
 
   void solve() { solve(Real(1e-10), 400); }
 
-  /// BiCGStab MATRICE-LIBRE preconditionne par precond_ (RadialLine par defaut, Jacobi en repli) ;
-  /// fixe la jauge (project_mean) quand pin_gauge_ (cas pur Neumann/periodique singulier). phi() =
-  /// inconnue (warm start), rhs() = second membre. Rend iterations + residu relatif + convergence.
+  /// MATRIX-FREE BiCGStab preconditioned by precond_ (RadialLine by default, Jacobi as fallback);
+  /// fixes the gauge (project_mean) when pin_gauge_ (singular pure Neumann/periodic case). phi() =
+  /// unknown (warm start), rhs() = right-hand side. Returns iterations + relative residual + convergence.
   PolarKrylovResult solve(Real rel_tol, int max_iters) {
     ensure_coeffs();
-    prepare_offset();  // c_bc = apply_operator(0) (part inhomogene de bord Dirichlet) une fois
+    prepare_offset();  // c_bc = apply_operator(0) (inhomogeneous part of Dirichlet boundary) once
     PolarKrylovResult res;
-    // MULTI-RANG MPI : TOUS les rangs (y compris ceux sans box, local_size()==0) executent le MEME corps
-    // BiCGStab. Les operations par fab (lincomb/saxpy/copy/apply_precond/apply_polar_tensor) sont des
-    // no-op sur un rang vide ; les COLLECTIFS (dot/l2_norm/project_mean -> all_reduce_sum) sont appeles
-    // par TOUS les rangs dans le MEME ordre (un rang vide contribue 0). Les criteres d'arret reposent
-    // uniquement sur ces scalaires GLOBAUX (identiques partout) -> aucune desynchronisation, aucun
-    // chemin "run_empty_rank" separe a maintenir en parallele. fill_ghosts (fill_boundary) est un
-    // echange PAIRWISE (Isend/Irecv apparies, pas un collectif) : un rang vide ne poste rien et personne
-    // ne lui envoie -> pas d'interblocage.
-    // r0 = rhs - L_int(phi) (operateur AFFINE : la donnee de Dirichlet est repliee dans le residu).
+    // MULTI-RANK MPI: ALL ranks (including those without a box, local_size()==0) execute the SAME
+    // BiCGStab body. The per-fab operations (lincomb/saxpy/copy/apply_precond/apply_polar_tensor) are
+    // no-ops on an empty rank; the COLLECTIVES (dot/l2_norm/project_mean -> all_reduce_sum) are called
+    // by ALL ranks in the SAME order (an empty rank contributes 0). The stopping criteria rely only on
+    // these GLOBAL scalars (identical everywhere) -> no desynchronization, no separate "run_empty_rank"
+    // path to maintain in parallel. fill_ghosts (fill_boundary) is a PAIRWISE exchange (paired
+    // Isend/Irecv, not a collective): an empty rank posts nothing and nobody sends to it -> no deadlock.
+    // r0 = rhs - L_int(phi) (AFFINE operator: the Dirichlet data is folded into the residual).
     apply_operator(phi_, v_);
     lincomb(r_, Real(1), rhs_, Real(-1), v_);
-    // OPERATEUR SINGULIER (pure Neumann radial + theta periodique, aucune reaction) : la constante est
-    // dans le noyau de L_int. BiCGStab diverge alors (le residu garde une composante constante non
-    // amortie). On FIXE LA JAUGE par projection sur le sous-espace de MOYENNE NULLE : on retire la
-    // moyenne de r0 (le RHS doit etre compatible : moyenne nulle au sens FV) et de phi (jauge), puis de
-    // chaque direction de correction preconditionnee dans la boucle. C'est le pendant iteratif du
-    // pinning de mode 0 du PolarPoissonSolver direct, sans perturber le stencil. Cas Dirichlet (>= un
-    // bord) : pin_gauge_ reste false -> CHEMIN INCHANGE, bit-identique.
+    // SINGULAR OPERATOR (pure radial Neumann + periodic theta, no reaction): the constant is in the
+    // kernel of L_int. BiCGStab then diverges (the residual keeps an undamped constant component). We
+    // FIX THE GAUGE by projection onto the zero-mean subspace: we remove the mean of r0 (the RHS must
+    // be compatible: zero mean in the FV sense) and of phi (gauge), then of each preconditioned
+    // correction direction in the loop. This is the iterative counterpart of the mode-0 pinning of the
+    // direct PolarPoissonSolver, without perturbing the stencil. Dirichlet case (>= one boundary):
+    // pin_gauge_ stays false -> PATH UNCHANGED, bit-identical.
     if (pin_gauge_) { project_mean(r_); project_mean(phi_); }
     const Real bnorm = l2_norm(rhs_);
     const Real norm0 = bnorm > Real(0) ? bnorm : Real(1);
@@ -427,7 +429,7 @@ class PolarTensorKrylovSolver {
     Real rho_prev = Real(1), alpha = Real(1), omega = Real(1);
 
     for (int k = 1; k <= max_iters; ++k) {
-      const Real rho = dot(rhat_, r_);  // COLLECTIF
+      const Real rho = dot(rhat_, r_);  // COLLECTIVE
       if (std::fabs(rho) < kTiny || std::fabs(omega) < kTiny) {
         res.iters = k - 1; res.rel_residual = rnorm / norm0; return res;
       }
@@ -435,8 +437,8 @@ class PolarTensorKrylovSolver {
       lincomb(p_, Real(1), p_, -omega, v_);  // p <- p - omega v
       lincomb(p_, beta, p_, Real(1), r_);    // p <- r + beta p
       apply_precond(p_, phat_);              // phat = M^{-1} p
-      if (pin_gauge_) project_mean(phat_);   // jauge : direction de correction a moyenne nulle
-      apply_operator_lin(phat_, v_);         // v = L_lin(phat) (matvec LINEAIRE)
+      if (pin_gauge_) project_mean(phat_);   // gauge: zero-mean correction direction
+      apply_operator_lin(phat_, v_);         // v = L_lin(phat) (LINEAR matvec)
       const Real rhat_dot_v = dot(rhat_, v_);
       if (std::fabs(rhat_dot_v) < kTiny) { res.iters = k - 1; res.rel_residual = rnorm / norm0; return res; }
       alpha = rho / rhat_dot_v;
@@ -447,7 +449,7 @@ class PolarTensorKrylovSolver {
         rnorm = snorm; res.iters = k; res.rel_residual = rnorm / norm0; res.converged = true; return res;
       }
       apply_precond(s_, shat_);              // shat = M^{-1} s
-      if (pin_gauge_) project_mean(shat_);   // jauge : direction de correction a moyenne nulle
+      if (pin_gauge_) project_mean(shat_);   // gauge: zero-mean correction direction
       apply_operator_lin(shat_, t_);         // t = L_lin(shat)
       const Real tt = dot(t_, t_);
       omega = tt > kTiny ? dot(t_, s_) / tt : Real(0);
@@ -458,33 +460,33 @@ class PolarTensorKrylovSolver {
       if (rnorm <= rel_tol * norm0) { res.converged = true; return res; }
       rho_prev = rho;
     }
-    return res;  // max_iters atteint : meilleur effort (converged=false)
+    return res;  // max_iters reached: best effort (converged=false)
   }
 
  private:
   static constexpr Real kTiny = Real(1e-300);
 
-  /// Garde-fou de LAYOUT du preconditionneur RadialLine : chaque box doit couvrir la plage radiale
-  /// COMPLETE du domaine (decoupage en THETA seulement), faute de quoi le sweep Thomas en r franchirait
-  /// une frontiere de box. Leve sur TOUS les rangs (la BoxArray est repliquee, cf. DistributionMapping)
-  /// -> pas d'interblocage. Mono-rang boite unique : la box == domaine, check trivialement vrai.
+  /// LAYOUT guard of the RadialLine preconditioner: each box must cover the FULL radial range of the
+  /// domain (splitting in THETA only), otherwise the Thomas sweep in r would cross a box boundary.
+  /// Throws on ALL ranks (the BoxArray is replicated, cf. DistributionMapping) -> no deadlock.
+  /// Single-rank single box: the box == domain, check trivially true.
   void check_radial_columns(const BoxArray& ba) const {
     const Box2D dom = geom_.domain;
     for (int b = 0; b < ba.size(); ++b) {
       if (ba[b].lo[0] != dom.lo[0] || ba[b].hi[0] != dom.hi[0])
         throw std::runtime_error(
-            "PolarTensorKrylovSolver (precond RadialLine) : le BoxArray doit etre decoupe en THETA "
-            "seulement (chaque box couvre la plage radiale complete). Le sweep Thomas en r ne peut pas "
-            "franchir une frontiere de box. Utiliser un decoupage azimutal, ou le repli "
-            "PolarPrecond::Jacobi (par cellule, sans contrainte de layout) si r doit etre coupe.");
+            "PolarTensorKrylovSolver (precond RadialLine): the BoxArray must be split in THETA only "
+            "(each box covers the full radial range). The Thomas sweep in r cannot cross a box "
+            "boundary. Use an azimuthal splitting, or the PolarPrecond::Jacobi fallback (per cell, "
+            "without layout constraint) if r must be cut.");
     }
   }
 
-  /// theta est PERIODIQUE par contrat (anneau, cf. en-tete "CONDITIONS AUX LIMITES") ; on l'IMPOSE a
-  /// la construction. Un appelant posant une CL azimutale physique (System::poisson_bc met Dirichlet
-  /// sur les QUATRE faces) polluait sinon le matvec inhomogene (fill_ghosts de la solution candidate
-  /// avec bc_ -> reflexion impaire au seam theta=0/2pi) : operateur faux au raccord. Pendant solveur
-  /// du fix stepper phi_bc (derive parasite Hoffart polaire, adc_cases ADC-62).
+  /// theta is PERIODIC by contract (ring, cf. header "BOUNDARY CONDITIONS"); we IMPOSE it at
+  /// construction. A caller setting a physical azimuthal BC (System::poisson_bc puts Dirichlet on all
+  /// FOUR faces) would otherwise pollute the inhomogeneous matvec (fill_ghosts of the candidate
+  /// solution with bc_ -> odd reflection at the theta=0/2pi seam): wrong operator at the junction.
+  /// Solver-side counterpart of the stepper phi_bc fix (spurious polar Hoffart drift, adc_cases ADC-62).
   static BCRec force_theta_periodic(const BCRec& bc) {
     BCRec b = bc;
     b.ylo = BCType::Periodic; b.yhi = BCType::Periodic;
@@ -492,12 +494,12 @@ class PolarTensorKrylovSolver {
     return b;
   }
 
-  /// CL des champs de coefficient : periodique conserve (theta), bord physique radial -> Foextrap.
+  /// BC of the coefficient fields: periodic preserved (theta), physical radial boundary -> Foextrap.
   BCRec coeff_bc() const {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec b;
     b.xlo = fo(bc_.xlo); b.xhi = fo(bc_.xhi);
-    b.ylo = BCType::Periodic; b.yhi = BCType::Periodic;  // theta toujours periodique
+    b.ylo = BCType::Periodic; b.yhi = BCType::Periodic;  // theta always periodic
     return b;
   }
 
@@ -512,7 +514,7 @@ class PolarTensorKrylovSolver {
 
   void ensure_coeffs() {
     if (coeffs_ready_) return;
-    // idiag = 1/diag du stencil diagonal (pour Jacobi).
+    // idiag = 1/diag of the diagonal stencil (for Jacobi).
     const Real dr = geom_.dr();
     const Real idr = Real(1) / dr;
     const Real idth = Real(1) / geom_.dtheta();
@@ -525,17 +527,17 @@ class PolarTensorKrylovSolver {
     coeffs_ready_ = true;
   }
 
-  /// Precalcule, pour le preconditionneur RadialLine, les coefficients de la tridiagonale RADIALE du
-  /// bloc DIAGONAL (par ligne theta j et par rayon i). C'est HOTE (les sweeps Thomas du precond lisent
-  /// ces tableaux cote hote, comme PolarPoissonSolver). Le coefficient a_rr est moyenne en r (les deux
-  /// faces radiales i+-1/2) ; le terme azimutal du bloc diagonal est LUMPE dans la diagonale b_ij (pour
-  /// que M approche le diag complet de L_int). BC radiale repliee HOMOGENE (le precond agit sur des
-  /// directions/residus) : Dirichlet b -= a/c, Neumann b += a/c.
-  /// MULTI-BOX / MPI (decoupage THETA seul) : on boucle sur les boxes LOCALES (local_size()). Chaque box
-  /// couvre la plage radiale COMPLETE (garde-fou check_radial_columns), donc nr est global et le sweep
-  /// Thomas reste box-local. Les tableaux sont ranges PAR BOX LOCALE : line_b_[li] indexe [jl*nr + i] ou
-  /// jl est l'indice theta LOCAL a la box. Mono-rang boite unique : une seule box -> identique a l'ancien
-  /// rangement [j*nr + i] sur tout le domaine (chemin bit-identique).
+  /// Precomputes, for the RadialLine preconditioner, the coefficients of the RADIAL tridiagonal of the
+  /// DIAGONAL block (per theta line j and per radius i). This is on the HOST (the precond Thomas sweeps
+  /// read these arrays host-side, like PolarPoissonSolver). The a_rr coefficient is averaged in r (the
+  /// two radial faces i+-1/2); the azimuthal term of the diagonal block is LUMPED into the diagonal
+  /// b_ij (so that M approximates the full diag of L_int). Radial BC folded in HOMOGENEOUSLY (the
+  /// precond acts on directions/residuals): Dirichlet b -= a/c, Neumann b += a/c.
+  /// MULTI-BOX / MPI (theta-only splitting): we loop over the LOCAL boxes (local_size()). Each box
+  /// covers the FULL radial range (check_radial_columns guard), so nr is global and the Thomas sweep
+  /// stays box-local. The arrays are stored PER LOCAL BOX: line_b_[li] indexes [jl*nr + i] where jl is
+  /// the theta index LOCAL to the box. Single-rank single box: only one box -> identical to the old
+  /// [j*nr + i] layout over the whole domain (bit-identical path).
   void build_radial_lines() {
     a_rr_->sync_host(); a_tt_->sync_host();
     const int nr = geom_.domain.nx();
@@ -551,8 +553,8 @@ class PolarTensorKrylovSolver {
     line_sub_.resize(static_cast<std::size_t>(nloc));
     line_sup_.resize(static_cast<std::size_t>(nloc));
     for (int li = 0; li < nloc; ++li) {
-      const Box2D vb = idiag_.box(li);           // box VALIDE locale (plage r complete, sous-plage theta)
-      const int nth_l = vb.ny();                 // nombre de lignes theta LOCALES a cette box
+      const Box2D vb = idiag_.box(li);           // local VALID box (full r range, theta sub-range)
+      const int nth_l = vb.ny();                 // number of theta lines LOCAL to this box
       const ConstArray4 arr = a_rr_->fab(li).const_array();
       const ConstArray4 att = a_tt_->fab(li).const_array();
       std::vector<Real>& lb = line_b_[li];
@@ -562,7 +564,7 @@ class PolarTensorKrylovSolver {
       lsub.assign(static_cast<std::size_t>(nth_l) * static_cast<std::size_t>(nr), Real(0));
       lsup.assign(static_cast<std::size_t>(nth_l) * static_cast<std::size_t>(nr), Real(0));
       for (int jl = 0; jl < nth_l; ++jl) {
-        const int jg = vb.lo[1] + jl;            // indice theta GLOBAL
+        const int jg = vb.lo[1] + jl;            // GLOBAL theta index
         for (int i = 0; i < nr; ++i) {
           const int ig = dom.lo[0] + i;
           const Real ri = geom_.r_cell(i);
@@ -572,16 +574,16 @@ class PolarTensorKrylovSolver {
           const Real arr_m = Real(0.5) * (arr(ig, jg) + arr(ig - 1, jg));
           const Real att_p = Real(0.5) * (att(ig, jg) + att(ig, jg + 1));
           const Real att_m = Real(0.5) * (att(ig, jg) + att(ig, jg - 1));
-          const Real ai = rfm * arr_m * (idr2 / ri);   // coeff de p_{i-1} dans L_int
-          const Real ci = rfp * arr_p * (idr2 / ri);    // coeff de p_{i+1}
-          const Real azi_diag = (att_p + att_m) * (idth2 / (ri * ri));  // part azimutale du -diag (lumpee)
-          Real bi = -(ai + ci) - azi_diag;              // diagonale COMPLETE de L_int (radiale + azimutale)
+          const Real ai = rfm * arr_m * (idr2 / ri);   // coeff of p_{i-1} in L_int
+          const Real ci = rfp * arr_p * (idr2 / ri);    // coeff of p_{i+1}
+          const Real azi_diag = (att_p + att_m) * (idth2 / (ri * ri));  // azimuthal part of -diag (lumped)
+          Real bi = -(ai + ci) - azi_diag;              // FULL diagonal of L_int (radial + azimuthal)
           Real sub = ai, sup = ci;
-          if (i == 0) {  // repli BC bas HOMOGENE : Dirichlet b -= a, Neumann b += a ; sous-diag annulee
+          if (i == 0) {  // HOMOGENEOUS low BC fold: Dirichlet b -= a, Neumann b += a; sub-diag zeroed
             bi += dir_lo ? -ai : ai;
             sub = Real(0);
           }
-          if (i == nr - 1) {  // repli BC haut HOMOGENE
+          if (i == nr - 1) {  // HOMOGENEOUS high BC fold
             bi += dir_hi ? -ci : ci;
             sup = Real(0);
           }
@@ -594,24 +596,24 @@ class PolarTensorKrylovSolver {
     }
   }
 
-  /// matvec MATRICE-LIBRE INHOMOGENE : out = L_int(in), ghosts de in remplis avec bc_ (CL ENTIERE).
-  /// AFFINE en in sous Dirichlet non nul (terme constant c_bc replie). Utilise pour r0 / residual().
+  /// INHOMOGENEOUS MATRIX-FREE matvec: out = L_int(in), ghosts of in filled with bc_ (FULL BC). AFFINE
+  /// in in under nonzero Dirichlet (constant term c_bc folded). Used for r0 / residual().
   void apply_operator(MultiFab& in, MultiFab& out) {
     device_fence();
     fill_ghosts(in, geom_.domain, bc_);
     apply_polar_tensor(in, geom_, out, a_rr_, a_tt_, a_rt_, a_tr_);
   }
 
-  /// matvec MATRICE-LIBRE LINEAIRE : out = L_int(in) - c_bc. BiCGStab applique la matvec a des
-  /// DIRECTIONS de correction -> l'operateur doit y etre lineaire (on retranche l'offset de bord).
+  /// LINEAR MATRIX-FREE matvec: out = L_int(in) - c_bc. BiCGStab applies the matvec to correction
+  /// DIRECTIONS -> the operator must be linear there (we subtract the boundary offset).
   void apply_operator_lin(MultiFab& in, MultiFab& out) {
     apply_operator(in, out);
     if (has_op_offset_) lincomb(out, Real(1), out, Real(-1), op_offset_);
   }
 
-  /// preconditionneur SIMPLE : Jacobi (diagonal) ou RadialLine (Thomas radial par ligne theta).
-  /// LINEAIRE, sans CL inhomogene (agit sur des directions/residus). Pendant SIMPLE du M^{-1} du Krylov
-  /// cartesien (qui, lui, fait N V-cycles MG ; ici PAS de MG : stagnation 1/r^2 polaire).
+  /// SIMPLE preconditioner: Jacobi (diagonal) or RadialLine (radial Thomas per theta line). LINEAR,
+  /// without inhomogeneous BC (acts on directions/residuals). SIMPLE counterpart of the cartesian
+  /// Krylov M^{-1} (which does N MG V-cycles; here NO MG: polar 1/r^2 stagnation).
   void apply_precond(MultiFab& in, MultiFab& out) {
     if (precond_ == PolarPrecond::Jacobi) {
       for (int li = 0; li < out.local_size(); ++li)
@@ -623,20 +625,20 @@ class PolarTensorKrylovSolver {
     apply_precond_radial_line(in, out);
   }
 
-  /// RadialLine : pour chaque ligne theta j, resout la tridiagonale radiale (sub/diag/sup precalculee
-  /// dans build_radial_lines) par Thomas, second membre = in(., j). out(., j) recoit la correction.
-  /// HOTE (Thomas sequentiel en r) comme PolarPoissonSolver ; sync_host avant lecture de in.
-  /// MULTI-BOX / MPI : boucle sur les boxes LOCALES (chaque box couvre la plage r complete -> le sweep
-  /// reste box-local) ; line_b_/sub_/sup_[li] sont indexes par l'indice theta LOCAL a la box. Aucun
-  /// echange MPI (M^{-1} est BLOC-DIAGONAL en box, par construction du decoupage theta) -> pas
-  /// d'interblocage. Mono-rang boite unique : une box -> chemin bit-identique a l'ancien fab(0).
+  /// RadialLine: for each theta line j, solves the radial tridiagonal (sub/diag/sup precomputed in
+  /// build_radial_lines) by Thomas, right-hand side = in(., j). out(., j) receives the correction.
+  /// HOST (sequential Thomas in r) like PolarPoissonSolver; sync_host before reading in.
+  /// MULTI-BOX / MPI: loop over the LOCAL boxes (each box covers the full r range -> the sweep stays
+  /// box-local); line_b_/sub_/sup_[li] are indexed by the theta index LOCAL to the box. No MPI
+  /// exchange (M^{-1} is BLOCK-DIAGONAL per box, by construction of the theta splitting) -> no
+  /// deadlock. Single-rank single box: one box -> bit-identical path to the old fab(0).
   void apply_precond_radial_line(MultiFab& in, MultiFab& out) {
     if (in.local_size() == 0) return;
     in.sync_host();
     const int r_lo = geom_.domain.lo[0];
     const std::size_t N = static_cast<std::size_t>(nr_);
-    cthom_.assign(N, Real(0));  // sur-diag de travail (Thomas)
-    xthom_.assign(N, Real(0));  // solution de travail
+    cthom_.assign(N, Real(0));  // Thomas working super-diagonal
+    xthom_.assign(N, Real(0));  // working solution
     for (int li = 0; li < in.local_size(); ++li) {
       const Box2D vb = in.box(li);
       const ConstArray4 z = in.fab(li).const_array();
@@ -648,7 +650,7 @@ class PolarTensorKrylovSolver {
       for (int jl = 0; jl < nth_l; ++jl) {
         const int jg = vb.lo[1] + jl;
         const std::size_t base = static_cast<std::size_t>(jl) * N;
-        // Thomas en r : a = lsub, b = lb, c = lsup (base + i), rhs = z(., jg).
+        // Thomas in r: a = lsub, b = lb, c = lsup (base + i), rhs = z(., jg).
         Real beta = lb[base + 0];
         xthom_[0] = (beta != Real(0) ? z(r_lo, jg) / beta : Real(0));
         for (std::size_t i = 1; i < N; ++i) {
@@ -664,30 +666,31 @@ class PolarTensorKrylovSolver {
     }
   }
 
-  /// Prepare l'offset c_bc = apply_operator(0) une fois par solve. CL Dirichlet nulle -> offset nul
-  /// (has_op_offset_ = false), chemin inchange. Detecte aussi l'operateur SINGULIER (pure Neumann radial
-  /// : aucun bord Dirichlet) -> pin_gauge_ : la constante est dans le noyau, on fixera la jauge par
-  /// projection de moyenne nulle (cf. solve). Au moins un bord Dirichlet => inversible => pin_gauge_=false.
+  /// Prepares the offset c_bc = apply_operator(0) once per solve. Zero Dirichlet BC -> zero offset
+  /// (has_op_offset_ = false), path unchanged. Also detects the SINGULAR operator (pure radial
+  /// Neumann: no Dirichlet boundary) -> pin_gauge_: the constant is in the kernel, we will fix the
+  /// gauge by zero-mean projection (cf. solve). At least one Dirichlet boundary => invertible =>
+  /// pin_gauge_=false.
   void prepare_offset() {
     has_op_offset_ = (bc_.xlo == BCType::Dirichlet && bc_.xlo_val != Real(0)) ||
                      (bc_.xhi == BCType::Dirichlet && bc_.xhi_val != Real(0));
     pin_gauge_ = (bc_.xlo != BCType::Dirichlet) && (bc_.xhi != BCType::Dirichlet);
     if (has_op_offset_) {
-      // Appele sur TOUS les rangs (apply_operator est no-op sur un rang vide hormis fill_ghosts pairwise) :
-      // pas de branche local_size() qui desapparierait l'echange de halos cross-rang.
+      // Called on ALL ranks (apply_operator is a no-op on an empty rank except for the pairwise
+      // fill_ghosts): no local_size() branch that would unpair the cross-rank halo exchange.
       phat_.set_val(Real(0));
       apply_operator(phat_, op_offset_);  // op_offset_ <- L_int(0) = c_bc
     }
   }
 
-  /// Retire la moyenne FV (ponderee volume r_i dr dtheta) de @p x (projection sur le sous-espace de
-  /// moyenne nulle, orthogonal au noyau constant de L_int). Brique du pinning de jauge (operateur
-  /// singulier pure Neumann). HOTE (la moyenne ponderee est un scalaire global).
-  /// MULTI-RANG MPI : le numerateur (sum) et le denominateur (vol) sont d'abord accumules sur les
-  /// cellules LOCALES (toutes les boxes de ce rang), puis all_reduit (MPI_SUM) -> la MEME moyenne
-  /// GLOBALE sur chaque rang ; on la retranche ensuite sur toutes les cellules locales. COLLECTIF :
-  /// all_reduce_sum est appele sur CHAQUE rang (y compris un rang sans box, qui contribue 0) -> pas
-  /// d'interblocage. Mono-rang : all_reduce_sum = identite, une seule box -> chemin bit-identique.
+  /// Removes the FV mean (weighted by the volume r_i dr dtheta) from @p x (projection onto the
+  /// zero-mean subspace, orthogonal to the constant kernel of L_int). Building block of the gauge
+  /// pinning (singular pure Neumann operator). HOST (the weighted mean is a global scalar).
+  /// MULTI-RANK MPI: the numerator (sum) and the denominator (vol) are first accumulated over the
+  /// LOCAL cells (all the boxes of this rank), then all_reduced (MPI_SUM) -> the SAME GLOBAL mean on
+  /// each rank; we then subtract it over all the local cells. COLLECTIVE: all_reduce_sum is called on
+  /// EACH rank (including a box-less rank, which contributes 0) -> no deadlock. Single-rank:
+  /// all_reduce_sum = identity, only one box -> bit-identical path.
   void project_mean(MultiFab& x) {
     x.sync_host();
     const int r_lo = geom_.domain.lo[0];
@@ -698,12 +701,12 @@ class PolarTensorKrylovSolver {
       const ConstArray4 a = x.fab(li).const_array();
       for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
         for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
-          const Real w = geom_.r_cell(i - r_lo) * dr * dth;  // i - r_lo = offset radial 0-base
+          const Real w = geom_.r_cell(i - r_lo) * dr * dth;  // i - r_lo = 0-based radial offset
           sum += a(i, j) * w;
           vol += w;
         }
     }
-    // all-reduce COLLECTIF (sur tous les rangs, y compris vides) : moyenne GLOBALE identique partout.
+    // COLLECTIVE all-reduce (over all ranks, including empty ones): GLOBAL mean identical everywhere.
     sum = static_cast<Real>(all_reduce_sum(static_cast<double>(sum)));
     vol = static_cast<Real>(all_reduce_sum(static_cast<double>(vol)));
     const Real mean = vol > Real(0) ? sum / vol : Real(0);
@@ -732,27 +735,27 @@ class PolarTensorKrylovSolver {
   MultiFab phi_, rhs_;
   MultiFab r_, rhat_, p_, v_, s_, t_;
   MultiFab phat_, shat_;
-  MultiFab idiag_;        ///< 1/diag (Jacobi), recalcule a chaque set_coefficients
-  MultiFab op_offset_;    ///< c_bc = apply_operator(0) (part inhomogene de bord Dirichlet)
-  MultiFab a_rr_store_, a_tt_store_;  ///< coefficients diagonaux par defaut (= 1, isotrope)
-  MultiFab* a_rr_ = nullptr;          ///< coefficients courants (pointe sur le store ou l'externe)
+  MultiFab idiag_;        ///< 1/diag (Jacobi), recomputed at each set_coefficients
+  MultiFab op_offset_;    ///< c_bc = apply_operator(0) (inhomogeneous part of Dirichlet boundary)
+  MultiFab a_rr_store_, a_tt_store_;  ///< default diagonal coefficients (= 1, isotropic)
+  MultiFab* a_rr_ = nullptr;          ///< current coefficients (point to the store or the external one)
   MultiFab* a_tt_ = nullptr;
-  MultiFab* a_rt_ = nullptr;          ///< termes croises (nullptr -> absents)
+  MultiFab* a_rt_ = nullptr;          ///< cross terms (nullptr -> absent)
   MultiFab* a_tr_ = nullptr;
   bool coeffs_ready_ = false;
   bool has_op_offset_ = false;
-  bool pin_gauge_ = false;  ///< operateur singulier (pure Neumann) : fixe la jauge (projection moyenne nulle)
-  // Preconditionneur RadialLine : tridiagonale radiale du bloc diagonal par ligne theta. PAR BOX LOCALE
-  // (line_b_/sub_/sup_[li]), chacun range [jl*nr + i] ou jl = indice theta LOCAL a la box, i = rayon
-  // global 0..nr-1 (a_rr peut dependre de theta -> coeffs par (i, jl)). Le decoupage etant en THETA seul,
-  // M^{-1} est bloc-diagonal en box (aucun couplage radial cross-box) -> chaque box est inversee
-  // independamment. cthom_/xthom_ = buffers de travail Thomas (reutilises, longueur nr). HOTE.
-  std::vector<std::vector<Real>> line_b_, line_sub_, line_sup_;  ///< tridiag par box locale [li][jl*nr+i]
-  mutable std::vector<Real> cthom_, xthom_;    ///< buffers Thomas du precond (longueur nr)
+  bool pin_gauge_ = false;  ///< singular operator (pure Neumann): fix the gauge (zero-mean projection)
+  // RadialLine preconditioner: radial tridiagonal of the diagonal block per theta line. PER LOCAL BOX
+  // (line_b_/sub_/sup_[li]), each stored [jl*nr + i] where jl = theta index LOCAL to the box, i = global
+  // radius 0..nr-1 (a_rr may depend on theta -> coeffs per (i, jl)). The splitting being in THETA only,
+  // M^{-1} is block-diagonal per box (no cross-box radial coupling) -> each box is inverted
+  // independently. cthom_/xthom_ = Thomas working buffers (reused, length nr). HOST.
+  std::vector<std::vector<Real>> line_b_, line_sub_, line_sup_;  ///< tridiag per local box [li][jl*nr+i]
+  mutable std::vector<Real> cthom_, xthom_;    ///< Thomas precond buffers (length nr)
   int nr_ = 0;
 };
 
 static_assert(PolarLinearSolver<PolarTensorKrylovSolver>,
-              "PolarTensorKrylovSolver doit modeler PolarLinearSolver");
+              "PolarTensorKrylovSolver must model PolarLinearSolver");
 
 }  // namespace adc

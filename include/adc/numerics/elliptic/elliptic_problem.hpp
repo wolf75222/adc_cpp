@@ -1,26 +1,26 @@
 #pragma once
 
 /// @file
-/// @brief Types DESCRIPTIFS de l'etage elliptique : EllipticProblem (definition du probleme) et
-///        FieldPostProcess (convention de derivation du champ), + fabriques additives.
+/// @brief DESCRIPTIVE types of the elliptic stage: EllipticProblem (problem definition) and
+///        FieldPostProcess (field derivation convention), plus additive factories.
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : NOMMER des valeurs et conventions DEJA codees, sans modifier une seule operation flottante
-/// (refactor structurel bit-identique). EllipticProblem rassemble ce qui definit lap(eps phi) = f resolu
-/// par GeometricMG/PoissonFFTSolver (coefficient eps, BCRec physique, drapeau nullspace_const).
-/// FieldPostProcess nomme la derivation E = -grad phi et la convention de signe (GradSign::Plus pour le
-/// coupler qui stocke +grad phi, Minus pour un consommateur stockant -grad phi).
-/// Contrat : make_elliptic_solver(geom, ba, problem, ...) construit un EllipticSolver a partir d'un
-/// EllipticProblem nomme ; field_postprocess(phi, out, cx, cy, spec) ecrit out = (phi si demande,
-/// s*grad phi centre) avec s = +/-1 selon la spec, cx = 1/(2 dx), cy = 1/(2 dy).
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: NAME values and conventions ALREADY coded, without modifying a single floating-point operation
+/// (bit-identical structural refactor). EllipticProblem gathers what defines lap(eps phi) = f solved
+/// by GeometricMG/PoissonFFTSolver (coefficient eps, physical BCRec, nullspace_const flag).
+/// FieldPostProcess names the derivation E = -grad phi and the sign convention (GradSign::Plus for the
+/// coupler that stores +grad phi, Minus for a consumer storing -grad phi).
+/// Contract: make_elliptic_solver(geom, ba, problem, ...) builds an EllipticSolver from a named
+/// EllipticProblem; field_postprocess(phi, out, cx, cy, spec) writes out = (phi if requested,
+/// s*grad phi centered) with s = +/-1 per the spec, cx = 1/(2 dx), cy = 1/(2 dy).
 ///
-/// Invariants :
-/// - eps est PUREMENT DESCRIPTIF : le stencil 5 points ne le lit pas (eps = 1 implicite) ; eps != 1 leve
-///   std::invalid_argument dans make_elliptic_solver (piege interdit, pas ignore silencieusement) ;
-/// - field_postprocess reproduit caractere pour caractere detail::coupler_grad_phi (meme ordre, memes
-///   facteurs *cx / *cy) : seul le signe s est un degre de liberte ;
-/// - FieldPostprocessKernel est un foncteur NOMME (et non lambda ADC_HD) car premiere-instancie depuis
-///   une TU externe : une lambda etendue ferait buter l'emission du kernel device sous nvcc.
+/// Invariants:
+/// - eps is PURELY DESCRIPTIVE: the 5-point stencil does not read it (eps = 1 implicit); eps != 1 raises
+///   std::invalid_argument in make_elliptic_solver (forbidden trap, not silently ignored);
+/// - field_postprocess reproduces detail::coupler_grad_phi character for character (same order, same
+///   factors *cx / *cy): only the sign s is a degree of freedom;
+/// - FieldPostprocessKernel is a NAMED functor (and not an ADC_HD lambda) because it is first instantiated
+///   from an external TU: an extended lambda would break the device kernel emission under nvcc.
 
 #include <adc/core/types.hpp>
 #include <adc/numerics/elliptic/geometric_mg.hpp>  // homogeneous(const BCRec&)
@@ -32,87 +32,56 @@
 #include <stdexcept>
 #include <utility>
 
-// Types DESCRIPTIFS de l'etage elliptique. Ils NOMMENT des valeurs et des
-// conventions deja codees aujourd'hui sans modifier une seule operation
-// flottante : ce header est un refactor structurel bit-identique.
-//
-// EllipticProblem rassemble ce qui definit le probleme lap(eps phi) = f resolu
-// par GeometricMG ou PoissonFFTSolver :
-//   eps             coefficient constant du Laplacien. Aujourd'hui le stencil
-//                   ecrit lap = somme/dx2 SANS facteur, c'est-a-dire eps = 1
-//                   implicite (cf. apply_laplacian / poisson_residual / gs_color
-//                   dans elliptic/poisson_operator.hpp). Le champ est purement
-//                   DESCRIPTIF a cette etape : le stencil ne le lit PAS. Le
-//                   brancher (multiplier le Laplacien par eps) changerait les
-//                   valeurs des que eps != 1, donc hors-perimetre ici.
-//   bc              la BCRec physique deja passee partout (Dirichlet, Foextrap,
-//                   periodique).
-//   nullspace_const la solution n'est definie qu'a une constante additive pres
-//                   et cette constante est projetee. Cas periodique :
-//                   PoissonFFTSolver met le mode k=0 a zero (phi de moyenne
-//                   nulle, cf. poisson_fft_solver.hpp), les tests de GeometricMG
-//                   font un demean. C'est une ETIQUETTE : elle ne change aucune
-//                   instruction, elle nomme une operation deja effective.
-//
-// FieldPostProcess nomme la derivation E = -grad phi et la convention de signe.
-// Le coupler stocke aux = (phi, +d phi/dx, +d phi/dy) : le signe physique
-// E = -grad phi est porte plus loin par la brique de transport qui lit
-// aux.grad_x / aux.grad_y (la vitesse vient de la policy de transport, p.ex. une
-// derive E x B). C'est GradSign::Plus.
-// A l'inverse, un consommateur qui stocke directement E = -grad phi utilise GradSign::Minus.
-// FieldPostProcess::apply reproduit caractere pour caractere l'expression de
-// detail::coupler_grad_phi (meme ordre, meme facteur multiplicatif *cx / *cy).
-
 namespace adc {
 
-// (a) Probleme elliptique : coefficient, CL physiques, nullspace.
+// (a) Elliptic problem: coefficient, physical BC, nullspace.
 struct EllipticProblem {
-  Real eps = 1;                 // descriptif : etat actuel du stencil (eps = 1)
-  BCRec bc{};                   // CL physiques deja propagees
-  bool nullspace_const = false; // solution a une constante additive pres
+  Real eps = 1;                 // descriptive: current stencil state (eps = 1)
+  BCRec bc{};                   // physical BC already propagated
+  bool nullspace_const = false; // solution defined up to an additive constant
 };
 
-// BCRec homogene associee au probleme : delegue a homogeneous(const BCRec&)
-// deja dans geometric_mg.hpp (correction multigrille a CL homogenes).
+// Homogeneous BCRec associated with the problem: delegates to homogeneous(const BCRec&)
+// already in geometric_mg.hpp (multigrid correction with homogeneous BC).
 inline BCRec homogeneous_bc(const EllipticProblem& p) {
   return homogeneous(p.bc);
 }
 
-// Fabrique additive : construit un EllipticSolver (GeometricMG, PoissonFFTSolver)
-// a partir d'un EllipticProblem nomme. Delegue au constructeur (geom, ba, bc,
-// active, ...) existant en extrayant problem.bc. eps et nullspace_const sont
-// descriptifs a cette etape (eps = 1 deja dans le stencil ; nullspace gere par
-// le bottom-solve + demean cote MG, par le mode k=0 a zero cote FFT) : aucun
-// appelant existant n'est touche, aucune valeur numerique ne change. Template
-// pour eviter un cycle d'inclusion (ce header inclut deja geometric_mg.hpp).
+// Additive factory: builds an EllipticSolver (GeometricMG, PoissonFFTSolver)
+// from a named EllipticProblem. Delegates to the existing (geom, ba, bc,
+// active, ...) constructor by extracting problem.bc. eps and nullspace_const are
+// descriptive at this stage (eps = 1 already in the stencil; nullspace handled by
+// the bottom-solve + demean on the MG side, by the k=0 mode set to zero on the FFT side):
+// no existing caller is touched, no numerical value changes. Template
+// to avoid an include cycle (this header already includes geometric_mg.hpp).
 template <class Solver, class... Args>
 inline Solver make_elliptic_solver(const Geometry& geom, const BoxArray& ba,
                                    const EllipticProblem& problem,
                                    Args&&... args) {
-  // Garde scientifique : eps n'est PAS lu par le stencil 5 points
-  // (apply_laplacian / poisson_residual / gs_color ecrivent lap sans facteur,
-  // soit eps = 1). Poser eps != 1 croirait resoudre un Laplacien a coefficient
-  // variable sans aucun effet sur les valeurs : on interdit ce piege au lieu de
-  // l'ignorer silencieusement.
+  // Scientific guard: eps is NOT read by the 5-point stencil
+  // (apply_laplacian / poisson_residual / gs_color write lap without a factor,
+  // so eps = 1). Setting eps != 1 would suggest solving a variable-coefficient
+  // Laplacian with no effect on the values: we forbid this trap instead of
+  // ignoring it silently.
   if (problem.eps != Real(1))
     throw std::invalid_argument(
-        "EllipticProblem::eps != 1 non supporte (operateur Laplacien a "
-        "coefficient constant)");
+        "EllipticProblem::eps != 1 unsupported (constant-coefficient Laplacian "
+        "operator)");
   return Solver(geom, ba, problem.bc, std::forward<Args>(args)...);
 }
 
-// (b) Post-traitement du champ : convention de derivation E = -grad phi.
+// (b) Field post-processing: derivation convention E = -grad phi.
 struct FieldPostProcess {
   enum class GradSign { Plus, Minus };
-  GradSign sign = GradSign::Plus;  // +grad (coupler) ou -grad (two_fluid)
-  bool store_phi = true;           // phi en composante 0 (convention coupler)
+  GradSign sign = GradSign::Plus;  // +grad (coupler) or -grad (two_fluid)
+  bool store_phi = true;           // phi in component 0 (coupler convention)
 };
 
 namespace detail {
-// Derive aux = (phi, s grad phi) a partir de phi (field_postprocess). Foncteur nomme
-// (et non lambda ADC_HD) : memes raisons que le chemin elliptique (#93) -- ce kernel est
-// premiere-instancie depuis une TU externe et une lambda etendue y fait buter l'emission
-// du kernel device sous nvcc. Corps identique a l'ancienne lambda -> bit-identique.
+// Derives aux = (phi, s grad phi) from phi (field_postprocess). Named functor
+// (and not an ADC_HD lambda): same reasons as the elliptic path (#93) -- this kernel is
+// first instantiated from an external TU and an extended lambda breaks the device kernel
+// emission under nvcc. Body identical to the former lambda -> bit-identical.
 struct FieldPostprocessKernel {
   bool store_phi;
   Array4 a;
@@ -127,11 +96,11 @@ struct FieldPostprocessKernel {
 };
 }  // namespace detail
 
-// Derive le champ a partir de phi selon spec. Le corps reproduit EXACTEMENT
-// detail::coupler_grad_phi (coupler.hpp) : meme ordre d'operations, meme facteur
-// multiplicatif *cx / *cy, le signe s = +1 (Plus) ou -1 (Minus) etant le seul
-// degre de liberte. cx, cy restent les facteurs centres deja calcules par
-// l'appelant (1/(2 dx), 1/(2 dy)).
+// Derives the field from phi per spec. The body reproduces EXACTLY
+// detail::coupler_grad_phi (coupler.hpp): same operation order, same
+// multiplicative factor *cx / *cy, with the sign s = +1 (Plus) or -1 (Minus) being the only
+// degree of freedom. cx, cy remain the centered factors already computed by
+// the caller (1/(2 dx), 1/(2 dy)).
 inline void field_postprocess(const MultiFab& phi, MultiFab& out, Real cx,
                               Real cy, FieldPostProcess spec) {
   const Real s = (spec.sign == FieldPostProcess::GradSign::Plus) ? Real(1)
@@ -141,7 +110,7 @@ inline void field_postprocess(const MultiFab& phi, MultiFab& out, Real cx,
     const ConstArray4 p = phi.fab(li).const_array();
     Array4 a = out.fab(li).array();
     const Box2D v = out.box(li);
-    const int gx = store_phi ? 1 : 0;  // decalage de composante si phi stocke
+    const int gx = store_phi ? 1 : 0;  // component offset if phi is stored
     for_each_cell(v, detail::FieldPostprocessKernel{store_phi, a, p, gx, s, cx, cy});
   }
 }

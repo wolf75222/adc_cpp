@@ -1,32 +1,33 @@
 #pragma once
 
 /// @file
-/// @brief Brique FFT bas niveau : PoissonFFT (solveur de Poisson periodique spectral, distribue par
-///        bandes) + primitives FFT 1D radix-2 (fft1d) et repli DFT directe (dft1d_direct).
+/// @brief Low-level FFT brick: PoissonFFT (spectral periodic Poisson solver, slab-distributed)
+///        plus 1D radix-2 FFT primitives (fft1d) and a direct DFT fallback (dft1d_direct).
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : resoudre EXACTEMENT le Laplacien periodique discret lap_h phi = rho avec phi de moyenne nulle,
-/// en UNE transformee (aucune iteration, aucune tolerance). Travaille sur des slabs (vecteurs plats par
-/// rang, PAS des MultiFab) : c'est la brique enveloppee par PoissonFFTSolver/DistributedFFTSolver
-/// (poisson_fft_solver.hpp). 2D FFT = FFT-x locale -> transpose parallele (MPI_Alltoall) -> FFT-y locale
-/// -> division par la valeur propre du Laplacien -> inverse.
-/// Contrat : chaque rang possede Ny/np lignes (x complet) ; solve(rho_local, phi_local) avec rho_local et
-/// phi_local de taille nyl_ x Nx_ (row-major). Le ctor prend spectral (false = valeur propre du stencil
-/// 5 points DISCRET, defaut bit-identique ; true = symbole CONTINU -(kx^2+ky^2), frequences signees).
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: solve EXACTLY the discrete periodic Laplacian lap_h phi = rho with phi of zero mean,
+/// in ONE transform (no iteration, no tolerance). Works on slabs (flat per-rank vectors, NOT
+/// MultiFab): this is the brick wrapped by PoissonFFTSolver/DistributedFFTSolver
+/// (poisson_fft_solver.hpp). 2D FFT = local FFT-x -> parallel transpose (MPI_Alltoall) -> local FFT-y
+/// -> division by the Laplacian eigenvalue -> inverse.
+/// Contract: each rank owns Ny/np rows (full x); solve(rho_local, phi_local) with rho_local and
+/// phi_local of size nyl_ x Nx_ (row-major). The ctor takes spectral (false = DISCRETE 5-point
+/// stencil eigenvalue, bit-identical default; true = CONTINUOUS symbol -(kx^2+ky^2), signed
+/// frequencies).
 ///
-/// Invariants :
-/// - la transposee par bandes impose Nx et Ny divisibles par np (n_ranks) ;
-/// - les longueurs puissance de 2 empruntent la FFT radix-2 ; toute autre taille retombe sur la DFT
-///   directe O(n^2) correcte (la butterfly radix-2 deborderait le buffer sur n quelconque), donc
-///   mono-rang accepte tout n ;
-/// - mode kx=ky=0 : valeur propre nulle -> phi_hat=0 (moyenne nulle imposee) ;
-/// - alltoall est l'identite quand np==1 (et sans MPI).
+/// Invariants:
+/// - the slab transpose requires Nx and Ny divisible by np (n_ranks);
+/// - power-of-two lengths use the radix-2 FFT; any other size falls back to the correct
+///   O(n^2) direct DFT (the radix-2 butterfly would overflow the buffer on an arbitrary n), so
+///   single-rank accepts any n;
+/// - mode kx=ky=0: zero eigenvalue -> phi_hat=0 (zero mean enforced);
+/// - alltoall is the identity when np==1 (and without MPI).
 
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>
 #include <complex>
-#include <numbers>  // std::numbers::pi (M_PI n est pas standard, absent sous MSVC)
+#include <numbers>  // std::numbers::pi (M_PI is not standard, absent under MSVC)
 #include <utility>
 #include <vector>
 
@@ -34,39 +35,18 @@
 #include <mpi.h>
 #endif
 
-// Solveur de Poisson periodique SPECTRAL (FFT), distribue par bandes (slabs).
-// Resout EXACTEMENT le Laplacien 5-points periodique  lap_h phi = rho  avec phi
-// de moyenne nulle : aucune iteration, aucune tolerance. Pour un domaine
-// periodique c'est le solveur propre par excellence (cf. DFTSolver des codes
-// spectraux), pas un Poisson grossier ni replique.
-//
-// Decomposition : chaque rang possede Ny/np lignes (x complet). La 2D FFT se
-// fait en FFT-x locale -> transpose parallele (MPI_Alltoall) -> FFT-y locale ->
-// division par la valeur propre discrete du Laplacien -> inverse. La transposee
-// par bandes impose Nx et Ny divisibles par np. Les puissances de 2 empruntent la
-// FFT radix-2 rapide ; toute autre taille (ex. 48) retombe sur une DFT directe
-// correcte mais quadratique (cf. dft1d_direct), donc mono-rang accepte tout n.
-//
-// Valeur propre du stencil 5-points sous la DFT :
-//   lambda(kx,ky) = (2cos(2*pi*kx/Nx) - 2)/dx^2 + (2cos(2*pi*ky/Ny) - 2)/dy^2
-// (mode kx=ky=0 : lambda=0 -> phi_hat=0, moyenne nulle). Variante spectral=true :
-// symbole CONTINU -(kx^2+ky^2) (frequences signees), cf. doc du constructeur. Comme on emploie la
-// valeur propre DISCRETE, la solution satisfait le Laplacien 5-points a
-// l'arrondi : coherent avec les gradients par differences finies du transport.
-
 namespace adc {
 
 using cplx = std::complex<double>;
 
 inline bool is_pow2(int n) { return n > 0 && (n & (n - 1)) == 0; }
 
-// DFT directe O(n^2), repli de CORRECTION pour les longueurs qui ne sont PAS
-// puissance de 2 (le radix-2 ci-dessous suppose n = 2^k : sur n quelconque sa
-// butterfly deborde le buffer, d'ou un resultat corrompu et non deterministe).
-// Memes conventions que fft1d (inv=false : exp(-i...), inv=true : exp(+i...) avec
-// 1/n), donc le solveur spectral reste correct pour un Nx ou Ny arbitraire, au
-// prix d'un cout quadratique. Sur grille puissance de 2 (le cas vise) on garde la
-// FFT rapide.
+// Direct O(n^2) DFT, CORRECTNESS fallback for lengths that are NOT powers of two
+// (the radix-2 below assumes n = 2^k: on an arbitrary n its butterfly overflows
+// the buffer, hence a corrupted, non-deterministic result). Same conventions as
+// fft1d (inv=false: exp(-i...), inv=true: exp(+i...) with 1/n), so the spectral
+// solver stays correct for an arbitrary Nx or Ny, at the cost of a quadratic
+// runtime. On a power-of-two grid (the intended case) we keep the fast FFT.
 inline void dft1d_direct(cplx* a, int n, bool inv) {
   std::vector<cplx> out(static_cast<std::size_t>(n));
   const double s = inv ? 1.0 : -1.0;
@@ -81,9 +61,9 @@ inline void dft1d_direct(cplx* a, int n, bool inv) {
   for (int i = 0; i < n; ++i) a[i] = out[static_cast<std::size_t>(i)];
 }
 
-// FFT 1D radix-2 en place (longueur puissance de 2). inv=false : exp(-i...),
-// inv=true : exp(+i...) avec normalisation 1/n. Repli sur la DFT directe quand n
-// n'est pas une puissance de 2 (sinon la butterfly radix-2 deborde le buffer).
+// In-place 1D radix-2 FFT (power-of-two length). inv=false: exp(-i...),
+// inv=true: exp(+i...) with 1/n normalization. Falls back to the direct DFT when n
+// is not a power of two (otherwise the radix-2 butterfly overflows the buffer).
 inline void fft1d(cplx* a, int n, bool inv) {
   if (!is_pow2(n)) {
     dft1d_direct(a, n, inv);
@@ -114,12 +94,12 @@ inline void fft1d(cplx* a, int n, bool inv) {
 
 class PoissonFFT {
  public:
-  /// @p spectral : false (defaut) = valeur propre du stencil 5-points DISCRET (coherent avec les
-  /// gradients du transport, bit-identique au comportement historique). true = symbole CONTINU
-  /// lambda(k) = -(kx^2 + ky^2) avec frequences signees k in [0..N/2-1, -N/2..-1] * (2pi/L) --
-  /// exactement la convention des solveurs spectraux de reference (ex. poisson_fft.m de RIEMOM2D) ;
-  /// la solution est alors le Poisson SPECTRAL (exact sur les sinusoides), qui differe du stencil
-  /// discret par O(h^2).
+  /// @p spectral: false (default) = DISCRETE 5-point stencil eigenvalue (consistent with the
+  /// transport gradients, bit-identical to the historical behavior). true = CONTINUOUS symbol
+  /// lambda(k) = -(kx^2 + ky^2) with signed frequencies k in [0..N/2-1, -N/2..-1] * (2pi/L) --
+  /// exactly the convention of reference spectral solvers (e.g. poisson_fft.m of RIEMOM2D);
+  /// the solution is then the SPECTRAL Poisson (exact on sinusoids), which differs from the
+  /// discrete stencil by O(h^2).
   PoissonFFT(int Nx, int Ny, double Lx, double Ly, bool spectral = false)
       : Nx_(Nx),
         Ny_(Ny),
@@ -131,12 +111,12 @@ class PoissonFFT {
         dy_(Ly / Ny),
         spectral_(spectral) {}
 
-  int ny_local() const { return nyl_; }  // lignes (y) possedees par ce rang
+  int ny_local() const { return nyl_; }  // rows (y) owned by this rank
   int nx() const { return Nx_; }
-  int y_begin() const { return rank_ * nyl_; }  // 1ere ligne globale du rang
+  int y_begin() const { return rank_ * nyl_; }  // first global row of the rank
 
-  // rho_local et phi_local : nyl_ x Nx_ (row-major, lignes globales
-  // [y_begin, y_begin+nyl_)). phi_local est (re)dimensionne.
+  // rho_local and phi_local: nyl_ x Nx_ (row-major, global rows
+  // [y_begin, y_begin+nyl_)). phi_local is (re)sized.
   void solve(const std::vector<double>& rho_local,
              std::vector<double>& phi_local) {
     std::vector<cplx> A(static_cast<std::size_t>(nyl_) * Nx_);
@@ -149,7 +129,7 @@ class PoissonFFT {
 
     for (int il = 0; il < nxl_; ++il) {
       const int kx = rank_ * nxl_ + il;
-      const int kxs = (kx < (Nx_ + 1) / 2) ? kx : kx - Nx_;  // frequence signee (Nyquist -> -N/2)
+      const int kxs = (kx < (Nx_ + 1) / 2) ? kx : kx - Nx_;  // signed frequency (Nyquist -> -N/2)
       const double wx = 2.0 * std::numbers::pi * kxs / (Nx_ * dx_);
       const double lx = spectral_ ? -(wx * wx)
                                   : (2.0 * std::cos(2.0 * std::numbers::pi * kx / Nx_) - 2.0) / (dx_ * dx_);
@@ -173,7 +153,7 @@ class PoissonFFT {
   }
 
  private:
-  // transpose A(nyl x Nx) -> B(nxl x Ny) : alltoall de blocs (nyl x nxl).
+  // transpose A(nyl x Nx) -> B(nxl x Ny): alltoall of (nyl x nxl) blocks.
   void transpose_fwd(const std::vector<cplx>& A, std::vector<cplx>& B) {
     const int blk = nyl_ * nxl_;
     std::vector<cplx> send(static_cast<std::size_t>(np_) * blk), recv(send.size());
@@ -188,7 +168,7 @@ class PoissonFFT {
           B[il * Ny_ + q * nyl_ + jl] = recv[q * blk + jl * nxl_ + il];
   }
 
-  // transpose B(nxl x Ny) -> A(nyl x Nx) : alltoall de blocs (nxl x nyl).
+  // transpose B(nxl x Ny) -> A(nyl x Nx): alltoall of (nxl x nyl) blocks.
   void transpose_bwd(const std::vector<cplx>& B, std::vector<cplx>& A) {
     const int blk = nxl_ * nyl_;
     std::vector<cplx> send(static_cast<std::size_t>(np_) * blk), recv(send.size());
@@ -203,7 +183,7 @@ class PoissonFFT {
           A[jl * Nx_ + q * nxl_ + il] = recv[q * blk + il * nyl_ + jl];
   }
 
-  // echange tous-vers-tous de `blk` complexes par rang (identite si np==1).
+  // all-to-all exchange of `blk` complex values per rank (identity if np==1).
   void alltoall(const std::vector<cplx>& send, std::vector<cplx>& recv, int blk) {
     if (np_ == 1) {
       recv = send;
