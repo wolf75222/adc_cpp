@@ -124,6 +124,28 @@ sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Expl
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("ne", ne0)          # ne0: initial density (2D array)
 sim.step_cfl(0.4)
+sim.write("ne.npz", format="npz")   # save the block states (npz; "vtk" also available)
+```
+
+A model written as **formulas** (`adc.dsl.Model`, translated to C++ and compiled to a `.so`,
+plugged in the same way with `add_equation`). Here an isothermal fluid:
+
+```python
+from adc import dsl
+m = dsl.Model("flow")
+rho, mx, my = m.conservative_vars("rho", "mx", "my",
+                                  roles=["Density", "MomentumX", "MomentumY"])
+u, v = m.primitive("u", mx / rho), m.primitive("v", my / rho)
+c = dsl.sqrt(0.5)                                   # isothermal sound speed
+m.flux(x=[mx, mx * u + 0.5 * rho, mx * v],
+       y=[my, my * u, my * v + 0.5 * rho])
+m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
+m.primitive_vars(rho, u, v)
+m.conservative_from([rho, rho * u, rho * v])
+m.elliptic_rhs(0.0 * rho)                          # no elliptic coupling here
+compiled = m.compile("flow.so")                    # codegen + C++ compile (headers auto-located)
+sim.add_equation("flow", model=compiled,
+                 spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
 ```
 
 `adc.AmrSystem` composes one or more blocks on a refined hierarchy (`set_refinement`, regrid,
