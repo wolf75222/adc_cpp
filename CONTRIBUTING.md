@@ -40,6 +40,16 @@ nothing; the full build runs on the weekly cron and on manual dispatch.
   an isolated `git worktree` off `master`.
 - Minimal diffs, scoped to the issue; no incidental reformatting.
 
+## Branches
+
+Trunk-based, a single trunk. `master` is the only long-lived branch and is protected (see
+[Code review](#code-review)). Work happens on short-lived `adc-<n>-description` branches cut
+from a Linear issue, merged by PR, then deleted automatically (`delete_branch_on_merge` is
+on). There is no Git Flow (`develop`, `release/*`): with continuous delivery and no release
+train, that structure buys nothing. The only long-lived exceptions are explicit, documented
+work areas (for example the frozen `feat/perf-campaign-*` branches); a branch that outlives
+its merged PR without such a reason is dead and gets pruned.
+
 ## Versioning
 
 `adc_cpp` follows Semantic Versioning. The public API under guarantee, the bump rules
