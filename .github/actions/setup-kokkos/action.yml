@@ -13,6 +13,12 @@ inputs:
   extra-apt:
     description: 'Paquets apt supplementaires (separes par des espaces), p.ex. clang-tidy'
     default: ''
+  compiler:
+    description: >
+      Compilateur de l'install Kokkos : gcc (defaut) ou clang. Le defaut gcc conserve la cle de
+      cache historique du gate ci.yml ; clang produit une install SEPAREE (cle distincte), requise
+      par le job fuzz (les harnais libFuzzer compilent en clang, on aligne le Kokkos lie).
+    default: 'gcc'
 
 outputs:
   kokkos-prefix:
@@ -32,21 +38,27 @@ runs:
         sudo apt-get update
         sudo apt-get install -y libeigen3-dev ninja-build ccache ${{ inputs.extra-apt }}
 
-    # Meme cle que ci.yml -> cache partage avec le gate (gros gain : pas de reconstruction Kokkos).
-    - name: Cache Kokkos install (Serial ${{ inputs.kokkos-version }})
+    # Avec compiler=gcc (defaut), la cle est IDENTIQUE a celle du gate ci.yml -> cache partage
+    # (gros gain : pas de reconstruction Kokkos). compiler=clang isole sa propre cle.
+    - name: Cache Kokkos install (Serial ${{ inputs.kokkos-version }}, ${{ inputs.compiler }})
       id: kokkos-cache
       uses: actions/cache@v4
       with:
         path: ${{ steps.paths.outputs.prefix }}
-        key: kokkos-${{ runner.os }}-${{ inputs.kokkos-version }}-serial-cxx20-gcc-pic
+        key: kokkos-${{ runner.os }}-${{ inputs.kokkos-version }}-serial-cxx20-${{ inputs.compiler }}-pic
 
-    - name: Build + install Kokkos (Serial, PIC)
+    - name: Build + install Kokkos (Serial, PIC, ${{ inputs.compiler }})
       if: steps.kokkos-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
+        case "${{ inputs.compiler }}" in
+          clang) CXX_BIN=clang++ ;;
+          *)     CXX_BIN=g++ ;;
+        esac
         git clone --depth 1 -b ${{ inputs.kokkos-version }} https://github.com/kokkos/kokkos.git /tmp/kokkos
         cmake -S /tmp/kokkos -B /tmp/kbuild -G Ninja -DKokkos_ENABLE_SERIAL=ON \
           -DCMAKE_INSTALL_PREFIX="${{ steps.paths.outputs.prefix }}" -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_COMPILER="$CXX_BIN" \
           -DCMAKE_CXX_STANDARD=20 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         cmake --build /tmp/kbuild --parallel 4 --target install

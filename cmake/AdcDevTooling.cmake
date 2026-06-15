@@ -14,6 +14,7 @@
 
 option(ADC_ENABLE_WARNINGS   "Compile les cibles internes (tests + _adc) avec des warnings stricts" OFF)
 option(ADC_ENABLE_SANITIZERS "Instrumente les cibles internes (tests + _adc) avec ASan + UBSan"     OFF)
+option(ADC_ENABLE_COVERAGE   "Instrumente les cibles internes (tests + _adc) pour gcov/gcovr"       OFF)
 
 # Cible TOUJOURS definie (vide si les deux options sont OFF) : tests/ et python/ la lient
 # inconditionnellement, sans garde `if(TARGET ...)`.
@@ -60,5 +61,23 @@ if(ADC_ENABLE_SANITIZERS)
   else()
     message(WARNING "adc: ADC_ENABLE_SANITIZERS ignore (compilateur ${CMAKE_CXX_COMPILER_ID} "
                     "non supporte pour les sanitizers).")
+  endif()
+endif()
+
+# --- Couverture (gcov) ---------------------------------------------------------------------------
+# GCC uniquement (gcovr appelle le gcov assorti au compilateur). --coverage = -fprofile-arcs
+# -ftest-coverage en compile ET en link. On instrumente les TU de tests : ce sont elles qui
+# INSTANCIENT les en-tetes du coeur, donc c'est bien la couverture de include/adc/ qu'on mesure
+# (le rapport gcovr du job coverage filtre sur include/adc/). Combine avec ADC_TESTS_FAST_O0
+# (-O0, herite du preset ci-kokkos) : les compteurs de lignes ne sont pas brouilles par l'inlining.
+if(ADC_ENABLE_COVERAGE)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(adc_dev_options INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:--coverage>")
+    target_link_options(adc_dev_options INTERFACE --coverage)
+    message(STATUS "adc: ADC_ENABLE_COVERAGE=ON -> instrumentation gcov des cibles internes "
+                   "(rapport : gcovr --filter include/adc/).")
+  else()
+    message(WARNING "adc: ADC_ENABLE_COVERAGE ignore (GCC requis, "
+                    "compilateur = ${CMAKE_CXX_COMPILER_ID}).")
   endif()
 endif()

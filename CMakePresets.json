@@ -181,6 +181,36 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "ADC_ENABLE_SANITIZERS": "ON"
       }
+    },
+    {
+      "name": "ci-fuzz",
+      "inherits": "base",
+      "displayName": "CI qualite : harnais libFuzzer (clang, fuzzer+ASan+UBSan)",
+      "description": "Job 'fuzz' de quality.yml. Clang LLVM requis (libFuzzer ; en local surcharger -DCMAKE_CXX_COMPILER=/chemin/llvm/clang++ si /usr/bin/clang++ est AppleClang). Kokkos pointe par $KOKKOS_PREFIX (install CLANG dediee, cf. setup-kokkos compiler=clang). Tests OFF : seuls les harnais fuzz/ sont construits.",
+      "binaryDir": "${sourceDir}/build-fuzz",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{KOKKOS_PREFIX}",
+        "rhs": ""
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "ADC_BUILD_TESTS": "OFF",
+        "ADC_BUILD_FUZZING": "ON",
+        "ADC_USE_KOKKOS": "ON",
+        "Kokkos_ROOT": "$env{KOKKOS_PREFIX}"
+      }
+    },
+    {
+      "name": "ci-coverage",
+      "inherits": "ci-kokkos",
+      "displayName": "CI qualite : couverture gcov (ADC_ENABLE_COVERAGE)",
+      "description": "Herite de ci-kokkos (tests -O0 : compteurs de lignes nets). --coverage sur les cibles internes via adc_dev_options (GCC requis). Job 'coverage' de quality.yml ; rapport gcovr filtre sur include/adc/.",
+      "binaryDir": "${sourceDir}/build-kokkos-coverage",
+      "cacheVariables": {
+        "ADC_ENABLE_COVERAGE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -255,6 +285,16 @@
       "name": "ci-asan",
       "configurePreset": "ci-asan",
       "jobs": 4
+    },
+    {
+      "name": "ci-fuzz",
+      "configurePreset": "ci-fuzz",
+      "jobs": 2
+    },
+    {
+      "name": "ci-coverage",
+      "configurePreset": "ci-coverage",
+      "jobs": 2
     }
   ],
   "testPresets": [
@@ -317,6 +357,16 @@
       },
       "execution": {
         "jobs": 4
+      }
+    },
+    {
+      "name": "ci-coverage",
+      "configurePreset": "ci-coverage",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 2
       }
     }
   ]

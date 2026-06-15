@@ -246,6 +246,15 @@ if(ADC_BUILD_BENCH)
   add_subdirectory(bench)
 endif()
 
+# Harnais libFuzzer (fuzz/) : fuzzing a invariants des composants purs du coeur (Box2D,
+# clustering, dense_eig). HORS du build par defaut et du gate CI ; construit par le job hebdo
+# `fuzz` de quality.yml (preset ci-fuzz ; clang LLVM requis pour -fsanitize=fuzzer, le
+# sous-repertoire avertit et n'ajoute rien sous un autre compilateur).
+option(ADC_BUILD_FUZZING "Build the libFuzzer harnesses (fuzz/, requires LLVM clang, OFF by default)" OFF)
+if(ADC_BUILD_FUZZING)
+  add_subdirectory(fuzz)
+endif()
+
 # Module Python `adc` (bindings de la lib). Compile la facade runtime System + pybind11.
 if(ADC_BUILD_PYTHON)
   include(FetchContent)

@@ -2,11 +2,13 @@ name: Quality
 
 # Analyse statique / qualite de code, VOLONTAIREMENT hors du chemin critique des PR : ce workflow
 # ne tourne JAMAIS sur un push ni sur une PR ordinaire (c'est ci.yml qui garde les PR). Il agrege
-# cinq familles d'outils :
-#   - format       : clang-format --dry-run (style maison, .clang-format)             [non bloquant]
+# sept familles d'outils :
+#   - format       : clang-format --dry-run (style maison) + ruff (lint python/)      [non bloquant]
 #   - warnings     : build avec -Wall -Wextra -Wpedantic ... (ADC_ENABLE_WARNINGS)    [non bloquant]
 #   - tidy         : run-clang-tidy sur les TU de tests/ (.clang-tidy)                 [non bloquant]
 #   - sanitizers   : ctest sous ASan + UBSan (ADC_ENABLE_SANITIZERS, preset ci-asan)  [non bloquant]
+#   - fuzz         : harnais libFuzzer 90 s/cible (ADC_BUILD_FUZZING, preset ci-fuzz) [BLOQUANT]
+#   - coverage     : ctest instrumente gcov + rapport gcovr (ADC_ENABLE_COVERAGE)     [non bloquant]
 #   - codeql       : code scanning C++ GitHub (repo public = gratuit)                 [-> onglet Security]
 #
 # DECLENCHEURS :
@@ -14,8 +16,9 @@ name: Quality
 #   - workflow_dispatch : a la demande ;
 #   - pull_request (labeled) FILTRE sur le label `quality` : poser le label `quality` sur une PR a
 #     risque lance la passe complete sur cette PR (opt-in ; cf. job set-mode).
-# POLITIQUE : informatif d'abord. Aucune option CMake n'est ON par defaut ; les jobs ne cassent pas
-# le run sur un finding (pas de -Werror) -> on observe l'etat reel, on durcit ensuite.
+# POLITIQUE : informatif d'abord. Aucune option CMake n'est ON par defaut ; la plupart des jobs ne
+# cassent PAS le run sur un finding (pas de -Werror) -> on observe l'etat reel, on durcit ensuite.
+# EXCEPTION deja actee (bascule ADC-120) : le job fuzz est BLOQUANT (un crash libFuzzer = vrai bug).
 on:
   schedule:
     - cron: '0 4 * * 0'
@@ -89,6 +92,18 @@ jobs:
             echo "_Informatif : applique localement avec_ \`clang-format -i <fichier>\` _ou_ \`git clang-format\`."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Non conformes : $bad / ${#files[@]} (run non bloquant)"
+      - name: ruff (lint Python, non bloquant)
+        run: |
+          # Config : [tool.ruff] de pyproject.toml. --exit-zero : annotations sans casser le run.
+          pipx run ruff check python --output-format github --exit-zero | tee ruff.log
+          n=$(grep -c "^::" ruff.log || true)
+          {
+            echo "### ruff (python/)"
+            echo ""
+            echo "- Findings : **$n**"
+            echo ""
+            echo "_Informatif : applique localement avec_ \`ruff check --fix python\`."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload diff de format
         if: always()
         uses: actions/upload-artifact@v4
@@ -118,7 +133,7 @@ jobs:
     if: needs.set-mode.outputs.run == 'true'
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 2G
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v5
         with:
@@ -169,7 +184,7 @@ jobs:
     if: needs.set-mode.outputs.run == 'true'
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 2G
+      CCACHE_MAXSIZE: 500M
     steps:
       - uses: actions/checkout@v5
         with:
@@ -218,7 +233,7 @@ jobs:
     if: needs.set-mode.outputs.run == 'true'
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 2G
+      CCACHE_MAXSIZE: 500M
       # Kokkos n'est pas instrumente -> on coupe LSan (singletons Kokkos) et les faux positifs de
       # frontiere instrumente/non instrumente. halt_on_error=0 : on collecte tous les rapports.
       ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0:abort_on_error=0:halt_on_error=0
@@ -267,12 +282,156 @@ jobs:
           path: asan.log
           if-no-files-found: ignore
 
+  # --- Fuzzing libFuzzer : invariants des composants purs du coeur -------------------------------
+  fuzz:
+    name: fuzzing libFuzzer (90 s/cible, bloquant)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+      # Kokkos lie mais non instrumente -> on coupe LSan ; l'UB reste fatal (-fno-sanitize-recover
+      # cote build), donc chaque violation produit un artefact crash-* reproductible.
+      ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0
+      UBSAN_OPTIONS: print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      # Install Kokkos compilee en CLANG (cle de cache distincte de celle du gate gcc) : les
+      # harnais compilent en clang (libFuzzer), on aligne le Kokkos lie sur le meme compilateur.
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+        with:
+          compiler: clang
+          extra-apt: clang
+      - name: Cache ccache (quality/fuzz)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-quality-fuzz-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-quality-fuzz-
+      - name: Detendre l'ASLR (compat ASan)
+        run: sudo sysctl vm.mmap_rnd_bits=28 || true
+      - name: Build des harnais (clang, fuzzer+ASan+UBSan)
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: |
+          cmake --preset ci-fuzz
+          cmake --build --preset ci-fuzz
+      - name: Fuzz (90 s par cible, bloquant)
+        run: |
+          mkdir -p fuzz-artifacts
+          bad=0
+          # CMAKE_RUNTIME_OUTPUT_DIRECTORY=bin (CMakeLists racine) : les executables sont dans bin/.
+          for t in fuzz_box2d fuzz_cluster fuzz_dense_eig; do
+            echo "::group::$t"
+            set +e
+            ./build-fuzz/bin/"$t" -max_total_time=90 -rss_limit_mb=4096 \
+              -artifact_prefix="fuzz-artifacts/$t-" -print_final_stats=1 2>&1 | tail -40
+            rc=${PIPESTATUS[0]}
+            set -e
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::fuzz : $t a trouve un crash / invariant viole (rc=$rc) -- entree fautive dans l'artefact fuzz-crashes"
+              bad=$((bad+1))
+            fi
+          done
+          {
+            echo "### Fuzzing (libFuzzer, 90 s/cible)"
+            echo ""
+            echo "- Cibles : fuzz_box2d, fuzz_cluster, fuzz_dense_eig"
+            echo "- Cibles avec crash / invariant viole : **$bad**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Bascule ADC-120 (1re bascule informatif -> bloquant). Le fuzz est durci EN PREMIER car un
+          # crash / invariant viole est TOUJOURS un bug reel : l'entree minimisee est reproductible
+          # (artefact fuzz-crashes), aucun faux positif a trier. Le job echoue donc des qu'une cible
+          # remonte un probleme.
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::fuzz : $bad cible(s) avec crash ou invariant viole -- job BLOQUANT (bascule ADC-120, voir artefact fuzz-crashes)"
+            exit 1
+          fi
+      - name: Upload entrees de crash
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz-artifacts/
+          if-no-files-found: ignore
+
+  # --- Couverture : ctest instrumente gcov + rapport gcovr ---------------------------------------
+  coverage:
+    name: couverture gcov (ctest + gcovr, informatif)
+    runs-on: ubuntu-latest
+    needs: set-mode
+    if: needs.set-mode.outputs.run == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - id: kokkos
+        uses: ./.github/actions/setup-kokkos
+      - name: Cache ccache (quality/coverage)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-quality-coverage-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-quality-coverage-
+      - name: Build + ctest (instrumentes gcov)
+        env:
+          KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
+        run: |
+          cmake --preset ci-coverage
+          cmake --build --preset ci-coverage
+          # Informatif : la couverture est publiee meme si des tests echouent (le gate ci.yml
+          # reste l'autorite sur la correction).
+          set +e
+          ctest --preset ci-coverage --output-on-failure
+          echo "ctest rc=$? (non bloquant ici)"
+          set -e
+      - name: Rapport gcovr (filtre include/adc/)
+        run: |
+          mkdir -p coverage-report
+          # --gcov-ignore-parse-errors : sans lui, UNE ligne gcov inattendue (vu en vrai sur
+          # fab2d.hpp : "Unrecognized GCOV output", exit 64) avorte TOUT le rapport. On degrade
+          # en warnings : un fichier mal parse vaut mieux que zero rapport.
+          pipx run gcovr --root . build-kokkos-coverage \
+            --gcov-ignore-parse-errors=all \
+            --filter 'include/adc/' \
+            --print-summary \
+            --txt coverage-report/coverage.txt \
+            --xml coverage-report/coverage.xml \
+            --html-details coverage-report/index.html
+          {
+            echo "### Couverture (gcovr, filtre include/adc/)"
+            echo ""
+            echo '```'
+            tail -30 coverage-report/coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload rapport de couverture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/
+          if-no-files-found: ignore
+
   # --- CodeQL : code scanning C++ (repo public = gratuit) ----------------------------------------
   codeql:
     name: CodeQL (code scanning C++)
     runs-on: ubuntu-latest
     needs: set-mode
     if: needs.set-mode.outputs.run == 'true'
+    # Garde-fou : un futur blocage du build trace echoue vite au lieu de squatter 6 h (defaut GitHub).
+    # Le constat ADC-173 : 2 runs annules apres >2h38 sur l'etape de build.
+    timeout-minutes: 45
     permissions:
       security-events: write
       actions: read
@@ -289,15 +448,31 @@ jobs:
           languages: c-cpp
           build-mode: manual
           queries: security-and-quality
-      # Build OBSERVE par le traceur CodeQL : ccache OFF (-DADC_USE_CCACHE=OFF) sinon les hits ccache
-      # masquent des TU au traceur. L'install Kokkos reste en cache (actions/cache), donc pas de
-      # reconstruction de Kokkos.
-      - name: Build du coeur + tests (trace CodeQL)
+      # Build OBSERVE par le traceur CodeQL : un SOUS-ENSEMBLE de petites cibles de test a -O0
+      # (ADC_TESTS_FAST_O0 du preset), choisi pour couvrir les couches d'en-tetes du coeur
+      # (mesh / amr / elliptique / numerics) avec un cout d'extraction BORNE.
+      #  - Le cout de l'extracteur C++ de CodeQL est proportionnel aux INSTANCIATIONS de templates
+      #    du TU, pas a son -O : les ~140 tests (>2h38, 2 runs annules) comme le module _adc
+      #    (3 TU geantes system.cpp/amr_system.cpp qui instancient TOUTES les facades : >45 min,
+      #    timeout) sont pathologiques. Les petites cibles ci-dessous instancient chacune une
+      #    tranche bornee du coeur -> minutes, pas heures.
+      #  - CodeQL analyse un en-tete des qu'il est compile dans UN SEUL TU : la reunion des
+      #    tranches couvre l'essentiel de include/adc/ SAUF les facades runtime System/AmrSystem
+      #    (instanciees uniquement par les TU geantes) -- trade-off assume, cf. ADC-173.
+      #  - ccache OFF (-DADC_USE_CCACHE=OFF) GARDE : un hit ccache court-circuiterait la
+      #    compilation et masquerait le TU a l'extracteur.
+      - name: Build cible (sous-ensemble leger, trace CodeQL)
         env:
           KOKKOS_PREFIX: ${{ steps.kokkos.outputs.kokkos-prefix }}
         run: |
           cmake --preset ci-kokkos -DADC_USE_CCACHE=OFF
-          cmake --build --preset ci-kokkos
+          cmake --build --preset ci-kokkos --target \
+            test_box2d test_fab2d test_box_array test_multifab test_reduce \
+            test_fill_boundary test_physical_bc test_geometry test_dense_eig \
+            test_refinement test_amr_hierarchy test_cluster test_regrid \
+            test_flux_register test_coverage_mask test_cf_interface \
+            test_poisson_smoother test_geometric_mg test_poisson_fft \
+            test_elliptic_operator
       - name: Analyse CodeQL
         uses: github/codeql-action/analyze@v3
         with:

@@ -35,6 +35,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   (`ADC_ENABLE_WARNINGS`), `clang-tidy` (`.clang-tidy`), ASan+UBSan sanitizers (`ADC_ENABLE_SANITIZERS`,
   `ci-warnings`/`ci-asan` presets) and CodeQL. CMake options OFF by default (empty `adc_dev_options`
   target), so `ci.yml`, local builds and `adc_cases` are unchanged. See `docs/QUALITY_TOOLING.md`.
+- **Fuzzing, coverage and developer automation** (ADC-113): invariant-checked libFuzzer harnesses in
+  `fuzz/` (Box2D, Berger-Rigoutsos clustering, `real_eig_minmax`; option `ADC_BUILD_FUZZING` +
+  `ci-fuzz` preset, clang), gcov/gcovr coverage (`ADC_ENABLE_COVERAGE` + `ci-coverage` preset),
+  Python ruff lint (`[tool.ruff]`), opt-in pre-commit hooks (`.pre-commit-config.yaml`: clang-format
+  and ruff at commit), and two more `quality.yml` jobs (`fuzz`, `coverage`) on the same weekly
+  informative cadence; the default build stays bit-unchanged.
 - **Repository health and GitHub hygiene**: BSD-3 `LICENSE` and license declaration, `CONTRIBUTING`,
   `SECURITY`, `.gitattributes`, PR and issue templates (ADC-223/224/244/246), a root-hygiene guard
   (ADC-169), Dependabot weekly Actions bumps (ADC-117), a release workflow that turns a `v*` tag

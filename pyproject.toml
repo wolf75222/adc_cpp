@@ -48,3 +48,21 @@ ADC_BUILD_TESTS = "OFF"
 provider = "scikit_build_core.metadata.regex"
 input = "CMakeLists.txt"
 regex = '(?m)^\s*VERSION (?P<value>\d+\.\d+\.\d+)'
+
+# ---- ruff : lint Python (python/adc + python/tests + scripts) ---------------------------------
+# Lance par le job `format` de quality.yml (informatif, --exit-zero) et par pre-commit (local).
+# Ignores calibres sur l'etat REEL de la base (sinon ~2150 findings de pur style noient les ~130
+# utiles, dont les bugprone B et les F) :
+#   E741  : `l` est l'indice de MODE standard du domaine (diocotron l=3..5) ;
+#   E501  : lignes longues historiques (1363) -- style pur, a resorber via ruff-format/pre-commit ;
+#   UP031 : %-formatting historique (790) -- modernisation de masse, pas un signal de bug.
+# NB : les F821 sur python/adc/__init__.py sont un artefact du `del _os, _sys` de fin d'init
+# (pyflakes voit la suppression), PAS des vrais undefined-names.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build*", "docs", "Tools", ".kokkos-install"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "NPY"]
+ignore = ["E741", "E501", "UP031"]

@@ -1,0 +1,36 @@
+# Hooks pre-commit OPT-IN cote developpeur : auto-formatage et hygiene AU COMMIT, sur les seuls
+# fichiers touches (jamais impose par le CI -- le job `format` de quality.yml reste informatif).
+#
+#   pipx install pre-commit       # (ou : pip install pre-commit)
+#   pre-commit install            # active les hooks dans ce clone
+#   pre-commit run --all-files    # passe manuelle sur toute la base (= le futur sweep ADC-118)
+#   pre-commit autoupdate         # rafraichit les `rev` ci-dessous
+#
+# NOTE : clang-format applique le .clang-format du depot ; ruff/ruff-format lisent [tool.ruff]
+# de pyproject.toml. Un commit modifie par un hook doit etre re-stage puis re-commite (cycle
+# pre-commit standard).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'  # deux espaces de fin = saut de ligne dur en Markdown
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.7
+    hooks:
+      - id: clang-format
+        types_or: [c++, c]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
