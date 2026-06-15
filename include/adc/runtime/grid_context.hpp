@@ -5,64 +5,64 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (en-tete leger : <cmath>/<functional>/<string>)
+#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (light header: <cmath>/<functional>/<string>)
 
 #include <functional>
 
 /// @file
-/// @brief Contexte de grille + fermetures d'un bloc, partages entre System (qui les installe) et
-///        block_builder.hpp (qui les fabrique a partir d'un modele compile). En-tete LEGER (mailles +
-///        std::function, sans la numerique) pour pouvoir etre inclus dans l'API publique du System
-///        sans y tirer assemble_rhs / flux / steppers.
+/// @brief Block grid context plus closures, shared between System (which installs them) and
+///        block_builder.hpp (which builds them from a compiled model). LIGHT header (mesh plus
+///        std::function, no numerics) so it can be included in the System public API without
+///        pulling in assemble_rhs / flux / steppers.
 
 namespace adc {
 
-/// MODE DE GEOMETRIE DE TRANSPORT du macro-pas (chantier T5-PR3, cablage du disque dans System::step).
-///  - None      : domaine plein cartesien (defaut). Le transport utilise assemble_rhs (chemin
-///                historique). BIT-IDENTIQUE a l'historique tant qu'aucun disque n'est fixe.
-///  - Staircase : disque approche par un MASQUE 0/1 cellule-centre (porte de face active/inactive,
-///                frontiere crenelee). Le transport utilise assemble_rhs_masked (chantier T2).
-///  - CutCell   : disque en cut-cell / embedded-boundary (apertures alpha_f continues + fraction de
-///                volume kappa). Le transport utilise assemble_rhs_eb (chantiers T5-PR1/PR2).
-/// Le mode est porte par le System (set_disc_domain mode= / set_geometry_mode) et lu par le stepper
-/// pour AIGUILLER l'avance de transport de chaque bloc. None reste le chemin de production intouche.
+/// TRANSPORT GEOMETRY MODE of the macro-step (T5-PR3 effort, disc wiring in System::step).
+///  - None: full Cartesian domain (default). Transport uses assemble_rhs (historical
+///                path). BIT-IDENTICAL to history as long as no disc is set.
+///  - Staircase: disc approximated by a cell-centered 0/1 MASK (active/inactive face gate,
+///                staircase boundary). Transport uses assemble_rhs_masked (T2 effort).
+///  - CutCell: disc as cut-cell / embedded-boundary (continuous alpha_f apertures plus volume
+///                fraction kappa). Transport uses assemble_rhs_eb (T5-PR1/PR2 efforts).
+/// The mode is held by the System (set_disc_domain mode= / set_geometry_mode) and read by the stepper
+/// to DISPATCH each block transport advance. None stays the untouched production path.
 enum class GeometryMode { None, Staircase, CutCell };
 
-/// Maillage + CL transport + aux partages par les fermetures d'un bloc. @c aux n'est PAS possede :
-/// il pointe l'aux du System (duree de vie superieure au bloc, adresse stable).
+/// Mesh + transport BC + aux shared by a block closures. @c aux is NOT owned:
+/// it points to the System aux (lifetime longer than the block, stable address).
 ///
-/// GEOMETRIE DISQUE (chantier T5-PR3) : @c disc_mask et @c disc pointent (NON possedes) le masque 0/1
-/// et le descripteur de disque du System (membres a adresse STABLE). Ils servent UNIQUEMENT a fabriquer
-/// les avances de transport disque optionnelles (build_block) ; lues PAR POINTEUR au pas, l'ordre
-/// add_block / set_disc_domain est indifferent. nullptr -> aucune avance disque (stepper sur advance,
-/// bit-identique). Le masque est materialise / le rayon pose par set_disc_domain.
+/// DISC GEOMETRY (T5-PR3 effort): @c disc_mask and @c disc point (NOT owned) to the 0/1 mask
+/// and the disc descriptor of the System (members with STABLE address). They are used ONLY to build
+/// the optional disc transport advances (build_block); read BY POINTER at the step, the order
+/// add_block / set_disc_domain does not matter. nullptr -> no disc advance (stepper on advance,
+/// bit-identical). The mask is materialized / the radius is set by set_disc_domain.
 struct GridContext {
-  Box2D dom;                ///< domaine (sans ghost)
-  BCRec bc;                 ///< CL de transport
-  Geometry geom;            ///< geometrie (dx, dy, bornes)
-  MultiFab* aux = nullptr;  ///< aux du System (phi, grad phi) ; NON possede
-  const MultiFab* disc_mask = nullptr;        ///< masque 0/1 disque (Impl::disc_mask_) ; NON possede
-  const detail::DiscDomain* disc = nullptr;   ///< descripteur disque (Impl::disc_) ; NON possede
+  Box2D dom;                ///< domain (without ghost)
+  BCRec bc;                 ///< transport BC
+  Geometry geom;            ///< geometry (dx, dy, bounds)
+  MultiFab* aux = nullptr;  ///< System aux (phi, grad phi); NOT owned
+  const MultiFab* disc_mask = nullptr;        ///< 0/1 disc mask (Impl::disc_mask_); NOT owned
+  const detail::DiscDomain* disc = nullptr;   ///< disc descriptor (Impl::disc_); NOT owned
 };
 
-/// Fermetures compilees d'un bloc, figees a l'ajout.
+/// Compiled block closures, frozen at add time.
 ///
-/// advance est l'avance de transport du chemin PAR DEFAUT (assemble_rhs, plein cartesien). Les deux
-/// avances DISQUE optionnelles (chantier T5-PR3) miment EXACTEMENT advance (meme schema RK / IMEX,
-/// meme limiteur / flux) mais aiguillent le residu de transport vers l'operateur disque :
-///   - advance_masked : assemble_rhs_masked (masque 0/1, mode Staircase) ;
-///   - advance_eb     : assemble_rhs_eb (cut-cell EB, mode CutCell).
-/// Elles lisent le masque / le level set du System PAR POINTEUR au moment du pas (et non a la
-/// construction), donc l'ordre add_block / set_disc_domain est indifferent. Vides (defaut) tant que le
-/// bloc ne supporte pas le routage disque : le stepper retombe alors sur advance (bit-identique).
+/// advance is the transport advance of the DEFAULT path (assemble_rhs, full Cartesian). The two
+/// optional DISC advances (T5-PR3 effort) mimic advance EXACTLY (same RK / IMEX scheme,
+/// same limiter / flux) but dispatch the transport residual to the disc operator:
+///   - advance_masked: assemble_rhs_masked (0/1 mask, Staircase mode);
+///   - advance_eb: assemble_rhs_eb (cut-cell EB, CutCell mode).
+/// They read the System mask / level set BY POINTER at step time (not at
+/// construction), so the order add_block / set_disc_domain does not matter. Empty (default) as long as
+/// the block does not support disc routing: the stepper then falls back to advance (bit-identical).
 struct BlockClosures {
-  std::function<void(MultiFab&, Real, int)> advance;  ///< (U, dt, n) : n sous-pas de dt/n
-  std::function<void(MultiFab&, Real, int)> advance_masked;  ///< idem, residu via assemble_rhs_masked
-  std::function<void(MultiFab&, Real, int)> advance_eb;      ///< idem, residu via assemble_rhs_eb
-  std::function<void(MultiFab&, MultiFab&)> rhs_into;  ///< R <- -div F + S (Poisson fige)
-  /// Diagnostic dt_hotspot (ADC-182) : (U, w, i, j) -> cellule GLOBALE dominant la CFL de
-  /// transport et sa vitesse. OPTIONNELLE (vide = bloc sans diagnostic, p.ex. chemins
-  /// historiques non recables) ; jamais appelee par step/step_cfl (hors chemin chaud).
+  std::function<void(MultiFab&, Real, int)> advance;  ///< (U, dt, n): n substeps of dt/n
+  std::function<void(MultiFab&, Real, int)> advance_masked;  ///< same, residual via assemble_rhs_masked
+  std::function<void(MultiFab&, Real, int)> advance_eb;      ///< same, residual via assemble_rhs_eb
+  std::function<void(MultiFab&, MultiFab&)> rhs_into;  ///< R <- -div F + S (Poisson frozen)
+  /// dt_hotspot diagnostic (ADC-182): (U, w, i, j) -> GLOBAL cell dominating the transport
+  /// CFL and its speed. OPTIONAL (empty = block without diagnostic, e.g. historical
+  /// unrewired paths); never called by step/step_cfl (off the hot path).
   std::function<void(const MultiFab&, Real&, int&, int&)> hotspot;
 };
 

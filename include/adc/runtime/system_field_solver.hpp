@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/state.hpp>       // kAuxBaseComps (composante de base du canal aux)
+#include <adc/core/state.hpp>       // kAuxBaseComps (base component of the aux channel)
 #include <adc/core/types.hpp>       // Real
 #include <adc/mesh/multifab.hpp>    // MultiFab, Array4, ConstArray4
 #include <adc/mesh/box2d.hpp>       // Box2D
@@ -8,15 +8,15 @@
 #include <adc/mesh/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver (Poisson polaire direct)
-#include <adc/parallel/comm.hpp>  // n_ranks() (garde-fou FFT MPI)
-#include <adc/runtime/block_builder_polar.hpp>  // derive_aux_polar (aux polaire en base locale)
+#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson)
+#include <adc/parallel/comm.hpp>  // n_ranks() (FFT MPI guard)
+#include <adc/runtime/block_builder_polar.hpp>  // derive_aux_polar (polar aux in local basis)
 #include <adc/runtime/wall_predicate.hpp>       // detail::wall_predicate
 
-#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS : trace de diagnostic device (env-gate, inerte par defaut)
+#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (env-gated, inert by default)
 #include <cstdlib>  // getenv
 #include <functional>
-#include <map>      // named_aux_ : champs aux NOMMES (comp -> champ), re-appliques apres realloc du canal
+#include <map>      // named_aux_: NAMED aux fields (comp -> field), re-applied after channel realloc
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -25,131 +25,131 @@
 #include <vector>
 
 /// @file
-/// @brief SystemFieldSolver : la responsabilite RESOLUTION ELLIPTIQUE + DERIVATION DE CHAMP extraite
-///        du god-class System::Impl (audit Lot B, cf. docs/SYSTEM_CPP_EXTRACTION_PLAN.md section 2).
-///        Extrait VERBATIM de python/system.cpp : aucune modification de numerique, d'ordre des
-///        operations, de fill_ghosts/fill_boundary, de device_fence ni de tolerance. STRICTEMENT
-///        bit-identique -- le code est deplace tel quel, seul l'acces aux membres PARTAGES de Impl
-///        (aux, sp, cfg, geom, pgeom_, ba, dm, bc_, dom, per_, periodic_, polar_) passe par le
+/// @brief SystemFieldSolver: the ELLIPTIC SOLVE + FIELD DERIVATION responsibility extracted
+///        from the god-class System::Impl (audit Lot B, cf. docs/SYSTEM_CPP_EXTRACTION_PLAN.md section 2).
+///        Extracted VERBATIM from python/system.cpp: no change to the numerics, to the order of
+///        operations, to fill_ghosts/fill_boundary, to device_fence or to tolerance. STRICTLY
+///        bit-identical -- the code is moved as is, only access to the SHARED members of Impl
+///        (aux, sp, cfg, geom, pgeom_, ba, dm, bc_, dom, per_, periodic_, polar_) goes through the
 ///        back-pointer owner_->.
 ///
-/// CONTRAT / INVARIANTS
-/// - POSSEDE : les solveurs elliptiques (ell_ cartesien GeometricMG/PoissonFFTSolver ; pell_ polaire
-///   PolarPoissonSolver), les jetons de configuration Poisson (p_rhs/p_solver/p_bc/p_wall/
-///   p_wall_radius/p_eps_), les champs et drapeaux de coefficient (eps(x), eps_x/eps_y, kappa) ainsi
-///   que les tampons d'APPLICATION de champ aux (bz_field_ et te_src_) avec leurs methodes apply_bz /
+/// CONTRACT / INVARIANTS
+/// - OWNS: the elliptic solvers (ell_ cartesian GeometricMG/PoissonFFTSolver; pell_ polar
+///   PolarPoissonSolver), the Poisson configuration tokens (p_rhs/p_solver/p_bc/p_wall/
+///   p_wall_radius/p_eps_), the coefficient fields and flags (eps(x), eps_x/eps_y, kappa) as well as
+///   the aux field APPLICATION buffers (bz_field_ and te_src_) with their methods apply_bz /
 ///   apply_te.
-/// - LIT (sans posseder) l'aux PARTAGE et la liste de blocs via owner_-> : l'aux est peuplee par
-///   solve_fields (phi, grad phi, B_z, T_e) puis ses halos sont remplis ; la liste de blocs fournit le
-///   second membre du Poisson (somme des briques elliptiques par bloc) et la source fluide de T_e.
-/// - DISPATCH cartesien vs polaire : solve_fields() route vers solve_fields_polar() quand owner_->polar_,
-///   sinon le chemin cartesien. Les deux chemins sont ind+ependants (ell_ jamais touche en polaire et
-///   reciproquement). ensure_elliptic / ensure_elliptic_polar construisent paresseusement le solveur.
-/// - INVARIANT device CRITIQUE : le device_fence() entre ell_solve() et la derivation de grad phi DOIT
-///   rester atomique (sans lui, le V-cycle GPU n'est pas termine quand on lit phi). Idem en polaire
-///   apres pell_->solve(). NE PAS reordonner.
-/// - INVARIANT MPI : les boucles de derivation / peuplement (B_z, T_e, eps, kappa) iterent sur les fabs
-///   LOCAUX (local_size()), jamais fab(0) en dur : no-op sur un rang sans box, bit-identique au
-///   proprietaire. Cette garde est PRESERVEE par l'extraction.
+/// - READS (without owning) the SHARED aux and the block list via owner_->: the aux is populated by
+///   solve_fields (phi, grad phi, B_z, T_e) then its halos are filled; the block list provides the
+///   right-hand side of the Poisson (sum of the per-block elliptic bricks) and the fluid source of T_e.
+/// - DISPATCH cartesian vs polar: solve_fields() routes to solve_fields_polar() when owner_->polar_,
+///   otherwise the cartesian path. The two paths are independent (ell_ never touched in polar and
+///   vice versa). ensure_elliptic / ensure_elliptic_polar build the solver lazily.
+/// - CRITICAL device INVARIANT: the device_fence() between ell_solve() and the derivation of grad phi MUST
+///   stay atomic (without it, the GPU V-cycle is not finished when phi is read). Same in polar
+///   after pell_->solve(). DO NOT reorder.
+/// - MPI INVARIANT: the derivation / population loops (B_z, T_e, eps, kappa) iterate over the LOCAL
+///   fabs (local_size()), never fab(0) hardcoded: no-op on a rank without a box, bit-identical to the
+///   owner. This guard is PRESERVED by the extraction.
 ///
-/// Comme System::Impl reste PRIVE a python/system.cpp, ce helper est un TEMPLATE parametre sur le type
-/// Impl reel (meme technique que native_loader) : python/system.cpp l'instancie avec System::Impl apres
-/// avoir defini Impl. owner_ est un Impl* (la duree de vie du helper est sous-jacente a celle de Impl).
+/// Since System::Impl stays PRIVATE to python/system.cpp, this helper is a TEMPLATE parametrized on the real
+/// Impl type (same technique as native_loader): python/system.cpp instantiates it with System::Impl after
+/// defining Impl. owner_ is an Impl* (the lifetime of the helper is subordinate to that of Impl).
 
 namespace adc {
 namespace field_solver {
 
-/// Vrai si la trace de DIAGNOSTIC du chemin solve_fields est active (variable d'environnement
-/// ADC_TRACE_SOLVE_FIELDS posee). Jalon #93 (crash device GH200) : ecrit sur stderr avec flush immediat
-/// pour localiser le dernier marqueur avant un crash device. INERTE par defaut : aucun effet sur les
-/// sorties ni sur la numerique. Diagnostic CONSERVE (env-gate) : utile pour un futur crash device.
+/// True if the DIAGNOSTIC trace of the solve_fields path is active (environment variable
+/// ADC_TRACE_SOLVE_FIELDS set). Milestone #93 (GH200 device crash): writes to stderr with immediate flush
+/// to locate the last marker before a device crash. INERT by default: no effect on the
+/// outputs or on the numerics. Diagnostic KEPT (env-gated): useful for a future device crash.
 inline bool adc_trace_sf() {
   static const bool on = std::getenv("ADC_TRACE_SOLVE_FIELDS") != nullptr;
   return on;
 }
-/// Ecrit le marqueur @p w sur stderr (avec flush) SEULEMENT si adc_trace_sf() ; no-op sinon.
+/// Writes the marker @p w to stderr (with flush) ONLY if adc_trace_sf(); no-op otherwise.
 inline void adc_sf_mark(const char* w) {
   if (adc_trace_sf()) { std::fprintf(stderr, "[sf] %s\n", w); std::fflush(stderr); }
 }
 
-/// SystemFieldSolver<Impl> : voir contrat ci-dessus. Toutes les methodes sont des MEMBRES (et non des
-/// fonctions libres) car elles partagent l'etat elliptique possede par cette classe ; les acces a l'etat
-/// PARTAGE de Impl passent par owner_-> verbatim. Template sur Impl pour rester sans dependance sur la
-/// definition (privee) de System::Impl.
+/// SystemFieldSolver<Impl>: see contract above. All methods are MEMBERS (not free
+/// functions) because they share the elliptic state owned by this class; accesses to the SHARED
+/// state of Impl go through owner_-> verbatim. Templated on Impl to stay free of any dependency on the
+/// (private) definition of System::Impl.
 template <class Impl>
 class SystemFieldSolver {
  public:
-  /// @param owner back-pointer vers System::Impl (duree de vie sous-jacente a celle de Impl).
+  /// @param owner back-pointer to System::Impl (lifetime subordinate to that of Impl).
   explicit SystemFieldSolver(Impl* owner) : owner_(owner) {}
 
-  /// Composante canonique de T_e (apres phi/grad/B_z) ; cf. adc::Aux et AUX_CANONICAL cote DSL.
+  /// Canonical component of T_e (after phi/grad/B_z); cf. adc::Aux and AUX_CANONICAL on the DSL side.
   static constexpr int kTeComp = kAuxBaseComps + 1;  // = 4
 
-  // --- etat POSSEDE (resolution elliptique + champs de coefficient + tampons d'application) --------
-  // Configuration Poisson (solveur elliptique construit paresseusement).
+  // --- OWNED state (elliptic solve + coefficient fields + application buffers) --------
+  // Poisson configuration (elliptic solver built lazily).
   std::string p_rhs = "charge_density";
   std::string p_solver = "geometric_mg";
   std::string p_bc = "auto";
   std::string p_wall = "none";
   double p_wall_radius = 0.0;
-  Real p_eps_ = 1;  // permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps
-  // Plancher ABSOLU du critere d'arret du V-cycle GeometricMG (memes unites que le residu). Defaut 0 :
-  // critere purement relatif (comportement historique bit-identique). Pose > 0 (echelle du probleme),
-  // il fait sortir SANS cycler les solve_fields HORS PAS sur un etat deja converge (diagnostics, oracles,
-  // restart). Inerte pour le solveur FFT (direct, sans tolerance iterative).
+  Real p_eps_ = 1;  // CONSTANT permittivity: div(eps grad phi) = f <=> lap phi = f/eps
+  // ABSOLUTE floor of the GeometricMG V-cycle stopping criterion (same units as the residual). Default 0:
+  // purely relative criterion (historical bit-identical behavior). Set > 0 (problem scale),
+  // it makes the off-step solve_fields exit WITHOUT cycling on an already converged state (diagnostics, oracles,
+  // restart). Inert for the FFT solver (direct, without iterative tolerance).
   Real p_abs_tol_ = 0;
-  bool has_eps_field_ = false;          // permittivite VARIABLE eps(x) fournie (porte par l'operateur)
-  std::vector<double> p_eps_field_;     // champ eps(x), n*n row-major (si has_eps_field_)
-  bool has_eps_xy_field_ = false;       // permittivite ANISOTROPE eps_x(x), eps_y(x) (operateur div(diag(eps_x,eps_y) grad phi))
-  std::vector<double> p_eps_x_field_;   // champ eps_x(x), n*n row-major (faces normales a x ; si has_eps_xy_field_)
-  std::vector<double> p_eps_y_field_;   // champ eps_y(x), n*n row-major (faces normales a y ; si has_eps_xy_field_)
-  bool has_kappa_field_ = false;        // terme de REACTION kappa(x) fourni : div(eps grad phi) - kappa phi
-  std::vector<double> p_kappa_field_;   // champ kappa(x), n*n row-major (si has_kappa_field_)
-  // POLITIQUE DE GAUSS (chantier R0, reproduction Hoffart arXiv:2510.11808). Defaut "restart" :
-  // solve_fields re-resout -Delta phi = f (Gauss) a CHAQUE appel -- comportement historique,
-  // BIT-IDENTIQUE. "evolve" : apres le PREMIER solve (phi^0), solve_fields NE re-resout PLUS le
-  // Poisson ; il ne fait que DERIVER l'aux (phi, grad phi) du phi COURANT -- celui que l'etage source
-  // condense (Schur) fait evoluer IN-PLACE dans ell_phi() (cf. run_source_stage). Reproduit ainsi
-  // l'evolution restart-free de -Delta phi du papier (la contrainte de Gauss n'est imposee qu'a t=0).
-  // INERTE sans etage Schur (phi resterait gele apres t=0). Le verrou gauss_solved_once_ garantit que
-  // le premier solve (l'init de phi^0) resout toujours, quelle que soit la politique.
+  bool has_eps_field_ = false;          // VARIABLE permittivity eps(x) provided (carried by the operator)
+  std::vector<double> p_eps_field_;     // field eps(x), n*n row-major (if has_eps_field_)
+  bool has_eps_xy_field_ = false;       // ANISOTROPIC permittivity eps_x(x), eps_y(x) (operator div(diag(eps_x,eps_y) grad phi))
+  std::vector<double> p_eps_x_field_;   // field eps_x(x), n*n row-major (faces normal to x; if has_eps_xy_field_)
+  std::vector<double> p_eps_y_field_;   // field eps_y(x), n*n row-major (faces normal to y; if has_eps_xy_field_)
+  bool has_kappa_field_ = false;        // REACTION term kappa(x) provided: div(eps grad phi) - kappa phi
+  std::vector<double> p_kappa_field_;   // field kappa(x), n*n row-major (if has_kappa_field_)
+  // GAUSS POLICY (work item R0, Hoffart reproduction arXiv:2510.11808). Default "restart":
+  // solve_fields re-solves -Delta phi = f (Gauss) on EVERY call -- historical behavior,
+  // BIT-IDENTICAL. "evolve": after the FIRST solve (phi^0), solve_fields NO LONGER re-solves the
+  // Poisson; it only DERIVES the aux (phi, grad phi) from the CURRENT phi -- the one that the condensed
+  // source stage (Schur) evolves IN-PLACE in ell_phi() (cf. run_source_stage). Thus it reproduces
+  // the restart-free evolution of -Delta phi from the paper (the Gauss constraint is only imposed at t=0).
+  // INERT without a Schur stage (phi would stay frozen after t=0). The lock gauss_solved_once_ guarantees that
+  // the first solve (the init of phi^0) always solves, whatever the policy.
   bool gauss_evolve_ = false;
   bool gauss_solved_once_ = false;
   std::optional<std::variant<GeometricMG, PoissonFFTSolver>> ell_;
-  // Solveur de Poisson POLAIRE direct (FFT-en-theta + tridiag-en-r), construit paresseusement quand
-  // polar_ (cf. ensure_elliptic_polar). SEPARE de ell_ (geom() rend une PolarGeometry, pas une
-  // Geometry) : le chemin cartesien n'est jamais touche. INERTE (nullopt) en cartesien.
+  // Direct POLAR Poisson solver (FFT-in-theta + tridiag-in-r), built lazily when
+  // polar_ (cf. ensure_elliptic_polar). SEPARATE from ell_ (geom() returns a PolarGeometry, not a
+  // Geometry): the cartesian path is never touched. INERT (nullopt) in cartesian.
   std::optional<PolarPoissonSolver> pell_;
-  // Tampon phi de l'ETAGE SOURCE condense POLAIRE (Voie A etape 2c). Le PolarPoissonSolver direct
-  // (pell_->phi()) est SANS ghost (box valide = allocation) ; or le PolarCondensedSchurSourceStepper
-  // a besoin d'un phi AVEC 1 ghost (fill_ghosts + apply_polar_tensor + grad centre + ecriture de
-  // phi^{n+1}). On lui passe donc ce tampon dedie (1 ghost), alimente par phi^n (= aux[0] apres
-  // solve_fields_polar) avant le source stage, et qui porte phi^{n+1} en sortie (warm start du pas
-  // suivant). En CARTESIEN ce tampon est INERTE (nullopt) : ell_phi() route vers ell_->phi() comme
-  // avant, BIT-IDENTIQUE.
+  // phi buffer of the POLAR condensed SOURCE STAGE (Path A step 2c). The direct PolarPoissonSolver
+  // (pell_->phi()) is WITHOUT ghost (valid box = allocation); but the PolarCondensedSchurSourceStepper
+  // needs a phi WITH 1 ghost (fill_ghosts + apply_polar_tensor + centered grad + write of
+  // phi^{n+1}). So we pass it this dedicated buffer (1 ghost), fed with phi^n (= aux[0] after
+  // solve_fields_polar) before the source stage, which carries phi^{n+1} on output (warm start of the next
+  // step). In CARTESIAN this buffer is INERT (nullopt): ell_phi() routes to ell_->phi() as
+  // before, BIT-IDENTICAL.
   std::optional<MultiFab> phi_src_polar_;
-  std::vector<Real> bz_field_;        // champ B_z(x) n*n row-major (vide si non fourni)
-  int te_src_ = -1;                   // indice du bloc fluide source de T_e (-1 = aucune)
-  // Champs aux NOMMES (ADC-70 phase 1) fournis par l'utilisateur via System::set_aux_field : cle =
-  // composante canonique (>= kAuxNamedBase = 5), valeur = champ n*n (cartesien) / nr*ntheta (polaire)
-  // row-major. PERSISTANTS comme bz_field_ : solve_fields ne touche QUE les composantes 0..2 (phi,
-  // grad) et 4 (T_e via apply_te), donc les composantes >= 5 survivent d'un pas a l'autre ; mais une
-  // REALLOCATION du canal aux (ensure_aux_width) repart d'un MultiFab a zero -> on les re-applique
-  // alors (apply_named_aux), exactement comme apply_bz / apply_te.
+  std::vector<Real> bz_field_;        // field B_z(x) n*n row-major (empty if not provided)
+  int te_src_ = -1;                   // index of the fluid block source of T_e (-1 = none)
+  // NAMED aux fields (ADC-70 phase 1) provided by the user via System::set_aux_field: key =
+  // canonical component (>= kAuxNamedBase = 5), value = field n*n (cartesian) / nr*ntheta (polar)
+  // row-major. PERSISTENT like bz_field_: solve_fields touches ONLY components 0..2 (phi,
+  // grad) and 4 (T_e via apply_te), so components >= 5 survive from one step to the next; but a
+  // REALLOCATION of the aux channel (ensure_aux_width) starts again from a zeroed MultiFab -> we re-apply
+  // them then (apply_named_aux), exactly like apply_bz / apply_te.
   std::map<int, std::vector<Real>> named_aux_;
 
-  /// Peuple la composante B_z (indice kAuxBaseComps) du canal partage depuis bz_field_, sur les
-  /// cellules valides. No-op si B_z non fourni ou si aucun bloc ne le lit (largeur de base). Les
-  /// halos de B_z sont remplis par solve_fields (comme grad) ; field_postprocess n'ecrit que comp 0..2.
+  /// Populates the B_z component (index kAuxBaseComps) of the shared channel from bz_field_, over the
+  /// valid cells. No-op if B_z not provided or if no block reads it (base width). The
+  /// halos of B_z are filled by solve_fields (like grad); field_postprocess only writes comp 0..2.
   void apply_bz() {
     if (bz_field_.empty() || owner_->aux_ncomp_ <= kAuxBaseComps) return;
-    // LARGEUR DE LIGNE (axe rapide i) du tableau row-major bz_field_ : n en cartesien (carre n x n,
-    // BIT-IDENTIQUE), nr en POLAIRE (anneau nr x ntheta, i = r de taille nr, cf. set_magnetic_field).
-    // L'index reste flat[j * row + i] : en cartesien row == n (inchange) ; en polaire row == nr.
+    // ROW WIDTH (fast axis i) of the row-major array bz_field_: n in cartesian (square n x n,
+    // BIT-IDENTICAL), nr in POLAR (ring nr x ntheta, i = r of size nr, cf. set_magnetic_field).
+    // The index stays flat[j * row + i]: in cartesian row == n (unchanged); in polar row == nr.
     const int row = owner_->polar_ ? owner_->aux.box(0).nx() : owner_->cfg.n;
-    // Peuplement LOCAL au rang proprietaire (cf. solve_fields) : iteration sur les fabs locaux du
-    // canal aux au lieu de fab(0) en dur (no-op sur un rang sans box locale a np>1, bit-identique au
-    // proprietaire).
+    // LOCAL population on the owner rank (cf. solve_fields): iteration over the local fabs of the
+    // aux channel instead of fab(0) hardcoded (no-op on a rank without a local box at np>1, bit-identical to the
+    // owner).
     for (int li = 0; li < owner_->aux.local_size(); ++li) {
       Array4 a = owner_->aux.fab(li).array();
       const Box2D v = owner_->aux.box(li);
@@ -159,17 +159,17 @@ class SystemFieldSolver {
     }
   }
 
-  /// Peuple la composante T_e (temperature electronique) = p/rho du bloc fluide source te_src_.
-  /// RECALCULEE a chaque solve_fields (T_e varie avec le fluide, contrairement a B_z statique).
-  /// No-op si aucune source ou si aucun bloc ne lit T_e (largeur insuffisante). Le bloc source est
-  /// compressible (4 var) ; p = (gamma-1)(E - 0.5 rho|v|^2), T = p/rho.
+  /// Populates the T_e component (electron temperature) = p/rho of the fluid block source te_src_.
+  /// RECOMPUTED on each solve_fields (T_e varies with the fluid, unlike the static B_z).
+  /// No-op if no source or if no block reads T_e (insufficient width). The source block is
+  /// compressible (4 var); p = (gamma-1)(E - 0.5 rho|v|^2), T = p/rho.
   void apply_te() {
     if (te_src_ < 0 || owner_->aux_ncomp_ <= kTeComp) return;
     const auto& s = owner_->sp[static_cast<std::size_t>(te_src_)];
     const Real gm1 = Real(s.gamma) - Real(1);
-    // Peuplement LOCAL au rang proprietaire (cf. solve_fields) : on itere sur les fabs locaux du
-    // canal aux au lieu de fab(0) en dur (no-op sur un rang sans box locale a np>1, bit-identique au
-    // proprietaire). s.U et aux partagent la meme DistributionMapping -> meme indexation locale.
+    // LOCAL population on the owner rank (cf. solve_fields): we iterate over the local fabs of the
+    // aux channel instead of fab(0) hardcoded (no-op on a rank without a local box at np>1, bit-identical to the
+    // owner). s.U and aux share the same DistributionMapping -> same local indexing.
     for (int li = 0; li < owner_->aux.local_size(); ++li) {
       const ConstArray4 us = s.U.fab(li).const_array();
       Array4 a = owner_->aux.fab(li).array();
@@ -183,16 +183,16 @@ class SystemFieldSolver {
     }
   }
 
-  /// Peuple UNE composante aux NOMMEE (indice canonique @p comp >= kAuxNamedBase) du canal partage
-  /// depuis @p field (row-major), sur les cellules valides. No-op si le canal est trop etroit
-  /// (aucun bloc ne lit cette composante) ou si le champ est vide. MEME patron que apply_bz : champ
-  /// STATIQUE fourni par l'utilisateur, jamais reecrit par solve_fields ; ses halos sont remplis par
-  /// solve_fields (fill_ghosts/fill_boundary sur tout le canal). Peuplement LOCAL au rang (iteration
-  /// sur les fabs locaux, no-op sur un rang sans box a np>1).
+  /// Populates ONE NAMED aux component (canonical index @p comp >= kAuxNamedBase) of the shared channel
+  /// from @p field (row-major), over the valid cells. No-op if the channel is too narrow
+  /// (no block reads this component) or if the field is empty. SAME pattern as apply_bz: STATIC field
+  /// provided by the user, never rewritten by solve_fields; its halos are filled by
+  /// solve_fields (fill_ghosts/fill_boundary over the whole channel). LOCAL population on the rank (iteration
+  /// over the local fabs, no-op on a rank without a box at np>1).
   void apply_named_aux_one(int comp, const std::vector<Real>& field) {
     if (field.empty() || owner_->aux_ncomp_ <= comp) return;
-    // LARGEUR DE LIGNE (axe rapide i) : n en cartesien (carre n x n), nr en polaire (anneau nr x
-    // ntheta). Index flat[j * row + i], identique a apply_bz / set_density.
+    // ROW WIDTH (fast axis i): n in cartesian (square n x n), nr in polar (ring nr x
+    // ntheta). Index flat[j * row + i], identical to apply_bz / set_density.
     const int row = owner_->polar_ ? owner_->aux.box(0).nx() : owner_->cfg.n;
     for (int li = 0; li < owner_->aux.local_size(); ++li) {
       Array4 a = owner_->aux.fab(li).array();
@@ -203,15 +203,15 @@ class SystemFieldSolver {
     }
   }
 
-  /// Re-applique TOUS les champs aux nommes stockes (cf. named_aux_). Appele par ensure_aux_width
-  /// apres une reallocation du canal aux (qui repart d'un MultiFab a zero), comme apply_bz / apply_te.
+  /// Re-applies ALL the stored named aux fields (cf. named_aux_). Called by ensure_aux_width
+  /// after a reallocation of the aux channel (which starts again from a zeroed MultiFab), like apply_bz / apply_te.
   void apply_named_aux() {
     for (const auto& kv : named_aux_) apply_named_aux_one(kv.first, kv.second);
   }
 
-  // --- solveur elliptique (Poisson de systeme) -----------------------------
-  /// Resout le mode de CL en BCRec : "auto" -> dirichlet si paroi/non-periodique, sinon periodic ;
-  /// "periodic"|"dirichlet"|"neumann" (Foextrap). @throws std::runtime_error sur un mode inconnu.
+  // --- elliptic solver (system Poisson) -----------------------------
+  /// Resolves the BC mode into a BCRec: "auto" -> dirichlet if wall/non-periodic, otherwise periodic;
+  /// "periodic"|"dirichlet"|"neumann" (Foextrap). @throws std::runtime_error on an unknown mode.
   BCRec poisson_bc() {
     std::string mode = p_bc;
     if (mode == "auto") mode = (p_wall == "circle" || !owner_->cfg.periodic) ? "dirichlet" : "periodic";
@@ -225,85 +225,85 @@ class SystemFieldSolver {
       b.xlo = b.xhi = b.ylo = b.yhi = BCType::Foextrap;
       return b;
     }
-    throw std::runtime_error("System::set_poisson : bc inconnu '" + mode + "'");
+    throw std::runtime_error("System::set_poisson: unknown bc '" + mode + "'");
   }
-  /// Predicat "interieur du conducteur" depuis p_wall / p_wall_radius / cfg.L (cf. wall_predicate) ;
-  /// vide si pas de paroi.
+  /// "Conductor interior" predicate from p_wall / p_wall_radius / cfg.L (cf. wall_predicate);
+  /// empty if no wall.
   std::function<bool(Real, Real)> wall_active() {
     return detail::wall_predicate(p_wall, p_wall_radius, owner_->cfg.L, "System::set_poisson");
   }
-  /// Construit PARESSEUSEMENT le solveur elliptique cartesien (ell_) selon p_solver : GeometricMG
-  /// (porte eps(x)/aniso/kappa s'ils sont fournis) ou PoissonFFTSolver (coefficient constant, mono-rang,
-  /// sans paroi ; kind 'fft' = stencil discret, 'fft_spectral' = symbole continu spectral).
-  /// No-op si ell_ existe deja. @throws std::runtime_error sur rhs/solver inconnu ou
-  /// combinaison non supportee (fft + MPI/paroi/eps variable/kappa ; kappa + eps constante != 1).
+  /// Builds the cartesian elliptic solver (ell_) LAZILY according to p_solver: GeometricMG
+  /// (carries eps(x)/aniso/kappa if provided) or PoissonFFTSolver (constant coefficient, single-rank,
+  /// no wall; kind 'fft' = discrete stencil, 'fft_spectral' = continuous spectral symbol).
+  /// No-op if ell_ already exists. @throws std::runtime_error on unknown rhs/solver or
+  /// unsupported combination (fft + MPI/wall/variable eps/kappa; kappa + constant eps != 1).
   void ensure_elliptic() {
     if (ell_) return;
-    // Le second membre de systeme est TOUJOURS f = Sum_s elliptic_rhs_s(u_s), assemble par
-    // solve_fields a partir de la brique elliptique de CHAQUE bloc (charge q n, fond alpha (n-n0),
-    // couplage gravite 4piG (rho-rho0)). Le token n'est donc PAS un mode de calcul mais une ETIQUETTE
-    // de ce second membre compose. "composite" nomme honnetement ce comportement ; "charge_density"
-    // reste l'alias historique (defaut, bit-identique) car le cas usuel est un bloc de charge.
+    // The system right-hand side is ALWAYS f = Sum_s elliptic_rhs_s(u_s), assembled by
+    // solve_fields from the elliptic brick of EACH block (charge q n, background alpha (n-n0),
+    // gravity coupling 4piG (rho-rho0)). The token is thus NOT a computation mode but a LABEL
+    // of this composite right-hand side. "composite" names this behavior honestly; "charge_density"
+    // stays the historical alias (default, bit-identical) since the usual case is a charge block.
     if (p_rhs != "charge_density" && p_rhs != "composite")
-      throw std::runtime_error("System::set_poisson : rhs '" + p_rhs +
-                               "' inconnu (charge_density|composite ; le second membre = somme des "
-                               "briques elliptiques par bloc)");
+      throw std::runtime_error("System::set_poisson: unknown rhs '" + p_rhs +
+                               "' (charge_density|composite; the right-hand side = sum of the "
+                               "per-block elliptic bricks)");
     const BCRec pbc = poisson_bc();
     std::function<bool(Real, Real)> active = wall_active();
     if (p_solver == "fft" || p_solver == "fft_spectral") {
-      // FFT directe mono-rang : sous MPI (n_ranks>1) System repartit UNE box en round-robin, donc
-      // des rangs ont local_size()==0 et PoissonFFTSolver::solve() dereferencerait fab(0) inexistant
-      // (SIGSEGV, l'ancien assert disparaissait en Release). On REFUSE explicitement ici, sur TOUS
-      // les rangs (ensure_elliptic est appele collectivement par solve_fields) -> pas d'interblocage.
-      // Le periodique distribue passe par DistributedFFTSolver (bandes), non cable dans System (sa
-      // decomposition par bandes est incompatible avec la box unique de System -> assemblage du rhs /
-      // relecture de phi). PoissonFFTSolver garde aussi un garde-fou dur dans son constructeur.
+      // Direct single-rank FFT: under MPI (n_ranks>1) System distributes ONE box round-robin, so
+      // some ranks have local_size()==0 and PoissonFFTSolver::solve() would dereference a nonexistent fab(0)
+      // (SIGSEGV, the old assert disappeared in Release). We REFUSE this explicitly here, on ALL
+      // ranks (ensure_elliptic is called collectively by solve_fields) -> no deadlock.
+      // The distributed periodic goes through DistributedFFTSolver (strips), not wired into System (its
+      // strip decomposition is incompatible with the single box of System -> rhs assembly /
+      // re-read of phi). PoissonFFTSolver also keeps a hard guard in its constructor.
       if (n_ranks() > 1)
         throw std::runtime_error(
-            "solveur fft non supporte en MPI (n_ranks>1) : utiliser geometric_mg ou le solveur fft "
-            "distribue");
+            "fft solver unsupported under MPI (n_ranks>1): use geometric_mg or the distributed fft "
+            "solver");
       if (active)
-        throw std::runtime_error("System : solver '" + p_solver + "' incompatible avec une paroi -> 'geometric_mg'");
+        throw std::runtime_error("System: solver '" + p_solver + "' incompatible with a wall -> 'geometric_mg'");
       if (has_eps_field_)
-        throw std::runtime_error("System : solver '" + p_solver + "' a coefficient CONSTANT, incompatible avec un "
-                                 "champ eps(x) variable -> utiliser solver='geometric_mg'");
+        throw std::runtime_error("System: solver '" + p_solver + "' has a CONSTANT coefficient, incompatible with a "
+                                 "variable eps(x) field -> use solver='geometric_mg'");
       if (has_eps_xy_field_)
-        throw std::runtime_error("System : solver '" + p_solver + "' a coefficient CONSTANT, incompatible avec une "
-                                 "permittivite ANISOTROPE eps_x(x), eps_y(x) -> utiliser solver='geometric_mg'");
+        throw std::runtime_error("System: solver '" + p_solver + "' has a CONSTANT coefficient, incompatible with an "
+                                 "ANISOTROPIC permittivity eps_x(x), eps_y(x) -> use solver='geometric_mg'");
       if (has_kappa_field_)
-        throw std::runtime_error("System : solver '" + p_solver + "' (Poisson pur) incompatible avec un terme de "
-                                 "reaction kappa(x) -> utiliser solver='geometric_mg'");
-      // 'fft_spectral' : meme plomberie, symbole CONTINU -(kx^2+ky^2) (fidelite aux references
-      // spectrales, ex. poisson_fft.m de RIEMOM2D) ; 'fft' garde le stencil discret (bit-identique).
+        throw std::runtime_error("System: solver '" + p_solver + "' (pure Poisson) incompatible with a "
+                                 "reaction term kappa(x) -> use solver='geometric_mg'");
+      // 'fft_spectral': same plumbing, CONTINUOUS symbol -(kx^2+ky^2) (fidelity to the spectral
+      // references, e.g. poisson_fft.m of RIEMOM2D); 'fft' keeps the discrete stencil (bit-identical).
       ell_.emplace(std::in_place_type<PoissonFFTSolver>, owner_->geom, owner_->ba, pbc, active,
                    p_solver == "fft_spectral");
     } else if (p_solver == "geometric_mg") {
       ell_.emplace(std::in_place_type<GeometricMG>, owner_->geom, owner_->ba, pbc, std::move(active));
-      std::get<GeometricMG>(*ell_).set_abs_tol(p_abs_tol_);  // plancher absolu du V-cycle (0 = relatif seul)
-      if (has_eps_field_) apply_epsilon_field();    // operateur div(eps grad phi) a eps(x) variable
+      std::get<GeometricMG>(*ell_).set_abs_tol(p_abs_tol_);  // absolute floor of the V-cycle (0 = relative only)
+      if (has_eps_field_) apply_epsilon_field();    // operator div(eps grad phi) with variable eps(x)
       if (has_eps_xy_field_) apply_epsilon_anisotropic_field();  // div(diag(eps_x, eps_y) grad phi)
-      if (has_kappa_field_) apply_reaction_field();  // terme - kappa phi (Poisson ecrante / Helmholtz)
-      // Garde-fou : avec kappa et une permittivite CONSTANTE eps != 1 (sans champ eps(x)), le rhs
-      // serait mis a l'echelle 1/eps (raccourci lap phi = f/eps) -- incoherent avec le terme -kappa phi.
-      // On exige alors eps = 1 ou un champ eps(x) (porte par l'operateur, sans mise a l'echelle).
+      if (has_kappa_field_) apply_reaction_field();  // term - kappa phi (screened Poisson / Helmholtz)
+      // Guard: with kappa and a CONSTANT permittivity eps != 1 (without an eps(x) field), the rhs
+      // would be scaled by 1/eps (shortcut lap phi = f/eps) -- inconsistent with the term -kappa phi.
+      // We then require eps = 1 or an eps(x) field (carried by the operator, without scaling).
       if (has_kappa_field_ && !has_eps_field_ && !has_eps_xy_field_ && p_eps_ != Real(1))
-        throw std::runtime_error("System : terme de reaction kappa(x) + permittivite CONSTANTE eps != 1 "
-                                 "non supporte ; utiliser eps = 1 ou un champ eps(x) (set_epsilon_field)");
+        throw std::runtime_error("System: reaction term kappa(x) + CONSTANT permittivity eps != 1 "
+                                 "unsupported; use eps = 1 or an eps(x) field (set_epsilon_field)");
     } else {
-      throw std::runtime_error("System::set_poisson : solver '" + p_solver +
-                               "' inconnu (geometric_mg|fft|fft_spectral)");
+      throw std::runtime_error("System::set_poisson: unknown solver '" + p_solver +
+                               "' (geometric_mg|fft|fft_spectral)");
     }
   }
-  /// Installe le champ eps(x) (n*n row-major) sur le GeometricMG : l'operateur passe a
-  /// div(eps grad phi) = f, eps PORTE PAR L'OPERATEUR (coefficient de face harmonique, ordre 2),
-  /// sans mise a l'echelle 1/eps du second membre. Seul GeometricMG supporte ce coefficient variable.
+  /// Installs the eps(x) field (n*n row-major) on the GeometricMG: the operator becomes
+  /// div(eps grad phi) = f, eps CARRIED BY THE OPERATOR (harmonic face coefficient, order 2),
+  /// without 1/eps scaling of the right-hand side. Only GeometricMG supports this variable coefficient.
   void apply_epsilon_field() {
     GeometricMG& mg = std::get<GeometricMG>(*ell_);
     MultiFab eps_fine(owner_->ba, owner_->dm, 1, 0);
     const int n = owner_->cfg.n;
-    // Remplissage du champ source LOCAL au rang proprietaire (iteration sur les fabs locaux, jamais
-    // fab(0) en dur) : no-op sur un rang sans box locale a np>1, identique a avant sur le
-    // proprietaire. mg.set_epsilon est ensuite COLLECTIF (copie locale + restriction MPI-safe).
+    // Filling of the source field LOCAL to the owner rank (iteration over the local fabs, never
+    // fab(0) hardcoded): no-op on a rank without a local box at np>1, identical to before on the
+    // owner. mg.set_epsilon is then COLLECTIVE (local copy + MPI-safe restriction).
     for (int li = 0; li < eps_fine.local_size(); ++li) {
       Array4 e = eps_fine.fab(li).array();
       const Box2D v = eps_fine.box(li);
@@ -311,19 +311,19 @@ class SystemFieldSolver {
         for (int i = v.lo[0]; i <= v.hi[0]; ++i)
           e(i, j, 0) = static_cast<Real>(p_eps_field_[static_cast<std::size_t>(j) * n + i]);
     }
-    mg.set_epsilon(eps_fine);  // copie sur le niveau fin + restriction (average_down) aux grossiers
+    mg.set_epsilon(eps_fine);  // copy on the fine level + restriction (average_down) to the coarse ones
   }
-  /// Installe les champs eps_x(x), eps_y(x) (n*n row-major chacun) sur le GeometricMG : l'operateur
-  /// passe a div(diag(eps_x, eps_y) grad phi) = f. Les faces normales a x lisent eps_x, celles
-  /// normales a y lisent eps_y (coefficients de face harmoniques, ordre 2), PORTES PAR L'OPERATEUR
-  /// sans mise a l'echelle 1/eps du second membre. GeometricMG seul (coefficient tensoriel variable).
+  /// Installs the eps_x(x), eps_y(x) fields (n*n row-major each) on the GeometricMG: the operator
+  /// becomes div(diag(eps_x, eps_y) grad phi) = f. The faces normal to x read eps_x, those
+  /// normal to y read eps_y (harmonic face coefficients, order 2), CARRIED BY THE OPERATOR
+  /// without 1/eps scaling of the right-hand side. GeometricMG only (variable tensor coefficient).
   void apply_epsilon_anisotropic_field() {
     GeometricMG& mg = std::get<GeometricMG>(*ell_);
     MultiFab eps_x_fine(owner_->ba, owner_->dm, 1, 0), eps_y_fine(owner_->ba, owner_->dm, 1, 0);
     const int n = owner_->cfg.n;
-    // Remplissage LOCAL au rang proprietaire (cf. apply_epsilon_field) : iteration sur les fabs
-    // locaux (no-op sur un rang vide a np>1). eps_x_fine et eps_y_fine partagent ba/dm -> meme
-    // indexation locale. mg.set_epsilon_anisotropic est ensuite COLLECTIF (copie + restriction).
+    // LOCAL filling on the owner rank (cf. apply_epsilon_field): iteration over the local fabs
+    // (no-op on an empty rank at np>1). eps_x_fine and eps_y_fine share ba/dm -> same
+    // local indexing. mg.set_epsilon_anisotropic is then COLLECTIVE (copy + restriction).
     for (int li = 0; li < eps_x_fine.local_size(); ++li) {
       Array4 ex = eps_x_fine.fab(li).array();
       Array4 ey = eps_y_fine.fab(li).array();
@@ -337,15 +337,15 @@ class SystemFieldSolver {
     }
     mg.set_epsilon_anisotropic(eps_x_fine, eps_y_fine);  // faces x <- eps_x, faces y <- eps_y (+ restriction)
   }
-  /// Installe le terme de reaction kappa(x) (n*n row-major) sur le GeometricMG : l'operateur passe a
-  /// div(eps grad phi) - kappa phi = f (Poisson ecrante / Helmholtz ; kappa = 1/lambda_D^2 pour Debye).
-  /// kappa est DIAGONAL (lu en cellule), restreint par moyenne aux niveaux grossiers. GeometricMG seul.
+  /// Installs the reaction term kappa(x) (n*n row-major) on the GeometricMG: the operator becomes
+  /// div(eps grad phi) - kappa phi = f (screened Poisson / Helmholtz; kappa = 1/lambda_D^2 for Debye).
+  /// kappa is DIAGONAL (read at cell), restricted by averaging to the coarse levels. GeometricMG only.
   void apply_reaction_field() {
     GeometricMG& mg = std::get<GeometricMG>(*ell_);
     MultiFab kappa_fine(owner_->ba, owner_->dm, 1, 0);
     const int n = owner_->cfg.n;
-    // Remplissage LOCAL au rang proprietaire (cf. apply_epsilon_field) : iteration sur les fabs
-    // locaux (no-op sur un rang vide a np>1). mg.set_reaction est ensuite COLLECTIF.
+    // LOCAL filling on the owner rank (cf. apply_epsilon_field): iteration over the local fabs
+    // (no-op on an empty rank at np>1). mg.set_reaction is then COLLECTIVE.
     for (int li = 0; li < kappa_fine.local_size(); ++li) {
       Array4 k = kappa_fine.fab(li).array();
       const Box2D v = kappa_fine.box(li);
@@ -355,19 +355,19 @@ class SystemFieldSolver {
     }
     mg.set_reaction(kappa_fine);
   }
-  /// Second membre f du solveur elliptique cartesien actif (GeometricMG ou FFT), par std::visit.
+  /// Right-hand side f of the active cartesian elliptic solver (GeometricMG or FFT), via std::visit.
   MultiFab& ell_rhs() {
     return std::visit([](auto& e) -> MultiFab& { return e.rhs(); }, *ell_);
   }
-  /// Potentiel phi lu (et reecrit) par l'etage source condense. CARTESIEN : le phi du solveur
-  /// elliptique actif (GeometricMG/FFT, AVEC ghosts), BIT-IDENTIQUE. POLAIRE : un tampon dedie 1 ghost
-  /// (phi_src_polar_), alimente avec phi^n (= aux[0], pose par solve_fields_polar) au moment de l'appel
-  /// -- le PolarPoissonSolver direct n'a pas de ghosts, donc on ne peut pas exposer pell_->phi()
-  /// directement a un stepper qui fait fill_ghosts/apply_polar_tensor. Le stepper y ecrit phi^{n+1}
-  /// (warm start du pas suivant ; l'aux[0] sera de toute facon reecrit par le prochain solve_fields).
+  /// Potential phi read (and rewritten) by the condensed source stage. CARTESIAN: the phi of the active
+  /// elliptic solver (GeometricMG/FFT, WITH ghosts), BIT-IDENTICAL. POLAR: a dedicated 1-ghost buffer
+  /// (phi_src_polar_), fed with phi^n (= aux[0], set by solve_fields_polar) at call time
+  /// -- the direct PolarPoissonSolver has no ghosts, so we cannot expose pell_->phi()
+  /// directly to a stepper that does fill_ghosts/apply_polar_tensor. The stepper writes phi^{n+1} into it
+  /// (warm start of the next step; aux[0] will be rewritten anyway by the next solve_fields).
   MultiFab& ell_phi() {
     if (owner_->polar_) {
-      // Alloue paresseusement (1 ghost) sur le layout du System, puis copie phi^n depuis aux[0].
+      // Allocate lazily (1 ghost) on the System layout, then copy phi^n from aux[0].
       if (!phi_src_polar_) phi_src_polar_.emplace(owner_->ba, owner_->dm, 1, 1);
       for (int li = 0; li < phi_src_polar_->local_size(); ++li) {
         const ConstArray4 a = owner_->aux.fab(li).const_array();
@@ -380,73 +380,73 @@ class SystemFieldSolver {
     }
     return std::visit([](auto& e) -> MultiFab& { return e.phi(); }, *ell_);
   }
-  /// Resout le Poisson cartesien actif (GeometricMG V-cycle ou FFT directe). Pose les marqueurs de
-  /// trace ; le device_fence apres ell_solve est porte par l'APPELANT (solve_fields), pas ici.
+  /// Solves the active cartesian Poisson (GeometricMG V-cycle or direct FFT). Sets the trace
+  /// markers; the device_fence after ell_solve is carried by the CALLER (solve_fields), not here.
   void ell_solve() {
-    adc_sf_mark("ell_solve: avant std::visit");
+    adc_sf_mark("ell_solve: before std::visit");
     std::visit(
         [](auto& e) {
           using T = std::decay_t<decltype(e)>;
           if (adc_trace_sf())
-            adc_sf_mark(std::is_same_v<T, GeometricMG> ? "ell_solve: GeometricMG::solve() debut"
-                                                       : "ell_solve: PoissonFFTSolver::solve() debut");
+            adc_sf_mark(std::is_same_v<T, GeometricMG> ? "ell_solve: GeometricMG::solve() start"
+                                                       : "ell_solve: PoissonFFTSolver::solve() start");
           e.solve();
-          adc_sf_mark("ell_solve: solve() retour");
+          adc_sf_mark("ell_solve: solve() return");
         },
         *ell_);
-    adc_sf_mark("ell_solve: apres std::visit");
+    adc_sf_mark("ell_solve: after std::visit");
   }
 
-  // --- Poisson POLAIRE direct (PolarPoissonSolver) -------------------------
-  /// Construit PARESSEUSEMENT le Poisson POLAIRE direct (PolarPoissonSolver, mono-rang, box unique
-  /// couvrant l'anneau). La BC radiale vient de poisson_bc() (Foextrap -> Neumann homogene, paroi ; le
-  /// 'wall' cartesien circulaire n'a pas de sens sur un anneau global et n'est pas applique). theta est
-  /// PERIODIQUE (gere par la FFT-en-theta, aucune BC azimutale). ADDITIF : ne touche jamais ell_.
-  /// @throws std::runtime_error sur rhs/solver inconnu ou permittivite variable/aniso/reaction (non
-  /// supportee par le Poisson polaire direct).
+  // --- direct POLAR Poisson (PolarPoissonSolver) -------------------------
+  /// Builds the direct POLAR Poisson (PolarPoissonSolver, single-rank, single box covering
+  /// the ring) LAZILY. The radial BC comes from poisson_bc() (Foextrap -> homogeneous Neumann, wall; the
+  /// circular cartesian 'wall' makes no sense on a global ring and is not applied). theta is
+  /// PERIODIC (handled by the FFT-in-theta, no azimuthal BC). ADDITIVE: never touches ell_.
+  /// @throws std::runtime_error on unknown rhs/solver or variable/aniso/reaction permittivity (unsupported
+  /// by the direct polar Poisson).
   void ensure_elliptic_polar() {
     if (pell_) return;
     if (p_rhs != "charge_density" && p_rhs != "composite")
-      throw std::runtime_error("System::set_poisson (polaire) : rhs '" + p_rhs +
-                               "' inconnu (charge_density|composite)");
+      throw std::runtime_error("System::set_poisson (polar): unknown rhs '" + p_rhs +
+                               "' (charge_density|composite)");
     if (p_solver != "geometric_mg" && p_solver != "polar")
       throw std::runtime_error(
-          "System::set_poisson (polaire) : solver '" + p_solver +
-          "' non supporte sur un anneau ; le Poisson polaire est direct (FFT-en-theta + tridiag-en-r). "
-          "Laisser le defaut ('geometric_mg') ou demander 'polar'.");
+          "System::set_poisson (polar): solver '" + p_solver +
+          "' unsupported on a ring; the polar Poisson is direct (FFT-in-theta + tridiag-in-r). "
+          "Leave the default ('geometric_mg') or request 'polar'.");
     if (has_eps_field_ || has_eps_xy_field_ || has_kappa_field_)
       throw std::runtime_error(
-          "System::set_poisson (polaire) : permittivite variable / anisotrope / reaction non supportee "
-          "par le Poisson polaire direct (Phase 2b ; operateur (1/r) d_r(r d_r) + (1/r^2) d_theta^2)");
-    // GARDE MULTI-BOX (ADC-67) : le Poisson polaire DIRECT (FFT-en-theta + tridiag-en-r) exige des
-    // LIGNES theta et des COLONNES radiales completes sur UNE box (PolarPoissonSolver rejette deja
-    // ba.size()!=1). On leve ICI un message AMONT clair -- avant la construction du solveur, donc des le
-    // 1er solve_fields / potential / set_potential d'un System a theta_boxes > 1 -- plutot que de laisser
-    // remonter le rejet bas niveau de PolarPoissonSolver. Le DECOUPAGE theta (theta_boxes > 1) ne sert
-    // qu'au TRANSPORT ; pour un champ electrostatique multi-box, passer par l'etage Schur tensoriel.
+          "System::set_poisson (polar): variable / anisotropic permittivity / reaction unsupported "
+          "by the direct polar Poisson (Phase 2b; operator (1/r) d_r(r d_r) + (1/r^2) d_theta^2)");
+    // MULTI-BOX GUARD (ADC-67): the DIRECT polar Poisson (FFT-in-theta + tridiag-in-r) requires
+    // complete theta ROWS and radial COLUMNS on ONE box (PolarPoissonSolver already rejects
+    // ba.size()!=1). We raise a clear UPSTREAM message HERE -- before the construction of the solver, so from the
+    // 1st solve_fields / potential / set_potential of a System with theta_boxes > 1 -- rather than letting
+    // the low-level rejection of PolarPoissonSolver bubble up. The theta SPLITTING (theta_boxes > 1) only serves
+    // the TRANSPORT; for a multi-box electrostatic field, go through the tensor Schur stage.
     if (owner_->ba.size() != 1)
       throw std::runtime_error(
-          "System : Poisson polaire DIRECT incompatible avec le decoupage theta (theta_boxes=" +
+          "System: DIRECT polar Poisson incompatible with the theta splitting (theta_boxes=" +
           std::to_string(owner_->ba.size()) +
-          " boites) ; il exige une grille mono-box (theta_boxes=1). Pour un decoupage theta multi-box, "
-          "utiliser l'etage Schur tensoriel polaire (adc.Split + adc.CondensedSchur), multi-box, ou "
-          "revenir a theta_boxes=1.");
-    // BC radiale : Dirichlet/Neumann depuis poisson_bc() (xlo/xhi). theta toujours periodique.
+          " boxes); it requires a single-box grid (theta_boxes=1). For a multi-box theta splitting, "
+          "use the polar tensor Schur stage (adc.Split + adc.CondensedSchur), multi-box, or "
+          "go back to theta_boxes=1.");
+    // Radial BC: Dirichlet/Neumann from poisson_bc() (xlo/xhi). theta always periodic.
     const BCRec pbc = poisson_bc();
     pell_.emplace(owner_->pgeom_, owner_->ba, pbc);
   }
 
-  /// solve_fields POLAIRE : assemble f = Sum_s elliptic_rhs_s(U_s) (boucle hote par cellule), resout le
-  /// Poisson polaire, puis DERIVE l'aux en base locale (e_r, e_theta) :
-  ///   aux[0] = phi ;  aux[1] = grad_r = d phi/dr ;  aux[2] = grad_theta = (1/r) d phi/d theta.
-  /// C'est la disposition attendue par ExBVelocityPolar (v_r = -grad_theta/B, v_theta = grad_r/B).
+  /// POLAR solve_fields: assembles f = Sum_s elliptic_rhs_s(U_s) (host loop per cell), solves the
+  /// polar Poisson, then DERIVES the aux in the local basis (e_r, e_theta):
+  ///   aux[0] = phi;  aux[1] = grad_r = d phi/dr;  aux[2] = grad_theta = (1/r) d phi/d theta.
+  /// This is the layout expected by ExBVelocityPolar (v_r = -grad_theta/B, v_theta = grad_r/B).
   void solve_fields_polar() {
     ensure_elliptic_polar();
     MultiFab& rhs = pell_->rhs();
     rhs.set_val(Real(0));
     for (auto& s : owner_->sp) s.add_poisson_rhs(s.U, rhs);
-    // Permittivite CONSTANTE eps != 1 : lap phi = f/eps (mise a l'echelle 1/eps du rhs), comme le
-    // cartesien. (eps(x) variable/aniso est refuse par ensure_elliptic_polar.)
+    // CONSTANT permittivity eps != 1: lap phi = f/eps (1/eps scaling of the rhs), like the
+    // cartesian. (variable/aniso eps(x) is refused by ensure_elliptic_polar.)
     if (p_eps_ != Real(1)) {
       const Real inv = Real(1) / p_eps_;
       for (int li = 0; li < rhs.local_size(); ++li) {
@@ -458,46 +458,46 @@ class SystemFieldSolver {
     }
     pell_->solve();
     device_fence();
-    // Derivation (phi, grad_r, grad_theta) en base locale (e_r, e_theta) via le MEME helper que le test
-    // C++ (derive_aux_polar de block_builder_polar.hpp). phi est SANS ghost (solveur direct mono-box) :
-    // le helper n'en lit donc jamais d'index hors domaine (radial DECENTRE aux parois, theta ENROULE en
-    // periodique) -- c'etait le bug : la difference centree lisait phi(lo-1)/phi(hi+1)/phi(.,jlo-1) hors
-    // allocation -> gradient parasite -> vitesse divergente -> nan.
+    // Derivation (phi, grad_r, grad_theta) in the local basis (e_r, e_theta) via the SAME helper as the C++
+    // test (derive_aux_polar of block_builder_polar.hpp). phi is WITHOUT ghost (direct single-box solver):
+    // the helper thus never reads an out-of-domain index (radial OFFSET at the walls, theta WRAPPED in
+    // periodic) -- that was the bug: the centered difference read phi(lo-1)/phi(hi+1)/phi(.,jlo-1) out of
+    // allocation -> spurious gradient -> divergent velocity -> nan.
     derive_aux_polar(pell_->phi(), owner_->aux, owner_->pgeom_);
-    apply_te();  // inerte en polaire ExB (aucun bloc fluide source de T_e), conserve par symetrie
-    // Ghosts de l'aux : theta PERIODIQUE (joint 0/2pi), r PHYSIQUE (extrapolation au bord). fill_ghosts
-    // route deja par bc_ (xlo/xhi Foextrap, ylo/yhi Periodic) -> halo azimutal periodique correct.
+    apply_te();  // inert in polar ExB (no fluid block source of T_e), kept by symmetry
+    // Aux ghosts: theta PERIODIC (joint 0/2pi), r PHYSICAL (extrapolation at the boundary). fill_ghosts
+    // already routes through bc_ (xlo/xhi Foextrap, ylo/yhi Periodic) -> correct periodic azimuthal halo.
     fill_ghosts(owner_->aux, owner_->dom, owner_->bc_);
   }
 
-  /// Resout le Poisson de systeme puis DERIVE l'aux = (phi, grad phi[, B_z, T_e]). Route vers
-  /// solve_fields_polar() en geometrie polaire. INVARIANT device : le device_fence() entre ell_solve()
-  /// et la derivation de grad phi DOIT rester atomique (sans lui le V-cycle GPU n'est pas termine quand
-  /// on lit phi) ; les boucles de derivation / peuplement iterent sur les fabs LOCAUX (MPI-safe).
+  /// Solves the system Poisson then DERIVES the aux = (phi, grad phi[, B_z, T_e]). Routes to
+  /// solve_fields_polar() in polar geometry. device INVARIANT: the device_fence() between ell_solve()
+  /// and the derivation of grad phi MUST stay atomic (without it the GPU V-cycle is not finished when
+  /// phi is read); the derivation / population loops iterate over the LOCAL fabs (MPI-safe).
   void solve_fields() {
-    if (owner_->polar_) return solve_fields_polar();  // anneau : Poisson polaire + aux en base locale (e_r, e_theta)
-    adc_sf_mark("solve_fields: debut");
+    if (owner_->polar_) return solve_fields_polar();  // ring: polar Poisson + aux in local basis (e_r, e_theta)
+    adc_sf_mark("solve_fields: start");
     ensure_elliptic();
-    adc_sf_mark("solve_fields: apres ensure_elliptic");
-    // POLITIQUE DE GAUSS (R0) : "restart" (defaut, gauss_evolve_==false) re-resout -Delta phi = f a
-    // CHAQUE appel (bit-identique a l'historique). "evolve" : apres le PREMIER solve (phi^0), on SAUTE
-    // l'assemblage du RHS + le solve elliptique -> ell_phi() conserve le phi courant (celui que l'etage
-    // source Schur fait evoluer in-place), reproduisant l'evolution -Delta phi sans restart du papier.
-    // La derivation de l'aux (phi, grad phi) ci-dessous tourne TOUJOURS, sur le phi courant.
+    adc_sf_mark("solve_fields: after ensure_elliptic");
+    // GAUSS POLICY (R0): "restart" (default, gauss_evolve_==false) re-solves -Delta phi = f on
+    // EVERY call (bit-identical to history). "evolve": after the FIRST solve (phi^0), we SKIP
+    // the RHS assembly + the elliptic solve -> ell_phi() keeps the current phi (the one that the
+    // Schur source stage evolves in-place), reproducing the -Delta phi evolution without restart of the paper.
+    // The derivation of the aux (phi, grad phi) below ALWAYS runs, on the current phi.
     if (!(gauss_evolve_ && gauss_solved_once_)) {
       MultiFab& rhs = ell_rhs();
       rhs.set_val(Real(0));
-      adc_sf_mark("solve_fields: apres rhs.set_val(0)");
-      // f = Sum_s elliptic_rhs_s(U_s) sur l'etat COURANT de chaque bloc. STRIDE : un bloc de cadence M
-      // est tenu (hold-then-catch-up) entre deux rattrapages, donc U_s y reste FIGE a sa derniere avance ;
-      // sa densite / charge entre dans cette somme avec un etat PERIME jusqu'a son prochain rattrapage
-      // (couplage Poisson lache du bloc lent, assume par le choix du stride).
+      adc_sf_mark("solve_fields: after rhs.set_val(0)");
+      // f = Sum_s elliptic_rhs_s(U_s) on the CURRENT state of each block. STRIDE: a block of cadence M
+      // is held (hold-then-catch-up) between two catch-ups, so U_s stays FROZEN there at its last advance;
+      // its density / charge enters this sum with a STALE state until its next catch-up
+      // (loose Poisson coupling of the slow block, assumed by the stride choice).
       for (auto& s : owner_->sp) s.add_poisson_rhs(s.U, rhs);
-      adc_sf_mark("solve_fields: apres add_poisson_rhs");
-      // Permittivite CONSTANTE : div(eps grad phi) = f <=> lap phi = f/eps, donc on met le rhs a
-      // l'echelle 1/eps. Avec un champ eps(x) VARIABLE ou ANISOTROPE on NE le fait PAS : l'operateur
-      // GeometricMG porte eps directement (apply_epsilon_field / apply_epsilon_anisotropic_field), le
-      // rhs reste f tel quel.
+      adc_sf_mark("solve_fields: after add_poisson_rhs");
+      // CONSTANT permittivity: div(eps grad phi) = f <=> lap phi = f/eps, so we scale the rhs by
+      // 1/eps. With a VARIABLE or ANISOTROPIC eps(x) field we DO NOT do it: the GeometricMG
+      // operator carries eps directly (apply_epsilon_field / apply_epsilon_anisotropic_field), the
+      // rhs stays f as is.
       if (!has_eps_field_ && !has_eps_xy_field_ && p_eps_ != Real(1)) {
         const Real inv = Real(1) / p_eps_;
         for (int li = 0; li < rhs.local_size(); ++li) {
@@ -507,20 +507,20 @@ class SystemFieldSolver {
             for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
         }
       }
-      adc_sf_mark("solve_fields: avant ell_solve");
+      adc_sf_mark("solve_fields: before ell_solve");
       ell_solve();
       gauss_solved_once_ = true;
-      adc_sf_mark("solve_fields: apres ell_solve, avant device_fence");
+      adc_sf_mark("solve_fields: after ell_solve, before device_fence");
     }
     device_fence();
-    adc_sf_mark("solve_fields: apres device_fence (derivation aux)");
+    adc_sf_mark("solve_fields: after device_fence (aux derivation)");
     const Real dx = owner_->geom.dx(), dy = owner_->geom.dy();
-    // Derivation par cellule (phi, grad phi) -> canal aux : LOCALE au rang proprietaire. System
-    // repartit UNE box (round-robin DistributionMapping(1, n_ranks())), donc a np>1 un seul rang la
-    // possede ; les autres ont local_size()==0 et N'ONT PAS de fab a deriver. On itere sur les fabs
-    // LOCAUX (jamais fab(0) en dur) : no-op sur un rang vide, identique a avant sur le proprietaire
-    // (boucle executee une fois, bit-identique a np=1). ell_phi() et aux partagent la meme
-    // DistributionMapping -> meme indexation locale.
+    // Per-cell derivation (phi, grad phi) -> aux channel: LOCAL to the owner rank. System
+    // distributes ONE box (round-robin DistributionMapping(1, n_ranks())), so at np>1 a single rank
+    // owns it; the others have local_size()==0 and HAVE NO fab to derive. We iterate over the LOCAL
+    // fabs (never fab(0) hardcoded): no-op on an empty rank, identical to before on the owner
+    // (loop executed once, bit-identical to np=1). ell_phi() and aux share the same
+    // DistributionMapping -> same local indexing.
     MultiFab& phi_mf = ell_phi();
     for (int li = 0; li < owner_->aux.local_size(); ++li) {
       const ConstArray4 p = phi_mf.fab(li).const_array();
@@ -533,14 +533,14 @@ class SystemFieldSolver {
           a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) / (2 * dy);
         }
     }
-    adc_sf_mark("solve_fields: apres derivation aux (phi, grad phi)");
-    apply_te();  // T_e = p/rho du bloc fluide source, recalculee a chaque solve (B_z, comp 3, preservee)
-    adc_sf_mark("solve_fields: apres apply_te");
+    adc_sf_mark("solve_fields: after aux derivation (phi, grad phi)");
+    apply_te();  // T_e = p/rho of the fluid block source, recomputed on each solve (B_z, comp 3, preserved)
+    adc_sf_mark("solve_fields: after apply_te");
     if (owner_->periodic_)
       fill_boundary(owner_->aux, owner_->dom, owner_->per_);
     else
-      fill_ghosts(owner_->aux, owner_->dom, owner_->bc_);  // extrapolation au bord (paroi / sortie libre)
-    adc_sf_mark("solve_fields: fin (fill ghosts aux)");
+      fill_ghosts(owner_->aux, owner_->dom, owner_->bc_);  // extrapolation at the boundary (wall / free outflow)
+    adc_sf_mark("solve_fields: end (fill ghosts aux)");
   }
 
  private:

@@ -1,32 +1,32 @@
 #pragma once
 
-#include <adc/amr/regrid.hpp>   // tag_cells, grow_tags (tags par bloc + phi pour le regrid d'union)
-#include <adc/amr/tag_box.hpp>  // TagBox, tag_union (OU cellule a cellule des tags de tous les blocs)
+#include <adc/amr/regrid.hpp>   // tag_cells, grow_tags (per-block tags + phi for the union regrid)
+#include <adc/amr/tag_box.hpp>  // TagBox, tag_union (cell-by-cell OR of the tags of all blocks)
 #include <adc/core/state.hpp>  // kAuxBaseComps
-#include <adc/core/variables.hpp>  // VariableSet, VariableRole, role_from_name (role -> composante des sources couplees)
-#include <adc/coupling/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb (injection aux coarse->fine)
-#include <adc/coupling/amr_regrid_coupler.hpp>  // regrid_compute_fine_layout + regrid_field_on_layout (briques scindees)
-#include <adc/coupling/amr_system_coupler.hpp>  // detail::same_layout_or_throw (garde de layout partage)
-#include <adc/coupling/aux_fill.hpp>        // detail::derive_aux_bc (CL du canal aux)
-#include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel + CsProgram (ABI plate, bytecode P5)
+#include <adc/core/variables.hpp>  // VariableSet, VariableRole, role_from_name (role -> component of coupled sources)
+#include <adc/coupling/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb (aux injection coarse->fine)
+#include <adc/coupling/amr_regrid_coupler.hpp>  // regrid_compute_fine_layout + regrid_field_on_layout (split bricks)
+#include <adc/coupling/amr_system_coupler.hpp>  // detail::same_layout_or_throw (shared-layout guard)
+#include <adc/coupling/aux_fill.hpp>        // detail::derive_aux_bc (BC of the aux channel)
+#include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel + CsProgram (flat ABI, P5 bytecode)
 #include <adc/numerics/elliptic/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, mf_average_down_mb
-#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonReport (diagnostics IMEX OPT-IN, agrege par bloc)
+#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonReport (OPT-IN IMEX diagnostics, aggregated per block)
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
-#include <adc/mesh/patch_box.hpp>  // PatchBox : empreinte index-space d'un patch fin (patch_boxes())
+#include <adc/mesh/patch_box.hpp>  // PatchBox: index-space signature of a fine patch (patch_boxes())
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fill_boundary.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 
-#include <algorithm>  // std::max (pas CFL substeps/stride-aware)
-#include <cmath>      // std::isfinite (rejet d'un dt degenere)
+#include <algorithm>  // std::max (substeps/stride-aware CFL step)
+#include <cmath>      // std::isfinite (reject a degenerate dt)
 #include <cstddef>
 #include <functional>
-#include <limits>     // std::numeric_limits (dt initial = +inf, min sur les blocs)
+#include <limits>     // std::numeric_limits (initial dt = +inf, min over the blocks)
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -34,187 +34,189 @@
 #include <vector>
 
 /// @file
-/// @brief Moteur multi-blocs AMR a l'EXECUTION (registre type-erase par nom).
+/// @brief AMR multi-block engine at RUNTIME (type-erased registry keyed by name).
 ///
-/// Pendant raffine de System::Impl (python/system.cpp) : la ou System type-erase les especes
-/// (struct Species) sur une grille MONO-NIVEAU, AmrRuntime type-erase N blocs sur une hierarchie
-/// AMR PARTAGEE. Il reproduit FIDELEMENT l'algorithme de AmrSystemCoupler::solve_fields / step
-/// (include/adc/coupling/amr_system_coupler.hpp), mais sur des fermetures type-erasees (le facade
-/// runtime ne connait pas les types Model/Limiter/Flux des blocs a la compilation) plutot que sur
-/// un CoupledSystem<Blocks...> compile-time.
+/// Runtime counterpart of System::Impl (python/system.cpp): where System type-erases the species
+/// (struct Species) on a SINGLE-LEVEL grid, AmrRuntime type-erases N blocks on a SHARED AMR
+/// hierarchy. It FAITHFULLY reproduces the AmrSystemCoupler::solve_fields / step algorithm
+/// (include/adc/coupling/amr_system_coupler.hpp), but over type-erased closures (the runtime facade
+/// does not know the blocks' Model/Limiter/Flux types at compile time) rather than over a
+/// compile-time CoupledSystem<Blocks...>.
 ///
-/// INVARIANTS (capstone multi-blocs, docs/AMR_MULTIBLOCK_DESIGN.md) :
-///  - UNE seule hierarchie AMR partagee (AmrHierarchyLayout, garde same_layout_or_throw) : tous les
-///    blocs vivent sur EXACTEMENT le meme BoxArray + DistributionMapping + dx/dy par niveau ;
-///  - TOUS les blocs vivent sur TOUS les patchs (jamais d'absence spatiale locale d'un bloc) ;
-///  - Poisson de SYSTEME a second membre SOMME et CO-LOCALISE : rhs[grossier] = Sum_b
-///    elliptic_rhs_b(U_b) lu aux MEMES cellules du grossier partage ;
-///  - aux PARTAGE par niveau (phi, grad phi) ; un seul solve Poisson grossier puis injection
-///    coarse->fine (coupler_inject_aux_mb), exactement comme AmrSystemCoupler ;
-///  - conservation PAR BLOC (reflux + average_down du moteur AMR, dans la fermeture advance).
+/// INVARIANTS (multi-block capstone, docs/AMR_MULTIBLOCK_DESIGN.md):
+///  - ONE single shared AMR hierarchy (AmrHierarchyLayout, same_layout_or_throw guard): all
+///    blocks live on EXACTLY the same BoxArray + DistributionMapping + dx/dy per level;
+///  - ALL blocks live on ALL patches (never a local spatial absence of a block);
+///  - SYSTEM Poisson with a SUMMED and CO-LOCATED right-hand side: rhs[coarse] = Sum_b
+///    elliptic_rhs_b(U_b) read at the SAME cells of the shared coarse;
+///  - aux SHARED per level (phi, grad phi); a single coarse Poisson solve then coarse->fine
+///    injection (coupler_inject_aux_mb), exactly like AmrSystemCoupler;
+///  - PER-BLOCK conservation (reflux + average_down of the AMR engine, in the advance closure).
 ///
-/// PERIMETRE (capstone). On porte des blocs a schemas spatiaux potentiellement DIFFERENTS sur la
-/// hierarchie FIGEE (pas de regrid : AmrSystemCoupler n'en a pas), avec le MULTIRATE par bloc :
-/// substeps (sous-pas explicites) et stride (cadence hold-then-catch-up), honores dans step() en
-/// mirroir de AmrSystemCoupler::step (#140). Le TRAITEMENT TEMPOREL est PAR BLOC : explicite (source
-/// en Euler avant, portee par le pas AMR) OU IMEX (source raide traitee en IMPLICITE par
-/// backward_euler_source, le transport restant explicite ; capstone vii), selectionne dans step().
+/// SCOPE (capstone). We carry blocks with potentially DIFFERENT spatial schemes over the FROZEN
+/// hierarchy (no regrid: AmrSystemCoupler has none), with per-block MULTIRATE: substeps (explicit
+/// substeps) and stride (hold-then-catch-up cadence), honored in step() mirroring
+/// AmrSystemCoupler::step (#140). The TEMPORAL TREATMENT is PER BLOCK: explicit (forward-Euler
+/// source, carried by the AMR step) OR IMEX (stiff source treated IMPLICITLY by
+/// backward_euler_source, transport staying explicit; capstone vii), selected in step().
 ///
-/// SEMANTIQUE IMEX SOUS substeps (decision d'integration, suite revue #184). A substeps=1 ET stride=1
-/// la branche IMEX du runtime COINCIDE avec la branche IMEX du moteur compile-time AmrSystemCoupler::step
-/// (un transport SOURCE-FREE + un backward_euler_source sur le pas effectif). POUR substeps>1 les deux
-/// chemins DIVERGENT DELIBEREMENT :
-///   - le moteur COMPILE-TIME IGNORE substeps sur la branche IMEX : il fait UN seul transport source-free
-///     puis UN seul implicit_advance sur tout le pas effectif bdt (cf. amr_system_coupler.hpp : la boucle
-///     de sous-pas n'existe que dans la branche Explicit) ;
-///   - le RUNTIME SOUS-CYCLE le splitting IMEX : il applique imex_advance K=substeps fois, chacune sur
-///     bdt/K, soit K pas de Lie [transport(dt/K) ; source implicite(dt/K)].
-/// Ce choix est ASSUME et SAIN (ce n'est PAS un bug) : (a) le transport explicite source-free devient
-/// PLUS SUR EN CFL (chaque sous-pas porte dt/K, donc une vitesse d'onde K fois plus grande reste
-/// admissible) ; (b) le backward-Euler est INCONDITIONNELLEMENT STABLE quel que soit le pas, donc le
-/// sous-cyclage ne destabilise jamais la source ; (c) raffiner le pas du backward-Euler RAPPROCHE la
-/// relaxation raide de sa trajectoire continue (erreur de splitting et erreur temporelle implicite en
-/// O(dt) toutes deux reduites). Le runtime ne mirroite donc PAS le compile-time bit-a-bit des que
-/// substeps>1 ; il honore substeps de facon COHERENTE avec la branche explicite (meme decoupage en K
-/// sous-pas egaux), ce qui est le comportement attendu d'un utilisateur reglant substeps. Verrou de
-/// non-regression : test_amr_multiblock_imex compare une trajectoire substeps=4 a substeps=1 et exige
-/// qu'elles DIFFERENT (le sous-cyclage est intentionnel, pas accidentel).
+/// IMEX SEMANTICS UNDER substeps (integration decision, follow-up review #184). At substeps=1 AND
+/// stride=1 the runtime IMEX branch COINCIDES with the IMEX branch of the compile-time engine
+/// AmrSystemCoupler::step (a SOURCE-FREE transport + a backward_euler_source over the effective step).
+/// FOR substeps>1 the two paths DIVERGE DELIBERATELY:
+///   - the COMPILE-TIME engine IGNORES substeps on the IMEX branch: it does ONE single source-free
+///     transport then ONE single implicit_advance over the whole effective step bdt (cf.
+///     amr_system_coupler.hpp: the substep loop exists only in the Explicit branch);
+///   - the RUNTIME SUB-CYCLES the IMEX splitting: it applies imex_advance K=substeps times, each over
+///     bdt/K, i.e. K Lie steps [transport(dt/K); implicit source(dt/K)].
+/// This choice is INTENTIONAL and SOUND (it is NOT a bug): (a) the source-free explicit transport
+/// becomes SAFER in CFL (each substep carries dt/K, so a wave speed K times larger stays
+/// admissible); (b) backward-Euler is UNCONDITIONALLY STABLE whatever the step, so sub-cycling never
+/// destabilizes the source; (c) refining the backward-Euler step BRINGS the stiff relaxation CLOSER
+/// to its continuous trajectory (splitting error and implicit temporal error both O(dt), both
+/// reduced). The runtime thus does NOT mirror the compile-time bit-for-bit once substeps>1; it
+/// honors substeps CONSISTENTLY with the explicit branch (same split into K equal substeps), which is
+/// the behavior expected by a user setting substeps. Non-regression guard:
+/// test_amr_multiblock_imex compares a substeps=4 trajectory to substeps=1 and requires them to
+/// DIFFER (the sub-cycling is intentional, not accidental).
 ///
-/// Le regrid d'union des tags et le DSL production multi-bloc compile restent des PR ULTERIEURES. Le
-/// facade runtime (AmrSystem) REFUSE explicitement multi-blocs + regrid_every > 0 tant que le regrid
-/// d'union n'existe pas.
+/// The union-tags regrid and the compiled multi-block production DSL remain LATER PRs. The runtime
+/// facade (AmrSystem) explicitly REFUSES multi-block + regrid_every > 0 as long as the union regrid
+/// does not exist.
 
 namespace adc {
 
-/// Fermetures type-erasees d'UN bloc AMR, posees sur la hierarchie partagee. Calque AMR de la
-/// struct Species de System::Impl : un nom + sa pile de niveaux (sur le layout partage) + ses
-/// fermetures (advance / elliptic-rhs / max_speed / mass / density). Les fermetures capturent le
-/// Model/Limiter/Flux CONCRETS du bloc (resolus au build) : le noyau reste COMPILE, seule la liste
-/// de blocs est type-erasee. Produites par detail::build_amr_block (amr_dsl_block.hpp).
+/// Type-erased closures of ONE AMR block, placed on the shared hierarchy. AMR counterpart of the
+/// Species struct of System::Impl: a name + its level stack (on the shared layout) + its closures
+/// (advance / elliptic-rhs / max_speed / mass / density). The closures capture the CONCRETE
+/// Model/Limiter/Flux of the block (resolved at build): the kernel stays COMPILED, only the block
+/// list is type-erased. Produced by detail::build_amr_block (amr_dsl_block.hpp).
 struct AmrRuntimeBlock {
   std::string name;
   int ncomp = 1;
   double gamma = 1.4;
-  /// Sous-pas EXPLICITES du bloc dans SON macro-pas effectif : le pas effectif (stride * dt) est
-  /// decoupe en substeps morceaux egaux et chaque morceau est avance par UN advance_amr (cf.
-  /// AmrRuntime::step). substeps=1 => un seul advance_amr de tout le pas effectif (bit-identique).
+  /// EXPLICIT substeps of the block within ITS effective macro-step: the effective step (stride * dt)
+  /// is split into substeps equal pieces and each piece is advanced by ONE advance_amr (cf.
+  /// AmrRuntime::step). substeps=1 => a single advance_amr over the whole effective step (bit-identical).
   int substeps = 1;
-  /// Cadence HOLD-THEN-CATCH-UP du bloc (multirate). stride=1 (defaut) : le bloc avance a CHAQUE
-  /// macro-pas (bit-identique). stride=M>1 : le bloc est TENU aux macro-pas 0..M-2 (non avance) puis
-  /// RATTRAPE au macro-pas M-1, ou (macro_step+1)%M==0, d'un pas effectif M*dt. Memes semantiques que
-  /// block_stride_v / AmrSystemCoupler::step (#140). L'INVARIANT du rattrapage en FIN de fenetre :
-  /// au macro-pas k le temps systeme est (k+1)*dt et le bloc qui rattrape a alors cumule (k+1)*dt, il
-  /// reste donc temporellement COHERENT avec les blocs rapides (jamais "dans le futur"), ce qui garde
-  /// le couplage Poisson (RHS somme) sense : un bloc tenu y contribue avec son etat FIGE (sa derniere
-  /// avance), pas avec un etat anticipe qui fausserait q_b n_b dans la somme.
+  /// HOLD-THEN-CATCH-UP cadence of the block (multirate). stride=1 (default): the block advances at
+  /// EVERY macro-step (bit-identical). stride=M>1: the block is HELD at macro-steps 0..M-2 (not
+  /// advanced) then CATCHES UP at macro-step M-1, where (macro_step+1)%M==0, by an effective step
+  /// M*dt. Same semantics as block_stride_v / AmrSystemCoupler::step (#140). The INVARIANT of the
+  /// end-of-window catch-up: at macro-step k the system time is (k+1)*dt and the block that catches
+  /// up has then accumulated (k+1)*dt, so it stays temporally CONSISTENT with the fast blocks (never
+  /// "in the future"), which keeps the Poisson coupling (summed RHS) meaningful: a held block
+  /// contributes with its FROZEN state (its last advance), not with an anticipated state that would
+  /// falsify q_b n_b in the sum.
   int stride = 1;
-  /// Largeur du canal aux LUE par le modele du bloc (aux_comps<Model>() ; >= kAuxBaseComps). Le
-  /// canal aux PARTAGE par niveau est dimensionne au MAX de cette largeur sur tous les blocs, pour
-  /// qu'un bloc lisant un champ extra (B_z, T_e ; n_aux > 3) ne lise jamais hors borne.
+  /// Width of the aux channel READ by the block model (aux_comps<Model>(); >= kAuxBaseComps). The aux
+  /// channel SHARED per level is sized to the MAX of this width over all blocks, so that a block
+  /// reading an extra field (B_z, T_e; n_aux > 3) never reads out of bounds.
   int aux_ncomp = kAuxBaseComps;
 
-  /// Descripteur des variables CONSERVATIVES du modele (noms + ROLES physiques, Model::conservative_vars()).
-  /// Source unique de verite pour resoudre un role (Density, MomentumX, ...) -> indice de composante dans
-  /// add_coupled_source, comme System::add_coupled_source lit Species::cons_vars. La resolution est STRICTE
-  /// (#181) : si le bloc n'expose PAS le role canonique demande (index_of < 0), add_coupled_source LEVE au
-  /// lieu de retomber sur la composante 0 (un repli silencieux appliquerait la source au mauvais champ).
+  /// Descriptor of the model CONSERVATIVE variables (names + physical ROLES, Model::conservative_vars()).
+  /// Single source of truth to resolve a role (Density, MomentumX, ...) -> component index in
+  /// add_coupled_source, like System::add_coupled_source reads Species::cons_vars. The resolution is
+  /// STRICT (#181): if the block does NOT expose the requested canonical role (index_of < 0),
+  /// add_coupled_source THROWS instead of falling back to component 0 (a silent fallback would apply
+  /// the source to the wrong field).
   VariableSet cons_vars;
 
-  /// Pile de niveaux du bloc (niveau 0 = grossier, > 0 = patchs fins), SUR le layout partage. Le
-  /// pointeur aux de chaque AmrLevelMP est (re)cable par AmrRuntime vers l'aux PARTAGE du niveau.
-  /// shared_ptr : AmrRuntimeBlock reste MOVABLE (un std::vector<AmrLevelMP> est lourd a deplacer
-  /// dans un std::function, et le ctor du moteur a besoin d'une adresse stable pour les fermetures).
+  /// Level stack of the block (level 0 = coarse, > 0 = fine patches), ON the shared layout. The aux
+  /// pointer of each AmrLevelMP is (re)wired by AmrRuntime to the SHARED aux of the level. shared_ptr:
+  /// AmrRuntimeBlock stays MOVABLE (a std::vector<AmrLevelMP> is heavy to move into a std::function,
+  /// and the engine ctor needs a stable address for the closures).
   std::shared_ptr<std::vector<AmrLevelMP>> levels;
 
-  /// Avance le bloc d'UN sous-pas de taille dt : transport AMR (Berger-Oliger + reflux +
-  /// average_down conservatifs) sur la pile de niveaux du bloc, avec SON schema spatial (Limiter,
-  /// Flux). Capture advance_amr<Limiter, Flux> sur le Model concret. La boucle de sous-pas et la
-  /// cadence stride sont portees par AmrRuntime::step (pendant runtime de AmrSystemCoupler::step) :
-  /// la fermeture fait UN advance_amr, le moteur l'appelle substeps fois (dt = pas effectif/substeps).
-  /// La signature passe le domaine de base + periodicite + politique d'ownership grossier, recables
-  /// par le moteur.
+  /// Advances the block by ONE substep of size dt: AMR transport (Berger-Oliger + conservative reflux
+  /// + average_down) over the block level stack, with ITS spatial scheme (Limiter, Flux). Captures
+  /// advance_amr<Limiter, Flux> on the concrete Model. The substep loop and the stride cadence are
+  /// carried by AmrRuntime::step (runtime counterpart of AmrSystemCoupler::step): the closure does ONE
+  /// advance_amr, the engine calls it substeps times (dt = effective step/substeps). The signature
+  /// passes the base domain + periodicity + coarse ownership policy, rewired by the engine.
   std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> advance;
 
-  /// TRAITEMENT TEMPOREL du bloc : false (defaut) = EXPLICITE (source en Euler avant, dans advance) ;
-  /// true = IMEX (source raide traitee en IMPLICITE par backward_euler_source). Le facade (AmrSystem)
-  /// le fige depuis time="imex". Selectionne EXPLICITEMENT dans AmrRuntime::step (pendant runtime du
-  /// branchement constexpr block_time_treatment_v de AmrSystemCoupler::step) : un bloc explicite passe
-  /// par advance, un bloc IMEX par imex_advance. false partout -> trajectoire bit-identique a l'historique.
+  /// TEMPORAL TREATMENT of the block: false (default) = EXPLICIT (forward-Euler source, in advance);
+  /// true = IMEX (stiff source treated IMPLICITLY by backward_euler_source). The facade (AmrSystem)
+  /// freezes it from time="imex". Selected EXPLICITLY in AmrRuntime::step (runtime counterpart of the
+  /// constexpr block_time_treatment_v dispatch of AmrSystemCoupler::step): an explicit block goes
+  /// through advance, an IMEX block through imex_advance. false everywhere -> bit-identical trajectory
+  /// to the historical one.
   bool imex = false;
 
-  /// Avance IMEX du bloc d'UN sous-pas de taille dt : (1) TRANSPORT EXPLICITE sur le modele SOURCE-FREE
-  /// (-div F seul, SourceFreeModel<Model>) par le moteur AMR (Berger-Oliger + reflux + average_down
-  /// conservatifs), puis (2) SOURCE RAIDE IMPLICITE backward_euler_source A CHAQUE NIVEAU (Newton local,
-  /// jacobienne par differences finies ; masque implicite PORTE PAR LE BLOC pour l'IMEX partiel), suivie
-  /// d'une cascade fin -> grossier (mf_average_down_mb). UN appel = UN pas de Lie [transport ; source
-  /// implicite] sur dt. La SEMANTIQUE de ce splitting (transport source-free puis backward-Euler) calque
-  /// la branche IMEX de AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper) ; A substeps=1
-  /// elle lui est IDENTIQUE. Mais step() appelle CETTE fermeture substeps fois (sur dt = pas effectif /
-  /// substeps), donc pour substeps>1 le runtime SOUS-CYCLE le splitting IMEX la ou le compile-time
-  /// l'applique une seule fois sur tout le pas effectif : divergence ASSUMEE (cf. SEMANTIQUE IMEX SOUS
-  /// substeps, en-tete du fichier). Capture le Model/Limiter/Flux CONCRETS + le masque (build_amr_block) ;
-  /// le noyau reste COMPILE, seul le registre de blocs est type-erase. INVARIANT DE CONSERVATION (source
-  /// LOCALE) : la source est cellule-locale (hors flux de face), donc HORS des registres de reflux -> la
-  /// conservation aux interfaces grossier-fin reste intacte ; une cellule grossiere COUVERTE redevient la
-  /// moyenne 2x2 de ses enfants par la cascade finale (sinon le diagnostic de masse, somme du seul
-  /// grossier, compterait une source fantome). Vide pour un bloc explicite (imex == false) : step() ne
-  /// l'appelle jamais.
+  /// IMEX advance of the block by ONE substep of size dt: (1) EXPLICIT TRANSPORT on the SOURCE-FREE
+  /// model (-div F only, SourceFreeModel<Model>) by the AMR engine (Berger-Oliger + conservative
+  /// reflux + average_down), then (2) IMPLICIT STIFF SOURCE backward_euler_source AT EACH LEVEL (local
+  /// Newton, finite-difference jacobian; implicit mask CARRIED BY THE BLOCK for partial IMEX),
+  /// followed by a fine -> coarse cascade (mf_average_down_mb). ONE call = ONE Lie step [transport;
+  /// implicit source] over dt. The SEMANTICS of this splitting (source-free transport then
+  /// backward-Euler) mirror the IMEX branch of AmrSystemCoupler::step (SourceFreeModel +
+  /// AmrImplicitSourceStepper); at substeps=1 it is IDENTICAL to it. But step() calls THIS closure
+  /// substeps times (over dt = effective step / substeps), so for substeps>1 the runtime SUB-CYCLES the
+  /// IMEX splitting where the compile-time applies it once over the whole effective step: DIVERGENCE
+  /// INTENTIONAL (cf. IMEX SEMANTICS UNDER substeps, file header). Captures the CONCRETE
+  /// Model/Limiter/Flux + the mask (build_amr_block); the kernel stays COMPILED, only the block
+  /// registry is type-erased. CONSERVATION INVARIANT (LOCAL source): the source is cell-local (outside
+  /// face fluxes), so OUTSIDE the reflux registers -> conservation at coarse-fine interfaces stays
+  /// intact; a COVERED coarse cell becomes again the 2x2 average of its children through the final
+  /// cascade (otherwise the mass diagnostic, sum of the coarse only, would count a phantom source).
+  /// Empty for an explicit block (imex == false): step() never calls it.
   std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> imex_advance;
 
-  /// DIAGNOSTICS NEWTON (OPT-IN, vague 3 : pendant AMR de System::newton_report). false (defaut) ->
-  /// imex_advance passe report=nullptr a backward_euler_source : chemin RAPIDE bit-identique, aucune
-  /// allocation ni reduction supplementaire. true -> imex_advance passe @c newton_report.get() (adresse
-  /// STABLE car shared_ptr) au backward_euler_source de CHAQUE niveau ; le rapport AGREGE (max residu,
-  /// max iterations, somme des cellules en echec, all_reduce MPI) sur tous les niveaux ET tous les
-  /// sous-pas d'un macro-pas. AmrRuntime::step RESET le rapport en tete d'avance du bloc (parite avec
-  /// System::AdvanceImex qui reset en tete d'operator()). MULTI-BLOCS natif seulement (le mono-bloc
-  /// coupleur et les loaders .so le rejettent au build / a la facade). Adresse STABLE (shared_ptr) :
-  /// capturee par la fermeture imex_advance ET lue par AmrRuntime::newton_report.
+  /// NEWTON DIAGNOSTICS (OPT-IN, wave 3: AMR counterpart of System::newton_report). false (default) ->
+  /// imex_advance passes report=nullptr to backward_euler_source: FAST bit-identical path, no extra
+  /// allocation or reduction. true -> imex_advance passes @c newton_report.get() (STABLE address since
+  /// shared_ptr) to the backward_euler_source of EACH level; the report is AGGREGATED (max residual,
+  /// max iterations, sum of failed cells, MPI all_reduce) over all levels AND all substeps of a
+  /// macro-step. AmrRuntime::step RESETS the report at the head of the block advance (parity with
+  /// System::AdvanceImex which resets at the head of operator()). MULTI-BLOCK native only (the
+  /// single-block coupler and the .so loaders reject it at build / at the facade). STABLE address
+  /// (shared_ptr): captured by the imex_advance closure AND read by AmrRuntime::newton_report.
   bool newton_diagnostics = false;
   std::shared_ptr<NewtonReport> newton_report;
 
-  /// Contribution du bloc au second membre de Poisson : rhs += elliptic_rhs_b(U_b) sur le grossier.
-  /// CO-LOCALISE : la boucle lit U_b et ecrit rhs AUX MEMES cellules (meme BoxArray grossier
-  /// partage). La SOMME des contributions de tous les blocs forme le RHS du Poisson de systeme.
+  /// Contribution of the block to the Poisson right-hand side: rhs += elliptic_rhs_b(U_b) on the
+  /// coarse. CO-LOCATED: the loop reads U_b and writes rhs AT THE SAME cells (same shared coarse
+  /// BoxArray). The SUM of the contributions of all blocks forms the system Poisson RHS.
   std::function<void(const MultiFab&, MultiFab&)> add_elliptic_rhs;
 
-  /// Vitesse pilotant la CFL du bloc sur le grossier. Par defaut max_wave_speed (historique) ;
-  /// quand le modele declare le trait HasStabilitySpeed, c'est lambda* (stability_speed) que la
-  /// fermeture reduit -- MEME politique que System (make_max_speed), cf. build_amr_block.
+  /// Speed driving the block CFL on the coarse. By default max_wave_speed (historical); when the
+  /// model declares the HasStabilitySpeed trait, it is lambda* (stability_speed) that the closure
+  /// reduces -- SAME policy as System (make_max_speed), cf. build_amr_block.
   std::function<Real(const MultiFab&, const MultiFab&)> max_speed;
 
-  /// BORNES DE PAS OPTIONNELLES du bloc (StabilityPolicy AMR, audit 2026-06) : evaluees sur le
-  /// GROSSIER (niveau 0, la ou vit la CFL AMR -- cf. step_cfl : h = dx_coarse). VIDES (defaut) ->
-  /// step_cfl garde la borne transport seule, bit-identique. Remplies par build_amr_block /
-  /// build_amr_compiled quand le modele declare HasSourceFrequency / HasStabilityDt (memes
-  /// semantiques que System : mu en 1/s -> dt <= cfl*substeps/(stride*mu), sans h ; pas admissible
-  /// direct -> dt <= dt_adm*substeps/stride, sans cfl).
+  /// OPTIONAL STEP BOUNDS of the block (AMR StabilityPolicy, audit 2026-06): evaluated on the COARSE
+  /// (level 0, where the AMR CFL lives -- cf. step_cfl: h = dx_coarse). EMPTY (default) -> step_cfl
+  /// keeps the transport bound only, bit-identical. Filled by build_amr_block / build_amr_compiled when
+  /// the model declares HasSourceFrequency / HasStabilityDt (same semantics as System: mu in 1/s ->
+  /// dt <= cfl*substeps/(stride*mu), without h; direct admissible step -> dt <=
+  /// dt_adm*substeps/stride, without cfl).
   std::function<Real(const MultiFab&, const MultiFab&)> source_frequency;
   std::function<Real(const MultiFab&, const MultiFab&)> stability_dt;
 
-  /// Masse de la composante 0 du grossier du bloc (somme u*dV ; reduite cross-rang si reparti).
+  /// Mass of component 0 of the block coarse (sum u*dV; cross-rank reduced if distributed).
   std::function<Real()> mass;
 
-  /// Densite grossiere (composante 0) du bloc en champ n*n row-major global (diagnostic).
+  /// Coarse density (component 0) of the block as a global n*n row-major field (diagnostic).
   std::function<std::vector<double>()> density;
 
-  /// Potentiel grossier lu depuis l'aux partage (composante 0) en champ n*n row-major (diagnostic).
-  /// Identique pour tous les blocs (aux partage) ; porte par bloc pour la symetrie d'API.
+  /// Coarse potential read from the shared aux (component 0) as an n*n row-major field (diagnostic).
+  /// Identical for all blocks (shared aux); carried per block for API symmetry.
   std::function<std::vector<double>(const MultiFab&)> potential;
 };
 
-/// Moteur multi-blocs AMR a l'execution. Detient l'aux PARTAGE par niveau, le Poisson grossier
-/// (GeometricMG), la geometrie + CL, et le REGISTRE de blocs type-erases. Reproduit l'algorithme
-/// de AmrSystemCoupler (solve_fields + step) sur des fermetures plutot qu'un CoupledSystem.
+/// AMR multi-block engine at runtime. Owns the SHARED aux per level, the coarse Poisson
+/// (GeometricMG), the geometry + BC, and the type-erased block REGISTRY. Reproduces the
+/// AmrSystemCoupler algorithm (solve_fields + step) over closures rather than a CoupledSystem.
 class AmrRuntime {
  public:
-  /// @param geom        geometrie du niveau grossier (domaine + extents physiques).
-  /// @param ba_coarse   BoxArray du grossier (le Poisson grossier vit dessus).
-  /// @param bcPhi       CL du Poisson grossier.
-  /// @param blocks      registre des blocs (>= 1), tous sur le MEME layout (garde au ctor).
-  /// @param base_per    periodicite du domaine de base (transport).
-  /// @param replicated_coarse  ownership du niveau 0 (replique mono-box, ou reparti multi-box).
-  /// @param active      predicat paroi conductrice (passe au MG ; vide = aucune).
+  /// @param geom        geometry of the coarse level (domain + physical extents).
+  /// @param ba_coarse   BoxArray of the coarse (the coarse Poisson lives on it).
+  /// @param bcPhi       BC of the coarse Poisson.
+  /// @param blocks      block registry (>= 1), all on the SAME layout (guarded at the ctor).
+  /// @param base_per    periodicity of the base domain (transport).
+  /// @param replicated_coarse  ownership of level 0 (replicated single-box, or distributed multi-box).
+  /// @param active      conductive-wall predicate (passed to MG; empty = none).
   AmrRuntime(const Geometry& geom, const BoxArray& ba_coarse, const BCRec& bcPhi,
              std::vector<AmrRuntimeBlock> blocks, Periodicity base_per = Periodicity{true, true},
              bool replicated_coarse = true, std::function<bool(Real, Real)> active = {})
@@ -227,18 +229,18 @@ class AmrRuntime {
         mg_(geom, ba_coarse, bcPhi, std::move(active), replicated_coarse),
         blocks_(std::move(blocks)) {
     if (blocks_.empty())
-      throw std::runtime_error("AmrRuntime : au moins un bloc requis");
+      throw std::runtime_error("AmrRuntime : at least one block required");
     for (const auto& b : blocks_)
       if (!b.levels || b.levels->empty())
-        throw std::runtime_error("AmrRuntime : chaque bloc doit porter au moins un niveau "
-                                 "(grossier) sur le layout partage");
+        throw std::runtime_error("AmrRuntime : each block must carry at least one level "
+                                 "(coarse) on the shared layout");
     nlev_ = static_cast<int>(blocks_[0].levels->size());
 
-    // Coherence de layout EXACTE entre blocs (l'aux est partage par niveau) : meme nombre de
-    // niveaux, et par niveau meme BoxArray (boites ET ordre), meme DistributionMapping, meme
-    // dx/dy. MEME garde-fou que AmrSystemCoupler (detail::same_layout_or_throw) : tous les blocs
-    // vivent sur TOUS les patchs de l'UNIQUE hierarchie partagee. Un seul bloc concorde
-    // trivialement avec lui-meme (la boucle sur les autres blocs est vide).
+    // EXACT layout consistency between blocks (the aux is shared per level): same number of levels,
+    // and per level same BoxArray (boxes AND order), same DistributionMapping, same dx/dy. SAME guard
+    // as AmrSystemCoupler (detail::same_layout_or_throw): all blocks live on ALL patches of the
+    // UNIQUE shared hierarchy. A single block matches itself trivially (the loop over the other blocks
+    // is empty).
     {
       std::vector<std::vector<AmrLevelMP>> ref;
       ref.reserve(blocks_.size());
@@ -246,19 +248,19 @@ class AmrRuntime {
       detail::same_layout_or_throw(ref);
     }
 
-    // Largeur du canal aux PARTAGE : max des aux_comps des blocs (>= kAuxBaseComps). Calque de
-    // AmrSystemCoupler::system_aux_comps : un bloc lisant un champ extra (B_z, T_e) dispose de la
-    // place a chaque niveau, un bloc de base ignore les composantes extra. PR1 ne PEUPLE pas B_z
-    // multi-bloc (pas de bz_ ici), mais on dimensionne quand meme le canal au plus large pour que
-    // load_aux<aux_comps<Model>> ne lise jamais hors borne. Sans bloc a champ extra -> kAuxBaseComps
-    // (3) -> allocation strictement identique au cas de base.
+    // Width of the SHARED aux channel: max of the blocks' aux_comps (>= kAuxBaseComps). Counterpart of
+    // AmrSystemCoupler::system_aux_comps: a block reading an extra field (B_z, T_e) has the room at
+    // each level, a base block ignores the extra components. PR1 does not POPULATE multi-block B_z (no
+    // bz_ here), but we size the channel to the widest anyway so that load_aux<aux_comps<Model>> never
+    // reads out of bounds. Without an extra-field block -> kAuxBaseComps (3) -> allocation strictly
+    // identical to the base case.
     aux_ncomp_ = kAuxBaseComps;
     for (const auto& b : blocks_)
       if (b.aux_ncomp > aux_ncomp_) aux_ncomp_ = b.aux_ncomp;
 
-    // aux PARTAGE : un MultiFab (phi, grad phi) par niveau, sur la grille commune. Dimensionne une
-    // seule fois -> adresses stables pour les pointeurs aux des blocs. Le layout partage est celui
-    // du bloc 0 (garde same_layout_or_throw : identique pour tous).
+    // SHARED aux: one MultiFab (phi, grad phi) per level, on the common grid. Sized once -> stable
+    // addresses for the blocks' aux pointers. The shared layout is that of block 0
+    // (same_layout_or_throw guard: identical for all).
     aux_.resize(nlev_);
     const auto& L0 = *blocks_[0].levels;
     for (int k = 0; k < nlev_; ++k)
@@ -266,9 +268,9 @@ class AmrRuntime {
     for (auto& b : blocks_)
       for (int k = 0; k < nlev_; ++k) (*b.levels)[k].aux = &aux_[k];
 
-    // Predicats de tag du regrid d'union : un slot vide par bloc (set_block_tag_predicate les remplit).
-    // Vide par defaut -> aucun tag -> hierarchie figee (le regrid n'est de toute facon pas appele tant
-    // que set_regrid n'a pas active regrid_every_ > 0).
+    // Tag predicates of the union regrid: one empty slot per block (set_block_tag_predicate fills
+    // them). Empty by default -> no tag -> frozen hierarchy (regrid is not called anyway as long as
+    // set_regrid has not activated regrid_every_ > 0).
     block_tag_.resize(blocks_.size());
   }
 
@@ -276,9 +278,9 @@ class AmrRuntime {
   std::size_t n_blocks() const { return blocks_.size(); }
   std::size_t n_coupled_sources() const { return coupled_sources_.size(); }
   MultiFab& phi() { return mg_.phi(); }
-  // Second membre du Poisson de systeme apres le dernier solve_fields : f = Sum_b elliptic_rhs_b(U_b)
-  // sur le grossier partage. Expose pour verifier la SOMME CO-LOCALISEE (test PR1) ; meme grille que
-  // le grossier (les contributions des blocs y sont accumulees aux memes cellules).
+  // System Poisson right-hand side after the last solve_fields: f = Sum_b elliptic_rhs_b(U_b) on the
+  // shared coarse. Exposed to check the CO-LOCATED SUM (PR1 test); same grid as the coarse (the
+  // blocks' contributions are accumulated there at the same cells).
   MultiFab& poisson_rhs() { return mg_.rhs(); }
   const MultiFab& aux(int k) const { return aux_[k]; }
   std::vector<AmrLevelMP>& levels(std::size_t b) { return *blocks_[b].levels; }
@@ -287,19 +289,20 @@ class AmrRuntime {
   int solve_count() const { return solve_count_; }
   int regrid_count() const { return regrid_count_; }
 
-  /// Predicat de tag du regrid d'union : (ConstArray4 du champ lu, i, j) -> doit-on raffiner ? Type
-  /// HOTE (evalue dans la boucle hote de tag_cells, jamais sur device) : une std::function capturant un
-  /// foncteur concret est licite (nvcc-safe -- le predicat n'entre pas dans un kernel). On l'utilise pour
-  /// le critere PAR BLOC (lu sur la densite/U du bloc, composante 0) et pour le critere de phi (lu sur
-  /// l'aux partage). docs/AMR_REGRID_UNION_TAGS_DESIGN.md (D1, D4).
+  /// Tag predicate of the union regrid: (ConstArray4 of the read field, i, j) -> should we refine ?
+  /// HOST type (evaluated in the host loop of tag_cells, never on device): a std::function capturing a
+  /// concrete functor is licit (nvcc-safe -- the predicate does not enter a kernel). We use it for the
+  /// PER-BLOCK criterion (read on the block density/U, component 0) and for the phi criterion (read on
+  /// the shared aux). docs/AMR_REGRID_UNION_TAGS_DESIGN.md (D1, D4).
   using TagPredicate = std::function<bool(const ConstArray4&, int, int)>;
 
-  /// Active le REGRID D'UNION DES TAGS a la cadence @p every (en macro-pas) : tous les @p every
-  /// macro-pas, AVANT le step(dt) du macro-pas (D2, coherent avec le mono-bloc amr_dsl_block.hpp:104),
-  /// la hierarchie partagee est re-grillee a partir de l'UNION des tags de tous les blocs + phi.
-  /// @p every == 0 (DEFAUT) -> hierarchie FIGEE, regrid jamais appele -> trajectoire BIT-IDENTIQUE a
-  /// l'historique (la feature est opt-in). @p grow : dilatation des tags (nesting + anticipation) ;
-  /// @p margin : nesting (clamp des patchs aux bords). Doit etre appele AVANT le premier step.
+  /// Activates the UNION-TAGS REGRID at the cadence @p every (in macro-steps): every @p every
+  /// macro-steps, BEFORE the macro-step's step(dt) (D2, consistent with the single-block
+  /// amr_dsl_block.hpp:104), the shared hierarchy is re-gridded from the UNION of the tags of all
+  /// blocks + phi. @p every == 0 (DEFAULT) -> FROZEN hierarchy, regrid never called -> BIT-IDENTICAL
+  /// trajectory to the historical one (the feature is opt-in). @p grow: tag dilation (nesting +
+  /// anticipation); @p margin: nesting (clamp the patches to the boundaries). Must be called BEFORE
+  /// the first step.
   void set_regrid(int every, int grow = 2, int margin = 2) {
     if (every < 0) throw std::runtime_error("AmrRuntime::set_regrid : regrid_every >= 0");
     regrid_every_ = every;
@@ -307,42 +310,44 @@ class AmrRuntime {
     regrid_margin_ = margin;
   }
 
-  /// Enregistre le PREDICAT DE TAG du bloc @p b (D1 : critere d'union PAR BLOC). Le predicat est evalue
-  /// sur U du bloc (composante 0 = densite, ou un gradient discret a la charge de l'appelant) au niveau
-  /// PARENT pendant le regrid ; l'UNION (OU) des predicats de tous les blocs + le critere phi pilote le
-  /// clustering. Un bloc SANS predicat enregistre ne tague rien de SON cote (il reste re-grille comme
-  /// fond, present partout, par l'union des autres criteres). @throws si @p b est hors bornes.
+  /// Registers the TAG PREDICATE of block @p b (D1: PER-BLOCK union criterion). The predicate is
+  /// evaluated on the block U (component 0 = density, or a discrete gradient at the caller's charge) at
+  /// the PARENT level during the regrid; the UNION (OR) of the predicates of all blocks + the phi
+  /// criterion drives the clustering. A block WITHOUT a registered predicate tags nothing on ITS side
+  /// (it stays re-gridded as background, present everywhere, by the union of the other criteria).
+  /// @throws if @p b is out of bounds.
   void set_block_tag_predicate(std::size_t b, TagPredicate crit) {
     if (b >= blocks_.size())
-      throw std::runtime_error("AmrRuntime::set_block_tag_predicate : indice de bloc hors bornes");
+      throw std::runtime_error("AmrRuntime::set_block_tag_predicate : block index out of bounds");
     block_tag_[b] = std::move(crit);
   }
 
-  /// Enregistre le PREDICAT DE TAG de PHI (D4 : critere de phi SEPARE, sur |grad phi|). Le predicat est
-  /// evalue sur l'aux partage du niveau parent (composantes 1,2 = grad phi en x,y) pendant le regrid ;
-  /// il s'ajoute a l'union des tags des blocs. Non enregistre -> phi ne contribue pas a l'union.
+  /// Registers the PHI TAG PREDICATE (D4: SEPARATE phi criterion, on |grad phi|). The predicate is
+  /// evaluated on the shared aux of the parent level (components 1,2 = grad phi in x,y) during the
+  /// regrid; it adds to the union of the blocks' tags. Not registered -> phi does not contribute to
+  /// the union.
   void set_phi_tag_predicate(TagPredicate crit) { phi_tag_ = std::move(crit); }
 
-  /// Enregistre une SOURCE COUPLEE inter-especes (DSL CoupledSource, bytecode P5) sur la facade
-  /// runtime, pendant raffine de System::add_coupled_source. L'ABI est PLATE (bytecode postfixe) : on
-  /// resout chaque (bloc, role) en (indice de bloc, composante) puis on stocke une fermeture qui, a
-  /// chaque macro-pas APRES le transport, applique la source par splitting forward-Euler additif via
-  /// coupled_source_step. Le couplage est ENTIEREMENT cuit en machine a pile (foncteur device-clean
-  /// CoupledSourceKernel) : AUCUN callback Python par cellule dans le chemin chaud.
+  /// Registers an inter-species COUPLED SOURCE (DSL CoupledSource, P5 bytecode) on the runtime facade,
+  /// counterpart of System::add_coupled_source. The ABI is FLAT (postfix bytecode): we resolve each
+  /// (block, role) into (block index, component) then store a closure that, at each macro-step AFTER
+  /// the transport, applies the source by additive forward-Euler splitting via coupled_source_step. The
+  /// coupling is ENTIRELY baked into a stack machine (device-clean functor CoupledSourceKernel): NO
+  /// per-cell Python callback in the hot path.
   ///
-  /// CONSERVATION (echange conservatif) : avec une construction add_pair (un terme +expr sur un bloc,
-  /// -expr exactement sur l'autre, MEME cellule), les deux contributions par cellule sont opposees au
-  /// signe pres, donc n_a + n_b est conserve PAR CELLULE (et globalement) a la precision machine,
-  /// independamment de dt et de l'etat. Le moteur ne l'impose pas (une ionisation creant une paire est
-  /// licite) : la conservation est une propriete du couplage construit, controlee cote test.
+  /// CONSERVATION (conservative exchange): with an add_pair construction (one +expr term on one block,
+  /// -expr exactly on the other, SAME cell), the two per-cell contributions are opposite up to sign, so
+  /// n_a + n_b is conserved PER CELL (and globally) to machine precision, independent of dt and of the
+  /// state. The engine does not enforce it (an ionization creating a pair is licit): conservation is a
+  /// property of the constructed coupling, checked test-side.
   ///
-  /// @param in_blocks/in_roles  champs LUS (un registre par (bloc, role)), dans l'ordre des registres.
-  /// @param consts              constantes (parametres), chargees dans les registres apres les entrees.
-  /// @param out_blocks/out_roles cible (bloc, role) de chaque terme de source.
-  /// @param prog_ops/prog_args  bytecode postfixe CONCATENE de tous les termes (decoupe par prog_lens).
-  /// @param prog_lens           longueur du programme de chaque terme (taille == out_blocks).
-  /// @throws std::runtime_error sur une forme incoherente, un role inconnu, un bloc inconnu, un opcode
-  ///         ou un registre hors bornes, ou un programme trop long (memes gardes que System).
+  /// @param in_blocks/in_roles  READ fields (one register per (block, role)), in register order.
+  /// @param consts              constants (parameters), loaded into the registers after the inputs.
+  /// @param out_blocks/out_roles target (block, role) of each source term.
+  /// @param prog_ops/prog_args  CONCATENATED postfix bytecode of all the terms (split by prog_lens).
+  /// @param prog_lens           program length of each term (size == out_blocks).
+  /// @throws std::runtime_error on an inconsistent form, an unknown role, an unknown block, an opcode
+  ///         or register out of bounds, or a program too long (same guards as System).
   void add_coupled_source(const std::vector<std::string>& in_blocks,
                           const std::vector<std::string>& in_roles,
                           const std::vector<double>& consts,
@@ -353,47 +358,48 @@ class AmrRuntime {
     const int n_in = static_cast<int>(in_blocks.size());
     const int n_const = static_cast<int>(consts.size());
     const int n_terms = static_cast<int>(out_blocks.size());
-    // --- validation de forme (avant tout pas, erreurs EXPLICITES) ; mirroir de System::add_coupled_source.
+    // --- form validation (before any step, EXPLICIT errors); mirror of System::add_coupled_source.
     if (n_terms == 0)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : aucun terme de source (out_blocks vide)");
+      throw std::runtime_error("AmrRuntime::add_coupled_source : no source term (out_blocks empty)");
     if (static_cast<int>(in_roles.size()) != n_in)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : in_blocks / in_roles de tailles differentes");
+      throw std::runtime_error("AmrRuntime::add_coupled_source : in_blocks / in_roles of different sizes");
     if (static_cast<int>(out_roles.size()) != n_terms || static_cast<int>(prog_lens.size()) != n_terms)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : out_blocks / out_roles / prog_lens de "
-                               "tailles differentes");
+      throw std::runtime_error("AmrRuntime::add_coupled_source : out_blocks / out_roles / prog_lens of "
+                               "different sizes");
     if (prog_ops.size() != prog_args.size())
-      throw std::runtime_error("AmrRuntime::add_coupled_source : prog_ops / prog_args de tailles differentes");
+      throw std::runtime_error("AmrRuntime::add_coupled_source : prog_ops / prog_args of different sizes");
     if (n_in + n_const > kCsMaxReg)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : trop de registres (entrees + constantes > " +
+      throw std::runtime_error("AmrRuntime::add_coupled_source : too many registers (inputs + constants > " +
                                std::to_string(kCsMaxReg) + ")");
     if (n_terms > kCsMaxTerms)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : trop de termes de source (> " +
+      throw std::runtime_error("AmrRuntime::add_coupled_source : too many source terms (> " +
                                std::to_string(kCsMaxTerms) + ")");
-    // Resout (bloc, role) -> (indice de bloc, composante) par le descripteur CONSERVATIF du bloc, comme
-    // System (#181). Un bloc inconnu leve immediatement ; un role inconnu (non canonique) aussi.
+    // Resolves (block, role) -> (block index, component) by the block CONSERVATIVE descriptor, like
+    // System (#181). An unknown block throws immediately; an unknown (non-canonical) role too.
     auto resolve = [&](const std::string& block, const std::string& role) -> std::pair<int, int> {
       const int b = block_index(block);
       if (b < 0)
-        throw std::runtime_error("AmrRuntime::add_coupled_source : aucun bloc nomme '" + block + "'");
+        throw std::runtime_error("AmrRuntime::add_coupled_source : no block named '" + block + "'");
       const VariableRole r = role_from_name(role);
       if (r == VariableRole::Custom)
-        throw std::runtime_error("AmrRuntime::add_coupled_source : role '" + role + "' inconnu (bloc '" +
+        throw std::runtime_error("AmrRuntime::add_coupled_source : role '" + role + "' unknown (block '" +
                                  block + "')");
-      // STRICT (pas de repli silencieux ; mirroir de System::add_coupled_source #181) : une source couplee
-      // DSL vise un (bloc, role) EXPLICITEMENT demande par l'utilisateur. Si le bloc n'expose PAS ce role
-      // (canonique mais absent de cons_vars), un repli sur la composante 0 appliquerait la source au mauvais
-      // champ EN SILENCE (le faux-positif identifie a la revue Lot E). On leve. Distinct des couplages NOMMES
-      // (add_collision/add_pair cote System) qui assument volontairement la disposition canonique via
-      // role_index(..., fallback) et restent inchanges (ils ne passent pas par ce chemin runtime AMR).
+      // STRICT (no silent fallback; mirror of System::add_coupled_source #181): a DSL coupled source
+      // targets a (block, role) EXPLICITLY requested by the user. If the block does NOT expose this role
+      // (canonical but absent from cons_vars), a fallback to component 0 would apply the source to the
+      // wrong field SILENTLY (the false-positive identified at the Lot E review). We throw. Distinct
+      // from the NAMED couplings (add_collision/add_pair System-side) which deliberately assume the
+      // canonical layout via role_index(..., fallback) and stay unchanged (they do not go through this
+      // AMR runtime path).
       const int comp = blocks_[static_cast<std::size_t>(b)].cons_vars.index_of(r);
       if (comp < 0)
-        throw std::runtime_error("AmrRuntime::add_coupled_source : le bloc '" + block +
-                                 "' n'expose pas le role '" + role +
-                                 "' (pas de repli silencieux sur la composante 0)");
+        throw std::runtime_error("AmrRuntime::add_coupled_source : block '" + block +
+                                 "' does not expose role '" + role +
+                                 "' (no silent fallback to component 0)");
       return {b, comp};
     };
-    // Entrees : (bloc, composante) lues par cellule. Capturees par INDICE -> on reconstruit les Array4 a
-    // CHAQUE application (les fabs vivent dans la pile de niveaux, repointees par niveau dans le splitting).
+    // Inputs: (block, component) read per cell. Captured by INDEX -> we rebuild the Array4 at EACH
+    // application (the fabs live in the level stack, repointed per level in the splitting).
     std::vector<CsRef> ins(static_cast<std::size_t>(n_in));
     for (int c = 0; c < n_in; ++c) {
       auto [b, comp] = resolve(in_blocks[static_cast<std::size_t>(c)], in_roles[static_cast<std::size_t>(c)]);
@@ -405,19 +411,19 @@ class AmrRuntime {
       auto [b, comp] = resolve(out_blocks[static_cast<std::size_t>(t)], out_roles[static_cast<std::size_t>(t)]);
       const int len = prog_lens[static_cast<std::size_t>(t)];
       if (len < 0 || len > kCsMaxProg)
-        throw std::runtime_error("AmrRuntime::add_coupled_source : programme du terme " +
-                                 std::to_string(t) + " trop long (> " + std::to_string(kCsMaxProg) + ")");
+        throw std::runtime_error("AmrRuntime::add_coupled_source : program of term " +
+                                 std::to_string(t) + " too long (> " + std::to_string(kCsMaxProg) + ")");
       if (off + len > static_cast<int>(prog_ops.size()))
-        throw std::runtime_error("AmrRuntime::add_coupled_source : prog_lens incoherent avec prog_ops");
+        throw std::runtime_error("AmrRuntime::add_coupled_source : prog_lens inconsistent with prog_ops");
       CsProgram pg;
       pg.len = len;
       for (int k = 0; k < len; ++k) {
         const int opc = prog_ops[static_cast<std::size_t>(off + k)];
         const int a = prog_args[static_cast<std::size_t>(off + k)];
         if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
-          throw std::runtime_error("AmrRuntime::add_coupled_source : opcode invalide");
+          throw std::runtime_error("AmrRuntime::add_coupled_source : invalid opcode");
         if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
-          throw std::runtime_error("AmrRuntime::add_coupled_source : registre hors bornes dans le programme");
+          throw std::runtime_error("AmrRuntime::add_coupled_source : register out of bounds in the program");
         pg.op[k] = opc;
         pg.arg[k] = a;
       }
@@ -429,31 +435,31 @@ class AmrRuntime {
                                                  n_in, n_const, n_terms});
   }
 
-  /// Applique TOUTES les sources couplees enregistrees d'un pas dt, par splitting forward-Euler.
-  /// Pendant runtime de AmrSystemCoupler::coupled_source_step : on rafraichit les champs (aux par
-  /// niveau) puis, source par source, on applique le bytecode INDEPENDAMMENT A CHAQUE NIVEAU de la
-  /// hierarchie partagee (les blocs vivent sur TOUS les niveaux), suivi d'une cascade fin -> grossier.
+  /// Applies ALL the registered coupled sources of a step dt, by forward-Euler splitting. Runtime
+  /// counterpart of AmrSystemCoupler::coupled_source_step: we refresh the fields (aux per level) then,
+  /// source by source, we apply the bytecode INDEPENDENTLY AT EACH LEVEL of the shared hierarchy (the
+  /// blocks live on ALL levels), followed by a fine -> coarse cascade.
   ///
-  /// INVARIANT DE COUVERTURE (#169) : la source a ete appliquee independamment sur CHAQUE niveau, donc
-  /// une cellule grossiere COUVERTE par un patch fin porterait sinon sa propre source grossiere, sans
-  /// rapport avec la source vue par ses enfants fins. Une cellule grossiere couverte DOIT etre la
-  /// moyenne 2x2 de ses enfants (elle ne represente pas de matiere a elle seule). On restaure cette
-  /// coherence par la MEME cascade fin -> grossier (mf_average_down_mb) que solve_fields et le moteur
-  /// compile-time : sans elle, le diagnostic de masse (somme du seul grossier) compterait une source
-  /// grossiere fantome sous le patch. Hierarchie mono-niveau : aucune cellule couverte, les boucles de
-  /// cascade ne s'executent pas -> bit-identique au cas sans patch.
+  /// COVERAGE INVARIANT (#169): the source was applied independently on EACH level, so a coarse cell
+  /// COVERED by a fine patch would otherwise carry its own coarse source, unrelated to the source seen
+  /// by its fine children. A covered coarse cell MUST be the 2x2 average of its children (it does not
+  /// represent matter on its own). We restore this consistency by the SAME fine -> coarse cascade
+  /// (mf_average_down_mb) as solve_fields and the compile-time engine: without it, the mass diagnostic
+  /// (sum of the coarse only) would count a phantom coarse source under the patch. Single-level
+  /// hierarchy: no covered cell, the cascade loops do not run -> bit-identical to the no-patch case.
   ///
-  /// CONSERVATION PAR CELLULE : a un niveau donne, chaque terme ecrit out(i,j,comp) += dt * S(reg(i,j))
-  /// sur la MEME cellule (i,j) lue par les entrees ; un echange add_pair pose +S sur un bloc et -S sur
-  /// l'autre AU MEME (i,j), donc la somme des deux blocs est inchangee cellule par cellule. Sans source
-  /// enregistree (coupled_sources_ vide) : no-op total -> trajectoire bit-identique a l'historique.
+  /// PER-CELL CONSERVATION: at a given level, each term writes out(i,j,comp) += dt * S(reg(i,j)) on
+  /// the SAME cell (i,j) read by the inputs; an add_pair exchange lays +S on one block and -S on the
+  /// other AT THE SAME (i,j), so the sum of the two blocks is unchanged cell by cell. Without a
+  /// registered source (coupled_sources_ empty): total no-op -> bit-identical trajectory to the
+  /// historical one.
   void coupled_source_step(Real dt) {
-    if (coupled_sources_.empty()) return;  // opt-in : aucune source -> chemin bit-identique
-    solve_fields();  // aux par niveau a jour (un terme peut lire phi/grad via une entree future)
+    if (coupled_sources_.empty()) return;  // opt-in: no source -> bit-identical path
+    solve_fields();  // aux per level up to date (a term may read phi/grad via a future input)
     for (const auto& cs : coupled_sources_) {
-      // Application PAR NIVEAU : a chaque niveau k, les blocs partagent EXACTEMENT le meme layout
-      // (garde same_layout_or_throw), donc meme local_size() et meme indexation locale -> on itere en
-      // parallele sur les fabs locaux. local_size()==0 sur un rang sans boite -> boucle vide (MPI-safe).
+      // PER-LEVEL application: at each level k, the blocks share EXACTLY the same layout
+      // (same_layout_or_throw guard), so same local_size() and same local indexing -> we iterate in
+      // parallel over the local fabs. local_size()==0 on a rank without a box -> empty loop (MPI-safe).
       for (int k = 0; k < nlev_; ++k) {
         const int sref = cs.n_in > 0 ? cs.ins[0].block : cs.outs[0].block;
         MultiFab& Uref = (*blocks_[static_cast<std::size_t>(sref)].levels)[k].U;
@@ -475,106 +481,108 @@ class AmrRuntime {
             kern.out_comp[t] = cs.outs[static_cast<std::size_t>(t)].comp;
             kern.prog[t] = cs.outs[static_cast<std::size_t>(t)].prog;
           }
-          for_each_cell(Uref.box(li), kern);  // foncteur NOMME (device-clean), additif forward-Euler
+          for_each_cell(Uref.box(li), kern);  // NAMED functor (device-clean), additive forward-Euler
         }
       }
-      // Restaure la coherence des cellules grossieres couvertes (cf. INVARIANT DE COUVERTURE ci-dessus).
+      // Restore the consistency of the covered coarse cells (cf. COVERAGE INVARIANT above).
       for (auto& b : blocks_)
         for (int k = nlev_ - 1; k >= 1; --k) mf_average_down_mb((*b.levels)[k].U, (*b.levels)[k - 1].U);
     }
   }
 
-  /// sync_down (par bloc) + Poisson grossier de systeme (RHS SOMME co-localise) + aux grossier +
-  /// injection fine. Reproduit AmrSystemCoupler::solve_fields a l'identique, mais le RHS de systeme
-  /// est assemble par les fermetures add_elliptic_rhs des blocs (Sum_b elliptic_rhs_b(U_b)) au lieu
-  /// d'un RhsAssembler compile-time.
+  /// sync_down (per block) + system coarse Poisson (CO-LOCATED SUMMED RHS) + coarse aux + fine
+  /// injection. Reproduces AmrSystemCoupler::solve_fields identically, but the system RHS is assembled
+  /// by the blocks' add_elliptic_rhs closures (Sum_b elliptic_rhs_b(U_b)) instead of a compile-time
+  /// RhsAssembler.
   void solve_fields() {
     ++solve_count_;
-    // 1. average_down par bloc (fin -> grossier) sur toute la hierarchie.
+    // 1. average_down per block (fine -> coarse) over the whole hierarchy.
     for (auto& b : blocks_) {
       auto& L = *b.levels;
       for (int k = nlev_ - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
     }
 
-    // 2. RHS de systeme SOMME et CO-LOCALISE : f = Sum_b elliptic_rhs_b(U_b) sur le grossier. On
-    // remet a zero puis chaque bloc ACCUMULE (+=) sa contribution sur les MEMES cellules du
-    // grossier partage (mg_.rhs() partage le layout du grossier).
+    // 2. SUMMED and CO-LOCATED system RHS: f = Sum_b elliptic_rhs_b(U_b) on the coarse. We reset to
+    // zero then each block ACCUMULATES (+=) its contribution on the SAME cells of the shared coarse
+    // (mg_.rhs() shares the coarse layout).
     mg_.rhs().set_val(Real(0));
     for (auto& b : blocks_) b.add_elliptic_rhs((*b.levels)[0].U, mg_.rhs());
     mg_.solve();
 
-    // 3. aux grossier = (phi, grad phi) via le MEME chemin propre que AmrSystemCoupler : remplir
-    // les ghosts de phi selon bcPhi_, field_postprocess (phi + grad), remplir les ghosts d'aux
-    // selon aux_bc_ (derive de bcPhi_). Gere le non-periodique (Foextrap).
+    // 3. coarse aux = (phi, grad phi) via the SAME clean path as AmrSystemCoupler: fill the ghosts of
+    // phi according to bcPhi_, field_postprocess (phi + grad), fill the ghosts of aux according to
+    // aux_bc_ (derived from bcPhi_). Handles the non-periodic case (Foextrap).
     fill_ghosts(mg_.phi(), dom_, bcPhi_);
     const Real cx = Real(1) / (2 * geom_.dx()), cy = Real(1) / (2 * geom_.dy());
     field_postprocess(mg_.phi(), aux_[0], cx, cy,
                       FieldPostProcess{FieldPostProcess::GradSign::Plus, true});
     fill_ghosts(aux_[0], dom_, aux_bc_);
-    // 4. injection coarse->fine de l'aux (parent replique seulement au niveau 1 si grossier replique).
+    // 4. coarse->fine injection of the aux (parent replicated only at level 1 if coarse replicated).
     for (int k = 1; k < nlev_; ++k)
       detail::coupler_inject_aux_mb(aux_[k - 1], aux_[k],
                                     /*replicated_parent=*/(k == 1) && replicated_coarse_);
   }
 
-  /// REGRID D'UNION DES TAGS (capstone Phase 2, C.6 ; docs/AMR_REGRID_UNION_TAGS_DESIGN.md, etapes
-  /// R0-R8). Re-grille la hierarchie PARTAGEE a partir de l'UNION (OU cellule a cellule) des tags de
-  /// TOUS les blocs (predicat par bloc, D1) + des tags de phi (sur |grad phi|, D4), suivie d'UN SEUL
-  /// clustering Berger-Rigoutsos -> UN SEUL nouveau layout fin applique a TOUS les blocs (y compris
-  /// ceux tenus par leur stride, D3) ET a l'aux partage. Maintient la PRECONDITION de layout partage
-  /// (same_layout_or_throw) apres le regrid. v1 a 2 NIVEAUX (grossier + 1 fin, D5) : no-op si nlev < 2.
-  /// No-op (grille inchangee) si l'union des tags est vide (rien a raffiner).
+  /// UNION-TAGS REGRID (capstone Phase 2, C.6; docs/AMR_REGRID_UNION_TAGS_DESIGN.md, steps R0-R8).
+  /// Re-grids the SHARED hierarchy from the UNION (cell-by-cell OR) of the tags of ALL blocks (per-block
+  /// predicate, D1) + the phi tags (on |grad phi|, D4), followed by ONE SINGLE Berger-Rigoutsos
+  /// clustering -> ONE SINGLE new fine layout applied to ALL blocks (including those held by their
+  /// stride, D3) AND to the shared aux. Maintains the shared-layout PRECONDITION (same_layout_or_throw)
+  /// after the regrid. v1 with 2 LEVELS (coarse + 1 fine, D5): no-op if nlev < 2. No-op (grid
+  /// unchanged) if the union of the tags is empty (nothing to refine).
   void regrid() {
-    if (nlev_ < 2) return;  // 2 niveaux requis (D5) : rien a re-griller en mono-niveau
-    const int fk = nlev_ - 1, pk = fk - 1;  // fin + son parent (pk == 0 en v1 a 2 niveaux)
+    if (nlev_ < 2) return;  // 2 levels required (D5): nothing to re-grid in single-level
+    const int fk = nlev_ - 1, pk = fk - 1;  // fine + its parent (pk == 0 in v1 with 2 levels)
 
-    // (R0) PRECONDITION : champs a jour (aux par niveau, pour le critere |grad phi|). Le snapshot de
-    // masse par bloc n'est PAS necessaire au moteur (la conservation est verifiee cote test V1).
+    // (R0) PRECONDITION: fields up to date (aux per level, for the |grad phi| criterion). The per-block
+    // mass snapshot is NOT needed by the engine (conservation is checked test-side V1).
     solve_fields();
 
-    // (R1)+(R2) TAGS PAR BLOC (sur U du bloc au niveau parent) + TAGS DE PHI (sur l'aux partage).
+    // (R1)+(R2) PER-BLOCK TAGS (on the block U at the parent level) + PHI TAGS (on the shared aux).
     const int PNX = dom_.nx() << pk, PNY = dom_.ny() << pk;
     const Box2D pdom = Box2D::from_extents(PNX, PNY);
     std::vector<TagBox> parts;
     parts.reserve(blocks_.size() + 1);
     for (std::size_t b = 0; b < blocks_.size(); ++b) {
       const TagPredicate& crit = block_tag_[b];
-      if (!crit) continue;  // bloc sans critere : ne tague rien de son cote (re-grille comme fond)
+      if (!crit) continue;  // block without a criterion: tags nothing on its side (re-gridded as background)
       parts.push_back(tag_cells((*blocks_[b].levels)[pk].U, pdom, crit));
     }
     if (phi_tag_) parts.push_back(tag_cells(aux_[pk], pdom, phi_tag_));
-    if (parts.empty()) return;  // aucun critere actif -> aucune cellule taguee -> grille inchangee
+    if (parts.empty()) return;  // no active criterion -> no tagged cell -> grid unchanged
 
-    // (R3) UNION (OU) des tags + dilatation (nesting + anticipation du deplacement des structures).
+    // (R3) UNION (OR) of the tags + dilation (nesting + anticipation of the structures moving).
     TagBox grown = grow_tags(tag_union(parts), regrid_grow_, pdom);
 
-    // (R4)+(R5) reduction collective cross-rang (si grossier reparti) + clustering UNIQUE -> layout fin
-    // PARTAGE. all_reduce_or_inplace est appele DANS regrid_compute_fine_layout pour pk==0 reparti :
-    // tous les rangs partent de la MEME grille de tags -> fb/dmap IDENTIQUES par rang (sinon MPI desync).
+    // (R4)+(R5) cross-rank collective reduction (if coarse distributed) + UNIQUE clustering -> SHARED
+    // fine layout. all_reduce_or_inplace is called INSIDE regrid_compute_fine_layout for distributed
+    // pk==0: all ranks start from the SAME tag grid -> IDENTICAL fb/dmap per rank (otherwise MPI
+    // desync).
     auto [fb, dmap] = regrid_compute_fine_layout(std::move(grown), pdom, pk, regrid_margin_,
                                                  replicated_coarse_);
-    if (fb.size() == 0) return;  // rien a raffiner : on garde la grille courante (no-op)
+    if (fb.size() == 0) return;  // nothing to refine: we keep the current grid (no-op)
 
-    // (R6) PROLONG / RESTRICT COHERENT de TOUS les blocs sur le MEME fb/dmap (y compris les blocs tenus
-    // par leur stride : leur etat fige est present partout et contribue au Poisson, D3). La largeur de
-    // ghost est HERITEE par bloc (un bloc MUSCL ordre 2 porte 2 ghosts ; un bloc Minmod et un VanLeer
-    // peuvent differer), donc le schema ne lit pas hors bornes au pas suivant (V2 / risque X4).
+    // (R6) COHERENT PROLONG / RESTRICT of ALL blocks on the SAME fb/dmap (including the blocks held by
+    // their stride: their frozen state is present everywhere and contributes to the Poisson, D3). The
+    // ghost width is INHERITED per block (a MUSCL order-2 block carries 2 ghosts; a Minmod block and a
+    // VanLeer one may differ), so the scheme does not read out of bounds at the next step (V2 / risk
+    // X4).
     for (auto& b : blocks_) {
       auto& L = *b.levels;
       const int ngf = L[fk].U.n_grow();
       L[fk].U = regrid_field_on_layout(fb, dmap, L[pk].U, L[fk].U, pk, ngf, replicated_coarse_);
     }
 
-    // (R7) REBUILD DE L'AUX PARTAGE (un seul, largeur aux_ncomp_) sur le nouveau layout + RE-CABLAGE
-    // du pointeur aux de CHAQUE bloc. L'adresse &aux_[fk] reste stable (reallocation en place du
-    // MultiFab dans le std::vector existant) -> les pointeurs des autres niveaux ne bougent pas.
+    // (R7) REBUILD OF THE SHARED AUX (one only, width aux_ncomp_) on the new layout + RE-WIRING of the
+    // aux pointer of EACH block. The address &aux_[fk] stays stable (in-place reallocation of the
+    // MultiFab in the existing std::vector) -> the pointers of the other levels do not move.
     aux_[fk] = MultiFab(fb, dmap, aux_ncomp_, 1);
     for (auto& b : blocks_)
       (*b.levels)[fk].aux = &aux_[fk];
 
-    // (V3) INVARIANT DE LAYOUT PARTAGE : tous les blocs DOIVENT vivre sur EXACTEMENT le meme fb/dmap
-    // (boites, ordre, rang par boite) apres le regrid. Garde-fou collectif (cross-bloc) ; attrape toute
-    // reconstruction incoherente avant qu'elle ne corrompe l'aux partage / le Poisson somme.
+    // (V3) SHARED-LAYOUT INVARIANT: all blocks MUST live on EXACTLY the same fb/dmap (boxes, order,
+    // rank per box) after the regrid. Collective guard (cross-block); catches any inconsistent
+    // reconstruction before it corrupts the shared aux / the summed Poisson.
     {
       std::vector<std::vector<AmrLevelMP>> ref;
       ref.reserve(blocks_.size());
@@ -582,95 +590,97 @@ class AmrRuntime {
       detail::same_layout_or_throw(ref);
     }
 
-    // (R8) RESTAURATION DE L'INVARIANT DE COUVERTURE : re-solve pour que phi / grad phi soient
-    // coherents avec la nouvelle grille ET pour declencher la cascade fin -> grossier (mf_average_down_mb,
-    // dans solve_fields) qui restaure les cellules grossieres couvertes (sinon un diagnostic de masse,
-    // somme du seul grossier, compterait une valeur grossiere fantome sous le nouveau patch, X5).
+    // (R8) RESTORATION OF THE COVERAGE INVARIANT: re-solve so that phi / grad phi are consistent with
+    // the new grid AND to trigger the fine -> coarse cascade (mf_average_down_mb, in solve_fields) that
+    // restores the covered coarse cells (otherwise a mass diagnostic, sum of the coarse only, would
+    // count a phantom coarse value under the new patch, X5).
     solve_fields();
     ++regrid_count_;
   }
 
-  /// Avance le systeme d'un macro-pas dt. On resout d'abord les champs (Poisson somme co-localise, UNE
-  /// fois par macro-pas : cadence OncePerStep), puis chaque bloc avance sur SA pile de niveaux avec SON
-  /// schema, en honorant sa cadence stride et ses substeps, et SON traitement temporel. Pendant runtime
-  /// de AmrSystemCoupler::step (OncePerStep) : la version compile-time porte substeps/stride dans
-  /// block_substeps_v / block_stride_v et choisit le traitement par le constexpr block_time_treatment_v ;
-  /// ici le moteur porte la boucle de sous-pas, le filtre stride ET la selection IMEX-vs-explicite.
+  /// Advances the system by one macro-step dt. We first solve the fields (co-located summed Poisson,
+  /// ONCE per macro-step: OncePerStep cadence), then each block advances over ITS level stack with ITS
+  /// scheme, honoring its stride cadence and its substeps, and ITS temporal treatment. Runtime
+  /// counterpart of AmrSystemCoupler::step (OncePerStep): the compile-time version carries
+  /// substeps/stride in block_substeps_v / block_stride_v and chooses the treatment by the constexpr
+  /// block_time_treatment_v; here the engine carries the substep loop, the stride filter AND the
+  /// IMEX-vs-explicit selection.
   ///
-  /// SELECTION DU TRAITEMENT (capstone vii) :
-  ///  - bloc EXPLICITE (b.imex == false) : la fermeture advance fait UN advance_amr (transport + source
-  ///    en Euler avant), appelee substeps fois ;
-  ///  - bloc IMEX (b.imex == true) : la fermeture imex_advance fait UN advance_amr SOURCE-FREE puis la
-  ///    source raide IMPLICITE backward_euler_source par niveau + cascade (cf. AmrRuntimeBlock::imex_advance),
-  ///    appelee substeps fois. Inconditionnellement stable sur une relaxation raide (la ou l'explicite,
-  ///    de facteur |1 - dt/eps|, DIVERGE des que dt > 2 eps).
-  /// La boucle de sous-pas est COMMUNE aux deux traitements (substeps applications de h = bdt/substeps),
-  /// donc le runtime SOUS-CYCLE aussi le splitting IMEX. A substeps=1 ce sous-cyclage est un no-op et le
-  /// chemin IMEX coincide avec la branche IMEX du moteur compile-time AmrSystemCoupler::step ; pour
-  /// substeps>1 il DIVERGE deliberement de ce moteur (qui, lui, ignore substeps sur sa branche IMEX) :
-  /// voir SEMANTIQUE IMEX SOUS substeps en en-tete (CFL-safe sur le transport, backward-Euler stable a
-  /// tout pas, relaxation raide plus precise). imex == false partout -> chemin advance seul ->
-  /// trajectoire bit-identique a l'historique (l'IMEX est opt-in).
+  /// TREATMENT SELECTION (capstone vii):
+  ///  - EXPLICIT block (b.imex == false): the advance closure does ONE advance_amr (transport +
+  ///    forward-Euler source), called substeps times;
+  ///  - IMEX block (b.imex == true): the imex_advance closure does ONE SOURCE-FREE advance_amr then the
+  ///    IMPLICIT stiff source backward_euler_source per level + cascade (cf.
+  ///    AmrRuntimeBlock::imex_advance), called substeps times. Unconditionally stable on a stiff
+  ///    relaxation (where the explicit, of factor |1 - dt/eps|, DIVERGES as soon as dt > 2 eps).
+  /// The substep loop is COMMON to both treatments (substeps applications of h = bdt/substeps), so the
+  /// runtime also SUB-CYCLES the IMEX splitting. At substeps=1 this sub-cycling is a no-op and the IMEX
+  /// path coincides with the IMEX branch of the compile-time engine AmrSystemCoupler::step; for
+  /// substeps>1 it DIVERGES deliberately from that engine (which itself ignores substeps on its IMEX
+  /// branch): see IMEX SEMANTICS UNDER substeps in the header (CFL-safe on the transport,
+  /// backward-Euler stable at any step, stiff relaxation more accurate). imex == false everywhere ->
+  /// advance path only -> bit-identical trajectory to the historical one (the IMEX is opt-in).
   void step(Real dt) {
     solve_count_ = 0;
-    // REGRID D'UNION DES TAGS (capstone Phase 2, C.6 ; D2 : AVANT le step du macro-pas, coherent avec
-    // le mono-bloc amr_dsl_block.hpp:108). Cadence regrid_every_ en MACRO-PAS, HORS des boucles de
-    // substeps et des fenetres de stride (granularite macro-pas SEULEMENT, D3). regrid_every_ == 0 ->
-    // hierarchie FIGEE, regrid jamais appele -> trajectoire BIT-IDENTIQUE a l'historique. Le garde
-    // macro_step_ > 0 (comme le mono-bloc) evite un regrid au tout premier pas (la grille initiale est
-    // deja celle du build). Le regrid se place AVANT solve_fields ci-dessous : il fait son propre
-    // solve_fields (R0/R8), puis le solve_fields du step recalcule phi sur la grille re-grillee.
+    // UNION-TAGS REGRID (capstone Phase 2, C.6; D2: BEFORE the macro-step's step, consistent with the
+    // single-block amr_dsl_block.hpp:108). regrid_every_ cadence in MACRO-STEPS, OUTSIDE the substep
+    // loops and the stride windows (macro-step granularity ONLY, D3). regrid_every_ == 0 -> FROZEN
+    // hierarchy, regrid never called -> BIT-IDENTICAL trajectory to the historical one. The guard
+    // macro_step_ > 0 (like the single-block) avoids a regrid at the very first step (the initial grid
+    // is already the build one). The regrid sits BEFORE solve_fields below: it does its own
+    // solve_fields (R0/R8), then the step's solve_fields recomputes phi on the re-gridded grid.
     if (regrid_every_ > 0 && macro_step_ > 0 && macro_step_ % regrid_every_ == 0) regrid();
-    // Poisson de systeme resolu UNE fois sur l'etat courant (cadence OncePerStep). Un bloc TENU
-    // (stride > 1, hors fin de fenetre) y a contribue avec son etat FIGE depuis sa derniere avance :
-    // couplage lache assume du multirate, exactement comme System::step / AmrSystemCoupler en
-    // OncePerStep. phi reste gele pendant l'avance des blocs (pas de re-solve par sous-pas ici).
+    // System Poisson solved ONCE on the current state (OncePerStep cadence). A HELD block (stride > 1,
+    // outside end-of-window) contributed with its FROZEN state since its last advance: loose coupling
+    // assumed by the multirate, exactly like System::step / AmrSystemCoupler in OncePerStep. phi stays
+    // frozen during the blocks' advance (no per-substep re-solve here).
     solve_fields();
     for (auto& b : blocks_) {
-      // Cadence HOLD-THEN-CATCH-UP (cf. AmrRuntimeBlock::stride, #140) : le bloc est TENU tant que
-      // (macro_step_+1) % stride != 0, puis RATTRAPE en fin de fenetre d'un pas effectif stride*dt.
-      // Le rattrapage en FIN de fenetre garde le bloc temporellement coherent avec les rapides au
-      // point de couplage (jamais dans le futur). stride=1 : toujours vrai -> chaque pas, bit-identique.
+      // HOLD-THEN-CATCH-UP cadence (cf. AmrRuntimeBlock::stride, #140): the block is HELD as long as
+      // (macro_step_+1) % stride != 0, then CATCHES UP at end-of-window by an effective step stride*dt.
+      // The end-of-window catch-up keeps the block temporally consistent with the fast ones at the
+      // coupling point (never in the future). stride=1: always true -> every step, bit-identical.
       if ((macro_step_ + 1) % b.stride != 0) continue;
-      // DIAGNOSTICS NEWTON (OPT-IN) : RESET du rapport en TETE de l'avance du bloc (parite avec
-      // System::AdvanceImex::operator() qui reset nreport avant sa boucle de sous-pas). Le rapport
-      // AGREGE ensuite sur tous les niveaux ET sous-pas de CETTE avance (imex_advance accumule par
-      // niveau via backward_euler_source ; step() appelle imex_advance substeps fois sans re-reset).
-      // Place APRES le skip de stride : un bloc TENU garde le rapport de sa DERNIERE avance (semantique
-      // "derniere avance" de System). No-op pour un bloc sans diagnostics (newton_report nul).
+      // NEWTON DIAGNOSTICS (OPT-IN): RESET of the report at the HEAD of the block advance (parity with
+      // System::AdvanceImex::operator() which resets nreport before its substep loop). The report then
+      // AGGREGATES over all the levels AND substeps of THIS advance (imex_advance accumulates per level
+      // via backward_euler_source; step() calls imex_advance substeps times without re-resetting).
+      // Placed AFTER the stride skip: a HELD block keeps the report of its LAST advance ("last advance"
+      // semantics of System). No-op for a block without diagnostics (newton_report null).
       if (b.newton_diagnostics && b.newton_report) b.newton_report->reset();
-      const Real bdt = dt * static_cast<Real>(b.stride);  // catch-up : pas effectif stride*dt
-      // substeps sous-pas egaux de bdt/substeps. La fermeture choisie fait UN advance par appel ;
-      // substeps=1 -> un seul advance de bdt (bit-identique au cas mono-substep). SELECTION du
-      // traitement par bloc : IMEX (transport source-free + source raide implicite, calque la branche
-      // IMEX de AmrSystemCoupler::step) si b.imex, sinon EXPLICITE (transport + source Euler avant). Le
-      // test est PAR BLOC et stable : un seul bloc IMEX ne change rien aux blocs explicites voisins.
-      // NOTE substeps>1 : la boucle ci-dessous appelle step_block substeps fois pour LES DEUX
-      // traitements, donc le splitting IMEX est SOUS-CYCLE (K pas de Lie sur bdt/K). Le compile-time, lui,
-      // n'applique son IMEX qu'une fois sur bdt (il ignore substeps sur sa branche IMEX) : divergence
-      // ASSUMEE et saine pour substeps>1 (cf. SEMANTIQUE IMEX SOUS substeps en en-tete du fichier).
+      const Real bdt = dt * static_cast<Real>(b.stride);  // catch-up: effective step stride*dt
+      // substeps equal substeps of bdt/substeps. The chosen closure does ONE advance per call;
+      // substeps=1 -> a single advance of bdt (bit-identical to the single-substep case). Per-block
+      // treatment SELECTION: IMEX (source-free transport + implicit stiff source, mirrors the IMEX
+      // branch of AmrSystemCoupler::step) if b.imex, otherwise EXPLICIT (transport + forward-Euler
+      // source). The test is PER BLOCK and stable: a single IMEX block changes nothing for the
+      // neighboring explicit blocks.
+      // NOTE substeps>1: the loop below calls step_block substeps times for BOTH treatments, so the
+      // IMEX splitting is SUB-CYCLED (K Lie steps over bdt/K). The compile-time, for its part, applies
+      // its IMEX only once over bdt (it ignores substeps on its IMEX branch): divergence INTENTIONAL
+      // and sound for substeps>1 (cf. IMEX SEMANTICS UNDER substeps in the file header).
       const Real h = bdt / static_cast<Real>(b.substeps);
       auto& step_block = b.imex ? b.imex_advance : b.advance;
       for (int s = 0; s < b.substeps; ++s)
         step_block(*b.levels, dom_, h, base_per_, replicated_coarse_);
     }
-    // Sources couplees inter-especes APRES le transport (meme ordre que AmrSystemCoupler : transport
-    // puis coupled_source_step), par splitting forward-Euler. No-op si aucune source enregistree ->
-    // trajectoire bit-identique a l'historique (la feature est opt-in).
+    // Inter-species coupled sources AFTER the transport (same order as AmrSystemCoupler: transport then
+    // coupled_source_step), by forward-Euler splitting. No-op if no source registered -> bit-identical
+    // trajectory to the historical one (the feature is opt-in).
     coupled_source_step(dt);
     ++macro_step_;
   }
 
-  /// Pas CFL substeps/stride-aware (pendant runtime de System::step_cfl, mirroir EXACT de sa
-  /// formule). Un bloc de cadence stride avance d'un pas effectif stride*dt en substeps sous-pas,
-  /// donc chaque sous-pas vaut stride*dt/substeps ; la condition de stabilite par sous-pas
-  /// stride*dt/substeps <= cfl*h/w_b donne dt <= cfl*h*substeps_b/(stride_b*w_b). Le dt GLOBAL est le
-  /// min sur les blocs (le plus contraignant). On resout d'abord les champs (max_speed par bloc exige
-  /// l'aux a jour), on calcule dt, puis on avance d'un step(dt). @p h = pas d'espace du grossier
-  /// (dx_coarse). Renvoie le dt utilise. Mono-bloc (un seul bloc, stride=1) : si w_b est le seul
-  /// contraignant, dt = cfl*h*substeps/w (identique a System::step_cfl mono-bloc).
+  /// substeps/stride-aware CFL step (runtime counterpart of System::step_cfl, EXACT mirror of its
+  /// formula). A block of stride cadence advances by an effective step stride*dt in substeps substeps,
+  /// so each substep is worth stride*dt/substeps; the per-substep stability condition
+  /// stride*dt/substeps <= cfl*h/w_b gives dt <= cfl*h*substeps_b/(stride_b*w_b). The GLOBAL dt is the
+  /// min over the blocks (the most constraining). We first solve the fields (per-block max_speed
+  /// requires the aux up to date), compute dt, then advance by one step(dt). @p h = coarse mesh spacing
+  /// (dx_coarse). Returns the dt used. Single-block (a single block, stride=1): if w_b is the only
+  /// constraining one, dt = cfl*h*substeps/w (identical to System::step_cfl single-block).
   Real step_cfl(Real cfl, Real h) {
-    solve_fields();  // aux a jour : max_speed de chaque bloc le lit sur le grossier courant
+    solve_fields();  // aux up to date: each block's max_speed reads it on the current coarse
     Real dt = std::numeric_limits<Real>::infinity();
     last_dt_reason_ = "degenerate";
     for (auto& b : blocks_) {
@@ -678,9 +688,9 @@ class AmrRuntime {
       Real dt_b = cfl * h * static_cast<Real>(b.substeps) /
                   (static_cast<Real>(b.stride) * w);
       const char* why = "transport";
-      // BORNES OPTIONNELLES du bloc (StabilityPolicy AMR, audit 2026-06) : memes formules
-      // substeps/stride que SystemStepper::step_cfl, evaluees sur le GROSSIER. Fermetures vides
-      // (modele sans trait) -> non interrogees, borne transport seule (bit-identique).
+      // OPTIONAL block BOUNDS (AMR StabilityPolicy, audit 2026-06): same substeps/stride formulas as
+      // SystemStepper::step_cfl, evaluated on the COARSE. Empty closures (model without the trait) ->
+      // not queried, transport bound only (bit-identical).
       if (b.source_frequency) {
         const Real mu = b.source_frequency((*b.levels)[0].U, aux_[0]);
         if (mu > Real(0)) {
@@ -698,21 +708,21 @@ class AmrRuntime {
       }
       if (dt_b < dt) { dt = dt_b; last_dt_reason_ = std::string(why) + ":" + b.name; }
     }
-    // Frequences declarees des sources couplees (CoupledSource.frequency) : borne sur le MACRO-pas
-    // (les couplages s'appliquent une fois par macro-pas), dt <= cfl / mu, sans substeps/stride.
+    // Declared frequencies of the coupled sources (CoupledSource.frequency): bound on the MACRO-step
+    // (the couplings apply once per macro-step), dt <= cfl / mu, without substeps/stride.
     for (const auto& cs : coupled_freqs_) {
       const Real dt_cs = cfl / cs.mu;
       if (dt_cs < dt) { dt = dt_cs; last_dt_reason_ = "coupled_source:" + cs.label; }
     }
-    // Frequences PAR CELLULE (CoupledSource.frequency avec une Expr) : mu(U) reduit (MAX) sur le NIVEAU
-    // GROSSIER des blocs d'entree (la ou vit la CFL AMR), all_reduce_max GLOBAL (TOUS les rangs, neutre
-    // sans box locale), borne dt <= cfl / max(mu). Meme raison "coupled_source:<label>" que la
-    // constante. Aucune source par cellule -> boucle vide (bit-identique). Les Array4 sont reconstruits
-    // a CHAQUE pas (les fabs de la hierarchie sont repointes par le regrid), comme coupled_source_step.
+    // PER-CELL frequencies (CoupledSource.frequency with an Expr): mu(U) reduced (MAX) on the COARSE
+    // level of the input blocks (where the AMR CFL lives), GLOBAL all_reduce_max (ALL ranks, neutral
+    // without a local box), bound dt <= cfl / max(mu). Same reason "coupled_source:<label>" as the
+    // constant. No per-cell source -> empty loop (bit-identical). The Array4 are rebuilt at EACH step
+    // (the hierarchy fabs are repointed by the regrid), like coupled_source_step.
     for (const auto& ce : coupled_freq_exprs_) {
       Real m = 0;
       if (ce.n_in > 0) {
-        auto& Uref = (*blocks_[static_cast<std::size_t>(ce.ins[0].block)].levels)[0].U;  // grossier (lev 0)
+        auto& Uref = (*blocks_[static_cast<std::size_t>(ce.ins[0].block)].levels)[0].U;  // coarse (lev 0)
         for (int li = 0; li < Uref.local_size(); ++li) {
           CoupledFreqKernel kern;
           kern.n_in = ce.n_in;
@@ -727,20 +737,20 @@ class AmrRuntime {
           m = std::max(m, reduce_max_cell(Uref.box(li), kern));
         }
       } else {
-        // Programme SANS champ d'entree (constante en bytecode) : evalue une fois sur les constantes.
+        // Program WITHOUT an input field (constant in bytecode): evaluated once on the constants.
         Real reg[kCsMaxReg];
         for (int c = 0; c < ce.n_const; ++c) reg[c] = ce.kconsts[static_cast<std::size_t>(c)];
         const Real mu0 = ce.prog.eval(reg);
         if (mu0 > Real(0)) m = mu0;
       }
-      const double mu = all_reduce_max(static_cast<double>(m));  // TOUS les rangs (symetrie collective)
+      const double mu = all_reduce_max(static_cast<double>(m));  // ALL ranks (collective symmetry)
       if (mu > 0.0) {
         const Real dt_cs = cfl / static_cast<Real>(mu);
         if (dt_cs < dt) { dt = dt_cs; last_dt_reason_ = "coupled_source:" + ce.label; }
       }
     }
-    // Bornes GLOBALES (AmrRuntime::add_dt_bound, parite avec System::add_dt_bound) : evaluees PAR
-    // RANG puis reduites all_reduce_min (dt identique sur tous les rangs ; <= 0/non finie = inerte).
+    // GLOBAL bounds (AmrRuntime::add_dt_bound, parity with System::add_dt_bound): evaluated PER RANK
+    // then reduced all_reduce_min (dt identical on all ranks; <= 0/non-finite = inert).
     for (const auto& g : dt_bounds_) {
       if (!g.fn) continue;
       double v = g.fn();
@@ -749,84 +759,83 @@ class AmrRuntime {
       if (static_cast<Real>(v) < dt) { dt = static_cast<Real>(v); last_dt_reason_ = "global:" + g.label; }
     }
     if (!std::isfinite(dt)) {
-      dt = cfl * h / kCflSpeedFloor;  // garde-fou (aucun bloc : impossible ici)
+      dt = cfl * h / kCflSpeedFloor;  // guard (no block: impossible here)
       last_dt_reason_ = "degenerate";
     }
     step(dt);
     return dt;
   }
 
-  /// Compteur de MACRO-PAS du moteur (cadence regrid + stride hold-then-catch-up : regrid quand
-  /// macro_step_ % regrid_every == 0, rattrapage stride quand (macro_step_+1) % stride == 0).
+  /// MACRO-STEP counter of the engine (regrid + hold-then-catch-up stride cadence: regrid when
+  /// macro_step_ % regrid_every == 0, stride catch-up when (macro_step_+1) % stride == 0).
   int macro_step() const { return macro_step_; }
-  /// RESTAURE le compteur de macro-pas (IO v1, reserve au restart via AmrSystem::set_clock) : sans
-  /// lui la cadence regrid/stride repartirait de la phase 0 apres une reprise. Aucun effet sur l'etat
-  /// des niveaux ; pose seulement la phase de cadence.
+  /// RESTORES the macro-step counter (IO v1, reserved for restart via AmrSystem::set_clock): without
+  /// it the regrid/stride cadence would restart from phase 0 after a resume. No effect on the level
+  /// state; only sets the cadence phase.
   void set_macro_step(int s) { macro_step_ = s; }
 
-  /// Borne GLOBALE de pas (pendant AMR de System::add_dt_bound) : fn() evaluee une fois par
-  /// step_cfl, all_reduce_min, <= 0/non finie = inerte. Pour couplage/scheduler/politiques user.
+  /// GLOBAL step bound (AMR counterpart of System::add_dt_bound): fn() evaluated once per step_cfl,
+  /// all_reduce_min, <= 0/non-finite = inert. For user coupling/scheduler/policies.
   void add_dt_bound(const std::string& label, std::function<double()> fn) {
     dt_bounds_.push_back(GlobalDtBound{label, std::move(fn)});
   }
 
-  /// Frequence DECLAREE d'une source couplee (CoupledSource.frequency, audit vague 3) : borne de
-  /// pas dt <= cfl / mu sur le MACRO-pas (les couplages s'appliquent une fois par macro-pas).
-  /// mu <= 0 = inerte (pas de borne).
+  /// DECLARED frequency of a coupled source (CoupledSource.frequency, wave-3 audit): step bound
+  /// dt <= cfl / mu on the MACRO-step (the couplings apply once per macro-step). mu <= 0 = inert (no
+  /// bound).
   void add_coupled_frequency(const std::string& label, Real mu) {
     if (mu > Real(0)) coupled_freqs_.push_back(CoupledFreqDecl{label, mu});
   }
 
-  /// Frequence COUPLEE PAR CELLULE (CoupledSource.frequency avec une Expr, raffinement de la frequence
-  /// CONSTANTE ci-dessus) : un programme bytecode mu(U) sur la MEME table de registres que la source
-  /// (entrees in_blocks/in_roles puis constantes consts). Evalue a chaque step_cfl sur le NIVEAU
-  /// GROSSIER des blocs d'entree (la ou vit la CFL AMR : h = dx_coarse), reduction MAX + all_reduce_max
-  /// global, borne dt <= cfl / max(mu) sur le macro-pas. La borne est donc evaluee sur le GROSSIER (pas
-  /// sur les patchs fins) : coherent avec la CFL transport AMR, mais une sous-estimation locale de mu
-  /// sous un patch fin n'est pas vue (choix assume, documente). Programme vide -> ignore (pas de borne).
-  /// Validation de forme (opcodes / registres bornes) et resolution STRICTE des roles, comme
-  /// add_coupled_source.
+  /// PER-CELL COUPLED frequency (CoupledSource.frequency with an Expr, refinement of the CONSTANT
+  /// frequency above): a bytecode program mu(U) on the SAME register table as the source (inputs
+  /// in_blocks/in_roles then constants consts). Evaluated at each step_cfl on the COARSE level of the
+  /// input blocks (where the AMR CFL lives: h = dx_coarse), MAX reduction + global all_reduce_max,
+  /// bound dt <= cfl / max(mu) on the macro-step. The bound is thus evaluated on the COARSE (not on the
+  /// fine patches): consistent with the AMR transport CFL, but a local under-estimate of mu under a
+  /// fine patch is not seen (assumed choice, documented). Empty program -> ignored (no bound). Form
+  /// validation (opcodes / register bounds) and STRICT role resolution, like add_coupled_source.
   void add_coupled_frequency_expr(const std::string& label,
                                   const std::vector<std::string>& in_blocks,
                                   const std::vector<std::string>& in_roles,
                                   const std::vector<double>& consts,
                                   const std::vector<int>& freq_prog_ops,
                                   const std::vector<int>& freq_prog_args) {
-    if (freq_prog_ops.empty() && freq_prog_args.empty()) return;  // pas de frequence par cellule
+    if (freq_prog_ops.empty() && freq_prog_args.empty()) return;  // no per-cell frequency
     const int n_in = static_cast<int>(in_blocks.size());
     const int n_const = static_cast<int>(consts.size());
     if (static_cast<int>(in_roles.size()) != n_in)
       throw std::runtime_error(
-          "AmrRuntime::add_coupled_frequency_expr : in_blocks / in_roles de tailles differentes");
+          "AmrRuntime::add_coupled_frequency_expr : in_blocks / in_roles of different sizes");
     if (n_in + n_const > kCsMaxReg)
       throw std::runtime_error(
-          "AmrRuntime::add_coupled_frequency_expr : trop de registres (entrees + constantes > " +
+          "AmrRuntime::add_coupled_frequency_expr : too many registers (inputs + constants > " +
           std::to_string(kCsMaxReg) + ")");
     if (freq_prog_ops.size() != freq_prog_args.size())
       throw std::runtime_error(
-          "AmrRuntime::add_coupled_frequency_expr : freq_prog_ops / freq_prog_args de tailles differentes");
+          "AmrRuntime::add_coupled_frequency_expr : freq_prog_ops / freq_prog_args of different sizes");
     if (static_cast<int>(freq_prog_ops.size()) > kCsMaxProg)
       throw std::runtime_error(
-          "AmrRuntime::add_coupled_frequency_expr : programme de frequence trop long (> " +
+          "AmrRuntime::add_coupled_frequency_expr : frequency program too long (> " +
           std::to_string(kCsMaxProg) + ")");
-    // Resout (bloc, role) -> (indice de bloc, composante), STRICT (mirroir de add_coupled_source).
+    // Resolves (block, role) -> (block index, component), STRICT (mirror of add_coupled_source).
     std::vector<CsRef> ins(static_cast<std::size_t>(n_in));
     for (int c = 0; c < n_in; ++c) {
       const std::string& block = in_blocks[static_cast<std::size_t>(c)];
       const std::string& role = in_roles[static_cast<std::size_t>(c)];
       const int b = block_index(block);
       if (b < 0)
-        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : aucun bloc nomme '" + block +
+        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : no block named '" + block +
                                  "'");
       const VariableRole r = role_from_name(role);
       if (r == VariableRole::Custom)
         throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : role '" + role +
-                                 "' inconnu (bloc '" + block + "')");
+                                 "' unknown (block '" + block + "')");
       const int comp = blocks_[static_cast<std::size_t>(b)].cons_vars.index_of(r);
       if (comp < 0)
-        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : le bloc '" + block +
-                                 "' n'expose pas le role '" + role +
-                                 "' (pas de repli silencieux sur la composante 0)");
+        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : block '" + block +
+                                 "' does not expose role '" + role +
+                                 "' (no silent fallback to component 0)");
       ins[static_cast<std::size_t>(c)] = {b, comp, CsProgram{}};
     }
     CsProgram pg;
@@ -835,10 +844,10 @@ class AmrRuntime {
       const int opc = freq_prog_ops[static_cast<std::size_t>(k)];
       const int a = freq_prog_args[static_cast<std::size_t>(k)];
       if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
-        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : opcode invalide dans la frequence");
+        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : invalid opcode in the frequency");
       if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
         throw std::runtime_error(
-            "AmrRuntime::add_coupled_frequency_expr : registre hors bornes dans la frequence");
+            "AmrRuntime::add_coupled_frequency_expr : register out of bounds in the frequency");
       pg.op[k] = opc;
       pg.arg[k] = a;
     }
@@ -847,34 +856,34 @@ class AmrRuntime {
         CoupledFreqExprDecl{label, std::move(ins), pg, n_in, n_const, std::move(kconsts)});
   }
 
-  /// Borne ACTIVE du dernier step_cfl ("transport:<bloc>" / "source_frequency:<bloc>" /
-  /// "stability_dt:<bloc>" / "global:<label>" / "degenerate" / "" avant le premier pas).
+  /// ACTIVE bound of the last step_cfl ("transport:<block>" / "source_frequency:<block>" /
+  /// "stability_dt:<block>" / "global:<label>" / "degenerate" / "" before the first step).
   const std::string& last_dt_bound() const { return last_dt_reason_; }
 
-  /// RAPPORT NEWTON (diagnostics IMEX OPT-IN) du bloc @p name, AGREGE sur les niveaux et sous-pas de
-  /// sa DERNIERE avance (cf. AmrRuntimeBlock::newton_report). Pendant AMR de System::newton_report.
-  /// @throws std::runtime_error si le bloc est inconnu, ou s'il n'a pas ete ajoute avec
-  ///         newton_diagnostics=true (pas de rapport silencieusement vide).
+  /// NEWTON REPORT (OPT-IN IMEX diagnostics) of block @p name, AGGREGATED over the levels and substeps
+  /// of its LAST advance (cf. AmrRuntimeBlock::newton_report). AMR counterpart of System::newton_report.
+  /// @throws std::runtime_error if the block is unknown, or if it was not added with
+  ///         newton_diagnostics=true (no silently empty report).
   const NewtonReport& newton_report(const std::string& name) const {
     const int b = block_index(name);
     if (b < 0)
-      throw std::runtime_error("AmrRuntime::newton_report : aucun bloc nomme '" + name + "'");
+      throw std::runtime_error("AmrRuntime::newton_report : no block named '" + name + "'");
     const AmrRuntimeBlock& blk = blocks_[static_cast<std::size_t>(b)];
     if (!blk.newton_diagnostics || !blk.newton_report)
       throw std::runtime_error(
-          "AmrRuntime::newton_report : diagnostics Newton non actives pour le bloc '" + name +
-          "' ; ajouter le bloc avec newton_diagnostics=True (adc.IMEX(newton_diagnostics=True))");
+          "AmrRuntime::newton_report : Newton diagnostics not enabled for block '" + name +
+          "' ; add the block with newton_diagnostics=True (adc.IMEX(newton_diagnostics=True))");
     return *blk.newton_report;
   }
 
-  /// Potentiel grossier (composante 0 de l'aux partage) en champ n*n row-major. Resout les champs
-  /// si besoin (pendant de AmrSystem::potential), puis lit aux(0). Identique pour tous les blocs.
+  /// Coarse potential (component 0 of the shared aux) as an n*n row-major field. Solves the fields if
+  /// needed (counterpart of AmrSystem::potential), then reads aux(0). Identical for all blocks.
   std::vector<double> potential() {
     solve_fields();
     return blocks_[0].potential(aux_[0]);
   }
 
-  /// Vitesse d'onde max du SYSTEME (max sur les blocs) sur le grossier courant. Exige aux a jour.
+  /// Max SYSTEM wave speed (max over the blocks) on the current coarse. Requires the aux up to date.
   Real max_speed() {
     solve_fields();
     Real w = Real(1e-12);
@@ -890,12 +899,12 @@ class AmrRuntime {
     return L.size() >= 2 ? static_cast<int>(L[1].U.box_array().size()) : 0;
   }
 
-  // Empreintes index-space des patchs fins (level + coins lo/hi inclusifs), pour TOUS les niveaux
-  // fins. Lecture seule du BoxArray GLOBAL (toutes boites/tous rangs) deja stocke -> rank-independent,
-  // zero communication, AUCUN cout chemin chaud (query entre les pas). Mirroir de n_patches() : la
-  // meme box_array() qui donne le COMPTE donne les BOITES. Bloc 0 representatif (layout PARTAGE, garde
-  // same_layout_or_throw). Boucle k = 1..nlev-1 : un seul niveau fin aujourd'hui (ratio 2), correct si
-  // un futur ajoute des niveaux (le champ level desambiguise le pas dx = L / (n << level) cote Python).
+  // Index-space signatures of the fine patches (level + inclusive lo/hi corners), for ALL fine levels.
+  // Read-only of the GLOBAL BoxArray (all boxes/all ranks) already stored -> rank-independent, zero
+  // communication, NO hot-path cost (query between steps). Mirror of n_patches(): the same box_array()
+  // that gives the COUNT gives the BOXES. Block 0 representative (SHARED layout, same_layout_or_throw
+  // guard). Loop k = 1..nlev-1: a single fine level today (ratio 2), correct if a future adds levels
+  // (the level field disambiguates the spacing dx = L / (n << level) Python-side).
   std::vector<PatchBox> patch_boxes() const {
     const auto& L = *blocks_[0].levels;
     std::vector<PatchBox> out;
@@ -908,25 +917,26 @@ class AmrRuntime {
   }
 
  private:
-  // Index du bloc nomme @p name dans le registre (-1 si absent). Pendant de AmrSystem::Impl::block_index
-  // (la facade nomme les blocs ; les sources couplees les ciblent par nom, resolu une fois a l'enregistrement).
+  // Index of the block named @p name in the registry (-1 if absent). Counterpart of
+  // AmrSystem::Impl::block_index (the facade names the blocks; the coupled sources target them by name,
+  // resolved once at registration).
   int block_index(const std::string& name) const {
     for (std::size_t i = 0; i < blocks_.size(); ++i)
       if (blocks_[i].name == name) return static_cast<int>(i);
     return -1;
   }
 
-  // Reference resolue d'un champ d'une source couplee : (indice de bloc, composante) + le programme
-  // bytecode du terme (vide pour une entree). Les entrees ne portent que block/comp ; les sorties
-  // portent en plus le programme postfixe evalue par cellule. On capture l'INDICE de bloc (pas un
-  // pointeur de fab) : les Array4 sont reconstruits a chaque application, par niveau.
+  // Resolved reference of a coupled-source field: (block index, component) + the term bytecode program
+  // (empty for an input). Inputs carry only block/comp; outputs carry in addition the postfix program
+  // evaluated per cell. We capture the block INDEX (not a fab pointer): the Array4 are rebuilt at each
+  // application, per level.
   struct CsRef {
     int block;
     int comp;
-    CsProgram prog;  // sorties : programme du terme ; entrees : inutilise (CsProgram{})
+    CsProgram prog;  // outputs: term program; inputs: unused (CsProgram{})
   };
-  // Une source couplee enregistree : ses entrees, ses termes de sortie et ses constantes, pretes a etre
-  // marshalees dans un CoupledSourceKernel par niveau / par fab a l'application.
+  // A registered coupled source: its inputs, its output terms and its constants, ready to be marshaled
+  // into a CoupledSourceKernel per level / per fab at application.
   struct CoupledSourceSpec {
     std::vector<CsRef> ins;
     std::vector<CsRef> outs;
@@ -943,21 +953,21 @@ class AmrRuntime {
   bool replicated_coarse_;
   GeometricMG mg_;
   std::vector<AmrRuntimeBlock> blocks_;
-  // Bornes GLOBALES de pas (add_dt_bound, parite System) + borne ACTIVE du dernier step_cfl.
+  // GLOBAL step bounds (add_dt_bound, parity with System) + ACTIVE bound of the last step_cfl.
   struct GlobalDtBound {
     std::string label;
     std::function<double()> fn;
   };
   std::vector<GlobalDtBound> dt_bounds_;
-  // Frequences declarees des sources couplees (borne dt <= cfl/mu sur le macro-pas, vague 3).
+  // Declared frequencies of the coupled sources (bound dt <= cfl/mu on the macro-step, wave 3).
   struct CoupledFreqDecl {
     std::string label;
     Real mu;
   };
   std::vector<CoupledFreqDecl> coupled_freqs_;
-  // Frequences PAR CELLULE des sources couplees (CoupledSource.frequency avec une Expr) : programme
-  // bytecode mu(U) evalue sur le grossier a chaque step_cfl (MAX + all_reduce_max -> dt <= cfl/max(mu)).
-  // ins = (bloc, comp) des entrees (prog inutilise) ; kconsts = constantes (memes que la source).
+  // PER-CELL frequencies of the coupled sources (CoupledSource.frequency with an Expr): bytecode
+  // program mu(U) evaluated on the coarse at each step_cfl (MAX + all_reduce_max -> dt <= cfl/max(mu)).
+  // ins = (block, comp) of the inputs (prog unused); kconsts = constants (same as the source).
   struct CoupledFreqExprDecl {
     std::string label;
     std::vector<CsRef> ins;
@@ -968,12 +978,12 @@ class AmrRuntime {
   };
   std::vector<CoupledFreqExprDecl> coupled_freq_exprs_;
   std::string last_dt_reason_;
-  std::vector<MultiFab> aux_;  // [niveau], partage par tous les blocs
-  std::vector<CoupledSourceSpec> coupled_sources_;  // sources couplees enregistrees (appliquees apres transport)
-  // REGRID D'UNION DES TAGS (capstone Phase 2, C.6). regrid_every_ == 0 -> hierarchie FIGEE (defaut,
-  // bit-identique). block_tag_ : predicat de tag PAR BLOC (D1 ; meme taille que blocks_, vide = ce
-  // bloc ne tague rien de son cote). phi_tag_ : predicat de tag de phi sur |grad phi| (D4 ; vide = phi
-  // ne contribue pas a l'union).
+  std::vector<MultiFab> aux_;  // [level], shared by all blocks
+  std::vector<CoupledSourceSpec> coupled_sources_;  // registered coupled sources (applied after transport)
+  // UNION-TAGS REGRID (capstone Phase 2, C.6). regrid_every_ == 0 -> FROZEN hierarchy (default,
+  // bit-identical). block_tag_: PER-BLOCK tag predicate (D1; same size as blocks_, empty = this block
+  // tags nothing on its side). phi_tag_: phi tag predicate on |grad phi| (D4; empty = phi does not
+  // contribute to the union).
   std::vector<TagPredicate> block_tag_;
   TagPredicate phi_tag_;
   int regrid_every_ = 0;

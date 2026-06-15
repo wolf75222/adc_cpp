@@ -4,47 +4,47 @@
 #include <vector>
 
 /// @file
-/// @brief PODs d'OPTIONS des facades publiques (System / AmrSystem), regroupant les longues familles
-///        de parametres HOMOGENES qui posaient un footgun d'ordre (C++ Core Guidelines I.23).
+/// @brief OPTIONS PODs for the public facades (System / AmrSystem), grouping the long families of
+///        HOMOGENEOUS parameters that posed an ordering footgun (C++ Core Guidelines I.23).
 ///
-/// Couche : `include/adc/runtime`.
-/// Role : porter, en un seul agregat nomme, les reglages d'un etage source condense par Schur et la
-///   description bytecode d'une source couplee inter-especes. Ces familles etaient auparavant des
-///   listes plates de parametres du MEME type (plusieurs `std::string` adjacents, plusieurs
-///   `std::vector<int>` paralleles) -- intervertibles silencieusement a l'appel. Les regrouper en POD
-///   nomme rend l'appel auto-documente (initialiseurs designes) et supprime le risque d'inversion.
-/// Contrat : POD plat traversant les bindings sans friction. Les DEFAUTS in-class reproduisent
-///   EXACTEMENT les anciens defauts des parametres a plat -> aucun changement de comportement.
+/// Layer: `include/adc/runtime`.
+/// Role: carry, in a single named aggregate, the settings of a Schur-condensed source stage and the
+///   bytecode description of an inter-species coupled source. These families were previously flat
+///   lists of parameters of the SAME type (several adjacent `std::string`, several parallel
+///   `std::vector<int>`) -- silently swappable at the call site. Grouping them into a named POD makes
+///   the call self-documenting (designated initializers) and removes the swap risk.
+/// Contract: flat POD crossing the bindings without friction. The in-class DEFAULTS reproduce EXACTLY
+///   the old defaults of the flat parameters -> no behavior change.
 ///
-/// Invariants :
-/// - chaque champ garde le nom, le type et le defaut de l'ancien parametre a plat homonyme ;
-/// - ces PODs vivent AU-DESSUS de la couche ABI (compiled_block_abi.hpp / native_loader.hpp) : ils ne
-///   traversent jamais la frontiere extern "C" d'un loader .so. L'ABI SEMANTIQUE extern "C"
-///   (residual / advance, structs traversant le loader) reste donc INCHANGEE. En revanche le LITTERAL
-///   abi_key() CHANGE : il embarque le jeton headers=ADC_HEADER_SIG (sha256 conservateur du chemin et
-///   du contenu de CHAQUE en-tete sous include/, cf. abi_key.hpp et python/CMakeLists.txt) ; le seul
-///   fait d'AJOUTER cet en-tete et d'EDITER system.hpp / amr_system.hpp deplace ADC_HEADER_SIG. C'est
-///   ATTENDU et inoffensif : aucune ABI semantique ne change, mais add_native_block rejettera les .so
-///   AOT generes avant ce changement (signature divergente) -> une regeneration unique des .so perimes.
+/// Invariants:
+/// - each field keeps the name, type and default of the old flat parameter of the same name;
+/// - these PODs live ABOVE the ABI layer (compiled_block_abi.hpp / native_loader.hpp): they never
+///   cross the extern "C" boundary of a .so loader. The SEMANTIC extern "C" ABI (residual / advance,
+///   structs crossing the loader) therefore stays UNCHANGED. On the other hand the abi_key() LITERAL
+///   CHANGES: it embeds the token headers=ADC_HEADER_SIG (conservative sha256 of the path and content
+///   of EVERY header under include/, cf. abi_key.hpp and python/CMakeLists.txt); merely ADDING this
+///   header and EDITING system.hpp / amr_system.hpp shifts ADC_HEADER_SIG. This is EXPECTED and
+///   harmless: no semantic ABI changes, but add_native_block will reject the AOT .so generated before
+///   this change (divergent signature) -> a one-time regeneration of the stale .so.
 
 namespace adc {
 
-/// @brief Reglages de l'ETAGE SOURCE condense par Schur (cf. System::set_source_stage /
-///        AmrSystem::set_source_stage). Regroupe le solve Krylov et les DESCRIPTEURS de champs --
-///        une famille de quatre `std::string` adjacents qui etaient intervertibles a l'appel.
+/// @brief Settings of the Schur-condensed SOURCE STAGE (cf. System::set_source_stage /
+///        AmrSystem::set_source_stage). Groups the Krylov solve and the field DESCRIPTORS --
+///        a family of four adjacent `std::string` that were swappable at the call site.
 ///
-/// Usage : construit par la facade (ou par les bindings, a partir des kwargs Python a plat) puis
-///   passe a set_source_stage. Tous defauts (POD vide) = comportement historique bit-identique.
-/// Contrat : les DEFAUTS reproduisent les anciens defauts des parametres a plat.
-///  - krylov_tol / krylov_max_iters : tolerance et budget du solve Krylov (BiCGStab) de l'etage.
-///    <= 0 (defaut) = constantes historiques du stepper (1e-10 ; 400 cartesien, 600 polaire).
-///  - density / momentum_x / momentum_y / energy : DESCRIPTEURS des champs de l'etage. Chaine VIDE
-///    (defaut) = role canonique (Density / MomentumX / MomentumY / Energy optionnel), bit-identique.
-///    Sinon : un NOM DE ROLE stable ("density", "momentum_x", ...) ou un NOM DE VARIABLE du bloc.
-///    energy == "none" desactive la mise a jour d'energie.
-///  - bz_aux_component : composante du canal aux lue comme champ magnetique Omega. < 0 (defaut) =
-///    canal canonique B_z (kAuxBaseComps), bit-identique. (Ignore par AmrSystem : etage mono-bloc
-///    sur le canal canonique.)
+/// Usage: built by the facade (or by the bindings, from the flat Python kwargs) then passed to
+///   set_source_stage. All defaults (empty POD) = bit-identical historical behavior.
+/// Contract: the DEFAULTS reproduce the old defaults of the flat parameters.
+///  - krylov_tol / krylov_max_iters: tolerance and budget of the stage Krylov solve (BiCGStab).
+///    <= 0 (default) = historical stepper constants (1e-10; 400 cartesian, 600 polar).
+///  - density / momentum_x / momentum_y / energy: DESCRIPTORS of the stage fields. EMPTY string
+///    (default) = canonical role (Density / MomentumX / MomentumY / optional Energy), bit-identical.
+///    Otherwise: a stable ROLE NAME ("density", "momentum_x", ...) or a VARIABLE NAME of the block.
+///    energy == "none" disables the energy update.
+///  - bz_aux_component: aux-channel component read as the magnetic field Omega. < 0 (default) =
+///    canonical B_z channel (kAuxBaseComps), bit-identical. (Ignored by AmrSystem: mono-block stage
+///    on the canonical channel.)
 struct SourceStageOptions {
   double krylov_tol = 0.0;
   int krylov_max_iters = 0;
@@ -55,25 +55,25 @@ struct SourceStageOptions {
   int bz_aux_component = -1;
 };
 
-/// @brief Description BYTECODE d'une SOURCE COUPLEE generique inter-especes (cf.
-///        System::add_coupled_source / AmrSystem::add_coupled_source). Regroupe les tableaux PLATS
-///        de l'ABI bytecode -- six `std::vector` (quatre de descripteurs bloc/role, deux+ de programme
-///        machine a pile) intervertibles a l'appel -- en un seul agregat nomme.
+/// @brief BYTECODE description of a generic inter-species COUPLED SOURCE (cf.
+///        System::add_coupled_source / AmrSystem::add_coupled_source). Groups the FLAT arrays
+///        of the bytecode ABI -- six `std::vector` (four of block/role descriptors, two+ of stack
+///        machine program) swappable at the call site -- into a single named aggregate.
 ///
-/// Usage : construit par la facade (ou par les bindings, a partir des kwargs Python a plat) puis passe
-///   a add_coupled_source avec la frequence et le label restes a plat (un double et une chaine, types
-///   distincts, hors footgun homogene). Une forme mal formee leve une erreur EXPLICITE a l'ajout.
-/// Contrat : ABI PLATE -- aucun objet C++ ne traverse la frontiere ; ce POD n'est qu'un porteur de
-///   tableaux cote facade. Les DEFAUTS reproduisent les anciens defauts des parametres a plat (les
-///   programmes de frequence par cellule VIDES = frequence constante seule, bit-identique).
-///  - in_blocks / in_roles : blocs lus en entree et leurs roles (un par registre d'entree).
-///  - consts : constantes (.param()), chargees apres les entrees.
-///  - out_blocks / out_roles : bloc cible et role cible de chaque terme de source.
-///  - prog_ops / prog_args : opcodes concatenes de TOUS les termes (machine a pile) et leurs arguments
-///    paralleles (indice de registre pour PushReg).
-///  - prog_lens : longueur du programme de chaque terme (segmente prog_ops / prog_args dans l'ordre).
-///  - freq_prog_ops / freq_prog_args : programme OPTIONNEL d'une frequence PAR CELLULE mu(U) (meme
-///    machine a pile, MEME table de registres). VIDES (defaut) = frequence constante seule.
+/// Usage: built by the facade (or by the bindings, from the flat Python kwargs) then passed to
+///   add_coupled_source with the frequency and the label kept flat (a double and a string, distinct
+///   types, outside the homogeneous footgun). A malformed shape raises an EXPLICIT error on add.
+/// Contract: FLAT ABI -- no C++ object crosses the boundary; this POD is only a facade-side carrier of
+///   arrays. The DEFAULTS reproduce the old defaults of the flat parameters (the EMPTY per-cell
+///   frequency programs = constant frequency alone, bit-identical).
+///  - in_blocks / in_roles: blocks read as input and their roles (one per input register).
+///  - consts: constants (.param()), loaded after the inputs.
+///  - out_blocks / out_roles: target block and target role of each source term.
+///  - prog_ops / prog_args: concatenated opcodes of ALL terms (stack machine) and their parallel
+///    arguments (register index for PushReg).
+///  - prog_lens: program length of each term (segments prog_ops / prog_args in order).
+///  - freq_prog_ops / freq_prog_args: OPTIONAL program of a PER-CELL frequency mu(U) (same stack
+///    machine, SAME register table). EMPTY (default) = constant frequency alone.
 struct CoupledSourceProgram {
   std::vector<std::string> in_blocks;
   std::vector<std::string> in_roles;
