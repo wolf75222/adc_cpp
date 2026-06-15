@@ -733,6 +733,13 @@ depends_on = []
 tested_by = []
 testable = false
 
+[docs."docs/sphinx/development/version-control-and-branches.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
 [docs."docs/sphinx/getting-started/quickstart.md"]
 owner = "Romain"
 mode = "warning"

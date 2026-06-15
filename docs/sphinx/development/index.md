@@ -10,6 +10,7 @@ how it is tested and validated, and how to contribute.
 documentation
 testing
 numerical-validation
+version-control-and-branches
 ```
 
 ## Canonical design guides
