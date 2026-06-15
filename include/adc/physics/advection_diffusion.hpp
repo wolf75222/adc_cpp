@@ -1,11 +1,11 @@
 #pragma once
 
 /// @file
-/// @brief Modele d'advection-diffusion scalaire (AdvectionDiffusion) : brique de TEST/VALIDATION.
+/// @brief Scalar advection-diffusion model (AdvectionDiffusion): TEST/VALIDATION brick.
 ///
-/// Utilisee dans les tests C++ du coeur (tests/test_weno5_ssprk3.cpp) comme modele de reference
-/// pour WENO5/SSPRK3 ; non utilisee par adc_cases. Conservee comme brique de validation et exemple
-/// illustrant le trait DiffusiveModel (nu > 0 active le terme parabolique cote coeur).
+/// Used in the core C++ tests (tests/test_weno5_ssprk3.cpp) as a reference model
+/// for WENO5/SSPRK3; not used by adc_cases. Kept as a validation brick and as an example
+/// illustrating the DiffusiveModel trait (nu > 0 enables the parabolic term on the core side).
 
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
@@ -15,39 +15,39 @@
 namespace adc {
 
 /**
- * Advection-diffusion scalaire : d_t u + a . grad u = nu Lap u.
+ * Scalar advection-diffusion: d_t u + a . grad u = nu Lap u.
  *
- * Brique de TEST/VALIDATION (non utilisee par adc_cases au 2026-06-06) ;
- * conservee comme exemple et comme modele de reference pour tests/test_weno5_ssprk3.cpp.
+ * TEST/VALIDATION brick (not used by adc_cases as of 2026-06-06);
+ * kept as an example and as a reference model for tests/test_weno5_ssprk3.cpp.
  *
- * Illustre la remarque "la diffusion, c'est comme un flux de plus" : on garde le
- * PhysicalModel d'advection et on ajoute la seule methode diffusivity(). Le terme
- * parabolique +nu Lap(u) est alors fourni par le coeur (assemble_rhs detecte le trait
- * DiffusiveModel), sans toucher au coupleur. nu = 0 redonne l'advection pure.
+ * Illustrates the remark "diffusion is just one more flux": we keep the
+ * advection PhysicalModel and add only the diffusivity() method. The
+ * parabolic term +nu Lap(u) is then provided by the core (assemble_rhs detects the
+ * DiffusiveModel trait), without touching the coupler. nu = 0 recovers pure advection.
  */
 struct AdvectionDiffusion {
-  using State = StateVec<1>;  ///< une variable conservee : le scalaire u
-  using Aux = adc::Aux;       ///< champs auxiliaires (inutilises, non couple)
-  static constexpr int n_vars = 1;  ///< nombre de variables conservees
+  using State = StateVec<1>;  ///< one conservative variable: the scalar u
+  using Aux = adc::Aux;       ///< auxiliary fields (unused, not coupled)
+  static constexpr int n_vars = 1;  ///< number of conservative variables
 
-  Real ax = 1.0;   ///< vitesse d'advection en x
-  Real ay = 0.0;   ///< vitesse d'advection en y
-  Real nu = 0.0;   ///< diffusivite (0 = advection pure)
+  Real ax = 1.0;   ///< advection velocity in x
+  Real ay = 0.0;   ///< advection velocity in y
+  Real nu = 0.0;   ///< diffusivity (0 = pure advection)
 
-  /// Flux d'advection F = a u dans la direction dir.
+  /// Advection flux F = a u in direction dir.
   ADC_HD State flux(const State& u, const Aux&, int dir) const {
     return State{(dir == 0 ? ax : ay) * u[0]};  // F = a u
   }
-  /// Vitesse d'onde maximale : module de la vitesse d'advection dans la direction dir.
+  /// Maximum wave speed: magnitude of the advection velocity in direction dir.
   ADC_HD Real max_wave_speed(const State&, const Aux&, int dir) const {
     const Real v = (dir == 0) ? ax : ay;
     return v < 0 ? -v : v;
   }
-  /// Terme source nul.
+  /// Zero source term.
   ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  /// Second membre de Poisson : u (non couple ici, present pour le concept).
+  /// Poisson right-hand side: u (not coupled here, present for the concept).
   ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
-  /// Diffusivite nu : active le terme parabolique cote coeur (trait DiffusiveModel).
+  /// Diffusivity nu: enables the parabolic term on the core side (DiffusiveModel trait).
   ADC_HD Real diffusivity() const { return nu; }
 };
 

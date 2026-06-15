@@ -3,27 +3,27 @@
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
 #include <adc/core/variables.hpp>
-#include <adc/physics/euler.hpp>  // Euler : reutilise comme brique hyperbolique CompressibleFlux
+#include <adc/physics/euler.hpp>  // Euler: reused as the CompressibleFlux hyperbolic brick
 
 #include <cmath>
 
 /// @file
-/// @brief Briques HYPERBOLIQUES generiques : Vars (cons U / prim P + conversions + descripteur) +
-///        flux + vitesses d'onde. Chacune satisfait le concept HyperbolicPhysicalModel : State, Prim,
+/// @brief Generic HYPERBOLIC bricks: Vars (cons U / prim P + conversions + descriptor) +
+///        flux + wave speeds. Each one satisfies the HyperbolicPhysicalModel concept: State, Prim,
 ///        n_vars, flux, max_wave_speed, to_primitive/to_conservative, conservative_vars/primitive_vars
-///        (+ pressure/wave_speeds si flux HLLC). Source et second membre elliptique sont des briques
-///        SEPAREES (physics/source.hpp, physics/elliptic.hpp) ; CompositeModel (physics/composite.hpp)
-///        les assemble. ExBVelocity (1 var), CompressibleFlux (= Euler, 4 var), IsothermalFlux (3 var).
+///        (+ pressure/wave_speeds if HLLC flux). Source and elliptic right-hand side are SEPARATE
+///        bricks (physics/source.hpp, physics/elliptic.hpp); CompositeModel (physics/composite.hpp)
+///        assembles them. ExBVelocity (1 var), CompressibleFlux (= Euler, 4 var), IsothermalFlux (3 var).
 
 namespace adc {
 
-/// Advection scalaire par la derive E x B : v = (-d_y phi, d_x phi)/B0 (a divergence nulle).
+/// Scalar advection by the E x B drift: v = (-d_y phi, d_x phi)/B0 (divergence-free).
 ///
-/// Brique HYPERBOLIQUE 1-variable (densite scalaire n). Satisfait HyperbolicPhysicalModel.
-/// CONTRAT : fonctions purement ponctuelles, device-callables (ADC_HD). Aucune MultiFab,
-/// aucune allocation, aucun acces global. La divergence nulle de la derive E x B assure
-/// la conservation exacte (pas de terme de compression dans ce flux).
-/// Variables cons = prim = {n} (scalaire : pas de conversion nontriviale).
+/// 1-variable HYPERBOLIC brick (scalar density n). Satisfies HyperbolicPhysicalModel.
+/// CONTRACT: purely pointwise functions, device-callable (ADC_HD). No MultiFab,
+/// no allocation, no global access. The divergence-free E x B drift ensures
+/// exact conservation (no compression term in this flux).
+/// Variables cons = prim = {n} (scalar: no nontrivial conversion).
 struct ExBVelocity {
   static constexpr int n_vars = 1;
   using State = StateVec<1>;
@@ -40,13 +40,13 @@ struct ExBVelocity {
     const Real d = velocity(a, dir);
     return d < 0 ? -d : d;
   }
-  /// Spectre : une onde, la vitesse de derive dans la direction dir.
+  /// Spectrum: one wave, the drift speed in direction dir.
   ADC_HD StateVec<1> eigenvalues(const StateVec<1>&, const Aux& a, int dir) const {
     StateVec<1> e{};
     e[0] = velocity(a, dir);
     return e;
   }
-  // Scalaire : variables primitives = conservatives (densite transportee).
+  // Scalar: primitive variables = conservative (transported density).
   using Prim = StateVec<1>;
   ADC_HD Prim to_primitive(const StateVec<1>& u) const { return u; }
   ADC_HD StateVec<1> to_conservative(const Prim& p) const { return p; }
@@ -58,31 +58,31 @@ struct ExBVelocity {
   }
 };
 
-/// Advection scalaire par la derive E x B en coordonnees POLAIRES (r, theta) -- chantier "grille
-/// polaire annulaire", Phase 1. C'est une brique SEPAREE d'ExBVelocity (cartesienne), pas une
-/// modification : le solveur polaire (assemble_rhs_polar) l'utilise sur une PolarGeometry.
+/// Scalar advection by the E x B drift in POLAR coordinates (r, theta) -- "annular polar grid"
+/// effort, Phase 1. This is a brick SEPARATE from ExBVelocity (Cartesian), not a
+/// modification: the polar solver (assemble_rhs_polar) uses it on a PolarGeometry.
 ///
-/// DISPOSITION DU CANAL aux EN POLAIRE (documentee, contrat de cette brique) -- les composantes de
-/// base [0..2] portent le champ E dans la BASE LOCALE ORTHONORMEE (e_r, e_theta) :
-///   aux.phi    [0] = phi (potentiel ; inutilise par le flux, present pour symetrie)
-///   aux.grad_x [1] = grad_r     = d phi / d r            (composante radiale de grad phi)
-///   aux.grad_y [2] = grad_theta = (1/r) d phi / d theta  (composante AZIMUTALE PHYSIQUE de grad phi)
-/// On REUTILISE les deux emplacements grad_x/grad_y de adc::Aux pour grad_r/grad_theta (pas de
-/// nouveau champ aux) ; le SENS est polaire et porte par cette brique seule. grad_theta est la
-/// derivee PHYSIQUE (deja divisee par r) : ainsi la vitesse ci-dessous est symetrique de la
-/// cartesienne (vr <- -grad_theta/B, vtheta <- grad_r/B) et l'appelant qui remplit aux porte le 1/r.
+/// aux CHANNEL LAYOUT IN POLAR (documented, contract of this brick) -- the base components
+/// [0..2] carry the E field in the LOCAL ORTHONORMAL BASIS (e_r, e_theta):
+///   aux.phi    [0] = phi (potential; unused by the flux, present for symmetry)
+///   aux.grad_x [1] = grad_r     = d phi / d r            (radial component of grad phi)
+///   aux.grad_y [2] = grad_theta = (1/r) d phi / d theta  (PHYSICAL AZIMUTHAL component of grad phi)
+/// We REUSE the two grad_x/grad_y slots of adc::Aux for grad_r/grad_theta (no new aux
+/// field); the MEANING is polar and carried by this brick alone. grad_theta is the
+/// PHYSICAL derivative (already divided by r): thus the velocity below is symmetric to the
+/// Cartesian one (vr <- -grad_theta/B, vtheta <- grad_r/B) and the caller that fills aux carries the 1/r.
 ///
-/// VITESSE E x B EN POLAIRE (composantes PHYSIQUES dans la base locale) :
-///   v_r     = -(1/(B r)) d phi/d theta = -grad_theta / B   (dir == 0, radiale)
-///   v_theta =  (1/B)     d phi/d r     =  grad_r     / B   (dir == 1, azimutale)
-/// Le flux rendu (dir 0 = F_r = n v_r ; dir 1 = F_theta = n v_theta) est PHYSIQUE ; la metrique 1/r
-/// et la divergence (1/r) d_r(r F_r) + (1/r) d_theta(F_theta) sont portees par assemble_rhs_polar,
-/// PAS par cette brique. La brique reste ainsi une physique pure (aucune box, aucun r).
+/// E x B VELOCITY IN POLAR (PHYSICAL components in the local basis):
+///   v_r     = -(1/(B r)) d phi/d theta = -grad_theta / B   (dir == 0, radial)
+///   v_theta =  (1/B)     d phi/d r     =  grad_r     / B   (dir == 1, azimuthal)
+/// The returned flux (dir 0 = F_r = n v_r; dir 1 = F_theta = n v_theta) is PHYSICAL; the 1/r metric
+/// and the divergence (1/r) d_r(r F_r) + (1/r) d_theta(F_theta) are carried by assemble_rhs_polar,
+/// NOT by this brick. The brick thus stays a pure physics (no box, no r).
 struct ExBVelocityPolar {
   static constexpr int n_vars = 1;
   using State = StateVec<1>;
   Real B0 = 1;
-  /// Composante PHYSIQUE de la vitesse de derive dans la direction d'indice dir (0 = r, 1 = theta).
+  /// PHYSICAL component of the drift velocity in direction index dir (0 = r, 1 = theta).
   ADC_HD Real velocity(const Aux& a, int dir) const {
     return (dir == 0) ? (-a.grad_y / B0) : (a.grad_x / B0);
   }
@@ -95,13 +95,13 @@ struct ExBVelocityPolar {
     const Real d = velocity(a, dir);
     return d < 0 ? -d : d;
   }
-  /// Spectre : une onde, la vitesse de derive dans la direction dir.
+  /// Spectrum: one wave, the drift speed in direction dir.
   ADC_HD StateVec<1> eigenvalues(const StateVec<1>&, const Aux& a, int dir) const {
     StateVec<1> e{};
     e[0] = velocity(a, dir);
     return e;
   }
-  // Scalaire : variables primitives = conservatives (densite transportee).
+  // Scalar: primitive variables = conservative (transported density).
   using Prim = StateVec<1>;
   ADC_HD Prim to_primitive(const StateVec<1>& u) const { return u; }
   ADC_HD StateVec<1> to_conservative(const Prim& p) const { return p; }
@@ -113,21 +113,21 @@ struct ExBVelocityPolar {
   }
 };
 
-/// Flux d'Euler compressible 2D (reutilise Euler : gamma, pression, vitesses d'onde signees).
-/// Alias de compat : CompressibleFlux == Euler ; la brique hyperbolique complete.
+/// Compressible 2D Euler flux (reuses Euler: gamma, pressure, signed wave speeds).
+/// Compat alias: CompressibleFlux == Euler; the complete hyperbolic brick.
 using CompressibleFlux = Euler;
 
-/// Flux d'Euler ISOTHERME (p = cs2 rho), 3 variables (rho, rho u, rho v).
+/// ISOTHERMAL Euler flux (p = cs2 rho), 3 variables (rho, rho u, rho v).
 ///
-/// Brique HYPERBOLIQUE 3-variables (densite + quantites de mouvement). Satisfait
-/// HyperbolicPhysicalModel. Loi de fermeture isotherme : p = cs2 * rho (pas d'equation
-/// d'energie). CONTRAT : fonctions purement ponctuelles, device-callables (ADC_HD).
-/// Aucune MultiFab, aucune allocation, aucun acces global.
-/// Invariant : cs2 > 0 pour que la vitesse d'onde sqrt(cs2) soit reelle.
+/// 3-variable HYPERBOLIC brick (density + momenta). Satisfies
+/// HyperbolicPhysicalModel. Isothermal closure law: p = cs2 * rho (no energy
+/// equation). CONTRACT: purely pointwise functions, device-callable (ADC_HD).
+/// No MultiFab, no allocation, no global access.
+/// Invariant: cs2 > 0 so that the wave speed sqrt(cs2) is real.
 struct IsothermalFlux {
   static constexpr int n_vars = 3;
-  using State = StateVec<3>;  ///< variables conservatives (rho, rho u, rho v)
-  using Prim = StateVec<3>;   ///< variables primitives (rho, u, v)
+  using State = StateVec<3>;  ///< conservative variables (rho, rho u, rho v)
+  using Prim = StateVec<3>;   ///< primitive variables (rho, u, v)
   Real cs2 = 1;
   ADC_HD StateVec<3> flux(const StateVec<3>& u, const Aux&, int dir) const {
     const Real rho = u[0];
@@ -139,7 +139,7 @@ struct IsothermalFlux {
     f[2] = u[2] * vn + (dir == 1 ? p : Real(0));
     return f;
   }
-  /// Conservatif -> primitif : (rho, rho u, rho v) -> (rho, u, v).
+  /// Conservative -> primitive: (rho, rho u, rho v) -> (rho, u, v).
   ADC_HD Prim to_primitive(const StateVec<3>& u) const {
     Prim p{};
     p[0] = u[0];
@@ -147,7 +147,7 @@ struct IsothermalFlux {
     p[2] = u[2] / u[0];
     return p;
   }
-  /// Primitif -> conservatif : (rho, u, v) -> (rho, rho u, rho v).
+  /// Primitive -> conservative: (rho, u, v) -> (rho, rho u, rho v).
   ADC_HD StateVec<3> to_conservative(const Prim& p) const {
     StateVec<3> u{};
     u[0] = p[0];
@@ -161,7 +161,7 @@ struct IsothermalFlux {
     const Real a = vn < 0 ? -vn : vn;
     return a + std::sqrt(cs2);
   }
-  /// Spectre complet : (v_dir - c, v_dir, v_dir + c), c = sqrt(cs2).
+  /// Full spectrum: (v_dir - c, v_dir, v_dir + c), c = sqrt(cs2).
   ADC_HD StateVec<3> eigenvalues(const StateVec<3>& u, const Aux&, int dir) const {
     const Prim p = to_primitive(u);
     const Real vn = (dir == 0 ? p[1] : p[2]);
@@ -172,7 +172,7 @@ struct IsothermalFlux {
     e[2] = vn + c;
     return e;
   }
-  /// Vitesses signees (HLL/HLLC) : v_dir -+ c_s.
+  /// Signed speeds (HLL/HLLC): v_dir -+ c_s.
   ADC_HD void wave_speeds(const StateVec<3>& u, const Aux&, int dir, Real& smin,
                           Real& smax) const {
     const Prim p = to_primitive(u);
@@ -191,50 +191,50 @@ struct IsothermalFlux {
   }
 };
 
-/// Flux d'Euler ISOTHERME en geometrie POLAIRE (anneau r, theta), 3 variables (rho, rho v_r,
-/// rho v_theta) -- chantier "grille polaire fluide", Voie A etape 1. C'est une brique SEPAREE
-/// d'IsothermalFlux (cartesien) : le flux PHYSIQUE et les conversions sont IDENTIQUES (les
-/// composantes 1, 2 sont la quantite de mouvement dans la BASE LOCALE ORTHONORMEE (e_r, e_theta) ;
-/// dir 0 = radial, dir 1 = azimutal), mais cette brique ajoute le TERME GEOMETRIQUE DE COURBURE
-/// porte par la metrique polaire. On herite IsothermalFlux pour ne PAS dupliquer flux /
-/// conversions / vitesses d'onde (cartesien strictement intact, bit-identique) et on n'ajoute QUE
-/// la methode polar_geom_source.
+/// ISOTHERMAL Euler flux in POLAR geometry (ring r, theta), 3 variables (rho, rho v_r,
+/// rho v_theta) -- "polar fluid grid" effort, Path A step 1. This is a brick SEPARATE
+/// from IsothermalFlux (Cartesian): the PHYSICAL flux and the conversions are IDENTICAL (the
+/// components 1, 2 are the momentum in the LOCAL ORTHONORMAL BASIS (e_r, e_theta);
+/// dir 0 = radial, dir 1 = azimuthal), but this brick adds the GEOMETRIC CURVATURE TERM
+/// carried by the polar metric. We inherit IsothermalFlux to NOT duplicate flux /
+/// conversions / wave speeds (Cartesian strictly intact, bit-identical) and add ONLY
+/// the polar_geom_source method.
 ///
-/// POURQUOI UN TERME GEOMETRIQUE EXPLICITE (et non une simple divergence conservative) :
-/// l'equation vectorielle de quantite de mouvement d_t(rho v) + div(rho v (x) v) + grad p = 0,
-/// projetee sur la base LOCALE polaire (e_r, e_theta) qui TOURNE avec theta, donne pour les
-/// composantes PHYSIQUES m_r = rho v_r, m_theta = rho v_theta :
+/// WHY AN EXPLICIT GEOMETRIC TERM (and not a plain conservative divergence):
+/// the vector momentum equation d_t(rho v) + div(rho v (x) v) + grad p = 0,
+/// projected onto the LOCAL polar basis (e_r, e_theta) which ROTATES with theta, gives for the
+/// PHYSICAL components m_r = rho v_r, m_theta = rho v_theta:
 ///   d_t m_r     + (1/r) d_r(r (rho v_r^2 + p)) + (1/r) d_theta(rho v_r v_theta)
-///                 - (rho v_theta^2 + p)/r            = 0      (terme CENTRIFUGE + pression)
+///                 - (rho v_theta^2 + p)/r            = 0      (CENTRIFUGAL + pressure term)
 ///   d_t m_theta + (1/r) d_r(r rho v_r v_theta)     + (1/r) d_theta(rho v_theta^2 + p)
-///                 + (rho v_r v_theta)/r             = 0      (terme de COURBURE croisee)
-/// L'operateur assemble_rhs_polar calcule EXACTEMENT -(1/r) d_r(r F_r) - (1/r) d_theta(F_theta)
-/// avec F_r, F_theta = IsothermalFlux::flux : il reproduit donc les divergences, mais PAS les
-/// termes algebriques -(rho v_theta^2 + p)/r et +(rho v_r v_theta)/r. Ces termes ne sont PAS
-/// captures par la divergence conservative (preuve : sur la cellule (rho, v_r=0, v_theta(r)) en
-/// equilibre rotatif d_r p = rho v_theta^2/r, la divergence radiale seule rendrait
-/// d_t m_r = -(d_r p + p/r) != 0, brisant l'equilibre). Il FAUT donc une SOURCE GEOMETRIQUE
-/// explicite, fournie ici et ajoutee en cellule par assemble_rhs_polar (qui seul connait r) :
+///                 + (rho v_r v_theta)/r             = 0      (cross CURVATURE term)
+/// The assemble_rhs_polar operator computes EXACTLY -(1/r) d_r(r F_r) - (1/r) d_theta(F_theta)
+/// with F_r, F_theta = IsothermalFlux::flux: it thus reproduces the divergences, but NOT the
+/// algebraic terms -(rho v_theta^2 + p)/r and +(rho v_r v_theta)/r. These terms are NOT
+/// captured by the conservative divergence (proof: on the cell (rho, v_r=0, v_theta(r)) in
+/// rotational equilibrium d_r p = rho v_theta^2/r, the radial divergence alone would yield
+/// d_t m_r = -(d_r p + p/r) != 0, breaking the equilibrium). An explicit GEOMETRIC SOURCE
+/// is therefore REQUIRED, provided here and added per cell by assemble_rhs_polar (which alone knows r):
 ///   S_geom = ( 0 , (rho v_theta^2 + p)/r , -(rho v_r v_theta)/r ).
-/// Avec cette source l'equilibre rotatif est preserve a l'ordre du schema (cf.
-/// test_polar_fluid_equilibrium). r > 0 (anneau, r_min > 0) : aucune singularite d'axe.
+/// With this source the rotational equilibrium is preserved to the scheme order (cf.
+/// test_polar_fluid_equilibrium). r > 0 (ring, r_min > 0): no axis singularity.
 ///
-/// CONTRAT : brique PHYSIQUE ponctuelle, device-callable (ADC_HD), aucune box, aucune allocation.
-/// polar_geom_source ne prend QUE l'etat et r (pas d'aux) : c'est de la pure metrique.
+/// CONTRACT: pointwise PHYSICAL brick, device-callable (ADC_HD), no box, no allocation.
+/// polar_geom_source takes ONLY the state and r (no aux): it is pure metric.
 struct IsothermalFluxPolar : IsothermalFlux {
-  /// Terme source GEOMETRIQUE de courbure en cellule de rayon r > 0 (anneau). Voir le bloc @file
-  /// ci-dessus pour la derivation. S_geom = (0, (rho v_theta^2 + p)/r, -(rho v_r v_theta)/r),
-  /// p = cs2 rho. Composante 0 (masse) nulle : la masse est purement conservative en polaire.
+  /// GEOMETRIC curvature source term in a cell of radius r > 0 (ring). See the @file block
+  /// above for the derivation. S_geom = (0, (rho v_theta^2 + p)/r, -(rho v_r v_theta)/r),
+  /// p = cs2 rho. Component 0 (mass) is zero: mass is purely conservative in polar.
   ADC_HD StateVec<3> polar_geom_source(const StateVec<3>& u, Real r) const {
     const Real rho = u[0];
     const Real inv_rho = Real(1) / rho;
-    const Real mr = u[1], mth = u[2];  // rho v_r, rho v_theta (base locale (e_r, e_theta))
+    const Real mr = u[1], mth = u[2];  // rho v_r, rho v_theta (local basis (e_r, e_theta))
     const Real p = cs2 * rho;
     const Real inv_r = Real(1) / r;
     StateVec<3> s{};
     s[0] = Real(0);
-    s[1] = (mth * mth * inv_rho + p) * inv_r;   // (rho v_theta^2 + p)/r : centrifuge + pression
-    s[2] = -(mr * mth * inv_rho) * inv_r;        // -(rho v_r v_theta)/r : courbure croisee
+    s[1] = (mth * mth * inv_rho + p) * inv_r;   // (rho v_theta^2 + p)/r: centrifugal + pressure
+    s[2] = -(mr * mth * inv_rho) * inv_r;        // -(rho v_r v_theta)/r: cross curvature
     return s;
   }
 };

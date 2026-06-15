@@ -9,61 +9,62 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/spatial_operator.hpp>  // reconstruct<>, load_state/load_aux (REUTILISES verbatim)
+#include <adc/numerics/spatial_operator.hpp>  // reconstruct<>, load_state/load_aux (REUSED verbatim)
 
 #include <concepts>
 #include <utility>
 #include <vector>
 
 /// @file
-/// @brief Operateur spatial POLAIRE additif : R = -div_polar F + S sur une grille annulaire (r, theta).
+/// @brief Additive POLAR spatial operator: R = -div_polar F + S on an annular grid (r, theta).
 ///
-/// Chantier "grille polaire annulaire", Phase 1 (TRANSPORT seul). C'est un assemble_rhs SEPARE de
-/// l'historique cartesien (adc/numerics/spatial_operator.hpp) : ce dernier reste STRICTEMENT INTOUCHE,
-/// donc un run sur maillage cartesien est bit-identique. Le chemin polaire est PUREMENT ADDITIF,
-/// opt-in (l'appelant choisit assemble_rhs_polar avec une PolarGeometry).
+/// "Annular polar grid" work, Phase 1 (TRANSPORT only). This is a SEPARATE assemble_rhs from the
+/// Cartesian history (adc/numerics/spatial_operator.hpp): that one stays STRICTLY UNTOUCHED, so a
+/// run on a Cartesian mesh is bit-identical. The polar path is PURELY ADDITIVE, opt-in (the caller
+/// chooses assemble_rhs_polar with a PolarGeometry).
 ///
-/// CONVENTION D'AXES (cf. PolarGeometry) : direction d'indice 0 = RADIALE (r), direction d'indice 1 =
-/// AZIMUTALE (theta). Domaine r in [r_min, r_max] (BC physique en r), theta in [0, 2pi) (periodique).
+/// AXIS CONVENTION (cf. PolarGeometry): index direction 0 = RADIAL (r), index direction 1 =
+/// AZIMUTHAL (theta). Domain r in [r_min, r_max] (physical BC in r), theta in [0, 2pi) (periodic).
 ///
-/// DIVERGENCE EN POLAIRE (forme conservative, volumes finis) :
+/// DIVERGENCE IN POLAR COORDINATES (conservative form, finite volumes):
 ///   div F = (1/r) d_r(r F_r) + (1/r) d_theta(F_theta)
-/// Discretisation par cellule (i, j), avec r_i = r_cell(i), r_{i+/-1/2} = r_face(i+1)/r_face(i),
-/// dr = PolarGeometry::dr(), dtheta = PolarGeometry::dtheta() :
+/// Per-cell discretization (i, j), with r_i = r_cell(i), r_{i+/-1/2} = r_face(i+1)/r_face(i),
+/// dr = PolarGeometry::dr(), dtheta = PolarGeometry::dtheta():
 ///   -div = -(1/r_i) (r_{i+1/2} Fr_{i+1/2} - r_{i-1/2} Fr_{i-1/2}) / dr
 ///          -(1/r_i) (Ftheta_{j+1/2} - Ftheta_{j-1/2}) / dtheta
-/// Fr, Ftheta sont les flux numeriques PHYSIQUES aux faces (le modele rend la composante physique
-/// dans la base locale ; cf. ExBVelocityPolar). Le facteur metrique r aux faces radiales (et 1/r en
-/// cellule) est porte ICI. CONSERVATION : la masse Sum_ij n_ij r_i dr dtheta voit le terme radial
-/// telescoper (le poids r_{i+1/2} d'une face est partage par les deux cellules voisines) et le terme
-/// azimutal telescoper exactement (periodique). Seuls les flux radiaux aux bords physiques r_min /
-/// r_max comptent : une paroi (flux radial nul) conserve la masse a la machine.
+/// Fr, Ftheta are the PHYSICAL numerical fluxes at the faces (the model returns the physical
+/// component in the local basis; cf. ExBVelocityPolar). The metric factor r at radial faces (and
+/// 1/r in cell) is carried HERE. CONSERVATION: the mass Sum_ij n_ij r_i dr dtheta sees the radial
+/// term telescope (the weight r_{i+1/2} of a face is shared by the two neighboring cells) and the
+/// azimuthal term telescope exactly (periodic). Only the radial fluxes at the physical boundaries
+/// r_min / r_max count: a wall (zero radial flux) conserves mass to machine precision.
 ///
-/// FONCTEURS NOMMES (et non lambdas etendues), comme spatial_operator.hpp (#64/#97) : emission device
-/// robuste si le noyau Model-template est instancie cross-TU. La RECONSTRUCTION (weno5z, minmod via
-/// reconstruct<>) et le FLUX numerique (RusanovFlux...) sont REUTILISES verbatim depuis l'operateur
-/// cartesien : direction-generiques (dir 0/1), ils s'appliquent tels quels aux axes (r, theta).
+/// NAMED FUNCTORS (not extended lambdas), like spatial_operator.hpp (#64/#97): robust device
+/// emission if the Model-template kernel is instantiated cross-TU. The RECONSTRUCTION (weno5z,
+/// minmod via reconstruct<>) and the numerical FLUX (RusanovFlux...) are REUSED verbatim from the
+/// Cartesian operator: direction-generic (dir 0/1), they apply as-is to the (r, theta) axes.
 
 namespace adc {
 
 namespace detail {
 
-// Le terme source est OPTIONNEL en transport polaire (Phase 1) : une brique de transport pure
-// (ExBVelocityPolar) n'expose pas source(), seul un modele compose (CompositeModel) le fait. On le
-// detecte et on retombe sur 0 sinon -> l'operateur polaire marche aussi bien sur la brique seule que
-// sur un modele compose, sans imposer source() (le chemin cartesien, lui, suppose un modele compose).
-/// PolarHasSource<M> : concept interne -- vrai si M expose source(U, aux) -> State.
+// The source term is OPTIONAL in polar transport (Phase 1): a pure transport brick
+// (ExBVelocityPolar) does not expose source(), only a composite model (CompositeModel) does. We
+// detect it and fall back to 0 otherwise -> the polar operator works just as well on the standalone
+// brick as on a composite model, without requiring source() (the Cartesian path, for its part,
+// assumes a composite model).
+/// PolarHasSource<M>: internal concept -- true if M exposes source(U, aux) -> State.
 ///
-/// Sert a router polar_source : retombe sur l'etat nul si la brique pure (ExBVelocityPolar)
-/// n'expose pas source(), sans imposer le contrat a toutes les briques hyperboliques.
+/// Used to route polar_source: falls back to the zero state if the pure brick (ExBVelocityPolar)
+/// does not expose source(), without requiring the contract from all hyperbolic bricks.
 template <class M>
 concept PolarHasSource = requires(const M m, const typename M::State u, const Aux a) {
   { m.source(u, a) } -> std::convertible_to<typename M::State>;
 };
 
-/// polar_source<Model> : retourne m.source(u, a) si PolarHasSource<Model>, sinon etat nul.
+/// polar_source<Model>: returns m.source(u, a) if PolarHasSource<Model>, otherwise the zero state.
 ///
-/// Garde if constexpr : zero codegen supplementaire pour les briques sans source. ADC_HD.
+/// if constexpr guard: zero extra codegen for bricks without a source. ADC_HD.
 template <class Model>
 ADC_HD inline typename Model::State polar_source(const Model& m, const typename Model::State& u,
                                                  const Aux& a) {
@@ -71,21 +72,21 @@ ADC_HD inline typename Model::State polar_source(const Model& m, const typename 
   else return typename Model::State{};
 }
 
-/// PolarHasGeomSource<M> : concept interne -- vrai si M expose polar_geom_source(u, r) -> State.
+/// PolarHasGeomSource<M>: internal concept -- true if M exposes polar_geom_source(u, r) -> State.
 ///
-/// Le terme GEOMETRIQUE de courbure (centrifuge -rho v_theta^2/r etc.) n'a de sens qu'en metrique
-/// polaire et ne depend QUE de l'etat et du rayon de cellule (pas d'aux). Une brique de transport
-/// SCALAIRE (ExBVelocityPolar) ne l'expose pas -> on retombe sur 0 (bit-identique au transport ExB
-/// polaire historique). Une brique FLUIDE polaire (IsothermalFluxPolar) l'expose -> il est ajoute
-/// en cellule par PolarAssembleRhsKernel (qui seul connait r_cell(i)).
+/// The GEOMETRIC curvature term (centrifugal -rho v_theta^2/r etc.) only makes sense in polar
+/// metric and depends ONLY on the state and the cell radius (no aux). A SCALAR transport brick
+/// (ExBVelocityPolar) does not expose it -> we fall back to 0 (bit-identical to the historical
+/// polar ExB transport). A polar FLUID brick (IsothermalFluxPolar) exposes it -> it is added in
+/// cell by PolarAssembleRhsKernel (which alone knows r_cell(i)).
 template <class M>
 concept PolarHasGeomSource = requires(const M m, const typename M::State u, Real r) {
   { m.polar_geom_source(u, r) } -> std::convertible_to<typename M::State>;
 };
 
-/// polar_geom_source<Model> : retourne m.polar_geom_source(u, r) si PolarHasGeomSource<Model>,
-/// sinon etat nul. Garde if constexpr : zero codegen supplementaire pour les briques scalaires (le
-/// chemin ExB polaire reste strictement bit-identique). ADC_HD. r > 0 (anneau) impose en amont.
+/// polar_geom_source<Model>: returns m.polar_geom_source(u, r) if PolarHasGeomSource<Model>,
+/// otherwise the zero state. if constexpr guard: zero extra codegen for scalar bricks (the polar
+/// ExB path stays strictly bit-identical). ADC_HD. r > 0 (annulus) enforced upstream.
 template <class Model>
 ADC_HD inline typename Model::State polar_geom_source(const Model& m, const typename Model::State& u,
                                                       Real r) {
@@ -93,42 +94,43 @@ ADC_HD inline typename Model::State polar_geom_source(const Model& m, const type
   else return typename Model::State{};
 }
 
-// Noyau de FLUX DE FACE RADIALE (dir 0) : flux numerique a la face radiale i (entre i-1 et i), DEJA
-// pondere par le rayon de face r_face(i). On stocke r_{i-1/2} Fr_{i-1/2} pour que la divergence soit
-// une simple difference. FONCTEUR NOMME (device-clean cross-TU).
-/// PolarFaceFluxRKernel : noyau device du flux a la face radiale i (ponderation par r_face(i)).
+// RADIAL FACE FLUX kernel (dir 0): numerical flux at the radial face i (between i-1 and i), ALREADY
+// weighted by the face radius r_face(i). We store r_{i-1/2} Fr_{i-1/2} so the divergence is a
+// simple difference. NAMED FUNCTOR (device-clean cross-TU).
+/// PolarFaceFluxRKernel: device kernel of the flux at the radial face i (weighting by r_face(i)).
 ///
-/// Stocke r_face(i) * Fr a la face entre i-1 et i, pour que la divergence discrete soit une
-/// simple difference (cf. formule dans @file). Si wall_radial == true, force le flux a zero
-/// aux faces physiques de bord (paroi no-penetration, conservation de la masse a la machine).
-/// Foncteur nomme, device-clean cross-TU. ADC_HD.
+/// Stores r_face(i) * Fr at the face between i-1 and i, so the discrete divergence is a simple
+/// difference (cf. formula in @file). If wall_radial == true, forces the flux to zero at the
+/// physical boundary faces (no-penetration wall, mass conservation to machine precision).
+/// Named functor, device-clean cross-TU. ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct PolarFaceFluxRKernel {
   Model model;
   ConstArray4 u, ax;
-  Array4 fr;        // sortie : r_face(i) * Fr a la face radiale i (ncomp composantes)
-  Real r_min, dr;   // geometrie radiale (r_face(i) = r_min + i*dr)
+  Array4 fr;        // output: r_face(i) * Fr at the radial face i (ncomp components)
+  Real r_min, dr;   // radial geometry (r_face(i) = r_min + i*dr)
   Limiter lim;
   NumericalFlux nflux;
   bool recon_prim;
-  // PAROI RADIALE (no-penetration) optionnelle. wall_radial == false (defaut) : aucun effet, flux de
-  // bord calcule comme l'interieur (BIT-IDENTIQUE a l'historique : MMS, conservation azimutale). true :
-  // le flux radial aux DEUX faces physiques de bord (i = i_lo_face = lo, i = i_hi_face = hi+1) est force
-  // a ZERO -> le terme radial telescope EXACTEMENT (chaque face interieure est partagee, les bords ne
-  // comptent plus) -> masse Sum n r dr dtheta conservee a la machine, quel que soit v_r (paroi solide).
+  // Optional RADIAL WALL (no-penetration). wall_radial == false (default): no effect, boundary flux
+  // computed like the interior (BIT-IDENTICAL to the history: MMS, azimuthal conservation). true:
+  // the radial flux at BOTH physical boundary faces (i = i_lo_face = lo, i = i_hi_face = hi+1) is
+  // forced to ZERO -> the radial term telescopes EXACTLY (each interior face is shared, the
+  // boundaries no longer count) -> mass Sum n r dr dtheta conserved to machine precision, whatever
+  // v_r (solid wall).
   bool wall_radial;
-  int i_lo_face, i_hi_face;  // indices de FACE des bords physiques (lo et hi+1) ; ignores si !wall_radial
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
-  int pos_comp = 0;          ///< composante du role Density (resolue par l'appelant hote)
+  int i_lo_face, i_hi_face;  // FACE indices of physical boundaries (lo and hi+1); ignored if !wall_radial
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
+  int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
-    const Real rf = r_min + i * dr;  // r_face(i) (positif sur l'anneau : r_min >= 0, i >= 0)
+    const Real rf = r_min + i * dr;  // r_face(i) (positive on the annulus: r_min >= 0, i >= 0)
     if (wall_radial && (i == i_lo_face || i == i_hi_face)) {
-      for (int c = 0; c < Model::n_vars; ++c) fr(i, j, c) = Real(0);  // paroi : flux radial nul
+      for (int c = 0; c < Model::n_vars; ++c) fr(i, j, c) = Real(0);  // wall: zero radial flux
       return;
     }
-    // Etats reconstruits de part et d'autre de la face radiale i (REUTILISE reconstruct_pp<> cartesien,
-    // dir == 0). L = extrapolation depuis la cellule i-1 vers sa face + ; R = depuis la cellule i
-    // vers sa face -.
+    // Reconstructed states on either side of the radial face i (REUSES Cartesian reconstruct_pp<>,
+    // dir == 0). L = extrapolation from cell i-1 toward its + face; R = from cell i toward its
+    // - face.
     const auto L = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
     const auto Rr = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i - 1, j), Rr,
@@ -137,22 +139,22 @@ struct PolarFaceFluxRKernel {
   }
 };
 
-// Noyau de FLUX DE FACE AZIMUTALE (dir 1) : flux numerique a la face theta j (entre j-1 et j). PAS de
-// ponderation par r (la metrique azimutale 1/r est appliquee en cellule, cf. PolarAssembleRhsKernel).
-/// PolarFaceFluxThetaKernel : noyau device du flux a la face azimutale j.
+// AZIMUTHAL FACE FLUX kernel (dir 1): numerical flux at the theta face j (between j-1 and j). NO
+// weighting by r (the azimuthal metric 1/r is applied in cell, cf. PolarAssembleRhsKernel).
+/// PolarFaceFluxThetaKernel: device kernel of the flux at the azimuthal face j.
 ///
-/// Calcule Ftheta a la face entre j-1 et j. Pas de ponderation par r ici : le facteur 1/r
-/// est applique en cellule dans PolarAssembleRhsKernel. Foncteur nomme. ADC_HD.
+/// Computes Ftheta at the face between j-1 and j. No weighting by r here: the 1/r factor is applied
+/// in cell in PolarAssembleRhsKernel. Named functor. ADC_HD.
 template <class Limiter, class NumericalFlux, class Model>
 struct PolarFaceFluxThetaKernel {
   Model model;
   ConstArray4 u, ax;
-  Array4 ft;        // sortie : Ftheta a la face azimutale j (ncomp composantes)
+  Array4 ft;        // output: Ftheta at the azimuthal face j (ncomp components)
   Limiter lim;
   NumericalFlux nflux;
   bool recon_prim;
-  Real pos_floor = Real(0);  ///< limiteur de positivite Zhang-Shu (<= 0 : inactif, bit-identique)
-  int pos_comp = 0;          ///< composante du role Density (resolue par l'appelant hote)
+  Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
+  int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
     const auto L = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
     const auto Rr = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
@@ -162,18 +164,18 @@ struct PolarFaceFluxThetaKernel {
   }
 };
 
-// Noyau d'assemblage du residu polaire en cellule (i, j) :
-//   R = S - (1/r_i) (Fr_pondere_{i+1} - Fr_pondere_i) / dr - (1/r_i) (Ftheta_{j+1} - Ftheta_j) / dtheta
-// Fr_pondere = r_face * Fr (deja produit par PolarFaceFluxRKernel). FONCTEUR NOMME.
-/// PolarAssembleRhsKernel : noyau device du residu polaire en cellule (i,j).
+// Polar residual assembly kernel in cell (i, j):
+//   R = S - (1/r_i) (Fr_weighted_{i+1} - Fr_weighted_i) / dr - (1/r_i) (Ftheta_{j+1} - Ftheta_j) / dtheta
+// Fr_weighted = r_face * Fr (already produced by PolarFaceFluxRKernel). NAMED FUNCTOR.
+/// PolarAssembleRhsKernel: device kernel of the polar residual in cell (i,j).
 ///
 /// R = S - (1/r_i) [ (r Fr)_{i+1} - (r Fr)_i ] / dr - (1/r_i) [ Ftheta_{j+1} - Ftheta_j ] / dtheta.
-/// fr contient deja r_face * Fr (produit par PolarFaceFluxRKernel). Foncteur nomme. ADC_HD.
+/// fr already contains r_face * Fr (produced by PolarFaceFluxRKernel). Named functor. ADC_HD.
 template <class Model>
 struct PolarAssembleRhsKernel {
   Model model;
-  ConstArray4 u, ax, fr, ft;  // etat, aux, flux radial pondere par r, flux azimutal
-  Array4 r;                    // sortie : residu
+  ConstArray4 u, ax, fr, ft;  // state, aux, r-weighted radial flux, azimuthal flux
+  Array4 r;                    // output: residual
   Real r_min, dr, dtheta;
   ADC_HD void operator()(int i, int j) const {
     const Real ri = r_min + (i + Real(0.5)) * dr;  // r_cell(i)
@@ -181,51 +183,53 @@ struct PolarAssembleRhsKernel {
     const Aux Ac = load_aux<aux_comps<Model>()>(ax, i, j);
     const auto Us = load_state<Model>(u, i, j);
     const auto S = polar_source<Model>(model, Us, Ac);
-    // Terme GEOMETRIQUE de courbure (centrifuge + courbure croisee) : non capture par la divergence
-    // conservative en base locale tournante (e_r, e_theta). Nul pour les briques scalaires (ExB
-    // polaire = bit-identique) ; non nul pour un fluide polaire (IsothermalFluxPolar). Voir
-    // PolarHasGeomSource / IsothermalFluxPolar pour la derivation. r_cell(i) > 0 (anneau).
+    // GEOMETRIC curvature term (centrifugal + cross curvature): not captured by the conservative
+    // divergence in the rotating local basis (e_r, e_theta). Zero for scalar bricks (polar ExB =
+    // bit-identical); non-zero for a polar fluid (IsothermalFluxPolar). See PolarHasGeomSource /
+    // IsothermalFluxPolar for the derivation. r_cell(i) > 0 (annulus).
     const auto Sg = polar_geom_source<Model>(model, Us, ri);
     for (int c = 0; c < Model::n_vars; ++c) {
-      const Real div_r = (fr(i + 1, j, c) - fr(i, j, c)) / dr;       // d_r(r Fr) discret
-      const Real div_t = (ft(i, j + 1, c) - ft(i, j, c)) / dtheta;   // d_theta(Ftheta) discret
+      const Real div_r = (fr(i + 1, j, c) - fr(i, j, c)) / dr;       // d_r(r Fr) discrete
+      const Real div_t = (ft(i, j + 1, c) - ft(i, j, c)) / dtheta;   // d_theta(Ftheta) discrete
       r(i, j, c) = S[c] + Sg[c] - inv_r * (div_r + div_t);
     }
   }
 };
 
-// Boites de FACE radiale / azimutale (cf. xface_box/yface_box cartesiennes) : faces radiales = nr+1 x
-// ntheta, faces azimutales = nr x ntheta+1. Reutilise les helpers cartesiens (memes conventions
-// d'indices de face) pour ne pas dupliquer.
+// Radial / azimuthal FACE boxes (cf. Cartesian xface_box/yface_box): radial faces = nr+1 x ntheta,
+// azimuthal faces = nr x ntheta+1. Reuses the Cartesian helpers (same face index conventions) to
+// avoid duplication.
 }  // namespace detail
 
-/// assemble_rhs_polar<Limiter, NumericalFlux> : R = -div_polar F* + S sur une PolarGeometry. Le
-/// limiteur (reconstruction) et le flux numerique sont des parametres de template, comme l'operateur
-/// cartesien. Calcule d'abord les flux de FACE (radial pondere par r, azimutal) dans des MultiFab
-/// temporaires, puis differencie. Tous les noyaux sont device-callable (foncteurs nommes).
+/// assemble_rhs_polar<Limiter, NumericalFlux>: R = -div_polar F* + S on a PolarGeometry. The limiter
+/// (reconstruction) and the numerical flux are template parameters, like the Cartesian operator.
+/// First computes the FACE fluxes (r-weighted radial, azimuthal) into temporary MultiFabs, then
+/// differences. All kernels are device-callable (named functors).
 ///
-/// CONDITIONS AUX LIMITES : theta PERIODIQUE (l'appelant remplit les ghosts azimutaux par fill_boundary
-/// periodique). r PHYSIQUE : l'appelant remplit les ghosts radiaux (paroi / sortie). Les flux radiaux
-/// aux faces r_min (i = lo) et r_max (i = hi+1) sont calcules a partir des etats de ghost (sortie
-/// libre), SAUF si @p wall_radial == true : alors le flux radial aux deux faces physiques de bord est
-/// force a ZERO (PAROI SOLIDE no-penetration), ce qui rend la masse Sum n r dr dtheta conservee A LA
-/// MACHINE quel que soit v_r (le terme radial telescope exactement). @p wall_radial == false (defaut)
-/// reproduit EXACTEMENT l'historique (MMS, conservation azimutale -- cf. test_polar_transport_mms).
+/// BOUNDARY CONDITIONS: theta PERIODIC (the caller fills the azimuthal ghosts via periodic
+/// fill_boundary). r PHYSICAL: the caller fills the radial ghosts (wall / outflow). The radial
+/// fluxes at the r_min (i = lo) and r_max (i = hi+1) faces are computed from the ghost states (free
+/// outflow), EXCEPT if @p wall_radial == true: then the radial flux at both physical boundary faces
+/// is forced to ZERO (SOLID no-penetration WALL), which makes the mass Sum n r dr dtheta conserved
+/// TO MACHINE precision whatever v_r (the radial term telescopes exactly). @p wall_radial == false
+/// (default) reproduces EXACTLY the history (MMS, azimuthal conservation -- cf.
+/// test_polar_transport_mms).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void assemble_rhs_polar(const Model& model, const MultiFab& U, const MultiFab& aux,
                         const PolarGeometry& geom, MultiFab& R, bool recon_prim = false,
                         bool wall_radial = false, Real pos_floor = Real(0)) {
   const int pos_comp = detail::positivity_comp<Model>(pos_floor);
   const Real r_min = geom.r_min, dr = geom.dr(), dtheta = geom.dtheta();
-  // Faces radiales physiques de bord (paroi) : r_min a la face lo du domaine d'indices, r_max a la face
-  // hi+1. geom.domain est le domaine GLOBAL (la PolarGeometry de System couvre tout l'anneau, mono-box).
+  // Physical radial boundary faces (wall): r_min at the lo face of the index domain, r_max at the
+  // hi+1 face. geom.domain is the GLOBAL domain (System's PolarGeometry covers the whole annulus,
+  // mono-box).
   const int i_lo_face = geom.domain.lo[0];
   const int i_hi_face = geom.domain.hi[0] + 1;
   const Limiter lim{};
   const NumericalFlux nflux{};
-  // BoxArrays de FACE (cf. compute_face_fluxes cartesien) : faces radiales = surroundingNodes en x
-  // (xface_box), faces azimutales en y (yface_box). Memes conventions d'indices de face -> fr(i, .)
-  // est la face radiale entre i-1 et i, ft(., j) la face azimutale entre j-1 et j.
+  // FACE BoxArrays (cf. Cartesian compute_face_fluxes): radial faces = surroundingNodes in x
+  // (xface_box), azimuthal faces in y (yface_box). Same face index conventions -> fr(i, .) is the
+  // radial face between i-1 and i, ft(., j) the azimuthal face between j-1 and j.
   std::vector<Box2D> rfaces, tfaces;
   rfaces.reserve(U.box_array().size());
   tfaces.reserve(U.box_array().size());
@@ -241,12 +245,12 @@ void assemble_rhs_polar(const Model& model, const MultiFab& U, const MultiFab& a
     Array4 fr = Fr.fab(li).array();
     Array4 ft = Ft.fab(li).array();
     const Box2D v = R.box(li);
-    // Faces radiales : i dans [lo..hi+1], j dans [lo..hi] (cf. xface_box).
+    // Radial faces: i in [lo..hi+1], j in [lo..hi] (cf. xface_box).
     for_each_cell(xface_box(v),
                   detail::PolarFaceFluxRKernel<Limiter, NumericalFlux, Model>{
                       model, u, ax, fr, r_min, dr, lim, nflux, recon_prim, wall_radial, i_lo_face,
                       i_hi_face, pos_floor, pos_comp});
-    // Faces azimutales : i dans [lo..hi], j dans [lo..hi+1] (cf. yface_box).
+    // Azimuthal faces: i in [lo..hi], j in [lo..hi+1] (cf. yface_box).
     for_each_cell(yface_box(v), detail::PolarFaceFluxThetaKernel<Limiter, NumericalFlux, Model>{
                                     model, u, ax, ft, lim, nflux, recon_prim, pos_floor, pos_comp});
   }
