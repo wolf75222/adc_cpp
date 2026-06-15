@@ -1,3 +1,5 @@
+> **STATUS: closed.** This is a closed TODO from the performance-scaling work; its items are done or tracked in Linear. Read it as a historical record, not as an active plan (class D, see `DOC_QUALITY.md`).
+
 # TODO perf scaling and frontends
 
 This TODO accompanies `docs/PERF_SCALING_FRONTENDS_AUDIT_2026-06-08.md`.

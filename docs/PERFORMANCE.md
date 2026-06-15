@@ -1,3 +1,5 @@
+> **STATUS: historical.** This page records past run-time performance numbers; they reflect the runs at the time, not the current build. Read it as a historical record, not as a current source of truth (class D, see `DOC_QUALITY.md`).
+
 # Performance (run-time)
 
 > **STATUS: historical (non-normative).** Dated measurements (M1, old milestone). The current figures live in PROFILE_RESULTS.md; do not rely on these as the current perf status.
