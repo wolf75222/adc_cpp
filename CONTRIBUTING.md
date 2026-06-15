@@ -68,6 +68,19 @@ Commit messages are local and technical (imperative, with a scope, e.g. `flux: a
 state reconstruction helper`); the PR description carries the full context. Avoid `fix`,
 `wip`, `update`.
 
+## Code review
+
+`master` is protected: every change lands through a pull request, never a direct push, and
+the required status check (`gate (agregation requise)`, the aggregating job of `ci.yml`) must
+be green before a merge. Force-pushes and deletion of `master` are blocked.
+
+Before merging a substantial PR, run an independent review pass (the `/code-review` skill, or
+`pr-review-toolkit`) and act on its result: a High-severity finding is either fixed or
+explicitly dismissed in the PR, with the reason. In a solo plus agents setting this pass is
+the one independent check, so it stands in for a second pair of eyes; keep it to one reviewer
+(human or agent) and one pass rather than chasing consensus. Treat every review comment as a
+TODO: resolve it, or reply why not, before closing it.
+
 ## Guardrails
 
 - **No AI author, committer or co-author** (Claude, Copilot, Anthropic, ...) anywhere in
