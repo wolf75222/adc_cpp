@@ -1,30 +1,30 @@
 #pragma once
 
 /// @file
-/// @brief Fonctions libres de l'operateur elliptique : apply_laplacian (matvec), poisson_residual
-///        (residu), gs_color/gs_smooth (lisseur Gauss-Seidel red-black), zero_conductor (Dirichlet embedded).
+/// @brief Free functions of the elliptic operator: apply_laplacian (matvec), poisson_residual
+///        (residual), gs_color/gs_smooth (red-black Gauss-Seidel smoother), zero_conductor (embedded Dirichlet).
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : briques de bas niveau de la multigrille geometrique (geometric_mg.hpp) et matvec du solveur de
-/// Krylov (krylov_solver.hpp). L'operateur est realise par des FONCTIONS LIBRES (pas un type) : aucun
-/// concept ne les contraint. Convention GLOBALE : on resout L(phi) = -div(A grad phi) + kappa phi = f_phys ;
-/// en interne les kernels assemblent L_int = div(A grad phi) - kappa phi et poisson_residual rend
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: low-level bricks of the geometric multigrid (geometric_mg.hpp) and matvec of the Krylov
+/// solver (krylov_solver.hpp). The operator is provided as FREE FUNCTIONS (not a type): no concept
+/// constrains them. GLOBAL convention: we solve L(phi) = -div(A grad phi) + kappa phi = f_phys;
+/// internally the kernels assemble L_int = div(A grad phi) - kappa phi and poisson_residual returns
 /// res = f - L_int.
-/// Contrat : tous les coefficients optionnels valent nullptr par defaut et redonnent ALORS EXACTEMENT le
-/// chemin historique bit-identique -- mask (embedded boundary, fige phi=0 dans le conducteur), coef
-/// (poids cut-cell Shortley-Weller, ordre 2 au bord), eps/eps_y (permittivite variable, isotrope ou
-/// anisotrope diagonale, moyenne harmonique de face), kappa (terme de reaction), a_xy/a_yx (tenseur
-/// PLEIN, termes croises EXPLICITES, A eventuellement non symetrique).
+/// Contract: all optional coefficients default to nullptr and THEN give back EXACTLY the bit-identical
+/// historical path -- mask (embedded boundary, pins phi=0 in the conductor), coef
+/// (Shortley-Weller cut-cell weights, order 2 at the boundary), eps/eps_y (variable permittivity, isotropic or
+/// diagonal anisotropic, harmonic face mean), kappa (reaction term), a_xy/a_yx (FULL tensor,
+/// EXPLICIT cross terms, A possibly non-symmetric).
 ///
-/// Invariants :
-/// - permittivite de FACE = moyenne HARMONIQUE des deux centres adjacents (flux normal continu, correct
-///   meme pour eps discontinu) ; le terme croise utilise la moyenne ARITHMETIQUE (pas un flux normal) ;
-/// - le lisseur gs_smooth reste 5 POINTS (bloc diagonal) : les termes croises a_xy/a_yx sont EXPLICITES,
-///   portes uniquement par le residu -> pour A fortement non symetrique le V-cycle GS peut NE PAS
-///   converger (un solveur de Krylov est alors requis, cf. krylov_solver.hpp) ;
-/// - les kernels sont des FONCTEURS NOMMES (et non lambdas ADC_HD) car premiere-instancies depuis une TU
-///   externe : une lambda etendue ferait buter l'emission du kernel device sous nvcc ;
-/// - le balayage red-black est parallelisable (une cellule rouge ne depend que de cellules noires).
+/// Invariants:
+/// - FACE permittivity = HARMONIC mean of the two adjacent centers (continuous normal flux, correct
+///   even for discontinuous eps); the cross term uses the ARITHMETIC mean (not a normal flux);
+/// - the gs_smooth smoother stays 5 POINTS (diagonal block): the cross terms a_xy/a_yx are EXPLICIT,
+///   carried only by the residual -> for strongly non-symmetric A the GS V-cycle may NOT
+///   converge (a Krylov solver is then required, cf. krylov_solver.hpp);
+/// - the kernels are NAMED FUNCTORS (and not ADC_HD lambdas) because they are first-instantiated from an
+///   external TU: an extended lambda would break the device kernel emission under nvcc;
+/// - the red-black sweep is parallelizable (a red cell depends only on black cells).
 
 #include <adc/core/types.hpp>
 #include <adc/mesh/fab2d.hpp>
@@ -33,137 +33,56 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 
-// Operateur de Poisson 5 points et lisseur Gauss-Seidel red-black, briques de
-// la multigrille geometrique maison.
-//
-// Convention : on resout l'operateur elliptique div(eps grad phi) = f. Le second
-// membre vient du modele, f = model.elliptic_rhs (p.ex. une densite de charge
-// signee). Par defaut eps == nullptr : permittivite uniforme eps=1 et l'operateur
-// degenere EXACTEMENT en lap(phi) = f (chemin historique, bit-identique).
-//
-// Masque optionnel (embedded boundary) : un MultiFab mask (1 = actif, 0 =
-// conducteur) fige phi=0 dans les cellules conductrices. Le lisseur et le residu
-// sautent ces cellules ; les cellules actives voisines lisent phi=0 chez le
-// conducteur, ce qui impose la condition de Dirichlet sur la frontiere.
-//
-// Coefficients CUT-CELL optionnels (coef) : par defaut le stencil est uniforme
-// (diag = 2/dx^2 + 2/dy^2), ce qui place la CL Dirichlet sur le contour en ESCALIER
-// des centres de cellules (erreur O(1) au bord embedded). Si un champ coef a 5
-// composantes est fourni (w_xm, w_xp, w_ym, w_yp, w_diag, par cellule active), le
-// stencil les utilise : ce sont les poids de Shortley-Weller calcules a partir des
-// DISTANCES reelles au bord (cellules coupees), imposant phi=0 sur le CERCLE et non
-// l'escalier (ordre 2 jusqu'au bord). Loin du bord (theta=1 partout) les coef valent
-// 1/dx^2, 1/dy^2, 2/dx^2+2/dy^2 -> identiques au stencil uniforme. coef==nullptr
-// redonne EXACTEMENT le chemin historique (bit-identique).
-//
-// PERMITTIVITE VARIABLE eps(x) optionnelle (eps) : un MultiFab a 1 composante,
-// eps AU CENTRE des cellules, dont les ghosts doivent etre deja remplis (les
-// voisins de bord de box sont lus). On discretise div(eps grad phi) par volumes
-// finis : le flux sur chaque face vaut eps_face (phi_voisin - phi_centre)/h, et
-// l'operateur est la divergence discrete sum_faces eps_face (phi_voisin -
-// phi_centre)/h^2. La permittivite de FACE est la MOYENNE HARMONIQUE des deux
-// centres adjacents :
-//     eps_face = 2 eps_c eps_v / (eps_c + eps_v).
-// Choix HARMONIQUE (et non arithmetique) : c'est la moyenne qui rend le FLUX NORMAL
-// continu a l'interface (resistances en serie), donc la discretisation conservative
-// reste correcte meme pour un eps DISCONTINU (saut de milieu) ; pour un eps lisse
-// elle reste d'ordre 2 comme l'arithmetique. Avec eps uniforme, eps_face == eps et
-// l'on retombe sur le Laplacien constant (a l'echelle eps pres). eps==nullptr
-// redonne EXACTEMENT le chemin historique (bit-identique).
-//
-// PERMITTIVITE ANISOTROPE optionnelle (eps_y) : second champ AU CENTRE des cellules
-// (memes conventions que eps : 1 composante, ghosts remplis). L'operateur passe de
-// div(eps grad phi) (eps scalaire) a div(diag(eps_x, eps_y) grad phi) : le coefficient
-// scalaire eps devient alors eps_x et porte UNIQUEMENT les faces NORMALES A X (exm, exp),
-// tandis que eps_y porte les faces NORMALES A Y (eym, eyp). Chaque face reste la moyenne
-// HARMONIQUE des deux centres adjacents de SON champ (eps_x pour x, eps_y pour y).
-// Cas d'usage : milieu/maillage anisotrope (permittivite tensorielle diagonale).
-// eps_y==nullptr => ISOTROPE : eps_y = eps (eps_x), donc faces x et y partagent le meme
-// champ, comportement actuel STRICTEMENT bit-identique. Le terme kappa est inchange.
-//
-// COEFFICIENTS HORS-DIAGONAUX optionnels (a_xy, a_yx) : tenseur de diffusion PLEIN 2x2
-// A = [[Axx, Axy], [Ayx, Ayy]], avec Axx=eps_x, Ayy=eps_y le bloc DIAGONAL deja gere
-// ci-dessus, et Axy, Ayx les coefficients de COUPLAGE croise (au CENTRE des cellules,
-// 1 composante, ghosts remplis). A peut etre NON SYMETRIQUE (Axy != Ayx). CONVENTION
-// GLOBALE du chemin elliptique : on resout L(phi) = -div(A grad phi) + kappa phi = f_phys ;
-// en interne ces kernels assemblent L_int = div(A grad phi) - kappa phi et poisson_residual
-// rend res = f - L_int (f = -f_phys), comportement inchange. Le bloc plein AJOUTE a
-// div(A grad phi) les deux termes CROISES :
-//     d_x(Axy d_y phi) + d_y(Ayx d_x phi).
-// DISCRETISATION VOLUMES FINIS (stencil 9 points) : le flux croise sur chaque face est porte
-// par la derivee TANGENTIELLE moyennee sur 4 voisins ; le coefficient de face est la moyenne
-// ARITHMETIQUE des deux centres adjacents (le terme croise n'est pas un flux NORMAL, la
-// continuite de la moyenne harmonique n'a pas de sens ici ; l'arithmetique reste d'ordre 2) :
-//   face x en i+1/2 : Fx_p = Axy_xp (phi(i,j+1)+phi(i+1,j+1) - phi(i,j-1) - phi(i+1,j-1)) / (4 dy),
-//     Axy_xp = 0.5 (Axy(i,j) + Axy(i+1,j)) ; idem Fx_m en i-1/2 (avec Axy(i-1,j)) ;
-//   face y en j+1/2 : Fy_p = Ayx_yp (phi(i+1,j)+phi(i+1,j+1) - phi(i-1,j) - phi(i-1,j+1)) / (4 dx),
-//     Ayx_yp = 0.5 (Ayx(i,j) + Ayx(i,j+1)) ; idem Fy_m en j-1/2 (avec Ayx(i,j-1)).
-//   contribution a div(A grad phi) : (Fx_p - Fx_m)/dx + (Fy_p - Fy_m)/dy.
-// Le terme croise est ADDITIF : applique APRES le stencil diagonal (5 points) deja calcule, il
-// ne touche NI la diagonale du lisseur (les termes croises restent EXPLICITES : le GS 5 points
-// du bloc diagonal demeure le lisseur) NI aucun chemin existant. a_xy==a_yx==nullptr => terme
-// croise ABSENT, operateur STRICTEMENT bit-identique au chemin diagonal/Poisson actuel.
-// AVERTISSEMENT : pour A NON symetrique l'operateur discret n'est pas auto-adjoint ; ces kernels
-// n'assemblent QUE l'application (apply/residu). Un V-cycle GS-5-points peut NE PAS converger sur
-// un A fortement non symetrique (un solveur de Krylov serait alors requis, hors de ce jalon).
-//
-// Combinaison cut-cell + eps : chaque poids de face Shortley-Weller est multiplie
-// par sa permittivite de face, et la diagonale est la somme des poids de face (eps
-// inclus). Avec eps uniforme=1 on retrouve les poids de face cut-cell d'origine.
-//
-// Le balayage red-black est parallelisable : avec le stencil 5 points, une
-// cellule rouge ne depend que de cellules noires.
-
 namespace adc {
 
-// Moyenne harmonique de deux permittivites de centre -> permittivite de face.
-// Garde-fou anti division par 0 si les deux centres sont nuls (cellule inactive).
+// Harmonic mean of two center permittivities -> face permittivity.
+// Guard against division by 0 if both centers are zero (inactive cell).
 ADC_HD inline Real eps_harmonic(Real ec, Real ev) {
   const Real s = ec + ev;
   return s > Real(0) ? Real(2) * ec * ev / s : Real(0);
 }
 
 namespace detail {
-// Poids des QUATRE faces (xm, xp, ym, yp) en (i,j) pour le chemin permittivite de FACE (he), avec ou
-// sans cut-cell. Chaque face = moyenne HARMONIQUE des deux centres adjacents (eps_x pour les faces x,
-// eps_y pour les faces y) ; en cut-cell (hc) on multiplie le poids Shortley-Weller de la face par sa
-// permittivite, sinon on applique 1/h^2 (idx2 / idy2). Foncteur libre ADC_HD (device-clean) partage
-// par les trois kernels he (apply / residu / lisseur) ; corps STRICTEMENT identique aux trois copies
-// d'origine -> sortie bit-identique. Sortie par reference (wxm/wxp/wym/wyp).
+// Weights of the FOUR faces (xm, xp, ym, yp) at (i,j) for the FACE permittivity path (he), with or
+// without cut-cell. Each face = HARMONIC mean of the two adjacent centers (eps_x for x faces,
+// eps_y for y faces); in cut-cell (hc) the face Shortley-Weller weight is multiplied by its
+// permittivity, otherwise 1/h^2 (idx2 / idy2) is applied. Free ADC_HD functor (device-clean) shared
+// by the three he kernels (apply / residual / smoother); body STRICTLY identical to the three
+// original copies -> bit-identical output. Output by reference (wxm/wxp/wym/wyp).
 ADC_HD inline void face_weights(const ConstArray4& ep, const ConstArray4& ey, int i, int j,
                                 Real idx2, Real idy2, bool hc, const ConstArray4& cf,
                                 Real& wxm, Real& wxp, Real& wym, Real& wyp) {
-  const Real ec = ep(i, j);    // eps_x au centre (faces x)
-  const Real ecy = ey(i, j);   // eps_y au centre (faces y) ; == ec en isotrope
+  const Real ec = ep(i, j);    // eps_x at center (x faces)
+  const Real ecy = ey(i, j);   // eps_y at center (y faces); == ec when isotropic
   const Real exm = eps_harmonic(ec, ep(i - 1, j));
   const Real exp = eps_harmonic(ec, ep(i + 1, j));
   const Real eym = eps_harmonic(ecy, ey(i, j - 1));
   const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
-  if (hc) {  // cut-cell : eps_face multiplie chaque poids Shortley-Weller
+  if (hc) {  // cut-cell: eps_face multiplies each Shortley-Weller weight
     wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
     wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
-  } else {   // stencil 5 points a coefficient de face variable
+  } else {   // 5-point stencil with variable face coefficient
     wxm = exm * idx2; wxp = exp * idx2;
     wym = eym * idy2; wyp = eyp * idy2;
   }
 }
 
-// Divergence des FLUX CROISES du tenseur plein en (i,j) : d_x(Axy d_y phi) + d_y(Ayx d_x phi),
-// discretisee en volumes finis (stencil 9 points) comme decrit dans l'entete. Renvoie la
-// contribution a AJOUTER a div(A grad phi). Foncteur libre ADC_HD (device-clean) partage par
-// apply_laplacian et poisson_residual ; coefficient de face = moyenne ARITHMETIQUE. hxy/hyx
-// gardent chaque demi-terme : un coefficient ABSENT (champ non fourni) contribue 0 sans deref.
+// Divergence of the CROSS FLUXES of the full tensor at (i,j): d_x(Axy d_y phi) + d_y(Ayx d_x phi),
+// discretized by finite volumes (9-point stencil) as described in the header. Returns the
+// contribution to be ADDED to div(A grad phi). Free ADC_HD functor (device-clean) shared by
+// apply_laplacian and poisson_residual; face coefficient = ARITHMETIC mean. hxy/hyx
+// guard each half-term: an ABSENT coefficient (field not provided) contributes 0 without deref.
 ADC_HD inline Real cross_div(const ConstArray4& p, bool hxy, const ConstArray4& axy, bool hyx,
                              const ConstArray4& ayx, int i, int j, Real idx, Real idy) {
   Real out = Real(0);
-  if (hxy) {  // Faces x : flux croise = Axy_face * (d_y phi)_face, tangentielle moyennee sur 4 coins.
+  if (hxy) {  // x faces: cross flux = Axy_face * (d_y phi)_face, tangential averaged over 4 corners.
     const Real axy_xp = Real(0.5) * (axy(i, j) + axy(i + 1, j));
     const Real axy_xm = Real(0.5) * (axy(i, j) + axy(i - 1, j));
     const Real dyf_xp = (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idy);
     const Real dyf_xm = (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idy);
     out += (axy_xp * dyf_xp - axy_xm * dyf_xm) * idx;
   }
-  if (hyx) {  // Faces y : flux croise = Ayx_face * (d_x phi)_face.
+  if (hyx) {  // y faces: cross flux = Ayx_face * (d_x phi)_face.
     const Real ayx_yp = Real(0.5) * (ayx(i, j) + ayx(i, j + 1));
     const Real ayx_ym = Real(0.5) * (ayx(i, j) + ayx(i, j - 1));
     const Real dxf_yp = (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idx);
@@ -174,16 +93,16 @@ ADC_HD inline Real cross_div(const ConstArray4& p, bool hxy, const ConstArray4& 
 }
 
 
-// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les kernels de l'operateur de Poisson et du lisseur
-// Gauss-Seidel. Memes raisons que le reste du chemin elliptique (#93, recette #64) : ces kernels sont
-// premiere-instancies depuis le V-cycle MG tire d'une TU externe (harness / loader natif) ; une lambda
-// etendue y fait buter l'emission du kernel device sous nvcc (kernel-stub nul -> segfault Cuda en
-// Release -O sans -g). Corps STRICTEMENT identique aux anciennes lambdas (memes branches he/hc/hk,
-// meme stencil) -> residu et potentiel bit-identiques sur CPU et device.
+// NAMED FUNCTORS (and not ADC_HD lambdas) for the Poisson operator and Gauss-Seidel smoother kernels.
+// Same reasons as the rest of the elliptic path (#93, recipe #64): these kernels are
+// first-instantiated from the MG V-cycle pulled from an external TU (harness / native loader); an extended
+// lambda there breaks the device kernel emission under nvcc (null kernel-stub -> Cuda segfault in
+// Release -O without -g). Body STRICTLY identical to the former lambdas (same he/hc/hk branches,
+// same stencil) -> bit-identical residual and potential on CPU and device.
 
-// L = div(A grad phi) - kappa phi (apply_laplacian). cf/ep/ey/ka inutilises si le flag est faux.
-// hxy/hyx => tenseur PLEIN : on AJOUTE les flux croises d_x(Axy d_y phi) + d_y(Ayx d_x phi) (idx/idy
-// = 1/dx, 1/dy ; axy/ayx = coefficients hors-diagonaux au centre). hxy=hyx=false => bit-identique.
+// L = div(A grad phi) - kappa phi (apply_laplacian). cf/ep/ey/ka unused if the flag is false.
+// hxy/hyx => FULL tensor: we ADD the cross fluxes d_x(Axy d_y phi) + d_y(Ayx d_x phi) (idx/idy
+// = 1/dx, 1/dy; axy/ayx = off-diagonal coefficients at center). hxy=hyx=false => bit-identical.
 struct ApplyLaplacianKernel {
   ConstArray4 p;
   Array4 L;
@@ -197,7 +116,7 @@ struct ApplyLaplacianKernel {
   bool hxy, hyx;
   ConstArray4 axy, ayx;
   ADC_HD void operator()(int i, int j) const {
-    if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
+    if (he) {  // face permittivity (harmonic), with or without cut-cell
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
       L(i, j) = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
@@ -209,15 +128,15 @@ struct ApplyLaplacianKernel {
     else
       L(i, j) = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
                 (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
-    // Bloc PLEIN : flux croises ADDITIFS (apres le stencil diagonal). hxy=hyx=false => +0, bit-identique.
+    // FULL block: ADDITIVE cross fluxes (after the diagonal stencil). hxy=hyx=false => +0, bit-identical.
     if (hxy || hyx) L(i, j) += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
-    // operateur Helmholtz / ecrante : L phi = div(A grad phi) - kappa phi.
+    // Helmholtz / screened operator: L phi = div(A grad phi) - kappa phi.
     if (hk) L(i, j) -= ka(i, j) * p(i, j);
   }
 };
 
-// res = f - L phi sur les cellules actives, 0 sur les conductrices (poisson_residual).
-// hx => tenseur PLEIN : flux croises ADDITIFS (cf. ApplyLaplacianKernel). hx=false => bit-identique.
+// res = f - L phi on active cells, 0 on conductor cells (poisson_residual).
+// hx => FULL tensor: ADDITIVE cross fluxes (cf. ApplyLaplacianKernel). hx=false => bit-identical.
 struct PoissonResidualKernel {
   ConstArray4 p, ff;
   Array4 r;
@@ -238,7 +157,7 @@ struct PoissonResidualKernel {
       return;
     }
     Real lap;
-    if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
+    if (he) {  // face permittivity (harmonic), with or without cut-cell
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
       lap = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
@@ -250,7 +169,7 @@ struct PoissonResidualKernel {
     else
       lap = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
             (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
-    // Bloc PLEIN : flux croises ADDITIFS (apres le stencil diagonal). hxy=hyx=false => +0, bit-identique.
+    // FULL block: ADDITIVE cross fluxes (after the diagonal stencil). hxy=hyx=false => +0, bit-identical.
     if (hxy || hyx) lap += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
     // res = f - L phi, L phi = div(A grad phi) - kappa phi = lap - kappa phi.
     r(i, j) = ff(i, j) - lap + (hk ? ka(i, j) * p(i, j) : Real(0));
@@ -258,8 +177,8 @@ struct PoissonResidualKernel {
 };
 }  // namespace detail
 
-// a_xy/a_yx : coefficients hors-diagonaux (tenseur PLEIN). nullptr => terme croise absent
-// (operateur diagonal/Poisson bit-identique). Ghosts (1 couche) supposes remplis par l'appelant.
+// a_xy/a_yx: off-diagonal coefficients (FULL tensor). nullptr => cross term absent
+// (bit-identical diagonal/Poisson operator). Ghosts (1 layer) assumed filled by the caller.
 inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
                             MultiFab& lap, const MultiFab* coef = nullptr,
                             const MultiFab* eps = nullptr,
@@ -279,12 +198,12 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
     const ConstArray4 cf = hc ? coef->fab(li).const_array() : ConstArray4{};
     const bool he = eps != nullptr;
     const ConstArray4 ep = he ? eps->fab(li).const_array() : ConstArray4{};
-    // eps_y==nullptr => isotrope : faces y lisent le meme champ que les faces x (eps_x).
+    // eps_y==nullptr => isotropic: y faces read the same field as the x faces (eps_x).
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
-    const bool hk = kappa != nullptr;  // terme de reaction -kappa phi
+    const bool hk = kappa != nullptr;  // reaction term -kappa phi
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    const bool hxy = a_xy != nullptr;  // demi-terme croise Axy (faces x)
-    const bool hyx = a_yx != nullptr;  // demi-terme croise Ayx (faces y)
+    const bool hxy = a_xy != nullptr;  // Axy cross half-term (x faces)
+    const bool hyx = a_yx != nullptr;  // Ayx cross half-term (y faces)
     const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
     const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
     for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, idx, idy, hc, cf, he,
@@ -292,8 +211,8 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
   }
 }
 
-// res = f - div(A grad phi) sur les cellules actives, 0 sur les conductrices.
-// a_xy/a_yx : coefficients hors-diagonaux (cf. apply_laplacian). nullptr => bit-identique.
+// res = f - div(A grad phi) on active cells, 0 on conductor cells.
+// a_xy/a_yx: off-diagonal coefficients (cf. apply_laplacian). nullptr => bit-identical.
 inline void poisson_residual(MultiFab& phi, const MultiFab& f,
                              const Geometry& geom, const BCRec& bc,
                              MultiFab& res, const MultiFab* mask = nullptr,
@@ -303,8 +222,8 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
                              const MultiFab* eps_y = nullptr,
                              const MultiFab* a_xy = nullptr,
                              const MultiFab* a_yx = nullptr) {
-  device_fence();  // GPU : phi a pu etre ecrit par un kernel (lisseur) ; on
-                   // attend avant la lecture hote de fill_ghosts.
+  device_fence();  // GPU: phi may have been written by a kernel (smoother); we
+                   // wait before the host read in fill_ghosts.
   fill_ghosts(phi, geom.domain, bc);
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
@@ -321,12 +240,12 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
     const ConstArray4 cf = hc ? coef->fab(li).const_array() : ConstArray4{};
     const bool he = eps != nullptr;
     const ConstArray4 ep = he ? eps->fab(li).const_array() : ConstArray4{};
-    // eps_y==nullptr => isotrope : faces y lisent le meme champ que les faces x (eps_x).
+    // eps_y==nullptr => isotropic: y faces read the same field as the x faces (eps_x).
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
-    const bool hk = kappa != nullptr;  // terme de reaction -kappa phi
+    const bool hk = kappa != nullptr;  // reaction term -kappa phi
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    const bool hxy = a_xy != nullptr;  // demi-terme croise Axy (faces x)
-    const bool hyx = a_yx != nullptr;  // demi-terme croise Ayx (faces y)
+    const bool hxy = a_xy != nullptr;  // Axy cross half-term (x faces)
+    const bool hyx = a_yx != nullptr;  // Ayx cross half-term (y faces)
     const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
     const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
     for_each_cell(v, detail::PoissonResidualKernel{p, ff, r, idx2, idy2, idx, idy, hm, mk, hc, cf,
@@ -335,9 +254,9 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
 }
 
 namespace detail {
-// Lisseur Gauss-Seidel red-black sur une couleur (gs_color). p est ECRIT en place. Corps identique a
-// l'ancienne lambda -> bit-identique. Voir le commentaire des autres kernels (#93) pour la motivation
-// du foncteur nomme.
+// Red-black Gauss-Seidel smoother on one color (gs_color). p is WRITTEN in place. Body identical to
+// the former lambda -> bit-identical. See the comment of the other kernels (#93) for the motivation
+// of the named functor.
 struct GsColorKernel {
   Array4 p;
   ConstArray4 ff;
@@ -353,15 +272,15 @@ struct GsColorKernel {
   ConstArray4 ka;
   ADC_HD void operator()(int i, int j) const {
     if (((i + j) & 1) != color) return;
-    if (hm && mk(i, j) == Real(0)) return;  // conducteur : fige phi=0
+    if (hm && mk(i, j) == Real(0)) return;  // conductor: pins phi=0
     Real off, diag;
-    if (he) {  // permittivite de face (harmonique), avec ou sans cut-cell
+    if (he) {  // face permittivity (harmonic), with or without cut-cell
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
       off = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
             wym * p(i, j - 1);
       diag = wxm + wxp + wym + wyp;
-    } else if (hc) {  // stencil cut-cell (Shortley-Weller) ; voisin conducteur = phi=0 sur le cercle
+    } else if (hc) {  // cut-cell stencil (Shortley-Weller); conductor neighbor = phi=0 on the circle
       off = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
             cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1);
       diag = cf(i, j, 4);
@@ -370,8 +289,8 @@ struct GsColorKernel {
             (p(i, j + 1) + p(i, j - 1)) * idy2;
       diag = diag0;
     }
-    // Terme de reaction : l'operateur devient div(eps grad phi) - kappa phi, donc la
-    // diagonale gagne +kappa (kappa >= 0 => plus diagonalement dominant, MG converge mieux).
+    // Reaction term: the operator becomes div(eps grad phi) - kappa phi, so the
+    // diagonal gains +kappa (kappa >= 0 => more diagonally dominant, MG converges better).
     p(i, j) = (off - ff(i, j)) / (diag + (hk ? ka(i, j) : Real(0)));
   }
 };
@@ -393,9 +312,9 @@ inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
     const ConstArray4 cf = hc ? coef->fab(li).const_array() : ConstArray4{};
     const bool he = eps != nullptr;
     const ConstArray4 ep = he ? eps->fab(li).const_array() : ConstArray4{};
-    // eps_y==nullptr => isotrope : faces y lisent le meme champ que les faces x (eps_x).
+    // eps_y==nullptr => isotropic: y faces read the same field as the x faces (eps_x).
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
-    const bool hk = kappa != nullptr;  // terme de reaction -kappa phi (Helmholtz / ecrante)
+    const bool hk = kappa != nullptr;  // reaction term -kappa phi (Helmholtz / screened)
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
     for_each_cell(v, GsColorKernel{p, ff, idx2, idy2, diag0, color, hm, mk, hc, cf,
                                    he, ep, ey, hk, ka});
@@ -409,12 +328,12 @@ inline void gs_rb_sweep(MultiFab& phi, const MultiFab& f, const Geometry& geom,
                         const MultiFab* eps = nullptr,
                         const MultiFab* kappa = nullptr,
                         const MultiFab* eps_y = nullptr) {
-  device_fence();  // attend le kernel precedent avant la lecture hote des halos
+  device_fence();  // wait for the previous kernel before the host read of the halos
   fill_ghosts(phi, geom.domain, bc);
-  detail::gs_color(phi, f, geom, 0, mask, coef, eps, kappa, eps_y);  // rouge (kernel GPU)
-  device_fence();  // le balayage noir lit les valeurs rouges via fill_ghosts hote
+  detail::gs_color(phi, f, geom, 0, mask, coef, eps, kappa, eps_y);  // red (GPU kernel)
+  device_fence();  // the black sweep reads the red values via host fill_ghosts
   fill_ghosts(phi, geom.domain, bc);
-  detail::gs_color(phi, f, geom, 1, mask, coef, eps, kappa, eps_y);  // noir
+  detail::gs_color(phi, f, geom, 1, mask, coef, eps, kappa, eps_y);  // black
 }
 
 inline void gs_smooth(MultiFab& phi, const MultiFab& f, const Geometry& geom,
@@ -425,7 +344,7 @@ inline void gs_smooth(MultiFab& phi, const MultiFab& f, const Geometry& geom,
 }
 
 namespace detail {
-// Fige phi=0 dans les cellules conductrices (mask==0). Foncteur nomme (#93) ; corps identique.
+// Pins phi=0 in the conductor cells (mask==0). Named functor (#93); body identical.
 struct ZeroConductorKernel {
   Array4 p;
   ConstArray4 mk;
@@ -435,7 +354,7 @@ struct ZeroConductorKernel {
 };
 }  // namespace detail
 
-// Force phi=0 dans les cellules conductrices (mask==0).
+// Forces phi=0 in the conductor cells (mask==0).
 inline void zero_conductor(MultiFab& phi, const MultiFab& mask) {
   for (int li = 0; li < phi.local_size(); ++li) {
     Array4 p = phi.fab(li).array();

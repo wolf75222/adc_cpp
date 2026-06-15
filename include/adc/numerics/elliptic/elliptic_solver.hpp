@@ -1,46 +1,28 @@
 #pragma once
 
 /// @file
-/// @brief Concept EllipticSolver : contrat commun des solveurs elliptiques au niveau MultiFab
-///        (resoudre D phi = f), pour que les coupleurs dependent du concept et non d'une classe concrete.
+/// @brief EllipticSolver concept: common contract for elliptic solvers at the MultiFab level
+///        (solve D phi = f), so couplers depend on the concept and not on a concrete class.
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : exprimer la dependance "solveur elliptique" par un concept C++20 plutot que par GeometricMG en
-/// dur, ce qui prepare l'echange MG <-> autre backend (FFT enveloppe, PETSc, Hypre) sans toucher la
-/// logique de couplage.
-/// Contrat : un EllipticSolver expose rhs() -> MultiFab& (second membre f, ecrit avant solve),
-/// phi() -> MultiFab& (solution lue apres solve, conservee entre appels pour le warm start),
-/// solve() (resout phi a partir de rhs en place), residual() -> Real (norme du residu ||D phi - f||),
-/// geom() -> const Geometry& (geometrie du niveau resolu).
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: express the "elliptic solver" dependency through a C++20 concept rather than a
+/// hard-coded GeometricMG, which prepares swapping MG for another backend (FFT wrapper, PETSc,
+/// Hypre) without touching the coupling logic.
+/// Contract: an EllipticSolver exposes rhs() -> MultiFab& (right-hand side f, written before solve),
+/// phi() -> MultiFab& (solution read after solve, kept between calls for the warm start),
+/// solve() (solves phi from rhs in place), residual() -> Real (residual norm ||D phi - f||),
+/// geom() -> const Geometry& (geometry of the solved level).
 ///
-/// Invariants :
-/// - le contrat est au niveau MultiFab : poisson_fft.hpp (slabs + vecteurs bruts) ne le modele PAS
-///   directement ; c'est PoissonFFTSolver/DistributedFFTSolver qui l'enveloppent ;
-/// - phi() est conservee entre appels (warm start) : ne PAS supposer une remise a zero implicite.
+/// Invariants:
+/// - the contract is at the MultiFab level: poisson_fft.hpp (slabs + raw vectors) does NOT model it
+///   directly; PoissonFFTSolver/DistributedFFTSolver are what wrap it;
+/// - phi() is kept between calls (warm start): do NOT assume an implicit reset to zero.
 
 #include <adc/core/types.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 
 #include <concepts>
-
-// Contrat commun des solveurs elliptiques (resoudre D phi = f sur un MultiFab).
-//
-// But : que les coupleurs dependent du CONCEPT, pas d'une implementation concrete.
-// Aujourd'hui Coupler nomme GeometricMG en dur ; en exprimant la dependance par
-// EllipticSolver on prepare l'echange MG <-> autre backend (FFT enveloppe, PETSc,
-// Hypre) sans toucher la logique de couplage.
-//
-// Interface au niveau MultiFab (celle de GeometricMG) :
-//   rhs()      -> MultiFab&        : second membre f (on y ecrit avant solve)
-//   phi()      -> MultiFab&        : solution (on y lit apres solve ; conservee
-//                                    entre appels -> warm start)
-//   solve()                        : resout phi a partir de rhs, en place
-//   residual() -> Real             : norme du residu courant ||D phi - f||
-//   geom()     -> const Geometry&  : geometrie du niveau resolu
-//
-// Note : poisson_fft.hpp est une brique de plus bas niveau (slabs + vecteurs
-// bruts, pas MultiFab) ; un PoissonFFTSolver qui l'enveloppe modelerait ce concept.
 
 namespace adc {
 

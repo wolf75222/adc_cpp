@@ -1,24 +1,24 @@
 #pragma once
 
 /// @file
-/// @brief Backends EllipticSolver DIRECTS par FFT spectrale (CL periodiques), enveloppes MultiFab autour
-///        de PoissonFFT : PoissonFFTSolver (mono-rang, boite unique) et DistributedFFTSolver (distribue, bandes).
+/// @brief DIRECT EllipticSolver backends via spectral FFT (periodic BCs), MultiFab wrappers around
+///        PoissonFFT: PoissonFFTSolver (single-rank, single box) and DistributedFFTSolver (distributed, slabs).
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : resoudre le MEME Laplacien discret 5 points que GeometricMG (memes valeurs propres) mais en UNE
-/// transformee au lieu d'iterer -- bien moins cher quand l'elliptique domine le run (cf. PERFORMANCE.md).
-/// Memes signature de constructeur et interface que GeometricMG, donc interchangeables comme parametre
-/// Elliptic du Coupler. Les deux modelent le concept EllipticSolver (static_assert en bas).
-/// Contrat : PoissonFFTSolver est mono-rang/boite unique (le cas par defaut du Coupler et des facades) ;
-/// DistributedFFTSolver est le pendant distribue (1 bande par rang, transposee MPI interne de PoissonFFT).
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: solve the SAME discrete 5-point Laplacian as GeometricMG (same eigenvalues) but in ONE
+/// transform instead of iterating -- far cheaper when the elliptic part dominates the run (cf. PERFORMANCE.md).
+/// Same constructor signature and interface as GeometricMG, so they are interchangeable as the Coupler's
+/// Elliptic parameter. Both model the EllipticSolver concept (static_assert at the bottom).
+/// Contract: PoissonFFTSolver is single-rank/single box (the default case of the Coupler and the facades);
+/// DistributedFFTSolver is the distributed counterpart (1 slab per rank, internal MPI transpose of PoissonFFT).
 ///
-/// Invariants :
-/// - PoissonFFTSolver leve (garde-fou DUR, actif en Release) si n_ranks() > 1 ou ba.size() != 1 :
-///   sinon un rang sans box locale dereferencerait fab(0) -> SIGSEGV ;
-/// - solve() ecrit phi de moyenne nulle (mode k=0 mis a zero) et remplit les ghosts periodiques de phi
-///   (fill_boundary) pour que la derivation de l'aux (grad phi centre) lise des ghosts a jour ;
-/// - residual() de DistributedFFTSolver est COLLECTIF (all_reduce_max) et remplit d'abord les halos
-///   inter-bandes (fill_boundary MPI).
+/// Invariants:
+/// - PoissonFFTSolver throws (HARD guard, active in Release) if n_ranks() > 1 or ba.size() != 1:
+///   otherwise a rank with no local box would dereference fab(0) -> SIGSEGV;
+/// - solve() writes phi with zero mean (mode k=0 set to zero) and fills phi's periodic ghosts
+///   (fill_boundary) so the aux derivation (centered grad phi) reads up-to-date ghosts;
+/// - residual() of DistributedFFTSolver is COLLECTIVE (all_reduce_max) and first fills the
+///   inter-slab halos (fill_boundary MPI).
 
 #include <adc/numerics/elliptic/elliptic_solver.hpp>
 #include <adc/numerics/elliptic/poisson_fft.hpp>
@@ -37,24 +37,12 @@
 #include <stdexcept>
 #include <vector>
 
-// Backend EllipticSolver DIRECT par FFT spectrale (CL periodiques). Resout le MEME
-// Laplacien discret 5 points que GeometricMG (memes valeurs propres
-// lambda = (2cos(2 pi kx/Nx)-2)/dx^2 + idem y), mais en UNE transformee au lieu
-// d'iterer -> bien moins cher quand l'elliptique domine le run (cf. PERFORMANCE.md).
-//
-// Memes signature de constructeur et interface que GeometricMG, donc interchangeable
-// comme parametre Elliptic du Coupler : Coupler<Model, PoissonFFTSolver>.
-//
-// Portee : mono-rang, boite unique couvrant le domaine (le cas par defaut du Coupler
-// et des facades). Pour le periodique DISTRIBUE, voir DistributedFFTSolver ci-dessous (bandes,
-// EllipticSolver autonome) ; SpectralCoupler l'enveloppe avec le transport E x B.
-
 namespace adc {
 
 class PoissonFFTSolver {
  public:
-  /// @p spectral : symbole du Laplacien (false = stencil 5-points discret, defaut bit-identique ;
-  /// true = symbole continu -(kx^2+ky^2), fidelite aux references spectrales -- cf. PoissonFFT).
+  /// @p spectral: Laplacian symbol (false = discrete 5-point stencil, bit-identical default;
+  /// true = continuous symbol -(kx^2+ky^2), faithful to spectral references -- cf. PoissonFFT).
   PoissonFFTSolver(const Geometry& geom, const BoxArray& ba,
                    const BCRec& = BCRec{}, std::function<bool(Real, Real)> = {},
                    bool spectral = false)
@@ -65,27 +53,27 @@ class PoissonFFTSolver {
         res_(ba, dm_, 1, 0),
         fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
              geom.yhi - geom.ylo, spectral) {
-    // Garde-fou DUR (actif en Release, NDEBUG ne le retire PAS) : ce solveur direct est mono-rang /
-    // boite unique. Sous DistributionMapping de systeme a n_ranks()>1, certains rangs n'ont aucune
-    // box locale (local_size()==0) et solve() dereferencerait fab(0) inexistant -> SIGSEGV. L'ancien
-    // assert disparaissait en Release et la protection s'evanouissait en silence. On leve sur TOUS les
-    // rangs (chacun construit l'objet), donc pas d'interblocage. Pour le periodique distribue :
-    // DistributedFFTSolver (bandes, MPI_Alltoall).
+    // HARD guard (active in Release, NDEBUG does NOT remove it): this direct solver is single-rank /
+    // single box. Under a system DistributionMapping with n_ranks()>1, some ranks have no local
+    // box (local_size()==0) and solve() would dereference a non-existent fab(0) -> SIGSEGV. The old
+    // assert vanished in Release and the protection silently disappeared. We throw on ALL ranks
+    // (each one constructs the object), so no deadlock. For the distributed periodic case:
+    // DistributedFFTSolver (slabs, MPI_Alltoall).
     if (n_ranks() != 1)
       throw std::runtime_error(
-          "solveur fft non supporte en MPI (n_ranks>1) : utiliser geometric_mg ou le solveur fft "
-          "distribue (DistributedFFTSolver)");
+          "fft solver unsupported in MPI (n_ranks>1): use geometric_mg or the distributed fft "
+          "solver (DistributedFFTSolver)");
     if (ba.size() != 1)
       throw std::runtime_error(
-          "PoissonFFTSolver : boite unique requise (ba.size()==1) ; pour un domaine multi-box "
-          "distribue, utiliser DistributedFFTSolver ou geometric_mg");
+          "PoissonFFTSolver: single box required (ba.size()==1); for a distributed multi-box "
+          "domain, use DistributedFFTSolver or geometric_mg");
   }
 
   MultiFab& rhs() { return rhs_; }
   MultiFab& phi() { return phi_; }
   const Geometry& geom() const { return geom_; }
 
-  // Resout lap(phi) = rhs en place (direct, une FFT directe + inverse).
+  // Solve lap(phi) = rhs in place (direct, one forward FFT + inverse).
   void solve() {
     const int Nx = geom_.domain.nx(), Ny = geom_.domain.ny();
     const ConstArray4 f = rhs_.fab(0).const_array();
@@ -94,22 +82,22 @@ class PoissonFFTSolver {
     for (int j = 0; j < Ny; ++j)
       for (int i = 0; i < Nx; ++i)
         rho[static_cast<std::size_t>(j) * Nx + i] = f(v.lo[0] + i, v.lo[1] + j);
-    fft_.solve(rho, phil);  // mode k=0 (constante) mis a zero -> phi de moyenne nulle
+    fft_.solve(rho, phil);  // mode k=0 (constant) set to zero -> phi with zero mean
     Array4 p = phi_.fab(0).array();
     for (int j = 0; j < Ny; ++j)
       for (int i = 0; i < Nx; ++i)
         p(v.lo[0] + i, v.lo[1] + j) = phil[static_cast<std::size_t>(j) * Nx + i];
-    // GHOSTS de phi : la derivation de l'aux (grad phi centre, solve_fields) lit les voisins
-    // i±1/j±1, donc les ghosts du bord de domaine. GeometricMG les remplit en lissant ; ce
-    // solveur direct ecrit SEULEMENT les cellules valides -> sans cet echange, le gradient du
-    // bord lirait des ghosts perimes (bug latent revele par une source electrique branchee sur
-    // 'fft' : Ex faux sur l'anneau de bord). Periodique pur par construction (gardes du ctor).
+    // phi GHOSTS: the aux derivation (centered grad phi, solve_fields) reads the i+-1/j+-1
+    // neighbors, hence the domain-boundary ghosts. GeometricMG fills them while smoothing; this
+    // direct solver writes ONLY the valid cells -> without this exchange, the boundary gradient
+    // would read stale ghosts (latent bug exposed by an electric source wired onto 'fft':
+    // wrong Ex on the boundary ring). Pure periodic by construction (ctor guards).
     fill_boundary(phi_, geom_.domain, Periodicity{true, true});
   }
 
-  // Residu discret ||lap(phi) - rhs|| (~ arrondi pour ce solveur direct).
+  // Discrete residual ||lap(phi) - rhs|| (~ round-off for this direct solver).
   Real residual() {
-    BCRec bc;  // periodique
+    BCRec bc;  // periodic
     poisson_residual(phi_, rhs_, geom_, bc, res_);
     return norm_inf(res_);
   }
@@ -122,29 +110,29 @@ class PoissonFFTSolver {
 };
 
 static_assert(EllipticSolver<PoissonFFTSolver>,
-              "PoissonFFTSolver doit modeler EllipticSolver");
+              "PoissonFFTSolver must model EllipticSolver");
 
-/// Solveur de Poisson periodique DIRECT (FFT spectrale) DISTRIBUE, modele EllipticSolver.
+/// DIRECT periodic Poisson solver (spectral FFT) DISTRIBUTED, models EllipticSolver.
 ///
-/// Role : variante distribuee de PoissonFFTSolver. Le domaine periodique est decoupe en BANDES (slabs,
-/// 1 box par rang -- le layout natif du solveur FFT) ; PoissonFFT fait la transposee parallele
-/// (MPI_Alltoall) en interne. C'est un EllipticSolver AUTONOME, utilisable comme
-/// Coupler<Model, DistributedFFTSolver>, au lieu d'enfermer la FFT distribuee dans SpectralCoupler.
-/// Usage : remplace GeometricMG/PoissonFFTSolver quand le Poisson periodique doit tourner sur n_ranks() > 1.
+/// Role: distributed variant of PoissonFFTSolver. The periodic domain is split into SLABS (slabs,
+/// 1 box per rank -- the FFT solver's native layout); PoissonFFT does the parallel transpose
+/// (MPI_Alltoall) internally. It is a STANDALONE EllipticSolver, usable as
+/// Coupler<Model, DistributedFFTSolver>, instead of locking the distributed FFT into SpectralCoupler.
+/// Usage: replaces GeometricMG/PoissonFFTSolver when the periodic Poisson must run on n_ranks() > 1.
 ///
-/// Preconditions :
-/// - geom.domain.ny() % n_ranks() == 0 : Ny doit etre divisible par le nombre de rangs (decoupage en
-///   bandes egales ; impose par un assert dans le constructeur) ;
-/// - geom.domain.nx() et geom.domain.ny() puissances de 2 : sinon PoissonFFT retombe sur la DFT directe
-///   O(n^2) par bande (correcte mais quadratique), et la transposee par bandes exige toujours la
-///   divisibilite par np ;
-/// - CL periodiques sur les deux axes (le BCRec passe est ignore : periodique par construction).
+/// Preconditions:
+/// - geom.domain.ny() % n_ranks() == 0: Ny must be divisible by the number of ranks (split into
+///   equal slabs; enforced by an assert in the constructor);
+/// - geom.domain.nx() and geom.domain.ny() powers of 2: otherwise PoissonFFT falls back on the
+///   direct O(n^2) DFT per slab (correct but quadratic), and the slab transpose still requires
+///   divisibility by np;
+/// - periodic BCs on both axes (the passed BCRec is ignored: periodic by construction).
 ///
-/// Invariants / contraintes :
-/// - solve() ecrit phi de moyenne nulle (mode k=0 mis a zero), une passe directe (pas de tolerance) ;
-/// - residual() est COLLECTIF : il remplit d'abord les halos inter-bandes (fill_boundary MPI) puis
-///   reduit la norme du residu sur tous les rangs (all_reduce_max) ;
-/// - en serie (n_ranks() == 1) une seule bande couvre le domaine -> identique a PoissonFFTSolver.
+/// Invariants / constraints:
+/// - solve() writes phi with zero mean (mode k=0 set to zero), one direct pass (no tolerance);
+/// - residual() is COLLECTIVE: it first fills the inter-slab halos (fill_boundary MPI) then
+///   reduces the residual norm over all ranks (all_reduce_max);
+/// - in serial (n_ranks() == 1) a single slab covers the domain -> identical to PoissonFFTSolver.
 class DistributedFFTSolver {
  public:
   DistributedFFTSolver(const Geometry& geom, const BCRec& = BCRec{},
@@ -155,17 +143,17 @@ class DistributedFFTSolver {
         fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
              geom.yhi - geom.ylo) {
     const int np = n_ranks();
-    // Garde-fou DUR (actif en Release) : nyl_ = Ny / np est deja calcule dans la liste d'init.
-    // Si Ny n'est pas divisible par np, les bandes seraient mal dimensionnees et solve() lirait
-    // hors bornes. L'ancien assert disparaissait sous NDEBUG. Aligne sur PoissonFFTSolver (throw).
+    // HARD guard (active in Release): nyl_ = Ny / np is already computed in the init list.
+    // If Ny is not divisible by np, the slabs would be mis-sized and solve() would read out
+    // of bounds. The old assert vanished under NDEBUG. Aligned with PoissonFFTSolver (throw).
     if (geom.domain.ny() % np != 0)
       throw std::runtime_error(
-          "DistributedFFTSolver : Ny doit etre divisible par n_ranks()");
+          "DistributedFFTSolver: Ny must be divisible by n_ranks()");
     std::vector<Box2D> slabs;
     for (int r = 0; r < np; ++r)
       slabs.push_back(Box2D{{0, r * nyl_}, {Nx_ - 1, (r + 1) * nyl_ - 1}});
     BoxArray ba(std::move(slabs));
-    dm_ = DistributionMapping(np, np);  // bande r -> rang r
+    dm_ = DistributionMapping(np, np);  // slab r -> rank r
     phi_ = MultiFab(ba, dm_, 1, 1);
     rhs_ = MultiFab(ba, dm_, 1, 0);
     res_ = MultiFab(ba, dm_, 1, 0);
@@ -175,11 +163,11 @@ class DistributedFFTSolver {
   MultiFab& phi() { return phi_; }
   const Geometry& geom() const { return geom_; }
 
-  // Resout lap(phi) = rhs en place : bande locale -> tableau plat -> PoissonFFT (transposee MPI
-  // interne) -> reecrit la bande locale. Mode k=0 mis a zero (phi de moyenne nulle).
+  // Solve lap(phi) = rhs in place: local slab -> flat array -> PoissonFFT (internal MPI transpose)
+  // -> rewrite the local slab. Mode k=0 set to zero (phi with zero mean).
   void solve() {
     const ConstArray4 f = rhs_.fab(0).const_array();
-    const Box2D v = rhs_.box(0);  // bande locale [0..Nx-1] x [y0..y0+nyl-1]
+    const Box2D v = rhs_.box(0);  // local slab [0..Nx-1] x [y0..y0+nyl-1]
     std::vector<double> rho(static_cast<std::size_t>(nyl_) * Nx_), phil;
     for (int jl = 0; jl < nyl_; ++jl)
       for (int i = 0; i < Nx_; ++i)
@@ -191,10 +179,10 @@ class DistributedFFTSolver {
         p(v.lo[0] + i, v.lo[1] + jl) = phil[static_cast<std::size_t>(jl) * Nx_ + i];
   }
 
-  // Residu discret ||lap(phi) - rhs|| reduit sur tous les rangs (~arrondi : solve direct exact).
+  // Discrete residual ||lap(phi) - rhs|| reduced over all ranks (~round-off: direct solve exact).
   Real residual() {
-    BCRec bc;  // periodique
-    fill_boundary(phi_, geom_.domain, Periodicity{true, true});  // halos inter-bandes (MPI)
+    BCRec bc;  // periodic
+    fill_boundary(phi_, geom_.domain, Periodicity{true, true});  // inter-slab halos (MPI)
     poisson_residual(phi_, rhs_, geom_, bc, res_);
     return all_reduce_max(norm_inf(res_));
   }
@@ -208,6 +196,6 @@ class DistributedFFTSolver {
 };
 
 static_assert(EllipticSolver<DistributedFFTSolver>,
-              "DistributedFFTSolver doit modeler EllipticSolver");
+              "DistributedFFTSolver must model EllipticSolver");
 
 }  // namespace adc

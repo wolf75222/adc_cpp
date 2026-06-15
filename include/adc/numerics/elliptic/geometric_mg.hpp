@@ -1,32 +1,32 @@
 #pragma once
 
 /// @file
-/// @brief GeometricMG : multigrille geometrique maison (V-cycle) pour l'operateur elliptique, lisseur
-///        Gauss-Seidel et solveur de fond (bottom solve). Modele les concepts EllipticSolver et LinearSolver.
+/// @brief GeometricMG: in-house geometric multigrid (V-cycle) for the elliptic operator, Gauss-Seidel
+///        smoother and bottom solve. Models the EllipticSolver and LinearSolver concepts.
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : resoudre L(phi) = f par V-cycle classique (pre-lissage, restriction du residu par average_down
-/// sur une grille deux fois plus grossiere, resolution recursive de la correction a CL homogenes,
-/// prolongation par interpolate, post-lissage ; au niveau le plus grossier, lissage long = bottom solve).
-/// La hierarchie est obtenue en grossissant le domaine par 2 jusqu'a une taille minimale ; restriction et
-/// prolongation reutilisent les operateurs de transfert AMR. C'est le SEUL type qui porte le role
-/// d'operateur (EllipticOperator : accesseurs op_eps()/op_kappa()/... + bc() + geom()), reutilise par le
-/// solveur de Krylov pour une matvec coherente avec le residu MG.
-/// Contrat : solve(rel_tol, max_cycles, abs_tol=0) renvoie le nombre de cycles ; critere d'arret MIXTE
-/// residu <= max(rel_tol * r0, abs_tol) (convention hypre/AMReX). solve() sans argument prend la tolerance
-/// par defaut (1e-8, 50 cycles). phi conservee entre appels (warm start). solve_robust durcit le lissage
-/// SEULEMENT en cas de vraie divergence du bord embedded (sinon bit-identique).
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: solve L(phi) = f by a classic V-cycle (pre-smoothing, residual restriction via average_down
+/// onto a twice-coarser grid, recursive solve of the correction with homogeneous BCs,
+/// prolongation via interpolate, post-smoothing; at the coarsest level, long smoothing = bottom solve).
+/// The hierarchy is obtained by coarsening the domain by 2 down to a minimal size; restriction and
+/// prolongation reuse the AMR transfer operators. This is the ONLY type that carries the operator
+/// role (EllipticOperator: accessors op_eps()/op_kappa()/... + bc() + geom()), reused by the
+/// Krylov solver for a matvec consistent with the MG residual.
+/// Contract: solve(rel_tol, max_cycles, abs_tol=0) returns the number of cycles; MIXED stopping
+/// criterion residual <= max(rel_tol * r0, abs_tol) (hypre/AMReX convention). solve() with no argument takes the
+/// default tolerance (1e-8, 50 cycles). phi is kept between calls (warm start). solve_robust hardens the smoothing
+/// ONLY in case of true divergence at the embedded boundary (otherwise bit-identical).
 ///
-/// Invariants :
-/// - le coarsening s'arrete si une boite ne se coarsen pas PROPREMENT (refine(coarsen(b)) != b) : evite
-///   un BoxArray grossier degenere (boites 1x1 en doublon) ou average_down lirait hors bornes (bug MPI) ;
-/// - current_residual() fait un all_reduce_max OBLIGATOIRE (grossier multi-box reparti) : sinon le
-///   critere d'arret se declenche a des iterations differentes par rang -> desynchronisation MPI ;
-/// - replicated : niveau replique sur tous les rangs (V-cycle par-fab sans communication), ce qu'attend
-///   le coupleur AMR ; en serie identique au round-robin, bit a bit ;
-/// - cut_cell : poids Shortley-Weller d'ordre 2 au bord embedded (vs escalier) ; cut_cell=false
-///   bit-identique au stencil historique ;
-/// - les kernels device sont des FONCTEURS NOMMES (recette #93/#64) : lambda etendue interdite cross-TU sous nvcc.
+/// Invariants:
+/// - coarsening stops if a box does not coarsen CLEANLY (refine(coarsen(b)) != b): avoids
+///   a degenerate coarse BoxArray (duplicate 1x1 boxes) where average_down would read out of bounds (MPI bug);
+/// - current_residual() does a MANDATORY all_reduce_max (distributed multi-box coarse): otherwise the
+///   stopping criterion fires at different iterations per rank -> MPI desynchronization;
+/// - replicated: level replicated on all ranks (per-fab V-cycle without communication), as expected by
+///   the AMR coupler; in serial bit-for-bit identical to round-robin;
+/// - cut_cell: order-2 Shortley-Weller weights at the embedded boundary (vs staircase); cut_cell=false
+///   bit-identical to the historical stencil;
+/// - device kernels are NAMED FUNCTORS (recipe #93/#64): extended lambda forbidden cross-TU under nvcc.
 
 #include <adc/core/types.hpp>
 #include <adc/numerics/elliptic/cut_fraction.hpp>
@@ -40,37 +40,25 @@
 #include <adc/mesh/refinement.hpp>
 #include <adc/parallel/comm.hpp>
 
-#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS : trace de diagnostic device (#93), inerte par defaut
+#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (#93), inert by default
 #include <cstdlib>  // getenv
 #include <functional>
 #include <utility>
 #include <vector>
 
-// Multigrille geometrique maison pour lap(phi) = f.
-//
-// V-cycle classique : pre-lissage, restriction du residu (average_down) sur une
-// grille deux fois plus grossiere, resolution recursive de l'equation de
-// correction lap(e) = residu a CL homogenes, prolongation de la correction
-// (interpolate) ajoutee a phi, post-lissage. Au niveau le plus grossier, on
-// lisse longuement (bottom solve).
-//
-// La hierarchie de grilles est obtenue en grossissant le domaine par 2 jusqu'a
-// une taille minimale. Restriction et prolongation reutilisent les operateurs
-// de transfert AMR (average_down / interpolate).
-
 namespace adc {
 
-// Trace de DIAGNOSTIC du V-cycle MG (jalon #93). Active uniquement si ADC_TRACE_SOLVE_FIELDS est pose ;
-// stderr + flush immediat pour localiser le dernier marqueur avant un crash device. INERTE par defaut.
+// DIAGNOSTIC trace of the MG V-cycle (milestone #93). Active only if ADC_TRACE_SOLVE_FIELDS is set;
+// stderr + immediate flush to locate the last marker before a device crash. INERT by default.
 namespace detail {
 inline void mg_trace_mark(const char* w) {
   static const bool on = std::getenv("ADC_TRACE_SOLVE_FIELDS") != nullptr;
   if (on) { std::fprintf(stderr, "[mg] %s\n", w); std::fflush(stderr); }
 }
 
-// Copie de la composante 0 d'un champ fin (eps/eps_y/kappa discretise) vers le niveau fin du MG.
-// FONCTEUR NOMME (et non lambda ADC_HD) : meme recette device-clean que le reste (#93). Corps
-// identique -> bit-identique. Inerte sur le chemin a eps constant, exerce des qu'un champ est cable.
+// Copy component 0 of a fine field (discretized eps/eps_y/kappa) onto the MG fine level.
+// NAMED FUNCTOR (not an ADC_HD lambda): same device-clean recipe as the rest (#93). Identical
+// body -> bit-identical. Inert on the constant-eps path, exercised as soon as a field is wired.
 struct CopyComp0Kernel {
   Array4 d;
   ConstArray4 s;
@@ -86,34 +74,34 @@ inline BCRec homogeneous(const BCRec& b) {
 
 class GeometricMG {
  public:
-  // active(x, y) : predicat optionnel "cellule active" (interieur du conducteur).
-  // Vide => tout actif (pas de paroi embedded).
-  // replicated : si true, chaque niveau (mono-box couvrant le domaine) est REPLIQUE sur
-  // tous les rangs (dmap = my_rank() partout) au lieu du round-robin par defaut. Chaque rang
-  // resout alors le MEME Poisson grossier redondamment, SANS communication (V-cycle par-fab,
-  // fill_boundary sur une box couvrant le domaine est local, et current_residual reduit par
-  // norm_inf = all_reduce_MAX, idempotent sous replication). C'est ce qu'attend le coupleur
-  // AMR (niveau 0 replique). En serie my_rank()=0 -> identique au round-robin, bit a bit.
+  // active(x, y): optional "active cell" predicate (interior of the conductor).
+  // Empty => everything active (no embedded wall).
+  // replicated: if true, each level (mono-box covering the domain) is REPLICATED on
+  // all ranks (dmap = my_rank() everywhere) instead of the default round-robin. Each rank
+  // then solves the SAME coarse Poisson redundantly, WITHOUT communication (per-fab V-cycle,
+  // fill_boundary on a box covering the domain is local, and current_residual reduced by
+  // norm_inf = all_reduce_MAX, idempotent under replication). This is what the AMR coupler
+  // expects (level 0 replicated). In serial my_rank()=0 -> bit-for-bit identical to round-robin.
   //
-  // cut_cell + levelset : bord embedded d'ORDRE 2 (Shortley-Weller) au lieu de
-  // l'escalier. levelset(x, y) est une fonction de niveau (< 0 a l'interieur, signe
-  // du bord) ; pour le cercle conducteur, levelset = hypot(x - cx, y - cy) - Rwall.
-  // Chaque cellule active recoit 5 coefficients calcules a partir des distances au
-  // bord (fraction de coupe theta par direction). active est alors deduit du signe de
-  // levelset s'il n'est pas fourni. cut_cell=false => stencil escalier historique (bit-identique).
+  // cut_cell + levelset: ORDER-2 embedded boundary (Shortley-Weller) instead of
+  // the staircase. levelset(x, y) is a level-set function (< 0 inside, sign of
+  // the boundary); for the conducting circle, levelset = hypot(x - cx, y - cy) - Rwall.
+  // Each active cell receives 5 coefficients computed from the distances to the
+  // boundary (cut fraction theta per direction). active is then deduced from the sign of
+  // levelset if it is not provided. cut_cell=false => historical staircase stencil (bit-identical).
   //
-  // Parametres du V-cycle (defauts eprouves) :
-  //   min_coarse (defaut 2) : taille minimale d'une dimension de grille au-dela de laquelle on ARRETE
-  //                           de coarsener. Le coarsening grossit le domaine par 2 tant que nx/2 et ny/2
-  //                           restent >= min_coarse (et que les boites se coarsenent proprement) ; la
-  //                           grille la plus grossiere (le bottom) garde donc >= min_coarse cellules par axe.
-  //   nu1 (defaut 2)        : nombre de balayages Gauss-Seidel de PRE-lissage (avant la descente vers la
-  //                           grille grossiere), a chaque niveau non-bottom.
-  //   nu2 (defaut 2)        : nombre de balayages Gauss-Seidel de POST-lissage (apres remontee et ajout de
-  //                           la correction prolongee), a chaque niveau non-bottom.
-  //   nbottom (defaut 50)   : nombre de balayages Gauss-Seidel au niveau le plus grossier (bottom solve) ;
-  //                           ce lissage long tient lieu de resolution exacte sur la petite grille de fond.
-  // (solve_robust double LOCALEMENT nu1/nu2 si le bord embedded fait diverger le cycle, puis les restaure.)
+  // V-cycle parameters (proven defaults):
+  //   min_coarse (default 2): minimal size of a grid dimension below which we STOP
+  //                           coarsening. Coarsening grows the domain by 2 as long as nx/2 and ny/2
+  //                           stay >= min_coarse (and the boxes coarsen cleanly); the
+  //                           coarsest grid (the bottom) thus keeps >= min_coarse cells per axis.
+  //   nu1 (default 2): number of PRE-smoothing Gauss-Seidel sweeps (before descending to the
+  //                           coarse grid), at each non-bottom level.
+  //   nu2 (default 2): number of POST-smoothing Gauss-Seidel sweeps (after ascending and adding
+  //                           the prolonged correction), at each non-bottom level.
+  //   nbottom (default 50): number of Gauss-Seidel sweeps at the coarsest level (bottom solve);
+  //                           this long smoothing stands in for an exact solve on the small bottom grid.
+  // (solve_robust LOCALLY doubles nu1/nu2 if the embedded boundary makes the cycle diverge, then restores them.)
   GeometricMG(const Geometry& geom, const BoxArray& ba, const BCRec& bc,
               std::function<bool(Real, Real)> active = {}, bool replicated = false,
               int min_coarse = 2, int nu1 = 2, int nu2 = 2, int nbottom = 50,
@@ -129,19 +117,19 @@ class GeometricMG {
       if (g.domain.nx() % 2 || g.domain.ny() % 2) break;
       if (g.domain.nx() / 2 < min_coarse || g.domain.ny() / 2 < min_coarse)
         break;
-      // Stop si une boite du niveau courant ne se coarsen pas PROPREMENT : sur un domaine
-      // MULTI-BOX (max_grid_size < n), les boites retrecissent par 2 a chaque niveau et
-      // finissent a 1 cellule ; coarsen(ba, 2) ferait alors retomber PLUSIEURS boites fines
-      // distinctes sur la MEME cellule grossiere -> BoxArray grossier DEGENERE (boites en
-      // doublon couvrant la meme cellule). average_down lit un bloc r x r par cellule grossiere
-      // (F(r*I+a, r*J+b)) : pour un fab fin de 1 cellule (0 fantome) trois des quatre lectures
-      // tombent HORS des bornes du buffer (indices negatifs), donc en memoire non initialisee.
-      // En serie le tas est stable (lecture deterministe), mais sous le chemin MPI le tas est
-      // remue et la lecture devient ERRATIQUE (ecart ponctuel jusqu'au blow-up). On garde donc
-      // le niveau courant comme grille la plus grossiere. refine(coarsen(b)) == b caracterise
-      // exactement les boites alignees ET de taille paire (coarsening exact, sans doublon ni
-      // debordement) ; mono-box et multi-box non degenere ne franchissent jamais ce break ->
-      // hierarchie (et resultat) STRICTEMENT inchanges sur ces cas.
+      // Stop if a box of the current level does not coarsen CLEANLY: on a MULTI-BOX domain
+      // (max_grid_size < n), the boxes shrink by 2 at each level and
+      // end up at 1 cell; coarsen(ba, 2) would then make SEVERAL distinct fine
+      // boxes fall onto the SAME coarse cell -> DEGENERATE coarse BoxArray (duplicate boxes
+      // covering the same cell). average_down reads an r x r block per coarse cell
+      // (F(r*I+a, r*J+b)): for a fine fab of 1 cell (0 ghost) three of the four reads
+      // fall OUT of the buffer bounds (negative indices), i.e. into uninitialized memory.
+      // In serial the heap is stable (deterministic read), but on the MPI path the heap is
+      // shuffled and the read becomes ERRATIC (pointwise deviation up to blow-up). So we keep
+      // the current level as the coarsest grid. refine(coarsen(b)) == b characterizes
+      // exactly the boxes that are aligned AND of even size (exact coarsening, no duplicate or
+      // overflow); mono-box and non-degenerate multi-box never cross this break ->
+      // hierarchy (and result) STRICTLY unchanged on those cases.
       const BoxArray& cur = lev_.back().ba;
       bool coarsenable = true;
       for (int i = 0; i < cur.size(); ++i)
@@ -150,26 +138,26 @@ class GeometricMG {
       Geometry gc{g.domain.coarsen(2), g.xlo, g.xhi, g.ylo, g.yhi};
       add_level(gc, coarsen(lev_.back().ba, 2));
     }
-    // Tampons de V-cycle (corr/cfine) alloues UNE fois pour chaque niveau NON-bottom. cfine adopte le
-    // layout exact que average_down/interpolate auraient alloue en interne : coarsen(L.ba, 2) sur la dmap
-    // FINE (L.dm), 0 ghost. Il est REUTILISE pour la restriction (average_down(L.res, C.rhs)) ET la
-    // prolongation (interpolate(C.phi, L.corr)) du meme niveau (usages disjoints dans le temps -> un seul
-    // tampon suffit). Le bottom n'en a pas besoin (retour anticipe de vcycle_rec) et sa coarsen serait
-    // degeneree (raison meme de l'arret du coarsening) -> non alloue.
+    // V-cycle buffers (corr/cfine) allocated ONCE for each NON-bottom level. cfine adopts the
+    // exact layout that average_down/interpolate would have allocated internally: coarsen(L.ba, 2) on the
+    // FINE dmap (L.dm), 0 ghost. It is REUSED for restriction (average_down(L.res, C.rhs)) AND
+    // prolongation (interpolate(C.phi, L.corr)) of the same level (uses disjoint in time -> a single
+    // buffer suffices). The bottom does not need them (early return from vcycle_rec) and its coarsen would
+    // be degenerate (the very reason coarsening stops) -> not allocated.
     for (int l = 0; l + 1 < static_cast<int>(lev_.size()); ++l) {
       lev_[l].corr  = MultiFab(lev_[l].ba, lev_[l].dm, 1, 0);
       lev_[l].cfine = MultiFab(coarsen(lev_[l].ba, 2), lev_[l].dm, 1, 0);
     }
     if (active_) {
-      // chaque niveau evalue son propre masque depuis le cercle physique
+      // each level evaluates its own mask from the physical circle
       for (auto& L : lev_) {
         L.mask = MultiFab(L.ba, L.dm, 1, 0);
         for (int li = 0; li < L.mask.local_size(); ++li) {
           Array4 m = L.mask.fab(li).array();
           const Geometry& g = L.geom;
           const Box2D b = L.mask.box(li);
-          // initialisation hote (predicat std::function non device-callable) ;
-          // ecrit la memoire unifiee avant tout kernel.
+          // host initialization (std::function predicate not device-callable);
+          // writes unified memory before any kernel.
           for (int j = b.lo[1]; j <= b.hi[1]; ++j)
             for (int i = b.lo[0]; i <= b.hi[0]; ++i)
               m(i, j) = active_(g.x_cell(i), g.y_cell(j)) ? Real(1) : Real(0);
@@ -177,11 +165,11 @@ class GeometricMG {
       }
     }
     if (cut_cell_ && levelset_) {
-      // coefficients Shortley-Weller par cellule active, calcules par niveau a partir
-      // des fractions de coupe du level-set (crossing lineaire). w_diag grossit pres du
-      // bord (cellule coupee) mais le systeme RESTE diagonalement dominant (le GS converge) :
-      // on ne clampe theta qu'a 1e-3 pour eviter la division par 0, sans degrader l'ordre 2
-      // (un clamp plus large, ex. 0.05, deplace les pires cellules coupees et casse l'ordre).
+      // Shortley-Weller coefficients per active cell, computed per level from
+      // the level-set cut fractions (linear crossing). w_diag grows near the
+      // boundary (cut cell) but the system STAYS diagonally dominant (GS converges):
+      // we only clamp theta at 1e-3 to avoid division by 0, without degrading order 2
+      // (a wider clamp, e.g. 0.05, shifts the worst cut cells and breaks the order).
       for (auto& L : lev_) {
         L.coef = MultiFab(L.ba, L.dm, 5, 0);
         const Geometry& g = L.geom;
@@ -190,24 +178,24 @@ class GeometricMG {
           Array4 c = L.coef.fab(li).array();
           const ConstArray4 m = L.mask.fab(li).const_array();
           const Box2D b = L.coef.box(li);
-          // Primitive PARTAGEE de croisement de face (cut_fraction.hpp) : MEME geometrie d'ouverture
-          // que le futur transport EB. detail::cut_fraction reprend a l'identique l'ancienne lambda
-          // 'cut' (cut_distance, memes branches et meme clamp 1e-3) et detail::shortley_weller la
-          // formule des 5 poids -> coef BIT-IDENTIQUE a l'assemblage inline d'avant le refactor.
+          // SHARED face-crossing primitive (cut_fraction.hpp): SAME aperture geometry
+          // as the future EB transport. detail::cut_fraction reproduces verbatim the old 'cut'
+          // lambda (cut_distance, same branches and same 1e-3 clamp) and detail::shortley_weller the
+          // formula for the 5 weights -> coef BIT-IDENTICAL to the inline assembly before the refactor.
           const auto& ls = levelset_;
           for (int j = b.lo[1]; j <= b.hi[1]; ++j)
             for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
-              if (m(i, j) == Real(0)) {  // conducteur : coef inutilise (cellule sautee)
+              if (m(i, j) == Real(0)) {  // conductor: coef unused (cell skipped)
                 for (int k = 0; k < 5; ++k) c(i, j, k) = 0;
                 continue;
               }
               const detail::CutFraction cf =
                   detail::cut_fraction(ls, g.x_cell(i), g.y_cell(j), dx, dy);
               const detail::ShortleyWellerWeights w = detail::shortley_weller(cf);
-              c(i, j, 0) = w.w_xm;    // w_xm sur p(i-1)
-              c(i, j, 1) = w.w_xp;    // w_xp sur p(i+1)
-              c(i, j, 2) = w.w_ym;    // w_ym sur p(i,j-1)
-              c(i, j, 3) = w.w_yp;    // w_yp sur p(i,j+1)
+              c(i, j, 0) = w.w_xm;    // w_xm on p(i-1)
+              c(i, j, 1) = w.w_xp;    // w_xp on p(i+1)
+              c(i, j, 2) = w.w_ym;    // w_ym on p(i,j-1)
+              c(i, j, 3) = w.w_yp;    // w_yp on p(i,j+1)
               c(i, j, 4) = w.w_diag;  // w_diag
             }
         }
@@ -220,101 +208,101 @@ class GeometricMG {
   const Geometry& geom() const { return lev_[0].geom; }
   int num_levels() const { return static_cast<int>(lev_.size()); }
 
-  // Active la permittivite VARIABLE eps(x) : l'operateur passe de lap(phi)=f a
-  // div(eps grad phi)=f. eps est un champ AU CENTRE des cellules, evalue par la
-  // fonction analytique fournie sur CHAQUE niveau de la hierarchie (comme le masque
-  // et les coefficients cut-cell), puis ses ghosts sont remplis. Evaluer eps niveau
-  // par niveau (plutot que restreindre depuis le niveau fin) donne la permittivite
-  // EXACTE a chaque resolution grossiere, ce qui preserve l'ordre 2. Appeler une fois
-  // apres construction, avant solve. NE PAS appeler => eps uniforme (chemin historique).
+  // Activates VARIABLE permittivity eps(x): the operator goes from lap(phi)=f to
+  // div(eps grad phi)=f. eps is a CELL-CENTERED field, evaluated by the
+  // analytic function provided on EACH level of the hierarchy (like the mask
+  // and the cut-cell coefficients), then its ghosts are filled. Evaluating eps level
+  // by level (rather than restricting from the fine level) gives the EXACT permittivity
+  // at each coarse resolution, which preserves order 2. Call once
+  // after construction, before solve. DO NOT call => uniform eps (historical path).
   void set_epsilon(std::function<Real(Real, Real)> eps_fn) {
-    // 1 ghost (voisins de bord de box lus), ghosts remplis (do_fill).
+    // 1 ghost (box-boundary neighbors read), ghosts filled (do_fill).
     sample_per_level(&MGLevel::eps, eps_fn, 1, true, eps_bc());
     has_eps_ = true;
   }
 
-  // Surcharge prenant un champ eps DEJA discretise (MultiFab a 1 composante, defini
-  // sur la grille du niveau le plus fin). Il est copie sur le niveau fin puis
-  // RESTREINT (average_down, moyenne 2x2) vers les niveaux grossiers, et ses ghosts
-  // sont remplis a chaque niveau. A utiliser quand eps vient d'un champ par cellule
-  // (pas d'une formule analytique) : c'est le point d'entree pour le cablage System.
+  // Overload taking an ALREADY-discretized eps field (1-component MultiFab, defined
+  // on the finest level grid). It is copied onto the fine level then
+  // RESTRICTED (average_down, 2x2 average) to the coarse levels, and its ghosts
+  // are filled at each level. Use it when eps comes from a per-cell field
+  // (not from an analytic formula): this is the entry point for System wiring.
   void set_epsilon(const MultiFab& eps_fine) {
-    // copie sur le fin + restriction vers les grossiers ; 1 ghost, ghosts remplis a chaque niveau.
+    // copy on the fine + restriction to the coarse; 1 ghost, ghosts filled at each level.
     restrict_and_fill(&MGLevel::eps, eps_fine, 1, true, eps_bc());
     has_eps_ = true;
   }
 
-  // Active la permittivite ANISOTROPE : l'operateur passe de div(eps grad phi) (eps
-  // scalaire) a div(diag(eps_x, eps_y) grad phi). Les faces NORMALES A X utilisent eps_x,
-  // les faces NORMALES A Y utilisent eps_y. eps_x est cable comme le eps isotrope (set
-  // le champ eps interne, faces x) et eps_y un SECOND champ (faces y). Memes conventions
-  // que set_epsilon : champ AU CENTRE, evalue PAR NIVEAU (permittivite exacte au grossier,
-  // ordre 2 preserve) puis ghosts remplis. Cas d'usage : milieu/maillage anisotrope.
-  // Donner eps_x_fn == eps_y_fn redonne l'operateur isotrope eps=eps_x. Composable avec
-  // set_reaction (kappa). Appeler une fois apres construction, avant solve.
+  // Activates ANISOTROPIC permittivity: the operator goes from div(eps grad phi) (scalar
+  // eps) to div(diag(eps_x, eps_y) grad phi). Faces NORMAL TO X use eps_x,
+  // faces NORMAL TO Y use eps_y. eps_x is wired like the isotropic eps (sets
+  // the internal eps field, x faces) and eps_y a SECOND field (y faces). Same conventions
+  // as set_epsilon: CELL-CENTERED field, evaluated PER LEVEL (exact coarse permittivity,
+  // order 2 preserved) then ghosts filled. Use case: anisotropic medium/mesh.
+  // Giving eps_x_fn == eps_y_fn gives back the isotropic operator eps=eps_x. Composable with
+  // set_reaction (kappa). Call once after construction, before solve.
   void set_epsilon_anisotropic(std::function<Real(Real, Real)> eps_x_fn,
                                std::function<Real(Real, Real)> eps_y_fn) {
-    set_epsilon(std::move(eps_x_fn));  // faces x : reutilise le cablage eps isotrope
-    // faces y : second champ eps_y, meme convention (1 ghost, ghosts remplis).
+    set_epsilon(std::move(eps_x_fn));  // x faces: reuse the isotropic eps wiring
+    // y faces: second eps_y field, same convention (1 ghost, ghosts filled).
     sample_per_level(&MGLevel::eps_y, eps_y_fn, 1, true, eps_bc());
     has_eps_y_ = true;
   }
 
-  // Surcharge prenant deux champs DEJA discretises (grille du niveau le plus fin), copies
-  // sur le niveau fin puis RESTREINTS (average_down) vers les grossiers et ghosts remplis,
-  // exactement comme set_epsilon(const MultiFab&). Point d'entree pour un cablage par champ
-  // (ex. depuis System). eps_x porte les faces x, eps_y les faces y.
+  // Overload taking two ALREADY-discretized fields (finest level grid), copied
+  // onto the fine level then RESTRICTED (average_down) to the coarse and ghosts filled,
+  // exactly like set_epsilon(const MultiFab&). Entry point for per-field wiring
+  // (e.g. from System). eps_x carries the x faces, eps_y the y faces.
   void set_epsilon_anisotropic(const MultiFab& eps_x_fine, const MultiFab& eps_y_fine) {
-    set_epsilon(eps_x_fine);  // faces x : reutilise le cablage eps isotrope (+ restriction)
-    // faces y : second champ eps_y, copie + restriction (1 ghost, ghosts remplis a chaque niveau).
+    set_epsilon(eps_x_fine);  // x faces: reuse the isotropic eps wiring (+ restriction)
+    // y faces: second eps_y field, copy + restriction (1 ghost, ghosts filled at each level).
     restrict_and_fill(&MGLevel::eps_y, eps_y_fine, 1, true, eps_bc());
     has_eps_y_ = true;
   }
 
-  // Active le terme de REACTION kappa(x) : l'operateur passe de div(eps grad phi) = f a
-  // div(eps grad phi) - kappa phi = f (Poisson ECRANTE / Helmholtz ; kappa = 1/lambda_D^2 pour
-  // l'ecrantage de Debye). kappa >= 0 rend l'operateur plus diagonalement dominant (la multigrille
-  // converge au moins aussi bien). C'est un coefficient PHYSIQUE (unite 1/longueur^2), DIAGONAL :
-  // lu en (i,j) seulement (aucun voisin), donc 0 ghost ; restreint par moyenne sur les niveaux
-  // grossiers (meme valeur physique echantillonnee). NE PAS appeler => kappa = 0 (Poisson, chemin
-  // historique strictement inchange). Composable avec set_epsilon (eps(x) et kappa(x) ensemble).
+  // Activates the REACTION term kappa(x): the operator goes from div(eps grad phi) = f to
+  // div(eps grad phi) - kappa phi = f (SCREENED Poisson / Helmholtz; kappa = 1/lambda_D^2 for
+  // Debye screening). kappa >= 0 makes the operator more diagonally dominant (the multigrid
+  // converges at least as well). It is a PHYSICAL coefficient (unit 1/length^2), DIAGONAL:
+  // read at (i,j) only (no neighbor), so 0 ghost; restricted by average on the coarse
+  // levels (same physical value sampled). DO NOT call => kappa = 0 (Poisson, historical
+  // path strictly unchanged). Composable with set_epsilon (eps(x) and kappa(x) together).
   void set_reaction(std::function<Real(Real, Real)> kappa_fn) {
-    // kappa : DIAGONAL, lu en (i,j) seul -> 0 ghost et do_fill=false (AUCUN fill_ghosts, historique).
-    // L'ebc est alors inutilise (BCRec{} jamais lu).
+    // kappa: DIAGONAL, read at (i,j) only -> 0 ghost and do_fill=false (NO fill_ghosts, historical).
+    // ebc is then unused (BCRec{} never read).
     sample_per_level(&MGLevel::kappa, kappa_fn, 0, false, BCRec{});
     has_kappa_ = true;
   }
 
-  // Surcharge : champ kappa DEJA discretise (MultiFab 1 composante, grille fine), copie sur le
-  // niveau fin puis RESTREINT (average_down) vers les grossiers. Point d'entree pour le cablage
-  // System (un champ kappa par cellule).
+  // Overload: ALREADY-discretized kappa field (1-component MultiFab, fine grid), copied onto the
+  // fine level then RESTRICTED (average_down) to the coarse. Entry point for System wiring
+  // (a per-cell kappa field).
   void set_reaction(const MultiFab& kappa_fine) {
-    // kappa : DIAGONAL -> 0 ghost et do_fill=false (AUCUN fill_ghosts, ni fin ni grossier, historique).
+    // kappa: DIAGONAL -> 0 ghost and do_fill=false (NO fill_ghosts, neither fine nor coarse, historical).
     restrict_and_fill(&MGLevel::kappa, kappa_fine, 0, false, BCRec{});
     has_kappa_ = true;
   }
 
-  // Active les COEFFICIENTS HORS-DIAGONAUX du tenseur PLEIN A = [[eps_x, Axy], [Ayx, eps_y]] :
-  // l'operateur passe de div(diag(eps_x, eps_y) grad phi) a div(A grad phi), en ajoutant les flux
-  // CROISES d_x(Axy d_y phi) + d_y(Ayx d_x phi) (cf. poisson_operator.hpp). A peut etre NON
-  // symetrique (Axy != Ayx). Memes conventions que set_epsilon : champs AU CENTRE, evalues PAR
-  // NIVEAU (coefficient exact au grossier) puis ghosts remplis (la moyenne de face lit le voisin a
-  // i+-1 / j+-1). Composable avec set_epsilon[_anisotropic] et set_reaction. Appeler une fois apres
-  // construction, avant solve. NE PAS appeler => bloc DIAGONAL (chemin actuel bit-identique).
-  // AVERTISSEMENT : pour A fortement non symetrique le V-cycle GS-5-points (lisseur du bloc
-  // DIAGONAL, termes croises EXPLICITES) peut ne PAS converger ; un Krylov serait alors requis.
+  // Activates the OFF-DIAGONAL COEFFICIENTS of the FULL tensor A = [[eps_x, Axy], [Ayx, eps_y]]:
+  // the operator goes from div(diag(eps_x, eps_y) grad phi) to div(A grad phi), adding the CROSS
+  // fluxes d_x(Axy d_y phi) + d_y(Ayx d_x phi) (cf. poisson_operator.hpp). A may be NON
+  // symmetric (Axy != Ayx). Same conventions as set_epsilon: CELL-CENTERED fields, evaluated PER
+  // LEVEL (exact coarse coefficient) then ghosts filled (the face average reads the neighbor at
+  // i+-1 / j+-1). Composable with set_epsilon[_anisotropic] and set_reaction. Call once after
+  // construction, before solve. DO NOT call => DIAGONAL block (current path bit-identical).
+  // WARNING: for strongly non-symmetric A the 5-point GS V-cycle (smoother of the DIAGONAL
+  // block, EXPLICIT cross terms) may NOT converge; a Krylov would then be required.
   void set_cross_terms(std::function<Real(Real, Real)> a_xy_fn,
                        std::function<Real(Real, Real)> a_yx_fn) {
     const BCRec ebc = eps_bc();
     for (auto& L : lev_) {
-      L.a_xy = MultiFab(L.ba, L.dm, 1, 1);  // 1 ghost : la moyenne de face lit le voisin de bord
+      L.a_xy = MultiFab(L.ba, L.dm, 1, 1);  // 1 ghost: the face average reads the boundary neighbor
       L.a_yx = MultiFab(L.ba, L.dm, 1, 1);
       const Geometry& g = L.geom;
       for (int li = 0; li < L.a_xy.local_size(); ++li) {
         Array4 fxy = L.a_xy.fab(li).array();
         Array4 fyx = L.a_yx.fab(li).array();
         const Box2D b = L.a_xy.box(li);
-        // initialisation hote (std::function non device-callable) ; memoire unifiee avant kernel
+        // host initialization (std::function not device-callable); unified memory before kernel
         for (int j = b.lo[1]; j <= b.hi[1]; ++j)
           for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
             const Real x = g.x_cell(i), y = g.y_cell(j);
@@ -328,15 +316,15 @@ class GeometricMG {
     has_cross_ = true;
   }
 
-  // Surcharge prenant deux champs DEJA discretises (grille du niveau le plus fin), copies sur le
-  // niveau fin puis RESTREINTS (average_down) vers les grossiers et ghosts remplis, exactement comme
-  // set_epsilon_anisotropic(const MultiFab&, const MultiFab&). Point d'entree pour des termes croises
-  // PAR CELLULE (ex. A = I + c rho B^{-1} de la condensation de Schur, ou rho varie en espace, donc
-  // a_xy/a_yx ne sont pas des formules analytiques mais des champs). Les coefficients croises ne
-  // servent QUE le residu / la matvec PLEINE (le lisseur GS reste 5 points, bloc diagonal) ; leur
-  // restriction au grossier ne sert donc qu'a un eventuel residu MG sur l'operateur plein (le
-  // preconditionneur Krylov, lui, est cable SANS termes croises -> partie symetrique). NE PAS appeler
-  // => bloc DIAGONAL (chemin actuel bit-identique).
+  // Overload taking two ALREADY-discretized fields (finest level grid), copied onto the
+  // fine level then RESTRICTED (average_down) to the coarse and ghosts filled, exactly like
+  // set_epsilon_anisotropic(const MultiFab&, const MultiFab&). Entry point for PER-CELL cross
+  // terms (e.g. A = I + c rho B^{-1} from Schur condensation, where rho varies in space, so
+  // a_xy/a_yx are not analytic formulas but fields). The cross coefficients only
+  // serve the residual / the FULL matvec (the GS smoother stays 5-point, diagonal block); their
+  // restriction to the coarse therefore only serves a possible MG residual on the full operator (the
+  // Krylov preconditioner is wired WITHOUT cross terms -> symmetric part). DO NOT call
+  // => DIAGONAL block (current path bit-identical).
   void set_cross_terms(const MultiFab& a_xy_fine, const MultiFab& a_yx_fine) {
     const BCRec ebc = eps_bc();
     for (auto& L : lev_) {
@@ -365,82 +353,82 @@ class GeometricMG {
 
   void vcycle() { vcycle_rec(0, bc_); }
 
-  // V-cycles jusqu'a residu sous le plancher mixte (ou max_cycles). Renvoie le nombre
-  // de cycles effectues. phi est conserve entre appels (warm start).
+  // V-cycles until the residual is under the mixed floor (or max_cycles). Returns the number
+  // of cycles performed. phi is kept between calls (warm start).
   //
-  // Critere d'arret MIXTE relatif/absolu (convention hypre/AMReX) :
-  //   residu <= max(rel_tol * r0, abs_tol)
-  // abs_tol est un plancher ABSOLU sur la norme du residu (MEMES unites que current_residual(),
-  // donc rapporte a l'echelle du probleme par l'appelant qui la connait : aucune constante magique
-  // n'est cuite ici). Defaut 0 -> max(rel_tol*r0, 0) = rel_tol*r0, soit le critere relatif
-  // historique a l'identique. Le plancher evite de sur-resoudre un etat DEJA converge (r0 minuscule,
-  // typique d'un solve HORS PAS sur etat inchange) : early-exit sans cycler si r0 est sous abs_tol.
+  // MIXED relative/absolute stopping criterion (hypre/AMReX convention):
+  //   residual <= max(rel_tol * r0, abs_tol)
+  // abs_tol is an ABSOLUTE floor on the residual norm (SAME units as current_residual(),
+  // so scaled to the problem by the caller who knows it: no magic constant
+  // is baked in here). Default 0 -> max(rel_tol*r0, 0) = rel_tol*r0, i.e. the historical
+  // relative criterion unchanged. The floor avoids over-solving an ALREADY converged state (tiny r0,
+  // typical of an OFF-STEP solve on an unchanged state): early-exit without cycling if r0 is below abs_tol.
   int solve(Real rel_tol, int max_cycles, Real abs_tol = Real(0)) {
-    detail::mg_trace_mark("solve: avant current_residual initial");
+    detail::mg_trace_mark("solve: before initial current_residual");
     const Real r0 = current_residual();
-    detail::mg_trace_mark("solve: apres current_residual initial");
-    if (r0 <= abs_tol) return 0;  // deja sous le plancher (ou nul) ; abs_tol=0 -> ancien test r0<=0
+    detail::mg_trace_mark("solve: after initial current_residual");
+    if (r0 <= abs_tol) return 0;  // already under the floor (or zero); abs_tol=0 -> old test r0<=0
     const Real stop = (rel_tol * r0 > abs_tol) ? rel_tol * r0 : abs_tol;  // max(rel_tol*r0, abs_tol)
     for (int c = 1; c <= max_cycles; ++c) {
-      detail::mg_trace_mark("solve: avant vcycle");
+      detail::mg_trace_mark("solve: before vcycle");
       vcycle();
-      detail::mg_trace_mark("solve: apres vcycle");
+      detail::mg_trace_mark("solve: after vcycle");
       if (current_residual() <= stop) return c;
     }
     return max_cycles;
   }
 
-  // Interface du concept EllipticSolver : solve() sans argument (tolerance par
-  // defaut) et residual() (alias de current_residual). Permet aux coupleurs de
-  // dependre du concept, pas de GeometricMG en dur. Propage abs_tol_ (plancher
-  // absolu, defaut 0 -> critere relatif historique a l'identique) au critere mixte.
+  // EllipticSolver concept interface: solve() with no argument (default
+  // tolerance) and residual() (alias of current_residual). Lets couplers
+  // depend on the concept, not on GeometricMG directly. Propagates abs_tol_ (absolute
+  // floor, default 0 -> historical relative criterion unchanged) to the mixed criterion.
   void solve() { solve(Real(1e-8), 50, abs_tol_); }
   Real residual() { return current_residual(); }
 
-  // Plancher ABSOLU sur le residu utilise par le solve() sans argument (chemin du concept
-  // EllipticSolver, emprunte par les coupleurs / le runtime). Memes unites que residual().
-  // Defaut 0 : le critere reste purement relatif (comportement historique bit-identique).
-  // Le poser > 0 (a une valeur rapportee a l'echelle du probleme, ex. eps * ||rhs||) fait sortir
-  // sans cycler les solves HORS PAS sur un etat deja converge (residu initial sous le plancher).
+  // ABSOLUTE floor on the residual used by the no-argument solve() (the EllipticSolver
+  // concept path, taken by the couplers / the runtime). Same units as residual().
+  // Default 0: the criterion stays purely relative (historical behavior bit-identical).
+  // Setting it > 0 (to a value scaled to the problem, e.g. eps * ||rhs||) makes the
+  // OFF-STEP solves on an already-converged state exit without cycling (initial residual under the floor).
   void set_abs_tol(Real abs_tol) { abs_tol_ = abs_tol; }
   Real abs_tol() const { return abs_tol_; }
 
-  // Solve DURCI pour le bord embedded a haute resolution. Sur grille fine, le V-cycle
-  // geometrique diverge parfois pres de la paroi conductrice : le coarsening est
-  // NON-Galerkin et le masque du cercle est re-evalue par niveau, donc la correction
-  // grossiere devient incoherente avec le bord fin et le lissage nu1=nu2=2 ne la domine
-  // plus (rayon spectral du cycle > 1). Le potentiel diverge alors a chaque appel (le
-  // warm start propage la divergence d'un pas a l'autre), d'ou un nan du champ a haute
-  // resolution (voir docs/HERO_RUN_AMR.md). La divergence est ERRATIQUE en resolution
-  // (elle depend de l'alignement du cercle sur la hierarchie de grilles).
+  // HARDENED solve for the embedded boundary at high resolution. On a fine grid, the geometric
+  // V-cycle sometimes diverges near the conducting wall: coarsening is
+  // NON-Galerkin and the circle mask is re-evaluated per level, so the coarse
+  // correction becomes inconsistent with the fine boundary and the nu1=nu2=2 smoothing no longer
+  // dominates it (cycle spectral radius > 1). The potential then diverges on each call (the
+  // warm start propagates the divergence from one step to the next), hence a nan in the field at high
+  // resolution (see docs/HERO_RUN_AMR.md). The divergence is ERRATIC in resolution
+  // (it depends on the alignment of the circle on the grid hierarchy).
   //
-  // Strategie, BIT-IDENTIQUE quand le solveur converge (ou stagne) deja :
-  //   1. cycle standard au lissage courant : EXACTEMENT le corps de solve(rel_tol,
-  //      max_cycles), donc identique aux runs deja stables ;
-  //   2. SEULEMENT si le residu final EXCEDE le residu initial (vraie divergence,
-  //      ratio > 1 ; pas une simple stagnation ratio < 1, qu'on garde telle quelle pour
-  //      rester bit-identique) : on durcit le lissage LOCALEMENT au solve (nu double,
-  //      nu1_/nu2_ restaures au retour, les pas suivants repartent au lissage nominal) et on
-  //      REPART A FROID (phi=0, le warm start portait l'etat diverge), jusqu'a convergence
-  //      ou saturation de nu. Plus de lissage rend le V-cycle contractant (le GS domine la
-  //      correction grossiere incoherente) : cf. balayage, nu=2 diverge a nc=640, nu>=4
-  //      converge. Tout run aujourd'hui stable n'a PAS diverge (divergence -> nan -> non
-  //      enregistre), donc la phase 2 ne se declenche jamais pour eux : bit-identique.
+  // Strategy, BIT-IDENTICAL when the solver already converges (or stalls):
+  //   1. standard cycle at the current smoothing: EXACTLY the body of solve(rel_tol,
+  //      max_cycles), so identical to the already-stable runs;
+  //   2. ONLY if the final residual EXCEEDS the initial residual (true divergence,
+  //      ratio > 1; not a mere stagnation ratio < 1, which we keep as-is to
+  //      stay bit-identical): we harden the smoothing LOCALLY to the solve (nu doubled,
+  //      nu1_/nu2_ restored on return, the next steps restart at nominal smoothing) and
+  //      RESTART COLD (phi=0, the warm start was carrying the diverged state), until convergence
+  //      or nu saturation. More smoothing makes the V-cycle contractive (GS dominates the
+  //      inconsistent coarse correction): cf. sweep, nu=2 diverges at nc=640, nu>=4
+  //      converges. Any run stable today did NOT diverge (divergence -> nan -> not
+  //      recorded), so phase 2 never fires for them: bit-identical.
   int solve_robust(Real rel_tol, int max_cycles) {
     const Real r0 = current_residual();
     if (r0 <= Real(0)) return 0;
     int total = 0;
-    for (int c = 1; c <= max_cycles; ++c) {  // phase 1 : EXACTEMENT le corps de solve()
+    for (int c = 1; c <= max_cycles; ++c) {  // phase 1: EXACTLY the body of solve()
       vcycle();
       ++total;
-      if (current_residual() <= rel_tol * r0) return total;  // -> bit-identique aux runs enregistres
+      if (current_residual() <= rel_tol * r0) return total;  // -> bit-identical to recorded runs
     }
-    if (current_residual() <= r0) return total;  // stagnation (pas divergence) : on garde tel quel
-    // phase 2 : divergence du V-cycle au bord embedded. Durcissement du lissage LOCAL au solve
-    // (nu1_/nu2_ sauves puis RESTAURES avant chaque retour) : pas de ratchet permanent sur le hot
-    // path, le surcout n'est paye QUE par le solve qui diverge ; les solves suivants repartent au
-    // lissage nominal (reproductibilite preservee, cout independant de l'historique). Restart a
-    // froid (phi=0, le warm start portait l'etat diverge). Plus de lissage rend le cycle contractant.
+    if (current_residual() <= r0) return total;  // stagnation (not divergence): keep as-is
+    // phase 2: V-cycle divergence at the embedded boundary. Smoothing hardening LOCAL to the solve
+    // (nu1_/nu2_ saved then RESTORED before each return): no permanent ratchet on the hot
+    // path, the overhead is paid ONLY by the solve that diverges; the next solves restart at
+    // nominal smoothing (reproducibility preserved, cost independent of history). Cold restart
+    // (phi=0, the warm start was carrying the diverged state). More smoothing makes the cycle contractive.
     const int nu1_save = nu1_, nu2_save = nu2_;
     while (nu1_ < 64 || nu2_ < 64) {
       if (nu1_ < 64) nu1_ *= 2;
@@ -453,32 +441,32 @@ class GeometricMG {
       }
     }
     nu1_ = nu1_save; nu2_ = nu2_save;
-    return total;  // meilleur effort au lissage maximal (residu deja sous r0 : pas de divergence)
+    return total;  // best effort at maximal smoothing (residual already under r0: no divergence)
   }
 
-  // Residu courant (norme infinie) au niveau le plus fin. all_reduce_max OBLIGATOIRE pour
-  // un grossier MULTI-BOX REPARTI : sans lui, norm_inf rend le max LOCAL (different par rang),
-  // donc le critere d'arret du V-cycle se declenche a des iterations differentes selon le rang
-  // -> nombre de V-cycles (et d'appels fill_boundary) different -> desynchronisation des flux
-  // MPI (MPI_ERR_TRUNCATE). Idempotent sous replication (max local = global sur chaque rang) et
-  // identite en serie -> bit-identique au comportement historique.
+  // Current residual (infinity norm) at the finest level. all_reduce_max MANDATORY for
+  // a DISTRIBUTED MULTI-BOX coarse: without it, norm_inf returns the LOCAL max (different per rank),
+  // so the V-cycle stopping criterion fires at different iterations depending on the rank
+  // -> different number of V-cycles (and fill_boundary calls) -> desynchronization of the
+  // MPI fluxes (MPI_ERR_TRUNCATE). Idempotent under replication (local max = global on each rank) and
+  // identity in serial -> bit-identical to the historical behavior.
   Real current_residual() {
-    detail::mg_trace_mark("current_residual: avant poisson_residual");
+    detail::mg_trace_mark("current_residual: before poisson_residual");
     poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res,
                      mask_ptr(0), coef_ptr(0), eps_ptr(0), kappa_ptr(0), eps_y_ptr(0),
                      a_xy_ptr(0), a_yx_ptr(0));
-    detail::mg_trace_mark("current_residual: apres poisson_residual, avant norm_inf");
+    detail::mg_trace_mark("current_residual: after poisson_residual, before norm_inf");
     const Real r = all_reduce_max(norm_inf(lev_[0].res));
-    detail::mg_trace_mark("current_residual: apres norm_inf");
+    detail::mg_trace_mark("current_residual: after norm_inf");
     return r;
   }
 
-  // ACCES aux pointeurs de coefficient de l'operateur du NIVEAU FIN (level 0) et a la CL. Exposent
-  // EXACTEMENT ce que current_residual() passe a poisson_residual : un appelant externe (le solveur
-  // de Krylov, qui utilise apply_laplacian comme matvec et a besoin d'une matvec COHERENTE avec le
-  // residu MG) reutilise ainsi le meme operateur, sans dupliquer le cablage des champs eps/kappa/Axy.
-  // nullptr quand le terme correspondant est inactif (cf. les *_ptr internes). Additif : aucun chemin
-  // existant ne les appelle, le comportement par defaut est inchange.
+  // ACCESS to the FINE-level (level 0) operator coefficient pointers and to the BC. Expose
+  // EXACTLY what current_residual() passes to poisson_residual: an external caller (the Krylov
+  // solver, which uses apply_laplacian as the matvec and needs a matvec CONSISTENT with the
+  // MG residual) thus reuses the same operator, without duplicating the eps/kappa/Axy field wiring.
+  // nullptr when the corresponding term is inactive (cf. the internal *_ptr). Additive: no existing
+  // path calls them, the default behavior is unchanged.
   const MultiFab* op_mask() { return mask_ptr(0); }
   const MultiFab* op_coef() { return coef_ptr(0); }
   const MultiFab* op_eps() { return eps_ptr(0); }
@@ -496,10 +484,10 @@ class GeometricMG {
     BoxArray ba;
     DistributionMapping dm;
     MultiFab phi, rhs, res, mask, coef, eps, kappa, eps_y, a_xy, a_yx;
-    // Tampons de V-cycle REUTILISES, alloues une fois par le constructeur pour les niveaux NON-bottom :
-    // corr = correction prolongee (layout du niveau) ; cfine = grille "fin coarsen" partagee par la
-    // restriction (average_down) et la prolongation (interpolate) du niveau. Le bottom les laisse vides
-    // (vcycle_rec y retourne avant de les toucher, et sa coarsen serait degeneree).
+    // REUSED V-cycle buffers, allocated once by the constructor for the NON-bottom levels:
+    // corr = prolonged correction (level layout); cfine = "fine coarsened" grid shared by the
+    // restriction (average_down) and the prolongation (interpolate) of the level. The bottom leaves them empty
+    // (vcycle_rec returns before touching them, and its coarsen would be degenerate).
     MultiFab corr, cfine;
   };
 
@@ -507,16 +495,16 @@ class GeometricMG {
   const MultiFab* coef_ptr(int l) { return cut_cell_ ? &lev_[l].coef : nullptr; }
   const MultiFab* eps_ptr(int l) { return has_eps_ ? &lev_[l].eps : nullptr; }
   const MultiFab* kappa_ptr(int l) { return has_kappa_ ? &lev_[l].kappa : nullptr; }
-  // eps_y absent => nullptr => operateur isotrope (eps_y = eps_x) inchange.
+  // eps_y absent => nullptr => isotropic operator (eps_y = eps_x) unchanged.
   const MultiFab* eps_y_ptr(int l) { return has_eps_y_ ? &lev_[l].eps_y : nullptr; }
-  // termes croises absents => nullptr => bloc DIAGONAL (chemin actuel inchange).
+  // cross terms absent => nullptr => DIAGONAL block (current path unchanged).
   const MultiFab* a_xy_ptr(int l) { return has_cross_ ? &lev_[l].a_xy : nullptr; }
   const MultiFab* a_yx_ptr(int l) { return has_cross_ ? &lev_[l].a_yx : nullptr; }
 
-  // CL utilisee pour remplir les ghosts du champ eps : on garde le periodique mais
-  // on remplace tout bord physique (Dirichlet ou outflow de phi) par une
-  // extrapolation gradient-nul (eps_ghost = eps interieur), ce qui donne une
-  // permittivite de face = eps au bord (face sur le contour du domaine).
+  // BC used to fill the eps field ghosts: we keep the periodic but
+  // replace every physical boundary (Dirichlet or outflow of phi) by a
+  // zero-gradient extrapolation (eps_ghost = interior eps), which gives a
+  // face permittivity = eps at the boundary (face on the domain contour).
   BCRec eps_bc() const {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec b;
@@ -535,18 +523,18 @@ class GeometricMG {
                            MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}});
   }
 
-  // FACTORISATION (cablage des coefficients d'operateur, partie COMMUNE) : un champ scalaire
-  // (eps, eps_y, kappa, ...) designe par un pointeur-vers-membre MGLevel::*, soit ECHANTILLONNE
-  // PAR NIVEAU depuis une fonction analytique (sample_per_level), soit COPIE sur le niveau fin
-  // puis RESTREINT (average_down) vers les grossiers (restrict_and_fill). Les deux preservent EXACTEMENT
-  // les corps inlines d'origine, y compris les DIFFERENCES entre coefficients :
-  //   - nghost : 1 pour eps/eps_y (voisins de face lus), 0 pour kappa (diagonal, lu en (i,j) seul) ;
-  //   - do_fill : eps/eps_y remplissent leurs ghosts (fill_ghosts) ; kappa NE LES REMPLIT PAS
-  //     (0 ghost, omission HISTORIQUE conservee a l'identique -- AUCUN fill_ghosts ajoute ici).
+  // FACTORIZATION (operator coefficient wiring, COMMON part): a scalar field
+  // (eps, eps_y, kappa, ...) designated by a pointer-to-MGLevel-member MGLevel::*, either SAMPLED
+  // PER LEVEL from an analytic function (sample_per_level), or COPIED onto the fine level
+  // then RESTRICTED (average_down) to the coarse (restrict_and_fill). Both preserve EXACTLY
+  // the original inline bodies, including the DIFFERENCES between coefficients:
+  //   - nghost: 1 for eps/eps_y (face neighbors read), 0 for kappa (diagonal, read at (i,j) only);
+  //   - do_fill: eps/eps_y fill their ghosts (fill_ghosts); kappa DOES NOT FILL THEM
+  //     (0 ghost, HISTORICAL omission kept unchanged -- NO fill_ghosts added here).
 
-  // Echantillonnage hote PAR NIVEAU d'un champ depuis fn (std::function non device-callable) : alloue
-  // MultiFab(L.ba, L.dm, 1, nghost) a chaque niveau, ecrit f(x_cell, y_cell) au centre, puis ghosts
-  // (fill_ghosts avec ebc) UNIQUEMENT si do_fill. Corps extrait mot-pour-mot de set_epsilon(fn) etc.
+  // Host PER-LEVEL sampling of a field from fn (std::function not device-callable): allocates
+  // MultiFab(L.ba, L.dm, 1, nghost) at each level, writes f(x_cell, y_cell) at the center, then ghosts
+  // (fill_ghosts with ebc) ONLY if do_fill. Body extracted word-for-word from set_epsilon(fn) etc.
   void sample_per_level(MultiFab MGLevel::* field, const std::function<Real(Real, Real)>& fn,
                         int nghost, bool do_fill, const BCRec& ebc) {
     for (auto& L : lev_) {
@@ -556,7 +544,7 @@ class GeometricMG {
       for (int li = 0; li < F.local_size(); ++li) {
         Array4 e = F.fab(li).array();
         const Box2D b = F.box(li);
-        // initialisation hote (fonction std::function non device-callable)
+        // host initialization (std::function not device-callable)
         for (int j = b.lo[1]; j <= b.hi[1]; ++j)
           for (int i = b.lo[0]; i <= b.hi[0]; ++i)
             e(i, j) = fn(g.x_cell(i), g.y_cell(j));
@@ -565,10 +553,10 @@ class GeometricMG {
     }
   }
 
-  // Copie comp 0 du champ fin (deja discretise) sur le niveau fin puis RESTRICTION (average_down,
-  // moyenne 2x2) vers les grossiers : alloue MultiFab(L.ba, L.dm, 1, nghost) a chaque niveau, ghosts
-  // (fill_ghosts avec ebc) du niveau fin PUIS de chaque niveau grossier apres sa moyenne, UNIQUEMENT
-  // si do_fill. Corps extrait mot-pour-mot de set_epsilon(const MultiFab&) / set_reaction(const MultiFab&).
+  // Copy comp 0 of the fine field (already discretized) onto the fine level then RESTRICTION (average_down,
+  // 2x2 average) to the coarse: allocates MultiFab(L.ba, L.dm, 1, nghost) at each level, ghosts
+  // (fill_ghosts with ebc) of the fine level THEN of each coarse level after its average, ONLY
+  // if do_fill. Body extracted word-for-word from set_epsilon(const MultiFab&) / set_reaction(const MultiFab&).
   void restrict_and_fill(MultiFab MGLevel::* field, const MultiFab& fine, int nghost, bool do_fill,
                          const BCRec& ebc) {
     for (auto& L : lev_) L.*field = MultiFab(L.ba, L.dm, 1, nghost);
@@ -591,17 +579,17 @@ class GeometricMG {
     const MultiFab* ck = coef_ptr(l);
     const MultiFab* ep = eps_ptr(l);
     const MultiFab* kp = kappa_ptr(l);
-    const MultiFab* ey = eps_y_ptr(l);  // nullptr => isotrope (eps_y = eps_x)
-    const MultiFab* axy = a_xy_ptr(l);  // nullptr => bloc diagonal (pas de flux croise)
+    const MultiFab* ey = eps_y_ptr(l);  // nullptr => isotropic (eps_y = eps_x)
+    const MultiFab* axy = a_xy_ptr(l);  // nullptr => diagonal block (no cross flux)
     const MultiFab* ayx = a_yx_ptr(l);
-    // NB : gs_smooth reste 5 POINTS (bloc diagonal). Les termes croises sont EXPLICITES : seul le
-    // residu (poisson_residual) les porte. Le lisseur GS ne touche que la diagonale -> sa diag reste
-    // dominante (kappa>=0, eps>0) ; le couplage croise est relegue au residu, comme la convention de
-    // l'entete. Pour A symetrique-defini-positif le V-cycle reste contractant ; pour A non symetrique
-    // fort, il peut diverger (cf. set_cross_terms, observation reportee).
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): avant gs_smooth(nu1) [premier kernel GS]");
+    // NB: gs_smooth stays 5-POINT (diagonal block). The cross terms are EXPLICIT: only the
+    // residual (poisson_residual) carries them. The GS smoother touches only the diagonal -> its diag stays
+    // dominant (kappa>=0, eps>0); the cross coupling is relegated to the residual, per the header
+    // convention. For symmetric-positive-definite A the V-cycle stays contractive; for strongly non-symmetric
+    // A, it may diverge (cf. set_cross_terms, reported observation).
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): before gs_smooth(nu1) [first GS kernel]");
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu1_, mk, ck, ep, kp, ey);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres gs_smooth(nu1)");
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu1)");
 
     if (l + 1 == static_cast<int>(lev_.size())) {
       gs_smooth(L.phi, L.rhs, L.geom, bc, nbottom_, mk, ck, ep, kp, ey);  // bottom solve
@@ -610,21 +598,21 @@ class GeometricMG {
     }
 
     poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep, kp, ey, axy, ayx);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres poisson_residual");
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after poisson_residual");
     MGLevel& C = lev_[l + 1];
-    average_down(L.res, C.rhs, 2, L.cfine);  // restriction du residu (tampon cfine reutilise)
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres average_down");
+    average_down(L.res, C.rhs, 2, L.cfine);  // residual restriction (cfine buffer reused)
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after average_down");
     C.phi.set_val(0.0);
     vcycle_rec(l + 1, homogeneous(bc));
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres recursion grossiere");
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after coarse recursion");
 
-    interpolate(C.phi, L.corr, 2, L.cfine);  // prolongation de la correction (tampons corr/cfine reutilises)
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres interpolate");
+    interpolate(C.phi, L.corr, 2, L.cfine);  // correction prolongation (corr/cfine buffers reused)
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after interpolate");
     saxpy(L.phi, Real(1), L.corr);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres saxpy");
-    if (mk) zero_conductor(L.phi, L.mask);  // refige le conducteur
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after saxpy");
+    if (mk) zero_conductor(L.phi, L.mask);  // re-pin the conductor
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu2_, mk, ck, ep, kp, ey);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): apres gs_smooth(nu2)");
+    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu2)");
   }
 
   BCRec bc_;
@@ -635,8 +623,8 @@ class GeometricMG {
   bool has_eps_ = false;
   bool has_eps_y_ = false;
   bool has_kappa_ = false;
-  bool has_cross_ = false;  // coefficients hors-diagonaux Axy/Ayx (tenseur PLEIN) actifs
-  Real abs_tol_ = Real(0);  // plancher absolu du solve() sans argument (0 = critere relatif seul)
+  bool has_cross_ = false;  // off-diagonal Axy/Ayx coefficients (FULL tensor) active
+  Real abs_tol_ = Real(0);  // absolute floor of the no-argument solve() (0 = relative criterion only)
   std::function<Real(Real, Real)> levelset_;
   std::vector<MGLevel> lev_;
 };

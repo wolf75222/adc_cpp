@@ -1,93 +1,62 @@
 #pragma once
 
 /// @file
-/// @brief Concepts C++20 NOMMANT les contrats communs de l'etage elliptique : EllipticOperator
-///        (role d'operateur), LinearSolver (sous-ensemble iteratif), FieldPostProcessor (derivation du champ).
+/// @brief C++20 concepts NAMING the common contracts of the elliptic stage: EllipticOperator
+///        (operator role), LinearSolver (iterative subset), FieldPostProcessor (field derivation).
 ///
-/// Couche : `include/adc/numerics/elliptic`.
-/// Role : header PUREMENT DESCRIPTIF (metaprogrammation hote). Il formalise sous forme de concepts les
-/// contrats DEJA codes par les classes elliptiques existantes et le PROUVE par static_assert. Aucune
-/// logique flottante, aucune classe existante touchee : la pile elliptique device-validee reste
-/// bit-identique. Reutilise (ne redefinit pas) le concept EllipticSolver de elliptic_solver.hpp.
-/// Contrat : trois concepts -- EllipticOperator (geom/bc + pointeurs de coefficient du stencil pour une
-/// matvec coherente avec le residu MG, modele par GeometricMG), LinearSolver (EllipticSolver + variante
-/// a tolerance solve(rel_tol, max_iters) au retour non void), FieldPostProcessor (callable derivant le
-/// champ a partir de phi, signature de field_postprocess).
+/// Layer: `include/adc/numerics/elliptic`.
+/// Role: PURELY DESCRIPTIVE header (host metaprogramming). It formalizes as concepts the
+/// contracts ALREADY coded by the existing elliptic classes and PROVES it via static_assert. No
+/// floating-point logic, no existing class touched: the device-validated elliptic stack stays
+/// bit-identical. Reuses (does not redefine) the EllipticSolver concept from elliptic_solver.hpp.
+/// Contract: three concepts -- EllipticOperator (geom/bc + stencil coefficient pointers for a
+/// matvec consistent with the MG residual, modeled by GeometricMG), LinearSolver (EllipticSolver + a
+/// tolerance variant solve(rel_tol, max_iters) with a non-void return), FieldPostProcessor (callable deriving the
+/// field from phi, signature of field_postprocess).
 ///
-/// Invariants :
-/// - les concepts sont des predicats de COMPILATION, sans incidence device (ni kernel, ni lambda etendue) ;
-/// - LinearSolver est VOLONTAIREMENT separe de EllipticSolver : les solveurs DIRECTS (PoissonFFTSolver,
-///   DistributedFFTSolver, PolarPoissonSolver) modelent EllipticSolver mais PAS LinearSolver (pas de
-///   notion de tolerance iterative), et c'est correct ;
-/// - aucune des classes elliptiques n'est modifiee pour satisfaire un concept (refus assume).
+/// Invariants:
+/// - the concepts are COMPILE-TIME predicates, with no device impact (neither kernel nor extended lambda);
+/// - LinearSolver is DELIBERATELY separated from EllipticSolver: the DIRECT solvers (PoissonFFTSolver,
+///   DistributedFFTSolver, PolarPoissonSolver) model EllipticSolver but NOT LinearSolver (no
+///   notion of iterative tolerance), and that is correct;
+/// - none of the elliptic classes is modified to satisfy a concept (deliberate refusal).
 
 #include <adc/core/types.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/numerics/elliptic/elliptic_problem.hpp>  // FieldPostProcess (spec), field_postprocess
-#include <adc/numerics/elliptic/elliptic_solver.hpp>   // concept EllipticSolver (deja en place)
+#include <adc/numerics/elliptic/elliptic_solver.hpp>   // concept EllipticSolver (already in place)
 
 #include <concepts>
-
-// FORMALISATION ADDITIVE des contrats communs de l'etage elliptique (audit D.1).
-//
-// But : NOMMER, sous forme de concepts C++20, les contrats partages DEJA codes par
-// les classes elliptiques existantes, et le PROUVER par static_assert. Ce header est
-// PUREMENT DESCRIPTIF :
-//   - il n'inclut AUCUNE logique flottante, ne touche AUCUNE classe existante ;
-//   - les concepts sont des predicats de COMPILATION (metaprogrammation hote), donc
-//     sans aucune incidence device (ni kernel, ni lambda etendue, ni emission nvcc) :
-//     la pile elliptique device-validee reste BIT-IDENTIQUE ;
-//   - le contrat "solveur au niveau MultiFab" (rhs/phi/solve/residual/geom) est DEJA
-//     porte par le concept EllipticSolver (elliptic_solver.hpp) ; on ne le redefinit
-//     PAS, on le REUTILISE et on documente comment les trois nouveaux concepts s'y
-//     articulent.
-//
-// REALITE DU CODE vs intitule de l'audit. L'item D.1 nommait des artefacts qui
-// n'existent pas sous cette forme dans le depot ; les concepts ci-dessous decrivent
-// le contrat REELLEMENT commun, pas une cible theorique :
-//   - il n'y a PAS de classe "TensorEllipticOperator". L'operateur elliptique est
-//     realise par des FONCTIONS LIBRES (apply_laplacian, poisson_residual, gs_smooth
-//     dans poisson_operator.hpp). Une fonction libre n'est pas un TYPE : aucun concept
-//     ne peut la contraindre. Le ROLE d'operateur (porter les coefficients du stencil
-//     et la geometrie pour une matvec coherente avec le residu) est, lui, porte par un
-//     TYPE : GeometricMG, via ses accesseurs op_eps()/op_coef()/op_kappa()/... + bc()
-//     + geom(). C'est ce role-la que capture EllipticOperator ci-dessous, parce que
-//     c'est exactement ce dont TensorKrylovSolver depend pour sa matvec matrice-libre.
-//   - "FieldPostProcess" est DEJA un nom pris : c'est la SPEC (struct POD : signe du
-//     gradient, stockage de phi) dans elliptic_problem.hpp, appliquee par la fonction
-//     libre field_postprocess(phi, out, cx, cy, spec). Le concept du POST-TRAITEMENT
-//     callable est donc nomme FieldPostProcessor (suffixe -or : l'objet qui APPLIQUE),
-//     pour ne pas masquer la spec existante.
 
 namespace adc {
 
 // ---------------------------------------------------------------------------
-// (1) EllipticOperator : role d'OPERATEUR du stencil elliptique au niveau MultiFab.
+// (1) EllipticOperator: OPERATOR role of the elliptic stencil at the MultiFab level.
 //
-// Contrat = ce qu'un consommateur de matvec matrice-libre (TensorKrylovSolver) lit sur
-// son operateur pour appliquer L_int(phi) = div(A grad phi) - kappa phi de facon
-// COHERENTE avec le residu MG (poisson_residual) : la geometrie, la CL physique, le
-// BoxArray/DistributionMapping du niveau fin, et les POINTEURS de coefficient de
-// l'operateur (eps_x, eps_y, kappa, poids cut-cell, termes croises Axy/Ayx, masque).
-// Un terme inactif rend nullptr (cf. op_*_ptr internes), ce que le concept exige juste
-// d'etre APPELABLE et convertible en const MultiFab* ; il ne contraint pas la valeur.
+// Contract = what a matrix-free matvec consumer (TensorKrylovSolver) reads from
+// its operator to apply L_int(phi) = div(A grad phi) - kappa phi in a way
+// CONSISTENT with the MG residual (poisson_residual): the geometry, the physical BC, the
+// BoxArray/DistributionMapping of the fine level, and the operator coefficient POINTERS
+// (eps_x, eps_y, kappa, cut-cell weights, cross terms Axy/Ayx, mask).
+// An inactive term returns nullptr (cf. internal op_*_ptr), which the concept only requires
+// to be CALLABLE and convertible to const MultiFab*; it does not constrain the value.
 //
-// GeometricMG modele ce role (et c'est le seul TYPE qui le porte aujourd'hui). Les
-// fonctions libres apply_laplacian/poisson_residual/gs_smooth en sont la realisation
-// de plus bas niveau (l'APPLICATION proprement dite) : non contraignables par concept
-// car ce ne sont pas des types. EllipticOperator NOMME donc l'interface de FOURNITURE
-// des coefficients (le "quoi appliquer"), pas le kernel d'application (le "comment").
+// GeometricMG models this role (and it is the only TYPE that carries it today). The
+// free functions apply_laplacian/poisson_residual/gs_smooth are its lowest-level
+// realization (the APPLICATION proper): not constrainable by a concept
+// because they are not types. EllipticOperator thus NAMES the interface that SUPPLIES
+// the coefficients (the "what to apply"), not the application kernel (the "how").
 //
-// NOTE : EllipticOperator n'EXIGE PAS solve()/rhs()/phi() ; il decrit le seul role
-// operateur. GeometricMG le complete par EllipticSolver (il est aussi un solveur), mais
-// un type purement operateur (sans solve) satisferait deja EllipticOperator.
+// NOTE: EllipticOperator does NOT REQUIRE solve()/rhs()/phi(); it describes the operator
+// role only. GeometricMG completes it with EllipticSolver (it is also a solver), but
+// a purely operator type (without solve) would already satisfy EllipticOperator.
 template <class Op>
 concept EllipticOperator = requires(Op op) {
   { op.geom() } -> std::convertible_to<const Geometry&>;
   { op.bc() } -> std::convertible_to<const BCRec&>;
-  // Pointeurs de coefficient du niveau fin : nullptr quand le terme est inactif.
+  // Fine-level coefficient pointers: nullptr when the term is inactive.
   { op.op_mask() } -> std::convertible_to<const MultiFab*>;
   { op.op_coef() } -> std::convertible_to<const MultiFab*>;
   { op.op_eps() } -> std::convertible_to<const MultiFab*>;
@@ -98,49 +67,49 @@ concept EllipticOperator = requires(Op op) {
 };
 
 // ---------------------------------------------------------------------------
-// (2) LinearSolver : solveur ITERATIF a critere d'arret explicite.
+// (2) LinearSolver: ITERATIVE solver with an explicit stopping criterion.
 //
-// Contrat = solve(rel_tol, max_iters) qui rend un RESULTAT (la convention "resoudre
-// jusqu'a une tolerance relative en au plus max_iters etapes, en rendant un compte
-// rendu"). On ne contraint PAS le type de retour a une struct precise : GeometricMG
-// rend int (nombre de V-cycles effectues) et TensorKrylovSolver rend KrylovResult
-// (iters + residu relatif + convergence). Le seul invariant commun REEL est : le retour
-// n'est PAS void (il porte une information d'arret). Le concept reflete donc cette
-// realite via !std::same_as<void>, sans imposer un type de resultat partage qui
-// n'existe pas (le forcer demanderait de modifier une des deux classes : interdit).
+// Contract = solve(rel_tol, max_iters) that returns a RESULT (the convention "solve
+// up to a relative tolerance in at most max_iters steps, returning a report").
+// The return type is NOT constrained to a precise struct: GeometricMG
+// returns int (number of V-cycles performed) and TensorKrylovSolver returns KrylovResult
+// (iters + relative residual + convergence). The only REAL common invariant is: the return
+// is NOT void (it carries stopping information). The concept thus reflects this
+// reality via !std::same_as<void>, without imposing a shared result type that
+// does not exist (forcing it would require modifying one of the two classes: forbidden).
 //
-// On exige aussi le socle EllipticSolver (rhs/phi/solve()/residual/geom) : un
-// LinearSolver elliptique EST un EllipticSolver qui, EN PLUS, expose la variante a
-// tolerance. GeometricMG et TensorKrylovSolver modelent les deux.
+// We also require the EllipticSolver base (rhs/phi/solve()/residual/geom): an
+// elliptic LinearSolver IS an EllipticSolver that, IN ADDITION, exposes the
+// tolerance variant. GeometricMG and TensorKrylovSolver model both.
 //
-// GAP DOCUMENTE (concept VOLONTAIREMENT separe de EllipticSolver). Les solveurs DIRECTS
-// PoissonFFTSolver, DistributedFFTSolver et PolarPoissonSolver resolvent en UNE passe
-// (FFT + Thomas) : ils n'ont PAS de solve(rel_tol, max_iters) ni de notion de tolerance
-// iterative. Ils modelent EllipticSolver (au niveau MultiFab cartesien) ou
-// PolarEllipticSolver (polaire), mais PAS LinearSolver, et c'est CORRECT : un solveur
-// direct n'est pas un solveur iteratif. LinearSolver capture donc le sous-ensemble
-// ITERATIF du contrat, sans pretendre que tous les backends elliptiques le portent.
+// DOCUMENTED GAP (concept DELIBERATELY separated from EllipticSolver). The DIRECT solvers
+// PoissonFFTSolver, DistributedFFTSolver and PolarPoissonSolver solve in ONE pass
+// (FFT + Thomas): they have NO solve(rel_tol, max_iters) nor any notion of iterative
+// tolerance. They model EllipticSolver (at the Cartesian MultiFab level) or
+// PolarEllipticSolver (polar), but NOT LinearSolver, and that is CORRECT: a direct
+// solver is not an iterative solver. LinearSolver thus captures the ITERATIVE
+// subset of the contract, without claiming that all elliptic backends carry it.
 template <class S>
 concept LinearSolver = EllipticSolver<S> && requires(S s, Real tol, int it) {
-  // Variante a tolerance : resout jusqu'a rel_tol (ou max_iters) et rend un compte rendu
-  // d'arret. Type de retour LIBRE mais NON void (int pour MG, KrylovResult pour Krylov).
+  // Tolerance variant: solves up to rel_tol (or max_iters) and returns a stopping
+  // report. Return type FREE but NON void (int for MG, KrylovResult for Krylov).
   s.solve(tol, it);
   requires !std::same_as<decltype(s.solve(tol, it)), void>;
 };
 
 // ---------------------------------------------------------------------------
-// (3) FieldPostProcessor : derivation du champ a partir du potentiel, phi -> aux/grad.
+// (3) FieldPostProcessor: field derivation from the potential, phi -> aux/grad.
 //
-// Contrat = un APPLICATEUR callable avec la signature de field_postprocess :
+// Contract = an APPLICATOR callable with the signature of field_postprocess:
 //   (const MultiFab& phi, MultiFab& out, Real cx, Real cy, FieldPostProcess spec) -> void
-// c.-a-d. ecrire dans out la convention (phi en composante 0 si demande) + le gradient
-// centre (+/- selon le signe de la spec), avec cx = 1/(2 dx), cy = 1/(2 dy). La SPEC
-// (signe du gradient, stockage de phi) reste la struct FieldPostProcess existante
-// (elliptic_problem.hpp) : on ne la redefinit pas, on la PARAMETRE.
+// i.e. write into out the convention (phi in component 0 if requested) + the
+// centered gradient (+/- depending on the spec sign), with cx = 1/(2 dx), cy = 1/(2 dy). The SPEC
+// (gradient sign, phi storage) stays the existing FieldPostProcess struct
+// (elliptic_problem.hpp): we do not redefine it, we PARAMETERIZE it.
 //
-// On contraint un type CALLABLE (foncteur ou pointeur de fonction), pas une classe a
-// methodes : c'est ce qu'EST field_postprocess (une fonction libre). Le static_assert
-// plus bas prouve que &field_postprocess satisfait FieldPostProcessor.
+// We constrain a CALLABLE type (functor or function pointer), not a class with
+// methods: that is what field_postprocess IS (a free function). The static_assert
+// below proves that &field_postprocess satisfies FieldPostProcessor.
 template <class F>
 concept FieldPostProcessor =
     requires(F f, const MultiFab& phi, MultiFab& out, Real cx, Real cy,

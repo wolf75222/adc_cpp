@@ -9,9 +9,9 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/mesh/refinement.hpp>                 // average_down, coarsen_index
-#include <adc/numerics/elliptic/geometric_mg.hpp>  // solveur grossier (multigrille geometrique)
-#include <adc/numerics/elliptic/poisson_operator.hpp>  // apply_laplacian (residu, lit les ghosts deja remplis)
-#include <adc/numerics/time/amr_patch_range.hpp>   // PatchRange, CoverageMask (empreinte grossiere d'un patch)
+#include <adc/numerics/elliptic/geometric_mg.hpp>  // coarse solver (geometric multigrid)
+#include <adc/numerics/elliptic/poisson_operator.hpp>  // apply_laplacian (residual, reads the already-filled ghosts)
+#include <adc/numerics/time/amr_patch_range.hpp>   // PatchRange, CoverageMask (coarse footprint of a patch)
 
 #include <algorithm>
 #include <cmath>
@@ -20,53 +20,53 @@
 #include <vector>
 
 /// @file
-/// @brief CompositeFacPoisson : solveur elliptique COMPOSITE AMR a 2 niveaux (Fast Adaptive Composite,
-///        FAC) pour le Poisson SCALAIRE Lap phi = f sur un niveau grossier + UN patch fin (ratio 2).
+/// @brief CompositeFacPoisson: 2-level AMR COMPOSITE elliptic solver (Fast Adaptive Composite,
+///        FAC) for the SCALAR Poisson Lap phi = f on a coarse level + ONE fine patch (ratio 2).
 ///
-/// MOTIVATION (chemin amr-schur). L'actuel Poisson AMR (Option A) resout l'elliptique sur le SEUL
-/// niveau grossier puis injecte grad phi (constant par morceaux) aux patchs fins : les patchs raffinent
-/// le TRANSPORT mais PAS le couplage elliptique. Un solveur COMPOSITE fait que le patch fin RAFFINE
-/// VRAIMENT la solution elliptique (phi/grad phi plus precis pres du patch). C'est le verrou de fidelite
-/// AMR (le couplage Poisson composite (FAC) que amr_reflux.hpp laisse explicitement a ce solveur).
+/// MOTIVATION (amr-schur path). The current AMR Poisson (Option A) solves the elliptic only on the
+/// coarse level then injects grad phi (piecewise constant) onto the fine patches: the patches refine
+/// the TRANSPORT but NOT the elliptic coupling. A COMPOSITE solver makes the fine patch ACTUALLY
+/// REFINE the elliptic solution (more accurate phi/grad phi near the patch). This is the AMR fidelity
+/// lock (the composite Poisson coupling (FAC) that amr_reflux.hpp explicitly leaves to this solver).
 ///
-/// ALGORITHME FAC 2 niveaux (McCormick), un patch fin INTERIEUR au domaine grossier. Solution composite
-/// phi = phi_f sur le patch, phi_c ailleurs :
-///   0. solve grossier initial : GeometricMG(Lap phi_c = f_c, Dirichlet) ;
-///   it. repeter :
-///      1. ghosts C-F : remplir l'anneau de ghosts du patch par INTERPOLATION BILINEAIRE de phi_c (ordre
-///         2 vs l'injection constante d'Option A) -> condition de Dirichlet C-F cellule-centre ;
-///      2. solve fin : GS rouge-noir sur le patch a ghosts GELES (Lap phi_f = f_f) ;
-///      3. average_down phi_f -> phi_c sur les cellules grossieres COUVERTES (coherence) ;
-///      4. residu composite grossier : r_c = f_c - Lap phi_c (cellules NON couvertes), 0 sur les couvertes,
-///         + CORRECTION DE FLUX C-F : sur les cellules grossieres BORDANT le patch, le flux a travers la
-///         face C-F est remplace par le flux FIN (somme conservative des 2 faces fines) -> two-way coupling ;
-///      5. correction grossiere : GeometricMG(Lap e_c = r_c, Dirichlet homogene) ; phi_c += e_c (non couvertes) ;
-///   jusqu'a ||r_c|| (norme du residu composite) sous tolerance.
+/// 2-LEVEL FAC ALGORITHM (McCormick), one fine patch INTERIOR to the coarse domain. Composite solution
+/// phi = phi_f on the patch, phi_c elsewhere:
+///   0. initial coarse solve: GeometricMG(Lap phi_c = f_c, Dirichlet);
+///   it. repeat:
+///      1. C-F ghosts: fill the patch ghost ring by BILINEAR INTERPOLATION of phi_c (order
+///         2 vs the constant injection of Option A) -> cell-centered C-F Dirichlet condition;
+///      2. fine solve: red-black GS on the patch with FROZEN ghosts (Lap phi_f = f_f);
+///      3. average_down phi_f -> phi_c on the COVERED coarse cells (consistency);
+///      4. composite coarse residual: r_c = f_c - Lap phi_c (NON covered cells), 0 on covered ones,
+///         + C-F FLUX CORRECTION: on the coarse cells BORDERING the patch, the flux through the
+///         C-F face is replaced by the FINE flux (conservative sum of the 2 fine faces) -> two-way coupling;
+///      5. coarse correction: GeometricMG(Lap e_c = r_c, homogeneous Dirichlet); phi_c += e_c (non covered);
+///   until ||r_c|| (composite residual norm) below tolerance.
 ///
-/// PERIMETRE (Phase 4a, multi-patch fin). Cartesien, 2 niveaux, 1..N patchs fins disjoints strictement
-/// interieurs, alignes (lo pair / hi impair) et SEPARES d'au moins une cellule grossiere (NON adjacents),
-/// ratio 2, grossier MONO-BOX REPLIQUE (serie / mono-rang). N == 1 -> chemin mono-patch bit-identique a la
-/// Phase 1 (ctor delegue, boucles par-patch degenerees a un seul patch). Le raccord fin-fin (patchs
-/// ADJACENTS), MPI et > 2 niveaux sont la Phase 4b. Le test MMS valide que le patch fin REDUIT l'erreur
-/// elliptique pres du patch vs coarse-only.
+/// SCOPE (Phase 4a, multi fine patch). Cartesian, 2 levels, 1..N disjoint fine patches strictly
+/// interior, aligned (lo even / hi odd) and SEPARATED by at least one coarse cell (NON adjacent),
+/// ratio 2, REPLICATED MONO-BOX coarse (serial / single-rank). N == 1 -> mono-patch path bit-identical to
+/// Phase 1 (ctor delegates, per-patch loops degenerate to a single patch). The fine-fine join (ADJACENT
+/// patches), MPI and > 2 levels are Phase 4b. The MMS test validates that the fine patch REDUCES the
+/// elliptic error near the patch vs coarse-only.
 ///
-/// MULTI-PATCH (Phase 4a). Chaque patch fin a sa propre box (BoxArray fin) ; les operations FINES (ghosts
-/// C-F bilineaires, SOR, correction de flux C-F) bouclent SUR CHAQUE patch local. La couverture grossiere
-/// (CoverageMask) est l'UNION des empreintes grossieres de tous les patchs : c'est elle qui dit quelles
-/// cellules grossieres sont ombragees (residu mis a 0, average_down) et permet de sauter une cellule
-/// bordante couverte par un AUTRE patch. La separation d'au moins une cellule grossiere (garde-fou ctor)
-/// garantit qu'aucune face fine n'est PARTAGEE entre deux patchs : chaque bord de patch est un vrai
-/// raccord grossier-fin, donc le ghost C-F bilineaire (lecture du grossier) et la correction de flux sont
-/// exacts patch par patch -- pas besoin d'echange fin-fin.
+/// MULTI-PATCH (Phase 4a). Each fine patch has its own box (fine BoxArray); the FINE operations (bilinear
+/// C-F ghosts, SOR, C-F flux correction) loop OVER EACH local patch. The coarse coverage
+/// (CoverageMask) is the UNION of the coarse footprints of all patches: it tells which
+/// coarse cells are shadowed (residual set to 0, average_down) and lets us skip a bordering
+/// cell covered by ANOTHER patch. The separation of at least one coarse cell (ctor guard)
+/// guarantees that no fine face is SHARED between two patches: each patch border is a true
+/// coarse-fine join, so the bilinear C-F ghost (read from the coarse) and the flux correction are
+/// exact patch by patch -- no fine-fine exchange needed.
 
 namespace adc {
 
 namespace detail {
 
-/// Interpolation BILINEAIRE du potentiel grossier (cellule-centre, @p C avec ghosts) au CENTRE de la
-/// cellule fine (i, j). Ratio @p r. Le centre fin a l'abscisse (i+0.5)/r en unites de pas grossier, soit
-/// l'indice-centre grossier fx = (i+0.5)/r - 0.5 ; on interpole les 4 centres grossiers entourants.
-/// Patch INTERIEUR -> Ic, Ic+1, Jc, Jc+1 sont dans le domaine grossier (ghosts inclus).
+/// BILINEAR interpolation of the coarse potential (cell-centered, @p C with ghosts) at the CENTER of the
+/// fine cell (i, j). Ratio @p r. The fine center has abscissa (i+0.5)/r in coarse-step units, i.e.
+/// the coarse center-index fx = (i+0.5)/r - 0.5; we interpolate the 4 surrounding coarse centers.
+/// INTERIOR patch -> Ic, Ic+1, Jc, Jc+1 are in the coarse domain (ghosts included).
 ADC_HD inline Real fac_bilerp_coarse(const ConstArray4& C, int i, int j, int r) {
   const Real fx = (Real(i) + Real(0.5)) / Real(r) - Real(0.5);
   const Real fy = (Real(j) + Real(0.5)) / Real(r) - Real(0.5);
@@ -81,24 +81,24 @@ ADC_HD inline Real fac_bilerp_coarse(const ConstArray4& C, int i, int j, int r) 
 
 }  // namespace detail
 
-/// Solveur Poisson COMPOSITE FAC 2 niveaux (scalaire). Construit sur le layout grossier (mono-box
-/// replique) + le patch fin (mono-box). Le caller fournit f_c (grossier) et f_f (fin) ; le solveur rend
-/// phi_c (grossier, couvert = average_down du fin) et phi_f (fin).
+/// 2-level COMPOSITE FAC Poisson solver (scalar). Built on the coarse layout (replicated mono-box)
+/// + the fine patch (mono-box). The caller provides f_c (coarse) and f_f (fine); the solver returns
+/// phi_c (coarse, covered = average_down of the fine) and phi_f (fine).
 class CompositeFacPoisson {
  public:
-  /// CTOR MONO-PATCH (Phase 1) : DELEGUE au ctor multi-patch avec un BoxArray fin a une seule box, donc
-  /// BIT-IDENTIQUE a l'ancien chemin. Conserve pour les appelants existants (AmrCouplerMP Option-A
-  /// composite, tests MMS mono-patch).
-  /// @p geom_c : geometrie grossiere (domaine entier). @p ba_c : BoxArray grossier (mono-box couvrant
-  ///             le domaine). @p bc : CL du domaine (Dirichlet pour ce jalon). @p fine_box : box du
-  ///             patch fin (espace d'indices FIN, ratio 2, strictement interieur). @p ratio : 2.
+  /// MONO-PATCH CTOR (Phase 1): DELEGATES to the multi-patch ctor with a fine BoxArray of a single box, so
+  /// BIT-IDENTICAL to the old path. Kept for existing callers (AmrCouplerMP Option-A composite,
+  /// mono-patch MMS tests).
+  /// @p geom_c: coarse geometry (whole domain). @p ba_c: coarse BoxArray (mono-box covering
+  ///             the domain). @p bc: domain BC (Dirichlet for this milestone). @p fine_box: box of the
+  ///             fine patch (FINE index space, ratio 2, strictly interior). @p ratio: 2.
   CompositeFacPoisson(const Geometry& geom_c, const BoxArray& ba_c, const BCRec& bc,
                       const Box2D& fine_box, int ratio = 2)
       : CompositeFacPoisson(geom_c, ba_c, bc, BoxArray(std::vector<Box2D>{fine_box}), ratio) {}
 
-  /// CTOR MULTI-PATCH (Phase 4a). @p fine_boxes : pavage du niveau fin (1..N patchs disjoints, espace
-  /// d'indices FIN, ratio 2, strictement interieurs, alignes lo pair / hi impair, SEPARES d'au moins une
-  /// cellule grossiere). Le grossier reste mono-box replique (mono-rang). N == 1 -> chemin mono-patch.
+  /// MULTI-PATCH CTOR (Phase 4a). @p fine_boxes: tiling of the fine level (1..N disjoint patches, FINE
+  /// index space, ratio 2, strictly interior, aligned lo even / hi odd, SEPARATED by at least one
+  /// coarse cell). The coarse stays replicated mono-box (single-rank). N == 1 -> mono-patch path.
   CompositeFacPoisson(const Geometry& geom_c, const BoxArray& ba_c, const BCRec& bc,
                       const BoxArray& fine_boxes, int ratio = 2)
       : geom_c_(geom_c),
@@ -122,67 +122,67 @@ class CompositeFacPoisson {
         axy_f_(ba_f_, dm_f_, 1, 1),
         ayx_f_(ba_f_, dm_f_, 1, 1),
         cov_(Box2D::from_extents(geom_c.domain.nx(), geom_c.domain.ny())) {
-    require_separated_patches(fine_boxes);  // garde-fou : patchs NON adjacents (raccord fin-fin = Phase 4b)
-    // empreintes grossieres (cellules couvertes) PAR PATCH : PatchRange (lo/2 .. (hi-1)/2). La couverture
-    // grossiere globale = UNION des empreintes (un trou eventuel entre patchs disjoints reste NON couvert).
+    require_separated_patches(fine_boxes);  // guard: NON adjacent patches (fine-fine join = Phase 4b)
+    // coarse footprints (covered cells) PER PATCH: PatchRange (lo/2 .. (hi-1)/2). The global coarse
+    // coverage = UNION of the footprints (any gap between disjoint patches stays NON covered).
     for (int g = 0; g < fine_boxes.size(); ++g) patch_coarse_.push_back(PatchRange(fine_boxes[g]).box());
     for (const Box2D& pc : patch_coarse_) cov_.mark(pc);
     phi_c_.set_val(Real(0));
     phi_f_.set_val(Real(0));
-    eps_c_.set_val(Real(1));  // permittivite par defaut 1 -> operateur = Laplacien (scalaire)
+    eps_c_.set_val(Real(1));  // default permittivity 1 -> operator = Laplacian (scalar)
     eps_f_.set_val(Real(1));
-    axy_c_.set_val(Real(0));  // termes croises par defaut 0 -> bloc diagonal seul
+    axy_c_.set_val(Real(0));  // default cross terms 0 -> diagonal block only
     ayx_c_.set_val(Real(0));
     axy_f_.set_val(Real(0));
     ayx_f_.set_val(Real(0));
   }
 
-  MultiFab& rhs_coarse() { return f_c_; }   ///< second membre grossier f_c (div(eps grad phi_c) = f_c)
-  MultiFab& rhs_fine() { return f_f_; }     ///< second membre fin f_f (div(eps grad phi_f) = f_f)
+  MultiFab& rhs_coarse() { return f_c_; }   ///< coarse right-hand side f_c (div(eps grad phi_c) = f_c)
+  MultiFab& rhs_fine() { return f_f_; }     ///< fine right-hand side f_f (div(eps grad phi_f) = f_f)
   MultiFab& phi_coarse() { return phi_c_; }
   MultiFab& phi_fine() { return phi_f_; }
-  /// Permittivite VARIABLE eps (au centre des cellules) PAR NIVEAU. A remplir + use_variable_coefficient(true)
-  /// pour passer de Lap phi = f a div(eps grad phi) = f -- l'operateur condense de Schur a B_z = 0
-  /// (eps = 1 + theta^2 dt^2 alpha rho). eps non rempli / non active -> scalaire (Phase 1), bit-identique.
+  /// VARIABLE permittivity eps (at cell centers) PER LEVEL. Fill + use_variable_coefficient(true)
+  /// to go from Lap phi = f to div(eps grad phi) = f -- the condensed Schur operator at B_z = 0
+  /// (eps = 1 + theta^2 dt^2 alpha rho). eps unfilled / not enabled -> scalar (Phase 1), bit-identical.
   MultiFab& eps_coarse() { return eps_c_; }
   MultiFab& eps_fine() { return eps_f_; }
   void use_variable_coefficient(bool v) { has_eps_ = v; }
-  /// Termes croises a_xy / a_yx (au centre des cellules) PAR NIVEAU : tenseur PLEIN A = diag(eps,eps) +
-  /// [[0,a_xy],[a_yx,0]]. C'est l'operateur condense de Schur a B_z != 0 (a_xy = c rho w/det,
-  /// a_yx = -a_xy, w = theta dt B_z) -- antisymetrique, NON auto-adjoint. Petit pour le pas Schur
-  /// (c = theta^2 dt^2 alpha) -> SOR/V-cycle convergent (termes croises EXPLICITES). Non actives -> bloc
-  /// diagonal seul (Phase 3a/1), bit-identique. Exige use_variable_coefficient(true) (le bloc diagonal).
+  /// Cross terms a_xy / a_yx (at cell centers) PER LEVEL: FULL tensor A = diag(eps,eps) +
+  /// [[0,a_xy],[a_yx,0]]. This is the condensed Schur operator at B_z != 0 (a_xy = c rho w/det,
+  /// a_yx = -a_xy, w = theta dt B_z) -- antisymmetric, NON self-adjoint. Small for the Schur step
+  /// (c = theta^2 dt^2 alpha) -> convergent SOR/V-cycle (EXPLICIT cross terms). Not enabled -> diagonal
+  /// block only (Phase 3a/1), bit-identical. Requires use_variable_coefficient(true) (the diagonal block).
   MultiFab& a_xy_coarse() { return axy_c_; }
   MultiFab& a_yx_coarse() { return ayx_c_; }
   MultiFab& a_xy_fine() { return axy_f_; }
   MultiFab& a_yx_fine() { return ayx_f_; }
   void use_cross_terms(bool v) { has_cross_ = v; }
-  /// Empreinte grossiere du PREMIER patch fin (compat mono-patch). Multi-patch : cf. patch_coarse(g).
+  /// Coarse footprint of the FIRST fine patch (mono-patch compat). Multi-patch: see patch_coarse(g).
   const Box2D& patch_coarse() const { return patch_coarse_[0]; }
-  /// Empreinte grossiere du patch fin @p g (0 <= g < n_fine_patches()).
+  /// Coarse footprint of fine patch @p g (0 <= g < n_fine_patches()).
   const Box2D& patch_coarse(int g) const { return patch_coarse_[g]; }
-  /// Nombre de patchs fins (taille du BoxArray fin).
+  /// Number of fine patches (size of the fine BoxArray).
   int n_fine_patches() const { return ba_f_.size(); }
 
   void set_verbose(bool v) { verbose_ = v; }
-  /// true : iterer le couplage two-way FAC (correction de flux C-F + correction grossiere). false :
-  /// chemin ONE-WAY (solve grossier + solve fin a ghosts C-F bilineaires) -- le patch raffine localement.
+  /// true: iterate the FAC two-way coupling (C-F flux correction + coarse correction). false:
+  /// ONE-WAY path (coarse solve + fine solve with bilinear C-F ghosts) -- the patch refines locally.
   void set_two_way(bool v) { two_way_ = v; }
 
-  /// Resout le systeme composite. @return le residu composite max final.
-  /// @p max_iters iterations FAC (two-way) ; @p fine_sweeps balayages SOR par solve fin ; @p tol tolerance.
+  /// Solves the composite system. @return the final max composite residual.
+  /// @p max_iters FAC iterations (two-way); @p fine_sweeps SOR sweeps per fine solve; @p tol tolerance.
   Real solve(int max_iters = 30, int fine_sweeps = 400, Real tol = 1e-9) {
-    // COEFFICIENT VARIABLE (operateur condense Schur B_z=0) : pose eps sur le solveur grossier et
-    // remplit les ghosts de eps PAR NIVEAU. eps_c ghosts = gradient-nul (coeff_bc Foextrap, comme le
-    // batisseur Schur) ; eps_f ghosts C-F = bilerp de eps_c (coherence du flux de coefficient a travers
-    // l'interface). Sans coefficient variable -> operateur Laplacien scalaire (Phase 1, bit-identique).
+    // VARIABLE COEFFICIENT (condensed Schur operator B_z=0): sets eps on the coarse solver and
+    // fills the eps ghosts PER LEVEL. eps_c ghosts = zero-gradient (coeff_bc Foextrap, like the
+    // Schur builder); eps_f C-F ghosts = bilerp of eps_c (consistency of the coefficient flux across
+    // the interface). Without variable coefficient -> scalar Laplacian operator (Phase 1, bit-identical).
     if (has_eps_) {
       device_fence();
       fill_ghosts(eps_c_, geom_c_.domain, coeff_bc(bc_));
       fill_cf_coarse_to_fine(eps_c_, eps_f_);
       mg_.set_epsilon(eps_c_);
     }
-    if (has_cross_) {  // tenseur PLEIN (Schur B_z != 0) : termes croises sur les 2 solveurs + ghosts.
+    if (has_cross_) {  // FULL tensor (Schur B_z != 0): cross terms on both solvers + ghosts.
       device_fence();
       fill_ghosts(axy_c_, geom_c_.domain, coeff_bc(bc_));
       fill_ghosts(ayx_c_, geom_c_.domain, coeff_bc(bc_));
@@ -190,28 +190,28 @@ class CompositeFacPoisson {
       fill_cf_coarse_to_fine(ayx_c_, ayx_f_);
       mg_.set_cross_terms(axy_c_, ayx_c_);
     }
-    // 0) solve grossier initial (donne un phi_c pour le 1er ghost C-F).
+    // 0) initial coarse solve (gives a phi_c for the 1st C-F ghost).
     copy0(mg_.rhs(), f_c_);
     mg_.phi().set_val(Real(0));
     mg_.solve(Real(1e-12), 100);
     copy0(phi_c_, mg_.phi());
 
-    // 1) ghosts C-F bilineaires + solve fin (ONE-WAY de base).
+    // 1) bilinear C-F ghosts + fine solve (base ONE-WAY).
     refresh_fine(fine_sweeps);
 
     Real rnorm = composite_coarse_residual();
     if (verbose_ && my_rank() == 0) std::fprintf(stderr, "[FAC] init r_c=%.4e\n", rnorm);
     if (!two_way_) { last_residual_ = rnorm; return rnorm; }
 
-    // 2) iterations FAC two-way : correction grossiere (flux C-F) puis re-solve fin.
+    // 2) FAC two-way iterations: coarse correction (C-F flux) then re-solve fine.
     for (int it = 0; it < max_iters; ++it) {
       if (rnorm < tol) break;
-      // correction grossiere : Lap e_c = r_c (Dirichlet homogene), phi_c += e_c (non couvertes).
+      // coarse correction: Lap e_c = r_c (homogeneous Dirichlet), phi_c += e_c (non covered).
       copy0(mg_.rhs(), res_c_);
       mg_.phi().set_val(Real(0));
       mg_.solve(Real(1e-12), 100);
       add_uncovered(phi_c_, mg_.phi());
-      // re-ghost + re-solve fin sur le phi_c corrige.
+      // re-ghost + re-solve fine on the corrected phi_c.
       refresh_fine(fine_sweeps);
       rnorm = composite_coarse_residual();
       if (verbose_ && my_rank() == 0) std::fprintf(stderr, "[FAC] it=%d r_c=%.4e\n", it, rnorm);
@@ -223,7 +223,7 @@ class CompositeFacPoisson {
   Real last_residual() const { return last_residual_; }
 
  private:
-  /// dst <- src (composante 0, cellules valides).
+  /// dst <- src (component 0, valid cells).
   void copy0(MultiFab& dst, const MultiFab& src) {
     device_fence();
     for (int li = 0; li < dst.local_size(); ++li) {
@@ -235,7 +235,7 @@ class CompositeFacPoisson {
     }
   }
 
-  /// phi_c += e_c sur les cellules NON couvertes (la correction ne touche pas le couvert = average_down).
+  /// phi_c += e_c on the NON covered cells (the correction does not touch the covered = average_down).
   void add_uncovered(MultiFab& phi, const MultiFab& e) {
     device_fence();
     for (int li = 0; li < phi.local_size(); ++li) {
@@ -248,11 +248,11 @@ class CompositeFacPoisson {
     }
   }
 
-  /// Garde-fou Phase 4a : les patchs fins doivent etre disjoints ET separes d'au moins UNE cellule
-  /// grossiere (empreintes grossieres PatchRange pas meme adjacentes). Sinon une face fine serait
-  /// PARTAGEE entre deux patchs et traitee a tort comme un bord grossier-fin (ghost C-F bilineaire +
-  /// correction de flux) : le raccord fin-fin (multi-patch ADJACENT) est la Phase 4b. On teste : empreinte
-  /// grossiere du patch g DILATEE d'une cellule croise empreinte du patch h -> separation insuffisante.
+  /// Phase 4a guard: the fine patches must be disjoint AND separated by at least ONE coarse
+  /// cell (PatchRange coarse footprints not even adjacent). Otherwise a fine face would be
+  /// SHARED between two patches and wrongly treated as a coarse-fine border (bilinear C-F ghost +
+  /// flux correction): the fine-fine join (ADJACENT multi-patch) is Phase 4b. We test: coarse
+  /// footprint of patch g GROWN by one cell intersects footprint of patch h -> insufficient separation.
   static void require_separated_patches(const BoxArray& fine_boxes) {
     const int N = fine_boxes.size();
     for (int g = 0; g < N; ++g) {
@@ -261,18 +261,18 @@ class CompositeFacPoisson {
         const Box2D bh = PatchRange(fine_boxes[h]).box();
         if (!ag.grow(1).intersect(bh).empty())
           throw std::runtime_error(
-              "CompositeFacPoisson : patchs fins adjacents ou se chevauchant (empreintes grossieres "
-              "separees de moins d'une cellule) ; le raccord fin-fin multi-patch est la Phase 4b -- "
-              "exiger des patchs disjoints separes d'au moins une cellule grossiere.");
+              "CompositeFacPoisson: adjacent or overlapping fine patches (coarse footprints "
+              "separated by less than one cell); the multi-patch fine-fine join is Phase 4b -- "
+              "require disjoint patches separated by at least one coarse cell.");
       }
     }
   }
 
-  /// Remplit l'anneau de ghosts de CHAQUE patch fin par bilerp de phi_c (Dirichlet C-F cellule-centre).
-  /// Les patchs etant separes d'au moins une cellule grossiere, l'anneau de ghosts d'un patch n'empiete
-  /// jamais sur les cellules valides d'un autre -> lecture du seul grossier (pas d'echange fin-fin).
+  /// Fills the ghost ring of EACH fine patch by bilerp of phi_c (cell-centered C-F Dirichlet).
+  /// Since the patches are separated by at least one coarse cell, the ghost ring of a patch never
+  /// overlaps the valid cells of another -> read from the coarse only (no fine-fine exchange).
   void fill_cf_ghosts() {
-    const ConstArray4 C = phi_c_.fab(0).const_array();  // grossier mono-box replique
+    const ConstArray4 C = phi_c_.fab(0).const_array();  // replicated mono-box coarse
     const int ng = phi_f_.n_grow();
     for (int li = 0; li < phi_f_.local_size(); ++li) {
       Array4 F = phi_f_.fab(li).array();
@@ -280,17 +280,17 @@ class CompositeFacPoisson {
       for (int j = vb.lo[1] - ng; j <= vb.hi[1] + ng; ++j)
         for (int i = vb.lo[0] - ng; i <= vb.hi[0] + ng; ++i) {
           const bool inside = (i >= vb.lo[0] && i <= vb.hi[0] && j >= vb.lo[1] && j <= vb.hi[1]);
-          if (inside) continue;  // ghosts seulement
+          if (inside) continue;  // ghosts only
           F(i, j, 0) = detail::fac_bilerp_coarse(C, i, j, ratio_);
         }
     }
   }
 
-  /// Remplit les ghosts d'un champ de COEFFICIENT fin (@p fine) par bilerp du champ grossier (@p coarse) :
-  /// coherence du coefficient a l'interface C-F (la face de coefficient au bord du patch melange le coeff
-  /// fin interieur et le coeff grossier injecte). Generique (eps, a_xy, a_yx).
+  /// Fills the ghosts of a fine COEFFICIENT field (@p fine) by bilerp of the coarse field (@p coarse):
+  /// coefficient consistency at the C-F interface (the coefficient face at the patch border mixes the fine
+  /// interior coeff and the injected coarse coeff). Generic (eps, a_xy, a_yx).
   void fill_cf_coarse_to_fine(const MultiFab& coarse, MultiFab& fine) {
-    const ConstArray4 C = coarse.fab(0).const_array();  // grossier mono-box replique
+    const ConstArray4 C = coarse.fab(0).const_array();  // replicated mono-box coarse
     const int ng = fine.n_grow();
     for (int li = 0; li < fine.local_size(); ++li) {
       Array4 F = fine.fab(li).array();
@@ -304,8 +304,8 @@ class CompositeFacPoisson {
     }
   }
 
-  /// CL des coefficients (eps) : periodique conserve, bord physique -> gradient-nul (Foextrap), comme
-  /// le batisseur Schur (coeff_bc) -- le coefficient ne porte pas de Dirichlet.
+  /// Coefficient (eps) BC: periodic preserved, physical border -> zero-gradient (Foextrap), like
+  /// the Schur builder (coeff_bc) -- the coefficient carries no Dirichlet.
   static BCRec coeff_bc(const BCRec& b) {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec c;
@@ -314,37 +314,37 @@ class CompositeFacPoisson {
     return c;
   }
 
-  /// Facteur de sur-relaxation SOR ~ optimal pour un patch (2/(1+sin(pi/N))) -> convergence O(N) sweeps
-  /// au lieu de O(N^2) pour GS. N = plus grand cote de la box @p b (calcule par patch en multi-patch).
+  /// SOR over-relaxation factor ~ optimal for a patch (2/(1+sin(pi/N))) -> O(N) sweeps convergence
+  /// instead of O(N^2) for GS. N = largest side of box @p b (computed per patch in multi-patch).
   Real sor_omega(const Box2D& b) const {
     const int N = std::max(b.nx(), b.ny());
     return Real(2) / (Real(1) + std::sin(Real(kPi_) / Real(N)));
   }
 
-  /// Re-remplit les ghosts C-F bilineaires depuis phi_c puis relaxe CHAQUE patch fin (SOR) a ghosts GELES.
+  /// Re-fills the bilinear C-F ghosts from phi_c then relaxes EACH fine patch (SOR) with FROZEN ghosts.
   void refresh_fine(int sweeps) {
     device_fence();
-    fill_ghosts(phi_c_, geom_c_.domain, bc_);  // phi_c ghosts physiques (le bilerp lit jusqu'au bord)
+    fill_ghosts(phi_c_, geom_c_.domain, bc_);  // phi_c physical ghosts (the bilerp reads up to the border)
     fill_cf_ghosts();
     fine_sor(sweeps);
-    average_down(phi_f_, phi_c_, ratio_);  // coherence : couvert grossier = moyenne fine (multi-box OK)
+    average_down(phi_f_, phi_c_, ratio_);  // consistency: coarse covered = fine average (multi-box OK)
   }
 
-  /// SOR rouge-noir sur CHAQUE patch fin : div(eps grad phi_f) = f_f (eps = harmonique de face), ghosts
-  /// GELES (pas de re-remplissage). eps == 1 partout (scalaire) -> Laplacien, bit-identique a Phase 1.
-  /// Le facteur de sur-relaxation est calcule PAR PATCH (taille propre). Les patchs etant separes, le
-  /// stencil 9 points d'un patch ne lit jamais les cellules valides d'un autre (ghosts geles seulement).
+  /// Red-black SOR over EACH fine patch: div(eps grad phi_f) = f_f (eps = face harmonic), FROZEN
+  /// ghosts (no re-filling). eps == 1 everywhere (scalar) -> Laplacian, bit-identical to Phase 1.
+  /// The over-relaxation factor is computed PER PATCH (own size). Since the patches are separated, the
+  /// 9-point stencil of a patch never reads the valid cells of another (frozen ghosts only).
   void fine_sor(int sweeps) {
     const Real idx2 = Real(1) / (geom_f_.dx() * geom_f_.dx());
     const Real idy2 = Real(1) / (geom_f_.dy() * geom_f_.dy());
     const bool he = has_eps_;
     const bool hc = has_cross_;
-    const Real idx = Real(1) / geom_f_.dx(), idy = Real(1) / geom_f_.dy();  // cross_div : 1/dx, 1/dy
+    const Real idx = Real(1) / geom_f_.dx(), idy = Real(1) / geom_f_.dy();  // cross_div: 1/dx, 1/dy
     for (int li = 0; li < phi_f_.local_size(); ++li) {
       const Box2D vb = phi_f_.box(li);
       const Real omega = sor_omega(vb);
       Array4 P = phi_f_.fab(li).array();
-      const ConstArray4 Pc = phi_f_.fab(li).const_array();  // vue const (meme memoire) pour stencil croise
+      const ConstArray4 Pc = phi_f_.fab(li).const_array();  // const view (same memory) for cross stencil
       const ConstArray4 F = f_f_.fab(li).const_array();
       const ConstArray4 E = eps_f_.fab(li).const_array();
       const ConstArray4 AXY = axy_f_.fab(li).const_array();
@@ -354,7 +354,7 @@ class CompositeFacPoisson {
           for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
             for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
               if (((i + j) & 1) != color) continue;
-              // permittivites de FACE (moyenne harmonique des 2 centres) ; eps==1 -> faces == 1.
+              // FACE permittivities (harmonic mean of the 2 centers); eps==1 -> faces == 1.
               const Real exm = he ? eps_harmonic(E(i, j, 0), E(i - 1, j, 0)) : Real(1);
               const Real exp = he ? eps_harmonic(E(i, j, 0), E(i + 1, j, 0)) : Real(1);
               const Real eym = he ? eps_harmonic(E(i, j, 0), E(i, j - 1, 0)) : Real(1);
@@ -362,25 +362,25 @@ class CompositeFacPoisson {
               const Real diag = (exm + exp) * idx2 + (eym + eyp) * idy2;
               const Real nb = (exm * P(i - 1, j, 0) + exp * P(i + 1, j, 0)) * idx2 +
                               (eym * P(i, j - 1, 0) + eyp * P(i, j + 1, 0)) * idy2;
-              // termes croises EXPLICITES (9 points, lus a partir du P courant) : div(A grad phi) =
-              // bloc_diag + cross. On resout bloc_diag(P) + cross(P) = f -> P = (nb + cross - f)/diag.
+              // EXPLICIT cross terms (9 points, read from the current P): div(A grad phi) =
+              // diag_block + cross. We solve diag_block(P) + cross(P) = f -> P = (nb + cross - f)/diag.
               const Real cross =
                   hc ? detail::cross_div(Pc, true, AXY, true, AYX, i, j, idx, idy) : Real(0);
               const Real pgs = (nb + cross - F(i, j, 0)) / diag;
-              P(i, j, 0) = (Real(1) - omega) * P(i, j, 0) + omega * pgs;  // sur-relax (sous-relax si fort)
+              P(i, j, 0) = (Real(1) - omega) * P(i, j, 0) + omega * pgs;  // over-relax (under-relax if strong)
             }
     }
   }
 
-  /// Residu composite grossier : r_c = f_c - div(eps grad phi_c) (non couvert), 0 (couvert), + correction
-  /// de FLUX C-F sur les cellules bordant le patch. @return ||r_c||_inf (cellules NON couvertes).
+  /// Composite coarse residual: r_c = f_c - div(eps grad phi_c) (non covered), 0 (covered), + C-F
+  /// FLUX correction on the cells bordering the patch. @return ||r_c||_inf (NON covered cells).
   Real composite_coarse_residual() {
     device_fence();
     fill_ghosts(phi_c_, geom_c_.domain, bc_);
-    // r_c = f_c - div(A grad phi_c) (apply_laplacian lit les ghosts deja remplis ; eps + croises si actifs).
-    // Les croises sont lus aussi sur les cellules COUVERTES (= moyenne fine apres average_down) -> le
-    // stencil 9 points reste coherent a l'interface ; seul le flux NORMAL est explicitement raccorde C-F
-    // (le flux croise, tangentiel et petit pour le pas Schur, est porte par le stencil de volume).
+    // r_c = f_c - div(A grad phi_c) (apply_laplacian reads the already-filled ghosts; eps + cross if active).
+    // The cross terms are read also on the COVERED cells (= fine average after average_down) -> the
+    // 9-point stencil stays consistent at the interface; only the NORMAL flux is explicitly joined C-F
+    // (the cross flux, tangential and small for the Schur step, is carried by the volume stencil).
     MultiFab lap(ba_c_, dm_c_, 1, 0);
     apply_laplacian(phi_c_, geom_c_, lap, /*coef=*/nullptr, has_eps_ ? &eps_c_ : nullptr,
                     /*kappa=*/nullptr, /*eps_y=*/nullptr, has_cross_ ? &axy_c_ : nullptr,
@@ -394,14 +394,14 @@ class CompositeFacPoisson {
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
         R(i, j, 0) = cov_.covered(i, j) ? Real(0) : (FC(i, j, 0) - LAP(i, j, 0));
 
-    // CORRECTION DE FLUX C-F, PAR PATCH FIN. Sur chaque cellule grossiere BORDANT un patch (non couverte,
-    // voisin couvert), on REMPLACE la contribution de la face C-F dans div(eps grad phi_c) par la
-    // contribution FINE (somme conservative des r faces fines, eps de face harmonique) : r_c += (grossiere
-    // - fine). Les patchs etant separes d'au moins une cellule grossiere, chaque bord est un VRAI raccord
-    // grossier-fin ; le test !cov_.covered(I, J) saute defensivement une cellule bordante qui serait
-    // couverte par un AUTRE patch (impossible sous le garde-fou, mais robuste : une cellule bordante
-    // couverte est deja un interieur d'un autre patch, son residu reste 0). Une cellule SEPARANT deux
-    // patchs (bord droit de l'un, bord gauche de l'autre) recoit DEUX corrections, une par face : correct.
+    // C-F FLUX CORRECTION, PER FINE PATCH. On each coarse cell BORDERING a patch (non covered,
+    // covered neighbor), we REPLACE the contribution of the C-F face in div(eps grad phi_c) by the
+    // FINE contribution (conservative sum of the r fine faces, harmonic face eps): r_c += (coarse
+    // - fine). Since the patches are separated by at least one coarse cell, each border is a TRUE
+    // coarse-fine join; the test !cov_.covered(I, J) defensively skips a bordering cell that would be
+    // covered by ANOTHER patch (impossible under the guard, but robust: a covered bordering
+    // cell is already interior to another patch, its residual stays 0). A cell SEPARATING two
+    // patches (right border of one, left border of the other) gets TWO corrections, one per face: correct.
     const ConstArray4 PC = phi_c_.fab(0).const_array();
     const ConstArray4 EC = eps_c_.fab(0).const_array();
     const bool he = has_eps_;
@@ -413,9 +413,9 @@ class CompositeFacPoisson {
       const ConstArray4 EF = eps_f_.fab(g).const_array();
       const int Ic0 = patch_coarse_[g].lo[0], Ic1 = patch_coarse_[g].hi[0];
       const int Jc0 = patch_coarse_[g].lo[1], Jc1 = patch_coarse_[g].hi[1];
-      // Faces NORMALES A X : colonnes bordantes I = Ic0-1 (face +x couverte) et I = Ic1+1 (face -x).
+      // Faces NORMAL TO X: bordering columns I = Ic0-1 (covered +x face) and I = Ic1+1 (-x face).
       for (int J = Jc0; J <= Jc1; ++J) {
-        if (!cov_.covered(Ic0 - 1, J)) {  // gauche : cellule (Ic0-1, J), face fine a i = r*Ic0.
+        if (!cov_.covered(Ic0 - 1, J)) {  // left: cell (Ic0-1, J), fine face at i = r*Ic0.
           const int I = Ic0 - 1;
           const Real efc = he ? eps_harmonic(EC(I, J, 0), EC(I + 1, J, 0)) : Real(1);
           const Real coarse_c = efc * (PC(I + 1, J, 0) - PC(I, J, 0)) * idx2;
@@ -423,11 +423,11 @@ class CompositeFacPoisson {
           for (int t = 0; t < r; ++t) {
             const int jf = r * J + t;
             const Real eff = he ? eps_harmonic(EF(r * Ic0 - 1, jf, 0), EF(r * Ic0, jf, 0)) : Real(1);
-            fine_sum += eff * (PF(r * Ic0, jf, 0) - PF(r * Ic0 - 1, jf, 0));  // interieur - ghost
+            fine_sum += eff * (PF(r * Ic0, jf, 0) - PF(r * Ic0 - 1, jf, 0));  // interior - ghost
           }
           R(I, J, 0) += coarse_c - fine_sum * idx2;
         }
-        if (!cov_.covered(Ic1 + 1, J)) {  // droite : cellule (Ic1+1, J), faces fines a i = r*Ic1+r.
+        if (!cov_.covered(Ic1 + 1, J)) {  // right: cell (Ic1+1, J), fine faces at i = r*Ic1+r.
           const int I = Ic1 + 1;
           const Real efc = he ? eps_harmonic(EC(I, J, 0), EC(I - 1, J, 0)) : Real(1);
           const Real coarse_c = efc * (PC(I - 1, J, 0) - PC(I, J, 0)) * idx2;
@@ -441,7 +441,7 @@ class CompositeFacPoisson {
           R(I, J, 0) += coarse_c - fine_sum * idx2;
         }
       }
-      // Faces NORMALES A Y : rangees bordantes J = Jc0-1 (face +y) et J = Jc1+1 (face -y).
+      // Faces NORMAL TO Y: bordering rows J = Jc0-1 (+y face) and J = Jc1+1 (-y face).
       for (int I = Ic0; I <= Ic1; ++I) {
         if (!cov_.covered(I, Jc0 - 1)) {
           const int J = Jc0 - 1;
@@ -471,7 +471,7 @@ class CompositeFacPoisson {
       }
     }
 
-    // norme inf du residu sur les cellules NON couvertes.
+    // inf norm of the residual over the NON covered cells.
     Real nrm = Real(0);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
@@ -486,15 +486,15 @@ class CompositeFacPoisson {
   int ratio_;
   BoxArray ba_f_;
   DistributionMapping dm_f_;
-  GeometricMG mg_;  ///< solveur grossier (initial + corrections), Dirichlet homogene
+  GeometricMG mg_;  ///< coarse solver (initial + corrections), homogeneous Dirichlet
   MultiFab phi_c_, phi_f_, f_c_, f_f_, res_c_;
-  MultiFab eps_c_, eps_f_;  ///< permittivite variable par niveau (operateur condense Schur B_z=0)
-  MultiFab axy_c_, ayx_c_, axy_f_, ayx_f_;  ///< termes croises par niveau (tenseur plein, Schur B_z!=0)
-  std::vector<Box2D> patch_coarse_;  ///< empreinte grossiere couverte PAR PATCH fin (multi-patch)
+  MultiFab eps_c_, eps_f_;  ///< variable permittivity per level (condensed Schur operator B_z=0)
+  MultiFab axy_c_, ayx_c_, axy_f_, ayx_f_;  ///< cross terms per level (full tensor, Schur B_z!=0)
+  std::vector<Box2D> patch_coarse_;  ///< covered coarse footprint PER fine patch (multi-patch)
   CoverageMask cov_;
   Real last_residual_ = 0;
-  bool has_eps_ = false;   ///< true : operateur div(eps grad phi) ; false : Laplacien scalaire (Phase 1)
-  bool has_cross_ = false; ///< true : ajoute les termes croises a_xy/a_yx (tenseur plein, Schur B_z!=0)
+  bool has_eps_ = false;   ///< true: div(eps grad phi) operator; false: scalar Laplacian (Phase 1)
+  bool has_cross_ = false; ///< true: adds the cross terms a_xy/a_yx (full tensor, Schur B_z!=0)
   bool verbose_ = false;
   bool two_way_ = true;
   static constexpr Real kPi_ = Real(3.14159265358979323846);
