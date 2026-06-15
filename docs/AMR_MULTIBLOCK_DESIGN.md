@@ -70,7 +70,8 @@ The TWO real gaps for the Phase 1 target are therefore:
    `regrid` in `amr_system_coupler.hpp` -> nothing), unlike `AmrCouplerMP::regrid`
    (lines 321-325) which delegates to `amr_regrid_finest`. Its hierarchy is FROZEN at
    construction. The UNION-of-tags regrid which rebuilds the mesh ONCE and
-   prolongs/restricts ALL the blocks is to be WRITTEN.
+   prolongs/restricts ALL the blocks is implemented (capstone Phase 2; `build_multi` ->
+   set_regrid + set_block_tag_predicate in `python/amr_system.cpp`).
 
 HARD CONSTRAINT (owner correction, point 4). AS LONG AS the UNION-of-tags regrid (cf. 5) is
 not implemented, the MULTI-BLOCK combination (`n_blocks >= 2`) AND `regrid_every > 0` MUST be
@@ -602,8 +603,8 @@ absence of a block on a patch.
 - [ ] electrons IMEX(substeps=10) + ions Explicit(substeps=1), stable; AND the inverse. (later PR)
 - [ ] neutrals stride=20 always read by the sources and the Poisson between catch-ups. (later PR)
 - [ ] `evolve=False` present as a fixed background in the elliptic right-hand side. (later PR)
-- [x] MULTI-BLOCK + `regrid_every > 0` EXPLICITLY REFUSED as long as the union regrid does not
-      exist (point 4; clear throw, at `ensure_built` of the runtime registry).
+- [x] MULTI-BLOCK + `regrid_every > 0` now SUPPORTED via the union-tag regrid (capstone Phase 2);
+      the old refusal at `ensure_built` is lifted.
 - [ ] regrid conserves the mass of EACH block (`mass(b)` before == after, per block). (union regrid
       = later PR; the multi-block is FROZEN for now)
 - [x] MULTI-BLOCK PRODUCTION DSL (capstone v, DELIVERED): add_compiled_model(AmrSystem&) installs a block

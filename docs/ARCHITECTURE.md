@@ -217,8 +217,8 @@ corner, which stays coherent on both sides of zero (negative ghosts). With a rat
 level therefore has a mesh $dx_f = dx_c / 2$ at unchanged physical domain.
 
 The multi-block co-locates N species on a shared hierarchy (same `BoxArray`, same
-`DistributionMapping`, same $dx, dy$ per level); the multi-block with `regrid_every > 0` is refused
-(the hierarchy is frozen). Conservation is guaranteed per block via reflux and average_down, described
+`DistributionMapping`, same $dx, dy$ per level); the multi-block supports `regrid_every > 0` (the union-tag regrid rebuilds the
+hierarchy from all blocks' tags; `regrid_every == 0` keeps it frozen). Conservation is guaranteed per block via reflux and average_down, described
 below.
 
 ## AMR coarse-fine stencil (reflux)

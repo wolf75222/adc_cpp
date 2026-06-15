@@ -9,9 +9,10 @@ What the AMR does not do yet.
 - **Poisson "coarse + inject".** The Poisson is solved on the coarse then injected toward the
   fine, it is not a multi-level composite elliptic solve. This is sufficient for
   the diocotron observable (which lives on a median circle resolved by the coarse) but worth knowing.
-- **No global Schur source stage on AMR.** The Schur-condensed source splitting (`adc.Split`,
-  `CondensedSchur`) has no AMR counterpart: `AmrSystem.add_block` / `add_equation`
-  reject it explicitly. For this stage, use a non-refined `System`.
+- **Global Schur source stage on AMR: single block only.** The Schur-condensed source splitting
+  (`adc.Split` / `adc.Strang` with `CondensedSchur`) is available on AMR via `AmrSystem.add_equation`,
+  assembled on the coarse level, when the hierarchy has a single block; it raises on a refined
+  multi-block one. `AmrSystem.add_block` rejects it (use `add_equation`).
 - **Multirate via the compiled path: restricted.** On the "production" DSL path (`.so`),
   `add_equation` explicitly rejects `stride > 1` and the partial IMEX mask
   (`implicit_vars` / `implicit_roles`): the flat ABI of the loader does not carry them, and they

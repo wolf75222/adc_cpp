@@ -28,8 +28,8 @@
 /// elliptiques des blocs (f = Sum_b q_b n_b lu aux memes cellules). Conservation PAR BLOC (reflux +
 /// average_down). Moteur runtime AmrRuntime (registre type-erase par nom). Blocs a schemas spatiaux
 /// potentiellement DIFFERENTS et a TRAITEMENT TEMPOREL par bloc (explicite ou IMEX, source raide
-/// implicite locale ; capstone vii) sur une hierarchie FIGEE (multi-blocs + regrid_every > 0 est
-/// REFUSE : le regrid d'union des tags est une PR ulterieure). Multirate (substeps/stride), sources
+/// implicite locale ; capstone vii) avec regrid d'union des tags (multi-blocs + regrid_every > 0 est DESORMAIS
+/// SUPPORTE : la grille re-grille a partir de l'union des tags ; regrid_every == 0 = hierarchie figee). Multirate (substeps/stride), sources
 /// couplees inter-especes : deja cables. Blocs COMPILES (add_compiled_model) multiples et MELANGE
 /// compile + natif : cables (capstone v, DSL production multi-bloc). Regrid d'union : PR ulterieure.
 ///

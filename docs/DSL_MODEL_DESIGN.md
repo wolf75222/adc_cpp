@@ -78,10 +78,9 @@ GAP (still target / deferred):
   of the union of tags, multi-block production DSL; cf. `AmrSystem` `__init__.py` and `amr_system.cpp`
   `build_multi`). `AmrSystem` LIMITS STILL REAL (to keep honest): IMEX local
   source OK (Gap 2 #132, backward_euler_source / mf_apply_source_treatment) but global Schur on
-  AMR remains to be done, and
-  HLLC/Roe/`primitive` REJECTED on the Python AMR facade side. This rejection is PURELY FACADE: the C++
-  engine (`amr_dsl_block.hpp`/`make_block`) already supports them; only the Python facade does not expose
-  them yet on AMR.
+  multi-block AMR remains to be done (mono-block AMR works via `add_equation`), and
+  HLLC/Roe/`primitive` are now WIRED on the Python AMR facade with a pressure guard: HLLC/Roe require a
+  declared primitive `p` (or `enable_hllc()` / `enable_roe()`), enforced in `add_equation`.
 
 HISTORICAL NOTE. The text below still uses the future tense ("TARGET", "to add") where the
 thing is now shipped; rely on 0bis and the SHIPPED/GAP tags. The design content is

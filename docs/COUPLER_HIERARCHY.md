@@ -64,7 +64,7 @@ point with subcycling) call `SSPRK2Step::take_step` /
 
 | Parameter | Role |
 |---|---|
-| `Limiter` | Interface reconstruction (NoSlope / Minmod / VanLeer / MC) |
+| `Limiter` | Interface reconstruction (NoSlope / Minmod / VanLeer / Weno5) |
 | `Policy` | Frequency of the elliptic solve: `PerStageCoupling` (phi recomputed at each RK stage) or `OncePerStepCoupling` (phi frozen during the step) |
 | `NumericalFlux` | Riemann flux (Rusanov / HLL / HLLC / Roe) |
 

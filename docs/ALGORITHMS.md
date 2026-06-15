@@ -1933,7 +1933,7 @@ level via `same_layout_or_throw`, coarse Poisson co-located sum, conservation pe
 goes through the elliptic right-hand side (sum) and the coupled sources, not through the flux. `substeps`
 and `stride` are orthogonal (a slow block on `stride=M` is held M-1 steps then catches up by an effective
 step `M*dt`); between two catch-ups the held block enters the Poisson sum with its stale state.
-In multi-block AMR, `regrid_every > 0` is refused (the tag-union regrid is a later PR)
+In multi-block AMR, `regrid_every > 0` is supported (the union-tag regrid rebuilds the hierarchy from all blocks' tags; `regrid_every == 0` keeps it frozen)
 and `set_conservative_state` is mono-block only. Without an explicit IMEX mask
 (`implicit_vars` / `implicit_roles` empty) the model default applies -> bit-identical.
 **Validation.** `test_system_abstraction`, `test_system_coupler`, `test_two_species_minimal`,

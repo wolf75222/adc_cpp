@@ -44,13 +44,13 @@ The spectral Poisson solver (`PoissonFFTSolver`) is single-rank by design. Under
 non-regression. For a distributed MPI Poisson, use the geometric multigrid
 (`geometric_mg`).
 
-## AMR: no global Schur
+## AMR: global Schur on a single block only
 
-The Schur-condensed source stage (`adc.CondensedSchur` via `adc.Split` / `adc.Strang`) has no
-AMR counterpart. `set_source_stage` is wired only on `System` (cartesian or polar), not on
-`AmrSystem`: `AmrSystem.add_block` and `AmrSystem.add_equation` explicitly reject an
-`adc.Split`/`adc.Strang` policy. For the condensed electrostatic Lorentz coupling, use
-a non-refined `System`. Design:
+The Schur-condensed source stage (`adc.CondensedSchur` via `adc.Split` / `adc.Strang`) is
+available on AMR through `AmrSystem.add_equation`. The condensed stage is assembled and solved
+on the coarse level and requires a single-block hierarchy; it raises on a refined multi-block
+one. `AmrSystem.add_block` rejects `adc.Split` / `adc.Strang` (use `add_equation`). On `System`
+the stage is available on any cartesian or polar grid. Design:
 [SCHUR_CONDENSATION_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/SCHUR_CONDENSATION_DESIGN.md),
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
 

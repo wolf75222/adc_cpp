@@ -89,8 +89,8 @@ Important points :
 - `riemann=` names the NUMERICAL flux (`rusanov`/`hllc`/`roe`) ; `m.flux(...)` is the PHYSICAL flux.
 - `fft` is not supported under `System` in MPI `np>1` : use `geometric_mg`.
 - `backend="production"` with `target="amr_system"` : `AmrSystem` is single- AND multi-block,
-  explicit ; HLLC/Roe/`primitive` are rejected on the Python AMR facade side (the C++ engine supports them,
-  but the Python binding does not expose them yet on this path).
+  explicit ; HLLC/Roe/`primitive` are wired on the Python AMR facade with a pressure guard: HLLC/Roe require a
+  declared primitive `p` (or the `enable_hllc()` / `enable_roe()` capability), otherwise `add_equation` raises.
 
 ---
 

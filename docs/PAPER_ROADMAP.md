@@ -212,8 +212,8 @@ Capabilities partially present but incomplete for an advanced Hoffart use.
   multi-species); local source IMEX OK (Gap 2 #132, backward_euler_source /
   mf_apply_source_treatment) but global Schur on AMR and multi-block AMR remain to be done. The
   native multi-box is not wired on the facade side,
-  and the Python AMR facade REJECTS HLLC/Roe and the primitive reconstruction (see `python/adc/__init__.py`,
-  safeguard `add_equation`); this rejection is PURELY facade: the C++ engine already supports them
+  and the Python AMR facade WIRES HLLC/Roe and the primitive reconstruction with a pressure guard (see `python/adc/__init__.py`,
+  safeguard `add_equation`): HLLC/Roe require a declared primitive `p` (or `enable_hllc()` / `enable_roe()`)
   (the `add_block` API accepts the primitive recon on the C++ side). WENO5 + Rusanov + conservative IS wired
   on the native AMR path (#105). A high-resolution + high-order AMR diocotron at `System`
   parity (primitive recon, Roe, multi-box) requires opening these options on the facade side.
@@ -276,7 +276,7 @@ Capabilities partially present but incomplete for an advanced Hoffart use.
   tested separately but is NOT routed in `System` (band layout vs single box); wiring it
   would allow the distributed periodic MPI without falling back on `geometric_mg`. Not required for the target.
 - **AMR facade <-> `System` parity**: open on the Python facade side the native multi-box, the primitive
-  recon and the HLLC/Roe fluxes (already supported by the C++ engine, rejection purely facade) to
+  recon and the HLLC/Roe fluxes (wired on the AMR facade with a pressure guard) to
   push the AMR to high resolution + high order at `System` parity.
 - **Basket 4 depending on the ambition**: full-device AMR strong-scaling (distributed coarse negative at
   the tested scale), then the full magnetized model (`two_fluid_ap` coupled to transport) if one
