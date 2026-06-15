@@ -14,6 +14,7 @@ Checks: >
   cppcoreguidelines-*,
   misc-*,
   portability-*,
+  google-explicit-constructor,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
   -modernize-use-nodiscard,
