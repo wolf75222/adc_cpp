@@ -123,7 +123,11 @@ g1, g2 = m_g.conservative_vars("g1", "g2")
 m_g.flux(x=[g1, g2], y=[g2, g1])
 m_g.wave_speeds(x=(0.0 * g1, 1.0 + 0.0 * g1), y=(0.0 * g1, 1.0 + 0.0 * g1))
 msg = err_msg(lambda: m_g.wave_speeds_from_jacobian())
-chk("set_wave_speeds" in msg, f"exclusivite paire explicite / jacobien ({msg[:40]}...)")
+# sans le split, "set_wave_speeds" matche le prefixe "set_wave_speeds_from_jacobian :" de
+# TOUTE garde de cette methode (assertion toujours vraie) ; on cible le detail, qui nomme
+# l'autre fournisseur set_wave_speeds -- token de code stable, propre a l'exclusivite.
+chk("set_wave_speeds" in msg.split(":", 1)[-1],
+    f"exclusivite paire explicite / jacobien ({msg[:40]}...)")
 m_g2 = dsl.Model("guard2")
 h1, h2 = m_g2.conservative_vars("h1", "h2")
 m_g2.flux(x=[h1, h2], y=[h2, h1])
