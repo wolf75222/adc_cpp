@@ -189,6 +189,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **GPU device-clean EB path**: `aux_comps()` is now `ADC_HD` so it can be evaluated inside the
+  embedded-boundary device kernels (`load_aux<aux_comps<Model>()>` in `spatial_operator_eb.hpp`).
+  nvcc rejected the constexpr `__host__` call from a `__host__ __device__` kernel (#20013-D), which
+  broke the CUDA build of the magnetized EB diocotron on GH200 (ADC-306). Host builds unchanged
+  (`ADC_HD` is empty off nvcc).
 - **Periodic theta ghosts in the polar Schur source coupling**: the polar condensed-Schur stepper
   and the polar Krylov solver now force the azimuthal (theta) ghosts of phi periodic instead of
   honoring the caller's four-face Dirichlet BCRec. The theta=0/2pi seam was filled by odd reflection
