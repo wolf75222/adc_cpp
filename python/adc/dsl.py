@@ -377,7 +377,7 @@ def _probe_cxx_std(cc, std):
         "  - conda: `conda install -c conda-forge cxx-compiler` (gcc>=13 / clang>=17) then "
         "export ADC_CXX=$CONDA_PREFIX/bin/clang++ (macOS) or $CONDA_PREFIX/bin/g++ (Linux).\n"
         "NB: a compiler DIFFERENT from the build one may compile but then be rejected "
-        "('ABI incompatible': the ABI key encodes the compiler version); prefer the build one."
+        "('incompatible ABI': the ABI key encodes the compiler version); prefer the build one."
         % (cc, std, (err or "").strip()[:800],
            baked or "(unknown: module without __cxx_compiler__, rebuild _adc to bake it)",
            baked or "<path/to/build/compiler>"))

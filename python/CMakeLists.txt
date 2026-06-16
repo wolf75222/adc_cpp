@@ -395,7 +395,7 @@ foreach(t
     test_dsl_autodiff_roe     # ADC-68 voie FOURNIE : dsl.diff (autodiff Expr) + m.flux_jacobian + m.roe_dissipation(x=,y=) (left/right) reproduisant le Roe isotherme a la main == enable_roe (~1e-12) ; (a)(b)(d) symboliques, (c) compile (auto-skip)
     test_coupled_freq_expr    # frequence PAR CELLULE des sources couplees (GENERICITY 7) : constante (regression), Expr mu(U)=k*rho (dt==cfl/(k*max rho)), suivi d'etat, rejet (bloc,role) non declare, AMR grossier
     test_backend_auto         # ADC-63 : backend par defaut 'auto' = production si parite toolchain etablie, aot sinon (raison posee, jamais muet) ; explicite inchange (auto-skip)
-    test_native_abi_std       # regression ABI : le std du modele natif (backend="production") suit le loader (c++20 sous Kokkos, c++23 sinon) -> add_native_block charge sans "ABI incompatible"
+    test_native_abi_std       # regression ABI : le std du modele natif (backend="production") suit le loader (c++20 sous Kokkos, c++23 sinon) -> add_native_block charge sans "incompatible ABI"
     # --- ADC-104 : tests DSL livres mais jamais enregistres en ctest. Ils etaient orphelins du grep
     # litteral (masques par l'interpolation tests/${t}.py de cette boucle) et NE tournaient PAS en
     # ctest ; en CI ils etaient bien lances par auto-decouverte (find|xargs) mais l'echec etait

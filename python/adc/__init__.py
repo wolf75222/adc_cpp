@@ -222,7 +222,7 @@ def doctor(verbose=True):
                 checks["compilateur"] = (False, str(e).splitlines()[0])
             if baked and cc != baked:
                 checks["compilateur_abi"] = (False, "runtime compiler (%s) != build (%s) -> risk "
-                                                    "of 'ABI incompatible' rejection on production "
+                                                    "of 'incompatible ABI' rejection on production "
                                                     "backend. export ADC_CXX=%r to force the one "
                                                     "from the build." % (cc, baked, baked))
 

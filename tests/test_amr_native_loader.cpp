@@ -199,7 +199,8 @@ int main(int argc, char** argv) {
     try {
       C.add_native_block("gas", so_bad, "minmod", "rusanov", "conservative", "explicit", kGamma, 1);
     } catch (const std::runtime_error& e) {
-      raised = (std::string(e.what()).find("ABI incompatible") != std::string::npos);
+      // ADC-283 : le message anglais (ADC-272) est "incompatible ABI", pas "ABI incompatible".
+      raised = (std::string(e.what()).find("incompatible ABI") != std::string::npos);
     }
     chk(raised, "cle d'ABI falsifiee REJETEE par add_native_block");
   } else {

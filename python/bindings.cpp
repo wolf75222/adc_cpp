@@ -87,7 +87,7 @@ PYBIND11_MODULE(_adc, m) {
 
   // C++ standard of the LOADER (ADC_CXX_STD injected by the build: 20 under Kokkos, 23 otherwise). The
   // DSL backend="production" MUST compile the native model with this SAME standard, otherwise __cplusplus
-  // diverges -> different ABI key -> add_native_block raises "ABI incompatible". We expose it as an
+  // diverges -> different ABI key -> add_native_block raises "incompatible ABI". We expose it as an
   // integer (20/23); dsl.compile derives the -std=c++NN flag from it instead of hardcoding c++23.
 #ifdef ADC_CXX_STD
   m.attr("__cxx_std__") = static_cast<int>(ADC_CXX_STD);

@@ -92,8 +92,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 - **Python test message-assertions reconciled with ADC-272 translation** (ADC-283): ~26 assertions
   across 21 `python/tests/` files grepped now-translated French error fragments (masked by the
   gate-python swallow, ADC-112). Reconciled to assert language-stable substrings (echoed values,
-  quoted tokens) so they survive the ongoing translation; also fixed two order-sensitive
-  `ABI incompatible` asserts (source throws `incompatible ABI`).
+  quoted tokens) so they survive the ongoing translation; also reconciled the order-sensitive
+  `ABI incompatible` greps with the source's `incompatible ABI` -- the `test_dsl_production{,_amr}.py`
+  asserts and the C++ `test_amr_native_loader.cpp` guard (`test_native_abi_std.py` rides along under
+  this umbrella) -- plus the stale forward-order wording in comments and hints (`bindings.cpp`,
+  `__init__.py`, `dsl.py`, `python/CMakeLists.txt`).
 
 ## [0.1.0] - 2026-06-10
 
