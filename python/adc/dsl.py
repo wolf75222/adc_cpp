@@ -838,6 +838,113 @@ def sign(x):
     return Sign(_wrap(x))
 
 
+# Champs scalaires d'adc::EigBounds exposables comme une valeur DSL (cf. dense_eig.hpp).
+_EIG_FIELDS = {
+    "max_im": "max_im",  # plus grande |Im(lambda)| -> temoin de VP complexes (0 = spectre reel)
+    "lmin": "lmin",      # plus petite partie reelle du spectre
+    "lmax": "lmax",      # plus grande partie reelle du spectre
+}
+
+
+class EigWitness(Expr):
+    """Valeur scalaire issue du spectre d'une PETITE matrice dense construite a partir d'expressions
+    (ADC-289). La matrice @c rows (liste de @c k lignes de @c k Expr, ordre ligne-major) est diagonalisee
+    par ``adc::real_eig_minmax`` (dense_eig.hpp, ADC_HD, repli Gershgorin sur non-convergence, cap QR
+    releve par ADC-195) ; @c field choisit le champ rendu de @c adc::EigBounds : ``max_im`` (temoin de
+    VP complexes : 0 = spectre reel donc hyperbolique), ``lmin`` / ``lmax`` (extremes des parties
+    reelles). Sert la logique branchless de m.projection : ``si max_im > tol alors corriger`` s'ecrit
+    en masque max/min/sign sur cette valeur, sans branche dynamique.
+
+    Codegen device-clean : l'emission est un FONCTEUR NOMME (methode statique ADC_HD de la brique
+    generee) qui remplit un ``adc::Real M[k][k]`` puis appelle ``real_eig_minmax`` -- jamais de lambda
+    etendue cross-TU (casse nvcc). to_cpp() rend l'APPEL de ce foncteur en passant les entrees comme
+    arguments scalaires (chacune evaluee une seule fois cote appelant : compatible CSE). La brique
+    declare le foncteur une fois par couple (field, k) rencontre (cf. _eig_witness_helpers).
+
+    eval(env) : miroir hote via numpy.linalg.eigvals (reference de test) ; field 'max_im' = max des
+    |Im| (0 si toutes reelles), 'lmin'/'lmax' = extremes des parties reelles. ATTENTION : le repli
+    Gershgorin du chemin C++ (non-convergence d'un bloc >= 3 sous le cap QR) n'est PAS reproduit ici --
+    sur des matrices saines (cas vise) les deux chemins coincident a la tolerance QR (cf. dense_eig)."""
+
+    def __init__(self, rows, field):
+        if field not in _EIG_FIELDS:
+            raise ValueError("EigWitness : field '%s' inconnu (attendu : %s)"
+                             % (field, ", ".join(sorted(_EIG_FIELDS))))
+        rows = [list(r) for r in rows]
+        k = len(rows)
+        if k < 1:
+            raise ValueError("EigWitness : matrice vide (au moins 1 ligne)")
+        if k > 16:
+            raise ValueError("EigWitness : matrice %dx%d > 16x16 (limite de real_eig_minmax, "
+                             "tampon pile O(N^2) par thread device)" % (k, k))
+        for r in rows:
+            if len(r) != k:
+                raise ValueError("EigWitness : matrice non carree (%d lignes, ligne de %d entrees)"
+                                 % (k, len(r)))
+        self.rows = [[_wrap(e) for e in r] for r in rows]
+        self.k = k
+        self.field = field
+
+    def entries(self):
+        """Entrees de la matrice a plat (ordre ligne-major), une par enfant Expr."""
+        return [e for row in self.rows for e in row]
+
+    def helper_name(self):
+        """Nom du foncteur nomme emis dans la brique pour ce couple (field, taille)."""
+        return "adc_eig_%s_%dx%d" % (self.field, self.k, self.k)
+
+    def eval(self, env):
+        # Miroir hote (reference de test / prototypage) : empile la matrice par cellule puis numpy.
+        # Les entrees sont diffusees a une forme commune ; eigvals s'applique sur le dernier axe 2x2.
+        vals = [e.eval(env) for e in self.entries()]
+        bshape = np.broadcast(*[np.asarray(v) for v in vals]).shape if vals else ()
+        k = self.k
+        M = np.empty(bshape + (k, k), dtype=float)
+        for idx, v in enumerate(vals):
+            M[..., idx // k, idx % k] = np.broadcast_to(np.asarray(v, dtype=float), bshape)
+        ev = np.linalg.eigvals(M)  # (..., k) complexe
+        if self.field == "max_im":
+            out = np.max(np.abs(ev.imag), axis=-1)
+        elif self.field == "lmin":
+            out = np.min(ev.real, axis=-1)
+        else:  # lmax
+            out = np.max(ev.real, axis=-1)
+        return out if bshape else float(out)
+
+    def deps(self):
+        d = set()
+        for e in self.entries():
+            d |= e.deps()
+        return d
+
+    def to_cpp(self):
+        return "%s(%s)" % (self.helper_name(), ", ".join(e.to_cpp() for e in self.entries()))
+
+    def _str(self):
+        return "eig_%s([%s])" % (self.field, ", ".join(str(e) for e in self.entries()))
+
+
+def eig_max_im(rows):
+    """Temoin de VALEURS PROPRES COMPLEXES d'une petite matrice dense @p rows (liste de @c k lignes de
+    @c k Expr) : valeur scalaire = max des |Im(lambda)| (0 = spectre reel, donc hyperbolique), via
+    ``adc::real_eig_minmax`` (ADC-289). Sert les selections branchless de m.projection (p.ex. ``si
+    max_im > tol, corriger``, ecrit en max/min/sign). Le caller assemble la matrice (bloc 3x3 du
+    jacobien, compagnon...) a partir d'expressions de moments ; aucune physique n'est dans le coeur."""
+    return EigWitness(rows, "max_im")
+
+
+def eig_lmin(rows):
+    """Plus petite PARTIE REELLE du spectre de la matrice dense @p rows (cf. eig_max_im), via
+    ``adc::real_eig_minmax`` -- valeur scalaire DSL (extreme de borne de vitesse / spectre reel)."""
+    return EigWitness(rows, "lmin")
+
+
+def eig_lmax(rows):
+    """Plus grande PARTIE REELLE du spectre de la matrice dense @p rows (cf. eig_max_im), via
+    ``adc::real_eig_minmax`` -- valeur scalaire DSL (extreme de borne de vitesse / spectre reel)."""
+    return EigWitness(rows, "lmax")
+
+
 class StateRef(Expr):
     """STATE marker for the TWO-state Roe dissipation (m.roe_dissipation): the
     enclosed sub-expression evaluates on the LEFT state UL (side='L', dsl.left) or RIGHT state UR
@@ -925,6 +1032,8 @@ def _children(e):
         return (e.a, e.b)
     if isinstance(e, (Neg, Sqrt, Abs, Sign)):
         return (e.a,)
+    if isinstance(e, EigWitness):
+        return tuple(e.entries())  # entrees de la matrice : enfants pour CSE / decouverte deps
     if isinstance(e, StateRef):
         return (e.expr,)  # left/right marker: a single child (discovery of runtime params, etc.)
     return ()
@@ -945,6 +1054,9 @@ def _key(e):
         return ("abs", _key(e.a))
     if isinstance(e, Sign):
         return ("sign", _key(e.a))
+    if isinstance(e, EigWitness):
+        # cle = (field, taille, cles des entrees) : deux temoins de la MEME matrice partagent une locale
+        return ("eig", e.field, e.k, tuple(_key(c) for c in e.entries()))
     if isinstance(e, StateRef):
         return ("state", e.side, _key(e.expr))  # defensive: the Roe lines do not go through CSE
     return (e.op, tuple(_key(c) for c in _children(e)))  # _Bin (Add/Sub/Mul/Div/Pow)
@@ -967,6 +1079,11 @@ def _cpp_expand(e, cse_map):
     if isinstance(e, Sign):
         s = _cpp_cse(e.a, cse_map)  # l'enfant peut etre une locale CSE : evalue UNE fois
         return "(adc::Real(%s > 0) - adc::Real(%s < 0))" % (s, s)
+    if isinstance(e, EigWitness):
+        # appel du foncteur nomme (declare dans la brique) : chaque entree passee en argument scalaire
+        # (via _cpp_cse -> partage les locales CSE, evaluee une seule fois cote appelant).
+        args = ", ".join(_cpp_cse(c, cse_map) for c in e.entries())
+        return "%s(%s)" % (e.helper_name(), args)
     if isinstance(e, Pow):
         return "std::pow(%s, %s)" % (_cpp_cse(e.a, cse_map), _cpp_cse(e.b, cse_map))
     if isinstance(e, _Bin):
@@ -1027,6 +1144,51 @@ def _cse_emit(roots, real, indent):
         lines.append("%sconst %s %s = %s;" % (indent, real, name, _cpp_expand(rep[k], cse_map)))
         cse_map[k] = name
     return lines, [_cpp_cse(r, cse_map) for r in roots]
+
+
+# --- Foncteurs nommes des temoins de valeurs propres (EigWitness, ADC-289) ---
+# Le codegen d'EigWitness emet un APPEL (to_cpp) vers une methode statique ADC_HD de la brique qui
+# remplit un adc::Real M[k][k] puis appelle adc::real_eig_minmax. Cette methode est un FONCTEUR NOMME
+# (device-clean : pas de lambda etendue cross-TU qui casse nvcc) declare une fois par couple (field, k)
+# rencontre dans les formules de la brique. Ces deux fonctions decouvrent les couples et emettent les
+# declarations.
+def _collect_eig_witnesses(exprs):
+    """Couples (field, k) des EigWitness presents dans @p exprs, dedupliques, en ordre stable
+    (tri par (k, field)). Vide si aucun temoin -> aucune declaration, brique bit-identique a l'histoire."""
+    seen = set()
+    memo = set()  # id() : DAG -> chaque objet Expr visite une fois
+
+    def walk(e):
+        if id(e) in memo:
+            return
+        memo.add(id(e))
+        if isinstance(e, EigWitness):
+            seen.add((e.field, e.k))
+        for c in _children(e):
+            walk(c)
+
+    for e in exprs:
+        walk(_wrap(e))
+    return sorted(seen, key=lambda fk: (fk[1], fk[0]))
+
+
+def _eig_witness_helpers(pairs, indent="  "):
+    """Lignes C++ des foncteurs nommes (methodes statiques ADC_HD) pour les couples (field, k) de
+    @p pairs (cf. _collect_eig_witnesses). Chaque foncteur prend les k*k entrees de la matrice en
+    arguments scalaires (ordre ligne-major), remplit adc::Real M[k][k] et renvoie le champ @c field de
+    ``adc::real_eig_minmax(M)``. Aucun argument -> aucune ligne."""
+    L = []
+    for field, k in pairs:
+        params = ", ".join("adc::Real m%d" % i for i in range(k * k))
+        L.append("%sstatic ADC_HD adc::Real adc_eig_%s_%dx%d(%s) {"
+                 % (indent, field, k, k, params))
+        L.append("%s  adc::Real M[%d][%d];" % (indent, k, k))
+        for r in range(k):
+            sets = " ".join("M[%d][%d] = m%d;" % (r, c, r * k + c) for c in range(k))
+            L.append("%s  %s" % (indent, sets))
+        L.append("%s  return adc::real_eig_minmax(M).%s;" % (indent, _EIG_FIELDS[field]))
+        L.append("%s}" % indent)
+    return L
 
 
 # --- Symbolic differentiation (autodiff of the Expr tree) -------------------
@@ -2233,7 +2395,10 @@ class HyperbolicModel:
         ]
         if rt_member:  # RuntimeParams header only if a formula reads a runtime param
             S.append("#include <adc/runtime/runtime_params.hpp>")
-        if self._ws_jacobian is not None:  # eigenvalues of dense blocks (exact wave_speeds)
+        # dense_eig.hpp : eigenvalues of dense blocks (exact wave_speeds) OU temoin de VP dans la
+        # projection (m.projection + dsl.eig_max_im, ADC-289). Sans l'un ou l'autre : non inclus.
+        eig_pairs = _collect_eig_witnesses(self._proj or [])
+        if self._ws_jacobian is not None or eig_pairs:
             S.append("#include <adc/numerics/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
@@ -2245,6 +2410,9 @@ class HyperbolicModel:
         ]
         if rt_member:  # member adc::RuntimeParams params{count, {defaults}} (P7-b)
             S.append(rt_member.rstrip("\n"))
+        # Foncteurs nommes des temoins de VP (EigWitness) : methodes statiques ADC_HD remplissant
+        # M[k][k] + real_eig_minmax, declarees une fois par couple (field, k). Device-clean (ADC-289).
+        S += _eig_witness_helpers(eig_pairs)
         # n_aux if a formula (flux / eigenvalues) reads an extra aux field : canonical
         # (B_z...) OR named (aux_field -> kAuxNamedBase + k). Without an extra field -> no n_aux emitted,
         # brick strictly bit-identical to history.

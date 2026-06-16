@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Eigenvalue witness in the projection DSL** (ADC-289): `dsl.eig_max_im(rows)`, `dsl.eig_lmin(rows)`
+  and `dsl.eig_lmax(rows)` build a small dense matrix from moment expressions and return a scalar
+  Expr from its spectrum via `adc::real_eig_minmax` (max imaginary part as a complex-eigenvalue
+  witness, or the real-part bounds). The codegen emits a named device-clean functor (no extended
+  lambda), so `m.projection` can express a branchless "if a moment matrix has a complex eigenvalue,
+  correct it" rule (unblocks the native relaxation15 projector, ADC-275). Additive: the existing
+  expression set and `m.projection` (ADC-177) are unchanged.
+
 - **Documentation rebuilt around a Diataxis navigation** (ADC-248): Getting started, Tutorials,
   Concepts (11 pages, ADC-249), How-to (12 task pages), Simulation, AMR, Running, Advanced topics,
   Reference and Development sections, plus a Quickstart page and an internal documentation style
