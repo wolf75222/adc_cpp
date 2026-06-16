@@ -18,8 +18,73 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-16
+
 ### Added
 
+- **AMR checkpoint/restart** (ADC-65): `AmrSystem.checkpoint(path)` / `restart(path)` write and read
+  a bit-identical npz (per-level conservative state with fine patches, per-level phi as the multigrid
+  warm-start, the fine hierarchy and the clock), replacing the old `NotImplementedError`. Restart
+  imposes the saved fine layout via the new `set_hierarchy` (no re-clustering, no re-prolongation).
+  Mono-block mono-rank for now: MPI np>1, multi-block and `regrid_every>0` are rejected explicitly.
+  Adds the append-only level accessors `n_levels` / `n_vars` / `level_state` / `level_potential` /
+  `set_hierarchy`.
+- **Model-declared named aux fields** (ADC-70, phase 1, Cartesian `System`): a model declares
+  persistent auxiliary fields with `m.aux_field("name")` (read in a formula via `aux.extra_field(k)`);
+  `sim.set_aux_field(block, name, array)` and `sim.aux_field(block, name)` set and read them (up to
+  four). The `Aux` POD stays trivially copyable and device-clean, named components are static (never
+  rewritten by `solve_fields`), and a model with no named field is cache/hash-identical to before;
+  `B_z` / `T_e` stay on their dedicated setters.
+- **Generic 2D moment-hierarchy generator** (ADC-164): the new `adc.moments` module derives the full
+  M->C->S->closure->C'->M' algebra (binomial transform plus standardization) over the DSL AST, so a
+  user supplies only the closure (S -> standardized moments of order N+1). Ships `build_moment_model`,
+  `gaussian_closure` (Levermore), `lorentz_sources` (Vlasov-Lorentz) and `moment_indices` /
+  `moment_names`; `robust=True` adds differentiable smooth floors and `exact_speeds=True` wires HLL
+  speeds via autodiff plus numeric eig.
+- **SSPRK3 time integration on AMR** (ADC-64): `AmrSystem.add_block(..., time="ssprk3")` (or
+  `adc.Explicit(ssprk3=True)`) runs a 3-stage Shu-Osher SSPRK3 per subcycled level, staying exactly
+  conservative across coarse-fine boundaries by refluxing the effective flux
+  `Feff = 1/6 F0 + 1/6 F1 + 2/3 F2`. The default stays forward Euler (bit-identical); rejected
+  explicitly on the compiled `.so` paths and with `imex`.
+- **First-order forward Euler explicit method** (ADC-174): `adc.Explicit(method="euler")` selects the
+  `ForwardEuler` stepper on `System.add_block` (native and `backend="production"`), for
+  first-order-reference fidelity; `ssprk2` stays the default. The frozen-ABI AOT path rejects `euler`
+  (pointing to the production/native backends) rather than silently ignoring it.
+- **Explicit signed wave speeds in the DSL** (ADC-83): `m.wave_speeds(x=(smin,smax), y=(smin,smax))`
+  declares signed face speeds directly, unlocking `riemann="hll"` for models with no pressure
+  primitive (moment systems, isothermal). Without `set_eigenvalues` the Rusanov/CFL bound derives
+  from `max(|smin|,|smax|)`; an `add_equation` guard rejects `riemann="hll"` with no emitted speeds.
+- **HLL wave speeds from the flux Jacobian** (ADC-86/87): `m.wave_speeds_from_jacobian(x=, y=,
+  eig="numeric"|"fd", blocks=)` emits exact HLL speeds as the spectrum extremes of the flux Jacobian
+  (new device-clean header `adc::real_eig_minmax`: closed form for N<=2, Hessenberg plus Francis QR
+  otherwise, Gershgorin outer-bound fallback). `x/y=None` autodiffs the declared flux; the `Abs`
+  autodiff node is now differentiable, so smooth `max(x,eps)` floors are Jacobian-able.
+- **Positivity floor limiter** (ADC-76): `adc.FiniteVolume(positivity_floor=...)` imposes a density
+  floor on reconstructed face states, falling back locally to the source-cell average (conservative,
+  first-order) on a violating face. `floor<=0` is bit-identical to before; it is threaded through the
+  Cartesian, polar and cut-cell kernels and the compiled-block ABI, and rejected explicitly on the
+  paths that do not support it (prototype JIT, AOT/production, AMR).
+- **Opt-in HLL wave-speed cache** (ADC-199): `adc.FiniteVolume(wave_speed_cache=True)` evaluates
+  `model.wave_speeds` once per cell and direction and reuses it as the face bound instead of
+  recomputing on every face and RK stage (measured speedup on moment hierarchies). Off by default,
+  bit-identical to OFF in the no-slope path, and rejected outside `riemann="hll"` plus explicit time.
+- **Spectral Poisson FFT variant** (ADC-175): a new elliptic kind `solver="fft_spectral"` (from
+  `System.set_poisson`, `adc.EllipticSolver`, listed in `adc.capabilities()`) reuses the periodic
+  single-rank FFT plumbing of `"fft"` but with the continuous Laplacian symbol `-(kx^2+ky^2)`, exact
+  on sinusoids. The discrete `"fft"` and `"geometric_mg"` solvers are unchanged.
+- **Native Windows (MSVC) support** (ADC-99/100/136/144): `adc_cpp` compiles and imports natively on
+  Windows without WSL2. A portable dynamic-loading layer `adc::dynlib` (`LoadLibraryW` /
+  `GetProcAddress`), an `ADC_EXPORT` macro (`__declspec`), an MSVC-aware ABI key, and
+  `std::numbers::pi` for `M_PI` cover the runtime; the DSL `production` backend compiles a model to a
+  `.dll` with `cl` and runs bit-identical to the brick path (shared Kokkos, `_adc.lib`). All `_WIN32`
+  branches are dead off Windows.
+- **`System.dt_hotspot(name)` CFL diagnostic** (ADC-182): returns `{w, i, j}` for the global cell
+  that dominates a block's transport CFL bound, to locate a collapsing dt without an external scan.
+  On-demand and off the hot path (`step` / `step_cfl` stay bit-identical), a two-pass device-clean
+  reduction with an MPI all-reduce.
+- **Find-or-fetch Kokkos** (ADC-263): if no Kokkos install is found, CMake downloads and builds a
+  release tarball verified by SHA256, so a plain `cmake -B build` works without a pre-installed
+  Kokkos. Overridable via `ADC_KOKKOS_FETCH_VERSION` (default 4.4.01) and `ADC_KOKKOS_FETCH_SHA256`.
 - **Eigenvalue witness in the projection DSL** (ADC-289): `dsl.eig_max_im(rows)`, `dsl.eig_lmin(rows)`
   and `dsl.eig_lmax(rows)` build a small dense matrix from moment expressions and return a scalar
   Expr from its spectrum via `adc::real_eig_minmax` (max imaginary part as a complex-eigenvalue
@@ -70,6 +135,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Kokkos is the only on-node backend** (ADC-263): the standalone OpenMP path is removed (the
+  `ADC_USE_OPENMP` option, `find_package(OpenMP)`, the mutual-exclusion check and every `#pragma omp`
+  or manual host loop); `ADC_USE_KOKKOS` defaults ON and is fatal if disabled. Serial runs through
+  Kokkos Serial, threads through Kokkos OpenMP, GPU through Kokkos Cuda/HIP, all chosen at Kokkos
+  install time (`Kokkos_ENABLE_*`). The `for_each_cell` seam `#error`s without `ADC_HAS_KOKKOS`; the
+  standard is pinned to C++20. The DSL loaders (`compile_aot` / `compile_native`) build against Kokkos
+  and the `.so` cache is keyed on Kokkos state.
+- **AOT DSL backend compiles at native optimization flags** (ADC-201): `compile_aot` (and the hybrid
+  AOT path) dropped the hardcoded `-O2` (about 1.48x slower) for the native `_dsl_optflags()`
+  (default `-O3 -DNDEBUG`, overridable via `$ADC_DSL_OPTFLAGS`); only the prototype JIT stays at
+  `-O2`. An `aot-optflags` marker in the `.so` cache key prevents serving a stale `-O2` binary.
+- **Hybrid AOT models build with the Kokkos toolchain** (ADC-103): since the Kokkos-only switch,
+  `HybridModel.compile(backend="aot")` uses the native Kokkos compiler and flags (with macOS
+  `-undefined dynamic_lookup`) and raises a clear `ADC_KOKKOS_ROOT` error when no Kokkos is visible;
+  the prototype JIT stays pure-host.
+- **Leaner DSL codegen** (ADC-200): `emit_cpp_*` now emit only the primitives transitively live in
+  each method (no dead closure or its `sqrt`), values bit-identical; an opt-in `hoist_reciprocals=True`
+  hoists `1/x` once for a recurring conservative denominator and turns those divisions into products
+  (off by default, since it changes rounding).
+- **Mixed relative/absolute stop criterion for GeometricMG** (ADC-202): `System.set_poisson(...,
+  abs_tol=0.0)` adds an absolute residual floor, so the stop test becomes
+  `residual <= max(rel_tol*r0, abs_tol)` with an early exit when `r0` is already under the floor
+  (avoids over-solving an already-converged off-step `solve_fields`). `abs_tol=0` keeps the historical
+  relative behavior bit-identical; inert for the FFT solver.
+- **Higher default QR cap in `dense_eig`** (ADC-195): the default iteration cap of `real_eig_minmax`
+  rises from 30 to 100 so near-degenerate companion blocks (HyQMOM 5x5, about 42 iterations) converge
+  instead of falling back to Gershgorin (which over-estimated the wave speed about 9x); a new optional
+  `fallback` out-parameter reports when the fallback fires.
+- **Overflow-safe index arithmetic in PoissonFFT** (ADC-286): the hot indexing (row offsets,
+  eigenvalue scaling, transpose buffers) widens to `size_t` before multiplying, removing an int*int
+  overflow past INT_MAX on large multi-rank grids (CodeQL). Numerically neutral, bit-identical under
+  INT_MAX.
 - **Documentation translated to English**: the whole Sphinx site (ADC-228), the root design guides
   and this changelog (ADC-241), the remaining French docs (ADC-245), `CONTRIBUTING` / `SECURITY` /
   `DOC_QUALITY` (ADC-227), and a restructured English README with a translation glossary
@@ -92,6 +189,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **Periodic theta ghosts in the polar Schur source coupling**: the polar condensed-Schur stepper
+  and the polar Krylov solver now force the azimuthal (theta) ghosts of phi periodic instead of
+  honoring the caller's four-face Dirichlet BCRec. The theta=0/2pi seam was filled by odd reflection
+  (ghost = -phi), injecting a dipole radial-momentum kick that grew like O(1/h) and diverged the
+  polar Hoffart run near t~0.01. A step with the System-style Dirichlet BCRec is now bit-identical to
+  the canonical theta-periodic step.
+- **Stale phi ghosts on the direct FFT Poisson path** (ADC-175): `PoissonFFTSolver::solve()` now does
+  a periodic `fill_boundary` on the phi ghosts after the solve; the direct solver wrote only valid
+  cells, so a centered grad-phi for an electric source read stale domain-edge ghosts (wrong Ex on the
+  boundary ring with `solver="fft"`).
+- **Ghost-width guard on the EB and polar FV operators** (ADC-221): the structural
+  `require_reconstruction_ghosts<Limiter>` check (ADC-163) now also runs at the entry of
+  `assemble_rhs_eb` and `assemble_rhs_polar`, which reused the same reconstruction stencil with no
+  input validation (bound `Limiter::n_ghost`, host-only; no sane production caller triggers it).
+- **Non-circular spectral check in `check_model`**: `check_model` now bounds `max_wave_speed` by the
+  spectral radius of the full dense flux Jacobian (central differences, independent of any `blocks=`
+  partition), catching a `set_wave_speeds_from_jacobian` partition that silently fails to bound the
+  spectrum (under-estimated CFL); tunable via `jac_rtol` / `jac_atol`. Also corrects a misleading
+  duplicate-index message.
 - clang portability: `make_system_coupler` factory replaces CTAD on the `SystemCoupler` alias
   template, which GCC accepts but clang rejects (P1814) -- this broke every clang build of the
   coupling tests, surfaced by the new TSan job (ADC-302).
@@ -114,6 +230,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   asserts and the C++ `test_amr_native_loader.cpp` guard (`test_native_abi_std.py` rides along under
   this umbrella) -- plus the stale forward-order wording in comments and hints (`bindings.cpp`,
   `__init__.py`, `dsl.py`, `python/CMakeLists.txt`).
+- **MPI FFT rejection test** (ADC-282): `test_mpi_system_fft` greps the translated
+  `fft solver unsupported under MPI` message, completing the post-ADC-272 test fixups alongside
+  ADC-281/283.
+- **CI hardening**: the weekly quality jobs are bounded against cold-cache OOM (serial instrumented
+  `ci-asan` / `ci-coverage` builds, `timeout-minutes` caps, and a single Ninja pool for the heavy
+  Kokkos translation units; ADC-284/290), CodeQL is scoped to the adc sources to drop 187
+  vendored-Kokkos findings (ADC-285), seven orphan DSL tests are registered in ctest with a
+  self-contained `ADC_KOKKOS_ROOT` (ADC-104), and a `no-ai-authors` guard rejects AI authorship or
+  co-author trailers.
 
 ## [0.1.0] - 2026-06-10
 
