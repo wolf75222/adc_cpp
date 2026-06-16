@@ -59,8 +59,12 @@ namespace adc {
 /// to history (extra Aux fields at 0, never read).
 /// Lives in this header (contract) and not in the spatial operator, so that
 /// CompositeModel can propagate n_aux without pulling in all the numerics.
+// ADC_HD : aux_comps() est evaluee a la compilation (argument de template non-type
+// load_aux<aux_comps<Model>()>) DANS les kernels device (cf. spatial_operator_eb.hpp). Sous nvcc,
+// appeler une constexpr __host__ depuis une fonction __host__ __device__ est refuse (#20013-D) ;
+// la marquer ADC_HD la rend callable des deux cotes. Hors nvcc, ADC_HD est vide -> constexpr pur.
 template <class M>
-constexpr int aux_comps() {
+ADC_HD constexpr int aux_comps() {
   if constexpr (requires { M::n_aux; })
     return M::n_aux;
   else
