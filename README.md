@@ -77,6 +77,20 @@ git clone https://github.com/wolf75222/adc_cpp.git && cd adc_cpp
 cmake --preset serial && cmake --build --preset serial && ctest --preset serial
 ```
 
+The Ninja build already uses every core; cap or pin it with `cmake --build --preset serial
+-j8`, and run the test suite concurrently with `ctest --preset serial -j8` (add
+`--output-on-failure` for logs). Two other presets build a parallel backend instead of the
+serial one (both read `$CONDA_PREFIX`, so the conda env must be active):
+
+```bash
+cmake --preset parallel && cmake --build --preset parallel && ctest --preset parallel  # threaded, Kokkos OpenMP
+cmake --preset mpi      && cmake --build --preset mpi      && ctest --preset mpi        # distributed, MPI
+```
+
+Each preset writes into its own folder (`build`, `build-kokkos`, `build-mpi`). Backends and
+runtime thread control (`adc.set_threads()`) are covered in the
+[installation guide](docs/sphinx/getting-started/installation.md).
+
 Python module (`adc`): `scripts/setup_env.sh` creates the conda env and pins the platform
 toolchain, then `pip install .` (scikit-build-core) drives the build. Backends are selected by
 environment variables (`ADC_USE_MPI`, `Kokkos_ROOT`, ...).
