@@ -121,11 +121,13 @@ class PoissonFFT {
              std::vector<double>& phi_local) {
     std::vector<cplx> A(static_cast<std::size_t>(nyl_) * Nx_);
     for (std::size_t t = 0; t < A.size(); ++t) A[t] = cplx(rho_local[t], 0.0);
-    for (int jl = 0; jl < nyl_; ++jl) fft1d(&A[jl * Nx_], Nx_, false);  // FFT-x
+    for (int jl = 0; jl < nyl_; ++jl)
+      fft1d(&A[static_cast<std::size_t>(jl) * Nx_], Nx_, false);  // FFT-x
 
     std::vector<cplx> B(static_cast<std::size_t>(nxl_) * Ny_);
     transpose_fwd(A, B);                                          // -> (nxl x Ny)
-    for (int il = 0; il < nxl_; ++il) fft1d(&B[il * Ny_], Ny_, false);  // FFT-y
+    for (int il = 0; il < nxl_; ++il)
+      fft1d(&B[static_cast<std::size_t>(il) * Ny_], Ny_, false);  // FFT-y
 
     for (int il = 0; il < nxl_; ++il) {
       const int kx = rank_ * nxl_ + il;
@@ -139,14 +141,16 @@ class PoissonFFT {
         const double ly = spectral_ ? -(wy * wy)
                                     : (2.0 * std::cos(2.0 * std::numbers::pi * ky / Ny_) - 2.0) / (dy_ * dy_);
         const double lam = lx + ly;
-        cplx& v = B[il * Ny_ + ky];
+        cplx& v = B[static_cast<std::size_t>(il) * Ny_ + ky];
         v = (std::abs(lam) < 1e-14) ? cplx(0.0, 0.0) : v / lam;
       }
     }
 
-    for (int il = 0; il < nxl_; ++il) fft1d(&B[il * Ny_], Ny_, true);  // IFFT-y
+    for (int il = 0; il < nxl_; ++il)
+      fft1d(&B[static_cast<std::size_t>(il) * Ny_], Ny_, true);  // IFFT-y
     transpose_bwd(B, A);                                         // -> (nyl x Nx)
-    for (int jl = 0; jl < nyl_; ++jl) fft1d(&A[jl * Nx_], Nx_, true);  // IFFT-x
+    for (int jl = 0; jl < nyl_; ++jl)
+      fft1d(&A[static_cast<std::size_t>(jl) * Nx_], Nx_, true);  // IFFT-x
 
     phi_local.resize(A.size());
     for (std::size_t t = 0; t < A.size(); ++t) phi_local[t] = A[t].real();
@@ -160,12 +164,14 @@ class PoissonFFT {
     for (int s = 0; s < np_; ++s)
       for (int jl = 0; jl < nyl_; ++jl)
         for (int il = 0; il < nxl_; ++il)
-          send[s * blk + jl * nxl_ + il] = A[jl * Nx_ + s * nxl_ + il];
+          send[static_cast<std::size_t>(s) * blk + static_cast<std::size_t>(jl) * nxl_ + il] =
+              A[static_cast<std::size_t>(jl) * Nx_ + static_cast<std::size_t>(s) * nxl_ + il];
     alltoall(send, recv, blk);
     for (int q = 0; q < np_; ++q)
       for (int jl = 0; jl < nyl_; ++jl)
         for (int il = 0; il < nxl_; ++il)
-          B[il * Ny_ + q * nyl_ + jl] = recv[q * blk + jl * nxl_ + il];
+          B[static_cast<std::size_t>(il) * Ny_ + static_cast<std::size_t>(q) * nyl_ + jl] =
+              recv[static_cast<std::size_t>(q) * blk + static_cast<std::size_t>(jl) * nxl_ + il];
   }
 
   // transpose B(nxl x Ny) -> A(nyl x Nx): alltoall of (nxl x nyl) blocks.
@@ -175,12 +181,14 @@ class PoissonFFT {
     for (int s = 0; s < np_; ++s)
       for (int il = 0; il < nxl_; ++il)
         for (int jl = 0; jl < nyl_; ++jl)
-          send[s * blk + il * nyl_ + jl] = B[il * Ny_ + s * nyl_ + jl];
+          send[static_cast<std::size_t>(s) * blk + static_cast<std::size_t>(il) * nyl_ + jl] =
+              B[static_cast<std::size_t>(il) * Ny_ + static_cast<std::size_t>(s) * nyl_ + jl];
     alltoall(send, recv, blk);
     for (int q = 0; q < np_; ++q)
       for (int il = 0; il < nxl_; ++il)
         for (int jl = 0; jl < nyl_; ++jl)
-          A[jl * Nx_ + q * nxl_ + il] = recv[q * blk + il * nyl_ + jl];
+          A[static_cast<std::size_t>(jl) * Nx_ + static_cast<std::size_t>(q) * nxl_ + il] =
+              recv[static_cast<std::size_t>(q) * blk + static_cast<std::size_t>(il) * nyl_ + jl];
   }
 
   // all-to-all exchange of `blk` complex values per rank (identity if np==1).
