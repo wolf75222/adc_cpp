@@ -134,6 +134,16 @@ struct CompositeModel {
     return src.frequency(u, a);
   }
 
+  /// PROJECTION PONCTUELLE post-pas (ADC-177) : forwardee depuis la brique HYPERBOLIQUE quand elle
+  /// declare project(U, aux) (le DSL l'emet via m.projection ; une brique native peut l'ecrire a la
+  /// main). Concept-gate comme stability_speed : sans methode, le compose ne l'expose pas et le
+  /// stepper n'applique aucune projection (chemin bit-identique).
+  ADC_HD State project(const State& u, const Aux& a) const
+    requires requires(const Hyperbolic h, const State s, const Aux aa) { h.project(s, aa); }
+  {
+    return hyp.project(u, a);
+  }
+
   /// ANALYTIC JACOBIAN of the source (audit wave 3): forwarded from the SOURCE brick when
   /// it declares jacobian(U, aux, J) (J[r][c] = dS_r/dU_c). The Newton of the implicit source
   /// uses it instead of finite differences (HasSourceJacobian trait); without the method,

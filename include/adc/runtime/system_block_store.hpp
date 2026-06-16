@@ -132,6 +132,11 @@ class SystemBlockStore {
     // Trailing + empty default: the positional aggregate init of the other members stays unchanged.
     std::function<Real(const MultiFab&)> source_frequency;  // max over cells of mu [1/s] (0 = no constraint)
     std::function<Real(const MultiFab&)> stability_dt;      // min over cells of the admissible step (0 = no constraint)
+    // PROJECTION PONCTUELLE post-pas (ADC-177) : U <- project(U, aux) sur les cellules VALIDES,
+    // appliquee par le stepper a la FIN de chaque macro-pas ENTIER (apres transport + etage source +
+    // couplages ; jamais par etage RK). VIDE (defaut) -> jamais interrogee (cout nul, chemin
+    // bit-identique). Trailing + defaut vide : l'init par agregat positionnel reste inchangee.
+    std::function<void(MultiFab&)> project;
   };
 
   /// ORDERED registry of the blocks (UNIQUE source of truth). PUBLIC: Impl aliases it as `sp` for the

@@ -142,6 +142,17 @@ concept HasStabilityDt = requires(const M m, const typename M::State u, const Au
   { m.stability_dt(u, a) } -> std::convertible_to<Real>;
 };
 
+/// Trait OPTIONNEL : PROJECTION PONCTUELLE post-pas U -> project(U, aux) (ADC-177). Le stepper
+/// l'applique sur les cellules VALIDES de chaque bloc a la FIN de chaque macro-pas ENTIER (apres
+/// transport + etage source + couplages ; jamais par etage RK). CONTRAT : project doit etre une
+/// PROJECTION (idempotente : project(project(U), a) == project(U, a)) et PONCTUELLE (aucune lecture
+/// de voisin) ; les formules elles-memes (realisabilite, clamps -- ecrits en max/min via abs/sign)
+/// restent cote cas, seul le hook est coeur. ADC_HD obligatoire (evaluee dans un kernel).
+template <class M>
+concept HasPointwiseProjection = requires(const M m, const typename M::State u, const Aux a) {
+  { m.project(u, a) } -> std::same_as<typename M::State>;
+};
+
 /// OPTIONAL extension of a PhysicalModel: primitive variables + cons<->prim conversions.
 ///
 /// Lets the spatial operator reconstruct in primitive variables (rho, u, p) rather than

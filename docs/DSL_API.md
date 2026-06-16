@@ -135,6 +135,17 @@ Important points :
 - Physical roles (`Density`, `MomentumX`, `MomentumY`, ...) : required for inter-species
   couplings and for the `System` to recover quantities by role. To be supplied to
   `conservative_vars(roles=...)` or to `m.compile(require_metadata=True)`.
+- `m.projection([...])` (ADC-177): pointwise post-step PROJECTION `U <- P(U, aux)`, one expression
+  per conservative component, emitted as the C++ trait `HasPointwiseProjection` and compiled like
+  the flux/source (CSE included) -- replaces the per-cell Python callback. SEMANTICS: applied by
+  the System ONCE at the END of each WHOLE macro-step (after transport + source stage + couplings;
+  never per RK stage, including under Strang), on the VALID cells only (the ghosts are rebuilt by
+  the head `fill_ghosts` of the next step -- no `fill_boundary` in the hook). CONTRACT: P idempotent
+  (a true projection) and pointwise (no neighbor); the clamps are written BRANCH-FREE, in max/min
+  via `dsl.abs_` / `dsl.sign` (differentiable through `dsl.diff`), e.g. positivity `(q + abs_(q))/2`.
+  Backends: `aot` and `production` on the `System` side; `prototype` (JIT) and `target="amr_system"`
+  REJECT it explicitly (the hook is not wired on the AMR step -- the per-level application after the
+  step reflux is the next scope).
 
 ---
 

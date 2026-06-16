@@ -53,6 +53,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 - **Moment-model documentation**: a step-by-step HyQMOM tutorial, a moments-and-closures concept
   page, a moment-models reference, and `adc.moments` (`build_moment_model`, `gaussian_closure`,
   `lorentz_sources`) added to the Python API reference (autodoc).
+- **Generic pointwise post-step PROJECTION hook** (ADC-177): `m.projection([...])` on the DSL side
+  (C++ trait `HasPointwiseProjection`, compiled like the flux/source), applied by `System` at the
+  end of every whole macro-step (never per RK stage) on the valid cells of each block -- replaces
+  the per-cell Python callback (`aot` and `production` backends; `prototype` and
+  `target="amr_system"` reject it explicitly). Adds `dsl.sign(x)` (branch-free mask selections,
+  differentiable). See `docs/DSL_API.md` section 5.
 
 ### Changed
 
