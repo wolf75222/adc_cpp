@@ -451,3 +451,11 @@ add_test(NAME test_codegen_dead_prims
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_codegen_dead_prims.py)
 set_tests_properties(test_codegen_dead_prims PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
+# AOT backend optimization flags (compile_aot): same flags as native ($ADC_DSL_OPTFLAGS,
+# default -O3 -DNDEBUG) + cache key folding in the flags. Hermetic for the flags/cache parts;
+# end-to-end parity auto-skips without compiler / Kokkos.
+add_test(NAME test_aot_optflags
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_aot_optflags.py)
+set_tests_properties(test_aot_optflags PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
