@@ -89,7 +89,7 @@ int main() {
   ElectronBlock electrons{"electrons", ElectronSource{}, Ue, bc};
   IonBlock ions{"ions", IonSource{}, Ui, bc};
   CoupledSystem system{electrons, ions};
-  SystemCoupler sim(system, geom, ba, bc, ZeroSystemRhs{});
+  auto sim = make_system_coupler(system, geom, ba, bc, ZeroSystemRhs{});
 
   int implicit_calls = 0;
   sim.step(Real(0.1), [&](auto&, auto& block, Real h, int, int) {

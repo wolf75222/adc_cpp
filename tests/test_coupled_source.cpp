@@ -85,7 +85,7 @@ int main() {
   BlockA a{"a", Inert{}, U0, bc};
   BlockB b{"b", Inert{}, U1, bc};
   CoupledSystem system{a, b};
-  SystemCoupler sim(system, geom, ba, bc, ChargeDensityRhs{{{Real(1), 0}, {Real(-1), 0}}});
+  auto sim = make_system_coupler(system, geom, ba, bc, ChargeDensityRhs{{{Real(1), 0}, {Real(-1), 0}}});
 
   const Real dt = Real(0.1);
   sim.coupled_source_step(LinearExchange{Real(0.5)}, dt);

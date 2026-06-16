@@ -60,7 +60,7 @@ int main() {
   FastBlk fast{"fast", Production{Real(1)}, Uf, bc};
   SlowBlk slow{"slow", Production{Real(1)}, Us, bc};
   CoupledSystem system{fast, slow};
-  SystemCoupler sim(system, geom, ba, bc, ZeroSystemRhs{});
+  auto sim = make_system_coupler(system, geom, ba, bc, ZeroSystemRhs{});
 
   // 1er macro-pas : rapide avance de dt (0.1) ; lent avance de 3*dt (0.3) en une fois.
   sim.step(dt);

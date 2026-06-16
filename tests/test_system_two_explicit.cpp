@@ -95,7 +95,7 @@ int main() {
     ProdSSP2 a{"ssp2", Production{Real(2)}, Ua, BCRec{}};
     ProdSSP3 b{"ssp3", Production{Real(5)}, Ub, BCRec{}};
     CoupledSystem system{a, b};
-    SystemCoupler sim(system, geom, ba, BCRec{}, ZeroSystemRhs{});
+    auto sim = make_system_coupler(system, geom, ba, BCRec{}, ZeroSystemRhs{});
     sim.step(dt);  // tout explicite : pas de callback
     chk(std::fabs(sum(Ua) - dt * Real(2) * ncell) < Real(1e-12), "ssp2_block");
     chk(std::fabs(sum(Ub) - dt * Real(5) * ncell) < Real(1e-12), "ssp3_block");
@@ -111,7 +111,7 @@ int main() {
     AdvBlock b1{"p1", AdvectX{}, Up1, per};
     AdvBlock b2{"p2", AdvectX{}, Up2, per};
     CoupledSystem system{b1, b2};
-    SystemCoupler sim(system, geom, ba, per, ZeroSystemRhs{});
+    auto sim = make_system_coupler(system, geom, ba, per, ZeroSystemRhs{});
     sim.step(dt);
     MultiFab d(ba, dm, 1, 0);
     lincomb(d, Real(1), Up1, Real(-1), Up2);
@@ -130,7 +130,7 @@ int main() {
     AdvBlock bp{"per", AdvectX{}, Uper, per};
     AdvBlock bo{"out", AdvectX{}, Uout, out};
     CoupledSystem system{bp, bo};
-    SystemCoupler sim(system, geom, ba, per, ZeroSystemRhs{});
+    auto sim = make_system_coupler(system, geom, ba, per, ZeroSystemRhs{});
     sim.step(dt);
     MultiFab d(ba, dm, 1, 0);
     lincomb(d, Real(1), Uper, Real(-1), Uout);

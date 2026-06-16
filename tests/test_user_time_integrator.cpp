@@ -68,7 +68,7 @@ int main() {
   U.set_val(Real(0));
   UserBlock blk{"prod", Production{Real(3)}, U, bc};
   CoupledSystem system{blk};
-  SystemCoupler sim(system, geom, ba, bc, ZeroSystemRhs{});
+  auto sim = make_system_coupler(system, geom, ba, bc, ZeroSystemRhs{});
 
   const Real dt = Real(0.1);
   sim.step(dt);  // tout explicite : le coupleur appelle UserForwardEuler::take_step

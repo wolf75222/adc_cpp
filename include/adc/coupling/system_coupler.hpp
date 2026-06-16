@@ -370,4 +370,15 @@ class SystemDriver {
 template <CoupledSystemLike System, class RhsAssembler, class Elliptic = GeometricMG>
 using SystemCoupler = SystemDriver<System, RhsAssembler, Elliptic>;
 
+// Friendly builder for the SystemCoupler alias. CTAD written directly on an alias template
+// (`SystemCoupler sim(...)`) is accepted by GCC but REJECTED by clang -- alias-template argument
+// deduction (P1814) is not implemented the same way, so `SystemCoupler sim(...)` fails to compile
+// under clang ("alias template requires template arguments"). This factory deduces the parameters
+// through the underlying class template (CTAD on SystemDriver, which every compiler supports) and
+// forwards to its constructor. Use `auto sim = make_system_coupler(system, geom, ba, bc, rhs);`.
+template <class... Args>
+auto make_system_coupler(Args&&... args) {
+  return SystemDriver(std::forward<Args>(args)...);
+}
+
 }  // namespace adc

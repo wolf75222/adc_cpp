@@ -92,6 +92,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- clang portability: `make_system_coupler` factory replaces CTAD on the `SystemCoupler` alias
+  template, which GCC accepts but clang rejects (P1814) -- this broke every clang build of the
+  coupling tests, surfaced by the new TSan job (ADC-302).
 - Heap-buffer-overflow masked on disc geometry, caught by a ghost-width guard at FV operator entry
   (ADC-163).
 - Comment rot: 10 inaccurate comments corrected (ADC-208); broken sister-solver links in the docs

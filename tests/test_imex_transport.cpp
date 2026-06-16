@@ -70,7 +70,7 @@ int main() {
   ImexBlk imex{"imex", AdvectX{Real(1)}, Ui, bc};
   ExplBlk expl{"expl", AdvectX{Real(1)}, Ue, bc};
   CoupledSystem system{imex, expl};
-  SystemCoupler sim(system, geom, ba, bc, ZeroSystemRhs{});
+  auto sim = make_system_coupler(system, geom, ba, bc, ZeroSystemRhs{});
 
   sim.step(Real(0.05), ImplicitSourceStepper{});  // source nulle -> seul le transport agit
 

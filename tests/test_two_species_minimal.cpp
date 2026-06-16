@@ -90,7 +90,7 @@ int main() {
 
   // Poisson rhs = Sum_s q_s n_s = (+1) n_i + (-1) n_e = n_i - n_e.
   ChargeDensityRhs charge{{{Real(-1), 0}, {Real(1), 0}}};  // [electrons, ions]
-  SystemCoupler sim(system, geom, ba, bc, charge);
+  auto sim = make_system_coupler(system, geom, ba, bc, charge);
 
   // Un pas : electrons via le defaut implicite, ions explicites par le coeur.
   const Real dt = Real(0.1);

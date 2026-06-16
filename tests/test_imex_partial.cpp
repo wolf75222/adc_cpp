@@ -53,7 +53,7 @@ static void run(MultiFab& U, const Geometry& geom, const BoxArray& ba,
   BCRec bc;
   Blk block{"relax", Model{}, U, bc};
   CoupledSystem system{block};
-  SystemCoupler sim(system, geom, ba, bc, ZeroSystemRhs{});
+  auto sim = make_system_coupler(system, geom, ba, bc, ZeroSystemRhs{});
   sim.step(dt, ImplicitSourceStepper{});
 }
 

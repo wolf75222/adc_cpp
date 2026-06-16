@@ -58,7 +58,7 @@ int main() {
   Blk fast{"fast", AdvectX{Real(2)}, Uf, bc};
   Blk slow{"slow", AdvectX{Real(0.5)}, Us, bc};
   CoupledSystem system{fast, slow};
-  SystemCoupler sim(system, geom, ba, bc, ZeroSystemRhs{});
+  auto sim = make_system_coupler(system, geom, ba, bc, ZeroSystemRhs{});
 
   const Real cfl = Real(0.4);
   const Real h = std::min(geom.dx(), geom.dy());
