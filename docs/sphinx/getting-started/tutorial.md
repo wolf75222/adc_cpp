@@ -8,7 +8,7 @@ only on `adc`, `numpy` and `matplotlib`, not on `adc_cases`, and runs as follows
 
 ```bash
 python docs/sphinx/tutorials/diocotron_tutorial.py            # --n 96 --steps 60
-python docs/sphinx/tutorials/diocotron_tutorial.py --quick    # passage de fumee rapide
+python docs/sphinx/tutorials/diocotron_tutorial.py --quick    # fast smoke pass
 ```
 
 :::{admonition} Physics: reduced model
@@ -16,7 +16,7 @@ python docs/sphinx/tutorials/diocotron_tutorial.py --quick    # passage de fumee
 A single density `n`, advected by the E x B drift `v = (-d_y phi / B0, d_x phi / B0)` (with
 zero divergence), where `phi` solves the system Poisson `-lap phi = alpha (n - n_i0)`. This is the
 diocotron normalization benchmark, not a reproduction of the full Euler-Poisson
-system. See the [honest limitations](#limites-honnetes) at the end of the page.
+system. See the [honest limitations](#honest-limitations) at the end of the page.
 :::
 
 ## Step 1: Clone the repository
@@ -41,10 +41,10 @@ The core is header-only; only the Python module `adc` is compiled (a few minutes
 equivalent paths:
 
 ```bash
-# Voie utilisateur : installe dans site-packages, rien a exporter ensuite.
+# User path: installs into site-packages, nothing to export afterwards.
 pip install .
 
-# Voie developpeur : build dans l'arbre (re-build incremental rapide apres une edition C++).
+# Developer path: in-tree build (fast incremental re-build after a C++ edit).
 cmake --preset python && cmake --build --preset python
 ```
 
@@ -53,9 +53,9 @@ The full build (core + tests, for contributing) is in [Installation](installatio
 ## Step 4: Environment variables
 
 ```bash
-export PYTHONPATH=$PWD/build-py/python   # voie developpeur seulement (inutile apres pip install)
+export PYTHONPATH=$PWD/build-py/python   # developer path only (not needed after pip install)
 export ADC_INCLUDE=$PWD/include
-export ADC_KOKKOS_ROOT=$CONDA_PREFIX     # install Kokkos pour le backend DSL aot/production (Serial suffit sur CPU)
+export ADC_KOKKOS_ROOT=$CONDA_PREFIX     # Kokkos install for the DSL aot/production backend (Serial is enough on CPU)
 export ADC_CACHE_DIR=$PWD/.adc_cache
 ```
 
@@ -114,8 +114,10 @@ referenced variable is declared.
 Then we compile the model into a `.so` and wire it in: the script first tries the
 `production` backend (native zero-copy path, preferred under MPI/AMR), then falls back to `aot`
 (numerically identical, marshaled host-side), as in the application cases. The default of
-`m.compile(...)` is `aot`; `production` requires that `_adc` and the `.so` were compiled with the
-same adc headers (ABI guard). This is also where we choose the spatial scheme (finite volume,
+`m.compile(...)` is the `auto` policy (ADC-63): it selects `production` as soon as `_adc`, the
+headers and the compiler match (toolchain parity), and falls back to `aot` otherwise -- `production`
+requires that `_adc` and the `.so` were compiled with the same adc headers (ABI guard). This is also
+where we choose the spatial scheme (finite volume,
 minmod limiter, Rusanov flux), the time (explicit) and the system Poisson.
 
 ```{literalinclude} ../tutorials/diocotron_tutorial.py
@@ -216,7 +218,7 @@ state of the two fronts:
 :pyobject: native_vs_dsl
 ```
 
-The difference is zero to binary precision (`max|briques - DSL| = 0`, `np.array_equal`): the
+The difference is zero to binary precision (`max|bricks - DSL| = 0`, `np.array_equal`): the
 DSL formulas reproduce exactly the conventions of the `ExBVelocity` and `BackgroundDensity` bricks.
 A divergence (even $10^{-15}$) would betray a wrong formula (sign of the drift, wave bound,
 right-hand side). The full brick catalog is in the
@@ -258,12 +260,12 @@ is Serial-only, `scripts/kokkos_openmp_conda.sh` first installs a Kokkos OpenMP 
 
 ```bash
 conda activate adc
-bash scripts/kokkos_openmp_conda.sh        # si besoin : Kokkos OpenMP dans $CONDA_PREFIX
+bash scripts/kokkos_openmp_conda.sh        # if needed: Kokkos OpenMP into $CONDA_PREFIX
 cmake --preset python-parallel && cmake --build --preset python-parallel
 ```
 
 **Custom / cluster Kokkos path** (install outside conda, e.g. ROMEO/Spack): set
-`KOKKOS_ROOT=<prefix de l'install Kokkos>` yourself, then:
+`KOKKOS_ROOT=<prefix of the Kokkos install>` yourself, then:
 
 ```bash
 cmake -S . -B build-py-kokkos -G Ninja \
@@ -283,7 +285,7 @@ At launch, point `PYTHONPATH` at this build and set the number of threads
 export PYTHONPATH=$PWD/build-py-kokkos/python
 export ADC_INCLUDE=$PWD/include
 export ADC_CACHE_DIR=$PWD/.adc_cache_kokkos
-export ADC_KOKKOS_ROOT="$CONDA_PREFIX"  # chemin conda ; ($KOKKOS_ROOT en chemin custom/cluster)
+export ADC_KOKKOS_ROOT="$CONDA_PREFIX"  # conda path; ($KOKKOS_ROOT for the custom/cluster path)
 
 OMP_NUM_THREADS=8 python docs/sphinx/tutorials/diocotron_tutorial.py
 ```
@@ -305,8 +307,8 @@ spaces chosen at the Kokkos install.
 Likewise, the distributed mode is obtained at compile time, and launched via `mpirun`:
 
 ```bash
-cmake --preset mpi && cmake --build --preset mpi     # OpenMPI de l'env conda
-ctest --preset mpi                                   # rejoue np=1/2/4 via mpirun
+cmake --preset mpi && cmake --build --preset mpi     # OpenMPI from the conda env
+ctest --preset mpi                                   # replays np=1/2/4 via mpirun
 ```
 
 `comm.hpp` then goes through `MPI_Comm_rank/size` + collectives. MPI and Kokkos combine (one GPU
@@ -314,7 +316,7 @@ per rank) for the GPU. The GPU itself requires ROMEO: `-DADC_USE_KOKKOS=ON` +
 `Kokkos_ARCH_HOPPER90` + `nvcc_wrapper`, validated manually on GH200 (never in CI). See
 [Check your backend](backend.md) and [`GPU_ROMEO.md`](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
 
-(limites-honnetes)=
+(honest-limitations)=
 
 ## Step 18: Honest limitations
 

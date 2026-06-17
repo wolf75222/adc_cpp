@@ -13,7 +13,7 @@ CUDA-aware), via SBATCH harnesses in `python/tests/gpu/` (excluded from the CI g
 "GPU-validated" mention therefore means "manually on ROMEO GH200", with the quantified evidence cited in
 [GPU_RUNTIME_PORT.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_RUNTIME_PORT.md) and [BACKEND_COVERAGE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md).
 Several GPU cells of the matrix remain `?` (not yet exercised on device); see the
-"Lacunes notables" section of the source document.
+"Notable gaps" section of the source document.
 
 ## DSL: parity asserted only if a C++23 compiler is present
 
