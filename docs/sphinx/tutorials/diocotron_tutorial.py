@@ -1,40 +1,40 @@
 #!/usr/bin/env python3
-"""Tutoriel canonique adc_cpp : instabilite diocotron reduite (derive E x B), de bout en bout.
+"""Canonical adc_cpp tutorial: reduced diocotron instability (E x B drift), end to end.
 
-Ce script est la SOURCE de verite du tutoriel A->Z de la documentation Sphinx : la page
-`getting_started/tutorial` l'inclut par `literalinclude` (le code de la doc N'EST PAS recopie
-a la main). Il est volontairement AUTONOME : il ne depend que de `adc` (le module compile),
-`numpy` et `matplotlib` -- aucune dependance au paquet applicatif `adc_cases`.
+This script is the SOURCE of truth for the A->Z tutorial in the Sphinx documentation: the
+`getting-started/tutorial` page includes it via `literalinclude` (the doc code is NOT copied by
+hand). It is deliberately SELF-CONTAINED: it depends only on `adc` (the compiled module), `numpy`
+and `matplotlib` -- no dependency on the `adc_cases` application package.
 
-Ce qu'il fait, dans l'ordre du tutoriel
----------------------------------------
-1. importe `adc` et detecte le backend execute ;
-2. ECRIT LE MODELE EN FORMULES avec `adc.dsl.Model` (variable conservative, champs auxiliaires
-   phi/grad, flux d'advection E x B, valeurs propres, second membre elliptique) ;
-3. COMPILE le modele : essaie le backend `production` (chemin natif zero-copie, prefere) puis
-   retombe sur `aot` (numeriquement identique, host-marshale) -- exactement comme les cas ;
-4. construit un `adc.System` periodique, choisit le schema (MUSCL minmod + Rusanov, explicite),
-   branche le Poisson de systeme (densite de charge, multigrille) et pose la condition initiale ;
-5. integre en temps en capturant des diagnostics (amplitude de la perturbation, masse) ;
-6. produit les figures : une COURBE (amplitude vs temps), une CARTE 2D (densite finale), un GIF, et
-   une COMPARAISON uniforme/AMR (`adc.AmrSystem` raffine vs grille uniforme) ;
-7. ecrit un enregistrement de provenance (SHA adc_cpp, backend, resolution, commande) a cote des
-   figures, pour que chaque asset soit reproductible.
+What it does, in tutorial order
+--------------------------------
+1. imports `adc` and detects the running backend;
+2. WRITES THE MODEL AS FORMULAS with `adc.dsl.Model` (conservative variable, auxiliary fields
+   phi/grad, E x B advection flux, eigenvalues, elliptic right-hand side);
+3. COMPILES the model: tries the `production` backend (zero-copy native path, preferred) then
+   falls back to `aot` (numerically identical, host-marshalled) -- exactly like the cases;
+4. builds a periodic `adc.System`, picks the scheme (MUSCL minmod + Rusanov, explicit), wires the
+   system Poisson (charge density, multigrid) and sets the initial condition;
+5. integrates in time while capturing diagnostics (perturbation amplitude, mass);
+6. produces the figures: a CURVE (amplitude vs time), a 2D MAP (final density), a GIF, and a
+   uniform/AMR COMPARISON (`adc.AmrSystem` refined vs uniform grid);
+7. writes a provenance record (adc_cpp SHA, backend, resolution, command) next to the figures, so
+   that each asset is reproducible.
 
-Physique (modele REDUIT, pas le systeme Euler-Poisson complet)
---------------------------------------------------------------
-Une seule variable conservative, la densite `n`, advectee par la derive E x B
-`v = (-d_y phi / B0, d_x phi / B0)` (a divergence nulle), ou `phi` resout le Poisson de systeme
-`-lap phi = alpha (n - n_i0)` (fond ionique neutralisant `n_i0`). Conventions ancrees dans le
-coeur : `include/adc/physics/hyperbolic.hpp` (`ExBVelocity`) et `.../elliptic.hpp`
-(`BackgroundDensity`). C'est le benchmark de NORMALISATION du diocotron, pas une reproduction du
-systeme complet (cf. `adc_cases/diocotron` et `docs/HOFFART_FIDELITY.md`).
+Physics (REDUCED model, not the full Euler-Poisson system)
+----------------------------------------------------------
+A single conservative variable, the density `n`, advected by the E x B drift
+`v = (-d_y phi / B0, d_x phi / B0)` (divergence-free), where `phi` solves the system Poisson
+`-lap phi = alpha (n - n_i0)` (neutralizing ionic background `n_i0`). Conventions anchored in the
+core: `include/adc/physics/hyperbolic.hpp` (`ExBVelocity`) and `.../elliptic.hpp`
+(`BackgroundDensity`). This is the diocotron NORMALIZATION benchmark, not a reproduction of the
+full system (cf. `adc_cases/diocotron` and `docs/HOFFART_FIDELITY.md`).
 
 Usage
 -----
     python diocotron_tutorial.py [--n 96] [--steps 60] [--outdir _assets] [--quick]
 
-`--quick` reduit la resolution et le nombre de pas pour un passage de fumee rapide (CI doc).
+`--quick` reduces the resolution and the number of steps for a fast smoke pass (doc CI).
 """
 
 from __future__ import annotations
@@ -52,83 +52,82 @@ import numpy as np
 import adc
 from adc import dsl
 
-# Parametres physiques du modele reduit (doivent etre coherents entre les formules et le RHS Poisson).
-B0 = 1.0      # champ magnetique de fond (porte la derive E x B)
-ALPHA = 1.0   # facteur du second membre elliptique alpha (n - n_i0)
+# Physical parameters of the reduced model (must be consistent between the formulas and the Poisson RHS).
+B0 = 1.0      # background magnetic field (carries the E x B drift)
+ALPHA = 1.0   # factor of the elliptic right-hand side alpha (n - n_i0)
 
-REPO_ROOT = Path(__file__).resolve().parents[3]   # tutorials -> sphinx -> docs -> racine du depot
+REPO_ROOT = Path(__file__).resolve().parents[3]   # tutorials -> sphinx -> docs -> repo root
 ADC_INCLUDE = os.environ.get("ADC_INCLUDE", str(REPO_ROOT / "include"))
 
 
-# --- 2. Le modele, ECRIT EN FORMULES (adc.dsl.Model) -----------------------------------------------
+# --- 2. The model, WRITTEN AS FORMULAS (adc.dsl.Model) ---------------------------------------------
 def diocotron_model(n_i0: float) -> "dsl.Model":
-    """Modele diocotron reduit en formules symboliques, reproduisant les briques natives
-    `ExBVelocity` (transport) et `BackgroundDensity` (elliptique). `n_i0` = fond ionique
-    neutralisant (moyenne de la densite, pour la solubilite du Poisson periodique)."""
+    """Reduced diocotron model as symbolic formulas, reproducing the native bricks `ExBVelocity`
+    (transport) and `BackgroundDensity` (elliptic). `n_i0` = neutralizing ionic background (mean of
+    the density, for the solvability of the periodic Poisson)."""
     m = dsl.Model("diocotron_tutorial")
 
-    (n,) = m.conservative_vars("n")          # unique variable conservative : la densite (role Density)
-    m.aux("phi")                             # champs auxiliaires fournis par le solveur (canal adc::Aux)
+    (n,) = m.conservative_vars("n")          # single conservative variable: the density (Density role)
+    m.aux("phi")                             # auxiliary fields provided by the solver (adc::Aux channel)
     grad_x = m.aux("grad_x")
     grad_y = m.aux("grad_y")
 
-    vx = (-grad_y) / B0                       # derive E x B : v = (-d_y phi / B0, d_x phi / B0)
+    vx = (-grad_y) / B0                       # E x B drift: v = (-d_y phi / B0, d_x phi / B0)
     vy = grad_x / B0
-    m.flux(x=[n * vx], y=[n * vy])            # flux d'advection f = n v(dir)
-    m.eigenvalues(x=[vx], y=[vy])             # spectre : une onde, la vitesse de derive
+    m.flux(x=[n * vx], y=[n * vy])            # advection flux f = n v(dir)
+    m.eigenvalues(x=[vx], y=[vy])             # spectrum: one wave, the drift speed
 
-    m.primitive_vars(n=n)                     # scalaire transporte : primitif = conservatif
+    m.primitive_vars(n=n)                     # transported scalar: primitive = conservative
     m.conservative_from([n])
-    m.elliptic_rhs(ALPHA * (n - n_i0))        # couple le bloc au Poisson : rhs = alpha (n - n_i0)
+    m.elliptic_rhs(ALPHA * (n - n_i0))        # couples the block to Poisson: rhs = alpha (n - n_i0)
 
-    m.check()                                 # toute variable referencee doit etre declaree
+    m.check()                                 # every referenced variable must be declared
     return m
 
 
-# --- 2bis. Le MEME modele, compose de briques natives (l'autre front d'ecriture) --------------------
+# --- 2bis. The SAME model, composed of native bricks (the other writing front) ---------------------
 def native_diocotron_model(n_i0: float):
-    """Le MEME diocotron, mais compose de briques natives au lieu de formules : Scalar (etat) +
-    ExB (transport E x B) + NoSource + BackgroundDensity (second membre elliptique alpha (n - n_i0)).
-    C'est l'autre facon d'ecrire un modele -- on prouve plus bas (`native_vs_dsl`) qu'elle produit
-    un etat BIT-IDENTIQUE aux formules. Conventions C++ : `ExBVelocity` et `BackgroundDensity`."""
+    """The SAME diocotron, but composed of native bricks instead of formulas: Scalar (state) +
+    ExB (E x B transport) + NoSource + BackgroundDensity (elliptic right-hand side alpha (n - n_i0)).
+    This is the other way to write a model -- we prove below (`native_vs_dsl`) that it produces a
+    BIT-IDENTICAL state to the formulas. C++ conventions: `ExBVelocity` and `BackgroundDensity`."""
     return adc.Model(state=adc.Scalar(),
                      transport=adc.ExB(B0=B0),
                      source=adc.NoSource(),
                      elliptic=adc.BackgroundDensity(alpha=ALPHA, n0=n_i0))
 
 
-# --- 4. Condition initiale (bande de charge perturbee, mode azimutal) -------------------------------
+# --- 4. Initial condition (perturbed charge band, azimuthal mode) ----------------------------------
 def band_density(n: int, L: float = 1.0, amp: float = 1.0, width: float = 0.05,
                  mode: int = 2, disp: float = 0.02, floor: float = 1.0) -> np.ndarray:
-    """Bande horizontale de charge perturbee sinusoidalement le long de x (convention `ne[j, i]`).
+    """Horizontal charge band perturbed sinusoidally along x (convention `ne[j, i]`).
 
         ne(x, y) = floor + amp exp(-(y - y0)^2 / width^2),  y0 = 0.5 L + disp cos(2 pi mode x / L).
     """
     xs = (np.arange(n) + 0.5) * L / n
-    X, Y = np.meshgrid(xs, xs)                # indexing 'xy' : X[j, i] = xs[i], Y[j, i] = xs[j]
+    X, Y = np.meshgrid(xs, xs)                # indexing 'xy': X[j, i] = xs[i], Y[j, i] = xs[j]
     y0 = 0.5 * L + disp * np.cos(2.0 * np.pi * mode * X / L)
     ne = floor + amp * np.exp(-((Y - y0) ** 2) / (width ** 2))
     return np.ascontiguousarray(ne)
 
 
 def perturbation_amplitude(density: np.ndarray) -> float:
-    """Amplitude L2 de la perturbation = ecart a la moyenne le long de x (la bande non perturbee est
-    uniforme en x ; ce qui en devie porte l'instabilite)."""
+    """L2 amplitude of the perturbation = deviation from the mean along x (the unperturbed band is
+    uniform in x; what deviates from it carries the instability)."""
     base = density.mean(axis=1, keepdims=True)
     delta = density - base
     return float(np.sqrt(np.mean(delta * delta)))
 
 
-# --- 3+4. Compilation + branchement : production (natif) si possible, sinon aot (identique) ----------
+# --- 3+4. Compilation + wiring: production (native) if possible, else aot (identical) --------------
 def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Path):
-    """Compile le modele DSL ET le branche dans un `adc.System` periodique.
+    """Compile the DSL model AND wire it into a periodic `adc.System`.
 
-    Essaie d'abord `production` (chemin natif zero-copie `add_native_block`, la cible du plan),
-    puis retombe sur `aot` (`add_compiled_block`, numeriquement identique, host-marshale) --
-    exactement la strategie des cas (cf. `adc_cases/diocotron_dsl`). Le chemin natif exige
-    que le module `_adc` et le `.so` du modele aient ETE COMPILES AVEC LES MEMES EN-TETES adc
-    (garde d'ABI) ; un module frais (construit comme dans getting_started/installation) prend le
-    chemin natif, sinon le `aot` s'applique. Renvoie (sim, backend_retenu)."""
+    Tries `production` first (zero-copy native path `add_native_block`, the plan's target), then
+    falls back to `aot` (`add_compiled_block`, numerically identical, host-marshalled) -- exactly the
+    cases' strategy (cf. `adc_cases/diocotron_dsl`). The native path requires the `_adc` module and the
+    model `.so` to have BEEN COMPILED WITH THE SAME adc headers (ABI guard); a fresh module (built as in
+    getting-started/installation) takes the native path, otherwise `aot` applies. Returns (sim, backend)."""
     last = None
     for backend in ("production", "aot"):
         try:
@@ -141,15 +140,25 @@ def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Pat
             sim.set_poisson(rhs="charge_density", solver="geometric_mg")
             sim.set_density("ne", ne0)
             return sim, backend
-        except Exception as exc:  # noqa: BLE001 - diagnostic : on tente le backend suivant
+        except Exception as exc:  # noqa: BLE001 - diagnostic: try the next backend
             last = exc
-            print(f"  backend {backend!r} indisponible ({type(exc).__name__}: "
-                  f"{str(exc).splitlines()[0][:80]}), essai suivant")
-    raise RuntimeError("aucun backend DSL n'a pu etre branche au System") from last
+            print(f"  backend {backend!r} unavailable ({type(exc).__name__}: "
+                  f"{str(exc).splitlines()[0][:80]}), trying the next one")
+    # Both backends failed. On a fresh install the usual cause is a missing/incompatible Kokkos root
+    # for the DSL .so (ADC_KOKKOS_ROOT). Delegate the diagnosis + copy-paste fixes to adc.doctor()
+    # rather than re-implementing the environment checks here.
+    print("\nNo DSL backend could be wired. Running adc.doctor() for a diagnosis:\n")
+    try:
+        adc.doctor()
+    except Exception:  # noqa: BLE001 - doctor is best-effort here
+        pass
+    raise RuntimeError(
+        "no DSL backend could be wired to the System; see the adc.doctor() output above "
+        "(typically: set ADC_KOKKOS_ROOT, cf. getting-started/installation.md)") from last
 
 
 def run(sim, steps: int, cfl: float, capture_every: int):
-    """Integre `steps` pas, capture des trames + l'amplitude au fil du temps."""
+    """Integrate `steps` steps, capturing frames + the amplitude over time."""
     frames = [np.asarray(sim.density("ne")).copy()]
     times = [sim.time()]
     amps = [perturbation_amplitude(frames[0])]
@@ -163,32 +172,32 @@ def run(sim, steps: int, cfl: float, capture_every: int):
     return frames, np.array(times), np.array(amps)
 
 
-# --- 6. Figures : courbe, carte, GIF, comparaison uniforme/AMR --------------------------------------
+# --- 6. Figures: curve, map, GIF, uniform/AMR comparison -------------------------------------------
 def make_figures(frames, times, amps, ne0, L, outdir: Path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation, PillowWriter
 
-    # Courbe (amplitude vs temps) + carte 2D (densite finale), cote a cote.
+    # Curve (amplitude vs time) + 2D map (final density), side by side.
     fig, ax = plt.subplots(1, 2, figsize=(9.2, 3.6))
     ax[0].semilogy(times, amps, "o-", color="#b5179e")
-    ax[0].set_xlabel("temps"); ax[0].set_ylabel("amplitude perturbation (L2)")
-    ax[0].set_title("croissance de l'instabilite diocotron")
+    ax[0].set_xlabel("time"); ax[0].set_ylabel("perturbation amplitude (L2)")
+    ax[0].set_title("diocotron instability growth")
     im = ax[1].imshow(frames[-1].T, origin="lower", cmap="magma",
                       extent=[0, L, 0, L])
-    ax[1].set_title("densite finale"); ax[1].set_xlabel("x"); ax[1].set_ylabel("y")
+    ax[1].set_title("final density"); ax[1].set_xlabel("x"); ax[1].set_ylabel("y")
     fig.colorbar(im, ax=ax[1], fraction=0.046)
     fig.tight_layout()
     fig.savefig(outdir / "diocotron_growth.png", dpi=120)
-    # Image de couverture PNG (premiere trame du GIF) pour les exports statiques.
+    # PNG cover image (first GIF frame) for static exports.
     fig_cov, ax_cov = plt.subplots(figsize=(3.8, 3.6))
     ax_cov.imshow(frames[-1].T, origin="lower", cmap="magma", extent=[0, L, 0, L])
-    ax_cov.set_title("diocotron (densite)"); ax_cov.set_xlabel("x"); ax_cov.set_ylabel("y")
+    ax_cov.set_title("diocotron (density)"); ax_cov.set_xlabel("x"); ax_cov.set_ylabel("y")
     fig_cov.tight_layout(); fig_cov.savefig(outdir / "diocotron_cover.png", dpi=120)
     plt.close(fig_cov)
 
-    # GIF de l'evolution de la densite.
+    # GIF of the density evolution.
     figg, axg = plt.subplots(figsize=(3.8, 3.6))
     img = axg.imshow(frames[0].T, origin="lower", cmap="magma", extent=[0, L, 0, L], animated=True)
     axg.set_xlabel("x"); axg.set_ylabel("y")
@@ -204,11 +213,11 @@ def make_figures(frames, times, amps, ne0, L, outdir: Path):
     plt.close(figg); plt.close(fig)
 
 
-# --- 6bis. Comparaison uniforme vs AMR --------------------------------------------------------------
+# --- 6bis. Uniform vs AMR comparison ---------------------------------------------------------------
 def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
-    """Rejoue la MEME physique sur une grille uniforme et sur `adc.AmrSystem` (raffinement adaptatif),
-    et trace les deux densites finales cote a cote. On utilise la composition NATIVE de briques pour
-    cette comparaison (les deux chemins, uniforme et AMR, partagent exactement le meme modele)."""
+    """Replays the SAME physics on a uniform grid and on `adc.AmrSystem` (adaptive refinement), and
+    plots both final densities side by side. We use the NATIVE brick composition for this comparison
+    (both paths, uniform and AMR, share exactly the same model)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -229,22 +238,22 @@ def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
     du = np.asarray(su.density("ne")); da = np.asarray(sa.density("ne"))
 
     fig, ax = plt.subplots(1, 2, figsize=(7.6, 3.6))
-    for a, d, t in ((ax[0], du, "grille uniforme"), (ax[1], da, "AMR (raffinee)")):
+    for a, d, t in ((ax[0], du, "uniform grid"), (ax[1], da, "AMR (refined)")):
         im = a.imshow(d.T, origin="lower", cmap="magma", extent=[0, L, 0, L])
         a.set_title(t); a.set_xlabel("x"); a.set_ylabel("y"); fig.colorbar(im, ax=a, fraction=0.046)
-    fig.suptitle(f"diocotron : uniforme vs AMR (max|delta| = {float(np.max(np.abs(da - du))):.2e})")
+    fig.suptitle(f"diocotron: uniform vs AMR (max|delta| = {float(np.max(np.abs(da - du))):.2e})")
     fig.tight_layout(); fig.savefig(outdir / "diocotron_uniform_vs_amr.png", dpi=120)
     plt.close(fig)
     return float(np.max(np.abs(da - du)))
 
 
-# --- 6ter. La meme physique, deux fronts : briques == DSL (bit-identique) ---------------------------
+# --- 6ter. The same physics, two fronts: bricks == DSL (bit-identical) -----------------------------
 def native_vs_dsl(dsl_final: np.ndarray, ne0, n_i0, L, steps, cfl, outdir: Path):
-    """Rejoue la MEME physique en BRIQUES natives (`native_diocotron_model`) sur la meme grille / le
-    meme schema / le meme nombre de pas que le run DSL, et compare l'etat final aux FORMULES. Les deux
-    fronts d'ecriture (briques et formules) produisent un noyau numerique IDENTIQUE : l'ecart est nul a
-    la precision binaire. Trace les deux cartes cote a cote avec `max|ecart|` en titre, et renvoie
-    cet ecart (asserte nul dans `main`)."""
+    """Replays the SAME physics with native BRICKS (`native_diocotron_model`) on the same grid / scheme
+    / number of steps as the DSL run, and compares the final state to the FORMULAS. The two writing
+    fronts (bricks and formulas) produce an IDENTICAL numerical kernel: the difference is zero to binary
+    precision. Plots both maps side by side with `max|delta|` in the title, and returns that difference
+    (asserted zero in `main`)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -260,10 +269,10 @@ def native_vs_dsl(dsl_final: np.ndarray, ne0, n_i0, L, steps, cfl, outdir: Path)
 
     max_delta = float(np.max(np.abs(native_final - dsl_final)))
     fig, ax = plt.subplots(1, 2, figsize=(7.6, 3.6))
-    for a, d, t in ((ax[0], native_final, "briques natives"), (ax[1], dsl_final, "formules (DSL)")):
+    for a, d, t in ((ax[0], native_final, "native bricks"), (ax[1], dsl_final, "formulas (DSL)")):
         im = a.imshow(d.T, origin="lower", cmap="magma", extent=[0, L, 0, L])
         a.set_title(t); a.set_xlabel("x"); a.set_ylabel("y"); fig.colorbar(im, ax=a, fraction=0.046)
-    fig.suptitle(f"diocotron : meme physique, deux fronts (max|briques - DSL| = {max_delta:.0e})")
+    fig.suptitle(f"diocotron: same physics, two fronts (max|bricks - DSL| = {max_delta:.0e})")
     fig.tight_layout(); fig.savefig(outdir / "diocotron_native_vs_dsl.png", dpi=120)
     plt.close(fig)
     return max_delta
@@ -278,7 +287,7 @@ def git_sha(path: Path) -> str:
 
 
 def detect_backend_runtime() -> str:
-    """Backend de parallelisme compile dans le module (cf. getting_started/backend)."""
+    """Parallelism backend compiled into the module (cf. getting-started/backend)."""
     for attr in ("backend", "parallel_backend", "build_info"):
         val = getattr(adc, attr, None)
         if callable(val):
@@ -288,16 +297,16 @@ def detect_backend_runtime() -> str:
                 pass
         elif val is not None:
             return str(val)
-    return "serial (defaut ; cf. getting_started/backend pour Kokkos/MPI)"
+    return "serial (default; cf. getting-started/backend for Kokkos/MPI)"
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Tutoriel diocotron adc_cpp (A->Z, reproductible).")
+    p = argparse.ArgumentParser(description="adc_cpp diocotron tutorial (A->Z, reproducible).")
     p.add_argument("--n", type=int, default=96)
     p.add_argument("--steps", type=int, default=60)
     p.add_argument("--cfl", type=float, default=0.4)
     p.add_argument("--outdir", default=str(Path(__file__).parent / "_assets"))
-    p.add_argument("--quick", action="store_true", help="resolution/pas reduits (fumee CI)")
+    p.add_argument("--quick", action="store_true", help="reduced resolution/steps (CI smoke)")
     args = p.parse_args()
     if args.quick:
         args.n, args.steps = 48, 20
@@ -305,35 +314,35 @@ def main() -> None:
     outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
     L = 1.0
 
-    print(f"adc importe depuis : {adc.__file__}")
-    print(f"backend de parallelisme : {detect_backend_runtime()}")
+    print(f"adc imported from: {adc.__file__}")
+    print(f"parallelism backend: {detect_backend_runtime()}")
 
     ne0 = band_density(args.n, L, amp=1.0, width=0.05, mode=2, disp=0.02)
     n_i0 = float(ne0.mean())
 
     t0 = time.time()
     sim, backend = compile_and_build(diocotron_model(n_i0), ne0, L, outdir)
-    print(f"modele DSL compile + branche (backend = {backend!r}) en {time.time() - t0:.1f} s")
+    print(f"DSL model compiled + wired (backend = {backend!r}) in {time.time() - t0:.1f} s")
 
     capture_every = max(1, args.steps // 15)
     frames, times, amps = run(sim, args.steps, args.cfl, capture_every)
 
     growth = amps[-1] / amps[0]
     mass_drift = abs(float(sim.mass("ne")) - float(ne0.sum())) / float(ne0.sum())
-    print(f"amplitude {amps[0]:.3e} -> {amps[-1]:.3e} (x{growth:.2f}) ; derive masse = {mass_drift:.2e}")
-    assert growth > 1.0, "l'instabilite diocotron n'a pas cru"
-    assert mass_drift < 1e-9, "masse non conservee (transport advectif periodique)"
+    print(f"amplitude {amps[0]:.3e} -> {amps[-1]:.3e} (x{growth:.2f}); mass drift = {mass_drift:.2e}")
+    assert growth > 1.0, "the diocotron instability did not grow"
+    assert mass_drift < 1e-9, "mass not conserved (periodic advective transport)"
 
     make_figures(frames, times, amps, ne0, L, outdir)
 
-    # La MEME physique en briques natives : on prouve que les deux fronts d'ecriture (formules DSL et
-    # briques) produisent un etat BIT-IDENTIQUE (meme noyau numerique), puis on trace les deux cartes.
+    # The SAME physics as native bricks: we prove that the two writing fronts (DSL formulas and bricks)
+    # produce a BIT-IDENTICAL state (same numerical kernel), then plot both maps.
     nd_delta = native_vs_dsl(frames[-1], ne0, n_i0, L, args.steps, args.cfl, outdir)
-    print(f"equivalence briques/DSL : max|delta| = {nd_delta:.3e}")
-    assert nd_delta == 0.0, "briques et formules DSL devraient etre bit-identiques (max|delta| != 0)"
+    print(f"bricks/DSL equivalence: max|delta| = {nd_delta:.3e}")
+    assert nd_delta == 0.0, "bricks and DSL formulas should be bit-identical (max|delta| != 0)"
 
     amr_delta = uniform_vs_amr(ne0, n_i0, L, args.steps, args.cfl, outdir)
-    print(f"comparaison uniforme/AMR : max|delta| = {amr_delta:.3e}")
+    print(f"uniform/AMR comparison: max|delta| = {amr_delta:.3e}")
 
     provenance = {
         "script": "docs/sphinx/tutorials/diocotron_tutorial.py",
@@ -354,8 +363,8 @@ def main() -> None:
         "amr_uniform_max_delta": amr_delta,
     }
     (outdir / "provenance.json").write_text(json.dumps(provenance, indent=2))
-    print(f"figures + provenance ecrites dans {outdir}")
-    print("OK tutoriel diocotron")
+    print(f"figures + provenance written to {outdir}")
+    print("OK diocotron tutorial")
 
 
 if __name__ == "__main__":

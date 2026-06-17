@@ -247,6 +247,34 @@ def doctor(verbose=True):
         except RuntimeError as e:
             checks["include"] = (False, "adc headers not found (set ADC_INCLUDE) : %s" % e)
 
+        # 5c. Kokkos root for the DSL production/aot backend (the tutorial's "no DSL backend" blocker).
+        # adc_cpp is Kokkos-only : every DSL .so that includes the adc headers MUST compile against an
+        # installed Kokkos (Serial is enough on CPU), found via ADC_KOKKOS_ROOT / Kokkos_ROOT.
+        kroot = _dsl._native_kokkos_root()
+        if kroot is None:
+            checks["kokkos_root"] = (False,
+                "ADC_KOKKOS_ROOT / Kokkos_ROOT not set -> DSL backend='production'/'aot' cannot compile "
+                "(the tutorial dead-ends on 'no DSL backend'). Fix (conda) :\n"
+                "      conda env config vars set ADC_KOKKOS_ROOT=\"$CONDA_PREFIX\"\n"
+                "      conda env config vars set Kokkos_ROOT=\"$CONDA_PREFIX\"\n"
+                "      conda deactivate && conda activate adc")
+        else:
+            checks["kokkos_root"] = (True, kroot)
+            # 5d. A CUDA Kokkos on a host without nvcc breaks BOTH `pip install .` (find_package picks it
+            # -> nvcc) AND the production .so. On a CPU host, install the CPU Kokkos variant instead.
+            import shutil
+            cuda = False
+            try:
+                with open(os.path.join(kroot, "include", "KokkosCore_config.h")) as _f:
+                    cuda = any(line.startswith("#define KOKKOS_ENABLE_CUDA") for line in _f)
+            except OSError:
+                pass
+            if cuda and shutil.which("nvcc") is None:
+                checks["kokkos_cuda"] = (False,
+                    "Kokkos at %s is a CUDA build but nvcc is not on PATH -> `pip install .` fails "
+                    "'Could not find nvcc'. Fix for a CPU host, recreate the env with CPU Kokkos :\n"
+                    "      CONDA_OVERRIDE_CUDA=\"\" bash scripts/setup_env.sh" % kroot)
+
     # 6. current threads
     checks["threads"] = (True, "OMP_NUM_THREADS=%s ; first System created=%s"
                          % (os.environ.get("OMP_NUM_THREADS", "(default)"), _first_system_built))

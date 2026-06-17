@@ -1,72 +1,80 @@
-# Environnement de developpement adc_cpp (conda / mamba, canal conda-forge).
+# adc_cpp development environment (conda / mamba, conda-forge channel).
 #
-# En UNE commande, conda fournit TOUT l'outillage -- une version recente de CMake, Ninja,
-# l'interpreteur Python, NumPy, pybind11 -- ET les backends paralleles locaux (Kokkos,
-# MPI, OpenMP), sans dependre des outils systeme, d'un venv pip ni de modules a charger :
+# In ONE command, conda provides ALL the tooling -- a recent CMake, Ninja, the Python
+# interpreter, NumPy, pybind11 -- AND the local parallel backends (Kokkos, MPI, OpenMP),
+# without depending on system tools, a pip venv, or modules to load:
 #
-#     conda env create -f environment.yml      # cree l'env "adc"
+#     conda env create -f environment.yml      # creates the "adc" env
 #     conda activate adc
-#     # puis le build habituel (cf. README / docs/sphinx/getting_started/installation.md)
+#     # then the usual build (cf. README / docs/sphinx/getting-started/installation.md)
 #
-# Mettre a jour apres edition de ce fichier :
+# Update after editing this file:
 #     conda env update -f environment.yml --prune
 #
-# Cet env supprime les pieges de config recurrents :
-#   - UN seul Python 3.12 (build ET import du module -> plus de "ModuleNotFoundError: adc._adc"
-#     par divergence d'ABI cpython) ;
-#   - pybind11 present -> pas de FetchContent reseau ni de warning de depreciation ;
-#   - Kokkos / OpenMPI / libomp installes -> find_package(Kokkos|MPI|OpenMP) reussit une fois
-#     l'env active (passer -DKokkos_ROOT=$CONDA_PREFIX au besoin, cf. doc d'installation).
+# This env removes the recurring config traps:
+#   - ONE single Python 3.12 (build AND import of the module -> no more "ModuleNotFoundError: adc._adc"
+#     from a cpython ABI divergence);
+#   - pybind11 present -> no network FetchContent nor deprecation warning;
+#   - Kokkos / OpenMPI / libomp installed -> find_package(Kokkos|MPI|OpenMP) succeeds once the env is
+#     active (pass -DKokkos_ROOT=$CONDA_PREFIX if needed, cf. the installation doc).
 #
-# NOTE compilateur : ce fichier ne fournit PAS le compilateur C++ (pas de selecteurs par
-# plateforme dans un environment.yml). `bash scripts/setup_env.sh` s'en charge : il cree cet
-# env PUIS fige la meilleure toolchain par plateforme -- AppleClang sur macOS (CC/CXX poses
-# dans l'env via `conda env config vars`, prioritaires sur le PATH ; un LLVM vanilla y est
-# >15x plus lent sur les TU du module), cxx-compiler (gcc 14, C++23) sur Linux.
+# COMPILER NOTE: this file does NOT provide the C++ compiler (no per-platform selectors in an
+# environment.yml). `bash scripts/setup_env.sh` handles it: it creates this env THEN pins the best
+# toolchain per platform -- AppleClang on macOS (CC/CXX set in the env via `conda env config vars`,
+# taking priority over the PATH; a vanilla LLVM there is >15x slower on the module's translation units),
+# cxx-compiler (gcc 14, C++23) on Linux.
 #
-# PIEGE CONNU (bug reel) : certains envs conda/mambaforge exposent un `gcc`/`c++` VIEUX sur le
-# PATH ; le DSL adc (backend "production") compilant des .so a l'execution, il pourrait le
-# ramasser et echouer ("error: invalid value 'c++23' in '-std=c++23'"). Protections en place :
-# le DSL prefere le compilateur qui a construit _adc (bake dans le module), `export ADC_CXX=...`
-# l'emporte explicitement, et `python -c "import adc; adc.doctor()"` diagnostique l'ensemble.
+# KOKKOS CPU/CUDA TRAP (real bug, Ubuntu): the bare `kokkos` below resolves to the CUDA variant
+# whenever conda detects a `__cuda` virtual package (NVIDIA driver present). On a CPU host this drags in
+# cuda-cudart and a CUDA Kokkos, then `pip install .` (Kokkos is ON and mandatory, find_package picks the
+# conda Kokkos) fails with "Could not find nvcc". `bash scripts/setup_env.sh` creates the env under
+# `CONDA_OVERRIDE_CUDA=""`, which forces conda to pick the CPU Kokkos builds (no fragile build-string
+# pin); pass `--cuda` to opt into the CUDA variant. Manual equivalent on a CPU host:
+#     CONDA_OVERRIDE_CUDA="" conda env create -f environment.yml
 #
-# NOTE GPU / cluster : la validation GPU (Grace-Hopper) et le parallelisme lourd se font sur
-# ROMEO via Spack/modules, PAS via conda. Les backends ci-dessous servent au dev LOCAL (CPU).
+# KNOWN COMPILER TRAP (real bug): some conda/mambaforge envs expose an OLD `gcc`/`c++` on the PATH;
+# the adc DSL (backend "production") compiling .so at runtime could pick it up and fail
+# ("error: invalid value 'c++23' in '-std=c++23'"). Protections in place: the DSL prefers the compiler
+# that built _adc (baked into the module), `export ADC_CXX=...` wins explicitly, and
+# `python -c "import adc; adc.doctor()"` diagnoses the whole chain.
+#
+# GPU / cluster NOTE: GPU validation (Grace-Hopper) and heavy parallelism run on ROMEO via Spack/modules,
+# NOT via conda. The backends below serve LOCAL (CPU) development.
 name: adc
 channels:
   - conda-forge
 dependencies:
-  # --- Outillage de build (toujours) ---
-  - python=3.12          # l'extension _adc est epinglee a l'ABI de CET interpreteur (cpython-312)
-  - cmake>=3.27          # conda-forge sert une version recente (>= la 3.20 minimale du projet)
-  - ninja                # generateur conseille (-G Ninja)
-  - ccache               # cache de compilation (auto-detecte par CMake) : re-builds rapides
+  # --- Build tooling (always) ---
+  - python=3.12          # the _adc extension is pinned to the ABI of THIS interpreter (cpython-312)
+  - cmake>=3.27          # conda-forge ships a recent version (>= the project's minimum 3.20)
+  - ninja                # recommended generator (-G Ninja)
+  - ccache               # compilation cache (auto-detected by CMake): fast re-builds
 
-  # --- Module Python (toujours) ---
-  - numpy>=1.24          # requis a l'IMPORT du module (python/adc/dsl.py fait `import numpy`)
-  - pybind11>=2.13       # bindings. NB : le configure prefere TOUJOURS le pybind11 de l'interpreteur
-                         # ACTIF (python -m pybind11 --cmakedir) -- potentiellement 3.x ; le repli
-                         # FetchContent v2.13.6 n'est qu'un filet hors-env. bindings.cpp compile
-                         # contre les deux (verifie avec 3.0.4).
+  # --- Python module (always) ---
+  - numpy>=1.24          # required at the module IMPORT (python/adc/dsl.py does `import numpy`)
+  - pybind11>=2.13       # bindings. NB: the configure ALWAYS prefers the pybind11 of the ACTIVE
+                         # interpreter (python -m pybind11 --cmakedir) -- possibly 3.x; the
+                         # FetchContent fallback v2.13.6 is only an out-of-env safety net. bindings.cpp
+                         # compiles against both (verified with 3.0.4).
 
-  # --- Backends paralleles locaux (CPU) : ADC_USE_KOKKOS / ADC_USE_MPI / ADC_USE_OPENMP ---
-  # ATTENTION (verifie sur le feedstock conda-forge, a reconfirmer a l'install) : le paquet
-  # `kokkos` de conda-forge est typiquement compile avec le SEUL backend Serial (pas d'OpenMP ;
-  # la variante CUDA est un paquet a part). Il suffit pour compiler/valider ADC_USE_KOKKOS=ON,
-  # mais NE SCALE PAS en threads. Multi-thread reel EN UNE COMMANDE (Kokkos OpenMP compile DANS
-  # l'env, ~2 min, outillage deja fourni par cet env) :
+  # --- Local parallel backends (CPU): ADC_USE_KOKKOS / ADC_USE_MPI / ADC_USE_OPENMP ---
+  # NOTE (verified on the conda-forge feedstock, reconfirm at install time): the conda-forge `kokkos`
+  # package is typically built with the Serial backend ONLY (no OpenMP; the CUDA variant is a separate
+  # package, see the KOKKOS CPU/CUDA TRAP above). Serial is enough to compile/validate ADC_USE_KOKKOS=ON
+  # but DOES NOT scale across threads. Real multi-threading IN ONE COMMAND (Kokkos OpenMP compiled IN the
+  # env, ~2 min, tooling already provided by this env):
   #     bash scripts/kokkos_openmp_conda.sh
-  # Verifier au configure : message "Kokkos found ... = (SERIAL[,OPENMP,...])".
-  - kokkos               # backend de dispatch portable. find_package(Kokkos) ; cf. ATTENTION ci-dessus
-  - openmpi              # backend MPI (seam comm distribue) ; fournit mpicxx/mpicc
-  - llvm-openmp          # libomp + en-tetes : OpenMP autonome (deprecie) + runtime -fopenmp
+  # Check at configure: message "Kokkos found ... = (SERIAL[,OPENMP,...])".
+  - kokkos               # portable dispatch backend. find_package(Kokkos); cf. the NOTE above
+  - openmpi              # MPI backend (distributed comm seam); provides mpicxx/mpicc
+  - llvm-openmp          # libomp + headers: standalone OpenMP (deprecated) + -fopenmp runtime
 
-  # --- Optionnels : decommenter selon le besoin ---
-  # - "hdf5=*=mpi_openmpi_*"  # ADC_USE_HDF5=ON, DataWriter parallele (variante MPI, coherente avec openmpi)
-  # - cxx-compiler            # toolchain C++ conda : clang 19 (osx-arm64) / gcc 14 (linux), tous deux
-  #                           # C++23-capables. Recommande sur Linux/cluster sans gcc recent. Sur macOS,
-  #                           # possible mais TOUT-CONDA alors : batir _adc avec lui ET export
-  #                           # ADC_CXX=$CONDA_PREFIX/bin/clang++ (ne pas melanger avec AppleClang).
-  # - sphinx>=7.0             # documentation (sinon docs/sphinx/requirements.txt via pip)
+  # --- Optional: uncomment as needed ---
+  # - "hdf5=*=mpi_openmpi_*"  # ADC_USE_HDF5=ON, parallel DataWriter (MPI variant, consistent with openmpi)
+  # - cxx-compiler            # conda C++ toolchain: clang 19 (osx-arm64) / gcc 14 (linux), both
+  #                           # C++23-capable. Recommended on Linux/cluster without a recent gcc. On macOS,
+  #                           # possible but ALL-CONDA then: build _adc with it AND export
+  #                           # ADC_CXX=$CONDA_PREFIX/bin/clang++ (do not mix with AppleClang).
+  # - sphinx>=7.0             # documentation (otherwise docs/sphinx/requirements.txt via pip)
   # - furo
   # - myst-parser

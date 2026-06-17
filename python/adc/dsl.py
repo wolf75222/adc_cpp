@@ -3164,7 +3164,8 @@ class HyperbolicModel:
             raise RuntimeError(
                 "compile_aot: adc_cpp is Kokkos-only -- the AOT model includes the adc headers which "
                 "require Kokkos. Point at an installed Kokkos via ADC_KOKKOS_ROOT (or Kokkos_ROOT), e.g. "
-                "`export ADC_KOKKOS_ROOT=/path/to/kokkos` (Serial is enough on CPU).")
+                "`export ADC_KOKKOS_ROOT=/path/to/kokkos` (Serial is enough on CPU). "
+                "Run `python -c \"import adc; adc.doctor()\"` for a full diagnosis and copy-paste fixes.")
         cc = _native_kokkos_compiler(cxx)
         if not cc:
             raise RuntimeError("compile_aot: no C++ compiler found")
@@ -4687,7 +4688,7 @@ class HybridModel:
                 "HybridModel.compile: adc_cpp is Kokkos-only -- the AOT model includes the adc "
                 "headers which require Kokkos. Point to an installed Kokkos via ADC_KOKKOS_ROOT (or "
                 "Kokkos_ROOT), e.g. `export ADC_KOKKOS_ROOT=/path/to/kokkos` (Serial is enough "
-                "on CPU).")
+                "on CPU). Run `python -c \"import adc; adc.doctor()\"` for a full diagnosis.")
         if native:  # pre-dlopen guard: headers != build of _adc -> clear remedy (cf. compile_native)
             _check_headers_match_module(include)
             _warn_kokkos_parity()

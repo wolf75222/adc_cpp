@@ -25,6 +25,69 @@ Update: re-run the script (or `conda env update -f environment.yml --prune`).
 The env interpreter builds and imports the module: no cpython ABI divergence.
 Standard: C++20 (Kokkos, the only on-node backend, is compiled under nvcc for the Cuda target).
 
+(linux-ubuntu-fresh-install)=
+
+## Linux and Ubuntu: fresh install
+
+From a clean machine with no Python, no compiler and no conda, one path reaches a healthy
+environment. `bash scripts/setup_env.sh` automates steps 3-6; the manual steps are shown for
+transparency.
+
+**1. System prerequisites** (Debian/Ubuntu). Install only git + curl; do NOT `apt install` Python or
+g++ for this workflow -- the `adc` conda env provides the interpreter AND the C++ compiler, and mixing
+a system toolchain in is a common source of ABI surprises.
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates
+```
+
+**2. Miniforge** (conda-forge installer). Skip if conda is already on the PATH.
+
+```bash
+cd /tmp
+curl -L -o Miniforge3.sh \
+  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash Miniforge3.sh -b -p "$HOME/miniforge3"
+source "$HOME/miniforge3/etc/profile.d/conda.sh"
+conda init "$(basename "$SHELL")"        # then open a new shell
+```
+
+**3. Create the env** (CPU Kokkos by default). The script forces a CPU Kokkos
+(`CONDA_OVERRIDE_CUDA=""`, so conda does not pull the CUDA variant on a host with an NVIDIA driver) and
+configures conda-forge to survive HTTP 429. Pass `--cuda` only if you really want the CUDA variant.
+
+```bash
+git clone https://github.com/wolf75222/adc_cpp.git ~/adc_cpp   # if not already cloned
+cd ~/adc_cpp
+bash scripts/setup_env.sh            # CPU; or: bash scripts/setup_env.sh --cuda
+conda activate adc
+```
+
+**4. Build the module.**
+
+```bash
+pip install . -v
+```
+
+**5. Persisted environment variables.** `setup_env.sh` pins `ADC_INCLUDE`, `ADC_KOKKOS_ROOT`,
+`Kokkos_ROOT` and `ADC_CACHE_DIR` inside the env (exported on each activation) so the DSL
+`production`/`aot` backend finds its Kokkos and its headers. They take effect on the next activation:
+
+```bash
+conda deactivate && conda activate adc
+```
+
+**6. Check, then first run.**
+
+```bash
+python -c "import adc; adc.doctor()"     # expect: => healthy environment
+python docs/sphinx/tutorials/diocotron_tutorial.py --quick
+```
+
+If a step fails, `adc.doctor()` names the broken link and prints the copy-paste fix; the
+[troubleshooting table](#troubleshooting) below maps each observed error to its remedy.
+
 ## Python module
 
 ### User: `pip install .`
@@ -35,18 +98,24 @@ chosen through environment variables, mapped onto the CMake options:
 
 ```bash
 conda activate adc
-pip install .                                  # Kokkos Serial (FetchContent si non installe)
-Kokkos_ROOT=$CONDA_PREFIX pip install . -v     # reutilise le Kokkos de l'env (OpenMP si dispo)
-ADC_USE_MPI=ON pip install . -v                                # MPI
+pip install . -v                               # builds the Kokkos module (Kokkos is ON, mandatory)
+Kokkos_ROOT=$CONDA_PREFIX pip install . -v     # reuse the env Kokkos (OpenMP if available)
+ADC_USE_MPI=ON pip install . -v                # MPI
 ```
+
+`ADC_USE_KOKKOS` is ON by default and mandatory: `pip install .` always builds with Kokkos. With the
+`adc` env active, `find_package(Kokkos)` finds the env Kokkos first (it is only fetched when none is
+installed). On a host with an NVIDIA driver, conda may have resolved the **CUDA** Kokkos variant; the
+build then fails with `Could not find nvcc`. Use `bash scripts/setup_env.sh` (it forces a CPU Kokkos),
+or see the [Linux / Ubuntu fresh install](#linux-ubuntu-fresh-install) section below.
 
 Then, in Python:
 
 ```python
 import adc
 print(adc.__version__)
-adc.doctor()           # diagnostic de l'environnement (OK/FAIL + remede par ligne)
-adc.set_threads()      # tous les coeurs -- ou set_threads(8) ; AVANT le 1er System
+adc.doctor()           # environment diagnosis (OK/FAIL + a remedy per line)
+adc.set_threads()      # all cores -- or set_threads(8); BEFORE the 1st System
 sim = adc.System(n=256)
 ```
 
@@ -72,7 +141,7 @@ To iterate on the C++ without reinstalling, the presets build the module in the 
 ```bash
 cmake --preset python          && cmake --build --preset python            # Kokkos Serial
 cmake --preset python-parallel && cmake --build --preset python-parallel   # Kokkos conda (OpenMP)
-export PYTHONPATH=$PWD/build-py/python        # ou build-py-kokkos/python
+export PYTHONPATH=$PWD/build-py/python        # or build-py-kokkos/python
 ```
 
 A single path is enough: the configuration copies the package sources next to the extension.
@@ -92,7 +161,7 @@ Kokkos initializes at that moment and reads the environment only once:
 
 ```python
 import adc
-adc.set_threads(8)       # = OMP_NUM_THREADS + KOKKOS_NUM_THREADS, sans toucher au shell
+adc.set_threads(8)       # = OMP_NUM_THREADS + KOKKOS_NUM_THREADS, without touching the shell
 sim = adc.System(n=256)
 ```
 
@@ -145,8 +214,11 @@ automatically (FetchContent, release tarball verified by SHA256).
 
 **Kokkos via conda**: the `kokkos` package from conda-forge is generally compiled with the
 Serial backend only. The build passes, but does not scale with threads, check the message
-`Kokkos found ... = (...)` at configure. For a Kokkos Serial+OpenMP in the env (~2 min,
-same compiler as the project):
+`Kokkos found ... = (...)` at configure. On a host with an NVIDIA driver, conda may instead resolve
+the **CUDA** Kokkos variant (it drags in `cuda-cudart`); `pip install .` then fails with
+`Could not find nvcc`. Force a CPU Kokkos with `bash scripts/setup_env.sh` (it sets
+`CONDA_OVERRIDE_CUDA=""`) or `CONDA_OVERRIDE_CUDA="" conda env update -n adc -f environment.yml --prune`.
+For a Kokkos Serial+OpenMP in the env (~2 min, same compiler as the project):
 
 ```bash
 bash scripts/kokkos_openmp_conda.sh
@@ -171,8 +243,8 @@ CC/CXX, Kokkos, DSL variables, cache in the scratch):
 
 ```bash
 cp Tools/machines/romeo/romeo_adc.profile.example ~/romeo_adc.profile
-# editer les lignes '# A ADAPTER' (chemin Kokkos), puis a chaque session/job :
-source ~/romeo_adc.profile                       # ADC_ROMEO_ARCH=armgpu pour le GPU
+# edit the '# A ADAPTER' lines (Kokkos path), then on each session/job:
+source ~/romeo_adc.profile                       # ADC_ROMEO_ARCH=armgpu for the GPU
 ```
 
 **Other cluster**: the generic guide
@@ -181,16 +253,18 @@ covers installing the stack (site Spack or your own bootstrap), microarchitectur
 compilation and SLURM launch with thread/GPU placement. Minimal schema:
 
 ```bash
-spack load cmake ninja kokkos openmpi            # ou module load <env du site>
+spack load cmake ninja kokkos openmpi            # or module load <site env>
 cmake -S . -B build-kokkos -G Ninja -DADC_USE_KOKKOS=ON \
       -DKokkos_ROOT=$(spack location -i kokkos)
-# configurer sur le LOGIN ; dans l'allocation, relancer seulement : ninja -C build-kokkos
+# configure on the LOGIN node; inside the allocation, only re-run: ninja -C build-kokkos
 ```
 
 Grace-Hopper GPU: [GPU_ROMEO.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/GPU_ROMEO.md).
 For the DSL `backend="production"`, export `ADC_KOKKOS_ROOT=<prefix Kokkos>` (the ROMEO profile
 does it); the build compiler is baked into `_adc`, the DSL finds it on its own as long as it
 exists on the nodes.
+
+(troubleshooting)=
 
 ## Troubleshooting
 
@@ -200,8 +274,25 @@ First reflex, whatever the symptom:
 python -c "import adc; adc.doctor()"
 ```
 
-Each line checks a link (interpreter/ABI, numpy, Kokkos, DSL compiler and its
-standard, header/module sync, threads) and gives the remedy on failure.
+Each line checks a link (interpreter/ABI, numpy, Kokkos, DSL compiler and its standard, the Kokkos
+root for the production backend, a CUDA-Kokkos-without-nvcc trap, header/module sync, threads) and
+gives the remedy on failure.
+
+Common fresh-install errors and their fix:
+
+| Error | Cause | Fix |
+|---|---|---|
+| `conda: command not found` | Miniforge not installed or not sourced | install Miniforge, or `source "$HOME/miniforge3/etc/profile.d/conda.sh"` |
+| `python: command not found` | outside the conda env | `conda activate adc` |
+| `EnvironmentNameNotFound: adc` | env not created | `bash scripts/setup_env.sh` |
+| `CondaHTTPError: HTTP 429` | conda-forge rate limiting | `setup_env.sh` sets retries + libmamba; otherwise wait and retry |
+| `Could not find nvcc` | a CUDA Kokkos was selected on a CPU host | `CONDA_OVERRIDE_CUDA="" bash scripts/setup_env.sh` (forces CPU Kokkos) |
+| `[FAIL] include` (adc headers not found) | `ADC_INCLUDE` not set | `conda env config vars set ADC_INCLUDE="$HOME/adc_cpp/include"`, then reactivate |
+| `[FAIL] kokkos_root` / `ADC_KOKKOS_ROOT is not defined` | DSL backend has no Kokkos root | `conda env config vars set ADC_KOKKOS_ROOT="$CONDA_PREFIX"` and `Kokkos_ROOT="$CONDA_PREFIX"`, then reactivate |
+| `no DSL backend could be wired` | DSL backend compile failed | run `python -c "import adc; adc.doctor()"` and apply the fixes it names |
+| `ModuleNotFoundError: matplotlib` | tutorial plotting deps missing | `conda install -n adc -c conda-forge matplotlib pillow` |
+
+`setup_env.sh` already handles the first six on a fresh install; the table is the manual fallback.
 
 **`ImportError` on `adc._adc`**: the extension is pinned to the interpreter that built it
 (suffix `cpython-312`). The error message now indicates the exact cause (extension

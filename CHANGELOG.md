@@ -45,6 +45,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   mass conservation (< 1e-12) and ulp-level global-mass parity vs np=1. Closes the System-MPI
   branch named in `GH200_HYQMOM15.md` section 3.
 
+### Changed
+
+- **Reliable Linux/Ubuntu user install** (ADC-321): `scripts/setup_env.sh` now bootstraps a fresh
+  machine end to end -- it guides the Miniforge install when `conda` is absent, configures conda-forge
+  to survive HTTP 429, forces a CPU Kokkos by default via `CONDA_OVERRIDE_CUDA=""` (so `pip install .`
+  no longer fails `Could not find nvcc` on a CPU host with an NVIDIA driver; `--cuda` opts in),
+  persists `ADC_INCLUDE`/`ADC_KOKKOS_ROOT`/`Kokkos_ROOT`/`ADC_CACHE_DIR` in the env, and ends on
+  `adc.doctor()`. `adc.doctor()` gains a `kokkos_root` check (the tutorial's "no DSL backend" blocker)
+  and a CUDA-Kokkos-without-nvcc check, each with a copy-paste fix. `installation.md` gains a
+  "Linux and Ubuntu: fresh install" section and a troubleshooting table; the diocotron tutorial routes
+  a both-backends-failure to `adc.doctor()`. `setup_env.sh`, `environment.yml`, the diocotron tutorial
+  and `pyproject.toml` are translated to English.
+
 ### Fixed
 
 - **Backend-blind DSL compile cache** (ADC-186): recompiling a `production` model onto an explicit
