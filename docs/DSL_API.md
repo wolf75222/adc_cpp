@@ -42,19 +42,20 @@ g = m.param("gamma", 1.4)
 ## 2. Compile
 
 ```python
-# Le DEFAUT de m.compile(...) est backend="aot" : il faut donc demander explicitement
-# "production" pour le chemin natif zero-copie (recommande en MPI/AMR).
+# The DEFAULT of m.compile(...) is backend="auto": it picks "production" under toolchain parity
+# (module loadable + baked compiler + matching header signature) and falls back to "aot" otherwise.
+# Request "production" explicitly to force the native zero-copy path (recommended in MPI/AMR).
 compiled = m.compile(backend="production", target="system")
 # Pour AMR :
 compiled_amr = m.compile(backend="production", target="amr_system")
 ```
 
-Available backends (`backend=` ; DEFAULT = `aot`) :
+Available backends (`backend=` ; the default `auto` picks `production` under toolchain parity, else `aot`) :
 
 | backend | CPU | MPI | AMR | GPU | Note |
 |---|---|---|---|---|---|
-| `production` | yes | yes (np=1/2/4) | via `AmrSystem` | GH200 (C++ side) | **recommended** in MPI/AMR ; native zero-copy. `_BACKEND_CAPS["production"]["gpu"]` is reported `False` on the Python side (the tested host module is not built with Kokkos/CUDA) |
-| `aot` | yes | no | no | no | **DEFAULT** ; marshaling `.so` ; CPU debug/bench. Also carries runtime params (`set_block_params`) |
+| `production` | yes | yes (np=1/2/4) | via `AmrSystem` | GH200 (C++ side) | **recommended** in MPI/AMR ; native zero-copy ; selected by the `auto` default under toolchain parity. `_BACKEND_CAPS["production"]["gpu"]` is reported `False` on the Python side (the tested host module is not built with Kokkos/CUDA) |
+| `aot` | yes | no | no | no | marshaling `.so` ; CPU debug/bench ; the `auto` fallback when toolchain parity is absent. Also carries runtime params (`set_block_params`) |
 | `prototype` | yes (Rusanov o1) | no | no | no | JIT proto ; do not use in production |
 
 The `.so` is cached by `model_hash` : an unchanged model is not recompiled.
@@ -87,7 +88,7 @@ amr.add_equation("fluide",
 
 Important points :
 - `riemann=` names the NUMERICAL flux (`rusanov`/`hllc`/`roe`) ; `m.flux(...)` is the PHYSICAL flux.
-- `fft` is not supported under `System` in MPI `np>1` : use `geometric_mg`.
+- `fft` / `fft_spectral` now run under `System` in MPI `np>1` (distributed via a box-slab remap, `RemappedFFTSolver`, ADC-287) ; periodic constant-coefficient only -- use `geometric_mg` for walls, variable/anisotropic eps, or kappa.
 - `backend="production"` with `target="amr_system"` : `AmrSystem` is single- AND multi-block,
   explicit ; HLLC/Roe/`primitive` are wired on the Python AMR facade with a pressure guard: HLLC/Roe require a
   declared primitive `p` (or the `enable_hllc()` / `enable_roe()` capability), otherwise `add_equation` raises.

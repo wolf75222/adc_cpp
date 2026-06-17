@@ -9,41 +9,41 @@ only that the module is [installed](installation.md) and importable).
 import numpy as np
 import adc
 
-# 1. Un systeme carre periodique 96 x 96, domaine [0, 1]^2.
+# 1. A periodic 96 x 96 square system, domain [0, 1]^2.
 sim = adc.System(n=96, L=1.0, periodic=True)
 
-# 2. Un bloc "ne" : la densite, advectee par la derive E x B (transport=ExB),
-#    couplee au Poisson via une densite de fond neutralisante (elliptic=BackgroundDensity).
+# 2. A block "ne": the density, advected by the E x B drift (transport=ExB),
+#    coupled to Poisson via a neutralizing background density (elliptic=BackgroundDensity).
 sim.add_block(
     "ne",
     model=adc.Model(
-        state=adc.Scalar(),                       # une variable conservative : la densite
-        transport=adc.ExB(B0=1.0),                # vitesse de derive v = (-d_y phi, d_x phi) / B0
-        source=adc.NoSource(),                    # pas de terme source
-        elliptic=adc.BackgroundDensity(alpha=1.0, n0=1.0),  # rhs Poisson = alpha (n - n0)
+        state=adc.Scalar(),                       # one conservative variable: the density
+        transport=adc.ExB(B0=1.0),                # drift velocity v = (-d_y phi, d_x phi) / B0
+        source=adc.NoSource(),                    # no source term
+        elliptic=adc.BackgroundDensity(alpha=1.0, n0=1.0),  # Poisson rhs = alpha (n - n0)
     ),
-    spatial=adc.Spatial(minmod=True),             # MUSCL minmod + Rusanov (defaut)
-    time=adc.Explicit(),                          # integration explicite
+    spatial=adc.Spatial(minmod=True),             # MUSCL minmod + Rusanov (default)
+    time=adc.Explicit(),                          # explicit integration
 )
 
-# 3. Le Poisson de systeme : second membre = densite de charge, solveur multigrille.
+# 3. The system Poisson: rhs = charge density, multigrid solver.
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 
-# 4. Condition initiale : une bande de charge perturbee le long de x.
+# 4. Initial condition: a perturbed charge band along x.
 n = 96
 xs = (np.arange(n) + 0.5) / n
-X, Y = np.meshgrid(xs, xs)                        # indexing 'xy' : ne[j, i]
-y0 = 0.5 + 0.02 * np.cos(2.0 * np.pi * 2.0 * X)   # mode azimutal 2
+X, Y = np.meshgrid(xs, xs)                        # indexing 'xy': ne[j, i]
+y0 = 0.5 + 0.02 * np.cos(2.0 * np.pi * 2.0 * X)   # azimuthal mode 2
 ne0 = 1.0 + np.exp(-((Y - y0) ** 2) / 0.05 ** 2)
 sim.set_density("ne", np.ascontiguousarray(ne0))
 
-# 5. Quelques pas a CFL fixe, puis on relit l'etat.
+# 5. A few fixed-CFL steps, then read the state back.
 for _ in range(20):
     sim.step_cfl(0.4)
 
 print("t        =", sim.time())
-print("masse    =", sim.mass("ne"))             # conservee par le transport advectif periodique
-print("densite  =", sim.density("ne").shape)    # (96, 96)
+print("mass     =", sim.mass("ne"))             # conserved by the periodic advective transport
+print("density  =", sim.density("ne").shape)    # (96, 96)
 ```
 
 What the key calls do:

@@ -72,7 +72,7 @@ primitive is not redefined ; it just joins the layout. Without this safeguard, t
 would emit `const Real u = u;` (auto-init -> NaN).
 
 ```python
-prho, pu, pv, pp = m.primitive_vars(rho=rho, u=u, v=v, p=p)   # definit ET ordonne
+prho, pu, pv, pp = m.primitive_vars(rho=rho, u=u, v=v, p=p)   # defines AND orders
 ```
 
 ### aux
@@ -93,7 +93,7 @@ channel : the generated brick then declares `n_aux` (4 or 5) so the system dimen
 channel.
 
 ```python
-gx, gy = m.aux("grad_x"), m.aux("grad_y")   # champ E = -grad phi
+gx, gy = m.aux("grad_x"), m.aux("grad_y")   # field E = -grad phi
 ```
 
 ### flux
@@ -146,7 +146,7 @@ background, gravity), a single `Expr`. The system Poisson sums the contributions
 blocks. Without it, the block's rhs is zero.
 
 ```python
-m.elliptic_rhs(-1.0 * (rho - 1.0))   # gravite self-consistante sign=-1, rho0=1
+m.elliptic_rhs(-1.0 * (rho - 1.0))   # self-consistent gravity, sign=-1, rho0=1
 ```
 
 ### projection
@@ -191,7 +191,7 @@ stays consistent.
 
 ```python
 g   = m.param("gamma", 1.4)                   # const : inline + set_gamma
-cs2 = m.param("cs2", 1.0, kind="runtime")     # runtime : params.get(0), ecrasable (aot)
+cs2 = m.param("cs2", 1.0, kind="runtime")     # runtime: params.get(0), overwritable (aot)
 ```
 
 `adc.dsl.RuntimeParam(name, value)` is sugar equivalent to `Param(name, value, kind="runtime")`.
@@ -383,7 +383,7 @@ stays valid without the flag.
 `m.check()` collects `known = cons_names + prim_defs + aux_names`, then `used` = all the
 dependencies (`deps()`) appearing in each primitive definition, in `flux` x/y, in
 `eigenvalues` x/y, in `source` and in `elliptic_rhs`. If `used - known` is non-empty, it raises
-`ValueError("modele '<name>' : variables non definies [...]")`. Returns `True` otherwise.
+`ValueError("model '<name>': undefined variables [...]")`. Returns `True` otherwise.
 
 `check()` does not verify : that `flux` / `eigenvalues` / `source` have been set, the completeness of the
 layout, the validity of the roles, nor conservation. These errors surface later :
@@ -424,7 +424,7 @@ def build_euler_poisson():
     m.eigenvalues(x=[u-c, u, u+c], y=[v-c, v, v+c])
     gx, gy = m.aux("grad_x"), m.aux("grad_y")        # E = -grad phi
     m.source([0.0, -rho*gx, -rho*gy, -(rhou*gx + rhov*gy)])
-    m.elliptic_rhs(-1.0 * (rho - 1.0))               # gravite self-consistante
+    m.elliptic_rhs(-1.0 * (rho - 1.0))               # self-consistent gravity
     prho, pu, pv, pp = m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([prho, prho*pu, prho*pv,
                          pp/(g-1.0) + 0.5*prho*(pu*pu + pv*pv)])
