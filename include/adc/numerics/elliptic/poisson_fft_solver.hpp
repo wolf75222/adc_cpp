@@ -261,25 +261,34 @@ class RemappedFFTSolver {
         owner_rank_(ba.size() > 0 ? dm_[0] : 0),
         fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
              geom.yhi - geom.ylo, spectral) {
+    // CONTRACT (ADC-273 vote on ADC-287): this solver is valid ONLY for System's round-robin
+    // single-box Cartesian layout, where box 0 is owned by rank dm_[0] (= owner_rank_) and every other
+    // rank holds an empty fab. It presents that layout outward (rhs()/phi() on ba/dm) and hides the
+    // box<->slab transpose inside solve(). For a genuinely slab-distributed domain use
+    // DistributedFFTSolver; for wall/non-constant-coefficient cases use geometric_mg.
     // COLLECTIVE hard guards (throw on ALL ranks -> no deadlock; ensure_elliptic is collective and
-    // every rank constructs this object). The System single box implies ba.size()==1 with the box on
-    // one owner rank; Ny must split into np equal slabs for the internal PoissonFFT transpose.
-    if (ba.size() != 1)
+    // every rank constructs this object). Ny must split into np equal slabs for the internal transpose.
+    if (ba.size() != 1) {
       throw std::runtime_error(
           "RemappedFFTSolver: System single-box layout required (ba.size()==1); for a slab-distributed "
           "domain use DistributedFFTSolver or geometric_mg");
-    if (geom.domain.ny() % n_ranks() != 0)
+    }
+    if (geom.domain.ny() % n_ranks() != 0) {
       throw std::runtime_error(
           "RemappedFFTSolver: Ny must be divisible by n_ranks() for the slab FFT");
+    }
   }
 
   MultiFab& rhs() { return rhs_; }
   MultiFab& phi() { return phi_; }
   const Geometry& geom() const { return geom_; }
 
-  // Solve lap(phi) = rhs in place: scatter the owner's box-major rhs into per-rank slabs, run the proven
-  // PoissonFFT (internal MPI transpose), gather the phi slabs back onto the owner, then fill periodic
-  // ghosts on the System layout (intra-box wrap, owner-only). Mode k=0 set to zero (phi with zero mean).
+  // Solve lap(phi) = rhs in place. THREE MPI collectives, in order: (1) MPI_Scatter the owner's box-major
+  // rhs into per-rank nyl_ x Nx_ slabs; (2) PoissonFFT::solve runs its internal MPI_Alltoall (y<->x
+  // transpose) + FFT on each slab; (3) MPI_Gather the phi slabs back onto the owner. Then the owner fills
+  // periodic ghosts on the System layout (intra-box wrap, no messages -> deadlock-free). The caller's
+  // device_fence() after ell_solve() (system_field_solver.hpp) covers the GPU read of the centered grad
+  // phi, identical to the PoissonFFTSolver path. Mode k=0 set to zero (phi with zero mean).
   void solve() {
     // box-major rhs lives ENTIRELY on owner_rank_; each rank ends up with one nyl_ x Nx_ slab.
     std::vector<double> rho_local(static_cast<std::size_t>(nyl_) * Nx_), phi_local;
