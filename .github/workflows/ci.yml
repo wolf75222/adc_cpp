@@ -256,7 +256,7 @@ jobs:
       # SECONDS chronometre configure+build puis tests, ecrits dans GITHUB_STEP_SUMMARY (baseline ADC-171).
       - name: Build + test module Python `adc` (Kokkos Serial)
         run: |
-          pip install --upgrade pip numpy
+          pip install --upgrade pip numpy pytest
           SECONDS=0
           cmake --preset ci-kokkos-python -DCMAKE_LINKER_TYPE=MOLD
           cmake --build --preset ci-kokkos-python
@@ -486,7 +486,7 @@ jobs:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 2G
         run: |
-          pip install --upgrade pip numpy
+          pip install --upgrade pip numpy pytest
           cmake --preset ci-kokkos-python
           cmake --build --preset ci-kokkos-python
 
