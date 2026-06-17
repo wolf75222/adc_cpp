@@ -72,6 +72,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   "Linux and Ubuntu: fresh install" section and a troubleshooting table; the diocotron tutorial routes
   a both-backends-failure to `adc.doctor()`. `setup_env.sh`, `environment.yml`, the diocotron tutorial
   and `pyproject.toml` are translated to English.
+- **Distributed FFT Poisson hardening** (ADC-316, fast-follow to ADC-287): `RemappedFFTSolver::solve()`
+  adds an owner-only `device_fence()` after the periodic-ghost wrap (PR #254 managed-buffer ordering
+  discipline; the caller's post-`ell_solve` fence already brackets the read, so this is belt-and-
+  suspenders that self-documents the seam, and a no-op on CPU). `test_mpi_system_fft` now asserts the
+  remapped solver's `residual()` is machine-zero and covers a non-power-of-two grid (n=12), exercising
+  PoissonFFT's O(n^2) DFT fallback under the box-slab remap. The System Cartesian single-box invariant
+  is documented at its source (`python/system.cpp`).
 
 ### Fixed
 

@@ -15,7 +15,14 @@
 //            fini non trivial, et il coincide avec geometric_mg du meme probleme (apres recentrage de
 //            moyenne pour neutraliser la jauge), a la tolerance FP. n=16 -> Ny=16 divisible par 1/2/4,
 //            donc la garde Ny % n_ranks() de RemappedFFTSolver passe.
+//
+// ADC-316 : en complement de la parite phi vs geometric_mg ci-dessus, on assure aussi le residu
+// discret du RemappedFFTSolver (residual(), DIRECTEMENT car l'API System ne l'expose pas) sur deux
+// tailles -- 16 (radix-2) et 12 (NON puissance de 2 -> repli DFT directe O(n^2) de PoissonFFT, le
+// chemin du remap jusqu'ici non couvert) -- toutes deux machine-zero sous np = 1/2/4.
 
+#include <adc/numerics/elliptic/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
+#include <adc/mesh/geometry.hpp>                          // Geometry, Box2D
 #include <adc/physics/composite.hpp>
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity
 #include <adc/physics/source.hpp>      // NoSource
@@ -39,6 +46,30 @@
 #endif
 
 using namespace adc;
+static constexpr double kPi = 3.14159265358979323846;
+
+// Residu discret machine-zero du RemappedFFTSolver (le solveur "fft"/"fft_spectral" sous MPI) sur la
+// MEME disposition mono-box que System (ba.size()==1, dm(1, np) -> box sur le rang proprietaire, fab
+// vide ailleurs). L'API System n'expose pas residual(), on teste donc le solveur DIRECTEMENT.
+// rho = sin(2 pi x) sin(2 pi y) : mode periodique a moyenne nulle (solvabilite Poisson). Le solve
+// direct etant EXACT pour le Laplacien discret 5 points, residual() (COLLECTIF : poisson_residual sur
+// l'owner + all_reduce_max) est machine-zero. N divisible par np ; radix-2 si puissance de 2, sinon
+// repli DFT directe O(n^2) de PoissonFFT.
+static double remap_residual(int N) {
+  Geometry geom{Box2D::from_extents(N, N), 0.0, 1.0, 0.0, 1.0};
+  BoxArray ba(std::vector<Box2D>{Box2D::from_extents(N, N)});  // box unique = disposition System
+  const double dx = geom.dx(), dy = geom.dy();
+  RemappedFFTSolver fft(geom, ba);
+  for (int li = 0; li < fft.rhs().local_size(); ++li) {  // seul le proprietaire possede une fab
+    Array4 r = fft.rhs().fab(li).array();
+    const Box2D b = fft.rhs().box(li);
+    for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        r(i, j) = std::sin(2 * kPi * (i + 0.5) * dx) * std::sin(2 * kPi * (j + 0.5) * dy);
+  }
+  fft.solve();            // scatter/gather box<->bandes + PoissonFFT + wrap periodique des ghosts
+  return fft.residual();  // COLLECTIF : poisson_residual (owner) + all_reduce_max
+}
 
 // Bloc de CHARGE : alimente le second membre du Poisson (elliptic_rhs = densite de charge q n).
 struct ChargeEll {
@@ -73,6 +104,24 @@ int main(int argc, char** argv) {
   auto chk = [&](bool c, const char* w) {
     if (!c) { std::printf("[rank %d/%d] FAIL %s\n", me, np, w); ++fails; }
   };
+
+  // RemappedFFTSolver residual() machine-zero (ADC-316). Le solveur "fft" sous MPI est
+  // RemappedFFTSolver ; on verifie son residu discret DIRECTEMENT (l'API System n'expose pas
+  // residual()) sur la grille mono-box System a deux tailles : 16 (puissance de 2 -> radix-2) et
+  // 12 (NON puissance de 2 -> repli DFT directe O(n^2) de PoissonFFT, chemin du remap jusqu'ici non
+  // couvert). Les deux doivent etre divisibles par np (transposee a bandes : Nx ET Ny divisibles par
+  // n_ranks()) ; 12 = 2^2 * 3 valide np = 1/2/4.
+  for (int Nr : {16, 12}) {
+    if (Nr % np != 0) {
+      if (me == 0) std::printf("[rank 0/%d] SKIP remap residual N=%d (non divisible par np)\n", np, Nr);
+      continue;
+    }
+    const double res = remap_residual(Nr);
+    if (me == 0)
+      std::printf("[rank 0/%d] RemappedFFTSolver residual (N=%d, %s) = %.3e\n", np, Nr,
+                  is_pow2(Nr) ? "radix-2" : "DFT O(n^2)", res);
+    chk(res < 1e-9, "remap_residual_machine_zero");
+  }
 
   const int n = 16;
   const std::size_t nn = static_cast<std::size_t>(n) * n;

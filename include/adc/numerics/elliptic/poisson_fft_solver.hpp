@@ -346,6 +346,12 @@ class RemappedFFTSolver {
     // no inter-rank messages, deadlock-free. SAME role as in PoissonFFTSolver::solve() (the centered grad
     // phi of the aux derivation reads the i+-1 / j+-1 ghosts).
     fill_boundary(phi_, geom_.domain, Periodicity{true, true});
+    // PR #254 managed-buffer / device-ordering discipline: owner-only device_fence so the host gather +
+    // ghost wrap are settled before phi() is read on the device. The caller's device_fence() after
+    // ell_solve() (system_field_solver.hpp) already brackets the grad-phi read, so this is belt-and-
+    // suspenders, but it self-documents the ordering at the solver seam. Gated on the owner because only
+    // it holds a fab (no-op on the empty ranks); no-op on the CPU/Serial backend.
+    if (my_rank() == owner_rank_) device_fence();
   }
 
   // Discrete residual ||lap(phi) - rhs|| reduced over all ranks (~round-off: direct solve exact). The

@@ -264,6 +264,14 @@ struct System::Impl {
         // ba: ONE box (Cartesian or polar mono-box); theta bands if polar theta_boxes > 1
         // (TRANSPORT split). dm: round-robin (nboxes, nranks) -- 1 box -> dm(1, n_ranks())
         // bit-identical to the historical.
+        // SINGLE-BOX INVARIANT (Cartesian): ba.size()==1 with the round-robin dm puts box 0 on rank
+        // dm[0] (the owner), so under MPI (n_ranks()>1) every other rank holds an empty fab
+        // (local_size()==0). RemappedFFTSolver -- the "fft"/"fft_spectral" Poisson under MPI -- is
+        // COUPLED to exactly this layout: it presents rhs()/phi() on this same ba/dm outward and hides
+        // the box<->slab scatter/gather inside solve(), so the field-solve path stays layout-agnostic
+        // (np==1 uses the single-rank PoissonFFTSolver; a genuinely slab-distributed domain would use
+        // DistributedFFTSolver instead). Stated here so the coupling is visible at the layout's source;
+        // see include/adc/numerics/elliptic/poisson_fft_solver.hpp (RemappedFFTSolver CONTRACT).
         ba(index_boxarray(c)),
         dm(ba.size(), n_ranks()),
         bc_(make_bc(c)),
