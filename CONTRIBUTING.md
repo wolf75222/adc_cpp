@@ -46,7 +46,9 @@ The conventions are written down; follow the project's decision first, then the 
   [docs/docguide/](docs/docguide/) (philosophy, best practices, Markdown style, README files) and is
   the canonical reference. Follow it, in particular *Update Docs with Code* (change the docs in the
   same commit as the code), *Minimum viable documentation*, and *Duplication is evil* (link, do not
-  re-document). The internal guide
+  re-document). Its lean companion, [docs/docguide/agile_documentation.md](docs/docguide/agile_documentation.md)
+  (adapted from Scott Ambler), covers *whether*, *what*, and *when* to document at all: document late
+  and stable, prefer executable specs and generated reference, and update only when it hurts. The internal guide
   [docs/sphinx/development/documentation.md](docs/sphinx/development/documentation.md) codifies how
   we apply it (Google developer documentation style and SWE-at-Google ch.10, doc treated as code).
   Write in English (en-US), ASCII for `docs/sphinx/**`, no em-dash; `check_docs.py` and `sphinx -W`
