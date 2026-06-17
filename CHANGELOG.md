@@ -61,6 +61,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `<base>.<backend>.so` sibling, so dlopen reloads a fresh handle. The out-of-source cache was
   already keyed by backend; the three compile facades (`HyperbolicModel`, `Model`, `HybridModel`)
   share the redirect. Regression test: `test_compile_cache_backend`.
+- **DSL production/AOT loaders now compile with MPI** (ADC-319): the `backend="production"` and
+  `backend="aot"` model `.so` were compiled without `-DADC_HAS_MPI` even when `_adc` is built with
+  MPI, so `comm.hpp` fell back to its serial stubs (`n_ranks()=1`, `my_rank()=0`) inside the loader.
+  Any distributed layout built in the loader then collapsed to a single owner on every rank: an
+  `AmrSystem(distribute_coarse=True)` replicated the whole coarse transport on all ranks (no MPI
+  strong-scaling). `dsl.py` now re-bakes `-DADC_HAS_MPI` plus the module's MPI include dir (exposed as
+  `_adc.__has_mpi__` / `__mpi_include__`), leaving the MPI symbols undefined to resolve at load against
+  the libmpi already loaded by `_adc`/mpi4py (no second libmpi linked, like the Kokkos runtime). The
+  MPI seam enters the loader cache key (`mpi=on|off`). Measured on ROMEO (hyqmom15 diocotron, N=256,
+  cmg=64, 16 boxes): per-rank coarse box count drops from 16 to 4 at np=4 (the base now distributes),
+  and ms/step falls from a flat 2554 to 1962. Serial builds are unaffected (no flag, bit-identical).
 
 ## [0.2.0] - 2026-06-16
 

@@ -107,6 +107,24 @@ PYBIND11_MODULE(_adc, m) {
   m.attr("__has_kokkos__") = false;
 #endif
 
+  // MPI seam COMPILED into the module (ADC_HAS_MPI via the adc INTERFACE under -DADC_USE_MPI=ON) plus
+  // the MPI include dir(s) used by the build (ADC_MPI_INCLUDE, baked by CMake; '|'-joined). The DSL
+  // "production"/"aot" loaders are compiled OUTSIDE CMake and inherit none of this: dsl.py reads these
+  // attributes (_native_mpi_flags) to re-bake -DADC_HAS_MPI + -I<inc> so the loader uses comm.hpp's
+  // REAL MPI rather than its serial stubs (n_ranks()=1). Without it a distributed layout built inside
+  // the loader replicates on every rank (ADC-319). A serial module exposes False / empty.
+#if defined(ADC_HAS_MPI)
+  m.attr("__has_mpi__") = true;
+#if defined(ADC_MPI_INCLUDE)
+  m.attr("__mpi_include__") = ADC_MPI_INCLUDE;
+#else
+  m.attr("__mpi_include__") = "";
+#endif
+#else
+  m.attr("__has_mpi__") = false;
+  m.attr("__mpi_include__") = "";
+#endif
+
   // Path of the COMPILER that built this module (ADC_CXX_COMPILER, injected by CMake). Since the ABI
   // key encodes __VERSION__, the "production" DSL MUST recompile its loaders with THIS compiler:
   // dsl.py prefers it to the PATH's `which c++` (which, in a conda env, often designates another

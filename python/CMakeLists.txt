@@ -62,6 +62,21 @@ target_compile_definitions(_adc PRIVATE ADC_VERSION="${PROJECT_VERSION}")
 # __VERSION__ different -> rejet ABI. dsl.py prefere ce chemin s'il existe encore sur la machine.
 target_compile_definitions(_adc PRIVATE ADC_CXX_COMPILER="${CMAKE_CXX_COMPILER}")
 
+# ADC-319 : dossier(s) d'include MPI du build, bake dans le module (expose en adc._adc.__mpi_include__).
+# Le module herite deja -DADC_HAS_MPI via l'INTERFACE adc (cible MPI::MPI_CXX, racine), mais le DSL
+# backend "production"/"aot" compile ses loaders HORS CMake et n'en herite rien : sans -DADC_HAS_MPI +
+# l'include MPI, comm.hpp y retombe sur ses stubs serie (n_ranks()=1, my_rank()=0) et toute disposition
+# distribuee construite DANS le loader (p.ex. AmrSystem(distribute_coarse=True)) se replique sur chaque
+# rang (pas de strong-scaling). dsl.py (_native_mpi_flags) lit cet attribut pour recompiler le loader
+# avec le MEME MPI que le module. Sans MPI (build serie) : attribut absent -> loader serie inchange.
+if(TARGET MPI::MPI_CXX)
+  get_target_property(_adc_mpi_inc MPI::MPI_CXX INTERFACE_INCLUDE_DIRECTORIES)
+  if(_adc_mpi_inc)
+    string(REPLACE ";" "|" _adc_mpi_inc "${_adc_mpi_inc}")
+    target_compile_definitions(_adc PRIVATE ADC_MPI_INCLUDE="${_adc_mpi_inc}")
+  endif()
+endif()
+
 # Signature de l'arbre d'en-tetes du coeur, BAKED dans la cle d'ABI du module (adc/runtime/abi_key.hpp
 # via -DADC_HEADER_SIG). Le backend DSL "production" (dsl.compile_native) recalcule la MEME signature
 # (adc.dsl.adc_header_signature) et la bake dans le loader .so : les cles concordent quand les en-tetes
