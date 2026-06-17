@@ -418,7 +418,8 @@ foreach(t
     # propres du jacobien de flux) ; on le rend visible a ctest. Compile AOT (.so) -> auto-skip sans compilateur.
     test_dsl_wave_speeds_jacobian    # vitesses d'onde par valeurs propres du jacobien de flux (real_eig_minmax) ; compile AOT (.so), auto-skip via dsl._default_cxx
     test_projection_hook      # ADC-177 : projection ponctuelle POST-PAS ENTIER (m.projection -> trait HasPointwiseProjection) : no-default-change, etat post-pas == transport puis projection numpy (production + aot), sign() DSL, rejets prototype/AMR (auto-skip)
-    test_projection_eig)      # ADC-289 : temoin de VALEURS PROPRES dans m.projection (dsl.eig_max_im/eig_lmin/eig_lmax -> foncteur nomme + real_eig_minmax) : eval == np.linalg.eigvals, brique generee project() == numpy cellule par cellule, semantique post-pas (_adc), extension additive (auto-skip)
+    test_projection_eig       # ADC-289 : temoin de VALEURS PROPRES dans m.projection (dsl.eig_max_im/eig_lmin/eig_lmax -> foncteur nomme + real_eig_minmax) : eval == np.linalg.eigvals, brique generee project() == numpy cellule par cellule, semantique post-pas (_adc), extension additive (auto-skip)
+    test_compile_cache_backend)  # ADC-186 : cache de compile keye PAR BACKEND -- un so_path explicite reutilise en process par un AUTRE backend est redirige vers un frere distinct (le cache de handles dlopen ne ressert plus un artefact aot a un chemin production)
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)
   set_tests_properties(${t} PROPERTIES

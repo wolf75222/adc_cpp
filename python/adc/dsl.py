@@ -429,6 +429,40 @@ def _cache_so_path(model_hash, abi_key, backend, target, name):
     return os.path.join(adc_cache_dir(), fname)
 
 
+# In-process registry of the backend already written to each resolved .so path (key = absolute path,
+# value = backend). It models a cache that neither the explicit so_path nor the out-of-source cache key
+# represented: the HANDLE cache of the dynamic loader (dlopen / dyld), keyed BY PATH and BLIND to the
+# file content. On macOS notably, dlopen('/x/m.so') already loaded returns the SAME handle even if the
+# file was recompiled in between: recompiling a 'production' .so ON a path where an 'aot' .so was already
+# loaded re-serves the stale aot handle (add_native_block -> 'adc_native_abi_key missing'). The
+# out-of-source cache key already includes the backend (distinct path per backend, so no collision); the
+# EXPLICIT so_path, however, is pinned by the caller -> two backends overwrite each other there. We avoid
+# it by redirecting to a per-backend DISTINCT sibling as soon as another backend already occupies that
+# path in the process. Reset every process (the dlopen state is too); a new process re-reads the current
+# file, so recompiling at the same path across two processes stays safe.
+_process_so_backend = {}
+
+
+def _backend_distinct_so_path(so_path, backend):
+    """Return a .so path safe for @p backend: so_path unchanged when no OTHER backend already occupies it
+    in this process, otherwise a distinct sibling (inserts '.<backend>' before the extension) so dlopen
+    reloads a fresh handle instead of re-serving the stale one (cf. _process_so_backend). Touches neither
+    the disk nor the registry; the caller records the backend of the RETAINED path after compilation."""
+    import os
+    prev = _process_so_backend.get(os.path.abspath(so_path))
+    if prev is not None and prev != backend:
+        root, ext = os.path.splitext(so_path)
+        so_path = "%s.%s%s" % (root, backend, ext or ".so")
+    return so_path
+
+
+def _record_so_backend(so_path, backend):
+    """Record (in process) the backend written to @p so_path: lets the next path resolution detect a
+    cross-backend reuse of the SAME path (cf. _backend_distinct_so_path)."""
+    import os
+    _process_so_backend[os.path.abspath(so_path)] = backend
+
+
 def _native_kokkos_root():
     """Kokkos root to compile the DSL loaders with the SAME backend as the _adc module.
 
@@ -3568,10 +3602,18 @@ class HyperbolicModel:
                 cache_backend += ";hoist"
             so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
+                _record_so_backend(so_path, backend)
                 return so_path  # cache HIT: .so already compiled for this key, reused as is
+        else:
+            # Explicit so_path: the out-of-source cache does not apply, but the dlopen handle cache (in
+            # process, by path) does -- recompiling another backend ON this path would re-serve the stale
+            # handle. Redirect to a distinct per-backend sibling if needed (cf. _backend_distinct_so_path).
+            so_path = _backend_distinct_so_path(so_path, backend)
 
-        return self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
-                                  target=target, hoist_reciprocals=hoist_reciprocals)
+        out_path = self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
+                                       target=target, hoist_reciprocals=hoist_reciprocals)
+        _record_so_backend(out_path, backend)
+        return out_path
 
     @classmethod
     def adder_for(cls, backend):
@@ -4169,6 +4211,9 @@ class Model:
             out_path = m.compile(so_path, include, backend=backend, name=name, cxx=cxx, std=std,
                                  require_metadata=require_metadata, target=target,
                                  hoist_reciprocals=hoist_reciprocals)
+        # The keyed path (cache HIT) or the path retained by the engine carries the written backend: we
+        # record it so a cross-backend reuse of the SAME path in this process is detected.
+        _record_so_backend(out_path, backend)
 
         adder = HyperbolicModel.adder_for(backend)
         cons_roles = roles_for(m.cons_names, m.cons_roles)
@@ -4657,7 +4702,13 @@ class HybridModel:
                              else "hybrid-" + backend)
             so_path = _cache_so_path(model_hash, abi_key, cache_backend, target, name)
             if os.path.exists(so_path):
+                _record_so_backend(so_path, "hybrid-" + backend)
                 return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
+        else:
+            # Explicit so_path: avoid the dlopen handle cache re-serving ANOTHER backend already loaded at
+            # this path in the process (cf. _backend_distinct_so_path). The hybrid backend is distinct from
+            # the non-hybrid backend of the same name (different ABI) -> 'hybrid-' prefix.
+            so_path = _backend_distinct_so_path(so_path, "hybrid-" + backend)
 
         # aot AND native run the production path -> same optimization flags (cf. _dsl_optflags);
         # only the jit/prototype stays at -O2 (Rusanov host residue, perf out of scope).
@@ -4688,6 +4739,7 @@ class HybridModel:
                 f.write(source)
             _run_compile([eff_cxx, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags],
                          "HybridModel, backend " + backend)
+        _record_so_backend(so_path, "hybrid-" + backend)
         return self._compiled_model(so_path, backend, target, abi_key, model_hash, eff_cxx, std)
 
     def _compiled_model(self, so_path, backend, target, abi_key, model_hash, cxx, std):

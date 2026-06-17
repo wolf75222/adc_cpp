@@ -45,6 +45,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   mass conservation (< 1e-12) and ulp-level global-mass parity vs np=1. Closes the System-MPI
   branch named in `GH200_HYQMOM15.md` section 3.
 
+### Fixed
+
+- **Backend-blind DSL compile cache** (ADC-186): recompiling a `production` model onto an explicit
+  `so_path` where an `aot` artifact was already loaded via dlopen in the same process re-served the
+  stale aot handle (`add_native_block: adc_native_abi_key missing`), since the dynamic loader caches
+  handles by path. `compile()` now keeps an in-process registry of the backend written to each path
+  and redirects an explicit `so_path` already held by another backend to a distinct
+  `<base>.<backend>.so` sibling, so dlopen reloads a fresh handle. The out-of-source cache was
+  already keyed by backend; the three compile facades (`HyperbolicModel`, `Model`, `HybridModel`)
+  share the redirect. Regression test: `test_compile_cache_backend`.
+
 ## [0.2.0] - 2026-06-16
 
 ### Added
