@@ -55,6 +55,9 @@ struct LevelHierarchy {
   // TIME METHOD: kEuler (default, forward Euler per substep, bit-identical to the historical) or
   // kSsprk3 (SSPRK3 order 3 + per-stage reflux). kSsprk3 requires imex == false (rejected otherwise, cf. engine).
   AmrTimeMethod time_method = AmrTimeMethod::kEuler;
+  // Zhang-Shu positivity floor (ADC-259): Density-role face-state + C/F-ghost-mean floor on the AMR
+  // transport. <= 0 (default) -> inactive, bit-identical to the historical path.
+  Real pos_floor = Real(0);
 };
 
 // Unified production entry: advances the hierarchy by one time step dt. "pieces" form (the coupler
@@ -68,15 +71,17 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void advance_amr(const Model& m, std::vector<AmrLevelMP>& levels, const Box2D& base_dom, Real dt,
                  Periodicity base_per = Periodicity{true, true}, bool coarse_replicated = true,
                  bool recon_prim = false, bool imex = false, const NewtonOptions& nopts = {},
-                 AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
+                 AmrTimeMethod tmethod = AmrTimeMethod::kEuler, Real pos_floor = Real(0)) {
   detail::amr_step_multilevel_multipatch<Limiter, NumericalFlux>(
-      m, levels, base_dom, dt, base_per, coarse_replicated, recon_prim, imex, nopts, tmethod);
+      m, levels, base_dom, dt, base_per, coarse_replicated, recon_prim, imex, nopts, tmethod,
+      pos_floor);
 }
 
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void advance_amr(const Model& m, LevelHierarchy& h, Real dt) {
   advance_amr<Limiter, NumericalFlux>(m, h.levels, h.base_dom, dt, h.base_per, h.coarse_replicated,
-                                      h.recon_prim, h.imex, h.newton_options, h.time_method);
+                                      h.recon_prim, h.imex, h.newton_options, h.time_method,
+                                      h.pos_floor);
 }
 
 }  // namespace adc

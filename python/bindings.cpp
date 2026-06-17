@@ -570,7 +570,8 @@ PYBIND11_MODULE(_adc, m) {
               const std::vector<std::string>& implicit_vars,
               const std::vector<std::string>& implicit_roles, int newton_max_iters,
               double newton_rel_tol, double newton_abs_tol, double newton_fd_eps,
-              double newton_damping, const std::string& newton_fail_policy, bool newton_diagnostics) {
+              double newton_damping, const std::string& newton_fail_policy, bool newton_diagnostics,
+              double positivity_floor) {
              NewtonOptions newton;
              newton.max_iters = newton_max_iters;
              newton.rel_tol = static_cast<Real>(newton_rel_tol);
@@ -580,7 +581,7 @@ PYBIND11_MODULE(_adc, m) {
              newton.fail_policy =
                  newton_fail_policy_from_string(newton_fail_policy, "AmrSystem::add_block");
              s.add_block(name, model, limiter, riemann, recon, time, substeps, stride, implicit_vars,
-                         implicit_roles, newton, newton_diagnostics);
+                         implicit_roles, newton, newton_diagnostics, positivity_floor);
            },
            py::arg("name"), py::arg("model"),
            py::arg("limiter") = "minmod", py::arg("riemann") = "rusanov",
@@ -597,7 +598,11 @@ PYBIND11_MODULE(_adc, m) {
            py::arg("newton_max_iters") = 2, py::arg("newton_rel_tol") = 0.0,
            py::arg("newton_abs_tol") = 0.0, py::arg("newton_fd_eps") = 1e-7,
            py::arg("newton_damping") = 1.0, py::arg("newton_fail_policy") = "none",
-           py::arg("newton_diagnostics") = false)
+           py::arg("newton_diagnostics") = false,
+           // Zhang-Shu positivity floor (ADC-259): Density-role face-state + C/F-ghost-mean floor on
+           // the AMR transport. 0 (default) = inactive, bit-identical. Marshaled from spatial.positivity_floor
+           // by the AmrSystem.add_block / add_equation Python facade.
+           py::arg("positivity_floor") = 0.0)
       // Newton report (IMEX diagnostics OPT-IN, native MULTI-BLOCK): dict {enabled, converged,
       // max_residual, max_iters_used, n_failed, failed_cell, failed_component}, aggregated over the
       // levels/substeps of the LAST advance of the block. failed_cell = (i, j) or None. EXACT shape of

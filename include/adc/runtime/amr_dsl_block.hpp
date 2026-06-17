@@ -181,6 +181,10 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   // cpl->step -> advance_amr. 0 (default / older .so loader) = historical kEuler, bit-identical.
   const AmrTimeMethod tmethod =
       bp.time_method == 1 ? AmrTimeMethod::kSsprk3 : AmrTimeMethod::kEuler;
+  // Zhang-Shu positivity floor (ADC-259): threaded to cpl->step / advance_transport -> advance_amr ->
+  // compute_face_fluxes + C/F ghost clamp. bp.pos_floor == 0 (default / older flat-ABI .so loader that
+  // never sets this append-only field) -> inactive, bit-identical historical path.
+  const Real pf = static_cast<Real>(bp.pos_floor);
   auto step_state = std::make_shared<int>(0);  // step counter shared by the closure
   if (bp.schur) {
     // amr-schur PATH: GLOBAL condensed source stage (electrostatic/Lorentz) instead of the LOCAL
@@ -245,7 +249,7 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
     const double theta = bp.schur_theta;
     const bool strang = bp.schur_strang;
     h.step = [cpl, crit, sub, rprim, regrid_every, step_state, schur, bz_coarse, phi_coarse, theta,
-              strang, model](double dt) {
+              strang, model, pf](double dt) {
       // amr-schur Step 2/3: MONO-LEVEL hierarchy (the condensed stage does not carry the multi-level case).
       // So we do NOT regrid (a regrid would create a fine patch -> multi-level guard of the stage). The
       // amr-schur regrid will come with the composite Schur/Poisson (Step 4). cf. levels().size() > 1.
@@ -259,16 +263,16 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
           // + grad inject, the AMR counterpart of solve_fields) RE-SOLVED BEFORE each stage that
           // consumes phi -- exactly SystemStepper::step_strang (3 solves: head, pre-source, post-source).
           cpl->update();
-          cpl->template advance_transport<AmrDiscLF<Limiter, Flux>>(Real(0.5) * h2, rprim);
+          cpl->template advance_transport<AmrDiscLF<Limiter, Flux>>(Real(0.5) * h2, rprim, pf);
           cpl->update();
           amr_schur_source(*cpl, *schur, *bz_coarse, *phi_coarse, theta, h2);
           cpl->update();
-          cpl->template advance_transport<AmrDiscLF<Limiter, Flux>>(Real(0.5) * h2, rprim);
+          cpl->template advance_transport<AmrDiscLF<Limiter, Flux>>(Real(0.5) * h2, rprim, pf);
         } else {
           // LIE (Godunov, 1st order): H(dt); S(dt). A single update() at the head (the source stage reads
           // the head phi), mirror of SystemStepper::step Lie (a single solve_fields, transport, source).
           cpl->update();
-          cpl->template advance_transport<AmrDiscLF<Limiter, Flux>>(h2, rprim);
+          cpl->template advance_transport<AmrDiscLF<Limiter, Flux>>(h2, rprim, pf);
           amr_schur_source(*cpl, *schur, *bz_coarse, *phi_coarse, theta, h2);
         }
       }
@@ -278,14 +282,14 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
       ++*step_state;
     };
   } else {
-    h.step = [cpl, crit, sub, rprim, imex, regrid_every, step_state, nopts, tmethod, model](double dt) {
+    h.step = [cpl, crit, sub, rprim, imex, regrid_every, step_state, nopts, tmethod, model, pf](double dt) {
       if (regrid_every > 0 && *step_state > 0 && *step_state % regrid_every == 0) cpl->regrid(crit);
       const double h2 = dt / sub;
       // NEWTON OPTIONS threaded to the coupler (mono-block): nopts={} by default => iters=2 historical,
       // bit-identical; non-default nopts (set_density + adc.IMEX(newton_*)) drives the local Newton.
       // tmethod (kEuler default) selects SSPRK3 if requested (time='ssprk3'); kEuler bit-identical.
       for (int s = 0; s < sub; ++s)
-        cpl->template step<AmrDiscLF<Limiter, Flux>>(h2, rprim, imex, nopts, tmethod);
+        cpl->template step<AmrDiscLF<Limiter, Flux>>(h2, rprim, imex, nopts, tmethod, pf);
       // PROJECTION PONCTUELLE post-pas (ADC-177) PAR NIVEAU, APRES transport + source de tous les
       // substeps. No-op si le modele ne declare pas m.project (HasPointwiseProjection false).
       detail::apply_pointwise_project_amr(model, cpl->levels());
@@ -468,7 +472,8 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
                                 const NewtonOptions& nopts = {},
                                 const std::vector<double>* state = nullptr,
                                 bool newton_diagnostics = false,
-                                AmrTimeMethod time_method = AmrTimeMethod::kEuler) {
+                                AmrTimeMethod time_method = AmrTimeMethod::kEuler,
+                                double pos_floor = 0.0) {
   const int nc = Model::n_vars;
   const int ng = Limiter::n_ghost;  // limiter stencil (scheme parity, like build_amr_compiled)
   const int nlev = S.nlev();
@@ -511,10 +516,10 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
   // we capture it in a std::function from THIS TU (device-clean recipe #64/#97).
   // tmethod (kEuler default) selects SSPRK3 (time='ssprk3') for the explicit transport of the block;
   // kEuler -> historical forward Euler, bit-identical. The explicit source stays carried by advance_amr.
-  b.advance = [model, rprim, time_method](std::vector<AmrLevelMP>& L, const Box2D& dom, Real dt,
-                                          Periodicity per, bool repl) {
+  b.advance = [model, rprim, time_method, pos_floor](std::vector<AmrLevelMP>& L, const Box2D& dom,
+                                                     Real dt, Periodicity per, bool repl) {
     advance_amr<Limiter, Flux>(model, L, dom, dt, per, repl, rprim, /*imex=*/false, NewtonOptions{},
-                               time_method);
+                               time_method, static_cast<Real>(pos_floor));
   };
   // imex_advance (capstone vii): ONE Lie step [source-free transport; implicit source] whose
   // SEMANTICS mirror the IMEX branch of AmrSystemCoupler::step (SourceFreeModel + AmrImplicitSourceStepper),
@@ -549,11 +554,17 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
       b.newton_report = nrep;
     }
     NewtonReport* nreport = nrep.get();  // null without diagnostics; stable address otherwise
-    b.imex_advance = [model, mask, nopts, nreport](std::vector<AmrLevelMP>& L, const Box2D& dom,
-                                                   Real dt, Periodicity per, bool repl) {
+    b.imex_advance = [model, mask, nopts, nreport, pos_floor](std::vector<AmrLevelMP>& L,
+                                                              const Box2D& dom, Real dt,
+                                                              Periodicity per, bool repl) {
       // (1) explicit source-free transport (-div F only), reflux carries the hyperbolic conservation.
+      // The Zhang-Shu floor (ADC-259) applies to the source-free TRANSPORT (the half-step that
+      // reconstructs faces); the stiff implicit source backward_euler_source below stays unfloored
+      // (cell-local, parity with the uniform System IMEX). SourceFreeModel<Model> forwards
+      // conservative_vars(), so positivity_comp resolves the SAME Density-role component.
       advance_amr<Limiter, Flux>(SourceFreeModel<Model>{model}, L, dom, dt, per, repl,
-                                 /*recon_prim=*/false, /*imex=*/false);
+                                 /*recon_prim=*/false, /*imex=*/false, NewtonOptions{},
+                                 AmrTimeMethod::kEuler, static_cast<Real>(pos_floor));
       // (2) stiff implicit source backward-Euler PER LEVEL (local Newton, block mask). The report
       // nreport (null without diagnostics) AGGREGATES over the levels: backward_euler_source does its own
       // max/sum + MPI all_reduce into *nreport (no reset here -> it also accumulates over the sub-steps,
@@ -644,7 +655,8 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                                    const NewtonOptions& nopts = {},
                                    const std::vector<double>* state = nullptr,
                                    bool newton_diagnostics = false,
-                                   AmrTimeMethod time_method = AmrTimeMethod::kEuler) {
+                                   AmrTimeMethod time_method = AmrTimeMethod::kEuler,
+                                   double pos_floor = 0.0) {
   // CENTRALIZED VALIDATION (dispatch_tags.hpp registry) BEFORE the dispatch: same tags accepted /
   // rejected as before, identical messages. The template if/else dispatch that follows is UNCHANGED; the
   // capability guards (hllc/roe: 2D Euler or capability) stay `if constexpr` PER MODEL.
@@ -653,16 +665,16 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
   if (riem == "rusanov") {
     if (lim == "none")
       return build_amr_block<Model, NoSlope, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                          substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                          substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
     if (lim == "minmod")
       return build_amr_block<Model, Minmod, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
     if (lim == "vanleer")
       return build_amr_block<Model, VanLeer, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                         substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                         substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
     if (lim == "weno5")
       return build_amr_block<Model, Weno5, RusanovFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
     throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-block)", "limiteur", lim);
   }
   if (riem == "hll") {
@@ -673,16 +685,16 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                   }) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, HLLFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-block)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-block): flux 'hll' requires signed wave "
@@ -696,19 +708,19 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                    requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                        substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       // weno5: PARITY with System::make_block (which routes hllc+weno5). Before this work the
       // hllc AMR branch had no weno5 case -> "unknown limiter" where System built: table
       // divergence fixed (build_amr_block supports Weno5, already wired on rusanov/hll).
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, HLLCFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-block)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-block): flux 'hllc' requires a "
@@ -722,18 +734,18 @@ AmrRuntimeBlock dispatch_amr_block(const Model& m, const std::string& lim, const
                    requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
       if (lim == "none")
         return build_amr_block<Model, NoSlope, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                       substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "minmod")
         return build_amr_block<Model, Minmod, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                     substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                     substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       if (lim == "vanleer")
         return build_amr_block<Model, VanLeer, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       // weno5: PARITY with System::make_block (which routes roe+weno5). Same table divergence
       // fix as the hllc branch above.
       if (lim == "weno5")
         return build_amr_block<Model, Weno5, RoeFlux>(m, S, name, density, has_density, gamma,
-                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method);
+                                                      substeps, recon_prim, imex, stride, implicit_components, nopts, state, newton_diagnostics, time_method, pos_floor);
       throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-block)", "limiteur", lim);
     } else {
       throw std::runtime_error("add_block(AmrSystem, multi-block): flux 'roe' requires a "

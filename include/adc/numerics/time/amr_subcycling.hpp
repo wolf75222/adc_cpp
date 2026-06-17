@@ -241,7 +241,8 @@ inline BoxArray coarsen_grown(const BoxArray& ba, int ngrow, int r) {
 //    interpolated. No more silent remote failures.
 // In serial both paths are identical (parent local everywhere, parallel_copy = memory copy).
 inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const MultiFab& Pn,
-                                   Real frac, bool replicated_parent = true) {
+                                   Real frac, bool replicated_parent = true,
+                                   Real pos_floor = Real(0), int pos_comp = 0) {
   const int nc = Uf.ncomp(), ng = Uf.n_grow();
   if (replicated_parent) {
     device_fence();
@@ -255,7 +256,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
             const int pb = mf_find_box(Po, ci, cj);
             if (pb < 0) continue;  // outside parent coverage -> leave to fill_boundary
             const ConstArray4 po = Po.fab(pb).const_array(), pn = Pn.fab(pb).const_array();
-            fill_cf_ghost_cell(f, po, pn, i, j, nc, frac);
+            fill_cf_ghost_cell(f, po, pn, i, j, nc, frac, pos_floor, pos_comp);
           }
     }
     return;
@@ -271,7 +272,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
     const Box2D v = Uf.box(li), g = Uf.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-        if (!v.contains(i, j)) fill_cf_ghost_cell(f, po, pn, i, j, nc, frac);
+        if (!v.contains(i, j)) fill_cf_ghost_cell(f, po, pn, i, j, nc, frac, pos_floor, pos_comp);
   }
 }
 
@@ -343,11 +344,13 @@ namespace detail {  // INTERNAL N-level multi-patch engine; the public facade is
 // parallel_copy).
 inline void ssprk3_refill_level_ghosts(MultiFab& U, int lev, const Box2D& base_dom,
                                        Periodicity base_per, const MultiFab* pOld,
-                                       const MultiFab* pNew, Real frac, bool coarse_replicated) {
+                                       const MultiFab* pNew, Real frac, bool coarse_replicated,
+                                       Real pos_floor = Real(0), int pos_comp = 0) {
   if (lev == 0) {
     fill_boundary(U, base_dom, base_per);
   } else {
-    mf_fill_fine_ghosts_mb(U, *pOld, *pNew, frac, (lev == 1) && coarse_replicated);
+    mf_fill_fine_ghosts_mb(U, *pOld, *pNew, frac, (lev == 1) && coarse_replicated, pos_floor,
+                           pos_comp);
     const Box2D fdom = Box2D::from_extents(base_dom.nx() << lev, base_dom.ny() << lev);
     fill_boundary(U, fdom, Periodicity{false, false});
   }
@@ -370,8 +373,11 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx, MultiFab& fy,
                           bool recon_prim, int lev, const Box2D& base_dom, Periodicity base_per,
                           const MultiFab* pOld, const MultiFab* pNew, Real frac,
-                          bool coarse_replicated) {
+                          bool coarse_replicated, Real pos_floor = Real(0)) {
   const int nc = lv.U.ncomp();
+  // Density-role component for the C/F ghost floor (ADC-259), resolved ONCE on the host. pos_floor<=0
+  // -> 0 without model introspection (positivity_comp short-circuit) -> bit-identical historical path.
+  const int pos_comp = detail::positivity_comp<Model>(pos_floor);
   MultiFab U0 = lv.U;  // starting state t (Shu-Osher convex combinations)
   MultiFab R(lv.U.box_array(), lv.U.dmap(), nc, 0);
   MultiFab Fxs(fx.box_array(), fx.dmap(), nc, 0), Fys(fy.box_array(), fy.dmap(), nc, 0);  // stage flux
@@ -383,8 +389,10 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
   lincomb(fy, Real(1) / 6, fy, Real(0), fy);
 
   // --- stage 1: F(U1) ---
-  ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated);
-  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim);
+  ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated,
+                             pos_floor, pos_comp);
+  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim,
+                                              pos_floor);
   device_fence();
   mf_eval_rhs(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, R);  // R1 = -div F1 + S(U1)
   saxpy(lv.U, dt, R);                                         // lv.U = U1 + dt R1
@@ -393,8 +401,10 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
   saxpy(fy, Real(1) / 6, Fys);
 
   // --- stage 2: F(U2) ---
-  ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated);
-  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim);
+  ssprk3_refill_level_ghosts(lv.U, lev, base_dom, base_per, pOld, pNew, frac, coarse_replicated,
+                             pos_floor, pos_comp);
+  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, recon_prim,
+                                              pos_floor);
   device_fence();
   mf_eval_rhs(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, R);  // R2 = -div F2 + S(U2)
   saxpy(lv.U, dt, R);                                         // lv.U = U2 + dt R2
@@ -410,7 +420,7 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
                        const MultiFab* pNew, Real frac, std::vector<RegMP>* parentRegs,
                        bool coarse_replicated = true, bool recon_prim = false,
                        bool imex = false, const NewtonOptions& nopts = {},
-                       AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
+                       AmrTimeMethod tmethod = AmrTimeMethod::kEuler, Real pos_floor = Real(0)) {
   // SSPRK3 + IMEX: combination NOT VALIDATED (the per-stage implicit stiff source under SSP has
   // not been verified), rejected EXPLICITLY rather than run silently. The facade cannot produce it
   // (time.kind is a single selector: "ssprk3" XOR "imex"), defense-in-depth guard here.
@@ -420,6 +430,9 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
         "time='ssprk3' (explicit source per stage) or time='imex' (forward Euler + implicit source)");
   const SubcyclingSchedule sched(2);
   const int nc = L[lev].U.ncomp();
+  // Density-role component for the C/F ghost floor (ADC-259), resolved ONCE on the host. pos_floor<=0
+  // -> 0 without model introspection (positivity_comp short-circuit) -> bit-identical historical path.
+  const int pos_comp = detail::positivity_comp<Model>(pos_floor);
   AmrLevelMP& lv = L[lev];
   const int np = lv.U.local_size();
   const bool ssprk3 = (tmethod == AmrTimeMethod::kSsprk3);
@@ -430,7 +443,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     // parent (level lev-1) REPLICATED only if it is level 0 (lev == 1); otherwise distributed ->
     // FillPatch by parallel_copy.
     mf_fill_fine_ghosts_mb(lv.U, *pOld, *pNew, frac,
-                           /*replicated_parent=*/(lev == 1) && coarse_replicated);
+                           /*replicated_parent=*/(lev == 1) && coarse_replicated, pos_floor,
+                           pos_comp);
     const Box2D fdom = Box2D::from_extents(base_dom.nx() << lev, base_dom.ny() << lev);
     fill_boundary(lv.U, fdom, Periodicity{false, false});  // fine-fine halos
   }
@@ -445,7 +459,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   }
   MultiFab fx(BoxArray(std::move(fxb)), lv.U.dmap(), nc, 0);
   MultiFab fy(BoxArray(std::move(fyb)), lv.U.dmap(), nc, 0);
-  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, recon_prim);
+  compute_face_fluxes<Limiter, NumericalFlux>(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, recon_prim,
+                                              pos_floor);
   device_fence();
 
   // SSPRK3: we FIRST advance lv.U from t to t+dt (3 stages) AND replace (fx, fy) -- which contain
@@ -463,7 +478,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   if (ssprk3) {
     if (!is_leaf) ssp_U_old = lv.U;  // the children interpolate between this state (t) and advanced lv.U (t+dt)
     ssprk3_advance_level<Limiter, NumericalFlux>(m, lv, dt, fx, fy, recon_prim, lev, base_dom,
-                                                 base_per, pOld, pNew, frac, coarse_replicated);
+                                                 base_per, pOld, pNew, frac, coarse_replicated,
+                                                 pos_floor);
   }
 
   if (parentRegs) {  // FINE role: fine fluxes of THIS level into the parent register
@@ -587,7 +603,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   for (int s = 0; s < sched.count(); ++s)  // each fine substep = one full SSP step (tmethod propagated)
     subcycle_level_mp<Limiter, NumericalFlux>(m, L, lev + 1, sched.dt_sub(dt), base_dom, base_per,
                                               &U_old, &lv.U, sched.frac(s), &regs,
-                                              coarse_replicated, recon_prim, imex, nopts, tmethod);
+                                              coarse_replicated, recon_prim, imex, nopts, tmethod,
+                                              pos_floor);
   mf_average_down_mb(L[lev + 1].U, lv.U);  // distributed point 3 (parallel_copy)
 
   // Distributed point 4: coverage-aware reflux. The bordering coarse cell may belong to a REMOTE
@@ -624,9 +641,11 @@ void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
                                     Periodicity per = Periodicity{true, true},
                                     bool coarse_replicated = true, bool recon_prim = false,
                                     bool imex = false, const NewtonOptions& nopts = {},
-                                    AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
+                                    AmrTimeMethod tmethod = AmrTimeMethod::kEuler,
+                                    Real pos_floor = Real(0)) {
   subcycle_level_mp<Limiter, NumericalFlux>(m, L, 0, dt, dom, per, nullptr, nullptr, Real(0), nullptr,
-                                            coarse_replicated, recon_prim, imex, nopts, tmethod);
+                                            coarse_replicated, recon_prim, imex, nopts, tmethod,
+                                            pos_floor);
 }
 
 }  // namespace detail (N-level multi-patch engine)

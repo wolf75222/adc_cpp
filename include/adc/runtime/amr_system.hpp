@@ -121,6 +121,13 @@ struct AmrBuildParams {
   // schur_* / newton_options: an older .so loader does not read this field and falls back SILENTLY
   // to 0 == kEuler -- no corruption). Consumed by build_amr_compiled (mono-block -> cpl->step).
   int time_method = 0;  // adc::AmrTimeMethod: 0 kEuler (default), 1 kSsprk3
+  // Zhang-Shu positivity floor (ADC-259): Density-role face-state + C/F-ghost-mean floor on the AMR
+  // transport. ADDED AT THE END OF THE STRUCT (append-only, same reason as has_state / schur_* /
+  // newton_options / time_method: an older flat-ABI .so loader does not read this field and falls
+  // back SILENTLY to 0 -- inactive, bit-identical). Consumed by build_amr_compiled (mono-block ->
+  // cpl->step / advance_transport). The COMPILED multi-block path rejects pos_floor > 0 at the facade
+  // (the AmrCompiledBlockBuilder ABI carries no floor slot); native blocks thread it through.
+  double pos_floor = 0.0;
 };
 
 /// Type-erased closures of a compiled AMR block, produced by amr_dsl_block::build_amr_compiled and
@@ -261,6 +268,12 @@ class AmrSystem {
   /// @param newton_diagnostics  aggregated Newton report (newton_report): wired in NATIVE MULTI-BLOCK
   ///                 only (the mono-block rejects it at build, the .so loaders at the facade). Stays
   ///                 flat (a separate bool, outside the homogeneous family of convergence options).
+  /// @param positivity_floor  Zhang-Shu positivity floor (ADC-259): if > 0, the AMR transport floors
+  ///                 the Density-role face states (reconstruct_pp / zhang_shu_scale) AND the C/F fine
+  ///                 ghost means to >= floor. Default 0 = inactive, bit-identical. Guarantee = face /
+  ///                 ghost-state Density positivity only (order-1 fallback), NOT updated-mean nor
+  ///                 pressure positivity (parity with System::add_block). A model without a Density
+  ///                 role rejects floor > 0; the COMPILED .so multi-block path rejects it at the facade.
   void add_block(const std::string& name, const ModelSpec& model,
                  const std::string& limiter = "minmod",
                  const std::string& riemann = "rusanov",
@@ -268,7 +281,8 @@ class AmrSystem {
                  const std::string& time = "explicit", int substeps = 1, int stride = 1,
                  const std::vector<std::string>& implicit_vars = {},
                  const std::vector<std::string>& implicit_roles = {},
-                 const NewtonOptions& newton = {}, bool newton_diagnostics = false);
+                 const NewtonOptions& newton = {}, bool newton_diagnostics = false,
+                 double positivity_floor = 0.0);
 
   /// Report of the implicit (IMEX) source Newton of a block, AGGREGATED over the levels and substeps of
   /// the block's LAST advance. Exists only if the block was added with newton_diagnostics=true IN
