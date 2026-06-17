@@ -224,6 +224,21 @@ and the `spatial=` argument:
 | Sharper resolution    | `exact_speeds=True`   | `FiniteVolume(limiter="none", riemann="hll")`         |
 | Vlasov-Poisson        | `sources=...` + `elliptic_rhs` | `FiniteVolume(..., riemann="hll")` + `set_poisson(...)` |
 | Near-degenerate state | `robust=True`         | unchanged                                             |
+| Realizability (long/high-Ma) | `projection=True` (needs `exact_speeds=True`) | unchanged; native projector applied post-step |
+
+### Realizability: the native projection
+
+On long or high-Mach runs the moment state can drift out of the realizable set; the reference applies
+a per-cell `relaxation15` projection each step. With `projection=True` (which requires
+`exact_speeds=True`) the model emits that projection NATIVELY -- `m.projection`, the
+`HasPointwiseProjection` trait -- so the system applies `U <- project(U, aux)` at the end of each
+whole macro-step in C++, instead of a per-cell Python callback. It runs on the flat `adc.System`,
+under MPI, and on `adc.AmrSystem` (per level after the reflux, ADC-312). Without the flag the model
+is unchanged.
+
+```python
+m = build_moment_model(..., exact_speeds=True, projection=True)  # projecteur natif relaxation15
+```
 
 ## Troubleshooting
 

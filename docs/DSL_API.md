@@ -143,9 +143,11 @@ Important points :
   the head `fill_ghosts` of the next step -- no `fill_boundary` in the hook). CONTRACT: P idempotent
   (a true projection) and pointwise (no neighbor); the clamps are written BRANCH-FREE, in max/min
   via `dsl.abs_` / `dsl.sign` (differentiable through `dsl.diff`), e.g. positivity `(q + abs_(q))/2`.
-  Backends: `aot` and `production` on the `System` side; `prototype` (JIT) and `target="amr_system"`
-  REJECT it explicitly (the hook is not wired on the AMR step -- the per-level application after the
-  step reflux is the next scope).
+  Backends: `aot` and `production`, on BOTH the flat `System` and `AmrSystem` (ADC-312: on AMR the
+  projection is applied PER LEVEL at the end of each macro-step, AFTER the reflux and cascade --
+  cell-local and idempotent, so the conservative flux correction is preserved). Only `prototype`
+  (JIT) still REJECTS it (host virtual dispatch, no projection ABI). A model WITHOUT a projection is
+  bit-identical to the historical trajectory on both systems (opt-in via `HasPointwiseProjection`).
 
 ---
 

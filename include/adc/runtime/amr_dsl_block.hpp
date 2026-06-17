@@ -56,6 +56,27 @@ struct AmrDiscLF {
 
 namespace detail {
 
+// Projection ponctuelle post-pas appliquee PAR NIVEAU (ADC-177) : miroir de PointwiseProject
+// (block_builder.hpp) mais sur la pile de niveaux AMR ; aux = lev.aux (cable par AmrRuntime).
+// Defini en tete du namespace : utilise par build_amr_compiled (mono-bloc) ET build_amr_block
+// (multi-bloc natif), tous deux situes plus bas (la recherche qualifiee detail:: exige la
+// declaration AVANT le point d'usage). No-op (else) si le modele ne declare pas m.project.
+template <class Model>
+void apply_pointwise_project_amr(const Model& m, std::vector<AmrLevelMP>& levels) {
+  if constexpr (HasPointwiseProjection<Model>) {
+    for (auto& lev : levels) {
+      MultiFab& U = lev.U;
+      const MultiFab& a = *lev.aux;
+      for (int li = 0; li < U.local_size(); ++li)
+        for_each_cell(U.box(li),
+                      ProjectCellKernel<Model>{m, U.fab(li).array(), U.fab(li).const_array(),
+                                               a.fab(li).const_array()});
+    }
+  } else {
+    (void)m; (void)levels;
+  }
+}
+
 /// Fills the COARSE B_z field (component 0, n*n row-major in GLOBAL indices) from @p field.
 /// Scalar counterpart of coupler_write_coarse (identical box traversal, replicated mono-box AND
 /// distributed multi-box): B_z is required by the Schur-condensed source stage (Lorentz term).
@@ -224,7 +245,7 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
     const double theta = bp.schur_theta;
     const bool strang = bp.schur_strang;
     h.step = [cpl, crit, sub, rprim, regrid_every, step_state, schur, bz_coarse, phi_coarse, theta,
-              strang](double dt) {
+              strang, model](double dt) {
       // amr-schur Step 2/3: MONO-LEVEL hierarchy (the condensed stage does not carry the multi-level case).
       // So we do NOT regrid (a regrid would create a fine patch -> multi-level guard of the stage). The
       // amr-schur regrid will come with the composite Schur/Poisson (Step 4). cf. levels().size() > 1.
@@ -251,10 +272,13 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
           amr_schur_source(*cpl, *schur, *bz_coarse, *phi_coarse, theta, h2);
         }
       }
+      // PROJECTION PONCTUELLE post-pas (ADC-177) PAR NIVEAU, APRES transport + source condensee de
+      // tous les substeps. No-op si le modele ne declare pas m.project (HasPointwiseProjection false).
+      detail::apply_pointwise_project_amr(model, cpl->levels());
       ++*step_state;
     };
   } else {
-    h.step = [cpl, crit, sub, rprim, imex, regrid_every, step_state, nopts, tmethod](double dt) {
+    h.step = [cpl, crit, sub, rprim, imex, regrid_every, step_state, nopts, tmethod, model](double dt) {
       if (regrid_every > 0 && *step_state > 0 && *step_state % regrid_every == 0) cpl->regrid(crit);
       const double h2 = dt / sub;
       // NEWTON OPTIONS threaded to the coupler (mono-block): nopts={} by default => iters=2 historical,
@@ -262,6 +286,9 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
       // tmethod (kEuler default) selects SSPRK3 if requested (time='ssprk3'); kEuler bit-identical.
       for (int s = 0; s < sub; ++s)
         cpl->template step<AmrDiscLF<Limiter, Flux>>(h2, rprim, imex, nopts, tmethod);
+      // PROJECTION PONCTUELLE post-pas (ADC-177) PAR NIVEAU, APRES transport + source de tous les
+      // substeps. No-op si le modele ne declare pas m.project (HasPointwiseProjection false).
+      detail::apply_pointwise_project_amr(model, cpl->levels());
       ++*step_state;
     };
   }
@@ -537,6 +564,14 @@ AmrRuntimeBlock build_amr_block(const Model& model, const SharedAmrLayout& S,
       for (int k = nlev_l - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
     };
   }
+  // PROJECTION PONCTUELLE post-pas (ADC-177) : cablee SEULEMENT si le modele declare m.project
+  // (HasPointwiseProjection). AmrRuntime::step l'applique PAR NIVEAU a la FIN de l'avance du bloc
+  // (substeps + reflux/cascade faits). Vide sinon -> trajectoire bit-identique. Capture le `model`
+  // concret comme advance / imex_advance (foncteur device-clean, pas de lambda etendue cross-TU).
+  if constexpr (HasPointwiseProjection<Model>)
+    b.project_per_level = [model](std::vector<AmrLevelMP>& L) {
+      detail::apply_pointwise_project_amr(model, L);
+    };
   // Contribution of the block to the SUMMED Poisson RHS: rhs += elliptic_rhs(U) on the coarse grid (pure
   // host loop). SAME functor as the flat System (make_poisson_rhs -> detail::PoissonRhs) -> each
   // block accumulates (+=) into the SAME cells of the shared coarse grid (per-cell co-location).
@@ -834,16 +869,11 @@ void add_compiled_model(AmrSystem& sys, const std::string& name, Model model,
                         int stride = 1, const std::vector<std::string>& implicit_vars = {},
                         const std::vector<std::string>& implicit_roles = {}) {
   if (substeps < 1) throw std::runtime_error("add_compiled_model(AmrSystem): substeps >= 1");
-  // PROJECTION PONCTUELLE post-pas (ADC-177) : NON CABLEE sur AmrSystem a ce stade. Le hook vit dans
-  // SystemStepper (System plat) ; le pas AMR (coupleur mono-bloc / AmrRuntime) ne l'applique pas, et
-  // son interaction avec le reflux / regrid (application niveau par niveau APRES le reflux du pas)
-  // reste a specifier -- perimetre suivant. Rejet EXPLICITE plutot qu'un modele dont la projection
-  // serait silencieusement ignoree (regle : jamais d'option ignoree).
-  if constexpr (HasPointwiseProjection<Model>)
-    throw std::runtime_error(
-        "add_compiled_model(AmrSystem) : le modele declare une projection ponctuelle post-pas "
-        "(m.projection, ADC-177), non cablee sur AMR a ce stade ; utiliser un System plat ou "
-        "retirer la projection (suite : application par niveau apres le reflux du pas)");
+  // PROJECTION PONCTUELLE post-pas (ADC-177) : DESORMAIS CABLEE sur AmrSystem. Appliquee PAR NIVEAU
+  // a la fin de l'avance du pas (apres le reflux), aussi bien sur le coupleur mono-bloc
+  // (build_amr_compiled -> cpl->levels()) que sur le multi-bloc natif (build_amr_block ->
+  // AmrRuntime::step -> project_per_level). Cell-local + idempotente : conservation preservee (les
+  // flux-registres sont deja regles). No-op si le modele ne declare pas m.project.
   // SSPRK3 IS NOT carried by the COMPILED path: neither the mono_builder nor the multi_builder
   // freezes AmrBuildParams::time_method / passes AmrTimeMethod to dispatch_amr_block (the flat ABI of the
   // .so loader does not marshal the method). EXPLICIT rejection rather than a silent kEuler fallback; an

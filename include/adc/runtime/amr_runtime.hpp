@@ -163,6 +163,12 @@ struct AmrRuntimeBlock {
   /// Empty for an explicit block (imex == false): step() never calls it.
   std::function<void(std::vector<AmrLevelMP>&, const Box2D&, Real, Periodicity, bool)> imex_advance;
 
+  /// POINTWISE PROJECTION post-pas (ADC-177) : U <- project(U, aux) appliquee PAR NIVEAU a la FIN
+  /// de l'avance complete du bloc (substeps + reflux/cascade faits). Vide -> aucune projection
+  /// (modele sans HasPointwiseProjection : trajectoire bit-identique). Locale par niveau (aucun
+  /// collectif MPI). Cf. detail::apply_pointwise_project_amr, cable par build_amr_block.
+  std::function<void(std::vector<AmrLevelMP>&)> project_per_level;
+
   /// NEWTON DIAGNOSTICS (OPT-IN, wave 3: AMR counterpart of System::newton_report). false (default) ->
   /// imex_advance passes report=nullptr to backward_euler_source: FAST bit-identical path, no extra
   /// allocation or reduction. true -> imex_advance passes @c newton_report.get() (STABLE address since
@@ -663,6 +669,9 @@ class AmrRuntime {
       auto& step_block = b.imex ? b.imex_advance : b.advance;
       for (int s = 0; s < b.substeps; ++s)
         step_block(*b.levels, dom_, h, base_per_, replicated_coarse_);
+      // PROJECTION PONCTUELLE post-pas (ADC-177) : par niveau, APRES substeps + reflux/cascade.
+      // Cell-local + idempotente -> conservation preservee (flux-registres deja regles). No-op si vide.
+      if (b.project_per_level) b.project_per_level(*b.levels);
     }
     // Inter-species coupled sources AFTER the transport (same order as AmrSystemCoupler: transport then
     // coupled_source_step), by forward-Euler splitting. No-op if no source registered -> bit-identical

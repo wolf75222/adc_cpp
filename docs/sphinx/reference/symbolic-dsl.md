@@ -27,6 +27,7 @@ map one to one to the functions of the `adc::PhysicalModel` concept read by the 
 | `conservative_from(exprs)` | the inverse `Prim -> U` (to be supplied, the DSL does not invert) | `m.conservative_from([rho, rho*u, rho*v, ...])` |
 | `source(s)` | the source term `S(U, aux)` (optional), one `Expr` per component | `m.source([0.0, -rho*gx, -rho*gy, ...])` |
 | `elliptic_rhs(e)` | the contribution to the right-hand side of the system Poisson (optional) | `m.elliptic_rhs(-1.0*(rho - 1.0))` |
+| `projection(p)` | pointwise post-step projection `U <- P(U, aux)` (optional, realizability/positivity) | `m.projection([rho, (rhou+abs_(rhou))/2, ...])` |
 | `gamma(value)` | the adiabatic index (EOS), exported in the `.so` | `m.gamma(1.4)` |
 | `param(name, value, kind="const")` | a named parameter usable in formulas ; returns a `Param` | `g = m.param("gamma", 1.4)` |
 | `check()` | verifies that every referenced variable is declared | `m.check()` |
@@ -147,6 +148,28 @@ blocks. Without it, the block's rhs is zero.
 ```python
 m.elliptic_rhs(-1.0 * (rho - 1.0))   # gravite self-consistante sign=-1, rho0=1
 ```
+
+### projection
+
+`projection([...])` declares a POINTWISE post-step projection `U <- P(U, aux)`, one `Expr` per
+conservative component, for realizability or positivity (e.g. the HyQMOM `relaxation15` moment
+projection). It is emitted as the C++ trait `HasPointwiseProjection` and compiled like the flux and
+source (CSE included), replacing a per-cell Python callback.
+
+```python
+m.projection([rho, (rhou + abs_(rhou)) / 2, ...])   # ex. plancher de positivite branche-libre
+```
+
+- **Semantics**: applied once at the END of each whole macro-step (after transport + source stage +
+  couplings; never per RK stage, including under Strang), on the valid cells only (ghosts are rebuilt
+  by the next step).
+- **Contract**: `P` must be idempotent (a true projection) and pointwise (no neighbor). Write the
+  clamps BRANCH-FREE in max/min via `dsl.abs_` / `dsl.sign` (differentiable through `dsl.diff`), e.g.
+  positivity `(q + abs_(q)) / 2`.
+- **Where it runs**: backends `aot` and `production`, on BOTH `adc.System` and `adc.AmrSystem` -- on
+  AMR (ADC-312) the projection is applied per level after the reflux and cascade, so the conservative
+  correction is preserved. Only the `prototype` (JIT) backend rejects it. A model without a projection
+  is bit-identical to the historical trajectory (opt-in via the trait).
 
 ### gamma and param
 

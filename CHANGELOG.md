@@ -22,6 +22,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Pointwise projection on AMR** (ADC-312): `add_compiled_model(AmrSystem)` now accepts a model
+  declaring `m.projection` (ADC-177, e.g. HyQMOM relaxation15). The projection `U <- project(U, aux)`
+  is applied per level at the end of each macro-step, after the reflux and cascade (cell-local and
+  idempotent, so conservation is preserved). Opt-in: a model without the projection trait is
+  bit-identical to the historical trajectory. Previously the AMR path rejected such models.
 - **AMR checkpoint/restart** (ADC-65): `AmrSystem.checkpoint(path)` / `restart(path)` write and read
   a bit-identical npz (per-level conservative state with fine patches, per-level phi as the multigrid
   warm-start, the fine hierarchy and the clock), replacing the old `NotImplementedError`. Restart
