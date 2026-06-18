@@ -844,7 +844,15 @@ get_property(_adc_dir_targets DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY BUI
 set(_adc_capped 0)
 foreach(_t ${_adc_dir_targets})
   get_target_property(_t_sources ${_t} SOURCES)
-  if(_t_sources MATCHES "python/(amr_)?system\.cpp")
+  get_target_property(_t_libs ${_t} LINK_LIBRARIES)
+  # Cap (-O0 + size-1 pool adc_heavy_tu) every target that EITHER compiles a heavy runtime TU directly
+  # (SOURCES) OR links the adc_runtime_{system,amr} object libraries. The second clause is essential:
+  # a target that links the object lib still compiles its OWN .cpp, and the parity tests instantiate
+  # add_compiled_model (a heavy AMR/System closure build) right there. The object lib's PUBLIC -O0 caps
+  # that .cpp, but the POOL is NOT a usage requirement, so without this it escapes adc_heavy_tu -> two
+  # such heavy compiles run concurrently under --parallel 2 and OOM the ~7GB runner (exit 143). The pool,
+  # not -O0 alone, is the structural anti-OOM guard (see the head-of-file note), so we re-attach it here.
+  if(_t_sources MATCHES "python/(amr_)?system\.cpp" OR _t_libs MATCHES "adc_runtime_(system|amr)")
     adc_cap_opt_for_kokkos_ram(${_t})
     math(EXPR _adc_capped "${_adc_capped}+1")
   endif()
