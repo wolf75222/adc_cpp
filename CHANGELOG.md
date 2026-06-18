@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **hyqmom15 AmrSystem multi-box GH200 validation** (ADC-320): a domain-decomposed driver
+  (`docs/validation/diocotron_amr_gpu.cpp` + `diocotron_amr_mpi.sbatch`) wiring the compiled hyqmom15
+  composite (`Hyqmom15Hyp/Src/Ell` + Poisson `geometric_mg`) on `AmrSystem` with
+  `distribute_coarse=True`, so at `np > 1` the coarse `fill_boundary` exchanges the 15 conserved
+  moments between GPUs (the real inter-GPU halo path that ADC-181's mono-box round-robin never
+  exercised). Records the np=1/2/4 parity in `docs/validation/GH200_HYQMOM15.md` (cmax bit-identical,
+  sums at last ulp, `coarse_local_boxes < coarse_total_boxes` proving the coarse distributed).
+  Validation only; no change to the library, the API, or the hot path.
 - **Coarse-level MPI ownership diagnostic** (ADC-319): `AmrSystem.coarse_local_boxes()` returns the
   number of base (level-0) boxes owned by the calling rank and `AmrSystem.coarse_total_boxes()` the
   total across all ranks. With `distribute_coarse=True` a distributed base gives `local < total` per
