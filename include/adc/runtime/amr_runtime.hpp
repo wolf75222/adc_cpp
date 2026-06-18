@@ -639,7 +639,8 @@ class AmrRuntime {
     // System Poisson solved ONCE on the current state (OncePerStep cadence). A HELD block (stride > 1,
     // outside end-of-window) contributed with its FROZEN state since its last advance: loose coupling
     // assumed by the multirate, exactly like System::step / AmrSystemCoupler in OncePerStep. phi stays
-    // frozen during the blocks' advance (no per-substep re-solve here).
+    // frozen during the blocks' advance (no per-substep re-solve here). When reached from step_cfl this
+    // re-solves an unchanged state (a second solve), kept on purpose; see the ADC-318 note in step_cfl.
     solve_fields();
     for (auto& b : blocks_) {
       // HOLD-THEN-CATCH-UP cadence (cf. AmrRuntimeBlock::stride, #140): the block is HELD as long as
@@ -689,6 +690,15 @@ class AmrRuntime {
   /// (dx_coarse). Returns the dt used. Single-block (a single block, stride=1): if w_b is the only
   /// constraining one, dt = cfl*h*substeps/w (identical to System::step_cfl single-block).
   Real step_cfl(Real cfl, Real h) {
+    // NOTE (ADC-318): this pre-solve plus step(dt)'s own head solve below is a DOUBLE Poisson solve on
+    // the SAME unchanged state (regrid_every=0 freezes the grid in between). It looks redundant but is
+    // NOT, and is INTENTIONALLY kept. GeometricMG::solve() is warm-started and iterates to a RELATIVE
+    // tolerance (rel_tol 1e-8; abs_tol 0 by default, so its off-step early-exit never fires here), so the
+    // second solve does not recompute identical phi: starting from the first solve's iterate it
+    // over-converges it by ~rel_tol. Skipping the second solve would therefore NOT be bit-identical; it
+    // drifts the trajectory by ~3e-10 over 20 steps (below the solver tolerance and far below the O(dt^2)
+    // scheme error, but nonzero). The de-dup was declined to preserve the exact historical bit-stream
+    // (SystemStepper::step_cfl avoids the double solve by INLINING its advance, not by skipping a solve).
     solve_fields();  // aux up to date: each block's max_speed reads it on the current coarse
     Real dt = std::numeric_limits<Real>::infinity();
     last_dt_reason_ = "degenerate";
