@@ -77,7 +77,11 @@ endfunction()
 # flags de production (ADC_HEADER_SIG/visibilite/...), et AUCUN preset ne co-construit tests+python
 # (ADC_BUILD_TESTS et ADC_BUILD_PYTHON sont mutuellement exclusifs dans CMakePresets.json) -- cette
 # bibliotheque est donc strictement tests-only et ne peut pas etre partagee avec _adc.
-add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
+add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_exb.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_isothermal.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_polar.cpp)
 add_library(adc_runtime_amr    OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
 foreach(_rt adc_runtime_system adc_runtime_amr)
   target_link_libraries(${_rt} PUBLIC adc::adc ${CMAKE_DL_LIBS})
