@@ -606,7 +606,23 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     if (model.transport == "exb") {
       bb = detail::build_block_exb(model, args);
     } else if (model.transport == "compressible") {
-      bb = detail::build_block_compressible(model, args);
+      // Compressible/Euler is flux-subdivided (ADC-335): all four fluxes are valid (4-var + pressure),
+      // so we run the SAME validation as make_block (validate_riemann then validate_limiter, identical
+      // messages) and dispatch the riemann string to the matching per-flux sub-TU. An unknown flux hits
+      // the same registry throw as make_block's tail (validate_riemann already rejected it).
+      validate_riemann(riemann, /*polar=*/false, "System");
+      validate_limiter(limiter, "System");
+      if (riemann == "rusanov") {
+        bb = detail::build_block_compressible_rusanov(model, args);
+      } else if (riemann == "hll") {
+        bb = detail::build_block_compressible_hll(model, args);
+      } else if (riemann == "hllc") {
+        bb = detail::build_block_compressible_hllc(model, args);
+      } else if (riemann == "roe") {
+        bb = detail::build_block_compressible_roe(model, args);
+      } else {
+        throw_registry_dispatch_mismatch("System", "flux", riemann);
+      }
     } else if (model.transport == "isothermal") {
       bb = detail::build_block_isothermal(model, args);
     } else {

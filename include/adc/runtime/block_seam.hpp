@@ -63,10 +63,13 @@ struct BlockBuildArgs {
 };
 
 /// VERBATIM Cartesian visitor body of the former dispatch_model lambda (system.cpp), with the transport
-/// brick @p tr already chosen. Instantiated ONLY in the per-transport TU that calls it (its make_block /
-/// makers leaves land there, not in system.cpp). Behavior identical to add_block before ADC-335.
-template <class TR>
-BuiltBlock build_block_for(TR tr, const ModelSpec& model, const BlockBuildArgs& a) {
+/// brick @p tr already chosen, and the per-leaf BlockClosures produced by @p make. @p make is
+/// `(auto m, const std::vector<int>& impl, const BlockBuildArgs& a) -> BlockClosures`: a per-(transport)
+/// seam (build_block_for) passes the full make_block dispatcher, while a per-(transport,flux) seam
+/// (system_compressible_<flux>.cpp) passes make_block_<flux> so ONLY that flux's build_block leaves are
+/// instantiated in its TU (ADC-335 flux subdivision). Instantiated only in the seam TU that calls it.
+template <class TR, class MakeFn>
+BuiltBlock build_block_for_make(TR tr, const ModelSpec& model, const BlockBuildArgs& a, MakeFn make) {
   BuiltBlock out;
   dispatch_model_for(model, std::move(tr), [&](auto m) {
     using M = decltype(m);
@@ -79,8 +82,7 @@ BuiltBlock build_block_for(TR tr, const ModelSpec& model, const BlockBuildArgs& 
     out.aux_width = aux_comps<M>();
     const std::vector<int> impl_components =
         resolve_implicit_components(a.name, out.cons_vs, a.implicit_vars, a.implicit_roles);
-    out.clo = make_block(m, a.limiter, a.riemann, a.ctx, a.imex, a.recon_prim, a.method, impl_components,
-                         a.nopts, a.nreport, a.positivity_floor, a.wave_speed_cache);
+    out.clo = make(m, impl_components, a);
     out.max_speed = make_max_speed(m, a.ctx);
     out.add_poisson_rhs = make_poisson_rhs(m);
     out.src_freq = make_source_frequency(m, a.ctx);
@@ -92,11 +94,32 @@ BuiltBlock build_block_for(TR tr, const ModelSpec& model, const BlockBuildArgs& 
   return out;
 }
 
+/// Per-transport seam body: the full make_block dispatcher (all fluxes). Used by transports that are NOT
+/// flux-subdivided (exb -- only rusanov reachable via the capability guards; isothermal -- rusanov+hll).
+template <class TR>
+BuiltBlock build_block_for(TR tr, const ModelSpec& model, const BlockBuildArgs& a) {
+  return build_block_for_make(std::move(tr), model, a,
+                              [](auto m, const std::vector<int>& impl, const BlockBuildArgs& aa) {
+                                return make_block(m, aa.limiter, aa.riemann, aa.ctx, aa.imex,
+                                                  aa.recon_prim, aa.method, impl, aa.nopts, aa.nreport,
+                                                  aa.positivity_floor, aa.wave_speed_cache);
+                              });
+}
+
 // Per-transport seam functions (defined in python/system_<transport>.cpp). The TR construction matches
 // dispatch_transport's branches VERBATIM (ExBVelocity{B0} / CompressibleFlux{gamma} / IsothermalFlux{cs2}).
 BuiltBlock build_block_exb(const ModelSpec& model, const BlockBuildArgs& a);
-BuiltBlock build_block_compressible(const ModelSpec& model, const BlockBuildArgs& a);
 BuiltBlock build_block_isothermal(const ModelSpec& model, const BlockBuildArgs& a);
+
+// Compressible (Euler, 4-var + pressure) is the heaviest transport: all four fluxes are valid, so it is
+// FLUX-SUBDIVIDED into one .cpp per flux (ADC-335) -- each instantiates only its flux's build_block
+// leaves, so they compile in parallel. System dispatches on the riemann string to the right one (every
+// flux is valid for Euler, so no capability rejection to reproduce; an unknown flux is caught by the
+// shared validate_riemann + the registry throw, same wording as make_block).
+BuiltBlock build_block_compressible_rusanov(const ModelSpec& model, const BlockBuildArgs& a);
+BuiltBlock build_block_compressible_hll(const ModelSpec& model, const BlockBuildArgs& a);
+BuiltBlock build_block_compressible_hllc(const ModelSpec& model, const BlockBuildArgs& a);
+BuiltBlock build_block_compressible_roe(const ModelSpec& model, const BlockBuildArgs& a);
 
 // Polar (ring) seam: VERBATIM polar visitor body (make_block_polar + polar makers). IMEX is rejected on
 // the ring by add_block before this is called. @p aux is &System::Impl::aux (the polar makers read it).

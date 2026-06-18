@@ -80,7 +80,10 @@ endfunction()
 add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_exb.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_isothermal.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_rusanov.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_hll.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_hllc.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_roe.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_polar.cpp)
 add_library(adc_runtime_amr    OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
 foreach(_rt adc_runtime_system adc_runtime_amr)

@@ -15,14 +15,14 @@
 # -flto=thin (sur macOS, plutot la chaine clang conda complete que le melange AppleClang + linker conda).
 option(ADC_PY_LTO "LTO (ThinLTO) sur le module _adc (OFF = build rapide, recommande)" OFF)
 if(ADC_PY_LTO)
-  pybind11_add_module(_adc THIN_LTO bindings.cpp system.cpp system_exb.cpp system_isothermal.cpp system_compressible.cpp system_polar.cpp amr_system.cpp)
+  pybind11_add_module(_adc THIN_LTO bindings.cpp system.cpp system_exb.cpp system_isothermal.cpp system_compressible_rusanov.cpp system_compressible_hll.cpp system_compressible_hllc.cpp system_compressible_roe.cpp system_polar.cpp amr_system.cpp)
 else()
   # NO_EXTRAS empeche pybind11 d'ACTIVER le LTO sur _adc. C'est NECESSAIRE, pas cosmetique : des que
   # le test HAS_FLTO passe (cas du pybind11 de l'env, p.ex. conda), pybind11_add_module activerait le
   # ThinLTO par defaut -> link/codegen au LINK -> build nettement plus long (le backend -O3 est deja le
   # goulot). On re-applique la visibilite cachee (seule "extra" qui compte ici) pour rester identique au
   # binaire produit jusqu'ici ; le chemin DSL "production" exporte quand meme ses symboles via ADC_EXPORT.
-  pybind11_add_module(_adc NO_EXTRAS bindings.cpp system.cpp system_exb.cpp system_isothermal.cpp system_compressible.cpp system_polar.cpp amr_system.cpp)
+  pybind11_add_module(_adc NO_EXTRAS bindings.cpp system.cpp system_exb.cpp system_isothermal.cpp system_compressible_rusanov.cpp system_compressible_hll.cpp system_compressible_hllc.cpp system_compressible_roe.cpp system_polar.cpp amr_system.cpp)
   set_target_properties(_adc PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 endif()
 target_link_libraries(_adc PRIVATE adc::adc adc_dev_options ${CMAKE_DL_LIBS})  # dl : add_dynamic_block (dlopen) ; adc_dev_options : warnings/sanitizers opt-in (vide par defaut, cf. cmake/AdcDevTooling.cmake)
