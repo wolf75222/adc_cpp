@@ -502,15 +502,23 @@ def _native_feature_key():
     of a .so compiled against the old Kokkos."""
     root = _native_kokkos_root()
     if not root:
-        return "kokkos=off"
-    import hashlib
-    cfg = os.path.join(root, "include", "KokkosCore_config.h")
-    try:
-        with open(cfg, "rb") as f:
-            tag = hashlib.sha256(f.read()).hexdigest()[:12]
-    except OSError:
-        tag = "unknown"
-    return "kokkos=on;kcfg=%s" % tag
+        kk = "kokkos=off"
+    else:
+        import hashlib
+        cfg = os.path.join(root, "include", "KokkosCore_config.h")
+        try:
+            with open(cfg, "rb") as f:
+                tag = hashlib.sha256(f.read()).hexdigest()[:12]
+        except OSError:
+            tag = "unknown"
+        kk = "kokkos=on;kcfg=%s" % tag
+    # ADC-319: the MPI seam of the loader (ADC_HAS_MPI on/off, cf. _native_mpi_flags) changes the
+    # compiled code (real comm vs serial stubs n_ranks()=1/my_rank()=0) -> it MUST enter the cache,
+    # else a SERIAL-stub .so would be reused on an MPI module and any distributed layout built inside
+    # the loader (e.g. AmrSystem(distribute_coarse=True)) would replicate on every rank (no scaling).
+    mod = _adc_module()
+    mpi = "mpi=on" if (mod is not None and getattr(mod, "__has_mpi__", False)) else "mpi=off"
+    return "%s;%s" % (kk, mpi)
 
 
 # Optimization flags shared by the DSL .so that run the PRODUCTION path (aot and native).
@@ -639,6 +647,30 @@ def _native_kokkos_flags():
             compile_flags.append("-fopenmp")
             link_flags.append("-fopenmp")
     return compile_flags, link_flags
+
+
+def _native_mpi_flags():
+    """Compile flags so the production/AOT DSL loader uses comm.hpp's REAL MPI seam (ADC-319).
+
+    The loader inlines the runtime templates (System / AmrSystem coupler), which call adc::n_ranks() /
+    my_rank() from comm.hpp to lay out the distributed grid (DistributionMapping over n_ranks()).
+    Compiled WITHOUT ADC_HAS_MPI while _adc is built WITH MPI, comm.hpp falls back to its SERIAL stubs
+    (n_ranks()=1, my_rank()=0): any distributed layout built INSIDE the loader then collapses to a
+    single owner on EVERY rank -- e.g. AmrSystem(distribute_coarse=True) replicates the coarse
+    transport on all ranks (no MPI strong-scaling, ADC-319). We compile WITH -DADC_HAS_MPI + the SAME
+    MPI include dir as _adc (baked as __mpi_include__) and leave the MPI symbols UNDEFINED, resolved at
+    load time against the libmpi already loaded by _adc / mpi4py (RTLD_GLOBAL) -- no 2nd libmpi linked,
+    exactly like the Kokkos runtime. Empty (no flag) when _adc is a serial build (__has_mpi__ False),
+    so the serial loader path stays bit-identical."""
+    mod = _adc_module()
+    if mod is None or not getattr(mod, "__has_mpi__", False):
+        return []
+    flags = ["-DADC_HAS_MPI"]
+    inc = getattr(mod, "__mpi_include__", "") or ""
+    for d in inc.split("|"):  # CMake bakes the include dirs joined by '|' (paths may contain ';')
+        if d:
+            flags += ["-I", d]
+    return flags
 
 
 def adc_loader_build_flags(cxx=None):
@@ -3171,6 +3203,7 @@ class HyperbolicModel:
             raise RuntimeError("compile_aot: no C++ compiler found")
         std = _probe_cxx_std(cc, std)  # ACTIONABLE error if the std is not supported (vs raw error)
         kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+        mpi_compile_flags = _native_mpi_flags()  # ADC-319: real comm.hpp MPI seam (else serial stubs)
         # Like the native loader, the AOT .so leaves the Kokkos symbols UNDEFINED (resolved at load
         # against the Kokkos runtime already loaded by _adc -- no 2nd copy). macOS/Apple-ld then requires
         # -undefined dynamic_lookup (on ELF/Linux -shared already allows it; the option is NOT GNU ld's).
@@ -3182,7 +3215,8 @@ class HyperbolicModel:
             # Same optimization flags as native (identical production path): at -O2 without
             # -DNDEBUG the marshaled kernel is ~1.48x. $ADC_DSL_OPTFLAGS overrides (cf. _dsl_optflags).
             _run_compile([cc, "-shared", "-fPIC", "-std=" + std, *_dsl_optflags(), "-I", include]
-                         + kokkos_compile_flags + link_extra + [cpp, "-o", so_path] + kokkos_link_flags,
+                         + kokkos_compile_flags + mpi_compile_flags + link_extra
+                         + [cpp, "-o", so_path] + kokkos_link_flags,
                          "backend aot, compile_aot")
         return so_path
 
@@ -3339,6 +3373,7 @@ class HyperbolicModel:
         # -march=native: the .so being JIT-compiled on the machine -> ~0.88x the generic native; not
         # default because a shared .so cache reused on a different micro-arch = illegal-instr risk).
         kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
+        mpi_compile_flags = _native_mpi_flags()  # ADC-319: real comm.hpp MPI seam (else serial stubs)
         with tempfile.TemporaryDirectory() as tmp:
             cpp = os.path.join(tmp, "model_native.cpp")
             # Windows: bake ADC_HEADER_SIG via #define AT THE TOP of the source (quoting an inline
@@ -3358,15 +3393,16 @@ class HyperbolicModel:
                 # /DNOMINMAX: windows.h (pulled by dynlib.hpp) must not define min/max (breaks the STL).
                 # /bigobj: large template TU. NO /Zc:__cplusplus: keep __cplusplus aligned with the
                 # module build (otherwise the ABI key diverges).
-                cl_flags = ["/nologo", "/LD", "/std:" + std, "/O2", "/DNDEBUG", "/EHsc",
-                            "/permissive-", "/Zc:preprocessor", "/DNOMINMAX", "/bigobj"] + kokkos_compile_flags
+                cl_flags = (["/nologo", "/LD", "/std:" + std, "/O2", "/DNDEBUG", "/EHsc",
+                             "/permissive-", "/Zc:preprocessor", "/DNOMINMAX", "/bigobj"]
+                            + kokkos_compile_flags + mpi_compile_flags)
                 cmd = ([cc] + cl_flags + ["-I", include, cpp,
                         "/Fe:" + so_path, "/Fo" + tmp + os.sep,
                         "/link"] + kokkos_link_flags + [adc_lib])
             else:
                 optflags = _dsl_optflags()
                 flags = ["-shared", "-fPIC", "-std=" + std, *optflags,
-                         "-DADC_HEADER_SIG=\"%s\"" % sig, *kokkos_compile_flags]
+                         "-DADC_HEADER_SIG=\"%s\"" % sig, *kokkos_compile_flags, *mpi_compile_flags]
                 # macOS/Apple-ld: explicitly allow undefined symbols (resolved at runtime).
                 if sys.platform == "darwin":
                     flags += ["-undefined", "dynamic_lookup"]

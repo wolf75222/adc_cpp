@@ -2496,6 +2496,28 @@ class AmrSystem:
             rects.append((ilo * dx, jlo * dx, (ihi - ilo + 1) * dx, (jhi - jlo + 1) * dx))
         return rects
 
+    def coarse_local_boxes(self):
+        """Number of coarse (base) boxes owned by this MPI rank (ADC-319 diagnostic).
+
+        The base level is a MultiFab whose boxes are spread across ranks by a DistributionMapping.
+        Returns this rank's owned-fab count (level-0 local_size()). With distribute_coarse=True the base
+        is split into several boxes round-robin, so each rank owns a strict subset and the coarse
+        transport is distributed; a replicated or single-box base owns the full count on every rank.
+        Compare with coarse_total_boxes() and adc.n_ranks() to confirm MPI strong-scaling of the base.
+        Triggers the lazy build like n_patches().
+        """
+        return self._s.coarse_local_boxes()
+
+    def coarse_total_boxes(self):
+        """Total number of coarse (base) boxes across all ranks (ADC-319 diagnostic).
+
+        Identical on every rank (BoxArray size, no communication). With distribute_coarse=True this is
+        the number of round-robin base tiles; with a single-box or replicated base it is 1. A rank
+        distributes the coarse transport when coarse_local_boxes() < coarse_total_boxes().
+        Triggers the lazy build like n_patches().
+        """
+        return self._s.coarse_total_boxes()
+
     def add_block(self, name, model, spatial=None, time=None):
         """Installs an evolved block composed of NATIVE BRICKS on the shared AMR hierarchy.
 

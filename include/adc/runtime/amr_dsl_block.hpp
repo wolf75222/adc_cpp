@@ -337,6 +337,12 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
     }
     return out;
   };
+  // Coarse-level (base) box counts (ADC-319, MPI ownership diagnostic): per-rank OWNED fabs of level 0
+  // (local_size()) and the GLOBAL base box count (box_array().size()). Same cpl capture as the other
+  // hooks (no new lifetime concern); a query between steps, zero cost on the hot path. distribute_coarse
+  // -> local < total per rank (distributed coarse transport); replicated/single-box -> local == total.
+  h.coarse_local_boxes = [cpl] { return cpl->coarse().local_size(); };
+  h.coarse_total_boxes = [cpl] { return cpl->coarse().box_array().size(); };
   // AMR CHECKPOINT / RESTART single-rank (ADC-65): COMPLETE conservative state per level + phi
   // (warm-start) + imposing the saved fine hierarchy. Capture the SAME cpl (shared_ptr) as the
   // other hooks (no new lifetime concern). Single-rank: the coupler accessors loop over local_size()

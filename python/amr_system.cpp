@@ -165,6 +165,8 @@ struct AmrSystem::Impl {
   std::function<double()> mass_fn;
   std::function<int()> n_patches_fn;
   std::function<std::vector<PatchBox>()> patch_boxes_fn;
+  std::function<int()> coarse_local_boxes_fn;  ///< per-rank owned coarse fab count (ADC-319 diagnostic)
+  std::function<int()> coarse_total_boxes_fn;  ///< global coarse box count (ADC-319 diagnostic)
   std::function<std::vector<double>()> density_fn;
   std::function<std::vector<double>()> potential_fn;
   // OPTIONAL step bounds of the single block (AMR StabilityPolicy, audit 2026-06): EMPTY hooks if
@@ -285,6 +287,8 @@ struct AmrSystem::Impl {
     mass_fn = std::move(h.mass);
     n_patches_fn = std::move(h.n_patches);
     patch_boxes_fn = std::move(h.patch_boxes);
+    coarse_local_boxes_fn = std::move(h.coarse_local_boxes);  // ADC-319 MPI ownership diagnostic
+    coarse_total_boxes_fn = std::move(h.coarse_total_boxes);
     density_fn = std::move(h.density);
     potential_fn = std::move(h.potential);
     source_frequency_fn = std::move(h.source_frequency);  // empty without trait (bit-identical)
@@ -1115,6 +1119,16 @@ std::vector<PatchBox> AmrSystem::patch_boxes() {
   p_->ensure_built();
   if (p_->runtime) return p_->runtime->patch_boxes();  // MULTI-BLOCK: AmrRuntime engine
   return p_->patch_boxes_fn();                          // SINGLE-BLOCK: AmrCouplerMP hook
+}
+int AmrSystem::coarse_local_boxes() {
+  p_->ensure_built();
+  if (p_->runtime) return p_->runtime->coarse_local_boxes();  // MULTI-BLOCK: shared layout, block 0
+  return p_->coarse_local_boxes_fn();                          // SINGLE-BLOCK: AmrCouplerMP hook
+}
+int AmrSystem::coarse_total_boxes() {
+  p_->ensure_built();
+  if (p_->runtime) return p_->runtime->coarse_total_boxes();
+  return p_->coarse_total_boxes_fn();
 }
 double AmrSystem::mass() { return mass(std::string()); }
 double AmrSystem::mass(const std::string& name) {

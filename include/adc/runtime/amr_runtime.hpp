@@ -925,6 +925,13 @@ class AmrRuntime {
     return out;
   }
 
+  // COARSE-level (base) box counts (ADC-319, MPI ownership diagnostic). Block 0 is the SHARED layout
+  // (same_layout_or_throw), so its level-0 MultiFab carries the base BoxArray + DistributionMapping
+  // common to all blocks. local_size() = base boxes OWNED by this rank; box_array().size() = total base
+  // boxes (all ranks). Mirror of n_patches(): a query between steps, no communication, no hot-path cost.
+  int coarse_local_boxes() const { return (*blocks_[0].levels)[0].U.local_size(); }
+  int coarse_total_boxes() const { return (*blocks_[0].levels)[0].U.box_array().size(); }
+
  private:
   // Index of the block named @p name in the registry (-1 if absent). Counterpart of
   // AmrSystem::Impl::block_index (the facade names the blocks; the coupled sources target them by name,

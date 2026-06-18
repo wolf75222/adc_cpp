@@ -107,6 +107,24 @@ PYBIND11_MODULE(_adc, m) {
   m.attr("__has_kokkos__") = false;
 #endif
 
+  // MPI seam COMPILED into the module (ADC_HAS_MPI via the adc INTERFACE under -DADC_USE_MPI=ON) plus
+  // the MPI include dir(s) used by the build (ADC_MPI_INCLUDE, baked by CMake; '|'-joined). The DSL
+  // "production"/"aot" loaders are compiled OUTSIDE CMake and inherit none of this: dsl.py reads these
+  // attributes (_native_mpi_flags) to re-bake -DADC_HAS_MPI + -I<inc> so the loader uses comm.hpp's
+  // REAL MPI rather than its serial stubs (n_ranks()=1). Without it a distributed layout built inside
+  // the loader replicates on every rank (ADC-319). A serial module exposes False / empty.
+#if defined(ADC_HAS_MPI)
+  m.attr("__has_mpi__") = true;
+#if defined(ADC_MPI_INCLUDE)
+  m.attr("__mpi_include__") = ADC_MPI_INCLUDE;
+#else
+  m.attr("__mpi_include__") = "";
+#endif
+#else
+  m.attr("__has_mpi__") = false;
+  m.attr("__mpi_include__") = "";
+#endif
+
   // Path of the COMPILER that built this module (ADC_CXX_COMPILER, injected by CMake). Since the ABI
   // key encodes __VERSION__, the "production" DSL MUST recompile its loaders with THIS compiler:
   // dsl.py prefers it to the PATH's `which c++` (which, in a conda env, often designates another
@@ -734,6 +752,12 @@ PYBIND11_MODULE(_adc, m) {
                out.append(py::make_tuple(b.level, b.ilo, b.jlo, b.ihi, b.jhi));
              return out;
            })
+      // COARSE-level (base) box counts (ADC-319, MPI ownership diagnostic): coarse_local_boxes() = base
+      // boxes OWNED by this rank (level-0 local_size()); coarse_total_boxes() = total base boxes (BoxArray
+      // size, identical on all ranks). distribute_coarse=True -> local < total per rank (distributed
+      // coarse transport); replicated / single-box -> local == total. Query between steps, no hot cost.
+      .def("coarse_local_boxes", &AmrSystem::coarse_local_boxes)
+      .def("coarse_total_boxes", &AmrSystem::coarse_total_boxes)
       // mass / density: overload by BLOCK NAME (multi-block; empty name -> 1st block, mono-block
       // compat or cosmetic name). The name INDEXES the block in multi-block (each block has its mass /
       // density, conserved PER BLOCK at reflux). Without argument -> 1st block (mono-block back-compat).

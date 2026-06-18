@@ -160,6 +160,14 @@ struct AmrCompiledHooks {
   std::function<std::vector<double>(int)> level_potential;      ///< phi of level k (nf*nf row-major)
   std::function<void(int, const std::vector<double>&)> set_level_potential;   ///< restores phi of level k
   std::function<void(const std::vector<PatchBox>&)> set_hierarchy;  ///< imposes the saved fine patches
+  // ADDED AT THE TAIL (ADC-319, MPI ownership diagnostic; additive like the fields above): COARSE-level
+  // (base) box counts. coarse_local_boxes = cpl->coarse().local_size() (level-0 fabs OWNED by this rank);
+  // coarse_total_boxes = cpl->coarse().box_array().size() (total base boxes, all ranks). They reveal
+  // whether distribute_coarse actually distributes the base across ranks (local < total) or replicates
+  // it (local == total on every rank). The adc_native_abi_key guard forces regeneration of older .so
+  // files (purely additive tail addition); the builder always populates them (never empty).
+  std::function<int()> coarse_local_boxes;  ///< per-rank owned coarse (level-0) fab count
+  std::function<int()> coarse_total_boxes;  ///< global coarse box count (identical on all ranks)
 };
 
 /// DEFERRED builder of a COMPILED block on the multi-block hierarchy: receives the SHARED layout (created
@@ -479,6 +487,15 @@ class AmrSystem {
   /// conversion to [0, L]^2 is done on the Python side (which knows n via nx() and L). Forces the lazy
   /// build (ensure_built) like n_patches()/mass()/density().
   std::vector<PatchBox> patch_boxes();
+  /// COARSE-level (base) box counts, MPI ownership diagnostic (ADC-319). coarse_local_boxes() = number
+  /// of base boxes OWNED by this rank (level-0 MultiFab local_size()); coarse_total_boxes() = total base
+  /// boxes across all ranks (BoxArray size, identical on every rank). With distribute_coarse=true the
+  /// base is split into several boxes spread round-robin, so local < total per rank and the coarse
+  /// transport distributes (MPI strong-scaling); a single-box or replicated base gives local == total on
+  /// every rank. coarse_local_boxes() is rank-dependent, coarse_total_boxes() is rank-independent.
+  /// Forces the lazy build (ensure_built) like n_patches()/mass()/density().
+  int coarse_local_boxes();
+  int coarse_total_boxes();
 
   /// MONO-RANK AMR CHECKPOINT / RESTART (ADC-65), MONO-BLOCK: per-level STATE accessors +
   /// hierarchy imposition for a BIT-IDENTICAL resumption (cf. AmrSystem.checkpoint/restart on the
