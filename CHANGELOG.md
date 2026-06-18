@@ -112,6 +112,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   allocated only when refinement is configured (`refine_threshold < 1e30`): no refinement gives a
   mono-level hierarchy (`n_patches() == 0`, coarse distributes cleanly), and the refined path is
   unchanged. Regression test: `test_amr_seed_no_refine`. Follow-up to ADC-319.
+- **Stale negative control in the compiled positivity-floor test** (ADC-341): ADC-324 made
+  `set_refinement(1e30)` a mono-level hierarchy, so the `python/tests/test_amr_compiled_positivity_floor.py`
+  section (1) assertion that the UNFLOORED `.so` run blows up on the spike became vacuous (the coarse-only
+  grid diverges in neither branch), reddening the `gate-python` CI job. Mirrors the ADC-324 fix already
+  applied to the native sibling test: drop the `unfloored-blows-up` control and keep the compiled-facade
+  contract (floor accepted + floored run finite); the load-bearing property stays covered by
+  `tests/test_positivity_floor.cpp` and the native test's refined C/F interface, and that the floor rides
+  the loader by the same test's dmax==0 marshalling check and multi-block routing. Test-only; no library
+  or ABI change.
 - **Backend-blind DSL compile cache** (ADC-186): recompiling a `production` model onto an explicit
   `so_path` where an `aot` artifact was already loaded via dlopen in the same process re-served the
   stale aot handle (`add_native_block: adc_native_abi_key missing`), since the dynamic loader caches
