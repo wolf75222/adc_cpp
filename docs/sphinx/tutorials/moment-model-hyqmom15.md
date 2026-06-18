@@ -240,6 +240,11 @@ is unchanged.
 m = build_moment_model(..., exact_speeds=True, projection=True)  # projecteur natif relaxation15
 ```
 
+Why it matters: on a Ma=20 crossing run without the projection, non-realizable cells blow up the
+flux eigenvalues and the CFL step collapses (the measured `dt` decays as `exp(-18.5 t)`); with the
+projection applied at every step `dt` stays stable (around `1.2e-3`) over the full run. The
+`adc_cases/hyqmom15` case measures this contrast.
+
 ## Troubleshooting
 
 - The closure raises about missing keys: it must return exactly the order-5 names
