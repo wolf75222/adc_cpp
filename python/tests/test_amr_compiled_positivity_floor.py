@@ -11,10 +11,14 @@ This test compiles an ISOTHERMAL block (p = cs2 rho, the ticket's regime: floori
 floors the pressure) with backend='production', target='amr_system' and drives it through the public
 facade AmrSystem.add_equation. It checks, on the compiled .so path:
 
-  (1) NO LONGER RAISES + LOAD-BEARING: add_equation(positivity_floor > 0) no longer raises (it used to)
-      and, on the 1e6-contrast oscillating top-hat advected at u=1 (where weno5 reconstructs a negative
-      face density), the floored .so run stays FINITE while the UNFLOORED .so run blows up. The floor is
-      load-bearing AND it actually rides the compiled loader.
+  (1) NO LONGER RAISES: add_equation(positivity_floor > 0) no longer raises (it used to) and, on the
+      1e6-contrast oscillating top-hat advected at u=1 (where weno5 reconstructs a negative face density),
+      the floored .so run stays FINITE. The load-bearing claim (an unfloored run diverging on the same
+      spike) is covered on the System path by tests/test_positivity_floor.cpp and on a refined AMR C/F
+      interface by python/tests/test_amr_positivity_floor.py section (3); it is not asserted here since it
+      depended on the pre-ADC-324 never-tagged seed of set_refinement(1e30) (now a mono-level hierarchy),
+      leaving a coarse-only grid on which the demo is not robust. The floor still rides the compiled
+      loader -- exercised by (2)'s dmax==0 marshalling check and (3)'s multi-block routing.
   (2) BIT-IDENTICAL AT floor=0: on a smooth strictly-positive drifting state, the compiled run with
       positivity_floor > 0 is BIT-IDENTICAL (dmax == 0) to positivity_floor = 0 -- the floor never bites
       a face above it, so the regenerated loader is a no-default-change at floor 0.
@@ -121,14 +125,19 @@ def main():
         assert isinstance(cm, dsl.CompiledModel)
         assert cm.adder == "add_native_block" and cm.target == "amr_system"
 
-        # --- (1) no longer raises + the floor rides the .so and is load-bearing on the 1e6 spike ------
-        print("== (1) compiled .so: positivity_floor>0 accepted + load-bearing on the contrast-1e6 spike ==")
+        # --- (1) no longer raises + the floor rides the .so; floored run finite on the 1e6 spike ------
+        # ADC-341/ADC-324: set_refinement(1e30) is now a MONO-LEVEL hierarchy (no seed fine patch). The
+        # historical "unfloored .so run blows up" assertion relied on the never-tagged 1e30 seed and is
+        # not robust on the resulting coarse-only grid (neither floored nor unfloored diverges there); the
+        # load-bearing property is covered on System by tests/test_positivity_floor.cpp and on a refined
+        # AMR C/F interface by python/tests/test_amr_positivity_floor.py section (3). Here we keep the
+        # compiled-facade contract: floor>0 is accepted (previously raised at add_equation) and the
+        # floored .so run stays finite. That the floor actually rides the loader is proven by (2)'s
+        # dmax==0 marshalling check and (3)'s multi-block routing.
+        print("== (1) compiled .so: positivity_floor>0 accepted + floored run finite on the contrast-1e6 spike ==")
         d_on = compiled_single(cm, 1e-8, spike_state())   # previously raised ValueError at add_equation
         chk(np.all(np.isfinite(d_on)),
             "compiled add_equation(positivity_floor>0) accepted + finite over 38 steps")
-        d_off = compiled_single(cm, 0.0, spike_state())
-        chk(not np.all(np.isfinite(d_off)),
-            "the unfloored compiled run blows up on the same spike (floor load-bearing on the .so)")
 
         # --- (2) bit-identical at floor=0: smooth positive drift -> floor ON == floor OFF -------------
         print("== (2) no-default-change: compiled floor>0 == floor=0 on smooth positive data ==")
