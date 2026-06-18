@@ -65,7 +65,7 @@ if [ ! -f "$KSER/lib64/cmake/Kokkos/KokkosConfig.cmake" ] && [ ! -f "$KSER/lib/c
     -DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_OPENMP=OFF -DKokkos_ENABLE_CUDA=OFF \
     -DKokkos_ARCH_NATIVE=ON -DCMAKE_CXX_STANDARD=20 > kserial_cfg.log 2>&1 \
     || { echo KSER_CFG_FAIL; tail -30 kserial_cfg.log; exit 1; }
-  cmake --build kserial_build -j 16 --target install > kserial_build.log 2>&1 \
+  cmake --build kserial_build -j "${SLURM_CPUS_PER_TASK:-16}" --target install > kserial_build.log 2>&1 \
     || { echo KSER_BUILD_FAIL; tail -40 kserial_build.log; exit 1; }
   echo KSER_OK
 else
@@ -79,6 +79,8 @@ rm -rf "$SCR/dev_build"
 cmake -S "$WORK" -B "$SCR/dev_build" -DCMAKE_CXX_COMPILER="$NVCC" \
   -DKokkos_ROOT="$KGPU" -DADC_INCLUDE="$ADCINC" -DCMAKE_BUILD_TYPE=Release \
   > "$SCR/dev_cfg.log" 2>&1 || { echo DEV_CFG_FAIL; tail -40 "$SCR/dev_cfg.log"; exit 1; }
+# -j 8 (half the 16-core allocation) caps memory: nvcc_wrapper expands each heavy
+# template TU per device pass, so the full allocation can exhaust node RAM. Intentional.
 cmake --build "$SCR/dev_build" -j 8 > "$SCR/dev_build.log" 2>&1 \
   || { echo DEV_BUILD_FAIL; grep -iE "error" "$SCR/dev_build.log" | head -40; exit 1; }
 echo DEV_BUILD_OK
@@ -91,6 +93,7 @@ rm -rf "$SCR/ser_build"
 cmake -S "$WORK" -B "$SCR/ser_build" -DCMAKE_CXX_COMPILER=g++ \
   -DKokkos_ROOT="$KSER" -DADC_INCLUDE="$ADCINC" -DCMAKE_BUILD_TYPE=Release \
   > "$SCR/ser_cfg.log" 2>&1 || { echo SER_CFG_FAIL; tail -40 "$SCR/ser_cfg.log"; exit 1; }
+# -j 8 mirrors the device build cap above: keep the host parity build symmetric. Intentional.
 cmake --build "$SCR/ser_build" -j 8 > "$SCR/ser_build.log" 2>&1 \
   || { echo SER_BUILD_FAIL; grep -iE "error" "$SCR/ser_build.log" | head -40; exit 1; }
 echo SER_BUILD_OK

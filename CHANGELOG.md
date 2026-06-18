@@ -94,6 +94,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   remapped solver's `residual()` is machine-zero and covers a non-power-of-two grid (n=12), exercising
   PoissonFFT's O(n^2) DFT fallback under the box-slab remap. The System Cartesian single-box invariant
   is documented at its source (`python/system.cpp`).
+- **Build parallelism derived from cores, not hardcoded** (ADC-339): the README no longer prints a
+  literal `-j8`; it states the Ninja default already uses every core and gives the dynamic cap form
+  (`-j$(nproc)` on Linux, `-j$(sysctl -n hw.ncpu)` on macOS). The ROMEO validation `.sbatch` builds
+  that matched their `--cpus-per-task` allocation now read `-j "${SLURM_CPUS_PER_TASK:-N}"` so they
+  self-adjust to the allocation. The CI `--parallel`, the WSL2 `-j 6` (RAM bound), and the parity181
+  half-allocation nvcc cap stay explicit and documented (memory-bounded environments, intentional).
 
 ### Fixed
 

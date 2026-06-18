@@ -77,10 +77,12 @@ git clone https://github.com/wolf75222/adc_cpp.git && cd adc_cpp
 cmake --preset serial && cmake --build --preset serial && ctest --preset serial
 ```
 
-The Ninja build already uses every core; cap or pin it with `cmake --build --preset serial
--j8`, and run the test suite concurrently with `ctest --preset serial -j8` (add
-`--output-on-failure` for logs). Two other presets build a parallel backend instead of the
-serial one (both read `$CONDA_PREFIX`, so the conda env must be active):
+The Ninja build already uses every core; pin it to fewer jobs on a constrained machine with
+`cmake --build --preset serial -j<N>`. The serial test preset runs tests one at a time;
+parallelize with `ctest --preset serial -j<N>` (`-j$(nproc)` on Linux, `-j$(sysctl -n
+hw.ncpu)` on macOS), and add `--output-on-failure` for logs. Two other presets build a
+parallel backend instead of the serial one (both read `$CONDA_PREFIX`, so the conda env must
+be active):
 
 ```bash
 cmake --preset parallel && cmake --build --preset parallel && ctest --preset parallel  # threaded, Kokkos OpenMP

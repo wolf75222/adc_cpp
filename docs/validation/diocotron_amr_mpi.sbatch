@@ -73,7 +73,7 @@ else
   cmake -S "$WORK" -B "$SCR/build" -DCMAKE_CXX_COMPILER="$NVCC" -DKokkos_ROOT="$KGPU" \
     -DADC_INCLUDE="$ADCINC" -DADC_VALIDATION_MPI=ON -DCMAKE_BUILD_TYPE=Release \
     > "$SCR/cfg.log" 2>&1 || { echo CFG_FAIL; tail -50 "$SCR/cfg.log"; exit 1; }
-  cmake --build "$SCR/build" --target diocotron_amr_gpu -j 8 > "$SCR/build.log" 2>&1 \
+  cmake --build "$SCR/build" --target diocotron_amr_gpu -j "${SLURM_CPUS_PER_TASK:-8}" > "$SCR/build.log" 2>&1 \
     || { echo BUILD_FAIL; grep -iE "error" "$SCR/build.log" | head -40; exit 1; }
   test -x "$BIN" || { echo NO_BIN; exit 2; }
   echo BUILD_OK

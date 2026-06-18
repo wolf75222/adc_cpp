@@ -67,7 +67,7 @@ rm -rf "$SCR/build"
 cmake -S "$WORK" -B "$SCR/build" -DCMAKE_CXX_COMPILER="$NVCC" -DKokkos_ROOT="$KGPU" \
   -DADC_INCLUDE="$ADCINC" -DADC_VALIDATION_MPI=ON -DCMAKE_BUILD_TYPE=Release \
   > "$SCR/cfg.log" 2>&1 || { echo CFG_FAIL; tail -50 "$SCR/cfg.log"; exit 1; }
-cmake --build "$SCR/build" -j 8 > "$SCR/build.log" 2>&1 \
+cmake --build "$SCR/build" -j "${SLURM_CPUS_PER_TASK:-8}" > "$SCR/build.log" 2>&1 \
   || { echo BUILD_FAIL; grep -iE "error" "$SCR/build.log" | head -40; exit 1; }
 BIN="$SCR/build/diocotron_gpu"
 test -x "$BIN" || { echo NO_BIN; exit 2; }
