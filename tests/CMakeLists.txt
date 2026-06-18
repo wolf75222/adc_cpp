@@ -50,7 +50,7 @@ endfunction()
 # l'ordonnancement. Honore par le generateur Ninja (la CI) ; ignore sans effet par Make. APPEND sur la
 # propriete GLOBALE JOB_POOLS (le CMakeLists racine y declare aussi adc_heavy_module_tu, nom DISTINCT :
 # chaque pool ne doit etre declare qu'UNE fois, sinon "ninja: error: duplicate pool").
-set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_tu=1)
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_tu=${ADC_HEAVY_TU_POOL})  # profondeur partagee (ADC-335, defaut 1 ; racine CMakeLists.txt)
 
 function(adc_cap_opt_for_kokkos_ram target)
   target_compile_options(${target} PRIVATE
