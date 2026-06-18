@@ -119,6 +119,11 @@ struct AmrSystem::Impl {
     // 1 == kSsprk3 (order 3 + per-stage reflux). Materialized to AmrTimeMethod at build (single-block via
     // make_build_params -> bp.time_method; multi-block via dispatch_amr_block). Mutually exclusive with imex.
     int time_method = 0;
+    // Zhang-Shu positivity floor (ADC-259): if > 0, the AMR transport floors the Density-role face
+    // states + C/F fine ghost means to >= pos_floor. 0 (default) = inactive, bit-identical. Threaded
+    // to dispatch_amr_block (multi-block) and to AmrBuildParams::pos_floor (single-block, build_amr_compiled).
+    // A COMPILED block rejects pos_floor > 0 (the flat ABI carries no floor slot).
+    double pos_floor = 0.0;
   };
 
   std::vector<BlockSpec> blocks;
@@ -276,6 +281,9 @@ struct AmrSystem::Impl {
     // coupler). build_amr_compiled captures them from bp and passes them to cpl->step. Default
     // (add_block without option) = historical NewtonOptions{} -> path (2a) bit-identical.
     bp.newton_options = b.newton;
+    // Zhang-Shu positivity floor (ADC-259): consumed by build_amr_compiled (mono-block ->
+    // cpl->step / advance_transport). 0 (default) -> inactive, bit-identical historical path.
+    bp.pos_floor = b.pos_floor;
     return bp;
   }
 
@@ -356,6 +364,13 @@ struct AmrSystem::Impl {
           throw std::runtime_error(
               "AmrSystem : newton_diagnostics (newton_report) is not transported by the "
               "compiled .so loader (block '" + b.name + "') ; use a native block adc.Model(...).");
+        // Zhang-Shu positivity floor (ADC-259) likewise: the AmrCompiledBlockBuilder flat ABI carries
+        // no floor slot. Explicit rejection rather than a silently dropped floor (regenerate the
+        // loader = dedicated follow-up). Parity with the Newton rejects above.
+        if (b.pos_floor > 0.0)
+          throw std::runtime_error(
+              "AmrSystem : positivity_floor is not transported by the compiled .so loader (block '" +
+              b.name + "') ; use a native adc.Model(...) block, or regenerate the loader.");
         rblocks.push_back(b.compiled_block_builder(S, b.name, b.density, b.has_density, b.gamma,
                                                    b.substeps, b.recon_prim, b.imex, b.stride,
                                                    b.implicit_vars, b.implicit_roles));
@@ -381,7 +396,7 @@ struct AmrSystem::Impl {
                                                      b.recon_prim, b.imex, b.stride, impl_components,
                                                      b.newton,
                                                      b.has_state ? &b.state : nullptr,
-                                                     b.newton_diagnostics, tmethod));
+                                                     b.newton_diagnostics, tmethod, b.pos_floor));
       });
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
@@ -472,6 +487,14 @@ struct AmrSystem::Impl {
           "System for the full report.");
     const AmrBuildParams bp = make_build_params();
     if (b.is_compiled) {  // compiled path: the builder freezes the types (Model, Limiter, Flux)
+      // Zhang-Shu positivity floor (ADC-259): the .so loader inlines its OWN build_amr_compiled at
+      // generation time (flat ABI); an older loader does not read bp.pos_floor (append-only) and would
+      // SILENTLY drop the floor. Explicit rejection rather than a silent no-op (regenerate the loader
+      // = dedicated follow-up). Parity with the multi-block compiled reject in build_multi.
+      if (b.pos_floor > 0.0)
+        throw std::runtime_error(
+            "AmrSystem : positivity_floor is not transported by the compiled .so loader (block '" +
+            b.name + "') ; use a native adc.Model(...) block, or regenerate the loader.");
       install(b.compiled_hooks_builder(bp));
       return;
     }
@@ -502,12 +525,17 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
                           const std::string& recon, const std::string& time, int substeps,
                           int stride, const std::vector<std::string>& implicit_vars,
                           const std::vector<std::string>& implicit_roles,
-                          const NewtonOptions& newton, bool newton_diagnostics) {
+                          const NewtonOptions& newton, bool newton_diagnostics,
+                          double positivity_floor) {
   if (p_->built)
     throw std::runtime_error("AmrSystem::add_block : the system is already built (call "
                              "add_block before any step/mass/density)");
   if (substeps < 1) throw std::runtime_error("AmrSystem::add_block : substeps >= 1");
   if (stride < 1) throw std::runtime_error("AmrSystem::add_block : stride >= 1");
+  // Zhang-Shu positivity floor (ADC-259): eager validation (parity with System::add_block). 0 =
+  // inactive (bit-identical). The Density-role probe + the compiled-.so rejection happen at lazy build.
+  if (!(positivity_floor >= 0.0) || !std::isfinite(positivity_floor))
+    throw std::runtime_error("AmrSystem::add_block : positivity_floor >= 0 and finite (0 = inactive)");
   // IMEX source Newton options grouped into a POD (ADC-214; wave 3 audit, parity
   // System::add_block). Defaults {} = historical constants (2 / 0 / 0 / 1e-7 / 1.0 / none),
   // bit-identical. SUPPORT: MULTI-BLOCK engine (AmrRuntime) only -- the single-block (AmrCouplerMP)
@@ -587,6 +615,7 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   b.newton = newton;  // Newton options grouped into a POD (ADC-214; wave 3, single-block AND multi-block)
   b.newton_non_default = newton_non_default;
   b.newton_diagnostics = newton_diagnostics;  // newton_report (native multi-block; single/.so rejected)
+  b.pos_floor = positivity_floor;  // Zhang-Shu floor (ADC-259); threaded at build (single/multi)
   b.substeps = substeps;
   b.stride = stride;
   b.gamma = model.gamma;  // adiabatic index of the block (Euler), read by coupler_write_coarse

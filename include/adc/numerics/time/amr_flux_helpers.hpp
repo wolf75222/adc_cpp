@@ -190,16 +190,29 @@ inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
 // (mono-box), mf_fill_fine_ghosts_multi (multi-box) and mf_fill_fine_ghosts_mb (multi-level):
 // a single formula (1-frac)*co + frac*cn, bit-identical to the three previous bodies.
 inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray4& cn,
-                               int i, int j, int nc, Real frac) {
+                               int i, int j, int nc, Real frac,
+                               Real pos_floor = Real(0), int pos_comp = 0) {
   const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
   for (int k = 0; k < nc; ++k)
     f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
+  // Zhang-Shu positivity floor on the C/F fine GHOST MEAN (ADC-259): clamp the Density role only
+  // (pos_comp, resolved on the host by the caller via positivity_comp<Model>) to >= pos_floor. The
+  // refined-patch C/F interface is the highest-risk site: reconstruct_pp's order-1 fallback brings a
+  // sub-floor face back to its SOURCE-CELL mean, and at a fine cell bordering the interface that
+  // source is a ghost; without this clamp the fallback target itself could be sub-floor (the coarse
+  // mean is not floored), defeating the guarantee. Momenta/energy stay interpolated -> the ghost
+  // velocity m/rho only DROPS at quasi-vacuum (bounded, mirror of the single-block mean fallback).
+  // pos_floor <= 0 short-circuits (bit-identical). Ghost cells are never averaged-down nor summed in
+  // mass, so the clamp is conservation-safe (cf. ADC-259 design: average-down immunity + the reflux
+  // coarse-side register reads a separate fab, so the two-sided telescoping is preserved exactly).
+  if (pos_floor > Real(0) && f(i, j, pos_comp) < pos_floor) f(i, j, pos_comp) = pos_floor;
 }
 
 // fine ghosts = spatial interp (piecewise constant) + time (linear) from the
 // old/new coarse. frac = temporal position of the substep within the coarse step.
 inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
-                                   const MultiFab& Uc_new, Real frac) {
+                                   const MultiFab& Uc_new, Real frac,
+                                   Real pos_floor = Real(0), int pos_comp = 0) {
   device_fence();  // host read/write on unified memory
   const int nc = Uf.ncomp();
   Array4 f = Uf.fab(0).array();
@@ -208,7 +221,7 @@ inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
   const Box2D v = Uf.box(0), g = Uf.fab(0).grown_box();
   for (int j = g.lo[1]; j <= g.hi[1]; ++j)
     for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-      if (!v.contains(i, j)) fill_cf_ghost_cell(f, co, cn, i, j, nc, frac);
+      if (!v.contains(i, j)) fill_cf_ghost_cell(f, co, cn, i, j, nc, frac, pos_floor, pos_comp);
 }
 
 }  // namespace adc

@@ -26,6 +26,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   rank; a replicated or single-box base gives `local == total` everywhere. Wired through the mono-block
   (`AmrCouplerMP`) and multi-block (`AmrRuntime`) paths, exposed in the pybind bindings and the Python
   facade. A general MPI strong-scaling diagnostic; no change to the numerics or the hot path.
+- **Positivity floor on the AMR transport** (ADC-259): `AmrSystem.add_block` / `add_equation` now
+  honor `spatial.positivity_floor > 0` (Zhang-Shu), previously rejected on the AMR path. The floor is
+  threaded through both engines (single-block `AmrCouplerMP`, multi-block `AmrRuntime`) into
+  `compute_face_fluxes` (Density-role face states) and adds a Density clamp on the coarse-fine fine
+  ghost means (`fill_cf_ghost_cell`), the refined-patch interface the diocotron Hoffart failure
+  exercised. Guarantee = face / C/F-ghost-mean Density positivity only (order-1 fallback), NOT
+  updated-mean nor pressure positivity (parity with `System`). `positivity_floor == 0` is bit-identical
+  to before; a model without a Density role and the compiled `.so` AMR path (flat ABI, no floor slot)
+  reject `positivity_floor > 0` explicitly.
 - **Distributed FFT Poisson under MPI** (ADC-287): `System.set_poisson(..., "fft"|"fft_spectral")` now
   runs with `n_ranks() > 1` via a box-slab remap (`RemappedFFTSolver`), replacing the previous explicit
   rejection. The new solver presents the System single round-robin box outward (so the field-solve path

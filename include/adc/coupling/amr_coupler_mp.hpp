@@ -491,11 +491,11 @@ class AmrCouplerMP {
   /// kSsprk3 = order-3 SSPRK3 + per-stage reflux). kSsprk3 requires imex == false (rejected otherwise).
   template <class Disc = FirstOrder>
   void step(Real dt, bool recon_prim = false, bool imex = false, const NewtonOptions& nopts = {},
-            AmrTimeMethod tmethod = AmrTimeMethod::kEuler) {
+            AmrTimeMethod tmethod = AmrTimeMethod::kEuler, Real pos_floor = Real(0)) {
     update();
     advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
         model_, stack_.L(), stack_.domain(), dt, Periodicity{true, true}, replicated_coarse_,
-        recon_prim, imex, nopts, tmethod);
+        recon_prim, imex, nopts, tmethod, pos_floor);
   }
 
   /// TRANSPORT-ONLY ADVANCE (hyperbolic), WITHOUT update() or source. Counterpart of step() stripped
@@ -507,10 +507,10 @@ class AmrCouplerMP {
   /// here in forward Euler, once by the Schur stage): this is the contract of the amr-schur path, mirror of
   /// the uniform time=Strang(Explicit, CondensedSchur) where the block is added with its transport only.
   template <class Disc = FirstOrder>
-  void advance_transport(Real dt, bool recon_prim = false) {
+  void advance_transport(Real dt, bool recon_prim = false, Real pos_floor = Real(0)) {
     advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
         model_, stack_.L(), stack_.domain(), dt, Periodicity{true, true}, replicated_coarse_,
-        recon_prim, /*imex=*/false);
+        recon_prim, /*imex=*/false, NewtonOptions{}, AmrTimeMethod::kEuler, pos_floor);
   }
 
   // Regrid of the FINE level by Berger-Rigoutsos (delegated to amr_regrid_finest):

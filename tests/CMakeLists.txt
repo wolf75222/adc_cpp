@@ -204,6 +204,7 @@ adc_add_test(test_user_time_integrator)
 adc_add_test(test_diffusion)
 adc_add_test(test_amr_diffusion)
 adc_add_test(test_amr_spatial_parity)
+adc_add_test(test_amr_positivity_floor)  # Zhang-Shu floor on the AMR transport + C/F ghost clamp (ADC-259)
 # Chantier T2 : masque de domaine DISQUE conservatif (CONTRAT, inerte par defaut). (a) bit-identite
 # du residu masque tout-actif vs assemble_rhs historique ; (b) conservation de masse sur les cellules
 # actives (flux normal nul aux faces active/inactive) + residu nul sur les cellules inactives.

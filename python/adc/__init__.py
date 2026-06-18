@@ -2542,8 +2542,11 @@ class AmrSystem:
             aggregate a report).
         @throws TypeError if time is an adc.Split / adc.Strang (Schur-condensed source stage) :
             go through add_equation(..., time=adc.Strang(...)) (amr-schur path).
-        @throws ValueError if spatial.positivity_floor > 0 : the positivity limiter (ADC-76) is not
-            wired on the AMR path (explicit rejection rather than a silently ignored floor).
+        spatial.positivity_floor > 0 (ADC-259) floors the Density-role face states AND the
+        coarse-fine fine ghost means to >= floor on the AMR transport (Zhang-Shu, parity with the
+        uniform System). Guarantee = face / ghost-state Density positivity only (order-1 fallback),
+        NOT updated-mean nor pressure positivity. A model without a Density role rejects it at the
+        first step; a COMPILED .so block rejects it at build (the flat ABI carries no floor slot).
         """
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
@@ -2556,12 +2559,9 @@ class AmrSystem:
                 "supported only by add_equation (which connects the source stage) ; use "
                 "add_equation(..., time=adc.Strang(hyperbolic=adc.Explicit(...), "
                 "source=adc.CondensedSchur(...))).")
-        # positivity_floor (ADC-76) is NOT wired on the AMR path (AmrSystem::add_block does not
-        # transport it) : explicit rejection rather than a silently ignored floor.
-        if getattr(spatial, "positivity_floor", 0.0) > 0.0:
-            raise ValueError(
-                "AmrSystem.add_block : positivity_floor not supported on the AMR path (separate "
-                "work item) ; remove positivity_floor or use the uniform System.")
+        # positivity_floor (ADC-259) IS now wired on the AMR transport (Density-role face states +
+        # C/F fine ghost means). Threaded to AmrSystem::add_block below; the C++ side rejects it on a
+        # compiled .so block (flat ABI) and on a model without a Density role.
         # wave_speed_cache (ADC-199) is NOT wired on the AMR path (AmrSystem::add_block does not
         # transport it) : explicit rejection rather than a silently ignored cache.
         if getattr(spatial, "wave_speed_cache", False):
@@ -2583,7 +2583,8 @@ class AmrSystem:
                           getattr(time, "newton_fd_eps", 1e-7),
                           getattr(time, "newton_damping", 1.0),
                           getattr(time, "newton_fail_policy", "none"),
-                          getattr(time, "newton_diagnostics", False))
+                          getattr(time, "newton_diagnostics", False),
+                          getattr(spatial, "positivity_floor", 0.0))
 
     def write(self, path, format="npz", step=None):
         """AMR VISUALIZATION OUTPUT (wave 3) : COARSE fields per block + phi + footprints of the
@@ -2805,12 +2806,10 @@ class AmrSystem:
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
 
-        # positivity_floor (ADC-76) is NOT wired on the AMR path (neither AmrSystem::add_block nor
-        # the amr_system loader ABI transport it): explicit rejection, no silent ignore.
-        if getattr(spatial, "positivity_floor", 0.0) > 0.0:
-            raise ValueError(
-                "AmrSystem.add_equation: positivity_floor not supported on the AMR path (separate "
-                "workstream); remove positivity_floor or use the uniform System.")
+        # positivity_floor (ADC-259) IS wired on the NATIVE AMR transport (Density-role face states +
+        # C/F fine ghost means). It is threaded below on the ModelSpec (native) branch and on the
+        # amr-schur transport (the recursive add_equation on time.hyperbolic). The COMPILED .so path
+        # carries no floor slot (flat ABI) -> rejected on the CompiledModel branch below.
 
         # --- adc.Split (Lie) / adc.Strang (2nd order): amr-schur PATH (GLOBAL condensed source stage) --
         # During AMR of System.add_equation (cf. ~line 925): we first add the block with its single
@@ -2864,7 +2863,8 @@ class AmrSystem:
                               getattr(time, "newton_fd_eps", 1e-7),
                               getattr(time, "newton_damping", 1.0),
                               getattr(time, "newton_fail_policy", "none"),
-                              getattr(time, "newton_diagnostics", False))
+                              getattr(time, "newton_diagnostics", False),
+                              getattr(spatial, "positivity_floor", 0.0))  # Zhang-Shu floor (ADC-259)
             return
 
         if not isinstance(model, dsl.CompiledModel):
@@ -2935,6 +2935,14 @@ class AmrSystem:
         # through the .so loader. Explicit rejection (otherwise iters=2 / no report silently), parity with
         # the stride/mask rejection above and with System.add_equation (compiled backend).
         _reject_newton_amr_compiled("AmrSystem.add_equation", time)
+        # positivity_floor (ADC-259): same flat ABI -> the .so loader carries no floor slot, so it would
+        # be dropped SILENTLY. Explicit rejection (parity with the stride/mask/Newton rejects above).
+        # The NATIVE add_block / add_equation(ModelSpec) path threads it; loader regeneration = follow-up.
+        if getattr(spatial, "positivity_floor", 0.0) > 0.0:
+            raise ValueError(
+                "AmrSystem.add_equation: positivity_floor not transported by the production AMR path "
+                "(.so loader, flat ABI add_native_block: the floor would be dropped silently). Use "
+                "AmrSystem.add_block (native model adc.Model(...), wired floor) or the uniform System.")
 
         # PRE-DLOPEN guard at attach (covers the cache HIT, cf. System.add_equation): module
         # _adc stale vs .so compiled against the up-to-date headers -> actionable error, not a dlopen
