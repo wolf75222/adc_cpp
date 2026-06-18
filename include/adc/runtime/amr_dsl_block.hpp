@@ -124,9 +124,10 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   // Level 0 (coarse): layout decided by the ownership policy (replicated mono-box by default,
   // distributed multi-box if bp.distribute_coarse). When replicated, dmap = my_rank() everywhere (the box
   // lives on each rank; a round-robin would place it on rank 0 only -> out-of-bounds fab elsewhere,
-  // segfault under np>1). The fine seed starts on the SAME dmap as the coarse; the initial regrid
-  // REBUILDS it then REDISTRIBUTES round-robin (DistributionMapping(nfine, n_ranks())) -> multi-GPU
-  // distribution of the fine patches. When distributed, the coarse is distributed TOO (AMR strong-scaling).
+  // segfault under np>1). The fine seed (allocated below ONLY when refinement is configured) starts on the
+  // SAME dmap as the coarse; the initial regrid REBUILDS it then REDISTRIBUTES round-robin
+  // (DistributionMapping(nfine, n_ranks())) -> multi-GPU distribution of the fine patches. When distributed,
+  // the coarse is distributed TOO (AMR strong-scaling).
   const auto [bac, dm] =
       coupler_make_coarse_layout(bp.n, bp.distribute_coarse, bp.coarse_max_grid);
   const int ng = Limiter::n_ghost;  // limiter stencil (1 NoSlope, 2 MUSCL): scheme parity
@@ -134,12 +135,21 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   Uc.set_val(Real(0));
   std::vector<AmrLevelMP> levels;
   levels.push_back({std::move(Uc), nullptr, dxc, dxc});
-  // Level 1 (central seed fine patch, reshaped by the regrid): explicit/imex path ONLY. The
-  // amr-schur path (Step 2/3) runs MONO-LEVEL -- the condensed source stage does not yet carry the
-  // multi-level case (cf. AmrCondensedSchurSourceStepper, guard on the number of fine patches). So we do
-  // NOT allocate a fine level for bp.schur (otherwise the seed would trip that guard at the first step). The
-  // multi-level amr-schur (fine reconstruction + cascade + composite Schur/Poisson) is Step 4.
-  if (!bp.schur) {
+  // Level 1 (central seed fine patch, reshaped by the regrid): allocated ONLY on the explicit/imex path
+  // AND when refinement is actually configured (set_refinement was called -> refine_threshold below its
+  // 1e30 "no refinement" sentinel). Two reasons to gate it:
+  //   - amr-schur (Step 2/3) runs MONO-LEVEL: the condensed source stage does not yet carry the multi-level
+  //     case (cf. AmrCondensedSchurSourceStepper, guard on the number of fine patches), so a seed would trip
+  //     that guard at the first step. Multi-level amr-schur (fine reconstruction + cascade + composite
+  //     Schur/Poisson) is Step 4.
+  //   - NO refinement (ADC-324): with the 1e30 sentinel the build-time regrid below (cpl->regrid(crit)) tags
+  //     nothing and amr_regrid_finest is a deliberate no-op on zero tags, so the seed would NEVER be reshaped
+  //     or removed -- it would persist as a SINGLE un-chopped fine box on the coarse dmap (box 0 -> rank 0),
+  //     dead weight that starves MPI strong-scaling (rank 0 carries its coarse boxes PLUS the whole fine
+  //     patch). Gating on refine_threshold keeps the no-refinement hierarchy MONO-LEVEL (n_patches()==0, like
+  //     the amr-schur path), so the coarse distributes cleanly. When refinement IS configured the seed is
+  //     allocated and the first build regrid chops + distributes it round-robin exactly as before (UNCHANGED).
+  if (!bp.schur && bp.refine_threshold < 1e30) {
     const int I0 = bp.n / 4, I1 = 3 * bp.n / 4 - 1, J0 = bp.n / 4, J1 = 3 * bp.n / 4 - 1;
     Box2D fb{{2 * I0, 2 * J0}, {2 * I1 + 1, 2 * J1 + 1}};
     BoxArray baf(std::vector<Box2D>{fb});

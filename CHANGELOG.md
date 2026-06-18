@@ -82,6 +82,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **AMR seed fine patch persisted without refinement** (ADC-324): the compiled/native mono-block AMR
+  builder (`build_amr_compiled`) always allocated a central seed fine patch on the explicit/imex path,
+  even when `set_refinement` was never called. With the `1e30` "no refinement" threshold the build-time
+  regrid tags nothing and the zero-tag regrid is a deliberate no-op, so the seed survived as a single
+  un-chopped fine box pinned to rank 0 of the coarse dmap (`n_patches() == 1`), dead weight that starved
+  MPI strong-scaling (rank 0 carried its coarse boxes plus the whole fine patch). The seed is now
+  allocated only when refinement is configured (`refine_threshold < 1e30`): no refinement gives a
+  mono-level hierarchy (`n_patches() == 0`, coarse distributes cleanly), and the refined path is
+  unchanged. Regression test: `test_amr_seed_no_refine`. Follow-up to ADC-319.
 - **Backend-blind DSL compile cache** (ADC-186): recompiling a `production` model onto an explicit
   `so_path` where an `aot` artifact was already loaded via dlopen in the same process re-served the
   stale aot handle (`add_native_block: adc_native_abi_key missing`), since the dynamic loader caches

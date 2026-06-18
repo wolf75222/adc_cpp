@@ -9,9 +9,12 @@ where flooring the density also floors the pressure so face-density positivity i
 finite (compressible Euler can still drive the pressure negative independently, cf.
 tests/test_positivity_floor.cpp; that is out of scope of the floor):
 
-  (1) FACADE + LOAD-BEARING: positivity_floor > 0 no longer raises; on the 1e6-contrast oscillating
-      top-hat advected at u=1 (where weno5 reconstructs a negative face density) the floored run stays
-      FINITE while the UNFLOORED run blows up -- the floor was load-bearing.
+  (1) FACADE: positivity_floor > 0 no longer raises on the AMR path and the floored run stays FINITE on
+      the 1e6-contrast oscillating top-hat advected at u=1 (where weno5 reconstructs a negative face
+      density). The load-bearing claim (an unfloored run diverging on the same spike) is covered on the
+      System path by tests/test_positivity_floor.cpp and on a refined AMR C/F interface by (3); it is not
+      asserted here since it depended on the pre-ADC-324 never-tagged seed of set_refinement(1e30) (now a
+      mono-level hierarchy), leaving a coarse-only grid on which the demo is not robust.
   (2) NO-DEFAULT-CHANGE: on a smooth positive drifting state, positivity_floor > 0 is BIT-IDENTICAL to
       positivity_floor = 0 (the floor never bites a face above it).
   (3) REGRID + MASS: with the floor active and a real refined hierarchy (the C/F interface straddling
@@ -87,18 +90,19 @@ def step_n(s, nsteps):
         s.step(dt)
 
 
-# --- (1) FACADE accepts the floor + the floor is LOAD-BEARING on the 1e6-contrast spike -------------
-print("== (1) positivity_floor>0 wired on AMR + load-bearing on the contrast-1e6 spike ==")
+# --- (1) FACADE accepts the floor + the floored run stays finite on the 1e6-contrast spike ----------
+# ADC-324: set_refinement(1e30) is now a MONO-LEVEL hierarchy (no seed fine patch). The historical
+# "unfloored run blows up" assertion relied on the never-tagged 1e30 seed and is not robust on the
+# resulting coarse-only grid (neither floored nor unfloored diverges there); the load-bearing property
+# is covered on System by tests/test_positivity_floor.cpp and on a refined AMR C/F interface by (3).
+# Here we keep the AMR-facade contract: floor>0 is accepted (previously raised at add_block) and the
+# floored run stays finite over the spike.
+print("== (1) positivity_floor>0 wired on AMR + floored run finite on the contrast-1e6 spike ==")
 s_on = build(1e-8)                                  # previously raised ValueError at add_block
 s_on.set_conservative_state("gas", spike_state())
 step_n(s_on, 38)
 d_on = np.asarray(s_on.density("gas"))
 chk(np.all(np.isfinite(d_on)), "positivity_floor>0 accepted on AMR + finite over 38 steps")
-s_off = build(0.0)
-s_off.set_conservative_state("gas", spike_state())
-step_n(s_off, 38)
-d_off = np.asarray(s_off.density("gas"))
-chk(not np.all(np.isfinite(d_off)), "the unfloored run blows up on the same spike (floor load-bearing)")
 
 
 # --- (2) NO-DEFAULT-CHANGE: smooth positive drift -> floor ON == floor OFF (bit-identical) ----------

@@ -368,6 +368,16 @@ add_executable(test_amr_compiled_model test_amr_compiled_model.cpp
 target_link_libraries(test_amr_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS})
 add_test(NAME test_amr_compiled_model COMMAND test_amr_compiled_model)
 
+# --- ADC-324 : le patch fin SEED n'existe que si le raffinement est configure (set_refinement) ---
+# Meme machinerie que test_amr_compiled_model (compile python/amr_system.cpp avec le test) : sans
+# set_refinement (refine_threshold == 1e30) la hierarchie compilee est MONO-NIVEAU (n_patches()==0),
+# avec set_refinement(seuil fini) le seed est alloue (n_patches()>=1). Verrouille la suppression du
+# patch fin rang-0 qui bridait le strong-scaling MPI quand le raffinement etait inactif.
+add_executable(test_amr_seed_no_refine test_amr_seed_no_refine.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+target_link_libraries(test_amr_seed_no_refine PRIVATE adc::adc ${CMAKE_DL_LIBS})
+add_test(NAME test_amr_seed_no_refine COMMAND test_amr_seed_no_refine)
+
 # --- AmrSystem::potential() : phi du niveau grossier expose, pendant de System::potential() ---
 # Compile les runtimes AmrSystem ET System (python/amr_system.cpp + python/system.cpp) avec le test :
 # sans raffinement, AmrSystem resout le MEME Poisson discret que System(geometric_mg) sur le grossier
