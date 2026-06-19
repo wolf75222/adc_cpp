@@ -67,6 +67,7 @@ jobs:
     outputs:
       cpp: ${{ steps.filter.outputs.cpp }}
       python: ${{ steps.filter.outputs.python }}
+      full: ${{ steps.filter.outputs.full }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -93,34 +94,61 @@ jobs:
             python:
               - 'python/**'
               - '.github/actions/**'
+            # full : un push master ne lance la suite COMPLETE (MPI + Kokkos OpenMP + bench) que si un
+            # chemin build/backend a bouge. Conservateur a dessein -- couvre tout ce qui peut affecter
+            # l'artefact compile OU le chemin DSL/production exerce par le job kokkos-openmp (dsl.py et
+            # python/tests/test_dsl_production*.py inclus via python/**) OU le bench (bench/, scripts/).
+            # Hors liste : fichiers meta seuls (autres workflows, configs linters, LICENSE). Filet de
+            # securite : le run nocturne (cron) lance la suite complete inconditionnellement.
+            full:
+              - 'include/**'
+              - 'tests/**'
+              - 'cmake/**'
+              - 'CMakeLists.txt'
+              - 'CMakePresets.json'
+              - 'pyproject.toml'
+              - 'python/**'
+              - 'bench/**'
+              - 'scripts/**'
+              - '.github/actions/**'
+              - '.github/workflows/ci.yml'
 
-  # Calcule si la suite COMPLETE (MPI + Kokkos OpenMP) doit tourner. Plein si :
-  #  - push sur master, OU
-  #  - run nocturne (schedule), OU
-  #  - declenchement manuel (workflow_dispatch), OU
-  #  - PR portant le label `ci-full` (l'integrateur exige la validation MPI/Kokkos OpenMP
-  #    sur une PR a risque avant merge).
+  # Calcule si la suite COMPLETE (MPI + Kokkos OpenMP + bench) doit tourner. Plein si :
+  #  - run nocturne (schedule) OU declenchement manuel (workflow_dispatch) : INCONDITIONNEL
+  #    (le cron est le filet anti-derive ; le dispatch, l'override de l'integrateur), OU
+  #  - push sur master ET un chemin build/backend a bouge (needs.changes.outputs.full) : un push ne
+  #    touchant QUE des fichiers meta (autres workflows, configs linters, LICENSE) saute MPI/OpenMP/
+  #    bench -- la prochaine execution nocturne les rejoue de toute facon, OU
+  #  - PR portant le label `ci-full` (l'integrateur exige la validation MPI/Kokkos OpenMP avant merge).
   # Sinon (PR ordinaire) : gate rapide seul (Kokkos Serial : C++ + Python).
   set-mode:
     name: mode (fast/full)
     runs-on: ubuntu-latest
+    needs: changes
     outputs:
       full: ${{ steps.decide.outputs.full }}
     steps:
       - id: decide
+        env:
+          FULL_PATHS: ${{ needs.changes.outputs.full }}
         run: |
           full=false
-          if [ "${{ github.event_name }}" = "push" ] \
-             || [ "${{ github.event_name }}" = "schedule" ] \
+          # Nocturne + manuel : suite complete inconditionnelle (backstop anti-derive + override).
+          if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             full=true
           fi
+          # Push master : suite complete UNIQUEMENT si un chemin build/backend a bouge (full_paths).
+          if [ "${{ github.event_name }}" = "push" ] && [ "$FULL_PATHS" = "true" ]; then
+            full=true
+          fi
+          # PR : opt-in explicite via le label ci-full.
           if [ "${{ github.event_name }}" = "pull_request" ] \
              && [ "${{ contains(github.event.pull_request.labels.*.name, 'ci-full') }}" = "true" ]; then
             full=true
           fi
           echo "full=$full" >> "$GITHUB_OUTPUT"
-          echo "Mode plein (MPI + Kokkos OpenMP) : $full (event=${{ github.event_name }})"
+          echo "Mode plein (MPI + Kokkos OpenMP + bench) : $full (event=${{ github.event_name }}, full_paths=$FULL_PATHS)"
 
   # GATE C++ (ADC-171). Ex-moitie C++ du job sequentiel build-and-test, isole pour tourner EN
   # PARALLELE de gate-python. Pas de `needs: set-mode` (le gate Serial tourne dans tous les modes) ;
@@ -459,7 +487,19 @@ jobs:
         env:
           OMPI_MCA_rmaps_base_oversubscribe: "true"
           PRTE_MCA_rmaps_default_mapping_policy: ":oversubscribe"
-        run: ctest --preset ci-mpi
+        # `-L mpi` : ne (re)joue QUE le sous-ensemble distribue. Les tests serie tournent deja dans
+        # gate-cpp (preset ci-kokkos, SANS filtre -L) ; les rejouer ici (build MPI, mono-rang) etait
+        # redondant. Couverture globale inchangee. Garde anti-regression : si le backfill du label
+        # "mpi" (tests/CMakeLists.txt) cassait, la selection s'effondrerait -> plancher explicite
+        # (60 tests aujourd'hui ; ~8 sans backfill), echec bruyant plutot que perte silencieuse.
+        run: |
+          mpi_n=$(ctest --preset ci-mpi -N -L mpi | awk -F': ' '/Total Tests:/{print $2}')
+          echo "Tests MPI selectionnes (-L mpi) : ${mpi_n:-0}"
+          if [ "${mpi_n:-0}" -lt 50 ]; then
+            echo "::error::Selection MPI effondree (${mpi_n:-0} < 50) : label \"mpi\" probablement absent (cf. backfill tests/CMakeLists.txt, ADC-366)"
+            exit 1
+          fi
+          ctest --preset ci-mpi -L mpi
 
       - name: ccache stats (MPI)
         if: always()

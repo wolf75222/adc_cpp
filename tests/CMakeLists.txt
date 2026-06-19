@@ -652,6 +652,14 @@ adc_add_test(test_newton_robustness)
 
 # --- MPI (coeur) : seam comm, reductions, Poisson distribue ---
 if(ADC_HAS_MPI)
+  # Backfill du label "mpi" (ADC-366). Beaucoup de tests distribues sont enregistres INLINE en
+  # add_test(NAME ..._np${np} ...) (np variables, postflags specifiques) sans passer par
+  # adc_add_mpi_test, donc SANS label : un `ctest -L mpi` les sautait silencieusement (perte de
+  # couverture). On photographie l'ensemble des tests AVANT ce bloc ; tout test ajoute DANS le bloc
+  # est par construction un test MPI -> on lui (re)pose LABELS "mpi" + TIMEOUT 600 a la fin du bloc.
+  # Difference d'ensemble exacte (aucune selection par motif de nom, fragile) ; idempotent pour les
+  # tests deja labellises par adc_add_mpi_test.
+  get_property(_adc_tests_before_mpi DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
   function(adc_add_mpi_test name nproc)
     add_executable(${name} ${name}.cpp)
     target_link_libraries(${name} PRIVATE adc::adc)
@@ -922,6 +930,27 @@ if(ADC_HAS_MPI)
              COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_system_io_gather>
                      ${MPIEXEC_POSTFLAGS})
+  endforeach()
+
+  # Fin du bloc MPI : tout test ajoute depuis le snapshot ci-dessus est un test distribue. On lui
+  # garantit le label "mpi" (selection `ctest -L mpi`) + un TIMEOUT 600 (un deadlock MPI echoue de
+  # maniere ciblee au lieu de bloquer le runner). APPEND (et seulement si "mpi" manque) plutot que
+  # set_tests_properties LABELS : ne JAMAIS ecraser un autre label deja pose ; TIMEOUT pose uniquement
+  # s'il n'en existe pas, pour respecter un timeout choisi explicitement. list(FIND) plutot que
+  # IN_LIST : pas de dependance a CMP0057.
+  get_property(_adc_tests_after_mpi DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
+  foreach(_t ${_adc_tests_after_mpi})
+    list(FIND _adc_tests_before_mpi "${_t}" _adc_mpi_seen)
+    if(_adc_mpi_seen EQUAL -1)
+      get_test_property(${_t} LABELS _adc_mpi_labels)
+      if(NOT _adc_mpi_labels MATCHES "(^|;)mpi(;|$)")
+        set_property(TEST ${_t} APPEND PROPERTY LABELS "mpi")
+      endif()
+      get_test_property(${_t} TIMEOUT _adc_mpi_timeout)
+      if(NOT _adc_mpi_timeout)
+        set_property(TEST ${_t} PROPERTY TIMEOUT 600)
+      endif()
+    endif()
   endforeach()
 endif()
 

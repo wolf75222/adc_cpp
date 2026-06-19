@@ -172,6 +172,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `CCACHE_SLOPPINESS` + a codegen-neutral `-ffile-prefix-map`; cache keys unchanged, abi_key untouched),
   and `setup-kokkos` bumps `actions/cache@v4 -> v5`. CI-only; no change to `-O` levels, the shipped
   library, or test coverage (the 3 shards are a complete, disjoint partition of all 110 test files).
+- **Trim push-master CI scope and the MPI job** (ADC-366): the full suite (MPI + Kokkos OpenMP + bench)
+  now runs on a push to `master` only when a build/backend path changed (a new conservative `full`
+  paths-filter covering sources, tests, build files, `python/**`, `bench/`, `scripts/`, and the CI
+  action/workflow); a push touching only meta files (other workflows, linter configs, LICENSE) skips
+  them, with the nightly cron as the unconditional backstop and the `ci-full` label as the manual
+  override (schedule/dispatch stay full). The MPI job runs `ctest --preset ci-mpi -L mpi` (the serial
+  tests already run in gate-cpp), backed by a `tests/CMakeLists.txt` backfill that labels every test in
+  the `ADC_HAS_MPI` block `mpi` (was ~8 of 60) plus a CI floor that fails loudly if the selection
+  collapses. CI-only; no change to `-O` levels or global test coverage.
 - **Split `bindings.cpp` into per-area pybind TUs** (ADC-365): the `py::class_` / `.def` surface moves
   from the single `PYBIND11_MODULE` into `init_core` (module attrs + `SystemConfig` + `ModelSpec`),
   `init_system` (`System`), and `init_amr` (`AmrSystemConfig` + `AmrSystem`), each its own TU declared in
