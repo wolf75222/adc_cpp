@@ -28,6 +28,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   non-convergence maps to `kUnknown` (never read as real) -- letting a native device projector test
   realizability on, e.g., a 3x3 HyQMOM15 block without NumPy or MATLAB. Header-only and additive:
   `real_eig_minmax` / `EigBounds` layout and the DSL eig path are unchanged.
+- **DSL surface for the real/complex spectrum predicate** (ADC-362): `dsl.eig_all_real(rows,
+  im_tol=1e-5)` exposes ADC-276's `EigBounds::all_real()` as a branchless DSL value (`1.0` if the small
+  dense block's spectrum is real and the block converged, `0.0` otherwise -- complex pair or
+  non-convergence), so a `m.projection` mask can ask "is this block's spectrum real?" without a branch.
+  It lowers to a named device-clean functor returning `adc::Real(adc::real_eig_minmax(M).all_real(
+  im_tol))`; gating on `converged` keeps a Gershgorin fallback at `0.0` (never read as real), unlike a
+  raw `eig_max_im <= tol` whose `max_im` is `0` under fallback. The host NumPy mirror (LAPACK always
+  converges, so no `kUnknown`) coincides with the generated brick on healthy matrices. Additive to
+  `dsl.py`; the scalar `eig_max_im` / `eig_lmin` / `eig_lmax` path is bit-identical
+  (`python/tests/test_projection_eig_predicate.py`).
 - **Public `System.set_source_stage` on the Python facade** (ADC-308): the Schur-condensed source
   stage, already wired internally by `add_equation(time=adc.Split(source=adc.CondensedSchur(...)))`, is
   now reachable as a public `adc.System.set_source_stage(name, kind, theta, alpha, ...)` method (a thin

@@ -930,6 +930,14 @@ _EIG_FIELDS = {
     "lmax": "lmax",      # plus grande partie reelle du spectre
 }
 
+# Predicats REEL/COMPLEXE d'adc::EigBounds (ADC-276) exposes comme une valeur DSL 1.0/0.0 (ADC-362) :
+# nom DSL -> METHODE C++ const(im_tol) -> bool, abaissee en adc::Real(...). Verrouillee sur converged
+# (un repli Gershgorin -> false -> 0.0, jamais reel), au contraire d'un comparatif brut sur max_im (=0
+# sous repli, donc lu comme reel). Compose dans les masques branchless de m.projection.
+_EIG_PREDICATES = {
+    "all_real": "all_real",  # 1.0 ssi le bloc a CONVERGE et le spectre est reel (sinon 0.0)
+}
+
 
 class EigWitness(Expr):
     """Valeur scalaire issue du spectre d'une PETITE matrice dense construite a partir d'expressions
@@ -937,7 +945,9 @@ class EigWitness(Expr):
     par ``adc::real_eig_minmax`` (dense_eig.hpp, ADC_HD, repli Gershgorin sur non-convergence, cap QR
     releve par ADC-195) ; @c field choisit le champ rendu de @c adc::EigBounds : ``max_im`` (temoin de
     VP complexes : 0 = spectre reel donc hyperbolique), ``lmin`` / ``lmax`` (extremes des parties
-    reelles). Sert la logique branchless de m.projection : ``si max_im > tol alors corriger`` s'ecrit
+    reelles), ou le PREDICAT ``all_real`` (ADC-362, cf. dsl.eig_all_real) qui rend 1.0/0.0 (spectre reel
+    ET convergent, sinon 0.0) abaisse sur ``adc::EigBounds::all_real(im_tol)`` (verrouille sur converged).
+    Sert la logique branchless de m.projection : ``si max_im > tol alors corriger`` s'ecrit
     en masque max/min/sign sur cette valeur, sans branche dynamique.
 
     Codegen device-clean : l'emission est un FONCTEUR NOMME (methode statique ADC_HD de la brique
@@ -951,10 +961,10 @@ class EigWitness(Expr):
     Gershgorin du chemin C++ (non-convergence d'un bloc >= 3 sous le cap QR) n'est PAS reproduit ici --
     sur des matrices saines (cas vise) les deux chemins coincident a la tolerance QR (cf. dense_eig)."""
 
-    def __init__(self, rows, field):
-        if field not in _EIG_FIELDS:
+    def __init__(self, rows, field, im_tol=None):
+        if field not in _EIG_FIELDS and field not in _EIG_PREDICATES:
             raise ValueError("EigWitness : field '%s' inconnu (attendu : %s)"
-                             % (field, ", ".join(sorted(_EIG_FIELDS))))
+                             % (field, ", ".join(sorted({**_EIG_FIELDS, **_EIG_PREDICATES}))))
         rows = [list(r) for r in rows]
         k = len(rows)
         if k < 1:
@@ -969,10 +979,32 @@ class EigWitness(Expr):
         self.rows = [[_wrap(e) for e in r] for r in rows]
         self.k = k
         self.field = field
+        # im_tol : seuil RELATIF d'|Im| -- n'a de sens que pour un PREDICAT (all_real). Pour un champ
+        # scalaire (max_im/lmin/lmax) il est rejete s'il est fourni, et reste None -> chemin scalaire
+        # bit-identique a l'historique (cle CSE, codegen et eval inchanges).
+        if field in _EIG_PREDICATES:
+            tol = 1e-5 if im_tol is None else float(im_tol)
+            if not (tol > 0.0) or not np.isfinite(tol):
+                raise ValueError("EigWitness : im_tol doit etre fini et > 0 (recu %r)" % (im_tol,))
+            self.im_tol = tol
+        else:
+            if im_tol is not None:
+                raise ValueError("EigWitness : im_tol ne s'applique qu'aux predicats "
+                                 "(field='%s' est un champ scalaire)" % field)
+            self.im_tol = None
+
+    def is_predicate(self):
+        """True si @c field est un PREDICAT reel/complexe (all_real) plutot qu'un champ scalaire."""
+        return self.field in _EIG_PREDICATES
 
     def entries(self):
         """Entrees de la matrice a plat (ordre ligne-major), une par enfant Expr."""
         return [e for row in self.rows for e in row]
+
+    def _extra_args_cpp(self):
+        """Arguments scalaires C++ apres les entrees de la matrice : le seuil relatif im_tol pour un
+        predicat (all_real), aucun pour un champ scalaire (chemin scalaire bit-identique)."""
+        return [repr(self.im_tol)] if self.is_predicate() else []
 
     def helper_name(self):
         """Nom du foncteur nomme emis dans la brique pour ce couple (field, taille)."""
@@ -992,8 +1024,17 @@ class EigWitness(Expr):
             out = np.max(np.abs(ev.imag), axis=-1)
         elif self.field == "lmin":
             out = np.min(ev.real, axis=-1)
-        else:  # lmax
+        elif self.field == "lmax":
             out = np.max(ev.real, axis=-1)
+        else:  # predicat all_real (ADC-362) : MEME formule RELATIVE que adc::EigBounds::all_real.
+            max_im = np.max(np.abs(ev.imag), axis=-1)
+            lmin = np.min(ev.real, axis=-1)
+            lmax = np.max(ev.real, axis=-1)
+            scale = np.maximum(np.maximum(np.abs(lmin), np.abs(lmax)), 1.0)
+            # numpy/LAPACK converge toujours -> PAS de kUnknown cote hote (le miroir definit le spectre
+            # comme converge par construction) ; une non-convergence DEVICE rendrait 0.0 (= PAS reel),
+            # jamais 1.0 : direction sure, coherente avec all_real (converged && max_im <= im_tol*scale).
+            out = (max_im <= self.im_tol * scale).astype(float)
         return out if bshape else float(out)
 
     def deps(self):
@@ -1003,7 +1044,8 @@ class EigWitness(Expr):
         return d
 
     def to_cpp(self):
-        return "%s(%s)" % (self.helper_name(), ", ".join(e.to_cpp() for e in self.entries()))
+        args = [e.to_cpp() for e in self.entries()] + self._extra_args_cpp()
+        return "%s(%s)" % (self.helper_name(), ", ".join(args))
 
     def _str(self):
         return "eig_%s([%s])" % (self.field, ", ".join(str(e) for e in self.entries()))
@@ -1028,6 +1070,27 @@ def eig_lmax(rows):
     """Plus grande PARTIE REELLE du spectre de la matrice dense @p rows (cf. eig_max_im), via
     ``adc::real_eig_minmax`` -- valeur scalaire DSL (extreme de borne de vitesse / spectre reel)."""
     return EigWitness(rows, "lmax")
+
+
+def eig_all_real(rows, im_tol=1e-5):
+    """PREDICAT reel/complexe du spectre de la PETITE matrice dense @p rows (liste de @c k lignes de
+    @c k Expr) : valeur scalaire DSL = 1.0 si le spectre est REEL et le bloc a CONVERGE, 0.0 sinon
+    (paire complexe OU non-convergence). Surface DSL d'``adc::EigBounds::all_real`` (dense_eig.hpp,
+    ADC-276) ; @p im_tol est le seuil RELATIF d'|Im| (defaut 1e-5, mis a l'echelle par
+    max(|lmin|,|lmax|,1) -- cf. EigBounds::all_real pour le contrat de tolerance, la couverture de
+    multiplicite et l'asymetrie relative).
+
+    A PREFERER a ``eig_max_im(rows) <= tol`` pour decider "spectre reel ?" : ``all_real`` est verrouille
+    sur ``converged``, donc un repli Gershgorin (non-convergence) rend 0.0 (= PAS reel), JAMAIS 1.0 ;
+    le ``max_im`` brut vaut 0 sous repli PAR CONVENTION et serait lu a tort comme un spectre reel.
+    Compose sans branche dans m.projection : ``complexe = 1 - eig_all_real(rows)``, puis un melange
+    max/min sans if (p.ex. "si paire complexe, corriger").
+
+    Codegen device-clean : foncteur nomme (methode statique ADC_HD) qui remplit M[k][k] et renvoie
+    ``adc::Real(adc::real_eig_minmax(M).all_real(im_tol))`` (cf. EigWitness ; pas de lambda cross-TU).
+    eval(env) : miroir hote via numpy (LAPACK converge toujours -> jamais de kUnknown cote hote ;
+    coincide avec la brique sur matrices saines, le cas vise)."""
+    return EigWitness(rows, "all_real", im_tol=im_tol)
 
 
 class StateRef(Expr):
@@ -1140,7 +1203,11 @@ def _key(e):
     if isinstance(e, Sign):
         return ("sign", _key(e.a))
     if isinstance(e, EigWitness):
-        # cle = (field, taille, cles des entrees) : deux temoins de la MEME matrice partagent une locale
+        # cle = (field, taille, cles des entrees) : deux temoins de la MEME matrice partagent une locale.
+        # Un PREDICAT ajoute im_tol a la cle (verdict different a seuil different) ; le chemin scalaire
+        # garde sa cle a 4 elements -> CSE et brique bit-identiques a l'historique.
+        if e.is_predicate():
+            return ("eig", e.field, e.k, e.im_tol, tuple(_key(c) for c in e.entries()))
         return ("eig", e.field, e.k, tuple(_key(c) for c in e.entries()))
     if isinstance(e, StateRef):
         return ("state", e.side, _key(e.expr))  # defensive: the Roe lines do not go through CSE
@@ -1166,9 +1233,10 @@ def _cpp_expand(e, cse_map):
         return "(adc::Real(%s > 0) - adc::Real(%s < 0))" % (s, s)
     if isinstance(e, EigWitness):
         # appel du foncteur nomme (declare dans la brique) : chaque entree passee en argument scalaire
-        # (via _cpp_cse -> partage les locales CSE, evaluee une seule fois cote appelant).
-        args = ", ".join(_cpp_cse(c, cse_map) for c in e.entries())
-        return "%s(%s)" % (e.helper_name(), args)
+        # (via _cpp_cse -> partage les locales CSE, evaluee une seule fois cote appelant). Un predicat
+        # ajoute le seuil im_tol en dernier argument (cf. _extra_args_cpp / _eig_witness_helpers).
+        args = [_cpp_cse(c, cse_map) for c in e.entries()] + e._extra_args_cpp()
+        return "%s(%s)" % (e.helper_name(), ", ".join(args))
     if isinstance(e, Pow):
         return "std::pow(%s, %s)" % (_cpp_cse(e.a, cse_map), _cpp_cse(e.b, cse_map))
     if isinstance(e, _Bin):
@@ -1264,14 +1332,23 @@ def _eig_witness_helpers(pairs, indent="  "):
     ``adc::real_eig_minmax(M)``. Aucun argument -> aucune ligne."""
     L = []
     for field, k in pairs:
+        is_pred = field in _EIG_PREDICATES
         params = ", ".join("adc::Real m%d" % i for i in range(k * k))
+        if is_pred:  # un predicat prend le seuil relatif im_tol en dernier argument scalaire
+            params += (", " if params else "") + "adc::Real im_tol"
         L.append("%sstatic ADC_HD adc::Real adc_eig_%s_%dx%d(%s) {"
                  % (indent, field, k, k, params))
         L.append("%s  adc::Real M[%d][%d];" % (indent, k, k))
         for r in range(k):
             sets = " ".join("M[%d][%d] = m%d;" % (r, c, r * k + c) for c in range(k))
             L.append("%s  %s" % (indent, sets))
-        L.append("%s  return adc::real_eig_minmax(M).%s;" % (indent, _EIG_FIELDS[field]))
+        if is_pred:
+            # predicat verrouille sur converged (un repli Gershgorin -> false -> 0.0, jamais reel) ;
+            # cast bool -> adc::Real (1.0/0.0) pour composer dans les masques branchless de m.projection.
+            L.append("%s  return adc::Real(adc::real_eig_minmax(M).%s(im_tol));"
+                     % (indent, _EIG_PREDICATES[field]))
+        else:
+            L.append("%s  return adc::real_eig_minmax(M).%s;" % (indent, _EIG_FIELDS[field]))
         L.append("%s}" % indent)
     return L
 
