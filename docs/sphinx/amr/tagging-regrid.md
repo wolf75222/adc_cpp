@@ -9,8 +9,14 @@ too much waste (recursive cut on the signature of the marks). The cadence is car
 
 Two criteria are exposed and compose (OR cell by cell, "union of tags"):
 
-- `set_refinement(threshold)`: density per block. Refines where the density (component 0)
-  of a block exceeds `threshold`. Base criterion, valid for single- and multi-block.
+- `set_refinement(threshold, variable=, role=)`: selected variable per block. Refines where the
+  selected conserved variable of a block exceeds `threshold`. By default the variable is component 0
+  (the historical density), bit-identical. Optionally select it per block by name (`variable=`) or
+  physical role (`role=`): each block resolves it against its own conserved variables, so a model whose
+  refinement variable is not at component 0 refines correctly. A block lacking the requested name/role
+  raises at build (no silent component-0 fallback). The default (component 0) is valid for single- and
+  multi-block; a non-default selector is multi-block only (the mono-block and compiled `.so` paths
+  refine on component 0 only and reject a non-default selector at build).
 - `set_phi_refinement(grad_threshold)`: gradient of the potential `|grad phi|`. Refines where
   the norm of the gradient of the electrostatic potential exceeds `grad_threshold` (physical criterion
   of the diocotron: the ring edge follows the gradient of the potential, not the density alone).

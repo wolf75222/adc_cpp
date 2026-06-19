@@ -389,7 +389,7 @@ conservation. In multi-blocks the block name indexes `set_density(name)` / `mass
 |---|---|---|
 | `add_block` | `add_block(name, model, spatial=None, time=None)` | Rejects `Split` ; threads substeps / stride + IMEX mask to the C++. |
 | `add_equation` | `add_equation(name, model, spatial=None, time=None, substeps=None)` | `ModelSpec` -> `add_block` (forwards stride + mask) ; a `CompiledModel` must be `backend="production"`, `target="amr_system"` -> `add_native_block`. Rejects stride > 1 and IMEX mask on the production `.so` (flat ABI) ; requires `p` for hllc / roe. Primitive recon + roe / hllc flux + weno5 are wired on AMR (parity with `add_block`). |
-| `set_refinement` | `set_refinement(threshold)` | Tags where the block density (component 0) exceeds `threshold`. |
+| `set_refinement` | `set_refinement(threshold, variable="", role="")` | Tags where the selected variable of a block exceeds `threshold`. Default = component 0 (historical density), bit-identical ; `variable=` / `role=` select it per block by name or physical role (a block lacking it raises at build, no silent component-0 fallback). Non-default selector is multi-block only (mono-block / compiled `.so` : component 0 only, selector rejected at build). |
 | `set_phi_refinement` | `set_phi_refinement(grad_threshold)` | Adds a tag based on `|grad phi|` to the regrid union (multi-blocks + `regrid_every > 0` ; `<= 0` disables, default). |
 | `set_poisson` | `set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto", wall="none", wall_radius=0.0)` | System Poisson (no `epsilon` argument on this path). |
 | `set_density` | `set_density(name, rho)` | Initial density of a block. |

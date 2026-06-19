@@ -24,9 +24,11 @@ DELIVERED (runtime multi-block engine AmrRuntime):
       `regrid_every == 0` -> regrid never called -> BIT-IDENTICAL to the frozen hierarchy (verified).
 - [x] FACADE UNLOCK (T7): `python/amr_system.cpp` no longer REFUSES multi-block +
       `regrid_every > 0`. `build_multi` wires `runtime->set_regrid(cfg.regrid_every)` and sets the tag
-      predicate PER BLOCK (D1: density of component 0 > `refine_threshold`, common to all blocks in v1,
-      like the mono-block AmrCouplerMP). `refine_threshold == 1e30` (default) -> no tag -> mesh
-      unchanged. `regrid_every == 0` -> FROZEN hierarchy, bit-identical to Phase 1.
+      predicate PER BLOCK (D1: selected variable > `refine_threshold`; default = component 0 like the
+      mono-block AmrCouplerMP, ADC-296 lets `set_refinement(threshold, variable=, role=)` pick it per
+      block by name/role, resolved against the block's cons_vars, STRICT -- no silent component-0
+      fallback). `refine_threshold == 1e30` (default) -> no tag -> mesh unchanged. `regrid_every == 0`
+      -> FROZEN hierarchy, bit-identical to Phase 1.
 - [x] acceptance tests (a-e + T7): `tests/test_amr_multiblock_regrid_union.cpp` (NAMED tag functors,
       nvcc-safe). (a) hierarchy that evolves, (b)+(c) union A OR B OR |grad phi|, (d) stride-held block
       re-gridded, (e) regrid_every==0 bit-identical, (V1) conservation per block, (T7) facade

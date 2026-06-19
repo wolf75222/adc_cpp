@@ -375,8 +375,21 @@ class AmrSystem {
                         const std::string& time = "explicit", double gamma = 1.4,
                         int substeps = 1, double positivity_floor = 0.0);
 
-  /// Refines the cells where the density (component 0) exceeds @p threshold.
-  void set_refinement(double threshold);
+  /// Refines the cells where the SELECTED conserved variable exceeds @p threshold. By default the
+  /// variable is component 0 (historically the density), preserving the bit-identical @c 1e30 no-op.
+  /// Optionally the variable is selected PER BLOCK by NAME (@p variable, e.g. "E") or by physical ROLE
+  /// (@p role, e.g. "energy"): each block resolves it against its OWN conservative VariableSet, so a
+  /// model whose refinement variable is NOT at component 0 refines correctly (ADC-296). Resolution is
+  /// STRICT -- a block lacking the requested name/role raises an explicit error at build, never a silent
+  /// fallback to component 0 (mirror of add_coupled_source). At most one of @p variable / @p role may be
+  /// set. MULTI-BLOCK only for a non-default selector (the AmrRuntime union-of-tags regrid carries the
+  /// per-block predicates); the mono-block AmrCouplerMP path and the compiled .so loader refine on
+  /// component 0 only and reject a non-empty selector, mirroring how set_phi_refinement is multi-block
+  /// only. @param threshold refinement threshold (@c 1e30 default elsewhere => no refinement, frozen).
+  /// @param variable conserved-variable NAME to threshold; empty (default) => component 0.
+  /// @param role conserved-variable physical ROLE to threshold; empty (default) => component 0.
+  void set_refinement(double threshold, const std::string& variable = std::string(),
+                      const std::string& role = std::string());
 
   /// Adds to the regrid criterion the PHI tag on |grad phi| (D4 of the design
   /// docs/AMR_REGRID_UNION_TAGS_DESIGN.md): also refines the cells where the norm of the gradient of the

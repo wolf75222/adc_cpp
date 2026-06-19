@@ -207,4 +207,38 @@ inline ADC_COLD_FN std::vector<int> resolve_implicit_components(const std::strin
   return out;
 }
 
+/// Resolves a SINGLE selector variable of @p block (the AMR regrid variable, ADC-296) into its
+/// conserved-component index, by NAME (@p name) XOR by physical ROLE (@p role), against @p cons. STRICT,
+/// like resolve_implicit_components: an absent name/role raises an EXPLICIT error (NO silent fallback to
+/// component 0 -- the whole point of letting a model put its refinement variable off component 0). Empty
+/// name AND empty role -> -1, the caller keeps its default (component 0, historical density criterion,
+/// bit-identical). At most one of name/role may be set. @p origin labels the error (e.g.
+/// "AmrSystem::set_refinement").
+inline ADC_COLD_FN int resolve_selected_component(const std::string& origin, const std::string& block,
+                                                  const VariableSet& cons, const std::string& name,
+                                                  const std::string& role) {
+  if (name.empty() && role.empty()) return -1;  // default selector -> caller's component 0
+  if (!name.empty() && !role.empty())
+    throw std::runtime_error(origin + " : select the refinement variable by NAME or by ROLE, not both");
+  if (!name.empty()) {
+    for (int i = 0; i < static_cast<int>(cons.names.size()); ++i)
+      if (cons.names[i] == name) return i;
+    std::string have;
+    for (std::size_t i = 0; i < cons.names.size(); ++i) {
+      if (i) have += ", ";
+      have += cons.names[i];
+    }
+    throw std::runtime_error(origin + " : variable '" + name + "' absent from block '" + block +
+                             "' (conserved variables : " + have + ")");
+  }
+  const VariableRole r = role_from_name(role);
+  const int idx = cons.index_of(r);
+  if (r == VariableRole::Custom || idx < 0) {
+    const std::string have = roles_csv(cons);
+    throw std::runtime_error(origin + " : role '" + role + "' absent from block '" + block +
+                             "' (roles : " + (have.empty() ? std::string("<not provided>") : have) + ")");
+  }
+  return idx;
+}
+
 }  // namespace adc::detail

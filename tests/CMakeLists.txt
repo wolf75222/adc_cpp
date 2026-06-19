@@ -433,6 +433,14 @@ add_executable(test_amr_seed_no_refine test_amr_seed_no_refine.cpp)
 target_link_libraries(test_amr_seed_no_refine PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_seed_no_refine COMMAND test_amr_seed_no_refine)
 
+# --- ADC-296 : critere de regrid configurable par nom/role (au-dela de la composante 0) ---
+# Exerce le resolveur detail::resolve_selected_component ET la facade multi-blocs (build_multi resout le
+# selecteur par bloc via AmrRuntime::block_cons_vars). Linke adc_runtime_amr (amr_system.cpp + seam),
+# comme test_amr_seed_no_refine / test_amr_system_twoblock.
+add_executable(test_amr_regrid_variable test_amr_regrid_variable.cpp)
+target_link_libraries(test_amr_regrid_variable PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
+add_test(NAME test_amr_regrid_variable COMMAND test_amr_regrid_variable)
+
 # --- AmrSystem::potential() : phi du niveau grossier expose, pendant de System::potential() ---
 # Compile les runtimes AmrSystem ET System (python/amr_system.cpp + python/system.cpp) avec le test :
 # sans raffinement, AmrSystem resout le MEME Poisson discret que System(geometric_mg) sur le grossier

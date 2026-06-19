@@ -23,6 +23,9 @@ documentation update:
   T6 - the spatial-dimension invariant is published as the structured scalar dimension == 2
        (ADC-294 / ADR-0001 Decision 1: the 2D core is an official, introspectable limit, not
        prose); guards against the key silently vanishing or drifting to a non-2D value.
+  T7 - the AMR regrid variable is advertised as selectable by name/role (ADC-296 / ADR-0001
+       Decision 5), with the mono-block / compiled .so paths declared component-0 only; guards
+       the "regrid is component-0 only" doc regression now that a selector exists.
 
 The test is pure Python: it only reads adc.capabilities() and adc.dsl._BACKEND_CAPS, so it
 needs the _adc extension to import but does not build or run any model.
@@ -32,7 +35,7 @@ from adc import dsl
 
 EXPECTED_TOP_KEYS = {
     "dimension", "riemann", "time", "stability_policy", "poisson", "geometry", "schur",
-    "backends_dsl", "io", "amr_layout", "aux",
+    "backends_dsl", "io", "amr_layout", "aux", "regrid",
 }
 
 
@@ -91,6 +94,18 @@ def test_dimension_invariant_2d():
         "the dimension invariant must stay a separate top-level key, not nested under geometry"
 
 
+def test_regrid_variable_selector_advertised():
+    # ADC-296 / ADR-0001 Decision 5: the multi-block regrid variable is selectable by name/role
+    # (default = component 0). The mono-block and compiled .so paths stay component-0 only. The
+    # surface mirrors AmrSystem.set_refinement(threshold, variable=, role=).
+    regrid = adc.capabilities()["regrid"]
+    assert set(regrid["variable_selector"]) == {"component_0", "by_name", "by_role"}, \
+        regrid["variable_selector"]
+    assert "by_name" in regrid["multi_block"] and "by_role" in regrid["multi_block"], regrid["multi_block"]
+    assert "component_0 only" in regrid["mono_block"], regrid["mono_block"]
+    assert "component_0 only" in regrid["compiled_so"], regrid["compiled_so"]
+
+
 if __name__ == "__main__":
     test_top_level_keys_present()
     test_riemann_surface_matches_dispatch()
@@ -98,5 +113,6 @@ if __name__ == "__main__":
     test_polar_stability_bounds_advertised_wired()
     test_amr_schur_advertised_implemented()
     test_dimension_invariant_2d()
+    test_regrid_variable_selector_advertised()
     print("test_capabilities : OK (top keys, riemann surface, backends_dsl, polar stability, "
-          "AMR Schur, 2D dimension)")
+          "AMR Schur, 2D dimension, regrid selector)")

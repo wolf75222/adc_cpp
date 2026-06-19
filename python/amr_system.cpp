@@ -111,6 +111,11 @@ struct AmrSystem::Impl {
   std::vector<CoupledSourceSpec> coupled_sources;
 
   double refine_threshold = 1e30;  // 1e30 => no refinement by default
+  // ADC-296: refinement variable selected by NAME (refine_var_name) XOR by physical ROLE
+  // (refine_var_role). BOTH empty (default) => component 0 (historical density criterion, bit-identical).
+  // Resolved PER BLOCK at build_multi against the block's cons_vars (STRICT, no silent comp-0 fallback).
+  std::string refine_var_name;
+  std::string refine_var_role;
   // PHI tag threshold on |grad phi| (D4): <= 0 => phi does NOT contribute to the tag union (default,
   // bit-identical). > 0 => in multi-block + regrid_every > 0, build_multi sets the engine's phi predicate
   // (set_phi_tag_predicate): refines where |grad phi| (components 1,2 of the shared aux) exceeds this threshold.
@@ -379,17 +384,34 @@ struct AmrSystem::Impl {
                                           cs.freq_prog_ops, cs.freq_prog_args);
     }
     // TAG-UNION REGRID (capstone Phase 2, C.6): if regrid_every > 0, we ACTIVATE the engine's
-    // cadence and set the PER-BLOCK tag predicate (D1). In v1 the criterion is COMMON to all blocks
-    // (density, component 0 > refine_threshold), like the single-block path AmrCouplerMP (which tags
-    // a(i,j,0) > threshold) -> the UNION of the block tags refines where ANY block exceeds the
-    // threshold. refine_threshold == 1e30 (default, no refinement) -> no tag -> grid unchanged even
-    // if regrid_every > 0 (consistent no-op, the user did not request refinement). regrid_every
-    // == 0 -> set_regrid(0) -> FROZEN hierarchy, bit-identical to before this PR.
+    // cadence and set the PER-BLOCK tag predicate (D1). The criterion tags where the SELECTED variable
+    // of the block exceeds refine_threshold -> the UNION of the block tags refines where ANY block
+    // exceeds it. By DEFAULT the variable is component 0 (historical density criterion, like the
+    // single-block path AmrCouplerMP which tags a(i,j,0) > threshold); ADC-296 lets set_refinement pick
+    // it PER BLOCK by name/role, resolved against the block's cons_vars (STRICT: absent -> explicit
+    // error, never a silent comp-0 fallback). refine_threshold == 1e30 (default, no refinement) -> no
+    // tag -> grid unchanged even if regrid_every > 0 (consistent no-op). regrid_every == 0 ->
+    // set_regrid(0) -> FROZEN hierarchy, bit-identical to before this PR.
     const Real thr = static_cast<Real>(refine_threshold);
     runtime->set_regrid(cfg.regrid_every);
     if (cfg.regrid_every > 0) {
-      const auto crit = [thr](const ConstArray4& a, int i, int j) { return a(i, j, 0) > thr; };
-      for (std::size_t b = 0; b < blocks.size(); ++b) runtime->set_block_tag_predicate(b, crit);
+      const bool selected = !refine_var_name.empty() || !refine_var_role.empty();
+      for (std::size_t b = 0; b < blocks.size(); ++b) {
+        int comp = 0;  // default: component 0 (bit-identical density criterion)
+        if (selected) {
+          // The compiled .so flat-ABI block carries no role table on its runtime side: a non-default
+          // selector there is REFUSED (comp-0 only), not silently ignored (mirror of the other .so rejects).
+          if (blocks[b].is_compiled)
+            throw std::runtime_error(
+                "AmrSystem::set_refinement : variable/role selector not supported on the compiled .so "
+                "block '" + blocks[b].name + "' (component 0 only) ; use a native block adc.Model(...)");
+          comp = detail::resolve_selected_component("AmrSystem::set_refinement", blocks[b].name,
+                                                    runtime->block_cons_vars(b), refine_var_name,
+                                                    refine_var_role);
+        }
+        runtime->set_block_tag_predicate(
+            b, [thr, comp](const ConstArray4& a, int i, int j) { return a(i, j, comp) > thr; });
+      }
       // PHI PREDICATE (D4): if the user set a |grad phi| threshold (set_phi_refinement > 0),
       // we wire the engine's phi predicate (read on the shared aux, components 1,2 = grad phi in x,y).
       // It is ADDED to the union of the per-block density predicates: the grid refines where any
@@ -426,6 +448,16 @@ struct AmrSystem::Impl {
 
     // --- SINGLE-BLOCK path (AmrCouplerMP, untouched: bit-identical to history) ---
     const BlockSpec& b = blocks[0];
+    // ADC-296: the name/role refinement selector is resolved per block by the MULTI-BLOCK runtime engine
+    // (build_multi -> resolve_selected_component). The single-block AmrCouplerMP path tags on component 0
+    // only; a selector requested but staying single-block would be SILENTLY ignored (the comp-0 fallback
+    // this milestone forbids), so we REFUSE it explicitly -- same pattern as the implicit-mask reject
+    // below. The default (empty selector) stays component 0, bit-identical.
+    if (!refine_var_name.empty() || !refine_var_role.empty())
+      throw std::runtime_error(
+          "AmrSystem::set_refinement : the variable/role selector is only wired in MULTI-BLOCK "
+          "(>= 2 add_block, union-of-tags runtime engine). In single-block the AmrCouplerMP path "
+          "refines on component 0 only : drop variable=/role= or add a 2nd block.");
     // The single-block IMEX goes through AmrCouplerMP (advance_amr imex flag), which carries NO partial
     // IMEX mask (FULL backward-Euler). A mask requested but staying SINGLE-BLOCK would thus be SILENTLY
     // ignored -> we REFUSE it explicitly (the partial mask requires the multi-block runtime engine).
@@ -813,7 +845,18 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
 #endif  // _WIN32 (production AMR POSIX-only; Windows = throw, ADC-100)
 }
 
-void AmrSystem::set_refinement(double threshold) { p_->refine_threshold = threshold; }
+void AmrSystem::set_refinement(double threshold, const std::string& variable,
+                               const std::string& role) {
+  // Reject the ambiguous double selector immediately (fast feedback); cons_vars is only known at the
+  // lazy build, so an absent name/role is caught there (build_multi -> resolve_selected_component).
+  if (!variable.empty() && !role.empty())
+    throw std::runtime_error(
+        "AmrSystem::set_refinement : select the refinement variable by NAME (variable=) or by ROLE "
+        "(role=), not both");
+  p_->refine_threshold = threshold;
+  p_->refine_var_name = variable;
+  p_->refine_var_role = role;
+}
 
 void AmrSystem::set_phi_refinement(double grad_threshold) {
   if (p_->built)

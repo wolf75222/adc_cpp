@@ -637,7 +637,16 @@ PYBIND11_MODULE(_adc, m) {
            // Zhang-Shu positivity floor (ADC-322): marshaled down the regenerated .so loader
            // (adc_install_native_amr). 0 (default) = inactive, bit-identical.
            py::arg("positivity_floor") = 0.0)
-      .def("set_refinement", &AmrSystem::set_refinement, py::arg("threshold"))
+      // Regrid criterion: refine where the SELECTED variable exceeds threshold. Default = component 0
+      // (historical density), bit-identical 1e30 no-op. ADC-296: select it PER BLOCK by NAME (variable=)
+      // or physical ROLE (role=); a block lacking it raises at build (no silent comp-0 fallback). A
+      // non-default selector is MULTI-BLOCK only (mono-block / compiled .so refine on component 0).
+      .def("set_refinement", &AmrSystem::set_refinement, py::arg("threshold"),
+           py::arg("variable") = "", py::arg("role") = "",
+           "Refine where the selected conserved variable exceeds threshold. variable=/role= pick it per "
+           "block by name or physical role (default: component 0, the historical density). Selecting by "
+           "name and role at once, or a name/role absent from a block, raises. Non-default selector is "
+           "multi-block only.")
       // PHI tag on |grad phi| (D4) added to the union of regrid tags: also refines where the
       // norm of the potential gradient exceeds grad_threshold (diocotron ring edge). MULTI-BLOCK
       // + regrid_every > 0. <= 0 (default) -> phi DISABLED (bit-identical). cf. AmrSystem::set_phi_refinement.

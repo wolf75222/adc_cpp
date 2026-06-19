@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Configurable AMR regrid variable by name or role** (ADC-296): `AmrSystem.set_refinement` gains
+  optional `variable=` / `role=` selectors so the multi-block union-of-tags regrid can refine on any
+  conserved variable, not just component 0. Each block resolves the selector against its own conserved
+  variables (`detail::resolve_selected_component`, STRICT: an absent name/role raises at build, no
+  silent component-0 fallback), so a model whose refinement variable is not at component 0 refines
+  correctly. The default (empty selector) stays component 0 and bit-identical; a non-default selector is
+  multi-block only (mono-block `AmrCouplerMP` and the compiled `.so` loader refine on component 0 only
+  and reject it). Surfaced under a new `regrid` key in `adc.capabilities()`. Per ADR-0001 Decision 5
+  (Option A): the engine seam (`TagPredicate`, per-block predicates, union) is unchanged.
 - **2D-core invariant published in `adc.capabilities()`** (ADC-294): `capabilities()` now exposes a
   structured `dimension` scalar (`== 2`) declaring the core's two-dimensional scope as an
   introspectable invariant, with a matching "Spatial dimension" section in

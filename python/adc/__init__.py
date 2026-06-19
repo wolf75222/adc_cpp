@@ -2417,6 +2417,18 @@ def capabilities():
             "set_conservative_state": "mono-block AND native multi-block (wave 3 ; .so loaders : "
                                       "explicit rejection)",
         },
+        "regrid": {
+            # ADC-296 / ADR-0001 Decision 5. The MULTI-BLOCK AMR regrid variable is selectable PER BLOCK
+            # by name or physical role (set_refinement(threshold, variable=|role=)); default = component
+            # 0 (historical density), bit-identical 1e30 no-op. A block lacking the requested name/role
+            # raises at build (no silent component-0 fallback). Mono-block (AmrCouplerMP) and the compiled
+            # .so loader refine on component 0 ONLY (a non-default selector is rejected there).
+            "variable_selector": ["component_0", "by_name", "by_role"],
+            "multi_block": "component_0 | by_name (variable=) | by_role (role=)",
+            "mono_block": "component_0 only (selector rejected)",
+            "compiled_so": "component_0 only (selector rejected)",
+            "phi_gradient": "set_phi_refinement(grad_threshold) : |grad phi|, multi-block, unioned",
+        },
         "aux": {
             "canonical": "phi/grad_x/grad_y (base) + B_z (set_magnetic_field) + T_e "
                          "(set_electron_temperature_from), closed list ADC_AUX_FIELDS/AUX_CANONICAL",
@@ -2466,8 +2478,11 @@ class AmrSystem:
     UNION-OF-TAGS REGRID (multi-block + regrid_every > 0) : the shared hierarchy is re-gridded from
     the UNION of the tags of all blocks. Two criteria compose (cell-by-cell OR) :
 
-    - PER-BLOCK DENSITY (set_refinement(threshold)) : refine where the density (component 0) of a block
-      exceeds threshold ;
+    - PER-BLOCK VARIABLE (set_refinement(threshold, variable=, role=)) : refine where the SELECTED
+      variable of a block exceeds threshold. Default = component 0 (historical density), bit-identical ;
+      ADC-296 lets you select it per block by name (variable=) or physical role (role=), resolved against
+      the block's conserved variables (a block lacking the name/role raises, no silent component-0
+      fallback). Non-default selector is multi-block only (mono-block / compiled .so : component 0 only) ;
     - ``grad phi`` (set_phi_refinement(grad_threshold)) : refine where the norm of the gradient of the
       electrostatic potential exceeds grad_threshold (diocotron ring edge). Disabled by default
       (grad_threshold <= 0). MULTI-BLOCK only.

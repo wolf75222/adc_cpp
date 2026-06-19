@@ -282,6 +282,15 @@ class AmrRuntime {
 
   int nlev() const { return nlev_; }
   std::size_t n_blocks() const { return blocks_.size(); }
+  /// Conservative VariableSet (names + physical roles, Model::conservative_vars()) of block @p b. The
+  /// SAME cons_vars that add_coupled_source resolves (block, role) against; exposed read-only so the
+  /// facade can resolve a name/role-selected regrid variable into a component per block (ADC-296).
+  /// @throws if @p b is out of bounds.
+  const VariableSet& block_cons_vars(std::size_t b) const {
+    if (b >= blocks_.size())
+      throw std::runtime_error("AmrRuntime::block_cons_vars : block index out of bounds");
+    return blocks_[b].cons_vars;
+  }
   std::size_t n_coupled_sources() const { return coupled_sources_.size(); }
   MultiFab& phi() { return mg_.phi(); }
   // System Poisson right-hand side after the last solve_fields: f = Sum_b elliptic_rhs_b(U_b) on the
