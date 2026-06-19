@@ -27,6 +27,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   source stage without reaching into the private `_s`. Purely additive: the public call is
   bit-identical to the historical `_s.set_source_stage` path
   (`python/tests/test_set_source_stage_facade.py`).
+- **One-command Python build** (ADC-358): `scripts/build_python.sh` activates the `adc` env, sizes the
+  heavy-TU Ninja pool (`ADC_HEAVY_TU_POOL`) from cores capped by RAM, exports the Kokkos/CMake
+  discovery vars (`Kokkos_ROOT`, `ADC_KOKKOS_ROOT`, `CMAKE_PREFIX_PATH`) and a stable cross-worktree
+  ccache, runs `pip install . --no-build-isolation`, and ends on `adc.doctor()`; `--clean` drops the
+  wheel cache, `--fresh` also clears ccache for a cold build. `scikit-build-core` is now pinned in
+  `environment.yml` (so `--no-build-isolation` reuses the pinned stack) and `setup_env.sh` persists
+  `CMAKE_PREFIX_PATH`. No change to `-O3` or generated code.
 - **Configurable AMR regrid variable by name or role** (ADC-296): `AmrSystem.set_refinement` gains
   optional `variable=` / `role=` selectors so the multi-block union-of-tags regrid can refine on any
   conserved variable, not just component 0. Each block resolves the selector against its own conserved

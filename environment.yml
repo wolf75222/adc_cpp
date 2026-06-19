@@ -49,6 +49,9 @@ dependencies:
   - cmake>=3.27          # conda-forge ships a recent version (>= the project's minimum 3.20)
   - ninja                # recommended generator (-G Ninja)
   - ccache               # compilation cache (auto-detected by CMake): fast re-builds
+  - scikit-build-core>=0.10  # wheel build backend (pyproject.toml). Present IN the env so
+                         # `pip install . --no-build-isolation` (cf. scripts/build_python.sh) reuses the
+                         # pinned stack instead of a fresh, unpinned pip build venv.
 
   # --- Python module (always) ---
   - numpy>=1.24          # required at the module IMPORT (python/adc/dsl.py does `import numpy`)

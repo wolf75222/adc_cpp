@@ -92,6 +92,16 @@ If a step fails, `adc.doctor()` names the broken link and prints the copy-paste 
 
 ### User: `pip install .`
 
+The quickest path, after `setup_env.sh`, is one command:
+
+```bash
+bash scripts/build_python.sh            # --clean to drop the wheel cache, --fresh for a cold build
+```
+
+It activates the env, sizes the heavy-TU pool from cores and RAM, exports the discovery vars and a
+shared ccache, installs with `--no-build-isolation`, then runs `adc.doctor()`. The rest of this
+section is what that does, step by step.
+
 `pip install .` drives the CMakeLists through scikit-build-core (`pyproject.toml`) and installs the
 package into `site-packages`: `import adc` then works without `PYTHONPATH`. Backends are
 chosen through environment variables, mapped onto the CMake options:

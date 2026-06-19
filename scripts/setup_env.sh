@@ -133,27 +133,35 @@ esac
 # ADC_KOKKOS_ROOT / Kokkos_ROOT : the Kokkos install the DSL .so compiles against (the env Kokkos;
 #                 Serial is enough on CPU). Without it, the tutorial dead-ends on "no DSL backend".
 # ADC_CACHE_DIR : a stable cache for the compiled DSL .so.
+# CMAKE_PREFIX_PATH : point find_package at the env prefix (env Kokkos/pybind11/MPI) even outside an
+#                 activated shell or when a system CMAKE_PREFIX_PATH would otherwise win.
 ADC_PREFIX="$(conda run -n "$ENV_NAME" printenv CONDA_PREFIX 2>/dev/null || true)"
 [ -n "$ADC_PREFIX" ] || ADC_PREFIX="$(conda env list | awk -v n="$ENV_NAME" '$1 == n {print $NF}')"
 conda env config vars set -n "$ENV_NAME" \
   ADC_INCLUDE="$HERE/include" \
   ADC_KOKKOS_ROOT="$ADC_PREFIX" \
   Kokkos_ROOT="$ADC_PREFIX" \
+  CMAKE_PREFIX_PATH="$ADC_PREFIX" \
   ADC_CACHE_DIR="$HERE/.adc_cache" >/dev/null
 mkdir -p "$HERE/.adc_cache"
-echo "env vars pinned: ADC_INCLUDE, ADC_KOKKOS_ROOT, Kokkos_ROOT, ADC_CACHE_DIR (prefix: $ADC_PREFIX)."
+echo "env vars pinned: ADC_INCLUDE, ADC_KOKKOS_ROOT, Kokkos_ROOT, CMAKE_PREFIX_PATH, ADC_CACHE_DIR (prefix: $ADC_PREFIX)."
 
 # --- final diagnostic --------------------------------------------------------------------------------
 echo ""
-echo "Env ready. Next:"
+echo "Env ready. Next, in one command (sizes the heavy-TU pool, exports the discovery vars + ccache,"
+echo "installs, then runs adc.doctor()):"
+echo "    bash scripts/build_python.sh"
+echo ""
+echo "Or by hand:"
 echo "    conda activate $ENV_NAME"
 echo "    pip install . -v          # builds the Kokkos module (Kokkos is ON and mandatory)"
 echo ""
 # ADC-338: after the ADC-335 split, the heavy module TUs are small but a size-1 Ninja pool
 # (ADC_HEAVY_TU_POOL, the CI 7GB-runner OOM guard) still serializes them. On a high-RAM local box,
-# widen it so -j actually compiles the sub-TUs in parallel (this, not -j alone, bounds the heavy TUs):
+# widen it so -j actually compiles the sub-TUs in parallel (this, not -j alone, bounds the heavy TUs).
+# scripts/build_python.sh sizes this automatically (cores capped by RAM); the manual knob:
 _ncpu="$( (nproc 2>/dev/null) || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-echo "Fast local build (high-RAM host): widen the heavy-TU pool, e.g."
+echo "Manual heavy-TU pool (build_python.sh does this for you):"
 echo "    pip install . -v -C cmake.define.ADC_HEAVY_TU_POOL=$_ncpu      # or a C++ preset: -DADC_HEAVY_TU_POOL=$_ncpu"
 echo "    (leave it at the default 1 on memory-constrained machines / CI -- it is the OOM guard.)"
 echo ""
