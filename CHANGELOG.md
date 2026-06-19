@@ -96,6 +96,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   GH200 recipe: build with CUDA-aware OpenMPI, run np=1/2/4 (one GH200 per rank), gate on per-run
   mass conservation (< 1e-12) and ulp-level global-mass parity vs np=1. Closes the System-MPI
   branch named in `GH200_HYQMOM15.md` section 3.
+- **Coverage for the `step_cfl` zero / NaN wave-speed guard** (ADC-267): `tests/test_cfl_dt.cpp`
+  gains two in-file cases (no new target) for the `std::max(w_max, 1e-30)` clamp that ADC-194 left
+  untested. A quiescent state (`w_max == 0`) asserts `dt` is finite and equals `cfl*h/1e-30` (without
+  the floor it would be `+inf`), and a model with `max_wave_speed() == NaN` asserts `cfl_dt` stays
+  finite and positive (`system_max_wave_speed` does `max(0, NaN) == 0`, swallowing the NaN). Test-only;
+  no change to the library, the API, or the hot path.
 
 ### Changed
 
@@ -246,6 +252,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   MPI seam enters the loader cache key (`mpi=on|off`). Measured on ROMEO (hyqmom15 diocotron, N=256,
   cmg=64, 16 boxes): per-rank coarse box count drops from 16 to 4 at np=4 (the base now distributes),
   and ms/step falls from a flat 2554 to 1962. Serial builds are unaffected (no flag, bit-identical).
+- **`bench scaling_amr` broken by the AMR TU split** (ADC-347): `bench/scaling_amr` compiles
+  `python/amr_system.cpp` (which calls the `build_amr_block_*` / `build_amr_compiled_*` factories) but,
+  after ADC-335/336 moved those into per-transport seam TUs, was never updated to link them, so
+  `bin/scaling_amr` failed to LINK (`undefined reference to adc::detail::build_amr_block_exb`, ...) and
+  the non-required `bench` job had been red since ADC-335. The six `amr_{block,compiled}_*.cpp` seam
+  sources are now linked into `scaling_amr`, mirroring the `adc_runtime_amr` object library. Build-graph
+  only; no behavior, API, or numerics change. Bench-side parallel to ADC-346.
 
 ## [0.2.0] - 2026-06-16
 

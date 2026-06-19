@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(adc_cpp
-  VERSION 0.2.0  # single source of the version: propagated to the Python module (__version__), the
+  VERSION 0.3.0  # single source of the version: propagated to the Python module (__version__), the
                  # pip wheel, Doxygen and Sphinx (see docs/VERSIONING.md). Never duplicate elsewhere.
   DESCRIPTION "Solveur advection-diffusion-couplage hyperbolique-elliptique sur AMR, cible cluster"
   LANGUAGES CXX C  # C : pour que find_package(MPI) cree MPI::MPI_C (exige par le
