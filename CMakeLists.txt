@@ -190,7 +190,16 @@ set(ADC_HAS_KOKKOS ON)
 # propriete GLOBALE JOB_POOLS rend build.ninja invalide ("ninja: error: duplicate pool").
 # Les consommateurs ne posent que JOB_POOL_COMPILE. (tests/ garde son pool distinct
 # adc_heavy_tu, declare dans tests/CMakeLists.txt.)
-set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_module_tu=1)
+# ADC-335 : profondeur du pool de compile des TU lourdes (module _adc ET tests/). Defaut 1 =
+# anti-OOM historique (deux TU geantes -O3 sous nvcc/Kokkos depassent les ~7 Go du runner -> exit
+# 143). Depuis le split par transport (ADC-335) chaque sous-TU est bien plus petite : on peut RELEVER
+# ce pool pour que `-j` compile plusieurs sous-TU a la fois (c'est le POOL, pas `-j`, qui borne la
+# concurrence des TU lourdes). A relever UNIQUEMENT apres avoir mesure la RSS par sous-TU sur le
+# runner nvcc (CI ci-kokkos*), sinon on re-OOM. Hors Kokkos / machine a forte RAM : relevable
+# librement (-DADC_HEAVY_TU_POOL=$(nproc)).
+set(ADC_HEAVY_TU_POOL 1 CACHE STRING
+    "Profondeur du pool Ninja des TU lourdes (_adc + tests) ; defaut 1 (anti-OOM), relever apres mesure RSS")
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_module_tu=${ADC_HEAVY_TU_POOL})
 
 # MPI : backend distribue, confine au seam comm (parallel/comm.hpp). Optionnel :
 # par defaut OFF, le build et les tests restent serie (comm.hpp = rang unique).

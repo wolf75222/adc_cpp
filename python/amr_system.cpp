@@ -3,6 +3,7 @@
 #include <adc/runtime/abi_key.hpp>         // detail::abi_key_string: ABI key (header-only), compared to the loader's
 #include <adc/runtime/amr_dsl_block.hpp>   // detail::dispatch_amr_compiled + build_amr_compiled (shared path)
 #include <adc/runtime/amr_runtime.hpp>     // AmrRuntime + AmrRuntimeBlock (multi-block runtime engine)
+#include <adc/runtime/amr_block_seam.hpp>  // ADC-335: per-transport AMR build seam (build_amr_block/_compiled_<transport>)
 #include <adc/runtime/model_factory.hpp>   // detail::dispatch_model + compiled bricks
 #include <adc/runtime/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
 
@@ -19,47 +20,9 @@
 
 namespace adc {
 
-namespace {
-// Resolves the PARTIAL IMEX MASK of a block (implicit_vars / implicit_roles) into a list of conserved
-// component indices, against the block's @p cons descriptor (resolved at lazy build, when the concrete
-// Model type -- thus cons_vars -- is known). SAME logic as System::resolve_implicit_components
-// (python/system.cpp): absent name or role -> EXPLICIT error (no silent ignore); sorted UNIQUE
-// indices (order is irrelevant for the mask). EMPTY input -> empty -> inactive mask
-// -> full backward-Euler (all components implicit), bit-identical to IMEX without a mask.
-std::vector<int> resolve_implicit_components(const std::string& block, const VariableSet& cons,
-                                             const std::vector<std::string>& names,
-                                             const std::vector<std::string>& roles) {
-  std::vector<int> out;
-  auto push_unique = [&out](int c) {
-    if (std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
-  };
-  for (const std::string& nm : names) {
-    int idx = -1;
-    for (int i = 0; i < static_cast<int>(cons.names.size()); ++i)
-      if (cons.names[i] == nm) { idx = i; break; }
-    if (idx < 0) {
-      std::string have;
-      for (std::size_t i = 0; i < cons.names.size(); ++i) {
-        if (i) have += ", ";
-        have += cons.names[i];
-      }
-      throw std::runtime_error("AmrSystem::add_block : implicit_vars : variable '" + nm +
-                               "' missing from block '" + block + "' (conserved variables : " + have + ")");
-    }
-    push_unique(idx);
-  }
-  for (const std::string& rn : roles) {
-    const VariableRole role = role_from_name(rn);
-    const int idx = cons.index_of(role);
-    if (role == VariableRole::Custom || idx < 0)
-      throw std::runtime_error("AmrSystem::add_block : implicit_roles : role '" + rn +
-                               "' missing from block '" + block + "' (the block does not provide this role)");
-    push_unique(idx);
-  }
-  std::sort(out.begin(), out.end());
-  return out;
-}
-}  // namespace
+// resolve_implicit_components (AMR) moved to amr_block_seam.hpp (adc::detail::
+// resolve_implicit_components_amr) so the per-transport seam TUs share one definition; otherwise
+// unchanged (AmrSystem-specific error wording preserved verbatim).
 
 struct AmrSystem::Impl {
   AmrSystemConfig cfg;
@@ -379,23 +342,25 @@ struct AmrSystem::Impl {
       // The block density is carried by the BlockSpec (set_density(name) targets it). The partial IMEX
       // mask (implicit_vars / implicit_roles) is resolved HERE into component indices, against the
       // conservative descriptor of the concrete Model type (cons_vars), then threaded to build_amr_block.
-      detail::dispatch_model(b.spec, [&](auto m) {
-        using M = decltype(m);
-        const std::vector<int> impl_components =
-            b.imex ? resolve_implicit_components(b.name, M::conservative_vars(), b.implicit_vars,
-                                                 b.implicit_roles)
-                   : std::vector<int>{};
-        // TEMPORAL METHOD of the block (kSsprk3 if time='ssprk3') threaded to dispatch_amr_block ->
-        // build_amr_block -> advance closure -> advance_amr. 0 == historical forward Euler, bit-identical.
-        const AmrTimeMethod tmethod =
-            b.time_method == 1 ? AmrTimeMethod::kSsprk3 : AmrTimeMethod::kEuler;
-        rblocks.push_back(detail::dispatch_amr_block(m, b.limiter, b.riemann, S, b.name, b.density,
-                                                     b.has_density, b.gamma, b.substeps,
-                                                     b.recon_prim, b.imex, b.stride, impl_components,
-                                                     b.newton,
-                                                     b.has_state ? &b.state : nullptr,
-                                                     b.newton_diagnostics, tmethod, b.pos_floor));
-      });
+      // Transport-axis seam (ADC-335): each per-transport TU (python/amr_block_<transport>.cpp) runs the
+      // SAME dispatch_amr_block as before (build_amr_block_for), but instantiates only its transport's
+      // leaves. The impl-mask resolution + temporal-method mapping move into the seam. The string if/else
+      // mirrors detail::dispatch_transport (same unknown-transport message).
+      const detail::AmrBlockBuildArgs ba{b.spec, b.name, b.limiter, b.riemann, b.density, b.has_density,
+                                         b.gamma, b.substeps, b.recon_prim, b.imex, b.stride,
+                                         b.implicit_vars, b.implicit_roles, b.newton,
+                                         b.has_state ? &b.state : nullptr, b.newton_diagnostics,
+                                         b.time_method, b.pos_floor};
+      if (b.spec.transport == "exb") {
+        rblocks.push_back(detail::build_amr_block_exb(ba, S));
+      } else if (b.spec.transport == "compressible") {
+        rblocks.push_back(detail::build_amr_block_compressible(ba, S));
+      } else if (b.spec.transport == "isothermal") {
+        rblocks.push_back(detail::build_amr_block_isothermal(ba, S));
+      } else {
+        throw std::runtime_error("unknown transport '" + b.spec.transport +
+                                 "' (exb|compressible|isothermal)");
+      }
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
                                                 std::move(rblocks), S.base_per, S.replicated_coarse,
@@ -494,9 +459,19 @@ struct AmrSystem::Impl {
     }
     // Native ModelSpec path: the model dispatch resolves the concrete type, then the SAME
     // spatial scheme dispatch + coupler build as add_compiled_model (detail, shared).
-    detail::dispatch_model(b.spec, [&](auto m) {
-      install(detail::dispatch_amr_compiled(m, b.limiter, b.riemann, bp));
-    });
+    // Transport-axis seam (ADC-335): the single-block (AmrCouplerMP) build, one per-transport TU
+    // (python/amr_compiled_<transport>.cpp). bp already bundles every single-block parameter. Same
+    // unknown-transport message as detail::dispatch_transport.
+    if (b.spec.transport == "exb") {
+      install(detail::build_amr_compiled_exb(b.spec, b.limiter, b.riemann, bp));
+    } else if (b.spec.transport == "compressible") {
+      install(detail::build_amr_compiled_compressible(b.spec, b.limiter, b.riemann, bp));
+    } else if (b.spec.transport == "isothermal") {
+      install(detail::build_amr_compiled_isothermal(b.spec, b.limiter, b.riemann, bp));
+    } else {
+      throw std::runtime_error("unknown transport '" + b.spec.transport +
+                               "' (exb|compressible|isothermal)");
+    }
   }
 };
 

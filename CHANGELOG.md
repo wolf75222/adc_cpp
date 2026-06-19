@@ -77,6 +77,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Parallelize the `_adc` build by splitting the heavy runtime TUs** (ADC-335): `python/system.cpp`
+  and `python/amr_system.cpp` instantiated the full transport x source x elliptic x flux x limiter x
+  integrator product (~1700 `-O3` leaves) in two giant TUs, so `_adc` had only 3 TUs and `-j` capped at
+  3 (a colleague's `-j40` build took 2h+). The runtime dispatch is now split, by a verbatim move behind
+  fixed-signature type-erased seams, into ~16 TUs: System by transport (`system_{exb,isothermal,polar}`)
+  with the compressible/Euler transport further by flux (`system_compressible_{rusanov,hll,hllc,roe}`),
+  and AmrSystem by transport x {single-block `AmrCouplerMP`, multi-block `AmrRuntime`}
+  (`amr_{block,compiled}_{exb,isothermal,compressible}`). A new `ADC_HEAVY_TU_POOL` CMake cache var
+  (default 1, anti-OOM) lets the Ninja heavy-TU pool widen so `-j` actually compiles the now-smaller
+  sub-TUs in parallel. Byte-identical: the inner make_block / dispatch_amr ladders move unchanged, so the
+  set of instantiated kernel symbols is identical (verified: `nm -g` exported table unchanged, 0 hot
+  kernel leaves added/removed) and the production-parity suite stays `dmax==0`. Measured on an 8-core
+  Mac: clean `-O3` `_adc` build 1112 s (pool=1) -> 284 s (pool=8, ~16 TUs), 3.9x. No numerics change.
 - **Test build deduplicates the heavy runtime TUs** (ADC-336): `python/system.cpp` and
   `python/amr_system.cpp` are now compiled once per test configuration into two `OBJECT` libraries
   (`adc_runtime_system`, `adc_runtime_amr`) in `tests/CMakeLists.txt`, instead of being re-listed as a

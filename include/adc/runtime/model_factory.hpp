@@ -1,10 +1,13 @@
 #pragma once
 
+#include <adc/core/variables.hpp>  // VariableSet/VariableRole/role_from_name/roles_csv (resolve_implicit_components)
 #include <adc/physics/bricks.hpp>
 #include <adc/runtime/model_spec.hpp>
 
+#include <algorithm>  // std::find, std::sort (resolve_implicit_components)
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 /// @file
 /// @brief Assemble a CompositeModel from a ModelSpec (bricks + parameters).
@@ -112,6 +115,71 @@ void dispatch_model(const ModelSpec& m, Visitor&& visitor) {
       });
     });
   });
+}
+
+/// Same as dispatch_model but with the transport brick ALREADY chosen (@p tr). Runs ONLY the
+/// source/elliptic dispatch for that fixed transport @p TR and calls visitor(CompositeModel<...>).
+/// This is the seam that lets the per-transport translation units (system_{exb,isothermal,
+/// compressible}.cpp, ADC-335) each instantiate ONLY their own transport's leaves: a TU calling
+/// dispatch_model_for<CompressibleFlux> never sees the exb/isothermal branches of dispatch_transport,
+/// so the ~1700-leaf combinatorial product splits cleanly across files for `-j`. The body is the inner
+/// part of dispatch_model VERBATIM (same role binding, same CompositeModel<TR,...> synthesis), so the
+/// reachable instantiation set is unchanged: dispatch_model itself is UNTOUCHED (still used by the .so /
+/// add_compiled_model loader path), and the union over the three transports is byte-identical.
+template <class TR, class Visitor>
+void dispatch_model_for(const ModelSpec& m, TR tr, Visitor&& visitor) {
+  const VariableSet cons = TR::conservative_vars();
+  dispatch_source<TR::n_vars>(m, [&](auto src) {
+    dispatch_elliptic(m, [&](auto ell) {
+      bind_variable_roles(src, cons);
+      bind_variable_roles(ell, cons);
+      visitor(CompositeModel<TR, decltype(src), decltype(ell)>{tr, src, ell});
+    });
+  });
+}
+
+/// Resolves the IMPLICIT MASK of a block (add_block: implicit_vars / implicit_roles) into a list of
+/// conserved-component indices, against the block descriptor @p cons. The mask lives on the BLOCK /
+/// time-policy side (and NOT the model): same model, distinct implicit treatments per block. A name
+/// or role absent from the block raises an EXPLICIT error (no silent ignore). Returns the UNIQUE,
+/// sorted indices (order is irrelevant). Empty input -> empty -> inactive mask. Moved out of
+/// system.cpp's anonymous namespace (ADC-335) so the per-transport seam TUs share one definition.
+inline std::vector<int> resolve_implicit_components(const std::string& block,
+                                                    const VariableSet& cons,
+                                                    const std::vector<std::string>& names,
+                                                    const std::vector<std::string>& roles) {
+  std::vector<int> out;
+  auto push_unique = [&out](int c) {
+    if (std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
+  };
+  for (const std::string& nm : names) {
+    int idx = -1;
+    for (int i = 0; i < static_cast<int>(cons.names.size()); ++i)
+      if (cons.names[i] == nm) { idx = i; break; }
+    if (idx < 0) {
+      std::string have;
+      for (std::size_t i = 0; i < cons.names.size(); ++i) {
+        if (i) have += ", ";
+        have += cons.names[i];
+      }
+      throw std::runtime_error("System::add_block : implicit_vars : variable '" + nm +
+                               "' absent from block '" + block + "' (conserved variables : " + have + ")");
+    }
+    push_unique(idx);
+  }
+  for (const std::string& rn : roles) {
+    const VariableRole role = role_from_name(rn);
+    const int idx = cons.index_of(role);
+    if (role == VariableRole::Custom || idx < 0) {
+      std::string have = roles_csv(cons);
+      throw std::runtime_error("System::add_block : implicit_roles : role '" + rn +
+                               "' absent from block '" + block + "' (roles : " +
+                               (have.empty() ? std::string("<not provided>") : have) + ")");
+    }
+    push_unique(idx);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
 }
 
 }  // namespace adc::detail

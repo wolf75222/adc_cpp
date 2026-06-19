@@ -50,7 +50,7 @@ endfunction()
 # l'ordonnancement. Honore par le generateur Ninja (la CI) ; ignore sans effet par Make. APPEND sur la
 # propriete GLOBALE JOB_POOLS (le CMakeLists racine y declare aussi adc_heavy_module_tu, nom DISTINCT :
 # chaque pool ne doit etre declare qu'UNE fois, sinon "ninja: error: duplicate pool").
-set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_tu=1)
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_tu=${ADC_HEAVY_TU_POOL})  # profondeur partagee (ADC-335, defaut 1 ; racine CMakeLists.txt)
 
 function(adc_cap_opt_for_kokkos_ram target)
   target_compile_options(${target} PRIVATE
@@ -77,8 +77,26 @@ endfunction()
 # flags de production (ADC_HEADER_SIG/visibilite/...), et AUCUN preset ne co-construit tests+python
 # (ADC_BUILD_TESTS et ADC_BUILD_PYTHON sont mutuellement exclusifs dans CMakePresets.json) -- cette
 # bibliotheque est donc strictement tests-only et ne peut pas etre partagee avec _adc.
-add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp)
-add_library(adc_runtime_amr    OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_exb.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_isothermal.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_rusanov.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_hll.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_hllc.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_roe.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_polar.cpp)
+# ADC-335: the AMR transport-seam TUs (multi-block build_amr_block_<t> + single-block
+# build_amr_compiled_<t>). amr_system.cpp CALLS them, so they must be compiled/linked wherever
+# amr_system.cpp is -- the adc_runtime_amr object lib AND the ENABLE_EXPORTS native-loader tests that
+# re-list amr_system.cpp directly (below). One list, reused, so none is forgotten.
+set(ADC_AMR_SEAM
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_exb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_isothermal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_compressible.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_exb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_isothermal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_compressible.cpp)
+add_library(adc_runtime_amr    OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
 foreach(_rt adc_runtime_system adc_runtime_amr)
   target_link_libraries(${_rt} PUBLIC adc::adc ${CMAKE_DL_LIBS})
   target_compile_options(${_rt} PUBLIC
@@ -397,9 +415,12 @@ add_test(NAME test_amr_compiled_model COMMAND test_amr_compiled_model)
 # set_refinement (refine_threshold == 1e30) la hierarchie compilee est MONO-NIVEAU (n_patches()==0),
 # avec set_refinement(seuil fini) le seed est alloue (n_patches()>=1). Verrouille la suppression du
 # patch fin rang-0 qui bridait le strong-scaling MPI quand le raffinement etait inactif.
-add_executable(test_amr_seed_no_refine test_amr_seed_no_refine.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
-target_link_libraries(test_amr_seed_no_refine PRIVATE adc::adc ${CMAKE_DL_LIBS})
+# ADC-335: amr_system.cpp now delegates its dispatch to the per-transport seam TUs (ADC_AMR_SEAM),
+# so this ADC-324 test -- added on master after this branch forked and still re-listing amr_system.cpp
+# directly -- must pick the seam up too. Link the adc_runtime_amr object lib (amr_system.cpp + the seam,
+# compiled once at -O0 under the heavy-TU pool) like test_amr_compiled_model, instead of recompiling.
+add_executable(test_amr_seed_no_refine test_amr_seed_no_refine.cpp)
+target_link_libraries(test_amr_seed_no_refine PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_seed_no_refine COMMAND test_amr_seed_no_refine)
 
 # --- AmrSystem::potential() : phi du niveau grossier expose, pendant de System::potential() ---
@@ -421,7 +442,7 @@ add_test(NAME test_amr_potential COMMAND test_amr_potential)
 # est rebati avec la MEME norme C++ que ce binaire (cle d'ABI concordante, garde-fou explicite sinon).
 # Le test s'auto-saute (exit 0) si le compilateur du build ne sait pas compiler le loader.
 add_executable(test_amr_native_loader test_amr_native_loader.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_native_loader PRIVATE adc::adc ${CMAKE_DL_LIBS})
 # ELF (Linux) : un executable n'exporte AUCUN symbole dans sa table dynamique sauf -rdynamic. Le loader
 # .so est dlopen-e en RTLD_GLOBAL et resout ses indefinis (adc::AmrSystem::set_compiled_block, exportee
@@ -446,7 +467,7 @@ add_test(NAME test_amr_native_loader COMMAND test_amr_native_loader)
 # n_grow() -- MEME mecanisme que System (PR #22/#88), pas de logique dupliquee. + no-default-change
 # none/minmod. Compile amr_system.cpp (add_native_block) avec le test ; memes injections que le loader.
 add_executable(test_amr_weno5_native test_amr_weno5_native.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_weno5_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
 # ENABLE_EXPORTS (-rdynamic) : le loader .so resout set_compiled_block (ADC_EXPORT) contre l'exe de
 # test auto-promu RTLD_GLOBAL (cf. test_amr_native_loader). Inoffensif sur macOS.
@@ -465,7 +486,7 @@ add_test(NAME test_amr_weno5_native COMMAND test_amr_weno5_native)
 # Verifie aussi que hllc/roe different de rusanov (flux actif, non silencieux). Compile amr_system.cpp
 # comme test_amr_weno5_native ; memes injections compilateur / include / norme / tmpdir.
 add_executable(test_amr_riemann_native test_amr_riemann_native.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_riemann_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
 set_target_properties(test_amr_riemann_native PROPERTIES ENABLE_EXPORTS ON)
 target_compile_definitions(test_amr_riemann_native PRIVATE
@@ -483,7 +504,7 @@ add_test(NAME test_amr_riemann_native COMMAND test_amr_riemann_native)
 # (la source hors registres de reflux). Compile amr_system.cpp comme test_amr_riemann_native ; memes
 # injections compilateur / include / norme / tmpdir.
 add_executable(test_amr_imex_native test_amr_imex_native.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp)
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_imex_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
 set_target_properties(test_amr_imex_native PROPERTIES ENABLE_EXPORTS ON)
 target_compile_definitions(test_amr_imex_native PRIVATE

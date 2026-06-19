@@ -507,6 +507,108 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
 /// @p method chooses the EXPLICIT advance (ssprk2 by default, ssprk3 | euler optional); no effect in IMEX.
 /// @p implicit_components: IMEX implicit mask carried by the block (indices; empty = model default,
 /// bit-identical). cf. build_block.
+// Per-flux limiter ladders, split out of make_block (ADC-335) so each flux's build_block leaves can be
+// instantiated in their OWN translation unit (python/system_compressible_<flux>.cpp). Each body is the
+// VERBATIM content of make_block's old `if (riem == "<flux>")` branch (same capability if-constexpr,
+// same limiter ladder, same throws) -> bit-identical. make_block (below) is now a thin riem dispatcher
+// that calls these; it stays the entry point for the non-subdivided callers (exb/isothermal seams, the
+// .so/AOT loader path). The flux string is implied by which helper is called -> validation moves to the
+// make_block dispatcher (kept) and, for the per-flux seam path, to the caller (System).
+template <class Model>
+BlockClosures make_block_rusanov(const Model& m, const std::string& lim, const GridContext& ctx,
+                                 bool imex, bool recon_prim, const std::string& method,
+                                 const std::vector<int>& implicit_components,
+                                 const NewtonOptions& newton_opts, NewtonReport* newton_report,
+                                 Real pos_floor) {
+  if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  throw_registry_dispatch_mismatch("System", "limiteur", lim);
+}
+
+template <class Model>
+BlockClosures make_block_hll(const Model& m, const std::string& lim, const GridContext& ctx,
+                             bool imex, bool recon_prim, const std::string& method,
+                             const std::vector<int>& implicit_components,
+                             const NewtonOptions& newton_opts, NewtonReport* newton_report,
+                             Real pos_floor, bool wave_speed_cache) {
+  // HLL (Harten-Lax-van Leer, 2 waves): less diffusive than Rusanov (dissipation ~ signed |sR-sL|
+  // instead of symmetric 2*max|v|), but does NOT require pressure (unlike HLLC/Roe) -- only SIGNED
+  // wave speeds model.wave_speeds. Available as soon as a model exposes its signed eigenvalues (the
+  // DSL emits wave_speeds as soon as a primitive 'p' is declared, even cold isothermal p=0 -> c=0 ->
+  // HLL degenerates to upwind, still less diffusive than Rusanov at the contact). Does NOT REQUIRE
+  // n_vars==4 nor a pressure: usable by the 3-var isothermal model (rho, m_x, m_y) of the Hoffart
+  // diocotron, where hllc/roe are rejected. Gated on the presence of wave_speeds (otherwise a CLEAR
+  // error, not a compilation failure for a scalar model without a signed wave, e.g. ExB transport).
+  if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
+                  mm.wave_speeds(s, a, 0, r, r);
+                }) {
+    // wave_speed_cache (opt-in) forwarded ONLY here: the wave speed cache only engages for the HLL
+    // flux (BlockRhsEval guarded by Flux == HLLFlux). rusanov/hllc/roe ignore it.
+    if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+    throw_registry_dispatch_mismatch("System", "limiteur", lim);
+  } else {
+    throw std::runtime_error("System: flux 'hll' requires signed wave speeds "
+                             "(model.wave_speeds: declare a primitive 'p' / eigenvalues); "
+                             "this transport -> 'rusanov'");
+  }
+}
+
+template <class Model>
+BlockClosures make_block_hllc(const Model& m, const std::string& lim, const GridContext& ctx,
+                              bool imex, bool recon_prim, const std::string& method,
+                              const std::vector<int>& implicit_components,
+                              const NewtonOptions& newton_opts, NewtonReport* newton_report,
+                              Real pos_floor) {
+  // HLLC PATHS: (a) HasHLLCStructure capability (the model provides contact_speed +
+  // hllc_star_state -> GENERIC contact-resolving algorithm, no assumed layout), OR
+  // (b) the CANONICAL Euler 2D path (n_vars == 4 + pressure, bit-identical historical
+  // implementation). Without either, explicit rejection with the capability remedy.
+  if constexpr (HasHLLCStructure<Model> ||
+                (Model::n_vars == 4 &&
+                 requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
+    if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    throw_registry_dispatch_mismatch("System", "limiteur", lim);
+  } else {
+    throw std::runtime_error("System: flux 'hllc' requires a compressible Euler 2D transport "
+                             "(4 variables + pressure) OR the model's HLLC capability "
+                             "(pressure + wave_speeds + contact_speed + hllc_star_state, cf. "
+                             "HasHLLCStructure); this transport -> 'hll'/'rusanov'");
+  }
+}
+
+template <class Model>
+BlockClosures make_block_roe(const Model& m, const std::string& lim, const GridContext& ctx,
+                             bool imex, bool recon_prim, const std::string& method,
+                             const std::vector<int>& implicit_components,
+                             const NewtonOptions& newton_opts, NewtonReport* newton_report,
+                             Real pos_floor) {
+  // ROE PATHS: (a) HasRoeDissipation capability (the model provides its full Roe dissipation
+  // d = |A_roe| dU -> GENERIC Roe-like solver), OR (b) the CANONICAL ideal-gas Euler 2D path
+  // (bit-identical historical). Without either, explicit rejection.
+  if constexpr (HasRoeDissipation<Model> ||
+                (Model::n_vars == 4 &&
+                 requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
+    if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    throw_registry_dispatch_mismatch("System", "limiteur", lim);
+  } else {
+    throw std::runtime_error("System: flux 'roe' requires a compressible Euler 2D transport "
+                             "(4 variables + pressure) OR the model's Roe capability "
+                             "(roe_dissipation, cf. HasRoeDissipation); this transport -> "
+                             "'hll'/'rusanov'");
+  }
+}
+
 template <class Model>
 BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
                          const GridContext& ctx, bool imex, bool recon_prim,
@@ -516,84 +618,16 @@ BlockClosures make_block(const Model& m, const std::string& lim, const std::stri
                          NewtonReport* newton_report = nullptr, Real pos_floor = Real(0),
                          bool wave_speed_cache = false) {
   // CENTRALIZED VALIDATION (registry dispatch_tags.hpp) BEFORE the dispatch: same tag acceptances /
-  // rejections as before, identical messages (validate_* keeps the historical wording). The if/else
-  // dispatch that follows is UNCHANGED (Limiter / Flux are compile-time types); its final
-  // "unknown limiter/flux" throws become unreachable -> replaced by a registry/dispatch inconsistency
-  // guard. The CAPABILITY guards (hll/hllc/roe on a model without a wave / without pressure) stay
-  // per-model `if constexpr` below, with their unchanged "requires ..." messages.
+  // rejections as before, identical messages (validate_* keeps the historical wording). The flux
+  // dispatch now forwards to the per-flux helpers above (each holds the unchanged capability
+  // `if constexpr` guard + limiter ladder); the final throw stays a registry/dispatch-inconsistency
+  // guard (unreachable after validate_riemann).
   validate_riemann(riem, /*polar=*/false, "System");
   validate_limiter(lim, "System");
-  if (riem == "rusanov") {
-    if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    throw_registry_dispatch_mismatch("System", "limiteur", lim);
-  }
-  if (riem == "hll") {
-    // HLL (Harten-Lax-van Leer, 2 waves): less diffusive than Rusanov (dissipation ~ signed |sR-sL|
-    // instead of symmetric 2*max|v|), but does NOT require pressure (unlike HLLC/Roe) -- only SIGNED
-    // wave speeds model.wave_speeds. Available as soon as a model exposes its signed eigenvalues (the
-    // DSL emits wave_speeds as soon as a primitive 'p' is declared, even cold isothermal p=0 -> c=0 ->
-    // HLL degenerates to upwind, still less diffusive than Rusanov at the contact). Does NOT REQUIRE
-    // n_vars==4 nor a pressure: usable by the 3-var isothermal model (rho, m_x, m_y) of the Hoffart
-    // diocotron, where hllc/roe are rejected. Gated on the presence of wave_speeds (otherwise a CLEAR
-    // error, not a compilation failure for a scalar model without a signed wave, e.g. ExB transport).
-    if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
-                    mm.wave_speeds(s, a, 0, r, r);
-                  }) {
-      // wave_speed_cache (opt-in) forwarded ONLY here: the wave speed cache only engages for the HLL
-      // flux (BlockRhsEval guarded by Flux == HLLFlux). rusanov/hllc/roe ignore it.
-      if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-      if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-      if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-      if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-      throw_registry_dispatch_mismatch("System", "limiteur", lim);
-    } else {
-      throw std::runtime_error("System: flux 'hll' requires signed wave speeds "
-                               "(model.wave_speeds: declare a primitive 'p' / eigenvalues); "
-                               "this transport -> 'rusanov'");
-    }
-  }
-  if (riem == "hllc") {
-    // HLLC PATHS: (a) HasHLLCStructure capability (the model provides contact_speed +
-    // hllc_star_state -> GENERIC contact-resolving algorithm, no assumed layout), OR
-    // (b) the CANONICAL Euler 2D path (n_vars == 4 + pressure, bit-identical historical
-    // implementation). Without either, explicit rejection with the capability remedy.
-    if constexpr (HasHLLCStructure<Model> ||
-                  (Model::n_vars == 4 &&
-                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
-      if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      throw_registry_dispatch_mismatch("System", "limiteur", lim);
-    } else {
-      throw std::runtime_error("System: flux 'hllc' requires a compressible Euler 2D transport "
-                               "(4 variables + pressure) OR the model's HLLC capability "
-                               "(pressure + wave_speeds + contact_speed + hllc_star_state, cf. "
-                               "HasHLLCStructure); this transport -> 'hll'/'rusanov'");
-    }
-  }
-  if (riem == "roe") {
-    // ROE PATHS: (a) HasRoeDissipation capability (the model provides its full Roe dissipation
-    // d = |A_roe| dU -> GENERIC Roe-like solver), OR (b) the CANONICAL ideal-gas Euler 2D path
-    // (bit-identical historical). Without either, explicit rejection.
-    if constexpr (HasRoeDissipation<Model> ||
-                  (Model::n_vars == 4 &&
-                   requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
-      if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-      throw_registry_dispatch_mismatch("System", "limiteur", lim);
-    } else {
-      throw std::runtime_error("System: flux 'roe' requires a compressible Euler 2D transport "
-                               "(4 variables + pressure) OR the model's Roe capability "
-                               "(roe_dissipation, cf. HasRoeDissipation); this transport -> "
-                               "'hll'/'rusanov'");
-    }
-  }
+  if (riem == "rusanov") return make_block_rusanov(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  if (riem == "hll") return make_block_hll(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+  if (riem == "hllc") return make_block_hllc(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  if (riem == "roe") return make_block_roe(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
   throw_registry_dispatch_mismatch("System", "flux", riem);
 }
 

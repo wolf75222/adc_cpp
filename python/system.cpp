@@ -3,6 +3,7 @@
 #include <adc/core/variables.hpp>  // VariableSet + VariableRole: role descriptor carried by each block
 #include <adc/runtime/abi_key.hpp>  // adc::abi_key + detail::abi_key_string (ABI boundary of the native loader)
 #include <adc/runtime/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
+#include <adc/runtime/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)
 #include <adc/runtime/model_factory.hpp>  // detail::dispatch_model + compiled bricks
 #include <adc/coupling/condensed_schur_source_stepper.hpp>  // Schur-condensed source stage (adc.Split / CondensedSchur, #126)
 #include <adc/coupling/polar_condensed_schur_source_stepper.hpp>  // POLAR counterpart of the condensed source stage (Path A step 2c, #212)
@@ -48,50 +49,8 @@ namespace adc {
 // The DIAGNOSTIC trace of the solve_fields path (adc_trace_sf / adc_sf_mark, milestone #93) was extracted
 // with SystemFieldSolver into include/adc/runtime/system_field_solver.hpp (namespace field_solver);
 // it stays env-gated (ADC_TRACE_SOLVE_FIELDS) and inert by default.
-namespace {
-// Resolves the IMPLICIT MASK of a block (cf. add_block: implicit_vars / implicit_roles) into a list
-// of conserved-component indices, against the block descriptor @p cons. The mask lives on the BLOCK /
-// time-policy side (and NOT the model): same model, distinct implicit treatments per block. A name
-// or a role absent from the block raises an EXPLICIT error (no silent ignore). Returns the UNIQUE,
-// sorted indices (order is irrelevant for the mask). Empty input -> empty -> inactive mask.
-inline std::vector<int> resolve_implicit_components(const std::string& block,
-                                                    const VariableSet& cons,
-                                                    const std::vector<std::string>& names,
-                                                    const std::vector<std::string>& roles) {
-  std::vector<int> out;
-  auto push_unique = [&out](int c) {
-    if (std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
-  };
-  for (const std::string& nm : names) {
-    int idx = -1;
-    for (int i = 0; i < static_cast<int>(cons.names.size()); ++i)
-      if (cons.names[i] == nm) { idx = i; break; }
-    if (idx < 0) {
-      std::string have;
-      for (std::size_t i = 0; i < cons.names.size(); ++i) {
-        if (i) have += ", ";
-        have += cons.names[i];
-      }
-      throw std::runtime_error("System::add_block : implicit_vars : variable '" + nm +
-                               "' absent from block '" + block + "' (conserved variables : " + have + ")");
-    }
-    push_unique(idx);
-  }
-  for (const std::string& rn : roles) {
-    const VariableRole role = role_from_name(rn);
-    const int idx = cons.index_of(role);
-    if (role == VariableRole::Custom || idx < 0) {
-      std::string have = roles_csv(cons);
-      throw std::runtime_error("System::add_block : implicit_roles : role '" + rn +
-                               "' absent from block '" + block + "' (roles : " +
-                               (have.empty() ? std::string("<not provided>") : have) + ")");
-    }
-    push_unique(idx);
-  }
-  std::sort(out.begin(), out.end());
-  return out;
-}
-}  // namespace
+// resolve_implicit_components moved to model_factory.hpp (adc::detail) so the per-transport seam TUs
+// (python/system_<transport>.cpp, ADC-335) share one definition; it is otherwise unchanged.
 
 // MODULE ABI key (frozen at compile time of this TU). Defined here so the _adc module
 // exports it (ADC_EXPORT): add_native_block compares it to the key baked into the loader .so.
@@ -607,91 +566,81 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   std::function<Real(const MultiFab&)> src_freq, stab_dt;  // optional step bounds (model traits)
   CellConvert prim_to_cons, cons_to_prim;  // pointwise model conversions (set/get_primitive_state)
   VariableSet cons_vs, prim_vs;
+  detail::BuiltBlock bb;
   if (P->polar_) {
-    // POLAR PATH (ring): closures built by block_builder_polar.hpp (assemble_rhs_polar +
-    // scalar polar transport ExBVelocityPolar OR fluid IsothermalFluxPolar + scalar polar Poisson).
-    // IMEX is not supported on the ring at this stage: the electrostatic coupling
-    // goes through an explicit LOCAL source (non-stiff regime, Path A step 1); we reject it
-    // explicitly rather than silently running the transport alone.
+    // POLAR PATH (ring): closures built by block_builder_polar.hpp (assemble_rhs_polar + scalar polar
+    // transport ExBVelocityPolar OR fluid IsothermalFluxPolar + scalar polar Poisson), via the polar
+    // seam (python/system_polar.cpp, ADC-335). IMEX is not supported on the ring at this stage: the
+    // electrostatic coupling goes through an explicit LOCAL source (non-stiff regime, Path A step 1);
+    // we reject it explicitly rather than silently running the transport alone.
     if (imex)
       throw std::runtime_error(
           "System::add_block (polar) : time='" + time + "' (IMEX / IMEX-RK ARS(2,2,2)) unsupported "
           "(ring : coupling by explicit local source, no stiff source to handle implicitly "
           "at this stage). Use 'explicit'/'ssprk2'/'ssprk3'.");
     const PolarGridContext pctx = P->grid_ctx_polar();
-    detail::dispatch_model_polar(model, [&](auto m) {
-      using M = decltype(m);
-      ncomp = M::n_vars;
-      cons_vs = M::conservative_vars();
-      prim_vs = M::primitive_vars();
-      // wall_radial = true: solid wall at both radial edges (no-penetration) -> zero radial flux
-      // at r_min / r_max -> mass Sum n r dr dtheta conserved TO MACHINE precision (the diocotron ring is bounded
-      // by two conducting walls). This is the BC that makes the coupled step conservative.
-      clo = make_block_polar(m, limiter, riemann, pctx, recon_prim, method, /*wall_radial=*/true,
-                             static_cast<Real>(positivity_floor));
-      // POLAR StabilityPolicy (audit wave 3): same policy as the Cartesian -- stability lambda*
-      // (trait) otherwise max_wave_speed; source/admissible-step bounds if declared,
-      // EMPTY closures otherwise (historical step policy, bit-identical).
-      max_speed = make_cfl_speed_polar(m, &P->aux);
-      src_freq = make_source_frequency_polar(m, &P->aux);
-      stab_dt = make_stability_dt_polar(m, &P->aux);
-      add_poisson_rhs = make_poisson_rhs_polar(m);
-      auto conv = make_cell_convert(m);
-      prim_to_cons = std::move(conv.first);
-      cons_to_prim = std::move(conv.second);
-    });
+    bb = detail::build_block_polar(model, limiter, riemann, pctx, recon_prim, method,
+                                   static_cast<Real>(positivity_floor), &P->aux);
   } else {
-  const GridContext ctx = P->grid_ctx();
-  // Newton options of the IMEX implicit source (defaults = historical constants, bit-identical).
-  // Grouped into a POD (ADC-214) on the facade side: we pass them as-is to the numerical core.
-  // The report (OPT-IN diagnostics) lives in Impl::newton_reports_ in shared_ptr -> STABLE address
-  // captured by the closures even when sp reallocates at a later add_block.
-  const NewtonOptions& nopts = newton;
-  NewtonReport* nreport = nullptr;
-  if (newton_diagnostics) {
-    auto rep = std::make_shared<NewtonReport>();
-    P->newton_reports_[name] = rep;
-    nreport = rep.get();
+    const GridContext ctx = P->grid_ctx();
+    // Newton options of the IMEX implicit source (defaults = historical constants, bit-identical).
+    // The report (OPT-IN diagnostics) lives in Impl::newton_reports_ in a shared_ptr -> STABLE address
+    // captured by the closures even when the map reallocates at a later add_block.
+    const NewtonOptions& nopts = newton;
+    NewtonReport* nreport = nullptr;
+    if (newton_diagnostics) {
+      auto rep = std::make_shared<NewtonReport>();
+      P->newton_reports_[name] = rep;
+      nreport = rep.get();
+    }
+    // Transport-axis seam (ADC-335): each per-transport TU (python/system_<transport>.cpp) runs the
+    // SAME source/elliptic dispatch + make_block + makers as before (detail::build_block_for), but
+    // instantiates ONLY its own transport's leaves -- so the combinatorial product splits across files
+    // for `-j`. This string if/else mirrors detail::dispatch_transport (same unknown-transport message).
+    // aux_width is widened host-side AFTER the build (was P->ensure_aux_width inside the visitor;
+    // ensure_aux_width keeps the aux ADDRESS captured by the closures, so order vs make_block is
+    // immaterial -- byte-identical).
+    const detail::BlockBuildArgs args{name, limiter, riemann, ctx, imex, recon_prim, method,
+                                      implicit_vars, implicit_roles, nopts, nreport,
+                                      static_cast<Real>(positivity_floor), wave_speed_cache};
+    if (model.transport == "exb") {
+      bb = detail::build_block_exb(model, args);
+    } else if (model.transport == "compressible") {
+      // Compressible/Euler is flux-subdivided (ADC-335): all four fluxes are valid (4-var + pressure),
+      // so we run the SAME validation as make_block (validate_riemann then validate_limiter, identical
+      // messages) and dispatch the riemann string to the matching per-flux sub-TU. An unknown flux hits
+      // the same registry throw as make_block's tail (validate_riemann already rejected it).
+      validate_riemann(riemann, /*polar=*/false, "System");
+      validate_limiter(limiter, "System");
+      if (riemann == "rusanov") {
+        bb = detail::build_block_compressible_rusanov(model, args);
+      } else if (riemann == "hll") {
+        bb = detail::build_block_compressible_hll(model, args);
+      } else if (riemann == "hllc") {
+        bb = detail::build_block_compressible_hllc(model, args);
+      } else if (riemann == "roe") {
+        bb = detail::build_block_compressible_roe(model, args);
+      } else {
+        throw_registry_dispatch_mismatch("System", "flux", riemann);
+      }
+    } else if (model.transport == "isothermal") {
+      bb = detail::build_block_isothermal(model, args);
+    } else {
+      throw std::runtime_error("unknown transport '" + model.transport +
+                               "' (exb|compressible|isothermal)");
+    }
+    P->ensure_aux_width(bb.aux_width);
   }
-  // The model is composed from the bricks named by the spec; the visitor wires the
-  // closures (header constructors, AOT-instantiable). ncomp = n_vars of the composed model;
-  // set_density adapts to it. The variable names come from the Variables descriptor carried by the
-  // model (Vars brick), single source of truth.
-  detail::dispatch_model(model, [&](auto m) {
-    using M = decltype(m);
-    ncomp = M::n_vars;
-    cons_vs = M::conservative_vars();  // names + physical ROLES (single source of truth)
-    prim_vs = M::primitive_vars();
-    // AUX WIDTH of the composed model (n_aux > 3 for a magnetized brick reading B_z): we widen
-    // the SHARED channel as add_compiled_model does (dsl_block.hpp). Without this call, load_aux<4>
-    // would read component 3 OUT OF BOUNDS of a 3-component aux (silently wrong B_z) -- the
-    // native add_block + 'magnetic' source path had never been exercised end-to-end (audit
-    // 2026-06, Python exposure of the magnetic bricks). ensure_aux_width preserves the ADDRESS of
-    // the aux (captured by the closures via grid_ctx) and re-applies any B_z already provided.
-    P->ensure_aux_width(aux_comps<M>());
-    // Implicit mask CARRIED BY THE BLOCK: resolves names/roles -> indices against the block descriptor
-    // (explicit error on an absent name/role). Empty -> make_implicit_mask inactive -> model default
-    // (bit-identical). Only plays in IMEX (guard above for explicit).
-    const std::vector<int> impl_components =
-        resolve_implicit_components(name, cons_vs, implicit_vars, implicit_roles);
-    // Disc routing (project T5-PR3): make_block ALSO builds the disc advances (advance_masked /
-    // advance_eb) because ctx (grid_ctx()) now carries ctx.disc_mask / ctx.disc (stable addresses of
-    // the Impl members). They stay INERT as long as the System is not put in Staircase /
-    // CutCell mode (cf. step()): built at add time, selected only on opt-in.
-    clo = make_block(m, limiter, riemann, ctx, imex, recon_prim, method, impl_components, nopts,
-                     nreport, static_cast<Real>(positivity_floor), wave_speed_cache);
-    max_speed = make_max_speed(m, ctx);  // stability_speed (trait) or max_wave_speed (fallback)
-    add_poisson_rhs = make_poisson_rhs(m);
-    // Optional step bounds (HasSourceFrequency / HasStabilityDt traits): EMPTY functions if
-    // the model does not declare them -> step_cfl keeps the historical policy (bit-identical).
-    src_freq = make_source_frequency(m, ctx);
-    stab_dt = make_stability_dt(m, ctx);
-    // cons <-> prim conversions OF THE MODEL (set/get_primitive_state): same formulas as the flux/CFL.
-    auto conv = make_cell_convert(m);
-    prim_to_cons = std::move(conv.first);
-    cons_to_prim = std::move(conv.second);
-  });
-  }
+  ncomp = bb.ncomp;
+  cons_vs = std::move(bb.cons_vs);
+  prim_vs = std::move(bb.prim_vs);
+  clo = std::move(bb.clo);
+  max_speed = std::move(bb.max_speed);
+  add_poisson_rhs = std::move(bb.add_poisson_rhs);
+  src_freq = std::move(bb.src_freq);
+  stab_dt = std::move(bb.stab_dt);
+  prim_to_cons = std::move(bb.prim_to_cons);
+  cons_to_prim = std::move(bb.cons_to_prim);
   // Common installation (same path as add_compiled_model for a DSL-generated model):
   // the closures run on the REAL System MultiFabs (MPI halos via fill_boundary, device
   // via Kokkos), without copy.
