@@ -539,15 +539,15 @@ silently), or are assumed scope boundaries.
   reflux per block"). The full tensor operator of the Schur condensation goes through
   `TensorKrylovSolver`, outside the symmetric `GeometricMG`, and is not wired on the refined hierarchy.
 
-- FFT under `System` in MPI np>1: refused. `System` distributes a single box in round-robin; at np>1
-  some ranks have `local_size()==0` and `PoissonFFTSolver::solve()` would dereference an absent box.
-  `set_poisson(solver="fft")` therefore raises explicitly, on all the ranks, if `n_ranks() > 1`
-  ([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)):
-  "solveur fft non supporte en MPI (n_ranks>1) : utiliser geometric_mg ou le solveur fft distribue". The
-  distributed periodic exists (`DistributedFFTSolver`, MPI_Alltoall bands) but its band
-  decomposition is incompatible with the single box of `System`; it is not wired there. The single-rank `fft` also refuses
-  a wall, a variable `eps(x)`, the anisotropy and the kappa reaction term (cases reserved to
-  `geometric_mg`).
+- FFT under `System` in MPI np>1: supported since ADC-287. `System` distributes a single box in
+  round-robin, so `PoissonFFTSolver` (which needs the whole grid) is kept only for `n_ranks()==1`; at
+  np>1 [`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system_field_solver.hpp)
+  now SELECTS a `RemappedFFTSolver` instead of raising: it hides a box-slab scatter/gather around
+  `PoissonFFT` (the field-solve path is unchanged, it sees the single round-robin box outward).
+  `set_poisson(solver="fft"|"fft_spectral")` therefore SUCCEEDS under MPI np>1 for the periodic,
+  constant-coefficient case; it raises only when the slab remap cannot tile (`Ny % n_ranks() != 0`).
+  A wall, a variable `eps(x)`, the anisotropy and the kappa reaction term are still reserved to
+  `geometric_mg` (the MPI default and the only option for those), at any rank count.
 
 - Polar: scalar ExB, single-rank. The polar geometry (global ring $r \in [r_{min}, r_{max}] \times \theta \in [0, 2\pi)$, `PolarGeometry`) wired in `System::step` carries the scalar ExB transport
   (`CompositeModel<ExBVelocityPolar, NoSource, ChargeDensity>`, see

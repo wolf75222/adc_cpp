@@ -6,6 +6,26 @@
 
 ---
 
+## Outcome - milestone "Compilation" (2026-06-19)
+
+The leads identified below were implemented and merged. The diagnostic that follows is kept as the
+analysis that motivated them. No numerical change (the `-O` level and the verbatim TU moves keep the
+IEEE results bit-identical; guarded by the `dmax==0` parity suite).
+
+| Lever | Issue | Result |
+|---|---|---|
+| Split the heavy TUs by transport x flux | ADC-335 | `_adc` went from **3 TUs to 16**; the critical path dropped from the single ~469 s `system.cpp` to the slowest sub-TU. Measured on this Mac: a full module build **1112 s -> 284 s (~3.9x)**. |
+| Flux-subdivide the isothermal TU | ADC-342 | the post-split long pole (`system_isothermal`, ~120 `-O3` leaves) is split into rusanov + hll sub-TUs (~60 leaves each). |
+| Compile the heavy TUs once | ADC-336 | the ~20x test recompile collapses to one `adc_runtime_{system,amr}` object library, linked by the tests (size-1 Ninja pool as the OOM guard). |
+| Derive `-j` from the core count | ADC-339 | no hardcoded `-j8`; the build saturates all cores by default. |
+| Pinned per-OS conda toolchain + heavy-TU pool | ADC-338 | AppleClang (macOS) / conda gcc 14.2 (Linux) pinned; `ADC_HEAVY_TU_POOL` lets `-j` parallelize the now-small sub-TUs on a high-RAM host (CI keeps the size-1 OOM guard). |
+| `optnone` on the cold factories | ADC-337 | the once-per-block string->closure wiring is no longer `-O3`-optimized; the hot kernels stay `-O3`. |
+| Gate unused flux x limiter x integrator combos (P1-C) | ADC-340 | **NO-GO**: the `if constexpr` capability guards already prune the impossible combos (recoverable residual ~ 0); further gating would be a forbidden scenario allowlist. Documented and closed. |
+
+The CI `--parallel 2` (7 GB-runner memory bound) and the WSL2 `-j 6` (RAM bound) are intentionally kept.
+
+---
+
 ## TL;DR
 
 | Finding | Measured evidence | Lever |
