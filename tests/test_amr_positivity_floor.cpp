@@ -17,7 +17,7 @@
 //      trajectory DIFFERS from the unfloored run (the floor was active).
 //  (4) REJECT: a model without a Density role (AdvectionDiffusion) + positivity_floor > 0 ->
 //      runtime_error mentioning positivity_floor (positivity_comp resolved on the AMR path).
-#include <adc/physics/advection_diffusion.hpp>
+#include <adc/validation/physics/advection_diffusion.hpp>
 #include <adc/physics/euler.hpp>
 
 #include <adc/numerics/numerical_flux.hpp>      // RusanovFlux
@@ -302,7 +302,7 @@ int main(int argc, char** argv) {
   //     (positivity_comp resolved at the head of subcycle_level_mp), message mentions positivity_floor.
   // ------------------------------------------------------------------------------------------------
   {
-    const AdvectionDiffusion scal{1.0, 0.0, 0.0};
+    const adc::validation::AdvectionDiffusion scal{1.0, 0.0, 0.0};
     MultiFab Us(ba, dm, 1, 2), auxs(ba, dm, 3, 1);
     Us.set_val(1.0);
     auxs.set_val(0.0);

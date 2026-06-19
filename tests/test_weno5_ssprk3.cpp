@@ -13,7 +13,7 @@
 //  (4) ORDRE / PRECISION : advection lineaire d'un sinus lisse periodique sur une periode complete.
 //      WENO5+SSPRK3 a une erreur < Minmod+SSPRK2 a meme resolution, et une pente de convergence > 2
 //      (au-dela de l'ordre 2 du MUSCL). Test court (n <= 64), CI-friendly.
-#include <adc/physics/advection_diffusion.hpp>  // AdvectionDiffusion : transport scalaire (nu=0 = advection pure)
+#include <adc/validation/physics/advection_diffusion.hpp>  // adc::validation::AdvectionDiffusion : transport scalaire (nu=0 = advection pure)
 #include <adc/runtime/block_builder.hpp>
 
 #include <adc/mesh/box_array.hpp>
@@ -41,7 +41,7 @@ static double advect_error(int n, const std::string& limiter, const std::string&
   MultiFab aux(ba, dm, 3, 1);
   aux.set_val(0.0);
 
-  AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.0, /*nu=*/0.0};  // advection pure selon x
+  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.0, /*nu=*/0.0};  // advection pure selon x
   const int ng = block_n_ghost(limiter);
   MultiFab U(ba, dm, 1, ng);
   auto init = [&](MultiFab& mf) {
@@ -87,7 +87,7 @@ int main() {
   MultiFab aux(ba, dm, 3, 1);
   aux.set_val(0.0);
 
-  AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.3, /*nu=*/0.0};  // advection 2D oblique, pure
+  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.3, /*nu=*/0.0};  // advection 2D oblique, pure
   const GridContext ctx{dom, bc, geom, &aux};
 
   auto init = [&](MultiFab& mf) {

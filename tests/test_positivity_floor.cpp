@@ -16,7 +16,7 @@
 //      plancher), et le residu assemble_rhs reste conservatif (somme de masse nulle en periodique).
 //  (4) REJET CLAIR : un modele sans role Density (AdvectionDiffusion scalaire) + pos_floor > 0 ->
 //      runtime_error explicite (jamais un scaling muet d'une composante arbitraire).
-#include <adc/physics/advection_diffusion.hpp>
+#include <adc/validation/physics/advection_diffusion.hpp>
 #include <adc/physics/euler.hpp>
 #include <adc/runtime/block_builder.hpp>
 
@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
   // (4) REJET CLAIR : modele sans role Density + pos_floor > 0 -> runtime_error explicite.
   // ----------------------------------------------------------------------------------------------
   {
-    const AdvectionDiffusion scal{1.0, 0.0, 0.0};
+    const adc::validation::AdvectionDiffusion scal{1.0, 0.0, 0.0};
     MultiFab Us(ba, dm, 1, 2), Rs(ba, dm, 1, 0);
     Us.set_val(1.0);
     bool threw = false;

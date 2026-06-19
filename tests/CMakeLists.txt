@@ -391,6 +391,12 @@ adc_add_test(test_weno5_ssprk3)
 #     (floor=0 bit-identique), garantie rho_face >= floor sur le top-hat 1e6, rejet sans role Density ---
 adc_add_test(test_positivity_floor)
 
+# --- ADC-329 : les briques de VALIDATION/REFERENCE (AdvectionDiffusion, LangmuirMode, TwoFluidLinear)
+#     vivent sous adc/validation/physics/ (namespace adc::validation), hors de la surface production.
+#     Ce test prouve que les NOUVEAUX chemins canoniques ET les forwarders de compat (adc/physics/...)
+#     compilent, et que les alias adc::<Type> deprecies nomment les memes types. ---
+adc_add_test(test_physics_validation_compat)
+
 # --- cache des vitesses d'onde HLL (opt-in) : PREUVE D'ENGAGEMENT par comptage de model.wave_speeds.
 #     make_block(none, hll) OFF vs ON sur N pas SSPRK2 : bit-exact (0 ulp) + calls_on < calls_off
 #     (le cache evalue par cellule, le chemin par face rappelle par face). Attrape un retour en no-op
