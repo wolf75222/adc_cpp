@@ -26,6 +26,15 @@ The design documents are the contributor reference and stay at the repository ro
 - [BACKEND_COVERAGE](https://github.com/wolf75222/adc_cpp/blob/master/docs/BACKEND_COVERAGE.md): the
   backend and test matrix.
 
+## Decision records
+
+Architecture Decision Records capture a deliberate cross-cutting choice and its alternatives. They
+stay at the repository root next to the design guides:
+
+- [ADR-0001 Genericity contracts](https://github.com/wolf75222/adc_cpp/blob/master/docs/adr/ADR-0001-genericity-contracts.md):
+  2D core invariant, explicit model spec, named aux, roles, and configurable AMR regrid
+  (ADC-294 / ADC-290 / ADC-291 / ADC-292 / ADC-296).
+
 ## Process
 
 - [CONTRIBUTING](https://github.com/wolf75222/adc_cpp/blob/master/CONTRIBUTING.md): the build, test
