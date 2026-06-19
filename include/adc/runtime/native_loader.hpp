@@ -168,10 +168,7 @@ inline VariableSet parse_var_set(VariableKind kind, const std::string& names_csv
   if (names_csv.empty()) return vs;  // no names transported: empty set (the caller will set its fallback)
   vs.names = split(names_csv, ',');
   vs.size = static_cast<int>(vs.names.size());
-  if (!roles_csv.empty()) {
-    std::vector<std::string> rs = split(roles_csv, ',');
-    for (const std::string& r : rs) vs.roles.push_back(role_from_name(r));
-  }
+  parse_roles_into(vs, roles_csv);  // canonical roles + any user-defined role label (ADC-292)
   return vs;
 }
 

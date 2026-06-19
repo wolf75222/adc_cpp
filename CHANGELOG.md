@@ -157,6 +157,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Named user roles and strict named-coupling fallbacks** (ADC-292): `VariableSet` gains a
+  string-keyed `user_roles` layer parallel to the canonical `VariableRole` enum, and a new
+  `index_of(string)` resolves a component by a canonical role name OR a user-defined role label
+  (removing the first-occurrence ambiguity of several `Custom` components). Coupled-source role
+  resolution (`System` / `AmrRuntime::add_coupled_source`), implicit-role masks and the AMR regrid
+  selector now accept a user-role label, and the label round-trips through the compiled-block `.so` roles CSV
+  (`roles_csv` / new `parse_roles_into`; the flat ABI and `abi_key` are unchanged). The legacy named
+  couplings (`add_collision`, `add_thermal_exchange`, `add_ionization`) now fail loud (new
+  `coupling_role_index`) when a ROLES-BEARING block omits a required role instead of silently coupling
+  component 0; a genuinely ROLELESS block keeps the canonical fallback. Shipped models declare full
+  canonical roles, so they stay bit-identical. Per ADR-0001 Decision 4 (Option A).
 - **Shard + instrument the gate-python CI** (ADC-366): the PR-blocking `gate-python` job is split into 3
   `matrix.shard` legs (round-robin over the sorted test list, ~1/3 of the ~18-19 min Python suite each);
   the `gate` aggregator still `needs: gate-python` so the required check name is unchanged (branch
