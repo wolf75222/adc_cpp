@@ -94,12 +94,15 @@ runtime thread control (`adc.set_threads()`) are covered in the
 [installation guide](docs/sphinx/getting-started/installation.md).
 
 Python module (`adc`): `scripts/setup_env.sh` creates the conda env and pins the platform
-toolchain, then `pip install .` (scikit-build-core) drives the build. Backends are selected by
-environment variables (`ADC_USE_MPI`, `Kokkos_ROOT`, ...).
+toolchain, then `scripts/build_python.sh` builds and installs the module in one command (it sizes
+the heavy-TU pool, exports the discovery vars, and ends on `adc.doctor()`); `pip install .`
+(scikit-build-core) drives the build directly if you prefer. Backends are selected by environment
+variables (`ADC_USE_MPI`, `Kokkos_ROOT`, ...).
 
 ```bash
-bash scripts/setup_env.sh    # conda env + toolchain
-pip install .                # see the installation guide for backends
+bash scripts/setup_env.sh      # conda env + toolchain
+bash scripts/build_python.sh   # build + install, then adc.doctor()
+# or, by hand:  pip install .  # see the installation guide for backends
 ```
 
 Released versions and binaries: the
