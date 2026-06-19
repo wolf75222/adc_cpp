@@ -53,7 +53,9 @@ ADCINC="$HOME/adc_cpp/include"
 mkdir -p "$SCR" "$WORK"
 
 # --- 0) staging : sources versionnees depuis SRC, brique + IC generes deja presents dans WORK ---
-for f in diocotron_gpu.cpp CMakeLists.txt; do
+# diocotron_amr_gpu.cpp is referenced by the shared CMakeLists add_executable (ADC-320) even though
+# this recipe only builds diocotron_gpu -- stage it too or the configure fails before building.
+for f in diocotron_gpu.cpp diocotron_amr_gpu.cpp CMakeLists.txt; do
   cp -f "$SRC/$f" "$WORK/$f" || { echo "SRC introuvable: $SRC/$f"; exit 2; }
 done
 for f in hyqmom15_brick.hpp ic_128.raw; do

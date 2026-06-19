@@ -165,6 +165,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **GPU validation drivers broken by the TU split** (ADC-346): `docs/validation/diocotron_gpu.cpp` and
+  `diocotron_amr_gpu.cpp` compile `python/system.cpp` / `amr_system.cpp` standalone, but after the
+  ADC-335 split those TUs delegate to the `build_block_*` / `build_amr_*` seams now living in per-transport
+  sub-TUs -- so the drivers failed to LINK on a GH200 build (`undefined reference to
+  adc::detail::build_block_compressible_rusanov`, ...). CI never builds these drivers, so it went unseen
+  until a ROMEO nvcc run (the split + the `optnone` factories COMPILE cleanly under nvcc; only the link
+  was missing the sub-TUs). `docs/validation/CMakeLists.txt` now compiles the seam sub-TUs into both
+  drivers (same list as `_adc` / `adc_runtime_*`), and `parity181.sbatch` / `diocotron_mpi.sbatch` stage
+  `diocotron_amr_gpu.cpp` (referenced by the shared CMakeLists since ADC-320). Validation-only; no library
+  or hot-path change.
 - **AMR seed fine patch persisted without refinement** (ADC-324): the compiled/native mono-block AMR
   builder (`build_amr_compiled`) always allocated a central seed fine patch on the explicit/imex path,
   even when `set_refinement` was never called. With the `1e30` "no refinement" threshold the build-time
