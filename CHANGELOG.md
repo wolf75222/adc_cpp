@@ -174,6 +174,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `coupling_role_index`) when a ROLES-BEARING block omits a required role instead of silently coupling
   component 0; a genuinely ROLELESS block keeps the canonical fallback. Shipped models declare full
   canonical roles, so they stay bit-identical. Per ADR-0001 Decision 4 (Option A).
+- **Cache and harden the macOS wheel build** (ADC-367): the `Wheels` workflow now caches the Serial
+  static+PIC Kokkos install (deterministic key on the pinned 4.4.01 commit + flags, so warm runs skip
+  the Kokkos build) and wires `ccache` into the `_adc` compile (`CMAKE_CXX_COMPILER_LAUNCHER` +
+  persisted `CCACHE_DIR` + `CCACHE_BASEDIR`/`NOHASHDIR`/`COMPILERCHECK=content`; a `ccache -s` step
+  reports the warm hit-rate). Hardening: the Kokkos clone is retried and its checkout asserted against
+  the pinned commit (re-pointed-tag / supply-chain guard), `-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0` is
+  passed explicitly to the Kokkos build (no min-version skew vs `_adc`), and the tag-time release-attach
+  is best-effort (a missing Release no longer red-flags a successful wheel build). CI-only.
 - **Shard + instrument the gate-python CI** (ADC-366): the PR-blocking `gate-python` job is split into 3
   `matrix.shard` legs (round-robin over the sorted test list, ~1/3 of the ~18-19 min Python suite each);
   the `gate` aggregator still `needs: gate-python` so the required check name is unchanged (branch
