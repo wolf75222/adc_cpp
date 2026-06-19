@@ -20,6 +20,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Varying-kappa coverage for the screened-Poisson reaction term** (ADC-251):
+  `tests/test_screened_poisson.cpp` gains an MMS case with a spatially varying `kappa(x,y)`, run
+  through both `GeometricMG::set_reaction` overloads (`fn` and `MultiFab`). The pre-existing cases
+  used only a constant kappa, so the per-cell diagonal read was unverified; order-2 convergence here
+  proves the `(i,j)`-only read with 0 ghost cells is correct and sufficient, locking the deliberate
+  no-ghost-fill invariant against any future stencil that would read kappa on its unfilled ghosts.
+  Tests and docs only; the kappa wiring and the hot path are unchanged.
 - **Multi-rank test for the collective IO gather** (ADC-257): `tests/test_mpi_system_io_gather.cpp`
   exercises `System::density_global` / `state_global` / `potential_global` (the `all_reduce_sum`
   gather behind `sim.write` / `sim.checkpoint`) under `mpirun -np {1,2,4}` -- previously covered only
