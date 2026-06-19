@@ -99,6 +99,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Factor the multi-box global-gather idiom** (ADC-264): the five copy-pasted collective gather sites
+  in `python/system.cpp` (`Impl::copy_comp0` / `copy_state` multi-box branches and
+  `System::density_global` / `state_global` / `potential_global`) now route through a single
+  anonymous-namespace `gather_global(mf, ncomp, gnx, gny)` helper (zero-init buffer, local-box write at
+  global indices, `all_reduce_sum_inplace`, component-major). The loop bodies are moved verbatim, so
+  every site stays bit-identical (`ncomp == 1` collapses the layout to `j*gnx + i`); the caller keeps
+  the `device_fence` and the single-box fast path delegating to `SystemBlockStore`. Net -33 lines, no
+  API, ABI, or behavior change. Locked by `tests/test_mpi_system_io_gather.cpp` (np=1/2/4, ADC-257) and
+  `python/tests/test_polar_theta_boxes.py` (theta_boxes=2/4).
 - **Explicit `ModelSpec`, no silent physics defaults** (ADC-290): `ModelSpec` no longer hard-codes the
   physics-selecting defaults `transport="compressible"` and `elliptic="charge"`; both tags are now unset
   by default and a new `detail::validate_model_spec` (called at `dispatch_model` and at the top of

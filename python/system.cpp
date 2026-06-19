@@ -67,6 +67,28 @@ int role_index(const VariableSet& vs, VariableRole role, int fallback) {
   const int c = vs.index_of(role);
   return c >= 0 ? c : fallback;
 }
+
+// Collective multi-box/multi-rank gather of @p mf into a GLOBAL buffer of size ncomp*gny*gnx,
+// component-major ((c*gny + j)*gnx + i; for ncomp == 1 this collapses to j*gnx + i). Zero-init,
+// then each rank writes ONLY its LOCAL boxes at their GLOBAL indices (disjoint boxes -> each cell
+// owned by exactly one rank; a rank without a box writes nothing), and all_reduce_sum_inplace
+// makes the full field appear on every rank. Mono-rank: the box covers the domain and the reduce
+// is the identity. The CALLER owns the device_fence and the single-box fast path (SystemBlockStore).
+// Factored out of the five copy-pasted gather sites (ADC-264); the loops are verbatim, so each site
+// stays bit-identical (copy_comp0 / copy_state and density_global / state_global / potential_global).
+std::vector<double> gather_global(const MultiFab& mf, int ncomp, int gnx, int gny) {
+  std::vector<double> out(static_cast<std::size_t>(ncomp) * gnx * gny, 0.0);
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const ConstArray4 u = mf.fab(li).const_array();
+    const Box2D v = mf.box(li);
+    for (int c = 0; c < ncomp; ++c)
+      for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+          out[(static_cast<std::size_t>(c) * gny + j) * gnx + i] = static_cast<double>(u(i, j, c));
+  }
+  all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
+  return out;
+}
 }  // namespace
 
 struct System::Impl {
@@ -359,33 +381,12 @@ struct System::Impl {
   std::vector<double> copy_comp0(const MultiFab& mf) const {
     if (mf.local_size() <= 1) return blocks_.copy_comp0(mf);
     device_fence();
-    const int gnx = dom.nx(), gny = dom.ny();
-    std::vector<double> out(static_cast<std::size_t>(gnx) * gny, 0.0);
-    for (int li = 0; li < mf.local_size(); ++li) {
-      const ConstArray4 u = mf.fab(li).const_array();
-      const Box2D v = mf.box(li);
-      for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-          out[static_cast<std::size_t>(j) * gnx + i] = static_cast<double>(u(i, j, 0));
-    }
-    all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
-    return out;
+    return gather_global(mf, 1, dom.nx(), dom.ny());
   }
   std::vector<double> copy_state(const MultiFab& mf, int ncomp) const {
     if (mf.local_size() <= 1) return blocks_.copy_state(mf, ncomp);
     device_fence();
-    const int gnx = dom.nx(), gny = dom.ny();
-    std::vector<double> out(static_cast<std::size_t>(ncomp) * gnx * gny, 0.0);
-    for (int li = 0; li < mf.local_size(); ++li) {
-      const ConstArray4 u = mf.fab(li).const_array();
-      const Box2D v = mf.box(li);
-      for (int c = 0; c < ncomp; ++c)
-        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-            out[(static_cast<std::size_t>(c) * gny + j) * gnx + i] = static_cast<double>(u(i, j, c));
-    }
-    all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
-    return out;
+    return gather_global(mf, ncomp, dom.nx(), dom.ny());
   }
   void write_state(MultiFab& mf, int ncomp, const std::vector<double>& in) {
     if (mf.local_size() <= 1) { blocks_.write_state(mf, ncomp, in); return; }
@@ -1777,49 +1778,23 @@ std::vector<double> System::potential() {
 }
 
 // --- GLOBAL accessors (collective MPI-safe), IO v1 multi-rank --------------------------------
-// Common pattern (cf. header system.hpp): GLOBAL buffer of size gny*gnx (or nc*gny*gnx) initialized
-// to 0, filled by the LOCAL fabs in GLOBAL INDICES (the box carries its global indices; a rank without a
-// box -> local_size()==0 -> no write), then all_reduce_sum_inplace: each cell being
-// owned by EXACTLY one rank (disjoint boxes), the sum = the EXACT global field on each
-// rank. Mono-rank: the box covers the whole domain and all_reduce = identity -> array bit-identical
-// to the non-global accessors (density / get_state / potential). IDENTICAL layout (density: j*gnx + i;
-// state: (c*gny + j)*gnx + i, component-major; cf. copy_comp0 / copy_state).
+// All three delegate to gather_global (anon namespace, top of file): a GLOBAL buffer filled by the
+// LOCAL fabs at GLOBAL indices then all_reduce_sum_inplace, component-major. Mono-rank: the box
+// covers the domain and the reduce is the identity -> array bit-identical to the non-global
+// accessors (density / get_state / potential). The device_fence is owned here (before the gather).
 std::vector<double> System::density_global(const std::string& name) const {
   device_fence();
   const Impl::Species& s = p_->find(name);
-  const int gnx = nx(), gny = ny();
-  std::vector<double> out(static_cast<std::size_t>(gnx) * gny, 0.0);
-  for (int li = 0; li < s.U.local_size(); ++li) {
-    const ConstArray4 u = s.U.fab(li).const_array();
-    const Box2D v = s.U.box(li);
-    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-        out[static_cast<std::size_t>(j) * gnx + i] = static_cast<double>(u(i, j, 0));
-  }
-  all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
-  return out;
+  return gather_global(s.U, 1, nx(), ny());
 }
 std::vector<double> System::state_global(const std::string& name) const {
   device_fence();
   const Impl::Species& s = p_->find(name);
-  const int nc = s.ncomp, gnx = nx(), gny = ny();
-  std::vector<double> out(static_cast<std::size_t>(nc) * gnx * gny, 0.0);
-  for (int li = 0; li < s.U.local_size(); ++li) {
-    const ConstArray4 u = s.U.fab(li).const_array();
-    const Box2D v = s.U.box(li);
-    for (int c = 0; c < nc; ++c)
-      for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-          out[(static_cast<std::size_t>(c) * gny + j) * gnx + i] = static_cast<double>(u(i, j, c));
-  }
-  all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
-  return out;
+  return gather_global(s.U, s.ncomp, nx(), ny());
 }
 std::vector<double> System::potential_global() {
   device_fence();
-  const int gnx = nx(), gny = ny();
-  std::vector<double> out(static_cast<std::size_t>(gnx) * gny, 0.0);
-  // Solves the Poisson (polar or Cartesian) if needed: COLLECTIVE, like potential_global as a whole.
+  // Resolve phi, solving the Poisson (polar or Cartesian) if needed: COLLECTIVE, like the gather.
   const MultiFab* phi = nullptr;
   if (p_->polar_) {
     p_->fields_.ensure_elliptic_polar();
@@ -1828,15 +1803,7 @@ std::vector<double> System::potential_global() {
     p_->fields_.ensure_elliptic();
     phi = &p_->fields_.ell_phi();
   }
-  for (int li = 0; li < phi->local_size(); ++li) {
-    const ConstArray4 ph = phi->fab(li).const_array();
-    const Box2D v = phi->box(li);
-    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-        out[static_cast<std::size_t>(j) * gnx + i] = static_cast<double>(ph(i, j));
-  }
-  all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
-  return out;
+  return gather_global(*phi, 1, nx(), ny());
 }
 
 // --- LOCAL per-fab accessors (NON collective): parallel HDF5 write by hyperslabs (PR-IO-3) --
