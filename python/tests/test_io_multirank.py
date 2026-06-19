@@ -8,8 +8,10 @@ HORS BORNES sur un rang sans box. Les variantes _global rassemblent le champ par
 (chaque rang detient le champ complet) ; sim.write / sim.checkpoint les utilisent puis n'ecrivent le
 fichier que sur le rang 0.
 
-CE TEST tourne en MONO-RANG (la batterie pytest n'a pas de harnais MPI ; le cas np>1 est couvert par
-le test C++ tests/test_mpi_system_io_gather.cpp). Il verrouille l'invariant CENTRAL :
+CE TEST tourne en MONO-RANG (la batterie pytest n'a pas de harnais MPI ; le cas np>1 -- gather
+bit-identique a np=1/2/4 et aller-retour checkpoint/restart -- est couvert par le test C++
+tests/test_mpi_system_io_gather.cpp, lance sous mpirun par le preset mpi/ci-mpi). Il verrouille
+l'invariant CENTRAL :
 
   T1 - EQUIVALENCE GLOBAL == LOCAL en mono-rang : state_global == get_state, density_global ==
        density, potential_global == potential, BIT-IDENTIQUE (all_reduce = identite, box = domaine

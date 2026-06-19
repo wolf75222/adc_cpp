@@ -854,6 +854,24 @@ if(ADC_HAS_MPI)
                      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_system_gather_scatter>
                      ${MPIEXEC_POSTFLAGS})
   endforeach()
+
+  # --- ADC-257 : gather IO collectif (density_global / state_global / potential_global) sous MPI.
+  # Ces accesseurs remplissent un buffer GLOBAL depuis les fabs locaux (aux indices globaux) puis
+  # all_reduce_sum : ils sont la base MPI de sim.write / sim.checkpoint, mais n'etaient testes QUE
+  # mono-rang (python/tests/test_io_multirank.py). La somme n'est correcte que si chaque cellule est
+  # ecrite par EXACTEMENT un rang (mono-box -> rang 0) ; un double-comptage la multiplierait. np=1
+  # = identite au serie ; np=2/4 = chemin distribue (rangs vides contribuant 0 a l'all_reduce). Le
+  # test pose une densite connue, exige gather == reference bit-a-bit (np-invariant), gather == local
+  # apres pas collectifs, et un aller-retour checkpoint/restart bit-identique. Compile le runtime
+  # System comme test_mpi_system_gather_scatter.
+  add_executable(test_mpi_system_io_gather test_mpi_system_io_gather.cpp)
+  target_link_libraries(test_mpi_system_io_gather PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
+  foreach(np 1 2 4)
+    add_test(NAME test_mpi_system_io_gather_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_mpi_system_io_gather>
+                     ${MPIEXEC_POSTFLAGS})
+  endforeach()
 endif()
 
 # --- contrats communs de l'etage elliptique (audit D.1) : concepts EllipticOperator /

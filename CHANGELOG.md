@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Multi-rank test for the collective IO gather** (ADC-257): `tests/test_mpi_system_io_gather.cpp`
+  exercises `System::density_global` / `state_global` / `potential_global` (the `all_reduce_sum`
+  gather behind `sim.write` / `sim.checkpoint`) under `mpirun -np {1,2,4}` -- previously covered only
+  mono-rank by `python/tests/test_io_multirank.py`, which deferred the `np>1` case to a C++ file that
+  did not exist. The test pins gather == known reference (bit-identical, np-invariant, catching any
+  double-count), gather == local accessor on the owning rank after collective steps, and a
+  checkpoint/restart round-trip that is bit-identical at np=2/4. Tests only; no change to the library,
+  the API, or the hot path.
 - **hyqmom15 AmrSystem multi-box GH200 validation** (ADC-320): a domain-decomposed driver
   (`docs/validation/diocotron_amr_gpu.cpp` + `diocotron_amr_mpi.sbatch`) wiring the compiled hyqmom15
   composite (`Hyqmom15Hyp/Src/Ell` + Poisson `geometric_mg`) on `AmrSystem` with
