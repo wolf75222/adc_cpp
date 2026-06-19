@@ -12,7 +12,7 @@
 /// elliptic wall (the "Cartesian ring edge" lock; cf. docs/HOFFART_FIDELITY.md, the
 /// "Domain (disc of radius R)" row of the fidelity table, the "Cartesian-ring-edge lock").
 ///
-/// The canonical level-set is detail::DiscDomain::level_set (wall_predicate.hpp, T2 work):
+/// The canonical level-set is detail::DiscDomain::level_set (numerics/embedded_boundary.hpp):
 ///   ls(x, y) = hypot(x - cx, y - cy) - R, < 0 INSIDE, sign of the boundary.
 /// This primitive is header-only, ADC_HD (device-safe) and STATELESS: it takes a level-set
 /// callback by value and the cell, and returns purely geometric distances/aperture.

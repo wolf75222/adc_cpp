@@ -202,31 +202,34 @@ class SystemStepper {
   ///   - None (default): s.advance (assemble_rhs, full Cartesian). BIT-IDENTICAL.
   ///   - Staircase, fixed disk: s.advance_masked (assemble_rhs_masked, 0/1 mask).
   ///   - CutCell, fixed disk: s.advance_eb (assemble_rhs_eb, cut-cell EB).
-  /// A disk mode requested WITHOUT a fixed disk (disc_set_ == false) FALLS BACK to s.advance: the mode alone
-  /// (without set_disc_domain) must not change the transport. A disk mode with a fixed disk but on
-  /// a block that DID NOT build the disk advance (e.g. polar block / loaded from an earlier .so)
-  /// raises an EXPLICIT error rather than SILENTLY playing the full path (the T2 footgun:
-  /// believing the disk active while the transport ignores it). The disk advances MIMIC s.advance
-  /// (same RK / IMEX scheme, same limiter / flux); only the transport residual is dispatched.
+  /// An embedded-boundary mode requested WITHOUT a fixed domain (eb_set_ == false) FALLS BACK to
+  /// s.advance: the mode alone (without set_disc_domain) must not change the transport. A mode with a
+  /// fixed domain but on a block that DID NOT build the embedded-boundary advance (e.g. polar block /
+  /// loaded from an earlier .so) raises an EXPLICIT error rather than SILENTLY playing the full path
+  /// (the T2 footgun: believing the boundary active while the transport ignores it). The
+  /// embedded-boundary advances MIMIC s.advance (same RK / IMEX scheme, same limiter / flux); only the
+  /// transport residual is dispatched.
   void advance_transport_n(typename Impl::Species& s, Real dt, int n) {
     const GeometryMode mode = owner_->geometry_mode_;
-    if (mode == GeometryMode::None || !owner_->disc_set_) {
-      s.advance(s.U, dt, n);  // default path (or disk mode without a fixed disk): BIT-IDENTICAL
+    if (mode == GeometryMode::None || !owner_->eb_set_) {
+      s.advance(s.U, dt,
+                n);  // default path (or mode without a fixed embedded boundary): BIT-IDENTICAL
       return;
     }
     if (mode == GeometryMode::Staircase) {
       if (!s.advance_masked)
         throw std::runtime_error(
-            "SystemStepper: geometry mode 'staircase' requested but block '" + s.name +
-            "' exposes no masked transport advance (disk transport not wired for this block)");
+            "SystemStepper: embedded-boundary mode 'staircase' requested but block '" + s.name +
+            "' exposes no masked transport advance (level-set transport not wired for this block)");
       s.advance_masked(s.U, dt, n);
       return;
     }
     // CutCell
     if (!s.advance_eb)
       throw std::runtime_error(
-          "SystemStepper: geometry mode 'cutcell' requested but block '" + s.name +
-          "' exposes no cut-cell EB transport advance (disk transport not wired for this block)");
+          "SystemStepper: embedded-boundary mode 'cutcell' requested but block '" + s.name +
+          "' exposes no cut-cell EB transport advance (level-set transport not wired for this "
+          "block)");
     s.advance_eb(s.U, dt, n);
   }
 

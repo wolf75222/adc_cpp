@@ -5,7 +5,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (light header: <cmath>/<functional>/<string>)
+#include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (built-in level-set domain instance)
 
 #include <functional>
 
@@ -31,18 +31,21 @@ enum class GeometryMode { None, Staircase, CutCell };
 /// Mesh + transport BC + aux shared by a block closures. @c aux is NOT owned:
 /// it points to the System aux (lifetime longer than the block, stable address).
 ///
-/// DISC GEOMETRY (T5-PR3 effort): @c disc_mask and @c disc point (NOT owned) to the 0/1 mask
-/// and the disc descriptor of the System (members with STABLE address). They are used ONLY to build
-/// the optional disc transport advances (build_block); read BY POINTER at the step, the order
-/// add_block / set_disc_domain does not matter. nullptr -> no disc advance (stepper on advance,
-/// bit-identical). The mask is materialized / the radius is set by set_disc_domain.
+/// EMBEDDED BOUNDARY / LEVEL-SET DOMAIN (T5-PR3 effort): @c domain_mask and @c eb_domain point (NOT
+/// owned) to the 0/1 mask and the level-set domain descriptor of the System (members with STABLE
+/// address). They are used ONLY to build the optional embedded-boundary transport advances
+/// (build_block); read BY POINTER at the step, the order add_block / set_disc_domain does not matter.
+/// nullptr -> no embedded-boundary advance (stepper on advance, bit-identical). The mask is
+/// materialized / the descriptor is set by set_disc_domain (the disc is one instance of the contract,
+/// cf. numerics/embedded_boundary.hpp).
 struct GridContext {
   Box2D dom;                ///< domain (without ghost)
   BCRec bc;                 ///< transport BC
   Geometry geom;            ///< geometry (dx, dy, bounds)
   MultiFab* aux = nullptr;  ///< System aux (phi, grad phi); NOT owned
-  const MultiFab* disc_mask = nullptr;        ///< 0/1 disc mask (Impl::disc_mask_); NOT owned
-  const detail::DiscDomain* disc = nullptr;   ///< disc descriptor (Impl::disc_); NOT owned
+  const MultiFab* domain_mask = nullptr;  ///< 0/1 domain mask (Impl::domain_mask_); NOT owned
+  const detail::DiscDomain* eb_domain =
+      nullptr;  ///< level-set domain descriptor (Impl::eb_domain_); NOT owned
 };
 
 /// Compiled block closures, frozen at add time.
