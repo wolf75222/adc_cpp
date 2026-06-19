@@ -15,7 +15,7 @@
 #include <adc/numerics/time/time_steppers.hpp>
 #include <adc/runtime/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann, limiter_n_ghost)
 #include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (shared lightweight header)
-#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (device-callable level set of the disc)
+#include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (built-in level-set domain instance)
 
 #include <cmath>  // std::sqrt (ARS(2,2,2) coefficients: gamma = 1 - 1/sqrt(2), host)
 #include <functional>
@@ -268,7 +268,7 @@ struct RhsInto {
 // is indifferent. NAMED functors (same device contract as BlockRhsEval).
 
 /// MASKED transport residual (Staircase mode): fill_ghosts then assemble_rhs_masked on the
-/// cell-centered 0/1 mask of the System (read via @c mask, pointer to Impl::disc_mask_, stable
+/// cell-centered 0/1 mask of the System (read via @c mask, pointer to Impl::domain_mask_, stable
 /// address). The mask has the SAME layout as U (same ba/dm, 1 ghost). Inactive cell -> residual 0;
 /// face toward an inactive cell -> zero normal flux (FV wall). The flux / reconstruction are REUSED
 /// verbatim.
@@ -276,7 +276,7 @@ template <class Limiter, class Flux, class Model>
 struct BlockRhsEvalMasked {
   Model model;
   const GridContext* ctx;
-  const MultiFab* mask;  // Impl::disc_mask_ (NOT owned; stable address)
+  const MultiFab* mask;  // Impl::domain_mask_ (NOT owned; stable address)
   bool recon_prim;
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, MultiFab& R) const {
@@ -287,21 +287,22 @@ struct BlockRhsEvalMasked {
 };
 
 /// CUT-CELL / EB transport residual (CutCell mode): fill_ghosts then assemble_rhs_eb on the level
-/// set of the System disc (read via @c disc, pointer to Impl::disc_, stable address). The
-/// device-callable level set is built HERE on the HOST (detail::disc_level_set(*disc) ->
-/// DiscLevelSet, a NAMED FUNCTOR capturing three doubles BY VALUE) and passed BY VALUE to
+/// set of the System embedded boundary (read via @c eb_domain, pointer to Impl::eb_domain_, stable
+/// address). The device-callable level set is built HERE on the HOST (detail::disc_level_set(*eb_domain)
+/// -> DiscLevelSet, a NAMED FUNCTOR capturing three doubles BY VALUE) and passed BY VALUE to
 /// assemble_rhs_eb: the device kernel therefore receives NO std::function, it stays device-clean
-/// (cf. spatial_operator_eb.hpp).
+/// (cf. spatial_operator_eb.hpp). The descriptor is a DiscDomain (the built-in instance of the
+/// level-set contract, numerics/embedded_boundary.hpp).
 template <class Limiter, class Flux, class Model>
 struct BlockRhsEvalEb {
   Model model;
   const GridContext* ctx;
-  const DiscDomain* disc;  // Impl::disc_ (NOT owned; stable address)
+  const DiscDomain* eb_domain;  // Impl::eb_domain_ (NOT owned; stable address)
   bool recon_prim;
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, MultiFab& R) const {
     fill_ghosts(U, ctx->dom, ctx->bc);
-    assemble_rhs_eb<Limiter, Flux>(model, U, *ctx->aux, disc_level_set(*disc), ctx->geom, R,
+    assemble_rhs_eb<Limiter, Flux>(model, U, *ctx->aux, disc_level_set(*eb_domain), ctx->geom, R,
                                    recon_prim, kEbKappaMin, pos_floor);
   }
 };
@@ -328,12 +329,12 @@ template <class Limiter, class Flux, class Model, class Stepper = SSPRK2Step>
 struct AdvanceExplicitEb {
   Model m;
   GridContext ctx;
-  const DiscDomain* disc;
+  const DiscDomain* eb_domain;
   bool recon_prim;
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
-    const BlockRhsEvalEb<Limiter, Flux, Model> rhs{m, &ctx, disc, recon_prim, pos_floor};
+    const BlockRhsEvalEb<Limiter, Flux, Model> rhs{m, &ctx, eb_domain, recon_prim, pos_floor};
     for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
   }
 };
@@ -371,7 +372,7 @@ template <class Limiter, class Flux, class Model>
 struct AdvanceImexEb {
   Model m;
   GridContext ctx;
-  const DiscDomain* disc;
+  const DiscDomain* eb_domain;
   bool recon_prim;
   ImplicitMask<Model::n_vars> mask_impl{};
   NewtonOptions nopts{};
@@ -379,8 +380,8 @@ struct AdvanceImexEb {
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive)
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
-    const BlockRhsEvalEb<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
-                                                                    disc, recon_prim, pos_floor};
+    const BlockRhsEvalEb<Limiter, Flux, SourceFreeModel<Model>> rhs{
+        SourceFreeModel<Model>{m}, &ctx, eb_domain, recon_prim, pos_floor};
     if (nreport) nreport->reset();
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);
@@ -417,12 +418,12 @@ ADC_COLD_FN ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_
 /// @p implicit_components: indices of the conserved variables to handle IMPLICITLY in the IMEX source
 /// (mask CARRIED BY THE BLOCK, overrides the model default). EMPTY (default) -> inactive mask -> model
 /// default is_implicit -> bit-identical. No effect outside IMEX (the explicit has no implicit step).
-/// The optional DISC transport advances (advance_masked / advance_eb) are built when @p ctx carries the
-/// System disc geometry (ctx.disc_mask / ctx.disc, T5-PR3 work); otherwise they stay empty and the
-/// stepper falls back on advance (bit-identical). STABLE addresses of Impl members, read BY POINTER at
-/// step time -> the add_block / set_disc_domain order is indifferent. The disc advances MIMIC advance
-/// (same RK / IMEX, same limiter / flux); only the transport residual is dispatched (assemble_rhs_masked
-/// / _eb).
+/// The optional EMBEDDED-BOUNDARY transport advances (advance_masked / advance_eb) are built when @p ctx
+/// carries the System level-set domain (ctx.domain_mask / ctx.eb_domain, T5-PR3 work); otherwise they
+/// stay empty and the stepper falls back on advance (bit-identical). STABLE addresses of Impl members,
+/// read BY POINTER at step time -> the add_block / set_disc_domain order is indifferent. The
+/// embedded-boundary advances MIMIC advance (same RK / IMEX, same limiter / flux); only the transport
+/// residual is dispatched (assemble_rhs_masked / _eb).
 template <class Limiter, class Flux, class Model>
 ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
                           const std::string& method = "ssprk2",
@@ -430,8 +431,8 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
                           const NewtonOptions& newton_opts = {},
                           NewtonReport* newton_report = nullptr, Real pos_floor = Real(0),
                           bool wave_speed_cache = false) {
-  const MultiFab* disc_mask = ctx.disc_mask;
-  const detail::DiscDomain* disc = ctx.disc;
+  const MultiFab* domain_mask = ctx.domain_mask;
+  const detail::DiscDomain* eb_domain = ctx.eb_domain;
   BlockClosures bc;
   const ImplicitMask<Model::n_vars> impl_mask = make_implicit_mask<Model::n_vars>(implicit_components);
   // SHARED scratch of the HLL wave speed cache (opt-in): a single MultiFab for the explicit advance and
@@ -443,8 +444,8 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
     if (method == "imexrk_ars222") {
       // IMEX-RK FAMILY, ARS(2,2,2) scheme (order 2): advance PARALLEL to AdvanceImex, FULLY implicit
       // source (impl_mask ignored: the facade already rejects a partial mask with this scheme). FULL
-      // CARTESIAN ONLY: we do NOT build a disc advance (advance_masked / advance_eb stay empty) -> a
-      // disc geometry mode on this block throws an EXPLICIT error at step time
+      // CARTESIAN ONLY: we do NOT build an embedded-boundary advance (advance_masked / advance_eb stay
+      // empty) -> an embedded-boundary geometry mode on this block throws an EXPLICIT error at step time
       // (SystemStepper::advance_transport_n), never a silent cartesian.
       bc.advance = detail::AdvanceImexRkArs222<Limiter, Flux, Model>{m, ctx, recon_prim, newton_opts,
                                                                      newton_report, pos_floor};
@@ -452,40 +453,40 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
       // Historical IMEX (local backward-Euler, order 1): UNTOUCHED, bit-identical.
       bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask,
                                                              newton_opts, newton_report, pos_floor};
-      if (disc_mask)
+      if (domain_mask)
         bc.advance_masked = detail::AdvanceImexMasked<Limiter, Flux, Model>{
-            m, ctx, disc_mask, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
-      if (disc)
+            m, ctx, domain_mask, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
+      if (eb_domain)
         bc.advance_eb = detail::AdvanceImexEb<Limiter, Flux, Model>{
-            m, ctx, disc, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
+            m, ctx, eb_domain, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
     }
   } else if (method == "euler") {
     bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, ForwardEuler>{m, ctx, recon_prim,
                                                                              pos_floor, ws_cache};
-    if (disc_mask)
+    if (domain_mask)
       bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, ForwardEuler>{
-          m, ctx, disc_mask, recon_prim, pos_floor};
-    if (disc)
+          m, ctx, domain_mask, recon_prim, pos_floor};
+    if (eb_domain)
       bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, ForwardEuler>{
-          m, ctx, disc, recon_prim, pos_floor};
+          m, ctx, eb_domain, recon_prim, pos_floor};
   } else if (method == "ssprk3") {
     bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK3Step>{m, ctx, recon_prim,
                                                                            pos_floor, ws_cache};
-    if (disc_mask)
+    if (domain_mask)
       bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, SSPRK3Step>{
-          m, ctx, disc_mask, recon_prim, pos_floor};
-    if (disc)
+          m, ctx, domain_mask, recon_prim, pos_floor};
+    if (eb_domain)
       bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, SSPRK3Step>{
-          m, ctx, disc, recon_prim, pos_floor};
+          m, ctx, eb_domain, recon_prim, pos_floor};
   } else if (method == "ssprk2") {
     bc.advance = detail::AdvanceExplicit<Limiter, Flux, Model, SSPRK2Step>{m, ctx, recon_prim,
                                                                            pos_floor, ws_cache};
-    if (disc_mask)
+    if (domain_mask)
       bc.advance_masked = detail::AdvanceExplicitMasked<Limiter, Flux, Model, SSPRK2Step>{
-          m, ctx, disc_mask, recon_prim, pos_floor};
-    if (disc)
+          m, ctx, domain_mask, recon_prim, pos_floor};
+    if (eb_domain)
       bc.advance_eb = detail::AdvanceExplicitEb<Limiter, Flux, Model, SSPRK2Step>{
-          m, ctx, disc, recon_prim, pos_floor};
+          m, ctx, eb_domain, recon_prim, pos_floor};
   } else {
     throw std::runtime_error("System: unknown explicit time method '" + method +
                              "' (euler|ssprk2|ssprk3)");

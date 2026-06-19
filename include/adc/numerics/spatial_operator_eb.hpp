@@ -10,8 +10,8 @@
 #include <adc/numerics/elliptic/cut_fraction.hpp>  // detail::cut_fraction, CutFraction (PR1)
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (level-set domain; numerics, not runtime)
 #include <adc/numerics/spatial_operator.hpp>  // reconstruct<>, load_state/load_aux, *_face_box (REUSED verbatim)
-#include <adc/runtime/wall_predicate.hpp>     // detail::DiscDomain (single-source level set of the disc)
 
 #include <utility>
 #include <vector>
@@ -109,9 +109,10 @@ constexpr Real kEbFaceOpenEps = Real(1e-6);
 /// stable fixed explicit step. See the SMALL-CELL STABILITY note of @file.
 constexpr Real kEbKappaMin = Real(1e-2);
 
-/// Device-safe adapter: makes DiscDomain (which exposes level_set/cell_active, NOT operator()) usable
-/// as the Real(Real, Real) callable expected by cut_fraction and the EB operator. NAMED FUNCTOR (captures
-/// the DiscDomain BY VALUE: three doubles, device-safe), not an extended lambda. operator() forwards
+/// Device-safe adapter wrapping a DiscDomain as the Real(Real, Real) callable expected by cut_fraction
+/// and the EB operator. Since ADC-327 DiscDomain is itself callable (operator() forwards to level_set),
+/// this is now a thin compat shim kept for the existing call sites. NAMED FUNCTOR (captures the
+/// DiscDomain BY VALUE: three doubles, device-safe), not an extended lambda. operator() forwards
 /// EXACTLY DiscDomain::level_set -> same cut geometry as the elliptic wall (bit consistency).
 struct DiscLevelSet {
   DiscDomain disc;

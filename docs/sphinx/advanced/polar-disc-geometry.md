@@ -46,8 +46,23 @@ Without `set_disc_domain`, the mask is fully active and the transport path stays
 bit-identical. The disc mask is refused in polar geometry (the ring is already bounded
 by its radial walls `r_min` / `r_max`).
 
+### Disc helper vs the generic level-set contract
+
+`set_disc_domain` / `disc_mask` are the stable Python *compatibility* helpers for the circle
+(the Hoffart disc). Under them the geometry is a single, named, device-clean C++ contract in
+`include/adc/numerics/embedded_boundary.hpp`: any POD type exposing
+`level_set(x, y)` (`< 0` inside), a callable `operator()`, and `cell_active` is an embedded
+boundary, with the same three transport modes (`none` / `staircase` / `cutcell`). The disc
+(`detail::DiscDomain`) is one instance; `detail::HalfPlaneDomain` is a built-in non-disc instance,
+and the cut-cell / mask operators (`assemble_rhs_eb`, `assemble_rhs_masked`, `cut_fraction`) are
+templated on the contract, so a non-disc level-set works on the C++ side without naming a shape. The
+contract stays 2D (it masks cells of the fixed `(i, j)` grid; cf. ADR-0001). There is no runtime
+callback path: a domain is a compile-time POD, never a `std::function`.
+
 ## Going further
 
 - Bindings: `python/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
   `set_disc_domain`, `disc_mask`).
+- Generic contract: `include/adc/numerics/embedded_boundary.hpp` (`DiscDomain`, `HalfPlaneDomain`,
+  the `LevelSetDomain` concept).
 - Polar solver: `include/adc/numerics/elliptic/polar_poisson_solver.hpp`.

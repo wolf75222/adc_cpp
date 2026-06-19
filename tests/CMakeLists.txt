@@ -274,6 +274,13 @@ adc_add_test(test_disc_domain_mask)
 # residu FINI (clamp small-cell, pas de NaN) ; (c) bit-identite : sans coupe, EB == operateur cartesien.
 adc_add_test(test_eb_transport)
 
+# ADC-327 : contrat GENERIQUE embedded-boundary / level-set (numerics/embedded_boundary.hpp). Prouve que
+# le contrat admet un domaine NON-disque (detail::HalfPlaneDomain) de bout en bout : concept LevelSetDomain
+# (static_assert), partition + cellules coupees, bit-identite sans coupe (EB == cartesien), residu fini
+# (clamp generique), masque staircase materialise (residu nul sur inactives, tout-actif == cartesien),
+# conservation a la machine sur une bande non-disque. Le disque devient une instance du contrat.
+adc_add_test(test_embedded_boundary_generic)
+
 # Chantier T5-PR3 : CABLAGE du transport disque (staircase + cut-cell EB) dans System::step. Resout le
 # footgun T2 (set_disc_domain materialisait un masque que step() ignorait) : le transport est aiguille
 # vers assemble_rhs_masked (staircase) / assemble_rhs_eb (cutcell) selon un mode explicite. (a) mode none

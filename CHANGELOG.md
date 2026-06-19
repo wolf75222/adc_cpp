@@ -20,6 +20,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Generic embedded-boundary / level-set domain contract** (ADC-327): the cut-cell / mask transport
+  geometry is now expressed through a named, device-clean POD contract in
+  `include/adc/numerics/embedded_boundary.hpp` (`level_set(x, y) < 0` inside, callable `operator()`,
+  `cell_active`; built-in instances `DiscDomain` and the non-disc `HalfPlaneDomain`; a
+  diagnostics-only `LevelSetDomain` concept that never constrains the hot-path templates).
+  `numerics/spatial_operator_eb.hpp` no longer depends on the runtime `wall_predicate.hpp`. The
+  Python helpers `set_disc_domain` / `set_geometry_mode` / `disc_mask` keep their name, signature and
+  behavior (the disc is now one instance of the contract); the internal System fields are renamed
+  `disc_ -> eb_domain_`, `disc_set_ -> eb_set_`, `disc_mask_ -> domain_mask_`, and runtime errors now
+  speak of an embedded boundary / level-set domain. Default path strictly bit-identical;
+  `tests/test_embedded_boundary_generic.cpp` locks the non-disc path end to end.
 - **Generic real/complex spectrum predicate in `dense_eig.hpp`** (ADC-276): `adc::real_spectrum<N>()`
   classifies a small dense block as `Spectrum::kReal` / `kComplexPair` / `kUnknown`, with
   `EigBounds::all_real()` / `has_complex_pair()` accessors. The imaginary tolerance is relative

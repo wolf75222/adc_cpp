@@ -123,26 +123,28 @@ struct System::Impl {
   MultiFab aux;
   int aux_ncomp_ = kAuxBaseComps;     // width of the SHARED aux channel (max over blocks; >= 3)
 
-  // DISC DOMAIN MASK (project T2, contract inert by default). disc_set_ == false: no fixed
-  // disc -> the mask is "all active" and the transport path stays BIT-IDENTICAL. When
-  // set_disc_domain is called, disc_ carries the descriptor (center + radius, SINGLE SOURCE reusing
-  // the conducting-wall level set) and disc_mask_ materializes the 0/1 cell-centered field (1 ghost,
-  // so the mask-aware transport reads neighbors). The mask is BUILT but NOT yet wired
-  // into step() (scaffolding); it is queryable (disc_mask()) and consumed by assemble_rhs_masked.
-  detail::DiscDomain disc_;
-  bool disc_set_ = false;
-  MultiFab disc_mask_;  // 0/1 cell-centered, same layout as the blocks (ba/dm), 1 ghost; empty as long as !disc_set_
+  // EMBEDDED-BOUNDARY / LEVEL-SET DOMAIN (T2 + T5-PR3, contract inert by default). eb_set_ == false:
+  // no fixed domain -> the mask is "all active" and the transport path stays BIT-IDENTICAL. When
+  // set_disc_domain is called, eb_domain_ carries the descriptor (the disc instance of the level-set
+  // contract, numerics/embedded_boundary.hpp, reusing the conducting-wall level set) and domain_mask_
+  // materializes the 0/1 cell-centered field (1 ghost, so the mask-aware transport reads neighbors).
+  // The mask is queryable (disc_mask()) and consumed by assemble_rhs_masked.
+  detail::DiscDomain eb_domain_;
+  bool eb_set_ = false;
+  MultiFab
+      domain_mask_;  // 0/1 cell-centered, same layout as the blocks (ba/dm), 1 ghost; empty as long as !eb_set_
   // At least one block requested wave_speed_cache (ADC-199, opt-in HLL cache). The cache is only wired
-  // on the FULL Cartesian advance (advance); the disc advances (advance_masked / advance_eb) do not
-  // carry it. This flag locks the switch to a disc transport mode (staircase/cutcell) -> explicit
-  // rejection in set_disc_domain / set_geometry_mode rather than a silently ignored cache.
+  // on the FULL Cartesian advance (advance); the embedded-boundary advances (advance_masked /
+  // advance_eb) do not carry it. This flag locks the switch to an embedded-boundary transport mode
+  // (staircase/cutcell) -> explicit rejection in set_disc_domain / set_geometry_mode rather than a
+  // silently ignored cache.
   bool ws_cache_block_ = false;
-  // TRANSPORT GEOMETRY MODE (project T5-PR3, wiring the disc into step()). None (default):
+  // TRANSPORT GEOMETRY MODE (T5-PR3, wiring the embedded boundary into step()). None (default):
   // full Cartesian transport (assemble_rhs) -> BIT-IDENTICAL. Staircase: assemble_rhs_masked (0/1
   // mask). CutCell: assemble_rhs_eb (cut-cell EB). The stepper reads this mode to ROUTE the transport
   // advance of each block (advance vs advance_masked vs advance_eb). Set by set_disc_domain(mode=)
-  // / set_geometry_mode; has effect only if a disc is fixed (disc_set_) AND the block carries the
-  // matching disc advance. None as long as no disc mode is requested.
+  // / set_geometry_mode; has effect only if a domain is fixed (eb_set_) AND the block carries the
+  // matching embedded-boundary advance. None as long as no embedded-boundary mode is requested.
   GeometryMode geometry_mode_ = GeometryMode::None;
   // aux APPLICATION fields (bz_field_, te_src_) and apply_bz/apply_te buffers EXTRACTED into
   // fields_ (SystemFieldSolver, Batch B); the SHARED aux and its width stay here (common channel).
@@ -351,11 +353,12 @@ struct System::Impl {
   // (adc/runtime/block_builder.hpp: make_block / make_max_speed / make_poisson_rhs) so that the
   // production template path is instantiable outside this unit (AOT compilation of a
   // generated model). Here we only provide the grid context to pass to them.
-  // GridContext: mesh + BC + aux + DISC geometry (project T5-PR3). disc_mask_ / disc_ are
-  // STABLE-address MEMBERS -> the block closures (build_block) read them by pointer at each
-  // step, so the add_block / set_disc_domain order is irrelevant (the mask is materialized / the
-  // radius set before the 1st step; as long as !disc_set_ the stepper does not select the disc advance).
-  GridContext grid_ctx() { return GridContext{dom, bc_, geom, &aux, &disc_mask_, &disc_}; }
+  // GridContext: mesh + BC + aux + EMBEDDED-BOUNDARY geometry (project T5-PR3). domain_mask_ /
+  // eb_domain_ are STABLE-address MEMBERS -> the block closures (build_block) read them by pointer at
+  // each step, so the add_block / set_disc_domain order is irrelevant (the mask is materialized / the
+  // descriptor set before the 1st step; as long as !eb_set_ the stepper does not select the
+  // embedded-boundary advance).
+  GridContext grid_ctx() { return GridContext{dom, bc_, geom, &aux, &domain_mask_, &eb_domain_}; }
 
   // POLAR grid context (ring pgeom_ + r/theta BC + aux) for the polar block closures
   // (block_builder_polar.hpp). Counterpart of grid_ctx(); never called in Cartesian.
@@ -546,14 +549,15 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     if (P->polar_)
       throw std::runtime_error("System::add_block : wave_speed_cache not supported on the polar "
                                "geometry (ring)");
-    // DISC transport mode already active: the stepper routes to advance_masked / advance_eb, which do
-    // not carry the cache -> requesting it would be WITHOUT EFFECT. Explicit rejection (no silent
-    // ignore). The reverse order (set_disc_domain AFTER a cached block) is rejected by set_disc_domain
-    // / set_geometry_mode.
-    if (P->disc_set_ && P->geometry_mode_ != GeometryMode::None)
-      throw std::runtime_error("System::add_block : wave_speed_cache incompatible with an active disc "
-                               "transport mode (staircase/cutcell) ; the cache is only wired on the full "
-                               "Cartesian advance (remove wave_speed_cache or mode='none')");
+    // EMBEDDED-BOUNDARY transport mode already active: the stepper routes to advance_masked /
+    // advance_eb, which do not carry the cache -> requesting it would be WITHOUT EFFECT. Explicit
+    // rejection (no silent ignore). The reverse order (set_disc_domain AFTER a cached block) is
+    // rejected by set_disc_domain / set_geometry_mode.
+    if (P->eb_set_ && P->geometry_mode_ != GeometryMode::None)
+      throw std::runtime_error(
+          "System::add_block : wave_speed_cache incompatible with an active "
+          "embedded-boundary transport mode (staircase/cutcell) ; the cache is only "
+          "wired on the full Cartesian advance (remove wave_speed_cache or mode='none')");
     P->ws_cache_block_ = true;  // a block requested the cache -> locks the switch to disc mode
   }
   const std::string method = imexrk ? std::string("imexrk_ars222")
@@ -715,8 +719,9 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
   P->sp.back().U.set_val(Real(0));
   P->sp.back().cons_vars = cons_vars;
   P->sp.back().prim_vars = prim_vars;
-  // DISC transport advances (project T5-PR3): empty unless build_block built them (Cartesian
-  // block with disc_mask_/disc_ provided). Empty -> the stepper falls back on advance (bit-identical).
+  // EMBEDDED-BOUNDARY transport advances (project T5-PR3): empty unless build_block built them
+  // (Cartesian block with domain_mask_/eb_domain_ provided). Empty -> the stepper falls back on advance
+  // (bit-identical).
   P->sp.back().advance_masked = std::move(closures.advance_masked);
   P->sp.back().advance_eb = std::move(closures.advance_eb);
   P->sp.back().hotspot = std::move(closures.hotspot);  // dt_hotspot diagnostic (ADC-182)
@@ -889,18 +894,18 @@ void System::set_disc_domain(double cx, double cy, double R, const std::string& 
                              "' incompatible with wave_speed_cache (a block enabled the HLL wave speed "
                              "cache, only wired on the full Cartesian advance ; remove wave_speed_cache "
                              "or use mode='none')");
-  P->disc_ = detail::DiscDomain{cx, cy, R};
-  P->disc_set_ = true;
+  P->eb_domain_ = detail::DiscDomain{cx, cy, R};
+  P->eb_set_ = true;
   // Materializes the 0/1 cell-centered mask (1 ghost, so the mask-aware transport reads the
   // i-1/i+1/j-1/j+1 neighbors up to the edge). Same layout as the blocks (ba/dm). Cell active when
   // its CENTER is inside the disc (level set < 0, SAME convention as the conducting wall).
-  P->disc_mask_ = MultiFab(P->ba, P->dm, 1, 1);
-  const detail::DiscDomain disc = P->disc_;
+  P->domain_mask_ = MultiFab(P->ba, P->dm, 1, 1);
+  const detail::DiscDomain disc = P->eb_domain_;
   const Geometry geom = P->geom;
-  for (int li = 0; li < P->disc_mask_.local_size(); ++li) {
-    Array4 m = P->disc_mask_.fab(li).array();
+  for (int li = 0; li < P->domain_mask_.local_size(); ++li) {
+    Array4 m = P->domain_mask_.fab(li).array();
     // box WITH ghosts: we also classify the ghosts (the mask-aware transport reads the edge neighbors).
-    const Box2D g = P->disc_mask_.fab(li).grown_box();
+    const Box2D g = P->domain_mask_.fab(li).grown_box();
     for_each_cell(g, [=] ADC_HD(int i, int j) {
       m(i, j, 0) = disc.cell_active(geom.x_cell(i), geom.y_cell(j)) ? Real(1) : Real(0);
     });
@@ -914,12 +919,13 @@ void System::set_disc_domain(double cx, double cy, double R, const std::string& 
 void System::set_geometry_mode(const std::string& mode) {
   Impl* P = p_.get();
   const GeometryMode gmode = parse_geometry_mode(mode, "System::set_geometry_mode");
-  // A disc mode (staircase/cutcell) only makes sense with a fixed disc: otherwise the stepper would fall
-  // back on the full transport (the mask / level set does not exist), a silent footgun -> we reject.
-  if (gmode != GeometryMode::None && !P->disc_set_)
+  // An embedded-boundary mode (staircase/cutcell) only makes sense with a fixed domain: otherwise the
+  // stepper would fall back on the full transport (the mask / level set does not exist), a silent
+  // footgun -> we reject.
+  if (gmode != GeometryMode::None && !P->eb_set_)
     throw std::runtime_error(
-        "System::set_geometry_mode : mode '" + mode +
-        "' requested without a fixed disc ; call set_disc_domain(cx, cy, R) first");
+        "System::set_geometry_mode : embedded-boundary mode '" + mode +
+        "' requested without a fixed level-set domain ; call set_disc_domain(cx, cy, R) first");
   // wave_speed_cache (ADC-199) is not carried by the disc advances -> explicit rejection (cf.
   // set_disc_domain) rather than a cache silently ignored in staircase/cutcell mode.
   if (gmode != GeometryMode::None && P->ws_cache_block_)
@@ -936,12 +942,12 @@ std::vector<double> System::disc_mask() const {
   const Box2D v = P->dom;
   std::vector<double> out;
   out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
-  if (!P->disc_set_) {
-    // CONTRACT: without a fixed disc, the transport subdomain is the whole domain -> all active.
+  if (!P->eb_set_) {
+    // CONTRACT: without a fixed domain, the transport subdomain is the whole domain -> all active.
     out.assign(static_cast<std::size_t>(v.nx()) * v.ny(), 1.0);
     return out;
   }
-  const ConstArray4 m = P->disc_mask_.fab(0).const_array();
+  const ConstArray4 m = P->domain_mask_.fab(0).const_array();
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
     for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(static_cast<double>(m(i, j, 0)));
   return out;
