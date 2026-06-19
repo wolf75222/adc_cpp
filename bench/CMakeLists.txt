@@ -30,7 +30,20 @@ target_link_libraries(scaling_step PRIVATE adc::adc)
 # COMPILEE (PIMPL) : on lie son implementation python/amr_system.cpp (comme le test integre
 # amrmpi_integrated). Kokkos etant le seul backend, ADC_HAS_KOKKOS est toujours defini et Kokkos est
 # toujours initialise (le #ifdef ADC_HAS_KOKKOS reste pour la lisibilite du cycle de vie).
-add_executable(scaling_amr scaling_amr.cpp ${CMAKE_SOURCE_DIR}/python/amr_system.cpp)
+# ADC-335/336 ont SORTI les fabriques de blocs AMR de amr_system.cpp vers les SIX TU du seam :
+# amr_block_{exb,isothermal,compressible}.cpp (build_amr_block_*, chemin natif multi-bloc) +
+# amr_compiled_{exb,isothermal,compressible}.cpp (build_amr_compiled_*, chemin compile mono-bloc),
+# regroupees cote tests dans la lib objet adc_runtime_amr. amr_system.cpp les APPELLE : scaling_amr
+# (qui compile amr_system.cpp) DOIT donc lier les six, sinon edition de liens en echec (undefined
+# reference to build_amr_block_* / build_amr_compiled_*).
+add_executable(scaling_amr scaling_amr.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_system.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_block_exb.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_block_isothermal.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_block_compressible.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_compiled_exb.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_compiled_isothermal.cpp
+               ${CMAKE_SOURCE_DIR}/python/amr_compiled_compressible.cpp)
 target_link_libraries(scaling_amr PRIVATE adc::adc)
 target_include_directories(scaling_amr PRIVATE ${CMAKE_SOURCE_DIR}/python)
 # RAM CI : amr_system.cpp est une des TU geantes du module (cf. python/CMakeLists.txt) ; sous
