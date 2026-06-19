@@ -136,6 +136,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Shard + instrument the gate-python CI** (ADC-366): the PR-blocking `gate-python` job is split into 3
+  `matrix.shard` legs (round-robin over the sorted test list, ~1/3 of the ~18-19 min Python suite each);
+  the `gate` aggregator still `needs: gate-python` so the required check name is unchanged (branch
+  protection intact) and `fail-fast: false` keeps a full red/green signal. The opaque test runner is
+  replaced by a per-file timing harness (slowest-first log + a TSV/JSON timings artifact) that preserves
+  the exact fail semantics. ccache hit-rate is lifted on both gates (`CCACHE_BASEDIR`, `CCACHE_NOHASHDIR`,
+  `CCACHE_SLOPPINESS` + a codegen-neutral `-ffile-prefix-map`; cache keys unchanged, abi_key untouched),
+  and `setup-kokkos` bumps `actions/cache@v4 -> v5`. CI-only; no change to `-O` levels, the shipped
+  library, or test coverage (the 3 shards are a complete, disjoint partition of all 110 test files).
 - **Memoize the fill_boundary halo schedule** (ADC-260): `fill_boundary_begin` no longer rebuilds the
   `BoxHash` and re-enumerates the full local + global (cross-rank send/recv) halo job list on every
   call. That schedule is a pure function of the layout (`BoxArray`, `DistributionMapping`, `n_grow`)
