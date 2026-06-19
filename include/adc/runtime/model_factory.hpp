@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/core/cold.hpp>       // ADC_COLD_FN: COLD-factory no-optimize attribute (ADC-337)
 #include <adc/core/variables.hpp>  // VariableSet/VariableRole/role_from_name/roles_csv (resolve_implicit_components)
 #include <adc/physics/bricks.hpp>
 #include <adc/runtime/model_spec.hpp>
@@ -21,7 +22,7 @@ namespace adc::detail {
 
 /// Builds the transport brick and calls v(transport).
 template <class Visitor>
-void dispatch_transport(const ModelSpec& m, Visitor&& v) {
+ADC_COLD_FN void dispatch_transport(const ModelSpec& m, Visitor&& v) {
   if (m.transport == "exb") return v(ExBVelocity{Real(m.B0)});
   if (m.transport == "compressible") return v(CompressibleFlux{Real(m.gamma)});
   if (m.transport == "isothermal") return v(IsothermalFlux{Real(m.cs2)});
@@ -42,7 +43,7 @@ void dispatch_transport(const ModelSpec& m, Visitor&& v) {
 /// qom (q/m, sign included) is shared by the two charged forces (same species). The magnetized bricks
 /// declare n_aux = 4 -> CompositeModel propagates the aux width up to the system (B_z channel).
 template <int NV, class Visitor>
-void dispatch_source(const ModelSpec& m, Visitor&& v) {
+ADC_COLD_FN void dispatch_source(const ModelSpec& m, Visitor&& v) {
   if (m.source == "none") return v(NoSource{});
   if constexpr (NV >= 3) {
     if (m.source == "potential") return v(PotentialForce{Real(m.qom)});
@@ -59,7 +60,7 @@ void dispatch_source(const ModelSpec& m, Visitor&& v) {
 
 /// Builds the elliptic right-hand-side brick and calls v(elliptic).
 template <class Visitor>
-void dispatch_elliptic(const ModelSpec& m, Visitor&& v) {
+ADC_COLD_FN void dispatch_elliptic(const ModelSpec& m, Visitor&& v) {
   if (m.elliptic == "charge") return v(ChargeDensity{Real(m.q)});
   if (m.elliptic == "background") return v(BackgroundDensity{Real(m.alpha), Real(m.n0)});
   if (m.elliptic == "gravity")
@@ -83,7 +84,7 @@ void dispatch_elliptic(const ModelSpec& m, Visitor&& v) {
 /// (rho=0, m_x=1, m_y=2) and ExB (density=0) declare CANONICAL roles -> the resolved indices ==
 /// the brick defaults -> no value changes. Resolved AT CONSTRUCTION (host, std::string); never on device.
 template <class Brick>
-void bind_variable_roles(Brick& brk, const VariableSet& cons) {
+ADC_COLD_FN void bind_variable_roles(Brick& brk, const VariableSet& cons) {
   const int i_rho = cons.index_of(VariableRole::Density);
   const int i_mx = cons.index_of(VariableRole::MomentumX);
   const int i_my = cons.index_of(VariableRole::MomentumY);
@@ -101,7 +102,7 @@ void bind_variable_roles(Brick& brk, const VariableSet& cons) {
 /// Assembles the CompositeModel designated by @p m and calls `visitor(model)`.
 /// @throws std::runtime_error on unknown tag or invalid combination.
 template <class Visitor>
-void dispatch_model(const ModelSpec& m, Visitor&& visitor) {
+ADC_COLD_FN void dispatch_model(const ModelSpec& m, Visitor&& visitor) {
   dispatch_transport(m, [&](auto tr) {
     using TR = decltype(tr);
     // Transport roles (host): used to resolve the indices of the source / elliptic bricks before
@@ -127,7 +128,7 @@ void dispatch_model(const ModelSpec& m, Visitor&& visitor) {
 /// reachable instantiation set is unchanged: dispatch_model itself is UNTOUCHED (still used by the .so /
 /// add_compiled_model loader path), and the union over the three transports is byte-identical.
 template <class TR, class Visitor>
-void dispatch_model_for(const ModelSpec& m, TR tr, Visitor&& visitor) {
+ADC_COLD_FN void dispatch_model_for(const ModelSpec& m, TR tr, Visitor&& visitor) {
   const VariableSet cons = TR::conservative_vars();
   dispatch_source<TR::n_vars>(m, [&](auto src) {
     dispatch_elliptic(m, [&](auto ell) {
@@ -144,7 +145,7 @@ void dispatch_model_for(const ModelSpec& m, TR tr, Visitor&& visitor) {
 /// or role absent from the block raises an EXPLICIT error (no silent ignore). Returns the UNIQUE,
 /// sorted indices (order is irrelevant). Empty input -> empty -> inactive mask. Moved out of
 /// system.cpp's anonymous namespace (ADC-335) so the per-transport seam TUs share one definition.
-inline std::vector<int> resolve_implicit_components(const std::string& block,
+inline ADC_COLD_FN std::vector<int> resolve_implicit_components(const std::string& block,
                                                     const VariableSet& cons,
                                                     const std::vector<std::string>& names,
                                                     const std::vector<std::string>& roles) {

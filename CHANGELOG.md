@@ -77,6 +77,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **No-optimize the cold model/block factories** (ADC-337, P1-B): the host string->closure wiring
+  (`dispatch_transport/_source/_elliptic/_model/_model_for`, `bind_variable_roles`,
+  `resolve_implicit_components`, `make_implicit_mask`, `build_block`, `make_block`/`make_block_*`) is
+  marked `ADC_COLD_FN` (clang `optnone` / gcc `optimize("O0")`, new `include/adc/core/cold.hpp`), so the
+  backend stops inlining and `-O3`-optimizing the entire CompositeModel instantiation tree into one
+  giant factory function -- the dominant slice of the heavy TUs' `-O3` cost (cf. `docs/BUILD_PROFILING.md`
+  P1-B). The HOT kernels (`BlockRhsEval` / `Advance*` / `take_step` / Kokkos `for_each_cell`) are separate
+  functions reached through `std::function` closures and stay `-O3`; the small closure-returning helpers
+  (`make_max_speed` etc.) are left untouched. No `-ffast-math` and `-O0` vs `-O3` never changes IEEE
+  results, so the numerics are byte-identical (guarded by the `dmax==0` parity suite). Stacks on ADC-335.
 - **Pin the conda build toolchain and surface the heavy-TU pool** (ADC-338): `environment.yml` pins
   `pybind11>=2.13,<3` (the conservative/validated 2.x line; 3.x still compiles, drop `<3` to opt in) and
   documents the local-vs-validated Kokkos gap (conda ships a Serial CPU-dev `kokkos`, default per-platform

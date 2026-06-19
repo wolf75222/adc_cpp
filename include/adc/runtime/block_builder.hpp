@@ -1,5 +1,6 @@
 #pragma once
 
+#include <adc/core/cold.hpp>   // ADC_COLD_FN: COLD block-builder no-optimize attribute (ADC-337)
 #include <adc/core/types.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/for_each.hpp>  // for_each_cell (projection ponctuelle post-pas, ADC-177)
@@ -394,7 +395,7 @@ struct AdvanceImexEb {
 /// (the validation / clear message lives on the System::add_block side, which resolves names/roles into
 /// indices and throws on an absent name/role).
 template <int N>
-ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) {
+ADC_COLD_FN ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) {
   ImplicitMask<N> mask;
   if (implicit_components.empty()) return mask;  // inactive: model default
   mask.active = true;
@@ -423,7 +424,7 @@ ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) 
 /// (same RK / IMEX, same limiter / flux); only the transport residual is dispatched (assemble_rhs_masked
 /// / _eb).
 template <class Limiter, class Flux, class Model>
-BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
+ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
                           const std::string& method = "ssprk2",
                           const std::vector<int>& implicit_components = {},
                           const NewtonOptions& newton_opts = {},
@@ -515,7 +516,7 @@ BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, boo
 // .so/AOT loader path). The flux string is implied by which helper is called -> validation moves to the
 // make_block dispatcher (kept) and, for the per-flux seam path, to the caller (System).
 template <class Model>
-BlockClosures make_block_rusanov(const Model& m, const std::string& lim, const GridContext& ctx,
+ADC_COLD_FN BlockClosures make_block_rusanov(const Model& m, const std::string& lim, const GridContext& ctx,
                                  bool imex, bool recon_prim, const std::string& method,
                                  const std::vector<int>& implicit_components,
                                  const NewtonOptions& newton_opts, NewtonReport* newton_report,
@@ -528,7 +529,7 @@ BlockClosures make_block_rusanov(const Model& m, const std::string& lim, const G
 }
 
 template <class Model>
-BlockClosures make_block_hll(const Model& m, const std::string& lim, const GridContext& ctx,
+ADC_COLD_FN BlockClosures make_block_hll(const Model& m, const std::string& lim, const GridContext& ctx,
                              bool imex, bool recon_prim, const std::string& method,
                              const std::vector<int>& implicit_components,
                              const NewtonOptions& newton_opts, NewtonReport* newton_report,
@@ -559,7 +560,7 @@ BlockClosures make_block_hll(const Model& m, const std::string& lim, const GridC
 }
 
 template <class Model>
-BlockClosures make_block_hllc(const Model& m, const std::string& lim, const GridContext& ctx,
+ADC_COLD_FN BlockClosures make_block_hllc(const Model& m, const std::string& lim, const GridContext& ctx,
                               bool imex, bool recon_prim, const std::string& method,
                               const std::vector<int>& implicit_components,
                               const NewtonOptions& newton_opts, NewtonReport* newton_report,
@@ -585,7 +586,7 @@ BlockClosures make_block_hllc(const Model& m, const std::string& lim, const Grid
 }
 
 template <class Model>
-BlockClosures make_block_roe(const Model& m, const std::string& lim, const GridContext& ctx,
+ADC_COLD_FN BlockClosures make_block_roe(const Model& m, const std::string& lim, const GridContext& ctx,
                              bool imex, bool recon_prim, const std::string& method,
                              const std::vector<int>& implicit_components,
                              const NewtonOptions& newton_opts, NewtonReport* newton_report,
@@ -610,7 +611,7 @@ BlockClosures make_block_roe(const Model& m, const std::string& lim, const GridC
 }
 
 template <class Model>
-BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
+ADC_COLD_FN BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
                          const GridContext& ctx, bool imex, bool recon_prim,
                          const std::string& method = "ssprk2",
                          const std::vector<int>& implicit_components = {},
