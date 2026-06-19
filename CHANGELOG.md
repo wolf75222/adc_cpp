@@ -145,6 +145,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `CCACHE_SLOPPINESS` + a codegen-neutral `-ffile-prefix-map`; cache keys unchanged, abi_key untouched),
   and `setup-kokkos` bumps `actions/cache@v4 -> v5`. CI-only; no change to `-O` levels, the shipped
   library, or test coverage (the 3 shards are a complete, disjoint partition of all 110 test files).
+- **Split `bindings.cpp` into per-area pybind TUs** (ADC-365): the `py::class_` / `.def` surface moves
+  from the single `PYBIND11_MODULE` into `init_core` (module attrs + `SystemConfig` + `ModelSpec`),
+  `init_system` (`System`), and `init_amr` (`AmrSystemConfig` + `AmrSystem`), each its own TU declared in
+  `python/bindings_detail.hpp` (which also holds the shared `to_2d`/`to_3d`/`flat`/`newton_fail_policy`
+  helpers). `bindings.cpp` is now a thin module that calls them in order (init_core first, so the configs
+  register before `System`/`AmrSystem` reference them). The bound API is byte-identical (bodies moved
+  verbatim); the win is parallel compilation + lower peak pybind memory per TU, and better incrementals.
 - **Memoize the fill_boundary halo schedule** (ADC-260): `fill_boundary_begin` no longer rebuilds the
   `BoxHash` and re-enumerates the full local + global (cross-rank send/recv) halo job list on every
   call. That schedule is a pure function of the layout (`BoxArray`, `DistributionMapping`, `n_grow`)
