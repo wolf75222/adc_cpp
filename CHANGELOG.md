@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Generic real/complex spectrum predicate in `dense_eig.hpp`** (ADC-276): `adc::real_spectrum<N>()`
+  classifies a small dense block as `Spectrum::kReal` / `kComplexPair` / `kUnknown`, with
+  `EigBounds::all_real()` / `has_complex_pair()` accessors. The imaginary tolerance is relative
+  (`im_tol * max(|lmin|, |lmax|, 1)`, default `1e-5`, covering a real multiplicity up to 3 -- the 3x3
+  target -- since eps^(1/3) ~ 6e-6), so a quasi-degenerate real spectrum is not mislabeled complex, and
+  non-convergence maps to `kUnknown` (never read as real) -- letting a native device projector test
+  realizability on, e.g., a 3x3 HyQMOM15 block without NumPy or MATLAB. Header-only and additive:
+  `real_eig_minmax` / `EigBounds` layout and the DSL eig path are unchanged.
 - **Public `System.set_source_stage` on the Python facade** (ADC-308): the Schur-condensed source
   stage, already wired internally by `add_equation(time=adc.Split(source=adc.CondensedSchur(...)))`, is
   now reachable as a public `adc.System.set_source_stage(name, kind, theta, alpha, ...)` method (a thin

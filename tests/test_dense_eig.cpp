@@ -17,6 +17,8 @@
 using adc::Real;
 using adc::EigBounds;
 using adc::real_eig_minmax;
+using adc::Spectrum;          // predicat de spectre reel/complexe (ADC-276)
+using adc::real_spectrum;
 using adc::test::close_rel;  // comparaison relative+absolue partagee (atol defaut 1e-12)
 
 // Compteur d'echecs partage, en style VERBOSE (imprime chaque ligne [OK ]/[XX ] comme avant).
@@ -37,6 +39,18 @@ static void companion(const Real (&roots)[N], Real (&A)[N][N]) {
     for (int j = 0; j < N; ++j) A[i][j] = Real(0);
   for (int j = 0; j < N; ++j) A[0][j] = -c[j + 1];
   for (int i = 1; i < N; ++i) A[i][i - 1] = Real(1);
+}
+
+/// Consommateur DEVICE-SAFE (pile uniquement, ni NumPy ni MATLAB) : tient lieu du projecteur
+/// HyQMOM15 qui classe un bloc 3x3 de moments puis choisit une action. Le switch est EXHAUSTIF sur
+/// adc::Spectrum -- kUnknown (non-convergence) y est traite explicitement, jamais confondu avec kReal.
+ADC_HD static int classify_action(const Real (&B)[3][3]) {
+  switch (adc::real_spectrum(B)) {
+    case Spectrum::kReal:        return 0;
+    case Spectrum::kComplexPair: return 1;
+    case Spectrum::kUnknown:     return 2;
+  }
+  return -1;  // injoignable : enumere clos
 }
 
 int main() {
@@ -227,6 +241,131 @@ int main() {
     Real glo, ghi;
     adc::detail::gershgorin_bounds(A, glo, ghi);
     chk(b.lmin == glo && b.lmax == ghi, "le repli EST la borne de Gershgorin (contrat documente)");
+  }
+
+  std::printf("== predicat de spectre reel/complexe (ADC-276) ==\n");
+  {
+    // (a) 3 reels distincts {1,2,3} -> kReal ; all_real vrai, has_complex_pair faux.
+    const Real roots[3] = {Real(1), Real(2), Real(3)};
+    Real A[3][3];
+    companion(roots, A);
+    const EigBounds b = real_eig_minmax(A);
+    chk(real_spectrum(A) == Spectrum::kReal && b.all_real() && !b.has_complex_pair()
+            && classify_action(A) == 0,
+        "3x3 reels distincts {1,2,3} : kReal (all_real, !has_complex_pair)");
+  }
+  {
+    // (b) Racine reelle DOUBLE {2,2,5} : le compagnon est defectif (conditionnement ~eps^(1/2),
+    // d'ou un petit Im parasite) -- la tolerance RELATIVE l'absorbe ; ne doit PAS passer kComplexPair.
+    const Real roots[3] = {Real(2), Real(2), Real(5)};
+    Real A[3][3];
+    companion(roots, A);
+    const EigBounds b = real_eig_minmax(A);
+    chk(real_spectrum(A) == Spectrum::kReal && b.all_real() && classify_action(A) == 0,
+        "3x3 racine double {2,2,5} : kReal (Im parasite absorbe par la tolerance relative)");
+  }
+  {
+    // (b2) Racine reelle TRIPLE {2,2,2} : compagnon MAXIMALEMENT defectif (bloc de Jordan 3x3), le PIRE
+    // cas d'un bloc 3x3 ; conditionnement ~eps^(1/3) ~ 6e-6 -> |Im| parasite relatif ~5e-6. Le defaut
+    // 1e-5 le couvre (eps^(1/3) < 1e-5) donc spectre REEL. Cas "racines multiples" exige par ADC-276 ;
+    // un defaut a 1e-7 (eps^(1/2) seulement) le classait kComplexPair a tort -- c'est la regression que
+    // ce test verrouille.
+    const Real roots[3] = {Real(2), Real(2), Real(2)};
+    Real A[3][3];
+    companion(roots, A);
+    const EigBounds b = real_eig_minmax(A);
+    chk(real_spectrum(A) == Spectrum::kReal && b.all_real() && classify_action(A) == 0,
+        "3x3 racine TRIPLE {2,2,2} : kReal au defaut (eps^(1/3) couvert, pas un faux kComplexPair)");
+  }
+  {
+    // (b3) Racine QUADRUPLE {1,1,1,1} (4x4) : conditionnement ~eps^(1/4) ~ 1.2e-4 > defaut 1e-5, donc AU
+    // DEFAUT le bloc est rapporte kComplexPair (LIMITE documentee : le defaut couvre m<=3, le 3x3 vise).
+    // Avec une tolerance ELARGIE (~eps^(1/4)) le spectre reel est correctement kReal : le bouton im_tol
+    // etend la couverture aux multiplicites superieures / aux blocs plus grands.
+    const Real roots[4] = {Real(1), Real(1), Real(1), Real(1)};
+    Real A[4][4];
+    companion(roots, A);
+    chk(real_spectrum(A) == Spectrum::kComplexPair
+            && real_spectrum(A, /*im_tol=*/1e-3) == Spectrum::kReal,
+        "4x4 racine QUADRUPLE : kComplexPair au defaut (m>3), kReal avec im_tol elargi (1e-3)");
+  }
+  {
+    // (c) Paire complexe conjuguee + un reel : diag-bloc rotation(+-2i) et {3}. kComplexPair ;
+    // has_complex_pair vrai, all_real faux, max_im ~ 2 (temoin de perte d'hyperbolicite).
+    const Real A[3][3] = {{Real(0), Real(2), Real(0)},
+                          {Real(-2), Real(0), Real(0)},
+                          {Real(0), Real(0), Real(3)}};
+    const EigBounds b = real_eig_minmax(A);
+    chk(real_spectrum(A) == Spectrum::kComplexPair && b.has_complex_pair() && !b.all_real()
+            && close_rel(b.max_im, Real(2), 1e-12) && classify_action(A) == 1,
+        "3x3 paire complexe + reel : kComplexPair (has_complex_pair, max_im = 2)");
+  }
+  {
+    // (d) ANTI-PIEGE de non-convergence : cap d'iterations 0 -> repli Gershgorin (converged=false,
+    // max_im=0 PAR CONVENTION). Le predicat doit dire kUnknown, JAMAIS kReal, et les deux booleens
+    // doivent etre FAUX (un bloc non converge n'est ni reel ni complexe : on ne sait pas).
+    const Real roots[5] = {Real(-3), Real(-1), Real(0), Real(2), Real(5)};
+    Real A[5][5];
+    companion(roots, A);
+    const EigBounds b = real_eig_minmax(A, /*max_iter_per_eig=*/0);
+    chk(!b.converged && real_spectrum(A, /*im_tol=*/1e-7, /*max_iter_per_eig=*/0) == Spectrum::kUnknown
+            && !b.all_real() && !b.has_complex_pair(),
+        "non-convergence : kUnknown, all_real ET has_complex_pair faux (max_im=0 jamais lu reel)");
+  }
+  {
+    // (e) Rotation pure : parties reelles nulles (echelle spectrale 0), Im = 2 reel. Le plancher
+    // max(rho,1) empeche le seuil de s'effondrer a 0 -> kComplexPair correct (pas un faux kReal).
+    const Real R[2][2] = {{Real(0), Real(2)}, {Real(-2), Real(0)}};
+    const EigBounds b = real_eig_minmax(R);
+    chk(real_spectrum(R) == Spectrum::kComplexPair && b.has_complex_pair() && !b.all_real(),
+        "rotation pure (echelle 0) : kComplexPair (plancher max(rho,1) ne s'effondre pas)");
+  }
+  {
+    // (f) Matrice nulle : converge, max_im = 0 -> kReal (le plancher gere l'echelle 0 sans faux complexe).
+    const Real Z[3][3] = {{Real(0), Real(0), Real(0)},
+                          {Real(0), Real(0), Real(0)},
+                          {Real(0), Real(0), Real(0)}};
+    const EigBounds b = real_eig_minmax(Z);
+    chk(real_spectrum(Z) == Spectrum::kReal && b.all_real() && classify_action(Z) == 0,
+        "matrice nulle : kReal (max_im = 0, plancher gere l'echelle nulle)");
+  }
+  {
+    // (g) BOUTON de tolerance, valeurs EXACTES (chemin ferme N=2) : [[1,-1e-6],[1e-6,1]] a pour VP
+    // 1 +- 1e-6 i, donc max_im = 1e-6 EXACT, echelle = max(1,1,1) = 1. Lache (1e-5) -> kReal ;
+    // serre (1e-7) -> kComplexPair. Le meme bloc bascule selon la tolerance : le bouton est explicite.
+    const Real A[2][2] = {{Real(1), Real(-1e-6)}, {Real(1e-6), Real(1)}};
+    const EigBounds b = real_eig_minmax(A);
+    chk(close_rel(b.max_im, Real(1e-6), 1e-12)
+            && b.all_real(/*im_tol=*/1e-5) && !b.all_real(/*im_tol=*/1e-7)
+            && real_spectrum(A, /*im_tol=*/1e-5) == Spectrum::kReal
+            && real_spectrum(A, /*im_tol=*/1e-7) == Spectrum::kComplexPair,
+        "bouton tolerance (max_im=1e-6 exact) : kReal a 1e-5, kComplexPair a 1e-7");
+  }
+  {
+    // (h) Pourquoi RELATIF et non absolu (valeurs exactes, N=2) : [[1e3,-1e-6],[1e-6,1e3]] a pour VP
+    // 1e3 +- 1e-6 i, max_im = 1e-6 EXACT mais echelle = 1e3. En relatif a 1e-9 le seuil vaut
+    // 1e-9*1e3 = 1e-6 >= max_im -> kReal (correct) ; une tolerance ABSOLUE 1e-9 le classerait
+    // complexe a tort. La mise a l'echelle suit la magnitude du spectre.
+    const Real A[2][2] = {{Real(1e3), Real(-1e-6)}, {Real(1e-6), Real(1e3)}};
+    const EigBounds b = real_eig_minmax(A);
+    // Le test passe parce que 1e-9*1e3 s'arrondit a 1.0000000000000002e-06 >= max_im (1e-6 exact) :
+    // c'est la frontiere <= (non stricte) ; un futur passage a < ferait basculer ce cas.
+    chk(close_rel(b.max_im, Real(1e-6), 1e-12) && b.all_real(/*im_tol=*/1e-9)
+            && real_spectrum(A, /*im_tol=*/1e-9) == Spectrum::kReal,
+        "tolerance RELATIVE : max_im=1e-6 a l'echelle 1e3 -> kReal a 1e-9 (un absolu mediterait complexe)");
+  }
+  {
+    // (i) ASYMETRIE assumee de la tolerance RELATIVE (valeurs exactes, N=2) : une VRAIE paire complexe
+    // dont |Im| est PETIT devant la magnitude reelle est rapportee kReal PAR CONSTRUCTION. [[1e8,-9],
+    // [9,1e8]] a pour VP 1e8 +- 9i, max_im = 9 exact, echelle = 1e8, seuil defaut 1e-5*1e8 = 1e3 :
+    // 9 <= 1e3 -> kReal (oscillation negligeable a l'echelle 1e8). En montant |Im| au-dessus du seuil
+    // (2000 > 1e3) le bloc bascule kComplexPair. Verrou : un changement de defaut deplacerait ce bord.
+    const Real Areal[2][2] = {{Real(1e8), Real(-9)}, {Real(9), Real(1e8)}};
+    const Real Acplx[2][2] = {{Real(1e8), Real(-2e3)}, {Real(2e3), Real(1e8)}};
+    chk(close_rel(real_eig_minmax(Areal).max_im, Real(9), 1e-12)
+            && real_spectrum(Areal) == Spectrum::kReal
+            && real_spectrum(Acplx) == Spectrum::kComplexPair,
+        "echelle 1e8 : |Im|=9 -> kReal (relatif), |Im|=2000 -> kComplexPair (asymetrie documentee)");
   }
 
   std::printf("FAILS = %d\n", g_chk.fails());

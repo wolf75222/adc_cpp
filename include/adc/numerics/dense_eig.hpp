@@ -26,7 +26,9 @@
 ///
 /// HYPERBOLICITY: max_im returns the largest |Im(lambda)| encountered. A hyperbolic system has a
 /// real spectrum (max_im ~ 0); a model that loses hyperbolicity does not silently receive a
-/// plausible-but-wrong speed -- the caller decides (assert, warning, clamp).
+/// plausible-but-wrong speed -- the caller decides (assert, warning, clamp). A caller wanting only a
+/// real/complex verdict (not the extremes) uses adc::real_spectrum / EigBounds::all_real (ADC-276),
+/// which couple this max_im check with convergence so a non-converged block is never reported real.
 ///
 /// PRECISION: simple, separated eigenvalues -> machine precision (tested at rtol 1e-10).
 /// CLUSTERED eigenvalues of a non-symmetric matrix: conditioning ~ eps^(1/m) for a near-multiplicity
@@ -55,7 +57,38 @@ struct EigBounds {
                   ///< meaning ONLY if converged: under fallback it is 0 by CONVENTION (the spectrum
                   ///< is not computed), certainly not a hyperbolicity signal -- read converged first.
   bool converged; ///< false -> Gershgorin fallback (valid external bound, NOT the spectrum)
+
+  /// REAL-SPECTRUM PREDICATE (ADC-276). True iff the block CONVERGED and the largest imaginary part is
+  /// within a RELATIVE tolerance of zero: max_im <= im_tol * max(|lmin|, |lmax|, 1). The threshold is
+  /// RELATIVE to the spectral magnitude, so the verdict is scale-invariant; the floor of 1 keeps a pure
+  /// rotation / zero matrix (real-part scale 0) from collapsing the threshold to 0.
+  /// MULTIPLICITY: a near m-fold REAL root is ill-conditioned and acquires a spurious relative |Im| of
+  /// order eps^(1/m) (see PRECISION in the file header). The default im_tol = 1e-5 covers m up to 3 (the
+  /// 3x3 priority target) since eps^(1/3) ~ 6e-6; a higher multiplicity or a larger block needs a larger
+  /// im_tol (~ eps^(1/m), e.g. eps^(1/4) ~ 1.2e-4 for a 4-fold root) or it is reported complex.
+  /// ASYMMETRY: because the tolerance is relative, a GENUINE complex pair whose |Im| is below
+  /// im_tol * scale is reported real BY DESIGN (e.g. 1e8 +- i at the default, or any pair below im_tol
+  /// when |Re| < 1 and the floor pins the threshold to im_tol). For an absolute test, read max_im.
+  /// NON-CONVERGENCE => false: the Gershgorin fallback sets max_im = 0 by CONVENTION (nothing computed),
+  /// never read as a real spectrum; a non-finite (NaN) max_im likewise makes this false (so a NaN block
+  /// is reported has_complex_pair, NOT kUnknown). ADC_HD, no allocation (only std::fabs and comparisons,
+  /// like the rest of this header).
+  ADC_HD bool all_real(Real im_tol = Real(1e-5)) const {
+    const Real rho = std::fabs(lmin) > std::fabs(lmax) ? std::fabs(lmin) : std::fabs(lmax);
+    const Real scale = rho > Real(1) ? rho : Real(1);
+    return converged && max_im <= im_tol * scale;
+  }
+  /// Complement of all_real RESTRICTED to converged blocks: true iff the spectrum was computed AND
+  /// carries a complex conjugate pair beyond @p im_tol. NON-CONVERGENCE => false (NOT a complex signal:
+  /// nothing was computed -- tell it apart via converged, or via adc::real_spectrum's kUnknown).
+  ADC_HD bool has_complex_pair(Real im_tol = Real(1e-5)) const { return converged && !all_real(im_tol); }
 };
+
+/// Tri-state classification of a small block's spectrum (ADC-276), returned by adc::real_spectrum.
+/// kUnknown is the NON-CONVERGENCE outcome and is NEVER kReal: a switch over it that omits kUnknown is
+/// a visible bug, which is the point -- the caller (e.g. a native realizability projector) must treat a
+/// non-converged block conservatively, not assume a real spectrum.
+enum class Spectrum : int { kReal = 0, kComplexPair = 1, kUnknown = 2 };
 
 namespace detail {
 
@@ -318,6 +351,25 @@ ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_
   }
   if (fallback) *fallback = !b.converged;
   return b;
+}
+
+/// Classify the spectrum of a small dense block @p A as kReal / kComplexPair / kUnknown (ADC-276): a
+/// GENERIC, device-safe predicate over the SAME Francis-QR path as real_eig_minmax (no second
+/// algorithm to keep in sync). @p im_tol is the RELATIVE imaginary tolerance of EigBounds::all_real
+/// (default 1e-5, scaled by max(|lmin|, |lmax|, 1); covers a real multiplicity up to m=3, the 3x3
+/// target -- see EigBounds::all_real for the tolerance contract, multiplicity coverage, and the
+/// relative-tolerance asymmetry). NON-CONVERGENCE under @p max_iter_per_eig returns kUnknown BEFORE any
+/// max_im read, so the Gershgorin fallback's max_im = 0 convention can never be mistaken for a real
+/// spectrum. Intended consumer: a native realizability / hyperbolicity check on small Jacobian or
+/// moment blocks (e.g. a 3x3 HyQMOM15 sub-block) with no NumPy and no host callback; the core stays
+/// free of any model specifics. Need the extremes too? Call real_eig_minmax and use the EigBounds
+/// predicates directly.
+template <int N>
+ADC_HD inline Spectrum real_spectrum(const Real (&A)[N][N], Real im_tol = Real(1e-5),
+                                     int max_iter_per_eig = 100) {
+  const EigBounds b = real_eig_minmax(A, max_iter_per_eig);
+  if (!b.converged) return Spectrum::kUnknown;  // non-convergence is EXPLICIT, never kReal
+  return b.all_real(im_tol) ? Spectrum::kReal : Spectrum::kComplexPair;
 }
 
 }  // namespace adc
