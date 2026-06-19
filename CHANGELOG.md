@@ -157,6 +157,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Shard + instrument the gate-python CI** (ADC-366): the PR-blocking `gate-python` job is split into 3
+  `matrix.shard` legs (round-robin over the sorted test list, ~1/3 of the ~18-19 min Python suite each);
+  the `gate` aggregator still `needs: gate-python` so the required check name is unchanged (branch
+  protection intact) and `fail-fast: false` keeps a full red/green signal. The opaque test runner is
+  replaced by a per-file timing harness (slowest-first log + a TSV/JSON timings artifact) that preserves
+  the exact fail semantics. ccache hit-rate is lifted on both gates (`CCACHE_BASEDIR`, `CCACHE_NOHASHDIR`,
+  `CCACHE_SLOPPINESS` + a codegen-neutral `-ffile-prefix-map`; cache keys unchanged, abi_key untouched),
+  and `setup-kokkos` bumps `actions/cache@v4 -> v5`. CI-only; no change to `-O` levels, the shipped
+  library, or test coverage (the 3 shards are a complete, disjoint partition of all 110 test files).
 - **Split `bindings.cpp` into per-area pybind TUs** (ADC-365): the `py::class_` / `.def` surface moves
   from the single `PYBIND11_MODULE` into `init_core` (module attrs + `SystemConfig` + `ModelSpec`),
   `init_system` (`System`), and `init_amr` (`AmrSystemConfig` + `AmrSystem`), each its own TU declared in

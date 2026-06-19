@@ -137,6 +137,11 @@ jobs:
       # ccache borne : evite que le cache enfle sans fin entre les runs.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
+      # ADC-366 ccache cross-run/cross-checkout hit-rate (codegen-neutral, keys unchanged; paired with
+      # -ffile-prefix-map on the cmake line below).
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_SLOPPINESS: locale,time_macros
       # Prefixe FIXE ou Kokkos est installe par l'action composite (meme chemin que kokkos-prefix) ;
       # mis en cache (le gros gain : pas de reconstruction de Kokkos a chaque run). Serial, PIC.
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
@@ -181,7 +186,10 @@ jobs:
       - name: Configure + build + test (Kokkos Serial)
         run: |
           SECONDS=0
-          cmake --preset ci-kokkos -DCMAKE_LINKER_TYPE=MOLD
+          # -ffile-prefix-map (ADC-366): codegen-neutral path rewrite for ccache cross-checkout hits (see
+          # gate-python). CI-only -D; abi_key (compiler+header-content hash) untouched.
+          cmake --preset ci-kokkos -DCMAKE_LINKER_TYPE=MOLD \
+            -DCMAKE_CXX_FLAGS="-ffile-prefix-map=${{ github.workspace }}=."
           cmake --build --preset ci-kokkos
           build_s=$SECONDS
           SECONDS=0
@@ -208,18 +216,41 @@ jobs:
   # GATE PYTHON (ADC-171). Ex-moitie Python du job sequentiel build-and-test : construit le module
   # _adc AVEC Kokkos puis exerce la suite python/tests. Tourne EN PARALLELE de gate-cpp.
   gate-python:
-    name: ubuntu-latest / Kokkos Serial (Python)
+    # ADC-366: sharded into N legs (matrix.shard) so the ~18-19 min Python suite runs ~1/N per leg in
+    # parallel. The job ID stays `gate-python`, so the required `gate` aggregator (needs: gate-python)
+    # rolls the WHOLE matrix up to ONE result -- branch protection (pinned to `gate`) is unchanged; the
+    # individual shard legs are NOT required checks. fail-fast:false so one red shard does not cancel the
+    # others (full red/green signal, no cancel-cascade that hides which shard failed). Each shard rebuilds
+    # _adc ccache-hot (the 38 DSL tests compile loaders at runtime, so a prebuilt artifact would not
+    # suffice; the shared ccache + Kokkos cache make the per-shard rebuild cheap).
+    name: ubuntu-latest / Kokkos Serial (Python) shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     needs: changes
     # Tout evenement non-PR lance le gate ; sur pull_request, des qu'un chemin C++ (cpp) OU Python
     # (python) a bouge -- une PR pur-Python ne paie donc QUE ce job, pas gate-cpp.
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Shard ids MUST stay contiguous 0..N-1: the harness pairs SHARD_INDEX=matrix.shard with
+        # SHARD_TOTAL=strategy.job-total and selects files by (index % total) == shard. Non-contiguous
+        # ids (e.g. [1,2,3]) would silently drop coverage -- to rebalance, change the COUNT here only.
+        shard: [0, 1, 2]
 
     env:
       # ccache dedie au module Python (.ccache-py) : meme separation que l'ancien job build-and-test.
       CCACHE_DIR: ${{ github.workspace }}/.ccache-py
       CCACHE_MAXSIZE: 2G
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
+      # ADC-366 ccache cross-run/cross-checkout hit-rate: rewrite workspace-absolute paths to relative
+      # (BASEDIR + NOHASHDIR) and lift the few residual false misses (SLOPPINESS). Codegen-neutral; the
+      # cache KEYS are unchanged. Paired with -ffile-prefix-map on the cmake configure line below.
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_SLOPPINESS: locale,time_macros
+      # Shard selector read by the test harness (no-op fallback INDEX=0/TOTAL=1 = run everything).
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_TOTAL: ${{ strategy.job-total }}
 
     steps:
       - uses: actions/checkout@v6
@@ -238,15 +269,18 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      # ccache du module Python : cle INCHANGEE depuis l'ancien job build-and-test (python).
+      # ccache du module Python. ADC-366: PER-SHARD write key so the N shards finishing together do not
+      # race on one shared key (GitHub would keep only the first; a partial cache could win). restore-keys
+      # still fall back to this shard on the branch, then master, then ANY python ccache, so a fresh shard
+      # warms from an existing cache (cross-shard / cross-ref hits via CCACHE_BASEDIR+NOHASHDIR).
       - name: Cache ccache (Python module)
         uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-python-${{ github.ref }}-${{ github.sha }}
+          key: ccache-${{ runner.os }}-python-shard${{ matrix.shard }}-${{ github.ref }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ runner.os }}-python-${{ github.ref }}-
-            ccache-${{ runner.os }}-python-refs/heads/master-
+            ccache-${{ runner.os }}-python-shard${{ matrix.shard }}-${{ github.ref }}-
+            ccache-${{ runner.os }}-python-shard${{ matrix.shard }}-refs/heads/master-
             ccache-${{ runner.os }}-python-
 
       # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On construit l'extension
@@ -258,7 +292,12 @@ jobs:
         run: |
           pip install --upgrade pip numpy pytest
           SECONDS=0
-          cmake --preset ci-kokkos-python -DCMAKE_LINKER_TYPE=MOLD
+          # -ffile-prefix-map (ADC-366): rewrite the workspace-absolute __FILE__/debug paths the compiler
+          # bakes into objects to relative, so ccache hits across checkouts/shards. Codegen-neutral (only
+          # embedded path strings change; instructions/symbols identical) -> the abi_key (compiler+header
+          # content hash) is untouched. CI-only -D, mirroring -DCMAKE_LINKER_TYPE=MOLD (presets stay clean).
+          cmake --preset ci-kokkos-python -DCMAKE_LINKER_TYPE=MOLD \
+            -DCMAKE_CXX_FLAGS="-ffile-prefix-map=${{ github.workspace }}=."
           cmake --build --preset ci-kokkos-python
           build_s=$SECONDS
           export PYTHONPATH="$PWD/build-kokkos-py/python"
@@ -267,27 +306,61 @@ jobs:
           # via Kokkos_ROOT / ADC_KOKKOS_ROOT : on pointe le MEME Kokkos Serial que le module _adc.
           export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
           SECONDS=0
-          # ADC-112 : capturer le code de sortie de python3 (rc) avant le echo final, sinon la
-          # valeur de retour du bash -c = celle du echo (toujours 0) et xargs avale les echecs.
-          # Avec exit $rc, un test rouge -> bash -c non nul -> xargs sort 123 -> l'etape echoue
-          # (le run a deja -eo pipefail). On garde -P 4 : tous les tests tournent, l'etape echoue
-          # si AU MOINS un a echoue.
-          find python/tests -maxdepth 1 -name 'test_*.py' -print0 | sort -z \
-            | xargs -0 -P 4 -I {} bash -c 'echo "::group::{}"; python3 "{}"; rc=$?; echo "::endgroup::"; exit $rc'
+          # ADC-366 instrumented + sharded runner. SHARD_INDEX/SHARD_TOTAL default to 0/1 (run EVERY file,
+          # identical to the old behaviour) when unset. The union of the 3 shards (index%total) is the full
+          # disjoint suite -> no test is dropped. ADC-112 fail semantics preserved: run_one returns the
+          # python rc; xargs returns 123 if ANY worker failed; `|| rc=$?` captures it WITHOUT aborting (so
+          # the timing summary/artifact still emit), then `exit $rc` fails the step.
+          : "${SHARD_INDEX:=0}" "${SHARD_TOTAL:=1}"
+          timings="$RUNNER_TEMP/pytimings"; mkdir -p "$timings"
+          run_one() {
+            f="$1"; s=$(date +%s.%N)
+            echo "::group::$f"; python3 "$f"; rc=$?; echo "::endgroup::"
+            e=$(date +%s.%N); d=$(awk -v a="$s" -v b="$e" 'BEGIN{printf "%.2f", b-a}')
+            printf '%s\t%s\t%s\n' "$f" "$d" "$rc" >> "$timings/timings.tsv"  # one <4KB O_APPEND line: atomic at -P4
+            return "$rc"
+          }
+          export -f run_one; export timings
+          rc=0
+          # NB: line-oriented (awk needs lines) -> assumes no test file name contains a newline (true for
+          # the test_*.py convention); we re-NUL the selected lines for xargs -0.
+          find python/tests -maxdepth 1 -name 'test_*.py' | sort \
+            | awk -v t="$SHARD_TOTAL" -v i="$SHARD_INDEX" '(NR-1)%t==i' \
+            | tr '\n' '\0' \
+            | xargs -0 -P 4 -I {} bash -c 'run_one "$@"' _ {} || rc=$?
           test_s=$SECONDS
+          # Per-file durations, slowest first, to the log + a JSON/TSV artifact (always, even on failure).
+          sort -t"$(printf '\t')" -k2 -gr "$timings/timings.tsv" > "$timings/timings.sorted.tsv" 2>/dev/null || cp "$timings/timings.tsv" "$timings/timings.sorted.tsv"
+          echo "::group::per-file test durations (slowest first) -- shard ${SHARD_INDEX}/${SHARD_TOTAL}"
+          awk -F'\t' '{printf "%8.2fs  rc=%s  %s\n",$2,$3,$1}' "$timings/timings.sorted.tsv"
+          echo "::endgroup::"
+          { printf '['; awk -F'\t' 'NR>1{printf ","} {printf "{\"file\":\"%s\",\"seconds\":%s,\"rc\":%s}",$1,$2,$3}' "$timings/timings.sorted.tsv"; printf ']\n'; } > "$timings/timings.json"
           {
-            echo "### gate-python (module _adc, Kokkos Serial)"
+            echo "### gate-python shard ${SHARD_INDEX}/${SHARD_TOTAL} (module _adc, Kokkos Serial)"
             echo ""
             echo "| Phase | Duree (s) |"
             echo "| --- | --- |"
             echo "| configure + build | ${build_s} |"
-            echo "| tests (python) | ${test_s} |"
+            echo "| tests (python, this shard) | ${test_s} |"
             echo ""
+            echo "Top 10 slowest test files (this shard):"
+            echo '```'
+            head -10 "$timings/timings.sorted.tsv" | awk -F'\t' '{printf "%8.2fs  %s\n",$2,$1}'
+            echo '```'
             echo "Hit-rate ccache :"
             echo '```'
             ccache -s | grep -i hits || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - name: Upload per-file test timings (ADC-366)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-python-timings-shard${{ matrix.shard }}
+          path: ${{ runner.temp }}/pytimings/timings.*
+          if-no-files-found: ignore
 
       - name: ccache stats (Python module)
         if: always()
