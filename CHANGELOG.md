@@ -77,6 +77,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Test build deduplicates the heavy runtime TUs** (ADC-336): `python/system.cpp` and
+  `python/amr_system.cpp` are now compiled once per test configuration into two `OBJECT` libraries
+  (`adc_runtime_system`, `adc_runtime_amr`) in `tests/CMakeLists.txt`, instead of being re-listed as a
+  source in ~23 test executables (each a multi-GB cc1plus compile of the full dispatch product). The 23
+  plain and MPI heavy-source targets link the matching object library; the 4 `ENABLE_EXPORTS`
+  native-loader tests keep their own copy so the dlopen/-rdynamic resolution of the `ADC_EXPORT` runtime
+  symbols is unchanged. Byte-identical: the object libraries carry exactly the flags those targets used
+  before (`adc::adc` only, no extra defines), and the `-O0` RAM cap is propagated PUBLIC so each
+  consumer's own `.cpp` stays at the same `-O` level, preserving the `add_compiled_model` vs `add_block`
+  bit-parity (`dmax==0`) against FMA contraction. `_adc` (`python/CMakeLists.txt`) is untouched: it
+  already compiled each TU once, and no preset co-builds tests and the Python module. Serial tree:
+  `system.cpp` 6 -> 1 compile, `amr_system.cpp` 14 -> 5 (1 library + 4 retained loaders). No change to
+  the numerics or the public API.
 - **Reliable Linux/Ubuntu user install** (ADC-321): `scripts/setup_env.sh` now bootstraps a fresh
   machine end to end -- it guides the Miniforge install when `conda` is absent, configures conda-forge
   to survive HTTP 429, forces a CPU Kokkos by default via `CONDA_OVERRIDE_CUDA=""` (so `pip install .`
