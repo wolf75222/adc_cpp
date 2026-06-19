@@ -122,6 +122,7 @@ adc_add_test(test_sync_residence)  # API memoire explicite : sync_host/sync_devi
 adc_add_test(test_reduce)
 adc_add_test(test_dense_eig)  # numerics/dense_eig.hpp : extremes du spectre d'un petit bloc dense (HLL exact)
 adc_add_test(test_fill_boundary)
+adc_add_test(test_fill_boundary_cache)
 adc_add_test(test_physical_bc)
 adc_add_test(test_geometry)
 
@@ -707,6 +708,17 @@ if(ADC_HAS_MPI)
   adc_add_mpi_test(test_mpi_smoke 4)
   adc_add_mpi_test(test_mpi_array_reduce 4)
   adc_add_mpi_test(test_mpi_fillboundary 4)
+  # Cache du schedule de halos (ADC-260) sous MPI : la reutilisation du schedule cache doit garder
+  # les listes send/recv ALIGNEES cross-rang (enumeration deterministe identique) et le resultat
+  # correct sur K appels. np=1 = chemin local (== serie, deja couvert par adc_add_test) ; np=2/4 =
+  # chemin MPI cross-rang. Reutilise la cible serie test_fill_boundary_cache (pas de doublon).
+  foreach(np 1 2 4)
+    add_test(NAME test_fill_boundary_cache_np${np}
+             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np}
+                     ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_fill_boundary_cache>
+                     ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(test_fill_boundary_cache_np${np} PROPERTIES LABELS "mpi" TIMEOUT 600)
+  endforeach()
   adc_add_mpi_test(test_mpi_poisson 4)
   adc_add_mpi_test(test_mpi_redistribute 4)
   adc_add_mpi_test(test_mpi_coupler_inject 4)

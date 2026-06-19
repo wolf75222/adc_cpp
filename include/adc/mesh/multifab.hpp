@@ -18,8 +18,10 @@
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>  // device_fence, sync_host, sync_device
+#include <adc/mesh/halo_schedule.hpp>  // memoized fill_boundary schedule (ADC-260)
 #include <adc/parallel/comm.hpp>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -87,6 +89,18 @@ class MultiFab {
     for (auto& f : fabs_) f.set_val(v);
   }
 
+  /// Internal (ADC-260): memoized halo-exchange schedule used by fill_boundary. Lazily created on
+  /// first use. The schedule is a pure function of (box_array, dmap, n_grow) for a given
+  /// (Periodicity, domain); since none of ba_/dm_/ngrow_ has an in-place setter, the cache can only
+  /// go stale through whole-object (re)assignment (e.g. AMR regrid builds a fresh MultiFab and
+  /// move-assigns it over the level slot), which drops the cache with the object. It is shared on
+  /// copy (a copy has the same layout), which keeps copies consistent. Not part of the public
+  /// numerical API. Returned by reference so fill_boundary can populate it.
+  HaloScheduleCache& halo_cache() const {
+    if (!halo_cache_) halo_cache_ = std::make_shared<HaloScheduleCache>();
+    return *halo_cache_;
+  }
+
  private:
   BoxArray ba_{};
   DistributionMapping dm_{};
@@ -95,6 +109,8 @@ class MultiFab {
   std::vector<Fab2D> fabs_{};       // locally owned fabs
   std::vector<int> local_index_{};  // global box -> local index (-1 otherwise)
   std::vector<int> global_of_local_{};  // local index -> global box
+  // Memoized fill_boundary schedule (ADC-260). mutable: caching is logically const; lazily built.
+  mutable std::shared_ptr<HaloScheduleCache> halo_cache_{};
 };
 
 /// Sum of the VALID cells of component comp, reduced over ALL ranks (all_reduce). COLLECTIVE under

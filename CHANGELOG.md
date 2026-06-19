@@ -136,6 +136,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Memoize the fill_boundary halo schedule** (ADC-260): `fill_boundary_begin` no longer rebuilds the
+  `BoxHash` and re-enumerates the full local + global (cross-rank send/recv) halo job list on every
+  call. That schedule is a pure function of the layout (`BoxArray`, `DistributionMapping`, `n_grow`)
+  and the per-call (`Periodicity`, domain), so it is now built once and memoized per distinct
+  (`Periodicity`, domain) on the `MultiFab` (new `include/adc/mesh/halo_schedule.hpp`); only the local
+  copies and the pack/MPI/unpack of the live data run per call. The plan is replayed in the SAME
+  deterministic order, so packed buffers stay bit-identical and the per-rank send/recv lists stay
+  aligned (`tests/test_mpi_mbox_parity`, `test_mpi_amr_compiled_parity` unchanged). The cache lives on
+  the `MultiFab` and is dropped when the object is reassigned (AMR regrid builds a fresh `MultiFab`),
+  so it cannot go stale. New `tests/test_fill_boundary_cache.cpp` (serial + `np=1/2/4`) proves cache-on
+  equals rebuild bit-for-bit, the schedule is built once across K calls, and it is rebuilt when the
+  periodicity, domain, `n_grow`, or layout changes. No API or behavior change; biggest win in the
+  MG-dominated and multi-rank halo-dominated regimes.
 - **Validation bricks out of the production physics surface** (ADC-329): the validation/reference
   bricks `AdvectionDiffusion`, `LangmuirMode` and `TwoFluidLinear` move from `include/adc/physics/` to
   `include/adc/validation/physics/` under the new `namespace adc::validation`, so the production brick
