@@ -128,6 +128,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Validation bricks out of the production physics surface** (ADC-329): the validation/reference
+  bricks `AdvectionDiffusion`, `LangmuirMode` and `TwoFluidLinear` move from `include/adc/physics/` to
+  `include/adc/validation/physics/` under the new `namespace adc::validation`, so the production brick
+  surface (`physics/{hyperbolic,source,elliptic,composite}.hpp`, aggregated by `physics/bricks.hpp`)
+  stays free of test-only models. The old `include/adc/physics/<name>.hpp` paths remain as deprecated
+  compat forwarders that alias the type back into `adc::` (e.g. `adc::AdvectionDiffusion`), so existing
+  and external includes keep compiling unchanged; `tests/test_physics_validation_compat.cpp` pins that
+  both the new and legacy paths build and name the same types. No numerical behavior change.
 - **Factor the multi-box global-gather idiom** (ADC-264): the five copy-pasted collective gather sites
   in `python/system.cpp` (`Impl::copy_comp0` / `copy_state` multi-box branches and
   `System::density_global` / `state_global` / `potential_global`) now route through a single
