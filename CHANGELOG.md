@@ -42,6 +42,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   wheel cache, `--fresh` also clears ccache for a cold build. `scikit-build-core` is now pinned in
   `environment.yml` (so `--no-build-isolation` reuses the pinned stack) and `setup_env.sh` persists
   `CMAKE_PREFIX_PATH`. No change to `-O3` or generated code.
+- **Prebuilt macOS arm64 wheel** (ADC-360): a `Wheels` workflow (`.github/workflows/wheels.yml`) builds a
+  self-contained macOS arm64 / CPython 3.12 `_adc` wheel with `cibuildwheel` (Kokkos Serial built
+  static + PIC and linked in; `delocate` bundles the rest), uploads it as a build artifact on
+  build-relevant PRs, and attaches it to the GitHub Release on a `vX.Y.Z` tag. End users can then
+  `pip install adc_cpp-*.whl` with no local toolchain. Separate from the required CI `gate`; no
+  source or runtime behavior change. Linux/Windows wheels and PyPI publishing are follow-ups.
 - **Configurable AMR regrid variable by name or role** (ADC-296): `AmrSystem.set_refinement` gains
   optional `variable=` / `role=` selectors so the multi-block union-of-tags regrid can refine on any
   conserved variable, not just component 0. Each block resolves the selector against its own conserved

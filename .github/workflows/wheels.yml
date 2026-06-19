@@ -1,0 +1,106 @@
+# Builds a PREBUILT macOS arm64 / CPython 3.12 wheel of the `_adc` module so end users can
+# `pip install adc_cpp-*.whl` in seconds with no local toolchain (the from-source `pip install .`
+# recompiles the heavy Kokkos module). The wheel is self-contained: Kokkos is built Serial + STATIC
+# + PIC and linked into `_adc.*.so`, and cibuildwheel runs delocate-wheel to bundle any remaining
+# dynamic dependency. Kokkos stays ON and mandatory (adc_cpp is Kokkos-only).
+#
+# Triggers: on a build-relevant PR (so this workflow validates itself and the wheel actually builds),
+# on a vX.Y.Z tag (attach the wheel to the GitHub Release made by release.yml), and on demand. It is
+# SEPARATE from ci.yml's required `gate` (an artifact build, not a correctness gate).
+name: Wheels
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'python/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.github/workflows/wheels.yml'
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write  # attach the wheel to the Release on a tag (gh release upload); read otherwise
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos-arm64:
+    name: wheel (macOS arm64, cp312)
+    runs-on: macos-14  # Apple Silicon (arm64) runner
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install cibuildwheel
+        # Pinned (not a floating range): this job ships a redistributable artifact, so its build driver
+        # is fixed like ci.yml pins its third-party action by SHA. Bump deliberately.
+        run: python -m pip install --upgrade pip "cibuildwheel==2.21.3"
+
+      # cibuildwheel builds cp312-macosx_arm64 in an isolated env. CIBW_BEFORE_ALL runs ONCE on the
+      # runner (macOS builds are native, not containerized), installing a Serial+static+PIC Kokkos that
+      # find_package(Kokkos) then links INTO _adc -> the wheel carries no external Kokkos dylib.
+      # ADC_HEAVY_TU_POOL=2: post-split (ADC-335/342/359) the heavy module TUs are SMALL sub-TUs, so two
+      # -O3 compiles fit the ~7 GB / 3-vCPU runner; the original pool=1 OOM guard (for the old monolithic
+      # system.cpp / amr_system.cpp) made the serial build ~1 h here. MACOSX_DEPLOYMENT_TARGET=11.0 keeps
+      # the wheel installable on older macOS than the runner SDK.
+      - name: Build wheel (cibuildwheel)
+        env:
+          CIBW_BUILD: cp312-macosx_arm64
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_CONFIG_SETTINGS: cmake.define.ADC_HEAVY_TU_POOL=2
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+          CIBW_BEFORE_ALL: >
+            git clone --depth 1 -b 4.4.01 https://github.com/kokkos/kokkos.git /tmp/kokkos &&
+            cmake -S /tmp/kokkos -B /tmp/kbuild
+            -DKokkos_ENABLE_SERIAL=ON
+            -DBUILD_SHARED_LIBS=OFF
+            -DCMAKE_INSTALL_PREFIX=/tmp/kokkos-install
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_CXX_STANDARD=20
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON &&
+            cmake --build /tmp/kbuild --target install -j3 &&
+            test -f /tmp/kokkos-install/lib/cmake/Kokkos/KokkosConfig.cmake
+          CIBW_ENVIRONMENT: >
+            Kokkos_ROOT=/tmp/kokkos-install
+            CMAKE_PREFIX_PATH=/tmp/kokkos-install
+            MACOSX_DEPLOYMENT_TARGET=11.0
+          # Smoke-test the built wheel in cibuildwheel's isolated venv: it must import self-contained
+          # (this is the real self-containment check; doctor() is skipped here as the bare venv has no
+          # compiler/Kokkos and would print noisy but harmless FAIL lines).
+          CIBW_TEST_COMMAND: 'python -c "import adc; print(adc.__version__)"'
+        run: python -m cibuildwheel --output-dir wheelhouse
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: adc_cpp-macos-arm64-cp312
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+      # On a vX.Y.Z tag, attach the wheel to the Release. release.yml (a separate workflow on the same
+      # tag) is the sole creator of the Release from CHANGELOG.md; both start together, so wait for it
+      # to exist before uploading rather than racing it (the long wheel build makes this near-certain,
+      # the poll is insurance). We do NOT create the Release here, to keep release.yml's CHANGELOG notes.
+      - name: Attach wheel to the Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 15); do
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then break; fi
+            echo "waiting for release $GITHUB_REF_NAME (attempt $i/15)..."; sleep 20
+          done
+          gh release upload "$GITHUB_REF_NAME" wheelhouse/*.whl --repo "$GITHUB_REPOSITORY" --clobber
