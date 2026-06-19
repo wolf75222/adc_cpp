@@ -266,6 +266,10 @@ class GeometricMG {
   // read at (i,j) only (no neighbor), so 0 ghost; restricted by average on the coarse
   // levels (same physical value sampled). DO NOT call => kappa = 0 (Poisson, historical
   // path strictly unchanged). Composable with set_epsilon (eps(x) and kappa(x) together).
+  // ADC-251: 0 ghost / no fill_ghosts is DELIBERATE (a reaction term is zeroth-order: kappa is never
+  // read at a neighbor, so its ghosts cannot be needed); filling them would be dead work. The
+  // invariant is locked by the VARYING-kappa MMS in tests/test_screened_poisson.cpp (cases D/E),
+  // which a future stencil reading kappa on its unfilled ghosts would break.
   void set_reaction(std::function<Real(Real, Real)> kappa_fn) {
     // kappa: DIAGONAL, read at (i,j) only -> 0 ghost and do_fill=false (NO fill_ghosts, historical).
     // ebc is then unused (BCRec{} never read).
