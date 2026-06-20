@@ -1620,6 +1620,8 @@ class HyperbolicModel:
         self._hllc = False       # True: emit the HLLC capability (contact_speed + star state)
         self._roe = False        # True: emit the ROE capability (roe_dissipation from the roles)
         self._roe_rows = None    # {"x": [Expr], "y": [Expr]}: roe_dissipation PROVIDED (outside roles)
+        self._roe_jacobian = None  # {"x"/"y": [[Expr]]}: roe_dissipation from the FLUX JACOBIAN
+                                   # (roe_from_jacobian, generic moment Roe via adc::roe_abs_apply)
         self.prim_state = []    # ordered names of the primitive state (Prim layout); for the codegen
         self.cons_from = None   # list of Expr: conservative in terms of the primitives (to_conservative)
         self.cons_roles = None  # explicit override of the conservative roles (otherwise canonical mapping)
@@ -1924,6 +1926,9 @@ class HyperbolicModel:
         if self._roe_rows is not None:
             raise ValueError("enable_roe : roe_dissipation(...) already provided -- one single provider "
                              "of the roe_dissipation hook (capability from the roles OR provided)")
+        if self._roe_jacobian is not None:
+            raise ValueError("enable_roe : roe_from_jacobian() already declared -- one single provider "
+                             "of the roe_dissipation hook")
         self._roe = True
 
     def roe_dissipation(self, x, y):
@@ -1949,6 +1954,9 @@ class HyperbolicModel:
         if self._roe:
             raise ValueError("roe_dissipation : enable_roe() already called -- one single provider of the "
                              "roe_dissipation hook (capability from the roles OR provided)")
+        if self._roe_jacobian is not None:
+            raise ValueError("roe_dissipation : roe_from_jacobian() already declared -- one single "
+                             "provider of the roe_dissipation hook")
         rx, ry = list(x), list(y)
         if len(rx) != self.n_vars or len(ry) != self.n_vars:
             raise ValueError("roe_dissipation : %d expressions expected per direction (got x=%d, "
@@ -1958,6 +1966,33 @@ class HyperbolicModel:
             for e in rows[key]:
                 _roe_validate(e, False)  # rejects any variable outside a left()/right() marker
         self._roe_rows = rows
+
+    def roe_from_jacobian(self):
+        """Generic moment Roe: emit the hook ``roe_dissipation(UL, AL, UR, AR, dir)`` =
+        ``|A| (UR - UL)`` with ``A = dF_dir/dU`` the flux Jacobian (m.flux_jacobian, autodiff)
+        evaluated at the ARITHMETIC MEAN interface state ``Uavg = 1/2 (UL + UR)``, and ``|A|`` via
+        the matrix-sign kernel ``adc::roe_abs_apply`` (dense_eig.hpp): for a real-diagonalizable A
+        this is ``R |Lambda| R^-1`` exactly, the dissipation of the reference flux_ROE. On a complex
+        or singular spectrum the kernel returns false and the hook FALLS BACK to a spectral-radius
+        (Rusanov) dissipation ``rho (UR - UL)``, ``rho = max(|lmin|, |lmax|)`` of
+        ``adc::real_eig_minmax(A)`` -- so the dissipation is always well defined.
+
+        Unlike m.enable_roe (which needs fluid roles Density/MomentumX/MomentumY + primitive 'p'),
+        this path needs NEITHER -- it is the GENERIC provider for a moment hierarchy (HyQMOM), making
+        riemann='roe' available with no Euler-4-var assumption. The FULL n_vars x n_vars Jacobian is
+        always eigendecomposed (as the reference flux_ROE does), not a block partition.
+
+        EXCLUSIVE with m.enable_roe and m.roe_dissipation: the three are providers of the SAME
+        roe_dissipation hook (declaring more than one raises). Requires set_flux(...) and the 'aot'
+        or 'production' backend (the hook is emitted in the generated brick). WITHOUT a call: nothing
+        emitted (bit-identical cache key)."""
+        if self._roe:
+            raise ValueError("roe_from_jacobian : enable_roe() already called -- one single provider "
+                             "of the roe_dissipation hook")
+        if self._roe_rows is not None:
+            raise ValueError("roe_from_jacobian : roe_dissipation(...) already provided -- one single "
+                             "provider of the roe_dissipation hook")
+        self._roe_jacobian = {"x": self.flux_jacobian(0), "y": self.flux_jacobian(1)}
 
     def flux_jacobian(self, dir):
         """Flux jacobian A = dF_dir/dU : n_vars x n_vars matrix of expressions, A[i][j] =
@@ -2648,7 +2683,7 @@ class HyperbolicModel:
         # dense_eig.hpp : eigenvalues of dense blocks (exact wave_speeds) OU temoin de VP dans la
         # projection (m.projection + dsl.eig_max_im, ADC-289). Sans l'un ou l'autre : non inclus.
         eig_pairs = _collect_eig_witnesses(self._proj or [])
-        if self._ws_jacobian is not None or eig_pairs:
+        if self._ws_jacobian is not None or eig_pairs or self._roe_jacobian is not None:
             S.append("#include <adc/numerics/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
@@ -2973,6 +3008,55 @@ class HyperbolicModel:
             S.append("    } else {")
             S += ["      d[%d] = %s;" % (i, _cpp_roe(self._roe_rows["y"][i], None)) for i in range(nc)]
             S += ["    }", "    return d;", "  }", ""]
+
+        # CAPABILITY ROE FROM THE FLUX JACOBIAN (m.roe_from_jacobian): generic moment Roe. The hook
+        # builds A = dF_dir/dU at Uavg = 1/2(UL+UR) (cons locals bound to the mean, like the
+        # wave_speeds-from-jacobian path binds them to U), then d = |A| (UR-UL) via adc::roe_abs_apply
+        # (matrix-sign |A| = A sign(A); for a real-diagonalizable A this is R|Lambda|R^-1 exactly,
+        # the reference flux_ROE dissipation). On a complex/singular spectrum the kernel returns false
+        # -> spectral-radius (Rusanov) fallback rho (UR-UL), rho = max(|lmin|,|lmax|) of
+        # adc::real_eig_minmax(A). Roles-free (no 'p', no Density/Momentum): the generic provider for a
+        # moment hierarchy. The core (HasRoeDissipation) does F = 1/2(FL+FR) - 1/2 d.
+        if self._roe_jacobian is not None:
+            Jx = self._roe_jacobian["x"]
+            Jy = self._roe_jacobian["y"]
+            live = self._live_prims([e for row in (Jx + Jy) for e in row])
+            S.append("  // CAPABILITY ROE depuis la JACOBIENNE (roe_from_jacobian) : d = |A| (UR-UL),")
+            S.append("  // A = dF/dU a l'etat moyen Uavg = 1/2(UL+UR) ; |A| via adc::roe_abs_apply")
+            S.append("  // (matrix-sign), repli rayon spectral (real_eig_minmax) si complexe/singulier.")
+            S.append("  ADC_HD State roe_dissipation(const State& UL, const adc::Aux&, "
+                     "const State& UR, const adc::Aux&, int dir) const {")
+            # conservatives at the ARITHMETIC-MEAN interface state Uavg = 1/2 (UL + UR)
+            S += ["    const adc::Real %s = adc::Real(0.5) * (UL[%d] + UR[%d]);" % (c, i, i)
+                  for i, c in enumerate(self.cons_names)]
+            S += self._prim_block(live)  # live primitives, evaluated at Uavg
+            S.append("    adc::Real A[%d][%d];" % (nc, nc))
+            S.append("    if (dir == 0) {")
+            tlx, cppx = self._codegen_exprs([Jx[i][j] for i in range(nc) for j in range(nc)],
+                                            cse, indent="      ")
+            S += tlx
+            for i in range(nc):
+                S += ["      A[%d][%d] = %s;" % (i, j, cppx[i * nc + j]) for j in range(nc)]
+            S.append("    } else {")
+            tly, cppy = self._codegen_exprs([Jy[i][j] for i in range(nc) for j in range(nc)],
+                                            cse, indent="      ")
+            S += tly
+            for i in range(nc):
+                S += ["      A[%d][%d] = %s;" % (i, j, cppy[i * nc + j]) for j in range(nc)]
+            S.append("    }")
+            S.append("    adc::Real dU[%d], out[%d];" % (nc, nc))
+            S += ["    dU[%d] = UR[%d] - UL[%d];" % (i, i, i) for i in range(nc)]
+            S.append("    State d{};")
+            S.append("    if (adc::roe_abs_apply(A, dU, out)) {")
+            S += ["      d[%d] = out[%d];" % (i, i) for i in range(nc)]
+            S.append("    } else {  // spectre complexe/singulier : repli rayon spectral (Rusanov)")
+            S.append("      const adc::EigBounds eb_ = adc::real_eig_minmax(A);")
+            S.append("      const adc::Real al_ = eb_.lmin < adc::Real(0) ? -eb_.lmin : eb_.lmin;")
+            S.append("      const adc::Real ah_ = eb_.lmax < adc::Real(0) ? -eb_.lmax : eb_.lmax;")
+            S.append("      const adc::Real rho_ = al_ > ah_ ? al_ : ah_;")
+            S += ["      d[%d] = rho_ * dU[%d];" % (i, i) for i in range(nc)]
+            S.append("    }")
+            S += ["    return d;", "  }", ""]
 
         # OPTIONAL step bounds (m.stability_speed / m.stability_dt): emitted like the C++
         # traits HasStabilitySpeed / HasStabilityDt (cf. adc/core/physical_model.hpp). A single
@@ -3583,6 +3667,12 @@ class HyperbolicModel:
         if getattr(m, "_roe_rows", None) is not None:
             parts.append("roe_rows=%s" % ";".join(repr(e) for k in ("x", "y")
                                                   for e in m._roe_rows[k]))
+        # roe_dissipation FROM THE JACOBIAN (roe_from_jacobian): same conditional policy -- folded
+        # only if declared, so a roe_from_jacobian model gets a DISTINCT .so cache key (from a non-roe
+        # model AND from an enable_roe / provided-rows model) without perturbing existing caches.
+        if getattr(m, "_roe_jacobian", None) is not None:
+            parts.append("roe_jac=%s" % ";".join(repr(e) for k in ("x", "y")
+                                                 for row in m._roe_jacobian[k] for e in row))
         # EXPLICIT signed wave speeds (set_wave_speeds): same conditional policy (without a call,
         # hash strictly identical to the historical one -> .so cache of existing models preserved).
         if getattr(m, "_wave_speeds", None) is not None:
@@ -4183,6 +4273,14 @@ class Model:
         m.roe_dissipation, emits nothing. @p dir: 0/'x' or 1/'y'. Delegates to HyperbolicModel."""
         return self._m.flux_jacobian(dir)
 
+    def roe_from_jacobian(self):
+        """Generic moment Roe: emits roe_dissipation = ``|A| (UR-UL)`` with A the flux Jacobian at
+        Uavg = 1/2(UL+UR) and |A| via adc::roe_abs_apply (matrix-sign), spectral-radius Rusanov
+        fallback on a complex/singular spectrum. Roles-free (no Density/Momentum, no 'p'): makes
+        riemann='roe' available for a moment hierarchy. Exclusive with enable_roe / roe_dissipation.
+        Delegates to HyperbolicModel.roe_from_jacobian (cf. its doc)."""
+        self._m.roe_from_jacobian()
+
     def left(self, expr):
         """Marks @p expr as evaluated on the LEFT state UL (m.roe_dissipation). Sugar for dsl.left."""
         return left(expr)
@@ -4345,7 +4443,8 @@ class Model:
             params=self.params, caps=_BACKEND_CAPS[backend],
             abi_key=abi_key, model_hash=model_hash,
             cxx=eff_cxx, std=eff_std, hllc=m._hllc,
-            roe=(m._roe or getattr(m, '_roe_rows', None) is not None),
+            roe=(m._roe or getattr(m, '_roe_rows', None) is not None
+                 or getattr(m, '_roe_jacobian', None) is not None),
             aux_extra_names=m.aux_extra_names,
             wave_speeds=(m._wave_speeds is not None or m._ws_jacobian is not None
                          or "p" in m.prim_defs))

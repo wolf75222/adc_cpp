@@ -30,6 +30,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   This is the numerical kernel for the upcoming generic moment-system Roe flux (HyQMOM15); no public
   behavior changes yet. Covered by `tests/test_dense_eig.cpp` (parity to `R |Lambda| R^T` up to N=15,
   plus the complex and singular fallbacks).
+- **Generic moment Roe flux: `m.roe_from_jacobian()` + `build_moment_model(roe=True)`** (ADC-368):
+  a DSL emitter that makes `riemann='roe'` available for a moment hierarchy (HyQMOM) with NO fluid
+  roles and NO primitive `p` (unlike `m.enable_roe`). It emits the `roe_dissipation` hook =
+  `|A| (UR - UL)` with `A = dF_dir/dU` the autodiff flux Jacobian evaluated at the arithmetic-mean
+  interface state, `|A|` via `adc::roe_abs_apply` (spectral-radius Rusanov fallback on a
+  complex/singular spectrum) -- the reference `flux_ROE` dissipation. It is the third (mutually
+  exclusive) provider of the `roe_dissipation` hook and folds into the model cache key; without a
+  call nothing is emitted (bit-identical). `adc.moments.build_moment_model` gains a `roe=False`
+  option (additive to `exact_speeds`, which still supplies `max_wave_speed`). This also fixes a
+  latent core gap: `SourceFreeModel` (the IMEX explicit-half-step wrapper) now forwards the Roe/HLLC
+  capability hooks (`roe_dissipation` / `contact_speed` / `hllc_star_state`), which it previously
+  dropped (it forwarded only `pressure` / `wave_speeds`) -- so a non-Euler model on `riemann='roe'`
+  (or `'hllc'`) lost the hook through the IMEX path and fell back to the Euler-4var branch, a compile
+  error for `n_vars != 4`. Covered by `python/tests/test_dsl_roe_from_jacobian.py` (codegen + AOT
+  compile + `System` `riemann='roe'` 10-step mass conservation + rejection without the capability).
 - **Configure-time guard: Kokkos CUDA is rejected on native Windows** (ADC-168): `cmake` now fails
   fast with a clear message (use WSL2 for the GPU; native Windows is CPU Serial/OpenMP only) when
   `Kokkos_ENABLE_CUDA=ON` is requested on a native Windows configuration, instead of letting the

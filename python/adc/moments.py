@@ -191,7 +191,7 @@ def bgk_source(M, nu):
 
 
 def build_moment_model(name, order, closure, blocks=None, exact_speeds=True,
-                       robust=False, eps_m00=1e-12, eps_cov=1e-12, sources=None):
+                       robust=False, eps_m00=1e-12, eps_cov=1e-12, sources=None, roe=False):
     """2D moment model with an arbitrary closure: flux and intermediates GENERATED.
 
     @p order: max order of the transported moments (order=2 -> 6 variables, order=4 -> 15).
@@ -210,6 +210,11 @@ def build_moment_model(name, order, closure, blocks=None, exact_speeds=True,
        state).
     @p sources: callable (m, M) -> list of Expr (aligned with moment_indices), wired through
        m.source; M = dict (p, q) -> conservative variable. See lorentz_sources.
+    @p roe: True = also emit the generic Roe dissipation (m.roe_from_jacobian): the FULL flux
+       Jacobian at the arithmetic-mean interface state is eigendecomposed (|A| via the matrix-sign
+       kernel adc::roe_abs_apply, spectral-radius Rusanov fallback), making riemann='roe' available
+       for the moment system (no fluid roles / pressure needed). Additive to exact_speeds (which
+       still provides max_wave_speed for the CFL dt). Needs the 'aot' or 'production' backend.
     @return adc.dsl.Model ready to compile (the caller may still add elliptic_rhs, params,
        aux... before m.compile)."""
     if order < 2:
@@ -296,6 +301,8 @@ def build_moment_model(name, order, closure, blocks=None, exact_speeds=True,
 
     if exact_speeds:
         m.wave_speeds_from_jacobian(blocks=blocks)
+    if roe:
+        m.roe_from_jacobian()
     if sources is not None:
         m.source(sources(m, M))
     m.primitive_vars(*cons)

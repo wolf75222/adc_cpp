@@ -89,6 +89,33 @@ struct SourceFreeModel {
   {
     m.wave_speeds(u, a, dir, smin, smax);
   }
+  // Roe / HLLC CAPABILITIES (HasRoeDissipation / HasHLLCStructure): forwarded ONLY if M exposes
+  // them (requires clause), exactly like pressure / wave_speeds above and like composite.hpp.
+  // WITHOUT these, an IMEX explicit half-step on riemann='roe' / 'hllc' loses the model's GENERIC
+  // hooks, so RoeFlux / HLLCFlux silently fall back to the canonical Euler-4var path -- which fails
+  // to even COMPILE for a non-Euler model (e.g. a moment hierarchy: n_vars != 4, no pressure). The
+  // 4-var Euler models compiled before only because that fallback happens to fit them.
+  ADC_HD Real contact_speed(const State& ul, const State& ur, Real pl, Real pr, Real sl, Real sr,
+                            int dir) const
+    requires requires(const M& mm, const State a_, const State b_, Real p, Real q, Real x, Real y,
+                      int d) { mm.contact_speed(a_, b_, p, q, x, y, d); }
+  {
+    return m.contact_speed(ul, ur, pl, pr, sl, sr, dir);
+  }
+  ADC_HD State hllc_star_state(const State& u, Real p, Real s, Real sStar, int dir) const
+    requires requires(const M& mm, const State a_, Real p_, Real s_, Real ss_, int d) {
+      mm.hllc_star_state(a_, p_, s_, ss_, d);
+    }
+  {
+    return m.hllc_star_state(u, p, s, sStar, dir);
+  }
+  ADC_HD State roe_dissipation(const State& ul, const Aux& al, const State& ur, const Aux& ar,
+                               int dir) const
+    requires requires(const M& mm, const State a_, const Aux x_, const State b_, const Aux y_,
+                      int d) { mm.roe_dissipation(a_, x_, b_, y_, d); }
+  {
+    return m.roe_dissipation(ul, al, ur, ar, dir);
+  }
   // Forward the VariableSet introspection (HOST): lets positivity_comp resolve the Density role
   // through the explicit IMEX half-step. Conditional (requires), like pressure / wave_speeds.
   static VariableSet conservative_vars()

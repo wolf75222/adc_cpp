@@ -188,6 +188,14 @@ add_test(NAME test_dsl_moments
 set_tests_properties(test_dsl_moments PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
+# compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
+# riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.
+add_test(NAME test_dsl_roe_from_jacobian
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_roe_from_jacobian.py)
+set_tests_properties(test_dsl_roe_from_jacobian PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Codegen C++ du DSL : compile la fonction flux generee et la compare a l'interprete numpy.
 add_test(NAME test_dsl_codegen
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_codegen.py)
