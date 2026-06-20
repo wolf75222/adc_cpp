@@ -207,6 +207,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Generalize runtime/system header comments** (ADC-370): follow-up to ADC-333 on the headers that
+  were then in flight with ADC-369 (`runtime/system.hpp`, `runtime/amr_system.hpp`,
+  `runtime/system/system_field_solver.hpp`, `coupling/amr_coupler_mp.hpp`). Diocotron/Hoffart/
+  ROMEO-GH200 narration reworded to the generic contract; the provenance is recorded in
+  `docs/validation/HEADER_PROVENANCE.md`. `system_stepper.hpp` is already generic (its
+  `HOFFART_STEP_SEQUENCE.md` references are sanctioned validation-doc pointers). Comments and docs
+  only; no behavior change.
 - **Runtime headers organized by layer** (ADC-330): the flat `include/adc/runtime/` directory is
   split into layers so the structure shows the API surface. The public facades stay at the root
   (`system.hpp`, `amr_system.hpp`, `model_spec.hpp`, `facade_options.hpp`, `export.hpp`); the ABI /

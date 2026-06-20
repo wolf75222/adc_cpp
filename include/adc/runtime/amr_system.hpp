@@ -406,8 +406,8 @@ class AmrSystem {
   /// MULTI-BLOCK only (the AmrRuntime runtime engine carries the union-of-tags regrid; the mono-block
   /// path AmrCouplerMP has no separate phi predicate). The phi tag is ADDED to the union of the density
   /// tags per block (set_refinement): the mesh refines where ANY block exceeds its
-  /// density threshold OR |grad phi| exceeds @p grad_threshold. PHYSICAL criterion of the diocotron: the ring
-  /// edge follows the gradient of the potential, not the density alone.
+  /// density threshold OR |grad phi| exceeds @p grad_threshold. PHYSICAL criterion: a sharp ring/edge
+  /// feature follows the gradient of the potential, not the density alone.
   /// @param grad_threshold threshold of |grad phi|. <= 0 (DEFAULT) -> the phi tag is DISABLED (phi does not
   ///        contribute to the union; bit-identical to before this call). Without regrid_every > 0, no
   ///        effect (the regrid is never called). To be called BEFORE the first step.
@@ -433,7 +433,7 @@ class AmrSystem {
   /// prolongs it to the fine levels at build (constant injection, like the density). @p U is flat
   /// component-major (c*n*n + j*n + i) of size ncomp*n*n; ncomp == n_vars of the model (checked at
   /// build, where only Model::n_vars is known). Takes priority over set_density: allows starting the AMR
-  /// from the paper's drift state (rho, rho*u, rho*v) instead of m=0 (Problem 2). The conversion
+  /// from a full drift state (rho, rho*u, rho*v) instead of m=0. The conversion
   /// primitive -> conservative (rho_u = rho*u) is done on the Python side (the caller already supplies the
   /// conservative). Wired on the NATIVE blocks (mono-block as well as multi-block: threaded to the native builder,
   /// seed the coarse then inject to the fine); in multi-block @p name indexes the target block. A

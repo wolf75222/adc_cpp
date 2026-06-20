@@ -62,3 +62,33 @@ transport-residual parity (dres = 0) was first obtained on a CUDA device under
 Heisenbug: passes on Serial, with compute-sanitizer, and with `-g`) was fixed the
 same way under `adc_cases` #93. Full-production-path CUDA parity (np = 1) is gated
 on closing that segfault; MPI multi-rank parity is a separate follow-up.
+
+## Runtime/system surface (ADC-370)
+
+ADC-333 deferred the runtime/system headers because they were then in flight with
+ADC-369 (per-field aux halos, merged PR #192). ADC-370 applies the same wording on
+the now-merged surface:
+
+- `runtime/system.hpp` `set_transport_domain` disc mask: FV transport on the true
+  disc instead of the full cartesian square (the "cartesian ring edges" lock) is the
+  same topic as "Disc domain" above; detail in `HOFFART_GEOMETRY_VERDICT.md` and
+  `HOFFART_FIDELITY.md`.
+- Gauss-law policy `restart` (default) vs `evolve` (`runtime/system.hpp` and
+  `runtime/system/system_field_solver.hpp`): `evolve` derives the aux from the
+  Schur-evolved phi instead of re-solving -Delta phi each step, so the Gauss
+  constraint is imposed only at t = 0. Originated as work item "R0" of the magnetic
+  Euler-Poisson reproduction (arXiv:2510.11808); the mechanism stays in the header,
+  only the case label was dropped.
+- `runtime/system/system_field_solver.hpp` env-gated `ADC_TRACE_SOLVE_FIELDS` stderr trace: a CUDA
+  device-crash diagnostic (the `adc_cases` #93 solve_fields segfault, see "Device
+  codegen" above).
+- `runtime/amr_system.hpp::set_conservative_state` + `coupling/amr_coupler_mp.hpp`
+  drift seed: starts the AMR from a full drift state (rho, rho*u, rho*v) instead of
+  m = 0 (the reference paper's "Problem 2" drift initial condition); only the case
+  label was dropped, the mechanism stays in the header.
+
+`runtime/system_stepper.hpp` and `runtime/system.hpp::set_time_scheme` were reviewed
+and left as-is: the prose is generic (Lie/Strang splitting, phi consistency) and the
+only case-named token is the `cf. docs/HOFFART_STEP_SEQUENCE.md` pointer, which is a
+sanctioned validation-doc reference (same convention as the `HOFFART_FIDELITY.md`
+pointers kept in ADC-333).

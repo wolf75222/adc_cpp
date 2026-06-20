@@ -130,7 +130,7 @@ inline void coupler_write_coarse(MultiFab& U, const std::vector<double>& rho, in
 // the ncomp components positionally (no density/momentum/energy wiring; the caller already provides
 // the conservative, e.g. [rho, rho*u, rho*v]). gamma omitted (no energy derived). Index computed
 // in std::size_t (no int overflow at large n, unlike the int validation of
-// coupler_write_coarse). Used for the drift seed (set_conservative_state, hoffart Problem 2).
+// coupler_write_coarse). Used for the drift seed (set_conservative_state).
 inline void coupler_write_coarse_state(MultiFab& U, const std::vector<double>& state, int n,
                                        int ncomp) {
   const std::size_t nn = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);

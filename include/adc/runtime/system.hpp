@@ -68,7 +68,7 @@ struct SystemConfig {
 /// cfg.n = 96;
 /// adc::System sys(cfg);
 ///
-/// adc::ModelSpec ne;                       // reduced diocotron: scalar density advected by E x B
+/// adc::ModelSpec ne;                       // scalar density advected by E x B
 /// ne.transport = "exb";
 /// ne.source = "none";
 /// ne.elliptic = "charge";
@@ -291,11 +291,10 @@ class System {
   /// Sets the TRANSPORT DOMAIN as a DISC centered at (@p cx, @p cy) with radius @p R
   /// (T2 work, CONTRACT inert by default). Materializes a 0/1 cell-centered mask (cell
   /// active when its center is inside the disc, level set hypot(x-cx, y-cy) - R < 0, SAME convention
-  /// as the conducting wall of the Poisson). It is the FV counterpart of the elliptic wall: the paper (Hoffart
-  /// et al., arXiv:2510.11808) transports on a true disc, whereas ADC transports on the full
-  /// cartesian square with the circle only in the Poisson wall ("cartesian ring edges"
-  /// lock, cf. docs/HOFFART_FIDELITY.md). The mask makes possible a CONSERVATIVE mask-aware
-  /// transport (zero normal flux at active/inactive faces).
+  /// as the conducting wall of the Poisson). It is the FV counterpart of the elliptic wall: it lets the
+  /// FV transport act on the true disc instead of the full cartesian square (otherwise the circle lives
+  /// only in the Poisson wall -- the "cartesian ring edges" lock, cf. docs/HOFFART_FIDELITY.md). The
+  /// mask makes possible a CONSERVATIVE mask-aware transport (zero normal flux at active/inactive faces).
   ///
   /// DISC TRANSPORT MODE (T5-PR3 work, @p mode): dispatches the transport advance of step() to
   /// the corresponding disc operator. Default "none" -> full cartesian path (assemble_rhs), BIT-
@@ -492,10 +491,10 @@ class System {
   /// raises an EXPLICIT error. Without a call, the path stays BIT-IDENTICAL (Lie).
   void set_time_scheme(const std::string& scheme);
 
-  /// Gauss-law policy (R0 work, Hoffart reproduction). "restart" (default): solve_fields
+  /// Gauss-law policy. "restart" (default): solve_fields
   /// re-solves -Delta phi = f at each step (BIT-IDENTICAL to history). "evolve": after the first
   /// solve (phi^0), solve_fields no longer re-solves the Poisson and derives the aux from the CURRENT phi
-  /// that the Schur source stage evolves in-place -> -Delta phi evolution without restart of the paper (Gauss
+  /// that the Schur source stage evolves in-place -> -Delta phi evolution without restart (Gauss
   /// imposed only at t=0). Has effect only with a condensed source stage. Unknown scheme -> explicit error.
   void set_gauss_policy(const std::string& policy);
 

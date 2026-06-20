@@ -60,7 +60,7 @@ namespace adc {
 namespace field_solver {
 
 /// True if the DIAGNOSTIC trace of the solve_fields path is active (environment variable
-/// ADC_TRACE_SOLVE_FIELDS set). Milestone #93 (GH200 device crash): writes to stderr with immediate flush
+/// ADC_TRACE_SOLVE_FIELDS set). Added for a CUDA device-crash diagnostic: writes to stderr with immediate flush
 /// to locate the last marker before a device crash. INERT by default: no effect on the
 /// outputs or on the numerics. Diagnostic KEPT (env-gated): useful for a future device crash.
 inline bool adc_trace_sf() {
@@ -105,12 +105,12 @@ class SystemFieldSolver {
   std::vector<double> p_eps_y_field_;   // field eps_y(x), n*n row-major (faces normal to y; if has_eps_xy_field_)
   bool has_kappa_field_ = false;        // REACTION term kappa(x) provided: div(eps grad phi) - kappa phi
   std::vector<double> p_kappa_field_;   // field kappa(x), n*n row-major (if has_kappa_field_)
-  // GAUSS POLICY (work item R0, Hoffart reproduction arXiv:2510.11808). Default "restart":
+  // GAUSS POLICY (restart-free Gauss-evolution option). Default "restart":
   // solve_fields re-solves -Delta phi = f (Gauss) on EVERY call -- historical behavior,
   // BIT-IDENTICAL. "evolve": after the FIRST solve (phi^0), solve_fields NO LONGER re-solves the
   // Poisson; it only DERIVES the aux (phi, grad phi) from the CURRENT phi -- the one that the condensed
-  // source stage (Schur) evolves IN-PLACE in ell_phi() (cf. run_source_stage). Thus it reproduces
-  // the restart-free evolution of -Delta phi from the paper (the Gauss constraint is only imposed at t=0).
+  // source stage (Schur) evolves IN-PLACE in ell_phi() (cf. run_source_stage). Thus it gives a
+  // restart-free evolution of -Delta phi (the Gauss constraint is only imposed at t=0).
   // INERT without a Schur stage (phi would stay frozen after t=0). The lock gauss_solved_once_ guarantees that
   // the first solve (the init of phi^0) always solves, whatever the policy.
   bool gauss_evolve_ = false;
@@ -503,10 +503,10 @@ class SystemFieldSolver {
     adc_sf_mark("solve_fields: start");
     ensure_elliptic();
     adc_sf_mark("solve_fields: after ensure_elliptic");
-    // GAUSS POLICY (R0): "restart" (default, gauss_evolve_==false) re-solves -Delta phi = f on
+    // GAUSS POLICY: "restart" (default, gauss_evolve_==false) re-solves -Delta phi = f on
     // EVERY call (bit-identical to history). "evolve": after the FIRST solve (phi^0), we SKIP
     // the RHS assembly + the elliptic solve -> ell_phi() keeps the current phi (the one that the
-    // Schur source stage evolves in-place), reproducing the -Delta phi evolution without restart of the paper.
+    // Schur source stage evolves in-place), giving a restart-free -Delta phi evolution (Gauss imposed only at t=0).
     // The derivation of the aux (phi, grad phi) below ALWAYS runs, on the current phi.
     if (!(gauss_evolve_ && gauss_solved_once_)) {
       MultiFab& rhs = ell_rhs();
