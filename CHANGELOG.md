@@ -20,6 +20,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Configure-time guard: Kokkos CUDA is rejected on native Windows** (ADC-168): `cmake` now fails
+  fast with a clear message (use WSL2 for the GPU; native Windows is CPU Serial/OpenMP only) when
+  `Kokkos_ENABLE_CUDA=ON` is requested on a native Windows configuration, instead of letting the
+  unsupported Kokkos CUDA build break deep inside configure. The supported GPU path stays WSL2
+  (ADC-96); Linux, macOS, and WSL2 are unaffected.
 - **Named aux phase 2: AMR, polar, and a declarative `kAuxMaxExtra`** (ADC-291): model-declared named
   auxiliary fields (`m.aux_field("name")`, component `kAuxNamedBase + k`, read via `aux.extra_field(k)`)
   now work beyond the cartesian `System`. The polar `System::add_block` path widens the shared aux
