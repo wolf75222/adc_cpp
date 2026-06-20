@@ -103,7 +103,7 @@ try:
     sim.set_state("mom", U0)
     for _ in range(10):
         sim.step(5e-4)
-    out = np.asarray(sim.state("mom"))
+    out = np.asarray(sim.get_state("mom"))
     chk(np.isfinite(out).all(), "10 pas ROE : etat fini")
     dm = abs(out[0].sum() - U0[0].sum()) / abs(U0[0].sum())
     chk(dm < 1e-12, f"10 pas ROE : masse M00 conservee ({dm:.2e})")
