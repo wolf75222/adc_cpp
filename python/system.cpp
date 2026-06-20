@@ -5,6 +5,7 @@
 #include <adc/runtime/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
 #include <adc/runtime/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)
 #include <adc/runtime/model_factory.hpp>  // detail::dispatch_model + compiled bricks
+#include <adc/runtime/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
 #include <adc/coupling/condensed_schur_source_stepper.hpp>  // Schur-condensed source stage (adc.Split / CondensedSchur, #126)
 #include <adc/coupling/polar_condensed_schur_source_stepper.hpp>  // POLAR counterpart of the condensed source stage (Path A step 2c, #212)
 #include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel: generic coupled source (DSL P5, bytecode)
@@ -660,8 +661,7 @@ void System::add_block(const std::string& name, const ModelSpec& model,
         throw_registry_dispatch_mismatch("System", "flux", riemann);
       }
     } else {
-      throw std::runtime_error("unknown transport '" + model.transport +
-                               "' (exb|compressible|isothermal)");
+      throw std::runtime_error(unknown_transport_msg(model.transport));
     }
     P->ensure_aux_width(bb.aux_width);
   }

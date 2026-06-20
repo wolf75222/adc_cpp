@@ -237,6 +237,7 @@ adc_add_test(test_amr_condensed_schur_composite)
 
 # --- reconstruction / discretisation / integrateurs generiques ---
 adc_add_test(test_dispatch_tags)  # registry UNIQUE des tags (validate_limiter/riemann, limiter_n_ghost) : matrice + messages
+adc_add_test(test_model_registry)  # registry UNIQUE des briques modele (transport/source/elliptic) : matrice + messages + perimetre (ADC-331)
 adc_add_test(test_spatial_discretisation)
 adc_add_test(test_primitive_recon)
 adc_add_test(test_system_abstraction)

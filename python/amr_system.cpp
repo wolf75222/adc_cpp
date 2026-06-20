@@ -5,6 +5,7 @@
 #include <adc/runtime/amr_runtime.hpp>     // AmrRuntime + AmrRuntimeBlock (multi-block runtime engine)
 #include <adc/runtime/amr_block_seam.hpp>  // ADC-335: per-transport AMR build seam (build_amr_block/_compiled_<transport>)
 #include <adc/runtime/model_factory.hpp>   // detail::dispatch_model + compiled bricks
+#include <adc/runtime/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
 #include <adc/runtime/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
 
 #include <algorithm>  // std::find, std::sort (partial IMEX mask resolution: sorted unique indices)
@@ -363,8 +364,7 @@ struct AmrSystem::Impl {
       } else if (b.spec.transport == "isothermal") {
         rblocks.push_back(detail::build_amr_block_isothermal(ba, S));
       } else {
-        throw std::runtime_error("unknown transport '" + b.spec.transport +
-                                 "' (exb|compressible|isothermal)");
+        throw std::runtime_error(unknown_transport_msg(b.spec.transport));
       }
     }
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
@@ -501,8 +501,7 @@ struct AmrSystem::Impl {
     } else if (b.spec.transport == "isothermal") {
       install(detail::build_amr_compiled_isothermal(b.spec, b.limiter, b.riemann, bp));
     } else {
-      throw std::runtime_error("unknown transport '" + b.spec.transport +
-                               "' (exb|compressible|isothermal)");
+      throw std::runtime_error(unknown_transport_msg(b.spec.transport));
     }
   }
 };

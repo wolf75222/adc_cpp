@@ -3,6 +3,7 @@
 #include <adc/core/cold.hpp>       // ADC_COLD_FN: COLD-factory no-optimize attribute (ADC-337)
 #include <adc/core/variables.hpp>  // VariableSet/VariableRole/role_from_name/roles_csv (resolve_implicit_components)
 #include <adc/physics/bricks.hpp>
+#include <adc/runtime/model_registry.hpp>  // kTransports/kSources/kElliptics: builtin-brick tag registry (ADC-331)
 #include <adc/runtime/model_spec.hpp>
 
 #include <algorithm>  // std::find, std::sort (resolve_implicit_components)
@@ -39,18 +40,29 @@ inline void validate_model_spec(const ModelSpec& m) {
         "The core infers no physics default (no silent 'charge').");
   if (m.source.empty())
     throw std::runtime_error(
-        "ModelSpec: source not set -- choose 'none' (no source) | 'potential' | 'gravity' | "
-        "'magnetic' | 'potential_magnetic'.");
+        "ModelSpec: source not set -- choose " + source_choices() + " ('none' = no source term).");
 }
+
+/// Non-drift guard (ADC-331): the registry's n_vars column (model_registry.hpp, a LIGHT header with
+/// no brick types) MUST agree with the real brick types' ::n_vars. This TU sees BOTH, so we lock it
+/// at compile time -- a registry row that disagrees with its brick fails the build here.
+static_assert(ExBVelocity::n_vars == transport_n_vars_ct("exb"), "registry n_vars drift: exb");
+static_assert(CompressibleFlux::n_vars == transport_n_vars_ct("compressible"),
+              "registry n_vars drift: compressible");
+static_assert(IsothermalFlux::n_vars == transport_n_vars_ct("isothermal"),
+              "registry n_vars drift: isothermal");
 
 /// Builds the transport brick and calls v(transport).
 template <class Visitor>
 ADC_COLD_FN void dispatch_transport(const ModelSpec& m, Visitor&& v) {
+  validate_transport(m.transport);  // registry rejection (single source of the valid tags + message)
   if (m.transport == "exb") return v(ExBVelocity{Real(m.B0)});
   if (m.transport == "compressible") return v(CompressibleFlux{Real(m.gamma)});
   if (m.transport == "isothermal") return v(IsothermalFlux{Real(m.cs2)});
-  throw std::runtime_error("unknown transport '" + m.transport +
-                           "' (exb|compressible|isothermal)");
+  // Reached only if a registry tag is not routed by the if-chain (a registry/dispatch inconsistency,
+  // i.e. a programming bug); user typos were already rejected by validate_transport above.
+  throw std::runtime_error("transport '" + m.transport +
+                           "' valid in registry but not routed (add the dispatch case)");
 }
 
 /// Builds the source brick and calls v(source). Fluid sources (force) require
@@ -84,11 +96,15 @@ ADC_COLD_FN void dispatch_source(const ModelSpec& m, Visitor&& v) {
 /// Builds the elliptic right-hand-side brick and calls v(elliptic).
 template <class Visitor>
 ADC_COLD_FN void dispatch_elliptic(const ModelSpec& m, Visitor&& v) {
+  validate_elliptic(m.elliptic);  // registry rejection (single source of the valid tags + message)
   if (m.elliptic == "charge") return v(ChargeDensity{Real(m.q)});
   if (m.elliptic == "background") return v(BackgroundDensity{Real(m.alpha), Real(m.n0)});
   if (m.elliptic == "gravity")
     return v(GravityCoupling{Real(m.sign), Real(m.four_pi_G), Real(m.rho0)});
-  throw std::runtime_error("unknown elliptic '" + m.elliptic + "' (charge|background|gravity)");
+  // Reached only on a registry/dispatch inconsistency (see dispatch_transport): unknown user tags
+  // were already rejected by validate_elliptic above.
+  throw std::runtime_error("elliptic '" + m.elliptic +
+                           "' valid in registry but not routed (add the dispatch case)");
 }
 
 /// AUTOMATIC resolution by ROLES (audit sec.5): fills the component indices of a SOURCE or ELLIPTIC
