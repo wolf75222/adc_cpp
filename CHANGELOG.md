@@ -215,6 +215,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   include path (`<adc/runtime/*.hpp>`) keeps compiling through a forwarding header, so the runtime
   consumers, the bindings and the tests are unaffected. Source-tree layout only; no behavior or
   ABI change.
+- **Factored the geometry-free Schur source kernels into one header** (ADC-263): the five device
+  functors carried byte-identical by the Cartesian and polar Schur source steppers
+  (extrapolate-scalar, extrapolate-velocity, energy, extract-velocity, copy-Bz) plus the
+  `set_krylov` validation now live in `include/adc/coupling/schur_source_kernels.hpp`, which depends
+  only on the lightweight `Array4`/`ConstArray4` handles (not on the elliptic solver stack), so the
+  polar path can share them instead of re-declaring its own copies. Only the metric-bearing kernels
+  (reconstruct, operator-coeff, explicit-flux, RHS-assemble) stay local to each stepper. Behavior is
+  bit-identical; covered by the existing Cartesian/polar/AMR Schur tests (serial + MPI np2/np4).
 - **Centralized native AMR refinement ratio** (ADC-295): the refinement ratio of the in-house AMR
   hierarchy is now a single named invariant `kAmrRefRatio` (with a `require_supported_ref_ratio`
   guard) in `include/adc/amr/refinement_ratio.hpp`, instead of the literal `2` scattered across the

@@ -410,10 +410,10 @@ int main(int argc, char** argv) {
     make_state(st, phi);
     MultiFab vrn(S.ba, S.dm, 1, 0), vtn(S.ba, S.dm, 1, 0);
     for (int li = 0; li < st.local_size(); ++li)
-      for_each_cell(st.box(li), detail::PolarExtractVelocityKernel{st.fab(li).const_array(),
-                                                                   vrn.fab(li).array(),
-                                                                   vtn.fab(li).array(), c_rho, c_mx,
-                                                                   c_my});
+      for_each_cell(st.box(li), detail::ExtractVelocityKernel{st.fab(li).const_array(),
+                                                              vrn.fab(li).array(),
+                                                              vtn.fab(li).array(), c_rho, c_mx,
+                                                              c_my});
 
     PolarCondensedSchurSourceStepper stepper(vars, S.geom, S.ba, S.bc, alpha);
     stepper.step(st, phi, bz, /*c_bz=*/0, /*theta=*/Real(1.0), dt);

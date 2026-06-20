@@ -3,6 +3,7 @@
 #include <adc/core/types.hpp>
 #include <adc/core/variables.hpp>
 #include <adc/coupling/schur_condensation.hpp>            // ElectrostaticLorentzCondensation (builder #124)
+#include <adc/coupling/schur_source_kernels.hpp>           // shared geometry-free kernels + validate_krylov_params (#263)
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/mf_arith.hpp>
@@ -106,74 +107,9 @@ struct SchurReconstructKernel {
   }
 };
 
-/// Linear extrapolation of a SCALAR field from the theta-stage to the full step: f^{n+1} = f^n + (1/theta)
-/// (f^{n+theta} - f^n). theta = 1 -> identity (inv_theta = 1). NAMED device-clean functor.
-struct SchurExtrapolateScalarKernel {
-  ConstArray4 f_n;     ///< f^n
-  Array4 f;            ///< IN: f^{n+theta}; OUT: f^{n+1}
-  Real inv_theta;      ///< 1 / theta
-  ADC_HD void operator()(int i, int j) const {
-    f(i, j, 0) = f_n(i, j, 0) + inv_theta * (f(i, j, 0) - f_n(i, j, 0));
-  }
-};
-
-/// Linear extrapolation of the VELOCITY (vx, vy) from the theta-stage to the full step, then recompose
-/// mom = rho^n v^{n+1} into the state. rho frozen. NAMED device-clean functor.
-struct SchurExtrapolateVelocityKernel {
-  ConstArray4 vx_n, vy_n;  ///< v^n
-  Array4 vx, vy;           ///< IN: v^{n+theta}; OUT: v^{n+1}
-  Array4 st;               ///< state (WRITE mx, my; READ rho)
-  Real inv_theta;          ///< 1 / theta
-  int c_rho, c_mx, c_my;
-  ADC_HD void operator()(int i, int j) const {
-    const Real nx = vx_n(i, j, 0) + inv_theta * (vx(i, j, 0) - vx_n(i, j, 0));
-    const Real ny = vy_n(i, j, 0) + inv_theta * (vy(i, j, 0) - vy_n(i, j, 0));
-    vx(i, j, 0) = nx;
-    vy(i, j, 0) = ny;
-    const Real rho = st(i, j, c_rho);
-    st(i, j, c_mx) = rho * nx;
-    st(i, j, c_my) = rho * ny;
-  }
-};
-
-/// Energy update: E^{n+1} = E^n + (1/2) rho^n (|v^{n+1}|^2 - |v^n|^2). NAMED device-clean
-/// functor. Applied only when the Energy role is present (host-side guard).
-struct SchurEnergyKernel {
-  ConstArray4 vx_n, vy_n;  ///< v^n
-  ConstArray4 vx, vy;      ///< v^{n+1}
-  Array4 st;               ///< state (WRITE E; READ rho)
-  int c_rho, c_E;
-  ADC_HD void operator()(int i, int j) const {
-    const Real rho = st(i, j, c_rho);
-    const Real ke_old = Real(0.5) * rho * (vx_n(i, j, 0) * vx_n(i, j, 0) + vy_n(i, j, 0) * vy_n(i, j, 0));
-    const Real ke_new = Real(0.5) * rho * (vx(i, j, 0) * vx(i, j, 0) + vy(i, j, 0) * vy(i, j, 0));
-    st(i, j, c_E) += ke_new - ke_old;
-  }
-};
-
-/// Extracts the velocity v = (mx, my) / rho from the state (Density / MomentumX / MomentumY roles) into two
-/// scalar fields vx, vy. rho = 0 -> velocity 0 (safeguard; in practice the source freezes rho > 0).
-/// NAMED device-clean functor.
-struct ExtractVelocityKernel {
-  ConstArray4 st;
-  Array4 vx, vy;
-  int c_rho, c_mx, c_my;
-  ADC_HD void operator()(int i, int j) const {
-    const Real rho = st(i, j, c_rho);
-    const Real inv = rho != Real(0) ? Real(1) / rho : Real(0);
-    vx(i, j, 0) = st(i, j, c_mx) * inv;
-    vy(i, j, 0) = st(i, j, c_my) * inv;
-  }
-};
-
-/// Copies the B_z field (aux channel) into an internal scalar MultiFab (0 ghost is enough, read at (i,j)).
-/// NAMED device-clean functor.
-struct CopyBzKernel {
-  ConstArray4 bz_src;
-  Array4 bz_dst;
-  int c_bz;
-  ADC_HD void operator()(int i, int j) const { bz_dst(i, j, 0) = bz_src(i, j, c_bz); }
-};
+// The 5 geometry-free source kernels (extrapolate-scalar/velocity, energy, extract-velocity, copy-Bz)
+// live in <adc/coupling/schur_source_kernels.hpp> and are shared with the polar / AMR steppers (#263).
+// Only SchurReconstructKernel stays local: it carries the discretization-specific centered gradient.
 
 }  // namespace detail
 
@@ -338,8 +274,7 @@ class CondensedSchurSourceStepper {
   /// constants (1e-10, 400), made configurable by the audit 2026-06 (explicit numeric
   /// constants). @throws std::invalid_argument out of domain.
   void set_krylov(Real tol, int max_iters) {
-    if (!(tol > Real(0)) || max_iters < 1)
-      throw std::invalid_argument("CondensedSchurSourceStepper::set_krylov: tol > 0, max_iters >= 1");
+    detail::validate_krylov_params(tol, max_iters, "CondensedSchurSourceStepper::set_krylov");
     krylov_tol_ = tol;
     krylov_max_iters_ = max_iters;
   }

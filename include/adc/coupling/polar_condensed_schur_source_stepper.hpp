@@ -2,6 +2,7 @@
 
 #include <adc/core/types.hpp>
 #include <adc/core/variables.hpp>
+#include <adc/coupling/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>  // PolarGeometry
 #include <adc/mesh/mf_arith.hpp>
@@ -198,73 +199,11 @@ struct PolarSchurReconstructKernel {
   }
 };
 
-/// Linear extrapolation of a SCALAR field from the theta-stage to the full step: f^{n+1} = f^n + (1/theta)
-/// (f^{n+theta} - f^n). theta = 1 -> identity. NAMED device-clean functor. (Local to the polar header
-/// so as not to depend on the Cartesian path.)
-struct PolarSchurExtrapolateScalarKernel {
-  ConstArray4 f_n;     ///< f^n
-  Array4 f;            ///< IN: f^{n+theta}; OUT: f^{n+1}
-  Real inv_theta;      ///< 1 / theta
-  ADC_HD void operator()(int i, int j) const {
-    f(i, j, 0) = f_n(i, j, 0) + inv_theta * (f(i, j, 0) - f_n(i, j, 0));
-  }
-};
-
-/// Linear extrapolation of the VELOCITY (vr, vtheta) from the theta-stage to the full step, then recompose
-/// mom = rho^n v^{n+1}. rho frozen. NAMED device-clean functor.
-struct PolarSchurExtrapolateVelocityKernel {
-  ConstArray4 vr_n, vt_n;  ///< v^n
-  Array4 vr, vt;           ///< IN: v^{n+theta}; OUT: v^{n+1}
-  Array4 st;               ///< state (WRITE mr, mtheta; READ rho)
-  Real inv_theta;          ///< 1 / theta
-  int c_rho, c_mx, c_my;
-  ADC_HD void operator()(int i, int j) const {
-    const Real nr = vr_n(i, j, 0) + inv_theta * (vr(i, j, 0) - vr_n(i, j, 0));
-    const Real nt = vt_n(i, j, 0) + inv_theta * (vt(i, j, 0) - vt_n(i, j, 0));
-    vr(i, j, 0) = nr;
-    vt(i, j, 0) = nt;
-    const Real rho = st(i, j, c_rho);
-    st(i, j, c_mx) = rho * nr;
-    st(i, j, c_my) = rho * nt;
-  }
-};
-
-/// Energy update: E^{n+1} = E^n + (1/2) rho^n (|v^{n+1}|^2 - |v^n|^2). Applied only
-/// when the Energy role is present (host-side guard). NAMED device-clean functor.
-struct PolarSchurEnergyKernel {
-  ConstArray4 vr_n, vt_n;  ///< v^n
-  ConstArray4 vr, vt;      ///< v^{n+1}
-  Array4 st;               ///< state (WRITE E; READ rho)
-  int c_rho, c_E;
-  ADC_HD void operator()(int i, int j) const {
-    const Real rho = st(i, j, c_rho);
-    const Real ke_old = Real(0.5) * rho * (vr_n(i, j, 0) * vr_n(i, j, 0) + vt_n(i, j, 0) * vt_n(i, j, 0));
-    const Real ke_new = Real(0.5) * rho * (vr(i, j, 0) * vr(i, j, 0) + vt(i, j, 0) * vt(i, j, 0));
-    st(i, j, c_E) += ke_new - ke_old;
-  }
-};
-
-/// Extracts the velocity v = (mr, mtheta) / rho from the state into two scalar fields vr, vt. rho = 0 ->
-/// velocity 0 (safeguard; the source freezes rho > 0). NAMED device-clean functor.
-struct PolarExtractVelocityKernel {
-  ConstArray4 st;
-  Array4 vr, vt;
-  int c_rho, c_mx, c_my;
-  ADC_HD void operator()(int i, int j) const {
-    const Real rho = st(i, j, c_rho);
-    const Real inv = rho != Real(0) ? Real(1) / rho : Real(0);
-    vr(i, j, 0) = st(i, j, c_mx) * inv;
-    vt(i, j, 0) = st(i, j, c_my) * inv;
-  }
-};
-
-/// Copies the B_z field (aux channel) into an internal scalar MultiFab. NAMED device-clean functor.
-struct PolarCopyBzKernel {
-  ConstArray4 bz_src;
-  Array4 bz_dst;
-  int c_bz;
-  ADC_HD void operator()(int i, int j) const { bz_dst(i, j, 0) = bz_src(i, j, c_bz); }
-};
+// The geometry-free extrapolate / energy / extract-velocity / copy-Bz kernels are shared with the
+// Cartesian stepper via <adc/coupling/schur_source_kernels.hpp> (#263): detail::SchurExtrapolateScalarKernel,
+// SchurExtrapolateVelocityKernel, SchurEnergyKernel, ExtractVelocityKernel, CopyBzKernel. Their member
+// fields are named vx/vy but hold the polar velocity (vr/vtheta): the math is frame-independent. Only the
+// metric-bearing kernels above (operator-coeff, explicit-flux, RHS-assemble, reconstruct) stay local.
 
 /// dst <- src (component 0). NAMED device-clean functor (local: the polar header does not depend on
 /// geometric_mg.hpp, like polar_tensor_operator.hpp).
@@ -369,10 +308,10 @@ class PolarCondensedSchurSourceStepper {
     for (int li = 0; li < state.local_size(); ++li) {
       const ConstArray4 s = state.fab(li).const_array();
       for_each_cell(state.box(li),
-                    detail::PolarExtractVelocityKernel{s, vr_n_.fab(li).array(), vt_n_.fab(li).array(),
-                                                       c_rho_, c_mx_, c_my_});
+                    detail::ExtractVelocityKernel{s, vr_n_.fab(li).array(), vt_n_.fab(li).array(),
+                                                  c_rho_, c_mx_, c_my_});
       for_each_cell(bz_.box(li),
-                    detail::PolarCopyBzKernel{bz_field.fab(li).const_array(), bz_.fab(li).array(), c_bz});
+                    detail::CopyBzKernel{bz_field.fab(li).const_array(), bz_.fab(li).array(), c_bz});
     }
     const BCRec ebc = coeff_bc(bcPhi_);
     device_fence();
@@ -448,11 +387,11 @@ class PolarCondensedSchurSourceStepper {
     const Real inv_theta = Real(1) / theta;
     for (int li = 0; li < phi.local_size(); ++li)
       for_each_cell(phi.box(li),
-                    detail::PolarSchurExtrapolateScalarKernel{phi_n_.fab(li).const_array(),
-                                                              phi.fab(li).array(), inv_theta});
+                    detail::SchurExtrapolateScalarKernel{phi_n_.fab(li).const_array(),
+                                                         phi.fab(li).array(), inv_theta});
     for (int li = 0; li < state.local_size(); ++li)
       for_each_cell(state.box(li),
-                    detail::PolarSchurExtrapolateVelocityKernel{
+                    detail::SchurExtrapolateVelocityKernel{
                         vr_n_.fab(li).const_array(), vt_n_.fab(li).const_array(),
                         vr_t_.fab(li).array(), vt_t_.fab(li).array(), state.fab(li).array(),
                         inv_theta, c_rho_, c_mx_, c_my_});
@@ -461,11 +400,11 @@ class PolarCondensedSchurSourceStepper {
     if (c_E_ >= 0)
       for (int li = 0; li < state.local_size(); ++li)
         for_each_cell(state.box(li),
-                      detail::PolarSchurEnergyKernel{vr_n_.fab(li).const_array(),
-                                                     vt_n_.fab(li).const_array(),
-                                                     vr_t_.fab(li).const_array(),
-                                                     vt_t_.fab(li).const_array(), state.fab(li).array(),
-                                                     c_rho_, c_E_});
+                      detail::SchurEnergyKernel{vr_n_.fab(li).const_array(),
+                                                vt_n_.fab(li).const_array(),
+                                                vr_t_.fab(li).const_array(),
+                                                vt_t_.fab(li).const_array(), state.fab(li).array(),
+                                                c_rho_, c_E_});
 
     // 6) FILL the ghosts of the state and the potential before returning.
     device_fence();
@@ -479,9 +418,7 @@ class PolarCondensedSchurSourceStepper {
   /// Tolerance / iteration budget of the polar Krylov solve. DEFAULTS = historical constants
   /// (1e-10, 600), made configurable by the audit 2026-06. @throws std::invalid_argument.
   void set_krylov(Real tol, int max_iters) {
-    if (!(tol > Real(0)) || max_iters < 1)
-      throw std::invalid_argument(
-          "PolarCondensedSchurSourceStepper::set_krylov: tol > 0, max_iters >= 1");
+    detail::validate_krylov_params(tol, max_iters, "PolarCondensedSchurSourceStepper::set_krylov");
     krylov_tol_ = tol;
     krylov_max_iters_ = max_iters;
   }
