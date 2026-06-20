@@ -53,6 +53,78 @@ ADC_HD static int classify_action(const Real (&B)[3][3]) {
   return -1;  // injoignable : enumere clos
 }
 
+// --- helpers pour adc::roe_abs_apply (ADC-368) : reference |A| = R |Lambda| R^T par construction ---
+template <int N>
+static void roe_matmul(const Real (&A)[N][N], const Real (&B)[N][N], Real (&C)[N][N]) {
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < N; ++j) {
+      Real s = 0;
+      for (int k = 0; k < N; ++k)
+        s += A[i][k] * B[k][j];
+      C[i][j] = s;
+    }
+}
+template <int N>
+static void roe_matvec(const Real (&A)[N][N], const Real (&x)[N], Real (&y)[N]) {
+  for (int i = 0; i < N; ++i) {
+    Real s = 0;
+    for (int j = 0; j < N; ++j)
+      s += A[i][j] * x[j];
+    y[i] = s;
+  }
+}
+// Rotation de Givens a DROITE (R <- R*G), pour batir un R orthogonal.
+template <int N>
+static void roe_givens_right(Real (&R)[N][N], int p, int q, Real c, Real s) {
+  for (int i = 0; i < N; ++i) {
+    const Real a = R[i][p], b = R[i][q];
+    R[i][p] = c * a - s * b;
+    R[i][q] = s * a + c * b;
+  }
+}
+// A = R diag(lam) R^T (R orthogonal) : spectre reel exact lam ; |A| = R diag(|lam|) R^T. On verifie
+// roe_abs_apply(A, dU) == |A| dU a la precision machine (le matrix-sign reproduit R |Lambda| R^-1).
+template <int N>
+static Real roe_abs_sym_err(const Real (&lam)[N]) {
+  Real R[N][N] = {};
+  for (int i = 0; i < N; ++i)
+    R[i][i] = 1;
+  for (int p = 0; p < N - 1; ++p) {
+    const Real th = Real(0.3) + Real(0.17) * p;
+    roe_givens_right(R, p, p + 1, std::cos(th), std::sin(th));
+    if (p + 2 < N)
+      roe_givens_right(R, p, p + 2, std::cos(Real(0.21) * p + Real(0.1)),
+                       std::sin(Real(0.21) * p + Real(0.1)));
+  }
+  Real Rt[N][N], D[N][N] = {}, Dabs[N][N] = {}, tmp[N][N], A[N][N], Aabs[N][N];
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < N; ++j)
+      Rt[i][j] = R[j][i];
+  for (int i = 0; i < N; ++i) {
+    D[i][i] = lam[i];
+    Dabs[i][i] = std::fabs(lam[i]);
+  }
+  roe_matmul(R, D, tmp);
+  roe_matmul(tmp, Rt, A);
+  roe_matmul(R, Dabs, tmp);
+  roe_matmul(tmp, Rt, Aabs);
+  Real dU[N];
+  for (int i = 0; i < N; ++i)
+    dU[i] = Real(1) + Real(0.37) * i - Real(0.11) * (i % 3);
+  Real ref[N];
+  roe_matvec(Aabs, dU, ref);
+  Real out[N];
+  if (!adc::roe_abs_apply(A, dU, out))
+    return Real(1e30);
+  Real m = 0;
+  for (int i = 0; i < N; ++i) {
+    const Real d = std::fabs(out[i] - ref[i]);
+    if (d > m)
+      m = d;
+  }
+  return m;
+}
+
 int main() {
   std::printf("== formes fermees N = 1, 2 ==\n");
   {
@@ -366,6 +438,54 @@ int main() {
             && real_spectrum(Areal) == Spectrum::kReal
             && real_spectrum(Acplx) == Spectrum::kComplexPair,
         "echelle 1e8 : |Im|=9 -> kReal (relatif), |Im|=2000 -> kComplexPair (asymetrie documentee)");
+  }
+
+  std::printf("== roe_abs_apply : |A| dU via matrix-sign (ADC-368) ==\n");
+  {
+    // N=1 : |A| = |a|, donc |A| dU = |a| dU.
+    const Real A[1][1] = {{Real(-5)}}, dU[1] = {Real(2)};
+    Real out[1];
+    chk(adc::roe_abs_apply(A, dU, out) && close_rel(out[0], Real(10), 1e-12),
+        "roe_abs N=1 : A=-5 -> |A|*2 = 10");
+  }
+  {
+    // N=2 non symetrique, VP 1 et -2 : |A| = [[1,-1/3],[0,2]] (calcul a la main), dU=(1,1) -> (2/3,2).
+    const Real A[2][2] = {{Real(1), Real(1)}, {Real(0), Real(-2)}}, dU[2] = {Real(1), Real(1)};
+    Real out[2];
+    chk(adc::roe_abs_apply(A, dU, out) && close_rel(out[0], Real(2) / Real(3), 1e-12) &&
+            close_rel(out[1], Real(2), 1e-12),
+        "roe_abs N=2 non-sym (VP 1,-2) : |A| dU = (2/3, 2)");
+  }
+  {
+    // Symetriques a spectre mixte, N croissant jusqu'a 15 (cible HyQMOM15) : |A| dU exact a eps machine.
+    const Real lam3[3] = {Real(2), Real(-3), Real(0.5)};
+    const Real lam4[4] = {Real(5), Real(-1), Real(2), Real(-4)};
+    const Real lam6[6] = {Real(3.1), Real(-2.2), Real(0.7), Real(-1.5), Real(4), Real(-0.3)};
+    Real lam15[15];
+    for (int i = 0; i < 15; ++i)
+      lam15[i] = (i % 2 ? Real(-1) : Real(1)) * (Real(1) + Real(0.5) * i);
+    chk(roe_abs_sym_err(lam3) < 1e-9, "roe_abs N=3 sym mixte : |A| dU == R |L| R^T dU");
+    chk(roe_abs_sym_err(lam4) < 1e-9, "roe_abs N=4 sym mixte");
+    chk(roe_abs_sym_err(lam6) < 1e-9, "roe_abs N=6 sym mixte");
+    chk(roe_abs_sym_err(lam15) < 1e-8, "roe_abs N=15 sym mixte (cible HyQMOM15)");
+  }
+  {
+    // Spectre tout positif : |A| = A, donc |A| dU = A dU (le sign vaut l'identite).
+    const Real lam5[5] = {Real(1), Real(2), Real(3), Real(4), Real(5)};
+    chk(roe_abs_sym_err(lam5) < 1e-9, "roe_abs spectre positif : |A| = A");
+  }
+  {
+    // Spectre COMPLEXE (rotation pure, VP +-i) : false (repli appelant), out intact.
+    const Real A[2][2] = {{Real(0), Real(-1)}, {Real(1), Real(0)}}, dU[2] = {Real(1), Real(0)};
+    Real out[2] = {Real(7), Real(7)};
+    chk(!adc::roe_abs_apply(A, dU, out) && out[0] == Real(7) && out[1] == Real(7),
+        "roe_abs spectre complexe -> false, out inchange (repli)");
+  }
+  {
+    // A singuliere (VP nulle, sign indefini sur l'axe imaginaire) : false.
+    const Real A[2][2] = {{Real(0), Real(0)}, {Real(0), Real(3)}}, dU[2] = {Real(1), Real(1)};
+    Real out[2];
+    chk(!adc::roe_abs_apply(A, dU, out), "roe_abs A singuliere (VP nulle) -> false");
   }
 
   std::printf("FAILS = %d\n", g_chk.fails());

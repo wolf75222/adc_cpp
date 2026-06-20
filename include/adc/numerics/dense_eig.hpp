@@ -372,4 +372,141 @@ ADC_HD inline Spectrum real_spectrum(const Real (&A)[N][N], Real im_tol = Real(1
   return b.all_real(im_tol) ? Spectrum::kReal : Spectrum::kComplexPair;
 }
 
+namespace detail {
+
+/// Inverse of a dense N x N matrix by Gauss-Jordan elimination with partial pivoting, into @p inv.
+/// Returns false (inv untouched-meaningful) if a pivot falls below @p pivot_tol (singular). Device
+/// clean: fixed stack buffers, bounded loops, no allocation.
+template <int N>
+ADC_HD inline bool mat_inverse(const Real (&A)[N][N], Real (&inv)[N][N],
+                               Real pivot_tol = Real(1e-300)) {
+  Real M[N][N];
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < N; ++j) {
+      M[i][j] = A[i][j];
+      inv[i][j] = (i == j) ? Real(1) : Real(0);
+    }
+  for (int col = 0; col < N; ++col) {
+    int piv = col;
+    Real best = std::fabs(M[col][col]);
+    for (int r = col + 1; r < N; ++r) {
+      const Real v = std::fabs(M[r][col]);
+      if (v > best) {
+        best = v;
+        piv = r;
+      }
+    }
+    if (best < pivot_tol)
+      return false;
+    if (piv != col)
+      for (int j = 0; j < N; ++j) {
+        Real t = M[col][j];
+        M[col][j] = M[piv][j];
+        M[piv][j] = t;
+        t = inv[col][j];
+        inv[col][j] = inv[piv][j];
+        inv[piv][j] = t;
+      }
+    const Real invd = Real(1) / M[col][col];
+    for (int j = 0; j < N; ++j) {
+      M[col][j] *= invd;
+      inv[col][j] *= invd;
+    }
+    for (int r = 0; r < N; ++r) {
+      if (r == col)
+        continue;
+      const Real f = M[r][col];
+      if (f != Real(0))
+        for (int j = 0; j < N; ++j) {
+          M[r][j] -= f * M[col][j];
+          inv[r][j] -= f * inv[col][j];
+        }
+    }
+  }
+  return true;
+}
+
+/// Max absolute row sum (infinity norm) of a dense N x N matrix.
+template <int N>
+ADC_HD inline Real mat_norm_inf(const Real (&A)[N][N]) {
+  Real m = Real(0);
+  for (int i = 0; i < N; ++i) {
+    Real r = Real(0);
+    for (int j = 0; j < N; ++j)
+      r += std::fabs(A[i][j]);
+    if (r > m)
+      m = r;
+  }
+  return m;
+}
+
+}  // namespace detail
+
+/// Roe matrix-absolute-value applied to a state jump: out = |A| dU, with |A| the SPECTRAL absolute
+/// value A * sign(A). sign(A) is computed by the determinant-free, infinity-norm-SCALED Newton
+/// matrix-sign iteration S_{k+1} = 1/2 (mu S_k + 1/mu S_k^-1), mu = sqrt(||S^-1||/||S||), which
+/// converges quadratically for a real spectrum off the imaginary axis. For a real-diagonalizable A
+/// this is EXACTLY R |Lambda| R^-1 dU -- the Roe dissipation of the reference flux_ROE_local.m
+/// (whose Harten floor |lambda| < 1e-6 is inactive at O(1) wave speeds, so omitting it here is exact
+/// for the smooth eigenmode / diocotron states this targets).
+///
+/// Returns false (out untouched) and leaves the dissipation to the caller (e.g. a spectral-radius
+/// Rusanov bound from real_eig_minmax) when |A| is not a faithful real spectral function:
+///   - the spectrum is not real (real_spectrum != kReal): A * sign(A) would keep the sign-of-real-part
+///     of a complex eigenvalue, NOT its modulus, so it would diverge from the reference;
+///   - A is singular / near-singular (a zero eigenvalue is on the imaginary axis: sign undefined) or
+///     the iteration does not converge within @p max_iter.
+/// ADC_HD, no allocation, N <= 16 (the dense-eig stack-buffer limit).
+template <int N>
+ADC_HD inline bool roe_abs_apply(const Real (&A)[N][N], const Real (&dU)[N], Real (&out)[N],
+                                 int max_iter = 80, Real tol = Real(1e-13)) {
+  static_assert(N >= 1 && N <= 16, "roe_abs_apply: 1 <= N <= 16");
+  if (real_spectrum(A) != Spectrum::kReal)
+    return false;  // complex/unknown -> caller falls back
+  Real S[N][N], Sinv[N][N];
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < N; ++j)
+      S[i][j] = A[i][j];
+  bool converged = false;
+  for (int it = 0; it < max_iter; ++it) {
+    if (!detail::mat_inverse(S, Sinv))
+      return false;  // singular iterate (zero eigenvalue)
+    const Real ns = detail::mat_norm_inf(S), nsi = detail::mat_norm_inf(Sinv);
+    Real mu = Real(1);
+    if (ns > Real(0) && nsi > Real(0))
+      mu = std::sqrt(nsi / ns);
+    const Real a = Real(0.5) * mu, b = Real(0.5) / mu;
+    Real diff = Real(0), nrm = Real(0);
+    for (int i = 0; i < N; ++i)
+      for (int j = 0; j < N; ++j) {
+        const Real snext = a * S[i][j] + b * Sinv[i][j];
+        const Real d = snext - S[i][j];
+        diff += d * d;
+        nrm += snext * snext;
+        S[i][j] = snext;
+      }
+    if (nrm > Real(0) && diff <= tol * tol * nrm) {
+      converged = true;
+      break;
+    }
+  }
+  if (!converged)
+    return false;
+  // |A| dU = (A sign(A)) dU = A (S dU)  (S = sign(A) commutes with A)
+  Real SdU[N];
+  for (int i = 0; i < N; ++i) {
+    Real s = Real(0);
+    for (int j = 0; j < N; ++j)
+      s += S[i][j] * dU[j];
+    SdU[i] = s;
+  }
+  for (int i = 0; i < N; ++i) {
+    Real s = Real(0);
+    for (int j = 0; j < N; ++j)
+      s += A[i][j] * SdU[j];
+    out[i] = s;
+  }
+  return true;
+}
+
 }  // namespace adc
