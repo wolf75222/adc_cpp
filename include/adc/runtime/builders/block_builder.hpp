@@ -94,7 +94,7 @@ struct AdvanceExplicit {
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim, pos_floor, ws_cache};
-    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
+    run_explicit_substeps<Stepper>(rhs, U, h, n);
   }
 };
 
@@ -319,7 +319,7 @@ struct AdvanceExplicitMasked {
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalMasked<Limiter, Flux, Model> rhs{m, &ctx, mask, recon_prim, pos_floor};
-    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
+    run_explicit_substeps<Stepper>(rhs, U, h, n);
   }
 };
 
@@ -335,7 +335,7 @@ struct AdvanceExplicitEb {
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalEb<Limiter, Flux, Model> rhs{m, &ctx, eb_domain, recon_prim, pos_floor};
-    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
+    run_explicit_substeps<Stepper>(rhs, U, h, n);
   }
 };
 

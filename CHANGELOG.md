@@ -252,6 +252,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `docs/validation/HEADER_PROVENANCE.md`. `system_stepper.hpp` is already generic (its
   `HOFFART_STEP_SEQUENCE.md` references are sanctioned validation-doc pointers). Comments and docs
   only; no behavior change.
+- **Hoisted the SSPRK RK scratch out of the per-substep hot loop** (ADC-261): the explicit steppers
+  (`ForwardEuler`, `SSPRK2Step`, `SSPRK3Step`) re-allocated and zero-initialized fresh full-state
+  scratch (the residual `R` plus the stage copies `U1`/`U2`/`U3`) on every `take_step`, so an
+  n-substep explicit advance churned malloc/zero/free n times per macro-step. Each stepper now has a
+  reusable `Scratch` struct and a `take_step(rhs, U, dt, Scratch&)` overload; a `run_explicit_substeps`
+  helper allocates the scratch once per advance and reuses it across substeps (with a one-shot
+  fallback for custom user steppers). The one-arg `take_step` is kept for the existing callers. The
+  same hoist already lived in `AdvanceImexRkArs222`; behavior is bit-identical (the buffers are fully
+  overwritten each substep and stage ghosts are re-derived by the residual fill_ghosts), locked by
+  `test_weno5_ssprk3` (1e-14 parity).
 - **Runtime headers organized by layer** (ADC-330): the flat `include/adc/runtime/` directory is
   split into layers so the structure shows the API surface. The public facades stay at the root
   (`system.hpp`, `amr_system.hpp`, `model_spec.hpp`, `facade_options.hpp`, `export.hpp`); the ABI /
