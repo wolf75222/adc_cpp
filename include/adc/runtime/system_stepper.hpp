@@ -147,6 +147,40 @@ class SystemStepper {
     }
   }
 
+  /// MIN physical step of the grid, shared by step_cfl / step_adaptive: Cartesian = min(dx, dy);
+  /// POLAR = min(dr, r_min * dtheta) -- the azimuthal physical step r*dtheta is minimal at the inner
+  /// radius r_min of the ring (the most constraining edge for the CFL). Reads rank-local geometry
+  /// only (no collective).
+  Real cfl_grid_h() const {
+    Impl* P = owner_;
+    return P->polar_
+               ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
+               : std::min(P->geom.dx(), P->geom.dy());
+  }
+
+  /// GLOBAL step bounds (System::add_dt_bound): multi-block coupling, Schur/Poisson, AMR/scheduler.
+  /// One HOST evaluation per step and per bound; <= 0 or non-finite = does not constrain this step
+  /// (neutralized to +inf BEFORE the global min). ALL_REDUCE_MIN mandatory: the callback is
+  /// evaluated PER RANK (it may read a rank-local state); without the global min each rank would
+  /// choose a different dt -> desynchronized step collectives (Krylov / fill_boundary) -> MPI
+  /// deadlock. In serial all_reduce_min is the identity (bit-identical). @p reason, if non-null, is
+  /// set to "global:<label>" for the winning bound (step_cfl tracks it; step_adaptive passes nullptr).
+  /// MPI: dt_bounds_ is identical on all ranks and `if(!g.fn)` is rank-uniform, so the collective is
+  /// symmetric (same count/order on every rank) -- factoring keeps the deadlock-safety unchanged.
+  void apply_global_dt_bounds(double& dt, std::string* reason) const {
+    Impl* P = owner_;
+    for (const auto& g : P->dt_bounds_) {
+      if (!g.fn) continue;
+      double v = g.fn();
+      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+      v = all_reduce_min(v);
+      if (v < dt) {
+        dt = v;
+        if (reason) *reason = "global:" + g.label;
+      }
+    }
+  }
+
   /// PROJECTION PONCTUELLE post-pas (ADC-177) : U <- project(U, aux) par bloc, appliquee UNE fois a
   /// la FIN de chaque macro-pas ENTIER (apres transport + etage source + couplages ; jamais par etage
   /// RK), sur les cellules VALIDES seulement. Les GHOSTS ne sont pas projetes : chaque consommateur
@@ -365,12 +399,9 @@ class SystemStepper {
   double step_cfl(double cfl) {
     Impl* P = owner_;
     P->solve_fields();
-    // MIN physical step of the grid: Cartesian = min(dx, dy); POLAR = min(dr, r_min * dtheta) (the
-    // azimuthal physical step r*dtheta is minimal at the inner radius r_min of the ring -> most
-    // constraining edge for the CFL). The rest of the CFL formula (per block, substeps/stride) is unchanged.
-    const Real h = P->polar_
-                       ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
-                       : std::min(P->geom.dx(), P->geom.dy());
+    // MIN physical step of the grid (Cartesian min(dx,dy) / polar min(dr, r_min*dtheta), cf.
+    // cfl_grid_h). The rest of the CFL formula (per block, substeps/stride) is unchanged.
+    const Real h = cfl_grid_h();
     // PER-BLOCK CFL, STRIDE AND SUBSTEPS FACTOR INCLUDED. A block of cadence M advances by an effective
     // step M*dt in substeps_b substeps, so each substep is worth stride_b * dt / substeps_b: the stable
     // condition per substep is stride_b * dt / substeps_b <= cfl * h / w_b, that is
@@ -426,19 +457,9 @@ class SystemStepper {
     // this step, global all_reduce_max, dt <= cfl / max(mu). Same reason "coupled_source:<label>" as the
     // constant. No per-cell source -> no-op (bit-identical).
     apply_coupled_freq_expr_bounds(cfl, dt, &reason);
-    // GLOBAL bounds (System::add_dt_bound): multi-block coupling, Schur/Poisson, AMR/scheduler.
-    // One HOST evaluation per step and per bound; <= 0 or non-finite = does not constrain this step
-    // (neutralized to +inf BEFORE the global min). ALL_REDUCE_MIN mandatory: the callback is
-    // evaluated PER RANK (it may read a rank-local state); without the global min each rank
-    // would choose a different dt -> desynchronized step collectives (Krylov / fill_boundary) ->
-    // MPI deadlock. In serial all_reduce_min is the identity (bit-identical).
-    for (const auto& g : P->dt_bounds_) {
-      if (!g.fn) continue;
-      double v = g.fn();
-      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
-      v = all_reduce_min(v);
-      if (v < dt) { dt = v; reason = "global:" + g.label; }
-    }
+    // GLOBAL bounds (System::add_dt_bound): all_reduce_min over the registered bounds, tracking the
+    // winning reason (see apply_global_dt_bounds for the MPI deadlock-safety rationale).
+    apply_global_dt_bounds(dt, &reason);
     if (!std::isfinite(dt)) {
       dt = cfl * static_cast<double>(h) / static_cast<double>(kCflSpeedFloor);  // all frozen: degenerate step
       reason = "degenerate";
@@ -482,9 +503,7 @@ class SystemStepper {
       if (s.evolve) wmin = std::min(wmin, w);
     }
     if (wmin >= Real(1e30)) wmin = kCflSpeedFloor;  // no evolving block (all frozen)
-    const Real h = P->polar_
-                       ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
-                       : std::min(P->geom.dx(), P->geom.dy());
+    const Real h = cfl_grid_h();  // Cartesian min(dx,dy) / polar min(dr, r_min*dtheta)
     double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
     // OPTIONAL block bounds: each block subcycles n_b times its effective step
     // stride_b*macro_dt; the substep stride_b*macro_dt/n_b must satisfy the source / admissible
@@ -517,15 +536,9 @@ class SystemStepper {
     // PER-CELL frequencies (Expr): MAX of mu(U) per cell, all_reduce_max, bound on the macro-step
     // (cf. step_cfl). step_adaptive does not track the active reason -> reason = nullptr.
     apply_coupled_freq_expr_bounds(cfl, macro_dt, nullptr);
-    // GLOBAL bounds (System::add_dt_bound), like step_cfl (same all_reduce_min: identical dt
-    // on all ranks, cf. the step_cfl comment).
-    for (const auto& g : P->dt_bounds_) {
-      if (!g.fn) continue;
-      double v = g.fn();
-      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
-      v = all_reduce_min(v);
-      if (v < macro_dt) macro_dt = v;
-    }
+    // GLOBAL bounds (System::add_dt_bound), like step_cfl; step_adaptive does not track the active
+    // reason -> nullptr (same all_reduce_min, identical dt on all ranks).
+    apply_global_dt_bounds(macro_dt, nullptr);
     for (std::size_t b = 0; b < P->sp.size(); ++b) {
       auto& s = P->sp[b];
       if (!s.evolve) continue;  // frozen block: not advanced

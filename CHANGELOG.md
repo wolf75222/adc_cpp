@@ -191,6 +191,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   and the provenance is relocated to the validation docs (new `docs/validation/HEADER_PROVENANCE.md`,
   plus the existing `HOFFART_*`/`SCHUR_CONDENSATION_DESIGN`/`DIOCOTRON_GROWTH_RATE` docs). Comments
   and docs only; no behavior change.
+- **Factor the stepper global-dt-bound and grid-step duplication** (ADC-213): `step_cfl` and
+  `step_adaptive` shared, verbatim, the `add_dt_bound` `all_reduce_min` loop and the
+  polar/Cartesian minimum-grid-step expression. Both are now private `SystemStepper` helpers
+  (`apply_global_dt_bounds(dt, reason*)`, mirroring the existing `apply_coupled_freq_expr_bounds`
+  idiom, and `cfl_grid_h()`). Trajectory is bit-identical and the MPI collective count/order is
+  unchanged (no behavior change).
 - **Builtin model bricks behind a single registry** (ADC-331): the transport / source / elliptic
   tag lists are centralized in `include/adc/runtime/model_registry.hpp` (constexpr `kTransports` /
   `kSources` / `kElliptics` tables plus CSV / choices / validator helpers), the model-axis
