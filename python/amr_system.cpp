@@ -127,6 +127,10 @@ struct AmrSystem::Impl {
   // as soon as a block carries schur==true (checked at build: amr_write_coarse_bz throws if size != n*n).
   bool schur_strang = false;       // false: Lie (H(dt) S(dt)); true: Strang (H(dt/2) S(dt) H(dt/2))
   std::vector<double> bz_field;    // coarse B_z(x,y), n*n row-major (set_magnetic_field)
+  // Model-NAMED aux fields (ADC-291): component (>= kAuxNamedBase) -> coarse field (n*n row-major).
+  // Pending until build: seeded into the single-block coupler (make_build_params -> bp.named_aux) AND
+  // pushed to the multi-block runtime (build_multi). Empty -> bit-identical. cf. set_aux_field_component.
+  std::map<int, std::vector<double>> named_aux_;
 
   std::string p_rhs = "charge_density", p_solver = "geometric_mg", p_bc = "auto",
               p_wall = "none";
@@ -247,6 +251,7 @@ struct AmrSystem::Impl {
     bp.schur_energy = b.schur_energy;
     bp.schur_strang = schur_strang;
     bp.bz_field = bz_field;
+    bp.named_aux = named_aux_;  // ADC-291: model-named aux fields seeded onto the single-block coupler
     // NEWTON OPTIONS of the single-block IMEX source (wave 3: now WIRED on the AmrCouplerMP
     // coupler). build_amr_compiled captures them from bp and passes them to cpl->step. Default
     // (add_block without option) = historical NewtonOptions{} -> path (2a) bit-identical.
@@ -370,6 +375,11 @@ struct AmrSystem::Impl {
     runtime = std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc,
                                                 std::move(rblocks), S.base_per, S.replicated_coarse,
                                                 S.wall);
+    // Model-NAMED aux fields (ADC-291): push the pending coarse fields into the runtime engine, which
+    // re-applies them onto the shared aux each solve_fields (so they persist across the union regrid)
+    // and injects them to the fine levels. Empty -> no-op (bit-identical).
+    for (const auto& kv : named_aux_)
+      runtime->set_named_aux(kv.first, std::vector<Real>(kv.second.begin(), kv.second.end()));
     // GLOBAL bounds registered BEFORE the lazy build (add_dt_bound): passed to the engine
     // (which aggregates them in its step_cfl, all_reduce_min). Those added AFTER go in directly.
     for (const auto& g : dt_bounds) runtime->add_dt_bound(g.label, g.fn);
@@ -958,6 +968,25 @@ void AmrSystem::set_magnetic_field(const std::vector<double>& bz) {
                              std::to_string(bz.size()) + " (expected n*n = " + std::to_string(nn) +
                              ", coarse row-major)");
   p_->bz_field = bz;
+}
+
+void AmrSystem::set_aux_field_component(int comp, const std::vector<double>& field) {
+  if (p_->built)
+    throw std::runtime_error("AmrSystem::set_aux_field : the system is already built (set named aux "
+                             "fields before any step)");
+  // RESERVED components (phi/grad/B_z/T_e): a model-named aux field starts at kAuxNamedBase. B_z keeps
+  // its dedicated path (the Python facade intercepts canonical names; this guard covers a direct call).
+  if (comp < kAuxNamedBase)
+    throw std::runtime_error(
+        "AmrSystem::set_aux_field : component " + std::to_string(comp) +
+        " reserved (phi/grad_x/grad_y/B_z/T_e) ; a named aux field starts at index " +
+        std::to_string(kAuxNamedBase) + " (B_z -> set_magnetic_field)");
+  const std::size_t nn = static_cast<std::size_t>(p_->cfg.n) * static_cast<std::size_t>(p_->cfg.n);
+  if (field.size() != nn)
+    throw std::runtime_error("AmrSystem::set_aux_field : field of size " +
+                             std::to_string(field.size()) + " (expected n*n = " + std::to_string(nn) +
+                             ", coarse row-major)");
+  p_->named_aux_[comp] = field;  // pending: seeded into the engine at build (single + multi block)
 }
 
 void AmrSystem::set_source_stage(const std::string& name, const std::string& kind, double theta,

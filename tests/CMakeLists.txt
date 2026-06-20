@@ -301,8 +301,16 @@ target_link_libraries(test_config_model_validation
                       PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system adc_runtime_amr)
 add_test(NAME test_config_model_validation COMMAND test_config_model_validation)
 
+# ADC-291 : la marshaling host (native_loader::host_residual) transporte les aux NOMMES (extra[k]),
+# pas seulement les extras canoniques. native_loader.hpp inclut system.hpp -> link adc_runtime_system.
+add_executable(test_native_aux_named test_native_aux_named.cpp)
+target_link_libraries(test_native_aux_named
+                      PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
+add_test(NAME test_native_aux_named COMMAND test_native_aux_named)
+
 # --- canal aux extensible (n_aux + load_aux<NComp>) : champ extra B_z lu et peuple ---
 adc_add_test(test_aux_extra)
+adc_add_test(test_aux_names)  # ADC-291 : table de noms aux canonique C++ <-> Python (aux_names.hpp)
 adc_add_test(test_aux_coupler_bz)
 adc_add_test(test_aux_system_bz)  # B_z partage multi-blocs (SystemAssembler, aux = max sur les blocs)
 adc_add_test(test_aux_composite)  # CompositeModel propage n_aux depuis ses briques (B_z)

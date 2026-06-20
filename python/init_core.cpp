@@ -1,5 +1,7 @@
 #include "bindings_detail.hpp"
 
+#include <adc/core/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
+
 // ADC-365: module attributes/globals + SystemConfig + ModelSpec (registered first so System/
 // AmrSystem signatures resolve them).
 void init_core(py::module_& m) {
@@ -76,6 +78,22 @@ void init_core(py::module_& m) {
 #else
   m.attr("__version__") = "unknown";
 #endif
+
+  // AUX channel limits + canonical name table (ADC-291), exposed from the SINGLE C++ source
+  // (adc/core/state.hpp + aux_names.hpp). The DSL/capabilities() read these so the Python mirrors
+  // (AUX_NAMED_MAX / AUX_NAMED_BASE / AUX_CANONICAL in dsl.py) cannot SILENTLY drift from C++:
+  // test_capabilities.py asserts they match. kAuxMaxExtra is the only remaining compile-time aux
+  // limit and is now declarative + introspectable here.
+  m.attr("__aux_base_comps__") = static_cast<int>(adc::kAuxBaseComps);
+  m.attr("__aux_named_base__") = static_cast<int>(adc::kAuxNamedBase);
+  m.attr("__aux_max_extra__") = static_cast<int>(adc::kAuxMaxExtra);
+  m.attr("__aux_max_comps__") = static_cast<int>(adc::kAuxMaxComps);
+  {
+    py::dict canon;
+    for (const auto& [name, comp] : adc::kAuxCanonicalNames)
+      canon[py::str(std::string(name))] = static_cast<int>(comp);
+    m.attr("__aux_canonical__") = canon;
+  }
 
   // REAL state of the Kokkos init (lazy: first Fab allocation, through ANY path --
   // System, AmrSystem, DSL .so...). adc.set_threads relies on this rather than on a Python

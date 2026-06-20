@@ -169,4 +169,20 @@ ADC_AUX_FIELDS(ADC_AUX_NAMED_BASE_CHECK)
 ADC_AUX_FIELDS(ADC_AUX_IDX_CHECK)
 #undef ADC_AUX_IDX_CHECK
 
+// EXPLICIT total cap of the aux channel (ADC-291): the maximum n_aux a model may declare is the
+// named base plus the bounded number of model-NAMED fields. NAMING the cap (rather than leaving the
+// bound an ad-hoc literal scattered across sites) makes the only remaining compile-time aux limit
+// DECLARATIVE; it is mirrored by AUX_NAMED_MAX on the DSL side (python/adc/dsl.py) and reported by
+// adc.capabilities() (the _adc module exposes kAuxMaxExtra/kAuxNamedBase so Python cannot silently
+// drift). A model declaring n_aux > kAuxMaxComps is out of contract.
+inline constexpr int kAuxMaxComps = kAuxNamedBase + kAuxMaxExtra;
+
+// The named-aux bound must allow at least one field, and the Aux POD storage must match it EXACTLY:
+// extra[] is the only place named fields live, so a mismatch between the declared limit and the array
+// would silently truncate (read-as-0). These pin the limit at compile time (tested via test_aux_names
+// and the Python<->C++ parity in test_capabilities.py).
+static_assert(kAuxMaxExtra >= 1, "kAuxMaxExtra must allow at least one model-named aux field");
+static_assert(static_cast<int>(sizeof(Aux::extra) / sizeof(Real)) == kAuxMaxExtra,
+              "Aux::extra[] size must equal kAuxMaxExtra (the declared named-aux limit)");
+
 }  // namespace adc

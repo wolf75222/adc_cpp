@@ -176,6 +176,11 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   auto crit = [thr](const ConstArray4& a, int i, int j) { return a(i, j, 0) > thr; };
   if (cpl->levels().size() > 1)
     cpl->regrid(crit);  // no regrid on a mono-level hierarchy (amr-schur)
+  // model-NAMED aux (ADC-291): seed the static named fields onto the coupler's shared aux BEFORE the
+  // first update/step (like density/B_z seeding). The coupler re-applies them in compute_aux each
+  // update, so they persist across regrid and reach every level via the aux injection. Empty -> no-op.
+  for (const auto& kv : bp.named_aux)
+    cpl->set_named_aux(kv.first, std::vector<Real>(kv.second.begin(), kv.second.end()));
   cpl->update();
 
   AmrCompiledHooks h;

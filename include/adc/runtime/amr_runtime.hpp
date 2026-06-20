@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>     // std::numeric_limits (initial dt = +inf, min over the blocks)
+#include <map>        // named_aux_: model-named aux fields (comp -> coarse field), re-applied each solve
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -343,6 +344,19 @@ class AmrRuntime {
   /// the union.
   void set_phi_tag_predicate(TagPredicate crit) { phi_tag_ = std::move(crit); }
 
+  /// Registers a model-NAMED aux field (ADC-291) at shared-channel component @p comp (= kAuxNamedBase
+  /// + k for the k-th named field of a block), as a coarse base-level field @p field (n*n row-major,
+  /// global cell index j*nx+i). The field is STATIC (external to the elliptic): solve_fields re-applies
+  /// it onto the coarse aux every macro-step AFTER field_postprocess (which only writes phi/grad,
+  /// comps 0..2) and BEFORE the coarse->fine injection, so it reaches every level and SURVIVES a regrid
+  /// (regrid re-solves). AMR counterpart of System::set_aux_field_component. No-op default: without a
+  /// named field the map is empty and the path is bit-identical. @p comp must be >= kAuxNamedBase and
+  /// within the channel (the facade validates and resolves the name).
+  void set_named_aux(int comp, std::vector<Real> field) {
+    named_aux_[comp] = std::move(field);
+    if (!aux_.empty()) apply_named_aux();  // reflect immediately if the hierarchy already exists
+  }
+
   /// Registers an inter-species COUPLED SOURCE (DSL CoupledSource, P5 bytecode) on the runtime facade,
   /// counterpart of System::add_coupled_source. The ABI is FLAT (postfix bytecode): we resolve each
   /// (block, role) into (block index, component) then store a closure that, at each macro-step AFTER
@@ -528,6 +542,11 @@ class AmrRuntime {
     const Real cx = Real(1) / (2 * geom_.dx()), cy = Real(1) / (2 * geom_.dy());
     field_postprocess(mg_.phi(), aux_[0], cx, cy,
                       FieldPostProcess{FieldPostProcess::GradSign::Plus, true});
+    // 3b. model-NAMED aux (ADC-291): re-apply the static named fields onto the coarse valid cells
+    // BEFORE fill_ghosts (so their ghosts are filled) and the injection (so they reach every level).
+    // No-op when no named field was set; field_postprocess wrote only comps 0..2, so this never clobbers
+    // phi/grad. This is what makes named aux survive a regrid (regrid re-solves -> re-applies).
+    apply_named_aux();
     fill_ghosts(aux_[0], dom_, aux_bc_);
     // 4. coarse->fine injection of the aux (parent replicated only at level 1 if coarse replicated).
     for (int k = 1; k < nlev_; ++k)
@@ -948,6 +967,26 @@ class AmrRuntime {
   int coarse_total_boxes() const { return (*blocks_[0].levels)[0].U.box_array().size(); }
 
  private:
+  // Re-applies the model-NAMED aux fields (ADC-291) onto the COARSE shared aux valid cells. Mirror of
+  // SystemFieldSolver::apply_named_aux_one (cartesian System): per LOCAL fab (MPI-safe), valid cells
+  // only, global flat index j*nx+i. The coarse layout is frozen across regrid (only fine levels are
+  // rebuilt), so the stored coarse field stays valid; solve_fields runs the coarse->fine injection
+  // right after, carrying the named comps to every level. No-op without a named field.
+  void apply_named_aux() {
+    if (named_aux_.empty() || aux_.empty()) return;
+    const int row = dom_.nx();
+    for (const auto& [comp, field] : named_aux_) {
+      if (field.empty() || comp >= aux_ncomp_) continue;
+      for (int li = 0; li < aux_[0].local_size(); ++li) {
+        Array4 a = aux_[0].fab(li).array();
+        const Box2D v = aux_[0].box(li);
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+            a(i, j, comp) = field[static_cast<std::size_t>(j) * row + i];
+      }
+    }
+  }
+
   // Index of the block named @p name in the registry (-1 if absent). Counterpart of
   // AmrSystem::Impl::block_index (the facade names the blocks; the coupled sources target them by name,
   // resolved once at registration).
@@ -1010,6 +1049,10 @@ class AmrRuntime {
   std::vector<CoupledFreqExprDecl> coupled_freq_exprs_;
   std::string last_dt_reason_;
   std::vector<MultiFab> aux_;  // [level], shared by all blocks
+  // Model-NAMED aux fields (ADC-291): component (>= kAuxNamedBase) -> coarse base-level field
+  // (n*n row-major). STATIC user fields re-applied by solve_fields each macro-step (so they persist
+  // across regrid). Empty by default -> bit-identical. cf. set_named_aux / apply_named_aux.
+  std::map<int, std::vector<Real>> named_aux_;
   std::vector<CoupledSourceSpec> coupled_sources_;  // registered coupled sources (applied after transport)
   // UNION-TAGS REGRID (capstone Phase 2, C.6). regrid_every_ == 0 -> FROZEN hierarchy (default,
   // bit-identical). block_tag_: PER-BLOCK tag predicate (D1; same size as blocks_, empty = this block

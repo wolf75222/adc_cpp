@@ -106,6 +106,35 @@ def test_regrid_variable_selector_advertised():
     assert "component_0 only" in regrid["compiled_so"], regrid["compiled_so"]
 
 
+def test_aux_named_surface_and_limit_parity():
+    # ADC-291: named aux is advertised on System (cartesian + polar) AND AMR (single + multi block),
+    # no longer "cartesian System only". The remaining compile-time limit (kAuxMaxExtra) is published
+    # as an introspectable scalar and MUST match BOTH the C++ source (_adc.__aux_max_extra__) and the
+    # DSL mirror (dsl.AUX_NAMED_MAX) -- this pins the hand-maintained Python<->C++ mirror so it cannot
+    # silently drift (the historical #51-class risk the issue calls out).
+    from adc import _adc
+    named = adc.capabilities()["aux"]["named"]
+    assert set(named["backends"]) >= {"system_cartesian", "system_polar", "amr_single_block",
+                                      "amr_multi_block"}, named["backends"]
+    # the limit is the SINGLE C++ source, mirrored by the DSL constant.
+    assert named["limit"] == _adc.__aux_max_extra__ == dsl.AUX_NAMED_MAX, \
+        "aux named limit drift: caps=%r, C++=%r, dsl=%r" % (
+            named["limit"], _adc.__aux_max_extra__, dsl.AUX_NAMED_MAX)
+    # the aux ghost width is explicit (the configurable-radius mechanism is a documented follow-up).
+    assert named["halo_radius"] == 1, named["halo_radius"]
+    # the other mirrored aux constants stay coherent C++ <-> DSL.
+    assert _adc.__aux_named_base__ == dsl.AUX_NAMED_BASE, "AUX_NAMED_BASE drift"
+    assert _adc.__aux_base_comps__ == dsl.AUX_BASE_COMPS, "AUX_BASE_COMPS drift"
+    assert _adc.__aux_max_comps__ == _adc.__aux_named_base__ + _adc.__aux_max_extra__
+    # the C++ canonical name->component table mirrors the Python AUX_CANONICAL exactly.
+    assert dict(_adc.__aux_canonical__) == dict(dsl.AUX_CANONICAL), \
+        "C++ aux_names table != Python AUX_CANONICAL: %r vs %r" % (
+            dict(_adc.__aux_canonical__), dict(dsl.AUX_CANONICAL))
+    # no stale "cartesian System only" claim survives in the aux surface.
+    blob = repr(adc.capabilities()["aux"]).lower()
+    assert "cartesian system only" not in blob, "stale 'cartesian System only' aux claim"
+
+
 if __name__ == "__main__":
     test_top_level_keys_present()
     test_riemann_surface_matches_dispatch()
@@ -114,5 +143,6 @@ if __name__ == "__main__":
     test_amr_schur_advertised_implemented()
     test_dimension_invariant_2d()
     test_regrid_variable_selector_advertised()
+    test_aux_named_surface_and_limit_parity()
     print("test_capabilities : OK (top keys, riemann surface, backends_dsl, polar stability, "
-          "AMR Schur, 2D dimension, regrid selector)")
+          "AMR Schur, 2D dimension, regrid selector, aux named surface + limit parity)")

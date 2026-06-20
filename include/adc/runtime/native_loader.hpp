@@ -88,6 +88,14 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
   if (AUX.size() >= ((idx) + 1) * nn) a.name = AUX[(idx) * nn + k];
       ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
 #undef ADC_AUX_MARSHAL
+      // Model-NAMED aux fields (ADC-291): extra[e] = aux component kAuxNamedBase + e. Same contract
+      // as load_aux (spatial_operator.hpp) and the AOT path (compiled_block_abi.hpp): a component is
+      // read ONLY when the channel carries it, so a narrow channel leaves extra[] at 0 (no out-of-
+      // bounds). Without this loop a model reading aux.extra_field(k) on the JIT host read 0 silently.
+      for (int e = 0; e < kAuxMaxExtra; ++e) {
+        const std::size_t comp = static_cast<std::size_t>(kAuxNamedBase + e);
+        if (AUX.size() >= (comp + 1) * nn) a.extra[e] = AUX[comp * nn + k];
+      }
     }
     return a;
   };
@@ -246,6 +254,11 @@ void push_dynamic(ImplT* P, const std::string& name, adc::dynlib::handle h, int 
   if (aux.size() >= ((idx) + 1) * nn) a.name = aux[(idx) * nn + c0];
         ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
 #undef ADC_AUX_MARSHAL
+        // Model-NAMED aux fields (ADC-291): same single-source contract as the host_residual site.
+        for (int e = 0; e < kAuxMaxExtra; ++e) {
+          const std::size_t comp = static_cast<std::size_t>(kAuxNamedBase + e);
+          if (aux.size() >= (comp + 1) * nn) a.extra[e] = aux[comp * nn + c0];
+        }
       }
       Real v = std::max(im->max_wave_speed(s, a, 0), im->max_wave_speed(s, a, 1));
       if (v > mx) mx = v;

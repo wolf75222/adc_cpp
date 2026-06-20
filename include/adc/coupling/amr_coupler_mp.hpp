@@ -24,6 +24,7 @@
 #include <cmath>       // std::hypot
 #include <cstddef>     // std::size_t
 #include <functional>  // std::function (conducting-wall predicate passed to the MG)
+#include <map>         // named_aux_: model-named aux fields (comp -> coarse field), re-applied by compute_aux
 #include <stdexcept>   // std::runtime_error (density size guard)
 #include <utility>     // std::pair, std::move
 #include <vector>
@@ -293,6 +294,16 @@ class AmrCouplerMP {
   // layout as coarse(). Read by the AmrSystem potential hook (coupler_read_coarse_phi).
   MultiFab& aux0() { return stack_.aux(0); }
   const MultiFab& aux0() const { return stack_.aux(0); }
+
+  /// Registers a model-NAMED aux field (ADC-291) at shared-channel component @p comp (>= kAuxNamedBase),
+  /// as a coarse base-level field @p field (n*n row-major, global cell index j*nx+i). STATIC user field
+  /// re-applied by compute_aux every update (so it persists across regrid) and injected coarse->fine.
+  /// Single-block AMR counterpart of System::set_aux_field_component. The facade validates comp/size and
+  /// resolves the name. No-op default (no named field -> empty map -> bit-identical).
+  void set_named_aux(int comp, std::vector<Real> field) {
+    named_aux_[comp] = std::move(field);
+    apply_named_aux();  // stack_ exists at ctor: reflect onto the coarse aux right away
+  }
   const Box2D& domain() const { return stack_.domain(); }
   int nlev() const { return stack_.nlev(); }
 
@@ -459,6 +470,11 @@ class AmrCouplerMP {
           a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) / (2 * dy);
         }
     }
+    // model-NAMED aux (ADC-291): re-apply the static named fields onto the coarse valid cells BEFORE
+    // fill_boundary (ghosts) and the injection (lines below), so they reach every level and survive a
+    // regrid. The loop above wrote only comps 0..2 (phi/grad), so this never clobbers them. No-op
+    // without a named field (bit-identical).
+    apply_named_aux();
     fill_boundary(stack_.aux(0), dom, Periodicity{true, true});
     // parent aux(k-1) replicated only if level 0 is: otherwise it is DISTRIBUTED (multi-box)
     // and the injection goes through parallel_copy. Beyond level 1, the parent is always distributed.
@@ -570,6 +586,12 @@ class AmrCouplerMP {
   /// FAC, then sets aux PER LEVEL from the phi OF EACH LEVEL: fine aux = (phi_f, fine grad) where fine
   /// grad = centered diff on phi_f (solved at fine resolution), NOT the constant coarse-grad injection of Option A.
   void compute_aux_composite() {
+    // ADC-291 NOTE: unlike compute_aux (Option A), this opt-in composite-FAC path does NOT re-apply
+    // named aux onto the fine level (it derives each level's aux from the FAC phi, with no coarse->fine
+    // aux injection). The coarse named comp survives (the grad writes touch only comps 0..2), but a
+    // fine-level model reading extra_field(k) would read 0. set_composite_poisson is C++-only and not
+    // facade-reachable, so named aux cannot hit this path today; carrying named aux to the composite
+    // fine level is a documented follow-up (cf. adc.capabilities()['aux']['followups']).
     auto& L = stack_.L();
     const Box2D& dom = stack_.domain();
     const Box2D fine_box = L[1].U.box_array()[0];
@@ -609,6 +631,29 @@ class AmrCouplerMP {
   bool fac_built_ = false;
   std::shared_ptr<CompositeFacPoisson> fac_;
   Box2D fac_fine_box_{};
+  // Model-NAMED aux fields (ADC-291): component (>= kAuxNamedBase) -> coarse base-level field
+  // (n*n row-major). STATIC user fields re-applied by compute_aux each update (so they persist across
+  // regrid). Empty by default -> bit-identical. cf. set_named_aux / apply_named_aux.
+  std::map<int, std::vector<Real>> named_aux_;
+
+  // Re-applies the model-NAMED aux fields onto the COARSE shared aux valid cells. Mirror of
+  // SystemFieldSolver::apply_named_aux_one and AmrRuntime::apply_named_aux: per local fab (MPI-safe),
+  // valid cells only, global flat index j*nx+i. compute_aux runs the coarse->fine injection right
+  // after, carrying the named comps to the fine levels. No-op without a named field.
+  void apply_named_aux() {
+    if (named_aux_.empty()) return;
+    const int row = stack_.domain().nx();
+    for (const auto& [comp, field] : named_aux_) {
+      if (field.empty() || comp >= stack_.aux(0).ncomp()) continue;
+      for (int li = 0; li < stack_.aux(0).local_size(); ++li) {
+        Array4 a = stack_.aux(0).fab(li).array();
+        const Box2D v = stack_.aux(0).box(li);
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+            a(i, j, comp) = field[static_cast<std::size_t>(j) * row + i];
+      }
+    }
+  }
 };
 
 }  // namespace adc

@@ -2311,6 +2311,9 @@ def capabilities():
     actually coded (make_block / dispatch_amr_* / block_builder_polar / dsl._BACKENDS) ; the
     combinations outside the matrix raise an explicit error on the C++ side (never a silent ignore).
     """
+    from . import _adc as _adc_mod  # ADC-291: read the aux limit from the SINGLE C++ source
+    from . import dsl as _dsl_caps  # fallback mirror (no second hardcoded literal)
+    aux_max_extra = int(getattr(_adc_mod, "__aux_max_extra__", _dsl_caps.AUX_NAMED_MAX))
     return {
         # Spatial dimension of the core (ADC-294 / ADR-0001 Decision 1). The solver is structurally
         # 2D: a load-bearing invariant baked into the data layout (Fab2D operator()(i, j, c)), the
@@ -2448,13 +2451,27 @@ def capabilities():
         },
         "aux": {
             "canonical": "phi/grad_x/grad_y (base) + B_z (set_magnetic_field) + T_e "
-                         "(set_electron_temperature_from), closed list ADC_AUX_FIELDS/AUX_CANONICAL",
-            "named": "fields NAMED by model (ADC-70 phase 1) : m.aux_field('name') -> components "
-                     ">= 5 (kAuxNamedBase) ; set_aux_field(block, name, array) / aux_field(block, name) on "
-                     "CARTESIAN System ; at most kAuxMaxExtra=4 per model ; static, persistent",
-            "named_followups": "AMR (aux channel per level / regrid), polar (validation), custom halos "
-                               "per field, name->comp table on the C++ Impl side (resolution without "
-                               "Python) = FOLLOW-UP ; phase 1 = cartesian System only",
+                         "(set_electron_temperature_from), closed list ADC_AUX_FIELDS / AUX_CANONICAL "
+                         "(C++ name table adc/core/aux_names.hpp, mirror of Python AUX_CANONICAL)",
+            "named": {
+                # Model-declared NAMED aux fields (ADC-70 phase 1 + ADC-291 phase 2): m.aux_field('name')
+                # reserves component AUX_NAMED_BASE + k (read in C++ via aux.extra_field(k));
+                # set_aux_field(block, name, array) carries the static field. STATIC + persistent.
+                "backends": ["system_cartesian", "system_polar", "amr_single_block",
+                             "amr_multi_block"],
+                # The ONLY remaining compile-time aux limit, declarative + introspectable (= C++
+                # kAuxMaxExtra, mirrored by dsl.AUX_NAMED_MAX ; test_capabilities.py pins the match).
+                "limit": aux_max_extra,
+                # Aux ghost width is fixed at 1 cell (the halo EXCHANGE is already component-generic, so
+                # a named field participates ; a per-field CONFIGURABLE radius is a follow-up).
+                "halo_radius": 1,
+                "persistent": True,
+            },
+            "followups": "per-field CONFIGURABLE aux halo radius (today fixed at 1) ; named aux on the "
+                         "AMR path needs backend='production' target='amr_system', on polar a "
+                         "System+AOT compiled block (the in-AMR compiled .so is mono-level) ; the "
+                         "opt-in single-block composite-FAC Poisson path (set_composite_poisson, not "
+                         "facade-reachable) does not yet carry named aux to the fine level",
         },
     }
 
@@ -2521,6 +2538,11 @@ class AmrSystem:
         # Regrid cadence (checkpoint/restart ADC-65) : a BIT-IDENTICAL resume requires regrid_every == 0
         # (otherwise the post-restart regrid would re-diverge the hierarchy). Memorized for the restart guard.
         self._regrid_every = int(config.regrid_every)
+        # ADC-291: block name -> {aux field name -> channel component}, filled by add_equation from a
+        # CompiledModel.aux_extra_names (component of the k-th name = AUX_NAMED_BASE + k). Drives
+        # set_aux_field(block, name, array). Empty for blocks without a named aux field. Mirror of
+        # System._aux_field_index.
+        self._aux_field_index = {}
 
     def patch_rectangles(self):
         """Physical rectangles (x0, y0, width, height) of the current fine patches, in [0, L]^2.
@@ -2996,6 +3018,45 @@ class AmrSystem:
         self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                  spatial.recon, time.kind, gamma, nsub,
                                  getattr(spatial, "positivity_floor", 0.0))
+        # ADC-291: record the named aux fields the block declares (component of the k-th name =
+        # AUX_NAMED_BASE + k), so set_aux_field(block, name, array) can resolve name -> component.
+        extra = list(getattr(compiled, "aux_extra_names", []) or [])
+        if extra:
+            self._aux_field_index[name] = {nm: dsl.AUX_NAMED_BASE + k for k, nm in enumerate(extra)}
+
+    def _resolve_aux_field(self, block, name):
+        """Resolve (block, named aux field) -> aux channel component (ADC-291). Mirror of
+        System._resolve_aux_field: a canonical name is redirected to its dedicated path; an unknown
+        block or an undeclared field raises (no silent component-0 fallback)."""
+        from . import dsl
+        if name in dsl.AUX_CANONICAL:
+            if name == "B_z":
+                raise ValueError(
+                    "set_aux_field: 'B_z' (magnetic field) is set via sim.set_magnetic_field(Bz), "
+                    "NOT via set_aux_field (B_z is a canonical aux field, not a named field).")
+            raise ValueError(
+                "set_aux_field: '%s' is a CANONICAL aux field (derived by the solver, not settable); "
+                "set_aux_field only carries the NAMED fields declared by m.aux_field(...)." % name)
+        table = self._aux_field_index.get(block)
+        if table is None:
+            raise ValueError(
+                "set_aux_field: block '%s' unknown (or added without a named aux field); add the block "
+                "via add_equation(model=...) with a model declaring m.aux_field('%s')." % (block, name))
+        if name not in table:
+            raise ValueError(
+                "set_aux_field: aux field '%s' not declared by block '%s'; known named fields: %s"
+                % (name, block, sorted(table)))
+        return table[name]
+
+    def set_aux_field(self, block, name, field):
+        """Set a model-NAMED aux field of @p block (declared via m.aux_field(name)) on the AMR
+        hierarchy. AMR counterpart of System.set_aux_field. @p field: 2D array (n, n) on the COARSE
+        base level; it is STATIC (re-applied each step, injected to the fine levels, survives a regrid).
+        Call BEFORE the first step (like set_density). Mono-rank facade."""
+        import numpy as np
+        comp = self._resolve_aux_field(block, name)
+        arr = np.asarray(field, dtype=float)
+        self._s.set_aux_field_component(comp, arr.reshape(-1))
 
     def add_coupling(self, coupling):
         """Add a generic inter-species COUPLED SOURCE (adc.dsl.CoupledSource(...).compile(...))

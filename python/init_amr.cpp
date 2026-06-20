@@ -137,6 +137,15 @@ void init_amr(py::module_& m) {
             s.set_magnetic_field(flat(arr));
           },
           py::arg("bz"))
+      // ADC-291: model-NAMED aux field at a resolved channel component (>= kAuxNamedBase). The Python
+      // facade (AmrSystem.set_aux_field) resolves the name -> comp and reshapes (n, n) -> flat n*n.
+      .def(
+          "set_aux_field_component",
+          [](AmrSystem& s, int comp,
+             py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+            s.set_aux_field_component(comp, flat(arr));
+          },
+          py::arg("comp"), py::arg("field"))
       // ADC-214: Python surface UNCHANGED (same flat krylov_* kwargs / descriptors, same
       // defaults; no bz_aux_component on the AMR side). The lambda assembles the SourceStageOptions POD.
       .def(

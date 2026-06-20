@@ -16,6 +16,11 @@ BuiltBlock build_block_polar(const ModelSpec& model, const std::string& limiter,
     out.ncomp = M::n_vars;
     out.cons_vs = M::conservative_vars();
     out.prim_vs = M::primitive_vars();
+    // ADC-291: aux channel width the model READS (canonical extras B_z/T_e AND model-named extra[k]).
+    // The caller (System::add_block, polar branch) widens the shared aux to this via ensure_aux_width,
+    // exactly like the Cartesian path. Without it a polar model with n_aux>3 read past the aux fab
+    // (load_aux<aux_comps<M>> on a 3-wide channel) -- a silent out-of-bounds (#51-class).
+    out.aux_width = aux_comps<M>();
     // wall_radial = true: solid wall at both radial edges (no-penetration) -> zero radial flux at
     // r_min / r_max -> mass Sum n r dr dtheta conserved TO MACHINE precision (diocotron ring bounded by
     // two conducting walls). This is the BC that makes the coupled step conservative.

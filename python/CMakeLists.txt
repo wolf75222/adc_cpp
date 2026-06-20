@@ -389,7 +389,7 @@ foreach(t
     test_dsl_jit_te           # T_e (derive p/rho) via add_dynamic_block (.so JIT)
     test_dsl_aot_bz           # B_z via add_compiled_block (.so AOT)
     test_dsl_aot_te           # T_e via add_compiled_block (.so AOT)
-    test_aux_named            # ADC-70 phase 1 : champs aux NOMMES par modele (m.aux_field) sur System cartesien
+    test_aux_named            # ADC-70 phase 1 + ADC-291 phase 2 : champs aux NOMMES (m.aux_field) sur System cartesien, polaire et AMR (auto-skip e2e sans compilateur)
     test_block_names_dynamic  # block_names() voit le bloc dynamique (.so JIT), pas seulement add_block
     test_dsl_abi_metadata     # noms/roles/gamma transportes par l'ABI du .so (AOT+JIT) + retro-compat
     test_dsl_compile_facade   # facade m.compile(backend=...) -> moteurs JIT/AOT + metadonnees preservees
@@ -445,6 +445,7 @@ foreach(t
     test_dsl_wave_speeds_jacobian    # vitesses d'onde par valeurs propres du jacobien de flux (real_eig_minmax) ; compile AOT (.so), auto-skip via dsl._default_cxx
     test_projection_hook      # ADC-177 : projection ponctuelle POST-PAS ENTIER (m.projection -> trait HasPointwiseProjection) : no-default-change, etat post-pas == transport puis projection numpy (production + aot), sign() DSL, rejets prototype/AMR (auto-skip)
     test_projection_eig       # ADC-289 : temoin de VALEURS PROPRES dans m.projection (dsl.eig_max_im/eig_lmin/eig_lmax -> foncteur nomme + real_eig_minmax) : eval == np.linalg.eigvals, brique generee project() == numpy cellule par cellule, semantique post-pas (_adc), extension additive (auto-skip)
+    test_capabilities         # ADC-297/291 : contrat de coherence de adc.capabilities() (surface aux nommee + parite limite C++/Python)
     test_compile_cache_backend)  # ADC-186 : cache de compile keye PAR BACKEND -- un so_path explicite reutilise en process par un AUTRE backend est redirige vers un frere distinct (le cache de handles dlopen ne ressert plus un artefact aot a un chemin production)
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)

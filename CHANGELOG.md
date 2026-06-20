@@ -20,6 +20,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Named aux phase 2: AMR, polar, and a declarative `kAuxMaxExtra`** (ADC-291): model-declared named
+  auxiliary fields (`m.aux_field("name")`, component `kAuxNamedBase + k`, read via `aux.extra_field(k)`)
+  now work beyond the cartesian `System`. The polar `System::add_block` path widens the shared aux
+  channel (`ensure_aux_width`), fixing a silent out-of-bounds read for any polar model with `n_aux > 3`
+  (e.g. the polar Lorentz block) and unlocking `set_aux_field` / `aux_field` on `PolarMesh`.
+  `AmrSystem.set_aux_field(block, name, array)` carries a static named field through both AMR engines
+  (single-block `AmrCouplerMP`, multi-block `AmrRuntime`); the field is re-applied each `compute_aux` /
+  `solve_fields` so it persists across a regrid and is injected to every level. The JIT host residual
+  (`native_loader::host_residual`) now marshals named fields too (previously read as `0`). A new
+  host-side C++ canonical name table (`include/adc/core/aux_names.hpp`) mirrors the Python
+  `AUX_CANONICAL`, and `adc.capabilities()['aux']` is restructured (backends list, introspectable
+  `limit`, `halo_radius`) and reads `kAuxMaxExtra` from the single C++ source so the Python mirror
+  cannot silently drift. The only remaining compile-time aux limit (`kAuxMaxExtra`) is now declarative
+  (`kAuxMaxComps` + static_asserts) and tested (`test_aux_names`, `test_native_aux_named`,
+  `test_capabilities`, polar/AMR end-to-end in `test_aux_named.py`). Default paths stay bit-identical
+  (empty named-aux map). The per-field configurable aux halo radius remains a documented follow-up.
 - **Generic embedded-boundary / level-set domain contract** (ADC-327): the cut-cell / mask transport
   geometry is now expressed through a named, device-clean POD contract in
   `include/adc/numerics/embedded_boundary.hpp` (`level_set(x, y) < 0` inside, callable `operator()`,

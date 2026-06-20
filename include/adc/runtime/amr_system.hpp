@@ -8,6 +8,7 @@
 #include <adc/runtime/model_spec.hpp>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -104,6 +105,10 @@ struct AmrBuildParams {
   double schur_alpha = 1.0;           ///< electrostatic coupling constant of the condensed stage
   bool schur_strang = false;          ///< true: Strang splitting H(dt/2) S(dt) H(dt/2); false: Lie H(dt) S(dt)
   std::vector<double> bz_field;       ///< coarse B_z(x,y) field, n*n row-major (required by the condensed stage)
+  /// Model-NAMED aux fields (ADC-291): component (>= kAuxNamedBase) -> coarse base-level field
+  /// (n*n row-major). Seeded onto the coupler's shared aux at build (build_amr_compiled), like bz_field;
+  /// the coupler re-applies them each update so they persist across regrid. Empty -> bit-identical.
+  std::map<int, std::vector<double>> named_aux;
   // Settings of the condensed stage TRANSPORTED by the ABI (audit wave 3, append-only like has_state).
   double schur_krylov_tol = 0.0;      ///< tolerance of the coarse Krylov solve (<= 0 = default 1e-10)
   int schur_krylov_max_iters = 0;     ///< iteration budget (<= 0 = default 400)
@@ -439,6 +444,15 @@ class AmrSystem {
   /// MONO-BLOCK only (the condensed AMR stage is wired on the mono-block coupler AmrCouplerMP).
   /// @throws std::runtime_error if the system is already built or if bz is not of size n*n.
   void set_magnetic_field(const std::vector<double>& bz);
+
+  /// Sets a model-NAMED aux field (ADC-291) at shared-channel component @p comp (>= kAuxNamedBase) from
+  /// a coarse base-level field @p field (n*n row-major). AMR counterpart of
+  /// System::set_aux_field_component: the field is STATIC (re-applied by the engine each update, so it
+  /// survives a regrid) and reaches every level via the coarse->fine aux injection. Works on the
+  /// single-block (AmrCouplerMP) AND multi-block (AmrRuntime) paths. The Python facade resolves the name
+  /// to @p comp and reshapes the array. Mono-rank facade (same as set_density). @throws if the system is
+  /// already built, if @p comp is reserved (< kAuxNamedBase), or if @p field is not of size n*n.
+  void set_aux_field_component(int comp, const std::vector<double>& field);
 
   /// Enables the Schur-CONDENSED SOURCE STAGE (amr-schur path) on block @p name. AMR counterpart of
   /// System::set_source_stage: assembles and solves the GLOBAL electrostatic/Lorentz condensed operator

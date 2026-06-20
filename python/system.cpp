@@ -604,6 +604,11 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     const PolarGridContext pctx = P->grid_ctx_polar();
     bb = detail::build_block_polar(model, limiter, riemann, pctx, recon_prim, method,
                                    static_cast<Real>(positivity_floor), &P->aux);
+    // ADC-291: widen the shared aux to the polar block's read width (canonical extras AND model-named
+    // extra[k]), mirroring the Cartesian branch below. ensure_aux_width keeps the aux ADDRESS captured
+    // by the closures and re-applies B_z / named aux on realloc; without it a polar n_aux>3 model read
+    // out of bounds. No-op for a base (n_aux=3) model -> bit-identical.
+    P->ensure_aux_width(bb.aux_width);
   } else {
     const GridContext ctx = P->grid_ctx();
     // Newton options of the IMEX implicit source (defaults = historical constants, bit-identical).
