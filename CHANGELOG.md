@@ -20,6 +20,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Regression guard: the red-black GS smoother reuses the cached halo schedule** (ADC-262):
+  `tests/test_poisson_smoother_cache.cpp` asserts that a multi-level GeometricMG V-cycle builds the
+  halo schedule once per MG-level layout and adds ZERO further builds across subsequent cycles, so the
+  RB-GS smoother (the 86%-dominant Poisson path) does not re-enumerate the exchange jobs per sweep.
+  This locks the lever-(a) win that ADC-260 (the `fill_boundary` halo-schedule cache) already shipped.
+  A `bench/profile_step` measurement (serial, n=256, geometric_mg) confirmed the remaining Poisson cost
+  is algorithmic (GS V-cycle iterations: 164 ms/step vs 10 ms/step with the FFT solver), not the
+  per-sweep `fill_ghosts`, so on the SERIAL path the proposed face-subset/fused-exchange lever (b) is
+  not worth it (sub-1% saving, and it would break bit-identity). Note: the ADC-260 cache hoists only
+  the schedule ENUMERATION; under MPI the per-sweep pack/exchange still runs every sweep (the bottom
+  level alone is ~100 exchanges per V-cycle), so the distributed-exchange lever (b) is NOT addressed
+  here and is left as a follow-up. Test only; no behavior change.
 - **`roe_abs_apply`: device-clean matrix-absolute-value for a generic moment Roe** (ADC-368): a new
   `adc::roe_abs_apply<N>(A, dU, out)` in `include/adc/numerics/dense_eig.hpp` returns the Roe
   dissipation `|A| dU = R |Lambda| R^-1 dU` of a small dense flux Jacobian via the
