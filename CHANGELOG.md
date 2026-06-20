@@ -184,6 +184,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Elliptic solver headers organized by family** (ADC-334): `include/adc/numerics/elliptic/` is
+  split into `interface/`, `poisson/`, `mg/`, `eb/`, `polar/`, and `linear/` subdirectories so the
+  numeric surface shows its solver families instead of one flat directory. Every historical include
+  path (`<adc/numerics/elliptic/*.hpp>`) keeps compiling through a forwarding header, so downstream
+  consumers and docs are unaffected; only the source-tree layout and the headers' internal
+  cross-includes change. No numerical behavior, public API, or capability surface changes.
 - **Generalize core public-header comments** (ADC-333): the headers under `include/adc/**` now read
   as the generic math contract (invariants, preconditions, expected errors, maintainer warnings)
   rather than the implementation of one scenario. The diocotron/Hoffart reproduction, the
