@@ -171,6 +171,61 @@ int main(int argc, char** argv) {
                   "transport"),
       "AmrSystem::add_block(ModelSpec incomplet) rejete -- pas de fallback silencieux");
 
+  // ============================================================================================
+  // ADC-331 : completude du routage. Chaque tag builtin de la registry (model_registry.hpp) DOIT
+  // etre route par le dispatch -- une ligne de table sans branche if = une derive registry/dispatch
+  // (validate_transport / validate_elliptic acceptent le tag, mais la chaine if/else tombe sur le
+  // garde "valid in registry but not routed"). Visiteur no-op : on verifie seulement que le dispatch
+  // ATTEINT une branche, sans construire le CompositeModel complet. Pendant runtime du static_assert
+  // de non-derive n_vars (model_factory.hpp) : ici on verrouille l'EXHAUSTIVITE du routage.
+  {
+    bool all_tr = true;
+    for (const TransportTag& t : kTransports) {
+      ModelSpec s;
+      s.transport = t.name;
+      bool routed = false;
+      try {
+        detail::dispatch_transport(s, [&](auto) { routed = true; });
+      } catch (...) {
+        routed = false;
+      }
+      all_tr = all_tr && routed;
+    }
+    chk(all_tr, "ADC-331 : tout transport builtin de la registry est route (pas de derive)");
+
+    bool all_el = true;
+    for (const EllipticTag& t : kElliptics) {
+      ModelSpec s;
+      s.elliptic = t.name;
+      bool routed = false;
+      try {
+        detail::dispatch_elliptic(s, [&](auto) { routed = true; });
+      } catch (...) {
+        routed = false;
+      }
+      all_el = all_el && routed;
+    }
+    chk(all_el, "ADC-331 : tout elliptic builtin de la registry est route (pas de derive)");
+
+    // dispatch_source est templatise sur NV et garde les forces fluides derriere `if constexpr
+    // (NV >= 3)` ; a NV=4 (Euler) les sept orthographes builtin routent. Une ligne kSources ajoutee
+    // sans branche dans dispatch_source ferait echouer ce passage (meme garde de derive que pour
+    // transport / elliptic, etendue a l'axe source que le if/else NV-dependant rend moins evident).
+    bool all_src = true;
+    for (const SourceTag& t : kSources) {
+      ModelSpec s;
+      s.source = t.name;
+      bool routed = false;
+      try {
+        detail::dispatch_source<4>(s, [&](auto) { routed = true; });
+      } catch (...) {
+        routed = false;
+      }
+      all_src = all_src && routed;
+    }
+    chk(all_src, "ADC-331 : tout source builtin de la registry route a NV=4 (pas de derive)");
+  }
+
   const int rc = checker.failed();  // 0 si aucun echec, 1 sinon
   std::printf(rc == 0 ? "OK test_config_model_validation\n"
                       : "test_config_model_validation : ECHEC\n");

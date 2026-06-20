@@ -14,6 +14,7 @@
 #include <adc/runtime/dispatch_tags.hpp>             // UNIQUE registry of tags (validate_limiter/riemann)
 #include <adc/runtime/grid_context.hpp>              // BlockClosures (light header)
 #include <adc/runtime/model_factory.hpp>             // detail::dispatch_source / dispatch_elliptic (REUSED)
+#include <adc/runtime/model_registry.hpp>            // transport_tags_csv: polar-wired transport list (ADC-331)
 #include <adc/runtime/model_spec.hpp>
 
 #include <functional>
@@ -68,11 +69,13 @@ template <class Visitor>
 void dispatch_transport_polar(const ModelSpec& m, Visitor&& v) {
   if (m.transport == "exb") return v(ExBVelocityPolar{Real(m.B0)});
   if (m.transport == "isothermal") return v(IsothermalFluxPolar{IsothermalFlux{Real(m.cs2)}});
+  // Wired polar transports = the registry rows with polar_ok (model_registry.hpp); the list is
+  // single-sourced via transport_tags_csv(/*polar=*/true). 'compressible' (Euler with energy) has no
+  // polar brick yet -> not polar_ok -> rejected here with the same explicit "unsupported" message.
   throw std::runtime_error(
-      "polar transport '" + m.transport +
-      "' unsupported (wired: 'exb' = scalar ExB advection; 'isothermal' = isothermal fluid "
-      "3 var in polar metric (Path A step 1). 'compressible' (Euler with energy) in polar "
-      "is a later phase)");
+      "polar transport '" + m.transport + "' unsupported (wired in polar: " +
+      transport_tags_csv(/*polar=*/true) +
+      "; 'compressible' (Euler with energy) in polar is a later phase)");
 }
 
 /// Assembles the POLAR CompositeModel designated by @p m and calls visitor(model). REUSES

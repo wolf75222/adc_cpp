@@ -163,6 +163,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Builtin model bricks behind a single registry** (ADC-331): the transport / source / elliptic
+  tag lists are centralized in `include/adc/runtime/model_registry.hpp` (constexpr `kTransports` /
+  `kSources` / `kElliptics` tables plus CSV / choices / validator helpers), the model-axis
+  counterpart of `dispatch_tags.hpp`. The sites that re-listed `exb|compressible|isothermal` inline
+  (`model_factory.hpp`, `block_builder_polar.hpp`, `python/system.cpp`, `python/amr_system.cpp`) and
+  the completeness messages of `validate_model_spec` now derive from that single table, so adding a
+  builtin brick is one table row plus its compile-time dispatch case. Rejection messages stay
+  byte-identical; a non-drift `static_assert` ties the registry `n_vars` to the brick types, the
+  dispatch keeps an explicit registry/dispatch-consistency guard, and `test_model_registry.cpp` plus
+  a routing-completeness check lock the table to generic brick tags (never an application scenario
+  name). The `ModelSpec` / capabilities surface and the compiled native backend are unchanged.
 - **Named user roles and strict named-coupling fallbacks** (ADC-292): `VariableSet` gains a
   string-keyed `user_roles` layer parallel to the canonical `VariableRole` enum, and a new
   `index_of(string)` resolves a component by a canonical role name OR a user-defined role label
