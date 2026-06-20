@@ -157,6 +157,20 @@ endmacro()
 # (On garde la forme explicite if/else plutot que FetchContent FIND_PACKAGE_ARGS, qui exige CMake>=3.24
 # alors que ce projet cible 3.20. CMAKE_DISABLE_FIND_PACKAGE_Kokkos=ON force le chemin FetchContent.)
 # La version mini 4.2 accepte les versions plus recentes, y compris 5.x (Homebrew 5.1.1, p.ex.).
+#
+# ADC-168 NO-GO : Kokkos CUDA (GPU) n'est PAS supporte en natif Windows. Kokkos 4.x n'a aucune
+# toolchain CUDA-sous-Windows qui marche -- le generateur Visual Studio avec Kokkos_ENABLE_CUDA
+# suppose CXX=nvcc (modele Linux), et nvcc-comme-CXX sous Ninja recoit des flags MSVC non traduits
+# (/MDd, /RTC1, /showIncludes ...) faute d'un nvcc_wrapper Windows. Le chemin GPU supporte est WSL2
+# (ADC-96) ; le natif Windows ne construit que le CPU Serial/OpenMP. On refuse TOT (avant toute
+# resolution/recuperation de Kokkos) une configuration Windows native demandant CUDA.
+if(WIN32 AND Kokkos_ENABLE_CUDA)
+  message(FATAL_ERROR
+    "Kokkos CUDA native Windows is unsupported in adc_cpp. "
+    "Use WSL2 for CUDA/Kokkos GPU. "
+    "Native Windows supports CPU Serial/OpenMP only. "
+    "Refs ADC-168 / ADC-96.")
+endif()
 adc_apple_libomp_hints()
 find_package(Kokkos 4.2 QUIET CONFIG)
 if(Kokkos_FOUND)

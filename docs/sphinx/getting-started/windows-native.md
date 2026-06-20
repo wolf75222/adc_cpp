@@ -80,5 +80,7 @@ same way.
 ## Limitations
 - **Native CUDA GPU: not available** (Kokkos has no native CUDA support on Windows -- neither VS+CUDA, nor
   nvcc-as-CXX for lack of a Windows `nvcc_wrapper`). The GPU goes through [WSL2](windows-wsl2.md).
+  CMake refuses this combination early: configuring with `Kokkos_ENABLE_CUDA=ON` on Windows stops at
+  a fatal error pointing to WSL2 (no broken half-build deep in the Kokkos configure). Refs ADC-168.
 - CMake industrialization (shared Kokkos option, install of the import libs, clang-cl presets) to finalize
   so that these builds are reproducible from a single command.
