@@ -207,6 +207,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Runtime headers organized by layer** (ADC-330): the flat `include/adc/runtime/` directory is
+  split into layers so the structure shows the API surface. The public facades stay at the root
+  (`system.hpp`, `amr_system.hpp`, `model_spec.hpp`, `facade_options.hpp`, `export.hpp`); the ABI /
+  dispatch / internal helpers move to `detail/`, the DSL and native model builders to `builders/`,
+  the extracted `System` internals to `system/`, and the AMR engine to `amr/`. Every historical
+  include path (`<adc/runtime/*.hpp>`) keeps compiling through a forwarding header, so the runtime
+  consumers, the bindings and the tests are unaffected. Source-tree layout only; no behavior or
+  ABI change.
 - **Centralized native AMR refinement ratio** (ADC-295): the refinement ratio of the in-house AMR
   hierarchy is now a single named invariant `kAmrRefRatio` (with a `require_supported_ref_ratio`
   guard) in `include/adc/amr/refinement_ratio.hpp`, instead of the literal `2` scattered across the
