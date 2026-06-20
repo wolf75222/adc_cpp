@@ -128,6 +128,7 @@ adc_add_test(test_geometry)
 
 # --- AMR (primitives, sans modele) ---
 adc_add_test(test_refinement)
+adc_add_test(test_ref_ratio)
 adc_add_test(test_amr_hierarchy)
 adc_add_test(test_cluster)
 adc_add_test(test_regrid)

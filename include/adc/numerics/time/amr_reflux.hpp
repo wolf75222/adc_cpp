@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/core/state.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/core/types.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/fab2d.hpp>
@@ -31,6 +32,8 @@
 ///   identical to the previous lambdas -> bit-identical CPU and device.
 
 namespace adc {
+
+static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
 
 // xface_box / yface_box: provided by numerics/spatial_operator.hpp (included above),
 // same face-box conventions. We do not redefine them here.
@@ -173,8 +176,8 @@ template <class Model>
 void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
                      double dyc, Fab2D& Uf, int CI0, int CI1, int CJ0, int CJ1,
                      const Fab2D& auxc, const Fab2D& auxf, double dt) {
-  const int r = 2;
-  const double dxf = dxc / 2, dyf = dyc / 2, dtf = dt / r;
+  const int r = kAmrRefRatio;
+  const double dxf = dxc / kAmrRefRatio, dyf = dyc / kAmrRefRatio, dtf = dt / r;
   const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
 
   const Fab2D Uc_old = Uc;  // coarse state at time t (for temporal interp)

@@ -1,5 +1,6 @@
 #pragma once
 #include <adc/numerics/time/amr_flux_helpers.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 
 /// @file
 /// @brief Single-box MultiFab AMR stack: struct detail::AmrLevelMF and the recursive
@@ -24,6 +25,8 @@
 
 namespace adc {
 
+static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
+
 namespace detail {
 
 // One level of the MultiFab hierarchy. aux held elsewhere (pointer). rC* = region
@@ -43,8 +46,8 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
                         Real dyc, MultiFab& Uf, int CI0, int CI1, int CJ0, int CJ1,
                         const MultiFab& auxc, const MultiFab& auxf, Real dt) {
-  const int r = 2, nc = Uc.ncomp();
-  const Real dxf = dxc / 2, dyf = dyc / 2, dtf = dt / r;
+  const int r = kAmrRefRatio, nc = Uc.ncomp();
+  const Real dxf = dxc / kAmrRefRatio, dyf = dyc / kAmrRefRatio, dtf = dt / r;
   const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
   MultiFab Uc_old = Uc;  // coarse state at time t (temporal interp of fine ghosts)
 
@@ -125,7 +128,7 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
                        const Box2D& dom, const MultiFab* pOld, const MultiFab* pNew,
                        Real frac, std::vector<Real>* pregL, std::vector<Real>* pregR,
                        std::vector<Real>* pregB, std::vector<Real>* pregT) {
-  const int r = 2;
+  const int r = kAmrRefRatio;
   AmrLevelMF& lv = L[lev];
   const int nc = lv.U.ncomp();
 

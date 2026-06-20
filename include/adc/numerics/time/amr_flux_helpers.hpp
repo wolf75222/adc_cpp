@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/mesh/box2d.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fill_boundary.hpp>
 #include <adc/mesh/for_each.hpp>
@@ -34,6 +35,8 @@
 /// - the device paths read/write unified memory: device_fence() before host read.
 
 namespace adc {
+
+static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
 
 // Time method of an AMR step (Berger-Oliger subcycling). kEuler (DEFAULT) = forward Euler
 // advance at each substep (legacy path, strictly bit-identical); kSsprk3 = SSPRK3
@@ -192,7 +195,7 @@ inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
 inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray4& cn,
                                int i, int j, int nc, Real frac,
                                Real pos_floor = Real(0), int pos_comp = 0) {
-  const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+  const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
   for (int k = 0; k < nc; ++k)
     f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
   // Zhang-Shu positivity floor on the C/F fine GHOST MEAN (ADC-259): clamp the Density role only

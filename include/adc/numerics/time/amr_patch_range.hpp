@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/numerics/time/amr_flux_helpers.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/parallel/comm.hpp>  // all_reduce_sum_inplace (distributed multi-patch reflux)
 
 #include <algorithm>
@@ -30,6 +31,8 @@
 ///   without an MPI plan, reads valid / writes ghost (no race).
 
 namespace adc {
+
+static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
 
 // PatchRange (review, point 5: role promoted to a type). COARSE footprint [I0..I1]x[J0..J1]
 // of a fine patch under ratio 2: I0 = lo/2, I1 = (hi-1)/2 (aligned patch, lo even / hi odd).
@@ -159,12 +162,12 @@ struct CoverageMask {
 
 // SubcyclingSchedule (review, point 5: role promoted to a type). Berger-Oliger cadence of a
 // level: temporal refinement ratio r, substep dt/r, and temporal position frac(s)
-// = s/r of substep s in the parent step. Centralizes the `const int r = 2`, `dt / r` and
+// = s/r of substep s in the parent step. Centralizes the `const int r = kAmrRefRatio`, `dt / r` and
 // `Real(s) / r` scattered across the subcycling loops. Arithmetic strictly preserved:
 // dt_sub(dt) == dt / r and frac(s) == Real(s) / r at the same types, thus bit-identical.
 struct SubcyclingSchedule {
   int r;
-  explicit SubcyclingSchedule(int ratio = 2) : r(ratio) {}
+  explicit SubcyclingSchedule(int ratio = kAmrRefRatio) : r(ratio) {}
   int count() const { return r; }                       // number of substeps
   Real dt_sub(Real dt) const { return dt / r; }         // fine step = parent step / r
   Real frac(int s) const { return Real(s) / r; }        // temporal position of substep s

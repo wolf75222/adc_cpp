@@ -2389,7 +2389,10 @@ def capabilities():
                             "reject if theta_boxes>1) ; polar tensor Schur stage multi-box. "
                             "get/set state (and eval_rhs/density) reconstruct the global ring "
                             "multi-box ; mono-rank (the direct Poisson refuses MPI).",
-            "amr": "hierarchy of levels (BoxArray per level, dynamic regrid)",
+            "amr": "hierarchy of levels (BoxArray per level, dynamic regrid) ; "
+                   "refinement_ratio = 2 only (single native AMR invariant, centralized in "
+                   "include/adc/amr/refinement_ratio.hpp ; a non-2 ratio is rejected at "
+                   "hierarchy construction, not silently mis-coarsened)",
         },
         "schur": {
             "system_cartesian": "complete ; configurable roles/fields (density=/momentum=/energy=/"

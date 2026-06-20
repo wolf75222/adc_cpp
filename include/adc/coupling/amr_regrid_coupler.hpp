@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/amr/cluster.hpp>  // berger_rigoutsos, ClusterParams
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/amr/regrid.hpp>   // tag_cells, grow_tags
 #include <adc/amr/tag_box.hpp>  // TagBox
 #include <adc/core/types.hpp>
@@ -91,7 +92,7 @@ inline MultiFab regrid_field_on_layout(const BoxArray& fb, const DistributionMap
   const bool par_replicated = (pk != 0) || coarse_replicated;
   MultiFab parloc;
   if (!par_replicated) {
-    parloc = MultiFab(coarsen(nU.box_array(), 2), nU.dmap(), par.ncomp(), 0);
+    parloc = MultiFab(coarsen(nU.box_array(), kAmrRefRatio), nU.dmap(), par.ncomp(), 0);
     parallel_copy(parloc, par);
     // parallel_copy launches async kernels under Cuda and, at np=1, returns WITHOUT a fence: without this
     // fence the read of parloc below would read device memory not yet written -> NaN.
@@ -103,18 +104,18 @@ inline MultiFab regrid_field_on_layout(const BoxArray& fb, const DistributionMap
     if (par_replicated) {
       for (int j = nb.lo[1]; j <= nb.hi[1]; ++j)  // 1) interp from the parent (local)
         for (int i = nb.lo[0]; i <= nb.hi[0]; ++i) {
-          const int pb = mf_find_box(par, coarsen_index(i, 2), coarsen_index(j, 2));
+          const int pb = mf_find_box(par, coarsen_index(i, kAmrRefRatio), coarsen_index(j, kAmrRefRatio));
           if (pb < 0) continue;
           const ConstArray4 pp = par.fab(pb).const_array();
           for (int k = 0; k < ncf; ++k)
-            a(i, j, k) = pp(coarsen_index(i, 2), coarsen_index(j, 2), k);
+            a(i, j, k) = pp(coarsen_index(i, kAmrRefRatio), coarsen_index(j, kAmrRefRatio), k);
         }
     } else {
       const ConstArray4 pp = parloc.fab(li).const_array();  // local child-coarsen grid
       for (int j = nb.lo[1]; j <= nb.hi[1]; ++j)
         for (int i = nb.lo[0]; i <= nb.hi[0]; ++i)
           for (int k = 0; k < ncf; ++k)
-            a(i, j, k) = pp(coarsen_index(i, 2), coarsen_index(j, 2), k);
+            a(i, j, k) = pp(coarsen_index(i, kAmrRefRatio), coarsen_index(j, kAmrRefRatio), k);
     }
     for (int ol = 0; ol < old.local_size(); ++ol) {  // 2) carry-over of the fine data
       const ConstArray4 o = old.fab(ol).const_array();
