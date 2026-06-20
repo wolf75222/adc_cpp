@@ -222,6 +222,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Reference and deprecated AMR headers moved out of the production surface** (ADC-332): the
+  single-box Fab2D/MultiFab oracle headers `numerics/time/amr_reflux.hpp` and
+  `numerics/time/amr_level.hpp` move to `numerics/time/reference/`, and the deprecated N-level
+  engine `numerics/time/amr_multilevel.hpp` moves to `numerics/time/deprecated/`, so the tree makes
+  their status explicit. Forwarding stubs keep every historical
+  `#include <adc/numerics/time/...>` path compiling (the live `amr_reflux_mf.hpp` aggregator still
+  reaches `amr_level.hpp` through the stub), so there is no behavior change. Audit recorded: none of
+  the three headers, nor the deprecated `coupling/spectral_coupler.hpp`, has any live includer in the
+  core, the tests, the bindings, or `adc_cases` (`amr_reflux.hpp` is pulled only by the deprecated
+  `amr_multilevel.hpp` and `coupling/spectral_coupler.hpp`); `spectral_coupler.hpp` is relocated to
+  `coupling/deprecated/` by ADC-326.
 - **Generalize runtime/system header comments** (ADC-370): follow-up to ADC-333 on the headers that
   were then in flight with ADC-369 (`runtime/system.hpp`, `runtime/amr_system.hpp`,
   `runtime/system/system_field_solver.hpp`, `coupling/amr_coupler_mp.hpp`). Diocotron/Hoffart/
