@@ -18,7 +18,7 @@
 
 <div align="center">
 <sub>
-Diocotron instability (E x B drift) on a 3-level nested AMR hierarchy, ROMEO (96 cores).
+Validation scenario: diocotron instability (E x B drift) on a 3-level nested AMR hierarchy, ROMEO (96 cores).
 Reproducible local version (Python facade):
 <a href="https://github.com/wolf75222/adc_cases/tree/master/diocotron_amr"><code>adc_cases/diocotron_amr</code></a>.
 </sub>

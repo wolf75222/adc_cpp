@@ -1,11 +1,20 @@
 # adc_cpp
 
-C++23 solver for coupled hyperbolic-elliptic systems on AMR (mesh stack written
-*from scratch*): single dispatch seam serial / OpenMP / Kokkos (GPU GH200) / MPI,
-MultiFab + BoxArray + Geometry stack, block-structured multi-level and multi-patch AMR
-(Berger-Rigoutsos, coverage-aware reflux), multigrid Poisson and spectral FFT, diocotron
-coupling (E x B drift), self-gravitating Euler-Poisson and asymptotic-preserving isothermal
-two-fluid. Python bindings via pybind11.
+`adc_cpp` is a model-free C++23 core for coupled hyperbolic-elliptic systems on adaptive
+(AMR) meshes. It names no scenario: it advances a hyperbolic part `U` (finite-volume
+transport) coupled to an elliptic part `phi` (a system Poisson solved each step), and a
+model is a composition of generic bricks (`adc.Model(state, transport, source, elliptic)`).
+
+The mesh and execution stack is written *from scratch*: a single dispatch seam
+(Serial / OpenMP / Kokkos GPU GH200 / MPI), a `MultiFab` + `BoxArray` + `Geometry` stack,
+block-structured multi-level and multi-patch AMR (Berger-Rigoutsos, coverage-aware reflux),
+multigrid and spectral-FFT Poisson, and Python bindings via pybind11.
+
+Named physical scenarios -- diocotron (E x B drift), self-gravitating Euler-Poisson,
+asymptotic-preserving isothermal two-fluid -- are how the core is validated, not what it is.
+Their readable, reproducible form (models, facades, figures) lives in
+[`adc_cases`](https://github.com/wolf75222/adc_cases); the runs behind them are tracked in
+[VALIDATION](https://github.com/wolf75222/adc_cpp/blob/master/docs/VALIDATION.md).
 
 This documentation is the user guide. The detailed design documents
 ([ARCHITECTURE](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md),
