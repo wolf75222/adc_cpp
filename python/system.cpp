@@ -60,14 +60,6 @@ ADC_EXPORT std::string abi_key() { return detail::abi_key_string(); }
 std::string System::abi_key() { return adc::abi_key(); }
 
 namespace {
-// Index of the component carrying @p role in @p vs, or @p fallback if the block does not provide
-// this role (dynamic / compiled block: descriptor without roles). Lets couplings target
-// a component by its MEANING without hard-coding the index, while staying backward-compatible.
-int role_index(const VariableSet& vs, VariableRole role, int fallback) {
-  const int c = vs.index_of(role);
-  return c >= 0 ? c : fallback;
-}
-
 // Collective multi-box/multi-rank gather of @p mf into a GLOBAL buffer of size ncomp*gny*gnx,
 // component-major ((c*gny + j)*gnx + i; for ncomp == 1 this collapses to j*gnx + i). Zero-init,
 // then each rank writes ONLY its LOCAL boxes at their GLOBAL indices (disjoint boxes -> each cell
@@ -1091,12 +1083,16 @@ void System::add_ionization(const std::string& electron, const std::string& ion,
   Impl* P = p_.get();
   const int ie = P->index(electron), ii = P->index(ion), ig = P->index(neutral);
   const Real k = static_cast<Real>(rate);
-  // Density resolved by ROLE (like add_collision / add_thermal_exchange), fallback comp 0 if the
-  // block does not provide its roles (dynamic / compiled block). A block storing its density elsewhere
-  // than index 0 stays correctly coupled.
-  const int de = role_index(P->sp[ie].cons_vars, VariableRole::Density, 0);
-  const int di = role_index(P->sp[ii].cons_vars, VariableRole::Density, 0);
-  const int dg = role_index(P->sp[ig].cons_vars, VariableRole::Density, 0);
+  // Density resolved by ROLE (like add_collision / add_thermal_exchange). A genuinely ROLELESS block
+  // (no roles declared: dynamic / compiled block) keeps the canonical fallback comp 0; a ROLES-BEARING
+  // block that omits Density fails loud (no silent coupling on the wrong component, ADC-292). A block
+  // storing its density off index 0 (but declaring the role) stays correctly coupled.
+  const int de = coupling_role_index(P->sp[ie].cons_vars, VariableRole::Density, 0,
+                                     "System::add_ionization", electron);
+  const int di = coupling_role_index(P->sp[ii].cons_vars, VariableRole::Density, 0,
+                                     "System::add_ionization", ion);
+  const int dg = coupling_role_index(P->sp[ig].cons_vars, VariableRole::Density, 0,
+                                     "System::add_ionization", neutral);
   // Ionization (operator-split, on the density): rate r = k n_e n_g. One neutral disappears, one ion and
   // one electron appear: n_g -= dt r, n_i += dt r, n_e += dt r. Mass is transferred from the
   // neutral to the ion (n_i + n_g conserved). First coupling brick; the momentum
@@ -1128,17 +1124,24 @@ void System::add_collision(const std::string& a, const std::string& b, double ra
     throw std::runtime_error("System::add_collision : both blocks must carry a momentum "
                              "(fluid transport >= 3 variables)");
   const Real k = static_cast<Real>(rate);
-  // Components resolved by ROLE (momentum x/y, density) rather than by literal index: a
-  // block that stores its variables differently stays correctly coupled. Fallback to the historical
-  // indices (1, 2, 0) if the block does not provide its roles (dynamic / compiled block).
+  // Components resolved by ROLE (momentum x/y, density) rather than by literal index: a block that
+  // stores its variables differently stays correctly coupled. A genuinely ROLELESS block keeps the
+  // historical fallback indices (1, 2, 0); a ROLES-BEARING block that omits a required role fails loud
+  // (no silent coupling on the wrong component, ADC-292).
   const VariableSet& va_set = P->sp[ia].cons_vars;
   const VariableSet& vb_set = P->sp[ib].cons_vars;
-  const int mxa = role_index(va_set, VariableRole::MomentumX, 1);
-  const int mya = role_index(va_set, VariableRole::MomentumY, 2);
-  const int da = role_index(va_set, VariableRole::Density, 0);
-  const int mxb = role_index(vb_set, VariableRole::MomentumX, 1);
-  const int myb = role_index(vb_set, VariableRole::MomentumY, 2);
-  const int db = role_index(vb_set, VariableRole::Density, 0);
+  auto ra = [&](VariableRole r, int fb) {
+    return coupling_role_index(va_set, r, fb, "System::add_collision", a);
+  };
+  auto rb = [&](VariableRole r, int fb) {
+    return coupling_role_index(vb_set, r, fb, "System::add_collision", b);
+  };
+  const int mxa = ra(VariableRole::MomentumX, 1);
+  const int mya = ra(VariableRole::MomentumY, 2);
+  const int da = ra(VariableRole::Density, 0);
+  const int mxb = rb(VariableRole::MomentumX, 1);
+  const int myb = rb(VariableRole::MomentumY, 2);
+  const int db = rb(VariableRole::Density, 0);
   // Inter-species friction (operator-split): force F = k (u_a - u_b) on the momentum,
   // opposite on each species (total momentum conserved); the velocities relax
   // toward each other. Frictional heating (energy) is a later refinement
@@ -1167,18 +1170,25 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
                              "energy (compressible Euler, 4 variables)");
   const Real k = static_cast<Real>(rate);
   const Real ga = static_cast<Real>(P->sp[ia].gamma), gb = static_cast<Real>(P->sp[ib].gamma);
-  // Components resolved by ROLE (energy, momentum x/y, density) rather than by literal index.
-  // Fallback to the historical indices (3, 1, 2, 0) if the block does not provide its roles.
+  // Components resolved by ROLE (energy, momentum x/y, density) rather than by literal index. A
+  // genuinely ROLELESS block keeps the historical fallback indices (3, 1, 2, 0); a ROLES-BEARING block
+  // that omits a required role fails loud (no silent coupling on the wrong component, ADC-292).
   const VariableSet& va_set = P->sp[ia].cons_vars;
   const VariableSet& vb_set = P->sp[ib].cons_vars;
-  const int ea = role_index(va_set, VariableRole::Energy, 3);
-  const int mxa = role_index(va_set, VariableRole::MomentumX, 1);
-  const int mya = role_index(va_set, VariableRole::MomentumY, 2);
-  const int da = role_index(va_set, VariableRole::Density, 0);
-  const int eb = role_index(vb_set, VariableRole::Energy, 3);
-  const int mxb = role_index(vb_set, VariableRole::MomentumX, 1);
-  const int myb = role_index(vb_set, VariableRole::MomentumY, 2);
-  const int db = role_index(vb_set, VariableRole::Density, 0);
+  auto ra = [&](VariableRole r, int fb) {
+    return coupling_role_index(va_set, r, fb, "System::add_thermal_exchange", a);
+  };
+  auto rb = [&](VariableRole r, int fb) {
+    return coupling_role_index(vb_set, r, fb, "System::add_thermal_exchange", b);
+  };
+  const int ea = ra(VariableRole::Energy, 3);
+  const int mxa = ra(VariableRole::MomentumX, 1);
+  const int mya = ra(VariableRole::MomentumY, 2);
+  const int da = ra(VariableRole::Density, 0);
+  const int eb = rb(VariableRole::Energy, 3);
+  const int mxb = rb(VariableRole::MomentumX, 1);
+  const int myb = rb(VariableRole::MomentumY, 2);
+  const int db = rb(VariableRole::Density, 0);
   // Thermal exchange (operator-split): heat flux q = k (T_a - T_b) on the energy, opposite
   // on each species (total energy conserved); the temperatures relax. T = p/rho (up to a
   // constant), p = (gamma-1)(E - 1/2 rho |u|^2). Transfers the INTERNAL energy (u unchanged).
@@ -1236,24 +1246,22 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
   if (n_terms > kCsMaxTerms)
     throw std::runtime_error("System::add_coupled_source : too many source terms (> " +
                              std::to_string(kCsMaxTerms) + ")");
-  // Resolves role -> component via the CONSERVATIVE descriptor of the block (like add_collision); fallback
-  // comp 0 if the block does not provide the role. An unknown block raises via P->index().
+  // Resolves role -> component via the CONSERVATIVE descriptor of the block. The role is addressed BY
+  // NAME: a canonical role name OR a user-defined role label (index_of(string), ADC-292). An unknown
+  // block raises via P->index().
   auto resolve = [&](const std::string& block, const std::string& role) -> std::pair<int, int> {
     const int sidx = P->index(block);  // raises if unknown block
-    const VariableRole r = role_from_name(role);
-    if (r == VariableRole::Custom)
-      throw std::runtime_error("System::add_coupled_source : role '" + role + "' unknown (block '" +
-                               block + "')");
-    // STRICT (no silent fallback): a DSL coupled source targets a (block, role) EXPLICITLY
-    // requested by the user. If the block does NOT expose this role, it is an error: a fallback on
-    // component 0 would apply the source to the wrong field SILENTLY (the false-positive identified at
-    // review). We raise. Distinct from the NAMED couplings (add_collision/add_pair) which deliberately assume
-    // the canonical layout via role_index(..., fallback) and stay unchanged.
-    const int comp = P->sp[static_cast<std::size_t>(sidx)].cons_vars.index_of(r);
+    const VariableSet& vs = P->sp[static_cast<std::size_t>(sidx)].cons_vars;
+    // STRICT (no silent fallback): a DSL coupled source targets a (block, role) EXPLICITLY requested
+    // by the user. If the block does NOT expose this role (neither a canonical role nor a declared
+    // user-role label), it is an error: a fallback on component 0 would apply the source to the wrong
+    // field SILENTLY. We raise, listing what the block actually exposes.
+    const int comp = vs.index_of(role);
     if (comp < 0)
       throw std::runtime_error("System::add_coupled_source : block '" + block +
-                               "' does not expose role '" + role +
-                               "' (no silent fallback on component 0)");
+                               "' does not expose role '" + role + "' (roles: " +
+                               (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
+                               ", no silent fallback on component 0)");
     return {sidx, comp};
   };
   // Inputs: (species, component) read per cell. Captured by INDEX (the fabs may be

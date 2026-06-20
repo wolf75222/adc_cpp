@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,10 @@ enum class VariableRole {
   VelocityX, VelocityY, VelocityZ, Pressure, Temperature, Scalar, Custom
 };
 
+/// Forward declaration: VariableSet::index_of(const std::string&) resolves a canonical role NAME via
+/// role_from_name (defined below) before matching a user-defined role label.
+inline VariableRole role_from_name(const std::string& s);
+
 /// A variable: name, physical role, component index in the state.
 struct Variable {
   std::string name;
@@ -35,19 +40,36 @@ struct Variable {
   int component;
 };
 
-/// A model's variable set: kind (cons/prim), names, size, and roles (optional, parallel to
-/// `names`; absent -> Custom). Existing calls `{kind, names, size}` stay valid (roles empty).
-/// index_of(role) gives the index of the component carrying that role (-1 if absent).
+/// A model's variable set: kind (cons/prim), names, size, canonical `roles` (optional, parallel to
+/// `names`; absent -> Custom), and `user_roles` (optional string labels parallel to `names`, for
+/// components whose role is OUTSIDE the canonical enum). Existing calls `{kind, names, size}` and
+/// `{kind, names, size, roles}` stay valid (user_roles empty). index_of(role) gives the index of the
+/// component carrying that role (-1 if absent).
 struct VariableSet {
   VariableKind kind;
   std::vector<std::string> names;
   int size;
-  std::vector<VariableRole> roles{};  ///< parallel to `names`; empty = roles not provided
+  std::vector<VariableRole> roles{};      ///< parallel to `names`; empty = roles not provided
+  std::vector<std::string> user_roles{};  ///< parallel to `names`; per-component user-defined role
+                                          ///< label (Custom role); empty entry = canonical role
 
   /// Index of the component carrying @p role (first occurrence), -1 if absent.
   int index_of(VariableRole role) const {
     for (int i = 0; i < static_cast<int>(roles.size()); ++i)
       if (roles[i] == role) return i;
+    return -1;
+  }
+  /// Index of the component carrying @p role addressed BY NAME: a canonical role name
+  /// (role_from_name) first, else a user-defined role label (user_roles). -1 if absent. Resolving a
+  /// user label by string removes the first-occurrence ambiguity of several `Custom` components. An
+  /// EMPTY @p role is never a valid target (it would otherwise match the empty user_roles slot of a
+  /// canonical component on a mixed block) and returns -1.
+  int index_of(const std::string& role) const {
+    if (role.empty()) return -1;
+    const VariableRole r = role_from_name(role);
+    if (r != VariableRole::Custom) return index_of(r);
+    for (int i = 0; i < static_cast<int>(user_roles.size()); ++i)
+      if (user_roles[i] == role) return i;
     return -1;
   }
   /// Full descriptor of component @p i (Custom role if not provided).
@@ -105,15 +127,62 @@ inline std::string names_csv(const VariableSet& vs) {
   return s;
 }
 
-/// CSV of a VariableSet's roles (role_name, separator ','). EMPTY if the model does not provide its
+/// CSV of a VariableSet's roles (role_name, separator ','). A component carrying a user-defined role
+/// label (user_roles, Custom role) emits its LABEL instead of "custom", so the user role round-trips
+/// through the .so ABI (parse_roles_into is the inverse). EMPTY if the model does not provide its
 /// roles (vs.roles empty): the consumer then falls back to indices (backward compatibility).
 inline std::string roles_csv(const VariableSet& vs) {
   std::string s;
   for (std::size_t i = 0; i < vs.roles.size(); ++i) {
     if (i) s += ',';
-    s += role_name(vs.roles[i]);
+    if (i < vs.user_roles.size() && !vs.user_roles[i].empty())
+      s += vs.user_roles[i];
+    else
+      s += role_name(vs.roles[i]);
   }
   return s;
+}
+
+/// Inverse of roles_csv: fill @p vs.roles (and @p vs.user_roles for any NON-canonical token) from a
+/// roles CSV. A canonical token (role_from_name) maps to its enum with an empty user label; a
+/// non-canonical token maps to VariableRole::Custom keeping the token as its user-role label, so a
+/// user role survives the .so ABI round-trip. user_roles stays EMPTY when every token is canonical
+/// (bit-identical to historical roleless / canonical blocks). Empty @p csv leaves both empty.
+inline void parse_roles_into(VariableSet& vs, const std::string& csv) {
+  if (csv.empty()) return;
+  std::vector<std::string> labels;
+  bool any_user = false;
+  std::size_t start = 0;
+  for (;;) {
+    const std::size_t comma = csv.find(',', start);
+    const std::string tok =
+        csv.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+    const VariableRole r = role_from_name(tok);
+    vs.roles.push_back(r);
+    const bool is_user = (r == VariableRole::Custom && tok != role_name(VariableRole::Custom));
+    labels.push_back(is_user ? tok : std::string());
+    any_user = any_user || is_user;
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  if (any_user) vs.user_roles = std::move(labels);
+}
+
+/// Resolve a REQUIRED canonical @p role to its component in @p vs, for a NAMED coupling
+/// (add_collision / add_thermal_exchange / ionization) that historically targeted the canonical
+/// layout. A genuinely ROLELESS set (`roles` empty: a legacy / dynamic block that declares no roles)
+/// returns the canonical @p fallback -- backward compatible. A ROLES-BEARING set that declares some
+/// roles but NOT @p role THROWS: a silent fallback to @p fallback would apply the coupling to the
+/// WRONG component. @p origin / @p block name the error.
+inline int coupling_role_index(const VariableSet& vs, VariableRole role, int fallback,
+                               const char* origin, const std::string& block) {
+  if (vs.roles.empty()) return fallback;  // roleless legacy block: keep the canonical fallback
+  const int c = vs.index_of(role);
+  if (c >= 0) return c;
+  throw std::runtime_error(std::string(origin) + " : block '" + block + "' declares roles (" +
+                           roles_csv(vs) + ") but not the role '" + role_name(role) +
+                           "' this coupling requires (no silent fallback to component " +
+                           std::to_string(fallback) + ")");
 }
 
 /// A model's "names" metadata: "cons_csv|prim_csv" (separator '|' between the two sets). Read

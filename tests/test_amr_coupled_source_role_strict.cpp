@@ -12,6 +12,9 @@
 //   (B) role ABSENT (canonique mais non expose : momentum_x sur un bloc scalaire) -> LEVE, avec le NOM du
 //       bloc ET le NOM du role dans le message (plus aucun repli silencieux sur la composante 0).
 //   (C) role INCONNU (non canonique, p.ex. "bogus_role") -> LEVE (comportement preexistant conserve).
+//   (D) role UTILISATEUR nomme ("charge", label ajoute sur la density) -> resolu de bout en bout par
+//       add_coupled_source via la couche string (index_of(string), ADC-292).
+//   (E) LABEL utilisateur ABSENT -> LEVE en nommant le role (pas de repli silencieux sur la comp 0).
 //
 // On travaille au niveau du moteur AmrRuntime + build_amr_block, comme test_amr_multiblock_coupled_source :
 // deux blocs ExB scalaires (1 var, role density) sur la hierarchie partagee, puis on enregistre des sources
@@ -60,7 +63,8 @@ static std::vector<double> bump(int n, double base, double amp) {
 // Construit un AmrRuntime a DEUX blocs ExB scalaires ("ions" q=+1, "neutrals" q=0) sur une hierarchie
 // 2 niveaux figee N x N (un patch fin central). Calque de test_amr_multiblock_coupled_source.
 static AmrRuntime make_two_block(int N, double L, double B0, const std::vector<double>& rho_ions,
-                                 const std::vector<double>& rho_neut) {
+                                 const std::vector<double>& rho_neut,
+                                 const char* ions_user_role = nullptr) {
   AmrBuildParams bp;
   bp.n = N;
   bp.L = L;
@@ -76,6 +80,11 @@ static AmrRuntime make_two_block(int N, double L, double B0, const std::vector<d
     blocks.push_back(detail::dispatch_amr_block(m, "minmod", "rusanov", S, "neutrals", rho_neut,
                                                 /*has_density=*/true, 1.4, 1, false, false, 1));
   });
+  // ADC-292: optionally ADD a USER-DEFINED role label on the "ions" density component (keeping the
+  // canonical Density role, so the ExB charge coupling is untouched). The coupled-source resolver must
+  // then go through the string user-role layer (index_of(string)) to map this label to component 0.
+  // Pure host METADATA: the numerics still act on component 0, only (block, role) resolution changes.
+  if (ions_user_role != nullptr) blocks[0].cons_vars.user_roles = {ions_user_role};
   return AmrRuntime(S.geom, S.ba_coarse, S.poisson_bc, std::move(blocks), S.base_per,
                     S.replicated_coarse, S.wall);
 }
@@ -89,6 +98,23 @@ static void add_source_with_out_role(AmrRuntime& rt, const std::string& out_role
   const std::vector<double> consts = {0.5};
   const std::vector<std::string> out_blocks = {"ions"};
   const std::vector<std::string> out_roles = {out_role};
+  const int P = static_cast<int>(CsOp::PushReg), MUL = static_cast<int>(CsOp::Mul);
+  const std::vector<int> prog_ops = {P, P, MUL, P, MUL};  // k * n_ions * n_neutrals
+  const std::vector<int> prog_args = {0, 1, 0, 2, 0};
+  const std::vector<int> prog_lens = {5};
+  rt.add_coupled_source(in_blocks, in_roles, consts, out_blocks, out_roles, prog_ops, prog_args,
+                        prog_lens);
+}
+
+// Comme add_source_with_out_role mais l'entree lue sur "ions" ET la sortie sont adressees par @p io_role
+// (un LABEL de role utilisateur). "neutrals" lit toujours sa density canonique. Sert les cas (D)/(E) :
+// resolution d'un role utilisateur nomme de bout en bout via add_coupled_source -> index_of(string).
+static void add_source_with_io_role(AmrRuntime& rt, const std::string& io_role) {
+  const std::vector<std::string> in_blocks = {"ions", "neutrals"};
+  const std::vector<std::string> in_roles = {io_role, "density"};
+  const std::vector<double> consts = {0.5};
+  const std::vector<std::string> out_blocks = {"ions"};
+  const std::vector<std::string> out_roles = {io_role};
   const int P = static_cast<int>(CsOp::PushReg), MUL = static_cast<int>(CsOp::Mul);
   const std::vector<int> prog_ops = {P, P, MUL, P, MUL};  // k * n_ions * n_neutrals
   const std::vector<int> prog_args = {0, 1, 0, 2, 0};
@@ -166,6 +192,40 @@ int main(int argc, char** argv) {
     }
     chk(threw, "unknown_role_raises");
     chk(rt.n_coupled_sources() == 0, "unknown_role_no_source_registered");
+  }
+
+  // ============================================================================================
+  // (D) role UTILISATEUR nomme ("charge", ajoute en label sur la density de "ions") resolu DE BOUT EN
+  //     BOUT par add_coupled_source via la couche string (index_of(string), ADC-292) -> REUSSIT.
+  // ============================================================================================
+  {
+    AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, /*ions_user_role=*/"charge");
+    bool threw = false;
+    try {
+      add_source_with_io_role(rt, "charge");
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    chk(!threw, "user_role_label_resolves_end_to_end");
+    chk(rt.n_coupled_sources() == 1, "user_role_source_registered");
+  }
+
+  // ============================================================================================
+  // (E) LABEL utilisateur ABSENT (le bloc declare "charge", pas "not_a_label") -> LEVE en nommant le
+  //     role, sans repli silencieux sur la composante 0.
+  // ============================================================================================
+  {
+    AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, /*ions_user_role=*/"charge");
+    bool threw = false, names_role = false;
+    try {
+      add_source_with_io_role(rt, "not_a_label");
+    } catch (const std::exception& e) {
+      threw = true;
+      names_role = std::string(e.what()).find("not_a_label") != std::string::npos;
+    }
+    chk(threw, "absent_user_label_raises");
+    chk(names_role, "absent_user_label_message_names_role");
+    chk(rt.n_coupled_sources() == 0, "absent_user_label_no_source_registered");
   }
 
   if (fails == 0)

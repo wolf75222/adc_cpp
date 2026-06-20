@@ -193,9 +193,8 @@ inline ADC_COLD_FN std::vector<int> resolve_implicit_components(const std::strin
     push_unique(idx);
   }
   for (const std::string& rn : roles) {
-    const VariableRole role = role_from_name(rn);
-    const int idx = cons.index_of(role);
-    if (role == VariableRole::Custom || idx < 0) {
+    const int idx = cons.index_of(rn);  // canonical role name OR user-defined role label (ADC-292)
+    if (idx < 0) {
       std::string have = roles_csv(cons);
       throw std::runtime_error("System::add_block : implicit_roles : role '" + rn +
                                "' absent from block '" + block + "' (roles : " +
@@ -231,9 +230,8 @@ inline ADC_COLD_FN int resolve_selected_component(const std::string& origin, con
     throw std::runtime_error(origin + " : variable '" + name + "' absent from block '" + block +
                              "' (conserved variables : " + have + ")");
   }
-  const VariableRole r = role_from_name(role);
-  const int idx = cons.index_of(r);
-  if (r == VariableRole::Custom || idx < 0) {
+  const int idx = cons.index_of(role);  // canonical role name OR user-defined role label (ADC-292)
+  if (idx < 0) {
     const std::string have = roles_csv(cons);
     throw std::runtime_error(origin + " : role '" + role + "' absent from block '" + block +
                              "' (roles : " + (have.empty() ? std::string("<not provided>") : have) + ")");

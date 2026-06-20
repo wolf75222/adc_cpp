@@ -640,6 +640,9 @@ add_test(NAME test_aux_te COMMAND test_aux_te)
 # --- descripteur de variables : roles physiques (index_of(role)) ---
 adc_add_test(test_variable_role)
 
+# --- roles utilisateurs nommes + fallbacks canoniques stricts (ADC-292) ---
+adc_add_test(test_variable_user_role)
+
 # --- flux de Roe (Euler) + eigenvalues() ---
 adc_add_test(test_roe_flux)
 # Capabilities Riemann (audit 2026-06) : HLLC/Roe generiques par hooks modele (HasHLLCStructure /

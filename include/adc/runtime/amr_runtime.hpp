@@ -395,22 +395,19 @@ class AmrRuntime {
       const int b = block_index(block);
       if (b < 0)
         throw std::runtime_error("AmrRuntime::add_coupled_source : no block named '" + block + "'");
-      const VariableRole r = role_from_name(role);
-      if (r == VariableRole::Custom)
-        throw std::runtime_error("AmrRuntime::add_coupled_source : role '" + role + "' unknown (block '" +
-                                 block + "')");
       // STRICT (no silent fallback; mirror of System::add_coupled_source #181): a DSL coupled source
-      // targets a (block, role) EXPLICITLY requested by the user. If the block does NOT expose this role
-      // (canonical but absent from cons_vars), a fallback to component 0 would apply the source to the
-      // wrong field SILENTLY (the false-positive identified at the Lot E review). We throw. Distinct
-      // from the NAMED couplings (add_collision/add_pair System-side) which deliberately assume the
-      // canonical layout via role_index(..., fallback) and stay unchanged (they do not go through this
-      // AMR runtime path).
-      const int comp = blocks_[static_cast<std::size_t>(b)].cons_vars.index_of(r);
+      // targets a (block, role) EXPLICITLY requested by the user. The role is addressed BY NAME: a
+      // canonical role name OR a user-defined role label (index_of(string), ADC-292). If the block does
+      // NOT expose this role, a fallback to component 0 would apply the source to the wrong field
+      // SILENTLY (the false-positive identified at the Lot E review). We throw, listing what the block
+      // exposes.
+      const VariableSet& vs = blocks_[static_cast<std::size_t>(b)].cons_vars;
+      const int comp = vs.index_of(role);
       if (comp < 0)
         throw std::runtime_error("AmrRuntime::add_coupled_source : block '" + block +
-                                 "' does not expose role '" + role +
-                                 "' (no silent fallback to component 0)");
+                                 "' does not expose role '" + role + "' (roles: " +
+                                 (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
+                                 ", no silent fallback to component 0)");
       return {b, comp};
     };
     // Inputs: (block, component) read per cell. Captured by INDEX -> we rebuild the Array4 at EACH
@@ -855,15 +852,14 @@ class AmrRuntime {
       if (b < 0)
         throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : no block named '" + block +
                                  "'");
-      const VariableRole r = role_from_name(role);
-      if (r == VariableRole::Custom)
-        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : role '" + role +
-                                 "' unknown (block '" + block + "')");
-      const int comp = blocks_[static_cast<std::size_t>(b)].cons_vars.index_of(r);
+      // Role addressed BY NAME: a canonical role name OR a user-defined role label (ADC-292), STRICT.
+      const VariableSet& vs = blocks_[static_cast<std::size_t>(b)].cons_vars;
+      const int comp = vs.index_of(role);
       if (comp < 0)
         throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : block '" + block +
-                                 "' does not expose role '" + role +
-                                 "' (no silent fallback to component 0)");
+                                 "' does not expose role '" + role + "' (roles: " +
+                                 (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
+                                 ", no silent fallback to component 0)");
       ins[static_cast<std::size_t>(c)] = {b, comp, CsProgram{}};
     }
     CsProgram pg;
