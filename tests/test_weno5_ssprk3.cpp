@@ -138,6 +138,29 @@ int main() {
     chk(d < 1e-14, "build_block(ssprk3).advance == SSPRK3Step du coeur");
   }
 
+  // (2b) REUSE DU SCRATCH (ADC-261) : une avance a n>1 sous-pas reutilise UN seul Scratch hoisté a
+  // travers les sous-pas (run_explicit_substeps) ; elle doit egaler n take_step one-shot SSPRK3Step
+  // separes (scratch frais a chaque appel, h=dt/n). Verrouille le chemin de REUTILISATION, pas couvert
+  // par le cas n=1 ci-dessus.
+  {
+    MultiFab U(ba, dm, 1, 3), Uref(ba, dm, 1, 3);
+    init(U); init(Uref);
+    BlockClosures clo3 = make_block(model, "weno5", "rusanov", ctx, false, false, "ssprk3");
+    BlockClosures clo2 = make_block(model, "weno5", "rusanov", ctx, false, false);  // rhs_into identique
+    const double dt = 4e-3;
+    const int nsub = 4;
+    clo3.advance(U, dt, nsub);  // Scratch reutilise a travers les nsub sous-pas
+    const double h = dt / nsub;
+    for (int s = 0; s < nsub; ++s)
+      SSPRK3Step{}.take_step([&](MultiFab& Us, MultiFab& R) { clo2.rhs_into(Us, R); }, Uref, h);
+    double d = 0;
+    const ConstArray4 u = U.fab(0).const_array(), ur = Uref.fab(0).const_array();
+    for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
+      for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
+        d = std::fmax(d, std::fabs(u(i, j, 0) - ur(i, j, 0)));
+    chk(d < 1e-14, "advance(n=4) == 4x take_step one-shot (reuse du scratch bit-identique)");
+  }
+
   // (3) NO-DEFAULT-CHANGE : minmod/rusanov, method par defaut == "ssprk2" == build_block<Minmod>
   // sans tag. Residu ET avance BIT-IDENTIQUES (le chemin historique n'a pas bouge d'un bit).
   {

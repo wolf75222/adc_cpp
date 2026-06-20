@@ -146,7 +146,7 @@ struct PolarAdvanceExplicit {
   void operator()(MultiFab& U, Real dt, int n) const {
     const Real h = dt / static_cast<Real>(n);
     const PolarBlockRhsEval<Limiter, Flux, Model> rhs{m, &ctx, recon_prim, wall_radial, pos_floor};
-    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
+    run_explicit_substeps<Stepper>(rhs, U, h, n);
   }
 };
 
