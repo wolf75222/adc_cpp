@@ -20,6 +20,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`roe_abs_apply`: device-clean matrix-absolute-value for a generic moment Roe** (ADC-368): a new
+  `adc::roe_abs_apply<N>(A, dU, out)` in `include/adc/numerics/dense_eig.hpp` returns the Roe
+  dissipation `|A| dU = R |Lambda| R^-1 dU` of a small dense flux Jacobian via the
+  infinity-norm-scaled Newton matrix-sign iteration (`|A| = A sign(A)`); `ADC_HD`, no allocation,
+  `N <= 16`. For a real-diagonalizable `A` this equals the reference `flux_ROE_local.m` dissipation
+  exactly (the Harten floor is inactive at O(1) wave speeds), and it returns `false` -- so the caller
+  falls back to a spectral-radius (Rusanov) bound -- when the spectrum is not real or `A` is singular.
+  This is the numerical kernel for the upcoming generic moment-system Roe flux (HyQMOM15); no public
+  behavior changes yet. Covered by `tests/test_dense_eig.cpp` (parity to `R |Lambda| R^T` up to N=15,
+  plus the complex and singular fallbacks).
 - **Configure-time guard: Kokkos CUDA is rejected on native Windows** (ADC-168): `cmake` now fails
   fast with a clear message (use WSL2 for the GPU; native Windows is CPU Serial/OpenMP only) when
   `Kokkos_ENABLE_CUDA=ON` is requested on a native Windows configuration, instead of letting the
