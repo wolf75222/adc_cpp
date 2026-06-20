@@ -43,7 +43,7 @@ to link for the core, you include the headers. The three design axes are orthogo
 `include/adc/numerics/elliptic/elliptic_solver.hpp`, `include/adc/runtime/system.hpp`,
 `include/adc/runtime/amr_system.hpp`, `include/adc/numerics/elliptic/geometric_mg.hpp`,
 `include/adc/numerics/elliptic/poisson_fft_solver.hpp`,
-`include/adc/coupling/amr_coupler_mp.hpp`.)
+`include/adc/coupling/amr/amr_coupler_mp.hpp`.)
 
 For the test coverage of these components by backend, see
 [backend matrix](backend-matrix.md).
