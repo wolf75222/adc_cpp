@@ -141,6 +141,7 @@ adc_add_test(test_load_balance)
 
 # --- elliptique ---
 adc_add_test(test_poisson_smoother)
+adc_add_test(test_poisson_smoother_cache)  # ADC-262 : RB-GS reuses the cached halo schedule (no per-sweep re-enumeration)
 adc_add_test(test_geometric_mg)
 adc_add_test(test_poisson_convergence)
 adc_add_test(test_poisson_fft)
