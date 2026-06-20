@@ -1,5 +1,6 @@
 #pragma once
 #include <adc/mesh/mf_arith.hpp>  // saxpy, lincomb (SSPRK3 stages, named device-clean functors)
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/mesh/refinement.hpp>  // coarsen, parallel_copy
 #include <adc/numerics/time/amr_flux_helpers.hpp>
 #include <adc/numerics/time/amr_patch_range.hpp>
@@ -30,6 +31,8 @@
 
 namespace adc {
 
+static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
+
 // --- MULTI-PATCH (several fine boxes per level) ---
 // The fine level is a MultiFab with N boxes. Reflux is COVERAGE-AWARE: it corrects a coarse
 // cell adjacent to a fine box only if it is NOT covered by another fine box (real fine-coarse
@@ -55,7 +58,7 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
                                 const MultiFab& auxf, Real dt) {
   const SubcyclingSchedule sched(2);
   const int nc = Uc.ncomp();
-  const Real dxf = dxc / 2, dyf = dyc / 2, dtf = sched.dt_sub(dt);
+  const Real dxf = dxc / kAmrRefRatio, dyf = dyc / kAmrRefRatio, dtf = sched.dt_sub(dt);
   const int NX = dom.nx(), NY = dom.ny();
 
   // coarse-fine interface: coverage (coarse cells shadowed by a fine patch) + bordering reflux
@@ -156,7 +159,7 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   // by 1 for the bordering reflux cells, clamped to the domain): the gather all_reduce goes from
   // O(NX*NY) to O(interface). Bit-identical: cells outside the interface were zero (uncovered,
   // without a face), skipped at application.
-  const Box2D fpc = coarsen(Uf.box_array(), 2).bounding_box();
+  const Box2D fpc = coarsen(Uf.box_array(), kAmrRefRatio).bounding_box();
   const Box2D rbox{{std::max(fpc.lo[0] - 1, 0), std::max(fpc.lo[1] - 1, 0)},
                    {std::min(fpc.hi[0] + 1, NX - 1), std::min(fpc.hi[1] + 1, NY - 1)}};
   FluxRegister avg(rbox, nc);  // average-down (overwrite of covered cells)
@@ -252,7 +255,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
       for (int j = g.lo[1]; j <= g.hi[1]; ++j)
         for (int i = g.lo[0]; i <= g.hi[0]; ++i)
           if (!v.contains(i, j)) {
-            const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+            const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
             const int pb = mf_find_box(Po, ci, cj);
             if (pb < 0) continue;  // outside parent coverage -> leave to fill_boundary
             const ConstArray4 po = Po.fab(pb).const_array(), pn = Pn.fab(pb).const_array();
@@ -261,7 +264,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
     }
     return;
   }
-  const BoxArray pcoarse_ba = coarsen_grown(Uf.box_array(), ng, 2);
+  const BoxArray pcoarse_ba = coarsen_grown(Uf.box_array(), ng, kAmrRefRatio);
   MultiFab Pco(pcoarse_ba, Uf.dmap(), nc, 0), Pcn(pcoarse_ba, Uf.dmap(), nc, 0);
   parallel_copy(Pco, Po);  // parent regions (from any rank) -> local grid
   parallel_copy(Pcn, Pn);
@@ -287,7 +290,7 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
 inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
   const int nc = std::min(Uf.ncomp(), Uc.ncomp());
   // coarse bounding box (GLOBAL indices) covering all the child footprints.
-  const BoxArray cba = coarsen(Uf.box_array(), 2);
+  const BoxArray cba = coarsen(Uf.box_array(), kAmrRefRatio);
   Box2D bb{{0, 0}, {-1, -1}};
   for (int g = 0; g < cba.size(); ++g)
     bb = (g == 0) ? cba[g] : Box2D{{std::min(bb.lo[0], cba[g].lo[0]), std::min(bb.lo[1], cba[g].lo[1])},
@@ -528,7 +531,7 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   // return -1 for a bordering coarse cell owned by a REMOTE rank (-> fab(-1), segfault). We then
   // route to the parallel_copy path (per-child coarse footprint), MPI-correct.
   const bool replicated_parent = (lev == 0) && coarse_replicated;
-  const BoxArray cba = coarsen(L[lev + 1].U.box_array(), 2);  // per-child coarse footprint
+  const BoxArray cba = coarsen(L[lev + 1].U.box_array(), kAmrRefRatio);  // per-child coarse footprint
   MultiFab cfx, cfy;
   if (!replicated_parent) {
     std::vector<Box2D> cfxb, cfyb;
@@ -616,7 +619,7 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   device_fence();
   // register restricted to the INTERFACE: bounding box of the fine footprints (coarsen of level
   // lev+1), grown by 1, clamped to level lev. all_reduce O(interface), bit-identical.
-  const Box2D fpcn = coarsen(L[lev + 1].U.box_array(), 2).bounding_box();
+  const Box2D fpcn = coarsen(L[lev + 1].U.box_array(), kAmrRefRatio).bounding_box();
   const Box2D rbox{{std::max(fpcn.lo[0] - 1, 0), std::max(fpcn.lo[1] - 1, 0)},
                    {std::min(fpcn.hi[0] + 1, NX - 1), std::min(fpcn.hi[1] + 1, NY - 1)}};
   FluxRegister ref(rbox, nc);  // N-level reflux (interface)

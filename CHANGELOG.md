@@ -184,6 +184,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Centralized native AMR refinement ratio** (ADC-295): the refinement ratio of the in-house AMR
+  hierarchy is now a single named invariant `kAmrRefRatio` (with a `require_supported_ref_ratio`
+  guard) in `include/adc/amr/refinement_ratio.hpp`, instead of the literal `2` scattered across the
+  coarse/fine paths. `AmrHierarchy` defaults to and validates that ratio, rejecting any other value
+  at construction with a clear error rather than silently mis-coarsening; the parametric call sites
+  (`coarsen_index`/`coarsen_grown`/`refine`, composite-FAC `CompositeFacPoisson`/`fac_bilerp_coarse`,
+  the subcycling `dxc / r` spacings and `SubcyclingSchedule`) read the constant, and the
+  ratio-2-structural kernels (the NxN average-down and coarse-fine flux unrolls in `numerics/time`)
+  carry a `static_assert` so a future non-2 ratio fails loudly at exactly those sites. `capabilities()`
+  now states `refinement_ratio = 2 only`. Behavior is bit-identical (the constant is 2);
+  `test_ref_ratio` locks the invariant and the rejection.
 - **Elliptic solver headers organized by family** (ADC-334): `include/adc/numerics/elliptic/` is
   split into `interface/`, `poisson/`, `mg/`, `eb/`, `polar/`, and `linear/` subdirectories so the
   numeric surface shows its solver families instead of one flat directory. Every historical include

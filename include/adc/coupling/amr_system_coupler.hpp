@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/core/coupled_system.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/core/types.hpp>
 #include <adc/coupling/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
 #include <adc/coupling/aux_fill.hpp>        // detail::derive_aux_bc + detail::fill_bz_box (shared)
@@ -42,6 +43,8 @@
 /// Single-block = bit-identical path to history (loops over the other blocks are empty).
 
 namespace adc {
+
+static_assert(kAmrRefRatio == 2, "refine(1 << k) assumes a power-of-two (ratio-2) cascade");
 
 /// Re-solve frequency of the Poisson on AMR: OncePerStep (phi solved once per macro-step, frozen
 /// during the advance; cheapest); PerSubstep (phi re-solved before each species substep, more

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/coupling/condensed_schur_source_stepper.hpp>  // CondensedSchurSourceStepper (#126) + detail kernels
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/coupling/schur_condensation.hpp>              // ElectrostaticLorentzCondensation (assemble per level)
 #include <adc/numerics/elliptic/composite_fac_poisson.hpp>  // CompositeFacPoisson (composite FAC elliptic solve)
 #include <adc/numerics/time/amr_reflux_mf.hpp>              // mf_average_down_mb (fine -> coarse cascade)
@@ -153,7 +154,7 @@ class AmrCondensedSchurSourceStepper {
     const BoxArray& fine_ba = levels[1].U.box_array();
     ensure_fac(fine_ba);
     const Geometry geom_c = coarse_geom_;
-    const Geometry geom_f = coarse_geom_.refine(2);
+    const Geometry geom_f = coarse_geom_.refine(kAmrRefRatio);
     ElectrostaticLorentzCondensation builder(vars_, alpha_, theta, dt);
 
     MultiFab& Uc = levels[0].U;
@@ -262,7 +263,8 @@ class AmrCondensedSchurSourceStepper {
   /// unnecessary rebuild (the FAC is reused as long as the hierarchy does not change).
   void ensure_fac(const BoxArray& fine_ba) {
     if (fac_ && fac_fine_boxes_ == fine_ba.boxes()) return;
-    fac_ = std::make_unique<CompositeFacPoisson>(coarse_geom_, coarse_ba_, bcPhi_, fine_ba, 2);
+    fac_ = std::make_unique<CompositeFacPoisson>(coarse_geom_, coarse_ba_, bcPhi_, fine_ba,
+                                                 kAmrRefRatio);
     fac_fine_boxes_ = fine_ba.boxes();
   }
 
@@ -309,7 +311,7 @@ class AmrCondensedSchurSourceStepper {
       const Box2D vb = fine.box(li);
       for (int j = vb.lo[1] - ng; j <= vb.hi[1] + ng; ++j)
         for (int i = vb.lo[0] - ng; i <= vb.hi[0] + ng; ++i)
-          F(i, j, 0) = detail::fac_bilerp_coarse(C, i, j, 2);
+          F(i, j, 0) = detail::fac_bilerp_coarse(C, i, j, kAmrRefRatio);
     }
   }
 

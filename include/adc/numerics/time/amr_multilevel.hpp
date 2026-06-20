@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/numerics/time/amr_reflux.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/fab2d.hpp>
 
@@ -46,6 +47,8 @@
 /// - aux held elsewhere (pointer); rC* = region refined by the child, valid if has_fine.
 
 namespace adc {
+
+static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
 
 // One level of the hierarchy. aux is held elsewhere (recomputed per step);
 // only a pointer is kept. rC* describes the region (in coords of THIS level)

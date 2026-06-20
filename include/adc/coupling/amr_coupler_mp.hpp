@@ -1,6 +1,7 @@
 #pragma once
 
 #include <adc/core/types.hpp>
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/coupling/amr_diagnostics.hpp>     // amr_mass, amr_max_drift_speed
 #include <adc/coupling/amr_level_storage.hpp>    // AmrLevelStack
 #include <adc/coupling/amr_regrid_coupler.hpp>   // amr_regrid_finest (Berger-Rigoutsos)
@@ -66,7 +67,7 @@ inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
       const Box2D g = child.fab(lc).grown_box();
       for (int j = g.lo[1]; j <= g.hi[1]; ++j)
         for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
-          const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+          const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
           const int pb = mf_find_box(parent, ci, cj);
           if (pb < 0) continue;
           const ConstArray4 pp = parent.fab(pb).const_array();
@@ -81,7 +82,7 @@ inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
       if (pba[b].contains(ci, cj)) return true;
     return false;
   };
-  const BoxArray ccoarse = coarsen_grown(child.box_array(), child.n_grow(), 2);
+  const BoxArray ccoarse = coarsen_grown(child.box_array(), child.n_grow(), kAmrRefRatio);
   MultiFab Pc(ccoarse, child.dmap(), parent.ncomp(), 0);
   parallel_copy(Pc, parent);  // parent regions (from any rank) -> local grid
   device_fence();
@@ -91,7 +92,7 @@ inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
     const Box2D g = child.fab(lc).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
-        const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+        const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
         if (!covered(ci, cj)) continue;  // outside coverage -> keep the child value
         for (int k = 0; k < nc; ++k) c(i, j, k) = pp(ci, cj, k);
       }
@@ -205,7 +206,7 @@ inline void coupler_inject_coarse_to_fine_mb(const MultiFab& Uc, MultiFab& Uf, b
       const Box2D v = Uf.box(li);
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
         for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
-          const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+          const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
           const int pb = mf_find_box(Uc, ci, cj);
           if (pb < 0) continue;
           const ConstArray4 c = Uc.fab(pb).const_array();
@@ -214,7 +215,7 @@ inline void coupler_inject_coarse_to_fine_mb(const MultiFab& Uc, MultiFab& Uf, b
     }
     return;
   }
-  const BoxArray ccoarse = coarsen(Uf.box_array(), 2);  // coarse footprint (valid cells)
+  const BoxArray ccoarse = coarsen(Uf.box_array(), kAmrRefRatio);  // coarse footprint (valid cells)
   MultiFab Pc(ccoarse, Uf.dmap(), Uc.ncomp(), 0);
   parallel_copy(Pc, Uc);  // coarse regions (from any rank) -> local grid
   device_fence();
@@ -224,7 +225,7 @@ inline void coupler_inject_coarse_to_fine_mb(const MultiFab& Uc, MultiFab& Uf, b
     const Box2D v = Uf.box(li);
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
       for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
-        const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
+        const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
         for (int k = 0; k < nc; ++k) f(i, j, k) = c(ci, cj, k);
       }
   }

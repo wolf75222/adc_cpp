@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <adc/amr/refinement_ratio.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -41,10 +42,12 @@ class AmrHierarchy {
   /// @param max_grid_size max box size for the split into BoxArray.
   /// @param ncomp number of field components per cell.
   /// @param ngrow number of ghost layers of the MultiFab.
-  /// @param ref_ratio integer refinement ratio between consecutive levels (2 by default).
+  /// @param ref_ratio integer refinement ratio; only kAmrRefRatio (2) is supported today
+  ///        and any other value is rejected at construction (see refinement_ratio.hpp).
   AmrHierarchy(const Box2D& coarse_domain, int max_grid_size, int ncomp,
-               int ngrow, int ref_ratio = 2)
+               int ngrow, int ref_ratio = kAmrRefRatio)
       : ref_ratio_(ref_ratio), ncomp_(ncomp), ngrow_(ngrow) {
+    require_supported_ref_ratio(ref_ratio);
     BoxArray ba = BoxArray::from_domain(coarse_domain, max_grid_size);
     domain_.push_back(coarse_domain);
     ba_.push_back(ba);
