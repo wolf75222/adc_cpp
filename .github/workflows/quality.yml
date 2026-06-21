@@ -66,7 +66,7 @@ jobs:
     needs: set-mode
     if: needs.set-mode.outputs.run == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - name: Install clang-format
@@ -161,7 +161,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: kokkos
@@ -213,7 +213,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: kokkos
@@ -267,7 +267,7 @@ jobs:
       ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0:abort_on_error=0:halt_on_error=0
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: kokkos
@@ -330,7 +330,7 @@ jobs:
       OMP_NUM_THREADS: '2'
       TSAN_OPTIONS: second_deadlock_stack=1:halt_on_error=0:suppressions=${{ github.workspace }}/tsan-suppressions.txt
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       # Install Kokkos OpenMP compilee en CLANG (cle de cache distincte) : libgomp (gcc) n'est PAS
@@ -390,7 +390,7 @@ jobs:
       ASAN_OPTIONS: detect_leaks=0:detect_container_overflow=0
       UBSAN_OPTIONS: print_stacktrace=1
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       # Install Kokkos compilee en CLANG (cle de cache distincte de celle du gate gcc) : les
@@ -466,7 +466,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 500M
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: kokkos
@@ -532,7 +532,7 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: kokkos

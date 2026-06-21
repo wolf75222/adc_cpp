@@ -69,7 +69,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       full: ${{ steps.filter.outputs.full }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: filter
@@ -175,7 +175,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -281,7 +281,7 @@ jobs:
       SHARD_TOTAL: ${{ strategy.job-total }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -437,7 +437,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-install
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -523,7 +523,7 @@ jobs:
       KOKKOS_PREFIX: ${{ github.workspace }}/.kokkos-openmp-install
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -649,7 +649,7 @@ jobs:
       CCACHE_MAXSIZE: 500M
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
