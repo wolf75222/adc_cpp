@@ -25,19 +25,19 @@ namespace adc {
 /// physics on its own. Historical shortcuts live at the Python edge (adc.Model(...)), which always
 /// sets the three tags. See docs/adr/ADR-0001-genericity-contracts.md.
 struct ModelSpec {
-  std::string transport;                   ///< REQUIRED (unset): "exb" | "compressible" | "isothermal"
-  std::string source = "none";             ///< "none" (default, neutral: no force) | "potential" | "gravity"
-                                           ///< | "magnetic"/"lorentz" | "potential_magnetic"/"potential_lorentz"
-  std::string elliptic;                    ///< REQUIRED (unset): "charge" | "background" | "gravity"
+  std::string transport;        ///< REQUIRED (unset): "exb" | "compressible" | "isothermal"
+  std::string source = "none";  ///< "none" (default, neutral: no force) | "potential" | "gravity"
+      ///< | "magnetic"/"lorentz" | "potential_magnetic"/"potential_lorentz"
+  std::string elliptic;  ///< REQUIRED (unset): "charge" | "background" | "gravity"
 
-  double B0 = 1.0;         ///< ExBVelocity: magnetic field
-  double gamma = 1.4;      ///< CompressibleFlux: adiabatic index
-  double cs2 = 0.5;        ///< IsothermalFlux: sound speed squared
+  double B0 = 1.0;            ///< ExBVelocity: magnetic field
+  double gamma = 1.4;         ///< CompressibleFlux: adiabatic index
+  double cs2 = 0.5;           ///< IsothermalFlux: sound speed squared
   double vacuum_floor = 0.0;  ///< IsothermalFlux: quasi-vacuum density floor for u=m/max(rho,floor)
                               ///< (ADC-77). Set from adc.FluidState(vacuum_floor=...) at compose;
-                              ///< INDEPENDENT of the spatial positivity_floor (deliberately decoupled --
-                              ///< coupling them shifts the CFL dt of existing positivity_floor runs).
-                              ///< 0 = off (bit-identical)
+  ///< INDEPENDENT of the spatial positivity_floor (deliberately decoupled --
+  ///< coupling them shifts the CFL dt of existing positivity_floor runs).
+  ///< 0 = off (bit-identical)
   double qom = 1.0;        ///< PotentialForce / MagneticLorentzForce: q/m (sign included)
   double q = 1.0;          ///< ChargeDensity: charge q
   double alpha = 1.0;      ///< BackgroundDensity: Poisson coupling

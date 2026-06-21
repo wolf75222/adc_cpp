@@ -93,7 +93,8 @@ Snap run(AmrSystem& s, int nsteps) {
   s.set_poisson("charge_density", "geometric_mg");
   s.set_refinement(1.2);  // raffine la bulle
   const double dt = 2e-4;
-  for (int k = 0; k < nsteps; ++k) s.step(dt);
+  for (int k = 0; k < nsteps; ++k)
+    s.step(dt);
   return Snap{s.density(), s.mass(), s.n_patches()};
 }
 
@@ -105,12 +106,17 @@ double maxdiff(const std::vector<double>& a, const std::vector<double>& b) {
 }
 double maxabs(const std::vector<double>& a) {
   double m = 0;
-  for (double v : a) m = std::fmax(m, std::fabs(v));
+  for (double v : a)
+    m = std::fmax(m, std::fabs(v));
   return m;
 }
 
 // Source du loader AMR : MEME forme que dsl.emit_cpp_native_loader(target="amr_system"), modele en dur.
 std::string loader_source() {
+  // Generated C++ source raw string: clang-format would reindent (or, with the
+  // interleaved R"CPP( delimiters, runaway-indent) the inner content. Fence it to keep the
+  // emitted source verbatim.
+  // clang-format off
   return R"CPP(
 #include <adc/runtime/amr_dsl_block.hpp>
 #include <adc/runtime/abi_key.hpp>
@@ -133,6 +139,7 @@ extern "C" void adc_install_native_amr(void* sys, const char* name, const char* 
       limiter, riemann, recon, time, gamma, substeps);
 }
 )CPP";
+  // clang-format on
 }
 
 bool compile_loader(const std::string& src_path, const std::string& so_path) {
@@ -165,7 +172,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // ============================================================================================
@@ -235,7 +245,8 @@ int main(int argc, char** argv) {
         A.set_density("gas", rho);
         const Snap sa = run(A, nsteps);
 
-        AmrSystem B(make_cfg(n));  // MEME modele installe EN DIRECT (le chemin que le loader inline)
+        AmrSystem B(
+            make_cfg(n));  // MEME modele installe EN DIRECT (le chemin que le loader inline)
         add_compiled_model(B, "gas", make_model(), lim, "rusanov", "conservative", "explicit",
                            kGamma);
         B.set_density("gas", rho);
@@ -256,7 +267,8 @@ int main(int argc, char** argv) {
 #endif  // ADC_HAS_KOKKOS
 
   if (fails == 0)
-    std::printf("OK test_amr_weno5_native (weno5 AMR : add_native_block == add_compiled_model == "
-                "add_block, bit-identique ; no-default-change none/minmod)\n");
+    std::printf(
+        "OK test_amr_weno5_native (weno5 AMR : add_native_block == add_compiled_model == "
+        "add_block, bit-identique ; no-default-change none/minmod)\n");
   return fails ? 1 : 0;
 }

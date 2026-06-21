@@ -68,7 +68,8 @@ static void fill_aux_comp(MultiFab& aux, int c, Real v) {
     Fab2D& f = aux.fab(li);
     const Box2D g = f.grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) f(i, j, c) = v;
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        f(i, j, c) = v;
   }
 }
 
@@ -121,8 +122,8 @@ int main() {
     auto run = [&](Real comp3) {
       MultiFab aux(ba, dm, 4, 1);
       aux.set_val(0.0);
-      fill_aux_comp(aux, 1, gx);      // grad_x
-      fill_aux_comp(aux, 3, comp3);   // B_z parasite : ne doit pas etre lu
+      fill_aux_comp(aux, 1, gx);     // grad_x
+      fill_aux_comp(aux, 3, comp3);  // B_z parasite : ne doit pas etre lu
       MultiFab R(ba, dm, 1, 0);
       GradSource m;
       assemble_rhs<NoSlope>(m, U, aux, geom, R);
@@ -141,12 +142,13 @@ int main() {
           val = r0(i, j, 0);
         }
     }
-    std::printf("  (B) base n_aux=3 : R(c3=0) vs R(c3=999) max diff = %.2e (R=%.3f)\n",
-                maxdiff, val);
+    std::printf("  (B) base n_aux=3 : R(c3=0) vs R(c3=999) max diff = %.2e (R=%.3f)\n", maxdiff,
+                val);
     chk(maxdiff == 0.0, "base_model_ignores_extra_comp");
     chk(std::fabs(val - gx) < 1e-14, "base_model_reads_grad_x");
   }
 
-  if (fails == 0) std::printf("OK test_aux_extra\n");
+  if (fails == 0)
+    std::printf("OK test_aux_extra\n");
   return fails == 0 ? 0 : 1;
 }

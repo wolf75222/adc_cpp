@@ -30,7 +30,8 @@ inline void ensure_kokkos_initialized() {
   if (!Kokkos::is_initialized() && !Kokkos::is_finalized()) {
     Kokkos::initialize();
     std::atexit([] {
-      if (Kokkos::is_initialized()) Kokkos::finalize();
+      if (Kokkos::is_initialized())
+        Kokkos::finalize();
     });
   }
 }
@@ -41,7 +42,8 @@ inline void ensure_kokkos_initialized() {
 /// No-op outside Kokkos (and if nothing has been launched).
 inline void device_fence() {
 #ifdef ADC_HAS_KOKKOS
-  if (Kokkos::is_initialized()) Kokkos::fence();
+  if (Kokkos::is_initialized())
+    Kokkos::fence();
 #endif
 }
 

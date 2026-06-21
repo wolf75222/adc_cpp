@@ -22,22 +22,26 @@ int main(int argc, char** argv) {
   // S = sum_{r=1..np} r = np(np+1)/2 (invariant du nombre de rangs cote resultat).
   const int n = 17;
   std::vector<double> buf(n);
-  for (int i = 0; i < n; ++i) buf[i] = double(me + 1) * (i + 1);
+  for (int i = 0; i < n; ++i)
+    buf[i] = double(me + 1) * (i + 1);
   all_reduce_sum_inplace(buf.data(), n);
 
   const double S = double(np) * (np + 1) / 2.0;
   for (int i = 0; i < n; ++i)
     if (std::fabs(buf[i] - S * (i + 1)) > 1e-9) {
       ++fails;
-      if (me == 0) std::printf("FAIL i=%d : %.3f != %.3f\n", i, buf[i], S * (i + 1));
+      if (me == 0)
+        std::printf("FAIL i=%d : %.3f != %.3f\n", i, buf[i], S * (i + 1));
     }
 
   // n <= 0 : no-op sans crash (buffer nul autorise).
   all_reduce_sum_inplace(nullptr, 0);
 
   if (me == 0) {
-    if (fails == 0) std::printf("OK test_mpi_array_reduce (np=%d)\n", np);
-    else std::printf("FAIL test_mpi_array_reduce : %ld\n", fails);
+    if (fails == 0)
+      std::printf("OK test_mpi_array_reduce (np=%d)\n", np);
+    else
+      std::printf("FAIL test_mpi_array_reduce : %ld\n", fails);
   }
   comm_finalize();
   return fails == 0 ? 0 : 1;

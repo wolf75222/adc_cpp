@@ -36,7 +36,8 @@ int main(int argc, char** argv) {
 
   std::vector<double> rho_local(static_cast<std::size_t>(nyl) * Nx), phi_local;
   for (int jl = 0; jl < nyl; ++jl)
-    for (int i = 0; i < Nx; ++i) rho_local[jl * Nx + i] = rho(i, y0 + jl);
+    for (int i = 0; i < Nx; ++i)
+      rho_local[jl * Nx + i] = rho(i, y0 + jl);
 
   solver.solve(rho_local, phi_local);
 
@@ -46,20 +47,20 @@ int main(int argc, char** argv) {
     phi_full = phi_local;
   } else {
 #ifdef ADC_HAS_MPI
-    if (me == 0) phi_full.resize(static_cast<std::size_t>(Ny) * Nx);
-    MPI_Gather(phi_local.data(), nyl * Nx, MPI_DOUBLE,
-               phi_full.data(), nyl * Nx, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    if (me == 0)
+      phi_full.resize(static_cast<std::size_t>(Ny) * Nx);
+    MPI_Gather(phi_local.data(), nyl * Nx, MPI_DOUBLE, phi_full.data(), nyl * Nx, MPI_DOUBLE, 0,
+               MPI_COMM_WORLD);
 #endif
   }
 
   long fails = 0;
   if (me == 0) {
     const double dx = Lx / Nx, dy = Ly / Ny;
-    auto P = [&](int i, int j) {
-      return phi_full[((j % Ny + Ny) % Ny) * Nx + (i % Nx + Nx) % Nx];
-    };
+    auto P = [&](int i, int j) { return phi_full[((j % Ny + Ny) % Ny) * Nx + (i % Nx + Nx) % Nx]; };
     double maxres = 0, meanphi = 0;
-    for (std::size_t t = 0; t < phi_full.size(); ++t) meanphi += phi_full[t];
+    for (std::size_t t = 0; t < phi_full.size(); ++t)
+      meanphi += phi_full[t];
     meanphi /= double(Nx) * Ny;
     for (int j = 0; j < Ny; ++j)
       for (int i = 0; i < Nx; ++i) {
@@ -67,16 +68,19 @@ int main(int argc, char** argv) {
                            (P(i, j + 1) - 2 * P(i, j) + P(i, j - 1)) / (dy * dy);
         maxres = std::max(maxres, std::fabs(lap - rho(i, j)));
       }
-    std::printf("np=%d  max|lap_h(phi)-rho|=%.3e  mean(phi)=%.3e\n", np, maxres,
-                meanphi);
-    if (maxres > 1e-10) ++fails;
-    if (std::fabs(meanphi) > 1e-10) ++fails;
+    std::printf("np=%d  max|lap_h(phi)-rho|=%.3e  mean(phi)=%.3e\n", np, maxres, meanphi);
+    if (maxres > 1e-10)
+      ++fails;
+    if (std::fabs(meanphi) > 1e-10)
+      ++fails;
   }
 
 #ifdef ADC_HAS_MPI
-  if (np > 1) MPI_Bcast(&fails, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+  if (np > 1)
+    MPI_Bcast(&fails, 1, MPI_LONG, 0, MPI_COMM_WORLD);
 #endif
-  if (me == 0 && fails == 0) std::printf("OK test_mpi_poisson (np=%d)\n", np);
+  if (me == 0 && fails == 0)
+    std::printf("OK test_mpi_poisson (np=%d)\n", np);
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

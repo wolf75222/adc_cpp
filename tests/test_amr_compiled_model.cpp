@@ -75,7 +75,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // memes patchs au depart (meme critere, meme champ) : le build compile produit la meme hierarchie.
@@ -104,7 +107,7 @@ int main(int argc, char** argv) {
   chk(A.n_patches() == B.n_patches(), "n_patches final AOT == natif (regrid identique)");
 
   if (fails == 0)
-    std::printf("OK test_amr_compiled_model (add_compiled_model == add_block sur AMR ; dmax=%.1e)\n",
-                dmax);
+    std::printf(
+        "OK test_amr_compiled_model (add_compiled_model == add_block sur AMR ; dmax=%.1e)\n", dmax);
   return fails ? 1 : 0;
 }

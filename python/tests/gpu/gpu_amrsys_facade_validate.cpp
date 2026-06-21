@@ -25,12 +25,12 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/mf_arith.hpp>  // sum, norm_inf
 #include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>  // coarsen_index
+#include <adc/mesh/refinement.hpp>                  // coarsen_index
 #include <adc/numerics/spatial_discretisation.hpp>  // FirstOrder, MusclMinmod
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP
-#include <adc/numerics/time/time_integrator.hpp>  // ExplicitTime
-#include <adc/numerics/time/time_steppers.hpp>  // SSPRK2
-#include <adc/parallel/comm.hpp>  // n_ranks
+#include <adc/numerics/time/amr_reflux_mf.hpp>      // AmrLevelMP
+#include <adc/numerics/time/time_integrator.hpp>    // ExplicitTime
+#include <adc/numerics/time/time_steppers.hpp>      // SSPRK2
+#include <adc/parallel/comm.hpp>                    // n_ranks
 
 #include <cmath>
 #include <cstdio>
@@ -79,7 +79,8 @@ static void collect(const MultiFab& U, std::vector<double>& out) {
     const ConstArray4 a = U.fab(li).const_array();
     const Box2D b = U.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) out.push_back(a(i, j, 0));
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        out.push_back(a(i, j, 0));
   }
 }
 
@@ -92,11 +93,15 @@ int main(int argc, char** argv) {
 #endif
   std::string dump_prefix;
   for (int k = 1; k < argc; ++k)
-    if (std::strncmp(argv[k], "--dump=", 7) == 0) dump_prefix = argv[k] + 7;
+    if (std::strncmp(argv[k], "--dump=", 7) == 0)
+      dump_prefix = argv[k] + 7;
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 #if defined(ADC_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
@@ -122,8 +127,10 @@ int main(int argc, char** argv) {
 
     MultiFab UeC(ba_coarse, dm, 1, 2), UeF(ba_fine, dm, 1, 2);
     MultiFab UiC(ba_coarse, dm, 1, 2), UiF(ba_fine, dm, 1, 2);
-    fill_by_coarse_i(UeC, 1, ne_fn);  fill_by_coarse_i(UeF, 2, ne_fn);
-    fill_by_coarse_i(UiC, 1, ni_fn);  fill_by_coarse_i(UiF, 2, ni_fn);
+    fill_by_coarse_i(UeC, 1, ne_fn);
+    fill_by_coarse_i(UeF, 2, ne_fn);
+    fill_by_coarse_i(UiC, 1, ni_fn);
+    fill_by_coarse_i(UiF, 2, ni_fn);
 
     using ElecBlk = EquationBlock<AdvectX, MusclMinmod, ExplicitTime<SSPRK2, 1>>;
     using IonBlk = EquationBlock<AdvectX, FirstOrder, ExplicitTime<SSPRK2, 1>>;
@@ -149,7 +156,8 @@ int main(int argc, char** argv) {
 
     const Real m0e = sim.mass(0), m0i = sim.mass(1);
     const Real dt = Real(0.01);
-    for (int s = 0; s < 3; ++s) sim.step(dt);  // tout explicite, advection periodique
+    for (int s = 0; s < 3; ++s)
+      sim.step(dt);  // tout explicite, advection periodique
     device_fence();
     const Real m1e = sim.mass(0), m1i = sim.mass(1);
     // conservation (reflux + average_down) : masse grossiere totale invariante sous advection periodique.
@@ -161,22 +169,30 @@ int main(int argc, char** argv) {
     const MultiFab& iC = sim.levels(1)[0].U;
     const MultiFab& iF = sim.levels(1)[1].U;
     std::printf("[AMRSYS facade] exec=%s\n", space);
-    std::printf("[AMRSYS facade] mass e: %.17g -> %.17g   mass i: %.17g -> %.17g\n", m0e, m1e, m0i, m1i);
+    std::printf("[AMRSYS facade] mass e: %.17g -> %.17g   mass i: %.17g -> %.17g\n", m0e, m1e, m0i,
+                m1i);
     std::printf("[AMRSYS facade] sum eC=%.17g eF=%.17g iC=%.17g iF=%.17g  ninf(phi)=%.17g\n",
                 sum(eC), sum(eF), sum(iC), sum(iF), norm_inf(sim.phi()));
 
     if (!dump_prefix.empty()) {
       std::vector<double> v;
-      collect(eC, v); collect(eF, v); collect(iC, v); collect(iF, v);
+      collect(eC, v);
+      collect(eF, v);
+      collect(iC, v);
+      collect(iF, v);
       const std::string path = dump_prefix + "_amrsys.bin";
       FILE* f = std::fopen(path.c_str(), "wb");
-      if (f) { std::fwrite(v.data(), 1, v.size() * sizeof(double), f); std::fclose(f); }
+      if (f) {
+        std::fwrite(v.data(), 1, v.size() * sizeof(double), f);
+        std::fclose(f);
+      }
     }
   }
 
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
-  if (fails == 0) std::printf("OK gpu_amrsys_facade_validate (exec=%s)\n", space);
+  if (fails == 0)
+    std::printf("OK gpu_amrsys_facade_validate (exec=%s)\n", space);
   return fails == 0 ? 0 : 1;
 }

@@ -24,7 +24,8 @@ int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   // --- (1)+(2)+(3) index_of(string) : layer role canonique + role utilisateur, layout NON canonique ---
@@ -37,16 +38,16 @@ int main() {
   vs.roles = {R::MomentumX, R::Custom, R::Density};
   vs.user_roles = {"", "phi", ""};
 
-  chk(vs.index_of("density") == 2, "index_of_string:canonical_name_non_canonical_layout");   // (2)
-  chk(vs.index_of(R::Density) == 2, "index_of_enum:canonical_non_canonical_layout");          // (2)
+  chk(vs.index_of("density") == 2, "index_of_string:canonical_name_non_canonical_layout");  // (2)
+  chk(vs.index_of(R::Density) == 2, "index_of_enum:canonical_non_canonical_layout");        // (2)
   chk(vs.index_of("momentum_x") == 0, "index_of_string:canonical_name_resolves");
-  chk(vs.index_of("phi") == 1, "index_of_string:user_label_resolves");                        // (1)
-  chk(vs.index_of("energy") == -1, "index_of_string:absent_canonical_name_is_minus1");        // (3)
-  chk(vs.index_of("psi") == -1, "index_of_string:absent_user_label_is_minus1");               // (3)
+  chk(vs.index_of("phi") == 1, "index_of_string:user_label_resolves");                  // (1)
+  chk(vs.index_of("energy") == -1, "index_of_string:absent_canonical_name_is_minus1");  // (3)
+  chk(vs.index_of("psi") == -1, "index_of_string:absent_user_label_is_minus1");         // (3)
   // An EMPTY role string is never a valid target: on this MIXED block user_roles[0] == "" (the
   // canonical momentum_x slot), so without a guard index_of("") would wrongly resolve to component 0
   // -- exactly the silent fallback ADC-292 kills. It must return -1.
-  chk(vs.index_of("") == -1, "index_of_string:empty_role_is_minus1");                          // (3)
+  chk(vs.index_of("") == -1, "index_of_string:empty_role_is_minus1");  // (3)
 
   // --- (4) aller-retour CSV : roles_csv emet le label utilisateur, parse_roles_into le reconstruit ----
   const std::string csv = adc::roles_csv(vs);
@@ -58,7 +59,8 @@ int main() {
   adc::parse_roles_into(rt, csv);
   chk(rt.index_of("phi") == 1, "parse_roles_into:roundtrips_user_label");
   chk(rt.index_of(R::Density) == 2, "parse_roles_into:roundtrips_canonical");
-  chk(rt.roles.size() == 3 && rt.roles[1] == R::Custom, "parse_roles_into:custom_enum_for_user_label");
+  chk(rt.roles.size() == 3 && rt.roles[1] == R::Custom,
+      "parse_roles_into:custom_enum_for_user_label");
 
   // Jeu PUREMENT canonique : user_roles reste vide (bit-identique au comportement historique, aucune
   // regression sur les blocs existants ni sur l'ABI .so des blocs sans role utilisateur).

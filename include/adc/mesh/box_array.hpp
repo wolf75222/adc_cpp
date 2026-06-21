@@ -33,7 +33,8 @@ class BoxArray {
     std::vector<Box2D> boxes;
     boxes.reserve(sx.size() * sy.size());
     for (auto [ylo, yhi] : sy)
-      for (auto [xlo, xhi] : sx) boxes.push_back(Box2D{{xlo, ylo}, {xhi, yhi}});
+      for (auto [xlo, xhi] : sx)
+        boxes.push_back(Box2D{{xlo, ylo}, {xhi, yhi}});
     return BoxArray{std::move(boxes)};
   }
 
@@ -47,13 +48,15 @@ class BoxArray {
   /// Total number of valid cells (sum of num_cells over all boxes).
   std::int64_t num_cells() const {
     std::int64_t n = 0;
-    for (const auto& b : boxes_) n += b.num_cells();
+    for (const auto& b : boxes_)
+      n += b.num_cells();
     return n;
   }
 
   /// Smallest box enclosing all boxes (empty box if the tiling is empty).
   Box2D bounding_box() const {
-    if (boxes_.empty()) return Box2D{};
+    if (boxes_.empty())
+      return Box2D{};
     Box2D b = boxes_[0];
     for (const auto& o : boxes_) {
       b.lo[0] = std::min(b.lo[0], o.lo[0]);
@@ -70,7 +73,8 @@ class BoxArray {
   static std::vector<std::pair<int, int>> split_range(int lo, int hi, int m) {
     std::vector<std::pair<int, int>> segs;
     int len = hi - lo + 1;
-    if (len <= 0 || m <= 0) return segs;
+    if (len <= 0 || m <= 0)
+      return segs;
     int n = (len + m - 1) / m;
     int base = len / n, rem = len % n;
     int cur = lo;

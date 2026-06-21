@@ -31,6 +31,7 @@ int main() {
   chk(close(gf.dx(), 0.125), "refine_dx");
   chk(close(gf.xhi, 1.0), "refine_extent");
 
-  if (fails == 0) std::printf("OK test_geometry\n");
+  if (fails == 0)
+    std::printf("OK test_geometry\n");
   return fails == 0 ? 0 : 1;
 }

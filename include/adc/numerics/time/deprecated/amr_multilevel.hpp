@@ -54,24 +54,23 @@ static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRe
 // only a pointer is kept. rC* describes the region (in coords of THIS level)
 // refined by the child l+1; valid only if has_fine.
 struct AmrLevel {
-  Fab2D U;                 // state, 1 component, 1 ghost
-  const Fab2D* aux;        // [phi, gx, gy], ghosts filled
-  double dx, dy;           // space step of this level
+  Fab2D U;                     // state, 1 component, 1 ghost
+  const Fab2D* aux;            // [phi, gx, gy], ghosts filled
+  double dx, dy;               // space step of this level
   int rCI0, rCI1, rCJ0, rCJ1;  // region refined by the child (local coords)
-  bool has_fine;           // does a level l+1 exist?
+  bool has_fine;               // does a level l+1 exist?
 };
 
 // Applies U -= dt div(F) from already-computed fluxes (ghosts untouched).
-inline void apply_flux_div_1c(Fab2D& U, const Fab2D& fx, const Fab2D& fy,
-                              double dx, double dy, double dt) {
+inline void apply_flux_div_1c(Fab2D& U, const Fab2D& fx, const Fab2D& fy, double dx, double dy,
+                              double dt) {
   Array4 uu = U.array();
   const ConstArray4 FX = fx.const_array();
   const ConstArray4 FY = fy.const_array();
   const Box2D v = U.box();
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
     for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-      uu(i, j) -= dt * ((FX(i + 1, j) - FX(i, j)) / dx +
-                        (FY(i, j + 1) - FY(i, j)) / dy);
+      uu(i, j) -= dt * ((FX(i + 1, j) - FX(i, j)) / dx + (FY(i, j + 1) - FY(i, j)) / dy);
 }
 
 // Recursively advances level lev by dt. pOld/pNew = parent states
@@ -79,9 +78,8 @@ inline void apply_flux_div_1c(Fab2D& U, const Fab2D& fx, const Fab2D& fy,
 // current substep within that step (s/r). The quadruplet preg = parent register
 // (accumulator of the fine fluxes of THIS level); null if lev == 0.
 template <class Model>
-void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
-                    double dt, const Box2D& dom, const Fab2D* pOld,
-                    const Fab2D* pNew, double frac, std::vector<double>* pregL,
+void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev, double dt, const Box2D& dom,
+                    const Fab2D* pOld, const Fab2D* pNew, double frac, std::vector<double>* pregL,
                     std::vector<double>* pregR, std::vector<double>* pregB,
                     std::vector<double>* pregT) {
   const int r = 2;
@@ -105,13 +103,11 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
     const int pI0 = par.rCI0, pI1 = par.rCI1, pJ0 = par.rCJ0, pJ1 = par.rCJ1;
     for (int J = pJ0; J <= pJ1; ++J) {
       (*pregL)[J - pJ0] += 0.5 * (FX(2 * pI0, 2 * J) + FX(2 * pI0, 2 * J + 1)) * dt;
-      (*pregR)[J - pJ0] +=
-          0.5 * (FX(2 * pI1 + 2, 2 * J) + FX(2 * pI1 + 2, 2 * J + 1)) * dt;
+      (*pregR)[J - pJ0] += 0.5 * (FX(2 * pI1 + 2, 2 * J) + FX(2 * pI1 + 2, 2 * J + 1)) * dt;
     }
     for (int I = pI0; I <= pI1; ++I) {
       (*pregB)[I - pI0] += 0.5 * (FY(2 * I, 2 * pJ0) + FY(2 * I + 1, 2 * pJ0)) * dt;
-      (*pregT)[I - pI0] +=
-          0.5 * (FY(2 * I, 2 * pJ1 + 2) + FY(2 * I + 1, 2 * pJ1 + 2)) * dt;
+      (*pregT)[I - pI0] += 0.5 * (FY(2 * I, 2 * pJ1 + 2) + FY(2 * I + 1, 2 * pJ1 + 2)) * dt;
     }
   }
 
@@ -134,13 +130,12 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
   }
   std::vector<double> fL(nJ, 0), fR(nJ, 0), fB(nI, 0), fT(nI, 0);  // fine fluxes
 
-  const Fab2D U_old = lv.U;  // state t (for the child's temporal interp)
+  const Fab2D U_old = lv.U;                           // state t (for the child's temporal interp)
   apply_flux_div_1c(lv.U, fx, fy, lv.dx, lv.dy, dt);  // lv.U becomes the state t+dt
 
   // --- 5. subcycling of the child: r substeps of dt/r ---
   for (int s = 0; s < r; ++s)
-    subcycle_level(m, L, lev + 1, dt / r, dom, &U_old, &lv.U, double(s) / r, &fL,
-                   &fR, &fB, &fT);
+    subcycle_level(m, L, lev + 1, dt / r, dom, &U_old, &lv.U, double(s) / r, &fL, &fR, &fB, &fT);
 
   average_down_fab(L[lev + 1].U, lv.U, cI0, cI1, cJ0, cJ1);  // sync covered
 
@@ -158,10 +153,8 @@ void subcycle_level(const Model& m, std::vector<AmrLevel>& L, int lev,
 
 // Driver: one dt step of the complete hierarchy (level 0 = coarse).
 template <class Model>
-void amr_step_multilevel(const Model& m, std::vector<AmrLevel>& L,
-                         const Box2D& dom, double dt) {
-  subcycle_level(m, L, 0, dt, dom, nullptr, nullptr, 0.0, nullptr, nullptr,
-                 nullptr, nullptr);
+void amr_step_multilevel(const Model& m, std::vector<AmrLevel>& L, const Box2D& dom, double dt) {
+  subcycle_level(m, L, 0, dt, dom, nullptr, nullptr, 0.0, nullptr, nullptr, nullptr, nullptr);
 }
 
 }  // namespace adc

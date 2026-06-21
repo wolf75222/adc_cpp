@@ -76,23 +76,30 @@ static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
 static constexpr double kRmax = 1.00;
 static constexpr double kB0 = 1.0;
-static constexpr int    kMode = 2;  // mode azimutal m de la solution manufacturee
+static constexpr int kMode = 2;  // mode azimutal m de la solution manufacturee
 // Vitesse CONSTANTE non nulle. v_r != 0 est l'objet du lot : le flux radial est reellement exerce.
-static constexpr double kVr = 0.35;   // vitesse radiale (NON NULLE)
-static constexpr double kVth = 0.6;   // vitesse azimutale (NON NULLE)
-static constexpr double kTfinal = 0.30;  // temps d'avance court (amortit le transitoire vers le stationnaire)
+static constexpr double kVr = 0.35;  // vitesse radiale (NON NULLE)
+static constexpr double kVth = 0.6;  // vitesse azimutale (NON NULLE)
+static constexpr double kTfinal =
+    0.30;  // temps d'avance court (amortit le transitoire vers le stationnaire)
 
 // --- Solution exacte STATIONNAIRE (forme close, lisse, strictement positive, periodique en theta) ----
 static double f_r(double r) {
   const double rr = (r - kRmin) / (kRmax - kRmin);
   return 1.0 + 0.5 * std::sin(kPiL * rr);
 }
-static double rho_exact(double r, double th) { return f_r(r) * (2.0 + std::cos(kMode * th)); }
+static double rho_exact(double r, double th) {
+  return f_r(r) * (2.0 + std::cos(kMode * th));
+}
 
 // --- Vitesse ExB polaire encodee dans aux : la brique lit v_r = -grad_theta/B, v_theta = grad_r/B.
 // Pour imposer (v_r, v_theta) = (kVr, kVth) constants : grad_theta = -B kVr, grad_r = B kVth.
-static double aux_grad_r() { return kB0 * kVth; }      // -> v_theta = grad_r / B = kVth
-static double aux_grad_theta() { return -kB0 * kVr; }  // -> v_r = -grad_theta / B = kVr
+static double aux_grad_r() {
+  return kB0 * kVth;
+}  // -> v_theta = grad_r / B = kVth
+static double aux_grad_theta() {
+  return -kB0 * kVr;
+}  // -> v_r = -grad_theta / B = kVr
 
 // --- Terme source manufacture S = (1/r) d_r(r rho v_r) + (1/r) d_theta(rho v_theta) (d_t rho = 0,
 // solution stationnaire), evalue par stencils centraux d'ordre 4 a pas h ~ 1e-5 sur les formes closes
@@ -106,8 +113,8 @@ static double mms_source(double r, double th) {
                       rRhoVr(r - 2 * h, th)) /
                      (12 * h);
   // (1/r) d_theta(rho v_theta), v_theta constant
-  const double dth = (-rho_exact(r, th + 2 * h) + 8 * rho_exact(r, th + h) - 8 * rho_exact(r, th - h) +
-                      rho_exact(r, th - 2 * h)) /
+  const double dth = (-rho_exact(r, th + 2 * h) + 8 * rho_exact(r, th + h) -
+                      8 * rho_exact(r, th - h) + rho_exact(r, th - 2 * h)) /
                      (12 * h) * kVth;
   return (drr + dth) / r;
 }
@@ -160,8 +167,9 @@ static void fill_radial_ghosts_exact(MultiFab& U, const PolarGeometry& g, const 
   for (int j = gb.lo[1]; j <= gb.hi[1]; ++j) {
     const double th = g.theta_cell(j);
     for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) {
-      if (i >= dom.lo[0] && i <= dom.hi[0]) continue;  // cellule valide : non touchee
-      u(i, j, 0) = rho_exact(g.r_cell(i), th);          // ghost radial = exact (Dirichlet-MMS)
+      if (i >= dom.lo[0] && i <= dom.hi[0])
+        continue;                               // cellule valide : non touchee
+      u(i, j, 0) = rho_exact(g.r_cell(i), th);  // ghost radial = exact (Dirichlet-MMS)
     }
   }
 }
@@ -174,10 +182,10 @@ static void fill_aux(MultiFab& aux, const PolarGeometry& g) {
   for (int j = gb.lo[1]; j <= gb.hi[1]; ++j)
     for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) {
       const double r = g.r_cell(i), th = g.theta_cell(j);
-      a(i, j, 0) = 0.0;               // phi (inutilise)
-      a(i, j, 1) = aux_grad_r();      // grad_r -> v_theta = kVth (constant)
-      a(i, j, 2) = aux_grad_theta();  // grad_theta -> v_r = kVr (constant, NON NUL)
-      a(i, j, 3) = mms_source(r, th); // S au canal extra 3 (relu par MmsTransportPolar::source)
+      a(i, j, 0) = 0.0;                // phi (inutilise)
+      a(i, j, 1) = aux_grad_r();       // grad_r -> v_theta = kVth (constant)
+      a(i, j, 2) = aux_grad_theta();   // grad_theta -> v_r = kVr (constant, NON NUL)
+      a(i, j, 3) = mms_source(r, th);  // S au canal extra 3 (relu par MmsTransportPolar::source)
     }
 }
 
@@ -229,7 +237,8 @@ static double run_mms(int nr, int nth) {
 
   // Vitesse constante + source manufacture statiques (solution stationnaire) : remplis UNE fois.
   fill_aux(aux, g);
-  fill_ghosts(aux, dom, bc);  // enroulement azimutal des composantes aux (grad, S) ; radial deja exact
+  fill_ghosts(aux, dom,
+              bc);  // enroulement azimutal des composantes aux (grad, S) ; radial deja exact
 
   // Condition initiale = solution exacte (valides + ghosts radiaux).
   set_exact(U, g, dom);
@@ -246,8 +255,9 @@ static double run_mms(int nr, int nth) {
   for (int s = 0; s < nsteps; ++s) {
     SSPRK3Step{}.take_step(
         [&](MultiFab& stage, MultiFab& R) {
-          fill_ghosts(stage, dom, bc);                // ghosts azimutaux periodiques
-          fill_radial_ghosts_exact(stage, g, dom);    // ghosts radiaux Dirichlet-MMS (exact, stationnaire)
+          fill_ghosts(stage, dom, bc);  // ghosts azimutaux periodiques
+          fill_radial_ghosts_exact(stage, g,
+                                   dom);  // ghosts radiaux Dirichlet-MMS (exact, stationnaire)
           assemble_rhs_polar<Limiter, RusanovFlux>(model, stage, aux, g, R);
         },
         U, static_cast<Real>(dt_eff));
@@ -258,10 +268,11 @@ static double run_mms(int nr, int nth) {
 
 int main() {
   std::printf("=== MMS POLAIRE DEDIE avec vitesse radiale v_r != 0 (Lot A4) ===\n");
-  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi), mode m=%d, B0=%.1f\n", kRmin, kRmax, kMode,
-              kB0);
-  std::printf("Vitesse CONSTANTE : v_r=%.2f (NON NUL), v_theta=%.2f ; t_final=%.2f (stationnaire)\n", kVr,
-              kVth, kTfinal);
+  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi), mode m=%d, B0=%.1f\n", kRmin, kRmax,
+              kMode, kB0);
+  std::printf(
+      "Vitesse CONSTANTE : v_r=%.2f (NON NUL), v_theta=%.2f ; t_final=%.2f (stationnaire)\n", kVr,
+      kVth, kTfinal);
   std::printf("Solution exacte : rho = (1+0.5 sin(pi (r-rmin)/(rmax-rmin)))*(2+cos(m theta))\n");
   std::printf("Source S = (1/r) d_r(r rho v_r) + (1/r) d_theta(rho v_theta)  (d_t rho = 0)\n");
 
@@ -287,14 +298,16 @@ int main() {
   // correctement, ce que ce lot vise.
   const double kSeuil = 1.8;
   if (!(p1 >= kSeuil) || !(p2 >= kSeuil) || !std::isfinite(e[2])) {
-    std::printf("  ECHEC : ordre < %.1f (transport radial v_r != 0 non convergent a l'ordre attendu)\n",
-                kSeuil);
+    std::printf(
+        "  ECHEC : ordre < %.1f (transport radial v_r != 0 non convergent a l'ordre attendu)\n",
+        kSeuil);
     ok = false;
   } else {
     std::printf("  OK : convergence d'ordre >= %.1f (transport radial v_r != 0 correct)\n", kSeuil);
   }
 
   std::printf("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
-  if (ok) std::printf("OK test_polar_mms_vr\n");
+  if (ok)
+    std::printf("OK test_polar_mms_vr\n");
   return ok ? 0 : 1;
 }

@@ -32,15 +32,17 @@ static constexpr double KAPPA = 50.0;  // 1/lambda_D^2 (ecrantage modere : lambd
 static double phi_exact(double x, double y) {
   return std::sin(kPi * x) * std::sin(kPi * y);
 }
-static double eps_field(double x, double /*y*/) { return 1.0 + 0.5 * x; }
+static double eps_field(double x, double /*y*/) {
+  return 1.0 + 0.5 * x;
+}
 
 // f = div(eps grad phi) - kappa phi (analytique). eps_on -> eps=1+0.5x sinon eps=1.
 static double rhs_exact(double x, double y, bool eps_on) {
   const double s = std::sin(kPi * x) * std::sin(kPi * y);
   double div_eps_grad;
   if (eps_on)
-    div_eps_grad = -(1.0 + 0.5 * x) * 2.0 * kPi * kPi * s +
-                   0.5 * kPi * std::cos(kPi * x) * std::sin(kPi * y);
+    div_eps_grad =
+        -(1.0 + 0.5 * x) * 2.0 * kPi * kPi * s + 0.5 * kPi * std::cos(kPi * x) * std::sin(kPi * y);
   else
     div_eps_grad = -2.0 * kPi * kPi * s;
   return div_eps_grad - KAPPA * s;  // - kappa phi
@@ -55,7 +57,8 @@ static double solve_mms(int n, bool eps_on) {
   bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;  // phi=0 au bord (exact)
 
   GeometricMG mg(geom, ba, bc);
-  if (eps_on) mg.set_epsilon([](Real x, Real y) { return Real(eps_field(x, y)); });
+  if (eps_on)
+    mg.set_epsilon([](Real x, Real y) { return Real(eps_field(x, y)); });
   mg.set_reaction([](Real, Real) { return Real(KAPPA); });  // kappa constant
 
   Array4 af = mg.rhs().fab(0).array();
@@ -75,8 +78,7 @@ static double solve_mms(int n, bool eps_on) {
   double eInf = 0;
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
-      eInf = std::max(eInf,
-                      std::fabs(p(i, j, 0) - phi_exact(geom.x_cell(i), geom.y_cell(j))));
+      eInf = std::max(eInf, std::fabs(p(i, j, 0) - phi_exact(geom.x_cell(i), geom.y_cell(j))));
   return eInf;
 }
 
@@ -112,7 +114,9 @@ static double zero_kappa_residual_gap(int n) {
 
 // kappa(x,y) LISSE, strictement positif (>= 30 -> diagonalement dominant), variable en x ET y. Un
 // kappa constant ne distingue pas une lecture (i,j) correcte d'une lecture decalee / sur ghost.
-static double kappa_var(double x, double y) { return 30.0 * (1.0 + 0.5 * x + 0.3 * y); }
+static double kappa_var(double x, double y) {
+  return 30.0 * (1.0 + 0.5 * x + 0.3 * y);
+}
 // f = lap(phi) - kappa(x,y) phi, eps = 1, phi = sin(pi x) sin(pi y).
 static double rhs_varkappa(double x, double y) {
   const double s = std::sin(kPi * x) * std::sin(kPi * y);
@@ -157,7 +161,8 @@ static double solve_mms_varkappa(int n, bool use_field, double* rel_resid = null
   }
   // Residu relatif final : permet a l'appelant de verifier que le solveur a CONVERGE, donc que
   // eInf mesure l'erreur de DISCRETISATION (et non un residu solveur residuel qui fausserait le ratio).
-  if (rel_resid) *rel_resid = (r0 > Real(0)) ? double(rn / r0) : double(rn);
+  if (rel_resid)
+    *rel_resid = (r0 > Real(0)) ? double(rn / r0) : double(rn);
 
   Fab2D& p = mg.phi().fab(0);
   double eInf = 0;
@@ -170,7 +175,10 @@ static double solve_mms_varkappa(int n, bool use_field, double* rel_resid = null
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // (A) kappa constant, eps=1 : convergence ordre 2.
@@ -198,18 +206,20 @@ int main() {
   const double rd = d64 / d128;
   std::printf("kappa(x,y) fn MMS : Linf d64=%.3e d128=%.3e | ratio %.2f (resid %.1e)\n", d64, d128,
               rd, rr_d);
-  chk(rr_d < 1e-9, "conv_varkappa_fn_128");  // le solveur a converge -> eInf = erreur de discretisation
+  chk(rr_d < 1e-9,
+      "conv_varkappa_fn_128");  // le solveur a converge -> eInf = erreur de discretisation
   chk(rd > 3.5 && rd < 4.5, "ordre2_varkappa_fn");
 
   // (E) kappa(x,y) VARIABLE via set_reaction(MultiFab) : meme invariant, chemin restrict_and_fill.
   double rr_f = 0;
   const double f64 = solve_mms_varkappa(64, true), f128 = solve_mms_varkappa(128, true, &rr_f);
   const double rf = f64 / f128;
-  std::printf("kappa(x,y) field MMS : Linf f64=%.3e f128=%.3e | ratio %.2f (resid %.1e)\n", f64, f128,
-              rf, rr_f);
+  std::printf("kappa(x,y) field MMS : Linf f64=%.3e f128=%.3e | ratio %.2f (resid %.1e)\n", f64,
+              f128, rf, rr_f);
   chk(rr_f < 1e-9, "conv_varkappa_field_128");
   chk(rf > 3.5 && rf < 4.5, "ordre2_varkappa_field");
 
-  if (fails == 0) std::printf("OK test_screened_poisson\n");
+  if (fails == 0)
+    std::printf("OK test_screened_poisson\n");
   return fails == 0 ? 0 : 1;
 }

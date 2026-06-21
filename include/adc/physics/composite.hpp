@@ -41,8 +41,10 @@ struct CompositeModel {
   // Without any extra-field brick, n_aux = kAuxBaseComps (3) -> strictly identical to the history.
   static constexpr int n_aux = [] {
     int w = aux_comps<Hyperbolic>();
-    if (aux_comps<Source>() > w) w = aux_comps<Source>();
-    if (aux_comps<Elliptic>() > w) w = aux_comps<Elliptic>();
+    if (aux_comps<Source>() > w)
+      w = aux_comps<Source>();
+    if (aux_comps<Elliptic>() > w)
+      w = aux_comps<Elliptic>();
     return w;
   }();
 
@@ -67,8 +69,9 @@ struct CompositeModel {
     return hyp.pressure(u);
   }
   ADC_HD void wave_speeds(const State& u, const Aux& a, int dir, Real& smin, Real& smax) const
-    requires requires(const Hyperbolic h, const State s, const Aux aa, int d, Real& lo,
-                      Real& hi) { h.wave_speeds(s, aa, d, lo, hi); }
+    requires requires(const Hyperbolic h, const State s, const Aux aa, int d, Real& lo, Real& hi) {
+      h.wave_speeds(s, aa, d, lo, hi);
+    }
   {
     hyp.wave_speeds(u, a, dir, smin, smax);
   }
@@ -149,8 +152,9 @@ struct CompositeModel {
   /// uses it instead of finite differences (HasSourceJacobian trait); without the method,
   /// nothing is exposed and the Newton keeps the historical finite differences.
   ADC_HD void source_jacobian(const State& u, const Aux& a, Real (&J)[n_vars][n_vars]) const
-    requires requires(const Source sc, const State s, const Aux aa,
-                      Real (&JJ)[n_vars][n_vars]) { sc.jacobian(s, aa, JJ); }
+    requires requires(const Source sc, const State s, const Aux aa, Real (&JJ)[n_vars][n_vars]) {
+      sc.jacobian(s, aa, JJ);
+    }
   {
     src.jacobian(u, a, J);
   }

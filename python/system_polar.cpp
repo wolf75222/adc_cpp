@@ -8,8 +8,9 @@
 namespace adc::detail {
 
 BuiltBlock build_block_polar(const ModelSpec& model, const std::string& limiter,
-                             const std::string& riemann, const PolarGridContext& pctx, bool recon_prim,
-                             const std::string& method, Real positivity_floor, const MultiFab* aux) {
+                             const std::string& riemann, const PolarGridContext& pctx,
+                             bool recon_prim, const std::string& method, Real positivity_floor,
+                             const MultiFab* aux) {
   BuiltBlock out;
   dispatch_model_polar(model, [&](auto m) {
     using M = decltype(m);

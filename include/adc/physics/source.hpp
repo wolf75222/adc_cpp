@@ -45,7 +45,7 @@ struct NoSource {
 /// defaults -> STRICTLY bit-identical. POD integers -> apply stays device-clean (reads u[c_rho],
 /// never resolves on device). No new user parameter: automatic, transparent resolution.
 struct PotentialForce {
-  Real qom = 1;  // q/m (sign included)
+  Real qom = 1;                                // q/m (sign included)
   int c_rho = 0, c_mx = 1, c_my = 2, c_E = 3;  // defaults = canonical fluid layout (bit-identical)
   template <class State>
   ADC_HD State apply(const State& u, const Aux& a) const {
@@ -53,7 +53,8 @@ struct PotentialForce {
     State s{};
     s[c_mx] = qom * u[c_rho] * Ex;
     s[c_my] = qom * u[c_rho] * Ey;
-    if constexpr (State::size() == 4) s[c_E] = qom * (u[c_mx] * Ex + u[c_my] * Ey);
+    if constexpr (State::size() == 4)
+      s[c_E] = qom * (u[c_mx] * Ex + u[c_my] * Ey);
     return s;
   }
 };
@@ -77,7 +78,8 @@ struct GravityForce {
     State s{};
     s[c_mx] = u[c_rho] * gx;
     s[c_my] = u[c_rho] * gy;
-    if constexpr (State::size() == 4) s[c_E] = u[c_mx] * gx + u[c_my] * gy;
+    if constexpr (State::size() == 4)
+      s[c_E] = u[c_mx] * gx + u[c_my] * gy;
     return s;
   }
 };
@@ -100,7 +102,7 @@ struct GravityForce {
 /// condensed Schur (ElectrostaticLorentzCondensation), NOT through this explicit brick.
 /// PRECONDITION: requires a fluid transport >= 3 variables (momentum on 2 axes); moot on a scalar.
 struct MagneticLorentzForce {
-  Real qom = 1;             // q/m (sign included)
+  Real qom = 1;                    // q/m (sign included)
   static constexpr int n_aux = 4;  // reads B_z (extra aux channel, canonical index 3)
   // ROLE-AWARE (audit section 5): only the MOMENTUM components are read/written (the magnetic
   // force touches neither density nor energy -- zero work). c_mx/c_my are members, defaults =
@@ -109,8 +111,9 @@ struct MagneticLorentzForce {
   int c_mx = 1, c_my = 2;
   template <class State>
   ADC_HD State apply(const State& u, const Aux& a) const {
-    static_assert(State::size() >= 3,
-                  "MagneticLorentzForce : requires a fluid transport >= 3 variables (momentum on 2 axes)");
+    static_assert(
+        State::size() >= 3,
+        "MagneticLorentzForce : requires a fluid transport >= 3 variables (momentum on 2 axes)");
     const Real c = qom * a.B_z;
     State s{};
     s[c_mx] = c * u[c_my];   // +qom B_z m_(y/theta)

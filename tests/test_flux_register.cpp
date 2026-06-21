@@ -14,15 +14,17 @@ using namespace adc;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // region a origine non nulle : [10,20] x [5,8], 3 composantes.
   const Box2D region{{10, 5}, {20, 8}};
   FluxRegister fr(region, 3);
   chk(fr.NX == 11 && fr.NY == 4 && fr.nc == 3, "dims");
-  chk(fr.in(10, 5) && fr.in(20, 8) && !fr.in(9, 5) && !fr.in(21, 8) && !fr.in(15, 4),
-      "in_bounds");
+  chk(fr.in(10, 5) && fr.in(20, 8) && !fr.in(9, 5) && !fr.in(21, 8) && !fr.in(15, 4), "in_bounds");
 
   // index a origine : (I0,J0,0) -> 0, monotone en I puis J puis k.
   chk(fr.idx(10, 5, 0) == 0, "idx_origin");
@@ -50,6 +52,7 @@ int main() {
   fr.gather();
   chk(fr.at(12, 7, 1) == v, "gather_serial_identity");
 
-  if (fails == 0) std::printf("OK test_flux_register\n");
+  if (fails == 0)
+    std::printf("OK test_flux_register\n");
   return fails == 0 ? 0 : 1;
 }

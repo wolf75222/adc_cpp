@@ -45,8 +45,7 @@ int main() {
   // second membre f = -2 pi^2 sin(pi x) sin(pi y)
   Array4 af = f.fab(0).array();
   for_each_cell(dom, [af, geom](int i, int j) {
-    af(i, j, 0) =
-        -2 * kPi * kPi * phi_exact(geom.x_cell(i), geom.y_cell(j));
+    af(i, j, 0) = -2 * kPi * kPi * phi_exact(geom.x_cell(i), geom.y_cell(j));
   });
 
   phi.set_val(0.0);  // initial nul (ghosts compris)
@@ -73,7 +72,7 @@ int main() {
     }
   chk(err < 0.02, "solution_accurate");
 
-  if (fails == 0) std::printf("OK test_poisson_smoother (r0=%.3e rN=%.3e err=%.3e)\n",
-                              r0, rN, err);
+  if (fails == 0)
+    std::printf("OK test_poisson_smoother (r0=%.3e rN=%.3e err=%.3e)\n", r0, rN, err);
   return fails == 0 ? 0 : 1;
 }

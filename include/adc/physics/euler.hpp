@@ -32,9 +32,9 @@ namespace adc {
  *       scalar transport model.
  */
 struct Euler {
-  using State = StateVec<4>;  ///< conservative variables (rho, rho u, rho v, E)
-  using Prim = StateVec<4>;   ///< primitive variables (rho, u, v, p)
-  using Aux = adc::Aux;       ///< auxiliary fields (unused in pure Euler)
+  using State = StateVec<4>;        ///< conservative variables (rho, rho u, rho v, E)
+  using Prim = StateVec<4>;         ///< primitive variables (rho, u, v, p)
+  using Aux = adc::Aux;             ///< auxiliary fields (unused in pure Euler)
   static constexpr int n_vars = 4;  ///< number of conserved variables
 
   Real gamma = 1.4;  ///< adiabatic index of the ideal gas
@@ -46,9 +46,7 @@ struct Euler {
     return (gamma - Real(1)) * (u[3] - ke);
   }
   /// Sound speed c = sqrt(gamma p / rho).
-  ADC_HD Real sound_speed(const State& u) const {
-    return std::sqrt(gamma * pressure(u) / u[0]);
-  }
+  ADC_HD Real sound_speed(const State& u) const { return std::sqrt(gamma * pressure(u) / u[0]); }
 
   /// Conservative -> primitive: (rho, rho u, rho v, E) -> (rho, u, v, p).
   ADC_HD Prim to_primitive(const State& u) const {
@@ -81,8 +79,7 @@ struct Euler {
    * @param[out] smin leftmost wave speed v_dir - c
    * @param[out] smax rightmost wave speed v_dir + c
    */
-  ADC_HD void wave_speeds(const State& u, const Aux&, int dir, Real& smin,
-                          Real& smax) const {
+  ADC_HD void wave_speeds(const State& u, const Aux&, int dir, Real& smin, Real& smax) const {
     const Prim p = to_primitive(u);
     const Real vn = (dir == 0 ? p[1] : p[2]);
     const Real c = std::sqrt(gamma * p[3] / p[0]);
@@ -127,12 +124,16 @@ struct Euler {
 
   /// Variable descriptor (hyperbolic model contract; host introspection metadata).
   static VariableSet conservative_vars() {
-    return {VariableKind::Conservative, {"rho", "rho_u", "rho_v", "E"}, 4,
+    return {VariableKind::Conservative,
+            {"rho", "rho_u", "rho_v", "E"},
+            4,
             {VariableRole::Density, VariableRole::MomentumX, VariableRole::MomentumY,
              VariableRole::Energy}};
   }
   static VariableSet primitive_vars() {
-    return {VariableKind::Primitive, {"rho", "u", "v", "p"}, 4,
+    return {VariableKind::Primitive,
+            {"rho", "u", "v", "p"},
+            4,
             {VariableRole::Density, VariableRole::VelocityX, VariableRole::VelocityY,
              VariableRole::Pressure}};
   }

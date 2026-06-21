@@ -2,16 +2,16 @@
 
 #include <adc/core/types.hpp>
 #include <adc/core/variables.hpp>
-#include <adc/coupling/schur/schur_condensation.hpp>            // ElectrostaticLorentzCondensation (builder #124)
-#include <adc/coupling/schur/schur_source_kernels.hpp>           // shared geometry-free kernels + validate_krylov_params (#263)
+#include <adc/coupling/schur/schur_condensation.hpp>  // ElectrostaticLorentzCondensation (builder #124)
+#include <adc/coupling/schur/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/mf_arith.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>          // operator + preconditioner (#120)
-#include <adc/numerics/elliptic/krylov_solver.hpp>          // TensorKrylovSolver (BiCGStab, #122)
-#include <adc/numerics/lorentz_eliminator.hpp>              // closed-form B^{-1} (#118)
+#include <adc/numerics/elliptic/geometric_mg.hpp>   // operator + preconditioner (#120)
+#include <adc/numerics/elliptic/krylov_solver.hpp>  // TensorKrylovSolver (BiCGStab, #122)
+#include <adc/numerics/lorentz_eliminator.hpp>      // closed-form B^{-1} (#118)
 
 #include <stdexcept>
 
@@ -83,12 +83,12 @@ namespace detail {
 /// to the precision of the SOLVE, term by term. rho is read from the state (Density role) and FROZEN.
 /// NAMED device-clean functor: captures Array4 handles (POD) plus scalars.
 struct SchurReconstructKernel {
-  ConstArray4 phi;     ///< phi^{n+theta} (ghosts filled: centered grad reads i+-1, j+-1)
-  ConstArray4 vx, vy;  ///< v^n (component 0 of their MultiFab: velocity, NOT momentum)
-  ConstArray4 bz;      ///< B_z field at the center
-  Array4 st;           ///< fluid state (WRITE mx, my; READ rho)
-  Array4 nvx, nvy;     ///< output: v^{n+theta} (component 0) for the energy / the diagnostic
-  Real th_dt;          ///< theta * dt (w = th_dt * B_z, and gradient factor)
+  ConstArray4 phi;          ///< phi^{n+theta} (ghosts filled: centered grad reads i+-1, j+-1)
+  ConstArray4 vx, vy;       ///< v^n (component 0 of their MultiFab: velocity, NOT momentum)
+  ConstArray4 bz;           ///< B_z field at the center
+  Array4 st;                ///< fluid state (WRITE mx, my; READ rho)
+  Array4 nvx, nvy;          ///< output: v^{n+theta} (component 0) for the energy / the diagnostic
+  Real th_dt;               ///< theta * dt (w = th_dt * B_z, and gradient factor)
   Real half_idx, half_idy;  ///< 1/(2 dx), 1/(2 dy) (centered gradient)
   int c_rho, c_mx, c_my;    ///< Density / MomentumX / MomentumY components
   ADC_HD void operator()(int i, int j) const {
@@ -101,8 +101,8 @@ struct SchurReconstructKernel {
     le.apply_Binv(rhsx, rhsy, nx, ny);  // v^{n+theta} = B^{-1}(v^n - theta dt grad phi)
     nvx(i, j, 0) = nx;
     nvy(i, j, 0) = ny;
-    const Real rho = st(i, j, c_rho);   // rho^n (frozen in the source)
-    st(i, j, c_mx) = rho * nx;          // mom^{n+theta} = rho^n v^{n+theta}
+    const Real rho = st(i, j, c_rho);  // rho^n (frozen in the source)
+    st(i, j, c_mx) = rho * nx;         // mom^{n+theta} = rho^n v^{n+theta}
     st(i, j, c_my) = rho * ny;
   }
 };
@@ -132,11 +132,10 @@ class CondensedSchurSourceStepper {
   /// @p n_precond_vcycles: N MG V-cycles per application of the BiCGStab preconditioner (1 or 2).
   CondensedSchurSourceStepper(const VariableSet& vars, const Geometry& geom, const BoxArray& ba,
                               const BCRec& bcPhi, Real alpha, int n_precond_vcycles = 1)
-      : CondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
-                                    vars.index_of(VariableRole::MomentumX),
-                                    vars.index_of(VariableRole::MomentumY),
-                                    vars.index_of(VariableRole::Energy), geom, ba, bcPhi, alpha,
-                                    n_precond_vcycles) {}
+      : CondensedSchurSourceStepper(
+            vars, vars.index_of(VariableRole::Density), vars.index_of(VariableRole::MomentumX),
+            vars.index_of(VariableRole::MomentumY), vars.index_of(VariableRole::Energy), geom, ba,
+            bcPhi, alpha, n_precond_vcycles) {}
 
   /// Variant with EXPLICIT COMPONENTS (audit 2026-06, wave 2: roles/fields carried in
   /// the ABI). The caller DESIGNATES the components (rho, mx, my[, E]) instead of letting the stepper
@@ -162,11 +161,16 @@ class CondensedSchurSourceStepper {
         op_(geom, ba, bcPhi),
         precond_(geom, ba, bcPhi),
         // reused buffers (allocated ONCE):
-        eps_x_(ba, dm_, 1, 1), eps_y_(ba, dm_, 1, 1), a_xy_(ba, dm_, 1, 1), a_yx_(ba, dm_, 1, 1),
+        eps_x_(ba, dm_, 1, 1),
+        eps_y_(ba, dm_, 1, 1),
+        a_xy_(ba, dm_, 1, 1),
+        a_yx_(ba, dm_, 1, 1),
         rhs_schur_(ba, dm_, 1, 0),
         bz_(ba, dm_, 1, 1),
-        vx_n_(ba, dm_, 1, 0), vy_n_(ba, dm_, 1, 0),
-        vx_t_(ba, dm_, 1, 0), vy_t_(ba, dm_, 1, 0),
+        vx_n_(ba, dm_, 1, 0),
+        vy_n_(ba, dm_, 1, 0),
+        vx_t_(ba, dm_, 1, 0),
+        vy_t_(ba, dm_, 1, 0),
         phi_n_(ba, dm_, 1, 1),
         kry_(op_, precond_, n_precond_) {
     if (c_rho_ < 0 || c_mx_ < 0 || c_my_ < 0)
@@ -183,7 +187,8 @@ class CondensedSchurSourceStepper {
   ///   @p phi: potential; INPUT phi^n (warm start of the solve); OUTPUT phi^{n+1}.
   ///   @p bz_field: B_z field (aux channel), component @p c_bz read at the center. theta/dt: theta-scheme.
   /// No transport: this is the SOURCE stage alone (the (2)-(3) implicit stage of docs/SCHUR_CONDENSATION_DESIGN.md).
-  void step(MultiFab& state, MultiFab& phi, const MultiFab& bz_field, int c_bz, Real theta, Real dt) {
+  void step(MultiFab& state, MultiFab& phi, const MultiFab& bz_field, int c_bz, Real theta,
+            Real dt) {
     const Real th_dt = theta * dt;
 
     // -1) freeze phi^n (for the final extrapolation; op_'s phi() will be overwritten by the solve).
@@ -195,8 +200,8 @@ class CondensedSchurSourceStepper {
       for_each_cell(state.box(li),
                     detail::ExtractVelocityKernel{s, vx_n_.fab(li).array(), vy_n_.fab(li).array(),
                                                   c_rho_, c_mx_, c_my_});
-      for_each_cell(bz_.box(li),
-                    detail::CopyBzKernel{bz_field.fab(li).const_array(), bz_.fab(li).array(), c_bz});
+      for_each_cell(bz_.box(li), detail::CopyBzKernel{bz_field.fab(li).const_array(),
+                                                      bz_.fab(li).array(), c_bz});
     }
     const BCRec ebc = coeff_bc(bcPhi_);
     fill_ghosts(bz_, geom_.domain, ebc);  // B_z read at (i,j) only here, but 1 ghost = MPI-clean
@@ -227,12 +232,12 @@ class CondensedSchurSourceStepper {
     const Real half_idx = Real(1) / (Real(2) * geom_.dx());
     const Real half_idy = Real(1) / (Real(2) * geom_.dy());
     for (int li = 0; li < state.local_size(); ++li) {
-      for_each_cell(state.box(li),
-                    detail::SchurReconstructKernel{
-                        phi.fab(li).const_array(), vx_n_.fab(li).const_array(),
-                        vy_n_.fab(li).const_array(), bz_.fab(li).const_array(),
-                        state.fab(li).array(), vx_t_.fab(li).array(), vy_t_.fab(li).array(), th_dt,
-                        half_idx, half_idy, c_rho_, c_mx_, c_my_});
+      for_each_cell(
+          state.box(li),
+          detail::SchurReconstructKernel{
+              phi.fab(li).const_array(), vx_n_.fab(li).const_array(), vy_n_.fab(li).const_array(),
+              bz_.fab(li).const_array(), state.fab(li).array(), vx_t_.fab(li).array(),
+              vy_t_.fab(li).array(), th_dt, half_idx, half_idy, c_rho_, c_mx_, c_my_});
     }
     // vx_t_/vy_t_ now carry v^{n+theta}.
 
@@ -240,26 +245,22 @@ class CondensedSchurSourceStepper {
     //    theta = 1 -> identity. phi^n is frozen in phi_n_ (step -1), v^n in vx_n_/vy_n_.
     const Real inv_theta = Real(1) / theta;
     for (int li = 0; li < phi.local_size(); ++li)
-      for_each_cell(phi.box(li),
-                    detail::SchurExtrapolateScalarKernel{phi_n_.fab(li).const_array(),
-                                                         phi.fab(li).array(), inv_theta});
+      for_each_cell(phi.box(li), detail::SchurExtrapolateScalarKernel{
+                                     phi_n_.fab(li).const_array(), phi.fab(li).array(), inv_theta});
     // v + mom: linear extrapolation, recompose mom = rho v^{n+1}. vx_t_/vy_t_ then carry v^{n+1}.
     for (int li = 0; li < state.local_size(); ++li)
-      for_each_cell(state.box(li),
-                    detail::SchurExtrapolateVelocityKernel{
-                        vx_n_.fab(li).const_array(), vy_n_.fab(li).const_array(),
-                        vx_t_.fab(li).array(), vy_t_.fab(li).array(), state.fab(li).array(),
-                        inv_theta, c_rho_, c_mx_, c_my_});
+      for_each_cell(state.box(li), detail::SchurExtrapolateVelocityKernel{
+                                       vx_n_.fab(li).const_array(), vy_n_.fab(li).const_array(),
+                                       vx_t_.fab(li).array(), vy_t_.fab(li).array(),
+                                       state.fab(li).array(), inv_theta, c_rho_, c_mx_, c_my_});
 
     // 4) ENERGY (if role present): E^{n+1} = E^n + (1/2) rho (|v^{n+1}|^2 - |v^n|^2).
     if (c_E_ >= 0)
       for (int li = 0; li < state.local_size(); ++li)
-        for_each_cell(state.box(li),
-                      detail::SchurEnergyKernel{vx_n_.fab(li).const_array(),
-                                                vy_n_.fab(li).const_array(),
-                                                vx_t_.fab(li).const_array(),
-                                                vy_t_.fab(li).const_array(), state.fab(li).array(),
-                                                c_rho_, c_E_});
+        for_each_cell(state.box(li), detail::SchurEnergyKernel{
+                                         vx_n_.fab(li).const_array(), vy_n_.fab(li).const_array(),
+                                         vx_t_.fab(li).const_array(), vy_t_.fab(li).const_array(),
+                                         state.fab(li).array(), c_rho_, c_E_});
 
     // 6) FILL the ghosts of the state and of the potential (MPI halos / physical BC) before returning control.
     device_fence();
@@ -294,8 +295,10 @@ class CondensedSchurSourceStepper {
   static BCRec coeff_bc(const BCRec& bc) {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec b;
-    b.xlo = fo(bc.xlo); b.xhi = fo(bc.xhi);
-    b.ylo = fo(bc.ylo); b.yhi = fo(bc.yhi);
+    b.xlo = fo(bc.xlo);
+    b.xhi = fo(bc.xhi);
+    b.ylo = fo(bc.ylo);
+    b.yhi = fo(bc.yhi);
     return b;
   }
 
@@ -321,14 +324,15 @@ class CondensedSchurSourceStepper {
   int n_precond_;
   BoxArray ba_;
   DistributionMapping dm_;
-  GeometricMG op_, precond_;  ///< full operator (matvec) + symmetric preconditioner
+  GeometricMG op_, precond_;              ///< full operator (matvec) + symmetric preconditioner
   MultiFab eps_x_, eps_y_, a_xy_, a_yx_;  ///< coefficients A_op = I + c rho B^{-1} (reused)
-  MultiFab rhs_schur_;        ///< condensed RHS (schur sign; negated before the solve)
-  MultiFab bz_;               ///< B_z at the center (internal buffer, 1 ghost)
-  MultiFab vx_n_, vy_n_;      ///< v^n (extracted at the start of step)
-  MultiFab vx_t_, vy_t_;      ///< v^{n+theta} then v^{n+1} (reconstruction + extrapolation)
-  MultiFab phi_n_;            ///< phi^n frozen (extrapolation); allocated at construction, copied at the start of step
-  KrylovResult last_result_;  ///< diagnostic of the last solve
+  MultiFab rhs_schur_;                    ///< condensed RHS (schur sign; negated before the solve)
+  MultiFab bz_;                           ///< B_z at the center (internal buffer, 1 ghost)
+  MultiFab vx_n_, vy_n_;                  ///< v^n (extracted at the start of step)
+  MultiFab vx_t_, vy_t_;  ///< v^{n+theta} then v^{n+1} (reconstruction + extrapolation)
+  MultiFab
+      phi_n_;  ///< phi^n frozen (extrapolation); allocated at construction, copied at the start of step
+  KrylovResult last_result_;       ///< diagnostic of the last solve
   Real krylov_tol_ = Real(1e-10);  ///< tolerance of the solve (historical default, cf. set_krylov)
   int krylov_max_iters_ = 400;     ///< iteration budget (historical default, cf. set_krylov)
   // PERSISTENT Krylov solver (BiCGStab + MG precond). Allocates its buffers (r/rhat/p/v/s/t/phat/

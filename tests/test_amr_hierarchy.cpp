@@ -42,9 +42,10 @@ int main() {
   interpolate(h.data(0), h.data(1), h.ref_ratio());
 
   // fine(i,j) = gc(i/2, j/2)
-  chk(close(h.data(1).fab(0)(4, 4, 0), 202.0), "interp_44");    // gc(2,2)
+  chk(close(h.data(1).fab(0)(4, 4, 0), 202.0), "interp_44");      // gc(2,2)
   chk(close(h.data(1).fab(0)(11, 11, 0), 505.0), "interp_1111");  // gc(5,5)
 
-  if (chk.fails() == 0) std::printf("OK test_amr_hierarchy\n");
+  if (chk.fails() == 0)
+    std::printf("OK test_amr_hierarchy\n");
   return chk.failed();
 }

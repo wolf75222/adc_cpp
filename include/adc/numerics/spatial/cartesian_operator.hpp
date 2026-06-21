@@ -17,10 +17,10 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/spatial/face_flux.hpp>      // reconstruct_pp, require_reconstruction_ghosts
-#include <adc/numerics/spatial/positivity.hpp>     // detail::positivity_comp
-#include <adc/numerics/spatial/state_access.hpp>   // load_state, load_aux, DiffusiveModel
-#include <adc/numerics/spatial/wave_speed.hpp>     // fill_wave_speed_cache
+#include <adc/numerics/spatial/face_flux.hpp>     // reconstruct_pp, require_reconstruction_ghosts
+#include <adc/numerics/spatial/positivity.hpp>    // detail::positivity_comp
+#include <adc/numerics/spatial/state_access.hpp>  // load_state, load_aux, DiffusiveModel
+#include <adc/numerics/spatial/wave_speed.hpp>    // fill_wave_speed_cache
 
 namespace adc {
 
@@ -56,18 +56,26 @@ struct AssembleRhsKernel {
     const Aux Ayp = load_aux<aux_comps<Model>()>(ax, i, j + 1);
 
     // x faces: reconstruction of the states on either side of each face
-    const auto Lxm = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rxm = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Lxp = reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rxp = reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxm =
+        reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxm =
+        reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxp =
+        reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxp =
+        reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto Fxm = nflux(model, Lxm, Axm, Rxm, Ac, 0);
     const auto Fxp = nflux(model, Lxp, Ac, Rxp, Axp, 0);
 
     // y faces
-    const auto Lym = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rym = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Lyp = reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Ryp = reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lym =
+        reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rym =
+        reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lyp =
+        reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Ryp =
+        reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto Fym = nflux(model, Lym, Aym, Rym, Ac, 1);
     const auto Fyp = nflux(model, Lyp, Ac, Ryp, Ayp, 1);
 
@@ -96,9 +104,8 @@ struct AssembleRhsKernel {
 /// HasPrimitiveVars. For the diffusive term, see DiffusiveModel.
 /// INVARIANT: the operator does not modify U, aux -- it only writes R. No ghost fill.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux,
-                  const Geometry& geom, MultiFab& R, bool recon_prim = false,
-                  Real pos_floor = Real(0)) {
+void assemble_rhs(const Model& model, const MultiFab& U, const MultiFab& aux, const Geometry& geom,
+                  MultiFab& R, bool recon_prim = false, Real pos_floor = Real(0)) {
   detail::require_reconstruction_ghosts<Limiter>(U);  // state ghosts >= stencil (otherwise OOB)
   const Real dx = geom.dx(), dy = geom.dy();
   const Limiter lim{};
@@ -139,10 +146,14 @@ struct AssembleRhsHllCachedKernel {
     const Aux Ayp = load_aux<aux_comps<Model>()>(ax, i, j + 1);
 
     // x faces: reconstruction of the states on both sides of each face
-    const auto Lxm = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rxm = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Lxp = reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rxp = reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxm =
+        reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxm =
+        reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxp =
+        reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxp =
+        reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     // face signal speeds = union (min of the lo, max of the hi) of the two adjacent cells: the LEFT
     // cell is always the lower-index neighbor (same operands/order as hll_speeds).
     const Real sLxm = ws(i - 1, j, 0) < ws(i, j, 0) ? ws(i - 1, j, 0) : ws(i, j, 0);
@@ -153,10 +164,14 @@ struct AssembleRhsHllCachedKernel {
     const auto Fxp = hll_flux_with_speeds(model, Lxp, Ac, Rxp, Axp, 0, sLxp, sRxp);
 
     // y faces (components 2 = lo_y, 3 = hi_y of the scratch)
-    const auto Lym = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rym = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Lyp = reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Ryp = reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lym =
+        reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rym =
+        reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lyp =
+        reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Ryp =
+        reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
     const Real sLym = ws(i, j - 1, 2) < ws(i, j, 2) ? ws(i, j - 1, 2) : ws(i, j, 2);
     const Real sRym = ws(i, j - 1, 3) > ws(i, j, 3) ? ws(i, j - 1, 3) : ws(i, j, 3);
     const Real sLyp = ws(i, j, 2) < ws(i, j + 1, 2) ? ws(i, j, 2) : ws(i, j + 1, 2);

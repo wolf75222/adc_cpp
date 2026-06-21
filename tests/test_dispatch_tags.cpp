@@ -90,7 +90,8 @@ int main() {
       "riemann roe rejete en polaire");
   chk(throws([] { validate_riemann("bogus", /*polar=*/true, "System (polaire)"); }, msg),
       "riemann inconnu rejete en polaire (meme message)");
-  chk(contains(msg, "unsupported"), "tag inconnu en polaire -> message polaire (parite historique)");
+  chk(contains(msg, "unsupported"),
+      "tag inconnu en polaire -> message polaire (parite historique)");
 
   // --- (4) limiter_n_ghost : largeurs de halo (allocation bit-identique) ----------------------------
   chk(limiter_n_ghost("none") == 1, "n_ghost(none) == 1");
@@ -106,19 +107,24 @@ int main() {
   // --- tables kLimiters / kRiemanns : source de verite ----------------------------------------------
   chk(std::string(kLimiters[0].name) == "none" && kLimiters[0].n_ghost == 1, "kLimiters[0]");
   chk(std::string(kLimiters[3].name) == "weno5" && kLimiters[3].n_ghost == 3, "kLimiters[3]");
-  chk(std::string(kRiemanns[0].name) == "rusanov" && kRiemanns[0].polar_ok, "kRiemanns[0] rusanov polar_ok");
-  chk(std::string(kRiemanns[1].name) == "hll" && kRiemanns[1].needs_wave_speeds && kRiemanns[1].polar_ok,
+  chk(std::string(kRiemanns[0].name) == "rusanov" && kRiemanns[0].polar_ok,
+      "kRiemanns[0] rusanov polar_ok");
+  chk(std::string(kRiemanns[1].name) == "hll" && kRiemanns[1].needs_wave_speeds &&
+          kRiemanns[1].polar_ok,
       "kRiemanns[1] hll needs_wave_speeds, pas polaire");
-  chk(std::string(kRiemanns[2].name) == "hllc" && kRiemanns[2].needs_hllc_struct, "kRiemanns[2] hllc");
+  chk(std::string(kRiemanns[2].name) == "hllc" && kRiemanns[2].needs_hllc_struct,
+      "kRiemanns[2] hllc");
   chk(std::string(kRiemanns[3].name) == "roe" && kRiemanns[3].needs_roe_diss, "kRiemanns[3] roe");
   // DEUX flux cables en polaire (rusanov + hll, solde de l'audit) : verrouille polar_ok.
   {
     int n_polar = 0;
     for (const RiemannTag& t : kRiemanns)
-      if (t.polar_ok) ++n_polar;
+      if (t.polar_ok)
+        ++n_polar;
     chk(n_polar == 2, "deux flux polar_ok (rusanov + hll)");
   }
 
-  if (fails == 0) std::printf("OK test_dispatch_tags\n");
+  if (fails == 0)
+    std::printf("OK test_dispatch_tags\n");
   return fails == 0 ? 0 : 1;
 }

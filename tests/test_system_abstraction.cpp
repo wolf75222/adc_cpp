@@ -96,6 +96,7 @@ int main() {
   charge(Ue, Ui, rhs);
   chk(std::fabs(sum(rhs) - Real(3 * 16)) < 1e-12, "charge_density_rhs");
 
-  if (fails == 0) std::printf("OK test_system_abstraction\n");
+  if (fails == 0)
+    std::printf("OK test_system_abstraction\n");
   return fails == 0 ? 0 : 1;
 }

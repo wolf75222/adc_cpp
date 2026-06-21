@@ -59,7 +59,8 @@ static ModelSpec exb_charge(double q, double B0) {
 
 // Disque gaussien centre en (cx, cy) du domaine [0,1]^2, amplitude amp sur une base, n*n row-major.
 // Le maximum (base + amp) depasse le seuil de raffinement -> la region taguee suit le blob (regrid).
-static std::vector<double> blob(int n, double cx, double cy, double amp, double base, double width) {
+static std::vector<double> blob(int n, double cx, double cy, double amp, double base,
+                                double width) {
   std::vector<double> rho(static_cast<std::size_t>(n) * n, base);
   for (int j = 0; j < n; ++j)
     for (int i = 0; i < n; ++i) {
@@ -88,16 +89,17 @@ int main(int argc, char** argv) {
   cfg.n = n;
   cfg.L = 1.0;
   cfg.periodic = true;
-  cfg.regrid_every = 2;             // REGRID ACTIF : la hierarchie se re-grille pendant la sequence
-  cfg.distribute_coarse = true;     // GROSSIER REPARTI : active la reduction collective des tags (R4)
+  cfg.regrid_every = 2;          // REGRID ACTIF : la hierarchie se re-grille pendant la sequence
+  cfg.distribute_coarse = true;  // GROSSIER REPARTI : active la reduction collective des tags (R4)
   // coarse_max_grid = 0 -> n/2 (decoupage 2x2 multi-box, le moins agressif pour le MG geometrique).
 
   AmrSystem sys(cfg);
   sys.add_block("a", exb_charge(q0, B0), "minmod", "rusanov", "conservative", "explicit", 1);
   sys.add_block("b", exb_charge(q1, B0), "minmod", "rusanov", "conservative", "explicit", 1);
   sys.set_poisson("charge_density", "geometric_mg", "periodic");
-  sys.set_refinement(1.5);          // tag densite > 1.5 (union des deux blobs, par bloc)
-  sys.set_phi_refinement(1e-3);     // tag |grad phi| > 1e-3 (bord d'anneau ; predicat phi cable facade)
+  sys.set_refinement(1.5);  // tag densite > 1.5 (union des deux blobs, par bloc)
+  sys.set_phi_refinement(
+      1e-3);  // tag |grad phi| > 1e-3 (bord d'anneau ; predicat phi cable facade)
   sys.set_density("a", rho0);
   sys.set_density("b", rho1);
 
@@ -105,7 +107,8 @@ int main(int argc, char** argv) {
   const double m0b = sys.mass("b");
 
   const double dt = 1e-3;
-  for (int s = 0; s < 16; ++s) sys.step(dt);  // 16 macro-pas, regrid tous les 2 -> plusieurs regrids
+  for (int s = 0; s < 16; ++s)
+    sys.step(dt);  // 16 macro-pas, regrid tous les 2 -> plusieurs regrids
 
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::fence();
@@ -124,15 +127,16 @@ int main(int argc, char** argv) {
   auto spread = [](double x) { return all_reduce_max(x) - (-all_reduce_max(-x)); };
   const double sp = std::fmax(
       std::fmax(spread(ca), spread(cb)),
-      std::fmax(spread(cp), std::fmax(spread(ma), std::fmax(spread(mb),
-                                                            spread(static_cast<double>(npatch))))));
+      std::fmax(spread(cp),
+                std::fmax(spread(ma), std::fmax(spread(mb), spread(static_cast<double>(npatch))))));
 
   int fails = 0;
   if (me == 0) {
     // Ligne PARITE (diffee cross-np par la CI) : n_patches + checksums imprimes en %.17e bit-exact.
-    std::printf("AMRREGRID np=%d | n_patches=%d | csum_a=%.17e csum_b=%.17e csum_phi=%.17e | "
-                "crossrank_spread=%.3e\n",
-                np, npatch, ca, cb, cp, sp);
+    std::printf(
+        "AMRREGRID np=%d | n_patches=%d | csum_a=%.17e csum_b=%.17e csum_phi=%.17e | "
+        "crossrank_spread=%.3e\n",
+        np, npatch, ca, cb, cp, sp);
     std::printf("AMRREGRID conservation: dm_a=%.3e dm_b=%.3e | mass_a=%.17e mass_b=%.17e\n",
                 std::fabs(ma - m0a), std::fabs(mb - m0b), ma, mb);
 
@@ -165,13 +169,17 @@ int main(int argc, char** argv) {
     // (1) grossier reparti reconstruit GLOBALEMENT + layout fin d'union UNIQUE -> tout bit-identique
     // cross-rang (spread exactement 0). Le n_patches dans le spread = meme layout fin sur tous les rangs.
     if (!(sp == 0.0)) {
-      std::printf("FAIL grandeurs non bit-identiques entre rangs (spread=%.3e) : la reduction des tags "
-                  "(R4) ou le layout fin d'union diverge par rang\n", sp);
+      std::printf(
+          "FAIL grandeurs non bit-identiques entre rangs (spread=%.3e) : la reduction des tags "
+          "(R4) ou le layout fin d'union diverge par rang\n",
+          sp);
       ++fails;
     }
     if (fails == 0)
-      std::printf("OK test_amr_regrid_mpi_parity np=%d (regrid d'union : layout fin IDENTIQUE "
-                  "cross-rang, masse par bloc conservee ; CI diffe np=1/2/4)\n", np);
+      std::printf(
+          "OK test_amr_regrid_mpi_parity np=%d (regrid d'union : layout fin IDENTIQUE "
+          "cross-rang, masse par bloc conservee ; CI diffe np=1/2/4)\n",
+          np);
   } else {
     (void)sp;
   }

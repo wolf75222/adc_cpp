@@ -1,9 +1,9 @@
 #pragma once
 
-#include <adc/core/state.hpp>      // kAuxBaseComps
-#include <adc/mesh/box2d.hpp>      // Box2D
-#include <adc/mesh/fab2d.hpp>      // Fab2D
-#include <adc/mesh/geometry.hpp>   // Geometry (x_cell / y_cell)
+#include <adc/core/state.hpp>        // kAuxBaseComps
+#include <adc/mesh/box2d.hpp>        // Box2D
+#include <adc/mesh/fab2d.hpp>        // Fab2D
+#include <adc/mesh/geometry.hpp>     // Geometry (x_cell / y_cell)
 #include <adc/mesh/physical_bc.hpp>  // BCRec / BCType
 
 /// @file
@@ -25,9 +25,7 @@ namespace detail {
 /// any other becomes Foextrap (order-0 extrapolation). Body taken verbatim from the
 /// three couplers.
 inline BCRec derive_aux_bc(const BCRec& b) {
-  auto t = [](BCType x) {
-    return x == BCType::Periodic ? BCType::Periodic : BCType::Foextrap;
-  };
+  auto t = [](BCType x) { return x == BCType::Periodic ? BCType::Periodic : BCType::Foextrap; };
   BCRec a;
   a.xlo = t(b.xlo);
   a.xhi = t(b.xhi);

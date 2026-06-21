@@ -70,12 +70,14 @@ int main(int argc, char** argv) {
     const double dt = 0.4 * h / 3.0;  // pas fixe stable (max wave speed ~ c ~ 1.2)
 
     for (int s = 0; s < steps; ++s) {
-      fill_ghosts(U, dom, bc);  // periodique (copy_shifted) + bords physiques (fill_physical_bc), device
+      fill_ghosts(U, dom,
+                  bc);  // periodique (copy_shifted) + bords physiques (fill_physical_bc), device
       assemble_rhs<NoSlope, RusanovFlux>(model, U, aux, geom, R, false);  // for_each -> GPU
       Array4 uu = U.fab(0).array();
       Array4 rr = R.fab(0).array();
       for_each_cell(U.box(0), [=] ADC_HD(int i, int j) {  // U += dt R, sur le device
-        for (int c = 0; c < 4; ++c) uu(i, j, c) += dt * rr(i, j, c);
+        for (int c = 0; c < 4; ++c)
+          uu(i, j, c) += dt * rr(i, j, c);
       });
     }
     device_fence();

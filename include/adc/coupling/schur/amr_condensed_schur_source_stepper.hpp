@@ -2,10 +2,10 @@
 
 #include <adc/coupling/schur/condensed_schur_source_stepper.hpp>  // CondensedSchurSourceStepper (#126) + detail kernels
 #include <adc/amr/refinement_ratio.hpp>
-#include <adc/coupling/schur/schur_condensation.hpp>              // ElectrostaticLorentzCondensation (assemble per level)
+#include <adc/coupling/schur/schur_condensation.hpp>  // ElectrostaticLorentzCondensation (assemble per level)
 #include <adc/numerics/elliptic/composite_fac_poisson.hpp>  // CompositeFacPoisson (composite FAC elliptic solve)
-#include <adc/numerics/time/amr_reflux_mf.hpp>              // mf_average_down_mb (fine -> coarse cascade)
-#include <adc/numerics/time/amr_subcycling.hpp>              // AmrLevelMP (multi-patch hierarchy)
+#include <adc/numerics/time/amr_reflux_mf.hpp>   // mf_average_down_mb (fine -> coarse cascade)
+#include <adc/numerics/time/amr_subcycling.hpp>  // AmrLevelMP (multi-patch hierarchy)
 
 #include <memory>
 #include <stdexcept>
@@ -63,11 +63,10 @@ class AmrCondensedSchurSourceStepper {
   AmrCondensedSchurSourceStepper(const VariableSet& vars, const Geometry& coarse_geom,
                                  const BoxArray& coarse_ba, const BCRec& bcPhi, Real alpha,
                                  int n_precond_vcycles = 1)
-      : AmrCondensedSchurSourceStepper(vars, vars.index_of(VariableRole::Density),
-                                       vars.index_of(VariableRole::MomentumX),
-                                       vars.index_of(VariableRole::MomentumY),
-                                       vars.index_of(VariableRole::Energy), coarse_geom, coarse_ba,
-                                       bcPhi, alpha, n_precond_vcycles) {}
+      : AmrCondensedSchurSourceStepper(
+            vars, vars.index_of(VariableRole::Density), vars.index_of(VariableRole::MomentumX),
+            vars.index_of(VariableRole::MomentumY), vars.index_of(VariableRole::Energy),
+            coarse_geom, coarse_ba, bcPhi, alpha, n_precond_vcycles) {}
 
   /// EXPLICIT-COMPONENT variant (audit wave 3, parity with the System steppers): roles
   /// carried by the ABI instead of being resolved canonically. The canonical ctor DELEGATES here.
@@ -105,7 +104,8 @@ class AmrCondensedSchurSourceStepper {
   ///                  by the caller, like s.advance / run_source_stage of the uniform path).
   void step(std::vector<AmrLevelMP>& levels, MultiFab& coarse_phi, const MultiFab& coarse_bz,
             int c_bz, Real theta, Real dt) {
-    if (levels.empty()) return;
+    if (levels.empty())
+      return;
     // A fine level EFFECTIVELY POPULATED (>= one patch) signals a multi-level hierarchy. NB: the
     // compiled path (build_amr_compiled) ALWAYS allocates a seed fine level, EMPTY after regrid when
     // no refinement is requested (refine_threshold disabled) -> levels.size() is 2 but the
@@ -129,7 +129,8 @@ class AmrCondensedSchurSourceStepper {
     if (levels.size() != 2 || n_ranks() != 1)
       throw std::runtime_error(
           "AmrCondensedSchurSourceStepper: COMPOSITE condensed source stage wired for 2 levels + "
-          "NON ADJACENT multi-box fine patches, mono-rank ; > 2 levels / MPI / multi-block = Phase 4b.");
+          "NON ADJACENT multi-box fine patches, mono-rank ; > 2 levels / MPI / multi-block = Phase "
+          "4b.");
     step_multilevel(levels, coarse_phi, coarse_bz, c_bz, theta, dt);
   }
 
@@ -191,12 +192,18 @@ class AmrCondensedSchurSourceStepper {
                               fac_->a_xy_coarse(), fac_->a_yx_coarse());
     builder.assemble_operator(Uf, bz_f, geom_f, bcPhi_, fac_->eps_fine(), eps_y_f,
                               fac_->a_xy_fine(), fac_->a_yx_fine());
-    { MultiFab pn(bac, dmc, 1, 1); copy0(pn, phi_n_c);
+    {
+      MultiFab pn(bac, dmc, 1, 1);
+      copy0(pn, phi_n_c);
       builder.assemble_rhs(pn, Uc, bz_c, geom_c, bcPhi_, rhs_c);
-      negate_into(fac_->rhs_coarse(), rhs_c); }
-    { MultiFab pn(baf, dmf, 1, 1); copy0(pn, phi_n_f);
+      negate_into(fac_->rhs_coarse(), rhs_c);
+    }
+    {
+      MultiFab pn(baf, dmf, 1, 1);
+      copy0(pn, phi_n_f);
       builder.assemble_rhs(pn, Uf, bz_f, geom_f, bcPhi_, rhs_f);
-      negate_into(fac_->rhs_fine(), rhs_f); }
+      negate_into(fac_->rhs_fine(), rhs_f);
+    }
 
     // --- COMPOSITE SOLVE: phi^{n+theta} per level (the fine patch refines the elliptic) ---
     fac_->use_variable_coefficient(true);
@@ -223,31 +230,34 @@ class AmrCondensedSchurSourceStepper {
   /// extrapolates phi and v from the theta-stage to the full step (f^{n+1} = f^n + (1/theta)(f^{n+theta}-f^n)); updates
   /// the energy (if the role is present). @p fill_phi_ghosts: fill the physical ghosts of phi (coarse)
   /// ; false for the fine level (the C-F ghosts are already set by the composite solve -- do NOT overwrite them).
-  void reconstruct_level(MultiFab& state, MultiFab& phi_nt, const MultiFab& phi_n, const MultiFab& bz,
-                         const MultiFab& vx_n, const MultiFab& vy_n, const Geometry& geom, Real theta,
-                         Real dt, bool fill_phi_ghosts) {
+  void reconstruct_level(MultiFab& state, MultiFab& phi_nt, const MultiFab& phi_n,
+                         const MultiFab& bz, const MultiFab& vx_n, const MultiFab& vy_n,
+                         const Geometry& geom, Real theta, Real dt, bool fill_phi_ghosts) {
     const Real th_dt = theta * dt, inv_theta = Real(1) / theta;
     const Real half_idx = Real(1) / (Real(2) * geom.dx());
     const Real half_idy = Real(1) / (Real(2) * geom.dy());
     device_fence();
-    if (fill_phi_ghosts) fill_ghosts(phi_nt, geom.domain, bcPhi_);
+    if (fill_phi_ghosts)
+      fill_ghosts(phi_nt, geom.domain, bcPhi_);
     device_fence();
-    MultiFab vx_t(state.box_array(), state.dmap(), 1, 0), vy_t(state.box_array(), state.dmap(), 1, 0);
+    MultiFab vx_t(state.box_array(), state.dmap(), 1, 0),
+        vy_t(state.box_array(), state.dmap(), 1, 0);
     for (int li = 0; li < state.local_size(); ++li)
-      for_each_cell(state.box(li),
-                    detail::SchurReconstructKernel{
-                        phi_nt.fab(li).const_array(), vx_n.fab(li).const_array(),
-                        vy_n.fab(li).const_array(), bz.fab(li).const_array(), state.fab(li).array(),
-                        vx_t.fab(li).array(), vy_t.fab(li).array(), th_dt, half_idx, half_idy, c_rho_,
-                        c_mx_, c_my_});
+      for_each_cell(
+          state.box(li),
+          detail::SchurReconstructKernel{
+              phi_nt.fab(li).const_array(), vx_n.fab(li).const_array(), vy_n.fab(li).const_array(),
+              bz.fab(li).const_array(), state.fab(li).array(), vx_t.fab(li).array(),
+              vy_t.fab(li).array(), th_dt, half_idx, half_idy, c_rho_, c_mx_, c_my_});
     for (int li = 0; li < phi_nt.local_size(); ++li)
-      for_each_cell(phi_nt.box(li), detail::SchurExtrapolateScalarKernel{
-                                        phi_n.fab(li).const_array(), phi_nt.fab(li).array(), inv_theta});
+      for_each_cell(phi_nt.box(li),
+                    detail::SchurExtrapolateScalarKernel{phi_n.fab(li).const_array(),
+                                                         phi_nt.fab(li).array(), inv_theta});
     for (int li = 0; li < state.local_size(); ++li)
-      for_each_cell(state.box(li),
-                    detail::SchurExtrapolateVelocityKernel{
-                        vx_n.fab(li).const_array(), vy_n.fab(li).const_array(), vx_t.fab(li).array(),
-                        vy_t.fab(li).array(), state.fab(li).array(), inv_theta, c_rho_, c_mx_, c_my_});
+      for_each_cell(state.box(li), detail::SchurExtrapolateVelocityKernel{
+                                       vx_n.fab(li).const_array(), vy_n.fab(li).const_array(),
+                                       vx_t.fab(li).array(), vy_t.fab(li).array(),
+                                       state.fab(li).array(), inv_theta, c_rho_, c_mx_, c_my_});
     if (c_E_ >= 0)
       for (int li = 0; li < state.local_size(); ++li)
         for_each_cell(state.box(li), detail::SchurEnergyKernel{
@@ -262,7 +272,8 @@ class AmrCondensedSchurSourceStepper {
   /// patches. We compare the current fine BoxArray to the previous one (same boxes AND same order) to avoid an
   /// unnecessary rebuild (the FAC is reused as long as the hierarchy does not change).
   void ensure_fac(const BoxArray& fine_ba) {
-    if (fac_ && fac_fine_boxes_ == fine_ba.boxes()) return;
+    if (fac_ && fac_fine_boxes_ == fine_ba.boxes())
+      return;
     fac_ = std::make_unique<CompositeFacPoisson>(coarse_geom_, coarse_ba_, bcPhi_, fine_ba,
                                                  kAmrRefRatio);
     fac_fine_boxes_ = fine_ba.boxes();
@@ -272,15 +283,18 @@ class AmrCondensedSchurSourceStepper {
   static BCRec coeff_bc(const BCRec& b) {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec c;
-    c.xlo = fo(b.xlo); c.xhi = fo(b.xhi);
-    c.ylo = fo(b.ylo); c.yhi = fo(b.yhi);
+    c.xlo = fo(b.xlo);
+    c.xhi = fo(b.xhi);
+    c.ylo = fo(b.ylo);
+    c.yhi = fo(b.yhi);
     return c;
   }
 
   void copy0(MultiFab& dst, const MultiFab& src) {
     device_fence();
     for (int li = 0; li < dst.local_size(); ++li)
-      for_each_cell(dst.box(li), detail::CopyComp0Kernel{dst.fab(li).array(), src.fab(li).const_array()});
+      for_each_cell(dst.box(li),
+                    detail::CopyComp0Kernel{dst.fab(li).array(), src.fab(li).const_array()});
   }
   void copy_comp(MultiFab& dst, const MultiFab& src, int c) {  // dst comp0 <- src comp c
     device_fence();
@@ -291,7 +305,8 @@ class AmrCondensedSchurSourceStepper {
   void negate_into(MultiFab& dst, const MultiFab& src) {
     device_fence();
     for (int li = 0; li < dst.local_size(); ++li)
-      for_each_cell(dst.box(li), detail::NegateKernel{src.fab(li).const_array(), dst.fab(li).array()});
+      for_each_cell(dst.box(li),
+                    detail::NegateKernel{src.fab(li).const_array(), dst.fab(li).array()});
   }
   void extract_v(const MultiFab& state, MultiFab& vx, MultiFab& vy) {
     device_fence();

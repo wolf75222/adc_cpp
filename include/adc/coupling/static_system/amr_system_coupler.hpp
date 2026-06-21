@@ -4,15 +4,15 @@
 #include <adc/amr/refinement_ratio.hpp>
 #include <adc/core/types.hpp>
 #include <adc/coupling/amr/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
-#include <adc/coupling/base/aux_fill.hpp>        // detail::derive_aux_bc + detail::fill_bz_box (shared)
+#include <adc/coupling/base/aux_fill.hpp>  // detail::derive_aux_bc + detail::fill_bz_box (shared)
 #include <adc/coupling/source/coupled_source.hpp>  // CoupledSourceFor
 #include <adc/coupling/base/elliptic_rhs.hpp>
 #include <adc/numerics/elliptic/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess
 #include <adc/numerics/elliptic/elliptic_solver.hpp>
 #include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
+#include <adc/numerics/time/amr_reflux_mf.hpp>     // AmrLevelMP, advance_amr, mf_average_down_mb
 #include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source
-#include <adc/numerics/time/scheduler.hpp>  // block_substeps_v, block_time_treatment_v
+#include <adc/numerics/time/scheduler.hpp>         // block_substeps_v, block_time_treatment_v
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -113,7 +113,8 @@ inline bool same_level_layout(const BoxArray& a_ba, const DistributionMapping& a
 // error at the FIRST discrepancy (block and level located). A single block matches itself trivially ->
 // single-block path strictly bit-identical (the loop over the other blocks is empty).
 inline void same_layout_or_throw(const std::vector<std::vector<AmrLevelMP>>& block_levels) {
-  if (block_levels.empty()) return;
+  if (block_levels.empty())
+    return;
   const auto& ref = block_levels[0];
   const int nlev = static_cast<int>(ref.size());
   for (std::size_t b = 1; b < block_levels.size(); ++b) {
@@ -127,7 +128,8 @@ inline void same_layout_or_throw(const std::vector<std::vector<AmrLevelMP>>& blo
                              ref[k].U.box_array(), ref[k].U.dmap(), ref[k].dx, ref[k].dy))
         throw std::runtime_error(
             "AmrSystemCoupler: inconsistent AMR layout between blocks (the shared aux requires the "
-            "SAME BoxArray [boxes and order], the SAME DistributionMapping and the SAME dx/dy per level)");
+            "SAME BoxArray [boxes and order], the SAME DistributionMapping and the SAME dx/dy per "
+            "level)");
     }
   }
 }
@@ -137,11 +139,9 @@ inline void same_layout_or_throw(const std::vector<std::vector<AmrLevelMP>>& blo
 /// @tparam RhsAssembler: assembler of the Poisson RHS (f = Sum_s q_s n_s, e.g. ChargeDensityRhs).
 /// @tparam Elliptic: elliptic backend (EllipticSolver concept, default GeometricMG). PRECONDITION:
 /// all blocks share EXACTLY the same AMR layout per level (checked at the ctor).
-template <CoupledSystemLike System, class RhsAssembler,
-          class Elliptic = GeometricMG>
+template <CoupledSystemLike System, class RhsAssembler, class Elliptic = GeometricMG>
 class AmrSystemCoupler {
-  static_assert(EllipticSolver<Elliptic>,
-                "the elliptic backend must model EllipticSolver");
+  static_assert(EllipticSolver<Elliptic>, "the elliptic backend must model EllipticSolver");
 
  public:
   // block_levels[b] = hierarchy of block b (level 0 = coarse on ba_coarse, levels
@@ -158,8 +158,7 @@ class AmrSystemCoupler {
   AmrSystemCoupler(System system, const Geometry& geom, const BoxArray& ba_coarse,
                    const BCRec& bcPhi, RhsAssembler rhs_assembler,
                    std::vector<std::vector<AmrLevelMP>> block_levels,
-                   Periodicity base_per = Periodicity{true, true},
-                   bool replicated_coarse = true,
+                   Periodicity base_per = Periodicity{true, true}, bool replicated_coarse = true,
                    PoissonCadence cadence = PoissonCadence::OncePerStep,
                    std::function<bool(Real, Real)> active = {},
                    std::function<Real(Real, Real)> bz = {})
@@ -181,8 +180,7 @@ class AmrSystemCoupler {
       throw std::runtime_error(
           "AmrSystemCoupler: block_levels must have one level vector per block "
           "(size != n_blocks)");
-    nlev_ = block_levels_.empty() ? 0
-                                  : static_cast<int>(block_levels_[0].size());
+    nlev_ = block_levels_.empty() ? 0 : static_cast<int>(block_levels_[0].size());
     if (nlev_ == 0)
       throw std::runtime_error("AmrSystemCoupler: at least one level (coarse) required");
     // EXACT layout consistency between blocks (the aux is shared per level): same number of
@@ -198,10 +196,11 @@ class AmrSystemCoupler {
     aux_ncomp_ = system_aux_comps(system_);
     aux_.resize(nlev_);
     for (int k = 0; k < nlev_; ++k)
-      aux_[k] = MultiFab(block_levels_[0][k].U.box_array(),
-                         block_levels_[0][k].U.dmap(), aux_ncomp_, 1);
+      aux_[k] =
+          MultiFab(block_levels_[0][k].U.box_array(), block_levels_[0][k].U.dmap(), aux_ncomp_, 1);
     for (auto& levels : block_levels_)
-      for (int k = 0; k < nlev_; ++k) levels[k].aux = &aux_[k];
+      for (int k = 0; k < nlev_; ++k)
+        levels[k].aux = &aux_[k];
 
     // re-point each block to ITS coarse level (block.U() = coarse of the block).
     std::size_t b = 0;
@@ -295,7 +294,8 @@ class AmrSystemCoupler {
       // at the first macro-step (macro_step_=0, old condition 0%stride==0 true),
       // which put the slow block IN THE FUTURE relative to the fast blocks.
       // stride=1: (macro_step_+1)%1==0 always true -> every step, bit-identical.
-      if ((macro_step_ + 1) % stride != 0) return;
+      if ((macro_step_ + 1) % stride != 0)
+        return;
       const Real bdt = dt * static_cast<Real>(stride);
       auto& levels = block_levels_[bi];
       if constexpr (treatment == TimeTreatment::Explicit) {
@@ -303,7 +303,8 @@ class AmrSystemCoupler {
         for (int s = 0; s < n; ++s) {
           // PerSubstep: re-solves phi before each subsequent substep (the charge has
           // moved); the first reuses the head solve. OncePerStep: phi frozen.
-          if (cadence_ == PoissonCadence::PerSubstep && s > 0) solve_fields();
+          if (cadence_ == PoissonCadence::PerSubstep && s > 0)
+            solve_fields();
           advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
               block.model, levels, dom_, h, base_per_, replicated_coarse_);
         }
@@ -314,8 +315,8 @@ class AmrSystemCoupler {
         // the callback. Pure implicit: everything to the callback (no transport).
         if constexpr (treatment == TimeTreatment::IMEX)
           advance_amr<typename Disc::Limiter, typename Disc::NumericalFlux>(
-              SourceFreeModel<typename Block::Model>{block.model}, levels, dom_, bdt,
-              base_per_, replicated_coarse_);
+              SourceFreeModel<typename Block::Model>{block.model}, levels, dom_, bdt, base_per_,
+              replicated_coarse_);
         implicit_advance(*this, block, levels, bdt);
       }
     });
@@ -377,8 +378,8 @@ class AmrSystemCoupler {
     Real M = 0;
     for (int li = 0; li < U.local_size(); ++li) {
       const ConstArray4 u = U.fab(li).const_array();
-      M += for_each_cell_reduce_sum(
-          U.box(li), [u, dV] ADC_HD(int i, int j) { return u(i, j, 0) * dV; });
+      M += for_each_cell_reduce_sum(U.box(li),
+                                    [u, dV] ADC_HD(int i, int j) { return u(i, j, 0) * dV; });
     }
     return replicated_coarse_ ? M : all_reduce_sum(M);
   }
@@ -397,7 +398,8 @@ class AmrSystemCoupler {
     sys.for_each_block([&](const auto& b) {
       using Model = std::decay_t<decltype(b.model)>;
       const int c = aux_comps<Model>();
-      if (c > w) w = c;
+      if (c > w)
+        w = c;
     });
     return w;
   }
@@ -414,7 +416,8 @@ class AmrSystemCoupler {
   // block reads B_z) or if bz_ is empty: RUNTIME guard (the width is only known at construction) ->
   // base model strictly bit-identical to history.
   void fill_bz() {
-    if (!bz_ || aux_ncomp_ <= kAuxBaseComps) return;
+    if (!bz_ || aux_ncomp_ <= kAuxBaseComps)
+      return;
     for (int k = 0; k < nlev_; ++k) {
       const Geometry gk = geom_.refine(1 << k);  // geometry of level k (dx = dx_coarse / 2^k)
       MultiFab& A = aux_[k];
@@ -437,7 +440,8 @@ class AmrSystemCoupler {
   Elliptic mg_;
   std::vector<std::vector<AmrLevelMP>> block_levels_;  // [block][level]
   std::vector<MultiFab> aux_;                          // [level], shared
-  int aux_ncomp_ = kAuxBaseComps;  // width of the shared aux channel (max aux_comps over the blocks)
+  int aux_ncomp_ =
+      kAuxBaseComps;  // width of the shared aux channel (max aux_comps over the blocks)
   int nlev_ = 0;
   std::function<Real(Real, Real)> bz_;  // external B_z(x, y) (empty if not provided)
 };

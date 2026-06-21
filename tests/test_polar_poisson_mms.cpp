@@ -62,15 +62,31 @@ static constexpr double kRmax = 1.00;
 //   L[S]            = S'' + S'/r   (S lineaire -> S''=0, S'/r non nul : terme radial non trivial)
 //   L[H cos(m th)]  = (H'' + H'/r - m^2 H / r^2) cos(m theta)
 // =================================================================================================
-static double aS() { return kPiL / (kRmax - kRmin); }
-static double S(double r) { return 1.0 + 0.5 * (r - kRmin); }
-static double Sp(double /*r*/) { return 0.5; }
-static double Spp(double /*r*/) { return 0.0; }
-static double H(double r) { return std::sin(aS() * (r - kRmin)); }
-static double Hp(double r) { return aS() * std::cos(aS() * (r - kRmin)); }
-static double Hpp(double r) { return -aS() * aS() * std::sin(aS() * (r - kRmin)); }
+static double aS() {
+  return kPiL / (kRmax - kRmin);
+}
+static double S(double r) {
+  return 1.0 + 0.5 * (r - kRmin);
+}
+static double Sp(double /*r*/) {
+  return 0.5;
+}
+static double Spp(double /*r*/) {
+  return 0.0;
+}
+static double H(double r) {
+  return std::sin(aS() * (r - kRmin));
+}
+static double Hp(double r) {
+  return aS() * std::cos(aS() * (r - kRmin));
+}
+static double Hpp(double r) {
+  return -aS() * aS() * std::sin(aS() * (r - kRmin));
+}
 
-static double phi_dir(double r, double th, int m) { return S(r) + H(r) * std::cos(m * th); }
+static double phi_dir(double r, double th, int m) {
+  return S(r) + H(r) * std::cos(m * th);
+}
 static double f_dir(double r, double th, int m) {
   const double lS = Spp(r) + Sp(r) / r;
   const double lH = (Hpp(r) + Hp(r) / r - (double)m * m * H(r) / (r * r)) * std::cos(m * th);
@@ -83,10 +99,18 @@ static double f_dir(double r, double th, int m) {
 //   G(r) = cos(b (r - r_min)),  b = pi / (r_max - r_min)  -> G'(r_min) = G'(r_max) = 0 (sin(0)=sin(pi)=0)
 //   K(r) = (r - r_min)^2 (r - r_max)^2  -> K'(r_min) = K'(r_max) = 0 (racine double a chaque bord)
 // =================================================================================================
-static double bN() { return kPiL / (kRmax - kRmin); }
-static double G(double r) { return std::cos(bN() * (r - kRmin)); }
-static double Gp(double r) { return -bN() * std::sin(bN() * (r - kRmin)); }
-static double Gpp(double r) { return -bN() * bN() * std::cos(bN() * (r - kRmin)); }
+static double bN() {
+  return kPiL / (kRmax - kRmin);
+}
+static double G(double r) {
+  return std::cos(bN() * (r - kRmin));
+}
+static double Gp(double r) {
+  return -bN() * std::sin(bN() * (r - kRmin));
+}
+static double Gpp(double r) {
+  return -bN() * bN() * std::cos(bN() * (r - kRmin));
+}
 static double K(double r) {
   const double u = r - kRmin, w = r - kRmax;
   return u * u * w * w;
@@ -99,7 +123,9 @@ static double Kpp(double r) {
   const double u = r - kRmin, w = r - kRmax;
   return 2 * w * w + 8 * u * w + 2 * u * u;
 }
-static double phi_neu(double r, double th, int m) { return G(r) + K(r) * std::cos(m * th); }
+static double phi_neu(double r, double th, int m) {
+  return G(r) + K(r) * std::cos(m * th);
+}
 static double f_neu(double r, double th, int m) {
   const double lG = Gpp(r) + Gp(r) / r;
   const double lK = (Kpp(r) + Kp(r) / r - (double)m * m * K(r) / (r * r)) * std::cos(m * th);
@@ -108,7 +134,10 @@ static double f_neu(double r, double th, int m) {
 
 // Erreur L2 (ponderee volume r dr dtheta) entre phi numerique et phi exact. @p subtract_mean :
 // retire la moyenne (jauge) des deux champs avant de comparer (cas Neumann pur, defini modulo cste).
-struct ErrL2 { double l2; double linf; };
+struct ErrL2 {
+  double l2;
+  double linf;
+};
 template <class PhiExact>
 static ErrL2 err_vs_exact(const MultiFab& phi, const PolarGeometry& g, const Box2D& dom,
                           PhiExact phi_exact, bool subtract_mean) {
@@ -134,7 +163,8 @@ static ErrL2 err_vs_exact(const MultiFab& phi, const PolarGeometry& g, const Box
           (p(i, j, 0) - mean_num) - (phi_exact(g.r_cell(i), g.theta_cell(j)) - mean_ex);
       l2 += e * e * w;
       vol2 += w;
-      if (std::fabs(e) > linf) linf = std::fabs(e);
+      if (std::fabs(e) > linf)
+        linf = std::fabs(e);
     }
   return {std::sqrt(l2 / vol2), linf};
 }
@@ -164,9 +194,9 @@ static void solve_case(int nr, int nth, int m, const BCRec& bc, PhiExact phi_exa
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
       rhs(i, j, 0) = f_exact(g.r_cell(i), g.theta_cell(j), m);
   solver.solve();
-  err = err_vs_exact(solver.phi(), g, dom, [phi_exact, m](double r, double th) {
-    return phi_exact(r, th, m);
-  }, subtract_mean);
+  err = err_vs_exact(
+      solver.phi(), g, dom, [phi_exact, m](double r, double th) { return phi_exact(r, th, m); },
+      subtract_mean);
   res = solver.residual();
 }
 
@@ -176,7 +206,10 @@ int main() {
               kRmin, kRmax);
   bool ok = true;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("  ECHEC %s\n", w); ok = false; }
+    if (!c) {
+      std::printf("  ECHEC %s\n", w);
+      ok = false;
+    }
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -247,6 +280,7 @@ int main() {
   chk(resD[2] < 1e-9, "residuD_arrondi");
 
   std::printf("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
-  if (ok) std::printf("OK test_polar_poisson_mms\n");
+  if (ok)
+    std::printf("OK test_polar_poisson_mms\n");
   return ok ? 0 : 1;
 }

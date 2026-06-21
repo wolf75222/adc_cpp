@@ -25,7 +25,7 @@
 #include <adc/mesh/mf_arith.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/mesh/refinement.hpp>  // coarsen_index
+#include <adc/mesh/refinement.hpp>              // coarsen_index
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
 #include <adc/parallel/comm.hpp>
 
@@ -76,7 +76,10 @@ static_assert(aux_comps<AdvectX>() == kAuxBaseComps, "AdvectX reste au contrat d
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int NC = 16;
@@ -95,23 +98,27 @@ int main() {
   {
     const Real u0 = Real(2);
     MultiFab Uc(ba_coarse, dm, 1, 2), Uf(ba_fine, dm, 1, 2);
-    Uc.set_val(u0);  Uf.set_val(u0);
+    Uc.set_val(u0);
+    Uf.set_val(u0);
 
     // aux ALLOUE A 4 COMP (aux_comps<BzGrow>()) : phi/grad = 0, B_z = c (comp 3). Sans cette
     // largeur, load_aux<4> dans la source AMR lirait hors borne ; ici la place existe.
     MultiFab auxc(ba_coarse, dm, aux_comps<BzGrow>(), 1);
     MultiFab auxf(ba_fine, dm, aux_comps<BzGrow>(), 1);
     chk(auxc.ncomp() == 4 && auxf.ncomp() == 4, "amr_aux_allocated_width_4");
-    auxc.set_val(Real(0));  auxf.set_val(Real(0));
+    auxc.set_val(Real(0));
+    auxf.set_val(Real(0));
     auto set_bz = [&](MultiFab& A) {
       for (int li = 0; li < A.local_size(); ++li) {
         Fab2D& f = A.fab(li);
         const Box2D g = f.grown_box();
         for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-          for (int i = g.lo[0]; i <= g.hi[0]; ++i) f(i, j, 3) = c;  // B_z = comp 3
+          for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+            f(i, j, 3) = c;  // B_z = comp 3
       }
     };
-    set_bz(auxc);  set_bz(auxf);
+    set_bz(auxc);
+    set_bz(auxf);
 
     std::vector<AmrLevelMP> L;
     L.push_back(AmrLevelMP{std::move(Uc), &auxc, dxc, dyc});
@@ -155,9 +162,11 @@ int main() {
           }
       }
     };
-    fillp(Uc, 1);  fillp(Uf, 2);
+    fillp(Uc, 1);
+    fillp(Uf, 2);
     MultiFab auxc(ba_coarse, dm, 3, 1), auxf(ba_fine, dm, 3, 1);  // largeur 3 (base)
-    auxc.set_val(Real(0));  auxf.set_val(Real(0));
+    auxc.set_val(Real(0));
+    auxf.set_val(Real(0));
     chk(auxc.ncomp() == 3, "base_aux_width_3");
 
     std::vector<AmrLevelMP> L;
@@ -178,8 +187,10 @@ int main() {
     const Real u0 = Real(2);
     MultiFab UgC(ba_coarse, dm, 1, 2), UgF(ba_fine, dm, 1, 2);  // bloc BzGrow
     MultiFab UbC(ba_coarse, dm, 1, 2), UbF(ba_fine, dm, 1, 2);  // bloc base
-    UgC.set_val(u0);  UgF.set_val(u0);
-    UbC.set_val(Real(1));  UbF.set_val(Real(1));
+    UgC.set_val(u0);
+    UgF.set_val(u0);
+    UbC.set_val(Real(1));
+    UbF.set_val(Real(1));
 
     BzBlk g{"grow", BzGrow{}, UgC, BCRec{}};
     BaseBlk b{"base", AdvectX{Real(0)}, UbC, BCRec{}};  // v=0 : pas de transport, source nulle
@@ -213,7 +224,8 @@ int main() {
         Fab2D& f = A.fab(li);
         const Box2D gb = f.grown_box();
         for (int j = gb.lo[1]; j <= gb.hi[1]; ++j)
-          for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) f(i, j, 3) = c;
+          for (int i = gb.lo[0]; i <= gb.hi[0]; ++i)
+            f(i, j, 3) = c;
       }
     }
 
@@ -228,6 +240,7 @@ int main() {
     chk(std::fabs(mb1 - mb0) < Real(1e-12), "amr_system_base_block_inert");
   }
 
-  if (fails == 0) std::printf("test_amr_aux_bz: OK\n");
+  if (fails == 0)
+    std::printf("test_amr_aux_bz: OK\n");
   return fails == 0 ? 0 : 1;
 }

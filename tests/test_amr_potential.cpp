@@ -42,12 +42,12 @@ static std::vector<double> blob(int n, double& mean_out) {
 
 static ModelSpec exb_background(double n0) {
   ModelSpec spec;
-  spec.transport = "exb";          // derive E x B (a divergence nulle)
-  spec.source = "none";            // pas de force source
-  spec.elliptic = "background";    // f = alpha (n - n0) : fond neutralisant
+  spec.transport = "exb";        // derive E x B (a divergence nulle)
+  spec.source = "none";          // pas de force source
+  spec.elliptic = "background";  // f = alpha (n - n0) : fond neutralisant
   spec.B0 = 1.0;
   spec.alpha = 1.0;
-  spec.n0 = n0;                    // fond = moyenne -> source d'integrale nulle (Poisson periodique)
+  spec.n0 = n0;  // fond = moyenne -> source d'integrale nulle (Poisson periodique)
   return spec;
 }
 
@@ -64,7 +64,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // --- AmrSystem SANS raffinement : un seul niveau grossier mono-box couvrant tout le domaine ---
@@ -87,7 +90,8 @@ int main(int argc, char** argv) {
   bool all_finite = true;
   double pmin = pa.empty() ? 0 : pa[0], pmax = pa.empty() ? 0 : pa[0], psum = 0;
   for (double v : pa) {
-    if (!std::isfinite(v)) all_finite = false;
+    if (!std::isfinite(v))
+      all_finite = false;
     pmin = std::fmin(pmin, v);
     pmax = std::fmax(pmax, v);
     psum += v;
@@ -116,7 +120,8 @@ int main(int argc, char** argv) {
   // compare apres recentrage sur la moyenne. Tolerance MG : meme operateur, meme rhs, meme box ->
   // l'ecart vient des iterations MG (rel_tol), pas du modele. Borne large mais discriminante.
   double smean = 0;
-  for (double v : ps) smean += v;
+  for (double v : ps)
+    smean += v;
   smean /= (static_cast<double>(n) * n);
   double dmax = 0, ref = 0;
   for (std::size_t k = 0; k < pa.size() && k < ps.size(); ++k) {
@@ -134,7 +139,8 @@ int main(int argc, char** argv) {
   bool finite2 = true;
   double p2min = pa2[0], p2max = pa2[0];
   for (double v : pa2) {
-    if (!std::isfinite(v)) finite2 = false;
+    if (!std::isfinite(v))
+      finite2 = false;
     p2min = std::fmin(p2min, v);
     p2max = std::fmax(p2max, v);
   }

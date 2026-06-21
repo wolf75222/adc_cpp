@@ -35,7 +35,8 @@ static double host_sum(const MultiFab& mf, int comp) {
     const Fab2D& f = mf.fab(li);
     const Box2D b = f.box();
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) s += f(i, j, comp);
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        s += f(i, j, comp);
   }
   return s;
 }
@@ -82,8 +83,7 @@ int main() {
     MultiFab mf(ba, dm, 1, 0);
     for (int li = 0; li < mf.local_size(); ++li) {
       Array4 a = mf.fab(li).array();
-      for_each_cell(mf.box(li),
-                    [a] ADC_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
+      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
     }
     device_fence();
     const double ref = host_sum(mf, 0);
@@ -142,6 +142,7 @@ int main() {
     chk(norm_inf(mf, 0) == norm_inf(mf, 0), "norm_inf_idempotent");
   }
 
-  if (fails == 0) std::printf("OK test_reduce\n");
+  if (fails == 0)
+    std::printf("OK test_reduce\n");
   return fails == 0 ? 0 : 1;
 }

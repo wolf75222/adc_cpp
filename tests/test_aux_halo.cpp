@@ -43,7 +43,8 @@ int main() {
       const Box2D v = mf.box(li);
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
         for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-          for (int c = 0; c < nc; ++c) a(i, j, c) = Real(c * 100 + i);
+          for (int c = 0; c < nc; ++c)
+            a(i, j, c) = Real(c * 100 + i);
     }
   };
   seed();
@@ -73,7 +74,8 @@ int main() {
   {
     const ConstArray4 a = mf.fab(0).const_array();
     // comp 5 xlo ghost: dirichlet mirror at 2*lo - i - 1 = 0 -> 2 V - a(0, j, 5) = 14 - 500 = -486.
-    chk(std::fabs(a(-1, 0, 5) - (2 * V - Real(500))) < 1e-12, "dirichlet comp5 xlo ghost == 2V - interior");
+    chk(std::fabs(a(-1, 0, 5) - (2 * V - Real(500))) < 1e-12,
+        "dirichlet comp5 xlo ghost == 2V - interior");
     // comp 0 must be UNCHANGED by the comp-5 override (still foextrap from step 1).
     chk(std::fabs(a(-1, 0, 0) - Real(0)) < 1e-12, "comp0 unchanged by comp-5 override");
     // and the named field's halo now genuinely differs from the shared one.
@@ -88,11 +90,14 @@ int main() {
     shared.xlo = shared.xhi = BCType::Foextrap;
     shared.ylo = shared.yhi = BCType::Periodic;
     const BCRec ov = aux_halo_override(shared, AuxHaloPolicy{BCType::Dirichlet, Real(3)});
-    chk(ov.xlo == BCType::Dirichlet && std::fabs(ov.xlo_val - Real(3)) < 1e-12, "override: xlo -> dirichlet(3)");
-    chk(ov.xhi == BCType::Dirichlet && std::fabs(ov.xhi_val - Real(3)) < 1e-12, "override: xhi -> dirichlet(3)");
+    chk(ov.xlo == BCType::Dirichlet && std::fabs(ov.xlo_val - Real(3)) < 1e-12,
+        "override: xlo -> dirichlet(3)");
+    chk(ov.xhi == BCType::Dirichlet && std::fabs(ov.xhi_val - Real(3)) < 1e-12,
+        "override: xhi -> dirichlet(3)");
     chk(ov.ylo == BCType::Periodic && ov.yhi == BCType::Periodic, "override: theta stays periodic");
   }
 
-  if (fails == 0) std::printf("OK test_aux_halo\n");
+  if (fails == 0)
+    std::printf("OK test_aux_halo\n");
   return fails == 0 ? 0 : 1;
 }

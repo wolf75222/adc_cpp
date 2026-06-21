@@ -82,7 +82,8 @@ int main() {
     m.nu = 0.0;
     init();
     const double a0 = amp(), mass0 = sum(U);
-    for (int s = 0; s < 50; ++s) advance_ssprk2(m, U, aux, geom, bc, 1e-3);
+    for (int s = 0; s < 50; ++s)
+      advance_ssprk2(m, U, aux, geom, bc, 1e-3);
     chk(std::fabs(amp() - a0) < 1e-12, "nu0_static");
     chk(std::fabs(sum(U) - mass0) < 1e-10, "nu0_mass");
   }
@@ -95,18 +96,19 @@ int main() {
     const double a0 = amp(), mass0 = sum(U);
     const double dt = 1e-3;
     const int K = 300;
-    for (int s = 0; s < K; ++s) advance_ssprk2(m, U, aux, geom, bc, dt);
+    for (int s = 0; s < K; ++s)
+      advance_ssprk2(m, U, aux, geom, bc, dt);
     const double t = K * dt;
     const double lambda = nu * (2.0 - 2.0 * std::cos(k * dx)) / (dx * dx);
     const double a_th = a0 * std::exp(-lambda * t);
     const double rel = std::fabs(amp() - a_th) / std::fabs(a_th);
-    std::printf("  diffusion: A/A0=%.4f  theorie=%.4f  err=%.2e\n", amp() / a0,
-                a_th / a0, rel);
+    std::printf("  diffusion: A/A0=%.4f  theorie=%.4f  err=%.2e\n", amp() / a0, a_th / a0, rel);
     chk(rel < 0.02, "heat_decay_matches_theory");
     chk(amp() < 0.7 * a0, "heat_decays");
     chk(std::fabs(sum(U) - mass0) < 1e-9, "heat_mass_conserved");
   }
 
-  if (fails == 0) std::printf("OK test_diffusion\n");
+  if (fails == 0)
+    std::printf("OK test_diffusion\n");
   return fails == 0 ? 0 : 1;
 }

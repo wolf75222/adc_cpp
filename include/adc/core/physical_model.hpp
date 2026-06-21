@@ -79,8 +79,7 @@ ADC_HD constexpr int aux_comps() {
 /// Do not confuse with HyperbolicPhysicalModel which adds the variables and conversions.
 template <class M>
 concept PhysicalModel =
-    requires(const M m, const typename M::State u, const typename M::Aux a,
-             int dir) {
+    requires(const M m, const typename M::State u, const typename M::Aux a, int dir) {
       typename M::State;
       typename M::Aux;
       requires std::same_as<typename M::Aux, Aux>;
@@ -129,10 +128,9 @@ concept PhysicalModel =
 
 /// OPTIONAL trait: stability speed lambda* replacing max_wave_speed in the block CFL.
 template <class M>
-concept HasStabilitySpeed =
-    requires(const M m, const typename M::State u, const Aux a, int dir) {
-      { m.stability_speed(u, a, dir) } -> std::convertible_to<Real>;
-    };
+concept HasStabilitySpeed = requires(const M m, const typename M::State u, const Aux a, int dir) {
+  { m.stability_speed(u, a, dir) } -> std::convertible_to<Real>;
+};
 
 /// OPTIONAL trait: local source frequency mu [1/s] (bound dt <= cfl / max mu, without h).
 template <class M>
@@ -167,8 +165,7 @@ concept HasPointwiseProjection = requires(const M m, const typename M::State u, 
 /// The spatial operator then reconstructs in primitive form (more robust: rho/p positivity).
 template <class M>
 concept HasPrimitiveVars =
-    PhysicalModel<M> &&
-    requires(const M m, const typename M::State u, const typename M::Prim p) {
+    PhysicalModel<M> && requires(const M m, const typename M::State u, const typename M::Prim p) {
       typename M::Prim;
       { m.to_primitive(u) } -> std::same_as<typename M::Prim>;
       { m.to_conservative(p) } -> std::same_as<typename M::State>;

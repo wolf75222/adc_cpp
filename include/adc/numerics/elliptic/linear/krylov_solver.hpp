@@ -41,9 +41,9 @@ namespace adc {
 
 // Result of a BiCGStab solve: iterations performed, final relative residual, convergence flag.
 struct KrylovResult {
-  int iters = 0;          ///< number of BiCGStab iterations performed
-  Real rel_residual = 0;  ///< ||r_final|| / ||r_0|| (global L2 norm)
-  bool converged = false; ///< true if rel_residual <= rel_tol reached
+  int iters = 0;           ///< number of BiCGStab iterations performed
+  Real rel_residual = 0;   ///< ||r_final|| / ||r_0|| (global L2 norm)
+  bool converged = false;  ///< true if rel_residual <= rel_tol reached
 };
 
 // Matrix-free BiCGStab, preconditioned by N V-cycles of GeometricMG on the SYMMETRIC part.
@@ -63,12 +63,21 @@ class TensorKrylovSolver {
  public:
   // @p n_precond_vcycles: number N of MG V-cycles per preconditioner application (1 or 2).
   TensorKrylovSolver(GeometricMG& op, GeometricMG& precond, int n_precond_vcycles = 1)
-      : op_(op), precond_(precond), n_precond_(n_precond_vcycles),
-        ba_(op.box_array()), dm_(op.dmap()),
-        r_(ba_, dm_, 1, 0), rhat_(ba_, dm_, 1, 0), p_(ba_, dm_, 1, 0),
-        v_(ba_, dm_, 1, 0), s_(ba_, dm_, 1, 0), t_(ba_, dm_, 1, 0),
-        phat_(ba_, dm_, 1, 1), shat_(ba_, dm_, 1, 1),
-        op_offset_(ba_, dm_, 1, 0), bc_offset_(ba_, dm_, 1, 0) {
+      : op_(op),
+        precond_(precond),
+        n_precond_(n_precond_vcycles),
+        ba_(op.box_array()),
+        dm_(op.dmap()),
+        r_(ba_, dm_, 1, 0),
+        rhat_(ba_, dm_, 1, 0),
+        p_(ba_, dm_, 1, 0),
+        v_(ba_, dm_, 1, 0),
+        s_(ba_, dm_, 1, 0),
+        t_(ba_, dm_, 1, 0),
+        phat_(ba_, dm_, 1, 1),
+        shat_(ba_, dm_, 1, 1),
+        op_offset_(ba_, dm_, 1, 0),
+        bc_offset_(ba_, dm_, 1, 0) {
     // op_ and precond_ MUST be distinct: apply_precond overwrites precond_.rhs()/phi() at every
     // iteration; confusing them with op_ would overwrite the iterate and the right-hand side of the solve (see header).
     assert(&op_ != &precond_ && "TensorKrylovSolver: op and precond must be distinct objects");
@@ -80,7 +89,7 @@ class TensorKrylovSolver {
   const Geometry& geom() const { return op_.geom(); }
   // current GLOBAL L2 residual ||rhs - L_int(phi)|| (collective). L2 counterpart of GeometricMG's norm_inf.
   Real residual() {
-    apply_operator(phi(), r_);          // r_ = L_int(phi)
+    apply_operator(phi(), r_);                  // r_ = L_int(phi)
     lincomb(r_, Real(1), rhs(), Real(-1), r_);  // r_ = rhs - L_int(phi)
     return l2_norm(r_);
   }
@@ -95,14 +104,17 @@ class TensorKrylovSolver {
     // equivalent linear system is L_lin x = rhs - c_bc (c_bc = apply_operator(0)); since
     // r0 = rhs - apply_operator(phi) = (rhs - c_bc) - L_lin(phi), r0 is UNCHANGED. The IN-LOOP matvecs,
     // by contrast, act on correction DIRECTIONS and must be LINEAR (apply_operator_lin).
-    apply_operator(phi(), v_);                       // v_ = L_int(phi)
-    lincomb(r_, Real(1), rhs(), Real(-1), v_);       // r_ = rhs - L_int(phi)
+    apply_operator(phi(), v_);                  // v_ = L_int(phi)
+    lincomb(r_, Real(1), rhs(), Real(-1), v_);  // r_ = rhs - L_int(phi)
     const Real bnorm = l2_norm(rhs());
     const Real norm0 = bnorm > Real(0) ? bnorm : Real(1);  // relative base (zero rhs -> absolute)
     Real rnorm = l2_norm(r_);
     KrylovResult res;
     res.rel_residual = rnorm / norm0;
-    if (rnorm <= rel_tol * norm0) { res.converged = true; return res; }  // already converged
+    if (rnorm <= rel_tol * norm0) {
+      res.converged = true;
+      return res;
+    }  // already converged
 
     // rhat = frozen r0 (BiCGStab shadow vector); p, v <- 0.
     copy_into(rhat_, r_);
@@ -120,13 +132,17 @@ class TensorKrylovSolver {
       }
       const Real beta = (rho / rho_prev) * (alpha / omega);
       // p <- r + beta (p - omega v)
-      lincomb(p_, Real(1), p_, -omega, v_);     // p <- p - omega v
-      lincomb(p_, beta, p_, Real(1), r_);       // p <- r + beta p
+      lincomb(p_, Real(1), p_, -omega, v_);  // p <- p - omega v
+      lincomb(p_, beta, p_, Real(1), r_);    // p <- r + beta p
       // phat = M^{-1} p  (N MG V-cycles on the symmetric part)
       apply_precond(p_, phat_);
-      apply_operator_lin(phat_, v_);            // v = L_lin(phat) (LINEAR matvec: phat is a direction)
-      const Real rhat_dot_v = dot(rhat_, v_);   // COLLECTIVE
-      if (std::fabs(rhat_dot_v) < kTiny) { res.iters = k - 1; res.rel_residual = rnorm / norm0; return res; }
+      apply_operator_lin(phat_, v_);  // v = L_lin(phat) (LINEAR matvec: phat is a direction)
+      const Real rhat_dot_v = dot(rhat_, v_);  // COLLECTIVE
+      if (std::fabs(rhat_dot_v) < kTiny) {
+        res.iters = k - 1;
+        res.rel_residual = rnorm / norm0;
+        return res;
+      }
       alpha = rho / rhat_dot_v;
       // s <- r - alpha v
       lincomb(s_, Real(1), r_, -alpha, v_);
@@ -135,12 +151,15 @@ class TensorKrylovSolver {
       const Real snorm = l2_norm(s_);
       if (snorm <= rel_tol * norm0) {  // convergence at mid-iteration
         rnorm = snorm;
-        res.iters = k; res.rel_residual = rnorm / norm0; res.converged = true; return res;
+        res.iters = k;
+        res.rel_residual = rnorm / norm0;
+        res.converged = true;
+        return res;
       }
       // shat = M^{-1} s; t = L_lin(shat) (LINEAR matvec: shat is a correction direction)
       apply_precond(s_, shat_);
       apply_operator_lin(shat_, t_);
-      const Real tt = dot(t_, t_);              // COLLECTIVE
+      const Real tt = dot(t_, t_);  // COLLECTIVE
       omega = tt > kTiny ? dot(t_, s_) / tt : Real(0);
       // phi <- phi + omega shat; r <- s - omega t
       saxpy(phi(), omega, shat_);
@@ -148,7 +167,10 @@ class TensorKrylovSolver {
       rnorm = l2_norm(r_);
       res.iters = k;
       res.rel_residual = rnorm / norm0;
-      if (rnorm <= rel_tol * norm0) { res.converged = true; return res; }
+      if (rnorm <= rel_tol * norm0) {
+        res.converged = true;
+        return res;
+      }
       rho_prev = rho;
     }
     return res;  // max_iters reached without convergence: best effort (converged=false)
@@ -170,7 +192,8 @@ class TensorKrylovSolver {
     apply_laplacian(in, op_.geom(), out, op_.op_coef(), op_.op_eps(), op_.op_kappa(),
                     op_.op_eps_y(), op_.op_a_xy(), op_.op_a_yx());
     // conductor cells (mask==0): L_int is 0 there (Dirichlet phi=0), like poisson_residual.
-    if (const MultiFab* mk = op_.op_mask()) mask_zero(out, *mk);
+    if (const MultiFab* mk = op_.op_mask())
+      mask_zero(out, *mk);
   }
 
   // LINEAR MATRIX-FREE matvec: out = L_lin(in) = apply_operator(in) - c_bc, with c_bc =
@@ -181,7 +204,8 @@ class TensorKrylovSolver {
   // Dirichlet BC => has_op_offset_ stays false => apply_operator_lin == apply_operator, bit-identical.
   void apply_operator_lin(MultiFab& in, MultiFab& out) {
     apply_operator(in, out);
-    if (has_op_offset_) lincomb(out, Real(1), out, Real(-1), op_offset_);  // out <- L_lin(in)
+    if (has_op_offset_)
+      lincomb(out, Real(1), out, Real(-1), op_offset_);  // out <- L_lin(in)
   }
 
   // preconditioner M^{-1}: out = (N MG V-cycles on the symmetric part) applied to in, with HOMOGENEOUS
@@ -208,7 +232,8 @@ class TensorKrylovSolver {
   // has_bc_offset_ stays false => path STRICTLY UNCHANGED (no subtraction), bit-identical.
   void apply_precond(MultiFab& in, MultiFab& out) {
     precond_raw(in, out);
-    if (has_bc_offset_) lincomb(out, Real(1), out, Real(-1), bc_offset_);  // out <- M^{-1} in (homogeneous)
+    if (has_bc_offset_)
+      lincomb(out, Real(1), out, Real(-1), bc_offset_);  // out <- M^{-1} in (homogeneous)
   }
 
   // RAW V-cycle of the preconditioner: out = (N MG V-cycles) applied to in, starting from phi=0. AFFINE in in
@@ -216,7 +241,8 @@ class TensorKrylovSolver {
   void precond_raw(MultiFab& in, MultiFab& out) {
     copy_into(precond_.rhs(), in);
     precond_.phi().set_val(Real(0));
-    for (int i = 0; i < n_precond_; ++i) precond_.vcycle();
+    for (int i = 0; i < n_precond_; ++i)
+      precond_.vcycle();
     copy_into(out, precond_.phi());
   }
 
@@ -228,18 +254,20 @@ class TensorKrylovSolver {
   // of apply_operator) as the NULL input; phat_ is overwritten at the 1st iteration (apply_precond(p_, phat_)).
   void prepare_solve() {
     auto inhomog = [](const BCRec& b) {
-      return b.xlo_val != Real(0) || b.xhi_val != Real(0) ||
-             b.ylo_val != Real(0) || b.yhi_val != Real(0);
+      return b.xlo_val != Real(0) || b.xhi_val != Real(0) || b.ylo_val != Real(0) ||
+             b.yhi_val != Real(0);
     };
     has_op_offset_ = inhomog(op_.bc());
     has_bc_offset_ = inhomog(precond_.bc());
     if (has_op_offset_) {
-      phat_.set_val(Real(0));            // null input (1 ghost for fill_ghosts; phat_ overwritten afterward)
-      apply_operator(phat_, op_offset_); // op_offset_ <- apply_operator(0) = c_bc (inhomogeneous boundary part)
+      phat_.set_val(Real(0));  // null input (1 ghost for fill_ghosts; phat_ overwritten afterward)
+      apply_operator(
+          phat_,
+          op_offset_);  // op_offset_ <- apply_operator(0) = c_bc (inhomogeneous boundary part)
     }
     if (has_bc_offset_) {
       phat_.set_val(Real(0));
-      precond_raw(phat_, bc_offset_);    // bc_offset_ <- precond_raw(0) = d_bc
+      precond_raw(phat_, bc_offset_);  // bc_offset_ <- precond_raw(0) = d_bc
     }
   }
 
@@ -271,10 +299,10 @@ class TensorKrylovSolver {
   DistributionMapping dm_;
   MultiFab r_, rhat_, p_, v_, s_, t_;  // 0 ghost: pointwise ops
   MultiFab phat_, shat_;               // 1 ghost: inputs of apply_operator (fill_ghosts)
-  MultiFab op_offset_;                 // c_bc = apply_operator(0): inhomogeneous boundary part of the matvec
-  MultiFab bc_offset_;                 // d_bc = precond_raw(0): Dirichlet BC offset of the precond
-  bool has_op_offset_ = false;         // true if the operator BC carries a nonzero Dirichlet value
-  bool has_bc_offset_ = false;         // true if the preconditioner BC carries a nonzero value
+  MultiFab op_offset_;  // c_bc = apply_operator(0): inhomogeneous boundary part of the matvec
+  MultiFab bc_offset_;  // d_bc = precond_raw(0): Dirichlet BC offset of the precond
+  bool has_op_offset_ = false;  // true if the operator BC carries a nonzero Dirichlet value
+  bool has_bc_offset_ = false;  // true if the preconditioner BC carries a nonzero value
 };
 
 }  // namespace adc

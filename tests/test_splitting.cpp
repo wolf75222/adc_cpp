@@ -38,7 +38,8 @@ static void stepA(MultiFab& U, Real h) {
     Array4 a = U.fab(li).array();
     const Box2D b = U.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) += h * a(i, j, 1);
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 0) += h * a(i, j, 1);
   }
 }
 // flot exact exp(B h) : y += h x  ("source")
@@ -47,7 +48,8 @@ static void stepB(MultiFab& U, Real h) {
     Array4 a = U.fab(li).array();
     const Box2D b = U.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 1) += h * a(i, j, 0);
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 1) += h * a(i, j, 0);
   }
 }
 
@@ -83,7 +85,10 @@ static double run(bool strang, int n, double T, double x0, double y0) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const double T = 0.8, x0 = 1.0, y0 = 0.0;
@@ -99,6 +104,7 @@ int main() {
   chk(lOrder > 0.8 && lOrder < 1.3, "lie_ordre_1");
   chk(sE1 < lE1, "strang_plus_precis_que_lie");
 
-  if (fails == 0) std::printf("OK test_splitting\n");
+  if (fails == 0)
+    std::printf("OK test_splitting\n");
   return fails == 0 ? 0 : 1;
 }

@@ -63,10 +63,12 @@ int main() {
 
   // DECISIVE: four more V-cycles -- hundreds more sweeps, each with two fill_ghosts -- must add ZERO
   // schedule builds. If gs_rb_sweep re-enumerated the exchange per sweep, this would grow ~5x.
-  for (int c = 0; c < 4; ++c) mg.vcycle();
+  for (int c = 0; c < 4; ++c)
+    mg.vcycle();
   const std::int64_t builds_after_5 = halo_schedule_build_count();
   chk(builds_after_5 == builds_after_1,
-      "RB-GS reuses the cached halo schedule across sweeps and cycles (no per-sweep re-enumeration)");
+      "RB-GS reuses the cached halo schedule across sweeps and cycles (no per-sweep "
+      "re-enumeration)");
 
   // The first-cycle build count reflects distinct layouts (a few MG levels), NOT the sweep count: a
   // single cycle already runs nbottom=50 bottom sweeps, so a per-sweep rebuild would exceed 50.
@@ -77,10 +79,12 @@ int main() {
 
   // Sanity: the solve still converges (the cache must not have broken the smoother).
   const Real r0 = mg.current_residual();
-  for (int c = 0; c < 20; ++c) mg.vcycle();
+  for (int c = 0; c < 20; ++c)
+    mg.vcycle();
   chk(mg.current_residual() < 1e-6 * r0 || mg.current_residual() < 1e-10,
       "GeometricMG still converges with the cached smoother");
 
-  if (fails == 0) std::printf("OK test_poisson_smoother_cache\n");
+  if (fails == 0)
+    std::printf("OK test_poisson_smoother_cache\n");
   return fails ? 1 : 0;
 }

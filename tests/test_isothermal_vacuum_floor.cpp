@@ -80,7 +80,8 @@ int main() {
   {
     const IsothermalFluxPolar on{IsothermalFlux{cs2, Real(1e-3)}};
     const StateVec<3> s = on.polar_geom_source(uvac, Real(1.5));
-    chk(s[0] == Real(0) && std::isfinite(s[1]) && std::isfinite(s[2]), "polar_geom_finite_at_vacuum");
+    chk(s[0] == Real(0) && std::isfinite(s[1]) && std::isfinite(s[2]),
+        "polar_geom_finite_at_vacuum");
     const IsothermalFluxPolar off{IsothermalFlux{cs2, Real(0)}};
     StateVec<3> u{};
     u[0] = Real(2.0);
@@ -91,6 +92,7 @@ int main() {
     chk(so[1] == sn[1] && so[2] == sn[2], "polar_geom_eq_above_floor");
   }
 
-  if (fails == 0) std::printf("OK test_isothermal_vacuum_floor\n");
+  if (fails == 0)
+    std::printf("OK test_isothermal_vacuum_floor\n");
   return fails;
 }

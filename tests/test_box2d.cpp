@@ -34,12 +34,12 @@ int main() {
   Box2D a{{0, 0}, {5, 5}};
   Box2D d{{3, 3}, {9, 9}};
   Box2D in = a.intersect(d);  // [3..5] x [3..5]
-  chk(in.lo[0] == 3 && in.hi[0] == 5 && in.lo[1] == 3 && in.hi[1] == 5,
-      "intersect");
+  chk(in.lo[0] == 3 && in.hi[0] == 5 && in.lo[1] == 3 && in.hi[1] == 5, "intersect");
   chk(a.intersect(Box2D{{10, 10}, {12, 12}}).empty(), "intersect_empty");
 
   chk(a.contains(in) && !a.contains(d), "contains_box");
 
-  if (chk.fails() == 0) std::printf("OK test_box2d\n");
+  if (chk.fails() == 0)
+    std::printf("OK test_box2d\n");
   return chk.failed();
 }

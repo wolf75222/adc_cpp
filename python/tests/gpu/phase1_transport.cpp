@@ -73,7 +73,8 @@ int main(int argc, char** argv) {
       Array4 uu = U.fab(0).array();
       Array4 rr = R.fab(0).array();
       for_each_cell(U.box(0), [=] ADC_HD(int i, int j) {  // U += dt R, sur le device
-        for (int c = 0; c < 4; ++c) uu(i, j, c) += dt * rr(i, j, c);
+        for (int c = 0; c < 4; ++c)
+          uu(i, j, c) += dt * rr(i, j, c);
       });
     }
     device_fence();

@@ -63,7 +63,8 @@ class Checker {
     } else if (!cond) {
       std::printf("FAIL %s\n", label);
     }
-    if (!cond) ++fails_;
+    if (!cond)
+      ++fails_;
     return cond;
   }
 
@@ -111,7 +112,8 @@ bool close_rel(T a, T b, T rtol, T atol = T(1e-12)) {
 /// test_mpi_amr_*_parity). On somme x*x : invariant au signe, sensible a toute divergence numerique.
 inline double checksum(const std::vector<double>& v) {
   double s = 0;
-  for (double x : v) s += x * x;
+  for (double x : v)
+    s += x * x;
   return s;
 }
 

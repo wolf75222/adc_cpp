@@ -53,7 +53,10 @@ namespace adc {
 namespace detail {
 inline void mg_trace_mark(const char* w) {
   static const bool on = std::getenv("ADC_TRACE_SOLVE_FIELDS") != nullptr;
-  if (on) { std::fprintf(stderr, "[mg] %s\n", w); std::fflush(stderr); }
+  if (on) {
+    std::fprintf(stderr, "[mg] %s\n", w);
+    std::fflush(stderr);
+  }
 }
 
 // Copy component 0 of a fine field (discretized eps/eps_y/kappa) onto the MG fine level.
@@ -104,17 +107,23 @@ class GeometricMG {
   // (solve_robust LOCALLY doubles nu1/nu2 if the embedded boundary makes the cycle diverge, then restores them.)
   GeometricMG(const Geometry& geom, const BoxArray& ba, const BCRec& bc,
               std::function<bool(Real, Real)> active = {}, bool replicated = false,
-              int min_coarse = 2, int nu1 = 2, int nu2 = 2, int nbottom = 50,
-              bool cut_cell = false, std::function<Real(Real, Real)> levelset = {})
-      : bc_(bc), active_(std::move(active)), nu1_(nu1), nu2_(nu2),
-        nbottom_(nbottom), replicated_(replicated), cut_cell_(cut_cell),
+              int min_coarse = 2, int nu1 = 2, int nu2 = 2, int nbottom = 50, bool cut_cell = false,
+              std::function<Real(Real, Real)> levelset = {})
+      : bc_(bc),
+        active_(std::move(active)),
+        nu1_(nu1),
+        nu2_(nu2),
+        nbottom_(nbottom),
+        replicated_(replicated),
+        cut_cell_(cut_cell),
         levelset_(std::move(levelset)) {
     if (cut_cell_ && levelset_ && !active_)
       active_ = [ls = levelset_](Real x, Real y) { return ls(x, y) < Real(0); };
     add_level(geom, ba);
     while (true) {
       const Geometry g = lev_.back().geom;
-      if (g.domain.nx() % 2 || g.domain.ny() % 2) break;
+      if (g.domain.nx() % 2 || g.domain.ny() % 2)
+        break;
       if (g.domain.nx() / 2 < min_coarse || g.domain.ny() / 2 < min_coarse)
         break;
       // Stop if a box of the current level does not coarsen CLEANLY: on a MULTI-BOX domain
@@ -133,8 +142,12 @@ class GeometricMG {
       const BoxArray& cur = lev_.back().ba;
       bool coarsenable = true;
       for (int i = 0; i < cur.size(); ++i)
-        if (!(cur[i].coarsen(2).refine(2) == cur[i])) { coarsenable = false; break; }
-      if (!coarsenable) break;
+        if (!(cur[i].coarsen(2).refine(2) == cur[i])) {
+          coarsenable = false;
+          break;
+        }
+      if (!coarsenable)
+        break;
       Geometry gc{g.domain.coarsen(2), g.xlo, g.xhi, g.ylo, g.yhi};
       add_level(gc, coarsen(lev_.back().ba, 2));
     }
@@ -145,7 +158,7 @@ class GeometricMG {
     // buffer suffices). The bottom does not need them (early return from vcycle_rec) and its coarsen would
     // be degenerate (the very reason coarsening stops) -> not allocated.
     for (int l = 0; l + 1 < static_cast<int>(lev_.size()); ++l) {
-      lev_[l].corr  = MultiFab(lev_[l].ba, lev_[l].dm, 1, 0);
+      lev_[l].corr = MultiFab(lev_[l].ba, lev_[l].dm, 1, 0);
       lev_[l].cfine = MultiFab(coarsen(lev_[l].ba, 2), lev_[l].dm, 1, 0);
     }
     if (active_) {
@@ -186,7 +199,8 @@ class GeometricMG {
           for (int j = b.lo[1]; j <= b.hi[1]; ++j)
             for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
               if (m(i, j) == Real(0)) {  // conductor: coef unused (cell skipped)
-                for (int k = 0; k < 5; ++k) c(i, j, k) = 0;
+                for (int k = 0; k < 5; ++k)
+                  c(i, j, k) = 0;
                 continue;
               }
               const detail::CutFraction cf =
@@ -371,13 +385,16 @@ class GeometricMG {
     detail::mg_trace_mark("solve: before initial current_residual");
     const Real r0 = current_residual();
     detail::mg_trace_mark("solve: after initial current_residual");
-    if (r0 <= abs_tol) return 0;  // already under the floor (or zero); abs_tol=0 -> old test r0<=0
-    const Real stop = (rel_tol * r0 > abs_tol) ? rel_tol * r0 : abs_tol;  // max(rel_tol*r0, abs_tol)
+    if (r0 <= abs_tol)
+      return 0;  // already under the floor (or zero); abs_tol=0 -> old test r0<=0
+    const Real stop =
+        (rel_tol * r0 > abs_tol) ? rel_tol * r0 : abs_tol;  // max(rel_tol*r0, abs_tol)
     for (int c = 1; c <= max_cycles; ++c) {
       detail::mg_trace_mark("solve: before vcycle");
       vcycle();
       detail::mg_trace_mark("solve: after vcycle");
-      if (current_residual() <= stop) return c;
+      if (current_residual() <= stop)
+        return c;
     }
     return max_cycles;
   }
@@ -420,14 +437,17 @@ class GeometricMG {
   //      recorded), so phase 2 never fires for them: bit-identical.
   int solve_robust(Real rel_tol, int max_cycles) {
     const Real r0 = current_residual();
-    if (r0 <= Real(0)) return 0;
+    if (r0 <= Real(0))
+      return 0;
     int total = 0;
     for (int c = 1; c <= max_cycles; ++c) {  // phase 1: EXACTLY the body of solve()
       vcycle();
       ++total;
-      if (current_residual() <= rel_tol * r0) return total;  // -> bit-identical to recorded runs
+      if (current_residual() <= rel_tol * r0)
+        return total;  // -> bit-identical to recorded runs
     }
-    if (current_residual() <= r0) return total;  // stagnation (not divergence): keep as-is
+    if (current_residual() <= r0)
+      return total;  // stagnation (not divergence): keep as-is
     // phase 2: V-cycle divergence at the embedded boundary. Smoothing hardening LOCAL to the solve
     // (nu1_/nu2_ saved then RESTORED before each return): no permanent ratchet on the hot
     // path, the overhead is paid ONLY by the solve that diverges; the next solves restart at
@@ -435,16 +455,23 @@ class GeometricMG {
     // (phi=0, the warm start was carrying the diverged state). More smoothing makes the cycle contractive.
     const int nu1_save = nu1_, nu2_save = nu2_;
     while (nu1_ < 64 || nu2_ < 64) {
-      if (nu1_ < 64) nu1_ *= 2;
-      if (nu2_ < 64) nu2_ *= 2;
+      if (nu1_ < 64)
+        nu1_ *= 2;
+      if (nu2_ < 64)
+        nu2_ *= 2;
       lev_[0].phi.set_val(Real(0));
       for (int c = 1; c <= max_cycles; ++c) {
         vcycle();
         ++total;
-        if (current_residual() <= rel_tol * r0) { nu1_ = nu1_save; nu2_ = nu2_save; return total; }
+        if (current_residual() <= rel_tol * r0) {
+          nu1_ = nu1_save;
+          nu2_ = nu2_save;
+          return total;
+        }
       }
     }
-    nu1_ = nu1_save; nu2_ = nu2_save;
+    nu1_ = nu1_save;
+    nu2_ = nu2_save;
     return total;  // best effort at maximal smoothing (residual already under r0: no divergence)
   }
 
@@ -456,9 +483,8 @@ class GeometricMG {
   // identity in serial -> bit-identical to the historical behavior.
   Real current_residual() {
     detail::mg_trace_mark("current_residual: before poisson_residual");
-    poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res,
-                     mask_ptr(0), coef_ptr(0), eps_ptr(0), kappa_ptr(0), eps_y_ptr(0),
-                     a_xy_ptr(0), a_yx_ptr(0));
+    poisson_residual(lev_[0].phi, lev_[0].rhs, lev_[0].geom, bc_, lev_[0].res, mask_ptr(0),
+                     coef_ptr(0), eps_ptr(0), kappa_ptr(0), eps_y_ptr(0), a_xy_ptr(0), a_yx_ptr(0));
     detail::mg_trace_mark("current_residual: after poisson_residual, before norm_inf");
     const Real r = all_reduce_max(norm_inf(lev_[0].res));
     detail::mg_trace_mark("current_residual: after norm_inf");
@@ -512,19 +538,20 @@ class GeometricMG {
   BCRec eps_bc() const {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec b;
-    b.xlo = fo(bc_.xlo); b.xhi = fo(bc_.xhi);
-    b.ylo = fo(bc_.ylo); b.yhi = fo(bc_.yhi);
+    b.xlo = fo(bc_.xlo);
+    b.xhi = fo(bc_.xhi);
+    b.ylo = fo(bc_.ylo);
+    b.yhi = fo(bc_.yhi);
     return b;
   }
 
   void add_level(const Geometry& g, const BoxArray& ba) {
     DistributionMapping dm = replicated_
-        ? DistributionMapping(std::vector<int>(ba.size(), my_rank()))
-        : DistributionMapping(ba.size(), n_ranks());
-    lev_.push_back(MGLevel{g, ba, dm, MultiFab(ba, dm, 1, 1),
-                           MultiFab(ba, dm, 1, 0), MultiFab(ba, dm, 1, 0),
-                           MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{},
-                           MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}});
+                                 ? DistributionMapping(std::vector<int>(ba.size(), my_rank()))
+                                 : DistributionMapping(ba.size(), n_ranks());
+    lev_.push_back(MGLevel{g, ba, dm, MultiFab(ba, dm, 1, 1), MultiFab(ba, dm, 1, 0),
+                           MultiFab(ba, dm, 1, 0), MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{},
+                           MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}, MultiFab{}});
   }
 
   // FACTORIZATION (operator coefficient wiring, COMMON part): a scalar field
@@ -553,7 +580,8 @@ class GeometricMG {
           for (int i = b.lo[0]; i <= b.hi[0]; ++i)
             e(i, j) = fn(g.x_cell(i), g.y_cell(j));
       }
-      if (do_fill) fill_ghosts(F, g.domain, ebc);
+      if (do_fill)
+        fill_ghosts(F, g.domain, ebc);
     }
   }
 
@@ -563,17 +591,20 @@ class GeometricMG {
   // if do_fill. Body extracted word-for-word from set_epsilon(const MultiFab&) / set_reaction(const MultiFab&).
   void restrict_and_fill(MultiFab MGLevel::* field, const MultiFab& fine, int nghost, bool do_fill,
                          const BCRec& ebc) {
-    for (auto& L : lev_) L.*field = MultiFab(L.ba, L.dm, 1, nghost);
+    for (auto& L : lev_)
+      L.*field = MultiFab(L.ba, L.dm, 1, nghost);
     for (int li = 0; li < (lev_[0].*field).local_size(); ++li) {
       Array4 e = (lev_[0].*field).fab(li).array();
       const ConstArray4 s = fine.fab(li).const_array();
       const Box2D b = (lev_[0].*field).box(li);
       for_each_cell(b, detail::CopyComp0Kernel{e, s});
     }
-    if (do_fill) fill_ghosts(lev_[0].*field, lev_[0].geom.domain, ebc);
+    if (do_fill)
+      fill_ghosts(lev_[0].*field, lev_[0].geom.domain, ebc);
     for (int l = 1; l < num_levels(); ++l) {
       average_down(lev_[l - 1].*field, lev_[l].*field, 2);
-      if (do_fill) fill_ghosts(lev_[l].*field, lev_[l].geom.domain, ebc);
+      if (do_fill)
+        fill_ghosts(lev_[l].*field, lev_[l].geom.domain, ebc);
     }
   }
 
@@ -591,32 +622,42 @@ class GeometricMG {
     // dominant (kappa>=0, eps>0); the cross coupling is relegated to the residual, per the header
     // convention. For symmetric-positive-definite A the V-cycle stays contractive; for strongly non-symmetric
     // A, it may diverge (cf. set_cross_terms, reported observation).
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): before gs_smooth(nu1) [first GS kernel]");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): before gs_smooth(nu1) [first GS kernel]");
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu1_, mk, ck, ep, kp, ey);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu1)");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu1)");
 
     if (l + 1 == static_cast<int>(lev_.size())) {
       gs_smooth(L.phi, L.rhs, L.geom, bc, nbottom_, mk, ck, ep, kp, ey);  // bottom solve
-      if (mk) zero_conductor(L.phi, L.mask);
+      if (mk)
+        zero_conductor(L.phi, L.mask);
       return;
     }
 
     poisson_residual(L.phi, L.rhs, L.geom, bc, L.res, mk, ck, ep, kp, ey, axy, ayx);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after poisson_residual");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after poisson_residual");
     MGLevel& C = lev_[l + 1];
     average_down(L.res, C.rhs, 2, L.cfine);  // residual restriction (cfine buffer reused)
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after average_down");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after average_down");
     C.phi.set_val(0.0);
     vcycle_rec(l + 1, homogeneous(bc));
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after coarse recursion");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after coarse recursion");
 
     interpolate(C.phi, L.corr, 2, L.cfine);  // correction prolongation (corr/cfine buffers reused)
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after interpolate");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after interpolate");
     saxpy(L.phi, Real(1), L.corr);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after saxpy");
-    if (mk) zero_conductor(L.phi, L.mask);  // re-pin the conductor
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after saxpy");
+    if (mk)
+      zero_conductor(L.phi, L.mask);  // re-pin the conductor
     gs_smooth(L.phi, L.rhs, L.geom, bc, nu2_, mk, ck, ep, kp, ey);
-    if (l == 0) detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu2)");
+    if (l == 0)
+      detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu2)");
   }
 
   BCRec bc_;
@@ -628,7 +669,8 @@ class GeometricMG {
   bool has_eps_y_ = false;
   bool has_kappa_ = false;
   bool has_cross_ = false;  // off-diagonal Axy/Ayx coefficients (FULL tensor) active
-  Real abs_tol_ = Real(0);  // absolute floor of the no-argument solve() (0 = relative criterion only)
+  Real abs_tol_ =
+      Real(0);  // absolute floor of the no-argument solve() (0 = relative criterion only)
   std::function<Real(Real, Real)> levelset_;
   std::vector<MGLevel> lev_;
 };

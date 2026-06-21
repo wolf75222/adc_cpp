@@ -23,8 +23,8 @@
 //
 // Independant du backend : Kokkos Serial (CI, CPU) et Cuda (GH200). Le script ROMEO relance le MEME
 // binaire en np=1/2/4 et diff cmax (bit-identique attendu).
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler
+#include <adc/physics/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/euler.hpp>          // Euler
 #include <adc/runtime/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
 #include <adc/runtime/amr_system.hpp>
 #include <adc/parallel/comm.hpp>
@@ -76,16 +76,16 @@ static Result run(int n, int nsteps, double dt, bool distribute) {
   // coarse_max_grid = 0 -> n/2 (decoupage 2x2, le moins agressif pour le MG geometrique).
 
   AmrSystem sys(cfg);
-  add_compiled_model(sys, "gas",
-                     Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}}, "minmod",
-                     "rusanov", "conservative", "explicit", /*gamma=*/1.4);
+  add_compiled_model(sys, "gas", Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}},
+                     "minmod", "rusanov", "conservative", "explicit", /*gamma=*/1.4);
   sys.set_poisson("charge_density", "geometric_mg");
   sys.set_refinement(1.2);
   sys.set_density("gas", rho);
 
   Result R;
   R.m0 = sys.mass();
-  for (int s = 0; s < nsteps; ++s) sys.step(dt);
+  for (int s = 0; s < nsteps; ++s)
+    sys.step(dt);
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::fence();
 #endif
@@ -123,7 +123,8 @@ int main(int argc, char** argv) {
     csum += v;
     csumsq += v * v;
     const double a = std::fabs(v);
-    if (a > cmax) cmax = a;
+    if (a > cmax)
+      cmax = a;
   }
   // (2) cmax cross-rang : max insensible a l'ordre -> doit etre identique sur tous les rangs.
   const double xmax = all_reduce_max(cmax), xmin = -all_reduce_max(-cmax);
@@ -133,37 +134,54 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   if (me == 0) {
-    std::printf("AMRDIST np=%d distribute_npf=%d replicated_npf=%d | cmax=%.17e | "
-                "dist_vs_repl_dmax=%.3e | cmax_crossrank_spread=%.3e\n",
-                np, dis.npf, rep.npf, cmax, dmax_g, cmax_spread);
+    std::printf(
+        "AMRDIST np=%d distribute_npf=%d replicated_npf=%d | cmax=%.17e | "
+        "dist_vs_repl_dmax=%.3e | cmax_crossrank_spread=%.3e\n",
+        np, dis.npf, rep.npf, cmax, dmax_g, cmax_spread);
 #if defined(ADC_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";
 #endif
-    std::printf("AMRDIST exec=%s | conservation: dm_dist=%.3e dm_repl=%.3e | csum=%.17e csumsq=%.17e\n",
-                space, std::fabs(dis.mass - dis.m0), std::fabs(rep.mass - rep.m0), csum, csumsq);
+    std::printf(
+        "AMRDIST exec=%s | conservation: dm_dist=%.3e dm_repl=%.3e | csum=%.17e csumsq=%.17e\n",
+        space, std::fabs(dis.mass - dis.m0), std::fabs(rep.mass - rep.m0), csum, csumsq);
 
-    if (!(dis.dens.size() == static_cast<std::size_t>(n) * n))
-      { std::printf("FAIL densite repartie de mauvaise taille\n"); ++fails; }
-    if (!(cmax > 1e-6)) { std::printf("FAIL densite repartie triviale\n"); ++fails; }
-    if (!std::isfinite(cmax) || !std::isfinite(csum))
-      { std::printf("FAIL champ non fini (MG diverge ?)\n"); ++fails; }
+    if (!(dis.dens.size() == static_cast<std::size_t>(n) * n)) {
+      std::printf("FAIL densite repartie de mauvaise taille\n");
+      ++fails;
+    }
+    if (!(cmax > 1e-6)) {
+      std::printf("FAIL densite repartie triviale\n");
+      ++fails;
+    }
+    if (!std::isfinite(cmax) || !std::isfinite(csum)) {
+      std::printf("FAIL champ non fini (MG diverge ?)\n");
+      ++fails;
+    }
     // (4) MG converge => champ fini ET proche du replique : le grossier reparti doit retrouver le
     // meme physique a l'arrondi pres (la difference vient de l'ordre de reduction du Poisson +
     // transport multi-box, pas d'un schema different). Seuil large mais ferme : un MG qui diverge
     // ou un transport casse exploserait bien au-dela.
-    if (!(dmax_g < 1e-9))
-      { std::printf("FAIL reparti != replique au-dela de l'arrondi (dmax=%.3e)\n", dmax_g); ++fails; }
+    if (!(dmax_g < 1e-9)) {
+      std::printf("FAIL reparti != replique au-dela de l'arrondi (dmax=%.3e)\n", dmax_g);
+      ++fails;
+    }
     // (3) conservation des deux modes.
-    if (!(std::fabs(dis.mass - dis.m0) < 1e-10))
-      { std::printf("FAIL conservation grossier reparti (dm=%.3e)\n", std::fabs(dis.mass - dis.m0)); ++fails; }
+    if (!(std::fabs(dis.mass - dis.m0) < 1e-10)) {
+      std::printf("FAIL conservation grossier reparti (dm=%.3e)\n", std::fabs(dis.mass - dis.m0));
+      ++fails;
+    }
     // (2) cmax bit-identique cross-rang.
-    if (!(cmax_spread == 0.0))
-      { std::printf("FAIL cmax non bit-identique entre rangs (spread=%.3e)\n", cmax_spread); ++fails; }
+    if (!(cmax_spread == 0.0)) {
+      std::printf("FAIL cmax non bit-identique entre rangs (spread=%.3e)\n", cmax_spread);
+      ++fails;
+    }
     if (fails == 0)
-      std::printf("OK test_mpi_amr_distributed_coarse np=%d (grossier reparti == replique a "
-                  "l'arrondi, cmax bit-identique cross-rang, masse conservee)\n", np);
+      std::printf(
+          "OK test_mpi_amr_distributed_coarse np=%d (grossier reparti == replique a "
+          "l'arrondi, cmax bit-identique cross-rang, masse conservee)\n",
+          np);
   }
   comm_finalize();
   return fails ? 1 : 0;

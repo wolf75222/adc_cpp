@@ -60,7 +60,10 @@ static_assert(PlainModel::n_aux == 3, "compose sans champ extra = contrat de bas
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -80,7 +83,8 @@ int main() {
     Fab2D& f = aux.fab(li);
     const Box2D g = f.grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) f(i, j, 3) = Bz;
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        f(i, j, 3) = Bz;
   }
 
   // (B) le compose lit B_z : flux nul (grad=0) -> R = source = B_z u = Bz.
@@ -98,6 +102,7 @@ int main() {
   std::printf("  composite n_aux=%d : max|R - B_z| = %.2e\n", MagModel::n_aux, maxerr);
   chk(maxerr < 1e-14, "composite_reads_Bz");
 
-  if (fails == 0) std::printf("OK test_aux_composite\n");
+  if (fails == 0)
+    std::printf("OK test_aux_composite\n");
   return fails == 0 ? 0 : 1;
 }

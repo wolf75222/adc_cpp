@@ -23,7 +23,8 @@ class DistributionMapping {
   /// Round-robin: box i -> rank i % nranks (rank 0 if nranks <= 0). Default distribution.
   DistributionMapping(int nboxes, int nranks) {
     rank_.resize(nboxes);
-    for (int i = 0; i < nboxes; ++i) rank_[i] = (nranks > 0) ? i % nranks : 0;
+    for (int i = 0; i < nboxes; ++i)
+      rank_[i] = (nranks > 0) ? i % nranks : 0;
   }
 
   /// EXPLICIT assignment: rank[i] = owning rank of box i (move). For external balanced strategies

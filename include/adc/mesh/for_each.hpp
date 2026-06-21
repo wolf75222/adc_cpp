@@ -30,7 +30,8 @@
 // adc_cpp is KOKKOS-ONLY: there is no longer a standalone OpenMP backend nor a manual host loop
 // as a production path. Configure with -DADC_USE_KOKKOS=ON (+ -DKokkos_ROOT=...); serial
 // goes through a Kokkos install with Kokkos_ENABLE_SERIAL=ON.
-#error "adc_cpp is Kokkos-only: for_each_cell requires ADC_HAS_KOKKOS. Configure with -DADC_USE_KOKKOS=ON and a Kokkos Serial/OpenMP/Cuda install."
+#error \
+    "adc_cpp is Kokkos-only: for_each_cell requires ADC_HAS_KOKKOS. Configure with -DADC_USE_KOKKOS=ON and a Kokkos Serial/OpenMP/Cuda install."
 #endif
 
 #include <Kokkos_Core.hpp>
@@ -70,7 +71,8 @@ inline std::int64_t foreach_serial_threshold() {
     if (const char* e = std::getenv("ADC_FOREACH_SERIAL_THRESHOLD")) {
       char* end = nullptr;
       const std::int64_t v = std::strtol(e, &end, 10);
-      if (end != e && v >= 0) return v;
+      if (end != e && v >= 0)
+        return v;
     }
     return 4096;
   }();
@@ -120,7 +122,9 @@ inline std::int64_t foreach_serial_threshold() {
 
 /// Makes the HOST residency valid before a host access (read/write from the host). Under unified memory
 /// = a targeted device_fence() (waits for in-flight kernels).
-inline void sync_host() { device_fence(); }
+inline void sync_host() {
+  device_fence();
+}
 
 /// Marks a DEVICE residency (upcoming kernel). Under unified memory: NO-OP (host writes
 /// are already visible from the device); exists to document the intent and to accommodate a future
@@ -147,13 +151,13 @@ void for_each_cell(const Box2D& b, F f) {
   // compile time, zero overhead). Under SharedSpace + host execution, the loop is
   // race-free: the existing coherence seams (gs_rb_sweep lays its device_fence around the
   // sweeps, sync_host before the host accesses) stay in place and unchanged.
-  if constexpr (std::is_same_v<Kokkos::DefaultExecutionSpace,
-                               Kokkos::DefaultHostExecutionSpace>) {
-    const std::int64_t n_cells = static_cast<std::int64_t>(b.hi[0] - b.lo[0] + 1) *
-                                 (b.hi[1] - b.lo[1] + 1);
+  if constexpr (std::is_same_v<Kokkos::DefaultExecutionSpace, Kokkos::DefaultHostExecutionSpace>) {
+    const std::int64_t n_cells =
+        static_cast<std::int64_t>(b.hi[0] - b.lo[0] + 1) * (b.hi[1] - b.lo[1] + 1);
     if (n_cells < detail::foreach_serial_threshold()) {
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) f(i, j);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          f(i, j);
       return;
     }
   }
@@ -161,11 +165,10 @@ void for_each_cell(const Box2D& b, F f) {
   // IndexType<int>: SIGNED indices. Ghost boxes have negative low
   // bounds (e.g. lo = -ng for copy_shifted); without an explicit signed type,
   // MDRangePolicy rejects the bound -1 (implicit conversion deemed unsafe).
-  Kokkos::parallel_for(
-      "adc_for_each_cell",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
-          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
-      f);
+  Kokkos::parallel_for("adc_for_each_cell",
+                       Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+                           {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+                       f);
 }
 
 // Device reductions: the reducing counterpart of for_each_cell. Same constraints
@@ -198,10 +201,9 @@ Real for_each_cell_reduce_sum(const Box2D& b, F f) {
   Real result = 0;
   Kokkos::parallel_reduce(
       "adc_reduce_sum",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
-          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
-      KOKKOS_LAMBDA(int i, int j, Real& acc) { acc += f(i, j); },
-      Kokkos::Sum<Real>{result});
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>({b.lo[0], b.lo[1]},
+                                                                     {b.hi[0] + 1, b.hi[1] + 1}),
+      KOKKOS_LAMBDA(int i, int j, Real& acc) { acc += f(i, j); }, Kokkos::Sum<Real>{result});
   return result;  // blocking host-side: valid on return, without device_fence()
 }
 
@@ -213,11 +215,12 @@ Real for_each_cell_reduce_max(const Box2D& b, F f) {
   Real result = 0;
   Kokkos::parallel_reduce(
       "adc_reduce_max",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
-          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>({b.lo[0], b.lo[1]},
+                                                                     {b.hi[0] + 1, b.hi[1] + 1}),
       KOKKOS_LAMBDA(int i, int j, Real& acc) {
         const Real v = f(i, j);
-        if (v > acc) acc = v;
+        if (v > acc)
+          acc = v;
       },
       Kokkos::Max<Real>{result});
   return result;  // exact max (associative/commutative IEEE754), no fence
@@ -237,11 +240,10 @@ template <class F>
 Real reduce_max_cell(const Box2D& b, F f) {
   detail::ensure_kokkos_initialized();
   Real result = 0;
-  Kokkos::parallel_reduce(
-      "adc_reduce_max_cell",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
-          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
-      f, Kokkos::Max<Real>{result});
+  Kokkos::parallel_reduce("adc_reduce_max_cell",
+                          Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+                              {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+                          f, Kokkos::Max<Real>{result});
   return result;
 }
 
@@ -251,11 +253,10 @@ template <class F>
 Real reduce_min_cell(const Box2D& b, F f) {
   detail::ensure_kokkos_initialized();
   Real result = 0;
-  Kokkos::parallel_reduce(
-      "adc_reduce_min_cell",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
-          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
-      f, Kokkos::Min<Real>{result});
+  Kokkos::parallel_reduce("adc_reduce_min_cell",
+                          Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+                              {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+                          f, Kokkos::Min<Real>{result});
   return result;
 }
 
@@ -273,11 +274,10 @@ template <class F>
 Real reduce_sum_cell(const Box2D& b, F f) {
   detail::ensure_kokkos_initialized();
   Real result = 0;
-  Kokkos::parallel_reduce(
-      "adc_reduce_sum_cell",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
-          {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
-      f, Kokkos::Sum<Real>{result});
+  Kokkos::parallel_reduce("adc_reduce_sum_cell",
+                          Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<int>>(
+                              {b.lo[0], b.lo[1]}, {b.hi[0] + 1, b.hi[1] + 1}),
+                          f, Kokkos::Sum<Real>{result});
   return result;
 }
 

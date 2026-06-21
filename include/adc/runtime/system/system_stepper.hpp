@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/state.hpp>     // kAuxBaseComps (B_z channel read by the condensed source stage)
-#include <adc/core/types.hpp>     // Real
+#include <adc/core/state.hpp>  // kAuxBaseComps (B_z channel read by the condensed source stage)
+#include <adc/core/types.hpp>  // Real
 #include <adc/coupling/coupled_source_program.hpp>  // CoupledFreqKernel (per-cell coupled frequency)
 #include <adc/mesh/for_each.hpp>  // reduce_max_cell (max mu over the cells, device-clean functor)
 #include <adc/parallel/comm.hpp>  // all_reduce_min/max (global bounds: identical dt on all ranks)
@@ -90,8 +90,10 @@ class SystemStepper {
   /// updating several blocks at the same point; they order after the transport on the same
   /// execution space, hence no prior device_fence (no more host access).
   void apply_couplings(Real dt) {
-    if (owner_->couplings.empty()) return;
-    for (auto& c : owner_->couplings) c(dt);
+    if (owner_->couplings.empty())
+      return;
+    for (auto& c : owner_->couplings)
+      c(dt);
   }
 
   /// Step bound from PER-CELL COUPLED FREQUENCIES (CoupledSource.frequency with an Expr,
@@ -119,7 +121,8 @@ class SystemStepper {
           kern.n_const = static_cast<int>(ce.kconsts.size());
           for (int c = 0; c < ce.n_in; ++c) {
             kern.in[c] = P->sp[static_cast<std::size_t>(ce.ins[static_cast<std::size_t>(c)].sidx)]
-                             .U.fab(li).array();
+                             .U.fab(li)
+                             .array();
             kern.in_comp[c] = ce.ins[static_cast<std::size_t>(c)].comp;
           }
           for (int c = 0; c < kern.n_const; ++c)
@@ -132,16 +135,19 @@ class SystemStepper {
         // on the constants alone (no box to traverse); identical on all ranks.
         Real reg[kCsMaxReg];
         const int nc = static_cast<int>(ce.kconsts.size());
-        for (int c = 0; c < nc; ++c) reg[c] = ce.kconsts[static_cast<std::size_t>(c)];
+        for (int c = 0; c < nc; ++c)
+          reg[c] = ce.kconsts[static_cast<std::size_t>(c)];
         const Real mu0 = ce.prog.eval(reg);
-        if (mu0 > Real(0)) m = mu0;
+        if (mu0 > Real(0))
+          m = mu0;
       }
       const double mu = all_reduce_max(static_cast<double>(m));  // ALL ranks (collective symmetry)
       if (mu > 0.0) {
         const double dt_cs = cfl / mu;
         if (dt_cs < dt) {
           dt = dt_cs;
-          if (reason) *reason = "coupled_source:" + ce.label;
+          if (reason)
+            *reason = "coupled_source:" + ce.label;
         }
       }
     }
@@ -153,9 +159,8 @@ class SystemStepper {
   /// only (no collective).
   Real cfl_grid_h() const {
     Impl* P = owner_;
-    return P->polar_
-               ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
-               : std::min(P->geom.dx(), P->geom.dy());
+    return P->polar_ ? std::min(P->pgeom_.dr(), P->pgeom_.r_min * P->pgeom_.dtheta())
+                     : std::min(P->geom.dx(), P->geom.dy());
   }
 
   /// GLOBAL step bounds (System::add_dt_bound): multi-block coupling, Schur/Poisson, AMR/scheduler.
@@ -170,13 +175,16 @@ class SystemStepper {
   void apply_global_dt_bounds(double& dt, std::string* reason) const {
     Impl* P = owner_;
     for (const auto& g : P->dt_bounds_) {
-      if (!g.fn) continue;
+      if (!g.fn)
+        continue;
       double v = g.fn();
-      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+      if (!(v > 0.0) || !std::isfinite(v))
+        v = std::numeric_limits<double>::infinity();
       v = all_reduce_min(v);
       if (v < dt) {
         dt = v;
-        if (reason) *reason = "global:" + g.label;
+        if (reason)
+          *reason = "global:" + g.label;
       }
     }
   }
@@ -193,8 +201,10 @@ class SystemStepper {
   /// (step / step_strang / step_cfl / step_adaptive) restent bit-identiques a l'historique.
   void apply_projections() {
     for (auto& s : owner_->sp) {
-      if (!s.evolve) continue;  // bloc gele : fond fixe jamais modifie, rien a projeter
-      if (s.project) s.project(s.U);
+      if (!s.evolve)
+        continue;  // bloc gele : fond fixe jamais modifie, rien a projeter
+      if (s.project)
+        s.project(s.U);
     }
   }
 
@@ -227,7 +237,8 @@ class SystemStepper {
     // GENERIC SOURCE STAGE (fallback): plays ONLY if NO condensed Schur stage (production path
     // UNTOUCHED, bit-identical). Advances the block source stage IN PLACE on eff_dt. nullptr
     // (default) -> no-op, as before. Used by generic splitting (adc.Strang) and order tests.
-    if (s.source_step) s.source_step(s.U, eff_dt);
+    if (s.source_step)
+      s.source_step(s.U, eff_dt);
   }
 
   /// TRANSPORT ADVANCE of block @p s over @p dt in @p n substeps, DISPATCHED by the System geometry
@@ -292,10 +303,13 @@ class SystemStepper {
   void advance_due_blocks(double dt) {
     Impl* P = owner_;
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;  // frozen block: not advanced
-      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold: not at the stride window end
+      if (!s.evolve)
+        continue;  // frozen block: not advanced
+      if (!stride_due(P->macro_step_, s.stride))
+        continue;                                     // hold: not at the stride window end
       const Real eff_dt = Real(dt) * Real(s.stride);  // catch-up: effective step s.stride * dt
-      advance_transport(s, eff_dt);  // transport DISPATCHED by the geometry mode (None: assemble_rhs)
+      advance_transport(s,
+                        eff_dt);  // transport DISPATCHED by the geometry mode (None: assemble_rhs)
       run_source_stage(s, eff_dt);  // OPT-IN: Schur-condensed source stage (no-op otherwise)
     }
   }
@@ -306,14 +320,18 @@ class SystemStepper {
   ///  - Strang: H(dt/2); S(dt); H(dt/2), with a solve_fields RE-SOLVED between each stage
   ///    (cf. step_strang() and docs/HOFFART_STEP_SEQUENCE.md).
   void step(double dt) {
-    if (scheme_ == SplitScheme::Strang) { step_strang(dt); return; }
+    if (scheme_ == SplitScheme::Strang) {
+      step_strang(dt);
+      return;
+    }
     Impl* P = owner_;
     // COUPLING / POISSON: solve_fields assembles f = Sum_s elliptic_rhs_s(U_s) on the CURRENT state of
     // each block. A HELD block (cadence M, outside the window end) contributes with its STALE state (its
     // last advance, thus frozen until its next catch-up): stale density / charge in the Poisson sum as
     // long as it has not caught up. Assumed stride choice (loose coupling of the slow block).
     P->solve_fields();
-    advance_due_blocks(dt);  // DUE blocks: catch-up transport + opt-in source stage (shared with step_cfl)
+    advance_due_blocks(
+        dt);  // DUE blocks: catch-up transport + opt-in source stage (shared with step_cfl)
     apply_couplings(Real(dt));  // inter-species coupled sources (splitting), after transport
     apply_projections();  // projection ponctuelle POST-PAS ENTIER (ADC-177) ; no-op sans projection
     P->t += dt;
@@ -350,8 +368,10 @@ class SystemStepper {
     // (2) H(dt/2): 1st transport half-advance of each DUE block. s.substeps substeps (unchanged).
     // Dispatched by the geometry mode (None: assemble_rhs; Staircase/CutCell: disk operator).
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;
-      if (!stride_due(P->macro_step_, s.stride)) continue;
+      if (!s.evolve)
+        continue;
+      if (!stride_due(P->macro_step_, s.stride))
+        continue;
       const Real eff_dt = Real(dt) * Real(s.stride);
       advance_transport_half(s, eff_dt);
     }
@@ -359,8 +379,10 @@ class SystemStepper {
     P->solve_fields();
     // (4) S(dt): FULL source stage of each DUE block (no-op if no Schur stage, like Lie).
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;
-      if (!stride_due(P->macro_step_, s.stride)) continue;
+      if (!s.evolve)
+        continue;
+      if (!stride_due(P->macro_step_, s.stride))
+        continue;
       const Real eff_dt = Real(dt) * Real(s.stride);
       run_source_stage(s, eff_dt);
     }
@@ -369,12 +391,15 @@ class SystemStepper {
     P->solve_fields();
     // (6) H(dt/2): 2nd transport half-advance, closing the symmetric Strang step. SAME dispatch.
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;
-      if (!stride_due(P->macro_step_, s.stride)) continue;
+      if (!s.evolve)
+        continue;
+      if (!stride_due(P->macro_step_, s.stride))
+        continue;
       const Real eff_dt = Real(dt) * Real(s.stride);
       advance_transport_half(s, eff_dt);
     }
-    apply_couplings(Real(dt));  // inter-species coupled sources (splitting), after the symmetric step
+    apply_couplings(
+        Real(dt));  // inter-species coupled sources (splitting), after the symmetric step
     // Projection ponctuelle POST-PAS ENTIER (ADC-177) : UNE application apres le pas Strang complet
     // H(dt/2) S(dt) H(dt/2), jamais entre les etages (semantique post-pas, pas post-etage).
     apply_projections();
@@ -384,7 +409,8 @@ class SystemStepper {
 
   /// Advances by @p nsteps macro-steps of length @p dt (loop over step).
   void advance(double dt, int nsteps) {
-    for (int s = 0; s < nsteps; ++s) step(dt);
+    for (int s = 0; s < nsteps; ++s)
+      step(dt);
   }
 
   /// One macro-step at CFL dt: dt = min over the evolving blocks of the block step BOUNDS, then advances
@@ -434,7 +460,8 @@ class SystemStepper {
     double dt = std::numeric_limits<double>::infinity();
     std::string reason = "degenerate";
     for (auto& s : P->sp) {
-      if (!s.evolve) continue;  // frozen block: does not constrain the step
+      if (!s.evolve)
+        continue;  // frozen block: does not constrain the step
       const Real w = std::max(s.max_speed(s.U), kCflSpeedFloor);
       double dt_b = cfl * static_cast<double>(h) * static_cast<double>(s.substeps) /
                     (static_cast<double>(s.stride) * static_cast<double>(w));
@@ -445,7 +472,10 @@ class SystemStepper {
         if (mu > Real(0)) {
           const double dt_src = cfl * static_cast<double>(s.substeps) /
                                 (static_cast<double>(s.stride) * static_cast<double>(mu));
-          if (dt_src < dt_b) { dt_b = dt_src; why = "source_frequency"; }
+          if (dt_src < dt_b) {
+            dt_b = dt_src;
+            why = "source_frequency";
+          }
         }
       }
       // Direct ADMISSIBLE STEP (optional; <= 0 = does not constrain; cfl NOT applied).
@@ -454,19 +484,29 @@ class SystemStepper {
         if (db > Real(0)) {
           const double dt_adm = static_cast<double>(db) * static_cast<double>(s.substeps) /
                                 static_cast<double>(s.stride);
-          if (dt_adm < dt_b) { dt_b = dt_adm; why = "stability_dt"; }
+          if (dt_adm < dt_b) {
+            dt_b = dt_adm;
+            why = "stability_dt";
+          }
         }
       }
-      if (dt_b < dt) { dt = dt_b; reason = std::string(why) + ":" + s.name; }
+      if (dt_b < dt) {
+        dt = dt_b;
+        reason = std::string(why) + ":" + s.name;
+      }
     }
     // DECLARED frequencies of the coupled sources (CoupledSource.frequency): the couplings
     // apply ONCE per MACRO-step (apply_couplings(dt)), so the bound applies to the
     // macro-dt directly: dt <= cfl / mu (NO substeps/stride factor -- those apply
     // only to the block subcycled transport, not to the coupling splitting).
     for (const auto& cs : P->coupled_freqs_) {
-      if (!(cs.mu > 0.0)) continue;
+      if (!(cs.mu > 0.0))
+        continue;
       const double dt_cs = cfl / cs.mu;
-      if (dt_cs < dt) { dt = dt_cs; reason = "coupled_source:" + cs.label; }
+      if (dt_cs < dt) {
+        dt = dt_cs;
+        reason = "coupled_source:" + cs.label;
+      }
     }
     // PER-CELL frequencies (CoupledSource.frequency with an Expr): mu(U) reduced (MAX) per cell at
     // this step, global all_reduce_max, dt <= cfl / max(mu). Same reason "coupled_source:<label>" as the
@@ -476,11 +516,13 @@ class SystemStepper {
     // winning reason (see apply_global_dt_bounds for the MPI deadlock-safety rationale).
     apply_global_dt_bounds(dt, &reason);
     if (!std::isfinite(dt)) {
-      dt = cfl * static_cast<double>(h) / static_cast<double>(kCflSpeedFloor);  // all frozen: degenerate step
+      dt = cfl * static_cast<double>(h) /
+           static_cast<double>(kCflSpeedFloor);  // all frozen: degenerate step
       reason = "degenerate";
     }
     last_dt_reason_ = std::move(reason);
-    advance_due_blocks(dt);  // DUE blocks: catch-up transport + opt-in source stage (shared with step Lie)
+    advance_due_blocks(
+        dt);  // DUE blocks: catch-up transport + opt-in source stage (shared with step Lie)
     apply_couplings(Real(dt));
     apply_projections();  // projection ponctuelle POST-PAS ENTIER (ADC-177) ; no-op sans projection
     P->t += dt;
@@ -509,9 +551,11 @@ class SystemStepper {
     for (auto& s : P->sp) {
       const Real w = s.evolve ? s.max_speed(s.U) : Real(0);  // frozen block: out of cadence
       wb.push_back(w);
-      if (s.evolve) wmin = std::min(wmin, w);
+      if (s.evolve)
+        wmin = std::min(wmin, w);
     }
-    if (wmin >= Real(1e30)) wmin = kCflSpeedFloor;  // no evolving block (all frozen)
+    if (wmin >= Real(1e30))
+      wmin = kCflSpeedFloor;      // no evolving block (all frozen)
     const Real h = cfl_grid_h();  // Cartesian min(dx,dy) / polar min(dr, r_min*dtheta)
     double macro_dt = cfl * static_cast<double>(h) / static_cast<double>(wmin);
     // OPTIONAL block bounds: each block subcycles n_b times its effective step
@@ -520,16 +564,20 @@ class SystemStepper {
     // on macro_dt: the clamp is done BEFORE the advance, n_b stays consistent.
     for (std::size_t b = 0; b < P->sp.size(); ++b) {
       auto& s = P->sp[b];
-      if (!s.evolve) continue;
-      if (!s.source_frequency && !s.stability_dt) continue;
-      int n = static_cast<int>(std::ceil(static_cast<double>(s.stride) *
-                                         static_cast<double>(wb[b] / wmin)));
-      if (n < 1) n = 1;
+      if (!s.evolve)
+        continue;
+      if (!s.source_frequency && !s.stability_dt)
+        continue;
+      int n = static_cast<int>(
+          std::ceil(static_cast<double>(s.stride) * static_cast<double>(wb[b] / wmin)));
+      if (n < 1)
+        n = 1;
       if (s.source_frequency) {
         const Real mu = s.source_frequency(s.U);
         if (mu > Real(0))
-          macro_dt = std::min(macro_dt, cfl * static_cast<double>(n) /
-                                            (static_cast<double>(s.stride) * static_cast<double>(mu)));
+          macro_dt =
+              std::min(macro_dt, cfl * static_cast<double>(n) /
+                                     (static_cast<double>(s.stride) * static_cast<double>(mu)));
       }
       if (s.stability_dt) {
         const Real db = s.stability_dt(s.U);
@@ -540,7 +588,8 @@ class SystemStepper {
     }
     // Declared frequencies of the coupled sources (cf. step_cfl): bound on the MACRO-step.
     for (const auto& cs : P->coupled_freqs_) {
-      if (cs.mu > 0.0) macro_dt = std::min(macro_dt, cfl / cs.mu);
+      if (cs.mu > 0.0)
+        macro_dt = std::min(macro_dt, cfl / cs.mu);
     }
     // PER-CELL frequencies (Expr): MAX of mu(U) per cell, all_reduce_max, bound on the macro-step
     // (cf. step_cfl). step_adaptive does not track the active reason -> reason = nullptr.
@@ -550,16 +599,20 @@ class SystemStepper {
     apply_global_dt_bounds(macro_dt, nullptr);
     for (std::size_t b = 0; b < P->sp.size(); ++b) {
       auto& s = P->sp[b];
-      if (!s.evolve) continue;  // frozen block: not advanced
-      if (!stride_due(P->macro_step_, s.stride)) continue;  // hold: not at the stride window end
+      if (!s.evolve)
+        continue;  // frozen block: not advanced
+      if (!stride_due(P->macro_step_, s.stride))
+        continue;  // hold: not at the stride window end
       // Stable subcycling of the EFFECTIVE step M*macro_dt: each substep must satisfy
       // M*macro_dt / n <= cfl*h / w_b, i.e. n >= ceil(M * w_b / w_min). The stride factor M is thus
       // carried by the number of substeps (without it, n on w_b/w_min alone would violate the CFL by a factor M).
-      int n = static_cast<int>(std::ceil(static_cast<double>(s.stride) *
-                                         static_cast<double>(wb[b] / wmin)));
-      if (n < 1) n = 1;
+      int n = static_cast<int>(
+          std::ceil(static_cast<double>(s.stride) * static_cast<double>(wb[b] / wmin)));
+      if (n < 1)
+        n = 1;
       const Real eff_dt = Real(macro_dt) * Real(s.stride);  // catch-up: effective step M*macro_dt
-      advance_transport_n(s, eff_dt, n);  // transport DISPATCHED by the geometry mode (n adaptive substeps)
+      advance_transport_n(s, eff_dt,
+                          n);  // transport DISPATCHED by the geometry mode (n adaptive substeps)
       run_source_stage(s, eff_dt);  // OPT-IN: Schur-condensed source stage (no-op otherwise)
     }
     apply_couplings(Real(macro_dt));

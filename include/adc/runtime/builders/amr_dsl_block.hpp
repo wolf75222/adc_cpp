@@ -182,7 +182,8 @@ AmrCompiledHooks build_amr_compiled(const Model& model, const AmrBuildParams& bp
   for (const auto& kv : bp.named_aux)
     cpl->set_named_aux(kv.first, std::vector<Real>(kv.second.begin(), kv.second.end()));
   // ADC-369: per-field aux halo policies (compute_aux applies them after the shared fill).
-  for (const auto& kv : bp.named_aux_bc) cpl->set_named_aux_bc(kv.first, kv.second);
+  for (const auto& kv : bp.named_aux_bc)
+    cpl->set_named_aux_bc(kv.first, kv.second);
   cpl->update();
 
   AmrCompiledHooks h;

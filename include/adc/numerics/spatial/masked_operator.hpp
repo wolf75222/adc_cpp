@@ -17,9 +17,9 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/spatial/face_flux.hpp>      // reconstruct_pp, require_reconstruction_ghosts
-#include <adc/numerics/spatial/positivity.hpp>     // detail::positivity_comp
-#include <adc/numerics/spatial/state_access.hpp>   // load_state, load_aux
+#include <adc/numerics/spatial/face_flux.hpp>     // reconstruct_pp, require_reconstruction_ghosts
+#include <adc/numerics/spatial/positivity.hpp>    // detail::positivity_comp
+#include <adc/numerics/spatial/state_access.hpp>  // load_state, load_aux
 
 namespace adc {
 
@@ -67,8 +67,10 @@ struct AssembleRhsMaskedKernel {
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
-    if (!mask_active(mask, i, j)) {  // cell outside the active sub-domain: zero residual, not advanced
-      for (int c = 0; c < Model::n_vars; ++c) r(i, j, c) = Real(0);
+    if (!mask_active(mask, i,
+                     j)) {  // cell outside the active sub-domain: zero residual, not advanced
+      for (int c = 0; c < Model::n_vars; ++c)
+        r(i, j, c) = Real(0);
       return;
     }
     const Aux Ac = load_aux<aux_comps<Model>()>(ax, i, j);
@@ -79,24 +81,36 @@ struct AssembleRhsMaskedKernel {
 
     // x faces: reconstruction on either side, numerical flux, THEN mask gate (closed face
     // -> zero normal flux) -- an inactive neighbor cell closes the face between it and (i, j).
-    const auto Lxm = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rxm = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Lxp = reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rxp = reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxm =
+        reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxm =
+        reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lxp =
+        reconstruct_pp<Model>(model, u, i, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rxp =
+        reconstruct_pp<Model>(model, u, i + 1, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     auto Fxm = nflux(model, Lxm, Axm, Rxm, Ac, 0);
     auto Fxp = nflux(model, Lxp, Ac, Rxp, Axp, 0);
-    if (!mask_active(mask, i - 1, j)) Fxm = typename Model::State{};
-    if (!mask_active(mask, i + 1, j)) Fxp = typename Model::State{};
+    if (!mask_active(mask, i - 1, j))
+      Fxm = typename Model::State{};
+    if (!mask_active(mask, i + 1, j))
+      Fxp = typename Model::State{};
 
     // y faces
-    const auto Lym = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rym = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Lyp = reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Ryp = reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lym =
+        reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rym =
+        reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Lyp =
+        reconstruct_pp<Model>(model, u, i, j, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Ryp =
+        reconstruct_pp<Model>(model, u, i, j + 1, 1, -1, lim, recon_prim, pos_floor, pos_comp);
     auto Fym = nflux(model, Lym, Aym, Rym, Ac, 1);
     auto Fyp = nflux(model, Lyp, Ac, Ryp, Ayp, 1);
-    if (!mask_active(mask, i, j - 1)) Fym = typename Model::State{};
-    if (!mask_active(mask, i, j + 1)) Fyp = typename Model::State{};
+    if (!mask_active(mask, i, j - 1))
+      Fym = typename Model::State{};
+    if (!mask_active(mask, i, j + 1))
+      Fyp = typename Model::State{};
 
     const auto S = model.source(load_state<Model>(u, i, j), Ac);
     for (int c = 0; c < Model::n_vars; ++c)

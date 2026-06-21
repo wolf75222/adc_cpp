@@ -51,12 +51,12 @@ namespace adc {
 /// wave_speeds_from_jacobian, ADC-87) receives the WHOLE structure: converged and max_im are part
 /// of the safety contract, no overload silently drops them.
 struct EigBounds {
-  Real lmin;      ///< smallest real part (or Gershgorin lower bound if !converged)
-  Real lmax;      ///< largest real part (or Gershgorin upper bound if !converged)
-  Real max_im;    ///< largest |Im(lambda)| encountered (0 = real spectrum: hyperbolic). Has this
-                  ///< meaning ONLY if converged: under fallback it is 0 by CONVENTION (the spectrum
-                  ///< is not computed), certainly not a hyperbolicity signal -- read converged first.
-  bool converged; ///< false -> Gershgorin fallback (valid external bound, NOT the spectrum)
+  Real lmin;    ///< smallest real part (or Gershgorin lower bound if !converged)
+  Real lmax;    ///< largest real part (or Gershgorin upper bound if !converged)
+  Real max_im;  ///< largest |Im(lambda)| encountered (0 = real spectrum: hyperbolic). Has this
+                ///< meaning ONLY if converged: under fallback it is 0 by CONVENTION (the spectrum
+                ///< is not computed), certainly not a hyperbolicity signal -- read converged first.
+  bool converged;  ///< false -> Gershgorin fallback (valid external bound, NOT the spectrum)
 
   /// REAL-SPECTRUM PREDICATE (ADC-276). True iff the block CONVERGED and the largest imaginary part is
   /// within a RELATIVE tolerance of zero: max_im <= im_tol * max(|lmin|, |lmax|, 1). The threshold is
@@ -81,7 +81,9 @@ struct EigBounds {
   /// Complement of all_real RESTRICTED to converged blocks: true iff the spectrum was computed AND
   /// carries a complex conjugate pair beyond @p im_tol. NON-CONVERGENCE => false (NOT a complex signal:
   /// nothing was computed -- tell it apart via converged, or via adc::real_spectrum's kUnknown).
-  ADC_HD bool has_complex_pair(Real im_tol = Real(1e-5)) const { return converged && !all_real(im_tol); }
+  ADC_HD bool has_complex_pair(Real im_tol = Real(1e-5)) const {
+    return converged && !all_real(im_tol);
+  }
 };
 
 /// Tri-state classification of a small block's spectrum (ADC-276), returned by adc::real_spectrum.
@@ -100,10 +102,13 @@ ADC_HD inline void gershgorin_bounds(const Real (&A)[N][N], Real& lo, Real& hi) 
   for (int i = 0; i < N; ++i) {
     Real r = Real(0);
     for (int j = 0; j < N; ++j)
-      if (j != i) r += std::fabs(A[i][j]);
+      if (j != i)
+        r += std::fabs(A[i][j]);
     const Real l = A[i][i] - r, h = A[i][i] + r;
-    if (i == 0 || l < lo) lo = l;
-    if (i == 0 || h > hi) hi = h;
+    if (i == 0 || l < lo)
+      lo = l;
+    if (i == 0 || h > hi)
+      hi = h;
   }
 }
 
@@ -114,33 +119,42 @@ ADC_HD inline void hessenberg_reduce(Real (&H)[N][N]) {
   Real v[N];  // Householder vector of the current step (components k..N-1)
   for (int k = 1; k <= N - 2; ++k) {
     Real scale = Real(0);
-    for (int i = k; i < N; ++i) scale += std::fabs(H[i][k - 1]);
-    if (scale == Real(0)) continue;  // column already zero below the subdiagonal
+    for (int i = k; i < N; ++i)
+      scale += std::fabs(H[i][k - 1]);
+    if (scale == Real(0))
+      continue;  // column already zero below the subdiagonal
     Real h = Real(0);
     for (int i = k; i < N; ++i) {
       v[i] = H[i][k - 1] / scale;
       h += v[i] * v[i];
     }
     Real g = std::sqrt(h);
-    if (v[k] > Real(0)) g = -g;
-    h -= v[k] * g;       // h = v.v / 2 after updating v[k]
+    if (v[k] > Real(0))
+      g = -g;
+    h -= v[k] * g;  // h = v.v / 2 after updating v[k]
     v[k] -= g;
-    if (h == Real(0)) continue;
+    if (h == Real(0))
+      continue;
     // P = I - v v^T / h; H <- P H P (column k-1 set explicitly, exact zeros below)
     for (int j = k; j < N; ++j) {  // P * H on rows k..N-1
       Real f = Real(0);
-      for (int i = k; i < N; ++i) f += v[i] * H[i][j];
+      for (int i = k; i < N; ++i)
+        f += v[i] * H[i][j];
       f /= h;
-      for (int i = k; i < N; ++i) H[i][j] -= f * v[i];
+      for (int i = k; i < N; ++i)
+        H[i][j] -= f * v[i];
     }
     for (int i = 0; i < N; ++i) {  // H * P on columns k..N-1
       Real f = Real(0);
-      for (int j = k; j < N; ++j) f += H[i][j] * v[j];
+      for (int j = k; j < N; ++j)
+        f += H[i][j] * v[j];
       f /= h;
-      for (int j = k; j < N; ++j) H[i][j] -= f * v[j];
+      for (int j = k; j < N; ++j)
+        H[i][j] -= f * v[j];
     }
     H[k][k - 1] = scale * g;
-    for (int i = k + 1; i < N; ++i) H[i][k - 1] = Real(0);
+    for (int i = k + 1; i < N; ++i)
+      H[i][k - 1] = Real(0);
   }
 }
 
@@ -150,12 +164,14 @@ ADC_HD inline Real hqr_copysign(Real mag, Real sgn) {
 
 /// Accumulate an eigenvalue (re, im) into the current extremes. A named function rather than a
 /// local lambda: device caution (nvcc and lambdas inside __host__ __device__ code).
-ADC_HD inline void record_eig(Real re, Real im, Real& lmin, Real& lmax, Real& max_im,
-                              bool& first) {
-  if (first || re < lmin) lmin = re;
-  if (first || re > lmax) lmax = re;
+ADC_HD inline void record_eig(Real re, Real im, Real& lmin, Real& lmax, Real& max_im, bool& first) {
+  if (first || re < lmin)
+    lmin = re;
+  if (first || re > lmax)
+    lmax = re;
   const Real ai = std::fabs(im);
-  if (first || ai > max_im) max_im = ai;
+  if (first || ai > max_im)
+    max_im = ai;
   first = false;
 }
 
@@ -169,7 +185,8 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
   constexpr Real kEps = std::numeric_limits<Real>::epsilon();  // follows the Real type
   Real anorm = Real(0);  // norm of the Hessenberg part (deflation criterion for the s == 0 cases)
   for (int i = 0; i < N; ++i)
-    for (int j = (i > 0 ? i - 1 : 0); j < N; ++j) anorm += std::fabs(H[i][j]);
+    for (int j = (i > 0 ? i - 1 : 0); j < N; ++j)
+      anorm += std::fabs(H[i][j]);
   if (anorm == Real(0)) {  // null matrix: spectrum {0}
     lmin = lmax = max_im = Real(0);
     return true;
@@ -177,8 +194,8 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
 
   bool first = true;
 
-  int nn = N - 1;     // top index of the active block
-  Real t = Real(0);   // cumulative shift (exceptional shifts)
+  int nn = N - 1;    // top index of the active block
+  Real t = Real(0);  // cumulative shift (exceptional shifts)
   Real p = Real(0), q = Real(0), r = Real(0), x, y, z, w, s;
   while (nn >= 0) {
     int its = 0;
@@ -187,7 +204,8 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
       // deflation: smallest l such that H[l][l-1] is negligible
       for (l = nn; l >= 1; --l) {
         s = std::fabs(H[l - 1][l - 1]) + std::fabs(H[l][l]);
-        if (s == Real(0)) s = anorm;
+        if (s == Real(0))
+          s = anorm;
         if (std::fabs(H[l][l - 1]) <= kEps * s) {
           H[l][l - 1] = Real(0);
           break;
@@ -209,16 +227,18 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
             z = p + hqr_copysign(z, p);
             record_eig(x + z, Real(0), lmin, lmax, max_im, first);
             record_eig(z != Real(0) ? x - w / z : x + z, Real(0), lmin, lmax, max_im, first);
-          } else {             // complex pair: Re = x + p, |Im| = z
+          } else {  // complex pair: Re = x + p, |Im| = z
             record_eig(x + p, z, lmin, lmax, max_im, first);
             record_eig(x + p, -z, lmin, lmax, max_im, first);
           }
           nn -= 2;
         } else {  // block > 2: one Francis double-shift iteration
-          if (its == max_iter_per_eig) return false;  // cap reached -> caller fallback
+          if (its == max_iter_per_eig)
+            return false;                // cap reached -> caller fallback
           if (its == 10 || its == 20) {  // exceptional shift (slow cycles)
             t += x;
-            for (int i = 0; i <= nn; ++i) H[i][i] -= x;
+            for (int i = 0; i <= nn; ++i)
+              H[i][i] -= x;
             s = std::fabs(H[nn][nn - 1]) + std::fabs(H[nn - 1][nn - 2]);
             y = x = Real(0.75) * s;
             w = Real(-0.4375) * s * s;
@@ -236,15 +256,18 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
             p /= s;
             q /= s;
             r /= s;
-            if (m == l) break;
+            if (m == l)
+              break;
             const Real u = std::fabs(H[m][m - 1]) * (std::fabs(q) + std::fabs(r));
-            const Real v = std::fabs(p) * (std::fabs(H[m - 1][m - 1]) + std::fabs(z)
-                                           + std::fabs(H[m + 1][m + 1]));
-            if (u <= kEps * v) break;
+            const Real v = std::fabs(p) *
+                           (std::fabs(H[m - 1][m - 1]) + std::fabs(z) + std::fabs(H[m + 1][m + 1]));
+            if (u <= kEps * v)
+              break;
           }
           for (int i = m + 2; i <= nn; ++i) {
             H[i][i - 2] = Real(0);
-            if (i > m + 2) H[i][i - 3] = Real(0);
+            if (i > m + 2)
+              H[i][i - 3] = Real(0);
           }
           for (int k = m; k <= nn - 1; ++k) {  // QR double-shift sweep on columns m..nn-1
             if (k != m) {
@@ -259,9 +282,11 @@ ADC_HD inline bool hqr_minmax(Real (&H)[N][N], Real& lmin, Real& lmax, Real& max
               }
             }
             s = hqr_copysign(std::sqrt(p * p + q * q + r * r), p);
-            if (s == Real(0)) continue;
+            if (s == Real(0))
+              continue;
             if (k == m) {
-              if (l != m) H[k][k - 1] = -H[k][k - 1];
+              if (l != m)
+                H[k][k - 1] = -H[k][k - 1];
             } else {
               H[k][k - 1] = -s * x;
             }
@@ -318,9 +343,10 @@ template <int N>
 ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_eig = 100,
                                         bool* fallback = nullptr) {
   static_assert(N >= 1, "real_eig_minmax: N >= 1");
-  static_assert(N <= 16, "real_eig_minmax: block limited to 16x16 (stack buffer O(N^2) per device "
-                         "thread, ~2 KB; beyond that, a dense solver with allocation is more "
-                         "appropriate than this path)");
+  static_assert(N <= 16,
+                "real_eig_minmax: block limited to 16x16 (stack buffer O(N^2) per device "
+                "thread, ~2 KB; beyond that, a dense solver with allocation is more "
+                "appropriate than this path)");
   EigBounds b{Real(0), Real(0), Real(0), true};
   if constexpr (N == 1) {
     b.lmin = b.lmax = A[0][0];
@@ -338,7 +364,8 @@ ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_
   } else {
     Real H[N][N];  // working copy (A is not modified)
     for (int i = 0; i < N; ++i)
-      for (int j = 0; j < N; ++j) H[i][j] = A[i][j];
+      for (int j = 0; j < N; ++j)
+        H[i][j] = A[i][j];
     detail::hessenberg_reduce(H);
     if (!detail::hqr_minmax(H, b.lmin, b.lmax, b.max_im, max_iter_per_eig)) {
       // non-convergence: external Gershgorin bound on the ORIGINAL matrix (the working copy is in
@@ -349,7 +376,8 @@ ADC_HD inline EigBounds real_eig_minmax(const Real (&A)[N][N], int max_iter_per_
       b.converged = false;
     }
   }
-  if (fallback) *fallback = !b.converged;
+  if (fallback)
+    *fallback = !b.converged;
   return b;
 }
 
@@ -368,7 +396,8 @@ template <int N>
 ADC_HD inline Spectrum real_spectrum(const Real (&A)[N][N], Real im_tol = Real(1e-5),
                                      int max_iter_per_eig = 100) {
   const EigBounds b = real_eig_minmax(A, max_iter_per_eig);
-  if (!b.converged) return Spectrum::kUnknown;  // non-convergence is EXPLICIT, never kReal
+  if (!b.converged)
+    return Spectrum::kUnknown;  // non-convergence is EXPLICIT, never kReal
   return b.all_real(im_tol) ? Spectrum::kReal : Spectrum::kComplexPair;
 }
 

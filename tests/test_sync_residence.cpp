@@ -62,14 +62,14 @@ int main() {
   mf.sync_device();  // intention : un kernel va ecrire (no-op sous unifiee)
   for (int li = 0; li < mf.local_size(); ++li) {
     Array4 a = mf.fab(li).array();
-    for_each_cell(mf.box(li),
-                  [a] ADC_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
+    for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
   }
   mf.sync_host();  // intention : on va relire cote hote (fence cible)
 
   Real expected = 0;
   for (int j = 0; j < 8; ++j)
-    for (int i = 0; i < 8; ++i) expected += i + 100.0 * j;
+    for (int i = 0; i < 8; ++i)
+      expected += i + 100.0 * j;
   const Real sf = sum(mf);
   chk(sf == expected, "field_after_sync_exact");
 
@@ -88,6 +88,7 @@ int main() {
   }
   chk(found, "cell_located");
 
-  if (fails == 0) std::printf("OK test_sync_residence\n");
+  if (fails == 0)
+    std::printf("OK test_sync_residence\n");
   return fails == 0 ? 0 : 1;
 }

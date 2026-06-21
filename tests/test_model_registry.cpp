@@ -60,8 +60,9 @@ int main() {
       "is_transport accepte les trois transports builtin");
   chk(!is_transport("bogus") && !is_transport("") && !is_transport("EXB"),
       "is_transport rejette inconnu / vide / casse");
-  chk(is_source("none") && is_source("potential") && is_source("gravity") && is_source("magnetic") &&
-          is_source("lorentz") && is_source("potential_magnetic") && is_source("potential_lorentz"),
+  chk(is_source("none") && is_source("potential") && is_source("gravity") &&
+          is_source("magnetic") && is_source("lorentz") && is_source("potential_magnetic") &&
+          is_source("potential_lorentz"),
       "is_source accepte les sept orthographes builtin (alias inclus)");
   chk(!is_source("bogus") && !is_source(""), "is_source rejette inconnu / vide");
   chk(is_elliptic("charge") && is_elliptic("background") && is_elliptic("gravity"),
@@ -76,7 +77,8 @@ int main() {
   chk(elliptic_tags_csv() == "charge|background|gravity",
       "elliptic_tags_csv() == 'charge|background|gravity'");
   chk(transport_choices() == "'exb' | 'compressible' | 'isothermal'",
-      "transport_choices() == \"'exb' | 'compressible' | 'isothermal'\" (message validate_model_spec)");
+      "transport_choices() == \"'exb' | 'compressible' | 'isothermal'\" (message "
+      "validate_model_spec)");
   chk(elliptic_choices() == "'charge' | 'background' | 'gravity'",
       "elliptic_choices() == \"'charge' | 'background' | 'gravity'\"");
   chk(contains(source_choices(), "'none'") && contains(source_choices(), "'potential_lorentz'"),
@@ -114,7 +116,8 @@ int main() {
   {
     int n_polar = 0;
     for (const TransportTag& t : kTransports)
-      if (t.polar_ok) ++n_polar;
+      if (t.polar_ok)
+        ++n_polar;
     chk(n_polar == 2, "deux transports polar_ok (exb + isothermal)");
   }
   chk(is_transport("compressible"), "compressible est un transport builtin (cartesien)");
@@ -139,7 +142,8 @@ int main() {
     constexpr int kNT = static_cast<int>(sizeof(kTransports) / sizeof(kTransports[0]));
     constexpr int kNS = static_cast<int>(sizeof(kSources) / sizeof(kSources[0]));
     constexpr int kNE = static_cast<int>(sizeof(kElliptics) / sizeof(kElliptics[0]));
-    chk(kNT == 3 && kNS == 7 && kNE == 3, "cardinalite des tables (3 transports, 7 sources, 3 elliptics)");
+    chk(kNT == 3 && kNS == 7 && kNE == 3,
+        "cardinalite des tables (3 transports, 7 sources, 3 elliptics)");
     const std::string tr = transport_tags_csv();
     const std::string sr = source_tags_csv();
     const std::string el = elliptic_tags_csv();
@@ -149,6 +153,7 @@ int main() {
     chk(el == "charge|background|gravity", "set elliptic verrouille (briques generiques)");
   }
 
-  if (fails == 0) std::printf("OK test_model_registry\n");
+  if (fails == 0)
+    std::printf("OK test_model_registry\n");
   return fails == 0 ? 0 : 1;
 }

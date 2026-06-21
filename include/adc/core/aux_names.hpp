@@ -35,7 +35,8 @@ inline constexpr std::pair<std::string_view, int> kAuxCanonicalNames[] = {
 /// then be a model-NAMED field, resolved per block by the facade). HOST-only constexpr.
 constexpr int aux_canonical_index(std::string_view name) {
   for (const auto& [n, c] : kAuxCanonicalNames)
-    if (n == name) return c;
+    if (n == name)
+      return c;
   return -1;
 }
 
@@ -43,7 +44,8 @@ constexpr int aux_canonical_index(std::string_view name) {
 /// component (e.g. a model-named field at kAuxNamedBase + k). HOST-only constexpr.
 constexpr std::string_view aux_canonical_name(int comp) {
   for (const auto& [n, c] : kAuxCanonicalNames)
-    if (c == comp) return n;
+    if (c == comp)
+      return n;
   return {};
 }
 

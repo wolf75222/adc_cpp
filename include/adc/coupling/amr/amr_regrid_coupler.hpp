@@ -62,12 +62,16 @@ inline std::pair<BoxArray, DistributionMapping> regrid_compute_fine_layout(
   std::vector<Box2D> cl = berger_rigoutsos(grown, ClusterParams{});
   std::vector<Box2D> fb;  // fine patches (fine level coords = parent x2)
   for (Box2D b : cl) {
-    b.lo[0] = std::max(b.lo[0], margin); b.lo[1] = std::max(b.lo[1], margin);
-    b.hi[0] = std::min(b.hi[0], PNX - 1 - margin); b.hi[1] = std::min(b.hi[1], PNY - 1 - margin);
-    if (b.hi[0] < b.lo[0] || b.hi[1] < b.lo[1]) continue;
+    b.lo[0] = std::max(b.lo[0], margin);
+    b.lo[1] = std::max(b.lo[1], margin);
+    b.hi[0] = std::min(b.hi[0], PNX - 1 - margin);
+    b.hi[1] = std::min(b.hi[1], PNY - 1 - margin);
+    if (b.hi[0] < b.lo[0] || b.hi[1] < b.lo[1])
+      continue;
     fb.push_back(Box2D{{2 * b.lo[0], 2 * b.lo[1]}, {2 * b.hi[0] + 1, 2 * b.hi[1] + 1}});
   }
-  if (fb.empty()) return {BoxArray{}, DistributionMapping{}};  // nothing to refine
+  if (fb.empty())
+    return {BoxArray{}, DistributionMapping{}};  // nothing to refine
   BoxArray ba(fb);
   return {ba, DistributionMapping(static_cast<int>(ba.size()), n_ranks())};
 }
@@ -104,8 +108,10 @@ inline MultiFab regrid_field_on_layout(const BoxArray& fb, const DistributionMap
     if (par_replicated) {
       for (int j = nb.lo[1]; j <= nb.hi[1]; ++j)  // 1) interp from the parent (local)
         for (int i = nb.lo[0]; i <= nb.hi[0]; ++i) {
-          const int pb = mf_find_box(par, coarsen_index(i, kAmrRefRatio), coarsen_index(j, kAmrRefRatio));
-          if (pb < 0) continue;
+          const int pb =
+              mf_find_box(par, coarsen_index(i, kAmrRefRatio), coarsen_index(j, kAmrRefRatio));
+          if (pb < 0)
+            continue;
           const ConstArray4 pp = par.fab(pb).const_array();
           for (int k = 0; k < ncf; ++k)
             a(i, j, k) = pp(coarsen_index(i, kAmrRefRatio), coarsen_index(j, kAmrRefRatio), k);
@@ -120,10 +126,12 @@ inline MultiFab regrid_field_on_layout(const BoxArray& fb, const DistributionMap
     for (int ol = 0; ol < old.local_size(); ++ol) {  // 2) carry-over of the fine data
       const ConstArray4 o = old.fab(ol).const_array();
       const Box2D inter = nb.intersect(old.box(ol));
-      if (inter.empty()) continue;
+      if (inter.empty())
+        continue;
       for (int j = inter.lo[1]; j <= inter.hi[1]; ++j)
         for (int i = inter.lo[0]; i <= inter.hi[0]; ++i)
-          for (int k = 0; k < ncf; ++k) a(i, j, k) = o(i, j, k);
+          for (int k = 0; k < ncf; ++k)
+            a(i, j, k) = o(i, j, k);
     }
   }
   return nU;
@@ -140,19 +148,22 @@ inline MultiFab regrid_field_on_layout(const BoxArray& fb, const DistributionMap
 /// function on the criterion only), the width is PROPAGATED as a parameter; default 3 ->
 /// MultiFab(..., 3, 1) allocation strictly bit-identical to the historical one.
 template <class Crit>
-void amr_regrid_finest(std::vector<AmrLevelMP>& L, std::vector<MultiFab>& aux,
-                       const Box2D& dom, Crit crit, int grow, int margin,
-                       int aux_ncomp = kAuxBaseComps, bool coarse_replicated = true) {
+void amr_regrid_finest(std::vector<AmrLevelMP>& L, std::vector<MultiFab>& aux, const Box2D& dom,
+                       Crit crit, int grow, int margin, int aux_ncomp = kAuxBaseComps,
+                       bool coarse_replicated = true) {
   const int nlev = static_cast<int>(L.size());
-  if (nlev < 2) return;
+  if (nlev < 2)
+    return;
   const int fk = nlev - 1, pk = fk - 1;  // fine and its parent
   const int PNX = dom.nx() << pk, PNY = dom.ny() << pk;
   const Box2D pdom = Box2D::from_extents(PNX, PNY);
   TagBox tags = tag_cells(L[pk].U, pdom, crit);
   TagBox grown = grow_tags(tags, grow, pdom);
   // (1) Compute the fine layout (tags -> grow [already done] -> all_reduce_or -> clustering -> clamp).
-  auto [fb, dmap] = regrid_compute_fine_layout(std::move(grown), pdom, pk, margin, coarse_replicated);
-  if (fb.size() == 0) return;  // nothing to refine: keep the current grid
+  auto [fb, dmap] =
+      regrid_compute_fine_layout(std::move(grown), pdom, pk, margin, coarse_replicated);
+  if (fb.size() == 0)
+    return;  // nothing to refine: keep the current grid
   // The new patches INHERIT the ghost width of the level being replaced (not a frozen 1): a
   // level rebuilt in 2nd-order MUSCL (Minmod / VanLeer) carries 2 ghosts, which the regrid must
   // preserve, otherwise the reconstruction would read out of bounds after re-refinement.

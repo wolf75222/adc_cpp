@@ -37,21 +37,26 @@ static double imex_err(double eps, double u0, double u_eq, double dt, int n) {
           a(i, j, 0) = (a(i, j, 0) + c * u_eq) / (1 + c);
     }
   };
-  for (int s = 0; s < n; ++s) imex_euler_step(U, dt, no_transport, simpl);
+  for (int s = 0; s < n; ++s)
+    imex_euler_step(U, dt, no_transport, simpl);
   return std::fabs(U.fab(0).const_array()(0, 0, 0) - u_eq);
 }
 
 // explicite naif : facteur d'amplification |1 - dt/eps| par pas.
 static double explicit_val(double eps, double u0, double u_eq, double dt, int n) {
   double u = u0;
-  for (int s = 0; s < n; ++s) u = u + dt * (u_eq - u) / eps;
+  for (int s = 0; s < n; ++s)
+    u = u + dt * (u_eq - u) / eps;
   return u;
 }
 
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const double u0 = 2.0, u_eq = 1.0, dt = 0.1;
@@ -65,8 +70,10 @@ int main() {
     const double e = imex_err(eps, u0, u_eq, dt, n);
     std::printf("  eps=%.0e (dt/eps=%.0e) : |u-u_eq|=%.3e\n", eps, dt / eps, e);
     worst = std::fmax(worst, e);
-    if (!std::isfinite(e)) monotone = false;
-    if (e > prev + 1e-14) monotone = false;  // erreur non croissante quand eps decroit
+    if (!std::isfinite(e))
+      monotone = false;
+    if (e > prev + 1e-14)
+      monotone = false;  // erreur non croissante quand eps decroit
     prev = e;
   }
   const double e_stiff = imex_err(1e-8, u0, u_eq, dt, n);
@@ -81,6 +88,7 @@ int main() {
   // contraste : l'explicite explose au meme regime.
   chk(!std::isfinite(e_expl) || std::fabs(e_expl) > 1e3, "explicite_explose");
 
-  if (fails == 0) std::printf("OK test_ap_limit\n");
+  if (fails == 0)
+    std::printf("OK test_ap_limit\n");
   return fails == 0 ? 0 : 1;
 }

@@ -81,8 +81,7 @@ struct AdvanceFab1cKernel {
   ConstArray4 FX, FY;
   double dx, dy, dt;
   ADC_HD void operator()(int i, int j) const {
-    uu(i, j) -= dt * ((FX(i + 1, j) - FX(i, j)) / dx +
-                      (FY(i, j + 1) - FY(i, j)) / dy);
+    uu(i, j) -= dt * ((FX(i + 1, j) - FX(i, j)) / dx + (FY(i, j + 1) - FY(i, j)) / dy);
   }
 };
 
@@ -92,8 +91,7 @@ struct AdvanceFab1cKernel {
 // 3 components [phi, gx, gy], ghosts filled), on a Fab2D.
 // fx(i,j) = flux at the left face of cell i; fy(i,j) = bottom face of j.
 template <class Model>
-void compute_fluxes_1c(const Model& m, const Fab2D& U, const Fab2D& aux,
-                       Fab2D& fx, Fab2D& fy) {
+void compute_fluxes_1c(const Model& m, const Fab2D& U, const Fab2D& aux, Fab2D& fx, Fab2D& fy) {
   const ConstArray4 u = U.const_array();
   const ConstArray4 ax = aux.const_array();
   {
@@ -108,8 +106,8 @@ void compute_fluxes_1c(const Model& m, const Fab2D& U, const Fab2D& aux,
 
 // Explicit Euler: U -= dt div(F). The ghosts of U must be filled.
 template <class Model>
-void advance_fab_1c(const Model& m, Fab2D& U, const Fab2D& aux, double dx,
-                    double dy, double dt, Fab2D& fx, Fab2D& fy) {
+void advance_fab_1c(const Model& m, Fab2D& U, const Fab2D& aux, double dx, double dy, double dt,
+                    Fab2D& fx, Fab2D& fy) {
   compute_fluxes_1c(m, U, aux, fx, fy);
   Array4 uu = U.array();
   const ConstArray4 FX = fx.const_array();
@@ -137,8 +135,7 @@ inline void fill_periodic_fab(Fab2D& U, const Box2D& dom) {
 // Fine ghosts by injection from the coarse (ratio 2), interpolated in time
 // between the old coarse state (frac=0) and the new one (frac=1): space-time
 // FillPatch for the Berger-Oliger subcycling.
-inline void fill_fine_ghosts_t(Fab2D& Uf, const Fab2D& Uco, const Fab2D& Ucn,
-                               double frac) {
+inline void fill_fine_ghosts_t(Fab2D& Uf, const Fab2D& Uco, const Fab2D& Ucn, double frac) {
   const ConstArray4 co = Uco.const_array();
   const ConstArray4 cn = Ucn.const_array();
   Array4 f = Uf.array();
@@ -154,14 +151,13 @@ inline void fill_fine_ghosts_t(Fab2D& Uf, const Fab2D& Uco, const Fab2D& Ucn,
 }
 
 // Fine -> coarse average over the covered region (ratio 2).
-inline void average_down_fab(const Fab2D& Uf, Fab2D& Uc, int CI0, int CI1,
-                             int CJ0, int CJ1) {
+inline void average_down_fab(const Fab2D& Uf, Fab2D& Uc, int CI0, int CI1, int CJ0, int CJ1) {
   const ConstArray4 f = Uf.const_array();
   Array4 c = Uc.array();
   for (int J = CJ0; J <= CJ1; ++J)
     for (int I = CI0; I <= CI1; ++I)
-      c(I, J) = 0.25 * (f(2 * I, 2 * J) + f(2 * I + 1, 2 * J) +
-                        f(2 * I, 2 * J + 1) + f(2 * I + 1, 2 * J + 1));
+      c(I, J) = 0.25 * (f(2 * I, 2 * J) + f(2 * I + 1, 2 * J) + f(2 * I, 2 * J + 1) +
+                        f(2 * I + 1, 2 * J + 1));
 }
 
 // One conservative 2-level step with Berger-Oliger subcycling (the fine does
@@ -173,9 +169,9 @@ inline void average_down_fab(const Fab2D& Uf, Fab2D& Uc, int CI0, int CI1,
 // fluxes (x dt/2 per substep, spatially averaged) at the 4 faces of the fine
 // region, then we correct the adjacent coarse cells by their difference.
 template <class Model>
-void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
-                     double dyc, Fab2D& Uf, int CI0, int CI1, int CJ0, int CJ1,
-                     const Fab2D& auxc, const Fab2D& auxf, double dt) {
+void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc, double dyc, Fab2D& Uf,
+                     int CI0, int CI1, int CJ0, int CJ1, const Fab2D& auxc, const Fab2D& auxf,
+                     double dt) {
   const int r = kAmrRefRatio;
   const double dxf = dxc / kAmrRefRatio, dyf = dyc / kAmrRefRatio, dtf = dt / r;
   const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
@@ -210,13 +206,11 @@ void amr_step_2level(const Model& m, Fab2D& Uc, const Box2D& dom, double dxc,
     const ConstArray4 FYf = fyf.const_array();
     for (int J = CJ0; J <= CJ1; ++J) {
       fL[J - CJ0] += 0.5 * (FXf(2 * CI0, 2 * J) + FXf(2 * CI0, 2 * J + 1)) * dtf;
-      fR[J - CJ0] +=
-          0.5 * (FXf(2 * CI1 + 2, 2 * J) + FXf(2 * CI1 + 2, 2 * J + 1)) * dtf;
+      fR[J - CJ0] += 0.5 * (FXf(2 * CI1 + 2, 2 * J) + FXf(2 * CI1 + 2, 2 * J + 1)) * dtf;
     }
     for (int I = CI0; I <= CI1; ++I) {
       fB[I - CI0] += 0.5 * (FYf(2 * I, 2 * CJ0) + FYf(2 * I + 1, 2 * CJ0)) * dtf;
-      fT[I - CI0] +=
-          0.5 * (FYf(2 * I, 2 * CJ1 + 2) + FYf(2 * I + 1, 2 * CJ1 + 2)) * dtf;
+      fT[I - CI0] += 0.5 * (FYf(2 * I, 2 * CJ1 + 2) + FYf(2 * I + 1, 2 * CJ1 + 2)) * dtf;
     }
     advance_fab_1c(m, Uf, auxf, dxf, dyf, dtf, fxf, fyf);
   }

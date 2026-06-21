@@ -47,9 +47,11 @@ static std::vector<double> bump(int n, double amp) {
     }
   // retire l'offset moyen -> Sum q n a moyenne nulle (Poisson periodique solvable).
   double mean = 0;
-  for (double v : r) mean += v;
+  for (double v : r)
+    mean += v;
   mean /= static_cast<double>(r.size());
-  for (double& v : r) v += (1.0 - mean);
+  for (double& v : r)
+    v += (1.0 - mean);
   return r;
 }
 
@@ -85,7 +87,8 @@ int main(int argc, char** argv) {
   const double m0e = sys.mass("electrons");
 
   const double dt = 1e-3;
-  for (int s = 0; s < 16; ++s) sys.step(dt);
+  for (int s = 0; s < 16; ++s)
+    sys.step(dt);
 
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::fence();
@@ -97,7 +100,8 @@ int main(int argc, char** argv) {
 
   auto checksum = [](const std::vector<double>& v) {
     double s = 0;
-    for (double x : v) s += x * x;
+    for (double x : v)
+      s += x * x;
     return s;
   };
   const double ci = checksum(di), ce = checksum(de), cp = checksum(phi);
@@ -110,21 +114,39 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   if (me == 0) {
-    std::printf("AMRMB np=%d | mass_ions=%.17e mass_elec=%.17e | csum_ions=%.17e csum_elec=%.17e "
-                "csum_phi=%.17e | crossrank_spread=%.3e\n",
-                np, mi, mass_e, ci, ce, cp, sp);
+    std::printf(
+        "AMRMB np=%d | mass_ions=%.17e mass_elec=%.17e | csum_ions=%.17e csum_elec=%.17e "
+        "csum_phi=%.17e | crossrank_spread=%.3e\n",
+        np, mi, mass_e, ci, ce, cp, sp);
     std::printf("AMRMB conservation: dm_ions=%.3e dm_elec=%.3e\n", std::fabs(mi - m0i),
                 std::fabs(mass_e - m0e));
-    if (!(di.size() == static_cast<std::size_t>(n) * n)) { std::printf("FAIL taille densite\n"); ++fails; }
-    if (!(cp > 1e-12)) { std::printf("FAIL potentiel trivial (Poisson somme inactif)\n"); ++fails; }
+    if (!(di.size() == static_cast<std::size_t>(n) * n)) {
+      std::printf("FAIL taille densite\n");
+      ++fails;
+    }
+    if (!(cp > 1e-12)) {
+      std::printf("FAIL potentiel trivial (Poisson somme inactif)\n");
+      ++fails;
+    }
     // masse de CHAQUE bloc conservee (transport conservatif periodique, par bloc).
-    if (!(std::fabs(mi - m0i) < 1e-9)) { std::printf("FAIL masse ions non conservee\n"); ++fails; }
-    if (!(std::fabs(mass_e - m0e) < 1e-9)) { std::printf("FAIL masse electrons non conservee\n"); ++fails; }
+    if (!(std::fabs(mi - m0i) < 1e-9)) {
+      std::printf("FAIL masse ions non conservee\n");
+      ++fails;
+    }
+    if (!(std::fabs(mass_e - m0e) < 1e-9)) {
+      std::printf("FAIL masse electrons non conservee\n");
+      ++fails;
+    }
     // grossier replique : tout bit-identique cross-rang (spread exactement 0).
-    if (!(sp == 0.0)) { std::printf("FAIL grandeurs non bit-identiques entre rangs\n"); ++fails; }
+    if (!(sp == 0.0)) {
+      std::printf("FAIL grandeurs non bit-identiques entre rangs\n");
+      ++fails;
+    }
     if (fails == 0)
-      std::printf("OK test_mpi_amr_twoblock_parity np=%d (multi-blocs AMR : Poisson somme "
-                  "co-localise, masse par bloc, bit-identique cross-rang)\n", np);
+      std::printf(
+          "OK test_mpi_amr_twoblock_parity np=%d (multi-blocs AMR : Poisson somme "
+          "co-localise, masse par bloc, bit-identique cross-rang)\n",
+          np);
   } else {
     (void)sp;
   }

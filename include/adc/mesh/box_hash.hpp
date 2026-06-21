@@ -40,7 +40,8 @@ class BoxHash {
   /// (no intersecting box is omitted). The caller tests the exact intersection. Empty if q is empty.
   std::vector<int> query(const Box2D& q) const {
     std::vector<int> out;
-    if (q.empty()) return out;
+    if (q.empty())
+      return out;
     for (int by = fdiv(q.lo[1]); by <= fdiv(q.hi[1]); ++by)
       for (int bx = fdiv(q.lo[0]); bx <= fdiv(q.hi[0]); ++bx) {
         auto it = bins_.find(key(bx, by));

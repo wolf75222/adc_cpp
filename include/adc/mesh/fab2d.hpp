@@ -89,14 +89,13 @@ class Fab2D {
 
   /// WRITE handle (POD device-copyable) over this Fab. Valid as long as the Fab lives.
   Array4 array() {
-    return Array4{data_.data(), nx_tot_,
-                  static_cast<std::int64_t>(nx_tot_) * ny_tot_, gbox_.lo[0], gbox_.lo[1]};
+    return Array4{data_.data(), nx_tot_, static_cast<std::int64_t>(nx_tot_) * ny_tot_, gbox_.lo[0],
+                  gbox_.lo[1]};
   }
   /// READ handle (POD device-copyable) over this Fab. Valid as long as the Fab lives.
   ConstArray4 const_array() const {
-    return ConstArray4{data_.data(), nx_tot_,
-                       static_cast<std::int64_t>(nx_tot_) * ny_tot_, gbox_.lo[0],
-                       gbox_.lo[1]};
+    return ConstArray4{data_.data(), nx_tot_, static_cast<std::int64_t>(nx_tot_) * ny_tot_,
+                       gbox_.lo[0], gbox_.lo[1]};
   }
 
   /// Raw pointer to the buffer (passed directly to MPI in unified memory, for instance).

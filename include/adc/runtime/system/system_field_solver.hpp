@@ -1,22 +1,22 @@
 #pragma once
 
-#include <adc/core/state.hpp>       // kAuxBaseComps (base component of the aux channel)
-#include <adc/core/types.hpp>       // Real
-#include <adc/mesh/multifab.hpp>    // MultiFab, Array4, ConstArray4
-#include <adc/mesh/box2d.hpp>       // Box2D
-#include <adc/mesh/for_each.hpp>    // device_fence
+#include <adc/core/state.hpp>        // kAuxBaseComps (base component of the aux channel)
+#include <adc/core/types.hpp>        // Real
+#include <adc/mesh/multifab.hpp>     // MultiFab, Array4, ConstArray4
+#include <adc/mesh/box2d.hpp>        // Box2D
+#include <adc/mesh/for_each.hpp>     // device_fence
 #include <adc/mesh/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
 #include <adc/numerics/elliptic/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>
 #include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson)
-#include <adc/parallel/comm.hpp>  // n_ranks() (FFT MPI guard)
+#include <adc/parallel/comm.hpp>                           // n_ranks() (FFT MPI guard)
 #include <adc/runtime/block_builder_polar.hpp>  // derive_aux_polar (polar aux in local basis)
 #include <adc/runtime/wall_predicate.hpp>       // detail::wall_predicate
 
 #include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (env-gated, inert by default)
 #include <cstdlib>  // getenv
 #include <functional>
-#include <map>      // named_aux_: NAMED aux fields (comp -> field), re-applied after channel realloc
+#include <map>  // named_aux_: NAMED aux fields (comp -> field), re-applied after channel realloc
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -69,7 +69,10 @@ inline bool adc_trace_sf() {
 }
 /// Writes the marker @p w to stderr (with flush) ONLY if adc_trace_sf(); no-op otherwise.
 inline void adc_sf_mark(const char* w) {
-  if (adc_trace_sf()) { std::fprintf(stderr, "[sf] %s\n", w); std::fflush(stderr); }
+  if (adc_trace_sf()) {
+    std::fprintf(stderr, "[sf] %s\n", w);
+    std::fflush(stderr);
+  }
 }
 
 /// SystemFieldSolver<Impl>: see contract above. All methods are MEMBERS (not free
@@ -98,13 +101,16 @@ class SystemFieldSolver {
   // it makes the off-step solve_fields exit WITHOUT cycling on an already converged state (diagnostics, oracles,
   // restart). Inert for the FFT solver (direct, without iterative tolerance).
   Real p_abs_tol_ = 0;
-  bool has_eps_field_ = false;          // VARIABLE permittivity eps(x) provided (carried by the operator)
-  std::vector<double> p_eps_field_;     // field eps(x), n*n row-major (if has_eps_field_)
-  bool has_eps_xy_field_ = false;       // ANISOTROPIC permittivity eps_x(x), eps_y(x) (operator div(diag(eps_x,eps_y) grad phi))
-  std::vector<double> p_eps_x_field_;   // field eps_x(x), n*n row-major (faces normal to x; if has_eps_xy_field_)
-  std::vector<double> p_eps_y_field_;   // field eps_y(x), n*n row-major (faces normal to y; if has_eps_xy_field_)
-  bool has_kappa_field_ = false;        // REACTION term kappa(x) provided: div(eps grad phi) - kappa phi
-  std::vector<double> p_kappa_field_;   // field kappa(x), n*n row-major (if has_kappa_field_)
+  bool has_eps_field_ = false;  // VARIABLE permittivity eps(x) provided (carried by the operator)
+  std::vector<double> p_eps_field_;  // field eps(x), n*n row-major (if has_eps_field_)
+  bool has_eps_xy_field_ =
+      false;  // ANISOTROPIC permittivity eps_x(x), eps_y(x) (operator div(diag(eps_x,eps_y) grad phi))
+  std::vector<double>
+      p_eps_x_field_;  // field eps_x(x), n*n row-major (faces normal to x; if has_eps_xy_field_)
+  std::vector<double>
+      p_eps_y_field_;  // field eps_y(x), n*n row-major (faces normal to y; if has_eps_xy_field_)
+  bool has_kappa_field_ = false;  // REACTION term kappa(x) provided: div(eps grad phi) - kappa phi
+  std::vector<double> p_kappa_field_;  // field kappa(x), n*n row-major (if has_kappa_field_)
   // GAUSS POLICY (restart-free Gauss-evolution option). Default "restart":
   // solve_fields re-solves -Delta phi = f (Gauss) on EVERY call -- historical behavior,
   // BIT-IDENTICAL. "evolve": after the FIRST solve (phi^0), solve_fields NO LONGER re-solves the
@@ -128,8 +134,8 @@ class SystemFieldSolver {
   // step). In CARTESIAN this buffer is INERT (nullopt): ell_phi() routes to ell_->phi() as
   // before, BIT-IDENTICAL.
   std::optional<MultiFab> phi_src_polar_;
-  std::vector<Real> bz_field_;        // field B_z(x) n*n row-major (empty if not provided)
-  int te_src_ = -1;                   // index of the fluid block source of T_e (-1 = none)
+  std::vector<Real> bz_field_;  // field B_z(x) n*n row-major (empty if not provided)
+  int te_src_ = -1;             // index of the fluid block source of T_e (-1 = none)
   // NAMED aux fields (ADC-70 phase 1) provided by the user via System::set_aux_field: key =
   // canonical component (>= kAuxNamedBase = 5), value = field n*n (cartesian) / nr*ntheta (polar)
   // row-major. PERSISTENT like bz_field_: solve_fields touches ONLY components 0..2 (phi,
@@ -147,10 +153,13 @@ class SystemFieldSolver {
   /// fill_ghosts/fill_boundary. For each declared component, overrides ONLY that component's
   /// physical-face ghosts (aux_halo_override keeps periodic faces periodic). No-op when empty.
   void apply_named_aux_bc() {
-    if (named_aux_bc_.empty()) return;  // hot-path fast exit (parity with the AMR counterparts)
+    if (named_aux_bc_.empty())
+      return;  // hot-path fast exit (parity with the AMR counterparts)
     for (const auto& kv : named_aux_bc_) {
-      if (kv.first >= owner_->aux_ncomp_) continue;
-      fill_physical_bc(owner_->aux, owner_->dom, aux_halo_override(owner_->bc_, kv.second), kv.first);
+      if (kv.first >= owner_->aux_ncomp_)
+        continue;
+      fill_physical_bc(owner_->aux, owner_->dom, aux_halo_override(owner_->bc_, kv.second),
+                       kv.first);
     }
   }
 
@@ -158,7 +167,8 @@ class SystemFieldSolver {
   /// valid cells. No-op if B_z not provided or if no block reads it (base width). The
   /// halos of B_z are filled by solve_fields (like grad); field_postprocess only writes comp 0..2.
   void apply_bz() {
-    if (bz_field_.empty() || owner_->aux_ncomp_ <= kAuxBaseComps) return;
+    if (bz_field_.empty() || owner_->aux_ncomp_ <= kAuxBaseComps)
+      return;
     // ROW WIDTH (fast axis i) of the row-major array bz_field_: n in cartesian (square n x n,
     // BIT-IDENTICAL), nr in POLAR (ring nr x ntheta, i = r of size nr, cf. set_magnetic_field).
     // The index stays flat[j * row + i]: in cartesian row == n (unchanged); in polar row == nr.
@@ -180,7 +190,8 @@ class SystemFieldSolver {
   /// No-op if no source or if no block reads T_e (insufficient width). The source block is
   /// compressible (4 var); p = (gamma-1)(E - 0.5 rho|v|^2), T = p/rho.
   void apply_te() {
-    if (te_src_ < 0 || owner_->aux_ncomp_ <= kTeComp) return;
+    if (te_src_ < 0 || owner_->aux_ncomp_ <= kTeComp)
+      return;
     const auto& s = owner_->sp[static_cast<std::size_t>(te_src_)];
     const Real gm1 = Real(s.gamma) - Real(1);
     // LOCAL population on the owner rank (cf. solve_fields): we iterate over the local fabs of the
@@ -206,7 +217,8 @@ class SystemFieldSolver {
   /// solve_fields (fill_ghosts/fill_boundary over the whole channel). LOCAL population on the rank (iteration
   /// over the local fabs, no-op on a rank without a box at np>1).
   void apply_named_aux_one(int comp, const std::vector<Real>& field) {
-    if (field.empty() || owner_->aux_ncomp_ <= comp) return;
+    if (field.empty() || owner_->aux_ncomp_ <= comp)
+      return;
     // ROW WIDTH (fast axis i): n in cartesian (square n x n), nr in polar (ring nr x
     // ntheta). Index flat[j * row + i], identical to apply_bz / set_density.
     const int row = owner_->polar_ ? owner_->aux.box(0).nx() : owner_->cfg.n;
@@ -222,7 +234,8 @@ class SystemFieldSolver {
   /// Re-applies ALL the stored named aux fields (cf. named_aux_). Called by ensure_aux_width
   /// after a reallocation of the aux channel (which starts again from a zeroed MultiFab), like apply_bz / apply_te.
   void apply_named_aux() {
-    for (const auto& kv : named_aux_) apply_named_aux_one(kv.first, kv.second);
+    for (const auto& kv : named_aux_)
+      apply_named_aux_one(kv.first, kv.second);
   }
 
   // --- elliptic solver (system Poisson) -----------------------------
@@ -230,9 +243,11 @@ class SystemFieldSolver {
   /// "periodic"|"dirichlet"|"neumann" (Foextrap). @throws std::runtime_error on an unknown mode.
   BCRec poisson_bc() {
     std::string mode = p_bc;
-    if (mode == "auto") mode = (p_wall == "circle" || !owner_->cfg.periodic) ? "dirichlet" : "periodic";
+    if (mode == "auto")
+      mode = (p_wall == "circle" || !owner_->cfg.periodic) ? "dirichlet" : "periodic";
     BCRec b;
-    if (mode == "periodic") return b;
+    if (mode == "periodic")
+      return b;
     if (mode == "dirichlet") {
       b.xlo = b.xhi = b.ylo = b.yhi = BCType::Dirichlet;
       return b;
@@ -254,7 +269,8 @@ class SystemFieldSolver {
   /// No-op if ell_ already exists. @throws std::runtime_error on unknown rhs/solver or
   /// unsupported combination (fft + MPI/wall/variable eps/kappa; kappa + constant eps != 1).
   void ensure_elliptic() {
-    if (ell_) return;
+    if (ell_)
+      return;
     // The system right-hand side is ALWAYS f = Sum_s elliptic_rhs_s(u_s), assembled by
     // solve_fields from the elliptic brick of EACH block (charge q n, background alpha (n-n0),
     // gravity coupling 4piG (rho-rho0)). The token is thus NOT a computation mode but a LABEL
@@ -271,15 +287,20 @@ class SystemFieldSolver {
       // permittivity and reaction kappa FIRST (each guard fires identically on all ranks -> no
       // deadlock), so only the pure periodic constant-coefficient case reaches the layout switch below.
       if (active)
-        throw std::runtime_error("System: solver '" + p_solver + "' incompatible with a wall -> 'geometric_mg'");
+        throw std::runtime_error("System: solver '" + p_solver +
+                                 "' incompatible with a wall -> 'geometric_mg'");
       if (has_eps_field_)
-        throw std::runtime_error("System: solver '" + p_solver + "' has a CONSTANT coefficient, incompatible with a "
+        throw std::runtime_error("System: solver '" + p_solver +
+                                 "' has a CONSTANT coefficient, incompatible with a "
                                  "variable eps(x) field -> use solver='geometric_mg'");
       if (has_eps_xy_field_)
-        throw std::runtime_error("System: solver '" + p_solver + "' has a CONSTANT coefficient, incompatible with an "
-                                 "ANISOTROPIC permittivity eps_x(x), eps_y(x) -> use solver='geometric_mg'");
+        throw std::runtime_error(
+            "System: solver '" + p_solver +
+            "' has a CONSTANT coefficient, incompatible with an "
+            "ANISOTROPIC permittivity eps_x(x), eps_y(x) -> use solver='geometric_mg'");
       if (has_kappa_field_)
-        throw std::runtime_error("System: solver '" + p_solver + "' (pure Poisson) incompatible with a "
+        throw std::runtime_error("System: solver '" + p_solver +
+                                 "' (pure Poisson) incompatible with a "
                                  "reaction term kappa(x) -> use solver='geometric_mg'");
       // 'fft_spectral': same plumbing, CONTINUOUS symbol -(kx^2+ky^2) (fidelity to the spectral
       // references, e.g. poisson_fft.m of RIEMOM2D); 'fft' keeps the discrete stencil (bit-identical).
@@ -301,17 +322,23 @@ class SystemFieldSolver {
                      spectral);
       }
     } else if (p_solver == "geometric_mg") {
-      ell_.emplace(std::in_place_type<GeometricMG>, owner_->geom, owner_->ba, pbc, std::move(active));
-      std::get<GeometricMG>(*ell_).set_abs_tol(p_abs_tol_);  // absolute floor of the V-cycle (0 = relative only)
-      if (has_eps_field_) apply_epsilon_field();    // operator div(eps grad phi) with variable eps(x)
-      if (has_eps_xy_field_) apply_epsilon_anisotropic_field();  // div(diag(eps_x, eps_y) grad phi)
-      if (has_kappa_field_) apply_reaction_field();  // term - kappa phi (screened Poisson / Helmholtz)
+      ell_.emplace(std::in_place_type<GeometricMG>, owner_->geom, owner_->ba, pbc,
+                   std::move(active));
+      std::get<GeometricMG>(*ell_).set_abs_tol(
+          p_abs_tol_);  // absolute floor of the V-cycle (0 = relative only)
+      if (has_eps_field_)
+        apply_epsilon_field();  // operator div(eps grad phi) with variable eps(x)
+      if (has_eps_xy_field_)
+        apply_epsilon_anisotropic_field();  // div(diag(eps_x, eps_y) grad phi)
+      if (has_kappa_field_)
+        apply_reaction_field();  // term - kappa phi (screened Poisson / Helmholtz)
       // Guard: with kappa and a CONSTANT permittivity eps != 1 (without an eps(x) field), the rhs
       // would be scaled by 1/eps (shortcut lap phi = f/eps) -- inconsistent with the term -kappa phi.
       // We then require eps = 1 or an eps(x) field (carried by the operator, without scaling).
       if (has_kappa_field_ && !has_eps_field_ && !has_eps_xy_field_ && p_eps_ != Real(1))
-        throw std::runtime_error("System: reaction term kappa(x) + CONSTANT permittivity eps != 1 "
-                                 "unsupported; use eps = 1 or an eps(x) field (set_epsilon_field)");
+        throw std::runtime_error(
+            "System: reaction term kappa(x) + CONSTANT permittivity eps != 1 "
+            "unsupported; use eps = 1 or an eps(x) field (set_epsilon_field)");
     } else {
       throw std::runtime_error("System::set_poisson: unknown solver '" + p_solver +
                                "' (geometric_mg|fft|fft_spectral)");
@@ -334,7 +361,8 @@ class SystemFieldSolver {
         for (int i = v.lo[0]; i <= v.hi[0]; ++i)
           e(i, j, 0) = static_cast<Real>(p_eps_field_[static_cast<std::size_t>(j) * n + i]);
     }
-    mg.set_epsilon(eps_fine);  // copy on the fine level + restriction (average_down) to the coarse ones
+    mg.set_epsilon(
+        eps_fine);  // copy on the fine level + restriction (average_down) to the coarse ones
   }
   /// Installs the eps_x(x), eps_y(x) fields (n*n row-major each) on the GeometricMG: the operator
   /// becomes div(diag(eps_x, eps_y) grad phi) = f. The faces normal to x read eps_x, those
@@ -358,7 +386,8 @@ class SystemFieldSolver {
           ey(i, j, 0) = static_cast<Real>(p_eps_y_field_[k]);
         }
     }
-    mg.set_epsilon_anisotropic(eps_x_fine, eps_y_fine);  // faces x <- eps_x, faces y <- eps_y (+ restriction)
+    mg.set_epsilon_anisotropic(eps_x_fine,
+                               eps_y_fine);  // faces x <- eps_x, faces y <- eps_y (+ restriction)
   }
   /// Installs the reaction term kappa(x) (n*n row-major) on the GeometricMG: the operator becomes
   /// div(eps grad phi) - kappa phi = f (screened Poisson / Helmholtz; kappa = 1/lambda_D^2 for Debye).
@@ -391,13 +420,15 @@ class SystemFieldSolver {
   MultiFab& ell_phi() {
     if (owner_->polar_) {
       // Allocate lazily (1 ghost) on the System layout, then copy phi^n from aux[0].
-      if (!phi_src_polar_) phi_src_polar_.emplace(owner_->ba, owner_->dm, 1, 1);
+      if (!phi_src_polar_)
+        phi_src_polar_.emplace(owner_->ba, owner_->dm, 1, 1);
       for (int li = 0; li < phi_src_polar_->local_size(); ++li) {
         const ConstArray4 a = owner_->aux.fab(li).const_array();
         Array4 p = phi_src_polar_->fab(li).array();
         const Box2D v = phi_src_polar_->box(li);
         for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int i = v.lo[0]; i <= v.hi[0]; ++i) p(i, j, 0) = a(i, j, 0);  // aux[0] = phi^n
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+            p(i, j, 0) = a(i, j, 0);  // aux[0] = phi^n
       }
       return *phi_src_polar_;
     }
@@ -428,7 +459,8 @@ class SystemFieldSolver {
   /// @throws std::runtime_error on unknown rhs/solver or variable/aniso/reaction permittivity (unsupported
   /// by the direct polar Poisson).
   void ensure_elliptic_polar() {
-    if (pell_) return;
+    if (pell_)
+      return;
     if (p_rhs != "charge_density" && p_rhs != "composite")
       throw std::runtime_error("System::set_poisson (polar): unknown rhs '" + p_rhs +
                                "' (charge_density|composite)");
@@ -451,7 +483,8 @@ class SystemFieldSolver {
       throw std::runtime_error(
           "System: DIRECT polar Poisson incompatible with the theta splitting (theta_boxes=" +
           std::to_string(owner_->ba.size()) +
-          " boxes); it requires a single-box grid (theta_boxes=1). For a multi-box theta splitting, "
+          " boxes); it requires a single-box grid (theta_boxes=1). For a multi-box theta "
+          "splitting, "
           "use the polar tensor Schur stage (adc.Split + adc.CondensedSchur), multi-box, or "
           "go back to theta_boxes=1.");
     // Radial BC: Dirichlet/Neumann from poisson_bc() (xlo/xhi). theta always periodic.
@@ -467,7 +500,8 @@ class SystemFieldSolver {
     ensure_elliptic_polar();
     MultiFab& rhs = pell_->rhs();
     rhs.set_val(Real(0));
-    for (auto& s : owner_->sp) s.add_poisson_rhs(s.U, rhs);
+    for (auto& s : owner_->sp)
+      s.add_poisson_rhs(s.U, rhs);
     // CONSTANT permittivity eps != 1: lap phi = f/eps (1/eps scaling of the rhs), like the
     // cartesian. (variable/aniso eps(x) is refused by ensure_elliptic_polar.)
     if (p_eps_ != Real(1)) {
@@ -476,7 +510,8 @@ class SystemFieldSolver {
         Array4 r = rhs.fab(li).array();
         const Box2D v = rhs.box(li);
         for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+            r(i, j, 0) *= inv;
       }
     }
     pell_->solve();
@@ -499,7 +534,8 @@ class SystemFieldSolver {
   /// and the derivation of grad phi MUST stay atomic (without it the GPU V-cycle is not finished when
   /// phi is read); the derivation / population loops iterate over the LOCAL fabs (MPI-safe).
   void solve_fields() {
-    if (owner_->polar_) return solve_fields_polar();  // ring: polar Poisson + aux in local basis (e_r, e_theta)
+    if (owner_->polar_)
+      return solve_fields_polar();  // ring: polar Poisson + aux in local basis (e_r, e_theta)
     adc_sf_mark("solve_fields: start");
     ensure_elliptic();
     adc_sf_mark("solve_fields: after ensure_elliptic");
@@ -516,7 +552,8 @@ class SystemFieldSolver {
       // is held (hold-then-catch-up) between two catch-ups, so U_s stays FROZEN there at its last advance;
       // its density / charge enters this sum with a STALE state until its next catch-up
       // (loose Poisson coupling of the slow block, assumed by the stride choice).
-      for (auto& s : owner_->sp) s.add_poisson_rhs(s.U, rhs);
+      for (auto& s : owner_->sp)
+        s.add_poisson_rhs(s.U, rhs);
       adc_sf_mark("solve_fields: after add_poisson_rhs");
       // CONSTANT permittivity: div(eps grad phi) = f <=> lap phi = f/eps, so we scale the rhs by
       // 1/eps. With a VARIABLE or ANISOTROPIC eps(x) field we DO NOT do it: the GeometricMG
@@ -528,7 +565,8 @@ class SystemFieldSolver {
           Array4 r = rhs.fab(li).array();
           const Box2D v = rhs.box(li);
           for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-            for (int i = v.lo[0]; i <= v.hi[0]; ++i) r(i, j, 0) *= inv;
+            for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+              r(i, j, 0) *= inv;
         }
       }
       adc_sf_mark("solve_fields: before ell_solve");
@@ -563,7 +601,8 @@ class SystemFieldSolver {
     if (owner_->periodic_)
       fill_boundary(owner_->aux, owner_->dom, owner_->per_);
     else
-      fill_ghosts(owner_->aux, owner_->dom, owner_->bc_);  // extrapolation at the boundary (wall / free outflow)
+      fill_ghosts(owner_->aux, owner_->dom,
+                  owner_->bc_);  // extrapolation at the boundary (wall / free outflow)
     apply_named_aux_bc();  // ADC-369: per-field halo override (after the shared fill; no-op if none)
     adc_sf_mark("solve_fields: end (fill ghosts aux)");
   }

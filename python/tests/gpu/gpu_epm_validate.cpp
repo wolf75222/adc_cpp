@@ -34,9 +34,15 @@ using namespace adc;
 static constexpr double kPi = 3.14159265358979323846;
 static constexpr double KAPPA = 50.0;  // 1/lambda_D^2 (ecrantage de Debye modere)
 
-static double phi_exact(double x, double y) { return std::sin(kPi * x) * std::sin(kPi * y); }
-static double eps_x_field(double x, double /*y*/) { return 1.0 + 0.5 * x; }
-static double eps_y_field(double /*x*/, double y) { return 1.0 + 0.3 * y; }
+static double phi_exact(double x, double y) {
+  return std::sin(kPi * x) * std::sin(kPi * y);
+}
+static double eps_x_field(double x, double /*y*/) {
+  return 1.0 + 0.5 * x;
+}
+static double eps_y_field(double /*x*/, double y) {
+  return 1.0 + 0.3 * y;
+}
 
 // f pour l'operateur ECRANTE : div(eps grad phi) - kappa phi, eps = eps_x_field (composable eps+kappa).
 static double rhs_screened(double x, double y) {
@@ -100,20 +106,26 @@ static double solve_mms(Op op, int n, int& cycles, std::vector<double>* phi_out)
   Fab2D& p = mg.phi().fab(0);
   ConstArray4 pc = p.const_array();
   double eInf = 0;
-  if (phi_out) phi_out->clear();
+  if (phi_out)
+    phi_out->clear();
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       const double v = pc(i, j, 0);
       eInf = std::max(eInf, std::fabs(v - phi_exact(geom.x_cell(i), geom.y_cell(j))));
-      if (phi_out) phi_out->push_back(v);
+      if (phi_out)
+        phi_out->push_back(v);
     }
   return eInf;
 }
 
 static void dump_bin(const std::string& path, const std::vector<double>& v) {
-  if (path.empty()) return;
+  if (path.empty())
+    return;
   FILE* f = std::fopen(path.c_str(), "wb");
-  if (!f) { std::printf("WARN: cannot open %s\n", path.c_str()); return; }
+  if (!f) {
+    std::printf("WARN: cannot open %s\n", path.c_str());
+    return;
+  }
   const std::uint64_t nbytes = static_cast<std::uint64_t>(v.size()) * sizeof(double);
   std::fwrite(v.data(), 1, nbytes, f);
   std::fclose(f);
@@ -129,11 +141,15 @@ int main(int argc, char** argv) {
 #endif
   std::string dump_prefix;
   for (int k = 1; k < argc; ++k)
-    if (std::strncmp(argv[k], "--dump=", 7) == 0) dump_prefix = argv[k] + 7;
+    if (std::strncmp(argv[k], "--dump=", 7) == 0)
+      dump_prefix = argv[k] + 7;
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 #if defined(ADC_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
@@ -149,9 +165,10 @@ int main(int argc, char** argv) {
     const double e64 = solve_mms(Op::Screened, 64, c64, &phi64);
     const double e128 = solve_mms(Op::Screened, 128, c128, nullptr);
     const double r1 = e32 / e64, r2 = e64 / e128;
-    std::printf("[EPM screened] exec=%s cycles(32/64/128)=%d/%d/%d Linf=%.17g/%.17g/%.17g "
-                "ratios=%.4f/%.4f\n",
-                space, c32, c64, c128, e32, e64, e128, r1, r2);
+    std::printf(
+        "[EPM screened] exec=%s cycles(32/64/128)=%d/%d/%d Linf=%.17g/%.17g/%.17g "
+        "ratios=%.4f/%.4f\n",
+        space, c32, c64, c128, e32, e64, e128, r1, r2);
     chk(r1 > 3.5 && r1 < 4.5, "screened_ordre2_32_64");
     chk(r2 > 3.5 && r2 < 4.5, "screened_ordre2_64_128");
     dump_bin(dump_prefix.empty() ? "" : dump_prefix + "_screened64.bin", phi64);
@@ -165,15 +182,17 @@ int main(int argc, char** argv) {
     const double e64 = solve_mms(Op::Aniso, 64, c64, &phi64);
     const double e128 = solve_mms(Op::Aniso, 128, c128, nullptr);
     const double r1 = e32 / e64, r2 = e64 / e128;
-    std::printf("[EPM aniso]    exec=%s cycles(32/64/128)=%d/%d/%d Linf=%.17g/%.17g/%.17g "
-                "ratios=%.4f/%.4f\n",
-                space, c32, c64, c128, e32, e64, e128, r1, r2);
+    std::printf(
+        "[EPM aniso]    exec=%s cycles(32/64/128)=%d/%d/%d Linf=%.17g/%.17g/%.17g "
+        "ratios=%.4f/%.4f\n",
+        space, c32, c64, c128, e32, e64, e128, r1, r2);
     chk(r1 > 3.5 && r1 < 4.5, "aniso_ordre2_32_64");
     chk(r2 > 3.5 && r2 < 4.5, "aniso_ordre2_64_128");
     dump_bin(dump_prefix.empty() ? "" : dump_prefix + "_aniso64.bin", phi64);
   }
 
-  if (fails == 0) std::printf("OK gpu_epm_validate (exec=%s)\n", space);
+  if (fails == 0)
+    std::printf("OK gpu_epm_validate (exec=%s)\n", space);
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif

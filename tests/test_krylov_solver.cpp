@@ -78,8 +78,8 @@ struct PoissonRhsKernel {
 
 // Remplit rhs() = div(A grad phi_exact) (A constant : axx, ayy diagonaux ; cxy, cyx croises). Le
 // systeme resolu est L_int(phi) = rhs avec L_int = div(A grad phi) (convention poisson_operator).
-static void fill_mms_rhs(GeometricMG& mg, const Geometry& geom, const Box2D& dom,
-                         double axx, double ayy, double cxy, double cyx) {
+static void fill_mms_rhs(GeometricMG& mg, const Geometry& geom, const Box2D& dom, double axx,
+                         double ayy, double cxy, double cyx) {
   const double csum = cxy + cyx;
   for (int li = 0; li < mg.rhs().local_size(); ++li) {
     Array4 af = mg.rhs().fab(li).array();
@@ -92,41 +92,55 @@ static void fill_mms_rhs(GeometricMG& mg, const Geometry& geom, const Box2D& dom
 // SEUL en contraste (meme operateur op, vcycle direct). n = resolution, c = amplitude croisee,
 // non_sym = true -> Ayx = -c (A non symetrique), sinon Ayx = c (A symetrique).
 struct SolveReport {
-  int kry_iters; bool kry_conv; double kry_rel;
-  double mg_r0, mg_rN; int mg_cycles; const char* mg_state;
+  int kry_iters;
+  bool kry_conv;
+  double kry_rel;
+  double mg_r0, mg_rN;
+  int mg_cycles;
+  const char* mg_state;
 };
 
 static SolveReport solve_case(int n, double c, bool non_sym) {
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba = BoxArray::from_domain(dom, n);
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
   const double cyx = non_sym ? -c : c;
 
   // operateur PLEIN : A = [[1, c], [cyx, 1]].
   GeometricMG op(geom, ba, bc);
-  op.set_epsilon_anisotropic([](Real, Real) { return Real(1); }, [](Real, Real) { return Real(1); });
+  op.set_epsilon_anisotropic([](Real, Real) { return Real(1); },
+                             [](Real, Real) { return Real(1); });
   op.set_cross_terms([c](Real, Real) { return Real(c); }, [cyx](Real, Real) { return Real(cyx); });
   fill_mms_rhs(op, geom, dom, 1.0, 1.0, c, cyx);
   op.phi().set_val(0.0);
 
   // preconditionneur SYMETRIQUE : meme bloc diagonal, SANS set_cross_terms (-> partie symetrique).
   GeometricMG precond(geom, ba, bc);
-  precond.set_epsilon_anisotropic([](Real, Real) { return Real(1); }, [](Real, Real) { return Real(1); });
+  precond.set_epsilon_anisotropic([](Real, Real) { return Real(1); },
+                                  [](Real, Real) { return Real(1); });
 
   TensorKrylovSolver kry(op, precond, /*n_precond_vcycles=*/1);
   const KrylovResult kr = kry.solve(Real(1e-10), 300);
 
   // CONTRASTE : V-cycle MG SEUL sur le MEME operateur plein (lisseur 5 points, croises explicites).
   GeometricMG mg(geom, ba, bc);
-  mg.set_epsilon_anisotropic([](Real, Real) { return Real(1); }, [](Real, Real) { return Real(1); });
+  mg.set_epsilon_anisotropic([](Real, Real) { return Real(1); },
+                             [](Real, Real) { return Real(1); });
   mg.set_cross_terms([c](Real, Real) { return Real(c); }, [cyx](Real, Real) { return Real(cyx); });
   fill_mms_rhs(mg, geom, dom, 1.0, 1.0, c, cyx);
   mg.phi().set_val(0.0);
   const double r0 = static_cast<double>(mg.current_residual());
-  double rn = r0; int cyc = 0;
-  for (int k = 0; k < 60 && rn > 1e-10 * r0; ++k) { mg.vcycle(); rn = static_cast<double>(mg.current_residual()); ++cyc; }
-  const char* st = (rn < 1e-6 * r0) ? "CONVERGE" : (rn < r0 ? "stagne (incomplet)" : "DIVERGE/STAGNE");
+  double rn = r0;
+  int cyc = 0;
+  for (int k = 0; k < 60 && rn > 1e-10 * r0; ++k) {
+    mg.vcycle();
+    rn = static_cast<double>(mg.current_residual());
+    ++cyc;
+  }
+  const char* st =
+      (rn < 1e-6 * r0) ? "CONVERGE" : (rn < r0 ? "stagne (incomplet)" : "DIVERGE/STAGNE");
 
   return SolveReport{kr.iters, kr.converged, static_cast<double>(kr.rel_residual), r0, rn, cyc, st};
 }
@@ -136,7 +150,8 @@ static double consistency_identity(int n) {
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba = BoxArray::from_domain(dom, n);
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
 
   // RHS de Poisson : f = div(grad phi_exact) = -2 pi^2 phi_exact (A = I, kappa = 0).
   auto fill = [&](GeometricMG& mg) {
@@ -192,10 +207,11 @@ static double consistency_identity(int n) {
 // a une reference GeometricMG du MEME probleme Dirichlet (consistance, comme (A)) ET a l'analytique
 // (avec la tolerance O(h^2) du schema 2 points). Renvoie le tout par SolveReport-like via parametres.
 struct DirichletReport {
-  bool kry_conv; double kry_rel;
-  double err_vs_mg;   // max|phi_krylov - phi_mg_ref| (consistance solveur, tres serre)
+  bool kry_conv;
+  double kry_rel;
+  double err_vs_mg;     // max|phi_krylov - phi_mg_ref| (consistance solveur, tres serre)
   double err_vs_exact;  // max|phi_krylov - phi_exact| (truncature O(h^2) du schema)
-  double ref_mag;     // |V| + 1 : echelle de reference pour la tolerance relative
+  double ref_mag;       // |V| + 1 : echelle de reference pour la tolerance relative
 };
 
 static DirichletReport dirichlet_mms(int n, double V) {
@@ -242,8 +258,8 @@ static DirichletReport dirichlet_mms(int n, double V) {
         dex = std::fmax(dex, std::fabs(a(i, j) - ex));
       }
   }
-  return DirichletReport{kr.converged, static_cast<double>(kr.rel_residual),
-                         all_reduce_max(dmg), all_reduce_max(dex), std::fabs(V) + 1.0};
+  return DirichletReport{kr.converged, static_cast<double>(kr.rel_residual), all_reduce_max(dmg),
+                         all_reduce_max(dex), std::fabs(V) + 1.0};
 }
 
 int main(int argc, char** argv) {
@@ -251,12 +267,17 @@ int main(int argc, char** argv) {
   const int me = my_rank(), np = n_ranks();
   long fails = 0;
   auto chk = [&](bool cond, const char* w) {
-    if (!cond) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!cond) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // (A) consistance A = I : Krylov colle a GeometricMG Poisson.
   const double gA = consistency_identity(64);
-  if (me == 0) std::printf("(A) A=I : max|phi_krylov - phi_mg| = %.3e\n", gA);
+  if (me == 0)
+    std::printf("(A) A=I : max|phi_krylov - phi_mg| = %.3e\n", gA);
   chk(gA < 1e-8, "A_eq_I_consistance_MG");
 
   // (B) MMS non diagonale, SOLVE : BiCGStab converge la ou MG seul echoue. c = 0.1, 0.4, 0.7.
@@ -267,18 +288,22 @@ int main(int argc, char** argv) {
     // A SYMETRIQUE (Axy = Ayx = c).
     const SolveReport rs = solve_case(n, c, /*non_sym=*/false);
     if (me == 0)
-      std::printf("(B) SYM c=%.1f : BiCGStab %s en %d iters (rel=%.2e) | MG seul: r0=%.2e rN=%.2e (%d cyc) -> %s\n",
-                  c, rs.kry_conv ? "CONVERGE" : "ECHOUE", rs.kry_iters, rs.kry_rel,
-                  rs.mg_r0, rs.mg_rN, rs.mg_cycles, rs.mg_state);
+      std::printf(
+          "(B) SYM c=%.1f : BiCGStab %s en %d iters (rel=%.2e) | MG seul: r0=%.2e rN=%.2e (%d cyc) "
+          "-> %s\n",
+          c, rs.kry_conv ? "CONVERGE" : "ECHOUE", rs.kry_iters, rs.kry_rel, rs.mg_r0, rs.mg_rN,
+          rs.mg_cycles, rs.mg_state);
     chk(rs.kry_conv, "B_sym_bicgstab_converge");
     chk(rs.kry_rel < 1e-10, "B_sym_residu_sous_1e-10");
 
     // A NON SYMETRIQUE (Axy = c, Ayx = -c) : le cas verrou de #120.
     const SolveReport ru = solve_case(n, c, /*non_sym=*/true);
     if (me == 0)
-      std::printf("(B) NONSYM c=%.1f : BiCGStab %s en %d iters (rel=%.2e) | MG seul: r0=%.2e rN=%.2e (%d cyc) -> %s\n",
-                  c, ru.kry_conv ? "CONVERGE" : "ECHOUE", ru.kry_iters, ru.kry_rel,
-                  ru.mg_r0, ru.mg_rN, ru.mg_cycles, ru.mg_state);
+      std::printf(
+          "(B) NONSYM c=%.1f : BiCGStab %s en %d iters (rel=%.2e) | MG seul: r0=%.2e rN=%.2e (%d "
+          "cyc) -> %s\n",
+          c, ru.kry_conv ? "CONVERGE" : "ECHOUE", ru.kry_iters, ru.kry_rel, ru.mg_r0, ru.mg_rN,
+          ru.mg_cycles, ru.mg_state);
     chk(ru.kry_conv, "B_nonsym_bicgstab_converge");
     chk(ru.kry_rel < 1e-10, "B_nonsym_residu_sous_1e-10");
   }
@@ -296,16 +321,20 @@ int main(int argc, char** argv) {
     const double tol_exact = atol + rtol * std::fmax(1.0, rc.ref_mag);
     const double tol_mg = atol + 1e-7 * std::fmax(1.0, rc.ref_mag);  // consistance solveur (serre)
     if (me == 0)
-      std::printf("(C) DIRICHLET V=%.1f : BiCGStab %s (rel=%.2e) | err vs MG=%.3e (tol %.1e) | err vs exact=%.3e (tol %.1e)\n",
-                  V, rc.kry_conv ? "CONVERGE" : "ECHOUE", rc.kry_rel,
-                  rc.err_vs_mg, tol_mg, rc.err_vs_exact, tol_exact);
+      std::printf(
+          "(C) DIRICHLET V=%.1f : BiCGStab %s (rel=%.2e) | err vs MG=%.3e (tol %.1e) | err vs "
+          "exact=%.3e (tol %.1e)\n",
+          V, rc.kry_conv ? "CONVERGE" : "ECHOUE", rc.kry_rel, rc.err_vs_mg, tol_mg, rc.err_vs_exact,
+          tol_exact);
     chk(rc.kry_conv, "C_dirichlet_bicgstab_converge");
     chk(rc.kry_rel < 1e-10, "C_dirichlet_residu_sous_1e-10");
     if (rc.err_vs_mg > tol_mg && me == 0)
-      std::printf("  -> ecart Krylov vs MG = %.3e DEPASSE %.3e (gap %.3e)\n", rc.err_vs_mg, tol_mg, rc.err_vs_mg - tol_mg);
+      std::printf("  -> ecart Krylov vs MG = %.3e DEPASSE %.3e (gap %.3e)\n", rc.err_vs_mg, tol_mg,
+                  rc.err_vs_mg - tol_mg);
     chk(rc.err_vs_mg <= tol_mg, "C_dirichlet_consistance_MG");
     if (rc.err_vs_exact > tol_exact && me == 0)
-      std::printf("  -> ecart Krylov vs exact = %.3e DEPASSE %.3e (gap %.3e)\n", rc.err_vs_exact, tol_exact, rc.err_vs_exact - tol_exact);
+      std::printf("  -> ecart Krylov vs exact = %.3e DEPASSE %.3e (gap %.3e)\n", rc.err_vs_exact,
+                  tol_exact, rc.err_vs_exact - tol_exact);
     chk(rc.err_vs_exact <= tol_exact, "C_dirichlet_vs_analytique");
   }
 
@@ -316,13 +345,17 @@ int main(int argc, char** argv) {
     const long it = r.kry_iters;
     const long it_min = -static_cast<long>(all_reduce_max(static_cast<double>(-it)));
     const long it_max = static_cast<long>(all_reduce_max(static_cast<double>(it)));
-    if (me == 0) std::printf("[mpi] np=%d : iters BiCGStab (nonsym c=0.7) min=%ld max=%ld (spread attendu 0)\n",
-                             np, it_min, it_max);
+    if (me == 0)
+      std::printf(
+          "[mpi] np=%d : iters BiCGStab (nonsym c=0.7) min=%ld max=%ld (spread attendu 0)\n", np,
+          it_min, it_max);
     chk(it_min == it_max, "mpi_iters_invariant_rangs");
   }
 
-  fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));  // un FAIL sur un rang -> tous
-  if (me == 0 && fails == 0) std::printf("OK test_krylov_solver (np=%d)\n", np);
+  fails =
+      static_cast<long>(all_reduce_max(static_cast<double>(fails)));  // un FAIL sur un rang -> tous
+  if (me == 0 && fails == 0)
+    std::printf("OK test_krylov_solver (np=%d)\n", np);
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

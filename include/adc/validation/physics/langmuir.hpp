@@ -48,9 +48,7 @@ struct LangmuirMode {
    * @param[in,out] b  velocity da/dt, updated by T = (0, -cs2k2 a)
    * @param[in]     dt time step
    */
-  ADC_HD void explicit_step(Real& a, Real& b, Real dt) const {
-    b += dt * (-cs2k2 * a);
-  }
+  ADC_HD void explicit_step(Real& a, Real& b, Real dt) const { b += dt * (-cs2k2 * a); }
 
   /**
    * Implicit step (stiff plasma term) in place: solves (a,b) = (a*, b*) + dt S.

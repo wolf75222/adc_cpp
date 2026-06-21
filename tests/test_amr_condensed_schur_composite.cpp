@@ -65,7 +65,8 @@ struct ConstKernel {
   ADC_HD void operator()(int i, int j) const { a(i, j, 0) = v; }
 };
 
-static void init_state(MultiFab& U, const Geometry& g, Real rho0, int c_rho, int c_mx, int c_my, int c_E) {
+static void init_state(MultiFab& U, const Geometry& g, Real rho0, int c_rho, int c_mx, int c_my,
+                       int c_E) {
   for (int li = 0; li < U.local_size(); ++li)
     for_each_cell(U.box(li), InitKernel{g, U.fab(li).array(), rho0, c_rho, c_mx, c_my, c_E});
 }
@@ -79,7 +80,8 @@ static double max_diff(const MultiFab& a, const MultiFab& b, int nc) {
     const Box2D bx = a.box(li);
     for (int j = bx.lo[1]; j <= bx.hi[1]; ++j)
       for (int i = bx.lo[0]; i <= bx.hi[0]; ++i)
-        for (int c = 0; c < nc; ++c) d = std::fmax(d, std::fabs(ua(i, j, c) - ub(i, j, c)));
+        for (int c = 0; c < nc; ++c)
+          d = std::fmax(d, std::fabs(ua(i, j, c) - ub(i, j, c)));
   }
   return all_reduce_max(d);
 }
@@ -93,7 +95,8 @@ static bool all_finite(const MultiFab& m, int nc) {
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
         for (int c = 0; c < nc; ++c)
-          if (!std::isfinite(u(i, j, c))) bad = 1;
+          if (!std::isfinite(u(i, j, c)))
+            bad = 1;
   }
   return all_reduce_max(bad) == 0.0;  // collectif : aucun NaN sur AUCUN rang.
 }
@@ -103,7 +106,11 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 32;
@@ -133,8 +140,8 @@ int main(int argc, char** argv) {
     init_state(Uc, geom_c, rho0, c_rho, c_mx, c_my, c_E);
     init_state(Uf, geom_f, rho0, c_rho, c_mx, c_my, c_E);
     MultiFab coarse_phi(ba_c, dm_c, 1, 1), coarse_bz(ba_c, dm_c, 1, 1), fine_aux(ba_f, dm_f, 1, 1);
-    coarse_phi.set_val(0.0);     // phi^n grossier
-    fine_aux.set_val(0.0);       // phi^n fin (aux comp 0)
+    coarse_phi.set_val(0.0);  // phi^n grossier
+    fine_aux.set_val(0.0);    // phi^n fin (aux comp 0)
     for (int li = 0; li < coarse_bz.local_size(); ++li)
       for_each_cell(coarse_bz.box(li), ConstKernel{coarse_bz.fab(li).array(), B0});
     std::vector<AmrLevelMP> levels;
@@ -159,7 +166,8 @@ int main(int argc, char** argv) {
   chk(all_finite(Uc, vars.size) && all_finite(Uf, vars.size), "(A) etat fini (grossier + fin)");
 
   // (B) la source a agi sur le FIN (mom change).
-  chk(max_diff(Uf, Uf0, vars.size) > 1e-6, "(B) la source modifie l'etat fin (etage composite a tourne)");
+  chk(max_diff(Uf, Uf0, vars.size) > 1e-6,
+      "(B) la source modifie l'etat fin (etage composite a tourne)");
 
   // (C) rho gelee (grossier ET fin) : la densite est inchangee.
   {
@@ -197,7 +205,8 @@ int main(int argc, char** argv) {
                                      UF(2 * I, 2 * J + 1, c) + UF(2 * I + 1, 2 * J + 1, c));
           dcov = std::fmax(dcov, std::fabs(UC(I, J, c) - avg));
         }
-    chk(all_reduce_max(dcov) < 1e-12, "(D) cascade average_down : grossier couvert = moyenne 2x2 fine");
+    chk(all_reduce_max(dcov) < 1e-12,
+        "(D) cascade average_down : grossier couvert = moyenne 2x2 fine");
   }
 
   // (E) stabilite a grand dt (source raide, theta=1 implicite) : etat fini et borne.
@@ -215,11 +224,13 @@ int main(int argc, char** argv) {
         for (int i = b.lo[0]; i <= b.hi[0]; ++i)
           mmax = std::fmax(mmax, std::fmax(std::fabs(u(i, j, c_mx)), std::fabs(u(i, j, c_my))));
     }
-    chk(fin && all_reduce_max(mmax) < 20.0 * rho0, "(E) stable et borne a grand dt (theta=1 implicite)");
+    chk(fin && all_reduce_max(mmax) < 20.0 * rho0,
+        "(E) stable et borne a grand dt (theta=1 implicite)");
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_amr_condensed_schur_composite\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_amr_condensed_schur_composite\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

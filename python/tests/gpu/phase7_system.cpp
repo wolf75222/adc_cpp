@@ -51,7 +51,8 @@ int main(int argc, char** argv) {
       }
     sim.set_density("gas", rho);
 
-    for (int s = 0; s < 20; ++s) sim.step_cfl(0.4);  // transport + Poisson + force, par pas
+    for (int s = 0; s < 20; ++s)
+      sim.step_cfl(0.4);  // transport + Poisson + force, par pas
 
     mass = sim.mass("gas");
     const std::vector<double> phi = sim.potential();
@@ -65,8 +66,8 @@ int main(int argc, char** argv) {
 #else
   const char* space = "Serial(host)";
 #endif
-  std::printf("exec=%s n=64 steps=20  mass=%.12f  sum(phi)=%.12f  max|phi|=%.12f\n",
-              space, mass, sum_phi, max_phi);
+  std::printf("exec=%s n=64 steps=20  mass=%.12f  sum(phi)=%.12f  max|phi|=%.12f\n", space, mass,
+              sum_phi, max_phi);
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif

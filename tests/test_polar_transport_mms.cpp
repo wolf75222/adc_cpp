@@ -51,7 +51,7 @@ static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
 static constexpr double kRmax = 1.00;
 static constexpr double kB0 = 1.0;
-static constexpr int    kMode = 2;  // mode azimutal de la solution manufacturee
+static constexpr int kMode = 2;  // mode azimutal de la solution manufacturee
 
 // --- Champs CONTINUS de la solution manufacturee (formes closes, lisses, periodiques en theta) ----
 // Densite lisse, strictement positive : n = (2 + cos(m theta)) * (1 + 0.5 sin(pi (r-rmin)/(rmax-rmin)))
@@ -79,11 +79,19 @@ static double mms_grad_theta(double r, double th, bool const_vel) {
   return const_vel ? 0.5 : std::sin(kMode * th) * (0.4 + 0.2 * std::cos(kPiL * r));
 }
 // Vitesse ExB polaire (B0) : v_r = -grad_theta/B, v_theta = grad_r/B.
-static double mms_vr(double r, double th, bool cv) { return -mms_grad_theta(r, th, cv) / kB0; }
-static double mms_vth(double r, double th, bool cv) { return mms_grad_r(r, th, cv) / kB0; }
+static double mms_vr(double r, double th, bool cv) {
+  return -mms_grad_theta(r, th, cv) / kB0;
+}
+static double mms_vth(double r, double th, bool cv) {
+  return mms_grad_r(r, th, cv) / kB0;
+}
 // Flux physiques.
-static double mms_Fr(double r, double th, bool cv) { return mms_n(r, th) * mms_vr(r, th, cv); }
-static double mms_Fth(double r, double th, bool cv) { return mms_n(r, th) * mms_vth(r, th, cv); }
+static double mms_Fr(double r, double th, bool cv) {
+  return mms_n(r, th) * mms_vr(r, th, cv);
+}
+static double mms_Fth(double r, double th, bool cv) {
+  return mms_n(r, th) * mms_vth(r, th, cv);
+}
 
 // Divergence ANALYTIQUE de reference : (1/r) d_r(r F_r) + (1/r) d_theta(F_theta), evaluee par stencil
 // central d'ordre 4 a pas h_ref = 1e-4 sur les formes closes (precision ~1e-12, negligeable vs grille).
@@ -91,9 +99,9 @@ static double mms_div_ref(double r, double th, bool cv) {
   const double h = 1e-4;
   auto rFr = [cv](double rr, double tt) { return rr * mms_Fr(rr, tt, cv); };
   // d_r(r F_r) ordre 4
-  const double drFr = (-rFr(r + 2 * h, th) + 8 * rFr(r + h, th) - 8 * rFr(r - h, th) +
-                       rFr(r - 2 * h, th)) /
-                      (12 * h);
+  const double drFr =
+      (-rFr(r + 2 * h, th) + 8 * rFr(r + h, th) - 8 * rFr(r - h, th) + rFr(r - 2 * h, th)) /
+      (12 * h);
   // d_theta(F_theta) ordre 4
   const double dthFth = (-mms_Fth(r, th + 2 * h, cv) + 8 * mms_Fth(r, th + h, cv) -
                          8 * mms_Fth(r, th - h, cv) + mms_Fth(r, th - 2 * h, cv)) /
@@ -107,21 +115,25 @@ static double mms_div_ref(double r, double th, bool cv) {
 static void fill_exact(MultiFab& U, MultiFab& aux, const PolarGeometry& g, bool cv) {
   Array4 u = U.fab(0).array();
   Array4 a = aux.fab(0).array();
-  const Box2D gb = U.fab(0).grown_box();  // boite AVEC ghosts (Fab2D::box() ne rend que les valides)
+  const Box2D gb =
+      U.fab(0).grown_box();  // boite AVEC ghosts (Fab2D::box() ne rend que les valides)
   for (int j = gb.lo[1]; j <= gb.hi[1]; ++j)
     for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) {
       const double r = g.r_cell(i);
       const double th = g.theta_cell(j);
       u(i, j, 0) = mms_n(r, th);
-      a(i, j, 0) = 0.0;                       // phi (inutilise par le flux)
-      a(i, j, 1) = mms_grad_r(r, th, cv);     // grad_r
-      a(i, j, 2) = mms_grad_theta(r, th, cv); // grad_theta (composante azimutale physique)
+      a(i, j, 0) = 0.0;                        // phi (inutilise par le flux)
+      a(i, j, 1) = mms_grad_r(r, th, cv);      // grad_r
+      a(i, j, 2) = mms_grad_theta(r, th, cv);  // grad_theta (composante azimutale physique)
     }
 }
 
 // Erreur L1 (ponderee par le volume r dr dtheta) entre le residu discret -R et la divergence
 // analytique, sur les cellules valides. Renvoie aussi la norme Linf.
-struct ErrNorms { double l1; double linf; };
+struct ErrNorms {
+  double l1;
+  double linf;
+};
 
 template <class Limiter>
 static ErrNorms mms_error(int nr, int nth, bool cv) {
@@ -152,12 +164,13 @@ static ErrNorms mms_error(int nr, int nth, bool cv) {
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       const double rc = g.r_cell(i), th = g.theta_cell(j);
-      const double div_discrete = -r(i, j, 0);       // R = -div F (source nulle) -> div = -R
+      const double div_discrete = -r(i, j, 0);  // R = -div F (source nulle) -> div = -R
       const double e = std::fabs(div_discrete - mms_div_ref(rc, th, cv));
-      const double w = rc * dr * dth;                 // volume de cellule
+      const double w = rc * dr * dth;  // volume de cellule
       l1 += e * w;
       vol += w;
-      if (e > linf) linf = e;
+      if (e > linf)
+        linf = e;
     }
   return {l1 / vol, linf};
 }
@@ -204,7 +217,8 @@ static double run_conservation() {
     for (int j = gb.lo[1]; j <= gb.hi[1]; ++j)
       for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) {
         const double r = g.r_cell(i), th = g.theta_cell(j);
-        u(i, j, 0) = 1.0 + 0.5 * std::cos(kMode * th) * std::sin(kPiL * (r - kRmin) / (kRmax - kRmin));
+        u(i, j, 0) =
+            1.0 + 0.5 * std::cos(kMode * th) * std::sin(kPiL * (r - kRmin) / (kRmax - kRmin));
         a(i, j, 0) = 0.0;
         a(i, j, 1) = 0.8;  // grad_r constant -> v_theta = 0.8/B (azimutal pur)
         a(i, j, 2) = 0.0;  // grad_theta = 0 -> v_r = 0
@@ -244,8 +258,8 @@ static double run_conservation() {
 
 int main() {
   std::printf("=== MMS + conservation de l'operateur de transport POLAIRE (Phase 1) ===\n");
-  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi), mode azimutal m=%d, B0=%.1f\n",
-              kRmin, kRmax, kMode, kB0);
+  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi), mode azimutal m=%d, B0=%.1f\n", kRmin,
+              kRmax, kMode, kB0);
 
   bool ok = true;
   const int res[3] = {48, 96, 192};  // nth = 2 nr (anneau, theta plus echantillonne)
@@ -263,7 +277,8 @@ int main() {
   // est correctement portee. Vitesse CONSTANTE (aux constant) : la reconstruction de la vitesse est
   // exacte a la face, donc l'ordre observe est celui de l'operateur de divergence lui-meme (et v_r != 0
   // exerce le terme radial (1/r) d_r(r F_r)).
-  std::printf("\n--- (A) Convergence MMS de la divergence polaire (ordre 2, vitesse constante) ---\n");
+  std::printf(
+      "\n--- (A) Convergence MMS de la divergence polaire (ordre 2, vitesse constante) ---\n");
   ErrNorms e[3];
   for (int k = 0; k < 3; ++k) {
     e[k] = mms_error<Weno5>(res[k], 2 * res[k], /*const_vel=*/true);
@@ -285,7 +300,8 @@ int main() {
     std::printf("  ECHEC : ordre hors [1.7, 2.3] (metrique polaire incoherente)\n");
     ok = false;
   } else {
-    std::printf("  OK : convergence d'ordre 2 propre (metrique polaire correcte, WENO5 et minmod)\n");
+    std::printf(
+        "  OK : convergence d'ordre 2 propre (metrique polaire correcte, WENO5 et minmod)\n");
   }
 
   // (A') Champ ExB VARIABLE (realiste, lisse) : meme operateur, aux non constant -> la vitesse de face
@@ -299,7 +315,8 @@ int main() {
   const double pw = std::log2(ew[0].l1 / ew[1].l1);
   std::printf("  WENO5 : L1(96)=%.4e L1(192)=%.4e ordre=%.2f\n", ew[0].l1, ew[1].l1, pw);
   if (pw < 1.7) {
-    std::printf("  ECHEC : ordre < 1.7 sur champ variable (metrique ou reconstruction incoherente)\n");
+    std::printf(
+        "  ECHEC : ordre < 1.7 sur champ variable (metrique ou reconstruction incoherente)\n");
     ok = false;
   } else {
     std::printf("  OK : ordre 2 sur champ variable\n");

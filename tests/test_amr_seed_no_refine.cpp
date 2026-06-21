@@ -50,7 +50,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   AmrSystemConfig cfg;
@@ -71,10 +74,12 @@ int main(int argc, char** argv) {
     chk(A.n_patches() == 0, "no set_refinement -> n_patches()==0 (compile, mono-niveau)");
     // le mono-niveau reste un solveur valide : il avance et conserve la masse (FV periodique).
     const double m0 = A.mass();
-    for (int s = 0; s < 8; ++s) A.step(1e-3);
+    for (int s = 0; s < 8; ++s)
+      A.step(1e-3);
     const std::vector<double> d = A.density();
     double nrm = 0;
-    for (double v : d) nrm = std::fmax(nrm, std::fabs(v));
+    for (double v : d)
+      nrm = std::fmax(nrm, std::fabs(v));
     chk(!d.empty() && nrm > 1e-6, "no set_refinement : densite non triviale apres pas");
     chk(std::fabs(A.mass() - m0) < 1e-9 * (std::fabs(m0) + 1.0),
         "no set_refinement : masse conservee (mono-niveau)");
@@ -93,7 +98,8 @@ int main(int argc, char** argv) {
     B.set_refinement(1.2);
     B.set_density("gas", rho);
     chk(B.n_patches() >= 1, "set_refinement(1.2) -> n_patches()>=1 (seed alloue + regrid)");
-    for (int s = 0; s < 8; ++s) B.step(1e-3);
+    for (int s = 0; s < 8; ++s)
+      B.step(1e-3);
     chk(B.n_patches() >= 1, "set_refinement(1.2) : raffinement actif apres pas");
   }
 
@@ -118,7 +124,8 @@ int main(int argc, char** argv) {
   }
 
   if (fails == 0)
-    std::printf("OK test_amr_seed_no_refine (seed alloue seulement si set_refinement ; "
-                "no-refine -> mono-niveau n_patches==0)\n");
+    std::printf(
+        "OK test_amr_seed_no_refine (seed alloue seulement si set_refinement ; "
+        "no-refine -> mono-niveau n_patches==0)\n");
   return fails ? 1 : 0;
 }

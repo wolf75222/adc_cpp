@@ -66,7 +66,8 @@ static std::vector<double> bump(int n, double base, double amp) {
 // tout fini (ni nan ni inf) : garde AVANT toute comparaison de tolerance (un nan passerait une borne).
 static bool all_finite(const std::vector<double>& v) {
   for (double x : v)
-    if (!std::isfinite(x)) return false;
+    if (!std::isfinite(x))
+      return false;
   return true;
 }
 
@@ -74,7 +75,8 @@ static bool all_finite(const std::vector<double>& v) {
 static double dmax_field(const std::vector<double>& a, const std::vector<double>& b) {
   double d = 0;
   const std::size_t nn = a.size() < b.size() ? a.size() : b.size();
-  for (std::size_t i = 0; i < nn; ++i) d = std::max(d, std::fabs(a[i] - b[i]));
+  for (std::size_t i = 0; i < nn; ++i)
+    d = std::max(d, std::fabs(a[i] - b[i]));
   return d;
 }
 
@@ -97,8 +99,8 @@ static AmrRuntime make_two_block(int N, double L, double B0, const std::vector<d
   AmrBuildParams bp;
   bp.n = N;
   bp.L = L;
-  bp.regrid_every = 0;     // hierarchie figee (multi-blocs)
-  bp.poisson_bc = BCRec{}; // periodique
+  bp.regrid_every = 0;      // hierarchie figee (multi-blocs)
+  bp.poisson_bc = BCRec{};  // periodique
   const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
   std::vector<AmrRuntimeBlock> blocks;
   detail::dispatch_model(exb_charge(+1.0, B0), [&](auto m) {
@@ -132,9 +134,8 @@ static void register_ionization(AmrRuntime& rt, double k) {
   const int P = static_cast<int>(CsOp::PushReg), MUL = static_cast<int>(CsOp::Mul),
             NEG = static_cast<int>(CsOp::Neg);
   std::vector<int> prog_ops = {P, P, MUL, P, MUL,        // gain : k*ni*ng
-                               P, P, MUL, P, MUL, NEG};   // perte : -(k*ni*ng)
-  std::vector<int> prog_args = {0, 1, 0, 2, 0,
-                                0, 1, 0, 2, 0, 0};
+                               P, P, MUL, P, MUL, NEG};  // perte : -(k*ni*ng)
+  std::vector<int> prog_args = {0, 1, 0, 2, 0, 0, 1, 0, 2, 0, 0};
   std::vector<int> prog_lens = {5, 6};
   rt.add_coupled_source(in_blocks, in_roles, consts, out_blocks, out_roles, prog_ops, prog_args,
                         prog_lens);
@@ -150,7 +151,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int N = 32;
@@ -167,11 +169,12 @@ int main(int argc, char** argv) {
   //     chaque bloc, lui, CHANGE (la source n'est pas un no-op).
   // ============================================================================================
   {
-    AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/1);
+    AmrRuntime rt =
+        make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/1);
     register_ionization(rt, k);
     const std::vector<double> ni0 = rt.density(0);  // ions, grossier
     const std::vector<double> ng0 = rt.density(1);  // neutrals, grossier
-    rt.coupled_source_step(dt);  // SOURCE SEULE (pas de transport)
+    rt.coupled_source_step(dt);                     // SOURCE SEULE (pas de transport)
     const std::vector<double> ni1 = rt.density(0);
     const std::vector<double> ng1 = rt.density(1);
 
@@ -189,11 +192,13 @@ int main(int argc, char** argv) {
   //     globalement a ~machine. Chaque masse de bloc, elle, DERIVE (la source transfere entre blocs).
   // ============================================================================================
   {
-    AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/1);
+    AmrRuntime rt =
+        make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/1);
     register_ionization(rt, k);
     const Real tot0 = rt.mass(0) + rt.mass(1);
     const Real mi0 = rt.mass(0);
-    for (int s = 0; s < K; ++s) rt.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt.step(dt);
     const std::vector<double> ni = rt.density(0);
     const std::vector<double> ng = rt.density(1);
     const Real tot1 = rt.mass(0) + rt.mass(1);
@@ -210,9 +215,11 @@ int main(int argc, char** argv) {
   //     central couvre les cellules grossieres [N/4 .. 3N/4-1]^2 (cf. make_shared_amr_layout).
   // ============================================================================================
   {
-    AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/1);
+    AmrRuntime rt =
+        make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/1);
     register_ionization(rt, k);
-    rt.coupled_source_step(dt);  // SOURCE SEULE -> l'invariant de couverture vient de la cascade post-source
+    rt.coupled_source_step(
+        dt);  // SOURCE SEULE -> l'invariant de couverture vient de la cascade post-source
     const MultiFab& Uc = rt.levels(0)[0].U;  // grossier (ions)
     const MultiFab& Uf = rt.levels(0)[1].U;  // patch fin (ions)
     // moyenne 2x2 des enfants fins vs valeur grossiere couverte, sur la box fine (mono-box replique).
@@ -240,10 +247,12 @@ int main(int argc, char** argv) {
   //     quand neutrals est tenu, l'echange +S/-S par cellule conserve la somme composite globale.
   // ============================================================================================
   {
-    AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/2);
+    AmrRuntime rt =
+        make_two_block(N, L, B0, rho_ions, rho_neut, /*stride_ions=*/1, /*stride_neut=*/2);
     register_ionization(rt, k);
     const Real tot0 = rt.mass(0) + rt.mass(1);
-    for (int s = 0; s < K; ++s) rt.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt.step(dt);
     chk(all_finite(rt.density(0)) && all_finite(rt.density(1)), "multirate_state_finite");
     chk(std::fabs((rt.mass(0) + rt.mass(1)) - tot0) < 1e-9, "multirate_composite_mass_conserved");
   }
@@ -256,7 +265,8 @@ int main(int argc, char** argv) {
   {
     auto run_no_source = [&]() {
       AmrRuntime rt = make_two_block(N, L, B0, rho_ions, rho_neut, 1, 1);
-      for (int s = 0; s < K; ++s) rt.step(dt);
+      for (int s = 0; s < K; ++s)
+        rt.step(dt);
       return rt.density(0);
     };
     const std::vector<double> a = run_no_source();
@@ -265,7 +275,8 @@ int main(int argc, char** argv) {
 
     AmrRuntime rt_src = make_two_block(N, L, B0, rho_ions, rho_neut, 1, 1);
     register_ionization(rt_src, k);
-    for (int s = 0; s < K; ++s) rt_src.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt_src.step(dt);
     chk(dmax_field(rt_src.density(0), a) > 1e-9, "source_differs_from_no_source");
     chk(rt_src.n_coupled_sources() == 1, "one_coupled_source_registered");
   }

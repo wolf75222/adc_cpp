@@ -35,10 +35,18 @@ using Blk = EquationBlock<Scalar, FirstOrder, ExplicitTime<SSPRK2, 1>>;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
   auto throws = [&](auto&& f) {
-    try { f(); return false; } catch (const std::exception&) { return true; }
+    try {
+      f();
+      return false;
+    } catch (const std::exception&) {
+      return true;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -79,6 +87,7 @@ int main() {
       }),
       "amr_rejects_wrong_block_count");
 
-  if (fails == 0) std::printf("OK test_system_hardening\n");
+  if (fails == 0)
+    std::printf("OK test_system_hardening\n");
   return fails == 0 ? 0 : 1;
 }

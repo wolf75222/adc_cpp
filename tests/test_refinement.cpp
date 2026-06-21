@@ -64,6 +64,7 @@ int main() {
     chk(close(sc2, sc), "conserv_roundtrip");
   }
 
-  if (fails == 0) std::printf("OK test_refinement\n");
+  if (fails == 0)
+    std::printf("OK test_refinement\n");
   return fails == 0 ? 0 : 1;
 }

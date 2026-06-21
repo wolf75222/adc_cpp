@@ -50,7 +50,8 @@ inline handle open(const std::string& path) {
   // UTF-8 -> UTF-16 for LoadLibraryW (Unicode paths and paths with spaces).
   const int n = ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
   std::wstring w(n > 0 ? n - 1 : 0, L'\0');
-  if (n > 0) ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
+  if (n > 0)
+    ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
   return ::LoadLibraryW(w.c_str());
 #else
   return ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
@@ -69,26 +70,32 @@ inline void* sym(handle h, const char* name) {
 /// Closes @p h (no-op on a null handle).
 inline void close(handle h) {
 #if defined(_WIN32)
-  if (h) ::FreeLibrary(h);
+  if (h)
+    ::FreeLibrary(h);
 #else
-  if (h) ::dlclose(h);
+  if (h)
+    ::dlclose(h);
 #endif
 }
 
 /// true if @p h is a valid handle.
-inline bool valid(handle h) { return h != handle{}; }
+inline bool valid(handle h) {
+  return h != handle{};
+}
 
 /// Last error message (best-effort, for diagnostics).
 inline std::string last_error() {
 #if defined(_WIN32)
   const DWORD e = ::GetLastError();
-  if (!e) return {};
+  if (!e)
+    return {};
   char* buf = nullptr;
-  ::FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                       FORMAT_MESSAGE_IGNORE_INSERTS,
-                   nullptr, e, 0, reinterpret_cast<char*>(&buf), 0, nullptr);
+  ::FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, e, 0, reinterpret_cast<char*>(&buf), 0, nullptr);
   std::string m = buf ? buf : "";
-  if (buf) ::LocalFree(buf);
+  if (buf)
+    ::LocalFree(buf);
   return m;
 #else
   const char* e = ::dlerror();

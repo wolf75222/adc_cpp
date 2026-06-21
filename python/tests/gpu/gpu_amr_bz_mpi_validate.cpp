@@ -61,7 +61,8 @@ static int fill_bz_level(MultiFab& A, const Geometry& gk, F bz) {
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
         const Real v = bz(gk.x_cell(i), gk.y_cell(j));
         f(i, j, kAuxBaseComps) = v;
-        if (std::fabs(f(i, j, kAuxBaseComps) - v) > Real(1e-12)) ++bad;
+        if (std::fabs(f(i, j, kAuxBaseComps) - v) > Real(1e-12))
+          ++bad;
       }
   }
   return bad;
@@ -89,14 +90,18 @@ int main(int argc, char** argv) {
     const BoxArray ba_fine(std::vector<Box2D>{fb0, fb1});
     const DistributionMapping dm_fine(ba_fine.size(), n_ranks());
 
-    auto bz = [](Real x, Real y) { return Real(1) + std::sin(2 * kPi * x) * std::cos(2 * kPi * y); };
+    auto bz = [](Real x, Real y) {
+      return Real(1) + std::sin(2 * kPi * x) * std::cos(2 * kPi * y);
+    };
 
     const Real u0 = Real(2);
     MultiFab Uc(ba_coarse, dm_coarse, 1, 2), Uf(ba_fine, dm_fine, 1, 2);
-    Uc.set_val(u0);  Uf.set_val(u0);
+    Uc.set_val(u0);
+    Uf.set_val(u0);
     MultiFab auxc(ba_coarse, dm_coarse, aux_comps<BzGrow>(), 1);
     MultiFab auxf(ba_fine, dm_fine, aux_comps<BzGrow>(), 1);
-    auxc.set_val(Real(0));  auxf.set_val(Real(0));
+    auxc.set_val(Real(0));
+    auxf.set_val(Real(0));
     int bad = 0;
     bad += fill_bz_level(auxc, geom, bz);  // niveau 0 : centres a dx, par boite locale
     bad += fill_bz_level(auxf, gf, bz);    // niveau 1 : centres a dx/2, par boite locale
@@ -119,8 +124,10 @@ int main(int argc, char** argv) {
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
         for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
           const double v = a(i, j, 0);
-          lsum += v; lsumsq += v * v;
-          if (std::fabs(v) > lmax) lmax = std::fabs(v);
+          lsum += v;
+          lsumsq += v * v;
+          if (std::fabs(v) > lmax)
+            lmax = std::fabs(v);
         }
     }
     const double gsum = all_reduce_sum(lsum), gsumsq = all_reduce_sum(lsumsq);
@@ -132,13 +139,21 @@ int main(int argc, char** argv) {
     const char* space = "Serial(host)";
 #endif
     if (me == 0) {
-      std::printf("AMRBZMPI np=%d exec=%s | coarse mass=%.17e csum=%.17e csumsq=%.17e cmax=%.17e | "
-                  "bz_bad=%d\n",
-                  np, space, gmass, gsum, gsumsq, gmax, bad_global);
-      if (bad_global != 0) { std::printf("FAIL bz mal pose par boite\n"); ++fails; }
-      if (!(gmax > u0)) { std::printf("FAIL source B_z non lue (cmax <= u0)\n"); ++fails; }
+      std::printf(
+          "AMRBZMPI np=%d exec=%s | coarse mass=%.17e csum=%.17e csumsq=%.17e cmax=%.17e | "
+          "bz_bad=%d\n",
+          np, space, gmass, gsum, gsumsq, gmax, bad_global);
+      if (bad_global != 0) {
+        std::printf("FAIL bz mal pose par boite\n");
+        ++fails;
+      }
+      if (!(gmax > u0)) {
+        std::printf("FAIL source B_z non lue (cmax <= u0)\n");
+        ++fails;
+      }
       if (fails == 0)
-        std::printf("OK gpu_amr_bz_mpi_validate np=%d (multi-box B_z par niveau, exec=%s)\n", np, space);
+        std::printf("OK gpu_amr_bz_mpi_validate np=%d (multi-box B_z par niveau, exec=%s)\n", np,
+                    space);
     }
   }
 #if defined(ADC_HAS_KOKKOS)

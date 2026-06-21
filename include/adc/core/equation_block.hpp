@@ -38,11 +38,9 @@ namespace adc {
 /// the MultiFab; the MultiFab lifetime must exceed that of the block.
 /// Do not store in a container by value if the MultiFab is dynamically allocated
 /// and could be moved (the pointer would become invalid).
-template <class ModelT, class SpatialT = FirstOrder,
-          class TimeT = ExplicitTime<SSPRK2>>
+template <class ModelT, class SpatialT = FirstOrder, class TimeT = ExplicitTime<SSPRK2>>
 struct EquationBlock {
-  static_assert(PhysicalModel<ModelT>,
-                "EquationBlock expects a ModelT that models PhysicalModel");
+  static_assert(PhysicalModel<ModelT>, "EquationBlock expects a ModelT that models PhysicalModel");
   static_assert(SpatialDiscretisationLike<SpatialT>,
                 "EquationBlock expects a named spatial discretisation");
 
@@ -55,8 +53,8 @@ struct EquationBlock {
   MultiFab* state = nullptr;
   BCRec bc{};
 
-  EquationBlock(std::string_view block_name, const Model& block_model,
-                MultiFab& block_state, const BCRec& block_bc = {})
+  EquationBlock(std::string_view block_name, const Model& block_model, MultiFab& block_state,
+                const BCRec& block_bc = {})
       : name(block_name), model(block_model), state(&block_state), bc(block_bc) {}
 
   MultiFab& U() { return *state; }

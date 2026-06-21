@@ -96,13 +96,14 @@ struct InitKernel {
     const Real r = geom.r_cell(i);
     const Real th = geom.theta_cell(j);
     const Real h = std::sin(Real(kPi) * (r - Real(kRmin)) / Real(kRmax - kRmin));  // 0 aux bords
-    const Real vr = Real(0.6) * h * std::cos(Real(2) * th);     // v_r0
-    const Real vth = Real(-0.4) * h * std::sin(th);             // v_theta0
-    const Real ph = Real(0.3) * h * std::cos(th);               // phi0 (0 aux bords radiaux)
+    const Real vr = Real(0.6) * h * std::cos(Real(2) * th);                        // v_r0
+    const Real vth = Real(-0.4) * h * std::sin(th);                                // v_theta0
+    const Real ph = Real(0.3) * h * std::cos(th);  // phi0 (0 aux bords radiaux)
     st(i, j, c_rho) = rho0;
     st(i, j, c_mx) = rho0 * vr;
     st(i, j, c_my) = rho0 * vth;
-    if (c_E >= 0) st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vr * vr + vth * vth);
+    if (c_E >= 0)
+      st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vr * vr + vth * vth);
     phi(i, j, 0) = ph;
   }
 };
@@ -156,8 +157,8 @@ static double implicit_residual(const MultiFab& st_new, const MultiFab& vrn, con
         const double Bvr = vnr - dt * B0 * vnt;
         const double Bvt = vnt + dt * B0 * vnr;
         const double ri = g.r_cell(i);
-        const double gr = (p(i + 1, j) - p(i - 1, j)) * half_idr;             // d_r phi
-        const double gt = (p(i, j + 1) - p(i, j - 1)) * (half_idth / ri);     // (1/r) d_theta phi
+        const double gr = (p(i + 1, j) - p(i - 1, j)) * half_idr;          // d_r phi
+        const double gt = (p(i, j + 1) - p(i, j - 1)) * (half_idth / ri);  // (1/r) d_theta phi
         const double rhsr = vr(i, j, 0) - dt * gr;
         const double rhst = vt(i, j, 0) - dt * gt;
         d = std::fmax(d, std::fmax(std::fabs(Bvr - rhsr), std::fabs(Bvt - rhst)));
@@ -232,14 +233,24 @@ struct RefIntegrator {
   MultiFab kvr[4], kvt[4], kphi[4], tvr, tvt, tphi;
 
   RefIntegrator(Setup& s, Real B0_, Real alpha_, Real rho0_)
-      : S(s), B0(B0_), alpha(alpha_), rho0(rho0_),
+      : S(s),
+        B0(B0_),
+        alpha(alpha_),
+        rho0(rho0_),
         half_idr(Real(1) / (Real(2) * s.geom.dr())),
         half_idth(Real(1) / (Real(2) * s.geom.dtheta())),
-        r_min(s.geom.r_min), dr(s.geom.dr()),
+        r_min(s.geom.r_min),
+        dr(s.geom.dr()),
         poisson(s.geom, s.ba, s.bc),
-        vr(s.ba, s.dm, 1, 1), vt(s.ba, s.dm, 1, 1), phi(s.ba, s.dm, 1, 1),
-        dvr(s.ba, s.dm, 1, 0), dvt(s.ba, s.dm, 1, 0), dphi(s.ba, s.dm, 1, 1),
-        tvr(s.ba, s.dm, 1, 1), tvt(s.ba, s.dm, 1, 1), tphi(s.ba, s.dm, 1, 1) {
+        vr(s.ba, s.dm, 1, 1),
+        vt(s.ba, s.dm, 1, 1),
+        phi(s.ba, s.dm, 1, 1),
+        dvr(s.ba, s.dm, 1, 0),
+        dvt(s.ba, s.dm, 1, 0),
+        dphi(s.ba, s.dm, 1, 1),
+        tvr(s.ba, s.dm, 1, 1),
+        tvt(s.ba, s.dm, 1, 1),
+        tphi(s.ba, s.dm, 1, 1) {
     for (int k = 0; k < 4; ++k) {
       kvr[k] = MultiFab(s.ba, s.dm, 1, 0);
       kvt[k] = MultiFab(s.ba, s.dm, 1, 0);
@@ -262,8 +273,8 @@ struct RefIntegrator {
     for (int li = 0; li < poisson.rhs().local_size(); ++li)
       for_each_cell(poisson.rhs().box(li),
                     DivVPolarKernel{avr.fab(li).const_array(), avt.fab(li).const_array(),
-                                    poisson.rhs().fab(li).array(), alpha * rho0, half_idr, half_idth,
-                                    r_min, dr});
+                                    poisson.rhs().fab(li).array(), alpha * rho0, half_idr,
+                                    half_idth, r_min, dr});
     poisson.phi().set_val(Real(0));
     poisson.solve();
     for (int li = 0; li < odphi.local_size(); ++li)
@@ -316,13 +327,14 @@ struct RefIntegrator {
       const Box2D b = y.box(li);
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
         for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-          Y(i, j, 0) += s * (k0(i, j, 0) + Real(2) * k1(i, j, 0) + Real(2) * k2(i, j, 0) + k3(i, j, 0));
+          Y(i, j, 0) +=
+              s * (k0(i, j, 0) + Real(2) * k1(i, j, 0) + Real(2) * k2(i, j, 0) + k3(i, j, 0));
     }
   }
 };
 
-static void load_ref_from_state(RefIntegrator& R, const MultiFab& st, const MultiFab& phi0, int c_rho,
-                                int c_mx, int c_my) {
+static void load_ref_from_state(RefIntegrator& R, const MultiFab& st, const MultiFab& phi0,
+                                int c_rho, int c_mx, int c_my) {
   sync_host();
   for (int li = 0; li < st.local_size(); ++li) {
     const ConstArray4 u = st.fab(li).const_array();
@@ -366,19 +378,25 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   std::printf("=== ETAGE SOURCE Schur POLAIRE (Voie A etape 2b) ===\n");
-  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi). PolarTensorKrylovSolver (RadialLine).\n",
-              kRmin, kRmax);
+  std::printf(
+      "Anneau r in [%.2f, %.2f], theta in [0, 2pi). PolarTensorKrylovSolver (RadialLine).\n", kRmin,
+      kRmax);
 
   const int nr = 48, nth = 64;
   const Real rho0 = 1.5, B0 = 100.0, alpha = 3.0;  // B0 = 100 : RAIDE (cyclotron eleve)
   const Setup S(nr, nth);
   const double dr = static_cast<double>(S.geom.dr());
   const double ds_min = std::min(dr, kRmin * static_cast<double>(S.geom.dtheta()));
-  const double w_plasma = std::sqrt(static_cast<double>(alpha) * static_cast<double>(rho0)) / ds_min;
+  const double w_plasma =
+      std::sqrt(static_cast<double>(alpha) * static_cast<double>(rho0)) / ds_min;
   const double w_max = std::max(static_cast<double>(B0), w_plasma);
   const double dt_stable = 0.5 / w_max;  // estimation prudente du pas explicite stable
   if (me == 0)
@@ -410,20 +428,22 @@ int main(int argc, char** argv) {
     make_state(st, phi);
     MultiFab vrn(S.ba, S.dm, 1, 0), vtn(S.ba, S.dm, 1, 0);
     for (int li = 0; li < st.local_size(); ++li)
-      for_each_cell(st.box(li), detail::ExtractVelocityKernel{st.fab(li).const_array(),
-                                                              vrn.fab(li).array(),
-                                                              vtn.fab(li).array(), c_rho, c_mx,
-                                                              c_my});
+      for_each_cell(st.box(li),
+                    detail::ExtractVelocityKernel{st.fab(li).const_array(), vrn.fab(li).array(),
+                                                  vtn.fab(li).array(), c_rho, c_mx, c_my});
 
     PolarCondensedSchurSourceStepper stepper(vars, S.geom, S.ba, S.bc, alpha);
     stepper.step(st, phi, bz, /*c_bz=*/0, /*theta=*/Real(1.0), dt);
     const PolarKrylovResult kr = stepper.last_solve();
 
-    const double rimp = implicit_residual(st, vrn, vtn, phi, S.geom, S.bc, B0, dt, c_rho, c_mx, c_my);
+    const double rimp =
+        implicit_residual(st, vrn, vtn, phi, S.geom, S.bc, B0, dt, c_rho, c_mx, c_my);
     if (me == 0)
-      std::printf("(A) implicite : BiCGStab %s en %d iters (rel=%.2e) | max|B v - (v^n - dt grad_polar phi)| = %.3e\n",
-                  kr.converged ? "CONVERGE" : "ECHOUE", kr.iters, static_cast<double>(kr.rel_residual),
-                  rimp);
+      std::printf(
+          "(A) implicite : BiCGStab %s en %d iters (rel=%.2e) | max|B v - (v^n - dt grad_polar "
+          "phi)| = %.3e\n",
+          kr.converged ? "CONVERGE" : "ECHOUE", kr.iters, static_cast<double>(kr.rel_residual),
+          rimp);
     chk(kr.converged, "A_solve_converge");
     chk(rimp < 1e-6, "A_relation_implicite");
   }
@@ -440,7 +460,8 @@ int main(int argc, char** argv) {
     const double v0 = vel_l2(st, c_rho, c_mx, c_my);
 
     PolarCondensedSchurSourceStepper stepper(vars, S.geom, S.ba, S.bc, alpha);
-    for (int k = 0; k < K; ++k) stepper.step(st, phi, bz, 0, Real(1.0), dt);
+    for (int k = 0; k < K; ++k)
+      stepper.step(st, phi, bz, 0, Real(1.0), dt);
     const double v_schur = vel_l2(st, c_rho, c_mx, c_my);
 
     MultiFab st0(S.ba, S.dm, vars.size, 1), phi0(S.ba, S.dm, 1, 1);
@@ -448,7 +469,8 @@ int main(int argc, char** argv) {
     make_state(st0, phi0);
     RefIntegrator expl(const_cast<Setup&>(S), B0, alpha, rho0);
     load_ref_from_state(expl, st0, phi0, c_rho, c_mx, c_my);
-    for (int k = 0; k < K; ++k) expl.euler_step(dt);
+    for (int k = 0; k < K; ++k)
+      expl.euler_step(dt);
     double v_expl = 0;
     {
       sync_host();
@@ -464,9 +486,10 @@ int main(int argc, char** argv) {
       v_expl = std::sqrt(all_reduce_sum(s));
     }
     if (me == 0)
-      std::printf("(B) dt=%.3e (=8x dt_stable), K=%d pas : ||v0||=%.3e | Schur ||v||=%.3e (x%.2f) | "
-                  "Euler ||v||=%.3e (x%.2e)\n",
-                  static_cast<double>(dt), K, v0, v_schur, v_schur / v0, v_expl, v_expl / v0);
+      std::printf(
+          "(B) dt=%.3e (=8x dt_stable), K=%d pas : ||v0||=%.3e | Schur ||v||=%.3e (x%.2f) | "
+          "Euler ||v||=%.3e (x%.2e)\n",
+          static_cast<double>(dt), K, v0, v_schur, v_schur / v0, v_expl, v_expl / v0);
     chk(v_schur < 5.0 * v0, "B_schur_stable_borne");
     chk(std::isfinite(v_schur), "B_schur_fini");
     chk(v_expl > 100.0 * v0, "B_explicite_explose");
@@ -485,7 +508,8 @@ int main(int argc, char** argv) {
       RefIntegrator ref(const_cast<Setup&>(S), B0, alpha, rho0);
       load_ref_from_state(ref, st0, phi0, c_rho, c_mx, c_my);
       const Real h = dt / Real(Nsub);
-      for (int s = 0; s < Nsub; ++s) ref.rk4_step(h);
+      for (int s = 0; s < Nsub; ++s)
+        ref.rk4_step(h);
 
       MultiFab st(S.ba, S.dm, vars.size, 1), phi(S.ba, S.dm, 1, 1);
       st.set_val(0.0);
@@ -500,8 +524,9 @@ int main(int argc, char** argv) {
     const double e2 = schur_vs_ref(Real(0.5) * dtC);
     const double ratio = e2 > 0 ? e1 / e2 : 0;
     if (me == 0)
-      std::printf("(C) reference RK4 fine : err(dt)=%.3e err(dt/2)=%.3e ratio=%.2f (ordre 1 attendu ~2)\n",
-                  e1, e2, ratio);
+      std::printf(
+          "(C) reference RK4 fine : err(dt)=%.3e err(dt/2)=%.3e ratio=%.2f (ordre 1 attendu ~2)\n",
+          e1, e2, ratio);
     chk(e1 < 5e-2, "C_accord_reference_modere");
     chk(ratio > 1.5, "C_ordre_un_decroissance");
   }
@@ -547,8 +572,10 @@ int main(int argc, char** argv) {
     dmax_st = all_reduce_max(dmax_st);
     dmax_phi = all_reduce_max(dmax_phi);
     if (me == 0)
-      std::printf("(D) seam theta : max|U_dir4 - U_per| = %.3e | max|phi_dir4 - phi_per| = %.3e "
-                  "(0 attendu, BC theta normalisee)\n", dmax_st, dmax_phi);
+      std::printf(
+          "(D) seam theta : max|U_dir4 - U_per| = %.3e | max|phi_dir4 - phi_per| = %.3e "
+          "(0 attendu, BC theta normalisee)\n",
+          dmax_st, dmax_phi);
     chk(dmax_st == 0.0, "D_seam_etat_bit_identique");
     chk(dmax_phi == 0.0, "D_seam_phi_bit_identique");
   }

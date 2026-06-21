@@ -58,7 +58,8 @@ using namespace adc;
 namespace {
 
 constexpr double kGamma = 1.4;
-constexpr double kQom = 200.0;  // q/m de PotentialForce : assez fort pour IMEX != explicite, sans exploser
+constexpr double kQom =
+    200.0;  // q/m de PotentialForce : assez fort pour IMEX != explicite, sans exploser
 
 // (A) modele ModelSpec-atteignable : Euler + force du potentiel (source raide self-consistent) + charge.
 using PotModel = CompositeModel<Euler, PotentialForce, ChargeDensity>;
@@ -86,7 +87,8 @@ struct StiffRelax {
   template <class State>
   ADC_HD State apply(const State& u, const Aux&) const {
     State s{};
-    for (int c = 0; c < State::size(); ++c) s[c] = inv_eps * (u_eq[c] - u[c]);
+    for (int c = 0; c < State::size(); ++c)
+      s[c] = inv_eps * (u_eq[c] - u[c]);
     return s;
   }
 };
@@ -125,17 +127,24 @@ double maxdiff(const std::vector<double>& a, const std::vector<double>& b) {
 }
 double maxabs(const std::vector<double>& a) {
   double m = 0;
-  for (double v : a) m = std::fmax(m, std::fabs(v));
+  for (double v : a)
+    m = std::fmax(m, std::fabs(v));
   return m;
 }
 bool all_finite(const std::vector<double>& a) {
-  for (double v : a) if (!std::isfinite(v)) return false;
+  for (double v : a)
+    if (!std::isfinite(v))
+      return false;
   return true;
 }
 
 // Source du loader AMR : MEME forme que dsl.emit_cpp_native_loader(target="amr_system"), DEUX modeles
 // en dur (PotModel pour A, StiffModel pour B) selectionnes par le nom du bloc ("pot" | "stiff:<eps>").
 std::string loader_source() {
+  // Generated C++ source raw string: clang-format would reindent (or, with the
+  // interleaved R"CPP( delimiters, runaway-indent) the inner content. Fence it to keep the
+  // emitted source verbatim.
+  // clang-format off
   return R"CPP(
 #include <adc/runtime/amr_dsl_block.hpp>
 #include <adc/runtime/abi_key.hpp>
@@ -183,6 +192,7 @@ extern "C" void adc_install_native_amr(void* sys, const char* name, const char* 
       limiter, riemann, recon, time, gamma, substeps);
 }
 )CPP";
+  // clang-format on
 }
 
 bool compile_loader(const std::string& src_path, const std::string& so_path) {
@@ -218,7 +228,8 @@ Snap run(int n, const std::vector<double>& rho, int nsteps, double dt, Setup set
   s.set_poisson("charge_density", "geometric_mg");
   s.set_refinement(1.2);
   s.set_density("gas", rho);
-  for (int k = 0; k < nsteps; ++k) s.step(dt);
+  for (int k = 0; k < nsteps; ++k)
+    s.step(dt);
   return Snap{s.density(), s.mass(), s.n_patches()};
 }
 
@@ -237,7 +248,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // ============================================================================================
@@ -262,7 +276,8 @@ int main(int argc, char** argv) {
 
   // (A2) IMEX ACTIF : different de l'explicite sur le MEME etat (le pas implicite est bien pris).
   Snap A_explicit = run(n, rho, nsteps, dtA, [](AmrSystem& s) {
-    add_compiled_model(s, "gas", make_pot(), "minmod", "rusanov", "conservative", "explicit", kGamma);
+    add_compiled_model(s, "gas", make_pot(), "minmod", "rusanov", "conservative", "explicit",
+                       kGamma);
   });
   chk(maxdiff(A_compiled.density, A_explicit.density) > 1e-9,
       "[A] IMEX != explicite sur le meme etat (pas implicite actif, non silencieux)");
@@ -279,7 +294,8 @@ int main(int argc, char** argv) {
     s.set_refinement(1.2);
     s.set_density("gas", rho);
     const double m0 = s.mass();
-    for (int k = 0; k < nsteps; ++k) s.step(dtA);
+    for (int k = 0; k < nsteps; ++k)
+      s.step(dtA);
     const double m1 = s.mass();
     const double drift = std::fabs(m1 - m0) / (std::fabs(m0) + 1e-30);
     chk(drift < 1e-12, "[A] masse conservee a ~machine sous IMEX (reflux intact)");
@@ -293,18 +309,21 @@ int main(int argc, char** argv) {
   {
     const double eps = 1e-5, dtB = 1e-3;
     Snap B_imex = run(n, rho, nsteps, dtB, [eps](AmrSystem& s) {
-      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex", kGamma);
+      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex",
+                         kGamma);
     });
     Snap B_expl = run(n, rho, nsteps, dtB, [eps](AmrSystem& s) {
-      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "explicit", kGamma);
+      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "explicit",
+                         kGamma);
     });
     chk(all_finite(B_imex.density) && maxabs(B_imex.density) < 1e3,
         "[B] IMEX stable sur source raide (fini, borne)");
     chk(!all_finite(B_expl.density) || maxabs(B_expl.density) > 1e3,
         "[B] explicite EXPLOSE sur source raide (non fini ou >> borne)");
-    std::printf("OK  [B] source raide (eps=%.0e, dt=%.0e) : IMEX max=%.3e (stable) | explicite %s\n",
-                eps, dtB, maxabs(B_imex.density),
-                all_finite(B_expl.density) ? "borne >> 1" : "NON FINI (explose)");
+    std::printf(
+        "OK  [B] source raide (eps=%.0e, dt=%.0e) : IMEX max=%.3e (stable) | explicite %s\n", eps,
+        dtB, maxabs(B_imex.density),
+        all_finite(B_expl.density) ? "borne >> 1" : "NON FINI (explose)");
   }
 
   // (B2) PARITE add_compiled_model == add_block sous IMEX en regime NON explosif (eps modere) :
@@ -315,10 +334,12 @@ int main(int argc, char** argv) {
   {
     const double eps = 1e-3, dtB = 2e-4;
     Snap B1 = run(n, rho, nsteps, dtB, [eps](AmrSystem& s) {
-      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex", kGamma);
+      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex",
+                         kGamma);
     });
     Snap B2 = run(n, rho, nsteps, dtB, [eps](AmrSystem& s) {
-      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex", kGamma);
+      add_compiled_model(s, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex",
+                         kGamma);
     });
     chk(maxdiff(B1.density, B2.density) == 0.0,
         "[B] add_compiled_model deterministe sous IMEX (dmax==0)");
@@ -326,8 +347,9 @@ int main(int argc, char** argv) {
     std::printf("OK  [B] add_compiled_model IMEX deterministe (dmax==0)\n");
   }
 
-  std::printf("OK  (direct) IMEX cable a parite (add_compiled_model == add_block, dmax==0) ; IMEX "
-              "actif (!= explicite) ; stable sur source raide (explicite explose) ; masse conservee\n");
+  std::printf(
+      "OK  (direct) IMEX cable a parite (add_compiled_model == add_block, dmax==0) ; IMEX "
+      "actif (!= explicite) ; stable sur source raide (explicite explose) ; masse conservee\n");
 
   // ============================================================================================
   // (C) CHEMIN .so : add_native_block(loader) == add_compiled_model, sous IMEX (A potential + B stiff).
@@ -343,7 +365,7 @@ int main(int argc, char** argv) {
     const std::string tmp = std::string(ADC_TEST_TMPDIR) + "/amr_imex_native_" +
                             std::to_string(static_cast<long>(std::clock()));
     const std::string src = tmp + ".cpp";
-    const std::string so  = tmp + ".so";
+    const std::string so = tmp + ".so";
     {
       std::ofstream f(src);
       f << loader_source();
@@ -358,14 +380,17 @@ int main(int argc, char** argv) {
         A.set_poisson("charge_density", "geometric_mg");
         A.set_refinement(1.2);
         A.set_density("gas", rho);
-        for (int k = 0; k < nsteps; ++k) A.step(dtA);
+        for (int k = 0; k < nsteps; ++k)
+          A.step(dtA);
 
         AmrSystem B(make_cfg(n));
-        add_compiled_model(B, "gas", make_pot(), "minmod", "rusanov", "conservative", "imex", kGamma);
+        add_compiled_model(B, "gas", make_pot(), "minmod", "rusanov", "conservative", "imex",
+                           kGamma);
         B.set_poisson("charge_density", "geometric_mg");
         B.set_refinement(1.2);
         B.set_density("gas", rho);
-        for (int k = 0; k < nsteps; ++k) B.step(dtA);
+        for (int k = 0; k < nsteps; ++k)
+          B.step(dtA);
 
         chk(maxdiff(A.density(), B.density()) == 0.0,
             "[C-A] add_native_block == add_compiled_model sous IMEX (potential, dmax==0)");
@@ -380,26 +405,31 @@ int main(int argc, char** argv) {
         A.set_poisson("charge_density", "geometric_mg");
         A.set_refinement(1.2);
         A.set_density("gas", rho);
-        for (int k = 0; k < nsteps; ++k) A.step(dtB);
+        for (int k = 0; k < nsteps; ++k)
+          A.step(dtB);
 
         AmrSystem B(make_cfg(n));
-        add_compiled_model(B, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex", kGamma);
+        add_compiled_model(B, "gas", make_stiff(eps), "minmod", "rusanov", "conservative", "imex",
+                           kGamma);
         B.set_poisson("charge_density", "geometric_mg");
         B.set_refinement(1.2);
         B.set_density("gas", rho);
-        for (int k = 0; k < nsteps; ++k) B.step(dtB);
+        for (int k = 0; k < nsteps; ++k)
+          B.step(dtB);
 
         chk(maxdiff(A.density(), B.density()) == 0.0,
             "[C-B] add_native_block == add_compiled_model sous IMEX (stiff, dmax==0)");
       }
-      std::printf("OK (C) add_native_block == add_compiled_model sous IMEX (potential + stiff, dmax==0)\n");
+      std::printf(
+          "OK (C) add_native_block == add_compiled_model sous IMEX (potential + stiff, dmax==0)\n");
     }
   }
 #endif  // ADC_HAS_KOKKOS
 
   if (fails == 0)
-    std::printf("OK test_amr_imex_native (IMEX sur AMR : add_native_block == add_compiled_model == "
-                "add_block bit-identique ; IMEX actif vs explicite ; stable sur source raide ; "
-                "masse conservee au reflux)\n");
+    std::printf(
+        "OK test_amr_imex_native (IMEX sur AMR : add_native_block == add_compiled_model == "
+        "add_block bit-identique ; IMEX actif vs explicite ; stable sur source raide ; "
+        "masse conservee au reflux)\n");
   return fails ? 1 : 0;
 }

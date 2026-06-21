@@ -10,9 +10,9 @@ namespace adc::detail {
 BuiltBlock build_block_isothermal_rusanov(const ModelSpec& model, const BlockBuildArgs& a) {
   return build_block_for_make(IsothermalFlux{Real(model.cs2), Real(model.vacuum_floor)}, model, a,
                               [](auto m, const std::vector<int>& impl, const BlockBuildArgs& aa) {
-                                return make_block_rusanov(m, aa.limiter, aa.ctx, aa.imex, aa.recon_prim,
-                                                          aa.method, impl, aa.nopts, aa.nreport,
-                                                          aa.positivity_floor);
+                                return make_block_rusanov(m, aa.limiter, aa.ctx, aa.imex,
+                                                          aa.recon_prim, aa.method, impl, aa.nopts,
+                                                          aa.nreport, aa.positivity_floor);
                               });
 }
 

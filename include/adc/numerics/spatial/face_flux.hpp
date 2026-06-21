@@ -34,11 +34,9 @@ namespace adc {
 /// Kept for the serial references (GPU demos, unit tests) that call rusanov_flux directly.
 /// Prefer RusanovFlux{} passed as a template for new calls. ADC_HD.
 template <class Model>
-ADC_HD inline typename Model::State rusanov_flux(const Model& m,
-                                          const typename Model::State& UL,
-                                          const Aux& AL,
-                                          const typename Model::State& UR,
-                                          const Aux& AR, int dir) {
+ADC_HD inline typename Model::State rusanov_flux(const Model& m, const typename Model::State& UL,
+                                                 const Aux& AL, const typename Model::State& UR,
+                                                 const Aux& AR, int dir) {
   return RusanovFlux{}(m, UL, AL, UR, AR, dir);
 }
 
@@ -50,29 +48,29 @@ ADC_HD inline typename Model::State rusanov_flux(const Model& m,
 /// NoSlope (n_ghost == 1): zero slope, prim has no effect -- pure conservative path.
 /// INVARIANT: POINTWISE function, does NOT loop over the grid. ADC_HD.
 template <class Model, class Limiter>
-ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstArray4& u,
-                                                int i, int j, int dir, Real sgn,
-                                                const Limiter& lim, bool prim) {
+ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstArray4& u, int i,
+                                                int j, int dir, Real sgn, const Limiter& lim,
+                                                bool prim) {
   if constexpr (HasPrimitiveVars<Model> && Limiter::n_ghost >= 2) {
     if (prim) {  // convert the stencil U->P, limit on P, convert back P->U
       using Prim = typename Model::Prim;
       const Prim P0 = model.to_primitive(load_state<Model>(u, i, j));
       Prim Pf{};
       if constexpr (Limiter::n_ghost == 2) {
-        const Prim Pm = model.to_primitive(
-            load_state<Model>(u, dir == 0 ? i - 1 : i, dir == 0 ? j : j - 1));
-        const Prim Pp = model.to_primitive(
-            load_state<Model>(u, dir == 0 ? i + 1 : i, dir == 0 ? j : j + 1));
+        const Prim Pm =
+            model.to_primitive(load_state<Model>(u, dir == 0 ? i - 1 : i, dir == 0 ? j : j - 1));
+        const Prim Pp =
+            model.to_primitive(load_state<Model>(u, dir == 0 ? i + 1 : i, dir == 0 ? j : j + 1));
         for (int c = 0; c < Model::n_vars; ++c)
           Pf[c] = P0[c] + sgn * Real(0.5) * lim(P0[c] - Pm[c], Pp[c] - P0[c]);
       } else {  // WENO5 on the 5-point stencil in primitive variables
         const int d = (sgn > Real(0)) ? 1 : -1;
         const Prim Pm2 = model.to_primitive(
             load_state<Model>(u, dir == 0 ? i - 2 * d : i, dir == 0 ? j : j - 2 * d));
-        const Prim Pm1 = model.to_primitive(
-            load_state<Model>(u, dir == 0 ? i - d : i, dir == 0 ? j : j - d));
-        const Prim Pp1 = model.to_primitive(
-            load_state<Model>(u, dir == 0 ? i + d : i, dir == 0 ? j : j + d));
+        const Prim Pm1 =
+            model.to_primitive(load_state<Model>(u, dir == 0 ? i - d : i, dir == 0 ? j : j - d));
+        const Prim Pp1 =
+            model.to_primitive(load_state<Model>(u, dir == 0 ? i + d : i, dir == 0 ? j : j + d));
         const Prim Pp2 = model.to_primitive(
             load_state<Model>(u, dir == 0 ? i + 2 * d : i, dir == 0 ? j : j + 2 * d));
         for (int c = 0; c < Model::n_vars; ++c)
@@ -87,10 +85,8 @@ ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstA
   if constexpr (Limiter::n_ghost == 2) {
     // MUSCL: per-component limited slope (order 2).
     for (int c = 0; c < Model::n_vars; ++c) {
-      const Real am = (dir == 0) ? u(i, j, c) - u(i - 1, j, c)
-                                 : u(i, j, c) - u(i, j - 1, c);
-      const Real ap = (dir == 0) ? u(i + 1, j, c) - u(i, j, c)
-                                 : u(i, j + 1, c) - u(i, j, c);
+      const Real am = (dir == 0) ? u(i, j, c) - u(i - 1, j, c) : u(i, j, c) - u(i, j - 1, c);
+      const Real ap = (dir == 0) ? u(i + 1, j, c) - u(i, j, c) : u(i, j + 1, c) - u(i, j, c);
       s[c] += sgn * Real(0.5) * lim(am, ap);
     }
   } else if constexpr (Limiter::n_ghost >= 3) {
@@ -100,11 +96,11 @@ ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstA
     const int d = (sgn > Real(0)) ? 1 : -1;
     for (int c = 0; c < Model::n_vars; ++c) {
       if (dir == 0)
-        s[c] = weno5z(u(i - 2 * d, j, c), u(i - d, j, c), u(i, j, c),
-                      u(i + d, j, c), u(i + 2 * d, j, c));
+        s[c] = weno5z(u(i - 2 * d, j, c), u(i - d, j, c), u(i, j, c), u(i + d, j, c),
+                      u(i + 2 * d, j, c));
       else
-        s[c] = weno5z(u(i, j - 2 * d, c), u(i, j - d, c), u(i, j, c),
-                      u(i, j + d, c), u(i, j + 2 * d, c));
+        s[c] = weno5z(u(i, j - 2 * d, c), u(i, j - d, c), u(i, j, c), u(i, j + d, c),
+                      u(i, j + 2 * d, c));
     }
   }
   return s;
@@ -115,10 +111,9 @@ ADC_HD inline typename Model::State reconstruct(const Model& model, const ConstA
 /// (i, j) is the SOURCE cell of the reconstruction: it is to ITS average that the face state is
 /// brought back. pos_floor <= 0 -> strictly identical to reconstruct (short-circuit). ADC_HD.
 template <class Model, class Limiter>
-ADC_HD inline typename Model::State reconstruct_pp(const Model& model, const ConstArray4& u,
-                                                   int i, int j, int dir, Real sgn,
-                                                   const Limiter& lim, bool prim,
-                                                   Real pos_floor, int pos_comp) {
+ADC_HD inline typename Model::State reconstruct_pp(const Model& model, const ConstArray4& u, int i,
+                                                   int j, int dir, Real sgn, const Limiter& lim,
+                                                   bool prim, Real pos_floor, int pos_comp) {
   typename Model::State s = reconstruct<Model>(model, u, i, j, dir, sgn, lim, prim);
   zhang_shu_scale<Model>(s, u, i, j, pos_floor, pos_comp);
   return s;
@@ -174,11 +169,14 @@ struct FaceFluxXKernel {
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
-    const auto L = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rr = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto L =
+        reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rr =
+        reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i - 1, j), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 0);
-    for (int c = 0; c < Model::n_vars; ++c) fx(i, j, c) = F[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      fx(i, j, c) = F[c];
     if constexpr (DiffusiveModel<Model>) {
       const Real nu = model.diffusivity();
       for (int c = 0; c < Model::n_vars; ++c)
@@ -201,11 +199,14 @@ struct FaceFluxYKernel {
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
-    const auto L = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rr = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto L =
+        reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rr =
+        reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i, j - 1), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 1);
-    for (int c = 0; c < Model::n_vars; ++c) fy(i, j, c) = F[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      fy(i, j, c) = F[c];
     if constexpr (DiffusiveModel<Model>) {
       const Real nu = model.diffusivity();
       for (int c = 0; c < Model::n_vars; ++c)
@@ -245,9 +246,9 @@ struct FaceFluxYKernel {
 // the LEVEL (passed by the caller; 0 by default, not read for a non-diffusive model -> the
 // hyperbolic path is strictly bit-identical).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& aux,
-                         MultiFab& Fx, MultiFab& Fy, Real dx = 0, Real dy = 0,
-                         bool recon_prim = false, Real pos_floor = Real(0)) {
+void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& aux, MultiFab& Fx,
+                         MultiFab& Fy, Real dx = 0, Real dy = 0, bool recon_prim = false,
+                         Real pos_floor = Real(0)) {
   detail::require_reconstruction_ghosts<Limiter>(U);  // state ghosts >= stencil (otherwise OOB)
   const Limiter lim{};
   const NumericalFlux nflux{};
@@ -258,10 +259,12 @@ void compute_face_fluxes(const Model& model, const MultiFab& U, const MultiFab& 
     Array4 fx = Fx.fab(li).array();
     Array4 fy = Fy.fab(li).array();
     const Box2D v = U.box(li);
-    for_each_cell(xface_box(v), detail::FaceFluxXKernel<Limiter, NumericalFlux, Model>{
-                                    model, u, ax, fx, dx, lim, nflux, recon_prim, pos_floor, pos_comp});
-    for_each_cell(yface_box(v), detail::FaceFluxYKernel<Limiter, NumericalFlux, Model>{
-                                    model, u, ax, fy, dy, lim, nflux, recon_prim, pos_floor, pos_comp});
+    for_each_cell(xface_box(v),
+                  detail::FaceFluxXKernel<Limiter, NumericalFlux, Model>{
+                      model, u, ax, fx, dx, lim, nflux, recon_prim, pos_floor, pos_comp});
+    for_each_cell(yface_box(v),
+                  detail::FaceFluxYKernel<Limiter, NumericalFlux, Model>{
+                      model, u, ax, fy, dy, lim, nflux, recon_prim, pos_floor, pos_comp});
   }
 }
 

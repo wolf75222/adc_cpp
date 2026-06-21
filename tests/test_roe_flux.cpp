@@ -22,7 +22,8 @@ static State cons(double rho, double u, double v, double p, double gamma) {
 
 static double maxdiff(const State& a, const State& b) {
   double m = 0;
-  for (int c = 0; c < 4; ++c) m = std::fmax(m, std::fabs(a[c] - b[c]));
+  for (int c = 0; c < 4; ++c)
+    m = std::fmax(m, std::fabs(a[c] - b[c]));
   return m;
 }
 
@@ -73,7 +74,8 @@ int main() {
       return 1;
     }
   }
-  std::printf("OK  Roe : propriete amont supersonique (F* == flux amont) -> decomposition correcte\n");
+  std::printf(
+      "OK  Roe : propriete amont supersonique (F* == flux amont) -> decomposition correcte\n");
 
   // (3) eigenvalues() : (vn-c, vn, vn, vn+c)
   {

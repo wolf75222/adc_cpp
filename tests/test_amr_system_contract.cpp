@@ -48,17 +48,32 @@ int main(int argc, char** argv) {
   cfg.periodic = true;
 
   // --- set_poisson : refus immediat de solver/rhs hors du domaine cable ---------------------
-  chk(raises([&] { AmrSystem s(cfg); s.set_poisson("charge_density", "fft"); }),
+  chk(raises([&] {
+        AmrSystem s(cfg);
+        s.set_poisson("charge_density", "fft");
+      }),
       "set_poisson refuse solver='fft' (seul geometric_mg est cable sur AMR)");
-  chk(raises([&] { AmrSystem s(cfg); s.set_poisson("charge_density", "inconnu"); }),
+  chk(raises([&] {
+        AmrSystem s(cfg);
+        s.set_poisson("charge_density", "inconnu");
+      }),
       "set_poisson refuse un solver inconnu");
-  chk(raises([&] { AmrSystem s(cfg); s.set_poisson("densite_bidon", "geometric_mg"); }),
+  chk(raises([&] {
+        AmrSystem s(cfg);
+        s.set_poisson("densite_bidon", "geometric_mg");
+      }),
       "set_poisson refuse un rhs hors {charge_density, composite}");
 
   // Les valeurs supportees passent sans lever.
-  chk(!raises([&] { AmrSystem s(cfg); s.set_poisson("charge_density", "geometric_mg"); }),
+  chk(!raises([&] {
+    AmrSystem s(cfg);
+    s.set_poisson("charge_density", "geometric_mg");
+  }),
       "set_poisson accepte charge_density + geometric_mg");
-  chk(!raises([&] { AmrSystem s(cfg); s.set_poisson("composite", "geometric_mg"); }),
+  chk(!raises([&] {
+    AmrSystem s(cfg);
+    s.set_poisson("composite", "geometric_mg");
+  }),
       "set_poisson accepte rhs='composite'");
 
   // --- set_poisson : bc/wall valides au build (poisson_bc/wall_active), donc au 1er mass() ---
@@ -82,9 +97,9 @@ int main(int argc, char** argv) {
   // transport explicite porte par le reflux). On verrouille donc qu'il est ACCEPTE, et qu'un
   // traitement GENUINEMENT inconnu reste refuse tot.
   chk(!raises([&] {
-        AmrSystem s(cfg);
-        s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "imex", 1);
-      }),
+    AmrSystem s(cfg);
+    s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "imex", 1);
+  }),
       "add_block accepte time='imex' (IMEX cable sur AMR)");
   chk(raises([&] {
         AmrSystem s(cfg);
@@ -107,12 +122,12 @@ int main(int argc, char** argv) {
   // l'ajout passe sans lever ; la physique (evolution, masse, Poisson somme) est verrouillee par
   // test_amr_system_twoblock.
   chk(!raises([&] {
-        AmrSystemConfig c2 = cfg;
-        c2.regrid_every = 0;  // multi-blocs PR1 : hierarchie FIGEE
-        AmrSystem s(c2);
-        s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "explicit", 1);
-        s.add_block("ni", exb_spec(), "minmod", "rusanov", "conservative", "explicit", 1);
-      }),
+    AmrSystemConfig c2 = cfg;
+    c2.regrid_every = 0;  // multi-blocs PR1 : hierarchie FIGEE
+    AmrSystem s(c2);
+    s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "explicit", 1);
+    s.add_block("ni", exb_spec(), "minmod", "rusanov", "conservative", "explicit", 1);
+  }),
       "add_block accepte un second bloc (multi-blocs, hierarchie partagee)");
 
   // --- DEVERROUILLAGE (capstone Phase 2, C.6) : multi-blocs + regrid_every > 0 est ACCEPTE ----
@@ -121,23 +136,23 @@ int main(int argc, char** argv) {
   // (1er mass()) construit le moteur avec la cadence active au lieu de lever ; le regrid d'union et
   // le mouvement effectif de la hierarchie sont verrouilles par test_amr_multiblock_regrid_union.
   chk(!raises([&] {
-        AmrSystemConfig c2 = cfg;
-        c2.regrid_every = 5;  // > 0
-        AmrSystem s(c2);
-        s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "explicit", 1);
-        s.add_block("ni", exb_spec(), "minmod", "rusanov", "conservative", "explicit", 1);
-        (void)s.mass("ne");  // declenche ensure_built -> moteur multi-blocs avec regrid d'union actif
-      }),
+    AmrSystemConfig c2 = cfg;
+    c2.regrid_every = 5;  // > 0
+    AmrSystem s(c2);
+    s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "explicit", 1);
+    s.add_block("ni", exb_spec(), "minmod", "rusanov", "conservative", "explicit", 1);
+    (void)s.mass("ne");  // declenche ensure_built -> moteur multi-blocs avec regrid d'union actif
+  }),
       "multi-blocs + regrid_every > 0 ACCEPTE (regrid d'union des tags, deverrouillage Phase 2)");
 
   // --- mono-bloc + regrid_every > 0 reste AUTORISE (chemin AmrCouplerMP, regrid intact) -------
   chk(!raises([&] {
-        AmrSystemConfig c2 = cfg;
-        c2.regrid_every = 5;
-        AmrSystem s(c2);
-        s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "explicit", 1);
-        (void)s.mass();  // ensure_built : mono-bloc avec regrid, pas de refus
-      }),
+    AmrSystemConfig c2 = cfg;
+    c2.regrid_every = 5;
+    AmrSystem s(c2);
+    s.add_block("ne", exb_spec(), "none", "rusanov", "conservative", "explicit", 1);
+    (void)s.mass();  // ensure_built : mono-bloc avec regrid, pas de refus
+  }),
       "mono-bloc + regrid_every > 0 reste autorise (regrid AmrCouplerMP intact)");
 
   if (checker.fails() == 0)

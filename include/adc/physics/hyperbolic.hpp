@@ -187,8 +187,7 @@ struct IsothermalFlux {
     return e;
   }
   /// Signed speeds (HLL/HLLC): v_dir -+ c_s.
-  ADC_HD void wave_speeds(const StateVec<3>& u, const Aux&, int dir, Real& smin,
-                          Real& smax) const {
+  ADC_HD void wave_speeds(const StateVec<3>& u, const Aux&, int dir, Real& smin, Real& smax) const {
     const Prim p = to_primitive(u);
     const Real vn = (dir == 0 ? p[1] : p[2]);
     const Real c = std::sqrt(cs2);
@@ -196,11 +195,15 @@ struct IsothermalFlux {
     smax = vn + c;
   }
   static VariableSet conservative_vars() {
-    return {VariableKind::Conservative, {"rho", "rho_u", "rho_v"}, 3,
+    return {VariableKind::Conservative,
+            {"rho", "rho_u", "rho_v"},
+            3,
             {VariableRole::Density, VariableRole::MomentumX, VariableRole::MomentumY}};
   }
   static VariableSet primitive_vars() {
-    return {VariableKind::Primitive, {"rho", "u", "v"}, 3,
+    return {VariableKind::Primitive,
+            {"rho", "u", "v"},
+            3,
             {VariableRole::Density, VariableRole::VelocityX, VariableRole::VelocityY}};
   }
 };
@@ -241,14 +244,15 @@ struct IsothermalFluxPolar : IsothermalFlux {
   /// p = cs2 rho. Component 0 (mass) is zero: mass is purely conservative in polar.
   ADC_HD StateVec<3> polar_geom_source(const StateVec<3>& u, Real r) const {
     const Real rho = u[0];
-    const Real inv_rho = Real(1) / velocity_rho(rho);  // quasi-vacuum floored (ADC-77; bit-identical if off)
+    const Real inv_rho =
+        Real(1) / velocity_rho(rho);   // quasi-vacuum floored (ADC-77; bit-identical if off)
     const Real mr = u[1], mth = u[2];  // rho v_r, rho v_theta (local basis (e_r, e_theta))
     const Real p = cs2 * rho;
     const Real inv_r = Real(1) / r;
     StateVec<3> s{};
     s[0] = Real(0);
-    s[1] = (mth * mth * inv_rho + p) * inv_r;   // (rho v_theta^2 + p)/r: centrifugal + pressure
-    s[2] = -(mr * mth * inv_rho) * inv_r;        // -(rho v_r v_theta)/r: cross curvature
+    s[1] = (mth * mth * inv_rho + p) * inv_r;  // (rho v_theta^2 + p)/r: centrifugal + pressure
+    s[2] = -(mr * mth * inv_rho) * inv_r;      // -(rho v_r v_theta)/r: cross curvature
     return s;
   }
 };

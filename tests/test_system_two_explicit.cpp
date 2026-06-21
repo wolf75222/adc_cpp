@@ -45,16 +45,16 @@ struct AdvectX {
   ADC_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const {
-    return a < 0 ? -a : a;
-  }
+  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
   ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
   ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 static void fill_ramp_x(MultiFab& mf) {
@@ -77,7 +77,10 @@ static_assert(ProdSSP3::Time::substeps == 4);
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -137,6 +140,7 @@ int main() {
     chk(norm_inf(d) > Real(1e-3), "per_block_bc_differs");
   }
 
-  if (fails == 0) std::printf("OK test_system_two_explicit\n");
+  if (fails == 0)
+    std::printf("OK test_system_two_explicit\n");
   return fails == 0 ? 0 : 1;
 }

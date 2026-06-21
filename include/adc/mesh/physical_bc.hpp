@@ -96,17 +96,21 @@ struct BCFaceYHiKernel {
 inline void fill_physical_bc_range(MultiFab& mf, const Box2D& domain, const BCRec& bc, int c0,
                                    int c1) {
   const int ng = mf.n_grow();
-  if (ng == 0) return;
+  if (ng == 0)
+    return;
   // All periodic: fill_boundary has already done everything, nothing to read/write here (and we
   // avoid a useless barrier on the hot path of the periodic multigrid).
-  if (bc.xlo == BCType::Periodic && bc.xhi == BCType::Periodic &&
-      bc.ylo == BCType::Periodic && bc.yhi == BCType::Periodic)
+  if (bc.xlo == BCType::Periodic && bc.xhi == BCType::Periodic && bc.ylo == BCType::Periodic &&
+      bc.yhi == BCType::Periodic)
     return;
   // Clamp the component range to the channel (defensive; the per-field override passes a single,
   // facade-validated component). An empty range is a no-op.
-  if (c0 < 0) c0 = 0;
-  if (c1 > mf.ncomp()) c1 = mf.ncomp();
-  if (c0 >= c1) return;
+  if (c0 < 0)
+    c0 = 0;
+  if (c1 > mf.ncomp())
+    c1 = mf.ncomp();
+  if (c0 >= c1)
+    return;
   // Physical edges on DEVICE (for_each_cell -> kernel): ghost = mirror cell (Foextrap: copy of the
   // 1st interior; Dirichlet: 2 v - reflection). Ghost index <-> layer: for x low, i = lo-k so the
   // Dirichlet mirror is 2 lo - i - 1 (k = lo - i). No more device_fence nor host access: these
@@ -199,10 +203,22 @@ struct AuxHaloPolicy {
 /// that component's physical-face ghosts with the field's own policy.
 inline BCRec aux_halo_override(const BCRec& shared, const AuxHaloPolicy& p) {
   BCRec b = shared;
-  if (b.xlo != BCType::Periodic) { b.xlo = p.type; b.xlo_val = p.value; }
-  if (b.xhi != BCType::Periodic) { b.xhi = p.type; b.xhi_val = p.value; }
-  if (b.ylo != BCType::Periodic) { b.ylo = p.type; b.ylo_val = p.value; }
-  if (b.yhi != BCType::Periodic) { b.yhi = p.type; b.yhi_val = p.value; }
+  if (b.xlo != BCType::Periodic) {
+    b.xlo = p.type;
+    b.xlo_val = p.value;
+  }
+  if (b.xhi != BCType::Periodic) {
+    b.xhi = p.type;
+    b.xhi_val = p.value;
+  }
+  if (b.ylo != BCType::Periodic) {
+    b.ylo = p.type;
+    b.ylo_val = p.value;
+  }
+  if (b.yhi != BCType::Periodic) {
+    b.yhi = p.type;
+    b.yhi_val = p.value;
+  }
   return b;
 }
 

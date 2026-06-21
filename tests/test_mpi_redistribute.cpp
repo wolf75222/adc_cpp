@@ -35,7 +35,8 @@ int main(int argc, char** argv) {
     Fab2D& F = MA.fab(li);
     const Box2D b = F.box();
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) F(i, j) = f(i, j);
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        F(i, j) = f(i, j);
   }
 
   // decomposition B : bandes (np boxes, full x, L/np lignes), box r -> rang r
@@ -55,7 +56,8 @@ int main(int argc, char** argv) {
     const Box2D b = F.box();
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-        if (std::fabs(F(i, j) - f(i, j)) > 1e-12) ++fails;
+        if (std::fabs(F(i, j) - f(i, j)) > 1e-12)
+          ++fails;
   }
 
   // bandes -> nouvelles tuiles (round-trip), identite attendue
@@ -67,7 +69,8 @@ int main(int argc, char** argv) {
     const Box2D b = F.box();
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-        if (std::fabs(F(i, j) - f(i, j)) > 1e-12) ++fails;
+        if (std::fabs(F(i, j) - f(i, j)) > 1e-12)
+          ++fails;
   }
 
   const long gfails = all_reduce_sum(fails);
@@ -75,8 +78,7 @@ int main(int argc, char** argv) {
     if (gfails == 0)
       std::printf("OK test_mpi_redistribute (np=%d : tuiles<->bandes)\n", np);
     else
-      std::printf("FAIL test_mpi_redistribute : %ld cellules fausses (np=%d)\n",
-                  gfails, np);
+      std::printf("FAIL test_mpi_redistribute : %ld cellules fausses (np=%d)\n", gfails, np);
   }
   comm_finalize();
   return gfails == 0 ? 0 : 1;

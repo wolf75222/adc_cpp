@@ -18,7 +18,9 @@ using adc::LorentzEliminator;
 using adc::Real;
 
 // Valeur absolue sans appel flottant conditionnel hors std::fabs.
-static inline double dabs(double x) { return x < 0.0 ? -x : x; }
+static inline double dabs(double x) {
+  return x < 0.0 ? -x : x;
+}
 
 // Seuil de tolerances : on attend une precision proche de epsilon machine (2.2e-16 en double).
 static constexpr double EPS_MACHINE = 1e-14;
@@ -38,11 +40,11 @@ int main() {
     const char* name;
   };
   const Case cases[] = {
-      {1.0,  0.1,   1.0,  1.0,  0.0,  "theta=1 dt=0.1 Bz=1 vx=1 vy=0"},
-      {0.5,  0.2,   2.5,  3.0, -1.5,  "theta=0.5 dt=0.2 Bz=2.5"},
-      {1.0,  1.0,  10.0,  0.7,  0.3,  "strong w=10"},
-      {0.75, 0.05,  0.01, 100.0, -50.0, "weak field small dt"},
-      {1.0,  0.01,  1e6,  1.0,  1.0,  "tres grand w"},
+      {1.0, 0.1, 1.0, 1.0, 0.0, "theta=1 dt=0.1 Bz=1 vx=1 vy=0"},
+      {0.5, 0.2, 2.5, 3.0, -1.5, "theta=0.5 dt=0.2 Bz=2.5"},
+      {1.0, 1.0, 10.0, 0.7, 0.3, "strong w=10"},
+      {0.75, 0.05, 0.01, 100.0, -50.0, "weak field small dt"},
+      {1.0, 0.01, 1e6, 1.0, 1.0, "tres grand w"},
   };
 
   // Test 1 : round-trip apply_Binv(apply_B(v)) == v
@@ -99,7 +101,7 @@ int main() {
   // Test 4 : cas degenere B_z = 0 -> B = I, B^{-1} = I, det = 1
   {
     LorentzEliminator le(1.0, 0.1, 0.0);
-    chk(dabs(le.w)   < EPS_MACHINE, "Bz=0 : w==0");
+    chk(dabs(le.w) < EPS_MACHINE, "Bz=0 : w==0");
     chk(dabs(le.det - 1.0) < EPS_MACHINE, "Bz=0 : det==1");
     Real Bx, By;
     le.apply_B(3.0, -2.0, Bx, By);
@@ -108,13 +110,12 @@ int main() {
     le.apply_Binv(3.0, -2.0, vxp, vyp);
     chk(dabs(vxp - 3.0) < EPS_MACHINE && dabs(vyp + 2.0) < EPS_MACHINE, "Bz=0 : Binv==I");
     chk(dabs(le.binv_11() - 1.0) < EPS_MACHINE, "Bz=0 : binv_11==1");
-    chk(dabs(le.binv_12())       < EPS_MACHINE, "Bz=0 : binv_12==0");
-    chk(dabs(le.binv_21())       < EPS_MACHINE, "Bz=0 : binv_21==0");
+    chk(dabs(le.binv_12()) < EPS_MACHINE, "Bz=0 : binv_12==0");
+    chk(dabs(le.binv_21()) < EPS_MACHINE, "Bz=0 : binv_21==0");
     chk(dabs(le.binv_22() - 1.0) < EPS_MACHINE, "Bz=0 : binv_22==1");
   }
 
   if (fails == 0)
-    std::printf("OK test_lorentz_eliminator (%zu cas)\n",
-                sizeof(cases) / sizeof(cases[0]));
+    std::printf("OK test_lorentz_eliminator (%zu cas)\n", sizeof(cases) / sizeof(cases[0]));
   return fails;
 }

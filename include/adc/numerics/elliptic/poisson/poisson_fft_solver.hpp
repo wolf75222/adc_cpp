@@ -52,16 +52,15 @@ class PoissonFFTSolver {
  public:
   /// @p spectral: Laplacian symbol (false = discrete 5-point stencil, bit-identical default;
   /// true = continuous symbol -(kx^2+ky^2), faithful to spectral references -- cf. PoissonFFT).
-  PoissonFFTSolver(const Geometry& geom, const BoxArray& ba,
-                   const BCRec& = BCRec{}, std::function<bool(Real, Real)> = {},
-                   bool spectral = false)
+  PoissonFFTSolver(const Geometry& geom, const BoxArray& ba, const BCRec& = BCRec{},
+                   std::function<bool(Real, Real)> = {}, bool spectral = false)
       : geom_(geom),
         dm_(ba.size(), n_ranks()),
         phi_(ba, dm_, 1, 1),
         rhs_(ba, dm_, 1, 0),
         res_(ba, dm_, 1, 0),
-        fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
-             geom.yhi - geom.ylo, spectral) {
+        fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo, geom.yhi - geom.ylo,
+             spectral) {
     // HARD guard (active in Release, NDEBUG does NOT remove it): this direct solver is single-rank /
     // single box. Under a system DistributionMapping with n_ranks()>1, some ranks have no local
     // box (local_size()==0) and solve() would dereference a non-existent fab(0) -> SIGSEGV. The old
@@ -118,8 +117,7 @@ class PoissonFFTSolver {
   PoissonFFT fft_;
 };
 
-static_assert(EllipticSolver<PoissonFFTSolver>,
-              "PoissonFFTSolver must model EllipticSolver");
+static_assert(EllipticSolver<PoissonFFTSolver>, "PoissonFFTSolver must model EllipticSolver");
 
 /// DIRECT periodic Poisson solver (spectral FFT) DISTRIBUTED, models EllipticSolver.
 ///
@@ -149,15 +147,13 @@ class DistributedFFTSolver {
       : geom_(geom),
         Nx_(geom.domain.nx()),
         nyl_(geom.domain.ny() / n_ranks()),
-        fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
-             geom.yhi - geom.ylo) {
+        fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo, geom.yhi - geom.ylo) {
     const int np = n_ranks();
     // HARD guard (active in Release): nyl_ = Ny / np is already computed in the init list.
     // If Ny is not divisible by np, the slabs would be mis-sized and solve() would read out
     // of bounds. The old assert vanished under NDEBUG. Aligned with PoissonFFTSolver (throw).
     if (geom.domain.ny() % np != 0)
-      throw std::runtime_error(
-          "DistributedFFTSolver: Ny must be divisible by n_ranks()");
+      throw std::runtime_error("DistributedFFTSolver: Ny must be divisible by n_ranks()");
     std::vector<Box2D> slabs;
     for (int r = 0; r < np; ++r)
       slabs.push_back(Box2D{{0, r * nyl_}, {Nx_ - 1, (r + 1) * nyl_ - 1}});
@@ -190,7 +186,7 @@ class DistributedFFTSolver {
 
   // Discrete residual ||lap(phi) - rhs|| reduced over all ranks (~round-off: direct solve exact).
   Real residual() {
-    BCRec bc;  // periodic
+    BCRec bc;                                                    // periodic
     fill_boundary(phi_, geom_.domain, Periodicity{true, true});  // inter-slab halos (MPI)
     poisson_residual(phi_, rhs_, geom_, bc, res_);
     return all_reduce_max(norm_inf(res_));
@@ -247,9 +243,8 @@ class RemappedFFTSolver {
   /// @p spectral: Laplacian symbol forwarded to PoissonFFT (false = discrete 5-point stencil,
   /// bit-identical default; true = continuous symbol -(kx^2+ky^2)). Same constructor shape as
   /// PoissonFFTSolver (BCRec and wall predicate accepted but ignored: periodic constant coefficient).
-  RemappedFFTSolver(const Geometry& geom, const BoxArray& ba,
-                    const BCRec& = BCRec{}, std::function<bool(Real, Real)> = {},
-                    bool spectral = false)
+  RemappedFFTSolver(const Geometry& geom, const BoxArray& ba, const BCRec& = BCRec{},
+                    std::function<bool(Real, Real)> = {}, bool spectral = false)
       : geom_(geom),
         dm_(ba.size(), n_ranks()),  // SAME layout System uses: box i -> rank i % np
         phi_(ba, dm_, 1, 1),
@@ -259,8 +254,8 @@ class RemappedFFTSolver {
         Ny_(geom.domain.ny()),
         nyl_(geom.domain.ny() / n_ranks()),
         owner_rank_(ba.size() > 0 ? dm_[0] : 0),
-        fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo,
-             geom.yhi - geom.ylo, spectral) {
+        fft_(geom.domain.nx(), geom.domain.ny(), geom.xhi - geom.xlo, geom.yhi - geom.ylo,
+             spectral) {
     // CONTRACT (ADC-273 vote on ADC-287): this solver is valid ONLY for System's round-robin
     // single-box Cartesian layout, where box 0 is owned by rank dm_[0] (= owner_rank_) and every other
     // rank holds an empty fab. It presents that layout outward (rhs()/phi() on ba/dm) and hides the
@@ -270,7 +265,8 @@ class RemappedFFTSolver {
     // every rank constructs this object). Ny must split into np equal slabs for the internal transpose.
     if (ba.size() != 1) {
       throw std::runtime_error(
-          "RemappedFFTSolver: System single-box layout required (ba.size()==1); for a slab-distributed "
+          "RemappedFFTSolver: System single-box layout required (ba.size()==1); for a "
+          "slab-distributed "
           "domain use DistributedFFTSolver or geometric_mg");
     }
     if (geom.domain.ny() % n_ranks() != 0) {
@@ -320,10 +316,11 @@ class RemappedFFTSolver {
     fft_.solve(rho_local, phi_local);  // PROVEN slab FFT (internal MPI_Alltoall), zero-mean phi
 #ifdef ADC_HAS_MPI
     std::vector<double> recvbuf;
-    if (my_rank() == owner_rank_) recvbuf.resize(static_cast<std::size_t>(Nx_) * Ny_);
+    if (my_rank() == owner_rank_)
+      recvbuf.resize(static_cast<std::size_t>(Nx_) * Ny_);
     MPI_Gather(phi_local.data(), cnt, MPI_DOUBLE,
-               my_rank() == owner_rank_ ? recvbuf.data() : nullptr, cnt, MPI_DOUBLE,
-               owner_rank_, MPI_COMM_WORLD);
+               my_rank() == owner_rank_ ? recvbuf.data() : nullptr, cnt, MPI_DOUBLE, owner_rank_,
+               MPI_COMM_WORLD);
     if (my_rank() == owner_rank_) {
       Array4 p = phi_.fab(0).array();
       const Box2D v = phi_.box(0);
@@ -351,7 +348,8 @@ class RemappedFFTSolver {
     // ell_solve() (system_field_solver.hpp) already brackets the grad-phi read, so this is belt-and-
     // suspenders, but it self-documents the ordering at the solver seam. Gated on the owner because only
     // it holds a fab (no-op on the empty ranks); no-op on the CPU/Serial backend.
-    if (my_rank() == owner_rank_) device_fence();
+    if (my_rank() == owner_rank_)
+      device_fence();
   }
 
   // Discrete residual ||lap(phi) - rhs|| reduced over all ranks (~round-off: direct solve exact). The
@@ -371,7 +369,6 @@ class RemappedFFTSolver {
   PoissonFFT fft_;
 };
 
-static_assert(EllipticSolver<RemappedFFTSolver>,
-              "RemappedFFTSolver must model EllipticSolver");
+static_assert(EllipticSolver<RemappedFFTSolver>, "RemappedFFTSolver must model EllipticSolver");
 
 }  // namespace adc

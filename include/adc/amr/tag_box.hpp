@@ -39,22 +39,20 @@ struct TagBox {
   TagBox() = default;
   /// Build a TagBox covering b, all markers at 0 (buffer sized on b.num_cells()).
   explicit TagBox(const Box2D& b)
-      : box(b),
-        t(static_cast<std::size_t>(std::max<std::int64_t>(0, b.num_cells())), 0) {}
+      : box(b), t(static_cast<std::size_t>(std::max<std::int64_t>(0, b.num_cells())), 0) {}
 
   /// Write access to marker (i, j); (i, j) MUST be in box (no bound check).
   char& operator()(int i, int j) { return t[idx(i, j)]; }
   /// Read access to marker (i, j); (i, j) MUST be in box (no bound check).
   char operator()(int i, int j) const { return t[idx(i, j)]; }
   /// true if (i, j) is in box AND tagged; safe (bound check included, unlike operator()).
-  bool tagged(int i, int j) const {
-    return box.contains(i, j) && t[idx(i, j)] != 0;
-  }
+  bool tagged(int i, int j) const { return box.contains(i, j) && t[idx(i, j)] != 0; }
 
   /// Number of tagged cells (sum of markers).
   std::int64_t count() const {
     std::int64_t c = 0;
-    for (char x : t) c += x;
+    for (char x : t)
+      c += x;
     return c;
   }
 
@@ -74,7 +72,8 @@ struct TagBox {
 /// @throws std::runtime_error if a box disagrees (linear indexing would mix two geometries).
 // No physics dependency (a few lines): i-fast storage -> simple |= over the buffer.
 inline TagBox tag_union(const std::vector<TagBox>& parts) {
-  if (parts.empty()) return TagBox{};
+  if (parts.empty())
+    return TagBox{};
   TagBox out(parts[0].box);
   for (const TagBox& tb : parts) {
     if (tb.box.lo[0] != out.box.lo[0] || tb.box.lo[1] != out.box.lo[1] ||
@@ -83,7 +82,8 @@ inline TagBox tag_union(const std::vector<TagBox>& parts) {
           "tag_union: all TagBox must share EXACTLY the same box (same parent "
           "domain) for cell-by-cell union");
     const std::size_t n = std::min(out.t.size(), tb.t.size());
-    for (std::size_t k = 0; k < n; ++k) out.t[k] |= tb.t[k];
+    for (std::size_t k = 0; k < n; ++k)
+      out.t[k] |= tb.t[k];
   }
   return out;
 }

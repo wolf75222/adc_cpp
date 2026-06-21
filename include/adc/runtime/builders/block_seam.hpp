@@ -1,9 +1,9 @@
 #pragma once
 
-#include <adc/core/variables.hpp>           // VariableSet (block descriptor carried in BuiltBlock)
-#include <adc/runtime/block_builder.hpp>    // make_block + makers + BlockClosures + NewtonOptions/Report
+#include <adc/core/variables.hpp>         // VariableSet (block descriptor carried in BuiltBlock)
+#include <adc/runtime/block_builder.hpp>  // make_block + makers + BlockClosures + NewtonOptions/Report
 #include <adc/runtime/block_builder_polar.hpp>  // make_block_polar + polar makers + PolarGridContext
-#include <adc/runtime/model_factory.hpp>    // dispatch_model_for + resolve_implicit_components + ModelSpec
+#include <adc/runtime/model_factory.hpp>  // dispatch_model_for + resolve_implicit_components + ModelSpec
 
 #include <functional>
 #include <string>
@@ -40,7 +40,8 @@ struct BuiltBlock {
   std::function<void(const MultiFab&, MultiFab&)> add_poisson_rhs;
   std::function<Real(const MultiFab&)> src_freq, stab_dt;  // optional step bounds (model traits)
   std::function<void(const double*, double*)> prim_to_cons, cons_to_prim;  // System::CellConvert
-  int aux_width = 0;  // aux_comps<Model>() (Cartesian); unused on the polar path (no ensure_aux_width)
+  int aux_width =
+      0;  // aux_comps<Model>() (Cartesian); unused on the polar path (no ensure_aux_width)
 };
 
 /// The non-model inputs of a Cartesian block build (a thin bundle so the seam signature stays fixed).
@@ -69,7 +70,8 @@ struct BlockBuildArgs {
 /// (system_compressible_<flux>.cpp) passes make_block_<flux> so ONLY that flux's build_block leaves are
 /// instantiated in its TU (ADC-335 flux subdivision). Instantiated only in the seam TU that calls it.
 template <class TR, class MakeFn>
-BuiltBlock build_block_for_make(TR tr, const ModelSpec& model, const BlockBuildArgs& a, MakeFn make) {
+BuiltBlock build_block_for_make(TR tr, const ModelSpec& model, const BlockBuildArgs& a,
+                                MakeFn make) {
   BuiltBlock out;
   dispatch_model_for(model, std::move(tr), [&](auto m) {
     using M = decltype(m);
@@ -98,12 +100,11 @@ BuiltBlock build_block_for_make(TR tr, const ModelSpec& model, const BlockBuildA
 /// flux-subdivided (exb -- only rusanov reachable via the capability guards; isothermal -- rusanov+hll).
 template <class TR>
 BuiltBlock build_block_for(TR tr, const ModelSpec& model, const BlockBuildArgs& a) {
-  return build_block_for_make(std::move(tr), model, a,
-                              [](auto m, const std::vector<int>& impl, const BlockBuildArgs& aa) {
-                                return make_block(m, aa.limiter, aa.riemann, aa.ctx, aa.imex,
-                                                  aa.recon_prim, aa.method, impl, aa.nopts, aa.nreport,
-                                                  aa.positivity_floor, aa.wave_speed_cache);
-                              });
+  return build_block_for_make(
+      std::move(tr), model, a, [](auto m, const std::vector<int>& impl, const BlockBuildArgs& aa) {
+        return make_block(m, aa.limiter, aa.riemann, aa.ctx, aa.imex, aa.recon_prim, aa.method,
+                          impl, aa.nopts, aa.nreport, aa.positivity_floor, aa.wave_speed_cache);
+      });
 }
 
 // Per-transport seam functions (defined in python/system_<transport>.cpp). The TR construction matches
@@ -131,7 +132,8 @@ BuiltBlock build_block_compressible_roe(const ModelSpec& model, const BlockBuild
 // Polar (ring) seam: VERBATIM polar visitor body (make_block_polar + polar makers). IMEX is rejected on
 // the ring by add_block before this is called. @p aux is &System::Impl::aux (the polar makers read it).
 BuiltBlock build_block_polar(const ModelSpec& model, const std::string& limiter,
-                             const std::string& riemann, const PolarGridContext& pctx, bool recon_prim,
-                             const std::string& method, Real positivity_floor, const MultiFab* aux);
+                             const std::string& riemann, const PolarGridContext& pctx,
+                             bool recon_prim, const std::string& method, Real positivity_floor,
+                             const MultiFab* aux);
 
 }  // namespace adc::detail

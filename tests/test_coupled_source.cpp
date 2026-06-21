@@ -67,7 +67,10 @@ static_assert(CoupledSourceFor<NoCoupledSource, CoupledSystem<BlockA, BlockB>>);
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -85,7 +88,8 @@ int main() {
   BlockA a{"a", Inert{}, U0, bc};
   BlockB b{"b", Inert{}, U1, bc};
   CoupledSystem system{a, b};
-  auto sim = make_system_coupler(system, geom, ba, bc, ChargeDensityRhs{{{Real(1), 0}, {Real(-1), 0}}});
+  auto sim =
+      make_system_coupler(system, geom, ba, bc, ChargeDensityRhs{{{Real(1), 0}, {Real(-1), 0}}});
 
   const Real dt = Real(0.1);
   sim.coupled_source_step(LinearExchange{Real(0.5)}, dt);
@@ -102,6 +106,7 @@ int main() {
   chk(std::fabs(sum(U0) - s0) < Real(1e-14) && std::fabs(sum(U1) - s1) < Real(1e-14),
       "no_coupled_source_noop");
 
-  if (fails == 0) std::printf("OK test_coupled_source\n");
+  if (fails == 0)
+    std::printf("OK test_coupled_source\n");
   return fails == 0 ? 0 : 1;
 }

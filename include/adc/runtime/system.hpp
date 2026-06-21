@@ -45,11 +45,12 @@ struct SystemConfig {
   double L = 1.0;        ///< size of the square domain [0,L]^2 (cartesian)
   bool periodic = true;  ///< periodic domain, otherwise free outflow in transport (cartesian)
   // --- opt-in geometry (Phase 1): "cartesian" (default, bit-identical) | "polar" (global ring) ---
-  std::string geometry = "cartesian";  ///< geometry choice (carried by adc.CartesianMesh / adc.PolarMesh)
-  int nr = 0;            ///< radial cells (polar; 0 => takes n)
-  int ntheta = 0;        ///< azimuthal cells (polar; 0 => takes n)
-  double r_min = 0.0;    ///< inner radius of the ring (polar)
-  double r_max = 1.0;    ///< outer radius of the ring (polar)
+  std::string geometry =
+      "cartesian";     ///< geometry choice (carried by adc.CartesianMesh / adc.PolarMesh)
+  int nr = 0;          ///< radial cells (polar; 0 => takes n)
+  int ntheta = 0;      ///< azimuthal cells (polar; 0 => takes n)
+  double r_min = 0.0;  ///< inner radius of the ring (polar)
+  double r_max = 1.0;  ///< outer radius of the ring (polar)
   // --- multi-box split of the polar TRANSPORT (split into theta BANDS, ADC-67) -----------------
   // Number of boxes of the ring, split in theta (each box covers the whole radius [0, nr-1] and one
   // azimuthal band). 1 (default) = mono-box STRICTLY bit-identical to history. theta_boxes > 1:
@@ -58,7 +59,7 @@ struct SystemConfig {
   // cartesian (the cartesian split goes through AmrSystem / the historical mono-box MPI multi-box).
   // SCOPE: multi-box transport OK; DIRECT polar Poisson mono-box only (clear UPSTREAM rejection if
   // theta_boxes > 1, cf. ensure_elliptic_polar); polar tensor Schur stage multi-box.
-  int theta_boxes = 1;   ///< boxes of the theta split of polar transport (1 = mono-box)
+  int theta_boxes = 1;  ///< boxes of the theta split of polar transport (1 = mono-box)
 };
 
 /// Coupled multi-species system, composed at runtime from generic bricks.
@@ -143,11 +144,9 @@ class System {
   ///                 geometry, or a staircase/cutcell disc transport mode is active (explicit error,
   ///                 never a silent ignore).
   void add_block(const std::string& name, const ModelSpec& model,
-                 const std::string& limiter = "minmod",
-                 const std::string& riemann = "rusanov",
-                 const std::string& recon = "conservative",
-                 const std::string& time = "explicit", int substeps = 1,
-                 bool evolve = true, int stride = 1,
+                 const std::string& limiter = "minmod", const std::string& riemann = "rusanov",
+                 const std::string& recon = "conservative", const std::string& time = "explicit",
+                 int substeps = 1, bool evolve = true, int stride = 1,
                  const std::vector<std::string>& implicit_vars = {},
                  const std::vector<std::string>& implicit_roles = {},
                  const NewtonOptions& newton = {}, bool newton_diagnostics = false,
@@ -157,14 +156,15 @@ class System {
   /// LAST advance of the block. Only exists if the block was added with newton_diagnostics=true
   /// (explicit error otherwise). Flat copy (no dependency on the numerics header).
   struct SourceNewtonReport {
-    bool enabled;          ///< a report was computed (at least one IMEX advance played)
-    bool converged;        ///< no failed cell on the last advance
-    double max_residual;   ///< max over cells/substeps of ||F||_inf at the Newton exit
-    double max_iters_used; ///< max over cells/substeps of the iterations consumed
-    double n_failed;       ///< number of (cells x substeps) failed (non-finite / pivot / non-convergence)
-    double failed_i;       ///< i of ONE faulty cell (-1 if none; max index encoded)
-    double failed_j;       ///< j of the same cell (-1 if none)
-    double failed_comp;    ///< conservative component of the worst residual of that cell (-1 unknown)
+    bool enabled;           ///< a report was computed (at least one IMEX advance played)
+    bool converged;         ///< no failed cell on the last advance
+    double max_residual;    ///< max over cells/substeps of ||F||_inf at the Newton exit
+    double max_iters_used;  ///< max over cells/substeps of the iterations consumed
+    double
+        n_failed;  ///< number of (cells x substeps) failed (non-finite / pivot / non-convergence)
+    double failed_i;     ///< i of ONE faulty cell (-1 if none; max index encoded)
+    double failed_j;     ///< j of the same cell (-1 if none)
+    double failed_comp;  ///< conservative component of the worst residual of that cell (-1 unknown)
   };
   SourceNewtonReport newton_report(const std::string& name) const;
 
@@ -231,9 +231,8 @@ class System {
                         const std::string& limiter = "minmod",
                         const std::string& riemann = "rusanov",
                         const std::string& recon = "conservative",
-                        const std::string& time = "explicit", double gamma = 1.4,
-                        int substeps = 1, bool evolve = true, int stride = 1,
-                        double positivity_floor = 0.0);
+                        const std::string& time = "explicit", double gamma = 1.4, int substeps = 1,
+                        bool evolve = true, int stride = 1, double positivity_floor = 0.0);
 
   /// ABI key of the module (compiler + C++ standard + signature of the adc headers, frozen at
   /// compilation). Compared to the key baked into a native loader .so by add_native_block; also exposed
@@ -258,10 +257,10 @@ class System {
   /// cons/prim descriptors carry the names AND the roles (M::conservative_vars()), used
   /// by inter-species couplings.
   ADC_EXPORT void install_block(const std::string& name, int ncomp, const VariableSet& cons_vars,
-                     const VariableSet& prim_vars, double gamma, BlockClosures closures,
-                     std::function<Real(const MultiFab&)> max_speed,
-                     std::function<void(const MultiFab&, MultiFab&)> poisson_rhs, int substeps,
-                     bool evolve, int stride = 1);
+                                const VariableSet& prim_vars, double gamma, BlockClosures closures,
+                                std::function<Real(const MultiFab&)> max_speed,
+                                std::function<void(const MultiFab&, MultiFab&)> poisson_rhs,
+                                int substeps, bool evolve, int stride = 1);
   /// Guarantees that the state U of block @p name carries at least @p n_ghost ghosts (width of the
   /// spatial stencil). WENO5 reads 3 ghosts, > the 2 allocated by install_block; called by add_compiled_model
   /// (header) with block_n_ghost(limiter) AFTER install_block, so the native compiled path
@@ -284,9 +283,9 @@ class System {
   ///                Set > 0 (problem scale), it makes solve_fields exit without cycling OUT OF
   ///                STEP on an already-converged state. No effect on the FFT solver (direct).
   void set_poisson(const std::string& rhs = "charge_density",
-                   const std::string& solver = "geometric_mg",
-                   const std::string& bc = "auto", const std::string& wall = "none",
-                   double wall_radius = 0.0, double epsilon = 1.0, double abs_tol = 0.0);
+                   const std::string& solver = "geometric_mg", const std::string& bc = "auto",
+                   const std::string& wall = "none", double wall_radius = 0.0, double epsilon = 1.0,
+                   double abs_tol = 0.0);
 
   /// Sets the TRANSPORT DOMAIN as a DISC centered at (@p cx, @p cy) with radius @p R
   /// (T2 work, CONTRACT inert by default). Materializes a 0/1 cell-centered mask (cell
@@ -594,7 +593,7 @@ class System {
   std::vector<std::string> block_names() const;
   double mass(const std::string& name) const;
   std::vector<double> density(const std::string& name) const;  ///< ny*nx row-major (j slow, i fast)
-  std::vector<double> potential();                             ///< phi, ny*nx row-major (j slow, i fast)
+  std::vector<double> potential();  ///< phi, ny*nx row-major (j slow, i fast)
   /// RESTORES the potential phi (IO v1, reserved for restart): without it the multigrid would restart
   /// from a blank phi and the resume would not be bit-identical (warm start lost); in
   /// gauss_policy="evolve", phi IS the physical state and its restoration is indispensable. Field
@@ -629,10 +628,12 @@ class System {
   /// GLOBAL indices in the box). Layout of local_state IDENTICAL to state_global but
   /// relative to the local box: (c*bny + (j - jlo))*bnx + (i - ilo), component-major.
   /// @{
-  std::vector<std::array<int, 4>> local_boxes(const std::string& name) const;  ///< (ilo,jlo,ihi,jhi) per local fab
-  std::vector<double> local_state(const std::string& name, int li) const;      ///< U of fab li, flat (ncomp*bny*bnx)
-  /// @}
-  /// @}
+  std::vector<std::array<int, 4>> local_boxes(
+      const std::string& name) const;  ///< (ilo,jlo,ihi,jhi) per local fab
+  std::vector<double> local_state(const std::string& name,
+                                  int li) const;  ///< U of fab li, flat (ncomp*bny*bnx)
+                                                  /// @}
+                                                  /// @}
 
  private:
   struct Impl;

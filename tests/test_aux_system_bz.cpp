@@ -56,7 +56,10 @@ using BlkB = EquationBlock<Scalar, FirstOrder, ExplicitTime<SSPRK2, 1>>;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -76,8 +79,7 @@ int main() {
   // charges nulles -> f = 0 -> phi = 0 (B_z est independant de l'elliptique).
   ChargeDensityRhs charge{{{Real(0), 0}, {Real(0), 0}}};
 
-  SystemAssembler assembler(system, geom, ba, bc, charge,
-                            std::function<bool(Real, Real)>{},
+  SystemAssembler assembler(system, geom, ba, bc, charge, std::function<bool(Real, Real)>{},
                             [c](Real, Real) { return c; });
 
   // --- (A) canal partage : largeur = max(4, 3) = 4 ; B_z peuple a c ---
@@ -129,6 +131,7 @@ int main() {
     std::printf("  (C) bloc B : ||R||_inf = %.2e\n", norm_inf(R));
   }
 
-  if (fails == 0) std::printf("OK test_aux_system_bz\n");
+  if (fails == 0)
+    std::printf("OK test_aux_system_bz\n");
   return fails == 0 ? 0 : 1;
 }

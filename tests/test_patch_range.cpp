@@ -15,7 +15,10 @@ using namespace adc;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // patch fin aligne grossier : cellules grossieres [2..5]^2 raffinees -> [4..11]^2.
@@ -32,6 +35,7 @@ int main() {
   PatchRange pr3(Box2D{{0, 0}, {3, 3}});  // fin 4x4 -> grossier [0..1]^2
   chk(pr3.I1 == 1 && pr3.J1 == 1, "borne_haute_hi_moins_1_sur_2");
 
-  if (fails == 0) std::printf("OK test_patch_range\n");
+  if (fails == 0)
+    std::printf("OK test_patch_range\n");
   return fails == 0 ? 0 : 1;
 }

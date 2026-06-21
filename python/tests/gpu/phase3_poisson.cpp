@@ -64,8 +64,8 @@ int main(int argc, char** argv) {
 #else
   const char* space = "Serial(host)";
 #endif
-  std::printf("exec=%s n=128 cycles=%d  sum(phi)=%.12f  max|phi|=%.12f\n",
-              space, cycles, sum_phi, max_phi);
+  std::printf("exec=%s n=128 cycles=%d  sum(phi)=%.12f  max|phi|=%.12f\n", space, cycles, sum_phi,
+              max_phi);
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif

@@ -6,8 +6,8 @@
 #include <adc/mesh/fill_boundary.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>  // coarsen_index
-#include <adc/numerics/spatial_operator.hpp>  // compute_face_fluxes, xface_box, yface_box
+#include <adc/mesh/refinement.hpp>                 // coarsen_index
+#include <adc/numerics/spatial_operator.hpp>       // compute_face_fluxes, xface_box, yface_box
 #include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source (IMEX implicit step)
 
 #include <vector>
@@ -61,8 +61,8 @@ struct AmrSspRhsKernel {
   ADC_HD void operator()(int i, int j) const {
     const auto S = m.source(load_state<Model>(u, i, j), load_aux<aux_comps<Model>()>(ax, i, j));
     for (int c = 0; c < Model::n_vars; ++c)
-      R(i, j, c) = -((fx(i + 1, j, c) - fx(i, j, c)) / dx + (fy(i, j + 1, c) - fy(i, j, c)) / dy) +
-                   S[c];
+      R(i, j, c) =
+          -((fx(i + 1, j, c) - fx(i, j, c)) / dx + (fy(i, j + 1, c) - fy(i, j, c)) / dy) + S[c];
   }
 };
 
@@ -87,14 +87,14 @@ struct AmrAdvanceFacesKernel {
   int nc;
   ADC_HD void operator()(int i, int j) const {
     for (int c = 0; c < nc; ++c)
-      u(i, j, c) -= dt * ((fx(i + 1, j, c) - fx(i, j, c)) / dx +
-                          (fy(i, j + 1, c) - fy(i, j, c)) / dy);
+      u(i, j, c) -=
+          dt * ((fx(i + 1, j, c) - fx(i, j, c)) / dx + (fy(i, j + 1, c) - fy(i, j, c)) / dy);
   }
 };
 
 // U <- U - dt div(Fx,Fy) on the valid cells (GPU via for_each_cell).
-inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy,
-                             Real dx, Real dy, Real dt) {
+inline void mf_advance_faces(MultiFab& U, const MultiFab& Fx, const MultiFab& Fy, Real dx, Real dy,
+                             Real dt) {
   const int nc = U.ncomp();
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
@@ -118,9 +118,9 @@ struct AmrApplySourceKernel {
   ConstArray4 uc, ax;
   Real dt;
   ADC_HD void operator()(int i, int j) const {
-    const auto S = m.source(load_state<Model>(uc, i, j),
-                            load_aux<aux_comps<Model>()>(ax, i, j));
-    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) += dt * S[c];
+    const auto S = m.source(load_state<Model>(uc, i, j), load_aux<aux_comps<Model>()>(ax, i, j));
+    for (int c = 0; c < Model::n_vars; ++c)
+      u(i, j, c) += dt * S[c];
   }
 };
 
@@ -162,7 +162,7 @@ inline void mf_apply_source_treatment(const Model& m, MultiFab& U, const MultiFa
     // identical to the legacy form with fixed iters (2), thus bit-identical as long as nopts is default.
     backward_euler_source(m, aux, U, dt, nopts, ImplicitMask<Model::n_vars>{});
   else
-    mf_apply_source(m, U, aux, dt);        // legacy forward Euler (bit-identical)
+    mf_apply_source(m, U, aux, dt);  // legacy forward Euler (bit-identical)
 }
 
 /// Device-clean NAMED functor: 2x2 average fine -> coarse on a coarse cell.
@@ -178,8 +178,7 @@ struct AmrAverageDownKernel {
 };
 
 // average fine -> coarse (ratio 2) on the covered region (coarse coords).
-inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
-                            int CJ0, int CJ1) {
+inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1, int CJ0, int CJ1) {
   const int nc = Uc.ncomp();
   const ConstArray4 f = Uf.fab(0).const_array();
   Array4 c = Uc.fab(0).array();
@@ -192,9 +191,8 @@ inline void mf_average_down(const MultiFab& Uf, MultiFab& Uc, int CI0, int CI1,
 // substep within the parent step. Centralizes the arithmetic shared by mf_fill_fine_ghosts_t
 // (mono-box), mf_fill_fine_ghosts_multi (multi-box) and mf_fill_fine_ghosts_mb (multi-level):
 // a single formula (1-frac)*co + frac*cn, bit-identical to the three previous bodies.
-inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray4& cn,
-                               int i, int j, int nc, Real frac,
-                               Real pos_floor = Real(0), int pos_comp = 0) {
+inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray4& cn, int i, int j,
+                               int nc, Real frac, Real pos_floor = Real(0), int pos_comp = 0) {
   const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
   for (int k = 0; k < nc; ++k)
     f(i, j, k) = (1 - frac) * co(ci, cj, k) + frac * cn(ci, cj, k);
@@ -208,14 +206,14 @@ inline void fill_cf_ghost_cell(Array4 f, const ConstArray4& co, const ConstArray
   // pos_floor <= 0 short-circuits (bit-identical). Ghost cells are never averaged-down nor summed in
   // mass, so the clamp is conservation-safe (cf. ADC-259 design: average-down immunity + the reflux
   // coarse-side register reads a separate fab, so the two-sided telescoping is preserved exactly).
-  if (pos_floor > Real(0) && f(i, j, pos_comp) < pos_floor) f(i, j, pos_comp) = pos_floor;
+  if (pos_floor > Real(0) && f(i, j, pos_comp) < pos_floor)
+    f(i, j, pos_comp) = pos_floor;
 }
 
 // fine ghosts = spatial interp (piecewise constant) + time (linear) from the
 // old/new coarse. frac = temporal position of the substep within the coarse step.
-inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
-                                   const MultiFab& Uc_new, Real frac,
-                                   Real pos_floor = Real(0), int pos_comp = 0) {
+inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old, const MultiFab& Uc_new,
+                                  Real frac, Real pos_floor = Real(0), int pos_comp = 0) {
   device_fence();  // host read/write on unified memory
   const int nc = Uf.ncomp();
   Array4 f = Uf.fab(0).array();
@@ -224,7 +222,8 @@ inline void mf_fill_fine_ghosts_t(MultiFab& Uf, const MultiFab& Uc_old,
   const Box2D v = Uf.box(0), g = Uf.fab(0).grown_box();
   for (int j = g.lo[1]; j <= g.hi[1]; ++j)
     for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-      if (!v.contains(i, j)) fill_cf_ghost_cell(f, co, cn, i, j, nc, frac, pos_floor, pos_comp);
+      if (!v.contains(i, j))
+        fill_cf_ghost_cell(f, co, cn, i, j, nc, frac, pos_floor, pos_comp);
 }
 
 }  // namespace adc

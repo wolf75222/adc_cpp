@@ -97,10 +97,13 @@ template <class TagT, std::size_t N>
 std::string join_tag_names(const TagT (&tbl)[N], const char* sep, bool quote) {
   std::string out;
   for (std::size_t i = 0; i < N; ++i) {
-    if (i) out += sep;
-    if (quote) out += '\'';
+    if (i)
+      out += sep;
+    if (quote)
+      out += '\'';
     out += tbl[i].name;
-    if (quote) out += '\'';
+    if (quote)
+      out += '\'';
   }
   return out;
 }
@@ -111,37 +114,52 @@ std::string join_tag_names(const TagT (&tbl)[N], const char* sep, bool quote) {
 inline std::string transport_tags_csv(bool polar = false) {
   std::string out;
   for (const TransportTag& t : kTransports) {
-    if (polar && !t.polar_ok) continue;
-    if (!out.empty()) out += '|';
+    if (polar && !t.polar_ok)
+      continue;
+    if (!out.empty())
+      out += '|';
     out += t.name;
   }
   return out;
 }
 
 /// Pipe list of source / elliptic tags (e.g. "charge|background|gravity").
-inline std::string source_tags_csv() { return detail::join_tag_names(kSources, "|", false); }
-inline std::string elliptic_tags_csv() { return detail::join_tag_names(kElliptics, "|", false); }
+inline std::string source_tags_csv() {
+  return detail::join_tag_names(kSources, "|", false);
+}
+inline std::string elliptic_tags_csv() {
+  return detail::join_tag_names(kElliptics, "|", false);
+}
 
 /// Quoted " | "-separated choices (e.g. "'exb' | 'compressible' | 'isothermal'"), as used in the
 /// completeness messages of validate_model_spec.
-inline std::string transport_choices() { return detail::join_tag_names(kTransports, " | ", true); }
-inline std::string source_choices() { return detail::join_tag_names(kSources, " | ", true); }
-inline std::string elliptic_choices() { return detail::join_tag_names(kElliptics, " | ", true); }
+inline std::string transport_choices() {
+  return detail::join_tag_names(kTransports, " | ", true);
+}
+inline std::string source_choices() {
+  return detail::join_tag_names(kSources, " | ", true);
+}
+inline std::string elliptic_choices() {
+  return detail::join_tag_names(kElliptics, " | ", true);
+}
 
 /// Membership against the builtin tables.
 inline bool is_transport(const std::string& tag) {
   for (const TransportTag& t : kTransports)
-    if (tag == t.name) return true;
+    if (tag == t.name)
+      return true;
   return false;
 }
 inline bool is_source(const std::string& tag) {
   for (const SourceTag& t : kSources)
-    if (tag == t.name) return true;
+    if (tag == t.name)
+      return true;
   return false;
 }
 inline bool is_elliptic(const std::string& tag) {
   for (const EllipticTag& t : kElliptics)
-    if (tag == t.name) return true;
+    if (tag == t.name)
+      return true;
   return false;
 }
 
@@ -151,7 +169,8 @@ inline bool is_elliptic(const std::string& tag) {
 /// to keep this header self-contained (no shared ct_str_eq -> no ODR coupling with dispatch_tags.hpp).
 inline int transport_n_vars(const std::string& tag) {
   for (const TransportTag& t : kTransports)
-    if (tag == t.name) return t.n_vars;
+    if (tag == t.name)
+      return t.n_vars;
   return -1;
 }
 constexpr int transport_n_vars_ct(const char* name) {
@@ -162,7 +181,8 @@ constexpr int transport_n_vars_ct(const char* name) {
       ++a;
       ++b;
     }
-    if (*a == '\0' && *b == '\0') return t.n_vars;
+    if (*a == '\0' && *b == '\0')
+      return t.n_vars;
   }
   return -1;
 }
@@ -186,10 +206,12 @@ inline std::string unknown_elliptic_msg(const std::string& tag) {
 /// (python/system.cpp, python/amr_system.cpp) instead reuse unknown_transport_msg as their if/else tail
 /// rejection (same message, single-sourced), since they route to per-TU builds rather than to types.
 inline void validate_transport(const std::string& tag) {
-  if (!is_transport(tag)) throw std::runtime_error(unknown_transport_msg(tag));
+  if (!is_transport(tag))
+    throw std::runtime_error(unknown_transport_msg(tag));
 }
 inline void validate_elliptic(const std::string& tag) {
-  if (!is_elliptic(tag)) throw std::runtime_error(unknown_elliptic_msg(tag));
+  if (!is_elliptic(tag))
+    throw std::runtime_error(unknown_elliptic_msg(tag));
 }
 
 }  // namespace adc

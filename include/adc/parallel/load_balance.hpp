@@ -51,24 +51,24 @@ inline std::vector<int> morton_order(const BoxArray& ba) {
   const int n = ba.size();
   std::vector<int> order(n);
   std::iota(order.begin(), order.end(), 0);
-  if (n == 0) return order;
+  if (n == 0)
+    return order;
   const Box2D bb = ba.bounding_box();
   std::vector<std::uint64_t> key(n);
   for (int i = 0; i < n; ++i)
     key[i] = morton_key(static_cast<std::uint32_t>(ba[i].lo[0] - bb.lo[0]),
                         static_cast<std::uint32_t>(ba[i].lo[1] - bb.lo[1]));
-  std::sort(order.begin(), order.end(),
-            [&](int a, int b) { return key[a] < key[b]; });
+  std::sort(order.begin(), order.end(), [&](int a, int b) { return key[a] < key[b]; });
   return order;
 }
 
 // Z-order distribution: contiguous segments of ~equal load along the SFC.
 // Guarantees that with nboxes >= nranks each rank receives at least one box.
-inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
-                                                 int nranks) {
+inline DistributionMapping make_sfc_distribution(const BoxArray& ba, int nranks) {
   const int n = ba.size();
   std::vector<int> rank(n, 0);
-  if (n == 0 || nranks <= 1) return DistributionMapping(std::move(rank));
+  if (n == 0 || nranks <= 1)
+    return DistributionMapping(std::move(rank));
 
   const std::vector<int> order = morton_order(ba);
   std::int64_t total = ba.num_cells();
@@ -91,11 +91,11 @@ inline DistributionMapping make_sfc_distribution(const BoxArray& ba,
 }
 
 // Knapsack distribution (LPT): heaviest box -> least loaded rank.
-inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
-                                                      int nranks) {
+inline DistributionMapping make_knapsack_distribution(const BoxArray& ba, int nranks) {
   const int n = ba.size();
   std::vector<int> rank(n, 0);
-  if (n == 0 || nranks <= 1) return DistributionMapping(std::move(rank));
+  if (n == 0 || nranks <= 1)
+    return DistributionMapping(std::move(rank));
 
   std::vector<int> order(n);
   std::iota(order.begin(), order.end(), 0);
@@ -106,7 +106,8 @@ inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
   for (int b : order) {
     int r = 0;
     for (int q = 1; q < nranks; ++q)
-      if (load[q] < load[r]) r = q;
+      if (load[q] < load[r])
+        r = q;
     rank[b] = r;
     load[r] += ba[b].num_cells();
   }
@@ -114,11 +115,12 @@ inline DistributionMapping make_knapsack_distribution(const BoxArray& ba,
 }
 
 // Imbalance = max load / average load (1.0 = perfect).
-inline double load_imbalance(const BoxArray& ba, const DistributionMapping& dm,
-                             int nranks) {
-  if (nranks <= 0 || ba.size() == 0) return 1.0;
+inline double load_imbalance(const BoxArray& ba, const DistributionMapping& dm, int nranks) {
+  if (nranks <= 0 || ba.size() == 0)
+    return 1.0;
   std::vector<std::int64_t> load(nranks, 0);
-  for (int i = 0; i < ba.size(); ++i) load[dm[i]] += ba[i].num_cells();
+  for (int i = 0; i < ba.size(); ++i)
+    load[dm[i]] += ba[i].num_cells();
   std::int64_t mx = 0, sum = 0;
   for (std::int64_t l : load) {
     mx = std::max(mx, l);

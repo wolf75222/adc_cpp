@@ -30,13 +30,13 @@
 // (CPU + Kokkos Serial/OpenMP/Cuda), comme test_amr_coupled_source_role_strict et add_compiled_model #16/#18.
 
 #include <adc/coupling/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/physics/bricks.hpp>                    // CompositeModel
-#include <adc/physics/elliptic.hpp>                  // ChargeDensity
-#include <adc/physics/hyperbolic.hpp>                // ExBVelocity
-#include <adc/physics/source.hpp>                    // NoSource
-#include <adc/runtime/amr_dsl_block.hpp>             // add_compiled_model(AmrSystem&, ...)
-#include <adc/runtime/amr_system.hpp>                // facade AmrSystem
-#include <adc/runtime/model_spec.hpp>                // ModelSpec (bloc natif, melange compile + natif)
+#include <adc/physics/bricks.hpp>                   // CompositeModel
+#include <adc/physics/elliptic.hpp>                 // ChargeDensity
+#include <adc/physics/hyperbolic.hpp>               // ExBVelocity
+#include <adc/physics/source.hpp>                   // NoSource
+#include <adc/runtime/amr_dsl_block.hpp>            // add_compiled_model(AmrSystem&, ...)
+#include <adc/runtime/amr_system.hpp>               // facade AmrSystem
+#include <adc/runtime/model_spec.hpp>  // ModelSpec (bloc natif, melange compile + natif)
 
 #include <cmath>
 #include <cstdio>
@@ -80,8 +80,10 @@ struct StiffMomentumRelax {
   template <class State>
   ADC_HD State apply(const State& u, const Aux&) const {
     State s{};
-    if (State::size() > 1) s[1] = -inv_eps * u[1];  // -mx / eps
-    if (State::size() > 2) s[2] = -inv_eps * u[2];  // -my / eps
+    if (State::size() > 1)
+      s[1] = -inv_eps * u[1];  // -mx / eps
+    if (State::size() > 2)
+      s[2] = -inv_eps * u[2];  // -my / eps
     return s;
   }
 };
@@ -142,19 +144,22 @@ static bool raises(F&& f) {
 static double dmax_field(const std::vector<double>& a, const std::vector<double>& b) {
   double d = 0;
   const std::size_t nn = a.size() < b.size() ? a.size() : b.size();
-  for (std::size_t i = 0; i < nn; ++i) d = std::max(d, std::fabs(a[i] - b[i]));
+  for (std::size_t i = 0; i < nn; ++i)
+    d = std::max(d, std::fabs(a[i] - b[i]));
   return d;
 }
 
 static bool all_finite(const std::vector<double>& v) {
   for (double x : v)
-    if (!std::isfinite(x)) return false;
+    if (!std::isfinite(x))
+      return false;
   return true;
 }
 
 static double maxabs(const std::vector<double>& v) {
   double m = 0;
-  for (double x : v) m = std::max(m, std::fabs(x));
+  for (double x : v)
+    m = std::max(m, std::fabs(x));
   return m;
 }
 
@@ -162,9 +167,9 @@ static double maxabs(const std::vector<double>& v) {
 // S = k * n_a * n_b ; gain +S sur @p block_gain, perte -S (gain + Neg) sur @p block_loss, MEME cellule.
 // Bytecode postfixe construit a la main, EXACTEMENT comme adc.dsl.CoupledSource.add_pair (cf.
 // test_amr_multiblock_coupled_source). Conserve n_a + n_b par cellule a ~machine.
-static void register_ionization(AmrSystem& sim, const std::string& block_a, const std::string& block_b,
-                                const std::string& block_gain, const std::string& block_loss,
-                                double k) {
+static void register_ionization(AmrSystem& sim, const std::string& block_a,
+                                const std::string& block_b, const std::string& block_gain,
+                                const std::string& block_loss, double k) {
   const std::vector<std::string> in_blocks = {block_a, block_b};
   const std::vector<std::string> in_roles = {"density", "density"};
   const std::vector<double> consts = {k};
@@ -175,10 +180,9 @@ static void register_ionization(AmrSystem& sim, const std::string& block_a, cons
   // registres : r0 = n_a (entree), r1 = n_b (entree), r2 = k (constante)
   // gain  : PushReg 0, PushReg 1, Mul, PushReg 2, Mul        -> k * n_a * n_b
   // perte : <gain> puis Neg                                  -> -(k * n_a * n_b)
-  std::vector<int> prog_ops = {P, P, MUL, P, MUL,           // gain
-                               P, P, MUL, P, MUL, NEG};      // perte
-  std::vector<int> prog_args = {0, 1, 0, 2, 0,
-                                0, 1, 0, 2, 0, 0};
+  std::vector<int> prog_ops = {P, P, MUL, P, MUL,        // gain
+                               P, P, MUL, P, MUL, NEG};  // perte
+  std::vector<int> prog_args = {0, 1, 0, 2, 0, 0, 1, 0, 2, 0, 0};
   std::vector<int> prog_lens = {5, 6};
   // ADC-214 : description bytecode regroupee dans le POD CoupledSourceProgram (appel auto-documente).
   adc::CoupledSourceProgram prog;
@@ -203,7 +207,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int N = 32;
@@ -225,7 +230,8 @@ int main(int argc, char** argv) {
 
     AmrSystem sim(cfg);
     // bloc 0 : ions q=+1, schema none/rusanov.
-    add_compiled_model(sim, "ions", exb_model(q0, B0), "none", "rusanov", "conservative", "explicit",
+    add_compiled_model(sim, "ions", exb_model(q0, B0), "none", "rusanov", "conservative",
+                       "explicit",
                        /*gamma=*/1.4);
     // bloc 1 : electrons q=-1, schema minmod/rusanov (DIFFERENT du bloc 0). NE LEVE PLUS.
     add_compiled_model(sim, "electrons", exb_model(q1, B0), "minmod", "rusanov", "conservative",
@@ -254,7 +260,8 @@ int main(int argc, char** argv) {
 
     const std::vector<double> phi = sim.potential();
     double pmax = 0;
-    for (double v : phi) pmax = std::max(pmax, std::fabs(v));
+    for (double v : phi)
+      pmax = std::max(pmax, std::fabs(v));
     chk(pmax > 1e-8, "A_system_potential_nonzero");
     chk(sim.n_patches() >= 1, "A_shared_hierarchy_has_fine_patch");
   }
@@ -306,7 +313,7 @@ int main(int argc, char** argv) {
 
     AmrSystem sim(cfg);
     add_compiled_model(sim, "ions", exb_model(q0, B0), "minmod", "rusanov", "conservative",
-                       "explicit", /*gamma=*/1.4);                                  // bloc COMPILE
+                       "explicit", /*gamma=*/1.4);                                   // bloc COMPILE
     sim.add_block("electrons", exb_spec(q1, B0), "none", "rusanov", "conservative",  // bloc NATIF
                   "explicit", 1);
     sim.set_poisson("charge_density", "geometric_mg", "periodic");
@@ -335,7 +342,8 @@ int main(int argc, char** argv) {
       cfg.periodic = true;
       cfg.regrid_every = 0;
       AmrSystem sim(cfg);
-      add_compiled_model(sim, "ne", exb_model(q0, B0), "none", "rusanov", "conservative", "explicit",
+      add_compiled_model(sim, "ne", exb_model(q0, B0), "none", "rusanov", "conservative",
+                         "explicit",
                          /*gamma=*/1.4);
       sim.set_poisson("charge_density", "geometric_mg", "periodic");
       sim.set_density("ne", rho0);
@@ -391,7 +399,8 @@ int main(int argc, char** argv) {
     // Construit un AmrSystem a DEUX blocs COMPILES : un bloc raide (traitement/stride/masque variables)
     // + un bloc neutre explicite. Renvoie la densite du bloc raide apres KF macro-pas (peut lever au
     // build paresseux si le masque demande en explicite, capte par l'appelant).
-    auto run_stiff_compiled = [&](bool imex, int stride, const std::vector<std::string>& impl_roles) {
+    auto run_stiff_compiled = [&](bool imex, int stride,
+                                  const std::vector<std::string>& impl_roles) {
       AmrSystemConfig cfg;
       cfg.n = Nf;
       cfg.L = L;
@@ -407,7 +416,8 @@ int main(int argc, char** argv) {
       sim.set_density("stiff", rhoF);
       sim.set_density("neutral", rhoF);
       const double m0 = sim.mass("stiff");
-      for (int s = 0; s < KF; ++s) sim.advance(dtF, 1);
+      for (int s = 0; s < KF; ++s)
+        sim.advance(dtF, 1);
       const std::vector<double> d = sim.density("stiff");
       return std::make_pair(d, std::fabs(sim.mass("stiff") - m0));
     };
@@ -435,7 +445,8 @@ int main(int argc, char** argv) {
     //      concret (4 var) en les indices 1/2, et applique en IMPLICITE a ces SEULES composantes. Comme
     //      la source raide n'attaque QUE mx/my, ce masque (qui couvre exactement les composantes raides)
     //      donne un run FINI/BORNE -> preuve que le masque a ete RESOLU et APPLIQUE.
-    const auto imex_mask = run_stiff_compiled(/*imex=*/true, /*stride=*/1, {"momentum_x", "momentum_y"});
+    const auto imex_mask =
+        run_stiff_compiled(/*imex=*/true, /*stride=*/1, {"momentum_x", "momentum_y"});
     chk(all_finite(imex_mask.first) && maxabs(imex_mask.first) < 1e3,
         "F3_compiled_imex_partial_mask_mxmy_resolved_and_runs");
 
@@ -444,9 +455,11 @@ int main(int argc, char** argv) {
     //          masque etait ignore (tout implicite) le run resterait borne ; l'explosion PROUVE que la
     //          selection par composante est reellement honoree (mirroir de l'esprit disable-and-fail).
     const auto imex_mask_mx = run_stiff_compiled(/*imex=*/true, /*stride=*/1, {"momentum_x"});
-    const bool partial_blew_up = !all_finite(imex_mask_mx.first) || maxabs(imex_mask_mx.first) > 1e3;
+    const bool partial_blew_up =
+        !all_finite(imex_mask_mx.first) || maxabs(imex_mask_mx.first) > 1e3;
     chk(partial_blew_up,
-        "F3_compiled_partial_mask_mx_only_leaves_my_EXPLICIT_and_blows_up (masque honore par composante)");
+        "F3_compiled_partial_mask_mx_only_leaves_my_EXPLICIT_and_blows_up (masque honore par "
+        "composante)");
 
     // (F3-neg) masque PARTIEL demande en EXPLICITE -> LEVE (pas d'ignore silencieux ; meme garde que
     //          add_block / set_compiled_block, amr_system.cpp / amr_dsl_block.hpp).

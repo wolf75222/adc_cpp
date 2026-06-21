@@ -32,9 +32,7 @@ int main() {
     BoxArray ba = BoxArray::from_domain(dom, n);
     BCRec bc;
     bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
-    auto active = [=](Real x, Real y) {
-      return std::hypot(x - cx, y - cy) < R;
-    };
+    auto active = [=](Real x, Real y) { return std::hypot(x - cx, y - cy) < R; };
     GeometricMG mg(geom, ba, bc, active);
     mg.rhs().set_val(-4.0);
     mg.phi().set_val(0.0);
@@ -67,14 +65,15 @@ int main() {
   double e128 = 0, e256 = 0;
   run(128, c128, e128);
   run(256, c256, e256);
-  std::printf("disc : n=128 cycles=%d err=%.3e | n=256 cycles=%d err=%.3e\n",
-              c128, e128, c256, e256);
+  std::printf("disc : n=128 cycles=%d err=%.3e | n=256 cycles=%d err=%.3e\n", c128, e128, c256,
+              e256);
 
   chk(c128 < 200, "converged_128");
   chk(c256 < 200, "converged_256");
   chk(e256 < 5e-3, "accurate");
   chk(e256 < e128, "converges_with_resolution");
 
-  if (fails == 0) std::printf("OK test_poisson_disc\n");
+  if (fails == 0)
+    std::printf("OK test_poisson_disc\n");
   return fails == 0 ? 0 : 1;
 }

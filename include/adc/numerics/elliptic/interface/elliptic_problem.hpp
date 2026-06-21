@@ -36,9 +36,9 @@ namespace adc {
 
 // (a) Elliptic problem: coefficient, physical BC, nullspace.
 struct EllipticProblem {
-  Real eps = 1;                 // descriptive: current stencil state (eps = 1)
-  BCRec bc{};                   // physical BC already propagated
-  bool nullspace_const = false; // solution defined up to an additive constant
+  Real eps = 1;                  // descriptive: current stencil state (eps = 1)
+  BCRec bc{};                    // physical BC already propagated
+  bool nullspace_const = false;  // solution defined up to an additive constant
 };
 
 // Homogeneous BCRec associated with the problem: delegates to homogeneous(const BCRec&)
@@ -56,8 +56,7 @@ inline BCRec homogeneous_bc(const EllipticProblem& p) {
 // to avoid an include cycle (this header already includes geometric_mg.hpp).
 template <class Solver, class... Args>
 inline Solver make_elliptic_solver(const Geometry& geom, const BoxArray& ba,
-                                   const EllipticProblem& problem,
-                                   Args&&... args) {
+                                   const EllipticProblem& problem, Args&&... args) {
   // Scientific guard: eps is NOT read by the 5-point stencil
   // (apply_laplacian / poisson_residual / gs_color write lap without a factor,
   // so eps = 1). Setting eps != 1 would suggest solving a variable-coefficient
@@ -89,7 +88,8 @@ struct FieldPostprocessKernel {
   int gx;
   Real s, cx, cy;
   ADC_HD void operator()(int i, int j) const {
-    if (store_phi) a(i, j, 0) = p(i, j);
+    if (store_phi)
+      a(i, j, 0) = p(i, j);
     a(i, j, gx) = s * (p(i + 1, j) - p(i - 1, j)) * cx;
     a(i, j, gx + 1) = s * (p(i, j + 1) - p(i, j - 1)) * cy;
   }
@@ -101,10 +101,9 @@ struct FieldPostprocessKernel {
 // multiplicative factor *cx / *cy, with the sign s = +1 (Plus) or -1 (Minus) being the only
 // degree of freedom. cx, cy remain the centered factors already computed by
 // the caller (1/(2 dx), 1/(2 dy)).
-inline void field_postprocess(const MultiFab& phi, MultiFab& out, Real cx,
-                              Real cy, FieldPostProcess spec) {
-  const Real s = (spec.sign == FieldPostProcess::GradSign::Plus) ? Real(1)
-                                                                 : Real(-1);
+inline void field_postprocess(const MultiFab& phi, MultiFab& out, Real cx, Real cy,
+                              FieldPostProcess spec) {
+  const Real s = (spec.sign == FieldPostProcess::GradSign::Plus) ? Real(1) : Real(-1);
   const bool store_phi = spec.store_phi;
   for (int li = 0; li < out.local_size(); ++li) {
     const ConstArray4 p = phi.fab(li).const_array();

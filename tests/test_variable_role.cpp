@@ -37,6 +37,7 @@ int main() {
     std::printf("FAIL : role ExB\n");
     return 1;
   }
-  std::printf("OK test_variable_role : composantes indexees par role (Density/Momentum/Energy/...)\n");
+  std::printf(
+      "OK test_variable_role : composantes indexees par role (Density/Momentum/Energy/...)\n");
   return 0;
 }

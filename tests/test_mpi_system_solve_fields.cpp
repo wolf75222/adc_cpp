@@ -49,11 +49,15 @@ struct TeSource {
 // Bloc de CHARGE : alimente le second membre du Poisson (elliptic_rhs = densite de charge q n).
 struct ChargeEll {
   template <class State>
-  ADC_HD Real rhs(const State& u) const { return u[0]; }  // rho = comp 0
+  ADC_HD Real rhs(const State& u) const {
+    return u[0];
+  }  // rho = comp 0
 };
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const { return Real(0); }
+  ADC_HD Real rhs(const State&) const {
+    return Real(0);
+  }
 };
 
 using ProbeModel = CompositeModel<ExBVelocity, TeSource, ChargeEll>;  // lit T_e + charge le Poisson
@@ -68,7 +72,10 @@ int main(int argc, char** argv) {
 
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("[rank %d/%d] FAIL %s\n", me, np, w); ++fails; }
+    if (!c) {
+      std::printf("[rank %d/%d] FAIL %s\n", me, np, w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -81,10 +88,11 @@ int main(int argc, char** argv) {
   cfg.periodic = true;
 
   System sys(cfg);
-  add_compiled_model(sys, "gas", GasModel{Euler{gamma}, NoSource{}, NoEll{}},
-                     "minmod", "rusanov", "conservative", "explicit", gamma);
+  add_compiled_model(sys, "gas", GasModel{Euler{gamma}, NoSource{}, NoEll{}}, "minmod", "rusanov",
+                     "conservative", "explicit", gamma);
   add_compiled_model(sys, "probe", ProbeModel{}, "minmod", "rusanov", "conservative", "explicit");
-  sys.set_poisson("composite", "geometric_mg");  // f = somme des briques elliptiques (ici la charge)
+  sys.set_poisson("composite",
+                  "geometric_mg");  // f = somme des briques elliptiques (ici la charge)
 
   // La box unique vit sur rang 0 (round-robin de 1 box). set_state / set_density ecrivent la box ;
   // on ne les appelle donc QUE sur le rang proprietaire. set_electron_temperature_from cable un
@@ -102,7 +110,8 @@ int main(int argc, char** argv) {
     // charge a moyenne nulle : +1 sur la moitie gauche, -1 sur la moitie droite (somme = 0).
     std::vector<double> q(nn, 0.0);
     for (int j = 0; j < n; ++j)
-      for (int i = 0; i < n; ++i) q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
+      for (int i = 0; i < n; ++i)
+        q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
     sys.set_density("probe", q);
   }
   sys.set_electron_temperature_from("gas");  // T_e <- p/rho du gaz, recalcule a chaque solve
@@ -121,7 +130,8 @@ int main(int argc, char** argv) {
     double maxabs = 0, sumphi = 0;
     bool finite = true;
     for (double v : phi) {
-      if (!std::isfinite(v)) finite = false;
+      if (!std::isfinite(v))
+        finite = false;
       maxabs = std::fmax(maxabs, std::fabs(v));
       sumphi += v;
     }
@@ -133,7 +143,8 @@ int main(int argc, char** argv) {
     // proprietaire ; la correction T_e exacte est verifiee a part par test_aux_te en serie).
     const std::vector<double> R = sys.eval_rhs("probe");
     bool rfin = !R.empty();
-    for (double r : R) rfin = rfin && std::isfinite(r);
+    for (double r : R)
+      rfin = rfin && std::isfinite(r);
     chk(rfin, "rhs_finite");
 
     std::printf("[rank %d/%d] np=%d  |phi|max=%.3e  sum(phi)=%.3e\n", me, np, np, maxabs, sumphi);

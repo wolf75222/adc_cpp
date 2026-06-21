@@ -63,15 +63,63 @@ struct CsProgram {
     for (int k = 0; k < len; ++k) {
       switch (static_cast<CsOp>(op[k])) {
         case CsOp::PushReg:
-          if (sp < kCsMaxStack) st[sp++] = reg[arg[k]];
+          if (sp < kCsMaxStack)
+            st[sp++] = reg[arg[k]];
           break;
-        case CsOp::Add: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a + b; } break;
-        case CsOp::Sub: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a - b; } break;
-        case CsOp::Mul: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a * b; } break;
-        case CsOp::Div: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = a / b; } break;
-        case CsOp::Neg: { assert(sp >= 1); if (sp < 1) break; Real a = st[--sp]; st[sp++] = -a; } break;
-        case CsOp::Pow: { assert(sp >= 2); if (sp < 2) break; Real b = st[--sp]; Real a = st[--sp]; st[sp++] = std::pow(a, b); } break;
-        case CsOp::Sqrt: { assert(sp >= 1); if (sp < 1) break; Real a = st[--sp]; st[sp++] = std::sqrt(a); } break;
+        case CsOp::Add: {
+          assert(sp >= 2);
+          if (sp < 2)
+            break;
+          Real b = st[--sp];
+          Real a = st[--sp];
+          st[sp++] = a + b;
+        } break;
+        case CsOp::Sub: {
+          assert(sp >= 2);
+          if (sp < 2)
+            break;
+          Real b = st[--sp];
+          Real a = st[--sp];
+          st[sp++] = a - b;
+        } break;
+        case CsOp::Mul: {
+          assert(sp >= 2);
+          if (sp < 2)
+            break;
+          Real b = st[--sp];
+          Real a = st[--sp];
+          st[sp++] = a * b;
+        } break;
+        case CsOp::Div: {
+          assert(sp >= 2);
+          if (sp < 2)
+            break;
+          Real b = st[--sp];
+          Real a = st[--sp];
+          st[sp++] = a / b;
+        } break;
+        case CsOp::Neg: {
+          assert(sp >= 1);
+          if (sp < 1)
+            break;
+          Real a = st[--sp];
+          st[sp++] = -a;
+        } break;
+        case CsOp::Pow: {
+          assert(sp >= 2);
+          if (sp < 2)
+            break;
+          Real b = st[--sp];
+          Real a = st[--sp];
+          st[sp++] = std::pow(a, b);
+        } break;
+        case CsOp::Sqrt: {
+          assert(sp >= 1);
+          if (sp < 1)
+            break;
+          Real a = st[--sp];
+          st[sp++] = std::sqrt(a);
+        } break;
       }
     }
     return sp > 0 ? st[sp - 1] : Real(0);
@@ -83,7 +131,7 @@ struct CsProgram {
 /// registers, evaluates each term and WRITES additively out[t] += dt * S_t (forward-Euler
 /// split). All terms are evaluated on the state AT THE START of the step (frozen reg) before the writes.
 struct CoupledSourceKernel {
-  Array4 in[kCsMaxReg];   // input fields (one per (block, role) read); only the first n_in are valid
+  Array4 in[kCsMaxReg];  // input fields (one per (block, role) read); only the first n_in are valid
   int in_comp[kCsMaxReg];
   int n_in = 0;
 
@@ -99,14 +147,18 @@ struct CoupledSourceKernel {
 
   ADC_HD void operator()(int i, int j) const {
     Real reg[kCsMaxReg];
-    for (int c = 0; c < n_in; ++c) reg[c] = in[c](i, j, in_comp[c]);
-    for (int c = 0; c < n_const; ++c) reg[n_in + c] = consts[c];
+    for (int c = 0; c < n_in; ++c)
+      reg[c] = in[c](i, j, in_comp[c]);
+    for (int c = 0; c < n_const; ++c)
+      reg[n_in + c] = consts[c];
     // We evaluate ALL terms on the state AT THE START of the step (frozen reg), then write: a term writing
     // a target that is also an input does not perturb the evaluation of the other terms (explicit additive
     // splitting consistent, order of the .add irrelevant to the result at 1st order).
     Real sval[kCsMaxTerms];
-    for (int t = 0; t < n_terms; ++t) sval[t] = prog[t].eval(reg);
-    for (int t = 0; t < n_terms; ++t) out[t](i, j, out_comp[t]) += dt * sval[t];
+    for (int t = 0; t < n_terms; ++t)
+      sval[t] = prog[t].eval(reg);
+    for (int t = 0; t < n_terms; ++t)
+      out[t](i, j, out_comp[t]) += dt * sval[t];
   }
 };
 
@@ -121,7 +173,7 @@ struct CoupledSourceKernel {
 // bound that derives from it is dt <= cfl / max(mu) (global max aggregated by step_cfl, all_reduce_max
 // over all ranks).
 struct CoupledFreqKernel {
-  Array4 in[kCsMaxReg];   // input fields (one per (block, role) read); only the first n_in are valid
+  Array4 in[kCsMaxReg];  // input fields (one per (block, role) read); only the first n_in are valid
   int in_comp[kCsMaxReg];
   int n_in = 0;
 
@@ -132,10 +184,13 @@ struct CoupledFreqKernel {
 
   ADC_HD void operator()(int i, int j, Real& acc) const {
     Real reg[kCsMaxReg];
-    for (int c = 0; c < n_in; ++c) reg[c] = in[c](i, j, in_comp[c]);
-    for (int c = 0; c < n_const; ++c) reg[n_in + c] = consts[c];
+    for (int c = 0; c < n_in; ++c)
+      reg[c] = in[c](i, j, in_comp[c]);
+    for (int c = 0; c < n_const; ++c)
+      reg[n_in + c] = consts[c];
     const Real mu = prog.eval(reg);
-    if (mu > acc) acc = mu;
+    if (mu > acc)
+      acc = mu;
   }
 };
 

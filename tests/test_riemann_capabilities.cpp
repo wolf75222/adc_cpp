@@ -83,8 +83,8 @@ struct HookedEuler : adc::Euler {
     d[0] = al1 * a1 + al2 * a2 + al5 * a5;
     d[in] = al1 * a1 * (un - c) + al2 * a2 * un + al5 * a5 * (un + c);
     d[it] = al1 * a1 * ut + al2 * (a2 * ut + a3) + al5 * a5 * ut;
-    d[3] = al1 * a1 * (H - un * c) + al2 * (a2 * Real(0.5) * q2 + a3 * ut) +
-           al5 * a5 * (H + un * c);
+    d[3] =
+        al1 * a1 * (H - un * c) + al2 * (a2 * Real(0.5) * q2 + a3 * ut) + al5 * a5 * (H + un * c);
     return d;
   }
 };
@@ -162,7 +162,8 @@ static State4 cons(double rho, double u, double v, double p, double gamma) {
 template <int N>
 static double maxdiff(const adc::StateVec<N>& a, const adc::StateVec<N>& b) {
   double m = 0;
-  for (int c = 0; c < N; ++c) m = std::fmax(m, std::fabs(a[c] - b[c]));
+  for (int c = 0; c < N; ++c)
+    m = std::fmax(m, std::fabs(a[c] - b[c]));
   return m;
 }
 
@@ -173,7 +174,8 @@ int main() {
   static_assert(!adc::HasRoeDissipation<adc::Euler>,
                 "Euler sans hooks ne doit PAS satisfaire HasRoeDissipation (chemin canonique)");
   static_assert(adc::HasHLLCStructure<HookedEuler>, "HookedEuler doit satisfaire HasHLLCStructure");
-  static_assert(adc::HasRoeDissipation<HookedEuler>, "HookedEuler doit satisfaire HasRoeDissipation");
+  static_assert(adc::HasRoeDissipation<HookedEuler>,
+                "HookedEuler doit satisfaire HasRoeDissipation");
   static_assert(adc::HasHLLCStructure<IsoHLLC>, "IsoHLLC doit satisfaire HasHLLCStructure");
   std::printf("OK  detection des capabilities (Euler canonique, Hooked/Iso capability)\n");
 
@@ -194,7 +196,8 @@ int main() {
   };
   for (const auto& pr : pairs)
     for (int dir = 0; dir < 2; ++dir) {
-      const double dh = maxdiff(hllc(he, pr[0], a, pr[1], a, dir), hllc(e, pr[0], a, pr[1], a, dir));
+      const double dh =
+          maxdiff(hllc(he, pr[0], a, pr[1], a, dir), hllc(e, pr[0], a, pr[1], a, dir));
       if (dh > 1e-13) {
         std::printf("FAIL HLLC generique != canonique (dir %d) : %.3e\n", dir, dh);
         return 1;
@@ -228,8 +231,12 @@ int main() {
   // resolue -> flux tangentiel EXACTEMENT nul (HLLC), la ou HLL le diffuse (terme sL sR dU != 0).
   {
     State3 UL{}, UR{};
-    UL[0] = 1.0; UL[1] = 0.0; UL[2] = 2.0;   // u_t = +2
-    UR[0] = 1.0; UR[1] = 0.0; UR[2] = -3.0;  // u_t = -3
+    UL[0] = 1.0;
+    UL[1] = 0.0;
+    UL[2] = 2.0;  // u_t = +2
+    UR[0] = 1.0;
+    UR[1] = 0.0;
+    UR[2] = -3.0;  // u_t = -3
     const State3 Fc = hllc(iso, UL, a, UR, a, 0);
     const State3 Fh = hll(iso, UL, a, UR, a, 0);
     if (std::fabs(Fc[2]) > 1e-14) {
@@ -242,8 +249,10 @@ int main() {
                   static_cast<double>(Fh[2]));
       return 1;
     }
-    std::printf("OK  HLLC isotherme preserve le cisaillement stationnaire (F_t = 0 ; "
-                "HLL temoin F_t = %.3e)\n", static_cast<double>(Fh[2]));
+    std::printf(
+        "OK  HLLC isotherme preserve le cisaillement stationnaire (F_t = 0 ; "
+        "HLL temoin F_t = %.3e)\n",
+        static_cast<double>(Fh[2]));
   }
 
   std::printf("OK  test_riemann_capabilities : tout est vert\n");

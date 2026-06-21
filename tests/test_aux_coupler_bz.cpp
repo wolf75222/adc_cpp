@@ -78,8 +78,8 @@ int main() {
       const Box2D v = A.box(li);
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
         for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
-          maxphi = std::max(maxphi, std::fabs(a(i, j, 0)));          // phi = 0
-          maxbz = std::max(maxbz, std::fabs(a(i, j, 3) - c));        // B_z = c
+          maxphi = std::max(maxphi, std::fabs(a(i, j, 0)));    // phi = 0
+          maxbz = std::max(maxbz, std::fabs(a(i, j, 3) - c));  // B_z = c
         }
     }
     std::printf("  (A) apres solve : max|phi|=%.2e  max|B_z - c|=%.2e\n", maxphi, maxbz);
@@ -90,7 +90,8 @@ int main() {
   // --- (B) le chemin complet applique B_z : du/dt = c u -> u = A^N (amplification SSPRK2) ---
   const int N = 20;
   const Real dt = 0.01;
-  for (int s = 0; s < N; ++s) cpl.advance(U, dt);  // SSPRK2 PerStage, NoSlope
+  for (int s = 0; s < N; ++s)
+    cpl.advance(U, dt);  // SSPRK2 PerStage, NoSlope
   const double cdt = c * dt;
   const double A = 1.0 + cdt + 0.5 * cdt * cdt;  // SSPRK2 (Heun) sur u' = c u
   const double expected = std::pow(A, N);
@@ -105,12 +106,13 @@ int main() {
           val = u(i, j, 0);
         }
     }
-    std::printf("  (B) apres %d pas : u=%.6f  attendu A^N=%.6f  err=%.2e\n", N, val,
-                expected, maxerr);
+    std::printf("  (B) apres %d pas : u=%.6f  attendu A^N=%.6f  err=%.2e\n", N, val, expected,
+                maxerr);
     chk(maxerr < 1e-10, "Bz_drives_growth_ssprk2");
     chk(val > 1.05, "u_grew");  // c>0 -> croissance nette
   }
 
-  if (fails == 0) std::printf("OK test_aux_coupler_bz\n");
+  if (fails == 0)
+    std::printf("OK test_aux_coupler_bz\n");
   return fails == 0 ? 0 : 1;
 }

@@ -24,8 +24,8 @@
 // multi-GPU). Sous Cuda, for_each_cell ne fence pas (async) : density()/mass() de l'AmrSystem font
 // deja un device_fence() interne avant la lecture hote (read_coarse / amr_read_coarse), donc la
 // lecture hote ici est sure. On insere malgre tout un Kokkos::fence() de ceinture avant les diffs.
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (transport compressible)
+#include <adc/physics/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/euler.hpp>          // Euler (transport compressible)
 #include <adc/runtime/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
 #include <adc/runtime/amr_system.hpp>
 #include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
@@ -82,9 +82,8 @@ int main(int argc, char** argv) {
 
   // Modele euler_poisson COMPILE branche sur la hierarchie AMR (chemin de production add_compiled_model).
   AmrSystem sys(cfg);
-  add_compiled_model(sys, "gas",
-                     Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}}, "minmod",
-                     "rusanov", "conservative", "explicit", /*gamma=*/1.4);
+  add_compiled_model(sys, "gas", Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}},
+                     "minmod", "rusanov", "conservative", "explicit", /*gamma=*/1.4);
   sys.set_poisson("charge_density", "geometric_mg");
   sys.set_refinement(1.2);  // raffine la bulle (rho > 1.2 au coeur)
   sys.set_density("gas", rho);
@@ -97,7 +96,8 @@ int main(int argc, char** argv) {
   // patchs sur les rangs). C'est la totalite du chemin AMR + MPI exercee ensemble.
   const double dt = 1e-3;
   const int nsteps = 16;
-  for (int s = 0; s < nsteps; ++s) sys.step(dt);
+  for (int s = 0; s < nsteps; ++s)
+    sys.step(dt);
 
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::fence();  // ceinture avant la lecture hote (density()/mass() fencent deja en interne)
@@ -113,7 +113,8 @@ int main(int argc, char** argv) {
     csum += v;
     csumsq += v * v;
     const double a = std::fabs(v);
-    if (a > cmax) cmax = a;
+    if (a > cmax)
+      cmax = a;
   }
 
   // (1) CONSISTANCE CROSS-RANG : le grossier replique impose que chaque rang ait EXACTEMENT le meme
@@ -123,15 +124,16 @@ int main(int argc, char** argv) {
   const double qmax = all_reduce_max(csumsq), qmin = -all_reduce_max(-csumsq);
   const double mmax = all_reduce_max(mass), mmin = -all_reduce_max(-mass);
   const double xmax = all_reduce_max(cmax), xmin = -all_reduce_max(-cmax);
-  const double spread = std::fmax(std::fmax(smax - smin, qmax - qmin),
-                                  std::fmax(mmax - mmin, xmax - xmin));
+  const double spread =
+      std::fmax(std::fmax(smax - smin, qmax - qmin), std::fmax(mmax - mmin, xmax - xmin));
 
   int fails = 0;
   if (me == 0) {
     // Sortie machine-parsable (le script DIFF ces lignes entre np=1/2/4 ; np=1 = oracle mono-GPU).
-    std::printf("AMRMPI np=%d patches0=%d patchesF=%d | mass=%.17e | csum=%.17e csumsq=%.17e "
-                "cmax=%.17e | crossrank_spread=%.3e\n",
-                np, np0, npf, mass, csum, csumsq, cmax, spread);
+    std::printf(
+        "AMRMPI np=%d patches0=%d patchesF=%d | mass=%.17e | csum=%.17e csumsq=%.17e "
+        "cmax=%.17e | crossrank_spread=%.3e\n",
+        np, np0, npf, mass, csum, csumsq, cmax, spread);
 #if defined(ADC_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
@@ -140,18 +142,31 @@ int main(int argc, char** argv) {
     std::printf("AMRMPI exec=%s m0=%.17e (conservation: dm=%.3e)\n", space, m0,
                 std::fabs(mass - m0));
 
-    if (!(dens.size() == static_cast<std::size_t>(n) * n))
-      { std::printf("FAIL densite grossiere de mauvaise taille\n"); ++fails; }
-    if (!(cmax > 1e-6)) { std::printf("FAIL densite triviale (pas de signal)\n"); ++fails; }
+    if (!(dens.size() == static_cast<std::size_t>(n) * n)) {
+      std::printf("FAIL densite grossiere de mauvaise taille\n");
+      ++fails;
+    }
+    if (!(cmax > 1e-6)) {
+      std::printf("FAIL densite triviale (pas de signal)\n");
+      ++fails;
+    }
     // >= 2 patchs fins : sous np>=2 ils se repartissent sur plusieurs rangs/GPU (round-robin),
     // exercant le chemin fin DISTRIBUE (halos cross-rang, reflux route vers la box parente distante)
     // et pas seulement le grossier replique. Les 4 bulles produisent typiquement 4 patchs.
-    if (!(npf >= 2)) { std::printf("FAIL < 2 patchs fins (niveau fin non distribuable)\n"); ++fails; }
+    if (!(npf >= 2)) {
+      std::printf("FAIL < 2 patchs fins (niveau fin non distribuable)\n");
+      ++fails;
+    }
     // Le grossier replique DOIT etre bit-identique sur tous les rangs (spread exactement 0).
-    if (!(spread == 0.0)) { std::printf("FAIL grossier non bit-identique entre rangs\n"); ++fails; }
+    if (!(spread == 0.0)) {
+      std::printf("FAIL grossier non bit-identique entre rangs\n");
+      ++fails;
+    }
     if (fails == 0)
-      std::printf("OK test_mpi_amr_compiled_parity np=%d (AmrSystem+MPI+compile : grossier "
-                  "bit-identique cross-rang)\n", np);
+      std::printf(
+          "OK test_mpi_amr_compiled_parity np=%d (AmrSystem+MPI+compile : grossier "
+          "bit-identique cross-rang)\n",
+          np);
   } else {
     // Les rangs non-0 valident aussi la consistance (spread doit etre 0 partout) mais ne FAILent que
     // via le rang 0 (sortie unique). On garde le code symetrique : aucune assertion divergente.

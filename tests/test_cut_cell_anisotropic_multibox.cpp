@@ -46,9 +46,14 @@ static constexpr double kEx = 1.5, kEy = 0.7;  // permittivite anisotrope consta
 // Le constructeur evalue masque / coefficients Shortley-Weller / eps_x / eps_y PAR BOITE depuis
 // les fonctions analytiques : il n'existe pas de chemin mono-box particulier dans l'operateur.
 static GeometricMG make_mg(const Geometry& geom, const BoxArray& ba) {
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
-  std::function<Real(Real, Real)> ls = [](Real x, Real y) { return std::hypot(x - kCx, y - kCy) - kR; };
-  std::function<bool(Real, Real)> active = [](Real x, Real y) { return std::hypot(x - kCx, y - kCy) < kR; };
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  std::function<Real(Real, Real)> ls = [](Real x, Real y) {
+    return std::hypot(x - kCx, y - kCy) - kR;
+  };
+  std::function<bool(Real, Real)> active = [](Real x, Real y) {
+    return std::hypot(x - kCx, y - kCy) < kR;
+  };
   // (geom, ba, bc, active, replicated, min_coarse, nu1, nu2, nbottom, cut_cell, levelset)
   GeometricMG mg(geom, ba, bc, active, false, 2, 2, 2, 50, /*cut_cell=*/true, ls);
   mg.set_epsilon_anisotropic([](Real, Real) { return Real(kEx); },
@@ -81,7 +86,8 @@ static double solve_l2(int nc, int max_grid_size) {
         const double r2 = (x - kCx) * (x - kCx) + (y - kCy) * (y - kCy);
         if (r2 < kR * kR) {  // interieur du disque
           const double e = std::fabs(p(i, j) - (kR * kR - r2));
-          s += e * e; ++cnt;
+          s += e * e;
+          ++cnt;
         }
       }
   }
@@ -94,7 +100,12 @@ static double order(double e1, double e2, int n1, int n2) {
 
 int main() {
   int fails = 0;
-  auto chk = [&](bool c, const char* w) { if (!c) { std::printf("FAIL %s\n", w); ++fails; } };
+  auto chk = [&](bool c, const char* w) {
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
+  };
 
   // max_grid_size = 64 sur n = 128/256/512 -> 2x2, 4x4, 8x8 boites (4, 16, 64 boites) pavant le
   // domaine. Chaque boite 64x64 se coarsen proprement dans la hierarchie MG (puissances de 2).
@@ -105,9 +116,9 @@ int main() {
   const double m256 = solve_l2(256, mgs);
   const double m512 = solve_l2(512, mgs);
   const double o = order(m128, m512, 128, 512);
-  std::printf("cut-cell+aniso (ex=%.1f ey=%.1f) MULTI-BOX L2 : %.3e %.3e %.3e  ordre=%.2f\n",
-              kEx, kEy, m128, m256, m512, o);
-  chk(o > 1.7, "cutcell_aniso_multibox_ordre2_L2");          // Shortley-Weller : ~2 en L2
+  std::printf("cut-cell+aniso (ex=%.1f ey=%.1f) MULTI-BOX L2 : %.3e %.3e %.3e  ordre=%.2f\n", kEx,
+              kEy, m128, m256, m512, o);
+  chk(o > 1.7, "cutcell_aniso_multibox_ordre2_L2");  // Shortley-Weller : ~2 en L2
   chk(std::isfinite(m512) && m512 > 0, "cutcell_aniso_multibox_fini");
 
   // (B) invariance au decoupage : MONO-box (une seule boite couvrant le domaine) vs MULTI-box, a
@@ -117,10 +128,11 @@ int main() {
   const double l2_mono = solve_l2(nc, nc);    // max_grid_size = nc -> 1 boite
   const double l2_multi = solve_l2(nc, mgs);  // plusieurs boites
   const double gap = std::fabs(l2_mono - l2_multi);
-  std::printf("invariance decoupage n=%d : mono=%.12e multi=%.12e  ecart=%.3e\n",
-              nc, l2_mono, l2_multi, gap);
+  std::printf("invariance decoupage n=%d : mono=%.12e multi=%.12e  ecart=%.3e\n", nc, l2_mono,
+              l2_multi, gap);
   chk(gap <= 1e-12 * (l2_mono + 1.0), "cutcell_aniso_invariance_decoupage");  // bit-identique
 
-  if (fails == 0) std::printf("OK test_cut_cell_anisotropic_multibox\n");
+  if (fails == 0)
+    std::printf("OK test_cut_cell_anisotropic_multibox\n");
   return fails == 0 ? 0 : 1;
 }

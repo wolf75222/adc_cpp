@@ -119,7 +119,9 @@ struct DiscLevelSet {
 };
 
 /// Builds the disc level set callable from a DiscDomain (sugar: disc_level_set(d)).
-ADC_HD inline DiscLevelSet disc_level_set(const DiscDomain& d) { return DiscLevelSet{d}; }
+ADC_HD inline DiscLevelSet disc_level_set(const DiscDomain& d) {
+  return DiscLevelSet{d};
+}
 
 /// Activity indicator (center in the disc, ls < 0) from a callable level set. ADC_HD.
 template <class LevelSet>
@@ -143,8 +145,9 @@ ADC_HD inline bool eb_cell_active(const LevelSet& ls, Real xc, Real yc) {
 /// gives the SAME aperture as soon as both are active (ln < 0: the "interior neighbor" branch returns
 /// h on both sides -> alpha = 1). The internal active/active boundary is therefore treated SYMMETRICALLY.
 ADC_HD inline Real eb_face_aperture(Real lc, Real ln, Real h) {
-  if (ln >= Real(0)) return Real(0);          // inactive neighbor: closed face (wall, no-penetration)
-  return cut_distance(lc, ln, h) / h;          // active neighbor: linear aperture (== elliptic wall)
+  if (ln >= Real(0))
+    return Real(0);                    // inactive neighbor: closed face (wall, no-penetration)
+  return cut_distance(lc, ln, h) / h;  // active neighbor: linear aperture (== elliptic wall)
 }
 
 /// FACE FLUX kernel for x (dir 0) of the EB transport: numerical flux at the face between (i-1, j) and
@@ -159,9 +162,9 @@ template <class Limiter, class NumericalFlux, class Model, class LevelSet>
 struct EbFaceFluxXKernel {
   Model model;
   ConstArray4 u, ax;
-  Array4 fx;            // output: alpha_x * Fx at the face between i-1 and i (ncomp components)
+  Array4 fx;  // output: alpha_x * Fx at the face between i-1 and i (ncomp components)
   Real dx;
-  Geometry geom;        // cell centers (level set evaluated at the center, like cut_fraction)
+  Geometry geom;  // cell centers (level set evaluated at the center, like cut_fraction)
   LevelSet ls;
   Limiter lim;
   NumericalFlux nflux;
@@ -174,23 +177,27 @@ struct EbFaceFluxXKernel {
     const bool aL = lL < Real(0), aR = lR < Real(0);
     Real alpha;
     if (aL && aR) {
-      alpha = eb_face_aperture(lL, lR, dx);     // internal active/active face: symmetric aperture
+      alpha = eb_face_aperture(lL, lR, dx);  // internal active/active face: symmetric aperture
     } else if (aR) {
-      alpha = eb_face_aperture(lR, lL, dx);     // (i) active, (i-1) inactive: closed face (0)
+      alpha = eb_face_aperture(lR, lL, dx);  // (i) active, (i-1) inactive: closed face (0)
     } else if (aL) {
-      alpha = eb_face_aperture(lL, lR, dx);     // (i-1) active, (i) inactive: closed face (0)
+      alpha = eb_face_aperture(lL, lR, dx);  // (i-1) active, (i) inactive: closed face (0)
     } else {
-      alpha = Real(0);                           // both inactive: face outside the active domain
+      alpha = Real(0);  // both inactive: face outside the active domain
     }
-    if (alpha < kEbFaceOpenEps) {                // closed face (immersed wall): zero normal flux
-      for (int c = 0; c < Model::n_vars; ++c) fx(i, j, c) = Real(0);
+    if (alpha < kEbFaceOpenEps) {  // closed face (immersed wall): zero normal flux
+      for (int c = 0; c < Model::n_vars; ++c)
+        fx(i, j, c) = Real(0);
       return;
     }
-    const auto L = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rr = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto L =
+        reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rr =
+        reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i - 1, j), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 0);
-    for (int c = 0; c < Model::n_vars; ++c) fx(i, j, c) = alpha * F[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      fx(i, j, c) = alpha * F[c];
   }
 };
 
@@ -224,14 +231,18 @@ struct EbFaceFluxYKernel {
       alpha = Real(0);
     }
     if (alpha < kEbFaceOpenEps) {
-      for (int c = 0; c < Model::n_vars; ++c) fy(i, j, c) = Real(0);
+      for (int c = 0; c < Model::n_vars; ++c)
+        fy(i, j, c) = Real(0);
       return;
     }
-    const auto L = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rr = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto L =
+        reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rr =
+        reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i, j - 1), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 1);
-    for (int c = 0; c < Model::n_vars; ++c) fy(i, j, c) = alpha * F[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      fy(i, j, c) = alpha * F[c];
   }
 };
 
@@ -245,15 +256,16 @@ template <class Model, class LevelSet>
 struct EbAssembleRhsKernel {
   Model model;
   ConstArray4 u, ax, fx, fy;  // state, aux, x flux weighted by alpha, y flux weighted by alpha
-  Array4 r;                    // output: residual
+  Array4 r;                   // output: residual
   Real dx, dy;
   Geometry geom;
   LevelSet ls;
   Real kappa_min;
   ADC_HD void operator()(int i, int j) const {
     const Real xc = geom.x_cell(i), yc = geom.y_cell(j);
-    if (!eb_cell_active(ls, xc, yc)) {            // outside the disc: zero residual, not advanced (cf. T2)
-      for (int c = 0; c < Model::n_vars; ++c) r(i, j, c) = Real(0);
+    if (!eb_cell_active(ls, xc, yc)) {  // outside the disc: zero residual, not advanced (cf. T2)
+      for (int c = 0; c < Model::n_vars; ++c)
+        r(i, j, c) = Real(0);
       return;
     }
     // Volume fraction kappa derived EXACTLY from the same cut_fraction as the elliptic wall: the

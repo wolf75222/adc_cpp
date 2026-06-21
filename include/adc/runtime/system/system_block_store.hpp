@@ -1,11 +1,11 @@
 #pragma once
 
-#include <adc/core/state.hpp>       // kAuxBaseComps (default aux channel of the Schur stage: B_z)
-#include <adc/core/types.hpp>       // Real
-#include <adc/core/variables.hpp>   // VariableSet (role descriptor carried by each block)
-#include <adc/mesh/box2d.hpp>       // Box2D
-#include <adc/mesh/for_each.hpp>    // device_fence (marshaling synchronizes the device before reading the host)
-#include <adc/mesh/multifab.hpp>    // MultiFab, Array4, ConstArray4
+#include <adc/core/state.hpp>      // kAuxBaseComps (default aux channel of the Schur stage: B_z)
+#include <adc/core/types.hpp>      // Real
+#include <adc/core/variables.hpp>  // VariableSet (role descriptor carried by each block)
+#include <adc/mesh/box2d.hpp>      // Box2D
+#include <adc/mesh/for_each.hpp>  // device_fence (marshaling synchronizes the device before reading the host)
+#include <adc/mesh/multifab.hpp>  // MultiFab, Array4, ConstArray4
 
 #include <functional>
 #include <memory>
@@ -71,13 +71,13 @@ class SystemBlockStore {
     std::string name;
     MultiFab U;
     int ncomp;
-    int substeps;                                             // static substeps (add_block)
-    bool evolve;                                              // false = frozen species (fixed background, not advanced)
-    int stride = 1;                                           // cadence: advance once every stride macro-steps
-    double gamma;                                             // for the rest energy (4 var)
-    std::function<void(MultiFab&, Real, int)> advance;        // (U, dt, n): n substeps of dt/n
-    std::function<void(MultiFab&, MultiFab&)> rhs_into;        // R <- -div F + S (Poisson frozen)
-    std::function<Real(const MultiFab&)> max_speed;           // max |wave speed| of the block
+    int substeps;    // static substeps (add_block)
+    bool evolve;     // false = frozen species (fixed background, not advanced)
+    int stride = 1;  // cadence: advance once every stride macro-steps
+    double gamma;    // for the rest energy (4 var)
+    std::function<void(MultiFab&, Real, int)> advance;   // (U, dt, n): n substeps of dt/n
+    std::function<void(MultiFab&, MultiFab&)> rhs_into;  // R <- -div F + S (Poisson frozen)
+    std::function<Real(const MultiFab&)> max_speed;      // max |wave speed| of the block
     std::function<void(const MultiFab&, MultiFab&)> add_poisson_rhs;  // += elliptic_rhs(U)
     // Descriptor of the conservative / primitive variables (names + physical ROLES) of the block.
     // The roles (provided by M::conservative_vars()) let inter-species couplings target a component
@@ -119,8 +119,9 @@ class SystemBlockStore {
     // AT THE SAME TIME as `advance`, they read the System mask / level set by pointer at step time
     // (stable address): the order add_block / set_disc_domain is irrelevant. Trailing + empty default:
     // the positional aggregate init of the other members stays unchanged.
-    std::function<void(MultiFab&, Real, int)> advance_masked;  // residual via assemble_rhs_masked (Staircase)
-    std::function<void(MultiFab&, Real, int)> advance_eb;      // residual via assemble_rhs_eb (CutCell)
+    std::function<void(MultiFab&, Real, int)>
+        advance_masked;  // residual via assemble_rhs_masked (Staircase)
+    std::function<void(MultiFab&, Real, int)> advance_eb;  // residual via assemble_rhs_eb (CutCell)
     // dt_hotspot DIAGNOSTIC (ADC-182): (U, w, i, j) -> GLOBAL cell dominating the transport CFL bound
     // of the block + its speed w = max(wx, wy). ON DEMAND only (System::dt_hotspot):
     // never queried by step/step_cfl (hot path bit-identical). Trailing + empty default.
@@ -130,8 +131,10 @@ class SystemBlockStore {
     // bit-identical). Set by set_block_dt_bounds when the model declares the traits
     // HasSourceFrequency / HasStabilityDt (cf. core/physical_model.hpp for the semantics).
     // Trailing + empty default: the positional aggregate init of the other members stays unchanged.
-    std::function<Real(const MultiFab&)> source_frequency;  // max over cells of mu [1/s] (0 = no constraint)
-    std::function<Real(const MultiFab&)> stability_dt;      // min over cells of the admissible step (0 = no constraint)
+    std::function<Real(const MultiFab&)>
+        source_frequency;  // max over cells of mu [1/s] (0 = no constraint)
+    std::function<Real(const MultiFab&)>
+        stability_dt;  // min over cells of the admissible step (0 = no constraint)
     // PROJECTION PONCTUELLE post-pas (ADC-177) : U <- project(U, aux) sur les cellules VALIDES,
     // appliquee par le stepper a la FIN de chaque macro-pas ENTIER (apres transport + etage source +
     // couplages ; jamais par etage RK). VIDE (defaut) -> jamais interrogee (cout nul, chemin
@@ -147,19 +150,22 @@ class SystemBlockStore {
   /// Reference to block @p name (for writing). @throws std::runtime_error "System: bloc inconnu '...'".
   BlockState& find(const std::string& name) {
     for (auto& s : blocks)
-      if (s.name == name) return s;
+      if (s.name == name)
+        return s;
     throw std::runtime_error("System : bloc inconnu '" + name + "'");
   }
   /// Reference to block @p name (for reading). @throws std::runtime_error "System: bloc inconnu '...'".
   const BlockState& find(const std::string& name) const {
     for (auto& s : blocks)
-      if (s.name == name) return s;
+      if (s.name == name)
+        return s;
     throw std::runtime_error("System : bloc inconnu '" + name + "'");
   }
   /// 0-based index of block @p name (insertion order). @throws std::runtime_error if unknown.
   int index(const std::string& name) const {
     for (std::size_t k = 0; k < blocks.size(); ++k)
-      if (blocks[k].name == name) return static_cast<int>(k);
+      if (blocks[k].name == name)
+        return static_cast<int>(k);
     throw std::runtime_error("System : bloc inconnu '" + name + "'");
   }
 
@@ -171,7 +177,8 @@ class SystemBlockStore {
     // add_dynamic_block / add_compiled_block (.so) appears just like an add_block.
     std::vector<std::string> out;
     out.reserve(blocks.size());
-    for (const auto& s : blocks) out.push_back(s.name);
+    for (const auto& s : blocks)
+      out.push_back(s.name);
     return out;
   }
 
@@ -183,13 +190,15 @@ class SystemBlockStore {
     // MPI single-box: the box lives on the owner rank (rank 0). A rank without a box (local_size()==0)
     // has NO fab(0) -> return EMPTY rather than an OUT-OF-BOUNDS access (UB). Single-rank: local_size()
     // is always 1, behavior UNCHANGED. For the global multi-rank field: System::density_global.
-    if (mf.local_size() == 0) return {};
+    if (mf.local_size() == 0)
+      return {};
     const ConstArray4 u = mf.fab(0).const_array();
     const Box2D v = mf.box(0);
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(u(i, j, 0));
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        out.push_back(u(i, j, 0));
     return out;
   }
   /// Copies the ncomp components of fab(0) in component-major layout (c slow, then j, then i).
@@ -197,14 +206,16 @@ class SystemBlockStore {
     device_fence();
     // Rank without a box (MPI single-box, non-owner): return EMPTY (no fab(0)). Cf. copy_comp0;
     // the global multi-rank field goes through System::state_global (collective gather).
-    if (mf.local_size() == 0) return {};
+    if (mf.local_size() == 0)
+      return {};
     const ConstArray4 u = mf.fab(0).const_array();
     const Box2D v = mf.box(0);
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(ncomp) * v.nx() * v.ny());
     for (int c = 0; c < ncomp; ++c)
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-        for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(u(i, j, c));
+        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+          out.push_back(u(i, j, c));
     return out;
   }
   /// Writes the ncomp components into fab(0) from a component-major buffer (same layout as
@@ -215,7 +226,8 @@ class SystemBlockStore {
     // sim.set_state / sim.restart be called on ALL ranks with the GLOBAL field: only the
     // owner rank (rank 0, box = full domain) writes, the others do nothing. Single-rank:
     // local_size()==1, validation + write UNCHANGED (bit-identical).
-    if (mf.local_size() == 0) return;
+    if (mf.local_size() == 0)
+      return;
     const Box2D v = mf.box(0);
     const std::size_t need = static_cast<std::size_t>(ncomp) * v.nx() * v.ny();
     if (in.size() != need)
@@ -224,7 +236,8 @@ class SystemBlockStore {
     std::size_t k = 0;
     for (int c = 0; c < ncomp; ++c)
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-        for (int i = v.lo[0]; i <= v.hi[0]; ++i) u(i, j, c) = in[k++];
+        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+          u(i, j, c) = in[k++];
   }
 };
 

@@ -26,8 +26,7 @@
 namespace adc {
 
 template <class Block>
-constexpr int block_substeps_v =
-    TimePolicyTraits<typename std::decay_t<Block>::Time>::substeps;
+constexpr int block_substeps_v = TimePolicyTraits<typename std::decay_t<Block>::Time>::substeps;
 
 template <class Block>
 constexpr TimeTreatment block_time_treatment_v =
@@ -35,8 +34,7 @@ constexpr TimeTreatment block_time_treatment_v =
 
 // Block cadence (tutor return): it advances only 1 macro-step out of `stride`.
 template <class Block>
-constexpr int block_stride_v =
-    TimePolicyTraits<typename std::decay_t<Block>::Time>::stride;
+constexpr int block_stride_v = TimePolicyTraits<typename std::decay_t<Block>::Time>::stride;
 
 // Variant with a macro-step counter: a block of cadence `stride` advances only at macro-steps
 // that are multiples of stride, and then by an EFFECTIVE step stride*dt (it catches up on
@@ -44,16 +42,17 @@ constexpr int block_stride_v =
 // "gas not resolved every step"). substeps stays orthogonal (splits the effective step).
 // stride=1 -> every macro-step, effective step dt: strictly the historical behavior.
 template <CoupledSystemLike System, class AdvanceBlock>
-void advance_subcycled(System& system, Real dt, int macro_step,
-                       AdvanceBlock&& advance_block) {
+void advance_subcycled(System& system, Real dt, int macro_step, AdvanceBlock&& advance_block) {
   system.for_each_block([&](auto& block) {
     using Block = std::decay_t<decltype(block)>;
     if constexpr (block_time_treatment_v<Block> != TimeTreatment::Prescribed) {
       constexpr int stride = block_stride_v<Block>;
-      if (macro_step % stride != 0) return;  // slow block: skip this macro-step
+      if (macro_step % stride != 0)
+        return;  // slow block: skip this macro-step
       constexpr int n = block_substeps_v<Block>;
       const Real h = (dt * static_cast<Real>(stride)) / static_cast<Real>(n);
-      for (int s = 0; s < n; ++s) advance_block(block, h, s, n);
+      for (int s = 0; s < n; ++s)
+        advance_block(block, h, s, n);
     }
   });
 }

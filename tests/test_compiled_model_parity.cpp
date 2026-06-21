@@ -76,14 +76,25 @@ int main(int argc, char** argv) {
     dres = std::fmax(dres, std::fabs(Ra[k] - Rb[k]));
     nrm = std::fmax(nrm, std::fabs(Rb[k]));
   }
-  for (std::size_t k = 0; k < pa.size(); ++k) dphi = std::fmax(dphi, std::fabs(pa[k] - pb[k]));
+  for (std::size_t k = 0; k < pa.size(); ++k)
+    dphi = std::fmax(dphi, std::fabs(pa[k] - pb[k]));
 
   int fails = 0;
-  if (!(nrm > 1e-6)) { std::printf("FAIL residu natif trivial\n"); ++fails; }
-  if (!(dres < 1e-12)) { std::printf("FAIL eval_rhs AOT != natif (ecart %.3e)\n", dres); ++fails; }
-  if (!(dphi < 1e-12)) { std::printf("FAIL potentiel AOT != natif (ecart %.3e)\n", dphi); ++fails; }
+  if (!(nrm > 1e-6)) {
+    std::printf("FAIL residu natif trivial\n");
+    ++fails;
+  }
+  if (!(dres < 1e-12)) {
+    std::printf("FAIL eval_rhs AOT != natif (ecart %.3e)\n", dres);
+    ++fails;
+  }
+  if (!(dphi < 1e-12)) {
+    std::printf("FAIL potentiel AOT != natif (ecart %.3e)\n", dphi);
+    ++fails;
+  }
   if (fails == 0)
-    std::printf("OK test_compiled_model_parity (add_compiled_model == add_block ; dres=%.1e dphi=%.1e)\n",
-                dres, dphi);
+    std::printf(
+        "OK test_compiled_model_parity (add_compiled_model == add_block ; dres=%.1e dphi=%.1e)\n",
+        dres, dphi);
   return fails ? 1 : 0;
 }

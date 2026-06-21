@@ -19,21 +19,25 @@ static int rank_transitions(const BoxArray& ba, const DistributionMapping& dm) {
   const std::vector<int> order = morton_order(ba);
   int t = 0;
   for (std::size_t k = 1; k < order.size(); ++k)
-    if (dm[order[k]] != dm[order[k - 1]]) ++t;
+    if (dm[order[k]] != dm[order[k - 1]])
+      ++t;
   return t;
 }
 
 static bool all_in_range(const DistributionMapping& dm, int nranks) {
   for (int r : dm.ranks())
-    if (r < 0 || r >= nranks) return false;
+    if (r < 0 || r >= nranks)
+      return false;
   return true;
 }
 
 static int n_ranks_used(const DistributionMapping& dm, int nranks) {
   std::vector<char> seen(nranks, 0);
-  for (int r : dm.ranks()) seen[r] = 1;
+  for (int r : dm.ranks())
+    seen[r] = 1;
   int u = 0;
-  for (char c : seen) u += c;
+  for (char c : seen)
+    u += c;
   return u;
 }
 
@@ -96,8 +100,7 @@ int main() {
   DistributionMapping sfc3 = make_sfc_distribution(ban, 3);
   DistributionMapping knap3 = make_knapsack_distribution(ban, 3);
   chk(all_in_range(sfc3, 3) && all_in_range(knap3, 3), "nonuniform_in_range");
-  chk(n_ranks_used(sfc3, 3) == 3 && n_ranks_used(knap3, 3) == 3,
-      "nonuniform_all_ranks_used");
+  chk(n_ranks_used(sfc3, 3) == 3 && n_ranks_used(knap3, 3) == 3, "nonuniform_all_ranks_used");
 
   const double sfc3_imb = load_imbalance(ban, sfc3, 3);
   const double knap3_imb = load_imbalance(ban, knap3, 3);
@@ -105,6 +108,7 @@ int main() {
   chk(knap3_imb <= sfc3_imb + 1e-9, "knap_balances_at_least_as_well");
   chk(knap3_imb < sfc3_imb, "knap_strictly_better_here");
 
-  if (fails == 0) std::printf("OK test_load_balance\n");
+  if (fails == 0)
+    std::printf("OK test_load_balance\n");
   return fails == 0 ? 0 : 1;
 }

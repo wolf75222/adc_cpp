@@ -70,13 +70,14 @@ int main() {
     for (int i = 0; i < N; ++i)
       maxdiff = std::fmax(maxdiff, std::fabs(pm(i, j) - pf(i, j)));
 
-  std::printf("operateur partage : residu(MG)=%.3e residu(FFT)=%.3e | maxdiff(phi)=%.3e\n",
-              rmg, rfft, maxdiff);
+  std::printf("operateur partage : residu(MG)=%.3e residu(FFT)=%.3e | maxdiff(phi)=%.3e\n", rmg,
+              rfft, maxdiff);
 
   chk(rmg < 1e-9, "MG_inverse_l_operateur_canonique");
   chk(rfft < 1e-9, "FFT_inverse_l_operateur_canonique");
   chk(maxdiff < 1e-9, "MG_et_FFT_meme_solution");
 
-  if (chk.fails() == 0) std::printf("OK test_elliptic_operator\n");
+  if (chk.fails() == 0)
+    std::printf("OK test_elliptic_operator\n");
   return chk.failed();
 }

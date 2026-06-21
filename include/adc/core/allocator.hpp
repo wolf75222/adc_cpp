@@ -24,9 +24,9 @@ namespace adc {
 /// ManagedArena pool statistics: hits/misses/fences and retained bytes.
 /// Side-effect-free read via adc::arena_stats() (snapshot under lock).
 struct ArenaStats {
-  long hits = 0;       // allocations served by the pool (no kokkos_malloc)
-  long misses = 0;     // allocations that triggered a kokkos_malloc<SharedSpace>
-  long fences = 0;     // batched Kokkos::fence barriers (recycling pending blocks)
+  long hits = 0;                   // allocations served by the pool (no kokkos_malloc)
+  long misses = 0;                 // allocations that triggered a kokkos_malloc<SharedSpace>
+  long fences = 0;                 // batched Kokkos::fence barriers (recycling pending blocks)
   std::size_t reserved_bytes = 0;  // total managed memory held by the pool
 };
 }  // namespace adc
@@ -42,9 +42,10 @@ struct ArenaStats {
 
 namespace adc {
 
-static_assert(Kokkos::has_shared_space,
-              "adc: the Kokkos backend must provide SharedSpace (unified memory) for the device "
-              "Fab; enable a Cuda/HIP/SYCL backend (or a host backend, where SharedSpace is HostSpace)");
+static_assert(
+    Kokkos::has_shared_space,
+    "adc: the Kokkos backend must provide SharedSpace (unified memory) for the device "
+    "Fab; enable a Cuda/HIP/SYCL backend (or a host backend, where SharedSpace is HostSpace)");
 
 // Cache of unified-memory allocations (Kokkos::SharedSpace), free-list by size (bytes).
 //
@@ -87,19 +88,23 @@ class ManagedArena {
   }
 
   void* allocate(std::size_t bytes) {
-    if (bytes == 0) return nullptr;
+    if (bytes == 0)
+      return nullptr;
     // CRUCIAL: a Fab can be constructed BEFORE any for_each (hence before the lazy init on the
     // kernel side). kokkos_malloc requires Kokkos initialized -> we guarantee the init HERE too.
     // Without this, the Kokkos build crashes at the very first allocation (regression identified on
     // build-kokkos). Outside the lock.
     detail::ensure_kokkos_initialized();
     std::lock_guard<std::mutex> lk(m_);
-    std::call_once(hook_once_, [] {  // return the blocks at Kokkos::finalize (otherwise "leaked" allocation)
-      Kokkos::push_finalize_hook([] { ManagedArena::instance().release_all(); });
-    });
-    if (void* p = pop_ready(bytes)) return p;
+    std::call_once(hook_once_,
+                   [] {  // return the blocks at Kokkos::finalize (otherwise "leaked" allocation)
+                     Kokkos::push_finalize_hook([] { ManagedArena::instance().release_all(); });
+                   });
+    if (void* p = pop_ready(bytes))
+      return p;
     if (pending_count_ > 0) {
-      Kokkos::fence();  // batched, portable barrier (drains in-flight kernels; former cudaDeviceSynchronize)
+      Kokkos::
+          fence();  // batched, portable barrier (drains in-flight kernels; former cudaDeviceSynchronize)
       ++fences_;
       for (auto& kv : pending_) {
         auto& r = ready_[kv.first];
@@ -107,10 +112,13 @@ class ManagedArena {
         kv.second.clear();
       }
       pending_count_ = 0;
-      if (void* p = pop_ready(bytes)) return p;
+      if (void* p = pop_ready(bytes))
+        return p;
     }
-    void* p = Kokkos::kokkos_malloc<Kokkos::SharedSpace>("adc_fab", bytes);  // portable unified memory
-    if (!p) throw std::bad_alloc();
+    void* p =
+        Kokkos::kokkos_malloc<Kokkos::SharedSpace>("adc_fab", bytes);  // portable unified memory
+    if (!p)
+      throw std::bad_alloc();
     ++misses_;
     reserved_ += bytes;
     return p;
@@ -119,7 +127,8 @@ class ManagedArena {
   // Freed block: pending (not reusable before the next batched barrier). No
   // immediate kokkos_free (the pool lives until the end of the process; release_all returns everything at finalize).
   void deallocate(void* p, std::size_t bytes) {
-    if (!p) return;
+    if (!p)
+      return;
     std::lock_guard<std::mutex> lk(m_);
     pending_[bytes].push_back(p);
     ++pending_count_;
@@ -131,9 +140,11 @@ class ManagedArena {
   void release_all() {
     std::lock_guard<std::mutex> lk(m_);
     for (auto& kv : ready_)
-      for (void* p : kv.second) Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
+      for (void* p : kv.second)
+        Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
     for (auto& kv : pending_)
-      for (void* p : kv.second) Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
+      for (void* p : kv.second)
+        Kokkos::kokkos_free<Kokkos::SharedSpace>(p);
     ready_.clear();
     pending_.clear();
     pending_count_ = 0;
@@ -165,7 +176,9 @@ class ManagedArena {
   std::size_t reserved_ = 0;
 };
 
-inline ArenaStats arena_stats() { return ManagedArena::instance().stats(); }
+inline ArenaStats arena_stats() {
+  return ManagedArena::instance().stats();
+}
 
 /// std::allocator_traits adapter backed by ManagedArena.
 /// Stateless: all ManagedAllocator<T> are equal (shared singleton pool).
@@ -223,20 +236,27 @@ struct PinnedAllocator {
   PinnedAllocator(const PinnedAllocator<U>&) noexcept {}
 
   T* allocate(std::size_t n) {
-    if (n == 0) return nullptr;
+    if (n == 0)
+      return nullptr;
     detail::ensure_kokkos_initialized();  // kokkos_malloc requires Kokkos initialized
     void* p = Kokkos::kokkos_malloc<Kokkos::SharedHostPinnedSpace>("adc_comm", n * sizeof(T));
-    if (!p) throw std::bad_alloc();
+    if (!p)
+      throw std::bad_alloc();
     return static_cast<T*>(p);
   }
   void deallocate(T* p, std::size_t) noexcept {
-    if (p) Kokkos::kokkos_free<Kokkos::SharedHostPinnedSpace>(p);
+    if (p)
+      Kokkos::kokkos_free<Kokkos::SharedHostPinnedSpace>(p);
   }
 };
 template <class A, class B>
-bool operator==(const PinnedAllocator<A>&, const PinnedAllocator<B>&) noexcept { return true; }
+bool operator==(const PinnedAllocator<A>&, const PinnedAllocator<B>&) noexcept {
+  return true;
+}
 template <class A, class B>
-bool operator!=(const PinnedAllocator<A>&, const PinnedAllocator<B>&) noexcept { return false; }
+bool operator!=(const PinnedAllocator<A>&, const PinnedAllocator<B>&) noexcept {
+  return false;
+}
 
 template <class T>
 using comm_allocator = PinnedAllocator<T>;
@@ -254,7 +274,9 @@ template <class T>
 using comm_allocator = std::allocator<T>;
 
 // Stub outside unified memory: no pool, no stats (CPU build unchanged).
-inline ArenaStats arena_stats() { return ArenaStats{}; }
+inline ArenaStats arena_stats() {
+  return ArenaStats{};
+}
 }  // namespace adc
 
 #endif

@@ -38,7 +38,10 @@ static constexpr double kPi = 3.14159265358979323846;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 32;
@@ -90,8 +93,7 @@ int main() {
     const ConstArray4 fx = Fx.fab(0).const_array(), fy = Fy.fab(0).const_array();
     for_each_cell(dom, [=] ADC_HD(int i, int j) {
       for (int c = 0; c < 4; ++c)
-        r(i, j, c) = -((fx(i + 1, j, c) - fx(i, j, c)) / dx +
-                       (fy(i, j + 1, c) - fy(i, j, c)) / dy);
+        r(i, j, c) = -((fx(i + 1, j, c) - fx(i, j, c)) / dx + (fy(i, j + 1, c) - fy(i, j, c)) / dy);
     });
   };
 
@@ -147,6 +149,7 @@ int main() {
     chk(maxdiff(Up, Uc) > 1e-9, "advance_amr : recon_prim plumbing (primitif != conservatif)");
   }
 
-  if (fails == 0) std::printf("OK test_amr_spatial_parity\n");
+  if (fails == 0)
+    std::printf("OK test_amr_spatial_parity\n");
   return fails == 0 ? 0 : 1;
 }

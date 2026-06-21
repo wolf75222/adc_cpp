@@ -32,14 +32,12 @@ struct ElectronRelax {
   using Aux = adc::Aux;
   static constexpr int n_vars = 1;
 
-  Real k = Real(1000);    // raideur
-  Real neq = Real(1);     // densite d'equilibre
+  Real k = Real(1000);  // raideur
+  Real neq = Real(1);   // densite d'equilibre
 
   ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
   ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux&) const {
-    return State{-k * (u[0] - neq)};
-  }
+  ADC_HD State source(const State& u, const Aux&) const { return State{-k * (u[0] - neq)}; }
   ADC_HD Real elliptic_rhs(const State& u) const { return -u[0]; }
 };
 
@@ -57,8 +55,7 @@ struct IonProduction {
   ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
-using ElectronBlock =
-    EquationBlock<ElectronRelax, FirstOrder, ImplicitTime<UserTimeIntegrator, 1>>;
+using ElectronBlock = EquationBlock<ElectronRelax, FirstOrder, ImplicitTime<UserTimeIntegrator, 1>>;
 using IonBlock = EquationBlock<IonProduction, FirstOrder, ExplicitTime<SSPRK2, 1>>;
 
 static_assert(EquationBlockLike<ElectronBlock>);
@@ -69,7 +66,10 @@ static_assert(IonBlock::Time::treatment == TimeTreatment::Explicit);
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -113,6 +113,7 @@ int main() {
   chk(std::fabs(sum(rhs) - (sum(Ui) - sum(Ue))) < Real(1e-12), "charge_density_rhs");
   chk(std::fabs(sum(rhs)) > Real(1), "poisson_rhs_nonzero");
 
-  if (fails == 0) std::printf("OK test_two_species_minimal\n");
+  if (fails == 0)
+    std::printf("OK test_two_species_minimal\n");
   return fails == 0 ? 0 : 1;
 }

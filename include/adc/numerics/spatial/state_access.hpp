@@ -117,10 +117,10 @@ struct SourceFreeModel {
 /// Returns a StateVec<n_vars> initialized from components 0..n_vars-1 of the channel.
 /// ADC_HD, zero allocation. Does NOT read components beyond n_vars.
 template <class Model>
-ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i,
-                                              int j) {
+ADC_HD inline typename Model::State load_state(const ConstArray4& a, int i, int j) {
   typename Model::State u;
-  for (int c = 0; c < Model::n_vars; ++c) u[c] = a(i, j, c);
+  for (int c = 0; c < Model::n_vars; ++c)
+    u[c] = a(i, j, c);
   return u;
 }
 
@@ -141,7 +141,8 @@ template <int NComp = kAuxBaseComps>
 ADC_HD inline Aux load_aux(const ConstArray4& a, int i, int j) {
   Aux x{a(i, j, 0), a(i, j, 1), a(i, j, 2)};
 #define ADC_AUX_LOAD(name, idx) \
-  if constexpr (NComp > (idx)) x.name = a(i, j, idx);
+  if constexpr (NComp > (idx))  \
+    x.name = a(i, j, idx);
   ADC_AUX_FIELDS(ADC_AUX_LOAD)
 #undef ADC_AUX_LOAD
   // NAMED aux fields (ADC-70 phase 1): components from kAuxNamedBase (= 5). Loaded
@@ -152,7 +153,8 @@ ADC_HD inline Aux load_aux(const ConstArray4& a, int i, int j) {
   if constexpr (NComp > kAuxNamedBase) {
     constexpr int n_extra =
         (NComp - kAuxNamedBase) < kAuxMaxExtra ? (NComp - kAuxNamedBase) : kAuxMaxExtra;
-    for (int k = 0; k < n_extra; ++k) x.extra[k] = a(i, j, kAuxNamedBase + k);
+    for (int k = 0; k < n_extra; ++k)
+      x.extra[k] = a(i, j, kAuxNamedBase + k);
   }
   return x;
 }

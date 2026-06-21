@@ -33,7 +33,9 @@ struct TeSource {
 };
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const { return Real(0); }
+  ADC_HD Real rhs(const State&) const {
+    return Real(0);
+  }
 };
 
 using ProbeModel = CompositeModel<ExBVelocity, TeSource, NoEll>;  // lit T_e
@@ -49,7 +51,10 @@ int main(int argc, char** argv) {
 #endif
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -62,8 +67,8 @@ int main(int argc, char** argv) {
   cfg.periodic = true;
 
   System sys(cfg);
-  add_compiled_model(sys, "gas", GasModel{Euler{gamma}, NoSource{}, NoEll{}},
-                     "minmod", "rusanov", "conservative", "explicit", gamma);
+  add_compiled_model(sys, "gas", GasModel{Euler{gamma}, NoSource{}, NoEll{}}, "minmod", "rusanov",
+                     "conservative", "explicit", gamma);
   add_compiled_model(sys, "probe", ProbeModel{}, "minmod", "rusanov", "conservative", "explicit");
   sys.set_poisson("charge_density", "geometric_mg");
 
@@ -82,10 +87,12 @@ int main(int argc, char** argv) {
   // eval_rhs(probe) = -div F + S ; flux ExB(grad=0)=0 -> R = source = T_e * n = Te.
   const std::vector<double> R = sys.eval_rhs("probe");
   double err = 0;
-  for (double r : R) err = std::fmax(err, std::fabs(r - Te));
+  for (double r : R)
+    err = std::fmax(err, std::fabs(r - Te));
   std::printf("  T_e derive p/rho : eval_rhs(probe) max|R - T_e| = %.2e (T_e=%.3g)\n", err, Te);
   chk(err < 1e-12, "te_derived_and_read");
 
-  if (fails == 0) std::printf("OK test_aux_te\n");
+  if (fails == 0)
+    std::printf("OK test_aux_te\n");
   return fails ? 1 : 0;
 }

@@ -64,15 +64,31 @@ static constexpr double kRmax = 1.00;
 //   H(r) = sin(a (r - r_min)), a = pi/(r_max - r_min)  -> H(r_min) = H(r_max) = 0 (face nulle pour les
 //          modes m != 0 ; la reflexion Dirichlet HOMOGENE des modes non nuls est donc exacte).
 // ------------------------------------------------------------------------------------------------
-static double aS() { return kPiL / (kRmax - kRmin); }
-static double S(double r) { return 1.0 + 0.5 * (r - kRmin); }
-static double Sp(double /*r*/) { return 0.5; }
-static double Spp(double /*r*/) { return 0.0; }
-static double H(double r) { return std::sin(aS() * (r - kRmin)); }
-static double Hp(double r) { return aS() * std::cos(aS() * (r - kRmin)); }
-static double Hpp(double r) { return -aS() * aS() * std::sin(aS() * (r - kRmin)); }
+static double aS() {
+  return kPiL / (kRmax - kRmin);
+}
+static double S(double r) {
+  return 1.0 + 0.5 * (r - kRmin);
+}
+static double Sp(double /*r*/) {
+  return 0.5;
+}
+static double Spp(double /*r*/) {
+  return 0.0;
+}
+static double H(double r) {
+  return std::sin(aS() * (r - kRmin));
+}
+static double Hp(double r) {
+  return aS() * std::cos(aS() * (r - kRmin));
+}
+static double Hpp(double r) {
+  return -aS() * aS() * std::sin(aS() * (r - kRmin));
+}
 
-static double phi_exact(double r, double th, int m) { return S(r) + H(r) * std::cos(m * th); }
+static double phi_exact(double r, double th, int m) {
+  return S(r) + H(r) * std::cos(m * th);
+}
 
 // Source analytique f = div(A grad phi) pour un tenseur A CONSTANT (a_rr, a_rt, a_tr, a_tt) :
 //   div(A grad phi) = a_rr (phi_rr + phi_r/r) + a_tt phi_tt / r^2 + (a_rt + a_tr) phi_rt / r
@@ -96,14 +112,33 @@ static double f_tensor(double r, double th, int m, double arr, double art, doubl
 //   chemin singulier (les termes croises n'y changent pas la nature du noyau).
 //   phi(r, theta) = G(r) + K(r) cos(m theta) avec G'(r_min)=G'(r_max)=0 et K'(r_min)=K'(r_max)=0.
 // ------------------------------------------------------------------------------------------------
-static double bN() { return kPiL / (kRmax - kRmin); }
-static double G(double r) { return std::cos(bN() * (r - kRmin)); }
-static double Gp(double r) { return -bN() * std::sin(bN() * (r - kRmin)); }
-static double Gpp(double r) { return -bN() * bN() * std::cos(bN() * (r - kRmin)); }
-static double Kf(double r) { const double u = r - kRmin, w = r - kRmax; return u * u * w * w; }
-static double Kp(double r) { const double u = r - kRmin, w = r - kRmax; return 2 * u * w * w + 2 * u * u * w; }
-static double Kpp(double r) { const double u = r - kRmin, w = r - kRmax; return 2 * w * w + 8 * u * w + 2 * u * u; }
-static double phi_neu(double r, double th, int m) { return G(r) + Kf(r) * std::cos(m * th); }
+static double bN() {
+  return kPiL / (kRmax - kRmin);
+}
+static double G(double r) {
+  return std::cos(bN() * (r - kRmin));
+}
+static double Gp(double r) {
+  return -bN() * std::sin(bN() * (r - kRmin));
+}
+static double Gpp(double r) {
+  return -bN() * bN() * std::cos(bN() * (r - kRmin));
+}
+static double Kf(double r) {
+  const double u = r - kRmin, w = r - kRmax;
+  return u * u * w * w;
+}
+static double Kp(double r) {
+  const double u = r - kRmin, w = r - kRmax;
+  return 2 * u * w * w + 2 * u * u * w;
+}
+static double Kpp(double r) {
+  const double u = r - kRmin, w = r - kRmax;
+  return 2 * w * w + 8 * u * w + 2 * u * u;
+}
+static double phi_neu(double r, double th, int m) {
+  return G(r) + Kf(r) * std::cos(m * th);
+}
 static double f_neu(double r, double th, int m) {  // A = I
   const double rad = Gpp(r) + Gp(r) / r + (Kpp(r) + Kp(r) / r) * std::cos(m * th);
   const double azi = -(double)m * m * Kf(r) * std::cos(m * th) / (r * r);
@@ -111,7 +146,10 @@ static double f_neu(double r, double th, int m) {  // A = I
 }
 
 // Erreur L2 (ponderee volume r dr dtheta) entre phi numerique et phi exact.
-struct ErrL2 { double l2; double linf; };
+struct ErrL2 {
+  double l2;
+  double linf;
+};
 static ErrL2 err_vs_exact(const MultiFab& phi, const PolarGeometry& g, const Box2D& dom, int m) {
   const ConstArray4 p = phi.fab(0).const_array();
   const double dr = g.dr(), dth = g.dtheta();
@@ -122,7 +160,8 @@ static ErrL2 err_vs_exact(const MultiFab& phi, const PolarGeometry& g, const Box
       const double e = p(i, j, 0) - phi_exact(g.r_cell(i), g.theta_cell(j), m);
       l2 += e * e * w;
       vol += w;
-      if (std::fabs(e) > linf) linf = std::fabs(e);
+      if (std::fabs(e) > linf)
+        linf = std::fabs(e);
     }
   return {std::sqrt(l2 / vol), linf};
 }
@@ -132,7 +171,8 @@ static ErrL2 err_vs_exact(const MultiFab& phi, const PolarGeometry& g, const Box
 static void fill_const(MultiFab& mf, const Box2D& dom, double val) {
   Array4 a = mf.fab(0).array();
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
-    for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) a(i, j, 0) = val;
+    for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
+      a(i, j, 0) = val;
 }
 
 // DistributionMapping helper (boite unique mono-rang) pour les MultiFab de coefficient du test.
@@ -185,12 +225,17 @@ static PolarKrylovResult solve_tensor(int nr, int nth, int m, double arr, double
 }
 
 int main() {
-  std::printf("=== MMS de l'operateur elliptique POLAIRE TENSORIEL iteratif (Voie A etape 2a) ===\n");
-  std::printf("Anneau r in [%.2f, %.2f] (r_min > 0), theta in [0, 2pi). BiCGStab + precond RadialLine.\n",
-              kRmin, kRmax);
+  std::printf(
+      "=== MMS de l'operateur elliptique POLAIRE TENSORIEL iteratif (Voie A etape 2a) ===\n");
+  std::printf(
+      "Anneau r in [%.2f, %.2f] (r_min > 0), theta in [0, 2pi). BiCGStab + precond RadialLine.\n",
+      kRmin, kRmax);
   bool ok = true;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("  ECHEC %s\n", w); ok = false; }
+    if (!c) {
+      std::printf("  ECHEC %s\n", w);
+      ok = false;
+    }
   };
 
   const int m = 3;
@@ -239,7 +284,9 @@ int main() {
   //   nth grand (=256) pour que le stencil azimutal FD 2 points (iteratif) coincide avec le spectral
   //   -k^2 (direct) a O(dtheta^2). On compare les deux solutions point a point (ecart L2 relatif petit).
   // ---------------------------------------------------------------------------------------------
-  std::printf("\n--- (D) Consistance ISOTROPE iteratif vs PolarPoissonSolver direct (nr=128, nth=256) ---\n");
+  std::printf(
+      "\n--- (D) Consistance ISOTROPE iteratif vs PolarPoissonSolver direct (nr=128, nth=256) "
+      "---\n");
   {
     const int nr = 128, nth = 256;
     Box2D dom = Box2D::from_extents(nr, nth);
@@ -289,8 +336,8 @@ int main() {
         ref += pd(i, j, 0) * pd(i, j, 0) * w;
       }
     const double rel = std::sqrt(diff / ref);
-    std::printf("  iteratif iters=%d rel=%.2e ; ecart L2 relatif iteratif/direct = %.3e\n", kr.iters,
-                kr.rel_residual, rel);
+    std::printf("  iteratif iters=%d rel=%.2e ; ecart L2 relatif iteratif/direct = %.3e\n",
+                kr.iters, kr.rel_residual, rel);
     // Les deux solveurs partagent le stencil radial FV ; ils ne different qu'en theta (FD 2 points vs
     // spectral), ecart O(dtheta^2). A nth=256, dtheta ~ 0.0245, dtheta^2 ~ 6e-4 : ecart bien < 1e-2.
     chk(rel < 1e-2, "D_consistance_iteratif_vs_direct");
@@ -305,14 +352,16 @@ int main() {
   //   raison du DEFAUT RadialLine. On exige seulement que RadialLine fasse STRICTEMENT moins
   //   d'iterations que Jacobi a la grille fine (preuve quantitative du gain ; pas de MG requis).
   // ---------------------------------------------------------------------------------------------
-  std::printf("\n--- (E) Preconditionneur Jacobi vs RadialLine (cas tenseur, iterations BiCGStab) ---\n");
+  std::printf(
+      "\n--- (E) Preconditionneur Jacobi vs RadialLine (cas tenseur, iterations BiCGStab) ---\n");
   {
     // solve_tensor utilise un plafond large (4000 iters) : Jacobi a une vraie chance de converger a la
     // grille fine, ce qui rend la comparaison honnete (il plafonne quand meme a n=96).
     for (int n : {32, 96}) {
       ErrL2 ej, el;
       PolarKrylovResult krj = solve_tensor(n, n, m, arr, art, atr, att, ej, PolarPrecond::Jacobi);
-      PolarKrylovResult krl = solve_tensor(n, n, m, arr, art, atr, att, el, PolarPrecond::RadialLine);
+      PolarKrylovResult krl =
+          solve_tensor(n, n, m, arr, art, atr, att, el, PolarPrecond::RadialLine);
       std::printf("  n=%-4d : Jacobi iters=%-5d (conv=%d) | RadialLine iters=%-4d (conv=%d)\n", n,
                   krj.iters, (int)krj.converged, krl.iters, (int)krl.converged);
       if (n == 96) {
@@ -329,7 +378,9 @@ int main() {
   //   Avec le pinning, il converge et l'erreur (modulo la jauge = moyenne FV retiree) est O(2). On
   //   raffine (nr=nth) et on observe l'ordre 2 + convergence. Mode m=2.
   // ---------------------------------------------------------------------------------------------
-  std::printf("\n--- (F) Neumann homogene 2 bords (operateur singulier) + pinning de jauge, mode m=2 ---\n");
+  std::printf(
+      "\n--- (F) Neumann homogene 2 bords (operateur singulier) + pinning de jauge, mode m=2 "
+      "---\n");
   {
     const int mN = 2;
     double pF1 = 0, pF2 = 0;
@@ -365,13 +416,15 @@ int main() {
           me += phi_neu(g.r_cell(i), g.theta_cell(j), mN) * w;
           vol += w;
         }
-      mn /= vol; me /= vol;
+      mn /= vol;
+      me /= vol;
       double l2 = 0, v2 = 0;
       for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
         for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
           const double w = g.r_cell(i) * dr * dth;
           const double e = (p(i, j, 0) - mn) - (phi_neu(g.r_cell(i), g.theta_cell(j), mN) - me);
-          l2 += e * e * w; v2 += w;
+          l2 += e * e * w;
+          v2 += w;
         }
       l2s[k] = std::sqrt(l2 / v2);
       std::printf("  n=%-4d : L2(jauge)=%.4e  [BiCGStab iters=%d rel=%.2e conv=%d]\n", n, l2s[k],
@@ -385,6 +438,7 @@ int main() {
   }
 
   std::printf("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
-  if (ok) std::printf("OK test_polar_tensor_elliptic_mms\n");
+  if (ok)
+    std::printf("OK test_polar_tensor_elliptic_mms\n");
   return ok ? 0 : 1;
 }

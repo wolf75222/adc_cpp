@@ -44,7 +44,10 @@ struct ScalarElliptic {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int N = 32;
@@ -84,7 +87,8 @@ int main() {
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
       for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
         const Real ref = alpha * (a0(i, j, 0) - n0);
-        if (r(i, j, 0) != ref) bit_eq = false;
+        if (r(i, j, 0) != ref)
+          bit_eq = false;
       }
     chk(bit_eq, "background_rhs_bit_identique");
   }
@@ -117,7 +121,8 @@ int main() {
         Real ref = Real(0);
         ref += m0.elliptic_rhs(StateVec<1>{a0(i, j, 0)});  // charge q0 n0
         ref += m1.elliptic_rhs(StateVec<1>{a1(i, j, 0)});  // gravite sign 4piG (n1 - rho0)
-        if (r(i, j, 0) != ref) bit_eq = false;
+        if (r(i, j, 0) != ref)
+          bit_eq = false;
       }
     chk(bit_eq, "somme_charge_plus_gravite_bit_identique");
 
@@ -127,11 +132,13 @@ int main() {
     for (int j = v.lo[1]; j <= v.hi[1] && !differs; ++j)
       for (int i = v.lo[0]; i <= v.hi[0] && !differs; ++i) {
         const Real charge_only = q0 * a0(i, j, 0) + q0 * a1(i, j, 0);
-        if (r(i, j, 0) != charge_only) differs = true;
+        if (r(i, j, 0) != charge_only)
+          differs = true;
       }
     chk(differs, "gravite_distincte_de_charge");
   }
 
-  if (fails == 0) std::printf("OK test_elliptic_composite_rhs\n");
+  if (fails == 0)
+    std::printf("OK test_elliptic_composite_rhs\n");
   return fails == 0 ? 0 : 1;
 }

@@ -3,8 +3,8 @@
 #include <adc/core/types.hpp>
 #include <adc/amr/refinement_ratio.hpp>
 #include <adc/coupling/amr/amr_diagnostics.hpp>     // amr_mass, amr_max_drift_speed
-#include <adc/coupling/amr/amr_level_storage.hpp>    // AmrLevelStack
-#include <adc/coupling/amr/amr_regrid_coupler.hpp>   // amr_regrid_finest (Berger-Rigoutsos)
+#include <adc/coupling/amr/amr_level_storage.hpp>   // AmrLevelStack
+#include <adc/coupling/amr/amr_regrid_coupler.hpp>  // amr_regrid_finest (Berger-Rigoutsos)
 #include <adc/coupling/single/coupler.hpp>  // detail::coupler_eval_rhs (f = model.elliptic_rhs(U))
 #include <adc/numerics/elliptic/composite_fac_poisson.hpp>  // COMPOSITE FAC 2-level Poisson solver (opt-in)
 #include <adc/numerics/elliptic/elliptic_solver.hpp>
@@ -25,9 +25,9 @@
 #include <cmath>       // std::hypot
 #include <cstddef>     // std::size_t
 #include <functional>  // std::function (conducting-wall predicate passed to the MG)
-#include <map>         // named_aux_: model-named aux fields (comp -> coarse field), re-applied by compute_aux
-#include <stdexcept>   // std::runtime_error (density size guard)
-#include <utility>     // std::pair, std::move
+#include <map>  // named_aux_: model-named aux fields (comp -> coarse field), re-applied by compute_aux
+#include <stdexcept>  // std::runtime_error (density size guard)
+#include <utility>    // std::pair, std::move
 #include <vector>
 
 /// @file
@@ -69,9 +69,11 @@ inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
         for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
           const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
           const int pb = mf_find_box(parent, ci, cj);
-          if (pb < 0) continue;
+          if (pb < 0)
+            continue;
           const ConstArray4 pp = parent.fab(pb).const_array();
-          for (int k = 0; k < nc; ++k) c(i, j, k) = pp(ci, cj, k);
+          for (int k = 0; k < nc; ++k)
+            c(i, j, k) = pp(ci, cj, k);
         }
     }
     return;
@@ -79,7 +81,8 @@ inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
   const BoxArray& pba = parent.box_array();  // GLOBAL: rank-independent coverage
   auto covered = [&](int ci, int cj) {
     for (int b = 0; b < pba.size(); ++b)
-      if (pba[b].contains(ci, cj)) return true;
+      if (pba[b].contains(ci, cj))
+        return true;
     return false;
   };
   const BoxArray ccoarse = coarsen_grown(child.box_array(), child.n_grow(), kAmrRefRatio);
@@ -93,8 +96,10 @@ inline void coupler_inject_aux_mb(const MultiFab& parent, MultiFab& child,
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
         const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
-        if (!covered(ci, cj)) continue;  // outside coverage -> keep the child value
-        for (int k = 0; k < nc; ++k) c(i, j, k) = pp(ci, cj, k);
+        if (!covered(ci, cj))
+          continue;  // outside coverage -> keep the child value
+        for (int k = 0; k < nc; ++k)
+          c(i, j, k) = pp(ci, cj, k);
       }
   }
 }
@@ -117,8 +122,12 @@ inline void coupler_write_coarse(MultiFab& U, const std::vector<double>& rho, in
       for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
         const Real r = rho[static_cast<std::size_t>(j) * n + i];
         u(i, j, 0) = r;
-        if (ncomp >= 3) { u(i, j, 1) = 0; u(i, j, 2) = 0; }
-        if (ncomp == 4) u(i, j, 3) = r / gm1;
+        if (ncomp >= 3) {
+          u(i, j, 1) = 0;
+          u(i, j, 2) = 0;
+        }
+        if (ncomp == 4)
+          u(i, j, 3) = r / gm1;
       }
   }
 }
@@ -135,8 +144,9 @@ inline void coupler_write_coarse_state(MultiFab& U, const std::vector<double>& s
                                        int ncomp) {
   const std::size_t nn = static_cast<std::size_t>(n) * static_cast<std::size_t>(n);
   if (state.size() != nn * static_cast<std::size_t>(ncomp))
-    throw std::runtime_error("AMR coupler: initial state of size != ncomp*n*n (full conservative "
-                             "state; ncomp == model n_vars)");
+    throw std::runtime_error(
+        "AMR coupler: initial state of size != ncomp*n*n (full conservative "
+        "state; ncomp == model n_vars)");
   device_fence();
   for (int li = 0; li < U.local_size(); ++li) {
     Array4 u = U.fab(li).array();
@@ -166,7 +176,8 @@ inline std::vector<double> coupler_read_coarse(const MultiFab& U, int n, bool re
       for (int i = v.lo[0]; i <= v.hi[0]; ++i)
         out[static_cast<std::size_t>(j) * n + i] = u(i, j, 0);
   }
-  if (!replicated) all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
+  if (!replicated)
+    all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
   return out;
 }
 
@@ -187,7 +198,8 @@ inline std::vector<double> coupler_read_coarse_phi(const MultiFab& aux0, int n, 
       for (int i = v.lo[0]; i <= v.hi[0]; ++i)
         out[static_cast<std::size_t>(j) * n + i] = a(i, j, 0);
   }
-  if (!replicated) all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
+  if (!replicated)
+    all_reduce_sum_inplace(out.data(), static_cast<int>(out.size()));
   return out;
 }
 
@@ -208,9 +220,11 @@ inline void coupler_inject_coarse_to_fine_mb(const MultiFab& Uc, MultiFab& Uf, b
         for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
           const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
           const int pb = mf_find_box(Uc, ci, cj);
-          if (pb < 0) continue;
+          if (pb < 0)
+            continue;
           const ConstArray4 c = Uc.fab(pb).const_array();
-          for (int k = 0; k < nc; ++k) f(i, j, k) = c(ci, cj, k);
+          for (int k = 0; k < nc; ++k)
+            f(i, j, k) = c(ci, cj, k);
         }
     }
     return;
@@ -226,7 +240,8 @@ inline void coupler_inject_coarse_to_fine_mb(const MultiFab& Uc, MultiFab& Uf, b
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
       for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
         const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
-        for (int k = 0; k < nc; ++k) f(i, j, k) = c(ci, cj, k);
+        for (int k = 0; k < nc; ++k)
+          f(i, j, k) = c(ci, cj, k);
       }
   }
 }
@@ -279,11 +294,11 @@ class AmrCouplerMP {
   // Removing the replicated path is DEFERRED as long as the distributed one is not strictly
   // superior. mg_ receives the same flag (otherwise, under replicated MPI, the coarse would fall on
   // the single rank 0 and compute_aux would read a phi absent elsewhere). In serial, both coincide.
-  AmrCouplerMP(const Model& model, const Geometry& geom, const BoxArray& ba_coarse,
-               const BCRec& bc, std::vector<AmrLevelMP> levels,
-               std::function<bool(Real, Real)> active = {},
+  AmrCouplerMP(const Model& model, const Geometry& geom, const BoxArray& ba_coarse, const BCRec& bc,
+               std::vector<AmrLevelMP> levels, std::function<bool(Real, Real)> active = {},
                bool replicated_coarse = true)
-      : model_(model), geom_(geom),
+      : model_(model),
+        geom_(geom),
         mg_(geom, ba_coarse, bc, std::move(active), replicated_coarse),
         stack_(geom.domain, std::move(levels), aux_comps<Model>()),
         replicated_coarse_(replicated_coarse) {}
@@ -366,8 +381,8 @@ class AmrCouplerMP {
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
         for (int i = v.lo[0]; i <= v.hi[0]; ++i)
           for (int c = 0; c < nc; ++c)
-            u(i, j, c) = s[static_cast<std::size_t>(c) * nf * nf + static_cast<std::size_t>(j) * nf +
-                           static_cast<std::size_t>(i)];
+            u(i, j, c) = s[static_cast<std::size_t>(c) * nf * nf +
+                           static_cast<std::size_t>(j) * nf + static_cast<std::size_t>(i)];
     }
   }
 
@@ -422,21 +437,25 @@ class AmrCouplerMP {
   void set_hierarchy(const std::vector<Box2D>& fine_boxes) {
     std::vector<AmrLevelMP>& L = stack_.L();
     if (L.size() < 2)
-      throw std::runtime_error("AmrCouplerMP::set_hierarchy: mono-level hierarchy (no fine patch "
-                               "to impose)");
+      throw std::runtime_error(
+          "AmrCouplerMP::set_hierarchy: mono-level hierarchy (no fine patch "
+          "to impose)");
     if (fine_boxes.empty())
-      throw std::runtime_error("AmrCouplerMP::set_hierarchy: no saved fine box (restart of a "
-                               "fine-patch hierarchy required)");
+      throw std::runtime_error(
+          "AmrCouplerMP::set_hierarchy: no saved fine box (restart of a "
+          "fine-patch hierarchy required)");
     const int ngf = L[1].U.n_grow();  // inherit the ghost width of the current fine (scheme parity)
     BoxArray fb(fine_boxes);
-    DistributionMapping dmap(static_cast<int>(fb.size()), n_ranks());  // single-rank -> all on rank 0
+    DistributionMapping dmap(static_cast<int>(fb.size()),
+                             n_ranks());  // single-rank -> all on rank 0
     L[1].U = regrid_field_on_layout(fb, dmap, L[0].U, L[1].U, /*pk=*/0, ngf, replicated_coarse_);
     stack_.reattach_aux(1);  // realloc aux[1] on the new layout + rewire L[1].aux
   }
 
   void sync_down() {  // average fine -> coarse over the whole hierarchy (multi-box)
     auto& L = stack_.L();
-    for (int k = stack_.nlev() - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
+    for (int k = stack_.nlev() - 1; k >= 1; --k)
+      mf_average_down_mb(L[k].U, L[k - 1].U);
   }
 
   /// OPT-IN: replaces the Option A AMR Poisson (coarse solve + piecewise-constant gradient injection)
@@ -493,7 +512,10 @@ class AmrCouplerMP {
 
   /// Updates the hierarchy before a step: sync_down (fine -> coarse) then compute_aux (coarse
   /// Poisson + grad phi + injection to the fine levels).
-  void update() { sync_down(); compute_aux(); }
+  void update() {
+    sync_down();
+    compute_aux();
+  }
 
   // Selectable spatial discretization (default FirstOrder = NoSlope + Rusanov,
   // strictly identical to the old step()). recon_prim selects the primitive
@@ -582,8 +604,8 @@ class AmrCouplerMP {
         for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
           const auto us = load_state<Model>(u, i, j);
           const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
-          w = std::max(w, std::max(model_.max_wave_speed(us, ax, 0),
-                                   model_.max_wave_speed(us, ax, 1)));
+          w = std::max(
+              w, std::max(model_.max_wave_speed(us, ax, 0), model_.max_wave_speed(us, ax, 1)));
         }
     }
     return all_reduce_max(w);
@@ -632,7 +654,8 @@ class AmrCouplerMP {
   Geometry geom_;
   Elliptic mg_;
   AmrLevelStack<AmrLevelMP> stack_;
-  bool replicated_coarse_;  // level 0 replicated (true) or distributed multi-box (false, de-replication)
+  bool
+      replicated_coarse_;  // level 0 replicated (true) or distributed multi-box (false, de-replication)
   // COMPOSITE FAC Poisson path (opt-in, set_composite_poisson). fac_ built lazily on the
   // current fine patch (rebuilt if the patch changes after regrid). Default OFF -> Option A bit-identical.
   bool composite_poisson_ = false;
@@ -652,10 +675,12 @@ class AmrCouplerMP {
   // valid cells only, global flat index j*nx+i. compute_aux runs the coarse->fine injection right
   // after, carrying the named comps to the fine levels. No-op without a named field.
   void apply_named_aux() {
-    if (named_aux_.empty()) return;
+    if (named_aux_.empty())
+      return;
     const int row = stack_.domain().nx();
     for (const auto& [comp, field] : named_aux_) {
-      if (field.empty() || comp >= stack_.aux(0).ncomp()) continue;
+      if (field.empty() || comp >= stack_.aux(0).ncomp())
+        continue;
       for (int li = 0; li < stack_.aux(0).local_size(); ++li) {
         Array4 a = stack_.aux(0).fab(li).array();
         const Box2D v = stack_.aux(0).box(li);
@@ -670,9 +695,11 @@ class AmrCouplerMP {
   // declared component's physical-face ghosts; aux_halo_override(mg_.bc(), policy) keeps periodic faces
   // periodic (so on a periodic domain this is a no-op). Mirror of SystemFieldSolver::apply_named_aux_bc.
   void apply_named_aux_bc() {
-    if (named_aux_bc_.empty()) return;
+    if (named_aux_bc_.empty())
+      return;
     for (const auto& [comp, policy] : named_aux_bc_) {
-      if (comp >= stack_.aux(0).ncomp()) continue;
+      if (comp >= stack_.aux(0).ncomp())
+        continue;
       fill_physical_bc(stack_.aux(0), stack_.domain(), aux_halo_override(mg_.bc(), policy), comp);
     }
   }
