@@ -234,6 +234,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **`adc/coupling` headers grouped by family** (ADC-326): the 18 flat coupling headers are moved into
+  abstraction families (`base/`, `source/`, `single/`, `static_system/`, `amr/`, `schur/`,
+  `deprecated/`) so the API surface is legible; internal cross-includes now use the canonical family
+  paths and a new `include/adc/coupling/README.md` documents each family's stability tier (stable,
+  reference/static, AMR, Schur, deprecated). Every historical `#include <adc/coupling/<name>.hpp>`
+  keeps compiling through a forwarding stub, so the move is source-compatible with no behavior change.
 - **Cartesian spatial operator split into focused modules** (ADC-328): the ~975-line
   `include/adc/numerics/spatial_operator.hpp` is split into a one-way module DAG under
   `include/adc/numerics/spatial/` (`state_access`, `positivity`, `face_flux`, `wave_speed`,
