@@ -30,6 +30,13 @@ set -euo pipefail
 ENV_NAME="${ADC_ENV_NAME:-adc}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
+# --- git hygiene: ignore the mechanical clang-format sweep in `git blame` (ADC-118) ----------------
+# The repo ships .git-blame-ignore-revs (the full-tree reformat SHA). Point local `git blame` at it so
+# the sweep does not mask real authorship; GitHub's blame UI honors the file automatically.
+if git -C "$HERE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$HERE" config blame.ignoreRevsFile .git-blame-ignore-revs || true
+fi
+
 # --- arguments --------------------------------------------------------------------------------------
 ADC_WITH_CUDA=0
 while [[ $# -gt 0 ]]; do

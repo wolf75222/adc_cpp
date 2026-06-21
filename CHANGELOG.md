@@ -239,6 +239,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Repo-wide clang-format sweep** (ADC-118): `include/`, `python/` and `tests/` reformatted to
+  `.clang-format` in one mechanical commit (`78816b0`, no functional change), bringing the
+  `format`-scanned trees to zero non-conforming. Its SHA is recorded in `.git-blame-ignore-revs` so
+  `git blame` skips it (`git config blame.ignoreRevsFile .git-blame-ignore-revs`, wired into
+  `scripts/setup_env.sh`; GitHub's blame UI honors the file automatically). The four tests carrying a
+  generated-C++ raw string are fenced with `// clang-format off` to keep the emitted source verbatim.
 - **`adc/coupling` headers grouped by family** (ADC-326): the 18 flat coupling headers are moved into
   abstraction families (`base/`, `source/`, `single/`, `static_system/`, `amr/`, `schur/`,
   `deprecated/`) so the API surface is legible; internal cross-includes now use the canonical family
