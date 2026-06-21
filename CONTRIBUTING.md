@@ -117,6 +117,12 @@ for a focused change, since the PR description carries the full context. Avoid `
 the required status check (`gate (agregation requise)`, the aggregating job of `ci.yml`) must
 be green before a merge. Force-pushes and deletion of `master` are blocked.
 
+Review is routed by zone through [`.github/CODEOWNERS`](.github/CODEOWNERS): the owner of a
+touched directory is auto-requested as reviewer. Today @wolf75222 owns every zone; the per-zone
+split documents the responsible owner per area and prepares reviewer routing as the team grows. Making
+that approval a merge gate (the "require review from Code Owners" branch-protection rule) is a
+governance decision, separate from the file itself.
+
 Before merging a substantial PR, run an independent review pass (the `/code-review` skill, or
 `pr-review-toolkit`) and act on its result: a High-severity finding is either fixed or
 explicitly dismissed in the PR, with the reason. In a solo plus agents setting this pass is

@@ -20,6 +20,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`.github/CODEOWNERS` routes review by zone** (ADC-252): the owner of a touched directory is
+  auto-requested as reviewer. Solo today, `@wolf75222` owns every zone; the per-zone split documents
+  the responsible owner per area and prepares reviewer routing at scale. This is the SWE-at-Google ch.10
+  "Ownership" bit of the review process; turning it into a merge gate ("require review from Code
+  Owners") is the branch-protection decision (ADC-166). CONTRIBUTING "Code review" links to it.
 - **Regression guard: the red-black GS smoother reuses the cached halo schedule** (ADC-262):
   `tests/test_poisson_smoother_cache.cpp` asserts that a multi-level GeometricMG V-cycle builds the
   halo schedule once per MG-level layout and adds ZERO further builds across subsequent cycles, so the

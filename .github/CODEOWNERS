@@ -1,0 +1,39 @@
+# Code owners -- routes review by zone (SWE-at-Google ch.10, "Ownership").
+#
+# An owner is the gatekeeper of a directory: GitHub auto-requests their review on
+# any PR that touches it, and -- once branch protection requires review from code
+# owners -- their approval gates the merge. Today adc_cpp is solo plus agents, so
+# @wolf75222 owns every zone; the per-zone split is deliberate, not redundant. It
+# documents the responsible owner per area and prepares reviewer auto-assignment for when
+# the team grows (adding a second owner to a line is then a one-line change).
+#
+# This file only declares ownership. Turning it into a merge gate is the branch
+# protection decision (ADC-166): enable "Require review from Code Owners" on master.
+# Until then CODEOWNERS drives review auto-assignment, not enforcement.
+#
+# Matching: last matching pattern wins, so the global fallback comes first and the
+# specific zones override it. See CONTRIBUTING.md "Code review".
+
+# Global fallback -- any path not matched by a zone below.
+*                       @wolf75222
+
+# C++23 core: mesh, AMR, numerics, elliptic, coupling, runtime, physics, validation.
+/include/adc/           @wolf75222
+
+# Python bindings, the DSL surface and the Python tests.
+/python/                @wolf75222
+
+# C++ tests, benchmarks and fuzzing harnesses.
+/tests/                 @wolf75222
+/bench/                 @wolf75222
+/fuzz/                  @wolf75222
+
+# Build, packaging, CI/CD and developer tooling.
+/CMakeLists.txt         @wolf75222
+/CMakePresets.json      @wolf75222
+/cmake/                 @wolf75222
+/.github/               @wolf75222
+/scripts/               @wolf75222
+
+# Documentation (Sphinx site, vendored guides, doc tooling).
+/docs/                  @wolf75222
