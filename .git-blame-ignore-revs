@@ -1,0 +1,10 @@
+# Revisions ignored by `git blame` -- bulk mechanical commits with no authorship signal.
+#
+# Enable locally (one time per clone):
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# scripts/setup_env.sh does this for you. GitHub's blame UI honors this file automatically.
+#
+# Append the FULL 40-char SHA of any future no-functional-change sweep below, newest last.
+
+# ADC-118: repo-wide clang-format sweep across include/, python/, tests/ (no functional change).
+78816b091ed18b7c0be8926bb1e25ec9b6e190ca
