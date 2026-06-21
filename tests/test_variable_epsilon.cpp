@@ -30,11 +30,12 @@ static constexpr double kPi = 3.14159265358979323846;
 static double phi_exact(double x, double y) {
   return std::sin(kPi * x) * std::sin(kPi * y);
 }
-static double eps_field(double x, double /*y*/) { return 1.0 + 0.5 * x; }
+static double eps_field(double x, double /*y*/) {
+  return 1.0 + 0.5 * x;
+}
 static double rhs_exact(double x, double y) {
   const double s = std::sin(kPi * x) * std::sin(kPi * y);
-  return -(1.0 + 0.5 * x) * 2.0 * kPi * kPi * s +
-         0.5 * kPi * std::cos(kPi * x) * std::sin(kPi * y);
+  return -(1.0 + 0.5 * x) * 2.0 * kPi * kPi * s + 0.5 * kPi * std::cos(kPi * x) * std::sin(kPi * y);
 }
 
 // Resout div(eps grad phi) = f sur n x n (Dirichlet exact), renvoie l'erreur L-inf.
@@ -50,9 +51,8 @@ static double solve_mms(int n) {
   mg.set_epsilon([](Real x, Real y) { return Real(eps_field(x, y)); });
 
   Array4 af = mg.rhs().fab(0).array();
-  for_each_cell(dom, [af, geom](int i, int j) {
-    af(i, j, 0) = rhs_exact(geom.x_cell(i), geom.y_cell(j));
-  });
+  for_each_cell(
+      dom, [af, geom](int i, int j) { af(i, j, 0) = rhs_exact(geom.x_cell(i), geom.y_cell(j)); });
   mg.phi().set_val(0.0);
 
   const Real r0 = mg.current_residual();
@@ -66,8 +66,7 @@ static double solve_mms(int n) {
   double eInf = 0;
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
-      eInf = std::max(eInf,
-                      std::fabs(p(i, j, 0) - phi_exact(geom.x_cell(i), geom.y_cell(j))));
+      eInf = std::max(eInf, std::fabs(p(i, j, 0) - phi_exact(geom.x_cell(i), geom.y_cell(j))));
   return eInf;
 }
 
@@ -107,15 +106,18 @@ static double uniform_eps_residual_gap(int n) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const double e32 = solve_mms(32);
   const double e64 = solve_mms(64);
   const double e128 = solve_mms(128);
   const double r1 = e32 / e64, r2 = e64 / e128;
-  std::printf("eps variable MMS : Linf  e32=%.3e e64=%.3e e128=%.3e | ratios %.2f %.2f\n",
-              e32, e64, e128, r1, r2);
+  std::printf("eps variable MMS : Linf  e32=%.3e e64=%.3e e128=%.3e | ratios %.2f %.2f\n", e32, e64,
+              e128, r1, r2);
   chk(r1 > 3.5 && r1 < 4.5, "ordre2_ratio_32_64");
   chk(r2 > 3.5 && r2 < 4.5, "ordre2_ratio_64_128");
 
@@ -123,6 +125,7 @@ int main() {
   std::printf("eps uniforme=1 : ecart residu vs operateur constant = %.3e\n", gap);
   chk(gap < 1e-12, "eps_uniforme_non_regression");
 
-  if (fails == 0) std::printf("OK test_variable_epsilon\n");
+  if (fails == 0)
+    std::printf("OK test_variable_epsilon\n");
   return fails == 0 ? 0 : 1;
 }

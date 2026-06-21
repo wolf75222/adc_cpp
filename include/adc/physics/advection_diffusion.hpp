@@ -12,5 +12,6 @@
 #include <adc/validation/physics/advection_diffusion.hpp>
 
 namespace adc {
-using validation::AdvectionDiffusion;  ///< deprecated alias; prefer adc::validation::AdvectionDiffusion
+using validation::
+    AdvectionDiffusion;  ///< deprecated alias; prefer adc::validation::AdvectionDiffusion
 }  // namespace adc

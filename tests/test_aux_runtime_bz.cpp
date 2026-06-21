@@ -33,7 +33,9 @@ struct BzSource {
 };
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const { return Real(0); }
+  ADC_HD Real rhs(const State&) const {
+    return Real(0);
+  }
 };
 
 using MagModel = CompositeModel<ExBVelocity, BzSource, NoEll>;
@@ -48,7 +50,10 @@ int main(int argc, char** argv) {
 #endif
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 32;
@@ -72,7 +77,8 @@ int main(int argc, char** argv) {
   // eval_rhs = -div F + S. flux ExB(grad=0)=0 -> R = source = B_z u = c.
   const std::vector<double> R = sys.eval_rhs("a");
   double maxerr = 0;
-  for (double r : R) maxerr = std::fmax(maxerr, std::fabs(r - c));
+  for (double r : R)
+    maxerr = std::fmax(maxerr, std::fabs(r - c));
   std::printf("  runtime System : eval_rhs, max|R - B_z| = %.2e (n_aux=%d)\n", maxerr,
               MagModel::n_aux);
   chk(maxerr < 1e-12, "runtime_system_reads_Bz");
@@ -83,10 +89,12 @@ int main(int argc, char** argv) {
   sys.solve_fields();
   const std::vector<double> R0 = sys.eval_rhs("a");
   double maxabs = 0;
-  for (double r : R0) maxabs = std::fmax(maxabs, std::fabs(r));
+  for (double r : R0)
+    maxabs = std::fmax(maxabs, std::fabs(r));
   std::printf("  controle B_z=0 : ||R||_inf = %.2e\n", maxabs);
   chk(maxabs < 1e-12, "runtime_system_Bz_zero");
 
-  if (fails == 0) std::printf("OK test_aux_runtime_bz\n");
+  if (fails == 0)
+    std::printf("OK test_aux_runtime_bz\n");
   return fails ? 1 : 0;
 }

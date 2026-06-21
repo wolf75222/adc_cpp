@@ -83,7 +83,8 @@ struct MockImpl {
   // (0,0)). C'est le couplage champ<-densite que le transport (via la source) doit voir COHERENT.
   void solve_fields() {
     ++solve_calls;
-    if (sp.empty() || sp[0].U.local_size() == 0) return;  // rang sans fab local (MPI mono-box) : no-op
+    if (sp.empty() || sp[0].U.local_size() == 0)
+      return;  // rang sans fab local (MPI mono-box) : no-op
     const ConstArray4 a = sp[0].U.fab(0).const_array();
     g = a(0, 0, 0);  // g <- x courant
   }
@@ -96,7 +97,10 @@ static void fill_ic(MultiFab& U, Real x0, Real y0) {
     Array4 a = U.fab(li).array();
     const Box2D b = U.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) { a(i, j, 0) = x0; a(i, j, 1) = y0; }
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
+        a(i, j, 0) = x0;
+        a(i, j, 1) = y0;
+      }
   }
 }
 
@@ -125,7 +129,8 @@ static MockImpl make_impl(Real x0, Real y0) {
       Array4 a = U.fab(li).array();
       const Box2D b = U.box(li);
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) += h * a(i, j, 1);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          a(i, j, 0) += h * a(i, j, 1);
     }
   };
   impl.sp.push_back(std::move(s));
@@ -142,7 +147,8 @@ static void attach_source(MockImpl& impl) {
       Array4 a = U.fab(li).array();
       const Box2D b = U.box(li);
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 1) += h * g;
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          a(i, j, 1) += h * g;
     }
   };
 }
@@ -185,8 +191,10 @@ static int count_solves(bool strang, int k) {
 static void run_one_step(bool with_transport, bool with_source, double dt, Real x0, Real y0,
                          double& xf, double& yf) {
   MockImpl impl = make_impl(x0, y0);
-  if (!with_transport) impl.sp[0].advance = [](MultiFab&, Real, int) {};  // H = identite
-  if (with_source) attach_source(impl);  // sinon source_step reste nullptr -> S = no-op (etage absent)
+  if (!with_transport)
+    impl.sp[0].advance = [](MultiFab&, Real, int) {};  // H = identite
+  if (with_source)
+    attach_source(impl);  // sinon source_step reste nullptr -> S = no-op (etage absent)
 
   Stepper st(&impl);
   st.set_scheme(adc::stepper::SplitScheme::Strang);
@@ -199,7 +207,10 @@ static void run_one_step(bool with_transport, bool with_source, double dt, Real 
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const double T = 0.8;
@@ -228,7 +239,8 @@ int main() {
       st.set_scheme(adc::stepper::SplitScheme::Lie);
       st.step(dt);
       const ConstArray4 a = impl.sp[0].U.fab(0).const_array();
-      xs = a(0, 0, 0); ys = a(0, 0, 1);
+      xs = a(0, 0, 0);
+      ys = a(0, 0, 1);
     }
     // Reference manuelle Lie : solve (g=x0) ; H : x = x0 + dt*y0 ; S : y = y0 + dt*g(=x0).
     const double xref = (double)x0 + dt * (double)y0;
@@ -248,7 +260,8 @@ int main() {
     run_one_step(/*transport*/ true, /*source*/ false, dt, x0, y0, xf, yf);
     // H seul : 2 demi-avances de transport pur = H(dt/2) puis H(dt/2). y inchange ; x += dt*y0.
     const double xref = (double)x0 + dt * (double)y0;
-    chk(std::fabs(xf - xref) < 1e-14 && std::fabs(yf - (double)y0) < 1e-14, "strang_source_nulle_eq_transport");
+    chk(std::fabs(xf - xref) < 1e-14 && std::fabs(yf - (double)y0) < 1e-14,
+        "strang_source_nulle_eq_transport");
   }
 
   // --- (E) DEGENERESCENCE transport nul : Strang(H0 S(dt) H0) == source pure S(dt) --------------------
@@ -259,9 +272,11 @@ int main() {
     // H = identite -> g = x0 a chaque solve. S(dt) plein : y = y0 + dt*x0 ; x inchange.
     const double xref = (double)x0;
     const double yref = (double)y0 + dt * (double)x0;
-    chk(std::fabs(xf - xref) < 1e-14 && std::fabs(yf - yref) < 1e-14, "strang_transport_nul_eq_source");
+    chk(std::fabs(xf - xref) < 1e-14 && std::fabs(yf - yref) < 1e-14,
+        "strang_transport_nul_eq_source");
   }
 
-  if (fails == 0) std::printf("OK test_strang_splitting\n");
+  if (fails == 0)
+    std::printf("OK test_strang_splitting\n");
   return fails == 0 ? 0 : 1;
 }

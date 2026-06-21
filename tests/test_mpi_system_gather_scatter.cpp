@@ -48,7 +48,9 @@ using namespace adc;
 // On teste l'avance en temps, pas la physique ; la densite reste uniforme.
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const { return Real(0); }
+  ADC_HD Real rhs(const State&) const {
+    return Real(0);
+  }
 };
 // Modele scalaire : transport E x B (vitesse nulle ici car phi=0) + source nulle + elliptic nul.
 using ScalarModel = CompositeModel<ExBVelocity, NoSource, NoEll>;
@@ -61,7 +63,10 @@ int main(int argc, char** argv) {
   const int me = my_rank(), np = n_ranks();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("[rank %d/%d] FAIL %s\n", me, np, w); ++fails; }
+    if (!c) {
+      std::printf("[rank %d/%d] FAIL %s\n", me, np, w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -92,7 +97,8 @@ int main(int argc, char** argv) {
   // (1) step() : appelle solve_fields (collectif) puis s.advance(U, dt, nsub) sur TOUS les rangs.
   //     advance (finding 8, chemin compile) appelle copy_state / write_state sans garde -> crash
   //     hors-bornes sur les rangs vides avant le fix. APRES : no-op sur les rangs vides.
-  for (int s = 0; s < nsteps; ++s) sys.step(dt);
+  for (int s = 0; s < nsteps; ++s)
+    sys.step(dt);
 
   // (2) step_cfl(cfl) : appelle s.max_speed(U) sur TOUS les rangs, puis all_reduce_max du dt CFL
   //     (collectif, APRES les max_speed). max_speed (finding 8) appelait copy_state sans garde.
@@ -110,7 +116,8 @@ int main(int argc, char** argv) {
   if (owns) {
     const std::vector<double> R = sys.eval_rhs("u");
     bool rfin = (R.size() == nn);
-    for (double r : R) rfin = rfin && std::isfinite(r);
+    for (double r : R)
+      rfin = rfin && std::isfinite(r);
     chk(rfin, "rhs_fini");
   }
 
@@ -123,15 +130,17 @@ int main(int argc, char** argv) {
     double dmin = d[0], dmax = d[0];
     for (double v : d) {
       finite = finite && std::isfinite(v);
-      if (v < dmin) dmin = v;
-      if (v > dmax) dmax = v;
+      if (v < dmin)
+        dmin = v;
+      if (v > dmax)
+        dmax = v;
     }
     chk(finite, "densite_finie");
     // etat uniforme, phi=0 -> transport nul -> densite INCHANGEE (a la precision machine).
     chk(std::fabs(dmin - rho0) < 1e-10, "densite_min_invariante");
     chk(std::fabs(dmax - rho0) < 1e-10, "densite_max_invariante");
-    std::printf("[rank %d/%d] np=%d  rho_min=%.12f  rho_max=%.12f  dt_cfl=%.6e\n",
-                me, np, np, dmin, dmax, dt_cfl);
+    std::printf("[rank %d/%d] np=%d  rho_min=%.12f  rho_max=%.12f  dt_cfl=%.6e\n", me, np, np, dmin,
+                dmax, dt_cfl);
   }
 
   // mass() est COLLECTIVE (sum -> all_reduce) : TOUS les rangs l'appellent (sinon interblocage).

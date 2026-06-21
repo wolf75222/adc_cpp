@@ -40,9 +40,9 @@ concept SpatialDiscretisationLike = requires {
 };
 
 // Usual bundles.
-using FirstOrder       = SpatialDiscretisation<NoSlope, RusanovFlux>;   // robust 1st order
-using MusclMinmod      = SpatialDiscretisation<Minmod,  RusanovFlux>;   // 2nd order TVD
-using MusclVanLeer     = SpatialDiscretisation<VanLeer, RusanovFlux>;
-using MusclVanLeerHLLC = SpatialDiscretisation<VanLeer, HLLCFlux>;      // 2nd order + HLLC
+using FirstOrder = SpatialDiscretisation<NoSlope, RusanovFlux>;  // robust 1st order
+using MusclMinmod = SpatialDiscretisation<Minmod, RusanovFlux>;  // 2nd order TVD
+using MusclVanLeer = SpatialDiscretisation<VanLeer, RusanovFlux>;
+using MusclVanLeerHLLC = SpatialDiscretisation<VanLeer, HLLCFlux>;  // 2nd order + HLLC
 
 }  // namespace adc

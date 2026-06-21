@@ -53,7 +53,7 @@ using namespace adc;
 static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
 static constexpr double kRmax = 1.00;
-static constexpr double kCs2 = 0.7;   // vitesse du son au carre (isotherme p = cs2 rho)
+static constexpr double kCs2 = 0.7;  // vitesse du son au carre (isotherme p = cs2 rho)
 
 // =====================================================================================
 // (A) EQUILIBRE ROTATIF : rotation rigide v_theta = Omega r, v_r = 0, densite cyclostrophique.
@@ -67,7 +67,9 @@ static constexpr double kRref = kRmin;  // rayon de reference
 static double eq_rho(double r) {
   return kRho0 * std::exp(kOmega * kOmega * (r * r - kRref * kRref) / (2.0 * kCs2));
 }
-static double eq_vth(double r) { return kOmega * r; }  // rotation rigide
+static double eq_vth(double r) {
+  return kOmega * r;
+}  // rotation rigide
 
 // Remplit U (rho, rho v_r=0, rho v_theta) sur TOUTE la boite (valides + ghosts) avec l'etat exact :
 // l'equilibre est stationnaire et a symetrie azimutale, donc les ghosts radiaux/azimutaux sont exacts.
@@ -79,8 +81,8 @@ static void fill_equilibrium(MultiFab& U, const PolarGeometry& g) {
       const double r = g.r_cell(i);
       const double rho = eq_rho(r);
       u(i, j, 0) = rho;
-      u(i, j, 1) = 0.0;             // rho v_r = 0
-      u(i, j, 2) = rho * eq_vth(r); // rho v_theta
+      u(i, j, 1) = 0.0;              // rho v_r = 0
+      u(i, j, 2) = rho * eq_vth(r);  // rho v_theta
     }
 }
 
@@ -95,7 +97,8 @@ static double equilibrium_residual_radial(int nr, int nth, const Model& model) {
 
   const int ng = Weno5::n_ghost;
   MultiFab U(ba, dm, Model::n_vars, ng);
-  MultiFab aux(ba, dm, kAuxBaseComps, ng);  // aux non utilise par le flux isotherme (pression interne)
+  MultiFab aux(ba, dm, kAuxBaseComps,
+               ng);  // aux non utilise par le flux isotherme (pression interne)
   MultiFab R(ba, dm, Model::n_vars, 0);
   U.set_val(0.0);
   aux.set_val(0.0);
@@ -111,7 +114,8 @@ static double equilibrium_residual_radial(int nr, int nth, const Model& model) {
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       const double e = std::fabs(r(i, j, 1));  // residu radial (quantite de mouvement v_r)
-      if (e > linf) linf = e;
+      if (e > linf)
+        linf = e;
     }
   return linf;
 }
@@ -119,45 +123,67 @@ static double equilibrium_residual_radial(int nr, int nth, const Model& model) {
 // =====================================================================================
 // (B) MMS du systeme fluide complet (3 var), avance en temps vers un etat stationnaire manufacture.
 // =====================================================================================
-static constexpr int    kMode = 2;     // mode azimutal
-static constexpr double kVr = 0.25;    // v_r constant NON NUL (exerce le flux radial)
-static constexpr double kVth0 = 0.5;   // base de v_theta
+static constexpr int kMode = 2;       // mode azimutal
+static constexpr double kVr = 0.25;   // v_r constant NON NUL (exerce le flux radial)
+static constexpr double kVth0 = 0.5;  // base de v_theta
 static constexpr double kTfinal = 0.25;
 
 // Solution exacte STATIONNAIRE manufacturee (lisse, strictement positive, periodique en theta) :
 //   rho     = (1 + 0.4 sin(pi (r-rmin)/(rmax-rmin))) * (2 + cos(m theta))
 //   v_r     = kVr (constant)
 //   v_theta = kVth0 * r           (pour que v_theta varie en r ET exerce la courbure croisee)
-static double mms_fr(double r) { return 1.0 + 0.4 * std::sin(kPiL * (r - kRmin) / (kRmax - kRmin)); }
-static double mms_rho(double r, double th) { return mms_fr(r) * (2.0 + std::cos(kMode * th)); }
-static double mms_vr() { return kVr; }
-static double mms_vth(double r) { return kVth0 * r; }
-static double mms_p(double r, double th) { return kCs2 * mms_rho(r, th); }
+static double mms_fr(double r) {
+  return 1.0 + 0.4 * std::sin(kPiL * (r - kRmin) / (kRmax - kRmin));
+}
+static double mms_rho(double r, double th) {
+  return mms_fr(r) * (2.0 + std::cos(kMode * th));
+}
+static double mms_vr() {
+  return kVr;
+}
+static double mms_vth(double r) {
+  return kVth0 * r;
+}
+static double mms_p(double r, double th) {
+  return kCs2 * mms_rho(r, th);
+}
 
 // Composantes de l'etat conservatif exact.
-static double mms_U0(double r, double th) { return mms_rho(r, th); }
-static double mms_U1(double r, double th) { return mms_rho(r, th) * mms_vr(); }
-static double mms_U2(double r, double th) { return mms_rho(r, th) * mms_vth(r); }
+static double mms_U0(double r, double th) {
+  return mms_rho(r, th);
+}
+static double mms_U1(double r, double th) {
+  return mms_rho(r, th) * mms_vr();
+}
+static double mms_U2(double r, double th) {
+  return mms_rho(r, th) * mms_vth(r);
+}
 
 // Flux physiques (base locale) : F_r = (rho v_r, rho v_r^2 + p, rho v_r v_theta),
 //                                F_theta = (rho v_theta, rho v_r v_theta, rho v_theta^2 + p).
 static double mms_Fr(int c, double r, double th) {
   const double rho = mms_rho(r, th), vr = mms_vr(), vth = mms_vth(r), p = mms_p(r, th);
-  if (c == 0) return rho * vr;
-  if (c == 1) return rho * vr * vr + p;
+  if (c == 0)
+    return rho * vr;
+  if (c == 1)
+    return rho * vr * vr + p;
   return rho * vr * vth;
 }
 static double mms_Fth(int c, double r, double th) {
   const double rho = mms_rho(r, th), vr = mms_vr(), vth = mms_vth(r), p = mms_p(r, th);
-  if (c == 0) return rho * vth;
-  if (c == 1) return rho * vr * vth;
+  if (c == 0)
+    return rho * vth;
+  if (c == 1)
+    return rho * vr * vth;
   return rho * vth * vth + p;
 }
 // Terme geometrique de courbure analytique : S_geom = (0, (rho v_theta^2 + p)/r, -(rho v_r v_theta)/r).
 static double mms_Sgeom(int c, double r, double th) {
   const double rho = mms_rho(r, th), vr = mms_vr(), vth = mms_vth(r), p = mms_p(r, th);
-  if (c == 0) return 0.0;
-  if (c == 1) return (rho * vth * vth + p) / r;
+  if (c == 0)
+    return 0.0;
+  if (c == 1)
+    return (rho * vth * vth + p) / r;
   return -(rho * vr * vth) / r;
 }
 // Terme source manufacture S = div_polar(F) - S_geom (pour d_t U = -div_polar F + S_geom + S = 0).
@@ -165,9 +191,9 @@ static double mms_Sgeom(int c, double r, double th) {
 static double mms_source(int c, double r, double th) {
   const double h = 1e-5;
   auto rFr = [c](double rr, double tt) { return rr * mms_Fr(c, rr, tt); };
-  const double drFr = (-rFr(r + 2 * h, th) + 8 * rFr(r + h, th) - 8 * rFr(r - h, th) +
-                       rFr(r - 2 * h, th)) /
-                      (12 * h);
+  const double drFr =
+      (-rFr(r + 2 * h, th) + 8 * rFr(r + h, th) - 8 * rFr(r - h, th) + rFr(r - 2 * h, th)) /
+      (12 * h);
   const double dthFth = (-mms_Fth(c, r, th + 2 * h) + 8 * mms_Fth(c, r, th + h) -
                          8 * mms_Fth(c, r, th - h) + mms_Fth(c, r, th - 2 * h)) /
                         (12 * h);
@@ -213,7 +239,8 @@ static void fill_mms_radial_ghosts(MultiFab& U, const PolarGeometry& g, const Bo
   for (int j = gb.lo[1]; j <= gb.hi[1]; ++j) {
     const double th = g.theta_cell(j);
     for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) {
-      if (i >= dom.lo[0] && i <= dom.hi[0]) continue;
+      if (i >= dom.lo[0] && i <= dom.hi[0])
+        continue;
       const double r = g.r_cell(i);
       u(i, j, 0) = mms_U0(r, th);
       u(i, j, 1) = mms_U1(r, th);
@@ -339,11 +366,11 @@ static double run_mass_conservation() {
     for (int j = gb.lo[1]; j <= gb.hi[1]; ++j)
       for (int i = gb.lo[0]; i <= gb.hi[0]; ++i) {
         const double r = g.r_cell(i), th = g.theta_cell(j);
-        const double rho = 1.0 + 0.3 * std::cos(kMode * th) *
-                                     std::sin(kPiL * (r - kRmin) / (kRmax - kRmin));
+        const double rho =
+            1.0 + 0.3 * std::cos(kMode * th) * std::sin(kPiL * (r - kRmin) / (kRmax - kRmin));
         u(i, j, 0) = rho;
-        u(i, j, 1) = rho * 0.2;        // v_r = 0.2 (vers la paroi)
-        u(i, j, 2) = rho * 0.3 * r;    // v_theta = 0.3 r
+        u(i, j, 1) = rho * 0.2;      // v_r = 0.2 (vers la paroi)
+        u(i, j, 2) = rho * 0.3 * r;  // v_theta = 0.3 r
       }
   }
 
@@ -382,7 +409,8 @@ int main() {
   // --- (A) Equilibre rotatif : residu radial -> 0 AVEC le terme geometrique ---------------------
   std::printf("\n--- (A) Equilibre rotatif (rotation rigide Omega=%.2f, rho cyclostrophique) ---\n",
               kOmega);
-  std::printf("    AVEC terme geometrique de courbure (IsothermalFluxPolar) : residu radial -> 0\n");
+  std::printf(
+      "    AVEC terme geometrique de courbure (IsothermalFluxPolar) : residu radial -> 0\n");
   const int res[3] = {48, 96, 192};
   IsothermalFluxPolar fp;
   fp.cs2 = kCs2;
@@ -398,7 +426,8 @@ int main() {
   // une DECROISSANCE nette (ordre >= 1.5) ET un residu fin petit : preuve que le terme geometrique
   // equilibre la divergence de pression radiale.
   if (!(peq1 >= 1.5) || !(peq2 >= 1.5)) {
-    std::printf("    ECHEC : le residu ne decroit pas a l'ordre attendu (terme geometrique faux ?)\n");
+    std::printf(
+        "    ECHEC : le residu ne decroit pas a l'ordre attendu (terme geometrique faux ?)\n");
     ok = false;
   } else {
     std::printf("    OK : residu radial -> 0 (ordre >= 1.5) => terme geometrique correct\n");
@@ -419,13 +448,15 @@ int main() {
     std::printf("    ECHEC : le residu sans geometrie devrait rester O(1) et >> le residu avec\n");
     ok = false;
   } else {
-    std::printf("    OK : residu O(1) non convergent sans terme geometrique (>> %.2e avec) => le terme\n"
-                "         geometrique est INDISPENSABLE (la divergence conservative seule ne suffit pas)\n",
-                eq[2]);
+    std::printf(
+        "    OK : residu O(1) non convergent sans terme geometrique (>> %.2e avec) => le terme\n"
+        "         geometrique est INDISPENSABLE (la divergence conservative seule ne suffit pas)\n",
+        eq[2]);
   }
 
   // --- (B) MMS du systeme fluide complet (3 var) : ordre 2 ---------------------------------------
-  std::printf("\n--- (B) MMS fluide complet 3 var (v_r != 0, v_theta != 0) : ordre 2 attendu ---\n");
+  std::printf(
+      "\n--- (B) MMS fluide complet 3 var (v_r != 0, v_theta != 0) : ordre 2 attendu ---\n");
   double e[3];
   for (int k = 0; k < 3; ++k) {
     e[k] = run_mms_fluid<Weno5>(res[k], 2 * res[k]);
@@ -439,8 +470,9 @@ int main() {
     std::printf("    ECHEC : ordre < %.1f (transport fluide polaire non convergent)\n", kSeuil);
     ok = false;
   } else {
-    std::printf("    OK : convergence d'ordre >= %.1f (transport fluide 3 var + courbure correct)\n",
-                kSeuil);
+    std::printf(
+        "    OK : convergence d'ordre >= %.1f (transport fluide 3 var + courbure correct)\n",
+        kSeuil);
   }
 
   // --- (C) Conservation de la masse (paroi radiale) ---------------------------------------------
@@ -454,6 +486,7 @@ int main() {
   }
 
   std::printf("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
-  if (ok) std::printf("OK test_polar_fluid_transport\n");
+  if (ok)
+    std::printf("OK test_polar_fluid_transport\n");
   return ok ? 0 : 1;
 }

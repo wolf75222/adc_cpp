@@ -65,7 +65,8 @@ static std::vector<double> bump(int n, double base, double amp) {
 // tout fini (ni nan ni inf) : garde AVANT toute comparaison de tolerance (un nan passerait une borne).
 static bool all_finite(const std::vector<double>& v) {
   for (double x : v)
-    if (!std::isfinite(x)) return false;
+    if (!std::isfinite(x))
+      return false;
   return true;
 }
 
@@ -73,7 +74,8 @@ static bool all_finite(const std::vector<double>& v) {
 static double dmax_field(const std::vector<double>& a, const std::vector<double>& b) {
   double d = 0;
   const std::size_t nn = a.size() < b.size() ? a.size() : b.size();
-  for (std::size_t i = 0; i < nn; ++i) d = std::max(d, std::fabs(a[i] - b[i]));
+  for (std::size_t i = 0; i < nn; ++i)
+    d = std::max(d, std::fabs(a[i] - b[i]));
   return d;
 }
 
@@ -87,8 +89,8 @@ static AmrRuntime make_two_block(int N, double L, double q0, double q1, double B
   AmrBuildParams bp;
   bp.n = N;
   bp.L = L;
-  bp.regrid_every = 0;       // hierarchie figee (multi-blocs)
-  bp.poisson_bc = BCRec{};   // periodique
+  bp.regrid_every = 0;      // hierarchie figee (multi-blocs)
+  bp.poisson_bc = BCRec{};  // periodique
   const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
   std::vector<AmrRuntimeBlock> blocks;
   detail::dispatch_model(exb_charge(q0, B0), [&](auto m) {
@@ -115,7 +117,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int N = 32;
@@ -133,7 +136,8 @@ int main(int argc, char** argv) {
     AmrRuntime rt = make_two_block(N, L, q0, q1, B0, rho0, rho1, "minmod", "minmod",
                                    /*sub0=*/4, /*sub1=*/1, /*stride0=*/1, /*stride1=*/1);
     const Real mA0 = rt.mass(0), mB0 = rt.mass(1);
-    for (int s = 0; s < K; ++s) rt.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt.step(dt);
     const std::vector<double> dA4 = rt.density(0);
     const std::vector<double> dB = rt.density(1);
     const Real mA1 = rt.mass(0), mB1 = rt.mass(1);
@@ -145,7 +149,8 @@ int main(int argc, char** argv) {
     // Reference : MEME config mais A substeps=1. Le resultat de A doit DIFFERER (le sous-cyclage agit).
     AmrRuntime rt1 = make_two_block(N, L, q0, q1, B0, rho0, rho1, "minmod", "minmod",
                                     /*sub0=*/1, /*sub1=*/1, /*stride0=*/1, /*stride1=*/1);
-    for (int s = 0; s < K; ++s) rt1.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt1.step(dt);
     const std::vector<double> dA1 = rt1.density(0);
     chk(all_finite(dA1), "subA1_state_finite");
     chk(dmax_field(dA4, dA1) > 1e-9, "subA4_differs_from_subA1");  // substepping NON no-op
@@ -161,7 +166,8 @@ int main(int argc, char** argv) {
     AmrRuntime rt = make_two_block(N, L, q0, q1, B0, rho0, rho1, "minmod", "minmod",
                                    /*sub0=*/1, /*sub1=*/4, /*stride0=*/1, /*stride1=*/1);
     const Real mA0 = rt.mass(0), mB0 = rt.mass(1);
-    for (int s = 0; s < K; ++s) rt.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt.step(dt);
     const std::vector<double> dB4 = rt.density(1);
     const Real mA1 = rt.mass(0), mB1 = rt.mass(1);
     chk(all_finite(dB4), "revB4_state_finite");
@@ -170,7 +176,8 @@ int main(int argc, char** argv) {
 
     AmrRuntime rt1 = make_two_block(N, L, q0, q1, B0, rho0, rho1, "minmod", "minmod",
                                     /*sub0=*/1, /*sub1=*/1, /*stride0=*/1, /*stride1=*/1);
-    for (int s = 0; s < K; ++s) rt1.step(dt);
+    for (int s = 0; s < K; ++s)
+      rt1.step(dt);
     const std::vector<double> dB1 = rt1.density(1);
     chk(dmax_field(dB4, dB1) > 1e-9, "revB4_differs_from_subB1");
   }
@@ -259,7 +266,8 @@ int main(int argc, char** argv) {
       sim.set_poisson("charge_density", "geometric_mg", "periodic");
       sim.set_density("ne", rho0);
       double last = 0;
-      for (int s = 0; s < 5; ++s) last = sim.step_cfl(0.4);
+      for (int s = 0; s < 5; ++s)
+        last = sim.step_cfl(0.4);
       return std::make_pair(sim.density("ne"), last);
     };
     const auto ra = run_cfl();

@@ -78,20 +78,22 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
         const Euler::State s = init_state(eul, i, j, n);
-        for (int c = 0; c < Model::n_vars; ++c) Fu(i, j, c) = s[c];
+        for (int c = 0; c < Model::n_vars; ++c)
+          Fu(i, j, c) = s[c];
       }
     Fab2D& Fa = aux.fab(li);
     const Box2D ag = Fa.box().grow(1);  // grad analytique periodique sur valid + fantomes
     for (int j = ag.lo[1]; j <= ag.hi[1]; ++j)
       for (int i = ag.lo[0]; i <= ag.hi[0]; ++i) {
         const double X = (i + 0.5) / n, Y = (j + 0.5) / n;
-        Fa(i, j, 0) = 0.0;                       // phi (inutilise par la source)
+        Fa(i, j, 0) = 0.0;                          // phi (inutilise par la source)
         Fa(i, j, 1) = 0.4 * std::sin(2 * kPi * X);  // grad_x
         Fa(i, j, 2) = 0.4 * std::cos(2 * kPi * Y);  // grad_y
       }
   }
   GridContext ctx{dom, BCRec{}, geom, &aux};  // BCRec{} = tout periodique
-  BlockClosures clo = make_block(model, "minmod", "rusanov", ctx, /*imex=*/false, /*recon_prim=*/false);
+  BlockClosures clo =
+      make_block(model, "minmod", "rusanov", ctx, /*imex=*/false, /*recon_prim=*/false);
   clo.rhs_into(U, R);  // fill_ghosts(U) [halos multi-box / MPI] + assemble_rhs (-div F + source)
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::fence();  // barriere avant lecture HOTE du residu device (no-op sous Serial)
@@ -107,7 +109,8 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
           s += v;
           ss += v * v;
           const double a = std::fabs(v);
-          if (a > mx) mx = a;
+          if (a > mx)
+            mx = a;
         }
   }
   gsum = all_reduce_sum(s);
@@ -168,8 +171,9 @@ int main(int argc, char** argv) {
       ++fails;
     }
     if (fails == 0)
-      std::printf("OK test_mpi_hybrid_mbox_parity np=%d (composite hybride multi-box %s == mono-box)\n",
-                  np, np > 1 ? "MPI" : "mono-rang");
+      std::printf(
+          "OK test_mpi_hybrid_mbox_parity np=%d (composite hybride multi-box %s == mono-box)\n", np,
+          np > 1 ? "MPI" : "mono-rang");
   }
   comm_finalize();
   return fails ? 1 : 0;

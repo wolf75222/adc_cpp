@@ -27,10 +27,18 @@
 using namespace adc;
 static constexpr double kPi = 3.14159265358979323846;
 
-static double u_exact(double x, double y) { return std::sin(3 * kPi * x) * std::sin(3 * kPi * y); }
-static double eps_xy(double x, double y) { return 1.0 + 0.3 * std::sin(2 * kPi * x) * std::sin(2 * kPi * y); }
-static double axy_xy(double x, double y) { return 0.2 * std::sin(2 * kPi * x) * std::sin(2 * kPi * y); }
-static double ayx_xy(double x, double y) { return -axy_xy(x, y); }
+static double u_exact(double x, double y) {
+  return std::sin(3 * kPi * x) * std::sin(3 * kPi * y);
+}
+static double eps_xy(double x, double y) {
+  return 1.0 + 0.3 * std::sin(2 * kPi * x) * std::sin(2 * kPi * y);
+}
+static double axy_xy(double x, double y) {
+  return 0.2 * std::sin(2 * kPi * x) * std::sin(2 * kPi * y);
+}
+static double ayx_xy(double x, double y) {
+  return -axy_xy(x, y);
+}
 static double f_rhs(double x, double y) {
   const double u = u_exact(x, y);
   const double ux = 3 * kPi * std::cos(3 * kPi * x) * std::sin(3 * kPi * y);
@@ -48,7 +56,8 @@ static void fill(MultiFab& m, const Geometry& g, Setter s) {
     Array4 a = m.fab(li).array();
     const Box2D b = m.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) = s(g.x_cell(i), g.y_cell(j));
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 0) = s(g.x_cell(i), g.y_cell(j));
   }
 }
 
@@ -57,7 +66,11 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 48, r = 2;
@@ -73,9 +86,13 @@ int main(int argc, char** argv) {
 
   // --- coarse-only tenseur plein (GeometricMG.set_epsilon + set_cross_terms) ---
   MultiFab eps_c(ba_c, dm_c, 1, 1), axy_c(ba_c, dm_c, 1, 1), ayx_c(ba_c, dm_c, 1, 1);
-  fill(eps_c, geom_c, eps_xy); fill(axy_c, geom_c, axy_xy); fill(ayx_c, geom_c, ayx_xy);
+  fill(eps_c, geom_c, eps_xy);
+  fill(axy_c, geom_c, axy_xy);
+  fill(ayx_c, geom_c, ayx_xy);
   device_fence();
-  fill_ghosts(eps_c, dom, BCRec{}); fill_ghosts(axy_c, dom, BCRec{}); fill_ghosts(ayx_c, dom, BCRec{});
+  fill_ghosts(eps_c, dom, BCRec{});
+  fill_ghosts(axy_c, dom, BCRec{});
+  fill_ghosts(ayx_c, dom, BCRec{});
   GeometricMG mg0(geom_c, ba_c, bc, {}, /*replicated=*/true);
   mg0.set_epsilon(eps_c);
   mg0.set_cross_terms(axy_c, ayx_c);
@@ -86,9 +103,12 @@ int main(int argc, char** argv) {
 
   // --- composite tenseur plein ---
   CompositeFacPoisson fac(geom_c, ba_c, bc, fine_box, r);
-  fill(fac.eps_coarse(), geom_c, eps_xy); fill(fac.eps_fine(), geom_f, eps_xy);
-  fill(fac.a_xy_coarse(), geom_c, axy_xy); fill(fac.a_xy_fine(), geom_f, axy_xy);
-  fill(fac.a_yx_coarse(), geom_c, ayx_xy); fill(fac.a_yx_fine(), geom_f, ayx_xy);
+  fill(fac.eps_coarse(), geom_c, eps_xy);
+  fill(fac.eps_fine(), geom_f, eps_xy);
+  fill(fac.a_xy_coarse(), geom_c, axy_xy);
+  fill(fac.a_xy_fine(), geom_f, axy_xy);
+  fill(fac.a_yx_coarse(), geom_c, ayx_xy);
+  fill(fac.a_yx_fine(), geom_f, ayx_xy);
   fac.use_variable_coefficient(true);
   fac.use_cross_terms(true);
   fill(fac.rhs_coarse(), geom_c, f_rhs);
@@ -113,7 +133,8 @@ int main(int argc, char** argv) {
           const int iff = r * I + ti, jff = r * J + tj;
           const double xf = geom_f.x_cell(iff), yf = geom_f.y_cell(jff);
           const double ue = u_exact(xf, yf);
-          e_coarse = std::fmax(e_coarse, std::fabs(detail::fac_bilerp_coarse(PC0, iff, jff, r) - ue));
+          e_coarse =
+              std::fmax(e_coarse, std::fabs(detail::fac_bilerp_coarse(PC0, iff, jff, r) - ue));
           e_comp = std::fmax(e_comp, std::fabs(PF(iff, jff, 0) - ue));
           const double gxa = 3 * kPi * std::cos(3 * kPi * xf) * std::sin(3 * kPi * yf);
           const double gya = 3 * kPi * std::sin(3 * kPi * xf) * std::cos(3 * kPi * yf);
@@ -123,20 +144,27 @@ int main(int argc, char** argv) {
           eg_comp = std::fmax(eg_comp, std::fmax(std::fabs(gxf - gxa), std::fabs(gyf - gya)));
         }
     }
-  e_coarse = all_reduce_max(e_coarse); e_comp = all_reduce_max(e_comp);
-  eg_optA = all_reduce_max(eg_optA); eg_comp = all_reduce_max(eg_comp);
+  e_coarse = all_reduce_max(e_coarse);
+  e_comp = all_reduce_max(e_comp);
+  eg_optA = all_reduce_max(eg_optA);
+  eg_comp = all_reduce_max(eg_comp);
 
   if (me == 0)
-    std::printf("  tenseur plein : phi e_coarse=%.3e e_comp=%.3e (x%.2f)  grad e_optA=%.3e e_comp=%.3e (x%.2f)\n",
-                e_coarse, e_comp, e_coarse / std::fmax(e_comp, 1e-30), eg_optA, eg_comp,
-                eg_optA / std::fmax(eg_comp, 1e-30));
+    std::printf(
+        "  tenseur plein : phi e_coarse=%.3e e_comp=%.3e (x%.2f)  grad e_optA=%.3e e_comp=%.3e "
+        "(x%.2f)\n",
+        e_coarse, e_comp, e_coarse / std::fmax(e_comp, 1e-30), eg_optA, eg_comp,
+        eg_optA / std::fmax(eg_comp, 1e-30));
 
   chk(std::isfinite(e_comp) && std::isfinite(eg_comp), "erreurs finies");
-  chk(e_comp < 0.6 * e_coarse, "(fidelite phi) patch fin plus precis que coarse-only (tenseur plein)");
-  chk(eg_comp < 0.5 * eg_optA, "(fidelite grad phi) composite >> injection Option A (tenseur plein)");
+  chk(e_comp < 0.6 * e_coarse,
+      "(fidelite phi) patch fin plus precis que coarse-only (tenseur plein)");
+  chk(eg_comp < 0.5 * eg_optA,
+      "(fidelite grad phi) composite >> injection Option A (tenseur plein)");
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_composite_fac_tensor\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_composite_fac_tensor\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

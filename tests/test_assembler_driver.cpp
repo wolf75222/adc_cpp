@@ -37,7 +37,10 @@ static_assert(std::is_same_v<SystemCoupler<CoupledSystem<Blk, Blk>, ChargeDensit
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -84,6 +87,7 @@ int main() {
   chk(std::fabs(sum(V0, 0) - Real(1) * n * n) < Real(1e-12), "driver_step_runs");
   chk(norm_inf(driver.phi()) < Real(1e-9), "driver_phi_zero_for_neutral_balance");
 
-  if (fails == 0) std::printf("OK test_assembler_driver\n");
+  if (fails == 0)
+    std::printf("OK test_assembler_driver\n");
   return fails == 0 ? 0 : 1;
 }

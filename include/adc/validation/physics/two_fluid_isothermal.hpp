@@ -69,7 +69,7 @@ struct TwoFluidLinear {
   ADC_HD void implicit_solve(Real& Ae, Real& Ai, Real& Be, Real& Bi, Real dt) const {
     const Real wpe2 = omega_pe * omega_pe, wpi2 = omega_pi * omega_pi, d2 = dt * dt;
     const Real re = Ae + dt * Be, ri = Ai + dt * Bi;  // known right-hand sides
-    const Real a = 1 + d2 * wpe2, b = -d2 * wpe2;      // I - dt^2 M_s
+    const Real a = 1 + d2 * wpe2, b = -d2 * wpe2;     // I - dt^2 M_s
     const Real c = -d2 * wpi2, dd = 1 + d2 * wpi2;
     const Real det = a * dd - b * c;
     Ae = (dd * re - b * ri) / det;
@@ -86,7 +86,7 @@ struct TwoFluidLinear {
    */
   void dispersion(Real& w_fast, Real& w_slow) const {
     const Real wpe2 = omega_pe * omega_pe, wpi2 = omega_pi * omega_pi;
-    const Real S = cse2k2 + csi2k2 + wpe2 + wpi2;  // = w_fast^2 + w_slow^2
+    const Real S = cse2k2 + csi2k2 + wpe2 + wpi2;                    // = w_fast^2 + w_slow^2
     const Real P = cse2k2 * csi2k2 + wpe2 * csi2k2 + wpi2 * cse2k2;  // = product
     const Real disc = std::sqrt(std::fmax(S * S - 4 * P, Real(0)));
     w_fast = std::sqrt(Real(0.5) * (S + disc));

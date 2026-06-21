@@ -1,16 +1,16 @@
 #pragma once
 
-#include <adc/core/state.hpp>       // StateVec, Aux, ADC_AUX_FIELDS, kAuxBaseComps
-#include <adc/core/types.hpp>       // ADC_HD, Real
-#include <adc/core/variables.hpp>   // VariableSet + VariableKind + VariableRole + role_from_name
+#include <adc/core/state.hpp>      // StateVec, Aux, ADC_AUX_FIELDS, kAuxBaseComps
+#include <adc/core/types.hpp>      // ADC_HD, Real
+#include <adc/core/variables.hpp>  // VariableSet + VariableKind + VariableRole + role_from_name
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>  // AuxHaloPolicy (ADC-369: per-field aux halo tail marshaling)
-#include <adc/runtime/abi_key.hpp>          // adc::abi_key (ABI guard for the native loader)
-#include <adc/runtime/dynamic_model.hpp>    // IModel: model loaded at runtime (dynamic block)
-#include <adc/runtime/grid_context.hpp>     // GridContext
-#include <adc/runtime/system.hpp>           // adc::System (install_block / grid_context / ensure_aux_width)
+#include <adc/runtime/abi_key.hpp>   // adc::abi_key (ABI guard for the native loader)
+#include <adc/runtime/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
+#include <adc/runtime/grid_context.hpp>   // GridContext
+#include <adc/runtime/system.hpp>  // adc::System (install_block / grid_context / ensure_aux_width)
 
 #include <algorithm>
 #include <cmath>
@@ -51,8 +51,10 @@ inline std::vector<double> marshal_aux_halo(Impl* P, int naux) {
   const std::size_t nn = static_cast<std::size_t>(P->cfg.n) * static_cast<std::size_t>(P->cfg.n);
   a.resize(static_cast<std::size_t>(naux) * nn + static_cast<std::size_t>(2) * naux, 0.0);
   for (const auto& kv : P->fields_.named_aux_bc_) {
-    if (kv.first < 0 || kv.first >= naux) continue;
-    const std::size_t base = static_cast<std::size_t>(naux) * nn + static_cast<std::size_t>(2) * kv.first;
+    if (kv.first < 0 || kv.first >= naux)
+      continue;
+    const std::size_t base =
+        static_cast<std::size_t>(naux) * nn + static_cast<std::size_t>(2) * kv.first;
     a[base] = static_cast<double>(static_cast<int>(kv.second.type));
     a[base + 1] = static_cast<double>(kv.second.value);
   }
@@ -64,12 +66,14 @@ inline std::vector<double> marshal_aux_halo(Impl* P, int naux) {
 /// Pointwise building block of the host residual host_residual; host counterpart of the compiled limiter (reconstruction.hpp).
 ADC_HD inline double limited_slope(double am, double ap, int recon) {
   if (recon == 1) {  // minmod: TVD, robust
-    if (am * ap <= 0) return 0.0;
+    if (am * ap <= 0)
+      return 0.0;
     return (std::fabs(am) < std::fabs(ap)) ? am : ap;
   }
   if (recon == 2) {  // van Leer: smoother at extrema
     const double ab = am * ap;
-    if (ab <= 0) return 0.0;
+    if (ab <= 0)
+      return 0.0;
     return 2.0 * ab / (am + ap);
   }
   return 0.0;  // order 1 (no slope)
@@ -91,7 +95,8 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
   };
   auto cell = [&](int i, int j) {
     StateVec<NV> u;
-    for (int c = 0; c < NV; ++c) u[c] = U[static_cast<std::size_t>(c) * nn + idx(i, j)];
+    for (int c = 0; c < NV; ++c)
+      u[c] = U[static_cast<std::size_t>(c) * nn + idx(i, j)];
     return u;
   };
   auto aux_at = [&](int i, int j) {  // per-cell aux, periodic; empty => zero
@@ -105,8 +110,9 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       // same table as load_aux on the device side. An extra component is read only if the channel is
       // wide enough ((idx+1)*nn elements). Adding an aux field => 1 line in ADC_AUX_FIELDS,
       // this site (and the other, further down) transports it AUTOMATICALLY. Closes gap #51.
-#define ADC_AUX_MARSHAL(name, idx) \
-  if (AUX.size() >= ((idx) + 1) * nn) a.name = AUX[(idx) * nn + k];
+#define ADC_AUX_MARSHAL(name, idx)    \
+  if (AUX.size() >= ((idx) + 1) * nn) \
+    a.name = AUX[(idx) * nn + k];
       ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
 #undef ADC_AUX_MARSHAL
       // Model-NAMED aux fields (ADC-291): extra[e] = aux component kAuxNamedBase + e. Same contract
@@ -115,7 +121,8 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       // bounds). Without this loop a model reading aux.extra_field(k) on the JIT host read 0 silently.
       for (int e = 0; e < kAuxMaxExtra; ++e) {
         const std::size_t comp = static_cast<std::size_t>(kAuxNamedBase + e);
-        if (AUX.size() >= (comp + 1) * nn) a.extra[e] = AUX[comp * nn + k];
+        if (AUX.size() >= (comp + 1) * nn)
+          a.extra[e] = AUX[comp * nn + k];
       }
     }
     return a;
@@ -123,11 +130,13 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
   // limited slope of cell (i,j) in direction dir (on the conservative variables)
   auto slope = [&](int i, int j, int dir) {
     StateVec<NV> s{};
-    if (recon == 0) return s;
+    if (recon == 0)
+      return s;
     StateVec<NV> Uc = cell(i, j);
     StateVec<NV> Um = (dir == 0) ? cell(i - 1, j) : cell(i, j - 1);
     StateVec<NV> Up = (dir == 0) ? cell(i + 1, j) : cell(i, j + 1);
-    for (int c = 0; c < NV; ++c) s[c] = limited_slope(Uc[c] - Um[c], Up[c] - Uc[c], recon);
+    for (int c = 0; c < NV; ++c)
+      s[c] = limited_slope(Uc[c] - Um[c], Up[c] - Uc[c], recon);
     return s;
   };
   double amax = 0;
@@ -136,7 +145,8 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       StateVec<NV> u = cell(i, j);
       Aux a = aux_at(i, j);
       double s = std::max(m.max_wave_speed(u, a, 0), m.max_wave_speed(u, a, 1));
-      if (s > amax) amax = s;
+      if (s > amax)
+        amax = s;
     }
   // numerical flux at the +dir face of cell (i,j): MUSCL states (cell + neighbor) then Rusanov
   auto face_flux = [&](int i, int j, int dir) {
@@ -148,7 +158,8 @@ std::vector<double> host_residual(const IModel<NV>& m, const std::vector<double>
       R[c] = Un[c] - 0.5 * sn[c];
     }
     StateVec<NV> FL = m.flux(L, aux_at(i, j), dir), FR = m.flux(R, aux_at(in, jn), dir), f;
-    for (int c = 0; c < NV; ++c) f[c] = 0.5 * (FL[c] + FR[c]) - 0.5 * amax * (R[c] - L[c]);
+    for (int c = 0; c < NV; ++c)
+      f[c] = 0.5 * (FL[c] + FR[c]) - 0.5 * amax * (R[c] - L[c]);
     return f;
   };
   std::vector<double> Rout(static_cast<std::size_t>(NV) * nn, 0.0);
@@ -171,8 +182,11 @@ inline std::vector<std::string> split(const std::string& s, char sep) {
   std::vector<std::string> out;
   std::string cur;
   for (char c : s) {
-    if (c == sep) { out.push_back(cur); cur.clear(); }
-    else cur += c;
+    if (c == sep) {
+      out.push_back(cur);
+      cur.clear();
+    } else
+      cur += c;
   }
   out.push_back(cur);
   return out;
@@ -194,7 +208,8 @@ struct BlockMeta {
 inline VariableSet parse_var_set(VariableKind kind, const std::string& names_csv,
                                  const std::string& roles_csv) {
   VariableSet vs{kind, {}, 0, {}};
-  if (names_csv.empty()) return vs;  // no names transported: empty set (the caller will set its fallback)
+  if (names_csv.empty())
+    return vs;  // no names transported: empty set (the caller will set its fallback)
   vs.names = split(names_csv, ',');
   vs.size = static_cast<int>(vs.names.size());
   parse_roles_into(vs, roles_csv);  // canonical roles + any user-defined role label (ADC-292)
@@ -206,9 +221,10 @@ inline VariableSet parse_var_set(VariableKind kind, const std::string& names_csv
 /// has_gamma=false: the caller then decides the fallback. String format: "cons_csv|prim_csv".
 inline BlockMeta read_block_meta(adc::dynlib::handle h) {
   BlockMeta m;
-  auto names_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h,"adc_compiled_var_names"));
-  auto roles_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h,"adc_compiled_roles"));
-  auto gamma_fn = reinterpret_cast<double (*)()>(adc::dynlib::sym(h,"adc_compiled_gamma"));
+  auto names_fn =
+      reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_compiled_var_names"));
+  auto roles_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_compiled_roles"));
+  auto gamma_fn = reinterpret_cast<double (*)()>(adc::dynlib::sym(h, "adc_compiled_gamma"));
   std::string names = names_fn ? std::string(names_fn()) : std::string();
   std::string roles = roles_fn ? std::string(roles_fn()) : std::string();
   // "cons|prim": index 0 = conservative set, index 1 = primitive set (each possibly empty).
@@ -219,7 +235,10 @@ inline BlockMeta read_block_meta(adc::dynlib::handle h) {
   };
   m.cons = parse_var_set(VariableKind::Conservative, part(nparts, 0), part(rparts, 0));
   m.prim = parse_var_set(VariableKind::Primitive, part(nparts, 1), part(rparts, 1));
-  if (gamma_fn) { m.has_gamma = true; m.gamma = gamma_fn(); }
+  if (gamma_fn) {
+    m.has_gamma = true;
+    m.gamma = gamma_fn();
+  }
   return m;
 }
 
@@ -229,14 +248,17 @@ inline BlockMeta read_block_meta(adc::dynlib::handle h) {
 template <typename ImplT, int NV>
 void push_dynamic(ImplT* P, const std::string& name, adc::dynlib::handle h, int substeps,
                   std::vector<std::string> names, int recon) {
-  auto mk = reinterpret_cast<void* (*)()>(adc::dynlib::sym(h,"adc_make_model"));
-  auto del = reinterpret_cast<void (*)(void*)>(adc::dynlib::sym(h,"adc_destroy_model"));
+  auto mk = reinterpret_cast<void* (*)()>(adc::dynlib::sym(h, "adc_make_model"));
+  auto del = reinterpret_cast<void (*)(void*)>(adc::dynlib::sym(h, "adc_destroy_model"));
   if (!mk || !del) {
     adc::dynlib::close(h);
-    throw std::runtime_error("add_dynamic_block: adc_make_model / adc_destroy_model missing from the .so");
+    throw std::runtime_error(
+        "add_dynamic_block: adc_make_model / adc_destroy_model missing from the .so");
   }
-  std::shared_ptr<IModel<NV>> im(static_cast<IModel<NV>*>(mk()),
-                                 [del, h](IModel<NV>* p) { del(p); adc::dynlib::close(h); });
+  std::shared_ptr<IModel<NV>> im(static_cast<IModel<NV>*>(mk()), [del, h](IModel<NV>* p) {
+    del(p);
+    adc::dynlib::close(h);
+  });
   // The loaded model can read extra aux fields (n_aux > 3, e.g. B_z): we
   // widen the SHARED aux channel so set_magnetic_field populates it and the host marshaling
   // transports them. Base model (3) -> no-op. The closures read P->aux_ncomp_ at call time.
@@ -250,20 +272,24 @@ void push_dynamic(ImplT* P, const std::string& name, adc::dynlib::handle h, int 
     // (local_size()==0 at np>1) there is nothing to marshal; the owner rank carries the full
     // physics. Without this guard, copy_state(U) / write_state(R) would dereference a nonexistent fab(0).
     // No collective MPI operation here -> one-sided no-op, no deadlock risk.
-    if (U.local_size() == 0) return;
-    P->write_state(R, NV, host_residual<NV>(*im, P->copy_state(U, NV),
-                                            P->copy_state(P->aux, P->aux_ncomp_), n, dx, recon));
+    if (U.local_size() == 0)
+      return;
+    P->write_state(R, NV,
+                   host_residual<NV>(*im, P->copy_state(U, NV),
+                                     P->copy_state(P->aux, P->aux_ncomp_), n, dx, recon));
   };
   std::function<Real(const MultiFab&)> max_speed = [P, im, n](const MultiFab& U) -> Real {
     // Same MPI guard: empty rank -> local speed 0 (the downstream all_reduce_max takes the global max,
     // the owner contributes the real value). No collective here -> no-op without deadlock.
-    if (U.local_size() == 0) return Real(0);
+    if (U.local_size() == 0)
+      return Real(0);
     std::vector<double> u = P->copy_state(U, NV), aux = P->copy_state(P->aux, P->aux_ncomp_);
     const std::size_t nn = static_cast<std::size_t>(n) * n;
     Real mx = 0;
     for (std::size_t c0 = 0; c0 < nn; ++c0) {
       StateVec<NV> s;
-      for (int c = 0; c < NV; ++c) s[c] = u[static_cast<std::size_t>(c) * nn + c0];
+      for (int c = 0; c < NV; ++c)
+        s[c] = u[static_cast<std::size_t>(c) * nn + c0];
       Aux a{};
       if (aux.size() >= 3 * nn) {
         a.phi = aux[c0];
@@ -271,56 +297,63 @@ void push_dynamic(ImplT* P, const std::string& name, adc::dynlib::handle h, int 
         a.grad_y = aux[2 * nn + c0];
         // Extra fields: same SINGLE SOURCE ADC_AUX_FIELDS as load_aux and the other marshaling
         // site (host_residual). cf. note above; adding a field = 1 line.
-#define ADC_AUX_MARSHAL(name, idx) \
-  if (aux.size() >= ((idx) + 1) * nn) a.name = aux[(idx) * nn + c0];
+#define ADC_AUX_MARSHAL(name, idx)    \
+  if (aux.size() >= ((idx) + 1) * nn) \
+    a.name = aux[(idx) * nn + c0];
         ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
 #undef ADC_AUX_MARSHAL
         // Model-NAMED aux fields (ADC-291): same single-source contract as the host_residual site.
         for (int e = 0; e < kAuxMaxExtra; ++e) {
           const std::size_t comp = static_cast<std::size_t>(kAuxNamedBase + e);
-          if (aux.size() >= (comp + 1) * nn) a.extra[e] = aux[comp * nn + c0];
+          if (aux.size() >= (comp + 1) * nn)
+            a.extra[e] = aux[comp * nn + c0];
         }
       }
       Real v = std::max(im->max_wave_speed(s, a, 0), im->max_wave_speed(s, a, 1));
-      if (v > mx) mx = v;
+      if (v > mx)
+        mx = v;
     }
     return mx;
   };
   std::function<void(MultiFab&, Real, int)> advance = [P, im, n, dx, recon](MultiFab& U, Real dt,
                                                                             int nsub) {
     // Same MPI guard: empty rank -> no-op (nothing to marshal). No collective -> without deadlock.
-    if (U.local_size() == 0) return;
+    if (U.local_size() == 0)
+      return;
     const Real hh = dt / nsub;
     const std::vector<double> aux = P->copy_state(P->aux, P->aux_ncomp_);  // frozen aux (splitting)
     for (int s = 0; s < nsub; ++s) {  // explicit Euler per substep (host path, prototype)
       std::vector<double> u = P->copy_state(U, NV);
       std::vector<double> res = host_residual<NV>(*im, u, aux, n, dx, recon);
-      for (std::size_t k = 0; k < u.size(); ++k) u[k] += hh * res[k];
+      for (std::size_t k = 0; k < u.size(); ++k)
+        u[k] += hh * res[k];
       P->write_state(U, NV, u);
     }
   };
   // Contribution of the dynamic block to the system Poisson: rhs += elliptic_rhs(U) per cell.
   // Model without an elliptic part => elliptic_rhs is 0 (no effect), thus backward-compatible.
-  std::function<void(const MultiFab&, MultiFab&)> add_poisson =
-      [P, im, n](const MultiFab& U, MultiFab& rhs) {
-        // HOST path (dynamic block .so prototype): it marshals the box to a full n*n
-        // array and treats it as replicated. On a rank without a local box (System distributes ONE box,
-        // so local_size()==0 at np>1 on the non-owner ranks) there is nothing to marshal:
-        // we skip, the owner rank carries the full contribution to the right-hand side. Without
-        // this guard, copy_state(U) / rhs.fab(0) would dereference a nonexistent fab (host crash).
-        if (rhs.local_size() == 0) return;
-        std::vector<double> u = P->copy_state(U, NV);
-        const std::size_t nn = static_cast<std::size_t>(n) * n;
-        Array4 r = rhs.fab(0).array();
-        const Box2D v = rhs.box(0);
-        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
-            const std::size_t k = static_cast<std::size_t>(j - v.lo[1]) * n + (i - v.lo[0]);
-            StateVec<NV> s;
-            for (int c = 0; c < NV; ++c) s[c] = u[static_cast<std::size_t>(c) * nn + k];
-            r(i, j, 0) += im->elliptic_rhs(s);
-          }
-      };
+  std::function<void(const MultiFab&, MultiFab&)> add_poisson = [P, im, n](const MultiFab& U,
+                                                                           MultiFab& rhs) {
+    // HOST path (dynamic block .so prototype): it marshals the box to a full n*n
+    // array and treats it as replicated. On a rank without a local box (System distributes ONE box,
+    // so local_size()==0 at np>1 on the non-owner ranks) there is nothing to marshal:
+    // we skip, the owner rank carries the full contribution to the right-hand side. Without
+    // this guard, copy_state(U) / rhs.fab(0) would dereference a nonexistent fab (host crash).
+    if (rhs.local_size() == 0)
+      return;
+    std::vector<double> u = P->copy_state(U, NV);
+    const std::size_t nn = static_cast<std::size_t>(n) * n;
+    Array4 r = rhs.fab(0).array();
+    const Box2D v = rhs.box(0);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
+        const std::size_t k = static_cast<std::size_t>(j - v.lo[1]) * n + (i - v.lo[0]);
+        StateVec<NV> s;
+        for (int c = 0; c < NV; ++c)
+          s[c] = u[static_cast<std::size_t>(c) * nn + k];
+        r(i, j, 0) += im->elliptic_rhs(s);
+      }
+  };
   // OPTIONAL metadata (names / roles / gamma) carried by the extended ABI of the .so. Symmetric
   // to the AOT path. Absent from an old .so -> empty meta -> fallback (names u0.. / no roles /
   // gamma 1.4). PRIORITY to the explicit name (names=), then meta, then fallback; roles + primitive
@@ -336,14 +369,25 @@ void push_dynamic(ImplT* P, const std::string& name, adc::dynlib::handle h, int 
     cons_vs.size = static_cast<int>(names.size());
   }
   if (cons_vs.names.empty()) {
-    for (int c = 0; c < NV; ++c) cons_vs.names.push_back("u" + std::to_string(c));
+    for (int c = 0; c < NV; ++c)
+      cons_vs.names.push_back("u" + std::to_string(c));
     cons_vs.size = NV;
   }
-  if (prim_vs.names.empty()) prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
+  if (prim_vs.names.empty())
+    prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
   const double gamma = meta.has_gamma ? meta.gamma : 1.4;
 
-  typename ImplT::Species block{name, MultiFab(P->ba, P->dm, NV, 2), NV, substeps, true, /*stride=*/1, gamma,
-                std::move(advance), std::move(rhs_into), std::move(max_speed), std::move(add_poisson)};
+  typename ImplT::Species block{name,
+                                MultiFab(P->ba, P->dm, NV, 2),
+                                NV,
+                                substeps,
+                                true,
+                                /*stride=*/1,
+                                gamma,
+                                std::move(advance),
+                                std::move(rhs_into),
+                                std::move(max_speed),
+                                std::move(add_poisson)};
   block.cons_vars = std::move(cons_vs);
   block.prim_vars = std::move(prim_vs);
   // POINTWISE cons <-> prim conversions OF THE MODEL (set/get_primitive_state): forwarded by
@@ -352,15 +396,19 @@ void push_dynamic(ImplT* P, const std::string& name, adc::dynlib::handle h, int 
   // on identity -- exact for a scalar (prim == cons). StateVec<NV> shares the width NV.
   block.prim_to_cons = [im](const double* in, double* out) {
     StateVec<NV> p{};
-    for (int c = 0; c < NV; ++c) p[c] = static_cast<Real>(in[c]);
+    for (int c = 0; c < NV; ++c)
+      p[c] = static_cast<Real>(in[c]);
     const StateVec<NV> u = im->to_conservative(p);
-    for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(u[c]);
+    for (int c = 0; c < NV; ++c)
+      out[c] = static_cast<double>(u[c]);
   };
   block.cons_to_prim = [im](const double* in, double* out) {
     StateVec<NV> u{};
-    for (int c = 0; c < NV; ++c) u[c] = static_cast<Real>(in[c]);
+    for (int c = 0; c < NV; ++c)
+      u[c] = static_cast<Real>(in[c]);
     const StateVec<NV> p = im->to_primitive(u);
-    for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(p[c]);
+    for (int c = 0; c < NV; ++c)
+      out[c] = static_cast<double>(p[c]);
   };
   P->sp.push_back(std::move(block));
   P->sp.back().U.set_val(Real(0));
@@ -372,29 +420,42 @@ void add_dynamic_block(System* self, ImplT* P, const std::string& name, const st
                        int substeps, const std::vector<std::string>& names,
                        const std::string& recon) {
   (void)self;
-  if (substeps < 1) throw std::runtime_error("System::add_dynamic_block: substeps >= 1");
+  if (substeps < 1)
+    throw std::runtime_error("System::add_dynamic_block: substeps >= 1");
   int recon_id = 0;  // MUSCL reconstruction order of the face states (conservative)
-  if (recon == "none") recon_id = 0;
-  else if (recon == "minmod") recon_id = 1;
-  else if (recon == "vanleer") recon_id = 2;
-  else throw std::runtime_error("System::add_dynamic_block: recon 'none' | 'minmod' | 'vanleer' "
-                                "(got '" + recon + "')");
+  if (recon == "none")
+    recon_id = 0;
+  else if (recon == "minmod")
+    recon_id = 1;
+  else if (recon == "vanleer")
+    recon_id = 2;
+  else
+    throw std::runtime_error(
+        "System::add_dynamic_block: recon 'none' | 'minmod' | 'vanleer' "
+        "(got '" +
+        recon + "')");
   adc::dynlib::handle h = adc::dynlib::open(so_path);
   if (!h) {
     const std::string e = adc::dynlib::last_error();
-    throw std::runtime_error("add_dynamic_block: dlopen('" + so_path + "'): " +
-                             (e.empty() ? std::string("?") : e));
+    throw std::runtime_error("add_dynamic_block: dlopen('" + so_path +
+                             "'): " + (e.empty() ? std::string("?") : e));
   }
-  auto nv_fn = reinterpret_cast<int (*)()>(adc::dynlib::sym(h,"adc_model_nvars"));
+  auto nv_fn = reinterpret_cast<int (*)()>(adc::dynlib::sym(h, "adc_model_nvars"));
   if (!nv_fn) {
     adc::dynlib::close(h);
     throw std::runtime_error("add_dynamic_block: adc_model_nvars missing from the .so");
   }
   const int nv = nv_fn();
   switch (nv) {
-    case 1: push_dynamic<ImplT, 1>(P, name, h, substeps, names, recon_id); break;
-    case 3: push_dynamic<ImplT, 3>(P, name, h, substeps, names, recon_id); break;
-    case 4: push_dynamic<ImplT, 4>(P, name, h, substeps, names, recon_id); break;
+    case 1:
+      push_dynamic<ImplT, 1>(P, name, h, substeps, names, recon_id);
+      break;
+    case 3:
+      push_dynamic<ImplT, 3>(P, name, h, substeps, names, recon_id);
+      break;
+    case 4:
+      push_dynamic<ImplT, 4>(P, name, h, substeps, names, recon_id);
+      break;
     default:
       adc::dynlib::close(h);
       throw std::runtime_error("add_dynamic_block: n_vars=" + std::to_string(nv) +
@@ -409,7 +470,8 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
                         const std::string& recon, const std::string& time, int substeps,
                         const std::vector<std::string>& names, double pos_floor = 0) {
   (void)self;
-  if (substeps < 1) throw std::runtime_error("System::add_compiled_block: substeps >= 1");
+  if (substeps < 1)
+    throw std::runtime_error("System::add_compiled_block: substeps >= 1");
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_compiled_block: recon 'conservative' | 'primitive'");
   // NB: the AOT path (.so) marshals time->imex without an explicit RK scheme: only SSPRK2 is wired
@@ -418,9 +480,10 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   // ABI of the .so (out of scope ADC-174). They are carried by the native add_block AND backend='production'
   // (add_native_block: the template marshals method down to make_block of the loader).
   if (time != "explicit" && time != "imex")
-    throw std::runtime_error("System::add_compiled_block: time 'explicit' | 'imex' (ssprk3, euler and "
-                             "the IMEX-RK family ARS(2,2,2) -> native add_block or backend='production'; "
-                             "the AOT path only exposes SSPRK2 + local backward-Euler)");
+    throw std::runtime_error(
+        "System::add_compiled_block: time 'explicit' | 'imex' (ssprk3, euler and "
+        "the IMEX-RK family ARS(2,2,2) -> native add_block or backend='production'; "
+        "the AOT path only exposes SSPRK2 + local backward-Euler)");
   // WENO5 (5-point stencil, 3 ghosts) is now EXPOSED by the AOT path: the local grid of the
   // .so allocates block_n_ghost(limiter) (compiled_block_abi.hpp), 3 for weno5, so assemble_rhs does not read
   // out of bounds. limiter is validated by make_block in the .so (none|minmod|vanleer|weno5).
@@ -430,8 +493,8 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   adc::dynlib::handle h = adc::dynlib::open(so_path);
   if (!h) {
     const std::string e = adc::dynlib::last_error();
-    throw std::runtime_error("add_compiled_block: dlopen('" + so_path + "'): " +
-                             (e.empty() ? std::string("?") : e));
+    throw std::runtime_error("add_compiled_block: dlopen('" + so_path +
+                             "'): " + (e.empty() ? std::string("?") : e));
   }
   // extern "C" ABI of the compiled block (compiled_block_abi.hpp). The .so runs the production path
   // (assemble_rhs<Limiter, Flux>, SSPRK2/IMEX) on the generated model; only flat arrays
@@ -443,20 +506,21 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
                             const char*, int, int, double, int);
   using max_fn_t = double (*)(const double*, const double*, int, double, double, int);
   using poi_fn_t = void (*)(const double*, double*, int);
-  auto nv_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h,"adc_model_nvars"));
-  auto res_fn = reinterpret_cast<res_fn_t>(adc::dynlib::sym(h,"adc_compiled_residual"));
-  auto adv_fn = reinterpret_cast<adv_fn_t>(adc::dynlib::sym(h,"adc_compiled_advance"));
-  auto max_fn = reinterpret_cast<max_fn_t>(adc::dynlib::sym(h,"adc_compiled_max_speed"));
-  auto poi_fn = reinterpret_cast<poi_fn_t>(adc::dynlib::sym(h,"adc_compiled_poisson_rhs"));
+  auto nv_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h, "adc_model_nvars"));
+  auto res_fn = reinterpret_cast<res_fn_t>(adc::dynlib::sym(h, "adc_compiled_residual"));
+  auto adv_fn = reinterpret_cast<adv_fn_t>(adc::dynlib::sym(h, "adc_compiled_advance"));
+  auto max_fn = reinterpret_cast<max_fn_t>(adc::dynlib::sym(h, "adc_compiled_max_speed"));
+  auto poi_fn = reinterpret_cast<poi_fn_t>(adc::dynlib::sym(h, "adc_compiled_poisson_rhs"));
   if (!nv_fn || !res_fn || !adv_fn || !max_fn || !poi_fn) {
     adc::dynlib::close(h);
-    throw std::runtime_error("add_compiled_block: compiled block ABI missing from the .so (regenerate via "
-                             "dsl.compile_aot / compile_or_jit(mode='compile'))");
+    throw std::runtime_error(
+        "add_compiled_block: compiled block ABI missing from the .so (regenerate via "
+        "dsl.compile_aot / compile_or_jit(mode='compile'))");
   }
   const int nv = nv_fn();
   // Width of the aux channel that the compiled model READS (B_z, T_e...). Symmetric to the JIT path
   // (IModel::n_aux). Optional: an old .so without this symbol falls back on the base contract (3).
-  auto naux_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h,"adc_compiled_naux"));
+  auto naux_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h, "adc_compiled_naux"));
   const int naux = naux_fn ? naux_fn() : kAuxBaseComps;
   // RUNTIME PARAMS (P7-b): SUFFIXED `_p` variants that take a flat block (const double*, int) of
   // runtime parameter values, injected into the model before execution. OPTIONAL: a .so
@@ -464,19 +528,19 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   // we keep the historical symbols (const-params path, bit-identical). We SEED the value block
   // to the declaration defaults (adc_compiled_param_defaults) so a later set_param overwrites
   // only one entry without resetting the others to zero.
-  auto nparams_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h,"adc_compiled_nparams"));
+  auto nparams_fn = reinterpret_cast<nv_fn_t>(adc::dynlib::sym(h, "adc_compiled_nparams"));
   const int nparams = nparams_fn ? nparams_fn() : 0;
   using res_p_fn_t = void (*)(const double*, double*, const double*, int, double, double, int,
                               const char*, const char*, int, const double*, int, double);
   using adv_p_fn_t = void (*)(double*, const double*, int, double, double, int, const char*,
                               const char*, int, int, double, int, const double*, int, double);
-  using max_p_fn_t = double (*)(const double*, const double*, int, double, double, int,
-                                const double*, int);
+  using max_p_fn_t =
+      double (*)(const double*, const double*, int, double, double, int, const double*, int);
   using poi_p_fn_t = void (*)(const double*, double*, int, const double*, int);
-  auto res_p_fn = reinterpret_cast<res_p_fn_t>(adc::dynlib::sym(h,"adc_compiled_residual_p"));
-  auto adv_p_fn = reinterpret_cast<adv_p_fn_t>(adc::dynlib::sym(h,"adc_compiled_advance_p"));
-  auto max_p_fn = reinterpret_cast<max_p_fn_t>(adc::dynlib::sym(h,"adc_compiled_max_speed_p"));
-  auto poi_p_fn = reinterpret_cast<poi_p_fn_t>(adc::dynlib::sym(h,"adc_compiled_poisson_rhs_p"));
+  auto res_p_fn = reinterpret_cast<res_p_fn_t>(adc::dynlib::sym(h, "adc_compiled_residual_p"));
+  auto adv_p_fn = reinterpret_cast<adv_p_fn_t>(adc::dynlib::sym(h, "adc_compiled_advance_p"));
+  auto max_p_fn = reinterpret_cast<max_p_fn_t>(adc::dynlib::sym(h, "adc_compiled_max_speed_p"));
+  auto poi_p_fn = reinterpret_cast<poi_p_fn_t>(adc::dynlib::sym(h, "adc_compiled_poisson_rhs_p"));
   // SHARED block of current values: captured by the closures AND registered in P->block_params_
   // (set_block_params writes there -> the closures see the new value at the next step). Empty if the
   // block has no runtime param or if the `_p` ABI is absent (old .so): the closures then call
@@ -492,10 +556,12 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
         "compiled module with the current headers)");
   if (use_params) {
     pv = std::make_shared<std::vector<double>>(static_cast<std::size_t>(nparams), 0.0);
-    auto defs_fn = reinterpret_cast<void (*)(double*)>(adc::dynlib::sym(h,"adc_compiled_param_defaults"));
-    if (defs_fn) defs_fn(pv->data());  // seed to the declaration defaults
+    auto defs_fn =
+        reinterpret_cast<void (*)(double*)>(adc::dynlib::sym(h, "adc_compiled_param_defaults"));
+    if (defs_fn)
+      defs_fn(pv->data());  // seed to the declaration defaults
   }  // registration in P->block_params_ DEFERRED to just before push_back (after the validations that
-     // may throw: avoids an orphan entry without an associated block if the addition fails).
+  // may throw: avoids an orphan entry without an associated block if the addition fails).
   // OPTIONAL metadata (names / roles / gamma) transported by the extended ABI of the .so. Absent
   // from an old .so -> empty meta, we fall back on the fallback (names u0.. / no roles / gamma 1.4).
   const BlockMeta meta = read_block_meta(h);
@@ -510,74 +576,77 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   const int per = P->periodic_ ? 1 : 0;
   const std::string lim = limiter, riem = riemann;
 
-  std::function<void(MultiFab&, MultiFab&)> rhs_into =
-      [P, lib, res_fn, res_p_fn, pv, nv, naux, n, dx, dy, per, lim, riem, recon_prim,
-       pos_floor](MultiFab& U, MultiFab& R) {
-        // HOST path (compiled block .so): same MPI guard as add_poisson. On a rank without a local
-        // box (local_size()==0 at np>1) there is nothing to marshal; the owner rank carries
-        // the full physics. No collective here -> one-sided no-op, no deadlock.
-        if (U.local_size() == 0) return;
-        // ADC-369: marshal naux comps + the per-field halo tail (read by make_grid in the .so).
-        std::vector<double> u = P->copy_state(U, nv), a = marshal_aux_halo(P, naux);
-        std::vector<double> r(static_cast<std::size_t>(nv) * n * n, 0.0);
-        if (pv || pos_floor > 0)  // `_p` variant: RUNTIME params (P7-b) and/or positivity (ADC-76)
-          res_p_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(),
-                   recon_prim, pv ? pv->data() : nullptr, pv ? static_cast<int>(pv->size()) : 0,
-                   pos_floor);
-        else
-          res_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim);
-        P->write_state(R, nv, r);
-      };
-  std::function<void(MultiFab&, Real, int)> advance =
-      [P, lib, adv_fn, adv_p_fn, pv, nv, naux, n, dx, dy, per, lim, riem, recon_prim, imex,
-       pos_floor](MultiFab& U, Real dt, int nsub) {
-        // Same MPI guard: empty rank -> no-op. No collective -> without deadlock.
-        if (U.local_size() == 0) return;
-        std::vector<double> u = P->copy_state(U, nv), a = marshal_aux_halo(P, naux);  // ADC-369 tail
-        if (pv || pos_floor > 0)  // `_p` variant: RUNTIME params (P7-b) and/or positivity (ADC-76)
-          adv_p_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
-                   static_cast<double>(dt), nsub, pv ? pv->data() : nullptr,
-                   pv ? static_cast<int>(pv->size()) : 0, pos_floor);
-        else
-          adv_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
-                 static_cast<double>(dt), nsub);
-        P->write_state(U, nv, u);
-      };
-  std::function<Real(const MultiFab&)> max_speed =
-      [P, lib, max_fn, max_p_fn, pv, nv, naux, n, dx, dy, per](const MultiFab& U) -> Real {
-        // Same MPI guard: empty rank -> local speed 0. The downstream all_reduce_max takes the global max.
-        if (U.local_size() == 0) return Real(0);
-        std::vector<double> u = P->copy_state(U, nv), a = marshal_aux_halo(P, naux);  // ADC-369 tail
-        if (pv)  // RUNTIME params (P7-b)
-          return max_p_fn(u.data(), a.data(), n, dx, dy, per, pv->data(),
-                          static_cast<int>(pv->size()));
-        return max_fn(u.data(), a.data(), n, dx, dy, per);
-      };
-  std::function<void(const MultiFab&, MultiFab&)> add_poisson =
-      [P, lib, poi_fn, poi_p_fn, pv, nv, n](const MultiFab& U, MultiFab& rhs) {
-        // HOST path (compiled block .so prototype): same MPI guard as the dynamic block. On a
-        // rank without a local box (local_size()==0 at np>1) there is nothing to marshal -> we skip, the
-        // owner rank carries the full contribution. Without it copy_state(U) / rhs.fab(0)
-        // would dereference a nonexistent fab (host crash).
-        if (rhs.local_size() == 0) return;
-        std::vector<double> u = P->copy_state(U, nv);
-        std::vector<double> pr(static_cast<std::size_t>(n) * n, 0.0);
-        if (pv)  // RUNTIME params (P7-b)
-          poi_p_fn(u.data(), pr.data(), n, pv->data(), static_cast<int>(pv->size()));
-        else
-          poi_fn(u.data(), pr.data(), n);
-        Array4 r = rhs.fab(0).array();
-        const Box2D v = rhs.box(0);
-        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-            r(i, j, 0) += pr[static_cast<std::size_t>(j - v.lo[1]) * n + (i - v.lo[0])];
-      };
+  std::function<void(MultiFab&, MultiFab&)> rhs_into = [P, lib, res_fn, res_p_fn, pv, nv, naux, n,
+                                                        dx, dy, per, lim, riem, recon_prim,
+                                                        pos_floor](MultiFab& U, MultiFab& R) {
+    // HOST path (compiled block .so): same MPI guard as add_poisson. On a rank without a local
+    // box (local_size()==0 at np>1) there is nothing to marshal; the owner rank carries
+    // the full physics. No collective here -> one-sided no-op, no deadlock.
+    if (U.local_size() == 0)
+      return;
+    // ADC-369: marshal naux comps + the per-field halo tail (read by make_grid in the .so).
+    std::vector<double> u = P->copy_state(U, nv), a = marshal_aux_halo(P, naux);
+    std::vector<double> r(static_cast<std::size_t>(nv) * n * n, 0.0);
+    if (pv || pos_floor > 0)  // `_p` variant: RUNTIME params (P7-b) and/or positivity (ADC-76)
+      res_p_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim,
+               pv ? pv->data() : nullptr, pv ? static_cast<int>(pv->size()) : 0, pos_floor);
+    else
+      res_fn(u.data(), r.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim);
+    P->write_state(R, nv, r);
+  };
+  std::function<void(MultiFab&, Real, int)> advance = [P, lib, adv_fn, adv_p_fn, pv, nv, naux, n,
+                                                       dx, dy, per, lim, riem, recon_prim, imex,
+                                                       pos_floor](MultiFab& U, Real dt, int nsub) {
+    // Same MPI guard: empty rank -> no-op. No collective -> without deadlock.
+    if (U.local_size() == 0)
+      return;
+    std::vector<double> u = P->copy_state(U, nv), a = marshal_aux_halo(P, naux);  // ADC-369 tail
+    if (pv || pos_floor > 0)  // `_p` variant: RUNTIME params (P7-b) and/or positivity (ADC-76)
+      adv_p_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
+               static_cast<double>(dt), nsub, pv ? pv->data() : nullptr,
+               pv ? static_cast<int>(pv->size()) : 0, pos_floor);
+    else
+      adv_fn(u.data(), a.data(), n, dx, dy, per, lim.c_str(), riem.c_str(), recon_prim, imex,
+             static_cast<double>(dt), nsub);
+    P->write_state(U, nv, u);
+  };
+  std::function<Real(const MultiFab&)> max_speed = [P, lib, max_fn, max_p_fn, pv, nv, naux, n, dx,
+                                                    dy, per](const MultiFab& U) -> Real {
+    // Same MPI guard: empty rank -> local speed 0. The downstream all_reduce_max takes the global max.
+    if (U.local_size() == 0)
+      return Real(0);
+    std::vector<double> u = P->copy_state(U, nv), a = marshal_aux_halo(P, naux);  // ADC-369 tail
+    if (pv)  // RUNTIME params (P7-b)
+      return max_p_fn(u.data(), a.data(), n, dx, dy, per, pv->data(), static_cast<int>(pv->size()));
+    return max_fn(u.data(), a.data(), n, dx, dy, per);
+  };
+  std::function<void(const MultiFab&, MultiFab&)> add_poisson = [P, lib, poi_fn, poi_p_fn, pv, nv,
+                                                                 n](const MultiFab& U,
+                                                                    MultiFab& rhs) {
+    // HOST path (compiled block .so prototype): same MPI guard as the dynamic block. On a
+    // rank without a local box (local_size()==0 at np>1) there is nothing to marshal -> we skip, the
+    // owner rank carries the full contribution. Without it copy_state(U) / rhs.fab(0)
+    // would dereference a nonexistent fab (host crash).
+    if (rhs.local_size() == 0)
+      return;
+    std::vector<double> u = P->copy_state(U, nv);
+    std::vector<double> pr(static_cast<std::size_t>(n) * n, 0.0);
+    if (pv)  // RUNTIME params (P7-b)
+      poi_p_fn(u.data(), pr.data(), n, pv->data(), static_cast<int>(pv->size()));
+    else
+      poi_fn(u.data(), pr.data(), n);
+    Array4 r = rhs.fab(0).array();
+    const Box2D v = rhs.box(0);
+    for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        r(i, j, 0) += pr[static_cast<std::size_t>(j - v.lo[1]) * n + (i - v.lo[0])];
+  };
 
   // Variable descriptors: PRIORITY to the explicit name passed by the caller (names=), otherwise to the
   // NAMES carried by the extended ABI of the .so (meta), otherwise fallback u0.. . The ROLES and the PRIMITIVE do not
   // transit EXCEPT through the ABI (the API has no way to provide them): we take them from meta as-is.
   VariableSet cons_vs = meta.cons, prim_vs = meta.prim;
-  if (!names.empty()) {                 // explicit override of the conservative names
+  if (!names.empty()) {  // explicit override of the conservative names
     if (static_cast<int>(names.size()) != nv)
       throw std::runtime_error("System::add_compiled_block: names= has " +
                                std::to_string(names.size()) + " names but block '" + name +
@@ -585,16 +654,26 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
     cons_vs.names = names;
     cons_vs.size = static_cast<int>(names.size());
   }
-  if (cons_vs.names.empty()) {          // neither names= nor meta: historical fallback u0..
-    for (int c = 0; c < nv; ++c) cons_vs.names.push_back("u" + std::to_string(c));
+  if (cons_vs.names.empty()) {  // neither names= nor meta: historical fallback u0..
+    for (int c = 0; c < nv; ++c)
+      cons_vs.names.push_back("u" + std::to_string(c));
     cons_vs.size = nv;
   }
-  if (prim_vs.names.empty()) prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
+  if (prim_vs.names.empty())
+    prim_vs = {VariableKind::Primitive, cons_vs.names, cons_vs.size, {}};
   // gamma: carried by the ABI if the model declares it (adc_compiled_gamma), otherwise historical default 1.4.
   const double gamma = meta.has_gamma ? meta.gamma : 1.4;
-  typename ImplT::Species block{name, MultiFab(P->ba, P->dm, nv, 2), nv, substeps, true, /*stride=*/1, gamma,
-                      std::move(advance), std::move(rhs_into), std::move(max_speed),
-                      std::move(add_poisson)};
+  typename ImplT::Species block{name,
+                                MultiFab(P->ba, P->dm, nv, 2),
+                                nv,
+                                substeps,
+                                true,
+                                /*stride=*/1,
+                                gamma,
+                                std::move(advance),
+                                std::move(rhs_into),
+                                std::move(max_speed),
+                                std::move(add_poisson)};
   block.cons_vars = std::move(cons_vs);
   block.prim_vars = std::move(prim_vs);
   // cons <-> prim conversions OF THE MODEL via the extended ABI of the .so (set/get_primitive_state). The
@@ -603,13 +682,14 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   // OPTIONAL: a .so generated before this work does not expose them -> empty conversion -> identity (the
   // set/get_primitive_state path then falls back on prim == cons, exact for a scalar).
   using cv_fn_t = void (*)(const double*, double*, int);
-  auto p2c_fn = reinterpret_cast<cv_fn_t>(adc::dynlib::sym(h,"adc_compiled_to_conservative"));
-  auto c2p_fn = reinterpret_cast<cv_fn_t>(adc::dynlib::sym(h,"adc_compiled_to_primitive"));
+  auto p2c_fn = reinterpret_cast<cv_fn_t>(adc::dynlib::sym(h, "adc_compiled_to_conservative"));
+  auto c2p_fn = reinterpret_cast<cv_fn_t>(adc::dynlib::sym(h, "adc_compiled_to_primitive"));
   // P7-b: if the block has runtime params, the cons<->prim conversions must see them too (the
   // conversion can read a runtime param). We then prefer the `_p` variants with the SHARED block.
   using cv_p_fn_t = void (*)(const double*, double*, int, const double*, int);
-  auto p2c_p_fn = reinterpret_cast<cv_p_fn_t>(adc::dynlib::sym(h,"adc_compiled_to_conservative_p"));
-  auto c2p_p_fn = reinterpret_cast<cv_p_fn_t>(adc::dynlib::sym(h,"adc_compiled_to_primitive_p"));
+  auto p2c_p_fn =
+      reinterpret_cast<cv_p_fn_t>(adc::dynlib::sym(h, "adc_compiled_to_conservative_p"));
+  auto c2p_p_fn = reinterpret_cast<cv_p_fn_t>(adc::dynlib::sym(h, "adc_compiled_to_primitive_p"));
   if (pv && p2c_p_fn)
     block.prim_to_cons = [lib, p2c_p_fn, pv](const double* in, double* out) {
       p2c_p_fn(in, out, 1, pv->data(), static_cast<int>(pv->size()));
@@ -639,7 +719,8 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
     block.project = [P, lib, proj_fn, pv, nv, n](MultiFab& U) {
       // Meme garde MPI que les autres fermetures marshalees : rang sans box locale -> no-op
       // unilateral (pas de collectif ici, aucun risque d'interblocage).
-      if (U.local_size() == 0) return;
+      if (U.local_size() == 0)
+        return;
       // NB (ADC-369): the projection reads the aux POINTWISE (compiled_block_abi::pointwise_project,
       // no make_grid, no ghost) -> it needs NO per-field halo tail, so we marshal the plain aux here.
       std::vector<double> u = P->copy_state(U, nv), a = P->copy_state(P->aux, P->aux_ncomp_);
@@ -650,7 +731,8 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
   }
   // P7-b: register the SHARED block of runtime params AFTER the validations (all passed here):
   // set_block_params will find it by name, and the block closures share the same shared_ptr.
-  if (pv) P->block_params_[name] = pv;
+  if (pv)
+    P->block_params_[name] = pv;
   P->sp.push_back(std::move(block));
   P->sp.back().U.set_val(Real(0));
 }
@@ -660,11 +742,13 @@ void add_compiled_block(System* self, ImplT* P, const std::string& name, const s
 template <typename ImplT>
 void add_native_block(System* self, ImplT* P, const std::string& name, const std::string& so_path,
                       const std::string& limiter, const std::string& riemann,
-                      const std::string& recon, const std::string& time, double gamma,
-                      int substeps, bool evolve, int stride, double pos_floor = 0) {
+                      const std::string& recon, const std::string& time, double gamma, int substeps,
+                      bool evolve, int stride, double pos_floor = 0) {
   (void)P;
-  if (substeps < 1) throw std::runtime_error("System::add_native_block: substeps >= 1");
-  if (stride < 1) throw std::runtime_error("System::add_native_block: stride >= 1");
+  if (substeps < 1)
+    throw std::runtime_error("System::add_native_block: substeps >= 1");
+  if (stride < 1)
+    throw std::runtime_error("System::add_native_block: stride >= 1");
   // UPFRONT validation of the scheme (like add_block / add_compiled_block): add_compiled_model interprets
   // imex = (time=="imex"), recon_prim = (recon=="primitive") and the explicit RK scheme
   // method = ssprk3 | euler | ssprk2 according to time; an unknown string would fall back SILENTLY on
@@ -677,9 +761,12 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
     throw std::runtime_error("System::add_native_block: recon 'conservative' | 'primitive' (got '" +
                              recon + "')");
   if (time != "explicit" && time != "ssprk3" && time != "euler" && time != "imex")
-    throw std::runtime_error("System::add_native_block: time 'explicit' | 'ssprk3' | 'euler' | 'imex' "
-                             "(got '" + time + "'; the IMEX-RK family ARS(2,2,2) is wired only on "
-                             "a composite model adc.Model(...) -> native add_block)");
+    throw std::runtime_error(
+        "System::add_native_block: time 'explicit' | 'ssprk3' | 'euler' | 'imex' "
+        "(got '" +
+        time +
+        "'; the IMEX-RK family ARS(2,2,2) is wired only on "
+        "a composite model adc.Model(...) -> native add_block)");
   // WENO5 (5-point stencil, 3 ghosts) is now EXPOSED by the native path: the loader inlines
   // add_compiled_model which, after install_block, reallocates the block state to block_n_ghost(limiter) (3
   // for weno5) -- SAME mechanism as add_block. assemble_rhs thus does not read out of bounds. limiter is
@@ -703,9 +790,9 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
   // simply load the .dll and resolve adc_install_native.
   adc::dynlib::handle h = adc::dynlib::open(so_path);
   if (!h)
-    throw std::runtime_error("add_native_block: LoadLibrary('" + so_path + "'): " +
-                             adc::dynlib::last_error() +
-                             " (the .dll must be linked against _adc.lib + kokkoscore.lib; cf. ADC-100)");
+    throw std::runtime_error(
+        "add_native_block: LoadLibrary('" + so_path + "'): " + adc::dynlib::last_error() +
+        " (the .dll must be linked against _adc.lib + kokkoscore.lib; cf. ADC-100)");
   {
     auto key_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_native_abi_key"));
     if (!key_fn) {
@@ -742,8 +829,8 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
   void* h = dlopen(so_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
   if (!h) {
     const char* e = dlerror();
-    throw std::runtime_error("add_native_block: dlopen('" + so_path + "'): " +
-                             std::string(e ? e : "?") +
+    throw std::runtime_error("add_native_block: dlopen('" + so_path +
+                             "'): " + std::string(e ? e : "?") +
                              " (the adc::System symbols (install_block/grid_context/"
                              "ensure_aux_width) must be exported AND the _adc module loaded "
                              "globally; cf. ADC_EXPORT)");
@@ -752,11 +839,12 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
   // key (at ITS compilation). A mismatch = divergent headers / compiler / standard -> memory
   // layout of System/GridContext/BlockClosures potentially different across the boundary ->
   // UB. We throw a CLEAR error rather than letting an incompatible loader through.
-  auto key_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h,"adc_native_abi_key"));
+  auto key_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_native_abi_key"));
   if (!key_fn) {
     adc::dynlib::close(h);
-    throw std::runtime_error("add_native_block: adc_native_abi_key missing from the .so (regenerate via "
-                             "dsl.compile_native / compile(backend='production'))");
+    throw std::runtime_error(
+        "add_native_block: adc_native_abi_key missing from the .so (regenerate via "
+        "dsl.compile_native / compile(backend='production'))");
   }
   const std::string loader_key = key_fn();
   const std::string module_key = abi_key();
@@ -773,11 +861,12 @@ void add_native_block(System* self, ImplT* P, const std::string& name, const std
   // block (not advanced) is possible as via add_block.
   using install_fn_t = void (*)(void*, const char*, const char*, const char*, const char*,
                                 const char*, double, int, int, int, double);
-  auto install = reinterpret_cast<install_fn_t>(adc::dynlib::sym(h,"adc_install_native"));
+  auto install = reinterpret_cast<install_fn_t>(adc::dynlib::sym(h, "adc_install_native"));
   if (!install) {
     adc::dynlib::close(h);
-    throw std::runtime_error("add_native_block: adc_install_native missing from the .so (regenerate via "
-                             "dsl.compile_native / compile(backend='production'))");
+    throw std::runtime_error(
+        "add_native_block: adc_install_native missing from the .so (regenerate via "
+        "dsl.compile_native / compile(backend='production'))");
   }
   // NB signature: adc_install_native now carries pos_floor (positivity limiter,
   // ADC-76) as the final flat argument. A loader generated BEFORE this addition has a different C

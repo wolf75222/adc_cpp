@@ -32,9 +32,10 @@ int main() {
     double emax = 0;
     for (int i = 3; i < N - 3; ++i) {
       const double xc = (i + 0.5) * dx;
-      const double rec = weno5z(favg(xc - 2.5 * dx, xc - 1.5 * dx), favg(xc - 1.5 * dx, xc - 0.5 * dx),
-                                favg(xc - 0.5 * dx, xc + 0.5 * dx), favg(xc + 0.5 * dx, xc + 1.5 * dx),
-                                favg(xc + 1.5 * dx, xc + 2.5 * dx));
+      const double rec =
+          weno5z(favg(xc - 2.5 * dx, xc - 1.5 * dx), favg(xc - 1.5 * dx, xc - 0.5 * dx),
+                 favg(xc - 0.5 * dx, xc + 0.5 * dx), favg(xc + 0.5 * dx, xc + 1.5 * dx),
+                 favg(xc + 1.5 * dx, xc + 2.5 * dx));
       const double exact = std::sin(2 * kPi * (xc + 0.5 * dx));  // valeur a la face x = xc + dx/2
       emax = std::fmax(emax, std::fabs(rec - exact));
     }

@@ -88,11 +88,16 @@ static void init_spike(MultiFab& U, const Box2D& dom, const EulerNoSrc& m) {
     Array4 a = U.fab(li).array();
     for_each_cell(U.box(li), [a, ilo, ihi, ks, m, p0](int i, int j) {
       Real rho = (i >= ilo && i <= ihi) ? Real(kRhoMax) : Real(kRhoMin);
-      if (i == ks) rho = Real(0.8);
-      else if (i == ks + 1) rho = Real(0.5);
-      else if (i == ks + 2) rho = Real(kRhoMin);
-      else if (i == ks + 3) rho = Real(1.0);
-      else if (i == ks + 4) rho = Real(kRhoMin);
+      if (i == ks)
+        rho = Real(0.8);
+      else if (i == ks + 1)
+        rho = Real(0.5);
+      else if (i == ks + 2)
+        rho = Real(kRhoMin);
+      else if (i == ks + 3)
+        rho = Real(1.0);
+      else if (i == ks + 4)
+        rho = Real(kRhoMin);
       a(i, j, 0) = rho;
       a(i, j, 1) = rho * Real(1.0);  // u = 1: advected contact
       a(i, j, 2) = Real(0);
@@ -106,7 +111,11 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   std::printf("=== POSITIVITY FLOOR on AMR (positivity_floor, ADC-259) ===\n");
@@ -136,7 +145,10 @@ int main(int argc, char** argv) {
       sync_host();
       Array4 c = Pc.fab(0).array();
       for_each_cell(cdom, [c](int i, int j) {
-        c(i, j, 0) = Real(1.0); c(i, j, 1) = Real(0.3); c(i, j, 2) = Real(-0.2); c(i, j, 3) = Real(2.0);
+        c(i, j, 0) = Real(1.0);
+        c(i, j, 1) = Real(0.3);
+        c(i, j, 2) = Real(-0.2);
+        c(i, j, 3) = Real(2.0);
       });
       c(1, 3, 0) = Real(1e-10);  // sub-floor density (coarse means are NOT floored: reachable)
       c(1, 3, 1) = Real(0.5);    // distinctive momentum: the clamp must leave it untouched
@@ -156,7 +168,8 @@ int main(int argc, char** argv) {
         const Box2D v = U.box(0), g = U.fab(0).grown_box();
         for (int j = g.lo[1]; j <= g.hi[1]; ++j)
           for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-            if (!v.contains(i, j) && f(i, j, 0) < floor) ++cnt;
+            if (!v.contains(i, j) && f(i, j, 0) < floor)
+              ++cnt;
       }
       return cnt;
     };
@@ -178,12 +191,13 @@ int main(int argc, char** argv) {
       ghost_mom = f(3, 6, 1);
     }
     if (me == 0)
-      std::printf("(1) C/F ghost clamp : sub-floor ghosts NU = %d, PP = %d ; ghost(3,6) rho = %.3e "
-                  "mom = %.3f\n", n_raw, n_pp, static_cast<double>(ghost_rho),
-                  static_cast<double>(ghost_mom));
+      std::printf(
+          "(1) C/F ghost clamp : sub-floor ghosts NU = %d, PP = %d ; ghost(3,6) rho = %.3e "
+          "mom = %.3f\n",
+          n_raw, n_pp, static_cast<double>(ghost_rho), static_cast<double>(ghost_mom));
     if (n_ranks() == 1) {
-      chk(n_raw > 0, "1_unclamped_ghost_subfloor");       // the problem exists at the C/F interface
-      chk(n_pp == 0, "1_clamped_ghost_floor");            // the clamp fixes every C/F ghost
+      chk(n_raw > 0, "1_unclamped_ghost_subfloor");  // the problem exists at the C/F interface
+      chk(n_pp == 0, "1_clamped_ghost_floor");       // the clamp fixes every C/F ghost
       chk(ghost_rho >= floor, "1_clamped_ghost_density_floored");
       chk(std::abs(ghost_mom - Real(0.5)) < Real(1e-12), "1_clamped_ghost_momentum_interpolated");
     }
@@ -194,8 +208,9 @@ int main(int argc, char** argv) {
     std::vector<AmrLevelMP> levels;
     levels.push_back(AmrLevelMP{U, &aux, geom.dx(), geom.dy()});
     advance_amr<Weno5, RusanovFlux>(model, levels, dom, dt, Periodicity{true, true},
-                                    /*coarse_replicated=*/true, /*recon_prim=*/false, /*imex=*/false,
-                                    NewtonOptions{}, AmrTimeMethod::kEuler, pos_floor);
+                                    /*coarse_replicated=*/true, /*recon_prim=*/false,
+                                    /*imex=*/false, NewtonOptions{}, AmrTimeMethod::kEuler,
+                                    pos_floor);
     U = std::move(levels[0].U);
   };
   auto coarse_mass = [&](const MultiFab& U) {
@@ -205,7 +220,8 @@ int main(int argc, char** argv) {
       const ConstArray4 a = U.fab(li).const_array();
       const Box2D v = U.box(li);
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-        for (int i = v.lo[0]; i <= v.hi[0]; ++i) mass += a(i, j, 0);
+        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+          mass += a(i, j, 0);
     }
     return all_reduce_sum(mass);
   };
@@ -236,8 +252,8 @@ int main(int argc, char** argv) {
     init_smooth(U0, geom, model);
     const Real dt = Real(0.1) * geom.dx();
     MultiFab Uoff = U0, Uon = U0;
-    amr_step(Uoff, aux, dt, Real(0));      // floor inactive
-    amr_step(Uon, aux, dt, floor);         // floor active but never bites a face above it
+    amr_step(Uoff, aux, dt, Real(0));  // floor inactive
+    amr_step(Uon, aux, dt, floor);     // floor active but never bites a face above it
     sync_host();
     double dmax = 0;
     for (int li = 0; li < Uoff.local_size(); ++li) {
@@ -253,7 +269,8 @@ int main(int argc, char** argv) {
     finite_min_rho(Uon, finite);
     const double m0 = coarse_mass(U0), m1 = coarse_mass(Uon);
     if (me == 0)
-      std::printf("(2) no-default-change : max|U(floor) - U(no floor)| = %.3e (smooth state)\n", dmax);
+      std::printf("(2) no-default-change : max|U(floor) - U(no floor)| = %.3e (smooth state)\n",
+                  dmax);
     chk(dmax == 0.0, "2_smooth_floor_bit_identical");
     chk(finite, "2_floor_finite");
     chk(std::abs(m1 - m0) < 1e-10, "2_mass_conserved");
@@ -267,7 +284,8 @@ int main(int argc, char** argv) {
     const int ng = Weno5::n_ghost;  // weno5 stencil radius (3)
     MultiFab U0(ba, dm, EulerNoSrc::n_vars, ng);
     init_spike(U0, dom, model);
-    const Real dt = Real(0.05) * geom.dx() / Real(2.5);  // prudent CFL (u=1, c~1.2 on the background)
+    const Real dt =
+        Real(0.05) * geom.dx() / Real(2.5);  // prudent CFL (u=1, c~1.2 on the background)
     const double m0 = coarse_mass(U0);
     MultiFab Uon = U0, Uoff = U0;
     amr_step(Uon, aux, dt, floor);
@@ -285,7 +303,8 @@ int main(int argc, char** argv) {
         for (int i = v.lo[0]; i <= v.hi[0]; ++i)
           for (int cc = 0; cc < EulerNoSrc::n_vars; ++cc) {
             const double da = a(i, j, cc), db = b(i, j, cc);
-            if (!(da == db)) differs = true;  // NaN != NaN -> differ
+            if (!(da == db))
+              differs = true;  // NaN != NaN -> differ
           }
     }
     differs = all_reduce_max(differs ? 1.0 : 0.0) > 0.0;
@@ -327,7 +346,8 @@ int main(int argc, char** argv) {
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_amr_positivity_floor\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_amr_positivity_floor\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

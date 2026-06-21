@@ -11,7 +11,7 @@
 #pragma once
 
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>  // DistributedFFTSolver (wraps PoissonFFT)
-#include <adc/numerics/time/amr_reflux.hpp>  // advance_fab_1c, xface_box, yface_box
+#include <adc/numerics/time/amr_reflux.hpp>              // advance_fab_1c, xface_box, yface_box
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -130,7 +130,8 @@ class SpectralCoupler {
     // (deterministic/idempotent but not bit-identical to a lexicographic sum);
     // parallel_reduce absorbs the barrier, no more device_fence at the head.
     const ConstArray4 u = U_.fab(0).const_array();
-    const Real s = for_each_cell_reduce_sum(U_.box(0), [u] ADC_HD(int i, int j) { return u(i, j); });
+    const Real s =
+        for_each_cell_reduce_sum(U_.box(0), [u] ADC_HD(int i, int j) { return u(i, j); });
     return all_reduce_sum(static_cast<double>(s)) * dx_ * dy_;
   }
 

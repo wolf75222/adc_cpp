@@ -85,7 +85,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int N = 32;
@@ -107,7 +108,7 @@ int main(int argc, char** argv) {
     AmrBuildParams bp;
     bp.n = N;
     bp.L = L;
-    bp.regrid_every = 0;  // hierarchie figee (multi-blocs PR1)
+    bp.regrid_every = 0;      // hierarchie figee (multi-blocs PR1)
     bp.poisson_bc = BCRec{};  // periodique
     const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
 
@@ -206,7 +207,8 @@ int main(int argc, char** argv) {
     // potentiel de systeme non trivial (Poisson somme co-localise q0 n0 + q1 n1).
     const std::vector<double> phi = sim.potential();
     double pmax = 0;
-    for (double v : phi) pmax = std::max(pmax, std::fabs(v));
+    for (double v : phi)
+      pmax = std::max(pmax, std::fabs(v));
     chk(pmax > 1e-8, "facade_potential_nonzero");
 
     chk(sim.n_patches() >= 1, "facade_shared_hierarchy_has_fine_patch");
@@ -217,18 +219,18 @@ int main(int argc, char** argv) {
   //     la cadence de regrid active. Le mouvement effectif de la hierarchie est verrouille en detail
   //     par test_amr_multiblock_regrid_union ; ici on verifie seulement que la facade NE LEVE PLUS.
   chk(!raises([&] {
-        AmrSystemConfig cfg;
-        cfg.n = N;
-        cfg.L = L;
-        cfg.regrid_every = 10;  // > 0
-        AmrSystem sim(cfg);
-        sim.add_block("ions", exb_charge(q0, B0), "none", "rusanov", "conservative", "explicit", 1);
-        sim.add_block("electrons", exb_charge(q1, B0), "minmod", "rusanov", "conservative",
-                      "explicit", 1);
-        sim.set_density("ions", rho0);
-        sim.set_density("electrons", rho1);
-        (void)sim.mass("ions");  // declenche ensure_built -> moteur multi-blocs + regrid d'union actif
-      }),
+    AmrSystemConfig cfg;
+    cfg.n = N;
+    cfg.L = L;
+    cfg.regrid_every = 10;  // > 0
+    AmrSystem sim(cfg);
+    sim.add_block("ions", exb_charge(q0, B0), "none", "rusanov", "conservative", "explicit", 1);
+    sim.add_block("electrons", exb_charge(q1, B0), "minmod", "rusanov", "conservative", "explicit",
+                  1);
+    sim.set_density("ions", rho0);
+    sim.set_density("electrons", rho1);
+    (void)sim.mass("ions");  // declenche ensure_built -> moteur multi-blocs + regrid d'union actif
+  }),
       "multiblock_regrid_now_accepted");
 
   // ============================================================================================
@@ -254,7 +256,8 @@ int main(int argc, char** argv) {
     const std::vector<double> a = run_mono();
     const std::vector<double> b = run_mono();
     double dmax = 0;
-    for (std::size_t i = 0; i < a.size(); ++i) dmax = std::max(dmax, std::fabs(a[i] - b[i]));
+    for (std::size_t i = 0; i < a.size(); ++i)
+      dmax = std::max(dmax, std::fabs(a[i] - b[i]));
     chk(dmax == 0.0, "monoblock_bit_identical_dmax0");
   }
 

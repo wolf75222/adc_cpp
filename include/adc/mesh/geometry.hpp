@@ -57,7 +57,7 @@ struct Geometry {
 // and thus grows with r (hence the 1/r metric of the divergence: cf. assemble_rhs_polar). The
 // centers and faces are defined for every index (ghosts included, i negative or >= nr).
 struct PolarGeometry {
-  Box2D domain{};            ///< nx() = nr (radial cells), ny() = ntheta (azimuthal cells)
+  Box2D domain{};             ///< nx() = nr (radial cells), ny() = ntheta (azimuthal cells)
   Real r_min = 0, r_max = 1;  ///< physical radial bounds of the ring
   // theta covers [0, 2pi) (periodic): we store no bounds, dtheta = 2pi/ntheta.
 

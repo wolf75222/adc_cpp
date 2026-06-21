@@ -53,16 +53,12 @@ struct CoupledSystem {
 
   template <class F>
   void for_each_block(F&& f) {
-    std::apply(
-        [&](auto&... bs) { (std::forward<F>(f)(bs), ...); },
-        blocks);
+    std::apply([&](auto&... bs) { (std::forward<F>(f)(bs), ...); }, blocks);
   }
 
   template <class F>
   void for_each_block(F&& f) const {
-    std::apply(
-        [&](const auto&... bs) { (std::forward<F>(f)(bs), ...); },
-        blocks);
+    std::apply([&](const auto&... bs) { (std::forward<F>(f)(bs), ...); }, blocks);
   }
 };
 

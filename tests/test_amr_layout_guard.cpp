@@ -42,16 +42,16 @@ struct AdvectX {
   ADC_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const {
-    return a < 0 ? -a : a;
-  }
+  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
   ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
   ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 // remplit U (composante 0) par une fonction de l'indice GROSSIER (le fin echantillonne la meme
@@ -85,7 +85,10 @@ static bool throws_runtime(F&& f) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int NC = 16;
@@ -177,8 +180,7 @@ int main() {
     const BoxArray cba_swapped(std::vector<Box2D>{cb1, cb0});
     const DistributionMapping cdm_swapped(cba_swapped.size(), n_ranks());
     chk(throws_runtime([&] {
-          build_two_block(cba_swapped, cdm_swapped, dxc, dyc, ba_fine, dm_fine, dxc / 2,
-                          dyc / 2);
+          build_two_block(cba_swapped, cdm_swapped, dxc, dyc, ba_fine, dm_fine, dxc / 2, dyc / 2);
         }),
         "guard_throws_on_box_order_mismatch");
   }
@@ -212,9 +214,8 @@ int main() {
 
   // --- Partie B : le garde-fou PASSE sur un layout strictement identique ---
   {
-    chk(!throws_runtime([&] {
-          build_two_block(ba_coarse, dm, dxc, dyc, ba_fine, dm_fine, dxc / 2, dyc / 2);
-        }),
+    chk(!throws_runtime(
+            [&] { build_two_block(ba_coarse, dm, dxc, dyc, ba_fine, dm_fine, dxc / 2, dyc / 2); }),
         "guard_passes_on_matching_layout");
   }
 
@@ -249,8 +250,8 @@ int main() {
 
   // --- Partie D : AmrHierarchyLayout::from_levels extrait la grille ---
   {
-    std::vector<AmrLevelMP> levels = make_two_level_block(ba_coarse, dm, dxc, dyc, ba_fine,
-                                                          dm_fine, dxc / 2, dyc / 2, /*is_e=*/true);
+    std::vector<AmrLevelMP> levels = make_two_level_block(ba_coarse, dm, dxc, dyc, ba_fine, dm_fine,
+                                                          dxc / 2, dyc / 2, /*is_e=*/true);
     const AmrHierarchyLayout L = AmrHierarchyLayout::from_levels(levels);
     chk(L.nlev() == 2, "layout_nlev");
     chk(L.ba[0].boxes() == ba_coarse.boxes(), "layout_coarse_boxes");
@@ -260,6 +261,7 @@ int main() {
     chk(L.dx[1] == dxc / 2 && L.dy[1] == dyc / 2, "layout_fine_dxdy");
   }
 
-  if (fails == 0) std::printf("OK test_amr_layout_guard\n");
+  if (fails == 0)
+    std::printf("OK test_amr_layout_guard\n");
   return fails == 0 ? 0 : 1;
 }

@@ -99,6 +99,7 @@ int main() {
     chk(h.num_levels() == 1, "fine_removed");
   }
 
-  if (fails == 0) std::printf("OK test_regrid\n");
+  if (fails == 0)
+    std::printf("OK test_regrid\n");
   return fails == 0 ? 0 : 1;
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/cold.hpp>   // ADC_COLD_FN: COLD block-builder no-optimize attribute (ADC-337)
+#include <adc/core/cold.hpp>  // ADC_COLD_FN: COLD block-builder no-optimize attribute (ADC-337)
 #include <adc/core/types.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/for_each.hpp>  // for_each_cell (projection ponctuelle post-pas, ADC-177)
@@ -19,7 +19,7 @@
 
 #include <cmath>  // std::sqrt (ARS(2,2,2) coefficients: gamma = 1 - 1/sqrt(2), host)
 #include <functional>
-#include <memory>       // std::shared_ptr (shared scratch of the HLL wave speed cache, opt-in)
+#include <memory>  // std::shared_ptr (shared scratch of the HLL wave speed cache, opt-in)
 #include <stdexcept>
 #include <string>
 #include <type_traits>  // std::is_same_v (cache engages only for the HLL flux)
@@ -115,10 +115,12 @@ struct AdvanceImex {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                   recon_prim, pos_floor};
-    if (nreport) nreport->reset();  // report AGGREGATED over the n substeps of THIS advance
+    if (nreport)
+      nreport->reset();  // report AGGREGATED over the n substeps of THIS advance
     for (int s = 0; s < n; ++s) {
-      ForwardEuler{}.take_step(rhs, U, h);     // explicit half-step: source-free transport
-      backward_euler_source(m, *ctx.aux, U, h, nopts, mask, nreport);  // implicit source (stiff relaxation)
+      ForwardEuler{}.take_step(rhs, U, h);  // explicit half-step: source-free transport
+      backward_euler_source(m, *ctx.aux, U, h, nopts, mask,
+                            nreport);  // implicit source (stiff relaxation)
     }
   }
 };
@@ -176,27 +178,29 @@ struct AdvanceImexRkArs222 {
     const BlockRhsEval<Limiter, Flux, SourceFreeModel<Model>> rhs{SourceFreeModel<Model>{m}, &ctx,
                                                                   recon_prim, pos_floor};
     const int nc = U.ncomp();
-    MultiFab Un(U.box_array(), U.dmap(), nc, 0);     // U^n
-    MultiFab L1(U.box_array(), U.dmap(), nc, 0);     // L(U^n)
-    MultiFab L2(U.box_array(), U.dmap(), nc, 0);     // L(U^(2))
-    MultiFab base2(U.box_array(), U.dmap(), nc, 0);  // U^n + dt*gamma*L1
+    MultiFab Un(U.box_array(), U.dmap(), nc, 0);             // U^n
+    MultiFab L1(U.box_array(), U.dmap(), nc, 0);             // L(U^n)
+    MultiFab L2(U.box_array(), U.dmap(), nc, 0);             // L(U^(2))
+    MultiFab base2(U.box_array(), U.dmap(), nc, 0);          // U^n + dt*gamma*L1
     MultiFab work(U.box_array(), U.dmap(), nc, U.n_grow());  // stage state (passed to transport)
-    if (nreport) nreport->reset();  // report AGGREGATED over the substeps AND the 2 stage solves
+    if (nreport)
+      nreport->reset();  // report AGGREGATED over the substeps AND the 2 stage solves
     for (int s = 0; s < n; ++s) {
       // Stage 1: U^(1) = U^n; L1 = L(U^n).
-      lincomb(Un, Real(1), U, Real(0), U);            // Un = U^n (valid cells)
-      rhs(U, L1);                                      // L1 = L(U^n)  (fill_ghosts(U) + assemble_rhs)
+      lincomb(Un, Real(1), U, Real(0), U);  // Un = U^n (valid cells)
+      rhs(U, L1);                           // L1 = L(U^n)  (fill_ghosts(U) + assemble_rhs)
       // Stage 2: U^(2) = base2 + dt*gamma*S(U^(2)),  base2 = U^n + dt*gamma*L1.
-      lincomb(base2, Real(1), Un, h * gamma, L1);      // base2 = U^n + dt*gamma*L1
-      lincomb(work, Real(1), base2, Real(0), base2);   // work = base2
+      lincomb(base2, Real(1), Un, h * gamma, L1);     // base2 = U^n + dt*gamma*L1
+      lincomb(work, Real(1), base2, Real(0), base2);  // work = base2
       backward_euler_source(m, *ctx.aux, work, h * gamma, nopts, mask, nreport);  // work = U^(2)
-      rhs(work, L2);                                   // L2 = L(U^(2))
+      rhs(work, L2);                                                              // L2 = L(U^(2))
       // Stage 3: U <- base3 = U^n + dt*delta*L1 + dt*(1-delta)*L2 + ((1-gamma)/gamma)*(U^(2) - base2).
-      lincomb(U, Real(1), Un, h * delta, L1);          // U = U^n + dt*delta*L1
-      saxpy(U, h * (Real(1) - delta), L2);             // + dt*(1-delta)*L2
-      saxpy(U, cS2, work);                             // + ((1-gamma)/gamma)*U^(2)
-      saxpy(U, -cS2, base2);                           // - ((1-gamma)/gamma)*base2  -> U = base3
-      backward_euler_source(m, *ctx.aux, U, h * gamma, nopts, mask, nreport);  // U = U^(3) = U^{n+1}
+      lincomb(U, Real(1), Un, h * delta, L1);  // U = U^n + dt*delta*L1
+      saxpy(U, h * (Real(1) - delta), L2);     // + dt*(1-delta)*L2
+      saxpy(U, cS2, work);                     // + ((1-gamma)/gamma)*U^(2)
+      saxpy(U, -cS2, base2);                   // - ((1-gamma)/gamma)*base2  -> U = base3
+      backward_euler_source(m, *ctx.aux, U, h * gamma, nopts, mask,
+                            nreport);  // U = U^(3) = U^{n+1}
     }
   }
 };
@@ -226,7 +230,8 @@ struct ProjectCellKernel {
   ADC_HD void operator()(int i, int j) const {
     const typename Model::State p =
         m.project(load_state<Model>(uc, i, j), load_aux<aux_comps<Model>()>(a, i, j));
-    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = p[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      u(i, j, c) = p[c];
   }
 };
 
@@ -358,7 +363,8 @@ struct AdvanceImexMasked {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalMasked<Limiter, Flux, SourceFreeModel<Model>> rhs{
         SourceFreeModel<Model>{m}, &ctx, mask, recon_prim, pos_floor};
-    if (nreport) nreport->reset();
+    if (nreport)
+      nreport->reset();
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);
       backward_euler_source(m, *ctx.aux, U, h, nopts, mask_impl, nreport);
@@ -382,7 +388,8 @@ struct AdvanceImexEb {
     const Real h = dt / static_cast<Real>(n);
     const BlockRhsEvalEb<Limiter, Flux, SourceFreeModel<Model>> rhs{
         SourceFreeModel<Model>{m}, &ctx, eb_domain, recon_prim, pos_floor};
-    if (nreport) nreport->reset();
+    if (nreport)
+      nreport->reset();
     for (int s = 0; s < n; ++s) {
       ForwardEuler{}.take_step(rhs, U, h);
       backward_euler_source(m, *ctx.aux, U, h, nopts, mask_impl, nreport);
@@ -398,10 +405,12 @@ struct AdvanceImexEb {
 template <int N>
 ADC_COLD_FN ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_components) {
   ImplicitMask<N> mask;
-  if (implicit_components.empty()) return mask;  // inactive: model default
+  if (implicit_components.empty())
+    return mask;  // inactive: model default
   mask.active = true;
   for (int c : implicit_components)
-    if (c >= 0 && c < N) mask.flag[c] = true;
+    if (c >= 0 && c < N)
+      mask.flag[c] = true;
   return mask;
 }
 
@@ -425,16 +434,17 @@ ADC_COLD_FN ImplicitMask<N> make_implicit_mask(const std::vector<int>& implicit_
 /// embedded-boundary advances MIMIC advance (same RK / IMEX, same limiter / flux); only the transport
 /// residual is dispatched (assemble_rhs_masked / _eb).
 template <class Limiter, class Flux, class Model>
-ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex, bool recon_prim,
-                          const std::string& method = "ssprk2",
-                          const std::vector<int>& implicit_components = {},
-                          const NewtonOptions& newton_opts = {},
-                          NewtonReport* newton_report = nullptr, Real pos_floor = Real(0),
-                          bool wave_speed_cache = false) {
+ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bool imex,
+                                      bool recon_prim, const std::string& method = "ssprk2",
+                                      const std::vector<int>& implicit_components = {},
+                                      const NewtonOptions& newton_opts = {},
+                                      NewtonReport* newton_report = nullptr,
+                                      Real pos_floor = Real(0), bool wave_speed_cache = false) {
   const MultiFab* domain_mask = ctx.domain_mask;
   const detail::DiscDomain* eb_domain = ctx.eb_domain;
   BlockClosures bc;
-  const ImplicitMask<Model::n_vars> impl_mask = make_implicit_mask<Model::n_vars>(implicit_components);
+  const ImplicitMask<Model::n_vars> impl_mask =
+      make_implicit_mask<Model::n_vars>(implicit_components);
   // SHARED scratch of the HLL wave speed cache (opt-in): a single MultiFab for the explicit advance and
   // rhs_into (never called concurrently). nullptr when the option is OFF -> BlockRhsEval keeps the
   // per-face path (bit-identical). Allocated at the real layout on the first call (cf. BlockRhsEval).
@@ -447,12 +457,12 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
       // CARTESIAN ONLY: we do NOT build an embedded-boundary advance (advance_masked / advance_eb stay
       // empty) -> an embedded-boundary geometry mode on this block throws an EXPLICIT error at step time
       // (SystemStepper::advance_transport_n), never a silent cartesian.
-      bc.advance = detail::AdvanceImexRkArs222<Limiter, Flux, Model>{m, ctx, recon_prim, newton_opts,
-                                                                     newton_report, pos_floor};
+      bc.advance = detail::AdvanceImexRkArs222<Limiter, Flux, Model>{
+          m, ctx, recon_prim, newton_opts, newton_report, pos_floor};
     } else {
       // Historical IMEX (local backward-Euler, order 1): UNTOUCHED, bit-identical.
-      bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{m, ctx, recon_prim, impl_mask,
-                                                             newton_opts, newton_report, pos_floor};
+      bc.advance = detail::AdvanceImex<Limiter, Flux, Model>{
+          m, ctx, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
       if (domain_mask)
         bc.advance_masked = detail::AdvanceImexMasked<Limiter, Flux, Model>{
             m, ctx, domain_mask, recon_prim, impl_mask, newton_opts, newton_report, pos_floor};
@@ -492,7 +502,8 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
                              "' (euler|ssprk2|ssprk3)");
   }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor, ws_cache};
-  bc.hotspot = detail::HotspotFn<Model>{m, ctx};  // dt_hotspot diagnostic (ADC-182), off the hot path
+  bc.hotspot =
+      detail::HotspotFn<Model>{m, ctx};  // dt_hotspot diagnostic (ADC-182), off the hot path
   // PROJECTION PONCTUELLE post-pas (ADC-177) : fabriquee SEULEMENT si le modele declare le trait
   // (HasPointwiseProjection, cf. core/physical_model.hpp) ; vide sinon -> le stepper ne l'interroge
   // jamais (chemin historique bit-identique). Partagee par add_block ET add_compiled_model (les deux
@@ -517,24 +528,35 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
 // .so/AOT loader path). The flux string is implied by which helper is called -> validation moves to the
 // make_block dispatcher (kept) and, for the per-flux seam path, to the caller (System).
 template <class Model>
-ADC_COLD_FN BlockClosures make_block_rusanov(const Model& m, const std::string& lim, const GridContext& ctx,
-                                 bool imex, bool recon_prim, const std::string& method,
-                                 const std::vector<int>& implicit_components,
-                                 const NewtonOptions& newton_opts, NewtonReport* newton_report,
-                                 Real pos_floor) {
-  if (lim == "none") return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-  if (lim == "minmod") return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-  if (lim == "vanleer") return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-  if (lim == "weno5") return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+ADC_COLD_FN BlockClosures make_block_rusanov(const Model& m, const std::string& lim,
+                                             const GridContext& ctx, bool imex, bool recon_prim,
+                                             const std::string& method,
+                                             const std::vector<int>& implicit_components,
+                                             const NewtonOptions& newton_opts,
+                                             NewtonReport* newton_report, Real pos_floor) {
+  if (lim == "none")
+    return build_block<NoSlope, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                             newton_opts, newton_report, pos_floor);
+  if (lim == "minmod")
+    return build_block<Minmod, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                            newton_opts, newton_report, pos_floor);
+  if (lim == "vanleer")
+    return build_block<VanLeer, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                             newton_opts, newton_report, pos_floor);
+  if (lim == "weno5")
+    return build_block<Weno5, RusanovFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                           newton_opts, newton_report, pos_floor);
   throw_registry_dispatch_mismatch("System", "limiteur", lim);
 }
 
 template <class Model>
-ADC_COLD_FN BlockClosures make_block_hll(const Model& m, const std::string& lim, const GridContext& ctx,
-                             bool imex, bool recon_prim, const std::string& method,
-                             const std::vector<int>& implicit_components,
-                             const NewtonOptions& newton_opts, NewtonReport* newton_report,
-                             Real pos_floor, bool wave_speed_cache) {
+ADC_COLD_FN BlockClosures make_block_hll(const Model& m, const std::string& lim,
+                                         const GridContext& ctx, bool imex, bool recon_prim,
+                                         const std::string& method,
+                                         const std::vector<int>& implicit_components,
+                                         const NewtonOptions& newton_opts,
+                                         NewtonReport* newton_report, Real pos_floor,
+                                         bool wave_speed_cache) {
   // HLL (Harten-Lax-van Leer, 2 waves): less diffusive than Rusanov (dissipation ~ signed |sR-sL|
   // instead of symmetric 2*max|v|), but does NOT require pressure (unlike HLLC/Roe) -- only SIGNED
   // wave speeds model.wave_speeds. Available as soon as a model exposes its signed eigenvalues (the
@@ -549,24 +571,34 @@ ADC_COLD_FN BlockClosures make_block_hll(const Model& m, const std::string& lim,
                 }) {
     // wave_speed_cache (opt-in) forwarded ONLY here: the wave speed cache only engages for the HLL
     // flux (BlockRhsEval guarded by Flux == HLLFlux). rusanov/hllc/roe ignore it.
-    if (lim == "none") return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-    if (lim == "minmod") return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-    if (lim == "vanleer") return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-    if (lim == "weno5") return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "none")
+      return build_block<NoSlope, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                           newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "minmod")
+      return build_block<Minmod, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                          newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "vanleer")
+      return build_block<VanLeer, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                           newton_opts, newton_report, pos_floor, wave_speed_cache);
+    if (lim == "weno5")
+      return build_block<Weno5, HLLFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                         newton_opts, newton_report, pos_floor, wave_speed_cache);
     throw_registry_dispatch_mismatch("System", "limiteur", lim);
   } else {
-    throw std::runtime_error("System: flux 'hll' requires signed wave speeds "
-                             "(model.wave_speeds: declare a primitive 'p' / eigenvalues); "
-                             "this transport -> 'rusanov'");
+    throw std::runtime_error(
+        "System: flux 'hll' requires signed wave speeds "
+        "(model.wave_speeds: declare a primitive 'p' / eigenvalues); "
+        "this transport -> 'rusanov'");
   }
 }
 
 template <class Model>
-ADC_COLD_FN BlockClosures make_block_hllc(const Model& m, const std::string& lim, const GridContext& ctx,
-                              bool imex, bool recon_prim, const std::string& method,
-                              const std::vector<int>& implicit_components,
-                              const NewtonOptions& newton_opts, NewtonReport* newton_report,
-                              Real pos_floor) {
+ADC_COLD_FN BlockClosures make_block_hllc(const Model& m, const std::string& lim,
+                                          const GridContext& ctx, bool imex, bool recon_prim,
+                                          const std::string& method,
+                                          const std::vector<int>& implicit_components,
+                                          const NewtonOptions& newton_opts,
+                                          NewtonReport* newton_report, Real pos_floor) {
   // HLLC PATHS: (a) HasHLLCStructure capability (the model provides contact_speed +
   // hllc_star_state -> GENERIC contact-resolving algorithm, no assumed layout), OR
   // (b) the CANONICAL Euler 2D path (n_vars == 4 + pressure, bit-identical historical
@@ -574,52 +606,71 @@ ADC_COLD_FN BlockClosures make_block_hllc(const Model& m, const std::string& lim
   if constexpr (HasHLLCStructure<Model> ||
                 (Model::n_vars == 4 &&
                  requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
-    if (lim == "none") return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "minmod") return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "vanleer") return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "weno5") return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "none")
+      return build_block<NoSlope, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                            newton_opts, newton_report, pos_floor);
+    if (lim == "minmod")
+      return build_block<Minmod, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                           newton_opts, newton_report, pos_floor);
+    if (lim == "vanleer")
+      return build_block<VanLeer, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                            newton_opts, newton_report, pos_floor);
+    if (lim == "weno5")
+      return build_block<Weno5, HLLCFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                          newton_opts, newton_report, pos_floor);
     throw_registry_dispatch_mismatch("System", "limiteur", lim);
   } else {
-    throw std::runtime_error("System: flux 'hllc' requires a compressible Euler 2D transport "
-                             "(4 variables + pressure) OR the model's HLLC capability "
-                             "(pressure + wave_speeds + contact_speed + hllc_star_state, cf. "
-                             "HasHLLCStructure); this transport -> 'hll'/'rusanov'");
+    throw std::runtime_error(
+        "System: flux 'hllc' requires a compressible Euler 2D transport "
+        "(4 variables + pressure) OR the model's HLLC capability "
+        "(pressure + wave_speeds + contact_speed + hllc_star_state, cf. "
+        "HasHLLCStructure); this transport -> 'hll'/'rusanov'");
   }
 }
 
 template <class Model>
-ADC_COLD_FN BlockClosures make_block_roe(const Model& m, const std::string& lim, const GridContext& ctx,
-                             bool imex, bool recon_prim, const std::string& method,
-                             const std::vector<int>& implicit_components,
-                             const NewtonOptions& newton_opts, NewtonReport* newton_report,
-                             Real pos_floor) {
+ADC_COLD_FN BlockClosures make_block_roe(const Model& m, const std::string& lim,
+                                         const GridContext& ctx, bool imex, bool recon_prim,
+                                         const std::string& method,
+                                         const std::vector<int>& implicit_components,
+                                         const NewtonOptions& newton_opts,
+                                         NewtonReport* newton_report, Real pos_floor) {
   // ROE PATHS: (a) HasRoeDissipation capability (the model provides its full Roe dissipation
   // d = |A_roe| dU -> GENERIC Roe-like solver), OR (b) the CANONICAL ideal-gas Euler 2D path
   // (bit-identical historical). Without either, explicit rejection.
   if constexpr (HasRoeDissipation<Model> ||
                 (Model::n_vars == 4 &&
                  requires(const Model mm, typename Model::State s) { mm.pressure(s); })) {
-    if (lim == "none") return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "minmod") return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "vanleer") return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-    if (lim == "weno5") return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+    if (lim == "none")
+      return build_block<NoSlope, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                           newton_opts, newton_report, pos_floor);
+    if (lim == "minmod")
+      return build_block<Minmod, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                          newton_opts, newton_report, pos_floor);
+    if (lim == "vanleer")
+      return build_block<VanLeer, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                           newton_opts, newton_report, pos_floor);
+    if (lim == "weno5")
+      return build_block<Weno5, RoeFlux>(m, ctx, imex, recon_prim, method, implicit_components,
+                                         newton_opts, newton_report, pos_floor);
     throw_registry_dispatch_mismatch("System", "limiteur", lim);
   } else {
-    throw std::runtime_error("System: flux 'roe' requires a compressible Euler 2D transport "
-                             "(4 variables + pressure) OR the model's Roe capability "
-                             "(roe_dissipation, cf. HasRoeDissipation); this transport -> "
-                             "'hll'/'rusanov'");
+    throw std::runtime_error(
+        "System: flux 'roe' requires a compressible Euler 2D transport "
+        "(4 variables + pressure) OR the model's Roe capability "
+        "(roe_dissipation, cf. HasRoeDissipation); this transport -> "
+        "'hll'/'rusanov'");
   }
 }
 
 template <class Model>
-ADC_COLD_FN BlockClosures make_block(const Model& m, const std::string& lim, const std::string& riem,
-                         const GridContext& ctx, bool imex, bool recon_prim,
-                         const std::string& method = "ssprk2",
-                         const std::vector<int>& implicit_components = {},
-                         const NewtonOptions& newton_opts = {},
-                         NewtonReport* newton_report = nullptr, Real pos_floor = Real(0),
-                         bool wave_speed_cache = false) {
+ADC_COLD_FN BlockClosures make_block(const Model& m, const std::string& lim,
+                                     const std::string& riem, const GridContext& ctx, bool imex,
+                                     bool recon_prim, const std::string& method = "ssprk2",
+                                     const std::vector<int>& implicit_components = {},
+                                     const NewtonOptions& newton_opts = {},
+                                     NewtonReport* newton_report = nullptr,
+                                     Real pos_floor = Real(0), bool wave_speed_cache = false) {
   // CENTRALIZED VALIDATION (registry dispatch_tags.hpp) BEFORE the dispatch: same tag acceptances /
   // rejections as before, identical messages (validate_* keeps the historical wording). The flux
   // dispatch now forwards to the per-flux helpers above (each holds the unchanged capability
@@ -627,10 +678,18 @@ ADC_COLD_FN BlockClosures make_block(const Model& m, const std::string& lim, con
   // guard (unreachable after validate_riemann).
   validate_riemann(riem, /*polar=*/false, "System");
   validate_limiter(lim, "System");
-  if (riem == "rusanov") return make_block_rusanov(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-  if (riem == "hll") return make_block_hll(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor, wave_speed_cache);
-  if (riem == "hllc") return make_block_hllc(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
-  if (riem == "roe") return make_block_roe(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts, newton_report, pos_floor);
+  if (riem == "rusanov")
+    return make_block_rusanov(m, lim, ctx, imex, recon_prim, method, implicit_components,
+                              newton_opts, newton_report, pos_floor);
+  if (riem == "hll")
+    return make_block_hll(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts,
+                          newton_report, pos_floor, wave_speed_cache);
+  if (riem == "hllc")
+    return make_block_hllc(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts,
+                           newton_report, pos_floor);
+  if (riem == "roe")
+    return make_block_roe(m, lim, ctx, imex, recon_prim, method, implicit_components, newton_opts,
+                          newton_report, pos_floor);
   throw_registry_dispatch_mismatch("System", "flux", riem);
 }
 
@@ -644,8 +703,10 @@ inline int block_n_ghost(const std::string& lim) {
   // static_asserts below (this TU sees BOTH the registry AND the types) guarantee that the kLimiters
   // table never drifts from the real::n_ghost constants.
   static_assert(limiter_n_ghost_ct("none") == NoSlope::n_ghost, "kLimiters[none].n_ghost drifted");
-  static_assert(limiter_n_ghost_ct("minmod") == Minmod::n_ghost, "kLimiters[minmod].n_ghost drifted");
-  static_assert(limiter_n_ghost_ct("vanleer") == VanLeer::n_ghost, "kLimiters[vanleer].n_ghost drifted");
+  static_assert(limiter_n_ghost_ct("minmod") == Minmod::n_ghost,
+                "kLimiters[minmod].n_ghost drifted");
+  static_assert(limiter_n_ghost_ct("vanleer") == VanLeer::n_ghost,
+                "kLimiters[vanleer].n_ghost drifted");
   static_assert(limiter_n_ghost_ct("weno5") == Weno5::n_ghost, "kLimiters[weno5].n_ghost drifted");
   return limiter_n_ghost(lim);
 }
@@ -660,7 +721,6 @@ struct MaxSpeed {
   GridContext ctx;
   Real operator()(const MultiFab& U) const { return max_wave_speed_mf(m, U, *ctx.aux); }
 };
-
 
 /// Block max STABILITY speed functor (HasStabilitySpeed trait): replaces MaxSpeed in the CFL when the
 /// model declares stability_speed (the Riemann solvers keep max_wave_speed).
@@ -752,28 +812,32 @@ std::function<void(const MultiFab&, MultiFab&)> make_poisson_rhs(const Model& m)
 /// arrays align component by component. Shared by add_block (native) and add_compiled_model (compiled):
 /// the SAME conversion serves both paths.
 template <class Model>
-std::pair<std::function<void(const double*, double*)>,
-          std::function<void(const double*, double*)>>
+std::pair<std::function<void(const double*, double*)>, std::function<void(const double*, double*)>>
 make_cell_convert(const Model& m) {
   constexpr int NV = Model::n_vars;
   if constexpr (HasPrimitiveVars<Model>) {
     auto p2c = [m](const double* in, double* out) {
       typename Model::Prim p{};
-      for (int c = 0; c < NV; ++c) p[c] = static_cast<Real>(in[c]);
+      for (int c = 0; c < NV; ++c)
+        p[c] = static_cast<Real>(in[c]);
       const typename Model::State u = m.to_conservative(p);
-      for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(u[c]);
+      for (int c = 0; c < NV; ++c)
+        out[c] = static_cast<double>(u[c]);
     };
     auto c2p = [m](const double* in, double* out) {
       typename Model::State u{};
-      for (int c = 0; c < NV; ++c) u[c] = static_cast<Real>(in[c]);
+      for (int c = 0; c < NV; ++c)
+        u[c] = static_cast<Real>(in[c]);
       const typename Model::Prim p = m.to_primitive(u);
-      for (int c = 0; c < NV; ++c) out[c] = static_cast<double>(p[c]);
+      for (int c = 0; c < NV; ++c)
+        out[c] = static_cast<double>(p[c]);
     };
     return {std::function<void(const double*, double*)>(p2c),
             std::function<void(const double*, double*)>(c2p)};
   } else {
     auto id = [](const double* in, double* out) {
-      for (int c = 0; c < NV; ++c) out[c] = in[c];
+      for (int c = 0; c < NV; ++c)
+        out[c] = in[c];
     };
     return {std::function<void(const double*, double*)>(id),
             std::function<void(const double*, double*)>(id)};

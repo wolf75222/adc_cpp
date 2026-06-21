@@ -75,11 +75,16 @@ static void init_tophat(MultiFab& U, const Box2D& dom, const EulerNoSrc& m, bool
     Array4 a = U.fab(li).array();
     for_each_cell(U.box(li), [a, ilo, ihi, ks, m, p0](int i, int j) {
       Real rho = (i >= ilo && i <= ihi) ? Real(kRhoMax) : Real(kRhoMin);
-      if (i == ks) rho = Real(0.8);
-      else if (i == ks + 1) rho = Real(0.5);
-      else if (i == ks + 2) rho = Real(kRhoMin);
-      else if (i == ks + 3) rho = Real(1.0);
-      else if (i == ks + 4) rho = Real(kRhoMin);
+      if (i == ks)
+        rho = Real(0.8);
+      else if (i == ks + 1)
+        rho = Real(0.5);
+      else if (i == ks + 2)
+        rho = Real(kRhoMin);
+      else if (i == ks + 3)
+        rho = Real(1.0);
+      else if (i == ks + 4)
+        rho = Real(kRhoMin);
       a(i, j, 0) = rho;
       a(i, j, 1) = rho * Real(1.0);  // u = 1 : advection du contact
       a(i, j, 2) = Real(0);
@@ -93,7 +98,11 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   std::printf("=== LIMITEUR DE POSITIVITE Zhang-Shu (pos_floor, ADC-76) ===\n");
@@ -140,18 +149,23 @@ int main(int argc, char** argv) {
     chk(t[0] == s0[0] && t[3] == s0[3], "1_floor0_inactif");
     // face deja au-dessus du plancher : INACTIF strict
     typename EulerNoSrc::State w{};
-    w[0] = Real(0.5); w[1] = Real(1); w[2] = Real(2); w[3] = Real(3);
+    w[0] = Real(0.5);
+    w[1] = Real(1);
+    w[2] = Real(2);
+    w[3] = Real(3);
     const typename EulerNoSrc::State w0 = w;
     zhang_shu_scale<EulerNoSrc>(w, u, i, j, floor, 0);
     chk(w[0] == w0[0] && w[1] == w0[1], "1_face_positive_inactif");
     // moyenne elle-meme sous le plancher : repli identique (face = moyenne, pas de masse creee)
     const int ilow = 1;  // cellule du fond (rho = 1e-6 < floor 1e-5)
     typename EulerNoSrc::State v{};
-    v[0] = Real(-1e-7); v[1] = Real(0.1);
+    v[0] = Real(-1e-7);
+    v[1] = Real(0.1);
     zhang_shu_scale<EulerNoSrc>(v, u, ilow, j, Real(1e-5), 0);
     chk(v[0] == u(ilow, j, 0) && v[1] == u(ilow, j, 1), "1_moyenne_sous_plancher_pente_nulle");
-    if (me == 0) std::printf("(1) mecanique : repli ordre 1 (face = moyenne), plancher %.1e\n",
-                             static_cast<double>(floor));
+    if (me == 0)
+      std::printf("(1) mecanique : repli ordre 1 (face = moyenne), plancher %.1e\n",
+                  static_cast<double>(floor));
   }
 
   // ----------------------------------------------------------------------------------------------
@@ -175,7 +189,8 @@ int main(int argc, char** argv) {
             dmax = std::max(dmax, std::abs(static_cast<double>(a(i, j, c)) - b(i, j, c)));
     }
     dmax = all_reduce_max(dmax);
-    if (me == 0) std::printf("(2) no-default-change : max|R(floor=0) - R(historique)| = %.3e\n", dmax);
+    if (me == 0)
+      std::printf("(2) no-default-change : max|R(floor=0) - R(historique)| = %.3e\n", dmax);
     chk(dmax == 0.0, "2_floor0_bit_identique");
   }
 
@@ -199,17 +214,19 @@ int main(int argc, char** argv) {
               reconstruct_pp<EulerNoSrc>(model, u, i, j, 0, Real(sgn), lim, false, floor, 0);
           worst_raw = std::min(worst_raw, raw[0]);
           worst_pp = std::min(worst_pp, pp[0]);
-          if (raw[0] < floor) ++n_under_raw;
+          if (raw[0] < floor)
+            ++n_under_raw;
           // garantie : rho_face >= floor (a 1 ulp pres : le scaling rend EXACTEMENT floor en
           // arithmetique exacte, l'arrondi flottant peut laisser floor - 1 ulp) OU la moyenne
           // elle-meme est <= floor (pente nulle).
-          if (pp[0] < floor * Real(0.999999) && u(i, j, 0) > floor) ++n_under_pp;
+          if (pp[0] < floor * Real(0.999999) && u(i, j, 0) > floor)
+            ++n_under_pp;
         }
     if (me == 0)
-      std::printf("(3) top-hat 1e6 + echarde, weno5 : min rho_face NU = %.3e (%d faces < floor) ; "
-                  "PP = %.3e (%d violations)\n",
-                  static_cast<double>(worst_raw), n_under_raw, static_cast<double>(worst_pp),
-                  n_under_pp);
+      std::printf(
+          "(3) top-hat 1e6 + echarde, weno5 : min rho_face NU = %.3e (%d faces < floor) ; "
+          "PP = %.3e (%d violations)\n",
+          static_cast<double>(worst_raw), n_under_raw, static_cast<double>(worst_pp), n_under_pp);
     chk(worst_raw < Real(0), "3_weno5_nu_sousshoote_negatif");  // le probleme existe (face < 0)
     chk(n_under_pp == 0, "3_pp_garantit_le_plancher");          // le limiteur le corrige partout
     // CONSERVATION : la divergence de flux telescope en periodique -> somme de masse du residu nulle,
@@ -222,10 +239,12 @@ int main(int argc, char** argv) {
       const ConstArray4 a = R.fab(li).const_array();
       const Box2D v = R.box(li);
       for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-        for (int i = v.lo[0]; i <= v.hi[0]; ++i) mass += a(i, j, 0);
+        for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+          mass += a(i, j, 0);
     }
     mass = all_reduce_sum(mass);
-    if (me == 0) std::printf("    somme de masse du residu (periodique) = %.3e\n", mass);
+    if (me == 0)
+      std::printf("    somme de masse du residu (periodique) = %.3e\n", mass);
     chk(std::abs(mass) < 1e-10, "3_residu_conservatif");
     // DYNAMIQUE AVEC floor : advance du top-hat SANS echarde (le profil du cas reel) -> etat fini.
     // NB : le scaling PAR FACE garantit les ETATS DE FACE >= floor, pas les moyennes mises a jour
@@ -239,8 +258,8 @@ int main(int argc, char** argv) {
     MultiFab Uf(ba, dm, EulerNoSrc::n_vars, ng);
     init_tophat(Uf, dom, model, /*spike=*/false);
     fill_ghosts(Uf, dom, bc);
-    BlockClosures cpp = make_block(model, "weno5", "rusanov", ctx, false, false, "ssprk2", {}, {},
-                                   nullptr, floor);
+    BlockClosures cpp =
+        make_block(model, "weno5", "rusanov", ctx, false, false, "ssprk2", {}, {}, nullptr, floor);
     cpp.advance(Uf, dt * nsteps, nsteps);
     sync_host();
     Real min_pp = Real(1e30);
@@ -274,8 +293,9 @@ int main(int argc, char** argv) {
       threw = true;
       msg = e.what();
     }
-    if (me == 0) std::printf("(4) modele sans Density : %s (%s)\n",
-                             threw ? "REJETE" : "ACCEPTE (!)", msg.c_str());
+    if (me == 0)
+      std::printf("(4) modele sans Density : %s (%s)\n", threw ? "REJETE" : "ACCEPTE (!)",
+                  msg.c_str());
     chk(threw, "4_rejet_modele_sans_density");
     // AdvectionDiffusion n'a pas d'introspection VariableSet du tout -> message "sans introspection" ;
     // un modele introspectable sans role Density donnerait le message "role Density". Les deux
@@ -284,7 +304,8 @@ int main(int argc, char** argv) {
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_positivity_floor\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_positivity_floor\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

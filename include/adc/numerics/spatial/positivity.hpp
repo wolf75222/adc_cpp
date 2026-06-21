@@ -39,11 +39,14 @@ namespace adc {
 /// source detonate -> NaN (positivity-fallback provenance: docs/validation/HEADER_PROVENANCE.md).
 /// POINTWISE device-clean function. ADC_HD.
 template <class Model>
-ADC_HD inline void zhang_shu_scale(typename Model::State& s, const ConstArray4& u,
-                                   int i, int j, Real floor, int pos_comp) {
-  if (!(floor > Real(0))) return;            // strict opt-in: floor <= 0 -> no effect
-  if (!(s[pos_comp] < floor)) return;        // face already above the floor
-  for (int c = 0; c < Model::n_vars; ++c) s[c] = u(i, j, c);  // order-1 fallback: face = average
+ADC_HD inline void zhang_shu_scale(typename Model::State& s, const ConstArray4& u, int i, int j,
+                                   Real floor, int pos_comp) {
+  if (!(floor > Real(0)))
+    return;  // strict opt-in: floor <= 0 -> no effect
+  if (!(s[pos_comp] < floor))
+    return;  // face already above the floor
+  for (int c = 0; c < Model::n_vars; ++c)
+    s[c] = u(i, j, c);  // order-1 fallback: face = average
 }
 
 namespace detail {
@@ -53,10 +56,12 @@ namespace detail {
 /// request positivity: clear error rather than a silent scaling of an arbitrary component.
 template <class Model>
 inline int positivity_comp(Real pos_floor) {
-  if (!(pos_floor > Real(0))) return 0;
+  if (!(pos_floor > Real(0)))
+    return 0;
   if constexpr (requires { Model::conservative_vars(); }) {
     const int c = Model::conservative_vars().index_of(VariableRole::Density);
-    if (c >= 0) return c;
+    if (c >= 0)
+      return c;
     throw std::runtime_error(
         "positivity_floor > 0: the model does not expose the Density role (scaling target)");
   } else {

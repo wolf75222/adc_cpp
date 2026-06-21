@@ -67,7 +67,8 @@ static void fill_bz_level(MultiFab& A, const Geometry& gk, F bz) {
     Fab2D& f = A.fab(li);
     const Box2D g = f.grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) f(i, j, kAuxBaseComps) = bz(gk.x_cell(i), gk.y_cell(j));
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        f(i, j, kAuxBaseComps) = bz(gk.x_cell(i), gk.y_cell(j));
   }
 }
 static void collect(const MultiFab& U, std::vector<double>& out) {
@@ -75,7 +76,8 @@ static void collect(const MultiFab& U, std::vector<double>& out) {
     const ConstArray4 a = U.fab(li).const_array();
     const Box2D b = U.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) out.push_back(a(i, j, 0));
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        out.push_back(a(i, j, 0));
   }
 }
 
@@ -88,11 +90,15 @@ int main(int argc, char** argv) {
 #endif
   std::string dump_prefix;
   for (int k = 1; k < argc; ++k)
-    if (std::strncmp(argv[k], "--dump=", 7) == 0) dump_prefix = argv[k] + 7;
+    if (std::strncmp(argv[k], "--dump=", 7) == 0)
+      dump_prefix = argv[k] + 7;
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 #if defined(ADC_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
@@ -102,8 +108,8 @@ int main(int argc, char** argv) {
 
   const int NC = 16;
   const Box2D dom = Box2D::from_extents(NC, NC);
-  const Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};   // niveau 0
-  const Geometry geomF = geom.refine(2);          // niveau 1 (dx/2)
+  const Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};  // niveau 0
+  const Geometry geomF = geom.refine(2);         // niveau 1 (dx/2)
   const BoxArray ba_coarse(std::vector<Box2D>{dom});
   const DistributionMapping dm(1, n_ranks());
   const Real dxc = geom.dx(), dyc = geom.dy();
@@ -114,12 +120,14 @@ int main(int argc, char** argv) {
 
   const Real u0 = Real(2);
   MultiFab Uc(ba_coarse, dm, 1, 2), Uf(ba_fine, dm, 1, 2);
-  Uc.set_val(u0);  Uf.set_val(u0);
+  Uc.set_val(u0);
+  Uf.set_val(u0);
 
   // canal aux ALLOUE A 4 comp (aux_comps<BzGrow>()) a CHAQUE niveau ; B_z pose PAR NIVEAU.
   MultiFab auxc(ba_coarse, dm, aux_comps<BzGrow>(), 1);
   MultiFab auxf(ba_fine, dm, aux_comps<BzGrow>(), 1);
-  auxc.set_val(Real(0));  auxf.set_val(Real(0));
+  auxc.set_val(Real(0));
+  auxf.set_val(Real(0));
   chk(auxc.ncomp() == 4 && auxf.ncomp() == 4, "amr_aux_width_4_each_level");
   fill_bz_level(auxc, geom, bz);   // niveau 0 : centres a dx
   fill_bz_level(auxf, geomF, bz);  // niveau 1 : centres a dx/2 -> valeurs DIFFERENTES
@@ -131,8 +139,9 @@ int main(int argc, char** argv) {
     const ConstArray4 a1 = auxf.fab(0).const_array();
     const Real bz0 = a0(4, 4, 3), bz1 = a1(8, 8, 3);
     const Real e0 = bz(geom.x_cell(4), geom.y_cell(4)), e1 = bz(geomF.x_cell(8), geomF.y_cell(8));
-    std::printf("[AMR Bz] exec=%s  bz_lvl0(4,4)=%.17g (exp %.17g)  bz_lvl1(8,8)=%.17g (exp %.17g)\n",
-                space, bz0, e0, bz1, e1);
+    std::printf(
+        "[AMR Bz] exec=%s  bz_lvl0(4,4)=%.17g (exp %.17g)  bz_lvl1(8,8)=%.17g (exp %.17g)\n", space,
+        bz0, e0, bz1, e1);
     chk(std::fabs(bz0 - e0) < 1e-12, "bz_level0_at_level0_centers");
     chk(std::fabs(bz1 - e1) < 1e-12, "bz_level1_at_level1_centers");
     chk(std::fabs(bz0 - bz1) > 1e-6, "bz_differs_between_levels");  // sinon le niveau n'est pas lu
@@ -178,7 +187,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (fails == 0) std::printf("OK gpu_amr_bz_validate (exec=%s)\n", space);
+  if (fails == 0)
+    std::printf("OK gpu_amr_bz_validate (exec=%s)\n", space);
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif

@@ -68,8 +68,10 @@ concept PolarHasSource = requires(const M m, const typename M::State u, const Au
 template <class Model>
 ADC_HD inline typename Model::State polar_source(const Model& m, const typename Model::State& u,
                                                  const Aux& a) {
-  if constexpr (PolarHasSource<Model>) return m.source(u, a);
-  else return typename Model::State{};
+  if constexpr (PolarHasSource<Model>)
+    return m.source(u, a);
+  else
+    return typename Model::State{};
 }
 
 /// PolarHasGeomSource<M>: internal concept -- true if M exposes polar_geom_source(u, r) -> State.
@@ -88,10 +90,12 @@ concept PolarHasGeomSource = requires(const M m, const typename M::State u, Real
 /// otherwise the zero state. if constexpr guard: zero extra codegen for scalar bricks (the polar
 /// ExB path stays strictly bit-identical). ADC_HD. r > 0 (annulus) enforced upstream.
 template <class Model>
-ADC_HD inline typename Model::State polar_geom_source(const Model& m, const typename Model::State& u,
-                                                      Real r) {
-  if constexpr (PolarHasGeomSource<Model>) return m.polar_geom_source(u, r);
-  else return typename Model::State{};
+ADC_HD inline typename Model::State polar_geom_source(const Model& m,
+                                                      const typename Model::State& u, Real r) {
+  if constexpr (PolarHasGeomSource<Model>)
+    return m.polar_geom_source(u, r);
+  else
+    return typename Model::State{};
 }
 
 // RADIAL FACE FLUX kernel (dir 0): numerical flux at the radial face i (between i-1 and i), ALREADY
@@ -107,8 +111,8 @@ template <class Limiter, class NumericalFlux, class Model>
 struct PolarFaceFluxRKernel {
   Model model;
   ConstArray4 u, ax;
-  Array4 fr;        // output: r_face(i) * Fr at the radial face i (ncomp components)
-  Real r_min, dr;   // radial geometry (r_face(i) = r_min + i*dr)
+  Array4 fr;       // output: r_face(i) * Fr at the radial face i (ncomp components)
+  Real r_min, dr;  // radial geometry (r_face(i) = r_min + i*dr)
   Limiter lim;
   NumericalFlux nflux;
   bool recon_prim;
@@ -119,23 +123,28 @@ struct PolarFaceFluxRKernel {
   // boundaries no longer count) -> mass Sum n r dr dtheta conserved to machine precision, whatever
   // v_r (solid wall).
   bool wall_radial;
-  int i_lo_face, i_hi_face;  // FACE indices of physical boundaries (lo and hi+1); ignored if !wall_radial
+  int i_lo_face,
+      i_hi_face;  // FACE indices of physical boundaries (lo and hi+1); ignored if !wall_radial
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
     const Real rf = r_min + i * dr;  // r_face(i) (positive on the annulus: r_min >= 0, i >= 0)
     if (wall_radial && (i == i_lo_face || i == i_hi_face)) {
-      for (int c = 0; c < Model::n_vars; ++c) fr(i, j, c) = Real(0);  // wall: zero radial flux
+      for (int c = 0; c < Model::n_vars; ++c)
+        fr(i, j, c) = Real(0);  // wall: zero radial flux
       return;
     }
     // Reconstructed states on either side of the radial face i (REUSES Cartesian reconstruct_pp<>,
     // dir == 0). L = extrapolation from cell i-1 toward its + face; R = from cell i toward its
     // - face.
-    const auto L = reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rr = reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto L =
+        reconstruct_pp<Model>(model, u, i - 1, j, 0, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rr =
+        reconstruct_pp<Model>(model, u, i, j, 0, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i - 1, j), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 0);
-    for (int c = 0; c < Model::n_vars; ++c) fr(i, j, c) = rf * F[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      fr(i, j, c) = rf * F[c];
   }
 };
 
@@ -149,18 +158,21 @@ template <class Limiter, class NumericalFlux, class Model>
 struct PolarFaceFluxThetaKernel {
   Model model;
   ConstArray4 u, ax;
-  Array4 ft;        // output: Ftheta at the azimuthal face j (ncomp components)
+  Array4 ft;  // output: Ftheta at the azimuthal face j (ncomp components)
   Limiter lim;
   NumericalFlux nflux;
   bool recon_prim;
   Real pos_floor = Real(0);  ///< Zhang-Shu positivity limiter (<= 0: inactive, bit-identical)
   int pos_comp = 0;          ///< component of the Density role (resolved by the host caller)
   ADC_HD void operator()(int i, int j) const {
-    const auto L = reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
-    const auto Rr = reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
+    const auto L =
+        reconstruct_pp<Model>(model, u, i, j - 1, 1, +1, lim, recon_prim, pos_floor, pos_comp);
+    const auto Rr =
+        reconstruct_pp<Model>(model, u, i, j, 1, -1, lim, recon_prim, pos_floor, pos_comp);
     const auto F = nflux(model, L, load_aux<aux_comps<Model>()>(ax, i, j - 1), Rr,
                          load_aux<aux_comps<Model>()>(ax, i, j), 1);
-    for (int c = 0; c < Model::n_vars; ++c) ft(i, j, c) = F[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      ft(i, j, c) = F[c];
   }
 };
 
@@ -175,7 +187,7 @@ template <class Model>
 struct PolarAssembleRhsKernel {
   Model model;
   ConstArray4 u, ax, fr, ft;  // state, aux, r-weighted radial flux, azimuthal flux
-  Array4 r;                    // output: residual
+  Array4 r;                   // output: residual
   Real r_min, dr, dtheta;
   ADC_HD void operator()(int i, int j) const {
     const Real ri = r_min + (i + Real(0.5)) * dr;  // r_cell(i)
@@ -189,8 +201,8 @@ struct PolarAssembleRhsKernel {
     // IsothermalFluxPolar for the derivation. r_cell(i) > 0 (annulus).
     const auto Sg = polar_geom_source<Model>(model, Us, ri);
     for (int c = 0; c < Model::n_vars; ++c) {
-      const Real div_r = (fr(i + 1, j, c) - fr(i, j, c)) / dr;       // d_r(r Fr) discrete
-      const Real div_t = (ft(i, j + 1, c) - ft(i, j, c)) / dtheta;   // d_theta(Ftheta) discrete
+      const Real div_r = (fr(i + 1, j, c) - fr(i, j, c)) / dr;      // d_r(r Fr) discrete
+      const Real div_t = (ft(i, j + 1, c) - ft(i, j, c)) / dtheta;  // d_theta(Ftheta) discrete
       r(i, j, c) = S[c] + Sg[c] - inv_r * (div_r + div_t);
     }
   }
@@ -254,10 +266,9 @@ void assemble_rhs_polar(const Model& model, const MultiFab& U, const MultiFab& a
     Array4 ft = Ft.fab(li).array();
     const Box2D v = R.box(li);
     // Radial faces: i in [lo..hi+1], j in [lo..hi] (cf. xface_box).
-    for_each_cell(xface_box(v),
-                  detail::PolarFaceFluxRKernel<Limiter, NumericalFlux, Model>{
-                      model, u, ax, fr, r_min, dr, lim, nflux, recon_prim, wall_radial, i_lo_face,
-                      i_hi_face, pos_floor, pos_comp});
+    for_each_cell(xface_box(v), detail::PolarFaceFluxRKernel<Limiter, NumericalFlux, Model>{
+                                    model, u, ax, fr, r_min, dr, lim, nflux, recon_prim,
+                                    wall_radial, i_lo_face, i_hi_face, pos_floor, pos_comp});
     // Azimuthal faces: i in [lo..hi], j in [lo..hi+1] (cf. yface_box).
     for_each_cell(yface_box(v), detail::PolarFaceFluxThetaKernel<Limiter, NumericalFlux, Model>{
                                     model, u, ax, ft, lim, nflux, recon_prim, pos_floor, pos_comp});
@@ -269,8 +280,8 @@ void assemble_rhs_polar(const Model& model, const MultiFab& U, const MultiFab& a
     const ConstArray4 ft = Ft.fab(li).const_array();
     Array4 r = R.fab(li).array();
     const Box2D v = R.box(li);
-    for_each_cell(v, detail::PolarAssembleRhsKernel<Model>{model, u, ax, fr, ft, r, r_min, dr,
-                                                           dtheta});
+    for_each_cell(
+        v, detail::PolarAssembleRhsKernel<Model>{model, u, ax, fr, ft, r, r_min, dr, dtheta});
   }
 }
 

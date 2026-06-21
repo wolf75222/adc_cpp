@@ -29,7 +29,8 @@
 using namespace adc;
 
 namespace {
-void fill_rhs(GeometricMG& mg, int n) {  // bulle gaussienne centree (ecriture hote, memoire unifiee)
+void fill_rhs(GeometricMG& mg,
+              int n) {  // bulle gaussienne centree (ecriture hote, memoire unifiee)
   Array4 r = mg.rhs().fab(0).array();
   const Box2D v = mg.rhs().box(0);
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
@@ -44,7 +45,8 @@ double sum_phi(GeometricMG& mg) {
   const Box2D v = mg.phi().box(0);
   double s = 0;
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-    for (int i = v.lo[0]; i <= v.hi[0]; ++i) s += p(i, j, 0);
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+      s += p(i, j, 0);
   return s;
 }
 }  // namespace
@@ -81,8 +83,8 @@ int main(int argc, char** argv) {
     const int c2_default = mg.solve(rel, maxc);  // etat inchange -> sur-resolution (cout a froid)
     device_fence();
     const double s2 = sum_phi(mg);
-    std::printf("BASE c1=%d sum1=%.17g res1=%.17g c2_default=%d sum2=%.17g\n",
-                c1, s1, res1, c2_default, s2);
+    std::printf("BASE c1=%d sum1=%.17g res1=%.17g c2_default=%d sum2=%.17g\n", c1, s1, res1,
+                c2_default, s2);
 
 #ifdef HARNESS_ABS
     // bloc PLANCHER ABSOLU : MG frais, solve #1 (chemin defaut, doit egaler le bloc ci-dessus),
@@ -98,15 +100,25 @@ int main(int argc, char** argv) {
     const double abs_floor = 1e-6;  // > residu converge (~rel*r0) et << r0 initial (~||rhs||)
     const int c2_abs = mg2.solve(rel, maxc, abs_floor);  // 3 args -> early-exit attendu
     device_fence();
-    std::printf("ABS  c1b=%d sum1b=%.17g res1b=%.17g abs_floor=%.3g c2_abs=%d\n",
-                c1b, s1b, res1b, abs_floor, c2_abs);
+    std::printf("ABS  c1b=%d sum1b=%.17g res1b=%.17g abs_floor=%.3g c2_abs=%d\n", c1b, s1b, res1b,
+                abs_floor, c2_abs);
 
-    if (c1b != c1 || s1b != s1) { std::printf("FAIL solve#1 differe du bloc defaut\n"); rc = 1; }
-    if (!(res1b <= abs_floor)) { std::printf("FAIL plancher mal choisi (res1b > abs_floor)\n"); rc = 1; }
-    if (c2_abs != 0) { std::printf("FAIL early-exit non declenche (c2_abs=%d)\n", c2_abs); rc = 1; }
+    if (c1b != c1 || s1b != s1) {
+      std::printf("FAIL solve#1 differe du bloc defaut\n");
+      rc = 1;
+    }
+    if (!(res1b <= abs_floor)) {
+      std::printf("FAIL plancher mal choisi (res1b > abs_floor)\n");
+      rc = 1;
+    }
+    if (c2_abs != 0) {
+      std::printf("FAIL early-exit non declenche (c2_abs=%d)\n", c2_abs);
+      rc = 1;
+    }
     // abs_tol par membre : meme early-exit via set_abs_tol + solve() sans argument (chemin coupleur).
     mg2.set_abs_tol(abs_floor);
-    const int c3_member = mg2.solve(rel, maxc);  // 2 args mais membre abs_tol_ pose -> NON early-exit
+    const int c3_member =
+        mg2.solve(rel, maxc);  // 2 args mais membre abs_tol_ pose -> NON early-exit
     // (le 2-args ignore le membre ; on verifie plutot la voie solve() no-arg) :
     (void)c3_member;
     GeometricMG mg3(geom, ba, bc);
@@ -120,14 +132,19 @@ int main(int argc, char** argv) {
     mg3.solve();  // no-arg, abs_tol_ pose, etat converge -> early-exit (residu inchange)
     device_fence();
     const double res3b = mg3.residual();
-    std::printf("NOARG res_after_solve=%.17g res_after_noarg_with_floor=%.17g (egaux => early-exit)\n",
-                res3, res3b);
-    if (res3 != res3b) { std::printf("FAIL solve() no-arg a cycle malgre le plancher\n"); rc = 1; }
+    std::printf(
+        "NOARG res_after_solve=%.17g res_after_noarg_with_floor=%.17g (egaux => early-exit)\n",
+        res3, res3b);
+    if (res3 != res3b) {
+      std::printf("FAIL solve() no-arg a cycle malgre le plancher\n");
+      rc = 1;
+    }
 #endif
   }
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
-  if (rc == 0) std::printf("[OK]\n");
+  if (rc == 0)
+    std::printf("[OK]\n");
   return rc;
 }

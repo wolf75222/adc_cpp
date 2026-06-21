@@ -23,9 +23,7 @@ namespace adc {
 template <class C, class System>
 concept CoupledSourceFor =
     CoupledSystemLike<System> &&
-    requires(const C c, System& s, const MultiFab& aux, Real dt) {
-      c.apply(s, aux, dt);
-    };
+    requires(const C c, System& s, const MultiFab& aux, Real dt) { c.apply(s, aux, dt); };
 
 // Default: no coupling source. Single-species case, or coupling provided
 // solely by Poisson (the field). No-op, zero cost.

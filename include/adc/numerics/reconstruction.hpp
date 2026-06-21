@@ -36,7 +36,8 @@ struct NoSlope {
 struct Minmod {
   static constexpr int n_ghost = 2;
   ADC_HD Real operator()(Real a, Real b) const {
-    if (a * b <= Real(0)) return Real(0);
+    if (a * b <= Real(0))
+      return Real(0);
     const Real fa = a < 0 ? -a : a, fb = b < 0 ? -b : b;  // |.| device-safe
     return (fa < fb) ? a : b;
   }
@@ -51,7 +52,8 @@ struct VanLeer {
   static constexpr int n_ghost = 2;
   ADC_HD Real operator()(Real a, Real b) const {
     const Real ab = a * b;
-    if (ab <= Real(0)) return Real(0);
+    if (ab <= Real(0))
+      return Real(0);
     return Real(2) * ab / (a + b);
   }
 };

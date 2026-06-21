@@ -58,8 +58,7 @@ static void add_constant(MultiFab& mf, Real value) {
 }
 
 using ElectronBlock =
-    EquationBlock<ElectronSource, MusclVanLeer,
-                  ImplicitTime<UserTimeIntegrator, 2>>;
+    EquationBlock<ElectronSource, MusclVanLeer, ImplicitTime<UserTimeIntegrator, 2>>;
 using IonBlock = EquationBlock<IonSource, MusclMinmod, ExplicitTime<SSPRK3, 1>>;
 
 static_assert(EquationBlockLike<ElectronBlock>);
@@ -101,11 +100,10 @@ int main() {
   });
 
   chk(implicit_calls == 2, "implicit_substeps");
-  chk(std::fabs(sum(Ue) - Real(2 * 0.1 * 16)) < Real(1e-12),
-      "electron_implicit_update");
-  chk(std::fabs(sum(Ui) - Real(3 * 0.1 * 16)) < Real(1e-12),
-      "ion_explicit_update");
+  chk(std::fabs(sum(Ue) - Real(2 * 0.1 * 16)) < Real(1e-12), "electron_implicit_update");
+  chk(std::fabs(sum(Ui) - Real(3 * 0.1 * 16)) < Real(1e-12), "ion_explicit_update");
 
-  if (fails == 0) std::printf("OK test_system_coupler\n");
+  if (fails == 0)
+    std::printf("OK test_system_coupler\n");
   return fails == 0 ? 0 : 1;
 }

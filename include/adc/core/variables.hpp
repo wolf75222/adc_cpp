@@ -25,8 +25,18 @@ enum class VariableKind { Conservative, Primitive };
 /// (index_of(MomentumX)) rather than by a magic index u[1]: a coupled source can target
 /// "the momentum of a given species" without hard-coding the index. Custom = role not provided.
 enum class VariableRole {
-  Density, MomentumX, MomentumY, MomentumZ, Energy,
-  VelocityX, VelocityY, VelocityZ, Pressure, Temperature, Scalar, Custom
+  Density,
+  MomentumX,
+  MomentumY,
+  MomentumZ,
+  Energy,
+  VelocityX,
+  VelocityY,
+  VelocityZ,
+  Pressure,
+  Temperature,
+  Scalar,
+  Custom
 };
 
 /// Forward declaration: VariableSet::index_of(const std::string&) resolves a canonical role NAME via
@@ -56,7 +66,8 @@ struct VariableSet {
   /// Index of the component carrying @p role (first occurrence), -1 if absent.
   int index_of(VariableRole role) const {
     for (int i = 0; i < static_cast<int>(roles.size()); ++i)
-      if (roles[i] == role) return i;
+      if (roles[i] == role)
+        return i;
     return -1;
   }
   /// Index of the component carrying @p role addressed BY NAME: a canonical role name
@@ -65,11 +76,14 @@ struct VariableSet {
   /// EMPTY @p role is never a valid target (it would otherwise match the empty user_roles slot of a
   /// canonical component on a mixed block) and returns -1.
   int index_of(const std::string& role) const {
-    if (role.empty()) return -1;
+    if (role.empty())
+      return -1;
     const VariableRole r = role_from_name(role);
-    if (r != VariableRole::Custom) return index_of(r);
+    if (r != VariableRole::Custom)
+      return index_of(r);
     for (int i = 0; i < static_cast<int>(user_roles.size()); ++i)
-      if (user_roles[i] == role) return i;
+      if (user_roles[i] == role)
+        return i;
     return -1;
   }
   /// Full descriptor of component @p i (Custom role if not provided).
@@ -82,18 +96,30 @@ struct VariableSet {
 /// application side.
 inline const char* role_name(VariableRole r) {
   switch (r) {
-    case VariableRole::Density:     return "density";
-    case VariableRole::MomentumX:   return "momentum_x";
-    case VariableRole::MomentumY:   return "momentum_y";
-    case VariableRole::MomentumZ:   return "momentum_z";
-    case VariableRole::Energy:      return "energy";
-    case VariableRole::VelocityX:   return "velocity_x";
-    case VariableRole::VelocityY:   return "velocity_y";
-    case VariableRole::VelocityZ:   return "velocity_z";
-    case VariableRole::Pressure:    return "pressure";
-    case VariableRole::Temperature: return "temperature";
-    case VariableRole::Scalar:      return "scalar";
-    case VariableRole::Custom:      return "custom";
+    case VariableRole::Density:
+      return "density";
+    case VariableRole::MomentumX:
+      return "momentum_x";
+    case VariableRole::MomentumY:
+      return "momentum_y";
+    case VariableRole::MomentumZ:
+      return "momentum_z";
+    case VariableRole::Energy:
+      return "energy";
+    case VariableRole::VelocityX:
+      return "velocity_x";
+    case VariableRole::VelocityY:
+      return "velocity_y";
+    case VariableRole::VelocityZ:
+      return "velocity_z";
+    case VariableRole::Pressure:
+      return "pressure";
+    case VariableRole::Temperature:
+      return "temperature";
+    case VariableRole::Scalar:
+      return "scalar";
+    case VariableRole::Custom:
+      return "custom";
   }
   return "custom";
 }
@@ -102,17 +128,28 @@ inline const char* role_name(VariableRole r) {
 /// reconstruct a VariableSet with roles from TEXT metadata (e.g. the string carried by a compiled /
 /// dynamic .so: the extern "C" ABI carries only strings, not the enum).
 inline VariableRole role_from_name(const std::string& s) {
-  if (s == "density")     return VariableRole::Density;
-  if (s == "momentum_x")  return VariableRole::MomentumX;
-  if (s == "momentum_y")  return VariableRole::MomentumY;
-  if (s == "momentum_z")  return VariableRole::MomentumZ;
-  if (s == "energy")      return VariableRole::Energy;
-  if (s == "velocity_x")  return VariableRole::VelocityX;
-  if (s == "velocity_y")  return VariableRole::VelocityY;
-  if (s == "velocity_z")  return VariableRole::VelocityZ;
-  if (s == "pressure")    return VariableRole::Pressure;
-  if (s == "temperature") return VariableRole::Temperature;
-  if (s == "scalar")      return VariableRole::Scalar;
+  if (s == "density")
+    return VariableRole::Density;
+  if (s == "momentum_x")
+    return VariableRole::MomentumX;
+  if (s == "momentum_y")
+    return VariableRole::MomentumY;
+  if (s == "momentum_z")
+    return VariableRole::MomentumZ;
+  if (s == "energy")
+    return VariableRole::Energy;
+  if (s == "velocity_x")
+    return VariableRole::VelocityX;
+  if (s == "velocity_y")
+    return VariableRole::VelocityY;
+  if (s == "velocity_z")
+    return VariableRole::VelocityZ;
+  if (s == "pressure")
+    return VariableRole::Pressure;
+  if (s == "temperature")
+    return VariableRole::Temperature;
+  if (s == "scalar")
+    return VariableRole::Scalar;
   return VariableRole::Custom;
 }
 
@@ -121,7 +158,8 @@ inline VariableRole role_from_name(const std::string& s) {
 inline std::string names_csv(const VariableSet& vs) {
   std::string s;
   for (std::size_t i = 0; i < vs.names.size(); ++i) {
-    if (i) s += ',';
+    if (i)
+      s += ',';
     s += vs.names[i];
   }
   return s;
@@ -134,7 +172,8 @@ inline std::string names_csv(const VariableSet& vs) {
 inline std::string roles_csv(const VariableSet& vs) {
   std::string s;
   for (std::size_t i = 0; i < vs.roles.size(); ++i) {
-    if (i) s += ',';
+    if (i)
+      s += ',';
     if (i < vs.user_roles.size() && !vs.user_roles[i].empty())
       s += vs.user_roles[i];
     else
@@ -149,7 +188,8 @@ inline std::string roles_csv(const VariableSet& vs) {
 /// user role survives the .so ABI round-trip. user_roles stays EMPTY when every token is canonical
 /// (bit-identical to historical roleless / canonical blocks). Empty @p csv leaves both empty.
 inline void parse_roles_into(VariableSet& vs, const std::string& csv) {
-  if (csv.empty()) return;
+  if (csv.empty())
+    return;
   std::vector<std::string> labels;
   bool any_user = false;
   std::size_t start = 0;
@@ -162,10 +202,12 @@ inline void parse_roles_into(VariableSet& vs, const std::string& csv) {
     const bool is_user = (r == VariableRole::Custom && tok != role_name(VariableRole::Custom));
     labels.push_back(is_user ? tok : std::string());
     any_user = any_user || is_user;
-    if (comma == std::string::npos) break;
+    if (comma == std::string::npos)
+      break;
     start = comma + 1;
   }
-  if (any_user) vs.user_roles = std::move(labels);
+  if (any_user)
+    vs.user_roles = std::move(labels);
 }
 
 /// Resolve a REQUIRED canonical @p role to its component in @p vs, for a NAMED coupling
@@ -176,9 +218,11 @@ inline void parse_roles_into(VariableSet& vs, const std::string& csv) {
 /// WRONG component. @p origin / @p block name the error.
 inline int coupling_role_index(const VariableSet& vs, VariableRole role, int fallback,
                                const char* origin, const std::string& block) {
-  if (vs.roles.empty()) return fallback;  // roleless legacy block: keep the canonical fallback
+  if (vs.roles.empty())
+    return fallback;  // roleless legacy block: keep the canonical fallback
   const int c = vs.index_of(role);
-  if (c >= 0) return c;
+  if (c >= 0)
+    return c;
   throw std::runtime_error(std::string(origin) + " : block '" + block + "' declares roles (" +
                            roles_csv(vs) + ") but not the role '" + role_name(role) +
                            "' this coupling requires (no silent fallback to component " +
@@ -209,18 +253,20 @@ using Variables = VariableSet;
 /// BACKWARD-COMPATIBLE: a .so that does not define these symbols (generated before this work) stays
 /// valid -- the System does not find the symbol and falls back (names u0.., no roles).
 /// @p MODEL = type of the model (carries conservative_vars / primitive_vars).
-#define ADC_EXPORT_BLOCK_METADATA(MODEL)                                         \
-  extern "C" const char* adc_compiled_var_names() {                             \
-    static const std::string s = adc::var_names_meta<MODEL>();                  \
-    return s.c_str();                                                           \
-  }                                                                             \
-  extern "C" const char* adc_compiled_roles() {                                 \
-    static const std::string s = adc::roles_meta<MODEL>();                      \
-    return s.c_str();                                                           \
+#define ADC_EXPORT_BLOCK_METADATA(MODEL)                       \
+  extern "C" const char* adc_compiled_var_names() {            \
+    static const std::string s = adc::var_names_meta<MODEL>(); \
+    return s.c_str();                                          \
+  }                                                            \
+  extern "C" const char* adc_compiled_roles() {                \
+    static const std::string s = adc::roles_meta<MODEL>();     \
+    return s.c_str();                                          \
   }
 
 /// Exports the block's gamma (adiabatic index) via the optional symbol adc_compiled_gamma, read by
 /// the System's inter-species couplings (collision, thermal exchange, T_e). EMITTED ONLY if the
 /// model declares a gamma: otherwise the symbol stays absent and the System keeps its default 1.4.
-#define ADC_EXPORT_BLOCK_GAMMA(GAMMA) \
-  extern "C" double adc_compiled_gamma() { return (GAMMA); }
+#define ADC_EXPORT_BLOCK_GAMMA(GAMMA)      \
+  extern "C" double adc_compiled_gamma() { \
+    return (GAMMA);                        \
+  }

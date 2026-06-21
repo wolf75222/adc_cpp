@@ -8,10 +8,10 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/mesh/refinement.hpp>                 // average_down, coarsen_index
+#include <adc/mesh/refinement.hpp>                    // average_down, coarsen_index
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>  // coarse solver (geometric multigrid)
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (residual, reads the already-filled ghosts)
-#include <adc/numerics/time/amr_patch_range.hpp>   // PatchRange, CoverageMask (coarse footprint of a patch)
+#include <adc/numerics/time/amr_patch_range.hpp>  // PatchRange, CoverageMask (coarse footprint of a patch)
 
 #include <algorithm>
 #include <cmath>
@@ -122,11 +122,14 @@ class CompositeFacPoisson {
         axy_f_(ba_f_, dm_f_, 1, 1),
         ayx_f_(ba_f_, dm_f_, 1, 1),
         cov_(Box2D::from_extents(geom_c.domain.nx(), geom_c.domain.ny())) {
-    require_separated_patches(fine_boxes);  // guard: NON adjacent patches (fine-fine join = Phase 4b)
+    require_separated_patches(
+        fine_boxes);  // guard: NON adjacent patches (fine-fine join = Phase 4b)
     // coarse footprints (covered cells) PER PATCH: PatchRange (lo/2 .. (hi-1)/2). The global coarse
     // coverage = UNION of the footprints (any gap between disjoint patches stays NON covered).
-    for (int g = 0; g < fine_boxes.size(); ++g) patch_coarse_.push_back(PatchRange(fine_boxes[g]).box());
-    for (const Box2D& pc : patch_coarse_) cov_.mark(pc);
+    for (int g = 0; g < fine_boxes.size(); ++g)
+      patch_coarse_.push_back(PatchRange(fine_boxes[g]).box());
+    for (const Box2D& pc : patch_coarse_)
+      cov_.mark(pc);
     phi_c_.set_val(Real(0));
     phi_f_.set_val(Real(0));
     eps_c_.set_val(Real(1));  // default permittivity 1 -> operator = Laplacian (scalar)
@@ -137,8 +140,10 @@ class CompositeFacPoisson {
     ayx_f_.set_val(Real(0));
   }
 
-  MultiFab& rhs_coarse() { return f_c_; }   ///< coarse right-hand side f_c (div(eps grad phi_c) = f_c)
-  MultiFab& rhs_fine() { return f_f_; }     ///< fine right-hand side f_f (div(eps grad phi_f) = f_f)
+  MultiFab& rhs_coarse() {
+    return f_c_;
+  }  ///< coarse right-hand side f_c (div(eps grad phi_c) = f_c)
+  MultiFab& rhs_fine() { return f_f_; }  ///< fine right-hand side f_f (div(eps grad phi_f) = f_f)
   MultiFab& phi_coarse() { return phi_c_; }
   MultiFab& phi_fine() { return phi_f_; }
   /// VARIABLE permittivity eps (at cell centers) PER LEVEL. Fill + use_variable_coefficient(true)
@@ -200,12 +205,17 @@ class CompositeFacPoisson {
     refresh_fine(fine_sweeps);
 
     Real rnorm = composite_coarse_residual();
-    if (verbose_ && my_rank() == 0) std::fprintf(stderr, "[FAC] init r_c=%.4e\n", rnorm);
-    if (!two_way_) { last_residual_ = rnorm; return rnorm; }
+    if (verbose_ && my_rank() == 0)
+      std::fprintf(stderr, "[FAC] init r_c=%.4e\n", rnorm);
+    if (!two_way_) {
+      last_residual_ = rnorm;
+      return rnorm;
+    }
 
     // 2) FAC two-way iterations: coarse correction (C-F flux) then re-solve fine.
     for (int it = 0; it < max_iters; ++it) {
-      if (rnorm < tol) break;
+      if (rnorm < tol)
+        break;
       // coarse correction: Lap e_c = r_c (homogeneous Dirichlet), phi_c += e_c (non covered).
       copy0(mg_.rhs(), res_c_);
       mg_.phi().set_val(Real(0));
@@ -214,7 +224,8 @@ class CompositeFacPoisson {
       // re-ghost + re-solve fine on the corrected phi_c.
       refresh_fine(fine_sweeps);
       rnorm = composite_coarse_residual();
-      if (verbose_ && my_rank() == 0) std::fprintf(stderr, "[FAC] it=%d r_c=%.4e\n", it, rnorm);
+      if (verbose_ && my_rank() == 0)
+        std::fprintf(stderr, "[FAC] it=%d r_c=%.4e\n", it, rnorm);
     }
     last_residual_ = rnorm;
     return rnorm;
@@ -231,7 +242,8 @@ class CompositeFacPoisson {
       const ConstArray4 s = src.fab(li).const_array();
       const Box2D b = dst.box(li);
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) d(i, j, 0) = s(i, j, 0);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          d(i, j, 0) = s(i, j, 0);
     }
   }
 
@@ -244,7 +256,8 @@ class CompositeFacPoisson {
       const Box2D b = phi.box(li);
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
         for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-          if (!cov_.covered(i, j)) p(i, j, 0) += ec(i, j, 0);
+          if (!cov_.covered(i, j))
+            p(i, j, 0) += ec(i, j, 0);
     }
   }
 
@@ -280,7 +293,8 @@ class CompositeFacPoisson {
       for (int j = vb.lo[1] - ng; j <= vb.hi[1] + ng; ++j)
         for (int i = vb.lo[0] - ng; i <= vb.hi[0] + ng; ++i) {
           const bool inside = (i >= vb.lo[0] && i <= vb.hi[0] && j >= vb.lo[1] && j <= vb.hi[1]);
-          if (inside) continue;  // ghosts only
+          if (inside)
+            continue;  // ghosts only
           F(i, j, 0) = detail::fac_bilerp_coarse(C, i, j, ratio_);
         }
     }
@@ -298,7 +312,8 @@ class CompositeFacPoisson {
       for (int j = vb.lo[1] - ng; j <= vb.hi[1] + ng; ++j)
         for (int i = vb.lo[0] - ng; i <= vb.hi[0] + ng; ++i) {
           const bool inside = (i >= vb.lo[0] && i <= vb.hi[0] && j >= vb.lo[1] && j <= vb.hi[1]);
-          if (inside) continue;
+          if (inside)
+            continue;
           F(i, j, 0) = detail::fac_bilerp_coarse(C, i, j, ratio_);
         }
     }
@@ -309,8 +324,10 @@ class CompositeFacPoisson {
   static BCRec coeff_bc(const BCRec& b) {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec c;
-    c.xlo = fo(b.xlo); c.xhi = fo(b.xhi);
-    c.ylo = fo(b.ylo); c.yhi = fo(b.yhi);
+    c.xlo = fo(b.xlo);
+    c.xhi = fo(b.xhi);
+    c.ylo = fo(b.ylo);
+    c.yhi = fo(b.yhi);
     return c;
   }
 
@@ -324,10 +341,12 @@ class CompositeFacPoisson {
   /// Re-fills the bilinear C-F ghosts from phi_c then relaxes EACH fine patch (SOR) with FROZEN ghosts.
   void refresh_fine(int sweeps) {
     device_fence();
-    fill_ghosts(phi_c_, geom_c_.domain, bc_);  // phi_c physical ghosts (the bilerp reads up to the border)
+    fill_ghosts(phi_c_, geom_c_.domain,
+                bc_);  // phi_c physical ghosts (the bilerp reads up to the border)
     fill_cf_ghosts();
     fine_sor(sweeps);
-    average_down(phi_f_, phi_c_, ratio_);  // consistency: coarse covered = fine average (multi-box OK)
+    average_down(phi_f_, phi_c_,
+                 ratio_);  // consistency: coarse covered = fine average (multi-box OK)
   }
 
   /// Red-black SOR over EACH fine patch: div(eps grad phi_f) = f_f (eps = face harmonic), FROZEN
@@ -344,7 +363,8 @@ class CompositeFacPoisson {
       const Box2D vb = phi_f_.box(li);
       const Real omega = sor_omega(vb);
       Array4 P = phi_f_.fab(li).array();
-      const ConstArray4 Pc = phi_f_.fab(li).const_array();  // const view (same memory) for cross stencil
+      const ConstArray4 Pc =
+          phi_f_.fab(li).const_array();  // const view (same memory) for cross stencil
       const ConstArray4 F = f_f_.fab(li).const_array();
       const ConstArray4 E = eps_f_.fab(li).const_array();
       const ConstArray4 AXY = axy_f_.fab(li).const_array();
@@ -353,7 +373,8 @@ class CompositeFacPoisson {
         for (int color = 0; color < 2; ++color)
           for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
             for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
-              if (((i + j) & 1) != color) continue;
+              if (((i + j) & 1) != color)
+                continue;
               // FACE permittivities (harmonic mean of the 2 centers); eps==1 -> faces == 1.
               const Real exm = he ? eps_harmonic(E(i, j, 0), E(i - 1, j, 0)) : Real(1);
               const Real exp = he ? eps_harmonic(E(i, j, 0), E(i + 1, j, 0)) : Real(1);
@@ -367,7 +388,8 @@ class CompositeFacPoisson {
               const Real cross =
                   hc ? detail::cross_div(Pc, true, AXY, true, AYX, i, j, idx, idy) : Real(0);
               const Real pgs = (nb + cross - F(i, j, 0)) / diag;
-              P(i, j, 0) = (Real(1) - omega) * P(i, j, 0) + omega * pgs;  // over-relax (under-relax if strong)
+              P(i, j, 0) = (Real(1) - omega) * P(i, j, 0) +
+                           omega * pgs;  // over-relax (under-relax if strong)
             }
     }
   }
@@ -422,7 +444,8 @@ class CompositeFacPoisson {
           Real fine_sum = Real(0);
           for (int t = 0; t < r; ++t) {
             const int jf = r * J + t;
-            const Real eff = he ? eps_harmonic(EF(r * Ic0 - 1, jf, 0), EF(r * Ic0, jf, 0)) : Real(1);
+            const Real eff =
+                he ? eps_harmonic(EF(r * Ic0 - 1, jf, 0), EF(r * Ic0, jf, 0)) : Real(1);
             fine_sum += eff * (PF(r * Ic0, jf, 0) - PF(r * Ic0 - 1, jf, 0));  // interior - ghost
           }
           R(I, J, 0) += coarse_c - fine_sum * idx2;
@@ -450,7 +473,8 @@ class CompositeFacPoisson {
           Real fine_sum = Real(0);
           for (int t = 0; t < r; ++t) {
             const int iff = r * I + t;
-            const Real eff = he ? eps_harmonic(EF(iff, r * Jc0 - 1, 0), EF(iff, r * Jc0, 0)) : Real(1);
+            const Real eff =
+                he ? eps_harmonic(EF(iff, r * Jc0 - 1, 0), EF(iff, r * Jc0, 0)) : Real(1);
             fine_sum += eff * (PF(iff, r * Jc0, 0) - PF(iff, r * Jc0 - 1, 0));
           }
           R(I, J, 0) += coarse_c - fine_sum * idy2;
@@ -475,7 +499,8 @@ class CompositeFacPoisson {
     Real nrm = Real(0);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-        if (!cov_.covered(i, j)) nrm = std::fmax(nrm, std::fabs(R(i, j, 0)));
+        if (!cov_.covered(i, j))
+          nrm = std::fmax(nrm, std::fabs(R(i, j, 0)));
     return nrm;
   }
 
@@ -493,8 +518,8 @@ class CompositeFacPoisson {
   std::vector<Box2D> patch_coarse_;  ///< covered coarse footprint PER fine patch (multi-patch)
   CoverageMask cov_;
   Real last_residual_ = 0;
-  bool has_eps_ = false;   ///< true: div(eps grad phi) operator; false: scalar Laplacian (Phase 1)
-  bool has_cross_ = false; ///< true: adds the cross terms a_xy/a_yx (full tensor, Schur B_z!=0)
+  bool has_eps_ = false;    ///< true: div(eps grad phi) operator; false: scalar Laplacian (Phase 1)
+  bool has_cross_ = false;  ///< true: adds the cross terms a_xy/a_yx (full tensor, Schur B_z!=0)
   bool verbose_ = false;
   bool two_way_ = true;
   static constexpr Real kPi_ = Real(3.14159265358979323846);

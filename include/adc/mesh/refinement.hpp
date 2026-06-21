@@ -31,13 +31,16 @@ namespace adc {
 /// Index of the coarse cell containing the fine cell a (FLOOR division by r, handles a < 0).
 /// ADC_HD: called inside the interpolation / coarse->fine injection kernels. Thin adapter over
 /// floor_div (box2d.hpp): same floor division, bit-identical result.
-ADC_HD inline int coarsen_index(int a, int r) { return floor_div(a, r); }
+ADC_HD inline int coarsen_index(int a, int r) {
+  return floor_div(a, r);
+}
 
 /// Coarsens each box of the BoxArray by a ratio r (coarsen box by box, order preserved).
 inline BoxArray coarsen(const BoxArray& ba, int r) {
   std::vector<Box2D> b;
   b.reserve(ba.size());
-  for (int i = 0; i < ba.size(); ++i) b.push_back(ba[i].coarsen(r));
+  for (int i = 0; i < ba.size(); ++i)
+    b.push_back(ba[i].coarsen(r));
   return BoxArray{std::move(b)};
 }
 
@@ -56,15 +59,18 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
     const Box2D vd = D.box();
     for (int gs : shash.query(vd)) {
       const int ls = src.local_index_of(gs);
-      if (ls < 0) continue;  // src not local -> MPI below
+      if (ls < 0)
+        continue;  // src not local -> MPI below
       const Box2D region = vd.intersect(sba[gs]);
-      if (region.empty()) continue;
+      if (region.empty())
+        continue;
       detail::copy_shifted(D, src.fab(ls), region, 0, 0, nc);
     }
   }
 
 #ifdef ADC_HAS_MPI
-  if (n_ranks() <= 1) return;
+  if (n_ranks() <= 1)
+    return;
   const int me = my_rank(), np = n_ranks();
   const DistributionMapping& sdm = src.dmap();
   const DistributionMapping& ddm = dst.dmap();
@@ -79,10 +85,13 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
     const Box2D vd = dba[gd];
     for (int gs : shash.query(vd)) {
       const int os = sdm[gs];
-      if (od != me && os != me) continue;  // does not concern us
-      if (od == me && os == me) continue;  // local, already done
+      if (od != me && os != me)
+        continue;  // does not concern us
+      if (od == me && os == me)
+        continue;  // local, already done
       const Box2D region = vd.intersect(sba[gs]);
-      if (region.empty()) continue;
+      if (region.empty())
+        continue;
       if (os == me)
         send[od].push_back({gs, gd, region});  // I own the src
       else
@@ -92,7 +101,8 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
 
   auto bufsz = [&](const std::vector<Job>& js) {
     std::int64_t n = 0;
-    for (const auto& j : js) n += j.region.num_cells() * nc;
+    for (const auto& j : js)
+      n += j.region.num_cells() * nc;
     return n;
   };
   device_fence();  // GPU: the local (device) copies precede the HOST pack
@@ -110,14 +120,14 @@ inline void parallel_copy(MultiFab& dst, const MultiFab& src) {
               sbuf[r][k++] = s(ii, jj, c);
       }
       reqs.emplace_back();
-      MPI_Isend(sbuf[r].data(), static_cast<int>(sbuf[r].size()), MPI_DOUBLE, r,
-                1, MPI_COMM_WORLD, &reqs.back());
+      MPI_Isend(sbuf[r].data(), static_cast<int>(sbuf[r].size()), MPI_DOUBLE, r, 1, MPI_COMM_WORLD,
+                &reqs.back());
     }
     if (!recv[r].empty()) {
       rbuf[r].resize(bufsz(recv[r]));
       reqs.emplace_back();
-      MPI_Irecv(rbuf[r].data(), static_cast<int>(rbuf[r].size()), MPI_DOUBLE, r,
-                1, MPI_COMM_WORLD, &reqs.back());
+      MPI_Irecv(rbuf[r].data(), static_cast<int>(rbuf[r].size()), MPI_DOUBLE, r, 1, MPI_COMM_WORLD,
+                &reqs.back());
     }
   }
   if (!reqs.empty())
@@ -153,7 +163,8 @@ struct AverageDownKernel {
   ADC_HD void operator()(int I, int J) const {
     Real s = 0;
     for (int b = 0; b < r; ++b)
-      for (int a = 0; a < r; ++a) s += F(r * I + a, r * J + b, c);
+      for (int a = 0; a < r; ++a)
+        s += F(r * I + a, r * J + b, c);
     C(I, J, c) = s * inv;
   }
 };

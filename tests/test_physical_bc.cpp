@@ -20,7 +20,9 @@
 
 using namespace adc;
 
-static double g(int i, int j) { return i + 10.0 * j; }
+static double g(int i, int j) {
+  return i + 10.0 * j;
+}
 
 int main() {
   int fails = 0;
@@ -83,7 +85,8 @@ int main() {
       Box2D vb = mf2.box(li);
       Array4 av = mf2.fab(li).array();
       for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
-        for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) av(i, j, 0) = g(i, j);
+        for (int i = vb.lo[0]; i <= vb.hi[0]; ++i)
+          av(i, j, 0) = g(i, j);
     }
     BCRec bc2;  // x physique (Foextrap bas, Dirichlet 0 haut), y PERIODIQUE
     bc2.xlo = BCType::Foextrap;
@@ -107,6 +110,7 @@ int main() {
     }
   }
 
-  if (fails == 0) std::printf("OK test_physical_bc\n");
+  if (fails == 0)
+    std::printf("OK test_physical_bc\n");
   return fails == 0 ? 0 : 1;
 }

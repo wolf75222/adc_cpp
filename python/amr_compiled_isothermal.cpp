@@ -4,8 +4,10 @@
 namespace adc::detail {
 
 AmrCompiledHooks build_amr_compiled_isothermal(const ModelSpec& spec, const std::string& limiter,
-                                               const std::string& riemann, const AmrBuildParams& bp) {
-  return build_amr_compiled_for(IsothermalFlux{Real(spec.cs2), Real(spec.vacuum_floor)}, spec, limiter, riemann, bp);
+                                               const std::string& riemann,
+                                               const AmrBuildParams& bp) {
+  return build_amr_compiled_for(IsothermalFlux{Real(spec.cs2), Real(spec.vacuum_floor)}, spec,
+                                limiter, riemann, bp);
 }
 
 }  // namespace adc::detail

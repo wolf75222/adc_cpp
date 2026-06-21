@@ -43,10 +43,14 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
-  const int n = 48;                 // grossier
+  const int n = 48;  // grossier
   const int r = 2;
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom_c{dom, 0.0, 1.0, 0.0, 1.0};
@@ -77,7 +81,8 @@ int main(int argc, char** argv) {
     const ConstArray4 s = f_c.fab(li).const_array();
     const Box2D b = mg0.rhs().box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) = s(i, j, 0);
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 0) = s(i, j, 0);
   }
   mg0.phi().set_val(0.0);
   mg0.solve(1e-12, 100);
@@ -91,7 +96,8 @@ int main(int argc, char** argv) {
     const ConstArray4 s = f_c.fab(li).const_array();
     const Box2D b = fac.rhs_coarse().box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) = s(i, j, 0);
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 0) = s(i, j, 0);
   }
   // rhs fin
   {
@@ -115,8 +121,8 @@ int main(int argc, char** argv) {
   const ConstArray4 PF = fac.phi_fine().fab(0).const_array();
 
   const double dxc = geom_c.dx(), dxf = geom_f.dx();
-  double e_coarse = 0, e_comp = 0, diff_cf = 0;       // erreur sur phi
-  double eg_optA = 0, eg_comp = 0;                     // erreur sur grad phi (la quantite physique ExB)
+  double e_coarse = 0, e_comp = 0, diff_cf = 0;  // erreur sur phi
+  double eg_optA = 0, eg_comp = 0;               // erreur sur grad phi (la quantite physique ExB)
   for (int J = iIc0; J <= iIc1; ++J)
     for (int I = iIc0; I <= iIc1; ++I) {
       // grad phi GROSSIER au centre (I,J) : centre, = ce qu'Option A injecte (constant par morceaux) aux fins.
@@ -149,22 +155,27 @@ int main(int argc, char** argv) {
   eg_comp = all_reduce_max(eg_comp);
 
   if (me == 0)
-    std::printf("  phi: e_coarse=%.3e e_composite=%.3e (x%.2f)  gradphi: e_optionA=%.3e e_composite=%.3e (x%.2f)  rfac=%.2e\n",
-                e_coarse, e_comp, e_coarse / std::fmax(e_comp, 1e-30), eg_optA, eg_comp,
-                eg_optA / std::fmax(eg_comp, 1e-30), rfac);
+    std::printf(
+        "  phi: e_coarse=%.3e e_composite=%.3e (x%.2f)  gradphi: e_optionA=%.3e e_composite=%.3e "
+        "(x%.2f)  rfac=%.2e\n",
+        e_coarse, e_comp, e_coarse / std::fmax(e_comp, 1e-30), eg_optA, eg_comp,
+        eg_optA / std::fmax(eg_comp, 1e-30), rfac);
 
   chk(std::isfinite(e_comp) && std::isfinite(e_coarse), "erreurs finies");
   chk(rfac < 1e-6, "(convergence) l'iteration FAC converge (residu composite -> 0)");
   // CRITERE PRINCIPAL (fidelite) : le patch fin REDUIT l'erreur elliptique dans la zone raffinee.
-  chk(e_comp < 0.6 * e_coarse, "(fidelite phi) patch fin plus precis que coarse-only (e_comp < 0.6 e_coarse)");
+  chk(e_comp < 0.6 * e_coarse,
+      "(fidelite phi) patch fin plus precis que coarse-only (e_comp < 0.6 e_coarse)");
   // grad phi (la quantite physique de la derive ExB) : composite NETTEMENT meilleur que l'injection
   // Option A (grad grossier constant par morceaux). C'est ce que le couplage elliptique raffine gagne.
-  chk(eg_comp < 0.5 * eg_optA, "(fidelite grad phi) composite plus precis qu'injection Option A (eg_comp < 0.5 eg_optA)");
+  chk(eg_comp < 0.5 * eg_optA,
+      "(fidelite grad phi) composite plus precis qu'injection Option A (eg_comp < 0.5 eg_optA)");
   // le patch CHANGE effectivement la solution (pas un no-op / pas une simple injection coarse).
   chk(diff_cf > 1e-4, "le patch fin change la solution (composite != coarse interpole)");
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_composite_fac_poisson\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_composite_fac_poisson\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

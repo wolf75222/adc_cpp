@@ -41,7 +41,8 @@ static double advect_error(int n, const std::string& limiter, const std::string&
   MultiFab aux(ba, dm, 3, 1);
   aux.set_val(0.0);
 
-  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.0, /*nu=*/0.0};  // advection pure selon x
+  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.0,
+                                            /*nu=*/0.0};  // advection pure selon x
   const int ng = block_n_ghost(limiter);
   MultiFab U(ba, dm, 1, ng);
   auto init = [&](MultiFab& mf) {
@@ -61,7 +62,8 @@ static double advect_error(int n, const std::string& limiter, const std::string&
   const double dt = cfl * dx / 1.0;  // |a| = 1
   const int nsteps = static_cast<int>(std::ceil(1.0 / dt));
   const double dt_exact = 1.0 / nsteps;  // ajuste pour terminer pile a t=1
-  for (int s = 0; s < nsteps; ++s) clo.advance(U, dt_exact, 1);
+  for (int s = 0; s < nsteps; ++s)
+    clo.advance(U, dt_exact, 1);
 
   double err = 0;
   const ConstArray4 u = U.fab(0).const_array();
@@ -74,7 +76,10 @@ static double advect_error(int n, const std::string& limiter, const std::string&
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 48;
@@ -87,7 +92,8 @@ int main() {
   MultiFab aux(ba, dm, 3, 1);
   aux.set_val(0.0);
 
-  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.3, /*nu=*/0.0};  // advection 2D oblique, pure
+  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.3,
+                                            /*nu=*/0.0};  // advection 2D oblique, pure
   const GridContext ctx{dom, bc, geom, &aux};
 
   auto init = [&](MultiFab& mf) {
@@ -123,12 +129,14 @@ int main() {
   // applique a la main au meme residu rhs_into (weno5/rusanov). Confirme le routage du tag temporel.
   {
     MultiFab U(ba, dm, 1, 3), Uref(ba, dm, 1, 3);
-    init(U); init(Uref);
+    init(U);
+    init(Uref);
     BlockClosures clo3 = make_block(model, "weno5", "rusanov", ctx, false, false, "ssprk3");
     const double dt = 1e-3;
     clo3.advance(U, dt, 1);  // un sous-pas SSPRK3
     // Reference : meme residu (rhs_into du chemin ssprk2, residu identique), avance SSPRK3Step a la main.
-    BlockClosures clo2 = make_block(model, "weno5", "rusanov", ctx, false, false);  // rhs_into identique
+    BlockClosures clo2 =
+        make_block(model, "weno5", "rusanov", ctx, false, false);  // rhs_into identique
     SSPRK3Step{}.take_step([&](MultiFab& Us, MultiFab& R) { clo2.rhs_into(Us, R); }, Uref, dt);
     double d = 0;
     const ConstArray4 u = U.fab(0).const_array(), ur = Uref.fab(0).const_array();
@@ -144,9 +152,11 @@ int main() {
   // par le cas n=1 ci-dessus.
   {
     MultiFab U(ba, dm, 1, 3), Uref(ba, dm, 1, 3);
-    init(U); init(Uref);
+    init(U);
+    init(Uref);
     BlockClosures clo3 = make_block(model, "weno5", "rusanov", ctx, false, false, "ssprk3");
-    BlockClosures clo2 = make_block(model, "weno5", "rusanov", ctx, false, false);  // rhs_into identique
+    BlockClosures clo2 =
+        make_block(model, "weno5", "rusanov", ctx, false, false);  // rhs_into identique
     const double dt = 4e-3;
     const int nsub = 4;
     clo3.advance(U, dt, nsub);  // Scratch reutilise a travers les nsub sous-pas
@@ -165,9 +175,12 @@ int main() {
   // sans tag. Residu ET avance BIT-IDENTIQUES (le chemin historique n'a pas bouge d'un bit).
   {
     MultiFab Ua(ba, dm, 1, 2), Ub(ba, dm, 1, 2);
-    init(Ua); init(Ub);
-    BlockClosures cdef = make_block(model, "minmod", "rusanov", ctx, false, false);  // method par defaut
-    BlockClosures cs2 = make_block(model, "minmod", "rusanov", ctx, false, false, "ssprk2");  // explicite
+    init(Ua);
+    init(Ub);
+    BlockClosures cdef =
+        make_block(model, "minmod", "rusanov", ctx, false, false);  // method par defaut
+    BlockClosures cs2 =
+        make_block(model, "minmod", "rusanov", ctx, false, false, "ssprk2");  // explicite
     // residu identique
     MultiFab Ra(ba, dm, 1, 0), Rb(ba, dm, 1, 0);
     cdef.rhs_into(Ua, Ra);
@@ -181,7 +194,10 @@ int main() {
     }
     chk(dr == 0.0, "minmod : rhs_into defaut == ssprk2 (bit-identique)");
     // avance identique sur 20 pas
-    for (int s = 0; s < 20; ++s) { cdef.advance(Ua, 1e-3, 1); cs2.advance(Ub, 1e-3, 1); }
+    for (int s = 0; s < 20; ++s) {
+      cdef.advance(Ua, 1e-3, 1);
+      cs2.advance(Ub, 1e-3, 1);
+    }
     double da = 0;
     {
       const ConstArray4 ua = Ua.fab(0).const_array(), ub = Ub.fab(0).const_array();
@@ -200,11 +216,12 @@ int main() {
     chk(e_weno_64 < e_minmod_64, "WENO5+SSPRK3 plus precis que Minmod+SSPRK2 a n=64");
     const double e_weno_32 = advect_error(32, "weno5", "ssprk3");
     const double slope = std::log(e_weno_32 / e_weno_64) / std::log(2.0);
-    std::printf("  WENO5 L1 : n=32 %.3e  n=64 %.3e  pente %.2f (Minmod n=64 %.3e)\n",
-                e_weno_32, e_weno_64, slope, e_minmod_64);
+    std::printf("  WENO5 L1 : n=32 %.3e  n=64 %.3e  pente %.2f (Minmod n=64 %.3e)\n", e_weno_32,
+                e_weno_64, slope, e_minmod_64);
     chk(slope > 2.0, "WENO5 : pente de convergence > 2 (ordre superieur a O2)");
   }
 
-  if (fails == 0) std::printf("OK test_weno5_ssprk3 (weno5 + ssprk3 cables, defaut SSPRK2 intact)\n");
+  if (fails == 0)
+    std::printf("OK test_weno5_ssprk3 (weno5 + ssprk3 cables, defaut SSPRK2 intact)\n");
   return fails ? 1 : 0;
 }

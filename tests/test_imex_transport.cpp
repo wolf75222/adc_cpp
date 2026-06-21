@@ -35,7 +35,9 @@ struct AdvectX {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 static void fill_ramp(MultiFab& mf) {
@@ -53,7 +55,10 @@ static_assert(ImexBlk::Time::treatment == TimeTreatment::IMEX);
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(8, 8);
@@ -82,6 +87,7 @@ int main() {
   lincomb(d, Real(1), Ue, Real(-1), Ui0);
   chk(norm_inf(d) > Real(1e-3), "explicit_block_transported");
 
-  if (fails == 0) std::printf("OK test_imex_transport\n");
+  if (fails == 0)
+    std::printf("OK test_imex_transport\n");
   return fails == 0 ? 0 : 1;
 }

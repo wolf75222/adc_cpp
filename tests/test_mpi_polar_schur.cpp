@@ -70,27 +70,59 @@ static constexpr double kRmax = 1.00;
 // a reflexion Dirichlet homogene exacte) ; S porte la donnee Dirichlet non triviale. Tenseur A = I
 // (isotrope) : exerce la metrique polaire + la BiCGStab + le preconditionneur RadialLine distribue.
 // ---------------------------------------------------------------------------------------------------
-static double aS() { return kPiL / (kRmax - kRmin); }
-static double Sf(double r) { return 1.0 + 0.5 * (r - kRmin); }
-static double Hf(double r) { return std::sin(aS() * (r - kRmin)); }
-static double Hp(double r) { return aS() * std::cos(aS() * (r - kRmin)); }
-static double Hpp(double r) { return -aS() * aS() * std::sin(aS() * (r - kRmin)); }
-static double phi_dir(double r, double th, int m) { return Sf(r) + Hf(r) * std::cos(m * th); }
-static double f_dir(double r, double th, int m) {  // A = I : div(grad phi) = phi_rr + phi_r/r + phi_tt/r^2
+static double aS() {
+  return kPiL / (kRmax - kRmin);
+}
+static double Sf(double r) {
+  return 1.0 + 0.5 * (r - kRmin);
+}
+static double Hf(double r) {
+  return std::sin(aS() * (r - kRmin));
+}
+static double Hp(double r) {
+  return aS() * std::cos(aS() * (r - kRmin));
+}
+static double Hpp(double r) {
+  return -aS() * aS() * std::sin(aS() * (r - kRmin));
+}
+static double phi_dir(double r, double th, int m) {
+  return Sf(r) + Hf(r) * std::cos(m * th);
+}
+static double f_dir(double r, double th,
+                    int m) {  // A = I : div(grad phi) = phi_rr + phi_r/r + phi_tt/r^2
   const double rad = 0.0 + 0.5 / r + (Hpp(r) + Hp(r) / r) * std::cos(m * th);
   const double azi = -(double)m * m * Hf(r) * std::cos(m * th) / (r * r);
   return rad + azi;
 }
 
 // MMS pure-Neumann (operateur singulier, jauge) : phi = G(r) + K(r) cos(m theta), G'=K'=0 aux bords.
-static double bN() { return kPiL / (kRmax - kRmin); }
-static double Gf(double r) { return std::cos(bN() * (r - kRmin)); }
-static double Gp(double r) { return -bN() * std::sin(bN() * (r - kRmin)); }
-static double Gpp(double r) { return -bN() * bN() * std::cos(bN() * (r - kRmin)); }
-static double Kf(double r) { const double u = r - kRmin, w = r - kRmax; return u * u * w * w; }
-static double Kp(double r) { const double u = r - kRmin, w = r - kRmax; return 2 * u * w * w + 2 * u * u * w; }
-static double Kpp(double r) { const double u = r - kRmin, w = r - kRmax; return 2 * w * w + 8 * u * w + 2 * u * u; }
-static double phi_neu(double r, double th, int m) { return Gf(r) + Kf(r) * std::cos(m * th); }
+static double bN() {
+  return kPiL / (kRmax - kRmin);
+}
+static double Gf(double r) {
+  return std::cos(bN() * (r - kRmin));
+}
+static double Gp(double r) {
+  return -bN() * std::sin(bN() * (r - kRmin));
+}
+static double Gpp(double r) {
+  return -bN() * bN() * std::cos(bN() * (r - kRmin));
+}
+static double Kf(double r) {
+  const double u = r - kRmin, w = r - kRmax;
+  return u * u * w * w;
+}
+static double Kp(double r) {
+  const double u = r - kRmin, w = r - kRmax;
+  return 2 * u * w * w + 2 * u * u * w;
+}
+static double Kpp(double r) {
+  const double u = r - kRmin, w = r - kRmax;
+  return 2 * w * w + 8 * u * w + 2 * u * u;
+}
+static double phi_neu(double r, double th, int m) {
+  return Gf(r) + Kf(r) * std::cos(m * th);
+}
 static double f_neu(double r, double th, int m) {  // A = I
   const double rad = Gpp(r) + Gp(r) / r + (Kpp(r) + Kp(r) / r) * std::cos(m * th);
   const double azi = -(double)m * m * Kf(r) * std::cos(m * th) / (r * r);
@@ -160,7 +192,8 @@ static PolarKrylovResult solve_mms(const PolarGeometry& g, const BoxArray& ba, P
     Array4 d = phi_out.fab(li).array();
     const ConstArray4 s = solver.phi().fab(li).const_array();
     for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
-      for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) d(i, j, 0) = s(i, j, 0);
+      for (int i = vb.lo[0]; i <= vb.hi[0]; ++i)
+        d(i, j, 0) = s(i, j, 0);
   }
   return kr;
 }
@@ -218,76 +251,83 @@ int main(int argc, char** argv) {
   Kokkos::initialize(argc, argv);
   {
 #endif
-  const int me = my_rank(), np = n_ranks();
-  const int nr = 48, nth = 96, m = 3;  // nth divisible par np <= 4 et par 8 (decoupage theta)
-  Box2D dom = Box2D::from_extents(nr, nth);
-  PolarGeometry g{dom, kRmin, kRmax};
+    const int me = my_rank(), np = n_ranks();
+    const int nr = 48, nth = 96, m = 3;  // nth divisible par np <= 4 et par 8 (decoupage theta)
+    Box2D dom = Box2D::from_extents(nr, nth);
+    PolarGeometry g{dom, kRmin, kRmax};
 
-  auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("  ECHEC %s (np=%d)\n", w, np); ++fails; }
-  };
+    auto chk = [&](bool c, const char* w) {
+      if (!c) {
+        if (me == 0)
+          std::printf("  ECHEC %s (np=%d)\n", w, np);
+        ++fails;
+      }
+    };
 
-  // round-robin (le MEME que le solveur construit en interne) pour aligner les boxes locales de phi_out.
-  auto rr = [&](const BoxArray& ba) { return DistributionMapping(ba.size(), np); };
+    // round-robin (le MEME que le solveur construit en interne) pour aligner les boxes locales de phi_out.
+    auto rr = [&](const BoxArray& ba) { return DistributionMapping(ba.size(), np); };
 
-  for (Problem prob : {Problem::Dirichlet, Problem::Neumann}) {
-    const char* pname = (prob == Problem::Dirichlet) ? "Dirichlet" : "Neumann(jauge)";
+    for (Problem prob : {Problem::Dirichlet, Problem::Neumann}) {
+      const char* pname = (prob == Problem::Dirichlet) ? "Dirichlet" : "Neumann(jauge)";
 
-    // -----------------------------------------------------------------------------------------------
-    // REFERENCE MONO-BOX : boite unique. Sous le round-robin du solveur, elle vit sur le rang 0 ; les
-    // autres rangs ont local_size()==0 (et contribuent 0 aux collectifs dot/project_mean/err). L'erreur
-    // L2 GLOBALE vs l'exact est all_reduite -> identique sur tous les rangs. C'est l'oracle.
-    // -----------------------------------------------------------------------------------------------
-    BoxArray ba_mono(std::vector<Box2D>{dom});
-    MultiFab phi_ref(ba_mono, rr(ba_mono), 1, 1);
-    PolarKrylovResult kr_ref = solve_mms(g, ba_mono, prob, m, phi_ref);
-    const double err_ref = err_l2_global(phi_ref, g, prob, m);  // collectif
-    chk(kr_ref.converged, "ref_mono_converge");
+      // -----------------------------------------------------------------------------------------------
+      // REFERENCE MONO-BOX : boite unique. Sous le round-robin du solveur, elle vit sur le rang 0 ; les
+      // autres rangs ont local_size()==0 (et contribuent 0 aux collectifs dot/project_mean/err). L'erreur
+      // L2 GLOBALE vs l'exact est all_reduite -> identique sur tous les rangs. C'est l'oracle.
+      // -----------------------------------------------------------------------------------------------
+      BoxArray ba_mono(std::vector<Box2D>{dom});
+      MultiFab phi_ref(ba_mono, rr(ba_mono), 1, 1);
+      PolarKrylovResult kr_ref = solve_mms(g, ba_mono, prob, m, phi_ref);
+      const double err_ref = err_l2_global(phi_ref, g, prob, m);  // collectif
+      chk(kr_ref.converged, "ref_mono_converge");
 
-    // -----------------------------------------------------------------------------------------------
-    // DECOUPAGE THETA reparti sur les rangs (round-robin). nseg boites en theta (chaque box = plage r
-    // complete). np=1 : 8 boites mono-rang (parite multi-box). np>=2 : 2 boites par rang (exerce le
-    // multi-box intra-rang ET le cross-rang MPI). La solution discrete est invariante au decoupage theta
-    // -> son erreur L2 vs l'exact colle a l'oracle a la reassociation FP des all_reduce pres.
-    // -----------------------------------------------------------------------------------------------
-    const int nseg = (np >= 2) ? np * 2 : 8;
-    BoxArray bad = theta_split(nr, nth, nseg);
-    MultiFab phid(bad, rr(bad), 1, 1);
-    PolarKrylovResult krd = solve_mms(g, bad, prob, m, phid);
-    const double errd = err_l2_global(phid, g, prob, m);  // collectif
-    const double derr = std::fabs(errd - err_ref);
-    if (me == 0)
-      std::printf("[np=%d %-14s] mono: iters=%d err=%.6e | theta(%d box): iters=%d err=%.6e | d=%.3e\n",
-                  np, pname, kr_ref.iters, err_ref, nseg, krd.iters, errd, derr);
-    chk(krd.converged, "dist_converge");
-    // PARITE de la solution : meme operateur + meme precond (invariant au decoupage theta) -> meme erreur
-    // discrete vs l'exact, a la tolerance du solveur (1e-11 rel) + reassociation FP des all_reduce.
-    chk(derr <= 1e-8, "dist_err_matches_mono");
+      // -----------------------------------------------------------------------------------------------
+      // DECOUPAGE THETA reparti sur les rangs (round-robin). nseg boites en theta (chaque box = plage r
+      // complete). np=1 : 8 boites mono-rang (parite multi-box). np>=2 : 2 boites par rang (exerce le
+      // multi-box intra-rang ET le cross-rang MPI). La solution discrete est invariante au decoupage theta
+      // -> son erreur L2 vs l'exact colle a l'oracle a la reassociation FP des all_reduce pres.
+      // -----------------------------------------------------------------------------------------------
+      const int nseg = (np >= 2) ? np * 2 : 8;
+      BoxArray bad = theta_split(nr, nth, nseg);
+      MultiFab phid(bad, rr(bad), 1, 1);
+      PolarKrylovResult krd = solve_mms(g, bad, prob, m, phid);
+      const double errd = err_l2_global(phid, g, prob, m);  // collectif
+      const double derr = std::fabs(errd - err_ref);
+      if (me == 0)
+        std::printf(
+            "[np=%d %-14s] mono: iters=%d err=%.6e | theta(%d box): iters=%d err=%.6e | d=%.3e\n",
+            np, pname, kr_ref.iters, err_ref, nseg, krd.iters, errd, derr);
+      chk(krd.converged, "dist_converge");
+      // PARITE de la solution : meme operateur + meme precond (invariant au decoupage theta) -> meme erreur
+      // discrete vs l'exact, a la tolerance du solveur (1e-11 rel) + reassociation FP des all_reduce.
+      chk(derr <= 1e-8, "dist_err_matches_mono");
 
-    // iterations IDENTIQUES sur TOUS les rangs du MEME decoupage (critere d'arret base sur des scalaires
-    // GLOBAUX all_reduits -> il se declenche a la meme iteration partout). spread == 0.
-    long it_min = krd.iters, it_max = krd.iters;
+      // iterations IDENTIQUES sur TOUS les rangs du MEME decoupage (critere d'arret base sur des scalaires
+      // GLOBAUX all_reduits -> il se declenche a la meme iteration partout). spread == 0.
+      long it_min = krd.iters, it_max = krd.iters;
+#ifdef ADC_HAS_MPI
+      if (np > 1) {
+        long lo = krd.iters, hi = krd.iters;
+        MPI_Allreduce(&lo, &it_min, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(&hi, &it_max, 1, MPI_LONG, MPI_MAX, MPI_COMM_WORLD);
+      }
+#endif
+      chk(it_min == it_max, "dist_same_iters_all_ranks");
+    }
+
 #ifdef ADC_HAS_MPI
     if (np > 1) {
-      long lo = krd.iters, hi = krd.iters;
-      MPI_Allreduce(&lo, &it_min, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
-      MPI_Allreduce(&hi, &it_max, 1, MPI_LONG, MPI_MAX, MPI_COMM_WORLD);
+      long g = 0;
+      MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
+      fails = g;
     }
 #endif
-    chk(it_min == it_max, "dist_same_iters_all_ranks");
-  }
-
-#ifdef ADC_HAS_MPI
-  if (np > 1) {
-    long g = 0;
-    MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
-    fails = g;
-  }
-#endif
-  if (me == 0) {
-    if (fails == 0) std::printf("OK test_mpi_polar_schur (np=%d)\n", np);
-    else std::printf("FAIL test_mpi_polar_schur (np=%d) : %ld echecs\n", np, fails);
-  }
+    if (me == 0) {
+      if (fails == 0)
+        std::printf("OK test_mpi_polar_schur (np=%d)\n", np);
+      else
+        std::printf("FAIL test_mpi_polar_schur (np=%d) : %ld echecs\n", np, fails);
+    }
 #if defined(ADC_HAS_KOKKOS)
   }
   Kokkos::finalize();

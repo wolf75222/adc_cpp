@@ -48,7 +48,7 @@ struct LevelHierarchy {
   Periodicity base_per{true, true};  // BC of the base domain
   bool coarse_replicated = true;     // level 0 replicated (true) or multi-box distributed (false)
   bool recon_prim = false;           // primitive reconstruction (cf. compute_face_fluxes)
-  bool imex = false;                 // stiff implicit source (backward_euler) instead of forward Euler
+  bool imex = false;  // stiff implicit source (backward_euler) instead of forward Euler
   // NEWTON OPTIONS of the IMEX step (default {} = historical constants 2 iters / 1e-7 -> bit-identical).
   // Honored only when imex==true; forwarded to backward_euler_source by mf_apply_source_treatment.
   NewtonOptions newton_options{};
@@ -72,9 +72,9 @@ void advance_amr(const Model& m, std::vector<AmrLevelMP>& levels, const Box2D& b
                  Periodicity base_per = Periodicity{true, true}, bool coarse_replicated = true,
                  bool recon_prim = false, bool imex = false, const NewtonOptions& nopts = {},
                  AmrTimeMethod tmethod = AmrTimeMethod::kEuler, Real pos_floor = Real(0)) {
-  detail::amr_step_multilevel_multipatch<Limiter, NumericalFlux>(
-      m, levels, base_dom, dt, base_per, coarse_replicated, recon_prim, imex, nopts, tmethod,
-      pos_floor);
+  detail::amr_step_multilevel_multipatch<Limiter, NumericalFlux>(m, levels, base_dom, dt, base_per,
+                                                                 coarse_replicated, recon_prim,
+                                                                 imex, nopts, tmethod, pos_floor);
 }
 
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>

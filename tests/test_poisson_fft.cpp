@@ -28,7 +28,10 @@ using namespace adc;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 48;  // NON puissance de 2 (entre 32 et 64) : declenchait le heap overflow radix-2
@@ -108,6 +111,7 @@ int main() {
     chk(dmax / ref < 1e-6, "fft_egale_mg_au_gradient_pres");
   }
 
-  if (fails == 0) std::printf("OK test_poisson_fft\n");
+  if (fails == 0)
+    std::printf("OK test_poisson_fft\n");
   return fails == 0 ? 0 : 1;
 }

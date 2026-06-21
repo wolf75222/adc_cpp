@@ -132,9 +132,9 @@ namespace detail {
 /// coefficients = arithmetic mean; metric r_face/r_i; cross term a_rt (1/r_face) (d_theta phi)_face.
 /// Cross terms absent (hrt=false) -> only the diagonal radial term contributes, bit-identical to the
 /// scalar polar stencil with a_rr=1.
-ADC_HD inline Real polar_radial_div(const ConstArray4& p, const ConstArray4& arr,
-                                    bool hrt, const ConstArray4& art, int i, int j, Real ri,
-                                    Real rfm, Real rfp, Real idr, Real idth) {
+ADC_HD inline Real polar_radial_div(const ConstArray4& p, const ConstArray4& arr, bool hrt,
+                                    const ConstArray4& art, int i, int j, Real ri, Real rfm,
+                                    Real rfp, Real idr, Real idth) {
   // Face a_rr coefficients (arithmetic mean of the adjacent centers).
   const Real arr_p = Real(0.5) * (arr(i, j) + arr(i + 1, j));
   const Real arr_m = Real(0.5) * (arr(i, j) + arr(i - 1, j));
@@ -145,8 +145,10 @@ ADC_HD inline Real polar_radial_div(const ConstArray4& p, const ConstArray4& arr
     const Real art_p = Real(0.5) * (art(i, j) + art(i + 1, j));
     const Real art_m = Real(0.5) * (art(i, j) + art(i - 1, j));
     // (d_theta phi)_face averaged over the 4 corners of the face: 1/(r_face) because grad_theta = (1/r) d_theta phi.
-    const Real dth_p = (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idth);
-    const Real dth_m = (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idth);
+    const Real dth_p =
+        (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idth);
+    const Real dth_m =
+        (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idth);
     // (1/r_i)(1/dr) [ r_{i+1/2} F_cross_p - r_{i-1/2} F_cross_m ], F_cross = a_rt (1/r_face) d_theta phi.
     // r_face * (1/r_face) = 1: the r_face metric cancels the 1/r_face of the azimuthal gradient -> factor 1.
     out += (art_p * dth_p - art_m * dth_m) * (idr / ri);
@@ -157,19 +159,22 @@ ADC_HD inline Real polar_radial_div(const ConstArray4& p, const ConstArray4& arr
 /// AZIMUTHAL FACE contribution to the diagonal + cross stencil, at (i, j). Returns the local L_int of
 /// the azimuthal term. Face a_tt coefficients (arithmetic); metric 1/(r_i^2); cross term a_tr d_r phi
 /// at face j+-1/2 (d_r averaged over 4 corners).
-ADC_HD inline Real polar_azimuthal_div(const ConstArray4& p, const ConstArray4& att,
-                                       bool htr, const ConstArray4& atr, int i, int j, Real ri,
-                                       Real idr, Real idth) {
+ADC_HD inline Real polar_azimuthal_div(const ConstArray4& p, const ConstArray4& att, bool htr,
+                                       const ConstArray4& atr, int i, int j, Real ri, Real idr,
+                                       Real idth) {
   const Real inv_r2 = Real(1) / (ri * ri);
   const Real att_p = Real(0.5) * (att(i, j) + att(i, j + 1));
   const Real att_m = Real(0.5) * (att(i, j) + att(i, j - 1));
   // DIAGONAL azimuthal term: a_tt^{j+-1/2} (phi_{j+1}-2 phi+phi_{j-1}) / (r_i^2 dtheta^2), flux form.
-  Real out = (att_p * (p(i, j + 1) - p(i, j)) - att_m * (p(i, j) - p(i, j - 1))) * (idth * idth * inv_r2);
+  Real out =
+      (att_p * (p(i, j + 1) - p(i, j)) - att_m * (p(i, j) - p(i, j - 1))) * (idth * idth * inv_r2);
   if (htr) {  // CROSS azimuthal term a_tr d_r phi at face j+-1/2 (d_r averaged over 4 corners).
     const Real atr_p = Real(0.5) * (atr(i, j) + atr(i, j + 1));
     const Real atr_m = Real(0.5) * (atr(i, j) + atr(i, j - 1));
-    const Real dr_p = (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idr);
-    const Real dr_m = (p(i + 1, j - 1) + p(i + 1, j) - p(i - 1, j - 1) - p(i - 1, j)) * (Real(0.25) * idr);
+    const Real dr_p =
+        (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idr);
+    const Real dr_m =
+        (p(i + 1, j - 1) + p(i + 1, j) - p(i - 1, j - 1) - p(i - 1, j)) * (Real(0.25) * idr);
     // (1/r_i)(1/dtheta) [ F_cross_p - F_cross_m ], F_cross = a_tr d_r phi. Metric 1/r_i (face weight dr).
     out += (atr_p * dr_p - atr_m * dr_m) * (idth / ri);
   }
@@ -204,9 +209,9 @@ struct PolarApplyKernel {
   ConstArray4 art, atr;
   Real r_min, dr, idr, idth;
   ADC_HD void operator()(int i, int j) const {
-    const Real ri = r_min + (i + Real(0.5)) * dr;     // r_cell(i)
-    const Real rfm = r_min + i * dr;                  // r_face(i)   = r_{i-1/2}
-    const Real rfp = r_min + (i + 1) * dr;            // r_face(i+1) = r_{i+1/2}
+    const Real ri = r_min + (i + Real(0.5)) * dr;  // r_cell(i)
+    const Real rfm = r_min + i * dr;               // r_face(i)   = r_{i-1/2}
+    const Real rfp = r_min + (i + 1) * dr;         // r_face(i+1) = r_{i+1/2}
     L(i, j) = polar_radial_div(p, arr, hrt, art, i, j, ri, rfm, rfp, idr, idth) +
               polar_azimuthal_div(p, att, htr, atr, i, j, ri, idr, idth);
   }
@@ -258,7 +263,8 @@ inline void apply_polar_tensor(const MultiFab& phi, const PolarGeometry& geom, M
   // isotropic case provides fields CONSTANT at 1 (PolarTensorKrylovSolver does this via its internal
   // stores). a_rt/a_tr optional (cross terms). We cannot deref a nullptr in the kernel -> guard at entry.
   if (!a_rr || !a_tt)
-    throw std::runtime_error("apply_polar_tensor: a_rr and a_tt required (fields at 1 if isotropic)");
+    throw std::runtime_error(
+        "apply_polar_tensor: a_rr and a_tt required (fields at 1 if isotropic)");
   const Real dr = geom.dr();
   const Real idr = Real(1) / dr;
   const Real idth = Real(1) / geom.dtheta();
@@ -272,7 +278,8 @@ inline void apply_polar_tensor(const MultiFab& phi, const PolarGeometry& geom, M
     const bool htr = a_tr != nullptr;
     const ConstArray4 art = hrt ? a_rt->fab(li).const_array() : ConstArray4{};
     const ConstArray4 atr = htr ? a_tr->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, detail::PolarApplyKernel{p, L, arr, att, hrt, htr, art, atr, geom.r_min, dr, idr, idth});
+    for_each_cell(
+        v, detail::PolarApplyKernel{p, L, arr, att, hrt, htr, art, atr, geom.r_min, dr, idr, idth});
   }
 }
 
@@ -333,19 +340,28 @@ class PolarTensorKrylovSolver {
         bc_(force_theta_periodic(bc)),
         precond_(precond),
         dm_(ba.size(), n_ranks()),
-        phi_(ba, dm_, 1, 1), rhs_(ba, dm_, 1, 0),
-        r_(ba, dm_, 1, 0), rhat_(ba, dm_, 1, 0), p_(ba, dm_, 1, 0),
-        v_(ba, dm_, 1, 0), s_(ba, dm_, 1, 0), t_(ba, dm_, 1, 0),
-        phat_(ba, dm_, 1, 1), shat_(ba, dm_, 1, 1),
-        idiag_(ba, dm_, 1, 0), op_offset_(ba, dm_, 1, 0),
-        a_rr_store_(ba, dm_, 1, 1), a_tt_store_(ba, dm_, 1, 1) {
+        phi_(ba, dm_, 1, 1),
+        rhs_(ba, dm_, 1, 0),
+        r_(ba, dm_, 1, 0),
+        rhat_(ba, dm_, 1, 0),
+        p_(ba, dm_, 1, 0),
+        v_(ba, dm_, 1, 0),
+        s_(ba, dm_, 1, 0),
+        t_(ba, dm_, 1, 0),
+        phat_(ba, dm_, 1, 1),
+        shat_(ba, dm_, 1, 1),
+        idiag_(ba, dm_, 1, 0),
+        op_offset_(ba, dm_, 1, 0),
+        a_rr_store_(ba, dm_, 1, 1),
+        a_tt_store_(ba, dm_, 1, 1) {
     // LAYOUT GUARD (replaces the single-rank guard): the RadialLine preconditioner solves a RADIAL
     // tridiagonal per theta line via a SEQUENTIAL Thomas sweep in r. This sweep must stay LOCAL to a
     // box (it cannot cross a box/rank boundary). We therefore REQUIRE that each box of the BoxArray
     // cover the FULL RADIAL RANGE [domain.lo[0], domain.hi[0]] (splitting in theta only). The Jacobi
     // fallback (per cell) has no such constraint -> no check. Single-rank single box: the box covers
     // the whole ring, the check passes trivially (path unchanged).
-    if (precond_ == PolarPrecond::RadialLine) check_radial_columns(ba);
+    if (precond_ == PolarPrecond::RadialLine)
+      check_radial_columns(ba);
     // Default diagonal coefficients = 1 (isotropic): internal fields at 1, ghosts filled Foextrap.
     a_rr_store_.set_val(Real(1));
     a_tt_store_.set_val(Real(1));
@@ -416,12 +432,18 @@ class PolarTensorKrylovSolver {
     // correction direction in the loop. This is the iterative counterpart of the mode-0 pinning of the
     // direct PolarPoissonSolver, without perturbing the stencil. Dirichlet case (>= one boundary):
     // pin_gauge_ stays false -> PATH UNCHANGED, bit-identical.
-    if (pin_gauge_) { project_mean(r_); project_mean(phi_); }
+    if (pin_gauge_) {
+      project_mean(r_);
+      project_mean(phi_);
+    }
     const Real bnorm = l2_norm(rhs_);
     const Real norm0 = bnorm > Real(0) ? bnorm : Real(1);
     Real rnorm = l2_norm(r_);
     res.rel_residual = rnorm / norm0;
-    if (rnorm <= rel_tol * norm0) { res.converged = true; return res; }
+    if (rnorm <= rel_tol * norm0) {
+      res.converged = true;
+      return res;
+    }
 
     copy_into(rhat_, r_);
     p_.set_val(Real(0));
@@ -431,33 +453,49 @@ class PolarTensorKrylovSolver {
     for (int k = 1; k <= max_iters; ++k) {
       const Real rho = dot(rhat_, r_);  // COLLECTIVE
       if (std::fabs(rho) < kTiny || std::fabs(omega) < kTiny) {
-        res.iters = k - 1; res.rel_residual = rnorm / norm0; return res;
+        res.iters = k - 1;
+        res.rel_residual = rnorm / norm0;
+        return res;
       }
       const Real beta = (rho / rho_prev) * (alpha / omega);
       lincomb(p_, Real(1), p_, -omega, v_);  // p <- p - omega v
       lincomb(p_, beta, p_, Real(1), r_);    // p <- r + beta p
       apply_precond(p_, phat_);              // phat = M^{-1} p
-      if (pin_gauge_) project_mean(phat_);   // gauge: zero-mean correction direction
-      apply_operator_lin(phat_, v_);         // v = L_lin(phat) (LINEAR matvec)
+      if (pin_gauge_)
+        project_mean(phat_);          // gauge: zero-mean correction direction
+      apply_operator_lin(phat_, v_);  // v = L_lin(phat) (LINEAR matvec)
       const Real rhat_dot_v = dot(rhat_, v_);
-      if (std::fabs(rhat_dot_v) < kTiny) { res.iters = k - 1; res.rel_residual = rnorm / norm0; return res; }
+      if (std::fabs(rhat_dot_v) < kTiny) {
+        res.iters = k - 1;
+        res.rel_residual = rnorm / norm0;
+        return res;
+      }
       alpha = rho / rhat_dot_v;
       lincomb(s_, Real(1), r_, -alpha, v_);  // s <- r - alpha v
       saxpy(phi_, alpha, phat_);             // phi <- phi + alpha phat
       const Real snorm = l2_norm(s_);
       if (snorm <= rel_tol * norm0) {
-        rnorm = snorm; res.iters = k; res.rel_residual = rnorm / norm0; res.converged = true; return res;
+        rnorm = snorm;
+        res.iters = k;
+        res.rel_residual = rnorm / norm0;
+        res.converged = true;
+        return res;
       }
-      apply_precond(s_, shat_);              // shat = M^{-1} s
-      if (pin_gauge_) project_mean(shat_);   // gauge: zero-mean correction direction
-      apply_operator_lin(shat_, t_);         // t = L_lin(shat)
+      apply_precond(s_, shat_);  // shat = M^{-1} s
+      if (pin_gauge_)
+        project_mean(shat_);          // gauge: zero-mean correction direction
+      apply_operator_lin(shat_, t_);  // t = L_lin(shat)
       const Real tt = dot(t_, t_);
       omega = tt > kTiny ? dot(t_, s_) / tt : Real(0);
       saxpy(phi_, omega, shat_);             // phi <- phi + omega shat
       lincomb(r_, Real(1), s_, -omega, t_);  // r <- s - omega t
       rnorm = l2_norm(r_);
-      res.iters = k; res.rel_residual = rnorm / norm0;
-      if (rnorm <= rel_tol * norm0) { res.converged = true; return res; }
+      res.iters = k;
+      res.rel_residual = rnorm / norm0;
+      if (rnorm <= rel_tol * norm0) {
+        res.converged = true;
+        return res;
+      }
       rho_prev = rho;
     }
     return res;  // max_iters reached: best effort (converged=false)
@@ -475,7 +513,8 @@ class PolarTensorKrylovSolver {
     for (int b = 0; b < ba.size(); ++b) {
       if (ba[b].lo[0] != dom.lo[0] || ba[b].hi[0] != dom.hi[0])
         throw std::runtime_error(
-            "PolarTensorKrylovSolver (precond RadialLine): the BoxArray must be split in THETA only "
+            "PolarTensorKrylovSolver (precond RadialLine): the BoxArray must be split in THETA "
+            "only "
             "(each box covers the full radial range). The Thomas sweep in r cannot cross a box "
             "boundary. Use an azimuthal splitting, or the PolarPrecond::Jacobi fallback (per cell, "
             "without layout constraint) if r must be cut.");
@@ -490,8 +529,10 @@ class PolarTensorKrylovSolver {
   /// docs/validation/HEADER_PROVENANCE.md).
   static BCRec force_theta_periodic(const BCRec& bc) {
     BCRec b = bc;
-    b.ylo = BCType::Periodic; b.yhi = BCType::Periodic;
-    b.ylo_val = Real(0); b.yhi_val = Real(0);
+    b.ylo = BCType::Periodic;
+    b.yhi = BCType::Periodic;
+    b.ylo_val = Real(0);
+    b.yhi_val = Real(0);
     return b;
   }
 
@@ -499,8 +540,10 @@ class PolarTensorKrylovSolver {
   BCRec coeff_bc() const {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec b;
-    b.xlo = fo(bc_.xlo); b.xhi = fo(bc_.xhi);
-    b.ylo = BCType::Periodic; b.yhi = BCType::Periodic;  // theta always periodic
+    b.xlo = fo(bc_.xlo);
+    b.xhi = fo(bc_.xhi);
+    b.ylo = BCType::Periodic;
+    b.yhi = BCType::Periodic;  // theta always periodic
     return b;
   }
 
@@ -509,22 +552,26 @@ class PolarTensorKrylovSolver {
     device_fence();
     fill_ghosts(*a_rr_, geom_.domain, eb);
     fill_ghosts(*a_tt_, geom_.domain, eb);
-    if (a_rt_) fill_ghosts(*a_rt_, geom_.domain, eb);
-    if (a_tr_) fill_ghosts(*a_tr_, geom_.domain, eb);
+    if (a_rt_)
+      fill_ghosts(*a_rt_, geom_.domain, eb);
+    if (a_tr_)
+      fill_ghosts(*a_tr_, geom_.domain, eb);
   }
 
   void ensure_coeffs() {
-    if (coeffs_ready_) return;
+    if (coeffs_ready_)
+      return;
     // idiag = 1/diag of the diagonal stencil (for Jacobi).
     const Real dr = geom_.dr();
     const Real idr = Real(1) / dr;
     const Real idth = Real(1) / geom_.dtheta();
     for (int li = 0; li < idiag_.local_size(); ++li) {
-      for_each_cell(idiag_.box(li),
-                    detail::PolarInvDiagKernel{a_rr_->fab(li).const_array(), a_tt_->fab(li).const_array(),
-                                               idiag_.fab(li).array(), geom_.r_min, dr, idr, idth});
+      for_each_cell(idiag_.box(li), detail::PolarInvDiagKernel{
+                                        a_rr_->fab(li).const_array(), a_tt_->fab(li).const_array(),
+                                        idiag_.fab(li).array(), geom_.r_min, dr, idr, idth});
     }
-    if (precond_ == PolarPrecond::RadialLine) build_radial_lines();
+    if (precond_ == PolarPrecond::RadialLine)
+      build_radial_lines();
     coeffs_ready_ = true;
   }
 
@@ -540,7 +587,8 @@ class PolarTensorKrylovSolver {
   /// the theta index LOCAL to the box. Single-rank single box: only one box -> identical to the old
   /// [j*nr + i] layout over the whole domain (bit-identical path).
   void build_radial_lines() {
-    a_rr_->sync_host(); a_tt_->sync_host();
+    a_rr_->sync_host();
+    a_tt_->sync_host();
     const int nr = geom_.domain.nx();
     const Box2D dom = geom_.domain;
     const Real dr = geom_.dr();
@@ -554,8 +602,8 @@ class PolarTensorKrylovSolver {
     line_sub_.resize(static_cast<std::size_t>(nloc));
     line_sup_.resize(static_cast<std::size_t>(nloc));
     for (int li = 0; li < nloc; ++li) {
-      const Box2D vb = idiag_.box(li);           // local VALID box (full r range, theta sub-range)
-      const int nth_l = vb.ny();                 // number of theta lines LOCAL to this box
+      const Box2D vb = idiag_.box(li);  // local VALID box (full r range, theta sub-range)
+      const int nth_l = vb.ny();        // number of theta lines LOCAL to this box
       const ConstArray4 arr = a_rr_->fab(li).const_array();
       const ConstArray4 att = a_tt_->fab(li).const_array();
       std::vector<Real>& lb = line_b_[li];
@@ -565,7 +613,7 @@ class PolarTensorKrylovSolver {
       lsub.assign(static_cast<std::size_t>(nth_l) * static_cast<std::size_t>(nr), Real(0));
       lsup.assign(static_cast<std::size_t>(nth_l) * static_cast<std::size_t>(nr), Real(0));
       for (int jl = 0; jl < nth_l; ++jl) {
-        const int jg = vb.lo[1] + jl;            // GLOBAL theta index
+        const int jg = vb.lo[1] + jl;  // GLOBAL theta index
         for (int i = 0; i < nr; ++i) {
           const int ig = dom.lo[0] + i;
           const Real ri = geom_.r_cell(i);
@@ -575,12 +623,14 @@ class PolarTensorKrylovSolver {
           const Real arr_m = Real(0.5) * (arr(ig, jg) + arr(ig - 1, jg));
           const Real att_p = Real(0.5) * (att(ig, jg) + att(ig, jg + 1));
           const Real att_m = Real(0.5) * (att(ig, jg) + att(ig, jg - 1));
-          const Real ai = rfm * arr_m * (idr2 / ri);   // coeff of p_{i-1} in L_int
-          const Real ci = rfp * arr_p * (idr2 / ri);    // coeff of p_{i+1}
-          const Real azi_diag = (att_p + att_m) * (idth2 / (ri * ri));  // azimuthal part of -diag (lumped)
-          Real bi = -(ai + ci) - azi_diag;              // FULL diagonal of L_int (radial + azimuthal)
+          const Real ai = rfm * arr_m * (idr2 / ri);  // coeff of p_{i-1} in L_int
+          const Real ci = rfp * arr_p * (idr2 / ri);  // coeff of p_{i+1}
+          const Real azi_diag =
+              (att_p + att_m) * (idth2 / (ri * ri));  // azimuthal part of -diag (lumped)
+          Real bi = -(ai + ci) - azi_diag;            // FULL diagonal of L_int (radial + azimuthal)
           Real sub = ai, sup = ci;
-          if (i == 0) {  // HOMOGENEOUS low BC fold: Dirichlet b -= a, Neumann b += a; sub-diag zeroed
+          if (i ==
+              0) {  // HOMOGENEOUS low BC fold: Dirichlet b -= a, Neumann b += a; sub-diag zeroed
             bi += dir_lo ? -ai : ai;
             sub = Real(0);
           }
@@ -588,7 +638,8 @@ class PolarTensorKrylovSolver {
             bi += dir_hi ? -ci : ci;
             sup = Real(0);
           }
-          const std::size_t idx = static_cast<std::size_t>(jl) * static_cast<std::size_t>(nr) + static_cast<std::size_t>(i);
+          const std::size_t idx = static_cast<std::size_t>(jl) * static_cast<std::size_t>(nr) +
+                                  static_cast<std::size_t>(i);
           lb[idx] = bi;
           lsub[idx] = sub;
           lsup[idx] = sup;
@@ -609,7 +660,8 @@ class PolarTensorKrylovSolver {
   /// DIRECTIONS -> the operator must be linear there (we subtract the boundary offset).
   void apply_operator_lin(MultiFab& in, MultiFab& out) {
     apply_operator(in, out);
-    if (has_op_offset_) lincomb(out, Real(1), out, Real(-1), op_offset_);
+    if (has_op_offset_)
+      lincomb(out, Real(1), out, Real(-1), op_offset_);
   }
 
   /// SIMPLE preconditioner: Jacobi (diagonal) or RadialLine (radial Thomas per theta line). LINEAR,
@@ -634,7 +686,8 @@ class PolarTensorKrylovSolver {
   /// exchange (M^{-1} is BLOCK-DIAGONAL per box, by construction of the theta splitting) -> no
   /// deadlock. Single-rank single box: one box -> bit-identical path to the old fab(0).
   void apply_precond_radial_line(MultiFab& in, MultiFab& out) {
-    if (in.local_size() == 0) return;
+    if (in.local_size() == 0)
+      return;
     in.sync_host();
     const int r_lo = geom_.domain.lo[0];
     const std::size_t N = static_cast<std::size_t>(nr_);
@@ -661,8 +714,10 @@ class PolarTensorKrylovSolver {
           xthom_[i] = (beta != Real(0) ? (zi - lsub[base + i] * xthom_[i - 1]) / beta : Real(0));
         }
         for (int i = static_cast<int>(N) - 2; i >= 0; --i)
-          xthom_[static_cast<std::size_t>(i)] -= cthom_[static_cast<std::size_t>(i + 1)] * xthom_[static_cast<std::size_t>(i + 1)];
-        for (std::size_t i = 0; i < N; ++i) o(r_lo + static_cast<int>(i), jg) = xthom_[i];
+          xthom_[static_cast<std::size_t>(i)] -=
+              cthom_[static_cast<std::size_t>(i + 1)] * xthom_[static_cast<std::size_t>(i + 1)];
+        for (std::size_t i = 0; i < N; ++i)
+          o(r_lo + static_cast<int>(i), jg) = xthom_[i];
       }
     }
   }
@@ -715,7 +770,8 @@ class PolarTensorKrylovSolver {
       const Box2D vb = x.box(li);
       Array4 a = x.fab(li).array();
       for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
-        for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) a(i, j) -= mean;
+        for (int i = vb.lo[0]; i <= vb.hi[0]; ++i)
+          a(i, j) -= mean;
     }
   }
 
@@ -736,23 +792,25 @@ class PolarTensorKrylovSolver {
   MultiFab phi_, rhs_;
   MultiFab r_, rhat_, p_, v_, s_, t_;
   MultiFab phat_, shat_;
-  MultiFab idiag_;        ///< 1/diag (Jacobi), recomputed at each set_coefficients
-  MultiFab op_offset_;    ///< c_bc = apply_operator(0) (inhomogeneous part of Dirichlet boundary)
+  MultiFab idiag_;      ///< 1/diag (Jacobi), recomputed at each set_coefficients
+  MultiFab op_offset_;  ///< c_bc = apply_operator(0) (inhomogeneous part of Dirichlet boundary)
   MultiFab a_rr_store_, a_tt_store_;  ///< default diagonal coefficients (= 1, isotropic)
-  MultiFab* a_rr_ = nullptr;          ///< current coefficients (point to the store or the external one)
+  MultiFab* a_rr_ = nullptr;  ///< current coefficients (point to the store or the external one)
   MultiFab* a_tt_ = nullptr;
-  MultiFab* a_rt_ = nullptr;          ///< cross terms (nullptr -> absent)
+  MultiFab* a_rt_ = nullptr;  ///< cross terms (nullptr -> absent)
   MultiFab* a_tr_ = nullptr;
   bool coeffs_ready_ = false;
   bool has_op_offset_ = false;
-  bool pin_gauge_ = false;  ///< singular operator (pure Neumann): fix the gauge (zero-mean projection)
+  bool pin_gauge_ =
+      false;  ///< singular operator (pure Neumann): fix the gauge (zero-mean projection)
   // RadialLine preconditioner: radial tridiagonal of the diagonal block per theta line. PER LOCAL BOX
   // (line_b_/sub_/sup_[li]), each stored [jl*nr + i] where jl = theta index LOCAL to the box, i = global
   // radius 0..nr-1 (a_rr may depend on theta -> coeffs per (i, jl)). The splitting being in THETA only,
   // M^{-1} is block-diagonal per box (no cross-box radial coupling) -> each box is inverted
   // independently. cthom_/xthom_ = Thomas working buffers (reused, length nr). HOST.
-  std::vector<std::vector<Real>> line_b_, line_sub_, line_sup_;  ///< tridiag per local box [li][jl*nr+i]
-  mutable std::vector<Real> cthom_, xthom_;    ///< Thomas precond buffers (length nr)
+  std::vector<std::vector<Real>> line_b_, line_sub_,
+      line_sup_;                             ///< tridiag per local box [li][jl*nr+i]
+  mutable std::vector<Real> cthom_, xthom_;  ///< Thomas precond buffers (length nr)
   int nr_ = 0;
 };
 

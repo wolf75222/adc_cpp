@@ -17,14 +17,16 @@
 using adc::Real;
 using adc::EigBounds;
 using adc::real_eig_minmax;
-using adc::Spectrum;          // predicat de spectre reel/complexe (ADC-276)
+using adc::Spectrum;  // predicat de spectre reel/complexe (ADC-276)
 using adc::real_spectrum;
 using adc::test::close_rel;  // comparaison relative+absolue partagee (atol defaut 1e-12)
 
 // Compteur d'echecs partage, en style VERBOSE (imprime chaque ligne [OK ]/[XX ] comme avant).
 static adc::test::Checker g_chk{adc::test::Checker::Style::Verbose};
 
-static void chk(bool ok, const char* label) { g_chk(ok, label); }
+static void chk(bool ok, const char* label) {
+  g_chk(ok, label);
+}
 
 /// Matrice compagnon (premiere ligne = -coefficients) du polynome unitaire de racines @p roots :
 /// spectre exactement {roots}. p(x) = prod (x - r_k) developpe par produits successifs.
@@ -32,13 +34,18 @@ template <int N>
 static void companion(const Real (&roots)[N], Real (&A)[N][N]) {
   Real c[N + 1];  // coefficients de p, c[0] = terme dominant 1
   c[0] = Real(1);
-  for (int k = 0; k < N; ++k) c[k + 1] = Real(0);
   for (int k = 0; k < N; ++k)
-    for (int j = k + 1; j >= 1; --j) c[j] -= roots[k] * c[j - 1];
+    c[k + 1] = Real(0);
+  for (int k = 0; k < N; ++k)
+    for (int j = k + 1; j >= 1; --j)
+      c[j] -= roots[k] * c[j - 1];
   for (int i = 0; i < N; ++i)
-    for (int j = 0; j < N; ++j) A[i][j] = Real(0);
-  for (int j = 0; j < N; ++j) A[0][j] = -c[j + 1];
-  for (int i = 1; i < N; ++i) A[i][i - 1] = Real(1);
+    for (int j = 0; j < N; ++j)
+      A[i][j] = Real(0);
+  for (int j = 0; j < N; ++j)
+    A[0][j] = -c[j + 1];
+  for (int i = 1; i < N; ++i)
+    A[i][i - 1] = Real(1);
 }
 
 /// Consommateur DEVICE-SAFE (pile uniquement, ni NumPy ni MATLAB) : tient lieu du projecteur
@@ -46,9 +53,12 @@ static void companion(const Real (&roots)[N], Real (&A)[N][N]) {
 /// adc::Spectrum -- kUnknown (non-convergence) y est traite explicitement, jamais confondu avec kReal.
 ADC_HD static int classify_action(const Real (&B)[3][3]) {
   switch (adc::real_spectrum(B)) {
-    case Spectrum::kReal:        return 0;
-    case Spectrum::kComplexPair: return 1;
-    case Spectrum::kUnknown:     return 2;
+    case Spectrum::kReal:
+      return 0;
+    case Spectrum::kComplexPair:
+      return 1;
+    case Spectrum::kUnknown:
+      return 2;
   }
   return -1;  // injoignable : enumere clos
 }
@@ -142,8 +152,8 @@ int main() {
   {
     const Real R[2][2] = {{Real(0), Real(2)}, {Real(-2), Real(0)}};  // lambda = +-2i
     const EigBounds b = real_eig_minmax(R);
-    chk(b.converged && close_rel(b.lmin, Real(0), 1e-14) && close_rel(b.lmax, Real(0), 1e-14)
-            && close_rel(b.max_im, Real(2), 1e-14),
+    chk(b.converged && close_rel(b.lmin, Real(0), 1e-14) && close_rel(b.lmax, Real(0), 1e-14) &&
+            close_rel(b.max_im, Real(2), 1e-14),
         "N=2 rotation : Re = 0, max_im = 2 (indicateur d'hyperbolicite)");
   }
 
@@ -153,8 +163,8 @@ int main() {
     Real A[3][3];
     companion(roots, A);
     const EigBounds b = real_eig_minmax(A);
-    chk(b.converged && close_rel(b.lmin, Real(1), 1e-10) && close_rel(b.lmax, Real(3), 1e-10)
-            && b.max_im < Real(1e-8),
+    chk(b.converged && close_rel(b.lmin, Real(1), 1e-10) && close_rel(b.lmax, Real(3), 1e-10) &&
+            b.max_im < Real(1e-8),
         "N=3 compagnon {1,2,3}");
   }
   {
@@ -186,7 +196,8 @@ int main() {
     for (int i = 0; i < 4; ++i)
       for (int j = 0; j < 4; ++j) {
         A[i][j] = Real(0);
-        for (int k = 0; k < 4; ++k) A[i][j] += S[i][k] * D[k] * Sinv[k][j];
+        for (int k = 0; k < 4; ++k)
+          A[i][j] += S[i][k] * D[k] * Sinv[k][j];
       }
     const EigBounds b = real_eig_minmax(A);
     chk(b.converged && close_rel(b.lmin, Real(-1), 1e-10) && close_rel(b.lmax, Real(7), 1e-10),
@@ -203,19 +214,23 @@ int main() {
     companion(roots, C);
     const Real v[5] = {1, 2, -1, 3, 1};
     Real vv = 0;
-    for (int i = 0; i < 5; ++i) vv += v[i] * v[i];
+    for (int i = 0; i < 5; ++i)
+      vv += v[i] * v[i];
     Real P[5][5], T[5][5], A[5][5];
     for (int i = 0; i < 5; ++i)
-      for (int j = 0; j < 5; ++j) P[i][j] = (i == j ? Real(1) : Real(0)) - 2 * v[i] * v[j] / vv;
+      for (int j = 0; j < 5; ++j)
+        P[i][j] = (i == j ? Real(1) : Real(0)) - 2 * v[i] * v[j] / vv;
     for (int i = 0; i < 5; ++i)
       for (int j = 0; j < 5; ++j) {
         T[i][j] = 0;
-        for (int k = 0; k < 5; ++k) T[i][j] += P[i][k] * C[k][j];
+        for (int k = 0; k < 5; ++k)
+          T[i][j] += P[i][k] * C[k][j];
       }
     for (int i = 0; i < 5; ++i)
       for (int j = 0; j < 5; ++j) {
         A[i][j] = 0;
-        for (int k = 0; k < 5; ++k) A[i][j] += T[i][k] * P[k][j];
+        for (int k = 0; k < 5; ++k)
+          A[i][j] += T[i][k] * P[k][j];
       }
     const EigBounds b = real_eig_minmax(A);
     chk(b.converged && close_rel(b.lmin, Real(-3), 1e-10) && close_rel(b.lmax, Real(5), 1e-10),
@@ -225,7 +240,7 @@ int main() {
   std::printf("== N = 8 : genericite au-dela des tailles HyQMOM ==\n");
   {
     const Real roots[8] = {Real(-7), Real(-5), Real(-2), Real(-1),
-                           Real(1), Real(3), Real(6), Real(9)};
+                           Real(1),  Real(3),  Real(6),  Real(9)};
     Real A[8][8];
     companion(roots, A);
     const EigBounds b = real_eig_minmax(A);
@@ -238,8 +253,8 @@ int main() {
     // Bloc diagonal : rotation 2x2 (lambda = +-2i) et diag(-1, 3), plonge dans une similarite.
     Real A[4][4] = {{0, 2, 1, 0}, {-2, 0, 0, 1}, {0, 0, -1, 5}, {0, 0, 0, 3}};
     const EigBounds b = real_eig_minmax(A);
-    chk(b.converged && close_rel(b.lmin, Real(-1), 1e-10) && close_rel(b.lmax, Real(3), 1e-10)
-            && close_rel(b.max_im, Real(2), 1e-10),
+    chk(b.converged && close_rel(b.lmin, Real(-1), 1e-10) && close_rel(b.lmax, Real(3), 1e-10) &&
+            close_rel(b.max_im, Real(2), 1e-10),
         "N=4 mixte : Re dans {-1, 0, 3}, max_im = 2");
   }
 
@@ -252,8 +267,8 @@ int main() {
     Real A[3][3];
     companion(roots, A);
     const EigBounds b = real_eig_minmax(A);
-    chk(b.converged && std::fabs(b.lmin - (Real(1) - Real(1e-3))) < Real(1e-5)
-            && std::fabs(b.lmax - (Real(1) + Real(1e-3))) < Real(1e-5),
+    chk(b.converged && std::fabs(b.lmin - (Real(1) - Real(1e-3))) < Real(1e-5) &&
+            std::fabs(b.lmax - (Real(1) + Real(1e-3))) < Real(1e-5),
         "N=3 racines groupees a 1e-3 (tolerance large volontaire)");
   }
   {
@@ -275,28 +290,31 @@ int main() {
     // Reference numpy (np.linalg.eigvals) : min Re = -1.732589689893011, max Re = 1.752707143107345.
     Real A[5][5];
     for (int i = 0; i < 5; ++i)
-      for (int j = 0; j < 5; ++j) A[i][j] = Real(0);
-    for (int i = 0; i < 4; ++i) A[i][i + 1] = Real(1);
+      for (int j = 0; j < 5; ++j)
+        A[i][j] = Real(0);
+    for (int i = 0; i < 4; ++i)
+      A[i][i + 1] = Real(1);
     const Real last[5] = {Real(0.0927583829495191), Real(-9.220453484757002),
                           Real(-0.18326928704092538), Real(6.072635227251581),
                           Real(0.05029363303583967)};
-    for (int j = 0; j < 5; ++j) A[4][j] = last[j];
+    for (int j = 0; j < 5; ++j)
+      A[4][j] = last[j];
     bool fb = true;  // doit etre remis a false : aucun repli attendu au cap defaut
     const EigBounds b = real_eig_minmax(A, /*max_iter_per_eig=*/100, &fb);
     // Tolerance ABSOLUE 1e-6 (et non 1e-9) : la paire superieure est QUASI-DOUBLE, son
     // conditionnement non symetrique est ~eps^(1/2) (~1.5e-8) -- exiger 1e-9 contredirait le
     // contrat documente dans l'en-tete. 1e-6 reste a 7 ordres de grandeur du repli (~+-15.6).
     chk(b.converged && !fb, "compagnon quasi-degenere : converge au cap defaut, fallback = false");
-    chk(std::fabs(b.lmin - Real(-1.732589689893011)) < Real(1e-6)
-            && std::fabs(b.lmax - Real(1.752707143107345)) < Real(1e-6),
+    chk(std::fabs(b.lmin - Real(-1.732589689893011)) < Real(1e-6) &&
+            std::fabs(b.lmax - Real(1.752707143107345)) < Real(1e-6),
         "min/max corrects (vs numpy) : pas le repli Gershgorin");
     chk(b.max_im < Real(1e-6), "spectre essentiellement reel (max_im ~ 0)");
     // Verrou du DEFAUT : meme bloc appele SANS cap explicite (donc avec le defaut de la signature).
     // Ce bloc demande ~42 iterations ; si le defaut regressait sous ce seuil (p.ex. l'ancien 30) il
     // replirait en silence et bdef.converged passerait a false. Epingle le defaut a >= 42.
     const EigBounds bdef = real_eig_minmax(A);
-    chk(bdef.converged && std::fabs(bdef.lmin - Real(-1.732589689893011)) < Real(1e-6)
-            && std::fabs(bdef.lmax - Real(1.752707143107345)) < Real(1e-6),
+    chk(bdef.converged && std::fabs(bdef.lmin - Real(-1.732589689893011)) < Real(1e-6) &&
+            std::fabs(bdef.lmax - Real(1.752707143107345)) < Real(1e-6),
         "cap par DEFAUT suffit a converger (une regression 100->30 ferait echouer ce test)");
   }
 
@@ -322,8 +340,8 @@ int main() {
     Real A[3][3];
     companion(roots, A);
     const EigBounds b = real_eig_minmax(A);
-    chk(real_spectrum(A) == Spectrum::kReal && b.all_real() && !b.has_complex_pair()
-            && classify_action(A) == 0,
+    chk(real_spectrum(A) == Spectrum::kReal && b.all_real() && !b.has_complex_pair() &&
+            classify_action(A) == 0,
         "3x3 reels distincts {1,2,3} : kReal (all_real, !has_complex_pair)");
   }
   {
@@ -347,7 +365,8 @@ int main() {
     companion(roots, A);
     const EigBounds b = real_eig_minmax(A);
     chk(real_spectrum(A) == Spectrum::kReal && b.all_real() && classify_action(A) == 0,
-        "3x3 racine TRIPLE {2,2,2} : kReal au defaut (eps^(1/3) couvert, pas un faux kComplexPair)");
+        "3x3 racine TRIPLE {2,2,2} : kReal au defaut (eps^(1/3) couvert, pas un faux "
+        "kComplexPair)");
   }
   {
     // (b3) Racine QUADRUPLE {1,1,1,1} (4x4) : conditionnement ~eps^(1/4) ~ 1.2e-4 > defaut 1e-5, donc AU
@@ -357,19 +376,18 @@ int main() {
     const Real roots[4] = {Real(1), Real(1), Real(1), Real(1)};
     Real A[4][4];
     companion(roots, A);
-    chk(real_spectrum(A) == Spectrum::kComplexPair
-            && real_spectrum(A, /*im_tol=*/1e-3) == Spectrum::kReal,
+    chk(real_spectrum(A) == Spectrum::kComplexPair &&
+            real_spectrum(A, /*im_tol=*/1e-3) == Spectrum::kReal,
         "4x4 racine QUADRUPLE : kComplexPair au defaut (m>3), kReal avec im_tol elargi (1e-3)");
   }
   {
     // (c) Paire complexe conjuguee + un reel : diag-bloc rotation(+-2i) et {3}. kComplexPair ;
     // has_complex_pair vrai, all_real faux, max_im ~ 2 (temoin de perte d'hyperbolicite).
-    const Real A[3][3] = {{Real(0), Real(2), Real(0)},
-                          {Real(-2), Real(0), Real(0)},
-                          {Real(0), Real(0), Real(3)}};
+    const Real A[3][3] = {
+        {Real(0), Real(2), Real(0)}, {Real(-2), Real(0), Real(0)}, {Real(0), Real(0), Real(3)}};
     const EigBounds b = real_eig_minmax(A);
-    chk(real_spectrum(A) == Spectrum::kComplexPair && b.has_complex_pair() && !b.all_real()
-            && close_rel(b.max_im, Real(2), 1e-12) && classify_action(A) == 1,
+    chk(real_spectrum(A) == Spectrum::kComplexPair && b.has_complex_pair() && !b.all_real() &&
+            close_rel(b.max_im, Real(2), 1e-12) && classify_action(A) == 1,
         "3x3 paire complexe + reel : kComplexPair (has_complex_pair, max_im = 2)");
   }
   {
@@ -380,8 +398,9 @@ int main() {
     Real A[5][5];
     companion(roots, A);
     const EigBounds b = real_eig_minmax(A, /*max_iter_per_eig=*/0);
-    chk(!b.converged && real_spectrum(A, /*im_tol=*/1e-7, /*max_iter_per_eig=*/0) == Spectrum::kUnknown
-            && !b.all_real() && !b.has_complex_pair(),
+    chk(!b.converged &&
+            real_spectrum(A, /*im_tol=*/1e-7, /*max_iter_per_eig=*/0) == Spectrum::kUnknown &&
+            !b.all_real() && !b.has_complex_pair(),
         "non-convergence : kUnknown, all_real ET has_complex_pair faux (max_im=0 jamais lu reel)");
   }
   {
@@ -394,9 +413,8 @@ int main() {
   }
   {
     // (f) Matrice nulle : converge, max_im = 0 -> kReal (le plancher gere l'echelle 0 sans faux complexe).
-    const Real Z[3][3] = {{Real(0), Real(0), Real(0)},
-                          {Real(0), Real(0), Real(0)},
-                          {Real(0), Real(0), Real(0)}};
+    const Real Z[3][3] = {
+        {Real(0), Real(0), Real(0)}, {Real(0), Real(0), Real(0)}, {Real(0), Real(0), Real(0)}};
     const EigBounds b = real_eig_minmax(Z);
     chk(real_spectrum(Z) == Spectrum::kReal && b.all_real() && classify_action(Z) == 0,
         "matrice nulle : kReal (max_im = 0, plancher gere l'echelle nulle)");
@@ -407,10 +425,9 @@ int main() {
     // serre (1e-7) -> kComplexPair. Le meme bloc bascule selon la tolerance : le bouton est explicite.
     const Real A[2][2] = {{Real(1), Real(-1e-6)}, {Real(1e-6), Real(1)}};
     const EigBounds b = real_eig_minmax(A);
-    chk(close_rel(b.max_im, Real(1e-6), 1e-12)
-            && b.all_real(/*im_tol=*/1e-5) && !b.all_real(/*im_tol=*/1e-7)
-            && real_spectrum(A, /*im_tol=*/1e-5) == Spectrum::kReal
-            && real_spectrum(A, /*im_tol=*/1e-7) == Spectrum::kComplexPair,
+    chk(close_rel(b.max_im, Real(1e-6), 1e-12) && b.all_real(/*im_tol=*/1e-5) &&
+            !b.all_real(/*im_tol=*/1e-7) && real_spectrum(A, /*im_tol=*/1e-5) == Spectrum::kReal &&
+            real_spectrum(A, /*im_tol=*/1e-7) == Spectrum::kComplexPair,
         "bouton tolerance (max_im=1e-6 exact) : kReal a 1e-5, kComplexPair a 1e-7");
   }
   {
@@ -422,9 +439,10 @@ int main() {
     const EigBounds b = real_eig_minmax(A);
     // Le test passe parce que 1e-9*1e3 s'arrondit a 1.0000000000000002e-06 >= max_im (1e-6 exact) :
     // c'est la frontiere <= (non stricte) ; un futur passage a < ferait basculer ce cas.
-    chk(close_rel(b.max_im, Real(1e-6), 1e-12) && b.all_real(/*im_tol=*/1e-9)
-            && real_spectrum(A, /*im_tol=*/1e-9) == Spectrum::kReal,
-        "tolerance RELATIVE : max_im=1e-6 a l'echelle 1e3 -> kReal a 1e-9 (un absolu mediterait complexe)");
+    chk(close_rel(b.max_im, Real(1e-6), 1e-12) && b.all_real(/*im_tol=*/1e-9) &&
+            real_spectrum(A, /*im_tol=*/1e-9) == Spectrum::kReal,
+        "tolerance RELATIVE : max_im=1e-6 a l'echelle 1e3 -> kReal a 1e-9 (un absolu mediterait "
+        "complexe)");
   }
   {
     // (i) ASYMETRIE assumee de la tolerance RELATIVE (valeurs exactes, N=2) : une VRAIE paire complexe
@@ -434,10 +452,11 @@ int main() {
     // (2000 > 1e3) le bloc bascule kComplexPair. Verrou : un changement de defaut deplacerait ce bord.
     const Real Areal[2][2] = {{Real(1e8), Real(-9)}, {Real(9), Real(1e8)}};
     const Real Acplx[2][2] = {{Real(1e8), Real(-2e3)}, {Real(2e3), Real(1e8)}};
-    chk(close_rel(real_eig_minmax(Areal).max_im, Real(9), 1e-12)
-            && real_spectrum(Areal) == Spectrum::kReal
-            && real_spectrum(Acplx) == Spectrum::kComplexPair,
-        "echelle 1e8 : |Im|=9 -> kReal (relatif), |Im|=2000 -> kComplexPair (asymetrie documentee)");
+    chk(close_rel(real_eig_minmax(Areal).max_im, Real(9), 1e-12) &&
+            real_spectrum(Areal) == Spectrum::kReal &&
+            real_spectrum(Acplx) == Spectrum::kComplexPair,
+        "echelle 1e8 : |Im|=9 -> kReal (relatif), |Im|=2000 -> kComplexPair (asymetrie "
+        "documentee)");
   }
 
   std::printf("== roe_abs_apply : |A| dU via matrix-sign (ADC-368) ==\n");

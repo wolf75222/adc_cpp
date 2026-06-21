@@ -26,8 +26,12 @@
 using namespace adc;
 static constexpr double kPi = 3.14159265358979323846;
 
-static double u_exact(double x, double y) { return std::sin(3 * kPi * x) * std::sin(3 * kPi * y); }
-static double eps_xy(double x, double y) { return 1.0 + 0.5 * std::sin(2 * kPi * x) * std::sin(2 * kPi * y); }
+static double u_exact(double x, double y) {
+  return std::sin(3 * kPi * x) * std::sin(3 * kPi * y);
+}
+static double eps_xy(double x, double y) {
+  return 1.0 + 0.5 * std::sin(2 * kPi * x) * std::sin(2 * kPi * y);
+}
 static double f_rhs(double x, double y) {
   const double u = u_exact(x, y);
   const double ux = 3 * kPi * std::cos(3 * kPi * x) * std::sin(3 * kPi * y);
@@ -43,7 +47,8 @@ static void fill(MultiFab& m, const Geometry& g, Setter s) {
     Array4 a = m.fab(li).array();
     const Box2D b = m.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) = s(g.x_cell(i), g.y_cell(j));
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 0) = s(g.x_cell(i), g.y_cell(j));
   }
 }
 
@@ -52,7 +57,11 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 48, r = 2;
@@ -106,7 +115,8 @@ int main(int argc, char** argv) {
           const int iff = r * I + ti, jff = r * J + tj;
           const double xf = geom_f.x_cell(iff), yf = geom_f.y_cell(jff);
           const double ue = u_exact(xf, yf);
-          e_coarse = std::fmax(e_coarse, std::fabs(detail::fac_bilerp_coarse(PC0, iff, jff, r) - ue));
+          e_coarse =
+              std::fmax(e_coarse, std::fabs(detail::fac_bilerp_coarse(PC0, iff, jff, r) - ue));
           e_comp = std::fmax(e_comp, std::fabs(PF(iff, jff, 0) - ue));
           const double gxa = 3 * kPi * std::cos(3 * kPi * xf) * std::sin(3 * kPi * yf);
           const double gya = 3 * kPi * std::sin(3 * kPi * xf) * std::cos(3 * kPi * yf);
@@ -122,16 +132,21 @@ int main(int argc, char** argv) {
   eg_comp = all_reduce_max(eg_comp);
 
   if (me == 0)
-    std::printf("  eps-variable : phi e_coarse=%.3e e_comp=%.3e (x%.2f)  grad e_optA=%.3e e_comp=%.3e (x%.2f)\n",
-                e_coarse, e_comp, e_coarse / std::fmax(e_comp, 1e-30), eg_optA, eg_comp,
-                eg_optA / std::fmax(eg_comp, 1e-30));
+    std::printf(
+        "  eps-variable : phi e_coarse=%.3e e_comp=%.3e (x%.2f)  grad e_optA=%.3e e_comp=%.3e "
+        "(x%.2f)\n",
+        e_coarse, e_comp, e_coarse / std::fmax(e_comp, 1e-30), eg_optA, eg_comp,
+        eg_optA / std::fmax(eg_comp, 1e-30));
 
   chk(std::isfinite(e_comp) && std::isfinite(eg_comp), "erreurs finies");
-  chk(e_comp < 0.6 * e_coarse, "(fidelite phi) patch fin plus precis que coarse-only (eps variable)");
-  chk(eg_comp < 0.5 * eg_optA, "(fidelite grad phi) composite >> injection Option A (eps variable)");
+  chk(e_comp < 0.6 * e_coarse,
+      "(fidelite phi) patch fin plus precis que coarse-only (eps variable)");
+  chk(eg_comp < 0.5 * eg_optA,
+      "(fidelite grad phi) composite >> injection Option A (eps variable)");
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_composite_fac_variable_eps\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_composite_fac_variable_eps\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

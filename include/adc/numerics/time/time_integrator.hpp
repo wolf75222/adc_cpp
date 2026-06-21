@@ -26,12 +26,7 @@ struct SSPRK3 {};  // Shu-Osher SSP-RK3 (3 stages, order 3)
 
 struct UserTimeIntegrator {};  // extension point: take_step provided by the case
 
-enum class TimeTreatment {
-  Explicit,
-  Implicit,
-  IMEX,
-  Prescribed
-};
+enum class TimeTreatment { Explicit, Implicit, IMEX, Prescribed };
 
 // SubstepsT: MORE FREQUENT substeps (n steps of dt/n per macro-step, fast electrons).
 // StrideT: SLOWER cadence (the block advances only 1 macro-step every StrideT, thus by a

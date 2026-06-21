@@ -41,14 +41,22 @@ static GeometricMG make_mg(int nc) {
   Box2D dom = Box2D::from_extents(nc, nc);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba(std::vector<Box2D>{dom});
-  std::function<bool(Real, Real)> active = [=](Real x, Real y) { return std::hypot(x - cx, y - cy) < Rwall; };
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  std::function<bool(Real, Real)> active = [=](Real x, Real y) {
+    return std::hypot(x - cx, y - cy) < Rwall;
+  };
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
   return GeometricMG(geom, ba, bc, active);
 }
 
 int main() {
   int fails = 0;
-  auto chk = [&](bool c, const char* w) { if (!c) { std::printf("FAIL %s\n", w); ++fails; } };
+  auto chk = [&](bool c, const char* w) {
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
+  };
 
   // 1 + 2 : cas DIVERGENT (eff 640). solve_robust converge ; deux solves a froid font le meme travail.
   {
@@ -82,6 +90,7 @@ int main() {
     std::printf("solve vs solve_robust (eff224, convergent) : maxdiff(phi)=%.3e\n", md);
   }
 
-  if (fails == 0) std::printf("OK test_solve_robust\n");
+  if (fails == 0)
+    std::printf("OK test_solve_robust\n");
   return fails == 0 ? 0 : 1;
 }

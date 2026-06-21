@@ -48,9 +48,8 @@ void run_compiled(int n, double L, const std::vector<double>& rho, const char* l
   cfg.periodic = true;
   System sys(cfg);
   using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
-  add_compiled_model(sys, "gas",
-                     Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}}, limiter,
-                     "rusanov", "conservative", "explicit", /*gamma=*/1.4);
+  add_compiled_model(sys, "gas", Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}},
+                     limiter, "rusanov", "conservative", "explicit", /*gamma=*/1.4);
   sys.set_poisson("charge_density", "geometric_mg");
   sys.set_density("gas", rho);
   sys.solve_fields();
@@ -93,7 +92,8 @@ int compare(int n, double L, const std::vector<double>& rho, const char* limiter
     dres = std::fmax(dres, std::fabs(Rc[k] - Rn[k]));
     nrm = std::fmax(nrm, std::fabs(Rn[k]));
   }
-  for (std::size_t k = 0; k < pc.size(); ++k) dphi = std::fmax(dphi, std::fabs(pc[k] - pn[k]));
+  for (std::size_t k = 0; k < pc.size(); ++k)
+    dphi = std::fmax(dphi, std::fabs(pc[k] - pn[k]));
 
   int fails = 0;
   if (!(nrm > 1e-6)) {
@@ -137,6 +137,7 @@ int main(int argc, char** argv) {
   fails += compare(n, L, rho, "none");
   fails += compare(n, L, rho, "minmod");
 
-  if (fails == 0) std::printf("OK test_weno5_compiled_model (weno5 + no-default-change none/minmod)\n");
+  if (fails == 0)
+    std::printf("OK test_weno5_compiled_model (weno5 + no-default-change none/minmod)\n");
   return fails ? 1 : 0;
 }

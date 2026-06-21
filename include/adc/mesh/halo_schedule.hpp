@@ -96,9 +96,13 @@ inline std::int64_t& halo_schedule_build_counter() {
 /// Number of times fill_boundary has BUILT (enumerated) a halo schedule. A reused (cached) schedule
 /// does NOT increment it, so a stable layout filled K times reports 1. Test hook for cache
 /// engagement; not part of the public numerical API.
-inline std::int64_t halo_schedule_build_count() { return detail::halo_schedule_build_counter(); }
+inline std::int64_t halo_schedule_build_count() {
+  return detail::halo_schedule_build_counter();
+}
 
 /// Resets the build counter (tests).
-inline void reset_halo_schedule_build_count() { detail::halo_schedule_build_counter() = 0; }
+inline void reset_halo_schedule_build_count() {
+  detail::halo_schedule_build_counter() = 0;
+}
 
 }  // namespace adc

@@ -42,7 +42,8 @@ int main() {
     AUX[static_cast<std::size_t>(kAuxNamedBase) * nn + c] = kappa;
   std::vector<double> R = native_loader::host_residual<1>(m, U, AUX, n, dx, /*recon=*/0);
   double maxerr = 0.0;
-  for (double v : R) maxerr = std::fmax(maxerr, std::fabs(v - kappa));
+  for (double v : R)
+    maxerr = std::fmax(maxerr, std::fabs(v - kappa));
   std::printf("  (A) host_residual named aux : max|R - kappa| = %.2e\n", maxerr);
   if (maxerr > 1e-14) {
     std::printf("FAIL named_aux_marshaled_host\n");
@@ -54,12 +55,14 @@ int main() {
   std::vector<double> AUXnarrow(3 * nn, 0.0);
   std::vector<double> R0 = native_loader::host_residual<1>(m, U, AUXnarrow, n, dx, 0);
   double maxz = 0.0;
-  for (double v : R0) maxz = std::fmax(maxz, std::fabs(v));
+  for (double v : R0)
+    maxz = std::fmax(maxz, std::fabs(v));
   if (maxz != 0.0) {
     std::printf("FAIL narrow_channel_named_zero (max=%.2e)\n", maxz);
     ++fails;
   }
 
-  if (fails == 0) std::printf("OK test_native_aux_named\n");
+  if (fails == 0)
+    std::printf("OK test_native_aux_named\n");
   return fails == 0 ? 0 : 1;
 }

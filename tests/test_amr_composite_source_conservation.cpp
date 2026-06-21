@@ -49,7 +49,9 @@ struct Inert {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 // Echange NON LINEAIRE mais CONSERVATIF entre deux blocs : flux = dt*k*(n1^2 - n0^2) par
@@ -84,14 +86,18 @@ static void fill_by_index(MultiFab& U, F f) {
     Array4 a = U.fab(li).array();
     const Box2D g = U.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) a(i, j, 0) = f(i, j);
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        a(i, j, 0) = f(i, j);
   }
 }
 
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int NC = 16;
@@ -109,9 +115,7 @@ int main() {
   auto make_level = [&](MultiFab&& U, Real dx, Real dy) {
     return AmrLevelMP{std::move(U), nullptr, dx, dy};
   };
-  auto covered = [&](int ci, int cj) {
-    return ci >= CLO && ci <= CHI && cj >= CLO && cj <= CHI;
-  };
+  auto covered = [&](int ci, int cj) { return ci >= CLO && ci <= CHI && cj >= CLO && cj <= CHI; };
 
   // masse FEUILLE-CONSCIENTE d'UNE espece (comp 0) : grossier NON couvert a dVc + fin a dVf
   // (le fin est la verite la ou il existe). C'est la masse physique de l'espece sur la
@@ -123,7 +127,8 @@ int main() {
     Real M = 0;
     for (int cj = 0; cj < NC; ++cj)
       for (int ci = 0; ci < NC; ++ci)
-        if (!covered(ci, cj)) M += c(ci, cj, 0) * dVc;
+        if (!covered(ci, cj))
+          M += c(ci, cj, 0) * dVc;
     for (int J = fbox.lo[1]; J <= fbox.hi[1]; ++J)
       for (int I = fbox.lo[0]; I <= fbox.hi[0]; ++I)
         M += f(I, J, 0) * dVf;
@@ -142,8 +147,10 @@ int main() {
 
   MultiFab U0c(ba_coarse, dm, 1, 2), U0f(ba_fine, dm, 1, 2);
   MultiFab U1c(ba_coarse, dm, 1, 2), U1f(ba_fine, dm, 1, 2);
-  fill_by_index(U0c, p0);  fill_by_index(U0f, p0);
-  fill_by_index(U1c, p1);  fill_by_index(U1f, p1);
+  fill_by_index(U0c, p0);
+  fill_by_index(U0f, p0);
+  fill_by_index(U1c, p1);
+  fill_by_index(U1f, p1);
 
   Blk b0{"a", Inert{}, U0c, BCRec{}};
   Blk b1{"b", Inert{}, U1c, BCRec{}};
@@ -203,6 +210,7 @@ int main() {
   const Real n0_lo = sim.levels(0)[1].U.fab(0).const_array()(2 * CLO, 2 * CLO, 0);
   chk(std::fabs(n0_lo - p0(2 * CLO, 2 * CLO)) > Real(1e-4), "source_active");
 
-  if (fails == 0) std::printf("OK test_amr_composite_source_conservation\n");
+  if (fails == 0)
+    std::printf("OK test_amr_composite_source_conservation\n");
   return fails == 0 ? 0 : 1;
 }

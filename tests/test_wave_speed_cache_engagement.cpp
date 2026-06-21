@@ -68,7 +68,8 @@ struct CountingIsothermal {
     Kokkos::atomic_add(&calls(), 1LL);
     const Real v = (dir == 0 ? u[1] : u[2]) / u[0];
     Real acc = Real(0);
-    for (int k = 0; k < busy; ++k) acc += std::sin(v + Real(k)) * std::cos(v - Real(k));
+    for (int k = 0; k < busy; ++k)
+      acc += std::sin(v + Real(k)) * std::cos(v - Real(k));
     const Real c = c0 + (acc - acc);  // acc-acc == 0 exact : lo/hi bit-stables quel que soit busy
     lo = v - c;
     hi = v + c;
@@ -95,7 +96,8 @@ static long long count_diff_bits(const MultiFab& A, const MultiFab& B, const Box
     for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
       for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
         const double va = a(i, j, c), vb = b(i, j, c);
-        if (std::memcmp(&va, &vb, sizeof(double)) != 0) ++ndiff;
+        if (std::memcmp(&va, &vb, sizeof(double)) != 0)
+          ++ndiff;
       }
   return ndiff;
 }
@@ -111,7 +113,8 @@ int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("%s %s\n", c ? "[OK]  " : "[FAIL]", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int n = 48;
@@ -121,7 +124,8 @@ int main() {
   BoxArray ba = BoxArray::from_domain(dom, n);
   DistributionMapping dm(ba.size(), n_ranks());
   BCRec bc;  // periodique
-  MultiFab aux(ba, dm, 3, 1);  // construit AVANT la View : initialise Kokkos via l'allocateur unifie
+  MultiFab aux(ba, dm, 3,
+               1);  // construit AVANT la View : initialise Kokkos via l'allocateur unifie
   aux.set_val(0.0);
   const GridContext ctx{dom, bc, geom, &aux};
 
@@ -143,19 +147,23 @@ int main() {
     const int nsteps = 25;
 
     Kokkos::deep_copy(calls, 0LL);
-    for (int s = 0; s < nsteps; ++s) off.advance(Uoff, dt, 1);
+    for (int s = 0; s < nsteps; ++s)
+      off.advance(Uoff, dt, 1);
     const long long calls_off = read_counter(calls);
 
     Kokkos::deep_copy(calls, 0LL);
-    for (int s = 0; s < nsteps; ++s) on.advance(Uon, dt, 1);
+    for (int s = 0; s < nsteps; ++s)
+      on.advance(Uon, dt, 1);
     const long long calls_on = read_counter(calls);
 
     device_fence();
     const long long ndiff = count_diff_bits(Uoff, Uon, dom);
     const long long evolved = count_diff_bits(Uoff, U0, dom);
     const double ratio = calls_on > 0 ? double(calls_off) / double(calls_on) : 0.0;
-    std::printf("  n=%d nsteps=%d : ndiff_bits=%lld evolved_bits=%lld\n", n, nsteps, ndiff, evolved);
-    std::printf("  wave_speeds calls : OFF=%lld ON=%lld  ratio=%.2fx\n", calls_off, calls_on, ratio);
+    std::printf("  n=%d nsteps=%d : ndiff_bits=%lld evolved_bits=%lld\n", n, nsteps, ndiff,
+                evolved);
+    std::printf("  wave_speeds calls : OFF=%lld ON=%lld  ratio=%.2fx\n", calls_off, calls_on,
+                ratio);
     chk(evolved > 0, "l'etat a reellement evolue (test non creux)");
     chk(ndiff == 0, "bit-exact NoSlope+HLL : cache ON == OFF (0 ulp)");
     // PREUVE D'ENGAGEMENT : le cache pre-calcule wave_speeds par cellule, le chemin par face le rappelle
@@ -179,17 +187,20 @@ int main() {
     const int nsteps = 10;
 
     auto t0 = std::chrono::steady_clock::now();
-    for (int s = 0; s < nsteps; ++s) off.advance(Uoff, dt, 1);
+    for (int s = 0; s < nsteps; ++s)
+      off.advance(Uoff, dt, 1);
     device_fence();
     auto t1 = std::chrono::steady_clock::now();
-    for (int s = 0; s < nsteps; ++s) on.advance(Uon, dt, 1);
+    for (int s = 0; s < nsteps; ++s)
+      on.advance(Uon, dt, 1);
     device_fence();
     auto t2 = std::chrono::steady_clock::now();
     const double ms_off = std::chrono::duration<double, std::milli>(t1 - t0).count();
     const double ms_on = std::chrono::duration<double, std::milli>(t2 - t1).count();
     const long long ndiff = count_diff_bits(Uoff, Uon, dom);
-    std::printf("  [diag] n=%d nsteps=%d busy=100 : OFF=%.1f ms ON=%.1f ms speedup=%.2fx ndiff_bits=%lld\n",
-                n, nsteps, ms_off, ms_on, ms_on > 0 ? ms_off / ms_on : 0.0, ndiff);
+    std::printf(
+        "  [diag] n=%d nsteps=%d busy=100 : OFF=%.1f ms ON=%.1f ms speedup=%.2fx ndiff_bits=%lld\n",
+        n, nsteps, ms_off, ms_on, ms_on > 0 ? ms_off / ms_on : 0.0, ndiff);
     chk(ndiff == 0, "bit-exact (cas wave_speeds couteux) : cache ON == OFF");
   }
 

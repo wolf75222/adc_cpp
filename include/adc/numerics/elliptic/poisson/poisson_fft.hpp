@@ -39,7 +39,9 @@ namespace adc {
 
 using cplx = std::complex<double>;
 
-inline bool is_pow2(int n) { return n > 0 && (n & (n - 1)) == 0; }
+inline bool is_pow2(int n) {
+  return n > 0 && (n & (n - 1)) == 0;
+}
 
 // Direct O(n^2) DFT, CORRECTNESS fallback for lengths that are NOT powers of two
 // (the radix-2 below assumes n = 2^k: on an arbitrary n its butterfly overflows
@@ -58,7 +60,8 @@ inline void dft1d_direct(cplx* a, int n, bool inv) {
     }
     out[static_cast<std::size_t>(k)] = inv ? acc / static_cast<double>(n) : acc;
   }
-  for (int i = 0; i < n; ++i) a[i] = out[static_cast<std::size_t>(i)];
+  for (int i = 0; i < n; ++i)
+    a[i] = out[static_cast<std::size_t>(i)];
 }
 
 // In-place 1D radix-2 FFT (power-of-two length). inv=false: exp(-i...),
@@ -71,9 +74,11 @@ inline void fft1d(cplx* a, int n, bool inv) {
   }
   for (int i = 1, j = 0; i < n; ++i) {
     int bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
+    for (; j & bit; bit >>= 1)
+      j ^= bit;
     j ^= bit;
-    if (i < j) std::swap(a[i], a[j]);
+    if (i < j)
+      std::swap(a[i], a[j]);
   }
   for (int len = 2; len <= n; len <<= 1) {
     const double ang = 2.0 * std::numbers::pi / len * (inv ? 1.0 : -1.0);
@@ -89,7 +94,8 @@ inline void fft1d(cplx* a, int n, bool inv) {
     }
   }
   if (inv)
-    for (int i = 0; i < n; ++i) a[i] /= n;
+    for (int i = 0; i < n; ++i)
+      a[i] /= n;
 }
 
 class PoissonFFT {
@@ -117,15 +123,15 @@ class PoissonFFT {
 
   // rho_local and phi_local: nyl_ x Nx_ (row-major, global rows
   // [y_begin, y_begin+nyl_)). phi_local is (re)sized.
-  void solve(const std::vector<double>& rho_local,
-             std::vector<double>& phi_local) {
+  void solve(const std::vector<double>& rho_local, std::vector<double>& phi_local) {
     std::vector<cplx> A(static_cast<std::size_t>(nyl_) * Nx_);
-    for (std::size_t t = 0; t < A.size(); ++t) A[t] = cplx(rho_local[t], 0.0);
+    for (std::size_t t = 0; t < A.size(); ++t)
+      A[t] = cplx(rho_local[t], 0.0);
     for (int jl = 0; jl < nyl_; ++jl)
       fft1d(&A[static_cast<std::size_t>(jl) * Nx_], Nx_, false);  // FFT-x
 
     std::vector<cplx> B(static_cast<std::size_t>(nxl_) * Ny_);
-    transpose_fwd(A, B);                                          // -> (nxl x Ny)
+    transpose_fwd(A, B);  // -> (nxl x Ny)
     for (int il = 0; il < nxl_; ++il)
       fft1d(&B[static_cast<std::size_t>(il) * Ny_], Ny_, false);  // FFT-y
 
@@ -133,13 +139,15 @@ class PoissonFFT {
       const int kx = rank_ * nxl_ + il;
       const int kxs = (kx < (Nx_ + 1) / 2) ? kx : kx - Nx_;  // signed frequency (Nyquist -> -N/2)
       const double wx = 2.0 * std::numbers::pi * kxs / (Nx_ * dx_);
-      const double lx = spectral_ ? -(wx * wx)
-                                  : (2.0 * std::cos(2.0 * std::numbers::pi * kx / Nx_) - 2.0) / (dx_ * dx_);
+      const double lx =
+          spectral_ ? -(wx * wx)
+                    : (2.0 * std::cos(2.0 * std::numbers::pi * kx / Nx_) - 2.0) / (dx_ * dx_);
       for (int ky = 0; ky < Ny_; ++ky) {
         const int kys = (ky < (Ny_ + 1) / 2) ? ky : ky - Ny_;
         const double wy = 2.0 * std::numbers::pi * kys / (Ny_ * dy_);
-        const double ly = spectral_ ? -(wy * wy)
-                                    : (2.0 * std::cos(2.0 * std::numbers::pi * ky / Ny_) - 2.0) / (dy_ * dy_);
+        const double ly =
+            spectral_ ? -(wy * wy)
+                      : (2.0 * std::cos(2.0 * std::numbers::pi * ky / Ny_) - 2.0) / (dy_ * dy_);
         const double lam = lx + ly;
         cplx& v = B[static_cast<std::size_t>(il) * Ny_ + ky];
         v = (std::abs(lam) < 1e-14) ? cplx(0.0, 0.0) : v / lam;
@@ -153,7 +161,8 @@ class PoissonFFT {
       fft1d(&A[static_cast<std::size_t>(jl) * Nx_], Nx_, true);  // IFFT-x
 
     phi_local.resize(A.size());
-    for (std::size_t t = 0; t < A.size(); ++t) phi_local[t] = A[t].real();
+    for (std::size_t t = 0; t < A.size(); ++t)
+      phi_local[t] = A[t].real();
   }
 
  private:
@@ -198,8 +207,8 @@ class PoissonFFT {
       return;
     }
 #ifdef ADC_HAS_MPI
-    MPI_Alltoall(send.data(), 2 * blk, MPI_DOUBLE, recv.data(), 2 * blk,
-                 MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Alltoall(send.data(), 2 * blk, MPI_DOUBLE, recv.data(), 2 * blk, MPI_DOUBLE,
+                 MPI_COMM_WORLD);
 #else
     recv = send;
 #endif

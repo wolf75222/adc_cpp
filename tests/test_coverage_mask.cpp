@@ -14,7 +14,10 @@ using namespace adc;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // region a origine non nulle : [10,5] x [20,8].
@@ -38,6 +41,7 @@ int main() {
   chk(m.covered(18, 7) && m.covered(20, 8), "clip_dedans");
   chk(!m.covered(21, 8) && !m.covered(20, 9), "clip_pas_de_debordement");
 
-  if (fails == 0) std::printf("OK test_coverage_mask\n");
+  if (fails == 0)
+    std::printf("OK test_coverage_mask\n");
   return fails == 0 ? 0 : 1;
 }

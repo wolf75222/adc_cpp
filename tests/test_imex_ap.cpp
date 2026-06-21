@@ -30,7 +30,9 @@ static MultiFab make_uniform(double u0) {
   return U;
 }
 
-static double value(const MultiFab& U) { return U.fab(0).const_array()(0, 0, 0); }
+static double value(const MultiFab& U) {
+  return U.fab(0).const_array()(0, 0, 0);
+}
 
 // transport nul (champ uniforme) : la partie explicite ne fait rien
 static void no_transport(MultiFab&, Real) {}
@@ -47,20 +49,25 @@ static double run_imex(double eps, double u0, double u_eq, double dt, int n) {
           a(i, j, 0) = (a(i, j, 0) + c * u_eq) / (1 + c);  // solve implicite
     }
   };
-  for (int s = 0; s < n; ++s) imex_euler_step(U, dt, no_transport, simpl);
+  for (int s = 0; s < n; ++s)
+    imex_euler_step(U, dt, no_transport, simpl);
   return value(U);
 }
 
 static double run_explicit(double eps, double u0, double u_eq, double dt, int n) {
   double u = u0;
-  for (int s = 0; s < n; ++s) u = u + dt * (u_eq - u) / eps;
+  for (int s = 0; s < n; ++s)
+    u = u + dt * (u_eq - u) / eps;
   return u;
 }
 
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const double u0 = 2.0, u_eq = 1.0;
@@ -83,11 +90,12 @@ int main() {
     const double e1 = std::fabs(run_imex(eps, u0, u_eq, T / 20, 20) - exact);
     const double e2 = std::fabs(run_imex(eps, u0, u_eq, T / 40, 40) - exact);
     const double order = std::log2(e1 / e2);
-    std::printf("non raide : err(dt)=%.3e err(dt/2)=%.3e ordre=%.2f (exact=%.6f)\n",
-                e1, e2, order, exact);
+    std::printf("non raide : err(dt)=%.3e err(dt/2)=%.3e ordre=%.2f (exact=%.6f)\n", e1, e2, order,
+                exact);
     chk(order > 0.8 && order < 1.3, "imex_ordre_1");
   }
 
-  if (fails == 0) std::printf("OK test_imex_ap\n");
+  if (fails == 0)
+    std::printf("OK test_imex_ap\n");
   return fails == 0 ? 0 : 1;
 }

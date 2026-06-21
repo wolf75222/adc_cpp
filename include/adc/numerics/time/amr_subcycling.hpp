@@ -53,9 +53,8 @@ static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRe
 // accepted; the recursive N-level path (subcycle_level_mp) still has to be generalized the same
 // way (ROADMAP).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
-                                Real dyc, MultiFab& Uf, const MultiFab& auxc,
-                                const MultiFab& auxf, Real dt) {
+void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc, Real dyc,
+                                MultiFab& Uf, const MultiFab& auxc, const MultiFab& auxf, Real dt) {
   const SubcyclingSchedule sched(2);
   const int nc = Uc.ncomp();
   const Real dxf = dxc / kAmrRefRatio, dyf = dyc / kAmrRefRatio, dtf = sched.dt_sub(dt);
@@ -74,7 +73,10 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
   compute_face_fluxes<Limiter, NumericalFlux>(m, Uc, auxc, fxc, fyc, dxc, dyc);
 
   // per fine-box register: coarse flux (without dt) saved at the 4 faces.
-  struct Reg { int I0, I1, J0, J1; std::vector<Real> cL, cR, cB, cT, fL, fR, fB, fT; };
+  struct Reg {
+    int I0, I1, J0, J1;
+    std::vector<Real> cL, cR, cB, cT, fL, fR, fB, fT;
+  };
   std::vector<Reg> regs(Uf.local_size());
   {
     device_fence();
@@ -82,13 +84,19 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     for (int li = 0; li < Uf.local_size(); ++li) {
       const PatchRange pr(Uf.box(li));
       Reg& g = regs[li];
-      g.I0 = pr.I0; g.I1 = pr.I1;
-      g.J0 = pr.J0; g.J1 = pr.J1;
+      g.I0 = pr.I0;
+      g.I1 = pr.I1;
+      g.J0 = pr.J0;
+      g.J1 = pr.J1;
       const int nJ = g.J1 - g.J0 + 1, nI = g.I1 - g.I0 + 1;
-      g.cL.assign(nJ * nc, 0); g.cR.assign(nJ * nc, 0);
-      g.cB.assign(nI * nc, 0); g.cT.assign(nI * nc, 0);
-      g.fL.assign(nJ * nc, 0); g.fR.assign(nJ * nc, 0);
-      g.fB.assign(nI * nc, 0); g.fT.assign(nI * nc, 0);
+      g.cL.assign(nJ * nc, 0);
+      g.cR.assign(nJ * nc, 0);
+      g.cB.assign(nI * nc, 0);
+      g.cT.assign(nI * nc, 0);
+      g.fL.assign(nJ * nc, 0);
+      g.fR.assign(nJ * nc, 0);
+      g.fB.assign(nI * nc, 0);
+      g.fT.assign(nI * nc, 0);
       for (int J = g.J0; J <= g.J1; ++J)
         for (int k = 0; k < nc; ++k) {
           g.cL[(J - g.J0) * nc + k] = FX(g.I0, J, k);
@@ -129,15 +137,15 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
         for (int k = 0; k < nc; ++k) {
           g.fL[(J - g.J0) * nc + k] +=
               Real(0.5) * (FX(2 * g.I0, 2 * J, k) + FX(2 * g.I0, 2 * J + 1, k)) * dtf;
-          g.fR[(J - g.J0) * nc + k] += Real(0.5) *
-              (FX(2 * g.I1 + 2, 2 * J, k) + FX(2 * g.I1 + 2, 2 * J + 1, k)) * dtf;
+          g.fR[(J - g.J0) * nc + k] +=
+              Real(0.5) * (FX(2 * g.I1 + 2, 2 * J, k) + FX(2 * g.I1 + 2, 2 * J + 1, k)) * dtf;
         }
       for (int I = g.I0; I <= g.I1; ++I)
         for (int k = 0; k < nc; ++k) {
           g.fB[(I - g.I0) * nc + k] +=
               Real(0.5) * (FY(2 * I, 2 * g.J0, k) + FY(2 * I + 1, 2 * g.J0, k)) * dtf;
-          g.fT[(I - g.I0) * nc + k] += Real(0.5) *
-              (FY(2 * I, 2 * g.J1 + 2, k) + FY(2 * I + 1, 2 * g.J1 + 2, k)) * dtf;
+          g.fT[(I - g.I0) * nc + k] +=
+              Real(0.5) * (FY(2 * I, 2 * g.J1 + 2, k) + FY(2 * I + 1, 2 * g.J1 + 2, k)) * dtf;
         }
     }
     mf_advance_faces(Uf, fxf, fyf, dxf, dyf, dtf);
@@ -170,8 +178,9 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     for (int J = g.J0; J <= g.J1; ++J)
       for (int I = g.I0; I <= g.I1; ++I)
         for (int k = 0; k < nc; ++k)
-          avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
-                                         f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
+          avg.set(I, J, k,
+                  Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
     cfi.route_reflux(g, dxc, dyc, dt, ref, nc);  // coverage-aware bordering reflux
   }
   avg.gather();
@@ -181,10 +190,12 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
     const Box2D cb = Uc.box(0);
     for (int J = cb.lo[1]; J <= cb.hi[1]; ++J)
       for (int I = cb.lo[0]; I <= cb.hi[0]; ++I) {
-        if (!ref.in(I, J)) continue;  // outside interface: neither average nor reflux (was 0)
+        if (!ref.in(I, J))
+          continue;  // outside interface: neither average nor reflux (was 0)
         for (int k = 0; k < nc; ++k) {
-          if (covered(I, J)) c(I, J, k) = avg.at(I, J, k);  // average-down
-          c(I, J, k) += ref.at(I, J, k);                    // reflux (0 if no face)
+          if (covered(I, J))
+            c(I, J, k) = avg.at(I, J, k);  // average-down
+          c(I, J, k) += ref.at(I, J, k);   // reflux (0 if no face)
         }
       }
   }
@@ -219,7 +230,8 @@ void amr_step_2level_multipatch(const Model& m, MultiFab& Uc, const Box2D& dom, 
 // LOCAL (valid) box containing cell (I,J), or -1.
 inline int mf_find_box(const MultiFab& mf, int I, int J) {
   for (int li = 0; li < mf.local_size(); ++li)
-    if (mf.box(li).contains(I, J)) return li;
+    if (mf.box(li).contains(I, J))
+      return li;
   return -1;
 }
 
@@ -229,7 +241,8 @@ inline int mf_find_box(const MultiFab& mf, int I, int J) {
 inline BoxArray coarsen_grown(const BoxArray& ba, int ngrow, int r) {
   std::vector<Box2D> b;
   b.reserve(ba.size());
-  for (int i = 0; i < ba.size(); ++i) b.push_back(ba[i].grow(ngrow).coarsen(r));
+  for (int i = 0; i < ba.size(); ++i)
+    b.push_back(ba[i].grow(ngrow).coarsen(r));
   return BoxArray{std::move(b)};
 }
 
@@ -243,9 +256,9 @@ inline BoxArray coarsen_grown(const BoxArray& ba, int ngrow, int r) {
 //    onto a LOCAL child-coarsen grid by parallel_copy (MPI routing handled there), then
 //    interpolated. No more silent remote failures.
 // In serial both paths are identical (parent local everywhere, parallel_copy = memory copy).
-inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const MultiFab& Pn,
-                                   Real frac, bool replicated_parent = true,
-                                   Real pos_floor = Real(0), int pos_comp = 0) {
+inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const MultiFab& Pn, Real frac,
+                                   bool replicated_parent = true, Real pos_floor = Real(0),
+                                   int pos_comp = 0) {
   const int nc = Uf.ncomp(), ng = Uf.n_grow();
   if (replicated_parent) {
     device_fence();
@@ -257,7 +270,8 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
           if (!v.contains(i, j)) {
             const int ci = coarsen_index(i, kAmrRefRatio), cj = coarsen_index(j, kAmrRefRatio);
             const int pb = mf_find_box(Po, ci, cj);
-            if (pb < 0) continue;  // outside parent coverage -> leave to fill_boundary
+            if (pb < 0)
+              continue;  // outside parent coverage -> leave to fill_boundary
             const ConstArray4 po = Po.fab(pb).const_array(), pn = Pn.fab(pb).const_array();
             fill_cf_ghost_cell(f, po, pn, i, j, nc, frac, pos_floor, pos_comp);
           }
@@ -275,7 +289,8 @@ inline void mf_fill_fine_ghosts_mb(MultiFab& Uf, const MultiFab& Po, const Multi
     const Box2D v = Uf.box(li), g = Uf.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-        if (!v.contains(i, j)) fill_cf_ghost_cell(f, po, pn, i, j, nc, frac, pos_floor, pos_comp);
+        if (!v.contains(i, j))
+          fill_cf_ghost_cell(f, po, pn, i, j, nc, frac, pos_floor, pos_comp);
   }
 }
 
@@ -293,14 +308,19 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
   const BoxArray cba = coarsen(Uf.box_array(), kAmrRefRatio);
   Box2D bb{{0, 0}, {-1, -1}};
   for (int g = 0; g < cba.size(); ++g)
-    bb = (g == 0) ? cba[g] : Box2D{{std::min(bb.lo[0], cba[g].lo[0]), std::min(bb.lo[1], cba[g].lo[1])},
-                                   {std::max(bb.hi[0], cba[g].hi[0]), std::max(bb.hi[1], cba[g].hi[1])}};
-  if (bb.empty()) { all_reduce_sum_inplace(nullptr, 0); return; }  // empty matched collective
+    bb = (g == 0) ? cba[g]
+                  : Box2D{{std::min(bb.lo[0], cba[g].lo[0]), std::min(bb.lo[1], cba[g].lo[1])},
+                          {std::max(bb.hi[0], cba[g].hi[0]), std::max(bb.hi[1], cba[g].hi[1])}};
+  if (bb.empty()) {
+    all_reduce_sum_inplace(nullptr, 0);
+    return;
+  }  // empty matched collective
   FluxRegister avg(bb, nc);  // multi-box average-down (region = bounding box)
   // GLOBAL coverage (all child footprints): only these cells are overwritten; the bounding box
   // may contain holes between disjoint patches that must NOT be overwritten.
   CoverageMask cmask(bb);
-  for (int g = 0; g < cba.size(); ++g) cmask.mark(cba[g]);
+  for (int g = 0; g < cba.size(); ++g)
+    cmask.mark(cba[g]);
   auto covered = [&](int I, int J) { return cmask.covered(I, J); };
   device_fence();
   for (int lf = 0; lf < Uf.local_size(); ++lf) {
@@ -309,8 +329,9 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
     for (int J = pr.J0; J <= pr.J1; ++J)
       for (int I = pr.I0; I <= pr.I1; ++I)
         for (int k = 0; k < nc; ++k)
-          avg.set(I, J, k, Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
-                                         f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
+          avg.set(I, J, k,
+                  Real(0.25) * (f(2 * I, 2 * J, k) + f(2 * I + 1, 2 * J, k) +
+                                f(2 * I, 2 * J + 1, k) + f(2 * I + 1, 2 * J + 1, k)));
   }
   avg.gather();
   for (int pb = 0; pb < Uc.local_size(); ++pb) {
@@ -319,7 +340,8 @@ inline void mf_average_down_mb(const MultiFab& Uf, MultiFab& Uc) {
     for (int J = inter.lo[1]; J <= inter.hi[1]; ++J)
       for (int I = inter.lo[0]; I <= inter.hi[0]; ++I)
         if (covered(I, J))
-          for (int k = 0; k < nc; ++k) c(I, J, k) = avg.at(I, J, k);
+          for (int k = 0; k < nc; ++k)
+            c(I, J, k) = avg.at(I, J, k);
   }
 }
 
@@ -383,12 +405,13 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
   const int pos_comp = detail::positivity_comp<Model>(pos_floor);
   MultiFab U0 = lv.U;  // starting state t (Shu-Osher convex combinations)
   MultiFab R(lv.U.box_array(), lv.U.dmap(), nc, 0);
-  MultiFab Fxs(fx.box_array(), fx.dmap(), nc, 0), Fys(fy.box_array(), fy.dmap(), nc, 0);  // stage flux
+  MultiFab Fxs(fx.box_array(), fx.dmap(), nc, 0),
+      Fys(fy.box_array(), fy.dmap(), nc, 0);  // stage flux
 
   // --- stage 0: F(U0) already in (fx, fy), R0 = -div F0 + S(U0) ---
   mf_eval_rhs(m, lv.U, *lv.aux, fx, fy, lv.dx, lv.dy, R);
-  saxpy(lv.U, dt, R);                          // lv.U = U1 = U0 + dt R0
-  lincomb(fx, Real(1) / 6, fx, Real(0), fx);   // Feff <- 1/6 F0 (pointwise aliasing, safe)
+  saxpy(lv.U, dt, R);                         // lv.U = U1 = U0 + dt R0
+  lincomb(fx, Real(1) / 6, fx, Real(0), fx);  // Feff <- 1/6 F0 (pointwise aliasing, safe)
   lincomb(fy, Real(1) / 6, fy, Real(0), fy);
 
   // --- stage 1: F(U1) ---
@@ -398,9 +421,9 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
                                               pos_floor);
   device_fence();
   mf_eval_rhs(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, R);  // R1 = -div F1 + S(U1)
-  saxpy(lv.U, dt, R);                                         // lv.U = U1 + dt R1
-  lincomb(lv.U, Real(3) / 4, U0, Real(1) / 4, lv.U);          // lv.U = U2
-  saxpy(fx, Real(1) / 6, Fxs);                                // Feff += 1/6 F1
+  saxpy(lv.U, dt, R);                                        // lv.U = U1 + dt R1
+  lincomb(lv.U, Real(3) / 4, U0, Real(1) / 4, lv.U);         // lv.U = U2
+  saxpy(fx, Real(1) / 6, Fxs);                               // Feff += 1/6 F1
   saxpy(fy, Real(1) / 6, Fys);
 
   // --- stage 2: F(U2) ---
@@ -410,9 +433,9 @@ void ssprk3_advance_level(const Model& m, AmrLevelMP& lv, Real dt, MultiFab& fx,
                                               pos_floor);
   device_fence();
   mf_eval_rhs(m, lv.U, *lv.aux, Fxs, Fys, lv.dx, lv.dy, R);  // R2 = -div F2 + S(U2)
-  saxpy(lv.U, dt, R);                                         // lv.U = U2 + dt R2
-  lincomb(lv.U, Real(1) / 3, U0, Real(2) / 3, lv.U);          // lv.U = U_new (t + dt)
-  saxpy(fx, Real(2) / 3, Fxs);                                // Feff += 2/3 F2
+  saxpy(lv.U, dt, R);                                        // lv.U = U2 + dt R2
+  lincomb(lv.U, Real(1) / 3, U0, Real(2) / 3, lv.U);         // lv.U = U_new (t + dt)
+  saxpy(fx, Real(2) / 3, Fxs);                               // Feff += 2/3 F2
   saxpy(fy, Real(2) / 3, Fys);
   device_fence();  // (fx, fy) = Feff and lv.U = U_new consistent for host reads (parentRegs/reflux)
 }
@@ -421,8 +444,8 @@ template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Mode
 void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real dt,
                        const Box2D& base_dom, Periodicity base_per, const MultiFab* pOld,
                        const MultiFab* pNew, Real frac, std::vector<RegMP>* parentRegs,
-                       bool coarse_replicated = true, bool recon_prim = false,
-                       bool imex = false, const NewtonOptions& nopts = {},
+                       bool coarse_replicated = true, bool recon_prim = false, bool imex = false,
+                       const NewtonOptions& nopts = {},
                        AmrTimeMethod tmethod = AmrTimeMethod::kEuler, Real pos_floor = Real(0)) {
   // SSPRK3 + IMEX: combination NOT VALIDATED (the per-stage implicit stiff source under SSP has
   // not been verified), rejected EXPLICITLY rather than run silently. The facade cannot produce it
@@ -430,7 +453,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   if (tmethod == AmrTimeMethod::kSsprk3 && imex)
     throw std::runtime_error(
         "subcycle_level_mp: SSPRK3 + IMEX unsupported (combination not validated); use "
-        "time='ssprk3' (explicit source per stage) or time='imex' (forward Euler + implicit source)");
+        "time='ssprk3' (explicit source per stage) or time='imex' (forward Euler + implicit "
+        "source)");
   const SubcyclingSchedule sched(2);
   const int nc = L[lev].U.ncomp();
   // Density-role component for the C/F ghost floor (ADC-259), resolved ONCE on the host. pos_floor<=0
@@ -479,7 +503,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   const bool is_leaf = (lev + 1 >= static_cast<int>(L.size()));
   MultiFab ssp_U_old;  // state t (pre-advance capture); filled only for SSPRK3 + coarse role
   if (ssprk3) {
-    if (!is_leaf) ssp_U_old = lv.U;  // the children interpolate between this state (t) and advanced lv.U (t+dt)
+    if (!is_leaf)
+      ssp_U_old = lv.U;  // the children interpolate between this state (t) and advanced lv.U (t+dt)
     ssprk3_advance_level<Limiter, NumericalFlux>(m, lv, dt, fx, fy, recon_prim, lev, base_dom,
                                                  base_per, pOld, pNew, frac, coarse_replicated,
                                                  pos_floor);
@@ -493,23 +518,24 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
         for (int k = 0; k < nc; ++k) {
           g.fL[(J - g.J0) * nc + k] +=
               Real(0.5) * (FX(2 * g.I0, 2 * J, k) + FX(2 * g.I0, 2 * J + 1, k)) * dt;
-          g.fR[(J - g.J0) * nc + k] += Real(0.5) *
-              (FX(2 * g.I1 + 2, 2 * J, k) + FX(2 * g.I1 + 2, 2 * J + 1, k)) * dt;
+          g.fR[(J - g.J0) * nc + k] +=
+              Real(0.5) * (FX(2 * g.I1 + 2, 2 * J, k) + FX(2 * g.I1 + 2, 2 * J + 1, k)) * dt;
         }
       for (int I = g.I0; I <= g.I1; ++I)
         for (int k = 0; k < nc; ++k) {
           g.fB[(I - g.I0) * nc + k] +=
               Real(0.5) * (FY(2 * I, 2 * g.J0, k) + FY(2 * I + 1, 2 * g.J0, k)) * dt;
-          g.fT[(I - g.I0) * nc + k] += Real(0.5) *
-              (FY(2 * I, 2 * g.J1 + 2, k) + FY(2 * I + 1, 2 * g.J1 + 2, k)) * dt;
+          g.fT[(I - g.I0) * nc + k] +=
+              Real(0.5) * (FY(2 * I, 2 * g.J1 + 2, k) + FY(2 * I + 1, 2 * g.J1 + 2, k)) * dt;
         }
     }
   }
 
-  if (is_leaf) {  // leaf
+  if (is_leaf) {    // leaf
     if (!ssprk3) {  // forward Euler (legacy path); SSPRK3 already advanced lv.U above
       mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
-      mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // explicit or IMEX source (Newton options)
+      mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex,
+                                nopts);  // explicit or IMEX source (Newton options)
     }
     return;
   }
@@ -531,7 +557,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   // return -1 for a bordering coarse cell owned by a REMOTE rank (-> fab(-1), segfault). We then
   // route to the parallel_copy path (per-child coarse footprint), MPI-correct.
   const bool replicated_parent = (lev == 0) && coarse_replicated;
-  const BoxArray cba = coarsen(L[lev + 1].U.box_array(), kAmrRefRatio);  // per-child coarse footprint
+  const BoxArray cba =
+      coarsen(L[lev + 1].U.box_array(), kAmrRefRatio);  // per-child coarse footprint
   MultiFab cfx, cfy;
   if (!replicated_parent) {
     std::vector<Box2D> cfxb, cfyb;
@@ -550,19 +577,26 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   for (int lc = 0; lc < L[lev + 1].U.local_size(); ++lc) {
     const PatchRange pr(L[lev + 1].U.box(lc));
     RegMP& g = regs[lc];
-    g.I0 = pr.I0; g.I1 = pr.I1;
-    g.J0 = pr.J0; g.J1 = pr.J1;
+    g.I0 = pr.I0;
+    g.I1 = pr.I1;
+    g.J0 = pr.J0;
+    g.J1 = pr.J1;
     const int nJ = g.J1 - g.J0 + 1, nI = g.I1 - g.I0 + 1;
-    g.cL.assign(nJ * nc, 0); g.cR.assign(nJ * nc, 0);
-    g.cB.assign(nI * nc, 0); g.cT.assign(nI * nc, 0);
-    g.fL.assign(nJ * nc, 0); g.fR.assign(nJ * nc, 0);
-    g.fB.assign(nI * nc, 0); g.fT.assign(nI * nc, 0);
+    g.cL.assign(nJ * nc, 0);
+    g.cR.assign(nJ * nc, 0);
+    g.cB.assign(nI * nc, 0);
+    g.cT.assign(nI * nc, 0);
+    g.fL.assign(nJ * nc, 0);
+    g.fR.assign(nJ * nc, 0);
+    g.fB.assign(nI * nc, 0);
+    g.fT.assign(nI * nc, 0);
     if (replicated_parent) {
       for (int J = g.J0; J <= g.J1; ++J) {
         const int bL = mf_find_box(lv.U, g.I0, J), bR = mf_find_box(lv.U, g.I1, J);
         // replicated-parent invariant: parent fully local (cf. above), mf_find_box always finds
         // the box; a -1 would index fab(-1) (segfault). The distributed case goes through the else.
-        assert(bL >= 0 && bR >= 0 && "subcycle_level_mp: replicated-parent invariant violated (coarse box x not found)");
+        assert(bL >= 0 && bR >= 0 &&
+               "subcycle_level_mp: replicated-parent invariant violated (coarse box x not found)");
         const ConstArray4 FXL = fx.fab(bL).const_array(), FXR = fx.fab(bR).const_array();
         for (int k = 0; k < nc; ++k) {
           g.cL[(J - g.J0) * nc + k] = FXL(g.I0, J, k);
@@ -572,7 +606,8 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
       for (int I = g.I0; I <= g.I1; ++I) {
         const int bB = mf_find_box(lv.U, I, g.J0), bT = mf_find_box(lv.U, I, g.J1);
         // same replicated-parent invariant as above (y faces): coarse box always found.
-        assert(bB >= 0 && bT >= 0 && "subcycle_level_mp: replicated-parent invariant violated (coarse box y not found)");
+        assert(bB >= 0 && bT >= 0 &&
+               "subcycle_level_mp: replicated-parent invariant violated (coarse box y not found)");
         const ConstArray4 FYB = fy.fab(bB).const_array(), FYT = fy.fab(bT).const_array();
         for (int k = 0; k < nc; ++k) {
           g.cB[(I - g.I0) * nc + k] = FYB(I, g.J0, k);
@@ -601,13 +636,14 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
   MultiFab U_old = ssprk3 ? ssp_U_old : lv.U;
   if (!ssprk3) {  // forward Euler (legacy path); SSPRK3 already advanced lv.U
     mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);
-    mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex, nopts);  // explicit or IMEX source (Newton options)
+    mf_apply_source_treatment(m, lv.U, *lv.aux, dt, imex,
+                              nopts);  // explicit or IMEX source (Newton options)
   }
-  for (int s = 0; s < sched.count(); ++s)  // each fine substep = one full SSP step (tmethod propagated)
-    subcycle_level_mp<Limiter, NumericalFlux>(m, L, lev + 1, sched.dt_sub(dt), base_dom, base_per,
-                                              &U_old, &lv.U, sched.frac(s), &regs,
-                                              coarse_replicated, recon_prim, imex, nopts, tmethod,
-                                              pos_floor);
+  for (int s = 0; s < sched.count();
+       ++s)  // each fine substep = one full SSP step (tmethod propagated)
+    subcycle_level_mp<Limiter, NumericalFlux>(
+        m, L, lev + 1, sched.dt_sub(dt), base_dom, base_per, &U_old, &lv.U, sched.frac(s), &regs,
+        coarse_replicated, recon_prim, imex, nopts, tmethod, pos_floor);
   mf_average_down_mb(L[lev + 1].U, lv.U);  // distributed point 3 (parallel_copy)
 
   // Distributed point 4: coverage-aware reflux. The bordering coarse cell may belong to a REMOTE
@@ -631,26 +667,27 @@ void subcycle_level_mp(const Model& m, std::vector<AmrLevelMP>& L, int lev, Real
     const Box2D pbx = lv.U.box(pb);
     for (int J = pbx.lo[1]; J <= pbx.hi[1]; ++J)
       for (int I = pbx.lo[0]; I <= pbx.hi[0]; ++I) {
-        if (!ref.in(I, J)) continue;  // outside interface: zero reflux
-        for (int k = 0; k < nc; ++k) c(I, J, k) += ref.at(I, J, k);
+        if (!ref.in(I, J))
+          continue;  // outside interface: zero reflux
+        for (int k = 0; k < nc; ++k)
+          c(I, J, k) += ref.at(I, J, k);
       }
   }
 }
 
 // Driver: one dt step of the N-level multi-patch hierarchy (level 0 = coarse).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L,
-                                    const Box2D& dom, Real dt,
-                                    Periodicity per = Periodicity{true, true},
+void amr_step_multilevel_multipatch(const Model& m, std::vector<AmrLevelMP>& L, const Box2D& dom,
+                                    Real dt, Periodicity per = Periodicity{true, true},
                                     bool coarse_replicated = true, bool recon_prim = false,
                                     bool imex = false, const NewtonOptions& nopts = {},
                                     AmrTimeMethod tmethod = AmrTimeMethod::kEuler,
                                     Real pos_floor = Real(0)) {
-  subcycle_level_mp<Limiter, NumericalFlux>(m, L, 0, dt, dom, per, nullptr, nullptr, Real(0), nullptr,
-                                            coarse_replicated, recon_prim, imex, nopts, tmethod,
-                                            pos_floor);
+  subcycle_level_mp<Limiter, NumericalFlux>(m, L, 0, dt, dom, per, nullptr, nullptr, Real(0),
+                                            nullptr, coarse_replicated, recon_prim, imex, nopts,
+                                            tmethod, pos_floor);
 }
 
-}  // namespace detail (N-level multi-patch engine)
+}  // namespace detail
 
 }  // namespace adc

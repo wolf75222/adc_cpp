@@ -22,20 +22,26 @@ using namespace adc;
 struct DiscLS {
   double cx, cy, R;
   Real operator()(Real x, Real y) const {
-    return static_cast<Real>(std::hypot(static_cast<double>(x) - cx, static_cast<double>(y) - cy) - R);
+    return static_cast<Real>(std::hypot(static_cast<double>(x) - cx, static_cast<double>(y) - cy) -
+                             R);
   }
 };
 
 // Reference INLINE : copie EXACTE de l'ancien corps de GeometricMG (lambda 'cut' + formule des poids)
 // AVANT le refactor. Sert d'oracle bit-identite : si la primitive devie d'un seul ULP, le test casse.
-struct RefWeights { Real w_xm, w_xp, w_ym, w_yp, w_diag; };
+struct RefWeights {
+  Real w_xm, w_xp, w_ym, w_yp, w_diag;
+};
 template <class LS>
 static RefWeights ref_inline(const LS& ls, Real xc, Real yc, Real dx, Real dy) {
   auto cut = [](Real lc, Real ln, Real h) -> Real {
-    if (ln < Real(0)) return h;
+    if (ln < Real(0))
+      return h;
     Real th = lc / (lc - ln);
-    if (th < Real(1e-3)) th = Real(1e-3);
-    if (th > Real(1)) th = Real(1);
+    if (th < Real(1e-3))
+      th = Real(1e-3);
+    if (th > Real(1))
+      th = Real(1);
     return th * h;
   };
   const Real lc = ls(xc, yc);
@@ -54,7 +60,12 @@ static RefWeights ref_inline(const LS& ls, Real xc, Real yc, Real dx, Real dy) {
 
 int main() {
   int fails = 0;
-  auto chk = [&](bool c, const char* w) { if (!c) { std::printf("FAIL %s\n", w); ++fails; } };
+  auto chk = [&](bool c, const char* w) {
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
+  };
 
   // ---------------------------------------------------------------------------
   // (1) UNITE ANALYTIQUE : cercle unite centre a l'origine, R = 1.
@@ -88,13 +99,16 @@ int main() {
   // interieurs. Toutes les faces pleines, apertures = 1, kappa = 1 (cellule non coupee).
   {
     const detail::CutFraction cf = detail::cut_fraction(ls, Real(0.0), Real(0.0), dx, dy);
-    chk(std::fabs(cf.alpha_xm - Real(1.0)) < Real(1e-12) && std::fabs(cf.alpha_xp - Real(1.0)) < Real(1e-12) &&
-        std::fabs(cf.alpha_ym - Real(1.0)) < Real(1e-12) && std::fabs(cf.alpha_yp - Real(1.0)) < Real(1e-12),
+    chk(std::fabs(cf.alpha_xm - Real(1.0)) < Real(1e-12) &&
+            std::fabs(cf.alpha_xp - Real(1.0)) < Real(1e-12) &&
+            std::fabs(cf.alpha_ym - Real(1.0)) < Real(1e-12) &&
+            std::fabs(cf.alpha_yp - Real(1.0)) < Real(1e-12),
         "interieur_apertures_unite");
     chk(std::fabs(cf.kappa - Real(1.0)) < Real(1e-12), "interieur_kappa_unite");
     // loin du bord les poids degenerent au stencil uniforme : 1/dx^2 = 25, diag = 2/dx^2 + 2/dy^2 = 100.
     const detail::ShortleyWellerWeights w = detail::shortley_weller(cf);
-    chk(std::fabs(w.w_xm - Real(25.0)) < Real(1e-9) && std::fabs(w.w_diag - Real(100.0)) < Real(1e-9),
+    chk(std::fabs(w.w_xm - Real(25.0)) < Real(1e-9) &&
+            std::fabs(w.w_diag - Real(100.0)) < Real(1e-9),
         "interieur_stencil_uniforme");
   }
 
@@ -119,28 +133,31 @@ int main() {
     for (int j = 0; j < nc; ++j)
       for (int i = 0; i < nc; ++i) {
         const Real xc = (i + Real(0.5)) * h, yc = (j + Real(0.5)) * h;
-        if (d(xc, yc) >= Real(0)) continue;  // conducteur : GeometricMG saute (coef = 0)
+        if (d(xc, yc) >= Real(0))
+          continue;  // conducteur : GeometricMG saute (coef = 0)
         ++active;
         const detail::CutFraction cf = detail::cut_fraction(d, xc, yc, h, h);
         const detail::ShortleyWellerWeights w = detail::shortley_weller(cf);
         const RefWeights r = ref_inline(d, xc, yc, h, h);
         // comparaison EXACTE (operator!=), pas de tolerance : doit etre byte-identique.
-        if (w.w_xm != r.w_xm || w.w_xp != r.w_xp || w.w_ym != r.w_ym ||
-            w.w_yp != r.w_yp || w.w_diag != r.w_diag) {
+        if (w.w_xm != r.w_xm || w.w_xp != r.w_xp || w.w_ym != r.w_ym || w.w_yp != r.w_yp ||
+            w.w_diag != r.w_diag) {
           max_diff = std::max(max_diff, std::fabs(w.w_xm - r.w_xm));
           max_diff = std::max(max_diff, std::fabs(w.w_xp - r.w_xp));
           max_diff = std::max(max_diff, std::fabs(w.w_diag - r.w_diag));
         }
-        if (cf.alpha_xm < Real(1) || cf.alpha_xp < Real(1) ||
-            cf.alpha_ym < Real(1) || cf.alpha_yp < Real(1)) ++cut_cells;
+        if (cf.alpha_xm < Real(1) || cf.alpha_xp < Real(1) || cf.alpha_ym < Real(1) ||
+            cf.alpha_yp < Real(1))
+          ++cut_cells;
       }
-    std::printf("bit-identite : %ld cellules actives, %ld coupees, max_diff=%.3e\n",
-                active, cut_cells, static_cast<double>(max_diff));
+    std::printf("bit-identite : %ld cellules actives, %ld coupees, max_diff=%.3e\n", active,
+                cut_cells, static_cast<double>(max_diff));
     chk(max_diff == Real(0), "bit_identite_poids_diff_exacte_0");
-    chk(active > 1800, "balayage_couvre_le_disque");      // pi*R^2/h^2 = pi*0.4^2*64^2 ~ 2058 cellules
+    chk(active > 1800, "balayage_couvre_le_disque");  // pi*R^2/h^2 = pi*0.4^2*64^2 ~ 2058 cellules
     chk(cut_cells > 100, "beaucoup_de_cellules_coupees");  // le bord du disque genere des coupures
   }
 
-  if (fails == 0) std::printf("OK test_cut_fraction\n");
+  if (fails == 0)
+    std::printf("OK test_cut_fraction\n");
   return fails == 0 ? 0 : 1;
 }

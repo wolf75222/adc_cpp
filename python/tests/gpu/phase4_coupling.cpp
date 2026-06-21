@@ -60,8 +60,8 @@ int main(int argc, char** argv) {
 #else
     const char* space = "Serial(host)";
 #endif
-    std::printf("exec=%s steps=%d  n_e=%.10f  n_i=%.10f  n_g=%.10f  (n_i+n_g)=%.10f\n",
-                space, steps, ne, ni, ng, ni + ng);
+    std::printf("exec=%s steps=%d  n_e=%.10f  n_i=%.10f  n_g=%.10f  (n_i+n_g)=%.10f\n", space,
+                steps, ne, ni, ng, ni + ng);
   }
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();

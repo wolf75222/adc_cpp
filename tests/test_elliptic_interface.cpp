@@ -12,11 +12,11 @@
 #include <adc/numerics/elliptic/elliptic_interface.hpp>
 
 #include <adc/numerics/elliptic/elliptic_problem.hpp>      // field_postprocess, FieldPostProcess
-#include <adc/numerics/elliptic/elliptic_solver.hpp>        // EllipticSolver
-#include <adc/numerics/elliptic/geometric_mg.hpp>           // GeometricMG
-#include <adc/numerics/elliptic/krylov_solver.hpp>          // TensorKrylovSolver, KrylovResult
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>     // PoissonFFTSolver, DistributedFFTSolver
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>   // PolarPoissonSolver, PolarEllipticSolver
+#include <adc/numerics/elliptic/elliptic_solver.hpp>       // EllipticSolver
+#include <adc/numerics/elliptic/geometric_mg.hpp>          // GeometricMG
+#include <adc/numerics/elliptic/krylov_solver.hpp>         // TensorKrylovSolver, KrylovResult
+#include <adc/numerics/elliptic/poisson_fft_solver.hpp>    // PoissonFFTSolver, DistributedFFTSolver
+#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver, PolarEllipticSolver
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -42,17 +42,20 @@ static_assert(EllipticOperator<GeometricMG>,
 // GAP DOCUMENTE : les solveurs DIRECTS (FFT, polaire) n'exposent PAS de coefficients
 // d'operateur (pas de matvec matrice-libre) -> ils ne modelent PAS EllipticOperator.
 // C'est le comportement attendu : seul l'operateur MG porte ce role aujourd'hui.
-static_assert(!EllipticOperator<PoissonFFTSolver>,
-              "PoissonFFTSolver (solveur direct) n'a PAS de role operateur a coefficients : attendu");
-static_assert(!EllipticOperator<PolarPoissonSolver>,
-              "PolarPoissonSolver (solveur direct) n'a PAS de role operateur a coefficients : attendu");
+static_assert(
+    !EllipticOperator<PoissonFFTSolver>,
+    "PoissonFFTSolver (solveur direct) n'a PAS de role operateur a coefficients : attendu");
+static_assert(
+    !EllipticOperator<PolarPoissonSolver>,
+    "PolarPoissonSolver (solveur direct) n'a PAS de role operateur a coefficients : attendu");
 
 // =====================================================================================
 // (2) LinearSolver : solveur ITERATIF a solve(rel_tol, max_iters) -> resultat non void.
 static_assert(LinearSolver<GeometricMG>,
               "GeometricMG doit modeler LinearSolver (solve(rel_tol, max_cycles) -> int)");
-static_assert(LinearSolver<TensorKrylovSolver>,
-              "TensorKrylovSolver doit modeler LinearSolver (solve(rel_tol, max_iters) -> KrylovResult)");
+static_assert(
+    LinearSolver<TensorKrylovSolver>,
+    "TensorKrylovSolver doit modeler LinearSolver (solve(rel_tol, max_iters) -> KrylovResult)");
 
 // Le contrat de socle (rhs/phi/solve()/residual/geom) reste EllipticSolver : tout
 // LinearSolver l'est. On le reverifie pour les deux solveurs iteratifs.
@@ -62,7 +65,8 @@ static_assert(EllipticSolver<TensorKrylovSolver>, "TensorKrylovSolver modele Ell
 // GAP DOCUMENTE : les solveurs DIRECTS resolvent en une passe, sans tolerance iterative.
 // Ils modelent EllipticSolver (cartesien) ou PolarEllipticSolver (polaire) mais PAS
 // LinearSolver. On le PROUVE pour verrouiller la frontiere du concept.
-static_assert(EllipticSolver<PoissonFFTSolver>, "PoissonFFTSolver modele EllipticSolver (cartesien)");
+static_assert(EllipticSolver<PoissonFFTSolver>,
+              "PoissonFFTSolver modele EllipticSolver (cartesien)");
 static_assert(EllipticSolver<DistributedFFTSolver>,
               "DistributedFFTSolver modele EllipticSolver (cartesien)");
 static_assert(PolarEllipticSolver<PolarPoissonSolver>,
@@ -77,8 +81,9 @@ static_assert(!LinearSolver<PolarPoissonSolver>,
 // Le resultat d'arret est bien NON void pour chaque solveur iteratif (l'invariant commun).
 static_assert(!std::is_same_v<decltype(std::declval<GeometricMG&>().solve(Real(1e-8), 1)), void>,
               "GeometricMG::solve(tol, iters) rend un compte rendu (int), pas void");
-static_assert(!std::is_same_v<decltype(std::declval<TensorKrylovSolver&>().solve(Real(1e-8), 1)), void>,
-              "TensorKrylovSolver::solve(tol, iters) rend un compte rendu (KrylovResult), pas void");
+static_assert(
+    !std::is_same_v<decltype(std::declval<TensorKrylovSolver&>().solve(Real(1e-8), 1)), void>,
+    "TensorKrylovSolver::solve(tol, iters) rend un compte rendu (KrylovResult), pas void");
 
 // =====================================================================================
 // (3) FieldPostProcessor : phi -> aux/grad. field_postprocess (fonction libre) le modele.
@@ -98,7 +103,10 @@ void apply_pp(PP pp, const MultiFab& phi, MultiFab& out, Real cx, Real cy, Field
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int N = 32;
@@ -138,7 +146,8 @@ int main() {
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
       for (int i = v.lo[0]; i <= v.hi[0]; ++i)
         for (int c = 0; c < 3; ++c)
-          if (ad(i, j, c) != ac(i, j, c)) bit_eq = false;
+          if (ad(i, j, c) != ac(i, j, c))
+            bit_eq = false;
   }
   chk(bit_eq, "FieldPostProcessor_via_concept_bit_identique");
 
@@ -157,6 +166,7 @@ int main() {
                   "GeometricMG::solve(tol, iters) rend int (nombre de V-cycles)");
   }
 
-  if (fails == 0) std::printf("OK test_elliptic_interface\n");
+  if (fails == 0)
+    std::printf("OK test_elliptic_interface\n");
   return fails == 0 ? 0 : 1;
 }

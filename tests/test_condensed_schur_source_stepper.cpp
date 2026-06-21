@@ -95,13 +95,14 @@ struct InitKernel {
   ADC_HD void operator()(int i, int j) const {
     const Real x = geom.x_cell(i), y = geom.y_cell(j);
     const Real sx = std::sin(Real(kPi) * x), sy = std::sin(Real(kPi) * y);
-    const Real vx = Real(0.6) * sx * sy;                       // v0_x
+    const Real vx = Real(0.6) * sx * sy;                            // v0_x
     const Real vy = Real(-0.4) * std::sin(Real(2 * kPi) * x) * sy;  // v0_y
-    const Real ph = Real(0.3) * sx * sy;                       // phi0
+    const Real ph = Real(0.3) * sx * sy;                            // phi0
     st(i, j, c_rho) = rho0;
     st(i, j, c_mx) = rho0 * vx;
     st(i, j, c_my) = rho0 * vy;
-    if (c_E >= 0) st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vx * vx + vy * vy);  // E = e_int + KE
+    if (c_E >= 0)
+      st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vx * vx + vy * vy);  // E = e_int + KE
     phi(i, j, 0) = ph;
   }
 };
@@ -203,7 +204,7 @@ static double implicit_residual(const MultiFab& st_new, const MultiFab& vxn, con
 struct DivVKernel {
   ConstArray4 vx, vy;
   Array4 rhs;
-  Real coef;          // alpha rho0
+  Real coef;  // alpha rho0
   Real half_idx, half_idy;
   ADC_HD void operator()(int i, int j) const {
     const Real divv = (vx(i + 1, j, 0) - vx(i - 1, j, 0)) * half_idx +
@@ -255,12 +256,22 @@ struct RefIntegrator {
   MultiFab kvx[4], kvy[4], kphi[4], tvx, tvy, tphi;
 
   RefIntegrator(Setup& s, Real B0_, Real alpha_, Real rho0_)
-      : S(s), B0(B0_), alpha(alpha_), rho0(rho0_),
-        half_idx(Real(1) / (Real(2) * s.geom.dx())), half_idy(Real(1) / (Real(2) * s.geom.dy())),
+      : S(s),
+        B0(B0_),
+        alpha(alpha_),
+        rho0(rho0_),
+        half_idx(Real(1) / (Real(2) * s.geom.dx())),
+        half_idy(Real(1) / (Real(2) * s.geom.dy())),
         poisson(s.geom, s.ba, s.bc),
-        vx(s.ba, s.dm, 1, 1), vy(s.ba, s.dm, 1, 1), phi(s.ba, s.dm, 1, 1),
-        dvx(s.ba, s.dm, 1, 0), dvy(s.ba, s.dm, 1, 0), dphi(s.ba, s.dm, 1, 1),
-        tvx(s.ba, s.dm, 1, 1), tvy(s.ba, s.dm, 1, 1), tphi(s.ba, s.dm, 1, 1) {
+        vx(s.ba, s.dm, 1, 1),
+        vy(s.ba, s.dm, 1, 1),
+        phi(s.ba, s.dm, 1, 1),
+        dvx(s.ba, s.dm, 1, 0),
+        dvy(s.ba, s.dm, 1, 0),
+        dphi(s.ba, s.dm, 1, 1),
+        tvx(s.ba, s.dm, 1, 1),
+        tvy(s.ba, s.dm, 1, 1),
+        tphi(s.ba, s.dm, 1, 1) {
     for (int k = 0; k < 4; ++k) {
       kvx[k] = MultiFab(s.ba, s.dm, 1, 0);
       kvy[k] = MultiFab(s.ba, s.dm, 1, 0);
@@ -277,10 +288,9 @@ struct RefIntegrator {
     fill_ghosts(aphi, S.geom.domain, S.bc);
     // dv
     for (int li = 0; li < avx.local_size(); ++li)
-      for_each_cell(odvx.box(li),
-                    DvKernel{avx.fab(li).const_array(), avy.fab(li).const_array(),
-                             aphi.fab(li).const_array(), odvx.fab(li).array(), odvy.fab(li).array(),
-                             B0, half_idx, half_idy});
+      for_each_cell(odvx.box(li), DvKernel{avx.fab(li).const_array(), avy.fab(li).const_array(),
+                                           aphi.fab(li).const_array(), odvx.fab(li).array(),
+                                           odvy.fab(li).array(), B0, half_idx, half_idy});
     // dphi : rhs = alpha rho0 div v, solve Lap(dphi) = rhs (Dirichlet, dphi=0 au bord)
     for (int li = 0; li < poisson.rhs().local_size(); ++li)
       for_each_cell(poisson.rhs().box(li),
@@ -289,9 +299,8 @@ struct RefIntegrator {
     poisson.phi().set_val(Real(0));
     poisson.solve(Real(1e-12), 200);
     for (int li = 0; li < odphi.local_size(); ++li)
-      for_each_cell(odphi.box(li),
-                    detail::CopyComp0Kernel{odphi.fab(li).array(),
-                                            poisson.phi().fab(li).const_array()});
+      for_each_cell(odphi.box(li), detail::CopyComp0Kernel{odphi.fab(li).array(),
+                                                           poisson.phi().fab(li).const_array()});
   }
 
   // un pas RK4 de taille h (in-place sur vx, vy, phi).
@@ -321,15 +330,12 @@ struct RefIntegrator {
   // tvx/tvy/tphi <- (vx,vy,phi) + a (kx,ky,kphi)
   void stage(Real a, MultiFab& kx, MultiFab& ky, MultiFab& kp) {
     for (int li = 0; li < tvx.local_size(); ++li) {
-      for_each_cell(tvx.box(li),
-                    ScaleAddKernel{tvx.fab(li).array(), vx.fab(li).const_array(),
-                                   kx.fab(li).const_array(), a});
-      for_each_cell(tvy.box(li),
-                    ScaleAddKernel{tvy.fab(li).array(), vy.fab(li).const_array(),
-                                   ky.fab(li).const_array(), a});
-      for_each_cell(tphi.box(li),
-                    ScaleAddKernel{tphi.fab(li).array(), phi.fab(li).const_array(),
-                                   kp.fab(li).const_array(), a});
+      for_each_cell(tvx.box(li), ScaleAddKernel{tvx.fab(li).array(), vx.fab(li).const_array(),
+                                                kx.fab(li).const_array(), a});
+      for_each_cell(tvy.box(li), ScaleAddKernel{tvy.fab(li).array(), vy.fab(li).const_array(),
+                                                ky.fab(li).const_array(), a});
+      for_each_cell(tphi.box(li), ScaleAddKernel{tphi.fab(li).array(), phi.fab(li).const_array(),
+                                                 kp.fab(li).const_array(), a});
     }
   }
   void axpy(MultiFab& y, Real a, MultiFab& x) {
@@ -347,7 +353,8 @@ struct RefIntegrator {
       const Box2D b = y.box(li);
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
         for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-          Y(i, j, 0) += s * (k0(i, j, 0) + Real(2) * k1(i, j, 0) + Real(2) * k2(i, j, 0) + k3(i, j, 0));
+          Y(i, j, 0) +=
+              s * (k0(i, j, 0) + Real(2) * k1(i, j, 0) + Real(2) * k2(i, j, 0) + k3(i, j, 0));
     }
   }
 };
@@ -399,7 +406,11 @@ int main(int argc, char** argv) {
   const int me = my_rank(), np = n_ranks();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 32;
@@ -443,9 +454,9 @@ int main(int argc, char** argv) {
     // v^n fige pour la verif.
     MultiFab vxn(S.ba, S.dm, 1, 0), vyn(S.ba, S.dm, 1, 0);
     for (int li = 0; li < st.local_size(); ++li)
-      for_each_cell(st.box(li), detail::ExtractVelocityKernel{st.fab(li).const_array(),
-                                                              vxn.fab(li).array(),
-                                                              vyn.fab(li).array(), c_rho, c_mx, c_my});
+      for_each_cell(st.box(li),
+                    detail::ExtractVelocityKernel{st.fab(li).const_array(), vxn.fab(li).array(),
+                                                  vyn.fab(li).array(), c_rho, c_mx, c_my});
 
     CondensedSchurSourceStepper stepper(vars, S.geom, S.ba, S.bc, alpha);
     stepper.step(st, phi, bz, /*c_bz=*/0, /*theta=*/Real(1.0), dt);
@@ -453,11 +464,14 @@ int main(int argc, char** argv) {
 
     // ATTENTION : step() a EXTRAPOLE (theta=1 -> identite, donc phi/v sont deja a n+1) et l'etat
     // porte v^{n+1}, phi^{n+1}. La relation implicite a verifier est sur le theta-stage = n+1 ici.
-    const double rimp = implicit_residual(st, vxn, vyn, phi, S.geom, S.bc, B0, dt, c_rho, c_mx, c_my);
+    const double rimp =
+        implicit_residual(st, vxn, vyn, phi, S.geom, S.bc, B0, dt, c_rho, c_mx, c_my);
     if (me == 0)
-      std::printf("(A) implicite : BiCGStab %s en %d iters (rel=%.2e) | max|B v - (v^n - dt grad phi)| = %.3e\n",
-                  kr.converged ? "CONVERGE" : "ECHOUE", kr.iters, static_cast<double>(kr.rel_residual),
-                  rimp);
+      std::printf(
+          "(A) implicite : BiCGStab %s en %d iters (rel=%.2e) | max|B v - (v^n - dt grad phi)| = "
+          "%.3e\n",
+          kr.converged ? "CONVERGE" : "ECHOUE", kr.iters, static_cast<double>(kr.rel_residual),
+          rimp);
     chk(kr.converged, "A_solve_converge");
     chk(rimp < 1e-7, "A_relation_implicite");  // tolerance solve 1e-10 propagee par grad -> marge
   }
@@ -473,15 +487,17 @@ int main(int argc, char** argv) {
   //   C'est exactement le contraste "explicite instable / implicite stable" a grand dt.
   // ----------------------------------------------------------------------------------------------
   {
-    const Real dt = Real(8.0 * dt_stable);  // au-dessus du pas stable : l'explicite amplifie a chaque pas
-    const int K = 12;                       // composition : g^K rend l'explosion explicite visible
+    const Real dt =
+        Real(8.0 * dt_stable);  // au-dessus du pas stable : l'explicite amplifie a chaque pas
+    const int K = 12;           // composition : g^K rend l'explosion explicite visible
     MultiFab st(S.ba, S.dm, vars.size, 1), phi(S.ba, S.dm, 1, 1);
     make_state(st, phi);
     const double v0 = vel_l2(st, c_rho, c_mx, c_my);
 
     // Schur : K pas de taille dt.
     CondensedSchurSourceStepper stepper(vars, S.geom, S.ba, S.bc, alpha);
-    for (int k = 0; k < K; ++k) stepper.step(st, phi, bz, 0, Real(1.0), dt);
+    for (int k = 0; k < K; ++k)
+      stepper.step(st, phi, bz, 0, Real(1.0), dt);
     const double v_schur = vel_l2(st, c_rho, c_mx, c_my);
 
     // Euler explicite : K pas du MEME systeme discret.
@@ -489,9 +505,10 @@ int main(int argc, char** argv) {
     make_state(st0, phi0);
     RefIntegrator expl(const_cast<Setup&>(S), B0, alpha, rho0);
     load_ref_from_state(expl, st0, phi0, c_rho, c_mx, c_my);
-    for (int k = 0; k < K; ++k) expl.euler_step(dt);
+    for (int k = 0; k < K; ++k)
+      expl.euler_step(dt);
     double v_expl = 0;
-    {  // norme L2 des vitesses de l'integrateur explicite
+    {               // norme L2 des vitesses de l'integrateur explicite
       sync_host();  // vx/vy ecrits par euler_step (kernels device) : residence hote valide avant lecture.
       double s = 0;
       for (int li = 0; li < expl.vx.local_size(); ++li) {
@@ -499,14 +516,16 @@ int main(int argc, char** argv) {
         const Box2D b = expl.vx.box(li);
         for (int j = b.lo[1]; j <= b.hi[1]; ++j)
           for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-            s += static_cast<double>(vx(i, j, 0)) * vx(i, j, 0) + static_cast<double>(vy(i, j, 0)) * vy(i, j, 0);
+            s += static_cast<double>(vx(i, j, 0)) * vx(i, j, 0) +
+                 static_cast<double>(vy(i, j, 0)) * vy(i, j, 0);
       }
       v_expl = std::sqrt(all_reduce_sum(s));
     }
     if (me == 0)
-      std::printf("(B) dt=%.3e (=%.0fx dt_stable), K=%d pas : ||v0||=%.3e | Schur ||v||=%.3e (x%.2f) | "
-                  "Euler ||v||=%.3e (x%.2e)\n",
-                  static_cast<double>(dt), 8.0, K, v0, v_schur, v_schur / v0, v_expl, v_expl / v0);
+      std::printf(
+          "(B) dt=%.3e (=%.0fx dt_stable), K=%d pas : ||v0||=%.3e | Schur ||v||=%.3e (x%.2f) | "
+          "Euler ||v||=%.3e (x%.2e)\n",
+          static_cast<double>(dt), 8.0, K, v0, v_schur, v_schur / v0, v_expl, v_expl / v0);
     // Schur STABLE : la vitesse reste BORNEE (pas d'explosion). On borne genereusement a x5.
     chk(v_schur < 5.0 * v0, "B_schur_stable_borne");
     chk(std::isfinite(v_schur), "B_schur_fini");
@@ -530,7 +549,8 @@ int main(int argc, char** argv) {
       RefIntegrator ref(const_cast<Setup&>(S), B0, alpha, rho0);
       load_ref_from_state(ref, st0, phi0, c_rho, c_mx, c_my);
       const Real h = dt / Real(Nsub);
-      for (int s = 0; s < Nsub; ++s) ref.rk4_step(h);
+      for (int s = 0; s < Nsub; ++s)
+        ref.rk4_step(h);
 
       // Schur : un pas de taille dt.
       MultiFab st(S.ba, S.dm, vars.size, 1), phi(S.ba, S.dm, 1, 1);
@@ -545,14 +565,18 @@ int main(int argc, char** argv) {
     const double e2 = schur_vs_ref(Real(0.5) * dtC);
     const double ratio = e2 > 0 ? e1 / e2 : 0;
     if (me == 0)
-      std::printf("(C) reference RK4 fine : err(dt)=%.3e err(dt/2)=%.3e ratio=%.2f (ordre 1 attendu ~2)\n",
-                  e1, e2, ratio);
-    chk(e1 < 5e-2, "C_accord_reference_modere");  // Euler retrograde ordre 1 a dt modere : ecart faible
-    chk(ratio > 1.5, "C_ordre_un_decroissance");  // l'erreur DECROIT (convergence vers la reference)
+      std::printf(
+          "(C) reference RK4 fine : err(dt)=%.3e err(dt/2)=%.3e ratio=%.2f (ordre 1 attendu ~2)\n",
+          e1, e2, ratio);
+    chk(e1 < 5e-2,
+        "C_accord_reference_modere");  // Euler retrograde ordre 1 a dt modere : ecart faible
+    chk(ratio > 1.5,
+        "C_ordre_un_decroissance");  // l'erreur DECROIT (convergence vers la reference)
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_condensed_schur_source_stepper (np=%d)\n", np);
+  if (me == 0 && fails == 0)
+    std::printf("OK test_condensed_schur_source_stepper (np=%d)\n", np);
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

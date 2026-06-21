@@ -73,13 +73,15 @@ void build_exb(System& s, double R_wall) {
 // max|diff| composante a composante entre deux champs de meme taille.
 double max_abs_diff(const std::vector<double>& a, const std::vector<double>& b) {
   double d = 0.0;
-  for (std::size_t k = 0; k < a.size(); ++k) d = std::fmax(d, std::fabs(a[k] - b[k]));
+  for (std::size_t k = 0; k < a.size(); ++k)
+    d = std::fmax(d, std::fabs(a[k] - b[k]));
   return d;
 }
 
 bool all_finite(const std::vector<double>& a) {
   for (double v : a)
-    if (!std::isfinite(v)) return false;
+    if (!std::isfinite(v))
+      return false;
   return true;
 }
 
@@ -94,41 +96,49 @@ int main(int argc, char** argv) {
 #endif
   const int n = 48;
   const double L = 1.0;
-  const double R_wall = 0.45 * L;   // mur conducteur de Poisson (rayon < L/2)
-  const double R_disc = 0.30 * L;   // disque de transport (plus petit : de vraies cellules inactives)
+  const double R_wall = 0.45 * L;  // mur conducteur de Poisson (rayon < L/2)
+  const double R_disc =
+      0.30 * L;  // disque de transport (plus petit : de vraies cellules inactives)
   const double cx = 0.5 * L, cy = 0.5 * L;
-  const double dt = 2e-4;           // pas court, transport ExB sous-CFL
+  const double dt = 2e-4;  // pas court, transport ExB sous-CFL
   const int n_steps = 12;
   const std::vector<double> rho0 = ring_density(n, L);
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // ----------------------------------------------------------------------
   // (a) NO-DISC PAR DEFAUT : mode='none' (disque materialise) == jamais set_disc_domain (byte a byte).
   // ----------------------------------------------------------------------
-  std::vector<double> ref_state;  // etat de reference (chemin plein cartesien), reutilise par (b)/(c)/(d)
+  std::vector<double>
+      ref_state;  // etat de reference (chemin plein cartesien), reutilise par (b)/(c)/(d)
   {
     System base(SystemConfig{n, L, false});
     build_exb(base, R_wall);
     base.set_density("n", rho0);
-    for (int k = 0; k < n_steps; ++k) base.step(dt);
+    for (int k = 0; k < n_steps; ++k)
+      base.step(dt);
     ref_state = base.get_state("n");
 
     System none(SystemConfig{n, L, false});
     build_exb(none, R_wall);
     none.set_density("n", rho0);
     none.set_disc_domain(cx, cy, R_disc, "none");  // disque pose, mode none : doit rester inerte
-    for (int k = 0; k < n_steps; ++k) none.step(dt);
+    for (int k = 0; k < n_steps; ++k)
+      none.step(dt);
     const std::vector<double> none_state = none.get_state("n");
 
     const double d = max_abs_diff(ref_state, none_state);
     std::printf("  (a) mode='none' vs sans disque : max|diff| = %.3e (attendu 0)\n", d);
     // Egalite BYTE A BYTE : mode none emprunte exactement assemble_rhs, le disque materialise n'a AUCUN
     // effet sur le transport. Pas une tolerance -- l'invariant "inerte par defaut".
-    chk(d == 0.0, "(a) mode='none' BIT-IDENTIQUE au chemin sans disque (routage inerte sauf opt-in)");
+    chk(d == 0.0,
+        "(a) mode='none' BIT-IDENTIQUE au chemin sans disque (routage inerte sauf opt-in)");
     chk(all_finite(ref_state) && ref_state.size() == static_cast<std::size_t>(n) * n,
         "(a) etat de reference fini et de taille n*n (le pas plein a bien tourne)");
   }
@@ -149,30 +159,37 @@ int main(int argc, char** argv) {
     int n_active = 0, n_inactive = 0;
     double mass0 = 0.0;
     for (std::size_t k = 0; k < mask.size(); ++k) {
-      if (mask[k] >= 0.5) { ++n_active; mass0 += dens0[k] * dx2; }
-      else ++n_inactive;
+      if (mask[k] >= 0.5) {
+        ++n_active;
+        mass0 += dens0[k] * dx2;
+      } else
+        ++n_inactive;
     }
     chk(n_active > 0 && n_inactive > 0,
         "(b) le disque partitionne la grille en cellules actives ET inactives (test non vide)");
 
-    for (int k = 0; k < n_steps; ++k) sc.step(dt);
+    for (int k = 0; k < n_steps; ++k)
+      sc.step(dt);
     const std::vector<double> sc_state = sc.get_state("n");
 
     // Masse active APRES les pas (meme masque : le disque est statique).
     const std::vector<double> dens1 = sc.density("n");
     double mass1 = 0.0;
     for (std::size_t k = 0; k < mask.size(); ++k)
-      if (mask[k] >= 0.5) mass1 += dens1[k] * dx2;
+      if (mask[k] >= 0.5)
+        mass1 += dens1[k] * dx2;
 
     const double d_vs_square = max_abs_diff(ref_state, sc_state);
     const double rel_drift = std::fabs(mass1 - mass0) / std::fabs(mass0);
-    std::printf("  (b) staircase vs carre : max|diff| = %.3e (attendu > 0) ; masse active drift = %.3e\n",
-                d_vs_square, rel_drift);
+    std::printf(
+        "  (b) staircase vs carre : max|diff| = %.3e (attendu > 0) ; masse active drift = %.3e\n",
+        d_vs_square, rel_drift);
 
     // Le routage N'EST PAS inerte : l'operateur masque ferme les faces a la frontiere du disque, donc
     // l'etat diverge du chemin plein cartesien. C'est la preuve directe contre le footgun T2.
     chk(d_vs_square > 1e-10,
-        "(b) staircase produit un etat DIFFERENT du carre (le transport disque est REELLEMENT cable)");
+        "(b) staircase produit un etat DIFFERENT du carre (le transport disque est REELLEMENT "
+        "cable)");
     chk(all_finite(sc_state), "(b) etat staircase fini partout (aucun NaN/Inf)");
     // La masse sur les cellules actives est conservee a la machine (flux normal nul aux faces
     // active/inactive). Borne juste au-dessus du bruit flottant des sommes telescopiques de flux.
@@ -189,18 +206,21 @@ int main(int argc, char** argv) {
     build_exb(cc, R_wall);
     cc.set_density("n", rho0);
     cc.set_disc_domain(cx, cy, R_disc, "cutcell");
-    for (int k = 0; k < n_steps; ++k) cc.step(dt);
+    for (int k = 0; k < n_steps; ++k)
+      cc.step(dt);
     const std::vector<double> cc_state = cc.get_state("n");
     const double d_vs_square = max_abs_diff(ref_state, cc_state);
     std::printf("  (c1) cutcell vs carre : max|diff| = %.3e (attendu > 0) ; fini = %d\n",
                 d_vs_square, all_finite(cc_state) ? 1 : 0);
-    chk(all_finite(cc_state), "(c1) etat cutcell fini partout (clamp small-cell -> pas de NaN/Inf)");
-    chk(d_vs_square > 1e-10, "(c1) cutcell produit un etat DIFFERENT du carre (transport EB cable)");
+    chk(all_finite(cc_state),
+        "(c1) etat cutcell fini partout (clamp small-cell -> pas de NaN/Inf)");
+    chk(d_vs_square > 1e-10,
+        "(c1) cutcell produit un etat DIFFERENT du carre (transport EB cable)");
 
     // (c2) disque ENGLOBANT (rayon > demi-diagonale) : TOUTE cellule est active, AUCUNE face coupee ->
     // assemble_rhs_eb == assemble_rhs (kappa=1, alpha=1 partout, cf. test_eb_transport bit-identite).
     // Un pas cutcell doit alors etre BIT-IDENTIQUE au pas carre sur le meme init.
-    const double R_big = 10.0 * L;  // englobe largement la boite
+    const double R_big = 10.0 * L;         // englobe largement la boite
     System sq(SystemConfig{n, L, false});  // reference 1 pas plein
     build_exb(sq, R_wall);
     sq.set_density("n", rho0);
@@ -230,8 +250,10 @@ int main(int argc, char** argv) {
       build_exb(s, R_wall);
       s.set_density("n", rho0);
       s.set_time_scheme(scheme);
-      if (std::string(mode) != "none") s.set_disc_domain(cx, cy, R_disc, mode);
-      for (int k = 0; k < n_steps; ++k) s.step(dt);
+      if (std::string(mode) != "none")
+        s.set_disc_domain(cx, cy, R_disc, mode);
+      for (int k = 0; k < n_steps; ++k)
+        s.step(dt);
       return s.get_state("n");
     };
 
@@ -248,13 +270,15 @@ int main(int argc, char** argv) {
     const double d_str = max_abs_diff(str_none, str_sc);
     std::printf("  (d) STRANG : staircase vs none = %.3e (attendu > 0)\n", d_str);
     chk(all_finite(str_none) && all_finite(str_sc), "(d) etats Strang finis (les deux modes)");
-    chk(d_str > 1e-10, "(d) sous STRANG, le mode disque change l'etat (step_strang consulte le mode)");
+    chk(d_str > 1e-10,
+        "(d) sous STRANG, le mode disque change l'etat (step_strang consulte le mode)");
     // Et la cutcell aussi est honoree sous Strang (chemin step_strang -> advance_transport_half EB).
     const std::vector<double> str_cc = run("strang", "cutcell");
     chk(all_finite(str_cc) && max_abs_diff(str_none, str_cc) > 1e-10,
         "(d) sous STRANG, le mode cutcell est aussi cable (fini + different de none)");
   }
 
-  if (fails == 0) std::printf("OK test_facade_routing\n");
+  if (fails == 0)
+    std::printf("OK test_facade_routing\n");
   return fails == 0 ? 0 : 1;
 }

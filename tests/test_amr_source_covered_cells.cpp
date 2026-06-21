@@ -42,15 +42,15 @@ struct Inert {
   ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
   // source NON LINEAIRE : -rate * u^2. Stiff-friendly (decroissance), exploite par le
   // chemin implicite (backward_euler_source). S(moyenne) != moyenne(S) en general.
-  ADC_HD State source(const State& u, const Aux&) const {
-    return State{-rate * u[0] * u[0]};
-  }
+  ADC_HD State source(const State& u, const Aux&) const { return State{-rate * u[0] * u[0]}; }
   ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 // Source de couplage NON LINEAIRE sur un bloc : n0 -= dt * k * n0^2 (par cellule). Non
@@ -83,14 +83,18 @@ static void fill_by_index(MultiFab& U, F f) {
     Array4 a = U.fab(li).array();
     const Box2D g = U.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) a(i, j, 0) = f(i, j);
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        a(i, j, 0) = f(i, j);
   }
 }
 
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
   // garde anti faux-positif : rejette nan/inf AVANT toute comparaison de tolerance, car en
   // C++ "nan < tol" est faux et passerait silencieusement le test.
@@ -218,13 +222,15 @@ int main() {
         if (!std::isfinite(got)) {
           std::printf("FAIL single_level_bit_identical (non finite a (%d,%d))\n", i, j);
           ++fails;
-          j = NC; break;
+          j = NC;
+          break;
         }
         worst = std::max(worst, std::fabs(got - want));
       }
     finite_close(worst, Real(0), Real(1e-14), "single_level_bit_identical");
   }
 
-  if (fails == 0) std::printf("OK test_amr_source_covered_cells\n");
+  if (fails == 0)
+    std::printf("OK test_amr_source_covered_cells\n");
   return fails == 0 ? 0 : 1;
 }

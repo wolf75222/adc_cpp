@@ -76,8 +76,10 @@ static double min_density(const MultiFab& U, const Box2D& dom) {
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       const double val = u(i, j, 0);
-      if (!std::isfinite(val)) return std::nan("");
-      if (val < mn) mn = val;
+      if (!std::isfinite(val))
+        return std::nan("");
+      if (val < mn)
+        mn = val;
     }
   return mn;
 }
@@ -114,7 +116,8 @@ static void coupled_step(const PolarModel& model, MultiFab& U, MultiFab& aux,
 
 int main() {
   std::printf("=== Pas COUPLE POLAIRE (transport -> Poisson -> aux -> avance), Phase 2b ===\n");
-  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi), B0=%.1f, q=%.1f\n", kRmin, kRmax, kB0, kQ);
+  std::printf("Anneau r in [%.2f, %.2f], theta in [0, 2pi), B0=%.1f, q=%.1f\n", kRmin, kRmax, kB0,
+              kQ);
 
   const int nr = 64, nth = 64;
   Box2D dom = Box2D::from_extents(nr, nth);
@@ -167,7 +170,8 @@ int main() {
     Array4 u0 = U0.fab(0).array();
     const ConstArray4 u = U.fab(0).const_array();
     for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
-      for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) u0(i, j, 0) = u(i, j, 0);
+      for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
+        u0(i, j, 0) = u(i, j, 0);
   }
   coupled_step(model, U, aux, solver, g, dom, bc, dt);
   double dmax = 0.0;
@@ -185,33 +189,39 @@ int main() {
 
   bool ok = true;
   if (!std::isfinite(dmax) || !std::isfinite(minrho_A)) {
-    std::printf("  ECHEC : champ non fini apres 1 pas (blow-up : Poisson/aux/transport instable)\n");
+    std::printf(
+        "  ECHEC : champ non fini apres 1 pas (blow-up : Poisson/aux/transport instable)\n");
     ok = false;
   } else if (!(dmax > 1e-9)) {
-    std::printf("  ECHEC : le pas couple ne modifie pas la densite (Poisson/aux/transport inertes ?)\n");
+    std::printf(
+        "  ECHEC : le pas couple ne modifie pas la densite (Poisson/aux/transport inertes ?)\n");
     ok = false;
   } else if (dmax > 1.0) {
     // Borne de STABILITE : a la CFL choisie (~0.3) un pas WENO5/SSPRK3 ne change une cellule que de
     // O(CFL * variation locale) ~ 0.1 ; une variation > 1.0 (densite initiale ~1) signe une divergence.
     // C'est ce garde qui rattrape le blow-up "fini mais enorme" (135) qui passait avant le fix.
-    std::printf("  ECHEC : variation %.4e > 1.0 apres 1 pas = instabilite (gradient/CFL faux ?)\n", dmax);
+    std::printf("  ECHEC : variation %.4e > 1.0 apres 1 pas = instabilite (gradient/CFL faux ?)\n",
+                dmax);
     ok = false;
   } else if (!(minrho_A > 0.0)) {
     std::printf("  ECHEC : densite <= 0 apres 1 pas\n");
     ok = false;
   } else {
-    std::printf("  OK : le pas couple advecte reellement la densite (variation finie, bornee, positive)\n");
+    std::printf(
+        "  OK : le pas couple advecte reellement la densite (variation finie, bornee, positive)\n");
   }
 
   // (B) Conservation de masse a la machine sur K pas couples (paroi radiale solide).
   std::printf("\n--- (B) Conservation de masse sur %d pas couples (paroi radiale solide) ---\n",
               nsteps);
-  for (int s = 1; s < nsteps; ++s) coupled_step(model, U, aux, solver, g, dom, bc, dt);
+  for (int s = 1; s < nsteps; ++s)
+    coupled_step(model, U, aux, solver, g, dom, bc, dt);
   const double m1 = total_mass(U, g, dom);
   const double minrho1 = min_density(U, dom);
   const double rel = std::fabs(m1 - m0) / std::fabs(m0);
   std::printf("  masse initiale=%.15e finale=%.15e  ecart relatif=%.3e\n", m0, m1, rel);
-  std::printf("  densite min initiale=%.4e finale=%.4e (sanity : reste positive)\n", minrho0, minrho1);
+  std::printf("  densite min initiale=%.4e finale=%.4e (sanity : reste positive)\n", minrho0,
+              minrho1);
   // GARDE anti-faux-positif : nan/inf doit FAIRE ECHOUER (nan > 1e-12 est faux en C++ -> sinon un run
   // divergent passerait silencieusement, exactement le bug attrape ici).
   if (!std::isfinite(m1) || !std::isfinite(rel) || !std::isfinite(minrho1)) {
@@ -229,6 +239,7 @@ int main() {
   }
 
   std::printf("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
-  if (ok) std::printf("OK test_polar_system_step\n");
+  if (ok)
+    std::printf("OK test_polar_system_step\n");
   return ok ? 0 : 1;
 }

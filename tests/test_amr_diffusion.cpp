@@ -50,7 +50,10 @@ static void fill(MultiFab& U, Real dx, F f) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int NC = 16;
@@ -69,8 +72,8 @@ int main() {
 
   // champ lisse non uniforme : 1 + 0.5 cos(2 pi x) cos(2 pi y) (la diffusion l'aplatit).
   auto f = [](Real x, Real y) {
-    return Real(1) + Real(0.5) * std::cos(Real(2) * Real(M_PI) * x) *
-                         std::cos(Real(2) * Real(M_PI) * y);
+    return Real(1) +
+           Real(0.5) * std::cos(Real(2) * Real(M_PI) * x) * std::cos(Real(2) * Real(M_PI) * y);
   };
   fill(Uc, dxc, f);
   fill(Uf, dxf, f);
@@ -88,8 +91,7 @@ int main() {
 
   const Real dt = Real(0.001);
   for (int s = 0; s < 5; ++s)
-    advance_amr<NoSlope, RusanovFlux>(model, levels, dom, dt,
-                                      Periodicity{true, true});
+    advance_amr<NoSlope, RusanovFlux>(model, levels, dom, dt, Periodicity{true, true});
 
   const Real M1 = sum(levels[0].U, 0);
   const Real peak1 = norm_inf(levels[0].U);
@@ -100,6 +102,7 @@ int main() {
   // la diffusion a bien agi : amplitude reduite (pic plus proche de la moyenne 1).
   chk(peak1 < peak0 - Real(1e-6), "amr_diffusion_smooths");
 
-  if (fails == 0) std::printf("OK test_amr_diffusion\n");
+  if (fails == 0)
+    std::printf("OK test_amr_diffusion\n");
   return fails == 0 ? 0 : 1;
 }

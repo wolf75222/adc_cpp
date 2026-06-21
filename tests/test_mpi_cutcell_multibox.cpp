@@ -36,9 +36,14 @@ static constexpr double kCx = 0.5, kCy = 0.5, kR = 0.4;
 // solve cut-cell sur ba. GeometricMG repartit lui-meme les boites (round-robin sur n_ranks()). Meme
 // MMS que test_cut_cell : lap(phi) = -4, phi = 0 sur le cercle.
 static double solve_l2(const Geometry& geom, const BoxArray& ba, int nc) {
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
-  std::function<Real(Real, Real)> ls = [](Real x, Real y) { return std::hypot(x - kCx, y - kCy) - kR; };
-  std::function<bool(Real, Real)> active = [](Real x, Real y) { return std::hypot(x - kCx, y - kCy) < kR; };
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  std::function<Real(Real, Real)> ls = [](Real x, Real y) {
+    return std::hypot(x - kCx, y - kCy) - kR;
+  };
+  std::function<bool(Real, Real)> active = [](Real x, Real y) {
+    return std::hypot(x - kCx, y - kCy) < kR;
+  };
   // (geom, ba, bc, active, replicated, min_coarse, nu1, nu2, nbottom, cut_cell, levelset)
   GeometricMG mg(geom, ba, bc, active, false, 2, 2, 2, 50, true, ls);
   mg.rhs().set_val(-4.0);
@@ -55,7 +60,11 @@ static double solve_l2(const Geometry& geom, const BoxArray& ba, int nc) {
       for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
         const double x = (i + 0.5) * dx, y = (j + 0.5) * dx;
         const double r2 = (x - kCx) * (x - kCx) + (y - kCy) * (y - kCy);
-        if (r2 < kR * kR) { const double e = std::fabs(p(i, j) - (kR * kR - r2)); s += e * e; ++cnt; }
+        if (r2 < kR * kR) {
+          const double e = std::fabs(p(i, j) - (kR * kR - r2));
+          s += e * e;
+          ++cnt;
+        }
       }
   }
   const double gs = all_reduce_sum(s);
@@ -82,26 +91,32 @@ int main(int argc, char** argv) {
   int local_fail = 0;
   for (int it = 0; it < K; ++it) {
     const double l2 = solve_l2(geom, baK, nc);
-    if (it == 0) l2_first = l2;
+    if (it == 0)
+      l2_first = l2;
     const bool finite = std::isfinite(l2);
-    const bool small = finite && l2 < 1e-3;                       // un solve diverge donne >> 1e-3
-    const bool stable = finite && l2 == l2_first;                 // determinisme intra-rang (bit-exact)
-    const bool invariant = finite &&
-        std::fabs(l2 - ref_mono) <= 1e-6 * (ref_mono + 1.0);      // == mono-box (decoupage invariant)
+    const bool small = finite && l2 < 1e-3;        // un solve diverge donne >> 1e-3
+    const bool stable = finite && l2 == l2_first;  // determinisme intra-rang (bit-exact)
+    const bool invariant =
+        finite &&
+        std::fabs(l2 - ref_mono) <= 1e-6 * (ref_mono + 1.0);  // == mono-box (decoupage invariant)
     if (!(small && stable && invariant)) {
       ++local_fail;
       if (local_fail <= 3)
-        std::printf("[rang %d/%d] it=%d L2=%.10e (ref_mono=%.10e) fini=%d petit=%d stable=%d invariant=%d\n",
-                    me, np, it, l2, ref_mono, finite, small, stable, invariant);
+        std::printf(
+            "[rang %d/%d] it=%d L2=%.10e (ref_mono=%.10e) fini=%d petit=%d stable=%d "
+            "invariant=%d\n",
+            me, np, it, l2, ref_mono, finite, small, stable, invariant);
     }
   }
 
   const long total_fail = static_cast<long>(all_reduce_sum(static_cast<long>(local_fail)));
   if (me == 0) {
-    std::printf("np=%d boites=%d K=%d ref_mono=%.10e l2_multi=%.10e : %ld echecs\n",
-                np, baK.size(), K, ref_mono, l2_first, total_fail);
+    std::printf("np=%d boites=%d K=%d ref_mono=%.10e l2_multi=%.10e : %ld echecs\n", np, baK.size(),
+                K, ref_mono, l2_first, total_fail);
     if (total_fail == 0)
-      std::printf("OK test_mpi_cutcell_multibox np=%d (cut-cell multi-box deterministe, == mono-box)\n", np);
+      std::printf(
+          "OK test_mpi_cutcell_multibox np=%d (cut-cell multi-box deterministe, == mono-box)\n",
+          np);
   }
   comm_finalize();
   return total_fail ? 1 : 0;

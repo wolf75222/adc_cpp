@@ -26,7 +26,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // FieldPostProcess (spec), field_postprocess
-#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>   // concept EllipticSolver (already in place)
+#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>  // concept EllipticSolver (already in place)
 
 #include <concepts>
 
@@ -112,8 +112,7 @@ concept LinearSolver = EllipticSolver<S> && requires(S s, Real tol, int it) {
 // below proves that &field_postprocess satisfies FieldPostProcessor.
 template <class F>
 concept FieldPostProcessor =
-    requires(F f, const MultiFab& phi, MultiFab& out, Real cx, Real cy,
-             FieldPostProcess spec) {
+    requires(F f, const MultiFab& phi, MultiFab& out, Real cx, Real cy, FieldPostProcess spec) {
       { f(phi, out, cx, cy, spec) } -> std::same_as<void>;
     };
 

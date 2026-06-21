@@ -27,7 +27,7 @@ namespace adc {
 
 static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRefRatio == 2");
 
-namespace detail {
+namespace detail {  // single-box MF oracle: Fab2D -> MF -> MP
 
 // One level of the MultiFab hierarchy. aux held elsewhere (pointer). rC* = region
 // (coords of THIS level) refined by the child; valid if has_fine.
@@ -43,9 +43,9 @@ struct AmrLevelMF {
 // Limiter). Uf: fine (refined box). auxc/auxf: (phi, grad phi) prescribed, ghosts
 // filled. dt = coarse step; the fine one does r=2 substeps of dt/2 then reflux.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc,
-                        Real dyc, MultiFab& Uf, int CI0, int CI1, int CJ0, int CJ1,
-                        const MultiFab& auxc, const MultiFab& auxf, Real dt) {
+void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc, Real dyc,
+                        MultiFab& Uf, int CI0, int CI1, int CJ0, int CJ1, const MultiFab& auxc,
+                        const MultiFab& auxf, Real dt) {
   const int r = kAmrRefRatio, nc = Uc.ncomp();
   const Real dxf = dxc / kAmrRefRatio, dyf = dyc / kAmrRefRatio, dtf = dt / r;
   const int nJ = CJ1 - CJ0 + 1, nI = CI1 - CI0 + 1;
@@ -72,7 +72,7 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
       }
   }
   mf_advance_faces(Uc, fxc, fyc, dxc, dyc, dt);  // Uc -> state t+dt
-  mf_apply_source(m, Uc, auxc, dt);  // source S(U,aux) at the substep
+  mf_apply_source(m, Uc, auxc, dt);              // source S(U,aux) at the substep
 
   // --- fine subcycling: r substeps, accumulation of fine fluxes (x dtf) ---
   std::vector<Real> fL(nJ * nc, 0), fR(nJ * nc, 0), fB(nI * nc, 0), fT(nI * nc, 0);
@@ -87,15 +87,15 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
       for (int k = 0; k < nc; ++k) {
         fL[(J - CJ0) * nc + k] +=
             Real(0.5) * (FX(2 * CI0, 2 * J, k) + FX(2 * CI0, 2 * J + 1, k)) * dtf;
-        fR[(J - CJ0) * nc + k] += Real(0.5) *
-            (FX(2 * CI1 + 2, 2 * J, k) + FX(2 * CI1 + 2, 2 * J + 1, k)) * dtf;
+        fR[(J - CJ0) * nc + k] +=
+            Real(0.5) * (FX(2 * CI1 + 2, 2 * J, k) + FX(2 * CI1 + 2, 2 * J + 1, k)) * dtf;
       }
     for (int I = CI0; I <= CI1; ++I)
       for (int k = 0; k < nc; ++k) {
         fB[(I - CI0) * nc + k] +=
             Real(0.5) * (FY(2 * I, 2 * CJ0, k) + FY(2 * I + 1, 2 * CJ0, k)) * dtf;
-        fT[(I - CI0) * nc + k] += Real(0.5) *
-            (FY(2 * I, 2 * CJ1 + 2, k) + FY(2 * I + 1, 2 * CJ1 + 2, k)) * dtf;
+        fT[(I - CI0) * nc + k] +=
+            Real(0.5) * (FY(2 * I, 2 * CJ1 + 2, k) + FY(2 * I + 1, 2 * CJ1 + 2, k)) * dtf;
       }
     mf_advance_faces(Uf, fxf, fyf, dxf, dyf, dtf);
     mf_apply_source(m, Uf, auxf, dtf);  // source S(U,aux) at the substep
@@ -125,9 +125,9 @@ void amr_step_2level_mf(const Model& m, MultiFab& Uc, const Box2D& dom, Real dxc
 // THIS level), null if lev==0. Generic (Limiter, NumericalFlux, N comp), GPU seam.
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
 void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real dt,
-                       const Box2D& dom, const MultiFab* pOld, const MultiFab* pNew,
-                       Real frac, std::vector<Real>* pregL, std::vector<Real>* pregR,
-                       std::vector<Real>* pregB, std::vector<Real>* pregT) {
+                       const Box2D& dom, const MultiFab* pOld, const MultiFab* pNew, Real frac,
+                       std::vector<Real>* pregL, std::vector<Real>* pregR, std::vector<Real>* pregB,
+                       std::vector<Real>* pregT) {
   const int r = kAmrRefRatio;
   AmrLevelMF& lv = L[lev];
   const int nc = lv.U.ncomp();
@@ -150,21 +150,21 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
       for (int k = 0; k < nc; ++k) {
         (*pregL)[(J - pJ0) * nc + k] +=
             Real(0.5) * (FX(2 * pI0, 2 * J, k) + FX(2 * pI0, 2 * J + 1, k)) * dt;
-        (*pregR)[(J - pJ0) * nc + k] += Real(0.5) *
-            (FX(2 * pI1 + 2, 2 * J, k) + FX(2 * pI1 + 2, 2 * J + 1, k)) * dt;
+        (*pregR)[(J - pJ0) * nc + k] +=
+            Real(0.5) * (FX(2 * pI1 + 2, 2 * J, k) + FX(2 * pI1 + 2, 2 * J + 1, k)) * dt;
       }
     for (int I = pI0; I <= pI1; ++I)
       for (int k = 0; k < nc; ++k) {
         (*pregB)[(I - pI0) * nc + k] +=
             Real(0.5) * (FY(2 * I, 2 * pJ0, k) + FY(2 * I + 1, 2 * pJ0, k)) * dt;
-        (*pregT)[(I - pI0) * nc + k] += Real(0.5) *
-            (FY(2 * I, 2 * pJ1 + 2, k) + FY(2 * I + 1, 2 * pJ1 + 2, k)) * dt;
+        (*pregT)[(I - pI0) * nc + k] +=
+            Real(0.5) * (FY(2 * I, 2 * pJ1 + 2, k) + FY(2 * I + 1, 2 * pJ1 + 2, k)) * dt;
       }
   }
 
   if (!lv.has_fine) {
     mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);  // leaf
-    mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) at the substep
+    mf_apply_source(m, lv.U, *lv.aux, dt);             // source S(U,aux) at the substep
     return;
   }
 
@@ -188,13 +188,13 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
   }
   std::vector<Real> fL(nJ * nc, 0), fR(nJ * nc, 0), fB(nI * nc, 0), fT(nI * nc, 0);
 
-  MultiFab U_old = lv.U;  // state t (temporal interp of the child)
+  MultiFab U_old = lv.U;                             // state t (temporal interp of the child)
   mf_advance_faces(lv.U, fx, fy, lv.dx, lv.dy, dt);  // lv.U -> t+dt
-  mf_apply_source(m, lv.U, *lv.aux, dt);  // source S(U,aux) at the substep
+  mf_apply_source(m, lv.U, *lv.aux, dt);             // source S(U,aux) at the substep
 
   for (int s = 0; s < r; ++s)
-    subcycle_level_mf<Limiter, NumericalFlux>(m, L, lev + 1, dt / r, dom, &U_old,
-                                              &lv.U, Real(s) / r, &fL, &fR, &fB, &fT);
+    subcycle_level_mf<Limiter, NumericalFlux>(m, L, lev + 1, dt / r, dom, &U_old, &lv.U,
+                                              Real(s) / r, &fL, &fR, &fB, &fT);
 
   mf_average_down(L[lev + 1].U, lv.U, cI0, cI1, cJ0, cJ1);
 
@@ -214,12 +214,11 @@ void subcycle_level_mf(const Model& m, std::vector<AmrLevelMF>& L, int lev, Real
 
 // Driver: one dt step of the full hierarchy (level 0 = coarse).
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void amr_step_multilevel_mf(const Model& m, std::vector<AmrLevelMF>& L,
-                            const Box2D& dom, Real dt) {
-  subcycle_level_mf<Limiter, NumericalFlux>(m, L, 0, dt, dom, nullptr, nullptr,
-                                            Real(0), nullptr, nullptr, nullptr, nullptr);
+void amr_step_multilevel_mf(const Model& m, std::vector<AmrLevelMF>& L, const Box2D& dom, Real dt) {
+  subcycle_level_mf<Limiter, NumericalFlux>(m, L, 0, dt, dom, nullptr, nullptr, Real(0), nullptr,
+                                            nullptr, nullptr, nullptr);
 }
 
-}  // namespace detail (single-box MF oracle: Fab2D -> MF -> MP)
+}  // namespace detail
 
 }  // namespace adc

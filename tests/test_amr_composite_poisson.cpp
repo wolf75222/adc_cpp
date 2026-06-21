@@ -31,8 +31,12 @@
 using namespace adc;
 static constexpr double kPi = 3.14159265358979323846;
 
-static double u_exact(double x, double y) { return std::sin(3 * kPi * x) * std::sin(3 * kPi * y); }
-static double f_rhs(double x, double y) { return -18.0 * kPi * kPi * u_exact(x, y); }  // Lap u
+static double u_exact(double x, double y) {
+  return std::sin(3 * kPi * x) * std::sin(3 * kPi * y);
+}
+static double f_rhs(double x, double y) {
+  return -18.0 * kPi * kPi * u_exact(x, y);
+}  // Lap u
 
 // Modele SCALAIRE minimal : aucune dynamique (flux/source nuls) ; elliptic_rhs(U) = U -> Lap phi = U.
 struct ScalarCharge {
@@ -51,12 +55,14 @@ static void set_state_f(MultiFab& U, const Geometry& g) {
     Array4 a = U.fab(li).array();
     const Box2D b = U.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-      for (int i = b.lo[0]; i <= b.hi[0]; ++i) a(i, j, 0) = f_rhs(g.x_cell(i), g.y_cell(j));
+      for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+        a(i, j, 0) = f_rhs(g.x_cell(i), g.y_cell(j));
   }
 }
 
 // erreur MAX du grad phi de l'aux fin vs le grad analytique, dans la zone INTERIEURE du patch.
-static double aux_grad_err(const MultiFab& aux_f, const Geometry& gf, int Ic0, int Ic1, int guard, int r) {
+static double aux_grad_err(const MultiFab& aux_f, const Geometry& gf, int Ic0, int Ic1, int guard,
+                           int r) {
   device_fence();
   const int iIc0 = Ic0 + guard, iIc1 = Ic1 - guard;
   double e = 0;
@@ -69,7 +75,8 @@ static double aux_grad_err(const MultiFab& aux_f, const Geometry& gf, int Ic0, i
           const double xf = gf.x_cell(iff), yf = gf.y_cell(jff);
           const double gxa = 3 * kPi * std::cos(3 * kPi * xf) * std::sin(3 * kPi * yf);
           const double gya = 3 * kPi * std::sin(3 * kPi * xf) * std::cos(3 * kPi * yf);
-          e = std::fmax(e, std::fmax(std::fabs(A(iff, jff, 1) - gxa), std::fabs(A(iff, jff, 2) - gya)));
+          e = std::fmax(
+              e, std::fmax(std::fabs(A(iff, jff, 1) - gxa), std::fabs(A(iff, jff, 2) - gya)));
         }
   return all_reduce_max(e);
 }
@@ -79,7 +86,11 @@ int main(int argc, char** argv) {
   const int me = my_rank();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { if (me == 0) std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 48, r = 2;
@@ -89,7 +100,8 @@ int main(int argc, char** argv) {
   BCRec bc;
   bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
 
-  auto [bac, dm] = detail::coupler_make_coarse_layout(n, /*distribute=*/false, 0);  // mono-box replique
+  auto [bac, dm] =
+      detail::coupler_make_coarse_layout(n, /*distribute=*/false, 0);  // mono-box replique
   const int Ic0 = n / 4, Ic1 = 3 * n / 4 - 1;
   Box2D fb{{r * Ic0, r * Ic0}, {r * Ic1 + r - 1, r * Ic1 + r - 1}};
   BoxArray baf(std::vector<Box2D>{fb});
@@ -103,7 +115,8 @@ int main(int argc, char** argv) {
   levels.push_back({std::move(Uf), nullptr, dxf, dxf});
 
   ScalarCharge model;
-  AmrCouplerMP<ScalarCharge> cpl(model, g, bac, bc, std::move(levels), {}, /*replicated_coarse=*/true);
+  AmrCouplerMP<ScalarCharge> cpl(model, g, bac, bc, std::move(levels), {},
+                                 /*replicated_coarse=*/true);
   set_state_f(cpl.coarse(), g);
   set_state_f(cpl.levels()[1].U, gf);
 
@@ -122,12 +135,15 @@ int main(int argc, char** argv) {
 
   chk(std::isfinite(e_optA) && std::isfinite(e_comp), "erreurs finies");
   // CRITERE : le patch fin raffine VRAIMENT l'elliptique -> grad phi fin nettement plus precis.
-  chk(e_comp < 0.5 * e_optA, "(fidelite) composite plus precis que Option A sur grad phi (e_comp < 0.5 e_optA)");
+  chk(e_comp < 0.5 * e_optA,
+      "(fidelite) composite plus precis que Option A sur grad phi (e_comp < 0.5 e_optA)");
 
   // --- (3) non-regression : composite OFF -> Option A inchange (bit-identique a un coupleur neuf) ---
   {
-    MultiFab Uc2(bac, dm, 1, 1); Uc2.set_val(Real(0));
-    MultiFab Uf2(baf, dm, 1, 1); Uf2.set_val(Real(0));
+    MultiFab Uc2(bac, dm, 1, 1);
+    Uc2.set_val(Real(0));
+    MultiFab Uf2(baf, dm, 1, 1);
+    Uf2.set_val(Real(0));
     std::vector<AmrLevelMP> lv2;
     lv2.push_back({std::move(Uc2), nullptr, dxc, dxc});
     lv2.push_back({std::move(Uf2), nullptr, dxf, dxf});
@@ -136,11 +152,13 @@ int main(int argc, char** argv) {
     set_state_f(ref.levels()[1].U, gf);
     ref.compute_aux();  // Option A (composite OFF par defaut)
     const double e_ref = aux_grad_err(*ref.levels()[1].aux, gf, Ic0, Ic1, 3, r);
-    chk(std::fabs(e_ref - e_optA) < 1e-12, "(non-regression) Option A inchange (composite OFF par defaut)");
+    chk(std::fabs(e_ref - e_optA) < 1e-12,
+        "(non-regression) Option A inchange (composite OFF par defaut)");
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_amr_composite_poisson\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_amr_composite_poisson\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

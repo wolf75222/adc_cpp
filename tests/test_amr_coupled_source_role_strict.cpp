@@ -68,8 +68,8 @@ static AmrRuntime make_two_block(int N, double L, double B0, const std::vector<d
   AmrBuildParams bp;
   bp.n = N;
   bp.L = L;
-  bp.regrid_every = 0;     // hierarchie figee (multi-blocs)
-  bp.poisson_bc = BCRec{}; // periodique
+  bp.regrid_every = 0;      // hierarchie figee (multi-blocs)
+  bp.poisson_bc = BCRec{};  // periodique
   const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
   std::vector<AmrRuntimeBlock> blocks;
   detail::dispatch_model(exb_charge(+1.0, B0), [&](auto m) {
@@ -84,7 +84,8 @@ static AmrRuntime make_two_block(int N, double L, double B0, const std::vector<d
   // canonical Density role, so the ExB charge coupling is untouched). The coupled-source resolver must
   // then go through the string user-role layer (index_of(string)) to map this label to component 0.
   // Pure host METADATA: the numerics still act on component 0, only (block, role) resolution changes.
-  if (ions_user_role != nullptr) blocks[0].cons_vars.user_roles = {ions_user_role};
+  if (ions_user_role != nullptr)
+    blocks[0].cons_vars.user_roles = {ions_user_role};
   return AmrRuntime(S.geom, S.ba_coarse, S.poisson_bc, std::move(blocks), S.base_per,
                     S.replicated_coarse, S.wall);
 }
@@ -133,7 +134,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int N = 32;

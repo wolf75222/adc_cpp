@@ -50,8 +50,7 @@ namespace detail {
 /// Assemble the single-model elliptic RHS: rhs = model.elliptic_rhs(U) on valid cells
 /// (delegated to SingleModelEllipticRhs). Shared by Coupler and AmrCouplerMP.
 template <class Model>
-inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs,
-                             const Model& model) {
+inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs, const Model& model) {
   SingleModelEllipticRhs<Model>{model}(state, rhs);
 }
 
@@ -62,10 +61,8 @@ inline void coupler_eval_rhs(const MultiFab& state, MultiFab& rhs,
 // -> bit-identical.
 /// Set aux = (phi, d phi/dx, d phi/dy) by centered differences (factors cx, cy = 1/(2 dx),
 /// 1/(2 dy)). Stores +grad phi (the physical sign E = -grad phi is carried by the drift velocity).
-inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx,
-                             Real cy) {
-  field_postprocess(phi, aux, cx, cy,
-                    FieldPostProcess{FieldPostProcess::GradSign::Plus, true});
+inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx, Real cy) {
+  field_postprocess(phi, aux, cx, cy, FieldPostProcess{FieldPostProcess::GradSign::Plus, true});
 }
 }  // namespace detail
 
@@ -75,8 +72,7 @@ inline void coupler_grad_phi(const MultiFab& phi, MultiFab& aux, Real cx,
 /// Poisson -> aux -> residual loop at each step. PRECONDITION: U carries at least Limiter::n_ghost ghosts.
 template <class Model, class Elliptic = GeometricMG>
 class Coupler {
-  static_assert(EllipticSolver<Elliptic>,
-                "the Coupler elliptic backend must model EllipticSolver");
+  static_assert(EllipticSolver<Elliptic>, "the Coupler elliptic backend must model EllipticSolver");
 
  public:
   // active: optional "inside the conductor" predicate (embedded wall for
@@ -86,9 +82,8 @@ class Coupler {
   // then fills aux component 3 once and for all (B_z static, external to the
   // elliptic solve: derive_aux does not touch it). Empty => no B_z. The aux channel is
   // allocated to the MODEL width: a base model (3) stays bit-identical.
-  Coupler(const Model& model, const Geometry& geom, const BoxArray& ba,
-          const BCRec& bcU, const BCRec& bcPhi,
-          std::function<bool(Real, Real)> active = {},
+  Coupler(const Model& model, const Geometry& geom, const BoxArray& ba, const BCRec& bcU,
+          const BCRec& bcPhi, std::function<bool(Real, Real)> active = {},
           std::function<Real(Real, Real)> bz = {})
       : model_(model),
         geom_(geom),
@@ -113,9 +108,9 @@ class Coupler {
   template <class Limiter = NoSlope, class Policy = PerStageCoupling,
             class NumericalFlux = RusanovFlux>
   void advance(MultiFab& U, Real dt) {
-    static_assert(std::is_same_v<Policy, PerStageCoupling> ||
-                      std::is_same_v<Policy, OncePerStepCoupling>,
-                  "Policy must be PerStageCoupling or OncePerStepCoupling");
+    static_assert(
+        std::is_same_v<Policy, PerStageCoupling> || std::is_same_v<Policy, OncePerStepCoupling>,
+        "Policy must be PerStageCoupling or OncePerStepCoupling");
     constexpr bool per = std::is_same_v<Policy, PerStageCoupling>;
     // DELEGATES the scheme to the core SSPRK2Step object (dedup, sec.8.2 A4). The residual
     // evaluator counts the stages: recompute_aux=true at stage 0, =per afterward (PerStage:
@@ -132,9 +127,9 @@ class Coupler {
   template <class Limiter = NoSlope, class Policy = PerStageCoupling,
             class NumericalFlux = RusanovFlux>
   void advance_ssprk3(MultiFab& U, Real dt) {
-    static_assert(std::is_same_v<Policy, PerStageCoupling> ||
-                      std::is_same_v<Policy, OncePerStepCoupling>,
-                  "Policy must be PerStageCoupling or OncePerStepCoupling");
+    static_assert(
+        std::is_same_v<Policy, PerStageCoupling> || std::is_same_v<Policy, OncePerStepCoupling>,
+        "Policy must be PerStageCoupling or OncePerStepCoupling");
     constexpr bool per = std::is_same_v<Policy, PerStageCoupling>;
     // Same as advance: delegates to SSPRK3Step, recompute_aux=true at stage 0, =per afterward.
     int stage = 0;
@@ -149,8 +144,7 @@ class Coupler {
   // (limiter + flux) and an explicit time policy. The old SSPRK2/SSPRK3 tags
   // stay valid; the new form also enables sub-cycling:
   //   sim.step<MusclVanLeerHLLC, ExplicitTime<SSPRK3, 4>>(U, dt);
-  template <class Disc = FirstOrder, class TimeInteg = SSPRK2,
-            class Policy = PerStageCoupling>
+  template <class Disc = FirstOrder, class TimeInteg = SSPRK2, class Policy = PerStageCoupling>
   void step(MultiFab& U, Real dt) {
     using L = typename Disc::Limiter;
     using F = typename Disc::NumericalFlux;
@@ -189,7 +183,8 @@ class Coupler {
   // to stay bit-identical to the old advance.
   template <class Limiter, class NumericalFlux>
   void stage_rhs(MultiFab& s, MultiFab& R, bool recompute_aux) {
-    if (recompute_aux) update_aux(s);
+    if (recompute_aux)
+      update_aux(s);
     fill_ghosts(s, geom_.domain, bcU_);
     assemble_rhs<Limiter, NumericalFlux>(model_, s, aux_, geom_, R);
   }
@@ -209,7 +204,8 @@ class Coupler {
   // cf. grad); field_postprocess only writes phi/grad (components 0..2), B_z is preserved.
   void fill_bz() {
     if constexpr (aux_comps<Model>() > kAuxBaseComps) {
-      if (!bz_) return;
+      if (!bz_)
+        return;
       for (int li = 0; li < aux_.local_size(); ++li)
         detail::fill_bz_box(aux_.fab(li), aux_.box(li), geom_, bz_);  // valid box
       fill_ghosts(aux_, geom_.domain, aux_bc_);  // B_z halos before the 1st solve
@@ -229,7 +225,6 @@ class Coupler {
 // The coupler elliptic backend honors the common contract: swapping
 // GeometricMG for another conforming solver (FFT wrapper, PETSc) will only
 // require changing the member type, not the coupling logic.
-static_assert(EllipticSolver<GeometricMG>,
-              "GeometricMG must model the EllipticSolver concept");
+static_assert(EllipticSolver<GeometricMG>, "GeometricMG must model the EllipticSolver concept");
 
 }  // namespace adc

@@ -69,7 +69,7 @@ static constexpr double kPi = 3.14159265358979323846;
 //   aux.grad_y = omega * y   ->  vx = -omega * y
 struct RotationModel {
   using State = StateVec<1>;
-  using Aux   = adc::Aux;
+  using Aux = adc::Aux;
   static constexpr int n_vars = 1;
   Real B0 = 1.0;
   ADC_HD State flux(const State& u, const Aux& a, int dir) const {
@@ -85,14 +85,14 @@ struct RotationModel {
 };
 
 // Parametes physiques
-static constexpr double kR0    = 0.175;
-static constexpr double kW     = 0.02;
+static constexpr double kR0 = 0.175;
+static constexpr double kW = 0.02;
 static constexpr double kOmega = 2.0 * kPi;  // 1 rotation en t=1
-static constexpr int    kN     = 128;
-static constexpr int    kNr    = 128;
-static constexpr int    kNth   = 256;         // plus fin en theta pour echantillonnage
-static constexpr int    kK     = 5;           // nombre de rotations
-static constexpr double kCFL   = 0.4;
+static constexpr int kN = 128;
+static constexpr int kNr = 128;
+static constexpr int kNth = 256;  // plus fin en theta pour echantillonnage
+static constexpr int kK = 5;      // nombre de rotations
+static constexpr double kCFL = 0.4;
 
 // Profil radial : gaussienne centree en r0, largeur w.
 static double ring_profile(double r) {
@@ -110,25 +110,27 @@ static double cart_r(double x, double y) {
 // depuis un MultiFab Cartesien (N x N). On integre le long de l'axe y=0 (j median).
 // -------------------------------------------------------------------
 struct RadialMetrics {
-  double peak;   // max de n(r) le long de la coupe
-  double fwhm;   // largeur a mi-hauteur en r
+  double peak;  // max de n(r) le long de la coupe
+  double fwhm;  // largeur a mi-hauteur en r
 };
 
 static RadialMetrics cartesian_radial_cut(const MultiFab& U, const Geometry& geom,
-                                           const Box2D& dom) {
+                                          const Box2D& dom) {
   const ConstArray4 u = U.fab(0).const_array();
   const int j0 = (dom.lo[1] + dom.hi[1]) / 2;  // rangee mediane
   double peak = 0.0;
   const int ni = dom.hi[0] - dom.lo[0] + 1;
   for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
     const double v = u(i, j0, 0);
-    if (v > peak) peak = v;
+    if (v > peak)
+      peak = v;
   }
   // FWHM : comptage des cellules au-dessus de peak/2
   double half = 0.5 * peak;
   int cnt = 0;
   for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
-    if (u(i, j0, 0) >= half) ++cnt;
+    if (u(i, j0, 0) >= half)
+      ++cnt;
   const double fwhm = cnt * geom.dx();
   return {peak, fwhm};
 }
@@ -137,7 +139,7 @@ static RadialMetrics cartesian_radial_cut(const MultiFab& U, const Geometry& geo
 // BRAS 1 : advection Cartesienne WENO5+Rusanov+SSPRK3
 // -------------------------------------------------------------------
 static RadialMetrics run_cartesian() {
-  const double L   = 1.0;
+  const double L = 1.0;
   const double xlo = -0.5, xhi = 0.5;
   const double ylo = -0.5, yhi = 0.5;
 
@@ -167,9 +169,9 @@ static RadialMetrics run_cartesian() {
       for (int i = ghost_box.lo[0]; i <= ghost_box.hi[0]; ++i) {
         const double x = geom.x_cell(i);
         const double y = geom.y_cell(j);
-        a(i, j, 0) = 0.0;           // phi (inutilise)
-        a(i, j, 1) = kOmega * x;    // grad_x -> vy = omega*x
-        a(i, j, 2) = kOmega * y;    // grad_y -> vx = -omega*y
+        a(i, j, 0) = 0.0;         // phi (inutilise)
+        a(i, j, 1) = kOmega * x;  // grad_x -> vy = omega*x
+        a(i, j, 2) = kOmega * y;  // grad_y -> vx = -omega*y
       }
   }
 
@@ -189,8 +191,8 @@ static RadialMetrics run_cartesian() {
 
   // Vitesse d'onde max pour CFL : |omega| * r_max
   const double v_max = kOmega * (xhi - xlo) * 0.5 * std::sqrt(2.0);
-  const double dt    = kCFL * dx / v_max;
-  const int nsteps   = static_cast<int>(std::ceil(double(kK) / (dt * kOmega / (2.0 * kPi))));
+  const double dt = kCFL * dx / v_max;
+  const int nsteps = static_cast<int>(std::ceil(double(kK) / (dt * kOmega / (2.0 * kPi))));
 
   RotationModel model;
   model.B0 = 1.0;
@@ -229,26 +231,27 @@ static double rusanov_1d(double uL, double uR, double a) {
 
 // Avance d'un pas SSPRK3 le tableau 1D n[j] (periodique en theta) selon
 // d_t n + a * d_theta n = 0 avec WENO5+Rusanov.
-static void polar_rhs_1d(const std::vector<double>& n, std::vector<double>& R,
-                          double dth, double a) {
+static void polar_rhs_1d(const std::vector<double>& n, std::vector<double>& R, double dth,
+                         double a) {
   const int Nth = static_cast<int>(n.size());
   // acces periodique
   auto nj = [&](int j) -> double {
     int jj = j % Nth;
-    if (jj < 0) jj += Nth;
+    if (jj < 0)
+      jj += Nth;
     return n[jj];
   };
   for (int j = 0; j < Nth; ++j) {
     // face + (entre j et j+1) : uL reconstruit depuis {j-2,...,j+2}
-    const double uLp = weno5z(nj(j-2), nj(j-1), nj(j), nj(j+1), nj(j+2));
+    const double uLp = weno5z(nj(j - 2), nj(j - 1), nj(j), nj(j + 1), nj(j + 2));
     // uR face + : reconstruction depuis j+1 regardant vers j
-    const double uRp = weno5z(nj(j+3), nj(j+2), nj(j+1), nj(j), nj(j-1));
-    const double Fp  = rusanov_1d(uLp, uRp, a);
+    const double uRp = weno5z(nj(j + 3), nj(j + 2), nj(j + 1), nj(j), nj(j - 1));
+    const double Fp = rusanov_1d(uLp, uRp, a);
 
     // face - (entre j-1 et j) : uL reconstruit depuis {j-3,...,j+1}
-    const double uLm = weno5z(nj(j-3), nj(j-2), nj(j-1), nj(j), nj(j+1));
-    const double uRm = weno5z(nj(j+2), nj(j+1), nj(j), nj(j-1), nj(j-2));
-    const double Fm  = rusanov_1d(uLm, uRm, a);
+    const double uLm = weno5z(nj(j - 3), nj(j - 2), nj(j - 1), nj(j), nj(j + 1));
+    const double uRm = weno5z(nj(j + 2), nj(j + 1), nj(j), nj(j - 1), nj(j - 2));
+    const double Fm = rusanov_1d(uLm, uRm, a);
 
     R[j] = -(Fp - Fm) / dth;
   }
@@ -260,12 +263,15 @@ static void polar_ssprk3_step(std::vector<double>& n, double dt, double dth, dou
 
   // etage 1
   polar_rhs_1d(n, R, dth, a);
-  for (int j = 0; j < Nth; ++j) n1[j] = n[j] + dt * R[j];
+  for (int j = 0; j < Nth; ++j)
+    n1[j] = n[j] + dt * R[j];
 
   // etage 2
   polar_rhs_1d(n1, R, dth, a);
-  for (int j = 0; j < Nth; ++j) n2[j] = n1[j] + dt * R[j];
-  for (int j = 0; j < Nth; ++j) n2[j] = 0.75 * n[j] + 0.25 * n2[j];
+  for (int j = 0; j < Nth; ++j)
+    n2[j] = n1[j] + dt * R[j];
+  for (int j = 0; j < Nth; ++j)
+    n2[j] = 0.75 * n[j] + 0.25 * n2[j];
 
   // etage 3
   polar_rhs_1d(n2, R, dth, a);
@@ -284,8 +290,8 @@ static PolarMetrics run_polar() {
   // Grille polaire (r, theta)
   const double r_min = 0.0;
   const double r_max = 0.5 * std::sqrt(2.0);  // rayon max du domaine [-0.5,0.5]^2
-  const double dr    = (r_max - r_min) / kNr;
-  const double dth   = 2.0 * kPi / kNth;
+  const double dr = (r_max - r_min) / kNr;
+  const double dth = 2.0 * kPi / kNth;
 
   // Vitesse angulaire constante : a = omega * r --> mais en polaire pur, pour un anneau
   // de rayon r0, la vitesse ANGULAIRE est omega (uniforme). En variables (r, theta), le
@@ -348,7 +354,8 @@ static PolarMetrics run_polar() {
     std::vector<double> prof(kNr);
     for (int ir = 0; ir < kNr; ++ir) {
       double s = 0;
-      for (int jt = 0; jt < kNth; ++jt) s += n[ir][jt];
+      for (int jt = 0; jt < kNth; ++jt)
+        s += n[ir][jt];
       prof[ir] = s / kNth;
     }
     return prof;
@@ -359,15 +366,16 @@ static PolarMetrics run_polar() {
   // Metrique initiale (profil radial)
   double peak0 = 0;
   for (int ir = 0; ir < kNr; ++ir)
-    if (n0_radial[ir] > peak0) peak0 = n0_radial[ir];
+    if (n0_radial[ir] > peak0)
+      peak0 = n0_radial[ir];
 
   // CFL polaire : vitesse angulaire max = omega, pas angulaire = dth
   // ds = r * dth ~ r0 * dth pour la region d'interet.
   // Vitesse lineaire au rayon r0 = omega * r0. dt_cfl = kCFL * dth / omega.
-  const double v_a   = kOmega;  // vitesse angulaire (composante en theta)
+  const double v_a = kOmega;  // vitesse angulaire (composante en theta)
   const double dt_th = kCFL * dth / v_a;
   const double T_total = double(kK) / (kOmega / (2.0 * kPi));  // kK periodes
-  const int nsteps   = static_cast<int>(std::ceil(T_total / dt_th));
+  const int nsteps = static_cast<int>(std::ceil(T_total / dt_th));
 
   // Advection : chaque couche r est independante, omega = const.
   for (int s = 0; s < nsteps; ++s)
@@ -379,15 +387,20 @@ static PolarMetrics run_polar() {
   // Metrique finale
   double peak1 = 0;
   for (int ir = 0; ir < kNr; ++ir)
-    if (n1_radial[ir] > peak1) peak1 = n1_radial[ir];
+    if (n1_radial[ir] > peak1)
+      peak1 = n1_radial[ir];
 
   // FWHM initial et final
   auto fwhm_of = [&](const std::vector<double>& prof) {
     double pk = 0;
-    for (int ir = 0; ir < kNr; ++ir) if (prof[ir] > pk) pk = prof[ir];
+    for (int ir = 0; ir < kNr; ++ir)
+      if (prof[ir] > pk)
+        pk = prof[ir];
     double half = 0.5 * pk;
     int cnt = 0;
-    for (int ir = 0; ir < kNr; ++ir) if (prof[ir] >= half) ++cnt;
+    for (int ir = 0; ir < kNr; ++ir)
+      if (prof[ir] >= half)
+        ++cnt;
     return cnt * dr;
   };
 
@@ -395,8 +408,8 @@ static PolarMetrics run_polar() {
   const double fwhm1 = fwhm_of(n1_radial);
 
   std::printf("[Polaire] Nr=%d  Nth=%d  pas=%d  dt_th=%.4e\n", kNr, kNth, nsteps, dt_th);
-  std::printf("[Polaire] pic initial=%.6f  pic final=%.6f  FWHM ini=%.4f  FWHM fin=%.4f\n",
-              peak0, peak1, fwhm0, fwhm1);
+  std::printf("[Polaire] pic initial=%.6f  pic final=%.6f  FWHM ini=%.4f  FWHM fin=%.4f\n", peak0,
+              peak1, fwhm0, fwhm1);
 
   return {peak1, fwhm1};
 }
@@ -406,20 +419,20 @@ static PolarMetrics run_polar() {
 // -------------------------------------------------------------------
 int main() {
   std::printf("=== Proto Phase-0 : diffusion radiale Cartesien vs Polaire ===\n");
-  std::printf("Profil n(r)=exp(-((r-%.3f)/%.3f)^2), N=%d, K=%d rotations, CFL=%.2f\n",
-              kR0, kW, kN, kK, kCFL);
+  std::printf("Profil n(r)=exp(-((r-%.3f)/%.3f)^2), N=%d, K=%d rotations, CFL=%.2f\n", kR0, kW, kN,
+              kK, kCFL);
 
   // --- bras polaire en premier (rapide, pas de MultiFab) ---
   const PolarMetrics polar = run_polar();
 
   // --- bras cartesien ---
   // On mesure le pic initial avant advection.
-  const double L   = 1.0;
+  const double L = 1.0;
   const double xlo = -0.5, xhi = 0.5;
   const double ylo = -0.5, yhi = 0.5;
   Box2D dom0 = Box2D::from_extents(kN, kN);
   Geometry geom0{dom0, xlo, xhi, ylo, yhi};
-  BoxArray ba0  = BoxArray::from_domain(dom0, kN);
+  BoxArray ba0 = BoxArray::from_domain(dom0, kN);
   DistributionMapping dm0(ba0.size(), n_ranks());
   {
     MultiFab Utmp(ba0, dm0, 1, 0);
@@ -440,19 +453,18 @@ int main() {
   // Simplification : peak theorique = 1.0 (pour la perte relative).
   const double peak_init_theory = 1.0;
 
-  const double loss_cart  = (peak_init_theory - cart.peak)  / peak_init_theory * 100.0;
+  const double loss_cart = (peak_init_theory - cart.peak) / peak_init_theory * 100.0;
   const double loss_polar = (peak_init_theory - polar.peak) / peak_init_theory * 100.0;
 
   std::printf("\n=== RESULTATS ===\n");
-  std::printf("Perte Cartesien  : %.2f %%  (pic apres K=%d rot = %.6f)\n",
-              loss_cart,  kK, cart.peak);
-  std::printf("Perte Polaire    : %.2f %%  (pic apres K=%d rot = %.6f)\n",
-              loss_polar, kK, polar.peak);
+  std::printf("Perte Cartesien  : %.2f %%  (pic apres K=%d rot = %.6f)\n", loss_cart, kK,
+              cart.peak);
+  std::printf("Perte Polaire    : %.2f %%  (pic apres K=%d rot = %.6f)\n", loss_polar, kK,
+              polar.peak);
 
   const double ratio = (loss_polar > 1e-12) ? (loss_cart / loss_polar) : 1e99;
   std::printf("Rapport perte C/P: %.1f\n", ratio);
-  std::printf("FWHM Cartesien   : %.4f -> %.4f\n",
-              kW * 2.0 * std::sqrt(std::log(2.0)), cart.fwhm);
+  std::printf("FWHM Cartesien   : %.4f -> %.4f\n", kW * 2.0 * std::sqrt(std::log(2.0)), cart.fwhm);
 
   const bool verdict_success = (loss_polar <= 2.0) && (ratio >= 5.0);
   if (verdict_success) {

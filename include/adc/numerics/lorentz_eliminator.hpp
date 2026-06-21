@@ -88,8 +88,7 @@ struct LorentzEliminator {
 // Static check: LorentzEliminator is trivially copyable (POD-like),
 // guaranteeing it can be captured by value in a Kokkos/CUDA kernel
 // without hidden allocation.
-static_assert(
-    __is_trivially_copyable(LorentzEliminator),
-    "LorentzEliminator must be trivially copyable (zero allocation, device-safe)");
+static_assert(__is_trivially_copyable(LorentzEliminator),
+              "LorentzEliminator must be trivially copyable (zero allocation, device-safe)");
 
 }  // namespace adc

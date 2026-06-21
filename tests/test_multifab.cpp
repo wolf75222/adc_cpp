@@ -43,7 +43,8 @@ int main() {
   // = 64*(sum i)/... -> sum_i i = 28 (x8 lignes) + 100 * sum_j j (x8 colonnes)
   Real expected = 0;
   for (int j = 0; j < 8; ++j)
-    for (int i = 0; i < 8; ++i) expected += i + 100.0 * j;
+    for (int i = 0; i < 8; ++i)
+      expected += i + 100.0 * j;
   chk(std::fabs(sum(mf) - expected) < 1e-9, "sum_field");
 
   // verifier une cellule precise via la box qui la contient
@@ -56,6 +57,7 @@ int main() {
   }
   chk(found, "cell_located");
 
-  if (fails == 0) std::printf("OK test_multifab\n");
+  if (fails == 0)
+    std::printf("OK test_multifab\n");
   return fails == 0 ? 0 : 1;
 }

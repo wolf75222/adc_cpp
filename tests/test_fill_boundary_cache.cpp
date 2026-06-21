@@ -47,7 +47,8 @@ int main(int argc, char** argv) {
       const Box2D b = F.box();
       for (int c = 0; c < ncomp; ++c)
         for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-          for (int i = b.lo[0]; i <= b.hi[0]; ++i) F(i, j, c) = val(i, j, c);
+          for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+            F(i, j, c) = val(i, j, c);
     }
   };
   // nombre de cellules (valides + ghosts) != valeur repliee, reduit sur tous les rangs.
@@ -59,7 +60,8 @@ int main(int argc, char** argv) {
       for (int c = 0; c < ncomp; ++c)
         for (int j = g.lo[1]; j <= g.hi[1]; ++j)
           for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-            if (std::fabs(F(i, j, c) - val(i, j, c)) > 1e-12) ++w;
+            if (std::fabs(F(i, j, c) - val(i, j, c)) > 1e-12)
+              ++w;
     }
     return all_reduce_sum(w);
   };
@@ -72,7 +74,8 @@ int main(int argc, char** argv) {
     MultiFab mf(ba, dm, ncomp, ng);
     set_valid(mf);
     reset_halo_schedule_build_count();
-    for (int k = 0; k < K; ++k) fill_boundary(mf, dom, per);
+    for (int k = 0; k < K; ++k)
+      fill_boundary(mf, dom, per);
     chk(count_wrong(mf) == 0, "cache_on_correct");
     chk(halo_schedule_build_count() == 1, "cache_built_once");
     chk(mf.halo_cache().size() == 1, "cache_one_entry");
@@ -83,7 +86,8 @@ int main(int argc, char** argv) {
     MultiFab a(ba, dm, ncomp, ng), b(ba, dm, ncomp, ng);
     set_valid(a);
     set_valid(b);
-    for (int k = 0; k < K; ++k) fill_boundary(a, dom, per);  // cache reutilise
+    for (int k = 0; k < K; ++k)
+      fill_boundary(a, dom, per);  // cache reutilise
     reset_halo_schedule_build_count();
     for (int k = 0; k < K; ++k) {  // reconstruit a chaque appel
       b.halo_cache().clear();
@@ -98,7 +102,8 @@ int main(int argc, char** argv) {
       for (int c = 0; c < ncomp; ++c)
         for (int j = g.lo[1]; j <= g.hi[1]; ++j)
           for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-            if (FA(i, j, c) != FB(i, j, c)) ++diff;  // egalite EXACTE (0 ulp)
+            if (FA(i, j, c) != FB(i, j, c))
+              ++diff;  // egalite EXACTE (0 ulp)
     }
     chk(all_reduce_sum(diff) == 0, "cache_on_equals_rebuild_bit_identical");
   }

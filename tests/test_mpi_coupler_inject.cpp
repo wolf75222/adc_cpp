@@ -44,7 +44,8 @@ int main(int argc, char** argv) {
     const Box2D g = parent.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-        for (int k = 0; k < 3; ++k) a(i, j, k) = fval(i, j, k);
+        for (int k = 0; k < 3; ++k)
+          a(i, j, k) = fval(i, j, k);
   }
 
   // enfant : niveau 2, 2 patchs interieurs (region niveau 1 [8,24)^2 -> niveau 2 [16,48)^2),
@@ -65,16 +66,16 @@ int main(int argc, char** argv) {
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
         const int ci = coarsen_index(i, 2), cj = coarsen_index(j, 2);
         for (int k = 0; k < 3; ++k)
-          if (c(i, j, k) != fval(ci, cj, k)) ++fails;
+          if (c(i, j, k) != fval(ci, cj, k))
+            ++fails;
       }
   }
 
   fails = all_reduce_sum(fails);
   if (me == 0) {
-    std::printf("inject aux multi-patch distribue (np=%d) : %ld cellules fausses\n",
-                n_ranks(), fails);
-    std::printf(fails == 0 ? "OK test_mpi_coupler_inject\n"
-                           : "FAIL test_mpi_coupler_inject\n");
+    std::printf("inject aux multi-patch distribue (np=%d) : %ld cellules fausses\n", n_ranks(),
+                fails);
+    std::printf(fails == 0 ? "OK test_mpi_coupler_inject\n" : "FAIL test_mpi_coupler_inject\n");
   }
   comm_finalize();
   return fails == 0 ? 0 : 1;

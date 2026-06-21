@@ -51,6 +51,10 @@ std::vector<double> bubble(int n) {  // bulle de densite lisse, periodique
 // ecrit en dur (CompositeModel<Euler, NoSource, BackgroundDensity>) pour un test autonome. @p fake_sig
 // remplace -DADC_HEADER_SIG par une valeur bidon (cle d'ABI fausse) quand vrai.
 std::string loader_source() {
+  // Generated C++ source raw string: clang-format would reindent (or, with the
+  // interleaved R"CPP( delimiters, runaway-indent) the inner content. Fence it to keep the
+  // emitted source verbatim.
+  // clang-format off
   return R"CPP(
 #include <adc/runtime/amr_dsl_block.hpp>
 #include <adc/runtime/abi_key.hpp>
@@ -73,6 +77,7 @@ extern "C" void adc_install_native_amr(void* sys, const char* name, const char* 
       limiter, riemann, recon, time, gamma, substeps);
 }
 )CPP";
+  // clang-format on
 }
 
 // Compile le loader en .so (g++/c++ a l'execution). @p extra : flags supplementaires (-DADC_HEADER_SIG
@@ -92,7 +97,8 @@ bool compile_loader(const std::string& src_path, const std::string& so_path,
   std::string cmd = cc + " -shared -fPIC -std=" + ADC_TEST_CXX_STD + " -O2 -I " + ADC_TEST_INCLUDE +
                     " " + extra + " " + src_path + " -o " + so_path;
 #if defined(__APPLE__)
-  cmd += " -undefined dynamic_lookup";  // macOS : indefinis resolus a l'execution (set_compiled_block)
+  cmd +=
+      " -undefined dynamic_lookup";  // macOS : indefinis resolus a l'execution (set_compiled_block)
 #endif
   cmd += " 2> /dev/null";
   return std::system(cmd.c_str()) == 0;
@@ -148,7 +154,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // (A) bloc "production" : loader .so -> AmrSystem::add_native_block (chemin natif AMR).
@@ -161,10 +170,10 @@ int main(int argc, char** argv) {
   // (B) MEME modele installe EN DIRECT par add_compiled_model(AmrSystem&) (le chemin que le loader
   // inline). Memes types + meme schema -> parite STRICTE attendue (bit-identique).
   AmrSystem B(make_cfg(n));
-  add_compiled_model(B, "gas",
-                     ProdModel{Euler{static_cast<Real>(kGamma)}, NoSource{},
-                               BackgroundDensity{Real(0), Real(0)}},
-                     "minmod", "rusanov", "conservative", "explicit", kGamma, 1);
+  add_compiled_model(
+      B, "gas",
+      ProdModel{Euler{static_cast<Real>(kGamma)}, NoSource{}, BackgroundDensity{Real(0), Real(0)}},
+      "minmod", "rusanov", "conservative", "explicit", kGamma, 1);
   B.set_poisson("charge_density", "geometric_mg");
   B.set_refinement(1.2);
   B.set_density("gas", rho);
@@ -208,8 +217,10 @@ int main(int argc, char** argv) {
   }
 
   if (fails == 0)
-    std::printf("OK test_amr_native_loader (add_native_block == add_compiled_model(AmrSystem&) ; "
-                "dmax=%.1e ; ABI falsifiee rejetee)\n", dmax);
+    std::printf(
+        "OK test_amr_native_loader (add_native_block == add_compiled_model(AmrSystem&) ; "
+        "dmax=%.1e ; ABI falsifiee rejetee)\n",
+        dmax);
   return fails ? 1 : 0;
 #endif  // ADC_HAS_KOKKOS
 }

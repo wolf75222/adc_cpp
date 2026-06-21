@@ -30,9 +30,9 @@ namespace detail {
 /// Linear extrapolation of a SCALAR field from the theta-stage to the full step: f^{n+1} = f^n + (1/theta)
 /// (f^{n+theta} - f^n). theta = 1 -> identity (inv_theta = 1). NAMED device-clean functor.
 struct SchurExtrapolateScalarKernel {
-  ConstArray4 f_n;     ///< f^n
-  Array4 f;            ///< IN: f^{n+theta}; OUT: f^{n+1}
-  Real inv_theta;      ///< 1 / theta
+  ConstArray4 f_n;  ///< f^n
+  Array4 f;         ///< IN: f^{n+theta}; OUT: f^{n+1}
+  Real inv_theta;   ///< 1 / theta
   ADC_HD void operator()(int i, int j) const {
     f(i, j, 0) = f_n(i, j, 0) + inv_theta * (f(i, j, 0) - f_n(i, j, 0));
   }
@@ -66,7 +66,8 @@ struct SchurEnergyKernel {
   int c_rho, c_E;
   ADC_HD void operator()(int i, int j) const {
     const Real rho = st(i, j, c_rho);
-    const Real ke_old = Real(0.5) * rho * (vx_n(i, j, 0) * vx_n(i, j, 0) + vy_n(i, j, 0) * vy_n(i, j, 0));
+    const Real ke_old =
+        Real(0.5) * rho * (vx_n(i, j, 0) * vx_n(i, j, 0) + vy_n(i, j, 0) * vy_n(i, j, 0));
     const Real ke_new = Real(0.5) * rho * (vx(i, j, 0) * vx(i, j, 0) + vy(i, j, 0) * vy(i, j, 0));
     st(i, j, c_E) += ke_new - ke_old;
   }

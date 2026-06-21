@@ -48,7 +48,9 @@ static constexpr int kFullWidth = [] {
 // donc de boucler sur les champs sans citer leurs noms a la main dans le corps du test.
 static Real aux_member(const Aux& a, int idx) {
   Real v = 0;
-#define ADC_AUX_GET(name, ix) if ((idx) == (ix)) v = a.name;
+#define ADC_AUX_GET(name, ix) \
+  if ((idx) == (ix))          \
+    v = a.name;
   ADC_AUX_FIELDS(ADC_AUX_GET)
 #undef ADC_AUX_GET
   return v;
@@ -57,11 +59,14 @@ static Real aux_member(const Aux& a, int idx) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
-  std::printf("  table ADC_AUX_FIELDS : %d champ(s) extra, largeur pleine = %d\n",
-              kNExtra, kFullWidth);
+  std::printf("  table ADC_AUX_FIELDS : %d champ(s) extra, largeur pleine = %d\n", kNExtra,
+              kFullWidth);
   chk(kNExtra >= 1, "table_non_vide");
   chk(kFullWidth >= kAuxBaseComps + 1, "largeur_pleine_coherente");
 
@@ -74,13 +79,13 @@ int main() {
   // --- (A) chemin device : chaque champ extra est lu au bon membre ---
   // On met une valeur DISTINCTE par composante extra, puis on verifie pour chaque champ que
   // load_aux<kFullWidth> a depose AUX[idx] dans aux_member(.,idx) (i.e. le bon membre nomme).
-  for (int c = 0; c < kFullWidth; ++c) w(0, 0, c) = Real(100 + c);  // 100,101,... distincts
+  for (int c = 0; c < kFullWidth; ++c)
+    w(0, 0, c) = Real(100 + c);  // 100,101,... distincts
   {
     const Aux x = load_aux<kFullWidth>(a, 0, 0);
-    chk(x.phi == Real(100) && x.grad_x == Real(101) && x.grad_y == Real(102),
-        "base_phi_grad_lus");
+    chk(x.phi == Real(100) && x.grad_x == Real(101) && x.grad_y == Real(102), "base_phi_grad_lus");
 #define ADC_AUX_CHECK_READ(name, idx) \
-    chk(aux_member(x, idx) == Real(100 + (idx)), "device_lit_" #name "_au_bon_indice");
+  chk(aux_member(x, idx) == Real(100 + (idx)), "device_lit_" #name "_au_bon_indice");
     ADC_AUX_FIELDS(ADC_AUX_CHECK_READ)
 #undef ADC_AUX_CHECK_READ
   }
@@ -91,36 +96,37 @@ int main() {
   {
     const std::size_t nn = 1, k = 0;
     std::vector<double> AUX(static_cast<std::size_t>(kFullWidth));
-    for (int c = 0; c < kFullWidth; ++c) AUX[static_cast<std::size_t>(c) * nn + k] = 100 + c;
+    for (int c = 0; c < kFullWidth; ++c)
+      AUX[static_cast<std::size_t>(c) * nn + k] = 100 + c;
     Aux host{};
     host.phi = AUX[k];
     host.grad_x = AUX[nn + k];
     host.grad_y = AUX[2 * nn + k];
-#define ADC_AUX_MARSHAL(name, idx) \
-    if (AUX.size() >= ((idx) + 1) * nn) host.name = AUX[(idx) * nn + k];
+#define ADC_AUX_MARSHAL(name, idx)    \
+  if (AUX.size() >= ((idx) + 1) * nn) \
+    host.name = AUX[(idx) * nn + k];
     ADC_AUX_FIELDS(ADC_AUX_MARSHAL)
 #undef ADC_AUX_MARSHAL
     const Aux dev = load_aux<kFullWidth>(a, 0, 0);
     chk(host.phi == dev.phi && host.grad_x == dev.grad_x && host.grad_y == dev.grad_y,
         "host_base_egal_device");
-#define ADC_AUX_CHECK_EQ(name, idx) \
-    chk(host.name == dev.name, "host_egal_device_" #name);
+#define ADC_AUX_CHECK_EQ(name, idx) chk(host.name == dev.name, "host_egal_device_" #name);
     ADC_AUX_FIELDS(ADC_AUX_CHECK_EQ)
 #undef ADC_AUX_CHECK_EQ
   }
 
   // --- (C) retro-compat : largeur de base n'ecrit aucun champ extra ---
-  for (int c = 0; c < kFullWidth; ++c) w(0, 0, c) = Real(999);  // tout parasite
+  for (int c = 0; c < kFullWidth; ++c)
+    w(0, 0, c) = Real(999);  // tout parasite
   {
     const Aux x = load_aux<kAuxBaseComps>(a, 0, 0);
-    chk(x.phi == Real(999) && x.grad_x == Real(999) && x.grad_y == Real(999),
-        "base_lit_phi_grad");
-#define ADC_AUX_CHECK_ZERO(name, idx) \
-    chk(aux_member(x, idx) == Real(0), "base_ignore_" #name);
+    chk(x.phi == Real(999) && x.grad_x == Real(999) && x.grad_y == Real(999), "base_lit_phi_grad");
+#define ADC_AUX_CHECK_ZERO(name, idx) chk(aux_member(x, idx) == Real(0), "base_ignore_" #name);
     ADC_AUX_FIELDS(ADC_AUX_CHECK_ZERO)
 #undef ADC_AUX_CHECK_ZERO
   }
 
-  if (fails == 0) std::printf("OK test_aux_single_source\n");
+  if (fails == 0)
+    std::printf("OK test_aux_single_source\n");
   return fails == 0 ? 0 : 1;
 }

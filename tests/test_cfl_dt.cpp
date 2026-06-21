@@ -49,7 +49,9 @@ struct NanSpeed {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 using Blk = EquationBlock<AdvectX, FirstOrder, ExplicitTime<SSPRK2, 1>>;
@@ -57,7 +59,10 @@ using Blk = EquationBlock<AdvectX, FirstOrder, ExplicitTime<SSPRK2, 1>>;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -113,11 +118,12 @@ int main() {
     NanBlk nblk{"nan", NanSpeed{}, Un, bc};
     CoupledSystem nsys{nblk};
     SystemCoupler nsim(nsys, geom, ba, bc, ZeroSystemRhs{});
-    const Real dtn = nsim.cfl_dt(cfl);  // calcule le pas SANS avancer l'etat
+    const Real dtn = nsim.cfl_dt(cfl);               // calcule le pas SANS avancer l'etat
     chk(std::isfinite(dtn), "nan_speed_dt_finite");  // std::max(0, NaN) = 0 -> w_max = 0 -> dt fini
     chk(dtn > Real(0), "nan_speed_dt_positive");
   }
 
-  if (fails == 0) std::printf("OK test_cfl_dt\n");
+  if (fails == 0)
+    std::printf("OK test_cfl_dt\n");
   return fails == 0 ? 0 : 1;
 }

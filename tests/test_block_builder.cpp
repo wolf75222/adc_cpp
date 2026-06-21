@@ -29,7 +29,10 @@ static constexpr double kPi = 3.14159265358979323846;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 48;
@@ -95,22 +98,26 @@ int main() {
     const ConstArray4 rr = rhs.fab(0).const_array(), u = U.fab(0).const_array();
     for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
       for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
-        dpo = std::fmax(dpo, std::fabs(rr(i, j, 0) - model.elliptic_rhs(load_state<Model>(u, i, j))));
+        dpo =
+            std::fmax(dpo, std::fabs(rr(i, j, 0) - model.elliptic_rhs(load_state<Model>(u, i, j))));
   }
   chk(dpo < 1e-14, "make_poisson_rhs == elliptic_rhs");
 
   // (4) l'avance SSPRK2 tourne (chemin de production) et conserve la masse sur un etat lisse.
   const double mass0 = sum(U);
-  for (int s = 0; s < 10; ++s) clo.advance(U, 2e-3, 1);
+  for (int s = 0; s < 10; ++s)
+    clo.advance(U, 2e-3, 1);
   double mn = 1e300;
   {
     const ConstArray4 u = U.fab(0).const_array();
     for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
-      for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) mn = std::fmin(mn, u(i, j, 0));
+      for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
+        mn = std::fmin(mn, u(i, j, 0));
   }
   chk(std::fabs(sum(U) - mass0) < 1e-9, "avance conserve la masse");
   chk(mn > 0.0 && std::isfinite(mn), "etat physique apres avance");
 
-  if (fails == 0) std::printf("OK test_block_builder (seam AOT instanciable hors System)\n");
+  if (fails == 0)
+    std::printf("OK test_block_builder (seam AOT instanciable hors System)\n");
   return fails ? 1 : 0;
 }

@@ -32,7 +32,9 @@ struct Production {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 using FastBlk = EquationBlock<Production, FirstOrder, ExplicitTime<SSPRK2, 1, 1>>;  // stride 1
@@ -43,7 +45,10 @@ static_assert(SlowBlk::Time::stride == 3);
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -76,6 +81,7 @@ int main() {
   chk(std::fabs(sum(Uf, 0) - Real(0.3) * ncell) < Real(1e-12), "fast_after_3");
   chk(std::fabs(sum(Us, 0) - Real(0.3) * ncell) < Real(1e-12), "slow_after_3_synced");
 
-  if (fails == 0) std::printf("OK test_multirate_stride\n");
+  if (fails == 0)
+    std::printf("OK test_multirate_stride\n");
   return fails == 0 ? 0 : 1;
 }

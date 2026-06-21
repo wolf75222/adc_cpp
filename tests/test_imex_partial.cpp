@@ -40,15 +40,17 @@ struct TwoVarRelaxPartial : TwoVarRelax {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 static_assert(PartiallyImplicitModel<TwoVarRelaxPartial>);
 static_assert(!PartiallyImplicitModel<TwoVarRelax>);
 
 template <class Model>
-static void run(MultiFab& U, const Geometry& geom, const BoxArray& ba,
-                const DistributionMapping&, Real dt) {
+static void run(MultiFab& U, const Geometry& geom, const BoxArray& ba, const DistributionMapping&,
+                Real dt) {
   using Blk = EquationBlock<Model, FirstOrder, IMEXTime<UserTimeIntegrator, 1>>;
   BCRec bc;
   Blk block{"relax", Model{}, U, bc};
@@ -60,7 +62,10 @@ static void run(MultiFab& U, const Geometry& geom, const BoxArray& ba,
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -93,6 +98,7 @@ int main() {
   chk(std::fabs(sum(Uf, 1) - W1_impl * ncell) < Real(1e-9), "full_var1_implicit");
   chk(std::fabs(sum(Up, 1) - sum(Uf, 1)) > Real(1), "partial_vs_full_differ");
 
-  if (fails == 0) std::printf("OK test_imex_partial\n");
+  if (fails == 0)
+    std::printf("OK test_imex_partial\n");
   return fails == 0 ? 0 : 1;
 }

@@ -42,15 +42,17 @@ static_assert(kAmrRefRatio == 2, "ratio-2-structural kernels below assume kAmrRe
 struct PatchRange {
   int I0, I1, J0, J1;
   explicit PatchRange(const Box2D& fine)
-      : I0(fine.lo[0] / 2), I1((fine.hi[0] - 1) / 2),
-        J0(fine.lo[1] / 2), J1((fine.hi[1] - 1) / 2) {}
+      : I0(fine.lo[0] / 2),
+        I1((fine.hi[0] - 1) / 2),
+        J0(fine.lo[1] / 2),
+        J1((fine.hi[1] - 1) / 2) {}
   Box2D box() const { return Box2D{{I0, J0}, {I1, J1}}; }  // coarse footprint (cells)
 };
 
 // multi-box fine ghosts from the coarse (space+time interp), THEN fill_boundary
 // (fine-fine) will overwrite the ghosts covered by a neighbor box. coarse mono-box.
-inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
-                                      const MultiFab& Uc_new, Real frac) {
+inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old, const MultiFab& Uc_new,
+                                      Real frac) {
   device_fence();
   const int nc = Uf.ncomp();
   const ConstArray4 co = Uc_old.fab(0).const_array();
@@ -60,7 +62,8 @@ inline void mf_fill_fine_ghosts_multi(MultiFab& Uf, const MultiFab& Uc_old,
     const Box2D v = Uf.box(li), g = Uf.fab(li).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-        if (!v.contains(i, j)) fill_cf_ghost_cell(f, co, cn, i, j, nc, frac);
+        if (!v.contains(i, j))
+          fill_cf_ghost_cell(f, co, cn, i, j, nc, frac);
   }
 }
 
@@ -106,7 +109,8 @@ inline void fill_periodic_local(MultiFab& mf, const Box2D& dom) {
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i)
         if (i < 0 || i >= NX || j < 0 || j >= NY)
-          for (int k = 0; k < nc; ++k) a(i, j, k) = a(wrap(i, NX), wrap(j, NY), k);
+          for (int k = 0; k < nc; ++k)
+            a(i, j, k) = a(wrap(i, NX), wrap(j, NY), k);
   }
 }
 
@@ -121,16 +125,20 @@ struct FluxRegister {
   int I0, J0, NX, NY, nc;
   std::vector<Real> buf;
   FluxRegister(const Box2D& region, int ncomp)
-      : I0(region.lo[0]), J0(region.lo[1]),
-        NX(region.hi[0] - region.lo[0] + 1), NY(region.hi[1] - region.lo[1] + 1), nc(ncomp),
+      : I0(region.lo[0]),
+        J0(region.lo[1]),
+        NX(region.hi[0] - region.lo[0] + 1),
+        NY(region.hi[1] - region.lo[1] + 1),
+        nc(ncomp),
         buf(static_cast<std::size_t>(NX) * NY * ncomp, Real(0)) {}
   std::size_t idx(int I, int J, int k) const {
     return (static_cast<std::size_t>(J - J0) * NX + (I - I0)) * nc + k;
   }
   bool in(int I, int J) const { return I >= I0 && I < I0 + NX && J >= J0 && J < J0 + NY; }
   void set(int I, int J, int k, Real v) { buf[idx(I, J, k)] = v; }  // overwrite (average_down)
-  void add(int I, int J, int k, Real v) {                          // bordering addition (reflux)
-    if (in(I, J)) buf[idx(I, J, k)] += v;
+  void add(int I, int J, int k, Real v) {                           // bordering addition (reflux)
+    if (in(I, J))
+      buf[idx(I, J, k)] += v;
   }
   Real at(int I, int J, int k) const { return buf[idx(I, J, k)]; }
   void gather() { all_reduce_sum_inplace(buf.data(), static_cast<int>(buf.size())); }
@@ -145,17 +153,21 @@ struct CoverageMask {
   int I0, J0, NX, NY;
   std::vector<char> cov;
   explicit CoverageMask(const Box2D& region)
-      : I0(region.lo[0]), J0(region.lo[1]),
-        NX(region.hi[0] - region.lo[0] + 1), NY(region.hi[1] - region.lo[1] + 1),
+      : I0(region.lo[0]),
+        J0(region.lo[1]),
+        NX(region.hi[0] - region.lo[0] + 1),
+        NY(region.hi[1] - region.lo[1] + 1),
         cov(static_cast<std::size_t>(NX) * NY, 0) {}
   void mark(const Box2D& b) {  // marks the cells of b intersected with the region
     const int i0 = std::max(b.lo[0], I0), i1 = std::min(b.hi[0], I0 + NX - 1);
     const int j0 = std::max(b.lo[1], J0), j1 = std::min(b.hi[1], J0 + NY - 1);
     for (int J = j0; J <= j1; ++J)
-      for (int I = i0; I <= i1; ++I) cov[(static_cast<std::size_t>(J - J0) * NX) + (I - I0)] = 1;
+      for (int I = i0; I <= i1; ++I)
+        cov[(static_cast<std::size_t>(J - J0) * NX) + (I - I0)] = 1;
   }
   bool covered(int I, int J) const {
-    if (I < I0 || I >= I0 + NX || J < J0 || J >= J0 + NY) return false;
+    if (I < I0 || I >= I0 + NX || J < J0 || J >= J0 + NY)
+      return false;
     return cov[(static_cast<std::size_t>(J - J0) * NX) + (I - I0)] != 0;
   }
 };
@@ -168,9 +180,9 @@ struct CoverageMask {
 struct SubcyclingSchedule {
   int r;
   explicit SubcyclingSchedule(int ratio = kAmrRefRatio) : r(ratio) {}
-  int count() const { return r; }                       // number of substeps
-  Real dt_sub(Real dt) const { return dt / r; }         // fine step = parent step / r
-  Real frac(int s) const { return Real(s) / r; }        // temporal position of substep s
+  int count() const { return r; }                 // number of substeps
+  Real dt_sub(Real dt) const { return dt / r; }   // fine step = parent step / r
+  Real frac(int s) const { return Real(s) / r; }  // temporal position of substep s
 };
 
 // CoarseFineInterface (review, point 2). The coarse-fine interface of a level: coverage
@@ -186,9 +198,9 @@ struct CoarseFineInterface {
   // region = coarse footprint of the level (origin (0,0), dims NX x NY); fine_ba = GLOBAL
   // fine patches (all the boxes, known to all ranks). We mark the coarse PatchRange footprint
   // of each patch.
-  CoarseFineInterface(const Box2D& coarse_region, const BoxArray& fine_ba)
-      : cmask(coarse_region) {
-    for (int g = 0; g < fine_ba.size(); ++g) cmask.mark(PatchRange(fine_ba[g]).box());
+  CoarseFineInterface(const Box2D& coarse_region, const BoxArray& fine_ba) : cmask(coarse_region) {
+    for (int g = 0; g < fine_ba.size(); ++g)
+      cmask.mark(PatchRange(fine_ba[g]).box());
   }
   bool covered(int I, int J) const { return cmask.covered(I, J); }
 
@@ -201,16 +213,20 @@ struct CoarseFineInterface {
     for (int J = g.J0; J <= g.J1; ++J)
       for (int k = 0; k < nc; ++k) {
         if (!covered(g.I0 - 1, J))
-          ref.add(g.I0 - 1, J, k, -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dx);
+          ref.add(g.I0 - 1, J, k,
+                  -(g.fL[(J - g.J0) * nc + k] - g.cL[(J - g.J0) * nc + k] * dt) / dx);
         if (!covered(g.I1 + 1, J))
-          ref.add(g.I1 + 1, J, k, +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dx);
+          ref.add(g.I1 + 1, J, k,
+                  +(g.fR[(J - g.J0) * nc + k] - g.cR[(J - g.J0) * nc + k] * dt) / dx);
       }
     for (int I = g.I0; I <= g.I1; ++I)
       for (int k = 0; k < nc; ++k) {
         if (!covered(I, g.J0 - 1))
-          ref.add(I, g.J0 - 1, k, -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dy);
+          ref.add(I, g.J0 - 1, k,
+                  -(g.fB[(I - g.I0) * nc + k] - g.cB[(I - g.I0) * nc + k] * dt) / dy);
         if (!covered(I, g.J1 + 1))
-          ref.add(I, g.J1 + 1, k, +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dy);
+          ref.add(I, g.J1 + 1, k,
+                  +(g.fT[(I - g.I0) * nc + k] - g.cT[(I - g.I0) * nc + k] * dt) / dy);
       }
   }
 };

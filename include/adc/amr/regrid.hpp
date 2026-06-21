@@ -45,7 +45,8 @@ TagBox tag_cells(const MultiFab& mf, const Box2D& domain, Crit crit) {
     const Box2D v = f.box();
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
       for (int i = v.lo[0]; i <= v.hi[0]; ++i)
-        if (crit(a, i, j)) tb(i, j) = 1;
+        if (crit(a, i, j))
+          tb(i, j) = 1;
   }
   return tb;
 }
@@ -63,14 +64,15 @@ inline TagBox grow_tags(const TagBox& in, int n, const Box2D& domain) {
         for (int dj = -n; dj <= n; ++dj)
           for (int di = -n; di <= n; ++di) {
             const int ii = i + di, jj = j + dj;
-            if (b.contains(ii, jj) && domain.contains(ii, jj)) out(ii, jj) = 1;
+            if (b.contains(ii, jj) && domain.contains(ii, jj))
+              out(ii, jj) = 1;
           }
   return out;
 }
 
 /// Regrid parameters (configuration object).
 struct RegridParams {
-  int n_buffer = 1;        ///< tag dilation radius (grow_tags) before clustering.
+  int n_buffer = 1;         ///< tag dilation radius (grow_tags) before clustering.
   ClusterParams cluster{};  ///< Berger-Rigoutsos clustering parameters.
 };
 
@@ -82,8 +84,7 @@ struct RegridParams {
 /// Steps: tag -> grow -> Berger-Rigoutsos -> refine(ref_ratio) -> interpolation from the coarse level,
 /// then a copy of the old fine level where it existed to preserve accuracy.
 template <class Crit>
-void regrid_level(AmrHierarchy& h, int coarse_lev, Crit crit,
-                  const RegridParams& rp = {}) {
+void regrid_level(AmrHierarchy& h, int coarse_lev, Crit crit, const RegridParams& rp = {}) {
   const Box2D cdom = h.domain(coarse_lev);
   TagBox tags = tag_cells(h.data(coarse_lev), cdom, crit);
   TagBox grown = grow_tags(tags, rp.n_buffer, cdom);
@@ -97,11 +98,11 @@ void regrid_level(AmrHierarchy& h, int coarse_lev, Crit crit,
   std::vector<Box2D> cboxes = berger_rigoutsos(grown, rp.cluster);
   std::vector<Box2D> fboxes;
   fboxes.reserve(cboxes.size());
-  for (const auto& b : cboxes) fboxes.push_back(b.refine(h.ref_ratio()));
+  for (const auto& b : cboxes)
+    fboxes.push_back(b.refine(h.ref_ratio()));
   BoxArray fba(std::move(fboxes));
 
-  MultiFab newfine(fba, DistributionMapping(fba.size(), n_ranks()), h.ncomp(),
-                   h.n_grow());
+  MultiFab newfine(fba, DistributionMapping(fba.size(), n_ranks()), h.ncomp(), h.n_grow());
   interpolate(h.data(coarse_lev), newfine, h.ref_ratio());
   if (h.num_levels() > coarse_lev + 1)
     parallel_copy(newfine, h.data(coarse_lev + 1));  // preserve the old fine level

@@ -89,7 +89,8 @@ Snap run(AmrSystem& s, int nsteps) {
   s.set_poisson("charge_density", "geometric_mg");
   s.set_refinement(1.2);
   const double dt = 2e-4;
-  for (int k = 0; k < nsteps; ++k) s.step(dt);
+  for (int k = 0; k < nsteps; ++k)
+    s.step(dt);
   return Snap{s.density(), s.mass(), s.n_patches()};
 }
 
@@ -101,12 +102,17 @@ double maxdiff(const std::vector<double>& a, const std::vector<double>& b) {
 }
 double maxabs(const std::vector<double>& a) {
   double m = 0;
-  for (double v : a) m = std::fmax(m, std::fabs(v));
+  for (double v : a)
+    m = std::fmax(m, std::fabs(v));
   return m;
 }
 
 // Source du loader AMR : MEME forme que dsl.emit_cpp_native_loader(target="amr_system"), modele en dur.
 std::string loader_source() {
+  // Generated C++ source raw string: clang-format would reindent (or, with the
+  // interleaved R"CPP( delimiters, runaway-indent) the inner content. Fence it to keep the
+  // emitted source verbatim.
+  // clang-format off
   return R"CPP(
 #include <adc/runtime/amr_dsl_block.hpp>
 #include <adc/runtime/abi_key.hpp>
@@ -129,6 +135,7 @@ extern "C" void adc_install_native_amr(void* sys, const char* name, const char* 
       limiter, riemann, recon, time, gamma, substeps);
 }
 )CPP";
+  // clang-format on
 }
 
 bool compile_loader(const std::string& src_path, const std::string& so_path) {
@@ -161,7 +168,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // ============================================================================================
@@ -209,8 +219,8 @@ int main(int argc, char** argv) {
 
   const std::vector<double> d_hllc_cons = parity_direct("hllc", "conservative");
   const std::vector<double> d_hllc_prim = parity_direct("hllc", "primitive");
-  const std::vector<double> d_roe_cons  = parity_direct("roe",  "conservative");
-  const std::vector<double> d_roe_prim  = parity_direct("roe",  "primitive");
+  const std::vector<double> d_roe_cons = parity_direct("roe", "conservative");
+  const std::vector<double> d_roe_prim = parity_direct("roe", "primitive");
 
   // NO-SILENT-FALLBACK : hllc et roe doivent differer de rusanov sur ce meme etat (la bulle
   // est un ecoulement compressible non-trivial : hllc/roe ne se reduisent PAS a rusanov).
@@ -219,8 +229,9 @@ int main(int argc, char** argv) {
   chk(maxdiff(d_roe_cons, d_rusanov) > 1e-12,
       "roe != rusanov (le flux roe est actif, non silencieux)");
 
-  std::printf("OK  (A) 4 combos hllc/roe x conservative/primitive BIT-IDENTIQUES (dmax==0) ; "
-              "hllc != rusanov, roe != rusanov (flux actifs)\n");
+  std::printf(
+      "OK  (A) 4 combos hllc/roe x conservative/primitive BIT-IDENTIQUES (dmax==0) ; "
+      "hllc != rusanov, roe != rusanov (flux actifs)\n");
 
   // ============================================================================================
   // (B) CHEMIN .so : add_native_block(loader) == add_compiled_model(AmrSystem&), hllc ET roe.
@@ -237,7 +248,7 @@ int main(int argc, char** argv) {
     const std::string tmp = std::string(ADC_TEST_TMPDIR) + "/amr_riemann_native_" +
                             std::to_string(static_cast<long>(std::clock()));
     const std::string src = tmp + ".cpp";
-    const std::string so  = tmp + ".so";
+    const std::string so = tmp + ".so";
     {
       std::ofstream f(src);
       f << loader_source();
@@ -258,23 +269,24 @@ int main(int argc, char** argv) {
 
         const double dmax = maxdiff(sa.density, sb.density);
         char w[200];
-        std::snprintf(w, sizeof w, "[%s/%s] add_native_block == add_compiled_model (dmax==0)",
-                      riem, recon);
+        std::snprintf(w, sizeof w, "[%s/%s] add_native_block == add_compiled_model (dmax==0)", riem,
+                      recon);
         chk(dmax == 0.0, w);
         std::snprintf(w, sizeof w, "[%s/%s] n_patches loader == direct", riem, recon);
         chk(sa.n_patches == sb.n_patches, w);
       };
       parity_loader("hllc", "conservative");
       parity_loader("hllc", "primitive");
-      parity_loader("roe",  "conservative");
-      parity_loader("roe",  "primitive");
+      parity_loader("roe", "conservative");
+      parity_loader("roe", "primitive");
       std::printf("OK (B) add_native_block(hllc/roe, cons/prim) == add_compiled_model (dmax==0)\n");
     }
   }
 #endif  // ADC_HAS_KOKKOS
 
   if (fails == 0)
-    std::printf("OK test_amr_riemann_native (hllc/roe x conservative/primitive : "
-                "add_compiled_model == add_block, bit-identique ; hllc/roe actifs vs rusanov)\n");
+    std::printf(
+        "OK test_amr_riemann_native (hllc/roe x conservative/primitive : "
+        "add_compiled_model == add_block, bit-identique ; hllc/roe actifs vs rusanov)\n");
   return fails ? 1 : 0;
 }

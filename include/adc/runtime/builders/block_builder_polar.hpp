@@ -9,12 +9,12 @@
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator_polar.hpp>  // assemble_rhs_polar (REUSED verbatim)
 #include <adc/numerics/time/time_steppers.hpp>      // SSPRK2Step / SSPRK3Step (core RK math)
-#include <adc/parallel/comm.hpp>                     // all_reduce_max (MPI-safe collective reduction)
-#include <adc/physics/bricks.hpp>                    // ExBVelocityPolar, CompositeModel, source/elliptic bricks
-#include <adc/runtime/dispatch_tags.hpp>             // UNIQUE registry of tags (validate_limiter/riemann)
-#include <adc/runtime/grid_context.hpp>              // BlockClosures (light header)
-#include <adc/runtime/model_factory.hpp>             // detail::dispatch_source / dispatch_elliptic (REUSED)
-#include <adc/runtime/model_registry.hpp>            // transport_tags_csv: polar-wired transport list (ADC-331)
+#include <adc/parallel/comm.hpp>   // all_reduce_max (MPI-safe collective reduction)
+#include <adc/physics/bricks.hpp>  // ExBVelocityPolar, CompositeModel, source/elliptic bricks
+#include <adc/runtime/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann)
+#include <adc/runtime/grid_context.hpp>   // BlockClosures (light header)
+#include <adc/runtime/model_factory.hpp>  // detail::dispatch_source / dispatch_elliptic (REUSED)
+#include <adc/runtime/model_registry.hpp>  // transport_tags_csv: polar-wired transport list (ADC-331)
 #include <adc/runtime/model_spec.hpp>
 
 #include <functional>
@@ -68,15 +68,16 @@ namespace detail {
 /// and curvature term do not yet have a polar brick -> EXPLICIT error.
 template <class Visitor>
 void dispatch_transport_polar(const ModelSpec& m, Visitor&& v) {
-  if (m.transport == "exb") return v(ExBVelocityPolar{Real(m.B0)});
-  if (m.transport == "isothermal") return v(IsothermalFluxPolar{IsothermalFlux{Real(m.cs2), Real(m.vacuum_floor)}});
+  if (m.transport == "exb")
+    return v(ExBVelocityPolar{Real(m.B0)});
+  if (m.transport == "isothermal")
+    return v(IsothermalFluxPolar{IsothermalFlux{Real(m.cs2), Real(m.vacuum_floor)}});
   // Wired polar transports = the registry rows with polar_ok (model_registry.hpp); the list is
   // single-sourced via transport_tags_csv(/*polar=*/true). 'compressible' (Euler with energy) has no
   // polar brick yet -> not polar_ok -> rejected here with the same explicit "unsupported" message.
-  throw std::runtime_error(
-      "polar transport '" + m.transport + "' unsupported (wired in polar: " +
-      transport_tags_csv(/*polar=*/true) +
-      "; 'compressible' (Euler with energy) in polar is a later phase)");
+  throw std::runtime_error("polar transport '" + m.transport +
+                           "' unsupported (wired in polar: " + transport_tags_csv(/*polar=*/true) +
+                           "; 'compressible' (Euler with energy) in polar is a later phase)");
 }
 
 /// Assembles the POLAR CompositeModel designated by @p m and calls visitor(model). REUSES
@@ -185,7 +186,8 @@ struct PolarMaxSpeed {
           const Aux ac = load_aux<aux_comps<Model>()>(a, i, j);
           for (int dir = 0; dir < 2; ++dir) {
             const Real w = m.max_wave_speed(us, ac, dir);
-            if (w > wmax) wmax = w;
+            if (w > wmax)
+              wmax = w;
           }
         }
     }
@@ -239,7 +241,8 @@ inline void derive_aux_polar(const MultiFab& phi, MultiFab& aux, const PolarGeom
       for (int i = ilo; i <= ihi; ++i) {
         const Real ri = g.r_cell(i);
         a(i, j, 0) = p(i, j);
-        Real gr;  // grad_r = d phi/dr: centered in the interior, one-sided second order at the walls (phi without ghost in r)
+        Real
+            gr;  // grad_r = d phi/dr: centered in the interior, one-sided second order at the walls (phi without ghost in r)
         if (i == ilo)
           gr = (Real(-3) * p(i, j) + Real(4) * p(i + 1, j) - p(i + 2, j)) / (Real(2) * dr);
         else if (i == ihi)
@@ -247,7 +250,8 @@ inline void derive_aux_polar(const MultiFab& phi, MultiFab& aux, const PolarGeom
         else
           gr = (p(i + 1, j) - p(i - 1, j)) / (Real(2) * dr);
         a(i, j, 1) = gr;
-        a(i, j, 2) = (p(i, jp) - p(i, jm)) / (Real(2) * dth * ri);  // grad_theta = (1/r) d phi/d theta (already /r)
+        a(i, j, 2) = (p(i, jp) - p(i, jm)) /
+                     (Real(2) * dth * ri);  // grad_theta = (1/r) d phi/d theta (already /r)
       }
     }
   }
@@ -272,7 +276,8 @@ BlockClosures build_block_polar(const Model& m, const PolarGridContext& ctx, boo
     throw std::runtime_error("System (polar): unknown explicit time method '" + method +
                              "' (ssprk2|ssprk3)");
   }
-  bc.rhs_into = detail::PolarRhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, wall_radial, pos_floor};
+  bc.rhs_into =
+      detail::PolarRhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, wall_radial, pos_floor};
   return bc;
 }
 
@@ -301,10 +306,18 @@ BlockClosures make_block_polar(const Model& m, const std::string& lim, const std
   validate_riemann(riem, /*polar=*/true, "System (polar)");
   validate_limiter(lim, "System (polar)");
   if (riem == "rusanov") {
-    if (lim == "none") return build_block_polar<NoSlope, RusanovFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
-    if (lim == "minmod") return build_block_polar<Minmod, RusanovFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
-    if (lim == "vanleer") return build_block_polar<VanLeer, RusanovFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
-    if (lim == "weno5") return build_block_polar<Weno5, RusanovFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
+    if (lim == "none")
+      return build_block_polar<NoSlope, RusanovFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                     pos_floor);
+    if (lim == "minmod")
+      return build_block_polar<Minmod, RusanovFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                    pos_floor);
+    if (lim == "vanleer")
+      return build_block_polar<VanLeer, RusanovFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                     pos_floor);
+    if (lim == "weno5")
+      return build_block_polar<Weno5, RusanovFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                   pos_floor);
     throw_registry_dispatch_mismatch("System (polar)", "limiter", lim);
   }
   if (riem == "hll") {
@@ -317,10 +330,18 @@ BlockClosures make_block_polar(const Model& m, const std::string& lim, const std
     if constexpr (requires(const Model mm, typename Model::State s, Aux a, Real r) {
                     mm.wave_speeds(s, a, 0, r, r);
                   }) {
-      if (lim == "none") return build_block_polar<NoSlope, HLLFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
-      if (lim == "minmod") return build_block_polar<Minmod, HLLFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
-      if (lim == "vanleer") return build_block_polar<VanLeer, HLLFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
-      if (lim == "weno5") return build_block_polar<Weno5, HLLFlux>(m, ctx, recon_prim, method, wall_radial, pos_floor);
+      if (lim == "none")
+        return build_block_polar<NoSlope, HLLFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                   pos_floor);
+      if (lim == "minmod")
+        return build_block_polar<Minmod, HLLFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                  pos_floor);
+      if (lim == "vanleer")
+        return build_block_polar<VanLeer, HLLFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                   pos_floor);
+      if (lim == "weno5")
+        return build_block_polar<Weno5, HLLFlux>(m, ctx, recon_prim, method, wall_radial,
+                                                 pos_floor);
       throw_registry_dispatch_mismatch("System (polar)", "limiter", lim);
     } else {
       throw std::runtime_error(

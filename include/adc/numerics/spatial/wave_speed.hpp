@@ -21,7 +21,7 @@
 #include <adc/mesh/for_each.hpp>  // reduce_max_cell, reduce_min_cell
 #include <adc/mesh/multifab.hpp>
 #include <adc/numerics/spatial/state_access.hpp>  // load_state, load_aux, aux_comps
-#include <adc/parallel/comm.hpp>  // all_reduce_max, all_reduce_min
+#include <adc/parallel/comm.hpp>                  // all_reduce_max, all_reduce_min
 
 #include <algorithm>
 #include <limits>
@@ -44,7 +44,8 @@ struct MaxWaveSpeedKernel {
     const Real wx = model.max_wave_speed(s, ax, 0);
     const Real wy = model.max_wave_speed(s, ax, 1);
     const Real w = wx > wy ? wx : wy;
-    if (w > acc) acc = w;
+    if (w > acc)
+      acc = w;
   }
 };
 }  // namespace detail
@@ -62,8 +63,7 @@ struct MaxWaveSpeedKernel {
 // rank (the rank whose local max is lower takes too large a step) and the simulation diverges or
 // desynchronizes the ranks. In serial all_reduce_max is the identity (behavior unchanged).
 template <class Model>
-inline Real max_wave_speed_mf(const Model& model, const MultiFab& U,
-                              const MultiFab& aux) {
+inline Real max_wave_speed_mf(const Model& model, const MultiFab& U, const MultiFab& aux) {
   Real m = 0;
   for (int li = 0; li < U.local_size(); ++li) {
     const ConstArray4 u = U.fab(li).const_array();
@@ -93,7 +93,8 @@ struct WaveSpeedMatchKernel {
     const Real w = wx > wy ? wx : wy;
     if (w == target) {
       const Real idx = static_cast<Real>(j) * nx + static_cast<Real>(i);
-      if (idx < acc) acc = idx;
+      if (idx < acc)
+        acc = idx;
     }
   }
 };
@@ -105,16 +106,15 @@ struct WaveSpeedMatchKernel {
 /// then all_reduce_min of the encoded index (+inf on the non-holder ranks). @p nx: domain width
 /// (encoding j*nx + i).
 template <class Model>
-inline void max_wave_speed_hotspot_mf(const Model& model, const MultiFab& U,
-                                      const MultiFab& aux, int nx,
-                                      Real& w_out, int& i_out, int& j_out) {
+inline void max_wave_speed_hotspot_mf(const Model& model, const MultiFab& U, const MultiFab& aux,
+                                      int nx, Real& w_out, int& i_out, int& j_out) {
   const Real w = max_wave_speed_mf(model, U, aux);
   Real best = std::numeric_limits<Real>::infinity();
   for (int li = 0; li < U.local_size(); ++li) {
     const ConstArray4 u = U.fab(li).const_array();
     const ConstArray4 a = aux.fab(li).const_array();
     best = std::min(best, reduce_min_cell(U.box(li), detail::WaveSpeedMatchKernel<Model>{
-                                              model, u, a, w, static_cast<Real>(nx)}));
+                                                         model, u, a, w, static_cast<Real>(nx)}));
   }
   best = static_cast<Real>(all_reduce_min(static_cast<double>(best)));
   w_out = w;
@@ -152,7 +152,8 @@ struct StabilitySpeedKernel {
     const Real wx = model.stability_speed(s, ax, 0);
     const Real wy = model.stability_speed(s, ax, 1);
     const Real w = wx > wy ? wx : wy;
-    if (w > acc) acc = w;
+    if (w > acc)
+      acc = w;
   }
 };
 
@@ -165,7 +166,8 @@ struct SourceFrequencyKernel {
     const auto s = load_state<Model>(u, i, j);
     const Aux ax = load_aux<aux_comps<Model>()>(a, i, j);
     const Real mu = model.source_frequency(s, ax);
-    if (mu > acc) acc = mu;
+    if (mu > acc)
+      acc = mu;
   }
 };
 
@@ -183,7 +185,8 @@ struct InvStabilityDtKernel {
     const Real db = model.stability_dt(s, ax);
     if (db > Real(0)) {
       const Real inv = Real(1) / db;
-      if (inv > acc) acc = inv;
+      if (inv > acc)
+        acc = inv;
     }
   }
 };
@@ -221,7 +224,8 @@ inline Real min_stability_dt_mf(const Model& model, const MultiFab& U, const Mul
   for (int li = 0; li < U.local_size(); ++li) {
     const ConstArray4 u = U.fab(li).const_array();
     const ConstArray4 a = aux.fab(li).const_array();
-    inv = std::max(inv, reduce_max_cell(U.box(li), detail::InvStabilityDtKernel<Model>{model, u, a}));
+    inv =
+        std::max(inv, reduce_max_cell(U.box(li), detail::InvStabilityDtKernel<Model>{model, u, a}));
   }
   inv = static_cast<Real>(all_reduce_max(static_cast<double>(inv)));
   return inv > Real(0) ? Real(1) / inv : Real(0);

@@ -54,9 +54,8 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
                         const std::string& limiter = "minmod",
                         const std::string& riemann = "rusanov",
                         const std::string& recon = "conservative",
-                        const std::string& time = "explicit", double gamma = 1.4,
-                        int substeps = 1, bool evolve = true, int stride = 1,
-                        double positivity_floor = 0) {
+                        const std::string& time = "explicit", double gamma = 1.4, int substeps = 1,
+                        bool evolve = true, int stride = 1, double positivity_floor = 0) {
   const bool imex = (time == "imex");
   const bool recon_prim = (recon == "primitive");
   // EXPLICIT RK scheme marshaled by the production path (add_native_block -> adc_install_native
@@ -66,9 +65,7 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
   // ForwardEuler half-step + implicit source, so method is ignored when imex. We thus align the
   // production .so with the native add_block path (system.cpp) which already exposed ssprk3; any
   // other string ("explicit"/unknown) falls back to ssprk2 (add_native_block validates the upstream string).
-  const std::string method = (time == "ssprk3") ? "ssprk3"
-                             : (time == "euler") ? "euler"
-                                                 : "ssprk2";
+  const std::string method = (time == "ssprk3") ? "ssprk3" : (time == "euler") ? "euler" : "ssprk2";
   // The block may read extra auxiliary fields (aux_comps<Model> > 3, e.g. B_z of a magnetized
   // source): we widen the System's SHARED aux channel BEFORE capturing its address, so that the
   // closure reads a wide enough aux. Base model (3) -> no-op, unchanged.
@@ -78,8 +75,8 @@ void add_compiled_model(System& sys, const std::string& name, Model model,
                                  nullptr, static_cast<Real>(positivity_floor));
   std::function<Real(const MultiFab&)> ms = make_max_speed(model, ctx);
   std::function<void(const MultiFab&, MultiFab&)> pr = make_poisson_rhs(model);
-  sys.install_block(name, Model::n_vars, Model::conservative_vars(), Model::primitive_vars(),
-                    gamma, std::move(clo), std::move(ms), std::move(pr), substeps, evolve, stride);
+  sys.install_block(name, Model::n_vars, Model::conservative_vars(), Model::primitive_vars(), gamma,
+                    std::move(clo), std::move(ms), std::move(pr), substeps, evolve, stride);
   // cons <-> prim conversions OF THE MODEL (set/get_primitive_state): same formulas as the flux of
   // the production path. Set AFTER install_block (like set_block_ghosts); a native .so loader
   // recompiled against this header (ABI key verified) carries them too.

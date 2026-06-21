@@ -56,7 +56,8 @@ struct Advect {
 };
 
 static_assert(PhysicalModel<Advect>, "Advect est un PhysicalModel");
-static_assert(!DiffusiveModel<Advect>, "Advect n'est pas diffusif (le masque cible le flux hyperbolique)");
+static_assert(!DiffusiveModel<Advect>,
+              "Advect n'est pas diffusif (le masque cible le flux hyperbolique)");
 
 int main() {
   int fails = 0;
@@ -90,7 +91,8 @@ int main() {
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
         const double x = geom.x_cell(i), y = geom.y_cell(j);
-        a(i, j, 0) = 1.0 + 0.5 * std::exp(-(((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) / 0.02));
+        a(i, j, 0) =
+            1.0 + 0.5 * std::exp(-(((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) / 0.02));
       }
   }
 
@@ -99,7 +101,7 @@ int main() {
   // ----------------------------------------------------------------------
   {
     MultiFab mask(ba, dm, 1, 1);
-    mask.set_val(Real(1));  // tout actif : le sous-domaine est le domaine entier
+    mask.set_val(Real(1));            // tout actif : le sous-domaine est le domaine entier
     fill_ghosts(U, geom.domain, bc);  // memes ghosts pour les deux chemins
     MultiFab R_ref(ba, dm, 1, 0), R_msk(ba, dm, 1, 0);
     assemble_rhs<Minmod, RusanovFlux>(model, U, aux, geom, R_ref);
@@ -155,7 +157,8 @@ int main() {
       double s = 0.0;
       for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
         for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
-          if (m(i, j, 0) >= Real(0.5)) s += double(f(i, j, 0));
+          if (m(i, j, 0) >= Real(0.5))
+            s += double(f(i, j, 0));
       return s * dx2;
     };
 
@@ -179,7 +182,8 @@ int main() {
         for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
           for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
             if (m(i, j, 0) < Real(0.5))
-              max_inactive_residual = std::max(max_inactive_residual, std::fabs(double(r(i, j, 0))));
+              max_inactive_residual =
+                  std::max(max_inactive_residual, std::fabs(double(r(i, j, 0))));
       }
       saxpy(U, Real(dt), R);  // U += dt R (cellules valides)
     }
@@ -213,6 +217,7 @@ int main() {
     }
   }
 
-  if (fails == 0) std::printf("OK test_disc_domain_mask\n");
+  if (fails == 0)
+    std::printf("OK test_disc_domain_mask\n");
   return fails == 0 ? 0 : 1;
 }

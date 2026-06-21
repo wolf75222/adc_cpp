@@ -134,13 +134,14 @@ inline void run_explicit_substeps(RhsEval&& rhs, MultiFab& U, Real h, int n) {
   // Probe the actual scratch-taking overload (not just a nested type named Scratch): a custom
   // TimeStepper that happens to expose an unrelated Scratch type but no four-arg take_step still
   // takes the one-shot fallback instead of hitting a hard error.
-  if constexpr (requires(Stepper st, RhsEval r, MultiFab& u, Real dt, typename Stepper::Scratch& sc) {
-                  st.take_step(r, u, dt, sc);
-                }) {
+  if constexpr (requires(Stepper st, RhsEval r, MultiFab& u, Real dt,
+                         typename Stepper::Scratch& sc) { st.take_step(r, u, dt, sc); }) {
     typename Stepper::Scratch scratch(U);
-    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h, scratch);
+    for (int s = 0; s < n; ++s)
+      Stepper{}.take_step(rhs, U, h, scratch);
   } else {
-    for (int s = 0; s < n; ++s) Stepper{}.take_step(rhs, U, h);
+    for (int s = 0; s < n; ++s)
+      Stepper{}.take_step(rhs, U, h);
   }
 }
 

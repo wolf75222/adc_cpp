@@ -2,12 +2,12 @@
 
 #include <adc/amr/regrid.hpp>   // tag_cells, grow_tags (per-block tags + phi for the union regrid)
 #include <adc/amr/tag_box.hpp>  // TagBox, tag_union (cell-by-cell OR of the tags of all blocks)
-#include <adc/core/state.hpp>  // kAuxBaseComps
+#include <adc/core/state.hpp>   // kAuxBaseComps
 #include <adc/core/variables.hpp>  // VariableSet, VariableRole, role_from_name (role -> component of coupled sources)
 #include <adc/coupling/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb (aux injection coarse->fine)
 #include <adc/coupling/amr_regrid_coupler.hpp>  // regrid_compute_fine_layout + regrid_field_on_layout (split bricks)
 #include <adc/coupling/amr_system_coupler.hpp>  // detail::same_layout_or_throw (shared-layout guard)
-#include <adc/coupling/aux_fill.hpp>        // detail::derive_aux_bc (BC of the aux channel)
+#include <adc/coupling/aux_fill.hpp>            // detail::derive_aux_bc (BC of the aux channel)
 #include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel + CsProgram (flat ABI, P5 bytecode)
 #include <adc/numerics/elliptic/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess
 #include <adc/numerics/elliptic/geometric_mg.hpp>
@@ -26,8 +26,8 @@
 #include <cmath>      // std::isfinite (reject a degenerate dt)
 #include <cstddef>
 #include <functional>
-#include <limits>     // std::numeric_limits (initial dt = +inf, min over the blocks)
-#include <map>        // named_aux_: model-named aux fields (comp -> coarse field), re-applied each solve
+#include <limits>  // std::numeric_limits (initial dt = +inf, min over the blocks)
+#include <map>  // named_aux_: model-named aux fields (comp -> coarse field), re-applied each solve
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -239,8 +239,9 @@ class AmrRuntime {
       throw std::runtime_error("AmrRuntime : at least one block required");
     for (const auto& b : blocks_)
       if (!b.levels || b.levels->empty())
-        throw std::runtime_error("AmrRuntime : each block must carry at least one level "
-                                 "(coarse) on the shared layout");
+        throw std::runtime_error(
+            "AmrRuntime : each block must carry at least one level "
+            "(coarse) on the shared layout");
     nlev_ = static_cast<int>(blocks_[0].levels->size());
 
     // EXACT layout consistency between blocks (the aux is shared per level): same number of levels,
@@ -251,7 +252,8 @@ class AmrRuntime {
     {
       std::vector<std::vector<AmrLevelMP>> ref;
       ref.reserve(blocks_.size());
-      for (const auto& b : blocks_) ref.push_back(*b.levels);
+      for (const auto& b : blocks_)
+        ref.push_back(*b.levels);
       detail::same_layout_or_throw(ref);
     }
 
@@ -263,7 +265,8 @@ class AmrRuntime {
     // identical to the base case.
     aux_ncomp_ = kAuxBaseComps;
     for (const auto& b : blocks_)
-      if (b.aux_ncomp > aux_ncomp_) aux_ncomp_ = b.aux_ncomp;
+      if (b.aux_ncomp > aux_ncomp_)
+        aux_ncomp_ = b.aux_ncomp;
 
     // SHARED aux: one MultiFab (phi, grad phi) per level, on the common grid. Sized once -> stable
     // addresses for the blocks' aux pointers. The shared layout is that of block 0
@@ -273,7 +276,8 @@ class AmrRuntime {
     for (int k = 0; k < nlev_; ++k)
       aux_[k] = MultiFab(L0[k].U.box_array(), L0[k].U.dmap(), aux_ncomp_, 1);
     for (auto& b : blocks_)
-      for (int k = 0; k < nlev_; ++k) (*b.levels)[k].aux = &aux_[k];
+      for (int k = 0; k < nlev_; ++k)
+        (*b.levels)[k].aux = &aux_[k];
 
     // Tag predicates of the union regrid: one empty slot per block (set_block_tag_predicate fills
     // them). Empty by default -> no tag -> frozen hierarchy (regrid is not called anyway as long as
@@ -320,7 +324,8 @@ class AmrRuntime {
   /// anticipation); @p margin: nesting (clamp the patches to the boundaries). Must be called BEFORE
   /// the first step.
   void set_regrid(int every, int grow = 2, int margin = 2) {
-    if (every < 0) throw std::runtime_error("AmrRuntime::set_regrid : regrid_every >= 0");
+    if (every < 0)
+      throw std::runtime_error("AmrRuntime::set_regrid : regrid_every >= 0");
     regrid_every_ = every;
     regrid_grow_ = grow;
     regrid_margin_ = margin;
@@ -354,7 +359,8 @@ class AmrRuntime {
   /// within the channel (the facade validates and resolves the name).
   void set_named_aux(int comp, std::vector<Real> field) {
     named_aux_[comp] = std::move(field);
-    if (!aux_.empty()) apply_named_aux();  // reflect immediately if the hierarchy already exists
+    if (!aux_.empty())
+      apply_named_aux();  // reflect immediately if the hierarchy already exists
   }
 
   /// Registers a per-field aux HALO policy (ADC-369) for the named component @p comp: solve_fields
@@ -396,17 +402,23 @@ class AmrRuntime {
     const int n_terms = static_cast<int>(out_blocks.size());
     // --- form validation (before any step, EXPLICIT errors); mirror of System::add_coupled_source.
     if (n_terms == 0)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : no source term (out_blocks empty)");
+      throw std::runtime_error(
+          "AmrRuntime::add_coupled_source : no source term (out_blocks empty)");
     if (static_cast<int>(in_roles.size()) != n_in)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : in_blocks / in_roles of different sizes");
-    if (static_cast<int>(out_roles.size()) != n_terms || static_cast<int>(prog_lens.size()) != n_terms)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : out_blocks / out_roles / prog_lens of "
-                               "different sizes");
+      throw std::runtime_error(
+          "AmrRuntime::add_coupled_source : in_blocks / in_roles of different sizes");
+    if (static_cast<int>(out_roles.size()) != n_terms ||
+        static_cast<int>(prog_lens.size()) != n_terms)
+      throw std::runtime_error(
+          "AmrRuntime::add_coupled_source : out_blocks / out_roles / prog_lens of "
+          "different sizes");
     if (prog_ops.size() != prog_args.size())
-      throw std::runtime_error("AmrRuntime::add_coupled_source : prog_ops / prog_args of different sizes");
+      throw std::runtime_error(
+          "AmrRuntime::add_coupled_source : prog_ops / prog_args of different sizes");
     if (n_in + n_const > kCsMaxReg)
-      throw std::runtime_error("AmrRuntime::add_coupled_source : too many registers (inputs + constants > " +
-                               std::to_string(kCsMaxReg) + ")");
+      throw std::runtime_error(
+          "AmrRuntime::add_coupled_source : too many registers (inputs + constants > " +
+          std::to_string(kCsMaxReg) + ")");
     if (n_terms > kCsMaxTerms)
       throw std::runtime_error("AmrRuntime::add_coupled_source : too many source terms (> " +
                                std::to_string(kCsMaxTerms) + ")");
@@ -425,29 +437,33 @@ class AmrRuntime {
       const VariableSet& vs = blocks_[static_cast<std::size_t>(b)].cons_vars;
       const int comp = vs.index_of(role);
       if (comp < 0)
-        throw std::runtime_error("AmrRuntime::add_coupled_source : block '" + block +
-                                 "' does not expose role '" + role + "' (roles: " +
-                                 (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
-                                 ", no silent fallback to component 0)");
+        throw std::runtime_error(
+            "AmrRuntime::add_coupled_source : block '" + block + "' does not expose role '" + role +
+            "' (roles: " + (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
+            ", no silent fallback to component 0)");
       return {b, comp};
     };
     // Inputs: (block, component) read per cell. Captured by INDEX -> we rebuild the Array4 at EACH
     // application (the fabs live in the level stack, repointed per level in the splitting).
     std::vector<CsRef> ins(static_cast<std::size_t>(n_in));
     for (int c = 0; c < n_in; ++c) {
-      auto [b, comp] = resolve(in_blocks[static_cast<std::size_t>(c)], in_roles[static_cast<std::size_t>(c)]);
+      auto [b, comp] =
+          resolve(in_blocks[static_cast<std::size_t>(c)], in_roles[static_cast<std::size_t>(c)]);
       ins[static_cast<std::size_t>(c)] = {b, comp, CsProgram{}};
     }
     std::vector<CsRef> outs(static_cast<std::size_t>(n_terms));
     int off = 0;
     for (int t = 0; t < n_terms; ++t) {
-      auto [b, comp] = resolve(out_blocks[static_cast<std::size_t>(t)], out_roles[static_cast<std::size_t>(t)]);
+      auto [b, comp] =
+          resolve(out_blocks[static_cast<std::size_t>(t)], out_roles[static_cast<std::size_t>(t)]);
       const int len = prog_lens[static_cast<std::size_t>(t)];
       if (len < 0 || len > kCsMaxProg)
         throw std::runtime_error("AmrRuntime::add_coupled_source : program of term " +
-                                 std::to_string(t) + " too long (> " + std::to_string(kCsMaxProg) + ")");
+                                 std::to_string(t) + " too long (> " + std::to_string(kCsMaxProg) +
+                                 ")");
       if (off + len > static_cast<int>(prog_ops.size()))
-        throw std::runtime_error("AmrRuntime::add_coupled_source : prog_lens inconsistent with prog_ops");
+        throw std::runtime_error(
+            "AmrRuntime::add_coupled_source : prog_lens inconsistent with prog_ops");
       CsProgram pg;
       pg.len = len;
       for (int k = 0; k < len; ++k) {
@@ -456,7 +472,8 @@ class AmrRuntime {
         if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
           throw std::runtime_error("AmrRuntime::add_coupled_source : invalid opcode");
         if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
-          throw std::runtime_error("AmrRuntime::add_coupled_source : register out of bounds in the program");
+          throw std::runtime_error(
+              "AmrRuntime::add_coupled_source : register out of bounds in the program");
         pg.op[k] = opc;
         pg.arg[k] = a;
       }
@@ -464,8 +481,8 @@ class AmrRuntime {
       off += len;
     }
     std::vector<Real> kconsts(consts.begin(), consts.end());
-    coupled_sources_.push_back(CoupledSourceSpec{std::move(ins), std::move(outs), std::move(kconsts),
-                                                 n_in, n_const, n_terms});
+    coupled_sources_.push_back(CoupledSourceSpec{std::move(ins), std::move(outs),
+                                                 std::move(kconsts), n_in, n_const, n_terms});
   }
 
   /// Applies ALL the registered coupled sources of a step dt, by forward-Euler splitting. Runtime
@@ -487,7 +504,8 @@ class AmrRuntime {
   /// registered source (coupled_sources_ empty): total no-op -> bit-identical trajectory to the
   /// historical one.
   void coupled_source_step(Real dt) {
-    if (coupled_sources_.empty()) return;  // opt-in: no source -> bit-identical path
+    if (coupled_sources_.empty())
+      return;        // opt-in: no source -> bit-identical path
     solve_fields();  // aux per level up to date (a term may read phi/grad via a future input)
     for (const auto& cs : coupled_sources_) {
       // PER-LEVEL application: at each level k, the blocks share EXACTLY the same layout
@@ -503,23 +521,32 @@ class AmrRuntime {
           kern.n_const = cs.n_const;
           kern.n_terms = cs.n_terms;
           for (int c = 0; c < cs.n_in; ++c) {
-            kern.in[c] = (*blocks_[static_cast<std::size_t>(cs.ins[static_cast<std::size_t>(c)].block)]
-                               .levels)[k].U.fab(li).array();
+            kern.in[c] =
+                (*blocks_[static_cast<std::size_t>(cs.ins[static_cast<std::size_t>(c)].block)]
+                      .levels)[k]
+                    .U.fab(li)
+                    .array();
             kern.in_comp[c] = cs.ins[static_cast<std::size_t>(c)].comp;
           }
-          for (int c = 0; c < cs.n_const; ++c) kern.consts[c] = cs.kconsts[static_cast<std::size_t>(c)];
+          for (int c = 0; c < cs.n_const; ++c)
+            kern.consts[c] = cs.kconsts[static_cast<std::size_t>(c)];
           for (int t = 0; t < cs.n_terms; ++t) {
-            kern.out[t] = (*blocks_[static_cast<std::size_t>(cs.outs[static_cast<std::size_t>(t)].block)]
-                                .levels)[k].U.fab(li).array();
+            kern.out[t] =
+                (*blocks_[static_cast<std::size_t>(cs.outs[static_cast<std::size_t>(t)].block)]
+                      .levels)[k]
+                    .U.fab(li)
+                    .array();
             kern.out_comp[t] = cs.outs[static_cast<std::size_t>(t)].comp;
             kern.prog[t] = cs.outs[static_cast<std::size_t>(t)].prog;
           }
-          for_each_cell(Uref.box(li), kern);  // NAMED functor (device-clean), additive forward-Euler
+          for_each_cell(Uref.box(li),
+                        kern);  // NAMED functor (device-clean), additive forward-Euler
         }
       }
       // Restore the consistency of the covered coarse cells (cf. COVERAGE INVARIANT above).
       for (auto& b : blocks_)
-        for (int k = nlev_ - 1; k >= 1; --k) mf_average_down_mb((*b.levels)[k].U, (*b.levels)[k - 1].U);
+        for (int k = nlev_ - 1; k >= 1; --k)
+          mf_average_down_mb((*b.levels)[k].U, (*b.levels)[k - 1].U);
     }
   }
 
@@ -532,14 +559,16 @@ class AmrRuntime {
     // 1. average_down per block (fine -> coarse) over the whole hierarchy.
     for (auto& b : blocks_) {
       auto& L = *b.levels;
-      for (int k = nlev_ - 1; k >= 1; --k) mf_average_down_mb(L[k].U, L[k - 1].U);
+      for (int k = nlev_ - 1; k >= 1; --k)
+        mf_average_down_mb(L[k].U, L[k - 1].U);
     }
 
     // 2. SUMMED and CO-LOCATED system RHS: f = Sum_b elliptic_rhs_b(U_b) on the coarse. We reset to
     // zero then each block ACCUMULATES (+=) its contribution on the SAME cells of the shared coarse
     // (mg_.rhs() shares the coarse layout).
     mg_.rhs().set_val(Real(0));
-    for (auto& b : blocks_) b.add_elliptic_rhs((*b.levels)[0].U, mg_.rhs());
+    for (auto& b : blocks_)
+      b.add_elliptic_rhs((*b.levels)[0].U, mg_.rhs());
     mg_.solve();
 
     // 3. coarse aux = (phi, grad phi) via the SAME clean path as AmrSystemCoupler: fill the ghosts of
@@ -571,7 +600,8 @@ class AmrRuntime {
   /// after the regrid. v1 with 2 LEVELS (coarse + 1 fine, D5): no-op if nlev < 2. No-op (grid
   /// unchanged) if the union of the tags is empty (nothing to refine).
   void regrid() {
-    if (nlev_ < 2) return;  // 2 levels required (D5): nothing to re-grid in single-level
+    if (nlev_ < 2)
+      return;  // 2 levels required (D5): nothing to re-grid in single-level
     const int fk = nlev_ - 1, pk = fk - 1;  // fine + its parent (pk == 0 in v1 with 2 levels)
 
     // (R0) PRECONDITION: fields up to date (aux per level, for the |grad phi| criterion). The per-block
@@ -585,11 +615,14 @@ class AmrRuntime {
     parts.reserve(blocks_.size() + 1);
     for (std::size_t b = 0; b < blocks_.size(); ++b) {
       const TagPredicate& crit = block_tag_[b];
-      if (!crit) continue;  // block without a criterion: tags nothing on its side (re-gridded as background)
+      if (!crit)
+        continue;  // block without a criterion: tags nothing on its side (re-gridded as background)
       parts.push_back(tag_cells((*blocks_[b].levels)[pk].U, pdom, crit));
     }
-    if (phi_tag_) parts.push_back(tag_cells(aux_[pk], pdom, phi_tag_));
-    if (parts.empty()) return;  // no active criterion -> no tagged cell -> grid unchanged
+    if (phi_tag_)
+      parts.push_back(tag_cells(aux_[pk], pdom, phi_tag_));
+    if (parts.empty())
+      return;  // no active criterion -> no tagged cell -> grid unchanged
 
     // (R3) UNION (OR) of the tags + dilation (nesting + anticipation of the structures moving).
     TagBox grown = grow_tags(tag_union(parts), regrid_grow_, pdom);
@@ -598,9 +631,10 @@ class AmrRuntime {
     // fine layout. all_reduce_or_inplace is called INSIDE regrid_compute_fine_layout for distributed
     // pk==0: all ranks start from the SAME tag grid -> IDENTICAL fb/dmap per rank (otherwise MPI
     // desync).
-    auto [fb, dmap] = regrid_compute_fine_layout(std::move(grown), pdom, pk, regrid_margin_,
-                                                 replicated_coarse_);
-    if (fb.size() == 0) return;  // nothing to refine: we keep the current grid (no-op)
+    auto [fb, dmap] =
+        regrid_compute_fine_layout(std::move(grown), pdom, pk, regrid_margin_, replicated_coarse_);
+    if (fb.size() == 0)
+      return;  // nothing to refine: we keep the current grid (no-op)
 
     // (R6) COHERENT PROLONG / RESTRICT of ALL blocks on the SAME fb/dmap (including the blocks held by
     // their stride: their frozen state is present everywhere and contributes to the Poisson, D3). The
@@ -626,7 +660,8 @@ class AmrRuntime {
     {
       std::vector<std::vector<AmrLevelMP>> ref;
       ref.reserve(blocks_.size());
-      for (const auto& b : blocks_) ref.push_back(*b.levels);
+      for (const auto& b : blocks_)
+        ref.push_back(*b.levels);
       detail::same_layout_or_throw(ref);
     }
 
@@ -669,7 +704,8 @@ class AmrRuntime {
     // macro_step_ > 0 (like the single-block) avoids a regrid at the very first step (the initial grid
     // is already the build one). The regrid sits BEFORE solve_fields below: it does its own
     // solve_fields (R0/R8), then the step's solve_fields recomputes phi on the re-gridded grid.
-    if (regrid_every_ > 0 && macro_step_ > 0 && macro_step_ % regrid_every_ == 0) regrid();
+    if (regrid_every_ > 0 && macro_step_ > 0 && macro_step_ % regrid_every_ == 0)
+      regrid();
     // System Poisson solved ONCE on the current state (OncePerStep cadence). A HELD block (stride > 1,
     // outside end-of-window) contributed with its FROZEN state since its last advance: loose coupling
     // assumed by the multirate, exactly like System::step / AmrSystemCoupler in OncePerStep. phi stays
@@ -681,14 +717,16 @@ class AmrRuntime {
       // (macro_step_+1) % stride != 0, then CATCHES UP at end-of-window by an effective step stride*dt.
       // The end-of-window catch-up keeps the block temporally consistent with the fast ones at the
       // coupling point (never in the future). stride=1: always true -> every step, bit-identical.
-      if ((macro_step_ + 1) % b.stride != 0) continue;
+      if ((macro_step_ + 1) % b.stride != 0)
+        continue;
       // NEWTON DIAGNOSTICS (OPT-IN): RESET of the report at the HEAD of the block advance (parity with
       // System::AdvanceImex::operator() which resets nreport before its substep loop). The report then
       // AGGREGATES over all the levels AND substeps of THIS advance (imex_advance accumulates per level
       // via backward_euler_source; step() calls imex_advance substeps times without re-resetting).
       // Placed AFTER the stride skip: a HELD block keeps the report of its LAST advance ("last advance"
       // semantics of System). No-op for a block without diagnostics (newton_report null).
-      if (b.newton_diagnostics && b.newton_report) b.newton_report->reset();
+      if (b.newton_diagnostics && b.newton_report)
+        b.newton_report->reset();
       const Real bdt = dt * static_cast<Real>(b.stride);  // catch-up: effective step stride*dt
       // substeps equal substeps of bdt/substeps. The chosen closure does ONE advance per call;
       // substeps=1 -> a single advance of bdt (bit-identical to the single-substep case). Per-block
@@ -706,7 +744,8 @@ class AmrRuntime {
         step_block(*b.levels, dom_, h, base_per_, replicated_coarse_);
       // PROJECTION PONCTUELLE post-pas (ADC-177) : par niveau, APRES substeps + reflux/cascade.
       // Cell-local + idempotente -> conservation preservee (flux-registres deja regles). No-op si vide.
-      if (b.project_per_level) b.project_per_level(*b.levels);
+      if (b.project_per_level)
+        b.project_per_level(*b.levels);
     }
     // Inter-species coupled sources AFTER the transport (same order as AmrSystemCoupler: transport then
     // coupled_source_step), by forward-Euler splitting. No-op if no source registered -> bit-identical
@@ -738,8 +777,7 @@ class AmrRuntime {
     last_dt_reason_ = "degenerate";
     for (auto& b : blocks_) {
       const Real w = std::max(b.max_speed((*b.levels)[0].U, aux_[0]), kCflSpeedFloor);
-      Real dt_b = cfl * h * static_cast<Real>(b.substeps) /
-                  (static_cast<Real>(b.stride) * w);
+      Real dt_b = cfl * h * static_cast<Real>(b.substeps) / (static_cast<Real>(b.stride) * w);
       const char* why = "transport";
       // OPTIONAL block BOUNDS (AMR StabilityPolicy, audit 2026-06): same substeps/stride formulas as
       // SystemStepper::step_cfl, evaluated on the COARSE. Empty closures (model without the trait) ->
@@ -747,25 +785,37 @@ class AmrRuntime {
       if (b.source_frequency) {
         const Real mu = b.source_frequency((*b.levels)[0].U, aux_[0]);
         if (mu > Real(0)) {
-          const Real dt_src = cfl * static_cast<Real>(b.substeps) /
-                              (static_cast<Real>(b.stride) * mu);
-          if (dt_src < dt_b) { dt_b = dt_src; why = "source_frequency"; }
+          const Real dt_src =
+              cfl * static_cast<Real>(b.substeps) / (static_cast<Real>(b.stride) * mu);
+          if (dt_src < dt_b) {
+            dt_b = dt_src;
+            why = "source_frequency";
+          }
         }
       }
       if (b.stability_dt) {
         const Real db = b.stability_dt((*b.levels)[0].U, aux_[0]);
         if (db > Real(0)) {
           const Real dt_adm = db * static_cast<Real>(b.substeps) / static_cast<Real>(b.stride);
-          if (dt_adm < dt_b) { dt_b = dt_adm; why = "stability_dt"; }
+          if (dt_adm < dt_b) {
+            dt_b = dt_adm;
+            why = "stability_dt";
+          }
         }
       }
-      if (dt_b < dt) { dt = dt_b; last_dt_reason_ = std::string(why) + ":" + b.name; }
+      if (dt_b < dt) {
+        dt = dt_b;
+        last_dt_reason_ = std::string(why) + ":" + b.name;
+      }
     }
     // Declared frequencies of the coupled sources (CoupledSource.frequency): bound on the MACRO-step
     // (the couplings apply once per macro-step), dt <= cfl / mu, without substeps/stride.
     for (const auto& cs : coupled_freqs_) {
       const Real dt_cs = cfl / cs.mu;
-      if (dt_cs < dt) { dt = dt_cs; last_dt_reason_ = "coupled_source:" + cs.label; }
+      if (dt_cs < dt) {
+        dt = dt_cs;
+        last_dt_reason_ = "coupled_source:" + cs.label;
+      }
     }
     // PER-CELL frequencies (CoupledSource.frequency with an Expr): mu(U) reduced (MAX) on the COARSE
     // level of the input blocks (where the AMR CFL lives), GLOBAL all_reduce_max (ALL ranks, neutral
@@ -775,41 +825,56 @@ class AmrRuntime {
     for (const auto& ce : coupled_freq_exprs_) {
       Real m = 0;
       if (ce.n_in > 0) {
-        auto& Uref = (*blocks_[static_cast<std::size_t>(ce.ins[0].block)].levels)[0].U;  // coarse (lev 0)
+        auto& Uref =
+            (*blocks_[static_cast<std::size_t>(ce.ins[0].block)].levels)[0].U;  // coarse (lev 0)
         for (int li = 0; li < Uref.local_size(); ++li) {
           CoupledFreqKernel kern;
           kern.n_in = ce.n_in;
           kern.n_const = ce.n_const;
           for (int c = 0; c < ce.n_in; ++c) {
-            kern.in[c] = (*blocks_[static_cast<std::size_t>(ce.ins[static_cast<std::size_t>(c)].block)]
-                               .levels)[0].U.fab(li).array();
+            kern.in[c] =
+                (*blocks_[static_cast<std::size_t>(ce.ins[static_cast<std::size_t>(c)].block)]
+                      .levels)[0]
+                    .U.fab(li)
+                    .array();
             kern.in_comp[c] = ce.ins[static_cast<std::size_t>(c)].comp;
           }
-          for (int c = 0; c < ce.n_const; ++c) kern.consts[c] = ce.kconsts[static_cast<std::size_t>(c)];
+          for (int c = 0; c < ce.n_const; ++c)
+            kern.consts[c] = ce.kconsts[static_cast<std::size_t>(c)];
           kern.prog = ce.prog;
           m = std::max(m, reduce_max_cell(Uref.box(li), kern));
         }
       } else {
         // Program WITHOUT an input field (constant in bytecode): evaluated once on the constants.
         Real reg[kCsMaxReg];
-        for (int c = 0; c < ce.n_const; ++c) reg[c] = ce.kconsts[static_cast<std::size_t>(c)];
+        for (int c = 0; c < ce.n_const; ++c)
+          reg[c] = ce.kconsts[static_cast<std::size_t>(c)];
         const Real mu0 = ce.prog.eval(reg);
-        if (mu0 > Real(0)) m = mu0;
+        if (mu0 > Real(0))
+          m = mu0;
       }
       const double mu = all_reduce_max(static_cast<double>(m));  // ALL ranks (collective symmetry)
       if (mu > 0.0) {
         const Real dt_cs = cfl / static_cast<Real>(mu);
-        if (dt_cs < dt) { dt = dt_cs; last_dt_reason_ = "coupled_source:" + ce.label; }
+        if (dt_cs < dt) {
+          dt = dt_cs;
+          last_dt_reason_ = "coupled_source:" + ce.label;
+        }
       }
     }
     // GLOBAL bounds (AmrRuntime::add_dt_bound, parity with System::add_dt_bound): evaluated PER RANK
     // then reduced all_reduce_min (dt identical on all ranks; <= 0/non-finite = inert).
     for (const auto& g : dt_bounds_) {
-      if (!g.fn) continue;
+      if (!g.fn)
+        continue;
       double v = g.fn();
-      if (!(v > 0.0) || !std::isfinite(v)) v = std::numeric_limits<double>::infinity();
+      if (!(v > 0.0) || !std::isfinite(v))
+        v = std::numeric_limits<double>::infinity();
       v = all_reduce_min(v);
-      if (static_cast<Real>(v) < dt) { dt = static_cast<Real>(v); last_dt_reason_ = "global:" + g.label; }
+      if (static_cast<Real>(v) < dt) {
+        dt = static_cast<Real>(v);
+        last_dt_reason_ = "global:" + g.label;
+      }
     }
     if (!std::isfinite(dt)) {
       dt = cfl * h / kCflSpeedFloor;  // guard (no block: impossible here)
@@ -837,7 +902,8 @@ class AmrRuntime {
   /// dt <= cfl / mu on the MACRO-step (the couplings apply once per macro-step). mu <= 0 = inert (no
   /// bound).
   void add_coupled_frequency(const std::string& label, Real mu) {
-    if (mu > Real(0)) coupled_freqs_.push_back(CoupledFreqDecl{label, mu});
+    if (mu > Real(0))
+      coupled_freqs_.push_back(CoupledFreqDecl{label, mu});
   }
 
   /// PER-CELL COUPLED frequency (CoupledSource.frequency with an Expr, refinement of the CONSTANT
@@ -854,7 +920,8 @@ class AmrRuntime {
                                   const std::vector<double>& consts,
                                   const std::vector<int>& freq_prog_ops,
                                   const std::vector<int>& freq_prog_args) {
-    if (freq_prog_ops.empty() && freq_prog_args.empty()) return;  // no per-cell frequency
+    if (freq_prog_ops.empty() && freq_prog_args.empty())
+      return;  // no per-cell frequency
     const int n_in = static_cast<int>(in_blocks.size());
     const int n_const = static_cast<int>(consts.size());
     if (static_cast<int>(in_roles.size()) != n_in)
@@ -866,7 +933,8 @@ class AmrRuntime {
           std::to_string(kCsMaxReg) + ")");
     if (freq_prog_ops.size() != freq_prog_args.size())
       throw std::runtime_error(
-          "AmrRuntime::add_coupled_frequency_expr : freq_prog_ops / freq_prog_args of different sizes");
+          "AmrRuntime::add_coupled_frequency_expr : freq_prog_ops / freq_prog_args of different "
+          "sizes");
     if (static_cast<int>(freq_prog_ops.size()) > kCsMaxProg)
       throw std::runtime_error(
           "AmrRuntime::add_coupled_frequency_expr : frequency program too long (> " +
@@ -878,8 +946,8 @@ class AmrRuntime {
       const std::string& role = in_roles[static_cast<std::size_t>(c)];
       const int b = block_index(block);
       if (b < 0)
-        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : no block named '" + block +
-                                 "'");
+        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : no block named '" +
+                                 block + "'");
       // Role addressed BY NAME: a canonical role name OR a user-defined role label (ADC-292), STRICT.
       const VariableSet& vs = blocks_[static_cast<std::size_t>(b)].cons_vars;
       const int comp = vs.index_of(role);
@@ -896,7 +964,8 @@ class AmrRuntime {
       const int opc = freq_prog_ops[static_cast<std::size_t>(k)];
       const int a = freq_prog_args[static_cast<std::size_t>(k)];
       if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
-        throw std::runtime_error("AmrRuntime::add_coupled_frequency_expr : invalid opcode in the frequency");
+        throw std::runtime_error(
+            "AmrRuntime::add_coupled_frequency_expr : invalid opcode in the frequency");
       if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
         throw std::runtime_error(
             "AmrRuntime::add_coupled_frequency_expr : register out of bounds in the frequency");
@@ -941,7 +1010,8 @@ class AmrRuntime {
     Real w = Real(1e-12);
     for (auto& b : blocks_) {
       const Real wb = b.max_speed((*b.levels)[0].U, aux_[0]);
-      if (wb > w) w = wb;
+      if (wb > w)
+        w = wb;
     }
     return w;
   }
@@ -982,10 +1052,12 @@ class AmrRuntime {
   // rebuilt), so the stored coarse field stays valid; solve_fields runs the coarse->fine injection
   // right after, carrying the named comps to every level. No-op without a named field.
   void apply_named_aux() {
-    if (named_aux_.empty() || aux_.empty()) return;
+    if (named_aux_.empty() || aux_.empty())
+      return;
     const int row = dom_.nx();
     for (const auto& [comp, field] : named_aux_) {
-      if (field.empty() || comp >= aux_ncomp_) continue;
+      if (field.empty() || comp >= aux_ncomp_)
+        continue;
       for (int li = 0; li < aux_[0].local_size(); ++li) {
         Array4 a = aux_[0].fab(li).array();
         const Box2D v = aux_[0].box(li);
@@ -1000,9 +1072,11 @@ class AmrRuntime {
   // only each declared component's physical-face ghosts (aux_halo_override keeps periodic faces
   // periodic). No-op without a policy. Mirror of SystemFieldSolver::apply_named_aux_bc.
   void apply_named_aux_bc() {
-    if (named_aux_bc_.empty() || aux_.empty()) return;
+    if (named_aux_bc_.empty() || aux_.empty())
+      return;
     for (const auto& [comp, policy] : named_aux_bc_) {
-      if (comp >= aux_ncomp_) continue;
+      if (comp >= aux_ncomp_)
+        continue;
       fill_physical_bc(aux_[0], dom_, aux_halo_override(aux_bc_, policy), comp);
     }
   }
@@ -1012,7 +1086,8 @@ class AmrRuntime {
   // resolved once at registration).
   int block_index(const std::string& name) const {
     for (std::size_t i = 0; i < blocks_.size(); ++i)
-      if (blocks_[i].name == name) return static_cast<int>(i);
+      if (blocks_[i].name == name)
+        return static_cast<int>(i);
     return -1;
   }
 
@@ -1076,7 +1151,8 @@ class AmrRuntime {
   // Per-field aux HALO policy (ADC-369): component -> uniform boundary policy, applied to the coarse aux
   // after the shared fill (apply_named_aux_bc). Empty by default -> bit-identical.
   std::map<int, AuxHaloPolicy> named_aux_bc_;
-  std::vector<CoupledSourceSpec> coupled_sources_;  // registered coupled sources (applied after transport)
+  std::vector<CoupledSourceSpec>
+      coupled_sources_;  // registered coupled sources (applied after transport)
   // UNION-TAGS REGRID (capstone Phase 2, C.6). regrid_every_ == 0 -> FROZEN hierarchy (default,
   // bit-identical). block_tag_: PER-BLOCK tag predicate (D1; same size as blocks_, empty = this block
   // tags nothing on its side). phi_tag_: phi tag predicate on |grad phi| (D4; empty = phi does not

@@ -68,11 +68,13 @@ static bool test_algebra() {
                 "MagneticLorentzForce doit declarer n_aux = 4 (lit B_z)");
   // CompositeSource propage le canal aux : max(3 electrostatique, 4 Lorentz) = 4.
   using CSrc = CompositeSource<PotentialForce, MagneticLorentzForce>;
-  static_assert(CSrc::n_aux == 4, "CompositeSource doit propager n_aux = 4 (sous-brique magnetisee)");
+  static_assert(CSrc::n_aux == 4,
+                "CompositeSource doit propager n_aux = 4 (sous-brique magnetisee)");
   // CompositeModel remonte n_aux au systeme (canal B_z dimensionne).
   using CModel = CompositeModel<IsothermalFluxPolar, CSrc, ChargeDensity>;
   static_assert(CModel::n_aux == 4, "CompositeModel doit remonter n_aux = 4 (source magnetisee)");
-  std::printf("    n_aux : MagneticLorentzForce=4, CompositeSource=4, CompositeModel=4 (OK static)\n");
+  std::printf(
+      "    n_aux : MagneticLorentzForce=4, CompositeSource=4, CompositeModel=4 (OK static)\n");
 
   // Formule exacte : (0, +qom B_z m_theta, -qom B_z m_r), energie nulle.
   const Real qom = Real(-1.5), Bz = Real(2.0);
@@ -89,7 +91,8 @@ static bool test_algebra() {
   const double e0 = std::fabs(s[0]);
   const double e1 = std::fabs(s[1] - ex1);
   const double e2 = std::fabs(s[2] - ex2);
-  std::printf("    Lorentz: s=(%.3e, %.6e, %.6e) attendu (0, %.6e, %.6e)\n", s[0], s[1], s[2], ex1, ex2);
+  std::printf("    Lorentz: s=(%.3e, %.6e, %.6e) attendu (0, %.6e, %.6e)\n", s[0], s[1], s[2], ex1,
+              ex2);
   if (e0 > 1e-14 || e1 > 1e-14 || e2 > 1e-14) {
     std::printf("    ECHEC : formule Lorentz incorrecte\n");
     ok = false;
@@ -99,7 +102,10 @@ static bool test_algebra() {
   const Real vr = u[1] / u[0], vth = u[2] / u[0];
   const double work = std::fabs(s[1] * vr + s[2] * vth);
   std::printf("    travail F.v = %.3e (doit etre ~0 : rotation pure)\n", work);
-  if (work > 1e-14) { std::printf("    ECHEC : la force de Lorentz fait un travail non nul\n"); ok = false; }
+  if (work > 1e-14) {
+    std::printf("    ECHEC : la force de Lorentz fait un travail non nul\n");
+    ok = false;
+  }
 
   // Composition : CompositeSource = PotentialForce + MagneticLorentzForce (somme exacte).
   a.grad_x = Real(0.9);
@@ -110,11 +116,16 @@ static bool test_algebra() {
   const CSrc comp{es, lor};
   const StateVec<3> s_comp = comp.apply(u, a);
   double ecomp = 0.0;
-  for (int c = 0; c < 3; ++c) ecomp = std::max(ecomp, std::fabs(s_comp[c] - (s_es[c] + s_lor[c])));
+  for (int c = 0; c < 3; ++c)
+    ecomp = std::max(ecomp, std::fabs(s_comp[c] - (s_es[c] + s_lor[c])));
   std::printf("    CompositeSource = electrostatique + Lorentz : ecart max = %.3e\n", ecomp);
-  if (ecomp > 1e-14) { std::printf("    ECHEC : CompositeSource ne somme pas les deux forces\n"); ok = false; }
+  if (ecomp > 1e-14) {
+    std::printf("    ECHEC : CompositeSource ne somme pas les deux forces\n");
+    ok = false;
+  }
 
-  if (ok) std::printf("    OK : formule + travail nul + composition + propagation aux corrects\n");
+  if (ok)
+    std::printf("    OK : formule + travail nul + composition + propagation aux corrects\n");
   return ok;
 }
 
@@ -130,9 +141,9 @@ static bool test_gyration() {
   a.B_z = Bz;
 
   StateVec<3> u{};
-  u[0] = Real(1.0);   // rho (fixe : la masse n'est pas touchee par la qdm-source)
-  u[1] = Real(1.0);   // m_r
-  u[2] = Real(0.0);   // m_theta
+  u[0] = Real(1.0);  // rho (fixe : la masse n'est pas touchee par la qdm-source)
+  u[1] = Real(1.0);  // m_r
+  u[2] = Real(0.0);  // m_theta
   const double m0 = std::sqrt(double(u[1]) * u[1] + double(u[2]) * u[2]);
 
   // RK4 sur dm/dt = source (la composante 0 reste a rho : source[0]=0). t parcourt un demi-tour.
@@ -155,9 +166,17 @@ static bool test_gyration() {
   std::printf("    m initial=(%.4f, %.4f) final=(%.6f, %.6f) (demi-tour cyclotron)\n", 1.0, 0.0,
               double(u[1]), double(u[2]));
   bool ok = true;
-  if (dmag > 1e-8) { std::printf("    ECHEC : |m| non conserve (la force devrait etre une rotation pure)\n"); ok = false; }
-  if (!(double(u[1]) < -0.99)) { std::printf("    ECHEC : m_r n'a pas tourne de ~pi\n"); ok = false; }
-  if (ok) std::printf("    OK : rotation cyclotron a |m| constant (travail nul confirme dynamiquement)\n");
+  if (dmag > 1e-8) {
+    std::printf("    ECHEC : |m| non conserve (la force devrait etre une rotation pure)\n");
+    ok = false;
+  }
+  if (!(double(u[1]) < -0.99)) {
+    std::printf("    ECHEC : m_r n'a pas tourne de ~pi\n");
+    ok = false;
+  }
+  if (ok)
+    std::printf(
+        "    OK : rotation cyclotron a |m| constant (travail nul confirme dynamiquement)\n");
   return ok;
 }
 
@@ -196,14 +215,15 @@ static void fill_aux(MultiFab& aux, const PolarGeometry& g, double Bz, double pe
       const double r = g.r_cell(i);
       const double x = (r - kRmin) / (kRmax - kRmin);
       // phi(r, theta) = phi_r(r) + pert * env(r) cos(m theta), phi_r d'equilibre confinant.
-      const double env = std::sin(kPiL * x);                 // enveloppe radiale (nulle aux parois)
+      const double env = std::sin(kPiL * x);  // enveloppe radiale (nulle aux parois)
       const double denv = (kPiL / (kRmax - kRmin)) * std::cos(kPiL * x);
-      const double phir = 0.5 * x * x;                       // potentiel radial monotone
+      const double phir = 0.5 * x * x;  // potentiel radial monotone
       const double dphir = (1.0 / (kRmax - kRmin)) * x;
-      a(i, j, 0) = phir + pert * env * std::cos(kModeC * th);          // phi
-      a(i, j, 1) = dphir + pert * denv * std::cos(kModeC * th);        // grad_r
-      a(i, j, 2) = pert * env * (-kModeC * std::sin(kModeC * th)) / r; // grad_theta = (1/r) d phi/d theta
-      a(i, j, 3) = Bz;                                                  // B_z constant
+      a(i, j, 0) = phir + pert * env * std::cos(kModeC * th);    // phi
+      a(i, j, 1) = dphir + pert * denv * std::cos(kModeC * th);  // grad_r
+      a(i, j, 2) =
+          pert * env * (-kModeC * std::sin(kModeC * th)) / r;  // grad_theta = (1/r) d phi/d theta
+      a(i, j, 3) = Bz;                                         // B_z constant
     }
   }
 }
@@ -256,7 +276,8 @@ static bool has_nan(const MultiFab& U, const Box2D& dom) {
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
       for (int c = 0; c < 3; ++c)
-        if (!std::isfinite(u(i, j, c))) return true;
+        if (!std::isfinite(u(i, j, c)))
+          return true;
   return false;
 }
 
@@ -311,7 +332,8 @@ static DiocoResult run_diocotron(double Bz) {
                                                  /*wall_radial=*/true);
         },
         U, dt);
-    if (s + 1 == probe0) res.amp0 = mode_amplitude(U, dom);
+    if (s + 1 == probe0)
+      res.amp0 = mode_amplitude(U, dom);
   }
   res.amp1 = mode_amplitude(U, dom);
   res.nan = has_nan(U, dom);
@@ -329,7 +351,10 @@ static bool test_diocotron() {
               on.nan ? "OUI" : "non", on.mass_rel, on.amp0, on.amp1);
 
   // (C1) pas de NaN
-  if (on.nan) { std::printf("    ECHEC : NaN dans le run avec Lorentz natif\n"); ok = false; }
+  if (on.nan) {
+    std::printf("    ECHEC : NaN dans le run avec Lorentz natif\n");
+    ok = false;
+  }
   // (C2) masse conservee a ~machine (paroi radiale)
   if (on.mass_rel > 1e-12) {
     std::printf("    ECHEC : masse non conservee (%.3e > 1e-12)\n", on.mass_rel);
@@ -345,18 +370,24 @@ static bool test_diocotron() {
   // l'amplitude finale du mode m_r doit etre NETTEMENT plus faible (la giration cyclotron, seule
   // capable de convertir grad phi azimutal en mouvement RADIAL coherent du mode, est absente).
   const DiocoResult off = run_diocotron(/*Bz=*/0.0);
-  std::printf("    [B_z=0  ] NaN=%s masse(ecart rel)=%.3e amp_mode(tf)=%.6e (controle Lorentz inactif)\n",
-              off.nan ? "OUI" : "non", off.mass_rel, off.amp1);
-  if (off.nan) { std::printf("    ECHEC : NaN dans le run controle\n"); ok = false; }
+  std::printf(
+      "    [B_z=0  ] NaN=%s masse(ecart rel)=%.3e amp_mode(tf)=%.6e (controle Lorentz inactif)\n",
+      off.nan ? "OUI" : "non", off.mass_rel, off.amp1);
+  if (off.nan) {
+    std::printf("    ECHEC : NaN dans le run controle\n");
+    ok = false;
+  }
   if (!(on.amp1 > 1.5 * off.amp1)) {
-    std::printf("    ECHEC : la croissance du mode n'est pas portee par la force magnetique\n"
-                "            (amp avec B_z=2.5 doit dominer amp avec B_z=0)\n");
+    std::printf(
+        "    ECHEC : la croissance du mode n'est pas portee par la force magnetique\n"
+        "            (amp avec B_z=2.5 doit dominer amp avec B_z=0)\n");
     ok = false;
   }
 
   if (ok)
-    std::printf("    OK : diocotron polaire NATIF (Lorentz q v x B_z) -- pas de NaN, masse conservee,\n"
-                "         mode croissant porte par la VRAIE force magnetique (pas le contournement)\n");
+    std::printf(
+        "    OK : diocotron polaire NATIF (Lorentz q v x B_z) -- pas de NaN, masse conservee,\n"
+        "         mode croissant porte par la VRAIE force magnetique (pas le contournement)\n");
   return ok;
 }
 
@@ -369,6 +400,7 @@ int main() {
   ok &= test_gyration();
   ok &= test_diocotron();
   std::printf("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
-  if (ok) std::printf("OK test_polar_lorentz_source\n");
+  if (ok)
+    std::printf("OK test_polar_lorentz_source\n");
   return ok ? 0 : 1;
 }

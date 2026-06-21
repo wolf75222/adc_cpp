@@ -29,8 +29,7 @@ class AmrLevelStack {
  public:
   /// Builds the stack: takes ownership of @p levels, allocates an aux (aux_ncomp components, 1
   /// ghost) on the layout of each U, and wires L_[k].aux = &aux_[k]. @p dom: domain of level 0.
-  AmrLevelStack(const Box2D& dom, std::vector<Level> levels,
-                int aux_ncomp = kAuxBaseComps)
+  AmrLevelStack(const Box2D& dom, std::vector<Level> levels, int aux_ncomp = kAuxBaseComps)
       : dom_(dom), L_(std::move(levels)), aux_ncomp_(aux_ncomp) {
     nlev_ = static_cast<int>(L_.size());
     aux_.resize(nlev_);  // stable addresses: aux_ is no longer resized

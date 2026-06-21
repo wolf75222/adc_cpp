@@ -38,12 +38,14 @@ int main(int argc, char** argv) {
     std::printf("DistributedFFTSolver (np=%d) : residu discret ||lap phi - rho|| = %.3e\n",
                 n_ranks(), res);
   if (res > 1e-9) {
-    if (my_rank() == 0) std::printf("FAIL fft_dist_residu\n");
+    if (my_rank() == 0)
+      std::printf("FAIL fft_dist_residu\n");
     ++fails;
   }
 
   fails = all_reduce_sum(fails);
-  if (fails == 0 && my_rank() == 0) std::printf("OK test_mpi_fft_distributed\n");
+  if (fails == 0 && my_rank() == 0)
+    std::printf("OK test_mpi_fft_distributed\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

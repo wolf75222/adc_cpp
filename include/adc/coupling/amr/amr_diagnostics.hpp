@@ -35,8 +35,8 @@ inline Real amr_mass_mb(const MultiFab& coarse, Real dx, Real dy) {
   Real M = 0;
   for (int li = 0; li < coarse.local_size(); ++li) {
     const ConstArray4 u = coarse.fab(li).const_array();
-    M += for_each_cell_reduce_sum(
-        coarse.box(li), [u, dV] ADC_HD(int i, int j) { return u(i, j, 0) * dV; });
+    M += for_each_cell_reduce_sum(coarse.box(li),
+                                  [u, dV] ADC_HD(int i, int j) { return u(i, j, 0) * dV; });
   }
   return M;
 }

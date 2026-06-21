@@ -31,7 +31,9 @@ struct Production {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 // Integrateur ECRIT PAR L'UTILISATEUR : Euler avant. Il ne voit que rhs_eval + U.
@@ -44,8 +46,7 @@ struct UserForwardEuler {
   }
 };
 
-static_assert(TimeStepper<UserForwardEuler>,
-              "l'integrateur utilisateur doit modeler TimeStepper");
+static_assert(TimeStepper<UserForwardEuler>, "l'integrateur utilisateur doit modeler TimeStepper");
 
 // Le Method du bloc EST le type de l'integrateur utilisateur.
 using UserBlock = EquationBlock<Production, FirstOrder, ExplicitTime<UserForwardEuler, 1>>;
@@ -54,7 +55,10 @@ static_assert(UserBlock::Time::treatment == TimeTreatment::Explicit);
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(4, 4);
@@ -76,6 +80,7 @@ int main() {
   // Euler avant sur une source constante : n = dt * rate, exact.
   chk(std::fabs(sum(U, 0) - dt * Real(3) * ncell) < Real(1e-12), "user_integrator_advances");
 
-  if (fails == 0) std::printf("OK test_user_time_integrator\n");
+  if (fails == 0)
+    std::printf("OK test_user_time_integrator\n");
   return fails == 0 ? 0 : 1;
 }

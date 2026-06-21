@@ -13,7 +13,8 @@ using namespace adc;
 
 static void tag_block(TagBox& tb, const Box2D& b) {
   for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-    for (int i = b.lo[0]; i <= b.hi[0]; ++i) tb(i, j) = 1;
+    for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+      tb(i, j) = 1;
 }
 
 // toutes les cellules taguees sont-elles couvertes par au moins une box ?
@@ -27,7 +28,8 @@ static bool covers_all_tags(const TagBox& tb, const std::vector<Box2D>& boxes) {
             in = true;
             break;
           }
-        if (!in) return false;
+        if (!in)
+          return false;
       }
   return true;
 }
@@ -74,7 +76,8 @@ int main() {
     p.max_box_size = 8;
     auto boxes = berger_rigoutsos(tb, p);
     chk(boxes.size() == 4, "chop_count");
-    for (const auto& b : boxes) chk(b.nx() <= 8 && b.ny() <= 8, "chop_size");
+    for (const auto& b : boxes)
+      chk(b.nx() <= 8 && b.ny() <= 8, "chop_size");
     chk(covers_all_tags(tb, boxes), "chop_cover");
   }
 
@@ -86,9 +89,11 @@ int main() {
     tag_block(tb, Box2D{{0, 0}, {7, 1}});  // ligne basse
     auto boxes = berger_rigoutsos(tb, ClusterParams{});
     chk(covers_all_tags(tb, boxes), "L_cover");
-    for (const auto& b : boxes) chk(dom.contains(b), "L_in_domain");
+    for (const auto& b : boxes)
+      chk(dom.contains(b), "L_in_domain");
   }
 
-  if (fails == 0) std::printf("OK test_cluster\n");
+  if (fails == 0)
+    std::printf("OK test_cluster\n");
   return fails == 0 ? 0 : 1;
 }

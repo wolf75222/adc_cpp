@@ -33,7 +33,7 @@
 // MPI (la seam MPI fill_boundary + collectifs Poisson tourne ; le multi-GPU par decoupage de domaine
 // est le chemin AMR, couvert ailleurs).
 
-#include <adc/physics/bricks.hpp>  // CompositeModel + Euler + PotentialForce + ChargeDensity
+#include <adc/physics/bricks.hpp>     // CompositeModel + Euler + PotentialForce + ChargeDensity
 #include <adc/runtime/dsl_block.hpp>  // add_compiled_model<Model> (gabarit natif du chemin production)
 #include <adc/runtime/system.hpp>
 
@@ -72,7 +72,8 @@ int main(int argc, char** argv) {
 
   std::string dump_prefix;
   for (int k = 1; k < argc; ++k)
-    if (std::strncmp(argv[k], "--dump=", 7) == 0) dump_prefix = argv[k] + 7;
+    if (std::strncmp(argv[k], "--dump=", 7) == 0)
+      dump_prefix = argv[k] + 7;
 
 #if defined(ADC_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
@@ -82,22 +83,28 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c && me == 0) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c && me == 0) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
   // Trace d'etape OPTIONNELLE (ADC_DSLPROD_TRACE=1) : ecrit sur stderr, flush immediat, pour localiser
   // un eventuel crash device entre construction / add_compiled_model / solve_fields / step. Inerte par
   // defaut (aucun effet sur les sorties machine-parsables). Utile au diagnostic GH200.
   const bool trace = (me == 0) && std::getenv("ADC_DSLPROD_TRACE");
   auto step_mark = [&](const char* w) {
-    if (trace) { std::fprintf(stderr, "[trace] %s\n", w); std::fflush(stderr); }
+    if (trace) {
+      std::fprintf(stderr, "[trace] %s\n", w);
+      std::fflush(stderr);
+    }
   };
 
   // n = 64 (= 2^6) : compatible avec le solveur FFT periodique (n = 2^k) ET GeometricMG.
   const int n = 64;
   const double L = 1.0;
-  const double gamma = 1.4;     // indice adiabatique du gaz parfait (Euler)
-  const double qom = 1.0;       // (q/m) de la force du potentiel
-  const double qcharge = 1.0;   // densite de charge q rho
+  const double gamma = 1.4;    // indice adiabatique du gaz parfait (Euler)
+  const double qom = 1.0;      // (q/m) de la force du potentiel
+  const double qcharge = 1.0;  // densite de charge q rho
 
   SystemConfig cfg;
   cfg.n = n;
@@ -148,12 +155,16 @@ int main(int argc, char** argv) {
   const int nsteps = 5;
   for (int s = 0; s < nsteps; ++s) {
     sim.step(dt);
-    if (trace) { std::fprintf(stderr, "[trace] apres step %d\n", s); std::fflush(stderr); }
+    if (trace) {
+      std::fprintf(stderr, "[trace] apres step %d\n", s);
+      std::fflush(stderr);
+    }
   }
   step_mark("apres tous les step");
 
 #if defined(ADC_HAS_KOKKOS)
-  Kokkos::fence();  // ceinture avant la lecture hote (get_state / potential fencent deja en interne)
+  Kokkos::
+      fence();  // ceinture avant la lecture hote (get_state / potential fencent deja en interne)
 #endif
 
   // Lecture / checksum SUR LE RANG PROPRIETAIRE (boite 0 -> rang 0). U = (rho, rho u, rho v, E),
@@ -171,9 +182,11 @@ int main(int argc, char** argv) {
       csum += v;
       csumsq += v * v;
       const double a = std::fabs(v);
-      if (a > cmax) cmax = a;
+      if (a > cmax)
+        cmax = a;
     }
-    for (double v : phi) pmax = std::fmax(pmax, std::fabs(v));
+    for (double v : phi)
+      pmax = std::fmax(pmax, std::fabs(v));
 
     chk(U.size() == static_cast<std::size_t>(4) * n * n, "state_size_4xn2");
     chk(phi.size() == static_cast<std::size_t>(n) * n, "phi_size_n2");
@@ -183,9 +196,10 @@ int main(int argc, char** argv) {
 
     // Ligne machine-parsable (le script ROMEO DIFF ces lignes entre np=1/2/4 ; np=1 = oracle mono-GPU)
     // ET entre exec=Cuda et exec=Serial pour la parite device.
-    std::printf("DSLPROD np=%d exec=%s solver=%s n=%d steps=%d | mass=%.17e csum=%.17e csumsq=%.17e "
-                "cmax=%.17e pmax=%.17e\n",
-                np, space, solver.c_str(), n, nsteps, mass, csum, csumsq, cmax, pmax);
+    std::printf(
+        "DSLPROD np=%d exec=%s solver=%s n=%d steps=%d | mass=%.17e csum=%.17e csumsq=%.17e "
+        "cmax=%.17e pmax=%.17e\n",
+        np, space, solver.c_str(), n, nsteps, mass, csum, csumsq, cmax, pmax);
   }
 
   // Parite cross-rang du checksum proprietaire : le bloc n'etant pas decoupe, les invariants du rang 0

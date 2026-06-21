@@ -17,7 +17,9 @@
 using namespace adc;
 
 // champ global continu a travers les frontieres de boxes
-static double g(int i, int j) { return i + 100.0 * j; }
+static double g(int i, int j) {
+  return i + 100.0 * j;
+}
 
 static void fill_valid(MultiFab& mf) {
   for (int li = 0; li < mf.local_size(); ++li) {
@@ -29,7 +31,8 @@ static void fill_valid(MultiFab& mf) {
 // recupere le fab local dont le coin bas vaut (lo0, lo1)
 static const Fab2D& fab_with_lo(const MultiFab& mf, int lo0, int lo1) {
   for (int li = 0; li < mf.local_size(); ++li)
-    if (mf.box(li).lo[0] == lo0 && mf.box(li).lo[1] == lo1) return mf.fab(li);
+    if (mf.box(li).lo[0] == lo0 && mf.box(li).lo[1] == lo1)
+      return mf.fab(li);
   return mf.fab(0);
 }
 
@@ -52,7 +55,7 @@ int main() {
 
     fill_boundary(mf, dom, Periodicity{false, false});
 
-    const Fab2D& b0 = fab_with_lo(mf, 0, 0);  // box [0..3]x[0..3]
+    const Fab2D& b0 = fab_with_lo(mf, 0, 0);     // box [0..3]x[0..3]
     chk(b0(4, 2, 0) == g(4, 2), "edge_right");   // depuis le voisin x
     chk(b0(2, 4, 0) == g(2, 4), "edge_top");     // depuis le voisin y
     chk(b0(4, 4, 0) == g(4, 4), "corner_diag");  // depuis le voisin diagonal
@@ -82,6 +85,7 @@ int main() {
     chk(f(8, 8, 0) == g(0, 0), "wrap_corner2");
   }
 
-  if (fails == 0) std::printf("OK test_fill_boundary\n");
+  if (fails == 0)
+    std::printf("OK test_fill_boundary\n");
   return fails == 0 ? 0 : 1;
 }

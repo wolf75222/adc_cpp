@@ -1,9 +1,9 @@
 #pragma once
 
-#include <adc/mesh/patch_box.hpp>    // PatchBox: index-space signature of a fine patch (patch_boxes())
-#include <adc/mesh/physical_bc.hpp>  // BCRec
+#include <adc/mesh/patch_box.hpp>  // PatchBox: index-space signature of a fine patch (patch_boxes())
+#include <adc/mesh/physical_bc.hpp>                // BCRec
 #include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions (Newton options of the IMEX source)
-#include <adc/runtime/export.hpp>    // ADC_EXPORT: set_compiled_block resolved by the native AMR loader
+#include <adc/runtime/export.hpp>  // ADC_EXPORT: set_compiled_block resolved by the native AMR loader
 #include <adc/runtime/facade_options.hpp>  // SourceStageOptions / CoupledSourceProgram (facade PODs, ADC-214)
 #include <adc/runtime/model_spec.hpp>
 
@@ -82,29 +82,32 @@ struct AmrBuildParams {
   int regrid_every = 20;
   double gamma = 1.4;
   int substeps = 1;
-  bool recon_prim = false;            ///< recon == "primitive" (frozen by add_compiled_model)
-  bool imex = false;                  ///< time == "imex": stiff implicit source (backward_euler)
-  double refine_threshold = 1e30;     ///< 1e30 => no refinement
-  BCRec poisson_bc;                   ///< coarse Poisson BC (resolved by set_poisson)
+  bool recon_prim = false;               ///< recon == "primitive" (frozen by add_compiled_model)
+  bool imex = false;                     ///< time == "imex": stiff implicit source (backward_euler)
+  double refine_threshold = 1e30;        ///< 1e30 => no refinement
+  BCRec poisson_bc;                      ///< coarse Poisson BC (resolved by set_poisson)
   std::function<bool(Real, Real)> wall;  ///< conductive wall predicate (empty = none)
   bool has_density = false;
-  std::vector<double> density;        ///< initial coarse density (component 0), n*n
-  bool distribute_coarse = false;     ///< distributed multi-box coarse (AMR strong-scaling)
-  int coarse_max_grid = 0;            ///< tile size of the distributed coarse (0 => n/2)
+  std::vector<double> density;     ///< initial coarse density (component 0), n*n
+  bool distribute_coarse = false;  ///< distributed multi-box coarse (AMR strong-scaling)
+  int coarse_max_grid = 0;         ///< tile size of the distributed coarse (0 => n/2)
   // FULL initial conservative state (all components), takes priority over `density` when
   // has_state. ADDED AT THE END OF THE STRUCT: the offsets of the preceding fields are unchanged, so an
   // older mono-block .so loader (which COPIES bp into its own layout then does not read these fields)
   // falls back SILENTLY to the historical density path -- no corruption (append-only).
   bool has_state = false;
-  std::vector<double> state;          ///< ncomp*n*n, component-major c*n*n + j*n + i; ncomp == Model::n_vars
+  std::vector<double>
+      state;  ///< ncomp*n*n, component-major c*n*n + j*n + i; ncomp == Model::n_vars
   // Schur-CONDENSED SOURCE STAGE (amr-schur path, counterpart of System::set_source_stage). ADDED AT THE
   // END OF THE STRUCT (append-only, same reason as has_state: an older .so loader does not read these
   // fields and falls back to the historical explicit/imex path). schur==false -> path unchanged.
-  bool schur = false;                 ///< true: GLOBAL condensed source stage (instead of local explicit/imex)
-  double schur_theta = 0.5;           ///< theta-scheme of the condensed stage (0.5 = Crank-Nicolson)
-  double schur_alpha = 1.0;           ///< electrostatic coupling constant of the condensed stage
-  bool schur_strang = false;          ///< true: Strang splitting H(dt/2) S(dt) H(dt/2); false: Lie H(dt) S(dt)
-  std::vector<double> bz_field;       ///< coarse B_z(x,y) field, n*n row-major (required by the condensed stage)
+  bool schur = false;  ///< true: GLOBAL condensed source stage (instead of local explicit/imex)
+  double schur_theta = 0.5;  ///< theta-scheme of the condensed stage (0.5 = Crank-Nicolson)
+  double schur_alpha = 1.0;  ///< electrostatic coupling constant of the condensed stage
+  bool schur_strang =
+      false;  ///< true: Strang splitting H(dt/2) S(dt) H(dt/2); false: Lie H(dt) S(dt)
+  std::vector<double>
+      bz_field;  ///< coarse B_z(x,y) field, n*n row-major (required by the condensed stage)
   /// Model-NAMED aux fields (ADC-291): component (>= kAuxNamedBase) -> coarse base-level field
   /// (n*n row-major). Seeded onto the coupler's shared aux at build (build_amr_compiled), like bz_field;
   /// the coupler re-applies them each update so they persist across regrid. Empty -> bit-identical.
@@ -114,8 +117,8 @@ struct AmrBuildParams {
   /// bit-identical.
   std::map<int, AuxHaloPolicy> named_aux_bc;
   // Settings of the condensed stage TRANSPORTED by the ABI (audit wave 3, append-only like has_state).
-  double schur_krylov_tol = 0.0;      ///< tolerance of the coarse Krylov solve (<= 0 = default 1e-10)
-  int schur_krylov_max_iters = 0;     ///< iteration budget (<= 0 = default 400)
+  double schur_krylov_tol = 0.0;   ///< tolerance of the coarse Krylov solve (<= 0 = default 1e-10)
+  int schur_krylov_max_iters = 0;  ///< iteration budget (<= 0 = default 400)
   // Field descriptors of the stage ("" = canonical role, bit-identical; otherwise stable role
   // name OR block variable name, resolved at build against Model::conservative_vars()).
   std::string schur_density, schur_momentum_x, schur_momentum_y, schur_energy;
@@ -143,40 +146,46 @@ struct AmrBuildParams {
 /// Type-erased closures of a compiled AMR block, produced by amr_dsl_block::build_amr_compiled and
 /// installed via AmrSystem::set_compiled_block. Symmetric with the std::function hooks of AmrSystem::Impl.
 struct AmrCompiledHooks {
-  std::shared_ptr<void> coupler_holder;   ///< keeps the AmrCouplerMP<Model> alive
-  std::function<void(double)> step;       ///< one macro-step (periodic regrid included)
-  std::function<double()> max_speed;      ///< max wave speed (CFL step)
-  std::function<double()> mass;           ///< coarse mass
-  std::function<int()> n_patches;         ///< number of fine patches
-  std::function<std::vector<double>()> density;  ///< coarse density, n*n row-major
+  std::shared_ptr<void> coupler_holder;            ///< keeps the AmrCouplerMP<Model> alive
+  std::function<void(double)> step;                ///< one macro-step (periodic regrid included)
+  std::function<double()> max_speed;               ///< max wave speed (CFL step)
+  std::function<double()> mass;                    ///< coarse mass
+  std::function<int()> n_patches;                  ///< number of fine patches
+  std::function<std::vector<double>()> density;    ///< coarse density, n*n row-major
   std::function<std::vector<double>()> potential;  ///< coarse-level phi, n*n row-major
   // ADDED AT THE TAIL (additive, moves no existing field): index-space signatures of the fine
   // patches. Mirror of n_patches (same box_array(), the COUNT becomes the BOXES). The .so loader that
   // builds this struct is guarded by adc_native_abi_key: a .so generated BEFORE this addition must be
   // recompiled (the guard already diagnoses it clearly); the tail addition makes it purely additive.
-  std::function<std::vector<PatchBox>()> patch_boxes;  ///< index-space signatures of the fine patches
+  std::function<std::vector<PatchBox>()>
+      patch_boxes;  ///< index-space signatures of the fine patches
   // ADDED AT THE TAIL (AMR StabilityPolicy, audit 2026-06, additive like patch_boxes): OPTIONAL step
   // bounds of the block, evaluated on the COARSE level by AmrSystem::step_cfl mono-block. EMPTY if
   // the model does not declare the HasSourceFrequency / HasStabilityDt traits (bit-identical). The
   // adc_native_abi_key guard forces regeneration of older .so files (purely additive addition).
   std::function<double()> source_frequency;  ///< coarse max of mu [1/s] (0 = does not constrain)
-  std::function<double()> stability_dt;      ///< coarse min of the admissible step (0 = does not constrain)
+  std::function<double()>
+      stability_dt;  ///< coarse min of the admissible step (0 = does not constrain)
   // ADDED AT THE TAIL (IO v1, parity with System::set_clock): restoration of the macro-step counter of
   // the MONO-BLOCK engine (the AmrCouplerMP coupler carries the regrid-cadence phase in a step_state;
   // this hook writes it at restart). EMPTY is never the case (the builder always populates it); the
   // adc_native_abi_key guard forces regeneration of older .so files (purely additive tail addition).
-  std::function<void(int)> set_macro_step;   ///< restores the cadence (regrid) phase of the mono-block
+  std::function<void(int)>
+      set_macro_step;  ///< restores the cadence (regrid) phase of the mono-block
   // ADDED AT THE TAIL (mono-rank AMR checkpoint/restart, ADC-65; additive like set_macro_step): FULL
   // CONSERVATIVE state per level (all components) + phi (warm-start) + imposition of a SAVED fine
   // hierarchy. The mono-block coupler (AmrCouplerMP) carries them; the builder always populates them
   // (never empty). The adc_native_abi_key guard forces regeneration of older .so files.
-  std::function<int()> n_levels;                                ///< number of levels (>= 1)
-  std::function<int()> n_vars;                                  ///< conserved components of the block
-  std::function<std::vector<double>(int)> level_state;          ///< full state of level k (c*nf*nf+j*nf+i)
-  std::function<void(int, const std::vector<double>&)> set_level_state;       ///< restores the state of level k
-  std::function<std::vector<double>(int)> level_potential;      ///< phi of level k (nf*nf row-major)
-  std::function<void(int, const std::vector<double>&)> set_level_potential;   ///< restores phi of level k
-  std::function<void(const std::vector<PatchBox>&)> set_hierarchy;  ///< imposes the saved fine patches
+  std::function<int()> n_levels;                        ///< number of levels (>= 1)
+  std::function<int()> n_vars;                          ///< conserved components of the block
+  std::function<std::vector<double>(int)> level_state;  ///< full state of level k (c*nf*nf+j*nf+i)
+  std::function<void(int, const std::vector<double>&)>
+      set_level_state;                                      ///< restores the state of level k
+  std::function<std::vector<double>(int)> level_potential;  ///< phi of level k (nf*nf row-major)
+  std::function<void(int, const std::vector<double>&)>
+      set_level_potential;  ///< restores phi of level k
+  std::function<void(const std::vector<PatchBox>&)>
+      set_hierarchy;  ///< imposes the saved fine patches
   // ADDED AT THE TAIL (ADC-319, MPI ownership diagnostic; additive like the fields above): COARSE-level
   // (base) box counts. coarse_local_boxes = cpl->coarse().local_size() (level-0 fabs OWNED by this rank);
   // coarse_total_boxes = cpl->coarse().box_array().size() (total base boxes, all ranks). They reveal
@@ -200,8 +209,8 @@ struct AmrCompiledHooks {
 /// forwarded to dispatch_amr_block -> build_amr_block exactly like a native multi-block.
 using AmrCompiledBlockBuilder = std::function<AmrRuntimeBlock(
     const detail::SharedAmrLayout& layout, const std::string& name,
-    const std::vector<double>& density, bool has_density, double gamma, int substeps, bool recon_prim,
-    bool imex, int stride, const std::vector<std::string>& implicit_vars,
+    const std::vector<double>& density, bool has_density, double gamma, int substeps,
+    bool recon_prim, bool imex, int stride, const std::vector<std::string>& implicit_vars,
     const std::vector<std::string>& implicit_roles, double pos_floor)>;
 
 /// Single block carried on an AMR hierarchy, composed at runtime.
@@ -290,10 +299,9 @@ class AmrSystem {
   ///                 role rejects floor > 0. The COMPILED .so path carries it too (ADC-322): a loader
   ///                 regenerated against this header marshals the floor (adc_install_native_amr).
   void add_block(const std::string& name, const ModelSpec& model,
-                 const std::string& limiter = "minmod",
-                 const std::string& riemann = "rusanov",
-                 const std::string& recon = "conservative",
-                 const std::string& time = "explicit", int substeps = 1, int stride = 1,
+                 const std::string& limiter = "minmod", const std::string& riemann = "rusanov",
+                 const std::string& recon = "conservative", const std::string& time = "explicit",
+                 int substeps = 1, int stride = 1,
                  const std::vector<std::string>& implicit_vars = {},
                  const std::vector<std::string>& implicit_roles = {},
                  const NewtonOptions& newton = {}, bool newton_diagnostics = false,
@@ -304,14 +312,15 @@ class AmrSystem {
   /// NATIVE MULTI-BLOCK (explicit error otherwise: mono-block, .so loader, or block without diagnostics).
   /// Flat copy (no dependence on the numerics header on the caller side), parity with System::SourceNewtonReport.
   struct SourceNewtonReport {
-    bool enabled;          ///< a report was computed (at least one IMEX advance played)
-    bool converged;        ///< no cell failed on the last advance
-    double max_residual;   ///< max over cells/levels/substeps of ||F||_inf at the Newton exit
-    double max_iters_used; ///< max over cells/levels/substeps of the iterations consumed
-    double n_failed;       ///< count (cells x levels x substeps) failed (non-finite / pivot / non-convergence)
-    double failed_i;       ///< i of ONE faulty cell (-1 if none; max index encoded)
-    double failed_j;       ///< j of the same cell (-1 if none)
-    double failed_comp;    ///< conserved component of the worst residual of that cell (-1 unknown)
+    bool enabled;           ///< a report was computed (at least one IMEX advance played)
+    bool converged;         ///< no cell failed on the last advance
+    double max_residual;    ///< max over cells/levels/substeps of ||F||_inf at the Newton exit
+    double max_iters_used;  ///< max over cells/levels/substeps of the iterations consumed
+    double
+        n_failed;  ///< count (cells x levels x substeps) failed (non-finite / pivot / non-convergence)
+    double failed_i;     ///< i of ONE faulty cell (-1 if none; max index encoded)
+    double failed_j;     ///< j of the same cell (-1 if none)
+    double failed_comp;  ///< conserved component of the worst residual of that cell (-1 unknown)
   };
   /// @throws std::runtime_error if the block is unknown, in mono-block, on a .so loader, or if the block
   ///         did not enable newton_diagnostics. Forces the lazy build (ensure_built).
@@ -381,8 +390,8 @@ class AmrSystem {
                         const std::string& limiter = "minmod",
                         const std::string& riemann = "rusanov",
                         const std::string& recon = "conservative",
-                        const std::string& time = "explicit", double gamma = 1.4,
-                        int substeps = 1, double positivity_floor = 0.0);
+                        const std::string& time = "explicit", double gamma = 1.4, int substeps = 1,
+                        double positivity_floor = 0.0);
 
   /// Refines the cells where the SELECTED conserved variable exceeds @p threshold. By default the
   /// variable is component 0 (historically the density), preserving the bit-identical @c 1e30 no-op.
@@ -421,9 +430,8 @@ class AmrSystem {
   /// @param wall   "none" | "circle" (circular conductive wall, requires wall_radius > 0)
   /// @throws std::runtime_error if rhs, solver, bc or wall is outside the supported domain.
   void set_poisson(const std::string& rhs = "charge_density",
-                   const std::string& solver = "geometric_mg",
-                   const std::string& bc = "auto", const std::string& wall = "none",
-                   double wall_radius = 0.0);
+                   const std::string& solver = "geometric_mg", const std::string& bc = "auto",
+                   const std::string& wall = "none", double wall_radius = 0.0);
 
   /// Sets the initial density on the coarse level (component 0), n*n row-major.
   /// @param name cosmetic label (mono-block AMR: the density targets the single block).
@@ -536,11 +544,11 @@ class AmrSystem {
   /// macro-step counter (propagated to the regrid/stride cadence of the engine, mono-block as well as multi-block). Useful
   /// alone (stride cadence + clock resumption). @throws if macro_step < 0.
   void set_clock(double t, int macro_step);
-  int n_blocks() const;           ///< number of blocks (1 = mono-block AmrCouplerMP; >= 2 = AmrRuntime)
+  int n_blocks() const;  ///< number of blocks (1 = mono-block AmrCouplerMP; >= 2 = AmrRuntime)
   /// Names of the blocks in add order (parity with System::block_names): the IO facade iterates over them
   /// to write EACH block by its name (an empty name -> block 0, historical mono-block compat).
   std::vector<std::string> block_names() const;
-  int n_patches();                ///< number of current fine patches (of the shared hierarchy)
+  int n_patches();  ///< number of current fine patches (of the shared hierarchy)
   /// Index-space signatures of the current fine patches: one PatchBox (level, ilo, jlo, ihi, jhi) per
   /// fine box, for ALL fine levels (level >= 1). INCLUSIVE corners in the index space of the
   /// level (n << level cells/direction, ratio 2). SAME source as n_patches() (the GLOBAL fine
@@ -564,12 +572,13 @@ class AmrSystem {
   /// Python side). All REJECT multi-block (AmrRuntime engine: SHARED layout + aux, documented
   /// follow-up); the facade additionally rejects MPI np>1 (per-level gather: follow-up). Force the lazy build
   /// (ensure_built) like patch_boxes()/mass(). @p k: level (0 = coarse, >= 1 = fine).
-  int n_levels();                 ///< number of levels of the hierarchy (>= 1)
-  int n_vars();                   ///< number of conserved components (mono-block)
+  int n_levels();  ///< number of levels of the hierarchy (>= 1)
+  int n_vars();    ///< number of conserved components (mono-block)
   /// FULL conservative state of level @p k, flat component-major c*nf*nf + j*nf + i (nf = n << k;
   /// zeros outside the patches at the fine level -- only the patch interior is defined).
   std::vector<double> level_state(int k);
-  void set_level_state(int k, const std::vector<double>& s);  ///< restores the state of level @p k (as is)
+  void set_level_state(int k,
+                       const std::vector<double>& s);  ///< restores the state of level @p k (as is)
   /// Potential phi of level @p k, flat nf*nf row-major. Level 0 = warm-start of the multigrid
   /// (bit-identical resumption); level >= 1 = aux comp 0 (recomputed at update).
   std::vector<double> level_potential(int k);
@@ -578,8 +587,9 @@ class AmrSystem {
   /// are the patch_boxes() signatures of the checkpoint (filtered to level 1 in mono-block).
   void set_hierarchy(const std::vector<PatchBox>& boxes);
 
-  double mass();                  ///< mass of the 1st block on the coarse (conserved at reflux)
-  double mass(const std::string& name);     ///< mass of the named block on the coarse (conserved PER BLOCK)
+  double mass();  ///< mass of the 1st block on the coarse (conserved at reflux)
+  double mass(
+      const std::string& name);   ///< mass of the named block on the coarse (conserved PER BLOCK)
   std::vector<double> density();  ///< coarse density of the 1st block (component 0), n*n row-major
   std::vector<double> density(const std::string& name);  ///< coarse density of the named block, n*n
   /// Electrostatic potential phi of the COARSE LEVEL (base), n*n row-major. Level 0 covers

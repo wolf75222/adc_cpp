@@ -53,8 +53,8 @@ struct CopyShiftedKernel {
 };
 
 // dst(i, j, c) = src(i - sx, j - sy, c) for (i, j) in region.
-inline void copy_shifted(Fab2D& dst, const Fab2D& src, const Box2D& region,
-                         int sx, int sy, int ncomp) {
+inline void copy_shifted(Fab2D& dst, const Fab2D& src, const Box2D& region, int sx, int sy,
+                         int ncomp) {
   Array4 d = dst.array();
   ConstArray4 s = src.const_array();
   for (int c = 0; c < ncomp; ++c)
@@ -114,7 +114,8 @@ inline void build_halo_schedule(const MultiFab& mf, const Box2D& domain, Periodi
   }
   std::vector<std::pair<int, int>> shifts;
   for (int sx : sxv)
-    for (int sy : syv) shifts.push_back({sx, sy});
+    for (int sy : syv)
+      shifts.push_back({sx, sy});
 
   // spatial hash: restricts the neighbor-box search (see box_hash.hpp).
   const BoxHash hash(ba, suggest_bin(ba));
@@ -126,11 +127,14 @@ inline void build_halo_schedule(const MultiFab& mf, const Box2D& domain, Periodi
     for (auto [sx, sy] : shifts) {
       const Box2D Q = gbox.shift(0, -sx).shift(1, -sy);
       for (int gB : hash.query(Q)) {
-        if (gB == gF && sx == 0 && sy == 0) continue;  // self, without shift
+        if (gB == gF && sx == 0 && sy == 0)
+          continue;  // self, without shift
         const int srcLocal = mf.local_index_of(gB);
-        if (srcLocal < 0) continue;  // non-local src -> MPI below
+        if (srcLocal < 0)
+          continue;  // non-local src -> MPI below
         const Box2D region = gbox.intersect(ba[gB].shift(0, sx).shift(1, sy));
-        if (region.empty()) continue;
+        if (region.empty())
+          continue;
         sched.local.push_back({gB, gF, sx, sy, region});
       }
     }
@@ -151,12 +155,16 @@ inline void build_halo_schedule(const MultiFab& mf, const Box2D& domain, Periodi
       for (auto [sx, sy] : shifts) {
         const Box2D Q = gbox.shift(0, -sx).shift(1, -sy);
         for (int gB : hash.query(Q)) {
-          if (gB == gF && sx == 0 && sy == 0) continue;
+          if (gB == gF && sx == 0 && sy == 0)
+            continue;
           const int os = dm[gB];
-          if (od != me && os != me) continue;
-          if (od == me && os == me) continue;
+          if (od != me && os != me)
+            continue;
+          if (od == me && os == me)
+            continue;
           const Box2D region = gbox.intersect(ba[gB].shift(0, sx).shift(1, sy));
-          if (region.empty()) continue;
+          if (region.empty())
+            continue;
           if (os == me)
             sched.send[od].push_back({gB, gF, sx, sy, region});
           else
@@ -172,7 +180,8 @@ inline void build_halo_schedule(const MultiFab& mf, const Box2D& domain, Periodi
 inline std::shared_ptr<const HaloSchedule> get_halo_schedule(const MultiFab& mf,
                                                              const Box2D& domain, Periodicity per) {
   HaloScheduleCache& cache = mf.halo_cache();
-  if (std::shared_ptr<const HaloSchedule> hit = cache.find(per.x, per.y, domain)) return hit;
+  if (std::shared_ptr<const HaloSchedule> hit = cache.find(per.x, per.y, domain))
+    return hit;
   std::shared_ptr<HaloSchedule> s = cache.add();
   s->per_x = per.x;
   s->per_y = per.y;
@@ -208,11 +217,11 @@ struct HaloExchange {
 /// Phase 1 (non-blocking): does the LOCAL halo copies and posts the Isend/Irecv of the distant halos.
 /// Returns the handle to pass to fill_boundary_end. Between begin and end the caller can advance the
 /// interior. No-op if mf has no ghost. @p domain is used for periodic wrapping @p per.
-inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
-                                        Periodicity per = {}) {
+inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain, Periodicity per = {}) {
   HaloExchange h;
   const int ng = mf.n_grow();
-  if (ng == 0) return h;
+  if (ng == 0)
+    return h;
   const int nc = mf.ncomp();
   // memoized schedule (BoxHash + enumeration) for this (layout, Periodicity, domain).
   const std::shared_ptr<const HaloSchedule> sched = detail::get_halo_schedule(mf, domain, per);
@@ -226,13 +235,15 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
   }
 
 #ifdef ADC_HAS_MPI
-  if (n_ranks() <= 1) return h;
+  if (n_ranks() <= 1)
+    return h;
   const int np = n_ranks();
   h.nc = nc;
 
   auto buf_size = [&](const std::vector<HaloJob>& js) {
     std::int64_t n = 0;
-    for (const auto& j : js) n += j.region.num_cells() * nc;
+    for (const auto& j : js)
+      n += j.region.num_cells() * nc;
     return n;
   };
   h.sbuf.assign(np, {});
@@ -243,7 +254,8 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
   // so sbuf[A->B] and rbuf[B<-A] align without negotiating sizes.
   for (int r = 0; r < np; ++r) {
     const std::vector<HaloJob>& send_r = sched->send[r];
-    if (send_r.empty()) continue;
+    if (send_r.empty())
+      continue;
     h.sbuf[r].resize(buf_size(send_r));
     Real* sb = h.sbuf[r].data();
     std::int64_t base = 0;
@@ -253,15 +265,17 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
       const std::int64_t rsz = static_cast<std::int64_t>(rnx) * jb.region.ny();
       const int sx = jb.sx, sy = jb.sy, ncl = nc;
       const std::int64_t b0 = base;
-      for_each_cell(jb.region,
-                    detail::PackKernel{sb, s, b0, rsz, lo0, lo1, rnx, sx, sy, ncl});
+      for_each_cell(jb.region, detail::PackKernel{sb, s, b0, rsz, lo0, lo1, rnx, sx, sy, ncl});
       base += rsz * nc;
     }
   }
   for (int r = 0; r < np; ++r)  // allocate the receive buffers
-    if (!sched->recv[r].empty()) h.rbuf[r].resize(buf_size(sched->recv[r]));
+    if (!sched->recv[r].empty())
+      h.rbuf[r].resize(buf_size(sched->recv[r]));
   device_fence();  // the pack kernels (and the local copies) must finish before MPI reads sbuf
-  for (int r = 0; r < np; ++r) {  // non-blocking posting; MPI receives PINNED HOST pointers (seen HOST, no GPUDirect/CUDA IPC)
+  for (
+      int r = 0; r < np;
+      ++r) {  // non-blocking posting; MPI receives PINNED HOST pointers (seen HOST, no GPUDirect/CUDA IPC)
     if (!h.sbuf[r].empty()) {
       h.reqs.emplace_back();
       MPI_Isend(h.sbuf[r].data(), static_cast<int>(h.sbuf[r].size()), MPI_DOUBLE, r, 0,
@@ -282,14 +296,16 @@ inline HaloExchange fill_boundary_begin(MultiFab& mf, const Box2D& domain,
 /// in serial (no request).
 inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
 #ifdef ADC_HAS_MPI
-  if (h.reqs.empty()) return;
+  if (h.reqs.empty())
+    return;
   MPI_Waitall(static_cast<int>(h.reqs.size()), h.reqs.data(), MPI_STATUSES_IGNORE);
   // device UNPACK (for_each) from the received PINNED HOST buffers. Waitall guarantees the transfer is
   // complete; the kernel launched next reads the pinned host (device-accessible, coherent). Replayed
   // from the SAME cached recv list begin used (h.sched), so base offsets match the sender's layout.
   const HaloSchedule& sched = *h.sched;
   for (std::size_t r = 0; r < sched.recv.size(); ++r) {
-    if (h.rbuf[r].empty()) continue;
+    if (h.rbuf[r].empty())
+      continue;
     const Real* rb = h.rbuf[r].data();
     std::int64_t base = 0;
     for (const auto& jb : sched.recv[r]) {
@@ -298,8 +314,7 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
       const std::int64_t rsz = static_cast<std::int64_t>(rnx) * jb.region.ny();
       const int ncl = h.nc;
       const std::int64_t b0 = base;
-      for_each_cell(jb.region,
-                    detail::UnpackKernel{rb, d, b0, rsz, lo0, lo1, rnx, ncl});
+      for_each_cell(jb.region, detail::UnpackKernel{rb, d, b0, rsz, lo0, lo1, rnx, ncl});
       base += rsz * ncl;
     }
   }
@@ -315,8 +330,7 @@ inline void fill_boundary_end(MultiFab& mf, HaloExchange& h) {
 
 /// BLOCKING halo exchange: begin then end immediately (no overlap). Fills the intra-level +
 /// periodic ghosts of @p mf; @p per sets the wrapping, @p domain the periodic fold.
-inline void fill_boundary(MultiFab& mf, const Box2D& domain,
-                          Periodicity per = {}) {
+inline void fill_boundary(MultiFab& mf, const Box2D& domain, Periodicity per = {}) {
   HaloExchange h = fill_boundary_begin(mf, domain, per);
   fill_boundary_end(mf, h);
 }

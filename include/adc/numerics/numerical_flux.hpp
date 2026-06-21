@@ -54,10 +54,8 @@ namespace adc {
 /// ADC_HD. INVARIANT: component-by-component treatment (scalar upwind), no coupling.
 struct RusanovFlux {
   template <class Model>
-  ADC_HD typename Model::State operator()(const Model& m,
-                                          const typename Model::State& UL,
-                                          const Aux& AL,
-                                          const typename Model::State& UR,
+  ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
+                                          const Aux& AL, const typename Model::State& UR,
                                           const Aux& AR, int dir) const {
     const auto FL = m.flux(UL, AL, dir);
     const auto FR = m.flux(UR, AR, dir);
@@ -77,9 +75,9 @@ struct RusanovFlux {
 /// Requires model.wave_speeds(U, aux, dir, lo, hi) -> signed speeds (cf. Euler).
 /// Shared by HLLFlux and HLLCFlux. ADC_HD.
 template <class Model>
-ADC_HD inline void hll_speeds(const Model& m, const typename Model::State& UL,
-                              const Aux& AL, const typename Model::State& UR,
-                              const Aux& AR, int dir, Real& sL, Real& sR) {
+ADC_HD inline void hll_speeds(const Model& m, const typename Model::State& UL, const Aux& AL,
+                              const typename Model::State& UR, const Aux& AR, int dir, Real& sL,
+                              Real& sR) {
   Real lL, hL, lR, hR;
   m.wave_speeds(UL, AL, dir, lL, hL);
   m.wave_speeds(UR, AR, dir, lR, hR);
@@ -102,8 +100,10 @@ ADC_HD inline typename Model::State hll_flux_with_speeds(const Model& m,
                                                          const Aux& AR, int dir, Real sL, Real sR) {
   const auto FL = m.flux(UL, AL, dir);
   const auto FR = m.flux(UR, AR, dir);
-  if (sL >= 0) return FL;
-  if (sR <= 0) return FR;
+  if (sL >= 0)
+    return FL;
+  if (sR <= 0)
+    return FR;
   typename Model::State F;
   const Real inv = Real(1) / (sR - sL);
   for (int c = 0; c < Model::n_vars; ++c)
@@ -118,10 +118,8 @@ ADC_HD inline typename Model::State hll_flux_with_speeds(const Model& m,
 /// Returns FL if sL >= 0, FR if sR <= 0, the HLL flux otherwise. ADC_HD.
 struct HLLFlux {
   template <class Model>
-  ADC_HD typename Model::State operator()(const Model& m,
-                                          const typename Model::State& UL,
-                                          const Aux& AL,
-                                          const typename Model::State& UR,
+  ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
+                                          const Aux& AL, const typename Model::State& UR,
                                           const Aux& AR, int dir) const {
     Real sL, sR;
     hll_speeds(m, UL, AL, UR, AR, dir, sL, sR);
@@ -155,11 +153,10 @@ concept HasHLLCStructure =
 /// (these are properties of the physical system, not the core). RoeFlux then becomes
 /// F = 1/2 (F_L + F_R) - 1/2 d, without any Euler assumption. ADC_HD required.
 template <class M>
-concept HasRoeDissipation =
-    requires(const M m, const typename M::State ul, const Aux al, const typename M::State ur,
-             const Aux ar, int dir) {
-      { m.roe_dissipation(ul, al, ur, ar, dir) } -> std::same_as<typename M::State>;
-    };
+concept HasRoeDissipation = requires(const M m, const typename M::State ul, const Aux al,
+                                     const typename M::State ur, const Aux ar, int dir) {
+  { m.roe_dissipation(ul, al, ur, ar, dir) } -> std::same_as<typename M::State>;
+};
 
 /// HLLCFlux (HLL + Contact wave, Toro): 3 waves, resolves the contact discontinuity.
 ///
@@ -171,10 +168,8 @@ concept HasRoeDissipation =
 /// INVARIANT: the n_vars == 4 assumption applies ONLY to the Euler fallback branch.
 struct HLLCFlux {
   template <class Model>
-  ADC_HD typename Model::State operator()(const Model& m,
-                                          const typename Model::State& UL,
-                                          const Aux& AL,
-                                          const typename Model::State& UR,
+  ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
+                                          const Aux& AL, const typename Model::State& UR,
                                           const Aux& AR, int dir) const {
     // CAPABILITY PATH (HasHLLCStructure): GENERIC HLLC algorithm -- the contact speed and the star
     // states come from the MODEL, the core assumes neither layout nor EOS. A canonical Euler model
@@ -184,54 +179,62 @@ struct HLLCFlux {
       hll_speeds(m, UL, AL, UR, AR, dir, sL, sR);
       const auto FL = m.flux(UL, AL, dir);
       const auto FR = m.flux(UR, AR, dir);
-      if (sL >= 0) return FL;
-      if (sR <= 0) return FR;
+      if (sL >= 0)
+        return FL;
+      if (sR <= 0)
+        return FR;
       const Real pL = m.pressure(UL), pR = m.pressure(UR);
       const Real sStar = m.contact_speed(UL, UR, pL, pR, sL, sR, dir);
       typename Model::State F;
       if (sStar >= 0) {
         const typename Model::State Us = m.hllc_star_state(UL, pL, sL, sStar, dir);
-        for (int c = 0; c < Model::n_vars; ++c) F[c] = FL[c] + sL * (Us[c] - UL[c]);
+        for (int c = 0; c < Model::n_vars; ++c)
+          F[c] = FL[c] + sL * (Us[c] - UL[c]);
       } else {
         const typename Model::State Us = m.hllc_star_state(UR, pR, sR, sStar, dir);
-        for (int c = 0; c < Model::n_vars; ++c) F[c] = FR[c] + sR * (Us[c] - UR[c]);
+        for (int c = 0; c < Model::n_vars; ++c)
+          F[c] = FR[c] + sR * (Us[c] - UR[c]);
       }
       return F;
     } else {
-    const int in = (dir == 0) ? 1 : 2;  // normal momentum component
-    const int it = (dir == 0) ? 2 : 1;  // tangential
-    const Real rL = UL[0], rR = UR[0];
-    const Real unL = UL[in] / rL, unR = UR[in] / rR;
-    const Real pL = m.pressure(UL), pR = m.pressure(UR);
-    Real sL, sR;
-    hll_speeds(m, UL, AL, UR, AR, dir, sL, sR);
-    const auto FL = m.flux(UL, AL, dir);
-    const auto FR = m.flux(UR, AR, dir);
-    if (sL >= 0) return FL;
-    if (sR <= 0) return FR;
+      const int in = (dir == 0) ? 1 : 2;  // normal momentum component
+      const int it = (dir == 0) ? 2 : 1;  // tangential
+      const Real rL = UL[0], rR = UR[0];
+      const Real unL = UL[in] / rL, unR = UR[in] / rR;
+      const Real pL = m.pressure(UL), pR = m.pressure(UR);
+      Real sL, sR;
+      hll_speeds(m, UL, AL, UR, AR, dir, sL, sR);
+      const auto FL = m.flux(UL, AL, dir);
+      const auto FR = m.flux(UR, AR, dir);
+      if (sL >= 0)
+        return FL;
+      if (sR <= 0)
+        return FR;
 
-    // contact wave speed (Toro 10.37)
-    const Real sStar = (pR - pL + rL * unL * (sL - unL) - rR * unR * (sR - unR)) /
-                       (rL * (sL - unL) - rR * (sR - unR));
-    typename Model::State F;
-    if (sStar >= 0) {  // left star state
-      const Real fac = rL * (sL - unL) / (sL - sStar);
-      typename Model::State Us;
-      Us[0] = fac;
-      Us[in] = fac * sStar;
-      Us[it] = fac * (UL[it] / rL);
-      Us[3] = fac * (UL[3] / rL + (sStar - unL) * (sStar + pL / (rL * (sL - unL))));
-      for (int c = 0; c < 4; ++c) F[c] = FL[c] + sL * (Us[c] - UL[c]);
-    } else {  // right star state
-      const Real fac = rR * (sR - unR) / (sR - sStar);
-      typename Model::State Us;
-      Us[0] = fac;
-      Us[in] = fac * sStar;
-      Us[it] = fac * (UR[it] / rR);
-      Us[3] = fac * (UR[3] / rR + (sStar - unR) * (sStar + pR / (rR * (sR - unR))));
-      for (int c = 0; c < 4; ++c) F[c] = FR[c] + sR * (Us[c] - UR[c]);
-    }
-    return F;
+      // contact wave speed (Toro 10.37)
+      const Real sStar = (pR - pL + rL * unL * (sL - unL) - rR * unR * (sR - unR)) /
+                         (rL * (sL - unL) - rR * (sR - unR));
+      typename Model::State F;
+      if (sStar >= 0) {  // left star state
+        const Real fac = rL * (sL - unL) / (sL - sStar);
+        typename Model::State Us;
+        Us[0] = fac;
+        Us[in] = fac * sStar;
+        Us[it] = fac * (UL[it] / rL);
+        Us[3] = fac * (UL[3] / rL + (sStar - unL) * (sStar + pL / (rL * (sL - unL))));
+        for (int c = 0; c < 4; ++c)
+          F[c] = FL[c] + sL * (Us[c] - UL[c]);
+      } else {  // right star state
+        const Real fac = rR * (sR - unR) / (sR - sStar);
+        typename Model::State Us;
+        Us[0] = fac;
+        Us[in] = fac * sStar;
+        Us[it] = fac * (UR[it] / rR);
+        Us[3] = fac * (UR[3] / rR + (sStar - unR) * (sStar + pR / (rR * (sR - unR))));
+        for (int c = 0; c < 4; ++c)
+          F[c] = FR[c] + sR * (Us[c] - UR[c]);
+      }
+      return F;
     }  // end of canonical Euler 2D path (else of the if constexpr HasHLLCStructure)
   }
 };
@@ -268,60 +271,60 @@ struct RoeFlux {
         F[c] = Real(0.5) * (FL[c] + FR[c]) - Real(0.5) * d[c];
       return F;
     } else {
-    const int in = (dir == 0) ? 1 : 2;  // normal momentum
-    const int it = (dir == 0) ? 2 : 1;  // tangential
-    const Real rL = UL[0], rR = UR[0];
-    const Real unL = UL[in] / rL, unR = UR[in] / rR;
-    const Real utL = UL[it] / rL, utR = UR[it] / rR;
-    const Real pL = m.pressure(UL), pR = m.pressure(UR);
-    const Real HL = (UL[3] + pL) / rL, HR = (UR[3] + pR) / rR;
+      const int in = (dir == 0) ? 1 : 2;  // normal momentum
+      const int it = (dir == 0) ? 2 : 1;  // tangential
+      const Real rL = UL[0], rR = UR[0];
+      const Real unL = UL[in] / rL, unR = UR[in] / rR;
+      const Real utL = UL[it] / rL, utR = UR[it] / rR;
+      const Real pL = m.pressure(UL), pR = m.pressure(UR);
+      const Real HL = (UL[3] + pL) / rL, HR = (UR[3] + pR) / rR;
 
-    // Roe average (weighted by sqrt(rho))
-    const Real sqL = std::sqrt(rL), sqR = std::sqrt(rR), den = sqL + sqR;
-    const Real un = (sqL * unL + sqR * unR) / den;
-    const Real ut = (sqL * utL + sqR * utR) / den;
-    const Real H = (sqL * HL + sqR * HR) / den;
-    const Real rho = sqL * sqR;
-    const Real q2 = un * un + ut * ut;
-    // gamma-1 derived from the ideal gas: p = (gamma-1) (E - 1/2 rho |v|^2)
-    const Real gm1 = pL / (UL[3] - Real(0.5) * rL * (unL * unL + utL * utL));
-    const Real c2 = gm1 * (H - Real(0.5) * q2);
-    const Real c = std::sqrt(c2);
+      // Roe average (weighted by sqrt(rho))
+      const Real sqL = std::sqrt(rL), sqR = std::sqrt(rR), den = sqL + sqR;
+      const Real un = (sqL * unL + sqR * unR) / den;
+      const Real ut = (sqL * utL + sqR * utR) / den;
+      const Real H = (sqL * HL + sqR * HR) / den;
+      const Real rho = sqL * sqR;
+      const Real q2 = un * un + ut * ut;
+      // gamma-1 derived from the ideal gas: p = (gamma-1) (E - 1/2 rho |v|^2)
+      const Real gm1 = pL / (UL[3] - Real(0.5) * rL * (unL * unL + utL * utL));
+      const Real c2 = gm1 * (H - Real(0.5) * q2);
+      const Real c = std::sqrt(c2);
 
-    // wave jumps and amplitudes
-    const Real dr = rR - rL, dp = pR - pL, dun = unR - unL, dut = utR - utL;
-    const Real a1 = (dp - rho * c * dun) / (Real(2) * c2);  // un - c wave
-    const Real a2 = dr - dp / c2;                           // entropy, un
-    const Real a3 = rho * dut;                              // shear, un
-    const Real a5 = (dp + rho * c * dun) / (Real(2) * c2);  // un + c wave
+      // wave jumps and amplitudes
+      const Real dr = rR - rL, dp = pR - pL, dun = unR - unL, dut = utR - utL;
+      const Real a1 = (dp - rho * c * dun) / (Real(2) * c2);  // un - c wave
+      const Real a2 = dr - dp / c2;                           // entropy, un
+      const Real a3 = rho * dut;                              // shear, un
+      const Real a5 = (dp + rho * c * dun) / (Real(2) * c2);  // un + c wave
 
-    // |eigenvalue| with Harten entropy fix on the acoustic waves (1, 5).
-    // kRoeEntropyFixFraction = 0.1 is an EULER/ROE-SPECIFIC entropy policy (width of the parabolic
-    // smoothing as a fraction of the Roe sound speed, the usual value from the literature):
-    // it has no meaning for another hyperbolic system and must not be presented as a generic core
-    // parameter.
-    const Real eps = kRoeEntropyFixFraction * c;
-    auto absfix = [eps](Real l) {
-      const Real al = l < 0 ? -l : l;
-      return al < eps ? Real(0.5) * (l * l / eps + eps) : al;
-    };
-    const Real al1 = absfix(un - c), al2 = (un < 0 ? -un : un), al5 = absfix(un + c);
+      // |eigenvalue| with Harten entropy fix on the acoustic waves (1, 5).
+      // kRoeEntropyFixFraction = 0.1 is an EULER/ROE-SPECIFIC entropy policy (width of the parabolic
+      // smoothing as a fraction of the Roe sound speed, the usual value from the literature):
+      // it has no meaning for another hyperbolic system and must not be presented as a generic core
+      // parameter.
+      const Real eps = kRoeEntropyFixFraction * c;
+      auto absfix = [eps](Real l) {
+        const Real al = l < 0 ? -l : l;
+        return al < eps ? Real(0.5) * (l * l / eps + eps) : al;
+      };
+      const Real al1 = absfix(un - c), al2 = (un < 0 ? -un : un), al5 = absfix(un + c);
 
-    // dissipation Sum |lambda_k| a_k r_k, basis (rho, mom_n, mom_t, E)
-    const Real d_rho = al1 * a1 + al2 * a2 + al5 * a5;
-    const Real d_mn = al1 * a1 * (un - c) + al2 * a2 * un + al5 * a5 * (un + c);
-    const Real d_mt = al1 * a1 * ut + al2 * (a2 * ut + a3) + al5 * a5 * ut;
-    const Real d_E = al1 * a1 * (H - un * c) + al2 * (a2 * Real(0.5) * q2 + a3 * ut) +
-                     al5 * a5 * (H + un * c);
+      // dissipation Sum |lambda_k| a_k r_k, basis (rho, mom_n, mom_t, E)
+      const Real d_rho = al1 * a1 + al2 * a2 + al5 * a5;
+      const Real d_mn = al1 * a1 * (un - c) + al2 * a2 * un + al5 * a5 * (un + c);
+      const Real d_mt = al1 * a1 * ut + al2 * (a2 * ut + a3) + al5 * a5 * ut;
+      const Real d_E =
+          al1 * a1 * (H - un * c) + al2 * (a2 * Real(0.5) * q2 + a3 * ut) + al5 * a5 * (H + un * c);
 
-    const auto FL = m.flux(UL, AL, dir);
-    const auto FR = m.flux(UR, AR, dir);
-    typename Model::State F;
-    F[0] = Real(0.5) * (FL[0] + FR[0]) - Real(0.5) * d_rho;
-    F[in] = Real(0.5) * (FL[in] + FR[in]) - Real(0.5) * d_mn;
-    F[it] = Real(0.5) * (FL[it] + FR[it]) - Real(0.5) * d_mt;
-    F[3] = Real(0.5) * (FL[3] + FR[3]) - Real(0.5) * d_E;
-    return F;
+      const auto FL = m.flux(UL, AL, dir);
+      const auto FR = m.flux(UR, AR, dir);
+      typename Model::State F;
+      F[0] = Real(0.5) * (FL[0] + FR[0]) - Real(0.5) * d_rho;
+      F[in] = Real(0.5) * (FL[in] + FR[in]) - Real(0.5) * d_mn;
+      F[it] = Real(0.5) * (FL[it] + FR[it]) - Real(0.5) * d_mt;
+      F[3] = Real(0.5) * (FL[3] + FR[3]) - Real(0.5) * d_E;
+      return F;
     }  // end of canonical ideal-gas Euler 2D path (else of the if constexpr HasRoeDissipation)
   }
 };

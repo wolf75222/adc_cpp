@@ -27,10 +27,10 @@ namespace detail {
 ///   - "circle": disc centered at (L/2, L/2) with radius @p wall_radius.
 ///   - other: error, prefixed by @p err_context (e.g. "System::set_poisson").
 /// Body reused identically from the System / AmrSystem runtimes (bit-identical).
-inline std::function<bool(Real, Real)> wall_predicate(const std::string& wall,
-                                                      double wall_radius, double L,
-                                                      const std::string& err_context) {
-  if (wall == "none") return {};
+inline std::function<bool(Real, Real)> wall_predicate(const std::string& wall, double wall_radius,
+                                                      double L, const std::string& err_context) {
+  if (wall == "none")
+    return {};
   if (wall == "circle") {
     const double cx = 0.5 * L, cy = 0.5 * L, R = wall_radius;
     return [cx, cy, R](Real x, Real y) { return std::hypot(x - cx, y - cy) < R; };

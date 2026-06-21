@@ -16,9 +16,9 @@
 #include <adc/runtime/system_stepper.hpp>  // SystemStepper: time advance (step/advance/step_cfl/step_adaptive) (Batch B)
 #include <adc/runtime/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
 #include <adc/runtime/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
-#include <adc/numerics/time/implicit_stepper.hpp>   // backward_euler_source
-#include <adc/numerics/time/time_steppers.hpp>      // ForwardEuler, SSPRK2Step (core RK math)
-#include <adc/numerics/spatial_operator.hpp>     // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
+#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source
+#include <adc/numerics/time/time_steppers.hpp>     // ForwardEuler, SSPRK2Step (core RK math)
+#include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -26,7 +26,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/mf_arith.hpp>  // sum
 #include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>  // fill_ghosts, fill_boundary
+#include <adc/mesh/physical_bc.hpp>       // fill_ghosts, fill_boundary
 #include <adc/runtime/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
 #include <adc/runtime/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
 #include <adc/runtime/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
@@ -55,10 +55,14 @@ namespace adc {
 
 // MODULE ABI key (frozen at compile time of this TU). Defined here so the _adc module
 // exports it (ADC_EXPORT): add_native_block compares it to the key baked into the loader .so.
-ADC_EXPORT std::string abi_key() { return detail::abi_key_string(); }
+ADC_EXPORT std::string abi_key() {
+  return detail::abi_key_string();
+}
 
 // Convenience static method (Python binding + add_native_block): delegates to the module's free key.
-std::string System::abi_key() { return adc::abi_key(); }
+std::string System::abi_key() {
+  return adc::abi_key();
+}
 
 namespace {
 // Collective multi-box/multi-rank gather of @p mf into a GLOBAL buffer of size ncomp*gny*gnx,
@@ -109,12 +113,13 @@ struct System::Impl {
   PolarGeometry pgeom_;
   BoxArray ba;
   DistributionMapping dm;
-  BCRec bc_;        // transport BC (periodic or Foextrap per cfg.periodic; polar: physical r, periodic theta)
+  BCRec
+      bc_;  // transport BC (periodic or Foextrap per cfg.periodic; polar: physical r, periodic theta)
   Box2D dom;
   Periodicity per_;
   bool periodic_;
   MultiFab aux;
-  int aux_ncomp_ = kAuxBaseComps;     // width of the SHARED aux channel (max over blocks; >= 3)
+  int aux_ncomp_ = kAuxBaseComps;  // width of the SHARED aux channel (max over blocks; >= 3)
 
   // EMBEDDED-BOUNDARY / LEVEL-SET DOMAIN (T2 + T5-PR3, contract inert by default). eb_set_ == false:
   // no fixed domain -> the mask is "all active" and the transport path stays BIT-IDENTICAL. When
@@ -182,7 +187,9 @@ struct System::Impl {
   struct CoupledFreqExpr {
     std::string label;
     CsProgram prog;
-    struct In { int sidx, comp; };
+    struct In {
+      int sidx, comp;
+    };
     std::vector<In> ins;  // (species, component) of the inputs (same as the source; resolved once)
     int n_in = 0;
     std::vector<Real> kconsts;  // constants loaded into r[n_in ..] (same as the source)
@@ -205,7 +212,8 @@ struct System::Impl {
   static int polar_ntheta(const SystemConfig& c) { return c.ntheta > 0 ? c.ntheta : c.n; }
   // INDEX domain: n x n square in Cartesian; nr x ntheta in polar (i = r, j = theta).
   static Box2D index_domain(const SystemConfig& c) {
-    if (c.geometry == "polar") return Box2D::from_extents(polar_nr(c), polar_ntheta(c));
+    if (c.geometry == "polar")
+      return Box2D::from_extents(polar_nr(c), polar_ntheta(c));
     return Box2D::from_extents(c.n, c.n);
   }
   // Number of cells of a cell-defined field (n*n Cartesian / nr*ntheta polar), for the
@@ -275,12 +283,14 @@ struct System::Impl {
   // Guarantees an aux width >= ncomp (SHARED channel). Reallocating the aux KEEPS its address (member:
   // the block closures capture &aux via grid_ctx) and re-applies B_z. No-op if already wide enough.
   void ensure_aux_width(int ncomp) {
-    if (ncomp <= aux_ncomp_) return;
+    if (ncomp <= aux_ncomp_)
+      return;
     aux_ncomp_ = ncomp;
     aux = MultiFab(ba, dm, aux_ncomp_, 1);
     fields_.apply_bz();
     fields_.apply_te();
-    fields_.apply_named_aux();  // re-applies the NAMED aux fields (ADC-70): the redistributed MultiFab starts at zero
+    fields_
+        .apply_named_aux();  // re-applies the NAMED aux fields (ADC-70): the redistributed MultiFab starts at zero
   }
 
   // apply_bz (population of the B_z component of the aux channel) EXTRACTED into fields_ (SystemFieldSolver).
@@ -292,7 +302,8 @@ struct System::Impl {
   // no-op if U already has enough ghosts -> allocation and data bit-identical to before for MUSCL.
   void set_block_ghosts(const std::string& name, int ng) {
     Species& s = find(name);
-    if (s.U.n_grow() >= ng) return;
+    if (s.U.n_grow() >= ng)
+      return;
     MultiFab nu(s.U.box_array(), s.U.dmap(), s.ncomp, ng);
     nu.set_val(Real(0));
     for (int li = 0; li < s.U.local_size(); ++li) {
@@ -301,7 +312,8 @@ struct System::Impl {
       const Box2D v = s.U.box(li);  // valid cells (excluding ghost): copied as-is
       for (int c = 0; c < s.ncomp; ++c)
         for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-          for (int i = v.lo[0]; i <= v.hi[0]; ++i) dst(i, j, c) = old(i, j, c);
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+            dst(i, j, c) = old(i, j, c);
     }
     s.U = std::move(nu);
   }
@@ -319,7 +331,8 @@ struct System::Impl {
       b.ylo = b.yhi = BCType::Periodic;
       return b;
     }
-    if (!c.periodic) b.xlo = b.xhi = b.ylo = b.yhi = BCType::Foextrap;
+    if (!c.periodic)
+      b.xlo = b.xhi = b.ylo = b.yhi = BCType::Foextrap;
     return b;
   }
 
@@ -375,17 +388,22 @@ struct System::Impl {
   // all_reduce_sum; mono-rank identity). We DO NOT TOUCH the store (VERBATIM bit-identical extraction):
   // the local_size() <= 1 branch delegates as-is -> Cartesian and polar mono-box UNCHANGED.
   std::vector<double> copy_comp0(const MultiFab& mf) const {
-    if (mf.local_size() <= 1) return blocks_.copy_comp0(mf);
+    if (mf.local_size() <= 1)
+      return blocks_.copy_comp0(mf);
     device_fence();
     return gather_global(mf, 1, dom.nx(), dom.ny());
   }
   std::vector<double> copy_state(const MultiFab& mf, int ncomp) const {
-    if (mf.local_size() <= 1) return blocks_.copy_state(mf, ncomp);
+    if (mf.local_size() <= 1)
+      return blocks_.copy_state(mf, ncomp);
     device_fence();
     return gather_global(mf, ncomp, dom.nx(), dom.ny());
   }
   void write_state(MultiFab& mf, int ncomp, const std::vector<double>& in) {
-    if (mf.local_size() <= 1) { blocks_.write_state(mf, ncomp, in); return; }
+    if (mf.local_size() <= 1) {
+      blocks_.write_state(mf, ncomp, in);
+      return;
+    }
     // Multi-box SCATTER: @p in is the GLOBAL field (component-major (c*gny + j)*gnx + i, same layout
     // as copy_state). Each rank writes ONLY the cells of its local boxes (reading at the
     // global indices) -- no communication. Mono-rank: writes all bands.
@@ -416,7 +434,8 @@ namespace {
 // bounds of the ring (r_max > r_min >= 0); the Python (PolarMesh) already validates them, but a caller
 // that builds the SystemConfig by hand must also be protected. Any other token is an error.
 void check_geometry(const SystemConfig& c) {
-  if (c.geometry == "cartesian") return;
+  if (c.geometry == "cartesian")
+    return;
   if (c.geometry == "polar") {
     if (!(c.r_max > c.r_min && c.r_min >= 0.0))
       throw std::runtime_error(
@@ -429,7 +448,8 @@ void check_geometry(const SystemConfig& c) {
     const int nr = c.nr > 0 ? c.nr : c.n;
     if (nr < 3)
       throw std::runtime_error(
-          "System : geometry='polar' requires nr >= 3 (2nd-order off-centered radial stencil at the walls ; "
+          "System : geometry='polar' requires nr >= 3 (2nd-order off-centered radial stencil at "
+          "the walls ; "
           "phi without ghost) ; cf. adc.PolarMesh");
     // THETA SPLIT of the transport (theta_boxes, ADC-67). 1 (default) = mono-box, bit-identical. > 1:
     // theta bands -- we require 1 <= theta_boxes <= ntheta (at least one azimuthal cell per band) AND
@@ -438,14 +458,17 @@ void check_geometry(const SystemConfig& c) {
     // builds the SystemConfig by hand is protected here.
     const int nth = c.ntheta > 0 ? c.ntheta : c.n;
     if (c.theta_boxes < 1)
-      throw std::runtime_error("System : geometry='polar' requires theta_boxes >= 1 (cf. adc.PolarMesh)");
+      throw std::runtime_error(
+          "System : geometry='polar' requires theta_boxes >= 1 (cf. adc.PolarMesh)");
     if (c.theta_boxes > nth)
       throw std::runtime_error(
-          "System : geometry='polar' requires theta_boxes <= ntheta (at least one azimuthal cell per "
+          "System : geometry='polar' requires theta_boxes <= ntheta (at least one azimuthal cell "
+          "per "
           "band) ; cf. adc.PolarMesh");
     if (nth % c.theta_boxes != 0)
       throw std::runtime_error(
-          "System : geometry='polar' requires that theta_boxes DIVIDES ntheta (equal azimuthal bands) ; "
+          "System : geometry='polar' requires that theta_boxes DIVIDES ntheta (equal azimuthal "
+          "bands) ; "
           "cf. adc.PolarMesh");
     return;
   }
@@ -472,28 +495,29 @@ void validate_system_config(const SystemConfig& c) {
 }  // namespace
 
 System::System(const SystemConfig& c) {
-  validate_system_config(c);          // BEFORE any allocation/derivation (Impl builds geom/ba/dm/aux)
+  validate_system_config(c);  // BEFORE any allocation/derivation (Impl builds geom/ba/dm/aux)
   p_ = std::make_unique<Impl>(c);
 }
 System::~System() = default;
 System::System(System&&) noexcept = default;
 System& System::operator=(System&&) noexcept = default;
 
-void System::add_block(const std::string& name, const ModelSpec& model,
-                       const std::string& limiter, const std::string& riemann,
-                       const std::string& recon, const std::string& time, int substeps,
-                       bool evolve, int stride, const std::vector<std::string>& implicit_vars,
-                       const std::vector<std::string>& implicit_roles,
-                       const NewtonOptions& newton, bool newton_diagnostics,
-                       double positivity_floor, bool wave_speed_cache) {
+void System::add_block(const std::string& name, const ModelSpec& model, const std::string& limiter,
+                       const std::string& riemann, const std::string& recon,
+                       const std::string& time, int substeps, bool evolve, int stride,
+                       const std::vector<std::string>& implicit_vars,
+                       const std::vector<std::string>& implicit_roles, const NewtonOptions& newton,
+                       bool newton_diagnostics, double positivity_floor, bool wave_speed_cache) {
   Impl* P = p_.get();
   // Completeness contract of the model (ADC-290): transport / elliptic must be chosen explicitly.
   // Validated HERE, before the transport string routing below (which would otherwise report a
   // cryptic "unknown transport ''" for an unset tag) -- a default-constructed ModelSpec no longer
   // means a silent Euler + Poisson-charge composition.
   detail::validate_model_spec(model);
-  if (substeps < 1) throw std::runtime_error("System::add_block : substeps >= 1");
-  if (stride < 1) throw std::runtime_error("System::add_block : stride >= 1");
+  if (substeps < 1)
+    throw std::runtime_error("System::add_block : substeps >= 1");
+  if (stride < 1)
+    throw std::runtime_error("System::add_block : stride >= 1");
   if (!(positivity_floor >= 0.0) || !std::isfinite(positivity_floor))
     throw std::runtime_error("System::add_block : positivity_floor >= 0 and finite (0 = inactive)");
   // Validation of the NEWTON OPTIONS POD (ADC-214): range check shared with AmrSystem::add_block
@@ -509,7 +533,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   if (time != "explicit" && time != "ssprk2" && time != "ssprk3" && time != "euler" &&
       time != "imex" && time != "imexrk_ars222")
     throw std::runtime_error(
-        "System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'euler'|'imex'|'imexrk_ars222' (received '" +
+        "System::add_block : time 'explicit'|'ssprk2'|'ssprk3'|'euler'|'imex'|'imexrk_ars222' "
+        "(received '" +
         time + "')");
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("System::add_block : recon 'conservative' | 'primitive' (received '" +
@@ -522,16 +547,19 @@ void System::add_block(const std::string& name, const ModelSpec& model,
   // its own factory (make_block_polar) without this cache.
   if (wave_speed_cache) {
     if (riemann != "hll")
-      throw std::runtime_error("System::add_block : wave_speed_cache requires riemann='hll' (the wave "
-                               "speed cache only applies to the HLL flux ; received riemann='" +
-                               riemann + "')");
+      throw std::runtime_error(
+          "System::add_block : wave_speed_cache requires riemann='hll' (the wave "
+          "speed cache only applies to the HLL flux ; received riemann='" +
+          riemann + "')");
     if (imex)
-      throw std::runtime_error("System::add_block : wave_speed_cache not supported with time='" + time +
+      throw std::runtime_error("System::add_block : wave_speed_cache not supported with time='" +
+                               time +
                                "' (wired on the explicit advance ; use time "
                                "'explicit'/'ssprk2'/'ssprk3'/'euler')");
     if (P->polar_)
-      throw std::runtime_error("System::add_block : wave_speed_cache not supported on the polar "
-                               "geometry (ring)");
+      throw std::runtime_error(
+          "System::add_block : wave_speed_cache not supported on the polar "
+          "geometry (ring)");
     // EMBEDDED-BOUNDARY transport mode already active: the stepper routes to advance_masked /
     // advance_eb, which do not carry the cache -> requesting it would be WITHOUT EFFECT. Explicit
     // rejection (no silent ignore). The reverse order (set_disc_domain AFTER a cached block) is
@@ -544,15 +572,16 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     P->ws_cache_block_ = true;  // a block requested the cache -> locks the switch to disc mode
   }
   const std::string method = imexrk ? std::string("imexrk_ars222")
-                                     : ((time == "ssprk3") ? std::string("ssprk3")
-                                        : (time == "euler") ? std::string("euler")
-                                                            : std::string("ssprk2"));
+                                    : ((time == "ssprk3")  ? std::string("ssprk3")
+                                       : (time == "euler") ? std::string("euler")
+                                                           : std::string("ssprk2"));
   // The implicit mask (implicit_vars / implicit_roles) applies only to the IMEX source step. Requesting
   // it in explicit is an ERROR (no silent ignore): the explicit has no implicit step.
   if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))
-    throw std::runtime_error("System::add_block : implicit_vars / implicit_roles require time='imex' "
-                             "(the implicit mask applies only to the IMEX source step ; received time='" +
-                             time + "')");
+    throw std::runtime_error(
+        "System::add_block : implicit_vars / implicit_roles require time='imex' "
+        "(the implicit mask applies only to the IMEX source step ; received time='" +
+        time + "')");
   // IMEX-RK ARS(2,2,2): FULLY implicit source (the stage consistency relation assumes a homogeneous
   // solve). A partial mask would be SILENTLY ignored there -> we reject it explicitly. The
   // partial mask stays available on time='imex' (local backward-Euler).
@@ -568,9 +597,10 @@ void System::add_block(const std::string& name, const ModelSpec& model,
                                   newton_diagnostics || newton.damping != 1.0 ||
                                   newton.fail_policy != NewtonOptions::kFailNone;
   if (!imex && newton_non_default)
-    throw std::runtime_error("System::add_block : the Newton options (newton_max_iters/rel_tol/"
-                             "abs_tol/fd_eps/diagnostics) require time='imex' (received time='" +
-                             time + "')");
+    throw std::runtime_error(
+        "System::add_block : the Newton options (newton_max_iters/rel_tol/"
+        "abs_tol/fd_eps/diagnostics) require time='imex' (received time='" +
+        time + "')");
 
   int ncomp = 1;
   BlockClosures clo;
@@ -588,7 +618,8 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     // we reject it explicitly rather than silently running the transport alone.
     if (imex)
       throw std::runtime_error(
-          "System::add_block (polar) : time='" + time + "' (IMEX / IMEX-RK ARS(2,2,2)) unsupported "
+          "System::add_block (polar) : time='" + time +
+          "' (IMEX / IMEX-RK ARS(2,2,2)) unsupported "
           "(ring : coupling by explicit local source, no stiff source to handle implicitly "
           "at this stage). Use 'explicit'/'ssprk2'/'ssprk3'.");
     const PolarGridContext pctx = P->grid_ctx_polar();
@@ -618,9 +649,19 @@ void System::add_block(const std::string& name, const ModelSpec& model,
     // aux_width is widened host-side AFTER the build (was P->ensure_aux_width inside the visitor;
     // ensure_aux_width keeps the aux ADDRESS captured by the closures, so order vs make_block is
     // immaterial -- byte-identical).
-    const detail::BlockBuildArgs args{name, limiter, riemann, ctx, imex, recon_prim, method,
-                                      implicit_vars, implicit_roles, nopts, nreport,
-                                      static_cast<Real>(positivity_floor), wave_speed_cache};
+    const detail::BlockBuildArgs args{name,
+                                      limiter,
+                                      riemann,
+                                      ctx,
+                                      imex,
+                                      recon_prim,
+                                      method,
+                                      implicit_vars,
+                                      implicit_roles,
+                                      nopts,
+                                      nreport,
+                                      static_cast<Real>(positivity_floor),
+                                      wave_speed_cache};
     if (model.transport == "exb") {
       bb = detail::build_block_exb(model, args);
     } else if (model.transport == "compressible") {
@@ -686,18 +727,20 @@ void System::add_block(const std::string& name, const ModelSpec& model,
 
 // Real grid context (mesh + BC + aux): used by the add_compiled_model template to build
 // the closures of an AOT-compiled model on the real System fields (native parity, without marshaling).
-ADC_EXPORT GridContext System::grid_context() { return p_->grid_ctx(); }
+ADC_EXPORT GridContext System::grid_context() {
+  return p_->grid_ctx();
+}
 
 // Installs a block from already-built closures (by dispatch_model on the add_block side, or by
 // block_builder on the add_compiled_model side). Centralizes the creation of the species (U, names, scheme).
 ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
-                                      const VariableSet& cons_vars,
-                                      const VariableSet& prim_vars, double gamma,
-                                      BlockClosures closures,
+                                      const VariableSet& cons_vars, const VariableSet& prim_vars,
+                                      double gamma, BlockClosures closures,
                                       std::function<Real(const MultiFab&)> max_speed,
                                       std::function<void(const MultiFab&, MultiFab&)> poisson_rhs,
                                       int substeps, bool evolve, int stride) {
-  if (stride < 1) throw std::runtime_error("System::install_block : stride >= 1");
+  if (stride < 1)
+    throw std::runtime_error("System::install_block : stride >= 1");
   Impl* P = p_.get();
   P->sp.push_back(Impl::Species{name, MultiFab(P->ba, P->dm, ncomp, 2), ncomp, substeps, evolve,
                                 stride, gamma, std::move(closures.advance),
@@ -737,12 +780,15 @@ void System::set_block_dt_bounds(const std::string& name,
 // GLOBAL step bound (host, one evaluation per step): multi-block coupling, Schur/Poisson,
 // scheduler, user policy. cf. SystemStepper::step_cfl for the aggregation.
 void System::add_dt_bound(const std::string& label, std::function<double()> fn) {
-  if (!fn) throw std::runtime_error("System::add_dt_bound : empty bound function");
+  if (!fn)
+    throw std::runtime_error("System::add_dt_bound : empty bound function");
   p_->dt_bounds_.push_back(Impl::GlobalDtBound{label, std::move(fn)});
 }
 
 // ACTIVE bound of the last step_cfl (step-policy diagnostic). "" before the first step.
-std::string System::last_dt_bound() const { return p_->stepper_.last_dt_reason(); }
+std::string System::last_dt_bound() const {
+  return p_->stepper_.last_dt_reason();
+}
 
 // dt_hotspot diagnostic (ADC-182): the GLOBAL cell (i, j) that dominates the transport CFL
 // bound of block @p name, and its speed w = max(wx, wy). ON DEMAND (two reduction
@@ -816,9 +862,9 @@ void System::set_block_params(const std::string& name, const std::vector<double>
         "backend='aot' / add_compiled_block ; const params are frozen at compile time)");
   std::vector<double>& pv = *it->second;
   if (values.size() != pv.size())
-    throw std::runtime_error(
-        "System::set_block_params : block '" + name + "' expects " + std::to_string(pv.size()) +
-        " runtime parameters, received " + std::to_string(values.size()));
+    throw std::runtime_error("System::set_block_params : block '" + name + "' expects " +
+                             std::to_string(pv.size()) + " runtime parameters, received " +
+                             std::to_string(values.size()));
   pv = values;  // the vector is SHARED with the closures (shared_ptr): effect at the next step
 }
 
@@ -835,18 +881,21 @@ void System::add_native_block(const std::string& name, const std::string& so_pat
                                   gamma, substeps, evolve, stride, positivity_floor);
 }
 
-void System::set_poisson(const std::string& rhs, const std::string& solver,
-                         const std::string& bc, const std::string& wall, double wall_radius,
-                         double epsilon, double abs_tol) {
-  if (epsilon == 0.0) throw std::runtime_error("System::set_poisson : epsilon != 0 required");
-  if (abs_tol < 0.0) throw std::runtime_error("System::set_poisson : abs_tol >= 0 required");
+void System::set_poisson(const std::string& rhs, const std::string& solver, const std::string& bc,
+                         const std::string& wall, double wall_radius, double epsilon,
+                         double abs_tol) {
+  if (epsilon == 0.0)
+    throw std::runtime_error("System::set_poisson : epsilon != 0 required");
+  if (abs_tol < 0.0)
+    throw std::runtime_error("System::set_poisson : abs_tol >= 0 required");
   p_->fields_.p_rhs = rhs;
   p_->fields_.p_solver = solver;
   p_->fields_.p_bc = bc;
   p_->fields_.p_wall = wall;
   p_->fields_.p_wall_radius = wall_radius;
   p_->fields_.p_eps_ = static_cast<Real>(epsilon);
-  p_->fields_.p_abs_tol_ = static_cast<Real>(abs_tol);  // absolute floor of the V-cycle (0 = relative only)
+  p_->fields_.p_abs_tol_ =
+      static_cast<Real>(abs_tol);  // absolute floor of the V-cycle (0 = relative only)
   p_->fields_.ell_.reset();
 }
 
@@ -854,9 +903,12 @@ namespace {
 // Translates the Python disc transport mode ("none"|"staircase"|"cutcell") into a GeometryMode. EXPLICIT
 // error on an unknown mode (never a silent fallback). Single source of the name table.
 GeometryMode parse_geometry_mode(const std::string& mode, const char* err_context) {
-  if (mode == "none") return GeometryMode::None;
-  if (mode == "staircase") return GeometryMode::Staircase;
-  if (mode == "cutcell") return GeometryMode::CutCell;
+  if (mode == "none")
+    return GeometryMode::None;
+  if (mode == "staircase")
+    return GeometryMode::Staircase;
+  if (mode == "cutcell")
+    return GeometryMode::CutCell;
   throw std::runtime_error(std::string(err_context) + " : unknown geometry mode '" + mode +
                            "' (none|staircase|cutcell)");
 }
@@ -877,10 +929,11 @@ void System::set_disc_domain(double cx, double cy, double R, const std::string& 
   // wave_speed_cache (ADC-199) is only wired on the full Cartesian advance: a disc mode
   // (staircase/cutcell) borrows advance_masked / advance_eb which ignore the cache -> explicit rejection.
   if (gmode != GeometryMode::None && P->ws_cache_block_)
-    throw std::runtime_error("System::set_disc_domain : mode '" + mode +
-                             "' incompatible with wave_speed_cache (a block enabled the HLL wave speed "
-                             "cache, only wired on the full Cartesian advance ; remove wave_speed_cache "
-                             "or use mode='none')");
+    throw std::runtime_error(
+        "System::set_disc_domain : mode '" + mode +
+        "' incompatible with wave_speed_cache (a block enabled the HLL wave speed "
+        "cache, only wired on the full Cartesian advance ; remove wave_speed_cache "
+        "or use mode='none')");
   P->eb_domain_ = detail::DiscDomain{cx, cy, R};
   P->eb_set_ = true;
   // Materializes the 0/1 cell-centered mask (1 ghost, so the mask-aware transport reads the
@@ -916,10 +969,11 @@ void System::set_geometry_mode(const std::string& mode) {
   // wave_speed_cache (ADC-199) is not carried by the disc advances -> explicit rejection (cf.
   // set_disc_domain) rather than a cache silently ignored in staircase/cutcell mode.
   if (gmode != GeometryMode::None && P->ws_cache_block_)
-    throw std::runtime_error("System::set_geometry_mode : mode '" + mode +
-                             "' incompatible with wave_speed_cache (a block enabled the HLL wave speed "
-                             "cache, only wired on the full Cartesian advance ; remove wave_speed_cache "
-                             "or use mode='none')");
+    throw std::runtime_error(
+        "System::set_geometry_mode : mode '" + mode +
+        "' incompatible with wave_speed_cache (a block enabled the HLL wave speed "
+        "cache, only wired on the full Cartesian advance ; remove wave_speed_cache "
+        "or use mode='none')");
   P->geometry_mode_ = gmode;
 }
 
@@ -936,7 +990,8 @@ std::vector<double> System::disc_mask() const {
   }
   const ConstArray4 m = P->domain_mask_.fab(0).const_array();
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-    for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(static_cast<double>(m(i, j, 0)));
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+      out.push_back(static_cast<double>(m(i, j, 0)));
   return out;
 }
 
@@ -949,24 +1004,29 @@ void System::set_epsilon_field(const std::vector<double>& eps) {
       throw std::runtime_error("System::set_epsilon_field : permittivity eps(x) > 0 required");
   p_->fields_.p_eps_field_ = eps;
   p_->fields_.has_eps_field_ = true;
-  p_->fields_.ell_.reset();  // the operator will be rebuilt with the eps field at the next solve_fields
+  p_->fields_.ell_
+      .reset();  // the operator will be rebuilt with the eps field at the next solve_fields
 }
 
 void System::set_epsilon_anisotropic_field(const std::vector<double>& eps_x,
                                            const std::vector<double>& eps_y) {
   const int n = p_->cfg.n;
   if (static_cast<int>(eps_x.size()) != n * n || static_cast<int>(eps_y.size()) != n * n)
-    throw std::runtime_error("System::set_epsilon_anisotropic_field : size != n*n (eps_x and eps_y)");
+    throw std::runtime_error(
+        "System::set_epsilon_anisotropic_field : size != n*n (eps_x and eps_y)");
   for (double e : eps_x)
     if (!(e > 0.0))
-      throw std::runtime_error("System::set_epsilon_anisotropic_field : permittivity eps_x(x) > 0 required");
+      throw std::runtime_error(
+          "System::set_epsilon_anisotropic_field : permittivity eps_x(x) > 0 required");
   for (double e : eps_y)
     if (!(e > 0.0))
-      throw std::runtime_error("System::set_epsilon_anisotropic_field : permittivity eps_y(x) > 0 required");
+      throw std::runtime_error(
+          "System::set_epsilon_anisotropic_field : permittivity eps_y(x) > 0 required");
   p_->fields_.p_eps_x_field_ = eps_x;
   p_->fields_.p_eps_y_field_ = eps_y;
   p_->fields_.has_eps_xy_field_ = true;
-  p_->fields_.ell_.reset();  // operator rebuilt as div(diag(eps_x, eps_y) grad phi) at the next solve_fields
+  p_->fields_.ell_
+      .reset();  // operator rebuilt as div(diag(eps_x, eps_y) grad phi) at the next solve_fields
 }
 
 void System::set_reaction_field(const std::vector<double>& kappa) {
@@ -975,14 +1035,17 @@ void System::set_reaction_field(const std::vector<double>& kappa) {
     throw std::runtime_error("System::set_reaction_field : size != n*n");
   for (double k : kappa)
     if (!(k >= 0.0))
-      throw std::runtime_error("System::set_reaction_field : reaction term kappa(x) >= 0 required "
-                               "(well-posed elliptic operator and convergent multigrid)");
+      throw std::runtime_error(
+          "System::set_reaction_field : reaction term kappa(x) >= 0 required "
+          "(well-posed elliptic operator and convergent multigrid)");
   p_->fields_.p_kappa_field_ = kappa;
   p_->fields_.has_kappa_field_ = true;
   p_->fields_.ell_.reset();  // operator rebuilt with - kappa phi at the next solve_fields
 }
 
-ADC_EXPORT void System::ensure_aux_width(int ncomp) { p_->ensure_aux_width(ncomp); }
+ADC_EXPORT void System::ensure_aux_width(int ncomp) {
+  p_->ensure_aux_width(ncomp);
+}
 
 void System::set_magnetic_field(const std::vector<double>& bz) {
   // Expected size of the B_z(x) field row-major (slow axis = 2nd box index, fast axis = 1st):
@@ -998,14 +1061,16 @@ void System::set_magnetic_field(const std::vector<double>& bz) {
       throw std::runtime_error("System::set_magnetic_field : size != n*n");
   }
   p_->fields_.bz_field_.assign(bz.begin(), bz.end());
-  p_->fields_.apply_bz();  // apply right away if a block already reads B_z; otherwise keep for ensure_aux_width
+  p_->fields_
+      .apply_bz();  // apply right away if a block already reads B_z; otherwise keep for ensure_aux_width
 }
 
 void System::set_electron_temperature_from(const std::string& name) {
   const int idx = p_->index(name);  // raises if unknown block
   if (p_->sp[static_cast<std::size_t>(idx)].ncomp != 4)
-    throw std::runtime_error("System::set_electron_temperature_from : block '" + name +
-                             "' must be compressible (4 vars : rho, rho u, rho v, E) for T = p/rho");
+    throw std::runtime_error(
+        "System::set_electron_temperature_from : block '" + name +
+        "' must be compressible (4 vars : rho, rho u, rho v, E) for T = p/rho");
   p_->fields_.te_src_ = idx;
   // T_e (canonical comp 4) DERIVED: recomputed at each solve_fields. Inert as long as no block
   // reads T_e (n_aux=5 -> ensure_aux_width(5)), like set_magnetic_field for B_z.
@@ -1031,7 +1096,8 @@ void System::set_aux_field_component(int comp, const std::vector<double>& field)
     throw std::runtime_error(
         "System::set_aux_field : component " + std::to_string(comp) +
         " reserved (phi/grad_x/grad_y/B_z/T_e) ; a named aux field starts at index " +
-        std::to_string(kAuxNamedBase) + " (B_z -> set_magnetic_field, T_e -> "
+        std::to_string(kAuxNamedBase) +
+        " (B_z -> set_magnetic_field, T_e -> "
         "set_electron_temperature_from)");
   const std::size_t expect = P->aux_field_cell_count();
   if (field.size() != expect)
@@ -1045,7 +1111,7 @@ void System::set_aux_field_component(int comp, const std::vector<double>& field)
         " components ; no block declares an aux field at index " + std::to_string(comp) +
         " (add the block that reads it before set_aux_field)");
   std::vector<Real> f(field.begin(), field.end());
-  p_->fields_.apply_named_aux_one(comp, f);  // populate right away (channel wide enough)
+  p_->fields_.apply_named_aux_one(comp, f);     // populate right away (channel wide enough)
   p_->fields_.named_aux_[comp] = std::move(f);  // keep for a later reallocation of the channel
 }
 
@@ -1062,10 +1128,10 @@ void System::set_aux_field_halo_component(int comp, int bc_type, double value) {
         " components ; no block declares an aux field at index " + std::to_string(comp));
   // Only the PHYSICAL-face policies are meaningful per field (Foextrap / Dirichlet). A periodic face is
   // a domain property kept by aux_halo_override, so a per-field 'periodic' is not offered.
-  if (bc_type != static_cast<int>(BCType::Foextrap) && bc_type != static_cast<int>(BCType::Dirichlet))
-    throw std::runtime_error(
-        "System::set_aux_field (halo) : unsupported halo type " + std::to_string(bc_type) +
-        " ; use foextrap or dirichlet");
+  if (bc_type != static_cast<int>(BCType::Foextrap) &&
+      bc_type != static_cast<int>(BCType::Dirichlet))
+    throw std::runtime_error("System::set_aux_field (halo) : unsupported halo type " +
+                             std::to_string(bc_type) + " ; use foextrap or dirichlet");
   P->fields_.named_aux_bc_[comp] =
       AuxHaloPolicy{static_cast<BCType>(bc_type), static_cast<Real>(value)};
 }
@@ -1073,10 +1139,11 @@ void System::set_aux_field_halo_component(int comp, int bc_type, double value) {
 std::vector<double> System::aux_field_component(int comp) const {
   Impl* P = p_.get();
   if (comp < kAuxNamedBase)
-    throw std::runtime_error(
-        "System::aux_field : component " + std::to_string(comp) +
-        " reserved (phi/grad_x/grad_y/B_z/T_e) ; read phi via potential(), a named aux field starts "
-        "at index " + std::to_string(kAuxNamedBase));
+    throw std::runtime_error("System::aux_field : component " + std::to_string(comp) +
+                             " reserved (phi/grad_x/grad_y/B_z/T_e) ; read phi via potential(), a "
+                             "named aux field starts "
+                             "at index " +
+                             std::to_string(kAuxNamedBase));
   if (comp >= P->aux_ncomp_)
     throw std::runtime_error(
         "System::aux_field : the aux channel has only " + std::to_string(P->aux_ncomp_) +
@@ -1084,13 +1151,15 @@ std::vector<double> System::aux_field_component(int comp) const {
   device_fence();
   // Rank without a box (MPI mono-box): EMPTY return (cf. potential / copy_comp0). The Python facade is
   // mono-rank; the multi-rank global field would be a dedicated collective accessor (follow-up).
-  if (P->aux.local_size() == 0) return {};
+  if (P->aux.local_size() == 0)
+    return {};
   const ConstArray4 a = P->aux.fab(0).const_array();
   const Box2D v = P->aux.box(0);
   std::vector<double> out;
   out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-    for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(static_cast<double>(a(i, j, comp)));
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+      out.push_back(static_cast<double>(a(i, j, comp)));
   return out;
 }
 
@@ -1137,8 +1206,9 @@ void System::add_collision(const std::string& a, const std::string& b, double ra
   Impl* P = p_.get();
   const int ia = P->index(a), ib = P->index(b);
   if (P->sp[ia].ncomp < 3 || P->sp[ib].ncomp < 3)
-    throw std::runtime_error("System::add_collision : both blocks must carry a momentum "
-                             "(fluid transport >= 3 variables)");
+    throw std::runtime_error(
+        "System::add_collision : both blocks must carry a momentum "
+        "(fluid transport >= 3 variables)");
   const Real k = static_cast<Real>(rate);
   // Components resolved by ROLE (momentum x/y, density) rather than by literal index: a block that
   // stores its variables differently stays correctly coupled. A genuinely ROLELESS block keeps the
@@ -1170,9 +1240,11 @@ void System::add_collision(const std::string& a, const std::string& b, double ra
       Array4 ub = P->sp[ib].U.fab(li).array();
       for_each_cell(Ua.box(li), [=] ADC_HD(int i, int j) {  // on device
         const Real fx = dt * k * (ua(i, j, mxa) / ua(i, j, da) - ub(i, j, mxb) / ub(i, j, db));
-        ua(i, j, mxa) -= fx; ub(i, j, mxb) += fx;
+        ua(i, j, mxa) -= fx;
+        ub(i, j, mxb) += fx;
         const Real fy = dt * k * (ua(i, j, mya) / ua(i, j, da) - ub(i, j, myb) / ub(i, j, db));
-        ua(i, j, mya) -= fy; ub(i, j, myb) += fy;
+        ua(i, j, mya) -= fy;
+        ub(i, j, myb) += fy;
       });
     }
   });
@@ -1182,8 +1254,9 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
   Impl* P = p_.get();
   const int ia = P->index(a), ib = P->index(b);
   if (P->sp[ia].ncomp != 4 || P->sp[ib].ncomp != 4)
-    throw std::runtime_error("System::add_thermal_exchange : both blocks must carry an "
-                             "energy (compressible Euler, 4 variables)");
+    throw std::runtime_error(
+        "System::add_thermal_exchange : both blocks must carry an "
+        "energy (compressible Euler, 4 variables)");
   const Real k = static_cast<Real>(rate);
   const Real ga = static_cast<Real>(P->sp[ia].gamma), gb = static_cast<Real>(P->sp[ib].gamma);
   // Components resolved by ROLE (energy, momentum x/y, density) rather than by literal index. A
@@ -1216,10 +1289,14 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
       Array4 ub = P->sp[ib].U.fab(li).array();
       for_each_cell(Ua.box(li), [=] ADC_HD(int i, int j) {  // on device
         const Real ra = ua(i, j, da), rb = ub(i, j, db);
-        const Real pa = (ga - Real(1)) * (ua(i, j, ea) -
-            Real(0.5) * (ua(i, j, mxa) * ua(i, j, mxa) + ua(i, j, mya) * ua(i, j, mya)) / ra);
-        const Real pb = (gb - Real(1)) * (ub(i, j, eb) -
-            Real(0.5) * (ub(i, j, mxb) * ub(i, j, mxb) + ub(i, j, myb) * ub(i, j, myb)) / rb);
+        const Real pa =
+            (ga - Real(1)) *
+            (ua(i, j, ea) -
+             Real(0.5) * (ua(i, j, mxa) * ua(i, j, mxa) + ua(i, j, mya) * ua(i, j, mya)) / ra);
+        const Real pb =
+            (gb - Real(1)) *
+            (ub(i, j, eb) -
+             Real(0.5) * (ub(i, j, mxb) * ub(i, j, mxb) + ub(i, j, myb) * ub(i, j, myb)) / rb);
         const Real q = dt * k * (pa / ra - pb / rb);  // k (T_a - T_b), T = p/rho
         ua(i, j, ea) -= q;
         ub(i, j, eb) += q;
@@ -1250,15 +1327,20 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
   if (n_terms == 0)
     throw std::runtime_error("System::add_coupled_source : no source term (out_blocks empty)");
   if (static_cast<int>(in_roles.size()) != n_in)
-    throw std::runtime_error("System::add_coupled_source : in_blocks / in_roles of different sizes");
-  if (static_cast<int>(out_roles.size()) != n_terms || static_cast<int>(prog_lens.size()) != n_terms)
-    throw std::runtime_error("System::add_coupled_source : out_blocks / out_roles / prog_lens of different "
-                             "sizes");
+    throw std::runtime_error(
+        "System::add_coupled_source : in_blocks / in_roles of different sizes");
+  if (static_cast<int>(out_roles.size()) != n_terms ||
+      static_cast<int>(prog_lens.size()) != n_terms)
+    throw std::runtime_error(
+        "System::add_coupled_source : out_blocks / out_roles / prog_lens of different "
+        "sizes");
   if (prog_ops.size() != prog_args.size())
-    throw std::runtime_error("System::add_coupled_source : prog_ops / prog_args of different sizes");
+    throw std::runtime_error(
+        "System::add_coupled_source : prog_ops / prog_args of different sizes");
   if (n_in + n_const > kCsMaxReg)
-    throw std::runtime_error("System::add_coupled_source : too many registers (inputs + constants > " +
-                             std::to_string(kCsMaxReg) + ")");
+    throw std::runtime_error(
+        "System::add_coupled_source : too many registers (inputs + constants > " +
+        std::to_string(kCsMaxReg) + ")");
   if (n_terms > kCsMaxTerms)
     throw std::runtime_error("System::add_coupled_source : too many source terms (> " +
                              std::to_string(kCsMaxTerms) + ")");
@@ -1274,25 +1356,32 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
     // field SILENTLY. We raise, listing what the block actually exposes.
     const int comp = vs.index_of(role);
     if (comp < 0)
-      throw std::runtime_error("System::add_coupled_source : block '" + block +
-                               "' does not expose role '" + role + "' (roles: " +
-                               (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
-                               ", no silent fallback on component 0)");
+      throw std::runtime_error(
+          "System::add_coupled_source : block '" + block + "' does not expose role '" + role +
+          "' (roles: " + (vs.roles.empty() ? std::string("<none>") : roles_csv(vs)) +
+          ", no silent fallback on component 0)");
     return {sidx, comp};
   };
   // Inputs: (species, component) read per cell. Captured by INDEX (the fabs may be
   // reallocated between registration and application: we rebuild the Array4 at EACH step).
-  struct InRef { int sidx, comp; };
+  struct InRef {
+    int sidx, comp;
+  };
   std::vector<InRef> ins(static_cast<std::size_t>(n_in));
   for (int c = 0; c < n_in; ++c) {
-    auto [s, comp] = resolve(in_blocks[static_cast<std::size_t>(c)], in_roles[static_cast<std::size_t>(c)]);
+    auto [s, comp] =
+        resolve(in_blocks[static_cast<std::size_t>(c)], in_roles[static_cast<std::size_t>(c)]);
     ins[static_cast<std::size_t>(c)] = {s, comp};
   }
-  struct OutRef { int sidx, comp; CsProgram prog; };
+  struct OutRef {
+    int sidx, comp;
+    CsProgram prog;
+  };
   std::vector<OutRef> outs(static_cast<std::size_t>(n_terms));
   int off = 0;
   for (int t = 0; t < n_terms; ++t) {
-    auto [s, comp] = resolve(out_blocks[static_cast<std::size_t>(t)], out_roles[static_cast<std::size_t>(t)]);
+    auto [s, comp] =
+        resolve(out_blocks[static_cast<std::size_t>(t)], out_roles[static_cast<std::size_t>(t)]);
     const int len = prog_lens[static_cast<std::size_t>(t)];
     if (len < 0 || len > kCsMaxProg)
       throw std::runtime_error("System::add_coupled_source : program of term " + std::to_string(t) +
@@ -1307,7 +1396,8 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
       if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
         throw std::runtime_error("System::add_coupled_source : invalid opcode");
       if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
-        throw std::runtime_error("System::add_coupled_source : register out of bounds in the program");
+        throw std::runtime_error(
+            "System::add_coupled_source : register out of bounds in the program");
       pg.op[k] = opc;
       pg.arg[k] = a;
     }
@@ -1327,8 +1417,9 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
   CsProgram freq_pg;
   if (has_freq_expr) {
     if (freq_prog_ops.size() != freq_prog_args.size())
-      throw std::runtime_error("System::add_coupled_source : freq_prog_ops / freq_prog_args of different "
-                               "sizes");
+      throw std::runtime_error(
+          "System::add_coupled_source : freq_prog_ops / freq_prog_args of different "
+          "sizes");
     if (static_cast<int>(freq_prog_ops.size()) > kCsMaxProg)
       throw std::runtime_error("System::add_coupled_source : frequency program too long (> " +
                                std::to_string(kCsMaxProg) + ")");
@@ -1339,7 +1430,8 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
       if (opc < 0 || opc > static_cast<int>(CsOp::Sqrt))
         throw std::runtime_error("System::add_coupled_source : invalid opcode in the frequency");
       if (opc == static_cast<int>(CsOp::PushReg) && (a < 0 || a >= n_in + n_const))
-        throw std::runtime_error("System::add_coupled_source : register out of bounds in the frequency");
+        throw std::runtime_error(
+            "System::add_coupled_source : register out of bounds in the frequency");
       freq_pg.op[k] = opc;
       freq_pg.arg[k] = a;
     }
@@ -1349,7 +1441,8 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
   // AFTER all the validation (source AND frequency have raised if invalid): a rejected coupling must
   // leave NO phantom bound -- otherwise a script that try/excepts the failure would keep a throttled step without
   // matching physics.
-  if (frequency > 0.0) P->coupled_freqs_.push_back(Impl::CoupledFreq{label, frequency});
+  if (frequency > 0.0)
+    P->coupled_freqs_.push_back(Impl::CoupledFreq{label, frequency});
   // PER-CELL frequency: same rule (push after complete validation). The inputs REUSE the
   // resolve() resolution (ins); the constants are the same as the source (kconsts). The program
   // mu(U) is reduced (MAX) at each step in step_cfl / step_adaptive.
@@ -1365,31 +1458,35 @@ void System::add_coupled_source(const CoupledSourceProgram& prog_desc, double fr
     ce.kconsts = kconsts;
     P->coupled_freq_exprs_.push_back(std::move(ce));
   }
-  P->couplings.push_back(
-      [P, ins, outs, kconsts, n_in, n_const, n_terms](Real dt) {
-        // MPI-safe: iteration over the LOCAL fabs of the first input block (or output if no
-        // input). local_size()==0 on a rank without a box -> empty loop, no-op (no hard-coded fab(0)).
-        const int sref = n_in > 0 ? ins[0].sidx : outs[0].sidx;
-        MultiFab& Uref = P->sp[static_cast<std::size_t>(sref)].U;
-        for (int li = 0; li < Uref.local_size(); ++li) {
-          CoupledSourceKernel kern;
-          kern.dt = dt;
-          kern.n_in = n_in;
-          kern.n_const = n_const;
-          kern.n_terms = n_terms;
-          for (int c = 0; c < n_in; ++c) {
-            kern.in[c] = P->sp[static_cast<std::size_t>(ins[static_cast<std::size_t>(c)].sidx)].U.fab(li).array();
-            kern.in_comp[c] = ins[static_cast<std::size_t>(c)].comp;
-          }
-          for (int c = 0; c < n_const; ++c) kern.consts[c] = kconsts[static_cast<std::size_t>(c)];
-          for (int t = 0; t < n_terms; ++t) {
-            kern.out[t] = P->sp[static_cast<std::size_t>(outs[static_cast<std::size_t>(t)].sidx)].U.fab(li).array();
-            kern.out_comp[t] = outs[static_cast<std::size_t>(t)].comp;
-            kern.prog[t] = outs[static_cast<std::size_t>(t)].prog;
-          }
-          for_each_cell(Uref.box(li), kern);  // NAMED functor (device-clean), additive forward-Euler
-        }
-      });
+  P->couplings.push_back([P, ins, outs, kconsts, n_in, n_const, n_terms](Real dt) {
+    // MPI-safe: iteration over the LOCAL fabs of the first input block (or output if no
+    // input). local_size()==0 on a rank without a box -> empty loop, no-op (no hard-coded fab(0)).
+    const int sref = n_in > 0 ? ins[0].sidx : outs[0].sidx;
+    MultiFab& Uref = P->sp[static_cast<std::size_t>(sref)].U;
+    for (int li = 0; li < Uref.local_size(); ++li) {
+      CoupledSourceKernel kern;
+      kern.dt = dt;
+      kern.n_in = n_in;
+      kern.n_const = n_const;
+      kern.n_terms = n_terms;
+      for (int c = 0; c < n_in; ++c) {
+        kern.in[c] = P->sp[static_cast<std::size_t>(ins[static_cast<std::size_t>(c)].sidx)]
+                         .U.fab(li)
+                         .array();
+        kern.in_comp[c] = ins[static_cast<std::size_t>(c)].comp;
+      }
+      for (int c = 0; c < n_const; ++c)
+        kern.consts[c] = kconsts[static_cast<std::size_t>(c)];
+      for (int t = 0; t < n_terms; ++t) {
+        kern.out[t] = P->sp[static_cast<std::size_t>(outs[static_cast<std::size_t>(t)].sidx)]
+                          .U.fab(li)
+                          .array();
+        kern.out_comp[t] = outs[static_cast<std::size_t>(t)].comp;
+        kern.prog[t] = outs[static_cast<std::size_t>(t)].prog;
+      }
+      for_each_cell(Uref.box(li), kern);  // NAMED functor (device-clean), additive forward-Euler
+    }
+  });
 }
 
 void System::set_source_stage(const std::string& name, const std::string& kind, double theta,
@@ -1424,8 +1521,10 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   // silent ignore).
   const bool polar = (P->cfg.geometry == "polar");
   if (P->cfg.geometry != "cartesian" && !polar)
-    throw std::runtime_error("System::set_source_stage : condensed source stage supports the "
-                             "cartesian and polar geometries (received '" + P->cfg.geometry + "')");
+    throw std::runtime_error(
+        "System::set_source_stage : condensed source stage supports the "
+        "cartesian and polar geometries (received '" +
+        P->cfg.geometry + "')");
   // The POLAR condensed source stage is now MULTI-RANK MPI (PolarTensorKrylovSolver / polar
   // Schur distributed by AZIMUTHAL split; check_radial_columns layout guard in the
   // solver). On the FACADE side, the System builds for now ONE box covering the ring (P->ba mono-box),
@@ -1464,10 +1563,11 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
       return idx;
     }
     for (std::size_t i = 0; i < vs.names.size(); ++i)
-      if (vs.names[i] == spec) return static_cast<int>(i);
+      if (vs.names[i] == spec)
+        return static_cast<int>(i);
     throw std::runtime_error("System::set_source_stage : '" + spec +
-                             "' is neither a stable role nor a variable of block '" + name +
-                             "' (" + label + ")");
+                             "' is neither a stable role nor a variable of block '" + name + "' (" +
+                             label + ")");
   };
   const int c_rho = resolve_field(density, VariableRole::Density, "Density");
   const int c_mx = resolve_field(momentum_x, VariableRole::MomentumX, "MomentumX");
@@ -1480,9 +1580,10 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   // (bz_field_ provided) and we widen the aux channel to the B_z channel (kAuxBaseComps) so that apply_bz
   // populates it and solve_fields fills its ghosts. An absent B_z raises an EXPLICIT error.
   if (P->fields_.bz_field_.empty())
-    throw std::runtime_error(
-        "System::set_source_stage : block '" + name + "' has no B_z field (aux Omega) ; "
-        "adc.CondensedSchur requires set_magnetic_field(B_z) (the Lorentz term reads Omega = B_z).");
+    throw std::runtime_error("System::set_source_stage : block '" + name +
+                             "' has no B_z field (aux Omega) ; "
+                             "adc.CondensedSchur requires set_magnetic_field(B_z) (the Lorentz "
+                             "term reads Omega = B_z).");
   // Aux channel of the magnetic field: canonical (kAuxBaseComps) by default, redirectable by
   // bz_aux_component (transported descriptor). NOTE: apply_bz populates the CANONICAL channel; a
   // different component assumes the caller populates it itself (derived/custom aux field).
@@ -1558,8 +1659,12 @@ void System::set_density(const std::string& name, const std::vector<double>& rho
   // Local helper: sets density + rest state on ONE cell (same formulas as the historical).
   auto set_cell = [&](Array4& u, int i, int j, Real r) {
     u(i, j, 0) = r;
-    if (s.ncomp >= 3) { u(i, j, 1) = 0; u(i, j, 2) = 0; }  // momentum at rest
-    if (s.ncomp == 4) u(i, j, 3) = r / gm1;                // E = p/(g-1), p = rho
+    if (s.ncomp >= 3) {
+      u(i, j, 1) = 0;
+      u(i, j, 2) = 0;
+    }  // momentum at rest
+    if (s.ncomp == 4)
+      u(i, j, 3) = r / gm1;  // E = p/(g-1), p = rho
   };
   // MULTI-BOX (theta_boxes > 1, polar): @p rho is the GLOBAL field (nr x ntheta, layout flat[j*gnx+i]
   // identical to the mono-box below). We write each local box at its GLOBAL indices. local_size() <= 1
@@ -1607,14 +1712,17 @@ void System::set_primitive_state(const std::string& name, const std::vector<doub
   // Number of cells = REAL EXTENTS of the index domain (n*n Cartesian, nr*ntheta polar), NOT
   // cfg.n*cfg.n: in polar cfg.n = nr, so cfg.n^2 != nr*ntheta -> heap overflow (ntheta<nr) or
   // partial/wrong content (ntheta>nr). Cartesian bit-identical (dom.nx()==dom.ny()==n).
-  const std::size_t nn = static_cast<std::size_t>(p_->dom.nx()) * static_cast<std::size_t>(p_->dom.ny());
+  const std::size_t nn =
+      static_cast<std::size_t>(p_->dom.nx()) * static_cast<std::size_t>(p_->dom.ny());
   if (prim.size() != static_cast<std::size_t>(nc) * nn)
-    throw std::runtime_error("System::set_primitive_state : size != ncomp*nr*ntheta (n*n Cartesian) (block '" + name +
-                             "' has " + std::to_string(nc) + " variables)");
+    throw std::runtime_error(
+        "System::set_primitive_state : size != ncomp*nr*ntheta (n*n Cartesian) (block '" + name +
+        "' has " + std::to_string(nc) + " variables)");
   if (!s.prim_to_cons)
-    throw std::runtime_error("System::set_primitive_state : the model of block '" + name +
-                             "' does not expose a primitive -> conservative conversion (.so generated before "
-                             "this project ?) ; use set_state (direct conservative state)");
+    throw std::runtime_error(
+        "System::set_primitive_state : the model of block '" + name +
+        "' does not expose a primitive -> conservative conversion (.so generated before "
+        "this project ?) ; use set_state (direct conservative state)");
   // CELL-BY-CELL conversion via the block model: we read the nc primitives component-major
   // (prim[c*nn + k]) into a small contiguous buffer, convert, and write the conservatives at the
   // same place in an output buffer. Then write_state pushes everything to the MultiFab (set_state
@@ -1622,9 +1730,11 @@ void System::set_primitive_state(const std::string& name, const std::vector<doub
   std::vector<double> cons(prim.size());
   std::vector<double> cell_in(static_cast<std::size_t>(nc)), cell_out(static_cast<std::size_t>(nc));
   for (std::size_t k = 0; k < nn; ++k) {
-    for (int c = 0; c < nc; ++c) cell_in[c] = prim[static_cast<std::size_t>(c) * nn + k];
+    for (int c = 0; c < nc; ++c)
+      cell_in[c] = prim[static_cast<std::size_t>(c) * nn + k];
     s.prim_to_cons(cell_in.data(), cell_out.data());
-    for (int c = 0; c < nc; ++c) cons[static_cast<std::size_t>(c) * nn + k] = cell_out[c];
+    for (int c = 0; c < nc; ++c)
+      cons[static_cast<std::size_t>(c) * nn + k] = cell_out[c];
   }
   p_->write_state(s.U, nc, cons);
 }
@@ -1635,36 +1745,52 @@ std::vector<double> System::get_primitive_state(const std::string& name) {
   // Number of cells = REAL EXTENTS of the index domain (n*n Cartesian, nr*ntheta polar), NOT
   // cfg.n*cfg.n: in polar cfg.n = nr, so cfg.n^2 != nr*ntheta -> heap overflow (ntheta<nr) or
   // partial/wrong content (ntheta>nr). Cartesian bit-identical (dom.nx()==dom.ny()==n).
-  const std::size_t nn = static_cast<std::size_t>(p_->dom.nx()) * static_cast<std::size_t>(p_->dom.ny());
+  const std::size_t nn =
+      static_cast<std::size_t>(p_->dom.nx()) * static_cast<std::size_t>(p_->dom.ny());
   if (!s.cons_to_prim)
-    throw std::runtime_error("System::get_primitive_state : the model of block '" + name +
-                             "' does not expose a conservative -> primitive conversion (.so generated before "
-                             "this project ?) ; use get_state (direct conservative state)");
+    throw std::runtime_error(
+        "System::get_primitive_state : the model of block '" + name +
+        "' does not expose a conservative -> primitive conversion (.so generated before "
+        "this project ?) ; use get_state (direct conservative state)");
   const std::vector<double> cons = p_->copy_state(s.U, nc);  // get_state path (same marshaling)
   std::vector<double> prim(cons.size());
   std::vector<double> cell_in(static_cast<std::size_t>(nc)), cell_out(static_cast<std::size_t>(nc));
   for (std::size_t k = 0; k < nn; ++k) {
-    for (int c = 0; c < nc; ++c) cell_in[c] = cons[static_cast<std::size_t>(c) * nn + k];
+    for (int c = 0; c < nc; ++c)
+      cell_in[c] = cons[static_cast<std::size_t>(c) * nn + k];
     s.cons_to_prim(cell_in.data(), cell_out.data());
-    for (int c = 0; c < nc; ++c) prim[static_cast<std::size_t>(c) * nn + k] = cell_out[c];
+    for (int c = 0; c < nc; ++c)
+      prim[static_cast<std::size_t>(c) * nn + k] = cell_out[c];
   }
   return prim;
 }
 
-void System::solve_fields() { p_->solve_fields(); }
+void System::solve_fields() {
+  p_->solve_fields();
+}
 
 // Time advance EXTRACTED into stepper_ (SystemStepper, Batch B). Pure delegation: the Cartesian/polar
 // dispatch of the physical step h, the per-block CFL formula (substeps/stride), the
 // hold-then-catch-up semantics of the macro-step counter, the condensed source stage and the couplings live
 // now in the header (bit-identical). The public API stays unchanged.
-void System::step(double dt) { p_->stepper_.step(dt); }
-void System::advance(double dt, int nsteps) { p_->stepper_.advance(dt, nsteps); }
-double System::step_cfl(double cfl) { return p_->stepper_.step_cfl(cfl); }
-double System::step_adaptive(double cfl) { return p_->stepper_.step_adaptive(cfl); }
+void System::step(double dt) {
+  p_->stepper_.step(dt);
+}
+void System::advance(double dt, int nsteps) {
+  p_->stepper_.advance(dt, nsteps);
+}
+double System::step_cfl(double cfl) {
+  return p_->stepper_.step_cfl(cfl);
+}
+double System::step_adaptive(double cfl) {
+  return p_->stepper_.step_adaptive(cfl);
+}
 
 // System clock (IO v1, audit wave 2): macro_step is REQUIRED by the restart (the
 // hold-then-catch-up stride cadence reads macro_step % stride; t alone is not enough).
-int System::macro_step() const { return p_->macro_step_; }
+int System::macro_step() const {
+  return p_->macro_step_;
+}
 
 // Potential phi restoration (IO v1, restart): writes the VALID cells of component 0 of the
 // solver phi (multigrid warm start; physical state in gauss_policy="evolve"). Mono-box
@@ -1677,26 +1803,30 @@ void System::set_potential(const std::vector<double>& phi) {
     MultiFab& ph = P->fields_.pell_->phi();
     // Rank without a box (MPI mono-box): NO-OP (the owning rank restores phi). Allows restart on
     // all ranks with the GLOBAL field. Mono-rank: local_size()==1, UNCHANGED.
-    if (ph.local_size() == 0) return;
+    if (ph.local_size() == 0)
+      return;
     const Box2D v = ph.box(0);
     if (static_cast<int>(phi.size()) != v.nx() * v.ny())
       throw std::runtime_error("System::set_potential : size != nr*ntheta");
     Array4 a = ph.fab(0).array();
     std::size_t k = 0;
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int i = v.lo[0]; i <= v.hi[0]; ++i) a(i, j, 0) = phi[k++];
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        a(i, j, 0) = phi[k++];
     return;
   }
   P->fields_.ensure_elliptic();
   MultiFab& ph = P->fields_.ell_phi();
-  if (ph.local_size() == 0) return;  // rank without a box: no-op (cf. polar branch)
+  if (ph.local_size() == 0)
+    return;  // rank without a box: no-op (cf. polar branch)
   const Box2D v = ph.box(0);
   if (static_cast<int>(phi.size()) != v.nx() * v.ny())
     throw std::runtime_error("System::set_potential : size != n*n");
   Array4 a = ph.fab(0).array();
   std::size_t k = 0;
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-    for (int i = v.lo[0]; i <= v.hi[0]; ++i) a(i, j, 0) = phi[k++];
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+      a(i, j, 0) = phi[k++];
 }
 void System::set_clock(double t, int macro_step) {
   if (macro_step < 0)
@@ -1719,39 +1849,57 @@ void System::set_state(const std::string& name, const std::vector<double>& u) {
   Impl::Species& s = p_->find(name);
   p_->write_state(s.U, s.ncomp, u);
 }
-int System::n_vars(const std::string& name) const { return p_->find(name).ncomp; }
+int System::n_vars(const std::string& name) const {
+  return p_->find(name).ncomp;
+}
 std::vector<std::string> System::variable_names(const std::string& name,
-                                               const std::string& kind) const {
+                                                const std::string& kind) const {
   const Impl::Species& s = p_->find(name);
-  if (kind == "conservative") return s.cons_vars.names;
-  if (kind == "primitive") return s.prim_vars.names;
-  throw std::runtime_error("System::variable_names : kind 'conservative' | 'primitive' (received '" +
-                           kind + "')");
+  if (kind == "conservative")
+    return s.cons_vars.names;
+  if (kind == "primitive")
+    return s.prim_vars.names;
+  throw std::runtime_error(
+      "System::variable_names : kind 'conservative' | 'primitive' (received '" + kind + "')");
 }
 std::vector<std::string> System::variable_roles(const std::string& name,
-                                               const std::string& kind) const {
+                                                const std::string& kind) const {
   const Impl::Species& s = p_->find(name);
   const VariableSet* vs = nullptr;
-  if (kind == "conservative") vs = &s.cons_vars;
-  else if (kind == "primitive") vs = &s.prim_vars;
-  else throw std::runtime_error("System::variable_roles : kind 'conservative' | 'primitive' (received '" +
-                                kind + "')");
+  if (kind == "conservative")
+    vs = &s.cons_vars;
+  else if (kind == "primitive")
+    vs = &s.prim_vars;
+  else
+    throw std::runtime_error(
+        "System::variable_roles : kind 'conservative' | 'primitive' (received '" + kind + "')");
   std::vector<std::string> out;
   out.reserve(static_cast<std::size_t>(vs->size));
-  for (int i = 0; i < vs->size; ++i) out.push_back(role_name(vs->at(i).role));  // 'custom' if absent
+  for (int i = 0; i < vs->size; ++i)
+    out.push_back(role_name(vs->at(i).role));  // 'custom' if absent
   return out;
 }
-double System::block_gamma(const std::string& name) const { return p_->find(name).gamma; }
+double System::block_gamma(const std::string& name) const {
+  return p_->find(name).gamma;
+}
 
-int System::nx() const { return p_->cfg.n; }
+int System::nx() const {
+  return p_->cfg.n;
+}
 // SLOW axis of the field (rows of the (ny, nx) array). We read it from the INDEX domain (dom = nx() x ny()),
 // SINGLE SOURCE of the extents for both geometries: Cartesian dom = n x n -> ny() == nx() == n (square,
 // UNCHANGED); polar dom = nr x ntheta -> nx() == nr (fast, i), ny() == ntheta (slow, j). It is this
 // dimension that sizes the numpy array on the bindings side: a polar field has nx()*ny() = nr*ntheta
 // values, and with nr != ntheta the square reshape (nx, nx) overflows the buffer (teardown bug).
-int System::ny() const { return p_->dom.ny(); }
-double System::time() const { return p_->t; }
-int System::n_species() const { return p_->blocks_.size(); }
+int System::ny() const {
+  return p_->dom.ny();
+}
+double System::time() const {
+  return p_->t;
+}
+int System::n_species() const {
+  return p_->blocks_.size();
+}
 std::vector<std::string> System::block_names() const {
   // SINGLE block registry (store), populated by all add paths: a block loaded via
   // add_dynamic_block / add_compiled_block (.so) appears there just like an add_block.
@@ -1759,7 +1907,8 @@ std::vector<std::string> System::block_names() const {
 }
 double System::mass(const std::string& name) const {
   const Impl::Species& s = p_->find(name);
-  if (!p_->polar_) return sum(s.U, 0);  // Cartesian: bare sum of the cells (bit-identical)
+  if (!p_->polar_)
+    return sum(s.U, 0);  // Cartesian: bare sum of the cells (bit-identical)
   // POLAR: FV mass = Sum_ij n_ij r_i dr dtheta (annular cell volume r dr dtheta). This is the
   // quantity CONSERVED by assemble_rhs_polar (cf. test_polar_transport_mms). Host loop over the valid
   // cells (mono-rank: a single local fab), reduced over the ranks by symmetry (n_ranks==1).
@@ -1787,23 +1936,27 @@ std::vector<double> System::potential() {
     p_->fields_.ensure_elliptic_polar();
     // Rank without a box (MPI mono-box): EMPTY return (no fab(0)). Cf. copy_comp0; the multi-rank
     // global field goes through System::potential_global.
-    if (p_->aux.local_size() == 0) return {};
+    if (p_->aux.local_size() == 0)
+      return {};
     const ConstArray4 ph = p_->fields_.pell_->phi().fab(0).const_array();
     const Box2D v = p_->aux.box(0);
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
     for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-      for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(ph(i, j));
+      for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+        out.push_back(ph(i, j));
     return out;
   }
   p_->fields_.ensure_elliptic();
-  if (p_->aux.local_size() == 0) return {};  // rank without a box: empty (cf. potential_global)
+  if (p_->aux.local_size() == 0)
+    return {};  // rank without a box: empty (cf. potential_global)
   const ConstArray4 ph = p_->fields_.ell_phi().fab(0).const_array();
   const Box2D v = p_->aux.box(0);
   std::vector<double> out;
   out.reserve(static_cast<std::size_t>(v.nx()) * v.ny());
   for (int j = v.lo[1]; j <= v.hi[1]; ++j)
-    for (int i = v.lo[0]; i <= v.hi[0]; ++i) out.push_back(ph(i, j));
+    for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+      out.push_back(ph(i, j));
   return out;
 }
 

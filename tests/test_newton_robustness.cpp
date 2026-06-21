@@ -44,9 +44,15 @@ struct StiffModel {
 // converger vers la MEME racine que les differences finies (l'equation BE est identique).
 struct JacStiffModel : StiffModel {
   ADC_HD void source_jacobian(const State& u, const Aux&, Real (&J)[3][3]) const {
-    J[0][0] = -k;          J[0][1] = k * u[2];  J[0][2] = k * u[1];
-    J[1][0] = k * Real(0.5); J[1][1] = -k;      J[1][2] = 0;
-    J[2][0] = 0;           J[2][1] = 0;         J[2][2] = -Real(3) * k * u[2] * u[2];
+    J[0][0] = -k;
+    J[0][1] = k * u[2];
+    J[0][2] = k * u[1];
+    J[1][0] = k * Real(0.5);
+    J[1][1] = -k;
+    J[1][2] = 0;
+    J[2][0] = 0;
+    J[2][1] = 0;
+    J[2][2] = -Real(3) * k * u[2] * u[2];
   }
 };
 
@@ -100,7 +106,8 @@ int main() {
     const adc::Box2D b = U.box(li);
     for (int c = 0; c < 3; ++c)
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) d(i, j, c) = s(i, j, c);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          d(i, j, c) = s(i, j, c);
   }
   const Real dt = 0.05;  // k*dt = 10 : raide (un point-fixe explicite divergerait)
   adc::NewtonOptions opts;
@@ -123,7 +130,8 @@ int main() {
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
         StiffModel::State W{};
-        for (int c = 0; c < 3; ++c) W[c] = w(i, j, c);
+        for (int c = 0; c < 3; ++c)
+          W[c] = w(i, j, c);
         const StiffModel::State S = m.source(W, Aux{});
         for (int c = 0; c < 3; ++c)
           worst = std::fmax(worst, std::fabs(w(i, j, c) - un(i, j, c) - dt * S[c]));
@@ -133,8 +141,10 @@ int main() {
     std::printf("FAIL (1) : residu BE %.3e > 1e-10\n", worst);
     return 1;
   }
-  std::printf("OK  (1) relaxation non lineaire 3-var NON Euler : converge (res BE %.1e, iters max "
-              "%.0f/25)\n", worst, static_cast<double>(rep.max_iters_used));
+  std::printf(
+      "OK  (1) relaxation non lineaire 3-var NON Euler : converge (res BE %.1e, iters max "
+      "%.0f/25)\n",
+      worst, static_cast<double>(rep.max_iters_used));
 
   // --- (2) damping : meme racine, plus d'iterations --------------------------------------------
   adc::MultiFab Ud = make_mf(ba, dm, 3);
@@ -144,7 +154,8 @@ int main() {
     const adc::Box2D b = Ud.box(li);
     for (int c = 0; c < 3; ++c)
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) d(i, j, c) = s(i, j, c);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          d(i, j, c) = s(i, j, c);
   }
   adc::NewtonOptions od = opts;
   od.damping = 0.5;
@@ -162,7 +173,8 @@ int main() {
           dmax = std::fmax(dmax, std::fabs(a4(i, j, c) - b4(i, j, c)));
   }
   if (!repd.converged || dmax > 1e-8) {
-    std::printf("FAIL (2) : damping (converged=%d, ecart racine %.3e)\n", int(repd.converged), dmax);
+    std::printf("FAIL (2) : damping (converged=%d, ecart racine %.3e)\n", int(repd.converged),
+                dmax);
     return 1;
   }
   std::printf("OK  (2) Newton amorti (damping=0.5) : meme racine (ecart %.1e), iters %.0f\n", dmax,
@@ -212,7 +224,10 @@ int main() {
     const adc::Box2D b = Ua.box(li);
     for (int c = 0; c < 3; ++c)
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) { a4(i, j, c) = s(i, j, c); b4(i, j, c) = s(i, j, c); }
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
+          a4(i, j, c) = s(i, j, c);
+          b4(i, j, c) = s(i, j, c);
+        }
   }
   adc::backward_euler_source(m, aux, Ua, dt, 2);  // chemin historique (surcharge iters)
   adc::NewtonOptions odef;                        // defauts stricts
@@ -243,7 +258,8 @@ int main() {
     const adc::Box2D b = Uj.box(li);
     for (int c = 0; c < 3; ++c)
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) d(i, j, c) = s(i, j, c);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          d(i, j, c) = s(i, j, c);
   }
   adc::NewtonReport repj;
   adc::backward_euler_source(jm, aux, Uj, dt, opts, {}, &repj);

@@ -38,18 +38,20 @@ using namespace adc;
 // Modele de production constante (sans flux) : source = +rate, elliptic_rhs = u[0].
 struct Prod {
   using State = StateVec<1>;
-  using Aux   = adc::Aux;
+  using Aux = adc::Aux;
   static constexpr int n_vars = 1;
   Real rate = Real(1);
   ADC_HD State flux(const State&, const Aux&, int) const { return State{}; }
-  ADC_HD Real  max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
   ADC_HD State source(const State&, const Aux&) const { return State{rate}; }
-  ADC_HD Real  elliptic_rhs(const State& u) const { return u[0]; }
+  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 // Construit un AmrSystemCoupler mono-niveau (grossier seul) pour un CoupledSystem
@@ -57,12 +59,9 @@ struct ZeroRhs {
 // niveaux ; les references retournees dans out_fast/out_slow permettent d'interroger
 // la valeur apres l'avance.
 template <class FastBlk, class SlowBlk>
-static auto make_sim(
-    const Geometry& geom,
-    const BoxArray& ba,
-    const DistributionMapping& dm,
-    MultiFab& out_fast,    // sortie : pointe sur le MultiFab du bloc rapide
-    MultiFab& out_slow)    // sortie : pointe sur le MultiFab du bloc lent
+static auto make_sim(const Geometry& geom, const BoxArray& ba, const DistributionMapping& dm,
+                     MultiFab& out_fast,  // sortie : pointe sur le MultiFab du bloc rapide
+                     MultiFab& out_slow)  // sortie : pointe sur le MultiFab du bloc lent
 {
   MultiFab Uf(ba, dm, 1, 2), Us(ba, dm, 1, 2);
   Uf.set_val(Real(0));
@@ -92,7 +91,10 @@ static auto make_sim(
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int NC = 4;
@@ -101,7 +103,7 @@ int main() {
   const BoxArray ba(std::vector<Box2D>{dom});
   const DistributionMapping dm(1, n_ranks());
   const int ncell = NC * NC;  // 16 cellules
-  const Real dt   = Real(0.1);
+  const Real dt = Real(0.1);
 
   // -----------------------------------------------------------------------
   // Test A : bloc rapide stride=1, bloc lent stride=3.
@@ -119,7 +121,8 @@ int main() {
     SlowBlk slow{"slow", Prod{Real(1)}, Us_out, BCRec{}};
 
     MultiFab Uf(ba, dm, 1, 2), Us(ba, dm, 1, 2);
-    Uf.set_val(Real(0)); Us.set_val(Real(0));
+    Uf.set_val(Real(0));
+    Us.set_val(Real(0));
     FastBlk f2{"fast", Prod{Real(1)}, Uf, BCRec{}};
     SlowBlk s2{"slow", Prod{Real(1)}, Us, BCRec{}};
     CoupledSystem system{f2, s2};
@@ -139,28 +142,24 @@ int main() {
     sim.step(dt);
     const Real uf0 = sum(sim.coarse(0), 0) / Real(ncell);  // valeur moyenne rapide
     const Real us0 = sum(sim.coarse(1), 0) / Real(ncell);  // valeur moyenne lente
-    chk(std::fabs(uf0 - Real(0.1)) < Real(1e-12),
-        "A_fast_advances_at_mac0");
+    chk(std::fabs(uf0 - Real(0.1)) < Real(1e-12), "A_fast_advances_at_mac0");
     chk(std::fabs(us0 - Real(0.0)) < Real(1e-12),
-        "A_slow_held_at_mac0");        // BUG : ancienne version donnait 0.3 ici
+        "A_slow_held_at_mac0");  // BUG : ancienne version donnait 0.3 ici
 
     // -- macro-pas 1 (macro_step_=1) : (1+1)%3 = 2 != 0 -> bloc lent encore TENU.
     sim.step(dt);
     const Real uf1 = sum(sim.coarse(0), 0) / Real(ncell);
     const Real us1 = sum(sim.coarse(1), 0) / Real(ncell);
-    chk(std::fabs(uf1 - Real(0.2)) < Real(1e-12),
-        "A_fast_advances_at_mac1");
-    chk(std::fabs(us1 - Real(0.0)) < Real(1e-12),
-        "A_slow_held_at_mac1");
+    chk(std::fabs(uf1 - Real(0.2)) < Real(1e-12), "A_fast_advances_at_mac1");
+    chk(std::fabs(us1 - Real(0.0)) < Real(1e-12), "A_slow_held_at_mac1");
 
     // -- macro-pas 2 (macro_step_=2) : (2+1)%3 = 0 -> bloc lent RATTRAPE (3*dt).
     sim.step(dt);
     const Real uf2 = sum(sim.coarse(0), 0) / Real(ncell);
     const Real us2 = sum(sim.coarse(1), 0) / Real(ncell);
-    chk(std::fabs(uf2 - Real(0.3)) < Real(1e-12),
-        "A_fast_at_mac2");
+    chk(std::fabs(uf2 - Real(0.3)) < Real(1e-12), "A_fast_at_mac2");
     chk(std::fabs(us2 - Real(0.3)) < Real(1e-12),
-        "A_slow_catchup_at_mac2");     // synchronises a 0.3
+        "A_slow_catchup_at_mac2");  // synchronises a 0.3
 
     // Invariant de couplage : le bloc lent n'est JAMAIS en avance sur le rapide.
     // Apres chaque macro-pas, slow_time <= fast_time.
@@ -179,7 +178,8 @@ int main() {
     using SlowBlk = EquationBlock<Prod, FirstOrder, ExplicitTime<SSPRK2, 1, M>>;
 
     MultiFab Uf(ba, dm, 1, 2), Us(ba, dm, 1, 2);
-    Uf.set_val(Real(0)); Us.set_val(Real(0));
+    Uf.set_val(Real(0));
+    Us.set_val(Real(0));
     FastBlk f{"fast", Prod{Real(1)}, Uf, BCRec{}};
     SlowBlk s{"slow", Prod{Real(1)}, Us, BCRec{}};
     CoupledSystem system{f, s};
@@ -196,8 +196,7 @@ int main() {
     for (int mac = 0; mac < M - 1; ++mac) {
       sim.step(dt);
       const Real us = sum(sim.coarse(1), 0) / Real(ncell);
-      chk(std::fabs(us - Real(0.0)) < Real(1e-12),
-          "A2_slow_held");
+      chk(std::fabs(us - Real(0.0)) < Real(1e-12), "A2_slow_held");
     }
     // Pas 4 (mac=M-1) : lent rattrape.
     sim.step(dt);
@@ -229,13 +228,14 @@ int main() {
     AmrSystemCoupler sim(system, geom, ba, BCRec{}, ZeroRhs{}, std::move(bl));
 
     const int N = 5;
-    for (int i = 0; i < N; ++i) sim.step(dt);
+    for (int i = 0; i < N; ++i)
+      sim.step(dt);
     const Real u = sum(sim.coarse(0), 0) / Real(ncell);
     // SSPRK2 exact pour u' = 1 : u(N*dt) = N*dt.
-    chk(std::fabs(u - Real(N) * dt) < Real(1e-12),
-        "B_stride1_advances_every_step");
+    chk(std::fabs(u - Real(N) * dt) < Real(1e-12), "B_stride1_advances_every_step");
   }
 
-  if (fails == 0) std::printf("OK test_amr_stride_cadence\n");
+  if (fails == 0)
+    std::printf("OK test_amr_stride_cadence\n");
   return fails == 0 ? 0 : 1;
 }

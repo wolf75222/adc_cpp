@@ -16,7 +16,8 @@ using namespace adc;
 static int fails = 0;
 static void chk(bool c, const char* label) {
   std::printf("  [%s] %s\n", c ? "OK " : "XX ", label);
-  if (!c) ++fails;
+  if (!c)
+    ++fails;
 }
 static bool close(Real a, Real b, Real tol = 1e-12) {
   const Real d = a - b;
@@ -40,7 +41,8 @@ int main() {
   chk(P[3] > 0, "Euler to_primitive : pression positive");
   const Euler::State U2 = e.to_conservative(P);
   bool rt = true;
-  for (int c = 0; c < 4; ++c) rt = rt && close(U[c], U2[c]);
+  for (int c = 0; c < 4; ++c)
+    rt = rt && close(U[c], U2[c]);
   chk(rt, "Euler round-trip cons->prim->cons == identite");
 
   // max_wave_speed calcule via le primitif, coherent avec |u| + c.
@@ -59,9 +61,9 @@ int main() {
   const auto Pi = is.to_primitive(Ui);
   const auto Ui2 = is.to_conservative(Pi);
   bool rti = true;
-  for (int k = 0; k < 3; ++k) rti = rti && close(Ui[k], Ui2[k]);
-  chk(rti && close(Pi[1], 0.4) && close(Pi[2], -0.1),
-      "isotherme round-trip + (u, v) primitifs");
+  for (int k = 0; k < 3; ++k)
+    rti = rti && close(Ui[k], Ui2[k]);
+  chk(rti && close(Pi[1], 0.4) && close(Pi[2], -0.1), "isotherme round-trip + (u, v) primitifs");
 
   // Scalaire (ExB) : conversions = identite.
   ExBVelocity exb;

@@ -92,7 +92,8 @@ struct InitKernel {
     st(i, j, c_rho) = rho0;
     st(i, j, c_mx) = rho0 * vx;
     st(i, j, c_my) = rho0 * vy;
-    if (c_E >= 0) st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vx * vx + vy * vy);
+    if (c_E >= 0)
+      st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vx * vx + vy * vy);
     phi(i, j, 0) = ph;
   }
 };
@@ -119,7 +120,8 @@ struct LocalizedInitKernel {
     st(i, j, c_rho) = rho0;
     st(i, j, c_mx) = rho0 * vx;
     st(i, j, c_my) = rho0 * vy;
-    if (c_E >= 0) st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vx * vx + vy * vy);
+    if (c_E >= 0)
+      st(i, j, c_E) = Real(1.0) + Real(0.5) * rho0 * (vx * vx + vy * vy);
   }
 };
 
@@ -133,7 +135,8 @@ static bool all_finite(const MultiFab& m, int nc) {
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
         for (int c = 0; c < nc; ++c)
-          if (!std::isfinite(u(i, j, c))) bad = 1;
+          if (!std::isfinite(u(i, j, c)))
+            bad = 1;
   }
   return all_reduce_max(bad) == 0.0;
 }
@@ -161,7 +164,8 @@ static void copy_all(MultiFab& dst, const MultiFab& src, int ncomp) {
     const Box2D b = dst.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i)
-        for (int c = 0; c < ncomp; ++c) d(i, j, c) = s(i, j, c);
+        for (int c = 0; c < ncomp; ++c)
+          d(i, j, c) = s(i, j, c);
   }
 }
 
@@ -220,7 +224,8 @@ int main(int argc, char** argv) {
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
     if (!c) {
-      if (me == 0) std::printf("FAIL %s\n", w);
+      if (me == 0)
+        std::printf("FAIL %s\n", w);
       ++fails;
     }
   };
@@ -243,8 +248,9 @@ int main(int argc, char** argv) {
   MultiFab phi_ref(S.ba, S.dm, 1, 1), phi_amr(S.ba, S.dm, 1, 1);
   MultiFab bz(S.ba, S.dm, 1, 1);
   for (int li = 0; li < st_ref.local_size(); ++li) {
-    for_each_cell(st_ref.box(li), InitKernel{S.geom, st_ref.fab(li).array(), phi_ref.fab(li).array(),
-                                             rho0, c_rho, c_mx, c_my, c_E});
+    for_each_cell(st_ref.box(li),
+                  InitKernel{S.geom, st_ref.fab(li).array(), phi_ref.fab(li).array(), rho0, c_rho,
+                             c_mx, c_my, c_E});
     for_each_cell(bz.box(li), ConstBzKernel{bz.fab(li).array(), B0});
   }
   copy_all(st_amr, st_ref, vars.size);
@@ -309,7 +315,8 @@ int main(int argc, char** argv) {
     } catch (const std::exception&) {
       threw = true;
     }
-    chk(threw, "hierarchie > 2 niveaux -> erreur claire (>2 niveaux / MPI / multi-blocs = Phase 4b)");
+    chk(threw,
+        "hierarchie > 2 niveaux -> erreur claire (>2 niveaux / MPI / multi-blocs = Phase 4b)");
   }
 
   // =========================== MULTI-PATCH FIN (Phase 4a) ===========================
@@ -338,8 +345,8 @@ int main(int argc, char** argv) {
     const Real xc = Real(0.36), yc = Real(0.36), sigma = Real(0.05);
     auto fill_localized = [&](MultiFab& U, const Geometry& g) {
       for (int li = 0; li < U.local_size(); ++li)
-        for_each_cell(U.box(li), LocalizedInitKernel{g, U.fab(li).array(), rho0m, xc, yc, sigma, c_rho,
-                                                     c_mx, c_my, c_E});
+        for_each_cell(U.box(li), LocalizedInitKernel{g, U.fab(li).array(), rho0m, xc, yc, sigma,
+                                                     c_rho, c_mx, c_my, c_E});
     };
 
     // Un pas composite ; rend l'etat grossier + fin et les etats INITIAUX fins (pour mesurer l'effet source).
@@ -395,11 +402,14 @@ int main(int argc, char** argv) {
           }
       diff_A = all_reduce_max(diff_A);
       dmom_A = all_reduce_max(dmom_A);
-      if (me == 0) std::printf("  [multi] dmom_A=%.3e diff_A=%.3e (rel=%.2e)\n", dmom_A, diff_A,
-                               diff_A / std::fmax(dmom_A, 1e-30));
-      chk(dmom_A > 1e-3, "(multi-ii) la source agit reellement dans le patch A (dynamique non triviale)");
+      if (me == 0)
+        std::printf("  [multi] dmom_A=%.3e diff_A=%.3e (rel=%.2e)\n", dmom_A, diff_A,
+                    diff_A / std::fmax(dmom_A, 1e-30));
+      chk(dmom_A > 1e-3,
+          "(multi-ii) la source agit reellement dans le patch A (dynamique non triviale)");
       chk(std::isfinite(diff_A) && diff_A < Real(1e-5) * dmom_A,
-          "(multi-ii) parite physique : patch A ~ cas mono-patch (perturbation du patch B distant < 1e-5)");
+          "(multi-ii) parite physique : patch A ~ cas mono-patch (perturbation du patch B distant "
+          "< 1e-5)");
     }
 
     // (iii) MASSE CONSERVEE : rho GELEE par la source sur le grossier ET les deux patchs fins. On compare
@@ -461,7 +471,8 @@ int main(int argc, char** argv) {
   }
 
   fails = static_cast<long>(all_reduce_max(static_cast<double>(fails)));
-  if (me == 0 && fails == 0) std::printf("OK test_amr_condensed_schur_source_stepper\n");
+  if (me == 0 && fails == 0)
+    std::printf("OK test_amr_condensed_schur_source_stepper\n");
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

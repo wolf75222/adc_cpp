@@ -34,17 +34,16 @@ int main() {
 
   chk(fab(0, 0, 0) == 0.0 && fab(3, 2, 0) == 23.0, "fill_c0");
   chk(fab(3, 2, 1) == -23.0, "fill_c1");
-  chk(fab(-1, 0, 0) == 0.0 && fab(4, 2, 0) == 0.0 && fab(0, -1, 0) == 0.0,
-      "ghost_untouched");
+  chk(fab(-1, 0, 0) == 0.0 && fab(4, 2, 0) == 0.0 && fab(0, -1, 0) == 0.0, "ghost_untouched");
 
   ConstArray4 ca = fab.const_array();
-  chk(ca(2, 1, 0) == fab(2, 1, 0) && ca(2, 1, 1) == fab(2, 1, 1),
-      "array4_matches");
+  chk(ca(2, 1, 0) == fab(2, 1, 0) && ca(2, 1, 1) == fab(2, 1, 1), "array4_matches");
 
   // composante-lente : le plan c=1 est un bloc contigu apres c=0,
   // de stride nx_tot * ny_tot = 6 * 5 = 30
   chk(&fab(0, 0, 1) - &fab(0, 0, 0) == 30, "comp_slowest");
 
-  if (fails == 0) std::printf("OK test_fab2d\n");
+  if (fails == 0)
+    std::printf("OK test_fab2d\n");
   return fails == 0 ? 0 : 1;
 }

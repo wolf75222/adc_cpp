@@ -39,9 +39,7 @@ struct Box2D {
   int hi[2]{-1, -1};  // empty by default (hi < lo)
 
   /// Box [0, nx-1] x [0, ny-1] covering nx*ny cells from the index origin.
-  static Box2D from_extents(int nx, int ny) {
-    return Box2D{{0, 0}, {nx - 1, ny - 1}};
-  }
+  static Box2D from_extents(int nx, int ny) { return Box2D{{0, 0}, {nx - 1, ny - 1}}; }
 
   // ADC_HD: Geometry::dx()/dy() (themselves ADC_HD) read domain.nx()/ny(); a device kernel that
   // calls geom.x_cell(i) descends down to here. Without ADC_HD this is a __host__ from __device__ ->
@@ -60,19 +58,15 @@ struct Box2D {
   bool empty() const { return hi[0] < lo[0] || hi[1] < lo[1]; }
 
   /// true if cell (i, j) is inside the box (lo/hi bounds inclusive).
-  bool contains(int i, int j) const {
-    return i >= lo[0] && i <= hi[0] && j >= lo[1] && j <= hi[1];
-  }
+  bool contains(int i, int j) const { return i >= lo[0] && i <= hi[0] && j >= lo[1] && j <= hi[1]; }
   /// true if box b (non-empty) is entirely contained in *this.
   bool contains(const Box2D& b) const {
-    return !b.empty() && b.lo[0] >= lo[0] && b.hi[0] <= hi[0] &&
-           b.lo[1] >= lo[1] && b.hi[1] <= hi[1];
+    return !b.empty() && b.lo[0] >= lo[0] && b.hi[0] <= hi[0] && b.lo[1] >= lo[1] &&
+           b.hi[1] <= hi[1];
   }
 
   /// Grows the box by n cells in ALL directions (uniform ghost layer).
-  Box2D grow(int n) const {
-    return {{lo[0] - n, lo[1] - n}, {hi[0] + n, hi[1] + n}};
-  }
+  Box2D grow(int n) const { return {{lo[0] - n, lo[1] - n}, {hi[0] + n, hi[1] + n}}; }
   /// Grows by n cells in the SINGLE direction d (n may be negative to shrink).
   Box2D grow(int d, int n) const {
     Box2D b = *this;
@@ -94,8 +88,7 @@ struct Box2D {
   }
   /// Coarsens by a ratio r via FLOOR division of each corner (handles the negative ghost indices).
   Box2D coarsen(int r) const {
-    return {{floor_div(lo[0], r), floor_div(lo[1], r)},
-            {floor_div(hi[0], r), floor_div(hi[1], r)}};
+    return {{floor_div(lo[0], r), floor_div(lo[1], r)}, {floor_div(hi[0], r), floor_div(hi[1], r)}};
   }
 
   /// Intersection of the two boxes (possibly empty: hi < lo if they do not overlap).

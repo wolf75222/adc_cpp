@@ -57,8 +57,12 @@ struct FillPhiRhsKernel {
 static double phi_exact(double x, double y) {
   return std::sin(kPi * x) * std::sin(kPi * y);
 }
-static double eps_x_field(double x, double /*y*/) { return 1.0 + 0.5 * x; }
-static double eps_y_field(double /*x*/, double y) { return 1.0 + 0.3 * y; }
+static double eps_x_field(double x, double /*y*/) {
+  return 1.0 + 0.5 * x;
+}
+static double eps_y_field(double /*x*/, double y) {
+  return 1.0 + 0.3 * y;
+}
 
 // Foncteur de remplissage MMS (C) : pose phi = phi_exact (sin(pi x) sin(pi y)) et f = div(A grad phi)
 // analytique pour A constant non diagonal. Top-level / device-clean (recette #64/#97/#133 : struct a
@@ -107,7 +111,8 @@ static double gap_identity(int n) {
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba = BoxArray::from_domain(dom, n);
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
 
   // phi non trivial commun aux deux operateurs.
   auto fill = [&](GeometricMG& mg) {
@@ -134,7 +139,8 @@ static double gap_diagonal(int n) {
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba = BoxArray::from_domain(dom, n);
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
 
   auto fill = [&](GeometricMG& mg) {
     Array4 ap = mg.phi().fab(0).array(), af = mg.rhs().fab(0).array();
@@ -166,12 +172,14 @@ static double operator_mms_resid(int n, double axx, double ayy, double cxy, doub
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba = BoxArray::from_domain(dom, n);
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
 
   GeometricMG mg(geom, ba, bc);
   mg.set_epsilon_anisotropic([axx](Real, Real) { return Real(axx); },
                              [ayy](Real, Real) { return Real(ayy); });
-  mg.set_cross_terms([cxy](Real, Real) { return Real(cxy); }, [cyx](Real, Real) { return Real(cyx); });
+  mg.set_cross_terms([cxy](Real, Real) { return Real(cxy); },
+                     [cyx](Real, Real) { return Real(cyx); });
 
   // phi = phi_exact (donnee EXACTE au centre des cellules) ; f = div(A grad phi) analytique.
   const double csum = cxy + cyx;
@@ -190,10 +198,12 @@ static void observe_mg_solve(int n, double c, double& r0_out, double& rN_out, in
   Box2D dom = Box2D::from_extents(n, n);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};
   BoxArray ba = BoxArray::from_domain(dom, n);
-  BCRec bc; bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
+  BCRec bc;
+  bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;
 
   GeometricMG mg(geom, ba, bc);
-  mg.set_epsilon_anisotropic([](Real, Real) { return Real(1); }, [](Real, Real) { return Real(1); });
+  mg.set_epsilon_anisotropic([](Real, Real) { return Real(1); },
+                             [](Real, Real) { return Real(1); });
   mg.set_cross_terms([c](Real, Real) { return Real(c); }, [c](Real, Real) { return Real(c); });
 
   const double csum = 2 * c;
@@ -202,15 +212,24 @@ static void observe_mg_solve(int n, double c, double& r0_out, double& rN_out, in
   mg.phi().set_val(0.0);
 
   r0_out = static_cast<double>(mg.current_residual());
-  double rn = r0_out; int c_done = 0;
-  for (int k = 0; k < 60 && rn > 1e-10 * r0_out; ++k) { mg.vcycle(); rn = static_cast<double>(mg.current_residual()); ++c_done; }
-  rN_out = rn; nc_out = c_done;
+  double rn = r0_out;
+  int c_done = 0;
+  for (int k = 0; k < 60 && rn > 1e-10 * r0_out; ++k) {
+    mg.vcycle();
+    rn = static_cast<double>(mg.current_residual());
+    ++c_done;
+  }
+  rN_out = rn;
+  nc_out = c_done;
 }
 
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   // (A) A = I : bit-identique au Poisson canonique.
@@ -229,8 +248,9 @@ int main() {
   const double s64 = operator_mms_resid(64, 1.0, 1.0, c, c);
   const double s128 = operator_mms_resid(128, 1.0, 1.0, c, c);
   const double rs1 = s32 / s64, rs2 = s64 / s128;
-  std::printf("(C1) A sym (Axy=Ayx=%.2f) : residu op r32=%.3e r64=%.3e r128=%.3e | ratios %.2f %.2f\n",
-              c, s32, s64, s128, rs1, rs2);
+  std::printf(
+      "(C1) A sym (Axy=Ayx=%.2f) : residu op r32=%.3e r64=%.3e r128=%.3e | ratios %.2f %.2f\n", c,
+      s32, s64, s128, rs1, rs2);
   chk(rs1 > 3.5 && rs1 < 4.5, "C1_op_ordre2_32_64");
   chk(rs2 > 3.5 && rs2 < 4.5, "C1_op_ordre2_64_128");
 
@@ -239,17 +259,22 @@ int main() {
   const double u64 = operator_mms_resid(64, 1.0, 1.0, c, -c);
   const double u128 = operator_mms_resid(128, 1.0, 1.0, c, -c);
   const double ru1 = u32 / u64, ru2 = u64 / u128;
-  std::printf("(C2) A NON sym (Axy=%.2f Ayx=%.2f) : residu op r32=%.3e r64=%.3e r128=%.3e | ratios %.2f %.2f\n",
-              c, -c, u32, u64, u128, ru1, ru2);
+  std::printf(
+      "(C2) A NON sym (Axy=%.2f Ayx=%.2f) : residu op r32=%.3e r64=%.3e r128=%.3e | ratios %.2f "
+      "%.2f\n",
+      c, -c, u32, u64, u128, ru1, ru2);
   chk(ru1 > 3.5 && ru1 < 4.5, "C2_op_ordre2_32_64");
   chk(ru2 > 3.5 && ru2 < 4.5, "C2_op_ordre2_64_128");
 
   // OBSERVATION (non gating) : V-cycle MG sur la MMS non diagonale SDP (Axy=Ayx=c).
-  double r0, rN; int nc;
+  double r0, rN;
+  int nc;
   observe_mg_solve(64, c, r0, rN, nc);
-  std::printf("[obs] MG V-cycle, A SDP non diag (c=%.2f) : r0=%.3e rN=%.3e (%d cycles) -> %s\n",
-              c, r0, rN, nc, (rN < 1e-6 * r0 ? "CONVERGE" : (rN < r0 ? "decroit (incomplet)" : "DIVERGE/STAGNE")));
+  std::printf("[obs] MG V-cycle, A SDP non diag (c=%.2f) : r0=%.3e rN=%.3e (%d cycles) -> %s\n", c,
+              r0, rN, nc,
+              (rN < 1e-6 * r0 ? "CONVERGE" : (rN < r0 ? "decroit (incomplet)" : "DIVERGE/STAGNE")));
 
-  if (fails == 0) std::printf("OK test_full_tensor_operator\n");
+  if (fails == 0)
+    std::printf("OK test_full_tensor_operator\n");
   return fails == 0 ? 0 : 1;
 }

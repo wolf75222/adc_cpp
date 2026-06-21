@@ -57,16 +57,19 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
         const Euler::State s = init_state(eul, i, j, n);
-        for (int c = 0; c < Model::n_vars; ++c) Fu(i, j, c) = s[c];
+        for (int c = 0; c < Model::n_vars; ++c)
+          Fu(i, j, c) = s[c];
       }
     Fab2D& Fa = aux.fab(li);
     const Box2D ag = Fa.box().grow(1);  // aux = 0 partout (valide + fantomes) : source nulle
     for (int c = 0; c < 3; ++c)
       for (int j = ag.lo[1]; j <= ag.hi[1]; ++j)
-        for (int i = ag.lo[0]; i <= ag.hi[0]; ++i) Fa(i, j, c) = 0.0;
+        for (int i = ag.lo[0]; i <= ag.hi[0]; ++i)
+          Fa(i, j, c) = 0.0;
   }
   GridContext ctx{dom, BCRec{}, geom, &aux};  // BCRec{} = tout periodique
-  BlockClosures clo = make_block(model, "minmod", "rusanov", ctx, /*imex=*/false, /*recon_prim=*/false);
+  BlockClosures clo =
+      make_block(model, "minmod", "rusanov", ctx, /*imex=*/false, /*recon_prim=*/false);
   clo.rhs_into(U, R);  // fill_ghosts(U) [halos multi-box / MPI] + assemble_rhs (foncteurs nommes)
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::fence();  // barriere avant lecture HOTE du residu device (no-op sous Serial)
@@ -82,7 +85,8 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
           s += v;
           ss += v * v;
           const double a = std::fabs(v);
-          if (a > mx) mx = a;
+          if (a > mx)
+            mx = a;
         }
   }
   gsum = all_reduce_sum(s);
@@ -119,10 +123,10 @@ int main(int argc, char** argv) {
 
   int fails = 0;
   if (me == 0) {
-    const double l2b = std::sqrt(bSumsq);                          // norme L2 du residu mono-box
-    const double dmax = std::fabs(aMax - bMax);                    // max|R| : invariant EXACT
+    const double l2b = std::sqrt(bSumsq);        // norme L2 du residu mono-box
+    const double dmax = std::fabs(aMax - bMax);  // max|R| : invariant EXACT
     const double dssq = std::fabs(aSumsq - bSumsq) / (bSumsq + 1e-300);
-    const double dsum = std::fabs(aSum - bSum);                    // somme ~0 (div periodique) -> absolu
+    const double dsum = std::fabs(aSum - bSum);  // somme ~0 (div periodique) -> absolu
     std::printf(
         "np=%d boxesK=%d | maxK=%.6e max1=%.6e dmax=%.2e | L2=%.6e dssqrel=%.2e | dsum=%.2e\n", np,
         baK.size(), aMax, bMax, dmax, l2b, dssq, dsum);

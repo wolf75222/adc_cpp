@@ -18,9 +18,9 @@
 ///
 /// NEVER apply it to a hot kernel or to a function that runs per cell / per step.
 #if defined(__clang__)
-#  define ADC_COLD_FN __attribute__((optnone))
+#define ADC_COLD_FN __attribute__((optnone))
 #elif defined(__GNUC__)
-#  define ADC_COLD_FN __attribute__((optimize("O0")))
+#define ADC_COLD_FN __attribute__((optimize("O0")))
 #else
-#  define ADC_COLD_FN
+#define ADC_COLD_FN
 #endif

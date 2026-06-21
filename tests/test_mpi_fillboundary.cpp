@@ -42,7 +42,8 @@ int main(int argc, char** argv) {
     const Box2D b = F.box();
     for (int c = 0; c < ncomp; ++c)
       for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-        for (int i = b.lo[0]; i <= b.hi[0]; ++i) F(i, j, c) = val(i, j, c);
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          F(i, j, c) = val(i, j, c);
   }
 
   fill_boundary(mf, dom, Periodicity{true, true});
@@ -54,7 +55,8 @@ int main(int argc, char** argv) {
     for (int c = 0; c < ncomp; ++c)
       for (int j = g.lo[1]; j <= g.hi[1]; ++j)
         for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-          if (std::fabs(F(i, j, c) - val(i, j, c)) > 1e-12) ++fails;
+          if (std::fabs(F(i, j, c) - val(i, j, c)) > 1e-12)
+            ++fails;
   }
 
   const long gfails = all_reduce_sum(fails);
@@ -62,8 +64,7 @@ int main(int argc, char** argv) {
     if (gfails == 0)
       std::printf("OK test_mpi_fillboundary (np=%d, boxes=%d)\n", np, ba.size());
     else
-      std::printf("FAIL test_mpi_fillboundary : %ld cellules fausses (np=%d)\n",
-                  gfails, np);
+      std::printf("FAIL test_mpi_fillboundary : %ld cellules fausses (np=%d)\n", gfails, np);
   }
   comm_finalize();
   return gfails == 0 ? 0 : 1;

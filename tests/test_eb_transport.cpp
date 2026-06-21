@@ -49,9 +49,9 @@
 
 using namespace adc;
 
-static constexpr double kL = 1.0;          // boite carree [0, L]^2
-static constexpr double kRdisc = 0.35;     // rayon du disque EB (cellules actives ET inactives)
-static constexpr double kVx = 0.7;         // vitesse de transport (div v = 0)
+static constexpr double kL = 1.0;       // boite carree [0, L]^2
+static constexpr double kRdisc = 0.35;  // rayon du disque EB (cellules actives ET inactives)
+static constexpr double kVx = 0.7;      // vitesse de transport (div v = 0)
 static constexpr double kVy = -0.4;
 
 // Advection scalaire a vitesse constante (vx, vy). Flux F = (vx u, vy u).
@@ -132,7 +132,8 @@ static double mms_error(int n, double margin) {
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       const double x = geom.x_cell(i), y = geom.y_cell(j);
       const double ls = double(disc.level_set(Real(x), Real(y)));
-      if (ls > -margin) continue;  // cellule au bord / dehors : exclue de la mesure d'ordre interieur
+      if (ls > -margin)
+        continue;  // cellule au bord / dehors : exclue de la mesure d'ordre interieur
       const double div_discrete = -double(r(i, j, 0));  // R = -div F (source nulle) -> div = -R
       const double e = std::fabs(div_discrete - mms_div_ref(x, y));
       l1 += e * dxa;
@@ -151,7 +152,8 @@ int main() {
   };
 
   std::printf("=== T5-PR2 : transport FV embedded-boundary conservatif sur disque ===\n");
-  std::printf("Boite [0, %.1f]^2, disque centre rayon %.2f, v=(%.2f, %.2f)\n", kL, kRdisc, kVx, kVy);
+  std::printf("Boite [0, %.1f]^2, disque centre rayon %.2f, v=(%.2f, %.2f)\n", kL, kRdisc, kVx,
+              kVy);
 
   // ----------------------------------------------------------------------
   // (a) MMS sur le disque : ordre 2 interieur (rapport d'erreur ~4 sous raffinement x2).
@@ -167,9 +169,11 @@ int main() {
     const double p1 = std::log2(e0 / e1);
     const double p2 = std::log2(e1 / e2);
     std::printf("  minmod L1 : n=64 %.4e  n=128 %.4e  n=256 %.4e\n", e0, e1, e2);
-    std::printf("  ordre observe : %.2f (64->128), %.2f (128->256)  (rapport e0/e1=%.2f, e1/e2=%.2f)\n",
-                p1, p2, e0 / e1, e1 / e2);
-    chk(e0 > 0.0 && e1 > 0.0 && e2 > 0.0, "(a) erreurs MMS strictement positives (mesure non vide)");
+    std::printf(
+        "  ordre observe : %.2f (64->128), %.2f (128->256)  (rapport e0/e1=%.2f, e1/e2=%.2f)\n", p1,
+        p2, e0 / e1, e1 / e2);
+    chk(e0 > 0.0 && e1 > 0.0 && e2 > 0.0,
+        "(a) erreurs MMS strictement positives (mesure non vide)");
     // Ordre 2 : rapport d'erreur ~4 (2^2). On exige p in [1.7, 2.3] sur les DEUX raffinements (la borne
     // haute exclut un ordre artificiellement gonfle ; la basse, un schema sous-convergent / une metrique
     // EB erronee qui donnerait un ordre 0 ou 1).
@@ -181,7 +185,8 @@ int main() {
   // ----------------------------------------------------------------------
   // (b) CONSERVATION de masse a la machine sur le disque (aucun flux ne franchit le mur immerge).
   // ----------------------------------------------------------------------
-  std::printf("\n--- (b) Conservation de masse EB (Sum n kappa_eff dx dy, mur no-penetration) ---\n");
+  std::printf(
+      "\n--- (b) Conservation de masse EB (Sum n kappa_eff dx dy, mur no-penetration) ---\n");
   {
     const int n = 96;
     const Box2D dom = Box2D::from_extents(n, n);
@@ -200,7 +205,8 @@ int main() {
       for (int j = g.lo[1]; j <= g.hi[1]; ++j)
         for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
           const double x = geom.x_cell(i), y = geom.y_cell(j);
-          a(i, j, 0) = 1.0 + 0.5 * std::exp(-(((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) / 0.02));
+          a(i, j, 0) =
+              1.0 + 0.5 * std::exp(-(((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) / 0.02));
         }
     }
 
@@ -217,8 +223,10 @@ int main() {
       for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
         for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
           const double x = geom.x_cell(i), y = geom.y_cell(j);
-          if (double(disc.level_set(Real(x), Real(y))) >= 0.0) continue;  // inactive : hors masse
-          detail::CutFraction cf = detail::cut_fraction(detail::disc_level_set(disc), Real(x), Real(y), Real(dx), Real(dy));
+          if (double(disc.level_set(Real(x), Real(y))) >= 0.0)
+            continue;  // inactive : hors masse
+          detail::CutFraction cf = detail::cut_fraction(detail::disc_level_set(disc), Real(x),
+                                                        Real(y), Real(dx), Real(dy));
           const double kappa_eff = std::max(double(cf.kappa), double(detail::kEbKappaMin));
           s += double(f(i, j, 0)) * kappa_eff * dx * dy;
         }
@@ -235,18 +243,23 @@ int main() {
       for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
         for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
           const double x = geom.x_cell(i), y = geom.y_cell(j);
-          if (double(disc.level_set(Real(x), Real(y))) >= 0.0) continue;
+          if (double(disc.level_set(Real(x), Real(y))) >= 0.0)
+            continue;
           ++n_active;
-          detail::CutFraction cf = detail::cut_fraction(detail::disc_level_set(disc), Real(x), Real(y), Real(dx), Real(dy));
-          if (double(cf.kappa) < 1.0 - 1e-9) ++n_cut;
+          detail::CutFraction cf = detail::cut_fraction(detail::disc_level_set(disc), Real(x),
+                                                        Real(y), Real(dx), Real(dy));
+          if (double(cf.kappa) < 1.0 - 1e-9)
+            ++n_cut;
         }
     }
     std::printf("  cellules actives=%d dont coupees (kappa<1)=%d\n", n_active, n_cut);
-    chk(n_active > 0 && n_cut > 0, "(b) le disque produit de vraies cellules coupees (test EB non vide)");
+    chk(n_active > 0 && n_cut > 0,
+        "(b) le disque produit de vraies cellules coupees (test EB non vide)");
 
     // Avance EXPLICITE Euler avant sur le residu EB : U^{n+1} = U^n + dt R_eb(U^n).
     const double v = std::hypot(kVx, kVy);
-    const double dt = 0.2 * geom.dx() / v;  // CFL transport (pas FIXE : le clamp garantit la stabilite)
+    const double dt =
+        0.2 * geom.dx() / v;  // CFL transport (pas FIXE : le clamp garantit la stabilite)
     bool any_nan = false;
     for (int s = 0; s < 60; ++s) {
       fill_ghosts(U, geom.domain, bc);
@@ -257,11 +270,14 @@ int main() {
         const ConstArray4 rr = R.fab(0).const_array();
         for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
           for (int i = dom.lo[0]; i <= dom.hi[0]; ++i)
-            if (!std::isfinite(double(rr(i, j, 0)))) any_nan = true;
+            if (!std::isfinite(double(rr(i, j, 0))))
+              any_nan = true;
       }
       saxpy(U, Real(dt), R);
     }
-    chk(!any_nan, "(b) residu FINI sur toutes les cellules (clamp small-cell : pas de NaN sur la couche r0/r1)");
+    chk(!any_nan,
+        "(b) residu FINI sur toutes les cellules (clamp small-cell : pas de NaN sur la couche "
+        "r0/r1)");
 
     const double m1 = eb_mass(U);
     const double rel_drift = std::fabs(m1 - m0) / std::fabs(m0);
@@ -269,7 +285,8 @@ int main() {
     // Conservation a la machine : la masse EB coherente avec le schema est conservee (telescopage exact
     // des flux internes, bords fermes). Borne juste au-dessus du bruit machine (accumulation 60 pas).
     chk(rel_drift < 1e-12,
-        "(b) masse EB conservee a la machine (aucun flux ne franchit le mur immerge ; drift < 1e-12)");
+        "(b) masse EB conservee a la machine (aucun flux ne franchit le mur immerge ; drift < "
+        "1e-12)");
     // Temoin que la dynamique a TOURNE (conservation non triviale) : l'etat a bouge.
     {
       device_fence();
@@ -278,10 +295,12 @@ int main() {
       for (int j = dom.lo[1]; j <= dom.hi[1]; ++j)
         for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
           const double x = geom.x_cell(i), y = geom.y_cell(j);
-          if (double(disc.level_set(Real(x), Real(y))) >= 0.0) continue;
+          if (double(disc.level_set(Real(x), Real(y))) >= 0.0)
+            continue;
           max_dev = std::max(max_dev, std::fabs(double(u(i, j, 0)) - 1.0));
         }
-      chk(max_dev > 1e-3, "(b) le transport EB a effectivement avance l'etat (conservation non triviale)");
+      chk(max_dev > 1e-3,
+          "(b) le transport EB a effectivement avance l'etat (conservation non triviale)");
     }
   }
 
@@ -310,7 +329,8 @@ int main() {
       for (int j = g.lo[1]; j <= g.hi[1]; ++j)
         for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
           const double x = geom.x_cell(i), y = geom.y_cell(j);
-          a(i, j, 0) = 1.0 + 0.5 * std::exp(-(((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) / 0.02));
+          a(i, j, 0) =
+              1.0 + 0.5 * std::exp(-(((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) / 0.02));
         }
     }
 
@@ -331,7 +351,8 @@ int main() {
     // Egalite BIT A BIT : sans coupe (alpha = 1, kappa = 1), l'EB emprunte le MEME flux/reconstruction,
     // la division par kappa = 1 et la ponderation par alpha = 1 sont l'identite -> diff EXACTEMENT 0.
     chk(max_abs_diff == 0.0,
-        "(c) sans coupe : residu EB BIT-IDENTIQUE au residu cartesien (alpha=1, kappa=1 -> identite)");
+        "(c) sans coupe : residu EB BIT-IDENTIQUE au residu cartesien (alpha=1, kappa=1 -> "
+        "identite)");
   }
 
   // ----------------------------------------------------------------------
@@ -343,7 +364,8 @@ int main() {
   //     le clamp est ACTIF et borne reellement l'amplification (assertion non vide : sans clamp le
   //     residu serait ~ (kappa_min/kappa_brut) fois plus grand).
   // ----------------------------------------------------------------------
-  std::printf("\n--- (d) Clamp small-cell : residu borne sur une cellule a kappa << kappa_min ---\n");
+  std::printf(
+      "\n--- (d) Clamp small-cell : residu borne sur une cellule a kappa << kappa_min ---\n");
   {
     const int n = 16;
     const Box2D dom = Box2D::from_extents(n, n);
@@ -398,33 +420,42 @@ int main() {
     const ConstArray4 rw = R_raw.fab(0).const_array();
     // Sur la rangee centrale coupee, le residu clampe doit etre FINI et, terme a terme, valoir
     // (kappa_raw / kappa_min) fois le residu non clampe (meme flux au numerateur, denominateur clampe).
-    const double ratio_expected = kappa_raw / double(detail::kEbKappaMin);  // < 1 : le clamp ATTENUE
+    const double ratio_expected =
+        kappa_raw / double(detail::kEbKappaMin);  // < 1 : le clamp ATTENUE
     double max_rel_err = 0.0, max_abs_clamp = 0.0, max_abs_raw = 0.0;
     bool clamp_finite = true;
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       const double vc = double(rc(i, jc, 0)), vw = double(rw(i, jc, 0));
-      if (!std::isfinite(vc)) clamp_finite = false;
+      if (!std::isfinite(vc))
+        clamp_finite = false;
       max_abs_clamp = std::max(max_abs_clamp, std::fabs(vc));
       max_abs_raw = std::max(max_abs_raw, std::fabs(vw));
-      if (std::fabs(vw) > 1e-300) {  // la, R = -(1/kappa) div ; le ratio des residus = ratio des 1/kappa
+      if (std::fabs(vw) >
+          1e-300) {  // la, R = -(1/kappa) div ; le ratio des residus = ratio des 1/kappa
         const double r = vc / vw;
         max_rel_err = std::max(max_rel_err, std::fabs(r - ratio_expected) / ratio_expected);
       }
     }
-    std::printf("  rangee coupee : max|R_clamp|=%.4e  max|R_raw|=%.4e  ratio attendu=%.4e  err rel=%.3e\n",
-                max_abs_clamp, max_abs_raw, ratio_expected, max_rel_err);
-    chk(clamp_finite, "(d) residu clampe FINI sur la rangee a kappa minuscule (pas de debordement)");
-    chk(max_abs_raw > 0.0, "(d) residu non trivial sur la rangee coupee (flux y non nul : test reel)");
+    std::printf(
+        "  rangee coupee : max|R_clamp|=%.4e  max|R_raw|=%.4e  ratio attendu=%.4e  err rel=%.3e\n",
+        max_abs_clamp, max_abs_raw, ratio_expected, max_rel_err);
+    chk(clamp_finite,
+        "(d) residu clampe FINI sur la rangee a kappa minuscule (pas de debordement)");
+    chk(max_abs_raw > 0.0,
+        "(d) residu non trivial sur la rangee coupee (flux y non nul : test reel)");
     // Le clamp ATTENUE le residu d'un facteur kappa_raw/kappa_min < 1 : R_clamp = ratio * R_raw a la
     // tolerance arithmetique. Prouve que le clamp borne l'amplification 1/kappa a 1/kappa_min (sans lui
     // le residu serait 1/ratio ~ %.0f fois plus grand -> instabilite du pas fixe).
     chk(max_rel_err < 1e-12,
-        "(d) R_clamp == (kappa_raw/kappa_min) * R_raw : le clamp borne 1/kappa a 1/kappa_min (exact)");
+        "(d) R_clamp == (kappa_raw/kappa_min) * R_raw : le clamp borne 1/kappa a 1/kappa_min "
+        "(exact)");
     chk(ratio_expected < 1.0,
-        "(d) le clamp ATTENUE bien (kappa_raw < kappa_min : amplification reduite, stabilite assuree)");
+        "(d) le clamp ATTENUE bien (kappa_raw < kappa_min : amplification reduite, stabilite "
+        "assuree)");
   }
 
   std::printf("\n=== VERDICT : %s ===\n", fails == 0 ? "SUCCESS" : "ECHEC");
-  if (fails == 0) std::printf("OK test_eb_transport\n");
+  if (fails == 0)
+    std::printf("OK test_eb_transport\n");
   return fails == 0 ? 0 : 1;
 }

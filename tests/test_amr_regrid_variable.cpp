@@ -80,12 +80,14 @@ static std::vector<double> make_state(int n, double rho, double E, int bump_comp
 static int min_fine_corner(const std::vector<PatchBox>& boxes) {
   int m = INT_MAX;
   for (const auto& b : boxes)
-    if (b.level >= 1) m = std::min(m, std::min(b.ilo, b.jlo));
+    if (b.level >= 1)
+      m = std::min(m, std::min(b.ilo, b.jlo));
   return m;
 }
 
 static bool same_boxes(const std::vector<PatchBox>& a, const std::vector<PatchBox>& b) {
-  if (a.size() != b.size()) return false;
+  if (a.size() != b.size())
+    return false;
   for (std::size_t i = 0; i < a.size(); ++i) {
     if (a[i].level != b[i].level || a[i].ilo != b[i].ilo || a[i].jlo != b[i].jlo ||
         a[i].ihi != b[i].ihi || a[i].jhi != b[i].jhi)
@@ -111,7 +113,8 @@ static std::vector<PatchBox> run_case(int N, double thr, const std::string& vari
   sim.set_refinement(thr, variable, role);
   sim.set_conservative_state("gas0", s0);
   sim.set_conservative_state("gas1", make_state(N, 1.0, 2.0, 0, 1.0, 0, 0));  // uniforme
-  for (int s = 0; s < 4; ++s) sim.step(1e-3);
+  for (int s = 0; s < 4; ++s)
+    sim.step(1e-3);
   return sim.patch_boxes();
 }
 
@@ -125,7 +128,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   // ============================================================================================
@@ -146,11 +150,16 @@ int main(int argc, char** argv) {
         "resolver_role_density_is_comp0");
     chk(detail::resolve_selected_component("set_refinement", "gas", cv, "", "momentum_x") == 1,
         "resolver_role_momentum_x_is_comp1");
-    chk(raises([&] { detail::resolve_selected_component("set_refinement", "gas", cv, "bogus", ""); }),
+    chk(raises(
+            [&] { detail::resolve_selected_component("set_refinement", "gas", cv, "bogus", ""); }),
         "resolver_unknown_name_throws");
-    chk(raises([&] { detail::resolve_selected_component("set_refinement", "gas", cv, "", "temperature"); }),
+    chk(raises([&] {
+          detail::resolve_selected_component("set_refinement", "gas", cv, "", "temperature");
+        }),
         "resolver_absent_role_throws");
-    chk(raises([&] { detail::resolve_selected_component("set_refinement", "gas", cv, "E", "energy"); }),
+    chk(raises([&] {
+          detail::resolve_selected_component("set_refinement", "gas", cv, "E", "energy");
+        }),
         "resolver_name_and_role_both_set_throws");
 
     // CAS D'ACCEPTATION CLE : densite NON situee a la composante 0. Le selecteur la retrouve par role
@@ -172,9 +181,11 @@ int main(int argc, char** argv) {
   const int N = 64;
   // Bosse d'ENERGIE en bas-gauche (boite grossiere [4, 20)^2, hors du seed central [16, 48)) ; densite
   // UNIFORME (=1). E base=2, bosse=12, seuil=6 : seule l'energie depasse, et seulement en bas-gauche.
-  const std::vector<double> s_energy = make_state(N, 1.0, 2.0, /*bump_comp=*/3, /*bump_val=*/12.0, 4, 20);
+  const std::vector<double> s_energy =
+      make_state(N, 1.0, 2.0, /*bump_comp=*/3, /*bump_val=*/12.0, 4, 20);
 
-  const std::vector<PatchBox> def = run_case(N, 6.0, "", "", s_energy);     // defaut comp 0 (densite=1<6)
+  const std::vector<PatchBox> def =
+      run_case(N, 6.0, "", "", s_energy);  // defaut comp 0 (densite=1<6)
   const std::vector<PatchBox> byrole = run_case(N, 6.0, "", "energy", s_energy);
   const std::vector<PatchBox> byname = run_case(N, 6.0, "E", "", s_energy);
 
@@ -187,7 +198,8 @@ int main(int argc, char** argv) {
 
   // NON-REGRESSION composante 0 : sur une bosse de DENSITE (comp 0) en bas-gauche, le selecteur par
   // defaut raffine bien la densite (le chemin historique reste fonctionnel).
-  const std::vector<double> s_density = make_state(N, 1.0, 2.0, /*bump_comp=*/0, /*bump_val=*/3.0, 4, 20);
+  const std::vector<double> s_density =
+      make_state(N, 1.0, 2.0, /*bump_comp=*/0, /*bump_val=*/3.0, 4, 20);
   const std::vector<PatchBox> dens_def = run_case(N, 2.0, "", "", s_density);
   chk(min_fine_corner(dens_def) < 32, "default_still_refines_on_density_comp0");
 

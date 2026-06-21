@@ -7,7 +7,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/numerics/elliptic/poisson_operator.hpp>  // apply_laplacian (Lap phi^n)
-#include <adc/numerics/lorentz_eliminator.hpp>          // closed 2x2 B^{-1}
+#include <adc/numerics/lorentz_eliminator.hpp>         // closed 2x2 B^{-1}
 
 #include <stdexcept>
 
@@ -65,21 +65,21 @@ namespace detail {
 ///   c_rho: component of the Density role in the state;
 ///   c: theta^2 dt^2 alpha; th_dt: theta dt (for w = theta dt B_z).
 struct SchurOperatorCoeffKernel {
-  ConstArray4 s;     ///< fluid state
-  ConstArray4 bz;    ///< B_z field at the center
-  Array4 ex, ey;     ///< output: eps_x, eps_y (diagonal of A)
-  Array4 axy, ayx;   ///< output: cross terms a_xy, a_yx
-  Real c;            ///< c = theta^2 dt^2 alpha
-  Real th_dt;        ///< theta * dt (for LorentzEliminator: w = th_dt * B_z, and binv depends only on w)
-  int c_rho;         ///< Density component
+  ConstArray4 s;    ///< fluid state
+  ConstArray4 bz;   ///< B_z field at the center
+  Array4 ex, ey;    ///< output: eps_x, eps_y (diagonal of A)
+  Array4 axy, ayx;  ///< output: cross terms a_xy, a_yx
+  Real c;           ///< c = theta^2 dt^2 alpha
+  Real th_dt;  ///< theta * dt (for LorentzEliminator: w = th_dt * B_z, and binv depends only on w)
+  int c_rho;   ///< Density component
   ADC_HD void operator()(int i, int j) const {
     const Real rho = s(i, j, c_rho);
     // Closed B^{-1} (2x2 rotation-dilation): only w = theta dt B_z enters binv. We reconstruct
     // the eliminator via (theta=th_dt, dt=1, B_z) to obtain w = th_dt * B_z (same binv).
     const LorentzEliminator le(th_dt, Real(1), bz(i, j, 0));
     const Real cr = c * rho;  // c rho: common factor of the 4 entries of A - I
-    ex(i, j, 0)  = Real(1) + cr * le.binv_11();
-    ey(i, j, 0)  = Real(1) + cr * le.binv_22();
+    ex(i, j, 0) = Real(1) + cr * le.binv_11();
+    ey(i, j, 0) = Real(1) + cr * le.binv_22();
     axy(i, j, 0) = cr * le.binv_12();
     ayx(i, j, 0) = cr * le.binv_21();
   }
@@ -89,11 +89,11 @@ struct SchurOperatorCoeffKernel {
 /// rho B^{-1} v = B^{-1} (rho v) = B^{-1} (mx, my): we apply B^{-1} DIRECTLY to the momentum
 /// (mx, my), which avoids the division by rho (and its rho=0 case). Device-clean NAMED functor.
 struct SchurExplicitFluxKernel {
-  ConstArray4 s;     ///< fluid state (mx, my read at components c_mx, c_my)
-  ConstArray4 bz;    ///< B_z field at the center
-  Array4 fx, fy;     ///< output: components of the flux F = B^{-1} (mx, my)
-  Real th_dt;        ///< theta * dt (w = th_dt * B_z)
-  int c_mx, c_my;    ///< MomentumX / MomentumY components
+  ConstArray4 s;   ///< fluid state (mx, my read at components c_mx, c_my)
+  ConstArray4 bz;  ///< B_z field at the center
+  Array4 fx, fy;   ///< output: components of the flux F = B^{-1} (mx, my)
+  Real th_dt;      ///< theta * dt (w = th_dt * B_z)
+  int c_mx, c_my;  ///< MomentumX / MomentumY components
   ADC_HD void operator()(int i, int j) const {
     const LorentzEliminator le(th_dt, Real(1), bz(i, j, 0));
     Real Fx, Fy;
@@ -106,10 +106,10 @@ struct SchurExplicitFluxKernel {
 /// rhs(i,j) = lap(i,j) (= -Lap phi^n, already negated by the caller) - g * div F, second-order centered
 /// divergence of a flux F at the center (fx, fy, ghosts filled). g = theta dt alpha. Device-clean NAMED functor.
 struct SchurRhsAssembleKernel {
-  ConstArray4 neg_lap;  ///< -Lap phi^n (already negated)
-  ConstArray4 fx, fy;   ///< flux F at the center (ghosts filled)
-  Array4 rhs;           ///< output: condensed right-hand side
-  Real g;               ///< theta dt alpha
+  ConstArray4 neg_lap;      ///< -Lap phi^n (already negated)
+  ConstArray4 fx, fy;       ///< flux F at the center (ghosts filled)
+  Array4 rhs;               ///< output: condensed right-hand side
+  Real g;                   ///< theta dt alpha
   Real half_idx, half_idy;  ///< 1/(2 dx), 1/(2 dy)
   ADC_HD void operator()(int i, int j) const {
     const Real divF = (fx(i + 1, j, 0) - fx(i - 1, j, 0)) * half_idx +
@@ -157,7 +157,9 @@ class ElectrostaticLorentzCondensation {
       : c_rho_(vars.index_of(VariableRole::Density)),
         c_mx_(vars.index_of(VariableRole::MomentumX)),
         c_my_(vars.index_of(VariableRole::MomentumY)),
-        alpha_(alpha), theta_(theta), dt_(dt) {
+        alpha_(alpha),
+        theta_(theta),
+        dt_(dt) {
     if (c_rho_ < 0 || c_mx_ < 0 || c_my_ < 0)
       throw std::runtime_error(
           "ElectrostaticLorentzCondensation: the fluid block must expose the roles Density, "
@@ -210,7 +212,8 @@ class ElectrostaticLorentzCondensation {
   void assemble_rhs(MultiFab& phi_n, const MultiFab& state, const MultiFab& bz,
                     const Geometry& geom, const BCRec& bc, MultiFab& rhs) const {
     const Real th_dt = theta_ * dt_;
-    const Real g = theta_ * dt_ * alpha_;  // theta dt alpha (coefficient of the div(rho B^{-1} v) term)
+    const Real g =
+        theta_ * dt_ * alpha_;  // theta dt alpha (coefficient of the div(rho B^{-1} v) term)
     const BoxArray& ba = rhs.box_array();
     const DistributionMapping& dm = rhs.dmap();
 
@@ -230,8 +233,9 @@ class ElectrostaticLorentzCondensation {
     for (int li = 0; li < state.local_size(); ++li) {
       const ConstArray4 s = state.fab(li).const_array();
       const ConstArray4 b = bz.fab(li).const_array();
-      for_each_cell(fx.box(li), detail::SchurExplicitFluxKernel{
-                                    s, b, fx.fab(li).array(), fy.fab(li).array(), th_dt, c_mx_, c_my_});
+      for_each_cell(fx.box(li),
+                    detail::SchurExplicitFluxKernel{s, b, fx.fab(li).array(), fy.fab(li).array(),
+                                                    th_dt, c_mx_, c_my_});
     }
     // ghosts of F: the centered divergence reads Fx(i+-1), Fy(j+-1) (box boundary AND physical boundary).
     const BCRec ebc = coeff_bc(bc);
@@ -242,10 +246,10 @@ class ElectrostaticLorentzCondensation {
     const Real half_idx = Real(1) / (Real(2) * geom.dx());
     const Real half_idy = Real(1) / (Real(2) * geom.dy());
     for (int li = 0; li < rhs.local_size(); ++li)
-      for_each_cell(rhs.box(li), detail::SchurRhsAssembleKernel{
-                                     neg_lap.fab(li).const_array(), fx.fab(li).const_array(),
-                                     fy.fab(li).const_array(), rhs.fab(li).array(), g, half_idx,
-                                     half_idy});
+      for_each_cell(rhs.box(li),
+                    detail::SchurRhsAssembleKernel{
+                        neg_lap.fab(li).const_array(), fx.fab(li).const_array(),
+                        fy.fab(li).const_array(), rhs.fab(li).array(), g, half_idx, half_idy});
   }
 
   /// COMPLETE assembly (operator + RHS) into one SchurCondensationOperator object allocated on the layout of
@@ -270,8 +274,10 @@ class ElectrostaticLorentzCondensation {
   static BCRec coeff_bc(const BCRec& bc) {
     auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
     BCRec b;
-    b.xlo = fo(bc.xlo); b.xhi = fo(bc.xhi);
-    b.ylo = fo(bc.ylo); b.yhi = fo(bc.yhi);
+    b.xlo = fo(bc.xlo);
+    b.xhi = fo(bc.xhi);
+    b.ylo = fo(bc.ylo);
+    b.yhi = fo(bc.yhi);
     return b;
   }
 

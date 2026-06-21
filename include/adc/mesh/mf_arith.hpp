@@ -41,9 +41,7 @@ struct LincombKernel {
   ConstArray4 X, Y;
   Real a, b;
   int c;
-  ADC_HD void operator()(int i, int j) const {
-    Z(i, j, c) = a * X(i, j, c) + b * Y(i, j, c);
-  }
+  ADC_HD void operator()(int i, int j) const { Z(i, j, c) = a * X(i, j, c) + b * Y(i, j, c); }
 };
 
 // Reducer |f(i,j,comp)| -> max, passed DIRECTLY to reduce_max_cell (no wrapping extended
@@ -56,7 +54,8 @@ struct NormInfKernel {
   ADC_HD void operator()(int i, int j, Real& acc) const {
     const Real v = a(i, j, comp);
     const Real av = v < 0 ? -v : v;
-    if (av > acc) acc = av;
+    if (av > acc)
+      acc = av;
   }
 };
 
@@ -66,9 +65,7 @@ struct NormInfKernel {
 struct DotKernel {
   ConstArray4 x, y;
   int comp;
-  ADC_HD void operator()(int i, int j, Real& acc) const {
-    acc += x(i, j, comp) * y(i, j, comp);
-  }
+  ADC_HD void operator()(int i, int j, Real& acc) const { acc += x(i, j, comp) * y(i, j, comp); }
 };
 }  // namespace detail
 
@@ -104,8 +101,7 @@ inline Real norm_inf(const MultiFab& mf, int comp = 0) {
 }
 
 /// z <- a x + b y over ALL components of the valid cells. Identical layouts; aliasing safe.
-inline void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b,
-                    const MultiFab& y) {
+inline void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b, const MultiFab& y) {
   const int nc = z.ncomp();
   for (int li = 0; li < z.local_size(); ++li) {
     Array4 Z = z.fab(li).array();

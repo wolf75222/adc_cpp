@@ -22,7 +22,7 @@
 // chemin du remap jusqu'ici non couvert) -- toutes deux machine-zero sous np = 1/2/4.
 
 #include <adc/numerics/elliptic/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
-#include <adc/mesh/geometry.hpp>                          // Geometry, Box2D
+#include <adc/mesh/geometry.hpp>                         // Geometry, Box2D
 #include <adc/physics/composite.hpp>
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity
 #include <adc/physics/source.hpp>      // NoSource
@@ -74,10 +74,13 @@ static double remap_residual(int N) {
 // Bloc de CHARGE : alimente le second membre du Poisson (elliptic_rhs = densite de charge q n).
 struct ChargeEll {
   template <class State>
-  ADC_HD Real rhs(const State& u) const { return u[0]; }  // rho = comp 0
+  ADC_HD Real rhs(const State& u) const {
+    return u[0];
+  }  // rho = comp 0
 };
 
-using ProbeModel = CompositeModel<ExBVelocity, NoSource, ChargeEll>;  // transporte + charge le Poisson
+using ProbeModel =
+    CompositeModel<ExBVelocity, NoSource, ChargeEll>;  // transporte + charge le Poisson
 
 // Construit le probleme (charge a moyenne nulle pour le Poisson periodique soluble) et cable "fft".
 // Le rang proprietaire (0) ecrit la densite. Renvoie le System pret a solve_fields().
@@ -88,7 +91,8 @@ static void build_problem(System& sys, int n, bool owns) {
     const std::size_t nn = static_cast<std::size_t>(n) * n;
     std::vector<double> q(nn, 0.0);  // charge a moyenne nulle : +1 gauche, -1 droite (somme = 0)
     for (int j = 0; j < n; ++j)
-      for (int i = 0; i < n; ++i) q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
+      for (int i = 0; i < n; ++i)
+        q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
     sys.set_density("probe", q);
   }
 }
@@ -102,7 +106,10 @@ int main(int argc, char** argv) {
 
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("[rank %d/%d] FAIL %s\n", me, np, w); ++fails; }
+    if (!c) {
+      std::printf("[rank %d/%d] FAIL %s\n", me, np, w);
+      ++fails;
+    }
   };
 
   // RemappedFFTSolver residual() machine-zero (ADC-316). Le solveur "fft" sous MPI est
@@ -113,7 +120,8 @@ int main(int argc, char** argv) {
   // n_ranks()) ; 12 = 2^2 * 3 valide np = 1/2/4.
   for (int Nr : {16, 12}) {
     if (Nr % np != 0) {
-      if (me == 0) std::printf("[rank 0/%d] SKIP remap residual N=%d (non divisible par np)\n", np, Nr);
+      if (me == 0)
+        std::printf("[rank 0/%d] SKIP remap residual N=%d (non divisible par np)\n", np, Nr);
       continue;
     }
     const double res = remap_residual(Nr);
@@ -151,7 +159,8 @@ int main(int argc, char** argv) {
     double maxabs = 0;
     bool finite = true;
     for (double v : phi) {
-      if (!std::isfinite(v)) finite = false;
+      if (!std::isfinite(v))
+        finite = false;
       maxabs = std::fmax(maxabs, std::fabs(v));
     }
     chk(finite, "np1_potential_finite");
@@ -165,14 +174,18 @@ int main(int argc, char** argv) {
     ref.set_poisson("composite", "geometric_mg");
     std::vector<double> q(nn, 0.0);
     for (int j = 0; j < n; ++j)
-      for (int i = 0; i < n; ++i) q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
+      for (int i = 0; i < n; ++i)
+        q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
     ref.set_density("probe", q);
     ref.solve_fields();
     const std::vector<double> phi_ref = ref.potential();
     chk(phi_ref.size() == nn, "np1_ref_size");
 
     double mean_fft = 0, mean_ref = 0;
-    for (std::size_t k = 0; k < nn; ++k) { mean_fft += phi[k]; mean_ref += phi_ref[k]; }
+    for (std::size_t k = 0; k < nn; ++k) {
+      mean_fft += phi[k];
+      mean_ref += phi_ref[k];
+    }
     mean_fft /= static_cast<double>(nn);
     mean_ref /= static_cast<double>(nn);
     double linf = 0, ampl = 0;
@@ -212,7 +225,8 @@ int main(int argc, char** argv) {
     double maxabs = 0;
     bool finite = true;
     for (double v : phi) {
-      if (!std::isfinite(v)) finite = false;
+      if (!std::isfinite(v))
+        finite = false;
       maxabs = std::fmax(maxabs, std::fabs(v));
     }
     chk(finite, "npN_potential_finite");
@@ -227,7 +241,8 @@ int main(int argc, char** argv) {
     if (owns) {
       std::vector<double> q(nn, 0.0);
       for (int j = 0; j < n; ++j)
-        for (int i = 0; i < n; ++i) q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
+        for (int i = 0; i < n; ++i)
+          q[static_cast<std::size_t>(j) * n + i] = (i < n / 2) ? 1.0 : -1.0;
       ref.set_density("probe", q);
     }
     ref.solve_fields();
@@ -235,7 +250,10 @@ int main(int argc, char** argv) {
     chk(phi_ref.size() == nn, "npN_ref_size");
 
     double mean_fft = 0, mean_ref = 0;
-    for (std::size_t k = 0; k < nn; ++k) { mean_fft += phi[k]; mean_ref += phi_ref[k]; }
+    for (std::size_t k = 0; k < nn; ++k) {
+      mean_fft += phi[k];
+      mean_ref += phi_ref[k];
+    }
     mean_fft /= static_cast<double>(nn);
     mean_ref /= static_cast<double>(nn);
     double linf = 0, ampl = 0;

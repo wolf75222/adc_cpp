@@ -90,9 +90,10 @@
 // test_amr_native_loader). A literal crosses no symbol: no interposition.
 // NB: the parsers (dsl._adc_cxx_std_from_module / module_header_signature) scan by token prefix
 // ("std=", "headers=") -> insensitive to ADDING tokens at the tail.
-#define ADC_ABI_KEY_LITERAL                                                          \
+#define ADC_ABI_KEY_LITERAL                                                                \
   "compiler=" ADC_ABI_COMPILER ";std=" ADC_ABI_STR(__cplusplus) ";headers=" ADC_HEADER_SIG \
-  ";kokkos=" ADC_ABI_KOKKOS ";stdlib=" ADC_ABI_STDLIB
+                                                                ";kokkos=" ADC_ABI_KOKKOS  \
+                                                                ";stdlib=" ADC_ABI_STDLIB
 
 namespace adc {
 namespace detail {
@@ -100,7 +101,9 @@ namespace detail {
 /// ABI key of the current TU (cf. ADC_ABI_KEY_LITERAL). Kept for the MODULE side
 /// (out-of-line abi_key() in system.cpp); a generated LOADER must return ADC_ABI_KEY_LITERAL
 /// directly (literal local to its TU, insensitive to ELF interposition -- cf. above).
-inline std::string abi_key_string() { return ADC_ABI_KEY_LITERAL; }
+inline std::string abi_key_string() {
+  return ADC_ABI_KEY_LITERAL;
+}
 
 }  // namespace detail
 

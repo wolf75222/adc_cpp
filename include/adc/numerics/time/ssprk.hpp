@@ -21,8 +21,8 @@
 namespace adc {
 
 template <class Limiter = NoSlope, class NumericalFlux = RusanovFlux, class Model>
-void advance_ssprk2(const Model& model, MultiFab& U, const MultiFab& aux,
-                    const Geometry& geom, const BCRec& bc, Real dt) {
+void advance_ssprk2(const Model& model, MultiFab& U, const MultiFab& aux, const Geometry& geom,
+                    const BCRec& bc, Real dt) {
   SSPRK2Step{}.take_step(
       [&](MultiFab& stage, MultiFab& R) {
         fill_ghosts(stage, geom.domain, bc);

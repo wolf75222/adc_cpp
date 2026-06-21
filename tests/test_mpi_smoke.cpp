@@ -32,7 +32,8 @@ int main(int argc, char** argv) {
   const double expect = double(ba.num_cells());
   if (std::fabs(s - expect) > 1e-9) {
     ++fails;
-    if (me == 0) std::printf("FAIL sum %.1f != %.1f\n", s, expect);
+    if (me == 0)
+      std::printf("FAIL sum %.1f != %.1f\n", s, expect);
   }
 
   // 2. la somme des fabs locaux sur tous les rangs = nombre total de boxes
@@ -53,8 +54,7 @@ int main(int argc, char** argv) {
   // 4. equilibrage raisonnable (64 boxes egales)
   if (me == 0) {
     const double imb = load_imbalance(ba, dm, np);
-    std::printf("np=%d  boxes=%d  somme=%.0f  imbalance=%.3f\n", np, ba.size(),
-                s, imb);
+    std::printf("np=%d  boxes=%d  somme=%.0f  imbalance=%.3f\n", np, ba.size(), s, imb);
     if (imb > 1.2) {
       ++fails;
       std::printf("FAIL imbalance %.3f > 1.2\n", imb);
@@ -62,7 +62,8 @@ int main(int argc, char** argv) {
   }
 
   const long gfails = all_reduce_sum(fails);
-  if (me == 0 && gfails == 0) std::printf("OK test_mpi_smoke (np=%d)\n", np);
+  if (me == 0 && gfails == 0)
+    std::printf("OK test_mpi_smoke (np=%d)\n", np);
   comm_finalize();
   return gfails == 0 ? 0 : 1;
 }

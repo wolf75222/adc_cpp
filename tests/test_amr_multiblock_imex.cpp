@@ -31,11 +31,11 @@
 // AmrRuntime + build_amr_block, EXACTEMENT comme test_amr_multiblock_substeps (acces niveaux/masses).
 // La FACADE (4)(5) passe par AmrSystem (modeles ModelSpec : exb, potential).
 
-#include <adc/physics/bricks.hpp>          // CompositeModel, Euler, BackgroundDensity, ChargeDensity, PotentialForce
-#include <adc/runtime/amr_dsl_block.hpp>   // detail::make_shared_amr_layout / build_amr_block / dispatch_amr_block
-#include <adc/runtime/amr_runtime.hpp>     // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/amr_system.hpp>      // facade AmrSystem
-#include <adc/runtime/model_factory.hpp>   // detail::dispatch_model
+#include <adc/physics/bricks.hpp>  // CompositeModel, Euler, BackgroundDensity, ChargeDensity, PotentialForce
+#include <adc/runtime/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / build_amr_block / dispatch_amr_block
+#include <adc/runtime/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <adc/runtime/amr_system.hpp>     // facade AmrSystem
+#include <adc/runtime/model_factory.hpp>  // detail::dispatch_model
 #include <adc/runtime/model_spec.hpp>
 
 #include <cmath>
@@ -66,9 +66,12 @@ struct StiffMomentumRelax {
   ADC_HD State apply(const State& u, const Aux&) const {
     State s{};
     // s[0] (densite) = 0 : la source ne cree/detruit PAS de masse -> conservation a la machine.
-    if (State::size() > 1) s[1] = -inv_eps * u[1];          // -mx / eps
-    if (State::size() > 2) s[2] = -inv_eps * u[2];          // -my / eps
-    if (State::size() > 3) s[3] = -inv_eps * (u[3] - e_eq); // -(E - E_eq) / eps
+    if (State::size() > 1)
+      s[1] = -inv_eps * u[1];  // -mx / eps
+    if (State::size() > 2)
+      s[2] = -inv_eps * u[2];  // -my / eps
+    if (State::size() > 3)
+      s[3] = -inv_eps * (u[3] - e_eq);  // -(E - E_eq) / eps
     return s;
   }
 };
@@ -86,7 +89,8 @@ StiffModel make_stiff(double eps) {
 // on prend un Euler 4 var a source nulle, MEME nombre de variables que le bloc raide (layout coherent).
 using NeutralModel = CompositeModel<Euler, NoSource, BackgroundDensity>;
 NeutralModel make_neutral() {
-  return NeutralModel{Euler{static_cast<Real>(kGamma)}, NoSource{}, BackgroundDensity{Real(0), Real(0)}};
+  return NeutralModel{Euler{static_cast<Real>(kGamma)}, NoSource{},
+                      BackgroundDensity{Real(0), Real(0)}};
 }
 
 // densite + impulsion initiales : une bulle de densite avec une impulsion non nulle (pour que la source
@@ -105,18 +109,21 @@ std::vector<double> bubble(int n) {
 
 bool all_finite(const std::vector<double>& v) {
   for (double x : v)
-    if (!std::isfinite(x)) return false;
+    if (!std::isfinite(x))
+      return false;
   return true;
 }
 double maxabs(const std::vector<double>& v) {
   double m = 0;
-  for (double x : v) m = std::fmax(m, std::fabs(x));
+  for (double x : v)
+    m = std::fmax(m, std::fabs(x));
   return m;
 }
 double dmax_field(const std::vector<double>& a, const std::vector<double>& b) {
   double d = 0;
   const std::size_t nn = a.size() < b.size() ? a.size() : b.size();
-  for (std::size_t i = 0; i < nn; ++i) d = std::fmax(d, std::fabs(a[i] - b[i]));
+  for (std::size_t i = 0; i < nn; ++i)
+    d = std::fmax(d, std::fabs(a[i] - b[i]));
   return d;
 }
 
@@ -131,8 +138,8 @@ AmrRuntime make_stiff_pair(int N, double L, double eps, bool imex_stiff,
   AmrBuildParams bp;
   bp.n = N;
   bp.L = L;
-  bp.regrid_every = 0;       // hierarchie figee (multi-blocs)
-  bp.poisson_bc = BCRec{};   // periodique
+  bp.regrid_every = 0;      // hierarchie figee (multi-blocs)
+  bp.poisson_bc = BCRec{};  // periodique
   const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
   std::vector<AmrRuntimeBlock> blocks;
   // bloc A : raide, traitement imex_stiff (true = IMEX, false = explicite : disable-and-fail).
@@ -166,7 +173,8 @@ double max_momentum_energy_coarse(AmrRuntime& rt, std::size_t b, bool& finite) {
       for (int i = box.lo[0]; i <= box.hi[0]; ++i)
         for (int c = 1; c <= 3; ++c) {
           const double v = static_cast<double>(a(i, j, c));
-          if (!std::isfinite(v)) finite = false;
+          if (!std::isfinite(v))
+            finite = false;
           m = std::fmax(m, std::fabs(v));
         }
   }
@@ -215,7 +223,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
     std::printf("  [%s] %s\n", c ? "OK " : "XX ", w);
-    if (!c) ++fails;
+    if (!c)
+      ++fails;
   };
 
   const int N = 32;
@@ -232,9 +241,10 @@ int main(int argc, char** argv) {
   // (1) IMEX : bloc raide STABLE (fini + borne) sur 2 niveaux.
   {
     AmrRuntime rt = make_stiff_pair(N, L, eps, /*imex_stiff=*/true, rho);
-    const Real m0 = rt.mass(0);            // masse du bloc raide AVANT (sur le grossier, cascade incluse)
+    const Real m0 = rt.mass(0);  // masse du bloc raide AVANT (sur le grossier, cascade incluse)
     chk(rt.nlev() == 2, "imex_two_levels_present");  // un patch fin existe (couverture exercee)
-    for (int s = 0; s < K; ++s) rt.step(static_cast<Real>(dt));
+    for (int s = 0; s < K; ++s)
+      rt.step(static_cast<Real>(dt));
     const std::vector<double> dStiff = rt.density(0);
     const std::vector<double> dNeutral = rt.density(1);
     const Real m1 = rt.mass(0);
@@ -250,11 +260,12 @@ int main(int argc, char** argv) {
     chk(me_finite, "imex_stiff_momentum_energy_finite_DIRECT");
     chk(me_max < 1e3, "imex_stiff_momentum_energy_bounded_DIRECT");
     // (2) CONSERVATION : la source raide ne touche pas la densite (comp 0) -> masse conservee ~machine.
-    const double drift = std::fabs(static_cast<double>(m1 - m0)) /
-                         (std::fabs(static_cast<double>(m0)) + 1e-30);
+    const double drift =
+        std::fabs(static_cast<double>(m1 - m0)) / (std::fabs(static_cast<double>(m0)) + 1e-30);
     chk(drift < 1e-12, "imex_stiff_mass_conserved_to_machine");
-    std::printf("      IMEX : max(rho)=%.3e, max|mx,my,E|=%.3e, derive de masse=%.3e (eps=%.0e, dt=%.0e)\n",
-                maxabs(dStiff), me_max, drift, eps, dt);
+    std::printf(
+        "      IMEX : max(rho)=%.3e, max|mx,my,E|=%.3e, derive de masse=%.3e (eps=%.0e, dt=%.0e)\n",
+        maxabs(dStiff), me_max, drift, eps, dt);
   }
 
   // (3) DISABLE-AND-FAIL : MEME bloc raide en EXPLICITE -> EXPLOSE. Prouve que la selection IMEX de (1)
@@ -262,7 +273,8 @@ int main(int argc, char** argv) {
   //     STIFFENE (mx/my/E directement, comp 1/2/3), la ou la source agit, pas seulement sur la densite.
   {
     AmrRuntime rt = make_stiff_pair(N, L, eps, /*imex_stiff=*/false, rho);
-    for (int s = 0; s < K; ++s) rt.step(static_cast<Real>(dt));
+    for (int s = 0; s < K; ++s)
+      rt.step(static_cast<Real>(dt));
     const std::vector<double> dStiff = rt.density(0);
     bool me_finite = false;
     const double me_max = max_momentum_energy_coarse(rt, 0, me_finite);
@@ -270,7 +282,8 @@ int main(int argc, char** argv) {
     // critere densite (contamination par le transport) pour la lisibilite du diagnostic.
     const bool me_blew_up = !me_finite || me_max > 1e3;
     const bool rho_blew_up = !all_finite(dStiff) || maxabs(dStiff) > 1e3;
-    chk(me_blew_up, "explicit_stiff_momentum_energy_BLOWS_UP_DIRECT (disable-and-fail sur mx/my/E)");
+    chk(me_blew_up,
+        "explicit_stiff_momentum_energy_BLOWS_UP_DIRECT (disable-and-fail sur mx/my/E)");
     chk(rho_blew_up, "explicit_stiff_BLOWS_UP (disable-and-fail : IMEX genuinement requis)");
     std::printf("      EXPLICITE : mx/my/E %s, rho %s (la stabilite vient bien du pas implicite)\n",
                 me_finite ? "borne >> 1" : "NON FINI (explose)",
@@ -291,7 +304,8 @@ int main(int argc, char** argv) {
     // substeps=1 : reference (un seul pas de Lie par macro-pas).
     AmrRuntime rt1 = make_stiff_pair(N, L, eps, /*imex_stiff=*/true, rho, /*substeps=*/1);
     const Real m0_1 = rt1.mass(0);
-    for (int s = 0; s < K; ++s) rt1.step(static_cast<Real>(dt));
+    for (int s = 0; s < K; ++s)
+      rt1.step(static_cast<Real>(dt));
     const std::vector<double> d1 = rt1.density(0);
     const double drift1 = std::fabs(static_cast<double>(rt1.mass(0) - m0_1)) /
                           (std::fabs(static_cast<double>(m0_1)) + 1e-30);
@@ -299,7 +313,8 @@ int main(int argc, char** argv) {
     // substeps=4 : meme eps/dt/macro-pas, mais le moteur SOUS-CYCLE le splitting IMEX en 4 pas de dt/4.
     AmrRuntime rt4 = make_stiff_pair(N, L, eps, /*imex_stiff=*/true, rho, /*substeps=*/4);
     const Real m0_4 = rt4.mass(0);
-    for (int s = 0; s < K; ++s) rt4.step(static_cast<Real>(dt));
+    for (int s = 0; s < K; ++s)
+      rt4.step(static_cast<Real>(dt));
     const std::vector<double> d4 = rt4.density(0);
     bool me4_finite = false;
     const double me4_max = max_momentum_energy_coarse(rt4, 0, me4_finite);
@@ -315,8 +330,10 @@ int main(int argc, char** argv) {
     // (d) VERROU : substeps=4 DIFFERE de substeps=1 -> le sous-cyclage IMEX est intentionnel et execute.
     const double d14 = dmax_field(d1, d4);
     chk(d14 > 0.0, "imex_subcycled_s4_DIFFERS_from_s1 (sous-cyclage assume, pas ignore)");
-    std::printf("      IMEX substeps : s1 (derive=%.2e) vs s4 (max|mx,my,E|=%.3e, derive=%.2e), "
-                "dmax(rho)=%.3e\n", drift1, me4_max, drift4, d14);
+    std::printf(
+        "      IMEX substeps : s1 (derive=%.2e) vs s4 (max|mx,my,E|=%.3e, derive=%.2e), "
+        "dmax(rho)=%.3e\n",
+        drift1, me4_max, drift4, d14);
   }
 
   // ============================================================================================
@@ -327,7 +344,8 @@ int main(int argc, char** argv) {
     auto run_all_explicit = [&]() {
       // regime NON raide (eps modere) : explicite NE diverge pas, et les deux blocs sont explicites.
       AmrRuntime rt = make_stiff_pair(N, L, /*eps=*/1.0, /*imex_stiff=*/false, rho);
-      for (int s = 0; s < 5; ++s) rt.step(static_cast<Real>(1e-3));
+      for (int s = 0; s < 5; ++s)
+        rt.step(static_cast<Real>(1e-3));
       return rt.density(0);
     };
     const std::vector<double> a = run_all_explicit();
@@ -354,7 +372,8 @@ int main(int argc, char** argv) {
     sim.set_poisson("charge_density", "geometric_mg", "periodic");
     sim.set_density("A", bump(N, 1.0, 0.40));
     sim.set_density("B", bump(N, 1.0, 0.20));
-    for (int s = 0; s < 6; ++s) sim.step(5e-3);
+    for (int s = 0; s < 6; ++s)
+      sim.step(5e-3);
     chk(sim.n_blocks() == 2, "facade_two_blocks");
     chk(all_finite(sim.density("A")) && all_finite(sim.density("B")),
         "facade_multiblock_imex_runs_finite");
@@ -385,7 +404,8 @@ int main(int argc, char** argv) {
       s3.set_density("B", bump(N, 1.0, 0.20));
       bool ok = false;
       try {
-        for (int s = 0; s < 4; ++s) s3.step(5e-3);
+        for (int s = 0; s < 4; ++s)
+          s3.step(5e-3);
         ok = all_finite(s3.density("A"));
       } catch (const std::exception& e) {
         std::printf("      (5c) masque partiel a leve : %s\n", e.what());

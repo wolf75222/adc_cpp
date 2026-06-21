@@ -47,7 +47,8 @@ inline Box2D tag_bbox(const TagBox& tb, const Box2D& region) {
         lo1 = std::min(lo1, j);
         hi1 = std::max(hi1, j);
       }
-  if (hi0 < lo0) return Box2D{{0, 0}, {-1, -1}};  // empty
+  if (hi0 < lo0)
+    return Box2D{{0, 0}, {-1, -1}};  // empty
   return Box2D{{lo0, lo1}, {hi0, hi1}};
 }
 
@@ -55,7 +56,8 @@ inline Box2D tag_bbox(const TagBox& tb, const Box2D& region) {
 inline long count_in(const TagBox& tb, const Box2D& r) {
   long c = 0;
   for (int j = r.lo[1]; j <= r.hi[1]; ++j)
-    for (int i = r.lo[0]; i <= r.hi[0]; ++i) c += tb(i, j);
+    for (int i = r.lo[0]; i <= r.hi[0]; ++i)
+      c += tb(i, j);
   return c;
 }
 
@@ -65,7 +67,8 @@ inline std::vector<long> signature(const TagBox& tb, const Box2D& r, int axis) {
   std::vector<long> s(len, 0);
   for (int j = r.lo[1]; j <= r.hi[1]; ++j)
     for (int i = r.lo[0]; i <= r.hi[0]; ++i)
-      if (tb(i, j)) s[(axis == 0) ? (i - r.lo[0]) : (j - r.lo[1])] += 1;
+      if (tb(i, j))
+        s[(axis == 0) ? (i - r.lo[0]) : (j - r.lo[1])] += 1;
   return s;
 }
 
@@ -89,9 +92,11 @@ inline int best_hole(const std::vector<long>& s, int mb) {
 inline int best_inflection(const std::vector<long>& s, int mb, long& score) {
   const int len = static_cast<int>(s.size());
   score = 0;
-  if (len < 3) return -1;
+  if (len < 3)
+    return -1;
   std::vector<long> D(len, 0);
-  for (int k = 1; k < len - 1; ++k) D[k] = s[k + 1] - 2 * s[k] + s[k - 1];
+  for (int k = 1; k < len - 1; ++k)
+    D[k] = s[k + 1] - 2 * s[k] + s[k - 1];
   int best = -1;
   const int klo = std::max(mb, 2), khi = std::min(len - mb, len - 2);
   for (int k = klo; k <= khi; ++k) {
@@ -110,7 +115,8 @@ inline int best_inflection(const std::vector<long>& s, int mb, long& score) {
 inline void cluster_rec(const TagBox& tb, Box2D region, const ClusterParams& p,
                         std::vector<Box2D>& out) {
   region = tag_bbox(tb, region);
-  if (region.empty()) return;
+  if (region.empty())
+    return;
 
   const long ntag = count_in(tb, region);
   const double eff = double(ntag) / double(region.num_cells());
@@ -176,14 +182,14 @@ inline void cluster_rec(const TagBox& tb, Box2D region, const ClusterParams& p,
 /// @param tags tag grid to cover (index space of tags.box).
 /// @param p parameters (target efficiency, min/max box sizes).
 /// @return boxes in the index space of tags.box, each of size <= p.max_box_size.
-inline std::vector<Box2D> berger_rigoutsos(const TagBox& tags,
-                                           const ClusterParams& p = {}) {
+inline std::vector<Box2D> berger_rigoutsos(const TagBox& tags, const ClusterParams& p = {}) {
   std::vector<Box2D> raw;
   detail::cluster_rec(tags, tags.box, p, raw);
   std::vector<Box2D> result;
   for (const auto& b : raw) {
     BoxArray chopped = BoxArray::from_domain(b, p.max_box_size);
-    for (int k = 0; k < chopped.size(); ++k) result.push_back(chopped[k]);
+    for (int k = 0; k < chopped.size(); ++k)
+      result.push_back(chopped[k]);
   }
   return result;
 }

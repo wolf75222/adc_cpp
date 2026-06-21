@@ -31,10 +31,13 @@ namespace detail {
 ///   - anti division-by-zero guard: theta is clamped to [1e-3, 1] (theta -> 0 would make the weight diverge).
 /// lc is assumed < 0 (active cell); the clamp bounds are the original ones.
 ADC_HD inline Real cut_distance(Real lc, Real ln, Real h) {
-  if (ln < Real(0)) return h;             // interior neighbor: no cut (full face)
-  Real th = lc / (lc - ln);               // ls changes sign: linear cut fraction
-  if (th < Real(1e-3)) th = Real(1e-3);   // anti division-by-zero guard (theta -> 0)
-  if (th > Real(1)) th = Real(1);
+  if (ln < Real(0))
+    return h;                // interior neighbor: no cut (full face)
+  Real th = lc / (lc - ln);  // ls changes sign: linear cut fraction
+  if (th < Real(1e-3))
+    th = Real(1e-3);  // anti division-by-zero guard (theta -> 0)
+  if (th > Real(1))
+    th = Real(1);
   return th * h;
 }
 
@@ -47,10 +50,10 @@ ADC_HD inline Real cut_distance(Real lc, Real ln, Real h) {
 /// alpha_f, cell volume kappa); axm/axp/aym/ayp are what the ELLIPTIC already consumes for the
 /// Shortley-Weller weights. Everything is derived from the SAME cut_distance -> bit-for-bit consistency.
 struct CutFraction {
-  Real axm;    ///< cut distance of face x- (toward i-1), in [1e-3*dx, dx]
-  Real axp;    ///< cut distance of face x+ (toward i+1)
-  Real aym;    ///< cut distance of face y- (toward j-1)
-  Real ayp;    ///< cut distance of face y+ (toward j+1)
+  Real axm;       ///< cut distance of face x- (toward i-1), in [1e-3*dx, dx]
+  Real axp;       ///< cut distance of face x+ (toward i+1)
+  Real aym;       ///< cut distance of face y- (toward j-1)
+  Real ayp;       ///< cut distance of face y+ (toward j+1)
   Real alpha_xm;  ///< aperture of face x- = axm / dx, in [1e-3, 1]
   Real alpha_xp;  ///< aperture of face x+ = axp / dx
   Real alpha_ym;  ///< aperture of face y- = aym / dy
@@ -100,10 +103,10 @@ ADC_HD inline ShortleyWellerWeights shortley_weller(const CutFraction& cf) {
   const Real sx = cf.axm + cf.axp;
   const Real sy = cf.aym + cf.ayp;
   return ShortleyWellerWeights{
-      Real(2) / (cf.axm * sx),                          // w_xm on p(i-1)
-      Real(2) / (cf.axp * sx),                          // w_xp on p(i+1)
-      Real(2) / (cf.aym * sy),                          // w_ym on p(i,j-1)
-      Real(2) / (cf.ayp * sy),                          // w_yp on p(i,j+1)
+      Real(2) / (cf.axm * sx),                                     // w_xm on p(i-1)
+      Real(2) / (cf.axp * sx),                                     // w_xp on p(i+1)
+      Real(2) / (cf.aym * sy),                                     // w_ym on p(i,j-1)
+      Real(2) / (cf.ayp * sy),                                     // w_yp on p(i,j+1)
       Real(2) / (cf.axm * cf.axp) + Real(2) / (cf.aym * cf.ayp)};  // w_diag
 }
 

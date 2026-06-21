@@ -16,12 +16,14 @@ static bool tiles_exactly(const BoxArray& ba, const Box2D& dom) {
     const Box2D& box = ba[b];
     for (int j = box.lo[1]; j <= box.hi[1]; ++j)
       for (int i = box.lo[0]; i <= box.hi[0]; ++i) {
-        if (!dom.contains(i, j)) return false;
+        if (!dom.contains(i, j))
+          return false;
         ++count[static_cast<size_t>(j - dom.lo[1]) * dom.nx() + (i - dom.lo[0])];
       }
   }
   for (int c : count)
-    if (c != 1) return false;
+    if (c != 1)
+      return false;
   return true;
 }
 
@@ -52,9 +54,9 @@ int main() {
   chk(ba2.num_cells() == 100, "ndiv_num_cells");
   chk(ba2.bounding_box() == dom2, "ndiv_bbox");
   // premiere tuile en x doit faire 4 (base 3 + reste 1), les suivantes 3
-  chk(ba2[0].nx() == 4 && ba2[1].nx() == 3 && ba2[2].nx() == 3,
-      "ndiv_even_split");
+  chk(ba2[0].nx() == 4 && ba2[1].nx() == 3 && ba2[2].nx() == 3, "ndiv_even_split");
 
-  if (fails == 0) std::printf("OK test_box_array\n");
+  if (fails == 0)
+    std::printf("OK test_box_array\n");
   return fails == 0 ? 0 : 1;
 }

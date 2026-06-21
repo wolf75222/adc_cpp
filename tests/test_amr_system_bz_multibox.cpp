@@ -80,7 +80,9 @@ namespace {
 constexpr int NC = 16;
 
 // B_z variable en x ET en y : exerce l'echantillonnage par boite dans les deux directions.
-Real bz_field(Real x, Real y) { return Real(1) + x + Real(2) * y; }
+Real bz_field(Real x, Real y) {
+  return Real(1) + x + Real(2) * y;
+}
 
 // Lit la composante B_z (comp kAuxBaseComps) du fab local li d'un MultiFab, a la cellule (i,j).
 Real read_bz(const MultiFab& A, int li, int i, int j) {
@@ -93,7 +95,10 @@ int main(int argc, char** argv) {
   comm_init(&argc, &argv);
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(NC, NC);
@@ -120,8 +125,10 @@ int main(int argc, char** argv) {
   auto build = [&](std::function<Real(Real, Real)> bz_user, bool use_setter, Real u0g) {
     MultiFab UgC(ba_coarse, dm_coarse, 1, 2), UgF(ba_fine, dm_fine, 1, 2);
     MultiFab UbC(ba_coarse, dm_coarse, 1, 2), UbF(ba_fine, dm_fine, 1, 2);
-    UgC.set_val(u0g);     UgF.set_val(u0g);
-    UbC.set_val(Real(1)); UbF.set_val(Real(1));
+    UgC.set_val(u0g);
+    UgF.set_val(u0g);
+    UbC.set_val(Real(1));
+    UbF.set_val(Real(1));
 
     BzBlk g{"grow", BzGrowMB{}, UgC, BCRec{}};
     BaseBlk b{"base", InertMB{}, UbC, BCRec{}};
@@ -140,12 +147,13 @@ int main(int argc, char** argv) {
 
     ChargeDensityRhs charge{{{Real(0), 0}, {Real(0), 0}}};  // charges nulles -> phi = 0
     using Sim = AmrSystemCoupler<decltype(system), ChargeDensityRhs>;
-    auto sim = std::make_unique<Sim>(
-        system, geom, ba_coarse, BCRec{}, charge, std::move(bl),
-        Periodicity{true, true}, /*replicated_coarse=*/false,  // grossier multi-box reparti
-        PoissonCadence::OncePerStep, std::function<bool(Real, Real)>{},
-        use_setter ? std::function<Real(Real, Real)>{} : bz_user);
-    if (use_setter) sim->set_bz(bz_user);
+    auto sim = std::make_unique<Sim>(system, geom, ba_coarse, BCRec{}, charge, std::move(bl),
+                                     Periodicity{true, true},
+                                     /*replicated_coarse=*/false,  // grossier multi-box reparti
+                                     PoissonCadence::OncePerStep, std::function<bool(Real, Real)>{},
+                                     use_setter ? std::function<Real(Real, Real)>{} : bz_user);
+    if (use_setter)
+      sim->set_bz(bz_user);
     return sim;
   };
 
@@ -166,7 +174,7 @@ int main(int argc, char** argv) {
   {
     auto sim = build(bz_field, /*use_setter=*/false, /*u0g=*/Real(2));
     chk(sim->aux_ncomp() == 4, "shared_aux_width_max_4");
-    chk(ba_coarse.size() >= 2, "coarse_is_multibox");      // garde-fou : le decoupage a bien eu lieu
+    chk(ba_coarse.size() >= 2, "coarse_is_multibox");  // garde-fou : le decoupage a bien eu lieu
     chk(ba_fine.size() == 2, "fine_is_multibox");
 
     // grossier : B_z correct sur les 4 boites (valides + ghosts).
@@ -253,11 +261,13 @@ int main(int argc, char** argv) {
     bool coarse_zero = true, fine_zero = true;
     for (int li = 0; li < sim->aux(0).local_size(); ++li) {
       const Box2D b = sim->aux(0).box(li);
-      if (std::fabs(read_bz(sim->aux(0), li, b.lo[0], b.lo[1])) >= Real(1e-30)) coarse_zero = false;
+      if (std::fabs(read_bz(sim->aux(0), li, b.lo[0], b.lo[1])) >= Real(1e-30))
+        coarse_zero = false;
     }
     for (int li = 0; li < sim->aux(1).local_size(); ++li) {
       const Box2D b = sim->aux(1).box(li);
-      if (std::fabs(read_bz(sim->aux(1), li, b.lo[0], b.lo[1])) >= Real(1e-30)) fine_zero = false;
+      if (std::fabs(read_bz(sim->aux(1), li, b.lo[0], b.lo[1])) >= Real(1e-30))
+        fine_zero = false;
     }
     chk(coarse_zero, "no_bz_coarse_stays_zero_all_boxes");
     chk(fine_zero, "no_bz_fine_stays_zero_all_boxes");
@@ -266,8 +276,10 @@ int main(int argc, char** argv) {
   // somme globale des echecs : sous MPI, un seul rang imprime mais tous votent.
   fails = static_cast<int>(all_reduce_sum(static_cast<double>(fails)));
   if (my_rank() == 0) {
-    if (fails == 0) std::printf("test_amr_system_bz_multibox: OK\n");
-    else std::printf("test_amr_system_bz_multibox: %d FAIL\n", fails);
+    if (fails == 0)
+      std::printf("test_amr_system_bz_multibox: OK\n");
+    else
+      std::printf("test_amr_system_bz_multibox: %d FAIL\n", fails);
   }
   comm_finalize();
   return fails == 0 ? 0 : 1;

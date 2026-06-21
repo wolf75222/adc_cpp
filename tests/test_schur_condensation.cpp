@@ -34,7 +34,9 @@
 
 using namespace adc;
 
-static double dabs(double x) { return x < 0 ? -x : x; }
+static double dabs(double x) {
+  return x < 0 ? -x : x;
+}
 static constexpr double EPS = 1e-12;  // precision machine relachee (FMA / association FP)
 
 // VariableSet d'un fluide minimal portant les roles requis : rho, mx, my (Density, MomentumX, MomentumY).
@@ -59,7 +61,8 @@ struct Setup {
         geom{dom, 0.0, 1.0, 0.0, 1.0},
         ba(BoxArray::from_domain(dom, n)),
         dm(ba.size(), n_ranks()) {
-    bc.xlo = bc.xhi = bc.ylo = bc.yhi = BCType::Dirichlet;  // bords physiques (RHS teste a l'interieur)
+    bc.xlo = bc.xhi = bc.ylo = bc.yhi =
+        BCType::Dirichlet;  // bords physiques (RHS teste a l'interieur)
   }
 };
 
@@ -81,8 +84,8 @@ static double max_gap(const MultiFab& mf, const Box2D& dom, F f, int skip = 0) {
     const Box2D b = mf.box(li);
     for (int j = b.lo[1]; j <= b.hi[1]; ++j)
       for (int i = b.lo[0]; i <= b.hi[0]; ++i) {
-        if (i < dom.lo[0] + skip || i > dom.hi[0] - skip ||
-            j < dom.lo[1] + skip || j > dom.hi[1] - skip)
+        if (i < dom.lo[0] + skip || i > dom.hi[0] - skip || j < dom.lo[1] + skip ||
+            j > dom.hi[1] - skip)
           continue;
         d = std::fmax(d, dabs(a(i, j, 0) - f(i, j)));
       }
@@ -93,7 +96,10 @@ static double max_gap(const MultiFab& mf, const Box2D& dom, F f, int skip = 0) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const VariableSet vars = fluid_vars();
@@ -112,23 +118,26 @@ int main() {
       const Box2D vb = state.box(li);
       for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
         for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
-          u(i, j, 0) = rho0; u(i, j, 1) = 0; u(i, j, 2) = 0;
+          u(i, j, 0) = rho0;
+          u(i, j, 1) = 0;
+          u(i, j, 2) = 0;
           b(i, j, 0) = Bz0;
         }
     }
 
     ElectrostaticLorentzCondensation builder(vars, alpha, theta, dt);
-    MultiFab ex(S.ba, S.dm, 1, 1), ey(S.ba, S.dm, 1, 1), axy(S.ba, S.dm, 1, 1), ayx(S.ba, S.dm, 1, 1);
+    MultiFab ex(S.ba, S.dm, 1, 1), ey(S.ba, S.dm, 1, 1), axy(S.ba, S.dm, 1, 1),
+        ayx(S.ba, S.dm, 1, 1);
     builder.assemble_operator(state, bz, S.geom, S.bc, ex, ey, axy, ayx);
 
     // valeur analytique fermee (by-hand) : c = theta^2 dt^2 alpha, B^{-1} = (1/det)[[1,w],[-w,1]].
     const double c = theta * theta * dt * dt * alpha;
     const double w = theta * dt * Bz0;
     const double det = 1.0 + w * w;
-    const double exa = 1.0 + c * rho0 * (1.0 / det);   // 1 + c rho binv_11
-    const double eya = 1.0 + c * rho0 * (1.0 / det);   // 1 + c rho binv_22
-    const double axya = c * rho0 * (w / det);          // c rho binv_12
-    const double ayxa = c * rho0 * (-w / det);         // c rho binv_21
+    const double exa = 1.0 + c * rho0 * (1.0 / det);  // 1 + c rho binv_11
+    const double eya = 1.0 + c * rho0 * (1.0 / det);  // 1 + c rho binv_22
+    const double axya = c * rho0 * (w / det);         // c rho binv_12
+    const double ayxa = c * rho0 * (-w / det);        // c rho binv_21
 
     chk(max_gap(ex, S.dom, [=](int, int) { return exa; }) < EPS, "A_eps_x_analytique");
     chk(max_gap(ey, S.dom, [=](int, int) { return eya; }) < EPS, "A_eps_y_analytique");
@@ -136,8 +145,8 @@ int main() {
     chk(max_gap(ayx, S.dom, [=](int, int) { return ayxa; }) < EPS, "A_a_yx_analytique");
     // non symetrie attendue (B_z != 0) : a_xy = -a_yx != 0.
     chk(dabs(axya + ayxa) < EPS && dabs(axya) > 1e-6, "A_non_symetrique_Bz_nonnul");
-    std::printf("(A) coeff analytiques : eps=%.6f a_xy=%.6f a_yx=%.6f (c=%.4f w=%.4f)\n",
-                exa, axya, ayxa, c, w);
+    std::printf("(A) coeff analytiques : eps=%.6f a_xy=%.6f a_yx=%.6f (c=%.4f w=%.4f)\n", exa, axya,
+                ayxa, c, w);
   }
 
   // ----------------------------------------------------------------------------------------------
@@ -157,9 +166,9 @@ int main() {
     const double g = theta * dt * alpha;  // coefficient du terme div(rho B^{-1} v)
 
     // phi^n quadratique, mx/my affines.
-    const double px = 0.7, py = -0.4, pxy = 0.3;            // phi = px x^2 + py y^2 + pxy x y
-    const double mx0 = 0.2, mxx = 0.5, mxy = -0.1;          // mx = mx0 + mxx x + mxy y
-    const double my0 = -0.3, myx = 0.4, myy = 0.6;          // my = my0 + myx x + myy y
+    const double px = 0.7, py = -0.4, pxy = 0.3;    // phi = px x^2 + py y^2 + pxy x y
+    const double mx0 = 0.2, mxx = 0.5, mxy = -0.1;  // mx = mx0 + mxx x + mxy y
+    const double my0 = -0.3, myx = 0.4, myy = 0.6;  // my = my0 + myx x + myy y
     auto phi_f = [=](double x, double y) { return px * x * x + py * y * y + pxy * x * y; };
     auto mx_f = [=](double x, double y) { return mx0 + mxx * x + mxy * y; };
     auto my_f = [=](double x, double y) { return my0 + myx * x + myy * y; };
@@ -171,7 +180,9 @@ int main() {
       for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
         for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
           const double x = S.geom.x_cell(i), y = S.geom.y_cell(j);
-          u(i, j, 0) = rho0; u(i, j, 1) = mx_f(x, y); u(i, j, 2) = my_f(x, y);
+          u(i, j, 0) = rho0;
+          u(i, j, 1) = mx_f(x, y);
+          u(i, j, 2) = my_f(x, y);
           b(i, j, 0) = Bz0;
           p(i, j, 0) = phi_f(x, y);
         }
@@ -218,7 +229,9 @@ int main() {
       const Box2D vb = state.box(li);
       for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
         for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
-          u(i, j, 0) = rho0; u(i, j, 1) = 0.5; u(i, j, 2) = -0.7;
+          u(i, j, 0) = rho0;
+          u(i, j, 1) = 0.5;
+          u(i, j, 2) = -0.7;
           b(i, j, 0) = 0.0;  // B_z = 0
         }
     }
@@ -227,7 +240,8 @@ int main() {
     {
       const Real alpha = 0.6;
       ElectrostaticLorentzCondensation builder(vars, alpha, theta, dt);
-      MultiFab ex(S.ba, S.dm, 1, 1), ey(S.ba, S.dm, 1, 1), axy(S.ba, S.dm, 1, 1), ayx(S.ba, S.dm, 1, 1);
+      MultiFab ex(S.ba, S.dm, 1, 1), ey(S.ba, S.dm, 1, 1), axy(S.ba, S.dm, 1, 1),
+          ayx(S.ba, S.dm, 1, 1);
       builder.assemble_operator(state, bz, S.geom, S.bc, ex, ey, axy, ayx);
       const double c = theta * theta * dt * dt * alpha;
       const double diag = 1.0 + c * rho0;
@@ -242,7 +256,8 @@ int main() {
     {
       const Real alpha = 0.0;
       ElectrostaticLorentzCondensation builder(vars, alpha, theta, dt);
-      MultiFab ex(S.ba, S.dm, 1, 1), ey(S.ba, S.dm, 1, 1), axy(S.ba, S.dm, 1, 1), ayx(S.ba, S.dm, 1, 1);
+      MultiFab ex(S.ba, S.dm, 1, 1), ey(S.ba, S.dm, 1, 1), axy(S.ba, S.dm, 1, 1),
+          ayx(S.ba, S.dm, 1, 1);
       builder.assemble_operator(state, bz, S.geom, S.bc, ex, ey, axy, ayx);
       // A = I : eps_x = eps_y = 1 EXACTEMENT (1 + 0), a_xy = a_yx = 0 EXACTEMENT (bit-identique).
       chk(max_gap(ex, S.dom, [](int, int) { return 1.0; }) == 0.0, "C2_eps_x_eq_1_bitident");
@@ -259,7 +274,8 @@ int main() {
         for (int j = vb.lo[1]; j <= vb.hi[1]; ++j)
           for (int i = vb.lo[0]; i <= vb.hi[0]; ++i) {
             const double x = S.geom.x_cell(i), y = S.geom.y_cell(j);
-            p(i, j, 0) = std::sin(3.14159265358979323846 * x) * std::sin(2 * 3.14159265358979323846 * y);
+            p(i, j, 0) =
+                std::sin(3.14159265358979323846 * x) * std::sin(2 * 3.14159265358979323846 * y);
           }
       }
       MultiFab rhs(S.ba, S.dm, 1, 0);
@@ -270,7 +286,7 @@ int main() {
       MultiFab lap_ref(S.ba, S.dm, 1, 0);
       apply_laplacian(phi, S.geom, lap_ref);
       sync_host();  // rhs (assemble_rhs) et lap_ref (apply_laplacian) ecrits par kernels device :
-                    // residence hote valide avant la lecture directe (no-op serie/OpenMP, fence Cuda).
+          // residence hote valide avant la lecture directe (no-op serie/OpenMP, fence Cuda).
       double dmax = 0;
       for (int li = 0; li < rhs.local_size(); ++li) {
         const ConstArray4 r = rhs.fab(li).const_array();
@@ -286,6 +302,7 @@ int main() {
     }
   }
 
-  if (fails == 0) std::printf("OK test_schur_condensation\n");
+  if (fails == 0)
+    std::printf("OK test_schur_condensation\n");
   return fails == 0 ? 0 : 1;
 }

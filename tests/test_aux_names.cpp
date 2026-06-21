@@ -48,6 +48,7 @@ int main() {
   chk(aux_canonical_index("B_z") < kAuxNamedBase, "B_z below named base");
   chk(aux_canonical_index("T_e") < kAuxNamedBase, "T_e below named base");
 
-  if (fails == 0) std::printf("OK test_aux_names\n");
+  if (fails == 0)
+    std::printf("OK test_aux_names\n");
   return fails == 0 ? 0 : 1;
 }

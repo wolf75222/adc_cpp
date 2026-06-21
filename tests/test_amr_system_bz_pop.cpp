@@ -81,7 +81,9 @@ namespace {
 constexpr int NC = 16;
 
 // B_z spatialement variable : echantillonner a la resolution du niveau change la valeur.
-Real bz_field(Real x, Real /*y*/) { return Real(1) + x; }
+Real bz_field(Real x, Real /*y*/) {
+  return Real(1) + x;
+}
 
 // Lit la composante B_z (comp kAuxBaseComps) d'un MultiFab a la cellule (i,j) du fab 0.
 Real read_bz(const MultiFab& A, int i, int j) {
@@ -93,7 +95,10 @@ Real read_bz(const MultiFab& A, int i, int j) {
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const Box2D dom = Box2D::from_extents(NC, NC);
@@ -111,8 +116,10 @@ int main() {
   auto build = [&](std::function<Real(Real, Real)> bz_user, bool use_setter, Real u0g) {
     MultiFab UgC(ba_coarse, dm, 1, 2), UgF(ba_fine, dm, 1, 2);
     MultiFab UbC(ba_coarse, dm, 1, 2), UbF(ba_fine, dm, 1, 2);
-    UgC.set_val(u0g);     UgF.set_val(u0g);
-    UbC.set_val(Real(1)); UbF.set_val(Real(1));
+    UgC.set_val(u0g);
+    UgF.set_val(u0g);
+    UbC.set_val(Real(1));
+    UbF.set_val(Real(1));
 
     BzBlk g{"grow", BzGrowPop{}, UgC, BCRec{}};
     BaseBlk b{"base", AdvectXPop{Real(0)}, UbC, BCRec{}};  // v=0 : inerte
@@ -131,12 +138,12 @@ int main() {
 
     ChargeDensityRhs charge{{{Real(0), 0}, {Real(0), 0}}};  // charges nulles -> phi = 0
     using Sim = AmrSystemCoupler<decltype(system), ChargeDensityRhs>;
-    auto sim = std::make_unique<Sim>(
-        system, geom, ba_coarse, BCRec{}, charge, std::move(bl),
-        Periodicity{true, true}, /*replicated_coarse=*/true,
-        PoissonCadence::OncePerStep, std::function<bool(Real, Real)>{},
-        use_setter ? std::function<Real(Real, Real)>{} : bz_user);
-    if (use_setter) sim->set_bz(bz_user);
+    auto sim = std::make_unique<Sim>(system, geom, ba_coarse, BCRec{}, charge, std::move(bl),
+                                     Periodicity{true, true}, /*replicated_coarse=*/true,
+                                     PoissonCadence::OncePerStep, std::function<bool(Real, Real)>{},
+                                     use_setter ? std::function<Real(Real, Real)>{} : bz_user);
+    if (use_setter)
+      sim->set_bz(bz_user);
     return sim;
   };
 
@@ -159,7 +166,8 @@ int main() {
     bool fine_ok = true;
     for (int I = fbox.lo[0]; I <= fbox.hi[0]; ++I) {
       const Real got = read_bz(sim->aux(1), I, fbox.lo[1]);
-      if (std::fabs(got - bz_field(gf.x_cell(I), 0)) > Real(1e-12)) fine_ok = false;
+      if (std::fabs(got - bz_field(gf.x_cell(I), 0)) > Real(1e-12))
+        fine_ok = false;
     }
     chk(fine_ok, "fine_Bz_sampled_at_fine_centers");
 
@@ -220,6 +228,7 @@ int main() {
         "no_bz_fine_stays_zero");
   }
 
-  if (fails == 0) std::printf("test_amr_system_bz_pop: OK\n");
+  if (fails == 0)
+    std::printf("test_amr_system_bz_pop: OK\n");
   return fails == 0 ? 0 : 1;
 }

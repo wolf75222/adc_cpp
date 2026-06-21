@@ -17,7 +17,7 @@
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence, sync_host, sync_device
+#include <adc/mesh/for_each.hpp>       // device_fence, sync_host, sync_device
 #include <adc/mesh/halo_schedule.hpp>  // memoized fill_boundary schedule (ADC-260)
 #include <adc/parallel/comm.hpp>
 
@@ -86,7 +86,8 @@ class MultiFab {
     sync_host();  // a kernel may have written these fabs; make the host residence
                   // valid before the host fill (otherwise a host/kernel write
                   // race). Under unified memory = a device_fence().
-    for (auto& f : fabs_) f.set_val(v);
+    for (auto& f : fabs_)
+      f.set_val(v);
   }
 
   /// Internal (ADC-260): memoized halo-exchange schedule used by fill_boundary. Lazily created on
@@ -97,7 +98,8 @@ class MultiFab {
   /// copy (a copy has the same layout), which keeps copies consistent. Not part of the public
   /// numerical API. Returned by reference so fill_boundary can populate it.
   HaloScheduleCache& halo_cache() const {
-    if (!halo_cache_) halo_cache_ = std::make_shared<HaloScheduleCache>();
+    if (!halo_cache_)
+      halo_cache_ = std::make_shared<HaloScheduleCache>();
     return *halo_cache_;
   }
 
@@ -106,8 +108,8 @@ class MultiFab {
   DistributionMapping dm_{};
   int ncomp_{1};
   int ngrow_{0};
-  std::vector<Fab2D> fabs_{};       // locally owned fabs
-  std::vector<int> local_index_{};  // global box -> local index (-1 otherwise)
+  std::vector<Fab2D> fabs_{};           // locally owned fabs
+  std::vector<int> local_index_{};      // global box -> local index (-1 otherwise)
   std::vector<int> global_of_local_{};  // local index -> global box
   // Memoized fill_boundary schedule (ADC-260). mutable: caching is logically const; lazily built.
   mutable std::shared_ptr<HaloScheduleCache> halo_cache_{};
@@ -120,8 +122,8 @@ inline Real sum(const MultiFab& mf, int comp = 0) {
   Real s = 0;
   for (int li = 0; li < mf.local_size(); ++li) {
     const ConstArray4 a = mf.fab(li).const_array();
-    s += for_each_cell_reduce_sum(
-        mf.box(li), [a, comp] ADC_HD(int i, int j) { return a(i, j, comp); });
+    s += for_each_cell_reduce_sum(mf.box(li),
+                                  [a, comp] ADC_HD(int i, int j) { return a(i, j, comp); });
   }
   return static_cast<Real>(all_reduce_sum(static_cast<double>(s)));
 }

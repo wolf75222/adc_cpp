@@ -22,8 +22,7 @@
 namespace adc {
 
 template <class TransportStep, class ImplicitSourceSolve>
-void imex_euler_step(MultiFab& U, Real dt, TransportStep Texpl,
-                     ImplicitSourceSolve Simpl) {
+void imex_euler_step(MultiFab& U, Real dt, TransportStep Texpl, ImplicitSourceSolve Simpl) {
   Texpl(U, dt);  // explicit: U becomes the known term U^n + dt T(U^n)
   Simpl(U, dt);  // implicit: solves U = known + dt S(U) (stiff source) in place
 }

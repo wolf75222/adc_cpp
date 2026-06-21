@@ -33,13 +33,13 @@ namespace adc::validation {
  * DiffusiveModel trait), without touching the coupler. nu = 0 recovers pure advection.
  */
 struct AdvectionDiffusion {
-  using State = StateVec<1>;  ///< one conservative variable: the scalar u
-  using Aux = adc::Aux;       ///< auxiliary fields (unused, not coupled)
+  using State = StateVec<1>;        ///< one conservative variable: the scalar u
+  using Aux = adc::Aux;             ///< auxiliary fields (unused, not coupled)
   static constexpr int n_vars = 1;  ///< number of conservative variables
 
-  Real ax = 1.0;   ///< advection velocity in x
-  Real ay = 0.0;   ///< advection velocity in y
-  Real nu = 0.0;   ///< diffusivity (0 = pure advection)
+  Real ax = 1.0;  ///< advection velocity in x
+  Real ay = 0.0;  ///< advection velocity in y
+  Real nu = 0.0;  ///< diffusivity (0 = pure advection)
 
   /// Advection flux F = a u in direction dir.
   ADC_HD State flux(const State& u, const Aux&, int dir) const {

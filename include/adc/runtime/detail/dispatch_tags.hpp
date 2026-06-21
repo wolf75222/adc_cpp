@@ -64,7 +64,8 @@ inline constexpr RiemannTag kRiemanns[] = {{"rusanov", false, false, false, true
 /// (wide WENO5 stencil: 5 points, 3 ghosts).
 inline int limiter_n_ghost(const std::string& lim) {
   for (const LimiterTag& t : kLimiters)
-    if (lim == t.name) return t.n_ghost;
+    if (lim == t.name)
+      return t.n_ghost;
   return 2;  // MUSCL fallback (historical allocation)
 }
 
@@ -72,7 +73,8 @@ namespace detail {
 /// COMPILE-TIME C string equality (no constexpr <cstring> guaranteed everywhere).
 constexpr bool ct_str_eq(const char* a, const char* b) {
   while (*a != '\0' && *b != '\0') {
-    if (*a != *b) return false;
+    if (*a != *b)
+      return false;
     ++a;
     ++b;
   }
@@ -85,7 +87,8 @@ constexpr bool ct_str_eq(const char* a, const char* b) {
 /// ::n_ghost constants of the types) -- guards that the table never diverges from the real types.
 constexpr int limiter_n_ghost_ct(const char* lim) {
   for (const LimiterTag& t : kLimiters)
-    if (detail::ct_str_eq(lim, t.name)) return t.n_ghost;
+    if (detail::ct_str_eq(lim, t.name))
+      return t.n_ghost;
   return -1;
 }
 
@@ -95,7 +98,8 @@ constexpr int limiter_n_ghost_ct(const char* lim) {
 /// "System (polar)") -> message STRICTLY identical to the old inline throw of each dispatch.
 inline void validate_limiter(const std::string& lim, const char* ctx = "System") {
   for (const LimiterTag& t : kLimiters)
-    if (lim == t.name) return;
+    if (lim == t.name)
+      return;
   throw std::runtime_error(std::string(ctx) + ": unknown limiter '" + lim + "'");
 }
 
@@ -111,7 +115,8 @@ inline void validate_riemann(const std::string& riem, bool polar = false,
     // settlement; hll keeps its model.wave_speeds capability gate at the call-site). HLLC/Roe and
     // unknown tags -> single polar message.
     for (const RiemannTag& t : kRiemanns)
-      if (riem == t.name && t.polar_ok) return;
+      if (riem == t.name && t.polar_ok)
+        return;
     throw std::runtime_error(
         std::string(ctx) + ": Riemann flux '" + riem +
         "' unsupported (polar -> 'rusanov' | 'hll' (signed wave speeds); HLLC/Roe "
@@ -119,7 +124,8 @@ inline void validate_riemann(const std::string& riem, bool polar = false,
         "isothermal fluid)");
   }
   for (const RiemannTag& t : kRiemanns)
-    if (riem == t.name) return;
+    if (riem == t.name)
+      return;
   throw std::runtime_error(std::string(ctx) + ": unknown Riemann flux '" + riem +
                            "' (rusanov|hll|hllc|roe)");
 }
@@ -131,8 +137,8 @@ inline void validate_riemann(const std::string& riem, bool polar = false,
 /// centralized validation precedes the dispatch. @p kind = "limiter" or "flux".
 [[noreturn]] inline void throw_registry_dispatch_mismatch(const char* ctx, const char* kind,
                                                           const std::string& tag) {
-  throw std::runtime_error(std::string(ctx) + ": registry/dispatch inconsistency -- " + kind + " '" +
-                           tag + "' valid but not routed (add the case to the dispatch)");
+  throw std::runtime_error(std::string(ctx) + ": registry/dispatch inconsistency -- " + kind +
+                           " '" + tag + "' valid but not routed (add the case to the dispatch)");
 }
 
 }  // namespace adc

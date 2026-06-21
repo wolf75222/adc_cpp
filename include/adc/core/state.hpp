@@ -39,19 +39,22 @@ struct StateVec {
 /// @{
 template <int N>
 ADC_HD StateVec<N> operator+(StateVec<N> a, const StateVec<N>& b) {
-  for (int i = 0; i < N; ++i) a[i] += b[i];
+  for (int i = 0; i < N; ++i)
+    a[i] += b[i];
   return a;
 }
 
 template <int N>
 ADC_HD StateVec<N> operator-(StateVec<N> a, const StateVec<N>& b) {
-  for (int i = 0; i < N; ++i) a[i] -= b[i];
+  for (int i = 0; i < N; ++i)
+    a[i] -= b[i];
   return a;
 }
 
 template <int N>
 ADC_HD StateVec<N> operator*(Real s, StateVec<N> a) {
-  for (int i = 0; i < N; ++i) a[i] *= s;
+  for (int i = 0; i < N; ++i)
+    a[i] *= s;
   return a;
 }
 /// @}
@@ -136,9 +139,7 @@ struct Aux {
   /// BOUNDED read of a named aux field (component kAuxNamedBase + k). Returns 0 out of bounds: the
   /// generated brick never calls extra_field with a k that the model did not declare, but the
   /// guard makes the access safe (still device-clean, no dynamic branch on a k known at codegen).
-  ADC_HD Real extra_field(int k) const {
-    return (k >= 0 && k < kAuxMaxExtra) ? extra[k] : Real(0);
-  }
+  ADC_HD Real extra_field(int k) const { return (k >= 0 && k < kAuxMaxExtra) ? extra[k] : Real(0); }
 };
 
 // Width of the aux channel of the base contract (phi, grad phi). A model reading additional
@@ -157,15 +158,16 @@ inline constexpr int kAuxNamedBase = kAuxBaseComps + 2;  // = 5 (after B_z=3, T_
 // this static_assert forces raising kAuxNamedBase (and AUX_NAMED_BASE on the DSL side) accordingly.
 #define ADC_AUX_NAMED_BASE_CHECK(name, idx) \
   static_assert(kAuxNamedBase > (idx),      \
-      "kAuxNamedBase must be beyond the canonical aux field '" #name "'");
+                "kAuxNamedBase must be beyond the canonical aux field '" #name "'");
 ADC_AUX_FIELDS(ADC_AUX_NAMED_BASE_CHECK)
 #undef ADC_AUX_NAMED_BASE_CHECK
 
 // Safeguard: the indices declared in ADC_AUX_FIELDS are strictly EXTRA (>= base) and
 // start right after the base contract. Checked at compile time that the table stays
 // consistent with kAuxBaseComps (the 1st extra field is at index kAuxBaseComps).
-#define ADC_AUX_IDX_CHECK(name, idx) static_assert((idx) >= kAuxBaseComps, \
-    "extra aux field '" #name "': index must be >= kAuxBaseComps (3)");
+#define ADC_AUX_IDX_CHECK(name, idx)    \
+  static_assert((idx) >= kAuxBaseComps, \
+                "extra aux field '" #name "': index must be >= kAuxBaseComps (3)");
 ADC_AUX_FIELDS(ADC_AUX_IDX_CHECK)
 #undef ADC_AUX_IDX_CHECK
 

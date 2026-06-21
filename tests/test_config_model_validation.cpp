@@ -77,12 +77,10 @@ int main(int argc, char** argv) {
   // ============================================================================================
   chk(raises_with([&] { System s(SystemConfig{0, 1.0, false}); }, "n >= 1"),
       "System(n=0) rejete avant Impl (n >= 1)");
-  chk(raises_with([&] { System s(SystemConfig{-4, 1.0, false}); }, "n >= 1"),
-      "System(n<0) rejete");
+  chk(raises_with([&] { System s(SystemConfig{-4, 1.0, false}); }, "n >= 1"), "System(n<0) rejete");
   chk(raises_with([&] { System s(SystemConfig{16, 0.0, false}); }, "L > 0"),
       "System(L=0) rejete (L > 0)");
-  chk(raises_with([&] { System s(SystemConfig{16, -1.0, false}); }, "L > 0"),
-      "System(L<0) rejete");
+  chk(raises_with([&] { System s(SystemConfig{16, -1.0, false}); }, "L > 0"), "System(L<0) rejete");
   // Une config valide CONSTRUIT toujours (le garde-fou ne sur-rejette pas).
   {
     bool ok = false;
@@ -158,17 +156,29 @@ int main(int argc, char** argv) {
   // (b) Surface utilisateur : le contrat s'applique a l'entree de System::add_block, AVANT le routage
   //     par chaine sur model.transport (qui dirait sinon "unknown transport ''"). Le defaut-construit
   //     ne devient JAMAIS un Euler silencieux.
-  chk(raises_with([&] { System s(SystemConfig{16, 1.0, false}); s.add_block("m", ModelSpec{}); },
-                  "transport"),
-      "System::add_block(ModelSpec incomplet) rejete -- pas de transport 'compressible' silencieux");
+  chk(raises_with(
+          [&] {
+            System s(SystemConfig{16, 1.0, false});
+            s.add_block("m", ModelSpec{});
+          },
+          "transport"),
+      "System::add_block(ModelSpec incomplet) rejete -- pas de transport 'compressible' "
+      "silencieux");
   // Un modele complet s'installe (chemin natif ExB scalaire complet, sans lever).
-  chk(!raises([&] { System s(SystemConfig{16, 1.0, false}); s.add_block("ne", exb_charge()); }),
+  chk(!raises([&] {
+    System s(SystemConfig{16, 1.0, false});
+    s.add_block("ne", exb_charge());
+  }),
       "System::add_block(modele complet) accepte");
 
   // (c) Meme contrat a l'entree de AmrSystem::add_block (parite). add_block est paresseux : le refus
   //     tombe au contrat, sans declencher le build de la hierarchie.
-  chk(raises_with([&] { AmrSystem a(AmrSystemConfig{16}); a.add_block("m", ModelSpec{}); },
-                  "transport"),
+  chk(raises_with(
+          [&] {
+            AmrSystem a(AmrSystemConfig{16});
+            a.add_block("m", ModelSpec{});
+          },
+          "transport"),
       "AmrSystem::add_block(ModelSpec incomplet) rejete -- pas de fallback silencieux");
 
   // ============================================================================================

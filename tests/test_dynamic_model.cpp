@@ -16,20 +16,22 @@ static_assert(std::is_base_of_v<adc::IModel<4>, adc::ModelAdapter<adc::Euler>>,
 int main() {
   adc::Euler ref;
   ref.gamma = 1.4;
-  auto dyn = adc::make_dynamic(ref);   // std::unique_ptr<adc::IModel<4>>
+  auto dyn = adc::make_dynamic(ref);  // std::unique_ptr<adc::IModel<4>>
   const adc::IModel<4>& m = *dyn;
 
   adc::Aux a{};
-  const double S[][4] = {{1.0, 0.2, -0.1, 2.5}, {2.0, 0.5, 0.3, 6.0},
-                         {0.5, -0.2, 0.1, 1.8}, {1.5, 0.0, 0.0, 3.0}};
+  const double S[][4] = {
+      {1.0, 0.2, -0.1, 2.5}, {2.0, 0.5, 0.3, 6.0}, {0.5, -0.2, 0.1, 1.8}, {1.5, 0.0, 0.0, 3.0}};
   double maxdiff = 0.0;
   for (const auto& s : S) {
     State u{};
-    for (int i = 0; i < 4; ++i) u[i] = s[i];
+    for (int i = 0; i < 4; ++i)
+      u[i] = s[i];
     for (int dir = 0; dir < 2; ++dir) {
       State fr = ref.flux(u, a, dir);
-      State fg = m.flux(u, a, dir);   // dispatch virtuel (type efface)
-      for (int i = 0; i < 4; ++i) maxdiff = std::fmax(maxdiff, std::fabs(fr[i] - fg[i]));
+      State fg = m.flux(u, a, dir);  // dispatch virtuel (type efface)
+      for (int i = 0; i < 4; ++i)
+        maxdiff = std::fmax(maxdiff, std::fabs(fr[i] - fg[i]));
       maxdiff = std::fmax(maxdiff,
                           std::fabs(ref.max_wave_speed(u, a, dir) - m.max_wave_speed(u, a, dir)));
     }

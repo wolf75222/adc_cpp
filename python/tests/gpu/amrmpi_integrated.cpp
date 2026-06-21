@@ -66,9 +66,8 @@ static int run_mode(int n, bool distribute, const char* tag) {
   cfg.coarse_max_grid = distribute ? n / 2 : 0;  // 2x2 : le decoupage qui ne degrade pas le MG
 
   AmrSystem sys(cfg);
-  add_compiled_model(sys, "gas",
-                     Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}}, "minmod",
-                     "rusanov", "conservative", "explicit", /*gamma=*/1.4);
+  add_compiled_model(sys, "gas", Model{Euler{1.4}, GravityForce{}, GravityCoupling{-1.0, 1.0, 1.0}},
+                     "minmod", "rusanov", "conservative", "explicit", /*gamma=*/1.4);
   sys.set_poisson("charge_density", "geometric_mg");
   sys.set_refinement(1.2);
   sys.set_density("gas", rho);
@@ -78,14 +77,15 @@ static int run_mode(int n, bool distribute, const char* tag) {
 
   const double dt = 5e-4;
   const int warmup = 4, measured = 40;
-  for (int s = 0; s < warmup; ++s) sys.step(dt);  // warmup (JIT/cache/alloc)
+  for (int s = 0; s < warmup; ++s)
+    sys.step(dt);  // warmup (JIT/cache/alloc)
   Kokkos::fence();
   const auto t0 = std::chrono::steady_clock::now();
-  for (int s = 0; s < measured; ++s) sys.step(dt);
+  for (int s = 0; s < measured; ++s)
+    sys.step(dt);
   Kokkos::fence();  // capturer le travail device async avant de stopper le chrono
   const auto t1 = std::chrono::steady_clock::now();
-  const double per_step_ms =
-      std::chrono::duration<double, std::milli>(t1 - t0).count() / measured;
+  const double per_step_ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / measured;
 
   Kokkos::fence();
   const std::vector<double> dens = sys.density();  // reconstruit n*n (reparti : all_reduce interne)
@@ -97,7 +97,8 @@ static int run_mode(int n, bool distribute, const char* tag) {
     csum += v;
     csumsq += v * v;
     const double a = std::fabs(v);
-    if (a > cmax) cmax = a;
+    if (a > cmax)
+      cmax = a;
   }
   // cmax cross-rang : max insensible a l'ordre -> bit-identique attendu dans les deux modes.
   const double xmax = all_reduce_max(cmax), xmin = -all_reduce_max(-cmax);
@@ -106,21 +107,38 @@ static int run_mode(int n, bool distribute, const char* tag) {
 
   int fails = 0;
   if (me == 0) {
-    std::printf("AMRMPI[%s] np=%d patches0=%d patchesF=%d | mass=%.17e | csum=%.17e csumsq=%.17e "
-                "cmax=%.17e | cmax_crossrank_spread=%.3e\n",
-                tag, np, np0, npf, mass, csum, csumsq, cmax, cmax_spread);
-    std::printf("AMRMPI[%s] exec=%s m0=%.17e (conservation: dm=%.3e) | per_step_ms=%.4f "
-                "(max over ranks, n=%d, measured=%d)\n",
-                tag, Kokkos::DefaultExecutionSpace::name(), m0, std::fabs(mass - m0), maxstep, n,
-                measured);
-    if (!(dens.size() == static_cast<std::size_t>(n) * n)) { std::printf("FAIL taille\n"); ++fails; }
-    if (!(cmax > 1e-6)) { std::printf("FAIL densite triviale\n"); ++fails; }
-    if (!(npf >= 2)) { std::printf("FAIL < 2 patchs fins\n"); ++fails; }
-    if (!(std::fabs(mass - m0) < 1e-9)) { std::printf("FAIL conservation (dm)\n"); ++fails; }
-    if (!(cmax_spread == 0.0)) { std::printf("FAIL cmax non bit-identique cross-rang\n"); ++fails; }
+    std::printf(
+        "AMRMPI[%s] np=%d patches0=%d patchesF=%d | mass=%.17e | csum=%.17e csumsq=%.17e "
+        "cmax=%.17e | cmax_crossrank_spread=%.3e\n",
+        tag, np, np0, npf, mass, csum, csumsq, cmax, cmax_spread);
+    std::printf(
+        "AMRMPI[%s] exec=%s m0=%.17e (conservation: dm=%.3e) | per_step_ms=%.4f "
+        "(max over ranks, n=%d, measured=%d)\n",
+        tag, Kokkos::DefaultExecutionSpace::name(), m0, std::fabs(mass - m0), maxstep, n, measured);
+    if (!(dens.size() == static_cast<std::size_t>(n) * n)) {
+      std::printf("FAIL taille\n");
+      ++fails;
+    }
+    if (!(cmax > 1e-6)) {
+      std::printf("FAIL densite triviale\n");
+      ++fails;
+    }
+    if (!(npf >= 2)) {
+      std::printf("FAIL < 2 patchs fins\n");
+      ++fails;
+    }
+    if (!(std::fabs(mass - m0) < 1e-9)) {
+      std::printf("FAIL conservation (dm)\n");
+      ++fails;
+    }
+    if (!(cmax_spread == 0.0)) {
+      std::printf("FAIL cmax non bit-identique cross-rang\n");
+      ++fails;
+    }
     if (fails == 0)
-      std::printf("OK amrmpi_integrated[%s] np=%d (AmrSystem+MPI+GPU : cmax bit-identique cross-rang)\n",
-                  tag, np);
+      std::printf(
+          "OK amrmpi_integrated[%s] np=%d (AmrSystem+MPI+GPU : cmax bit-identique cross-rang)\n",
+          tag, np);
   }
   return fails;
 }
@@ -131,7 +149,8 @@ int main(int argc, char** argv) {
   int fails = 0;
   {
     int n = 128;  // grossier 128^2, fin 256^2 sous les patchs : charge GPU non triviale
-    if (argc > 1) n = std::atoi(argv[1]);
+    if (argc > 1)
+      n = std::atoi(argv[1]);
     fails += run_mode(n, /*distribute=*/false, "replique");
     fails += run_mode(n, /*distribute=*/true, "reparti");
   }

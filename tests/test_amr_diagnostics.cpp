@@ -19,7 +19,10 @@ using namespace adc;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int nc = 16;
@@ -34,7 +37,8 @@ int main() {
     Array4 u = U.fab(0).array();
     const Box2D g = U.fab(0).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) u(i, j, 0) = Real(2.5);
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        u(i, j, 0) = Real(2.5);
     const Real M = amr_mass(U, dom, dx, dy);
     std::printf("amr_mass(const 2.5) = %.15e (attendu 2.5)\n", M);
     chk(std::fabs(M - Real(2.5)) < 1e-13, "amr_mass_constant");
@@ -84,12 +88,15 @@ int main() {
     const Box2D g = aux.fab(0).grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
       for (int i = g.lo[0]; i <= g.hi[0]; ++i) {
-        a(i, j, 0) = 0; a(i, j, 1) = 0; a(i, j, 2) = 0;
+        a(i, j, 0) = 0;
+        a(i, j, 1) = 0;
+        a(i, j, 2) = 0;
       }
     const Real v = amr_max_drift_speed(aux, dom, Real(1));
     chk(v == Real(1e-12), "amr_max_drift_speed_plancher");
   }
 
-  if (fails == 0) std::printf("OK test_amr_diagnostics\n");
+  if (fails == 0)
+    std::printf("OK test_amr_diagnostics\n");
   return fails == 0 ? 0 : 1;
 }

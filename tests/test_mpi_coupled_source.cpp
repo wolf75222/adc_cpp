@@ -38,7 +38,9 @@ using namespace adc;
 
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const { return Real(0); }  // pas de charge -> phi=0 -> derive nulle
+  ADC_HD Real rhs(const State&) const {
+    return Real(0);
+  }  // pas de charge -> phi=0 -> derive nulle
 };
 using Dens = CompositeModel<ExBVelocity, NoSource, NoEll>;  // densite scalaire, transport E x B
 
@@ -50,7 +52,10 @@ int main(int argc, char** argv) {
   const int me = my_rank(), np = n_ranks();
   long fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("[rank %d/%d] FAIL %s\n", me, np, w); ++fails; }
+    if (!c) {
+      std::printf("[rank %d/%d] FAIL %s\n", me, np, w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -91,9 +96,7 @@ int main(int argc, char** argv) {
   std::vector<int> ops = {PUSH, PUSH, MUL, PUSH, MUL,        // electrons (len 5)
                           PUSH, PUSH, MUL, PUSH, MUL,        // ions      (len 5)
                           PUSH, PUSH, MUL, PUSH, MUL, NEG};  // neutrals  (len 6)
-  std::vector<int> args = {3, 0, 0, 2, 0,
-                           3, 0, 0, 2, 0,
-                           3, 0, 0, 2, 0, 0};
+  std::vector<int> args = {3, 0, 0, 2, 0, 3, 0, 0, 2, 0, 3, 0, 0, 2, 0, 0};
   std::vector<int> lens = {5, 5, 6};
   // ADC-214 : la description bytecode est regroupee dans un POD CoupledSourceProgram (initialiseurs
   // designes -> appel auto-documente, plus de liste de vecteurs du meme type intervertibles).
@@ -127,9 +130,13 @@ int main(int argc, char** argv) {
     bool finite = true;
     for (std::size_t q = 0; q < nn; ++q) {
       finite = finite && std::isfinite(de[q]) && std::isfinite(di[q]) && std::isfinite(dg[q]);
-      sde += de[q]; sdi += di[q]; sdg += dg[q];
+      sde += de[q];
+      sdi += di[q];
+      sdg += dg[q];
     }
-    ge = sde / nn; gi = sdi / nn; gg = sdg / nn;
+    ge = sde / nn;
+    gi = sdi / nn;
+    gg = sdg / nn;
     chk(finite, "density_finite");
     // etat reste uniforme (transport nul) : min == max == moyenne.
     bool uniform = true;
@@ -152,7 +159,8 @@ int main(int argc, char** argv) {
   // lourde (ions + neutres) est conservee a 1e-9 et INVARIANTE en np.
   const double mi = sys.mass("ions"), mg = sys.mass("neutrals");
   chk(std::isfinite(mi) && std::isfinite(mg), "mass_finite");
-  chk(std::fabs((mi + mg) - (ni0 + ng0) * static_cast<double>(nn)) < 1e-7, "masse_lourde_conservee");
+  chk(std::fabs((mi + mg) - (ni0 + ng0) * static_cast<double>(nn)) < 1e-7,
+      "masse_lourde_conservee");
 
 #ifdef ADC_HAS_MPI
   if (np > 1) {
@@ -161,7 +169,8 @@ int main(int argc, char** argv) {
     fails = g;
   }
 #endif
-  if (me == 0 && fails == 0) std::printf("OK test_mpi_coupled_source (np=%d)\n", np);
+  if (me == 0 && fails == 0)
+    std::printf("OK test_mpi_coupled_source (np=%d)\n", np);
   comm_finalize();
   return fails == 0 ? 0 : 1;
 }

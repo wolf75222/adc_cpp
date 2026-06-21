@@ -39,10 +39,10 @@ enum class GeometryMode { None, Staircase, CutCell };
 /// materialized / the descriptor is set by set_disc_domain (the disc is one instance of the contract,
 /// cf. numerics/embedded_boundary.hpp).
 struct GridContext {
-  Box2D dom;                ///< domain (without ghost)
-  BCRec bc;                 ///< transport BC
-  Geometry geom;            ///< geometry (dx, dy, bounds)
-  MultiFab* aux = nullptr;  ///< System aux (phi, grad phi); NOT owned
+  Box2D dom;                              ///< domain (without ghost)
+  BCRec bc;                               ///< transport BC
+  Geometry geom;                          ///< geometry (dx, dy, bounds)
+  MultiFab* aux = nullptr;                ///< System aux (phi, grad phi); NOT owned
   const MultiFab* domain_mask = nullptr;  ///< 0/1 domain mask (Impl::domain_mask_); NOT owned
   const detail::DiscDomain* eb_domain =
       nullptr;  ///< level-set domain descriptor (Impl::eb_domain_); NOT owned
@@ -60,9 +60,10 @@ struct GridContext {
 /// the block does not support disc routing: the stepper then falls back to advance (bit-identical).
 struct BlockClosures {
   std::function<void(MultiFab&, Real, int)> advance;  ///< (U, dt, n): n substeps of dt/n
-  std::function<void(MultiFab&, Real, int)> advance_masked;  ///< same, residual via assemble_rhs_masked
-  std::function<void(MultiFab&, Real, int)> advance_eb;      ///< same, residual via assemble_rhs_eb
-  std::function<void(MultiFab&, MultiFab&)> rhs_into;  ///< R <- -div F + S (Poisson frozen)
+  std::function<void(MultiFab&, Real, int)>
+      advance_masked;                                    ///< same, residual via assemble_rhs_masked
+  std::function<void(MultiFab&, Real, int)> advance_eb;  ///< same, residual via assemble_rhs_eb
+  std::function<void(MultiFab&, MultiFab&)> rhs_into;    ///< R <- -div F + S (Poisson frozen)
   /// dt_hotspot diagnostic (ADC-182): (U, w, i, j) -> GLOBAL cell dominating the transport
   /// CFL and its speed. OPTIONAL (empty = block without diagnostic, e.g. historical
   /// unrewired paths); never called by step/step_cfl (off the hot path).

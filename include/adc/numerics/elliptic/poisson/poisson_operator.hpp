@@ -50,20 +50,24 @@ namespace detail {
 // by the three he kernels (apply / residual / smoother); body STRICTLY identical to the three
 // original copies -> bit-identical output. Output by reference (wxm/wxp/wym/wyp).
 ADC_HD inline void face_weights(const ConstArray4& ep, const ConstArray4& ey, int i, int j,
-                                Real idx2, Real idy2, bool hc, const ConstArray4& cf,
-                                Real& wxm, Real& wxp, Real& wym, Real& wyp) {
-  const Real ec = ep(i, j);    // eps_x at center (x faces)
-  const Real ecy = ey(i, j);   // eps_y at center (y faces); == ec when isotropic
+                                Real idx2, Real idy2, bool hc, const ConstArray4& cf, Real& wxm,
+                                Real& wxp, Real& wym, Real& wyp) {
+  const Real ec = ep(i, j);   // eps_x at center (x faces)
+  const Real ecy = ey(i, j);  // eps_y at center (y faces); == ec when isotropic
   const Real exm = eps_harmonic(ec, ep(i - 1, j));
   const Real exp = eps_harmonic(ec, ep(i + 1, j));
   const Real eym = eps_harmonic(ecy, ey(i, j - 1));
   const Real eyp = eps_harmonic(ecy, ey(i, j + 1));
   if (hc) {  // cut-cell: eps_face multiplies each Shortley-Weller weight
-    wxm = cf(i, j, 0) * exm; wxp = cf(i, j, 1) * exp;
-    wym = cf(i, j, 2) * eym; wyp = cf(i, j, 3) * eyp;
-  } else {   // 5-point stencil with variable face coefficient
-    wxm = exm * idx2; wxp = exp * idx2;
-    wym = eym * idy2; wyp = eyp * idy2;
+    wxm = cf(i, j, 0) * exm;
+    wxp = cf(i, j, 1) * exp;
+    wym = cf(i, j, 2) * eym;
+    wyp = cf(i, j, 3) * eyp;
+  } else {  // 5-point stencil with variable face coefficient
+    wxm = exm * idx2;
+    wxp = exp * idx2;
+    wym = eym * idy2;
+    wyp = eyp * idy2;
   }
 }
 
@@ -78,20 +82,23 @@ ADC_HD inline Real cross_div(const ConstArray4& p, bool hxy, const ConstArray4& 
   if (hxy) {  // x faces: cross flux = Axy_face * (d_y phi)_face, tangential averaged over 4 corners.
     const Real axy_xp = Real(0.5) * (axy(i, j) + axy(i + 1, j));
     const Real axy_xm = Real(0.5) * (axy(i, j) + axy(i - 1, j));
-    const Real dyf_xp = (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idy);
-    const Real dyf_xm = (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idy);
+    const Real dyf_xp =
+        (p(i, j + 1) + p(i + 1, j + 1) - p(i, j - 1) - p(i + 1, j - 1)) * (Real(0.25) * idy);
+    const Real dyf_xm =
+        (p(i - 1, j + 1) + p(i, j + 1) - p(i - 1, j - 1) - p(i, j - 1)) * (Real(0.25) * idy);
     out += (axy_xp * dyf_xp - axy_xm * dyf_xm) * idx;
   }
   if (hyx) {  // y faces: cross flux = Ayx_face * (d_x phi)_face.
     const Real ayx_yp = Real(0.5) * (ayx(i, j) + ayx(i, j + 1));
     const Real ayx_ym = Real(0.5) * (ayx(i, j) + ayx(i, j - 1));
-    const Real dxf_yp = (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idx);
-    const Real dxf_ym = (p(i + 1, j - 1) + p(i + 1, j) - p(i - 1, j - 1) - p(i - 1, j)) * (Real(0.25) * idx);
+    const Real dxf_yp =
+        (p(i + 1, j) + p(i + 1, j + 1) - p(i - 1, j) - p(i - 1, j + 1)) * (Real(0.25) * idx);
+    const Real dxf_ym =
+        (p(i + 1, j - 1) + p(i + 1, j) - p(i - 1, j - 1) - p(i - 1, j)) * (Real(0.25) * idx);
     out += (ayx_yp * dxf_yp - ayx_ym * dxf_ym) * idy;
   }
   return out;
 }
-
 
 // NAMED FUNCTORS (and not ADC_HD lambdas) for the Poisson operator and Gauss-Seidel smoother kernels.
 // Same reasons as the rest of the elliptic path (#93, recipe #64): these kernels are
@@ -119,19 +126,20 @@ struct ApplyLaplacianKernel {
     if (he) {  // face permittivity (harmonic), with or without cut-cell
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
-      L(i, j) = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
-                wym * p(i, j - 1) - (wxm + wxp + wym + wyp) * p(i, j);
+      L(i, j) = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) + wym * p(i, j - 1) -
+                (wxm + wxp + wym + wyp) * p(i, j);
     } else if (hc)
-      L(i, j) = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
-                cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1) -
-                cf(i, j, 4) * p(i, j);
+      L(i, j) = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) + cf(i, j, 3) * p(i, j + 1) +
+                cf(i, j, 2) * p(i, j - 1) - cf(i, j, 4) * p(i, j);
     else
       L(i, j) = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
                 (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
     // FULL block: ADDITIVE cross fluxes (after the diagonal stencil). hxy=hyx=false => +0, bit-identical.
-    if (hxy || hyx) L(i, j) += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
+    if (hxy || hyx)
+      L(i, j) += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
     // Helmholtz / screened operator: L phi = div(A grad phi) - kappa phi.
-    if (hk) L(i, j) -= ka(i, j) * p(i, j);
+    if (hk)
+      L(i, j) -= ka(i, j) * p(i, j);
   }
 };
 
@@ -160,17 +168,17 @@ struct PoissonResidualKernel {
     if (he) {  // face permittivity (harmonic), with or without cut-cell
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
-      lap = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
-            wym * p(i, j - 1) - (wxm + wxp + wym + wyp) * p(i, j);
+      lap = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) + wym * p(i, j - 1) -
+            (wxm + wxp + wym + wyp) * p(i, j);
     } else if (hc)
-      lap = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
-            cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1) -
-            cf(i, j, 4) * p(i, j);
+      lap = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) + cf(i, j, 3) * p(i, j + 1) +
+            cf(i, j, 2) * p(i, j - 1) - cf(i, j, 4) * p(i, j);
     else
       lap = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
             (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
     // FULL block: ADDITIVE cross fluxes (after the diagonal stencil). hxy=hyx=false => +0, bit-identical.
-    if (hxy || hyx) lap += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
+    if (hxy || hyx)
+      lap += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
     // res = f - L phi, L phi = div(A grad phi) - kappa phi = lap - kappa phi.
     r(i, j) = ff(i, j) - lap + (hk ? ka(i, j) * p(i, j) : Real(0));
   }
@@ -179,13 +187,10 @@ struct PoissonResidualKernel {
 
 // a_xy/a_yx: off-diagonal coefficients (FULL tensor). nullptr => cross term absent
 // (bit-identical diagonal/Poisson operator). Ghosts (1 layer) assumed filled by the caller.
-inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
-                            MultiFab& lap, const MultiFab* coef = nullptr,
-                            const MultiFab* eps = nullptr,
-                            const MultiFab* kappa = nullptr,
-                            const MultiFab* eps_y = nullptr,
-                            const MultiFab* a_xy = nullptr,
-                            const MultiFab* a_yx = nullptr) {
+inline void apply_laplacian(const MultiFab& phi, const Geometry& geom, MultiFab& lap,
+                            const MultiFab* coef = nullptr, const MultiFab* eps = nullptr,
+                            const MultiFab* kappa = nullptr, const MultiFab* eps_y = nullptr,
+                            const MultiFab* a_xy = nullptr, const MultiFab* a_yx = nullptr) {
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
   const Real idx = Real(1) / geom.dx();
@@ -206,22 +211,18 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom,
     const bool hyx = a_yx != nullptr;  // Ayx cross half-term (y faces)
     const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
     const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, idx, idy, hc, cf, he,
-                                                  ep, ey, hk, ka, hxy, hyx, axy, ayx});
+    for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, idx, idy, hc, cf, he, ep, ey,
+                                                  hk, ka, hxy, hyx, axy, ayx});
   }
 }
 
 // res = f - div(A grad phi) on active cells, 0 on conductor cells.
 // a_xy/a_yx: off-diagonal coefficients (cf. apply_laplacian). nullptr => bit-identical.
-inline void poisson_residual(MultiFab& phi, const MultiFab& f,
-                             const Geometry& geom, const BCRec& bc,
-                             MultiFab& res, const MultiFab* mask = nullptr,
-                             const MultiFab* coef = nullptr,
-                             const MultiFab* eps = nullptr,
-                             const MultiFab* kappa = nullptr,
-                             const MultiFab* eps_y = nullptr,
-                             const MultiFab* a_xy = nullptr,
-                             const MultiFab* a_yx = nullptr) {
+inline void poisson_residual(MultiFab& phi, const MultiFab& f, const Geometry& geom,
+                             const BCRec& bc, MultiFab& res, const MultiFab* mask = nullptr,
+                             const MultiFab* coef = nullptr, const MultiFab* eps = nullptr,
+                             const MultiFab* kappa = nullptr, const MultiFab* eps_y = nullptr,
+                             const MultiFab* a_xy = nullptr, const MultiFab* a_yx = nullptr) {
   device_fence();  // GPU: phi may have been written by a kernel (smoother); we
                    // wait before the host read in fill_ghosts.
   fill_ghosts(phi, geom.domain, bc);
@@ -248,8 +249,9 @@ inline void poisson_residual(MultiFab& phi, const MultiFab& f,
     const bool hyx = a_yx != nullptr;  // Ayx cross half-term (y faces)
     const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
     const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, detail::PoissonResidualKernel{p, ff, r, idx2, idy2, idx, idy, hm, mk, hc, cf,
-                                                   he, ep, ey, hk, ka, hxy, hyx, axy, ayx});
+    for_each_cell(v,
+                  detail::PoissonResidualKernel{p,  ff, r,  idx2, idy2, idx, idy, hm,  mk,  hc,
+                                                cf, he, ep, ey,   hk,   ka,  hxy, hyx, axy, ayx});
   }
 }
 
@@ -271,22 +273,23 @@ struct GsColorKernel {
   bool hk;
   ConstArray4 ka;
   ADC_HD void operator()(int i, int j) const {
-    if (((i + j) & 1) != color) return;
-    if (hm && mk(i, j) == Real(0)) return;  // conductor: pins phi=0
+    if (((i + j) & 1) != color)
+      return;
+    if (hm && mk(i, j) == Real(0))
+      return;  // conductor: pins phi=0
     Real off, diag;
     if (he) {  // face permittivity (harmonic), with or without cut-cell
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
-      off = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) +
-            wym * p(i, j - 1);
+      off = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) + wym * p(i, j - 1);
       diag = wxm + wxp + wym + wyp;
-    } else if (hc) {  // cut-cell stencil (Shortley-Weller); conductor neighbor = phi=0 on the circle
-      off = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) +
-            cf(i, j, 3) * p(i, j + 1) + cf(i, j, 2) * p(i, j - 1);
+    } else if (
+        hc) {  // cut-cell stencil (Shortley-Weller); conductor neighbor = phi=0 on the circle
+      off = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) + cf(i, j, 3) * p(i, j + 1) +
+            cf(i, j, 2) * p(i, j - 1);
       diag = cf(i, j, 4);
     } else {
-      off = (p(i + 1, j) + p(i - 1, j)) * idx2 +
-            (p(i, j + 1) + p(i, j - 1)) * idy2;
+      off = (p(i + 1, j) + p(i - 1, j)) * idx2 + (p(i, j + 1) + p(i, j - 1)) * idy2;
       diag = diag0;
     }
     // Reaction term: the operator becomes div(eps grad phi) - kappa phi, so the
@@ -295,10 +298,9 @@ struct GsColorKernel {
   }
 };
 
-inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
-                     int color, const MultiFab* mask, const MultiFab* coef,
-                     const MultiFab* eps, const MultiFab* kappa = nullptr,
-                     const MultiFab* eps_y = nullptr) {
+inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom, int color,
+                     const MultiFab* mask, const MultiFab* coef, const MultiFab* eps,
+                     const MultiFab* kappa = nullptr, const MultiFab* eps_y = nullptr) {
   const Real idx2 = Real(1) / (geom.dx() * geom.dx());
   const Real idy2 = Real(1) / (geom.dy() * geom.dy());
   const Real diag0 = 2 * idx2 + 2 * idy2;
@@ -316,17 +318,15 @@ inline void gs_color(MultiFab& phi, const MultiFab& f, const Geometry& geom,
     const ConstArray4 ey = (he && eps_y) ? eps_y->fab(li).const_array() : ep;
     const bool hk = kappa != nullptr;  // reaction term -kappa phi (Helmholtz / screened)
     const ConstArray4 ka = hk ? kappa->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, GsColorKernel{p, ff, idx2, idy2, diag0, color, hm, mk, hc, cf,
-                                   he, ep, ey, hk, ka});
+    for_each_cell(
+        v, GsColorKernel{p, ff, idx2, idy2, diag0, color, hm, mk, hc, cf, he, ep, ey, hk, ka});
   }
 }
 }  // namespace detail
 
-inline void gs_rb_sweep(MultiFab& phi, const MultiFab& f, const Geometry& geom,
-                        const BCRec& bc, const MultiFab* mask = nullptr,
-                        const MultiFab* coef = nullptr,
-                        const MultiFab* eps = nullptr,
-                        const MultiFab* kappa = nullptr,
+inline void gs_rb_sweep(MultiFab& phi, const MultiFab& f, const Geometry& geom, const BCRec& bc,
+                        const MultiFab* mask = nullptr, const MultiFab* coef = nullptr,
+                        const MultiFab* eps = nullptr, const MultiFab* kappa = nullptr,
                         const MultiFab* eps_y = nullptr) {
   device_fence();  // wait for the previous kernel before the host read of the halos
   fill_ghosts(phi, geom.domain, bc);
@@ -336,11 +336,12 @@ inline void gs_rb_sweep(MultiFab& phi, const MultiFab& f, const Geometry& geom,
   detail::gs_color(phi, f, geom, 1, mask, coef, eps, kappa, eps_y);  // black
 }
 
-inline void gs_smooth(MultiFab& phi, const MultiFab& f, const Geometry& geom,
-                      const BCRec& bc, int nsweeps, const MultiFab* mask = nullptr,
-                      const MultiFab* coef = nullptr, const MultiFab* eps = nullptr,
-                      const MultiFab* kappa = nullptr, const MultiFab* eps_y = nullptr) {
-  for (int s = 0; s < nsweeps; ++s) gs_rb_sweep(phi, f, geom, bc, mask, coef, eps, kappa, eps_y);
+inline void gs_smooth(MultiFab& phi, const MultiFab& f, const Geometry& geom, const BCRec& bc,
+                      int nsweeps, const MultiFab* mask = nullptr, const MultiFab* coef = nullptr,
+                      const MultiFab* eps = nullptr, const MultiFab* kappa = nullptr,
+                      const MultiFab* eps_y = nullptr) {
+  for (int s = 0; s < nsweeps; ++s)
+    gs_rb_sweep(phi, f, geom, bc, mask, coef, eps, kappa, eps_y);
 }
 
 namespace detail {
@@ -349,7 +350,8 @@ struct ZeroConductorKernel {
   Array4 p;
   ConstArray4 mk;
   ADC_HD void operator()(int i, int j) const {
-    if (mk(i, j) == Real(0)) p(i, j) = 0;
+    if (mk(i, j) == Real(0))
+      p(i, j) = 0;
   }
 };
 }  // namespace detail

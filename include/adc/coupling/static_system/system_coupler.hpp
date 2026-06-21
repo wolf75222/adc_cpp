@@ -48,8 +48,7 @@ struct ScopedBlockState {
   Block& block;
   MultiFab* old_state;
 
-  ScopedBlockState(Block& b, MultiFab& stage_state)
-      : block(b), old_state(b.state) {
+  ScopedBlockState(Block& b, MultiFab& stage_state) : block(b), old_state(b.state) {
     block.state = &stage_state;
   }
 
@@ -69,11 +68,9 @@ struct ScopedBlockState {
 /// ASSEMBLES the fields (system Poisson + shared aux) and a block residual evaluator. No time
 /// stepping. @tparam System: CoupledSystem. @tparam RhsAssembler: Poisson RHS assembler.
 /// @tparam Elliptic: elliptic backend (EllipticSolver concept, default GeometricMG).
-template <CoupledSystemLike System, class RhsAssembler,
-          class Elliptic = GeometricMG>
+template <CoupledSystemLike System, class RhsAssembler, class Elliptic = GeometricMG>
 class SystemAssembler {
-  static_assert(EllipticSolver<Elliptic>,
-                "the elliptic backend must model EllipticSolver");
+  static_assert(EllipticSolver<Elliptic>, "the elliptic backend must model EllipticSolver");
 
  public:
   // bz: out-of-plane magnetic field B_z(x, y) supplied by the user (constant or field),
@@ -81,9 +78,8 @@ class SystemAssembler {
   // by the blocks (aux_comps): a block reading B_z (n_aux=4) sees it, a base block (3)
   // ignores the component. Without an extra-field block the width stays 3 -> allocation and numerics
   // strictly bit-identical to history.
-  SystemAssembler(System system, const Geometry& geom, const BoxArray& ba,
-                  const BCRec& bcPhi, RhsAssembler rhs_assembler,
-                  std::function<bool(Real, Real)> active = {},
+  SystemAssembler(System system, const Geometry& geom, const BoxArray& ba, const BCRec& bcPhi,
+                  RhsAssembler rhs_assembler, std::function<bool(Real, Real)> active = {},
                   std::function<Real(Real, Real)> bz = {})
       : system_(std::move(system)),
         rhs_assembler_(std::move(rhs_assembler)),
@@ -120,8 +116,7 @@ class SystemAssembler {
   /// This is the method-of-lines arrow the Driver passes to the TimeStepper. Fills the ghosts of
   /// @p state per block.bc before assembly.
   template <class Limiter, class NumericalFlux, class Block>
-  void block_residual(Block& block, MultiFab& state, MultiFab& R,
-                      bool recompute_aux) {
+  void block_residual(Block& block, MultiFab& state, MultiFab& R, bool recompute_aux) {
     if (recompute_aux) {
       detail::ScopedBlockState<Block> swap(block, state);
       solve_fields();
@@ -149,7 +144,8 @@ class SystemAssembler {
     sys.for_each_block([&](const auto& b) {
       using Model = std::decay_t<decltype(b.model)>;
       const int c = aux_comps<Model>();
-      if (c > w) w = c;
+      if (c > w)
+        w = c;
     });
     return w;
   }
@@ -159,7 +155,8 @@ class SystemAssembler {
   // RUNTIME guard on aux_ncomp_ (the width is only known at construction). Halos are then
   // maintained by derive_aux (aux_bc_); field_postprocess only writes phi/grad (comp 0..2).
   void fill_bz() {
-    if (!bz_ || aux_ncomp_ <= kAuxBaseComps) return;
+    if (!bz_ || aux_ncomp_ <= kAuxBaseComps)
+      return;
     for (int li = 0; li < aux_.local_size(); ++li)
       detail::fill_bz_box(aux_.fab(li), aux_.box(li), geom_, bz_);  // valid box
     fill_ghosts(aux_, geom_.domain, aux_bc_);  // B_z halos before the 1st solve
@@ -181,18 +178,16 @@ class SystemAssembler {
 /// ADVANCES the system: carries the schedule (per-species subcycling, adaptive multirate,
 /// implicit/IMEX delegated) and calls a TimeStepper. OWNS a SystemAssembler and delegates the
 /// fields to it. Same template parameters as SystemAssembler.
-template <CoupledSystemLike System, class RhsAssembler,
-          class Elliptic = GeometricMG>
+template <CoupledSystemLike System, class RhsAssembler, class Elliptic = GeometricMG>
 class SystemDriver {
  public:
   /// Builds the driver (which builds the underlying assembler). @p active: optional wall predicate
   /// passed to the MG; @p bz: optional B_z(x, y) field shared by the blocks.
-  SystemDriver(System system, const Geometry& geom, const BoxArray& ba,
-               const BCRec& bcPhi, RhsAssembler rhs_assembler,
-               std::function<bool(Real, Real)> active = {},
+  SystemDriver(System system, const Geometry& geom, const BoxArray& ba, const BCRec& bcPhi,
+               RhsAssembler rhs_assembler, std::function<bool(Real, Real)> active = {},
                std::function<Real(Real, Real)> bz = {})
-      : asm_(std::move(system), geom, ba, bcPhi, std::move(rhs_assembler),
-             std::move(active), std::move(bz)) {}
+      : asm_(std::move(system), geom, ba, bcPhi, std::move(rhs_assembler), std::move(active),
+             std::move(bz)) {}
 
   // Accessors delegated to the assembler (compat with the old SystemCoupler API).
   System& system() { return asm_.system(); }
@@ -229,9 +224,7 @@ class SystemDriver {
       using Block = std::decay_t<decltype(block)>;
       if constexpr (block_time_treatment_v<Block> != TimeTreatment::Prescribed) {
         const Real w_s = max_wave_speed_mf(block.model, block.U(), asm_.aux());
-        const int stride = (w_s <= Real(0))
-                               ? 1
-                               : std::max(1, static_cast<int>(wmax / w_s));
+        const int stride = (w_s <= Real(0)) ? 1 : std::max(1, static_cast<int>(wmax / w_s));
         if (macro_step_ % stride == 0) {
           constexpr int n = block_substeps_v<Block>;
           const Real hh = (macro_dt * static_cast<Real>(stride)) / static_cast<Real>(n);
@@ -312,10 +305,10 @@ class SystemDriver {
     constexpr TimeTreatment treatment = block_time_treatment_v<Block>;
     if constexpr (treatment == TimeTreatment::Explicit) {
       advance_explicit_block(block, h);
-    } else if constexpr (treatment == TimeTreatment::Implicit ||
-                         treatment == TimeTreatment::IMEX) {
+    } else if constexpr (treatment == TimeTreatment::Implicit || treatment == TimeTreatment::IMEX) {
       asm_.solve_fields();
-      if constexpr (treatment == TimeTreatment::IMEX) explicit_transport(block, h);
+      if constexpr (treatment == TimeTreatment::IMEX)
+        explicit_transport(block, h);
       advance_implicit(*this, block, h, s, n);
     }
   }

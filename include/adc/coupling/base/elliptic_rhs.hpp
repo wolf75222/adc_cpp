@@ -63,9 +63,7 @@ struct TwoFieldChargeDensityRhsKernel {
   ConstArray4 u0, u1;
   Real a0, a1;
   int c0, c1;
-  ADC_HD void operator()(int i, int j) const {
-    r(i, j, 0) = a0 * u0(i, j, c0) + a1 * u1(i, j, c1);
-  }
+  ADC_HD void operator()(int i, int j) const { r(i, j, 0) = a0 * u0(i, j, c0) + a1 * u1(i, j, c1); }
 };
 
 }  // namespace detail
@@ -135,8 +133,7 @@ struct AddScaledComponentKernel {
 
 /// rhs(.,.,0) += q * U(.,.,comp) over the valid cells. Accumulation brick of the N-species elliptic
 /// RHS (identical layouts between U and rhs).
-inline void add_scaled_component(const MultiFab& U, Real q, int comp,
-                                 MultiFab& rhs) {
+inline void add_scaled_component(const MultiFab& U, Real q, int comp, MultiFab& rhs) {
   for (int li = 0; li < rhs.local_size(); ++li) {
     const ConstArray4 u = U.fab(li).const_array();
     Array4 r = rhs.fab(li).array();

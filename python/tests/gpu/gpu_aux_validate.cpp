@@ -24,8 +24,8 @@
 #include <adc/mesh/for_each.hpp>  // device_fence
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
-#include <adc/numerics/numerical_flux.hpp>  // RusanovFlux
-#include <adc/numerics/reconstruction.hpp>  // NoSlope
+#include <adc/numerics/numerical_flux.hpp>    // RusanovFlux
+#include <adc/numerics/reconstruction.hpp>    // NoSlope
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, load_aux, aux_comps
 #include <adc/parallel/comm.hpp>
 
@@ -70,11 +70,15 @@ int main(int argc, char** argv) {
 #endif
   std::string dump_prefix;
   for (int k = 1; k < argc; ++k)
-    if (std::strncmp(argv[k], "--dump=", 7) == 0) dump_prefix = argv[k] + 7;
+    if (std::strncmp(argv[k], "--dump=", 7) == 0)
+      dump_prefix = argv[k] + 7;
 
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 #if defined(ADC_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
@@ -101,7 +105,8 @@ int main(int argc, char** argv) {
     Fab2D& f = aux.fab(li);
     const Box2D g = f.grown_box();
     for (int j = g.lo[1]; j <= g.hi[1]; ++j)
-      for (int i = g.lo[0]; i <= g.hi[0]; ++i) f(i, j, 4) = te(geom.x_cell(i), geom.y_cell(j));
+      for (int i = g.lo[0]; i <= g.hi[0]; ++i)
+        f(i, j, 4) = te(geom.x_cell(i), geom.y_cell(j));
   }
 
   // assemble_rhs : R = -div F + S ; flux nul -> R = S = T_e * u. La lecture de a.T_e = a(i,j,4)
@@ -140,7 +145,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (fails == 0) std::printf("OK gpu_aux_validate (exec=%s)\n", space);
+  if (fails == 0)
+    std::printf("OK gpu_aux_validate (exec=%s)\n", space);
 #if defined(ADC_HAS_KOKKOS)
   Kokkos::finalize();
 #endif

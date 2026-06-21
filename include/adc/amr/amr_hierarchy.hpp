@@ -44,15 +44,14 @@ class AmrHierarchy {
   /// @param ngrow number of ghost layers of the MultiFab.
   /// @param ref_ratio integer refinement ratio; only kAmrRefRatio (2) is supported today
   ///        and any other value is rejected at construction (see refinement_ratio.hpp).
-  AmrHierarchy(const Box2D& coarse_domain, int max_grid_size, int ncomp,
-               int ngrow, int ref_ratio = kAmrRefRatio)
+  AmrHierarchy(const Box2D& coarse_domain, int max_grid_size, int ncomp, int ngrow,
+               int ref_ratio = kAmrRefRatio)
       : ref_ratio_(ref_ratio), ncomp_(ncomp), ngrow_(ngrow) {
     require_supported_ref_ratio(ref_ratio);
     BoxArray ba = BoxArray::from_domain(coarse_domain, max_grid_size);
     domain_.push_back(coarse_domain);
     ba_.push_back(ba);
-    data_.emplace_back(ba, DistributionMapping(ba.size(), n_ranks()), ncomp,
-                       ngrow);
+    data_.emplace_back(ba, DistributionMapping(ba.size(), n_ranks()), ncomp, ngrow);
   }
 
   /// Adds a fine level defined by its BoxArray (in fine index space).
@@ -62,8 +61,7 @@ class AmrHierarchy {
     const int lev = num_levels();
     domain_.push_back(domain_[lev - 1].refine(ref_ratio_));
     ba_.push_back(fine_ba);
-    data_.emplace_back(fine_ba, DistributionMapping(fine_ba.size(), n_ranks()),
-                       ncomp_, ngrow_);
+    data_.emplace_back(fine_ba, DistributionMapping(fine_ba.size(), n_ranks()), ncomp_, ngrow_);
   }
 
   /// Installs (adds or replaces) a fine level at index lev. Used by the regrid.

@@ -39,7 +39,8 @@ int main(int argc, char** argv) {
       const Box2D b = F.box();
       for (int c = 0; c < ncomp; ++c)
         for (int j = b.lo[1]; j <= b.hi[1]; ++j)
-          for (int i = b.lo[0]; i <= b.hi[0]; ++i) F(i, j, c) = val(i, j, c);
+          for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+            F(i, j, c) = val(i, j, c);
     }
 
     fill_boundary(mf, dom, Periodicity{true, true});  // local for_each + MPI cross-rang
@@ -52,7 +53,8 @@ int main(int argc, char** argv) {
       for (int c = 0; c < ncomp; ++c)
         for (int j = g.lo[1]; j <= g.hi[1]; ++j)
           for (int i = g.lo[0]; i <= g.hi[0]; ++i)
-            if (std::fabs(F(i, j, c) - val(i, j, c)) > 1e-12) ++fails;
+            if (std::fabs(F(i, j, c) - val(i, j, c)) > 1e-12)
+              ++fails;
     }
     gfails = all_reduce_sum(fails);
 #if defined(ADC_HAS_KOKKOS)

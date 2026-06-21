@@ -43,9 +43,7 @@ namespace adc {
 // advance a block over dt by reading the coupler (for up-to-date aux / phi) and the model.
 template <class Stepper, class Coupler, class Block>
 concept ImplicitBlockStepper =
-    requires(const Stepper st, Coupler& c, Block& b, Real dt, int s, int n) {
-      st(c, b, dt, s, n);
-    };
+    requires(const Stepper st, Coupler& c, Block& b, Real dt, int s, int n) { st(c, b, dt, s, n); };
 
 // OPTIONAL trait: a model can declare which conserved variables are treated
 // implicitly (the stiff ones). is_implicit(c) -> bool. A model WITHOUT this trait is treated
@@ -72,8 +70,7 @@ ADC_HD inline bool model_is_implicit(int c) {
 // WITHOUT the trait keeps the historical finite differences, bit-identical. ADC_HD required.
 template <class M>
 concept HasSourceJacobian =
-    requires(const M m, const typename M::State u, const Aux a,
-             Real (&J)[M::n_vars][M::n_vars]) {
+    requires(const M m, const typename M::State u, const Aux a, Real (&J)[M::n_vars][M::n_vars]) {
       m.source_jacobian(u, a, J);
     };
 
@@ -93,7 +90,8 @@ struct ImplicitMask {
 // (default) delegates to model_is_implicit<Model> -> strictly identical to before this change.
 template <class Model, int N>
 ADC_HD inline bool is_implicit_component(const ImplicitMask<N>& mask, int c) {
-  if (mask.active) return mask.flag[c];
+  if (mask.active)
+    return mask.flag[c];
   return model_is_implicit<Model>(c);
 }
 
@@ -133,7 +131,8 @@ struct NewtonOptions {
 /// non-default test) differ between the two callers and remain at each call site.
 inline void validate_newton_options(const NewtonOptions& newton, const char* where) {
   const std::string ctx = std::string(where) + " : ";
-  if (newton.max_iters < 1) throw std::runtime_error(ctx + "newton_max_iters >= 1");
+  if (newton.max_iters < 1)
+    throw std::runtime_error(ctx + "newton_max_iters >= 1");
   if (newton.rel_tol < 0.0 || newton.abs_tol < 0.0 || newton.fd_eps <= 0.0)
     throw std::runtime_error(ctx + "newton_rel_tol/abs_tol >= 0 and newton_fd_eps > 0");
   if (!(newton.damping > 0.0 && newton.damping <= 1.0))
@@ -141,7 +140,8 @@ inline void validate_newton_options(const NewtonOptions& newton, const char* whe
   if (newton.fail_policy != NewtonOptions::kFailNone &&
       newton.fail_policy != NewtonOptions::kFailWarn &&
       newton.fail_policy != NewtonOptions::kFailThrow)
-    throw std::runtime_error(ctx + "newton_fail_policy invalid "
+    throw std::runtime_error(ctx +
+                             "newton_fail_policy invalid "
                              "(NewtonOptions::kFailNone|kFailWarn|kFailThrow)");
 }
 
@@ -163,11 +163,12 @@ struct NewtonCellStat {
 /// with MAXIMAL encoded index (j then i), enough to go inspect the state; -1 if none. failed_comp
 /// is the conserved component carrying the worst residual of THAT cell.
 struct NewtonReport {
-  bool enabled = false;        ///< a report was computed (at least one instrumented substep)
-  bool converged = true;       ///< no failed cell over the advance
-  Real max_residual = Real(0); ///< max over cells/substeps of ||F||_inf at exit
+  bool enabled = false;           ///< a report was computed (at least one instrumented substep)
+  bool converged = true;          ///< no failed cell over the advance
+  Real max_residual = Real(0);    ///< max over cells/substeps of ||F||_inf at exit
   Real max_iters_used = Real(0);  ///< max over cells/substeps of iterations consumed
-  double n_failed = 0;         ///< number of (cells x substeps) failed (non-finite / pivot / non-convergence)
+  double n_failed =
+      0;  ///< number of (cells x substeps) failed (non-finite / pivot / non-convergence)
   double failed_i = -1, failed_j = -1, failed_comp = -1;  ///< one offending cell (-1 if none)
   void reset() { *this = NewtonReport{}; }
 };
@@ -193,22 +194,35 @@ ADC_HD inline bool solve_dense(Real J[N][N], Real b[N], Real x[N], int n) {
     Real best = J[p][p] < 0 ? -J[p][p] : J[p][p];
     for (int r = p + 1; r < n; ++r) {
       const Real v = J[r][p] < 0 ? -J[r][p] : J[r][p];
-      if (v > best) { best = v; piv = r; }
+      if (v > best) {
+        best = v;
+        piv = r;
+      }
     }
     if (piv != p) {
-      for (int c = 0; c < n; ++c) { const Real t = J[p][c]; J[p][c] = J[piv][c]; J[piv][c] = t; }
-      const Real t = b[p]; b[p] = b[piv]; b[piv] = t;
+      for (int c = 0; c < n; ++c) {
+        const Real t = J[p][c];
+        J[p][c] = J[piv][c];
+        J[piv][c] = t;
+      }
+      const Real t = b[p];
+      b[p] = b[piv];
+      b[piv] = t;
     }
     const Real d = J[p][p];
-    if (d == Real(0) || !newton_finite(d)) ok = false;
+    if (d == Real(0) || !newton_finite(d))
+      ok = false;
     for (int r = 0; r < n; ++r) {
-      if (r == p) continue;
+      if (r == p)
+        continue;
       const Real f = J[r][p] / d;
-      for (int c = p; c < n; ++c) J[r][c] -= f * J[p][c];
+      for (int c = p; c < n; ++c)
+        J[r][c] -= f * J[p][c];
       b[r] -= f * b[p];
     }
   }
-  for (int p = 0; p < n; ++p) x[p] = b[p] / J[p][p];
+  for (int p = 0; p < n; ++p)
+    x[p] = b[p] / J[p][p];
   return ok;
 }
 
@@ -267,14 +281,16 @@ ADC_HD inline typename Model::State newton_source_solve(
   int impl[N];  // indices of the implicit components (the first m_impl useful slots)
   int m_impl = 0;
   for (int c = 0; c < N; ++c)
-    if (is_implicit_component<Model>(mask, c)) impl[m_impl++] = c;
+    if (is_implicit_component<Model>(mask, c))
+      impl[m_impl++] = c;
 
   typename Model::State W = Un;
   // (1) explicit: forward Euler on the non-implicit components (source at the input).
   if (m_impl < N) {
     const typename Model::State S_in = m.source(Un, a);
     for (int c = 0; c < N; ++c)
-      if (!is_implicit_component<Model>(mask, c)) W[c] = Un[c] + dt * S_in[c];
+      if (!is_implicit_component<Model>(mask, c))
+        W[c] = Un[c] + dt * S_in[c];
   }
   const bool tol_active = opts.rel_tol > Real(0) || opts.abs_tol > Real(0);
   if (!tol_active && stat == nullptr) {
@@ -291,7 +307,8 @@ ADC_HD inline typename Model::State newton_source_solve(
       assemble_newton_jacobian<Model, N>(m, W, a, dt, opts, impl, m_impl, S0, J);
       Real delta[N];
       solve_dense<N>(J, F, delta, m_impl);
-      for (int r = 0; r < m_impl; ++r) W[impl[r]] -= opts.damping * delta[r];
+      for (int r = 0; r < m_impl; ++r)
+        W[impl[r]] -= opts.damping * delta[r];
     }
     return W;
   }
@@ -320,19 +337,29 @@ ADC_HD inline typename Model::State newton_source_solve(
       const int c = impl[r];
       F[r] = W[c] - Un[c] - dt * S0[c];
       const Real av = F[r] < 0 ? -F[r] : F[r];
-      if (av > res) { res = av; worst_comp = c; }
+      if (av > res) {
+        res = av;
+        worst_comp = c;
+      }
     }
-    if (!newton_finite(res)) failed = true;  // marks WITHOUT break: trajectory (2a) preserved
+    if (!newton_finite(res))
+      failed = true;  // marks WITHOUT break: trajectory (2a) preserved
     if (tol_active) {
-      if (it == 0) res0 = res;
-      if (res <= opts.abs_tol + opts.rel_tol * res0) { converged = true; break; }
+      if (it == 0)
+        res0 = res;
+      if (res <= opts.abs_tol + opts.rel_tol * res0) {
+        converged = true;
+        break;
+      }
     }
     Real J[N][N];
     assemble_newton_jacobian<Model, N>(m, W, a, dt, opts, impl, m_impl, S0, J);
     Real delta[N];
     const bool ok = solve_dense<N>(J, F, delta, m_impl);
-    if (!ok) failed = true;  // degenerate pivot: marks WITHOUT break, inf/NaN division as in (2a)
-    for (int r = 0; r < m_impl; ++r) W[impl[r]] -= opts.damping * delta[r];
+    if (!ok)
+      failed = true;  // degenerate pivot: marks WITHOUT break, inf/NaN division as in (2a)
+    for (int r = 0; r < m_impl; ++r)
+      W[impl[r]] -= opts.damping * delta[r];
     used = it + 1;
   }
   // Exit by budget exhaustion: recompute the residual AFTER the last update (honest
@@ -345,10 +372,15 @@ ADC_HD inline typename Model::State newton_source_solve(
       const int c = impl[r];
       const Real fr = W[c] - Un[c] - dt * S0[c];
       const Real av = fr < 0 ? -fr : fr;
-      if (av > res) { res = av; worst_comp = c; }
+      if (av > res) {
+        res = av;
+        worst_comp = c;
+      }
     }
-    if (!newton_finite(res)) failed = true;
-    else if (tol_active) converged = res <= opts.abs_tol + opts.rel_tol * res0;
+    if (!newton_finite(res))
+      failed = true;
+    else if (tol_active)
+      converged = res <= opts.abs_tol + opts.rel_tol * res0;
   }
   if (stat) {
     stat->res = res;
@@ -363,8 +395,8 @@ ADC_HD inline typename Model::State newton_source_solve(
 /// {max_iters = iters} (tolerances inactive, historical fd_eps) -> path (2a), bit-identical.
 template <class Model>
 ADC_HD inline typename Model::State newton_source_solve(
-    const Model& m, const typename Model::State& Un, const Aux& a, Real dt,
-    int iters, const ImplicitMask<Model::n_vars>& mask = {}) {
+    const Model& m, const typename Model::State& Un, const Aux& a, Real dt, int iters,
+    const ImplicitMask<Model::n_vars>& mask = {}) {
   NewtonOptions opts;
   opts.max_iters = iters;
   return newton_source_solve(m, Un, a, dt, opts, mask, nullptr);
@@ -388,7 +420,8 @@ struct BackwardEulerSourceKernel {
     const typename Model::State Un = load_state<Model>(uc, i, j);
     const Aux a = load_aux<aux_comps<Model>()>(ax, i, j);
     const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, opts, mask, nullptr);
-    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = W[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      u(i, j, c) = W[c];
   }
 };
 
@@ -412,7 +445,8 @@ struct BackwardEulerSourceStatKernel {
     const Aux a = load_aux<aux_comps<Model>()>(ax, i, j);
     NewtonCellStat s{};
     const typename Model::State W = newton_source_solve<Model>(m, Un, a, dt, opts, mask, &s);
-    for (int c = 0; c < Model::n_vars; ++c) u(i, j, c) = W[c];
+    for (int c = 0; c < Model::n_vars; ++c)
+      u(i, j, c) = W[c];
     st(i, j, 0) = s.res;
     st(i, j, 1) = s.iters;
     st(i, j, 2) = s.failed;
@@ -429,7 +463,8 @@ struct NewtonStatMaxKernel {
   int comp;
   ADC_HD void operator()(int i, int j, Real& acc) const {
     const Real v = st(i, j, comp);
-    if (v > acc) acc = v;
+    if (v > acc)
+      acc = v;
   }
 };
 struct NewtonStatSumKernel {
@@ -448,9 +483,8 @@ struct NewtonStatSumKernel {
 // the caller's responsibility at the start of the advance). report == nullptr AND tolerances inactive -> historical
 // path strictly bit-identical, zero allocation, zero extra evaluation.
 template <class Model>
-void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
-                           Real dt, const NewtonOptions& opts,
-                           const ImplicitMask<Model::n_vars>& mask = {},
+void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U, Real dt,
+                           const NewtonOptions& opts, const ImplicitMask<Model::n_vars>& mask = {},
                            NewtonReport* report = nullptr) {
   // FAST path (historical): neither a report requested nor an active fail_policy -> no scratch, no
   // reduction, historical kernel bit-identical. A fail_policy != kFailNone REQUIRES the detection,
@@ -474,8 +508,8 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
     const ConstArray4 uc = U.fab(li).const_array();
     const ConstArray4 ax = aux.fab(li).const_array();
     const Box2D b = U.box(li);
-    for_each_cell(b, detail::BackwardEulerSourceStatKernel<Model>{model, uc, ax, u, st, dt, opts,
-                                                                  mask});
+    for_each_cell(
+        b, detail::BackwardEulerSourceStatKernel<Model>{model, uc, ax, u, st, dt, opts, mask});
   }
   Real rmax = Real(0), imax = Real(0), nfail = Real(0), enc = Real(-1);
   for (int li = 0; li < stats.local_size(); ++li) {
@@ -503,8 +537,13 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
     report->max_residual = std::max(report->max_residual, rmax);
     report->max_iters_used = std::max(report->max_iters_used, imax);
     report->n_failed += nfail_g;
-    if (nfail_g > 0) { report->failed_i = fi; report->failed_j = fj; report->failed_comp = fc; }
-    if (nfail_g > 0 || !newton_finite(rmax)) report->converged = false;
+    if (nfail_g > 0) {
+      report->failed_i = fi;
+      report->failed_j = fj;
+      report->failed_comp = fc;
+    }
+    if (nfail_g > 0 || !newton_finite(rmax))
+      report->converged = false;
   }
   // FAIL_POLICY (host, after reductions -- the device kernels never throw): reaction to the
   // failed cells. kFailWarn: one stderr warning (rank 0). kFailThrow: hard error with
@@ -515,8 +554,10 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
                   "Implicit source Newton: %.0f cell(s) failed (max residual %.3e; cell "
                   "(%g, %g), component %g)",
                   nfail_g, static_cast<double>(rmax), fi, fj, fc);
-    if (opts.fail_policy == NewtonOptions::kFailThrow) throw std::runtime_error(msg);
-    if (my_rank() == 0) std::fprintf(stderr, "[adc] WARNING %s\n", msg);
+    if (opts.fail_policy == NewtonOptions::kFailThrow)
+      throw std::runtime_error(msg);
+    if (my_rank() == 0)
+      std::fprintf(stderr, "[adc] WARNING %s\n", msg);
   }
 }
 
@@ -524,9 +565,8 @@ void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
 /// NewtonOptions{max_iters = iters} without report -> historical path bit-identical. Kept for
 /// existing callers (AMR couplers, ImplicitSourceStepper, tests).
 template <class Model>
-void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U,
-                           Real dt, int iters = 2,
-                           const ImplicitMask<Model::n_vars>& mask = {}) {
+void backward_euler_source(const Model& model, const MultiFab& aux, MultiFab& U, Real dt,
+                           int iters = 2, const ImplicitMask<Model::n_vars>& mask = {}) {
   NewtonOptions opts;
   opts.max_iters = iters;
   backward_euler_source(model, aux, U, dt, opts, mask, nullptr);
@@ -539,8 +579,7 @@ struct ImplicitSourceStepper {
   int iters = 2;
 
   template <class Coupler, class Block>
-  void operator()(Coupler& coupler, Block& block, Real dt, int /*substep*/,
-                  int /*nsub*/) const {
+  void operator()(Coupler& coupler, Block& block, Real dt, int /*substep*/, int /*nsub*/) const {
     backward_euler_source(block.model, coupler.aux(), block.U(), dt, iters);
   }
 };

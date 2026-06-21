@@ -36,7 +36,9 @@ struct AdvectProduce {
 
 struct ZeroSystemRhs {
   template <class System>
-  void operator()(const System&, MultiFab& rhs) const { rhs.set_val(Real(0)); }
+  void operator()(const System&, MultiFab& rhs) const {
+    rhs.set_val(Real(0));
+  }
 };
 
 using Blk = EquationBlock<AdvectProduce, FirstOrder, ExplicitTime<SSPRK2, 1>>;
@@ -44,7 +46,10 @@ using Blk = EquationBlock<AdvectProduce, FirstOrder, ExplicitTime<SSPRK2, 1>>;
 int main() {
   int fails = 0;
   auto chk = [&](bool c, const char* w) {
-    if (!c) { std::printf("FAIL %s\n", w); ++fails; }
+    if (!c) {
+      std::printf("FAIL %s\n", w);
+      ++fails;
+    }
   };
 
   const int n = 16;
@@ -77,6 +82,7 @@ int main() {
   chk(std::fabs(sum(Us, 0) - (Real(1) + Real(4) * macro_dt) * ncell) < Real(1e-10),
       "slow_big_adaptive_step");
 
-  if (fails == 0) std::printf("OK test_adaptive_multirate\n");
+  if (fails == 0)
+    std::printf("OK test_adaptive_multirate\n");
   return fails == 0 ? 0 : 1;
 }
