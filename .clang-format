@@ -8,6 +8,9 @@
 # Le job `format` de quality.yml est BLOQUANT (clang-format --dry-run) depuis ADC-219 : le tronc est
 # conforme depuis le balayage ADC-118, donc tout nouvel ecart est une regression (corriger avec
 # `clang-format -i`). quality.yml ne tourne que sur schedule / dispatch / PR labellisee `quality`.
+# Version canonique (ADC-381) : clang-format 19.1.7 (celle du balayage ADC-118 et du gate CI epingle).
+# Le rendu Google-style variant entre versions majeures, alignez votre clang-format local sur 19.x
+# (p. ex. `pipx install clang-format==19.1.7`) pour reproduire le gate.
 ---
 Language: Cpp
 BasedOnStyle: Google

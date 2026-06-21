@@ -239,6 +239,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **`quality.yml` pins clang-format to 19.1.7** (ADC-381): the now-blocking `format` job installed
+  whatever clang-format the `ubuntu-latest` runner shipped (~v14-18) via `apt-get`, so Google-style
+  output drift between major versions could fail the gate on an otherwise-clean tree. It now installs
+  the ADC-118 sweep version (`pipx install clang-format==19.1.7`) for a deterministic gate; the
+  canonical version is documented in `.clang-format` and `CONTRIBUTING.md`. CI install step only; no
+  source reformatting.
 - **`quality.yml` clang-format check is now blocking** (ADC-219): with the tree conforming to
   `.clang-format` since the ADC-118 sweep, the `format` job's `clang-format --dry-run` step fails the
   job on any new style deviation (a regression) instead of only warning. `ruff` (Python) stays

@@ -38,7 +38,9 @@ The conventions are written down; follow the project's decision first, then the 
 - **C++ style**: the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html),
   adapted. The ratified decisions (what we follow, adapt or drop, D1-D15) are in
   [docs/CODING_STANDARDS_DECISIONS.md](docs/CODING_STANDARDS_DECISIONS.md); `.clang-format` and
-  `.clang-tidy` enforce the mechanical part.
+  `.clang-tidy` enforce the mechanical part. The `format` gate is blocking, so run the pinned
+  clang-format 19 locally (`pipx install clang-format==19.1.7`) to match it; output drifts between
+  major versions.
 - **Python style**: the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)
   for `python/adc/**`, the bindings, the DSL and the tests; `ruff` (see `quality.yml`) enforces the
   mechanical part.
