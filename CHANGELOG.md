@@ -557,6 +557,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **Build robustness on bare / FetchContent / HPC paths the conda CI never exercises** (ADC-387,
+  same bug class as ADC-386, found by a build-system audit):
+  - The FetchContent Kokkos fallback now sets `CMAKE_POSITION_INDEPENDENT_CODE ON` before
+    `FetchContent_MakeAvailable(Kokkos)`, so the fetched (static) Kokkos links into the shared `_adc`
+    extension on Linux instead of failing with `relocation R_X86_64_PC32 ... recompile with -fPIC`.
+    Previously only `scripts/build_docs.sh` and `.github/workflows/wheels.yml` worked around it by
+    hand; the documented `pip install .` / `cmake -B build` paths were unguarded.
+  - `ADC_USE_HDF5=ON` no longer aborts configure when HDF5 is absent: `find_package(HDF5)` dropped
+    `REQUIRED` and links/defines only when found. No C/C++ TU calls the HDF5 API (parallel output is
+    the Python h5py facade), so a missing HDF5 must not be fatal (hit the HPC Spack recipe).
+  - Removed the dead `@ADC_USE_OPENMP@` gate from `cmake/adcConfig.cmake.in` (the standalone OpenMP
+    backend was removed in ADC-263; the variable expanded to an always-false `if()`). Kokkos-OpenMP
+    installs get OpenMP transitively via `find_dependency(Kokkos)`.
+  - Raised the `find_package(pybind11)` floor from 2.11 to 2.13 to match `environment.yml` and the
+    FetchContent tag.
 - **`_adc` builds on machines without pybind11 in the environment** (ADC-386): the FetchContent
   fallback for pybind11 now sets `PYBIND11_FINDPYTHON ON` before fetching, so the downloaded pybind11
   reuses the modern Python found via `find_package(... Development.Module)`. Without it pybind11 fell

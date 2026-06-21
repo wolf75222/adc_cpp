@@ -185,6 +185,13 @@ else()
      AND NOT DEFINED Kokkos_ENABLE_CUDA AND NOT DEFINED Kokkos_ENABLE_HIP)
     set(Kokkos_ENABLE_SERIAL ON CACHE BOOL "Kokkos Serial backend (defaut adc FetchContent)" FORCE)
   endif()
+  # Le Kokkos recupere se compile en bibliotheque statique ; pour le lier dans l'extension
+  # PARTAGEE _adc (pybind11_add_module) sous Linux il faut du code position-independant, sinon le
+  # link echoue ("relocation R_X86_64_PC32 ... recompile with -fPIC"). On le pose AVANT
+  # FetchContent_MakeAvailable pour que les cibles Kokkos en heritent ; sans ca le repli
+  # FetchContent ne marchait que parce que build_docs.sh / wheels.yml passaient le flag a la main
+  # (ADC-387).
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(_adc_kokkos_url
       "https://github.com/kokkos/kokkos/releases/download/${ADC_KOKKOS_FETCH_VERSION}/kokkos-${ADC_KOKKOS_FETCH_VERSION}.tar.gz")
   if(ADC_KOKKOS_FETCH_SHA256)
@@ -234,12 +241,20 @@ set(ADC_HAS_HDF5 OFF)
 if(ADC_USE_HDF5)
   # MODULE (wrappers h5cc/h5pcc + variables) plutot que CONFIG : le hdf5-config.cmake
   # de spack exige une cible importee MPI::MPI_C que ce projet CXX-only ne cree pas.
-  find_package(HDF5 MODULE REQUIRED COMPONENTS C)
-  target_link_libraries(adc INTERFACE ${HDF5_C_LIBRARIES})
-  target_include_directories(adc INTERFACE ${HDF5_C_INCLUDE_DIRS})
-  target_compile_definitions(adc INTERFACE ADC_HAS_HDF5)
-  set(ADC_HAS_HDF5 ON)
-  message(STATUS "HDF5 found (${HDF5_VERSION}, parallel=${HDF5_IS_PARALLEL}) : enabling DataWriter")
+  # PAS de REQUIRED : la sortie HDF5 parallele passe par la facade Python (h5py) et aucun TU
+  # C/C++ n'appelle l'API HDF5, donc une configuration manquante ne doit PAS avorter le build
+  # (cas du recipe HPC -DADC_USE_HDF5=ON ou FindHDF5 echoue). On lie/active si et seulement si
+  # HDF5 est trouve (ADC-387).
+  find_package(HDF5 MODULE COMPONENTS C)
+  if(HDF5_FOUND)
+    target_link_libraries(adc INTERFACE ${HDF5_C_LIBRARIES})
+    target_include_directories(adc INTERFACE ${HDF5_C_INCLUDE_DIRS})
+    target_compile_definitions(adc INTERFACE ADC_HAS_HDF5)
+    set(ADC_HAS_HDF5 ON)
+    message(STATUS "HDF5 found (${HDF5_VERSION}, parallel=${HDF5_IS_PARALLEL}) : enabling DataWriter")
+  else()
+    message(WARNING "ADC_USE_HDF5=ON but HDF5 (MODULE, COMPONENTS C) not found -- DataWriter stays off")
+  endif()
 endif()
 
 # Outillage QUALITE opt-in (warnings stricts, sanitizers) porte par la cible INTERFACE
@@ -306,7 +321,7 @@ if(ADC_BUILD_PYTHON)
   if(_adc_pybind11_probe EQUAL 0 AND IS_DIRECTORY "${_adc_pybind11_cmakedir}")
     list(PREPEND CMAKE_PREFIX_PATH "${_adc_pybind11_cmakedir}")
   endif()
-  find_package(pybind11 2.11 CONFIG QUIET)
+  find_package(pybind11 2.13 CONFIG QUIET)  # floor aligne sur environment.yml + le tag FetchContent
   if(pybind11_FOUND)
     message(STATUS "adc Python module: pybind11 ${pybind11_VERSION} trouve dans l'environnement (pas de FetchContent)")
   else()
