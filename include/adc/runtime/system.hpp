@@ -531,7 +531,9 @@ class System {
   void add_coupled_source(const CoupledSourceProgram& prog, double frequency = 0.0,
                           const std::string& label = "coupled_source");
 
-  void solve_fields();   ///< solves Poisson then derives aux = (phi, grad phi)
+  ADC_EXPORT void solve_fields();  ///< solves Poisson then derives aux = (phi, grad phi); exported
+                                   ///< so a compiled program .so resolves it via ProgramContext
+                                   ///< (the other seam accessors below are likewise ADC_EXPORT)
   void step(double dt);  ///< solve_fields, then advances each block according to its scheme
   void advance(double dt, int nsteps);
 

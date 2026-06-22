@@ -307,6 +307,7 @@ __all__ = [
     "Ionization", "Collision", "ThermalExchange",
     "PythonFlux", "dsl", "time", "abi_key", "capabilities",
     "set_threads", "has_kokkos", "parallel_info", "doctor",
+    "compile_problem", "CompiledProblem", "CompiledTime",
 ]
 
 
@@ -3192,6 +3193,7 @@ class PythonFlux:
 
 from . import integrate  # noqa: E402  (after the definition of System; without numpy dependency)
 from . import time  # noqa: E402  (adc.time.Program IR; pure stdlib, no numpy/_adc dependency)
+from .time import CompiledTime  # noqa: E402,F401  (re-export: compiled-Program time policy)
 
 
 # LAZY adc.dsl (PEP 562): dsl.py does `import numpy` at module level (host evaluator of the
@@ -3209,4 +3211,8 @@ def __getattr__(name):
                 "adc.dsl requires numpy in this interpreter (host evaluator of the DSL): "
                 "`pip install numpy` / `conda install numpy`. The rest of adc (System, add_block) "
                 "works without it. Cause: %s" % exc) from exc
+    # adc.compile_problem / adc.CompiledProblem live in adc.dsl (which imports numpy); expose them at
+    # the top level LAZILY so `import adc` stays numpy-free until the DSL/compile path is first used.
+    if name in ("compile_problem", "CompiledProblem"):
+        return getattr(__getattr__("dsl"), name)
     raise AttributeError("module %r has no attribute %r" % (__name__, name))

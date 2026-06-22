@@ -25,7 +25,7 @@ import hashlib
 import json
 import types
 
-__all__ = ["Program", "std"]
+__all__ = ["Program", "std", "CompiledTime"]
 
 
 class _Coeff:
@@ -509,3 +509,35 @@ def strang(P, block, half_flow, source, *, commit=True):
 # adc.time.std.<scheme>(Program, block, ...) -- the spec's standard library entry point.
 std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,
                             strang=strang)
+
+
+class CompiledTime:
+    """Time-stepping policy for a compiled `Program`, passed to `sim.add_equation(..., time=...)`.
+
+    A compiled Program OWNS the whole step body (it is installed via `sim.install_program` and driven
+    by `sim.step(dt)`); `CompiledTime` records the macro-step cadence around it. MVP scope: a single
+    Forward-Euler step. `substeps > 1`, `stride > 1`, and a non-default `cfl` are deferred -- the
+    Program currently receives a bare `dt` and `step_cfl` / substep / stride orchestration is not yet
+    wired for the program path (cf. system_stepper.hpp; ADC-401 Phase 2c) -- so they fail loud here
+    rather than be silently ignored."""
+
+    def __init__(self, substeps=1, stride=1, cfl="default"):
+        if substeps != 1:
+            raise NotImplementedError(
+                "CompiledTime: substeps > 1 is deferred (ADC-401 Phase 2c); the compiled Program "
+                "receives a bare dt with no substep orchestration yet")
+        if stride != 1:
+            raise NotImplementedError(
+                "CompiledTime: stride > 1 is deferred (ADC-401 Phase 2c); the compiled Program has "
+                "no macro-step cadence yet")
+        if cfl != "default":
+            raise NotImplementedError(
+                "CompiledTime: cfl != 'default' is deferred (ADC-401 Phase 2c); pass an explicit dt "
+                "to sim.step(dt)")
+        self.substeps = substeps
+        self.stride = stride
+        self.cfl = cfl
+        self.kind = "compiled"
+
+    def __repr__(self):
+        return "CompiledTime(substeps=%d, stride=%d, cfl=%r)" % (self.substeps, self.stride, self.cfl)
