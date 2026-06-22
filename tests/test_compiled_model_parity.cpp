@@ -4,8 +4,8 @@
 // les vrais MultiFab du System, sans marshaling) : on exige un residu eval_rhs ET un potentiel
 // BIT-IDENTIQUES au bloc natif. C'est ce qui donne au modele genere par le DSL la parite Kokkos + MPI
 // du bloc natif (les deux passent par le meme make_block / install_block / fill_boundary).
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (= CompressibleFlux)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
 #include <adc/runtime/builders/dsl_block.hpp>
 #include <adc/runtime/model_spec.hpp>
 #include <adc/runtime/system.hpp>

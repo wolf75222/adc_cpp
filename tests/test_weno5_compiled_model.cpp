@@ -10,8 +10,8 @@
 //  (2) NO-DEFAULT-CHANGE : pour none et minmod (<= 2 ghosts), add_compiled_model reste BIT-IDENTIQUE
 //      a add_block -- la reallocation set_block_ghosts est un NO-OP (U a deja 2 ghosts), donc
 //      l'allocation et le resultat sont inchanges vs avant ce chantier.
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (= CompressibleFlux)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
 #include <adc/runtime/builders/dsl_block.hpp>
 #include <adc/runtime/model_spec.hpp>
 #include <adc/runtime/system.hpp>

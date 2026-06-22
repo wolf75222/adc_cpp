@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/fab2d.hpp>  // Array4 (POD device-copyable)
 
 #include <cassert>

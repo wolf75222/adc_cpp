@@ -15,8 +15,8 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (transport compressible)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>   // Euler (transport compressible)
 #include <adc/runtime/builders/block_builder.hpp>
 
 #include <cmath>

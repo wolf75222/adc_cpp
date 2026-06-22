@@ -77,9 +77,9 @@ def realizable_states(nstates, seed):
 
 
 HARNESS = r"""
-#include <adc/physics/bricks.hpp>
-#include <adc/core/physical_model.hpp>
-#include <adc/core/variables.hpp>
+#include <adc/physics/bricks/bricks.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/variables.hpp>
 __DEFAULT__
 __HOIST__
 #include <cstdio>

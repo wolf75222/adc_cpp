@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // aux_comps<Model>: aux width requested by the model
+#include <adc/core/model/physical_model.hpp>  // aux_comps<Model>: aux width requested by the model
 #include <adc/runtime/builders/block_builder.hpp>
 #include <adc/runtime/system.hpp>
 

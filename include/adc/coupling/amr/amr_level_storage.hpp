@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <adc/core/state.hpp>  // kAuxBaseComps: default aux width (base phi/grad channel)
-#include <adc/core/types.hpp>
+#include <adc/core/state/state.hpp>  // kAuxBaseComps: default aux width (base phi/grad channel)
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/multifab.hpp>
 

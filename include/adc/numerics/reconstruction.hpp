@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 
 #include <cmath>
 

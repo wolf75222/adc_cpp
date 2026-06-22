@@ -4,8 +4,8 @@
 // canonical aux field by name WITHOUT the Python facade. This test pins the C++ side; the
 // C++<->Python coherence is pinned by python/tests/test_capabilities.py.
 
-#include <adc/core/aux_names.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/state/aux_names.hpp>
+#include <adc/core/state/state.hpp>
 
 #include <cstdio>
 #include <string_view>

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/state.hpp>        // kAuxBaseComps (base component of the aux channel)
-#include <adc/core/types.hpp>        // Real
+#include <adc/core/state/state.hpp>        // kAuxBaseComps (base component of the aux channel)
+#include <adc/core/foundation/types.hpp>        // Real
 #include <adc/mesh/multifab.hpp>     // MultiFab, Array4, ConstArray4
 #include <adc/mesh/box2d.hpp>        // Box2D
 #include <adc/mesh/for_each.hpp>     // device_fence

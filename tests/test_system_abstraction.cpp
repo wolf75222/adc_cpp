@@ -1,8 +1,8 @@
 // Squelette architecture multi-blocs : PhysicalModel local, EquationBlock,
 // CoupledSystem, scheduler par sous-pas, RHS elliptique multi-champs.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>
 #include <adc/numerics/time/scheduler.hpp>
 #include <adc/mesh/box_array.hpp>

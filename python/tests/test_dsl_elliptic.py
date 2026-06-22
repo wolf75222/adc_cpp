@@ -22,7 +22,7 @@ def build_charge():
 
 
 HARNESS = r"""
-#include <adc/physics/bricks.hpp>
+#include <adc/physics/bricks/bricks.hpp>
 %s
 #include <cstdio>
 #include <cmath>

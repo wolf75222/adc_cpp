@@ -6,8 +6,8 @@
 //   modele MagModel = CompositeModel<ExBVelocity, BzSource, NoEll>, flux ExB (grad=0 -> nul),
 //   source S = B_z u, elliptic_rhs nul (phi=0) -> eval_rhs = B_z u = c (densite 1, B_z constant c).
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/hyperbolic.hpp>  // ExBVelocity
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
 #include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 

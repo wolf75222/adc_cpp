@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/state.hpp>        // kAuxBaseComps
+#include <adc/core/state/state.hpp>        // kAuxBaseComps
 #include <adc/mesh/box2d.hpp>        // Box2D
 #include <adc/mesh/fab2d.hpp>        // Fab2D
 #include <adc/mesh/geometry.hpp>     // Geometry (x_cell / y_cell)

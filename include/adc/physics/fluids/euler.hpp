@@ -6,9 +6,9 @@
 ///        separate bricks (physics/source.hpp, physics/elliptic.hpp); this file contains only
 ///        Vars + flux + wave speeds + cons<->prim conversions.
 
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
-#include <adc/core/variables.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
+#include <adc/core/state/variables.hpp>
 
 #include <cmath>
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/types.hpp>
-#include <adc/core/variables.hpp>
+#include <adc/core/foundation/types.hpp>
+#include <adc/core/state/variables.hpp>
 #include <adc/coupling/schur/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>  // PolarGeometry

@@ -6,9 +6,9 @@
 //   (B) le bloc qui lit B_z voit la source S = B_z u (residu = c) ;
 //   (C) le bloc de base, sur le meme aux elargi, reste a residu nul (comp 3 ignoree).
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

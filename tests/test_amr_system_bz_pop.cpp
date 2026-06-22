@@ -21,9 +21,9 @@
 //   (D) SETTER set_bz : poser B_z apres construction donne le meme resultat que par le ctor.
 //   (E) GARDE / BIT-IDENTITE : sans bz fourni, la composante B_z reste 0 (comportement historique).
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
 #include <adc/mesh/box2d.hpp>

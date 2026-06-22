@@ -18,7 +18,7 @@
 /// The old adc/physics/{advection_diffusion,langmuir,two_fluid_isothermal}.hpp paths remain as
 /// deprecated compat forwarders and are intentionally not aggregated here.
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/elliptic.hpp>
-#include <adc/physics/hyperbolic.hpp>
-#include <adc/physics/source.hpp>
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/elliptic.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>
+#include <adc/physics/bricks/source.hpp>

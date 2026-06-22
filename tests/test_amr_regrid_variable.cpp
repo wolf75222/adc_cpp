@@ -11,8 +11,8 @@
 //   (2) la facade multi-blocs : refiner sur l'energie (composante 3 de l'Euler compressible) deplace le
 //       patch fin vers la bosse d'energie, la ou le selecteur par defaut (densite uniforme) garde le
 //       seed central -> les deux layouts DIFFERENT, preuve que la composante lue a change.
-#include <adc/physics/euler.hpp>          // Euler::conservative_vars (rho, rho_u, rho_v, E)
-#include <adc/core/variables.hpp>         // VariableSet, VariableRole, VariableKind
+#include <adc/physics/fluids/euler.hpp>          // Euler::conservative_vars (rho, rho_u, rho_v, E)
+#include <adc/core/state/variables.hpp>         // VariableSet, VariableRole, VariableKind
 #include <adc/mesh/patch_box.hpp>         // PatchBox (signature index-espace des patchs fins)
 #include <adc/runtime/amr_system.hpp>     // AmrSystem, AmrSystemConfig
 #include <adc/runtime/builders/model_factory.hpp>  // detail::resolve_selected_component (ADC-296)

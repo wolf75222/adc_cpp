@@ -13,10 +13,10 @@
 // AVANT le fix : segfault a np=2/4 sur le(s) rang(s) sans box locale. APRES : np=1/2/4 verts, et le
 // resultat (potentiel, masse) est invariant au nombre de rangs (la box unique vit toujours sur rang 0).
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/euler.hpp>       // Euler (bloc fluide source de T_e)
-#include <adc/physics/hyperbolic.hpp>  // ExBVelocity
-#include <adc/physics/source.hpp>      // NoSource
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/fluids/euler.hpp>       // Euler (bloc fluide source de T_e)
+#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
+#include <adc/physics/bricks/source.hpp>      // NoSource
 #include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 

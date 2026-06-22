@@ -44,7 +44,7 @@
 // global reconstruit), donc aucun deadlock.
 
 #include <adc/parallel/comm.hpp>
-#include <adc/physics/composite.hpp>
+#include <adc/physics/composition/composite.hpp>
 #include <adc/runtime/builders/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem&, ...)
 #include <adc/runtime/amr_system.hpp>
 

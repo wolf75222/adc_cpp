@@ -1,8 +1,8 @@
 #pragma once
 
-#include <adc/core/state.hpp>      // StateVec, Aux, ADC_AUX_FIELDS, kAuxBaseComps
-#include <adc/core/types.hpp>      // ADC_HD, Real
-#include <adc/core/variables.hpp>  // VariableSet + VariableKind + VariableRole + role_from_name
+#include <adc/core/state/state.hpp>      // StateVec, Aux, ADC_AUX_FIELDS, kAuxBaseComps
+#include <adc/core/foundation/types.hpp>      // ADC_HD, Real
+#include <adc/core/state/variables.hpp>  // VariableSet + VariableKind + VariableRole + role_from_name
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>

@@ -9,7 +9,7 @@
 /// A-stable), while the acoustic correction c_s^2 k^2 stays explicit. Not used by adc_cases as of
 /// 2026-06-06. The legacy path <adc/physics/langmuir.hpp> still works through a compat forwarder.
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 
 #include <cmath>
 

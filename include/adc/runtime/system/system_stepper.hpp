@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/state.hpp>  // kAuxBaseComps (B_z channel read by the condensed source stage)
-#include <adc/core/types.hpp>  // Real
+#include <adc/core/state/state.hpp>  // kAuxBaseComps (B_z channel read by the condensed source stage)
+#include <adc/core/foundation/types.hpp>  // Real
 #include <adc/coupling/source/coupled_source_program.hpp>  // CoupledFreqKernel (per-cell coupled frequency)
 #include <adc/mesh/for_each.hpp>  // reduce_max_cell (max mu over the cells, device-clean functor)
 #include <adc/parallel/comm.hpp>  // all_reduce_min/max (global bounds: identical dt on all ranks)

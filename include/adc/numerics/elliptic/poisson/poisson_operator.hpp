@@ -26,7 +26,7 @@
 ///   external TU: an extended lambda would break the device kernel emission under nvcc;
 /// - the red-black sweep is parallelizable (a red cell depends only on black cells).
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>

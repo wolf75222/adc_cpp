@@ -239,6 +239,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **`include/adc` deep re-nest, phase 2: core / physics / amr split into sub-families** (ADC-393,
+  follow-up of ADC-392): `core/` now groups `foundation/` (types, cold, allocator, kokkos_env),
+  `state/` (state, variables, aux_names) and `model/` (physical_model, equation_block,
+  coupled_system); `physics/` groups `bricks/` (bricks, hyperbolic, elliptic, source),
+  `composition/` (composite) and `fluids/` (euler); `amr/` groups `hierarchy/`, `tagging/` and
+  `regridding/`. Every internal `#include <adc/...>` and the DSL emit (`physics/bricks.hpp`,
+  `core/variables.hpp`) are repointed. Public include-path break (pre-1.0). Also retires the
+  deprecated physics compat forwarders
+  `physics/{advection_diffusion,langmuir,two_fluid_isothermal}.hpp` (the bricks live at
+  `validation/physics/` under `adc::validation` since ADC-329; only the dedicated
+  `test_physics_validation_compat` used the old `adc::` aliases, removed with them).
 - **`quality.yml` pins clang-format to 19.1.7** (ADC-381): the now-blocking `format` job installed
   whatever clang-format the `ubuntu-latest` runner shipped (~v14-18) via `apt-get`, so Google-style
   output drift between major versions could fail the gate on an otherwise-clean tree. It now installs

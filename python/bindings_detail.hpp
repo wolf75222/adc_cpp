@@ -10,7 +10,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <adc/core/kokkos_env.hpp>  // Kokkos_Core under ADC_HAS_KOKKOS (kokkos_is_initialized)
+#include <adc/core/foundation/kokkos_env.hpp>  // Kokkos_Core under ADC_HAS_KOKKOS (kokkos_is_initialized)
 #include <adc/parallel/comm.hpp>  // adc::my_rank / n_ranks: rank-0 guard of the multi-rank IO facade
 #include <adc/runtime/detail/abi_key.hpp>  // adc::abi_key: ABI key exposed to the DSL ("production" path)
 #include <adc/runtime/amr_system.hpp>

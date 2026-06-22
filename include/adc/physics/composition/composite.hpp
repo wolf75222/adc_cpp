@@ -1,9 +1,9 @@
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // HyperbolicPhysicalModel: contract of the hyperbolic brick
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
-#include <adc/core/variables.hpp>
+#include <adc/core/model/physical_model.hpp>  // HyperbolicPhysicalModel: contract of the hyperbolic brick
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
+#include <adc/core/state/variables.hpp>
 
 /// @file
 /// @brief CompositeModel: assembles (hyperbolic, source, elliptic) into one compiled PhysicalModel.

@@ -8,12 +8,12 @@
 //   (B) le modele compose lit bien B_z dans assemble_rhs (grad nul -> flux nul -> R = B_z u) ;
 //   (C) un compose SANS brique a champ extra reste a n_aux == 3 (bit-identique).
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
-#include <adc/physics/composite.hpp>
-#include <adc/physics/hyperbolic.hpp>  // ExBVelocity (brique hyperbolique 1 var)
-#include <adc/physics/source.hpp>      // NoSource
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (brique hyperbolique 1 var)
+#include <adc/physics/bricks/source.hpp>      // NoSource
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>

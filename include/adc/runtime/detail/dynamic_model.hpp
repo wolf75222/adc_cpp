@@ -1,8 +1,8 @@
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // aux_comps<M>: aux width of the wrapped model
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/model/physical_model.hpp>  // aux_comps<M>: aux width of the wrapped model
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 
 #include <memory>
 

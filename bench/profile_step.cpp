@@ -36,7 +36,7 @@
 #include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks.hpp>  // CompositeModel, ExBVelocity, NoSource, ChargeDensity
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, ExBVelocity, NoSource, ChargeDensity
 
 #include "common.hpp"  // adc::bench::{timed, PhaseTimers, eat} (briques de mesure partagees)
 

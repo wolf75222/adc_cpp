@@ -3281,8 +3281,8 @@ class HyperbolicModel:
                              "backend='aot' ou 'production'")
         nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
         return ('#include <adc/runtime/detail/dynamic_model.hpp>\n'
-                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
-                '#include <adc/core/variables.hpp>\n'
+                '#include <adc/physics/bricks/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
+                '#include <adc/core/state/variables.hpp>\n'
                 + bricks
                 + '\nnamespace adc_generated { using JitModel = %s; }\n' % composite  # comma-free alias (metadata macro)
                 + 'extern "C" int adc_model_nvars() { return %d; }\n' % nv
@@ -3326,8 +3326,8 @@ class HyperbolicModel:
         identical to a native add_block block. As opposed to the "jit" backend (IModel, virtual dispatch)."""
         nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
         return ('#include <adc/runtime/builders/compiled_block_abi.hpp>\n'
-                '#include <adc/physics/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
-                '#include <adc/core/variables.hpp>\n'
+                '#include <adc/physics/bricks/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
+                '#include <adc/core/state/variables.hpp>\n'
                 + bricks
                 + '\nnamespace adc_generated { using AotModel = %s; }\n' % composite
                 + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n'
@@ -3428,8 +3428,8 @@ class HyperbolicModel:
                 '#include <cstddef>\n'
                 '#include <string>\n'
                 '#include <adc/runtime/detail/abi_key.hpp>\n'         # ADC_ABI_KEY_LITERAL (key frozen at compile)
-                '#include <adc/physics/bricks.hpp>\n'          # CompositeModel + NoSource + bricks
-                '#include <adc/core/variables.hpp>\n')
+                '#include <adc/physics/bricks/bricks.hpp>\n'          # CompositeModel + NoSource + bricks
+                '#include <adc/core/state/variables.hpp>\n')
         # Header template of the target: dsl_block.hpp (System) or amr_dsl_block.hpp (AmrSystem). Included
         # selectively so as not to pull the AMR machinery into a System loader (and vice versa).
         head += ('#include <adc/runtime/builders/dsl_block.hpp>\n' if target == "system"
@@ -4739,8 +4739,8 @@ class HybridModel:
         structs) are stitched together, then assembled into adc::CompositeModel<...>."""
         hyp, src, ell = self._slots
         parts = ['#include <adc/runtime/builders/compiled_block_abi.hpp>\n',
-                 '#include <adc/physics/bricks.hpp>\n',   # CompositeModel + native bricks
-                 '#include <adc/core/variables.hpp>\n']   # ADC_EXPORT_BLOCK_METADATA / _GAMMA
+                 '#include <adc/physics/bricks/bricks.hpp>\n',   # CompositeModel + native bricks
+                 '#include <adc/core/state/variables.hpp>\n']   # ADC_EXPORT_BLOCK_METADATA / _GAMMA
         for slot in self._slots:
             if slot["struct_text"]:
                 parts.append(slot["struct_text"])
@@ -4785,8 +4785,8 @@ class HybridModel:
         counterpart of emit_cpp_so_source."""
         bricks, composite = self._bricks_and_composite()
         return ('#include <adc/runtime/detail/dynamic_model.hpp>\n'
-                '#include <adc/physics/bricks.hpp>\n'
-                '#include <adc/core/variables.hpp>\n'
+                '#include <adc/physics/bricks/bricks.hpp>\n'
+                '#include <adc/core/state/variables.hpp>\n'
                 + bricks
                 + '\nnamespace adc_generated { using JitModel = %s; }\n' % composite
                 + 'extern "C" int adc_model_nvars() { return %d; }\n' % self.n_vars
@@ -4812,8 +4812,8 @@ class HybridModel:
             raise ValueError("_emit_native_source: target 'system' | 'amr_system' (got %r)" % (target,))
         bricks, composite = self._bricks_and_composite()
         head = ('#include <adc/runtime/detail/abi_key.hpp>\n'        # ADC_ABI_KEY_LITERAL (key frozen at compile time)
-                '#include <adc/physics/bricks.hpp>\n'         # CompositeModel + native bricks
-                '#include <adc/core/variables.hpp>\n'
+                '#include <adc/physics/bricks/bricks.hpp>\n'         # CompositeModel + native bricks
+                '#include <adc/core/state/variables.hpp>\n'
                 '#include <string>\n')
         # Header template of the target (selective: do not pull the AMR machinery into a System loader).
         head += ('#include <adc/runtime/builders/dsl_block.hpp>\n' if target == "system"

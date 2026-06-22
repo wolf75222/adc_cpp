@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <adc/amr/refinement_ratio.hpp>
+#include <adc/amr/hierarchy/refinement_ratio.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

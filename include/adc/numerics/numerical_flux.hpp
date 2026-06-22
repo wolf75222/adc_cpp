@@ -38,8 +38,8 @@
 
 #pragma once
 
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 
 #include <cmath>     // std::sqrt (RoeFlux: Roe average); libstdc++ does not pull it transitively
 #include <concepts>  // Riemann capabilities (HasHLLCStructure / HasRoeDissipation)

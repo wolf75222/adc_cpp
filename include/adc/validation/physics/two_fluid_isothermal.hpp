@@ -10,7 +10,7 @@
 /// as of 2026-06-06. The legacy path <adc/physics/two_fluid_isothermal.hpp> still works through a
 /// compat forwarder.
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 
 #include <cmath>
 

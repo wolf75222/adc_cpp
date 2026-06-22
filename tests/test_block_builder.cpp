@@ -7,8 +7,8 @@
 // main (sans System), puis on verifie que make_block / make_max_speed / make_poisson_rhs produisent
 // exactement le residu / la vitesse d'onde / le second membre de Poisson du chemin direct, et que
 // l'avance SSPRK2 conserve la masse. Si ca compile et passe, un .so genere peut faire de meme.
-#include <adc/physics/bricks.hpp>  // CompositeModel, NoSource, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (brique hyperbolique compressible)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, NoSource, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>   // Euler (brique hyperbolique compressible)
 #include <adc/runtime/builders/block_builder.hpp>
 
 #include <adc/mesh/box_array.hpp>

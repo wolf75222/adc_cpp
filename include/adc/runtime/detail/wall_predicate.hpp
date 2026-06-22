@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>  // Real
+#include <adc/core/foundation/types.hpp>  // Real
 #include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (the level-set domain it lives in since ADC-327)
 
 #include <cmath>       // std::hypot

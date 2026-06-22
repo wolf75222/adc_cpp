@@ -1,8 +1,8 @@
 // Execution mono-niveau d'un CoupledSystem : RHS elliptique global, bloc
 // implicite delegue, bloc explicite avance par le coeur.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

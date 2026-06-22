@@ -21,7 +21,7 @@
 ///   notion of iterative tolerance), and that is correct;
 /// - none of the elliptic classes is modified to satisfy a concept (deliberate refusal).
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>

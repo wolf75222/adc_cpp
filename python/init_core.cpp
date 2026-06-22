@@ -1,6 +1,6 @@
 #include "bindings_detail.hpp"
 
-#include <adc/core/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
+#include <adc/core/state/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
 
 // ADC-365: module attributes/globals + SystemConfig + ModelSpec (registered first so System/
 // AmrSystem signatures resolve them).

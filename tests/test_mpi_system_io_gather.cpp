@@ -41,9 +41,9 @@
 // write_state est en fait no-op sur un rang vide, mais on garde la garde owns). set_potential et
 // set_clock sont MPI-safe (no-op sur les rangs vides). step() / step_cfl() sont collectifs.
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/euler.hpp>      // Euler (bloc fluide a 4 composantes, etat conservatif riche)
-#include <adc/physics/source.hpp>     // NoSource
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/fluids/euler.hpp>      // Euler (bloc fluide a 4 composantes, etat conservatif riche)
+#include <adc/physics/bricks/source.hpp>     // NoSource
 #include <adc/runtime/builders/dsl_block.hpp>  // add_compiled_model
 #include <adc/runtime/system.hpp>
 

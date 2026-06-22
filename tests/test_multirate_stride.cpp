@@ -6,8 +6,8 @@
 // Ici : bloc rapide (stride 1) + bloc lent (stride 3), production constante. Apres 1 pas le
 // lent a deja fait son pas de 3*dt (!= rapide) ; apres 3 pas les deux sont synchronises.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

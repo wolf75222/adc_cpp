@@ -2,9 +2,9 @@
 // sont interpolees depuis le grossier, le buffer dilate la region, un re-regrid
 // preserve l'ancien fin, et un tagging vide supprime le niveau fin.
 
-#include <adc/amr/amr_hierarchy.hpp>
-#include <adc/amr/cluster.hpp>
-#include <adc/amr/regrid.hpp>
+#include <adc/amr/hierarchy/amr_hierarchy.hpp>
+#include <adc/amr/tagging/cluster.hpp>
+#include <adc/amr/regridding/regrid.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>

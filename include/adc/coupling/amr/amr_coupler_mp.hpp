@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/types.hpp>
-#include <adc/amr/refinement_ratio.hpp>
+#include <adc/core/foundation/types.hpp>
+#include <adc/amr/hierarchy/refinement_ratio.hpp>
 #include <adc/coupling/amr/amr_diagnostics.hpp>     // amr_mass, amr_max_drift_speed
 #include <adc/coupling/amr/amr_level_storage.hpp>   // AmrLevelStack
 #include <adc/coupling/amr/amr_regrid_coupler.hpp>  // amr_regrid_finest (Berger-Rigoutsos)

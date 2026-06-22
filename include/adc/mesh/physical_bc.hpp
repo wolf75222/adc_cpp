@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/fill_boundary.hpp>

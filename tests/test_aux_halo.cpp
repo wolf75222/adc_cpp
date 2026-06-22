@@ -4,7 +4,7 @@
 // strictly bit-identical. This is the mechanism the System / polar / AMR aux-ghost paths reuse to
 // honor a per-field halo declared via adc.AuxHalo (Refs ADC-291).
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

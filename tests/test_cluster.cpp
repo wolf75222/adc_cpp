@@ -1,8 +1,8 @@
 // Berger-Rigoutsos : bloc plein -> une box, deux blocs separes -> deux boxes,
 // gros bloc -> chop par max_box_size, et couverture complete d'une forme en L.
 
-#include <adc/amr/cluster.hpp>
-#include <adc/amr/tag_box.hpp>
+#include <adc/amr/tagging/cluster.hpp>
+#include <adc/amr/tagging/tag_box.hpp>
 #include <adc/mesh/box2d.hpp>
 
 #include <algorithm>

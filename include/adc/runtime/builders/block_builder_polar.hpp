@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>  // PolarGeometry
 #include <adc/mesh/multifab.hpp>
@@ -10,7 +10,7 @@
 #include <adc/numerics/spatial_operator_polar.hpp>  // assemble_rhs_polar (REUSED verbatim)
 #include <adc/numerics/time/time_steppers.hpp>      // SSPRK2Step / SSPRK3Step (core RK math)
 #include <adc/parallel/comm.hpp>   // all_reduce_max (MPI-safe collective reduction)
-#include <adc/physics/bricks.hpp>  // ExBVelocityPolar, CompositeModel, source/elliptic bricks
+#include <adc/physics/bricks/bricks.hpp>  // ExBVelocityPolar, CompositeModel, source/elliptic bricks
 #include <adc/runtime/detail/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann)
 #include <adc/runtime/detail/grid_context.hpp>   // BlockClosures (light header)
 #include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_source / dispatch_elliptic (REUSED)

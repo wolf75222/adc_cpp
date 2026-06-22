@@ -2,8 +2,8 @@
 // champs (Poisson de systeme + aux + residu de bloc) SANS avancer ; un SystemDriver AVANCE
 // (et possede un assembleur). "advance un coupleur" devient "advance un driver".
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>  // SystemAssembler, SystemDriver, SystemCoupler
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

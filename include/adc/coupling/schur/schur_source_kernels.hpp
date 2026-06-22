@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>  // Real, ADC_HD
+#include <adc/core/foundation/types.hpp>  // Real, ADC_HD
 #include <adc/mesh/fab2d.hpp>  // Array4, ConstArray4
 
 #include <stdexcept>
