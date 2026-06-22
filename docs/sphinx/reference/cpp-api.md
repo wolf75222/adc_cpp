@@ -39,7 +39,7 @@ to link for the core, you include the headers. The three design axes are orthogo
 | `AmrCouplerMP` | Multi-patch AMR coupler: Berger-Rigoutsos regrid, time subcycling of the fine levels, coverage-aware reflux at the coarse-fine interface. |
 
 (The canonical definitions of these symbols live respectively in
-`include/adc/core/physical_model.hpp`, `include/adc/numerics/numerical_flux.hpp`,
+`include/adc/core/model/physical_model.hpp`, `include/adc/numerics/fv/numerical_flux.hpp`,
 `include/adc/numerics/elliptic/interface/elliptic_solver.hpp`, `include/adc/runtime/system.hpp`,
 `include/adc/runtime/amr_system.hpp`, `include/adc/numerics/elliptic/mg/geometric_mg.hpp`,
 `include/adc/numerics/elliptic/poisson/poisson_fft_solver.hpp`,

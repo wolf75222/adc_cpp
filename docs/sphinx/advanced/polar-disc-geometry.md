@@ -50,7 +50,7 @@ by its radial walls `r_min` / `r_max`).
 
 `set_disc_domain` / `disc_mask` are the stable Python *compatibility* helpers for the circle
 (the Hoffart disc). Under them the geometry is a single, named, device-clean C++ contract in
-`include/adc/numerics/embedded_boundary.hpp`: any POD type exposing
+`include/adc/numerics/spatial/embedded_boundary/domain.hpp`: any POD type exposing
 `level_set(x, y)` (`< 0` inside), a callable `operator()`, and `cell_active` is an embedded
 boundary, with the same three transport modes (`none` / `staircase` / `cutcell`). The disc
 (`detail::DiscDomain`) is one instance; `detail::HalfPlaneDomain` is a built-in non-disc instance,
@@ -63,6 +63,6 @@ callback path: a domain is a compile-time POD, never a `std::function`.
 
 - Bindings: `python/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
   `set_disc_domain`, `disc_mask`).
-- Generic contract: `include/adc/numerics/embedded_boundary.hpp` (`DiscDomain`, `HalfPlaneDomain`,
+- Generic contract: `include/adc/numerics/spatial/embedded_boundary/domain.hpp` (`DiscDomain`, `HalfPlaneDomain`,
   the `LevelSetDomain` concept).
 - Polar solver: `include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp`.

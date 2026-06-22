@@ -96,14 +96,14 @@ Sources read for this design:
   `add_dynamic_block`, `add_compiled_block`, and metadata (`read_block_meta`,
   `variable_names`/`variable_roles`/`block_gamma`), `set_poisson`, `step_cfl`/
   `step_adaptive`.
-- `include/adc/core/variables.hpp`: `VariableRole`/`VariableSet`/`role_from_name`/
+- `include/adc/core/state/variables.hpp`: `VariableRole`/`VariableSet`/`role_from_name`/
   `ADC_EXPORT_BLOCK_METADATA`/`ADC_EXPORT_BLOCK_GAMMA`.
-- `include/adc/core/physical_model.hpp`: contract `PhysicalModel`/
+- `include/adc/core/model/physical_model.hpp`: contract `PhysicalModel`/
   `HyperbolicPhysicalModel`/`aux_comps`.
-- `include/adc/runtime/compiled_block_abi.hpp`: AOT ABI `ADC_DEFINE_COMPILED_BLOCK`.
-- `include/adc/runtime/dynamic_model.hpp`: `IModel`/`ModelAdapter` (JIT).
-- `include/adc/runtime/dsl_block.hpp`: `add_compiled_model` (native, template).
-- `include/adc/runtime/amr_dsl_block.hpp`: `add_compiled_model` on the `AmrSystem` side.
+- `include/adc/runtime/builders/compiled/compiled_block_abi.hpp`: AOT ABI `ADC_DEFINE_COMPILED_BLOCK`.
+- `include/adc/runtime/dynamic/dynamic_model.hpp`: `IModel`/`ModelAdapter` (JIT).
+- `include/adc/runtime/builders/compiled/dsl_block.hpp`: `add_compiled_model` (native, template).
+- `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model` on the `AmrSystem` side.
 - `docs/PAPER_ROADMAP.md` (basket 2), `docs/ARCHITECTURE.md` (runtime/DSL section).
 
 ENVIRONMENT NOTE. A sibling agent adds in parallel a real native `production`
@@ -545,7 +545,7 @@ Delivered. It is dispatch wiring (no new numerics).
 ### Phase E: `m.param` runtime -- GAP (phase 2, engine change)
 
 11. Mode (b) (section 2b): ABI with parameters + codegen with members, OR dedicated aux channel.
-    HEAVY WRITE-SET: `include/adc/runtime/compiled_block_abi.hpp`,
+    HEAVY WRITE-SET: `include/adc/runtime/builders/compiled/compiled_block_abi.hpp`,
     `python/system.cpp` (`add_compiled_block`), `python/adc/dsl.py` (codegen). Outside the
     critical path of the Hoffart reproduction (`PAPER_ROADMAP.md:147-150`, basket 2
     transverse, optional).

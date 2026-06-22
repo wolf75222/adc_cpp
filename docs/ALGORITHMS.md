@@ -216,7 +216,7 @@ function HLLC(m, UL, AL, UR, AR, dir):                 # canonical Euler 2D fall
 ```
 
 **Code.** Stateless policies in
-[`include/adc/numerics/numerical_flux.hpp`](../include/adc/numerics/fv/numerical_flux.hpp): `RusanovFlux`,
+[`include/adc/numerics/fv/numerical_flux.hpp`](../include/adc/numerics/fv/numerical_flux.hpp): `RusanovFlux`,
 `HLLFlux`, `HLLCFlux`, `RoeFlux` (all `ADC_HD`). `RusanovFlux` loops component by component with
 `m.max_wave_speed`; `HLLFlux`/`HLLCFlux` share the free function `hll_speeds` (Davis estimates,
 requires `m.wave_speeds`); `HLLCFlux`/`RoeFlux` additionally require `m.pressure`. A non-Euler model
@@ -231,7 +231,7 @@ independently of the limiter. The `SourceFreeModel` adapter (explicit IMEX half-
 IMEX half-step stays on an HLLC flux. A moment hierarchy (no fluid roles, no primitive `p`) can also
 drive a generic Roe via the DSL emitter `m.roe_from_jacobian()` (section 23): `|A|` is applied by
 `adc::roe_abs_apply`
-([`include/adc/numerics/dense_eig.hpp`](../include/adc/numerics/linalg/dense_eig.hpp)) behind a real-spectrum
+([`include/adc/numerics/linalg/dense_eig.hpp`](../include/adc/numerics/linalg/dense_eig.hpp)) behind a real-spectrum
 gate, with a spectral-radius Rusanov fallback when `|A|` is not a faithful real spectral function.
 
 **Constraints / remarks.** `RusanovFlux` is the only flux compatible with the minimal `PhysicalModel`
@@ -351,7 +351,7 @@ function weno5z(vm2, vm1, v0, vp1, vp2):        # face entre v0 et vp1
 ```
 
 **Code.** Pointwise `Limiter` policies in
-[`include/adc/numerics/reconstruction.hpp`](../include/adc/numerics/fv/reconstruction.hpp): `NoSlope`
+[`include/adc/numerics/fv/reconstruction.hpp`](../include/adc/numerics/fv/reconstruction.hpp): `NoSlope`
 (`n_ghost = 1`, `operator()` returns `Real(0)`), `Minmod` and `VanLeer` (`n_ghost = 2`, `operator()(a,b)`
 returns the limited slope, absolute value coded by hand to stay device-safe without `<cmath>`), `Weno5`
 (`n_ghost = 3`, a tag whose `operator()` is a no-op that just satisfies the `Limiter` concept). The
@@ -438,16 +438,16 @@ concept TimeStepper<I> = I.take_step(rhs, U, dt) compile
 ```
 
 **Code.** Two expressions coexist, separating the mathematical scheme from its usage policy.
-The tags [`include/adc/numerics/time/time_integrator.hpp`](../include/adc/numerics/time/integrators/time_integrator.hpp)
+The tags [`include/adc/numerics/time/integrators/time_integrator.hpp`](../include/adc/numerics/time/integrators/time_integrator.hpp)
 (`SSPRK2`, `SSPRK3`, `UserTimeIntegrator`) name, per block, the temporal treatment via a
 `TimePolicy<Method, TimeTreatment, Substeps, Stride>`; `TimePolicyTraits` reads these fields (and accepts
 a bare tag, then treated as `Explicit` with a single step). The aliases `ExplicitTime` / `ImplicitTime` /
 `IMEXTime` / `PrescribedTime` set the `TimeTreatment`. The object integrators
-[`include/adc/numerics/time/time_steppers.hpp`](../include/adc/numerics/time/integrators/time_steppers.hpp)
+[`include/adc/numerics/time/integrators/time_steppers.hpp`](../include/adc/numerics/time/integrators/time_steppers.hpp)
 (`ForwardEuler`, `SSPRK2Step`, `SSPRK3Step`) carry the method: each exposes
 `take_step(rhs, U, dt)` and allocates its scratch (`R`, stages `U1`/`U2`/`U3`) only from the layout of
 `U`, with no persistent state. The integrator sees only `rhs(U_stage, R)` (the method-of-lines arrow)
-and the `saxpy`/`lincomb` operations of [`include/adc/mesh/mf_arith.hpp`](../include/adc/mesh/storage/mf_arith.hpp):
+and the `saxpy`/`lincomb` operations of [`include/adc/mesh/storage/mf_arith.hpp`](../include/adc/mesh/storage/mf_arith.hpp):
 it is agnostic of the model and of the discretization. The `TimeStepper` concept formalizes the contract, so
 that a case can provide its own `take_step` object exactly as it provides a `PhysicalModel`.
 
@@ -536,10 +536,10 @@ function backward_euler_source(model, aux, U, dt, iters, mask):
             U(i,j,:) <- W)
 ```
 
-**Code.** [`include/adc/numerics/time/imex.hpp`](../include/adc/numerics/time/schemes/imex.hpp):
+**Code.** [`include/adc/numerics/time/schemes/imex.hpp`](../include/adc/numerics/time/schemes/imex.hpp):
 `imex_euler_step(U, dt, Texpl, Simpl)` chains the in-place explicit transport then the in-place implicit
 source solve (two callables `TransportStep` / `ImplicitSourceSolve`). The implicit step lives in
-[`include/adc/numerics/time/implicit_stepper.hpp`](../include/adc/numerics/time/integrators/implicit_stepper.hpp):
+[`include/adc/numerics/time/integrators/implicit_stepper.hpp`](../include/adc/numerics/time/integrators/implicit_stepper.hpp):
 `newton_source_solve<Model>` (local per-cell Newton, forward-backward Euler for the partial IMEX),
 `detail::solve_dense<N>` (dense `n x n` resolution by Gauss elimination with partial pivoting, a
 fixed constexpr array hence device-callable, no allocation), and `backward_euler_source<Model>` which applies
@@ -614,7 +614,7 @@ function strang_step(U, dt, T, S):
 ```
 
 **Code.** The two generic bricks are in
-[`include/adc/numerics/time/splitting.hpp`](../include/adc/numerics/time/schemes/splitting.hpp):
+[`include/adc/numerics/time/schemes/splitting.hpp`](../include/adc/numerics/time/schemes/splitting.hpp):
 `lie_step(MultiFab& U, Real dt, TransportStep T, SourceStep S)` and
 `strang_step(...)`. Both are templated on `TransportStep` / `SourceStep`: $T$ and $S$ are
 callables `(MultiFab&, Real) -> void` that advance their subsystem in place, so the integrator is
@@ -1245,16 +1245,16 @@ function cut_distance(lc, ln, h):
 ```
 
 **Code.** The cut geometry is centralized in
-[`include/adc/numerics/elliptic/cut_fraction.hpp`](../include/adc/numerics/elliptic/eb/cut_fraction.hpp):
+[`include/adc/numerics/elliptic/eb/cut_fraction.hpp`](../include/adc/numerics/elliptic/eb/cut_fraction.hpp):
 `detail::cut_distance` (linear crossing of a face), `detail::cut_fraction` (the 4 half-distances
 + apertures + volume fraction `kappa`), and `detail::shortley_weller` which returns the 5 weights
 `ShortleyWellerWeights{w_xm, w_xp, w_ym, w_yp, w_diag}`. The V-cycle
-[`include/adc/numerics/elliptic/geometric_mg.hpp`](../include/adc/numerics/elliptic/mg/geometric_mg.hpp)
+[`include/adc/numerics/elliptic/mg/geometric_mg.hpp`](../include/adc/numerics/elliptic/mg/geometric_mg.hpp)
 writes them once per level into its `coef` field (5 components) at setup (host) then reads them
 on-device; it skips the conductor cells (`m(i,j) == 0`). It is the same `cut_fraction` that the
 EB transport consumes (section 15): aperture geometry bit-consistent between Poisson and transport.
 The cut-cell and mask geometry is a named generic level-set contract in
-[`include/adc/numerics/embedded_boundary.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp) (ADC-327):
+[`include/adc/numerics/spatial/embedded_boundary/domain.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp) (ADC-327):
 a domain exposes `ADC_HD Real level_set(x, y)` (negative inside) and is directly usable as the
 `LevelSet` argument of `cut_fraction` / `assemble_rhs_eb`. Built-ins are `DiscDomain` (circle) and
 `HalfPlaneDomain`; the `LevelSetDomain` concept in the same header is diagnostics-only (a `static_assert`
@@ -1333,19 +1333,19 @@ function face_aperture(lc, ln):
 **Code.** `System::set_disc_domain(cx, cy, R, mode)` (#216,
 [`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp), defined in
 [`python/system.cpp`](../python/system.cpp)) sets a `DiscDomain`
-([`include/adc/numerics/embedded_boundary.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp),
+([`include/adc/numerics/spatial/embedded_boundary/domain.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp),
 `level_set`) and the transport mode; `set_geometry_mode(mode)` switches the mode alone; `disc_mask()`
 materializes the
 mask (all-active if no disc). The stepper routes each block: `assemble_rhs` (full),
 `assemble_rhs_masked`
 ([`include/adc/numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp), 0/1
 gate) or `assemble_rhs_eb`
-([`include/adc/numerics/spatial_operator_eb.hpp`](../include/adc/numerics/spatial/embedded_boundary/operator.hpp),
+([`include/adc/numerics/spatial/embedded_boundary/operator.hpp`](../include/adc/numerics/spatial/embedded_boundary/operator.hpp),
 EB). The device kernels are named functors (`detail::EbFaceFluxXKernel`,
 `EbFaceFluxYKernel`, `EbAssembleRhsKernel`, and the adapter `detail::DiscLevelSet` which forwards
 `DiscDomain::level_set`) for cross-TU emission under nvcc; `eb_face_aperture` closes the face toward an
 inactive neighbor. The apertures and `kappa` come from
-[`include/adc/numerics/elliptic/cut_fraction.hpp`](../include/adc/numerics/elliptic/eb/cut_fraction.hpp)
+[`include/adc/numerics/elliptic/eb/cut_fraction.hpp`](../include/adc/numerics/elliptic/eb/cut_fraction.hpp)
 (same geometry as the elliptic cut-cell of section 14); the reconstruction (`reconstruct<>`) and
 the numerical flux (`RusanovFlux`) are reused verbatim from the Cartesian operator.
 
@@ -1431,17 +1431,17 @@ $m=0$ alone) or homogeneous Neumann (Foextrap, $\phi_{-1} = \phi_0$ -> $b_0 \mat
 + two Neumann boundaries: the radial operator has the constant in its kernel (singular tridiagonal); we fix
 the gauge by pinning $\hat\phi(0,0) = 0$ (row 0 replaced by the identity in Thomas).
 
-**Code.** [`include/adc/mesh/geometry.hpp`](../include/adc/mesh/geometry/geometry.hpp)`::PolarGeometry` (ring,
+**Code.** [`include/adc/mesh/geometry/geometry.hpp`](../include/adc/mesh/geometry/geometry.hpp)`::PolarGeometry` (ring,
 opt-in via `adc.PolarMesh`; `cfg.geometry == "polar"` on the
 [`python/system.cpp`](../python/system.cpp) side). Transport:
-[`include/adc/numerics/spatial_operator_polar.hpp`](../include/adc/numerics/spatial/operators/polar_operator.hpp)`::assemble_rhs_polar<Limiter, NumericalFlux>`
+[`include/adc/numerics/spatial/operators/polar_operator.hpp`](../include/adc/numerics/spatial/operators/polar_operator.hpp)`::assemble_rhs_polar<Limiter, NumericalFlux>`
 (`recon_prim`, `wall_radial`), via the named functors `detail::PolarFaceFluxRKernel` (radial flux
 weighted by `r_face`, optional wall at the boundary faces), `PolarFaceFluxThetaKernel`,
 `PolarAssembleRhsKernel`; the physical source and the geometric source are routed by the concepts
 `PolarHasSource` / `PolarHasGeomSource` (`if constexpr`: zero codegen for a scalar brick,
 ExB path bit-identical). Instantiated via `runtime/block_builder_polar.hpp`, wired in
 `System::step` for `geometry == "polar"`. Poisson:
-[`include/adc/numerics/elliptic/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp)`::PolarPoissonSolver`
+[`include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp)`::PolarPoissonSolver`
 (FFT-in-theta `fft1d` reused from `poisson_fft.hpp` + complex `thomas_solve` in r; models the
 concept `PolarEllipticSolver` `rhs()/phi()/solve()/residual()/geom()`). The aux is derived in the local
 basis $(e_r, e_\theta)$: `aux[1] = d phi/dr`, `aux[2] = (1/r) d phi/d theta`
@@ -1452,7 +1452,7 @@ high $\omega_c$), the Schur condenses a full tensor operator
 $A = I + c\,\rho\, B^{-1}$ with cross terms $a_{rt}, a_{tr}$ and a theta-dependent coefficient: the
 FFT-in-theta of `PolarPoissonSolver` no longer applies (it requires a constant theta coefficient
 without cross coupling).
-[`include/adc/numerics/elliptic/polar_tensor_operator.hpp`](../include/adc/numerics/elliptic/polar/polar_tensor_operator.hpp)`::PolarTensorKrylovSolver`
+[`include/adc/numerics/elliptic/polar/polar_tensor_operator.hpp`](../include/adc/numerics/elliptic/polar/polar_tensor_operator.hpp)`::PolarTensorKrylovSolver`
 then solves by matrix-free BiCGStab (handles the non-symmetric of the cross term), preconditioned
 `Jacobi` or `RadialLine` (radial Thomas per theta line, default). No MG V-cycle (stagnation on
 $1/r^2$). Singular operator (pure radial Neumann + periodic theta): gauge fixed by projection onto

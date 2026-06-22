@@ -125,15 +125,15 @@ flowchart TD
 
 adc_cpp is organized into five orthogonal layers. A high layer expresses the problem, a low layer executes it; a high layer never depends on an execution detail. The structuring separation: the containers (what stores) are distinct from the execution policy (how one loops and communicates).
 
-**Physics (local, device-callable).** The `PhysicalModel` concept ([`include/adc/core/physical_model.hpp`](../include/adc/core/model/physical_model.hpp)) only exposes local and pointwise laws, all `ADC_HD`: `flux`, `source`, `max_wave_speed`, `elliptic_rhs`. No access to storage nor to parallelism; no allocation in hot loops, no `std::function`, no dynamic polymorphism. The core is model-agnostic: a model is a composition (`CompositeModel`, [`include/adc/physics/composite.hpp`](../include/adc/physics/composition/composite.hpp)) of generic bricks ([`include/adc/physics/bricks.hpp`](../include/adc/physics/bricks/bricks.hpp)) on three axes (transport / source / elliptic), the scenario names living on the application side. The `aux` channel carries `(phi, grad_x, grad_y)` and is extensible (`B_z`, `T_e`). The geometry (cartesian / polar / disk) is a config axis of the mesh, not of the model.
+**Physics (local, device-callable).** The `PhysicalModel` concept ([`include/adc/core/model/physical_model.hpp`](../include/adc/core/model/physical_model.hpp)) only exposes local and pointwise laws, all `ADC_HD`: `flux`, `source`, `max_wave_speed`, `elliptic_rhs`. No access to storage nor to parallelism; no allocation in hot loops, no `std::function`, no dynamic polymorphism. The core is model-agnostic: a model is a composition (`CompositeModel`, [`include/adc/physics/composition/composite.hpp`](../include/adc/physics/composition/composite.hpp)) of generic bricks ([`include/adc/physics/bricks/bricks.hpp`](../include/adc/physics/bricks/bricks.hpp)) on three axes (transport / source / elliptic), the scenario names living on the application side. The `aux` channel carries `(phi, grad_x, grad_y)` and is extensible (`B_z`, `T_e`). The geometry (cartesian / polar / disk) is a config axis of the mesh, not of the model.
 
-**Numerics / discretization.** The local numerical logic: Riemann flux ([`include/adc/numerics/numerical_flux.hpp`](../include/adc/numerics/fv/numerical_flux.hpp): Rusanov / HLL / HLLC / Roe, `ADC_HD` policies), MUSCL + WENO5-Z reconstruction ([`include/adc/numerics/reconstruction.hpp`](../include/adc/numerics/fv/reconstruction.hpp)), the elliptic operator ([`include/adc/numerics/elliptic/`](../include/adc/numerics/elliptic/)) and the logical BCs ([`include/adc/mesh/physical_bc.hpp`](../include/adc/mesh/boundary/physical_bc.hpp)). We distinguish the point-wise policies (flux, reconstruction, stencil: they take states, see no container) from the grid operators (`assemble_rhs`, [`include/adc/numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp)) which loop over a `Box` via a local view `Array4` but ignore the decomposition into boxes/ranks and the backend. The geometry variants are purely additive: [`spatial_operator_eb.hpp`](../include/adc/numerics/spatial/embedded_boundary/operator.hpp) (cut-cell) and [`spatial_operator_polar.hpp`](../include/adc/numerics/spatial/operators/polar_operator.hpp), the cartesian remaining bit-identical.
+**Numerics / discretization.** The local numerical logic: Riemann flux ([`include/adc/numerics/fv/numerical_flux.hpp`](../include/adc/numerics/fv/numerical_flux.hpp): Rusanov / HLL / HLLC / Roe, `ADC_HD` policies), MUSCL + WENO5-Z reconstruction ([`include/adc/numerics/fv/reconstruction.hpp`](../include/adc/numerics/fv/reconstruction.hpp)), the elliptic operator ([`include/adc/numerics/elliptic/`](../include/adc/numerics/elliptic/)) and the logical BCs ([`include/adc/mesh/boundary/physical_bc.hpp`](../include/adc/mesh/boundary/physical_bc.hpp)). We distinguish the point-wise policies (flux, reconstruction, stencil: they take states, see no container) from the grid operators (`assemble_rhs`, [`include/adc/numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp)) which loop over a `Box` via a local view `Array4` but ignore the decomposition into boxes/ranks and the backend. The geometry variants are purely additive: [`spatial_operator_eb.hpp`](../include/adc/numerics/spatial/embedded_boundary/operator.hpp) (cut-cell) and [`spatial_operator_polar.hpp`](../include/adc/numerics/spatial/operators/polar_operator.hpp), the cartesian remaining bit-identical.
 
-**Mesh / data.** What stores: `box2d`, `box_array` ([`include/adc/mesh/box_array.hpp`](../include/adc/mesh/layout/box_array.hpp)), `distribution_mapping` ([`include/adc/mesh/distribution_mapping.hpp`](../include/adc/mesh/layout/distribution_mapping.hpp)), `multifab` ([`include/adc/mesh/multifab.hpp`](../include/adc/mesh/storage/multifab.hpp)), `geometry` (cartesian + `PolarGeometry`, [`include/adc/mesh/geometry.hpp`](../include/adc/mesh/geometry/geometry.hpp)) and the AMR hierarchy. These containers carry the distributed fields and their halos; they do not know how one loops nor communicates.
+**Mesh / data.** What stores: `box2d`, `box_array` ([`include/adc/mesh/layout/box_array.hpp`](../include/adc/mesh/layout/box_array.hpp)), `distribution_mapping` ([`include/adc/mesh/layout/distribution_mapping.hpp`](../include/adc/mesh/layout/distribution_mapping.hpp)), `multifab` ([`include/adc/mesh/storage/multifab.hpp`](../include/adc/mesh/storage/multifab.hpp)), `geometry` (cartesian + `PolarGeometry`, [`include/adc/mesh/geometry/geometry.hpp`](../include/adc/mesh/geometry/geometry.hpp)) and the AMR hierarchy. These containers carry the distributed fields and their halos; they do not know how one loops nor communicates.
 
-**Execution (seams).** The execution policy, reduced to seams that only see minimal views (Box2D, `Array4`, scalar, rank), never `BoxArray` nor `DistributionMapping`: `for_each_cell` ([`include/adc/mesh/for_each.hpp`](../include/adc/mesh/execution/for_each.hpp), serial / OpenMP / Kokkos dispatch) takes a box and an `ADC_HD(i, j)` lambda; the POD view `Array4` ([`include/adc/mesh/fab2d.hpp`](../include/adc/mesh/storage/fab2d.hpp)) is identical host/device; `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) does rank/size, all-reduce, barrier (serial / MPI identity); the allocator ([`include/adc/core/allocator.hpp`](../include/adc/core/foundation/allocator.hpp)) manages the storage of the Fabs. The halo exchange (`fill_boundary`) and the reductions / `saxpy` (`mf_arith`) are not this layer: they are grid operators that orchestrate the seams.
+**Execution (seams).** The execution policy, reduced to seams that only see minimal views (Box2D, `Array4`, scalar, rank), never `BoxArray` nor `DistributionMapping`: `for_each_cell` ([`include/adc/mesh/execution/for_each.hpp`](../include/adc/mesh/execution/for_each.hpp), serial / OpenMP / Kokkos dispatch) takes a box and an `ADC_HD(i, j)` lambda; the POD view `Array4` ([`include/adc/mesh/storage/fab2d.hpp`](../include/adc/mesh/storage/fab2d.hpp)) is identical host/device; `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) does rank/size, all-reduce, barrier (serial / MPI identity); the allocator ([`include/adc/core/foundation/allocator.hpp`](../include/adc/core/foundation/allocator.hpp)) manages the storage of the Fabs. The halo exchange (`fill_boundary`) and the reductions / `saxpy` (`mf_arith`) are not this layer: they are grid operators that orchestrate the seams.
 
-**Time / coupling.** The layer that composes the operators without knowing their internal implementation: SSPRK ([`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/integrators/ssprk.hpp)), IMEX asymptotic-preserving ([`include/adc/numerics/time/imex.hpp`](../include/adc/numerics/time/schemes/imex.hpp)), splitting `lie_step` / `strang_step` ([`include/adc/numerics/time/splitting.hpp`](../include/adc/numerics/time/schemes/splitting.hpp)). A `TimePolicy` ([`include/adc/numerics/time/time_integrator.hpp`](../include/adc/numerics/time/integrators/time_integrator.hpp)) names, per block, the temporal treatment and the number of substeps; the scheduler reads this policy and calls the adapted operator without knowing the flux formula. The fluid <-> Poisson coupling is carried by a `CouplingPolicy` ([`include/adc/coupling/base/coupling_policy.hpp`](../include/adc/coupling/base/coupling_policy.hpp)) which decides the order of operations and the synchronizations, without owning the data nor knowing the backend: `Coupler` single-model ([`include/adc/coupling/single/coupler.hpp`](../include/adc/coupling/single/coupler.hpp)), `SystemCoupler` multi-species single-level ([`include/adc/coupling/static_system/system_coupler.hpp`](../include/adc/coupling/system/system_coupler.hpp)), `AmrCouplerMP` AMR multi-box ([`include/adc/coupling/amr/amr_coupler_mp.hpp`](../include/adc/coupling/amr/amr_coupler_mp.hpp)).
+**Time / coupling.** The layer that composes the operators without knowing their internal implementation: SSPRK ([`include/adc/numerics/time/integrators/ssprk.hpp`](../include/adc/numerics/time/integrators/ssprk.hpp)), IMEX asymptotic-preserving ([`include/adc/numerics/time/schemes/imex.hpp`](../include/adc/numerics/time/schemes/imex.hpp)), splitting `lie_step` / `strang_step` ([`include/adc/numerics/time/schemes/splitting.hpp`](../include/adc/numerics/time/schemes/splitting.hpp)). A `TimePolicy` ([`include/adc/numerics/time/integrators/time_integrator.hpp`](../include/adc/numerics/time/integrators/time_integrator.hpp)) names, per block, the temporal treatment and the number of substeps; the scheduler reads this policy and calls the adapted operator without knowing the flux formula. The fluid <-> Poisson coupling is carried by a `CouplingPolicy` ([`include/adc/coupling/base/coupling_policy.hpp`](../include/adc/coupling/base/coupling_policy.hpp)) which decides the order of operations and the synchronizations, without owning the data nor knowing the backend: `Coupler` single-model ([`include/adc/coupling/single/coupler.hpp`](../include/adc/coupling/single/coupler.hpp)), `SystemCoupler` multi-species single-level ([`include/adc/coupling/system/system_coupler.hpp`](../include/adc/coupling/system/system_coupler.hpp)), `AmrCouplerMP` AMR multi-box ([`include/adc/coupling/amr/amr_coupler_mp.hpp`](../include/adc/coupling/amr/amr_coupler_mp.hpp)).
 
 
 ## Grid conventions
@@ -312,20 +312,20 @@ each block and sets the initial state. It is the macro-step that differs.
 ### Single-level: `System.step_cfl`
 
 The core is `SystemStepper::step_cfl` (and `step`), in
-[`include/adc/runtime/system_stepper.hpp`](../include/adc/runtime/system/system_stepper.hpp). The order is an
+[`include/adc/runtime/system/system_stepper.hpp`](../include/adc/runtime/system/system_stepper.hpp). The order is an
 explicit invariant (cf. the contract at the head of the file): `solve_fields` once at the head, then for
 each block DU (honored stride cadence) an `advance_transport` followed by a `run_source_stage`
 interleaved, then `apply_couplings`, then `advance the time` and `advance the macro-step counter`.
 
 The `solve_fields` delegates to `SystemFieldSolver`
-([`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system/system_field_solver.hpp)): it
+([`include/adc/runtime/system/system_field_solver.hpp`](../include/adc/runtime/system/system_field_solver.hpp)): it
 solves the system Poisson whose right-hand side is the sum of the elliptic bricks of the blocks
 ($f = \sum_b q_b\, n_b$), then derives the aux. The aux is the shared channel that carries $\phi$ and $\nabla\phi$
 (components 1 and 2), plus optionally $B_z$ and $T_e$. The transport of a block, in turn, reads this aux:
 `advance_transport` routes toward the closure `s.advance` (full path) or its disk variants, and
 this closure does `fill_ghosts` then `assemble_rhs` (limited reconstruction then numerical flux ->
 $R = -\mathrm{div} F + S$) at each SSPRK stage (cf.
-[`include/adc/numerics/time/ssprk.hpp`](../include/adc/numerics/time/integrators/ssprk.hpp), `SSPRK2Step` /
+[`include/adc/numerics/time/integrators/ssprk.hpp`](../include/adc/numerics/time/integrators/ssprk.hpp), `SSPRK2Step` /
 `SSPRK3`). The step $dt$ returned by `step_cfl` is the min over the evolutive blocks of
 $cfl \cdot h \cdot \mathrm{substeps}_b / (\mathrm{stride}_b \cdot w_b)$, with $h = \min(dx, dy)$ in
 cartesian and $h = \min(dr,\, r_{\min}\, d\theta)$ in polar.
@@ -375,7 +375,7 @@ $H(dt/2)\,;\,S(dt)\,;\,H(dt/2)$ and `solve_fields` is RE-solved before each stag
 On the adaptive hierarchy, `AmrSystem::step`
 ([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) forces the lazy build
 then delegates to the multi-block engine `AmrRuntime::step`
-([`include/adc/runtime/amr_runtime.hpp`](../include/adc/runtime/amr/amr_runtime.hpp)) (or, in single-block, to
+([`include/adc/runtime/amr/amr_runtime.hpp`](../include/adc/runtime/amr/amr_runtime.hpp)) (or, in single-block, to
 the closure `step_fn` of an `AmrCouplerMP`). The engine adds two steps proper to the adaptive around
 the same skeleton.
 
@@ -474,7 +474,7 @@ cmake -B build -DADC_USE_MPI=ON                       # + distribue (ADC_HAS_MPI
 
 **MPI: distributed, optional.** `-DADC_USE_MPI=ON` defines `ADC_HAS_MPI` and links `MPI::MPI_CXX`. The `if(ADC_HAS_MPI)` block of the CMake compiles the MPI-only tests (section 1h of [`docs/BACKEND_COVERAGE.md`](BACKEND_COVERAGE.md)), each replayed at np=1/2/4. Out of MPI (a single process), the seam `comm` ([`include/adc/parallel/comm.hpp`](../include/adc/parallel/comm.hpp)) degenerates to the identity (rank 0, size 1, all-reduce and barrier no-op), so that a binary linked MPI but launched single-process behaves like a single-rank run. MPI + Kokkos Cuda multi-GPU is validated on ROMEO for 10 Krylov/Schur/MPI-kernel tests (rank-invariant np=1/2/4, `dmax=0`).
 
-**The seam `for_each_cell`.** The seam point that makes all this possible is `for_each_cell(box, f)` in [`include/adc/mesh/for_each.hpp`](../include/adc/mesh/execution/for_each.hpp). It expresses an execution policy, not numerical logic: it takes a `Box` and an `ADC_HD(i, j)` lambda, and compiles into `Kokkos::parallel_for` (Serial / OpenMP / Cuda depending on the Kokkos install). The numerical logic stays in the lambda (layer 2: discretization), never in the seam; growing it into `for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)` would recreate an opaque framework. A grid operator sees a local view `Array4` + `Box`, but neither the `DistributionMapping` nor the loop policy. The reductions share the same philosophy: `for_each_cell_reduce_sum` / `_max` carry the deterministic reducers `Kokkos::Sum` / `Max` (the `sum` reassociates the addition by tile -- deterministic/idempotent but not bit-identical to a lexicographic sum, for all the Kokkos spaces; the `max` stays exact).
+**The seam `for_each_cell`.** The seam point that makes all this possible is `for_each_cell(box, f)` in [`include/adc/mesh/execution/for_each.hpp`](../include/adc/mesh/execution/for_each.hpp). It expresses an execution policy, not numerical logic: it takes a `Box` and an `ADC_HD(i, j)` lambda, and compiles into `Kokkos::parallel_for` (Serial / OpenMP / Cuda depending on the Kokkos install). The numerical logic stays in the lambda (layer 2: discretization), never in the seam; growing it into `for_each_cell(U, grid, ghosts, mpi, bc, amr, ...)` would recreate an opaque framework. A grid operator sees a local view `Array4` + `Box`, but neither the `DistributionMapping` nor the loop policy. The reductions share the same philosophy: `for_each_cell_reduce_sum` / `_max` carry the deterministic reducers `Kokkos::Sum` / `Max` (the `sum` reassociates the addition by tile -- deterministic/idempotent but not bit-identical to a lexicographic sum, for all the Kokkos spaces; the `max` stays exact).
 
 ## Thread safety
 
@@ -504,13 +504,13 @@ target_link_libraries(mon_appli PRIVATE adc::adc)
 ```
 
 The entry contract is the `PhysicalModel` concept, declared in
-[`include/adc/core/physical_model.hpp`](../include/adc/core/model/physical_model.hpp). A type that satisfies it
+[`include/adc/core/model/physical_model.hpp`](../include/adc/core/model/physical_model.hpp). A type that satisfies it
 exposes a flux, a source, a maximum wave speed (`max_wave_speed`) and a contribution to the elliptic right-hand
 side (`elliptic_rhs`), with `M::Aux == adc::Aux` explicitly required by the concept. The
 methods called in the kernels must carry `ADC_HD` (device callable); the concept does not verify it,
 it is an invariant in the charge of the model author. One obtains such a type either by composing
 generic bricks in `CompositeModel<Hyperbolic, Source, Elliptic>`
-([`include/adc/physics/composite.hpp`](../include/adc/physics/composition/composite.hpp)), or by writing one's own
+([`include/adc/physics/composition/composite.hpp`](../include/adc/physics/composition/composite.hpp)), or by writing one's own
 struct.
 
 The model is then instantiated in a coupler, which closes the loop Poisson -> `aux` channel -> advance in
@@ -521,7 +521,7 @@ template parameter, `GeometricMG` by default. For the multi-patch AMR ExB, it is
 ([`include/adc/coupling/amr/amr_coupler_mp.hpp`](../include/adc/coupling/amr/amr_coupler_mp.hpp)), which orders the
 operations (coarse Poisson -> `aux = grad phi` -> advance + regrid Berger-Rigoutsos) and outputs the
 hierarchy in `AmrLevelStack`. The multi-species coupler carried over AMR is `AmrSystemCoupler`
-([`include/adc/coupling/static_system/amr_system_coupler.hpp`](../include/adc/coupling/system/amr_system_coupler.hpp)).
+([`include/adc/coupling/system/amr_system_coupler.hpp`](../include/adc/coupling/system/amr_system_coupler.hpp)).
 
 The runtime facades `System` ([`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp)) and
 `AmrSystem` ([`include/adc/runtime/amr_system.hpp`](../include/adc/runtime/amr_system.hpp)) wrap these
@@ -536,14 +536,14 @@ silently), or are assumed scope boundaries.
   Poisson (`CompositeFacPoisson`,
   [`include/adc/numerics/elliptic/mg/composite_fac_poisson.hpp`](../include/adc/numerics/elliptic/mg/composite_fac_poisson.hpp))
   and the AMR condensed Schur source stage (`AmrCondensedSchurSourceStepper`,
-  [`include/adc/coupling/schur/amr_condensed_schur_source_stepper.hpp`](../include/adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp))
+  [`include/adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp`](../include/adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp))
   are wired on the refined hierarchy. The supported scope is 2 levels, 1..N disjoint NON-adjacent fine
   patches, a replicated mono-block coarse, mono-rank; adjacent patches, more than 2 levels, MPI and
   multi-block are refused explicitly (Phase 4b). See ALGORITHMS.md section 25 for the full scope.
 
 - FFT under `System` in MPI np>1: supported since ADC-287. `System` distributes a single box in
   round-robin, so `PoissonFFTSolver` (which needs the whole grid) is kept only for `n_ranks()==1`; at
-  np>1 [`include/adc/runtime/system_field_solver.hpp`](../include/adc/runtime/system/system_field_solver.hpp)
+  np>1 [`include/adc/runtime/system/system_field_solver.hpp`](../include/adc/runtime/system/system_field_solver.hpp)
   now SELECTS a `RemappedFFTSolver` instead of raising: it hides a box-slab scatter/gather around
   `PoissonFFT` (the field-solve path is unchanged, it sees the single round-robin box outward).
   `set_poisson(solver="fft"|"fft_spectral")` therefore SUCCEEDS under MPI np>1 for the periodic,
@@ -553,8 +553,8 @@ silently), or are assumed scope boundaries.
 
 - Polar: scalar ExB, single-rank. The polar geometry (global ring $r \in [r_{min}, r_{max}] \times \theta \in [0, 2\pi)$, `PolarGeometry`) wired in `System::step` carries the scalar ExB transport
   (`CompositeModel<ExBVelocityPolar, NoSource, ChargeDensity>`, see
-  [`include/adc/physics/hyperbolic.hpp`](../include/adc/physics/bricks/hyperbolic.hpp)). The direct polar Poisson
-  `PolarPoissonSolver` ([`include/adc/numerics/elliptic/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp))
+  [`include/adc/physics/bricks/hyperbolic.hpp`](../include/adc/physics/bricks/hyperbolic.hpp)). The direct polar Poisson
+  `PolarPoissonSolver` ([`include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp))
   is single-rank, on a single box covering the ring: its FFT-in-theta + tridiagonal-in-r requires the
   complete azimuthal line and the complete radial column on a same rank, so it raises if `n_ranks() > 1` or if
   `ba.size() != 1`. The parallel transpose is out of scope at this stage.

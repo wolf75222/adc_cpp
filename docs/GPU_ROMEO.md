@@ -44,7 +44,7 @@ GPU.
 ## Kokkos (parallel_for dispatch, CUDA backend)
 
 Beyond raw CUDA, we verify the generated brick through the REAL parallel dispatch that the solver
-uses (`adc/mesh/for_each.hpp` -> `Kokkos::parallel_for`). We build Kokkos from sources
+uses (`adc/mesh/execution/for_each.hpp` -> `Kokkos::parallel_for`). We build Kokkos from sources
 (no module on ROMEO) then a `Kokkos::parallel_for(KOKKOS_LAMBDA ...)` harness that computes the flux
 of `EulerGen` on the device and compares it against `adc::Euler` on the host.
 
@@ -83,7 +83,7 @@ brick is correct through the Kokkos dispatch on GH200.
 
 We go beyond an isolated flux: a complete 2D Euler case (80 steps, CFL, Rusanov order 1, periodic)
 advances ENTIRELY on GPU through `adc::for_each_cell` / `for_each_cell_reduce_max|sum`
-(`adc/mesh/for_each.hpp` -> `Kokkos::parallel_for` / `parallel_reduce`). We simulate the SAME thing with
+(`adc/mesh/execution/for_each.hpp` -> `Kokkos::parallel_for` / `parallel_reduce`). We simulate the SAME thing with
 the generated brick `EulerGen` and with `adc::Euler`, and we compare the final fields + the mass.
 
 ```bash
@@ -94,7 +94,7 @@ ssh romeo 'cd ~/adc_dsl_kk && srun --account=<compte> -p instant --constraint=ar
            --gres=gpu:1 --mem=16G -c 16 -t 25 bash kk_sim_build.sh'
 ```
 
-The harness defines `#define ADC_HAS_KOKKOS` then includes `adc/mesh/for_each.hpp`: the cell
+The harness defines `#define ADC_HAS_KOKKOS` then includes `adc/mesh/execution/for_each.hpp`: the cell
 loops therefore go through the solver's REAL Kokkos dispatch (the same call site as on CPU).
 
 Result (obtained):
@@ -108,7 +108,7 @@ over 80 steps). The complete case therefore runs on GPU through adc's Kokkos mac
 
 ## Limits / next steps
 
-- The complete case goes through `adc/mesh/for_each.hpp` (the solver's REAL Kokkos seam), but we do not
+- The complete case goes through `adc/mesh/execution/for_each.hpp` (the solver's REAL Kokkos seam), but we do not
   rebuild the whole runtime stack (System / AMR / MPI) on GPU here: the cell loops
   use the same dispatch as production, which is enough to validate the device.
 - Type-erased dispatch at runtime: DONE elsewhere (adc::IModel, see python/tests/test_dsl_dynamic.py).

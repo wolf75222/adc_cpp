@@ -8,7 +8,7 @@ FROZEN multi-block AMR hierarchy ADAPTIVE.
 ## PROGRESS STATUS (Lot C.6 implementation)
 
 DELIVERED (runtime multi-block engine AmrRuntime):
-- [x] (R3) helper `tag_union(span<TagBox>)` (cell-by-cell OR) -> `include/adc/amr/tag_box.hpp`.
+- [x] (R3) helper `tag_union(span<TagBox>)` (cell-by-cell OR) -> `include/adc/amr/tagging/tag_box.hpp`.
 - [x] REFACTOR (section 6): `amr_regrid_finest` split into `regrid_compute_fine_layout`
       (tags -> grow -> all_reduce_or -> berger_rigoutsos -> clamp -> (fb, dmap)) + `regrid_field_on_layout`
       (re-grids ONE field on an IMPOSED layout) -> `include/adc/coupling/amr/amr_regrid_coupler.hpp`.
@@ -17,7 +17,7 @@ DELIVERED (runtime multi-block engine AmrRuntime):
       tags on |grad phi| (D4), (R3) union + grow, (R4) all_reduce_or if coarse distributed, (R5) a single
       clustering -> shared layout, (R6) prolong/restrict of ALL blocks (including stride-held, D3)
       with ghost inherited per block, (R7) rebuild shared aux + re-wiring, (R8) re-solve (coverage
-      cascade). (V3) `same_layout_or_throw` post-regrid. -> `include/adc/runtime/amr_runtime.hpp`.
+      cascade). (V3) `same_layout_or_throw` post-regrid. -> `include/adc/runtime/amr/amr_runtime.hpp`.
 - [x] registration API: `set_regrid(every, grow, margin)` (D2: regrid BEFORE the step, macro-step
       cadence), `set_block_tag_predicate(b, crit)` (D1), `set_phi_tag_predicate(crit)` (D4).
 - [x] cadence in `AmrRuntime::step`: regrid every `regrid_every` macro-steps, BEFORE the step;
@@ -45,8 +45,8 @@ OUT OF SCOPE (conforming to the boundaries):
   facade sets the per-block density predicate; phi stays opt-in on the engine side, mechanical to wire if needed).
 
 PROJECT FRAME. The multi-block runtime delivered so far (`AmrRuntime`,
-`include/adc/runtime/amr_runtime.hpp`, runtime counterpart of `AmrSystemCoupler`,
-`include/adc/coupling/static_system/amr_system_coupler.hpp`) is "Phase 1 multi-block with FROZEN hierarchy":
+`include/adc/runtime/amr/amr_runtime.hpp`, runtime counterpart of `AmrSystemCoupler`,
+`include/adc/coupling/system/amr_system_coupler.hpp`) is "Phase 1 multi-block with FROZEN hierarchy":
 N blocks (electrons, ions, neutrals, ...) co-located on ONE shared AMR hierarchy, a single
 coarse Poisson with SUMMED right-hand side, cell-by-cell coupled sources, multirate per block
 (substeps / stride / evolve), but a mesh that NEVER MOVES after construction. Neither
@@ -81,7 +81,7 @@ orchestration is missing.
 FACT 2: the MONO-BLOCK REGRID IS ALREADY WIRED TO THE FACADE, but ONLY for the mono-block path.
 `AmrCouplerMP::regrid` (`include/adc/coupling/amr/amr_coupler_mp.hpp:321-325`) delegates to
 `amr_regrid_finest`, and the `h.step` closure of the mono-block path calls it periodically
-(`include/adc/runtime/amr_dsl_block.hpp:101-104`:
+(`include/adc/runtime/builders/compiled/amr_dsl_block.hpp:101-104`:
 `if (regrid_every > 0 && *step_state % regrid_every == 0) cpl->regrid(crit);`). The
 multi-block path, in contrast, goes through `AmrRuntime` which has no `regrid`: its hierarchy is frozen.
 
@@ -93,7 +93,7 @@ would make the API CLAIM it does dynamic AMR while the mesh never moves
 the algorithm below is implemented and tested.
 
 FACT 4: the LAYOUT GUARD EXISTS and will be the natural safety net of the post-regrid.
-`detail::same_layout_or_throw` (`include/adc/coupling/static_system/amr_system_coupler.hpp:122-140`, reused
+`detail::same_layout_or_throw` (`include/adc/coupling/system/amr_system_coupler.hpp:122-140`, reused
 by `AmrRuntime` at the ctor, `amr_runtime.hpp:213-218`) compares EXACTLY, across all blocks:
 number of levels, then per level `BoxArray` (boxes AND order, via `ba.boxes() ==`),
 `DistributionMapping` (rank per box, via `dm.ranks() ==`) and `dx`/`dy` (bit for bit). It is the
@@ -193,7 +193,7 @@ the phi-gradient criterion, exactly like `amr_runtime.hpp:413`). Snapshot of the
 block `mass(b)` BEFORE regrid (for verification (V1)).
 
 (R1) PER-BLOCK TAGS ON THE PARENT. For each block `b`, compute a `TagBox` on the parent level
-via `tag_cells((*blocks_[b].levels)[pk].U, pdom, crit_b)` (`include/adc/amr/regrid.hpp:36-47`).
+via `tag_cells((*blocks_[b].levels)[pk].U, pdom, crit_b)` (`include/adc/amr/regridding/regrid.hpp:36-47`).
 `crit_b` is a predicate `(ConstArray4 a, int i, int j) -> bool` on the density of the block (component
 0) or a gradient. In v1 the criterion can be common to all blocks; the UNION below stays
 the contract. `TagBox` is a dense grid of `char` 0/1 on `pdom` (`tag_box.hpp`).
@@ -222,7 +222,7 @@ reduction is INDISPENSABLE to cross-rank layout consistency: otherwise Berger-Ri
 would produce different patches per rank and the `DistributionMapping` would diverge.
 
 (R5) UNIQUE CLUSTERING -> SHARED LAYOUT. A SINGLE `berger_rigoutsos(grown, ClusterParams{})`
-(`include/adc/amr/cluster.hpp:171-181`) on the reduced union tags. Apply the nesting clamp
+(`include/adc/amr/tagging/cluster.hpp:171-181`) on the reduced union tags. Apply the nesting clamp
 (`margin`) and the parent coords -> fine coords conversion (parent x2) EXACTLY like
 `amr_regrid_finest:62-68`. Build A SINGLE fine `BoxArray fb` and A SINGLE
 `DistributionMapping((int)fb.size(), n_ranks())`. This is THE GOLDEN RULE: one rebuild, not one per
@@ -450,22 +450,22 @@ OPEN DECISIONS (owner signature required).
 
 ## 9. Code references (all verified at this head)
 
-- `include/adc/coupling/static_system/amr_system_coupler.hpp`: compile-time multi-block AMR engine (FROZEN
+- `include/adc/coupling/system/amr_system_coupler.hpp`: compile-time multi-block AMR engine (FROZEN
   hierarchy, NO regrid); `AmrHierarchyLayout`, `detail::same_layout_or_throw` (layout guard).
-- `include/adc/runtime/amr_runtime.hpp`: RUNTIME multi-block engine (type-erased registry by name,
+- `include/adc/runtime/amr/amr_runtime.hpp`: RUNTIME multi-block engine (type-erased registry by name,
   shared aux, summed Poisson, coupled sources, multirate); NO regrid (target of this design).
 - `include/adc/coupling/amr/amr_coupler_mp.hpp`: MONO-BLOCK AMR coupler + `regrid` (`:321-325`,
   delegates to `amr_regrid_finest`); mono-block path UNTOUCHED.
 - `include/adc/coupling/amr/amr_regrid_coupler.hpp`: `amr_regrid_finest` (Berger-Rigoutsos, finest
   level); brick to SPLIT into "layout computation" + "re-grid a field on a given layout".
-- `include/adc/amr/tag_box.hpp`: `TagBox` (dense grid of tags 0/1; union = cell-by-cell OR).
-- `include/adc/amr/regrid.hpp`: `tag_cells`, `grow_tags`, `regrid_level` (generic bricks).
-- `include/adc/amr/cluster.hpp`: `berger_rigoutsos`, `ClusterParams` (geometric clustering).
-- `include/adc/amr/amr_hierarchy.hpp`: `AmrHierarchy` (level container; note: "the future conservative
+- `include/adc/amr/tagging/tag_box.hpp`: `TagBox` (dense grid of tags 0/1; union = cell-by-cell OR).
+- `include/adc/amr/regridding/regrid.hpp`: `tag_cells`, `grow_tags`, `regrid_level` (generic bricks).
+- `include/adc/amr/tagging/cluster.hpp`: `berger_rigoutsos`, `ClusterParams` (geometric clustering).
+- `include/adc/amr/hierarchy/amr_hierarchy.hpp`: `AmrHierarchy` (level container; note: "the future conservative
   multi-block AMR will have to share a common hierarchy", l. 31-32).
 - `include/adc/runtime/amr_system.hpp` + `python/amr_system.cpp`: RUNTIME facade (`regrid_every`;
   multi-block + `regrid_every > 0` REFUSAL at `amr_system.cpp:246-251`, lifted by this design).
-- `include/adc/runtime/amr_dsl_block.hpp`: mono-block regrid wiring (`:101-104`), shared 2-level
+- `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: mono-block regrid wiring (`:101-104`), shared 2-level
   FROZEN layout (`make_shared_amr_layout`) and per-block allocation (`build_amr_block`).
 - `include/adc/parallel/comm.hpp`: `all_reduce_or_inplace`, `n_ranks`, `my_rank` (MPI collectives).
 - `docs/AMR_MULTIBLOCK_DESIGN.md`: Phase 1 capstone (multi-block engine, layout guard, Phase 2 /

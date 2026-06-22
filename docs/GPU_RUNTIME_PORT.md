@@ -30,7 +30,7 @@ in our case). `SharedSpace` being a portable alias (`CudaUVMSpace` / `HIPManaged
 
 ## Design asset : the seam does not change the call sites
 
-`adc/mesh/for_each.hpp` (`for_each_cell`, `for_each_cell_reduce_*`) switches CPU <-> GPU at
+`adc/mesh/execution/for_each.hpp` (`for_each_cell`, `for_each_cell_reduce_*`) switches CPU <-> GPU at
 COMPILE TIME without touching the operators. `ADC_HD` makes the whole core device-callable. So the GPU
 port is mostly a job of data RESIDENCE on device + porting of the still-host steps,
 not a rewrite of the compute kernels.

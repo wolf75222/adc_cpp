@@ -1,7 +1,7 @@
 # GH200 device validation: dense_eig + hyqmom15 (.so), single + multi-GPU
 
 ADC-181. Validates on GH200 (ROMEO, NVIDIA GH200 120GB, aarch64) the device path of the exact
-eigenvalue-based wave speeds: `include/adc/numerics/dense_eig.hpp` (`real_eig_minmax`: Hessenberg
+eigenvalue-based wave speeds: `include/adc/numerics/linalg/dense_eig.hpp` (`real_eig_minmax`: Hessenberg
 reduction + Francis double-shift QR iteration, named `ADC_HD` functors, on-stack buffers, zero
 allocation) through the compiled hyqmom15 `.so` (DSL-emitted bricks, `exact_speeds=True`,
 `riemann="hll"`), wired by the `adc::add_compiled_model` compilation seam (full native path: device

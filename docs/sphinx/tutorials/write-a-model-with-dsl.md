@@ -156,7 +156,7 @@ formulas reproduce exactly the conventions of the native `ExB` and `BackgroundDe
 - Import error on `import adc`: the extension is pinned to the interpreter that built it. Import with
   the same Python, and run `python -c "import adc; adc.doctor()"` to check the environment.
 - `RuntimeError` about headers when compiling: set `ADC_INCLUDE` to the repository `include`
-  directory (Step 1). The DSL validates it by checking that `adc/mesh/multifab.hpp` exists there.
+  directory (Step 1). The DSL validates it by checking that `adc/mesh/storage/multifab.hpp` exists there.
 - The script reports that the `production` backend is unavailable and continues on `aot`: this is the
   documented fallback when `_adc` and the `.so` were not built with the same headers. The `aot` run is
   numerically identical; nothing further is required for this tutorial.

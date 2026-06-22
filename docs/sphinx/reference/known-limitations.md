@@ -25,7 +25,7 @@ fixed 2D plane and add no third index.
 
 Source of truth: `adc.capabilities()['dimension']` (`== 2`), the decision record
 [ADR-0001](https://github.com/wolf75222/adc_cpp/blob/master/docs/adr/ADR-0001-genericity-contracts.md),
-and the `include/adc/mesh/box2d.hpp` header comment.
+and the `include/adc/mesh/index/box2d.hpp` header comment.
 
 ## GPU: validated manually on ROMEO, not in CI
 
