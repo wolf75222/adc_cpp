@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`System::install_program`: load a compiled time-program `.so`** (ADC-401, Phase 2c-i): the runtime
+  path that drives a compiled time Program from a generated `problem.so`. `install_program(so_path)`
+  dlopens the `.so`, checks its `adc_program_abi_key` against the module (fail-loud on mismatch), and
+  calls its `adc_install_program(this)`, which wraps the System in a `ProgramContext` and installs the
+  macro-step closure (mirroring `add_native_block`: self-promote to the global scope so the `.so`
+  resolves the `ADC_EXPORT` seam accessors). `tests/test_program_loader.cpp` compiles a stub Forward-Euler
+  `problem.so` at runtime, loads it, runs `sim.step(dt)`, and asserts bit-parity vs the reference -- the
+  full dlopen + ABI guard + symbol-resolution chain. Auto-skips under Kokkos / without a compiler. The
+  Python `compile_problem` codegen that GENERATES the `.so` from a `Program` IR is Phase 2c-ii.
 - **`adc.time.std`: standard library of time-stepping macros that lower to the Program IR** (ADC-407,
   Phase 8a): `forward_euler`, `ssprk2`, `ssprk3`, `rk4` and a `strang` splitting combinator are Python
   functions that BUILD `adc.time.Program` IR via the same builder ops and the affine algebra over `dt`
