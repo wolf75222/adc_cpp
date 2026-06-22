@@ -235,6 +235,15 @@ add_test(NAME test_compile_problem
 set_tests_properties(test_compile_problem PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Multi-stage compiled Programs (ADC-399/ADC-407) : SSPRK2 + RK4 lowered by emit_cpp_program (scratch
+# states + lincomb commit), compiled + installed + run, parity vs an offline stage-by-stage reference
+# (set_state + solve_fields + eval_rhs) and vs native adc.Explicit('ssprk2'). Auto-skips without the
+# install_program binding / a compiler / a visible Kokkos.
+add_test(NAME test_time_multistage
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_multistage.py)
+set_tests_properties(test_time_multistage PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.

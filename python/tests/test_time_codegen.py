@@ -1,16 +1,13 @@
-"""adc.time codegen (epic ADC-399 / ADC-401 Phase 2c-ii): Program.emit_cpp_program.
+"""adc.time codegen (epic ADC-399 / ADC-401, ADC-407): Program.emit_cpp_program.
 
-`emit_cpp_program` lowers the Program IR to the C++ source of a problem.so. This test pins the
-Forward-Euler lowering: the generated source must carry the stable .so ABI (adc_program_abi_key via
-the ADC_ABI_KEY_LITERAL preprocessor literal -- never the interposable inline -- plus
-adc_program_name / adc_program_hash / adc_install_program) and must express the FE algorithm purely
-through ProgramContext primitives (solve_fields + rhs_into + axpy with the dt coefficient). This is
-the SAME source shape tests/test_program_loader.cpp compiles, loads, and runs to bit-parity in CI,
-so structural identity here means the generated .so compiles and runs there.
-
-Schemes the MVP codegen cannot yet lower (multi-stage, which needs scratch states; named sources
-beyond 'default', which need source masks) must be REFUSED with NotImplementedError, never silently
-mis-lowered. Pure Python (no compile); skips cleanly if the adc module is unavailable.
+`emit_cpp_program` lowers the Program IR to the C++ source of a problem.so by a topological SSA walk.
+This test pins the generated source: the stable .so ABI (adc_program_abi_key via the
+ADC_ABI_KEY_LITERAL preprocessor literal -- never the interposable inline -- plus adc_program_name /
+adc_program_hash / adc_install_program), the Forward-Euler body, and that a multi-stage scheme
+(SSPRK2) now lowers (a scratch state + a second rhs + a lincomb commit). Constructs the codegen
+cannot lower yet -- more than one block, named sources beyond 'default' -- must be REFUSED with a
+clear NotImplementedError, never silently mis-lowered. Pure Python (no compile); skips if adc is
+unavailable.
 """
 import sys
 
@@ -30,8 +27,20 @@ def _forward_euler(t):
     U = P.state("plasma")
     f = P.solve_fields(U)
     R = P.rhs(state=U, fields=f, flux=True, sources=["default"])
-    U1 = P.linear_combine("U1", U + dt * R)
-    P.commit("plasma", U1)
+    P.commit("plasma", P.linear_combine("U1", U + dt * R))
+    return P
+
+
+def _ssprk2(t):
+    P = t.Program("ssprk2_program")
+    dt = P.dt
+    U0 = P.state("plasma")
+    f0 = P.solve_fields(U0)
+    k0 = P.rhs(state=U0, fields=f0, flux=True, sources=["default"])
+    U1 = P.linear_combine("U1", U0 + dt * k0)
+    f1 = P.solve_fields(U1)
+    k1 = P.rhs(state=U1, fields=f1, flux=True, sources=["default"])
+    P.commit("plasma", P.linear_combine("U2", 0.5 * U0 + 0.5 * (U1 + dt * k1)))
     return P
 
 
@@ -47,14 +56,28 @@ def test_forward_euler_abi(t):
 
 
 def test_forward_euler_algorithm(t):
+    # FE: base = ctx.state(0); solve_fields; R = rhs_into(0, base); acc += dt*R; commit via lincomb.
     src = _forward_euler(t).emit_cpp_program()
-    for line in ("ctx.solve_fields();",
-                 "for (int b = 0; b < ctx.n_blocks(); ++b)",
-                 "adc::MultiFab& U = ctx.state(b);",
-                 "adc::MultiFab R = ctx.rhs_scratch_like(U);",
-                 "ctx.rhs_into(b, U, R);",
-                 "ctx.axpy(U, static_cast<adc::Real>(dt), R);"):
-        assert line in src, "generated FE body missing %r" % line
+    for frag in ("ctx.solve_fields();",
+                 "= ctx.state(0);",
+                 "ctx.rhs_scratch_like(",
+                 "ctx.rhs_into(0, ",
+                 "ctx.scratch_state_like(",
+                 "static_cast<adc::Real>(dt)",
+                 "ctx.axpy(",
+                 "ctx.lincomb("):
+        assert frag in src, "generated FE body missing %r" % frag
+    assert "ctx.n_blocks()" not in src, "single-block codegen should target ctx.state(0), not a loop"
+
+
+def test_multistage_lowers(t):
+    # SSPRK2 now LOWERS (multi-stage codegen): a scratch state, two rhs_into, a lincomb commit, the 0.5
+    # weights. (It previously raised NotImplementedError; that restriction is lifted.)
+    src = _ssprk2(t).emit_cpp_program()
+    assert src.count("ctx.rhs_into(") >= 2, "SSPRK2 should evaluate the RHS at two stages"
+    assert "ctx.scratch_state_like(" in src, "SSPRK2 needs an intermediate scratch state"
+    assert "ctx.lincomb(" in src, "the committed stage writes the block state via lincomb"
+    assert "0.5" in src, "SSPRK2 weights (0.5) should appear in the generated source"
 
 
 def test_includes_present(t):
@@ -65,41 +88,37 @@ def test_includes_present(t):
         assert ("#include <%s>" % inc) in src, "missing #include <%s>" % inc
 
 
-def test_multistage_refused(t):
-    # SSPRK2 lowers to two linear_combine states (a scratch stage) -> not yet supported by the MVP.
-    P = t.Program("ssprk2_program")
-    dt = P.dt
-    U0 = P.state("plasma")
-    f0 = P.solve_fields(U0)
-    k0 = P.rhs(state=U0, fields=f0, flux=True, sources=["default"])
-    U1 = P.linear_combine("U1", U0 + dt * k0)
-    f1 = P.solve_fields(U1)
-    k1 = P.rhs(state=U1, fields=f1, flux=True, sources=["default"])
-    U2 = P.linear_combine("U2", 0.5 * U0 + 0.5 * (U1 + dt * k1))
-    P.commit("plasma", U2)
-    try:
-        P.emit_cpp_program()
-    except NotImplementedError as exc:
-        assert "single" in str(exc).lower() or "scratch" in str(exc).lower()
-    else:
-        raise AssertionError("expected NotImplementedError for a multi-stage Program")
-
-
 def test_named_source_refused(t):
-    # Single stage, but a non-default named source needs a source mask (Phase 4) -> refuse.
+    # A non-default named source needs a source mask (Phase 4) -> refuse, never mis-lower.
     P = t.Program("electric_program")
     dt = P.dt
     U = P.state("plasma")
     f = P.solve_fields(U)
     R = P.rhs(state=U, fields=f, flux=True, sources=["electric"])
-    U1 = P.linear_combine("U1", U + dt * R)
-    P.commit("plasma", U1)
+    P.commit("plasma", P.linear_combine("U1", U + dt * R))
     try:
         P.emit_cpp_program()
     except NotImplementedError as exc:
         assert "source" in str(exc).lower()
     else:
         raise AssertionError("expected NotImplementedError for a non-default named source")
+
+
+def test_multiblock_refused(t):
+    # Two committed blocks -> multi-block is a later phase; refuse with a clear message.
+    P = t.Program("two_block")
+    dt = P.dt
+    for blk in ("a", "b"):
+        U = P.state(blk)
+        f = P.solve_fields(U)
+        R = P.rhs(state=U, fields=f, flux=True, sources=["default"])
+        P.commit(blk, P.linear_combine(blk + "_next", U + dt * R))
+    try:
+        P.emit_cpp_program()
+    except NotImplementedError as exc:
+        assert "block" in str(exc).lower()
+    else:
+        raise AssertionError("expected NotImplementedError for a multi-block Program")
 
 
 def test_uncommitted_refused(t):

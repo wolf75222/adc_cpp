@@ -55,8 +55,20 @@ class ProgramContext {
     return MultiFab(u.box_array(), u.dmap(), u.ncomp(), u.n_grow());
   }
 
+  /// A zero-initialized scratch STATE with the same layout as @p u: an intermediate stage state of a
+  /// multi-stage scheme (SSPRK/RK). Same allocation as rhs_scratch_like; named for the codegen's
+  /// intent. Starts at zero, so a stage `sum_i c_i V_i` is built by axpy-ing each term onto it.
+  MultiFab scratch_state_like(const MultiFab& u) const { return rhs_scratch_like(u); }
+
   /// u <- u + a r over the valid cells (linear combine; forwards to adc::saxpy).
   void axpy(MultiFab& u, Real a, const MultiFab& r) const { adc::saxpy(u, a, r); }
+
+  /// z <- a x + b y over the valid cells (assignment, not accumulation; z may alias x or y).
+  /// Forwards to adc::lincomb. The codegen uses it for the committed stage: the block state becomes
+  /// z = c_base * z + 1 * acc, where acc holds the non-base terms (self-alias z==x is safe).
+  void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b, const MultiFab& y) const {
+    adc::lincomb(z, a, x, b, y);
+  }
 
  private:
   System* sys_;
