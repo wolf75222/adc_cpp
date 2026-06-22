@@ -10,14 +10,14 @@
 // variable) : le patch fin doit REDUIRE l'erreur (phi et grad phi), comme dans le cas scalaire -- la
 // machinerie FAC (ghost C-F bilineaire + flux C-F harmonique two-way) tient avec un coefficient variable.
 
-#include <adc/numerics/elliptic/composite_fac_poisson.hpp>
+#include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

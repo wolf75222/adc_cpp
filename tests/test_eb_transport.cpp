@@ -42,7 +42,7 @@
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/numerics/spatial_operator_eb.hpp>
-#include <adc/runtime/wall_predicate.hpp>  // detail::DiscDomain (level set source-unique)
+#include <adc/runtime/detail/wall_predicate.hpp>  // detail::DiscDomain (level set source-unique)
 
 #include <cmath>
 #include <cstdio>

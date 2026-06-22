@@ -4,7 +4,7 @@
 // des coupleurs : garde la conversion seam de amr_mass bit-identique a la boucle hote
 // en serie, et fige le contrat de amr_max_drift_speed avant sa propre conversion.
 
-#include <adc/coupling/amr_diagnostics.hpp>
+#include <adc/coupling/amr/amr_diagnostics.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

@@ -18,11 +18,11 @@
 // build_amr_block (les briques introduites par cette PR), ou l'on a acces au RHS du MG et aux
 // niveaux des blocs ; les points (a)(c)(d)(e) au niveau de la facade AmrSystem.
 
-#include <adc/coupling/elliptic_rhs.hpp>  // add_scaled_component (RHS de reference assemble main)
-#include <adc/runtime/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <adc/coupling/base/elliptic_rhs.hpp>  // add_scaled_component (RHS de reference assemble main)
+#include <adc/runtime/builders/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
 #include <adc/runtime/amr_system.hpp>     // facade AmrSystem
-#include <adc/runtime/model_factory.hpp>  // detail::dispatch_model
+#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model
 #include <adc/runtime/model_spec.hpp>
 #include <adc/mesh/mf_arith.hpp>  // norm_inf
 #include <adc/mesh/multifab.hpp>

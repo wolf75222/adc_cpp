@@ -4,7 +4,7 @@
 #include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions (options of the IMEX source Newton)
 #include <adc/runtime/export.hpp>  // ADC_EXPORT (methods resolved by the native loader through dlopen)
 #include <adc/runtime/facade_options.hpp>  // SourceStageOptions / CoupledSourceProgram (facade PODs, ADC-214)
-#include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (AOT-compiled block seam)
+#include <adc/runtime/detail/grid_context.hpp>  // GridContext + BlockClosures (AOT-compiled block seam)
 #include <adc/runtime/model_spec.hpp>
 
 #include <array>

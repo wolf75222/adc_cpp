@@ -9,7 +9,7 @@
 // valeur f(coarsen(i), coarsen(j), k). A np=1 le chemin reste exerce (parallel_copy = copie
 // memoire). DIST == analytique a np=1/2/4 prouve l'invariance a la distribution.
 
-#include <adc/coupling/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
+#include <adc/coupling/amr/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/multifab.hpp>

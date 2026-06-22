@@ -27,8 +27,8 @@
 // explicites : c'est volontaire (jalon = operateur, pas solveur non symetrique). L'observation
 // alimente la decision PR2 (Krylov). NON gating : le test ne FAIL jamais sur ce point.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson_operator.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>

@@ -2,7 +2,7 @@
 // flux subdivision: this TU is now the thin riemann dispatcher, routing to the per-flux
 // build_amr_compiled_compressible_<flux> seam TUs (each compiles ONE flux's build_amr_compiled leaves in
 // parallel). See amr_block_seam.hpp.
-#include <adc/runtime/amr_block_seam.hpp>
+#include <adc/runtime/builders/amr_block_seam.hpp>
 
 namespace adc::detail {
 

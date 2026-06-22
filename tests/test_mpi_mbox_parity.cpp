@@ -17,7 +17,7 @@
 #include <adc/parallel/load_balance.hpp>
 #include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
 #include <adc/physics/euler.hpp>   // Euler (transport compressible)
-#include <adc/runtime/block_builder.hpp>
+#include <adc/runtime/builders/block_builder.hpp>
 
 #include <cmath>
 #include <cstdio>

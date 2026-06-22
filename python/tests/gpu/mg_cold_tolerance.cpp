@@ -16,7 +16,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 
 #include <cmath>
 #include <cstdio>

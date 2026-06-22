@@ -20,7 +20,7 @@
 // residu (donc l'operateur) doit etre IDENTIQUE A LA PRECISION MACHINE a l'operateur
 // isotrope set_epsilon(eps_x). Composabilite avec kappa egalement verifiee.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>

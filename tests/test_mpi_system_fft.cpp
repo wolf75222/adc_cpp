@@ -21,12 +21,12 @@
 // tailles -- 16 (radix-2) et 12 (NON puissance de 2 -> repli DFT directe O(n^2) de PoissonFFT, le
 // chemin du remap jusqu'ici non couvert) -- toutes deux machine-zero sous np = 1/2/4.
 
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
 #include <adc/mesh/geometry.hpp>                         // Geometry, Box2D
 #include <adc/physics/composite.hpp>
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity
 #include <adc/physics/source.hpp>      // NoSource
-#include <adc/runtime/dsl_block.hpp>   // add_compiled_model
+#include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 
 #include <adc/parallel/comm.hpp>

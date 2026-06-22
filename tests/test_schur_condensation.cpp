@@ -17,7 +17,7 @@
 //       Poisson canonique, et le RHS (sans terme de flux) = -Lap phi^n BIT-IDENTIQUE au Laplacien
 //       canonique apply_laplacian (negue). Garde-fou de non-regression.
 
-#include <adc/coupling/schur_condensation.hpp>
+#include <adc/coupling/schur/schur_condensation.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -25,7 +25,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/poisson_operator.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
 #include <adc/numerics/lorentz_eliminator.hpp>
 #include <adc/parallel/comm.hpp>
 

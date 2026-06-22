@@ -14,7 +14,7 @@
 //
 // Serie (Kokkos OFF). Le grossier est mono-box replique ; la FAC mono-rang est validee ici.
 
-#include <adc/numerics/elliptic/composite_fac_poisson.hpp>
+#include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -22,7 +22,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

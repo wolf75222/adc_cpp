@@ -5,7 +5,7 @@
 // NULLSPACE periodique : le second membre a moyenne nulle (solvabilite), la solution est
 // fixee a moyenne nulle (jauge) puis comparee.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>

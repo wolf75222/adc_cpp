@@ -17,10 +17,10 @@
 #include <adc/physics/composite.hpp>
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var, role Density)
 #include <adc/physics/source.hpp>      // NoSource
-#include <adc/runtime/dsl_block.hpp>   // add_compiled_model
+#include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 
-#include <adc/coupling/coupled_source_program.hpp>  // CsOp (opcodes, miroir Python)
+#include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes, miroir Python)
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

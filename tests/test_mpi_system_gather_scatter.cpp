@@ -26,7 +26,7 @@
 #include <adc/physics/composite.hpp>
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var)
 #include <adc/physics/source.hpp>      // NoSource
-#include <adc/runtime/dsl_block.hpp>   // add_compiled_model
+#include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 
 #include <adc/parallel/comm.hpp>

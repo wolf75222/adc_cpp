@@ -7,9 +7,9 @@
 #include <adc/coupling/base/aux_fill.hpp>  // detail::derive_aux_bc + detail::fill_bz_box (shared)
 #include <adc/coupling/source/coupled_source.hpp>  // CoupledSourceFor
 #include <adc/coupling/base/elliptic_rhs.hpp>
-#include <adc/numerics/elliptic/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess
-#include <adc/numerics/elliptic/elliptic_solver.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess
+#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>     // AmrLevelMP, advance_amr, mf_average_down_mb
 #include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source
 #include <adc/numerics/time/scheduler.hpp>         // block_substeps_v, block_time_treatment_v

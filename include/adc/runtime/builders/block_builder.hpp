@@ -13,8 +13,8 @@
 #include <adc/numerics/spatial_operator_eb.hpp>  // assemble_rhs_eb (cut-cell EB) + detail::DiscLevelSet (T5-PR2)
 #include <adc/numerics/time/implicit_stepper.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
-#include <adc/runtime/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann, limiter_n_ghost)
-#include <adc/runtime/grid_context.hpp>  // GridContext + BlockClosures (shared lightweight header)
+#include <adc/runtime/detail/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann, limiter_n_ghost)
+#include <adc/runtime/detail/grid_context.hpp>  // GridContext + BlockClosures (shared lightweight header)
 #include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (built-in level-set domain instance)
 
 #include <cmath>  // std::sqrt (ARS(2,2,2) coefficients: gamma = 1 - 1/sqrt(2), host)

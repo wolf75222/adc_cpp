@@ -13,7 +13,7 @@
 // cellule coupee (probleme du small-cell), ce qui rend L_inf erratique ; l'ordre 2 propre
 // est en norme L2 (supraconvergence de Shortley-Weller). On l'imprime aussi a titre indicatif.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>

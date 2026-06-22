@@ -44,7 +44,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar_tensor_operator.hpp>
+#include <adc/numerics/elliptic/polar/polar_tensor_operator.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

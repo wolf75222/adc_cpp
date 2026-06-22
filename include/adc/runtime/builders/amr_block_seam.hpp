@@ -1,9 +1,9 @@
 #pragma once
 
 #include <adc/core/variables.hpp>         // VariableSet/VariableRole/role_from_name (resolve mask)
-#include <adc/runtime/amr_dsl_block.hpp>  // dispatch_amr_block / dispatch_amr_compiled + AmrBuildParams
-#include <adc/runtime/amr_runtime.hpp>    // AmrRuntimeBlock + AmrTimeMethod
-#include <adc/runtime/model_factory.hpp>  // dispatch_model_for + compiled bricks + ModelSpec
+#include <adc/runtime/builders/amr_dsl_block.hpp>  // dispatch_amr_block / dispatch_amr_compiled + AmrBuildParams
+#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntimeBlock + AmrTimeMethod
+#include <adc/runtime/builders/model_factory.hpp>  // dispatch_model_for + compiled bricks + ModelSpec
 
 #include <algorithm>
 #include <stdexcept>

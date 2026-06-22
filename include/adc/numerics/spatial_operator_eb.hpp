@@ -7,7 +7,7 @@
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
-#include <adc/numerics/elliptic/cut_fraction.hpp>  // detail::cut_fraction, CutFraction (PR1)
+#include <adc/numerics/elliptic/eb/cut_fraction.hpp>  // detail::cut_fraction, CutFraction (PR1)
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (level-set domain; numerics, not runtime)

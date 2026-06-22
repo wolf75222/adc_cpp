@@ -17,7 +17,7 @@
 // -> reference correcte). Les echecs sont votes par all_reduce sur tous les rangs. Rejoue np=1/2/4 :
 // np=1 couvre le chemin qui flakait deja, np=2/4 le multi-box reparti (halos cut-cell cross-rang).
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>

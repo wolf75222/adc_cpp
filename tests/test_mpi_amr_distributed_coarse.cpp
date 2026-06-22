@@ -25,7 +25,7 @@
 // binaire en np=1/2/4 et diff cmax (bit-identique attendu).
 #include <adc/physics/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
 #include <adc/physics/euler.hpp>          // Euler
-#include <adc/runtime/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
+#include <adc/runtime/builders/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
 #include <adc/runtime/amr_system.hpp>
 #include <adc/parallel/comm.hpp>
 

@@ -37,7 +37,7 @@
 // CMake injecte ADC_TEST_CXX, ADC_TEST_INCLUDE, ADC_TEST_CXX_STD, ADC_TEST_TMPDIR (meme pattern que
 // test_amr_riemann_native).
 #include <adc/physics/bricks.hpp>  // CompositeModel, Euler, PotentialForce, ChargeDensity, BackgroundDensity
-#include <adc/runtime/amr_dsl_block.hpp>
+#include <adc/runtime/builders/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/model_spec.hpp>
 
@@ -146,8 +146,8 @@ std::string loader_source() {
   // emitted source verbatim.
   // clang-format off
   return R"CPP(
-#include <adc/runtime/amr_dsl_block.hpp>
-#include <adc/runtime/abi_key.hpp>
+#include <adc/runtime/builders/amr_dsl_block.hpp>
+#include <adc/runtime/detail/abi_key.hpp>
 #include <adc/physics/bricks.hpp>
 #include <cstdlib>
 #include <cstring>

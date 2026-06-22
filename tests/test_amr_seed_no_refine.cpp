@@ -12,7 +12,7 @@
 // bit-a-bit du chemin raffine est verrouillee par test_amr_compiled_model / test_amr_riemann_native).
 #include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
 #include <adc/physics/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/amr_dsl_block.hpp>
+#include <adc/runtime/builders/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/model_spec.hpp>
 

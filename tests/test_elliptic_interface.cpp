@@ -9,14 +9,14 @@
 // Les concepts sont de la metaprogrammation hote (pas de kernel) : zero incidence device,
 // la pile elliptique device-validee reste bit-identique.
 
-#include <adc/numerics/elliptic/elliptic_interface.hpp>
+#include <adc/numerics/elliptic/interface/elliptic_interface.hpp>
 
-#include <adc/numerics/elliptic/elliptic_problem.hpp>      // field_postprocess, FieldPostProcess
-#include <adc/numerics/elliptic/elliptic_solver.hpp>       // EllipticSolver
-#include <adc/numerics/elliptic/geometric_mg.hpp>          // GeometricMG
-#include <adc/numerics/elliptic/krylov_solver.hpp>         // TensorKrylovSolver, KrylovResult
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>    // PoissonFFTSolver, DistributedFFTSolver
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver, PolarEllipticSolver
+#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>      // field_postprocess, FieldPostProcess
+#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>       // EllipticSolver
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>          // GeometricMG
+#include <adc/numerics/elliptic/linear/krylov_solver.hpp>         // TensorKrylovSolver, KrylovResult
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>    // PoissonFFTSolver, DistributedFFTSolver
+#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver, PolarEllipticSolver
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

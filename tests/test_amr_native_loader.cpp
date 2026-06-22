@@ -17,7 +17,7 @@
 // CMake injecte ADC_TEST_CXX (compilateur), ADC_TEST_INCLUDE (dossier des en-tetes adc) et
 // ADC_TEST_CXX_STD (norme C++ du build, pour que la cle d'ABI du loader concorde avec celle du test).
 #include <adc/physics/bricks.hpp>  // CompositeModel, Euler, NoSource, BackgroundDensity
-#include <adc/runtime/amr_dsl_block.hpp>
+#include <adc/runtime/builders/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 
 #include <cmath>
@@ -56,8 +56,8 @@ std::string loader_source() {
   // emitted source verbatim.
   // clang-format off
   return R"CPP(
-#include <adc/runtime/amr_dsl_block.hpp>
-#include <adc/runtime/abi_key.hpp>
+#include <adc/runtime/builders/amr_dsl_block.hpp>
+#include <adc/runtime/detail/abi_key.hpp>
 #include <adc/physics/bricks.hpp>
 #include <string>
 namespace adc_generated {

@@ -8,7 +8,7 @@
 //   3. BIT-IDENTIQUE a solve() sur un cas convergent (eff 224) : la phase 1 est le corps de solve(),
 //      donc phi doit etre identique au bit pres.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>

@@ -18,7 +18,7 @@
 #include <adc/physics/bricks.hpp>  // CompositeModel, GravityCoupling
 #include <adc/physics/euler.hpp>   // Euler (transport compressible natif)
 
-#include <adc/runtime/block_builder.hpp>
+#include <adc/runtime/builders/block_builder.hpp>
 
 #include <cmath>
 #include <cstdio>

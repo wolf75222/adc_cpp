@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/coupling/amr_condensed_schur_source_stepper.hpp>  // GLOBAL condensed source stage (amr-schur)
-#include <adc/coupling/amr_coupler_mp.hpp>                      // AmrCouplerMP, AmrLevelMP
+#include <adc/coupling/schur/amr_condensed_schur_source_stepper.hpp>  // GLOBAL condensed source stage (amr-schur)
+#include <adc/coupling/amr/amr_coupler_mp.hpp>                      // AmrCouplerMP, AmrLevelMP
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -14,10 +14,10 @@
 #include <adc/numerics/spatial_operator.hpp>  // SourceFreeModel (explicit IMEX half-step, transport only)
 #include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source + ImplicitMask (stiff IMEX source)
 #include <adc/parallel/comm.hpp>                   // n_ranks
-#include <adc/runtime/amr_runtime.hpp>  // AmrRuntimeBlock (type-erased multi-block registry)
+#include <adc/runtime/amr/amr_runtime.hpp>  // AmrRuntimeBlock (type-erased multi-block registry)
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/block_builder.hpp>  // detail::make_poisson_rhs (rhs += elliptic_rhs(U))
-#include <adc/runtime/dispatch_tags.hpp>  // UNIQUE tag registry (validate_limiter/riemann)
+#include <adc/runtime/builders/block_builder.hpp>  // detail::make_poisson_rhs (rhs += elliptic_rhs(U))
+#include <adc/runtime/detail/dispatch_tags.hpp>  // UNIQUE tag registry (validate_limiter/riemann)
 
 #include <algorithm>  // std::find, std::sort (resolving the partial IMEX mask of a compiled block)
 #include <functional>

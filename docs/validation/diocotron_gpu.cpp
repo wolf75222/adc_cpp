@@ -24,7 +24,7 @@
 
 #include <adc/parallel/comm.hpp>
 #include <adc/physics/composite.hpp>
-#include <adc/runtime/dsl_block.hpp>
+#include <adc/runtime/builders/dsl_block.hpp>
 #include <adc/runtime/system.hpp>
 
 #include "hyqmom15_brick.hpp"

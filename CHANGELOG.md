@@ -555,6 +555,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   self-adjust to the allocation. The CI `--parallel`, the WSL2 `-j 6` (RAM bound), and the parity181
   half-allocation nvcc cap stay explicit and documented (memory-bounded environments, intentional).
 
+### Removed
+
+- **`include/adc` forwarding shims deleted; one canonical family path per header** (ADC-392): the 54
+  transition stubs left at the old flat include paths by the M2 generalisation reorgs (ADC-326
+  coupling, ADC-329 physics, ADC-330 runtime, ADC-332 reference/deprecated, ADC-334 elliptic) are
+  gone, so `install(DIRECTORY include/adc)` no longer ships duplicate header paths. Every internal
+  `#include <adc/...>` (~290 references across include/python/tests/bench/docs) and the DSL emitted
+  includes in `python/adc/dsl.py` now point at the canonical family path, e.g.
+  `<adc/runtime/builders/block_builder.hpp>`, `<adc/coupling/single/coupler.hpp>`,
+  `<adc/numerics/elliptic/mg/geometric_mg.hpp>`. Public include-path break, acceptable while the
+  public API still moves (pre-1.0; One-Version rule: one pinned `_adc`, adc_cases regenerates its
+  bricks from the DSL). Phase 1 of the include/adc reorganization; the per-layer deep re-nest follows.
+
 ### Fixed
 
 - **Embedded C++ API page no longer inherits the doxygen-awesome theme** (ADC-388): the in-site

@@ -20,8 +20,8 @@
 // critere d'arret BiCGStab se declenche a la MEME iteration sur tous les rangs : le nombre
 // d'iterations et la convergence sont invariants au nombre de rangs (verifie par all_reduce).
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/krylov_solver.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/linear/krylov_solver.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>

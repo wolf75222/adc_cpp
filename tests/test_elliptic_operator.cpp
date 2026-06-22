@@ -5,9 +5,9 @@
 // elliptic/poisson_operator.hpp, l'EllipticOperator de l'archi) : les deux residus tombent a
 // l'arrondi. C'est l'OperatorSpec partage rendu verifiable, pas seulement documentaire.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>
-#include <adc/numerics/elliptic/poisson_operator.hpp>  // poisson_residual : l'operateur canonique
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // poisson_residual : l'operateur canonique
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/for_each.hpp>

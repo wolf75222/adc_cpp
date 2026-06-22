@@ -6,7 +6,7 @@
 // du bloc natif (les deux passent par le meme make_block / install_block / fill_boundary).
 #include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
 #include <adc/physics/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/dsl_block.hpp>
+#include <adc/runtime/builders/dsl_block.hpp>
 #include <adc/runtime/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 

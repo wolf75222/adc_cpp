@@ -9,7 +9,7 @@
 
 #include <adc/core/coupled_system.hpp>
 #include <adc/core/state.hpp>
-#include <adc/coupling/system_coupler.hpp>
+#include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/for_each.hpp>

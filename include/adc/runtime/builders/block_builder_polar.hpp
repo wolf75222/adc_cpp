@@ -11,10 +11,10 @@
 #include <adc/numerics/time/time_steppers.hpp>      // SSPRK2Step / SSPRK3Step (core RK math)
 #include <adc/parallel/comm.hpp>   // all_reduce_max (MPI-safe collective reduction)
 #include <adc/physics/bricks.hpp>  // ExBVelocityPolar, CompositeModel, source/elliptic bricks
-#include <adc/runtime/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann)
-#include <adc/runtime/grid_context.hpp>   // BlockClosures (light header)
-#include <adc/runtime/model_factory.hpp>  // detail::dispatch_source / dispatch_elliptic (REUSED)
-#include <adc/runtime/model_registry.hpp>  // transport_tags_csv: polar-wired transport list (ADC-331)
+#include <adc/runtime/detail/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann)
+#include <adc/runtime/detail/grid_context.hpp>   // BlockClosures (light header)
+#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_source / dispatch_elliptic (REUSED)
+#include <adc/runtime/detail/model_registry.hpp>  // transport_tags_csv: polar-wired transport list (ADC-331)
 #include <adc/runtime/model_spec.hpp>
 
 #include <functional>

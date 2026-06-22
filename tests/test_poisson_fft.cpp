@@ -11,8 +11,8 @@
 //   B. sur second membre a moyenne NULLE (bien pose), phi(FFT) == phi(GeometricMG) a une
 //      constante additive pres (jauge) : les deux inversent le meme stencil discret.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>

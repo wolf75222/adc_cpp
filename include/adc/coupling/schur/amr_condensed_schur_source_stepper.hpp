@@ -3,7 +3,7 @@
 #include <adc/coupling/schur/condensed_schur_source_stepper.hpp>  // CondensedSchurSourceStepper (#126) + detail kernels
 #include <adc/amr/refinement_ratio.hpp>
 #include <adc/coupling/schur/schur_condensation.hpp>  // ElectrostaticLorentzCondensation (assemble per level)
-#include <adc/numerics/elliptic/composite_fac_poisson.hpp>  // CompositeFacPoisson (composite FAC elliptic solve)
+#include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>  // CompositeFacPoisson (composite FAC elliptic solve)
 #include <adc/numerics/time/amr_reflux_mf.hpp>   // mf_average_down_mb (fine -> coarse cascade)
 #include <adc/numerics/time/amr_subcycling.hpp>  // AmrLevelMP (multi-patch hierarchy)
 

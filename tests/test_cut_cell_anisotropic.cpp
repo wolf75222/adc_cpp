@@ -9,7 +9,7 @@
 // (A) eps_x=1.5, eps_y=0.7 (anisotrope) : cut-cell converge a l'ORDRE ~2 en L2 (Shortley-Weller).
 // (B) NON-REGRESSION : eps_x=eps_y=1 (anisotropie degeneree) == cut-cell SANS eps (operateur lap).
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>

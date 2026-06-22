@@ -4,7 +4,7 @@
 // On resout lap(phi) = -4 avec phi=0 hors du disque (masque) et on compare a
 // l'interieur (loin de la frontiere en escalier, O(dx) la-bas).
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>

@@ -30,13 +30,13 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>
+#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator_polar.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
 #include <adc/physics/bricks.hpp>  // ExBVelocityPolar, CompositeModel, NoSource, ChargeDensity
-#include <adc/runtime/block_builder_polar.hpp>  // derive_aux_polar : MEME derivation aux que System::solve_fields_polar
+#include <adc/runtime/builders/block_builder_polar.hpp>  // derive_aux_polar : MEME derivation aux que System::solve_fields_polar
 
 #include <cmath>
 #include <cstdio>

@@ -8,7 +8,7 @@
 #include <adc/core/physical_model.hpp>
 #include <adc/core/state.hpp>
 #include <adc/core/types.hpp>
-#include <adc/coupling/coupler.hpp>
+#include <adc/coupling/single/coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>

@@ -80,7 +80,7 @@ def legacy_aot_so(so_path):
     """.so AOT a l'ABI HISTORIQUE : macro ADC_DEFINE_COMPILED_BLOCK seule, AUCUNE metadonnee emise."""
     e = build_legacy_scalar()
     nv, bricks, composite = e._emit_bricks()
-    src = ('#include <adc/runtime/compiled_block_abi.hpp>\n'
+    src = ('#include <adc/runtime/builders/compiled_block_abi.hpp>\n'
            '#include <adc/physics/bricks.hpp>\n'
            '#include <adc/core/variables.hpp>\n'
            + bricks
@@ -93,7 +93,7 @@ def legacy_jit_so(so_path):
     """.so JIT a l'ABI HISTORIQUE : fabrique adc_make_model seule, AUCUNE metadonnee emise."""
     e = build_legacy_scalar()
     nv, bricks, composite = e._emit_bricks()
-    src = ('#include <adc/runtime/dynamic_model.hpp>\n'
+    src = ('#include <adc/runtime/detail/dynamic_model.hpp>\n'
            '#include <adc/physics/bricks.hpp>\n'
            '#include <adc/core/variables.hpp>\n'
            + bricks

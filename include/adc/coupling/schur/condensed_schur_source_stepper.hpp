@@ -9,8 +9,8 @@
 #include <adc/mesh/mf_arith.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>   // operator + preconditioner (#120)
-#include <adc/numerics/elliptic/krylov_solver.hpp>  // TensorKrylovSolver (BiCGStab, #122)
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>   // operator + preconditioner (#120)
+#include <adc/numerics/elliptic/linear/krylov_solver.hpp>  // TensorKrylovSolver (BiCGStab, #122)
 #include <adc/numerics/lorentz_eliminator.hpp>      // closed-form B^{-1} (#118)
 
 #include <stdexcept>

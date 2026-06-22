@@ -37,7 +37,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>
+#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
 
 #include <cmath>
 #include <cstdio>

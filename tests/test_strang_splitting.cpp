@@ -24,14 +24,14 @@
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
-#include <adc/runtime/system_block_store.hpp>
-#include <adc/runtime/system_stepper.hpp>
+#include <adc/runtime/system/system_block_store.hpp>
+#include <adc/runtime/system/system_stepper.hpp>
 // run_source_stage (gabarit, instancie via SystemStepper<MockImpl>::step) DEREFERENCE les types Schur
 // dans des branches MORTES ici (s.schur / s.schur_polar restent nullptr ; on passe par source_step).
 // Le member-access ->step(...) exige neanmoins le type COMPLET a l'instanciation -> on inclut les deux
 // en-tetes Schur (comme python/system.cpp). On n'en CONSTRUIT aucun objet : le test reste leger.
-#include <adc/coupling/condensed_schur_source_stepper.hpp>
-#include <adc/coupling/polar_condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/polar_condensed_schur_source_stepper.hpp>
 
 #include <cmath>
 #include <cstdio>

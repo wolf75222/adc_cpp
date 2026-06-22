@@ -10,8 +10,8 @@
 
 #pragma once
 
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>  // DistributedFFTSolver (wraps PoissonFFT)
-#include <adc/numerics/time/amr_reflux.hpp>              // advance_fab_1c, xface_box, yface_box
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>  // DistributedFFTSolver (wraps PoissonFFT)
+#include <adc/numerics/time/reference/amr_reflux.hpp>              // advance_fab_1c, xface_box, yface_box
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

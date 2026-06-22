@@ -22,10 +22,10 @@
 // On travaille au niveau du MOTEUR AmrRuntime + build_amr_block (les briques de cette PR), ou l'on
 // construit la hierarchie partagee et l'on accede aux densites/masses par bloc et au RHS Poisson.
 
-#include <adc/coupling/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/runtime/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/model_factory.hpp>  // detail::dispatch_model
+#include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
+#include <adc/runtime/builders/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model
 #include <adc/runtime/model_spec.hpp>
 #include <adc/mesh/multifab.hpp>
 

@@ -6,12 +6,12 @@
 #include <adc/mesh/box2d.hpp>        // Box2D
 #include <adc/mesh/for_each.hpp>     // device_fence
 #include <adc/mesh/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson)
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
+#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson)
 #include <adc/parallel/comm.hpp>                           // n_ranks() (FFT MPI guard)
-#include <adc/runtime/block_builder_polar.hpp>  // derive_aux_polar (polar aux in local basis)
-#include <adc/runtime/wall_predicate.hpp>       // detail::wall_predicate
+#include <adc/runtime/builders/block_builder_polar.hpp>  // derive_aux_polar (polar aux in local basis)
+#include <adc/runtime/detail/wall_predicate.hpp>       // detail::wall_predicate
 
 #include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (env-gated, inert by default)
 #include <cstdlib>  // getenv

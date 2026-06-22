@@ -13,7 +13,7 @@
 //
 // Serie (Kokkos OFF) : grossier mono-box replique, 1 patch mono-box. Multi-patch / MPI = phases ulterieures.
 
-#include <adc/coupling/amr_coupler_mp.hpp>
+#include <adc/coupling/amr/amr_coupler_mp.hpp>
 
 #include <adc/core/state.hpp>
 #include <adc/mesh/box2d.hpp>

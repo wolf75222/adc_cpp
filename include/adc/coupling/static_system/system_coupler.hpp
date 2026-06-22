@@ -5,9 +5,9 @@
 #include <adc/coupling/base/aux_fill.hpp>  // detail::derive_aux_bc + detail::fill_bz_box (shared)
 #include <adc/coupling/source/coupled_source.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>
-#include <adc/numerics/elliptic/elliptic_problem.hpp>
-#include <adc/numerics/elliptic/elliptic_solver.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>
+#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/time/implicit_stepper.hpp>
 #include <adc/numerics/time/scheduler.hpp>
 #include <adc/numerics/time/time_steppers.hpp>

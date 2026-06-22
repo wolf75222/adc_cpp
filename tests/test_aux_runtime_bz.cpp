@@ -8,7 +8,7 @@
 
 #include <adc/physics/composite.hpp>
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity
-#include <adc/runtime/dsl_block.hpp>   // add_compiled_model
+#include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

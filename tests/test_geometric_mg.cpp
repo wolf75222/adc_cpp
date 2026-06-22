@@ -1,7 +1,7 @@
 // Multigrille geometrique : convergence rapide et quasi independante du maillage
 // sur des solutions manufacturees (Dirichlet et periodique), precision O(dx^2).
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>

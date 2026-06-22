@@ -6,9 +6,9 @@
 #include <adc/coupling/amr/amr_level_storage.hpp>   // AmrLevelStack
 #include <adc/coupling/amr/amr_regrid_coupler.hpp>  // amr_regrid_finest (Berger-Rigoutsos)
 #include <adc/coupling/single/coupler.hpp>  // detail::coupler_eval_rhs (f = model.elliptic_rhs(U))
-#include <adc/numerics/elliptic/composite_fac_poisson.hpp>  // COMPOSITE FAC 2-level Poisson solver (opt-in)
-#include <adc/numerics/elliptic/elliptic_solver.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>  // COMPOSITE FAC 2-level Poisson solver (opt-in)
+#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, amr_step_multilevel_multipatch, mf_*_mb
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>

@@ -27,7 +27,7 @@
 //
 // Host / Serial-safe : UNE box, n_ranks()==1 (PolarTensorKrylovSolver / PolarPoissonSolver mono-rang).
 
-#include <adc/coupling/polar_condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/polar_condensed_schur_source_stepper.hpp>
 
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
@@ -36,7 +36,7 @@
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>
+#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
 #include <adc/numerics/lorentz_eliminator.hpp>
 #include <adc/parallel/comm.hpp>
 

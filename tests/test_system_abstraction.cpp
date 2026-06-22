@@ -3,7 +3,7 @@
 
 #include <adc/core/coupled_system.hpp>
 #include <adc/core/state.hpp>
-#include <adc/coupling/elliptic_rhs.hpp>
+#include <adc/coupling/base/elliptic_rhs.hpp>
 #include <adc/numerics/time/scheduler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

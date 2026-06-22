@@ -4,7 +4,7 @@
 // On verifie que le residu chute fortement et que la solution converge vers la
 // solution exacte a O(dx^2).
 
-#include <adc/numerics/elliptic/poisson_operator.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>

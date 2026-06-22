@@ -30,7 +30,7 @@
 // les rangs, y compris vides) : iterations et resultat invariants au nombre de rangs. Les verifs
 // (ecarts MAX, normes) sont reduites par all_reduce_max : un FAIL sur un rang -> FAIL partout.
 
-#include <adc/coupling/condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/condensed_schur_source_stepper.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -39,7 +39,7 @@
 #include <adc/mesh/mf_arith.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/lorentz_eliminator.hpp>
 #include <adc/parallel/comm.hpp>
 

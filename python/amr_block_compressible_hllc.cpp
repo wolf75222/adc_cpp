@@ -1,7 +1,7 @@
 // ADC-359 flux subdivision of the compressible (Euler) multi-block AMR seam: this TU instantiates ONLY
 // the hllc flux's build_amr_block leaves, so it compiles in parallel with the other flux TUs. See
 // amr_block_seam.hpp / amr_block_compressible.cpp (the riemann dispatcher).
-#include <adc/runtime/amr_block_seam.hpp>
+#include <adc/runtime/builders/amr_block_seam.hpp>
 
 namespace adc::detail {
 

@@ -18,7 +18,7 @@
 // python/system.cpp et python/amr_system.cpp (objets runtime splices, cf. tests/CMakeLists.txt).
 
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_factory.hpp>  // detail::validate_model_spec (contrat de completude)
+#include <adc/runtime/builders/model_factory.hpp>  // detail::validate_model_spec (contrat de completude)
 #include <adc/runtime/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 

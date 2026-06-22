@@ -16,7 +16,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 #include <adc/numerics/spatial_operator.hpp>
-#include <adc/runtime/block_builder.hpp>
+#include <adc/runtime/builders/block_builder.hpp>
 
 #include <Kokkos_Core.hpp>  // Kokkos::View / atomic_add / deep_copy (compteur d'appels device-accessible)
 

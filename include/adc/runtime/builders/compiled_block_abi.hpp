@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/runtime/block_builder.hpp>
+#include <adc/runtime/builders/block_builder.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -11,7 +11,7 @@
 #include <adc/mesh/physical_bc.hpp>
 
 #include <adc/core/physical_model.hpp>  // aux_comps<Model>: aux channel width of the generated model
-#include <adc/runtime/runtime_params.hpp>  // RuntimeParams: RUNTIME params (P7-b) carried by the ABI
+#include <adc/runtime/detail/runtime_params.hpp>  // RuntimeParams: RUNTIME params (P7-b) carried by the ABI
 
 #include <string>
 #include <type_traits>

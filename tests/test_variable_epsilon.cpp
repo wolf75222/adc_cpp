@@ -14,7 +14,7 @@
 // aussi la NON-REGRESSION : avec eps UNIFORME=1 le residu (donc l'operateur) est identique
 // au Laplacien constant existant.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>

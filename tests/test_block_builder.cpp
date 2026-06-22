@@ -9,7 +9,7 @@
 // l'avance SSPRK2 conserve la masse. Si ca compile et passe, un .so genere peut faire de meme.
 #include <adc/physics/bricks.hpp>  // CompositeModel, NoSource, GravityForce, GravityCoupling
 #include <adc/physics/euler.hpp>   // Euler (brique hyperbolique compressible)
-#include <adc/runtime/block_builder.hpp>
+#include <adc/runtime/builders/block_builder.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

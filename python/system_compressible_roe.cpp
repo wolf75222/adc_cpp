@@ -1,6 +1,6 @@
 // ADC-335 (P0-B flux subdivision): compressible (Euler) x Roe flux only (|A_roe| dissipation, the other
 // heaviest leaf). See system_compressible_rusanov.cpp.
-#include <adc/runtime/block_seam.hpp>
+#include <adc/runtime/builders/block_seam.hpp>
 
 namespace adc::detail {
 

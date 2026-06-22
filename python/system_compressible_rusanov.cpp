@@ -2,7 +2,7 @@
 // heaviest TU, so it is split one .cpp per flux. This TU instantiates ONLY the RusanovFlux build_block
 // leaves of the compressible models (via make_block_rusanov), so they compile in parallel with the other
 // flux TUs. The flux is dispatched by System (riemann string); validation lives there (shared validate_*).
-#include <adc/runtime/block_seam.hpp>
+#include <adc/runtime/builders/block_seam.hpp>
 
 namespace adc::detail {
 

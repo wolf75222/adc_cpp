@@ -1,21 +1,21 @@
 #include <adc/runtime/system.hpp>
 
 #include <adc/core/variables.hpp>  // VariableSet + VariableRole: role descriptor carried by each block
-#include <adc/runtime/abi_key.hpp>  // adc::abi_key + detail::abi_key_string (ABI boundary of the native loader)
-#include <adc/runtime/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
-#include <adc/runtime/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)
-#include <adc/runtime/model_factory.hpp>  // detail::dispatch_model + compiled bricks
-#include <adc/runtime/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
-#include <adc/coupling/condensed_schur_source_stepper.hpp>  // Schur-condensed source stage (adc.Split / CondensedSchur, #126)
-#include <adc/coupling/polar_condensed_schur_source_stepper.hpp>  // POLAR counterpart of the condensed source stage (Path A step 2c, #212)
-#include <adc/coupling/coupled_source_program.hpp>  // CoupledSourceKernel: generic coupled source (DSL P5, bytecode)
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson_fft_solver.hpp>
-#include <adc/numerics/elliptic/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson, REUSED)
-#include <adc/runtime/system_field_solver.hpp>  // SystemFieldSolver: elliptic solve + field derivation (Batch B)
-#include <adc/runtime/system_stepper.hpp>  // SystemStepper: time advance (step/advance/step_cfl/step_adaptive) (Batch B)
-#include <adc/runtime/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
-#include <adc/runtime/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
+#include <adc/runtime/detail/abi_key.hpp>  // adc::abi_key + detail::abi_key_string (ABI boundary of the native loader)
+#include <adc/runtime/builders/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
+#include <adc/runtime/builders/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)
+#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model + compiled bricks
+#include <adc/runtime/detail/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
+#include <adc/coupling/schur/condensed_schur_source_stepper.hpp>  // Schur-condensed source stage (adc.Split / CondensedSchur, #126)
+#include <adc/coupling/schur/polar_condensed_schur_source_stepper.hpp>  // POLAR counterpart of the condensed source stage (Path A step 2c, #212)
+#include <adc/coupling/source/coupled_source_program.hpp>  // CoupledSourceKernel: generic coupled source (DSL P5, bytecode)
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
+#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson, REUSED)
+#include <adc/runtime/system/system_field_solver.hpp>  // SystemFieldSolver: elliptic solve + field derivation (Batch B)
+#include <adc/runtime/system/system_stepper.hpp>  // SystemStepper: time advance (step/advance/step_cfl/step_adaptive) (Batch B)
+#include <adc/runtime/system/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
+#include <adc/runtime/builders/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
 #include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source
 #include <adc/numerics/time/time_steppers.hpp>     // ForwardEuler, SSPRK2Step (core RK math)
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
@@ -27,15 +27,15 @@
 #include <adc/mesh/mf_arith.hpp>  // sum
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>       // fill_ghosts, fill_boundary
-#include <adc/runtime/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
-#include <adc/runtime/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
-#include <adc/runtime/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
+#include <adc/runtime/detail/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
+#include <adc/runtime/builders/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
+#include <adc/runtime/detail/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (env-gated, inert by default)
 #include <cstdlib>  // getenv
-#include <adc/runtime/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
+#include <adc/runtime/detail/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
 #include <functional>
 #include <limits>  // std::numeric_limits (per-block CFL: dt = min over blocks)
 #include <map>     // std::map (per-block runtime params registry, P7-b)

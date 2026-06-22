@@ -22,7 +22,7 @@
 #include <adc/mesh/mf_arith.hpp>  // dot (brique des reductions)
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/physics/bricks.hpp>

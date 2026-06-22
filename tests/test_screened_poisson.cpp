@@ -15,7 +15,7 @@
 //   (lecture en (i,j)), et verrouille l'invariant : un futur stencil qui lirait kappa sur ses ghosts
 //   (non remplis) casserait ces deux cas.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>

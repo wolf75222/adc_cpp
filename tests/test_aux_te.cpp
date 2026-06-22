@@ -8,7 +8,7 @@
 #include <adc/physics/euler.hpp>       // Euler (bloc fluide source de T_e)
 #include <adc/physics/hyperbolic.hpp>  // ExBVelocity
 #include <adc/physics/source.hpp>      // NoSource
-#include <adc/runtime/dsl_block.hpp>   // add_compiled_model
+#include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

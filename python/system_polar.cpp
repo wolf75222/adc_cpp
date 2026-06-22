@@ -3,7 +3,7 @@
 // in its own translation unit. VERBATIM move of the dispatch_model_polar visitor body that used to live
 // in System::add_block; the polar makers read the System aux through the @p aux pointer (was &P->aux).
 // IMEX is rejected on the ring by add_block before this is called.
-#include <adc/runtime/block_seam.hpp>
+#include <adc/runtime/builders/block_seam.hpp>
 
 namespace adc::detail {
 

@@ -13,9 +13,9 @@
 //       bit. Le cas GradSign::Minus egale -reference (convention two_fluid).
 //   (C) garde-fou eps : EllipticProblem{}.eps vaut exactement 1.
 
-#include <adc/numerics/elliptic/elliptic_problem.hpp>
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson_operator.hpp>
+#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/for_each.hpp>

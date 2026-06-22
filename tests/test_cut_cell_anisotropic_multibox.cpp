@@ -27,7 +27,7 @@
 // NON-MPI, lui, est strictement deterministe (cf. plus bas). Le cut-cell reparti MPI reste donc un
 // chemin a durcir avant d'etre teste ; ce test verrouille le sous-ensemble SOLIDE (multi-box mono-rang).
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/multifab.hpp>

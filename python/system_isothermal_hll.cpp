@@ -1,6 +1,6 @@
 // ADC-342 (P0-B flux subdivision): isothermal x HLL flux only. make_block_hll forwards wave_speed_cache
 // (the only flux that engages it). See system_isothermal_rusanov.cpp.
-#include <adc/runtime/block_seam.hpp>
+#include <adc/runtime/builders/block_seam.hpp>
 
 namespace adc::detail {
 

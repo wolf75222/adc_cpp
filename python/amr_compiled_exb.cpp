@@ -1,6 +1,6 @@
 // ADC-335 (P0-B): single-block AMR seam (AmrCouplerMP) for the ExB scalar transport. Instantiates only
 // the ExBVelocity build_amr_compiled leaves. See amr_block_seam.hpp.
-#include <adc/runtime/amr_block_seam.hpp>
+#include <adc/runtime/builders/amr_block_seam.hpp>
 
 namespace adc::detail {
 

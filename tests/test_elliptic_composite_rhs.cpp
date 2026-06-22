@@ -14,7 +14,7 @@
 
 #include <adc/physics/composite.hpp>
 #include <adc/physics/elliptic.hpp>
-#include <adc/runtime/block_builder.hpp>  // make_poisson_rhs
+#include <adc/runtime/builders/block_builder.hpp>  // make_poisson_rhs
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

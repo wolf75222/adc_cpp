@@ -9,7 +9,7 @@
 // Aucune capabilite modele n'est testee ici (hll/hllc/roe sur un transport sans onde / sans pression)
 // : ces gardes sont des `if constexpr` PAR MODELE au call-site, hors perimetre du registry.
 
-#include <adc/runtime/dispatch_tags.hpp>
+#include <adc/runtime/detail/dispatch_tags.hpp>
 
 #include <cstdio>
 #include <stdexcept>

@@ -12,8 +12,8 @@
 //
 // Probleme : lap(phi) = -4 dans le disque r < R, phi = 0 sur r = R. Solution exacte R^2 - r^2.
 
-#include <adc/numerics/elliptic/geometric_mg.hpp>
-#include <adc/numerics/elliptic/cut_fraction.hpp>
+#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <adc/numerics/elliptic/eb/cut_fraction.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>

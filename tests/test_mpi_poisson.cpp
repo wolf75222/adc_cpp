@@ -5,7 +5,7 @@
 // l'arrondi (verification du residu, independante de la constante additive).
 // Resultat identique quel que soit N (Nx, Ny divisibles par N).
 
-#include <adc/numerics/elliptic/poisson_fft.hpp>
+#include <adc/numerics/elliptic/poisson/poisson_fft.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

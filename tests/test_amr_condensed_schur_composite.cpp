@@ -13,7 +13,7 @@
 //
 // Serie (Kokkos OFF) : grossier mono-box, 1 patch fin mono-box (cadre Phase 3c ; MPI = Phase 4).
 
-#include <adc/coupling/amr_condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/amr_condensed_schur_source_stepper.hpp>
 
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
