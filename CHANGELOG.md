@@ -20,6 +20,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`adc.compile_problem` + `sim.install_program` + `adc.CompiledTime`: run a compiled time Program
+  end to end** (ADC-401, Phase 2c-ii): `compile_problem(model=, time=)` lowers an `adc.time.Program`
+  to C++ (`emit_cpp_program`) and compiles it into a `problem.so` against the adc headers with the
+  SAME Kokkos toolchain as the loaded `_adc` (reusing `adc.dsl.adc_loader_build_flags`), so the `.so`
+  is ABI-compatible and loads in-process; it returns a `CompiledProblem` handle and caches the `.so`
+  out-of-source keyed by [program source + header signature + compiler + std]. `sim.install_program`
+  is now exposed to Python (it wraps the C++ loader; ABI mismatch / dlopen failure surface as
+  `RuntimeError`). `adc.CompiledTime` is the compiled-Program time policy (MVP: single Forward-Euler
+  step; `substeps`/`stride` > 1 and a non-default `cfl` raise `NotImplementedError`, deferred to Phase
+  2c). `compile_problem` rejects `backend != "production"` and `target != "system"`.
+  `python/tests/test_compile_problem.py` checks the rejections and the parity of a compiled
+  Forward-Euler Program against the reference one-step `U0 + dt*eval_rhs`.
 - **`adc.time.Program.emit_cpp_program`: lower the IR to a `problem.so` source** (ADC-401, Phase
   2c-ii codegen): generates the C++ of a compiled time Program -- the stable `.so` ABI
   (`adc_program_abi_key` via the `ADC_ABI_KEY_LITERAL` literal, `adc_program_name`,

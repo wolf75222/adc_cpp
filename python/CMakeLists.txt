@@ -225,6 +225,16 @@ add_test(NAME test_time_codegen
 set_tests_properties(test_time_codegen PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# compile_problem + sim.install_program + CompiledTime end-to-end (ADC-401 Phase 2c-ii) : validation
+# (backend/target/multi-stage/CompiledTime rejections, always run) + parity of a compiled Forward-Euler
+# Program against the reference one-step U0 + dt*eval_rhs. The parity part auto-skips without the
+# install_program binding / a compiler / a visible Kokkos (ADC_KOKKOS_ROOT) ; it compiles the .so WITH
+# Kokkos so it is ABI-compatible with _adc and loads in-process.
+add_test(NAME test_compile_problem
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compile_problem.py)
+set_tests_properties(test_compile_problem PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.

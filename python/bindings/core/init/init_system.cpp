@@ -94,6 +94,10 @@ void init_system(py::module_& m) {
            py::arg("recon") = "conservative", py::arg("time") = "explicit", py::arg("gamma") = 1.4,
            py::arg("substeps") = 1, py::arg("evolve") = true, py::arg("stride") = 1,
            py::arg("positivity_floor") = 0.0)
+      // Compiled time Program (epic ADC-399 / ADC-401): dlopen a generated problem.so, verify its
+      // ABI key against this module (fail-loud -> RuntimeError), and install its macro-step body. The
+      // block(s) must already exist (add_equation); the Program drives sim.step(dt) via ProgramContext.
+      .def("install_program", &System::install_program, py::arg("so_path"))
       .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
            py::arg("neutral"), py::arg("rate"))
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))

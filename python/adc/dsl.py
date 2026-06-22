@@ -4076,6 +4076,94 @@ def RuntimeParam(name, value):
     return Param(name, value, kind="runtime")
 
 
+class CompiledProblem:
+    """Result of `adc.compile_problem(...)`: a generated `problem.so` (a compiled time Program) plus
+    the metadata to install + reproduce it. Install it with `sim.install_program(compiled.so_path)`
+    AFTER the physical block has been added (`sim.add_equation` / `sim.add_block`); the Program then
+    drives `sim.step(dt)` entirely in C++ via `ProgramContext`.
+
+    The `.so` is compiled against the adc headers with the SAME Kokkos toolchain as the loaded _adc
+    module (cf. `adc_loader_build_flags`), so its ABI key matches and `System::install_program`
+    accepts it. `os.fspath(compiled)` returns `so_path` (it can be passed where a path is expected)."""
+
+    def __init__(self, so_path, program, model, abi_key, cxx, std):
+        self.so_path = so_path
+        self.program = program          # the adc.time.Program that was lowered
+        self.model = model              # the physical model (optional; added as a block in the MVP)
+        self.program_name = getattr(program, "name", None)
+        self.program_hash = program._ir_hash() if hasattr(program, "_ir_hash") else None
+        self.abi_key = abi_key          # cache key: header signature | compiler | C++ standard
+        self.cxx = cxx
+        self.std = std
+
+    def __fspath__(self):
+        return self.so_path
+
+    def __repr__(self):
+        return "<CompiledProblem %r -> %s>" % (self.program_name, self.so_path)
+
+
+def compile_problem(so_path=None, *, model=None, time=None, backend="production", target="system",
+                    force=False, cxx=None, include=None, std=None, debug=False):
+    """Compile an `adc.time.Program` into a `problem.so` the runtime loads via `sim.install_program`.
+
+    Lowers the Program IR to C++ (`Program.emit_cpp_program`) and compiles it against the adc headers
+    with the SAME Kokkos toolchain as the loaded _adc module (`adc_loader_build_flags`), so the `.so`
+    is ABI-compatible and runs in-process. Returns a `CompiledProblem` (`.so_path` + metadata).
+
+    The physical `model` is validated here (fail-loud) and carried on the handle, but in this MVP it
+    is added as a normal block (`sim.add_equation`) while the Program drives the step via
+    `ProgramContext` (`ctx.rhs_into` uses the block RHS); a single combined model+program `.so` is a
+    later phase. MVP constraints (spec): `backend` must be "production", `target` "system". Without an
+    explicit `so_path` the `.so` is cached out-of-source keyed by [program source + header signature +
+    compiler + std]; `force=True` recompiles. `debug=True` also writes the generated `.cpp` next to
+    the `.so` for inspection."""
+    import hashlib
+    import os
+    import tempfile
+
+    if backend != "production":
+        raise ValueError("compiled time programs require backend='production'")
+    if target != "system":
+        raise ValueError("compiled time programs currently support target='system' only")
+    if time is None or not hasattr(time, "emit_cpp_program"):
+        raise ValueError("compile_problem: time must be an adc.time.Program (got %r)" % (time,))
+    if model is not None and hasattr(model, "check"):
+        model.check()  # fail-loud on a malformed physical model, even though it is added separately
+
+    src = time.emit_cpp_program()  # validates the IR; raises NotImplementedError for unsupported schemes
+
+    include = include or adc_include()
+    sig = adc_header_signature(include)
+    cc, cflags, lflags = adc_loader_build_flags(cxx)
+    eff_std = _probe_cxx_std(cc, std or loader_cxx_std())
+    abi_key = "%s|%s|%s" % (sig, cc, eff_std)
+
+    if so_path is None:
+        program_hash = hashlib.sha256(src.encode()).hexdigest()
+        so_path = _cache_so_path(program_hash, abi_key, "program-production", target,
+                                 getattr(time, "name", "problem"))
+        if not force and os.path.isfile(so_path):
+            return CompiledProblem(so_path, time, model, abi_key, cc, eff_std)
+
+    optflags = _dsl_optflags()
+    with tempfile.TemporaryDirectory() as tmp:
+        cpp = os.path.join(tmp, "problem.cpp")
+        with open(cpp, "w") as f:
+            f.write(src)
+        if debug:
+            try:
+                with open(os.path.splitext(so_path)[0] + ".cpp", "w") as f:
+                    f.write(src)
+            except OSError:
+                pass
+        flags = ["-shared", "-fPIC", "-std=" + eff_std, *optflags,
+                 "-DADC_HEADER_SIG=\"%s\"" % sig, *cflags]
+        cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *lflags]
+        _run_compile(cmd, "compile_problem (backend production)")
+    return CompiledProblem(so_path, time, model, abi_key, cc, eff_std)
+
+
 class CompiledModel:
     """Result of `m.compile(...)`: packages the produced `.so` + EVERYTHING needed to wire it
     correctly (dispatch adder, ABI diagnostic, reproducibility). Replaces the historical pair
