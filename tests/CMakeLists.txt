@@ -656,6 +656,21 @@ add_executable(test_program_runtime test_program_runtime.cpp)
 target_link_libraries(test_program_runtime PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
 add_test(NAME test_program_runtime COMMAND test_program_runtime)
 
+# --- compiled time-program LOADER (ADC-401 phase 2c-i) : System::install_program dlopen-e un problem.so
+# genere a l'execution (stub Forward Euler via ProgramContext) et l'installe ; sim.step reproduit
+# bit-a-bit le pas de reference. ENABLE_EXPORTS (-rdynamic) pour que le .so resolve les accessors du
+# seam (ADC_EXPORT) contre l'exe ; defines ADC_TEST_* comme test_amr_native_loader (compilateur, en-tetes,
+# norme, tmp). S'auto-saute sous Kokkos / sans compilateur. Link adc_runtime_system (system.cpp + le seam).
+add_executable(test_program_loader test_program_loader.cpp)
+target_link_libraries(test_program_loader PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
+set_target_properties(test_program_loader PROPERTIES ENABLE_EXPORTS ON)
+target_compile_definitions(test_program_loader PRIVATE
+  ADC_TEST_CXX="${CMAKE_CXX_COMPILER}"
+  ADC_TEST_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/../include"
+  ADC_TEST_CXX_STD="c++${CMAKE_CXX_STANDARD}"
+  ADC_TEST_TMPDIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME test_program_loader COMMAND test_program_loader)
+
 # --- descripteur de variables : roles physiques (index_of(role)) ---
 adc_add_test(test_variable_role)
 

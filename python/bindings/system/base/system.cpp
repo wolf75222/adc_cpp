@@ -1858,6 +1858,64 @@ MultiFab& System::block_state(int b) {
 void System::block_rhs_into(int b, MultiFab& U, MultiFab& R) {
   p_->sp[static_cast<std::size_t>(b)].rhs_into(U, R);
 }
+
+// Load a generated problem.so and install its compiled time Program. Mirrors add_native_block
+// (native_loader.hpp): self-promote this module to the global scope so the .so resolves the System
+// seam accessors (ADC_EXPORT) against it, dlopen, fail-loud on ABI-key mismatch, then call
+// adc_install_program(this) which wraps the System in a ProgramContext and installs the macro-step
+// closure. The .so stays loaded for the process lifetime (the closure runs every step).
+ADC_EXPORT void System::install_program(const std::string& so_path) {
+#if defined(_WIN32)
+  // Windows: the generated .dll links against _adc.lib at compile time; no global promotion needed.
+  adc::dynlib::handle h = adc::dynlib::open(so_path);
+  if (!h) {
+    throw std::runtime_error("System::install_program: LoadLibrary('" + so_path +
+                             "'): " + adc::dynlib::last_error());
+  }
+#else
+  {
+    // Promote the already-loaded module (found via an exported symbol) to the global scope so the
+    // .so's undefined System seam symbols (ADC_EXPORT) resolve against it. macOS: harmless (the .so
+    // is built with -undefined dynamic_lookup).
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&adc::abi_key), &info) && info.dli_fname)
+      dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+  }
+  void* h = dlopen(so_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+  if (!h) {
+    const char* e = dlerror();
+    throw std::runtime_error(
+        "System::install_program: dlopen('" + so_path + "'): " + std::string(e ? e : "?") +
+        " (the adc::System seam accessors must be exported AND the module loaded "
+        "globally; cf. ADC_EXPORT)");
+  }
+#endif
+  auto key_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_program_abi_key"));
+  if (!key_fn) {
+    adc::dynlib::close(h);
+    throw std::runtime_error("System::install_program: adc_program_abi_key missing from '" +
+                             so_path +
+                             "' (regenerate the problem module with the current adc headers)");
+  }
+  const std::string loader_key = key_fn();
+  const std::string module_key = adc::abi_key();
+  if (loader_key != module_key) {
+    adc::dynlib::close(h);
+    throw std::runtime_error(
+        "System::install_program: incompatible ABI -- loader key '" + loader_key +
+        "' != module key '" + module_key +
+        "'. Recompile the problem module with the SAME compiler, C++ standard and "
+        "adc headers as the _adc module.");
+  }
+  auto install = reinterpret_cast<void (*)(void*)>(adc::dynlib::sym(h, "adc_install_program"));
+  if (!install) {
+    adc::dynlib::close(h);
+    throw std::runtime_error("System::install_program: adc_install_program missing from '" +
+                             so_path + "'");
+  }
+  install(static_cast<void*>(this));
+  // .so left loaded for the duration of the process (the installed closure points to code in it).
+}
 std::vector<double> System::get_state(const std::string& name) {
   Impl::Species& s = p_->find(name);
   return p_->copy_state(s.U, s.ncomp);

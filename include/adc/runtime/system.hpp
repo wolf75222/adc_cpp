@@ -584,6 +584,12 @@ class System {
   ADC_EXPORT MultiFab& block_state(int b);
   /// R <- -div F(U) + S(U, aux) for block @p b (the block's frozen-Poisson residual closure).
   ADC_EXPORT void block_rhs_into(int b, MultiFab& U, MultiFab& R);
+  /// Load a generated problem.so and install its compiled time Program. dlopens @p so_path, checks
+  /// its ABI key against this module (fail-loud on mismatch), and calls its adc_install_program(this),
+  /// which wraps the System in a ProgramContext and installs the macro-step closure. The .so resolves
+  /// the seam accessors above via the global scope (same self-promotion as the native loader). Mirrors
+  /// add_native_block; the .so stays loaded for the process lifetime.
+  ADC_EXPORT void install_program(const std::string& so_path);
   /// @}
 
   /// @name Diagnostics
