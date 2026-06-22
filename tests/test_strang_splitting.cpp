@@ -57,6 +57,8 @@ struct MockImpl {
   std::vector<std::function<void(Real)>> couplings;
   double t = 0.0;
   int macro_step_ = 0;
+  std::function<void(double)>
+      program_step_;  // compiled time Program hook (ADC-401); empty here -> historical path
   bool polar_ = false;
   // Geometrie de transport EMBEDDED-BOUNDARY (chantier T5-PR3) : le stepper lit geometry_mode_ / eb_set_
   // pour aiguiller l'avance de transport. None + !eb_set_ -> le toy emprunte s.advance (chemin plein),

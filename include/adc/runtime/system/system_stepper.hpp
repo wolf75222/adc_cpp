@@ -1,7 +1,7 @@
 #pragma once
 
 #include <adc/core/state/state.hpp>  // kAuxBaseComps (B_z channel read by the condensed source stage)
-#include <adc/core/foundation/types.hpp>  // Real
+#include <adc/core/foundation/types.hpp>                   // Real
 #include <adc/coupling/source/coupled_source_program.hpp>  // CoupledFreqKernel (per-cell coupled frequency)
 #include <adc/mesh/execution/for_each.hpp>  // reduce_max_cell (max mu over the cells, device-clean functor)
 #include <adc/parallel/comm.hpp>  // all_reduce_min/max (global bounds: identical dt on all ranks)
@@ -325,6 +325,16 @@ class SystemStepper {
       return;
     }
     Impl* P = owner_;
+    // Compiled time Program (epic ADC-399): when a problem.so has installed a macro-step body, IT owns
+    // the whole step (solve_fields, RHS, combine, commit -- all via ProgramContext). The runtime only
+    // keeps the clock coherent. No implicit solve_fields / couplings / projections here: the Program
+    // expresses them explicitly. (step_cfl/step_adaptive do not yet support a Program -- ADC-401 2c.)
+    if (P->program_step_) {
+      P->program_step_(dt);
+      P->t += dt;
+      P->macro_step_++;
+      return;
+    }
     // COUPLING / POISSON: solve_fields assembles f = Sum_s elliptic_rhs_s(U_s) on the CURRENT state of
     // each block. A HELD block (cadence M, outside the window end) contributes with its STALE state (its
     // last advance, thus frozen until its next catch-up): stale density / charge in the Poisson sum as

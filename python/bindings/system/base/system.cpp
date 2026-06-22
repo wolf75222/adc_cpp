@@ -17,7 +17,7 @@
 #include <adc/runtime/system/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
 #include <adc/runtime/builders/block/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
 #include <adc/numerics/time/integrators/implicit_stepper.hpp>  // backward_euler_source
-#include <adc/numerics/time/integrators/time_steppers.hpp>     // ForwardEuler, SSPRK2Step (core RK math)
+#include <adc/numerics/time/integrators/time_steppers.hpp>  // ForwardEuler, SSPRK2Step (core RK math)
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
 
 #include <adc/mesh/layout/box_array.hpp>
@@ -26,7 +26,7 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/mf_arith.hpp>  // sum
 #include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>       // fill_ghosts, fill_boundary
+#include <adc/mesh/boundary/physical_bc.hpp>      // fill_ghosts, fill_boundary
 #include <adc/runtime/dynamic/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
 #include <adc/runtime/builders/compiled/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
 #include <adc/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
@@ -161,6 +161,8 @@ struct System::Impl {
   std::map<std::string, std::shared_ptr<NewtonReport>> newton_reports_;
   double t = 0;
   int macro_step_ = 0;  // macro-step counter (0-indexed): feeds the per-block stride filter
+  std::function<void(double)>
+      program_step_;  // compiled time Program macro-step body (ADC-399); empty = historical path
   std::vector<std::function<void(Real)>> couplings;  // inter-species coupled sources (splitting)
   // GLOBAL time-step bounds (System::add_dt_bound): evaluated ONCE per step (host) by
   // step_cfl / step_adaptive. Hook for non-cell-local constraints (multi-block coupling,
@@ -1840,6 +1842,21 @@ std::vector<double> System::eval_rhs(const std::string& name) {
   MultiFab R(p_->ba, p_->dm, s.ncomp, 0);
   s.rhs_into(s.U, R);
   return p_->copy_state(R, s.ncomp);
+}
+
+// Compiled time-program seam (epic ADC-399 / ADC-401): a generated problem.so installs its macro-step
+// body and reaches per-block storage through these accessors (Impl is private to this TU).
+void System::install_program_step(std::function<void(double)> step) {
+  p_->program_step_ = std::move(step);
+}
+int System::n_blocks() const {
+  return static_cast<int>(p_->sp.size());
+}
+MultiFab& System::block_state(int b) {
+  return p_->sp[static_cast<std::size_t>(b)].U;
+}
+void System::block_rhs_into(int b, MultiFab& U, MultiFab& R) {
+  p_->sp[static_cast<std::size_t>(b)].rhs_into(U, R);
 }
 std::vector<double> System::get_state(const std::string& name) {
   Impl::Species& s = p_->find(name);

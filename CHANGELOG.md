@@ -20,6 +20,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **C++ `ProgramContext` runtime seam for compiled time programs** (ADC-401, Phase 2b): a new
+  `adc::runtime::program::ProgramContext` facade (`include/adc/runtime/program/program_context.hpp`)
+  lets a generated `problem.so` run a compiled time Program entirely C++-side during `sim.step(dt)`,
+  reusing the existing runtime primitives and reimplementing nothing. `System` gains public seam
+  accessors `install_program_step` / `n_blocks` / `block_state` / `block_rhs_into` (plus an
+  `Impl::program_step_` member), and `SystemStepper::step` dispatches to the installed Program when
+  present while keeping `t` / `macro_step` coherent -- the historical path is byte-for-byte unchanged
+  when no program is installed. `tests/test_program_runtime.cpp` installs a Forward-Euler Program via
+  `ProgramContext` and runs it through `sim.step(dt)`, asserting bit-identity with a reference step
+  computed from the same primitives (`solve_fields` + `eval_rhs` + `U + dt*R`). `step_cfl` /
+  `step_adaptive` with a Program, codegen, and the Python `compile_problem`/`install_program` wiring
+  follow in Phase 2c.
 - **`adc.time.Program`: builder-mode IR for compiled time programs** (ADC-401): a new `adc.time`
   module exposing `Program`, the central abstraction of the compiled time-program DSL (ADC-399).
   Python builds a typed SSA IR -- `state`, `solve_fields`, `rhs(flux=, sources=)`, `linear_combine`,

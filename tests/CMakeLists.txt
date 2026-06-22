@@ -648,6 +648,14 @@ add_executable(test_aux_te test_aux_te.cpp)
 target_link_libraries(test_aux_te PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
 add_test(NAME test_aux_te COMMAND test_aux_te)
 
+# --- compiled time-program seam (ADC-399 / ADC-401 Phase 2b) : un programme Forward Euler installe via
+# ProgramContext (le role du problem.so genere) tourne dans sim.step(dt) et reproduit bit-a-bit un pas
+# d'Euler de reference (solve_fields + eval_rhs + U + dt*R). Compile le runtime System (add_compiled_model
+# + les accessors du seam) -> link adc_runtime_system, comme test_aux_te.
+add_executable(test_program_runtime test_program_runtime.cpp)
+target_link_libraries(test_program_runtime PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
+add_test(NAME test_program_runtime COMMAND test_program_runtime)
+
 # --- descripteur de variables : roles physiques (index_of(role)) ---
 adc_add_test(test_variable_role)
 
