@@ -7,13 +7,13 @@
 //   halo y via la plage j ETENDUE). Sans cette extension, ce coin reste a 0 et un terme croise d'un
 //   operateur a 9 points le lit faux au bord de box (regression historique multi-box polaire).
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 
 #include <cstdio>
 #include <vector>

@@ -17,13 +17,13 @@
 
 #include <adc/core/model/physical_model.hpp>
 #include <adc/core/state/state.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>  // device_fence
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/numerics/numerical_flux.hpp>    // RusanovFlux
 #include <adc/numerics/reconstruction.hpp>    // NoSlope
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, load_aux, aux_comps

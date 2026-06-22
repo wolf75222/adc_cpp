@@ -8,9 +8,9 @@
 // L'explicite, lui, a un facteur |1 - dt/eps| >> 1 des que dt >> eps : il explose.
 
 #include <adc/numerics/time/imex.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

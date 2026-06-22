@@ -18,12 +18,12 @@
 #include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>    // PoissonFFTSolver, DistributedFFTSolver
 #include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver, PolarEllipticSolver
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>

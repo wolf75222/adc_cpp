@@ -2,9 +2,9 @@
 // (handle Array4 capture par valeur, comme un kernel Kokkos), ghosts intacts,
 // coherence du handle avec operator(), et layout composante-lente.
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
 
 #include <cstdio>
 

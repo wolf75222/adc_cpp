@@ -5,7 +5,7 @@
 // reflux (np=1/2/4 bit-identiques), ici on fige les mecaniques locales.
 
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // adc::CoverageMask
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include <cstdio>
 

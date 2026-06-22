@@ -14,7 +14,7 @@
 #include <adc/core/state/state.hpp>
 #include <adc/core/foundation/types.hpp>
 #include <adc/core/state/variables.hpp>  // VariableRole, VariableSet: Density-role resolution
-#include <adc/mesh/fab2d.hpp>      // ConstArray4: face-state source cell read
+#include <adc/mesh/storage/fab2d.hpp>      // ConstArray4: face-state source cell read
 
 #include <stdexcept>  // positivity_comp: model without Density role -> clear error
 

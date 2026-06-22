@@ -31,13 +31,13 @@
 #include <adc/core/foundation/types.hpp>
 #include <adc/numerics/elliptic/eb/cut_fraction.hpp>
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
-#include <adc/mesh/refinement.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
+#include <adc/mesh/layout/refinement.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (#93), inert by default

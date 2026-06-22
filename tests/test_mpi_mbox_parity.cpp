@@ -10,9 +10,9 @@
 // elle l'est aussi sous Kokkos Cuda (GPU, valide sur ROMEO GH200, cf docs/GPU_RUNTIME_PORT.md). Sous
 // Cuda, for_each_cell ne fence pas (async) : on insere une barriere Kokkos::fence() avant la lecture
 // HOTE du residu. Lance via ctest a np=1/2/4 ; resultat bit-identique (dmax == 0) a chaque rang count.
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
 #include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling

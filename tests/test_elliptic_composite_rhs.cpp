@@ -16,10 +16,10 @@
 #include <adc/physics/bricks/elliptic.hpp>
 #include <adc/runtime/builders/block_builder.hpp>  // make_poisson_rhs
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

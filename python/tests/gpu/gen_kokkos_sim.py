@@ -11,7 +11,7 @@ brick = build_euler_brick().emit_cpp_brick(name="EulerGen")
 HARNESS = r"""// CAS COMPLET Euler 2D sur GPU via le seam Kokkos d'adc (for_each_cell).
 #define ADC_HAS_KOKKOS 1
 #include <Kokkos_Core.hpp>
-#include <adc/mesh/for_each.hpp>
+#include <adc/mesh/execution/for_each.hpp>
 #include <adc/physics/fluids/euler.hpp>
 __BRICK__
 #include <cstdio>

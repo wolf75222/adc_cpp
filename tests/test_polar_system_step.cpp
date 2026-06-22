@@ -22,14 +22,14 @@
 // leve proprement sous MPI ; ce test n'est pas enregistre MPI, comme test_polar_poisson_mms).
 
 #include <adc/core/state/state.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>

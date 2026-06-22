@@ -18,12 +18,12 @@
 #include <adc/amr/hierarchy/amr_hierarchy.hpp>
 #include <adc/amr/tagging/cluster.hpp>
 #include <adc/amr/tagging/tag_box.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/layout/refinement.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <utility>

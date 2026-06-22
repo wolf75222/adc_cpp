@@ -16,11 +16,11 @@
 //   (non remplis) casserait ces deux cas.
 
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

@@ -24,10 +24,10 @@
 
 #include <adc/core/foundation/types.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>  // homogeneous(const BCRec&)
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 
 #include <stdexcept>
 #include <utility>

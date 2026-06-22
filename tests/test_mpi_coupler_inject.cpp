@@ -10,10 +10,10 @@
 // memoire). DIST == analytique a np=1/2/4 prouve l'invariance a la distribution.
 
 #include <adc/coupling/amr/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>  // coarsen_index
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/layout/refinement.hpp>  // coarsen_index
 #include <adc/parallel/comm.hpp>
 
 #include <cstdio>

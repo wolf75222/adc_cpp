@@ -1,11 +1,11 @@
 // MultiFab : allocation des fabs locaux, iteration, remplissage via dispatch,
 // reduction sum sur les cellules valides.
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

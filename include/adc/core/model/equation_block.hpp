@@ -17,8 +17,8 @@
 
 #include <adc/core/model/physical_model.hpp>
 #include <adc/numerics/time/time_integrator.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/spatial_discretisation.hpp>
 
 #include <concepts>

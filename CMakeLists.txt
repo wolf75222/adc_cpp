@@ -42,7 +42,7 @@ option(ADC_BUILD_BENCH    "Build the standalone profiling harness (bench/, OFF b
 #   - GPU              : Kokkos Cuda/HIP (Kokkos_ENABLE_CUDA=ON / Kokkos_ENABLE_HIP=ON)
 # Il n'y a PLUS de backend OpenMP autonome (ADC_USE_OPENMP), plus de `#pragma omp`, plus de
 # boucle hote manuelle comme chemin de production : tout le parallelisme on-node passe par le
-# seam for_each_cell -> Kokkos (cf. include/adc/mesh/for_each.hpp).
+# seam for_each_cell -> Kokkos (cf. include/adc/mesh/execution/for_each.hpp).
 #
 # Kokkos n'a PAS besoin d'etre pre-installe : on utilise une install existante si elle est trouvee
 # (-DKokkos_ROOT=..., p.ex. cache CI / module ROMEO), SINON on le RECUPERE + construit a la volee

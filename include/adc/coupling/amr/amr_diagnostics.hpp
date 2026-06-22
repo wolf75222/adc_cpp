@@ -12,9 +12,9 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>  // device_fence
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <algorithm>
 #include <cmath>

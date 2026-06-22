@@ -1,10 +1,10 @@
 // Phase 4 du portage runtime : le KERNEL de couplage inter-especes (ionisation) en for_each_cell,
 // sur la vraie infra MultiFab (memoire unifiee sous CUDA). Reproduit la math de System::add_ionization
 // (n_g -= dt k n_e n_g ; n_i += ; n_e +=) et verifie la conservation n_i + n_g. Portable seriel/Kokkos.
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cstdio>
 

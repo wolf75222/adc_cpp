@@ -1,7 +1,7 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>  // Real, ADC_HD
-#include <adc/mesh/fab2d.hpp>  // Array4, ConstArray4
+#include <adc/mesh/storage/fab2d.hpp>  // Array4, ConstArray4
 
 #include <stdexcept>
 #include <string>

@@ -1,12 +1,12 @@
 #pragma once
 
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 #include <adc/amr/hierarchy/refinement_ratio.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>                 // coarsen_index
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/layout/refinement.hpp>                 // coarsen_index
 #include <adc/numerics/spatial_operator.hpp>       // compute_face_fluxes, xface_box, yface_box
 #include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source (IMEX implicit step)
 

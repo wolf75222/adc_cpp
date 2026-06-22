@@ -20,7 +20,7 @@
 
 #include <adc/core/foundation/kokkos_env.hpp>  // detail::ensure_kokkos_initialized + device_fence (life cycle)
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include <cstdint>      // std::int64_t: cell counts (LLP64 portability, no-op on LP64)
 #include <cstdlib>      // getenv / strtol: overridable serial fallback threshold (#165)

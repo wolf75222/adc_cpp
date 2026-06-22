@@ -5,10 +5,10 @@
 #include <adc/amr/hierarchy/amr_hierarchy.hpp>
 #include <adc/amr/tagging/cluster.hpp>
 #include <adc/amr/regridding/regrid.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

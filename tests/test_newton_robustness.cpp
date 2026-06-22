@@ -8,9 +8,9 @@
 //      une erreur claire, le rapport identifie LA cellule fautive (i, j) et la composante.
 //  (4) OBSERVATEUR PUR : avec defauts + diagnostics, W est BIT-IDENTIQUE au chemin historique.
 #include <adc/core/state/state.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/numerics/time/implicit_stepper.hpp>
 #include <adc/parallel/comm.hpp>
 

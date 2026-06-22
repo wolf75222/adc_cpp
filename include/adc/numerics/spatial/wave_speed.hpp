@@ -17,9 +17,9 @@
 
 #include <adc/core/state/state.hpp>
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>  // reduce_max_cell, reduce_min_cell
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>  // reduce_max_cell, reduce_min_cell
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/numerics/spatial/state_access.hpp>  // load_state, load_aux, aux_comps
 #include <adc/parallel/comm.hpp>                  // all_reduce_max, all_reduce_min
 

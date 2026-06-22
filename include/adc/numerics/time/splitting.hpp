@@ -1,7 +1,7 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 /// @file
 /// @brief Operator splitting: decomposes dU/dt = T(U) + S(U) into separate substeps.

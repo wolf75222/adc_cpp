@@ -4,11 +4,11 @@
 // device) + le chemin MPI cross-rang (OpenMPI CUDA-aware). Avec np>1 sur plusieurs GH200, les ghosts
 // viennent de fabs distants -> valide le transfert device-to-device. device_fence() avant la lecture
 // hote (kernels async + MPI). Invariant au nombre de rangs : OK en np=1/2/4.
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
 

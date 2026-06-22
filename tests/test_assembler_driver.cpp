@@ -5,12 +5,12 @@
 #include <adc/core/model/coupled_system.hpp>
 #include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>  // SystemAssembler, SystemDriver, SystemCoupler
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

@@ -7,8 +7,8 @@
 //     et routage bordant du reflux (formules et garde de couverture).
 
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // adc::SubcyclingSchedule, adc::CoarseFineInterface
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
 
 #include <cstdio>
 #include <vector>

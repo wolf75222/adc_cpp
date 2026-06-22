@@ -14,12 +14,12 @@
 #include <adc/physics/composition/composite.hpp>
 #include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (brique hyperbolique 1 var)
 #include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 

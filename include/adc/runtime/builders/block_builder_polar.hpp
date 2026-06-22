@@ -1,10 +1,10 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/geometry.hpp>  // PolarGeometry
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/geometry/geometry.hpp>  // PolarGeometry
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator_polar.hpp>  // assemble_rhs_polar (REUSED verbatim)

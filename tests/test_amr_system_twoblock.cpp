@@ -24,8 +24,8 @@
 #include <adc/runtime/amr_system.hpp>     // facade AmrSystem
 #include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model
 #include <adc/runtime/model_spec.hpp>
-#include <adc/mesh/mf_arith.hpp>  // norm_inf
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>  // norm_inf
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

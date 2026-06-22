@@ -4,11 +4,11 @@
 #include <adc/core/state/variables.hpp>
 #include <adc/coupling/schur/schur_condensation.hpp>  // ElectrostaticLorentzCondensation (builder #124)
 #include <adc/coupling/schur/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>   // operator + preconditioner (#120)
 #include <adc/numerics/elliptic/linear/krylov_solver.hpp>  // TensorKrylovSolver (BiCGStab, #122)
 #include <adc/numerics/lorentz_eliminator.hpp>      // closed-form B^{-1} (#118)

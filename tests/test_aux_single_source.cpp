@@ -18,8 +18,8 @@
 
 #include <adc/core/state/state.hpp>
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/fab2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 
 #include <cstdio>

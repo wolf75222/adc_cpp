@@ -11,11 +11,11 @@
 //      meme resultat qu'aujourd'hui (set_val + sum inchanges) ;
 //   4) sync_device() avant un kernel for_each_cell ne perturbe pas le calcul.
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cstdio>
 

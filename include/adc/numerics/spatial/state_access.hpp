@@ -18,7 +18,7 @@
 #include <adc/core/state/state.hpp>
 #include <adc/core/foundation/types.hpp>
 #include <adc/core/state/variables.hpp>  // VariableSet: SourceFreeModel::conservative_vars forwarding
-#include <adc/mesh/fab2d.hpp>      // ConstArray4: load_state / load_aux read path
+#include <adc/mesh/storage/fab2d.hpp>      // ConstArray4: load_state / load_aux read path
 
 #include <concepts>
 

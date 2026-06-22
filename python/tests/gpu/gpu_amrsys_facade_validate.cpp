@@ -18,14 +18,14 @@
 #include <adc/core/foundation/types.hpp>  // ADC_HD
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>  // sum, norm_inf
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>                  // coarsen_index
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>  // device_fence
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>  // sum, norm_inf
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/layout/refinement.hpp>                  // coarsen_index
 #include <adc/numerics/spatial_discretisation.hpp>  // FirstOrder, MusclMinmod
 #include <adc/numerics/time/amr_reflux_mf.hpp>      // AmrLevelMP
 #include <adc/numerics/time/time_integrator.hpp>    // ExplicitTime

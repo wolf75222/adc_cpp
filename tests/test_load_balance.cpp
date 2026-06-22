@@ -5,8 +5,8 @@
 // knapsack equilibre au moins aussi bien que la SFC (il optimise le desequilibre
 // max, la SFC le troque contre la localite).
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
 #include <adc/parallel/load_balance.hpp>
 
 #include <cstdio>

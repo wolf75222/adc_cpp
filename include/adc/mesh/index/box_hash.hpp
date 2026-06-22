@@ -10,8 +10,8 @@
 
 #pragma once
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
 
 #include <algorithm>
 #include <cstdint>

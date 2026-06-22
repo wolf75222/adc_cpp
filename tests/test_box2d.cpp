@@ -2,7 +2,7 @@
 // intersect, contains), y compris la division plancher du coarsen sur les
 // indices negatifs des ghosts.
 
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include "test_harness.hpp"  // adc::test::Checker (compteur + assertion partages)
 

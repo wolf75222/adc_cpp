@@ -20,10 +20,10 @@
 //
 // Attendu : Lie ordre ~1 (erreur /2 quand dt /2), Strang ordre ~2 (erreur /4).
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/runtime/system/system_block_store.hpp>
 #include <adc/runtime/system/system_stepper.hpp>
 // run_source_stage (gabarit, instancie via SystemStepper<MockImpl>::step) DEREFERENCE les types Schur

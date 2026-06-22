@@ -6,7 +6,7 @@
 /// trivial par construction -- les coordonnees d'un vrai maillage tiennent largement dans ces
 /// bornes, et refine(8) y reste loin de INT_MAX.
 
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include <cstdint>
 #include <cstdio>

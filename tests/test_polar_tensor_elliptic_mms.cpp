@@ -38,13 +38,13 @@
 //
 // Host / Serial-safe : UNE box, n_ranks()==1 (solveur mono-rang, non enregistre MPI a l'etape 2a).
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // (D) reference directe
 #include <adc/numerics/elliptic/polar/polar_tensor_operator.hpp>
 

@@ -3,11 +3,11 @@
 #include <adc/core/foundation/types.hpp>
 #include <adc/core/state/variables.hpp>
 #include <adc/coupling/schur/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>  // PolarGeometry
-#include <adc/mesh/mf_arith.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>  // PolarGeometry
+#include <adc/mesh/storage/mf_arith.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/polar/polar_tensor_operator.hpp>  // PolarTensorKrylovSolver, apply_polar_tensor (#210)
 #include <adc/numerics/lorentz_eliminator.hpp>  // B^{-1} closed form (#118)
 #include <adc/parallel/comm.hpp>

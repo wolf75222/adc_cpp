@@ -5,7 +5,7 @@
 // ici on fige les mecaniques locales du registre, independamment de l'integration AMR.
 
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // adc::FluxRegister
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include <cstdio>
 

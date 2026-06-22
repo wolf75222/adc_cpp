@@ -12,10 +12,10 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/parallel/comm.hpp>  // all_reduce_sum: COLLECTIVE dot product (Krylov under MPI)
 
 #include <algorithm>

@@ -16,10 +16,10 @@
 #pragma once
 
 #include <adc/core/model/physical_model.hpp>  // HasPrimitiveVars: optional primitive reconstruction
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial/positivity.hpp>

@@ -12,13 +12,13 @@
 // Le cas physique est Euler 2D periodique lisse, sans disque, sans Schur, sans AMR, sans Poisson.
 // Il sert a comparer C++/Kokkos/MPI et frontends Python sans melanger le verrou scientifique Hoffart.
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>

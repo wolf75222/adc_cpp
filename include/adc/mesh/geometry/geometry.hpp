@@ -11,7 +11,7 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 namespace adc {
 

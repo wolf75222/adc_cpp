@@ -6,12 +6,12 @@
 #include <adc/amr/tagging/tag_box.hpp>  // TagBox
 #include <adc/core/foundation/types.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, mf_find_box
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence (barrier after async parallel_copy under Cuda)
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>  // coarsen_index
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>  // device_fence (barrier after async parallel_copy under Cuda)
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/layout/refinement.hpp>  // coarsen_index
 #include <adc/parallel/comm.hpp>    // n_ranks (explicit include, no longer an indirect path)
 
 #include <algorithm>

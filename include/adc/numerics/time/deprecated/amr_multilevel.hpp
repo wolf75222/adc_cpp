@@ -2,8 +2,8 @@
 
 #include <adc/numerics/time/reference/amr_reflux.hpp>
 #include <adc/amr/hierarchy/refinement_ratio.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/fab2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
 
 #include <vector>
 

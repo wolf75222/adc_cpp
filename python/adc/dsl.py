@@ -80,7 +80,7 @@ def adc_include():
 
     Priority : $ADC_INCLUDE (override), otherwise from the installed `adc` package
     (.../adc -> ../../../include), otherwise the neighboring repo (.../adc_cpp/include from this module).
-    Requires that adc/mesh/multifab.hpp exists. Raises RuntimeError if not found (diagnostic listing the
+    Requires that adc/mesh/storage/multifab.hpp exists. Raises RuntimeError if not found (diagnostic listing the
     candidates), so as to NEVER compile against a silently wrong include."""
     import os
     here = os.path.dirname(os.path.abspath(__file__))           # .../python/adc
@@ -97,10 +97,10 @@ def adc_include():
     # from this file (python/adc/dsl.py) : python/adc -> python -> repo root -> include
     candidates.append(os.path.normpath(os.path.join(here, "..", "..", "include")))
     for c in candidates:
-        if c and os.path.isfile(os.path.join(c, "adc", "mesh", "multifab.hpp")):
+        if c and os.path.isfile(os.path.join(c, "adc", "mesh", "storage", "multifab.hpp")):
             return c
     raise RuntimeError(
-        "adc headers not found (looking for adc/mesh/multifab.hpp). "
+        "adc headers not found (looking for adc/mesh/storage/multifab.hpp). "
         "Pass include=<adc_cpp>/include or set ADC_INCLUDE. Candidates tried : "
         + ", ".join(repr(c) for c in candidates))
 

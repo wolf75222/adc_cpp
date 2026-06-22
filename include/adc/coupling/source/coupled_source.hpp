@@ -13,7 +13,7 @@
 
 #include <adc/core/model/coupled_system.hpp>
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 namespace adc {
 

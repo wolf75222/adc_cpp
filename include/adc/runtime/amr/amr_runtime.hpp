@@ -13,14 +13,14 @@
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, mf_average_down_mb
 #include <adc/numerics/time/implicit_stepper.hpp>  // NewtonReport (OPT-IN IMEX diagnostics, aggregated per block)
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/patch_box.hpp>  // PatchBox: index-space signature of a fine patch (patch_boxes())
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/patch_box.hpp>  // PatchBox: index-space signature of a fine patch (patch_boxes())
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 
 #include <algorithm>  // std::max (substeps/stride-aware CFL step)
 #include <cmath>      // std::isfinite (reject a degenerate dt)

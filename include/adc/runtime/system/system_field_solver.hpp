@@ -2,10 +2,10 @@
 
 #include <adc/core/state/state.hpp>        // kAuxBaseComps (base component of the aux channel)
 #include <adc/core/foundation/types.hpp>        // Real
-#include <adc/mesh/multifab.hpp>     // MultiFab, Array4, ConstArray4
-#include <adc/mesh/box2d.hpp>        // Box2D
-#include <adc/mesh/for_each.hpp>     // device_fence
-#include <adc/mesh/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
+#include <adc/mesh/storage/multifab.hpp>     // MultiFab, Array4, ConstArray4
+#include <adc/mesh/index/box2d.hpp>        // Box2D
+#include <adc/mesh/execution/for_each.hpp>     // device_fence
+#include <adc/mesh/boundary/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
 #include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson)

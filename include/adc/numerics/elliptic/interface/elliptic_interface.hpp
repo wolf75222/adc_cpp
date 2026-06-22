@@ -22,9 +22,9 @@
 /// - none of the elliptic classes is modified to satisfy a concept (deliberate refusal).
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // FieldPostProcess (spec), field_postprocess
 #include <adc/numerics/elliptic/interface/elliptic_solver.hpp>  // concept EllipticSolver (already in place)
 

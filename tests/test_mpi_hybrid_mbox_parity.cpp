@@ -10,9 +10,9 @@
 // Pendant strict de test_mpi_mbox_parity (composite 100% natif) : seul le TYPE de brique change. La
 // propriete est independante du backend (verte Kokkos Serial CPU, et Cuda GPU). Lance via ctest a
 // np=1/2/4 ; resultat bit-identique (dmax == 0) a chaque rang count.
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
 #include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityCoupling

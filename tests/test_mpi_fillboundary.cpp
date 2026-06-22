@@ -8,10 +8,10 @@
 // Invariant au nombre de rangs : reussit en serie (np=1, chemin local) comme en
 // distribue (np>1, chemin MPI). Couvre aussi les coins (shifts diagonaux).
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
 

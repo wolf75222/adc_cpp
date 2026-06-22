@@ -3,10 +3,10 @@
 #include <adc/core/state/state.hpp>      // StateVec, Aux, ADC_AUX_FIELDS, kAuxBaseComps
 #include <adc/core/foundation/types.hpp>      // ADC_HD, Real
 #include <adc/core/state/variables.hpp>  // VariableSet + VariableKind + VariableRole + role_from_name
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>  // AuxHaloPolicy (ADC-369: per-field aux halo tail marshaling)
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>  // AuxHaloPolicy (ADC-369: per-field aux halo tail marshaling)
 #include <adc/runtime/detail/abi_key.hpp>   // adc::abi_key (ABI guard for the native loader)
 #include <adc/runtime/detail/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
 #include <adc/runtime/detail/grid_context.hpp>   // GridContext

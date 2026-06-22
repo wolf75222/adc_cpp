@@ -3,14 +3,14 @@
 // Sous un build Kokkos+CUDA, les Fab sont en memoire unifiee (ManagedAllocator) et assemble_rhs
 // dispatche via for_each_cell -> Kokkos::parallel_for sur le device. On imprime un checksum
 // (masse, energie) pour comparer CPU vs GPU. Compiler seriel (sans -DADC_HAS_KOKKOS) ou Kokkos+CUDA.
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/physical_bc.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>

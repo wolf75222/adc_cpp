@@ -1,7 +1,7 @@
 // BoxArray::from_domain : decoupage en tuiles disjointes et couvrantes,
 // reparties egalement (cas divisible et non divisible).
 
-#include <adc/mesh/box_array.hpp>
+#include <adc/mesh/layout/box_array.hpp>
 
 #include <cstdio>
 #include <vector>

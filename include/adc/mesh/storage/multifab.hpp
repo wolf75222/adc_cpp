@@ -13,12 +13,12 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fab2d.hpp>
-#include <adc/mesh/for_each.hpp>       // device_fence, sync_host, sync_device
-#include <adc/mesh/halo_schedule.hpp>  // memoized fill_boundary schedule (ADC-260)
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/storage/fab2d.hpp>
+#include <adc/mesh/execution/for_each.hpp>       // device_fence, sync_host, sync_device
+#include <adc/mesh/boundary/halo_schedule.hpp>  // memoized fill_boundary schedule (ADC-260)
 #include <adc/parallel/comm.hpp>
 
 #include <memory>

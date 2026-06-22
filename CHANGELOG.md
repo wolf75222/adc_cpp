@@ -239,6 +239,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **`include/adc` deep re-nest, phase 3: mesh split into sub-families** (ADC-394, follow-up of
+  ADC-393): `mesh/` now groups `index/` (box2d, box_hash), `layout/` (box_array, patch_box,
+  distribution_mapping, refinement), `storage/` (fab2d, multifab, mf_arith), `geometry/`
+  (geometry), `boundary/` (physical_bc, halo_schedule, fill_boundary) and `execution/` (for_each).
+  Every internal `#include <adc/...>` is repointed. Public include-path break (pre-1.0); the
+  adc_cases two_fluid_ap mesh includes are updated in a companion PR.
 - **`include/adc` deep re-nest, phase 2: core / physics / amr split into sub-families** (ADC-393,
   follow-up of ADC-392): `core/` now groups `foundation/` (types, cold, allocator, kokkos_env),
   `state/` (state, variables, aux_names) and `model/` (physical_model, equation_block,

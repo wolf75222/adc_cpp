@@ -5,10 +5,10 @@
 // verifie les valeurs, puis on redistribue les bandes vers de NOUVELLES tuiles
 // et on verifie l'identite du round-trip. Invariant au nombre de rangs.
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/refinement.hpp>  // parallel_copy
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/layout/refinement.hpp>  // parallel_copy
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
 

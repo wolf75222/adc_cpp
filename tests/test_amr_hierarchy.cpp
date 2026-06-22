@@ -2,9 +2,9 @@
 // et interpolation grossier->fin sur la region raffinee.
 
 #include <adc/amr/hierarchy/amr_hierarchy.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/refinement.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/layout/refinement.hpp>
 
 #include "test_harness.hpp"  // adc::test::Checker (compteur + assertion partages)
 

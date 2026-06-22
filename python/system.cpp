@@ -20,13 +20,13 @@
 #include <adc/numerics/time/time_steppers.hpp>     // ForwardEuler, SSPRK2Step (core RK math)
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>  // sum
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>       // fill_ghosts, fill_boundary
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>  // device_fence
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>  // sum
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>       // fill_ghosts, fill_boundary
 #include <adc/runtime/detail/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
 #include <adc/runtime/builders/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
 #include <adc/runtime/detail/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)

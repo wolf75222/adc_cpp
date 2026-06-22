@@ -7,7 +7,7 @@
 // SpectralCoupler.
 
 #include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
-#include <adc/mesh/geometry.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

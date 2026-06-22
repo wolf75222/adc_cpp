@@ -1,10 +1,10 @@
 #pragma once
 
 #include <adc/core/state/state.hpp>        // kAuxBaseComps
-#include <adc/mesh/box2d.hpp>        // Box2D
-#include <adc/mesh/fab2d.hpp>        // Fab2D
-#include <adc/mesh/geometry.hpp>     // Geometry (x_cell / y_cell)
-#include <adc/mesh/physical_bc.hpp>  // BCRec / BCType
+#include <adc/mesh/index/box2d.hpp>        // Box2D
+#include <adc/mesh/storage/fab2d.hpp>        // Fab2D
+#include <adc/mesh/geometry/geometry.hpp>     // Geometry (x_cell / y_cell)
+#include <adc/mesh/boundary/physical_bc.hpp>  // BCRec / BCType
 
 /// @file
 /// @brief Helpers shared by the three couplers (single-block Coupler, SystemAssembler,

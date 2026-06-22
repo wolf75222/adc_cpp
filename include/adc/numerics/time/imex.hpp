@@ -1,7 +1,7 @@
 #pragma once
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 /// @file
 /// @brief Asymptotic-preserving IMEX (implicit-explicit) integrator: imex_euler_step, order-1

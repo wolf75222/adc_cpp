@@ -5,12 +5,12 @@
 //     et quand le MultiFab entier est reassigne (style regrid AMR).
 // Invariant au nombre de rangs : couvre le chemin local (np=1) comme le chemin MPI (np>1).
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/halo_schedule.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/boundary/halo_schedule.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 #include <adc/parallel/comm.hpp>
 #include <adc/parallel/load_balance.hpp>
 

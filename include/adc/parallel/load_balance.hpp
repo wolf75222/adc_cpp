@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
 
 #include <algorithm>
 #include <cstdint>

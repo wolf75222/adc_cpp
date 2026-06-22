@@ -22,7 +22,7 @@
 // chemin du remap jusqu'ici non couvert) -- toutes deux machine-zero sous np = 1/2/4.
 
 #include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
-#include <adc/mesh/geometry.hpp>                         // Geometry, Box2D
+#include <adc/mesh/geometry/geometry.hpp>                         // Geometry, Box2D
 #include <adc/physics/composition/composite.hpp>
 #include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
 #include <adc/physics/bricks/source.hpp>      // NoSource

@@ -19,8 +19,8 @@
 /// - phi() is kept between calls (warm start): do NOT assume an implicit reset to zero.
 
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <concepts>
 

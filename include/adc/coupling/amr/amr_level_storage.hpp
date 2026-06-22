@@ -13,8 +13,8 @@
 
 #include <adc/core/state/state.hpp>  // kAuxBaseComps: default aux width (base phi/grad channel)
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <utility>
 #include <vector>

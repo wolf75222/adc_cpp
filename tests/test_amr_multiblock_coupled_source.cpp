@@ -27,7 +27,7 @@
 #include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
 #include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model
 #include <adc/runtime/model_spec.hpp>
-#include <adc/mesh/multifab.hpp>
+#include <adc/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>

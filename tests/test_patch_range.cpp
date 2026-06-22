@@ -6,7 +6,7 @@
 // les tests de reflux (np=1/2/4 bit-identiques), ici on fige la mecanique d'index.
 
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // adc::PatchRange
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include <cstdio>
 

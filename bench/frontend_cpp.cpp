@@ -17,14 +17,14 @@
 // Compile/lance avec le MEME backend que la lib (Kokkos Serial / OpenMP / Cuda) et sous MPI (np>1)
 // sans changement, via bench/run_frontend.sh. ZERO optimisation : on ne fait que MESURER.
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/fill_boundary.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/mf_arith.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/boundary/fill_boundary.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/mf_arith.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>

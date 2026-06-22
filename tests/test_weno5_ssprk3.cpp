@@ -16,11 +16,11 @@
 #include <adc/validation/physics/advection_diffusion.hpp>  // adc::validation::AdvectionDiffusion : transport scalaire (nu=0 = advection pure)
 #include <adc/runtime/builders/block_builder.hpp>
 
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/distribution_mapping.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/layout/distribution_mapping.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
 

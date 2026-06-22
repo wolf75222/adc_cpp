@@ -15,7 +15,7 @@
 
 #include <adc/core/foundation/allocator.hpp>
 #include <adc/core/foundation/types.hpp>
-#include <adc/mesh/box2d.hpp>
+#include <adc/mesh/index/box2d.hpp>
 
 #include <cassert>
 #include <cstdint>

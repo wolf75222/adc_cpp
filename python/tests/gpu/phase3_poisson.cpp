@@ -2,11 +2,11 @@
 // V-cycle (smoother red-black GS, residu, restriction average_down, prolongation interpolate, norme
 // via reduce) est deja en for_each -> device. Seul le setup (masque/coefs cut-cell, ici absent) est
 // hote. On resout lap phi = f (Dirichlet phi=0 au bord) et on compare CPU vs GPU. Portable seriel/Kokkos.
-#include <adc/mesh/box_array.hpp>
-#include <adc/mesh/for_each.hpp>
-#include <adc/mesh/geometry.hpp>
-#include <adc/mesh/multifab.hpp>
-#include <adc/mesh/physical_bc.hpp>
+#include <adc/mesh/layout/box_array.hpp>
+#include <adc/mesh/execution/for_each.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 
 #include <cmath>

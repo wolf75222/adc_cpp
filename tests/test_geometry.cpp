@@ -1,7 +1,7 @@
 // Geometry : pas d'espace dx/dy, centres de cellule, raffinement.
 
-#include <adc/mesh/box2d.hpp>
-#include <adc/mesh/geometry.hpp>
+#include <adc/mesh/index/box2d.hpp>
+#include <adc/mesh/geometry/geometry.hpp>
 
 #include <cmath>
 #include <cstdio>

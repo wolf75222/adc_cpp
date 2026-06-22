@@ -1,7 +1,7 @@
 #pragma once
-#include <adc/mesh/mf_arith.hpp>  // saxpy, lincomb (SSPRK3 stages, named device-clean functors)
+#include <adc/mesh/storage/mf_arith.hpp>  // saxpy, lincomb (SSPRK3 stages, named device-clean functors)
 #include <adc/amr/hierarchy/refinement_ratio.hpp>
-#include <adc/mesh/refinement.hpp>  // coarsen, parallel_copy
+#include <adc/mesh/layout/refinement.hpp>  // coarsen, parallel_copy
 #include <adc/numerics/time/amr_flux_helpers.hpp>
 #include <adc/numerics/time/amr_patch_range.hpp>
 
