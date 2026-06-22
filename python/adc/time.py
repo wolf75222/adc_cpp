@@ -266,7 +266,7 @@ class Program:
         polynomials in ``dt`` are recorded in ``attrs['coeffs']`` (aligned with ``inputs``)."""
         if expr is None and not isinstance(name, str):
             name, expr = None, name
-        aff = _to_affine(expr)._merge() if not isinstance(expr, _Affine) else _to_affine(expr)._merge()
+        aff = _to_affine(expr)._merge()
         if not aff:
             raise ValueError("linear_combine: empty combination")
         block = None
