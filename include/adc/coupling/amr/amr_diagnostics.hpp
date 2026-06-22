@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/for_each.hpp>  // device_fence
 #include <adc/mesh/multifab.hpp>

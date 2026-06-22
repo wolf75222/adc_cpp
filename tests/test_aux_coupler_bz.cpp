@@ -5,9 +5,9 @@
 //   modele jouet n_aux=4, flux nul, elliptic_rhs nul (phi = 0), source S = B_z * u.
 //   -> du/dt = B_z u ; B_z constant c -> u(t) = u0 * A^N avec A l'amplification SSPRK2.
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/coupling/single/coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

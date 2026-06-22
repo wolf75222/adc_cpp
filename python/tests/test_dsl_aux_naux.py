@@ -60,8 +60,8 @@ def main():
         return
 
     harness = (
-        "#include <adc/core/state.hpp>\n"
-        "#include <adc/core/types.hpp>\n"
+        "#include <adc/core/state/state.hpp>\n"
+        "#include <adc/core/foundation/types.hpp>\n"
         + src
         + "#include <cstdio>\n"
         "static_assert(adc_generated::GenBzSrc::n_aux == 4, \"n_aux propage\");\n"

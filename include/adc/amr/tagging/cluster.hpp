@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <adc/amr/tag_box.hpp>
+#include <adc/amr/tagging/tag_box.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 

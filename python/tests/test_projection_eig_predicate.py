@@ -240,9 +240,9 @@ def test_cpp_brick_vs_numpy(cxx, tmp):
     with open(main, "w") as f:
         f.write(
             "#include <cstdio>\n"
-            "#include <adc/core/types.hpp>\n"
-            "#include <adc/core/state.hpp>\n"
-            "#include <adc/core/variables.hpp>\n"
+            "#include <adc/core/foundation/types.hpp>\n"
+            "#include <adc/core/state/state.hpp>\n"
+            "#include <adc/core/state/variables.hpp>\n"
             '#include "pred_brick.hpp"\n'
             "int main(int argc, char** argv) {\n"
             "  adc_generated::ToyPredCpp m;\n"

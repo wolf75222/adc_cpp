@@ -10,7 +10,7 @@
 //   (3) vacuum_floor > 0 with rho >= floor is inactive (identical to OFF);
 //   (4) the polar geometric source is floored too (finite at vacuum, identical above the floor).
 
-#include <adc/physics/hyperbolic.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>
 
 #include <cmath>
 #include <cstdio>

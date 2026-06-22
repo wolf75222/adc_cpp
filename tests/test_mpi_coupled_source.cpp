@@ -14,9 +14,9 @@
 // Densites UNIFORMES -> transport nul -> seule la source agit ; on compare aux invariants physiques
 // (n_i+n_g conserve, n_e-n_i conserve, e/i croissent, g decroit) et a la valeur attendue, INVARIANTE en np.
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var, role Density)
-#include <adc/physics/source.hpp>      // NoSource
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var, role Density)
+#include <adc/physics/bricks/source.hpp>      // NoSource
 #include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 

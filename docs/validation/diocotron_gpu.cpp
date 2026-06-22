@@ -23,7 +23,7 @@
 // local_size()==0 -> contribuent 0 a l'all-reduce), identique a la topologie CPU de run_mpi.py.
 
 #include <adc/parallel/comm.hpp>
-#include <adc/physics/composite.hpp>
+#include <adc/physics/composition/composite.hpp>
 #include <adc/runtime/builders/dsl_block.hpp>
 #include <adc/runtime/system.hpp>
 

@@ -1,10 +1,10 @@
 #pragma once
 
-#include <adc/amr/cluster.hpp>  // berger_rigoutsos, ClusterParams
-#include <adc/amr/refinement_ratio.hpp>
-#include <adc/amr/regrid.hpp>   // tag_cells, grow_tags
-#include <adc/amr/tag_box.hpp>  // TagBox
-#include <adc/core/types.hpp>
+#include <adc/amr/tagging/cluster.hpp>  // berger_rigoutsos, ClusterParams
+#include <adc/amr/hierarchy/refinement_ratio.hpp>
+#include <adc/amr/regridding/regrid.hpp>   // tag_cells, grow_tags
+#include <adc/amr/tagging/tag_box.hpp>  // TagBox
+#include <adc/core/foundation/types.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, mf_find_box
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>

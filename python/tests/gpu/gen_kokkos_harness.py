@@ -8,7 +8,7 @@ brick = build_euler_brick().emit_cpp_brick(name="EulerGen")  # CSE active
 
 HARNESS = r"""// harnais Kokkos : brique generee via Kokkos::parallel_for (CUDA/GH200) vs adc::Euler hote.
 #include <Kokkos_Core.hpp>
-#include <adc/physics/euler.hpp>
+#include <adc/physics/fluids/euler.hpp>
 __BRICK__
 #include <cstdio>
 #include <cmath>

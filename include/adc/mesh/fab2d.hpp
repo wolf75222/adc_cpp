@@ -13,8 +13,8 @@
 
 #pragma once
 
-#include <adc/core/allocator.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/allocator.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box2d.hpp>
 
 #include <cassert>

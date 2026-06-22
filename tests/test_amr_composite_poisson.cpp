@@ -15,7 +15,7 @@
 
 #include <adc/coupling/amr/amr_coupler_mp.hpp>
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

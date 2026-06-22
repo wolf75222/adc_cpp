@@ -14,8 +14,8 @@
 // On verifie l'invariant sur les DEUX chemins : la source de couplage explicite
 // (coupled_source_step) et la source implicite par defaut (AmrImplicitSourceStepper).
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP
 #include <adc/mesh/box2d.hpp>

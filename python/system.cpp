@@ -1,6 +1,6 @@
 #include <adc/runtime/system.hpp>
 
-#include <adc/core/variables.hpp>  // VariableSet + VariableRole: role descriptor carried by each block
+#include <adc/core/state/variables.hpp>  // VariableSet + VariableRole: role descriptor carried by each block
 #include <adc/runtime/detail/abi_key.hpp>  // adc::abi_key + detail::abi_key_string (ABI boundary of the native loader)
 #include <adc/runtime/builders/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
 #include <adc/runtime/builders/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)

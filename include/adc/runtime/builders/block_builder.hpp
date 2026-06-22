@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/cold.hpp>  // ADC_COLD_FN: COLD block-builder no-optimize attribute (ADC-337)
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/cold.hpp>  // ADC_COLD_FN: COLD block-builder no-optimize attribute (ADC-337)
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/for_each.hpp>  // for_each_cell (projection ponctuelle post-pas, ADC-177)
 #include <adc/mesh/geometry.hpp>

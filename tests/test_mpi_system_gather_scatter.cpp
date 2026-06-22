@@ -23,9 +23,9 @@
 // AVANT le fix : segfault / UB a np=2/4 sur les rangs sans box locale (rhs_into / advance /
 // max_speed dereferencaient fab(0) inexistant). APRES : np=1/2/4 verts, resultats identiques.
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var)
-#include <adc/physics/source.hpp>      // NoSource
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var)
+#include <adc/physics/bricks/source.hpp>      // NoSource
 #include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 

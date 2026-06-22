@@ -19,8 +19,8 @@
 //   exactement la meme trajectoire qu'un stride=1 au premier macro-pas (avance
 //   a mac=0), et produit la meme valeur apres N pas qu'un calcul de reference.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP
 #include <adc/mesh/box2d.hpp>

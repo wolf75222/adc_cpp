@@ -29,7 +29,7 @@
 //
 // Host / Serial-safe (UNE box, n_ranks()==1 : non enregistre MPI, comme les autres tests polaires).
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -42,7 +42,7 @@
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator_polar.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
-#include <adc/physics/hyperbolic.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>
 
 #include <cmath>
 #include <cstdio>

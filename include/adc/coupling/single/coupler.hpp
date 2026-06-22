@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/coupling/base/aux_fill.hpp>  // detail::derive_aux_bc + detail::fill_bz_box (shared)
 #include <adc/coupling/base/coupling_policy.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>

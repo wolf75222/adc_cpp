@@ -4,7 +4,7 @@
 // per-cell aux marshaling looped ONLY over ADC_AUX_FIELDS, so a model reading aux.extra_field(0) on
 // the host path read 0 SILENTLY (#51-class gap, but for named fields). This pins the marshaling.
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/runtime/detail/dynamic_model.hpp>
 #include <adc/runtime/builders/native_loader.hpp>
 

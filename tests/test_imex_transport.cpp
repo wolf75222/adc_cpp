@@ -6,8 +6,8 @@
 // Ici : deux blocs d'advection identiques, l'un IMEX, l'autre explicite. Apres un pas
 // (avec ImplicitSourceStepper, source nulle = no-op), les DEUX ont advecte (champ change).
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

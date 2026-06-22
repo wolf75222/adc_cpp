@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/multifab.hpp>
 
 namespace adc {

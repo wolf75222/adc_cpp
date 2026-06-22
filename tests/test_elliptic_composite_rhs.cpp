@@ -12,8 +12,8 @@
 //
 // Aucune tolerance : operator!= strict (le test echoue au moindre ecart de dernier bit).
 
-#include <adc/physics/composite.hpp>
-#include <adc/physics/elliptic.hpp>
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/elliptic.hpp>
 #include <adc/runtime/builders/block_builder.hpp>  // make_poisson_rhs
 
 #include <adc/mesh/box_array.hpp>

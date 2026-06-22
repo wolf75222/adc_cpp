@@ -11,8 +11,8 @@
 // Sortie : reduits GLOBAUX mass/csum/csumsq/cmax (all_reduce sur les boites locales) du bloc B_z apres
 // un pas AMR, + un compteur de cellules ou B_z relu != bz(centre du niveau) (all_reduce, doit etre 0).
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

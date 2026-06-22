@@ -10,8 +10,8 @@
 // AmrHierarchy ctor refuses a non-2 ratio at construction (the single entry point)
 // rather than silently mis-coarsening.
 
-#include <adc/amr/amr_hierarchy.hpp>
-#include <adc/amr/refinement_ratio.hpp>
+#include <adc/amr/hierarchy/amr_hierarchy.hpp>
+#include <adc/amr/hierarchy/refinement_ratio.hpp>
 
 #include <cstdio>
 #include <stdexcept>

@@ -1,7 +1,7 @@
 // AmrHierarchy : construction du niveau grossier, ajout d'un niveau fin imbrique,
 // et interpolation grossier->fin sur la region raffinee.
 
-#include <adc/amr/amr_hierarchy.hpp>
+#include <adc/amr/hierarchy/amr_hierarchy.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/refinement.hpp>

@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <adc/core/equation_block.hpp>
+#include <adc/core/model/equation_block.hpp>
 
 #include <cstddef>
 #include <tuple>

@@ -24,8 +24,8 @@
 // multi-GPU). Sous Cuda, for_each_cell ne fence pas (async) : density()/mass() de l'AmrSystem font
 // deja un device_fence() interne avant la lecture hote (read_coarse / amr_read_coarse), donc la
 // lecture hote ici est sure. On insere malgre tout un Kokkos::fence() de ceinture avant les diffs.
-#include <adc/physics/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>          // Euler (transport compressible)
+#include <adc/physics/bricks/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>          // Euler (transport compressible)
 #include <adc/runtime/builders/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
 #include <adc/runtime/amr_system.hpp>
 #include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*

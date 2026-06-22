@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>  // Real, ADC_HD
+#include <adc/core/foundation/types.hpp>  // Real, ADC_HD
 
 #include <cmath>     // std::hypot
 #include <concepts>  // std::convertible_to (diagnostics only)

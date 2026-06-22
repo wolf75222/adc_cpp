@@ -23,9 +23,9 @@
 
 #include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
 #include <adc/mesh/geometry.hpp>                         // Geometry, Box2D
-#include <adc/physics/composite.hpp>
-#include <adc/physics/hyperbolic.hpp>  // ExBVelocity
-#include <adc/physics/source.hpp>      // NoSource
+#include <adc/physics/composition/composite.hpp>
+#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
+#include <adc/physics/bricks/source.hpp>      // NoSource
 #include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 

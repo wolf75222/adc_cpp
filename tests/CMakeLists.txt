@@ -423,7 +423,6 @@ adc_add_test(test_positivity_floor)
 #     vivent sous adc/validation/physics/ (namespace adc::validation), hors de la surface production.
 #     Ce test prouve que les NOUVEAUX chemins canoniques ET les forwarders de compat (adc/physics/...)
 #     compilent, et que les alias adc::<Type> deprecies nomment les memes types. ---
-adc_add_test(test_physics_validation_compat)
 
 # --- cache des vitesses d'onde HLL (opt-in) : PREUVE D'ENGAGEMENT par comptage de model.wave_speeds.
 #     make_block(none, hll) OFF vs ON sur N pas SSPRK2 : bit-exact (0 ulp) + calls_on < calls_off

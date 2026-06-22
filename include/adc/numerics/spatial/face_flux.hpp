@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // HasPrimitiveVars: optional primitive reconstruction
+#include <adc/core/model/physical_model.hpp>  // HasPrimitiveVars: optional primitive reconstruction
 #include <adc/mesh/fab2d.hpp>
 #include <adc/mesh/for_each.hpp>
 #include <adc/mesh/geometry.hpp>

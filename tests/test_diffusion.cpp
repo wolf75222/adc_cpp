@@ -3,9 +3,9 @@
 // chaleur pure (flux nul) : un mode cos(kx) decroit a exp(-lambda t) avec lambda le
 // taux du laplacien DISCRET. Modele jouet inline (le coeur ne connait aucune physique).
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/numerics/time/ssprk.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

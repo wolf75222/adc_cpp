@@ -23,7 +23,7 @@
 ///   (all_reduce_sum) and called on ALL ranks, including a rank WITHOUT a box (no deadlock);
 /// - ADDITIVE: no existing path (GeometricMG / Poisson) goes through this header (opt-in).
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/geometry.hpp>

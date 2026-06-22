@@ -10,7 +10,7 @@
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>
 
-#include <adc/core/physical_model.hpp>  // aux_comps<Model>: aux channel width of the generated model
+#include <adc/core/model/physical_model.hpp>  // aux_comps<Model>: aux channel width of the generated model
 #include <adc/runtime/detail/runtime_params.hpp>  // RuntimeParams: RUNTIME params (P7-b) carried by the ABI
 
 #include <string>

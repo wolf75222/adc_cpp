@@ -8,7 +8,7 @@ from test_dsl_brick import build_euler_brick
 brick = build_euler_brick().emit_cpp_brick(name="EulerGen")  # CSE active par defaut
 
 HARNESS = r"""// harnais CUDA : brique generee sur GPU (H100) vs adc::Euler sur hote.
-#include <adc/physics/euler.hpp>
+#include <adc/physics/fluids/euler.hpp>
 __BRICK__
 #include <cstdio>
 #include <cmath>

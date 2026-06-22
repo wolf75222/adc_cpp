@@ -7,9 +7,9 @@
 //       composante 3 du canal aux -- changer sa valeur ne change rien au residu.
 // Le coeur ne connait aucune physique : les deux modeles sont des jouets inline.
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/fab2d.hpp>

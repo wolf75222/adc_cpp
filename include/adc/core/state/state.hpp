@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 
 // State and Aux: the two pointwise types handled by the physics layer.
 //

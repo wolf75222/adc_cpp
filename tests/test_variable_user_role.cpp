@@ -12,7 +12,7 @@
 //       mais sans le role requis -> LEVE en nommant le bloc et le role (plus aucun repli silencieux).
 //
 // Test PUR (n'inclut que core/variables.hpp) : aucune dependance runtime, lie adc::adc seul.
-#include <adc/core/variables.hpp>
+#include <adc/core/state/variables.hpp>
 
 #include <cstdio>
 #include <stdexcept>

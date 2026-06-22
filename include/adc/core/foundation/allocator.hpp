@@ -32,7 +32,7 @@ struct ArenaStats {
 }  // namespace adc
 
 #if defined(ADC_HAS_KOKKOS)
-#include <adc/core/kokkos_env.hpp>  // detail::ensure_kokkos_initialized: Kokkos init BEFORE kokkos_malloc
+#include <adc/core/foundation/kokkos_env.hpp>  // detail::ensure_kokkos_initialized: Kokkos init BEFORE kokkos_malloc
 #include <Kokkos_Core.hpp>
 
 #include <mutex>

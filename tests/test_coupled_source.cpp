@@ -6,8 +6,8 @@
 // construction (ce que les sources locales ne pourraient pas garantir : elles ne
 // voient pas l'autre espece). Applique par SystemCoupler::coupled_source_step.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/source/coupled_source.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/mesh/box_array.hpp>

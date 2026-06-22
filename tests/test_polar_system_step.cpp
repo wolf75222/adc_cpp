@@ -21,7 +21,7 @@
 // Host / Serial-safe : UNE box couvrant l'anneau, n_ranks()==1 dans les 3 jobs CI (PolarPoissonSolver
 // leve proprement sous MPI ; ce test n'est pas enregistre MPI, comme test_polar_poisson_mms).
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
@@ -35,7 +35,7 @@
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator_polar.hpp>
 #include <adc/numerics/time/time_steppers.hpp>
-#include <adc/physics/bricks.hpp>  // ExBVelocityPolar, CompositeModel, NoSource, ChargeDensity
+#include <adc/physics/bricks/bricks.hpp>  // ExBVelocityPolar, CompositeModel, NoSource, ChargeDensity
 #include <adc/runtime/builders/block_builder_polar.hpp>  // derive_aux_polar : MEME derivation aux que System::solve_fields_polar
 
 #include <cmath>

@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/box2d.hpp>
 
 namespace adc {

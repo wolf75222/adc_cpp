@@ -17,9 +17,9 @@
 
 #pragma once
 
-#include <adc/core/state.hpp>  // Aux: the contract fixes the auxiliary to adc::Aux
-#include <adc/core/types.hpp>
-#include <adc/core/variables.hpp>  // Variables: mandatory contract of the hyperbolic model
+#include <adc/core/state/state.hpp>  // Aux: the contract fixes the auxiliary to adc::Aux
+#include <adc/core/foundation/types.hpp>
+#include <adc/core/state/variables.hpp>  // Variables: mandatory contract of the hyperbolic model
 
 #include <concepts>
 

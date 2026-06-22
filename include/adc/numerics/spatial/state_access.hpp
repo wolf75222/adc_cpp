@@ -14,10 +14,10 @@
 
 #pragma once
 
-#include <adc/core/physical_model.hpp>  // aux_comps, HasPrimitiveVars: optional primitive reconstruction
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
-#include <adc/core/variables.hpp>  // VariableSet: SourceFreeModel::conservative_vars forwarding
+#include <adc/core/model/physical_model.hpp>  // aux_comps, HasPrimitiveVars: optional primitive reconstruction
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
+#include <adc/core/state/variables.hpp>  // VariableSet: SourceFreeModel::conservative_vars forwarding
 #include <adc/mesh/fab2d.hpp>      // ConstArray4: load_state / load_aux read path
 
 #include <concepts>

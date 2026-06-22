@@ -13,7 +13,7 @@
 //      compute_face_fluxes (primitif != conservatif apres un pas), reste fini et
 //      conserve la masse sur un etat lisse periodique.
 
-#include <adc/physics/bricks.hpp>  // CompositeModel, CompressibleFlux, NoSource, ChargeDensity
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, CompressibleFlux, NoSource, ChargeDensity
 #include <adc/numerics/numerical_flux.hpp>      // HLLCFlux, RoeFlux
 #include <adc/numerics/reconstruction.hpp>      // Minmod
 #include <adc/numerics/spatial_operator.hpp>    // assemble_rhs, compute_face_fluxes, load_state
