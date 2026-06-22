@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`adc.time.std`: standard library of time-stepping macros that lower to the Program IR** (ADC-407,
+  Phase 8a): `forward_euler`, `ssprk2`, `ssprk3`, `rk4` and a `strang` splitting combinator are Python
+  functions that BUILD `adc.time.Program` IR via the same builder ops and the affine algebra over `dt`
+  -- a scheme is expressed once with no scheme-specific class (RK4 has no special RK4 class). They
+  reproduce `adc.Explicit(method="euler"/"ssprk2"/"ssprk3")` at the IR level; a generated `problem.so`
+  (`compile_problem`, Phase 2c) will execute the lowered IR. Tested via IR-structure assertions on the
+  committed state's per-input coefficient polynomials; parity vs the old C++ steppers needs
+  `compile_problem` and is deferred.
 - **C++ `ProgramContext` runtime seam for compiled time programs** (ADC-401, Phase 2b): a new
   `adc::runtime::program::ProgramContext` facade (`include/adc/runtime/program/program_context.hpp`)
   lets a generated `problem.so` run a compiled time Program entirely C++-side during `sim.step(dt)`,

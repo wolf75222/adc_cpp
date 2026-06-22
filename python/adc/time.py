@@ -23,8 +23,9 @@ cf. docs/sphinx/reference/time-program.md (Phase 8) and the ADC-399 epic.
 """
 import hashlib
 import json
+import types
 
-__all__ = ["Program"]
+__all__ = ["Program", "std"]
 
 
 class _Coeff:
@@ -324,3 +325,77 @@ class Program:
         """Stable SHA-256 of the IR (feeds the compiled-problem cache key in a later phase)."""
         blob = json.dumps(self._serialize(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode()).hexdigest()
+
+
+# --- Standard library: time-stepping macros that LOWER to the Program IR (adc.time.std, ADC-407) ----
+# These are NOT separate C++ steppers: each builds adc.time.Program IR via the same builder ops + the
+# affine algebra over dt, so a scheme is expressed ONCE with no scheme-specific class (spec acceptance
+# 25-29; RK4 has no special RK4 class). The generated problem.so (compile_problem, Phase 2c) executes
+# the lowered IR. forward_euler / ssprk2 / ssprk3 reproduce adc.Explicit(method="euler"/"ssprk2"/"ssprk3").
+def _stage_rhs(P, U, sources, flux):
+    """Solve the elliptic fields from U and assemble its RHS for one stage. The FieldContext is
+    distinct per stage (no stale global aux). flux=False builds a source-only sub-flow (e.g. Strang S)."""
+    fields = P.solve_fields(U) if flux else None
+    return P.rhs(state=U, fields=fields, flux=flux, sources=list(sources))
+
+
+def forward_euler(P, block, *, sources=("default",), flux=True):
+    """Forward Euler: U^{n+1} = U + dt * R(U)."""
+    U = P.state(block)
+    R = _stage_rhs(P, U, sources, flux)
+    P.commit(block, P.linear_combine("fe_step", U + P.dt * R))
+
+
+def ssprk2(P, block, *, sources=("default",), flux=True):
+    """SSPRK2 (Heun / Shu-Osher): U1 = U0 + dt k0; U^{n+1} = 1/2 U0 + 1/2 (U1 + dt k1)."""
+    U0 = P.state(block)
+    k0 = _stage_rhs(P, U0, sources, flux)
+    U1 = P.linear_combine("ssprk2_U1", U0 + P.dt * k0)
+    k1 = _stage_rhs(P, U1, sources, flux)
+    P.commit(block, P.linear_combine("ssprk2_step", 0.5 * U0 + 0.5 * (U1 + P.dt * k1)))
+
+
+def ssprk3(P, block, *, sources=("default",), flux=True):
+    """SSPRK3 (Shu-Osher): U1 = U0 + dt k0; U2 = 3/4 U0 + 1/4 (U1 + dt k1);
+    U^{n+1} = 1/3 U0 + 2/3 (U2 + dt k2)."""
+    U0 = P.state(block)
+    k0 = _stage_rhs(P, U0, sources, flux)
+    U1 = P.linear_combine("ssprk3_U1", U0 + P.dt * k0)
+    k1 = _stage_rhs(P, U1, sources, flux)
+    U2 = P.linear_combine("ssprk3_U2", 0.75 * U0 + 0.25 * (U1 + P.dt * k1))
+    k2 = _stage_rhs(P, U2, sources, flux)
+    P.commit(block, P.linear_combine("ssprk3_step", (1.0 / 3.0) * U0 + (2.0 / 3.0) * (U2 + P.dt * k2)))
+
+
+def rk4(P, block, *, sources=("default",), flux=True):
+    """Classic RK4, expressed with NO special RK4 class (spec acceptance 29):
+    U^{n+1} = U0 + dt/6 (k1 + 2 k2 + 2 k3 + k4)."""
+    U0 = P.state(block)
+    k1 = _stage_rhs(P, U0, sources, flux)
+    U1 = P.linear_combine("rk4_U1", U0 + 0.5 * P.dt * k1)
+    k2 = _stage_rhs(P, U1, sources, flux)
+    U2 = P.linear_combine("rk4_U2", U0 + 0.5 * P.dt * k2)
+    k3 = _stage_rhs(P, U2, sources, flux)
+    U3 = P.linear_combine("rk4_U3", U0 + P.dt * k3)
+    k4 = _stage_rhs(P, U3, sources, flux)
+    P.commit(block, P.linear_combine(
+        "rk4_step", U0 + P.dt / 6.0 * k1 + P.dt / 3.0 * k2 + P.dt / 3.0 * k3 + P.dt / 6.0 * k4))
+
+
+def strang(P, block, half_flow, source, *, commit=True):
+    """Strang splitting macro H(dt/2); S(dt); H(dt/2), the macro form of adc.Strang (lowers to the SAME
+    IR, no special class). @p half_flow and @p source are IR-building callables (prog, state, frac) ->
+    state that advance the hyperbolic flow and the source by a fraction @p frac of dt. Returns the final
+    state (committed when @p commit)."""
+    U = P.state(block)
+    U1 = half_flow(P, U, 0.5)
+    U2 = source(P, U1, 1.0)
+    U3 = half_flow(P, U2, 0.5)
+    if commit:
+        P.commit(block, U3)
+    return U3
+
+
+# adc.time.std.<scheme>(Program, block, ...) -- the spec's standard library entry point.
+std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,
+                            strang=strang)

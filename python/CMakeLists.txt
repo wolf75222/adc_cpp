@@ -207,6 +207,16 @@ add_test(NAME test_time_program
 set_tests_properties(test_time_program PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# adc.time.std -- bibliotheque de macros de schemas temporels qui LOWERENT vers l'IR Program (ADC-407,
+# phase 8a) : forward_euler / ssprk2 / ssprk3 / rk4 + combinateur strang construisent l'IR via les memes
+# operations builder + l'algebre affine en dt (un schema exprime UNE fois, aucune classe par schema ;
+# RK4 sans classe RK4 dediee). Verifie la STRUCTURE de l'IR (coefficients du commit) ; la parite vs les
+# anciens steppers C++ exige compile_problem (phase 2c) et est differee. Pur Python, aucun compilateur.
+add_test(NAME test_time_std
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_std.py)
+set_tests_properties(test_time_std PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.
