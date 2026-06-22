@@ -28,8 +28,8 @@
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks.hpp>  // CompositeModel, NoSource, ChargeDensity, kAuxBaseComps
-#include <adc/physics/euler.hpp>   // Euler (brique hyperbolique compressible 4 var)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, NoSource, ChargeDensity, kAuxBaseComps
+#include <adc/physics/fluids/euler.hpp>   // Euler (brique hyperbolique compressible 4 var)
 
 #include "common.hpp"  // adc::bench::{timed, PhaseTimers, percentile, eat} (briques de mesure partagees)
 

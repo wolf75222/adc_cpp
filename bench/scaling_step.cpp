@@ -25,8 +25,8 @@
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks.hpp>
-#include <adc/physics/euler.hpp>
+#include <adc/physics/bricks/bricks.hpp>
+#include <adc/physics/fluids/euler.hpp>
 
 #include <algorithm>
 #include <chrono>

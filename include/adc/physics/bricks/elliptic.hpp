@@ -1,7 +1,7 @@
 #pragma once
 
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 
 /// @file
 /// @brief Elliptic RIGHT-HAND-SIDE bricks f(U): a block's contribution to the right-hand side

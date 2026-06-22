@@ -10,8 +10,8 @@
 // Quand le raffinement EST configure (set_refinement(seuil fini)), le seed est alloue et le regrid de
 // build chope + distribue exactement comme avant : n_patches()>=1, chemin raffine INCHANGE (la parite
 // bit-a-bit du chemin raffine est verrouillee par test_amr_compiled_model / test_amr_riemann_native).
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (= CompressibleFlux)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
 #include <adc/runtime/builders/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/model_spec.hpp>

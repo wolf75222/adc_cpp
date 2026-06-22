@@ -1,9 +1,9 @@
 #pragma once
 
-#include <adc/amr/regrid.hpp>   // tag_cells, grow_tags (per-block tags + phi for the union regrid)
-#include <adc/amr/tag_box.hpp>  // TagBox, tag_union (cell-by-cell OR of the tags of all blocks)
-#include <adc/core/state.hpp>   // kAuxBaseComps
-#include <adc/core/variables.hpp>  // VariableSet, VariableRole, role_from_name (role -> component of coupled sources)
+#include <adc/amr/regridding/regrid.hpp>   // tag_cells, grow_tags (per-block tags + phi for the union regrid)
+#include <adc/amr/tagging/tag_box.hpp>  // TagBox, tag_union (cell-by-cell OR of the tags of all blocks)
+#include <adc/core/state/state.hpp>   // kAuxBaseComps
+#include <adc/core/state/variables.hpp>  // VariableSet, VariableRole, role_from_name (role -> component of coupled sources)
 #include <adc/coupling/amr/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb (aux injection coarse->fine)
 #include <adc/coupling/amr/amr_regrid_coupler.hpp>  // regrid_compute_fine_layout + regrid_field_on_layout (split bricks)
 #include <adc/coupling/static_system/amr_system_coupler.hpp>  // detail::same_layout_or_throw (shared-layout guard)

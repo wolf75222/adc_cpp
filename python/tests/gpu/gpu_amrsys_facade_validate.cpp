@@ -12,10 +12,10 @@
 // Imprime exec=, masses par bloc, checksums grossier+fin par bloc (%.17g) ; --dump=<prefixe> ecrit
 // U(grossier+fin, par bloc) pour un diff binaire Cuda vs Serial (dmax par cellule).
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/equation_block.hpp>
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>  // ADC_HD
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/model/equation_block.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>  // ADC_HD
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
 #include <adc/mesh/box2d.hpp>

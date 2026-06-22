@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>  // Real, ADC_HD
+#include <adc/core/foundation/types.hpp>  // Real, ADC_HD
 
 /// @file
 /// @brief SHARED cut-fraction primitive (cut-cell / embedded boundary).

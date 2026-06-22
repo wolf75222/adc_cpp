@@ -13,8 +13,8 @@
 // Lance via bench/run_scaling.sh (kokkos-omp / kokkos-cuda / mpi-cuda) en srun -n 1/2/4.
 
 #include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks.hpp>
-#include <adc/physics/euler.hpp>
+#include <adc/physics/bricks/bricks.hpp>
+#include <adc/physics/fluids/euler.hpp>
 #include <adc/runtime/builders/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 

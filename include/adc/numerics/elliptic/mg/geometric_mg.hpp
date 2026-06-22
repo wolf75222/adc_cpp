@@ -28,7 +28,7 @@
 ///   bit-identical to the historical stencil;
 /// - device kernels are NAMED FUNCTORS (recipe #93/#64): extended lambda forbidden cross-TU under nvcc.
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/numerics/elliptic/eb/cut_fraction.hpp>
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
 #include <adc/mesh/box_array.hpp>

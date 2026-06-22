@@ -81,8 +81,8 @@ def legacy_aot_so(so_path):
     e = build_legacy_scalar()
     nv, bricks, composite = e._emit_bricks()
     src = ('#include <adc/runtime/builders/compiled_block_abi.hpp>\n'
-           '#include <adc/physics/bricks.hpp>\n'
-           '#include <adc/core/variables.hpp>\n'
+           '#include <adc/physics/bricks/bricks.hpp>\n'
+           '#include <adc/core/state/variables.hpp>\n'
            + bricks
            + '\nnamespace adc_generated { using AotModel = %s; }\n' % composite
            + 'ADC_DEFINE_COMPILED_BLOCK(adc_generated::AotModel)\n')  # PAS de ADC_EXPORT_BLOCK_METADATA
@@ -94,8 +94,8 @@ def legacy_jit_so(so_path):
     e = build_legacy_scalar()
     nv, bricks, composite = e._emit_bricks()
     src = ('#include <adc/runtime/detail/dynamic_model.hpp>\n'
-           '#include <adc/physics/bricks.hpp>\n'
-           '#include <adc/core/variables.hpp>\n'
+           '#include <adc/physics/bricks/bricks.hpp>\n'
+           '#include <adc/core/state/variables.hpp>\n'
            + bricks
            + '\nnamespace adc_generated { using JitModel = %s; }\n' % composite
            + 'extern "C" int adc_model_nvars() { return %d; }\n' % nv

@@ -1,7 +1,7 @@
 // Test des roles de variables : adresser une composante par son SENS (index_of(role)) plutot que
 // par un indice magique. Verifie Euler / isotherme / ExB.
-#include <adc/physics/bricks.hpp>
-#include <adc/physics/euler.hpp>
+#include <adc/physics/bricks/bricks.hpp>
+#include <adc/physics/fluids/euler.hpp>
 
 #include <cstdio>
 

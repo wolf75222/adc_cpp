@@ -31,7 +31,7 @@
 // AmrRuntime + build_amr_block, EXACTEMENT comme test_amr_multiblock_substeps (acces niveaux/masses).
 // La FACADE (4)(5) passe par AmrSystem (modeles ModelSpec : exb, potential).
 
-#include <adc/physics/bricks.hpp>  // CompositeModel, Euler, BackgroundDensity, ChargeDensity, PotentialForce
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, Euler, BackgroundDensity, ChargeDensity, PotentialForce
 #include <adc/runtime/builders/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / build_amr_block / dispatch_amr_block
 #include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
 #include <adc/runtime/amr_system.hpp>     // facade AmrSystem

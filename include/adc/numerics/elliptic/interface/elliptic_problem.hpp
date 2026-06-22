@@ -22,7 +22,7 @@
 /// - FieldPostprocessKernel is a NAMED functor (and not an ADC_HD lambda) because it is first instantiated
 ///   from an external TU: an extended lambda would break the device kernel emission under nvcc.
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>  // homogeneous(const BCRec&)
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/geometry.hpp>

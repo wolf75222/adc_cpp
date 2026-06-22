@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>  // Real, ADC_HD (device-callable)
+#include <adc/core/foundation/types.hpp>  // Real, ADC_HD (device-callable)
 
 #include <cstddef>
 

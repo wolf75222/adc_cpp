@@ -5,7 +5,7 @@
 // masse totale (grossier average-down) est conservee a travers un pas AMR diffusif,
 // (2) la diffusion AGIT (le champ se lisse, le pic baisse).
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>

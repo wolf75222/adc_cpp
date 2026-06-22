@@ -4,9 +4,9 @@
 // conversions ; on verifie ici leur exactitude (round-trip) et la centralisation du calcul
 // des variables primitives. Imprime "OK test_primitive_recon" en cas de succes.
 
-#include <adc/core/physical_model.hpp>
-#include <adc/physics/bricks.hpp>
-#include <adc/physics/euler.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/physics/bricks/bricks.hpp>
+#include <adc/physics/fluids/euler.hpp>
 
 #include <cmath>
 #include <cstdio>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/geometry.hpp>
 #include <adc/mesh/mf_arith.hpp>
 #include <adc/mesh/multifab.hpp>

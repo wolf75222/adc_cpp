@@ -14,8 +14,8 @@
 /// The legacy include path <adc/physics/advection_diffusion.hpp> still works through a compat
 /// forwarder that aliases adc::validation::AdvectionDiffusion back into adc:: (deprecated).
 
-#include <adc/core/state.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/state/state.hpp>
+#include <adc/core/foundation/types.hpp>
 
 #include <cmath>
 

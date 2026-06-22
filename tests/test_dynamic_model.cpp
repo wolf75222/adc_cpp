@@ -2,7 +2,7 @@
 // (Euler) enrobe dans IModel<4> et dispatche par vtable doit donner exactement le meme flux et la
 // meme vitesse d'onde que l'appel direct. C'est le mecanisme qui permet d'utiliser, a l'execution,
 // une brique generee/JIT dont le type n'est pas connu a la compilation (cf. dynamic_model.hpp).
-#include <adc/physics/euler.hpp>
+#include <adc/physics/fluids/euler.hpp>
 #include <adc/runtime/detail/dynamic_model.hpp>
 
 #include <cmath>

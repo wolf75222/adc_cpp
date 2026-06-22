@@ -14,7 +14,7 @@
 #include <string_view>
 #include <utility>
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 
 namespace adc {
 

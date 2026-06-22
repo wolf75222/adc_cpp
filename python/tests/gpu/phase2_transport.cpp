@@ -14,7 +14,7 @@
 #include <adc/numerics/numerical_flux.hpp>
 #include <adc/numerics/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>
-#include <adc/physics/bricks.hpp>  // Euler + CompositeModel + NoSource + ChargeDensity
+#include <adc/physics/bricks/bricks.hpp>  // Euler + CompositeModel + NoSource + ChargeDensity
 
 #include <cmath>
 #include <cstdio>

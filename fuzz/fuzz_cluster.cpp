@@ -8,8 +8,8 @@
 /// chop final) est exactement la classe de code geometrique ou les bords degeneres mordent
 /// (boites 1x1, lignes vides, domaines plats 1xN).
 
-#include <adc/amr/cluster.hpp>
-#include <adc/amr/tag_box.hpp>
+#include <adc/amr/tagging/cluster.hpp>
+#include <adc/amr/tagging/tag_box.hpp>
 #include <adc/mesh/box2d.hpp>
 
 #include <cstdint>

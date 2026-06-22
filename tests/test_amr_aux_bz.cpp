@@ -14,9 +14,9 @@
 //       canal aux PARTAGE a la largeur MAX (4) a chaque niveau ; B_z peuple a c ; le bloc qui
 //       lit B_z croit (source = B_z u), le bloc de base sur le meme aux elargi reste inerte.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>

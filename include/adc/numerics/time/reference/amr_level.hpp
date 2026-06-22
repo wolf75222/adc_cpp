@@ -1,6 +1,6 @@
 #pragma once
 #include <adc/numerics/time/amr_flux_helpers.hpp>
-#include <adc/amr/refinement_ratio.hpp>
+#include <adc/amr/hierarchy/refinement_ratio.hpp>
 
 /// @file
 /// @brief Single-box MultiFab AMR stack: struct detail::AmrLevelMF and the recursive

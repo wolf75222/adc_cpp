@@ -1,8 +1,8 @@
 #pragma once
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/amr/refinement_ratio.hpp>
-#include <adc/core/types.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/amr/hierarchy/refinement_ratio.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/coupling/amr/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb
 #include <adc/coupling/base/aux_fill.hpp>  // detail::derive_aux_bc + detail::fill_bz_box (shared)
 #include <adc/coupling/source/coupled_source.hpp>  // CoupledSourceFor

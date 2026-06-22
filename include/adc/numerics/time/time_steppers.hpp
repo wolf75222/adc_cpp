@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/core/types.hpp>
+#include <adc/core/foundation/types.hpp>
 #include <adc/mesh/mf_arith.hpp>  // saxpy, lincomb
 #include <adc/mesh/multifab.hpp>
 

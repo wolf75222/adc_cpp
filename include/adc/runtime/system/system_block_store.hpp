@@ -1,8 +1,8 @@
 #pragma once
 
-#include <adc/core/state.hpp>      // kAuxBaseComps (default aux channel of the Schur stage: B_z)
-#include <adc/core/types.hpp>      // Real
-#include <adc/core/variables.hpp>  // VariableSet (role descriptor carried by each block)
+#include <adc/core/state/state.hpp>      // kAuxBaseComps (default aux channel of the Schur stage: B_z)
+#include <adc/core/foundation/types.hpp>      // Real
+#include <adc/core/state/variables.hpp>  // VariableSet (role descriptor carried by each block)
 #include <adc/mesh/box2d.hpp>      // Box2D
 #include <adc/mesh/for_each.hpp>  // device_fence (marshaling synchronizes the device before reading the host)
 #include <adc/mesh/multifab.hpp>  // MultiFab, Array4, ConstArray4

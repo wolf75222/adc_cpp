@@ -3,8 +3,8 @@
 //       exige une entree par bloc (sinon throw).
 //   9.3 AmrSystemCoupler : refuse une hierarchie mal formee (throw au ctor).
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/coupling/static_system/system_coupler.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP

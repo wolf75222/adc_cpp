@@ -7,7 +7,7 @@
 //  (3) PATHOLOGIE PROPRE : une source qui produit NaN sur UNE cellule -> fail_policy=throw leve
 //      une erreur claire, le rapport identifie LA cellule fautive (i, j) et la composante.
 //  (4) OBSERVATEUR PUR : avec defauts + diagnostics, W est BIT-IDENTIQUE au chemin historique.
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>
 #include <adc/mesh/multifab.hpp>

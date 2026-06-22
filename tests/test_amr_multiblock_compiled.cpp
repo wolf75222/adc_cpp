@@ -30,10 +30,10 @@
 // (CPU + Kokkos Serial/OpenMP/Cuda), comme test_amr_coupled_source_role_strict et add_compiled_model #16/#18.
 
 #include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/physics/bricks.hpp>                   // CompositeModel
-#include <adc/physics/elliptic.hpp>                 // ChargeDensity
-#include <adc/physics/hyperbolic.hpp>               // ExBVelocity
-#include <adc/physics/source.hpp>                   // NoSource
+#include <adc/physics/bricks/bricks.hpp>                   // CompositeModel
+#include <adc/physics/bricks/elliptic.hpp>                 // ChargeDensity
+#include <adc/physics/bricks/hyperbolic.hpp>               // ExBVelocity
+#include <adc/physics/bricks/source.hpp>                   // NoSource
 #include <adc/runtime/builders/amr_dsl_block.hpp>            // add_compiled_model(AmrSystem&, ...)
 #include <adc/runtime/amr_system.hpp>               // facade AmrSystem
 #include <adc/runtime/model_spec.hpp>  // ModelSpec (bloc natif, melange compile + natif)

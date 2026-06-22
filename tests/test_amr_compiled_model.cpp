@@ -7,8 +7,8 @@
 //
 // dispatch_model construit CompositeModel<CompressibleFlux, GravityForce, GravityCoupling> ; on passe
 // au chemin compile le MEME type (CompressibleFlux == Euler, cf. hyperbolic.hpp) -> parite exacte.
-#include <adc/physics/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/euler.hpp>   // Euler (= CompressibleFlux)
+#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
 #include <adc/runtime/builders/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 #include <adc/runtime/model_spec.hpp>

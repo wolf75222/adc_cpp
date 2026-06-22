@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include <adc/core/types.hpp>  // ADC_HD: nx/ny/length called from Geometry::dx() inside a device kernel
+#include <adc/core/foundation/types.hpp>  // ADC_HD: nx/ny/length called from Geometry::dx() inside a device kernel
 
 #include <algorithm>
 #include <cstdint>

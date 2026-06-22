@@ -9,8 +9,8 @@
 //   Le defaut AmrImplicitSourceStepper resout backward-Euler sur CHAQUE niveau :
 //   grossier ET fin relaxent, bornes, stables a grand dt.
 
-#include <adc/core/coupled_system.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/coupled_system.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/coupling/static_system/amr_system_coupler.hpp>
 #include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP
 #include <adc/mesh/box2d.hpp>

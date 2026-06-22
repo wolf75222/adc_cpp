@@ -14,8 +14,8 @@
 // fin -> u(t+dt) depend de B_z LU AU BON NIVEAU. Imprime exec=, B_z relu par niveau, et les valeurs
 // finales ; dump binaire de U(grossier+fin) -> diff_bin Cuda vs Serial (dmax sur chaque cellule).
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

@@ -81,8 +81,8 @@ def build_scalar_brick():
 
 
 HARNESS = r"""
-#include <adc/physics/euler.hpp>
-#include <adc/core/physical_model.hpp>
+#include <adc/physics/fluids/euler.hpp>
+#include <adc/core/model/physical_model.hpp>
 %s
 #include <cstdio>
 

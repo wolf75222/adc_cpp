@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <adc/core/physical_model.hpp>
+#include <adc/core/model/physical_model.hpp>
 #include <adc/numerics/time/time_integrator.hpp>
 #include <adc/mesh/multifab.hpp>
 #include <adc/mesh/physical_bc.hpp>

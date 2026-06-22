@@ -26,7 +26,7 @@
 ///   dette CONNUE, a resorber aux prochaines passes en pointant vers les briques d'ici. Aucun
 ///   changement de comportement attendu a chaque migration (meme sortie chronometree, meme JSON).
 
-#include <adc/core/kokkos_env.hpp>  // device_fence (seam backend : no-op serie/OpenMP, fence sous Cuda)
+#include <adc/core/foundation/kokkos_env.hpp>  // device_fence (seam backend : no-op serie/OpenMP, fence sous Cuda)
 
 #include <algorithm>
 #include <chrono>

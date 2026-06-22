@@ -15,8 +15,8 @@
 // profil NON CONSTANT T_e(x,y) = 1 + x + 2 y pour que la source depende vraiment de la cellule.
 // Imprime exec=, max|R - T_e*u|, et dump binaire de R -> diff_bin Cuda vs Serial (dmax par cellule).
 
-#include <adc/core/physical_model.hpp>
-#include <adc/core/state.hpp>
+#include <adc/core/model/physical_model.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

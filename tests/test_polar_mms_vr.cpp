@@ -52,7 +52,7 @@
 // Host / Serial-safe (UNE box, n_ranks()==1 dans les 3 jobs CI : non enregistre MPI, comme les autres
 // tests polaires mono-box).
 
-#include <adc/core/state.hpp>
+#include <adc/core/state/state.hpp>
 #include <adc/mesh/box2d.hpp>
 #include <adc/mesh/box_array.hpp>
 #include <adc/mesh/distribution_mapping.hpp>

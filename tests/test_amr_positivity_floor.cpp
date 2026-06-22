@@ -18,7 +18,7 @@
 //  (4) REJECT: a model without a Density role (AdvectionDiffusion) + positivity_floor > 0 ->
 //      runtime_error mentioning positivity_floor (positivity_comp resolved on the AMR path).
 #include <adc/validation/physics/advection_diffusion.hpp>
-#include <adc/physics/euler.hpp>
+#include <adc/physics/fluids/euler.hpp>
 
 #include <adc/numerics/numerical_flux.hpp>      // RusanovFlux
 #include <adc/numerics/reconstruction.hpp>      // Weno5, Minmod
