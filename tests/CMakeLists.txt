@@ -27,7 +27,7 @@ function(adc_add_test name)
   set_tests_properties(${name} PROPERTIES LABELS "core" TIMEOUT 600)
 endfunction()
 
-# Coupe l'optimisation (-O0) sur une cible de test qui compile python/system.cpp (le runtime System avec le
+# Coupe l'optimisation (-O0) sur une cible de test qui compile python/bindings/system/base/system.cpp (le runtime System avec le
 # dispatch ModelSpec). make_block y instancie, POUR CHAQUE CompositeModel resolu (~33 : transport x source x
 # elliptique), TOUTES les familles de flux qui compilent -- rusanov/hll/hllc/roe x 4 limiteurs, chacune un
 # build_block d'une dizaine de foncteurs device. Sous le backend Kokkos a -O3, l'inlining de ces centaines
@@ -59,7 +59,7 @@ function(adc_cap_opt_for_kokkos_ram target)
 endfunction()
 
 # --- ADC-336 (P0-A) : les deux TU lourdes du runtime compilees UNE SEULE FOIS par config -----------
-# Avant, ~23 executables de test re-listaient python/system.cpp et/ou python/amr_system.cpp en source
+# Avant, ~23 executables de test re-listaient python/bindings/system/base/system.cpp et/ou python/bindings/amr/amr_system.cpp en source
 # (chacune une compilation cc1plus de plusieurs Go / centaines de secondes -- la meme TU recompilee
 # jusqu'a 20x dans un build de tests). On les compile UNE fois dans deux bibliotheques OBJECT, splicees
 # dans chaque executable consommateur EXACTEMENT comme si la .cpp y etait encore listee : memes objets,
@@ -77,35 +77,35 @@ endfunction()
 # flags de production (ADC_HEADER_SIG/visibilite/...), et AUCUN preset ne co-construit tests+python
 # (ADC_BUILD_TESTS et ADC_BUILD_PYTHON sont mutuellement exclusifs dans CMakePresets.json) -- cette
 # bibliotheque est donc strictement tests-only et ne peut pas etre partagee avec _adc.
-add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/system.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_exb.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_isothermal_rusanov.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_isothermal_hll.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_rusanov.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_hll.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_hllc.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_compressible_roe.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../python/system_polar.cpp)
+add_library(adc_runtime_system OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/base/system.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/base/system_exb.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/isothermal/system_isothermal_rusanov.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/isothermal/system_isothermal_hll.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/compressible/system_compressible_rusanov.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/compressible/system_compressible_hll.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/compressible/system_compressible_hllc.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/compressible/system_compressible_roe.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/system/base/system_polar.cpp)
 # ADC-335: the AMR transport-seam TUs (multi-block build_amr_block_<t> + single-block
 # build_amr_compiled_<t>). amr_system.cpp CALLS them, so they must be compiled/linked wherever
 # amr_system.cpp is -- the adc_runtime_amr object lib AND the ENABLE_EXPORTS native-loader tests that
 # re-list amr_system.cpp directly (below). One list, reused, so none is forgotten.
 set(ADC_AMR_SEAM
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_exb.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_isothermal.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_compressible.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_compressible_rusanov.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_compressible_hll.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_compressible_hllc.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_block_compressible_roe.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_exb.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_isothermal.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_compressible.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_compressible_rusanov.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_compressible_hll.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_compressible_hllc.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_compiled_compressible_roe.cpp)
-add_library(adc_runtime_amr    OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/base/amr_block_exb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/base/amr_block_isothermal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/compressible/amr_block_compressible.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/compressible/amr_block_compressible_rusanov.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/compressible/amr_block_compressible_hll.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/compressible/amr_block_compressible_hllc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/block/compressible/amr_block_compressible_roe.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/base/amr_compiled_exb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/base/amr_compiled_isothermal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/compressible/amr_compiled_compressible.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/compressible/amr_compiled_compressible_rusanov.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/compressible/amr_compiled_compressible_hll.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/compressible/amr_compiled_compressible_hllc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/compiled/compressible/amr_compiled_compressible_roe.cpp)
+add_library(adc_runtime_amr    OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/amr_system.cpp ${ADC_AMR_SEAM})
 foreach(_rt adc_runtime_system adc_runtime_amr)
   target_link_libraries(${_rt} PUBLIC adc::adc ${CMAKE_DL_LIBS})
   target_compile_options(${_rt} PUBLIC
@@ -289,7 +289,7 @@ adc_add_test(test_embedded_boundary_generic)
 # vers assemble_rhs_masked (staircase) / assemble_rhs_eb (cutcell) selon un mode explicite. (a) mode none
 # byte-identique au chemin sans disque ; (b) staircase != carre + masse active conservee a la machine ;
 # (c) cutcell fini + != carre, disque englobant == carre (sans coupe) ; (d) mode honore sous Lie ET Strang.
-# Compile le runtime System (python/system.cpp) avec le test, comme test_compiled_model_parity.
+# Compile le runtime System (python/bindings/system/base/system.cpp) avec le test, comme test_compiled_model_parity.
 add_executable(test_facade_routing test_facade_routing.cpp)
 target_link_libraries(test_facade_routing PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
 add_test(NAME test_facade_routing COMMAND test_facade_routing)
@@ -431,7 +431,7 @@ adc_add_test(test_positivity_floor)
 adc_add_test(test_wave_speed_cache_engagement)
 
 # --- parite bloc compile AOT (add_compiled_model) == bloc natif (add_block) ---
-# Compile le runtime System (python/system.cpp) avec le test : add_compiled_model branche un
+# Compile le runtime System (python/bindings/system/base/system.cpp) avec le test : add_compiled_model branche un
 # CompositeModel connu a la compilation sur la grille reelle, comme un bloc natif (sans marshaling).
 add_executable(test_compiled_model_parity test_compiled_model_parity.cpp)
 target_link_libraries(test_compiled_model_parity PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_system)
@@ -446,7 +446,7 @@ target_link_libraries(test_weno5_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS
 add_test(NAME test_weno5_compiled_model COMMAND test_weno5_compiled_model)
 
 # --- parite bloc compile AOT (add_compiled_model) == bloc natif (add_block) COTE AMR ---
-# Compile le runtime AmrSystem (python/amr_system.cpp) avec le test : add_compiled_model branche un
+# Compile le runtime AmrSystem (python/bindings/amr/amr_system.cpp) avec le test : add_compiled_model branche un
 # CompositeModel connu a la compilation sur la hierarchie AMR reelle (AmrCouplerMP + reflux + regrid),
 # comme add_block (sans dispatch ModelSpec). Densite grossiere et masse bit-identiques apres N pas.
 add_executable(test_amr_compiled_model test_amr_compiled_model.cpp)
@@ -454,7 +454,7 @@ target_link_libraries(test_amr_compiled_model PRIVATE adc::adc ${CMAKE_DL_LIBS} 
 add_test(NAME test_amr_compiled_model COMMAND test_amr_compiled_model)
 
 # --- ADC-324 : le patch fin SEED n'existe que si le raffinement est configure (set_refinement) ---
-# Meme machinerie que test_amr_compiled_model (compile python/amr_system.cpp avec le test) : sans
+# Meme machinerie que test_amr_compiled_model (compile python/bindings/amr/amr_system.cpp avec le test) : sans
 # set_refinement (refine_threshold == 1e30) la hierarchie compilee est MONO-NIVEAU (n_patches()==0),
 # avec set_refinement(seuil fini) le seed est alloue (n_patches()>=1). Verrouille la suppression du
 # patch fin rang-0 qui bridait le strong-scaling MPI quand le raffinement etait inactif.
@@ -475,7 +475,7 @@ target_link_libraries(test_amr_regrid_variable PRIVATE adc::adc ${CMAKE_DL_LIBS}
 add_test(NAME test_amr_regrid_variable COMMAND test_amr_regrid_variable)
 
 # --- AmrSystem::potential() : phi du niveau grossier expose, pendant de System::potential() ---
-# Compile les runtimes AmrSystem ET System (python/amr_system.cpp + python/system.cpp) avec le test :
+# Compile les runtimes AmrSystem ET System (python/bindings/amr/amr_system.cpp + python/bindings/system/base/system.cpp) avec le test :
 # sans raffinement, AmrSystem resout le MEME Poisson discret que System(geometric_mg) sur le grossier
 # mono-box -> potential() : forme n*n, valeurs finies, champ non trivial, moyenne ~0 (source neutre),
 # et PARITE avec System::potential() a la tolerance MG pres. C'est l'observable phi qu'echantillonne le
@@ -493,7 +493,7 @@ add_test(NAME test_amr_potential COMMAND test_amr_potential)
 # est rebati avec la MEME norme C++ que ce binaire (cle d'ABI concordante, garde-fou explicite sinon).
 # Le test s'auto-saute (exit 0) si le compilateur du build ne sait pas compiler le loader.
 add_executable(test_amr_native_loader test_amr_native_loader.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_native_loader PRIVATE adc::adc ${CMAKE_DL_LIBS})
 # ELF (Linux) : un executable n'exporte AUCUN symbole dans sa table dynamique sauf -rdynamic. Le loader
 # .so est dlopen-e en RTLD_GLOBAL et resout ses indefinis (adc::AmrSystem::set_compiled_block, exportee
@@ -518,7 +518,7 @@ add_test(NAME test_amr_native_loader COMMAND test_amr_native_loader)
 # n_grow() -- MEME mecanisme que System (PR #22/#88), pas de logique dupliquee. + no-default-change
 # none/minmod. Compile amr_system.cpp (add_native_block) avec le test ; memes injections que le loader.
 add_executable(test_amr_weno5_native test_amr_weno5_native.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_weno5_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
 # ENABLE_EXPORTS (-rdynamic) : le loader .so resout set_compiled_block (ADC_EXPORT) contre l'exe de
 # test auto-promu RTLD_GLOBAL (cf. test_amr_native_loader). Inoffensif sur macOS.
@@ -537,7 +537,7 @@ add_test(NAME test_amr_weno5_native COMMAND test_amr_weno5_native)
 # Verifie aussi que hllc/roe different de rusanov (flux actif, non silencieux). Compile amr_system.cpp
 # comme test_amr_weno5_native ; memes injections compilateur / include / norme / tmpdir.
 add_executable(test_amr_riemann_native test_amr_riemann_native.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_riemann_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
 set_target_properties(test_amr_riemann_native PROPERTIES ENABLE_EXPORTS ON)
 target_compile_definitions(test_amr_riemann_native PRIVATE
@@ -555,7 +555,7 @@ add_test(NAME test_amr_riemann_native COMMAND test_amr_riemann_native)
 # (la source hors registres de reflux). Compile amr_system.cpp comme test_amr_riemann_native ; memes
 # injections compilateur / include / norme / tmpdir.
 add_executable(test_amr_imex_native test_amr_imex_native.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/../python/amr_system.cpp ${ADC_AMR_SEAM})
+               ${CMAKE_CURRENT_SOURCE_DIR}/../python/bindings/amr/amr_system.cpp ${ADC_AMR_SEAM})
 target_link_libraries(test_amr_imex_native PRIVATE adc::adc ${CMAKE_DL_LIBS})
 set_target_properties(test_amr_imex_native PROPERTIES ENABLE_EXPORTS ON)
 target_compile_definitions(test_amr_imex_native PRIVATE
@@ -566,7 +566,7 @@ target_compile_definitions(test_amr_imex_native PRIVATE
 add_test(NAME test_amr_imex_native COMMAND test_amr_imex_native)
 
 # --- contrat mono-bloc/explicite de la facade AmrSystem : refus explicite des params non cables ---
-# Compile le runtime AmrSystem (python/amr_system.cpp) avec le test : verrouille que set_poisson
+# Compile le runtime AmrSystem (python/bindings/amr/amr_system.cpp) avec le test : verrouille que set_poisson
 # refuse solver/rhs hors du domaine cable (GeometricMG + somme des briques elliptiques) et qu'add_block
 # refuse time != explicit / recon hors domaine / substeps < 1, au lieu de les ignorer en silence.
 add_executable(test_amr_system_contract test_amr_system_contract.cpp)
@@ -576,7 +576,7 @@ add_test(NAME test_amr_system_contract COMMAND test_amr_system_contract)
 # --- AMR MULTI-BLOCS (capstone PR1) : facade AmrSystem -> moteur runtime AmrRuntime ---------------
 # Deux blocs EXPLICITES a schemas DIFFERENTS sur UNE hierarchie AMR PARTAGEE : Poisson somme
 # co-localise (q0 n0 + q1 n1), masse conservee PAR BLOC, mono-bloc bit-identique (dmax=0), refus
-# multi-blocs + regrid. Compile python/amr_system.cpp (la facade) avec le test.
+# multi-blocs + regrid. Compile python/bindings/amr/amr_system.cpp (la facade) avec le test.
 add_executable(test_amr_system_twoblock test_amr_system_twoblock.cpp)
 target_link_libraries(test_amr_system_twoblock PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_system_twoblock COMMAND test_amr_system_twoblock)
@@ -588,7 +588,7 @@ add_test(NAME test_amr_system_twoblock COMMAND test_amr_system_twoblock)
 # Verrouille : (A) deux blocs compiles a schemas differents evoluent + masse par bloc, (B) couplage
 # inter-blocs compiles conservatif, (C) melange compile + natif, (D) mono-bloc compile bit-identique
 # (route par AmrCouplerMP), (E) non-regression du refus. Types CONCRETS / foncteurs nommes (pas de
-# lambda generique) -> compilable sous nvcc. Compile python/amr_system.cpp (la facade) avec le test.
+# lambda generique) -> compilable sous nvcc. Compile python/bindings/amr/amr_system.cpp (la facade) avec le test.
 add_executable(test_amr_multiblock_compiled test_amr_multiblock_compiled.cpp)
 target_link_libraries(test_amr_multiblock_compiled PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_multiblock_compiled COMMAND test_amr_multiblock_compiled)
@@ -596,7 +596,7 @@ add_test(NAME test_amr_multiblock_compiled COMMAND test_amr_multiblock_compiled)
 # --- AMR MULTI-BLOCS MULTIRATE (capstone iv) : substeps + stride PAR BLOC honores par AmrRuntime ---
 # substeps reellement exerces (A=4 differe de A=1, etat fini, masse conservee), stride hold-then-catch-up
 # (bloc lent tenu au mac0, rattrape au mac1, Poisson somme actif), step_cfl substeps/stride-aware
-# (dt = cfl*h*min_b(substeps_b/(stride_b*w_b))), mono-bloc bit-identique. Compile python/amr_system.cpp.
+# (dt = cfl*h*min_b(substeps_b/(stride_b*w_b))), mono-bloc bit-identique. Compile python/bindings/amr/amr_system.cpp.
 add_executable(test_amr_multiblock_substeps test_amr_multiblock_substeps.cpp)
 target_link_libraries(test_amr_multiblock_substeps PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_multiblock_substeps COMMAND test_amr_multiblock_substeps)
@@ -605,7 +605,7 @@ add_test(NAME test_amr_multiblock_substeps COMMAND test_amr_multiblock_substeps)
 # echange conservatif PAR CELLULE (add_pair +k*ni*ng / -k*ni*ng, meme cellule), source active (l'etat
 # change), conservation GLOBALE composite sous K macro-pas, couverture #169 (grossier couvert = moyenne
 # 2x2 du fin apres la source), multirate (stride=2 reste conservatif), opt-in bit-identique. Compile
-# python/amr_system.cpp (la facade).
+# python/bindings/amr/amr_system.cpp (la facade).
 add_executable(test_amr_multiblock_coupled_source test_amr_multiblock_coupled_source.cpp)
 target_link_libraries(test_amr_multiblock_coupled_source PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_multiblock_coupled_source COMMAND test_amr_multiblock_coupled_source)
@@ -623,7 +623,7 @@ add_test(NAME test_amr_coupled_source_role_strict COMMAND test_amr_coupled_sourc
 # SourceFreeModel + AmrImplicitSourceStepper) : bloc raide STABLE sous IMEX la ou l'explicite EXPLOSE
 # (disable-and-fail), masse conservee a ~machine (source cellule-locale, hors reflux), multi-blocs
 # tout-explicite bit-identique (opt-in), facade time="imex" + masque IMEX partiel (implicit_roles).
-# Compile python/amr_system.cpp (la facade).
+# Compile python/bindings/amr/amr_system.cpp (la facade).
 add_executable(test_amr_multiblock_imex test_amr_multiblock_imex.cpp)
 target_link_libraries(test_amr_multiblock_imex PRIVATE adc::adc ${CMAKE_DL_LIBS} adc_runtime_amr)
 add_test(NAME test_amr_multiblock_imex COMMAND test_amr_multiblock_imex)
@@ -979,8 +979,8 @@ endif()
 adc_add_test(test_elliptic_interface)
 
 # --- Couverture AUTOMATIQUE du garde memoire (audit CI : 4 cibles capees a la main sur ~39) ----
-# TOUTE cible de ce repertoire qui compile une TU lourde du runtime (python/system.cpp ou
-# python/amr_system.cpp -- les deux instancient le produit combinatoire complet du dispatch,
+# TOUTE cible de ce repertoire qui compile une TU lourde du runtime (python/bindings/system/base/system.cpp ou
+# python/bindings/amr/amr_system.cpp -- les deux instancient le produit combinatoire complet du dispatch,
 # ~1-2 GB de RSS cc1plus a -O3 sous Kokkos) passe par adc_cap_opt_for_kokkos_ram : -O0 cible
 # (correction inchangee, cf. justification en tete de fichier) + pool ninja adc_heavy_tu=1
 # (jamais deux TU lourdes concurrentes). La boucle couvre les cibles FUTURES automatiquement :

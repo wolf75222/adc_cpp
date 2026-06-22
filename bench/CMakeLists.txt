@@ -27,7 +27,7 @@ add_executable(scaling_step scaling_step.cpp)
 target_link_libraries(scaling_step PRIVATE adc::adc)
 
 # Scaling AMR synthetique (4 bulles, AmrSystem + add_compiled_model). AmrSystem est une classe
-# COMPILEE (PIMPL) : on lie son implementation python/amr_system.cpp (comme le test integre
+# COMPILEE (PIMPL) : on lie son implementation python/bindings/amr/amr_system.cpp (comme le test integre
 # amrmpi_integrated). Kokkos etant le seul backend, ADC_HAS_KOKKOS est toujours defini et Kokkos est
 # toujours initialise (le #ifdef ADC_HAS_KOKKOS reste pour la lisibilite du cycle de vie).
 # ADC-335/336 ont SORTI les fabriques de blocs AMR de amr_system.cpp vers les SIX TU du seam :
@@ -37,21 +37,21 @@ target_link_libraries(scaling_step PRIVATE adc::adc)
 # (qui compile amr_system.cpp) DOIT donc lier les six, sinon edition de liens en echec (undefined
 # reference to build_amr_block_* / build_amr_compiled_*).
 add_executable(scaling_amr scaling_amr.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_system.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_exb.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_isothermal.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_compressible.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_compressible_rusanov.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_compressible_hll.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_compressible_hllc.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_block_compressible_roe.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_exb.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_isothermal.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_compressible.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_compressible_rusanov.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_compressible_hll.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_compressible_hllc.cpp
-               ${CMAKE_SOURCE_DIR}/python/amr_compiled_compressible_roe.cpp)
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/amr_system.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/base/amr_block_exb.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/base/amr_block_isothermal.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/compressible/amr_block_compressible.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/compressible/amr_block_compressible_rusanov.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/compressible/amr_block_compressible_hll.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/compressible/amr_block_compressible_hllc.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/block/compressible/amr_block_compressible_roe.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/base/amr_compiled_exb.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/base/amr_compiled_isothermal.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/compressible/amr_compiled_compressible.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/compressible/amr_compiled_compressible_rusanov.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/compressible/amr_compiled_compressible_hll.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/compressible/amr_compiled_compressible_hllc.cpp
+               ${CMAKE_SOURCE_DIR}/python/bindings/amr/compiled/compressible/amr_compiled_compressible_roe.cpp)
 target_link_libraries(scaling_amr PRIVATE adc::adc)
 target_include_directories(scaling_amr PRIVATE ${CMAKE_SOURCE_DIR}/python)
 # RAM CI : amr_system.cpp est une des TU geantes du module (cf. python/CMakeLists.txt) ; sous

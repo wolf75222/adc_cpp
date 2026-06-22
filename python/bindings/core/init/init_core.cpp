@@ -1,4 +1,4 @@
-#include "bindings_detail.hpp"
+#include "../bindings_detail.hpp"
 
 #include <adc/core/state/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
 
