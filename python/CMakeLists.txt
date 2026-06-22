@@ -112,7 +112,7 @@ set_target_properties(_adc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ADC_PY_PKG})
 if(SKBUILD)
   install(TARGETS _adc LIBRARY DESTINATION adc)
 endif()
-foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py adc/moments.py)
+foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py adc/moments.py adc/time.py)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()
 
