@@ -1,4 +1,4 @@
-#include "bindings_detail.hpp"
+#include "../bindings_detail.hpp"
 
 // ADC-365: the AMR (AmrSystemConfig + AmrSystem) bindings.
 void init_amr(py::module_& m) {

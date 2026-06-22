@@ -1,4 +1,4 @@
-#include "bindings_detail.hpp"
+#include "../bindings_detail.hpp"
 
 // ADC-365: the System runtime-composition facade bindings.
 void init_system(py::module_& m) {
