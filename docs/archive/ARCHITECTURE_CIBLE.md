@@ -180,7 +180,7 @@ the `Cuda` execution space (GH200; Kokkos 4.4 + CUDA 12.6, `HOPPER90`), == `adc:
 (5.6e-17, FMA contraction), cf. docs/GPU_ROMEO.md. It is the same dispatch primitive as
 `adc/mesh/for_each.hpp`.
 
-(a) DONE: TYPE-ERASED interface `adc::IModel<NV>` + `ModelAdapter` (include/adc/runtime/dynamic_model.hpp)
+(a) DONE: TYPE-ERASED interface `adc::IModel<NV>` + `ModelAdapter` (include/adc/runtime/dynamic/dynamic_model.hpp)
 AND wiring into the runtime. `System::add_dynamic_block(name, so)` loads at runtime (dlopen) a generated
 brick compiled into a `.so` and creates a block driven by the IModel (host Rusanov order 1), advanced via
 eval_rhs / step / step_cfl like any block; `dsl.HyperbolicModel.compile_so` does the JIT.

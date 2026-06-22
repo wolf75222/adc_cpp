@@ -30,7 +30,7 @@ single closure. See [moments and closures](../concepts/moments-and-closures.md),
 ## PhysicalModel: the concept
 
 All bricks satisfy the same C++ contract, the `adc::PhysicalModel` concept
-([include/adc/core/physical_model.hpp](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/core/physical_model.hpp)). A
+([include/adc/core/physical_model.hpp](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/core/model/physical_model.hpp)). A
 `PhysicalModel` describes an equation as a set of pure functions of pointwise states, nothing
 more. It is the only "what to compute" axis of the architecture, separate from the "where / how to iterate"
 axis (mesh + dispatch) and from the "in what order" axis (integrator + coupler, cf.

@@ -11,7 +11,7 @@ There are no "three layers" stacked. The architecture is MPI + Kokkos:
 - **Kokkos** parallelizes the local compute and abstracts the hardware through its `ExecutionSpace`:
   `Cuda` backend for NVIDIA GPUs, `Serial`/`OpenMP` for CPU. Everything goes through `for_each_cell`
   (and `for_each_cell_reduce_*`) from
-  [`include/adc/mesh/for_each.hpp`](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/mesh/for_each.hpp), which switches
+  [`include/adc/mesh/for_each.hpp`](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/mesh/execution/for_each.hpp), which switches
   CPU <-> GPU at compile time without touching the call sites.
 
 No CUDA kernel is written by hand: the same `.cpp` targets CPU and GPU depending on the Kokkos

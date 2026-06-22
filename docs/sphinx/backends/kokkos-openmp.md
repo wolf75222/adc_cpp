@@ -30,4 +30,4 @@ only (unlike the Serial gate, which runs on every PR). Status `ci-full`,
 > bit-identical to a hand-written lexicographic sum. Since there is only one
 > Kokkos path, this holds for all spaces (Serial, OpenMP, Cuda). The max reduction
 > (`Kokkos::Max`) is exact everywhere. Detail in the header of
-> [`for_each.hpp`](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/mesh/for_each.hpp).
+> [`for_each.hpp`](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/mesh/execution/for_each.hpp).

@@ -187,10 +187,10 @@ Reference: [native-bricks](docs/sphinx/reference/native-bricks.md),
 
 | Layer | Role | Entry point |
 |---|---|---|
-| `core/` | types, state, `PhysicalModel`, `EquationBlock`, `CoupledSystem` | [physical_model.hpp](include/adc/core/physical_model.hpp) |
-| `physics/` | generic bricks composed into a `CompositeModel` | [composite.hpp](include/adc/physics/composite.hpp) |
-| `numerics/` | reconstruction (Minmod / VanLeer / WENO5), flux (Rusanov / HLL / HLLC / Roe) | [reconstruction.hpp](include/adc/numerics/reconstruction.hpp) |
-| `numerics/elliptic/` | `EllipticSolver` concept, geometric multigrid, FFT, composite FAC | [elliptic_solver.hpp](include/adc/numerics/elliptic/elliptic_solver.hpp) |
+| `core/` | types, state, `PhysicalModel`, `EquationBlock`, `CoupledSystem` | [physical_model.hpp](include/adc/core/model/physical_model.hpp) |
+| `physics/` | generic bricks composed into a `CompositeModel` | [composite.hpp](include/adc/physics/composition/composite.hpp) |
+| `numerics/` | reconstruction (Minmod / VanLeer / WENO5), flux (Rusanov / HLL / HLLC / Roe) | [reconstruction.hpp](include/adc/numerics/fv/reconstruction.hpp) |
+| `numerics/elliptic/` | `EllipticSolver` concept, geometric multigrid, FFT, composite FAC | [elliptic_solver.hpp](include/adc/numerics/elliptic/interface/elliptic_solver.hpp) |
 | `numerics/time/` | SSP-RK, multirate scheduler, IMEX, splitting, AMR engine | [numerics/time/](include/adc/numerics/time) |
 | `coupling/` | `Coupler`, `SystemCoupler`, `AmrSystemCoupler`, `AmrCouplerMP` | [coupler.hpp](include/adc/coupling/single/coupler.hpp) |
 | `amr/`, `mesh/`, `parallel/` | Berger-Rigoutsos clustering, regrid, MultiFab, MPI comm seam | [amr/](include/adc/amr) |
