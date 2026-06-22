@@ -7,7 +7,7 @@
 #include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model + compiled bricks
 #include <adc/runtime/detail/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
 #include <adc/runtime/detail/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
-#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions + validate_newton_options (shared range check)
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // NewtonOptions + validate_newton_options (shared range check)
 
 #include <algorithm>  // std::find, std::sort (partial IMEX mask resolution: sorted unique indices)
 #include <cmath>

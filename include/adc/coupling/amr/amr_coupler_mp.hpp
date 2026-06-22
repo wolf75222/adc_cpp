@@ -9,7 +9,7 @@
 #include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>  // COMPOSITE FAC 2-level Poisson solver (opt-in)
 #include <adc/numerics/elliptic/interface/elliptic_solver.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, amr_step_multilevel_multipatch, mf_*_mb
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, amr_step_multilevel_multipatch, mf_*_mb
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>

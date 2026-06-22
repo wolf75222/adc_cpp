@@ -14,10 +14,10 @@
 //      conserve la masse sur un etat lisse periodique.
 
 #include <adc/physics/bricks/bricks.hpp>  // CompositeModel, CompressibleFlux, NoSource, ChargeDensity
-#include <adc/numerics/numerical_flux.hpp>      // HLLCFlux, RoeFlux
-#include <adc/numerics/reconstruction.hpp>      // Minmod
+#include <adc/numerics/fv/numerical_flux.hpp>      // HLLCFlux, RoeFlux
+#include <adc/numerics/fv/reconstruction.hpp>      // Minmod
 #include <adc/numerics/spatial_operator.hpp>    // assemble_rhs, compute_face_fluxes, load_state
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP
 
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>

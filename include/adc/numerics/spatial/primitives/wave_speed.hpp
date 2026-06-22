@@ -20,7 +20,7 @@
 #include <adc/mesh/storage/fab2d.hpp>
 #include <adc/mesh/execution/for_each.hpp>  // reduce_max_cell, reduce_min_cell
 #include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/spatial/state_access.hpp>  // load_state, load_aux, aux_comps
+#include <adc/numerics/spatial/primitives/state_access.hpp>  // load_state, load_aux, aux_comps
 #include <adc/parallel/comm.hpp>                  // all_reduce_max, all_reduce_min
 
 #include <algorithm>

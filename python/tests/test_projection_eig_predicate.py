@@ -157,7 +157,7 @@ def test_codegen():
     print("== (3) codegen : foncteur all_real abaisse sur EigBounds::all_real (PAS .max_im) ==")
     m, im_tol, _ = build_pred_model("cg")
     src = m.emit_cpp_brick(name="ToyPredCg")
-    chk("#include <adc/numerics/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
+    chk("#include <adc/numerics/linalg/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
     chk("static ADC_HD adc::Real adc_eig_all_real_2x2(" in src,
         "foncteur nomme adc_eig_all_real_2x2 declare")
     chk("adc::real_eig_minmax(M).all_real(" in src,
@@ -200,7 +200,7 @@ def test_fallback_conservative(cxx, tmp):
     with open(main, "w") as f:
         f.write(
             "#include <cstdio>\n"
-            "#include <adc/numerics/dense_eig.hpp>\n"
+            "#include <adc/numerics/linalg/dense_eig.hpp>\n"
             "int main() {\n"
             # companion 3x3 plein (ne deflate pas en 1x1/2x2) -> cap QR 0 force le repli Gershgorin.
             "  const adc::Real A[3][3] = {{0,0,-6},{1,0,11},{0,1,-6}};\n"

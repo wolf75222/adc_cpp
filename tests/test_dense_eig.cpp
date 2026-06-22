@@ -7,7 +7,7 @@
 // fortement non normale (triangulaire a grand hors-diagonale). Contrat de repli : cap
 // d'iterations a 0 -> bornes de Gershgorin (converged = false) qui ENCADRENT le vrai spectre.
 
-#include <adc/numerics/dense_eig.hpp>
+#include <adc/numerics/linalg/dense_eig.hpp>
 
 #include "test_harness.hpp"  // adc::test::Checker (style verbose) + close_rel partages
 

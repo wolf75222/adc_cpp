@@ -7,8 +7,8 @@
 #include <adc/mesh/execution/for_each.hpp>
 #include <adc/mesh/geometry/geometry.hpp>  // PolarGeometry
 #include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>  // reconstruct<>, load_state/load_aux (REUSED verbatim)
 
 #include <concepts>

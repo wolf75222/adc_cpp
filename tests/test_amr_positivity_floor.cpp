@@ -20,10 +20,10 @@
 #include <adc/validation/physics/advection_diffusion.hpp>
 #include <adc/physics/fluids/euler.hpp>
 
-#include <adc/numerics/numerical_flux.hpp>      // RusanovFlux
-#include <adc/numerics/reconstruction.hpp>      // Weno5, Minmod
+#include <adc/numerics/fv/numerical_flux.hpp>      // RusanovFlux
+#include <adc/numerics/fv/reconstruction.hpp>      // Weno5, Minmod
 #include <adc/numerics/spatial_operator.hpp>    // reconstruct_pp, positivity_comp
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP, mf_fill_fine_ghosts_mb
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP, mf_fill_fine_ghosts_mb
 
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>

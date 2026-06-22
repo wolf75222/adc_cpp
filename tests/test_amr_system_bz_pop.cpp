@@ -32,7 +32,7 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

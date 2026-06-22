@@ -6,7 +6,7 @@
 //   - CoarseFineInterface : couverture batie depuis un BoxArray fin (empreinte PatchRange)
 //     et routage bordant du reflux (formules et garde de couverture).
 
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // adc::SubcyclingSchedule, adc::CoarseFineInterface
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // adc::SubcyclingSchedule, adc::CoarseFineInterface
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>
 

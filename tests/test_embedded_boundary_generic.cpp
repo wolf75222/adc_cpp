@@ -44,11 +44,11 @@
 #include <adc/mesh/storage/mf_arith.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/embedded_boundary.hpp>  // ADC-327 : contrat generique (DiscDomain + HalfPlaneDomain + concept)
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/spatial/embedded_boundary/domain.hpp>  // ADC-327 : contrat generique (DiscDomain + HalfPlaneDomain + concept)
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>     // assemble_rhs, assemble_rhs_masked
-#include <adc/numerics/spatial_operator_eb.hpp>  // assemble_rhs_eb
+#include <adc/numerics/spatial/embedded_boundary/operator.hpp>  // assemble_rhs_eb
 
 #include <algorithm>
 #include <cmath>

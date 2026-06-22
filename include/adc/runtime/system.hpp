@@ -1,7 +1,7 @@
 #pragma once
 
 #include <adc/core/state/variables.hpp>  // VariableSet (role-bearing descriptor carried by each block)
-#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions (options of the IMEX source Newton)
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // NewtonOptions (options of the IMEX source Newton)
 #include <adc/runtime/export.hpp>  // ADC_EXPORT (methods resolved by the native loader through dlopen)
 #include <adc/runtime/facade_options.hpp>  // SourceStageOptions / CoupledSourceProgram (facade PODs, ADC-214)
 #include <adc/runtime/detail/grid_context.hpp>  // GridContext + BlockClosures (AOT-compiled block seam)

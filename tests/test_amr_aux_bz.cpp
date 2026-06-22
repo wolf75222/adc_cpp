@@ -26,7 +26,7 @@
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/mesh/layout/refinement.hpp>              // coarsen_index
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

@@ -15,7 +15,7 @@
 //      F*(U,U) == flux(U), et un CISAILLEMENT STATIONNAIRE (un = 0, saut tangentiel) est preserve
 //      EXACTEMENT (flux tangentiel nul) la ou HLL le diffuse. C'est exactement ce qu'apporte la
 //      resolution de l'onde intermediaire, prouvee hors Euler.
-#include <adc/numerics/numerical_flux.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
 #include <adc/physics/fluids/euler.hpp>
 
 #include <cmath>

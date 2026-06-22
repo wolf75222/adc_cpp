@@ -5,7 +5,7 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (built-in level-set domain instance)
+#include <adc/numerics/spatial/embedded_boundary/domain.hpp>  // detail::DiscDomain (built-in level-set domain instance)
 
 #include <functional>
 

@@ -37,7 +37,7 @@
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
-#include <adc/numerics/lorentz_eliminator.hpp>
+#include <adc/numerics/linalg/lorentz_eliminator.hpp>
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

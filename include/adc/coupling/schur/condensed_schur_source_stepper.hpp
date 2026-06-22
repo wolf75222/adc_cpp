@@ -11,7 +11,7 @@
 #include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>   // operator + preconditioner (#120)
 #include <adc/numerics/elliptic/linear/krylov_solver.hpp>  // TensorKrylovSolver (BiCGStab, #122)
-#include <adc/numerics/lorentz_eliminator.hpp>      // closed-form B^{-1} (#118)
+#include <adc/numerics/linalg/lorentz_eliminator.hpp>      // closed-form B^{-1} (#118)
 
 #include <stdexcept>
 

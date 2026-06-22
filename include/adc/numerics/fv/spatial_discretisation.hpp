@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
 
 #include <concepts>
 

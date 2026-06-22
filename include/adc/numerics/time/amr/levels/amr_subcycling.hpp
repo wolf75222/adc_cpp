@@ -2,8 +2,8 @@
 #include <adc/mesh/storage/mf_arith.hpp>  // saxpy, lincomb (SSPRK3 stages, named device-clean functors)
 #include <adc/amr/hierarchy/refinement_ratio.hpp>
 #include <adc/mesh/layout/refinement.hpp>  // coarsen, parallel_copy
-#include <adc/numerics/time/amr_flux_helpers.hpp>
-#include <adc/numerics/time/amr_patch_range.hpp>
+#include <adc/numerics/time/amr/reflux/amr_flux_helpers.hpp>
+#include <adc/numerics/time/amr/levels/amr_patch_range.hpp>
 
 #include <cassert>  // assert (replicated-parent invariant: mf_find_box always finds it)
 

@@ -239,6 +239,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **`include/adc` deep re-nest, phase 4: numerics split into sub-families** (ADC-395, follow-up of
+  ADC-394): top-level numerics headers move to `linalg/` (dense_eig, lorentz_eliminator) and `fv/`
+  (numerical_flux, reconstruction, spatial_discretisation); `spatial/` splits into `primitives/`
+  (state_access, positivity, face_flux, wave_speed), `operators/` (cartesian_operator,
+  masked_operator, polar_operator) and `embedded_boundary/` (domain, operator); `time/` splits into
+  `integrators/` (time_integrator, time_steppers, ssprk, implicit_stepper), `schemes/` (imex,
+  splitting, scheduler) and `amr/` (levels, advance, reflux). The `numerics/spatial_operator.hpp`
+  umbrella (ADC-328) is kept and repointed. Every internal `#include <adc/...>` and the DSL emit
+  (`numerics/dense_eig.hpp`) are repointed. Public include-path break (pre-1.0).
 - **`include/adc` deep re-nest, phase 3: mesh split into sub-families** (ADC-394, follow-up of
   ADC-393): `mesh/` now groups `index/` (box2d, box_hash), `layout/` (box_array, patch_box,
   distribution_mapping, refinement), `storage/` (fab2d, multifab, mf_arith), `geometry/`

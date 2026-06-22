@@ -9,7 +9,7 @@
 //      et B^{-1} ramene au vecteur initial (norme conservee par B^{-1} o B).
 //   4. Cas degenere B_z=0 : B=I, B^{-1}=I, det=1.
 
-#include <adc/numerics/lorentz_eliminator.hpp>
+#include <adc/numerics/linalg/lorentz_eliminator.hpp>
 
 #include <cmath>
 #include <cstdio>

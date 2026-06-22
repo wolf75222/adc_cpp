@@ -111,7 +111,7 @@ def test_codegen():
     print("== (2) codegen : include dense_eig + foncteur nomme (pas de lambda) ==")
     m, _, _ = build_eig_model("cg")
     src = m.emit_cpp_brick(name="ToyEigCg")
-    chk("#include <adc/numerics/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
+    chk("#include <adc/numerics/linalg/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
     chk("static ADC_HD adc::Real adc_eig_max_im_2x2(" in src, "foncteur nomme adc_eig_max_im_2x2 declare")
     chk("adc::real_eig_minmax(M).max_im" in src, "le foncteur appelle real_eig_minmax(M).max_im")
     chk("[&]" not in src and "[=]" not in src, "aucune lambda etendue (device-clean)")

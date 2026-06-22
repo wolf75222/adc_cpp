@@ -8,9 +8,9 @@
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>
 #include <adc/numerics/elliptic/interface/elliptic_solver.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/time/implicit_stepper.hpp>
-#include <adc/numerics/time/scheduler.hpp>
-#include <adc/numerics/time/time_steppers.hpp>
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>
+#include <adc/numerics/time/schemes/scheduler.hpp>
+#include <adc/numerics/time/integrators/time_steppers.hpp>
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>
 #include <adc/mesh/geometry/geometry.hpp>

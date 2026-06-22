@@ -24,8 +24,8 @@
 #include <adc/mesh/execution/for_each.hpp>  // device_fence
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/numerical_flux.hpp>    // RusanovFlux
-#include <adc/numerics/reconstruction.hpp>    // NoSlope
+#include <adc/numerics/fv/numerical_flux.hpp>    // RusanovFlux
+#include <adc/numerics/fv/reconstruction.hpp>    // NoSlope
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, load_aux, aux_comps
 #include <adc/parallel/comm.hpp>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/numerics/time/amr_flux_helpers.hpp>
+#include <adc/numerics/time/amr/reflux/amr_flux_helpers.hpp>
 #include <adc/amr/hierarchy/refinement_ratio.hpp>
 #include <adc/parallel/comm.hpp>  // all_reduce_sum_inplace (distributed multi-patch reflux)
 

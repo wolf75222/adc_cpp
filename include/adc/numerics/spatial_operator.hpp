@@ -24,9 +24,9 @@
 
 #pragma once
 
-#include <adc/numerics/spatial/state_access.hpp>
-#include <adc/numerics/spatial/positivity.hpp>
-#include <adc/numerics/spatial/face_flux.hpp>
-#include <adc/numerics/spatial/wave_speed.hpp>
-#include <adc/numerics/spatial/cartesian_operator.hpp>
-#include <adc/numerics/spatial/masked_operator.hpp>
+#include <adc/numerics/spatial/primitives/state_access.hpp>
+#include <adc/numerics/spatial/primitives/positivity.hpp>
+#include <adc/numerics/spatial/primitives/face_flux.hpp>
+#include <adc/numerics/spatial/primitives/wave_speed.hpp>
+#include <adc/numerics/spatial/operators/cartesian_operator.hpp>
+#include <adc/numerics/spatial/operators/masked_operator.hpp>

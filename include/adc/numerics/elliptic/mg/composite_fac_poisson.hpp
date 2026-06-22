@@ -11,7 +11,7 @@
 #include <adc/mesh/layout/refinement.hpp>                    // average_down, coarsen_index
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>  // coarse solver (geometric multigrid)
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (residual, reads the already-filled ghosts)
-#include <adc/numerics/time/amr_patch_range.hpp>  // PatchRange, CoverageMask (coarse footprint of a patch)
+#include <adc/numerics/time/amr/levels/amr_patch_range.hpp>  // PatchRange, CoverageMask (coarse footprint of a patch)
 
 #include <algorithm>
 #include <cmath>

@@ -26,10 +26,10 @@
 #include <adc/mesh/storage/mf_arith.hpp>  // sum, norm_inf
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/layout/refinement.hpp>                  // coarsen_index
-#include <adc/numerics/spatial_discretisation.hpp>  // FirstOrder, MusclMinmod
-#include <adc/numerics/time/amr_reflux_mf.hpp>      // AmrLevelMP
-#include <adc/numerics/time/time_integrator.hpp>    // ExplicitTime
-#include <adc/numerics/time/time_steppers.hpp>      // SSPRK2
+#include <adc/numerics/fv/spatial_discretisation.hpp>  // FirstOrder, MusclMinmod
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>      // AmrLevelMP
+#include <adc/numerics/time/integrators/time_integrator.hpp>    // ExplicitTime
+#include <adc/numerics/time/integrators/time_steppers.hpp>      // SSPRK2
 #include <adc/parallel/comm.hpp>                    // n_ranks
 
 #include <cmath>

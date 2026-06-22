@@ -31,10 +31,10 @@
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/spatial_operator_polar.hpp>
-#include <adc/numerics/time/time_steppers.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
+#include <adc/numerics/spatial/operators/polar_operator.hpp>
+#include <adc/numerics/time/integrators/time_steppers.hpp>
 #include <adc/physics/bricks/bricks.hpp>  // ExBVelocityPolar, CompositeModel, NoSource, ChargeDensity
 #include <adc/runtime/builders/block_builder_polar.hpp>  // derive_aux_polar : MEME derivation aux que System::solve_fields_polar
 

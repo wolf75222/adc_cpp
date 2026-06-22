@@ -8,7 +8,7 @@
 ///  - brut : 8 octets -> double tel quel (NaN/Inf/denormaux compris) -> seul le no-crash/no-UB
 ///    est exige (ASan + UBSan sont lies au harnais, -fno-sanitize-recover rend l'UB fatal).
 
-#include <adc/numerics/dense_eig.hpp>
+#include <adc/numerics/linalg/dense_eig.hpp>
 
 #include <cmath>
 #include <cstdint>

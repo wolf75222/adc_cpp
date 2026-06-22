@@ -7,8 +7,8 @@
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>
 #include <adc/numerics/elliptic/interface/elliptic_solver.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/time/time_integrator.hpp>
-#include <adc/numerics/time/time_steppers.hpp>  // SSPRK2Step / SSPRK3Step (shared scheme)
+#include <adc/numerics/time/integrators/time_integrator.hpp>
+#include <adc/numerics/time/integrators/time_steppers.hpp>  // SSPRK2Step / SSPRK3Step (shared scheme)
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>
 #include <adc/mesh/storage/fab2d.hpp>
@@ -17,8 +17,8 @@
 #include <adc/mesh/storage/mf_arith.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/spatial_discretisation.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
+#include <adc/numerics/fv/spatial_discretisation.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/parallel/comm.hpp>
 

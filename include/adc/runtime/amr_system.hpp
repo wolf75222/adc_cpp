@@ -2,7 +2,7 @@
 
 #include <adc/mesh/layout/patch_box.hpp>  // PatchBox: index-space signature of a fine patch (patch_boxes())
 #include <adc/mesh/boundary/physical_bc.hpp>                // BCRec
-#include <adc/numerics/time/implicit_stepper.hpp>  // NewtonOptions (Newton options of the IMEX source)
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // NewtonOptions (Newton options of the IMEX source)
 #include <adc/runtime/export.hpp>  // ADC_EXPORT: set_compiled_block resolved by the native AMR loader
 #include <adc/runtime/facade_options.hpp>  // SourceStageOptions / CoupledSourceProgram (facade PODs, ADC-214)
 #include <adc/runtime/model_spec.hpp>

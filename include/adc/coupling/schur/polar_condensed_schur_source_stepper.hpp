@@ -9,7 +9,7 @@
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/polar/polar_tensor_operator.hpp>  // PolarTensorKrylovSolver, apply_polar_tensor (#210)
-#include <adc/numerics/lorentz_eliminator.hpp>  // B^{-1} closed form (#118)
+#include <adc/numerics/linalg/lorentz_eliminator.hpp>  // B^{-1} closed form (#118)
 #include <adc/parallel/comm.hpp>
 
 #include <stdexcept>

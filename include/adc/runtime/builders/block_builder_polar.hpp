@@ -5,10 +5,10 @@
 #include <adc/mesh/geometry/geometry.hpp>  // PolarGeometry
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>  // BCRec, fill_ghosts, fill_boundary
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/spatial_operator_polar.hpp>  // assemble_rhs_polar (REUSED verbatim)
-#include <adc/numerics/time/time_steppers.hpp>      // SSPRK2Step / SSPRK3Step (core RK math)
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
+#include <adc/numerics/spatial/operators/polar_operator.hpp>  // assemble_rhs_polar (REUSED verbatim)
+#include <adc/numerics/time/integrators/time_steppers.hpp>      // SSPRK2Step / SSPRK3Step (core RK math)
 #include <adc/parallel/comm.hpp>   // all_reduce_max (MPI-safe collective reduction)
 #include <adc/physics/bricks/bricks.hpp>  // ExBVelocityPolar, CompositeModel, source/elliptic bricks
 #include <adc/runtime/detail/dispatch_tags.hpp>  // UNIQUE registry of tags (validate_limiter/riemann)

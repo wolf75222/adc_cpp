@@ -47,10 +47,10 @@
 #include <adc/mesh/storage/mf_arith.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
 #include <adc/numerics/spatial_operator.hpp>
-#include <adc/numerics/time/time_steppers.hpp>
+#include <adc/numerics/time/integrators/time_steppers.hpp>
 
 #include <cmath>
 #include <cstdio>

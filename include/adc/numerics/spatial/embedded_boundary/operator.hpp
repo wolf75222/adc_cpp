@@ -8,9 +8,9 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/numerics/elliptic/eb/cut_fraction.hpp>  // detail::cut_fraction, CutFraction (PR1)
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/embedded_boundary.hpp>  // detail::DiscDomain (level-set domain; numerics, not runtime)
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
+#include <adc/numerics/spatial/embedded_boundary/domain.hpp>  // detail::DiscDomain (level-set domain; numerics, not runtime)
 #include <adc/numerics/spatial_operator.hpp>  // reconstruct<>, load_state/load_aux, *_face_box (REUSED verbatim)
 
 #include <utility>

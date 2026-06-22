@@ -7,7 +7,7 @@
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (Lap phi^n)
-#include <adc/numerics/lorentz_eliminator.hpp>         // closed 2x2 B^{-1}
+#include <adc/numerics/linalg/lorentz_eliminator.hpp>         // closed 2x2 B^{-1}
 
 #include <stdexcept>
 

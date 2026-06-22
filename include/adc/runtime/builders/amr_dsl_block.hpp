@@ -9,10 +9,10 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/layout/refinement.hpp>  // coarsen_index
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>  // SourceFreeModel (explicit IMEX half-step, transport only)
-#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source + ImplicitMask (stiff IMEX source)
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // backward_euler_source + ImplicitMask (stiff IMEX source)
 #include <adc/parallel/comm.hpp>                   // n_ranks
 #include <adc/runtime/amr/amr_runtime.hpp>  // AmrRuntimeBlock (type-erased multi-block registry)
 #include <adc/runtime/amr_system.hpp>

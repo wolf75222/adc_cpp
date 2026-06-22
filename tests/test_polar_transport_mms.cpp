@@ -35,10 +35,10 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
-#include <adc/numerics/spatial_operator_polar.hpp>
-#include <adc/numerics/time/time_steppers.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
+#include <adc/numerics/spatial/operators/polar_operator.hpp>
+#include <adc/numerics/time/integrators/time_steppers.hpp>
 #include <adc/physics/bricks/hyperbolic.hpp>
 
 #include <cmath>

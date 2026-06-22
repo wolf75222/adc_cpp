@@ -4,7 +4,7 @@
 //      (ecoulement supersonique), F* doit valoir EXACTEMENT le flux amont. C'est equivalent a
 //      F_R - F_L = A_roe (U_R - U_L) : ca ne passe que si la decomposition en ondes est correcte.
 #include <adc/physics/fluids/euler.hpp>
-#include <adc/numerics/numerical_flux.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
 
 #include <cmath>
 #include <cstdio>

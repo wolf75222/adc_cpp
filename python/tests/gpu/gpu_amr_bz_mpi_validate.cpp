@@ -19,7 +19,7 @@
 #include <adc/mesh/execution/for_each.hpp>  // device_fence
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
 #include <adc/parallel/comm.hpp>
 
 #include <cmath>

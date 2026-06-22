@@ -8,7 +8,7 @@
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/layout/refinement.hpp>                 // coarsen_index
 #include <adc/numerics/spatial_operator.hpp>       // compute_face_fluxes, xface_box, yface_box
-#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source (IMEX implicit step)
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // backward_euler_source (IMEX implicit step)
 
 #include <vector>
 

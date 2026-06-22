@@ -58,7 +58,7 @@ src = mr._m.emit_cpp_brick()
 chk(mr._m._roe_jacobian is not None, "roe=True: _roe_jacobian set on the engine")
 chk("State roe_dissipation(" in src, "roe=True: roe_dissipation hook emitted")
 chk("adc::roe_abs_apply(" in src, "roe=True: hook calls adc::roe_abs_apply")
-chk("#include <adc/numerics/dense_eig.hpp>" in src, "roe=True: dense_eig.hpp included")
+chk("#include <adc/numerics/linalg/dense_eig.hpp>" in src, "roe=True: dense_eig.hpp included")
 chk("adc::real_eig_minmax(" in src, "roe=True: spectral-radius (Rusanov) fallback emitted")
 
 m0 = build_moment_model("noroe_src", 2, gaussian_closure(2), roe=False)

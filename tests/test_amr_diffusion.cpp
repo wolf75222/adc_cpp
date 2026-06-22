@@ -6,7 +6,7 @@
 // (2) la diffusion AGIT (le champ se lisse, le pic baisse).
 
 #include <adc/core/state/state.hpp>
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>

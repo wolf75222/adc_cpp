@@ -6,7 +6,7 @@
 #include <adc/core/model/physical_model.hpp>
 #include <adc/core/state/state.hpp>
 #include <adc/core/foundation/types.hpp>
-#include <adc/numerics/time/ssprk.hpp>
+#include <adc/numerics/time/integrators/ssprk.hpp>
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>
 #include <adc/mesh/storage/fab2d.hpp>

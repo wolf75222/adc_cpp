@@ -2684,7 +2684,7 @@ class HyperbolicModel:
         # projection (m.projection + dsl.eig_max_im, ADC-289). Sans l'un ou l'autre : non inclus.
         eig_pairs = _collect_eig_witnesses(self._proj or [])
         if self._ws_jacobian is not None or eig_pairs or self._roe_jacobian is not None:
-            S.append("#include <adc/numerics/dense_eig.hpp>")
+            S.append("#include <adc/numerics/linalg/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
@@ -3155,7 +3155,7 @@ class HyperbolicModel:
         if rt_member:  # RuntimeParams header only if a formula reads a runtime param
             S.append("#include <adc/runtime/detail/runtime_params.hpp>")
         if self._ws_jacobian is not None:  # dense-block eigenvalues (exact wave_speeds)
-            S.append("#include <adc/numerics/dense_eig.hpp>")
+            S.append("#include <adc/numerics/linalg/dense_eig.hpp>")
         S += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,

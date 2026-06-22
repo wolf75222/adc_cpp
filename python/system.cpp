@@ -16,8 +16,8 @@
 #include <adc/runtime/system/system_stepper.hpp>  // SystemStepper: time advance (step/advance/step_cfl/step_adaptive) (Batch B)
 #include <adc/runtime/system/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
 #include <adc/runtime/builders/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
-#include <adc/numerics/time/implicit_stepper.hpp>  // backward_euler_source
-#include <adc/numerics/time/time_steppers.hpp>     // ForwardEuler, SSPRK2Step (core RK math)
+#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // backward_euler_source
+#include <adc/numerics/time/integrators/time_steppers.hpp>     // ForwardEuler, SSPRK2Step (core RK math)
 #include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
 
 #include <adc/mesh/layout/box_array.hpp>

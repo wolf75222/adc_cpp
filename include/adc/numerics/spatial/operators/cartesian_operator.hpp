@@ -16,11 +16,11 @@
 #include <adc/mesh/execution/for_each.hpp>
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/spatial/face_flux.hpp>     // reconstruct_pp, require_reconstruction_ghosts
-#include <adc/numerics/spatial/positivity.hpp>    // detail::positivity_comp
-#include <adc/numerics/spatial/state_access.hpp>  // load_state, load_aux, DiffusiveModel
-#include <adc/numerics/spatial/wave_speed.hpp>    // fill_wave_speed_cache
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/spatial/primitives/face_flux.hpp>     // reconstruct_pp, require_reconstruction_ghosts
+#include <adc/numerics/spatial/primitives/positivity.hpp>    // detail::positivity_comp
+#include <adc/numerics/spatial/primitives/state_access.hpp>  // load_state, load_aux, DiffusiveModel
+#include <adc/numerics/spatial/primitives/wave_speed.hpp>    // fill_wave_speed_cache
 
 namespace adc {
 

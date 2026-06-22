@@ -29,8 +29,8 @@
 #include <adc/mesh/storage/mf_arith.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/numerical_flux.hpp>
-#include <adc/numerics/reconstruction.hpp>
+#include <adc/numerics/fv/numerical_flux.hpp>
+#include <adc/numerics/fv/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/runtime/detail/wall_predicate.hpp>  // detail::DiscDomain (descripteur source-unique)
 

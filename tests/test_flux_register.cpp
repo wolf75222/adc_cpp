@@ -4,7 +4,7 @@
 // tests MPI de reflux (test_mpi_amr_multipatch / _multipatch3, np=1/2/4 bit-identiques) ;
 // ici on fige les mecaniques locales du registre, independamment de l'integration AMR.
 
-#include <adc/numerics/time/amr_reflux_mf.hpp>  // adc::FluxRegister
+#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // adc::FluxRegister
 #include <adc/mesh/index/box2d.hpp>
 
 #include <cstdio>
