@@ -328,64 +328,97 @@ class Program:
 
     # --- C++ codegen (Phase 2c-ii): lower the IR to a problem.so source ---
     def emit_cpp_program(self):
-        """Generate the C++ source of a problem.so implementing this Program (codegen, Phase 2c-ii).
+        """Generate the C++ source of a problem.so implementing this Program (codegen).
 
-        The text exports the stable .so ABI -- ``adc_program_abi_key`` (the ``ADC_ABI_KEY_LITERAL``
-        preprocessor literal, NOT the interposable inline), ``adc_program_name``,
-        ``adc_program_hash``, ``adc_install_program`` -- and installs the step as a closure built from
-        `ProgramContext` primitives only (no MultiFab / flux / solver reimplementation). It is the
-        source the C++ loader (`System::install_program`) compiles, dlopens, and runs.
+        Exports the stable .so ABI -- ``adc_program_abi_key`` (the ``ADC_ABI_KEY_LITERAL``
+        preprocessor literal, NOT the interposable inline), ``adc_program_name``, ``adc_program_hash``,
+        ``adc_install_program`` -- and installs the macro step as a closure built from `ProgramContext`
+        primitives only (no MultiFab / flux / solver reimplementation). It is the source the C++ loader
+        (`System::install_program`) compiles, dlopens, and runs.
 
-        MVP scope: a single-block Forward-Euler step ``U <- U + c*dt*R`` over the ``"default"``
-        source. Schemes the codegen cannot yet lower -- multi-stage (needs scratch states), named
-        sources (need source masks) -- raise NotImplementedError, never a silent mis-lowering. Later
-        phases extend the lowering (scratch states, source masks, control flow, Krylov)."""
+        Lowers a SINGLE-BLOCK Program by a topological walk of the SSA IR: the block's current state is
+        the base (``ctx.state(0)``); ``solve_fields()`` runs the elliptic solve; each RHS becomes a
+        scratch + ``rhs_into``; each intermediate ``linear_combine`` becomes a zero scratch accumulated
+        with ``axpy``; the committed combine writes the block state via ``lincomb``. Forward Euler,
+        SSPRK2/SSPRK3 and RK4 all lower this way -- no per-scheme class. Constructs not yet supported --
+        more than one block, named sources beyond ``"default"``, or any op outside
+        ``{state, solve_fields, rhs, linear_combine}`` (split sources, local solves, control flow,
+        Krylov: later phases) -- raise NotImplementedError, never a silent mis-lowering.
+
+        NOTE: ``solve_fields()`` solves from the block's CURRENT state, so a multi-stage scheme that
+        needs the elliptic fields re-solved from each STAGE state (a field-coupled model) is not yet
+        exact; for an uncoupled model (no Poisson feedback into the flux) the field solve is inert and
+        the scheme is exact. ``solve_fields_from_state`` is a later phase."""
         self.validate()
-        rhs_coeff = self._forward_euler_rhs_coeff()  # raises if not the FE pattern
+        self._check_lowerable()
         return _PROGRAM_CPP_TEMPLATE.format(name=json.dumps(self.name), hash=self._ir_hash(),
-                                            axpy_coeff=_coeff_cpp(rhs_coeff))
+                                            body=self._emit_body())
 
-    def _forward_euler_rhs_coeff(self):
-        """Recognize the single-block Forward-Euler pattern and return the RHS coefficient as a
-        ``power -> float`` dict. Raise NotImplementedError for anything the MVP codegen cannot lower
-        yet, with a message naming the unsupported construct."""
+    def _check_lowerable(self):
+        """Raise NotImplementedError if the IR uses a construct the current codegen cannot lower yet,
+        naming the offending construct (never a silent mis-lowering)."""
         if len(self._commits) != 1:
             raise NotImplementedError(
-                "emit_cpp_program currently supports a single committed block (single-block Forward "
-                "Euler); this Program commits %d" % len(self._commits))
-        combines = [v for v in self._values if v.op == "linear_combine"]
-        if len(combines) != 1:
+                "emit_cpp_program currently supports a single committed block; this Program commits "
+                "%d (multi-block is a later phase)" % len(self._commits))
+        states = [v for v in self._values if v.op == "state"]
+        if len(states) != 1:
             raise NotImplementedError(
-                "emit_cpp_program currently supports single-stage Forward Euler only; this Program "
-                "has %d linear-combination stages (multi-stage needs scratch states, a later phase)"
-                % len(combines))
-        committed = next(iter(self._commits.values()))
-        if committed.op != "linear_combine":
-            raise NotImplementedError(
-                "emit_cpp_program: the committed state must be a linear combination (Forward Euler)")
-        state_terms, rhs_terms = [], []
-        for inp, coeff in zip(committed.inputs, committed.attrs["coeffs"], strict=True):
-            if inp.op == "state":
-                state_terms.append((inp, coeff))
-            elif inp.vtype == "rhs":
-                rhs_terms.append((inp, coeff))
-            else:
+                "emit_cpp_program currently supports a single block state (one P.state(...)); got %d"
+                % len(states))
+        allowed = {"state", "solve_fields", "rhs", "linear_combine"}
+        for v in self._values:
+            if v.op not in allowed:
                 raise NotImplementedError(
-                    "emit_cpp_program: unexpected term %r in the committed combination" % inp.name)
-        if len(state_terms) != 1 or len(rhs_terms) != 1:
-            raise NotImplementedError(
-                "emit_cpp_program: Forward Euler expects U + c*dt*R (one state, one rhs term); got "
-                "%d state and %d rhs terms" % (len(state_terms), len(rhs_terms)))
-        if state_terms[0][1] != {0: 1.0}:
-            raise NotImplementedError(
-                "emit_cpp_program: the state term must have coefficient 1 (in-place Forward Euler)")
-        rhs = rhs_terms[0][0]
-        extra = [s for s in (rhs.attrs.get("sources") or []) if s != "default"]
-        if extra:
-            raise NotImplementedError(
-                "emit_cpp_program currently supports the 'default' source only; named sources %r "
-                "need source masks (Phase 4)" % extra)
-        return rhs_terms[0][1]
+                    "emit_cpp_program cannot lower op '%s' (value '%s') yet; supported ops are %s "
+                    "(split sources / local solves / control flow / Krylov are later phases)"
+                    % (v.op, v.name, sorted(allowed)))
+            if v.op == "rhs":
+                extra = [s for s in (v.attrs.get("sources") or []) if s != "default"]
+                if extra:
+                    raise NotImplementedError(
+                        "emit_cpp_program currently supports the 'default' source only; rhs '%s' uses "
+                        "named sources %r (source masks are Phase 4)" % (v.name, extra))
+
+    def _emit_body(self):
+        """Generate the C++ lines of the install-closure body (each indented 4 spaces). Assumes
+        `_check_lowerable` has passed: one block state (the base = ctx.state(0)), one commit."""
+        base = next(v for v in self._values if v.op == "state")
+        committed = next(iter(self._commits.values()))
+        var = {}  # IR value id -> C++ MultiFab variable name (states + RHS scratches)
+        lines = []
+        for v in self._values:
+            if v.op == "state":
+                var[v.id] = "u%d" % v.id
+                lines.append("adc::MultiFab& %s = ctx.state(0);" % var[v.id])
+            elif v.op == "solve_fields":
+                lines.append("ctx.solve_fields();")
+            elif v.op == "rhs":
+                state_in = v.inputs[0]  # rhs inputs = (state[, fields]); the state is first
+                var[v.id] = "r%d" % v.id
+                lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
+                             % (var[v.id], var[state_in.id]))
+                lines.append("ctx.rhs_into(0, %s, %s);" % (var[state_in.id], var[v.id]))
+            elif v.op == "linear_combine":
+                terms = list(zip(v.inputs, v.attrs["coeffs"], strict=True))
+                if v.id == committed.id:
+                    # Commit: block state <- c_base * base + sum(non-base coeff * term).
+                    c_base = {0: 0.0}
+                    acc = "acc%d" % v.id
+                    lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (acc, var[base.id]))
+                    for inp, coeff in terms:
+                        if inp.id == base.id:
+                            c_base = coeff
+                        else:
+                            lines.append("ctx.axpy(%s, %s, %s);" % (acc, _coeff_cpp(coeff), var[inp.id]))
+                    lines.append("ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(1), %s);"
+                                 % (var[base.id], _coeff_cpp(c_base), var[base.id], acc))
+                else:
+                    var[v.id] = "u%d" % v.id  # an intermediate stage state (scratch, zero-initialized)
+                    lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (var[v.id], var[base.id]))
+                    for inp, coeff in terms:
+                        lines.append("ctx.axpy(%s, %s, %s);" % (var[v.id], _coeff_cpp(coeff), var[inp.id]))
+        return "\n".join("    " + ln for ln in lines)
 
 
 def _coeff_cpp(powers):
@@ -404,11 +437,11 @@ def _coeff_cpp(powers):
     return "static_cast<adc::Real>(%s)" % " + ".join(terms)
 
 
-# Source of a generated problem.so (Forward-Euler MVP). The includes + adc_install_program closure
-# match the shape tests/test_program_loader compiles+runs in CI; adc_program_hash is added per the
-# spec .so ABI (a cache/restart key) and is not yet consumed by System::install_program. {name} is a
-# JSON-escaped C string literal, {hash} the IR hash, {axpy_coeff} the dt-coefficient expression;
-# braces in the C++ body are doubled for str.format.
+# Source of a generated problem.so. The includes + adc_install_program closure match the shape
+# tests/test_program_loader compiles+runs in CI; adc_program_hash is added per the spec .so ABI (a
+# cache/restart key) and is not yet consumed by System::install_program. {name} is a JSON-escaped C
+# string literal, {hash} the IR hash, {body} the generated install-closure body (already indented);
+# the literal braces of the C++ scaffold are doubled for str.format.
 _PROGRAM_CPP_TEMPLATE = '''\
 // GENERATED by adc.time.Program.emit_cpp_program (epic ADC-399 / ADC-401). Do not edit by hand.
 // A compiled time Program installed across the stable .so ABI: it drives sim.step(dt) entirely in
@@ -425,13 +458,8 @@ extern "C" const char* adc_program_hash() {{ return "{hash}"; }}
 extern "C" void adc_install_program(void* sys) {{
   adc::runtime::program::ProgramContext ctx(sys);
   ctx.install([ctx](double dt) {{
-    ctx.solve_fields();
-    for (int b = 0; b < ctx.n_blocks(); ++b) {{
-      adc::MultiFab& U = ctx.state(b);
-      adc::MultiFab R = ctx.rhs_scratch_like(U);
-      ctx.rhs_into(b, U, R);
-      ctx.axpy(U, {axpy_coeff}, R);
-    }}
+    (void)dt;
+{body}
   }});
 }}
 '''

@@ -20,6 +20,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Multi-stage compiled time programs (SSPRK2, SSPRK3, RK4)** (ADC-399 / ADC-407):
+  `Program.emit_cpp_program` now lowers any single-block multi-stage scheme by a topological SSA walk
+  -- intermediate stage states become zero-initialized scratch MultiFabs accumulated with `axpy`, and
+  the committed stage writes the block state via `lincomb` -- so SSPRK2/SSPRK3/RK4 compile and run
+  C++-side with no per-scheme class. `ProgramContext` gains `scratch_state_like` + `lincomb` (both
+  forward to existing primitives; no reimplementation). Verified: a compiled SSPRK2 Program reproduces
+  native `adc.Explicit("ssprk2")` bit-for-bit, and compiled SSPRK2/RK4 match an offline stage-by-stage
+  reference to machine precision (`python/tests/test_time_multistage.py` + the `examples/time_programs/`
+  ssprk2/rk4 scripts). Field-coupled multi-stage (re-solving the elliptic fields from each stage state)
+  still needs `solve_fields_from_state` (a later phase) and is documented as such; uncoupled models are
+  exact. Constructs not yet lowerable (multi-block, named sources beyond `default`) raise a clear error.
 - **Compiled time-program reference doc + runnable example** (ADC-407, Phase 8b):
   `docs/sphinx/reference/time-program.md` explains the Model-vs-Program split, the builder API,
   `compile_problem` / `install_program` / `CompiledTime`, and a status table (Forward Euler runs

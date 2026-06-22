@@ -59,19 +59,6 @@ def _fe_program(name="forward_euler_parity"):
     return P
 
 
-def _multistage_program():
-    P = adctime.Program("ssprk2_parity")
-    dt = P.dt
-    U0 = P.state("ions")
-    f0 = P.solve_fields(U0)
-    k0 = P.rhs(state=U0, fields=f0, flux=True, sources=["default"])
-    U1 = P.linear_combine("U1", U0 + dt * k0)
-    f1 = P.solve_fields(U1)
-    k1 = P.rhs(state=U1, fields=f1, flux=True, sources=["default"])
-    P.commit("ions", P.linear_combine("U2", 0.5 * U0 + 0.5 * (U1 + dt * k1)))
-    return P
-
-
 # ---- (A) validation: pure Python, always runs ----
 print("== (A) compile_problem / CompiledTime validation ==")
 chk(raises(ValueError, lambda: adc.compile_problem(time=_fe_program(), backend="aot")),
@@ -80,8 +67,6 @@ chk(raises(ValueError, lambda: adc.compile_problem(time=_fe_program(), target="a
     "compile_problem target != 'system' rejected")
 chk(raises(ValueError, lambda: adc.compile_problem(time=None)),
     "compile_problem without a Program rejected")
-chk(raises(NotImplementedError, lambda: adc.compile_problem(time=_multistage_program())),
-    "compile_problem refuses a multi-stage Program (codegen MVP)")
 chk(raises(NotImplementedError, lambda: adc.CompiledTime(substeps=2)),
     "CompiledTime substeps>1 rejected (deferred)")
 chk(raises(NotImplementedError, lambda: adc.CompiledTime(stride=2)),
