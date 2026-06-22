@@ -1187,6 +1187,19 @@ def _children(e):
     return ()
 
 
+def _expr_uses_cons_or_prim(e):
+    """True if the expression tree references a conservative or primitive Var. Tests the Var KIND, so
+    the answer does not depend on declaration order. Used to enforce that linear_source coefficients
+    are linear in U: a coefficient depending on U or a primitive is not a constant matrix entry."""
+    stack = [e]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Var) and node.kind in ("cons", "prim"):
+            return True
+        stack.extend(_children(node))
+    return False
+
+
 def _key(e):
     if isinstance(e, Const):
         return ("const", e.value)
@@ -1611,6 +1624,12 @@ class HyperbolicModel:
         self._ws_jacobian = None  # {"x"/"y": [[Expr]]} + meta (eig, blocks): EXACT signed speeds
                                   # from the eigenvalues of the flux jacobian (set_wave_speeds_from_jacobian)
         self._source = None     # list of Expr (one per component) or None
+        self._source_terms = {}   # NAMED local sources (source_term): name -> [Expr] (n_cons each).
+                                  # The implicit "default" source lives in self._source (m.source), so a
+                                  # model that only ever calls m.source keeps this dict EMPTY -- the named
+                                  # keys enter _model_hash ONLY when non-empty (cache key preserved).
+        self._linear_sources = {}  # NAMED local linear operators (linear_source): name -> [[Expr]]
+                                   # (n_cons x n_cons), coefficients linear in U (no cons/prim dependency).
         self._elliptic = None   # Expr (contribution to the elliptic right-hand side) or None
         self._stab_speed = None  # Expr: STABILITY speed lambda* (None = fallback eigenvalues)
         self._stab_dt = None     # Expr: direct ADMISSIBLE step dt(U, aux) (None = no bound)
@@ -1820,6 +1839,67 @@ class HyperbolicModel:
                              "explicit": x is not None}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
+
+    def source_term(self, name, exprs):
+        """Declare a NAMED local source S_name(U, primitives, aux, params): exactly n_cons
+        expressions, free to depend on cons / primitives / aux / aux_field / params / constants. A
+        named source is OPT-IN -- it is emitted only when a compiled time Program asks for it
+        (ctx.rhs(..., sources=[name]) / ctx.source(name)) and is NEVER summed implicitly into the
+        legacy total source. name == "default" is the backward-compatible alias of m.source([...])
+        (stored in self._source, hash unchanged). Other names must be valid identifiers, unique, and
+        must not collide with a linear_source."""
+        n = self.n_vars
+        if n == 0:
+            raise ValueError("source_term(%r): declare conservative_vars(...) first" % (name,))
+        if not isinstance(name, str) or not name:
+            raise ValueError("source_term: name must be a non-empty string")
+        exprs = [_wrap(e) for e in exprs]
+        if len(exprs) != n:
+            raise ValueError("source_term('%s'): %d expressions for %d conservative variables"
+                             % (name, len(exprs), n))
+        if name == "default":
+            self._source = exprs   # equivalent to m.source([...]) -- the legacy default source
+            return
+        if not name.isidentifier():
+            raise ValueError("source_term('%s'): name must be a valid identifier "
+                             "(letters/digits/_, no leading digit)" % name)
+        if name in self._source_terms:
+            raise ValueError("source_term('%s'): already declared" % name)
+        if name in self._linear_sources:
+            raise ValueError("source_term('%s'): name collides with a linear_source" % name)
+        self._source_terms[name] = exprs
+
+    def linear_source(self, name, matrix):
+        """Declare a NAMED local linear operator L_name(aux, params): an n_cons x n_cons matrix whose
+        coefficients may depend on constants / params / aux / aux_field ONLY -- NOT on conservative or
+        primitive variables (otherwise S(U) = L U is not linear in U and could not be treated as a
+        local linear source by solve_local_linear). The operator is OPT-IN: never folded into m.source
+        or ctx.rhs; a Program uses it explicitly via ctx.linear_source(name) / ctx.apply /
+        ctx.solve_local_linear. Name must be a valid identifier, unique, and must not collide with a
+        source_term."""
+        n = self.n_vars
+        if n == 0:
+            raise ValueError("linear_source(%r): declare conservative_vars(...) first" % (name,))
+        if not isinstance(name, str) or not name:
+            raise ValueError("linear_source: name must be a non-empty string")
+        if not name.isidentifier():
+            raise ValueError("linear_source('%s'): name must be a valid identifier "
+                             "(letters/digits/_, no leading digit)" % name)
+        rows = [list(r) for r in matrix]
+        if len(rows) != n or any(len(r) != n for r in rows):
+            raise ValueError("linear_source('%s'): expected a %dx%d matrix (n_cons x n_cons)"
+                             % (name, n, n))
+        wrapped = [[_wrap(c) for c in row] for row in rows]
+        for row in wrapped:
+            for coeff in row:
+                if _expr_uses_cons_or_prim(coeff):
+                    raise ValueError("linear_source '%s' coefficients must not depend on "
+                                     "conservative or primitive variables" % name)
+        if name in self._linear_sources:
+            raise ValueError("linear_source('%s'): already declared" % name)
+        if name in self._source_terms:
+            raise ValueError("linear_source('%s'): name collides with a source_term" % name)
+        self._linear_sources[name] = wrapped
 
     def stability_speed(self, expr):
         """STABILITY speed lambda* (expression of cons / prims / aux): drives the block CFL
@@ -2164,8 +2244,14 @@ class HyperbolicModel:
         return (np.min(np.stack(eigs), axis=0), np.max(np.stack(eigs), axis=0))
 
     def source_value(self, U, aux):
-        """Source term (numpy (n_vars, ...)), or zeros if not defined."""
+        """Source term (numpy (n_vars, ...)), or zeros if not defined. A model that declares only
+        NAMED sources (no m.source default) cannot answer the legacy total-source query: the named
+        terms are never summed implicitly, so an old stepper asking for the total source is rejected
+        (use adc.compile_problem(...) with a time Program, or define m.source(...) explicitly)."""
         if self._source is None:
+            if self._source_terms:
+                raise ValueError("model has multiple named sources; use adc.compile_problem(...) "
+                                 "or define m.source(...) explicitly")
             return np.zeros_like(U)
         env = self._env(U, aux)
         return np.stack([np.broadcast_to(s.eval(env), U[0].shape) for s in self._source], axis=0)
@@ -2199,6 +2285,10 @@ class HyperbolicModel:
         if self._roe_rows is not None:
             groups.append(self._roe_rows["x"])
             groups.append(self._roe_rows["y"])
+        for exprs in self._source_terms.values():  # NAMED sources (source_term)
+            groups.append(exprs)
+        for mat in self._linear_sources.values():  # NAMED linear operators (linear_source)
+            groups.append([e for row in mat for e in row])
         for e in self.prim_defs.values():
             used |= e.deps()
         for grp in groups:
@@ -2228,6 +2318,13 @@ class HyperbolicModel:
             for key in ("x", "y"):
                 for e in self._roe_rows[key]:
                     _roe_validate(e, False)
+        # linear_source coefficients stay linear in U (defensive re-check: also caught at declaration).
+        for nm, mat in self._linear_sources.items():
+            for row in mat:
+                for coeff in row:
+                    if _expr_uses_cons_or_prim(coeff):
+                        raise ValueError("linear_source '%s' coefficients must not depend on "
+                                         "conservative or primitive variables" % nm)
         return True
 
     def check_model(self, samples=None, n_samples=64, seed=0, aux=None, rtol=1e-8, atol=1e-10,
@@ -3130,6 +3227,9 @@ class HyperbolicModel:
         plus, aux -> locals); cse=True factors the common sub-expressions. Raises ValueError if
         set_source(...) has not been called."""
         if self._source is None:
+            if self._source_terms:
+                raise ValueError("model has multiple named sources; use adc.compile_problem(...) "
+                                 "or define m.source(...) explicitly")
             raise ValueError("emit_cpp_source: call set_source([...]) first")
         nm = name or (self.name.capitalize() + "Source")
         nc = self.n_vars
@@ -3649,6 +3749,18 @@ class HyperbolicModel:
             parts.append("flux_%s=%s" % (d, ";".join(repr(e) for e in m._flux.get(d, []))))
             parts.append("eig_%s=%s" % (d, ";".join(repr(e) for e in m._eig.get(d, []))))
         parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
+        # NAMED sources (source_term, non-default) and LINEAR sources (linear_source) fold into the
+        # hash ONLY when present: a model that never declares them keeps a STRICTLY identical cache
+        # key to the historical one. Sorted by name (order-insensitive); changing a named-source
+        # expression or a linear_source coefficient invalidates the .so cache.
+        if getattr(m, "_source_terms", None):
+            parts.append("source_terms=%s" % ";".join(
+                "%s:[%s]" % (k, ",".join(repr(e) for e in m._source_terms[k]))
+                for k in sorted(m._source_terms)))
+        if getattr(m, "_linear_sources", None):
+            parts.append("linear_sources=%s" % ";".join(
+                "%s:[%s]" % (k, ";".join(repr(e) for row in m._linear_sources[k] for e in row))
+                for k in sorted(m._linear_sources)))
         parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
         parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
         parts.append("stab_speed=%s" % (repr(m._stab_speed) if m._stab_speed is not None else ""))
@@ -4212,6 +4324,20 @@ class Model:
     def source(self, s):
         """Source term S(U, aux), one expression per component (optional; delegates to set_source)."""
         self._m.set_source(s)
+
+    def source_term(self, name, exprs):
+        """NAMED local source S_name(U, primitives, aux, params): exactly n_cons expressions
+        (delegates to HyperbolicModel.source_term). Opt-in -- emitted only when a compiled time
+        Program requests it (ctx.rhs(..., sources=[name]) / ctx.source(name)), never summed
+        implicitly. name='default' is the backward-compatible alias of m.source([...])."""
+        self._m.source_term(name, exprs)
+
+    def linear_source(self, name, matrix):
+        """NAMED local linear operator L_name(aux, params) U, an n_cons x n_cons matrix whose
+        coefficients are independent of U / primitives (delegates to HyperbolicModel.linear_source).
+        Used explicitly by a Program (ctx.linear_source / ctx.apply / ctx.solve_local_linear);
+        never folded into m.source or ctx.rhs."""
+        self._m.linear_source(name, matrix)
 
     def source_frequency(self, expr_mu):
         """Local frequency mu(U, aux) [1/s] of the source -- the 'source' step bound from the meeting

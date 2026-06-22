@@ -188,6 +188,15 @@ add_test(NAME test_dsl_moments
 set_tests_properties(test_dsl_moments PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Sources physiques NOMMEES (ADC-400, m.source_term / m.linear_source) : declaration, validation
+# (dimensions, noms, collisions, linearite en U des coefficients de linear_source), retro-compat de
+# m.source, rejet d'un ancien stepper sur sources nommees multiples, et cle de cache (.so) conditionnelle
+# (golden inchangee sans source nommee, invalidee a tout changement). Pur Python, aucun compilateur.
+add_test(NAME test_dsl_named_sources
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dsl_named_sources.py)
+set_tests_properties(test_dsl_named_sources PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.

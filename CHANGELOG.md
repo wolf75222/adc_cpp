@@ -20,6 +20,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Named physical-model sources: `m.source_term` and `m.linear_source`** (ADC-400): the DSL `Model`
+  gains opt-in named local sources. `source_term(name, exprs)` declares a named `S_name(U, prim, aux,
+  params)` with `n_cons` components; `linear_source(name, matrix)` declares a named `n_cons x n_cons`
+  linear operator `L_name(aux, params) U` whose coefficients stay independent of U/primitives. They
+  are the physical building blocks the compiled time-program DSL (ADC-399) will consume and are never
+  summed implicitly. `m.source([...])` stays backward compatible and equals `source_term("default",
+  ...)`. Validation rejects wrong dimensions, empty/duplicate/colliding names, and U/primitive
+  dependent linear-source coefficients; an old stepper asking for the total source of a model that
+  only declares named sources is rejected rather than silently summing them. The model hash folds the
+  named sources in ONLY when present, so a model that never declares one keeps a byte-identical `.so`
+  cache key, while changing a named source or a linear-source coefficient invalidates the cache.
+  Python-only declaration/validation/hash (no codegen yet); first slice of the ADC-399 epic.
 - **`.github/CODEOWNERS` routes review by zone** (ADC-252): the owner of a touched directory is
   auto-requested as reviewer. Solo today, `@wolf75222` owns every zone; the per-zone split documents
   the responsible owner per area and prepares reviewer routing at scale. This is the SWE-at-Google ch.10
