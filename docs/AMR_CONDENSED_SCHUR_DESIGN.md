@@ -52,7 +52,7 @@ Component layout (matches `to_3d`/`set_primitive_state`): **component-major, row
   std::vector<double> state;   // ncomp*n*n, component-major c*n*n+j*n+i; ncomp == Model::n_vars
   ```
   Takes priority over `density` when `has_state`. ncomp not stored -- it is `Model::n_vars`, validated `state.size()==ncomp*n*n` at write.
-- **`BlockSpec`** -- `python/amr_system.cpp:98-100`. Mirror: `bool has_state=false; std::vector<double> state;`.
+- **`BlockSpec`** -- `python/bindings/amr/amr_system.cpp:98-100`. Mirror: `bool has_state=false; std::vector<double> state;`.
 - **`AmrCompiledHooks`** -- unchanged.
 
 ### 1.2 New kernel `coupler_write_coarse_state` -- `include/adc/coupling/amr/amr_coupler_mp.hpp` (add after `coupler_write_coarse`, ~line 133)
@@ -106,19 +106,19 @@ const std::vector<double>& state, bool has_state)>;
 
 ### 1.5 Python marshaling
 
-- **`make_build_params`** -- `python/amr_system.cpp:183-184`: `bp.has_state = b.has_state; bp.state = b.state;`.
-- **compiled multi dispatch** -- `python/amr_system.cpp:232-234`: append `, b.state, b.has_state`.
-- **native multi dispatch** -- `python/amr_system.cpp:248-250`: append `, b.state, b.has_state`.
+- **`make_build_params`** -- `python/bindings/amr/amr_system.cpp:183-184`: `bp.has_state = b.has_state; bp.state = b.state;`.
+- **compiled multi dispatch** -- `python/bindings/amr/amr_system.cpp:232-234`: append `, b.state, b.has_state`.
+- **native multi dispatch** -- `python/bindings/amr/amr_system.cpp:248-250`: append `, b.state, b.has_state`.
 - `set_compiled_block` (387-430) needs **no signature change** -- `state`/`has_state` default-init and are filled post-registration by `set_conservative_state` (mirrors `set_density`). *(But its correctness depends entirely on the §1.4 sentinel bump -- qualify the "no change" claim accordingly [phaseB-typeerasure H1].)*
 
 ### 1.6 `set_conservative_state` + binding
 
 - **Declare** -- `amr_system.hpp` after line 258. Full conservative state on coarse level, component-major, takes priority over `set_density` (last call wins; flags independent). `name` cosmetic mono / indexes block multi.
-- **Define** -- `python/amr_system.cpp` after `set_density` (~588). Mirror `set_density`: guard `built`, guard empty blocks, **size guard** `U.size() % (n*n) == 0`, multi-block name->index, set `blocks[idx].state/.has_state`. Leave `has_density` as-is (harmless; never read when `has_state`).
+- **Define** -- `python/bindings/amr/amr_system.cpp` after `set_density` (~588). Mirror `set_density`: guard `built`, guard empty blocks, **size guard** `U.size() % (n*n) == 0`, multi-block name->index, set `blocks[idx].state/.has_state`. Leave `has_density` as-is (harmless; never read when `has_state`).
 
   > **REVIEW FIX [phaseB-typeerasure M1] -- reject empty state explicitly.** `0 % nn == 0` is true, so a zero-length `U` would set `has_state=true` with empty `state` and throw only deep inside the first `step()`. Add an explicit `U.size()==0` rejection distinct from the modulus check, and surface the count mismatch (`ncomp != n_vars`) as early as the size check allows. The fine `ncomp*n*n` check stays deferred to `coupler_write_coarse_state` at build (ncomp = `Model::n_vars` known only then -- same deferral as density's `n*n` check).
 
-- **pybind** -- `python/bindings.cpp` after the AMR `set_density` binding (~318). Mirror the `set_density` lambda; `flat(arr)` (line 51) C-contiguates `(ncomp,n,n)` -> `c*n*n+j*n+i`.
+- **pybind** -- `python/bindings/core/bindings.cpp` after the AMR `set_density` binding (~318). Mirror the `set_density` lambda; `flat(arr)` (line 51) C-contiguates `(ncomp,n,n)` -> `c*n*n+j*n+i`.
 
   > **REVIEW FIX [phaseB-typeerasure L2] -- assert `arr.ndim()==3` in the binding.** `flat(arr)` flattens *any* C-contiguous array (`bindings.cpp:51-53`), so a 2-D `(n,n)` density passed by mistake silently becomes a 1-component state (passes `%nn==0`), writing comp 0 and leaving momentum/energy at `set_val(0)` defaults -- a silent density-masquerade with wrong physics. Add `if (arr.ndim()!=3) throw ...` before `flat`, mirroring `to_3d`'s validation (`bindings.cpp:38-49`).
 
@@ -265,7 +265,7 @@ Pure per-level reuse of the mono kernels; the only AMR addition is C/F ghost fil
 
 Remove the `isinstance(time, Split)` rejection guards in `python/adc/__init__.py` (`add_block` ~1240-1244, `add_equation` ~1287-1295). Reuse the **existing** `adc.Strang`/`adc.Split`/`adc.CondensedSchur` descriptors (no new `AmrStrang` class -- they are topology-agnostic). Route as `System.add_equation` (912-924): add the transport block, then `self._s.set_source_stage(name, kind, theta, alpha)` + `self._s.set_time_scheme(scheme)`.
 
-C++ `set_source_stage`/`set_time_scheme` on `AmrSystem` (header `amr_system.hpp`, impl `python/amr_system.cpp`, pybind `python/bindings.cpp`) with the **same validation chain** as `system.cpp:922-990`: kind=="electrostatic_lorentz"; theta in (0,1]; cartesian geometry; Density/MomentumX/MomentumY roles present; **B_z mandatory** (`set_magnetic_field` + `ensure_aux_width(kAuxBaseComps+1)`, `system.cpp:969-973`). Store spec per block; build `AmrCondensedSchurSourceStepper` lazily at first `step()` (after hierarchy/layout final).
+C++ `set_source_stage`/`set_time_scheme` on `AmrSystem` (header `amr_system.hpp`, impl `python/bindings/amr/amr_system.cpp`, pybind `python/bindings/core/bindings.cpp`) with the **same validation chain** as `system.cpp:922-990`: kind=="electrostatic_lorentz"; theta in (0,1]; cartesian geometry; Density/MomentumX/MomentumY roles present; **B_z mandatory** (`set_magnetic_field` + `ensure_aux_width(kAuxBaseComps+1)`, `system.cpp:969-973`). Store spec per block; build `AmrCondensedSchurSourceStepper` lazily at first `step()` (after hierarchy/layout final).
 
 **Step insertion (`AmrRuntime::step`, `amr_runtime.hpp:589-630`).** Lie: insert `amr_schur_step(dt)` **after** `coupled_source_step(dt)` (628), before `++macro_step_`. The stage freezes `phi_n_[l]`/`v_n_[l]`, copies B_z from `aux_[l]`, assembles `A_l`/`rhs_l` (§2.2), runs the solver (§2.4), reconstructs/extrapolates (§2.6).
 
@@ -334,8 +334,8 @@ ROMEO-only = **V6**. Everything through V5 (incl. MPI up to np=4) runs on the la
 - `include/adc/runtime/dynamic/abi_key.hpp` -- **add glob-independent ABI sentinel** (`amr_builder_v=2`) [phaseB C1/H1].
 - `include/adc/coupling/amr/amr_coupler_mp.hpp` -- **new** `coupler_write_coarse_state`; **new** `coupler_read_coarse_all`.
 - `include/adc/runtime/builders/compiled/amr_dsl_block.hpp` -- mono seed branch (90); `build_amr_block`/`dispatch_amr_block` (10 sites)/`multi_builder` += `state,has_state`.
-- `python/amr_system.cpp` -- `BlockSpec` += `has_state,state`; `make_build_params` packs state; 2 multi dispatches += args; **new** `set_conservative_state` + `coarse_state` bodies.
-- `python/bindings.cpp` -- **new** `set_conservative_state` (with `ndim()==3` guard) + `coarse_state` pybind.
+- `python/bindings/amr/amr_system.cpp` -- `BlockSpec` += `has_state,state`; `make_build_params` packs state; 2 multi dispatches += args; **new** `set_conservative_state` + `coarse_state` bodies.
+- `python/bindings/core/bindings.cpp` -- **new** `set_conservative_state` (with `ndim()==3` guard) + `coarse_state` pybind.
 - `adc_cases/hoffart_euler_poisson_dsl/run.py` -- drift-seed `build_amr` (probe in try/except, `nc` guard); docstring (15-17) + metadata (464,482) honesty fix.
 - `python/tests/test_amr_conservative_state.py` -- **new** Tests A-E.
 
@@ -349,7 +349,7 @@ ROMEO-only = **V6**. Everything through V5 (incl. MPI up to np=4) runs on the la
 **Phase C -- changed:**
 - `include/adc/numerics/elliptic/poisson/poisson_operator.hpp` -- *(only if §2.3 option 1)* `cross_div` refactor to emit C/F-conforming face cross-flux [recon-extrap G3, contradicts original "no modification"].
 - `include/adc/runtime/amr/amr_runtime.hpp` -- `amr_schur_step`; Strang restructure (new phi-publish-without-resolve entry, half-step orchestration); **rebuild stepper after `regrid()`**; phi-restart contract (R0).
-- `include/adc/runtime/amr_system.hpp` / `python/amr_system.cpp` / `python/bindings.cpp` -- `set_source_stage` + `set_time_scheme` (validation chain mirroring `system.cpp:922-990`).
+- `include/adc/runtime/amr_system.hpp` / `python/bindings/amr/amr_system.cpp` / `python/bindings/core/bindings.cpp` -- `set_source_stage` + `set_time_scheme` (validation chain mirroring `system.cpp:922-990`).
 - `python/adc/__init__.py` -- remove `isinstance(time, Split)` AMR guards; route `set_source_stage`/`set_time_scheme`.
 
 **Unchanged (reused as-is):** `GeometricMG` (except do **not** retrofit `vcycle_rec`), `TensorKrylovSolver`, `schur_condensation.hpp`, mono `condensed_schur_source_stepper.hpp`. *(`poisson_operator.hpp` moves to "changed" only under §2.3 option 1.)*

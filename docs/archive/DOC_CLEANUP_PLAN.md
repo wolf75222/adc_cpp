@@ -110,7 +110,7 @@ Spec/API document (Python API, status by phase). Overlaps:
   section becomes the single source.
 - The capability matrix (section 5) DUPLICATES the "Four paths" table of the README. Single
   source: DSL_MODEL_DESIGN.md.
-- The file references (python/system.cpp lines) go stale quickly. To mark
+- The file references (python/bindings/system/base/system.cpp lines) go stale quickly. To mark
   "indicative" and not to sync on every PR.
 
 ### 2.5 GPU_RUNTIME_PORT.md

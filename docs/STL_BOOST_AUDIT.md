@@ -23,7 +23,7 @@ so std::ranges::find / std::any_of are available without any new dependency.
 ## STL verdict
 
 The host/orchestration code is mostly clean -- no raw-loop epidemic. The vast
-majority of for-loops in python/system.cpp, python/amr_system.cpp and
+majority of for-loops in python/bindings/system/base/system.cpp, python/bindings/amr/amr_system.cpp and
 coupling/*.hpp iterate Kokkos field cells (i,j,c marshaling) or drive a bytecode
 VM (coupled_source_program.hpp); these are correctly OUT of scope (device/hot,
 STL unavailable on device, no clean primitive). A small number of genuine
@@ -48,8 +48,8 @@ not strictly clearer.
 | Sev | Where | Issue |
 |-----|-------|-------|
 | Low | include/adc/parallel/load_balance.hpp:108 (in make_knapsack_distribution) | Hand-rolled min-element scan (`if (load[q] < load[r]) r = q;`) over the load vector -- exactly std::min_element. Host orchestration (LPT knapsack, once per regrid). File already includes <algorithm> and <numeric>; this site IS inside the clang-tidy HeaderFilterRegex. |
-| Low | python/system.cpp (resolve_implicit_components name search) | Hand-rolled linear name search over cons.names by index; a textbook std::find / std::ranges::find on a std::vector<std::string>. Host-side block setup. TU already includes <algorithm>. NOT covered by .clang-tidy (python/*.cpp excluded), so net-new. |
-| Low | python/amr_system.cpp (resolve_implicit_components name search) | Exact copy of the system.cpp linear name search plus the same index-based CSV build. Same STL-find opportunity, same uncovered-by-tidy status. The two copies are themselves a small duplication: both could call one shared host helper. |
+| Low | python/bindings/system/base/system.cpp (resolve_implicit_components name search) | Hand-rolled linear name search over cons.names by index; a textbook std::find / std::ranges::find on a std::vector<std::string>. Host-side block setup. TU already includes <algorithm>. NOT covered by .clang-tidy (python/*.cpp excluded), so net-new. |
+| Low | python/bindings/amr/amr_system.cpp (resolve_implicit_components name search) | Exact copy of the system.cpp linear name search plus the same index-based CSV build. Same STL-find opportunity, same uncovered-by-tidy status. The two copies are themselves a small duplication: both could call one shared host helper. |
 
 ### Proposed actions (all bit-identical, behavior-preserving)
 

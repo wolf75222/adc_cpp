@@ -29,7 +29,7 @@ Two genuine spec<->code divergences were found.
 
 | Sev | Where | Issue |
 |-----|-------|-------|
-| Medium | python/amr_system.cpp:438-442; include/adc/runtime/amr_runtime.hpp:84; include/adc/runtime/amr_system.hpp (contract comment); docs/ARCHITECTURE.md:220; docs/ALGORITHMS.md:1936 | Design docs and header contracts still claim multi-block AMR + `regrid_every>0` is REFUSED, but it is implemented and tested. |
+| Medium | python/bindings/amr/amr_system.cpp:438-442; include/adc/runtime/amr_runtime.hpp:84; include/adc/runtime/amr_system.hpp (contract comment); docs/ARCHITECTURE.md:220; docs/ALGORITHMS.md:1936 | Design docs and header contracts still claim multi-block AMR + `regrid_every>0` is REFUSED, but it is implemented and tested. |
 | Medium | include/adc/numerics/elliptic/geometric_mg.hpp:378-391 (solve), 429-457 (solve_robust); include/adc/runtime/system_field_solver.hpp:385-397 (ell_solve calls the void solve()); include/adc/runtime/amr_runtime.hpp:504 (mg_.solve()) | Elliptic Poisson non-convergence is a silent failure: solve() returns best-effort, every caller discards the status, no facade reporting. |
 
 ### F1 -- stale multi-block + regrid_every refusal claim
@@ -38,7 +38,7 @@ ARCHITECTURE.md:220 states the multi-block with `regrid_every > 0` is refused
 ("hierarchie figee") and ALGORITHMS.md:1936 says the same. Two C++ contract
 comments repeat it (amr_runtime.hpp:84 "facade runtime (AmrSystem) REFUSE
 explicitement multi-blocs + regrid_every > 0", and the amr_system.hpp header
-contract). But python/amr_system.cpp:438-442 explicitly UNLOCKED it ("capstone
+contract). But python/bindings/amr/amr_system.cpp:438-442 explicitly UNLOCKED it ("capstone
 Phase 2, C.6 ... EST DESORMAIS SUPPORTE ... L'ancien REFUS ... est leve"):
 build_multi wires set_regrid plus per-block union tag predicates, and
 python/tests/test_amr_multiblock.py asserts the path is accepted and runs

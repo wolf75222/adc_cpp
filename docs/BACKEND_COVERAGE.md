@@ -172,7 +172,7 @@ Columns:
 
 ### 1g-bis. Multi-block AMR group (runtime capstone, amr_system.cpp linkage)
 
-`add_executable` tests linked to the `python/amr_system.cpp` runtime (AmrSystem facade -> AmrRuntime engine),
+`add_executable` tests linked to the `python/bindings/amr/amr_system.cpp` runtime (AmrSystem facade -> AmrRuntime engine),
 NAMED model / tag functors (no generic lambda) hence in principle nvcc-compatible. Same CPU
 backends as section 1g; not yet exercised on device (Cuda columns = ?).
 

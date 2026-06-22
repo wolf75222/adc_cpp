@@ -181,7 +181,7 @@ $2\pi$).
 | `r_min`, `r_max` | physical radial bounds of the ring |
 
 The resolution `0 -> n` is wired on the facade side: `polar_nr` / `polar_ntheta` in
-[`python/system.cpp`](../python/system.cpp) return `c.nr > 0 ? c.nr : c.n` (same for `ntheta`), and the
+[`python/bindings/system/base/system.cpp`](../python/bindings/system/base/system.cpp) return `c.nr > 0 ? c.nr : c.n` (same for `ntheta`), and the
 index box becomes `Box2D::from_extents(polar_nr(c), polar_ntheta(c))`. The mesh is uniform
 in index: $dr = (r_{max} - r_{min}) / N_r$ and $d\theta = 2\pi / N_\theta$. The physical mesh in
 $\theta$ equals $r\,d\theta$ and therefore grows with $r$; this is the origin of the $1/r$ metric of the

@@ -1332,7 +1332,7 @@ function face_aperture(lc, ln):
 
 **Code.** `System::set_disc_domain(cx, cy, R, mode)` (#216,
 [`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp), defined in
-[`python/system.cpp`](../python/system.cpp)) sets a `DiscDomain`
+[`python/bindings/system/base/system.cpp`](../python/bindings/system/base/system.cpp)) sets a `DiscDomain`
 ([`include/adc/numerics/spatial/embedded_boundary/domain.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp),
 `level_set`) and the transport mode; `set_geometry_mode(mode)` switches the mode alone; `disc_mask()`
 materializes the
@@ -1433,7 +1433,7 @@ the gauge by pinning $\hat\phi(0,0) = 0$ (row 0 replaced by the identity in Thom
 
 **Code.** [`include/adc/mesh/geometry/geometry.hpp`](../include/adc/mesh/geometry/geometry.hpp)`::PolarGeometry` (ring,
 opt-in via `adc.PolarMesh`; `cfg.geometry == "polar"` on the
-[`python/system.cpp`](../python/system.cpp) side). Transport:
+[`python/bindings/system/base/system.cpp`](../python/bindings/system/base/system.cpp) side). Transport:
 [`include/adc/numerics/spatial/operators/polar_operator.hpp`](../include/adc/numerics/spatial/operators/polar_operator.hpp)`::assemble_rhs_polar<Limiter, NumericalFlux>`
 (`recon_prim`, `wall_radial`), via the named functors `detail::PolarFaceFluxRKernel` (radial flux
 weighted by `r_face`, optional wall at the boundary faces), `PolarFaceFluxThetaKernel`,

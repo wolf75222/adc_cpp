@@ -22,7 +22,7 @@ DELIVERED (runtime multi-block engine AmrRuntime):
       cadence), `set_block_tag_predicate(b, crit)` (D1), `set_phi_tag_predicate(crit)` (D4).
 - [x] cadence in `AmrRuntime::step`: regrid every `regrid_every` macro-steps, BEFORE the step;
       `regrid_every == 0` -> regrid never called -> BIT-IDENTICAL to the frozen hierarchy (verified).
-- [x] FACADE UNLOCK (T7): `python/amr_system.cpp` no longer REFUSES multi-block +
+- [x] FACADE UNLOCK (T7): `python/bindings/amr/amr_system.cpp` no longer REFUSES multi-block +
       `regrid_every > 0`. `build_multi` wires `runtime->set_regrid(cfg.regrid_every)` and sets the tag
       predicate PER BLOCK (D1: selected variable > `refine_threshold`; default = component 0 like the
       mono-block AmrCouplerMP, ADC-296 lets `set_refinement(threshold, variable=, role=)` pick it per
@@ -52,7 +52,7 @@ coarse Poisson with SUMMED right-hand side, cell-by-cell coupled sources, multir
 (substeps / stride / evolve), but a mesh that NEVER MOVES after construction. Neither
 `AmrSystemCoupler` nor `AmrRuntime` has a `regrid` method (verified: grep `regrid` in the
 two files returns nothing). The Python facade therefore explicitly REFUSES the combination
-multi-block + `regrid_every > 0` (`python/amr_system.cpp:246-251`).
+multi-block + `regrid_every > 0` (`python/bindings/amr/amr_system.cpp:246-251`).
 
 PURPOSE OF THIS DOCUMENT (Phase 2, the capstone finale). Specify the `regrid` by TAG UNION
 that turns this frozen hierarchy into an ADAPTIVE hierarchy: a single collective criterion
@@ -87,7 +87,7 @@ multi-block path, in contrast, goes through `AmrRuntime` which has no `regrid`: 
 
 FACT 3: the multi-block + `regrid_every > 0` REFUSAL IS ALREADY IN PLACE, by design (owner
 correction, `docs/AMR_MULTIBLOCK_DESIGN.md` section 4). It is wired into `ensure_built` of the facade
-(`python/amr_system.cpp:246-251`): silently allowing `regrid_every > 0` in multi-block
+(`python/bindings/amr/amr_system.cpp:246-251`): silently allowing `regrid_every > 0` in multi-block
 would make the API CLAIM it does dynamic AMR while the mesh never moves
 (dangerous illusion). LIFTING this refusal is precisely what THIS DESIGN authorizes, once
 the algorithm below is implemented and tested.
@@ -308,7 +308,7 @@ blocks (their frozen state stays physically present). Interaction to test explic
 COMPOSITION WITH THE FROZEN HIERARCHY (transition from Phase 1 to Phase 2). As long as `regrid_every ==
 0`, the multi-block path stays STRICTLY that of today (frozen hierarchy, bit-identical):
 the regrid is never called. The UNLOCK consists in REPLACING the refusal
-`python/amr_system.cpp:246-251` by the activation of the cadence: multi-block + `regrid_every > 0`
+`python/bindings/amr/amr_system.cpp:246-251` by the activation of the cadence: multi-block + `regrid_every > 0`
 stops throwing and wires the periodic regrid closure. The mono-block keeps its path
 (`AmrCouplerMP`, untouched). Non-regression criterion: a multi-block case with `regrid_every == 0`
 must stay BIT-IDENTICAL to before this PR (the union regrid only activates for
@@ -347,7 +347,7 @@ contract is preserved.
 
 NEW FACADE-SIDE METHOD. `AmrRuntime::regrid(crit, grow, margin, ...)` (and the counterpart
 `AmrSystemCoupler::regrid`) orchestrates (R0)-(R8). It is the SOLE multi-block entry point added.
-The facade unlock (`python/amr_system.cpp`) replaces the throw by the wiring of the cadence.
+The facade unlock (`python/bindings/amr/amr_system.cpp`) replaces the throw by the wiring of the cadence.
 
 
 ## 7. Acceptance tests
@@ -384,7 +384,7 @@ device-side. A GPU case (GH200) validates once the full device instantiation wit
 full chaining of `amr_regrid_finest`).
 
 (T7) UNLOCK. Multi-block + `regrid_every > 0` no longer throws (the old refusal
-`python/amr_system.cpp:246-251` is lifted) and produces a hierarchy that effectively MOVES between
+`python/bindings/amr/amr_system.cpp:246-251` is lifted) and produces a hierarchy that effectively MOVES between
 two steps (the fine `BoxArray` changes when the structure moves).
 
 
@@ -463,7 +463,7 @@ OPEN DECISIONS (owner signature required).
 - `include/adc/amr/tagging/cluster.hpp`: `berger_rigoutsos`, `ClusterParams` (geometric clustering).
 - `include/adc/amr/hierarchy/amr_hierarchy.hpp`: `AmrHierarchy` (level container; note: "the future conservative
   multi-block AMR will have to share a common hierarchy", l. 31-32).
-- `include/adc/runtime/amr_system.hpp` + `python/amr_system.cpp`: RUNTIME facade (`regrid_every`;
+- `include/adc/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: RUNTIME facade (`regrid_every`;
   multi-block + `regrid_every > 0` REFUSAL at `amr_system.cpp:246-251`, lifted by this design).
 - `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: mono-block regrid wiring (`:101-104`), shared 2-level
   FROZEN layout (`make_shared_amr_layout`) and per-block allocation (`build_amr_block`).

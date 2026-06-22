@@ -87,7 +87,7 @@ character of this kind in the repository.
 Good overall coverage but uneven. Absent (start on `#include`/`namespace`):
 `include/adc/parallel/comm.hpp:1` and `parallel/load_balance.hpp:1` (`//` header only),
 `include/adc/mesh/patch_box.hpp:1`, `include/adc/numerics/time/amr_advance.hpp:1` and
-`amr_flux_helpers.hpp:1`, and above all `python/system.cpp:1` + `python/amr_system.cpp:1` (no
+`amr_flux_helpers.hpp:1`, and above all `python/bindings/system/base/system.cpp:1` + `python/bindings/amr/amr_system.cpp:1` (no
 header at all, 1831 and 1192 lines). Non-uniform placement of the `/// @file` (before vs after the
 includes) in `numerics-2` (3 files) and `coupling-1` (4 before / 6 after). Dead reference:
 `docs/CODEBASE_AUDIT.md:15` points to `CODE_DOCUMENTATION_CONVENTION.md`, not committed (cf. header).
@@ -111,7 +111,7 @@ the ctor of `GeometricMG` covers `active/replicated/cut_cell/levelset` but omits
 `min_coarse/nu1/nu2/nbottom` (`include/adc/numerics/elliptic/geometric_mg.hpp:76`). On the Python side,
 `System.add_block`/`AmrSystem.add_block` (`python/adc/__init__.py:1365,2415`), primary entry points,
 have no docstring whereas `add_equation` is detailed; several non-trivial pybind `.def`
-are exposed without docstring (`python/bindings.cpp:362`: `step_cfl`, `step_adaptive`,
+are exposed without docstring (`python/bindings/core/bindings.cpp:362`: `step_cfl`, `step_adaptive`,
 `dt_hotspot`, `set_poisson`, `variable_names/roles`).
 
 ### Variable Comments
@@ -141,7 +141,7 @@ Near-total consistency (cf. section 5). Isolated typos: `referenceent`
 (`runtime/native_loader.hpp:733`), `tolerree` (`python/adc/__init__.py:870`). Occasional ungrammatical
 sentences: `for_each.hpp:113` (`acces hote sur sont sans course`), `limite de / Debye` line break
 in `numerics/time/imex.hpp:11`, self-correction left in place `... non : ...` in
-`python/system.cpp:1511`. `@returns` tag (English) instead of `@return`: 2 occurrences
+`python/bindings/system/base/system.cpp:1511`. `@returns` tag (English) instead of `@return`: 2 occurrences
 (`amr_coupler_mp.hpp:558`, `amr_system.hpp:439`).
 
 ### TODO Comments
@@ -163,8 +163,8 @@ Each one has been confronted with the code and re-verified.
 | `include/adc/numerics/time/amr_reflux.hpp:19` | "minimal version": subcycling to come, uniform aux | `amr_step_2level` ALREADY IMPLEMENTS Berger-Oliger subcycling (155-174) and reads a spatial aux; living file (included by `spectral_coupler.hpp`) |
 | `include/adc/coupling/schur/condensed_schur_source_stepper.hpp:395` | `phi_n_` allocated at the first `advance_source` | allocated unconditionally at the ctor (234); the `advance_source` method DOES NOT EXIST (the API is `step()`, repo grep = 0 other occurrence) |
 | `include/adc/runtime/amr_system.hpp:363` | `set_conservative_state` raises in multi-block | the `build_multi` facade threads the state to the NATIVE blocks (379); only the compiled path (.so) rejects (315) |
-| `python/bindings.cpp:70` | serial: `my_rank=1`, `n_ranks=0` | `comm.hpp` returns `my_rank()=0`, `n_ranks()=1`; contradicts the adjacent docstrings (73-74) |
-| `python/bindings.cpp:240` | `set_source_stage` descriptors: "Cartesian only (polar: reject)" | the polar stage builds a `PolarCondensedSchurSourceStepper` and honors `bz_aux_component` without rejection (`system.cpp:1410-1438`) |
+| `python/bindings/core/bindings.cpp:70` | serial: `my_rank=1`, `n_ranks=0` | `comm.hpp` returns `my_rank()=0`, `n_ranks()=1`; contradicts the adjacent docstrings (73-74) |
+| `python/bindings/core/bindings.cpp:240` | `set_source_stage` descriptors: "Cartesian only (polar: reject)" | the polar stage builds a `PolarCondensedSchurSourceStepper` and honors `bz_aux_component` without rejection (`system.cpp:1410-1438`) |
 
 All are vestiges of earlier refactors (API rename, pinned-host fix, multi-block
 wave, mono-rank safeguard removal). 6/10 are auto-correctable in one line; the other 4
@@ -228,8 +228,8 @@ require a reformulation to review. To do first, independently of the rest.
 P1: public API `include/adc/**` and `python/` non-extractable or undocumented. PRs targeted per
 subsystem (mechanical conversion, content already present):
 - Add `@file`/`@brief` where it is missing: `parallel/comm.hpp`, `parallel/load_balance.hpp`,
-  `mesh/patch_box.hpp`, `numerics/time/amr_advance.hpp` + `amr_flux_helpers.hpp`, `python/system.cpp`,
-  `python/amr_system.cpp`.
+  `mesh/patch_box.hpp`, `numerics/time/amr_advance.hpp` + `amr_flux_helpers.hpp`, `python/bindings/system/base/system.cpp`,
+  `python/bindings/amr/amr_system.cpp`.
 - Migrate `//` -> `///` on the public APIs documented in prose: `numerics/time/*` (12 files,
   including the `mf_*` helpers and `advance_amr`), checkpoint/restart of `AmrCouplerMP`
   (`coupling/amr_coupler_mp.hpp:319+`), `runtime/amr_runtime.hpp:279,893`.

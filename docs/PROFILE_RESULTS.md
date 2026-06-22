@@ -13,7 +13,7 @@ code change beyond a lead to investigate, in line with the owner's rule:
 ### What is measured
 
 The harness reconstructs, from the PUBLIC SEAMS of the library (headers only, without touching
-`python/system.cpp` nor any hot path header), a REPRESENTATIVE time step of the diocotron case as
+`python/bindings/system/base/system.cpp` nor any hot path header), a REPRESENTATIVE time step of the diocotron case as
 `System::step` orchestrates it:
 
 - model `CompositeModel<ExBVelocity, NoSource, ChargeDensity>` (scalar ExB advection + charge
@@ -173,7 +173,7 @@ The harness accepts `--n --steps --warmup --cfl --solver {geometric_mg|fft} --li
 
 ## 5. Guarantees
 
-- NO optimization, NO refactor of the hot path. `python/system.cpp` and the hot path headers
+- NO optimization, NO refactor of the hot path. `python/bindings/system/base/system.cpp` and the hot path headers
   are NOT modified. Only additions: `bench/` (new) and the `ADC_BUILD_BENCH` option (OFF by
   default) + an `add_subdirectory(bench)` guarded in the root `CMakeLists.txt`.
 - `docs/PERFORMANCE.md` (historical) and `docs/BACKEND_COVERAGE.md` are NOT touched.

@@ -42,10 +42,10 @@ of RECOGNITION and COMPLETION, not of creation ex nihilo. It is good news to say
 frankly: the Phase 1 target is closer than it seems.
 
 FACT 2: the RUNTIME FACADE (the one exposed to Python) remains MONO-BLOCK. `AmrSystem`
-(`include/adc/runtime/amr_system.hpp`, impl `python/amr_system.cpp`) explicitly REFUSES a
+(`include/adc/runtime/amr_system.hpp`, impl `python/bindings/amr/amr_system.cpp`) explicitly REFUSES a
 2nd block:
 ```
-// python/amr_system.cpp:129-130
+// python/bindings/amr/amr_system.cpp:129-130
 if (p_->has_block || p_->has_compiled)
   throw std::runtime_error("AmrSystem : un seul bloc (AMR mono-modele)");
 // idem set_compiled_block, ligne 152-153
@@ -62,7 +62,7 @@ The TWO real gaps for the Phase 1 target are therefore:
    described in 2.2.1). It needs a TYPE-ERASED REGISTRY BY NAME that holds, PER BLOCK: its stack of
    levels (`std::vector<AmrLevelMP>` on the shared layout) AND its type-erased closures
    (`advance` / elliptic `rhs` / `source` / `max_speed` / `mass` / `density`), exactly like
-   `System::Impl::sp` (the `Species` struct, `python/system.cpp:270-301`) holds the closures per
+   `System::Impl::sp` (the `Species` struct, `python/bindings/system/base/system.cpp:270-301`) holds the closures per
    species for the mono-level runtime path. It is the gap already crossed between the compile-time
    `SystemCoupler` and the runtime facade `System`: type-erased registry of blocks, repeated
    `add_block`, multirate `stride` / `evolve` / `substeps`, sum of the Poisson;
@@ -71,7 +71,7 @@ The TWO real gaps for the Phase 1 target are therefore:
    (lines 321-325) which delegates to `amr_regrid_finest`. Its hierarchy is FROZEN at
    construction. The UNION-of-tags regrid which rebuilds the mesh ONCE and
    prolongs/restricts ALL the blocks is implemented (capstone Phase 2; `build_multi` ->
-   set_regrid + set_block_tag_predicate in `python/amr_system.cpp`).
+   set_regrid + set_block_tag_predicate in `python/bindings/amr/amr_system.cpp`).
 
 HARD CONSTRAINT (owner correction, point 4). AS LONG AS the UNION-of-tags regrid (cf. 5) is
 not implemented, the MULTI-BLOCK combination (`n_blocks >= 2`) AND `regrid_every > 0` MUST be
@@ -214,7 +214,7 @@ added. C++ signatures that fit the existing types are given.
 
 - `AmrBlockRegistry`: the collection of blocks. At compile-time it is `CoupledSystem<Blocks...>`
   (already there). At runtime it will be a type-erased `std::vector<AmrSpecies>` modeled on
-  `System::Impl::sp` (`python/system.cpp:270-301`, the `Species` struct).
+  `System::Impl::sp` (`python/bindings/system/base/system.cpp:270-301`, the `Species` struct).
 
 - `AmrFieldSolver`: the SYSTEM Poisson with a SUMMED right-hand side, co-located. It is
   `solve_fields` of `AmrSystemCoupler` (lines 177-206) wired on `ChargeDensityRhs`
@@ -227,7 +227,7 @@ added. C++ signatures that fit the existing types are given.
 - `AmrScheduler`: honors `treatment` / `substeps` / `stride` / `evolve` per block. It is
   `AmrSystemCoupler::step` (lines 211-250) plus the stride semantics of
   `advance_subcycled` (`include/adc/numerics/time/schemes/scheduler.hpp`) and of runtime `System`
-  (`stride_due`, `python/system.cpp:327`). The target contract (cf. 4.iv):
+  (`stride_due`, `python/bindings/system/base/system.cpp:327`). The target contract (cf. 4.iv):
   - `Explicit` -> AMR transport by `advance_amr<Limiter,NumericalFlux>`;
   - `IMEX` -> explicit transport (`SourceFreeModel<Model>`) + implicit source by the
     callback (reuses `mf_apply_source_treatment` / `backward_euler_source` of the Gap2);
@@ -316,7 +316,7 @@ block. Concretely:
    is the TYPE-ERASED REGISTRY BY NAME: `add_block` must REGISTER, per block, its stack of
    levels PLUS its type-erased closures (`advance` / elliptic `rhs` / `source` / `max_speed`
    / `mass` / `density`), an exact copy of the `Species` struct of `System::Impl::sp`
-   (`python/system.cpp:270-301`). Without this registry, two blocks can be neither advanced, nor
+   (`python/bindings/system/base/system.cpp:270-301`). Without this registry, two blocks can be neither advanced, nor
    summed in the Poisson, nor coupled: the throw is only the symptom. The 1st `add_block` alone,
    followed by `step` / `step_cfl` / `mass` / `density` / `potential`, must produce EXACTLY the
    same bytes as today (mono-block `AmrCouplerMP` path untouched).
@@ -380,11 +380,11 @@ CONSERVATION: the total charge integrated on the coarse stays the expected sum.
 ### PR (iv) -- substeps / stride / evolve + step_cfl substeps-aware
 WRITE-SET:
 - `include/adc/coupling/system/amr_system_coupler.hpp`: add `step_cfl(cfl)` modeled on
-  `System::step_cfl` (`python/system.cpp:1663-1693`), substeps-aware:
+  `System::step_cfl` (`python/bindings/system/base/system.cpp:1663-1693`), substeps-aware:
   `dt <= cfl * h * substeps_b / (stride_b * w_b)`, min over the evolving blocks; a block
   `evolve=false` does NOT constrain the step but stays in the Poisson RHS.
 - the stride semantics MUST be that of `System`: HOLD-THEN-CATCH-UP, that is to say
-  `stride_due = (macro_step_ + 1) % stride == 0` (`python/system.cpp:320-327`), NOT that of
+  `stride_due = (macro_step_ + 1) % stride == 0` (`python/bindings/system/base/system.cpp:320-327`), NOT that of
   `advance_subcycled` (`macro%M==0`, start of window). OWNER CORRECTION (point 6): the condition
   `macro_step_ % stride` written higher up in an earlier version of this plan was WRONG; the
   correct cadence is indeed `(macro_step_ + 1) % stride == 0` (catch-up at the END of window, not
@@ -403,9 +403,9 @@ WRITE-SET:
 - `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model(AmrSystem&, name, Model{}, ...)`
   must INSTALL A NAMED BLOCK (and not replace the unique block) -> symmetric of
   `add_compiled_model(System&)` (`include/adc/runtime/builders/compiled/dsl_block.hpp` + `block_builder.hpp`).
-- `include/adc/runtime/amr_system.hpp` + `python/amr_system.cpp`: `set_compiled_block` /
+- `include/adc/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: `set_compiled_block` /
   `add_native_block` stop throwing at the 2nd call (cf. 3) and stack a spec.
-- `python/bindings.cpp`: expose the 2nd `add_block` (already wired, `bindings.cpp:239`), validate
+- `python/bindings/core/bindings.cpp`: expose the 2nd `add_block` (already wired, `bindings.cpp:239`), validate
   `dsl.Model(...).compile(target="amr_system", backend="production")` for TWO blocks.
 ACCEPTANCE: `test_dsl_production_amr.py` extended to two native compiled blocks on the same
 hierarchy; ABI key verified (`adc_native_abi_key`, `amr_system.cpp:218-235`).
@@ -418,7 +418,7 @@ WRITE-SET:
 - `include/adc/coupling/system/amr_system_coupler.hpp`: `coupled_source_step` (already there) wired on the
   named couplings (ionization/collision/exchange) AND on `CoupledSourceKernel`
   (`coupled_source_program.hpp`).
-- `python/amr_system.cpp` + `bindings.cpp`: `sim.add_coupling(adc.Ionization(...))` modeled on
+- `python/bindings/amr/amr_system.cpp` + `bindings.cpp`: `sim.add_coupling(adc.Ionization(...))` modeled on
   `System::add_ionization` / `add_coupled_source` (`include/adc/runtime/system.hpp:266-329`).
 ACCEPTANCE: ionization `+k n_e n_g` / `-k n_e n_g` on 3 co-located blocks, level by
 level, on all the patches.
@@ -510,7 +510,7 @@ not to solve here.
 
 - MIXED stride/substeps across the blocks in `step_cfl`. RISK: a dt computed on `w_max`
   alone, multiplied by stride, violates the CFL by a factor M. DE-RISK: copy LITERALLY the
-  per-block formula of `System::step_cfl` (`python/system.cpp:1667-1680`),
+  per-block formula of `System::step_cfl` (`python/bindings/system/base/system.cpp:1667-1680`),
   `dt = min_b cfl*h*substeps_b/(stride_b*w_b)`, frozen blocks excluded. Test: a block stride=4
   stays under the effective CFL.
 
@@ -660,9 +660,9 @@ absence of a block on a patch.
   `block_stride_v`, `block_time_treatment_v`.
 - `include/adc/coupling/system/system_coupler.hpp`: `SystemAssembler` / `SystemDriver` (mono-level
   split), `step_cfl` substeps-aware (`cfl*h*substeps/(stride*w)`).
-- `include/adc/runtime/system.hpp` + `python/system.cpp`: multi-block RUNTIME facade (model to
+- `include/adc/runtime/system.hpp` + `python/bindings/system/base/system.cpp`: multi-block RUNTIME facade (model to
   imitate), `Species`, `stride_due` (HOLD-THEN-CATCH-UP), `step_cfl` (lines 1663-1693).
-- `include/adc/runtime/amr_system.hpp` + `python/amr_system.cpp`: MONO-BLOCK AMR RUNTIME facade
+- `include/adc/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: MONO-BLOCK AMR RUNTIME facade
   (refusal of the 2nd block, lines 129-130 and 152-153).
 - `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model(AmrSystem&)` (a single block).
 - `include/adc/runtime/builders/block/block_builder.hpp`: `make_block` / `make_max_speed` /

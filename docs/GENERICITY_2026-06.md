@@ -241,7 +241,7 @@ is wired really is; what is not is documented with file:line, never masked).
    (isothermal transport bit-identical theta_boxes=1/2/4; scalar ExB; divisibility + direct Poisson
    multi-box rejections; round-trip get/set state multi-box). `adc.capabilities()['geometry']`.
 
-3. **MULTI-RANK System IO** (`python/system.cpp` + `include/adc/runtime/system.hpp` + bindings +
+3. **MULTI-RANK System IO** (`python/bindings/system/base/system.cpp` + `include/adc/runtime/system.hpp` + bindings +
    `python/adc/__init__.py`). Finding: `copy_state` / `copy_comp0` / `potential` read `fab(0)`
    (valid on the owner rank -- mono-box, box 0 on rank 0 -- but OUT OF BOUNDS on a rank
    without a box). Added: collective GLOBAL accessors `density_global` / `state_global` /
@@ -260,7 +260,7 @@ is wired really is; what is not is documented with file:line, never masked).
    `test_schur_condensation_np*`.)
 
 4. **AMR clock: macro_step() / set_clock()** (`include/adc/runtime/amr_system.hpp` +
-   `python/amr_system.cpp` + `amr_runtime.hpp` + `amr_dsl_block.hpp` + bindings). Parity with System:
+   `python/bindings/amr/amr_system.cpp` + `amr_runtime.hpp` + `amr_dsl_block.hpp` + bindings). Parity with System:
    `AmrSystem::Impl` carries an AUTHORITATIVE macro-step counter (incremented by step/step_cfl),
    `macro_step()` returns it, `set_clock(t, ms)` restores it AND pushes it to the CADENCE counter of the
    engine (regrid/stride): `AmrRuntime::set_macro_step` (multi-block) OR `set_macro_step` hook of the
@@ -371,7 +371,7 @@ is wired really is; what is not is documented with file:line, never masked).
     hyperslabs: DONE on the System `write` side (ADC-66 / PR-IO-3)** -- `sim.write(format="hdf5",
     parallel=True)` OPT-IN: global datasets `(ncomp, ny, nx)` created collectively via h5py(mpio),
     each rank writes ITS boxes in hyperslabs (minimal NON-collective C++ accessors
-    `System::local_boxes` / `System::local_state`; `python/system.cpp` + `system.hpp` + bindings).
+    `System::local_boxes` / `System::local_state`; `python/bindings/system/base/system.cpp` + `system.hpp` + bindings).
     `parallel=False` (default) STRICTLY unchanged; h5py absent / without MPI / mpi4py absent ->
     CLEAR RuntimeError with remedy (never a silent write). The cartesian System being MONO-BOX,
     the TRUE hyperslab parallelism only appears in MULTI-BOX (documented honestly). Test:

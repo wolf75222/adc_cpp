@@ -61,7 +61,7 @@ callback path: a domain is a compile-time POD, never a `std::function`.
 
 ## Going further
 
-- Bindings: `python/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
+- Bindings: `python/bindings/core/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
   `set_disc_domain`, `disc_mask`).
 - Generic contract: `include/adc/numerics/spatial/embedded_boundary/domain.hpp` (`DiscDomain`, `HalfPlaneDomain`,
   the `LevelSetDomain` concept).

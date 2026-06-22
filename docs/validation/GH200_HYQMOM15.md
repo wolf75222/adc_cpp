@@ -30,7 +30,7 @@ Everything that produces the figures below is in the repository, under `docs/val
   `ic_<n>.raw` (`diocotron_state` of the validated python);
 * `diocotron_gpu.cpp`: driver (reads the binary IC, assembles the composite via
   `add_compiled_model`, advances, dumps `snap_*.raw` + `growth.csv`);
-* `CMakeLists.txt`: driver build (also compiles `python/system.cpp`);
+* `CMakeLists.txt`: driver build (also compiles `python/bindings/system/base/system.cpp`);
 * `compare_snap.cpp`: final-state comparator;
 * `parity181.sbatch` (parity + timing, sections 2 and 4), `mpi181.sbatch` (multi-GPU substrate,
   section 3).
@@ -259,7 +259,7 @@ across all np and in both modes.
 ### Recipe (versioned sources)
 
 `docs/validation/diocotron_amr_gpu.cpp` + `CMakeLists.txt` (target `diocotron_amr_gpu`, compiles
-`python/amr_system.cpp` -- NOT `system.cpp`) + `diocotron_amr_mpi.sbatch`. Brick + IC: the SAME
+`python/bindings/amr/amr_system.cpp` -- NOT `system.cpp`) + `diocotron_amr_mpi.sbatch`. Brick + IC: the SAME
 generated artifacts as section 3 (`make_brick_and_ic.py --ns 128`, md5 `ic_128.raw`
 da245ba8934546986508976a64156d2e, brick d785b13ac0da1dd349ff4775368c8ff2). Device build with the GPU
 `kinstall` `nvcc_wrapper`, CUDA-aware OpenMPI (`-DADC_VALIDATION_MPI=ON`),
@@ -306,7 +306,7 @@ Reading:
   STATIC B_z field; here the bit-exact reading is `dist_vs_repl` at fixed np. phi stays finite (the
   geometric MG converges on the 2x2 multi-box coarse).
 * **nvcc.** The SINGLE compiled block (`add_compiled_model` -> `AmrCouplerMP<Model>`, never the
-  facade) compiles and runs on GH200 (`nvcc_wrapper`, `python/amr_system.cpp`): job 657120 `BUILD_OK`.
+  facade) compiles and runs on GH200 (`nvcc_wrapper`, `python/bindings/amr/amr_system.cpp`): job 657120 `BUILD_OK`.
 
 ## Conclusion
 

@@ -105,7 +105,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `amr/` | Tagging, clustering, abstract regrid. | Correct, small. |
 | `coupling/` | Historical header-only and AMR coupling engines, coupled sources, Schur. | Most redundant zone. To classify public/internal/deprecated. |
 | `runtime/` | C++ facades used by Python, DSL ABI, loaders. | Strong direction, but many paths. Needs strict naming. |
-| `python/*.cpp` | Bindings and offline runtime implementation. | `python/system.cpp` is too big. |
+| `python/*.cpp` | Bindings and offline runtime implementation. | `python/bindings/system/base/system.cpp` is too big. |
 | `python/adc/*.py` | Python user API and DSL. | Some docstrings remain old. |
 
 ## 4. Audit by file
@@ -227,7 +227,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
-| `system.hpp` | `SystemConfig`, `System` | C++ multi-block runtime facade exposed to Python. | Contain all the implementation. | Rich interface: stride, primitives, DSL source, Schur. Implementation too heavy in `python/system.cpp`. |
+| `system.hpp` | `SystemConfig`, `System` | C++ multi-block runtime facade exposed to Python. | Contain all the implementation. | Rich interface: stride, primitives, DSL source, Schur. Implementation too heavy in `python/bindings/system/base/system.cpp`. |
 | `amr_system.hpp` | `AmrSystemConfig`, `AmrSystem`, hooks | Mono-block AMR runtime facade. | Promise multi-block runtime. | Mono-block but richer: WENO5/HLLC/Roe/primitive recon, DSL production, local IMEX. Multi-block capstone not merged. |
 | `model_spec.hpp` | `ModelSpec` | Native brick tags from Python. | Becoming a named scenario. | OK. |
 | `model_factory.hpp` | dispatch `ModelSpec` -> C++ types | Bridge runtime tags to templates. | Grow endlessly. | OK short term. To watch if bricks become numerous. |
@@ -280,7 +280,7 @@ dependency.
 
 ### P0 - Do not break, but clarify
 
-1. **`python/system.cpp`**
+1. **`python/bindings/system/base/system.cpp`**
    - Problem: it carries too many responsibilities: block registry, allocation, Poisson,
      couplings, native loaders, I/O state, stride, diagnostics, auxiliary fields.
    - Target refactor:
@@ -555,8 +555,8 @@ between documents:
    - Keep #140 as the only structural open PR in this block; #141 is already merged.
 
 2. **`AmrSystem.potential()` is documented "IN PROGRESS" in several documents, but the binding exists.**
-   - Code read: `python/bindings.cpp` exposes `.def("potential", ...)` for `AmrSystem` and
-     `python/amr_system.cpp` implements `AmrSystem::potential()`.
+   - Code read: `python/bindings/core/bindings.cpp` exposes `.def("potential", ...)` for `AmrSystem` and
+     `python/bindings/amr/amr_system.cpp` implements `AmrSystem::potential()`.
    - Documents to fix: `README.md`, `docs/DSL_MODEL_DESIGN.md`, `docs/PAPER_ROADMAP.md`,
      probably `todo.md`.
 
@@ -647,7 +647,7 @@ To avoid the divergences:
 
 ### Lot B - `System` runtime
 
-1. Extract `NativeLoader` from `python/system.cpp`.
+1. Extract `NativeLoader` from `python/bindings/system/base/system.cpp`.
 2. Extract `SystemFieldSolver` for `ensure_elliptic`, `solve_fields`, `apply_eps/kappa/Bz/Te`.
 3. Extract `SystemBlockStore` for blocks, ghosts, get/set state.
 4. Keep `System::Impl` as a thin orchestrator.
@@ -691,12 +691,12 @@ designed; the problem is that it grew very fast and keeps several generations of
 The merges #118-#142 added important bricks: Schur usable from Python,
 DSL coupled sources, runtime primitives, substeps-aware cadence, polar transport/Poisson, and
 many API guards. These additions make the project more powerful, but they also increase the
-pressure on `python/system.cpp`, `amr_reflux_mf.hpp` and the backend matrix.
+pressure on `python/bindings/system/base/system.cpp`, `amr_reflux_mf.hpp` and the backend matrix.
 
 The code is maintainable if we now do two things:
 
 1. **Classify the surfaces**: public / internal / legacy / test.
-2. **Extract the god classes**: especially `python/system.cpp` and `amr_reflux_mf.hpp`.
+2. **Extract the god classes**: especially `python/bindings/system/base/system.cpp` and `amr_reflux_mf.hpp`.
 3. **Name the backend proofs**: never replace `MPI CPU`, `Kokkos Cuda` or
    `MPI + Kokkos Cuda` by a simple "MPI".
 

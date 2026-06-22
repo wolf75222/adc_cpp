@@ -1,16 +1,16 @@
 > **ARCHIVE -- non-normative document.** Internal plan/spec kept for the record. The current source of truth is the code plus the canonical docs (ARCHITECTURE.md, ALGORITHMS.md, BACKEND_COVERAGE.md). Do not rely on it as the current state.
 
-# Extraction plan for python/system.cpp
+# Extraction plan for python/bindings/system/base/system.cpp
 
 PLAN ONLY. This document changes no code. It identifies four extraction candidates
-in `python/system.cpp` (1805 lines), states the current code ranges,
+in `python/bindings/system/base/system.cpp` (1805 lines), states the current code ranges,
 the dependencies and the risks, then proposes a sequence of bit-identical PRs.
 
 ---
 
 ## 0. Context
 
-`python/system.cpp` is the only translation unit of the `System` runtime facade. It
+`python/bindings/system/base/system.cpp` is the only translation unit of the `System` runtime facade. It
 contains, all mixed together:
 - loading a `.so` via `dlopen` (three paths: JIT, AOT, native);
 - the elliptic solver and its wiring (lazy construction, eps/kappa fields);
@@ -266,7 +266,7 @@ Sequence from least dependent to most dependent.
 
 WRITE-SET:
 - New file `python/system_native_loader.cpp` (or `python/native_loader.cpp`);
-- `python/system.cpp`: remove the moved functions, add an include if needed;
+- `python/bindings/system/base/system.cpp`: remove the moved functions, add an include if needed;
 - `python/CMakeLists.txt`: add the new file to the `_adc` target.
 
 Moved content: `host_residual`, `limited_slope`, `split`, `BlockMeta`, `parse_var_set`,
@@ -295,7 +295,7 @@ so the native loaders resolve them.
 
 WRITE-SET:
 - New file `python/system_field_solver.cpp`;
-- `python/system.cpp`: remove the moved Impl methods and members.
+- `python/bindings/system/base/system.cpp`: remove the moved Impl methods and members.
 
 Moved content: elliptic Impl members (`p_rhs`, ..., `ell_`), `ensure_elliptic`,
 `apply_epsilon_field`, `apply_epsilon_anisotropic_field`, `apply_reaction_field`, `ell_rhs()`,
@@ -328,7 +328,7 @@ reordering of the `device_fence`.
 
 WRITE-SET:
 - New file `python/system_stepper.cpp`;
-- `python/system.cpp`: remove `step`, `advance`, `step_cfl`, `step_adaptive`.
+- `python/bindings/system/base/system.cpp`: remove `step`, `advance`, `step_cfl`, `step_adaptive`.
 
 Moved content: `System::step`, `System::advance`, `System::step_cfl`,
 `System::step_adaptive`.
@@ -350,7 +350,7 @@ RISK: LOW. Pure orchestration functions, with no direct access to the fabs.
 
 WRITE-SET:
 - New file `python/system_block_store.cpp`;
-- `python/system.cpp`: remove everything that remains (struct Species, sp registry,
+- `python/bindings/system/base/system.cpp`: remove everything that remains (struct Species, sp registry,
   add_block, install_block, add_ionization, ..., set_density, ...).
 
 Moved content: see section 3.

@@ -10,7 +10,7 @@
 
 - **The canonical backbone is reliable, the bookkeeping is not.** The background docs (ARCHITECTURE, ALGORITHMS, BACKEND_COVERAGE, CHOICES, DSL_API, DSL_MODEL_DESIGN, CONSERVATION_SUMMARY, BIBLIOGRAPHY, COUPLER_HIERARCHY, COUPLING_SURFACE, PERFORMANCE) correctly describe the layers, the C++20 concepts (`PhysicalModel`, `EllipticSolver`), the three-way parallel seam (`for_each.hpp` + `comm.hpp`), the 4-job CPU-only CI matrix. The risk is concentrated on (a) the "AmrSystem single-block" narrative and (b) the bookkeeping (test counters, phantom symbols, deleted files).
 
-- **Risk #1 (high severity, CONFIRMED): "AmrSystem single-block" is OBSOLETE.** Repeated as an honest limitation in README, ARCHITECTURE Sec. 8, DSL_MODEL_DESIGN (Sec. 0bis/Sec. 5/Phase D) and the persistent memory, whereas `python/amr_system.cpp` ships a real multi-block facade (`multi_block()`/`build_multi()`/`set_regrid`, plus no "single block only" throw), with 7 capstone tests and union-tags regrid (#195/#199/#205). A refactor that trusts the canonical docs **would re-assert a false limitation**.
+- **Risk #1 (high severity, CONFIRMED): "AmrSystem single-block" is OBSOLETE.** Repeated as an honest limitation in README, ARCHITECTURE Sec. 8, DSL_MODEL_DESIGN (Sec. 0bis/Sec. 5/Phase D) and the persistent memory, whereas `python/bindings/amr/amr_system.cpp` ships a real multi-block facade (`multi_block()`/`build_multi()`/`set_regrid`, plus no "single block only" throw), with 7 capstone tests and union-tags regrid (#195/#199/#205). A refactor that trusts the canonical docs **would re-assert a false limitation**.
 
 - **Risk #2 (CONFIRMED): deleted file still documented.** `amr_coupler.hpp`/`AmrCoupler` is DELETE (#164) but described as "deprecated kept for reference" in THREE normative docs (ARCHITECTURE:33, COUPLING_SURFACE:118, COUPLER_HIERARCHY Sec. 4). Only CODEBASE_AUDIT records the deletion. Any autodoc/coupler reference built on these three docs would list a nonexistent file.
 
@@ -60,7 +60,7 @@ Statuses: **active** (living normative), **historical** (spec/plan partially exe
 | docs/FULL_MODEL_VALIDATION_ROADMAP.md | Full-model reproduction roadmap; SUPERSEDES PAPER_ROADMAP | internal-dev | active | HOFFART_FIDELITY + HOFFART_STEP_SEQUENCE + run.py | Self-corrects PAPER_ROADMAP; PR2 (#208) done; most up-to-date science doc | PAPER_ROADMAP, HOFFART_FIDELITY | **keep** |
 | docs/HOFFART_STEP_SEQUENCE.md | Exact master macro-step order (Lie not Strang) | contributor | active | `system_stepper.hpp`, `amr_runtime.hpp`, etc. | None apparent; specific file:line anchors | HOFFART_FIDELITY, CONSERVATION_SUMMARY | **keep** |
 | docs/CODE_DOCUMENTATION_CONVENTION.md | Code doc convention (Doxygen/PEP257) | internal-dev | active | self (style) | None (style guide) | -- | **keep** |
-| docs/SYSTEM_CPP_EXTRACTION_PLAN.md | `system.cpp` split plan (NativeLoader) | internal-dev | historical | `python/system.cpp` | Partially executed (#151, native_loader shipped) | CODEBASE_AUDIT | **archive** |
+| docs/SYSTEM_CPP_EXTRACTION_PLAN.md | `system.cpp` split plan (NativeLoader) | internal-dev | historical | `python/bindings/system/base/system.cpp` | Partially executed (#151, native_loader shipped) | CODEBASE_AUDIT | **archive** |
 | todo.md | Living internal TODO (session state, PR log) | internal-dev | active | git history + master | Partially stale (l.579 "6/6" vs header "7/7"); 65 KB | PAPER_ROADMAP Sec. 6, RESEARCH_BACKLOG | **keep** |
 | docs/RESEARCH_BACKLOG.md | Non-auto-completable research backlog | internal-dev | active | `schur_condensation.hpp` + ROMEO | None material | PAPER_ROADMAP, FULL_MODEL_VALIDATION | **keep** |
 | docs/archive/README.md | Archive index ("out-of-archive is authoritative") | internal-dev | archive | self | None (correct disclaimer) | -- | **keep** |
@@ -153,7 +153,7 @@ Merge of `claim_findings` + adversarial pass. Verdict column: inventory verdict;
 
 ## 4. Real API to document (autodoc)
 
-Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py` + `dsl.py` + `integrate.py`, bindings in `python/bindings.cpp` (the only `.def()` file -- `system.cpp`/`amr_system.cpp` are pure C++ without pybind). C++ concepts/classes = `include/adc/**`. `doc_status`: documented / wrong-docstring / unverified.
+Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py` + `dsl.py` + `integrate.py`, bindings in `python/bindings/core/bindings.cpp` (the only `.def()` file -- `system.cpp`/`amr_system.cpp` are pure C++ without pybind). C++ concepts/classes = `include/adc/**`. `doc_status`: documented / wrong-docstring / unverified.
 
 ### C++ -- core concepts & classes (seed for C++ Reference / Doxygen)
 

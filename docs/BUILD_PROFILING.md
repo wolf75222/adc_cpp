@@ -66,7 +66,7 @@ The ~41 s at `-O0` are the incompressible cost (parsing + frontend + unoptimized
 
 - **The `adc` core is `INTERFACE` (header-only)** - `CMakeLists.txt:57`. It compiles nothing on its own; all the cost is carried by the TUs that *instantiate* it.
 - **Python module `_adc` = 3 TUs only**: `bindings.cpp`, `system.cpp`, `amr_system.cpp` - `python/CMakeLists.txt:9`. This is where your pain "even `_adc` is slow" comes from: there is nothing to parallelize beyond 3 cores, and the critical path is the slowest TU (`system.cpp`).
-- **Tests = ~113 executables** (`grep -c CXX_EXECUTABLE_LINKER build.ninja` -> 113; 133 `.cpp.o` objects). Most are small TUs, **but 20 of them re-list `python/system.cpp` or `python/amr_system.cpp` as an extra source** (e.g. `tests/CMakeLists.txt:204, 304, 334-336, 349, 374, 393, 411, 426, 435...`), so they fully recompile the heavy TU.
+- **Tests = ~113 executables** (`grep -c CXX_EXECUTABLE_LINKER build.ninja` -> 113; 133 `.cpp.o` objects). Most are small TUs, **but 20 of them re-list `python/bindings/system/base/system.cpp` or `python/bindings/amr/amr_system.cpp` as an extra source** (e.g. `tests/CMakeLists.txt:204, 304, 334-336, 349, 374, 393, 411, 426, 435...`), so they fully recompile the heavy TU.
 
 ---
 
@@ -76,8 +76,8 @@ The ~41 s at `-O0` are the incompressible cost (parsing + frontend + unoptimized
 
 | TU | `-O3` real | user | Backend % |
 |---|---|---|---|
-| `python/system.cpp` | **469.4 s** | 379 s | 93 % |
-| `python/amr_system.cpp` | **217.6 s** | 192 s | 93 % |
+| `python/bindings/system/base/system.cpp` | **469.4 s** | 379 s | 93 % |
+| `python/bindings/amr/amr_system.cpp` | **217.6 s** | 192 s | 93 % |
 
 ### 3.2 Where the time goes - `-ftime-trace` (`system.cpp`)
 
@@ -116,8 +116,8 @@ dispatch_transport : exb | compressible | isothermal                         (3)
 ### 3.4 Duplication of the heavy TUs (test build, serial)
 
 ```
-python/system.cpp      compilé  6×   (grep -c "python/system.cpp.o:" build.ninja)
-python/amr_system.cpp  compilé 14×
+python/bindings/system/base/system.cpp      compilé  6×   (grep -c "python/bindings/system/base/system.cpp.o:" build.ninja)
+python/bindings/amr/amr_system.cpp  compilé 14×
 ```
 
 - **Duplicated CPU cost (serial):** 6 x 469 + 14 x 218 ~ **5866 CPU-s**.
@@ -148,8 +148,8 @@ python/amr_system.cpp  compilé 14×
 
 | Rank | Target | `-O3` single-threaded cost | Multiplicity |
 |---|---|---|---|
-| 1 | `python/system.cpp` | **469 s** | x1 in `_adc`, x6 in tests |
-| 2 | `python/amr_system.cpp` | **218 s** | x1 in `_adc`, x14 in tests |
+| 1 | `python/bindings/system/base/system.cpp` | **469 s** | x1 in `_adc`, x6 in tests |
+| 2 | `python/bindings/amr/amr_system.cpp` | **218 s** | x1 in `_adc`, x14 in tests |
 | 3 | `bindings.cpp` | not isolated (includes pybind11 + facade) | x1 in `_adc` |
 | 4 | small test TUs instantiating `make_block` (`test_block_builder`, `test_compiled_model_parity`...) | 15-35 s each | x113 |
 
@@ -162,7 +162,7 @@ python/amr_system.cpp  compilé 14×
 ### P0 - high impact, ~zero risk
 
 - **P0-A. Compile `system.cpp` + `amr_system.cpp` ONCE into a shared object library.**
-  `add_library(adc_runtime STATIC python/system.cpp python/amr_system.cpp)` linked by `_adc` **and** by the 20 test executables (replace the `add_executable(test_x test_x.cpp .../system.cpp)` with a link to `adc_runtime`).
+  `add_library(adc_runtime STATIC python/bindings/system/base/system.cpp python/bindings/amr/amr_system.cpp)` linked by `_adc` **and** by the 20 test executables (replace the `add_executable(test_x test_x.cpp .../system.cpp)` with a link to `adc_runtime`).
   -> removes ~18 recompilations (serial) / ~26 (MPI) per config, **x6 in CI**. Test build gain: **~88 %** of the heavy TU cost.
   *Caution:* some tests pass specific `-D` (`ADC_TEST_CXX`, `ENABLE_EXPORTS`) - those stay on their own test `.cpp`; only the `system.cpp`/`amr_system.cpp` object is shared. `adc_cap_opt_for_kokkos_ram` (the targeted `-O0`) would then apply once to the lib, not N times.
 
@@ -203,12 +203,12 @@ sed -n '2550,2556p' <build-audit>/build.ninja      # → -O3 -DNDEBUG -std=c++2b
 SDK=/Applications/Xcode.app/.../MacOSX26.5.sdk
 CXX=/Applications/Xcode.app/.../usr/bin/c++
 /usr/bin/time -p "$CXX" -O3 -DNDEBUG -std=c++2b -arch arm64 -isysroot "$SDK" -I include \
-  -ftime-trace -c python/system.cpp -o /tmp/adc_system.o      # → real 469 s, trace JSON
+  -ftime-trace -c python/bindings/system/base/system.cpp -o /tmp/adc_system.o      # → real 469 s, trace JSON
 # idem amr_system.cpp (218 s) ; idem en -O2/-O1/-O0 pour le scaling
 
 # Comptage de la duplication
-grep -c "python/system.cpp.o:"     <build-audit>/build.ninja  # → 6
-grep -c "python/amr_system.cpp.o:" <build-audit>/build.ninja  # → 14
+grep -c "python/bindings/system/base/system.cpp.o:"     <build-audit>/build.ninja  # → 6
+grep -c "python/bindings/amr/amr_system.cpp.o:" <build-audit>/build.ninja  # → 14
 ```
 
 > The temporary artifacts (`/tmp/adc_*.o`, JSON traces ~150 MB) were removed after analysis. No project file was modified or deleted; no clean build was launched.

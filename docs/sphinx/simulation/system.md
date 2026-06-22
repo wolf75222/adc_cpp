@@ -48,7 +48,7 @@ sim.advance(0.01, 50)               # 50 steps of fixed dt = 0.01
 `add_block`, `add_equation`, `set_poisson`, `set_density`, `step`, `step_cfl`, `advance` and the
 diagnostics are forwarded to the compiled facade. On the C++ side the coupler lives in
 `runtime/system.hpp` (`System`, multi-block single-level, shared Poisson) and is exposed to Python
-by `python/bindings.cpp`. The backend (serial / OpenMP / Kokkos GPU / MPI) is the one with which
+by `python/bindings/core/bindings.cpp`. The backend (serial / OpenMP / Kokkos GPU / MPI) is the one with which
 `libadc` was compiled; the physics never sees the backend.
 
 > AMR variant. `adc.AmrSystem(n=, L=, periodic=)` is the refined counterpart of `System`:

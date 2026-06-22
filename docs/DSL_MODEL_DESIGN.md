@@ -64,7 +64,7 @@ GAP (still target / deferred):
   A `DistributedFFTSolver` exists and is tested separately, but it is NOT routed in `System` (its
   band layout does not match the single-box layout expected by `System`). MPI `np>1` must therefore
   use `geometric_mg`, not `fft`.
-- **`AmrSystem.potential()`**: binding SHIPPED (python/bindings.cpp:272, `#135`). Acquired.
+- **`AmrSystem.potential()`**: binding SHIPPED (python/bindings/core/bindings.cpp:272, `#135`). Acquired.
 - **Wall-transport Phase 1**: EXPERIMENTAL, closed WITHOUT merge (#109). It masks the external
   CONDUCTOR (wrong boundary); the scientific lock remains the RING BOUNDARY. DO NOT read as shipped.
 - **Runtime params**: `m.param(kind="runtime")` is SHIPPED on the "aot" backend (P7-b): the param
@@ -92,7 +92,7 @@ Sources read for this design:
   `emit_cpp_aot_source`), the `compile(backend=)` facade + `_BACKENDS` + `adder_for`.
 - `python/adc/__init__.py`: runtime sugar `Model`/`Spatial`/`Explicit`/`IMEX`/
   `Implicit`/`DivEpsGrad`/`System`/`AmrSystem`/`PythonFlux`.
-- `python/system.cpp` + `python/bindings.cpp`: adders `add_block`,
+- `python/bindings/system/base/system.cpp` + `python/bindings/core/bindings.cpp`: adders `add_block`,
   `add_dynamic_block`, `add_compiled_block`, and metadata (`read_block_meta`,
   `variable_names`/`variable_roles`/`block_gamma`), `set_poisson`, `step_cfl`/
   `step_adaptive`.
@@ -484,7 +484,7 @@ Grouped by dependency. Each step notes its file WRITE-SET.
 
 ### Phase A: pure-Python facade, NO engine change -- SHIPPED (#89/#90)
 
-Delivered. Edits only Python; touches neither `include/**` nor `python/system.cpp`/`bindings.cpp`.
+Delivered. Edits only Python; touches neither `include/**` nor `python/bindings/system/base/system.cpp`/`bindings.cpp`.
 Items 1-6 below: all SHIPPED.
 
 1. `dsl.Model` (section 1): delegation to `HyperbolicModel`. WRITE-SET:
@@ -546,7 +546,7 @@ Delivered. It is dispatch wiring (no new numerics).
 
 11. Mode (b) (section 2b): ABI with parameters + codegen with members, OR dedicated aux channel.
     HEAVY WRITE-SET: `include/adc/runtime/builders/compiled/compiled_block_abi.hpp`,
-    `python/system.cpp` (`add_compiled_block`), `python/adc/dsl.py` (codegen). Outside the
+    `python/bindings/system/base/system.cpp` (`add_compiled_block`), `python/adc/dsl.py` (codegen). Outside the
     critical path of the Hoffart reproduction (`PAPER_ROADMAP.md:147-150`, basket 2
     transverse, optional).
 

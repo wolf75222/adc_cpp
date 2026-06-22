@@ -74,7 +74,7 @@ mode = "warning"
 depends_on = ["CMakeLists.txt", "include/adc", "python/adc"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/sphinx/getting-started/overview.md"]
 owner = "Romain"
@@ -177,10 +177,10 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/reference/python-api.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc", "python/bindings.cpp", "python/system.cpp", "python/amr_system.cpp"]
+depends_on = ["python/adc", "python/bindings/core/bindings.cpp", "python/bindings/system/base/system.cpp", "python/bindings/amr/amr_system.cpp"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/sphinx/reference/backend-matrix.md"]
 owner = "Romain"
@@ -204,7 +204,7 @@ mode = "warning"
 depends_on = ["python/adc/dsl.py", "include/adc/runtime/builders/compiled/dsl_block.hpp"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/sphinx/reference/moment-models.md"]
 owner = "Romain"
@@ -212,7 +212,7 @@ mode = "warning"
 depends_on = ["python/adc/moments.py", "python/adc/dsl.py"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/sphinx/concepts/moments-and-closures.md"]
 owner = "Romain"
@@ -228,7 +228,7 @@ mode = "warning"
 depends_on = ["python/adc/moments.py", "python/adc/dsl.py"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/sphinx/reference/bibliography.md"]
 owner = "Romain"
@@ -270,7 +270,7 @@ mode = "warning"
 depends_on = ["CMakePresets.json", "tests"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/CHOICES.md"]
 owner = "Romain"
@@ -285,7 +285,7 @@ mode = "warning"
 depends_on = ["python/adc/dsl.py", "include/adc/runtime/builders/compiled/dsl_block.hpp"]
 tested_by = []
 testable = false
-reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
+reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 
 [docs."docs/CONSERVATION_SUMMARY.md"]
 owner = "Romain"

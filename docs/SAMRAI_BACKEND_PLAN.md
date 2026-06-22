@@ -64,9 +64,9 @@ These APIs must keep compiling with the native backend without SAMRAI.
 
 To keep with no default behavioral change:
 
-- `python/bindings.cpp`
+- `python/bindings/core/bindings.cpp`
   - `AmrSystemConfig` bindings.
-- `python/amr_system.cpp`
+- `python/bindings/amr/amr_system.cpp`
   - `AmrSystem` bindings.
 - `python/adc/__init__.py`
   - Python `AmrSystem` facade, sugar `add_block`, `add_equation`,
@@ -318,8 +318,8 @@ Exit criterion:
 Files:
 
 - `include/adc/runtime/amr_system.hpp`
-- `python/bindings.cpp`
-- `python/amr_system.cpp`
+- `python/bindings/core/bindings.cpp`
+- `python/bindings/amr/amr_system.cpp`
 - `python/adc/__init__.py`
 - `tests/test_amr_system_contract.cpp`
 - `python/tests/test_bindings.py`
@@ -365,7 +365,7 @@ Files:
 - `include/adc/samrai/hierarchy_adapter.hpp`
 - `include/adc/runtime/amr_system_samrai.hpp`
 - `include/adc/runtime/amr_system.hpp`
-- `python/amr_system.cpp`
+- `python/bindings/amr/amr_system.cpp`
 
 Work:
 

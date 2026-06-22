@@ -17,7 +17,7 @@ Sources read for this audit:
 - `todo.md` section 6 (M1/M2/M2b Hoffart) + sections 1-2 (aux/EPM);
 - cases `adc_cases/diocotron/{run.py,README.md,band_instability.py}`,
   `adc_cases/diocotron_amr/run.py`, `adc_cases/two_fluid_ap/`, `adc_cases/cases_manifest.toml`;
-- bindings: `python/system.cpp`, `python/amr_system.cpp`, `python/bindings.cpp`,
+- bindings: `python/bindings/system/base/system.cpp`, `python/bindings/amr/amr_system.cpp`, `python/bindings/core/bindings.cpp`,
   `python/adc/__init__.py`, `python/adc/dsl.py`, `include/adc/numerics/elliptic/mg/geometric_mg.hpp`.
 
 ## Reproduction status (factual)
@@ -48,7 +48,7 @@ The Shortley-Weller cut-cell capability (`docs/ALGORITHMS.md` section 12) lives 
 at its REAL position for the POISSON solver. But the hyperbolic transport
 (`numerics/spatial_operator.hpp`, `numerics/numerical_flux.hpp`, `numerics/reconstruction.hpp`)
 has NO notion of an embedded boundary: the charge ring is advected on the full Cartesian grid.
-The wall predicate (`runtime/wall_predicate.hpp`, `python/system.cpp::wall_active`)
+The wall predicate (`runtime/wall_predicate.hpp`, `python/bindings/system/base/system.cpp::wall_active`)
 feeds only the elliptic operator, never the flux. The net radial gradient of the ring is
 therefore diffused by the Cartesian FV scheme, which damps the growth rate in an
 l-dependent way (the shorter-wavelength modes, l=4, pay the most). Increasing the
@@ -126,14 +126,14 @@ Capabilities wired and exposed, sufficient to push further without new code.
   prototype path (`add_dynamic_block`) stays at 2 ghosts and rejects `"weno5"` (see Basket 2). The sweep
   therefore covers `{O1, O2-minmod, O2-vanleer, O5 weno5}`, up to n=512.
 - **Circular conducting wall on Poisson**: `wall="circle"` + `wall_radius` is wired on
-  `System` (`python/bindings.cpp:97`) AND on `AmrSystem` (`python/bindings.cpp:193`,
-  `python/amr_system.cpp:78`). The elliptic cut-cell is validated (MMS order 2, multi-box, MPI;
+  `System` (`python/bindings/core/bindings.cpp:97`) AND on `AmrSystem` (`python/bindings/core/bindings.cpp:193`,
+  `python/bindings/amr/amr_system.cpp:78`). The elliptic cut-cell is validated (MMS order 2, multi-box, MPI;
   `docs/ALGORITHMS.md` section 12). Nothing to write for the Petri ring geometry.
 - **AMR on the ring edge**: `adc.AmrSystem` + `set_refinement(threshold)` runs and
   conserves mass (case `adc_cases/diocotron_amr/run.py`). M2/M2b of `todo.md` note that
   AMR triples the rate at equal base. Pushing the refinement / the number of levels is a
   config tuning. `AmrSystem.potential()` (reading `phi` from Python for the azimuthal
-  FFT): binding SHIPPED (python/bindings.cpp:272, `#135`).
+  FFT): binding SHIPPED (python/bindings/core/bindings.cpp:272, `#135`).
 - **Rate diagnostic**: the measurement chain (azimuthal FFT of mode `l` of `phi`, fit of
   the linear phase) is entirely in place on the `adc_cases` side.
 
@@ -270,7 +270,7 @@ Capabilities partially present but incomplete for an advanced Hoffart use.
 
 ### Next infrastructure blockers (can land in parallel)
 
-- **`AmrSystem.potential()` on the Python side**: binding SHIPPED (python/bindings.cpp:272, `#135`);
+- **`AmrSystem.potential()` on the Python side**: binding SHIPPED (python/bindings/core/bindings.cpp:272, `#135`);
   `phi` readable from the AMR for the azimuthal FFT of the rate diagnostic.
 - **distributed fft routed in `System`**: `DistributedFFTSolver` (band layout) exists and is
   tested separately but is NOT routed in `System` (band layout vs single box); wiring it

@@ -76,7 +76,7 @@ you choose without rewriting the coupler.
 
 ## D-6. Runtime composition facade + bindings
 
-**Decision.** The bindings (`python/bindings.cpp`) expose runtime COMPOSITION facades
+**Decision.** The bindings (`python/bindings/core/bindings.cpp`) expose runtime COMPOSITION facades
 (`System`, `AmrSystem`), not named solvers. A model is a composition of
 generic bricks (`adc.Model(state, transport, source, elliptic)`) assembled by the
 `model_factory`; no scenario is named in the lib.

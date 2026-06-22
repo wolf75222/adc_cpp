@@ -86,7 +86,7 @@ Status observed in ADC at audit time:
 - `include/adc/runtime/system.hpp` documents the contract: Python composes, the
   cell-by-cell compute stays compiled C++; no Python callback in the
   hot path, except custom integrator via `eval_rhs/get_state/set_state`.
-- `python/bindings.cpp` exposes `step` and `advance` directly. The visible
+- `python/bindings/core/bindings.cpp` exposes `step` and `advance` directly. The visible
   copies are at the `set_*` boundaries (`flat(arr)`) and diagnostics
   `get_state`, `density`, `potential` (`to_2d`, `to_3d` with `memcpy`).
 - `python/adc/integrate.py` is the path to ban from production measurements:
@@ -675,7 +675,7 @@ bench/romeo_results_frontends_adde23b_647848/
 ```
 
 The C++ frontend build was the dominant cold cost: `frontend_cpp` spent
-about 15 minutes compiling `python/system.cpp` in `-O3` before the measurements.
+about 15 minutes compiling `python/bindings/system/base/system.cpp` in `-O3` before the measurements.
 Practical conclusion: future campaigns must separate build and measurement,
 or reuse a prepared build, otherwise the campaign time mostly measures the
 compiler.

@@ -132,7 +132,7 @@ the user architecture.
   (arbitrary species) remains a later milestone (combinatorial explosion / type erasure).
 - [x] pybind11 bindings: `adc.MultiSpeciesConfig`, `adc.MultiSpeciesSolver`
   (`step/advance/density_e/density_i/potential/mass_e/mass_i/max_charge`), fields as numpy
-  (`python/bindings.cpp`, tested `python/test_bindings.py`).
+  (`python/bindings/core/bindings.cpp`, tested `python/test_bindings.py`).
 - [x] **Runtime composition**: `adc.Simulation` (`solver/simulation.{hpp,cpp}`),
   `add_species(name, charge)` adds N species on the fly, sharing a system Poisson;
   `set_density` (numpy), `step/advance`, `density/potential/mass`. The `sim.add_equation(...)`
