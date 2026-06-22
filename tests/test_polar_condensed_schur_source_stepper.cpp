@@ -27,7 +27,7 @@
 //
 // Host / Serial-safe : UNE box, n_ranks()==1 (PolarTensorKrylovSolver / PolarPoissonSolver mono-rang).
 
-#include <adc/coupling/schur/polar_condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>
 
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>

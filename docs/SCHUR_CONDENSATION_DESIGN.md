@@ -20,7 +20,7 @@ The document relies on the architecture already in place (sources read):
 - the MERGED polar Phase 1 (#116, commit `004efca`): the MESH abstraction
   (`adc.CartesianMesh` / `adc.PolarMesh` -> `System(mesh=)`), with `adc.FiniteVolume` = recon +
   Riemann + variables ONLY (no geometry argument);
-- `include/adc/core/variables.hpp` (`VariableRole`: `Density`, `MomentumX`, `MomentumY`,
+- `include/adc/core/state/variables.hpp` (`VariableRole`: `Density`, `MomentumX`, `MomentumY`,
   `MomentumZ`, `Energy`, ...);
 - `docs/BIBLIOGRAPHY.md` section 3 (Hoffart entry).
 

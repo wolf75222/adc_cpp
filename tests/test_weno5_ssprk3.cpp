@@ -14,7 +14,7 @@
 //      WENO5+SSPRK3 a une erreur < Minmod+SSPRK2 a meme resolution, et une pente de convergence > 2
 //      (au-dela de l'ordre 2 du MUSCL). Test court (n <= 64), CI-friendly.
 #include <adc/validation/physics/advection_diffusion.hpp>  // adc::validation::AdvectionDiffusion : transport scalaire (nu=0 = advection pure)
-#include <adc/runtime/builders/block_builder.hpp>
+#include <adc/runtime/builders/block/block_builder.hpp>
 
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>

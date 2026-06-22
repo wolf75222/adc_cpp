@@ -15,8 +15,8 @@
 #include <adc/core/state/variables.hpp>         // VariableSet, VariableRole, VariableKind
 #include <adc/mesh/layout/patch_box.hpp>         // PatchBox (signature index-espace des patchs fins)
 #include <adc/runtime/amr_system.hpp>     // AmrSystem, AmrSystemConfig
-#include <adc/runtime/builders/model_factory.hpp>  // detail::resolve_selected_component (ADC-296)
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::resolve_selected_component (ADC-296)
+#include <adc/runtime/config/model_spec.hpp>
 
 #include <algorithm>
 #include <climits>

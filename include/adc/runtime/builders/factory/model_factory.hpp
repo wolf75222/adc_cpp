@@ -3,8 +3,8 @@
 #include <adc/core/foundation/cold.hpp>  // ADC_COLD_FN: COLD-factory no-optimize attribute (ADC-337)
 #include <adc/core/state/variables.hpp>  // VariableSet/VariableRole/role_from_name/roles_csv (resolve_implicit_components)
 #include <adc/physics/bricks/bricks.hpp>
-#include <adc/runtime/detail/model_registry.hpp>  // kTransports/kSources/kElliptics: builtin-brick tag registry (ADC-331)
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/dynamic/model_registry.hpp>  // kTransports/kSources/kElliptics: builtin-brick tag registry (ADC-331)
+#include <adc/runtime/config/model_spec.hpp>
 
 #include <algorithm>  // std::find, std::sort (resolve_implicit_components)
 #include <stdexcept>

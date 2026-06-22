@@ -7,15 +7,15 @@
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>  // AuxHaloPolicy (ADC-369: per-field aux halo tail marshaling)
-#include <adc/runtime/detail/abi_key.hpp>   // adc::abi_key (ABI guard for the native loader)
-#include <adc/runtime/detail/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
-#include <adc/runtime/detail/grid_context.hpp>   // GridContext
+#include <adc/runtime/dynamic/abi_key.hpp>   // adc::abi_key (ABI guard for the native loader)
+#include <adc/runtime/dynamic/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
+#include <adc/runtime/context/grid_context.hpp>   // GridContext
 #include <adc/runtime/system.hpp>  // adc::System (install_block / grid_context / ensure_aux_width)
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <adc/runtime/detail/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); includes <dlfcn.h> on POSIX
+#include <adc/runtime/dynamic/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); includes <dlfcn.h> on POSIX
 #include <functional>
 #include <memory>
 #include <stdexcept>

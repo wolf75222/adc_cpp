@@ -12,8 +12,8 @@
 //      l'allocation et le resultat sont inchanges vs avant ce chantier.
 #include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
 #include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/builders/dsl_block.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/builders/compiled/dsl_block.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

@@ -28,11 +28,11 @@
 // des lambdas generiques sous concept : ils sont evalues dans la boucle HOTE de tag_cells (pas sur
 // device), donc une std::function les capturant est licite et compile partout (CPU + Kokkos).
 
-#include <adc/runtime/builders/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
 #include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
 #include <adc/runtime/amr_system.hpp>  // facade AmrSystem (deverrouillage multi-blocs + regrid_every>0)
-#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <adc/runtime/config/model_spec.hpp>
 
 #include <algorithm>
 #include <cmath>

@@ -2,7 +2,7 @@
 // euler_poisson : transport compressible (HLLC) + force de gravite + solve Poisson a CHAQUE pas +
 // pas de temps CFL. Exerce les phases 1 (transport/MultiFab), 2 (BCs) et 3 (Poisson) INTEGREES par le
 // System. On lie system.cpp et on compare CPU vs GPU. Portable seriel / Kokkos+CUDA.
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

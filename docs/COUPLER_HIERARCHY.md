@@ -78,7 +78,7 @@ point with subcycling) call `SSPRK2Step::take_step` /
 
 ## 3. SystemAssembler / SystemDriver (alias SystemCoupler) -- multi-species, single-level
 
-**File:** `include/adc/coupling/static_system/system_coupler.hpp`
+**File:** `include/adc/coupling/system/system_coupler.hpp`
 
 **Instantiations:**
 - `adc::SystemAssembler<System, RhsAssembler, Elliptic = GeometricMG>`
@@ -206,7 +206,7 @@ resynchronizes `aux` after regrid.
 
 ## 6. AmrSystemCoupler (alias AmrSystemDriver) -- multi-species, AMR
 
-**File:** `include/adc/coupling/static_system/amr_system_coupler.hpp`
+**File:** `include/adc/coupling/system/amr_system_coupler.hpp`
 
 **Instantiation:** `adc::AmrSystemCoupler<System, RhsAssembler, Elliptic = GeometricMG>`
 
@@ -314,7 +314,7 @@ blocks AND on the potential. The concept requires `apply(system, aux, dt)`.
 
 ## 9. CondensedSchurSourceStepper -- implicit Schur source stage
 
-**File:** `include/adc/coupling/schur/condensed_schur_source_stepper.hpp`
+**File:** `include/adc/coupling/schur/source/condensed_schur_source_stepper.hpp`
 
 Added in PR #126 (branch `feat/schur-pr4-stepper`).
 

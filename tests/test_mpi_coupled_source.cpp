@@ -17,7 +17,7 @@
 #include <adc/physics/composition/composite.hpp>
 #include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var, role Density)
 #include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/runtime/builders/dsl_block.hpp>   // add_compiled_model
+#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
 #include <adc/runtime/system.hpp>
 
 #include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes, miroir Python)

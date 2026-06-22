@@ -21,10 +21,10 @@
 // couplees minimales et on assertit le succes / la levee. Backend CPU/Kokkos (ctor sous ScopeGuard).
 
 #include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/runtime/builders/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
 #include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <adc/runtime/config/model_spec.hpp>
 
 #include <cstdio>
 #include <stdexcept>

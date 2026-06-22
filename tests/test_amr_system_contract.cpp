@@ -7,7 +7,7 @@
 // python/amr_system.cpp avec le test, la classe AmrSystem etant la facade des bindings.
 
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 
 #include "test_harness.hpp"  // adc::test::Checker (style verbose) + raises partages
 

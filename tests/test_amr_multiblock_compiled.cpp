@@ -34,9 +34,9 @@
 #include <adc/physics/bricks/elliptic.hpp>                 // ChargeDensity
 #include <adc/physics/bricks/hyperbolic.hpp>               // ExBVelocity
 #include <adc/physics/bricks/source.hpp>                   // NoSource
-#include <adc/runtime/builders/amr_dsl_block.hpp>            // add_compiled_model(AmrSystem&, ...)
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>            // add_compiled_model(AmrSystem&, ...)
 #include <adc/runtime/amr_system.hpp>               // facade AmrSystem
-#include <adc/runtime/model_spec.hpp>  // ModelSpec (bloc natif, melange compile + natif)
+#include <adc/runtime/config/model_spec.hpp>  // ModelSpec (bloc natif, melange compile + natif)
 
 #include <cmath>
 #include <cstdio>

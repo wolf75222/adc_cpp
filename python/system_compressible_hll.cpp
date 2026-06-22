@@ -1,6 +1,6 @@
 // ADC-335 (P0-B flux subdivision): compressible (Euler) x HLL flux only. make_block_hll forwards
 // wave_speed_cache (the only flux that engages it). See system_compressible_rusanov.cpp.
-#include <adc/runtime/builders/block_seam.hpp>
+#include <adc/runtime/builders/block/block_seam.hpp>
 
 namespace adc::detail {
 

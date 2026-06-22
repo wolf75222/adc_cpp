@@ -19,9 +19,9 @@
 // CMake injecte ADC_TEST_CXX, ADC_TEST_INCLUDE, ADC_TEST_CXX_STD, ADC_TEST_TMPDIR (meme pattern
 // que test_amr_weno5_native).
 #include <adc/physics/bricks/bricks.hpp>  // CompositeModel, Euler, NoSource, BackgroundDensity
-#include <adc/runtime/builders/amr_dsl_block.hpp>
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -114,8 +114,8 @@ std::string loader_source() {
   // emitted source verbatim.
   // clang-format off
   return R"CPP(
-#include <adc/runtime/builders/amr_dsl_block.hpp>
-#include <adc/runtime/detail/abi_key.hpp>
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <adc/runtime/dynamic/abi_key.hpp>
 #include <adc/physics/bricks/bricks.hpp>
 #include <string>
 namespace adc_generated {

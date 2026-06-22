@@ -12,7 +12,7 @@
 // central multi-patch + le Poisson somme co-localise distribues. Independant du backend (Kokkos
 // Serial CI, Kokkos Cuda GH200).
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
 
 #include <cmath>

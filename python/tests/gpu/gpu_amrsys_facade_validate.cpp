@@ -16,7 +16,7 @@
 #include <adc/core/model/equation_block.hpp>
 #include <adc/core/state/state.hpp>
 #include <adc/core/foundation/types.hpp>  // ADC_HD
-#include <adc/coupling/static_system/amr_system_coupler.hpp>
+#include <adc/coupling/system/amr_system_coupler.hpp>
 #include <adc/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>

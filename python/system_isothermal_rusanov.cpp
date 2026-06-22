@@ -3,7 +3,7 @@
 // is split one .cpp per flux like compressible. This TU instantiates ONLY the RusanovFlux build_block
 // leaves of the isothermal models (via make_block_rusanov), so they compile in parallel with the hll TU.
 // The flux is dispatched by System (riemann string); validation lives there (shared validate_*).
-#include <adc/runtime/builders/block_seam.hpp>
+#include <adc/runtime/builders/block/block_seam.hpp>
 
 namespace adc::detail {
 

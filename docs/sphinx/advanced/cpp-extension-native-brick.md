@@ -6,7 +6,7 @@ composition of generic bricks (state, transport, source, elliptic), and the per-
 computation stays compiled C++.
 
 To write a new native brick, one satisfies the `PhysicalModel` concept
-(`include/adc/core/physical_model.hpp`). The minimal contract:
+(`include/adc/core/model/physical_model.hpp`). The minimal contract:
 
 ```cpp
 template <class M>
@@ -35,5 +35,5 @@ and is exposed at runtime like the existing bricks.
   (problem / operator / solver / post-processing): [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md).
 - The design choices (concepts + policies, `for_each_cell` seam, `EllipticSolver`):
   [CHOICES.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CHOICES.md).
-- The concept and its extensions: `include/adc/core/physical_model.hpp`;
-  the reference composition: `include/adc/physics/composite.hpp`.
+- The concept and its extensions: `include/adc/core/model/physical_model.hpp`;
+  the reference composition: `include/adc/physics/composition/composite.hpp`.

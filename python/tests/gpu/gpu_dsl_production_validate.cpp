@@ -34,7 +34,7 @@
 // est le chemin AMR, couvert ailleurs).
 
 #include <adc/physics/bricks/bricks.hpp>     // CompositeModel + Euler + PotentialForce + ChargeDensity
-#include <adc/runtime/builders/dsl_block.hpp>  // add_compiled_model<Model> (gabarit natif du chemin production)
+#include <adc/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model<Model> (gabarit natif du chemin production)
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

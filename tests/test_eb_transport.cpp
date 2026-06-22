@@ -42,7 +42,7 @@
 #include <adc/numerics/fv/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>
 #include <adc/numerics/spatial/embedded_boundary/operator.hpp>
-#include <adc/runtime/detail/wall_predicate.hpp>  // detail::DiscDomain (level set source-unique)
+#include <adc/runtime/context/wall_predicate.hpp>  // detail::DiscDomain (level set source-unique)
 
 #include <cmath>
 #include <cstdio>

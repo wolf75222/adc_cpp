@@ -15,7 +15,7 @@ Euler-Poisson, two-fluid) lives in `adc` ; the named compositions live in
 state <-> transport coherence and reports the parameters into a `ModelSpec` (tags read on the C++ side by the
 model factory) ; an incoherent pairing raises an immediate `ValueError`. The builtin tags
 (transport / source / elliptic) have a single C++ source of truth,
-`include/adc/runtime/model_registry.hpp` : the dispatch validates every tag against that registry
+`include/adc/runtime/dynamic/model_registry.hpp` : the dispatch validates every tag against that registry
 (an unknown tag is rejected explicitly) and the supported-vs-not-routed combinations
 (e.g. `compressible` has no polar brick, a fluid force needs a transport with >= 3 variables) are
 encoded there as data.

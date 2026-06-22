@@ -36,7 +36,7 @@
 #include <adc/numerics/spatial/operators/polar_operator.hpp>
 #include <adc/numerics/time/integrators/time_steppers.hpp>
 #include <adc/physics/bricks/bricks.hpp>  // ExBVelocityPolar, CompositeModel, NoSource, ChargeDensity
-#include <adc/runtime/builders/block_builder_polar.hpp>  // derive_aux_polar : MEME derivation aux que System::solve_fields_polar
+#include <adc/runtime/builders/block/block_builder_polar.hpp>  // derive_aux_polar : MEME derivation aux que System::solve_fields_polar
 
 #include <cmath>
 #include <cstdio>

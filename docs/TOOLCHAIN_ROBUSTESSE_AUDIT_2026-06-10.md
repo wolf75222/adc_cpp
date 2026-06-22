@@ -6,7 +6,7 @@ same class "**build environment != runtime environment**":
 | # | Observed symptom | Root cause | Status |
 |---|---|---|---|
 | 1 | `error: invalid value 'c++23' in '-std=c++23'` (mambaforge env) | the DSL compiled its runtime `.so` files with the compiler from the **PATH** (old conda gcc/clang) and the literal **`c++23` spelling**, whereas `_adc` is built in `-std=c++2b` by another compiler | **FIXED** (3 safeguards, validated by repro) |
-| 2 | `dlopen : symbol not found in flat namespace '__ZN3adc6System13install_block...'` | `_adc` module **stale** vs headers (build before a `git pull`): the DSL loader references a C++ signature that the old `.so` does not export; the ABI guard **never** runs because the dlopen fails before it ([native_loader.hpp:634](../include/adc/runtime/native_loader.hpp) dlopen < line 647 key read) | **FIXED** (pre-dlopen guard, validated by repro) |
+| 2 | `dlopen : symbol not found in flat namespace '__ZN3adc6System13install_block...'` | `_adc` module **stale** vs headers (build before a `git pull`): the DSL loader references a C++ signature that the old `.so` does not export; the ABI guard **never** runs because the dlopen fails before it ([native_loader.hpp:634](../include/adc/runtime/builders/compiled/native_loader.hpp) dlopen < line 647 key read) | **FIXED** (pre-dlopen guard, validated by repro) |
 | 3 | `subprocess.CalledProcessError: Command [...] returned non-zero exit status 1` | `subprocess.run(check=True)` without capture: the compiler error is not surfaced in the exception | **FIXED** (`_run_compile`, stderr + remedies) |
 
 Audit conducted by a multi-agent workflow (4 lenses: `dsl.py`, CMake, env bug class, conda-forge

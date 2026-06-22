@@ -6,7 +6,7 @@
 #include <adc/core/state/variables.hpp>  // VariableSet, VariableRole, role_from_name (role -> component of coupled sources)
 #include <adc/coupling/amr/amr_coupler_mp.hpp>  // detail::coupler_inject_aux_mb (aux injection coarse->fine)
 #include <adc/coupling/amr/amr_regrid_coupler.hpp>  // regrid_compute_fine_layout + regrid_field_on_layout (split bricks)
-#include <adc/coupling/static_system/amr_system_coupler.hpp>  // detail::same_layout_or_throw (shared-layout guard)
+#include <adc/coupling/system/amr_system_coupler.hpp>  // detail::same_layout_or_throw (shared-layout guard)
 #include <adc/coupling/base/aux_fill.hpp>            // detail::derive_aux_bc (BC of the aux channel)
 #include <adc/coupling/source/coupled_source_program.hpp>  // CoupledSourceKernel + CsProgram (flat ABI, P5 bytecode)
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // field_postprocess, FieldPostProcess

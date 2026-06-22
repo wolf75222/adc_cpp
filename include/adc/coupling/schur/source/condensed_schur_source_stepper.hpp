@@ -2,8 +2,8 @@
 
 #include <adc/core/foundation/types.hpp>
 #include <adc/core/state/variables.hpp>
-#include <adc/coupling/schur/schur_condensation.hpp>  // ElectrostaticLorentzCondensation (builder #124)
-#include <adc/coupling/schur/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
+#include <adc/coupling/schur/core/schur_condensation.hpp>  // ElectrostaticLorentzCondensation (builder #124)
+#include <adc/coupling/schur/core/schur_source_kernels.hpp>  // shared geometry-free kernels + validate_krylov_params (#263)
 #include <adc/mesh/execution/for_each.hpp>
 #include <adc/mesh/geometry/geometry.hpp>
 #include <adc/mesh/storage/mf_arith.hpp>

@@ -18,7 +18,7 @@ Notes:
 
 - Kokkos is the only on-node backend and it is required: configuring without it
   (`-DADC_USE_KOKKOS=OFF`) is a fatal CMake error, and the
-  [`for_each.hpp`](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/mesh/for_each.hpp)
+  [`for_each.hpp`](https://github.com/wolf75222/adc_cpp/blob/master/include/adc/mesh/execution/for_each.hpp)
   seam does not compile without `ADC_HAS_KOKKOS` (`#error`).
 - **Kokkos does not need to be pre-installed**: CMake does `find_package(Kokkos)` then, as a fallback,
   fetches + builds it via FetchContent (version `ADC_KOKKOS_FETCH_VERSION`, default 4.4.01, tarball verified by SHA256). The

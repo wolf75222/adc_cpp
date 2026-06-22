@@ -356,7 +356,7 @@ Argument semantics :
   + `abi_key` (+ backend / target / name). Cache hit (the `.so` already exists for this key) -> no
   recompilation. Passing `so_path=` forces that path and always recompiles.
 - `include=None` : auto-detected by `adc_include()` (`$ADC_INCLUDE`, otherwise the installed `adc`
-  package, otherwise the sibling repo). Validity criterion : `adc/mesh/multifab.hpp` exists ; otherwise `RuntimeError`.
+  package, otherwise the sibling repo). Validity criterion : `adc/mesh/storage/multifab.hpp` exists ; otherwise `RuntimeError`.
 - `cxx=None` : autodetect `c++` / `g++` / `clang++` (via `shutil.which`).
 - `std=None` : default per backend. For `production` (native), the loader standard via
   `loader_cxx_std()` (= `_adc.__cxx_std__` : c++20 under Kokkos because CUDA 12.x has no `-std=c++23`,

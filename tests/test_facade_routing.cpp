@@ -20,7 +20,7 @@
 // transport DIOCOTRON de production. La vitesse derive de grad phi (Poisson sur la densite) : champ a
 // divergence nulle -> la masse est conservee par les schemas masque / EB. Compile python/system.cpp.
 
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

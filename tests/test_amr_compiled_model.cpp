@@ -9,9 +9,9 @@
 // au chemin compile le MEME type (CompressibleFlux == Euler, cf. hyperbolic.hpp) -> parite exacte.
 #include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
 #include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/builders/amr_dsl_block.hpp>
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>

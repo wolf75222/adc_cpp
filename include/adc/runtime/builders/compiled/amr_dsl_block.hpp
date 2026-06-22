@@ -1,6 +1,6 @@
 #pragma once
 
-#include <adc/coupling/schur/amr_condensed_schur_source_stepper.hpp>  // GLOBAL condensed source stage (amr-schur)
+#include <adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp>  // GLOBAL condensed source stage (amr-schur)
 #include <adc/coupling/amr/amr_coupler_mp.hpp>                      // AmrCouplerMP, AmrLevelMP
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>
@@ -16,8 +16,8 @@
 #include <adc/parallel/comm.hpp>                   // n_ranks
 #include <adc/runtime/amr/amr_runtime.hpp>  // AmrRuntimeBlock (type-erased multi-block registry)
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/builders/block_builder.hpp>  // detail::make_poisson_rhs (rhs += elliptic_rhs(U))
-#include <adc/runtime/detail/dispatch_tags.hpp>  // UNIQUE tag registry (validate_limiter/riemann)
+#include <adc/runtime/builders/block/block_builder.hpp>  // detail::make_poisson_rhs (rhs += elliptic_rhs(U))
+#include <adc/runtime/config/dispatch_tags.hpp>  // UNIQUE tag registry (validate_limiter/riemann)
 
 #include <algorithm>  // std::find, std::sort (resolving the partial IMEX mask of a compiled block)
 #include <functional>

@@ -4,7 +4,7 @@
 
 #include <adc/core/model/coupled_system.hpp>
 #include <adc/core/state/state.hpp>
-#include <adc/coupling/static_system/system_coupler.hpp>  // SystemAssembler, SystemDriver, SystemCoupler
+#include <adc/coupling/system/system_coupler.hpp>  // SystemAssembler, SystemDriver, SystemCoupler
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>
 #include <adc/mesh/execution/for_each.hpp>

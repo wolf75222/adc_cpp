@@ -331,9 +331,9 @@ ROMEO-only = **V6**. Everything through V5 (incl. MPI up to np=4) runs on the la
 
 **Phase B -- changed:**
 - `include/adc/runtime/amr_system.hpp` -- `AmrBuildParams` += `has_state,state`; `AmrCompiledBlockBuilder` typedef += `state,has_state`; declare `set_conservative_state`, `coarse_state`.
-- `include/adc/runtime/abi_key.hpp` -- **add glob-independent ABI sentinel** (`amr_builder_v=2`) [phaseB C1/H1].
+- `include/adc/runtime/dynamic/abi_key.hpp` -- **add glob-independent ABI sentinel** (`amr_builder_v=2`) [phaseB C1/H1].
 - `include/adc/coupling/amr/amr_coupler_mp.hpp` -- **new** `coupler_write_coarse_state`; **new** `coupler_read_coarse_all`.
-- `include/adc/runtime/amr_dsl_block.hpp` -- mono seed branch (90); `build_amr_block`/`dispatch_amr_block` (10 sites)/`multi_builder` += `state,has_state`.
+- `include/adc/runtime/builders/compiled/amr_dsl_block.hpp` -- mono seed branch (90); `build_amr_block`/`dispatch_amr_block` (10 sites)/`multi_builder` += `state,has_state`.
 - `python/amr_system.cpp` -- `BlockSpec` += `has_state,state`; `make_build_params` packs state; 2 multi dispatches += args; **new** `set_conservative_state` + `coarse_state` bodies.
 - `python/bindings.cpp` -- **new** `set_conservative_state` (with `ndim()==3` guard) + `coarse_state` pybind.
 - `adc_cases/hoffart_euler_poisson_dsl/run.py` -- drift-seed `build_amr` (probe in try/except, `nc` guard); docstring (15-17) + metadata (464,482) honesty fix.
@@ -342,13 +342,13 @@ ROMEO-only = **V6**. Everything through V5 (incl. MPI up to np=4) runs on the la
 **Phase C -- new:**
 - `include/adc/numerics/elliptic/amr_tensor_krylov_solver.hpp` -- multi-level BiCGStab; covered-excluded L2 reductions; per-level matvec with reflux + covered-slave; FGMRES fallback hook.
 - `include/adc/numerics/elliptic/amr_elliptic_reflux.hpp` -- `TensorFluxRegister` + `route_elliptic_reflux` (diagonal flux; conforming cross-flux if §2.3 option 1).
-- `include/adc/coupling/schur/amr_condensed_schur_source_stepper.hpp` -- per-level scratch, `step()`, lazy build, full rebuild-on-regrid.
+- `include/adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp` -- per-level scratch, `step()`, lazy build, full rebuild-on-regrid.
 - `include/adc/numerics/elliptic/amr_mg_preconditioner.hpp` -- *(Tier 1 only)* MLAT V-cycle across AMR levels.
 - `python/tests/test_amr_schur_*.py` -- V0a/V0b/V1/V2/V3/V4 drivers.
 
 **Phase C -- changed:**
-- `include/adc/numerics/elliptic/poisson_operator.hpp` -- *(only if §2.3 option 1)* `cross_div` refactor to emit C/F-conforming face cross-flux [recon-extrap G3, contradicts original "no modification"].
-- `include/adc/runtime/amr_runtime.hpp` -- `amr_schur_step`; Strang restructure (new phi-publish-without-resolve entry, half-step orchestration); **rebuild stepper after `regrid()`**; phi-restart contract (R0).
+- `include/adc/numerics/elliptic/poisson/poisson_operator.hpp` -- *(only if §2.3 option 1)* `cross_div` refactor to emit C/F-conforming face cross-flux [recon-extrap G3, contradicts original "no modification"].
+- `include/adc/runtime/amr/amr_runtime.hpp` -- `amr_schur_step`; Strang restructure (new phi-publish-without-resolve entry, half-step orchestration); **rebuild stepper after `regrid()`**; phi-restart contract (R0).
 - `include/adc/runtime/amr_system.hpp` / `python/amr_system.cpp` / `python/bindings.cpp` -- `set_source_stage` + `set_time_scheme` (validation chain mirroring `system.cpp:922-990`).
 - `python/adc/__init__.py` -- remove `isinstance(time, Split)` AMR guards; route `set_source_stage`/`set_time_scheme`.
 

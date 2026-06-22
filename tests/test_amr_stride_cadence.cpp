@@ -21,7 +21,7 @@
 
 #include <adc/core/model/coupled_system.hpp>
 #include <adc/core/state/state.hpp>
-#include <adc/coupling/static_system/amr_system_coupler.hpp>
+#include <adc/coupling/system/amr_system_coupler.hpp>
 #include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP
 #include <adc/mesh/index/box2d.hpp>
 #include <adc/mesh/layout/box_array.hpp>

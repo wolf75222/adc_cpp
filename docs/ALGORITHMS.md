@@ -216,7 +216,7 @@ function HLLC(m, UL, AL, UR, AR, dir):                 # canonical Euler 2D fall
 ```
 
 **Code.** Stateless policies in
-[`include/adc/numerics/numerical_flux.hpp`](../include/adc/numerics/numerical_flux.hpp): `RusanovFlux`,
+[`include/adc/numerics/fv/numerical_flux.hpp`](../include/adc/numerics/fv/numerical_flux.hpp): `RusanovFlux`,
 `HLLFlux`, `HLLCFlux`, `RoeFlux` (all `ADC_HD`). `RusanovFlux` loops component by component with
 `m.max_wave_speed`; `HLLFlux`/`HLLCFlux` share the free function `hll_speeds` (Davis estimates,
 requires `m.wave_speeds`); `HLLCFlux`/`RoeFlux` additionally require `m.pressure`. A non-Euler model
@@ -231,7 +231,7 @@ independently of the limiter. The `SourceFreeModel` adapter (explicit IMEX half-
 IMEX half-step stays on an HLLC flux. A moment hierarchy (no fluid roles, no primitive `p`) can also
 drive a generic Roe via the DSL emitter `m.roe_from_jacobian()` (section 23): `|A|` is applied by
 `adc::roe_abs_apply`
-([`include/adc/numerics/dense_eig.hpp`](../include/adc/numerics/dense_eig.hpp)) behind a real-spectrum
+([`include/adc/numerics/linalg/dense_eig.hpp`](../include/adc/numerics/linalg/dense_eig.hpp)) behind a real-spectrum
 gate, with a spectral-radius Rusanov fallback when `|A|` is not a faithful real spectral function.
 
 **Constraints / remarks.** `RusanovFlux` is the only flux compatible with the minimal `PhysicalModel`
@@ -351,7 +351,7 @@ function weno5z(vm2, vm1, v0, vp1, vp2):        # face entre v0 et vp1
 ```
 
 **Code.** Pointwise `Limiter` policies in
-[`include/adc/numerics/reconstruction.hpp`](../include/adc/numerics/reconstruction.hpp): `NoSlope`
+[`include/adc/numerics/fv/reconstruction.hpp`](../include/adc/numerics/fv/reconstruction.hpp): `NoSlope`
 (`n_ghost = 1`, `operator()` returns `Real(0)`), `Minmod` and `VanLeer` (`n_ghost = 2`, `operator()(a,b)`
 returns the limited slope, absolute value coded by hand to stay device-safe without `<cmath>`), `Weno5`
 (`n_ghost = 3`, a tag whose `operator()` is a no-op that just satisfies the `Limiter` concept). The
@@ -438,16 +438,16 @@ concept TimeStepper<I> = I.take_step(rhs, U, dt) compile
 ```
 
 **Code.** Two expressions coexist, separating the mathematical scheme from its usage policy.
-The tags [`include/adc/numerics/time/time_integrator.hpp`](../include/adc/numerics/time/time_integrator.hpp)
+The tags [`include/adc/numerics/time/integrators/time_integrator.hpp`](../include/adc/numerics/time/integrators/time_integrator.hpp)
 (`SSPRK2`, `SSPRK3`, `UserTimeIntegrator`) name, per block, the temporal treatment via a
 `TimePolicy<Method, TimeTreatment, Substeps, Stride>`; `TimePolicyTraits` reads these fields (and accepts
 a bare tag, then treated as `Explicit` with a single step). The aliases `ExplicitTime` / `ImplicitTime` /
 `IMEXTime` / `PrescribedTime` set the `TimeTreatment`. The object integrators
-[`include/adc/numerics/time/time_steppers.hpp`](../include/adc/numerics/time/time_steppers.hpp)
+[`include/adc/numerics/time/integrators/time_steppers.hpp`](../include/adc/numerics/time/integrators/time_steppers.hpp)
 (`ForwardEuler`, `SSPRK2Step`, `SSPRK3Step`) carry the method: each exposes
 `take_step(rhs, U, dt)` and allocates its scratch (`R`, stages `U1`/`U2`/`U3`) only from the layout of
 `U`, with no persistent state. The integrator sees only `rhs(U_stage, R)` (the method-of-lines arrow)
-and the `saxpy`/`lincomb` operations of [`include/adc/mesh/mf_arith.hpp`](../include/adc/mesh/mf_arith.hpp):
+and the `saxpy`/`lincomb` operations of [`include/adc/mesh/storage/mf_arith.hpp`](../include/adc/mesh/storage/mf_arith.hpp):
 it is agnostic of the model and of the discretization. The `TimeStepper` concept formalizes the contract, so
 that a case can provide its own `take_step` object exactly as it provides a `PhysicalModel`.
 
@@ -536,10 +536,10 @@ function backward_euler_source(model, aux, U, dt, iters, mask):
             U(i,j,:) <- W)
 ```
 
-**Code.** [`include/adc/numerics/time/imex.hpp`](../include/adc/numerics/time/imex.hpp):
+**Code.** [`include/adc/numerics/time/schemes/imex.hpp`](../include/adc/numerics/time/schemes/imex.hpp):
 `imex_euler_step(U, dt, Texpl, Simpl)` chains the in-place explicit transport then the in-place implicit
 source solve (two callables `TransportStep` / `ImplicitSourceSolve`). The implicit step lives in
-[`include/adc/numerics/time/implicit_stepper.hpp`](../include/adc/numerics/time/implicit_stepper.hpp):
+[`include/adc/numerics/time/integrators/implicit_stepper.hpp`](../include/adc/numerics/time/integrators/implicit_stepper.hpp):
 `newton_source_solve<Model>` (local per-cell Newton, forward-backward Euler for the partial IMEX),
 `detail::solve_dense<N>` (dense `n x n` resolution by Gauss elimination with partial pivoting, a
 fixed constexpr array hence device-callable, no allocation), and `backward_euler_source<Model>` which applies
@@ -614,7 +614,7 @@ function strang_step(U, dt, T, S):
 ```
 
 **Code.** The two generic bricks are in
-[`include/adc/numerics/time/splitting.hpp`](../include/adc/numerics/time/splitting.hpp):
+[`include/adc/numerics/time/schemes/splitting.hpp`](../include/adc/numerics/time/schemes/splitting.hpp):
 `lie_step(MultiFab& U, Real dt, TransportStep T, SourceStep S)` and
 `strang_step(...)`. Both are templated on `TransportStep` / `SourceStep`: $T$ and $S$ are
 callables `(MultiFab&, Real) -> void` that advance their subsystem in place, so the integrator is
@@ -731,14 +731,14 @@ function step_adaptive(cfl):                       # macro-pas = pas du bloc le 
     return macro_dt
 ```
 
-**Code.** The skeleton is [`numerics/time/scheduler.hpp`](../include/adc/numerics/time/scheduler.hpp),
+**Code.** The skeleton is [`numerics/time/scheduler.hpp`](../include/adc/numerics/time/schemes/scheduler.hpp),
 function `advance_subcycled` (two overloads: with and without `macro_step`). It reads
 `block_substeps_v`, `block_stride_v` and `block_time_treatment_v`, aliases of `TimePolicyTraits`
-defined in [`numerics/time/time_integrator.hpp`](../include/adc/numerics/time/time_integrator.hpp)
+defined in [`numerics/time/time_integrator.hpp`](../include/adc/numerics/time/integrators/time_integrator.hpp)
 (`TimePolicy<Method, Treatment, substeps, stride>`, aliases `ExplicitTime` / `ImplicitTime` /
 `IMEXTime` / `PrescribedTime`). A `TimeTreatment::Prescribed` block is skipped (the guard
 `!= Prescribed`). The step choice lives in
-[`runtime/system_stepper.hpp`](../include/adc/runtime/system_stepper.hpp): `step_cfl`,
+[`runtime/system_stepper.hpp`](../include/adc/runtime/system/system_stepper.hpp): `step_cfl`,
 `step_adaptive`, and the helper `stride_due(macro_step, stride)` that materializes the end of window
 $(k+1)\bmod m = 0$. The speed $w_b$ comes from `max_wave_speed_mf`
 ([`numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp)), collective
@@ -901,14 +901,14 @@ coarse multi-box distributed grid, otherwise the stopping criterion triggers at 
 rank and desynchronizes the MPI fluxes). The `replicated` mode replicates each level on all
 ranks (per-fab V-cycle without communication), which is what the AMR coupler expects (level 0 replicated).
 
-**Code.** [`numerics/elliptic/geometric_mg.hpp`](../include/adc/numerics/elliptic/geometric_mg.hpp):
+**Code.** [`numerics/elliptic/geometric_mg.hpp`](../include/adc/numerics/elliptic/mg/geometric_mg.hpp):
 `GeometricMG` models the `EllipticSolver` concept (`rhs()`, `phi()`, `solve()`, `residual()`);
 `vcycle_rec` is the recursion, `solve(rel_tol, max_cycles)` iterates the cycles with warm-start (`phi`
 kept between calls, 1-2 V-cycles in the established regime). The 5-point Laplacian and the smoother are
-the shared bricks of [`numerics/elliptic/poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson_operator.hpp)
+the shared bricks of [`numerics/elliptic/poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson/poisson_operator.hpp)
 (`poisson_residual`, `gs_smooth` -> `gs_rb_sweep` -> `detail::gs_color`, named ADC_HD functors
 device-clean). Restriction / prolongation reuse the AMR transfer operators `average_down`
-/ `interpolate` of [`mesh/refinement.hpp`](../include/adc/mesh/refinement.hpp). `solve_robust`
+/ `interpolate` of [`mesh/refinement.hpp`](../include/adc/mesh/layout/refinement.hpp). `solve_robust`
 adds an anti-divergence safeguard (cf. below).
 
 **Constraints / remarks.** Fully on-device (the V-cycle goes through `for_each_cell`),
@@ -953,13 +953,13 @@ function solve():                                  # DistributedFFTSolver, FFT p
     phi = re-empaqueter la bande locale
 ```
 
-**Code.** [`numerics/elliptic/poisson_fft_solver.hpp`](../include/adc/numerics/elliptic/poisson_fft_solver.hpp):
+**Code.** [`numerics/elliptic/poisson_fft_solver.hpp`](../include/adc/numerics/elliptic/poisson/poisson_fft_solver.hpp):
 `PoissonFFTSolver` (single-rank, single box) and `DistributedFFTSolver` (FFT distributed by bands /
 slabs, 1 box per rank, `MPI_Alltoall` transpose internal to `PoissonFFT`). Both model the same
 `EllipticSolver` concept (`static_assert`) as multigrid, so the coupler is generic over the
 backend (`Coupler<Model, PoissonFFTSolver>` interchangeable with `GeometricMG`). The residual reuses
 the canonical operator `poisson_residual` of
-[`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson_operator.hpp); the
+[`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson/poisson_operator.hpp); the
 distributed variant does a `fill_boundary` (inter-band halos) before the measurement and reduces by
 `all_reduce_max`. The FFT core lives in `poisson_fft.hpp` (a fix handles $n$ not a power of 2).
 
@@ -1022,7 +1022,7 @@ function ApplyLaplacianKernel(i, j):               # L = div(eps grad phi) - kap
     if hk (kappa actif):  L(i,j) -= kappa(i,j) * p(i,j)
 ```
 
-**Code.** [`numerics/elliptic/geometric_mg.hpp`](../include/adc/numerics/elliptic/geometric_mg.hpp):
+**Code.** [`numerics/elliptic/geometric_mg.hpp`](../include/adc/numerics/elliptic/mg/geometric_mg.hpp):
 `GeometricMG::set_epsilon(eps_fn | eps_fine)`, `set_reaction(kappa_fn | kappa_fine)`,
 `set_epsilon_anisotropic(eps_x, eps_y)`. Each field exists in two overloads: analytic
 (`std::function`, evaluated per level over the whole hierarchy -> exact permittivity at the coarse,
@@ -1031,7 +1031,7 @@ order 2 preserved) and already-discretized (`MultiFab` of the fine level, compon
 `System`). The $\kappa$ term (0 ghost, diagonal), the $\epsilon$ / $\epsilon_y$ fields (1 ghost,
 ghosts filled by `eps_bc`: periodic preserved, physical boundary by zero-gradient extrapolation)
 live in the ADC_HD `for_each_cell` of the smoother, the residual and the apply
-([`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson_operator.hpp):
+([`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson/poisson_operator.hpp):
 `ApplyLaplacianKernel`, `PoissonResidualKernel`, `GsColorKernel`, `eps_harmonic`) -> device. The
 fine-level coefficient pointers are also exposed (`op_eps`, `op_kappa`, `op_eps_y`, ...)
 so the Krylov solver reuses an operator consistent with the MG residual.
@@ -1054,7 +1054,7 @@ exact coefficient at each coarse resolution, which preserves the order 2 of the 
 
 **Intuition.** When the elliptic operator carries cross terms $A_{xy} \neq A_{yx}$ (a non-self-adjoint operator, for example the rotation $B^{-1}$ coming from Schur condensation), geometric multigrid alone, whose Gauss-Seidel smoother assumes a self-adjoint operator, stagnates or diverges. A non-symmetric Krylov solver is needed, preconditioned by the MG V-cycle applied to the symmetric part of the operator.
 
-**Formula / discretization.** We solve $A\,\phi = f$ with, in the convention of [`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson_operator.hpp) and of `GeometricMG`,
+**Formula / discretization.** We solve $A\,\phi = f$ with, in the convention of [`poisson_operator.hpp`](../include/adc/numerics/elliptic/poisson/poisson_operator.hpp) and of `GeometricMG`,
 
 $$L_{\mathrm{int}}(\phi) = \mathrm{div}(A\,\nabla\phi) - \kappa\,\phi, \qquad A = \begin{pmatrix} A_{xx} & A_{xy} \\ A_{yx} & A_{yy}\end{pmatrix},$$
 
@@ -1115,7 +1115,7 @@ function apply_precond(in):                   # M^{-1} a CL homogenes
     return out
 ```
 
-**Code.** [`numerics/elliptic/krylov_solver.hpp`](../include/adc/numerics/elliptic/krylov_solver.hpp): class `TensorKrylovSolver`, methods `solve(rel_tol, max_iters)` (returns a `KrylovResult`: `iters`, `rel_residual`, `converged`), `apply_operator` / `apply_operator_lin` (affine and linear matvec), `precond_raw` / `apply_precond` (raw V-cycle and homogeneous-BC V-cycle), `prepare_solve` (one-time computation of the offsets $c_{bc}$, $d_{bc}$), `residual` (current global L2 residual). The constructor takes two distinct `GeometricMG`: `op` carries the full operator (matvec + storage of $\phi$/$rhs$), `precond` carries the symmetric part (same eps but `set_cross_terms` not called). They must be separate objects, enforced by `assert(&op != &precond)`: `apply_precond` overwrites `precond.rhs()`/`precond.phi()` at each iteration, and conflating them would overwrite the iterate and the right-hand side of the solve.
+**Code.** [`numerics/elliptic/krylov_solver.hpp`](../include/adc/numerics/elliptic/linear/krylov_solver.hpp): class `TensorKrylovSolver`, methods `solve(rel_tol, max_iters)` (returns a `KrylovResult`: `iters`, `rel_residual`, `converged`), `apply_operator` / `apply_operator_lin` (affine and linear matvec), `precond_raw` / `apply_precond` (raw V-cycle and homogeneous-BC V-cycle), `prepare_solve` (one-time computation of the offsets $c_{bc}$, $d_{bc}$), `residual` (current global L2 residual). The constructor takes two distinct `GeometricMG`: `op` carries the full operator (matvec + storage of $\phi$/$rhs$), `precond` carries the symmetric part (same eps but `set_cross_terms` not called). They must be separate objects, enforced by `assert(&op != &precond)`: `apply_precond` overwrites `precond.rhs()`/`precond.phi()` at each iteration, and conflating them would overwrite the iterate and the right-hand side of the solve.
 
 **Constraints / remarks.** Iterative method, no CFL of its own; the cost depends on the conditioning of the Schur complement, hence the preconditioning by symmetric MG (1 to 2 V-cycles, parameter `n_precond_vcycles`). BiCGStab breakdown safeguards: if $|\rho|$, $|\omega|$ or $\mathrm{dot}(\hat r, v)$ fall below `kTiny` $= 10^{-300}$, the solve returns the current best effort without dividing by zero. Device/MPI: named functors only (`mf_arith`: `saxpy`/`lincomb`/`dot`, `apply_laplacian`, MG V-cycle), all device-clean. The scalar products `dot` are collective (`all_reduce_sum`) and called on all ranks, including a rank without a box (`local_size() == 0`): no short-circuit, hence no MPI deadlock nor desynchronization of the stopping criterion. Known limitation: the symmetric preconditioner loses efficiency when the antisymmetric part grows (high source CFL, large $\omega_c$); the iteration count then increases.
 
@@ -1180,7 +1180,7 @@ function CondensedSchurSourceStepper.step(state, phi, bz_field, c_bz, theta, dt)
     device_fence() ; fill_ghosts(state, foextrap) ; fill_ghosts(phi, bcPhi)
 ```
 
-**Code.** [`numerics/lorentz_eliminator.hpp`](../include/adc/numerics/lorentz_eliminator.hpp): POD struct `LorentzEliminator(theta, dt, B_z)`, methods `apply_B`/`apply_Binv`, accessors `binv_11..binv_22`; trivially copyable (static_assert), capturable by value in a kernel. [`coupling/schur_condensation.hpp`](../include/adc/coupling/schur/schur_condensation.hpp) builds the operator and the RHS without solving nor reconstructing: class `ElectrostaticLorentzCondensation`, methods `assemble_operator` (functor `SchurOperatorCoeffKernel`), `assemble_rhs` (functors `SchurExplicitFluxKernel`, `SchurRhsAssembleKernel`, `NegateKernel`), `assemble` (into a `SchurCondensationOperator`), accessor `c_coeff()`; the Density/MomentumX/MomentumY roles contract is validated on the host (exception otherwise). [`coupling/condensed_schur_source_stepper.hpp`](../include/adc/coupling/schur/condensed_schur_source_stepper.hpp): class `CondensedSchurSourceStepper`, method `step` which composes the three bricks (assembler #124, `TensorKrylovSolver` #122, `LorentzEliminator` #118), functors `SchurReconstructKernel`, `SchurExtrapolateScalarKernel`, `SchurExtrapolateVelocityKernel`, `SchurEnergyKernel`, `ExtractVelocityKernel`, `CopyBzKernel`, diagnostic `last_solve()`. This is the production source stage (#126), opt-in via `adc.Split(source=CondensedSchur)`.
+**Code.** [`numerics/lorentz_eliminator.hpp`](../include/adc/numerics/linalg/lorentz_eliminator.hpp): POD struct `LorentzEliminator(theta, dt, B_z)`, methods `apply_B`/`apply_Binv`, accessors `binv_11..binv_22`; trivially copyable (static_assert), capturable by value in a kernel. [`coupling/schur_condensation.hpp`](../include/adc/coupling/schur/core/schur_condensation.hpp) builds the operator and the RHS without solving nor reconstructing: class `ElectrostaticLorentzCondensation`, methods `assemble_operator` (functor `SchurOperatorCoeffKernel`), `assemble_rhs` (functors `SchurExplicitFluxKernel`, `SchurRhsAssembleKernel`, `NegateKernel`), `assemble` (into a `SchurCondensationOperator`), accessor `c_coeff()`; the Density/MomentumX/MomentumY roles contract is validated on the host (exception otherwise). [`coupling/condensed_schur_source_stepper.hpp`](../include/adc/coupling/schur/source/condensed_schur_source_stepper.hpp): class `CondensedSchurSourceStepper`, method `step` which composes the three bricks (assembler #124, `TensorKrylovSolver` #122, `LorentzEliminator` #118), functors `SchurReconstructKernel`, `SchurExtrapolateScalarKernel`, `SchurExtrapolateVelocityKernel`, `SchurEnergyKernel`, `ExtractVelocityKernel`, `CopyBzKernel`, diagnostic `last_solve()`. This is the production source stage (#126), opt-in via `adc.Split(source=CondensedSchur)`.
 
 **Constraints / remarks.** Stability: the theta-scheme is unconditionally stable for $\theta \geq 1/2$ ($\theta = 1$ pure implicit, the extrapolation is the identity; $\theta = 1/2$ Crank-Nicolson, extrapolation factor 2). The centered order-2 discretization (5-point Laplacian, centered divergence and gradient) fixes the spatial order. This is the source stage alone (transport frozen): $\rho$ is constant in the stage, $\rho^{n+1} = \rho^n$, and all the transport dynamics stays in the hyperbolic stage of the splitting. Safeguard: $c = 0$ and $B_z = 0$ give $A = I$, the solve becomes $\Delta\phi^{n+\theta} = \Delta\phi^n$ so $\phi^{n+\theta} = \phi^n$ (up to a constant), and the reconstruction degenerates into the explicit electrostatic push $v^{n+\theta} = v^n - \theta\, dt\,\nabla\phi^n$. The tolerance of the internal solve ($10^{-10}$, 400 iterations max) bounds the precision of the implicit relation $B v = v^n - \theta\, dt\,\nabla\phi$ (verified term by term). Device/MPI: all kernels are device-clean named functors (no extended cross-TU lambda, nvcc limit #64/#97); the MultiFab buffers are allocated once at construction and reused at each `step`; the loops iterate over `local_size()` (a rank without a box -> no kernel) and the Krylov solve is collective, so MPI-clean.
 
@@ -1245,16 +1245,16 @@ function cut_distance(lc, ln, h):
 ```
 
 **Code.** The cut geometry is centralized in
-[`include/adc/numerics/elliptic/cut_fraction.hpp`](../include/adc/numerics/elliptic/cut_fraction.hpp):
+[`include/adc/numerics/elliptic/eb/cut_fraction.hpp`](../include/adc/numerics/elliptic/eb/cut_fraction.hpp):
 `detail::cut_distance` (linear crossing of a face), `detail::cut_fraction` (the 4 half-distances
 + apertures + volume fraction `kappa`), and `detail::shortley_weller` which returns the 5 weights
 `ShortleyWellerWeights{w_xm, w_xp, w_ym, w_yp, w_diag}`. The V-cycle
-[`include/adc/numerics/elliptic/geometric_mg.hpp`](../include/adc/numerics/elliptic/geometric_mg.hpp)
+[`include/adc/numerics/elliptic/mg/geometric_mg.hpp`](../include/adc/numerics/elliptic/mg/geometric_mg.hpp)
 writes them once per level into its `coef` field (5 components) at setup (host) then reads them
 on-device; it skips the conductor cells (`m(i,j) == 0`). It is the same `cut_fraction` that the
 EB transport consumes (section 15): aperture geometry bit-consistent between Poisson and transport.
 The cut-cell and mask geometry is a named generic level-set contract in
-[`include/adc/numerics/embedded_boundary.hpp`](../include/adc/numerics/embedded_boundary.hpp) (ADC-327):
+[`include/adc/numerics/spatial/embedded_boundary/domain.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp) (ADC-327):
 a domain exposes `ADC_HD Real level_set(x, y)` (negative inside) and is directly usable as the
 `LevelSet` argument of `cut_fraction` / `assemble_rhs_eb`. Built-ins are `DiscDomain` (circle) and
 `HalfPlaneDomain`; the `LevelSetDomain` concept in the same header is diagnostics-only (a `static_assert`
@@ -1333,19 +1333,19 @@ function face_aperture(lc, ln):
 **Code.** `System::set_disc_domain(cx, cy, R, mode)` (#216,
 [`include/adc/runtime/system.hpp`](../include/adc/runtime/system.hpp), defined in
 [`python/system.cpp`](../python/system.cpp)) sets a `DiscDomain`
-([`include/adc/numerics/embedded_boundary.hpp`](../include/adc/numerics/embedded_boundary.hpp),
+([`include/adc/numerics/spatial/embedded_boundary/domain.hpp`](../include/adc/numerics/spatial/embedded_boundary/domain.hpp),
 `level_set`) and the transport mode; `set_geometry_mode(mode)` switches the mode alone; `disc_mask()`
 materializes the
 mask (all-active if no disc). The stepper routes each block: `assemble_rhs` (full),
 `assemble_rhs_masked`
 ([`include/adc/numerics/spatial_operator.hpp`](../include/adc/numerics/spatial_operator.hpp), 0/1
 gate) or `assemble_rhs_eb`
-([`include/adc/numerics/spatial_operator_eb.hpp`](../include/adc/numerics/spatial_operator_eb.hpp),
+([`include/adc/numerics/spatial/embedded_boundary/operator.hpp`](../include/adc/numerics/spatial/embedded_boundary/operator.hpp),
 EB). The device kernels are named functors (`detail::EbFaceFluxXKernel`,
 `EbFaceFluxYKernel`, `EbAssembleRhsKernel`, and the adapter `detail::DiscLevelSet` which forwards
 `DiscDomain::level_set`) for cross-TU emission under nvcc; `eb_face_aperture` closes the face toward an
 inactive neighbor. The apertures and `kappa` come from
-[`include/adc/numerics/elliptic/cut_fraction.hpp`](../include/adc/numerics/elliptic/cut_fraction.hpp)
+[`include/adc/numerics/elliptic/eb/cut_fraction.hpp`](../include/adc/numerics/elliptic/eb/cut_fraction.hpp)
 (same geometry as the elliptic cut-cell of section 14); the reconstruction (`reconstruct<>`) and
 the numerical flux (`RusanovFlux`) are reused verbatim from the Cartesian operator.
 
@@ -1431,17 +1431,17 @@ $m=0$ alone) or homogeneous Neumann (Foextrap, $\phi_{-1} = \phi_0$ -> $b_0 \mat
 + two Neumann boundaries: the radial operator has the constant in its kernel (singular tridiagonal); we fix
 the gauge by pinning $\hat\phi(0,0) = 0$ (row 0 replaced by the identity in Thomas).
 
-**Code.** [`include/adc/mesh/geometry.hpp`](../include/adc/mesh/geometry.hpp)`::PolarGeometry` (ring,
+**Code.** [`include/adc/mesh/geometry/geometry.hpp`](../include/adc/mesh/geometry/geometry.hpp)`::PolarGeometry` (ring,
 opt-in via `adc.PolarMesh`; `cfg.geometry == "polar"` on the
 [`python/system.cpp`](../python/system.cpp) side). Transport:
-[`include/adc/numerics/spatial_operator_polar.hpp`](../include/adc/numerics/spatial_operator_polar.hpp)`::assemble_rhs_polar<Limiter, NumericalFlux>`
+[`include/adc/numerics/spatial/operators/polar_operator.hpp`](../include/adc/numerics/spatial/operators/polar_operator.hpp)`::assemble_rhs_polar<Limiter, NumericalFlux>`
 (`recon_prim`, `wall_radial`), via the named functors `detail::PolarFaceFluxRKernel` (radial flux
 weighted by `r_face`, optional wall at the boundary faces), `PolarFaceFluxThetaKernel`,
 `PolarAssembleRhsKernel`; the physical source and the geometric source are routed by the concepts
 `PolarHasSource` / `PolarHasGeomSource` (`if constexpr`: zero codegen for a scalar brick,
 ExB path bit-identical). Instantiated via `runtime/block_builder_polar.hpp`, wired in
 `System::step` for `geometry == "polar"`. Poisson:
-[`include/adc/numerics/elliptic/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar_poisson_solver.hpp)`::PolarPoissonSolver`
+[`include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp`](../include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp)`::PolarPoissonSolver`
 (FFT-in-theta `fft1d` reused from `poisson_fft.hpp` + complex `thomas_solve` in r; models the
 concept `PolarEllipticSolver` `rhs()/phi()/solve()/residual()/geom()`). The aux is derived in the local
 basis $(e_r, e_\theta)$: `aux[1] = d phi/dr`, `aux[2] = (1/r) d phi/d theta`
@@ -1452,7 +1452,7 @@ high $\omega_c$), the Schur condenses a full tensor operator
 $A = I + c\,\rho\, B^{-1}$ with cross terms $a_{rt}, a_{tr}$ and a theta-dependent coefficient: the
 FFT-in-theta of `PolarPoissonSolver` no longer applies (it requires a constant theta coefficient
 without cross coupling).
-[`include/adc/numerics/elliptic/polar_tensor_operator.hpp`](../include/adc/numerics/elliptic/polar_tensor_operator.hpp)`::PolarTensorKrylovSolver`
+[`include/adc/numerics/elliptic/polar/polar_tensor_operator.hpp`](../include/adc/numerics/elliptic/polar/polar_tensor_operator.hpp)`::PolarTensorKrylovSolver`
 then solves by matrix-free BiCGStab (handles the non-symmetric of the cross term), preconditioned
 `Jacobi` or `RadialLine` (radial Thomas per theta line, default). No MG V-cycle (stagnation on
 $1/r^2$). Singular operator (pure radial Neumann + periodic theta): gauge fixed by projection onto
@@ -1541,17 +1541,17 @@ function subcycle_level(coarse_level, fine_level, dt, r=2):
         Uc(I,J) -= flux_register.at(I,J,k)
 ```
 
-**Code.** [`numerics/time/amr_reflux_mf.hpp`](../include/adc/numerics/time/amr_reflux_mf.hpp) is the
+**Code.** [`numerics/time/amr_reflux_mf.hpp`](../include/adc/numerics/time/amr/reflux/amr_reflux_mf.hpp) is the
 umbrella that aggregates the sub-headers. The unified production entry is `advance_amr` in
-[`numerics/time/amr_advance.hpp`](../include/adc/numerics/time/amr_advance.hpp) (a faithful facade of the
+[`numerics/time/amr_advance.hpp`](../include/adc/numerics/time/amr/advance/amr_advance.hpp) (a faithful facade of the
 N-level multi-patch engine `detail::amr_step_multilevel_multipatch`). The roles are promoted to named types
-in [`numerics/time/amr_patch_range.hpp`](../include/adc/numerics/time/amr_patch_range.hpp):
+in [`numerics/time/amr_patch_range.hpp`](../include/adc/numerics/time/amr/levels/amr_patch_range.hpp):
 `SubcyclingSchedule` (cadence $r$, $\Delta t/r$, $\mathrm{frac}(s)=s/r$), `PatchRange` (coarse footprint
 $[I_0..I_1]\times[J_0..J_1]$ of a fine patch), `FluxRegister` (a global-index buffer, accumulation
 `add`/`set` then `gather`), `CoverageMask` (shadowed cells), `CoarseFineInterface::route_reflux`
 (bordering deposit). The inter-level transfers `average_down` (conservative average over $r\times r$ blocks),
 `interpolate` (piecewise-constant injection) and `parallel_copy` are in
-[`mesh/refinement.hpp`](../include/adc/mesh/refinement.hpp). The per-cell fine ghost goes through
+[`mesh/refinement.hpp`](../include/adc/mesh/layout/refinement.hpp). The per-cell fine ghost goes through
 `fill_cf_ghost_cell` (space + time interpolation), shared by the three variants `mf_fill_fine_ghosts_*`.
 
 **Constraints / remarks.** The temporal ratio is fixed at $r = 2$: `PatchRange` uses the
@@ -1610,18 +1610,18 @@ function reflux_multipatch(coarse_level, fine_boxarray_global, registers, distri
 ```
 
 **Code.** The coverage-aware types live in
-[`numerics/time/amr_patch_range.hpp`](../include/adc/numerics/time/amr_patch_range.hpp):
+[`numerics/time/amr_patch_range.hpp`](../include/adc/numerics/time/amr/levels/amr_patch_range.hpp):
 `CoverageMask` (built on the coarse region, `mark` marks the intersected footprint, `covered` is
 bounded outside the region), `CoarseFineInterface` (assembles the mask on `fine_ba.size()` global patches and
 exposes `route_reflux`, a named function templated on the register type `Reg`/`RegMP` hence safe under nvcc),
 `FluxRegister::gather` (inter-rank sum by `all_reduce_sum_inplace`). The MPI routing of the distributed
 coarse goes through `parallel_copy` in
-[`mesh/refinement.hpp`](../include/adc/mesh/refinement.hpp) (general redistribution between two MultiFab
+[`mesh/refinement.hpp`](../include/adc/mesh/layout/refinement.hpp) (general redistribution between two MultiFab
 on the same domain with different decompositions: local copies via `BoxHash::query`, then
 `MPI_Isend`/`MPI_Irecv` jobs enumerated deterministically, tag 1). The replicated coarse fills its
 periodic ghosts by `fill_periodic_local` (a purely local self-fold, without an MPI plan). The
 `coarse_replicated` flag of `LevelHierarchy` (default `true`) is passed to the engine by `advance_amr` in
-[`numerics/time/amr_advance.hpp`](../include/adc/numerics/time/amr_advance.hpp); without this passing, a
+[`numerics/time/amr_advance.hpp`](../include/adc/numerics/time/amr/advance/amr_advance.hpp); without this passing, a
 de-replicated coarse would revert to replicated mode (`mf_find_box` instead of `parallel_copy`).
 
 **Constraints / remarks.** Without a coverage mask, the fine-fine joint would be refluxed twice, hence
@@ -1696,14 +1696,14 @@ function regrid_level(hierarchy, coarse_lev, crit, params):
 ```
 
 **Code.** The clustering is `berger_rigoutsos` in
-[`amr/cluster.hpp`](../include/adc/amr/cluster.hpp), with the helpers `detail::tag_bbox` (trim),
+[`amr/cluster.hpp`](../include/adc/amr/tagging/cluster.hpp), with the helpers `detail::tag_bbox` (trim),
 `detail::signature`, `detail::best_hole`, `detail::best_inflection` (max $|D[k]-D[k-1]|$),
 `detail::cluster_rec` (recursion), and the final chop by `BoxArray::from_domain(b, max_box_size)`. The
 parameters are `ClusterParams` (`min_efficiency`, `min_box_size`, `max_box_size`). The regrid is
-`regrid_level` in [`amr/regrid.hpp`](../include/adc/amr/regrid.hpp): `tag_cells` (generic predicate
+`regrid_level` in [`amr/regrid.hpp`](../include/adc/amr/regridding/regrid.hpp): `tag_cells` (generic predicate
 on `ConstArray4`), `grow_tags` (square dilation bounded to the domain), `berger_rigoutsos`, then
 `Box2D::refine(ref_ratio)`, `interpolate` and `parallel_copy` (to preserve the values of the old fine)
-of [`mesh/refinement.hpp`](../include/adc/mesh/refinement.hpp), finally `AmrHierarchy::install_level`. Without
+of [`mesh/refinement.hpp`](../include/adc/mesh/layout/refinement.hpp), finally `AmrHierarchy::install_level`. Without
 a tag, `clear_above` removes the fine level and the finer ones. Under MPI, the global OR of the tags
 (`all_reduce_or_inplace`) must precede the clustering, otherwise the fine BoxArray would differ per rank.
 
@@ -1804,13 +1804,13 @@ function fill_boundary_end(mf, h):
     unpack(recv buffers via for_each UnpackKernel) -> ghosts
 ```
 
-**Code.** [`mesh/box_array.hpp`](../include/adc/mesh/box_array.hpp) (`BoxArray::from_domain`,
+**Code.** [`mesh/box_array.hpp`](../include/adc/mesh/layout/box_array.hpp) (`BoxArray::from_domain`,
 `split_range`, the vector order is the box identity);
-[`mesh/distribution_mapping.hpp`](../include/adc/mesh/distribution_mapping.hpp)
+[`mesh/distribution_mapping.hpp`](../include/adc/mesh/layout/distribution_mapping.hpp)
 (`DistributionMapping`, round-robin `i % nranks` by default, replicated metadata);
-[`mesh/multifab.hpp`](../include/adc/mesh/multifab.hpp) (`MultiFab` allocates only the fabs where
+[`mesh/multifab.hpp`](../include/adc/mesh/storage/multifab.hpp) (`MultiFab` allocates only the fabs where
 `dm_[i] == my_rank()`, iterates over `local_size()`, `global_index` / `local_index_of` bridge);
-[`mesh/fill_boundary.hpp`](../include/adc/mesh/fill_boundary.hpp) (`fill_boundary_begin` /
+[`mesh/fill_boundary.hpp`](../include/adc/mesh/boundary/fill_boundary.hpp) (`fill_boundary_begin` /
 `fill_boundary_end` non-blocking + `fill_boundary` blocking, `HaloExchange` owns the buffers and
 `MPI_Request`, kernels `CopyShiftedKernel` / `PackKernel` / `UnpackKernel` device-clean);
 [`parallel/load_balance.hpp`](../include/adc/parallel/load_balance.hpp) (`morton_key`,
@@ -1869,15 +1869,15 @@ function make_grid(n, dx, dy, periodic, aux_in, naux):  # compiled_block_abi.hpp
     fill ghosts (memes CL que le System) -> load_aux<naux> lit B_z / T_e
 ```
 
-**Code.** [`core/physical_model.hpp`](../include/adc/core/physical_model.hpp):
+**Code.** [`core/physical_model.hpp`](../include/adc/core/model/physical_model.hpp):
 `aux_comps<M>()` (detects `M::n_aux` via `requires`, falls back to `kAuxBaseComps = 3`), lives in the
 contract header so that `CompositeModel` propagates `n_aux` without pulling in the numerics; the concept
 `PhysicalModel` enforces `M::Aux == adc::Aux`. On the virtual dispatch side,
-[`runtime/dynamic_model.hpp`](../include/adc/runtime/dynamic_model.hpp):
+[`runtime/dynamic_model.hpp`](../include/adc/runtime/dynamic/dynamic_model.hpp):
 `IModel<NV>::n_aux()` (default `kAuxBaseComps`), `ModelAdapter<M>::n_aux()` returns `aux_comps<M>()`.
 The widening is anchored in `System::ensure_aux_width` (called by
-[`runtime/dsl_block.hpp`](../include/adc/runtime/dsl_block.hpp) before `grid_context()`), and the
-flat marshaling in [`runtime/compiled_block_abi.hpp`](../include/adc/runtime/compiled_block_abi.hpp)
+[`runtime/dsl_block.hpp`](../include/adc/runtime/builders/compiled/dsl_block.hpp) before `grid_context()`), and the
+flat marshaling in [`runtime/compiled_block_abi.hpp`](../include/adc/runtime/builders/compiled/compiled_block_abi.hpp)
 (`make_grid(..., naux)`, symbol `adc_compiled_naux()` = `aux_comps<MODEL>()`).
 
 **Constraints / remarks.** The widening must precede the capture of the aux address (otherwise the
@@ -1943,7 +1943,7 @@ level via `same_layout_or_throw`, coarse Poisson co-located sum, conservation pe
 `add_coupled_source` for the inter-species sources, `n_blocks()`). On the coupling side:
 `coupling/system_coupler.hpp` (`SystemAssembler` assembles, `SystemDriver` advances),
 `coupling/amr_system_coupler.hpp` (the system carried over AMR).
-[`runtime/model_factory.hpp`](../include/adc/runtime/model_factory.hpp):
+[`runtime/model_factory.hpp`](../include/adc/runtime/builders/factory/model_factory.hpp):
 `dispatch_model` / `dispatch_transport` / `dispatch_source` / `dispatch_elliptic` assemble a
 `CompositeModel` from a `ModelSpec` (the core names no scenario).
 
@@ -2008,14 +2008,14 @@ function residual<Model>(U, R, aux_in, n, dx, dy, periodic, lim, riem, recon_pri
 ```
 
 **Code.**
-- JIT: [`runtime/dynamic_model.hpp`](../include/adc/runtime/dynamic_model.hpp) (`IModel<NV>`
+- JIT: [`runtime/dynamic_model.hpp`](../include/adc/runtime/dynamic/dynamic_model.hpp) (`IModel<NV>`
   virtual, `ModelAdapter<M>`, `make_dynamic`); `System.add_dynamic_block` wires a virtual-dispatch
   model (host path, Rusanov, prototyping).
-- AOT marshaled: [`runtime/compiled_block_abi.hpp`](../include/adc/runtime/compiled_block_abi.hpp)
+- AOT marshaled: [`runtime/compiled_block_abi.hpp`](../include/adc/runtime/builders/compiled/compiled_block_abi.hpp)
   (`make_grid`, `fill_interior` / `extract`, `residual` / `advance` / `max_speed` / `poisson_rhs`,
   macro `ADC_DEFINE_COMPILED_BLOCK`, runtime params via `make_model_with_params` and the symbols
   `_p`); `System.add_compiled_block` (`extern "C"` ABI, without AMR nor MPI).
-- AOT native: [`runtime/dsl_block.hpp`](../include/adc/runtime/dsl_block.hpp) (`add_compiled_model`,
+- AOT native: [`runtime/dsl_block.hpp`](../include/adc/runtime/builders/compiled/dsl_block.hpp) (`add_compiled_model`,
   wires a `CompositeModel` known at compile time as a native block, `ensure_aux_width` +
   `grid_context` + `make_block` + `install_block` + `set_block_ghosts`). The
   device-clean machinery is `runtime/block_builder.hpp` (named functors `BlockRhsEval`, `AdvanceExplicit`,
@@ -2024,7 +2024,7 @@ function residual<Model>(U, R, aux_in, n, dx, dy, periodic, lim, riem, recon_pri
 **Constraints / remarks.** The type-erased JIT costs an indirect jump per cell (out of the
 high-performance hot path); the AOT marshaled recopies the arrays at each call but stays mono-rank; the AOT
 native is the only zero-copy / GPU / MPI / AMR path. The native path loads a `.so` via a loader
-([`runtime/native_loader.hpp`](../include/adc/runtime/native_loader.hpp)) which compares an ABI key
+([`runtime/native_loader.hpp`](../include/adc/runtime/builders/compiled/native_loader.hpp)) which compares an ABI key
 (`abi_key`: header signature, compiler, C++ standard) between the model's `.so` and the module
 already loaded; a divergence is refused cleanly (no loading of an incompatible `.so`). The
 parity is locked at each level.
@@ -2079,7 +2079,7 @@ function sync_host():  device_fence()                # avant un acces hote (memo
 function sync_device(): pass                          # no-op sous SharedSpace (scaffolding)
 ```
 
-**Code.** [`mesh/for_each.hpp`](../include/adc/mesh/for_each.hpp): `for_each_cell` (`Kokkos::parallel_for`
+**Code.** [`mesh/for_each.hpp`](../include/adc/mesh/execution/for_each.hpp): `for_each_cell` (`Kokkos::parallel_for`
 on the execution space chosen at install, `#error` without `ADC_HAS_KOKKOS`, guard `if constexpr` device,
 threshold `foreach_serial_threshold` for the internal small host loop),
 `for_each_cell_reduce_sum` / `_max` (reducers `Kokkos::Sum` / `Max` deterministic), the variants
@@ -2087,7 +2087,7 @@ with a reducer functor `reduce_sum_cell` / `reduce_max_cell` (passed directly to
 without a wrapper lambda, a device-clean cross-TU path for a Model-template kernel), and the
 coherence seam `sync_host()` (= targeted `device_fence()`) / `sync_device()` (no-op under unified memory).
 The fabs and the reduction `sum(MultiFab)` (all-reduce on all ranks) live in
-[`mesh/multifab.hpp`](../include/adc/mesh/multifab.hpp). The MPI collectives are wrapped in
+[`mesh/multifab.hpp`](../include/adc/mesh/storage/multifab.hpp). The MPI collectives are wrapped in
 [`parallel/comm.hpp`](../include/adc/parallel/comm.hpp) (`all_reduce_sum`, `all_reduce_max`,
 `all_reduce_sum_inplace`, `all_reduce_or_inplace`, `barrier`, `comm_init` / `comm_finalize`), which
 degenerate into the serial identity.

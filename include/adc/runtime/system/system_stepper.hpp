@@ -5,7 +5,7 @@
 #include <adc/coupling/source/coupled_source_program.hpp>  // CoupledFreqKernel (per-cell coupled frequency)
 #include <adc/mesh/execution/for_each.hpp>  // reduce_max_cell (max mu over the cells, device-clean functor)
 #include <adc/parallel/comm.hpp>  // all_reduce_min/max (global bounds: identical dt on all ranks)
-#include <adc/runtime/detail/grid_context.hpp>  // GeometryMode (disk transport dispatch)
+#include <adc/runtime/context/grid_context.hpp>  // GeometryMode (disk transport dispatch)
 
 #include <stdexcept>  // std::runtime_error (disk mode requested without disk advance on a block)
 

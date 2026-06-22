@@ -49,13 +49,13 @@ To keep as the high-level surface:
 - `include/adc/runtime/amr_system.hpp`
   - `adc::runtime::AmrSystemConfig`
   - `adc::runtime::AmrSystem`
-- `include/adc/runtime/amr_runtime.hpp`
+- `include/adc/runtime/amr/amr_runtime.hpp`
   - runtime multi-block engine, shared hierarchy, regrid by union of tags.
 - `include/adc/coupling/amr/amr_coupler_mp.hpp`
   - historical mono-block path.
-- `include/adc/coupling/static_system/amr_system_coupler.hpp`
+- `include/adc/coupling/system/amr_system_coupler.hpp`
   - compile-time multi-block path.
-- `include/adc/numerics/time/amr_advance.hpp`
+- `include/adc/numerics/time/amr/advance/amr_advance.hpp`
   - `LevelHierarchy`, `advance_amr`.
 
 These APIs must keep compiling with the native backend without SAMRAI.
@@ -94,18 +94,18 @@ Proposed addition: an optional backend selector, for example
 
 | Need | Current implementation | Current files |
 |---|---|---|
-| AMR levels | `AmrHierarchy`, `AmrLevelStack`, `AmrLevelMP` | `include/adc/amr/amr_hierarchy.hpp`, `include/adc/coupling/amr/amr_level_storage.hpp`, `include/adc/numerics/time/amr_subcycling.hpp` |
-| Patches | `Box2D`, `BoxArray`, local/global index of `MultiFab` | `include/adc/mesh/box2d.hpp`, `include/adc/mesh/box_array.hpp`, `include/adc/mesh/multifab.hpp` |
+| AMR levels | `AmrHierarchy`, `AmrLevelStack`, `AmrLevelMP` | `include/adc/amr/hierarchy/amr_hierarchy.hpp`, `include/adc/coupling/amr/amr_level_storage.hpp`, `include/adc/numerics/time/amr/levels/amr_subcycling.hpp` |
+| Patches | `Box2D`, `BoxArray`, local/global index of `MultiFab` | `include/adc/mesh/index/box2d.hpp`, `include/adc/mesh/layout/box_array.hpp`, `include/adc/mesh/storage/multifab.hpp` |
 | Hierarchy | vectors of levels and `MultiFab`, fixed ref ratio 2 | `amr_hierarchy.hpp`, `amr_runtime.hpp`, `amr_coupler_mp.hpp` |
-| Distribution | `DistributionMapping` round-robin/explicit | `include/adc/mesh/distribution_mapping.hpp` |
-| Data | `MultiFab` -> contiguous `Fab2D`, ghosts, `sync_host/device` | `include/adc/mesh/multifab.hpp`, `include/adc/mesh/fab2d.hpp` |
-| Intra-level ghost fill | hand-rolled MPI halos | `include/adc/mesh/fill_boundary.hpp` |
-| Physical BC | `BCRec`, `fill_physical_bc`, `fill_ghosts` | `include/adc/mesh/physical_bc.hpp` |
-| Interpolation/restriction | `interpolate`, `average_down`, `parallel_copy` | `include/adc/mesh/refinement.hpp` |
-| Tags and clustering | `TagBox`, `tag_cells`, `grow_tags`, `berger_rigoutsos` | `include/adc/amr/tag_box.hpp`, `include/adc/amr/regrid.hpp`, `include/adc/amr/cluster.hpp` |
-| Regrid production | fine layout imposed, multi-block union already implemented | `include/adc/coupling/amr/amr_regrid_coupler.hpp`, `include/adc/runtime/amr_runtime.hpp` |
-| Reflux | `FluxRegister`, `CoverageMask`, `CoarseFineInterface` | `include/adc/numerics/time/amr_patch_range.hpp`, `include/adc/numerics/time/amr_reflux*.hpp` |
-| Subcycling | Berger-Oliger ratio 2, average-down, reflux | `include/adc/numerics/time/amr_subcycling.hpp` |
+| Distribution | `DistributionMapping` round-robin/explicit | `include/adc/mesh/layout/distribution_mapping.hpp` |
+| Data | `MultiFab` -> contiguous `Fab2D`, ghosts, `sync_host/device` | `include/adc/mesh/storage/multifab.hpp`, `include/adc/mesh/storage/fab2d.hpp` |
+| Intra-level ghost fill | hand-rolled MPI halos | `include/adc/mesh/boundary/fill_boundary.hpp` |
+| Physical BC | `BCRec`, `fill_physical_bc`, `fill_ghosts` | `include/adc/mesh/boundary/physical_bc.hpp` |
+| Interpolation/restriction | `interpolate`, `average_down`, `parallel_copy` | `include/adc/mesh/layout/refinement.hpp` |
+| Tags and clustering | `TagBox`, `tag_cells`, `grow_tags`, `berger_rigoutsos` | `include/adc/amr/tagging/tag_box.hpp`, `include/adc/amr/regridding/regrid.hpp`, `include/adc/amr/tagging/cluster.hpp` |
+| Regrid production | fine layout imposed, multi-block union already implemented | `include/adc/coupling/amr/amr_regrid_coupler.hpp`, `include/adc/runtime/amr/amr_runtime.hpp` |
+| Reflux | `FluxRegister`, `CoverageMask`, `CoarseFineInterface` | `include/adc/numerics/time/amr/levels/amr_patch_range.hpp`, `include/adc/numerics/time/amr_reflux*.hpp` |
+| Subcycling | Berger-Oliger ratio 2, average-down, reflux | `include/adc/numerics/time/amr/levels/amr_subcycling.hpp` |
 | Elliptic | `GeometricMG`, limited `CompositeFacPoisson`, coarse solve + injection by default | `include/adc/numerics/elliptic/*`, `include/adc/coupling/amr/amr_coupler_mp.hpp` |
 | Physics | local models, fluxes, sources, CFL, DSL/native | `include/adc/physics`, `include/adc/numerics`, `include/adc/runtime` |
 
@@ -407,7 +407,7 @@ Exit criterion:
 Files:
 
 - `include/adc/samrai/transfer_adapter.hpp`
-- `include/adc/numerics/time/amr_flux_helpers.hpp` if a generic interface
+- `include/adc/numerics/time/amr/reflux/amr_flux_helpers.hpp` if a generic interface
   is needed.
 - `tests/test_samrai_refinement.cpp`
 - `tests/test_samrai_cf_interface.cpp`
@@ -456,8 +456,8 @@ Exit criterion:
 Files:
 
 - `include/adc/samrai/flux_register_adapter.hpp`
-- `include/adc/numerics/time/amr_subcycling.hpp`
-- `include/adc/numerics/time/amr_patch_range.hpp`
+- `include/adc/numerics/time/amr/levels/amr_subcycling.hpp`
+- `include/adc/numerics/time/amr/levels/amr_patch_range.hpp`
 - `include/adc/runtime/amr_system_samrai.hpp`
 - `tests/test_samrai_flux_register.cpp`
 - `tests/test_samrai_amr_diffusion.cpp`
@@ -481,7 +481,7 @@ Files:
 
 - `include/adc/samrai/elliptic_adapter.hpp`
 - `include/adc/coupling/amr/amr_coupler_mp.hpp`
-- `include/adc/runtime/amr_runtime.hpp`
+- `include/adc/runtime/amr/amr_runtime.hpp`
 - `tests/test_samrai_amr_potential.cpp`
 
 Work:

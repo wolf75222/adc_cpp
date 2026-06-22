@@ -17,7 +17,7 @@ from test_dsl_brick import build_euler_brick   # Euler en formules + prim_state 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 LIB = r"""
-#include <adc/runtime/detail/dynamic_model.hpp>
+#include <adc/runtime/dynamic/dynamic_model.hpp>
 #include <adc/core/state/variables.hpp>
 %s
 extern "C" adc::IModel<4>* adc_make_model() { return new adc::ModelAdapter<adc_generated::EulerGen>(); }
@@ -26,7 +26,7 @@ extern "C" void adc_destroy_model(adc::IModel<4>* p) { delete p; }
 
 MAIN = r"""
 #include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/detail/dynamic_model.hpp>
+#include <adc/runtime/dynamic/dynamic_model.hpp>
 #include <dlfcn.h>
 #include <cstdio>
 #include <cmath>

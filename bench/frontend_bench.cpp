@@ -1,4 +1,4 @@
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 
 #include <chrono>

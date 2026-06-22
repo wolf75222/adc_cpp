@@ -1,9 +1,9 @@
 #pragma once
 
 #include <adc/core/state/variables.hpp>         // VariableSet (block descriptor carried in BuiltBlock)
-#include <adc/runtime/builders/block_builder.hpp>  // make_block + makers + BlockClosures + NewtonOptions/Report
-#include <adc/runtime/builders/block_builder_polar.hpp>  // make_block_polar + polar makers + PolarGridContext
-#include <adc/runtime/builders/model_factory.hpp>  // dispatch_model_for + resolve_implicit_components + ModelSpec
+#include <adc/runtime/builders/block/block_builder.hpp>  // make_block + makers + BlockClosures + NewtonOptions/Report
+#include <adc/runtime/builders/block/block_builder_polar.hpp>  // make_block_polar + polar makers + PolarGridContext
+#include <adc/runtime/builders/factory/model_factory.hpp>  // dispatch_model_for + resolve_implicit_components + ModelSpec
 
 #include <functional>
 #include <string>

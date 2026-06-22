@@ -45,7 +45,7 @@
 
 #include <adc/parallel/comm.hpp>
 #include <adc/physics/composition/composite.hpp>
-#include <adc/runtime/builders/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem&, ...)
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem&, ...)
 #include <adc/runtime/amr_system.hpp>
 
 #include "hyqmom15_brick.hpp"

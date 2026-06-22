@@ -15,7 +15,7 @@
 #include <adc/parallel/comm.hpp>
 #include <adc/physics/bricks/bricks.hpp>
 #include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/builders/amr_dsl_block.hpp>
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 
 #ifdef ADC_HAS_KOKKOS

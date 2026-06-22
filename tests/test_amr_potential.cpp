@@ -11,7 +11,7 @@
 // Le modele est un transport ExB pur + fond neutralisant (briques exb / none / background), proche du
 // scenario diocotron qui echantillonne phi sur un cercle median (FFT azimutale).
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/runtime/system.hpp>
 
 #include <cmath>

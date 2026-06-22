@@ -1,19 +1,19 @@
 #include <adc/runtime/amr_system.hpp>
 
-#include <adc/runtime/detail/abi_key.hpp>  // detail::abi_key_string: ABI key (header-only), compared to the loader's
-#include <adc/runtime/builders/amr_dsl_block.hpp>  // detail::dispatch_amr_compiled + build_amr_compiled (shared path)
+#include <adc/runtime/dynamic/abi_key.hpp>  // detail::abi_key_string: ABI key (header-only), compared to the loader's
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::dispatch_amr_compiled + build_amr_compiled (shared path)
 #include <adc/runtime/amr/amr_runtime.hpp>  // AmrRuntime + AmrRuntimeBlock (multi-block runtime engine)
-#include <adc/runtime/builders/amr_block_seam.hpp>  // ADC-335: per-transport AMR build seam (build_amr_block/_compiled_<transport>)
-#include <adc/runtime/builders/model_factory.hpp>  // detail::dispatch_model + compiled bricks
-#include <adc/runtime/detail/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
-#include <adc/runtime/detail/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
+#include <adc/runtime/builders/block/amr_block_seam.hpp>  // ADC-335: per-transport AMR build seam (build_amr_block/_compiled_<transport>)
+#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model + compiled bricks
+#include <adc/runtime/dynamic/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
+#include <adc/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
 #include <adc/numerics/time/integrators/implicit_stepper.hpp>  // NewtonOptions + validate_newton_options (shared range check)
 
 #include <algorithm>  // std::find, std::sort (partial IMEX mask resolution: sorted unique indices)
 #include <cmath>
 #include <cstddef>
 #include <limits>  // std::numeric_limits (global step bounds: neutralization to +inf before the min)
-#include <adc/runtime/detail/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
+#include <adc/runtime/dynamic/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
 #include <functional>
 #include <memory>
 #include <stdexcept>

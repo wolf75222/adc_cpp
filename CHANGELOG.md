@@ -239,6 +239,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **`include/adc` deep re-nest, phase 5 (final): runtime split + coupling families finished**
+  (ADC-396, follow-up of ADC-395): `runtime/` keeps only the public facade at top (system,
+  amr_system, facade_options, export); `detail/` splits into `config/` (runtime_params,
+  dispatch_tags, model_spec), `context/` (grid_context, wall_predicate) and `dynamic/` (abi_key,
+  dynlib, dynamic_model, model_registry); `builders/` splits into `block/`, `compiled/` and
+  `factory/`. `coupling/static_system/` is renamed `coupling/system/`, and `coupling/schur/` splits
+  into `core/`, `source/` and `amr/`. Every internal `#include <adc/...>` and the DSL emit (runtime
+  config/dynamic/builders paths) are repointed. Public include-path break (pre-1.0). Completes the
+  include/adc family layout.
 - **`include/adc` deep re-nest, phase 4: numerics split into sub-families** (ADC-395, follow-up of
   ADC-394): top-level numerics headers move to `linalg/` (dense_eig, lorentz_eliminator) and `fv/`
   (numerical_flux, reconstruction, spatial_discretisation); `spatial/` splits into `primitives/`

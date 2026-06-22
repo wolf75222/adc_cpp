@@ -5,8 +5,8 @@
 // the host path read 0 SILENTLY (#51-class gap, but for named fields). This pins the marshaling.
 
 #include <adc/core/state/state.hpp>
-#include <adc/runtime/detail/dynamic_model.hpp>
-#include <adc/runtime/builders/native_loader.hpp>
+#include <adc/runtime/dynamic/dynamic_model.hpp>
+#include <adc/runtime/builders/compiled/native_loader.hpp>
 
 #include <cmath>
 #include <cstdio>

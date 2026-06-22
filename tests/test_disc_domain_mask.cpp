@@ -32,7 +32,7 @@
 #include <adc/numerics/fv/numerical_flux.hpp>
 #include <adc/numerics/fv/reconstruction.hpp>
 #include <adc/numerics/spatial_operator.hpp>
-#include <adc/runtime/detail/wall_predicate.hpp>  // detail::DiscDomain (descripteur source-unique)
+#include <adc/runtime/context/wall_predicate.hpp>  // detail::DiscDomain (descripteur source-unique)
 
 #include <cmath>
 #include <cstdio>

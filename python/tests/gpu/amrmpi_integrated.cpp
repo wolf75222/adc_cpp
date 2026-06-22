@@ -18,7 +18,7 @@
 // et on encadre la mesure de temps par Kokkos::fence() pour ne pas sous-estimer le cout device.
 #include <adc/physics/bricks/bricks.hpp>
 #include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/builders/amr_dsl_block.hpp>
+#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
 #include <adc/runtime/amr_system.hpp>
 #include <adc/parallel/comm.hpp>
 

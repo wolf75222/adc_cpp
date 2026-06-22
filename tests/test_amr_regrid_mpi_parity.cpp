@@ -31,7 +31,7 @@
 // Independant du backend (Kokkos Serial CI, Kokkos Cuda GH200). Compile le runtime AmrSystem comme
 // test_mpi_amr_twoblock_parity (avec python/amr_system.cpp).
 #include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/model_spec.hpp>
+#include <adc/runtime/config/model_spec.hpp>
 #include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
 
 #include "test_harness.hpp"  // adc::test::checksum (somme des carres partagee)

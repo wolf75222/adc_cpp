@@ -18,7 +18,7 @@ Sources read for this audit:
 - cases `adc_cases/diocotron/{run.py,README.md,band_instability.py}`,
   `adc_cases/diocotron_amr/run.py`, `adc_cases/two_fluid_ap/`, `adc_cases/cases_manifest.toml`;
 - bindings: `python/system.cpp`, `python/amr_system.cpp`, `python/bindings.cpp`,
-  `python/adc/__init__.py`, `python/adc/dsl.py`, `include/adc/numerics/elliptic/geometric_mg.hpp`.
+  `python/adc/__init__.py`, `python/adc/dsl.py`, `include/adc/numerics/elliptic/mg/geometric_mg.hpp`.
 
 ## Reproduction status (factual)
 
@@ -44,7 +44,7 @@ candidate is the **Cartesian ring edge**.
 ## The structural blocker: Cartesian ring edge
 
 The Shortley-Weller cut-cell capability (`docs/ALGORITHMS.md` section 12) lives ONLY in
-`include/adc/numerics/elliptic/geometric_mg.hpp`: it places the circular Dirichlet conducting wall
+`include/adc/numerics/elliptic/mg/geometric_mg.hpp`: it places the circular Dirichlet conducting wall
 at its REAL position for the POISSON solver. But the hyperbolic transport
 (`numerics/spatial_operator.hpp`, `numerics/numerical_flux.hpp`, `numerics/reconstruction.hpp`)
 has NO notion of an embedded boundary: the charge ring is advected on the full Cartesian grid.

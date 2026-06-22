@@ -18,7 +18,7 @@
 //      runtime_error explicite (jamais un scaling muet d'une composante arbitraire).
 #include <adc/validation/physics/advection_diffusion.hpp>
 #include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/builders/block_builder.hpp>
+#include <adc/runtime/builders/block/block_builder.hpp>
 
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>

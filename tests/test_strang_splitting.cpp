@@ -30,8 +30,8 @@
 // dans des branches MORTES ici (s.schur / s.schur_polar restent nullptr ; on passe par source_step).
 // Le member-access ->step(...) exige neanmoins le type COMPLET a l'instanciation -> on inclut les deux
 // en-tetes Schur (comme python/system.cpp). On n'en CONSTRUIT aucun objet : le test reste leger.
-#include <adc/coupling/schur/condensed_schur_source_stepper.hpp>
-#include <adc/coupling/schur/polar_condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>
 
 #include <cmath>
 #include <cstdio>

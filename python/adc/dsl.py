@@ -2679,7 +2679,7 @@ class HyperbolicModel:
             "// Satisfait adc::HyperbolicModel : flux + max_wave_speed + conversions + descripteurs.",
         ]
         if rt_member:  # RuntimeParams header only if a formula reads a runtime param
-            S.append("#include <adc/runtime/detail/runtime_params.hpp>")
+            S.append("#include <adc/runtime/config/runtime_params.hpp>")
         # dense_eig.hpp : eigenvalues of dense blocks (exact wave_speeds) OU temoin de VP dans la
         # projection (m.projection + dsl.eig_max_im, ADC-289). Sans l'un ou l'autre : non inclus.
         eig_pairs = _collect_eig_witnesses(self._proj or [])
@@ -3153,7 +3153,7 @@ class HyperbolicModel:
             "// apply(U, a) -> terme source S(U, aux) ; noms aux = champs de adc::Aux (grad_x, grad_y).",
         ]
         if rt_member:  # RuntimeParams header only if a formula reads a runtime param
-            S.append("#include <adc/runtime/detail/runtime_params.hpp>")
+            S.append("#include <adc/runtime/config/runtime_params.hpp>")
         if self._ws_jacobian is not None:  # dense-block eigenvalues (exact wave_speeds)
             S.append("#include <adc/numerics/linalg/dense_eig.hpp>")
         S += [
@@ -3280,7 +3280,7 @@ class HyperbolicModel:
                              "(m.projection) non transportee par ce chemin ; utiliser "
                              "backend='aot' ou 'production'")
         nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
-        return ('#include <adc/runtime/detail/dynamic_model.hpp>\n'
+        return ('#include <adc/runtime/dynamic/dynamic_model.hpp>\n'
                 '#include <adc/physics/bricks/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
                 '#include <adc/core/state/variables.hpp>\n'
                 + bricks
@@ -3325,7 +3325,7 @@ class HyperbolicModel:
         (assemble_rhs<Limiter, Flux>, the core's SSPRK2/IMEX) on the generated model: inlined numerics,
         identical to a native add_block block. As opposed to the "jit" backend (IModel, virtual dispatch)."""
         nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
-        return ('#include <adc/runtime/builders/compiled_block_abi.hpp>\n'
+        return ('#include <adc/runtime/builders/compiled/compiled_block_abi.hpp>\n'
                 '#include <adc/physics/bricks/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
                 '#include <adc/core/state/variables.hpp>\n'
                 + bricks
@@ -3427,13 +3427,13 @@ class HyperbolicModel:
                 '#include <array>\n'
                 '#include <cstddef>\n'
                 '#include <string>\n'
-                '#include <adc/runtime/detail/abi_key.hpp>\n'         # ADC_ABI_KEY_LITERAL (key frozen at compile)
+                '#include <adc/runtime/dynamic/abi_key.hpp>\n'         # ADC_ABI_KEY_LITERAL (key frozen at compile)
                 '#include <adc/physics/bricks/bricks.hpp>\n'          # CompositeModel + NoSource + bricks
                 '#include <adc/core/state/variables.hpp>\n')
         # Header template of the target: dsl_block.hpp (System) or amr_dsl_block.hpp (AmrSystem). Included
         # selectively so as not to pull the AMR machinery into a System loader (and vice versa).
-        head += ('#include <adc/runtime/builders/dsl_block.hpp>\n' if target == "system"
-                 else '#include <adc/runtime/builders/amr_dsl_block.hpp>\n')
+        head += ('#include <adc/runtime/builders/compiled/dsl_block.hpp>\n' if target == "system"
+                 else '#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>\n')
         # preprocessor LITERAL, no call to abi_key_string(): an inline would be interposed
         # (ELF/RTLD_GLOBAL) toward the module's copy -> module's key returned -> tautological guard.
         key = ('#if defined(_WIN32)\n'
@@ -3856,7 +3856,7 @@ class HyperbolicModel:
             "// rhs(U) -> Real : second membre f(U) de l'operateur elliptique (p.ex. densite de charge).",
         ]
         if rt_member:  # RuntimeParams header only if a formula reads a runtime param
-            out.append("#include <adc/runtime/detail/runtime_params.hpp>")
+            out.append("#include <adc/runtime/config/runtime_params.hpp>")
         out += [
             "namespace %s {" % namespace,
             "struct %s {" % nm,
@@ -4738,7 +4738,7 @@ class HybridModel:
         (aot backend: same flat ABI as emit_cpp_aot_source). The bricks (generated DSL or native binding
         structs) are stitched together, then assembled into adc::CompositeModel<...>."""
         hyp, src, ell = self._slots
-        parts = ['#include <adc/runtime/builders/compiled_block_abi.hpp>\n',
+        parts = ['#include <adc/runtime/builders/compiled/compiled_block_abi.hpp>\n',
                  '#include <adc/physics/bricks/bricks.hpp>\n',   # CompositeModel + native bricks
                  '#include <adc/core/state/variables.hpp>\n']   # ADC_EXPORT_BLOCK_METADATA / _GAMMA
         for slot in self._slots:
@@ -4784,7 +4784,7 @@ class HybridModel:
         Rusanov residual): fast iteration, to be plugged via System.add_dynamic_block. Hybrid
         counterpart of emit_cpp_so_source."""
         bricks, composite = self._bricks_and_composite()
-        return ('#include <adc/runtime/detail/dynamic_model.hpp>\n'
+        return ('#include <adc/runtime/dynamic/dynamic_model.hpp>\n'
                 '#include <adc/physics/bricks/bricks.hpp>\n'
                 '#include <adc/core/state/variables.hpp>\n'
                 + bricks
@@ -4811,13 +4811,13 @@ class HybridModel:
         if target not in ("system", "amr_system"):
             raise ValueError("_emit_native_source: target 'system' | 'amr_system' (got %r)" % (target,))
         bricks, composite = self._bricks_and_composite()
-        head = ('#include <adc/runtime/detail/abi_key.hpp>\n'        # ADC_ABI_KEY_LITERAL (key frozen at compile time)
+        head = ('#include <adc/runtime/dynamic/abi_key.hpp>\n'        # ADC_ABI_KEY_LITERAL (key frozen at compile time)
                 '#include <adc/physics/bricks/bricks.hpp>\n'         # CompositeModel + native bricks
                 '#include <adc/core/state/variables.hpp>\n'
                 '#include <string>\n')
         # Header template of the target (selective: do not pull the AMR machinery into a System loader).
-        head += ('#include <adc/runtime/builders/dsl_block.hpp>\n' if target == "system"
-                 else '#include <adc/runtime/builders/amr_dsl_block.hpp>\n')
+        head += ('#include <adc/runtime/builders/compiled/dsl_block.hpp>\n' if target == "system"
+                 else '#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>\n')
         # Preprocessor LITERAL, no call to abi_key_string(): an inline would be interposed
         # (ELF/RTLD_GLOBAL) toward the module's copy -> module key returned -> tautological guard.
         key = ('#if defined(_WIN32)\n'

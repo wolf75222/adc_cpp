@@ -15,7 +15,7 @@
 // Le routage effectif (chaque tag builtin atteint bien une branche du dispatch) est verifie cote
 // test_config_model_validation.cpp, qui lie la machinerie de dispatch.
 
-#include <adc/runtime/detail/model_registry.hpp>
+#include <adc/runtime/dynamic/model_registry.hpp>
 
 #include <cstdio>
 #include <stdexcept>

@@ -27,8 +27,8 @@
 // Serie (Kokkos OFF) : n_ranks() == 1. L'etage uniforme est par ailleurs deja rejoue MPI np=1/2/4 par
 // son propre test ; la parite mono-niveau est une propriete de composition, independante du rang.
 
-#include <adc/coupling/schur/amr_condensed_schur_source_stepper.hpp>
-#include <adc/coupling/schur/condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>
 
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>

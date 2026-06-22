@@ -30,7 +30,7 @@
 // les rangs, y compris vides) : iterations et resultat invariants au nombre de rangs. Les verifs
 // (ecarts MAX, normes) sont reduites par all_reduce_max : un FAIL sur un rang -> FAIL partout.
 
-#include <adc/coupling/schur/condensed_schur_source_stepper.hpp>
+#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>
 
 #include <adc/mesh/layout/box_array.hpp>
 #include <adc/mesh/layout/distribution_mapping.hpp>
