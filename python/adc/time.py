@@ -326,6 +326,116 @@ class Program:
         blob = json.dumps(self._serialize(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode()).hexdigest()
 
+    # --- C++ codegen (Phase 2c-ii): lower the IR to a problem.so source ---
+    def emit_cpp_program(self):
+        """Generate the C++ source of a problem.so implementing this Program (codegen, Phase 2c-ii).
+
+        The text exports the stable .so ABI -- ``adc_program_abi_key`` (the ``ADC_ABI_KEY_LITERAL``
+        preprocessor literal, NOT the interposable inline), ``adc_program_name``,
+        ``adc_program_hash``, ``adc_install_program`` -- and installs the step as a closure built from
+        `ProgramContext` primitives only (no MultiFab / flux / solver reimplementation). It is the
+        source the C++ loader (`System::install_program`) compiles, dlopens, and runs.
+
+        MVP scope: a single-block Forward-Euler step ``U <- U + c*dt*R`` over the ``"default"``
+        source. Schemes the codegen cannot yet lower -- multi-stage (needs scratch states), named
+        sources (need source masks) -- raise NotImplementedError, never a silent mis-lowering. Later
+        phases extend the lowering (scratch states, source masks, control flow, Krylov)."""
+        self.validate()
+        rhs_coeff = self._forward_euler_rhs_coeff()  # raises if not the FE pattern
+        return _PROGRAM_CPP_TEMPLATE.format(name=json.dumps(self.name), hash=self._ir_hash(),
+                                            axpy_coeff=_coeff_cpp(rhs_coeff))
+
+    def _forward_euler_rhs_coeff(self):
+        """Recognize the single-block Forward-Euler pattern and return the RHS coefficient as a
+        ``power -> float`` dict. Raise NotImplementedError for anything the MVP codegen cannot lower
+        yet, with a message naming the unsupported construct."""
+        if len(self._commits) != 1:
+            raise NotImplementedError(
+                "emit_cpp_program currently supports a single committed block (single-block Forward "
+                "Euler); this Program commits %d" % len(self._commits))
+        combines = [v for v in self._values if v.op == "linear_combine"]
+        if len(combines) != 1:
+            raise NotImplementedError(
+                "emit_cpp_program currently supports single-stage Forward Euler only; this Program "
+                "has %d linear-combination stages (multi-stage needs scratch states, a later phase)"
+                % len(combines))
+        committed = next(iter(self._commits.values()))
+        if committed.op != "linear_combine":
+            raise NotImplementedError(
+                "emit_cpp_program: the committed state must be a linear combination (Forward Euler)")
+        state_terms, rhs_terms = [], []
+        for inp, coeff in zip(committed.inputs, committed.attrs["coeffs"], strict=True):
+            if inp.op == "state":
+                state_terms.append((inp, coeff))
+            elif inp.vtype == "rhs":
+                rhs_terms.append((inp, coeff))
+            else:
+                raise NotImplementedError(
+                    "emit_cpp_program: unexpected term %r in the committed combination" % inp.name)
+        if len(state_terms) != 1 or len(rhs_terms) != 1:
+            raise NotImplementedError(
+                "emit_cpp_program: Forward Euler expects U + c*dt*R (one state, one rhs term); got "
+                "%d state and %d rhs terms" % (len(state_terms), len(rhs_terms)))
+        if state_terms[0][1] != {0: 1.0}:
+            raise NotImplementedError(
+                "emit_cpp_program: the state term must have coefficient 1 (in-place Forward Euler)")
+        rhs = rhs_terms[0][0]
+        extra = [s for s in (rhs.attrs.get("sources") or []) if s != "default"]
+        if extra:
+            raise NotImplementedError(
+                "emit_cpp_program currently supports the 'default' source only; named sources %r "
+                "need source masks (Phase 4)" % extra)
+        return rhs_terms[0][1]
+
+
+def _coeff_cpp(powers):
+    """Render a dt-polynomial coefficient (``power -> float`` dict) as a C++ ``adc::Real`` expression
+    in the closure's ``dt`` parameter: ``{1: 1.0}`` -> ``static_cast<adc::Real>(dt)``,
+    ``{1: 0.5}`` -> ``static_cast<adc::Real>(0.5 * dt)``, ``{0: 2.0}`` ->
+    ``static_cast<adc::Real>(2.0)``. Drops a unit factor and a zero polynomial collapses to 0."""
+    if not powers:
+        return "static_cast<adc::Real>(0)"
+    terms = []
+    for power, coeff in sorted(powers.items()):
+        factors = ["dt"] * int(power)
+        if float(coeff) != 1.0 or not factors:
+            factors = [repr(float(coeff))] + factors
+        terms.append(" * ".join(factors))
+    return "static_cast<adc::Real>(%s)" % " + ".join(terms)
+
+
+# Source of a generated problem.so (Forward-Euler MVP). The includes + adc_install_program closure
+# match the shape tests/test_program_loader compiles+runs in CI; adc_program_hash is added per the
+# spec .so ABI (a cache/restart key) and is not yet consumed by System::install_program. {name} is a
+# JSON-escaped C string literal, {hash} the IR hash, {axpy_coeff} the dt-coefficient expression;
+# braces in the C++ body are doubled for str.format.
+_PROGRAM_CPP_TEMPLATE = '''\
+// GENERATED by adc.time.Program.emit_cpp_program (epic ADC-399 / ADC-401). Do not edit by hand.
+// A compiled time Program installed across the stable .so ABI: it drives sim.step(dt) entirely in
+// C++ via ProgramContext, reusing the adc_cpp runtime (no MultiFab / flux / solver reimplementation).
+#include <adc/runtime/program/program_context.hpp>
+#include <adc/runtime/dynamic/abi_key.hpp>
+#include <adc/mesh/storage/multifab.hpp>
+#include <adc/core/foundation/types.hpp>
+
+extern "C" const char* adc_program_abi_key() {{ return ADC_ABI_KEY_LITERAL; }}
+extern "C" const char* adc_program_name() {{ return {name}; }}
+extern "C" const char* adc_program_hash() {{ return "{hash}"; }}
+
+extern "C" void adc_install_program(void* sys) {{
+  adc::runtime::program::ProgramContext ctx(sys);
+  ctx.install([ctx](double dt) {{
+    ctx.solve_fields();
+    for (int b = 0; b < ctx.n_blocks(); ++b) {{
+      adc::MultiFab& U = ctx.state(b);
+      adc::MultiFab R = ctx.rhs_scratch_like(U);
+      ctx.rhs_into(b, U, R);
+      ctx.axpy(U, {axpy_coeff}, R);
+    }}
+  }});
+}}
+'''
+
 
 # --- Standard library: time-stepping macros that LOWER to the Program IR (adc.time.std, ADC-407) ----
 # These are NOT separate C++ steppers: each builds adc.time.Program IR via the same builder ops + the

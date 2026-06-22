@@ -217,6 +217,14 @@ add_test(NAME test_time_std
 set_tests_properties(test_time_std PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Time-program codegen (ADC-401 Phase 2c-ii) : Program.emit_cpp_program lowers the IR to a problem.so
+# C++ source (Forward-Euler MVP). Pure Python (no compile) : asserts the stable .so ABI + the FE
+# algorithm via ProgramContext, and that multi-stage / named sources are refused, not mis-lowered.
+add_test(NAME test_time_codegen
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_codegen.py)
+set_tests_properties(test_time_codegen PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.

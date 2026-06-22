@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`adc.time.Program.emit_cpp_program`: lower the IR to a `problem.so` source** (ADC-401, Phase
+  2c-ii codegen): generates the C++ of a compiled time Program -- the stable `.so` ABI
+  (`adc_program_abi_key` via the `ADC_ABI_KEY_LITERAL` literal, `adc_program_name`,
+  `adc_program_hash`, `adc_install_program`) plus the step expressed purely through `ProgramContext`
+  primitives (`solve_fields` + `rhs_into` + `axpy`), the source `System::install_program` compiles
+  and runs. MVP lowers single-block Forward Euler; multi-stage (needs scratch states) and named
+  sources beyond `default` (need source masks) raise `NotImplementedError`, never a silent
+  mis-lowering. `python/tests/test_time_codegen.py` pins the generated ABI + algorithm and the refusals.
 - **`System::install_program`: load a compiled time-program `.so`** (ADC-401, Phase 2c-i): the runtime
   path that drives a compiled time Program from a generated `problem.so`. `install_program(so_path)`
   dlopens the `.so`, checks its `adc_program_abi_key` against the module (fail-loud on mismatch), and
