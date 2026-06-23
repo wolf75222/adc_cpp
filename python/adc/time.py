@@ -387,21 +387,37 @@ class Program:
             raise ValueError("state: block must be a non-empty string")
         return self._new("state", "state", (), {}, block, block)
 
-    def solve_fields(self, name=None, state=None):
+    def solve_fields(self, name=None, state=None, field=None):
         """Solve the elliptic fields from ``state`` and return a FieldContext. Accepts
         ``solve_fields(state)`` or ``solve_fields(name, state)``. Each call is a DISTINCT
         FieldContext (a stage's RHS must read the fields solved from its own state, never a stale
-        global)."""
+        global). @p field (ADC-419) names a NAMED elliptic field (m.elliptic_field) to solve instead of
+        the default Poisson coupling; its derived aux populate that field's named aux channel. The
+        multi-field RUNTIME is DEFERRED: a non-None @p field lowers to a clear NotImplementedError
+        (the IR records it so a program reads cleanly when the runtime lands)."""
         if isinstance(name, Value) and state is None:
             name, state = None, name
         if not (isinstance(state, Value) and state.vtype == "state"):
             raise ValueError("solve_fields: a State value is required")
-        return self._new("fields", "solve_fields", (state,), {}, name, state.block)
+        if field is not None and not (isinstance(field, str) and field):
+            raise ValueError("solve_fields: field must be a non-empty named elliptic field")
+        # The attr is added ONLY for a named field so a default solve_fields keeps its historical IR
+        # (empty attrs) -> the .so cache key of an existing time program is byte-identical (no spurious
+        # invalidation from this feature).
+        attrs = {"field": field} if field is not None else {}
+        return self._new("fields", "solve_fields", (state,), attrs, name, state.block)
 
     def rhs(self, name=None, state=None, fields=None, flux=True, sources=None, fluxes=None):
         """Build R = -div F(U) + sum of the requested named ``sources``. ``fields`` is the explicit
         FieldContext any field-dependent source reads (no implicit global aux). Named sources are
-        never summed implicitly: ``sources`` lists exactly the ones to include."""
+        never summed implicitly: ``sources`` lists exactly the ones to include.
+
+        ``fluxes`` (ADC-419) selects the PHYSICAL flux: ``None`` or ``["default"]`` uses the model's
+        historical -div F (the compiled Riemann/FV path, byte-identical to before). A list of NAMED
+        fluxes (``m.flux_term``) assembles -div of their SUM via centered FV differencing of the
+        evaluated flux fields: so splitting the physical flux into named pieces that sum to it
+        reproduces the same -div F to round-off. Mixing ``"default"`` with named fluxes is rejected
+        (the two divergence stencils differ); request either the default or a set of named fluxes."""
         if isinstance(name, Value):
             raise ValueError("rhs: pass state=/fields= by keyword (first arg is the debug name)")
         if not (isinstance(state, Value) and state.vtype == "state"):
@@ -1573,7 +1589,45 @@ class Program:
             for w in v.attrs["apply_block"]:
                 self._check_op_lowerable(w, model)
             return
+        if v.op == "solve_fields":
+            # A NAMED elliptic field (ADC-419) needs a second elliptic operator + its own aux channel,
+            # which the runtime does not host yet -> lower to a clear NotImplementedError (the IR /
+            # validation / hash for the named field land; only the multi-field SOLVE is deferred).
+            field = v.attrs.get("field")
+            if field is not None:
+                if model is not None and field not in _model_impl(model)._elliptic_fields:
+                    raise ValueError(
+                        "unknown elliptic_field '%s' in solve_fields '%s'; declared: %s"
+                        % (field, v.name, sorted(_model_impl(model)._elliptic_fields)))
+                raise NotImplementedError(
+                    "emit_cpp_program cannot lower solve_fields with a named elliptic field ('%s'): "
+                    "the multi-elliptic-field runtime (a second elliptic operator + its own aux "
+                    "channel) is deferred; only the default Poisson coupling (solve_fields without "
+                    "field=) is lowered" % field)
+            return
         if v.op == "rhs":
+            named_fluxes = _named_fluxes(v)
+            if named_fluxes is not None:  # NAMED fluxes (ADC-419): need the model's flux_term coeffs
+                if model is None:
+                    raise NotImplementedError(
+                        "emit_cpp_program cannot lower rhs '%s' with named fluxes %r without the "
+                        "physical model that declares them (m.flux_term); pass model= "
+                        "(compile_problem threads it through)" % (v.name, named_fluxes))
+                impl_f = _model_impl(model)
+                ft = impl_f._flux_terms
+                for f in named_fluxes:
+                    if f not in ft:
+                        raise ValueError(
+                            "unknown flux_term '%s' in rhs '%s'; declared flux_terms: %s"
+                            % (f, v.name, sorted(ft)))
+                # The named-flux path emits -div(selected fluxes) only (no ctx.rhs_into), so the model's
+                # DEFAULT source would be silently dropped -- reject it (it must be requested as a named
+                # source_term instead). The named sources below are still axpy'd on top.
+                if getattr(impl_f, "_source", None):
+                    raise NotImplementedError(
+                        "rhs with named fluxes %r needs a model whose default source is empty (no "
+                        "m.source); rhs '%s' has a non-empty default source that the named-flux path "
+                        "would drop (declare it as a source_term instead)" % (named_fluxes, v.name))
             extra = [s for s in (v.attrs.get("sources") or []) if s != "default"]
             if not extra:
                 return
@@ -1589,6 +1643,8 @@ class Program:
             # Adding a named source on top of a non-empty default would DOUBLE-COUNT, so the named-
             # source rhs is only sound when the default source is empty (the named-source-only model the
             # predictor-corrector uses). A flux-only seam ('default' / no sources) is unaffected.
+            # NOTE: a NAMED-flux rhs (-div of selected named fluxes, no rhs_into) carries no default
+            # source either, so the same empty-default invariant keeps it free of double-counting.
             if getattr(impl, "_source", None):
                 raise NotImplementedError(
                     "rhs with named sources needs a model whose default source is empty (no "
@@ -1716,10 +1772,25 @@ class Program:
             var[v.id] = "r%d" % v.id
             lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
                          % (var[v.id], var[state_in.id]))
-            # R <- -div F + default/composite source (ctx.rhs_into). _check_lowerable guarantees the
-            # model's default source is EMPTY when named sources are requested, so rhs_into here is
-            # flux-only (-div F) and the named sources below are added without double-counting.
-            lines.append("ctx.rhs_into(0, %s, %s);" % (var[state_in.id], var[v.id]))
+            named_fluxes = _named_fluxes(v)
+            if named_fluxes is None:
+                # R <- -div F + default/composite source (ctx.rhs_into). _check_lowerable guarantees the
+                # model's default source is EMPTY when named sources are requested, so rhs_into here is
+                # flux-only (-div F) and the named sources below are added without double-counting.
+                lines.append("ctx.rhs_into(0, %s, %s);" % (var[state_in.id], var[v.id]))
+            else:
+                # NAMED fluxes (ADC-419): R <- -div(sum of selected named fluxes). Evaluate the SUM of
+                # the flux expressions per direction into two n_cons scratch fields (fx / fy) by a
+                # per-cell kernel, then take the negated centered FV divergence into R. Linear in the
+                # named pieces -> splitting the physical flux into named pieces that sum to it gives the
+                # SAME -div (to round-off). Distinct stencil from rhs_into (centered FV vs Riemann), so
+                # this path is NEVER mixed with the default (guarded by _named_fluxes).
+                fx = "%s_fx" % var[v.id]
+                fy = "%s_fy" % var[v.id]
+                lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);" % (fx, var[state_in.id]))
+                lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);" % (fy, var[state_in.id]))
+                lines += _emit_flux_kernel(model, named_fluxes, var[state_in.id], fx, fy)
+                lines.append("ctx.neg_div_flux_into(%s, %s, %s);" % (var[v.id], fx, fy))
             named = [s for s in (v.attrs.get("sources") or []) if s != "default"]
             for s in named:
                 # R += S_s(U, aux): assemble the named source into a scratch (same per-cell kernel as
@@ -2233,6 +2304,23 @@ def _model_impl(model):
     return getattr(model, "_m", model)
 
 
+def _named_fluxes(v):
+    """Resolve a ``rhs`` op's ``fluxes`` attr to the list of NAMED fluxes to assemble (ADC-419), or
+    ``None`` for the historical default flux path (``ctx.rhs_into`` -- byte-identical -div F). ``None``
+    or ``["default"]`` -> default path; a list of named fluxes -> that list. Mixing ``"default"`` with
+    named fluxes is rejected (the centered-FV named-flux stencil differs from the Riemann rhs_into
+    stencil, so they cannot be summed)."""
+    fluxes = v.attrs.get("fluxes")
+    if not fluxes or fluxes == ["default"]:
+        return None
+    named = [f for f in fluxes if f != "default"]
+    if len(named) != len(fluxes):
+        raise ValueError(
+            "rhs '%s': fluxes mixes 'default' with named fluxes %r; request either the default flux "
+            "(-div F via rhs_into) or a set of named fluxes (their -div sum), not both" % (v.name, named))
+    return named
+
+
 def _aux_comp(impl, name):
     """Component index of an aux field @p name in the System aux channel: canonical (dsl.AUX_CANONICAL)
     or a model NAMED aux field (dsl.AUX_NAMED_BASE + position in aux_extra_names). @p impl is the
@@ -2276,12 +2364,19 @@ def _cell_locals(impl, exprs, state_var, *, with_cons, with_prim):
     for e in exprs:
         deps |= e.deps()
     lines = []
+    live = impl._live_prims(exprs) if with_prim else set()
+    # A live primitive's formula (e.g. u = mx / rho) references conservative variables that the top
+    # expressions may not name directly: bind those TRANSITIVE cons too, else the emitted prim line
+    # references an undeclared local. (Existing source/apply kernels read cons directly, so this only
+    # ADDS the cons a live prim pulls in -- it never drops one that was already bound.)
+    cons_needed = set(deps)
+    for p in live:
+        cons_needed |= {d for d in impl.prim_defs[p].deps() if d in impl.cons_names}
     if with_cons:
         for idx, c in enumerate(impl.cons_names):
-            if c in deps:
+            if c in cons_needed:
                 lines.append("const adc::Real %s = %sA(i, j, %d);" % (c, state_var, idx))
     if with_prim:
-        live = impl._live_prims(exprs)  # closure over the live primitives
         for p, expr in impl.prim_defs.items():  # declaration order (a prim may use an earlier prim)
             if p in live:
                 lines.append("const adc::Real %s = %s;" % (p, expr.to_cpp()))
@@ -2374,6 +2469,37 @@ def _emit_source_kernel(model, name, state_var, out_var):
     body += ["    " + ln for ln in _cell_locals(impl, exprs, state_var, with_cons=True,
                                                  with_prim=True)]
     body += ["    outA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(exprs)]
+    body += _kernel_close()
+    return body
+
+
+def _emit_flux_kernel(model, names, state_var, fx_var, fy_var):
+    """Lower NAMED fluxes (ADC-419): fxA(i,j,c) = sum_k F^k_x[c](U, prims, aux),
+    fyA(i,j,c) = sum_k F^k_y[c](U, prims, aux) over the selected named fluxes @p names. ONE kernel
+    evaluates the SUM per direction into the two n_cons flux fields (the subsequent neg_div_flux_into
+    takes -div). Reuses the same per-cell local machinery as the source kernel (cons/prim/aux locals)."""
+    impl = _model_impl(model)
+    flux_terms = impl._flux_terms
+    for name in names:
+        if name not in flux_terms:
+            raise NotImplementedError(
+                "emit_cpp_program: flux '%s' is not declared on the model (m.flux_term); declared: %s"
+                % (name, sorted(flux_terms)))
+    n = len(impl.cons_names)
+    x_exprs = [flux_terms[names[0]]["x"][c] for c in range(n)]
+    y_exprs = [flux_terms[names[0]]["y"][c] for c in range(n)]
+    for name in names[1:]:  # accumulate the additional named fluxes (their SUM is one -div)
+        x_exprs = [x_exprs[c] + flux_terms[name]["x"][c] for c in range(n)]
+        y_exprs = [y_exprs[c] + flux_terms[name]["y"][c] for c in range(n)]
+    body = _kernel_open(fx_var, state_var)
+    # fx and fy share the (ba, dm) of the scratch state, so the SAME loop / handles write both: bind a
+    # second write handle to fy's local fab right after _kernel_open's outA (= fxA), still INSIDE the
+    # per-fab loop and BEFORE for_each_cell so the device lambda captures it.
+    body.insert(3, "  const adc::Array4 fyA = %s.fab(li).array();" % fy_var)
+    body += ["    " + ln for ln in _cell_locals(impl, x_exprs + y_exprs, state_var, with_cons=True,
+                                                 with_prim=True)]
+    body += ["    outA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(x_exprs)]
+    body += ["    fyA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(y_exprs)]
     body += _kernel_close()
     return body
 

@@ -1618,6 +1618,13 @@ class HyperbolicModel:
         self.aux_names = []      # CANONICAL aux fields read (phi/grad/B_z/T_e), cf. AUX_CANONICAL
         self.aux_extra_names = []  # NAMED aux fields (aux_field): order = index AUX_NAMED_BASE + k
         self._flux = {}         # "x" / "y" -> list of Expr (one per conservative component)
+        self._flux_terms = {}   # NAMED physical fluxes (flux_term, ADC-419): name -> {"x": [Expr],
+                                # "y": [Expr]} (n_cons each). The implicit "default" flux lives in
+                                # self._flux (m.flux / set_flux), so a model that only ever calls m.flux
+                                # keeps this dict EMPTY -- the named keys enter _model_hash ONLY when
+                                # non-empty (cache key preserved). A compiled Program selects a SUM of
+                                # named fluxes via ctx.rhs(..., fluxes=[name, ...]); fluxes=["default"]
+                                # (or no list) keeps the historical -div F (rhs_into), byte-identical.
         self._eig = {}          # "x" / "y" -> list of Expr (eigenvalues)
         self._wave_speeds = None  # {"x"/"y": (smin Expr, smax Expr)}: explicit SIGNED speeds
                                   # (set_wave_speeds); None = derived from the eigenvalues if 'p' (historical)
@@ -1631,6 +1638,13 @@ class HyperbolicModel:
         self._linear_sources = {}  # NAMED local linear operators (linear_source): name -> [[Expr]]
                                    # (n_cons x n_cons), coefficients linear in U (no cons/prim dependency).
         self._elliptic = None   # Expr (contribution to the elliptic right-hand side) or None
+        self._elliptic_fields = {}  # NAMED elliptic fields (elliptic_field, ADC-419): name -> dict
+                                    # {"rhs": Expr, "operator": str, "aux": [str]}. The unnamed default
+                                    # stays in self._elliptic (m.elliptic_rhs); the named keys enter
+                                    # _model_hash ONLY when non-empty (cache key preserved). The runtime
+                                    # (a second elliptic operator / aux channel) is DEFERRED: the IR +
+                                    # validation + hash + codegen-IR land, but ctx.solve_fields(field=)
+                                    # raises NotImplementedError on lowering (cf. time.py).
         self._stab_speed = None  # Expr: STABILITY speed lambda* (None = fallback eigenvalues)
         self._stab_dt = None     # Expr: direct ADMISSIBLE step dt(U, aux) (None = no bound)
         self._src_freq = None    # Expr: frequency mu(U, aux) of the SOURCE (None = no bound)
@@ -1723,6 +1737,37 @@ class HyperbolicModel:
 
     def set_flux(self, x, y): self._flux = {"x": list(x), "y": list(y)}
     def set_eigenvalues(self, x, y): self._eig = {"x": list(x), "y": list(y)}
+
+    def flux_term(self, name, x, y):
+        """Declare a NAMED physical flux F_name(U, primitives, aux, params): exactly n_cons
+        expressions per direction (x= the x-flux, y= the y-flux), free to depend on cons / primitives /
+        aux / aux_field / params / constants -- the same dependency surface as set_flux. A named flux is
+        OPT-IN: it is emitted only when a compiled time Program selects it (ctx.rhs(..., fluxes=[name,
+        ...])) and is NEVER folded into the historical -div F (rhs_into). name == "default" is the
+        backward-compatible alias of m.flux(...) (stored in self._flux, hash unchanged): so
+        ctx.rhs(fluxes=["default"]) is byte-identical to the historical flux-only RHS. Other names must
+        be valid identifiers, unique, and not collide with another named flux. A Program that requests
+        several named fluxes assembles -div of their SUM (the codegen emits one kernel per name and
+        sums them), so splitting the physical flux into named pieces that sum to it reproduces -div F."""
+        n = self.n_vars
+        if n == 0:
+            raise ValueError("flux_term(%r): declare conservative_vars(...) first" % (name,))
+        if not isinstance(name, str) or not name:
+            raise ValueError("flux_term: name must be a non-empty string")
+        x = [_wrap(e) for e in x]
+        y = [_wrap(e) for e in y]
+        if len(x) != n or len(y) != n:
+            raise ValueError("flux_term('%s'): %d/%d expressions (x/y) for %d conservative variables"
+                             % (name, len(x), len(y), n))
+        if name == "default":
+            self._flux = {"x": x, "y": y}   # equivalent to m.flux(...) -- the legacy default flux
+            return
+        if not name.isidentifier():
+            raise ValueError("flux_term('%s'): name must be a valid identifier "
+                             "(letters/digits/_, no leading digit)" % name)
+        if name in self._flux_terms:
+            raise ValueError("flux_term('%s'): already declared" % name)
+        self._flux_terms[name] = {"x": x, "y": y}
 
     def set_wave_speeds(self, x, y):
         """Explicit SIGNED wave speeds per direction: x = (smin_x, smax_x), y = (smin_y,
@@ -1839,6 +1884,45 @@ class HyperbolicModel:
                              "explicit": x is not None}
     def set_source(self, s): self._source = [_wrap(e) for e in s]
     def set_elliptic_rhs(self, e): self._elliptic = _wrap(e)
+
+    def elliptic_field(self, name, rhs, operator="poisson", aux=None):
+        """Declare a NAMED elliptic field (ADC-419): an elliptic solve ``operator(field) = rhs(U)``
+        whose solution + derived quantities populate the NAMED aux fields @p aux (default
+        ``["phi", "grad_x", "grad_y"]``, the canonical electrostatic triple). @p rhs is an Expr of
+        cons / primitives / aux / params (the elliptic right-hand side assembled from the state, the
+        same surface as set_elliptic_rhs). @p operator names the elliptic operator (only ``"poisson"``
+        is hosted by the runtime today). A named elliptic field is OPT-IN; the unnamed default stays in
+        self._elliptic (m.elliptic_rhs). name must be a valid identifier, unique, and not collide with
+        the default.
+
+        SCOPE: the IR + validation + hash + codegen-IR for the named field land here, but the RUNTIME
+        (a SECOND elliptic operator with its own aux-channel allocation) is DEFERRED -- the System hosts
+        a single elliptic solve + the shared aux channel, so ctx.solve_fields(field=name) raises a clear
+        NotImplementedError on lowering rather than mis-solving (cf. time.py / report)."""
+        n = self.n_vars
+        if n == 0:
+            raise ValueError("elliptic_field(%r): declare conservative_vars(...) first" % (name,))
+        if not isinstance(name, str) or not name:
+            raise ValueError("elliptic_field: name must be a non-empty string")
+        if name == "default":
+            raise ValueError("elliptic_field('default'): the default elliptic field is m.elliptic_rhs "
+                             "(set_elliptic_rhs); pass a distinct name")
+        if not name.isidentifier():
+            raise ValueError("elliptic_field('%s'): name must be a valid identifier "
+                             "(letters/digits/_, no leading digit)" % name)
+        if operator != "poisson":
+            raise ValueError("elliptic_field('%s'): operator '%s' is not supported (only 'poisson')"
+                             % (name, operator))
+        if name in self._elliptic_fields:
+            raise ValueError("elliptic_field('%s'): already declared" % name)
+        aux = list(aux) if aux is not None else ["phi", "grad_x", "grad_y"]
+        if not aux:
+            raise ValueError("elliptic_field('%s'): aux must list at least one field" % name)
+        for a in aux:
+            if not (isinstance(a, str) and a.isidentifier()):
+                raise ValueError("elliptic_field('%s'): aux field %r is not a valid identifier"
+                                 % (name, a))
+        self._elliptic_fields[name] = {"rhs": _wrap(rhs), "operator": operator, "aux": aux}
 
     def source_term(self, name, exprs):
         """Declare a NAMED local source S_name(U, primitives, aux, params): exactly n_cons
@@ -2289,6 +2373,8 @@ class HyperbolicModel:
             groups.append(exprs)
         for mat in self._linear_sources.values():  # NAMED linear operators (linear_source)
             groups.append([e for row in mat for e in row])
+        for flx in self._flux_terms.values():  # NAMED fluxes (flux_term, ADC-419)
+            groups.append(list(flx["x"]) + list(flx["y"]))
         for e in self.prim_defs.values():
             used |= e.deps()
         for grp in groups:
@@ -2296,6 +2382,8 @@ class HyperbolicModel:
                 used |= e.deps()
         if self._elliptic is not None:
             used |= self._elliptic.deps()
+        for fld in self._elliptic_fields.values():  # NAMED elliptic fields (elliptic_field, ADC-419)
+            used |= fld["rhs"].deps()
         missing = used - known
         if missing:
             raise ValueError("model '%s': undefined variables %s" % (self.name, sorted(missing)))
@@ -3761,8 +3849,26 @@ class HyperbolicModel:
             parts.append("linear_sources=%s" % ";".join(
                 "%s:[%s]" % (k, ";".join(repr(e) for row in m._linear_sources[k] for e in row))
                 for k in sorted(m._linear_sources)))
+        # NAMED fluxes (flux_term, ADC-419) fold into the hash ONLY when present: a model that never
+        # declares a named flux keeps a STRICTLY identical cache key to the historical one. Sorted by
+        # name (order-insensitive); changing a named-flux expression invalidates the .so cache.
+        if getattr(m, "_flux_terms", None):
+            parts.append("flux_terms=%s" % ";".join(
+                "%s:x[%s]:y[%s]" % (k,
+                                    ",".join(repr(e) for e in m._flux_terms[k]["x"]),
+                                    ",".join(repr(e) for e in m._flux_terms[k]["y"]))
+                for k in sorted(m._flux_terms)))
         parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
         parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
+        # NAMED elliptic fields (elliptic_field, ADC-419): same conditional policy -- folded only when
+        # present, so a model without a named elliptic field keeps its historical cache key. Each entry
+        # folds the rhs Expr, the operator and the ordered aux-field list (changing any invalidates the .so).
+        if getattr(m, "_elliptic_fields", None):
+            parts.append("elliptic_fields=%s" % ";".join(
+                "%s:%s:%s:[%s]" % (k, m._elliptic_fields[k]["operator"],
+                                   repr(m._elliptic_fields[k]["rhs"]),
+                                   ",".join(m._elliptic_fields[k]["aux"]))
+                for k in sorted(m._elliptic_fields)))
         parts.append("stab_speed=%s" % (repr(m._stab_speed) if m._stab_speed is not None else ""))
         parts.append("stab_dt=%s" % (repr(m._stab_dt) if m._stab_dt is not None else ""))
         parts.append("src_freq=%s" % (repr(m._src_freq) if m._src_freq is not None else ""))
@@ -4360,6 +4466,15 @@ class Model:
         per conservative component. DO NOT confuse with the numpy evaluator eval_flux."""
         self._m.set_flux(x, y)
 
+    def flux_term(self, name, x, y):
+        """NAMED physical flux F_name(U, primitives, aux, params): exactly n_cons expressions per
+        direction (delegates to HyperbolicModel.flux_term). Opt-in -- emitted only when a compiled time
+        Program selects it (ctx.rhs(..., fluxes=[name, ...])), never folded into the historical -div F.
+        name='default' is the backward-compatible alias of m.flux(...): ctx.rhs(fluxes=['default']) is
+        byte-identical to the historical flux-only RHS. A Program requesting several named fluxes
+        assembles -div of their SUM."""
+        self._m.flux_term(name, x, y)
+
     def eval_flux(self, U, aux, dir):
         """numpy EVALUATOR of the physical flux (debug / host proto; delegates to HyperbolicModel.flux).
         U: numpy (n_vars, ...); aux: dict name -> array; dir: 0=x, 1=y."""
@@ -4509,6 +4624,13 @@ class Model:
     def elliptic_rhs(self, e):
         """Contribution to the elliptic right-hand side (Poisson coupling; delegates to set_elliptic_rhs)."""
         self._m.set_elliptic_rhs(e)
+
+    def elliptic_field(self, name, rhs, operator="poisson", aux=None):
+        """NAMED elliptic field: an elliptic solve operator(field) = rhs(U) populating the named @p aux
+        fields (default ['phi', 'grad_x', 'grad_y']); delegates to HyperbolicModel.elliptic_field. The
+        IR + validation + hash land; the multi-field RUNTIME (a second elliptic operator + aux channel)
+        is DEFERRED -- ctx.solve_fields(field=name) raises NotImplementedError on lowering."""
+        self._m.elliptic_field(name, rhs, operator=operator, aux=aux)
 
     def gamma(self, value):
         """Adiabatic index (EOS), carried by ADC_EXPORT_BLOCK_GAMMA (delegates to set_gamma)."""
