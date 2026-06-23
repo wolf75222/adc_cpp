@@ -34,6 +34,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   Program history '<name>'"), and `System::install_program` reports an ABI mismatch explicitly
   ("compiled program ABI mismatch: expected '<...>', got '<...>'"). New
   `python/tests/test_time_ops_polish.py`.
+- **Time-program examples + docs batch** (ADC-415, epic ADC-399 acceptance 35): five new runnable
+  programs in `examples/time_programs/` -- `ssprk3_program.py` (compiled SSPRK3 == native
+  `adc.Explicit("ssprk3")` bit-for-bit), `strang_program.py` (compiled `std.strang` == native
+  `adc.Strang` bit-for-bit on an uncoupled model), `predictor_corrector_poisson_lorentz.py` (the spec
+  Example 5 named-source / Lorentz predictor-corrector vs an offline staged reference),
+  `adams_bashforth2_program.py` (AB2 over the System-owned history vs an offline AB2 reference), and
+  `condensed_schur_program.py` (the available divergence + matrix-free + Krylov primitives, plus the
+  documented `std.condensed_schur` `NotImplementedError` gap). Each self-skips cleanly (exit 0) without
+  a compiler / a visible Kokkos. `docs/sphinx/reference/time-program.md` refreshes the "What is
+  implemented today" table (histories/multistep + checkpoint/restart now end-to-end; `condensed_schur`
+  marked partial; rows added for substeps/stride, step_cfl routing, `solve_fields_from_state`, the
+  differential primitives, reductions, and `solve_local_linear`) and `symbolic-dsl.md` gains
+  `source_term` (named opt-in sources) and `linear_source` (named local linear operators, the Lorentz
+  3x3) sections.
 - **Divergence primitive + condensed-Schur partial** (ADC-412, acceptance 32): a centered
   finite-volume divergence is factored as `adc::apply_divergence` (next to `adc::apply_laplacian` in
   `poisson_operator.hpp`; the native Schur condensation keeps its bit-identical inline copy),

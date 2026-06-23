@@ -47,8 +47,10 @@ scalar used as a Python `bool`, an unknown source, etc. all raise with an action
 ### Standard library
 
 `adc.time.std` provides macros that *lower to the same IR* (they are not separate C++ steppers):
-`forward_euler`, `ssprk2`, `ssprk3`, `rk4`, and a `strang` splitting combinator. A macro is an
-ordinary Python function that builds IR nodes -- it never computes arrays.
+`forward_euler`, `ssprk2`, `ssprk3`, `rk4`, `adams_bashforth2` (over a System-owned history), and a
+`strang` splitting combinator. A macro is an ordinary Python function that builds IR nodes -- it never
+computes arrays. `condensed_schur` is a documented stub (it raises `NotImplementedError`; see the
+table below).
 
 ## Compiling and running
 
@@ -82,22 +84,44 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | Capability | Status |
 |---|---|
 | `adc.time.Program` builder IR + `adc.time.std` macros | available |
-| `Program.emit_cpp_program` codegen, single-block **Forward Euler** | available, runs end-to-end |
+| `Program.emit_cpp_program` codegen, single-block **Forward Euler** (`forward_euler_program.py`) | available, runs end-to-end |
 | `adc.compile_problem` + cache + `debug=` + `sim.install_program` + `adc.CompiledTime` | available |
 | Named sources / linear sources on `adc.dsl.Model` (`m.source_term`, `m.linear_source`) | available |
-| Multi-stage codegen (SSPRK2 / SSPRK3 / RK4) | available, runs end-to-end |
-| `P.source` / `P.apply` / `P.solve_local_linear` (split sources, Lorentz) + predictor-corrector | available, runs end-to-end |
+| Multi-stage codegen (SSPRK2 / SSPRK3 / RK4) (`ssprk2_program.py`, `ssprk3_program.py`, `rk4_program.py`) | available, runs end-to-end |
+| `P.source` / `P.apply` / `P.solve_local_linear` (split sources, Lorentz) + predictor-corrector (`predictor_corrector_poisson_lorentz.py`) | available, runs end-to-end |
+| `strang` splitting combinator (compiled H(dt/2); S(dt); H(dt/2) == native `adc.Strang`) (`strang_program.py`) | available, runs end-to-end |
 | Structured control flow (`P.range` / `P.static_range` / `P.while_` / `P.if_`) + reductions (`P.norm2` / `P.dot` / `P.norm_inf`) | available, runs end-to-end |
-| Matrix-free operators (`P.matrix_free_operator` / `P.set_apply`) + Krylov (`P.solve_linear`: cg / bicgstab / richardson) | available, runs end-to-end |
-| Histories / multistep (Adams-Bashforth) + checkpoint/restart | in progress |
-| `condensed_schur` as a Program macro | planned (the matrix-free + Krylov primitives are in place) |
+| Matrix-free operators (`P.matrix_free_operator` / `P.set_apply`) + Krylov (`P.solve_linear`: cg / bicgstab / richardson) (`matrix_free_solve.py`) | available, runs end-to-end |
+| Differential primitives (`P.gradient` / `P.divergence` / `P.laplacian`) in a matrix-free apply (`divergence_solve.py`) | available, runs end-to-end |
+| `P.solve_local_linear` (per-cell implicit local linear solve, e.g. Lorentz / relaxation) | available, runs end-to-end |
+| `P.solve_fields` / `solve_fields_from_state` (per-stage elliptic field solve from the stage state) | available, runs end-to-end |
+| `step_cfl` routes through the compiled program (`sim.step_cfl` honors the installed Program) | available, runs end-to-end |
+| `substeps` / `stride` cadence (`adc.CompiledTime`, `sim.set_program_cadence`) | available, runs end-to-end |
+| Histories / multistep (Adams-Bashforth, `P.history` / `P.store_history`) (`adams_bashforth2_program.py`) | available, runs end-to-end |
+| Checkpoint / restart of a compiled Program (history slices serialized) | available, runs end-to-end |
+| Reductions `P.sum` / `P.max` / `P.min` / `P.sum_component`, `P.fill_boundary`, `P.project` (block positivity), `P.record_scalar` diagnostics (`sim.program_diagnostic`) | available, runs end-to-end |
+| `condensed_schur` as a Program macro | partial: divergence + matrix-free + Krylov primitives in place (`condensed_schur_program.py`); `std.condensed_schur` is a stub (multi-component `solve_linear` + anisotropic coefficient assembly deferred) |
 
 Each lowered path is verified against an independent reference to machine precision: Forward Euler /
-SSPRK2 reproduce the native `adc.Explicit` step bit-for-bit; RK4 matches an offline stage reference;
-the split-source predictor-corrector (Poisson/Lorentz) and the matrix-free `solve_linear` (a CG solve
-of `(I - alpha*Lap) phi = b`) match offline references to ~1e-15; the dynamic `while_` / `range` /
+SSPRK2 / SSPRK3 reproduce the native `adc.Explicit` step bit-for-bit; the compiled `strang` macro
+reproduces the native `adc.Strang` macro-step bit-for-bit on an uncoupled model; RK4 matches an offline
+stage reference; Adams-Bashforth 2 (over the System-owned history, with the runtime cold start) matches
+an offline AB2 reference to machine precision; the split-source predictor-corrector (Poisson/Lorentz)
+and the matrix-free `solve_linear` (CG / BiCGStab solves of `(I - alpha*Lap) phi = b` and
+`(I - alpha*div(grad)) phi = b`) match offline references to ~1e-15; the dynamic `while_` / `range` /
 `if_` loops run a runtime-dependent number of iterations entirely C++-side. `compile_problem` raises a
 clear `NotImplementedError` for any construct the codegen cannot yet lower, rather than mis-lowering it.
 
+The `condensed_schur` row is a documented partial: the divergence + matrix-free + Krylov primitives a
+hand-rolled condensed-Schur stage needs are in place (see `condensed_schur_program.py`), but the
+`adc.time.std.condensed_schur` macro itself raises `NotImplementedError` -- a full rewrite of the native
+`adc.CondensedSchur` is blocked on two deep IR features out of scope here: multi-component `solve_linear`
+(`P.matrix_free_operator` / `P.solve_linear` are scalar-field only) and anisotropic position-dependent
+operator-coefficient assembly (the Schur operator `-div((I + c*rho*B^-1) grad phi)` has a per-cell tensor
+coefficient). The native `adc.CondensedSchur` source stepper stays fully supported.
+
 See {doc}`symbolic-dsl` for the physical model DSL and `examples/time_programs/` for runnable
-programs.
+programs. The runnable time programs are `forward_euler_program.py`, `ssprk2_program.py`,
+`ssprk3_program.py`, `rk4_program.py`, `strang_program.py`, `adams_bashforth2_program.py`,
+`predictor_corrector_poisson_lorentz.py`, `matrix_free_solve.py`, `divergence_solve.py`, and
+`condensed_schur_program.py`; each self-skips cleanly (exit 0) without a compiler / a visible Kokkos.
