@@ -1210,6 +1210,14 @@ class Program:
             prelude.append(
                 "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % sp)
             captures.append(sp)
+        # The affine result-write accumulator: one PERSISTENT shared_ptr (alloc-once, like the scratch),
+        # zeroed and reused every matvec instead of allocated per call -- so the apply lambda allocates
+        # NOTHING per Krylov iteration (the runtime r/p/Ap scratch in generic_krylov.hpp is likewise
+        # alloc-once). _emit_field_combine writes the affine into `out` through it.
+        acc_sp = "acc%d" % apply_id
+        prelude.append(
+            "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % acc_sp)
+        captures.append(acc_sp)
         # 2) The lambda body: the laplacian / gradient ops + the result write into `out`.
         body = []
         for w in block:
@@ -1227,7 +1235,7 @@ class Program:
                 raise NotImplementedError(
                     "emit_cpp_program: op '%s' is not lowerable inside a matrix_free_operator apply "
                     "(supported: scalar_field, laplacian, gradient)" % w.op)
-        body += _emit_field_combine(result, "out", sub)
+        body += _emit_field_combine(result, "out", sub, acc_sp)
         prelude.append("adc::ApplyFn %s = [%s](adc::MultiFab& out, const adc::MultiFab& in) {"
                        % (lam, ", ".join(captures)))
         prelude += ["  " + ln for ln in body]
@@ -1285,14 +1293,18 @@ def _apply_in_arg(sub, value):
     return "*%s" % tok
 
 
-def _emit_field_combine(result, target, sub):
+def _emit_field_combine(result, target, sub, acc):
     """Emit C++ writing the affine combination @p result into the field @p target (a C++ MultiFab token,
-    e.g. ``out``). Mirrors the linear_combine commit: accumulate the non-`target` terms onto a zero
-    scratch, then ``ctx.lincomb(target, c_target, target, 1, acc)``. A single unit term that already is
-    the target is a no-op. @p sub maps IR value ids to C++ tokens (``in``/``out``/scratch shared_ptrs)."""
+    e.g. ``out``). Mirrors the linear_combine commit: zero the PERSISTENT accumulator @p acc (a scratch
+    shared_ptr allocated once at install time -- no per-call/per-iteration allocation), accumulate the
+    non-`target` terms onto it, then ``ctx.lincomb(target, c_target, target, 1, *acc)``. A single unit
+    term that already is the target is a no-op. @p sub maps IR value ids to C++ tokens (``in``/``out``/
+    scratch shared_ptrs); @p acc is the install-time accumulator shared_ptr name. Zeroing via
+    ``set_val(0)`` reproduces the old ``scratch_state_like`` (a zero-initialized scratch) bit-for-bit
+    over the valid cells the axpy / lincomb touch."""
     aff = _to_affine(result)._merge()
     terms = [(v, c.as_dict()) for v, c in aff]
-    lines = ["adc::MultiFab acc_%s = ctx.scratch_state_like(%s);" % (target, target)]
+    lines = ["%s->set_val(static_cast<adc::Real>(0));" % acc]
     c_target = {0: 0.0}
     for value, coeff in terms:
         tok = sub[value.id]
@@ -1301,9 +1313,9 @@ def _emit_field_combine(result, target, sub):
         if tok == target:
             c_target = coeff
         else:
-            lines.append("ctx.axpy(acc_%s, %s, %s);" % (target, _coeff_cpp(coeff), ref))
-    lines.append("ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(1), acc_%s);"
-                 % (target, _coeff_cpp(c_target), target, target))
+            lines.append("ctx.axpy(*%s, %s, %s);" % (acc, _coeff_cpp(coeff), ref))
+    lines.append("ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(1), *%s);"
+                 % (target, _coeff_cpp(c_target), target, acc))
     return lines
 
 

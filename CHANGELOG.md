@@ -379,6 +379,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Matrix-free apply allocates nothing per Krylov iteration** (ADC-408, follow-up of ADC-405
+  Phase 6b): the time-program codegen for a `matrix_free_operator` no longer allocates the
+  affine-combine accumulator inside the `adc::ApplyFn` lambda (it ran
+  `adc::MultiFab acc = ctx.scratch_state_like(...)` on every matvec). It is now a persistent
+  install-time scratch (`std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1))`, captured by
+  the lambda), zeroed with `set_val(0)` and reused each iteration, matching the alloc-once runtime
+  Krylov scratch (`generic_krylov.hpp`). The emitted result is unchanged (bit-identical over the
+  valid cells the axpy / lincomb touch); only the allocation is hoisted.
 - **`include/adc` deep re-nest, phase 5 (final): runtime split + coupling families finished**
   (ADC-396, follow-up of ADC-395): `runtime/` keeps only the public facade at top (system,
   amr_system, facade_options, export); `detail/` splits into `config/` (runtime_params,
