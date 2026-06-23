@@ -275,6 +275,20 @@ add_test(NAME test_time_local_solve_run
 set_tests_properties(test_time_local_solve_run PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Phase 4b NON-LINEAR local solve (ADC-422) : emit_cpp_program LOWERS P.solve_local_nonlinear (spec
+# op 10) to a per-cell Newton -- an inlined device residual (the residual sub-block: named source /
+# apply per-cell Exprs + the iterate / frozen guess + affine combines), an in-kernel FD Jacobian, and
+# the Newton step via the SAME adc::detail::mat_inverse stack inverse solve_local_linear uses (no heap /
+# std::function / Eigen in the kernel). Section (A) pins the generated Newton kernel + the loud builder
+# guards (non-callable residual, non-local residual op, n_cons > 8 dense fallback), pure Python.
+# Section (B) compiles a scalar implicit-reaction problem.so (S(rho) = -k*rho^2), installs it, steps
+# once, and checks parity with the analytic closed form AND an offline numpy Newton on the identical
+# residual; it self-skips without a compiler / Kokkos / install_program (never faking the engine).
+add_test(NAME test_time_local_newton
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_local_newton.py)
+set_tests_properties(test_time_local_newton PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Control flow + reductions codegen (ADC-404a) : emit_cpp_program LOWERS a convergence loop --
 # P.norm2 / P.dot (-> adc::dot collective all_reduce), scalar comparisons (-> a Bool predicate), and
 # P.while_ (-> an infinite C++ loop with a break that RE-EVALUATES the condition each pass, mutating

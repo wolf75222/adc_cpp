@@ -108,6 +108,22 @@ def _affine_ids(aff):
             for v, coeff in aff._merge()]
 
 
+def _residual_wants_guess(fn):
+    """True if a `solve_local_nonlinear` residual callable takes the frozen guess as a third positional
+    arg (``residual_fn(P, U, U0)``); False for the two-arg form (``residual_fn(P, U)``). A ``*args``
+    callable is treated as wanting the guess (it can accept it)."""
+    import inspect
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):  # builtins / C callables: pass the guess and let the call decide
+        return True
+    positional = [p for p in params
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    if any(p.kind == p.VAR_POSITIONAL for p in params):
+        return True
+    return len(positional) >= 3
+
+
 class _Affine:
     """Affine combination of State/RHS values: ordered ``[(value, _Coeff)]`` terms. Built by the
     operator overloads on field values; consumed by `Program.linear_combine`."""
@@ -479,19 +495,88 @@ class Program:
         return self._new("state", "solve_local_linear", inputs,
                          {"linear_source": lname, "a_coeff": a}, name, rhs.block)
 
+    # The LOCAL per-cell ops a solve_local_nonlinear residual sub-block may use: the iterate / guess
+    # State placeholders, named per-cell sources / linear-source applies, and the affine combine of
+    # them. All lower to a per-cell scalar expression in the cell-local conservative stack -- NO
+    # non-local op (rhs / divergence / solve_fields / a nested solve) is allowed (it would need a halo
+    # / global solve, which a per-cell Newton kernel cannot evaluate at a perturbed stack state).
+    _RESIDUAL_LOCAL_OPS = frozenset({"state", "source", "apply", "linear_combine"})
+
     def solve_local_nonlinear(self, name=None, residual=None, initial_guess=None, method="newton",
-                              tol=1e-8, max_iter=20):
-        """Solve a LOCAL non-linear system ``residual(U) = 0`` cell by cell (spec op 10). DEFERRED:
-        the per-cell Newton iteration (the IR for a non-linear residual + its Jacobian) is out of
-        scope for this epic; this builder raises a clean NotImplementedError rather than mis-lowering.
-        For a LOCAL LINEAR operator ``(I +/- a*L) U = rhs`` use `solve_local_linear`, which IS lowered
-        (a per-cell dense inverse). @p residual / @p initial_guess / @p method / @p tol / @p max_iter
-        document the intended signature so a caller's program reads cleanly when the feature lands."""
-        raise NotImplementedError(
-            "solve_local_nonlinear is deferred: the per-cell Newton solve of a non-linear residual is "
-            "out of scope for this epic (no IR for the residual / Jacobian yet). Use "
-            "P.solve_local_linear for a local LINEAR operator (I +/- a*L) U = rhs, which is lowered to "
-            "a per-cell dense inverse.")
+                              tol=1e-12, max_iter=20):
+        """Solve a LOCAL non-linear system ``residual(U) = 0`` cell by cell with a per-cell Newton
+        iteration (spec op 10). Returns the converged solution State.
+
+        @p residual is an IR-building callable ``residual_fn(P, U, U0) -> State``: given the Newton
+        iterate State @p U and the frozen initial-guess State @p U0 it BUILDS the residual ``r(U)`` (a
+        State value) from LOCAL per-cell ops only -- ``P.source`` (a named ``m.source_term``),
+        ``P.apply`` (a named ``m.linear_source``), the iterate / initial-guess States, and the affine
+        algebra over them (e.g. an implicit reaction ``r(U) = U - U0 - dt*S(U)``). A non-local op
+        (``P.rhs`` / ``P.divergence`` / ``P.solve_fields`` / a nested solve) is rejected: the residual
+        must be re-evaluable at a PERTURBED cell-local stack state, which a halo / global solve cannot.
+        The sub-block (like a ``set_apply`` body) lowers to a device-inlinable per-cell residual the
+        kernel re-evaluates at ``U`` and at the finite-difference perturbations ``U + eps*e_j``. A
+        two-argument ``residual_fn(P, U)`` (ignoring the guess) is also accepted.
+
+        @p initial_guess is the start State ``U0`` (typically ``U^n``); it seeds the Newton iterate and
+        the residual reads it as a frozen per-cell constant. @p method is ``"newton"`` (the only
+        method). @p tol is the convergence threshold on ``max_c |r_c|`` (per cell) and @p max_iter the
+        iteration budget (the kernel runs a fixed C++ ``for`` bounded by @p max_iter, breaking early
+        once ``|r| < tol``).
+
+        The Jacobian is formed in-kernel by finite differences (``J_ij = (r_i(U+eps e_j) - r_i(U))/eps``)
+        and the Newton step ``J dU = -r`` is solved with the SAME stack-only dense inverse
+        (``adc::detail::mat_inverse<N>``) `solve_local_linear` uses -- so the kernel is heap-free
+        / allocation-free / dispatch-free (no ``std::function`` / Eigen / ``std::vector``). The dense
+        fallback bound ``n_cons <= 8`` is enforced by the codegen (same as `solve_local_linear`)."""
+        if not callable(residual):
+            raise ValueError(
+                "solve_local_nonlinear: residual must be an IR-building callable "
+                "residual_fn(P, U, U0) returning the residual State r(U)")
+        if not (isinstance(initial_guess, Value) and initial_guess.vtype == "state"):
+            raise ValueError(
+                "solve_local_nonlinear: initial_guess must be a State value (initial_guess=...)")
+        if method != "newton":
+            raise NotImplementedError(
+                "solve_local_nonlinear: only method='newton' is supported (got %r)" % (method,))
+        if not isinstance(tol, (int, float)) or tol <= 0:
+            raise ValueError("solve_local_nonlinear: tol must be a positive number (got %r)" % (tol,))
+        if isinstance(max_iter, bool) or not isinstance(max_iter, int) or max_iter <= 0:
+            raise ValueError(
+                "solve_local_nonlinear: max_iter must be a positive int (got %r)" % (max_iter,))
+        if self._recording:
+            raise NotImplementedError(
+                "solve_local_nonlinear: recording a residual inside another sub-block (apply / while "
+                "body) is a later phase")
+        block = initial_guess.block
+        # Record the residual sub-block (like set_apply / a while body): the iterate U and the frozen
+        # initial-guess U0 are State placeholders local to the sub-block; residual_fn builds r(U) from
+        # them with LOCAL per-cell ops. The placeholders are NOT appended to self._values (they belong
+        # to this op) -- the kernel binds the iterate to the cell stack and U0 to the frozen guess.
+        wants_guess = _residual_wants_guess(residual)
+        sub = []
+        self._recording.append(sub)
+        try:
+            iterate = self._new("state", "state", (), {}, "newton_iterate", block)
+            guess_ph = self._new("state", "state", (), {}, "newton_guess", block)
+            # residual_fn(P, U, U0); a two-arg residual_fn(P, U) (ignoring the guess) is also accepted.
+            r = residual(self, iterate, guess_ph) if wants_guess else residual(self, iterate)
+        finally:
+            self._recording.pop()
+        if not (isinstance(r, Value) and r.vtype == "state"):
+            raise ValueError(
+                "solve_local_nonlinear: residual_fn must return the residual State r(U) (got %r)" % (r,))
+        for w in sub:
+            if w.op not in Program._RESIDUAL_LOCAL_OPS:
+                raise ValueError(
+                    "solve_local_nonlinear: residual op '%s' is not LOCAL; a per-cell Newton residual "
+                    "may use only %s (the iterate / guess State, P.source, P.apply, affine combines). "
+                    "Use a non-local op (P.rhs / P.divergence / P.solve_fields) outside the residual."
+                    % (w.op, sorted(Program._RESIDUAL_LOCAL_OPS)))
+        return self._new(
+            "state", "solve_local_nonlinear", (initial_guess,),
+            {"residual_block": sub, "residual": r, "iterate": iterate, "guess": guess_ph,
+             "tol": float(tol), "max_iter": int(max_iter), "method": method}, name, block)
 
     def _linear_source_name(self, operator, where):
         """Resolve `operator` (a `linear_source` value, its name, or a single unit-coefficient
@@ -1158,6 +1243,13 @@ class Program:
                 # The apply sub-block is self-contained (its in/out placeholders + scratch are defined
                 # inside it); it reads nothing from the enclosing scope.
                 self._validate_block(v.attrs["apply_block"], seen)
+            elif v.op == "solve_local_nonlinear":
+                # The residual sub-block is self-contained: the iterate / guess State placeholders are
+                # defined inside it (first ops) and every op reads only the placeholders or earlier
+                # sub-block ops. Validate against an EMPTY outer scope so a residual that closes over an
+                # enclosing value (which the per-cell kernel cannot evaluate) fails loud here, not as a
+                # codegen KeyError.
+                self._validate_block(v.attrs["residual_block"], set())
         return True
 
     def _validate_block(self, block, outer_seen):
@@ -1195,6 +1287,10 @@ class Program:
                 ref = attrs.get(k)
                 attrs[k] = (_affine_ids(ref) if isinstance(ref, _Affine)
                             else (ref.id if isinstance(ref, Value) else None))
+        elif v.op == "solve_local_nonlinear":  # the residual sub-block is a nested node list; refs ids
+            attrs["residual_block"] = [Program._serialize_node(w) for w in attrs["residual_block"]]
+            for k in ("residual", "iterate", "guess"):
+                attrs[k] = attrs[k].id
         return {"id": v.id, "vtype": v.vtype, "op": v.op, "block": v.block,
                 "inputs": [i.id for i in v.inputs], "attrs": attrs}
 
@@ -1286,7 +1382,7 @@ class Program:
 
     # Ops the Phase-4b codegen lowers ONLY when a physical model is supplied (they read the model's
     # symbolic source_term / linear_source coefficients). Without a model they raise NotImplementedError.
-    _MODEL_OPS = ("source", "apply", "solve_local_linear")
+    _MODEL_OPS = ("source", "apply", "solve_local_linear", "solve_local_nonlinear")
 
     def _check_lowerable(self, model=None):
         """Raise NotImplementedError if the IR uses a construct the current codegen cannot lower yet,
@@ -1303,14 +1399,15 @@ class Program:
                 % len(states))
         for v in self._values:
             self._check_op_lowerable(v, model)
-        # Per-cell dense fallback bound for solve_local_linear (mat_inverse<N> uses fixed stack buffers).
-        if model is not None and any(v.op == "solve_local_linear" for v in self._all_ops()):
+        # Per-cell dense fallback bound for the local dense solves (mat_inverse<N> uses fixed stack
+        # buffers): solve_local_linear (M = I - a*L) and solve_local_nonlinear (the Newton FD Jacobian).
+        dense_ops = ("solve_local_linear", "solve_local_nonlinear")
+        if model is not None and any(v.op in dense_ops for v in self._all_ops()):
             impl = _model_impl(model)
             n_cons = len(getattr(impl, "cons_names", []) or [])
             if n_cons > 8:
                 raise ValueError(
-                    "solve_local_linear dense fallback currently supports n_cons <= 8 (got %d)"
-                    % n_cons)
+                    "local dense fallback currently supports n_cons <= 8 (got %d)" % n_cons)
 
     # 'linear_source' is a pure NAME-reference SSA node (vtype 'operator'): it carries no runtime work
     # (consumed by apply / solve_local_linear, which read the model coefficients), so it lowers to
@@ -1332,7 +1429,7 @@ class Program:
         flow is disallowed, so the sub-blocks are flat (one level)."""
         for v in self._values:
             yield v
-            for key in ("cond_block", "body_block", "apply_block"):
+            for key in ("cond_block", "body_block", "apply_block", "residual_block"):
                 blk = v.attrs.get(key)
                 if isinstance(blk, list):
                     yield from blk
@@ -1346,6 +1443,9 @@ class Program:
                     "emit_cpp_program cannot lower op '%s' (value '%s') without the physical model "
                     "that declares its named source / linear source; pass model= "
                     "(compile_problem threads it through)" % (v.op, v.name))
+            if v.op == "solve_local_nonlinear":  # recurse: the residual sub-block ops must lower too
+                for w in v.attrs["residual_block"]:
+                    self._check_op_lowerable(w, model)
             return  # _emit_op lowers it from the model's symbolic coefficients
         if v.op not in Program._ALLOWED_OPS:
             raise NotImplementedError(
@@ -1540,6 +1640,15 @@ class Program:
                          % (var[v.id], var[base.id]))
             lines += _emit_solve_local_linear_kernel(
                 model, v.attrs["linear_source"], v.attrs["a_coeff"], var[rhs_in.id], var[v.id])
+        elif v.op == "solve_local_nonlinear":
+            # Per-cell Newton (spec op 10): solve residual(U) = 0 from the initial guess U0, cell by
+            # cell, with an in-kernel FD Jacobian + the SAME stack dense inverse solve_local_linear
+            # uses. The output is a fresh scratch state; the guess input seeds the iterate.
+            guess_in = v.inputs[0]  # solve inputs = (initial_guess,)
+            var[v.id] = "u%d" % v.id
+            lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);"
+                         % (var[v.id], var[base.id]))
+            lines += _emit_solve_local_nonlinear_kernel(model, v, var[guess_in.id], var[v.id])
         elif v.op == "matrix_free_operator":
             # Install-time: emit the apply lambda `apply_A{id}` into the prelude. Its persistent scratch
             # (the scalar_field ops of the apply sub-block) are shared_ptr fields, captured by value so
@@ -2090,6 +2199,164 @@ def _emit_solve_local_linear_kernel(model, name, a_coeff, rhs_var, out_var):
     for r in range(n):
         terms = ["Minv_[%d][%d] * %sA(i, j, %d)" % (r, c, rhs_var, c) for c in range(n)]
         body.append("    outA(i, j, %d) = %s;" % (r, " + ".join(terms)))
+    body += _kernel_close()
+    return body
+
+
+def _residual_term_exprs(impl, w):
+    """The per-component Expr list of one LOCAL residual sub-block op @p w, as a function of the bare
+    conservative-variable names (which the Newton kernel binds to the iterate stack ``Ueval[c]``):
+
+      - ``source`` (a named ``m.source_term``): S_c(U) -- the declared source expressions;
+      - ``apply`` (a named ``m.linear_source`` L): (L U)_c = sum_k L[c][k] * <cons_k>.
+
+    The iterate / guess State placeholders and ``linear_combine`` are handled by the affine walk in
+    `_emit_residual_eval`, not here (they are not standalone-evaluable Exprs)."""
+    from . import dsl
+    if w.op == "source":
+        name = w.attrs["source"]
+        if name not in impl._source_terms:
+            raise NotImplementedError(
+                "emit_cpp_program: residual source '%s' is not declared on the model (m.source_term); "
+                "declared: %s" % (name, sorted(impl._source_terms)))
+        return list(impl._source_terms[name])
+    if w.op == "apply":
+        rows = _linear_source_rows(impl, w.attrs["linear_source"])
+        n = len(rows)
+        # (L U)_r = sum_c L[r][c] * cons_c -- a per-component Expr in the cons names + aux.
+        return [sum((rows[r][c] * dsl.Var(impl.cons_names[c], "cons") for c in range(n)),
+                    dsl.Const(0.0)) for r in range(n)]
+    raise NotImplementedError(
+        "emit_cpp_program: residual op '%s' is not a per-cell Expr term (source / apply only)" % w.op)
+
+
+def _emit_residual_eval(impl, v, n):
+    """Build the device residual-evaluation lambda body for ``solve_local_nonlinear``: lines computing
+    ``rout[0..n-1] = r(Ueval)`` from the iterate stack ``Ueval`` (bound to the conservative names), the
+    frozen guess stack ``Gval`` (the initial-guess State, read as a per-cell constant) and the captured
+    aux locals. Mirrors the affine walk: each residual sub-block op is one of the iterate / guess State
+    placeholders, a ``source`` / ``apply`` per-cell Expr term, or a ``linear_combine`` (an affine over
+    earlier terms). The result is the affine the residual returned.
+
+    @p v is the solve_local_nonlinear op; @p n the conservative count. Returns the lambda BODY lines
+    (indented two spaces past the lambda header). The lambda captures the aux locals + ``Gval`` by ref."""
+    block = v.attrs["residual_block"]
+    iterate_id = v.attrs["iterate"].id
+    guess_id = v.attrs["guess"].id
+    # term id -> a list of n C++ expression strings (one per conservative component). The iterate is the
+    # stack Ueval; the guess is the frozen Gval; source / apply lower to Exprs over the cons names.
+    comps = {iterate_id: ["Ueval[%d]" % c for c in range(n)],
+             guess_id: ["Gval[%d]" % c for c in range(n)]}
+    lines = []
+    for w in block:
+        if w.op == "state":
+            continue  # the iterate / guess placeholders: bound in `comps` above, nothing to emit
+        if w.op in ("source", "apply"):
+            exprs = _residual_term_exprs(impl, w)
+            comps[w.id] = ["(%s)" % e.to_cpp() for e in exprs]
+        elif w.op == "linear_combine":
+            # An affine sum over earlier terms: comps[w] = sum_k coeff_k(dt) * comps[input_k].
+            coeffs = w.attrs["coeffs"]  # aligned with w.inputs; each a dt-polynomial power->float dict
+            for inp in w.inputs:
+                if inp.id not in comps:  # an input outside the residual sub-block (validate() guards this)
+                    raise NotImplementedError(
+                        "emit_cpp_program: residual combine reads value '%s' which is not produced "
+                        "inside the residual (only the iterate / guess and earlier residual ops are "
+                        "available to a per-cell Newton kernel)" % inp.name)
+            row = []
+            for c in range(n):
+                parts = []
+                for inp, coeff in zip(w.inputs, coeffs, strict=True):
+                    parts.append("%s * (%s)" % (_coeff_cpp(coeff), comps[inp.id][c]))
+                row.append(" + ".join(parts) if parts else "static_cast<adc::Real>(0)")
+            comps[w.id] = row
+        else:  # builder guards _RESIDUAL_LOCAL_OPS; this is belt-and-suspenders
+            raise NotImplementedError(
+                "emit_cpp_program: residual op '%s' is not lowerable in a local Newton kernel" % w.op)
+    result = comps[v.attrs["residual"].id]
+    for c in range(n):
+        lines.append("rout[%d] = %s;" % (c, result[c]))
+    return lines
+
+
+def _emit_solve_local_nonlinear_kernel(model, v, guess_var, out_var):
+    """Lower ``solve_local_nonlinear`` (spec op 10) to a per-cell Newton kernel: from the initial guess
+    U0 (the @p guess_var state), iterate ``J dU = -r``, ``U -= dU`` until ``max_c |r_c| < tol`` or the
+    fixed budget, then write the converged U into @p out_var. Reuses ``adc::for_each_cell`` + the SAME
+    stack dense inverse ``adc::detail::mat_inverse<N>`` as `solve_local_linear` -- no heap / std::function
+    / Eigen in the device kernel (only stack scalars + fixed ``[N]`` / ``[N][N]`` arrays).
+
+    The residual is evaluated by an inlined device lambda built from the residual sub-block (the
+    iterate stack, the frozen guess, named ``source`` / ``apply`` per-cell Exprs, affine combines). The
+    Jacobian is finite-difference: column j perturbs ``U[j] += eps`` and forms ``(r(U+eps e_j)-r(U))/eps``
+    with a relative ``eps`` so it scales with the iterate magnitude."""
+    impl = _model_impl(model)
+    n = len(impl.cons_names)
+    tol = repr(float(v.attrs["tol"]))
+    max_iter = int(v.attrs["max_iter"])
+    # The aux fields the residual reads: bind them once per cell (constant across the Newton iterates),
+    # so the residual lambda captures them by reference. Gather the dependency set over every term Expr.
+    term_exprs = []
+    for w in v.attrs["residual_block"]:
+        if w.op in ("source", "apply"):
+            term_exprs += _residual_term_exprs(impl, w)
+    body = _kernel_open(out_var, guess_var)
+    # Per-cell aux + the live primitives are NOT pre-bound here: the prims depend on the ITERATE (they
+    # are recomputed inside the residual lambda from Ueval). Only the aux locals are cell constants.
+    body += ["    " + ln for ln in _cell_locals(impl, term_exprs, guess_var, with_cons=False,
+                                                with_prim=False)]
+    # The frozen initial guess as a stack vector (the residual reads it as a per-cell constant).
+    body.append("    adc::Real Gval[%d];" % n)
+    for c in range(n):
+        body.append("    Gval[%d] = %sA(i, j, %d);" % (c, guess_var, c))
+    # The residual-eval lambda r(Ueval) -> rout (device, stack-only, no std::function): captures the
+    # cell-constant aux locals + the frozen guess by reference; recomputes the iterate-dependent
+    # primitives inside from Ueval (bound to the conservative names).
+    body.append("    auto residual_eval = [&](const adc::Real (&Ueval)[%d], adc::Real (&rout)[%d]) {"
+                % (n, n))
+    for c, cn in enumerate(impl.cons_names):
+        body.append("      const adc::Real %s = Ueval[%d];" % (cn, c))
+    # Live primitives of the residual terms, in declaration order (a prim may use an earlier prim).
+    live = impl._live_prims(term_exprs) if term_exprs else set()
+    for p, expr in impl.prim_defs.items():
+        if p in live:
+            body.append("      const adc::Real %s = %s;" % (p, expr.to_cpp()))
+    body += ["      " + ln for ln in _emit_residual_eval(impl, v, n)]
+    body.append("    };")
+    # Newton state: the iterate U_ (seeded to the guess), the residual r_, the FD Jacobian J_ and step.
+    body.append("    adc::Real U_[%d];" % n)
+    for c in range(n):
+        body.append("    U_[%d] = Gval[%d];" % (c, c))
+    body.append("    adc::Real r_[%d];" % n)
+    body.append("    for (int it_ = 0; it_ < %d; ++it_) {" % max_iter)
+    body.append("      residual_eval(U_, r_);")
+    # Convergence on max_c |r_c| (the per-cell residual infinity norm).
+    body.append("      adc::Real rmax_ = adc::Real(0);")
+    body.append("      for (int c_ = 0; c_ < %d; ++c_) rmax_ = std::fmax(rmax_, std::fabs(r_[c_]));" % n)
+    body.append("      if (rmax_ < static_cast<adc::Real>(%s)) break;" % tol)
+    # FD Jacobian J_[i][j] = (r_i(U + eps e_j) - r_i(U)) / eps, eps relative to |U_j| (floored).
+    body.append("      adc::Real J_[%d][%d];" % (n, n))
+    body.append("      adc::Real Up_[%d];" % n)
+    body.append("      adc::Real rp_[%d];" % n)
+    body.append("      for (int j_ = 0; j_ < %d; ++j_) {" % n)
+    body.append("        for (int k_ = 0; k_ < %d; ++k_) Up_[k_] = U_[k_];" % n)
+    body.append("        const adc::Real eps_ = static_cast<adc::Real>(1e-7) "
+                "* std::fmax(std::fabs(U_[j_]), static_cast<adc::Real>(1));")
+    body.append("        Up_[j_] += eps_;")
+    body.append("        residual_eval(Up_, rp_);")
+    body.append("        for (int i_ = 0; i_ < %d; ++i_) J_[i_][j_] = (rp_[i_] - r_[i_]) / eps_;" % n)
+    body.append("      }")
+    # Newton step J dU = -r via the SAME stack dense inverse solve_local_linear uses; U -= dU.
+    body.append("      adc::Real Jinv_[%d][%d];" % (n, n))
+    body.append("      adc::detail::mat_inverse<%d>(J_, Jinv_);" % n)
+    body.append("      for (int i_ = 0; i_ < %d; ++i_) {" % n)
+    body.append("        adc::Real du_ = adc::Real(0);")
+    body.append("        for (int k_ = 0; k_ < %d; ++k_) du_ += Jinv_[i_][k_] * r_[k_];" % n)
+    body.append("        U_[i_] -= du_;")
+    body.append("      }")
+    body.append("    }")
+    for c in range(n):
+        body.append("    outA(i, j, %d) = U_[%d];" % (c, c))
     body += _kernel_close()
     return body
 

@@ -2,7 +2,8 @@
 """adc.time op-set completeness (epic ADC-399 / ADC-414): the spec ops 10/16/21/22/23 + the mandatory
 validation errors #18/#19.
 
-  - solve_local_nonlinear (op 10): a clean NotImplementedError stub (Newton is deferred);
+  - solve_local_nonlinear (op 10): a per-cell Newton solve (ADC-422); the builder validates its inputs
+    and lowers a residual sub-block to a device FD-Jacobian Newton kernel;
   - reductions (op 16): P.sum / P.max / P.min / P.sum_component build a 'reduce' IR op and lower to the
     matching adc:: collective reduction (adc::reduce_sum / reduce_max / reduce_min);
   - fill_boundary (op 22): P.fill_boundary lowers to ctx.fill_boundary (the shared ghost exchange);
@@ -31,18 +32,86 @@ def _adc_time():
     return t
 
 
-# ---- (A.1) solve_local_nonlinear stub (op 10) ----
-def test_solve_local_nonlinear_is_a_clean_stub(t):
+# ---- (A.1) solve_local_nonlinear (op 10): the per-cell Newton builder (ADC-422) ----
+def test_solve_local_nonlinear_validates_inputs(t):
+    # The residual must be an IR-building callable and the guess a State; the bad-input messages are loud.
     P = t.Program("p")
     U = P.state("blk")
-    try:
+    try:  # a State (not a callable) is no longer accepted -- the residual builds r(U)
         P.solve_local_nonlinear(name="u", residual=U, initial_guess=U)
-    except NotImplementedError as exc:
-        msg = str(exc)
-        assert "solve_local_nonlinear" in msg and "deferred" in msg, msg
-        assert "solve_local_linear" in msg, "the stub must point to the linear case: %s" % msg
+    except ValueError as exc:
+        assert "residual must be" in str(exc) and "callable" in str(exc), str(exc)
     else:
-        raise AssertionError("solve_local_nonlinear must raise a clean NotImplementedError")
+        raise AssertionError("solve_local_nonlinear must reject a non-callable residual")
+
+    def good_residual(P, Uit, U0):
+        return P.linear_combine(Uit - U0)
+    try:  # the initial_guess must be a State value
+        P.solve_local_nonlinear(name="u", residual=good_residual, initial_guess="nope")
+    except ValueError as exc:
+        assert "initial_guess" in str(exc), str(exc)
+    else:
+        raise AssertionError("solve_local_nonlinear must reject a non-State initial_guess")
+    try:  # max_iter must be a positive int
+        P.solve_local_nonlinear(name="u", residual=good_residual, initial_guess=U, max_iter=0)
+    except ValueError as exc:
+        assert "max_iter" in str(exc), str(exc)
+    else:
+        raise AssertionError("solve_local_nonlinear must reject max_iter <= 0")
+
+
+def test_solve_local_nonlinear_builds_newton_ir(t):
+    # A valid implicit reaction r(U) = U - U0 - dt*S(U) builds a typed Newton IR op with a residual
+    # sub-block; the IR validates and hashes.
+    P = t.Program("react")
+    dt = P.dt
+    U = P.state("blk")
+
+    def residual(P, Uit, U0):
+        S = P.source("react", state=Uit)
+        return P.linear_combine("r", Uit - U0 - dt * S)
+    W = P.solve_local_nonlinear(name="W", residual=residual, initial_guess=U, tol=1e-10, max_iter=25)
+    assert W.op == "solve_local_nonlinear" and W.vtype == "state", (W.op, W.vtype)
+    assert W.attrs["max_iter"] == 25 and W.attrs["tol"] == 1e-10
+    assert len(W.attrs["residual_block"]) >= 3, "the residual sub-block holds the iterate/guess + ops"
+    P.commit("blk", W)
+    assert P.validate() is True, "the Newton IR must validate"
+    assert P._ir_hash(), "the Newton IR must serialize to a stable hash"
+
+
+def test_solve_local_nonlinear_rejects_non_local_residual(t):
+    # A non-local op (P.rhs / P.solve_fields) inside the residual is rejected: the per-cell kernel cannot
+    # re-evaluate a halo / global solve at a perturbed stack state.
+    P = t.Program("bad")
+    U = P.state("blk")
+
+    def bad_residual(P, Uit, U0):
+        R = P.rhs(state=Uit, sources=["default"])  # a non-local divergence-bearing rhs
+        return P.linear_combine(Uit - U0 - P.dt * R)
+    try:
+        P.solve_local_nonlinear(name="W", residual=bad_residual, initial_guess=U)
+    except ValueError as exc:
+        assert "not LOCAL" in str(exc) or "rhs" in str(exc), str(exc)
+    else:
+        raise AssertionError("a non-local residual op must be rejected")
+
+
+def test_solve_local_nonlinear_refused_without_model(t):
+    # The Newton codegen reads the residual's named source / linear source coefficients -> needs a model.
+    P = t.Program("react")
+    dt = P.dt
+    U = P.state("blk")
+
+    def residual(P, Uit, U0):
+        S = P.source("react", state=Uit)
+        return P.linear_combine("r", Uit - U0 - dt * S)
+    P.commit("blk", P.solve_local_nonlinear(name="W", residual=residual, initial_guess=U))
+    try:
+        P.emit_cpp_program()  # no model
+    except NotImplementedError as exc:
+        assert "solve_local_nonlinear" in str(exc) or "source" in str(exc), str(exc)
+    else:
+        raise AssertionError("the Newton codegen must be refused without a model")
 
 
 # ---- (A.2) reductions (op 16): IR + codegen ----
