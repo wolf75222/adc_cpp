@@ -379,6 +379,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **No per-iteration allocation in the matrix-free `solve_linear` apply** (ADC-405 follow-up): the
+  generated `matrix_free_operator` apply lambda previously allocated an accumulator MultiFab on every
+  matvec (every Krylov iteration). The codegen now writes the apply result directly into the output
+  field (`ctx.lincomb` for the first term, `ctx.axpy` for the rest), so the matrix-free inner loop does
+  no per-iteration allocation -- matching the spec's runtime-memory rule (the runtime Krylov scratch was
+  already allocated once). Pure `time.py` codegen, result unchanged (the `solve_linear` CG parity stays
+  at ~1e-15); no `_adc` rebuild.
 - **`include/adc` deep re-nest, phase 5 (final): runtime split + coupling families finished**
   (ADC-396, follow-up of ADC-395): `runtime/` keeps only the public facade at top (system,
   amr_system, facade_options, export); `detail/` splits into `config/` (runtime_params,

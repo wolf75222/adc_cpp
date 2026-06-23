@@ -1287,23 +1287,33 @@ def _apply_in_arg(sub, value):
 
 def _emit_field_combine(result, target, sub):
     """Emit C++ writing the affine combination @p result into the field @p target (a C++ MultiFab token,
-    e.g. ``out``). Mirrors the linear_combine commit: accumulate the non-`target` terms onto a zero
-    scratch, then ``ctx.lincomb(target, c_target, target, 1, acc)``. A single unit term that already is
-    the target is a no-op. @p sub maps IR value ids to C++ tokens (``in``/``out``/scratch shared_ptrs)."""
+    e.g. ``out``). Accumulates DIRECTLY into @p target -- the first term sets it (``ctx.lincomb`` with a
+    zero second weight), the remaining terms are ``ctx.axpy``-ed on -- so a matrix-free apply does NO
+    per-call (per-matvec, i.e. per Krylov iteration) allocation. @p target is the apply's OUTPUT and must
+    not appear among the affine terms (it is never an input field). @p sub maps IR value ids to C++
+    tokens (``in`` / ``out`` / scratch shared_ptrs)."""
     aff = _to_affine(result)._merge()
     terms = [(v, c.as_dict()) for v, c in aff]
-    lines = ["adc::MultiFab acc_%s = ctx.scratch_state_like(%s);" % (target, target)]
-    c_target = {0: 0.0}
-    for value, coeff in terms:
-        tok = sub[value.id]
-        ref = "const_cast<adc::MultiFab&>(in)" if tok == "in" else (
+
+    def _ref(tok):
+        return "const_cast<adc::MultiFab&>(in)" if tok == "in" else (
             "*%s" % tok if tok.startswith("sf") else tok)
-        if tok == target:
-            c_target = coeff
-        else:
-            lines.append("ctx.axpy(acc_%s, %s, %s);" % (target, _coeff_cpp(coeff), ref))
-    lines.append("ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(1), acc_%s);"
-                 % (target, _coeff_cpp(c_target), target, target))
+
+    for value, _ in terms:
+        if sub[value.id] == target:
+            raise NotImplementedError(
+                "matrix-free apply: the output '%s' appears among its own input terms; in-place "
+                "accumulation is unsupported" % target)
+    if not terms:
+        return ["%s.set_val(static_cast<adc::Real>(0));" % target]
+    v0, c0 = terms[0]
+    # target <- c0 * term0, then += the rest. The second lincomb operand is term0 (weight 0), NOT
+    # target: this never reads target's prior content (which may be uninitialized), so target is fully
+    # overwritten regardless of its incoming value.
+    lines = ["ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(0), %s);"
+             % (target, _coeff_cpp(c0), _ref(sub[v0.id]), _ref(sub[v0.id]))]
+    for value, coeff in terms[1:]:
+        lines.append("ctx.axpy(%s, %s, %s);" % (target, _coeff_cpp(coeff), _ref(sub[value.id])))
     return lines
 
 
