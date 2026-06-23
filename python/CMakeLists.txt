@@ -253,6 +253,16 @@ add_test(NAME test_time_local_solve
 set_tests_properties(test_time_local_solve PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Phase 4b codegen (ADC-403) : emit_cpp_program LOWERS source / apply / solve_local_linear to per-cell
+# C++ (for_each_cell + adc::detail::mat_inverse) reusing the model coefficients. Section (A) pins the
+# generated dense-inverse kernel (pure Python). Section (B) compiles a Lorentz solve_local_linear
+# problem.so, installs it, steps once, and checks parity with the analytic implicit Lorentz rotation;
+# it self-skips without a compiler / Kokkos / install_program (never faking the engine).
+add_test(NAME test_time_local_solve_run
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_local_solve_run.py)
+set_tests_properties(test_time_local_solve_run PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.

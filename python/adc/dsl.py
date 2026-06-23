@@ -4131,7 +4131,10 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
     if model is not None and hasattr(model, "check"):
         model.check()  # fail-loud on a malformed physical model, even though it is added separately
 
-    src = time.emit_cpp_program()  # validates the IR; raises NotImplementedError for unsupported schemes
+    # Thread the physical model so the codegen can lower the Phase-4b split-source / local-linear ops
+    # (it reads the model's symbolic source_term / linear_source coefficients). FE / SSPRK / RK4 lower
+    # with model=None too; a model is required only when the Program uses a Phase-4b op.
+    src = time.emit_cpp_program(model=model)  # validates the IR; NotImplementedError for unsupported ops
 
     include = include or adc_include()
     sig = adc_header_signature(include)

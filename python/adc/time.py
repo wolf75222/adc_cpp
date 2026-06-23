@@ -443,8 +443,8 @@ class Program:
         blob = json.dumps(self._serialize(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode()).hexdigest()
 
-    # --- C++ codegen (Phase 2c-ii): lower the IR to a problem.so source ---
-    def emit_cpp_program(self):
+    # --- C++ codegen (Phase 2c-ii / Phase 4b): lower the IR to a problem.so source ---
+    def emit_cpp_program(self, model=None):
         """Generate the C++ source of a problem.so implementing this Program (codegen).
 
         Exports the stable .so ABI -- ``adc_program_abi_key`` (the ``ADC_ABI_KEY_LITERAL``
@@ -457,23 +457,35 @@ class Program:
         the base (``ctx.state(0)``); ``solve_fields()`` runs the elliptic solve; each RHS becomes a
         scratch + ``rhs_into``; each intermediate ``linear_combine`` becomes a zero scratch accumulated
         with ``axpy``; the committed combine writes the block state via ``lincomb``. Forward Euler,
-        SSPRK2/SSPRK3 and RK4 all lower this way -- no per-scheme class. Constructs not yet supported --
-        more than one block, named sources beyond ``"default"``, or any op outside
-        ``{state, solve_fields, rhs, linear_combine}`` (split sources, local solves, control flow,
-        Krylov: later phases) -- raise NotImplementedError, never a silent mis-lowering.
+        SSPRK2/SSPRK3 and RK4 all lower this way -- no per-scheme class.
+
+        Phase-4b also lowers the SPLIT-SOURCE / LOCAL-LINEAR ops -- ``source`` (a named ``m.source_term``
+        evaluated per cell), ``apply`` (LU for a named ``m.linear_source``) and ``solve_local_linear``
+        ((I -/+ a*L) U = rhs solved cell by cell via a dense per-cell inverse) -- but ONLY when the
+        physical ``model`` (the ``adc.dsl`` model whose ``source_term`` / ``linear_source`` they name)
+        is provided: the codegen reads the model's symbolic coefficients to emit the per-cell kernels.
+        Without ``model`` those ops raise NotImplementedError (the Program cannot be lowered in
+        isolation); ``model=None`` still lowers FE / SSPRK / RK4 (no model needed). More than one block,
+        named ``rhs`` sources beyond ``"default"``, control flow or Krylov remain later phases and raise
+        NotImplementedError, never a silent mis-lowering.
 
         NOTE: ``solve_fields()`` solves from the block's CURRENT state, so a multi-stage scheme that
         needs the elliptic fields re-solved from each STAGE state (a field-coupled model) is not yet
         exact; for an uncoupled model (no Poisson feedback into the flux) the field solve is inert and
         the scheme is exact. ``solve_fields_from_state`` is a later phase."""
         self.validate()
-        self._check_lowerable()
+        self._check_lowerable(model)
         return _PROGRAM_CPP_TEMPLATE.format(name=json.dumps(self.name), hash=self._ir_hash(),
-                                            body=self._emit_body())
+                                            body=self._emit_body(model))
 
-    def _check_lowerable(self):
+    # Ops the Phase-4b codegen lowers ONLY when a physical model is supplied (they read the model's
+    # symbolic source_term / linear_source coefficients). Without a model they raise NotImplementedError.
+    _MODEL_OPS = ("source", "apply", "solve_local_linear")
+
+    def _check_lowerable(self, model=None):
         """Raise NotImplementedError if the IR uses a construct the current codegen cannot lower yet,
-        naming the offending construct (never a silent mis-lowering)."""
+        naming the offending construct (never a silent mis-lowering). @p model: the physical model that
+        declares the named sources / linear sources; required for the Phase-4b ops."""
         if len(self._commits) != 1:
             raise NotImplementedError(
                 "emit_cpp_program currently supports a single committed block; this Program commits "
@@ -483,23 +495,42 @@ class Program:
             raise NotImplementedError(
                 "emit_cpp_program currently supports a single block state (one P.state(...)); got %d"
                 % len(states))
-        allowed = {"state", "solve_fields", "rhs", "linear_combine"}
+        # 'linear_source' is a pure NAME-reference SSA node (vtype 'operator'): it carries no runtime
+        # work (it is consumed by apply / solve_local_linear, which read the model coefficients), so it
+        # lowers to nothing -- always allowed, model or not.
+        allowed = {"state", "solve_fields", "rhs", "linear_combine", "linear_source"}
         for v in self._values:
+            if v.op in Program._MODEL_OPS:
+                if model is None:
+                    raise NotImplementedError(
+                        "emit_cpp_program cannot lower op '%s' (value '%s') without the physical model "
+                        "that declares its named source / linear source; pass model= "
+                        "(compile_problem threads it through)" % (v.op, v.name))
+                continue  # _emit_body lowers it from the model's symbolic coefficients
             if v.op not in allowed:
                 raise NotImplementedError(
                     "emit_cpp_program cannot lower op '%s' (value '%s') yet; supported ops are %s "
-                    "(split sources / local solves / control flow / Krylov are later phases)"
-                    % (v.op, v.name, sorted(allowed)))
+                    "(+ %s with a model; control flow / Krylov are later phases)"
+                    % (v.op, v.name, sorted(allowed), sorted(Program._MODEL_OPS)))
             if v.op == "rhs":
                 extra = [s for s in (v.attrs.get("sources") or []) if s != "default"]
                 if extra:
                     raise NotImplementedError(
                         "emit_cpp_program currently supports the 'default' source only; rhs '%s' uses "
                         "named sources %r (source masks are Phase 4)" % (v.name, extra))
+        # Per-cell dense fallback bound for solve_local_linear (mat_inverse<N> uses fixed stack buffers).
+        if model is not None and any(v.op == "solve_local_linear" for v in self._values):
+            impl = _model_impl(model)
+            n_cons = len(getattr(impl, "cons_names", []) or [])
+            if n_cons > 8:
+                raise ValueError(
+                    "solve_local_linear dense fallback currently supports n_cons <= 8 (got %d)"
+                    % n_cons)
 
-    def _emit_body(self):
+    def _emit_body(self, model=None):
         """Generate the C++ lines of the install-closure body (each indented 4 spaces). Assumes
-        `_check_lowerable` has passed: one block state (the base = ctx.state(0)), one commit."""
+        `_check_lowerable` has passed: one block state (the base = ctx.state(0)), one commit. @p model
+        supplies the symbolic coefficients of the Phase-4b source / apply / solve_local_linear ops."""
         base = next(v for v in self._values if v.op == "state")
         committed = next(iter(self._commits.values()))
         var = {}  # IR value id -> C++ MultiFab variable name (states + RHS scratches)
@@ -516,10 +547,30 @@ class Program:
                 lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
                              % (var[v.id], var[state_in.id]))
                 lines.append("ctx.rhs_into(0, %s, %s);" % (var[state_in.id], var[v.id]))
+            elif v.op == "source":
+                state_in = v.inputs[0]  # source inputs = (state[, fields]); the state is first
+                var[v.id] = "r%d" % v.id
+                lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
+                             % (var[v.id], var[state_in.id]))
+                lines += _emit_source_kernel(model, v.attrs["source"], var[state_in.id], var[v.id])
+            elif v.op == "apply":
+                state_in = v.inputs[0]  # apply inputs = (state[, fields]); the state is first
+                var[v.id] = "r%d" % v.id
+                lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
+                             % (var[v.id], var[state_in.id]))
+                lines += _emit_apply_kernel(model, v.attrs["linear_source"], var[state_in.id],
+                                            var[v.id])
+            elif v.op == "solve_local_linear":
+                rhs_in = v.inputs[0]  # solve inputs = (rhs_state, op_value[, fields]); rhs first
+                var[v.id] = "u%d" % v.id
+                lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);"
+                             % (var[v.id], var[base.id]))
+                lines += _emit_solve_local_linear_kernel(
+                    model, v.attrs["linear_source"], v.attrs["a_coeff"], var[rhs_in.id], var[v.id])
             elif v.op == "linear_combine":
                 terms = list(zip(v.inputs, v.attrs["coeffs"], strict=True))
                 if v.id == committed.id:
-                    # Commit: block state <- c_base * base + sum(non-base coeff * term).
+                    # Commit: block state <- c_base * base + sum(non-base coeff * term), in place.
                     c_base = {0: 0.0}
                     acc = "acc%d" % v.id
                     lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (acc, var[base.id]))
@@ -530,11 +581,18 @@ class Program:
                             lines.append("ctx.axpy(%s, %s, %s);" % (acc, _coeff_cpp(coeff), var[inp.id]))
                     lines.append("ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(1), %s);"
                                  % (var[base.id], _coeff_cpp(c_base), var[base.id], acc))
+                    var[v.id] = var[base.id]  # the commit wrote the block state in place (no final copy)
                 else:
                     var[v.id] = "u%d" % v.id  # an intermediate stage state (scratch, zero-initialized)
                     lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (var[v.id], var[base.id]))
                     for inp, coeff in terms:
                         lines.append("ctx.axpy(%s, %s, %s);" % (var[v.id], _coeff_cpp(coeff), var[inp.id]))
+        # The committed value may be an op that wrote into a SCRATCH (e.g. solve_local_linear): copy it
+        # into the block state. A linear_combine commit already wrote ctx.state(0) in place (var ==
+        # base), so this is a no-op there (skipped).
+        if var[committed.id] != var[base.id]:
+            lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
+                         % (var[base.id], var[base.id], var[committed.id]))
         return "\n".join("    " + ln for ln in lines)
 
 
@@ -554,6 +612,172 @@ def _coeff_cpp(powers):
     return "static_cast<adc::Real>(%s)" % " + ".join(terms)
 
 
+# --- Phase-4b: lower a model's split-source / local-linear ops to per-cell C++ kernels ----------
+# These helpers emit the body of a for_each_cell kernel over the VALID cells of each local fab. They
+# reuse the dsl Expr -> C++ machinery (Var.to_cpp returns the bare name; we bind those names to locals)
+# and the existing numerics (adc::detail::mat_inverse). A device kernel must stay heap-free /
+# allocation-free: only stack scalars + fixed-size arrays, no std::vector / std::function / Eigen.
+
+def _model_impl(model):
+    """The underlying HyperbolicModel carrying the symbolic coefficients: the public adc.dsl.Model
+    wraps it as ``_m``; a HyperbolicModel is already itself."""
+    return getattr(model, "_m", model)
+
+
+def _aux_comp(impl, name):
+    """Component index of an aux field @p name in the System aux channel: canonical (dsl.AUX_CANONICAL)
+    or a model NAMED aux field (dsl.AUX_NAMED_BASE + position in aux_extra_names). @p impl is the
+    HyperbolicModel."""
+    from . import dsl
+    if name in dsl.AUX_CANONICAL:
+        return dsl.AUX_CANONICAL[name]
+    extra = list(getattr(impl, "aux_extra_names", []) or [])
+    if name in extra:
+        return dsl.AUX_NAMED_BASE + extra.index(name)
+    raise NotImplementedError(
+        "emit_cpp_program: aux field '%s' is neither canonical (%s) nor a declared named aux field "
+        "(%s); cannot map it to an aux component" % (name, sorted(dsl.AUX_CANONICAL), extra))
+
+
+def _check_no_runtime_param(exprs):
+    """Phase-4b kernels read coefficients from the state / aux only (const params are inlined as
+    literals by the dsl Expr tree). A RUNTIME parameter would emit ``params.get(idx)``, unavailable in
+    a ProgramContext kernel -> raise NotImplementedError (deferred), never a .so that fails to link."""
+    from . import dsl
+    stack = list(exprs)
+    while stack:
+        e = stack.pop()
+        if isinstance(e, dsl.RuntimeParamRef):
+            raise NotImplementedError(
+                "emit_cpp_program: a Phase-4b source / linear source references a RUNTIME parameter "
+                "(%s); only constants and aux fields are supported in the per-cell kernel yet "
+                "(runtime params in compiled programs are a later phase)" % e.name)
+        stack.extend(dsl._children(e))
+
+
+def _cell_locals(impl, exprs, state_var, *, with_cons, with_prim):
+    """C++ local declarations binding the names the @p exprs reference to per-cell values:
+      - aux fields -> ``const adc::Real <name> = auxA(i, j, <comp>);`` (always, by dependency);
+      - conservative vars -> ``const adc::Real <name> = <state>A(i, j, <idx>);`` (when @p with_cons);
+      - primitives -> their dsl formula, in declaration order, only the LIVE ones (when @p with_prim).
+    @p impl is the HyperbolicModel; @p state_var the C++ MultiFab variable (its const Array4 is
+    ``<state_var>A``, the aux Array4 is ``auxA``). Raises on a runtime-param dependency (deferred)."""
+    _check_no_runtime_param(exprs)
+    deps = set()
+    for e in exprs:
+        deps |= e.deps()
+    lines = []
+    if with_cons:
+        for idx, c in enumerate(impl.cons_names):
+            if c in deps:
+                lines.append("const adc::Real %s = %sA(i, j, %d);" % (c, state_var, idx))
+    if with_prim:
+        live = impl._live_prims(exprs)  # closure over the live primitives
+        for p, expr in impl.prim_defs.items():  # declaration order (a prim may use an earlier prim)
+            if p in live:
+                lines.append("const adc::Real %s = %s;" % (p, expr.to_cpp()))
+    aux_deps = set(impl.aux_names) | set(getattr(impl, "aux_extra_names", []) or [])
+    for name in sorted(deps & aux_deps):
+        lines.append("const adc::Real %s = auxA(i, j, %d);" % (name, _aux_comp(impl, name)))
+    return lines
+
+
+def _kernel_open(out_var, state_var):
+    """Open the per-fab loop + per-cell for_each_cell over the VALID cells of @p out_var, binding the
+    write handle ``outA``, the read state handle ``<state_var>A`` and the aux read handle ``auxA``.
+
+    Pairing by local fab index ``li`` is sound: the System aux is built with the SAME box array AND
+    distribution map as the blocks (``aux(ba, dm, ...)`` in System::Impl), and a scratch state comes
+    from ``scratch_state_like(state(0))`` which copies that ``(ba, dm)`` -- so ``out``, the input
+    state and ``aux`` share one ``(ba, dm)`` and ``fab(li)`` is the same box on every rank. This is the
+    same co-distribution the existing aux-reading kernels (compiled_block_abi / source bricks) rely on."""
+    return [
+        "adc::MultiFab& %s_aux = ctx.aux();" % out_var,
+        "for (int li = 0; li < %s.local_size(); ++li) {" % out_var,
+        "  const adc::Array4 outA = %s.fab(li).array();" % out_var,
+        "  const adc::ConstArray4 %sA = %s.fab(li).const_array();" % (state_var, state_var),
+        "  const adc::ConstArray4 auxA = %s_aux.fab(li).const_array();" % out_var,
+        "  adc::for_each_cell(%s.box(li), [=] ADC_HD(int i, int j) {" % out_var,
+    ]
+
+
+def _kernel_close():
+    return ["  });", "}"]
+
+
+def _emit_source_kernel(model, name, state_var, out_var):
+    """Lower ``source`` (a named ``m.source_term``): outA(i,j,c) = S_c(U, prims, aux) per cell."""
+    impl = _model_impl(model)
+    if name not in impl._source_terms:
+        raise NotImplementedError(
+            "emit_cpp_program: source '%s' is not declared on the model (m.source_term); declared: %s"
+            % (name, sorted(impl._source_terms)))
+    exprs = impl._source_terms[name]
+    body = _kernel_open(out_var, state_var)
+    body += ["    " + ln for ln in _cell_locals(impl, exprs, state_var, with_cons=True,
+                                                 with_prim=True)]
+    body += ["    outA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(exprs)]
+    body += _kernel_close()
+    return body
+
+
+def _emit_apply_kernel(model, name, state_var, out_var):
+    """Lower ``apply`` (a named ``m.linear_source`` L): outA(i,j,r) = sum_c L[r][c](aux) * U(i,j,c)."""
+    impl = _model_impl(model)
+    rows = _linear_source_rows(impl, name)
+    n = len(rows)
+    flat = [e for row in rows for e in row]
+    body = _kernel_open(out_var, state_var)
+    # L coefficients depend on aux / const only (linear_source invariant): cons/prim locals not needed.
+    body += ["    " + ln for ln in _cell_locals(impl, flat, state_var, with_cons=False,
+                                                 with_prim=False)]
+    for r in range(n):
+        terms = ["(%s) * %sA(i, j, %d)" % (rows[r][c].to_cpp(), state_var, c) for c in range(n)]
+        body.append("    outA(i, j, %d) = %s;" % (r, " + ".join(terms)))
+    body += _kernel_close()
+    return body
+
+
+def _emit_solve_local_linear_kernel(model, name, a_coeff, rhs_var, out_var):
+    """Lower ``solve_local_linear``: per cell M = I - a*L (a = a_coeff(dt)), invert M (dense N x N
+    via adc::detail::mat_inverse) and set outA(i,j,r) = sum_c Minv[r][c] * q(i,j,c), q = the rhs state.
+    L's coefficients depend on aux / const only, so M is assembled from the aux locals + the literal a."""
+    impl = _model_impl(model)
+    rows = _linear_source_rows(impl, name)
+    n = len(rows)
+    flat = [e for row in rows for e in row]
+    a_cpp = _coeff_cpp(a_coeff)
+    body = _kernel_open(out_var, rhs_var)
+    body += ["    " + ln for ln in _cell_locals(impl, flat, rhs_var, with_cons=False,
+                                                 with_prim=False)]
+    body.append("    const adc::Real a_ = %s;" % a_cpp)
+    body.append("    adc::Real M_[%d][%d];" % (n, n))
+    for r in range(n):
+        for c in range(n):
+            ident = "adc::Real(1)" if r == c else "adc::Real(0)"
+            body.append("    M_[%d][%d] = %s - a_ * (%s);" % (r, c, ident, rows[r][c].to_cpp()))
+    body.append("    adc::Real Minv_[%d][%d];" % (n, n))
+    # mat_inverse returns false on a singular M; we do not branch in the device kernel (no throw on
+    # device). I - a*L is invertible for a well-posed local source (e.g. Lorentz: det = 1 + (a*B)^2 > 0);
+    # a singular user operator yields a non-finite result that surfaces downstream, not a plausible wrong one.
+    body.append("    adc::detail::mat_inverse<%d>(M_, Minv_);" % n)
+    for r in range(n):
+        terms = ["Minv_[%d][%d] * %sA(i, j, %d)" % (r, c, rhs_var, c) for c in range(n)]
+        body.append("    outA(i, j, %d) = %s;" % (r, " + ".join(terms)))
+    body += _kernel_close()
+    return body
+
+
+def _linear_source_rows(impl, name):
+    """The n_cons x n_cons matrix of Expr of a model linear source @p name (m.linear_source).
+    @p impl is the HyperbolicModel."""
+    if name not in impl._linear_sources:
+        raise NotImplementedError(
+            "emit_cpp_program: linear source '%s' is not declared on the model (m.linear_source); "
+            "declared: %s" % (name, sorted(impl._linear_sources)))
+    return impl._linear_sources[name]
+
+
 # Source of a generated problem.so. The includes + adc_install_program closure match the shape
 # tests/test_program_loader compiles+runs in CI; adc_program_hash is added per the spec .so ABI (a
 # cache/restart key) and is not yet consumed by System::install_program. {name} is a JSON-escaped C
@@ -566,7 +790,11 @@ _PROGRAM_CPP_TEMPLATE = '''\
 #include <adc/runtime/program/program_context.hpp>
 #include <adc/runtime/dynamic/abi_key.hpp>
 #include <adc/mesh/storage/multifab.hpp>
+#include <adc/mesh/storage/fab2d.hpp>          // Array4 / ConstArray4 (per-cell handles)
+#include <adc/mesh/execution/for_each.hpp>     // for_each_cell (Phase-4b per-cell kernels)
+#include <adc/numerics/linalg/dense_eig.hpp>   // adc::detail::mat_inverse (local dense solve)
 #include <adc/core/foundation/types.hpp>
+#include <cmath>                               // std::sqrt / std::fabs / std::pow in lowered formulas
 
 extern "C" const char* adc_program_abi_key() {{ return ADC_ABI_KEY_LITERAL; }}
 extern "C" const char* adc_program_name() {{ return {name}; }}

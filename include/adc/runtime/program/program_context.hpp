@@ -3,10 +3,11 @@
 #include <functional>
 #include <utility>
 
-#include <adc/core/foundation/types.hpp>  // Real
-#include <adc/mesh/storage/mf_arith.hpp>  // saxpy (linear combine over a MultiFab)
-#include <adc/mesh/storage/multifab.hpp>  // MultiFab
-#include <adc/runtime/system.hpp>         // System (the runtime this facade forwards to)
+#include <adc/core/foundation/types.hpp>         // Real
+#include <adc/mesh/storage/mf_arith.hpp>         // saxpy (linear combine over a MultiFab)
+#include <adc/mesh/storage/multifab.hpp>         // MultiFab
+#include <adc/runtime/context/grid_context.hpp>  // GridContext (System aux seam)
+#include <adc/runtime/system.hpp>                // System (the runtime this facade forwards to)
 
 /// @file
 /// @brief ProgramContext -- the C++-side facade a generated problem.so calls to run a compiled time
@@ -48,6 +49,12 @@ class ProgramContext {
   int n_blocks() const { return sys_->n_blocks(); }
   MultiFab& state(int b) const { return sys_->block_state(b); }
   void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(b, u, r); }
+
+  /// The System aux MultiFab (phi=0, grad_x=1, grad_y=2, B_z=3, T_e=4, named fields from
+  /// kAuxNamedBase). NOT owned by the context: it is the live System aux (stable address), the same
+  /// channel solve_fields() fills. A generated local-linear-solve kernel reads the operator
+  /// coefficients (e.g. B_z) from it. Forwards to System::grid_context().aux.
+  MultiFab& aux() const { return *sys_->grid_context().aux; }
 
   /// A zero-initialized RHS scratch with the SAME layout (box array / distribution / ghosts) as @p u,
   /// so the subsequent axpy(u, ., r) combines identical layouts.
