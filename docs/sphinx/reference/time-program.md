@@ -94,6 +94,7 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | Matrix-free operators (`P.matrix_free_operator` / `P.set_apply`) + Krylov (`P.solve_linear`: cg / bicgstab / richardson) (`matrix_free_solve.py`) | available, runs end-to-end |
 | Differential primitives (`P.gradient` / `P.divergence` / `P.laplacian`) in a matrix-free apply (`divergence_solve.py`) | available, runs end-to-end |
 | `P.solve_local_linear` (per-cell implicit local linear solve, e.g. Lorentz / relaxation) | available, runs end-to-end |
+| `P.solve_local_nonlinear` (per-cell Newton solve of a local non-linear residual, e.g. an implicit reaction) (`test_time_local_newton.py`) | available, runs end-to-end |
 | `P.solve_fields` / `solve_fields_from_state` (per-stage elliptic field solve from the stage state) | available, runs end-to-end |
 | `step_cfl` routes through the compiled program (`sim.step_cfl` honors the installed Program) | available, runs end-to-end |
 | `substeps` / `stride` cadence (`adc.CompiledTime`, `sim.set_program_cadence`) | available, runs end-to-end |
@@ -108,9 +109,11 @@ reproduces the native `adc.Strang` macro-step bit-for-bit on an uncoupled model;
 stage reference; Adams-Bashforth 2 (over the System-owned history, with the runtime cold start) matches
 an offline AB2 reference to machine precision; the split-source predictor-corrector (Poisson/Lorentz)
 and the matrix-free `solve_linear` (CG / BiCGStab solves of `(I - alpha*Lap) phi = b` and
-`(I - alpha*div(grad)) phi = b`) match offline references to ~1e-15; the dynamic `while_` / `range` /
-`if_` loops run a runtime-dependent number of iterations entirely C++-side. `compile_problem` raises a
-clear `NotImplementedError` for any construct the codegen cannot yet lower, rather than mis-lowering it.
+`(I - alpha*div(grad)) phi = b`) match offline references to ~1e-15; the per-cell `solve_local_nonlinear`
+Newton solve of an implicit reaction `r(U) = U - U0 - dt*S(U) = 0` matches the analytic closed form and
+an offline numpy Newton on the identical residual to ~1e-10; the dynamic `while_` / `range` / `if_`
+loops run a runtime-dependent number of iterations entirely C++-side. `compile_problem` raises a clear
+`NotImplementedError` for any construct the codegen cannot yet lower, rather than mis-lowering it.
 
 The `condensed_schur` row is a documented partial: the divergence + matrix-free + Krylov primitives a
 hand-rolled condensed-Schur stage needs are in place (see `condensed_schur_program.py`), but the

@@ -28,6 +28,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   gmres matches the offline CG reference (~1e-15); on a non-symmetric operator (where CG stagnates) it
   converges to the same solution as BiCGStab. New `python/tests/test_time_gmres.py` + C++ coverage in
   `tests/test_generic_krylov.cpp`.
+- **Per-cell non-linear local solve** (ADC-422, epic ADC-399 spec op 10): `adc.time.Program`'s
+  `solve_local_nonlinear` is no longer a deferred stub. It now lowers a per-cell Newton iteration:
+  the residual is built by an IR callable `residual_fn(P, U, U0)` from LOCAL ops only (named
+  `P.source` / `P.apply`, the iterate / frozen guess, affine combines), and `emit_cpp_program`
+  emits a device kernel that re-evaluates an inlined residual, forms an in-kernel finite-difference
+  Jacobian, and solves the Newton step `J dU = -r` with the same stack dense inverse
+  (`adc::detail::mat_inverse<N>`) `solve_local_linear` uses, iterating to `max_c |r_c| < tol` or the
+  `max_iter` budget. The kernel is heap-free / `std::function`-free / Eigen-free; a non-local residual
+  op and `n_cons > 8` are rejected loud. Reuses `adc::for_each_cell` and the `solve_local_linear`
+  per-cell codegen (no flux / solver reimplementation).
 - **Optional per-Program dt bound** (ADC-417, epic ADC-399 spec section 18): an
   `adc.time.Program` may declare a dt bound via `@P.dt_bound` or `P.set_dt_bound(expr)`, e.g.
   `cfl * P.hmin() / P.max_wave_speed(U)`. It builds a scalar IR sub-program (new `P.hmin` /
