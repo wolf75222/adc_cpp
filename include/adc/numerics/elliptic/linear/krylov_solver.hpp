@@ -30,6 +30,7 @@
 #include <adc/mesh/storage/mf_arith.hpp>
 #include <adc/mesh/storage/multifab.hpp>
 #include <adc/mesh/boundary/physical_bc.hpp>
+#include <adc/numerics/elliptic/linear/krylov_result.hpp>
 #include <adc/numerics/elliptic/mg/geometric_mg.hpp>
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
 #include <adc/parallel/comm.hpp>
@@ -39,12 +40,7 @@
 
 namespace adc {
 
-// Result of a BiCGStab solve: iterations performed, final relative residual, convergence flag.
-struct KrylovResult {
-  int iters = 0;           ///< number of BiCGStab iterations performed
-  Real rel_residual = 0;   ///< ||r_final|| / ||r_0|| (global L2 norm)
-  bool converged = false;  ///< true if rel_residual <= rel_tol reached
-};
+// KrylovResult is defined in krylov_result.hpp (included above), shared with generic_krylov.hpp.
 
 // Matrix-free BiCGStab, preconditioned by N V-cycles of GeometricMG on the SYMMETRIC part.
 //

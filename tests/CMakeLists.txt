@@ -212,6 +212,11 @@ adc_add_test(test_polar_condensed_schur_source_stepper)
 # SEUL echoue (#120 : stagnation c=0.1-0.4, divergence c=0.7), + consistance A=I vs GeometricMG.
 # (entree serie ; les entrees MPI np=1/2/4 sont ajoutees dans le bloc ADC_HAS_MPI plus bas)
 adc_add_test(test_krylov_solver)
+# ADC-405a : couche de Krylov GENERIQUE matrice-libre (generic_krylov.hpp) -- Richardson, CG,
+# BiCGStab -- l'operateur passe en CALLBACK (ApplyFn). Valide les trois boucles sur un operateur
+# de Helmholtz SPD A = I - alpha*Lap : solution manufacturee discretisation-exacte (rhs = A(phi_exact)),
+# convergence + recouvrement de phi_exact, et max_iter=0 -> std::invalid_argument (erreur spec 13).
+adc_add_test(test_generic_krylov)
 # Schur PR3 (batisseur) : ASSEMBLE l'operateur tensoriel A_op = I + theta^2 dt^2 alpha rho B^{-1}
 # (eps_x/eps_y diag, a_xy/a_yx croises) + le RHS condense -Lap phi^n - theta dt alpha div(rho B^{-1} v^n)
 # depuis les roles Density/MomentumX/MomentumY d'un bloc fluide. PAS de solve (PR4). Tests analytiques :
