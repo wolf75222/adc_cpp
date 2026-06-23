@@ -108,6 +108,24 @@ class ProgramContext {
     field_postprocess(phi, out, cx, cy, FieldPostProcess{FieldPostProcess::GradSign::Plus, false});
   }
 
+  /// out = div(@p fx, @p fy) by centered differences: out = d fx/dx + d fy/dy (component 0). The x-flux
+  /// is read from component 0 of @p fx and the y-flux from component 1 of @p fy, the SAME layout
+  /// @ref gradient writes (d/dx in component 0, d/dy in component 1) -- so chaining ctx.gradient(g, phi)
+  /// then ctx.divergence(out, g, g) recovers the 5-point Laplacian. Fills the ghosts of @p fx and @p fy
+  /// (transport BC, periodic by default) then forwards to adc::apply_divergence -- the exact inverse
+  /// stencil of @ref gradient and the same centered FV divergence the native Schur condensation
+  /// assembles (coupling/schur/core/schur_condensation.hpp). @p fx and @p fy are non-const because the
+  /// ghost fill WRITES their halos (the valid cells are unchanged). A compiled Program forms a
+  /// Schur-like flux operator A(phi) = phi - alpha*div(grad phi) by chaining ctx.gradient then
+  /// ctx.divergence inside a matrix-free apply.
+  void divergence(MultiFab& out, MultiFab& fx, MultiFab& fy) const {
+    const GridContext gc = sys_->grid_context();
+    fill_ghosts(fx, gc.geom.domain, gc.bc);
+    if (&fy != &fx)
+      fill_ghosts(fy, gc.geom.domain, gc.bc);  // skip the redundant halo fill when fy aliases fx
+    apply_divergence(fx, fy, gc.geom, out, /*cx=*/0, /*cy=*/1);
+  }
+
   /// A zero-initialized RHS scratch with the SAME layout (box array / distribution / ghosts) as @p u,
   /// so the subsequent axpy(u, ., r) combines identical layouts.
   MultiFab rhs_scratch_like(const MultiFab& u) const {

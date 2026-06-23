@@ -216,6 +216,49 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom, MultiFab&
   }
 }
 
+namespace detail {
+// Centered finite-volume divergence of a cell-centered vector flux: the x-flux is read from
+// component @c cx of fx and the y-flux from component @c cy of fy:
+//   div(i,j) = (fx(i+1,j,cx) - fx(i-1,j,cx)) / (2 dx) + (fy(i,j+1,cy) - fy(i,j-1,cy)) / (2 dy),
+// second order, the exact inverse of the centered gradient (field_postprocess). Named functor
+// (and not an ADC_HD lambda) for the same reason as the other elliptic kernels (#93): it is
+// first-instantiated from an external TU (the compiled time-program .so) and an extended lambda
+// breaks the device kernel emission under nvcc. half_idx/half_idy = 1/(2 dx), 1/(2 dy).
+struct DivergenceKernel {
+  ConstArray4 fx, fy;
+  Array4 div;
+  Real half_idx, half_idy;
+  int cx, cy;
+  ADC_HD void operator()(int i, int j) const {
+    div(i, j) = (fx(i + 1, j, cx) - fx(i - 1, j, cx)) * half_idx +
+                (fy(i, j + 1, cy) - fy(i, j - 1, cy)) * half_idy;
+  }
+};
+}  // namespace detail
+
+// Centered FV divergence of a cell-centered vector flux into div_out (component 0):
+//   div = d fx/dx + d fy/dy, centered (the matching inverse of the centered gradient). The x-flux is
+// read from component @p cx of @p fx and the y-flux from component @p cy of @p fy, so the 2-component
+// output of the centered gradient (field_postprocess: d/dx in component 0, d/dy in component 1) can be
+// fed back as a SINGLE field passed for both arguments (apply_divergence(g, g, geom, out, 0, 1)) to
+// recover the 5-point Laplacian, or two distinct single-component fluxes with cx = cy = 0. Ghosts (1
+// layer) assumed filled by the caller. Mirrors apply_laplacian's structure (one local-fab loop, named
+// functor). The Schur condensation builder uses the same stencil inline (coupling/schur/core/
+// schur_condensation.hpp SchurRhsAssembleKernel, which fuses it with -Lap phi^n -- not refactored to
+// call this so the native source path stays bit-identical).
+inline void apply_divergence(const MultiFab& fx, const MultiFab& fy, const Geometry& geom,
+                             MultiFab& div_out, int cx = 0, int cy = 0) {
+  const Real half_idx = Real(1) / (Real(2) * geom.dx());
+  const Real half_idy = Real(1) / (Real(2) * geom.dy());
+  for (int li = 0; li < div_out.local_size(); ++li) {
+    const ConstArray4 fxv = fx.fab(li).const_array();
+    const ConstArray4 fyv = fy.fab(li).const_array();
+    Array4 d = div_out.fab(li).array();
+    for_each_cell(div_out.box(li),
+                  detail::DivergenceKernel{fxv, fyv, d, half_idx, half_idy, cx, cy});
+  }
+}
+
 // res = f - div(A grad phi) on active cells, 0 on conductor cells.
 // a_xy/a_yx: off-diagonal coefficients (cf. apply_laplacian). nullptr => bit-identical.
 inline void poisson_residual(MultiFab& phi, const MultiFab& f, const Geometry& geom,
