@@ -221,3 +221,7 @@ Build, test and workflow conventions: [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 BSD-3-Clause. See [LICENSE](LICENSE).
+
+<p align="center">
+  <img src="docs/banner_pops.png" alt="PoPS - Plasma-Oriented PDE Solver" width="100%">
+</p>
