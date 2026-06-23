@@ -1695,10 +1695,14 @@ std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=s
 
 
 class CompiledTime:
-    """Time-stepping policy for a compiled `Program`, passed to `sim.add_equation(..., time=...)`.
+    """Record of a compiled `Program`'s macro-step cadence (`substeps` / `stride`).
 
-    A compiled Program OWNS the whole step body (it is installed via `sim.install_program` and driven
-    by `sim.step(dt)`); `CompiledTime` records the macro-step cadence around it. `substeps` and
+    A compiled Program OWNS the whole step body: it is installed via `sim.install_program` and driven
+    by `sim.step(dt)`. Its cadence is applied to the System with `sim.set_program_cadence(substeps,
+    stride)` (call it after `install_program`); a `CompiledTime` just records those values. The
+    compiled program is NOT attached via `sim.add_equation(time=CompiledTime(...))` -- that path is
+    rejected with an explicit error (the transport policy passed to `add_equation` is a native
+    `adc.Explicit`/etc.; the compiled program is installed separately). `substeps` and
     `stride` are wired (ADC-411) as a SYSTEM-level orchestration AROUND the opaque program closure
     (`System.set_program_cadence`, mirroring the native per-block advance loop): `substeps=n` runs the
     program n times over `eff_dt/n`; `stride=M` runs the whole program once per M macro-steps with

@@ -70,8 +70,11 @@ the cache key, hence forces a recompile -- a stale `.so` is never reused. `debug
 generated `.cpp` next to the `.so` for inspection. `backend` must be `"production"` and `target`
 `"system"` (other values raise a clear error).
 
-`adc.CompiledTime(substeps=, stride=, cfl=)` is the time policy passed to `sim.add_equation`. The
-old time schemes (`adc.Explicit`, `adc.IMEX`, `adc.Strang`, `adc.CondensedSchur`) and the old
+`adc.CompiledTime(substeps=, stride=, cfl=)` records the compiled Program's macro-step cadence;
+apply it with `sim.set_program_cadence(substeps, stride)` after `sim.install_program` (`substeps` and
+`stride` orchestrate the program System-side, mirroring the native per-block loop -- `substeps>1` is
+bit-exact vs native only for an uncoupled program, and `stride` is global, i.e. single-block exact).
+The old time schemes (`adc.Explicit`, `adc.IMEX`, `adc.Strang`, `adc.CondensedSchur`) and the old
 compile path (`m.compile`, `m.source`) keep working unchanged.
 
 ## What is implemented today
