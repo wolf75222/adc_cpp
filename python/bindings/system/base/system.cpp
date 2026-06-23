@@ -163,6 +163,18 @@ struct System::Impl {
   int macro_step_ = 0;  // macro-step counter (0-indexed): feeds the per-block stride filter
   std::function<void(double)>
       program_step_;  // compiled time Program macro-step body (ADC-399); empty = historical path
+  // MULTISTEP HISTORY (ADC-406a): SYSTEM-OWNED ring buffers for multistep schemes (Adams-Bashforth and
+  // friends). A name maps to a ring of (depth = max lag + 1) MultiFabs, newest at [0], each
+  // co-distributed with block 0's state (ba/dm, the block's ncomp). The history lives HERE (not in the
+  // .so closure) so a later checkpoint slice (ADC-406b) can serialize it. depth_[name] is the ring
+  // length; initialized_[name] is false until the first store (a read before then is a fail-loud
+  // config error -- spec error 17). Empty by default -> the historical / single-step paths are untouched.
+  struct HistoryManager {
+    std::map<std::string, std::vector<MultiFab>> histories;  // name -> ring (newest at [0])
+    std::map<std::string, int> depth;                        // name -> ring length (max lag + 1)
+    std::map<std::string, bool> initialized;                 // name -> stored at least once
+  };
+  HistoryManager hist_;
   std::vector<std::function<void(Real)>> couplings;  // inter-species coupled sources (splitting)
   // GLOBAL time-step bounds (System::add_dt_bound): evaluated ONCE per step (host) by
   // step_cfl / step_adaptive. Hook for non-cell-local constraints (multi-block coupling,
@@ -1865,6 +1877,100 @@ MultiFab System::alloc_scalar_field(int n_comp, int n_ghost) {
   MultiFab f(p_->ba, p_->dm, n_comp, n_ghost);
   f.set_val(Real(0));
   return f;
+}
+
+// Multistep history seam (ADC-406a): a generated problem.so declares / reads / writes a named history
+// field across macro-steps (Adams-Bashforth), reaching the SYSTEM-OWNED ring buffers through these
+// accessors. The history lives in Impl::hist_ (private to this TU) so a later checkpoint slice
+// (ADC-406b) can serialize it without touching the .so ABI.
+MultiFab& System::register_history(const std::string& name, int lag) {
+  if (lag < 1)
+    throw std::runtime_error("System::register_history: lag must be >= 1 (got " +
+                             std::to_string(lag) + ") for history '" + name + "'");
+  if (p_->sp.empty())
+    throw std::runtime_error(
+        "System::register_history: no block exists yet; a history is co-distributed with block 0's "
+        "state (add the block before installing the program)");
+  const int want_depth = lag + 1;
+  auto it = p_->hist_.histories.find(name);
+  if (it != p_->hist_.histories.end()) {
+    // Idempotent re-registration: the ring depth is the MAX lag any caller requests. A read at the
+    // declared max lag and the store (which only needs the current slot, register_history(name, 1))
+    // can register in EITHER order without conflict -- a smaller request is a no-op (returns the
+    // existing current slot), a larger one grows the ring (appending zero-filled deeper slots; the
+    // current slot [0] and the already-stored slots are preserved). A program reads each name at one
+    // fixed lag, so the depth converges in the first step and never changes again.
+    if (want_depth > p_->hist_.depth[name]) {
+      const int ncomp = it->second[0].ncomp();
+      for (int k = p_->hist_.depth[name]; k < want_depth; ++k) {
+        MultiFab slot(p_->ba, p_->dm, ncomp, 1);
+        slot.set_val(Real(0));
+        it->second.push_back(std::move(slot));
+      }
+      p_->hist_.depth[name] = want_depth;
+    }
+    return it->second[0];
+  }
+  // The ring holds the block's ncomp (so a slot can carry a full RHS / state), co-distributed with the
+  // block storage (ba/dm) so a per-cell kernel and the arithmetic pair it with the state by local fab
+  // index. One ghost layer like a block state; zero-initialized (the cold-start fill happens on the
+  // first store, but a never-stored read still fails loud on the !initialized flag below).
+  const int ncomp = p_->sp[0].ncomp;
+  std::vector<MultiFab> ring;
+  ring.reserve(static_cast<std::size_t>(want_depth));
+  for (int k = 0; k < want_depth; ++k) {
+    MultiFab slot(p_->ba, p_->dm, ncomp, 1);
+    slot.set_val(Real(0));
+    ring.push_back(std::move(slot));
+  }
+  auto& stored = p_->hist_.histories.emplace(name, std::move(ring)).first->second;
+  p_->hist_.depth[name] = want_depth;
+  p_->hist_.initialized[name] = false;
+  return stored[0];
+}
+
+MultiFab& System::read_history(const std::string& name, int lag) {
+  auto it = p_->hist_.histories.find(name);
+  if (it == p_->hist_.histories.end())
+    throw std::runtime_error("System::read_history: unknown history '" + name +
+                             "' (register it first)");
+  if (lag < 0 || lag >= p_->hist_.depth[name])
+    throw std::runtime_error("System::read_history: lag=" + std::to_string(lag) +
+                             " out of range for history '" + name + "' (depth " +
+                             std::to_string(p_->hist_.depth[name]) + ")");
+  if (!p_->hist_.initialized[name])
+    throw std::runtime_error("history '" + name + "' with lag=" + std::to_string(lag) +
+                             " was requested but not initialized");
+  return it->second[static_cast<std::size_t>(lag)];
+}
+
+void System::store_history(const std::string& name, const MultiFab& value) {
+  auto it = p_->hist_.histories.find(name);
+  if (it == p_->hist_.histories.end())
+    throw std::runtime_error("System::store_history: unknown history '" + name +
+                             "' (register it first)");
+  std::vector<MultiFab>& ring = it->second;
+  // Copy the valid cells of value into the current slot [0] (identical layout: ring slots and the
+  // block state share (ba, dm); lincomb(dst, 1, src, 0, src) is a valid-cell deep copy).
+  adc::lincomb(ring[0], Real(1), value, Real(0), value);
+  if (!p_->hist_.initialized[name]) {
+    // COLD START (first store): broadcast into every deeper slot so a multistep step 0 reads the same
+    // value at every lag (degenerating to a one-step method). Deterministic + machine-precision exact.
+    for (std::size_t k = 1; k < ring.size(); ++k)
+      adc::lincomb(ring[k], Real(1), value, Real(0), value);
+    p_->hist_.initialized[name] = true;
+  }
+}
+
+void System::rotate_histories() {
+  // Shift each ring one step (slot k <- slot k-1, newest-to-oldest), called ONCE at the end of a
+  // macro-step. The current slot [0] keeps its value (the next store overwrites it). The MultiFab move
+  // is a cheap handle swap; the slots stay co-distributed (no reallocation).
+  for (auto& [name, ring] : p_->hist_.histories) {
+    (void)name;
+    for (std::size_t k = ring.size(); k-- > 1;)
+      adc::lincomb(ring[k], Real(1), ring[k - 1], Real(0), ring[k - 1]);
+  }
 }
 
 // Load a generated problem.so and install its compiled time Program. Mirrors add_native_block

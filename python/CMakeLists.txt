@@ -300,6 +300,18 @@ add_test(NAME test_time_solve_linear
 set_tests_properties(test_time_solve_linear PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Multistep histories + Adams-Bashforth 2 (ADC-406a) : emit_cpp_program lowers P.history /
+# P.store_history (a SYSTEM-OWNED ring buffer, not a closure capture) and adc.time.std.adams_bashforth2.
+# Section (A) pins the IR + generated body (ctx.history / ctx.store_history / ctx.rotate_histories, the
+# 3/2 -1/2 weights, store-before-read, IR-hash sensitivity to name/lag), pure Python. Section (B) runs
+# the AB2 program N steps on a 1-var manufactured-source model and matches an OFFLINE AB2 recurrence
+# (FE cold start) to machine precision; Section (C) checks the absent-history read fails loud at
+# sim.step (spec test 38). (B)/(C) self-skip without a compiler / Kokkos / install_program.
+add_test(NAME test_time_history
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_history.py)
+set_tests_properties(test_time_history PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Named-source RHS codegen (ADC-403) : emit_cpp_program LOWERS a rhs(sources=[name,...]) with NAMED
 # sources -- ctx.rhs_into (-div F + default source) + the same per-cell m.source_term kernel as the
 # standalone source op, accumulated via ctx.axpy. Section (A) pins the generated body + the validation

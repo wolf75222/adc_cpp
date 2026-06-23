@@ -308,6 +308,7 @@ class Program:
         self._next_id = 0
         self._commits = {}      # block -> State value
         self._recording = []    # stack of sub-block lists (a control-flow body); see _new / while_
+        self._histories = {}    # name -> max declared lag (multistep histories; ADC-406a)
         self.dt = _Coeff({1: 1.0})   # symbolic time step; participates in coefficient arithmetic
 
     # --- node construction ---
@@ -575,6 +576,35 @@ class Program:
                          {"method": method, "preconditioner": preconditioner, "tol": float(tol),
                           "max_iter": int(max_iter), "has_guess": initial_guess is not None},
                          name, rhs.block)
+
+    # --- multistep histories (ADC-406a) ---
+    def history(self, name, lag=1):
+        """Read a SYSTEM-OWNED history field carried across macro-steps: the value stored @p lag steps
+        back (e.g. ``P.history("plasma.R", lag=1)`` is R_{n-1} for Adams-Bashforth). Returns a
+        State-typed value usable in the affine algebra. The history is owned by the System (a
+        HistoryManager), not the Program, so a later checkpoint slice can serialize it; reading it
+        before it has ever been stored is a fail-loud runtime error (it must be written by
+        `store_history` every step). @p lag must be a Python int >= 1."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("history: name must be a non-empty string")
+        if isinstance(lag, bool) or not isinstance(lag, int) or lag < 1:
+            raise ValueError("history: lag must be a Python int >= 1 (got %r)" % (lag,))
+        self._histories[name] = max(self._histories.get(name, 0), lag)
+        return self._new("state", "history", (), {"history": name, "lag": int(lag)}, name, None)
+
+    def store_history(self, name, value):
+        """Store @p value (a State/RHS field) into the CURRENT slot of history @p name at the end of the
+        step (rotated to lag 1 on the next step). A multistep scheme stores its current RHS so the next
+        step can read it back via `history`. The history is System-owned; this is a side-effecting op
+        (no value). @p value must be a State/RHS field of the Program."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("store_history: name must be a non-empty string")
+        if not _is_field_value(value):
+            raise ValueError("store_history: value must be a State/RHS field (got %r)" % (value,))
+        if value.prog is not self:
+            raise ValueError("store_history: the value belongs to a different Program")
+        self._histories.setdefault(name, 1)
+        return self._new("state", "store_history", (value,), {"history": name}, name, value.block)
 
     def commit(self, block, state):
         """Replace the current state of ``block`` with ``state`` at the end of the step. Each block
@@ -890,7 +920,7 @@ class Program:
     _ALLOWED_OPS = frozenset({"state", "solve_fields", "rhs", "linear_combine", "linear_source",
                               "reduce", "compare", "while", "range", "if", "matrix_free_operator",
                               "scalar_field", "laplacian", "gradient", "solve_linear", "apply_in",
-                              "apply_out"})
+                              "apply_out", "history", "store_history"})
 
     def _all_ops(self):
         """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
@@ -976,6 +1006,13 @@ class Program:
         var = {}
         prelude = []
         lines = []
+        # Multistep histories (ADC-406a): register each declared history at its MAX lag FIRST (a
+        # registration-only call, NOT a read -- a read before the first store fails loud), so the ring
+        # depth is locked before any store. The first ctx.store_history then cold-start-fills every
+        # (already-allocated) slot -- step 0 reads the same value at every lag and the scheme degenerates
+        # to a one-step method. register_history is idempotent (no-op once registered).
+        for name, lag in sorted(self._histories.items()):
+            lines.append("ctx.register_history(%s, %d);" % (json.dumps(name), int(lag)))
         for v in self._values:
             self._emit_op(v, base, committed.id, var, model, lines, prelude)
         # The committed value may be an op that wrote into a SCRATCH (e.g. solve_local_linear,
@@ -984,6 +1021,10 @@ class Program:
         if var[committed.id] != var[base.id]:
             lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
                          % (var[base.id], var[base.id], var[committed.id]))
+        # Rotate the history rings ONCE at the very end of the step (after the commit), so the next step
+        # reads lag k as the value k stores ago. Only emitted when the Program uses histories.
+        if self._histories:
+            lines.append("ctx.rotate_histories();")
         prelude_src = "\n".join("  " + ln for ln in prelude)
         body_src = "\n".join("    " + ln for ln in lines)
         return prelude_src, body_src
@@ -1001,6 +1042,20 @@ class Program:
             lines.append("adc::MultiFab& %s = ctx.state(0);" % var[v.id])
         elif v.op == "solve_fields":
             lines.append("ctx.solve_fields();")
+        elif v.op == "history":
+            # Read the SYSTEM-OWNED history slot (a MultiFab&, ADC-406a): lag steps back. The reference
+            # is bound to a C++ name the affine combine then reads like any other state/RHS term.
+            var[v.id] = "h%d" % v.id
+            lines.append("adc::MultiFab& %s = ctx.history(%s, %d);"
+                         % (var[v.id], json.dumps(v.attrs["history"]), int(v.attrs["lag"])))
+        elif v.op == "store_history":
+            # Side-effect: copy the value into the current slot of the history (the cold-start fill on
+            # the first store happens System-side). store_history is a State-typed node but carries no
+            # readable value -- nothing combines it. Its var maps to the stored value (a harmless alias).
+            (value_in,) = v.inputs
+            lines.append("ctx.store_history(%s, %s);"
+                         % (json.dumps(v.attrs["history"]), var[value_in.id]))
+            var[v.id] = var[value_in.id]
         elif v.op == "rhs":
             state_in = v.inputs[0]  # rhs inputs = (state[, fields]); the state is first
             var[v.id] = "r%d" % v.id
@@ -1592,6 +1647,27 @@ def rk4(P, block, *, sources=("default",), flux=True):
         "rk4_step", U0 + P.dt / 6.0 * k1 + P.dt / 3.0 * k2 + P.dt / 3.0 * k3 + P.dt / 6.0 * k4))
 
 
+def adams_bashforth2(P, block, *, sources=("default",), flux=True):
+    """Adams-Bashforth 2 (explicit 2-step), expressed over the System-owned history (ADC-406a):
+
+        R_n   = R(U)
+        U^{n+1} = U + dt * (3/2 R_n - 1/2 R_{n-1})     with R_{n-1} = history(block.R, lag=1)
+        store_history(block.R, R_n)
+
+    COLD START: the store is recorded BEFORE the lag-1 read, and the runtime fills every history slot on
+    the FIRST store, so step 0 reads R_{n-1} = R_0 and degenerates to one Forward-Euler step
+    (U^1 = U^0 + dt R_0). From step 1 on it is the true AB2 recurrence. This is deterministic and exact;
+    an offline reference mirrors it by taking a Forward-Euler step 0 then AB2. The history name is
+    ``"<block>.R"`` (the block's previous RHS)."""
+    name = block + ".R"
+    U = P.state(block)
+    R_n = _stage_rhs(P, U, sources, flux)
+    # Store R_n FIRST (so the first store cold-start-fills the ring), then read R_{n-1} = lag 1.
+    P.store_history(name, R_n)
+    R_nm1 = P.history(name, lag=1)
+    P.commit(block, P.linear_combine("ab2_step", U + P.dt * (1.5 * R_n - 0.5 * R_nm1)))
+
+
 def strang(P, block, half_flow, source, *, commit=True):
     """Strang splitting macro H(dt/2); S(dt); H(dt/2), the macro form of adc.Strang (lowers to the SAME
     IR, no special class). @p half_flow and @p source are IR-building callables (prog, state, frac) ->
@@ -1608,7 +1684,7 @@ def strang(P, block, half_flow, source, *, commit=True):
 
 # adc.time.std.<scheme>(Program, block, ...) -- the spec's standard library entry point.
 std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,
-                            strang=strang)
+                            adams_bashforth2=adams_bashforth2, strang=strang)
 
 
 class CompiledTime:

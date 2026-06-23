@@ -592,6 +592,36 @@ class System {
   /// fields that feed cg_solve / bicgstab_solve via ProgramContext::laplacian); shares the block
   /// (ba, dm) so a per-cell kernel pairs it with the state and aux by local fab index.
   ADC_EXPORT MultiFab alloc_scalar_field(int n_comp, int n_ghost);
+  /// @name Multistep history (epic ADC-399 / ADC-406a)
+  /// SYSTEM-OWNED history ring buffers for multistep schemes (Adams-Bashforth and friends): a named
+  /// field carried ACROSS macro-steps (e.g. the previous RHS R_{n-1}). The history lives in the System
+  /// (a HistoryManager in Impl), NOT in the .so closure, so a later checkpoint slice (ADC-406b) can
+  /// serialize it. A generated problem.so reaches it through ProgramContext::history / store_history /
+  /// rotate_histories; these are ADC_EXPORT so the .so resolves them across the dlopen boundary.
+  /// @{
+  /// Register (idempotent) a history named @p name with maximum lag @p lag (>= 1): a ring buffer of
+  /// depth @p lag + 1 (slot 0 = the CURRENT value, slot k = the value k macro-steps back after the
+  /// rotates), each slot a MultiFab co-distributed with block 0 (the block state's ncomp, so it can
+  /// hold a full RHS / state) and zero-initialized. Re-registering with the SAME lag returns the
+  /// existing current slot; a DIFFERENT lag throws (a name binds one depth). Returns the current slot
+  /// [0] -- the read target for lag = 1 after one rotate. @throws if @p lag < 1 or no block exists yet.
+  ADC_EXPORT MultiFab& register_history(const std::string& name, int lag);
+  /// The history slot @p lag macro-steps back (lag 0 = the current slot, lag 1 = the previous step's
+  /// stored value, ...). @throws if @p name is unknown, @p lag exceeds the registered depth, or the
+  /// history has not been stored yet ("history '<name>' with lag=<lag> was requested but not
+  /// initialized") -- a read before the first store is a fail-loud configuration error (spec error 17).
+  ADC_EXPORT MultiFab& read_history(const std::string& name, int lag);
+  /// Copy @p value (valid cells) into the CURRENT slot [0] of history @p name and mark it initialized.
+  /// On the FIRST store the value is also broadcast into EVERY deeper slot (the cold-start fill: a
+  /// multistep scheme's step 0 then reads the same value at every lag, degenerating to a one-step
+  /// method -- deterministic and machine-precision reproducible). @throws if @p name is unknown or the
+  /// layouts differ.
+  ADC_EXPORT void store_history(const std::string& name, const MultiFab& value);
+  /// Shift every history ring buffer one step (slot k <- slot k-1, for k = depth-1 .. 1), called ONCE
+  /// at the end of each macro-step (the generated step body emits ctx.rotate_histories() last). The
+  /// current slot [0] keeps its value until the next store overwrites it. No-op when no history exists.
+  ADC_EXPORT void rotate_histories();
+  /// @}
   /// Load a generated problem.so and install its compiled time Program. dlopens @p so_path, checks
   /// its ABI key against this module (fail-loud on mismatch), and calls its adc_install_program(this),
   /// which wraps the System in a ProgramContext and installs the macro-step closure. The .so resolves

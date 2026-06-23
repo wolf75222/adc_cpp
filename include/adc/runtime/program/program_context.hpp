@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <string>
 #include <utility>
 
 #include <adc/core/foundation/types.hpp>      // Real
@@ -118,6 +119,39 @@ class ProgramContext {
   void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b, const MultiFab& y) const {
     adc::lincomb(z, a, x, b, y);
   }
+
+  /// Register (idempotent) the history @p name with maximum lag @p lag, allocating the ring buffer
+  /// WITHOUT reading it. The codegen emits this ONCE at the top of the step body for each declared
+  /// history, so the ring depth is locked before the first store (the cold-start fill then broadcasts
+  /// the first stored value into every -- already allocated -- slot). Forwards to
+  /// System::register_history. A read-only counterpart of @ref history (no fail-loud on uninitialized).
+  void register_history(const std::string& name, int lag) const {
+    sys_->register_history(name, lag);
+  }
+
+  /// The history slot @p lag macro-steps back (the SYSTEM-OWNED ring buffer, ADC-406a): lag 1 = the
+  /// previous step's stored value (e.g. R_{n-1} for Adams-Bashforth), lag 0 = the current slot. The
+  /// codegen emits ``ctx.history("<name>", <lag>)``; the read registers the ring on first use
+  /// (idempotent) and forwards to System::read_history, which throws if the history was never stored
+  /// (spec error 17). @p lag defaults to 1 (the common one-step-back read).
+  MultiFab& history(const std::string& name, int lag = 1) const {
+    sys_->register_history(name, lag);  // idempotent: allocate the ring on first use
+    return sys_->read_history(name, lag);
+  }
+
+  /// Store @p value into the CURRENT slot of history @p name (ADC-406a). Registers the ring on first
+  /// use (at least a current slot; the lag the program reads via @ref history sets the real depth) and
+  /// forwards to System::store_history (which fills every slot on the first store -- the cold start).
+  /// The codegen emits ``ctx.store_history("<name>", <value>)`` near the end of the step body.
+  void store_history(const std::string& name, const MultiFab& value) const {
+    sys_->register_history(name, 1);  // idempotent: at least a current slot exists before the store
+    sys_->store_history(name, value);
+  }
+
+  /// Shift every history ring one macro-step (slot k <- slot k-1). Forwards to
+  /// System::rotate_histories. The codegen emits ``ctx.rotate_histories()`` as the LAST statement of
+  /// the step body (after the commit), so the next step reads lag k as the value k stores ago.
+  void rotate_histories() const { sys_->rotate_histories(); }
 
  private:
   System* sys_;

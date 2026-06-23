@@ -20,6 +20,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Multistep histories + Adams-Bashforth 2 in the time program** (ADC-406, Phase 7a): a compiled
+  `problem.so` can declare, read, and write a history field carried across macro-steps. The history is
+  SYSTEM-owned (a `HistoryManager` in `System::Impl`, ring buffer per name) rather than closure-captured,
+  so a later checkpoint slice can serialize it. New `System` `ADC_EXPORT` seam:
+  `register_history(name, lag)` (idempotent ring of depth `lag + 1`, co-distributed with block 0),
+  `read_history(name, lag)` (throws `"history '<name>' with lag=<lag> was requested but not
+  initialized"` on a read before the first store), `store_history(name, value)` (fills every slot on the
+  FIRST store -- the cold start), `rotate_histories()` (shift the rings one step at end-of-step). New
+  `ProgramContext` forwarders `history`/`store_history`/`rotate_histories` and `adc.time.Program` ops
+  `P.history(name, lag=1)` (a State value) + `P.store_history(name, value)`; the codegen emits
+  `ctx.history`/`ctx.store_history` and `ctx.rotate_histories()` last when any history is used. New std
+  macro `adc.time.std.adams_bashforth2`: `U^{n+1} = U + dt*(3/2 R_n - 1/2 R_{n-1})`, with the cold start
+  degenerating step 0 to Forward Euler (deterministic, machine-precision reproducible). Validated by
+  `python/tests/test_time_history.py` (AB2 vs an offline recurrence to machine precision; an
+  uninitialized-history read fails loud at `sim.step`).
 - **Matrix-free operators + global `solve_linear` in the time program** (ADC-405, Phase 6b): a compiled
   `problem.so` can now run a matrix-free linear solve entirely C++-side via the runtime's Krylov loop
   (`adc::cg_solve`/`bicgstab_solve`/`richardson_solve`), Python only building the IR. New
