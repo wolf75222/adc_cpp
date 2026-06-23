@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **`adc.time.Program` split-source / local-linear-operator IR ops** (ADC-403, Phase 4): `P.source`
+  (a single named model source as an RHS-like value), `P.linear_source` (reference a model
+  `m.linear_source` operator), `P.apply` (`LU = L U`), and `P.solve_local_linear(operator=P.I - a*L,
+  rhs=, fields=)` for a cell-local implicit solve, with an operator algebra (`P.I`, `a * L`,
+  `I +/- a*L`). These build typed IR (the predictor-corrector Poisson/Lorentz program from the spec
+  validates); a non-local or non-linear operator is rejected (`"solve_local_linear currently supports
+  local linear operators only"`). Codegen lowering of these ops is a follow-up, so
+  `emit_cpp_program` still refuses them with a clear `NotImplementedError`.
+  `python/tests/test_time_local_solve.py`.
 - **Multi-stage compiled time programs (SSPRK2, SSPRK3, RK4)** (ADC-399 / ADC-407):
   `Program.emit_cpp_program` now lowers any single-block multi-stage scheme by a topological SSA walk
   -- intermediate stage states become zero-initialized scratch MultiFabs accumulated with `axpy`, and

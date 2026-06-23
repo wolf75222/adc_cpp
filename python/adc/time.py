@@ -146,6 +146,40 @@ class _Affine:
                         "use Program control flow")
 
 
+class _Operator:
+    """A LOCAL linear operator expression ``c_I * I + sum_k c_k * L_k`` (coefficients are `_Coeff`,
+    polynomials in dt). Built by ``Program.I`` and ``a * Program.linear_source(name)``; consumed by
+    `Program.solve_local_linear` (operator ``I +/- a*L``). It is NOT a runtime field value -- it names
+    the model linear source(s) and the scalar(s) that form the operator."""
+
+    def __init__(self, identity, terms):
+        self.identity = identity   # _Coeff: coefficient of the identity I
+        self.terms = list(terms)   # [(Value(op='linear_source'), _Coeff)]
+
+    def __add__(self, other):
+        if not isinstance(other, _Operator):
+            return NotImplemented
+        return _Operator(self.identity + other.identity, self.terms + other.terms)
+
+    def __sub__(self, other):
+        if not isinstance(other, _Operator):
+            return NotImplemented
+        return _Operator(self.identity - other.identity,
+                         self.terms + [(v, -c) for v, c in other.terms])
+
+    def __neg__(self):
+        return _Operator(-self.identity, [(v, -c) for v, c in self.terms])
+
+    def __mul__(self, other):
+        if isinstance(other, (int, float)):
+            other = _Coeff({0: float(other)})
+        if isinstance(other, _Coeff):
+            return _Operator(self.identity * other, [(v, c * other) for v, c in self.terms])
+        return NotImplemented
+
+    __rmul__ = __mul__
+
+
 class Value:
     """A typed SSA node in a Program IR. Field-like values (State, RHS) support affine arithmetic."""
 
@@ -190,6 +224,12 @@ class Value:
         return _to_affine(other) - self._affine()
 
     def __mul__(self, other):
+        if self.vtype == "operator":  # a linear-source operator: scalar/dt * L -> an _Operator term
+            if isinstance(other, (int, float)):
+                other = _Coeff({0: float(other)})
+            if isinstance(other, _Coeff):
+                return _Operator(_Coeff({}), [(self, other)])
+            return NotImplemented
         if isinstance(other, (int, float, _Coeff)):
             return self._affine() * other
         return NotImplemented
@@ -281,6 +321,81 @@ class Program:
         coeffs = [c.as_dict() for _, c in aff]
         return self._new("state", "linear_combine", inputs, {"coeffs": coeffs}, name, block)
 
+    # --- named sources / local linear operators (Phase 4 / ADC-403) ---
+    @property
+    def I(self):  # noqa: E743  -- the mathematical identity operator (matches the spec's P.I)
+        """The identity operator, for building a local linear operator ``self.I - a * L`` (L a
+        linear source). Consumed by `solve_local_linear`."""
+        return _Operator(_Coeff({0: 1.0}), [])
+
+    def linear_source(self, name):
+        """Reference a model linear-source operator ``L_name`` (declared via ``m.linear_source``).
+        Use it in operator algebra (``self.I - a * P.linear_source('lorentz')``) or `apply`. The
+        coefficients of L are the model's; the Program only names it (resolved at compile time)."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("linear_source: name must be a non-empty string")
+        return self._new("operator", "linear_source", (), {"linear_source": name}, name, None)
+
+    def source(self, name, state=None, fields=None):
+        """Evaluate a single named model source ``S_name(U, fields)`` (``m.source_term``) on its own.
+        Returns an RHS-like value (a dU/dt contribution) usable in linear combinations. Named sources
+        are never summed implicitly; this requests exactly one."""
+        if not isinstance(name, str) or not name:
+            raise ValueError("source: a non-empty source name is required")
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("source: a State value is required (state=...)")
+        if fields is not None and not (isinstance(fields, Value) and fields.vtype == "fields"):
+            raise ValueError("source: fields must be a FieldContext from solve_fields")
+        inputs = (state, fields) if fields is not None else (state,)
+        return self._new("rhs", "source", inputs, {"source": name}, name, state.block)
+
+    def apply(self, operator=None, state=None, fields=None, name=None):
+        """Apply a linear-source operator to a state: ``LU = L_name(aux, params) U``. ``operator`` is
+        a `linear_source` value (or its name). Returns an RHS-like value."""
+        lname = self._linear_source_name(operator, "apply")
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("apply: a State value is required (state=...)")
+        if fields is not None and not (isinstance(fields, Value) and fields.vtype == "fields"):
+            raise ValueError("apply: fields must be a FieldContext from solve_fields")
+        inputs = (state, fields) if fields is not None else (state,)
+        return self._new("rhs", "apply", inputs, {"linear_source": lname},
+                         name or ("apply_" + lname), state.block)
+
+    def solve_local_linear(self, name=None, operator=None, rhs=None, fields=None):
+        """Solve a LOCAL linear system ``operator U = rhs`` cell by cell, where
+        ``operator = self.I +/- a*L`` for a single model linear source ``L`` (``a`` may depend on dt
+        / constants). Returns the solution State. A non-local or non-linear operator is rejected; the
+        per-cell dense fallback bound (n_cons <= 8) is enforced by the codegen (a later phase)."""
+        if not isinstance(operator, _Operator) or operator.identity.as_dict() != {0: 1.0}:
+            raise ValueError("solve_local_linear currently supports local linear operators only")
+        if len(operator.terms) != 1:
+            raise NotImplementedError(
+                "solve_local_linear currently supports a single linear source (I +/- a*L); got %d "
+                "term(s)" % len(operator.terms))
+        if not (isinstance(rhs, Value) and rhs.vtype == "state"):
+            raise ValueError("solve_local_linear: rhs must be a State value (rhs=...)")
+        if fields is not None and not (isinstance(fields, Value) and fields.vtype == "fields"):
+            raise ValueError("solve_local_linear: fields must be a FieldContext from solve_fields")
+        op_value, l_coeff = operator.terms[0]
+        lname = op_value.attrs["linear_source"]
+        a = (-l_coeff).as_dict()  # operator = I - a*L, so the L term carries the coefficient -a
+        inputs = (rhs, op_value, fields) if fields is not None else (rhs, op_value)
+        return self._new("state", "solve_local_linear", inputs,
+                         {"linear_source": lname, "a_coeff": a}, name, rhs.block)
+
+    def _linear_source_name(self, operator, where):
+        """Resolve `operator` (a `linear_source` value, its name, or a single unit-coefficient
+        ``_Operator`` term) to the linear-source name."""
+        if isinstance(operator, str) and operator:
+            return operator
+        if isinstance(operator, Value) and operator.op == "linear_source":
+            return operator.attrs["linear_source"]
+        if (isinstance(operator, _Operator) and not operator.identity.as_dict()
+                and len(operator.terms) == 1 and operator.terms[0][1].as_dict() == {0: 1.0}):
+            return operator.terms[0][0].attrs["linear_source"]
+        raise ValueError(
+            "%s: operator must be a linear source (P.linear_source(name) or its name)" % where)
+
     def commit(self, block, state):
         """Replace the current state of ``block`` with ``state`` at the end of the step. Each block
         is committed AT MOST once; read-only blocks need no commit."""
@@ -316,6 +431,8 @@ class Program:
             attrs = dict(v.attrs)
             if "coeffs" in attrs:  # dict keys (powers) -> sorted [power, value] for stable JSON
                 attrs["coeffs"] = [sorted((int(p), c) for p, c in d.items()) for d in attrs["coeffs"]]
+            if "a_coeff" in attrs:  # solve_local_linear: the dt-polynomial a in (I - a*L)
+                attrs["a_coeff"] = sorted((int(p), c) for p, c in attrs["a_coeff"].items())
             nodes.append({"id": v.id, "vtype": v.vtype, "op": v.op, "block": v.block,
                           "inputs": [i.id for i in v.inputs], "attrs": attrs})
         commits = sorted((b, s.id) for b, s in self._commits.items())

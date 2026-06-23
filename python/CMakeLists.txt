@@ -244,6 +244,15 @@ add_test(NAME test_time_multistage
 set_tests_properties(test_time_multistage PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Phase 4 IR ops (ADC-403) : named sources + local linear operators (P.source/linear_source/apply/
+# solve_local_linear + P.I operator algebra). Pure-Python IR (no codegen yet) : builds the spec
+# predictor-corrector Poisson/Lorentz program, validates it, and checks the operator-form rejections
+# and that the codegen still refuses these ops (lowering is a later PR).
+add_test(NAME test_time_local_solve
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_local_solve.py)
+set_tests_properties(test_time_local_solve PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Roe generique des systemes de moments (ADC-368, m.roe_from_jacobian) : cablage/codegen sans
 # compilateur, puis (AOT + System riemann='roe') 10 pas finis + masse conservee, et rejet de
 # riemann='roe' sans capability ; la partie compilee s'auto-saute sans compilateur ou sans Kokkos.
