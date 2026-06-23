@@ -217,6 +217,18 @@ add_test(NAME test_time_std
 set_tests_properties(test_time_std PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# Compiled adc.time.std.strang reproduces native adc.Strang on a simple case (ADC-410). (A) pure Python:
+# the std.strang macro lowers to two half-flow stages (U + dt/2 * R) around a no-op source, and
+# emit_cpp_program produces the matching C++. (B) native bit-parity: an uncoupled isothermal NoSource
+# block advanced with Forward Euler runs native step_strang (set_time_scheme("strang"), run_source_stage
+# a no-op) and the installed compiled std.strang program -- both step N times and match BIT-EXACTLY, plus
+# an offline H(dt/2); no-op; H(dt/2) replay to machine precision. (B) auto-skips without the
+# install_program binding / a compiler / a visible Kokkos (ADC_KOKKOS_ROOT).
+add_test(NAME test_time_strang_parity
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_strang_parity.py)
+set_tests_properties(test_time_strang_parity PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Time-program codegen (ADC-401 Phase 2c-ii) : Program.emit_cpp_program lowers the IR to a problem.so
 # C++ source (Forward-Euler MVP). Pure Python (no compile) : asserts the stable .so ABI + the FE
 # algorithm via ProgramContext, and that multi-stage / named sources are refused, not mis-lowered.

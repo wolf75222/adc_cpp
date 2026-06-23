@@ -20,6 +20,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Compiled Strang macro reproduces native adc.Strang** (ADC-410): a new test
+  `python/tests/test_time_strang_parity.py` demonstrates that the compiled `adc.time.std.strang`
+  combinator (the Program-IR Strang macro `H(dt/2); S(dt); H(dt/2)`) reproduces the native engine
+  Strang macro-step (`SystemStepper::step_strang`) BIT-EXACTLY on a simple case: an uncoupled isothermal
+  `NoSource` block advanced with Forward Euler, where native `H` is a single Euler transport step over
+  `dt/2`, native `S` (`run_source_stage`) is a no-op, and the `solve_fields` fences are inert. The
+  compiled `std.strang` program (installed via `sim.install_program`) and the native scheme
+  (`set_time_scheme("strang")`) step `N` times and match to the last bit (`array_equal`, `max|d| = 0`),
+  with an independent offline `H(dt/2); no-op; H(dt/2)` replay matching to machine precision. No new C++
+  stepper and no `std.strang` change -- pure test coverage of the existing composition.
+
 - **Per-stage elliptic field solve in the time program** (ADC-409, Phase 8): a compiled `problem.so`
   can now re-solve the Poisson fields from an arbitrary stage state, so a field-coupled multi-stage
   scheme is exact. New `System::solve_fields_from_state(block_idx, U_stage)` (`ADC_EXPORT`) assembles
