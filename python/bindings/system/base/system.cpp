@@ -163,6 +163,12 @@ struct System::Impl {
   int macro_step_ = 0;  // macro-step counter (0-indexed): feeds the per-block stride filter
   std::function<void(double)>
       program_step_;  // compiled time Program macro-step body (ADC-399); empty = historical path
+  // Compiled-Program macro-step cadence (ADC-411), the SYSTEM-level orchestration around program_step_
+  // (cf. SystemStepper::step). Defaults 1/1 -> byte-identical to a single program_step_(dt) call.
+  // substeps n: program_step_ runs n times over eff_dt/n. stride M: the program runs once per M
+  // macro-steps with eff_dt = M*dt (GLOBAL hold-then-catch-up). Set by System::set_program_cadence.
+  int program_substeps_ = 1;
+  int program_stride_ = 1;
   // IR hash of the installed compiled Program (the .so's adc_program_hash, ADC-406b). Empty until
   // install_program records it. Serialized in the checkpoint so a restart against a DIFFERENT compiled
   // Program is rejected fail-loud (mismatched buffers / cadence would be meaningless).
@@ -1873,6 +1879,19 @@ std::vector<double> System::eval_rhs(const std::string& name) {
 // body and reaches per-block storage through these accessors (Impl is private to this TU).
 void System::install_program_step(std::function<void(double)> step) {
   p_->program_step_ = std::move(step);
+}
+// Compiled-Program macro-step cadence (ADC-411): SYSTEM-level substeps + stride around the installed
+// program closure (cf. SystemStepper::step). Kept separate from install_program so the .so ABI is
+// untouched. Validates substeps >= 1 && stride >= 1 (fail-loud: a non-positive cadence is meaningless).
+void System::set_program_cadence(int substeps, int stride) {
+  if (substeps < 1)
+    throw std::invalid_argument("System::set_program_cadence: substeps >= 1 required (got " +
+                                std::to_string(substeps) + ")");
+  if (stride < 1)
+    throw std::invalid_argument("System::set_program_cadence: stride >= 1 required (got " +
+                                std::to_string(stride) + ")");
+  p_->program_substeps_ = substeps;
+  p_->program_stride_ = stride;
 }
 int System::n_blocks() const {
   return static_cast<int>(p_->sp.size());

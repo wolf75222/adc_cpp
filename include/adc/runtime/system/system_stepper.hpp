@@ -329,9 +329,32 @@ class SystemStepper {
     // the whole step (solve_fields, RHS, combine, commit -- all via ProgramContext). The runtime only
     // keeps the clock coherent. No implicit solve_fields / couplings / projections here: the Program
     // expresses them explicitly. (step_cfl/step_adaptive do not yet support a Program -- ADC-401 2c.)
+    //
+    // SUBSTEPS + STRIDE (ADC-411): SYSTEM-level orchestration AROUND the opaque program closure,
+    // mirroring how the native path wraps per-block advance (advance_due_blocks: stride_due gate +
+    // advance_transport_n substep subdivision). The Program stays unaware -- it receives a substrate
+    // step size and runs. The clock ticks EVERY macro-step (held steps included), matching native.
+    //   - stride M: GLOBAL hold-then-catch-up. The whole program is HELD on the macro-steps where
+    //     stride_due is false, then runs ONCE with the effective step eff_dt = M*dt at the window end.
+    //     A compiled program is ONE whole-system closure, so the stride is GLOBAL (whole-system); this
+    //     equals native per-block stride ONLY for a single-block system (or all blocks sharing M).
+    //   - substeps n: subdivides the EFFECTIVE step into n calls program_step_(eff_dt/n), mirroring
+    //     native advance_transport_n(s, eff_dt, n) -> eff_dt/n. BUT program_step_(h) re-runs the WHOLE
+    //     program (its solve_fields included), whereas native substeps subdivides ONLY the transport
+    //     (solve_fields + source run ONCE per macro-step). So n>1 here is bit-exact vs native substeps
+    //     ONLY for an UNCOUPLED / transport-only program (solve_fields inert).
+    // Default cadence 1/1 is byte-identical to the single program_step_(dt) call: stride_due(_, 1) is
+    // always true and n == 1 collapses the loop to one call with h == dt.
     if (P->program_step_) {
-      P->program_step_(dt);
-      P->t += dt;
+      if (stride_due(P->macro_step_, P->program_stride_)) {
+        const Real eff_dt = Real(dt) * Real(P->program_stride_);  // catch-up: effective step M*dt
+        const int n = P->program_substeps_;
+        const Real h =
+            eff_dt / Real(n);  // substeps subdivide the EFFECTIVE step (native: eff_dt/n)
+        for (int sub = 0; sub < n; ++sub)
+          P->program_step_(h);
+      }
+      P->t += dt;  // clock ticks EVERY macro-step (held steps included), like native
       P->macro_step_++;
       return;
     }

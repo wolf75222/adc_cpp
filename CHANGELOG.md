@@ -20,6 +20,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Substeps + stride in the compiled time program** (ADC-411): `adc.CompiledTime(substeps=, stride=)`
+  no longer raises -- the macro-step cadence is wired as a SYSTEM-level orchestration AROUND the opaque
+  compiled-program closure (`System::set_program_cadence`, a new `ADC_EXPORT` kept separate from
+  `install_program` so the generated `.so` ABI is untouched), mirroring how the native path wraps the
+  per-block advance (`stride_due` gate + substep subdivision). `substeps=n` calls the program closure
+  `n` times over `eff_dt/n`; `stride=M` runs the whole program once per `M` macro-steps with
+  `eff_dt = M*dt` (GLOBAL hold-then-catch-up) while the clock keeps ticking every macro-step. Default
+  `1/1` is byte-identical to a single `program_step_(dt)` call. New test
+  `python/tests/test_time_substeps_stride.py`: a compiled Forward-Euler program over an uncoupled
+  transport-only model matches native `adc.Explicit(method="euler", substeps=2)` and a single-block
+  `adc.Explicit(stride=2)` BIT-EXACTLY (the two limits where the GLOBAL/whole-program cadence equals the
+  native per-block one are documented in `CompiledTime` and at the stepper seam).
+
 - **Compiled Strang macro reproduces native adc.Strang** (ADC-410): a new test
   `python/tests/test_time_strang_parity.py` demonstrates that the compiled `adc.time.std.strang`
   combinator (the Program-IR Strang macro `H(dt/2); S(dt); H(dt/2)`) reproduces the native engine

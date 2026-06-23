@@ -98,6 +98,11 @@ void init_system(py::module_& m) {
       // ABI key against this module (fail-loud -> RuntimeError), and install its macro-step body. The
       // block(s) must already exist (add_equation); the Program drives sim.step(dt) via ProgramContext.
       .def("install_program", &System::install_program, py::arg("so_path"))
+      // Compiled-Program macro-step cadence (ADC-411): SYSTEM-level substeps + stride around the
+      // installed program closure (cf. SystemStepper::step). Separate from install_program so the .so
+      // ABI is untouched; CompiledTime(substeps=, stride=) threads through here. Both must be >= 1.
+      .def("set_program_cadence", &System::set_program_cadence, py::arg("substeps"),
+           py::arg("stride"))
       // ADC-406b: IR hash of the installed compiled Program (the .so's adc_program_hash), or "" if
       // none. sim.checkpoint records it; sim.restart rejects a restart against a DIFFERENT Program.
       .def("installed_program_hash", &System::installed_program_hash)

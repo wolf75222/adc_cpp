@@ -589,6 +589,17 @@ class System {
   /// install_block / grid_context; without default visibility the .so could not find them (_adc is
   /// built with hidden visibility).
   ADC_EXPORT void install_program_step(std::function<void(double)> step);
+  /// Set the compiled-Program macro-step cadence (ADC-411): SYSTEM-level @p substeps and @p stride
+  /// around the installed program closure (cf. SystemStepper::step). @p substeps subdivides each
+  /// effective step into @p substeps calls program_step_(eff_dt/substeps); @p stride runs the whole
+  /// program once per @p stride macro-steps with eff_dt = stride*dt (GLOBAL hold-then-catch-up, the
+  /// clock still ticks every macro-step). Both must be >= 1 (throws std::invalid_argument otherwise).
+  /// Default 1/1 -> byte-identical to a single program_step_(dt) call. Kept SEPARATE from
+  /// install_program so the generated .so ABI is untouched (the cadence is runtime metadata).
+  /// NOTE: substeps > 1 is bit-exact vs native substeps ONLY for an UNCOUPLED / transport-only program
+  /// (program_step_ re-runs the whole program, solve_fields included); stride is GLOBAL (whole-system),
+  /// equal to native per-block stride only for a single-block system. See SystemStepper::step.
+  ADC_EXPORT void set_program_cadence(int substeps, int stride);
   /// Number of blocks (species) installed.
   ADC_EXPORT int n_blocks() const;
   /// The conservative state MultiFab of block @p b (zero-copy, non-owning reference).

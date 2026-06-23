@@ -1698,21 +1698,27 @@ class CompiledTime:
     """Time-stepping policy for a compiled `Program`, passed to `sim.add_equation(..., time=...)`.
 
     A compiled Program OWNS the whole step body (it is installed via `sim.install_program` and driven
-    by `sim.step(dt)`); `CompiledTime` records the macro-step cadence around it. MVP scope: a single
-    Forward-Euler step. `substeps > 1`, `stride > 1`, and a non-default `cfl` are deferred -- the
-    Program currently receives a bare `dt` and `step_cfl` / substep / stride orchestration is not yet
-    wired for the program path (cf. system_stepper.hpp; ADC-401 Phase 2c) -- so they fail loud here
-    rather than be silently ignored."""
+    by `sim.step(dt)`); `CompiledTime` records the macro-step cadence around it. `substeps` and
+    `stride` are wired (ADC-411) as a SYSTEM-level orchestration AROUND the opaque program closure
+    (`System.set_program_cadence`, mirroring the native per-block advance loop): `substeps=n` runs the
+    program n times over `eff_dt/n`; `stride=M` runs the whole program once per M macro-steps with
+    `eff_dt = M*dt` (GLOBAL hold-then-catch-up, the clock still ticks every macro-step).
+
+    Two semantic limits to keep in mind (cf. system_stepper.hpp):
+      - `substeps > 1` is bit-exact vs native `adc.Explicit(substeps=n)` ONLY for an UNCOUPLED /
+        transport-only program: `program_step_(h)` re-runs the WHOLE program (its `solve_fields`
+        included), whereas native substeps subdivides ONLY the transport (solve_fields runs once).
+      - `stride` here is GLOBAL (a compiled program is one whole-system closure), so it equals native
+        per-block stride only for a single-block system (or all blocks sharing the stride).
+
+    A non-default `cfl` is still deferred (the Program receives a bare `dt`; pass an explicit `dt` to
+    `sim.step(dt)`) -- it fails loud rather than being silently ignored."""
 
     def __init__(self, substeps=1, stride=1, cfl="default"):
-        if substeps != 1:
-            raise NotImplementedError(
-                "CompiledTime: substeps > 1 is deferred (ADC-401 Phase 2c); the compiled Program "
-                "receives a bare dt with no substep orchestration yet")
-        if stride != 1:
-            raise NotImplementedError(
-                "CompiledTime: stride > 1 is deferred (ADC-401 Phase 2c); the compiled Program has "
-                "no macro-step cadence yet")
+        if not isinstance(substeps, int) or substeps < 1:
+            raise ValueError("CompiledTime: substeps must be a positive int (got %r)" % (substeps,))
+        if not isinstance(stride, int) or stride < 1:
+            raise ValueError("CompiledTime: stride must be a positive int (got %r)" % (stride,))
         if cfl != "default":
             raise NotImplementedError(
                 "CompiledTime: cfl != 'default' is deferred (ADC-401 Phase 2c); pass an explicit dt "

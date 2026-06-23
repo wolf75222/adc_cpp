@@ -67,10 +67,10 @@ chk(raises(ValueError, lambda: adc.compile_problem(time=_fe_program(), target="a
     "compile_problem target != 'system' rejected")
 chk(raises(ValueError, lambda: adc.compile_problem(time=None)),
     "compile_problem without a Program rejected")
-chk(raises(NotImplementedError, lambda: adc.CompiledTime(substeps=2)),
-    "CompiledTime substeps>1 rejected (deferred)")
-chk(raises(NotImplementedError, lambda: adc.CompiledTime(stride=2)),
-    "CompiledTime stride>1 rejected (deferred)")
+# substeps>1 / stride>1 are WIRED now (ADC-411): they STORE the cadence (System.set_program_cadence
+# applies it around the program closure) instead of being rejected. cf. test_time_substeps_stride.py.
+chk(adc.CompiledTime(substeps=2).substeps == 2, "CompiledTime substeps>1 accepted (wired, ADC-411)")
+chk(adc.CompiledTime(stride=2).stride == 2, "CompiledTime stride>1 accepted (wired, ADC-411)")
 chk(raises(NotImplementedError, lambda: adc.CompiledTime(cfl="program")),
     "CompiledTime cfl!='default' rejected (deferred)")
 chk(adc.CompiledTime().kind == "compiled", "CompiledTime() default ok (kind 'compiled')")

@@ -335,6 +335,18 @@ add_test(NAME test_time_history_checkpoint
 set_tests_properties(test_time_history_checkpoint PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Compiled-Program macro-step cadence: substeps + stride (ADC-411). Section (A) is pure Python: the
+# CompiledTime(substeps=, stride=) guards are GONE (the values are stored; negative/zero raise). Section
+# (B) checks parity vs the native cadence on the simple bit-exact cases -- a compiled Forward-Euler
+# program on an UNCOUPLED transport-only model matches native adc.Explicit(euler, substeps=2) and a
+# single-block adc.Explicit(euler, stride=2) hold-then-catch-up bit-for-bit (System.set_program_cadence
+# wraps the program closure), and the clock ticks every macro-step. (B) self-skips without the
+# install_program / set_program_cadence binding / a compiler / a visible Kokkos (never faking the engine).
+add_test(NAME test_time_substeps_stride
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_substeps_stride.py)
+set_tests_properties(test_time_substeps_stride PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Named-source RHS codegen (ADC-403) : emit_cpp_program LOWERS a rhs(sources=[name,...]) with NAMED
 # sources -- ctx.rhs_into (-div F + default source) + the same per-cell m.source_term kernel as the
 # standalone source op, accumulated via ctx.axpy. Section (A) pins the generated body + the validation
