@@ -360,6 +360,19 @@ add_test(NAME test_time_substeps_stride
 set_tests_properties(test_time_substeps_stride PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# step_cfl routes through an installed compiled program (ADC-413, epic ADC-399 criterion 7 / spec 19).
+# step_cfl conserves the existing CFL logic (the per-block CFL dt is still computed in adc_cpp on the
+# native state) AND drives the macro-step at that dt through the SAME cadence helper as step()
+# (run_program_cadence). Section (A) is the pure-Python API presence check. Section (B) checks
+# end-to-end that step_cfl ADVANCES the state via the program, that its dt equals the native CFL dt,
+# that step_cfl(cfl) == step(dt_cfl) bit-exact, that substeps/stride cadence is honored under step_cfl,
+# and that the clock is coherent; (B) self-skips without install_program / set_program_cadence / a
+# compiler / a visible Kokkos (never faking the engine).
+add_test(NAME test_time_step_cfl
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_step_cfl.py)
+set_tests_properties(test_time_step_cfl PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Named-source RHS codegen (ADC-403) : emit_cpp_program LOWERS a rhs(sources=[name,...]) with NAMED
 # sources -- ctx.rhs_into (-div F + default source) + the same per-cell m.source_term kernel as the
 # standalone source op, accumulated via ctx.axpy. Section (A) pins the generated body + the validation
