@@ -312,6 +312,17 @@ add_test(NAME test_time_history
 set_tests_properties(test_time_history PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Checkpoint/restart of compiled-Program histories + the program-hash-mismatch guard (ADC-406b, spec
+# Phase 7 + tests 39/45/46). Section (A) is pure Python: the NPZ facade writes / reads the program_hash
+# + history_* keys round-trip (no engine). Sections (B)/(C) compile an AB2 program and check
+# continuous == (run, checkpoint, restart, continue) bit-for-bit (the history survives the checkpoint --
+# spec 45/39) and that restarting a DIFFERENT compiled Program from an AB2 checkpoint raises the
+# spec-46 hash-mismatch error. They self-skip without numpy / _adc / a compiler / Kokkos / install_program.
+add_test(NAME test_time_history_checkpoint
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_history_checkpoint.py)
+set_tests_properties(test_time_history_checkpoint PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Named-source RHS codegen (ADC-403) : emit_cpp_program LOWERS a rhs(sources=[name,...]) with NAMED
 # sources -- ctx.rhs_into (-div F + default source) + the same per-cell m.source_term kernel as the
 # standalone source op, accumulated via ctx.axpy. Section (A) pins the generated body + the validation

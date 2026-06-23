@@ -2306,6 +2306,30 @@ class System:
         # phi : multigrid warm start (BIT-IDENTICAL restart) ; physical STATE if
         # gauss_policy="evolve" (phi is no longer re-derived from rho there).
         out["phi"] = np.asarray(self._s.potential_global(), dtype=np.float64)
+        # COMPILED-PROGRAM HISTORIES (ADC-406b): a compiled time Program with multistep histories (e.g.
+        # Adams-Bashforth 2) carries the System-owned ring buffers across macro-steps. To make a
+        # (run, checkpoint, restart, continue) run bit-identical to a continuous run, the rings (the
+        # previous RHS R_{n-1}, ...) MUST survive the checkpoint -- else AB2 cold-starts again and
+        # diverges. The program HASH is recorded too: a restart against a DIFFERENT compiled Program is
+        # rejected (the buffers / cadence would be meaningless). Both groups of keys are OPTIONAL: a
+        # checkpoint with no installed program / no history restarts exactly as before (back-compatible).
+        prog_hash = ""
+        if hasattr(self._s, "installed_program_hash"):
+            prog_hash = self._s.installed_program_hash()
+        if prog_hash:
+            out["program_hash"] = prog_hash
+        hist_names = list(self._s.history_names()) if hasattr(self._s, "history_names") else []
+        if hist_names:
+            out["history_names"] = np.array(hist_names)
+            for hname in hist_names:
+                depth = int(self._s.history_depth(hname))
+                out["history_depth_" + hname] = depth
+                out["history_ncomp_" + hname] = int(self._s.history_ncomp(hname))
+                out["history_init_" + hname] = bool(self._s.history_initialized(hname))
+                # COLLECTIVE gather of every slot (all ranks call), like state_global above.
+                for k in range(depth):
+                    out["history_%s_%d" % (hname, k)] = np.asarray(
+                        self._s.history_global(hname, k), dtype=np.float64)
         target = path if path.endswith(".npz") else path + ".npz"
         if _adc.my_rank() != 0:
             return target  # only rank 0 writes the checkpoint (gather already done)
@@ -2349,6 +2373,28 @@ class System:
         # state in gauss_policy="evolve").
         if "phi" in d:
             self._s.set_potential(np.asarray(d["phi"], dtype=np.float64).ravel())
+        # COMPILED-PROGRAM HASH GUARD (ADC-406b): if the checkpoint recorded an installed program hash,
+        # the user must have RE-INSTALLED the SAME compiled Program before restart (the v1 replay
+        # contract). A different Program (different IR hash) makes the restored histories / cadence
+        # meaningless -> fail loud rather than silently continue with the wrong scheme.
+        if "program_hash" in d:
+            chk_hash = str(d["program_hash"])
+            cur_hash = (self._s.installed_program_hash()
+                        if hasattr(self._s, "installed_program_hash") else "")
+            if cur_hash != chk_hash:
+                raise RuntimeError("checkpoint was created with a different compiled Program hash")
+        # COMPILED-PROGRAM HISTORIES (ADC-406b): restore each ring (the previous RHS, ...) so a
+        # multistep scheme (AB2) resumes EXACTLY where it stopped -- continuous == (run, ckpt, restart,
+        # continue) bit-for-bit. The program re-registers the rings on its first post-restart step;
+        # restoring them here (before that step) seeds the slots and the initialized flag so the first
+        # post-restart read sees the true R_{n-1} (no phantom cold-start re-fill).
+        if "history_names" in d:
+            for hname in (str(h) for h in d["history_names"]):
+                depth = int(d["history_depth_" + hname])
+                for k in range(depth):
+                    self._s.restore_history(
+                        hname, k, np.asarray(d["history_%s_%d" % (hname, k)], dtype=np.float64))
+                self._s.set_history_initialized(hname, bool(d["history_init_" + hname]))
         self._s.set_clock(float(d["t"]), int(d["macro_step"]))
 
     def __getattr__(self, attr):

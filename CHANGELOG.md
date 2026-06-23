@@ -35,6 +35,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   degenerating step 0 to Forward Euler (deterministic, machine-precision reproducible). Validated by
   `python/tests/test_time_history.py` (AB2 vs an offline recurrence to machine precision; an
   uninitialized-history read fails loud at `sim.step`).
+- **Checkpoint/restart of compiled-Program histories + program-hash guard** (ADC-406, Phase 7b): a
+  compiled `problem.so` with multistep histories (e.g. Adams-Bashforth 2) now checkpoints and restarts
+  correctly -- the System-owned ring buffers survive the round-trip, so a continuous run is bit-for-bit
+  identical to a (run, checkpoint, restart, continue) run. `sim.checkpoint` additionally records the
+  installed Program's IR hash and each history ring (per name: depth, ncomp, every slot, the initialized
+  flag); `sim.restart` rejects a restart against a DIFFERENT compiled Program with
+  `"checkpoint was created with a different compiled Program hash"`, then restores the rings. The v1
+  checkpoint format stays back-compatible (a checkpoint with no program/history keys restarts as before).
+  New `System` `ADC_EXPORT` seam reusing the block-state gather/scatter machinery:
+  `installed_program_hash()`, `history_names()`/`history_depth`/`history_ncomp`/`history_initialized`,
+  `history_global(name, slot)` (collective gather, like `state_global`), `restore_history(name, slot,
+  values)` (owner-rank scatter, like `set_state`; auto-registers the ring) and
+  `set_history_initialized`. `rotate_histories()` now does O(1) `std::swap` handle rotations instead of a
+  deep copy. Validated by `python/tests/test_time_history_checkpoint.py` (continuous == restart to
+  machine precision; the hash mismatch fails loud).
 - **Matrix-free operators + global `solve_linear` in the time program** (ADC-405, Phase 6b): a compiled
   `problem.so` can now run a matrix-free linear solve entirely C++-side via the runtime's Krylov loop
   (`adc::cg_solve`/`bicgstab_solve`/`richardson_solve`), Python only building the IR. New

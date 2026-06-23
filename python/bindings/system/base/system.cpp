@@ -163,6 +163,10 @@ struct System::Impl {
   int macro_step_ = 0;  // macro-step counter (0-indexed): feeds the per-block stride filter
   std::function<void(double)>
       program_step_;  // compiled time Program macro-step body (ADC-399); empty = historical path
+  // IR hash of the installed compiled Program (the .so's adc_program_hash, ADC-406b). Empty until
+  // install_program records it. Serialized in the checkpoint so a restart against a DIFFERENT compiled
+  // Program is rejected fail-loud (mismatched buffers / cadence would be meaningless).
+  std::string installed_program_hash_;
   // MULTISTEP HISTORY (ADC-406a): SYSTEM-OWNED ring buffers for multistep schemes (Adams-Bashforth and
   // friends). A name maps to a ring of (depth = max lag + 1) MultiFabs, newest at [0], each
   // co-distributed with block 0's state (ba/dm, the block's ncomp). The history lives HERE (not in the
@@ -1963,14 +1967,96 @@ void System::store_history(const std::string& name, const MultiFab& value) {
 }
 
 void System::rotate_histories() {
-  // Shift each ring one step (slot k <- slot k-1, newest-to-oldest), called ONCE at the end of a
-  // macro-step. The current slot [0] keeps its value (the next store overwrites it). The MultiFab move
-  // is a cheap handle swap; the slots stay co-distributed (no reallocation).
+  // Shift each ring one step (slot k gets slot k-1's value, newest-to-oldest), called ONCE at the end
+  // of a macro-step. O(1) std::swap of the MultiFab handles (not a deep adc::lincomb copy): the swap
+  // chain from the deepest slot down to 1 leaves every read slot k >= 1 holding slot k-1's old value
+  // (identical to a copy-shift) and RECYCLES the now-oldest buffer into slot [0]. Slot [0] is always
+  // overwritten by the next store before any read (the AB2 body stores then reads lag 1), so recycling
+  // it is harmless and avoids reallocation; the slots stay co-distributed (same (ba, dm)).
   for (auto& [name, ring] : p_->hist_.histories) {
     (void)name;
     for (std::size_t k = ring.size(); k-- > 1;)
-      adc::lincomb(ring[k], Real(1), ring[k - 1], Real(0), ring[k - 1]);
+      std::swap(ring[k], ring[k - 1]);
   }
+}
+
+// Multistep history checkpoint/restart seam (ADC-406b): the System owns the rings, so the checkpoint
+// facade (sim.checkpoint / sim.restart) gathers and restores them DIRECTLY -- reusing the SAME global
+// gather (gather_global) / scatter (write_state) machinery as the block state, so the round-trip is
+// MPI-safe and bit-identical under np>1. No .so checkpoint_extra ABI is needed for the buffers.
+std::vector<std::string> System::history_names() const {
+  std::vector<std::string> out;
+  out.reserve(p_->hist_.histories.size());
+  for (const auto& [name, ring] : p_->hist_.histories) {
+    (void)ring;
+    out.push_back(name);
+  }
+  return out;
+}
+int System::history_depth(const std::string& name) const {
+  auto it = p_->hist_.depth.find(name);
+  if (it == p_->hist_.depth.end())
+    throw std::runtime_error("System::history_depth: unknown history '" + name + "'");
+  return it->second;
+}
+int System::history_ncomp(const std::string& name) const {
+  auto it = p_->hist_.histories.find(name);
+  if (it == p_->hist_.histories.end())
+    throw std::runtime_error("System::history_ncomp: unknown history '" + name + "'");
+  return it->second[0].ncomp();
+}
+std::vector<double> System::history_global(const std::string& name, int slot) const {
+  auto it = p_->hist_.histories.find(name);
+  if (it == p_->hist_.histories.end())
+    throw std::runtime_error("System::history_global: unknown history '" + name + "'");
+  const std::vector<MultiFab>& ring = it->second;
+  if (slot < 0 || slot >= static_cast<int>(ring.size()))
+    throw std::runtime_error("System::history_global: slot=" + std::to_string(slot) +
+                             " out of range for history '" + name + "' (depth " +
+                             std::to_string(ring.size()) + ")");
+  device_fence();
+  return gather_global(ring[static_cast<std::size_t>(slot)], ring[0].ncomp(), nx(), ny());
+}
+bool System::history_initialized(const std::string& name) const {
+  auto it = p_->hist_.initialized.find(name);
+  if (it == p_->hist_.initialized.end())
+    throw std::runtime_error("System::history_initialized: unknown history '" + name + "'");
+  return it->second;
+}
+void System::restore_history(const std::string& name, int slot, const std::vector<double>& values) {
+  auto it = p_->hist_.histories.find(name);
+  if (it == p_->hist_.histories.end()) {
+    // The program will re-register the ring on its first post-restart step, but we restore BEFORE that
+    // step; register it now (depth = slot + 1, grown as deeper slots arrive) so the values land. Uses
+    // the SAME co-distributed (ba, dm, block 0 ncomp) ring as register_history.
+    register_history(name, slot >= 1 ? slot : 1);
+    it = p_->hist_.histories.find(name);
+  }
+  std::vector<MultiFab>& ring = it->second;
+  if (slot < 0)
+    throw std::runtime_error("System::restore_history: slot=" + std::to_string(slot) +
+                             " must be >= 0 for history '" + name + "'");
+  if (slot >= static_cast<int>(ring.size())) {
+    // A deeper slot than currently registered: grow the ring (zero-filled tail) so it fits, matching
+    // register_history's idempotent growth.
+    const int ncomp = ring[0].ncomp();
+    for (int k = static_cast<int>(ring.size()); k <= slot; ++k) {
+      MultiFab s(p_->ba, p_->dm, ncomp, 1);
+      s.set_val(Real(0));
+      ring.push_back(std::move(s));
+    }
+    p_->hist_.depth[name] = static_cast<int>(ring.size());
+  }
+  // Scatter the GLOBAL component-major buffer into the slot's fab (owner rank writes, others no-op):
+  // reuse the block store's write_state, the EXACT inverse of gather_global / state_global.
+  p_->blocks_.write_state(ring[static_cast<std::size_t>(slot)], ring[0].ncomp(), values);
+}
+void System::set_history_initialized(const std::string& name, bool initialized) {
+  auto it = p_->hist_.initialized.find(name);
+  if (it == p_->hist_.initialized.end())
+    throw std::runtime_error("System::set_history_initialized: unknown history '" + name +
+                             "' (restore its slots first)");
+  it->second = initialized;
 }
 
 // Load a generated problem.so and install its compiled time Program. Mirrors add_native_block
@@ -2028,7 +2114,15 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
                              so_path + "'");
   }
   install(static_cast<void*>(this));
+  // Record the program's IR hash (ADC-406b): the optional adc_program_hash export (a stable IR key,
+  // cf. _PROGRAM_CPP_TEMPLATE) is serialized in the checkpoint so a restart against a DIFFERENT
+  // compiled Program is rejected fail-loud. Missing symbol (older module) -> empty hash, no guard.
+  auto hash_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_program_hash"));
+  p_->installed_program_hash_ = hash_fn ? std::string(hash_fn()) : std::string();
   // .so left loaded for the duration of the process (the installed closure points to code in it).
+}
+std::string System::installed_program_hash() const {
+  return p_->installed_program_hash_;
 }
 std::vector<double> System::get_state(const std::string& name) {
   Impl::Species& s = p_->find(name);

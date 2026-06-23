@@ -98,6 +98,31 @@ void init_system(py::module_& m) {
       // ABI key against this module (fail-loud -> RuntimeError), and install its macro-step body. The
       // block(s) must already exist (add_equation); the Program drives sim.step(dt) via ProgramContext.
       .def("install_program", &System::install_program, py::arg("so_path"))
+      // ADC-406b: IR hash of the installed compiled Program (the .so's adc_program_hash), or "" if
+      // none. sim.checkpoint records it; sim.restart rejects a restart against a DIFFERENT Program.
+      .def("installed_program_hash", &System::installed_program_hash)
+      // Multistep history checkpoint/restart seam (ADC-406b): the facade gathers/restores the
+      // System-owned rings DIRECTLY (no .so checkpoint_extra ABI). history_global mirrors state_global
+      // (collective gather, component-major); restore_history mirrors set_state (owner-rank scatter).
+      .def("history_names", &System::history_names)
+      .def("history_depth", &System::history_depth, py::arg("name"))
+      .def("history_ncomp", &System::history_ncomp, py::arg("name"))
+      .def(
+          "history_global",
+          [](const System& s, const std::string& name, int slot) {
+            return to_3d(s.history_global(name, slot), s.history_ncomp(name), s.ny(), s.nx());
+          },
+          py::arg("name"), py::arg("slot"))
+      .def("history_initialized", &System::history_initialized, py::arg("name"))
+      .def(
+          "restore_history",
+          [](System& s, const std::string& name, int slot,
+             py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+            s.restore_history(name, slot, flat(arr));
+          },
+          py::arg("name"), py::arg("slot"), py::arg("values"))
+      .def("set_history_initialized", &System::set_history_initialized, py::arg("name"),
+           py::arg("initialized"))
       .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
            py::arg("neutral"), py::arg("rate"))
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))

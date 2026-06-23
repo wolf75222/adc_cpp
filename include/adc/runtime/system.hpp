@@ -614,13 +614,48 @@ class System {
   /// Copy @p value (valid cells) into the CURRENT slot [0] of history @p name and mark it initialized.
   /// On the FIRST store the value is also broadcast into EVERY deeper slot (the cold-start fill: a
   /// multistep scheme's step 0 then reads the same value at every lag, degenerating to a one-step
-  /// method -- deterministic and machine-precision reproducible). @throws if @p name is unknown or the
-  /// layouts differ.
+  /// method -- deterministic and machine-precision reproducible). @throws if @p name is unknown. The
+  /// caller is responsible for layout compatibility: the ring slots share the block's (ba, dm, ncomp),
+  /// so a value built from the same block matches (lincomb is a valid-cell copy, no layout check).
   ADC_EXPORT void store_history(const std::string& name, const MultiFab& value);
   /// Shift every history ring buffer one step (slot k <- slot k-1, for k = depth-1 .. 1), called ONCE
   /// at the end of each macro-step (the generated step body emits ctx.rotate_histories() last). The
-  /// current slot [0] keeps its value until the next store overwrites it. No-op when no history exists.
+  /// current slot [0] is recycled (it gets the oldest buffer; the next store overwrites it before any
+  /// read). O(1) handle swaps -- no deep copy. No-op when no history exists.
   ADC_EXPORT void rotate_histories();
+  /// @name Multistep history checkpoint/restart (epic ADC-399 / ADC-406b)
+  /// SERIALIZE / RESTORE the System-owned history rings across a checkpoint. The history lives in the
+  /// System (HistoryManager in Impl), so the checkpoint facade (sim.checkpoint / sim.restart) gathers
+  /// and restores it DIRECTLY -- no .so checkpoint_extra ABI is needed for the buffers (only the program
+  /// hash, installed_program_hash() below, is recorded to reject a restart against a different Program).
+  /// @{
+  /// Names of every registered history (the keys of the HistoryManager), so the facade can iterate the
+  /// rings to serialize. Empty when no history exists (the single-step paths). Order is the map order.
+  ADC_EXPORT std::vector<std::string> history_names() const;
+  /// Ring depth (max lag + 1) of history @p name. @throws if @p name is unknown.
+  ADC_EXPORT int history_depth(const std::string& name) const;
+  /// Component count of the slots of history @p name (the block's ncomp). @throws if unknown.
+  ADC_EXPORT int history_ncomp(const std::string& name) const;
+  /// GLOBAL (collective, MPI-safe) gather of slot @p slot (0 = current, k = k macro-steps back) of
+  /// history @p name into a component-major buffer of size ncomp*ny*nx, EXACTLY like state_global
+  /// (every rank fills its local boxes then all_reduce_sum). All ranks MUST call it. @throws if @p name
+  /// is unknown or @p slot is out of range. Reads the slot even before the first store (the checkpoint
+  /// of a never-stored ring is its zero fill); the initialized flag is serialized separately.
+  ADC_EXPORT std::vector<double> history_global(const std::string& name, int slot) const;
+  /// Whether history @p name has been stored at least once (the cold-start fill already happened). The
+  /// facade records it so a restart restores the initialized state without a phantom re-fill. @throws
+  /// if @p name is unknown.
+  ADC_EXPORT bool history_initialized(const std::string& name) const;
+  /// RESTORE (restart) slot @p slot of history @p name from a GLOBAL component-major buffer (same layout
+  /// as history_global / set_state): the owner rank writes its box, the others are no-ops (MPI-safe, all
+  /// ranks call it). Registers the ring (depth = max(slot)+1) if @p name is unknown yet, so the restart
+  /// rebuilds the rings the program will re-register on its first step. @throws on a size mismatch.
+  ADC_EXPORT void restore_history(const std::string& name, int slot,
+                                  const std::vector<double>& values);
+  /// Mark history @p name initialized (or not) after a restart: a restored, already-stored ring must
+  /// read at lag without a phantom cold-start re-fill on its first post-restart store. @throws if
+  /// @p name is unknown (restore its slots first).
+  ADC_EXPORT void set_history_initialized(const std::string& name, bool initialized);
   /// @}
   /// Load a generated problem.so and install its compiled time Program. dlopens @p so_path, checks
   /// its ABI key against this module (fail-loud on mismatch), and calls its adc_install_program(this),
@@ -628,6 +663,10 @@ class System {
   /// the seam accessors above via the global scope (same self-promotion as the native loader). Mirrors
   /// add_native_block; the .so stays loaded for the process lifetime.
   ADC_EXPORT void install_program(const std::string& so_path);
+  /// IR hash of the installed compiled Program (the string returned by the .so's adc_program_hash),
+  /// or "" if no program is installed. Recorded in the checkpoint (sim.checkpoint) so a restart against
+  /// a DIFFERENT compiled Program is rejected fail-loud (the buffers / cadence would be meaningless).
+  ADC_EXPORT std::string installed_program_hash() const;
   /// @}
 
   /// @name Diagnostics
