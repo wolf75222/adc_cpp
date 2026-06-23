@@ -38,6 +38,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `max_iter` budget. The kernel is heap-free / `std::function`-free / Eigen-free; a non-local residual
   op and `n_cons > 8` are rejected loud. Reuses `adc::for_each_cell` and the `solve_local_linear`
   per-cell codegen (no flux / solver reimplementation).
+- **Condensed-Schur implicit source stage as a compiled Program** (ADC-421, epic ADC-399 acceptance
+  32): the anisotropic, position-dependent operator-coefficient assembly that the condensed-Schur
+  operator needs. `adc.time.Program.schur_coeffs` assembles the per-cell tensor `A = I + c*rho*B^{-1}`
+  (lowered to `ProgramContext::assemble_schur_coeffs`, reusing the native
+  `detail::SchurOperatorCoeffKernel`), `P.apply_laplacian_coeff` applies `div(A grad phi)` matrix-free
+  (`adc::apply_laplacian`'s coefficient path), `P.schur_rhs` assembles the fused
+  `-Lap(phi^n) - theta*dt*alpha*div(B^{-1}(mx,my))` RHS (the native `assemble_rhs`), and
+  `P.schur_reconstruct` reconstructs `v = B^{-1}(v^n - theta*dt*grad phi)` (the closed B^{-1}). The
+  `adc.time.std.condensed_schur` macro composes them with `P.solve_linear` (matrix-free BiCGStab) into
+  the native `CondensedSchurSourceStepper` assemble / solve / reconstruct sequence. Near-match to the
+  native `adc.CondensedSchur` (which adds a GeometricMG preconditioner): same operator and RHS, a
+  preconditioner-free Krylov path. The macro is the `theta == 1` (backward-Euler) source stage from
+  `phi^n = 0`; cross-step phi carry, `theta < 1` extrapolation and the energy-role update are deferred
+  (the macro raises for `theta != 1` rather than mis-lower). The native stepper is untouched.
 - **Optional per-Program dt bound** (ADC-417, epic ADC-399 spec section 18): an
   `adc.time.Program` may declare a dt bound via `@P.dt_bound` or `P.set_dt_bound(expr)`, e.g.
   `cfl * P.hmin() / P.max_wave_speed(U)`. It builds a scalar IR sub-program (new `P.hmin` /

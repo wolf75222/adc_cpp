@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Condensed-Schur: available primitives + the documented macro gap (epic ADC-399 / acceptance 32).
+"""Condensed-Schur: the Program macro + a matrix-free Schur-like solve (epic ADC-399 / ADC-421).
 
-The full ``adc.time.std.condensed_schur`` macro is a DOCUMENTED STUB: a Program rewrite of the native
-``adc.CondensedSchur`` global matrix-free Schur solve is blocked on two deep IR features out of scope
-for this epic -- (A) multi-component ``solve_linear`` (``P.matrix_free_operator`` / ``P.solve_linear``
-are scalar-field only) and (B) anisotropic position-dependent operator-coefficient assembly (the Schur
-operator -div((I + c*rho*B^-1) grad phi) has a per-cell tensor coefficient). This example is therefore
-a "primitives + documented gap" showcase, NOT a fake macro:
+``adc.time.std.condensed_schur`` (ADC-421) lowers the implicit electrostatic-Lorentz source stage to a
+compiled Program -- the anisotropic coefficient assembly (``P.schur_coeffs`` -> the native
+``A = I + c*rho*B^{-1}`` tensor), the coefficiented matrix-free matvec (``P.apply_laplacian_coeff``),
+the fused RHS (``P.schur_rhs``) and the closed-B^{-1} reconstruction (``P.schur_reconstruct``) solved
+with ``P.solve_linear`` (BiCGStab) -- mirroring the native ``CondensedSchurSourceStepper``. This example:
 
-  (a) it RUNS the primitives a hand-rolled condensed-Schur stage already has -- ctx.divergence +
+  (a) RUNS a matrix-free Schur-like solve from the differential primitives -- ctx.divergence +
       ctx.gradient chained into a matrix-free operator solved with P.solve_linear(bicgstab). The
       operator is the SCALAR Schur-like flux operator A(phi) = phi - alpha*div(grad phi) (the
       div(flux) structure of the condensed Poisson operator on the WIDE-stencil Laplacian), checked
       against an offline NumPy CG on the SAME discrete operator (like divergence_solve.py);
-  (b) it shows ``adc.time.std.condensed_schur(P)`` RAISING NotImplementedError with its message
-      (caught + printed), pointing to the still-supported native ``adc.CondensedSchur`` source stepper.
+  (b) shows ``adc.time.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
+      assemble / solve / reconstruct chain, and the deferred ``theta != 1`` extrapolation raising. The
+      end-to-end parity vs an offline reference is in ``python/tests/test_time_condensed_schur.py``; the
+      native ``adc.CondensedSchur`` source stepper stays fully supported.
 
 The wide-stencil centered div(grad) is the Laplacian (x(i+2) - 2 x(i) + x(i-2))/(4 h^2); A is a
 well-posed SPD Helmholtz operator on it. Run::
@@ -112,17 +113,23 @@ def offline_cg(apply, b, tol=1e-10, max_iter=2000):
     return x, iters
 
 
-def show_documented_gap():
-    """(b) std.condensed_schur is a documented NotImplementedError stub: show it raising, print the
-    message (it points to the native adc.CondensedSchur + the available primitives)."""
-    P = adctime.Program("condensed_schur_gap")
+def show_macro():
+    """(b) std.condensed_schur (ADC-421) lowers the theta == 1 condensed-Schur source stage to the full
+    anisotropic assemble / solve / reconstruct chain; the deferred theta != 1 extrapolation raises."""
+    P = adctime.Program("condensed_schur_macro")
+    adctime.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
+    src = P.emit_cpp_program()
+    have_chain = all(frag in src for frag in ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs",
+                                              "ctx.apply_laplacian_coeff", "ctx.schur_reconstruct"))
+    print("std.condensed_schur(theta=1) lowers the full coeff/RHS/solve/reconstruct chain:",
+          "yes" if have_chain else "NO")
     try:
-        adctime.std.condensed_schur(P)
+        adctime.std.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=0.5)
     except NotImplementedError as exc:
-        print("std.condensed_schur is a documented stub -- it raises NotImplementedError:")
-        print("  %s" % str(exc)[:200])
-        return True
-    print("UNEXPECTED: std.condensed_schur did not raise NotImplementedError")
+        print("std.condensed_schur(theta != 1) raises (deferred n+1 extrapolation):")
+        print("  %s" % str(exc)[:160])
+        return have_chain
+    print("UNEXPECTED: std.condensed_schur(theta != 1) did not raise")
     return False
 
 
@@ -132,8 +139,8 @@ def main():
         print("skip condensed_schur_program (_adc lacks the install_program binding; rebuild _adc)")
         return 0
 
-    # (b) the documented gap is pure Python -- it always runs (no toolchain needed).
-    gap_ok = show_documented_gap()
+    # (b) the macro lowering is pure Python -- it always runs (no toolchain needed).
+    gap_ok = show_macro()
 
     # (a) the available primitives: a matrix-free Schur-like solve.
     try:

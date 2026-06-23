@@ -14,10 +14,10 @@ operator on that wide stencil; the compiled result is checked against a plain of
 SAME discrete operator. The single conservative variable doubles as the scalar field: the Program solves
 ``(I - alpha*div(grad)) phi = U`` and commits ``phi`` back into the block.
 
-This is the sanctioned PARTIAL of the condensed-Schur Program (acceptance 32): the divergence + Krylov
-primitives in place. The FULL ``adc.time.std.condensed_schur`` macro stays a documented stub (it raises
-NotImplementedError naming the two missing IR features); the native ``adc.CondensedSchur`` source
-stepper remains supported. Run::
+This is the scalar divergence + Krylov building block of the condensed-Schur Program (acceptance 32);
+the FULL anisotropic ``adc.time.std.condensed_schur`` macro (ADC-421) is in
+``condensed_schur_program.py`` and ``python/tests/test_time_condensed_schur.py``. The native
+``adc.CondensedSchur`` source stepper remains supported. Run::
 
     python examples/time_programs/divergence_solve.py
 

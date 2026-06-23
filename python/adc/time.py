@@ -709,6 +709,112 @@ class Program:
                 raise ValueError("divergence: %s must be a scalar_field value" % nm)
         return self._new("scalar_field", "divergence", (out, fx, fy), {}, out.name, None)
 
+    # --- anisotropic condensed-Schur coefficient assembly + coefficiented apply (ADC-399 / ADC-421) ---
+    def schur_coeffs(self, name=None, state=None, c=None, th_dt=None, c_rho=0, c_bz=3):
+        """Assemble the per-cell tensor coefficient ``A = I + c*rho*B^{-1}`` of the condensed-Schur
+        operator from a State (rho at component @p c_rho) and the B_z aux field (component @p c_bz,
+        canonical B_z=3). Returns a ``schur_coeffs`` bundle value carrying the four coefficient fields
+        (eps_x, eps_y, a_xy, a_yx) -- pass it to ``P.apply_laplacian_coeff`` inside a matrix-free apply.
+
+        @p c = theta^2 * dt^2 * alpha and @p th_dt = theta*dt are scalar coefficients (numbers or
+        dt-polynomials via the affine ``P.dt`` algebra; ``B^{-1}`` depends only on ``w = th_dt*B_z``).
+        The assembly runs ONCE per step (rho / B_z frozen in the source) and the bundle is reused across
+        every Krylov iteration of the phi solve. Lowered to ``ctx.assemble_schur_coeffs`` -- the SAME
+        native detail::SchurOperatorCoeffKernel + apply_laplacian coefficient path, no reimplementation.
+        """
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("schur_coeffs: a State value is required (state=...)")
+        for nm, sc in (("c", c), ("th_dt", th_dt)):
+            if not isinstance(sc, (int, float, _Coeff)):
+                raise ValueError("schur_coeffs: %s must be a number or a dt-polynomial (got %r)"
+                                 % (nm, sc))
+        for nm, ci in (("c_rho", c_rho), ("c_bz", c_bz)):
+            if isinstance(ci, bool) or not isinstance(ci, int) or ci < 0:
+                raise ValueError("schur_coeffs: %s must be a Python int >= 0 (got %r)" % (nm, ci))
+        c_d = (c if isinstance(c, _Coeff) else _Coeff({0: float(c)})).as_dict()
+        th_d = (th_dt if isinstance(th_dt, _Coeff) else _Coeff({0: float(th_dt)})).as_dict()
+        return self._new("schur_coeffs", "schur_coeffs", (state,),
+                         {"c": c_d, "th_dt": th_d, "c_rho": int(c_rho), "c_bz": int(c_bz)}, name,
+                         state.block)
+
+    def apply_laplacian_coeff(self, out, in_, coeffs):
+        """Record ``out = div(A grad in_)`` with the tensor ``A`` of a @ref schur_coeffs bundle (the
+        coefficiented matrix-free matvec of the condensed-Schur operator, ``adc::apply_laplacian``'s
+        coefficient path). @p out and @p in_ are scalar_field values; @p coeffs is a ``schur_coeffs``
+        value. Used inside a matrix-free apply: the condensed operator ``L_schur(phi) = -div(A grad
+        phi) = -out``, so build it as ``-1 * P.apply_laplacian_coeff(out, in_, A)`` via the affine
+        algebra. Lowered to ``ctx.apply_laplacian_coeff(out, in_, eps_x, eps_y, a_xy, a_yx)``."""
+        if not (isinstance(out, Value) and out.vtype == "scalar_field"):
+            raise ValueError("apply_laplacian_coeff: out must be a scalar_field value")
+        if not (isinstance(in_, Value) and in_.vtype == "scalar_field"):
+            raise ValueError("apply_laplacian_coeff: in_ must be a scalar_field value")
+        if not (isinstance(coeffs, Value) and coeffs.vtype == "schur_coeffs"):
+            raise ValueError("apply_laplacian_coeff: coeffs must be a schur_coeffs bundle "
+                             "(P.schur_coeffs(...))")
+        return self._new("scalar_field", "apply_laplacian_coeff", (out, in_, coeffs), {}, out.name,
+                         None)
+
+    def schur_explicit_flux(self, out, state, th_dt, c_mx=1, c_my=2, c_bz=3):
+        """Record ``out = B^{-1} (mx, my)`` per cell -- the explicit condensed-Schur flux
+        ``F = rho*B^{-1}*v^n`` (Fx in component 0, Fy in component 1). @p out is a scalar_field (>= 2
+        components), @p state a State (mx / my at @p c_mx / @p c_my), B_z the aux field at @p c_bz.
+        @p th_dt = theta*dt. Chain ``P.divergence(d, out, out)`` for the centered divergence of F.
+        Lowered to ``ctx.schur_explicit_flux`` (native detail::SchurExplicitFluxKernel)."""
+        if not (isinstance(out, Value) and out.vtype == "scalar_field"):
+            raise ValueError("schur_explicit_flux: out must be a scalar_field value (ncomp >= 2)")
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("schur_explicit_flux: a State value is required")
+        th_d = (th_dt if isinstance(th_dt, _Coeff) else _Coeff({0: float(th_dt)})).as_dict()
+        return self._new("scalar_field", "schur_explicit_flux", (out, state),
+                         {"th_dt": th_d, "c_mx": int(c_mx), "c_my": int(c_my), "c_bz": int(c_bz)},
+                         out.name, None)
+
+    def schur_rhs(self, out, phi_n, state, th_dt, g, c_mx=1, c_my=2, c_bz=3):
+        """Record the FUSED condensed-Schur right-hand side ``out = -Lap(phi_n) - g*div(F)`` with
+        ``F = B^{-1}(mx, my)`` -- the native ElectrostaticLorentzCondensation::assemble_rhs in one op.
+        @p out is a 1-component scalar_field, @p phi_n a scalar_field (phi^n warm start; its ghosts are
+        filled for the Laplacian), @p state a State (mx / my at @p c_mx / @p c_my). @p th_dt = theta*dt
+        and @p g = theta*dt*alpha are scalar coefficients (numbers or dt-polynomials). Lowered to
+        ``ctx.assemble_schur_rhs``. A single op because there is no scalar-field affine combine at the
+        IR level -- the fused C++ assembler mirrors the native one (bare Lap + explicit flux + the
+        SchurRhsAssemble divergence)."""
+        if not (isinstance(out, Value) and out.vtype == "scalar_field"):
+            raise ValueError("schur_rhs: out must be a scalar_field value")
+        if not (isinstance(phi_n, Value) and phi_n.vtype == "scalar_field"):
+            raise ValueError("schur_rhs: phi_n must be a scalar_field value")
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("schur_rhs: a State value is required (state=...)")
+        for nm, sc in (("th_dt", th_dt), ("g", g)):
+            if not isinstance(sc, (int, float, _Coeff)):
+                raise ValueError("schur_rhs: %s must be a number or a dt-polynomial (got %r)"
+                                 % (nm, sc))
+        th_d = (th_dt if isinstance(th_dt, _Coeff) else _Coeff({0: float(th_dt)})).as_dict()
+        g_d = (g if isinstance(g, _Coeff) else _Coeff({0: float(g)})).as_dict()
+        return self._new("scalar_field", "schur_rhs", (out, phi_n, state),
+                         {"th_dt": th_d, "g": g_d, "c_mx": int(c_mx), "c_my": int(c_my),
+                          "c_bz": int(c_bz)}, out.name, None)
+
+    def schur_reconstruct(self, name=None, state=None, phi=None, th_dt=None, c_rho=0, c_mx=1, c_my=2,
+                          c_bz=3):
+        """Record the condensed-Schur velocity reconstruction ``v^{n+theta} = B^{-1}(v^n - theta*dt*
+        grad phi)`` IN PLACE on @p state (rho frozen; mom = rho*v written back). @p phi is the solved
+        potential (a scalar_field or 1-component State), @p th_dt = theta*dt; B_z the aux at @p c_bz.
+        Returns the updated State. Lowered to ``ctx.schur_reconstruct`` (the native centered gradient +
+        closed B^{-1}). The final n+1 extrapolation (factor 1/theta) is the caller's affine algebra."""
+        if isinstance(name, Value) and state is None:
+            name, state = None, name
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("schur_reconstruct: a State value is required (state=...)")
+        if not _is_field_value(phi):
+            raise ValueError("schur_reconstruct: phi must be a scalar_field or State value (phi=...)")
+        if not isinstance(th_dt, (int, float, _Coeff)):
+            raise ValueError("schur_reconstruct: th_dt must be a number or a dt-polynomial (got %r)"
+                             % (th_dt,))
+        th_d = (th_dt if isinstance(th_dt, _Coeff) else _Coeff({0: float(th_dt)})).as_dict()
+        return self._new("state", "schur_reconstruct", (state, phi),
+                         {"th_dt": th_d, "c_rho": int(c_rho), "c_mx": int(c_mx), "c_my": int(c_my),
+                          "c_bz": int(c_bz)}, name, state.block)
+
     def solve_linear(self, name=None, operator=None, rhs=None, initial_guess=None, method="cg",
                      preconditioner="identity", tol=1e-8, max_iter=None, restart=None):
         """Solve the matrix-free linear system ``operator x = rhs`` with the runtime's Krylov loop and
@@ -1421,7 +1527,9 @@ class Program:
                               "scalar_field", "laplacian", "gradient", "divergence", "solve_linear",
                               "apply_in", "apply_out", "history", "store_history",
                               "fill_boundary", "project", "record_scalar",
-                              "cell_compare", "where"})
+                              "cell_compare", "where",
+                              "schur_coeffs", "apply_laplacian_coeff", "schur_explicit_flux",
+                              "schur_rhs", "schur_reconstruct"})
 
     def _all_ops(self):
         """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
@@ -1649,15 +1757,81 @@ class Program:
             lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);"
                          % (var[v.id], var[base.id]))
             lines += _emit_solve_local_nonlinear_kernel(model, v, var[guess_in.id], var[v.id])
+        elif v.op == "schur_coeffs":
+            # Anisotropic condensed-Schur coefficient bundle (ADC-421): allocate the four 1-component
+            # coefficient fields ONCE (persistent shared_ptr in the prelude, captured by the apply
+            # lambda) and FILL them per step in the body from the live state + B_z aux. The bundle's var
+            # is the 4 shared_ptr names; apply_laplacian_coeff dereferences them inside the apply.
+            if prelude is None:
+                raise NotImplementedError(
+                    "schur_coeffs is only lowerable at the top level / step body, not inside a "
+                    "control-flow (if/while/range) body")
+            self._emit_schur_coeffs(v, var, lines, prelude)
+        elif v.op == "scalar_field":
+            # A step-body scratch scalar field (e.g. the explicit-flux buffer the RHS assembly fills):
+            # a persistent shared_ptr (prelude, alloc-once) reused every step. Inside an apply sub-block
+            # the scalar_field is handled by _emit_matrix_free_operator instead (this branch is the
+            # top-level / step-body path -- prelude is not None there).
+            if prelude is None:
+                raise NotImplementedError(
+                    "scalar_field is only lowerable at the top level / step body or inside a "
+                    "matrix_free_operator apply sub-block, not inside a control-flow (if/while/range) body")
+            sp = "sf%d" % v.id
+            var[v.id] = "(*%s)" % sp
+            ncomp = int(v.attrs.get("ncomp", 1))
+            prelude.append("auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(%d, 1));"
+                           % (sp, ncomp))
+        elif v.op == "schur_explicit_flux":
+            # F = B^{-1} (mx, my) per cell into a 2-component scalar field (Fx comp 0, Fy comp 1): the
+            # explicit condensed-Schur flux, a step-body one-shot (not a per-iteration apply).
+            out_in, state_in = v.inputs
+            lines.append("ctx.schur_explicit_flux(%s, %s, %s, %d, %d, %d);"
+                         % (_deref(var[out_in.id]), var[state_in.id], _coeff_cpp(v.attrs["th_dt"]),
+                            v.attrs["c_mx"], v.attrs["c_my"], v.attrs["c_bz"]))
+            var[v.id] = var[out_in.id]
+        elif v.op == "schur_rhs":
+            # Fused condensed-Schur RHS = -Lap(phi^n) - g*div(F) into a 1-component scalar field: the
+            # native assemble_rhs in one ctx call (no scalar-field affine combine at IR level).
+            out_in, phi_in, state_in = v.inputs
+            lines.append(
+                "ctx.assemble_schur_rhs(%s, %s, %s, %s, %s, %d, %d, %d);"
+                % (_deref(var[out_in.id]), _deref(var[phi_in.id]), var[state_in.id],
+                   _coeff_cpp(v.attrs["th_dt"]), _coeff_cpp(v.attrs["g"]), v.attrs["c_mx"],
+                   v.attrs["c_my"], v.attrs["c_bz"]))
+            var[v.id] = var[out_in.id]
+        elif v.op == "laplacian":
+            # Step-body bare Laplacian (e.g. Lap phi^n for the condensed RHS). Inside an apply sub-block
+            # this op is handled by _emit_matrix_free_operator; here it is the top-level path.
+            o, i = v.inputs
+            lines.append("ctx.laplacian(%s, %s);" % (_deref(var[o.id]), _deref(var[i.id])))
+            var[v.id] = var[o.id]
+        elif v.op == "gradient":
+            o, p = v.inputs
+            lines.append("ctx.gradient(%s, %s);" % (_deref(var[o.id]), _deref(var[p.id])))
+            var[v.id] = var[o.id]
+        elif v.op == "divergence":
+            o, fx, fy = v.inputs
+            lines.append("ctx.divergence(%s, %s, %s);"
+                         % (_deref(var[o.id]), _deref(var[fx.id]), _deref(var[fy.id])))
+            var[v.id] = var[o.id]
+        elif v.op == "schur_reconstruct":
+            # In-place velocity reconstruction v = B^{-1}(v^n - theta dt grad phi); mom = rho v. Result
+            # aliases the input state (mx/my overwritten). phi is a scalar_field / 1-comp State token.
+            state_in, phi_in = v.inputs
+            lines.append("ctx.schur_reconstruct(%s, %s, %s, %d, %d, %d, %d);"
+                         % (var[state_in.id], _deref(var[phi_in.id]), _coeff_cpp(v.attrs["th_dt"]),
+                            v.attrs["c_rho"], v.attrs["c_mx"], v.attrs["c_my"], v.attrs["c_bz"]))
+            var[v.id] = var[state_in.id]
         elif v.op == "matrix_free_operator":
             # Install-time: emit the apply lambda `apply_A{id}` into the prelude. Its persistent scratch
             # (the scalar_field ops of the apply sub-block) are shared_ptr fields, captured by value so
             # they outlive the install call and are reused across every Krylov iteration (alloc-once).
             # The lambda is itself captured by the step closure ([=]) and passed to adc::*_solve.
             self._emit_matrix_free_operator(v, var, prelude)
-        elif v.op in ("scalar_field", "laplacian", "gradient", "divergence", "apply_in", "apply_out"):
-            # These ops only appear INSIDE an apply sub-block (lowered by _emit_matrix_free_operator) or
-            # as the operands of solve_linear; they never lower standalone at the top level.
+        elif v.op in ("apply_in", "apply_out", "apply_laplacian_coeff"):
+            # The lambda in/out placeholders and the coefficiented apply matvec only appear INSIDE a
+            # matrix_free_operator apply sub-block (lowered by _emit_matrix_free_operator); they never
+            # lower standalone at the top level.
             raise NotImplementedError(
                 "emit_cpp_program: op '%s' (value '%s') is only lowerable inside a matrix_free_operator "
                 "apply sub-block" % (v.op, v.name))
@@ -1822,6 +1996,27 @@ class Program:
         lines += ["  " + ln for ln in body_lines]
         lines.append("}")
 
+    def _emit_schur_coeffs(self, v, var, lines, prelude):
+        """Lower a schur_coeffs bundle (ADC-421): allocate the four 1-component coefficient fields
+        (eps_x, eps_y, a_xy, a_yx) ONCE as persistent shared_ptrs (prelude, alloc-once, captured by the
+        step closure and by the apply lambda that consumes them) and FILL them per step in the body from
+        the live state + B_z aux via ``ctx.assemble_schur_coeffs`` (the SAME native
+        detail::SchurOperatorCoeffKernel). The bundle's token is the tuple of the four shared_ptr names;
+        ``apply_laplacian_coeff`` dereferences them inside the matrix-free apply."""
+        (state_in,) = v.inputs
+        ex = "ceps_x%d" % v.id
+        ey = "ceps_y%d" % v.id
+        axy = "ca_xy%d" % v.id
+        ayx = "ca_yx%d" % v.id
+        for sp in (ex, ey, axy, ayx):
+            prelude.append(
+                "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % sp)
+        var[v.id] = (ex, ey, axy, ayx)  # the bundle token: the four coefficient shared_ptr names
+        lines.append(
+            "ctx.assemble_schur_coeffs(*%s, *%s, *%s, *%s, %s, %s, %s, %d, %d);"
+            % (ex, ey, axy, ayx, var[state_in.id], _coeff_cpp(v.attrs["c"]),
+               _coeff_cpp(v.attrs["th_dt"]), v.attrs["c_rho"], v.attrs["c_bz"]))
+
     def _emit_matrix_free_operator(self, v, var, prelude):
         """Lower a matrix_free_operator to an INSTALL-TIME C++ apply lambda ``apply_A{id}`` (appended to
         @p prelude). The lambda has the adc::ApplyFn signature ``(adc::MultiFab& out, const adc::MultiFab&
@@ -1868,6 +2063,15 @@ class Program:
             "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(%d, 1));"
             % (acc_sp, op_ncomp))
         captures.append(acc_sp)
+        # A coefficiented apply (apply_laplacian_coeff) reads an OUTER schur_coeffs bundle (assembled in
+        # the step body, before the operator): capture its four coefficient shared_ptrs (already
+        # allocated in the prelude by _emit_schur_coeffs) so the lambda can dereference them.
+        for w in block:
+            if w.op == "apply_laplacian_coeff":
+                coeffs = w.inputs[2]
+                for sp in var[coeffs.id]:
+                    if sp not in captures:
+                        captures.append(sp)
         # 2) The lambda body: the laplacian / gradient ops + the result write into `out`.
         body = []
         for w in block:
@@ -1886,10 +2090,19 @@ class Program:
                 sub[w.id] = sub[o.id]
                 body.append("ctx.divergence(*%s, %s, %s);"
                             % (sub[o.id], _apply_in_arg(sub, fx), _apply_in_arg(sub, fy)))
+            elif w.op == "apply_laplacian_coeff":
+                # out = div(A grad in), A the schur_coeffs tensor: forwards to the native
+                # apply_laplacian coefficient path. eps_x/eps_y/a_xy/a_yx are the captured coeff fields.
+                o, i, coeffs = w.inputs
+                ex, ey, axy, ayx = var[coeffs.id]
+                sub[w.id] = sub[o.id]
+                body.append("ctx.apply_laplacian_coeff(*%s, %s, *%s, *%s, *%s, *%s);"
+                            % (sub[o.id], _apply_in_arg(sub, i), ex, ey, axy, ayx))
             else:
                 raise NotImplementedError(
                     "emit_cpp_program: op '%s' is not lowerable inside a matrix_free_operator apply "
-                    "(supported: scalar_field, laplacian, gradient, divergence)" % w.op)
+                    "(supported: scalar_field, laplacian, gradient, divergence, apply_laplacian_coeff)"
+                    % w.op)
         body += _emit_field_combine(result, "out", sub, acc_sp)
         prelude.append("adc::ApplyFn %s = [%s](adc::MultiFab& out, const adc::MultiFab& in) {"
                        % (lam, ", ".join(captures)))
@@ -1944,6 +2157,15 @@ class Program:
                          "static_cast<adc::Real>(1), %s, %d);"
                          % (kr, lam, sol_sp, rhs_tok, tol, max_iter))
         lines.append("(void)%s;" % kr)
+
+
+def _deref(tok):
+    """C++ MultiFab-lvalue argument for a top-level (step-body) field token. Every top-level token is
+    already a MultiFab lvalue expression: a state / RHS scratch (``u5``, ``r5``), a history (``h5``) or
+    a dereferenced scratch scalar field (``(*sf5)``). The step-body laplacian / gradient / divergence /
+    schur ops take ``adc::MultiFab&`` arguments, so the token passes through unchanged (the apply-block
+    counterpart is `_apply_in_arg`, which additionally const_casts the lambda's ``in`` param)."""
+    return tok
 
 
 def _apply_in_arg(sub, value):
@@ -2508,38 +2730,84 @@ def strang(P, block, half_flow, source, *, commit=True):
     return U3
 
 
-def condensed_schur(P, *args, **kwargs):
-    """Documented stub of the condensed-Schur implicit-source stage (epic ADC-399, acceptance 32).
+def condensed_schur(P, block, *, alpha, theta=1.0, c_rho=0, c_mx=1, c_my=2, c_bz=3,
+                    method="bicgstab", tol=1e-10, max_iter=400, commit=True):
+    """Condensed-Schur implicit electrostatic-Lorentz SOURCE stage as a compiled Program (epic ADC-399,
+    acceptance 32), mirroring the native ``adc.CondensedSchur`` (CondensedSchurSourceStepper) sequence:
 
-    A full Program rewrite of the native ``adc.CondensedSchur`` global matrix-free Schur solve is BLOCKED
-    on two deep IR features that are out of scope for this epic:
+      1. assemble the anisotropic tensor coefficient ``A = I + c*rho*B^{-1}`` (``P.schur_coeffs``,
+         ``c = theta^2 dt^2 alpha``);
+      2. assemble the fused RHS ``-Lap(phi^n) - theta*dt*alpha*div(B^{-1}(mx,my))`` (``P.schur_rhs``);
+      3. solve ``-div(A grad phi^{n+theta}) = RHS`` matrix-free (``P.matrix_free_operator`` +
+         ``P.apply_laplacian_coeff`` negated, ``P.solve_linear``), warm-started from phi^n;
+      4. reconstruct ``v^{n+theta} = B^{-1}(v^n - theta*dt*grad phi)`` and write ``mom = rho*v``
+         (``P.schur_reconstruct``, the closed B^{-1}); rho stays frozen.
 
-      (A) **multi-component solve_linear** -- ``P.matrix_free_operator`` / ``P.solve_linear`` are
-          ``scalar_field``-only today (``domain``/``range_`` other than ``"scalar"`` raise), but the
-          condensed velocity reconstruction couples the (mx, my) momentum components through B^{-1};
-      (B) **anisotropic position-dependent operator-coefficient assembly** -- the Schur operator is
-          ``-div((I + c*rho*B^{-1}) grad phi)``, whose tensor coefficient varies per cell with rho and
-          B_z; there is no IR path to allocate / fill a coefficient MultiFab and wire it into a
-          matrix-free apply (``ctx.laplacian`` hardcodes the bare 5-point stencil, all coefficients null).
+    phi^n is a fresh zero scalar field each step (NO persistent history -- see the cross-step carry note
+    under DEFERRED below). At ``theta == 1`` the stage is well-posed from ``phi^n = 0``: the phi solve
+    runs to tolerance and the velocity reconstruction reads only the solved phi, so a single step matches
+    the native single step taken from ``phi^n = 0``. Every numerical kernel REUSES a native primitive (no
+    stencil / B^{-1} / elimination reimplementation); the native ``adc.CondensedSchur`` stepper is
+    untouched.
 
-    The native ``adc.CondensedSchur`` source stepper REMAINS fully supported for this stage. The
-    matrix-free / Krylov / divergence primitives ARE available for hand-rolled stages right now --
-    ``P.matrix_free_operator`` + ``P.set_apply`` (built from ``P.laplacian`` / ``P.gradient`` /
-    ``P.divergence`` + the affine algebra) + ``P.solve_linear`` (cg / bicgstab / richardson) -- as the
-    div(grad) Helmholtz demo (examples/time_programs/divergence_solve.py,
-    python/tests/test_time_divergence.py) shows: a Schur-like flux operator
-    ``A(phi) = phi - alpha*div(grad phi)`` solved matrix-free against the same offline reference."""
-    raise NotImplementedError(
-        "adc.time.std.condensed_schur is not implemented as a compiled Program. A full rewrite is "
-        "blocked on two deep IR features out of scope for this epic: (A) multi-component solve_linear "
-        "(P.matrix_free_operator / P.solve_linear are scalar_field-only today), and (B) anisotropic "
-        "position-dependent operator-coefficient assembly (the Schur operator -div((I + c*rho*B^-1) "
-        "grad phi) has a per-cell tensor coefficient with no IR path to allocate/fill a coefficient "
-        "MultiFab and wire it into the apply). Use the still-supported native adc.CondensedSchur source "
-        "stepper for this stage. The matrix-free / Krylov / divergence primitives (P.matrix_free_"
-        "operator + P.set_apply with P.laplacian / P.gradient / P.divergence, P.solve_linear) ARE "
-        "available for hand-rolled stages -- see the div(grad) Helmholtz demo in "
-        "examples/time_programs/divergence_solve.py.")
+    @p alpha is the electrostatic coupling constant; @p theta the theta-scheme implicitness; @p c_rho /
+    @p c_mx / @p c_my the conserved-variable components and @p c_bz the aux component of B_z (canonical 3,
+    filled by ``solve_fields``). @p method / @p tol / @p max_iter configure the Krylov phi solve.
+
+    DEFERRED (documented partial, spec's "if too large" clause):
+      - **theta == 1 only** (backward-Euler source stage). For ``theta < 1`` the native stepper
+        extrapolates phi and v from the theta-stage to ``n+1`` (factor ``1/theta``, a MOMENTUM-ONLY /
+        energy-aware update); there is no IR op for a component-restricted extrapolation yet, so a
+        ``theta < 1`` macro would silently commit ``v^{n+theta}`` as ``v^{n+1}``. Rather than mis-lower,
+        this raises for ``theta != 1``.
+      - **cross-step phi^n carry**. The native stepper freezes phi^n (the previous stage's potential)
+        and keeps it in the RHS (``-Lap(phi^n)``) and as the solve warm start. The System history ring
+        is sized to the block's ncomp (a full state), so a 1-component phi cannot be carried through it
+        safely; this macro solves each step from ``phi^n = 0`` (a fresh zero scalar field). At
+        ``theta == 1`` the stage is well-posed from any phi^n (the solve is to tolerance) and the
+        velocity reconstruction reads only the solved phi, so a single step matches the native single
+        step taken from ``phi^n = 0``. A persistent-phi carry is a follow-up (it needs a 1-component
+        history or a scalar-field copy op).
+      - **energy role**. The native ``E^{n+1} = E^n + (1/2)rho(|v^{n+1}|^2 - |v^n|^2)`` update is
+        deferred; the macro updates the rho-frozen momentum only.
+
+    NEAR-MATCH to native, not bit-exact: the native solve is BiCGStab + GeometricMG preconditioner while
+    the Program solve is matrix-free BiCGStab WITHOUT a preconditioner -- the SAME operator and RHS, a
+    different Krylov path (both converge to the same phi at tolerance). ``python/tests/
+    test_time_condensed_schur.py`` checks against an offline reference of the identical assemble / solve
+    / reconstruct steps and documents the gap vs native."""
+    if float(theta) != 1.0:
+        raise NotImplementedError(
+            "adc.time.std.condensed_schur currently lowers only theta == 1 (backward-Euler source "
+            "stage); theta=%r needs the n+1 extrapolation (factor 1/theta) of phi and the MOMENTUM "
+            "components, for which there is no IR op yet (a component-restricted extrapolate). The "
+            "native adc.CondensedSchur stepper supports general theta. See the macro docstring."
+            % (theta,))
+    U = P.state(block)
+    P.solve_fields(U)  # fill the shared aux (B_z at c_bz) from the current state, like the native stage
+    # phi^n = 0 (a fresh zero scalar field): the RHS Laplacian term -Lap(phi^n) vanishes and the solve
+    # warm starts from zero. Cross-step phi^n carry is deferred (see the docstring).
+    phi_n = P.scalar_field(block + ".schur_phi_n")
+    c_coeff = (float(theta) * float(theta) * float(alpha)) * P.dt * P.dt  # c = theta^2 dt^2 alpha
+    th_dt = float(theta) * P.dt  # theta dt
+    g = (float(theta) * float(alpha)) * P.dt  # theta dt alpha (coefficient of the div(F) term)
+    coeffs = P.schur_coeffs(state=U, c=c_coeff, th_dt=th_dt, c_rho=c_rho, c_bz=c_bz)
+    rhs = P.scalar_field(block + ".schur_rhs")
+    P.schur_rhs(rhs, phi_n, U, th_dt, g, c_mx=c_mx, c_my=c_my, c_bz=c_bz)
+    A = P.matrix_free_operator(block + ".schur_op")
+
+    def apply(P, out, x):  # out <- A(x) = -div((I + c rho B^{-1}) grad x) = -apply_laplacian_coeff(x)
+        lap = P.scalar_field("schur_lap")
+        P.apply_laplacian_coeff(lap, x, coeffs)
+        return -1.0 * lap  # the condensed operator -div(A grad phi); the affine is the lowered result
+
+    P.set_apply(A, apply)
+    phi = P.solve_linear(operator=A, rhs=rhs, method=method, tol=tol, max_iter=max_iter)
+    out = P.schur_reconstruct(state=U, phi=phi, th_dt=th_dt, c_rho=c_rho, c_mx=c_mx, c_my=c_my,
+                              c_bz=c_bz)
+    if commit:
+        P.commit(block, out)
+    return out
 
 
 # adc.time.std.<scheme>(Program, block, ...) -- the spec's standard library entry point.
