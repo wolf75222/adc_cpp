@@ -47,10 +47,10 @@ scalar used as a Python `bool`, an unknown source, etc. all raise with an action
 ### Standard library
 
 `adc.time.std` provides macros that *lower to the same IR* (they are not separate C++ steppers):
-`forward_euler`, `ssprk2`, `ssprk3`, `rk4`, `adams_bashforth2` (over a System-owned history), and a
-`strang` splitting combinator. A macro is an ordinary Python function that builds IR nodes -- it never
-computes arrays. `condensed_schur` is a documented stub (it raises `NotImplementedError`; see the
-table below).
+`forward_euler`, `ssprk2`, `ssprk3`, `rk4`, `adams_bashforth2` (over a System-owned history), a
+`strang` splitting combinator, and `condensed_schur` (the implicit electrostatic-Lorentz source stage;
+see the table below). A macro is an ordinary Python function that builds IR nodes -- it never computes
+arrays.
 
 ## Compiling and running
 
@@ -101,7 +101,8 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | Histories / multistep (Adams-Bashforth, `P.history` / `P.store_history`) (`adams_bashforth2_program.py`) | available, runs end-to-end |
 | Checkpoint / restart of a compiled Program (history slices serialized) | available, runs end-to-end |
 | Reductions `P.sum` / `P.max` / `P.min` / `P.sum_component`, `P.fill_boundary`, `P.project` (block positivity), `P.record_scalar` diagnostics (`sim.program_diagnostic`) | available, runs end-to-end |
-| `condensed_schur` as a Program macro | partial: divergence + matrix-free + Krylov primitives in place (`condensed_schur_program.py`); `std.condensed_schur` is a stub (multi-component `solve_linear` + anisotropic coefficient assembly deferred) |
+| Anisotropic coefficient assembly (`P.schur_coeffs` / `P.apply_laplacian_coeff` / `P.schur_rhs` / `P.schur_reconstruct`) | available, runs end-to-end |
+| `condensed_schur` as a Program macro (ADC-421) | available (`theta == 1` backward-Euler source stage from `phi^n = 0`); near-match to native `adc.CondensedSchur` (no preconditioner); cross-step phi carry / `theta < 1` extrapolation / energy update deferred |
 
 Each lowered path is verified against an independent reference to machine precision: Forward Euler /
 SSPRK2 / SSPRK3 reproduce the native `adc.Explicit` step bit-for-bit; the compiled `strang` macro
@@ -115,13 +116,21 @@ an offline numpy Newton on the identical residual to ~1e-10; the dynamic `while_
 loops run a runtime-dependent number of iterations entirely C++-side. `compile_problem` raises a clear
 `NotImplementedError` for any construct the codegen cannot yet lower, rather than mis-lowering it.
 
-The `condensed_schur` row is a documented partial: the divergence + matrix-free + Krylov primitives a
-hand-rolled condensed-Schur stage needs are in place (see `condensed_schur_program.py`), but the
-`adc.time.std.condensed_schur` macro itself raises `NotImplementedError` -- a full rewrite of the native
-`adc.CondensedSchur` is blocked on two deep IR features out of scope here: multi-component `solve_linear`
-(`P.matrix_free_operator` / `P.solve_linear` are scalar-field only) and anisotropic position-dependent
-operator-coefficient assembly (the Schur operator `-div((I + c*rho*B^-1) grad phi)` has a per-cell tensor
-coefficient). The native `adc.CondensedSchur` source stepper stays fully supported.
+The `condensed_schur` macro (ADC-421) composes the anisotropic coefficient assembly
+(`P.schur_coeffs` -> the native `A = I + c*rho*B^{-1}` tensor), the coefficiented matrix-free matvec
+(`P.apply_laplacian_coeff` -> `adc::apply_laplacian`'s coefficient path), the fused RHS (`P.schur_rhs`
+-> `-Lap(phi^n) - theta*dt*alpha*div(B^{-1}(mx,my))`) and the closed-B^{-1} velocity reconstruction
+(`P.schur_reconstruct`) with a matrix-free `P.solve_linear` (BiCGStab), mirroring the native
+`CondensedSchurSourceStepper` assemble / solve / reconstruct sequence. It is a **near-match** to the
+native `adc.CondensedSchur`, which preconditions the BiCGStab solve with a GeometricMG V-cycle: the
+operator and RHS are identical, the Krylov path differs (both converge to the same phi at tolerance), so
+`test_time_condensed_schur.py` checks it against an offline reference of the identical
+assemble / solve / reconstruct steps rather than bit-against-native. The macro lowers the `theta == 1`
+(backward-Euler) source stage from `phi^n = 0`; cross-step phi carry (the System history ring is
+state-sized, so a scalar phi cannot ride it safely yet), the `theta < 1` n+1 extrapolation (a
+momentum-only update with no IR op yet) and the energy-role update are deferred -- the macro raises for
+`theta != 1` rather than mis-lower. The native `adc.CondensedSchur` source stepper stays fully
+supported and untouched.
 
 See {doc}`symbolic-dsl` for the physical model DSL and `examples/time_programs/` for runnable
 programs. The runnable time programs are `forward_euler_program.py`, `ssprk2_program.py`,

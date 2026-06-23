@@ -2,8 +2,7 @@
 """adc.time centered divergence primitive + a div(grad) Helmholtz solve (epic ADC-399 / ADC-412).
 
 ADC-412 adds the ``ctx.divergence`` primitive (the centered finite-volume divergence factored as
-``adc::apply_divergence``) and the ``P.divergence(out, fx, fy)`` IR op, plus a documented
-``adc.time.std.condensed_schur`` stub. A matrix-free Schur-like operator
+``adc::apply_divergence``) and the ``P.divergence(out, fx, fy)`` IR op. A matrix-free Schur-like operator
 ``A(phi) = phi - alpha*div(grad phi)`` (the div(flux) structure of the condensed-Schur operator) is
 built from ``P.gradient`` chained into ``P.divergence`` and solved with ``P.solve_linear`` -- exactly
 the matrix-free Krylov path acceptance 32 needs in place. The centered ``div(grad)`` is the WIDE-stencil
@@ -18,9 +17,8 @@ compiled solve is verified against an OFFLINE numpy CG on that SAME wide-stencil
     - a standalone divergence-of-a-known-field check: the offline centered FV divergence of
       f = (cos 2pi x, sin 2pi y) matches the analytic div f = -2pi sin 2pi x + 2pi cos 2pi y to the
       discretization error -- the reference the compiled ctx.divergence reproduces;
-    - ``adc.time.std.condensed_schur`` raises NotImplementedError naming BOTH missing IR features
-      (multi-component solve_linear; anisotropic position-dependent operator-coefficient assembly) and
-      pointing at the native adc.CondensedSchur stepper.
+    - ``adc.time.std.condensed_schur`` (now implemented, ADC-421) lowers at theta == 1 and raises for
+      the deferred theta != 1 extrapolation (the full end-to-end parity is test_time_condensed_schur.py).
 
 (B) End-to-end parity (skips unless the full toolchain is present): the div(grad) Helmholtz Program is
     compiled + installed + stepped, then compared to an OFFLINE numpy CG on the identical discrete
@@ -130,17 +128,21 @@ def test_divgrad_codegen(t):
         assert frag in src, "the div(grad) solve must contain %r\n%s" % (frag, src)
 
 
-def test_condensed_schur_stub_raises(t):
+def test_condensed_schur_macro_lowers(t):
+    # ADC-421: the condensed-Schur macro is now implemented (no longer a stub). At theta == 1 it lowers
+    # to the full anisotropic assemble / solve / reconstruct chain; the deferred theta != 1 extrapolation
+    # raises. The end-to-end parity lives in test_time_condensed_schur.py.
+    P = t.Program("p")
+    t.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
+    assert P.validate() is True, "the condensed-Schur macro must validate"
+    src = P.emit_cpp_program()
+    assert "ctx.assemble_schur_coeffs" in src and "ctx.schur_reconstruct" in src, src
     try:
-        t.std.condensed_schur(t.Program("p"), "blk")
+        t.std.condensed_schur(t.Program("p2"), "blk", alpha=1.0, theta=0.5)
     except NotImplementedError as exc:
-        msg = str(exc)
-        # Names BOTH missing IR features and points at the native stepper.
-        assert "multi-component solve_linear" in msg, msg
-        assert "anisotropic" in msg and "coefficient" in msg, msg
-        assert "adc.CondensedSchur" in msg, msg
+        assert "theta == 1" in str(exc), str(exc)
     else:
-        raise AssertionError("adc.time.std.condensed_schur must raise NotImplementedError (stub)")
+        raise AssertionError("condensed_schur(theta != 1) must raise NotImplementedError (deferred)")
 
 
 def _analytic_divergence_check():

@@ -4,15 +4,18 @@
 #include <string>
 #include <utility>
 
-#include <adc/core/foundation/types.hpp>      // Real
+#include <adc/core/foundation/types.hpp>  // Real
+#include <adc/coupling/schur/core/schur_condensation.hpp>  // SchurOperatorCoeffKernel / SchurExplicitFluxKernel (native coeff assembly, ADC-421)
 #include <adc/mesh/boundary/physical_bc.hpp>  // fill_ghosts (periodic / physical halo exchange)
-#include <adc/mesh/geometry/geometry.hpp>     // Geometry (mesh metric of the Laplacian / gradient)
-#include <adc/mesh/storage/mf_arith.hpp>      // saxpy (linear combine over a MultiFab)
-#include <adc/mesh/storage/multifab.hpp>      // MultiFab
+#include <adc/mesh/execution/for_each.hpp>  // for_each_cell (per-cell coeff / reconstruct kernels)
+#include <adc/mesh/geometry/geometry.hpp>   // Geometry (mesh metric of the Laplacian / gradient)
+#include <adc/mesh/storage/mf_arith.hpp>    // saxpy (linear combine over a MultiFab)
+#include <adc/mesh/storage/multifab.hpp>    // MultiFab
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // field_postprocess (centered gradient)
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (shared 5-point matvec)
-#include <adc/runtime/context/grid_context.hpp>                // GridContext (System aux seam)
-#include <adc/runtime/system.hpp>  // System (the runtime this facade forwards to)
+#include <adc/numerics/linalg/lorentz_eliminator.hpp>  // LorentzEliminator (closed B^{-1}, ADC-421 reconstruct)
+#include <adc/runtime/context/grid_context.hpp>  // GridContext (System aux seam)
+#include <adc/runtime/system.hpp>                // System (the runtime this facade forwards to)
 
 /// @file
 /// @brief ProgramContext -- the C++-side facade a generated problem.so calls to run a compiled time
@@ -38,6 +41,97 @@
 namespace adc {
 namespace runtime {
 namespace program {
+
+namespace detail {
+
+/// Aux-component-aware variants of the native Schur kernels (coupling/schur/core/schur_condensation.hpp
+/// + condensed_schur_source_stepper.hpp). The native kernels read B_z from a DEDICATED B_z MultiFab at
+/// component 0; a compiled Program reads B_z straight from the System aux channel at an arbitrary
+/// component @c c_bz, so these thin wrappers carry @c c_bz and otherwise REPRODUCE the native formulas
+/// verbatim (same LorentzEliminator B^{-1}, same coefficients, same centered gradient) -- the native
+/// CondensedSchur path is untouched. Named functors (device-clean, nvcc cross-TU rule, like the native
+/// ones). epic ADC-399 / ADC-421.
+
+/// A_op = I + c*rho*B^{-1} per cell (eps_x/eps_y diag, a_xy/a_yx cross). Mirrors
+/// detail::SchurOperatorCoeffKernel but reads B_z from the aux at c_bz.
+struct SchurOperatorCoeffKernelC {
+  ConstArray4 s;    ///< fluid state (rho at c_rho)
+  ConstArray4 aux;  ///< System aux (B_z at c_bz)
+  Array4 ex, ey;    ///< output: eps_x, eps_y (diagonal of A)
+  Array4 axy, ayx;  ///< output: cross terms a_xy, a_yx
+  Real c;           ///< c = theta^2 dt^2 alpha
+  Real th_dt;       ///< theta*dt (w = th_dt*B_z)
+  int c_rho, c_bz;
+  ADC_HD void operator()(int i, int j) const {
+    const Real rho = s(i, j, c_rho);
+    const LorentzEliminator le(th_dt, Real(1), aux(i, j, c_bz));
+    const Real cr = c * rho;  // c rho: common factor of the 4 entries of A - I
+    ex(i, j, 0) = Real(1) + cr * le.binv_11();
+    ey(i, j, 0) = Real(1) + cr * le.binv_22();
+    axy(i, j, 0) = cr * le.binv_12();
+    ayx(i, j, 0) = cr * le.binv_21();
+  }
+};
+
+/// out = B^{-1} (mx, my) at the center (Fx in comp 0, Fy in comp 1): the explicit flux F = rho*B^{-1}*v.
+struct SchurExplicitFluxKernelC {
+  ConstArray4 s;    ///< fluid state (mx, my at c_mx / c_my)
+  ConstArray4 aux;  ///< System aux (B_z at c_bz)
+  Array4 out;       ///< output: Fx (comp 0), Fy (comp 1)
+  Real th_dt;       ///< theta*dt (w = th_dt*B_z)
+  int c_mx, c_my, c_bz;
+  ADC_HD void operator()(int i, int j) const {
+    const LorentzEliminator le(th_dt, Real(1), aux(i, j, c_bz));
+    Real Fx, Fy;
+    le.apply_Binv(s(i, j, c_mx), s(i, j, c_my), Fx, Fy);  // B^{-1} (mx, my) = rho*B^{-1}*v
+    out(i, j, 0) = Fx;
+    out(i, j, 1) = Fy;
+  }
+};
+
+/// rhs = -Lap phi^n - g*div(F), the centered FV divergence of the explicit flux F packed in ONE
+/// 2-component buffer (Fx in comp 0, Fy in comp 1 -- the layout schur_explicit_flux writes), fused with
+/// the already-negated -Lap phi^n. Mirrors detail::SchurRhsAssembleKernel verbatim except it reads both
+/// flux components from the single buffer @c f instead of two separate fx/fy MultiFabs.
+struct SchurRhsAssembleKernelC {
+  ConstArray4 neg_lap;      ///< -Lap phi^n (already negated)
+  ConstArray4 f;            ///< explicit flux F at the center (Fx comp 0, Fy comp 1; ghosts filled)
+  Array4 rhs;               ///< output: condensed right-hand side
+  Real g;                   ///< theta dt alpha
+  Real half_idx, half_idy;  ///< 1/(2 dx), 1/(2 dy)
+  ADC_HD void operator()(int i, int j) const {
+    const Real divF =
+        (f(i + 1, j, 0) - f(i - 1, j, 0)) * half_idx + (f(i, j + 1, 1) - f(i, j - 1, 1)) * half_idy;
+    rhs(i, j, 0) = neg_lap(i, j, 0) - g * divF;
+  }
+};
+
+/// Reconstruct v^{n+theta} = B^{-1}(v^n - theta*dt*grad phi) and write mom = rho^n*v (rho frozen).
+/// Mirrors detail::SchurReconstructKernel but reads B_z from the aux at c_bz (no separate vx/vy
+/// buffers: v^n = (mx, my)/rho read inline from the state).
+struct SchurReconstructKernelC {
+  ConstArray4 phi;  ///< phi^{n+theta} (ghosts filled: centered grad reads i+-1, j+-1)
+  ConstArray4 aux;  ///< System aux (B_z at c_bz)
+  Array4 st;        ///< fluid state (READ rho, mx, my; WRITE mx, my)
+  Real th_dt;
+  Real half_idx, half_idy;  ///< 1/(2 dx), 1/(2 dy) (centered gradient)
+  int c_rho, c_mx, c_my, c_bz;
+  ADC_HD void operator()(int i, int j) const {
+    const Real rho = st(i, j, c_rho);
+    const Real inv_rho = rho != Real(0) ? Real(1) / rho : Real(0);
+    const Real vx = st(i, j, c_mx) * inv_rho;  // v^n = (mx, my)/rho
+    const Real vy = st(i, j, c_my) * inv_rho;
+    const Real gx = (phi(i + 1, j, 0) - phi(i - 1, j, 0)) * half_idx;  // d_x phi^{n+theta}
+    const Real gy = (phi(i, j + 1, 0) - phi(i, j - 1, 0)) * half_idy;
+    const LorentzEliminator le(th_dt, Real(1), aux(i, j, c_bz));
+    Real nx, ny;
+    le.apply_Binv(vx - th_dt * gx, vy - th_dt * gy, nx, ny);  // B^{-1}(v^n - theta dt grad phi)
+    st(i, j, c_mx) = rho * nx;
+    st(i, j, c_my) = rho * ny;
+  }
+};
+
+}  // namespace detail
 
 class ProgramContext {
  public:
@@ -138,6 +232,144 @@ class ProgramContext {
     apply_divergence(fx, fy, gc.geom, out, /*cx=*/0, /*cy=*/1);
   }
 
+  /// @name Anisotropic Schur condensation (epic ADC-399 / ADC-421)
+  /// The full condensed-Schur operator is L_schur(phi) = -div((I + c*rho*B^{-1}) grad phi), a tensor
+  /// elliptic operator whose per-cell coefficient varies with rho and B_z. These primitives let a
+  /// compiled Program ASSEMBLE that coefficient tensor (from the live state + B_z aux) and APPLY it
+  /// matrix-free, REUSING the native Schur kernels (coupling/schur/core/schur_condensation.hpp) and
+  /// adc::apply_laplacian's coefficient path -- no stencil / elimination reimplementation. The native
+  /// adc::CondensedSchur source stepper is untouched.
+  /// @{
+
+  /// Assemble the tensor coefficient A_op = I + c*rho*B^{-1} of the condensed-Schur operator per cell:
+  /// eps_x = 1 + c*rho*binv_11, eps_y = 1 + c*rho*binv_22, a_xy = c*rho*binv_12, a_yx = c*rho*binv_21,
+  /// with B^{-1} the closed 2x2 LorentzEliminator(th_dt, 1, B_z). @p state carries rho at component
+  /// @p c_rho; B_z is read from the System aux at component @p c_bz. The four coefficient fields are
+  /// filled over the valid cells (the SAME detail::SchurOperatorCoeffKernel the native builder uses)
+  /// and their ghosts extended by zero-gradient (Foextrap, periodic preserved) -- the eps_bc the
+  /// GeometricMG / native assembly use, so the face mean at the boundary is consistent. @p c =
+  /// theta^2 dt^2 alpha, @p th_dt = theta*dt. Assembled ONCE per step (rho / B_z frozen in the source),
+  /// then reused across every Krylov iteration of the matrix-free phi solve.
+  void assemble_schur_coeffs(MultiFab& eps_x, MultiFab& eps_y, MultiFab& a_xy, MultiFab& a_yx,
+                             const MultiFab& state, Real c, Real th_dt, int c_rho, int c_bz) const {
+    const GridContext gc = sys_->grid_context();
+    const MultiFab& aux = *sys_->grid_context().aux;
+    for (int li = 0; li < eps_x.local_size(); ++li) {
+      const ConstArray4 s = state.fab(li).const_array();
+      const ConstArray4 b = aux.fab(li).const_array();
+      for_each_cell(eps_x.box(li),
+                    detail::SchurOperatorCoeffKernelC{s, b, eps_x.fab(li).array(),
+                                                      eps_y.fab(li).array(), a_xy.fab(li).array(),
+                                                      a_yx.fab(li).array(), c, th_dt, c_rho, c_bz});
+    }
+    const BCRec ebc = coeff_bc(gc.bc);
+    fill_ghosts(eps_x, gc.geom.domain, ebc);
+    fill_ghosts(eps_y, gc.geom.domain, ebc);
+    fill_ghosts(a_xy, gc.geom.domain, ebc);
+    fill_ghosts(a_yx, gc.geom.domain, ebc);
+  }
+
+  /// out = div(A grad in), A = [[eps_x, a_xy], [a_yx, eps_y]] -- the coefficiented matrix-free matvec
+  /// of the condensed-Schur operator. Fills @p in's ghosts (transport BC) then forwards to the SAME
+  /// adc::apply_laplacian coefficient path the native GeometricMG operator uses (eps / cross pointers),
+  /// component 0 (the scalar potential). @p in is non-const because the ghost fill writes its halos.
+  /// The condensed operator is L_schur(phi) = -div(A grad phi) = -out, so a matrix-free apply forms
+  /// it as ``ctx.apply_laplacian_coeff(out, in, ...); out *= -1`` via the affine algebra. The
+  /// coefficient fields are the ones assemble_schur_coeffs filled (1 ghost each).
+  void apply_laplacian_coeff(MultiFab& out, MultiFab& in, const MultiFab& eps_x,
+                             const MultiFab& eps_y, const MultiFab& a_xy,
+                             const MultiFab& a_yx) const {
+    const GridContext gc = sys_->grid_context();
+    fill_ghosts(in, gc.geom.domain, gc.bc);
+    apply_laplacian(in, gc.geom, out, /*coef=*/nullptr, /*eps=*/&eps_x, /*kappa=*/nullptr,
+                    /*eps_y=*/&eps_y, /*a_xy=*/&a_xy, /*a_yx=*/&a_yx);
+  }
+
+  /// out = B^{-1} (mx, my) per cell -- the EXPLICIT condensed-Schur flux F = rho*B^{-1}*v^n (= B^{-1}
+  /// applied to the momentum, avoiding the divide by rho). @p out has >= 2 components (Fx in comp 0,
+  /// Fy in comp 1, the layout ctx.divergence reads). @p state carries mx / my at @p c_mx / @p c_my;
+  /// B_z from the aux at @p c_bz; @p th_dt = theta*dt (w = th_dt*B_z). Reuses the native
+  /// detail::SchurExplicitFluxKernel. The condensed RHS is then -Lap phi^n - theta*dt*alpha*div(F),
+  /// assembled with ctx.laplacian + ctx.divergence + the affine algebra.
+  void schur_explicit_flux(MultiFab& out, const MultiFab& state, Real th_dt, int c_mx, int c_my,
+                           int c_bz) const {
+    const GridContext gc = sys_->grid_context();
+    const MultiFab& aux = *sys_->grid_context().aux;
+    for (int li = 0; li < out.local_size(); ++li) {
+      const ConstArray4 s = state.fab(li).const_array();
+      const ConstArray4 b = aux.fab(li).const_array();
+      Array4 o = out.fab(li).array();
+      for_each_cell(out.box(li),
+                    detail::SchurExplicitFluxKernelC{s, b, o, th_dt, c_mx, c_my, c_bz});
+    }
+    const BCRec ebc = coeff_bc(gc.bc);
+    fill_ghosts(out, gc.geom.domain, ebc);
+  }
+
+  /// rhs = -Lap(phi_n) - g*div(F), F = B^{-1}(mx, my) -- the FUSED condensed-Schur right-hand side
+  /// (the native ElectrostaticLorentzCondensation::assemble_rhs, reading B_z from the aux at @p c_bz).
+  /// @p phi_n is phi^n (its ghosts are filled here for the Laplacian); @p state carries mx / my at
+  /// @p c_mx / @p c_my; @p th_dt = theta*dt; @p g = theta*dt*alpha. @p rhs is a 1-component scalar field.
+  /// Internal Lap / flux buffers are allocated on @p rhs's layout (transient, like the native assembler).
+  /// Mirrors native assemble_rhs step-for-step (bare apply_laplacian + NegateKernel + the explicit flux
+  /// + SchurRhsAssembleKernel), so the top-level RHS assembly is a SINGLE op (no scalar-field affine
+  /// combine at IR level): the same fused -Lap - g*div(F) the native source stepper assembles.
+  void assemble_schur_rhs(MultiFab& rhs, MultiFab& phi_n, const MultiFab& state, Real th_dt, Real g,
+                          int c_mx, int c_my, int c_bz) const {
+    const GridContext gc = sys_->grid_context();
+    const MultiFab& aux = *sys_->grid_context().aux;
+    const BoxArray& ba = rhs.box_array();
+    const DistributionMapping& dm = rhs.dmap();
+    // 1) -Lap phi^n (bare 5-point Laplacian of the warm-started potential, negated).
+    fill_ghosts(phi_n, gc.geom.domain, gc.bc);
+    MultiFab lap(ba, dm, 1, 0);
+    apply_laplacian(phi_n, gc.geom, lap);
+    MultiFab neg_lap(ba, dm, 1, 0);
+    for (int li = 0; li < neg_lap.local_size(); ++li)
+      for_each_cell(neg_lap.box(li),
+                    adc::detail::NegateKernel{lap.fab(li).const_array(), neg_lap.fab(li).array()});
+    // 2) explicit flux F = B^{-1}(mx, my) at the center (1 ghost for the centered divergence).
+    MultiFab fx(ba, dm, 2, 1);
+    for (int li = 0; li < state.local_size(); ++li) {
+      const ConstArray4 s = state.fab(li).const_array();
+      const ConstArray4 b = aux.fab(li).const_array();
+      for_each_cell(fx.box(li), detail::SchurExplicitFluxKernelC{s, b, fx.fab(li).array(), th_dt,
+                                                                 c_mx, c_my, c_bz});
+    }
+    const BCRec ebc = coeff_bc(gc.bc);
+    fill_ghosts(fx, gc.geom.domain, ebc);
+    // 3) rhs = -Lap phi^n - g*div(F) (centered FV divergence; Fx in comp 0, Fy in comp 1 of fx).
+    const Real half_idx = Real(1) / (Real(2) * gc.geom.dx());
+    const Real half_idy = Real(1) / (Real(2) * gc.geom.dy());
+    for (int li = 0; li < rhs.local_size(); ++li)
+      for_each_cell(rhs.box(li), detail::SchurRhsAssembleKernelC{
+                                     neg_lap.fab(li).const_array(), fx.fab(li).const_array(),
+                                     rhs.fab(li).array(), g, half_idx, half_idy});
+  }
+
+  /// Reconstruct v^{n+theta} = B^{-1}(v^n - theta*dt*grad phi^{n+theta}) and write mom = rho^n*v into
+  /// @p state in place (rho frozen). @p phi is phi^{n+theta} (its ghosts are filled here for the
+  /// centered gradient); B_z from the aux at @p c_bz; @p th_dt = theta*dt. v^n is read from the state
+  /// (mx/my / rho), the same closed B^{-1} (LorentzEliminator) the native reconstruction uses. The
+  /// final n+1 extrapolation (factor 1/theta) is left to the caller's affine algebra.
+  void schur_reconstruct(MultiFab& state, MultiFab& phi, Real th_dt, int c_rho, int c_mx, int c_my,
+                         int c_bz) const {
+    const GridContext gc = sys_->grid_context();
+    const MultiFab& aux = *sys_->grid_context().aux;
+    fill_ghosts(phi, gc.geom.domain, gc.bc);
+    const Real half_idx = Real(1) / (Real(2) * gc.geom.dx());
+    const Real half_idy = Real(1) / (Real(2) * gc.geom.dy());
+    for (int li = 0; li < state.local_size(); ++li) {
+      const ConstArray4 ph = phi.fab(li).const_array();
+      const ConstArray4 b = aux.fab(li).const_array();
+      Array4 st = state.fab(li).array();
+      for_each_cell(state.box(li),
+                    detail::SchurReconstructKernelC{ph, b, st, th_dt, half_idx, half_idy, c_rho,
+                                                    c_mx, c_my, c_bz});
+    }
+  }
+  /// @}
+
   /// A zero-initialized RHS scratch with the SAME layout (box array / distribution / ghosts) as @p u,
   /// so the subsequent axpy(u, ., r) combines identical layouts.
   MultiFab rhs_scratch_like(const MultiFab& u) const {
@@ -230,6 +462,19 @@ class ProgramContext {
   }
 
  private:
+  /// BC of the coefficient / flux fields (ADC-421): periodic preserved, physical boundary -> zero-
+  /// gradient (Foextrap). Identical to GeometricMG::eps_bc and the native Schur coeff_bc -- the face
+  /// value at the domain boundary equals the interior value, consistent with the elliptic operator.
+  static BCRec coeff_bc(const BCRec& bc) {
+    auto fo = [](BCType t) { return t == BCType::Periodic ? t : BCType::Foextrap; };
+    BCRec b;
+    b.xlo = fo(bc.xlo);
+    b.xhi = fo(bc.xhi);
+    b.ylo = fo(bc.ylo);
+    b.yhi = fo(bc.yhi);
+    return b;
+  }
+
   System* sys_;
 };
 

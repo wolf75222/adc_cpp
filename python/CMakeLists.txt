@@ -351,7 +351,8 @@ set_tests_properties(test_time_gmres PROPERTIES
 # Schur-like operator A(phi) = phi - alpha*div(grad phi) equals (I - alpha*Lap) and is checked against
 # the same offline CG reference as test_time_solve_linear. Section (A) (pure Python): the divergence IR
 # + operand validation, the gradient->divergence codegen (ctx.gradient / ctx.divergence / 2-component
-# buffer), a standalone analytic-divergence check, and the std.condensed_schur NotImplementedError stub.
+# buffer), a standalone analytic-divergence check, and the std.condensed_schur macro lowering (the full
+# parity is test_time_condensed_schur).
 # Section (B) compiles + installs the div(grad) program and matches the offline numpy CG; it self-skips
 # without a compiler / Kokkos / install_program (never faking the engine).
 add_test(NAME test_time_divergence
@@ -371,6 +372,22 @@ set_tests_properties(test_time_divergence PROPERTIES
 add_test(NAME test_time_multicomp_solve
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_multicomp_solve.py)
 set_tests_properties(test_time_multicomp_solve PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
+# Condensed-Schur implicit source stage as a compiled Program (ADC-421, acceptance 32). The anisotropic
+# position-dependent operator-coefficient assembly (P.schur_coeffs -> ctx.assemble_schur_coeffs, the
+# native A = I + c*rho*B^{-1}) + the coefficiented matrix-free matvec (P.apply_laplacian_coeff ->
+# adc::apply_laplacian's coefficient path) + the fused RHS (P.schur_rhs) + the closed-B^{-1}
+# reconstruction (P.schur_reconstruct) compose the adc.time.std.condensed_schur macro, mirroring the
+# native CondensedSchurSourceStepper sequence with a matrix-free BiCGStab phi solve. Section (A) (pure
+# Python): the four builder ops + operand validation, the macro lowering (the full ctx chain), the
+# theta != 1 NotImplementedError. Section (B) compiles + installs + steps a field-coupled rho/mx/my block
+# with a constant B_z and matches an OFFLINE numpy reference of the identical assemble/solve/reconstruct
+# steps (near-match to native adc.CondensedSchur, which adds a GeometricMG preconditioner; documented
+# gap). It self-skips without a compiler / Kokkos / install_program / set_magnetic_field.
+add_test(NAME test_time_condensed_schur
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_condensed_schur.py)
+set_tests_properties(test_time_condensed_schur PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
 # Multistep histories + Adams-Bashforth 2 (ADC-406a) : emit_cpp_program lowers P.history /
