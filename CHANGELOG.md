@@ -78,6 +78,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   building a per-cell 0/1 mask scalar_field from a threshold on a field's component 0. The select
   kernel is emitted purely into the generated `problem.so` (reusing the existing `ProgramContext`
   per-cell kernel pattern; no new `_adc` header). New `python/tests/test_time_where.py`.
+- **Named fluxes and named elliptic fields** (ADC-419, epic ADC-399, spec "Flux nommes optionnels" +
+  "Champs elliptiques nommes"): `adc.dsl.Model` gains `m.flux_term(name, x=, y=)` (an opt-in named
+  physical flux, `n_cons` expressions per direction; `name='default'` aliases `m.flux(...)`) and
+  `m.elliptic_field(name, rhs=, operator=, aux=)` (an opt-in named elliptic field). A compiled
+  `adc.time.Program` selects fluxes via `ctx.rhs(..., fluxes=[name, ...])`: `fluxes=['default']` (or
+  omitted) keeps the historical `-div F` (`ctx.rhs_into`) byte-identical, while a list of named fluxes
+  assembles `-div` of their sum through the centered-FV `ProgramContext::neg_div_flux_into` (reusing
+  `adc::apply_divergence` per component) -- so splitting the physical flux into named pieces that sum to
+  it reproduces the same `-div F` to round-off. Both fold into the model hash only when declared (cache
+  key of an existing model preserved); unknown names, dimension mismatches, `default`/named-flux mixing,
+  and a default source dropped by the named-flux path are rejected with clear errors. The
+  multi-elliptic-field RUNTIME (a second elliptic operator with its own aux channel) is deferred:
+  `P.solve_fields(field=name)` validates + lowers to a clear `NotImplementedError`. New
+  `python/tests/test_time_named_flux_elliptic.py`.
 - **Program op-set completeness** (ADC-414, spec ops 10/16/21/22/23 + validation #18/#19): the
   `adc.time.Program` builder gains `P.sum` / `P.max` / `P.min` / `P.sum_component` (collective
   reductions lowered to new `adc::reduce_sum` / `reduce_max` / `reduce_min` in `mf_arith.hpp`, with

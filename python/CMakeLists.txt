@@ -474,6 +474,17 @@ add_test(NAME test_predictor_corrector
 set_tests_properties(test_predictor_corrector PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Named fluxes (m.flux_term) + named elliptic fields (m.elliptic_field), ADC-419. (A) pure-Python
+# validation / hash / codegen: rhs(fluxes=['default']) lowers byte-identically to the default rhs, a
+# named-flux rhs lowers the centered-FV neg_div_flux_into path, unknown/mixed names are rejected, and
+# the named-elliptic SOLVE lowers to a documented NotImplementedError (runtime deferred). (B) a
+# compiled program splitting the physical flux into two named pieces steps identically to the whole
+# named flux (their -div sums to the same); auto-skips without a compiler / Kokkos.
+add_test(NAME test_time_named_flux_elliptic
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_named_flux_elliptic.py)
+set_tests_properties(test_time_named_flux_elliptic PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Per-stage elliptic field solve (ADC-409, solve_fields_from_state): each P.solve_fields(state) op now
 # lowers to ctx.solve_fields_from_state(0, stage state), so a field-coupled multi-stage scheme re-solves
 # phi from each stage's own state. (A) codegen: the per-stage lowering + distinct stage vars (pure
