@@ -33,6 +33,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   position-dependent operator-coefficient assembly), so `adc.time.std.condensed_schur` is a documented
   `NotImplementedError` stub naming both gaps and pointing at the still-supported native
   `adc.CondensedSchur` source stepper.
+- **step_cfl routes through an installed compiled program** (ADC-413, epic ADC-399 criterion 7):
+  `System::step_cfl(cfl)` now drives an installed compiled time Program. The CFL `dt` is still computed
+  in adc_cpp on the native state (per-block transport / source-frequency / stability bounds + global
+  bounds, UNCHANGED -- the CFL logic stays in the runtime), then the Program runs the macro-step at that
+  `dt` through the SAME cadence helper as `step()` (the new `SystemStepper::run_program_cadence`, factored
+  out of `step()` so both paths route a program identically: substeps + stride + clock tick, no implicit
+  `solve_fields`/couplings/projections -- the Program expresses those). Previously `step_cfl` drove only
+  the native per-block path and silently ignored an installed program. `step_adaptive` (multirate) still
+  drives only the native path: a compiled program is one whole-system closure, so per-block subcycling
+  does not apply. New test `python/tests/test_time_step_cfl.py`: `step_cfl` advances the state via the
+  program, its `dt` equals the native CFL `dt`, `step_cfl(cfl) == step(dt_cfl)` bit-exact, the
+  substeps/stride cadence is honored under `step_cfl`, and the clock stays coherent.
 - **Substeps + stride in the compiled time program** (ADC-411): `adc.CompiledTime(substeps=, stride=)`
   no longer raises -- the macro-step cadence is wired as a SYSTEM-level orchestration AROUND the opaque
   compiled-program closure (`System::set_program_cadence`, a new `ADC_EXPORT` kept separate from

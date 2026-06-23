@@ -314,6 +314,39 @@ class SystemStepper {
     }
   }
 
+  /// Runs ONE macro-step of length @p dt through an INSTALLED compiled time Program (epic ADC-399):
+  /// the SYSTEM-level cadence (substeps + stride, ADC-411) wrapped around the opaque program closure,
+  /// then the clock tick. Shared by step() (Lie path) and step_cfl() (CFL path) so both route a
+  /// compiled program through the SAME cadence, keeping them consistent. The Program OWNS the whole
+  /// step body (solve_fields, RHS, combine, commit -- all via ProgramContext); the runtime adds no
+  /// implicit solve_fields / couplings / projections here (cf. step()): they are the Program's job.
+  ///
+  /// SUBSTEPS + STRIDE (ADC-411), mirroring the native per-block advance loop (advance_due_blocks):
+  ///   - stride M: GLOBAL hold-then-catch-up. The whole program is HELD on the macro-steps where
+  ///     stride_due is false, then runs ONCE with the effective step eff_dt = M*dt at the window end.
+  ///     A compiled program is ONE whole-system closure, so the stride is GLOBAL (whole-system); this
+  ///     equals native per-block stride ONLY for a single-block system (or all blocks sharing M).
+  ///   - substeps n: subdivides the EFFECTIVE step into n calls program_step_(eff_dt/n), mirroring
+  ///     native advance_transport_n(s, eff_dt, n) -> eff_dt/n. BUT program_step_(h) re-runs the WHOLE
+  ///     program (its solve_fields included), whereas native substeps subdivides ONLY the transport
+  ///     (solve_fields + source run ONCE per macro-step). So n>1 here is bit-exact vs native substeps
+  ///     ONLY for an UNCOUPLED / transport-only program (solve_fields inert).
+  /// The clock ticks EVERY macro-step (held steps included), matching native. Default cadence 1/1 is
+  /// byte-identical to the single program_step_(dt) call: stride_due(_, 1) is always true and n == 1
+  /// collapses the loop to one call with h == dt.
+  void run_program_cadence(double dt) {
+    Impl* P = owner_;
+    if (stride_due(P->macro_step_, P->program_stride_)) {
+      const Real eff_dt = Real(dt) * Real(P->program_stride_);  // catch-up: effective step M*dt
+      const int n = P->program_substeps_;
+      const Real h = eff_dt / Real(n);  // substeps subdivide the EFFECTIVE step (native: eff_dt/n)
+      for (int sub = 0; sub < n; ++sub)
+        P->program_step_(h);
+    }
+    P->t += dt;  // clock ticks EVERY macro-step (held steps included), like native
+    P->macro_step_++;
+  }
+
   /// One macro-step of length @p dt. ORDER INVARIANT per scheme (cf. SplitScheme):
   ///  - Lie (default, bit-identical): solve_fields; for each DUE block (stride cadence honored)
   ///    advance(dt) then run_source_stage(dt) interleaved; couplings; t += dt; ++macro_step.
@@ -327,35 +360,11 @@ class SystemStepper {
     Impl* P = owner_;
     // Compiled time Program (epic ADC-399): when a problem.so has installed a macro-step body, IT owns
     // the whole step (solve_fields, RHS, combine, commit -- all via ProgramContext). The runtime only
-    // keeps the clock coherent. No implicit solve_fields / couplings / projections here: the Program
-    // expresses them explicitly. (step_cfl/step_adaptive do not yet support a Program -- ADC-401 2c.)
-    //
-    // SUBSTEPS + STRIDE (ADC-411): SYSTEM-level orchestration AROUND the opaque program closure,
-    // mirroring how the native path wraps per-block advance (advance_due_blocks: stride_due gate +
-    // advance_transport_n substep subdivision). The Program stays unaware -- it receives a substrate
-    // step size and runs. The clock ticks EVERY macro-step (held steps included), matching native.
-    //   - stride M: GLOBAL hold-then-catch-up. The whole program is HELD on the macro-steps where
-    //     stride_due is false, then runs ONCE with the effective step eff_dt = M*dt at the window end.
-    //     A compiled program is ONE whole-system closure, so the stride is GLOBAL (whole-system); this
-    //     equals native per-block stride ONLY for a single-block system (or all blocks sharing M).
-    //   - substeps n: subdivides the EFFECTIVE step into n calls program_step_(eff_dt/n), mirroring
-    //     native advance_transport_n(s, eff_dt, n) -> eff_dt/n. BUT program_step_(h) re-runs the WHOLE
-    //     program (its solve_fields included), whereas native substeps subdivides ONLY the transport
-    //     (solve_fields + source run ONCE per macro-step). So n>1 here is bit-exact vs native substeps
-    //     ONLY for an UNCOUPLED / transport-only program (solve_fields inert).
-    // Default cadence 1/1 is byte-identical to the single program_step_(dt) call: stride_due(_, 1) is
-    // always true and n == 1 collapses the loop to one call with h == dt.
+    // keeps the clock coherent (the SYSTEM-level substeps + stride cadence + clock tick are factored
+    // into run_program_cadence, shared with step_cfl so both route a program the same way -- ADC-413).
+    // No implicit solve_fields / couplings / projections here: the Program expresses them explicitly.
     if (P->program_step_) {
-      if (stride_due(P->macro_step_, P->program_stride_)) {
-        const Real eff_dt = Real(dt) * Real(P->program_stride_);  // catch-up: effective step M*dt
-        const int n = P->program_substeps_;
-        const Real h =
-            eff_dt / Real(n);  // substeps subdivide the EFFECTIVE step (native: eff_dt/n)
-        for (int sub = 0; sub < n; ++sub)
-          P->program_step_(h);
-      }
-      P->t += dt;  // clock ticks EVERY macro-step (held steps included), like native
-      P->macro_step_++;
+      run_program_cadence(dt);
       return;
     }
     // COUPLING / POISSON: solve_fields assembles f = Sum_s elliptic_rhs_s(U_s) on the CURRENT state of
@@ -554,6 +563,18 @@ class SystemStepper {
       reason = "degenerate";
     }
     last_dt_reason_ = std::move(reason);
+    // Compiled time Program (epic ADC-399, criterion 7): the CFL dt above is computed in adc_cpp ON
+    // THE NATIVE STATE (per-block bounds + global bounds, UNCHANGED -- the CFL logic stays here), then
+    // the installed Program drives the macro-step at that dt via the SHARED cadence helper. step_cfl
+    // thus conserves the existing CFL logic AND calls the Program. Semantics match step()'s program
+    // branch EXACTLY: run the cadence + tick the clock, with NO apply_couplings / apply_projections
+    // (the Program expresses solve_fields / couplings / projections itself). The native advance path
+    // below is taken ONLY when no program is installed. (step_adaptive -- multirate -- still drives
+    // only the native path; a Program is whole-system, so multirate subcycling does not apply.)
+    if (P->program_step_) {
+      run_program_cadence(dt);
+      return dt;
+    }
     advance_due_blocks(
         dt);  // DUE blocks: catch-up transport + opt-in source stage (shared with step Lie)
     apply_couplings(Real(dt));
