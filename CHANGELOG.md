@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Structured for-loops + if + norm_inf in the time-program codegen** (ADC-404, Phase 5b):
+  `adc.time.Program` gains `P.static_range(state, count, body)` (a COMPILE-TIME unrolled loop -- `count`
+  copies of the body inline, no C++ loop), `P.range(state, count, body)` (a C++ `for` over a fixed
+  count, the body emitted once and re-run each pass), `P.if_(state, cond, body)` (a C++ `if` branch on
+  a runtime `Bool`), and the `P.norm_inf(state)` reduction (`-> adc::norm_inf`). A runtime `Scalar`
+  count is rejected loud (`static_range` -> TypeError, `range` -> NotImplementedError); the IR hash
+  distinguishes loop counts and unrolled bodies (distinct `.so` cache keys). Validated by
+  `python/tests/test_time_control_flow_b.py` (the unrolled-vs-loop codegen + a dt-free contraction run
+  matching the offline closed form). `ctx.where` (per-cell mask) is a later slice.
 - **Control flow + reductions in the time-program codegen** (ADC-404, Phase 5): `adc.time.Program`
   gains `Scalar`/`Bool` IR value types, the reductions `P.norm2(state)` and `P.dot(a, b)` (lowered to
   the collective `adc::dot`, an MPI all-reduce), scalar comparisons (`>`, `<`, `>=`, `<=` -> a `Bool`),

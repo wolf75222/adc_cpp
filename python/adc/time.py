@@ -471,6 +471,14 @@ class Program:
             raise ValueError("dot: two State/RHS values are required")
         return self._new("scalar", "reduce", (a, b), {"kind": "dot"}, None, a.block)
 
+    def norm_inf(self, state):
+        """The infinity norm ``max|u|`` of a State (a collective all_reduce). Returns a Scalar value.
+        Lowered as ``adc::norm_inf(u)``. Like norm2/dot it reduces COMPONENT 0 only (a multi-component
+        reduction is a later phase) and MUST run on every rank (it goes through the collective seam)."""
+        if not (isinstance(state, Value) and state.is_field()):
+            raise ValueError("norm_inf: a State/RHS value is required")
+        return self._new("scalar", "reduce", (state,), {"kind": "norm_inf"}, None, state.block)
+
     def _compare(self, lhs, rhs, cmp):
         """Build a Bool predicate ``s_lhs <cmp> rhs`` (re-evaluated each loop pass). @p rhs is a Python
         float tolerance (stored as a literal) or another Scalar value (compared at runtime). Inputs are
@@ -513,6 +521,73 @@ class Program:
                           "body_block": body_block, "body": next_state},
                          None, state.block)
 
+    def static_range(self, state, count, body_fn):
+        """A COMPILE-TIME (unrolled) loop: apply ``body_fn(self, x)`` to the State @p count times,
+        threading the result, and return the final State. @p count must be a Python int known at IR
+        build time -- the loop is unrolled HERE (no IR control-flow op, no C++ loop): it simply builds
+        @p count copies of the body ops in order. Use `range` for a C++ ``for`` over a fixed count."""
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise TypeError("static_range count must be a Python int (compile-time); use P.range for "
+                            "a runtime / C++-loop count")
+        if count < 0:
+            raise ValueError("static_range count must be non-negative")
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("static_range: the loop variable must be a State value")
+        x = state
+        for _ in range(count):
+            x = body_fn(self, x)
+            if not (isinstance(x, Value) and x.vtype == "state" and x.block == state.block):
+                raise ValueError("static_range: body_fn must return a State of the loop variable's "
+                                 "block")
+        return x
+
+    def range(self, state, count, body_fn):
+        """A C++ ``for`` loop over a FIXED count: from @p state, apply ``body_fn(self, x)`` @p count
+        times, threading the loop-variable State in place, and return the final State. @p count must be
+        a Python int (a runtime/Scalar count is a later phase). The body is RE-EXECUTED each pass, so
+        its ops are captured into a recording sub-block (NOT the flat SSA list) and emitted ONCE inside
+        the loop. Use `static_range` to unroll instead."""
+        if isinstance(count, Value):
+            if count.vtype == "scalar":
+                raise NotImplementedError("range with a runtime Scalar count is deferred; use a "
+                                          "Python int")
+            raise TypeError("range count must be a Python int")
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise TypeError("range count must be a Python int")
+        if count < 0:
+            raise ValueError("range count must be non-negative")
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("range: the loop variable must be a State value")
+        if self._recording:
+            raise NotImplementedError("range: nested control flow is a later phase; a control-flow "
+                                      "body cannot itself open a range yet")
+        body_block, next_state = self._record(body_fn, state)
+        if not (isinstance(next_state, Value) and next_state.vtype == "state"
+                and next_state.block == state.block):
+            raise ValueError("range: body_fn must return the next-iteration State of the same block")
+        return self._new("state", "range", (state,),
+                         {"count": int(count), "body_block": body_block, "body": next_state},
+                         None, state.block)
+
+    def if_(self, state, cond, body_fn):
+        """A C++ ``if`` branch: from @p state, if the runtime Bool @p cond holds, replace the state by
+        ``body_fn(self, x)``; otherwise leave it unchanged. Returns the (possibly updated) State. @p
+        cond is a Bool value built BEFORE if_ (e.g. ``P.norm2(d) > tol``), evaluated ONCE. The body ops
+        are captured into a recording sub-block and emitted inside the branch."""
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("if_: the state must be a State value")
+        if not (isinstance(cond, Value) and cond.vtype == "bool"):
+            raise ValueError("if_: cond must be a Bool value (e.g. P.norm2(d) > tol)")
+        if self._recording:
+            raise NotImplementedError("if_: nested control flow is a later phase; a control-flow body "
+                                      "cannot itself open an if_ yet")
+        body_block, next_state = self._record(body_fn, state)
+        if not (isinstance(next_state, Value) and next_state.vtype == "state"
+                and next_state.block == state.block):
+            raise ValueError("if_: body_fn must return a State of the same block as the input state")
+        return self._new("state", "if", (state, cond),
+                         {"body_block": body_block, "body": next_state}, None, state.block)
+
     def _record(self, fn, x):
         """Run a control-flow callable ``fn(self, x)`` with a fresh recording scope active, capturing the
         ops it builds into a sub-block (returned with the value fn produced). The sub-block ops are NOT
@@ -538,6 +613,8 @@ class Program:
             seen.add(v.id)
             if v.op == "while":
                 self._validate_block(v.attrs["cond_block"], seen)
+                self._validate_block(v.attrs["body_block"], seen)
+            elif v.op in ("range", "if"):
                 self._validate_block(v.attrs["body_block"], seen)
         return True
 
@@ -565,6 +642,9 @@ class Program:
             attrs["cond_block"] = [Program._serialize_node(w) for w in attrs["cond_block"]]
             attrs["body_block"] = [Program._serialize_node(w) for w in attrs["body_block"]]
             attrs["cond"] = attrs["cond"].id
+            attrs["body"] = attrs["body"].id
+        elif v.op in ("range", "if"):  # body sub-block (range carries its int count in attrs too)
+            attrs["body_block"] = [Program._serialize_node(w) for w in attrs["body_block"]]
             attrs["body"] = attrs["body"].id
         return {"id": v.id, "vtype": v.vtype, "op": v.op, "block": v.block,
                 "inputs": [i.id for i in v.inputs], "attrs": attrs}
@@ -652,18 +732,18 @@ class Program:
     # nothing -- always allowed, model or not. 'reduce' / 'compare' / 'while' are the ADC-404a control
     # flow / reduction ops (lowered inline via adc::dot; no model needed).
     _ALLOWED_OPS = frozenset({"state", "solve_fields", "rhs", "linear_combine", "linear_source",
-                              "reduce", "compare", "while"})
+                              "reduce", "compare", "while", "range", "if"})
 
     def _all_ops(self):
-        """Iterate over every op of the Program, descending into while sub-blocks (a flat view used by
-        the lowerability guards: the sub-block ops are not in self._values)."""
+        """Iterate over every op of the Program, descending into control-flow sub-blocks (a flat view
+        used by the lowerability guards: the sub-block ops are not in self._values). Nested control flow
+        is disallowed, so the sub-blocks are flat (one level)."""
         for v in self._values:
             yield v
-            if v.op == "while":
-                for w in v.attrs["cond_block"]:
-                    yield w
-                for w in v.attrs["body_block"]:
-                    yield w
+            for key in ("cond_block", "body_block"):
+                blk = v.attrs.get(key)
+                if isinstance(blk, list):
+                    yield from blk
 
     def _check_op_lowerable(self, v, model):
         """Lowerability check for a single op (used for both the top-level walk and a while sub-block).
@@ -680,11 +760,10 @@ class Program:
                 "emit_cpp_program cannot lower op '%s' (value '%s') yet; supported ops are %s "
                 "(+ %s with a model; nested control flow / Krylov are later phases)"
                 % (v.op, v.name, sorted(Program._ALLOWED_OPS), sorted(Program._MODEL_OPS)))
-        if v.op == "while":  # recurse: the cond / body sub-blocks must lower op by op too
-            for w in v.attrs["cond_block"]:
-                self._check_op_lowerable(w, model)
-            for w in v.attrs["body_block"]:
-                self._check_op_lowerable(w, model)
+        if v.op in ("while", "range", "if"):  # recurse: the cond / body sub-blocks must lower too
+            for key in ("cond_block", "body_block"):
+                for w in v.attrs.get(key, []):
+                    self._check_op_lowerable(w, model)
             return
         if v.op == "rhs":
             extra = [s for s in (v.attrs.get("sources") or []) if s != "default"]
@@ -789,6 +868,9 @@ class Program:
                 (u,) = v.inputs
                 lines.append("const adc::Real %s = std::sqrt(adc::dot(%s, %s));"
                              % (var[v.id], var[u.id], var[u.id]))
+            elif v.attrs["kind"] == "norm_inf":
+                (u,) = v.inputs
+                lines.append("const adc::Real %s = adc::norm_inf(%s);" % (var[v.id], var[u.id]))
             else:  # dot
                 a, b = v.inputs
                 lines.append("const adc::Real %s = adc::dot(%s, %s);"
@@ -804,6 +886,10 @@ class Program:
             var[v.id] = "(%s %s %s)" % (var[lhs.id], v.attrs["cmp"], rhs_tok)
         elif v.op == "while":
             self._emit_while(v, base, var, model, lines)
+        elif v.op == "range":
+            self._emit_range(v, base, var, model, lines)
+        elif v.op == "if":
+            self._emit_if(v, base, var, model, lines)
         elif v.op == "linear_combine":
             terms = list(zip(v.inputs, v.attrs["coeffs"], strict=True))
             if v.id == committed_id:
@@ -851,6 +937,49 @@ class Program:
         for w in v.attrs["body_block"]:
             self._emit_op(w, base, None, sub, model, body_lines)
         # Write the next state into the loop variable in place (x <- body result).
+        body_lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
+                          % (x, x, sub[v.attrs["body"].id]))
+        lines += ["  " + ln for ln in body_lines]
+        lines.append("}")
+
+    def _emit_range(self, v, base, var, model, lines):
+        """Lower a range op to a C++ ``for`` over a fixed count. Like a while, the loop variable is one
+        MultiFab mutated in place and the body sub-block is emitted ONCE inside the loop (re-run each
+        pass at runtime); the loop-variable value id is seeded to the loop var for the sub-block."""
+        loop_in = v.inputs[0]
+        x = "x%d" % v.id
+        i = "i%d" % v.id
+        var[v.id] = x
+        lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (x, var[base.id]))
+        lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
+                     % (x, x, var[loop_in.id]))
+        lines.append("for (int %s = 0; %s < %d; ++%s) {" % (i, i, int(v.attrs["count"]), i))
+        sub = dict(var)
+        sub[loop_in.id] = x
+        body_lines = []
+        for w in v.attrs["body_block"]:
+            self._emit_op(w, base, None, sub, model, body_lines)
+        body_lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
+                          % (x, x, sub[v.attrs["body"].id]))
+        lines += ["  " + ln for ln in body_lines]
+        lines.append("}")
+
+    def _emit_if(self, v, base, var, model, lines):
+        """Lower an if op to a C++ branch. @p cond was emitted at the top level (its boolean expression
+        is var[cond.id]); the loop variable is a copy of the input state, overwritten in place only when
+        the branch is taken (so the result is the input state when the condition is false at runtime)."""
+        state_in, cond = v.inputs[0], v.inputs[1]
+        x = "x%d" % v.id
+        var[v.id] = x
+        lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (x, var[base.id]))
+        lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
+                     % (x, x, var[state_in.id]))
+        lines.append("if (%s) {" % var[cond.id])
+        sub = dict(var)
+        sub[state_in.id] = x
+        body_lines = []
+        for w in v.attrs["body_block"]:
+            self._emit_op(w, base, None, sub, model, body_lines)
         body_lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
                           % (x, x, sub[v.attrs["body"].id]))
         lines += ["  " + ln for ln in body_lines]

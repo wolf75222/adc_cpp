@@ -276,6 +276,17 @@ add_test(NAME test_time_control_flow
 set_tests_properties(test_time_control_flow PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Structured for-loops + if + norm_inf codegen (ADC-404b) : emit_cpp_program LOWERS P.static_range
+# (compile-time UNROLL -- N body copies, no C++ loop), P.range (a C++ for over a fixed count, body
+# emitted ONCE), P.if_ (a C++ if branch on a runtime Bool), and P.norm_inf (-> adc::norm_inf). Section
+# (A) pins the unrolled-vs-loop codegen + the runtime-count guards + the IR-hash distinguishing counts /
+# bodies, pure Python. Section (B) compiles a dt-free contraction (range / static_range / if_), installs,
+# steps, and checks parity with the offline closed form; self-skips without a compiler / Kokkos.
+add_test(NAME test_time_control_flow_b
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_control_flow_b.py)
+set_tests_properties(test_time_control_flow_b PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Named-source RHS codegen (ADC-403) : emit_cpp_program LOWERS a rhs(sources=[name,...]) with NAMED
 # sources -- ctx.rhs_into (-div F + default source) + the same per-cell m.source_term kernel as the
 # standalone source op, accumulated via ctx.axpy. Section (A) pins the generated body + the validation
