@@ -207,6 +207,51 @@ potential force). Without `source`, the brick is `adc::NoSource`.
 m.source([0.0, -rho*gx, -rho*gy, -(rhou*gx + rhov*gy)])
 ```
 
+### Named sources (source_term)
+
+`m.source_term(name, exprs)` declares a NAMED local source `S_name(U, primitives, aux, params)` --
+exactly `n_cons` expressions, free to depend on conservative / primitive / aux / params / constants.
+A named source is **opt-in**: it is emitted only when a compiled time {doc}`Program <time-program>`
+requests it (`P.rhs(..., sources=[name])` / `ctx.source(name)`), and is **never** summed implicitly
+into the legacy total source. `m.source([...])` is exactly `source_term("default")` (the
+backward-compatible alias). Other names must be valid identifiers, unique, and must not collide with a
+`linear_source`.
+
+```python
+m.source_term("electric", [0.0, -rho*gx, -rho*gy])   # opt-in; requested via rhs(sources=["electric"])
+```
+
+Because named terms are never summed implicitly, a model that declares only named sources (no
+`m.source` default) cannot answer the legacy total-source query: an old stepper asking for the total
+source is rejected fail-loud (`ValueError: model has multiple named sources; use
+adc.compile_problem(...) or define m.source(...) explicitly`). Use a compiled time `Program` (which
+names the sources it wants) for such a model.
+
+### Local linear sources (linear_source)
+
+`m.linear_source(name, matrix)` declares a NAMED local linear operator `L_name(aux, params)` -- an
+`n_cons x n_cons` matrix whose coefficients may depend on constants / params / aux **only**, NOT on
+conservative or primitive variables (otherwise `S(U) = L U` would not be linear in `U` and could not
+be treated as a local linear source). A coefficient that reads a conservative or primitive variable is
+rejected fail-loud (`ValueError: linear_source '<name>' coefficients must not depend on conservative
+or primitive variables`).
+
+The operator is **opt-in**: never folded into `m.source` or `P.rhs`. A compiled time `Program` uses it
+explicitly via `P.linear_source(name)` -- as `ctx.apply(L, U)` (`L U`, the explicit Lorentz force), or
+inside `P.solve_local_linear(operator=P.I - dt*P.linear_source(name), rhs=...)` (the per-cell implicit
+solve `(I - dt L) U' = rhs`). The canonical example is the 3x3 Lorentz operator (rho, mx, my) with the
+magnetic field `B_z` read from the aux channel:
+
+```python
+bz = m.aux("B_z")
+m.linear_source("lorentz", [[0.0,  0.0, 0.0],
+                            [0.0,  0.0,  bz],
+                            [0.0,  -bz, 0.0]])   # used via P.apply / P.solve_local_linear in a Program
+```
+
+See `examples/time_programs/predictor_corrector_poisson_lorentz.py` for a full predictor-corrector
+step driving a named `electric` source and the `lorentz` linear source.
+
 ### elliptic_rhs
 
 Contribution to the elliptic right-hand side (system Poisson coupling : charge density, neutralizing
