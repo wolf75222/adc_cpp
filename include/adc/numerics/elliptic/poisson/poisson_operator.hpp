@@ -122,18 +122,19 @@ struct ApplyLaplacianKernel {
   ConstArray4 ka;
   bool hxy, hyx;
   ConstArray4 axy, ayx;
+  int c;  // component the matvec acts on; 0 for the scalar Poisson path (bit-identical 2-arg access)
   ADC_HD void operator()(int i, int j) const {
-    if (he) {  // face permittivity (harmonic), with or without cut-cell
+    if (he) {  // face permittivity (harmonic), with or without cut-cell (coefficient path: comp 0 only)
       Real wxm, wxp, wym, wyp;
       face_weights(ep, ey, i, j, idx2, idy2, hc, cf, wxm, wxp, wym, wyp);
       L(i, j) = wxp * p(i + 1, j) + wxm * p(i - 1, j) + wyp * p(i, j + 1) + wym * p(i, j - 1) -
                 (wxm + wxp + wym + wyp) * p(i, j);
-    } else if (hc)
+    } else if (hc)  // cut-cell coefficient path (comp 0 only)
       L(i, j) = cf(i, j, 1) * p(i + 1, j) + cf(i, j, 0) * p(i - 1, j) + cf(i, j, 3) * p(i, j + 1) +
                 cf(i, j, 2) * p(i, j - 1) - cf(i, j, 4) * p(i, j);
-    else
-      L(i, j) = (p(i + 1, j) - 2 * p(i, j) + p(i - 1, j)) * idx2 +
-                (p(i, j + 1) - 2 * p(i, j) + p(i, j - 1)) * idy2;
+    else  // bare 5-point stencil, applied PER COMPONENT (c); c==0 => the scalar path, bit-identical.
+      L(i, j, c) = (p(i + 1, j, c) - 2 * p(i, j, c) + p(i - 1, j, c)) * idx2 +
+                   (p(i, j + 1, c) - 2 * p(i, j, c) + p(i, j - 1, c)) * idy2;
     // FULL block: ADDITIVE cross fluxes (after the diagonal stencil). hxy=hyx=false => +0, bit-identical.
     if (hxy || hyx)
       L(i, j) += cross_div(p, hxy, axy, hyx, ayx, i, j, idx, idy);
@@ -211,8 +212,14 @@ inline void apply_laplacian(const MultiFab& phi, const Geometry& geom, MultiFab&
     const bool hyx = a_yx != nullptr;  // Ayx cross half-term (y faces)
     const ConstArray4 axy = hxy ? a_xy->fab(li).const_array() : ConstArray4{};
     const ConstArray4 ayx = hyx ? a_yx->fab(li).const_array() : ConstArray4{};
-    for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, idx, idy, hc, cf, he, ep, ey,
-                                                  hk, ka, hxy, hyx, axy, ayx});
+    // Bare 5-point matvec acts on EVERY component (a vector / state matrix-free operator: the
+    // condensed-Schur block unknown). The coefficient / cross / Helmholtz branches are single-component
+    // (the scalar Poisson operator), so they run for component 0 only; nc==1 reproduces the old
+    // single-pass, bit-identical scalar path.
+    const int nc = (he || hc || hk || hxy || hyx) ? 1 : lap.ncomp();
+    for (int c = 0; c < nc; ++c)
+      for_each_cell(v, detail::ApplyLaplacianKernel{p, L, idx2, idy2, idx, idy, hc, cf, he, ep, ey,
+                                                    hk, ka, hxy, hyx, axy, ayx, c});
   }
 }
 

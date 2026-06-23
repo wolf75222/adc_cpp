@@ -325,6 +325,20 @@ add_test(NAME test_time_divergence
 set_tests_properties(test_time_divergence PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Multi-component (vector / state-valued) matrix-free solve (ADC-416): P.matrix_free_operator now takes
+# domain/range_ in {scalar,vector,state} + an ncomp, and P.solve_linear / the codegen allocate the
+# scratch/accumulator/solution with that ncomp; the runtime Krylov inner products reduce over ALL
+# components (adc::dot_all) so every component is solved (the scalar path stays bit-identical). Section
+# (A) (pure Python): the IR + ncomp/domain validation, the 2-component codegen (alloc_scalar_field(2,1)),
+# the scalar default unchanged. Section (B) compiles + installs a 2-component (I - alpha*Lap) solve with
+# DIFFERENT per-component right-hand sides and matches an offline numpy CG on both components (the comp-1
+# match is the full-component-norm regression guard), plus a scalar solve still matching; it self-skips
+# without a compiler / Kokkos / install_program (never faking the engine).
+add_test(NAME test_time_multicomp_solve
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_multicomp_solve.py)
+set_tests_properties(test_time_multicomp_solve PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Multistep histories + Adams-Bashforth 2 (ADC-406a) : emit_cpp_program lowers P.history /
 # P.store_history (a SYSTEM-OWNED ring buffer, not a closure capture) and adc.time.std.adams_bashforth2.
 # Section (A) pins the IR + generated body (ctx.history / ctx.store_history / ctx.rotate_histories, the

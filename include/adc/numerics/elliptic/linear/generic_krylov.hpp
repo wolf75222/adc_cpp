@@ -18,15 +18,23 @@
 /// Convention: each loop solves `A x = b` (A = the @p A callback). @p phi is the unknown IN/OUT:
 /// the incoming value is the initial guess (warm start), the outgoing value is the solution. @p rhs
 /// is the right-hand side, never modified. Convergence is the RELATIVE L2 residual
-/// `||r|| <= rel_tol * ||b||` (||.|| = sqrt(adc::dot(.,.)), a GLOBAL L2 norm), or @p max_iters
-/// reached (returns converged=false, best effort). When ||b|| == 0 the base is taken as 1 (absolute).
+/// `||r|| <= rel_tol * ||b||` (||.|| = sqrt of the Krylov inner product, a GLOBAL L2 norm), or
+/// @p max_iters reached (returns converged=false, best effort). When ||b|| == 0 the base is taken as 1.
 ///
-/// COLLECTIVE / ALL-RANKS CONTRACT: every reduction goes through adc::dot, which performs a
-/// COLLECTIVE all_reduce_sum and MUST run on EVERY rank (including a rank with no box), otherwise
-/// MPI deadlocks. Because the residual driving the stopping test is collective, all ranks observe
-/// the SAME residual and break at the SAME iteration: the loops NEVER short-circuit a dot() and the
-/// trip count is identical on every rank. CG and BiCGStab use the same all_reduce'd dot, so they are
-/// also rank-divergence free.
+/// MULTI-COMPONENT (vector / state) FIELDS: every inner product goes through detail::krylov_dot, which
+/// reduces over ALL components (adc::dot_all) when the field has ncomp>1 and over component 0 only
+/// (adc::dot, BIT-IDENTICAL) when it is scalar. A vector solve thus drives the residual / search-
+/// direction norms and the CG / BiCGStab scalar recurrences over every component -- a component-0-only
+/// dot would converge on component 0 alone and leave the others unsolved. The pointwise updates
+/// (saxpy / lincomb) already span all components, so no other change is needed; the scalar (ncomp==1)
+/// path is unchanged.
+///
+/// COLLECTIVE / ALL-RANKS CONTRACT: every reduction goes through krylov_dot -> adc::dot / dot_all,
+/// which perform a COLLECTIVE all_reduce_sum and MUST run on EVERY rank (including a rank with no box),
+/// otherwise MPI deadlocks. Because the residual driving the stopping test is collective, all ranks
+/// observe the SAME residual and break at the SAME iteration: the loops NEVER short-circuit a dot() and
+/// the trip count is identical on every rank. CG and BiCGStab use the same all_reduce'd dot, so they
+/// are also rank-divergence free.
 ///
 /// ALLOC-ONCE / REUSE DISCIPLINE: every scratch MultiFab is allocated ONCE at the START of each call,
 /// co-distributed with @p phi (its BoxArray / DistributionMapping / ncomp / nghost), and reused
@@ -59,10 +67,19 @@ using ApplyFn = std::function<void(MultiFab& out, const MultiFab& in)>;
 
 namespace detail {
 
-/// GLOBAL L2 norm sqrt(sum x.x) over component 0, collective (adc::dot -> all_reduce_sum). Identical
-/// on all ranks. Must be called on every rank (it wraps dot).
+/// Krylov inner product x.y, COLLECTIVE (all_reduce_sum). For a MULTI-component (vector / state)
+/// operator it reduces over ALL components (adc::dot_all) so the residual / search-direction norms and
+/// the CG / BiCGStab scalar recurrences cover every component -- a component-0-only dot would converge
+/// on component 0 alone and leave the others unsolved. For a single-component field it is exactly
+/// adc::dot(x, y) (component 0), so the scalar path stays BIT-IDENTICAL. Must run on every rank.
+inline Real krylov_dot(const MultiFab& x, const MultiFab& y) {
+  return x.ncomp() > 1 ? dot_all(x, y) : dot(x, y);
+}
+
+/// GLOBAL L2 norm sqrt(sum x.x), collective (all_reduce_sum). Full-component for a vector / state
+/// field, component-0 (bit-identical) for a scalar field. Identical on all ranks; wraps krylov_dot.
 inline Real krylov_l2_norm(const MultiFab& x) {
-  return std::sqrt(dot(x, x));
+  return std::sqrt(krylov_dot(x, x));
 }
 
 /// Guards a dynamic solver loop: a non-positive iteration budget is a configuration error.
@@ -156,21 +173,21 @@ inline KrylovResult cg_solve(const ApplyFn& A, MultiFab& phi, const MultiFab& rh
     return res;
   }
 
-  lincomb(p, Real(1), r, Real(0), r);  // p_0 = r_0 (copy via lincomb)
-  Real rs_old = dot(r, r);             // COLLECTIVE: ||r||^2
+  lincomb(p, Real(1), r, Real(0), r);      // p_0 = r_0 (copy via lincomb)
+  Real rs_old = detail::krylov_dot(r, r);  // COLLECTIVE: ||r||^2 (all components if ncomp>1)
 
   for (int k = 1; k <= max_iters; ++k) {
     A(Ap, p);                                    // Ap = A(p)
-    const Real pAp = dot(p, Ap);                 // COLLECTIVE
+    const Real pAp = detail::krylov_dot(p, Ap);  // COLLECTIVE (all components if ncomp>1)
     if (std::fabs(pAp) < detail::kKrylovTiny) {  // breakdown (A not SPD / null direction)
       res.iters = k - 1;
       res.rel_residual = rnorm / norm0;
       return res;
     }
     const Real alpha = rs_old / pAp;
-    saxpy(phi, alpha, p);           // phi <- phi + alpha p
-    saxpy(r, -alpha, Ap);           // r   <- r - alpha Ap
-    const Real rs_new = dot(r, r);  // COLLECTIVE: new ||r||^2
+    saxpy(phi, alpha, p);                          // phi <- phi + alpha p
+    saxpy(r, -alpha, Ap);                          // r   <- r - alpha Ap
+    const Real rs_new = detail::krylov_dot(r, r);  // COLLECTIVE: new ||r||^2 (all components)
     rnorm = std::sqrt(rs_new);
     res.iters = k;
     res.rel_residual = rnorm / norm0;
@@ -242,7 +259,7 @@ inline KrylovResult bicgstab_solve(const ApplyFn& A, const ApplyFn& precond, Mul
   Real rho_prev = Real(1), alpha = Real(1), omega = Real(1);
 
   for (int k = 1; k <= max_iters; ++k) {
-    const Real rho = dot(rhat, r);  // COLLECTIVE
+    const Real rho = detail::krylov_dot(rhat, r);  // COLLECTIVE (all components if ncomp>1)
     if (std::fabs(rho) < detail::kKrylovTiny || std::fabs(omega) < detail::kKrylovTiny) {
       res.iters = k - 1;  // breakdown: best effort
       res.rel_residual = rnorm / norm0;
@@ -253,9 +270,9 @@ inline KrylovResult bicgstab_solve(const ApplyFn& A, const ApplyFn& precond, Mul
     lincomb(p, beta, p, Real(1), r);              // p <- r + beta p
     MultiFab& phat_ref = has_precond ? phat : p;  // identity precond: phat = p
     if (has_precond)
-      precond(phat, p);                    // phat = M^{-1} p
-    A(v, phat_ref);                        // v = A(phat)
-    const Real rhat_dot_v = dot(rhat, v);  // COLLECTIVE
+      precond(phat, p);                                   // phat = M^{-1} p
+    A(v, phat_ref);                                       // v = A(phat)
+    const Real rhat_dot_v = detail::krylov_dot(rhat, v);  // COLLECTIVE (all components if ncomp>1)
     if (std::fabs(rhat_dot_v) < detail::kKrylovTiny) {
       res.iters = k - 1;
       res.rel_residual = rnorm / norm0;
@@ -274,13 +291,13 @@ inline KrylovResult bicgstab_solve(const ApplyFn& A, const ApplyFn& precond, Mul
     }
     MultiFab& shat_ref = has_precond ? shat : s;  // identity precond: shat = s
     if (has_precond)
-      precond(shat, s);                                           // shat = M^{-1} s
-    A(t, shat_ref);                                               // t = A(shat)
-    const Real tt = dot(t, t);                                    // COLLECTIVE
-    omega = tt > detail::kKrylovTiny ? dot(t, s) / tt : Real(0);  // dot(t,s) COLLECTIVE
-    saxpy(phi, omega, shat_ref);                                  // phi <- phi + omega shat
-    lincomb(r, Real(1), s, -omega, t);                            // r <- s - omega t
-    rnorm = detail::krylov_l2_norm(r);                            // COLLECTIVE
+      precond(shat, s);                        // shat = M^{-1} s
+    A(t, shat_ref);                            // t = A(shat)
+    const Real tt = detail::krylov_dot(t, t);  // COLLECTIVE (all components if ncomp>1)
+    omega = tt > detail::kKrylovTiny ? detail::krylov_dot(t, s) / tt : Real(0);  // COLLECTIVE
+    saxpy(phi, omega, shat_ref);        // phi <- phi + omega shat
+    lincomb(r, Real(1), s, -omega, t);  // r <- s - omega t
+    rnorm = detail::krylov_l2_norm(r);  // COLLECTIVE
     res.iters = k;
     res.rel_residual = rnorm / norm0;
     if (rnorm <= rel_tol * norm0) {

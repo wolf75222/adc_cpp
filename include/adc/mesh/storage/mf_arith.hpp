@@ -170,6 +170,28 @@ inline Real dot(const MultiFab& x, const MultiFab& y, int comp = 0) {
   return static_cast<Real>(all_reduce_sum(static_cast<double>(s)));
 }
 
+/// FULL-component dot Sum_{cells, c} x(.,.,c) * y(.,.,c) over ALL components, reduced over ALL ranks
+/// (all_reduce). The vector inner product for a MULTI-component (vector / state-valued) Krylov solve:
+/// the residual / search-direction norms must cover EVERY component, not just component 0, or the loop
+/// converges on component 0 alone and leaves the others unsolved. For a single-component field this is
+/// exactly dot(x, y) (one component, component 0), so the scalar Krylov path stays BIT-IDENTICAL.
+///
+/// COLLECTIVE, MANDATORY UNDER MPI: like dot, all_reduce_sum runs on every rank (an empty rank
+/// contributes 0); the per-component local sums are summed BEFORE the single all-reduce so the
+/// reduction structure matches dot per component (same per-tile Kokkos::Sum, deterministic).
+inline Real dot_all(const MultiFab& x, const MultiFab& y) {
+  const int nc = x.ncomp();
+  Real s = 0;
+  for (int li = 0; li < x.local_size(); ++li) {
+    const ConstArray4 X = x.fab(li).const_array();
+    const ConstArray4 Y = y.fab(li).const_array();
+    const Box2D b = x.box(li);
+    for (int c = 0; c < nc; ++c)
+      s += reduce_sum_cell(b, detail::DotKernel{X, Y, c});
+  }
+  return static_cast<Real>(all_reduce_sum(static_cast<double>(s)));
+}
+
 /// Sum Sum_cells f(.,.,comp) over component comp, reduced over ALL ranks (all_reduce_sum) -- the
 /// compiled-Program P.sum / P.sum_component reduction. COLLECTIVE, MANDATORY UNDER MPI: called on every
 /// rank (an empty rank contributes 0), like dot. Same per-tile Kokkos::Sum FP guarantees as dot.
