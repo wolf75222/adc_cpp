@@ -81,16 +81,20 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | `adc.time.Program` builder IR + `adc.time.std` macros | available |
 | `Program.emit_cpp_program` codegen, single-block **Forward Euler** | available, runs end-to-end |
 | `adc.compile_problem` + cache + `debug=` + `sim.install_program` + `adc.CompiledTime` | available |
-| Named sources / linear sources on `adc.dsl.Model` (`m.source_term`, `m.linear_source`) | DSL surface available |
-| Multi-stage codegen (SSPRK2/SSPRK3/RK4/Strang) | IR **builds**; codegen deferred (needs scratch states) |
-| `ctx.source` / `ctx.apply` / `ctx.solve_local_linear` (split sources, Lorentz) | planned |
-| Structured control flow (`ctx.range`/`while_`/`if_`), reductions | planned |
-| Matrix-free operators + Krylov (`ctx.solve_linear`) | planned |
-| Histories / multistep (Adams-Bashforth, BDF) + checkpoint | planned |
+| Named sources / linear sources on `adc.dsl.Model` (`m.source_term`, `m.linear_source`) | available |
+| Multi-stage codegen (SSPRK2 / SSPRK3 / RK4) | available, runs end-to-end |
+| `P.source` / `P.apply` / `P.solve_local_linear` (split sources, Lorentz) + predictor-corrector | available, runs end-to-end |
+| Structured control flow (`P.range` / `P.static_range` / `P.while_` / `P.if_`) + reductions (`P.norm2` / `P.dot` / `P.norm_inf`) | available, runs end-to-end |
+| Matrix-free operators (`P.matrix_free_operator` / `P.set_apply`) + Krylov (`P.solve_linear`: cg / bicgstab / richardson) | available, runs end-to-end |
+| Histories / multistep (Adams-Bashforth) + checkpoint/restart | in progress |
+| `condensed_schur` as a Program macro | planned (the matrix-free + Krylov primitives are in place) |
 
-The Forward-Euler path is verified to reproduce the native `adc.Explicit(method="euler")` step to
-machine precision. The multi-stage macros build valid IR today; `compile_problem` raises a clear
-`NotImplementedError` for a scheme the codegen cannot yet lower, rather than mis-lowering it.
+Each lowered path is verified against an independent reference to machine precision: Forward Euler /
+SSPRK2 reproduce the native `adc.Explicit` step bit-for-bit; RK4 matches an offline stage reference;
+the split-source predictor-corrector (Poisson/Lorentz) and the matrix-free `solve_linear` (a CG solve
+of `(I - alpha*Lap) phi = b`) match offline references to ~1e-15; the dynamic `while_` / `range` /
+`if_` loops run a runtime-dependent number of iterations entirely C++-side. `compile_problem` raises a
+clear `NotImplementedError` for any construct the codegen cannot yet lower, rather than mis-lowering it.
 
 See {doc}`symbolic-dsl` for the physical model DSL and `examples/time_programs/` for runnable
 programs.
