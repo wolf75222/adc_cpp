@@ -20,6 +20,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Divergence primitive + condensed-Schur partial** (ADC-412, acceptance 32): a centered
+  finite-volume divergence is factored as `adc::apply_divergence` (next to `adc::apply_laplacian` in
+  `poisson_operator.hpp`; the native Schur condensation keeps its bit-identical inline copy),
+  `ProgramContext::divergence(out, fx, fy)` mirrors `laplacian`/`gradient`, and `P.divergence(out, fx,
+  fy)` is a new IR op lowered to `ctx.divergence`. Since `div(grad phi) == Lap phi`, a Schur-like
+  matrix-free operator `A(phi) = phi - alpha*div(grad phi)` equals `(I - alpha*Lap)` and is solved via
+  `P.solve_linear` against the same offline CG reference (new `python/tests/test_time_divergence.py` +
+  `examples/time_programs/divergence_solve.py`). `P.scalar_field(ncomp=)` now allocates a multi-component
+  scratch (the 2-component gradient buffer the divergence consumes). The full Program rewrite of the
+  condensed-Schur stage is BLOCKED on two deep IR features (multi-component `solve_linear`; anisotropic
+  position-dependent operator-coefficient assembly), so `adc.time.std.condensed_schur` is a documented
+  `NotImplementedError` stub naming both gaps and pointing at the still-supported native
+  `adc.CondensedSchur` source stepper.
 - **Substeps + stride in the compiled time program** (ADC-411): `adc.CompiledTime(substeps=, stride=)`
   no longer raises -- the macro-step cadence is wired as a SYSTEM-level orchestration AROUND the opaque
   compiled-program closure (`System::set_program_cadence`, a new `ADC_EXPORT` kept separate from

@@ -105,6 +105,10 @@ struct SchurExplicitFluxKernel {
 
 /// rhs(i,j) = lap(i,j) (= -Lap phi^n, already negated by the caller) - g * div F, second-order centered
 /// divergence of a flux F at the center (fx, fy, ghosts filled). g = theta dt alpha. Device-clean NAMED functor.
+/// The same centered divergence stencil is exposed standalone as adc::apply_divergence
+/// (numerics/elliptic/poisson/poisson_operator.hpp, used by the compiled time-program ctx.divergence);
+/// it is fused here with -Lap phi^n and the -g factor and kept inline so this native source path stays
+/// bit-identical.
 struct SchurRhsAssembleKernel {
   ConstArray4 neg_lap;      ///< -Lap phi^n (already negated)
   ConstArray4 fx, fy;       ///< flux F at the center (ghosts filled)

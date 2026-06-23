@@ -464,10 +464,13 @@ class Program:
     # supplies the apply (a C++ lambda) + the rhs / tolerance / iteration budget.
     _KRYLOV_METHODS = frozenset({"cg", "bicgstab", "richardson"})
 
-    def scalar_field(self, name=None):
-        """A fresh, zero-initialized scalar field (1 component): scratch the apply sub-block uses (e.g.
-        the Laplacian output). Lowered to ``ctx.alloc_scalar_field()``."""
-        return self._new("scalar_field", "scalar_field", (), {}, name, None)
+    def scalar_field(self, name=None, ncomp=1):
+        """A fresh, zero-initialized scalar field: scratch the apply sub-block uses (e.g. the Laplacian
+        output, or a 2-component gradient buffer). @p ncomp is the component count (1 by default; 2 for a
+        gradient field consumed by ``P.divergence``). Lowered to ``ctx.alloc_scalar_field(ncomp, 1)``."""
+        if not isinstance(ncomp, int) or ncomp < 1:
+            raise ValueError("scalar_field: ncomp must be a positive integer (got %r)" % (ncomp,))
+        return self._new("scalar_field", "scalar_field", (), {"ncomp": int(ncomp)}, name, None)
 
     def matrix_free_operator(self, name, domain="scalar", range_="scalar"):
         """Declare a matrix-free operator ``A : domain -> range_`` (scalar field -> scalar field for
@@ -535,6 +538,17 @@ class Program:
         if not (isinstance(phi, Value) and phi.vtype == "scalar_field"):
             raise ValueError("gradient: phi must be a scalar_field value")
         return self._new("scalar_field", "gradient", (out, phi), {}, out.name, None)
+
+    def divergence(self, out, fx, fy):
+        """Record ``out = div(fx, fy)`` (centered FV divergence d fx/dx + d fy/dy, component 0). @p out,
+        @p fx and @p fy are scalar_field values. Lowered to ``ctx.divergence(out, fx, fy)``. The exact
+        inverse of @ref gradient: chaining ``P.gradient(g, phi); P.divergence(d, gx, gy)`` recovers the
+        5-point Laplacian, so a matrix-free apply ``phi - alpha*div(grad phi)`` is the Schur-like flux
+        operator ``phi - alpha*Lap(phi)``."""
+        for nm, val in (("out", out), ("fx", fx), ("fy", fy)):
+            if not (isinstance(val, Value) and val.vtype == "scalar_field"):
+                raise ValueError("divergence: %s must be a scalar_field value" % nm)
+        return self._new("scalar_field", "divergence", (out, fx, fy), {}, out.name, None)
 
     def solve_linear(self, name=None, operator=None, rhs=None, initial_guess=None, method="cg",
                      preconditioner="identity", tol=1e-8, max_iter=None):
@@ -917,12 +931,13 @@ class Program:
     # (consumed by apply / solve_local_linear, which read the model coefficients), so it lowers to
     # nothing -- always allowed, model or not. 'reduce' / 'compare' / 'while' are the ADC-404a control
     # flow / reduction ops (lowered inline via adc::dot; no model needed). 'matrix_free_operator' /
-    # 'scalar_field' / 'laplacian' / 'gradient' / 'solve_linear' are the ADC-405 matrix-free Krylov ops
-    # (the operator declaration carries an apply sub-block; solve_linear lowers to adc::*_solve).
+    # 'scalar_field' / 'laplacian' / 'gradient' / 'divergence' / 'solve_linear' are the ADC-405 / ADC-412
+    # matrix-free Krylov ops (the operator declaration carries an apply sub-block; solve_linear lowers to
+    # adc::*_solve; divergence is the centered FV divergence of a gradient field).
     _ALLOWED_OPS = frozenset({"state", "solve_fields", "rhs", "linear_combine", "linear_source",
                               "reduce", "compare", "while", "range", "if", "matrix_free_operator",
-                              "scalar_field", "laplacian", "gradient", "solve_linear", "apply_in",
-                              "apply_out", "history", "store_history"})
+                              "scalar_field", "laplacian", "gradient", "divergence", "solve_linear",
+                              "apply_in", "apply_out", "history", "store_history"})
 
     def _all_ops(self):
         """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
@@ -1106,7 +1121,7 @@ class Program:
             # they outlive the install call and are reused across every Krylov iteration (alloc-once).
             # The lambda is itself captured by the step closure ([=]) and passed to adc::*_solve.
             self._emit_matrix_free_operator(v, var, prelude)
-        elif v.op in ("scalar_field", "laplacian", "gradient", "apply_in", "apply_out"):
+        elif v.op in ("scalar_field", "laplacian", "gradient", "divergence", "apply_in", "apply_out"):
             # These ops only appear INSIDE an apply sub-block (lowered by _emit_matrix_free_operator) or
             # as the operands of solve_linear; they never lower standalone at the top level.
             raise NotImplementedError(
@@ -1269,8 +1284,10 @@ class Program:
         for w in scratch:
             sp = "sf%d_%d" % (apply_id, w.id)
             sub[w.id] = sp
+            ncomp = int(w.attrs.get("ncomp", 1))  # >1 for a gradient buffer consumed by divergence
             prelude.append(
-                "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % sp)
+                "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(%d, 1));"
+                % (sp, ncomp))
             captures.append(sp)
         # The affine result-write accumulator: one PERSISTENT shared_ptr (alloc-once, like the scratch),
         # zeroed and reused every matvec instead of allocated per call -- so the apply lambda allocates
@@ -1293,10 +1310,15 @@ class Program:
                 o, p = w.inputs
                 sub[w.id] = sub[o.id]
                 body.append("ctx.gradient(*%s, %s);" % (sub[o.id], _apply_in_arg(sub, p)))
+            elif w.op == "divergence":
+                o, fx, fy = w.inputs
+                sub[w.id] = sub[o.id]
+                body.append("ctx.divergence(*%s, %s, %s);"
+                            % (sub[o.id], _apply_in_arg(sub, fx), _apply_in_arg(sub, fy)))
             else:
                 raise NotImplementedError(
                     "emit_cpp_program: op '%s' is not lowerable inside a matrix_free_operator apply "
-                    "(supported: scalar_field, laplacian, gradient)" % w.op)
+                    "(supported: scalar_field, laplacian, gradient, divergence)" % w.op)
         body += _emit_field_combine(result, "out", sub, acc_sp)
         prelude.append("adc::ApplyFn %s = [%s](adc::MultiFab& out, const adc::MultiFab& in) {"
                        % (lam, ", ".join(captures)))
@@ -1689,9 +1711,44 @@ def strang(P, block, half_flow, source, *, commit=True):
     return U3
 
 
+def condensed_schur(P, *args, **kwargs):
+    """Documented stub of the condensed-Schur implicit-source stage (epic ADC-399, acceptance 32).
+
+    A full Program rewrite of the native ``adc.CondensedSchur`` global matrix-free Schur solve is BLOCKED
+    on two deep IR features that are out of scope for this epic:
+
+      (A) **multi-component solve_linear** -- ``P.matrix_free_operator`` / ``P.solve_linear`` are
+          ``scalar_field``-only today (``domain``/``range_`` other than ``"scalar"`` raise), but the
+          condensed velocity reconstruction couples the (mx, my) momentum components through B^{-1};
+      (B) **anisotropic position-dependent operator-coefficient assembly** -- the Schur operator is
+          ``-div((I + c*rho*B^{-1}) grad phi)``, whose tensor coefficient varies per cell with rho and
+          B_z; there is no IR path to allocate / fill a coefficient MultiFab and wire it into a
+          matrix-free apply (``ctx.laplacian`` hardcodes the bare 5-point stencil, all coefficients null).
+
+    The native ``adc.CondensedSchur`` source stepper REMAINS fully supported for this stage. The
+    matrix-free / Krylov / divergence primitives ARE available for hand-rolled stages right now --
+    ``P.matrix_free_operator`` + ``P.set_apply`` (built from ``P.laplacian`` / ``P.gradient`` /
+    ``P.divergence`` + the affine algebra) + ``P.solve_linear`` (cg / bicgstab / richardson) -- as the
+    div(grad) Helmholtz demo (examples/time_programs/divergence_solve.py,
+    python/tests/test_time_divergence.py) shows: a Schur-like flux operator
+    ``A(phi) = phi - alpha*div(grad phi)`` solved matrix-free against the same offline reference."""
+    raise NotImplementedError(
+        "adc.time.std.condensed_schur is not implemented as a compiled Program. A full rewrite is "
+        "blocked on two deep IR features out of scope for this epic: (A) multi-component solve_linear "
+        "(P.matrix_free_operator / P.solve_linear are scalar_field-only today), and (B) anisotropic "
+        "position-dependent operator-coefficient assembly (the Schur operator -div((I + c*rho*B^-1) "
+        "grad phi) has a per-cell tensor coefficient with no IR path to allocate/fill a coefficient "
+        "MultiFab and wire it into the apply). Use the still-supported native adc.CondensedSchur source "
+        "stepper for this stage. The matrix-free / Krylov / divergence primitives (P.matrix_free_"
+        "operator + P.set_apply with P.laplacian / P.gradient / P.divergence, P.solve_linear) ARE "
+        "available for hand-rolled stages -- see the div(grad) Helmholtz demo in "
+        "examples/time_programs/divergence_solve.py.")
+
+
 # adc.time.std.<scheme>(Program, block, ...) -- the spec's standard library entry point.
 std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,
-                            adams_bashforth2=adams_bashforth2, strang=strang)
+                            adams_bashforth2=adams_bashforth2, strang=strang,
+                            condensed_schur=condensed_schur)
 
 
 class CompiledTime:

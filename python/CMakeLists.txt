@@ -312,6 +312,19 @@ add_test(NAME test_time_solve_linear
 set_tests_properties(test_time_solve_linear PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Centered divergence primitive + a div(grad) Helmholtz matrix-free solve (ADC-412, acceptance 32).
+# P.divergence(out, fx, fy) lowers to ctx.divergence (adc::apply_divergence); since div(grad) == Lap, a
+# Schur-like operator A(phi) = phi - alpha*div(grad phi) equals (I - alpha*Lap) and is checked against
+# the same offline CG reference as test_time_solve_linear. Section (A) (pure Python): the divergence IR
+# + operand validation, the gradient->divergence codegen (ctx.gradient / ctx.divergence / 2-component
+# buffer), a standalone analytic-divergence check, and the std.condensed_schur NotImplementedError stub.
+# Section (B) compiles + installs the div(grad) program and matches the offline numpy CG; it self-skips
+# without a compiler / Kokkos / install_program (never faking the engine).
+add_test(NAME test_time_divergence
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_divergence.py)
+set_tests_properties(test_time_divergence PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Multistep histories + Adams-Bashforth 2 (ADC-406a) : emit_cpp_program lowers P.history /
 # P.store_history (a SYSTEM-OWNED ring buffer, not a closure capture) and adc.time.std.adams_bashforth2.
 # Section (A) pins the IR + generated body (ctx.history / ctx.store_history / ctx.rotate_histories, the
