@@ -15,10 +15,14 @@
 //   rhs = A(phi_exact) by APPLYING the same discrete operator to the sampled phi_exact. Then we
 //   solve A x = rhs from x = 0 and require max|x - phi_exact| < 1e-8 (tight: same discrete A).
 //
-// We validate the three loops:
+// We validate the four loops:
 //   - cg_solve        (SPD operator),
 //   - bicgstab_solve  (identity preconditioner -- empty ApplyFn),
-//   - richardson_solve(omega = 1/(1 + alpha*8*pi^2) ~ 1/spectral-max, more iters allowed).
+//   - richardson_solve(omega = 1/(1 + alpha*8*pi^2) ~ 1/spectral-max, more iters allowed),
+//   - gmres_solve     (restarted GMRES(m), identity preconditioner): on the SPD operator it matches
+//                      CG, and on a NON-symmetric operator (Helmholtz + a one-sided advection term,
+//                      where CG STAGNATES) it converges to phi_exact. The non-symmetric case is the
+//                      gmres-specific guard -- cg_solve on the same operator must NOT recover phi_exact.
 // Each must converge (converged == true, iters > 1, small residual) and recover phi_exact. We also
 // assert that max_iters = 0 throws std::invalid_argument (spec error 13).
 //
@@ -58,6 +62,20 @@ struct HelmholtzCombineKernel {
   ConstArray4 inv, lapv;
   Real alpha;
   ADC_HD void operator()(int i, int j) const { outv(i, j) = inv(i, j) - alpha * lapv(i, j); }
+};
+
+// Non-symmetric combine: out = in - alpha*Lap(in) + beta * (in(i) - in(i-1)) / h, a FIRST-order
+// upwind x-derivative added to the SPD Helmholtz operator. The one-sided difference is NOT
+// self-adjoint (its transpose is the opposite-sided difference), so the whole operator is
+// non-symmetric -- CG stagnates on it while GMRES (and BiCGStab) converge. `in`'s ghosts are
+// periodic (filled before the matvec), so in(i-1) wraps at the low edge.
+struct AdvectionHelmholtzKernel {
+  Array4 outv;
+  ConstArray4 inv, lapv;
+  Real alpha, beta, inv_h;
+  ADC_HD void operator()(int i, int j) const {
+    outv(i, j) = inv(i, j) - alpha * lapv(i, j) + beta * (inv(i, j) - inv(i - 1, j)) * inv_h;
+  }
 };
 
 // phi_exact(x,y) = sum of several periodic sine modes. A SINGLE mode is an eigenvector of the
@@ -136,6 +154,28 @@ int main() {
   MultiFab rhs(ba, dm, 1, 0);
   A(rhs, phi_exact_mf);  // rhs <- A(phi_exact): discrete RHS (tests the SOLVER, not the scheme)
 
+  // NON-symmetric operator A_ns(in) = in - alpha*Lap(in) + beta * upwind dx(in): the Helmholtz part is
+  // SPD, the one-sided advection term breaks symmetry. beta is large enough that the operator is
+  // strongly non-self-adjoint (CG stagnates), but the spectrum stays in the right half-plane so GMRES
+  // converges. Reuses lap_tmp; `in`'s periodic ghosts feed the upwind in(i-1).
+  constexpr Real kBeta =
+      2.0;  // advection strength (CFL-irrelevant: this is a linear solve, not a step)
+  const Real inv_h = Real(1) / geom.dx();
+  ApplyFn A_ns = [&](MultiFab& out, const MultiFab& in) {
+    MultiFab& in_mut = const_cast<MultiFab&>(in);
+    fill_ghosts(in_mut, geom.domain, bc);
+    apply_laplacian(in_mut, geom, lap_tmp);
+    for (int li = 0; li < out.local_size(); ++li) {
+      Array4 ov = out.fab(li).array();
+      const ConstArray4 iv = in.fab(li).const_array();
+      const ConstArray4 lv = lap_tmp.fab(li).const_array();
+      for_each_cell(out.box(li), AdvectionHelmholtzKernel{ov, iv, lv, kAlpha, kBeta, inv_h});
+    }
+  };
+  MultiFab rhs_ns(ba, dm, 1, 0);
+  A_ns(rhs_ns,
+       phi_exact_mf);  // rhs_ns <- A_ns(phi_exact): discrete RHS for the non-symmetric solve
+
   const Real rel_tol = 1e-12;
   const Real recover_tol = 1e-8;
 
@@ -189,11 +229,50 @@ int main() {
     chk(err < recover_tol, "richardson_recovers_exact");
   }
 
+  // --- GMRES on the SPD operator (identity preconditioner): must recover phi_exact like CG ---
+  {
+    MultiFab x(ba, dm, 1, 1);
+    x.set_val(0.0);
+    const KrylovResult r = gmres_solve(A, ApplyFn{}, x, rhs, rel_tol, 500, 30);
+    const Real err = max_abs_diff(x, phi_exact_mf);
+    std::printf("GMRES(SPD): %s in %d iters (rel=%.2e) | max|x - exact| = %.3e\n",
+                r.converged ? "CONVERGED" : "FAILED", r.iters, r.rel_residual, err);
+    chk(r.converged, "gmres_spd_converged");
+    chk(r.iters > 1, "gmres_spd_iters_gt_1");
+    chk(r.rel_residual <= rel_tol * 10, "gmres_spd_residual_small");
+    chk(err < recover_tol, "gmres_spd_recovers_exact");
+  }
+
+  // --- GMRES on the NON-symmetric operator: the gmres-specific guard. CG STAGNATES on A_ns (it is not
+  //     self-adjoint), so we first confirm CG fails to recover phi_exact, then GMRES does. ---
+  {
+    MultiFab x_cg(ba, dm, 1, 1);
+    x_cg.set_val(0.0);
+    const KrylovResult rc = cg_solve(A_ns, x_cg, rhs_ns, rel_tol, 500);
+    const Real err_cg = max_abs_diff(x_cg, phi_exact_mf);
+    std::printf(
+        "CG(nonsym): %s in %d iters (rel=%.2e) | max|x - exact| = %.3e (expected to NOT "
+        "recover)\n",
+        rc.converged ? "CONVERGED" : "FAILED", rc.iters, rc.rel_residual, err_cg);
+    chk(!(rc.converged && err_cg < recover_tol), "cg_stagnates_on_nonsymmetric");
+
+    MultiFab x(ba, dm, 1, 1);
+    x.set_val(0.0);
+    const KrylovResult r = gmres_solve(A_ns, ApplyFn{}, x, rhs_ns, rel_tol, 500, 30);
+    const Real err = max_abs_diff(x, phi_exact_mf);
+    std::printf("GMRES(nsy): %s in %d iters (rel=%.2e) | max|x - exact| = %.3e\n",
+                r.converged ? "CONVERGED" : "FAILED", r.iters, r.rel_residual, err);
+    chk(r.converged, "gmres_nonsym_converged");
+    chk(r.iters > 1, "gmres_nonsym_iters_gt_1");
+    chk(r.rel_residual <= rel_tol * 10, "gmres_nonsym_residual_small");
+    chk(err < recover_tol, "gmres_nonsym_recovers_exact");
+  }
+
   // --- max_iters <= 0 must throw (spec error 13) ---
   {
     MultiFab x(ba, dm, 1, 1);
     x.set_val(0.0);
-    bool threw_cg = false, threw_rich = false, threw_bicg = false;
+    bool threw_cg = false, threw_rich = false, threw_bicg = false, threw_gmres = false;
     try {
       cg_solve(A, x, rhs, rel_tol, 0);
     } catch (const std::invalid_argument&) {
@@ -209,9 +288,15 @@ int main() {
     } catch (const std::invalid_argument&) {
       threw_bicg = true;
     }
+    try {
+      gmres_solve(A, ApplyFn{}, x, rhs, rel_tol, 0);
+    } catch (const std::invalid_argument&) {
+      threw_gmres = true;
+    }
     chk(threw_cg, "cg_max_iters_0_throws");
     chk(threw_rich, "richardson_max_iters_0_throws");
     chk(threw_bicg, "bicgstab_max_iters_0_throws");
+    chk(threw_gmres, "gmres_max_iters_0_throws");
   }
 
   if (chk.fails() == 0)

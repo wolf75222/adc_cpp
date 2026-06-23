@@ -509,10 +509,11 @@ class Program:
     # --- matrix-free operators / dynamic linear solve (ADC-405 Phase 6b) ----------------------------
     # A ``matrix_free_op`` names a GLOBAL matrix-free operator A : scalar_field -> scalar_field whose
     # apply ``out <- A(in)`` is an IR sub-block recorded by ``set_apply``. ``solve_linear`` lowers to a
-    # call into the runtime's Krylov loop (adc::cg_solve / bicgstab_solve / richardson_solve): the
-    # iteration is DYNAMIC and lives C++-side (inside the loop), invisible to the IR -- the Program only
-    # supplies the apply (a C++ lambda) + the rhs / tolerance / iteration budget.
-    _KRYLOV_METHODS = frozenset({"cg", "bicgstab", "richardson"})
+    # call into the runtime's Krylov loop (adc::cg_solve / bicgstab_solve / richardson_solve /
+    # gmres_solve): the iteration is DYNAMIC and lives C++-side (inside the loop), invisible to the IR --
+    # the Program only supplies the apply (a C++ lambda) + the rhs / tolerance / iteration budget.
+    _KRYLOV_METHODS = frozenset({"cg", "bicgstab", "richardson", "gmres"})
+    _GMRES_RESTART_DEFAULT = 30  # GMRES(m) restart length when the caller does not override it
 
     def scalar_field(self, name=None, ncomp=1):
         """A fresh, zero-initialized scalar field: scratch the apply sub-block uses (e.g. the Laplacian
@@ -624,7 +625,7 @@ class Program:
         return self._new("scalar_field", "divergence", (out, fx, fy), {}, out.name, None)
 
     def solve_linear(self, name=None, operator=None, rhs=None, initial_guess=None, method="cg",
-                     preconditioner="identity", tol=1e-8, max_iter=None):
+                     preconditioner="identity", tol=1e-8, max_iter=None, restart=None):
         """Solve the matrix-free linear system ``operator x = rhs`` with the runtime's Krylov loop and
         return the solution as a scalar_field. The iteration is DYNAMIC (C++-side, inside the loop):
         the IR only carries the operator (its apply lambda), the rhs, the initial guess, and the
@@ -633,11 +634,14 @@ class Program:
           - @p operator: a ``matrix_free_operator`` value (with a ``set_apply`` body);
           - @p rhs: the right-hand side -- a scalar_field, or (MVP) a 1-component State value;
           - @p initial_guess: warm start (defaults to zero);
-          - @p method: ``"cg"`` (SPD), ``"bicgstab"`` (general) or ``"richardson"``;
+          - @p method: ``"cg"`` (SPD), ``"bicgstab"`` (general), ``"richardson"``, or ``"gmres"``
+            (restarted GMRES(m), the robust choice for a NON-symmetric operator);
           - @p preconditioner: ``"identity"`` only for now;
           - @p tol: relative L2 residual stop (> 0);
           - @p max_iter: iteration budget (REQUIRED, > 0: a dynamic solver loop with no budget is a
-            configuration error -- ``adc::*_solve`` itself throws on a non-positive budget)."""
+            configuration error -- ``adc::*_solve`` itself throws on a non-positive budget);
+          - @p restart: GMRES restart length m (a positive int; defaults to 30). Ignored by the other
+            methods; passing it to a non-gmres solve is rejected."""
         if not (isinstance(operator, Value) and operator.vtype == "matrix_free_op"):
             raise ValueError("solve_linear: operator must be a matrix_free_operator value")
         if operator.attrs["apply_block"] is None:
@@ -670,11 +674,23 @@ class Program:
             raise ValueError("solve_linear: tol must be a positive number (got %r)" % (tol,))
         if max_iter is None or not isinstance(max_iter, int) or max_iter <= 0:
             raise ValueError("dynamic solver loops require max_iter")
+        # restart is a gmres-only knob; the GMRES(m) basis size. Other methods have no restart concept,
+        # so passing one to them is a config error (fail loud rather than silently ignore it).
+        if method == "gmres":
+            if restart is None:
+                restart = Program._GMRES_RESTART_DEFAULT
+            elif isinstance(restart, bool) or not isinstance(restart, int) or restart <= 0:
+                raise ValueError("solve_linear: restart must be a positive integer for gmres (got %r)"
+                                 % (restart,))
+        elif restart is not None:
+            raise ValueError("solve_linear: restart only applies to method='gmres' (got method=%r)"
+                             % (method,))
         inputs = (operator, rhs) if initial_guess is None else (operator, rhs, initial_guess)
         return self._new("scalar_field", "solve_linear", inputs,
                          {"method": method, "preconditioner": preconditioner, "tol": float(tol),
                           "max_iter": int(max_iter), "has_guess": initial_guess is not None,
-                          "ncomp": op_ncomp}, name, rhs.block)
+                          "ncomp": op_ncomp,
+                          "restart": int(restart) if method == "gmres" else None}, name, rhs.block)
 
     # --- multistep histories (ADC-406a) ---
     def history(self, name, lag=1):
@@ -1809,6 +1825,11 @@ class Program:
             # Identity preconditioner = empty ApplyFn (unpreconditioned BiCGStab).
             lines.append("adc::KrylovResult %s = adc::bicgstab_solve(%s, adc::ApplyFn{}, *%s, %s, %s, "
                          "%d);" % (kr, lam, sol_sp, rhs_tok, tol, max_iter))
+        elif method == "gmres":
+            # Restarted GMRES(m): identity preconditioner = empty ApplyFn; restart = the basis size.
+            restart = int(v.attrs["restart"])
+            lines.append("adc::KrylovResult %s = adc::gmres_solve(%s, adc::ApplyFn{}, *%s, %s, %s, "
+                         "%d, %d);" % (kr, lam, sol_sp, rhs_tok, tol, max_iter, restart))
         else:  # richardson: omega = 1 (the operator is expected to be pre-scaled / well-conditioned)
             lines.append("adc::KrylovResult %s = adc::richardson_solve(%s, *%s, %s, "
                          "static_cast<adc::Real>(1), %s, %d);"
@@ -2099,7 +2120,7 @@ _PROGRAM_CPP_TEMPLATE = '''\
 #include <adc/mesh/storage/fab2d.hpp>          // Array4 / ConstArray4 (per-cell handles)
 #include <adc/mesh/execution/for_each.hpp>     // for_each_cell (Phase-4b per-cell kernels)
 #include <adc/numerics/linalg/dense_eig.hpp>   // adc::detail::mat_inverse (local dense solve)
-#include <adc/numerics/elliptic/linear/generic_krylov.hpp>  // adc::cg_solve / bicgstab_solve / richardson_solve (matrix-free)
+#include <adc/numerics/elliptic/linear/generic_krylov.hpp>  // adc::cg_solve / bicgstab_solve / richardson_solve / gmres_solve (matrix-free)
 #include <adc/core/foundation/types.hpp>
 #include <cmath>                               // std::sqrt / std::fabs / std::pow in lowered formulas
 #include <limits>                              // std::numeric_limits (dt_bound +inf sentinel)

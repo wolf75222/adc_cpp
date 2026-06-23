@@ -1,8 +1,8 @@
 #pragma once
 
 /// @file
-/// @brief Generic MATRIX-FREE Krylov solver loops -- richardson_solve, cg_solve, bicgstab_solve --
-///        operating on adc::MultiFab with the operator supplied as a CALLBACK (ApplyFn).
+/// @brief Generic MATRIX-FREE Krylov solver loops -- richardson_solve, cg_solve, bicgstab_solve,
+///        gmres_solve -- operating on adc::MultiFab with the operator supplied as a CALLBACK (ApplyFn).
 ///
 /// Layer: `include/adc/numerics/elliptic/linear`.
 /// Role: the reusable Krylov core. Where TensorKrylovSolver (krylov_solver.hpp) hardwires the
@@ -54,6 +54,7 @@
 #include <cmath>
 #include <functional>
 #include <stdexcept>
+#include <vector>
 
 namespace adc {
 
@@ -305,6 +306,180 @@ inline KrylovResult bicgstab_solve(const ApplyFn& A, const ApplyFn& precond, Mul
       return res;
     }
     rho_prev = rho;
+  }
+  return res;  // max_iters reached: best effort (converged=false)
+}
+
+/// Left-preconditioned restarted GMRES(m), solving A x = b for a GENERAL (possibly NON-symmetric)
+/// operator A. Where CG needs an SPD A and BiCGStab can break down on a strongly non-symmetric one,
+/// GMRES minimises the (preconditioned) residual over the growing Krylov subspace and is the robust
+/// choice for a non-self-adjoint operator (e.g. an advection-diffusion / condensed-Schur block).
+///
+/// Math: classic restarted GMRES. The inner cycle builds an Arnoldi basis of M^{-1}A by MODIFIED
+/// Gram-Schmidt, accumulating the upper-Hessenberg matrix H; Givens rotations triangularise H
+/// incrementally so the least-squares residual ||beta e1 - H y|| is read off the last rotated
+/// component WITHOUT a matvec. Every @p restart steps (or at convergence) the iterate is updated from
+/// the back-substituted y and the cycle restarts on the fresh residual. The preconditioner @p precond
+/// is OPTIONAL: an empty std::function means the identity (unpreconditioned GMRES). Left
+/// preconditioning is used (the minimised residual is M^{-1}(b - A x)); with the identity that is the
+/// true residual, so the stopping test ||r|| <= rel_tol * ||b|| matches CG / BiCGStab exactly.
+///
+/// ALLOC-ONCE: the (restart+1) Arnoldi basis MultiFabs, plus w / r / Mb scratch, are allocated ONCE
+/// (co-distributed with @p phi) before the restart loop and reused across every cycle -- no MultiFab
+/// allocation inside the loop. The small (restart+1) x restart Hessenberg least-squares lives on
+/// fixed-size stack arrays (H, the Givens cs/sn, the rotated rhs g, the solution y): no Eigen / LAPACK
+/// and no device-side dynamic allocation; @p restart is capped at kGmresRestartMax (50) so the stack
+/// footprint stays bounded. All inner products go through detail::krylov_dot (COLLECTIVE all_reduce,
+/// multi-component aware), so the loop is rank-divergence free and solves EVERY component of a vector /
+/// state field.
+///
+/// @param A         matrix-free operator `out <- A(in)`.
+/// @param precond   matrix-free preconditioner `out <- M^{-1}(in)`; EMPTY -> identity.
+/// @param phi       unknown, IN (initial guess) / OUT (solution).
+/// @param rhs       right-hand side b (unchanged).
+/// @param rel_tol   stop when ||r|| <= rel_tol * ||b||.
+/// @param max_iters total matvec budget across restarts; <= 0 throws std::invalid_argument.
+/// @param restart   GMRES restart length m (basis size); clamped to [1, kGmresRestartMax]. Default 30.
+/// @return iterations, relative residual, convergence flag.
+inline KrylovResult gmres_solve(const ApplyFn& A, const ApplyFn& precond, MultiFab& phi,
+                                const MultiFab& rhs, Real rel_tol, int max_iters,
+                                int restart = 30) {
+  detail::require_max_iter(max_iters);
+  constexpr int kGmresRestartMax = 50;  // caps the stack Hessenberg system (restart+1 entries)
+  const int m = restart < 1 ? 1 : (restart > kGmresRestartMax ? kGmresRestartMax : restart);
+  const bool has_precond = static_cast<bool>(precond);
+
+  const BoxArray& ba = phi.box_array();
+  const DistributionMapping& dm = phi.dmap();
+  const int nc = phi.ncomp();
+  const int ng = phi.n_grow();
+
+  // Scratch allocated ONCE, co-distributed with phi; reused across every restart cycle. The Arnoldi
+  // basis V holds m+1 vectors; w is the matvec / MGS workspace (carries phi's ghost width since A reads
+  // its ghosts); r is the (preconditioned) residual; Mb is M^{-1} b for the relative-residual base.
+  std::vector<MultiFab> V;
+  V.reserve(static_cast<std::size_t>(m) + 1);
+  for (int i = 0; i <= m; ++i)
+    V.emplace_back(ba, dm, nc, ng);
+  MultiFab w(ba, dm, nc, ng);
+  MultiFab r(ba, dm, nc, ng);
+  MultiFab Mb;
+  if (has_precond)
+    Mb = MultiFab(ba, dm, nc, ng);
+
+  // Preconditioned right-hand-side norm: the left-preconditioned residual is M^{-1}(b - A x), so its
+  // base is ||M^{-1} b||. With the identity Mb aliases rhs and this is the true ||b||, matching CG.
+  if (has_precond)
+    precond(Mb, rhs);
+  const MultiFab& Mb_ref = has_precond ? Mb : rhs;
+  const Real bnorm = detail::krylov_l2_norm(Mb_ref);  // COLLECTIVE
+  const Real norm0 = bnorm > Real(0) ? bnorm : Real(1);
+
+  // Fixed-size stack Hessenberg least-squares: H column-major (m columns of m+1 rows), the Givens
+  // rotation cosines/sines, the rotated rhs g (beta e1 after rotations), and the back-substituted y.
+  // restart <= kGmresRestartMax keeps every array bounded; no heap, no Eigen / LAPACK.
+  Real H[kGmresRestartMax + 1][kGmresRestartMax];
+  Real cs[kGmresRestartMax];
+  Real sn[kGmresRestartMax];
+  Real g[kGmresRestartMax + 1];
+  Real y[kGmresRestartMax];
+
+  KrylovResult res;
+  int total_iters = 0;
+
+  while (total_iters < max_iters) {
+    // r = M^{-1}(b - A phi): residual of the current iterate, then left-preconditioned.
+    A(w, phi);                              // w = A(phi)
+    lincomb(w, Real(1), rhs, Real(-1), w);  // w = b - A(phi)
+    if (has_precond)
+      precond(r, w);  // r = M^{-1}(b - A phi)
+    else
+      lincomb(r, Real(1), w, Real(0), w);   // r = b - A phi (copy via lincomb)
+    Real beta = detail::krylov_l2_norm(r);  // COLLECTIVE
+    res.rel_residual = beta / norm0;
+    if (beta <= rel_tol * norm0) {  // converged (also the warm-start early-out)
+      res.converged = true;
+      return res;
+    }
+
+    lincomb(V[0], Real(1) / beta, r, Real(0), r);  // v_0 = r / ||r||
+    g[0] = beta;
+    for (int i = 1; i <= m; ++i)
+      g[i] = Real(0);
+
+    int k = 0;  // Krylov steps taken this cycle
+    for (; k < m && total_iters < max_iters; ++k) {
+      ++total_iters;
+      // Arnoldi: w = M^{-1} A v_k, orthogonalised against v_0..v_k by MODIFIED Gram-Schmidt.
+      if (has_precond) {
+        A(r, V[k]);     // r = A v_k (reuse r as the unpreconditioned matvec scratch)
+        precond(w, r);  // w = M^{-1} A v_k
+      } else {
+        A(w, V[k]);  // w = A v_k
+      }
+      for (int i = 0; i <= k; ++i) {
+        H[i][k] = detail::krylov_dot(w, V[i]);  // COLLECTIVE (all components if ncomp>1)
+        saxpy(w, -H[i][k], V[i]);               // w <- w - H[i][k] v_i
+      }
+      H[k + 1][k] = detail::krylov_l2_norm(w);  // COLLECTIVE
+      if (H[k + 1][k] > detail::kKrylovTiny)
+        lincomb(V[k + 1], Real(1) / H[k + 1][k], w, Real(0), w);  // v_{k+1} = w / h
+      // else: lucky breakdown (the exact solution lies in the current subspace); v_{k+1} stays unused.
+
+      // Apply the previous Givens rotations to the new Hessenberg column, then a fresh rotation to
+      // annihilate H[k+1][k]; carry the rotation through g (the rotated beta e1).
+      for (int i = 0; i < k; ++i) {
+        const Real t = cs[i] * H[i][k] + sn[i] * H[i + 1][k];
+        H[i + 1][k] = -sn[i] * H[i][k] + cs[i] * H[i + 1][k];
+        H[i][k] = t;
+      }
+      const Real denom = std::sqrt(H[k][k] * H[k][k] + H[k + 1][k] * H[k + 1][k]);
+      if (denom > detail::kKrylovTiny) {
+        cs[k] = H[k][k] / denom;
+        sn[k] = H[k + 1][k] / denom;
+      } else {  // degenerate column: identity rotation (no division by ~0)
+        cs[k] = Real(1);
+        sn[k] = Real(0);
+      }
+      H[k][k] = cs[k] * H[k][k] + sn[k] * H[k + 1][k];
+      H[k + 1][k] = Real(0);
+      const Real g_next = -sn[k] * g[k];
+      g[k] = cs[k] * g[k];
+      g[k + 1] = g_next;
+
+      const Real resid = std::fabs(g[k + 1]);  // ||M^{-1}(b - A x)|| WITHOUT a matvec
+      res.iters = total_iters;
+      res.rel_residual = resid / norm0;
+      if (resid <= rel_tol * norm0) {
+        ++k;  // include this step in the back-substitution
+        break;
+      }
+    }
+
+    // Back-substitution: solve the k x k upper-triangular R y = g, then phi <- phi + sum y_i v_i.
+    for (int i = k - 1; i >= 0; --i) {
+      Real sum = g[i];
+      for (int j = i + 1; j < k; ++j)
+        sum -= H[i][j] * y[j];
+      y[i] = std::fabs(H[i][i]) > detail::kKrylovTiny ? sum / H[i][i] : Real(0);
+    }
+    for (int i = 0; i < k; ++i)
+      saxpy(phi, y[i], V[i]);  // phi <- phi + y_i v_i
+
+    // True residual of the updated iterate decides convergence / continuation (the rotated estimate
+    // g[k] guides the inner cycle; this recompute keeps the stopping test honest across restarts).
+    A(w, phi);                              // w = A(phi)
+    lincomb(w, Real(1), rhs, Real(-1), w);  // w = b - A(phi)
+    if (has_precond)
+      precond(r, w);
+    else
+      lincomb(r, Real(1), w, Real(0), w);
+    const Real rnorm = detail::krylov_l2_norm(r);  // COLLECTIVE
+    res.rel_residual = rnorm / norm0;
+    if (rnorm <= rel_tol * norm0) {
+      res.converged = true;
+      return res;
+    }
   }
   return res;  // max_iters reached: best effort (converged=false)
 }

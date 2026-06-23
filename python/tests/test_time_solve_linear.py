@@ -118,7 +118,7 @@ def test_unknown_method(t):
     A = P.matrix_free_operator("A")
     P.set_apply(A, lambda P, out, x: _helmholtz(P, x))
     try:
-        P.solve_linear(operator=A, rhs=U, max_iter=10, method="gmres")
+        P.solve_linear(operator=A, rhs=U, max_iter=10, method="minres")
     except ValueError as exc:
         assert "method" in str(exc), str(exc)
     else:

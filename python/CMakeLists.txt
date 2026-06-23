@@ -324,6 +324,14 @@ add_test(NAME test_time_solve_linear
 set_tests_properties(test_time_solve_linear PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# GMRES Krylov solver (ADC-420): P.solve_linear(method="gmres") -> adc::gmres_solve (restarted
+# GMRES(m), matrix-free, Givens). Section A pins the lowering; Section B checks gmres on the SPD
+# Helmholtz (matches CG) AND on a non-symmetric operator (where CG stagnates). Self-skips without _adc.
+add_test(NAME test_time_gmres
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_gmres.py)
+set_tests_properties(test_time_gmres PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Centered divergence primitive + a div(grad) Helmholtz matrix-free solve (ADC-412, acceptance 32).
 # P.divergence(out, fx, fy) lowers to ctx.divergence (adc::apply_divergence); since div(grad) == Lap, a
 # Schur-like operator A(phi) = phi - alpha*div(grad phi) equals (I - alpha*Lap) and is checked against

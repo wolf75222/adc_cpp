@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **GMRES Krylov solver** (ADC-420, epic ADC-399): `adc.time.Program.solve_linear(method="gmres",
+  restart=)` lowers to a new `adc::gmres_solve` (restarted GMRES(m), matrix-free `ApplyFn`, modified
+  Gram-Schmidt Arnoldi + Givens rotations, identity preconditioner) in `generic_krylov.hpp`, alongside
+  `cg_solve`/`bicgstab_solve`/`richardson_solve` and routing every inner product through the
+  multi-component `krylov_dot`. `restart` is gmres-only (rejected for the others). On an SPD operator
+  gmres matches the offline CG reference (~1e-15); on a non-symmetric operator (where CG stagnates) it
+  converges to the same solution as BiCGStab. New `python/tests/test_time_gmres.py` + C++ coverage in
+  `tests/test_generic_krylov.cpp`.
 - **Optional per-Program dt bound** (ADC-417, epic ADC-399 spec section 18): an
   `adc.time.Program` may declare a dt bound via `@P.dt_bound` or `P.set_dt_bound(expr)`, e.g.
   `cfl * P.hmin() / P.max_wave_speed(U)`. It builds a scalar IR sub-program (new `P.hmin` /
