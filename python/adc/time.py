@@ -522,18 +522,38 @@ class Program:
             raise ValueError("scalar_field: ncomp must be a positive integer (got %r)" % (ncomp,))
         return self._new("scalar_field", "scalar_field", (), {"ncomp": int(ncomp)}, name, None)
 
-    def matrix_free_operator(self, name, domain="scalar", range_="scalar"):
-        """Declare a matrix-free operator ``A : domain -> range_`` (scalar field -> scalar field for
-        now). Supply its apply via ``P.set_apply(A, body_fn)`` before using it in ``P.solve_linear``.
-        domain / range_ other than ``"scalar"`` are a later phase (vector / state-valued operators)."""
-        if domain != "scalar" or range_ != "scalar":
-            raise NotImplementedError(
-                "matrix_free_operator currently supports domain='scalar' and range_='scalar' only "
-                "(vector / state-valued operators are a later phase); got domain=%r range_=%r"
-                % (domain, range_))
+    _OPERATOR_KINDS = frozenset({"scalar", "vector", "state"})
+
+    def matrix_free_operator(self, name, domain="scalar", range_="scalar", ncomp=None):
+        """Declare a matrix-free operator ``A : domain -> range_``. @p domain / @p range_ are the field
+        kind on each side and MUST match (a square operator: the Krylov iterate, residual and solution
+        share one layout): ``"scalar"`` (a 1-component scalar field, the default), or ``"vector"`` /
+        ``"state"`` (a multi-component field, e.g. the condensed-Schur block unknown). For a
+        ``vector`` / ``state`` operator @p ncomp (an int >= 1) is REQUIRED -- the component count of the
+        apply's in/out buffers and of the solution; for a ``scalar`` operator @p ncomp must be omitted
+        (or 1). Supply the apply via ``P.set_apply(A, body_fn)`` before using it in ``P.solve_linear``."""
+        if domain not in Program._OPERATOR_KINDS or range_ not in Program._OPERATOR_KINDS:
+            raise ValueError(
+                "matrix_free_operator: domain / range_ must be one of %s; got domain=%r range_=%r"
+                % (sorted(Program._OPERATOR_KINDS), domain, range_))
+        if domain != range_:
+            raise ValueError(
+                "matrix_free_operator: domain and range_ must match (a square operator); got "
+                "domain=%r range_=%r" % (domain, range_))
+        if domain == "scalar":
+            if ncomp not in (None, 1):
+                raise ValueError(
+                    "matrix_free_operator: a scalar operator has ncomp=1 (omit ncomp); got ncomp=%r"
+                    % (ncomp,))
+            ncomp = 1
+        else:  # vector / state: an explicit positive component count is required
+            if isinstance(ncomp, bool) or not isinstance(ncomp, int) or ncomp < 1:
+                raise ValueError(
+                    "matrix_free_operator: a %r operator requires ncomp (an int >= 1); got ncomp=%r"
+                    % (domain, ncomp))
         return self._new("matrix_free_op", "matrix_free_operator", (),
-                         {"domain": domain, "range": range_, "apply_block": None, "apply_result": None,
-                          "apply_in": None, "apply_out": None}, name, None)
+                         {"domain": domain, "range": range_, "ncomp": int(ncomp), "apply_block": None,
+                          "apply_result": None, "apply_in": None, "apply_out": None}, name, None)
 
     def set_apply(self, operator, body_fn):
         """Record the apply ``out <- A(in)`` of a ``matrix_free_operator``. @p body_fn(P, out, in) is an
@@ -554,9 +574,12 @@ class Program:
         # the flat SSA list: they are re-emitted as the C++ apply lambda, never walked at the top level.
         sub = []
         self._recording.append(sub)
+        # The in/out buffers carry the operator's component count: a vector / state operator applies on
+        # an ncomp buffer (scalar -> ncomp == 1). The apply body sees ncomp-component in / out fields.
+        op_ncomp = int(operator.attrs["ncomp"])
         try:
-            out_sf = self._new("scalar_field", "apply_out", (), {}, "apply_out", None)
-            in_sf = self._new("scalar_field", "apply_in", (), {}, "apply_in", None)
+            out_sf = self._new("scalar_field", "apply_out", (), {"ncomp": op_ncomp}, "apply_out", None)
+            in_sf = self._new("scalar_field", "apply_in", (), {"ncomp": op_ncomp}, "apply_in", None)
             result = body_fn(self, out_sf, in_sf)
         finally:
             self._recording.pop()
@@ -624,6 +647,18 @@ class Program:
             raise ValueError("solve_linear: rhs must be a scalar_field or State value (rhs=...)")
         if initial_guess is not None and not _is_field_value(initial_guess):
             raise ValueError("solve_linear: initial_guess must be a scalar_field or State value")
+        op_ncomp = int(operator.attrs["ncomp"])
+        # The rhs / initial guess must carry at least the operator's component count: the solve runs on
+        # an op_ncomp buffer. A scalar_field exposes its ncomp here; a State's n_cons is only known at
+        # compile (against the model), so a State is accepted now and checked there.
+        for label, fld in (("rhs", rhs), ("initial_guess", initial_guess)):
+            if fld is None or fld.vtype != "scalar_field":
+                continue
+            fld_ncomp = int(fld.attrs.get("ncomp", 1))
+            if fld_ncomp < op_ncomp:
+                raise ValueError(
+                    "solve_linear: %s has %d component(s) but the operator needs %d (a scalar_field "
+                    "with ncomp >= the operator ncomp, or a State)" % (label, fld_ncomp, op_ncomp))
         if method not in Program._KRYLOV_METHODS:
             raise ValueError("solve_linear: method must be one of %s; got %r"
                              % (sorted(Program._KRYLOV_METHODS), method))
@@ -638,8 +673,8 @@ class Program:
         inputs = (operator, rhs) if initial_guess is None else (operator, rhs, initial_guess)
         return self._new("scalar_field", "solve_linear", inputs,
                          {"method": method, "preconditioner": preconditioner, "tol": float(tol),
-                          "max_iter": int(max_iter), "has_guess": initial_guess is not None},
-                         name, rhs.block)
+                          "max_iter": int(max_iter), "has_guess": initial_guess is not None,
+                          "ncomp": op_ncomp}, name, rhs.block)
 
     # --- multistep histories (ADC-406a) ---
     def history(self, name, lag=1):
@@ -1602,10 +1637,13 @@ class Program:
         # The affine result-write accumulator: one PERSISTENT shared_ptr (alloc-once, like the scratch),
         # zeroed and reused every matvec instead of allocated per call -- so the apply lambda allocates
         # NOTHING per Krylov iteration (the runtime r/p/Ap scratch in generic_krylov.hpp is likewise
-        # alloc-once). _emit_field_combine writes the affine into `out` through it.
+        # alloc-once). _emit_field_combine writes the affine into `out` through it. It carries the
+        # operator's component count so the axpy / lincomb cover ALL components (a vector / state apply).
+        op_ncomp = int(v.attrs["ncomp"])
         acc_sp = "acc%d" % apply_id
         prelude.append(
-            "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % acc_sp)
+            "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(%d, 1));"
+            % (acc_sp, op_ncomp))
         captures.append(acc_sp)
         # 2) The lambda body: the laplacian / gradient ops + the result write into `out`.
         body = []
@@ -1648,8 +1686,12 @@ class Program:
         guess_in = v.inputs[2] if v.attrs["has_guess"] else None
         lam = var[op_value.id]  # the apply lambda (already emitted into the prelude)
         sol_sp = "sf_sol%d" % v.id
+        # The solution carries the operator's component count: a vector / state solve writes an ncomp
+        # iterate (the Krylov scratch r/p/Ap is co-allocated from it, so the whole loop is ncomp-wide).
+        op_ncomp = int(v.attrs.get("ncomp", 1))
         prelude.append(
-            "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % sol_sp)
+            "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(%d, 1));"
+            % (sol_sp, op_ncomp))
         var[v.id] = "(*%s)" % sol_sp  # token: the dereferenced solution MultiFab
         # Initial guess: zero (default) or a copy of the guess field.
         if guess_in is None:

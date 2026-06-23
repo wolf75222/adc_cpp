@@ -29,6 +29,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   without a bound the native CFL is unchanged. New `ProgramContext::hmin` / `max_wave_speed` forward
   to `System::cfl_min_dx` / `block_max_speed`, reusing the native CFL hmin and per-block wave-speed
   reduction (no reimplementation).
+- **Multi-component matrix-free linear solve** (ADC-416, condensed-Schur foundation):
+  `adc.time.Program.matrix_free_operator` now takes `domain` / `range_` in `{scalar, vector, state}`
+  plus an `ncomp` (required, `>= 1`, for `vector` / `state`; the apply in/out buffers and the solution
+  inherit it), and `P.solve_linear` validates the rhs / initial-guess component count and returns an
+  `ncomp`-component solution; the codegen allocates the apply scratch / accumulator / solution with the
+  operator `ncomp`. The runtime Krylov loop (`generic_krylov.hpp`) reduces its residual and CG /
+  BiCGStab inner products over ALL components via a new full-component `adc::dot_all` (`mf_arith.hpp`)
+  when `ncomp > 1`, so every component converges (a component-0-only norm would leave the others
+  unsolved); the bare `adc::apply_laplacian` matvec now runs per component. The scalar (`ncomp == 1`)
+  path is unchanged and bit-identical. New `python/tests/test_time_multicomp_solve.py`.
 - **Program op-set completeness** (ADC-414, spec ops 10/16/21/22/23 + validation #18/#19): the
   `adc.time.Program` builder gains `P.sum` / `P.max` / `P.min` / `P.sum_component` (collective
   reductions lowered to new `adc::reduce_sum` / `reduce_max` / `reduce_min` in `mf_arith.hpp`, with
