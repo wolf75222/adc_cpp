@@ -1858,6 +1858,14 @@ MultiFab& System::block_state(int b) {
 void System::block_rhs_into(int b, MultiFab& U, MultiFab& R) {
   p_->sp[static_cast<std::size_t>(b)].rhs_into(U, R);
 }
+MultiFab System::alloc_scalar_field(int n_comp, int n_ghost) {
+  // Co-distributed with the block storage (Impl::ba / Impl::dm -- the same (ba, dm) every block U is
+  // built with, P->ba/P->dm above), so a matrix-free apply pairs this field with the state/aux by
+  // local fab index. Zero-initialized like a fresh block state (install_block sets U to 0).
+  MultiFab f(p_->ba, p_->dm, n_comp, n_ghost);
+  f.set_val(Real(0));
+  return f;
+}
 
 // Load a generated problem.so and install its compiled time Program. Mirrors add_native_block
 // (native_loader.hpp): self-promote this module to the global scope so the .so resolves the System

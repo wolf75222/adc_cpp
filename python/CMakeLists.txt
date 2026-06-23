@@ -287,6 +287,19 @@ add_test(NAME test_time_control_flow_b
 set_tests_properties(test_time_control_flow_b PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Matrix-free DYNAMIC linear solve (ADC-405 Phase 6b) : emit_cpp_program LOWERS a matrix_free_operator
+# (apply out = in - alpha*Lap(in), built from P.laplacian + the affine algebra -> an adc::ApplyFn
+# lambda) and P.solve_linear -> the runtime Krylov loop (adc::cg_solve / bicgstab_solve /
+# richardson_solve), the iteration living C++-side. Section (A) pins the generated apply lambda +
+# ctx.laplacian + adc::cg_solve and the validation errors (max_iter absent/<=0, tol<=0, unknown method),
+# pure Python. Section (B) compiles + installs + steps a 1-variable solve and checks parity vs an
+# offline numpy CG on the same discrete periodic system; it self-skips without a compiler / Kokkos /
+# install_program (never faking the engine).
+add_test(NAME test_time_solve_linear
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_solve_linear.py)
+set_tests_properties(test_time_solve_linear PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Named-source RHS codegen (ADC-403) : emit_cpp_program LOWERS a rhs(sources=[name,...]) with NAMED
 # sources -- ctx.rhs_into (-div F + default source) + the same per-cell m.source_term kernel as the
 # standalone source op, accumulated via ctx.axpy. Section (A) pins the generated body + the validation

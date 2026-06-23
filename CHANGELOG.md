@@ -20,6 +20,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Matrix-free operators + global `solve_linear` in the time program** (ADC-405, Phase 6b): a compiled
+  `problem.so` can now run a matrix-free linear solve entirely C++-side via the runtime's Krylov loop
+  (`adc::cg_solve`/`bicgstab_solve`/`richardson_solve`), Python only building the IR. New
+  `ProgramContext` primitives (reuse, no reimplementation): `alloc_scalar_field` (a 1-component field
+  co-distributed with the blocks; new `System` `ADC_EXPORT`), `geom`, `laplacian` (`fill_ghosts` +
+  `adc::apply_laplacian`), `gradient` (`adc::field_postprocess`). New `adc.time.Program` ops:
+  `P.matrix_free_operator(name)` + `P.set_apply(op, body_fn)` (the apply lowers to an install-time
+  `adc::ApplyFn` lambda), `P.scalar_field`, `P.laplacian`/`P.gradient`, and
+  `P.solve_linear(operator, rhs, method, preconditioner, tol, max_iter)` (method in
+  `cg`/`bicgstab`/`richardson`; `max_iter` required and `> 0` -> `"dynamic solver loops require
+  max_iter"`; `tol > 0`; non-identity preconditioner deferred). The codegen uses a two-phase template
+  (persistent install-time scratch via `std::make_shared` + the step closure). The dynamic loop runs
+  C++-side, invisible to the IR. Validated by `python/tests/test_time_solve_linear.py`: a compiled
+  `(I - 0.1*Lap)phi = U` CG solve matches an offline numpy CG on the same discrete periodic system to
+  1.78e-15. (`condensed_schur` as a Program macro is a later slice built on these primitives.)
 - **Structured for-loops + if + norm_inf in the time-program codegen** (ADC-404, Phase 5b):
   `adc.time.Program` gains `P.static_range(state, count, body)` (a COMPILE-TIME unrolled loop -- `count`
   copies of the body inline, no C++ loop), `P.range(state, count, body)` (a C++ `for` over a fixed

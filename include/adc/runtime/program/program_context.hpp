@@ -3,11 +3,15 @@
 #include <functional>
 #include <utility>
 
-#include <adc/core/foundation/types.hpp>         // Real
-#include <adc/mesh/storage/mf_arith.hpp>         // saxpy (linear combine over a MultiFab)
-#include <adc/mesh/storage/multifab.hpp>         // MultiFab
-#include <adc/runtime/context/grid_context.hpp>  // GridContext (System aux seam)
-#include <adc/runtime/system.hpp>                // System (the runtime this facade forwards to)
+#include <adc/core/foundation/types.hpp>      // Real
+#include <adc/mesh/boundary/physical_bc.hpp>  // fill_ghosts (periodic / physical halo exchange)
+#include <adc/mesh/geometry/geometry.hpp>     // Geometry (mesh metric of the Laplacian / gradient)
+#include <adc/mesh/storage/mf_arith.hpp>      // saxpy (linear combine over a MultiFab)
+#include <adc/mesh/storage/multifab.hpp>      // MultiFab
+#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // field_postprocess (centered gradient)
+#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (shared 5-point matvec)
+#include <adc/runtime/context/grid_context.hpp>                // GridContext (System aux seam)
+#include <adc/runtime/system.hpp>  // System (the runtime this facade forwards to)
 
 /// @file
 /// @brief ProgramContext -- the C++-side facade a generated problem.so calls to run a compiled time
@@ -55,6 +59,44 @@ class ProgramContext {
   /// channel solve_fields() fills. A generated local-linear-solve kernel reads the operator
   /// coefficients (e.g. B_z) from it. Forwards to System::grid_context().aux.
   MultiFab& aux() const { return *sys_->grid_context().aux; }
+
+  /// A fresh scalar field co-distributed with the System mesh (block 0's box array / distribution),
+  /// @p n_comp components, @p n_ghost ghost layers, zero-initialized. Forwards to
+  /// System::alloc_scalar_field. The scratch fields (residual, search direction, solution) a
+  /// matrix-free Krylov solve allocates -- a 1-component field is distinct from the n_cons block state,
+  /// but shares its (ba, dm) so laplacian / gradient pair it with the state and aux by local fab index.
+  MultiFab alloc_scalar_field(int n_comp = 1, int n_ghost = 1) const {
+    return sys_->alloc_scalar_field(n_comp, n_ghost);
+  }
+
+  /// The System mesh geometry (index domain + physical bounds, dx/dy). BY VALUE: grid_context()
+  /// returns a temporary, so a reference to its @c geom member would dangle. The metric the matrix-free
+  /// Laplacian / gradient read.
+  Geometry geom() const { return sys_->grid_context().geom; }
+
+  /// out = Lap(in): fill @p in's ghosts (transport BC, periodic by default) then apply the SHARED
+  /// discrete 5-point Laplacian (adc::apply_laplacian, all optional coefficients null -> the bare
+  /// bit-identical Laplacian). @p in is non-const because the ghost fill WRITES its halos (the valid
+  /// cells are unchanged); this is the same matvec idiom the matrix-free Krylov test
+  /// (tests/test_generic_krylov.cpp) wraps in its ApplyFn. The compiled program forms an operator
+  /// A(in) = in - alpha*Lap(in) by combining this with ctx.lincomb.
+  void laplacian(MultiFab& out, MultiFab& in) const {
+    const GridContext gc = sys_->grid_context();
+    fill_ghosts(in, gc.geom.domain, gc.bc);
+    apply_laplacian(in, gc.geom, out);  // all optional pointers null -> bare 5-point Laplacian
+  }
+
+  /// out = grad(@p phi) by centered differences: out(.,0) = d phi/dx, out(.,1) = d phi/dy (@p out
+  /// needs >= 2 components). Fills @p phi's ghosts then forwards to adc::field_postprocess with
+  /// store_phi=false (the gradient lands in components 0/1) and the centered factors cx = 1/(2 dx),
+  /// cy = 1/(2 dy) -- the same derivation the elliptic aux post-process uses (+grad sign).
+  void gradient(MultiFab& out, MultiFab& phi) const {
+    const GridContext gc = sys_->grid_context();
+    fill_ghosts(phi, gc.geom.domain, gc.bc);
+    const Real cx = Real(1) / (Real(2) * gc.geom.dx());
+    const Real cy = Real(1) / (Real(2) * gc.geom.dy());
+    field_postprocess(phi, out, cx, cy, FieldPostProcess{FieldPostProcess::GradSign::Plus, false});
+  }
 
   /// A zero-initialized RHS scratch with the SAME layout (box array / distribution / ghosts) as @p u,
   /// so the subsequent axpy(u, ., r) combines identical layouts.

@@ -95,6 +95,19 @@ def _to_affine(x):
     raise TypeError("expected a State/RHS value or an affine combination, got %r" % (x,))
 
 
+def _is_field_value(x):
+    """True for a grid-field Value (State / RHS / scalar_field) -- the values that carry an
+    adc::MultiFab and support the affine algebra."""
+    return isinstance(x, Value) and x.is_field()
+
+
+def _affine_ids(aff):
+    """Stable JSON-able form of an _Affine (the apply result of a matrix_free_operator): an ordered
+    list of ``[value_id, sorted-coeff-powers]``."""
+    return [[v.id, sorted((int(p), c) for p, c in coeff.as_dict().items())]
+            for v, coeff in aff._merge()]
+
+
 class _Affine:
     """Affine combination of State/RHS values: ordered ``[(value, _Coeff)]`` terms. Built by the
     operator overloads on field values; consumed by `Program.linear_combine`."""
@@ -181,9 +194,13 @@ class _Operator:
 
 
 class Value:
-    """A typed SSA node in a Program IR. Field-like values (State, RHS) support affine arithmetic."""
+    """A typed SSA node in a Program IR. Field-like values (State, RHS, scalar_field) support affine
+    arithmetic. A ``scalar_field`` is a single-component grid field (the unknown / residual of a
+    matrix-free linear solve), DISTINCT from the n_cons conservative ``state`` even though both lower
+    to an adc::MultiFab; a ``matrix_free_op`` names a matrix-free operator A whose apply sub-block is
+    recorded by ``set_apply`` and lowered to a C++ lambda the runtime Krylov loop calls."""
 
-    _FIELD = ("state", "rhs")
+    _FIELD = ("state", "rhs", "scalar_field")
     _SCALAR = ("scalar", "bool")  # runtime scalars / predicates: never a Python bool / index
 
     def __init__(self, prog, vid, vtype, op, inputs, attrs, name, block):
@@ -438,11 +455,136 @@ class Program:
         raise ValueError(
             "%s: operator must be a linear source (P.linear_source(name) or its name)" % where)
 
+    # --- matrix-free operators / dynamic linear solve (ADC-405 Phase 6b) ----------------------------
+    # A ``matrix_free_op`` names a GLOBAL matrix-free operator A : scalar_field -> scalar_field whose
+    # apply ``out <- A(in)`` is an IR sub-block recorded by ``set_apply``. ``solve_linear`` lowers to a
+    # call into the runtime's Krylov loop (adc::cg_solve / bicgstab_solve / richardson_solve): the
+    # iteration is DYNAMIC and lives C++-side (inside the loop), invisible to the IR -- the Program only
+    # supplies the apply (a C++ lambda) + the rhs / tolerance / iteration budget.
+    _KRYLOV_METHODS = frozenset({"cg", "bicgstab", "richardson"})
+
+    def scalar_field(self, name=None):
+        """A fresh, zero-initialized scalar field (1 component): scratch the apply sub-block uses (e.g.
+        the Laplacian output). Lowered to ``ctx.alloc_scalar_field()``."""
+        return self._new("scalar_field", "scalar_field", (), {}, name, None)
+
+    def matrix_free_operator(self, name, domain="scalar", range_="scalar"):
+        """Declare a matrix-free operator ``A : domain -> range_`` (scalar field -> scalar field for
+        now). Supply its apply via ``P.set_apply(A, body_fn)`` before using it in ``P.solve_linear``.
+        domain / range_ other than ``"scalar"`` are a later phase (vector / state-valued operators)."""
+        if domain != "scalar" or range_ != "scalar":
+            raise NotImplementedError(
+                "matrix_free_operator currently supports domain='scalar' and range_='scalar' only "
+                "(vector / state-valued operators are a later phase); got domain=%r range_=%r"
+                % (domain, range_))
+        return self._new("matrix_free_op", "matrix_free_operator", (),
+                         {"domain": domain, "range": range_, "apply_block": None, "apply_result": None,
+                          "apply_in": None, "apply_out": None}, name, None)
+
+    def set_apply(self, operator, body_fn):
+        """Record the apply ``out <- A(in)`` of a ``matrix_free_operator``. @p body_fn(P, out, in) is an
+        IR-building callable: @p in and @p out are scalar_field values (the operator's argument and
+        result); the body builds @p out from @p in (e.g. ``P.laplacian(tmp, in); ...``) using
+        ``P.laplacian`` + the affine algebra and RETURNS the result scalar_field (the value written into
+        @p out). The ops are captured into a separate sub-block (like a while body) and re-emitted as a
+        C++ lambda the Krylov loop calls."""
+        if not (isinstance(operator, Value) and operator.vtype == "matrix_free_op"):
+            raise ValueError("set_apply: operator must be a matrix_free_operator value")
+        if operator.attrs["apply_block"] is not None:
+            raise ValueError("set_apply: operator '%s' already has an apply" % operator.name)
+        if self._recording:
+            raise NotImplementedError(
+                "set_apply: recording an apply inside another sub-block (apply / while body) is a "
+                "later phase")
+        # The apply ops (the in/out placeholders + the body) live in the operator's OWN sub-block, NOT
+        # the flat SSA list: they are re-emitted as the C++ apply lambda, never walked at the top level.
+        sub = []
+        self._recording.append(sub)
+        try:
+            out_sf = self._new("scalar_field", "apply_out", (), {}, "apply_out", None)
+            in_sf = self._new("scalar_field", "apply_in", (), {}, "apply_in", None)
+            result = body_fn(self, out_sf, in_sf)
+        finally:
+            self._recording.pop()
+        block = sub
+        result = result if result is not None else out_sf
+        if not (isinstance(result, (Value, _Affine)) or _is_field_value(result)):
+            raise ValueError("set_apply: body_fn must return the result scalar_field (out <- A(in))")
+        operator.attrs["apply_block"] = block
+        operator.attrs["apply_result"] = result
+        operator.attrs["apply_in"] = in_sf
+        operator.attrs["apply_out"] = out_sf
+        return operator
+
+    def laplacian(self, out, in_):
+        """Record ``out = Lap(in_)`` (the shared discrete 5-point Laplacian). @p out and @p in_ are
+        scalar_field values. Lowered to ``ctx.laplacian(out, in_)``. Used inside an apply sub-block to
+        form a Helmholtz operator ``A(in) = in - alpha*Lap(in)`` via the affine algebra."""
+        if not (isinstance(out, Value) and out.vtype == "scalar_field"):
+            raise ValueError("laplacian: out must be a scalar_field value")
+        if not (isinstance(in_, Value) and in_.vtype == "scalar_field"):
+            raise ValueError("laplacian: in must be a scalar_field value")
+        return self._new("scalar_field", "laplacian", (out, in_), {}, out.name, None)
+
+    def gradient(self, out, phi):
+        """Record ``out = grad(phi)`` (centered differences; @p out has >= 2 components). @p out and
+        @p phi are scalar_field values. Lowered to ``ctx.gradient(out, phi)``."""
+        if not (isinstance(out, Value) and out.vtype == "scalar_field"):
+            raise ValueError("gradient: out must be a scalar_field value")
+        if not (isinstance(phi, Value) and phi.vtype == "scalar_field"):
+            raise ValueError("gradient: phi must be a scalar_field value")
+        return self._new("scalar_field", "gradient", (out, phi), {}, out.name, None)
+
+    def solve_linear(self, name=None, operator=None, rhs=None, initial_guess=None, method="cg",
+                     preconditioner="identity", tol=1e-8, max_iter=None):
+        """Solve the matrix-free linear system ``operator x = rhs`` with the runtime's Krylov loop and
+        return the solution as a scalar_field. The iteration is DYNAMIC (C++-side, inside the loop):
+        the IR only carries the operator (its apply lambda), the rhs, the initial guess, and the
+        method / tolerance / iteration budget.
+
+          - @p operator: a ``matrix_free_operator`` value (with a ``set_apply`` body);
+          - @p rhs: the right-hand side -- a scalar_field, or (MVP) a 1-component State value;
+          - @p initial_guess: warm start (defaults to zero);
+          - @p method: ``"cg"`` (SPD), ``"bicgstab"`` (general) or ``"richardson"``;
+          - @p preconditioner: ``"identity"`` only for now;
+          - @p tol: relative L2 residual stop (> 0);
+          - @p max_iter: iteration budget (REQUIRED, > 0: a dynamic solver loop with no budget is a
+            configuration error -- ``adc::*_solve`` itself throws on a non-positive budget)."""
+        if not (isinstance(operator, Value) and operator.vtype == "matrix_free_op"):
+            raise ValueError("solve_linear: operator must be a matrix_free_operator value")
+        if operator.attrs["apply_block"] is None:
+            raise ValueError("solve_linear: operator '%s' has no apply; call P.set_apply first"
+                             % operator.name)
+        if not _is_field_value(rhs):
+            raise ValueError("solve_linear: rhs must be a scalar_field or State value (rhs=...)")
+        if initial_guess is not None and not _is_field_value(initial_guess):
+            raise ValueError("solve_linear: initial_guess must be a scalar_field or State value")
+        if method not in Program._KRYLOV_METHODS:
+            raise ValueError("solve_linear: method must be one of %s; got %r"
+                             % (sorted(Program._KRYLOV_METHODS), method))
+        if preconditioner != "identity":
+            raise NotImplementedError(
+                "solve_linear: only preconditioner='identity' is supported yet (got %r)"
+                % preconditioner)
+        if not isinstance(tol, (int, float)) or tol <= 0:
+            raise ValueError("solve_linear: tol must be a positive number (got %r)" % (tol,))
+        if max_iter is None or not isinstance(max_iter, int) or max_iter <= 0:
+            raise ValueError("dynamic solver loops require max_iter")
+        inputs = (operator, rhs) if initial_guess is None else (operator, rhs, initial_guess)
+        return self._new("scalar_field", "solve_linear", inputs,
+                         {"method": method, "preconditioner": preconditioner, "tol": float(tol),
+                          "max_iter": int(max_iter), "has_guess": initial_guess is not None},
+                         name, rhs.block)
+
     def commit(self, block, state):
         """Replace the current state of ``block`` with ``state`` at the end of the step. Each block
-        is committed AT MOST once; read-only blocks need no commit."""
-        if not (isinstance(state, Value) and state.vtype == "state"):
-            raise ValueError("commit: a State value is required")
+        is committed AT MOST once; read-only blocks need no commit.
+
+        @p state is normally a State value; a 1-component model's conservative state doubles as a
+        scalar field, so a ``scalar_field`` (e.g. a ``solve_linear`` solution) is also accepted and
+        copied back into the block state at commit (the final ``ctx.lincomb`` in the lowered body)."""
+        if not (isinstance(state, Value) and state.vtype in ("state", "scalar_field")):
+            raise ValueError("commit: a State (or scalar_field) value is required")
         if state.prog is not self:
             raise ValueError("commit: the State value belongs to a different Program")
         if block in self._commits:
@@ -616,6 +758,10 @@ class Program:
                 self._validate_block(v.attrs["body_block"], seen)
             elif v.op in ("range", "if"):
                 self._validate_block(v.attrs["body_block"], seen)
+            elif v.op == "matrix_free_operator" and v.attrs.get("apply_block"):
+                # The apply sub-block is self-contained (its in/out placeholders + scratch are defined
+                # inside it); it reads nothing from the enclosing scope.
+                self._validate_block(v.attrs["apply_block"], seen)
         return True
 
     def _validate_block(self, block, outer_seen):
@@ -646,6 +792,13 @@ class Program:
         elif v.op in ("range", "if"):  # body sub-block (range carries its int count in attrs too)
             attrs["body_block"] = [Program._serialize_node(w) for w in attrs["body_block"]]
             attrs["body"] = attrs["body"].id
+        elif v.op == "matrix_free_operator":  # the apply sub-block is a nested node list; refs are ids
+            attrs["apply_block"] = ([Program._serialize_node(w) for w in attrs["apply_block"]]
+                                    if attrs.get("apply_block") else None)
+            for k in ("apply_result", "apply_in", "apply_out"):
+                ref = attrs.get(k)
+                attrs[k] = (_affine_ids(ref) if isinstance(ref, _Affine)
+                            else (ref.id if isinstance(ref, Value) else None))
         return {"id": v.id, "vtype": v.vtype, "op": v.op, "block": v.block,
                 "inputs": [i.id for i in v.inputs], "attrs": attrs}
 
@@ -696,8 +849,9 @@ class Program:
         the scheme is exact. ``solve_fields_from_state`` is a later phase."""
         self.validate()
         self._check_lowerable(model)
+        prelude, body = self._emit_body(model)
         return _PROGRAM_CPP_TEMPLATE.format(name=json.dumps(self.name), hash=self._ir_hash(),
-                                            body=self._emit_body(model))
+                                            prelude=prelude, body=body)
 
     # Ops the Phase-4b codegen lowers ONLY when a physical model is supplied (they read the model's
     # symbolic source_term / linear_source coefficients). Without a model they raise NotImplementedError.
@@ -730,17 +884,21 @@ class Program:
     # 'linear_source' is a pure NAME-reference SSA node (vtype 'operator'): it carries no runtime work
     # (consumed by apply / solve_local_linear, which read the model coefficients), so it lowers to
     # nothing -- always allowed, model or not. 'reduce' / 'compare' / 'while' are the ADC-404a control
-    # flow / reduction ops (lowered inline via adc::dot; no model needed).
+    # flow / reduction ops (lowered inline via adc::dot; no model needed). 'matrix_free_operator' /
+    # 'scalar_field' / 'laplacian' / 'gradient' / 'solve_linear' are the ADC-405 matrix-free Krylov ops
+    # (the operator declaration carries an apply sub-block; solve_linear lowers to adc::*_solve).
     _ALLOWED_OPS = frozenset({"state", "solve_fields", "rhs", "linear_combine", "linear_source",
-                              "reduce", "compare", "while", "range", "if"})
+                              "reduce", "compare", "while", "range", "if", "matrix_free_operator",
+                              "scalar_field", "laplacian", "gradient", "solve_linear", "apply_in",
+                              "apply_out"})
 
     def _all_ops(self):
-        """Iterate over every op of the Program, descending into control-flow sub-blocks (a flat view
-        used by the lowerability guards: the sub-block ops are not in self._values). Nested control flow
-        is disallowed, so the sub-blocks are flat (one level)."""
+        """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
+        view used by the lowerability guards: the sub-block ops are not in self._values). Nested control
+        flow is disallowed, so the sub-blocks are flat (one level)."""
         for v in self._values:
             yield v
-            for key in ("cond_block", "body_block"):
+            for key in ("cond_block", "body_block", "apply_block"):
                 blk = v.attrs.get(key)
                 if isinstance(blk, list):
                     yield from blk
@@ -764,6 +922,14 @@ class Program:
             for key in ("cond_block", "body_block"):
                 for w in v.attrs.get(key, []):
                     self._check_op_lowerable(w, model)
+            return
+        if v.op == "matrix_free_operator":  # recurse into the apply sub-block (set by set_apply)
+            if v.attrs.get("apply_block") is None:
+                raise ValueError(
+                    "matrix_free_operator '%s' has no apply; call P.set_apply before lowering"
+                    % v.name)
+            for w in v.attrs["apply_block"]:
+                self._check_op_lowerable(w, model)
             return
         if v.op == "rhs":
             extra = [s for s in (v.attrs.get("sources") or []) if s != "default"]
@@ -793,31 +959,43 @@ class Program:
                         % (s, v.name, sorted(impl._source_terms)))
 
     def _emit_body(self, model=None):
-        """Generate the C++ lines of the install-closure body (each indented 4 spaces). Assumes
-        `_check_lowerable` has passed: one block state (the base = ctx.state(0)), one commit. @p model
-        supplies the symbolic coefficients of the Phase-4b source / apply / solve_local_linear ops."""
+        """Generate the C++ of the install function in TWO phases (each list indented uniformly by the
+        template). Assumes `_check_lowerable` has passed: one block state (the base = ctx.state(0)), one
+        commit. @p model supplies the symbolic coefficients of the Phase-4b source / apply /
+        solve_local_linear ops. Returns ``(prelude, body)``:
+
+          - ``prelude``: INSTALL-TIME C++ (before ``ctx.install``) -- persistent scratch fields (held
+            via ``std::shared_ptr`` so they outlive the install call and are reused across every step
+            and every Krylov iteration) and the matrix-free apply lambdas. Captured by value into the
+            step closure (shared_ptr / lambda / ctx all copy cheaply).
+          - ``body``: the STEP closure body (one macro-step over dt)."""
         base = next(v for v in self._values if v.op == "state")
         committed = next(iter(self._commits.values()))
         # IR value id -> C++ token: a MultiFab variable name (states / RHS scratches), a scalar variable
         # name (reductions, ``s{id}``) or a parenthesized boolean expression (compares).
         var = {}
+        prelude = []
         lines = []
         for v in self._values:
-            self._emit_op(v, base, committed.id, var, model, lines)
-        # The committed value may be an op that wrote into a SCRATCH (e.g. solve_local_linear): copy it
-        # into the block state. A linear_combine commit already wrote ctx.state(0) in place (var ==
-        # base), so this is a no-op there (skipped).
+            self._emit_op(v, base, committed.id, var, model, lines, prelude)
+        # The committed value may be an op that wrote into a SCRATCH (e.g. solve_local_linear,
+        # solve_linear): copy it into the block state. A linear_combine commit already wrote ctx.state(0)
+        # in place (var == base), so this is a no-op there (skipped).
         if var[committed.id] != var[base.id]:
             lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
                          % (var[base.id], var[base.id], var[committed.id]))
-        return "\n".join("    " + ln for ln in lines)
+        prelude_src = "\n".join("  " + ln for ln in prelude)
+        body_src = "\n".join("    " + ln for ln in lines)
+        return prelude_src, body_src
 
-    def _emit_op(self, v, base, committed_id, var, model, lines):
+    def _emit_op(self, v, base, committed_id, var, model, lines, prelude=None):
         """Lower a SINGLE op to C++, appending to @p lines and recording its C++ token in @p var. Shared
         by the top-level walk and the while sub-blocks (a while body re-runs this per op each pass), so
         reductions / compares / linear_combine all lower identically inside the loop. @p base is the
         block-state value (its C++ var is the loop variable inside a while sub-block); @p committed_id
-        is the committed value's id (None inside a sub-block: a body combine is never the commit)."""
+        is the committed value's id (None inside a sub-block: a body combine is never the commit).
+        @p prelude collects INSTALL-TIME lines (persistent scratch + apply lambdas) for the matrix-free
+        Krylov ops; None inside a sub-block (those ops only appear at the top level for now)."""
         if v.op == "state":
             var[v.id] = "u%d" % v.id
             lines.append("adc::MultiFab& %s = ctx.state(0);" % var[v.id])
@@ -860,6 +1038,20 @@ class Program:
                          % (var[v.id], var[base.id]))
             lines += _emit_solve_local_linear_kernel(
                 model, v.attrs["linear_source"], v.attrs["a_coeff"], var[rhs_in.id], var[v.id])
+        elif v.op == "matrix_free_operator":
+            # Install-time: emit the apply lambda `apply_A{id}` into the prelude. Its persistent scratch
+            # (the scalar_field ops of the apply sub-block) are shared_ptr fields, captured by value so
+            # they outlive the install call and are reused across every Krylov iteration (alloc-once).
+            # The lambda is itself captured by the step closure ([=]) and passed to adc::*_solve.
+            self._emit_matrix_free_operator(v, var, prelude)
+        elif v.op in ("scalar_field", "laplacian", "gradient", "apply_in", "apply_out"):
+            # These ops only appear INSIDE an apply sub-block (lowered by _emit_matrix_free_operator) or
+            # as the operands of solve_linear; they never lower standalone at the top level.
+            raise NotImplementedError(
+                "emit_cpp_program: op '%s' (value '%s') is only lowerable inside a matrix_free_operator "
+                "apply sub-block" % (v.op, v.name))
+        elif v.op == "solve_linear":
+            self._emit_solve_linear(v, base, var, prelude, lines)
         elif v.op == "reduce":
             # A collective all_reduce -> a C++ scalar. norm2 = sqrt(dot(u, u)); dot(a, b) directly. Both
             # MUST run on every rank (adc::dot is collective); they sit at the top of the loop body.
@@ -984,6 +1176,135 @@ class Program:
                           % (x, x, sub[v.attrs["body"].id]))
         lines += ["  " + ln for ln in body_lines]
         lines.append("}")
+
+    def _emit_matrix_free_operator(self, v, var, prelude):
+        """Lower a matrix_free_operator to an INSTALL-TIME C++ apply lambda ``apply_A{id}`` (appended to
+        @p prelude). The lambda has the adc::ApplyFn signature ``(adc::MultiFab& out, const adc::MultiFab&
+        in)``; its body re-emits the apply sub-block:
+
+          - each ``scalar_field`` scratch -> a PERSISTENT shared_ptr field (declared in the prelude
+            BEFORE the lambda, captured by value), reused across every Krylov iteration (alloc-once);
+          - ``laplacian(o, i)`` -> ``ctx.laplacian(*o, i)`` (i const_cast when it is the lambda's ``in``,
+            which is logically read-only -- the fill only writes ghosts, as in test_generic_krylov);
+          - the apply RESULT (the affine the body returned, e.g. ``in - alpha*Lap(in)``) is written into
+            ``out`` via the same accumulate-then-lincomb idiom as a linear_combine commit.
+
+        The lambda captures ``[ctx, <scratch shared_ptrs>]``; the step closure captures it by value."""
+        apply_id = v.id
+        lam = "apply_A%d" % apply_id
+        var[apply_id] = lam
+        in_sf = v.attrs["apply_in"]
+        out_sf = v.attrs["apply_out"]
+        block = v.attrs["apply_block"]
+        result = v.attrs["apply_result"]
+        # Sub-scope token map: the lambda params + persistent scratch. `in` is the const lambda param;
+        # `out` is the (non-const) lambda param the result is written into.
+        sub = {in_sf.id: "in", out_sf.id: "out"}
+        # 1) Persistent scratch (the scalar_field ops): one shared_ptr per scratch, declared before the
+        #    lambda so it is in scope to capture. Collected first so the capture list is known.
+        scratch = [w for w in block if w.op == "scalar_field"]
+        captures = ["ctx"]
+        for w in scratch:
+            sp = "sf%d_%d" % (apply_id, w.id)
+            sub[w.id] = sp
+            prelude.append(
+                "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % sp)
+            captures.append(sp)
+        # 2) The lambda body: the laplacian / gradient ops + the result write into `out`.
+        body = []
+        for w in block:
+            if w.op in ("scalar_field", "apply_in", "apply_out"):
+                continue  # scratch shared_ptr / lambda params: already bound in `sub`, nothing to emit
+            if w.op == "laplacian":
+                o, i = w.inputs
+                sub[w.id] = sub[o.id]
+                body.append("ctx.laplacian(*%s, %s);" % (sub[o.id], _apply_in_arg(sub, i)))
+            elif w.op == "gradient":
+                o, p = w.inputs
+                sub[w.id] = sub[o.id]
+                body.append("ctx.gradient(*%s, %s);" % (sub[o.id], _apply_in_arg(sub, p)))
+            else:
+                raise NotImplementedError(
+                    "emit_cpp_program: op '%s' is not lowerable inside a matrix_free_operator apply "
+                    "(supported: scalar_field, laplacian, gradient)" % w.op)
+        body += _emit_field_combine(result, "out", sub)
+        prelude.append("adc::ApplyFn %s = [%s](adc::MultiFab& out, const adc::MultiFab& in) {"
+                       % (lam, ", ".join(captures)))
+        prelude += ["  " + ln for ln in body]
+        prelude.append("};")
+
+    def _emit_solve_linear(self, v, base, var, prelude, lines):
+        """Lower solve_linear to a call into the runtime's matrix-free Krylov loop. The solution field
+        ``sf_sol{id}`` is a PERSISTENT shared_ptr (prelude, captured by the step closure); the step body
+        seeds the initial guess (zero, or a copy of the supplied guess), then calls
+        ``adc::cg_solve`` / ``bicgstab_solve`` / ``richardson_solve`` with the operator's apply lambda.
+        The KrylovResult is kept (diagnostics) but the trip count is decided C++-side, inside the loop --
+        invisible to the IR. The result token is the solution field, dereferenced for the final copy back
+        into the block state at commit."""
+        op_value = v.inputs[0]
+        rhs_in = v.inputs[1]
+        guess_in = v.inputs[2] if v.attrs["has_guess"] else None
+        lam = var[op_value.id]  # the apply lambda (already emitted into the prelude)
+        sol_sp = "sf_sol%d" % v.id
+        prelude.append(
+            "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(1, 1));" % sol_sp)
+        var[v.id] = "(*%s)" % sol_sp  # token: the dereferenced solution MultiFab
+        # Initial guess: zero (default) or a copy of the guess field.
+        if guess_in is None:
+            lines.append("%s->set_val(static_cast<adc::Real>(0));" % sol_sp)
+        else:
+            lines.append("ctx.lincomb(*%s, static_cast<adc::Real>(0), *%s, static_cast<adc::Real>(1), "
+                         "%s);" % (sol_sp, sol_sp, var[guess_in.id]))
+        tol = "static_cast<adc::Real>(%s)" % repr(float(v.attrs["tol"]))
+        max_iter = int(v.attrs["max_iter"])
+        rhs_tok = var[rhs_in.id]
+        method = v.attrs["method"]
+        kr = "kr%d" % v.id
+        if method == "cg":
+            lines.append("adc::KrylovResult %s = adc::cg_solve(%s, *%s, %s, %s, %d);"
+                         % (kr, lam, sol_sp, rhs_tok, tol, max_iter))
+        elif method == "bicgstab":
+            # Identity preconditioner = empty ApplyFn (unpreconditioned BiCGStab).
+            lines.append("adc::KrylovResult %s = adc::bicgstab_solve(%s, adc::ApplyFn{}, *%s, %s, %s, "
+                         "%d);" % (kr, lam, sol_sp, rhs_tok, tol, max_iter))
+        else:  # richardson: omega = 1 (the operator is expected to be pre-scaled / well-conditioned)
+            lines.append("adc::KrylovResult %s = adc::richardson_solve(%s, *%s, %s, "
+                         "static_cast<adc::Real>(1), %s, %d);"
+                         % (kr, lam, sol_sp, rhs_tok, tol, max_iter))
+        lines.append("(void)%s;" % kr)
+
+
+def _apply_in_arg(sub, value):
+    """C++ argument for the INPUT field of a laplacian / gradient inside an apply lambda. When the input
+    is the lambda's ``in`` (a const&), const_cast it (ctx.laplacian / gradient take a non-const MultiFab&
+    and only write the ghosts, never the valid cells -- the same contract test_generic_krylov relies on);
+    a persistent scratch shared_ptr is dereferenced."""
+    tok = sub[value.id]
+    if tok == "in":
+        return "const_cast<adc::MultiFab&>(in)"
+    return "*%s" % tok
+
+
+def _emit_field_combine(result, target, sub):
+    """Emit C++ writing the affine combination @p result into the field @p target (a C++ MultiFab token,
+    e.g. ``out``). Mirrors the linear_combine commit: accumulate the non-`target` terms onto a zero
+    scratch, then ``ctx.lincomb(target, c_target, target, 1, acc)``. A single unit term that already is
+    the target is a no-op. @p sub maps IR value ids to C++ tokens (``in``/``out``/scratch shared_ptrs)."""
+    aff = _to_affine(result)._merge()
+    terms = [(v, c.as_dict()) for v, c in aff]
+    lines = ["adc::MultiFab acc_%s = ctx.scratch_state_like(%s);" % (target, target)]
+    c_target = {0: 0.0}
+    for value, coeff in terms:
+        tok = sub[value.id]
+        ref = "const_cast<adc::MultiFab&>(in)" if tok == "in" else (
+            "*%s" % tok if tok.startswith("sf") else tok)
+        if tok == target:
+            c_target = coeff
+        else:
+            lines.append("ctx.axpy(acc_%s, %s, %s);" % (target, _coeff_cpp(coeff), ref))
+    lines.append("ctx.lincomb(%s, %s, %s, static_cast<adc::Real>(1), acc_%s);"
+                 % (target, _coeff_cpp(c_target), target, target))
+    return lines
 
 
 def _coeff_cpp(powers):
@@ -1171,8 +1492,9 @@ def _linear_source_rows(impl, name):
 # Source of a generated problem.so. The includes + adc_install_program closure match the shape
 # tests/test_program_loader compiles+runs in CI; adc_program_hash is added per the spec .so ABI (a
 # cache/restart key) and is not yet consumed by System::install_program. {name} is a JSON-escaped C
-# string literal, {hash} the IR hash, {body} the generated install-closure body (already indented);
-# the literal braces of the C++ scaffold are doubled for str.format.
+# string literal, {hash} the IR hash, {prelude} the INSTALL-TIME C++ (persistent scratch + matrix-free
+# apply lambdas, captured into the step closure by [=]), {body} the step-closure body (both already
+# indented); the literal braces of the C++ scaffold are doubled for str.format.
 _PROGRAM_CPP_TEMPLATE = '''\
 // GENERATED by adc.time.Program.emit_cpp_program (epic ADC-399 / ADC-401). Do not edit by hand.
 // A compiled time Program installed across the stable .so ABI: it drives sim.step(dt) entirely in
@@ -1183,8 +1505,10 @@ _PROGRAM_CPP_TEMPLATE = '''\
 #include <adc/mesh/storage/fab2d.hpp>          // Array4 / ConstArray4 (per-cell handles)
 #include <adc/mesh/execution/for_each.hpp>     // for_each_cell (Phase-4b per-cell kernels)
 #include <adc/numerics/linalg/dense_eig.hpp>   // adc::detail::mat_inverse (local dense solve)
+#include <adc/numerics/elliptic/linear/generic_krylov.hpp>  // adc::cg_solve / bicgstab_solve / richardson_solve (matrix-free)
 #include <adc/core/foundation/types.hpp>
 #include <cmath>                               // std::sqrt / std::fabs / std::pow in lowered formulas
+#include <memory>                              // std::make_shared (persistent matrix-free scratch)
 
 extern "C" const char* adc_program_abi_key() {{ return ADC_ABI_KEY_LITERAL; }}
 extern "C" const char* adc_program_name() {{ return {name}; }}
@@ -1192,7 +1516,8 @@ extern "C" const char* adc_program_hash() {{ return "{hash}"; }}
 
 extern "C" void adc_install_program(void* sys) {{
   adc::runtime::program::ProgramContext ctx(sys);
-  ctx.install([ctx](double dt) {{
+{prelude}
+  ctx.install([=](double dt) {{
     (void)dt;
 {body}
   }});

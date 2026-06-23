@@ -586,6 +586,12 @@ class System {
   ADC_EXPORT MultiFab& block_state(int b);
   /// R <- -div F(U) + S(U, aux) for block @p b (the block's frozen-Poisson residual closure).
   ADC_EXPORT void block_rhs_into(int b, MultiFab& U, MultiFab& R);
+  /// A fresh scalar field co-distributed with the System mesh: block 0's BoxArray and
+  /// DistributionMapping, @p n_comp components, @p n_ghost ghost layers, zero-initialized. Scratch a
+  /// compiled time Program allocates for a matrix-free Krylov solve (the residual / search-direction
+  /// fields that feed cg_solve / bicgstab_solve via ProgramContext::laplacian); shares the block
+  /// (ba, dm) so a per-cell kernel pairs it with the state and aux by local fab index.
+  ADC_EXPORT MultiFab alloc_scalar_field(int n_comp, int n_ghost);
   /// Load a generated problem.so and install its compiled time Program. dlopens @p so_path, checks
   /// its ABI key against this module (fail-loud on mismatch), and calls its adc_install_program(this),
   /// which wraps the System in a ProgramContext and installs the macro-step closure. The .so resolves
