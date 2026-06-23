@@ -373,6 +373,17 @@ add_test(NAME test_time_step_cfl
 set_tests_properties(test_time_step_cfl PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Optional per-Program dt bound (ADC-417, epic ADC-399 spec section 18). A compiled Program may export a
+# dt bound (@P.dt_bound / P.set_dt_bound); step_cfl then uses min(native CFL dt, program dt bound) -- a
+# tighter bound wins, a looser one loses, no bound leaves the native CFL unchanged. The .so exports a
+# SECOND ABI pair: adc_program_has_dt_bound() + adc_program_dt_bound(ctx, cfl). Section (A) pins the IR +
+# codegen (pure Python); Section (B) checks the min semantics end-to-end and self-skips without a
+# compiler / a visible Kokkos (never faking the engine).
+add_test(NAME test_time_dt_bound
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_dt_bound.py)
+set_tests_properties(test_time_dt_bound PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Program op-set completeness (ADC-414, spec ops 10/16/21/22/23 + validation #18/#19):
 # solve_local_nonlinear is a clean NotImplementedError stub (Newton deferred); the reductions
 # P.sum/max/min/sum_component lower to adc::reduce_sum/max/min; P.fill_boundary -> ctx.fill_boundary;

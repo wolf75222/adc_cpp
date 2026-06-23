@@ -30,6 +30,7 @@
 #include <adc/runtime/dynamic/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
 #include <adc/runtime/builders/compiled/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
 #include <adc/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
+#include <adc/runtime/program/program_context.hpp>  // ProgramContext: wraps the System for the .so dt_bound call (ADC-417)
 
 #include <algorithm>
 #include <cmath>
@@ -163,6 +164,13 @@ struct System::Impl {
   int macro_step_ = 0;  // macro-step counter (0-indexed): feeds the per-block stride filter
   std::function<void(double)>
       program_step_;  // compiled time Program macro-step body (ADC-399); empty = historical path
+  // OPTIONAL compiled-Program dt bound (epic ADC-399 / ADC-417, spec s18). When a generated .so exports
+  // adc_program_has_dt_bound() == true, install_program stores a closure here that runs the .so's
+  // lowered dt_bound expression (a scalar reading state + reductions / hmin / max_wave_speed) for a
+  // given cfl. step_cfl then tightens dt to min(native CFL dt, program dt bound). Empty = no program dt
+  // bound -> the native CFL is used UNCHANGED. Referenced by SystemStepper::step_cfl (so the MockImpl in
+  // tests/test_strang_splitting.cpp carries a matching member).
+  std::function<Real(Real)> program_dt_bound_;
   // Compiled-Program macro-step cadence (ADC-411), the SYSTEM-level orchestration around program_step_
   // (cf. SystemStepper::step). Defaults 1/1 -> byte-identical to a single program_step_(dt) call.
   // substeps n: program_step_ runs n times over eff_dt/n. stride M: the program runs once per M
@@ -1907,6 +1915,18 @@ MultiFab& System::block_state(int b) {
 void System::block_rhs_into(int b, MultiFab& U, MultiFab& R) {
   p_->sp[static_cast<std::size_t>(b)].rhs_into(U, R);
 }
+// Max |wave speed| of block b on U: the SAME BlockState::max_speed closure step_cfl reads (set at
+// add_block time -- HasStabilitySpeed / max_wave_speed of the model). REUSES it, does not recompute.
+Real System::block_max_speed(int b, const MultiFab& U) const {
+  return p_->sp[static_cast<std::size_t>(b)].max_speed(U);
+}
+// MIN physical cell size of the grid: Cartesian min(dx, dy) / polar min(dr, r_min*dtheta), the exact
+// formula SystemStepper::cfl_grid_h uses for the native CFL (kept consistent so a Program dt bound and
+// the native CFL share the same hmin).
+Real System::cfl_min_dx() const {
+  return p_->polar_ ? std::min(p_->pgeom_.dr(), p_->pgeom_.r_min * p_->pgeom_.dtheta())
+                    : std::min(p_->geom.dx(), p_->geom.dy());
+}
 MultiFab System::alloc_scalar_field(int n_comp, int n_ghost) {
   // Co-distributed with the block storage (Impl::ba / Impl::dm -- the same (ba, dm) every block U is
   // built with, P->ba/P->dm above), so a matrix-free apply pairs this field with the state/aux by
@@ -2155,6 +2175,25 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
   // compiled Program is rejected fail-loud. Missing symbol (older module) -> empty hash, no guard.
   auto hash_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_program_hash"));
   p_->installed_program_hash_ = hash_fn ? std::string(hash_fn()) : std::string();
+  // OPTIONAL dt bound (epic ADC-399 / ADC-417, spec s18). A Program may export a SECOND ABI pair --
+  // adc_program_has_dt_bound() and adc_program_dt_bound(ProgramContext*, Real cfl) -- alongside
+  // adc_install_program. When present AND has_dt_bound() is true, store a closure that builds a
+  // ProgramContext over THIS System and runs the .so's lowered dt_bound expression for a given cfl;
+  // step_cfl tightens dt to min(native CFL, program dt bound). A Program WITHOUT a dt bound (older
+  // module / has_dt_bound() == false) clears the closure -> the native CFL is used UNCHANGED.
+  using has_dt_t = bool (*)();
+  using dt_bound_t = adc::Real (*)(adc::runtime::program::ProgramContext*, adc::Real);
+  auto has_dt = reinterpret_cast<has_dt_t>(adc::dynlib::sym(h, "adc_program_has_dt_bound"));
+  auto dt_bound = reinterpret_cast<dt_bound_t>(adc::dynlib::sym(h, "adc_program_dt_bound"));
+  if (has_dt && dt_bound && has_dt()) {
+    System* self = this;
+    p_->program_dt_bound_ = [self, dt_bound](Real cfl) -> Real {
+      adc::runtime::program::ProgramContext ctx(self);
+      return dt_bound(&ctx, cfl);
+    };
+  } else {
+    p_->program_dt_bound_ = nullptr;  // no program dt bound -> native CFL unchanged
+  }
   // .so left loaded for the duration of the process (the installed closure points to code in it).
 }
 std::string System::installed_program_hash() const {

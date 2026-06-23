@@ -607,6 +607,18 @@ class System {
   ADC_EXPORT MultiFab& block_state(int b);
   /// R <- -div F(U) + S(U, aux) for block @p b (the block's frozen-Poisson residual closure).
   ADC_EXPORT void block_rhs_into(int b, MultiFab& U, MultiFab& R);
+  /// The maximum |wave speed| of block @p b evaluated on @p U -- the SAME per-block reduction
+  /// step_cfl reads (BlockState::max_speed, the HasStabilitySpeed / max_wave_speed closure set at
+  /// add_block time): a collective reduction over the block's cells. A compiled time Program reads it
+  /// (ProgramContext::max_wave_speed) to express its own dt bound (epic ADC-399 / ADC-417, spec s18).
+  /// REUSES the block's wave-speed closure -- it does not recompute the speed. ADC_EXPORT: resolved by
+  /// the generated problem.so across the dlopen boundary, like the other seam accessors.
+  ADC_EXPORT Real block_max_speed(int b, const MultiFab& U) const;
+  /// The MIN physical cell size of the grid (Cartesian min(dx, dy); polar min(dr, r_min*dtheta)) --
+  /// the SAME hmin the native CFL uses (SystemStepper::cfl_grid_h). A compiled time Program reads it
+  /// (ProgramContext::hmin) to express its own dt bound (epic ADC-399 / ADC-417, spec s18). ADC_EXPORT:
+  /// resolved by the generated problem.so across the dlopen boundary.
+  ADC_EXPORT Real cfl_min_dx() const;
   /// A fresh scalar field co-distributed with the System mesh: block 0's BoxArray and
   /// DistributionMapping, @p n_comp components, @p n_ghost ghost layers, zero-initialized. Scratch a
   /// compiled time Program allocates for a matrix-free Krylov solve (the residual / search-direction

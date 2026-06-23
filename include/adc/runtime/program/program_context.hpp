@@ -64,6 +64,18 @@ class ProgramContext {
   MultiFab& state(int b) const { return sys_->block_state(b); }
   void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(b, u, r); }
 
+  /// The MIN physical cell size of the grid (Cartesian min(dx, dy); polar min(dr, r_min*dtheta)) -- the
+  /// SAME hmin the native CFL uses. Forwards to System::cfl_min_dx. A compiled time Program's dt bound
+  /// (epic ADC-399 / ADC-417, spec s18) reads it to express e.g. cfl * hmin / max_wave_speed.
+  Real hmin() const { return sys_->cfl_min_dx(); }
+
+  /// The maximum |wave speed| of block @p b on the state @p u: the SAME per-block reduction step_cfl
+  /// reads (BlockState::max_speed). Forwards to System::block_max_speed -- it REUSES the block's
+  /// wave-speed closure, it does not recompute the speed. @p u is the state the bound is evaluated on
+  /// (the block's current state for a CFL bound). The dt_bound expression uses it as the denominator of
+  /// cfl * hmin / max_wave_speed (epic ADC-399 / ADC-417, spec s18).
+  Real max_wave_speed(int b, const MultiFab& u) const { return sys_->block_max_speed(b, u); }
+
   /// The System aux MultiFab (phi=0, grad_x=1, grad_y=2, B_z=3, T_e=4, named fields from
   /// kAuxNamedBase). NOT owned by the context: it is the live System aux (stable address), the same
   /// channel solve_fields() fills. A generated local-linear-solve kernel reads the operator

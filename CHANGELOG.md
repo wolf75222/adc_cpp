@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Optional per-Program dt bound** (ADC-417, epic ADC-399 spec section 18): an
+  `adc.time.Program` may declare a dt bound via `@P.dt_bound` or `P.set_dt_bound(expr)`, e.g.
+  `cfl * P.hmin() / P.max_wave_speed(U)`. It builds a scalar IR sub-program (new `P.hmin` /
+  `P.max_wave_speed` scalar ops plus scalar arithmetic) that the generated module exports as a second
+  ABI pair, `adc_program_has_dt_bound` and `adc_program_dt_bound(ProgramContext*, cfl)`. `step_cfl`
+  then uses `min(native CFL dt, program dt bound)` (a tighter bound wins, a looser one is ignored);
+  without a bound the native CFL is unchanged. New `ProgramContext::hmin` / `max_wave_speed` forward
+  to `System::cfl_min_dx` / `block_max_speed`, reusing the native CFL hmin and per-block wave-speed
+  reduction (no reimplementation).
 - **Program op-set completeness** (ADC-414, spec ops 10/16/21/22/23 + validation #18/#19): the
   `adc.time.Program` builder gains `P.sum` / `P.max` / `P.min` / `P.sum_component` (collective
   reductions lowered to new `adc::reduce_sum` / `reduce_max` / `reduce_min` in `mf_arith.hpp`, with

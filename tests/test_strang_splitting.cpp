@@ -61,6 +61,8 @@ struct MockImpl {
       program_step_;          // compiled time Program hook (ADC-401); empty here -> historical path
   int program_substeps_ = 1;  // compiled-Program macro-step cadence (ADC-411); default 1/1
   int program_stride_ = 1;    // matches System::Impl so SystemStepper::step compiles for the mock
+  std::function<Real(Real)>
+      program_dt_bound_;  // compiled-Program dt bound (ADC-417); empty -> step_cfl uses the native CFL
   bool polar_ = false;
   // Geometrie de transport EMBEDDED-BOUNDARY (chantier T5-PR3) : le stepper lit geometry_mode_ / eb_set_
   // pour aiguiller l'avance de transport. None + !eb_set_ -> le toy emprunte s.advance (chemin plein),

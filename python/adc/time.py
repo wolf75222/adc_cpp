@@ -261,21 +261,44 @@ class Value:
                             % (self.vtype, self.name))
         return _to_affine(self)
 
+    # --- scalar arithmetic (scalar values only): build a scalar_op node, NOT a Python float ---
+    # A runtime Scalar (a reduction, max_wave_speed, hmin, the dt_bound's cfl) composes into a new
+    # Scalar via + - * / so a dt_bound can express e.g. cfl * P.hmin() / P.max_wave_speed(U) (spec s18);
+    # the value is unknown until the step runs, so the arithmetic builds IR, it is never evaluated here.
+    def _scalar_op(self, other, fn, swap=False):
+        if self.vtype != "scalar":
+            raise NotImplementedError("scalar arithmetic is only defined for Scalar values")
+        a, b = (other, self) if swap else (self, other)
+        return self.prog._scalar_binop(a, b, fn)
+
     def __add__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "add")
         return self._affine() + _to_affine(other)
 
-    __radd__ = __add__
+    def __radd__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "add", swap=True)
+        return self._affine() + _to_affine(other)
 
     def __neg__(self):
+        if self.vtype == "scalar":
+            return self._scalar_op(-1.0, "mul")
         return -self._affine()
 
     def __sub__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "sub")
         return self._affine() - _to_affine(other)
 
     def __rsub__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "sub", swap=True)
         return _to_affine(other) - self._affine()
 
     def __mul__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "mul")
         if self.vtype == "operator":  # a linear-source operator: scalar/dt * L -> an _Operator term
             if isinstance(other, (int, float)):
                 other = _Coeff({0: float(other)})
@@ -286,11 +309,21 @@ class Value:
             return self._affine() * other
         return NotImplemented
 
-    __rmul__ = __mul__
+    def __rmul__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "mul", swap=True)
+        return self.__mul__(other)
 
     def __truediv__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "div")
         if isinstance(other, (int, float)):
             return self._affine() * _Coeff({0: 1.0 / other})
+        return NotImplemented
+
+    def __rtruediv__(self, other):
+        if self.vtype == "scalar":
+            return self._scalar_op(other, "div", swap=True)
         return NotImplemented
 
     def __repr__(self):
@@ -309,6 +342,9 @@ class Program:
         self._commits = {}      # block -> State value
         self._recording = []    # stack of sub-block lists (a control-flow body); see _new / while_
         self._histories = {}    # name -> max declared lag (multistep histories; ADC-406a)
+        # OPTIONAL dt bound (spec s18 / ADC-417): a recorded scalar sub-program (cfl -> Scalar) the
+        # generated .so exports as adc_program_dt_bound; None = no bound (the native CFL is used).
+        self._dt_bound = None        # (block, scalar_value) once set; the block is the scalar sub-block
         self.dt = _Coeff({1: 1.0})   # symbolic time step; participates in coefficient arithmetic
 
     # --- node construction ---
@@ -759,6 +795,43 @@ class Program:
         return self._new("scalar", "record_scalar", (value,), {"diagnostic": name}, name,
                          value.block)
 
+    def _scalar_binop(self, a, b, fn):
+        """Build a Scalar arithmetic node ``a <fn> b`` (fn in add/sub/mul/div). Each operand is a Scalar
+        Value or a Python number (a literal constant, stored in attrs). Used by the Value scalar dunders
+        so a dt_bound can express cfl * hmin / max_wave_speed (spec s18); never evaluated in Python."""
+        inputs = []
+        operands = []  # per operand: ("v", index-into-inputs) or ("c", literal float)
+        for x in (a, b):
+            if isinstance(x, Value):
+                if x.vtype != "scalar":
+                    raise TypeError("scalar arithmetic operands must be Scalar values or numbers; got "
+                                    "a %s value %r" % (x.vtype, x.name))
+                operands.append(("v", len(inputs)))
+                inputs.append(x)
+            elif isinstance(x, (int, float)) and not isinstance(x, bool):
+                operands.append(("c", float(x)))
+            else:
+                raise TypeError("scalar arithmetic operands must be Scalar values or numbers; got %r"
+                                % (x,))
+        block = next((x.block for x in (a, b) if isinstance(x, Value)), None)
+        return self._new("scalar", "scalar_op", tuple(inputs), {"fn": fn, "operands": operands}, None,
+                         block)
+
+    def max_wave_speed(self, state):
+        """The maximum |wave speed| of @p state's block (a collective reduction): the SAME per-block
+        wave speed the native CFL uses (BlockState::max_speed). Returns a Scalar value. Lowered to
+        ``ctx.max_wave_speed(0, u)``. The denominator of a CFL-style dt bound cfl * hmin / w (spec s18).
+        REUSES the block's wave-speed closure -- it does not recompute the speed."""
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("max_wave_speed: a State value is required")
+        return self._new("scalar", "max_wave_speed", (state,), {}, None, state.block)
+
+    def hmin(self):
+        """The MIN physical cell size of the grid (Cartesian min(dx, dy); polar min(dr, r_min*dtheta)):
+        the SAME hmin the native CFL uses. Returns a Scalar value. Lowered to ``ctx.hmin()``. The
+        numerator factor of a CFL-style dt bound cfl * hmin / max_wave_speed (spec s18)."""
+        return self._new("scalar", "hmin", (), {}, None, None)
+
     def _compare(self, lhs, rhs, cmp):
         """Build a Bool predicate ``s_lhs <cmp> rhs`` (re-evaluated each loop pass). @p rhs is a Python
         float tolerance (stored as a literal) or another Scalar value (compared at runtime). Inputs are
@@ -880,6 +953,60 @@ class Program:
             self._recording.pop()
         return sub, out
 
+    # --- optional dt bound (spec s18 / ADC-417) ----------------------------------------------------
+    def set_dt_bound(self, expr_or_fn):
+        """Set an OPTIONAL dt bound for this Program (spec s18). The generated .so exports it as a
+        SECOND ABI function (``adc_program_dt_bound``) alongside the macro step; ``step_cfl`` then uses
+        ``min(native CFL dt, program dt bound)``. Without a dt bound the native CFL is UNCHANGED.
+
+        @p expr_or_fn is either a callable ``f(P, cfl)`` returning a Scalar (the common form -- it reads
+        the runtime ``cfl`` to build e.g. ``cfl * P.hmin() / P.max_wave_speed(U)``), or a Scalar Value
+        already built (a fixed bound, cfl-independent). The body is recorded as a scalar sub-program; it
+        is NOT run in Python during ``sim.step_cfl`` -- it lowers to C++ that reads the live state /
+        reductions. The dt_bound body may read state / fields / scalars only (no commit, no field write):
+        a State / RHS / field op in it is rejected."""
+        if self._dt_bound is not None:
+            raise ValueError("set_dt_bound: a dt bound is already set (set it at most once)")
+        if self._recording:
+            raise NotImplementedError("set_dt_bound: a dt bound cannot be set inside a control-flow body")
+        sub = []
+        self._recording.append(sub)
+        try:
+            if callable(expr_or_fn):
+                # The cfl placeholder is a runtime Scalar the body composes with (cfl * hmin / w).
+                cfl = self._new("scalar", "cfl", (), {}, "cfl", None)
+                result = expr_or_fn(self, cfl)
+            else:
+                result = expr_or_fn
+        finally:
+            self._recording.pop()
+        if not (isinstance(result, Value) and result.vtype == "scalar"):
+            raise ValueError("set_dt_bound: the body must return a Scalar value (e.g. "
+                             "cfl * P.hmin() / P.max_wave_speed(U)); got %r" % (result,))
+        # The dt_bound is a READ-ONLY scalar program: it may READ state / fields (P.state, P.solve_fields)
+        # and produce scalars (reductions, hmin, max_wave_speed, cfl, scalar arithmetic, comparisons),
+        # but it must NOT write a field or commit -- a flux / linear_combine / source / projection in it
+        # is rejected fail-loud (it would mutate the state during the CFL dt evaluation).
+        _DT_BOUND_OPS = frozenset({"state", "solve_fields", "reduce", "compare", "cfl", "hmin",
+                                   "max_wave_speed", "scalar_op"})
+        for v in sub:
+            if v.op not in _DT_BOUND_OPS:
+                raise ValueError("set_dt_bound: the dt bound body may read state / fields and compute "
+                                 "scalars only (no field write / commit); op '%s' (value '%s') is not "
+                                 "allowed" % (v.op, v.name))
+        self._dt_bound = (sub, result)
+        return result
+
+    def dt_bound(self, fn):
+        """Decorator form of `set_dt_bound`: ``@P.dt_bound`` over ``def f(P, cfl): return ...`` records
+        the dt bound (spec s18) and returns the function unchanged (so the name stays usable)."""
+        self.set_dt_bound(fn)
+        return fn
+
+    def has_dt_bound(self):
+        """True iff an optional dt bound was set (spec s18)."""
+        return self._dt_bound is not None
+
     def validate(self):
         """Structural validation of the IR. Raises ValueError on a malformed program."""
         if not self._commits:
@@ -943,7 +1070,15 @@ class Program:
     def _serialize(self):
         nodes = [Program._serialize_node(v) for v in self._values]
         commits = sorted((b, s.id) for b, s in self._commits.items())
-        return {"name": self.name, "version": 1, "nodes": nodes, "commits": commits}
+        out = {"name": self.name, "version": 1, "nodes": nodes, "commits": commits}
+        # The optional dt bound (spec s18 / ADC-417) is part of the IR identity: its presence and its
+        # scalar sub-program feed the hash (the compiled-problem cache key) so two Programs differing
+        # only by a dt bound get distinct .so caches.
+        if self._dt_bound is not None:
+            sub, result = self._dt_bound
+            out["dt_bound"] = {"nodes": [Program._serialize_node(w) for w in sub],
+                               "result": result.id}
+        return out
 
     def _ir_hash(self):
         """Stable SHA-256 of the IR (feeds the compiled-problem cache key in a later phase)."""
@@ -990,8 +1125,33 @@ class Program:
         self.validate()
         self._check_lowerable(model)
         prelude, body = self._emit_body(model)
-        return _PROGRAM_CPP_TEMPLATE.format(name=json.dumps(self.name), hash=self._ir_hash(),
-                                            prelude=prelude, body=body)
+        # Optional dt bound (spec s18 / ADC-417): emit the SECOND ABI pair -- adc_program_has_dt_bound()
+        # (true iff a bound was set) and adc_program_dt_bound(ProgramContext*, cfl) (the lowered scalar
+        # expression). Without a bound, has_dt_bound() returns false and the dt_bound function returns a
+        # +inf sentinel (never reached: the loader stores the closure only when has_dt_bound() is true).
+        has_dt_bound, dt_bound_body = self._emit_dt_bound(model)
+        return _PROGRAM_CPP_TEMPLATE.format(
+            name=json.dumps(self.name), hash=self._ir_hash(), prelude=prelude, body=body,
+            has_dt_bound=has_dt_bound, dt_bound_body=dt_bound_body)
+
+    def _emit_dt_bound(self, model=None):
+        """Lower the optional dt bound (spec s18 / ADC-417) to ``(has_dt_bound, body)``: the bool literal
+        adc_program_has_dt_bound returns and the C++ body of adc_program_dt_bound. No bound -> ("false",
+        a +inf return that is never reached). The bound is a READ-ONLY scalar sub-program: it reuses the
+        same per-op lowering (state -> ctx.state(0), reductions, cfl/hmin/max_wave_speed, scalar_op) and
+        returns the final scalar. base = the sub-block's state op (if any); committed_id None (no commit
+        in a dt bound)."""
+        if self._dt_bound is None:
+            return "false", "    return std::numeric_limits<adc::Real>::infinity();"
+        sub, result = self._dt_bound
+        var = {}
+        lines = []
+        base = next((v for v in sub if v.op == "state"), None)
+        for v in sub:
+            self._emit_op(v, base, None, var, model, lines, None)
+        lines.append("return %s;" % var[result.id])
+        body = "\n".join("    " + ln for ln in lines)
+        return "true", body
 
     # Ops the Phase-4b codegen lowers ONLY when a physical model is supplied (they read the model's
     # symbolic source_term / linear_source coefficients). Without a model they raise NotImplementedError.
@@ -1267,6 +1427,33 @@ class Program:
                 a, b = v.inputs
                 lines.append("const adc::Real %s = adc::dot(%s, %s);"
                              % (var[v.id], var[a.id], var[b.id]))
+        elif v.op == "cfl":
+            # The dt_bound's runtime cfl argument -- the C++ parameter of adc_program_dt_bound. It is
+            # NOT a statement; its token is the bound parameter name (spec s18 / ADC-417).
+            var[v.id] = "cfl"
+        elif v.op == "hmin":
+            # MIN physical cell size (ctx.hmin(), = the native CFL's hmin). A scalar local (spec s18).
+            var[v.id] = "s%d" % v.id
+            lines.append("const adc::Real %s = ctx.hmin();" % var[v.id])
+        elif v.op == "max_wave_speed":
+            # Max |wave speed| of the block on the state (ctx.max_wave_speed(0, u)): the SAME per-block
+            # reduction the native CFL reads, REUSED (spec s18). A collective reduction -> a scalar local.
+            (u,) = v.inputs
+            var[v.id] = "s%d" % v.id
+            lines.append("const adc::Real %s = ctx.max_wave_speed(0, %s);" % (var[v.id], var[u.id]))
+        elif v.op == "scalar_op":
+            # Scalar arithmetic (add/sub/mul/div) over scalar locals / literal constants -> a new scalar
+            # local. Used by the dt_bound expression cfl * hmin / max_wave_speed (spec s18).
+            var[v.id] = "s%d" % v.id
+            toks = []
+            for kind, val in v.attrs["operands"]:
+                if kind == "v":
+                    toks.append(var[v.inputs[val].id])
+                else:  # a literal constant
+                    toks.append("static_cast<adc::Real>(%s)" % repr(float(val)))
+            cppop = {"add": "+", "sub": "-", "mul": "*", "div": "/"}[v.attrs["fn"]]
+            lines.append("const adc::Real %s = (%s %s %s);"
+                         % (var[v.id], toks[0], cppop, toks[1]))
         elif v.op == "compare":
             # A predicate over scalars -> an inline boolean C++ expression (no statement of its own; the
             # while op embeds it directly in `if (!(<expr>)) break;`).
@@ -1727,6 +1914,7 @@ _PROGRAM_CPP_TEMPLATE = '''\
 #include <adc/numerics/elliptic/linear/generic_krylov.hpp>  // adc::cg_solve / bicgstab_solve / richardson_solve (matrix-free)
 #include <adc/core/foundation/types.hpp>
 #include <cmath>                               // std::sqrt / std::fabs / std::pow in lowered formulas
+#include <limits>                              // std::numeric_limits (dt_bound +inf sentinel)
 #include <memory>                              // std::make_shared (persistent matrix-free scratch)
 
 extern "C" const char* adc_program_abi_key() {{ return ADC_ABI_KEY_LITERAL; }}
@@ -1740,6 +1928,16 @@ extern "C" void adc_install_program(void* sys) {{
     (void)dt;
 {body}
   }});
+}}
+
+// OPTIONAL dt bound (spec s18 / ADC-417). adc_program_has_dt_bound() is true iff the Program set one;
+// adc_program_dt_bound(ctx, cfl) returns the lowered scalar bound (min'd into the native CFL by
+// step_cfl). When no bound was set, has_dt_bound() is false and dt_bound returns +inf (unreached).
+extern "C" bool adc_program_has_dt_bound() {{ return {has_dt_bound}; }}
+extern "C" adc::Real adc_program_dt_bound(adc::runtime::program::ProgramContext* ctxp, adc::Real cfl) {{
+  adc::runtime::program::ProgramContext& ctx = *ctxp;
+  (void)ctx; (void)cfl;
+{dt_bound_body}
 }}
 '''
 
