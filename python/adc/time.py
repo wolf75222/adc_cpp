@@ -1195,6 +1195,18 @@ class Program:
         return self._new("scalar", "record_scalar", (value,), {"diagnostic": name}, name,
                          value.block)
 
+    def to_int(self, value):
+        """Truncate a runtime Scalar to an INTEGER Scalar (a host int), for use as a `range` loop bound.
+        @p value is a Scalar value (e.g. ``P.sum(mask)``, a cell count, or ``P.max(level)``). Returns a
+        Scalar marked int-subtype: ``P.range(U, P.to_int(P.sum(mask)), body)`` then runs the body that
+        many times at runtime. Lowered to ``static_cast<int>(<scalar>)`` (C-style truncation toward
+        zero). The explicit wrap makes the float->int truncation visible in the IR (a raw float Scalar is
+        rejected as a range count)."""
+        if not (isinstance(value, Value) and value.vtype == "scalar"):
+            raise ValueError("to_int: value must be a Scalar value (e.g. P.sum(mask)); got %r"
+                             % (value,))
+        return self._new("scalar", "to_int", (value,), {"int_scalar": True}, None, value.block)
+
     def _scalar_binop(self, a, b, fn):
         """Build a Scalar arithmetic node ``a <fn> b`` (fn in add/sub/mul/div). Each operand is a Scalar
         Value or a Python number (a literal constant, stored in attrs). Used by the Value scalar dunders
@@ -1257,10 +1269,6 @@ class Program:
           - ``body_fn(self, x)`` must return the next-iteration State (e.g. a linear_combine)."""
         if not (isinstance(state, Value) and state.vtype == "state"):
             raise ValueError("while_: the loop variable must be a State value")
-        if self._recording:
-            raise NotImplementedError(
-                "while_: nested control flow is a later phase; a while_ body cannot itself open a "
-                "while_ yet")
         cond_block, cond_val = self._record(cond_fn, state)
         if not (isinstance(cond_val, Value) and cond_val.vtype == "bool"):
             raise ValueError("while_: cond_fn must return a Bool value (e.g. P.norm2(d) > tol)")
@@ -1296,31 +1304,42 @@ class Program:
         return x
 
     def range(self, state, count, body_fn):
-        """A C++ ``for`` loop over a FIXED count: from @p state, apply ``body_fn(self, x)`` @p count
-        times, threading the loop-variable State in place, and return the final State. @p count must be
-        a Python int (a runtime/Scalar count is a later phase). The body is RE-EXECUTED each pass, so
-        its ops are captured into a recording sub-block (NOT the flat SSA list) and emitted ONCE inside
-        the loop. Use `static_range` to unroll instead."""
-        if isinstance(count, Value):
-            if count.vtype == "scalar":
-                raise NotImplementedError("range with a runtime Scalar count is deferred; use a "
-                                          "Python int")
-            raise TypeError("range count must be a Python int")
-        if isinstance(count, bool) or not isinstance(count, int):
-            raise TypeError("range count must be a Python int")
-        if count < 0:
-            raise ValueError("range count must be non-negative")
+        """A C++ ``for`` loop over a fixed-at-runtime count: from @p state, apply ``body_fn(self, x)``
+        @p count times, threading the loop-variable State in place, and return the final State.
+
+        @p count is either a Python int (a compile-time bound) OR a runtime INTEGER Scalar built with
+        ``P.to_int(...)`` (e.g. ``P.to_int(P.sum(mask))`` -- a count derived from a reduction). A plain
+        float Scalar is rejected loud: a loop bound must be an int (use ``P.to_int`` to make the
+        truncation explicit). The body is RE-EXECUTED each pass, so its ops are captured into a recording
+        sub-block (NOT the flat SSA list) and emitted ONCE inside the loop. Use `static_range` to unroll
+        a compile-time count instead."""
         if not (isinstance(state, Value) and state.vtype == "state"):
             raise ValueError("range: the loop variable must be a State value")
-        if self._recording:
-            raise NotImplementedError("range: nested control flow is a later phase; a control-flow "
-                                      "body cannot itself open a range yet")
+        if isinstance(count, Value):
+            if count.vtype != "scalar":
+                raise TypeError("range count must be a Python int or an integer Scalar (P.to_int); got "
+                                "a %s value" % count.vtype)
+            if not count.attrs.get("int_scalar"):
+                raise TypeError(
+                    "range count must be an INTEGER Scalar: wrap a float reduction in P.to_int(...) "
+                    "(e.g. P.range(U, P.to_int(P.sum(mask)), body)); a raw float Scalar is rejected")
+            count_attr = count  # a runtime int Scalar -> for (int i=0; i<static_cast<int>(s); ++i)
+        else:
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise TypeError("range count must be a Python int or an integer Scalar (P.to_int)")
+            if count < 0:
+                raise ValueError("range count must be non-negative")
+            count_attr = int(count)
         body_block, next_state = self._record(body_fn, state)
         if not (isinstance(next_state, Value) and next_state.vtype == "state"
                 and next_state.block == state.block):
             raise ValueError("range: body_fn must return the next-iteration State of the same block")
-        return self._new("state", "range", (state,),
-                         {"count": int(count), "body_block": body_block, "body": next_state},
+        # A runtime count Scalar is an INPUT (it is read once, before the loop, for the for-bound); a
+        # compile-time int count carries no input. The count op itself lives in the flat SSA list (it is
+        # built BEFORE range at the enclosing scope), so its C++ scalar local is in scope at the for.
+        inputs = (state, count_attr) if isinstance(count_attr, Value) else (state,)
+        return self._new("state", "range", inputs,
+                         {"count": count_attr, "body_block": body_block, "body": next_state},
                          None, state.block)
 
     def if_(self, state, cond, body_fn):
@@ -1332,9 +1351,6 @@ class Program:
             raise ValueError("if_: the state must be a State value")
         if not (isinstance(cond, Value) and cond.vtype == "bool"):
             raise ValueError("if_: cond must be a Bool value (e.g. P.norm2(d) > tol)")
-        if self._recording:
-            raise NotImplementedError("if_: nested control flow is a later phase; a control-flow body "
-                                      "cannot itself open an if_ yet")
         body_block, next_state = self._record(body_fn, state)
         if not (isinstance(next_state, Value) and next_state.vtype == "state"
                 and next_state.block == state.block):
@@ -1342,10 +1358,25 @@ class Program:
         return self._new("state", "if", (state, cond),
                          {"body_block": body_block, "body": next_state}, None, state.block)
 
+    # Nesting cap (ADC-433): control-flow bodies may nest (a while_ body may open an if_ / range /
+    # while_), but the depth is bounded -- each level emits a real C++ scope, and an accidentally
+    # unbounded recursion (a body_fn that re-opens itself forever) must fail loud here, not blow the
+    # Python / C++ stack. A handful of levels covers every real solver (an outer Newton / convergence
+    # loop with an inner correction branch is depth 2-3).
+    _MAX_NESTING_DEPTH = 8
+
     def _record(self, fn, x):
         """Run a control-flow callable ``fn(self, x)`` with a fresh recording scope active, capturing the
         ops it builds into a sub-block (returned with the value fn produced). The sub-block ops are NOT
-        appended to self._values (they belong to the owning control-flow op)."""
+        appended to self._values (they belong to the owning control-flow op). Sub-blocks may nest
+        (ADC-433): a body recorded here may itself open a while_ / range / if_, recording a deeper level
+        on the stack. The depth is capped so a runaway (unbounded) nesting fails loud."""
+        if len(self._recording) >= Program._MAX_NESTING_DEPTH:
+            raise RuntimeError(
+                "control-flow nesting exceeds the supported depth (%d): a while_/range/if_ body opened "
+                "another at depth %d. Real solvers nest 2-3 levels; an unbounded nesting (a body that "
+                "re-opens itself) is rejected here rather than overflowing the stack."
+                % (Program._MAX_NESTING_DEPTH, len(self._recording) + 1))
         sub = []
         self._recording.append(sub)
         try:
@@ -1441,13 +1472,19 @@ class Program:
         """Validate a control-flow sub-block: each op may read values defined earlier in the SAME block
         or in the enclosing scope (the loop variable / anything defined before the while). @p outer_seen
         is the enclosing scope's def set (copied, not mutated -- the sub-block ops are not visible
-        outside)."""
+        outside). Nested control flow (ADC-433): a while_/range/if_ inside the body recurses, its own
+        sub-blocks validated against this block's scope (so the inner body can read the outer loop var)."""
         seen = set(outer_seen)
         for v in block:
             for inp in v.inputs:
                 if inp.id not in seen:
                     raise ValueError("IR value '%s' used before definition" % inp.name)
             seen.add(v.id)
+            if v.op == "while":
+                self._validate_block(v.attrs["cond_block"], seen)
+                self._validate_block(v.attrs["body_block"], seen)
+            elif v.op in ("range", "if"):
+                self._validate_block(v.attrs["body_block"], seen)
 
     # --- serialization / hash ---
     @staticmethod
@@ -1462,9 +1499,13 @@ class Program:
             attrs["body_block"] = [Program._serialize_node(w) for w in attrs["body_block"]]
             attrs["cond"] = attrs["cond"].id
             attrs["body"] = attrs["body"].id
-        elif v.op in ("range", "if"):  # body sub-block (range carries its int count in attrs too)
+        elif v.op in ("range", "if"):  # body sub-block (range carries its count in attrs too)
             attrs["body_block"] = [Program._serialize_node(w) for w in attrs["body_block"]]
             attrs["body"] = attrs["body"].id
+            if v.op == "range" and isinstance(attrs.get("count"), Value):
+                # A runtime int-Scalar count (ADC-433): serialize by id (its op already serializes in the
+                # flat node list). A compile-time int count serializes as the literal int.
+                attrs["count"] = {"runtime": attrs["count"].id}
         elif v.op == "matrix_free_operator":  # the apply sub-block is a nested node list; refs are ids
             attrs["apply_block"] = ([Program._serialize_node(w) for w in attrs["apply_block"]]
                                     if attrs.get("apply_block") else None)
@@ -1641,7 +1682,8 @@ class Program:
     # matrix-free Krylov ops (the operator declaration carries an apply sub-block; solve_linear lowers to
     # adc::*_solve; divergence is the centered FV divergence of a gradient field).
     _ALLOWED_OPS = frozenset({"state", "solve_fields", "rhs", "linear_combine", "linear_source",
-                              "reduce", "compare", "while", "range", "if", "matrix_free_operator",
+                              "reduce", "compare", "to_int", "while", "range", "if",
+                              "matrix_free_operator",
                               "scalar_field", "laplacian", "gradient", "divergence", "solve_linear",
                               "apply_in", "apply_out", "history", "store_history",
                               "fill_boundary", "project", "record_scalar",
@@ -1650,15 +1692,18 @@ class Program:
                               "schur_rhs", "schur_reconstruct"})
 
     def _all_ops(self):
-        """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
-        view used by the lowerability guards: the sub-block ops are not in self._values). Nested control
-        flow is disallowed, so the sub-blocks are flat (one level)."""
-        for v in self._values:
-            yield v
-            for key in ("cond_block", "body_block", "apply_block", "residual_block"):
-                blk = v.attrs.get(key)
-                if isinstance(blk, list):
-                    yield from blk
+        """Iterate over every op of the Program, descending recursively into control-flow + apply
+        sub-blocks (a flat view used by the lowerability guards: the sub-block ops are not in
+        self._values). Nested control flow (ADC-433) is supported, so the descent recurses to any depth
+        (a while_/range/if_ inside a body yields its own sub-block ops too)."""
+        def walk(ops):
+            for v in ops:
+                yield v
+                for key in ("cond_block", "body_block", "apply_block", "residual_block"):
+                    blk = v.attrs.get(key)
+                    if isinstance(blk, list):
+                        yield from walk(blk)
+        yield from walk(self._values)
 
     def _check_op_lowerable(self, v, model):
         """Lowerability check for a single op (used for both the top-level walk and a while sub-block).
@@ -2071,6 +2116,12 @@ class Program:
                 a, b = v.inputs
                 lines.append("const adc::Real %s = adc::dot(%s, %s);"
                              % (var[v.id], var[a.id], var[b.id]))
+        elif v.op == "to_int":
+            # An INTEGER Scalar (ADC-433): truncate a Real scalar to a host int (a range loop bound).
+            # Stored in an `int` local so the for-bound reads it directly (the cast is explicit in the IR).
+            (u,) = v.inputs
+            var[v.id] = "n%d" % v.id
+            lines.append("const int %s = static_cast<int>(%s);" % (var[v.id], var[u.id]))
         elif v.op == "cfl":
             # The dt_bound's runtime cfl argument -- the C++ parameter of adc_program_dt_bound. It is
             # NOT a statement; its token is the bound parameter name (spec s18 / ADC-417).
@@ -2170,15 +2221,19 @@ class Program:
     def _emit_range(self, v, base, var, model, lines, block_idx=None):
         """Lower a range op to a C++ ``for`` over a fixed count. Like a while, the loop variable is one
         MultiFab mutated in place and the body sub-block is emitted ONCE inside the loop (re-run each
-        pass at runtime); the loop-variable value id is seeded to the loop var for the sub-block."""
+        pass at runtime); the loop-variable value id is seeded to the loop var for the sub-block. The
+        count is a compile-time int literal OR a runtime INTEGER Scalar (ADC-433): an int local computed
+        BEFORE the loop (P.to_int), read once as the for-bound."""
         loop_in = v.inputs[0]
         x = "x%d" % v.id
         i = "i%d" % v.id
         var[v.id] = x
+        count = v.attrs["count"]
+        bound = var[count.id] if isinstance(count, Value) else "%d" % int(count)
         lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (x, var[base.id]))
         lines.append("ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
                      % (x, x, var[loop_in.id]))
-        lines.append("for (int %s = 0; %s < %d; ++%s) {" % (i, i, int(v.attrs["count"]), i))
+        lines.append("for (int %s = 0; %s < %s; ++%s) {" % (i, i, bound, i))
         sub = dict(var)
         sub[loop_in.id] = x
         body_lines = []

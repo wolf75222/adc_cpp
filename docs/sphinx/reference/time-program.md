@@ -116,7 +116,7 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | Multi-stage codegen (SSPRK2 / SSPRK3 / RK4) (`ssprk2_program.py`, `ssprk3_program.py`, `rk4_program.py`) | available, runs end-to-end |
 | `P.source` / `P.apply` / `P.solve_local_linear` (split sources, Lorentz) + predictor-corrector (`predictor_corrector_poisson_lorentz.py`) | available, runs end-to-end |
 | `strang` splitting combinator (compiled H(dt/2); S(dt); H(dt/2) == native `adc.Strang`) (`strang_program.py`) | available, runs end-to-end |
-| Structured control flow (`P.range` / `P.static_range` / `P.while_` / `P.if_`) + reductions (`P.norm2` / `P.dot` / `P.norm_inf`) | available, runs end-to-end |
+| Structured control flow (`P.range` / `P.static_range` / `P.while_` / `P.if_`, nestable; `P.range` takes a Python int or a runtime `P.to_int(...)` count) + reductions (`P.norm2` / `P.dot` / `P.norm_inf`) | available, runs end-to-end |
 | Matrix-free operators (`P.matrix_free_operator` / `P.set_apply`) + Krylov (`P.solve_linear`: cg / bicgstab / richardson) (`matrix_free_solve.py`) | available, runs end-to-end |
 | Differential primitives (`P.gradient` / `P.divergence` / `P.laplacian`) in a matrix-free apply (`divergence_solve.py`) | available, runs end-to-end |
 | `P.solve_local_linear` (per-cell implicit local linear solve, e.g. Lorentz / relaxation) | available, runs end-to-end |

@@ -97,15 +97,17 @@ def test_static_range_scalar_count_rejected(t):
         raise AssertionError("static_range with a Scalar count must raise TypeError")
 
 
-def test_range_scalar_count_rejected(t):
+def test_range_float_scalar_count_rejected(t):
+    # ADC-433: a runtime count is now allowed, but a RAW float Scalar must be wrapped in P.to_int
+    # (the float->int truncation is explicit); a bare float reduction as a loop bound is rejected.
     P = t.Program("p")
     U = P.state("blk")
     try:
         P.range(U, P.norm2(U), _fe_body())
-    except NotImplementedError as exc:
-        assert "runtime Scalar count" in str(exc), str(exc)
+    except TypeError as exc:
+        assert "INTEGER Scalar" in str(exc) and "to_int" in str(exc), str(exc)
     else:
-        raise AssertionError("range with a Scalar count must raise NotImplementedError")
+        raise AssertionError("range with a raw float Scalar count must raise TypeError")
 
 
 def test_range_count_changes_hash(t):

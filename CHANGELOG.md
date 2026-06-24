@@ -20,6 +20,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Nested control flow + runtime-count range in compiled time Programs** (ADC-433, epic ADC-399):
+  a `P.while_` / `P.range` / `P.if_` body may now itself open another control-flow op (nesting, e.g.
+  an outer convergence loop with an inner conditional correction); the recording scope is a stack and
+  the codegen recurses through nested body sub-blocks (scratch names stay unique per level -- each is
+  keyed on the globally unique SSA value id -- and the block index threads through every level). The
+  nesting depth is bounded (an unbounded recursion raises rather than overflowing the stack). New
+  `P.to_int(scalar)` produces an integer Scalar so `P.range` accepts a RUNTIME count (e.g.
+  `P.range(U, P.to_int(P.sum(mask)), body)` -> a C++ `for` whose bound is `static_cast<int>` of the
+  reduction); a raw float Scalar count is rejected (the float->int truncation must be explicit). Flat
+  control flow lowers byte for byte as before. New `python/tests/test_time_nested_flow.py`.
 - **Multi-block compiled time Programs** (ADC-426, epic ADC-399, spec "Multi-blocs"):
   `Program.emit_cpp_program` lowers N `P.state("a")` / N `P.commit` -- the SSA walk allocates a base
   per block and routes every op (state, rhs, solve_fields, projection, max_wave_speed) to its block's
