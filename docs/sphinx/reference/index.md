@@ -24,6 +24,8 @@ symbolic-dsl
 time-program
 operator-modules
 board-like-dsl
+typed-ir
+spec2-builder-layer
 moment-models
 cpp-api
 backend-matrix

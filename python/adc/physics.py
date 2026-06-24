@@ -153,7 +153,11 @@ class CallableOperator:
             raise ValueError(
                 "operator %r must be called with time-Program values (inside a Program); "
                 "got %r" % (self.name, args))
-        if getattr(prog, "_registry", None) is None and self._model is not None:
+        reg = getattr(prog, "_registry", None)
+        # Bind (or rebind) the model's FRESH module if the program has no registry yet or
+        # the bound one predates this operator -- so operators registered in any order all
+        # resolve, not just those present when the program was first bound.
+        if self._model is not None and (reg is None or self.name not in reg):
             prog.bind_operators(self._model.module)
         return prog.call(self.name, *args, name=name)
 
@@ -440,6 +444,43 @@ class Model:
     def operator_alias(self, name):
         """The registered operator name for a board role name (``operator(...)``)."""
         return self._aliases.get(name, name)
+
+    # --- inspection / debug (Spec 3 section 33): show the lowering ---
+    def dump_physics(self):
+        """A board-level view of what was declared (states, params, fields, fluxes,
+        sources, operators) -- the layer-1 surface."""
+        lines = ["# physics.Model %s" % self.name]
+        lines.append("states: %s" % {n: list(h.components) for n, h in self._states.items()})
+        lines.append("params: %s" % list(self._dsl.params))
+        lines.append("fields: %s" % list(self._fields))
+        lines.append("fluxes: %s" % list(self._fluxes))
+        lines.append("sources: %s" % list(self._sources))
+        lines.append("invariants: %s" % list(self._invariants))
+        lines.append("operators: %s" % self.list_operators())
+        return "\n".join(lines)
+
+    def dump_module_ir(self):
+        """The operator-first :class:`adc.model.Module` this model lowers to: the typed
+        spaces and operators with signatures (layer 2)."""
+        mod = self.module
+        reg = mod.operator_registry()
+        lines = ["# adc.model.Module %s" % mod.name]
+        for n, s in mod.state_spaces().items():
+            lines.append("StateSpace %s: %s" % (n, list(s.components)))
+        for n, f in mod.field_spaces().items():
+            lines.append("FieldSpace %s: %s" % (n, list(f.components)))
+        for op in mod.list_operators():
+            lines.append("Operator %s [%s]: %r" % (op, reg.get(op).kind, mod.operator_signature(op)))
+        return "\n".join(lines)
+
+    def dump_capabilities(self):
+        """The requirements / capabilities declared by each typed operator."""
+        mod = self.module
+        lines = ["# capabilities / requirements of %s" % mod.name]
+        for op in mod.list_operators():
+            lines.append("%s: caps=%s reqs=%s"
+                         % (op, mod.operator_capabilities(op), mod.operator_requirements(op)))
+        return "\n".join(lines)
 
     # --- internals ---
     def _destructure_rate(self, rhs):

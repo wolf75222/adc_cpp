@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Spec 3 inspection / debug API** (ADC-460, epic ADC-450, spec 3 section 33): show the lowering of
+  a board-written model or program. `Program.dump_operator_ir()` renders the operator-first Program
+  IR a board program lowers to, `Program.dump_board()` / `dump_cpp_plan()` the board view and the C++
+  step plan; `physics.Model.dump_physics()` / `dump_module_ir()` / `dump_capabilities()` render the
+  declared surface, the typed `adc.model.Module` and the operator requirements/capabilities. Pure
+  introspection over the existing IR (no new IR, no parallel system). New
+  `python/tests/test_inspection.py`; examples `examples/spec3/board_vs_operator_ir_equivalence.py`
+  (asserts board IR == operator-first IR) and `operator_first_same_problem.py`; reference pages
+  `typed-ir.md` + `spec2-builder-layer.md`.
 - **Blackboard-style physics DSL** (ADC-451/452/453/454, epic ADC-450, spec 3): a layer-1 user API
   that reads like the blackboard and lowers to the spec-2 operator-first IR. `adc.math` adds the
   notation (`ddt`, `div`, `grad`, `laplacian`, `dx`/`dy`, `rate`, `unknown`, `integral`, `sqrt`,

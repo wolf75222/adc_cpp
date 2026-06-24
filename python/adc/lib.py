@@ -212,7 +212,7 @@ diagnostics = SimpleNamespace(
 
 
 # --- projections -----------------------------------------------------------
-# Positivity is the adc::zhang_shu_scale free function (face_flux.hpp); the others have
+# Positivity is the adc::zhang_shu_scale free function (positivity.hpp); the others have
 # no native symbol yet (a generated brick or a planned native type).
 projections = SimpleNamespace(
     positivity=lambda **o: _native("positivity", "adc::zhang_shu_scale", "positivity",

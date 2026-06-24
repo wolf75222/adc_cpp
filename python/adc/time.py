@@ -1384,6 +1384,46 @@ class Program:
         out.attrs["tolerance"] = float(tolerance)
         return out
 
+    # --- inspection / debug (Spec 3 section 33): show the lowering ---
+    @staticmethod
+    def _render_node(v):
+        """Render one IR value as an operator-first line (introspection, not codegen)."""
+        ins = ", ".join(i.name for i in v.inputs)
+        extra = ""
+        keys = {k: val for k, val in v.attrs.items() if k != "coeffs"}
+        if "coeffs" in v.attrs:
+            extra = "  # coeffs=%s" % (v.attrs["coeffs"],)
+        elif keys:
+            extra = "  # %s" % (keys,)
+        return "%-16s = P.%s(%s)%s" % (v.name, v.op, ins, extra)
+
+    def dump_operator_ir(self):
+        """The operator-first Program IR (one line per node): P.call/linear_combine/
+        solve_local_linear/commit. The board sugar lowers to exactly this -- the dump
+        proves the board and the operator-first writings share one IR."""
+        lines = ["# operator-first Program IR: %s" % self.name]
+        for v in self._values:
+            lines.append("  " + self._render_node(v))
+        for block, st in self._commits.items():
+            lines.append("  P.commit(%r, %s)" % (block, st.name))
+        return "\n".join(lines)
+
+    def dump_board(self):
+        """The board-level view; board notation lowers to the operator-first IR below."""
+        return ("# board program %s lowers to the operator-first IR (board == operator-first):\n%s"
+                % (self.name, self.dump_operator_ir()))
+
+    def dump_cpp_plan(self):
+        """A textual C++ plan of the generated step (ProgramContext calls), NOT the exact
+        codegen -- it shows which ctx / GeneratedModule call each node lowers to."""
+        lines = ["// C++ plan for GeneratedProgram step of %s" % self.name]
+        for v in self._values:
+            ins = ", ".join(i.name for i in v.inputs)
+            lines.append("  ctx.%s(%s);  // -> %s" % (v.op, ins, v.name))
+        for block, st in self._commits.items():
+            lines.append("  ctx.commit(%r, %s);" % (block, st.name))
+        return "\n".join(lines)
+
     # --- decorator mode (ADC-423): record the step body from a function ---
     def step(self, fn):
         """Record this Program's IR by calling @p fn(self) ONCE, at build time (decorator mode).
