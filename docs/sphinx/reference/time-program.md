@@ -58,13 +58,18 @@ macro is an ordinary Python function that builds IR nodes -- it never computes a
 | `strang(P, block, H, S)` | Strang splitting H(dt/2);S(dt);H(dt/2) | three sub-flow stages |
 | `lie(P, block, H, S)` | Lie (Godunov) splitting H(dt);S(dt) | two sub-flow stages |
 | `imex_local(P, block, linear_source=)` | explicit flux/source + implicit cell-local linear source | `rhs` + `solve_local_linear` ((I - theta*dt*L)^{-1}) |
-| `bdf(P, block, order, linear_source=)` | implicit BDF1/BDF2 (cell-local L only) | `solve_local_linear` (+ history for BDF2) |
+| `bdf(P, block, order)` | implicit-flux BDF1/BDF2 (Newton-Krylov) | `matrix_free_operator` + `rhs_jacvec` + GMRES `solve_linear` (+ history for BDF2) |
+| `bdf(P, block, order, linear_source=)` | implicit BDF1/BDF2 (cell-local L fast path) | `solve_local_linear` (+ history for BDF2) |
 | `condensed_schur(P, block, alpha=)` | implicit electrostatic-Lorentz source stage | the Schur assemble / Krylov / reconstruct chain |
 
-`bdf` lowers only a cell-local linear source (its block-diagonal solve is `solve_local_linear`); a BDF
-over an implicit flux needs a global Newton/Krylov solve and raises a clear `NotImplementedError`. The
-`imex_local` / `bdf` / `condensed_schur` macros need the physical model at codegen (they name an
-`m.linear_source` whose coefficients the per-cell kernel reads).
+`bdf` has two lowerings. The default (implicit FLUX) solves `F(U) = U - U^n - dt*rhs(U) = 0` (BDF2 adds
+the `U^{n-1}` history term) by a matrix-free Newton-Krylov iteration: the Jacobian `J = I - c*dt*
+d(rhs)/dU` is applied matrix-free by a finite-difference Jacobian-vector product (`P.rhs_jacvec`, which
+calls `rhs` inside the apply) and each Newton step solves `J dU = -F` with GMRES. Naming a cell-local
+`linear_source` instead selects the block-diagonal fast path (`solve_local_linear`, no Newton/Krylov).
+The cell-local `imex_local` / `bdf` (linear-source path) / `condensed_schur` macros need the physical
+model at codegen (they name an `m.linear_source` whose coefficients the per-cell kernel reads); the
+implicit-flux `bdf` reuses the block's own compiled `rhs` closure, so it needs no extra model coupling.
 
 A program body can also be recorded with the `@P.step` **decorator**: the decorated `build_fn(P)` runs
 **once at build time** to populate the IR (never numerically during a step) and yields IR identical to
@@ -129,7 +134,8 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | Reductions `P.sum` / `P.max` / `P.min` / `P.sum_component`, `P.fill_boundary`, `P.project` (block positivity), `P.record_scalar` diagnostics (`sim.program_diagnostic`) | available, runs end-to-end |
 | Anisotropic coefficient assembly (`P.schur_coeffs` / `P.apply_laplacian_coeff` / `P.schur_rhs` / `P.schur_reconstruct`) | available, runs end-to-end |
 | `condensed_schur` as a Program macro (ADC-421) | available (`theta == 1` backward-Euler source stage from `phi^n = 0`); near-match to native `adc.CondensedSchur` (no preconditioner); cross-step phi carry / `theta < 1` extrapolation / energy update deferred |
-| `std.rk` (generic Butcher tableau) / `std.lie` / `std.imex_local` / `std.adams_bashforth(order)` / `std.bdf` + `@P.step` decorator (ADC-423) | available (all lower to the existing IR); `bdf` is cell-local-`L` only (implicit-flux BDF deferred) |
+| `std.rk` (generic Butcher tableau) / `std.lie` / `std.imex_local` / `std.adams_bashforth(order)` + `@P.step` decorator (ADC-423) | available (all lower to the existing IR) |
+| `std.bdf` implicit-flux BDF1/BDF2 (matrix-free Newton-Krylov; `P.rhs_jacvec` FD Jacobian-vector + GMRES) (ADC-431) (`test_time_bdf.py`) | available, runs end-to-end (cell-local-`L` fast path unchanged) |
 | Multi-block programs: N `P.state` / N `P.commit`, each op routed to its block index (ADC-426) | available, runs end-to-end (add the System blocks in `P.state` declaration order); per-block `P.solve_fields(state=)` is a coupled solve; the simultaneous multi-target `P.solve_fields_from_blocks` is deferred |
 
 Each lowered path is verified against an independent reference to machine precision: Forward Euler /

@@ -59,14 +59,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   `emit_cpp_so_source` raise `NotImplementedError` when a named field is declared, since the loader
   macro / extern-C factory cannot register it), the `amr_system` target, and the polar (ring) named
   path. New `python/tests/test_time_multielliptic.py`.
+- **Implicit-flux BDF via matrix-free Newton-Krylov** (ADC-431, epic ADC-399): `adc.time.std.bdf`
+  completes the implicit-FLUX case (the globally coupled `-div F` stencil) as a pure-Python macro of
+  existing primitives -- no new C++ stepper. It solves `F(U) = U - U^n - dt*rhs(U) = 0` (BDF2 adds the
+  `U^{n-1}` history term) by Newton's method, each step solving `J dU = -F` with GMRES (J nonsymmetric).
+  J is applied matrix-free by a new `Program.rhs_jacvec` finite-difference Jacobian-vector product, the
+  codegen enabler that calls `rhs` INSIDE a `matrix_free_operator` apply sub-block (perturbing the
+  frozen Newton iterate, frozen-Poisson). The final residual norm is recorded as
+  `"<block>.bdf_residual"`. The cell-local linear-source fast path (`solve_local_linear`) is unchanged
+  and still selected by naming a `linear_source`. New `python/tests/test_time_bdf.py` (BDF1/BDF2
+  Burgers parity vs an offline Newton-Krylov on the engine's own `eval_rhs`).
 - **`adc.time.std` library completion + `@P.step` decorator** (ADC-423, epic ADC-399): pure-Python
   macros that lower to the existing Program IR (no new C++ stepper) -- `std.rk` (generic explicit
   Butcher tableau; `RK4_TABLEAU` reproduces the `rk4` macro IR byte for byte, `SSPRK2_TABLEAU` gives
   Heun, the Butcher form of an SSPRK2 step), `std.lie` (sequential Lie splitting), `std.imex_local`
   (explicit flux/source + implicit
   cell-local linear source via `solve_local_linear`), `std.adams_bashforth(order in {1,2,3})`
-  (`adams_bashforth2` kept as a thin alias), and `std.bdf` (cell-local-`L` BDF1/BDF2; implicit-flux
-  BDF raises `NotImplementedError`). `Program.step` records a body from a decorated `build_fn(P)` run
+  (`adams_bashforth2` kept as a thin alias), and `std.bdf` (cell-local-`L` BDF1/BDF2; the implicit-flux
+  BDF is completed by ADC-431, see above). `Program.step` records a body from a decorated `build_fn(P)` run
   once at build time. New `python/tests/test_time_std_decorator.py`, `test_time_std_rk.py`,
   `test_time_std_imex_lie_ab.py`.
 - **GMRES Krylov solver** (ADC-420, epic ADC-399): `adc.time.Program.solve_linear(method="gmres",

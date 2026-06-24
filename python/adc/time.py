@@ -773,6 +773,48 @@ class Program:
                 raise ValueError("divergence: %s must be a scalar_field value" % nm)
         return self._new("scalar_field", "divergence", (out, fx, fy), {}, out.name, None)
 
+    # --- finite-difference Jacobian-vector product (ADC-431: implicit-flux BDF Newton-Krylov) --------
+    def rhs_jacvec(self, out, in_, *, iterate, r0, c_dt, eps=1e-7, flux=True, sources=("default",)):
+        """Record the finite-difference Jacobian-vector product of an implicit-flux residual, INSIDE a
+        matrix_free_operator apply sub-block (ADC-431). It lowers to ``out <- J(@p iterate) @p in`` where
+        the Newton-system Jacobian is ``J = I - c*dt * d(rhs)/dU`` and the matvec is formed matrix-free by
+        a directional finite difference::
+
+            out = in - (c*dt/eps) * (rhs(U^k + eps*in) - rhs(U^k))
+
+        @p out / @p in_ are the apply sub-block's out / in scalar_field buffers (carrying the operator's
+        component count). @p iterate is the FROZEN Newton iterate ``U^k`` (a State, defined OUTSIDE the
+        apply, captured into the apply lambda); @p r0 is the precomputed ``rhs(U^k)`` (a State/RHS value,
+        also captured) so the perturbation cost is one ``rhs`` per matvec. @p c_dt is the BDF coefficient
+        ``c*dt`` (a number or a dt-polynomial: ``c == 1`` for BDF1, ``c == 2/3`` for BDF2). @p eps is the
+        relative FD step (scaled by ``||U^k|| / ||in||`` inside the kernel). @p flux / @p sources select
+        the same residual the outer ``rhs`` uses (so the linearized operator is consistent with the
+        residual). The op may ONLY appear inside ``set_apply`` (it captures the apply's in/out buffers).
+
+        Unlike the cell-local FD Jacobian of `solve_local_nonlinear` (a per-cell dense inverse), this is a
+        GLOBAL operator: ``rhs`` couples the cells through the flux stencil, so the matvec is dense over
+        the coupled stencil and the Newton step ``J dU = -F`` is solved by `solve_linear` (GMRES)."""
+        if not self._recording:
+            raise ValueError("rhs_jacvec may only be recorded inside a matrix_free_operator apply "
+                             "(call it from the set_apply body_fn)")
+        if not (isinstance(out, Value) and out.vtype == "scalar_field"):
+            raise ValueError("rhs_jacvec: out must be the apply sub-block's out scalar_field value")
+        if not (isinstance(in_, Value) and in_.vtype == "scalar_field"):
+            raise ValueError("rhs_jacvec: in_ must be the apply sub-block's in scalar_field value")
+        if not (isinstance(iterate, Value) and iterate.vtype == "state"):
+            raise ValueError("rhs_jacvec: iterate must be the frozen Newton-iterate State (iterate=...)")
+        if not (isinstance(r0, Value) and r0.is_field()):
+            raise ValueError("rhs_jacvec: r0 must be the precomputed rhs(U^k) State/RHS value (r0=...)")
+        if not isinstance(c_dt, (int, float, _Coeff)):
+            raise ValueError("rhs_jacvec: c_dt must be a number or a dt-polynomial (got %r)" % (c_dt,))
+        if not isinstance(eps, (int, float)) or eps <= 0:
+            raise ValueError("rhs_jacvec: eps must be a positive number (got %r)" % (eps,))
+        c_d = (c_dt if isinstance(c_dt, _Coeff) else _Coeff({0: float(c_dt)})).as_dict()
+        src = list(sources) if sources is not None else None
+        return self._new("scalar_field", "rhs_jacvec", (out, in_, iterate, r0),
+                         {"c_dt": c_d, "eps": float(eps), "flux": bool(flux), "sources": src},
+                         out.name, None)
+
     # --- anisotropic condensed-Schur coefficient assembly + coefficiented apply (ADC-399 / ADC-421) ---
     def schur_coeffs(self, name=None, state=None, c=None, th_dt=None, c_rho=0, c_bz=3):
         """Assemble the per-cell tensor coefficient ``A = I + c*rho*B^{-1}`` of the condensed-Schur
@@ -1489,6 +1531,8 @@ class Program:
             attrs["coeffs"] = [sorted((int(p), c) for p, c in d.items()) for d in attrs["coeffs"]]
         if "a_coeff" in attrs:  # solve_local_linear: the dt-polynomial a in (I - a*L)
             attrs["a_coeff"] = sorted((int(p), c) for p, c in attrs["a_coeff"].items())
+        if "c_dt" in attrs:  # rhs_jacvec: the dt-polynomial BDF coefficient c*dt
+            attrs["c_dt"] = sorted((int(p), c) for p, c in attrs["c_dt"].items())
         if v.op == "while":  # the cond/body sub-blocks are nested node lists; the results are ids
             attrs["cond_block"] = [Program._serialize_node(w) for w in attrs["cond_block"]]
             attrs["body_block"] = [Program._serialize_node(w) for w in attrs["body_block"]]
@@ -1682,7 +1726,7 @@ class Program:
                               "scalar_field", "laplacian", "gradient", "divergence", "solve_linear",
                               "apply_in", "apply_out", "history", "store_history",
                               "fill_boundary", "project", "record_scalar",
-                              "cell_compare", "where",
+                              "cell_compare", "where", "rhs_jacvec",
                               "schur_coeffs", "apply_laplacian_coeff", "schur_explicit_flux",
                               "schur_rhs", "schur_reconstruct", "schur_energy"})
 
@@ -2115,8 +2159,10 @@ class Program:
             # Install-time: emit the apply lambda `apply_A{id}` into the prelude. Its persistent scratch
             # (the scalar_field ops of the apply sub-block) are shared_ptr fields, captured by value so
             # they outlive the install call and are reused across every Krylov iteration (alloc-once).
-            # The lambda is itself captured by the step closure ([=]) and passed to adc::*_solve.
-            self._emit_matrix_free_operator(v, var, prelude)
+            # The lambda is itself captured by the step closure ([=]) and passed to adc::*_solve. An
+            # rhs_jacvec apply (ADC-431) also captures persistent jac_uk / jac_r0 scratch the lambda
+            # dereferences; the step body refreshes them from the live iterate / rhs(U^k) here (@p lines).
+            self._emit_matrix_free_operator(v, var, prelude, lines)
         elif v.op in ("apply_in", "apply_out", "apply_laplacian_coeff"):
             # The lambda in/out placeholders and the coefficiented apply matvec only appear INSIDE a
             # matrix_free_operator apply sub-block (lowered by _emit_matrix_free_operator); they never
@@ -2308,7 +2354,7 @@ class Program:
             % (ex, ey, axy, ayx, var[state_in.id], _coeff_cpp(v.attrs["c"]),
                _coeff_cpp(v.attrs["th_dt"]), v.attrs["c_rho"], v.attrs["c_bz"]))
 
-    def _emit_matrix_free_operator(self, v, var, prelude):
+    def _emit_matrix_free_operator(self, v, var, prelude, lines=None):
         """Lower a matrix_free_operator to an INSTALL-TIME C++ apply lambda ``apply_A{id}`` (appended to
         @p prelude). The lambda has the adc::ApplyFn signature ``(adc::MultiFab& out, const adc::MultiFab&
         in)``; its body re-emits the apply sub-block:
@@ -2317,10 +2363,16 @@ class Program:
             BEFORE the lambda, captured by value), reused across every Krylov iteration (alloc-once);
           - ``laplacian(o, i)`` -> ``ctx.laplacian(*o, i)`` (i const_cast when it is the lambda's ``in``,
             which is logically read-only -- the fill only writes ghosts, as in test_generic_krylov);
+          - ``rhs_jacvec(out, in, iterate, r0, ...)`` (ADC-431) -> a finite-difference Jacobian-vector
+            product ``out = in - (c*dt/eps)(rhs(U^k + eps*in) - rhs(U^k))`` calling ``ctx.rhs_into`` (or
+            ``neg_div_flux_default_into``) on PERSISTENT jac_uk / jac_r0 scratch the lambda captures; the
+            step body refreshes that scratch from the live iterate / rhs(U^k) (@p lines, see below);
           - the apply RESULT (the affine the body returned, e.g. ``in - alpha*Lap(in)``) is written into
             ``out`` via the same accumulate-then-lincomb idiom as a linear_combine commit.
 
-        The lambda captures ``[ctx, <scratch shared_ptrs>]``; the step closure captures it by value."""
+        The lambda captures ``[ctx, <scratch shared_ptrs>]``; the step closure captures it by value. @p
+        lines is the step-body line list (for the rhs_jacvec scratch refresh); None when the operator has
+        no jacvec op (the historical matrix-free path, prelude only)."""
         apply_id = v.id
         lam = "apply_A%d" % apply_id
         var[apply_id] = lam
@@ -2363,6 +2415,43 @@ class Program:
                 for sp in var[coeffs.id]:
                     if sp not in captures:
                         captures.append(sp)
+        # An rhs_jacvec apply (ADC-431, implicit-flux BDF) needs the FROZEN Newton iterate U^k and its
+        # precomputed rhs(U^k) inside the lambda. They are step-body locals that CHANGE each Newton
+        # iteration, so -- like schur_coeffs -- they become PERSISTENT shared_ptr scratch (jac_uk / jac_r0)
+        # captured by value (shared pointee), refreshed from the live iterate / r0 in the step body BEFORE
+        # the solve. Plus a perturbed-state scratch (jac_up) and a perturbed-rhs scratch (jac_rp) the
+        # lambda fills per matvec. All carry the operator's component count (= the block n_cons).
+        jac_ops = [w for w in block if w.op == "rhs_jacvec"]
+        if jac_ops and lines is None:
+            raise NotImplementedError(
+                "rhs_jacvec is only lowerable in a top-level / step-body matrix-free solve, not inside a "
+                "control-flow (if/while/range) body (the Newton outer loop must be a static_range unroll)")
+        jac_scratch = {}  # jacvec op id -> (uk, r0, up, rp, cdt) names
+        ng_state = "ctx.state(0).n_grow()"  # the jacvec scratch needs the state's ghost count for rhs_into
+        for w in jac_ops:
+            uk = "jac_uk%d_%d" % (apply_id, w.id)
+            r0 = "jac_r0%d_%d" % (apply_id, w.id)
+            up = "jac_up%d_%d" % (apply_id, w.id)
+            rp = "jac_rp%d_%d" % (apply_id, w.id)
+            for sp in (uk, r0, up, rp):
+                prelude.append(
+                    "auto %s = std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field(%d, %s));"
+                    % (sp, op_ncomp, ng_state))
+                captures.append(sp)
+            # The BDF coefficient c*dt depends on the step's dt (the step-closure parameter), which the
+            # install-time lambda cannot see; carry it through a captured shared_ptr<Real> the step body
+            # sets to its dt value before the solve (the same persistent-scratch idiom as jac_uk).
+            cdt = "jac_cdt%d_%d" % (apply_id, w.id)
+            prelude.append("auto %s = std::make_shared<adc::Real>(static_cast<adc::Real>(0));" % cdt)
+            captures.append(cdt)
+            jac_scratch[w.id] = (uk, r0, up, rp, cdt)
+            # Step body: refresh the FROZEN captures from this iteration's live iterate / rhs(U^k) / dt.
+            iterate_in, r0_in = w.inputs[2], w.inputs[3]
+            lines.append("ctx.lincomb(*%s, static_cast<adc::Real>(0), *%s, static_cast<adc::Real>(1), %s);"
+                         % (uk, uk, var[iterate_in.id]))
+            lines.append("ctx.lincomb(*%s, static_cast<adc::Real>(0), *%s, static_cast<adc::Real>(1), %s);"
+                         % (r0, r0, var[r0_in.id]))
+            lines.append("*%s = %s;" % (cdt, _coeff_cpp(w.attrs["c_dt"])))
         # 2) The lambda body: the laplacian / gradient ops + the result write into `out`.
         body = []
         for w in block:
@@ -2389,11 +2478,45 @@ class Program:
                 sub[w.id] = sub[o.id]
                 body.append("ctx.apply_laplacian_coeff(*%s, %s, *%s, *%s, *%s, *%s);"
                             % (sub[o.id], _apply_in_arg(sub, i), ex, ey, axy, ayx))
+            elif w.op == "rhs_jacvec":
+                # out = J(U^k) in = in - (c*dt/h)(rhs(U^k + h*in) - rhs(U^k)), the finite-difference
+                # Jacobian-vector product of the implicit-flux BDF residual (ADC-431). h is a relatively
+                # scaled FD step (Brown-Saad / WP: h = eps*(1+||U^k||)/||in||, eps the relative step). The
+                # captured jac_uk / jac_r0 hold U^k and rhs(U^k) (refreshed in the step body); jac_up /
+                # jac_rp are per-matvec scratch; jac_cdt holds c*dt. The op writes directly into `out`.
+                o, i = w.inputs[0], w.inputs[1]
+                uk, r0, up, rp, cdt = jac_scratch[w.id]
+                in_arg = _apply_in_arg(sub, i)        # the Krylov vector v (the lambda's const `in`)
+                out_tok = sub[o.id]                   # the apply out buffer (== "out")
+                eps = repr(float(w.attrs["eps"]))
+                sub[w.id] = out_tok
+                want_default = w.attrs.get("sources")
+                want_default = want_default is None or "default" in want_default
+                rhs_call = ("ctx.rhs_into(0, *%s, *%s);" if (w.attrs["flux"] and want_default)
+                            else "ctx.neg_div_flux_default_into(0, *%s, *%s);") % (up, rp)
+                body.append("{")
+                # FD step norms via krylov_dot (all components when ncomp>1, component 0 otherwise --
+                # the SAME reduction the Krylov loop uses for its residual norm).
+                body.append("  const adc::Real jvn = std::sqrt(adc::detail::krylov_dot(%s, %s));"
+                            % (in_arg, in_arg))
+                body.append("  const adc::Real jukn = std::sqrt(adc::detail::krylov_dot(*%s, *%s));"
+                            % (uk, uk))
+                body.append("  const adc::Real jh = jvn > adc::Real(0) ? "
+                            "static_cast<adc::Real>(%s) * (adc::Real(1) + jukn) / jvn "
+                            ": static_cast<adc::Real>(%s);" % (eps, eps))
+                # U^k + h*v -> jac_up; rhs(U^k + h*v) -> jac_rp (one rhs per matvec, U^k / rhs(U^k) frozen).
+                body.append("  ctx.lincomb(*%s, adc::Real(1), *%s, jh, %s);" % (up, uk, in_arg))
+                body.append("  %s" % rhs_call)
+                # out = v - (c*dt/h)(rhs(U^k + h*v) - rhs(U^k)): lincomb then axpy back the frozen rhs(U^k).
+                body.append("  const adc::Real jc = *%s / jh;" % cdt)
+                body.append("  ctx.lincomb(%s, adc::Real(1), %s, -jc, *%s);" % (out_tok, in_arg, rp))
+                body.append("  ctx.axpy(%s, jc, *%s);" % (out_tok, r0))
+                body.append("}")
             else:
                 raise NotImplementedError(
                     "emit_cpp_program: op '%s' is not lowerable inside a matrix_free_operator apply "
-                    "(supported: scalar_field, laplacian, gradient, divergence, apply_laplacian_coeff)"
-                    % w.op)
+                    "(supported: scalar_field, laplacian, gradient, divergence, apply_laplacian_coeff, "
+                    "rhs_jacvec)" % w.op)
         body += _emit_field_combine(result, "out", sub, acc_sp)
         prelude.append("adc::ApplyFn %s = [%s](adc::MultiFab& out, const adc::MultiFab& in) {"
                        % (lam, ", ".join(captures)))
@@ -3344,33 +3467,13 @@ def imex_local(P, block, *, linear_source, sources=("default",), flux=True, thet
     return out
 
 
-def bdf(P, block, order, *, linear_source=None, sources=("default",), flux=True):
-    """Backward Differentiation Formula, IMPLICIT ``order``-step (ADC-423, STRETCH).
+def _bdf_local_linear(P, block, order, linear_source, sources, flux):
+    """The cell-LOCAL linear-source BDF fast path (the historical lowering): the BDF system is
+    block-diagonal, so ``(c0*I - dt*L) U^{n+1} = rhs`` is solved per cell by `P.solve_local_linear`.
 
-    BDF lowers cleanly to the existing IR ONLY for a cell-local linear source (the BDF system is then
-    block-diagonal and the per-cell ``(c0*I - dt*L)`` solve is exactly `P.solve_local_linear`):
-
-      - **BDF1** (backward Euler): ``(I - dt*L) U^{n+1} = U^n``;
-      - **BDF2**: ``(3/2 I - dt*L) U^{n+1} = 2 U^n - 1/2 U^{n-1}`` over the System history ring, with a
-        BDF1 cold start (the first store fills every slot, so U^{n-1} = U^n and step 0 is backward
-        Euler).
-
-    @p linear_source is REQUIRED and names a model ``m.linear_source`` ``L``; the BDF operator is
-    ``c0*I - dt*L`` solved by `P.solve_local_linear`. There is no general implicit-FLUX BDF lowering:
-    an implicit ``-div F`` needs a GLOBAL Newton/Krylov solve over the coupled stencil, which the
-    current per-cell local-solve IR cannot express -- so a BDF with an implicit flux raises a clear
-    NotImplementedError naming the gap (the explicit-flux + implicit-local-L case is the supported one,
-    matching `imex_local`'s implicit term). @p flux / @p sources add an EXPLICIT flux/source RHS to the
-    BDF right-hand side (lagged, like `imex_local`); pass ``flux=False, sources=()`` for a pure
-    relaxation BDF."""
-    if isinstance(order, bool) or not isinstance(order, int) or order not in (1, 2):
-        raise ValueError("bdf: order must be the int 1 or 2 (got %r)" % (order,))
-    if not (isinstance(linear_source, str) and linear_source):
-        raise NotImplementedError(
-            "bdf currently lowers only a cell-LOCAL linear source (operator c0*I - dt*L solved by "
-            "solve_local_linear); pass linear_source='<m.linear_source name>'. A BDF over an implicit "
-            "FLUX (-div F) needs a global Newton/Krylov solve over the coupled stencil, which the "
-            "per-cell local-solve IR cannot express -- that lowering is deferred.")
+      - **BDF1** (backward Euler): ``(I - dt*L) U^{n+1} = U^n [+ dt R]``;
+      - **BDF2**: ``(I - (2/3) dt L) U^{n+1} = (2/3)(2 U^n - 1/2 U^{n-1}) [+ dt R]`` over the System
+        history ring, with a BDF1 cold start (the first store fills every slot -> U^{n-1} = U^n)."""
     U = P.state(block)
     fields = P.solve_fields(U) if flux else None
     # Optional EXPLICIT flux/source RHS folded into the BDF right-hand side (lagged at U^n).
@@ -3396,6 +3499,140 @@ def bdf(P, block, order, *, linear_source=None, sources=("default",), flux=True)
     out = P.solve_local_linear(name=block + "_bdf2_step", operator=operator, rhs=rhs, fields=fields)
     P.commit(block, out)
     return out
+
+
+def _bdf_implicit_flux(P, block, order, sources, flux, ncomp, newton_tol, newton_max, krylov_tol,
+                       krylov_max, krylov_restart, eps):
+    """The IMPLICIT-FLUX BDF lowering (ADC-431): a matrix-free Newton-Krylov solve of the coupled
+    nonlinear system, composed PURELY from existing IR primitives (no new C++ stepper).
+
+    The implicit BDF step solves ``F(U^{n+1}) = 0`` with::
+
+        BDF1:  F(U) = U - U^n            - dt*rhs(U)
+        BDF2:  F(U) = U - (4/3)U^n + (1/3)U^{n-1} - (2/3)*dt*rhs(U)
+
+    (BDF2 reads ``U^{n-1}`` from the System history ring with a BDF1 cold start.) ``rhs(U) = -div F(U)
+    [+ sources]`` is the SAME hyperbolic residual the explicit schemes use, so the flux couples the
+    cells through its stencil and the Newton system is GLOBAL.
+
+    Newton's method (the outer loop) is a fixed `static_range` unroll of @p newton_max iterations -- each
+    iteration is independent IR (its own matrix-free operator + Krylov solve), which the codegen lowers
+    at the top level (the install-time apply lambda the Krylov loop needs cannot live inside a runtime
+    while/range body). Each iteration:
+
+      1. ``R^k = rhs(U^k)`` (one rhs evaluation; also the frozen base of the matvec FD);
+      2. ``F^k = U^k - U^n_terms - c*dt*R^k`` (the residual; ``c = 1`` BDF1, ``c = 2/3`` BDF2);
+      3. solve ``J dU = -F^k`` with GMRES (J nonsymmetric), J applied matrix-free via `rhs_jacvec`
+         (``J v = v - c*dt * d(rhs)/dU v``, a finite-difference Jacobian-vector product around U^k);
+      4. ``U^{k+1} = U^k + dU``.
+
+    The final residual norm ``||F||`` is recorded as the diagnostic ``"<block>.bdf_residual"`` (read via
+    ``sim.program_diagnostic``). @p ncomp is the block component count (1 by default -- a scalar model
+    like inviscid Burgers / linear advection; pass the model's n_cons for a multi-component block)."""
+    c = 1.0 if order == 1 else (2.0 / 3.0)
+    U0 = P.state(block)
+    fields = P.solve_fields(U0) if flux else None  # frozen-Poisson coupling, solved once from U^n
+    # Snapshot U^n into a scratch: the commit writes ctx.state(0) IN PLACE at the very end, so the lagged
+    # term must read this frozen copy (not the live state) -- otherwise the post-commit residual
+    # diagnostic would read U^{n+1} as U^n. The Newton-loop residuals (before the commit) would be correct
+    # either way; the snapshot keeps every residual (loop + diagnostic) reading the true U^n.
+    Un = P.linear_combine(block + "_bdf_Un", 1.0 * U0)
+    if order == 2:
+        name = block + ".U"
+        P.store_history(name, U0)                   # store U^n (cold-start fills the ring)
+        U_nm1 = P.history(name, lag=1)              # U^{n-1} (== U^n on step 0 -> BDF1 cold start)
+
+    def _un_terms():
+        # The lagged (constant-in-Newton) part of the residual: U^n for BDF1, (4/3)U^n - (1/3)U^{n-1}
+        # for BDF2 (the constant-state coefficients of the BDF residual normalized to a unit U^{n+1}).
+        if order == 1:
+            return 1.0 * Un
+        return (4.0 / 3.0) * Un - (1.0 / 3.0) * U_nm1
+
+    src = list(sources) if sources is not None else None
+    kind = "scalar" if ncomp == 1 else "state"
+
+    def _residual(P, Uk, tag):
+        # F^k = U^k - U^n_terms - c*dt*rhs(U^k); returns (F^k, R^k) so the matvec can reuse R^k.
+        Rk = P.rhs(name="%s_R" % tag, state=Uk, fields=fields, flux=flux, sources=src)
+        Fk = P.linear_combine("%s_F" % tag, _un_terms() * (-1.0) + 1.0 * Uk - (c * P.dt) * Rk)
+        return Fk, Rk
+
+    def _newton_step(P, Uk, k):
+        tag = "%s_bdf%d_n%d" % (block, order, k)
+        Fk, Rk = _residual(P, Uk, tag)
+        negF = P.linear_combine("%s_negF" % tag, -1.0 * Fk)
+        A = P.matrix_free_operator("%s_J" % tag, domain=kind, range_=kind,
+                                   ncomp=(None if ncomp == 1 else ncomp))
+
+        def apply(P, out, v):
+            # J v = v - c*dt * d(rhs)/dU v, matrix-free FD around the frozen iterate U^k (r0 = R^k).
+            return P.rhs_jacvec(out, v, iterate=Uk, r0=Rk, c_dt=(c * P.dt), eps=eps, flux=flux,
+                                sources=sources)
+
+        P.set_apply(A, apply)
+        dU = P.solve_linear(name="%s_dU" % tag, operator=A, rhs=negF, method="gmres", tol=krylov_tol,
+                            max_iter=krylov_max, restart=krylov_restart)
+        return P.linear_combine("%s_next" % tag, 1.0 * Uk + 1.0 * dU)
+
+    # Outer Newton loop: a fixed unroll of newton_max iterations (each independent top-level IR).
+    Uk = U0
+    for k in range(newton_max):
+        Uk = _newton_step(P, Uk, k)
+    # Record the final residual norm for diagnostics (sim.program_diagnostic("<block>.bdf_residual")).
+    Ffinal, _ = _residual(P, Uk, "%s_bdf%d_final" % (block, order))
+    P.record_scalar(block + ".bdf_residual", P.norm2(Ffinal))
+    P.commit(block, Uk)
+    return Uk
+
+
+def bdf(P, block, order, *, linear_source=None, sources=("default",), flux=True, ncomp=1,
+        newton_tol=1e-10, newton_max=20, krylov_tol=1e-10, krylov_max=200, krylov_restart=None,
+        eps=1e-7):
+    """Backward Differentiation Formula, IMPLICIT ``order``-step (ADC-423 / ADC-431).
+
+    Two lowerings share this entry point, selected by whether an implicit @p linear_source is named:
+
+      - **implicit FLUX** (the default, ADC-431): ``F(U^{n+1}) = 0`` for the coupled nonlinear system
+        ``U - U^n - dt*rhs(U)`` (BDF1) / ``U - (4/3)U^n + (1/3)U^{n-1} - (2/3)dt*rhs(U)`` (BDF2) is
+        solved by a matrix-free Newton-Krylov iteration -- ``rhs(U) = -div F [+ sources]`` couples the
+        cells through the flux stencil, so the Jacobian ``J = I - c*dt*d(rhs)/dU`` is GLOBAL and applied
+        matrix-free by a finite-difference Jacobian-vector product (`P.rhs_jacvec`); each Newton step
+        solves ``J dU = -F`` with GMRES (J nonsymmetric). The outer Newton loop is a fixed unroll of
+        @p newton_max iterations. The final ``||F||`` is recorded as ``"<block>.bdf_residual"``. This is
+        a pure-macro composition of existing primitives (matrix_free_operator + solve_linear + the affine
+        algebra + history) -- no new C++ runtime stepper.
+
+      - **cell-local linear SOURCE** (the fast path, ADC-423): when @p linear_source names a model
+        ``m.linear_source`` ``L``, the BDF system is block-diagonal and ``(c0*I - dt*L) U^{n+1} = rhs``
+        is solved per cell by `P.solve_local_linear` (no Newton / Krylov). @p flux / @p sources then add
+        an EXPLICIT flux/source RHS lagged at U^n (like `imex_local`).
+
+    @p order is 1 (backward Euler) or 2 (BDF2, over the System history ring with a BDF1 cold start).
+    @p ncomp is the block component count for the implicit-flux path (1 for a scalar model such as
+    inviscid Burgers / linear advection; pass the model's n_cons for a multi-component block).
+    @p newton_max / @p newton_tol bound the Newton iteration; @p krylov_tol / @p krylov_max /
+    @p krylov_restart configure each GMRES inner solve; @p eps is the relative finite-difference step of
+    the Jacobian-vector product."""
+    if isinstance(order, bool) or not isinstance(order, int) or order not in (1, 2):
+        raise ValueError("bdf: order must be the int 1 or 2 (got %r)" % (order,))
+    if linear_source is not None:
+        if not (isinstance(linear_source, str) and linear_source):
+            raise ValueError("bdf: linear_source must be a non-empty model linear-source name or None")
+        return _bdf_local_linear(P, block, order, linear_source, sources, flux)
+    # The implicit-flux Newton-Krylov path (ADC-431): a flux-less BDF with no implicit term is a no-op.
+    if not flux:
+        raise ValueError(
+            "bdf with flux=False needs a cell-local implicit linear_source (there is no implicit term to "
+            "solve); pass linear_source='<name>' for the relaxation BDF, or flux=True for the "
+            "implicit-flux Newton-Krylov BDF")
+    if isinstance(ncomp, bool) or not isinstance(ncomp, int) or ncomp < 1:
+        raise ValueError("bdf: ncomp must be a positive int (the block component count); got %r"
+                         % (ncomp,))
+    if isinstance(newton_max, bool) or not isinstance(newton_max, int) or newton_max < 1:
+        raise ValueError("bdf: newton_max must be a positive int (got %r)" % (newton_max,))
+    return _bdf_implicit_flux(P, block, order, sources, flux, ncomp, newton_tol, newton_max,
+                              krylov_tol, krylov_max, krylov_restart, eps)
 
 
 # adc.time.std.<scheme>(Program, block, ...) -- the spec's standard library entry point.
