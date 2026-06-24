@@ -20,6 +20,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Full multi-component IR reductions** (ADC-432, epic ADC-399; closes the ADC-404 "later phase"):
+  the compiled-Program reductions `P.norm2` / `P.dot` / `P.sum` / `P.max` / `P.min` / `P.norm_inf` now
+  reduce over ALL components of a State (the true state L2 norm / inner product / sum / extrema), not
+  component 0 only. `norm2` / `dot` lower to the full-component `adc::dot_all` (added by ADC-416);
+  `sum` / `max` / `min` / `norm_inf` lower to new full-component helpers
+  `adc::reduce_sum_all` / `reduce_max_all` / `reduce_min_all` / `norm_inf_all` in `mf_arith.hpp`
+  (mirroring `dot_all`: per-component local reduction then a single collective all-reduce, device-clean).
+  `P.sum_component(state, comp)` still reduces one explicitly named component. For a single-component
+  (`ncomp==1`) State each reduction is bit-identical to the previous component-0 reduction, so the scalar
+  / Richardson / GMRES paths do not regress. This makes a multi-variable BDF/Newton or Richardson
+  convergence loop stop only once EVERY component is converged. New
+  `python/tests/test_time_multicomp_reductions.py`.
 - **Multi-block compiled time Programs** (ADC-426, epic ADC-399, spec "Multi-blocs"):
   `Program.emit_cpp_program` lowers N `P.state("a")` / N `P.commit` -- the SSA walk allocates a base
   per block and routes every op (state, rhs, solve_fields, projection, max_wave_speed) to its block's

@@ -354,7 +354,7 @@ set_tests_properties(test_time_local_newton PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
 # Control flow + reductions codegen (ADC-404a) : emit_cpp_program LOWERS a convergence loop --
-# P.norm2 / P.dot (-> adc::dot collective all_reduce), scalar comparisons (-> a Bool predicate), and
+# P.norm2 / P.dot (-> adc::dot_all all-component collective all_reduce), scalar comparisons (-> a Bool predicate), and
 # P.while_ (-> an infinite C++ loop with a break that RE-EVALUATES the condition each pass, mutating
 # the loop-variable state in place; cond / body ops recorded in a separate sub-block). Section (A) pins
 # the generated loop + scalar/bool value types + the loud Python guards (a Scalar/Bool never collapses
@@ -368,7 +368,7 @@ set_tests_properties(test_time_control_flow PROPERTIES
 
 # Structured for-loops + if + norm_inf codegen (ADC-404b) : emit_cpp_program LOWERS P.static_range
 # (compile-time UNROLL -- N body copies, no C++ loop), P.range (a C++ for over a fixed count, body
-# emitted ONCE), P.if_ (a C++ if branch on a runtime Bool), and P.norm_inf (-> adc::norm_inf). Section
+# emitted ONCE), P.if_ (a C++ if branch on a runtime Bool), and P.norm_inf (-> adc::norm_inf_all). Section
 # (A) pins the unrolled-vs-loop codegen + the runtime-count guards + the IR-hash distinguishing counts /
 # bodies, pure Python. Section (B) compiles a dt-free contraction (range / static_range / if_), installs,
 # steps, and checks parity with the offline closed form; self-skips without a compiler / Kokkos.
@@ -436,6 +436,21 @@ set_tests_properties(test_time_divergence PROPERTIES
 add_test(NAME test_time_multicomp_solve
          COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_multicomp_solve.py)
 set_tests_properties(test_time_multicomp_solve PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
+# Full multi-component IR reductions (ADC-432): P.norm2 / P.dot / P.sum / P.max / P.min / P.norm_inf
+# reduce over ALL components (the true state norm / inner product / sum / extrema), lowering to the
+# full-component helpers adc::dot_all (ADC-416) and adc::reduce_sum_all/max_all/min_all/norm_inf_all
+# (ADC-432); P.sum_component still reduces one named component. For ncomp==1 each is bit-identical to the
+# old component-0 reduction. Section (A) (pure Python): the reductions lower to the _all helpers and the
+# codegen is ncomp-agnostic. Section (B) compiles + installs a 3-component passive block with DISTINCT
+# per-component fields and matches every reduction to an offline numpy FULL reduction (a comp-0-only value
+# would miss components 1/2), plus a scalar (ncomp==1) run matching the single-component reduction. Section
+# (C) a 2-component Richardson loop converges BOTH components (a comp-0-only norm would stop early). It
+# self-skips without a compiler / Kokkos / install_program (never faking the engine).
+add_test(NAME test_time_multicomp_reductions
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_multicomp_reductions.py)
+set_tests_properties(test_time_multicomp_reductions PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
 # Condensed-Schur implicit source stage as a compiled Program (ADC-421, acceptance 32). The anisotropic
@@ -515,7 +530,8 @@ set_tests_properties(test_time_dt_bound PROPERTIES
 
 # Program op-set completeness (ADC-414, spec ops 10/16/21/22/23 + validation #18/#19):
 # solve_local_nonlinear is a clean NotImplementedError stub (Newton deferred); the reductions
-# P.sum/max/min/sum_component lower to adc::reduce_sum/max/min; P.fill_boundary -> ctx.fill_boundary;
+# P.sum/max/min lower to all-component adc::reduce_sum_all/max_all/min_all and P.sum_component to the
+# per-component adc::reduce_sum(u, comp); P.fill_boundary -> ctx.fill_boundary;
 # P.project -> ctx.apply_projection (the block's own positivity); P.record_scalar -> ctx.record_scalar,
 # retrievable after the step via sim.program_diagnostic(s). Section (A) pins IR + codegen (pure Python);
 # (B) checks the reductions vs analytic values + record_scalar retrieval + a fill_boundary/project run;

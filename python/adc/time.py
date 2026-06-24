@@ -1151,55 +1151,58 @@ class Program:
 
     # --- reductions / comparisons / control flow (ADC-404a) ---
     def norm2(self, state):
-        """The Euclidean norm ``||u||_2`` of a State (a collective all_reduce). Returns a Scalar value.
-        Lowered as ``sqrt(adc::dot(u, u))`` -- the same collective reduction every rank must run. NOTE:
-        ``adc::dot`` reduces COMPONENT 0 only, so for a multi-component State this is the L2 norm of the
-        first conserved variable, not the full state norm; a full multi-component reduction is a later
-        phase (the convergence loops this enables are single-residual-component for now)."""
+        """The Euclidean norm ``||u||_2`` of a State over ALL components (a collective all_reduce).
+        Returns a Scalar value. Lowered as ``sqrt(adc::dot_all(u, u))`` -- the full-state L2 norm (sum of
+        squares over every conserved variable), the same collective reduction every rank must run. For a
+        single-component State this is bit-identical to the component-0 norm (``dot_all`` loops the one
+        component)."""
         if not (isinstance(state, Value) and state.is_field()):
             raise ValueError("norm2: a State/RHS value is required")
         return self._new("scalar", "reduce", (state,), {"kind": "norm2"}, None, state.block)
 
     def dot(self, a, b):
-        """The inner product ``<a, b>`` of two State values (a collective all_reduce). Returns a Scalar.
-        Lowered as ``adc::dot(a, b)`` -- COLLECTIVE, called on every rank (empty ranks included)."""
+        """The inner product ``<a, b>`` of two State values over ALL components (a collective
+        all_reduce). Returns a Scalar. Lowered as ``adc::dot_all(a, b)`` -- the full-state inner product
+        (summed over every conserved variable), COLLECTIVE, called on every rank (empty ranks included).
+        For single-component States this is bit-identical to the component-0 inner product."""
         if not (isinstance(a, Value) and a.is_field() and isinstance(b, Value) and b.is_field()):
             raise ValueError("dot: two State/RHS values are required")
         return self._new("scalar", "reduce", (a, b), {"kind": "dot"}, None, a.block)
 
     def norm_inf(self, state):
-        """The infinity norm ``max|u|`` of a State (a collective all_reduce). Returns a Scalar value.
-        Lowered as ``adc::norm_inf(u)``. Like norm2/dot it reduces COMPONENT 0 only (a multi-component
-        reduction is a later phase) and MUST run on every rank (it goes through the collective seam)."""
+        """The infinity norm ``max|u|`` of a State over ALL components (a collective all_reduce). Returns
+        a Scalar value. Lowered as ``adc::norm_inf_all(u)`` -- max|.| over every conserved variable, and
+        MUST run on every rank (it goes through the collective seam). For a single-component State this
+        is bit-identical to the component-0 infinity norm."""
         if not (isinstance(state, Value) and state.is_field()):
             raise ValueError("norm_inf: a State/RHS value is required")
         return self._new("scalar", "reduce", (state,), {"kind": "norm_inf"}, None, state.block)
 
     def sum(self, state):
-        """The sum ``sum_cells u`` of a State over component 0 (a collective all_reduce). Returns a
-        Scalar value. Lowered as ``adc::reduce_sum(u, 0)`` -- COLLECTIVE, called on every rank (empty
-        ranks included), the same seam adc::dot uses. Like norm2/dot it reduces COMPONENT 0 only (a
-        full multi-component reduction is a later phase). For a specific component use
-        `sum_component`."""
+        """The sum ``sum_{cells, c} u(.,.,c)`` of a State over ALL components (a collective all_reduce).
+        Returns a Scalar value. Lowered as ``adc::reduce_sum_all(u)`` -- COLLECTIVE, called on every rank
+        (empty ranks included), the same seam adc::dot_all uses. For a single-component State this is
+        bit-identical to the component-0 sum. For one specific component use `sum_component`."""
         if not (isinstance(state, Value) and state.is_field()):
             raise ValueError("sum: a State/RHS value is required")
-        return self._new("scalar", "reduce", (state,), {"kind": "sum", "comp": 0}, None, state.block)
+        return self._new("scalar", "reduce", (state,), {"kind": "sum"}, None, state.block)
 
     def max(self, state):
-        """The maximum ``max_cells u`` of a State over component 0 (a collective all_reduce). Returns a
-        Scalar value. Lowered as ``adc::reduce_max(u, 0)`` (the SIGNED max, not the magnitude -- use
-        `norm_inf` for max|u|). COLLECTIVE: called on every rank. Component 0 only."""
+        """The maximum ``max_{cells, c} u(.,.,c)`` of a State over ALL components (a collective
+        all_reduce). Returns a Scalar value. Lowered as ``adc::reduce_max_all(u)`` (the SIGNED max, not
+        the magnitude -- use `norm_inf` for max|u|). COLLECTIVE: called on every rank. For a
+        single-component State this is bit-identical to the component-0 max."""
         if not (isinstance(state, Value) and state.is_field()):
             raise ValueError("max: a State/RHS value is required")
-        return self._new("scalar", "reduce", (state,), {"kind": "max", "comp": 0}, None, state.block)
+        return self._new("scalar", "reduce", (state,), {"kind": "max"}, None, state.block)
 
     def min(self, state):
-        """The minimum ``min_cells u`` of a State over component 0 (a collective all_reduce). Returns a
-        Scalar value. Lowered as ``adc::reduce_min(u, 0)``. COLLECTIVE: called on every rank.
-        Component 0 only."""
+        """The minimum ``min_{cells, c} u(.,.,c)`` of a State over ALL components (a collective
+        all_reduce). Returns a Scalar value. Lowered as ``adc::reduce_min_all(u)``. COLLECTIVE: called on
+        every rank. For a single-component State this is bit-identical to the component-0 min."""
         if not (isinstance(state, Value) and state.is_field()):
             raise ValueError("min: a State/RHS value is required")
-        return self._new("scalar", "reduce", (state,), {"kind": "min", "comp": 0}, None, state.block)
+        return self._new("scalar", "reduce", (state,), {"kind": "min"}, None, state.block)
 
     def sum_component(self, state, comp):
         """The sum ``sum_cells u(.,comp)`` of a State over conservative component @p comp (a collective
@@ -2127,26 +2130,32 @@ class Program:
         elif v.op == "solve_linear":
             self._emit_solve_linear(v, base, var, prelude, lines)
         elif v.op == "reduce":
-            # A collective all_reduce -> a C++ scalar. norm2 = sqrt(dot(u, u)); dot(a, b) directly;
-            # sum/max/min (over a component) via the matching adc reduction. All MUST run on every rank
-            # (the reductions are collective all_reduce); they sit at the top of the loop body.
+            # A collective all_reduce -> a C++ scalar. norm2 = sqrt(dot_all(u, u)); dot_all(a, b)
+            # directly; sum/max/min/norm_inf over ALL components via the matching _all reduction. All
+            # MUST run on every rank (the reductions are collective all_reduce); they sit at the top of
+            # the loop body. The _all variants reduce over EVERY component (the true state norm / inner
+            # product / sum); for a single-component (ncomp==1) state each is bit-identical to the
+            # per-component path (one component, component 0). sum_component pins an explicit comp.
             var[v.id] = "s%d" % v.id
             kind = v.attrs["kind"]
             if kind == "norm2":
                 (u,) = v.inputs
-                lines.append("const adc::Real %s = std::sqrt(adc::dot(%s, %s));"
+                lines.append("const adc::Real %s = std::sqrt(adc::dot_all(%s, %s));"
                              % (var[v.id], var[u.id], var[u.id]))
             elif kind == "norm_inf":
                 (u,) = v.inputs
-                lines.append("const adc::Real %s = adc::norm_inf(%s);" % (var[v.id], var[u.id]))
+                lines.append("const adc::Real %s = adc::norm_inf_all(%s);" % (var[v.id], var[u.id]))
             elif kind in ("sum", "max", "min"):
                 (u,) = v.inputs
-                comp = int(v.attrs.get("comp", 0))
-                lines.append("const adc::Real %s = adc::reduce_%s(%s, %d);"
-                             % (var[v.id], kind, var[u.id], comp))
+                if "comp" in v.attrs:  # sum_component: an explicit single named component
+                    lines.append("const adc::Real %s = adc::reduce_%s(%s, %d);"
+                                 % (var[v.id], kind, var[u.id], int(v.attrs["comp"])))
+                else:  # P.sum / P.max / P.min: the full-component (all comps) reduction
+                    lines.append("const adc::Real %s = adc::reduce_%s_all(%s);"
+                                 % (var[v.id], kind, var[u.id]))
             else:  # dot
                 a, b = v.inputs
-                lines.append("const adc::Real %s = adc::dot(%s, %s);"
+                lines.append("const adc::Real %s = adc::dot_all(%s, %s);"
                              % (var[v.id], var[a.id], var[b.id]))
         elif v.op == "cfl":
             # The dt_bound's runtime cfl argument -- the C++ parameter of adc_program_dt_bound. It is

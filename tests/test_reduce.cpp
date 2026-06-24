@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 using namespace adc;
 
@@ -52,6 +53,45 @@ static double host_norm_inf(const MultiFab& mf, int comp) {
         m = std::max(m, a < 0 ? -a : a);
       }
   }
+  return m;
+}
+
+// Host references over ALL components (the contract of reduce_*_all / norm_inf_all): sum / signed
+// extrema / max|.| accumulated across every component, lexicographic per component.
+static double host_sum_all(const MultiFab& mf) {
+  double s = 0;
+  for (int c = 0; c < mf.ncomp(); ++c)
+    s += host_sum(mf, c);
+  return s;
+}
+static double host_max_all(const MultiFab& mf) {
+  double m = -std::numeric_limits<double>::infinity();
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const Fab2D& f = mf.fab(li);
+    const Box2D b = f.box();
+    for (int c = 0; c < mf.ncomp(); ++c)
+      for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          m = std::max(m, double(f(i, j, c)));
+  }
+  return m;
+}
+static double host_min_all(const MultiFab& mf) {
+  double m = std::numeric_limits<double>::infinity();
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const Fab2D& f = mf.fab(li);
+    const Box2D b = f.box();
+    for (int c = 0; c < mf.ncomp(); ++c)
+      for (int j = b.lo[1]; j <= b.hi[1]; ++j)
+        for (int i = b.lo[0]; i <= b.hi[0]; ++i)
+          m = std::min(m, double(f(i, j, c)));
+  }
+  return m;
+}
+static double host_norm_inf_all(const MultiFab& mf) {
+  double m = 0;
+  for (int c = 0; c < mf.ncomp(); ++c)
+    m = std::max(m, host_norm_inf(mf, c));
   return m;
 }
 
@@ -140,6 +180,66 @@ int main() {
     device_fence();
     chk(sum(mf, 0) == sum(mf, 0), "sum_idempotent");
     chk(norm_inf(mf, 0) == norm_inf(mf, 0), "norm_inf_idempotent");
+  }
+
+  // 6. FULL-component reductions (ADC-432): dot_all / reduce_sum_all / reduce_max_all / reduce_min_all /
+  //    norm_inf_all reduce over EVERY component. A 3-component field with DISTINCT per-component ranges
+  //    (comp 1 carries the global min, comp 2 the global max / max|.|) -- a comp-0-only reduction would
+  //    miss them. Max / min / norm_inf are EXACT (strict equality vs host); sum / dot are within the
+  //    per-tile Kokkos::Sum relative tolerance.
+  {
+    MultiFab mf(ba, dm, 3, 0);
+    for (int li = 0; li < mf.local_size(); ++li) {
+      Array4 a = mf.fab(li).array();
+      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) {
+        a(i, j, 0) = 1.0 + 0.001 * (i + j);      // small positive
+        a(i, j, 1) = -1000.0 - (i + 100.0 * j);  // the global min, negative (drives norm_inf)
+        a(i, j, 2) = 2000.0 + (i + 100.0 * j);   // the global max
+      });
+    }
+    device_fence();
+    const double rsum = host_sum_all(mf), rmax = host_max_all(mf), rmin = host_min_all(mf);
+    const double rninf = host_norm_inf_all(mf);
+    chk(reduce_max_all(mf) == rmax, "reduce_max_all_exact");
+    chk(reduce_min_all(mf) == rmin, "reduce_min_all_exact");
+    chk(norm_inf_all(mf) == rninf, "norm_inf_all_exact");
+    const double dsum = reduce_sum_all(mf);
+    chk(std::fabs(dsum - rsum) / std::max(1.0, std::fabs(rsum)) < 1e-10, "reduce_sum_all_relative");
+    // dot_all(mf, mf) = Sum_{cells, c} f^2 over all comps -- the full-state ||.||^2.
+    double rdotsq = 0;
+    for (int c = 0; c < mf.ncomp(); ++c)
+      for (int li = 0; li < mf.local_size(); ++li) {
+        const Fab2D& f = mf.fab(li);
+        const Box2D b = f.box();
+        for (int jj = b.lo[1]; jj <= b.hi[1]; ++jj)
+          for (int ii = b.lo[0]; ii <= b.hi[0]; ++ii)
+            rdotsq += double(f(ii, jj, c)) * f(ii, jj, c);
+      }
+    const double ddot = dot_all(mf, mf);
+    chk(std::fabs(ddot - rdotsq) / std::max(1.0, rdotsq) < 1e-10, "dot_all_relative");
+    // The full-component reductions must DIFFER from the comp-0-only values (proving they cover c1, c2).
+    chk(reduce_max_all(mf) != reduce_max(mf, 0), "reduce_max_all_covers_all_comps");
+    chk(reduce_min_all(mf) != reduce_min(mf, 0), "reduce_min_all_covers_all_comps");
+    chk(norm_inf_all(mf) != norm_inf(mf, 0), "norm_inf_all_covers_all_comps");
+  }
+
+  // 7. ncomp==1 BIT-IDENTITY (the no-regression guard): each _all helper loops the one component, so it
+  //    is bit-identical to its per-component counterpart on a single-component field.
+  {
+    MultiFab mf(ba, dm, 1, 0);
+    for (int li = 0; li < mf.local_size(); ++li) {
+      Array4 a = mf.fab(li).array();
+      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) {
+        const Real v = i + 100.0 * j;
+        a(i, j, 0) = ((i + j) & 1) ? -v : v;
+      });
+    }
+    device_fence();
+    chk(reduce_sum_all(mf) == reduce_sum(mf, 0), "reduce_sum_all_ncomp1_bit_identical");
+    chk(reduce_max_all(mf) == reduce_max(mf, 0), "reduce_max_all_ncomp1_bit_identical");
+    chk(reduce_min_all(mf) == reduce_min(mf, 0), "reduce_min_all_ncomp1_bit_identical");
+    chk(norm_inf_all(mf) == norm_inf(mf, 0), "norm_inf_all_ncomp1_bit_identical");
+    chk(dot_all(mf, mf) == dot(mf, mf, 0), "dot_all_ncomp1_bit_identical");
   }
 
   if (fails == 0)

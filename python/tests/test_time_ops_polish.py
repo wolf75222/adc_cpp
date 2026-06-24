@@ -4,8 +4,9 @@ validation errors #18/#19.
 
   - solve_local_nonlinear (op 10): a per-cell Newton solve (ADC-422); the builder validates its inputs
     and lowers a residual sub-block to a device FD-Jacobian Newton kernel;
-  - reductions (op 16): P.sum / P.max / P.min / P.sum_component build a 'reduce' IR op and lower to the
-    matching adc:: collective reduction (adc::reduce_sum / reduce_max / reduce_min);
+  - reductions (op 16): P.sum / P.max / P.min build a 'reduce' IR op and lower to the matching
+    full-component adc:: collective reduction (adc::reduce_sum_all / reduce_max_all / reduce_min_all);
+    P.sum_component lowers to the per-component adc::reduce_sum(u, comp);
   - fill_boundary (op 22): P.fill_boundary lowers to ctx.fill_boundary (the shared ghost exchange);
   - project (op 21): P.project lowers to ctx.apply_projection (the block's own positivity projection);
   - record_scalar (op 23): P.record_scalar lowers to ctx.record_scalar; the value is retrievable after
@@ -164,9 +165,14 @@ def test_reductions_lower_to_adc_reductions(t):
     P.record_scalar("s_c", s_c)
     P.commit("blk", P.linear_combine(U + P.dt * R))
     src = P.emit_cpp_program()
-    for frag in ("adc::reduce_sum(", "adc::reduce_max(", "adc::reduce_min("):
+    # P.sum / P.max / P.min reduce over ALL components (ADC-432) -> the _all variants.
+    for frag in ("adc::reduce_sum_all(", "adc::reduce_max_all(", "adc::reduce_min_all("):
         assert frag in src, "the reduction codegen must contain %r\n%s" % (frag, src)
-    assert "adc::reduce_sum(r" in src and ", 0)" in src, "sum/sum_component reduce over a component"
+    # sum_component pins one named component -> the per-component adc::reduce_sum(<state>, comp), which
+    # takes a SECOND comma argument (the component) unlike the no-arg reduce_sum_all(<state>).
+    import re
+    assert re.search(r"adc::reduce_sum\([^,()]+, 0\)", src), \
+        "sum_component reduces over a named component\n%s" % src
 
 
 # ---- (A.3) fill_boundary (op 22) + project (op 21): IR + codegen ----

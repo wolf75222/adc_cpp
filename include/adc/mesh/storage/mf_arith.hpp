@@ -1,5 +1,6 @@
 /// @file
-/// @brief MultiFab arithmetic (saxpy, lincomb, norm_inf, dot) over VALID cells.
+/// @brief MultiFab arithmetic (saxpy, lincomb, norm_inf, dot) over VALID cells, plus the
+/// full-component reductions (dot_all / reduce_*_all / norm_inf_all) the compiled Program uses.
 ///
 /// Building blocks for integrator stages and Krylov solvers. Assumes IDENTICAL layouts
 /// (same BoxArray, same DistributionMapping). Pointwise operations -> ALIASING is safe
@@ -129,6 +130,22 @@ inline Real norm_inf(const MultiFab& mf, int comp = 0) {
   return m;  // MPI all-reduce max later (iso-behavior, not added here)
 }
 
+/// FULL-component infinity norm max_{cells, c} |f(.,.,c)| over ALL components -- the compiled-Program
+/// P.norm_inf reduction on a MULTI-component (vector / state) field. For a single-component field this
+/// loops component 0 only, so it is BIT-IDENTICAL to norm_inf(mf, 0) (the scalar path is unchanged).
+/// LOCAL like norm_inf (no MPI all_reduce here, iso-behavior with the per-component norm_inf).
+inline Real norm_inf_all(const MultiFab& mf) {
+  const int nc = mf.ncomp();
+  Real m = 0;
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const ConstArray4 a = mf.fab(li).const_array();
+    const Box2D b = mf.box(li);
+    for (int c = 0; c < nc; ++c)
+      m = std::max(m, reduce_max_cell(b, detail::NormInfKernel{a, c}));
+  }
+  return m;  // MPI all-reduce max later (iso-behavior with norm_inf)
+}
+
 /// z <- a x + b y over ALL components of the valid cells. Identical layouts; aliasing safe.
 inline void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b, const MultiFab& y) {
   const int nc = z.ncomp();
@@ -225,6 +242,57 @@ inline Real reduce_min(const MultiFab& mf, int comp = 0) {
   for (int li = 0; li < mf.local_size(); ++li) {
     const ConstArray4 a = mf.fab(li).const_array();
     m = std::min(m, reduce_min_cell(mf.box(li), detail::MinKernel{a, comp}));
+  }
+  return static_cast<Real>(all_reduce_min(static_cast<double>(m)));
+}
+
+/// FULL-component sum Sum_{cells, c} f(.,.,c) over ALL components, reduced over ALL ranks
+/// (all_reduce_sum) -- the compiled-Program P.sum reduction on a MULTI-component (vector / state)
+/// field. For a single-component field this loops component 0 only, so it is BIT-IDENTICAL to
+/// reduce_sum(mf, 0) (the scalar path is unchanged). Like dot_all, the per-component local sums are
+/// summed BEFORE the single all-reduce. COLLECTIVE, MANDATORY UNDER MPI: called on every rank.
+inline Real reduce_sum_all(const MultiFab& mf) {
+  const int nc = mf.ncomp();
+  Real s = 0;
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const ConstArray4 a = mf.fab(li).const_array();
+    const Box2D b = mf.box(li);
+    for (int c = 0; c < nc; ++c)
+      s += reduce_sum_cell(b, detail::SumKernel{a, c});
+  }
+  return static_cast<Real>(all_reduce_sum(static_cast<double>(s)));
+}
+
+/// FULL-component signed maximum max_{cells, c} f(.,.,c) over ALL components, reduced over ALL ranks
+/// (all_reduce_max) -- the compiled-Program P.max reduction on a MULTI-component field (SIGNED, not the
+/// magnitude -- use norm_inf_all for max|f|). For a single-component field this loops component 0 only,
+/// so it is BIT-IDENTICAL to reduce_max(mf, 0). COLLECTIVE, MANDATORY UNDER MPI: an empty rank seeds
+/// -inf so the all_reduce_max ignores it. EXACT everywhere (max without rounding).
+inline Real reduce_max_all(const MultiFab& mf) {
+  const int nc = mf.ncomp();
+  Real m = -std::numeric_limits<Real>::infinity();
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const ConstArray4 a = mf.fab(li).const_array();
+    const Box2D b = mf.box(li);
+    for (int c = 0; c < nc; ++c)
+      m = std::max(m, reduce_max_cell(b, detail::MaxKernel{a, c}));
+  }
+  return static_cast<Real>(all_reduce_max(static_cast<double>(m)));
+}
+
+/// FULL-component signed minimum min_{cells, c} f(.,.,c) over ALL components, reduced over ALL ranks
+/// (all_reduce_min) -- the compiled-Program P.min reduction on a MULTI-component field. For a
+/// single-component field this loops component 0 only, so it is BIT-IDENTICAL to reduce_min(mf, 0).
+/// COLLECTIVE, MANDATORY UNDER MPI: an empty rank seeds +inf so the all_reduce_min ignores it. EXACT
+/// everywhere (min without rounding).
+inline Real reduce_min_all(const MultiFab& mf) {
+  const int nc = mf.ncomp();
+  Real m = std::numeric_limits<Real>::infinity();
+  for (int li = 0; li < mf.local_size(); ++li) {
+    const ConstArray4 a = mf.fab(li).const_array();
+    const Box2D b = mf.box(li);
+    for (int c = 0; c < nc; ++c)
+      m = std::min(m, reduce_min_cell(b, detail::MinKernel{a, c}));
   }
   return static_cast<Real>(all_reduce_min(static_cast<double>(m)));
 }
