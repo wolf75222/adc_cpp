@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Typed `P.call` and `m.rate_operator`** (ADC-438, epic ADC-436, spec 2 "operator-first"):
+  `Program.bind_operators(model)` binds the typed registry; `P.call(name, *args, name=None)` resolves
+  an operator by name, type-checks the arguments against its `Signature` (clear errors on unknown
+  operator / arity / vtype / no-bind), and lowers to the matching PDE shortcut (`solve_fields` /
+  `source` / `rhs` / `linear_source` / `project`) so the generated C++ is byte-identical to the Spec 1
+  path. `m.rate_operator(name, flux=, sources=, fluxes=)` names a composite `-div F + sources` rate as
+  a Program-side alias (lowers to the same `rhs` IR; no model-hash impact).
+  `OperatorRegistry.default_of_kind` resolves a privileged default and raises a clear ambiguity error.
+  New `python/tests/test_operator_call.py`.
 - **Internal typed operator registry** (ADC-437, epic ADC-436, spec 2 "operator-first"):
   new `adc.model` type system (`StateSpace`, `FieldSpace`, `RateSpace`/`Rate(U)`,
   `LocalLinearOperator`, `MatrixFreeOperator`, `Signature`, `Operator`, `OperatorRegistry`)

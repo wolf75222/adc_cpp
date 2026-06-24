@@ -362,6 +362,9 @@ class Program:
         # generated .so exports as adc_program_dt_bound; None = no bound (the native CFL is used).
         self._dt_bound = None        # (block, scalar_value) once set; the block is the scalar sub-block
         self.dt = _Coeff({1: 1.0})   # symbolic time step; participates in coefficient arithmetic
+        # OPTIONAL bound operator registry (Spec 2, operator-first): set by bind_operators so P.call
+        # can resolve and type-check operators at build time. None = legacy PDE-shortcut-only Program.
+        self._registry = None
 
     # --- node construction ---
     def _new(self, vtype, op, inputs, attrs, name, block):
@@ -434,6 +437,83 @@ class Program:
             seen.add(s.block)
         # The FieldContext is attached to the first listed block (an arbitrary but stable owner).
         return self._new("fields", "solve_fields_from_blocks", tuple(states), {}, name, states[0].block)
+
+    # --- operator-first calls (Spec 2) -------------------------------------------
+    def bind_operators(self, source):
+        """Bind a typed operator registry so ``P.call`` can resolve and type-check operators.
+
+        ``source`` is an ``adc.model.OperatorRegistry`` or any object exposing
+        ``operator_registry()`` (a ``dsl.Model`` / ``adc.model.Module``). Returns ``self`` for
+        chaining. The bound registry is build-time TYPE information only -- the codegen still reads
+        the model passed to ``compile_problem``; operator-first Programs and the ``adc.time.std``
+        macros bind the module's operators here.
+        """
+        reg = source.operator_registry() if hasattr(source, "operator_registry") else source
+        if not (hasattr(reg, "get") and hasattr(reg, "names")):
+            raise TypeError("bind_operators: expected an OperatorRegistry or an object exposing "
+                            "operator_registry(); got %r" % (source,))
+        self._registry = reg
+        return self
+
+    def call(self, operator_name, *args, name=None):
+        """Call a typed operator by name (the operator-first level).
+
+        Resolves ``operator_name`` against the bound operator registry (see :meth:`bind_operators`),
+        type-checks the arguments against the operator's ``Signature``, then lowers to the equivalent
+        primitive op so the result is IDENTICAL to the matching PDE shortcut: a ``field_operator`` to
+        ``solve_fields``, a ``local_source`` to ``source``, a ``grid_operator`` / ``local_rate`` to
+        ``rhs``, a ``local_linear_operator`` to ``linear_source``, a ``projection`` to ``project``.
+        A Program composes operators by signature, never by a hardcoded PDE category.
+        """
+        if self._registry is None:
+            raise ValueError("P.call(%r): no operators bound; call P.bind_operators(model) first"
+                             % (operator_name,))
+        op = self._registry.get(operator_name)  # clear KeyError on an unknown operator
+        self._check_call_args(op, args)
+        kind = op.kind
+        if kind == "field_operator":
+            field = None if operator_name == "fields_from_state" else operator_name
+            return self.solve_fields(name=name, state=args[0], field=field)
+        if kind == "local_source":
+            fields = args[1] if len(args) > 1 else None
+            return self.source(operator_name, state=args[0], fields=fields)
+        if kind in ("grid_operator", "local_rate"):
+            fields = args[1] if len(args) > 1 else None
+            if kind == "grid_operator":
+                # Flux divergence only (no source): the default flux or a named flux_term.
+                fluxes = None if operator_name == "flux_default" else [operator_name]
+                return self.rhs(name=name, state=args[0], fields=fields, flux=True,
+                                sources=[], fluxes=fluxes)
+            low = op.lowering
+            return self.rhs(name=name, state=args[0], fields=fields,
+                            flux=low.get("flux", True), sources=low.get("sources"),
+                            fluxes=low.get("fluxes"))
+        if kind == "local_linear_operator":
+            return self.linear_source(operator_name)
+        if kind == "projection":
+            return self.project(name=name, state=args[0])
+        raise NotImplementedError(
+            "P.call: operator kind %r is not yet lowerable (operator %r)" % (kind, operator_name))
+
+    def _check_call_args(self, op, args):
+        """Type-check ``P.call`` arguments against an operator's Signature: arity plus the vtype of
+        each space-typed input (a StateSpace input wants a 'state' value, a FieldSpace input a
+        'fields' value). Operator-valued inputs are not passed positionally. Clear error on mismatch.
+        """
+        expected = [t for t in op.signature.inputs
+                    if getattr(t, "kind", None) in ("state", "field")]
+        if len(args) != len(expected):
+            raise ValueError(
+                "operator %r expects %d argument(s) %s, got %d"
+                % (op.name, len(expected), tuple(t.name for t in expected), len(args)))
+        want_of = {"state": "state", "field": "fields"}
+        for t, a in zip(expected, args, strict=True):
+            want = want_of[t.kind]
+            if not (isinstance(a, Value) and a.vtype == want):
+                got = a.vtype if isinstance(a, Value) else type(a).__name__
+                raise ValueError(
+                    "operator %r argument for %s %r expects a %s value, got %s"
+                    % (op.name, t.kind, t.name, want, got))
 
     def rhs(self, name=None, state=None, fields=None, flux=True, sources=None, fluxes=None):
         """Build R = -div F(U) + sum of the requested named ``sources``. ``fields`` is the explicit

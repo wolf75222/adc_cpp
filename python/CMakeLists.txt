@@ -206,6 +206,15 @@ add_test(NAME test_operator_registry
 set_tests_properties(test_operator_registry PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# P.call type + m.rate_operator (ADC-438, spec 2 operator-first) : P.call resout un operateur du
+# registre type, verifie les arguments contre sa Signature, puis abaisse vers le raccourci PDE
+# equivalent -> C++ genere IDENTIQUE au chemin spec 1 (solve_fields / source / rhs / linear_source).
+# m.rate_operator nomme un -div F + sources composite (alias cote Program). Pur Python.
+add_test(NAME test_operator_call
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_operator_call.py)
+set_tests_properties(test_operator_call PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # adc.time.Program -- IR du programme temporel compile, mode builder (ADC-401, phase 2a) : etats /
 # solve_fields / rhs / linear_combine / commit construisent une IR typee ; algebre affine de
 # linear_combine (U + dt*R, coefficients RK comme polynomes en dt), validation structurelle (commit

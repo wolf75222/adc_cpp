@@ -195,7 +195,7 @@ class Operator:
     numerics; the body lives in the model / codegen."""
 
     def __init__(self, name, kind, signature, capabilities=None,
-                 requirements=None, source=None):
+                 requirements=None, source=None, lowering=None):
         if kind not in OPERATOR_KINDS:
             raise ValueError("operator %r: unknown kind %r (expected one of %s)"
                              % (name, kind, ", ".join(OPERATOR_KINDS)))
@@ -207,6 +207,9 @@ class Operator:
         self.capabilities = dict(capabilities) if capabilities else {}
         self.requirements = dict(requirements) if requirements else {}
         self.source = source
+        # Codegen hint consumed by the lowering of a typed P.call (e.g. a composite
+        # rate operator carries {"flux", "sources", "fluxes"}); empty for primitives.
+        self.lowering = dict(lowering) if lowering else {}
 
     def __repr__(self):
         return "Operator(%r, kind=%r, %r)" % (
@@ -247,6 +250,31 @@ class OperatorRegistry:
     def names(self):
         """Operator names in registration (id) order."""
         return list(self._order)
+
+    def operators_of_kind(self, kind):
+        """Operators of the given kind, in registration order."""
+        return [self._by_name[n] for n in self._order if self._by_name[n].kind == kind]
+
+    def default_of_kind(self, kind):
+        """The default operator of ``kind`` for model-free resolution.
+
+        Picks the operator flagged ``capabilities["default"]`` if there is exactly
+        one; otherwise the sole operator of that kind. Raises a clear error when none
+        exists, or when several are compatible and none is privileged -- the caller
+        must then disambiguate with an explicit ``P.call(name, ...)``.
+        """
+        candidates = self.operators_of_kind(kind)
+        privileged = [op for op in candidates if op.capabilities.get("default")]
+        if len(privileged) == 1:
+            return privileged[0]
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            raise KeyError("no %s operator registered" % kind)
+        names = ", ".join(op.name for op in candidates)
+        raise ValueError(
+            "multiple %s operators are compatible (%s); call P.call(name, ...) "
+            "explicitly" % (kind, names))
 
     def id_of(self, name):
         """Integer OperatorId of ``name`` (its registration index)."""

@@ -1668,6 +1668,11 @@ class HyperbolicModel:
         self.gamma = None       # adiabatic index of the block (EOS), read by the inter-species couplings
                                 # on the System side. None -> symbol adc_compiled_gamma not emitted (the System
                                 # then falls back to its historical default 1.4, strict backward compatibility).
+        self._rate_operators = {}  # NAMED composite rate operators (rate_operator, Spec 2): name ->
+                                   # {"flux": bool, "sources": [str], "fluxes": [str] | None}. A pure
+                                   # Program-side ALIAS for ctx.rhs(flux=..., sources=..., fluxes=...): a
+                                   # typed P.call(name) lowers to the SAME rhs IR, so the alias never enters
+                                   # the model hash nor the codegen (its flux/sources are already hashed).
 
     def cons(self, name):
         self.cons_names.append(name)
@@ -2006,6 +2011,32 @@ class HyperbolicModel:
             raise ValueError("linear_source('%s'): name collides with a source_term" % name)
         self._linear_sources[name] = wrapped
 
+    def rate_operator(self, name, *, flux=True, sources=("default",), fluxes=None):
+        """Declare a NAMED composite rate operator ``R_name = -div F + sum(sources)`` (Spec 2,
+        operator-first). It is a Program-side ALIAS for ``ctx.rhs(flux=, sources=, fluxes=)``: a typed
+        ``P.call(name, U[, fields])`` lowers to the SAME rhs IR as the explicit ``P.rhs(...)`` shortcut,
+        so a model-free Program can address the RHS by one operator name instead of spelling out
+        flux/sources. The alias carries no new numerics (its flux/sources are already in the model and
+        the hash) -- it never enters the model hash nor the codegen. ``flux`` / ``sources`` / ``fluxes``
+        have the same meaning as :meth:`Program.rhs`. ``name`` must be a valid identifier, unique among
+        rate operators, and must not collide with a source_term / linear_source."""
+        if self.n_vars == 0:
+            raise ValueError("rate_operator(%r): declare conservative_vars(...) first" % (name,))
+        if not (isinstance(name, str) and name.isidentifier()):
+            raise ValueError("rate_operator(%r): name must be a valid identifier "
+                             "(letters/digits/_, no leading digit)" % (name,))
+        if name in self._rate_operators:
+            raise ValueError("rate_operator('%s'): already declared" % name)
+        if name in self._source_terms or name in self._linear_sources:
+            raise ValueError("rate_operator('%s'): name collides with a source_term/linear_source"
+                             % name)
+        flx = list(fluxes) if fluxes else None
+        if not flux and flx:
+            raise ValueError("rate_operator('%s'): named fluxes require flux=True "
+                             "(a source-only rate has no flux to divide)" % name)
+        srcs = list(sources) if sources is not None else None
+        self._rate_operators[name] = {"flux": bool(flux), "sources": srcs, "fluxes": flx}
+
     def stability_speed(self, expr):
         """STABILITY speed lambda* (expression of cons / prims / aux): drives the block CFL
         instead of ``max(|eigenvalues|)``. Emitted as ``stability_speed(U, aux, dir)`` (C++ trait
@@ -2293,7 +2324,8 @@ class HyperbolicModel:
                 "flux_default", "grid_operator",
                 _model.Signature([state], _model.Rate(state)),
                 capabilities={"local": False, "linear": False, "produces_rate": True,
-                              "requires_ghosts": 1, "supports_device": True},
+                              "requires_ghosts": 1, "supports_device": True,
+                              "default": True},
                 source="dsl.flux"))
         for nm in sorted(self._flux_terms):
             reg.register(_model.Operator(
@@ -2310,7 +2342,8 @@ class HyperbolicModel:
                 _model.Signature([state, fields] if rf else [state],
                                  _model.Rate(state)),
                 capabilities={"local": True, "linear": False, "requires_fields": rf,
-                              "produces_rate": True, "supports_device": True},
+                              "produces_rate": True, "supports_device": True,
+                              "default": True},
                 requirements=self._aux_requirements(self._source),
                 source="dsl.source"))
         for nm in sorted(self._source_terms):
@@ -2344,7 +2377,8 @@ class HyperbolicModel:
                 "fields_from_state", "field_operator",
                 _model.Signature([state], _model.FieldSpace(
                     "phi", components=("phi", "grad_x", "grad_y"))),
-                capabilities={"requires_solver": True, "supports_device": True},
+                capabilities={"requires_solver": True, "supports_device": True,
+                              "default": True},
                 requirements={"elliptic_operator": "poisson"},
                 source="dsl.elliptic_rhs"))
         for nm in sorted(self._elliptic_fields):
@@ -2364,6 +2398,28 @@ class HyperbolicModel:
                 capabilities={"local": True, "idempotent": True,
                               "supports_device": True},
                 source="dsl.projection"))
+
+        # Composite rate operators (local_rate: State[, Fields] -> Rate(State)); aliases
+        # for ctx.rhs(flux=, sources=, fluxes=), carried as a lowering hint for P.call.
+        for nm in sorted(self._rate_operators):
+            cfg = self._rate_operators[nm]
+            src_names = cfg["sources"] if cfg["sources"] is not None else ["default"]
+            needs = False
+            for s in src_names:
+                if s == "default":
+                    needs = needs or (self._source is not None
+                                      and reads_fields(self._source))
+                elif s in self._source_terms:
+                    needs = needs or reads_fields(self._source_terms[s])
+            reg.register(_model.Operator(
+                nm, "local_rate",
+                _model.Signature([state, fields] if needs else [state],
+                                 _model.Rate(state)),
+                capabilities={"local": False, "linear": False, "requires_fields": needs,
+                              "produces_rate": True, "supports_device": True},
+                lowering={"flux": cfg["flux"], "sources": cfg["sources"],
+                          "fluxes": cfg["fluxes"]},
+                source="dsl.rate_operator"))
         return reg
 
     # --- evaluation (CPU interpreter, numpy) ---
@@ -4796,6 +4852,12 @@ class Model:
         Used explicitly by a Program (ctx.linear_source / ctx.apply / ctx.solve_local_linear);
         never folded into m.source or ctx.rhs."""
         self._m.linear_source(name, matrix)
+
+    def rate_operator(self, name, *, flux=True, sources=("default",), fluxes=None):
+        """NAMED composite rate operator R_name = -div F + sum(sources) (Spec 2, operator-first):
+        a Program-side alias for ctx.rhs(flux=, sources=, fluxes=) so a model-free Program can call
+        P.call(name, U[, fields]) instead of P.rhs(...). Delegates to HyperbolicModel.rate_operator."""
+        self._m.rate_operator(name, flux=flux, sources=sources, fluxes=fluxes)
 
     def source_frequency(self, expr_mu):
         """Local frequency mu(U, aux) [1/s] of the source -- the 'source' step bound from the meeting
