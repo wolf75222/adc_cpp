@@ -45,8 +45,15 @@ def test_metadata_block_emitted():
     assert "adc_module_operator_requirements(int i)" in src
     assert "adc_module_state_space_name(int i)" in src
     assert "adc_module_field_space_name(int i)" in src
+    # The count equals the registry size (flux_default, electric, lorentz, fields_from_state,
+    # explicit_rhs) and every operator name + its kind is emitted.
+    reg = m.operator_registry()
+    assert "adc_module_operator_count() { return %d; }" % len(reg) in src
     for op in ("flux_default", "electric", "lorentz", "fields_from_state", "explicit_rhs"):
         assert '"%s"' % op in src, "operator %r missing from the module metadata" % op
+    for kind in ("grid_operator", "local_source", "local_linear_operator", "field_operator",
+                 "local_rate"):
+        assert '"%s"' % kind in src, "operator kind %r missing from the module metadata" % kind
     assert '"U"' in src and '"fields"' in src
     print("OK  GeneratedModule metadata block emitted alongside the program")
 

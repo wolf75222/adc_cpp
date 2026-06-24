@@ -12,6 +12,12 @@ This benchmark times the SSPRK3 step loop for the SAME 2D Euler model two ways:
                    which lowers to the same three Shu-Osher stages.
 It reports ms/step for each and the generated/native ratio. Needs a compiler + Kokkos
 (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0 otherwise (run it on ROMEO).
+
+The model is pure Euler with NO elliptic coupling, so ``solve_fields`` is a no-op and the two
+paths do the same work per step. (On a field-coupled model the comparison would be apples-to-
+oranges: the generated Program re-solves the elliptic field at each SSPRK3 stage -- the correct,
+stage-consistent semantics -- versus one step-level solve in the native path; pick a transport-only
+model for a clean scheduler-overhead measurement.)
 """
 import sys
 import time

@@ -1761,7 +1761,8 @@ class Program:
                     '  switch (i) {\n%s    default: return "";\n  }\n}\n' % (accessor, cases))
 
         def req_json(op):
-            return json.dumps({"kind": op.kind, **op.requirements})
+            # The operator's own kind always wins (a requirements dict must not shadow it).
+            return json.dumps({**op.requirements, "kind": op.kind})
 
         parts = [
             "// GeneratedModule metadata (Spec 2 / ADC-442): the typed operator registry exposed by\n"
