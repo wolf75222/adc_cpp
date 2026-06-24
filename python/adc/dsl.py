@@ -775,7 +775,7 @@ def roles_for(names, override=None):
         return [role_of(nm) for nm in names]
     if len(override) != len(names):
         raise ValueError("roles: %d roles for %d variables" % (len(override), len(names)))
-    return [(r if r is not None else role_of(nm)) for nm, r in zip(names, override)]
+    return [(r if r is not None else role_of(nm)) for nm, r in zip(names, override, strict=True)]
 
 
 # --- Expression tree -------------------------------------------------------
@@ -824,7 +824,9 @@ class Const(Expr):
 class Var(Expr):
     """Named variable: conservative, primitive, auxiliary (field) or constant."""
 
-    def __init__(self, name, kind): self.name = name; self.kind = kind
+    def __init__(self, name, kind):
+        self.name = name
+        self.kind = kind
     def eval(self, env):
         if self.name not in env:
             raise KeyError("variable '%s' (%s) missing from the environment" % (self.name, self.kind))
@@ -836,7 +838,9 @@ class Var(Expr):
 
 class _Bin(Expr):
     op = "?"
-    def __init__(self, a, b): self.a = a; self.b = b
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
     def deps(self): return self.a.deps() | self.b.deps()
     def to_cpp(self): return "(%s %s %s)" % (self.a.to_cpp(), self.op, self.b.to_cpp())
     def _str(self): return "(%s %s %s)" % (self.a, self.op, self.b)
@@ -2296,8 +2300,10 @@ class HyperbolicModel:
         J = np.empty((nsmp, nv, nv))
         for j in range(nv):
             eps = 1e-6 * np.abs(U[j]) + 1e-7
-            Up = U.copy(); Up[j] = Up[j] + eps
-            Um = U.copy(); Um[j] = Um[j] - eps
+            Up = U.copy()
+            Up[j] = Up[j] + eps
+            Um = U.copy()
+            Um[j] = Um[j] - eps
             Fp = self.flux(Up, aux, dir)
             Fm = self.flux(Um, aux, dir)
             if not (bool(np.all(np.isfinite(Fp))) and bool(np.all(np.isfinite(Fm)))):
@@ -2796,7 +2802,7 @@ class HyperbolicModel:
                             entries.append((bi, r, c, e))
             tl, cpps = self._codegen_exprs([e for (_, _, _, e) in entries], cse)
             fill = {}
-            for (bi, r, c, _), cpp in zip(entries, cpps):
+            for (bi, r, c, _), cpp in zip(entries, cpps, strict=True):
                 fill.setdefault(bi, []).append((r, c, cpp))
             for (bi, r, c) in zeros:
                 fill.setdefault(bi, []).append((r, c, "adc::Real(0)"))
@@ -3052,7 +3058,7 @@ class HyperbolicModel:
             except ValueError:
                 raise ValueError("enable_hllc: roles Density / MomentumX / MomentumY required "
                                  "(declare conservative_vars(..., roles=[...])); current roles %r"
-                                 % (roles_l,))
+                                 % (roles_l,)) from None
             iE = roles_l.index("Energy") if "Energy" in roles_l else -1
             S.append("  // CAPABILITY HLLC generee depuis les ROLES (enable_hllc) : algorithme")
             S.append("  // contact-resolving generique du coeur (HasHLLCStructure), aucun layout fige.")
@@ -3099,7 +3105,7 @@ class HyperbolicModel:
             except ValueError:
                 raise ValueError("enable_roe: roles Density / MomentumX / MomentumY required "
                                  "(declare conservative_vars(..., roles=[...])); current roles %r"
-                                 % (roles_l,))
+                                 % (roles_l,)) from None
             iE = roles_l.index("Energy") if "Energy" in roles_l else -1
             passives = [c for c in range(nc) if c not in (iD, iX, iY, iE)]
             S.append("  // CAPABILITY ROE generee depuis les ROLES (enable_roe) : dissipation")
@@ -3488,8 +3494,6 @@ class HyperbolicModel:
         c++/g++/clang++). Returns so_path. Requires set_primitive_state(...) and
         set_conservative_from([...]) (like emit_cpp_brick)."""
         import os
-        import shutil
-        import subprocess
         import tempfile
 
         if include is None:
@@ -3535,7 +3539,6 @@ class HyperbolicModel:
         also aligns its ABI with the _adc module (also Kokkos). An installed Kokkos must be visible
         via ADC_KOKKOS_ROOT / Kokkos_ROOT (Serial is enough on CPU)."""
         import os
-        import subprocess
         import tempfile
 
         if include is None:
@@ -3691,8 +3694,6 @@ class HyperbolicModel:
         include = adc headers directory (None -> auto-detected via adc_include()); cxx = compiler.
         Returns so_path."""
         import os
-        import shutil
-        import subprocess
         import sys
         import tempfile
 
@@ -3991,7 +3992,6 @@ class HyperbolicModel:
 
         To know which System adder to use: see adder_for(backend)."""
         import os
-        import shutil
         # DEFAULT 'auto' (ADC-63): production if toolchain parity with the module is established,
         # aot otherwise (historical default). An explicit backend short-circuits (unchanged).
         if backend == "auto":
@@ -4348,7 +4348,7 @@ class CompiledModel:
         X, Y = np.meshgrid(x, x, indexing="xy")
         bump = 1.0 + 0.3 * np.exp(-40.0 * ((X - 0.5) ** 2 + (Y - 0.5) ** 2))
         comps = []
-        for name, role in zip(self.cons_names, self.cons_roles):
+        for name, role in zip(self.cons_names, self.cons_roles, strict=True):
             if state is not None and name in state:
                 comps.append(np.asarray(state[name], dtype=float).reshape(n, n))
             elif role == "Density":
@@ -4711,7 +4711,6 @@ class Model:
         Returns a CompiledModel carrying so_path, backend, target, adder, names/roles/gamma/n_aux/params,
         caps, abi_key, model_hash, cxx, std."""
         import os
-        import shutil
         # 'auto' DEFAULT (ADC-63): production if toolchain parity is established, aot otherwise. The reason
         # is recorded on the CompiledModel (backend_auto_reason) -- never a silent choice.
         auto_reason = None
@@ -5215,8 +5214,6 @@ class HybridModel:
 
         so_path None -> out-of-source cache (key = model_hash + abi_key + backend + target)."""
         import os
-        import shutil
-        import subprocess
         import sys
         import tempfile
         if backend not in ("prototype", "aot", "production"):
@@ -5585,23 +5582,44 @@ class CoupledSource:
                 if node.name not in reg_index:
                     raise ValueError("CoupledSource: field %r used without .block(...).role(...)"
                                      % node.name)
-                ops.append(_CS_PUSHREG); args.append(reg_index[node.name])
+                ops.append(_CS_PUSHREG)
+                args.append(reg_index[node.name])
             elif isinstance(node, Const):
-                ops.append(_CS_PUSHREG); args.append(self._const_reg(node.value, reg_index))
+                ops.append(_CS_PUSHREG)
+                args.append(self._const_reg(node.value, reg_index))
             elif isinstance(node, Neg):
-                emit(node.a); ops.append(_CS_NEG); args.append(0)
+                emit(node.a)
+                ops.append(_CS_NEG)
+                args.append(0)
             elif isinstance(node, Sqrt):
-                emit(node.a); ops.append(_CS_SQRT); args.append(0)
+                emit(node.a)
+                ops.append(_CS_SQRT)
+                args.append(0)
             elif isinstance(node, Add):
-                emit(node.a); emit(node.b); ops.append(_CS_ADD); args.append(0)
+                emit(node.a)
+                emit(node.b)
+                ops.append(_CS_ADD)
+                args.append(0)
             elif isinstance(node, Sub):
-                emit(node.a); emit(node.b); ops.append(_CS_SUB); args.append(0)
+                emit(node.a)
+                emit(node.b)
+                ops.append(_CS_SUB)
+                args.append(0)
             elif isinstance(node, Mul):
-                emit(node.a); emit(node.b); ops.append(_CS_MUL); args.append(0)
+                emit(node.a)
+                emit(node.b)
+                ops.append(_CS_MUL)
+                args.append(0)
             elif isinstance(node, Div):
-                emit(node.a); emit(node.b); ops.append(_CS_DIV); args.append(0)
+                emit(node.a)
+                emit(node.b)
+                ops.append(_CS_DIV)
+                args.append(0)
             elif isinstance(node, Pow):
-                emit(node.a); emit(node.b); ops.append(_CS_POW); args.append(0)
+                emit(node.a)
+                emit(node.b)
+                ops.append(_CS_POW)
+                args.append(0)
             else:
                 raise TypeError("CoupledSource: expression node not supported in Phase 1: %r "
                                 "(supported: +, -, *, /, **, unary -, sqrt, field, constant)"
