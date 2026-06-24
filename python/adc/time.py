@@ -228,6 +228,11 @@ class Value:
         self.attrs = dict(attrs)
         self.name = name
         self.block = block
+        # Operator-first type tag (Spec 2): the adc.model space/operator-type this value lives over
+        # (a StateSpace / RateSpace / FieldSpace / LocalLinearOperator), set by P.state(space=) and
+        # P.call. Used only for build-time type checks; NEVER serialized into the IR. None = untyped
+        # (legacy), and all the space checks are skipped (backward compatible).
+        self.space = None
 
     def is_field(self):
         return self.vtype in Value._FIELD
@@ -346,6 +351,18 @@ class Value:
         return "<%s %s #%d>" % (self.vtype, self.name, self.id)
 
 
+def _state_base_name(space):
+    """The StateSpace name a value lives over, for operator-first type checks: a StateSpace -> its
+    name; a Rate(state) -> the base state name; anything else (FieldSpace / operator-type / None) ->
+    None (not a state-like value)."""
+    kind = getattr(space, "kind", None)
+    if kind == "state":
+        return space.name
+    if kind == "rate":
+        return getattr(space, "base_name", None)
+    return None
+
+
 class Program:
     """A compiled time program (builder mode). Holds the SSA value list and the committed blocks.
 
@@ -384,11 +401,18 @@ class Program:
             self._values.append(v)
         return v
 
-    def state(self, block):
-        """Reference the current conservative state of ``block`` at the start of the step."""
+    def state(self, block, space=None):
+        """Reference the current conservative state of ``block`` at the start of the step.
+
+        @p space (Spec 2): the operator-first :class:`adc.model.StateSpace` this block instantiates.
+        It is recorded for type checking (a State tagged with space U cannot be combined with a
+        Rate(V), and an operator expecting state U cannot be called on it) and is NOT serialized into
+        the IR. ``None`` keeps the legacy untyped state (no space checks)."""
         if not isinstance(block, str) or not block:
             raise ValueError("state: block must be a non-empty string")
-        return self._new("state", "state", (), {}, block, block)
+        v = self._new("state", "state", (), {}, block, block)
+        v.space = space
+        return v
 
     def solve_fields(self, name=None, state=None, field=None):
         """Solve the elliptic fields from ``state`` and return a FieldContext. Accepts
@@ -470,6 +494,14 @@ class Program:
                              % (operator_name,))
         op = self._registry.get(operator_name)  # clear KeyError on an unknown operator
         self._check_call_args(op, args)
+        result = self._lower_call(op, operator_name, args, name)
+        # Tag the result with the operator's declared output type (a Rate / FieldSpace /
+        # LocalLinearOperator / StateSpace) so downstream ops can type-check the composition
+        # (a Rate(U) cannot be combined with a State(V); an L: U -> U cannot drive a State(V)).
+        result.space = op.signature.output
+        return result
+
+    def _lower_call(self, op, operator_name, args, name):
         kind = op.kind
         if kind == "field_operator":
             field = None if operator_name == "fields_from_state" else operator_name
@@ -520,6 +552,14 @@ class Program:
                 raise ValueError(
                     "operator %r argument for %s %r expects a %s value, got %s"
                     % (op.name, t.kind, t.name, want, got))
+            # If the argument carries an operator-first space tag, its name must match the
+            # operator's declared input space (a value over 'V' cannot feed an input typed 'U').
+            arg_space = getattr(a, "space", None)
+            arg_name = getattr(arg_space, "name", None)
+            if arg_name is not None and arg_name != t.name:
+                raise ValueError(
+                    "operator %r expects %s %r but got a value over %r"
+                    % (op.name, t.kind, t.name, arg_name))
 
     def rhs(self, name=None, state=None, fields=None, flux=True, sources=None, fluxes=None):
         """Build R = -div F(U) + sum of the requested named ``sources``. ``fields`` is the explicit
@@ -573,15 +613,27 @@ class Program:
         if not aff:
             raise ValueError("linear_combine: empty combination")
         block = None
+        state_space = None
         for v, _ in aff:
             if v.vtype == "state":
                 block = v.block
+                if state_space is None:
+                    state_space = v.space
                 break
         if block is None:
             block = aff[0][0].block
+        # Operator-first type check (Spec 2): every State/Rate term must live over ONE StateSpace.
+        # Combining a Rate(U) with a State(V) (V != U) is a type error; untyped (legacy) terms skip.
+        spaces = {nm for nm in (_state_base_name(v.space) for v, _ in aff) if nm is not None}
+        if len(spaces) > 1:
+            raise ValueError(
+                "cannot combine values over different state spaces %s; a State and the Rate(state) "
+                "added to it must share one StateSpace" % sorted(spaces))
         inputs = tuple(v for v, _ in aff)
         coeffs = [c.as_dict() for _, c in aff]
-        return self._new("state", "linear_combine", inputs, {"coeffs": coeffs}, name, block)
+        out = self._new("state", "linear_combine", inputs, {"coeffs": coeffs}, name, block)
+        out.space = state_space  # the combine result is a State over the same space
+        return out
 
     # --- named sources / local linear operators (Phase 4 / ADC-403) ---
     @property
@@ -611,6 +663,17 @@ class Program:
         inputs = (state, fields) if fields is not None else (state,)
         return self._new("rhs", "source", inputs, {"source": name}, name, state.block)
 
+    def _check_operator_state(self, l_value, state_value, where):
+        """Operator-first type check (Spec 2): a LocalLinearOperator L: U -> U may only act on a State
+        over U. Fires only when both carry space tags (P.call / P.state(space=)); legacy skips."""
+        lop = getattr(l_value, "space", None) if isinstance(l_value, Value) else None
+        dom = getattr(lop, "domain_name", None)
+        st = _state_base_name(getattr(state_value, "space", None))
+        if dom is not None and st is not None and dom != st:
+            raise ValueError(
+                "%s: operator maps %s -> %s but was applied to a State over %r"
+                % (where, dom, getattr(lop, "range_name", dom), st))
+
     def apply(self, operator=None, state=None, fields=None, name=None):
         """Apply a linear-source operator to a state: ``LU = L_name(aux, params) U``. ``operator`` is
         a `linear_source` value (or its name). Returns an RHS-like value."""
@@ -619,6 +682,7 @@ class Program:
             raise ValueError("apply: a State value is required (state=...)")
         if fields is not None and not (isinstance(fields, Value) and fields.vtype == "fields"):
             raise ValueError("apply: fields must be a FieldContext from solve_fields")
+        self._check_operator_state(operator, state, "apply")
         inputs = (state, fields) if fields is not None else (state,)
         return self._new("rhs", "apply", inputs, {"linear_source": lname},
                          name or ("apply_" + lname), state.block)
@@ -639,11 +703,14 @@ class Program:
         if fields is not None and not (isinstance(fields, Value) and fields.vtype == "fields"):
             raise ValueError("solve_local_linear: fields must be a FieldContext from solve_fields")
         op_value, l_coeff = operator.terms[0]
+        self._check_operator_state(op_value, rhs, "solve_local_linear")
         lname = op_value.attrs["linear_source"]
         a = (-l_coeff).as_dict()  # operator = I - a*L, so the L term carries the coefficient -a
         inputs = (rhs, op_value, fields) if fields is not None else (rhs, op_value)
-        return self._new("state", "solve_local_linear", inputs,
-                         {"linear_source": lname, "a_coeff": a}, name, rhs.block)
+        out = self._new("state", "solve_local_linear", inputs,
+                        {"linear_source": lname, "a_coeff": a}, name, rhs.block)
+        out.space = rhs.space  # the solution is a State over the same space as the rhs
+        return out
 
     # The LOCAL per-cell ops a solve_local_nonlinear residual sub-block may use: the iterate / guess
     # State placeholders, named per-cell sources / linear-source applies, and the affine combine of

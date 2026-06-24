@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Operator-first Program type diagnostics** (ADC-448, epic ADC-436, spec 2 "operator-first"): with
+  `P.state(block, space=U)` tags and rates/operators flowing from `P.call`, a Program type-checks the
+  composition -- an argument over the wrong StateSpace (`expects state 'U' but got a value over 'V'`),
+  combining a `Rate(U)` with a `State(V)` (`cannot combine values over different state spaces`), or
+  driving `solve_local_linear` / `apply` with an `L: U -> U` on a `State(V)` (`maps U -> U but was
+  applied to a State over 'V'`) all raise clear errors. The space tag is build-time only (never
+  serialized); untagged (legacy / Spec 1) programs skip the checks. New
+  `python/tests/test_operator_validation.py`.
+
 - **Operator-first perf benchmark** (ADC-445, epic ADC-436, spec 2 "operator-first"):
   `bench/operator_first_perf.py` times the SSPRK3 step loop for the same 2D Euler model two ways --
   the native stepper (`adc.Explicit("ssprk3")`) vs a compiled time Program (`adc.time.std.ssprk3`

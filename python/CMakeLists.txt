@@ -255,6 +255,14 @@ add_test(NAME test_module_codegen
 set_tests_properties(test_module_codegen PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Diagnostics de validation operator-first (ADC-448, spec 2) : un etat tague d'un StateSpace ne peut
+# pas alimenter un operateur type pour un autre, un Rate(U) ne se combine pas avec un State(V), et un
+# L: U->U ne pilote pas un solve sur State(V). Les programmes non tagues (legacy) sautent les checks.
+add_test(NAME test_operator_validation
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_operator_validation.py)
+set_tests_properties(test_operator_validation PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # adc.time.Program -- IR du programme temporel compile, mode builder (ADC-401, phase 2a) : etats /
 # solve_fields / rhs / linear_combine / commit construisent une IR typee ; algebre affine de
 # linear_combine (U + dt*R, coefficients RK comme polynomes en dt), validation structurelle (commit
