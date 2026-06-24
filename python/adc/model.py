@@ -550,6 +550,10 @@ class Module:
         for nm in sorted(self._aux):
             a = self._aux[nm]
             parts.append("aux:%s:%s" % (a.name, a.kind))
+        if self._eigenvalues is not None:
+            for direction in ("x", "y"):
+                parts.append("eig_%s:%s" % (
+                    direction, ";".join(repr(e) for e in self._eigenvalues[direction])))
         for op in self._registry:  # registration (id) order
             parts.append("op:%s:%s:%s:caps=%s:reqs=%s:body=%s" % (
                 op.name, op.kind, repr(op.signature),

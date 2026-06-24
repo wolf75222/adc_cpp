@@ -115,7 +115,21 @@ def test_multiple_field_operators_rejected():
     print("OK  multiple field_operators are rejected (single elliptic solve)")
 
 
+def test_explicit_roles_honored():
+    # A non-canonical layout: the StateSpace's explicit roles must reach the dsl model, not be lost.
+    mod = model.Module("custom")
+    u = mod.state_space("U", ("n", "px", "py"),
+                        roles={"n": "density", "px": "momentum_x", "py": "momentum_y"})
+    n, px, py = dsl.Var("n", "cons"), dsl.Var("px", "cons"), dsl.Var("py", "cons")
+    mod.operator(name="flux", signature=(u,) >> model.Rate(u), kind="grid_operator",
+                 expr={"x": [px, px * px / n, px * py / n], "y": [py, px * py / n, py * py / n]})
+    m = mod.to_dsl()
+    assert m._m.cons_roles == ["Density", "MomentumX", "MomentumY"], m._m.cons_roles
+    print("OK  explicit StateSpace roles are mapped through to the dsl model")
+
+
 def main():
+    test_explicit_roles_honored()
     test_module_lowers_to_dsl()
     test_pure_module_program_emits()
     test_module_requires_one_state_space()

@@ -4580,7 +4580,19 @@ def _module_to_model(module):
                          "(got %s)" % sorted(states))
     state = next(iter(states.values()))
     m = Model(module.name)
-    m.conservative_vars(*state.components)  # roles inferred from the canonical names
+    # Honor the StateSpace's explicit roles (spec-style lowercase) by mapping them to the dsl
+    # VariableRole names; an unmapped or absent role falls back to None (dsl infers from the name).
+    _spec_role = {"density": "Density", "momentum_x": "MomentumX", "momentum_y": "MomentumY",
+                  "momentum_z": "MomentumZ", "energy": "Energy", "pressure": "Pressure",
+                  "velocity_x": "VelocityX", "velocity_y": "VelocityY", "velocity_z": "VelocityZ",
+                  "temperature": "Temperature"}
+    roles = None
+    if state.roles:
+        roles = [_spec_role.get(state.roles.get(c)) for c in state.components]
+        if all(r is None for r in roles):
+            roles = None  # nothing mapped -> let dsl infer from the canonical names
+    m.conservative_vars(*state.components, roles=roles)
+    # Module parameters lower to const params (the runtime-param kind is not yet on ParameterSpace).
     for p in module.params().values():
         m.param(p.name, p.default, kind="const")
     declared = set()

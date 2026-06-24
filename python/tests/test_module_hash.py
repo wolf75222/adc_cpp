@@ -124,6 +124,20 @@ def test_requirements_change_invalidates():
     print("OK  a requirements change invalidates module_hash")
 
 
+def test_eigenvalues_change_invalidates():
+    def build(speed):
+        mod = model.Module("m")
+        mod.state_space("U", ("rho", "mx"))
+        mod.field_space("fields", ("phi",))
+        rho, mx = dsl.Var("rho", "cons"), dsl.Var("mx", "cons")
+        mod.eigenvalues(x=[mx / rho - speed, mx / rho + speed],
+                        y=[mx / rho - speed, mx / rho + speed])
+        return mod
+
+    assert build(dsl.sqrt(0.5)).module_hash() != build(dsl.sqrt(0.7)).module_hash()
+    print("OK  an eigenvalue (wave-speed) change invalidates module_hash")
+
+
 def test_dsl_backed_module_hashes():
     m = dsl.Model("ep")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
@@ -141,6 +155,7 @@ def main():
     test_callable_body_change_invalidates()
     test_capability_and_space_change_invalidate()
     test_requirements_change_invalidates()
+    test_eigenvalues_change_invalidates()
     test_dsl_backed_module_hashes()
     print("OK  test_module_hash")
 
