@@ -4,20 +4,15 @@
 # + PIC and linked into `_adc.*.so`, and cibuildwheel runs delocate-wheel to bundle any remaining
 # dynamic dependency. Kokkos stays ON and mandatory (adc_cpp is Kokkos-only).
 #
-# Triggers: on a build-relevant PR (so this workflow validates itself and the wheel actually builds),
-# on a vX.Y.Z tag (attach the wheel to the GitHub Release made by release.yml), and on demand. It is
-# SEPARATE from ci.yml's required `gate` (an artifact build, not a correctness gate).
+# Triggers: on a vX.Y.Z tag (attach the wheel to the GitHub Release made by release.yml) and on
+# demand (workflow_dispatch). It is SEPARATE from ci.yml's required `gate` (an artifact build, not a
+# correctness gate), and deliberately does NOT run on PRs: ci.yml's required gate-python already
+# builds `_adc` WITH Kokkos and runs the python suite on every PR, so the only signal unique to this
+# job is the packaging path (cibuildwheel + delocate + static-Kokkos link + pyproject). To validate
+# that before cutting a release, run this workflow manually (workflow_dispatch) on the candidate.
 name: Wheels
 
 on:
-  pull_request:
-    paths:
-      - 'pyproject.toml'
-      - 'python/**'
-      - 'include/**'
-      - 'CMakeLists.txt'
-      - 'cmake/**'
-      - '.github/workflows/wheels.yml'
   push:
     tags:
       - 'v*'
@@ -28,7 +23,9 @@ permissions:
 
 concurrency:
   group: wheels-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A tag build ships a release artifact and must not be cancelled; only redundant manual re-runs on
+  # the same ref supersede each other (a fresh dispatch cancels a stale one on that ref).
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 jobs:
   macos-arm64:
