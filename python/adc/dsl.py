@@ -4591,7 +4591,13 @@ def _module_to_model(module):
         roles = [_spec_role.get(state.roles.get(c)) for c in state.components]
         if all(r is None for r in roles):
             roles = None  # nothing mapped -> let dsl infer from the canonical names
-    m.conservative_vars(*state.components, roles=roles)
+    cvars = m.conservative_vars(*state.components, roles=roles)
+    # A pure Module declares no primitives, but the brick codegen (to_primitive / to_conservative)
+    # needs a primitive-state layout. Give it the trivial identity layout Prim = the conservative
+    # variables (operator bodies are written in conservative + aux variables, so no physical
+    # primitive is required); a model needing genuine primitives would author them via dsl.Model.
+    m.primitive_vars(*cvars)
+    m.conservative_from(list(cvars))
     # Module parameters lower to const params (the runtime-param kind is not yet on ParameterSpace).
     for p in module.params().values():
         m.param(p.name, p.default, kind="const")

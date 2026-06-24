@@ -52,7 +52,12 @@ def test_module_lowers_to_dsl():
     assert m._m._elliptic is not None
     assert m._m._flux and m._m._eig
     assert "explicit_rhs" in m._m._rate_operators
-    print("OK  Module.to_dsl maps every typed operator to its dsl method")
+    # The brick codegen (to_primitive / to_conservative) must succeed: a pure Module declares no
+    # primitives, so to_dsl supplies the identity primitive-state layout (regression: without it
+    # emit_cpp_brick raises "call set_primitive_state(...) first").
+    brick = m._m.emit_cpp_brick(name="ModuleCheck")
+    assert "struct ModuleCheck" in brick
+    print("OK  Module.to_dsl maps every operator + yields a compilable brick")
 
 
 def test_pure_module_program_emits():
