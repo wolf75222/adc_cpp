@@ -107,6 +107,24 @@ riemann = SimpleNamespace(
 )
 
 
+def _hook(name, scheme):
+    """A capability-hook selector descriptor: it picks a canonical model hook (e.g. the Euler
+    contact speed / star state, the Einfeldt wave speeds) that the native solver consumes. It
+    computes nothing; the hook C++ is generated from the model (roles) by the dsl backend."""
+    return BrickDescriptor(name, "macro", category="riemann_hook", scheme=scheme)
+
+
+# Canonical capability-hook selectors used by m.riemann(..., wave_speeds=, contact_speed=, star_state=).
+riemann.speeds = SimpleNamespace(
+    einfeldt=lambda: _hook("einfeldt", "einfeldt"),
+    davis=lambda: _hook("davis", "davis"),
+)
+riemann.hllc = SimpleNamespace(
+    contact_speed=SimpleNamespace(euler=lambda: _hook("euler_contact", "euler")),
+    star_state=SimpleNamespace(euler=lambda: _hook("euler_star", "euler")),
+)
+
+
 # --- reconstruction --------------------------------------------------------
 # adc::Weno5 IS the WENO5-Z reconstruction (it wraps weno5z()); WENO5 and WENO5Z both
 # select it. MUSCL is reconstruction-by-limiter; its native limiter type is adc::Minmod.

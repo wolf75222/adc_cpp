@@ -43,9 +43,22 @@ lib.reconstruction.WENO5Z().native_id  # 'adc::Weno5'
 lib.riemann.HLLC().requirements     # {'capabilities': ['physical_flux', 'pressure', ...]}
 ```
 
+## Capability validation (board)
+
+`m.riemann("hllc"/"roe"/"hll"/"rusanov")` and `m.finite_volume_rate(riemann=...)` validate the
+model's capabilities for the chosen solver before anything is generated, and canonicalize the
+board roles (`density` -> `Density`, `momentum_x` -> `MomentumX`, ...) so the role lookup finds
+them. HLLC/Roe require a pressure (a primitive `p` or a `pressure=` formula) and the fluid roles
+Density/MomentumX/MomentumY; HLL requires wave speeds; Rusanov requires only a max wave speed.
+Missing capabilities are rejected with a clear message, e.g.
+`riemann HLLC requires model capability 'pressure' for state 'U'`. When valid, `m.riemann` drives
+the dsl `enable_hllc()` / `enable_roe()` that generate the `ADC_HD` `contact_speed` /
+`hllc_star_state` / `roe_dissipation` hooks from the roles.
+
 ## Status
 
-The native solvers, the reconstruction bricks and the descriptor catalog are in place. The
-board-level `m.riemann(...)` / `m.finite_volume_rate(...)` surface that lowers model
-capability formulas written in `adc.math` to fresh `ADC_HD` hooks (beyond the existing
-role-based `enable_hllc`/`enable_roe`) is tracked by ADC-456.
+The native solvers, the reconstruction bricks, the descriptor catalog, the board capability
+validation and the role-derived hook generation are in place. Generating the hooks from
+ARBITRARY board formulas (a non-canonical `contact_speed=` / `star_state=` written in `adc.math`,
+beyond the role-derived Toro/Roe forms) and the end-to-end board-model compile path are the
+remaining part of ADC-456.

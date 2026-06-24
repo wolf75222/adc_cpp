@@ -70,7 +70,9 @@ def test_state_lowers_to_state_space():
     assert isinstance(mod, _model.Module)
     st = mod.state_spaces()["U"]
     assert st.components == ("rho", "mx", "my")
-    assert st.roles.get("rho") == "density"
+    # board roles are canonicalized to the dsl roles (density -> Density) so the native
+    # Riemann capability lookup recognizes them (ADC-456).
+    assert st.roles.get("rho") == "Density"
 
 
 def test_state_is_unpackable_into_components():
