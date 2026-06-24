@@ -20,6 +20,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Spec 3 reference docs** (ADC-455, epic ADC-450): `docs/sphinx/reference/native-numerics.md`
+  (the native C++ Riemann solvers + reconstruction bricks and the model capabilities they need)
+  and `typed-bricks.md` (the `adc.lib` catalog: NativeBrick / GeneratedBrick / MacroBrick /
+  ExternalCppBrick, the brick descriptors and the time macros). Document existing functionality;
+  the not-yet-wired pieces (board `m.riemann` hook codegen, `compile_library`, specialization
+  modes, external C++ registration) are clearly marked as ADC-456+ follow-ups.
 - **Spec 3 inspection / debug API** (ADC-460, epic ADC-450, spec 3 section 33): show the lowering of
   a board-written model or program. `Program.dump_operator_ir()` renders the operator-first Program
   IR a board program lowers to, `Program.dump_board()` / `dump_cpp_plan()` the board view and the C++
