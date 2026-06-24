@@ -22,6 +22,7 @@ python-api
 native-bricks
 symbolic-dsl
 time-program
+operator-modules
 moment-models
 cpp-api
 backend-matrix

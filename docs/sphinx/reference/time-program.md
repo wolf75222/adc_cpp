@@ -110,6 +110,29 @@ bit-exact vs native only for an uncoupled program, and `stride` is global, i.e. 
 The old time schemes (`adc.Explicit`, `adc.IMEX`, `adc.Strang`, `adc.CondensedSchur`) and the old
 compile path (`m.compile`, `m.source`) keep working unchanged.
 
+## Operator-first programs
+
+The PDE-shaped builders above (`P.rhs`, `P.solve_fields`, `P.apply`, `P.source`) are sugar over a
+more general layer: a program composes **typed operators by name**. After `P.bind_operators(model)`,
+`P.call("name", *args)` resolves an operator against the model's typed registry, type-checks the
+arguments against its signature, and lowers to the same IR as the matching shortcut, so the result
+is identical:
+
+```python
+# PDE-shaped (spec 1)                       # operator-first (spec 2)
+fields = P.solve_fields(U)            <=>    fields = P.call("fields_from_state", U)
+R = P.rhs(state=U, fields=fields,     <=>    R = P.call("explicit_rhs", U, fields)
+          flux=True, sources=["electric"])   #   (after m.rate_operator("explicit_rhs",
+                                             #    flux=True, sources=["electric"]))
+L = P.linear_source("lorentz")        <=>    L = P.call("lorentz", fields)
+```
+
+An operator-first program mentions no flux, source, Poisson or Lorentz; it composes operator calls,
+linear combinations, solves and a commit. The same generic program then runs against any model that
+provides operators with the expected signatures. The model-free type system, the operator kinds and
+the `adc.time.std` operator-first macros are documented in {doc}`operator-modules`; see
+`examples/operator_modules/predictor_corrector_operator_first.py`.
+
 ## What is implemented today
 
 | Capability | Status |

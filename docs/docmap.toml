@@ -50,7 +50,7 @@ mode = "strict"
 depends_on = ["python/adc/__init__.py", "include/adc/physics/bricks/bricks.hpp", "include/adc/runtime/system.hpp"]
 tested_by = []
 testable = true
-reviewed = "2a8d719236b0780101e0a7758eeb5d9cc573e68b"
+reviewed = "28b09586c26e62b35390881c062fe7a342c92bd5"
 
 [docs."docs/sphinx/getting-started/tutorial.md"]
 owner = "Romain"
@@ -58,7 +58,7 @@ mode = "strict"
 depends_on = ["docs/sphinx/tutorials/diocotron_tutorial.py", "python/adc/dsl.py", "include/adc/physics/bricks/hyperbolic.hpp", "include/adc/physics/bricks/elliptic.hpp", "include/adc/runtime/builders/compiled/dsl_block.hpp"]
 tested_by = ["docs/sphinx/tutorials/diocotron_tutorial.py"]
 testable = true
-reviewed = "44f2e063f40ae6ed6da5c11e7d2d8119a0dbe531"
+reviewed = "28b09586c26e62b35390881c062fe7a342c92bd5"
 
 [docs."docs/sphinx/getting-started/backend.md"]
 owner = "Romain"
@@ -213,6 +213,14 @@ depends_on = ["python/adc/time.py"]
 tested_by = []
 testable = false
 reviewed = "15a2195c0d17fa7201092758879214f3d937500e"
+
+[docs."docs/sphinx/reference/operator-modules.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/adc/model.py", "python/adc/dsl.py", "python/adc/time.py"]
+tested_by = ["python/tests/test_operator_module.py", "python/tests/test_operator_macros.py"]
+testable = false
+reviewed = "28b09586c26e62b35390881c062fe7a342c92bd5"
 
 [docs."docs/sphinx/reference/moment-models.md"]
 owner = "Romain"

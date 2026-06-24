@@ -20,6 +20,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Operator-first example and docs** (ADC-444, epic ADC-436, spec 2):
+  `examples/operator_modules/predictor_corrector_operator_first.py` builds the spec-1 Example 5
+  physics with `adc.model` + the generic `predictor_corrector_local_linear` macro (no physics term in
+  the program), validated against the same analytic reference. New reference page
+  `docs/sphinx/reference/operator-modules.md` (Module vs Simulation, spaces, operators, signatures,
+  capabilities / requirements, `P.call`, `dsl.Model` compatibility, migration from the PDE shortcuts);
+  an "Operator-first programs" section in `time-program.md`.
 - **Compiled operator introspection** (ADC-441, epic ADC-436, spec 2): `list_operators` /
   `operator_signature` / `operator_requirements` / `operator_capabilities` / `list_state_spaces` /
   `list_field_spaces` on `adc.model.Module`, `dsl.Model` and `CompiledProblem` (the compiled handle
