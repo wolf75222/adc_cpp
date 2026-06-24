@@ -26,6 +26,8 @@ operator-modules
 board-like-dsl
 typed-ir
 spec2-builder-layer
+native-numerics
+typed-bricks
 moment-models
 cpp-api
 backend-matrix
