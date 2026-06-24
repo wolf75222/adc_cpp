@@ -115,3 +115,18 @@ def test_lorentz_is_a_local_linear_operator():
 def test_board_model_check_passes():
     m = _euler_poisson_lorentz()
     m.check()  # must not raise: all referenced vars are declared
+
+
+def test_board_module_is_consumable_by_operator_first_program():
+    # Spec 2 retention: the board model lowers to a real operator-first Module that the
+    # explicit P.bind_operators / P.call layer drives unchanged (board never replaces it).
+    from adc.time import Program
+    m = _euler_poisson_lorentz()
+    P = Program("operator_first")
+    P.bind_operators(m.module)
+    U = P.state("plasma")
+    fields = P.call("fields_from_state", U)            # field_operator -> solve_fields
+    R = P.call("explicit_rate", U, fields)             # local_rate (U, fields) -> Rate(U)
+    assert fields.vtype == "fields"
+    assert R.vtype == "rhs"
+    assert "explicit_rate" in m.module.list_operators()

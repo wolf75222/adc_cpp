@@ -93,6 +93,53 @@ hand side; `T.commit_many({...})` commits several coupled blocks atomically;
 `T.state_set` builds a coherent set of stage states for a multi-block field solve.
 The `P.call` / `P.solve_local_linear` builder style is unchanged and still available.
 
+## Spec 2 retention: the operator-first layer
+
+Spec 3 does NOT remove the Spec 2 operator-first API. The board-like facade is added
+*on top* of it and lowers to the same typed objects; it never hides or replaces the
+explicit level. Both writings are valid:
+
+1. **board-like** -- close to the blackboard, recommended for users;
+2. **operator-first** -- explicit, recommended for library authors, generic operators,
+   time-scheme macros, precise tests, explicit signatures, lowering inspection, and the
+   advanced cases the facade does not cover.
+
+The following remain first-class (not kept for backward compatibility -- they are the
+explicit operator-first level):
+
+```python
+@module.operator(...)        # and module.operator(...)
+module.state_space(...)
+module.field_space(...)
+adc.model.Signature(...)
+adc.model.Rate(...)
+adc.model.LocalLinearOperator(...)
+P.call(...)
+P.linear_combine(...)
+P.apply(...)
+P.solve_local_linear(...)
+P.solve_linear(...)
+P.commit(...)
+P.commit_many(...)
+```
+
+The board facade lowers to exactly these objects:
+
+```text
+m.rate(...)                  -> module.operator(..., output=Rate(U))
+m.solve_field(...)           -> module.operator(..., output=FieldSpace)
+m.local_linear_operator(...) -> a LocalLinearOperator object
+m.operator(...)              -> a typed operator registration
+T.define(...)                -> P.call(...) or P.linear_combine(...)
+T.solve(...)                 -> P.solve_local_linear(...) or P.solve_linear(...)
+T.fields(...)                -> P.solve_fields(...) / P.call(field_operator, ...)
+```
+
+The board-like API must only GENERATE the same IR -- never cache or shadow the
+operator-first level. `examples/spec3/board_time_predictor_corrector.py` asserts this at
+runtime (the board program and the primitive program have identical IR), and the
+`test_time_board.py` IR-identity tests gate it.
+
 ## Typed brick catalog (`adc.lib`)
 
 `adc.lib` is a catalog of descriptors and IR macros, never a Python numerics library.
