@@ -129,20 +129,27 @@ def test_divgrad_codegen(t):
 
 
 def test_condensed_schur_macro_lowers(t):
-    # ADC-421: the condensed-Schur macro is now implemented (no longer a stub). At theta == 1 it lowers
-    # to the full anisotropic assemble / solve / reconstruct chain; the deferred theta != 1 extrapolation
-    # raises. The end-to-end parity lives in test_time_condensed_schur.py.
+    # ADC-421 + ADC-427: the condensed-Schur macro lowers for any theta in (0, 1]. theta == 1 lowers to
+    # the full anisotropic assemble / solve / reconstruct chain (historical IR byte-identical); theta != 1
+    # adds the n+1 momentum extrapolation by factor 1/theta on top (no longer a deferred stub). theta out
+    # of (0, 1] raises ValueError. The end-to-end parity lives in test_time_condensed_schur.py.
     P = t.Program("p")
     t.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
     assert P.validate() is True, "the condensed-Schur macro must validate"
     src = P.emit_cpp_program()
     assert "ctx.assemble_schur_coeffs" in src and "ctx.schur_reconstruct" in src, src
+    # ADC-427: theta != 1 now lowers (the extrapolation is plain affine algebra), no longer raises.
+    P2 = t.Program("p2")
+    t.std.condensed_schur(P2, "blk", alpha=1.0, theta=0.5)
+    assert P2.validate() is True, "condensed_schur(theta != 1) must validate (ADC-427)"
+    assert "ctx.schur_reconstruct" in P2.emit_cpp_program(), "theta=0.5 must lower the reconstruct chain"
+    # theta out of (0, 1] is still rejected (loud).
     try:
-        t.std.condensed_schur(t.Program("p2"), "blk", alpha=1.0, theta=0.5)
-    except NotImplementedError as exc:
-        assert "theta == 1" in str(exc), str(exc)
+        t.std.condensed_schur(t.Program("p3"), "blk", alpha=1.0, theta=1.5)
+    except ValueError as exc:
+        assert "theta must be in (0, 1]" in str(exc), str(exc)
     else:
-        raise AssertionError("condensed_schur(theta != 1) must raise NotImplementedError (deferred)")
+        raise AssertionError("condensed_schur(theta out of (0, 1]) must raise ValueError")
 
 
 def _analytic_divergence_check():

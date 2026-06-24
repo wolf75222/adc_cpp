@@ -133,6 +133,29 @@ struct SchurReconstructKernelC {
   }
 };
 
+/// Condensed-Schur kinetic-energy increment (ADC-427), mirroring the native detail::SchurEnergyKernel:
+/// E^{n+1} = E^n + (1/2) rho (|v^{n+1}|^2 - |v^n|^2), v = (mx, my)/rho. v^{n+1} is read from the updated
+/// state @p st (after the velocity update + n+1 extrapolation), v^n and the base E^n from @p st_old
+/// (U^n). rho is frozen in the source (same value in both states), read from @p st. The energy base E^n
+/// already sits in @p st (the reconstruction / extrapolation leave the energy component untouched), so
+/// the kernel ADDS the increment in place, exactly as the native stepper does.
+struct SchurEnergyKernelC {
+  Array4 st;           ///< updated state (READ rho, mx, my = mom^{n+1}; READ+WRITE E)
+  ConstArray4 st_old;  ///< U^n (READ mx, my = mom^n)
+  int c_rho, c_mx, c_my, c_E;
+  ADC_HD void operator()(int i, int j) const {
+    const Real rho = st(i, j, c_rho);
+    const Real inv_rho = rho != Real(0) ? Real(1) / rho : Real(0);
+    const Real vx_new = st(i, j, c_mx) * inv_rho;
+    const Real vy_new = st(i, j, c_my) * inv_rho;
+    const Real vx_old = st_old(i, j, c_mx) * inv_rho;  // rho frozen: rho^n == rho^{n+1}
+    const Real vy_old = st_old(i, j, c_my) * inv_rho;
+    const Real ke_new = Real(0.5) * rho * (vx_new * vx_new + vy_new * vy_new);
+    const Real ke_old = Real(0.5) * rho * (vx_old * vx_old + vy_old * vy_old);
+    st(i, j, c_E) += ke_new - ke_old;
+  }
+};
+
 }  // namespace detail
 
 class ProgramContext {
@@ -379,6 +402,20 @@ class ProgramContext {
       for_each_cell(state.box(li),
                     detail::SchurReconstructKernelC{ph, b, st, th_dt, half_idx, half_idy, c_rho,
                                                     c_mx, c_my, c_bz});
+    }
+  }
+
+  /// Condensed-Schur kinetic-energy increment (ADC-427): E^{n+1} = E^n + (1/2)*rho*(|v^{n+1}|^2 -
+  /// |v^n|^2) IN PLACE on @p state, reading v^{n+1} from @p state (after the velocity update +
+  /// extrapolation) and v^n from @p state_old (U^n). rho is frozen (read from @p state). Reuses the
+  /// native energy formula (detail::SchurEnergyKernel). Applied only when the model carries an energy
+  /// component (the macro passes c_E only for an energy block).
+  void schur_energy(MultiFab& state, const MultiFab& state_old, int c_rho, int c_mx, int c_my,
+                    int c_E) const {
+    for (int li = 0; li < state.local_size(); ++li) {
+      Array4 st = state.fab(li).array();
+      const ConstArray4 so = state_old.fab(li).const_array();
+      for_each_cell(state.box(li), detail::SchurEnergyKernelC{st, so, c_rho, c_mx, c_my, c_E});
     }
   }
   /// @}

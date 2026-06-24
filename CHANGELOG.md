@@ -32,6 +32,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   the IR but `emit_cpp_program` raises `NotImplementedError` for it (the native field solver overrides
   a single target block per solve; the coupled multi-target solve is deferred, never faked). New
   `python/tests/test_time_multiblock.py`.
+- **`adc.time.std.condensed_schur` theta != 1** (ADC-427, epic ADC-399, completes ADC-421): the macro
+  now lowers any `theta` in `(0, 1]`, not just backward Euler. The n+1 extrapolation by factor
+  `1/theta` is expressed with the EXISTING affine algebra (no component-restricted IR op): because
+  `schur_reconstruct` freezes the density, the plain state combine `U^n + (1/theta)(U^{n+theta} - U^n)`
+  leaves rho untouched and matches the native momentum-only extrapolation. An OPTIONAL `c_E` energy
+  component adds the native kinetic-energy increment `E += (1/2)rho(|v^{n+1}|^2 - |v^n|^2)` via a new
+  `P.schur_energy` IR op (lowered to `ProgramContext::schur_energy`, reusing the native energy
+  formula). `theta == 1` keeps its historical IR byte-identical (no copy / extrapolation / energy op).
+  The cross-step persistent-phi carry stays deferred (it needs a 1-component history runtime path; the
+  System history ring is block-ncomp); each step solves from phi^n = 0. Extended
+  `python/tests/test_time_condensed_schur.py` (theta == 1 and theta == 0.5 compiled-vs-offline parity,
+  the energy lowering, and a native `adc.CondensedSchur(theta=0.5)` diagnostic).
 - **`adc.time.std` library completion + `@P.step` decorator** (ADC-423, epic ADC-399): pure-Python
   macros that lower to the existing Program IR (no new C++ stepper) -- `std.rk` (generic explicit
   Butcher tableau; `RK4_TABLEAU` reproduces the `rk4` macro IR byte for byte, `SSPRK2_TABLEAU` gives

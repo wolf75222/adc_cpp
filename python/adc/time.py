@@ -869,6 +869,28 @@ class Program:
                          {"th_dt": th_d, "c_rho": int(c_rho), "c_mx": int(c_mx), "c_my": int(c_my),
                           "c_bz": int(c_bz)}, name, state.block)
 
+    def schur_energy(self, name=None, state=None, state_old=None, c_rho=0, c_mx=1, c_my=2, c_E=3):
+        """Record the condensed-Schur kinetic-energy increment IN PLACE on @p state (ADC-427):
+        ``E^{n+1} = E^n + (1/2)*rho*(|v^{n+1}|^2 - |v^n|^2)``, ``v = (mx, my)/rho`` (the native
+        SchurEnergyKernel). @p state carries ``rho`` / ``mx`` / ``my`` / ``E`` at @p c_rho / @p c_mx /
+        @p c_my / @p c_E AFTER the velocity update (mom = rho*v^{n+1}); @p state_old is U^n (read for
+        v^n = mom^n/rho^n and the base energy E^n). rho is frozen, so the same rho is read from both.
+        Returns @p state (E overwritten in place). Lowered to ``ctx.schur_energy``."""
+        if isinstance(name, Value) and state is None:
+            name, state = None, name
+        if not (isinstance(state, Value) and state.vtype == "state"):
+            raise ValueError("schur_energy: a State value is required (state=...)")
+        if not (isinstance(state_old, Value) and state_old.vtype == "state"):
+            raise ValueError("schur_energy: a State value is required (state_old=U^n)")
+        if state_old.block != state.block:
+            raise ValueError("schur_energy: state and state_old must belong to the same block")
+        for nm, ci in (("c_rho", c_rho), ("c_mx", c_mx), ("c_my", c_my), ("c_E", c_E)):
+            if isinstance(ci, bool) or not isinstance(ci, int) or ci < 0:
+                raise ValueError("schur_energy: %s must be a Python int >= 0 (got %r)" % (nm, ci))
+        return self._new("state", "schur_energy", (state, state_old),
+                         {"c_rho": int(c_rho), "c_mx": int(c_mx), "c_my": int(c_my), "c_E": int(c_E)},
+                         name, state.block)
+
     def solve_linear(self, name=None, operator=None, rhs=None, initial_guess=None, method="cg",
                      preconditioner="identity", tol=1e-8, max_iter=None, restart=None):
         """Solve the matrix-free linear system ``operator x = rhs`` with the runtime's Krylov loop and
@@ -1647,7 +1669,7 @@ class Program:
                               "fill_boundary", "project", "record_scalar",
                               "cell_compare", "where",
                               "schur_coeffs", "apply_laplacian_coeff", "schur_explicit_flux",
-                              "schur_rhs", "schur_reconstruct"})
+                              "schur_rhs", "schur_reconstruct", "schur_energy"})
 
     def _all_ops(self):
         """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
@@ -2033,6 +2055,14 @@ class Program:
             lines.append("ctx.schur_reconstruct(%s, %s, %s, %d, %d, %d, %d);"
                          % (var[state_in.id], _deref(var[phi_in.id]), _coeff_cpp(v.attrs["th_dt"]),
                             v.attrs["c_rho"], v.attrs["c_mx"], v.attrs["c_my"], v.attrs["c_bz"]))
+            var[v.id] = var[state_in.id]
+        elif v.op == "schur_energy":
+            # In-place energy increment E += (1/2) rho (|v^{n+1}|^2 - |v^n|^2) (ADC-427). Reads v^{n+1}
+            # from the updated state and v^n / E^n from state_old (U^n); rho frozen (same in both).
+            state_in, old_in = v.inputs
+            lines.append("ctx.schur_energy(%s, %s, %d, %d, %d, %d);"
+                         % (var[state_in.id], var[old_in.id], v.attrs["c_rho"], v.attrs["c_mx"],
+                            v.attrs["c_my"], v.attrs["c_E"]))
             var[v.id] = var[state_in.id]
         elif v.op == "matrix_free_operator":
             # Install-time: emit the apply lambda `apply_A{id}` into the prelude. Its persistent scratch
@@ -3034,7 +3064,7 @@ def strang(P, block, half_flow, source, *, commit=True):
     return U3
 
 
-def condensed_schur(P, block, *, alpha, theta=1.0, c_rho=0, c_mx=1, c_my=2, c_bz=3,
+def condensed_schur(P, block, *, alpha, theta=1.0, c_rho=0, c_mx=1, c_my=2, c_bz=3, c_E=None,
                     method="bicgstab", tol=1e-10, max_iter=400, commit=True):
     """Condensed-Schur implicit electrostatic-Lorentz SOURCE stage as a compiled Program (epic ADC-399,
     acceptance 32), mirroring the native ``adc.CondensedSchur`` (CondensedSchurSourceStepper) sequence:
@@ -3045,48 +3075,55 @@ def condensed_schur(P, block, *, alpha, theta=1.0, c_rho=0, c_mx=1, c_my=2, c_bz
       3. solve ``-div(A grad phi^{n+theta}) = RHS`` matrix-free (``P.matrix_free_operator`` +
          ``P.apply_laplacian_coeff`` negated, ``P.solve_linear``), warm-started from phi^n;
       4. reconstruct ``v^{n+theta} = B^{-1}(v^n - theta*dt*grad phi)`` and write ``mom = rho*v``
-         (``P.schur_reconstruct``, the closed B^{-1}); rho stays frozen.
+         (``P.schur_reconstruct``, the closed B^{-1}); rho stays frozen;
+      5. (``theta < 1``) extrapolate the theta-stage state to ``n+1`` by the native factor ``1/theta``:
+         ``U^{n+1} = U^n + (1/theta)(U^{n+theta} - U^n)`` (the affine algebra, see THETA below);
+      6. (``c_E`` given) update the total energy ``E^{n+1} = E^n + (1/2)rho(|v^{n+1}|^2 - |v^n|^2)``
+         (``P.schur_energy``, the native kinetic-energy increment).
 
     phi^n is a fresh zero scalar field each step (NO persistent history -- see the cross-step carry note
-    under DEFERRED below). At ``theta == 1`` the stage is well-posed from ``phi^n = 0``: the phi solve
-    runs to tolerance and the velocity reconstruction reads only the solved phi, so a single step matches
-    the native single step taken from ``phi^n = 0``. Every numerical kernel REUSES a native primitive (no
-    stencil / B^{-1} / elimination reimplementation); the native ``adc.CondensedSchur`` stepper is
-    untouched.
+    under DEFERRED below). The phi solve runs to tolerance and the velocity reconstruction reads only the
+    solved phi^{n+theta}, so a single step matches the native single step taken from ``phi^n = 0`` (the
+    System also initializes phi to zero). Every numerical kernel REUSES a native primitive (no stencil /
+    B^{-1} / elimination reimplementation); the native ``adc.CondensedSchur`` stepper is untouched.
 
-    @p alpha is the electrostatic coupling constant; @p theta the theta-scheme implicitness; @p c_rho /
-    @p c_mx / @p c_my the conserved-variable components and @p c_bz the aux component of B_z (canonical 3,
-    filled by ``solve_fields``). @p method / @p tol / @p max_iter configure the Krylov phi solve.
+    THETA != 1 (ADC-427). The native stepper takes the implicit stage at ``n+theta`` and extrapolates phi
+    and the MOMENTUM (not rho) to ``n+1`` by the factor ``1/theta``. This macro lowers that extrapolation
+    with the EXISTING affine algebra, no component-restricted IR op: ``schur_reconstruct`` freezes rho
+    (and energy), so ``rho^{n+theta} = rho^n`` and ``mom^{n+theta} = rho v^{n+theta}``,
+    ``mom^n = rho v^n``. The plain STATE affine ``U^n + (1/theta)(U^{n+theta} - U^n)`` therefore leaves
+    rho (and a yet-unwritten energy) untouched -- ``rho^{n+1} = (1-1/theta)rho^n + (1/theta)rho^n =
+    rho^n`` -- and on the momentum it equals the native ``mom^{n+1} = mom^n + (1/theta)(mom^{n+theta} -
+    mom^n) = rho(v^n + (1/theta)(v^{n+theta} - v^n))``. The phi extrapolation is a no-op here because
+    phi^n = 0 (no carry) and the reconstruction already read phi^{n+theta}; phi^{n+1} would only matter
+    as the NEXT step's warm start (the deferred persistent-phi carry).
+
+    @p alpha is the electrostatic coupling constant; @p theta the theta-scheme implicitness in ``(0, 1]``;
+    @p c_rho / @p c_mx / @p c_my the conserved-variable components, @p c_bz the aux component of B_z
+    (canonical 3, filled by ``solve_fields``) and @p c_E the OPTIONAL energy component (None = no energy
+    update, like a rho/mx/my isothermal block). @p method / @p tol / @p max_iter configure the Krylov phi
+    solve.
 
     DEFERRED (documented partial, spec's "if too large" clause):
-      - **theta == 1 only** (backward-Euler source stage). For ``theta < 1`` the native stepper
-        extrapolates phi and v from the theta-stage to ``n+1`` (factor ``1/theta``, a MOMENTUM-ONLY /
-        energy-aware update); there is no IR op for a component-restricted extrapolation yet, so a
-        ``theta < 1`` macro would silently commit ``v^{n+theta}`` as ``v^{n+1}``. Rather than mis-lower,
-        this raises for ``theta != 1``.
       - **cross-step phi^n carry**. The native stepper freezes phi^n (the previous stage's potential)
         and keeps it in the RHS (``-Lap(phi^n)``) and as the solve warm start. The System history ring
-        is sized to the block's ncomp (a full state), so a 1-component phi cannot be carried through it
-        safely; this macro solves each step from ``phi^n = 0`` (a fresh zero scalar field). At
-        ``theta == 1`` the stage is well-posed from any phi^n (the solve is to tolerance) and the
-        velocity reconstruction reads only the solved phi, so a single step matches the native single
-        step taken from ``phi^n = 0``. A persistent-phi carry is a follow-up (it needs a 1-component
-        history or a scalar-field copy op).
-      - **energy role**. The native ``E^{n+1} = E^n + (1/2)rho(|v^{n+1}|^2 - |v^n|^2)`` update is
-        deferred; the macro updates the rho-frozen momentum only.
+        is sized to the block's ncomp (a full state) and stores via ``adc::lincomb`` (matching ncomp), so
+        a 1-component phi cannot be carried through it without a scalar-history runtime path (a new
+        ncomp-aware ``register_history`` + scalar-typed history IR ops + the extrapolated-phi store/read
+        dataflow) -- a runtime change too large for this slice. This macro therefore solves each step
+        from ``phi^n = 0`` (a fresh zero scalar field). At theta != 1 the FIRST step still matches the
+        native first step (both start from phi = 0); the cross-step difference is the warm-start /
+        ``-Lap(phi^n)`` term the native stepper carries (a smoother convergence, the same fixed point).
 
     NEAR-MATCH to native, not bit-exact: the native solve is BiCGStab + GeometricMG preconditioner while
     the Program solve is matrix-free BiCGStab WITHOUT a preconditioner -- the SAME operator and RHS, a
     different Krylov path (both converge to the same phi at tolerance). ``python/tests/
     test_time_condensed_schur.py`` checks against an offline reference of the identical assemble / solve
-    / reconstruct steps and documents the gap vs native."""
-    if float(theta) != 1.0:
-        raise NotImplementedError(
-            "adc.time.std.condensed_schur currently lowers only theta == 1 (backward-Euler source "
-            "stage); theta=%r needs the n+1 extrapolation (factor 1/theta) of phi and the MOMENTUM "
-            "components, for which there is no IR op yet (a component-restricted extrapolate). The "
-            "native adc.CondensedSchur stepper supports general theta. See the macro docstring."
-            % (theta,))
+    / reconstruct / extrapolate steps and documents the gap vs native (theta == 1 and theta == 0.5)."""
+    if not (0.0 < float(theta) <= 1.0):
+        raise ValueError("condensed_schur: theta must be in (0, 1] (got %r)" % (theta,))
+    if c_E is not None and (isinstance(c_E, bool) or not isinstance(c_E, int) or c_E < 0):
+        raise ValueError("condensed_schur: c_E must be None or a Python int >= 0 (got %r)" % (c_E,))
     U = P.state(block)
     P.solve_fields(U)  # fill the shared aux (B_z at c_bz) from the current state, like the native stage
     # phi^n = 0 (a fresh zero scalar field): the RHS Laplacian term -Lap(phi^n) vanishes and the solve
@@ -3107,8 +3144,24 @@ def condensed_schur(P, block, *, alpha, theta=1.0, c_rho=0, c_mx=1, c_my=2, c_bz
 
     P.set_apply(A, apply)
     phi = P.solve_linear(operator=A, rhs=rhs, method=method, tol=tol, max_iter=max_iter)
-    out = P.schur_reconstruct(state=U, phi=phi, th_dt=th_dt, c_rho=c_rho, c_mx=c_mx, c_my=c_my,
+    # The reconstruction overwrites the MOMENTUM in place. theta == 1 with no energy keeps the historical
+    # IR byte-identical (reconstruct directly on U). For theta < 1 OR an energy update we need U^n
+    # (mom^n / E^n) AFTER the reconstruction, so reconstruct on a fresh COPY of U^n and keep U^n intact.
+    needs_un = float(theta) != 1.0 or c_E is not None
+    target = P.linear_combine(block + ".schur_un_copy", 1.0 * U) if needs_un else U
+    out = P.schur_reconstruct(state=target, phi=phi, th_dt=th_dt, c_rho=c_rho, c_mx=c_mx, c_my=c_my,
                               c_bz=c_bz)
+    # 5) theta-stage -> n+1 extrapolation (ADC-427). theta < 1 lowers U^n + (1/theta)(U^{n+theta} - U^n)
+    # with the affine algebra (out is the theta-stage on the copy, U^n is the untouched original). rho is
+    # frozen by the reconstruction, so this affine leaves rho (and the not-yet-written energy) at U^n.
+    if float(theta) != 1.0:
+        inv_theta = 1.0 / float(theta)
+        out = P.linear_combine(block + ".schur_extrap", U + inv_theta * (out - U))
+    # 6) energy role (ADC-427). E^{n+1} = E^n + (1/2)rho(|v^{n+1}|^2 - |v^n|^2): the kinetic-energy
+    # increment from v^n (= mom^n/rho, read from U^n) to v^{n+1} (= mom^{n+1}/rho, in `out`). Skipped
+    # for an isothermal rho/mx/my block (c_E is None).
+    if c_E is not None:
+        out = P.schur_energy(state=out, state_old=U, c_rho=c_rho, c_mx=c_mx, c_my=c_my, c_E=c_E)
     if commit:
         P.commit(block, out)
     return out

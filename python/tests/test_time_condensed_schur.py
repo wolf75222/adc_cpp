@@ -11,26 +11,33 @@ detail::SchurOperatorCoeffKernel), ``P.apply_laplacian_coeff`` applies ``div(A g
 the same assemble / solve / reconstruct sequence as the native CondensedSchurSourceStepper (epic
 acceptance 32). The native ``adc.CondensedSchur`` stepper is untouched.
 
+ADC-427 extends the macro to theta != 1: the n+1 extrapolation by factor 1/theta is lowered with the
+EXISTING affine algebra (no component-restricted IR op) because schur_reconstruct freezes rho, so the
+plain state affine ``U^n + (1/theta)(U^{n+theta} - U^n)`` leaves rho untouched and equals the native
+momentum-only extrapolation; an OPTIONAL energy component (c_E) adds the native kinetic-energy increment
+via a new P.schur_energy op. The cross-step persistent-phi carry stays deferred (it needs a 1-component
+history runtime path); each step solves from phi^n = 0.
+
 (A) Pure Python, always runs:
-    - the four new builder ops record + validate their operands and serialize;
-    - the ``std.condensed_schur`` macro lowers (theta == 1) to a Program whose C++ contains the full
-      ctx.assemble_schur_coeffs -> ctx.assemble_schur_rhs -> bicgstab_solve(apply, -apply_laplacian_coeff)
-      -> ctx.schur_reconstruct chain;
-    - the macro raises NotImplementedError for theta != 1 (the deferred n+1 extrapolation), naming the
-      blocker.
+    - the builder ops record + validate their operands and serialize;
+    - the ``std.condensed_schur`` macro lowers theta == 1 (backward Euler, historical IR byte-identical)
+      AND theta < 1 (the 1/theta extrapolation as a copy-then-reconstruct + affine combine);
+    - an energy component lowers the P.schur_energy op; theta out of (0, 1] raises ValueError.
 
 (B) End-to-end parity (skips unless the full toolchain is present): the macro is compiled + installed +
-    one step is taken on a field-coupled rho/mx/my block with a constant B_z, then compared to an OFFLINE
-    numpy reference of the IDENTICAL discrete steps (the same anisotropic 5-point operator with harmonic
-    face means + arithmetic cross means, the same centered-divergence RHS, the same closed B^{-1}
-    reconstruction, BiCGStab from phi^n = 0). Asserts max|compiled - offline| <= 1e-6.
+    one step is taken on a field-coupled rho/mx/my block with a constant B_z, for theta == 1 AND
+    theta == 0.5, then compared to an OFFLINE numpy reference of the IDENTICAL discrete steps (the same
+    anisotropic 5-point operator with harmonic face means + arithmetic cross means, the same centered-
+    divergence RHS, the same closed B^{-1} reconstruction, BiCGStab from phi^n = 0, the same 1/theta
+    extrapolation). Asserts max|compiled - offline| <= 1e-6 for both thetas.
 
     DOCUMENTED GAP vs the native adc.CondensedSchur: the native solve is BiCGStab + a GeometricMG
     preconditioner while the Program solve is matrix-free BiCGStab WITHOUT a preconditioner -- the same
-    operator and RHS, a different Krylov path. Both converge to the same phi at tolerance, so the parity
-    is checked against the matrix-free-equivalent offline reference (not bit-against-native). The macro
-    is the theta == 1 (backward-Euler) source stage from phi^n = 0; cross-step phi^n carry, theta < 1
-    extrapolation and the energy-role update are deferred (see the macro docstring).
+    operator and RHS, a different Krylov path. Both converge to the same phi at tolerance, so the firm
+    parity is checked against the matrix-free-equivalent offline reference (not bit-against-native); a
+    native adc.CondensedSchur(theta=0.5) step is also REPORTED as a diagnostic (it is confounded by the
+    explicit transport half-flow of adc.Split, so it is not asserted). The cross-step phi^n carry is
+    deferred (see the macro docstring).
 
 Self-skips (exit 0) without numpy / _adc / install_program / a compiler / a visible Kokkos -- never
 fakes the engine (project policy: no fake adc in tests).
@@ -128,15 +135,52 @@ def test_condensed_schur_macro_lowers(t):
         assert frag in src, "the condensed-Schur macro must contain %r\n%s" % (frag, src)
 
 
-def test_condensed_schur_theta_not_one_raises(t):
-    try:
-        t.std.condensed_schur(t.Program("p"), "blk", alpha=1.0, theta=0.5)
-    except NotImplementedError as exc:
-        msg = str(exc)
-        assert "theta == 1" in msg and "extrapolation" in msg, msg
-        assert "adc.CondensedSchur" in msg, msg
-    else:
-        raise AssertionError("condensed_schur(theta != 1) must raise NotImplementedError (deferred)")
+def test_condensed_schur_theta_half_lowers(t):
+    """ADC-427: theta != 1 now lowers (the n+1 extrapolation by factor 1/theta is the affine algebra,
+    no component-restricted IR op). The macro reconstructs on a COPY of U^n so the extrapolation can
+    read mom^n, then commits U^n + (1/theta)(U^{n+theta} - U^n)."""
+    P = t.Program("cs")
+    t.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=0.5)
+    assert P.validate() is True, "the theta=0.5 condensed-Schur macro must validate"
+    assert P._ir_hash(), "the IR must serialize to a stable hash"
+    src = P.emit_cpp_program()
+    for frag in ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs", "adc::bicgstab_solve",
+                 "ctx.schur_reconstruct"):
+        assert frag in src, "the theta=0.5 macro must contain %r\n%s" % (frag, src)
+    # th_dt = theta*dt is lowered into the reconstruction; the extrapolation is an axpy(2.0, ...) (1/0.5).
+    assert "0.5 * dt" in src, "th_dt = theta*dt must reach the reconstruction\n%s" % src
+    assert "static_cast<adc::Real>(2.0)" in src, "the 1/theta extrapolation must axpy by 2.0\n%s" % src
+
+
+def test_condensed_schur_theta_out_of_range_raises(t):
+    for bad in (0.0, -0.5, 1.5):
+        try:
+            t.std.condensed_schur(t.Program("p"), "blk", alpha=1.0, theta=bad)
+        except ValueError as exc:
+            assert "theta must be in (0, 1]" in str(exc), str(exc)
+        else:
+            raise AssertionError("condensed_schur(theta=%r) must raise ValueError" % bad)
+
+
+def test_condensed_schur_energy_lowers(t):
+    """ADC-427: an energy component (c_E) adds the native kinetic-energy increment via P.schur_energy."""
+    P = t.Program("cs")
+    t.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=0.5, c_E=3)
+    assert P.validate() is True
+    src = P.emit_cpp_program()
+    assert "ctx.schur_energy" in src, "the energy variant must emit ctx.schur_energy\n%s" % src
+
+
+def test_condensed_schur_theta_one_ir_unchanged(t):
+    """ADC-427 no-regression: theta == 1 keeps its historical IR (reconstruct IN PLACE on U^n, no copy /
+    extrapolation / energy op), so an existing theta==1 program's .so cache key is byte-identical."""
+    P = t.Program("cs")
+    t.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=1.0)
+    src = P.emit_cpp_program()
+    assert "ctx.schur_energy" not in src, "theta=1 must NOT emit an energy op"
+    # No copy-then-reconstruct: the reconstruction writes U^n in place, the commit is the reconstruction.
+    assert src.count("ctx.schur_reconstruct") == 1, src
+    assert "static_cast<adc::Real>(2.0)" not in src, "theta=1 must NOT emit a 1/theta extrapolation"
 
 
 # ---- offline reference of the identical discrete steps (numpy, periodic) ----
@@ -187,7 +231,9 @@ def _apply_aniso(phi, eps_x, eps_y, a_xy, a_yx, h):
 
 
 def _offline_step(U0, alpha, theta, bz, h, dt, tol):
-    """Offline replay with an EXPLICIT dt, mirroring the generated C++ exactly (phi^n = 0)."""
+    """Offline replay with an EXPLICIT dt, mirroring the generated C++ exactly (phi^n = 0). For
+    theta < 1 it also applies the n+1 extrapolation v^{n+1} = v^n + (1/theta)(v^{n+theta} - v^n) =
+    the macro's affine ``U^n + (1/theta)(U^{n+theta} - U^n)`` (rho frozen)."""
     import numpy as np
 
     rho, mx, my = U0[0].copy(), U0[1].copy(), U0[2].copy()
@@ -210,7 +256,7 @@ def _offline_step(U0, alpha, theta, bz, h, dt, tol):
     def apply(phi):
         return -_apply_aniso(phi, eps_x, eps_y, a_xy, a_yx, h)
     phi, iters = _np_bicgstab(apply, rhs, tol=tol)
-    # 4) reconstruct v = B^{-1}(v^n - theta*dt*grad phi); mom = rho*v (rho frozen).
+    # 4) reconstruct v^{n+theta} = B^{-1}(v^n - theta*dt*grad phi); mom = rho*v (rho frozen).
     inv_rho = np.where(rho != 0.0, 1.0 / rho, 0.0)
     vx = mx * inv_rho
     vy = my * inv_rho
@@ -218,8 +264,12 @@ def _offline_step(U0, alpha, theta, bz, h, dt, tol):
     gy = (np.roll(phi, -1, 1) - np.roll(phi, 1, 1)) / (2 * h)
     ax = vx - th_dt * gx
     ay = vy - th_dt * gy
-    nx = b11 * ax + b12 * ay
+    nx = b11 * ax + b12 * ay  # v^{n+theta}
     ny = b21 * ax + b22 * ay
+    # 5) n+1 extrapolation (theta < 1): v^{n+1} = v^n + (1/theta)(v^{n+theta} - v^n). theta == 1 -> id.
+    inv_theta = 1.0 / theta
+    nx = vx + inv_theta * (nx - vx)
+    ny = vy + inv_theta * (ny - vy)
     return np.stack([rho, rho * nx, rho * ny]), iters
 
 
@@ -323,39 +373,83 @@ def _run_section_b(t):
         sim.set_state("blk", U0)
         return sim, U0
 
-    sim, U0 = make_sim("cs_block")
-    if sim is None:
-        return None
-
-    P = t.Program("cs_step")
-    t.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=_THETA, tol=_TOL, max_iter=400)
-    try:
-        compiled = adc.compile_problem(model=schur_model("cs_prog"), time=P)
-    except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
-        print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
-        return None
-    assert compiled.program_name == "cs_step", "handle carries the program name"
-
-    sim.install_program(compiled.so_path)
-    sim.step(_DT)
-    out = np.array(sim.get_state("blk"))
-
-    # OFFLINE reference: the identical assemble / solve / reconstruct steps in numpy (phi^n = 0,
-    # matrix-free BiCGStab). B_z is the constant the System carries; rho is FROZEN.
     h = _L / _N
-    ref, iters = _offline_step(U0, _ALPHA, _THETA, _BZ, h, _DT, _TOL)
-    err = float(np.abs(out - ref).max())
-    moved = float(np.abs(out - U0).max())
-    rho_drift = float(np.abs(out[0] - U0[0]).max())
-    print("  condensed-Schur parity: max|compiled - offline| = %.2e  offline BiCGStab iters = %d  "
-          "max|U - U0| = %.2e  rho drift = %.2e" % (err, iters, moved, rho_drift))
-    assert err <= 1e-6, "compiled condensed-Schur == offline (matrix-free) reference (max|d| = %.2e); " \
-                        "NOTE near-match to native adc.CondensedSchur, which adds a GeometricMG " \
-                        "preconditioner (same operator/RHS, different Krylov path)" % err
-    assert moved > 1e-6, "the source stage must change the momentum (max|d| = %.2e)" % moved
-    assert rho_drift < 1e-12, "rho must stay frozen in the source stage (drift = %.2e)" % rho_drift
-    assert iters > 1, "the solve must take > 1 iteration, got %d" % iters
-    return (err, iters)
+
+    def compiled_vs_offline(theta):
+        """One compiled step of std.condensed_schur(theta) vs the matrix-free offline reference."""
+        sim, U0 = make_sim("cs_block_%d" % int(round(theta * 100)))
+        if sim is None:
+            return None
+        P = t.Program("cs_step_%d" % int(round(theta * 100)))
+        t.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, tol=_TOL, max_iter=400)
+        try:
+            compiled = adc.compile_problem(model=schur_model("cs_prog_%d" % int(round(theta * 100))),
+                                           time=P)
+        except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
+            print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
+            return None
+        sim.install_program(compiled.so_path)
+        sim.step(_DT)
+        out = np.array(sim.get_state("blk"))
+        ref, iters = _offline_step(U0, _ALPHA, theta, _BZ, h, _DT, _TOL)
+        err = float(np.abs(out - ref).max())
+        moved = float(np.abs(out - U0).max())
+        rho_drift = float(np.abs(out[0] - U0[0]).max())
+        print("  compiled-vs-offline theta=%.2f: max|compiled - offline| = %.2e  iters = %d  "
+              "max|U - U0| = %.2e  rho drift = %.2e" % (theta, err, iters, moved, rho_drift))
+        assert err <= 1e-6, "compiled condensed-Schur(theta=%.2f) == offline reference (max|d| = " \
+                            "%.2e)" % (theta, err)
+        assert moved > 1e-6, "the source stage must change the momentum (theta=%.2f, max|d| = %.2e)" \
+                             % (theta, moved)
+        assert rho_drift < 1e-12, "rho must stay frozen (theta=%.2f, drift = %.2e)" % (theta, rho_drift)
+        assert iters > 1, "the solve must take > 1 iteration (theta=%.2f), got %d" % (theta, iters)
+        return out, U0, ref
+
+    # theta == 1 (no-regression: the historical backward-Euler path) + theta == 0.5 (ADC-427).
+    compiled_vs_offline(1.0)
+    half = compiled_vs_offline(0.5)
+
+    # NATIVE diagnostic (ADC-427): std.condensed_schur(theta=0.5) compiled vs adc.CondensedSchur(
+    # theta=0.5) through adc.Split, taken as a SINGLE step (both start from phi^n = 0 -- the System
+    # initializes phi to zero, the macro has no persistent phi carry). This is REPORTED, not asserted:
+    # the native adc.Split also runs the EXPLICIT transport half-flow that the source-only Program omits,
+    # so the two states differ by the transport advection (plus the MG-preconditioned vs unpreconditioned
+    # BiCGStab path -- the documented ADC-421 Krylov gap). The FIRM parity is compiled-vs-offline above,
+    # where the offline reference IS the source stage exactly (same matrix-free BiCGStab). Faking a tight
+    # native bound here would mean asserting against a transport-confounded step -- we do not.
+    if half is not None:
+        out_c, U0, _ = half
+        sim_n = adc.System(n=_N, L=_L, periodic=True)
+        try:
+            native_model = schur_model("cs_native").compile(backend="production")
+        except RuntimeError as exc:
+            print("-- (B) native diagnostic skipped: model compile failed: %s --" % str(exc)[:160])
+            native_model = None
+        if native_model is not None:
+            try:
+                # B_z must exist BEFORE add_equation: the CondensedSchur source stage is wired during
+                # add_equation (set_source_stage), which reads the B_z aux. set_poisson + the magnetic
+                # field first, then the block.
+                sim_n.set_poisson("charge_density", "geometric_mg")
+                sim_n.set_magnetic_field(_BZ * np.ones(_N * _N))
+                sim_n.add_equation(
+                    "blk", native_model,
+                    spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
+                    time=adc.Split(hyperbolic=adc.Explicit(method="euler"),
+                                   source=adc.CondensedSchur(theta=0.5, alpha=_ALPHA)))
+            except Exception as exc:  # noqa: BLE001 -- Split/CondensedSchur wiring unavailable here
+                print("-- (B) native diagnostic skipped: adc.Split/CondensedSchur unavailable: %s --"
+                      % str(exc)[:160])
+            else:
+                sim_n.set_state("blk", U0)
+                sim_n.step(_DT)
+                out_n = np.array(sim_n.get_state("blk"))
+                d_native = float(np.abs(out_c - out_n).max())
+                print("  [diagnostic] compiled(theta=0.5) source-only vs native adc.CondensedSchur("
+                      "theta=0.5) Split(transport+source): max|d| = %.2e  (native includes the explicit "
+                      "transport half-flow + the MG-preconditioned BiCGStab path; firm parity is the "
+                      "compiled-vs-offline assertion above)" % d_native)
+    return half
 
 
 def _run():
