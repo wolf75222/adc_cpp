@@ -64,6 +64,14 @@ struct BlockClosures {
       advance_masked;                                    ///< same, residual via assemble_rhs_masked
   std::function<void(MultiFab&, Real, int)> advance_eb;  ///< same, residual via assemble_rhs_eb
   std::function<void(MultiFab&, MultiFab&)> rhs_into;    ///< R <- -div F + S (Poisson frozen)
+  /// FLUX-ONLY residual R <- -div F(U) (NO default/composite source), Poisson frozen (ADC-425). The
+  /// SAME transport assembly as @ref rhs_into evaluated on SourceFreeModel<Model> (zero source), so the
+  /// flux / ghost / geometry handling is bit-identical -- only the source is dropped. A compiled time
+  /// Program's hyperbolic stage (P.rhs(flux=True, sources without "default")) reads it so a Lie/Strang
+  /// split assembles "flux but no source" without the default source leaking in (spec criterion 17:
+  /// sources are explicit, never summed implicitly). OPTIONAL (empty for block paths that do not build
+  /// it, e.g. the host .so prototype loader): System::block_neg_div_flux_into fails loud then.
+  std::function<void(MultiFab&, MultiFab&)> rhs_flux_only;
   /// dt_hotspot diagnostic (ADC-182): (U, w, i, j) -> GLOBAL cell dominating the transport
   /// CFL and its speed. OPTIONAL (empty = block without diagnostic, e.g. historical
   /// unrewired paths); never called by step/step_cfl (off the hot path).

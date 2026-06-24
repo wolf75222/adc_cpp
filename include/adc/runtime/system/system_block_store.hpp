@@ -1,9 +1,9 @@
 #pragma once
 
-#include <adc/core/state/state.hpp>      // kAuxBaseComps (default aux channel of the Schur stage: B_z)
-#include <adc/core/foundation/types.hpp>      // Real
-#include <adc/core/state/variables.hpp>  // VariableSet (role descriptor carried by each block)
-#include <adc/mesh/index/box2d.hpp>      // Box2D
+#include <adc/core/state/state.hpp>  // kAuxBaseComps (default aux channel of the Schur stage: B_z)
+#include <adc/core/foundation/types.hpp>  // Real
+#include <adc/core/state/variables.hpp>   // VariableSet (role descriptor carried by each block)
+#include <adc/mesh/index/box2d.hpp>       // Box2D
 #include <adc/mesh/execution/for_each.hpp>  // device_fence (marshaling synchronizes the device before reading the host)
 #include <adc/mesh/storage/multifab.hpp>  // MultiFab, Array4, ConstArray4
 
@@ -140,6 +140,14 @@ class SystemBlockStore {
     // couplages ; jamais par etage RK). VIDE (defaut) -> jamais interrogee (cout nul, chemin
     // bit-identique). Trailing + defaut vide : l'init par agregat positionnel reste inchangee.
     std::function<void(MultiFab&)> project;
+    // FLUX-ONLY residual R <- -div F(U) (NO default/composite source), Poisson frozen (ADC-425). The
+    // SAME transport assembly as rhs_into evaluated on SourceFreeModel<Model> (zero source), so the
+    // flux / ghost / geometry handling is bit-identical -- only the source is dropped. Read by
+    // System::block_neg_div_flux_into, which a compiled time Program's hyperbolic stage calls so a
+    // Lie/Strang split assembles "flux but no source" (spec criterion 17). EMPTY (default) for paths
+    // that do not build it (the host .so prototype loader); block_neg_div_flux_into fails loud then.
+    // Trailing + empty default: the positional aggregate init of the other members stays unchanged.
+    std::function<void(MultiFab&, MultiFab&)> rhs_flux_only;
   };
 
   /// ORDERED registry of the blocks (UNIQUE source of truth). PUBLIC: Impl aliases it as `sp` for the

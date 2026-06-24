@@ -959,6 +959,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **Flux-only RHS no longer leaks the default source** (ADC-425, epic ADC-399, spec criterion 17):
+  `adc.time.Program.rhs(flux=True, sources=[])` on a model with a default `m.source` used to STILL add
+  that source (the codegen always lowered the default-flux RHS to `ctx.rhs_into` = `-div F` + the
+  default source), breaking the hyperbolic stage of a Lie/Strang/IMEX split (which needs "flux but no
+  source"). A new runtime primitive `System::block_neg_div_flux_into` (and
+  `ProgramContext::neg_div_flux_default_into`) assembles `-div F(U)` WITHOUT the default source by
+  reusing the block's existing transport path on `SourceFreeModel<Model>` (bit-identical flux / ghost /
+  geometry handling, only the source dropped). The codegen now routes on whether `"default"` is among
+  the requested sources: `sources=None` (legacy) / `["default"]` keep `ctx.rhs_into` (unchanged);
+  `sources=[]` is flux only; `sources=["a","b"]` is flux + a + b (named sources axpy'd on top, no
+  double-count). New `python/tests/test_time_rhs_sources.py`.
 - **Embedded C++ API page no longer inherits the doxygen-awesome theme** (ADC-388): the in-site
   `/doxygen/` pages (doxysphinx) inline the raw Doxygen `<head>`, so the doxygen-awesome global
   selectors (`body`, `a:link`, root variables, dozens of `!important` rules) were leaking into the
