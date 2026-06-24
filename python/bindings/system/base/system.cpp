@@ -416,6 +416,16 @@ struct System::Impl {
   void solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
     fields_.solve_fields_from_state(block_idx, U_stage);
   }
+  // NAMED multi-elliptic field (ADC-428): a SECOND elliptic solve for the user-named @p field, from a
+  // stage state of @p block_idx, written to the field's OWN aux components. The default Poisson path
+  // (solve_fields / solve_fields_from_state) is untouched. Same delegation idiom.
+  void solve_named_field_from_state(const std::string& field, int block_idx,
+                                    const MultiFab& U_stage) {
+    fields_.solve_named_field_from_state(field, block_idx, U_stage);
+  }
+  void register_elliptic_field(const std::string& field, int phi_comp, int gx_comp, int gy_comp) {
+    fields_.register_named_field(field, phi_comp, gx_comp, gy_comp);
+  }
 
   // State marshaling DELEGATED to the store (Batch B.3): copy_comp0 / copy_state / write_state carry the
   // device_fence, the layout (component-major) and the size error identically. Kept as
@@ -1817,6 +1827,33 @@ void System::solve_fields() {
 
 void System::solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
   p_->solve_fields_from_state(block_idx, U_stage);
+}
+
+// NAMED multi-elliptic field (ADC-428): a SECOND elliptic solve for @p field from block @p block_idx's
+// stage state. Forwards to the field solver, which assembles the per-field RHS (sum of the blocks'
+// named bricks), solves with a dedicated native solver, and writes the field's OWN aux components.
+ADC_EXPORT void System::solve_fields_from_state(const std::string& field, int block_idx,
+                                                const MultiFab& U_stage) {
+  p_->solve_named_field_from_state(field, block_idx, U_stage);
+}
+
+// Register a named elliptic field (ADC-428): records WHERE the field's solved phi / centered grad land
+// in the aux channel (@p phi_comp / @p gx_comp / @p gy_comp, the model's named aux slots). The native
+// loader calls this for each m.elliptic_field after the block is installed. ADC_EXPORT: resolved by the
+// generated problem.so / native loader across the dlopen boundary.
+ADC_EXPORT void System::register_elliptic_field(const std::string& field, int phi_comp, int gx_comp,
+                                                int gy_comp) {
+  p_->register_elliptic_field(field, phi_comp, gx_comp, gy_comp);
+}
+
+// Attach a named elliptic-field RHS closure to block @p block_name (ADC-428): the per-field Poisson
+// right-hand side brick += elliptic_field_rhs(U). The native loader builds it (make_poisson_rhs of the
+// named brick) and attaches it here; solve_fields_from_state(field, ...) then sums it over the blocks.
+// @throws if the block is unknown. ADC_EXPORT: resolved across the dlopen boundary.
+ADC_EXPORT void System::set_block_elliptic_field(
+    const std::string& block_name, const std::string& field,
+    std::function<void(const MultiFab&, MultiFab&)> rhs) {
+  p_->blocks_.find(block_name).named_poisson_rhs[field] = std::move(rhs);
 }
 
 // Time advance EXTRACTED into stepper_ (SystemStepper, Batch B). Pure delegation: the Cartesian/polar

@@ -179,6 +179,15 @@ class ProgramContext {
   void solve_fields_from_state(int b, MultiFab& u_stage) const {
     sys_->solve_fields_from_state(b, u_stage);
   }
+  /// Named multi-elliptic field solve (ADC-428): re-solve the SECOND elliptic field @p field from block
+  /// @p b's stage state @p u_stage and write its phi (+ centered grad) into the field's OWN aux
+  /// components (distinct from the shared phi/grad the default solve_fields fills). Forwards to
+  /// System::solve_fields_from_state(field, b, u_stage). The codegen lowers
+  /// P.solve_fields(field=name, state=U) to this; a default (unnamed) solve_fields keeps the overload
+  /// above, byte-identical.
+  void solve_fields_from_state(const std::string& field, int b, MultiFab& u_stage) const {
+    sys_->solve_fields_from_state(field, b, u_stage);
+  }
   int n_blocks() const { return sys_->n_blocks(); }
   MultiFab& state(int b) const { return sys_->block_state(b); }
   void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(b, u, r); }

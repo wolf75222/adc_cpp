@@ -44,6 +44,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   System history ring is block-ncomp); each step solves from phi^n = 0. Extended
   `python/tests/test_time_condensed_schur.py` (theta == 1 and theta == 0.5 compiled-vs-offline parity,
   the energy lowering, and a native `adc.CondensedSchur(theta=0.5)` diagnostic).
+- **Named multi-elliptic-field runtime** (ADC-428, epic ADC-399; completes ADC-419): a SECOND elliptic
+  solve beyond the default Poisson for a user-named field. `m.elliptic_field("phi2", rhs=, aux=[...])`
+  now lowers end to end on the `production`/`system` backend -- the named field gets its own RHS brick
+  (a function of the conservative state, like `m.elliptic_rhs`), a DEDICATED native elliptic solver
+  instance (GeometricMG/FFT, reused, not reimplemented), and its OWN aux output channel (the model's
+  named `aux_field` slots), distinct from the shared phi/grad. `P.solve_fields(field=name, state=U)`
+  lowers to `ctx.solve_fields_from_state(field, block, U)` (a distinct FieldContext per field) instead
+  of raising `NotImplementedError`; a source/flux reads the solved field via its named aux. The default
+  Poisson path (`solve_fields` without `field=`) is byte-identical. New `System` seam
+  (`solve_fields_from_state(field, ...)`, `register_elliptic_field`, `set_block_elliptic_field`) +
+  `ProgramContext` overload. Deferred (documented, rejected loud): the `aot` flat-ABI named symbols,
+  the `amr_system` target, and the polar (ring) named path. New
+  `python/tests/test_time_multielliptic.py`.
 - **`adc.time.std` library completion + `@P.step` decorator** (ADC-423, epic ADC-399): pure-Python
   macros that lower to the existing Program IR (no new C++ stepper) -- `std.rk` (generic explicit
   Butcher tableau; `RK4_TABLEAU` reproduces the `rk4` macro IR byte for byte, `SSPRK2_TABLEAU` gives

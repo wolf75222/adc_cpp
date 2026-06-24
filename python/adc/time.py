@@ -1726,20 +1726,21 @@ class Program:
                 self._check_op_lowerable(w, model)
             return
         if v.op == "solve_fields":
-            # A NAMED elliptic field (ADC-419) needs a second elliptic operator + its own aux channel,
-            # which the runtime does not host yet -> lower to a clear NotImplementedError (the IR /
-            # validation / hash for the named field land; only the multi-field SOLVE is deferred).
+            # A NAMED elliptic field (ADC-419/ADC-428) drives a SECOND elliptic solve into its own aux
+            # channel. The runtime now hosts it (System::solve_fields_from_state(field, ...) via
+            # ProgramContext); lowering needs the model so the field name can be validated against the
+            # declared m.elliptic_field set (the codegen emits the named ctx call).
             field = v.attrs.get("field")
             if field is not None:
-                if model is not None and field not in _model_impl(model)._elliptic_fields:
+                if model is None:
+                    raise NotImplementedError(
+                        "emit_cpp_program cannot lower solve_fields with a named elliptic field "
+                        "('%s') without the physical model that declares it (m.elliptic_field); pass "
+                        "model= (compile_problem threads it through)" % field)
+                if field not in _model_impl(model)._elliptic_fields:
                     raise ValueError(
                         "unknown elliptic_field '%s' in solve_fields '%s'; declared: %s"
                         % (field, v.name, sorted(_model_impl(model)._elliptic_fields)))
-                raise NotImplementedError(
-                    "emit_cpp_program cannot lower solve_fields with a named elliptic field ('%s'): "
-                    "the multi-elliptic-field runtime (a second elliptic operator + its own aux "
-                    "channel) is deferred; only the default Poisson coupling (solve_fields without "
-                    "field=) is lowered" % field)
             return
         if v.op == "rhs":
             named_fluxes = _named_fluxes(v)
@@ -1863,7 +1864,16 @@ class Program:
             # Poisson RHS is Sum_s elliptic_rhs_s(U_s) (assemble_poisson_rhs), so block idx reads its
             # stage state while every OTHER block contributes its live state into the shared phi/aux.
             (state_in,) = v.inputs  # solve_fields inputs = (state,)
-            lines.append("ctx.solve_fields_from_state(%d, %s);" % (bidx, var[state_in.id]))
+            field = v.attrs.get("field")
+            if field is not None:
+                # NAMED multi-elliptic field (ADC-428): a SECOND elliptic solve into the field's OWN aux
+                # channel (distinct from the shared phi/grad). Lowers to the named overload
+                # ctx.solve_fields_from_state(field, block, U) -- block from block_idx (ADC-426); the
+                # default (unnamed) path keeps the 2-arg overload below, byte-identical.
+                lines.append('ctx.solve_fields_from_state(%s, %d, %s);'
+                             % (json.dumps(field), bidx, var[state_in.id]))
+            else:
+                lines.append("ctx.solve_fields_from_state(%d, %s);" % (bidx, var[state_in.id]))
         elif v.op == "history":
             # Read the SYSTEM-OWNED history slot (a MultiFab&, ADC-406a): lag steps back. The reference
             # is bound to a C++ name the affine combine then reads like any other state/RHS term.

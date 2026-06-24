@@ -1926,7 +1926,22 @@ class HyperbolicModel:
             if not (isinstance(a, str) and a.isidentifier()):
                 raise ValueError("elliptic_field('%s'): aux field %r is not a valid identifier"
                                  % (name, a))
-        self._elliptic_fields[name] = {"rhs": _wrap(rhs), "operator": operator, "aux": aux}
+        rhs = _wrap(rhs)
+        # The elliptic RHS brick (emit_cpp_elliptic_field, like the default emit_cpp_elliptic) reads
+        # ONLY the conservative state (+ primitives derived from it), never the aux channel: the System
+        # assembles f(U) per cell from the block state, before any aux is solved. An rhs reading an aux
+        # field would compile to an undefined local -> reject it loud (the default set_elliptic_rhs has
+        # the same surface). A source/flux READING the named field's solved aux is the supported pattern;
+        # it is the named-elliptic RHS itself that must be a function of U only.
+        rhs_aux = rhs.deps() & (set(AUX_CANONICAL) | set(self.aux_extra_names) | {"phi", "grad_x",
+                                                                                 "grad_y", "B_z",
+                                                                                 "T_e"})
+        if rhs_aux:
+            raise ValueError("elliptic_field('%s'): rhs may not read aux fields %s; the elliptic "
+                             "right-hand side is a function of the conservative state only (the same "
+                             "surface as m.elliptic_rhs). Read the SOLVED field's aux in a source/flux."
+                             % (name, sorted(rhs_aux)))
+        self._elliptic_fields[name] = {"rhs": rhs, "operator": operator, "aux": aux}
 
     def source_term(self, name, exprs):
         """Declare a NAMED local source S_name(U, primitives, aux, params): exactly n_cons
@@ -3433,9 +3448,40 @@ class HyperbolicModel:
                 "namespace adc_generated { struct %sEll {\n"
                 "  template <class State> ADC_HD adc::Real rhs(const State&) const { return adc::Real(0); }\n"
                 "}; }\n" % nm)
+        # NAMED elliptic fields (ADC-428): one SELF-CONTAINED brick per m.elliptic_field, paired with
+        # make_poisson_rhs by the native loader and routed to a SECOND elliptic solve. Emitted only when
+        # the model declares one -> backward-compatible (no named field => no extra struct, byte-identical
+        # to the historical brick set).
+        for fld in sorted(self._elliptic_fields):
+            parts.append(self.emit_cpp_elliptic_field(
+                fld, "%sEll_%s" % (nm, fld), hoist_reciprocals=hoist_reciprocals))
         composite = ("adc::CompositeModel<adc_generated::%sHyp, %s, adc_generated::%sEll>"
                      % (nm, src_type, nm))
         return nv, "".join(parts), composite
+
+    def _elliptic_field_registrations(self, nm):
+        """Per named elliptic field (ADC-428): (field, brick_struct, phi_comp, gx_comp, gy_comp) for the
+        native loader. The aux component of each output name is its channel index: a CANONICAL name
+        (phi/grad_x/...) maps via AUX_CANONICAL; a model-named aux (aux_field) maps to
+        AUX_NAMED_BASE + its position in aux_extra_names. A name the model never declared as an aux is
+        rejected (the solve would write a component no source can read). gx/gy default to -1 (phi only)
+        when the field lists fewer than 3 aux names."""
+        def comp(name):
+            if name in AUX_CANONICAL:
+                return AUX_CANONICAL[name]
+            if name in self.aux_extra_names:
+                return AUX_NAMED_BASE + self.aux_extra_names.index(name)
+            raise ValueError(
+                "elliptic_field: aux output '%s' is not a declared aux field; declare it with "
+                "m.aux_field('%s') (so it gets an aux-channel slot a source can read)" % (name, name))
+        regs = []
+        for fld in sorted(self._elliptic_fields):
+            aux = self._elliptic_fields[fld]["aux"]
+            phi_c = comp(aux[0])
+            gx_c = comp(aux[1]) if len(aux) > 1 else -1
+            gy_c = comp(aux[2]) if len(aux) > 2 else -1
+            regs.append((fld, "adc_generated::%sEll_%s" % (nm, fld), phi_c, gx_c, gy_c))
+        return regs
 
     def _emit_metadata(self, model_alias):
         """OPTIONAL metadata symbols of the .so block, read by dlsym on the System side. SHARED by both
@@ -3610,6 +3656,8 @@ class HyperbolicModel:
             raise ValueError("emit_cpp_native_loader: target 'system' | 'amr_system' (got %r)"
                              % (target,))
         nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
+        nm = name or (self.name.capitalize() + "Gen")  # brick struct prefix (matches _emit_bricks)
+        ell_field_regs = self._elliptic_field_registrations(nm)  # ADC-428 named elliptic fields
         # std headers FIRST (before any namespace). MSVC: a #include <std> while an adc namespace
         # is open makes std seen as adc::std (<vector> errors); g++ tolerates it because already included via
         # guard. Hoisting them here makes the brick-internal #include std harmless (no-op guard).
@@ -3639,6 +3687,15 @@ class HyperbolicModel:
             # pos_floor (ADC-76, Zhang-Shu positivity limiter): final flat argument, marshaled
             # down to the loader's make_block via add_compiled_model. Old signature = old .so =
             # rejected by the ABI key (the headers changed), never a wrong argument layout.
+            # NAMED elliptic fields (ADC-428): after the block is installed, register each named field's
+            # aux output components on the System and attach its per-block RHS closure
+            # (make_poisson_rhs of the self-contained brick). solve_fields(field=name) then drives a
+            # SECOND elliptic solve. Empty (no named field) -> byte-identical to the historical loader.
+            ell_field_lines = "".join(
+                '  s->register_elliptic_field("%s", %d, %d, %d);\n'
+                '  s->set_block_elliptic_field(name, "%s", adc::make_poisson_rhs(%s{}));\n'
+                % (fld, phi_c, gx_c, gy_c, fld, brick)
+                for (fld, brick, phi_c, gx_c, gy_c) in ell_field_regs)
             install = ('ADC_LOADER_API void adc_install_native(void* sys, const char* name, const char* limiter,\n'
                        '                                    const char* riemann, const char* recon,\n'
                        '                                    const char* time, double gamma, int substeps,\n'
@@ -3648,8 +3705,17 @@ class HyperbolicModel:
                        '                                                    limiter, riemann, recon, time, gamma,\n'
                        '                                                    substeps, evolve != 0, stride,\n'
                        '                                                    pos_floor);\n'
+                       + ell_field_lines +
                        '}\n')
         else:  # amr_system: AmrSystem overload (no evolve parameter, single-block AMR)
+            # NAMED elliptic fields (ADC-428) are CARTESIAN-System only for now: the AMR named-elliptic
+            # runtime (a second elliptic solve over the AMR hierarchy) is a future extension. Reject
+            # them loud rather than silently dropping the field (the .so would compile but never solve).
+            if ell_field_regs:
+                raise NotImplementedError(
+                    "elliptic_field (named multi-elliptic, ADC-428) on target='amr_system' is not "
+                    "supported yet; it is available on target='system' (cartesian). Declared: %s"
+                    % sorted(f for (f, *_rest) in ell_field_regs))
             # pos_floor (ADC-322, Zhang-Shu positivity limiter): final flat argument, marshaled down to
             # add_compiled_model -> set_compiled_block (mono via AmrBuildParams::pos_floor, multi via the
             # AmrCompiledBlockBuilder slot). stride / implicit_vars / implicit_roles stay at their defaults
@@ -4088,6 +4154,39 @@ class HyperbolicModel:
         out += ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
         out += self._prim_block(self._live_prims([self._elliptic]), hoist_reciprocals)
         tl, cpps = self._codegen_exprs([self._elliptic], cse)
+        out += tl
+        out += ["    return %s;" % cpps[0], "  }", "};", "}  // namespace %s" % namespace]
+        return "\n".join(out) + "\n"
+
+    def emit_cpp_elliptic_field(self, field, struct_name, namespace="adc_generated",
+                                hoist_reciprocals=False, cse=True):
+        """Generates a SELF-CONTAINED elliptic RHS brick for the NAMED field @p field (ADC-428).
+
+        Unlike emit_cpp_elliptic (which emits only ``rhs(U)``, consumed by CompositeModel), this brick
+        is shaped like a minimal Model so the runtime can pair it with adc::make_poisson_rhs directly:
+        it declares ``n_vars`` + ``State`` (so load_state<Brick> reads the conservative state) and
+        exposes ``elliptic_rhs(State)`` (what detail::PoissonRhs<Brick> calls per cell). The native
+        loader builds one std::function per named field via make_poisson_rhs(Brick{}) and attaches it to
+        the block (System::set_block_elliptic_field). The RHS reads ONLY the conservative state (+
+        primitives), never the aux (enforced at declaration). Reuses _codegen_exprs / _prim_block so the
+        formula lowers IDENTICALLY to the default elliptic brick."""
+        spec = self._elliptic_fields[field]
+        rt_member = self._runtime_params_member()  # runtime indices BEFORE any to_cpp()
+        out = ["#include <cmath>",
+               "#include <adc/numerics/spatial/primitives/state_access.hpp>  // StateVec",
+               "// brique de SECOND MEMBRE elliptique NOMMEE '%s' (champ '%s', adc.dsl.elliptic_field)."
+               % (struct_name, field)]
+        if rt_member:
+            out.append("#include <adc/runtime/config/runtime_params.hpp>")
+        out += ["namespace %s {" % namespace, "struct %s {" % struct_name,
+                "  static constexpr int n_vars = %d;" % self.n_vars,
+                "  using State = adc::StateVec<%d>;" % self.n_vars]
+        if rt_member:
+            out.append(rt_member.rstrip("\n"))
+        out += ["  ADC_HD adc::Real elliptic_rhs(const State& U) const {"]
+        out += ["    const adc::Real %s = U[%d];" % (c, i) for i, c in enumerate(self.cons_names)]
+        out += self._prim_block(self._live_prims([spec["rhs"]]), hoist_reciprocals)
+        tl, cpps = self._codegen_exprs([spec["rhs"]], cse)
         out += tl
         out += ["    return %s;" % cpps[0], "  }", "};", "}  // namespace %s" % namespace]
         return "\n".join(out) + "\n"

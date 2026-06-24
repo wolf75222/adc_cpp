@@ -149,6 +149,38 @@ class SystemFieldSolver {
   // periodic, polar theta -- keep their wrap). Empty -> shared aux BC for every field, bit-identical.
   std::map<int, AuxHaloPolicy> named_aux_bc_;
 
+  // NAMED multi-elliptic fields (ADC-428): a SECOND elliptic solve (beyond the default Poisson) for a
+  // user-named field m.elliptic_field("phi2", rhs=..., aux=[...]). Each named field owns:
+  //   - phi_comp / gx_comp / gy_comp: the aux channel components (>= kAuxNamedBase) its solution and
+  //     centered gradient are written to (the model declares them as aux_field slots; a source then
+  //     reads them like any other named aux). gx_comp / gy_comp < 0 => the field declares fewer than 3
+  //     aux slots and the gradient is not derived (only phi is written).
+  //   - a DEDICATED elliptic solver instance (cartesian GeometricMG / FFT), built lazily the SAME way
+  //     as the default ell_ (ensure_named_elliptic mirrors ensure_elliptic's poisson operator), so the
+  //     native solver is REUSED, not reimplemented. The default Poisson path (ell_) is untouched.
+  // The RHS = sum over blocks of s.named_poisson_rhs[name] (the per-field brick, ADC-428), assembled
+  // exactly like assemble_poisson_rhs but reading the named closures.
+  struct NamedField {
+    int phi_comp = -1;
+    int gx_comp = -1;
+    int gy_comp = -1;
+    std::optional<std::variant<GeometricMG, PoissonFFTSolver, RemappedFFTSolver>> ell;
+  };
+  std::map<std::string, NamedField> named_fields_;
+
+  /// Register a named elliptic field (ADC-428): records the aux output components (where the field's
+  /// solved phi and centered gradient land). @p gx_comp / @p gy_comp < 0 => only phi is written (the
+  /// model declared fewer than 3 aux slots for the field). Idempotent (re-register overwrites the
+  /// component map, drops the lazily-built solver so the next solve rebuilds it). The DEDICATED solver
+  /// is built on first solve, never here.
+  void register_named_field(const std::string& field, int phi_comp, int gx_comp, int gy_comp) {
+    NamedField nf;
+    nf.phi_comp = phi_comp;
+    nf.gx_comp = gx_comp;
+    nf.gy_comp = gy_comp;
+    named_fields_[field] = std::move(nf);  // solver built lazily by ensure_named_elliptic
+  }
+
   /// Re-applies the per-field aux HALO policies (ADC-369) onto the shared channel, AFTER the shared
   /// fill_ghosts/fill_boundary. For each declared component, overrides ONLY that component's
   /// physical-face ghosts (aux_halo_override keeps periodic faces periodic). No-op when empty.
@@ -641,6 +673,136 @@ class SystemFieldSolver {
       throw std::out_of_range("solve_fields_from_state: block index " + std::to_string(block_idx) +
                               " out of range (" + std::to_string(owner_->sp.size()) + " blocks)");
     solve_fields(block_idx, &U_stage);
+  }
+
+  // --- NAMED multi-elliptic field (ADC-428) ----------------------------------
+  /// Builds the DEDICATED cartesian elliptic solver of named field @p nf, the SAME poisson operator as
+  /// the default ell_ (ensure_elliptic): GeometricMG (default) or PoissonFFTSolver/RemappedFFTSolver,
+  /// with the System's Poisson BC and wall. REUSES the native solver -- no operator is reimplemented.
+  /// The variable / anisotropic permittivity and reaction coefficients of the DEFAULT Poisson are NOT
+  /// carried onto a named field (a named field is a plain Laplacian; its own coefficients are a future
+  /// extension). Built lazily; no-op if already built.
+  void ensure_named_elliptic(NamedField& nf) {
+    if (nf.ell)
+      return;
+    const BCRec pbc = poisson_bc();
+    std::function<bool(Real, Real)> active = wall_active();
+    if (p_solver == "fft" || p_solver == "fft_spectral") {
+      if (active)
+        throw std::runtime_error("System: named elliptic field solver '" + p_solver +
+                                 "' incompatible with a wall -> 'geometric_mg'");
+      const bool spectral = (p_solver == "fft_spectral");
+      if (n_ranks() > 1)
+        nf.ell.emplace(std::in_place_type<RemappedFFTSolver>, owner_->geom, owner_->ba, pbc, active,
+                       spectral);
+      else
+        nf.ell.emplace(std::in_place_type<PoissonFFTSolver>, owner_->geom, owner_->ba, pbc, active,
+                       spectral);
+    } else if (p_solver == "geometric_mg") {
+      nf.ell.emplace(std::in_place_type<GeometricMG>, owner_->geom, owner_->ba, pbc,
+                     std::move(active));
+      std::get<GeometricMG>(*nf.ell).set_abs_tol(p_abs_tol_);
+    } else {
+      throw std::runtime_error("System: named elliptic field solver '" + p_solver +
+                               "' unsupported (geometric_mg|fft|fft_spectral)");
+    }
+  }
+
+  /// Assembles the RIGHT-HAND SIDE of named field @p field into @p rhs: f = Sum_s
+  /// named_poisson_rhs_s[field](U_s), the per-field elliptic brick of EACH block that declares it
+  /// (ADC-428). When @p target_block >= 0 and @p U_stage != nullptr, the target block reads @p U_stage
+  /// instead of its live s.U (per-stage field solve, like assemble_poisson_rhs). @throws if no block
+  /// declares this field (a named field with no contributing block would solve a zero RHS silently).
+  void assemble_named_poisson_rhs(const std::string& field, MultiFab& rhs, int target_block,
+                                  const MultiFab* U_stage) {
+    rhs.set_val(Real(0));
+    bool any = false;
+    for (std::size_t b = 0; b < owner_->sp.size(); ++b) {
+      auto& s = owner_->sp[b];
+      auto it = s.named_poisson_rhs.find(field);
+      if (it == s.named_poisson_rhs.end() || !it->second)
+        continue;
+      const bool override_here = (U_stage != nullptr && static_cast<int>(b) == target_block);
+      it->second(override_here ? *U_stage : s.U, rhs);
+      any = true;
+    }
+    if (!any)
+      throw std::runtime_error("System: named elliptic field '" + field +
+                               "' has no contributing block (declare m.elliptic_field on the block "
+                               "model)");
+  }
+
+  /// Solves named field @p field's SECOND elliptic problem from block @p block_idx's stage state
+  /// @p U_stage and writes phi (+ centered grad) into the field's OWN aux components (ADC-428):
+  /// assemble f = Sum_s named_poisson_rhs_s[field] -> ell.solve() (the dedicated native solver) ->
+  /// aux[phi_comp] = phi, aux[gx_comp]/aux[gy_comp] = centered grad. The SHARED phi/grad (components
+  /// 0..2) and the default Poisson (ell_) are NOT touched. The named aux components are then ghost-
+  /// filled (the shared aux fill + the per-field halo override). CARTESIAN only (the polar named path is
+  /// a future extension); @throws on the polar geometry or an unknown field.
+  void solve_named_field_from_state(const std::string& field, int block_idx,
+                                    const MultiFab& U_stage) {
+    if (block_idx < 0 || block_idx >= static_cast<int>(owner_->sp.size()))
+      throw std::out_of_range("solve_fields_from_state (named): block index " +
+                              std::to_string(block_idx) + " out of range (" +
+                              std::to_string(owner_->sp.size()) + " blocks)");
+    auto it = named_fields_.find(field);
+    if (it == named_fields_.end())
+      throw std::runtime_error("System: unknown named elliptic field '" + field +
+                               "' (register it via m.elliptic_field + the compiled block)");
+    if (owner_->polar_)
+      throw std::runtime_error("System: named elliptic field '" + field +
+                               "' on a polar (ring) grid is not supported yet (cartesian only)");
+    NamedField& nf = it->second;
+    if (nf.phi_comp < 0 || nf.phi_comp >= owner_->aux_ncomp_)
+      throw std::runtime_error(
+          "System: named elliptic field '" + field +
+          "' aux component out of the channel width (add the block that declares "
+          "its aux fields before solving)");
+    ensure_named_elliptic(nf);
+    MultiFab& rhs = std::visit([](auto& e) -> MultiFab& { return e.rhs(); }, *nf.ell);
+    assemble_named_poisson_rhs(field, rhs, block_idx, &U_stage);
+    // CONSTANT permittivity eps != 1: lap phi = f/eps (1/eps scaling), like the default Poisson. The
+    // variable / anisotropic eps(x) and reaction kappa of the DEFAULT Poisson are NOT applied to a
+    // named field (plain Laplacian operator; see ensure_named_elliptic).
+    if (p_eps_ != Real(1)) {
+      const Real inv = Real(1) / p_eps_;
+      for (int li = 0; li < rhs.local_size(); ++li) {
+        Array4 r = rhs.fab(li).array();
+        const Box2D v = rhs.box(li);
+        for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+          for (int i = v.lo[0]; i <= v.hi[0]; ++i)
+            r(i, j, 0) *= inv;
+      }
+    }
+    std::visit([](auto& e) { e.solve(); }, *nf.ell);
+    device_fence();  // CRITICAL: the V-cycle must finish before phi is read (same invariant as ell_)
+    MultiFab& phi_mf = std::visit([](auto& e) -> MultiFab& { return e.phi(); }, *nf.ell);
+    const Real dx = owner_->geom.dx(), dy = owner_->geom.dy();
+    const int cphi = nf.phi_comp, cgx = nf.gx_comp, cgy = nf.gy_comp;
+    const bool grad =
+        (cgx >= 0 && cgx < owner_->aux_ncomp_ && cgy >= 0 && cgy < owner_->aux_ncomp_);
+    for (int li = 0; li < owner_->aux.local_size(); ++li) {
+      const ConstArray4 p = phi_mf.fab(li).const_array();
+      Array4 a = owner_->aux.fab(li).array();
+      const Box2D v = owner_->aux.box(li);
+      for (int j = v.lo[1]; j <= v.hi[1]; ++j)
+        for (int i = v.lo[0]; i <= v.hi[0]; ++i) {
+          a(i, j, cphi) = p(i, j);
+          if (grad) {
+            a(i, j, cgx) = (p(i + 1, j) - p(i - 1, j)) / (2 * dx);
+            a(i, j, cgy) = (p(i, j + 1) - p(i, j - 1)) / (2 * dy);
+          }
+        }
+    }
+    // Ghost-fill the named field's aux components: the shared aux fill (same routing as solve_fields)
+    // then the per-field halo override (ADC-369). This re-fills ALL components -- the shared phi/grad
+    // were last written by the default solve_fields, so their valid cells are unchanged and only the
+    // halos are recomputed (idempotent for those components).
+    if (owner_->periodic_)
+      fill_boundary(owner_->aux, owner_->dom, owner_->per_);
+    else
+      fill_ghosts(owner_->aux, owner_->dom, owner_->bc_);
+    apply_named_aux_bc();
   }
 
  private:

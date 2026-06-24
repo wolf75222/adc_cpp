@@ -8,8 +8,9 @@ Mirrors the named-source pattern (ADC-400 / ADC-403):
     Program selects a SUM of named fluxes via ctx.rhs(..., fluxes=[name, ...]) and assembles -div of
     that sum; fluxes=['default'] (or no list) keeps the historical -div F (rhs_into), byte-identical.
   - m.elliptic_field(name, rhs=, operator=, aux=) declares an OPT-IN named elliptic field. The IR +
-    validation + hash land; the multi-field RUNTIME (a second elliptic operator + its own aux channel)
-    is DEFERRED, so solve_fields(field=name) lowers to a clear NotImplementedError (documented).
+    validation + hash land here (ADC-419); the multi-elliptic SOLVE RUNTIME (a second elliptic operator
+    + its own aux channel) is now wired (ADC-428), so solve_fields(field=name) lowers to the named ctx
+    call. The end-to-end second-elliptic parity lives in python/tests/test_time_multielliptic.py.
 
 Section A (pure Python, always runs): validation (dims / unique / unknown-name / collisions), the
 model hash changes when a named flux / elliptic changes (and is byte-identical when none is declared),
@@ -17,8 +18,7 @@ and rhs(fluxes=['default']) lowers IDENTICALLY to the current default rhs.
 
 Section B (gated, self-skip): a compiled program using NAMED fluxes that split the physical flux into
 two pieces summing to the default -> stepping it equals stepping a single-named-flux ('whole') program
-to ~1e-14 (the named fluxes sum to the same -div F). The named-elliptic SOLVE is deferred, so this
-section asserts the IR/validation/hash for elliptic_field instead (Section A) and documents the skip.
+to ~1e-14 (the named fluxes sum to the same -div F).
 
 Skips cleanly (exit 0) without numpy / _adc / a compiler / a visible Kokkos -- never fakes the engine.
 """
@@ -232,7 +232,9 @@ src_split = _fe_program("nf_split_prog", ["conv", "press"]).emit_cpp_program(mod
 chk(src_split.count("ctx.neg_div_flux_into(") == 1,
     "a multi-named-flux rhs assembles a single -div of the summed fluxes")
 
-# --- elliptic_field: solve_fields(field=) lowers to a documented NotImplementedError (deferred) ---
+# --- elliptic_field: solve_fields(field=) now lowers to the named ctx call (ADC-428 wired the runtime;
+#     the multi-elliptic SOLVE + aux channel are no longer deferred). The end-to-end parity lives in
+#     python/tests/test_time_multielliptic.py; here we just assert the lowering + the error paths. ---
 def _named_field_program(name="nf_ell"):
     P = adctime.Program(name)
     U = P.state("plasma")
@@ -243,10 +245,20 @@ def _named_field_program(name="nf_ell"):
 
 
 ell_model, Vell = _carrier()
-ell_model.elliptic_field("phi2", rhs=Vell["rho"])
-chk(raises(NotImplementedError, lambda: _named_field_program().emit_cpp_program(model=ell_model)),
-    "solve_fields(field=) lowers to NotImplementedError (multi-elliptic-field runtime deferred)")
-# An unknown named field is rejected before the deferral (clear error).
+ell_model.elliptic_field("phi2", rhs=Vell["rho"], aux=["phi2", "g2x", "g2y"])
+for a in ("phi2", "g2x", "g2y"):
+    ell_model._m.aux_field(a)  # the named field's aux outputs need channel slots (ADC-428)
+src_named_ell = _named_field_program().emit_cpp_program(model=ell_model)
+chk('ctx.solve_fields_from_state("phi2", 0, ' in src_named_ell,
+    "solve_fields(field=) lowers to the named ctx call (ADC-428 multi-elliptic runtime)")
+# Unknown field name -> clear ValueError; missing model -> NotImplementedError (cannot validate).
+chk(raises(ValueError,
+           lambda: _named_field_program("nf_unknown_ell").emit_cpp_program(
+               model=_carrier()[0])),
+    "an unknown elliptic_field name in solve_fields raises ValueError")
+chk(raises(NotImplementedError, lambda: _named_field_program("nf_nomodel_ell").emit_cpp_program()),
+    "a named-elliptic solve_fields without a model raises NotImplementedError")
+# An empty field name is rejected at construction (clear error).
 chk(raises(ValueError, lambda: adctime.Program("x").solve_fields("f", adctime.Program("x").state("b"),
                                                                  field="")),
     "solve_fields with an empty field name raises ValueError")
@@ -330,6 +342,6 @@ chk(e_split < 1e-14, "split named fluxes (conv+press) step == whole named flux s
                      % e_split)
 chk(float(np.abs(U_w - U0).max()) > 1e-6, "the named flux actually moved the state")
 
-print("== elliptic_field SOLVE runtime is DEFERRED (Section A asserts its IR/validation/hash) ==")
+print("== elliptic_field SOLVE runtime is wired (ADC-428); end-to-end parity: test_time_multielliptic ==")
 print("%s test_time_named_flux_elliptic" % ("FAIL (%d)" % fails if fails else "PASS"))
 sys.exit(1 if fails else 0)

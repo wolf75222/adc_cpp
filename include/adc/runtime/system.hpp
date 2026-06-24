@@ -544,6 +544,30 @@ class System {
   /// it is identical to solve_fields(). ADC_EXPORT: resolved by a compiled program .so (ProgramContext)
   /// across the dlopen boundary. @throws std::out_of_range if @p block_idx is not a valid block.
   ADC_EXPORT void solve_fields_from_state(int block_idx, const MultiFab& U_stage);
+  /// @name Named multi-elliptic fields (ADC-428)
+  /// A SECOND elliptic solve (beyond the default Poisson) for a user-named field
+  /// (m.elliptic_field("phi2", rhs=..., aux=[...])). The named field owns its RHS (a per-block brick,
+  /// distinct from the default elliptic coupling), a DEDICATED native elliptic solver instance, and its
+  /// OWN aux output components (the model's named aux slots). The default Poisson path
+  /// (solve_fields / solve_fields_from_state) is untouched / bit-identical. ADC_EXPORT: resolved by the
+  /// generated problem.so / native loader across the dlopen boundary.
+  /// @{
+  /// Solve named @p field's elliptic problem from block @p block_idx's stage state @p U_stage and write
+  /// its solved phi (+ centered gradient) into the field's own aux components. The codegen lowers
+  /// P.solve_fields(field=name, state=U) to this. @throws if @p field is unregistered, the block index
+  /// is invalid, or the geometry is polar (cartesian only for now).
+  ADC_EXPORT void solve_fields_from_state(const std::string& field, int block_idx,
+                                          const MultiFab& U_stage);
+  /// Register named @p field's aux output components (where its solved phi / centered grad land). Called
+  /// by the native loader for each m.elliptic_field once the block is installed. @p gx_comp / @p gy_comp
+  /// < 0 => only phi is written (the field declared fewer than 3 aux slots).
+  ADC_EXPORT void register_elliptic_field(const std::string& field, int phi_comp, int gx_comp,
+                                          int gy_comp);
+  /// Attach named @p field's RHS closure (+= elliptic_field_rhs(U)) to block @p block_name. Called by
+  /// the native loader (make_poisson_rhs of the per-field brick). @throws if the block is unknown.
+  ADC_EXPORT void set_block_elliptic_field(const std::string& block_name, const std::string& field,
+                                           std::function<void(const MultiFab&, MultiFab&)> rhs);
+  /// @}
   void step(double dt);  ///< solve_fields, then advances each block according to its scheme
   void advance(double dt, int nsteps);
 

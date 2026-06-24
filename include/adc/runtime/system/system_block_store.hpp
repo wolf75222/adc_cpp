@@ -8,6 +8,7 @@
 #include <adc/mesh/storage/multifab.hpp>  // MultiFab, Array4, ConstArray4
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -151,6 +152,14 @@ class SystemBlockStore {
     // that do not build it (the host .so prototype loader); block_neg_div_flux_into fails loud then.
     // Trailing + empty default: the positional aggregate init of the other members stays unchanged.
     std::function<void(MultiFab&, MultiFab&)> rhs_flux_only;
+    // NAMED elliptic-field RHS closures (ADC-428): field name -> (+= elliptic_field_rhs(U)). A model
+    // declaring m.elliptic_field("phi2", rhs=...) carries here a SECOND Poisson right-hand side
+    // (distinct from add_poisson_rhs, the default Poisson coupling), assembled the same way (host loop,
+    // += per cell). EMPTY (default) -> no named elliptic field: bit-identical to the historical block.
+    // The SystemFieldSolver gathers these per field (sum over blocks) into a SEPARATE elliptic solve
+    // whose phi/grad are written to the field's OWN aux channel. Trailing + empty default: the
+    // positional aggregate init of the other members stays unchanged.
+    std::map<std::string, std::function<void(const MultiFab&, MultiFab&)>> named_poisson_rhs;
   };
 
   /// ORDERED registry of the blocks (UNIQUE source of truth). PUBLIC: Impl aliases it as `sp` for the
