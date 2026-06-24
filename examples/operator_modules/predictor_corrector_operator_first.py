@@ -88,6 +88,8 @@ def default_source_model(name="opfirst_ref"):
            y=[my, mx * my / rho, my * my / rho + CS2 * rho])
     m.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],
                   y=[my / rho - cs, my / rho, my / rho + cs])
+    m.primitive_vars(rho, mx, my)            # identity primitive state (Prim = the conserved vars)
+    m.conservative_from([rho, mx, my])
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
     m.aux("B_z")
