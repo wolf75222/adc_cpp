@@ -373,6 +373,10 @@ class Module:
         self._params = {}
         self._aux = {}
         self._registry = OperatorRegistry()
+        # Wave speeds for the Riemann solver of a compilable Module: {"x": [Expr], "y": [Expr]}
+        # eigenvalues, or None (set via eigenvalues()). Carried so a pure Module is self-contained;
+        # lowered to dsl.Model.eigenvalues by compile_problem.
+        self._eigenvalues = None
 
     # --- spaces ---
     def state_space(self, name="U", components=(), roles=None, layout="cell",
@@ -446,6 +450,27 @@ class Module:
 
         return decorator
 
+    def rate_operator(self, name, state_space="U", flux=True, sources=("default",), fluxes=None):
+        """Register a composite ``local_rate`` operator ``R = -div F + sum(sources)`` from named
+        sub-operators (the flux and the listed source operators). Mirrors ``dsl.rate_operator``; the
+        ``lowering`` carries the flux/sources/fluxes so ``P.call`` and the codegen compose it."""
+        u = self._state_spaces.get(state_space) or StateSpace(state_space)
+        srcs = list(sources) if sources is not None else None
+        op = Operator(name, "local_rate", Signature((u,), RateSpace(u)),
+                      capabilities={"local": False, "produces_rate": True, "supports_device": True},
+                      lowering={"flux": bool(flux), "sources": srcs,
+                                "fluxes": list(fluxes) if fluxes else None},
+                      source="module")
+        self._registry.register(op)
+        return op
+
+    def eigenvalues(self, x, y):
+        """Declare the per-direction wave speeds (eigenvalues) the Riemann solver needs, as lists of
+        IR expressions over the state. Carried so a pure Module is a self-contained, compilable model
+        (lowered to ``dsl.Model.eigenvalues``)."""
+        self._eigenvalues = {"x": list(x), "y": list(y)}
+        return self._eigenvalues
+
     def adopt_registry(self, registry):
         """Use ``registry`` as this Module's operator registry (the dsl.Model facade adopts
         the derived registry of its HyperbolicModel). Returns ``self``."""
@@ -457,6 +482,14 @@ class Module:
     def operator_registry(self):
         """The Module's :class:`OperatorRegistry` (bind it to a Program with P.bind_operators)."""
         return self._registry
+
+    def to_dsl(self):
+        """Lower this Module to a :class:`adc.dsl.Model` -- the physical/codegen engine -- by mapping
+        each typed operator (with its IR body) to the dsl method of its kind. Reuses the dsl backend
+        (a translation, not a second codegen). ``adc.compile_problem(model=module, ...)`` does this
+        implicitly; call it directly to build the block model for ``sim.add_equation``."""
+        from . import dsl as _dsl  # lazy: dsl imports this module, so import only when compiling
+        return _dsl._module_to_model(self)
 
     # --- introspection (Spec 2, S2-5) ---
     def state_spaces(self):

@@ -87,6 +87,18 @@ The standard library provides model-free macros keyed on operator names:
 same macro runs against any module that provides operators with the expected signatures; see
 `examples/operator_modules/predictor_corrector_operator_first.py`.
 
+## Compiling a Module
+
+A Module authored directly -- typed spaces, operators with IR (`dsl.Expr`) bodies, the Riemann wave
+speeds via `module.eigenvalues(x, y)`, and a composite rate via `module.rate_operator` -- is a
+self-contained, compilable model. `module.to_dsl()` lowers it to a `dsl.Model` (each operator mapped
+to the dsl method of its kind: `grid_operator` to `flux`, `local_source` to `source_term`,
+`local_linear_operator` to `linear_source`, `field_operator` to `elliptic_rhs`, `local_rate` to
+`rate_operator`), so it reuses the dsl codegen engine -- a translation, not a second backend.
+`adc.compile_problem(model=module, time=P)` accepts a Module and does this implicitly; use
+`module.to_dsl()` to build the block model for `sim.add_equation`. `examples/operator_modules/
+predictor_corrector_operator_first.py` is authored this way.
+
 ## Compatibility with `adc.dsl.Model`
 
 `adc.dsl.Model` is the **PDE convenience facade** over a module: its `flux` / `source_term` /

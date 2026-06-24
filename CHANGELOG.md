@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Pure `adc.model.Module` compiles** (ADC-447, epic ADC-436, spec 2 "model-free"): a Module
+  authored directly -- typed spaces, operators with IR (`dsl.Expr`) bodies (builder mode `expr=`),
+  the Riemann wave speeds via `Module.eigenvalues`, and a composite rate via `Module.rate_operator`
+  -- is a self-contained, compilable model. `Module.to_dsl()` lowers it to a `dsl.Model` (each typed
+  operator mapped to the dsl method of its kind), reusing the dsl codegen engine (a translation, not
+  a second backend); `adc.compile_problem(model=module, time=P)` accepts a Module. The
+  `examples/operator_modules/predictor_corrector_operator_first.py` example is rewritten as a pure
+  Module (no PDE method called on the model). New `python/tests/test_module_compile.py`.
+
 - **Operator-first Program type diagnostics** (ADC-448, epic ADC-436, spec 2 "operator-first"): with
   `P.state(block, space=U)` tags and rates/operators flowing from `P.call`, a Program type-checks the
   composition -- an argument over the wrong StateSpace (`expects state 'U' but got a value over 'V'`),

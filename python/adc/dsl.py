@@ -4564,6 +4564,66 @@ class CompiledProblem:
         return "<CompiledProblem %r -> %s>" % (self.program_name, self.so_path)
 
 
+def _module_to_model(module):
+    """Lower an :class:`adc.model.Module` to a :class:`Model` (Spec 2, S2-11), reusing the dsl codegen
+    engine -- a translation, NOT a second backend. The Module's typed operators carry dsl ``Expr``
+    bodies; each is mapped to the dsl method of its kind: a ``grid_operator`` to ``flux`` (or
+    ``flux_term``), a ``local_source`` to ``source_term``, a ``local_linear_operator`` to
+    ``linear_source``, a ``field_operator`` to ``elliptic_rhs`` (or ``elliptic_field``), a
+    ``local_rate`` to ``rate_operator``, a ``projection`` to ``projection``. The state-space
+    components become the conservative variables; the field-space + aux names become the aux channel
+    the bodies read; ``Module.eigenvalues`` becomes the Riemann wave speeds. The operator bodies are
+    plain ``Expr`` trees, so this runs at codegen time only -- never during a step."""
+    states = module.state_spaces()
+    if len(states) != 1:
+        raise ValueError("compile_problem: a Module must declare exactly one StateSpace to compile "
+                         "(got %s)" % sorted(states))
+    state = next(iter(states.values()))
+    m = Model(module.name)
+    m.conservative_vars(*state.components)  # roles inferred from the canonical names
+    for p in module.params().values():
+        m.param(p.name, p.default, kind="const")
+    declared = set()
+
+    def _declare_aux(nm):
+        if nm in declared:
+            return
+        declared.add(nm)
+        if nm in AUX_CANONICAL:
+            m.aux(nm)
+        else:
+            m.aux_field(nm)
+
+    for fs in module.field_spaces().values():
+        for comp in fs.components:
+            _declare_aux(comp)
+    for a in module.aux().values():
+        _declare_aux(a.name)
+    if module._eigenvalues is not None:
+        m.eigenvalues(x=module._eigenvalues["x"], y=module._eigenvalues["y"])
+    for op in module.operator_registry():
+        body = op.body
+        if op.kind == "grid_operator":
+            if op.name in ("flux", "flux_default"):
+                m.flux(x=body["x"], y=body["y"])
+            else:
+                m.flux_term(op.name, x=body["x"], y=body["y"])
+        elif op.kind == "local_source":
+            m.source_term(op.name, body)
+        elif op.kind == "local_linear_operator":
+            m.linear_source(op.name, body)
+        elif op.kind == "field_operator":
+            m.elliptic_rhs(body)
+        elif op.kind == "local_rate":
+            low = op.lowering
+            m.rate_operator(op.name, flux=low.get("flux", True),
+                            sources=low.get("sources"), fluxes=low.get("fluxes"))
+        elif op.kind == "projection":
+            m.projection(body)
+        # matrix_free_operator / diagnostic / residual kinds are Program-level, not model codegen.
+    return m
+
+
 def compile_problem(so_path=None, *, model=None, time=None, backend="production", target="system",
                     force=False, cxx=None, include=None, std=None, debug=False):
     """Compile an `adc.time.Program` into a `problem.so` the runtime loads via `sim.install_program`.
@@ -4587,6 +4647,9 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
         raise ValueError("compiled time programs require backend='production'")
     if target != "system":
         raise ValueError("compiled time programs currently support target='system' only")
+    # A pure operator-first Module (Spec 2, S2-11) lowers to a dsl.Model via the shared codegen.
+    if model is not None and isinstance(model, _model.Module):
+        model = _module_to_model(model)
     if time is None or not hasattr(time, "emit_cpp_program"):
         raise ValueError("compile_problem: time must be an adc.time.Program (got %r)" % (time,))
     if model is not None and hasattr(model, "check"):

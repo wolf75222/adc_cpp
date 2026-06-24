@@ -263,6 +263,14 @@ add_test(NAME test_operator_validation
 set_tests_properties(test_operator_validation PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Module pur compilable (ADC-447, spec 2) : un adc.model.Module (espaces + operateurs a corps IR +
+# eigenvalues) s'abaisse en dsl.Model (Module.to_dsl) et compile_problem(model=module) l'accepte ;
+# reutilise le codegen dsl (traduction, pas un fork). Codegen-text local ; compile+run sur ROMEO.
+add_test(NAME test_module_compile
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_module_compile.py)
+set_tests_properties(test_module_compile PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # adc.time.Program -- IR du programme temporel compile, mode builder (ADC-401, phase 2a) : etats /
 # solve_fields / rhs / linear_combine / commit construisent une IR typee ; algebre affine de
 # linear_combine (U + dt*R, coefficients RK comme polynomes en dt), validation structurelle (commit
