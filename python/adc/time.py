@@ -522,6 +522,36 @@ class StageStateSet:
         return "StageStateSet(%r, blocks=%s)" % (self.name, list(self._states))
 
 
+class _CoupledResult:
+    """The typed multi-output of a coupled_rate ``P.call``: a mapping ``block -> per-block rate``.
+
+    ``C = P.call("collision", e_n, i_n)`` returns this; ``C["electrons"]`` is the per-block rate
+    (an RHS Value) that composes like any other (``e_n + dt * C["electrons"]``). It is not itself
+    a Value: a coupled operator has no single output, so it cannot be combined as one.
+    """
+
+    def __init__(self, outs):
+        self._outs = dict(outs)
+
+    def __getitem__(self, block):
+        return self._outs[block]
+
+    def __contains__(self, block):
+        return block in self._outs
+
+    def keys(self):
+        return list(self._outs)
+
+    def items(self):
+        return list(self._outs.items())
+
+    def __len__(self):
+        return len(self._outs)
+
+    def __repr__(self):
+        return "_CoupledResult(blocks=%s)" % list(self._outs)
+
+
 class Program:
     """A compiled time program (builder mode). Holds the SSA value list and the committed blocks.
 
@@ -656,6 +686,15 @@ class Program:
         if schedule is not None:
             self._validate_schedule(op, schedule)
         result = self._lower_call(op, operator_name, args, name)
+        # A coupled_rate has no single output Value (it returns a _CoupledResult): its per-block
+        # spaces are tagged inside _lower_coupled_rate, and a schedule on the whole bundle is not
+        # meaningful yet -- reject it with a clear message rather than leaking an AttributeError.
+        if isinstance(result, _CoupledResult):
+            if schedule is not None:
+                raise ValueError(
+                    "schedule= is not supported on a coupled_rate operator (%r) yet; schedule its "
+                    "per-block consumers instead (ADC-457/458)" % (operator_name,))
+            return result
         # Tag the result with the operator's declared output type (a Rate / FieldSpace /
         # LocalLinearOperator / StateSpace) so downstream ops can type-check the composition
         # (a Rate(U) cannot be combined with a State(V); an L: U -> U cannot drive a State(V)).
@@ -706,8 +745,34 @@ class Program:
             return self.linear_source(operator_name)
         if kind == "projection":
             return self.project(name=name, state=args[0])
+        if kind == "coupled_rate":
+            return self._lower_coupled_rate(op, operator_name, args, name)
         raise NotImplementedError(
             "P.call: operator kind %r is not yet lowerable (operator %r)" % (kind, operator_name))
+
+    def _lower_coupled_rate(self, op, operator_name, args, name):
+        """Lower a coupled_rate operator to a coupled node plus one per-block rate projection.
+
+        A coupled operator (collisions, ionization, ...) of arbitrary arity returns a typed
+        ``RateBundle``; ``P.call`` returns a :class:`_CoupledResult` whose ``["electrons"]`` is the
+        per-block rate (an RHS Value over that block) so it composes like any other RHS. The
+        coupled-rate KERNEL codegen is deferred (ADC-457): ``_check_lowerable`` refuses to lower a
+        ``coupled_rate`` / ``coupled_rate_out`` node rather than fake it as independent rates.
+        """
+        bundle = op.signature.output                 # a model.RateBundle: block -> RateSpace
+        blocks = bundle.keys()
+        base = name or operator_name
+        coupled = self._new("rhs", "coupled_rate", tuple(args),
+                            {"operator": operator_name, "blocks": list(blocks)},
+                            base, args[0].block)
+        outs = {}
+        for blk in blocks:
+            out = self._new("rhs", "coupled_rate_out", (coupled,),
+                            {"operator": operator_name, "out_block": blk},
+                            "%s_%s" % (base, blk), blk)
+            out.space = bundle[blk]                   # the per-block RateSpace, for type checks
+            outs[blk] = out
+        return _CoupledResult(outs)
 
     def _check_call_args(self, op, args):
         """Type-check ``P.call`` arguments against an operator's Signature: arity plus the vtype of
@@ -1544,7 +1609,13 @@ class Program:
         lines = ["// C++ plan for GeneratedProgram step of %s" % self.name]
         for v in self._values:
             ins = ", ".join(i.name for i in v.inputs)
-            lines.append("  ctx.%s(%s);  // -> %s" % (v.op, ins, v.name))
+            if v.op in ("coupled_rate", "coupled_rate_out"):
+                # the coupled-rate kernel is not generated yet -- show it as deferred, never as a
+                # ctx.coupled_rate(...) call that does not exist (ADC-457).
+                lines.append("  // %s = %s(%s);  // coupled-rate kernel codegen is ADC-457 (deferred)"
+                             % (v.name, v.op, ins))
+            else:
+                lines.append("  ctx.%s(%s);  // -> %s" % (v.op, ins, v.name))
         for block, st in self._commits.items():
             lines.append("  ctx.commit(%r, %s);" % (block, st.name))
         return "\n".join(lines)
@@ -2243,6 +2314,12 @@ class Program:
                     "commit of unknown block '%s': no P.state('%s') declares it (declared blocks: %s)"
                     % (b, b, sorted(blocks)))
         self._check_schedules_lowerable()
+        for v in self._all_ops():
+            if v.op in ("coupled_rate", "coupled_rate_out"):
+                raise NotImplementedError(
+                    "the coupled_rate kernel codegen is ADC-457: a coupled multi-block rate "
+                    "(node %r) builds + composes in the IR but is not yet lowered to C++ (it must "
+                    "not be faked as independent single-block rates)." % (v.name,))
         for v in self._values:
             self._check_op_lowerable(v, model)
         # Per-cell dense fallback bound for the local dense solves (mat_inverse<N> uses fixed stack

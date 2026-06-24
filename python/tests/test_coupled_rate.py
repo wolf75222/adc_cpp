@@ -1,0 +1,116 @@
+"""Spec 3 multi-species: coupled_rate operator kind + multi-output P.call (ADC-457).
+
+A coupled operator (collisions, ionization, radiation) takes an arbitrary arity of states and
+returns a typed RateBundle -- one Rate per participating block. P.call lowers it to a bundle of
+per-block rate values usable in affine combinations. This is the IR/authoring slice (pure
+Python, locally testable); the C++ coupled-rate kernel codegen is the deferred runtime part.
+"""
+import pytest
+
+from adc import dsl, model
+
+adctime = pytest.importorskip("adc.time")
+
+
+def _two_fluid_module():
+    """(e, i) -> RateBundle{electrons: Rate(e), ions: Rate(i)} collision operator."""
+    mod = model.Module("two_fluid")
+    e = mod.state_space("electron_state", ("ne", "mex", "mey"))
+    i = mod.state_space("ion_state", ("ni", "mix", "miy"))
+    bundle = model.RateBundle({"electrons": model.Rate(e), "ions": model.Rate(i)})
+    ne, ni = dsl.Var("ne", "cons"), dsl.Var("ni", "cons")
+    mod.operator(name="collision", signature=model.Signature((e, i), bundle),
+                 kind="coupled_rate",
+                 expr={"electrons": [ni - ne, ne, ne], "ions": [ne - ni, ni, ni]})
+    return mod, e, i, bundle
+
+
+def test_coupled_rate_is_a_valid_kind():
+    assert "coupled_rate" in model.OPERATOR_KINDS
+
+
+def test_rate_bundle_equality_and_hash():
+    e = model.StateSpace("e", ("a",))
+    i = model.StateSpace("i", ("b",))
+    b1 = model.RateBundle({"electrons": model.Rate(e), "ions": model.Rate(i)})
+    b2 = model.RateBundle({"electrons": model.Rate(e), "ions": model.Rate(i)})
+    assert b1 == b2 and hash(b1) == hash(b2)
+    assert b1 != model.RateBundle({"electrons": model.Rate(e)})
+
+
+def test_coupled_rate_operator_registers_with_bundle_output():
+    mod, _, _, bundle = _two_fluid_module()
+    op = mod.operator_registry().get("collision")
+    assert op.kind == "coupled_rate"
+    assert op.signature.output == bundle
+
+
+def test_p_call_coupled_rate_returns_indexable_bundle():
+    mod, e, i, _ = _two_fluid_module()
+    P = adctime.Program("step").bind_operators(mod)
+    e_n = P.state("electrons", space=e)
+    i_n = P.state("ions", space=i)
+    C = P.call("collision", e_n, i_n)
+    re_, ri_ = C["electrons"], C["ions"]
+    assert re_.vtype == "rhs" and ri_.vtype == "rhs"
+    # each per-block rate is usable in an affine combination of its block's state
+    e1 = P.linear_combine("e1", e_n + P.dt * re_)
+    i1 = P.linear_combine("i1", i_n + P.dt * ri_)
+    assert e1.vtype == "state" and i1.vtype == "state"
+
+
+def test_coupled_rate_arbitrary_arity_three_blocks():
+    mod = model.Module("three_fluid")
+    e = mod.state_space("e", ("ne",))
+    i = mod.state_space("i", ("ni",))
+    n = mod.state_space("n", ("nn",))
+    bundle = model.RateBundle({"e": model.Rate(e), "i": model.Rate(i), "n": model.Rate(n)})
+    z = dsl.Var("ne", "cons")
+    mod.operator(name="coll3", signature=model.Signature((e, i, n), bundle),
+                 kind="coupled_rate", expr={"e": [z], "i": [z], "n": [z]})
+    P = adctime.Program("s").bind_operators(mod)
+    en, inn, nn = P.state("e", space=e), P.state("i", space=i), P.state("n", space=n)
+    C = P.call("coll3", en, inn, nn)
+    assert set(C.keys()) == {"e", "i", "n"}
+
+
+def test_coupled_rate_bundle_unknown_block_errors():
+    mod, e, i, _ = _two_fluid_module()
+    P = adctime.Program("step").bind_operators(mod)
+    C = P.call("collision", P.state("electrons", space=e), P.state("ions", space=i))
+    with pytest.raises(KeyError):
+        _ = C["neutrals"]
+
+
+def test_coupled_rate_rejects_schedule_clearly():
+    # schedule= on a coupled_rate has no single output to schedule yet -> clear error, not a raw
+    # AttributeError from the _CoupledResult having no .attrs.
+    mod, e, i, _ = _two_fluid_module()
+    P = adctime.Program("step").bind_operators(mod)
+    with pytest.raises(ValueError, match="coupled_rate"):
+        P.call("collision", P.state("electrons", space=e), P.state("ions", space=i),
+               schedule=adctime.every(2))
+
+
+def test_dump_cpp_plan_marks_coupled_rate_deferred():
+    # the C++ plan must not imply a ctx.coupled_rate(...) call exists; it shows the node as deferred.
+    mod, e, i, _ = _two_fluid_module()
+    P = adctime.Program("step").bind_operators(mod)
+    e_n, i_n = P.state("electrons", space=e), P.state("ions", space=i)
+    C = P.call("collision", e_n, i_n)
+    P.linear_combine("e1", e_n + P.dt * C["electrons"])
+    plan = P.dump_cpp_plan()
+    assert "ADC-457" in plan and "ctx.coupled_rate(" not in plan
+
+
+def test_coupled_rate_codegen_is_deferred():
+    # honest deferral: a coupled_rate node refuses to lower to C++ (the coupled-rate kernel is the
+    # ADC-457 runtime), rather than silently mis-lowering to independent single-block rates.
+    mod, e, i, _ = _two_fluid_module()
+    P = adctime.Program("step").bind_operators(mod)
+    e_n, i_n = P.state("electrons", space=e), P.state("ions", space=i)
+    C = P.call("collision", e_n, i_n)
+    P.commit_many({"electrons": P.linear_combine("e1", e_n + P.dt * C["electrons"]),
+                   "ions": P.linear_combine("i1", i_n + P.dt * C["ions"])})
+    with pytest.raises(NotImplementedError, match="coupled_rate"):
+        P._check_lowerable(None)

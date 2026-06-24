@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Spec 3 coupled_rate operator + multi-output P.call** (ADC-457, epic ADC-450): a `coupled_rate`
+  operator kind (`model.OPERATOR_KINDS`) whose `Signature` output is a `RateBundle` (now hashable/
+  equatable so it can be a signature output), of arbitrary arity. `Program.call` on a coupled_rate
+  returns a `_CoupledResult` whose `["electrons"]` is the per-block rate (an RHS Value) that composes
+  like any other (`e_n + dt * C["electrons"]`) and feeds `commit_many`. The coupled-rate KERNEL
+  codegen is deferred (`_check_lowerable` refuses a `coupled_rate` node with a clear ADC-457 message
+  rather than faking it as independent single-block rates). New `python/tests/test_coupled_rate.py`
+  (7); `examples/spec3/rate_bundle_collisions.py` extended to a full coupled step.
+
 - **Spec 3 unified-scheduler authoring** (ADC-458, epic ADC-450): `adc.time` schedules
   (`always`/`every(N)`/`when`/`on_start`/`on_end`/`subcycle`) with policy chaining
   (`.hold`/`.skip`/`.zero`/`.accumulate_dt`/`.error`), a `schedule=` kwarg on `Program.call`

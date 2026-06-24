@@ -35,6 +35,7 @@ OPERATOR_KINDS = (
     "matrix_free_operator",
     "local_nonlinear_residual",
     "global_residual",
+    "coupled_rate",
 )
 
 
@@ -640,6 +641,16 @@ class RateBundle:
 
     def __len__(self):
         return len(self._rates)
+
+    def _key(self):
+        # order-independent identity so a Signature output compares structurally
+        return tuple(sorted((k, repr(v)) for k, v in self._rates.items()))
+
+    def __eq__(self, other):
+        return isinstance(other, RateBundle) and self._key() == other._key()
+
+    def __hash__(self):
+        return hash(self._key())
 
     def __repr__(self):
         return "RateBundle({%s})" % ", ".join(
