@@ -448,6 +448,16 @@ class Program:
         ``"default"`` is in the list). So ``None``/``["default"]`` -> flux + default source, ``[]`` ->
         flux only, ``["a","b"]`` -> flux + a + b. ``None`` and ``[]`` are recorded DISTINCTLY in the IR.
 
+        ``flux`` (ADC-430) toggles the ``-div F`` base. ``flux=True`` (the default) is the above.
+        ``flux=False`` is SOURCE-ONLY: no flux divergence at all -- the RHS is just the requested
+        ``sources`` (the source stage of a Lie/Strang/IMEX split). So ``flux=False, sources=["default"]``
+        (or the bare ``flux=False``) is the model's default source only, ``flux=False, sources=["s"]`` is
+        just the named ``s``, and ``flux=False, sources=[]`` is the zero RHS. Named ``fluxes`` with
+        ``flux=False`` are rejected (a source-only stage has no flux to divide). Before ADC-430 the
+        codegen ignored ``flux=False`` and still emitted ``-div F``, double-adding the flux on a
+        non-zero-flux model in a split (it was masked only because split source stages were tested on
+        zero-flux models).
+
         ``fluxes`` (ADC-419) selects the PHYSICAL flux: ``None`` or ``["default"]`` uses the model's
         historical -div F (the compiled Riemann/FV path, byte-identical to before). A list of NAMED
         fluxes (``m.flux_term``) assembles -div of their SUM via centered FV differencing of the
@@ -1550,17 +1560,22 @@ class Program:
         is provided: the codegen reads the model's symbolic coefficients to emit the per-cell kernels.
         Without ``model`` those ops raise NotImplementedError (the Program cannot be lowered in
         isolation); ``model=None`` still lowers FE / SSPRK / RK4 (no model needed). A ``rhs`` routes its
-        base on whether ``"default"`` is among the requested ``sources`` (ADC-425, spec criterion 17 --
-        sources are explicit, never summed implicitly): ``"default"`` present -> ``ctx.rhs_into`` (=
-        ``-div F`` + the model's default/composite source, the historical path); ``"default"`` absent
-        (incl. the empty list ``[]``) -> ``ctx.neg_div_flux_default_into`` (= ``-div F`` only, NO default
-        source). Each NAMED source (``sources=[...]`` beyond ``"default"``) then lowers with a model: the
-        same per-cell ``m.source_term`` kernel as the standalone ``source`` op, accumulated onto ``R`` via
-        ``axpy``. So ``sources=[]`` is flux only, ``sources=["default"]`` is flux + default source
-        (unchanged), ``sources=["a","b"]`` is flux + a + b -- the named ones never double-count the
-        default (it is folded in iff "default" was listed). More than one block now lowers (ADC-426):
-        each op routes to its block's runtime index and control flow (while/range/if) inside a block
-        lowers per block; a SIMULTANEOUS multi-target coupled field solve
+        base on its ``flux`` flag and whether ``"default"`` is among the requested ``sources`` (ADC-425 /
+        ADC-430, spec criterion 17 -- flux and sources are explicit, never summed implicitly). With
+        ``flux=True``: ``"default"`` present -> ``ctx.rhs_into`` (= ``-div F`` + the model's
+        default/composite source, the historical path); ``"default"`` absent (incl. the empty list
+        ``[]``) -> ``ctx.neg_div_flux_default_into`` (= ``-div F`` only, NO default source). With
+        ``flux=False`` (SOURCE-ONLY, ADC-430): NO ``-div F`` base -- ``"default"`` present (or ``None``)
+        -> ``ctx.source_default_into`` (= S only, the exact mirror); ``"default"`` absent -> the zeroed
+        scratch (the named sources, if any, are the whole RHS). Each NAMED source (``sources=[...]``
+        beyond ``"default"``) then lowers with a model: the same per-cell ``m.source_term`` kernel as the
+        standalone ``source`` op, accumulated onto ``R`` via ``axpy``. So ``flux=True,sources=[]`` is flux
+        only, ``flux=True,sources=["default"]`` is flux + default source (unchanged),
+        ``flux=False,sources=["default"]`` is the default source only, ``flux=False,sources=["s"]`` is
+        just ``s`` -- the named ones never double-count the default (it is folded in iff "default" was
+        listed). More than one block now lowers (ADC-426): each op routes to its block's runtime index
+        (``_block_indices``, in P.state declaration order) and control flow (while/range/if) inside a
+        block lowers per block; a SIMULTANEOUS multi-target coupled field solve
         (``solve_fields_from_blocks([Ua, Ub])``) is refused (see below), never a silent mis-lowering.
 
         Each ``solve_fields(state=...)`` op lowers to ``ctx.solve_fields_from_state(idx, <stage state>)``
@@ -1744,6 +1759,14 @@ class Program:
             return
         if v.op == "rhs":
             named_fluxes = _named_fluxes(v)
+            # ADC-430: flux=False is SOURCE-ONLY -- no -div F base. Named fluxes (a -div of selected
+            # flux_terms) contradict "no flux": reject the combination loud rather than silently picking
+            # one (request flux=True for named fluxes, or flux=False for a source-only stage).
+            if not v.attrs.get("flux", True) and named_fluxes is not None:
+                raise ValueError(
+                    "rhs '%s' sets flux=False (source-only) but also requests named fluxes %r; a "
+                    "source-only stage has no flux divergence -- drop fluxes= or set flux=True"
+                    % (v.name, named_fluxes))
             if named_fluxes is not None:  # NAMED fluxes (ADC-419): need the model's flux_term coeffs
                 if model is None:
                     raise NotImplementedError(
@@ -1934,12 +1957,26 @@ class Program:
                          % (var[v.id], var[state_in.id]))
             named_fluxes = _named_fluxes(v)
             requested = v.attrs.get("sources")
+            want_flux = v.attrs.get("flux", True)
             # ADC-425 routing (spec criterion 17): the default/composite source is folded in iff the
             # caller did NOT exclude it -- i.e. sources is None (the legacy default) OR "default" is in
             # the explicit list. An EMPTY list [] (or a list of only named sources) excludes it -> flux
             # only. None and [] are recorded distinctly in the IR, so this is unambiguous.
             want_default_source = requested is None or "default" in requested
-            if named_fluxes is None:
+            if not want_flux:
+                # SOURCE-ONLY (ADC-430): flux=False -- NO -div F base (the rhs_scratch starts at zero).
+                # The default/composite source is added iff requested (the same want_default_source
+                # routing as flux=True): "default" present (or None) -> ctx.source_default_into (S only,
+                # the exact mirror of neg_div_flux_default_into); excluded -> R stays the zeroed scratch.
+                # The named source_terms below axpy on top either way -- so flux=False,sources=["default"]
+                # is the default source only; flux=False,sources=["s"] is just s; flux=False,sources=[]
+                # is the zero RHS. Named fluxes are rejected upstream (no flux base to divide). This is
+                # the fix: before ADC-430 a flux=False stage still emitted the -div F base (it ignored the
+                # flux attr), double-adding the flux on any non-zero-flux model in a Lie/Strang split.
+                if want_default_source:
+                    lines.append("ctx.source_default_into(%d, %s, %s);"
+                                 % (bidx, var[state_in.id], var[v.id]))
+            elif named_fluxes is None:
                 if want_default_source:
                     # R <- -div F + default/composite source (ctx.rhs_into) for THIS op's block (ADC-426
                     # bidx), the historical path: sources is None (legacy) or "default" is requested.

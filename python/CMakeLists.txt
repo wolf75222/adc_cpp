@@ -326,6 +326,19 @@ add_test(NAME test_time_rhs_sources
 set_tests_properties(test_time_rhs_sources PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# rhs flux TOGGLE (ADC-430, sibling of ADC-425): P.rhs(flux=False) is SOURCE-ONLY -- the codegen routed
+# on `sources` but ignored `flux`, so a source-only stage still emitted the -div F base (double-flux on
+# any non-zero-flux model in a Lie/Strang split; masked because split source stages were tested on
+# zero-flux models). Section (A) pins the codegen route (flux=False, sources=['default'] ->
+# ctx.source_default_into, the new source-only primitive; NO flux base) and the flux=True no-regression,
+# pure Python. Section (B) compiles a NON-zero-flux advection model with a default source, steps once,
+# and checks flux=False applies ONLY the source (-div F not leaked) while flux=True includes it; it
+# self-skips without a compiler / Kokkos / install_program (never faking the engine).
+add_test(NAME test_time_rhs_flux_false
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_rhs_flux_false.py)
+set_tests_properties(test_time_rhs_flux_false PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Phase 4b NON-LINEAR local solve (ADC-422) : emit_cpp_program LOWERS P.solve_local_nonlinear (spec
 # op 10) to a per-cell Newton -- an inlined device residual (the residual sub-block: named source /
 # apply per-cell Exprs + the iterate / frozen guess + affine combines), an in-kernel FD Jacobian, and

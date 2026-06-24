@@ -644,6 +644,19 @@ class System {
   /// loader) -- never a silent source leak. ADC_EXPORT: resolved by the generated problem.so across the
   /// dlopen boundary, like block_rhs_into.
   ADC_EXPORT void block_neg_div_flux_into(int b, MultiFab& U, MultiFab& R);
+  /// R <- S(U, aux) for block @p b -- the model's default/composite SOURCE only, WITHOUT the flux
+  /// divergence (the exact MIRROR of block_neg_div_flux_into, which is flux without source). Together
+  /// they split block_rhs_into = -div F + S into its two halves (ADC-430, sibling of ADC-425). The
+  /// block's source-only closure evaluates m.source per cell into R (the SAME source term assemble_rhs
+  /// adds), with NO numerical-flux dispatch -- so it is flux-template agnostic (unlike a zero-flux model
+  /// adapter, which HLL/Roe would not zero) and bit-identical to the source term of rhs_into. A compiled
+  /// time Program's source stage (ProgramContext::source_default_into) reads it so a Lie/Strang split
+  /// assembles "the default source but no flux" -- P.rhs(flux=False, sources with "default") -- without
+  /// the -div F base leaking in (epic ADC-399 / ADC-430, spec: rhs flux=False is source-only). FAILS
+  /// LOUD (std::runtime_error) on a block whose path did not build the closure (the host .so prototype
+  /// loader) -- never a silent flux leak. ADC_EXPORT: resolved by the generated problem.so across the
+  /// dlopen boundary, like block_neg_div_flux_into.
+  ADC_EXPORT void block_source_into(int b, MultiFab& U, MultiFab& R);
   /// The maximum |wave speed| of block @p b evaluated on @p U -- the SAME per-block reduction
   /// step_cfl reads (BlockState::max_speed, the HasStabilitySpeed / max_wave_speed closure set at
   /// add_block time): a collective reduction over the block's cells. A compiled time Program reads it
