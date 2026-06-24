@@ -607,6 +607,17 @@ class System {
   ADC_EXPORT MultiFab& block_state(int b);
   /// R <- -div F(U) + S(U, aux) for block @p b (the block's frozen-Poisson residual closure).
   ADC_EXPORT void block_rhs_into(int b, MultiFab& U, MultiFab& R);
+  /// R <- -div F(U) for block @p b -- the SAME flux divergence as block_rhs_into but WITHOUT the
+  /// model's default/composite source (Poisson frozen, ghosts filled identically). The block's
+  /// flux-only closure is the rhs_into path on SourceFreeModel<Model> (the zero-source adapter the
+  /// IMEX explicit half-step already uses), so the flux / ghost / geometry handling is bit-identical
+  /// -- only the source is dropped. A compiled time Program's hyperbolic stage
+  /// (ProgramContext::neg_div_flux_default_into) reads it so a Lie/Strang split assembles "flux but no
+  /// source" without the default source leaking in (epic ADC-399 / ADC-425, spec criterion 17). FAILS
+  /// LOUD (std::runtime_error) on a block whose path did not build the closure (the host .so prototype
+  /// loader) -- never a silent source leak. ADC_EXPORT: resolved by the generated problem.so across the
+  /// dlopen boundary, like block_rhs_into.
+  ADC_EXPORT void block_neg_div_flux_into(int b, MultiFab& U, MultiFab& R);
   /// The maximum |wave speed| of block @p b evaluated on @p U -- the SAME per-block reduction
   /// step_cfl reads (BlockState::max_speed, the HasStabilitySpeed / max_wave_speed closure set at
   /// add_block time): a collective reduction over the block's cells. A compiled time Program reads it

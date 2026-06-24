@@ -502,6 +502,16 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
                              "' (euler|ssprk2|ssprk3)");
   }
   bc.rhs_into = detail::RhsInto<Limiter, Flux, Model>{m, ctx, recon_prim, pos_floor, ws_cache};
+  // FLUX-ONLY residual R <- -div F(U) (ADC-425): the SAME RhsInto path on SourceFreeModel<Model> (the
+  // canonical zero-source adapter the IMEX explicit half-step already uses, state_access.hpp), so the
+  // flux / ghost / geometry / positivity handling is bit-identical to rhs_into -- only the model's
+  // default/composite source is dropped. A compiled time Program's hyperbolic stage reads it so a
+  // Lie/Strang split assembles "flux but no source" without the default source leaking in (spec
+  // criterion 17). NO HLL cache: the explicit/IMEX advances and rhs_into share ws_cache (never
+  // concurrent), but a flux-only RHS can interleave with them, so it keeps the per-face path (the
+  // residual is identical either way -- the cache is a perf scratch, not a numerics change).
+  bc.rhs_flux_only = detail::RhsInto<Limiter, Flux, SourceFreeModel<Model>>{
+      SourceFreeModel<Model>{m}, ctx, recon_prim, pos_floor, nullptr};
   bc.hotspot =
       detail::HotspotFn<Model>{m, ctx};  // dt_hotspot diagnostic (ADC-182), off the hot path
   // PROJECTION PONCTUELLE post-pas (ADC-177) : fabriquee SEULEMENT si le modele declare le trait

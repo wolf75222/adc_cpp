@@ -800,6 +800,10 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
   // Projection ponctuelle post-pas (ADC-177) : vide sauf si le modele declare le trait
   // HasPointwiseProjection (make_block). Vide -> le stepper ne l'interroge pas (bit-identique).
   P->sp.back().project = std::move(closures.project);
+  // FLUX-ONLY residual -div F(U) (ADC-425): set for native blocks (build_block builds it via
+  // SourceFreeModel<Model>); empty for paths that do not (the host .so prototype loader) ->
+  // block_neg_div_flux_into fails loud rather than silently leaking the default source.
+  P->sp.back().rhs_flux_only = std::move(closures.rhs_flux_only);
 }
 
 // Width-aware reallocation of a block state (delegates to Impl::set_block_ghosts). Exposed
@@ -1914,6 +1918,19 @@ MultiFab& System::block_state(int b) {
 }
 void System::block_rhs_into(int b, MultiFab& U, MultiFab& R) {
   p_->sp[static_cast<std::size_t>(b)].rhs_into(U, R);
+}
+// FLUX-ONLY residual R <- -div F(U) (ADC-425): the block's SourceFreeModel<Model> rhs path (built in
+// build_block), bit-identical to rhs_into minus the default source. Fails loud on a block that did not
+// build it (the host .so prototype loader) instead of silently leaking the source.
+void System::block_neg_div_flux_into(int b, MultiFab& U, MultiFab& R) {
+  Impl::Species& s = p_->sp[static_cast<std::size_t>(b)];
+  if (!s.rhs_flux_only)
+    throw std::runtime_error(
+        "System::block_neg_div_flux_into: block '" + s.name +
+        "' has no flux-only residual closure (the host .so prototype loader does not build one); a "
+        "flux-only RHS (P.rhs(flux=True, sources without 'default')) needs a native block "
+        "(add_block / production-backend compiled block)");
+  s.rhs_flux_only(U, R);
 }
 // Max |wave speed| of block b on U: the SAME BlockState::max_speed closure step_cfl reads (set at
 // add_block time -- HasStabilitySpeed / max_wave_speed of the model). REUSES it, does not recompute.

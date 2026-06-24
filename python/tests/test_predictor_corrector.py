@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Named-source RHS codegen, end to end: the predictor-corrector Poisson/Lorentz step (ADC-403).
 
-`emit_cpp_program` now LOWERS a ``rhs`` with NAMED sources (``sources=[name, ...]`` beyond
-``"default"``): it emits ``ctx.rhs_into`` (= ``-div F`` + the model's default source) and, for each
-named source, the SAME per-cell ``m.source_term`` kernel as the standalone ``source`` op, accumulated
-onto R via ``ctx.axpy``. That is sound only when the model's DEFAULT source is empty (else
-``rhs_into`` already folds a source and adding named ones double-counts), so a named-source ``rhs``
-against a model with a non-empty ``m.source`` is refused; an unknown source name is rejected.
+`emit_cpp_program` LOWERS a ``rhs`` with NAMED sources (``sources=[name, ...]`` beyond ``"default"``):
+its base is the flux assembly routed on whether ``"default"`` is requested (ADC-425) -- ``ctx.rhs_into``
+(= ``-div F`` + the model's default source) when ``"default"`` is in the list, else
+``ctx.neg_div_flux_default_into`` (= ``-div F`` only, NO default source) -- and each named source is the
+SAME per-cell ``m.source_term`` kernel as the standalone ``source`` op, accumulated onto R via
+``ctx.axpy``. ``sources=["electric"]`` (no ``"default"``) therefore lowers to the flux-only base + the
+electric source, so the default source is never double-counted (an unknown source name is rejected).
 
 (A) Codegen (pure Python, always runs): a ``rhs(sources=["electric"])`` EMITS (no longer raises) and
-    the generated body contains ``ctx.rhs_into`` + the electric source kernel (-rho*grad_x/-rho*grad_y)
-    + an ``axpy`` onto R; an UNKNOWN source raises ValueError; a model WITH a non-empty default source
-    + a named-source rhs raises the deferred NotImplementedError; a named-source rhs WITHOUT a model
-    raises NotImplementedError (no coefficients to read).
+    the generated body contains ``ctx.neg_div_flux_default_into`` (flux only, "default" not requested) +
+    the electric source kernel (-rho*grad_x/-rho*grad_y) + an ``axpy`` onto R; an UNKNOWN source raises
+    ValueError; a named-source rhs WITHOUT a model raises NotImplementedError (no coefficients to read).
 
 (B) Focused parity (skips unless the full toolchain is present): a single Forward-Euler step driven by
     a compiled ``rhs(state=U, sources=["electric"])`` equals the offline one-step reference
@@ -142,7 +142,10 @@ def _unknown_source_program(name="unknown_src"):
 
 
 src = _electric_fe_program().emit_cpp_program(model=m_named)
-chk("ctx.rhs_into(0, " in src, "rhs lowers the flux/composite term via ctx.rhs_into")
+# sources=["electric"] excludes "default" (ADC-425) -> the flux base is the flux-only primitive, NOT
+# ctx.rhs_into (which would fold the default source); the named electric source is axpy'd on top.
+chk("ctx.neg_div_flux_default_into(0, " in src and "ctx.rhs_into(" not in src,
+    "rhs(sources=['electric']) lowers the flux via ctx.neg_div_flux_default_into (no default source)")
 chk("adc::for_each_cell(" in src, "the named electric source is a per-cell kernel")
 chk("((-rho) * grad_x)" in src and "((-rho) * grad_y)" in src,
     "the electric source kernel reads -rho*grad_x / -rho*grad_y")
@@ -154,10 +157,34 @@ chk("ctx.axpy(" in src, "the named source is accumulated onto R via axpy (R += S
 chk(raises(ValueError, lambda: _unknown_source_program().emit_cpp_program(model=named_source_model())),
     "an unknown source_term name in rhs raises ValueError")
 
-# A model WITH a non-empty DEFAULT source + a named-source rhs would double-count -> deferred.
-chk(raises(NotImplementedError,
-           lambda: _electric_fe_program().emit_cpp_program(model=default_source_model())),
-    "rhs with named sources is refused when the model has a non-empty default source")
+# ADC-425: a named-source rhs on a model WITH a non-empty DEFAULT source now LOWERS (the old
+# double-count rejection is gone). A model carrying BOTH a default source and a named "extra"
+# source_term: sources=["extra"] (no "default") routes the flux base to ctx.neg_div_flux_default_into
+# (default source NOT folded) + the extra axpy -- no double-count; sources=["default","extra"] folds the
+# default via ctx.rhs_into + the extra axpy. Both are sound and emit, not refused.
+def _both_source_model(name="pc_both"):
+    m = dsl.Model(name)
+    rho, mx, my, gx, gy, bz = _base_block(m)
+    m.source([0.0, -rho * gx, -rho * gy])          # non-empty DEFAULT source
+    m.source_term("extra", [0.0, 0.5 * rho, 0.0])  # a distinct NAMED source
+    return m
+
+
+def _extra_fe_program(srcs, name="extra_fe"):
+    P = adctime.Program(name)
+    U = P.state("plasma")
+    f = P.solve_fields(U)
+    R = P.rhs(name="R", state=U, fields=f, flux=True, sources=srcs)
+    P.commit("plasma", P.linear_combine("U1", U + P.dt * R))
+    return P
+
+
+src_extra_only = _extra_fe_program(["extra"]).emit_cpp_program(model=_both_source_model())
+chk("ctx.neg_div_flux_default_into(0, " in src_extra_only and "ctx.rhs_into(" not in src_extra_only,
+    "rhs(sources=['extra']) on a default-source model uses the flux-only base (no double-count)")
+src_extra_default = _extra_fe_program(["default", "extra"]).emit_cpp_program(model=_both_source_model())
+chk("ctx.rhs_into(0, " in src_extra_default,
+    "rhs(sources=['default','extra']) folds the default via rhs_into + the extra source axpy'd")
 
 # A named-source rhs without a model cannot read the coefficients -> NotImplementedError.
 chk(raises(NotImplementedError, lambda: _electric_fe_program().emit_cpp_program()),

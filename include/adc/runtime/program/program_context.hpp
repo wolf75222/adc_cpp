@@ -29,6 +29,7 @@
 ///   n_blocks()           -> System::n_blocks()
 ///   state(b)             -> System::block_state(b)             (the block's live MultiFab, zero-copy)
 ///   rhs_into(b, U, R)    -> System::block_rhs_into(b, U, R)    (R <- -div F + S, Poisson frozen)
+///   neg_div_flux_default_into(b, U, R) -> System::block_neg_div_flux_into (R <- -div F, NO source)
 ///   axpy(U, a, R)        -> adc::saxpy(U, a, R)                (U <- U + a R, device-dispatched)
 ///
 /// The Program composes the chain (e.g. Forward Euler = solve_fields(); for each block:
@@ -158,6 +159,17 @@ class ProgramContext {
   int n_blocks() const { return sys_->n_blocks(); }
   MultiFab& state(int b) const { return sys_->block_state(b); }
   void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(b, u, r); }
+
+  /// r <- -div F(u) for block @p b -- the SAME flux divergence as @ref rhs_into but WITHOUT the model's
+  /// default/composite source (Poisson frozen). Forwards to System::block_neg_div_flux_into (the block's
+  /// SourceFreeModel<Model> rhs path, bit-identical to rhs_into minus the source). The codegen lowers a
+  /// hyperbolic stage that excludes the default source (P.rhs(flux=True, sources without "default"),
+  /// incl. the empty list) to this, so a Lie/Strang split assembles "flux but no source" without the
+  /// default source leaking in (epic ADC-399 / ADC-425, spec criterion 17). Header-inline forwarder,
+  /// like @ref rhs_into.
+  void neg_div_flux_default_into(int b, MultiFab& u, MultiFab& r) const {
+    sys_->block_neg_div_flux_into(b, u, r);
+  }
 
   /// The MIN physical cell size of the grid (Cartesian min(dx, dy); polar min(dr, r_min*dtheta)) -- the
   /// SAME hmin the native CFL uses. Forwards to System::cfl_min_dx. A compiled time Program's dt bound

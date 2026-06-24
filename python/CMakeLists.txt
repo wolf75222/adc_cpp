@@ -303,6 +303,18 @@ add_test(NAME test_time_local_solve_run
 set_tests_properties(test_time_local_solve_run PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# RHS source routing (ADC-425) : P.rhs(flux=True, sources=[]) must assemble flux WITHOUT the model's
+# default source (spec criterion 17 -- sources are explicit). Section (A) pins the codegen routing
+# (sources=[] -> ctx.neg_div_flux_default_into ; sources=['default'] -> ctx.rhs_into ; distinct IR
+# hashes), pure Python. Section (B) is the end-to-end PROBE on a zero-flux model with m.source([c*rho]):
+# sources=[] -> rho unchanged (0 cells, source NOT leaked) ; sources=['default'] -> dt*c*rho applied ;
+# a Lie split (H flux-only ; S default-source) == the offline single-source split ; a default-source
+# forward_euler is unchanged. Self-skips without a compiler / Kokkos / install_program (never faking).
+add_test(NAME test_time_rhs_sources
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_rhs_sources.py)
+set_tests_properties(test_time_rhs_sources PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Phase 4b NON-LINEAR local solve (ADC-422) : emit_cpp_program LOWERS P.solve_local_nonlinear (spec
 # op 10) to a per-cell Newton -- an inlined device residual (the residual sub-block: named source /
 # apply per-cell Exprs + the iterate / frozen guess + affine combines), an in-kernel FD Jacobian, and

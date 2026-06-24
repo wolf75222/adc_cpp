@@ -412,6 +412,14 @@ class Program:
         FieldContext any field-dependent source reads (no implicit global aux). Named sources are
         never summed implicitly: ``sources`` lists exactly the ones to include.
 
+        ``sources`` selects which sources are folded in (ADC-425, spec criterion 17): ``None`` (the
+        argument default) keeps the legacy behavior (``-div F`` + the model's default/composite source,
+        byte-identical to before); ``["default"]`` is the same explicitly; ``[]`` (an EMPTY list) is
+        FLUX ONLY (``-div F`` with NO default source) -- the hyperbolic stage of a Lie/Strang/IMEX
+        split; a list of named ``m.source_term`` names adds exactly those (plus the default iff
+        ``"default"`` is in the list). So ``None``/``["default"]`` -> flux + default source, ``[]`` ->
+        flux only, ``["a","b"]`` -> flux + a + b. ``None`` and ``[]`` are recorded DISTINCTLY in the IR.
+
         ``fluxes`` (ADC-419) selects the PHYSICAL flux: ``None`` or ``["default"]`` uses the model's
         historical -div F (the compiled Riemann/FV path, byte-identical to before). A list of NAMED
         fluxes (``m.flux_term``) assembles -div of their SUM via centered FV differencing of the
@@ -424,7 +432,9 @@ class Program:
             raise ValueError("rhs: a State value is required (state=...)")
         if fields is not None and not (isinstance(fields, Value) and fields.vtype == "fields"):
             raise ValueError("rhs: fields must be a FieldContext from solve_fields")
-        src = list(sources) if sources is not None else []
+        # Preserve None (legacy default = flux + default source) DISTINCT from [] (flux only): the
+        # codegen routes on whether "default" is requested, and None is the legacy "default included".
+        src = list(sources) if sources is not None else None
         attrs = {"flux": bool(flux), "sources": src, "fluxes": list(fluxes) if fluxes else None}
         inputs = (state, fields) if fields is not None else (state,)
         return self._new("rhs", "rhs", inputs, attrs, name, state.block)
@@ -1479,14 +1489,17 @@ class Program:
         physical ``model`` (the ``adc.dsl`` model whose ``source_term`` / ``linear_source`` they name)
         is provided: the codegen reads the model's symbolic coefficients to emit the per-cell kernels.
         Without ``model`` those ops raise NotImplementedError (the Program cannot be lowered in
-        isolation); ``model=None`` still lowers FE / SSPRK / RK4 (no model needed). A ``rhs`` with NAMED
-        sources (``sources=[...]`` beyond ``"default"``) also lowers with a model: ``ctx.rhs_into`` (=
-        ``-div F`` + the model's default source) plus, for each named source, the same per-cell
-        ``m.source_term`` kernel as the standalone ``source`` op, accumulated onto ``R`` via ``axpy``.
-        That is sound only when the model's DEFAULT source is empty (else ``rhs_into`` already folds a
-        source and adding named ones double-counts), so a named-source ``rhs`` against a model with a
-        non-empty ``m.source`` is refused (deferred). More than one block, control flow or Krylov remain
-        later phases and raise NotImplementedError, never a silent mis-lowering.
+        isolation); ``model=None`` still lowers FE / SSPRK / RK4 (no model needed). A ``rhs`` routes its
+        base on whether ``"default"`` is among the requested ``sources`` (ADC-425, spec criterion 17 --
+        sources are explicit, never summed implicitly): ``"default"`` present -> ``ctx.rhs_into`` (=
+        ``-div F`` + the model's default/composite source, the historical path); ``"default"`` absent
+        (incl. the empty list ``[]``) -> ``ctx.neg_div_flux_default_into`` (= ``-div F`` only, NO default
+        source). Each NAMED source (``sources=[...]`` beyond ``"default"``) then lowers with a model: the
+        same per-cell ``m.source_term`` kernel as the standalone ``source`` op, accumulated onto ``R`` via
+        ``axpy``. So ``sources=[]`` is flux only, ``sources=["default"]`` is flux + default source
+        (unchanged), ``sources=["a","b"]`` is flux + a + b -- the named ones never double-count the
+        default (it is folded in iff "default" was listed). More than one block, control flow or Krylov
+        remain later phases and raise NotImplementedError, never a silent mis-lowering.
 
         Each ``solve_fields(state=...)`` op lowers to ``ctx.solve_fields_from_state(0, <stage state>)``
         (ADC-409): the elliptic fields are re-solved -- and the shared aux re-filled -- from THAT stage's
@@ -1662,17 +1675,11 @@ class Program:
                     "physical model that declares them (m.source_term); pass model= "
                     "(compile_problem threads it through)" % (v.name, extra))
             impl = _model_impl(model)
-            # ctx.rhs_into already folds the model's DEFAULT/composite source (m.source -> _source).
-            # Adding a named source on top of a non-empty default would DOUBLE-COUNT, so the named-
-            # source rhs is only sound when the default source is empty (the named-source-only model the
-            # predictor-corrector uses). A flux-only seam ('default' / no sources) is unaffected.
-            # NOTE: a NAMED-flux rhs (-div of selected named fluxes, no rhs_into) carries no default
-            # source either, so the same empty-default invariant keeps it free of double-counting.
-            if getattr(impl, "_source", None):
-                raise NotImplementedError(
-                    "rhs with named sources needs a model whose default source is empty (no "
-                    "m.source), or a flux-only seam; rhs '%s' requests %r but the model has a "
-                    "non-empty default source (deferred)" % (v.name, extra))
+            # ADC-425: the named sources are axpy'd on top of an EXPLICIT base. With "default" requested
+            # the base is ctx.rhs_into (flux + the model's default/composite source); without it the base
+            # is ctx.neg_div_flux_default_into (flux only). Either way the default source is folded in iff
+            # the caller listed "default", so adding distinct named source_terms cannot double-count it --
+            # the old "model default source must be empty" rejection is gone (the routing is now exact).
             for s in extra:
                 if s not in impl._source_terms:
                     raise ValueError(
@@ -1796,11 +1803,24 @@ class Program:
             lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
                          % (var[v.id], var[state_in.id]))
             named_fluxes = _named_fluxes(v)
+            requested = v.attrs.get("sources")
+            # ADC-425 routing (spec criterion 17): the default/composite source is folded in iff the
+            # caller did NOT exclude it -- i.e. sources is None (the legacy default) OR "default" is in
+            # the explicit list. An EMPTY list [] (or a list of only named sources) excludes it -> flux
+            # only. None and [] are recorded distinctly in the IR, so this is unambiguous.
+            want_default_source = requested is None or "default" in requested
             if named_fluxes is None:
-                # R <- -div F + default/composite source (ctx.rhs_into). _check_lowerable guarantees the
-                # model's default source is EMPTY when named sources are requested, so rhs_into here is
-                # flux-only (-div F) and the named sources below are added without double-counting.
-                lines.append("ctx.rhs_into(0, %s, %s);" % (var[state_in.id], var[v.id]))
+                if want_default_source:
+                    # R <- -div F + default/composite source (ctx.rhs_into), the historical path:
+                    # sources is None (legacy) or "default" is requested. UNCHANGED / bit-identical.
+                    lines.append("ctx.rhs_into(0, %s, %s);" % (var[state_in.id], var[v.id]))
+                else:
+                    # FLUX-ONLY (ADC-425): "default" is NOT among the requested sources (the empty list
+                    # [] or a named-only list) -> R <- -div F(U) WITHOUT the model's default source
+                    # (ctx.neg_div_flux_default_into). The named source_terms below are then axpy'd on
+                    # top -- so sources=[] is flux only, sources=["a","b"] is flux + a + b.
+                    lines.append("ctx.neg_div_flux_default_into(0, %s, %s);"
+                                 % (var[state_in.id], var[v.id]))
             else:
                 # NAMED fluxes (ADC-419): R <- -div(sum of selected named fluxes). Evaluate the SUM of
                 # the flux expressions per direction into two n_cons scratch fields (fx / fy) by a
