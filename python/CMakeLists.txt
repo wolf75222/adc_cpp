@@ -245,6 +245,18 @@ add_test(NAME test_time_std_imex_lie_ab
 set_tests_properties(test_time_std_imex_lie_ab PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# adc.time.std.bdf IMPLICIT-FLUX via matrix-free Newton-Krylov (ADC-431): the implicit-flux BDF1/BDF2 is
+# a pure-macro Newton-Krylov solve (P.rhs_jacvec FD Jacobian-vector inside the matrix-free apply + GMRES
+# solve_linear), the cell-local linear-source path unchanged. (A) pure Python: the IR builds/lowers with
+# one GMRES per Newton iteration, the rhs-inside-apply scratch, the residual diagnostic; the cell-local
+# path stays solve_local_linear; guards fire. (B) offline parity (compiled BDF1/BDF2 step on an isothermal
+# nonlinear-flux block vs an offline numpy Newton-Krylov on the IDENTICAL residual via the engine's own
+# eval_rhs) auto-skips without numpy / install_program / a compiler / a visible Kokkos (ADC_KOKKOS_ROOT).
+add_test(NAME test_time_bdf
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_bdf.py)
+set_tests_properties(test_time_bdf PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Compiled adc.time.std.strang reproduces native adc.Strang on a simple case (ADC-410). (A) pure Python:
 # the std.strang macro lowers to two half-flow stages (U + dt/2 * R) around a no-op source, and
 # emit_cpp_program produces the matching C++. (B) native bit-parity: an uncoupled isothermal NoSource
