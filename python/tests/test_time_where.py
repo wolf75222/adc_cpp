@@ -8,8 +8,9 @@ scalar runtime branch ``if_``. The 0/1 mask is built per cell with ``P.cell_ge``
 
 (A) Codegen (pure Python, always runs): ``cell_ge`` + ``where`` build + lower to the select kernel
     (``for_each_cell`` + the ``maskA ? aA : bA`` ternary, component-wise over the runtime ncomp), and
-    the validation (mismatched a/b ncomp / vtype / block rejected; a non-float threshold rejected; a
-    mask whose ncomp is neither 1 nor a/b's ncomp rejected).
+    the validation (mismatched a/b ncomp / vtype / block rejected; a field threshold accepted, a
+    non-field non-float threshold rejected (ADC-434); a mask whose ncomp is neither 1 nor a/b's ncomp
+    rejected).
 
 (B) End-to-end parity (skips unless the full toolchain is present): a per-cell select
     ``U <- where(U >= floor, U, 0.5*U)`` stepped once, compared to an offline numpy ``np.where`` doing
@@ -145,15 +146,26 @@ def test_where_rejects_mismatched_vtype(t):
         raise AssertionError("where must reject a / b of different value types")
 
 
-def test_cell_compare_rejects_non_float_threshold(t):
+def test_cell_compare_accepts_field_threshold(t):
+    # ADC-434: a per-cell FIELD threshold is now allowed (a State/RHS/scalar_field rhs); the mask
+    # compares component 0 of the field against component 0 of the threshold field.
+    P = t.Program("p")
+    U = P.state("blk")
+    m = P.cell_ge(U, U)  # a field-vs-field compare (U >= U)
+    assert m.vtype == "scalar_field" and m.attrs["value"] is None, m.attrs
+    assert [i.op for i in m.inputs] == ["state", "state"], [i.op for i in m.inputs]
+
+
+def test_cell_compare_rejects_non_field_non_float_threshold(t):
+    # A threshold that is neither a field value nor a Python float is still rejected.
     P = t.Program("p")
     U = P.state("blk")
     try:
-        P.cell_ge(U, U)  # a per-cell field threshold is a later phase
+        P.cell_ge(U, "0.5")
     except TypeError as exc:
         assert "float threshold" in str(exc), str(exc)
     else:
-        raise AssertionError("cell_compare must reject a non-float threshold")
+        raise AssertionError("cell_compare must reject a non-field non-float threshold")
 
 
 def test_cell_compare_rejects_bad_cmp(t):

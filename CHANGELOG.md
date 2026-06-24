@@ -20,6 +20,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Per-cell op completeness: field-threshold `cell_compare` / `where` + custom `project`** (ADC-434,
+  epic ADC-399): `Program.cell_compare` (and `cell_gt` / `cell_ge` / `cell_lt` / `cell_le`) now accepts
+  a FIELD threshold (a State/RHS/scalar_field), not only a Python float -- the per-cell mask compares
+  component 0 of the field against component 0 of the threshold field; the constant-threshold lowering
+  is byte-identical. `Program.project(state, projection=fn)` now accepts a CUSTOM projection callable
+  `fn(P, U) -> U` that builds a per-cell map (an affine combine + `cell_compare` / `where` + named
+  `source` / `apply`) lowered through the existing per-cell kernels (no new device primitive: heap-free
+  / `std::function`-free), the result copied back into the state in place; `projection="block"` (the
+  native `ctx.apply_projection`) is unchanged. New `python/tests/test_time_percell_ops.py`.
 - **Multi-block compiled time Programs** (ADC-426, epic ADC-399, spec "Multi-blocs"):
   `Program.emit_cpp_program` lowers N `P.state("a")` / N `P.commit` -- the SSA walk allocates a base
   per block and routes every op (state, rhs, solve_fields, projection, max_wave_speed) to its block's

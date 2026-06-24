@@ -1019,23 +1019,72 @@ class Program:
                              % (x,))
         return self._new(x.vtype, "fill_boundary", (x,), {}, x.name, x.block)
 
+    # A custom projection sub-block is a PER-CELL map U -> U_projected built from the SAME local field
+    # ops a clamp / floor needs: the input-state placeholder, an affine combine, a per-cell threshold
+    # (cell_compare) and select (where), and the named model ops (source / apply). Every op lowers
+    # through the existing per-cell kernels -- no new device primitive (no std::function / heap).
+    _PROJECTION_LOCAL_OPS = frozenset({"state", "linear_combine", "cell_compare", "where",
+                                       "source", "apply"})
+
     def project(self, name=None, state=None, projection="block"):
-        """Apply the block's post-step positivity projection to @p state in place (spec op 21):
-        ``U <- project(U, aux)`` over the valid cells, the SAME Zhang-Shu / floor projection the native
-        per-step path runs (ADC-177). Returns a State value (the projected state). @p projection selects
-        the projection primitive; only ``"block"`` (the block's own, set at add_block time) is supported
-        -- a custom projection is a later phase. Lowered to ``ctx.apply_projection(idx, state)`` for the
-        state's own block (ADC-426)."""
+        """Apply a post-step projection to @p state in place (spec op 21): ``U <- project(U)`` over the
+        valid cells. Returns a State value (the projected state).
+
+        @p projection selects the projection:
+
+          - ``"block"`` (the default): the block's OWN positivity projection -- the SAME Zhang-Shu /
+            floor projection the native per-step path runs (ADC-177), lowered to
+            ``ctx.apply_projection(idx, state)`` for the state's own block (ADC-426). Byte-identical to
+            the pre-ADC-434 lowering.
+          - a CUSTOM projection callable ``fn(P, U) -> U`` (ADC-434): @p fn BUILDS the projected state
+            from the input state @p U using LOCAL per-cell ops only -- the affine algebra over @p U,
+            ``P.cell_compare`` / ``P.where`` (a per-cell threshold + select, e.g. a clamp ``rho in
+            [lo, hi]``), and named ``P.source`` / ``P.apply``. A non-local op (``P.rhs`` /
+            ``P.divergence`` / ``P.solve_fields`` / a nested solve) is rejected: a projection is a
+            cell-local map. The sub-block lowers like a control-flow body -- its ops re-emit through the
+            existing per-cell kernels and the result is copied back into @p state in place (no new
+            device primitive)."""
         if isinstance(name, Value) and state is None:
             name, state = None, name
         if not (isinstance(state, Value) and state.vtype == "state"):
             raise ValueError("project: a State value is required (state=...)")
-        if projection != "block":
+        if projection == "block":
+            return self._new("state", "project", (state,), {"projection": projection}, name,
+                             state.block)
+        if not callable(projection):
             raise NotImplementedError(
-                "project: only projection='block' (the block's own positivity projection) is "
-                "supported; a custom projection is a later phase (got %r)" % (projection,))
-        return self._new("state", "project", (state,), {"projection": projection}, name,
-                         state.block)
+                "project: projection must be 'block' (the block's own positivity projection) or a "
+                "custom projection callable fn(P, U) -> U; got %r" % (projection,))
+        if self._recording:
+            raise NotImplementedError(
+                "project: recording a custom projection inside another sub-block (apply / while / "
+                "projection body) is a later phase")
+        block = state.block
+        # Record the projection sub-block (like a residual / apply body): the input state is a State
+        # placeholder local to the sub-block; fn builds U_projected from it with LOCAL per-cell ops. The
+        # placeholder is NOT appended to self._values (it belongs to this op) -- at lowering it binds to
+        # the live state and the sub-block re-emits through the existing per-cell kernels.
+        sub = []
+        self._recording.append(sub)
+        try:
+            arg = self._new("state", "state", (), {}, "proj_input", block)
+            result = projection(self, arg)
+        finally:
+            self._recording.pop()
+        for w in sub:
+            if w.op not in Program._PROJECTION_LOCAL_OPS:
+                raise ValueError(
+                    "project: custom-projection op '%s' is not LOCAL; a per-cell projection may use "
+                    "only %s (the input State, an affine combine, P.cell_compare / P.where, named "
+                    "P.source / P.apply). Use a non-local op (P.rhs / P.divergence / P.solve_fields) "
+                    "outside the projection." % (w.op, sorted(Program._PROJECTION_LOCAL_OPS)))
+        if not (isinstance(result, Value) and result.vtype == "state"):
+            raise ValueError(
+                "project: a custom projection fn(P, U) must return the projected State (got %r)"
+                % (result,))
+        return self._new("state", "project", (state,),
+                         {"projection": "custom", "proj_block": sub, "proj_input": arg,
+                          "proj_result": result}, name, block)
 
     # --- per-cell conditional select (spec op 17, ADC-418) ---
     _CELL_CMPS = {">": "cell_gt", ">=": "cell_ge", "<": "cell_lt", "<=": "cell_le"}
@@ -1043,20 +1092,32 @@ class Program:
     def cell_compare(self, field, value, cmp, name=None):
         """A PER-CELL comparison ``field <cmp> value`` -> a fresh 1-component 0/1 mask scalar_field (1.0
         where the comparison holds, 0.0 otherwise), evaluated cell by cell on component 0 of @p field
-        (its sole / first conserved component). @p field is a State/RHS/scalar_field value; @p value is a
-        Python float threshold (a per-cell field threshold is a later phase); @p cmp is one of
+        (its sole / first conserved component). @p field is a State/RHS/scalar_field value; @p value is
+        EITHER a Python float (a constant threshold) OR another field value (a State/RHS/scalar_field) --
+        a per-cell field-vs-field threshold, compared component-0-to-component-0. @p cmp is one of
         ``'>' '>=' '<' '<='``. The mask is the input the per-cell `where` selects on. Lowered to a
-        for_each_cell kernel ``maskA(i,j,0) = fieldA(i,j,0) <cmp> value ? 1 : 0``. Convenience wrappers:
-        `cell_gt` / `cell_ge` / `cell_lt` / `cell_le`."""
+        for_each_cell kernel ``maskA(i,j,0) = fieldA(i,j,0) <cmp> value ? 1 : 0`` (the right-hand side is
+        the literal threshold or, for a field rhs, ``rhsA(i,j,0)``). Convenience wrappers: `cell_gt` /
+        `cell_ge` / `cell_lt` / `cell_le`."""
         if not _is_field_value(field):
             raise ValueError("cell_compare: a State/RHS/scalar_field value is required (got %r)"
                              % (field,))
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise TypeError("cell_compare: value must be a Python float threshold (a per-cell field "
-                            "threshold is a later phase); got %r" % (value,))
         if cmp not in Program._CELL_CMPS:
             raise ValueError("cell_compare: cmp must be one of %s; got %r"
                              % (sorted(Program._CELL_CMPS), cmp))
+        # The threshold is EITHER a Python float (the constant-threshold path, bit-identical to before:
+        # one input, the literal in attrs["value"]) OR another field value (the field-vs-field path: a
+        # second input, no literal -- the kernel reads component 0 of the rhs field per cell).
+        if _is_field_value(value):
+            if value.block != field.block:
+                raise ValueError("cell_compare: the field threshold must belong to the same block as "
+                                 "the compared field (field is %r, threshold is %r)"
+                                 % (field.block, value.block))
+            return self._new("scalar_field", "cell_compare", (field, value),
+                             {"cmp": cmp, "value": None}, name, field.block)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("cell_compare: value must be a Python float threshold or a "
+                            "State/RHS/scalar_field value; got %r" % (value,))
         return self._new("scalar_field", "cell_compare", (field,),
                          {"cmp": cmp, "value": float(value)}, name, field.block)
 
@@ -1476,6 +1537,10 @@ class Program:
             attrs["residual_block"] = [Program._serialize_node(w) for w in attrs["residual_block"]]
             for k in ("residual", "iterate", "guess"):
                 attrs[k] = attrs[k].id
+        elif v.op == "project" and attrs.get("projection") == "custom":  # the projection sub-block
+            attrs["proj_block"] = [Program._serialize_node(w) for w in attrs["proj_block"]]
+            for k in ("proj_input", "proj_result"):
+                attrs[k] = attrs[k].id
         return {"id": v.id, "vtype": v.vtype, "op": v.op, "block": v.block,
                 "inputs": [i.id for i in v.inputs], "attrs": attrs}
 
@@ -1655,7 +1720,7 @@ class Program:
         flow is disallowed, so the sub-blocks are flat (one level)."""
         for v in self._values:
             yield v
-            for key in ("cond_block", "body_block", "apply_block", "residual_block"):
+            for key in ("cond_block", "body_block", "apply_block", "residual_block", "proj_block"):
                 blk = v.attrs.get(key)
                 if isinstance(blk, list):
                     yield from blk
@@ -1701,6 +1766,12 @@ class Program:
                     "matrix_free_operator '%s' has no apply; call P.set_apply before lowering"
                     % v.name)
             for w in v.attrs["apply_block"]:
+                self._check_op_lowerable(w, model)
+            return
+        if v.op == "project" and v.attrs.get("projection") == "custom":
+            # A custom projection (ADC-434): recurse into the projection sub-block so its named
+            # source / apply (which need the model) are validated like a residual / apply body.
+            for w in v.attrs["proj_block"]:
                 self._check_op_lowerable(w, model)
             return
         if v.op == "solve_fields":
@@ -1864,21 +1935,44 @@ class Program:
             lines.append("ctx.fill_boundary(%s);" % var[x.id])
             var[v.id] = var[x.id]
         elif v.op == "project":
-            # In-place positivity projection of the state (the block's own project closure). The result
-            # aliases the input state. Forwards to ctx.apply_projection(idx, state) (ADC-426: the op's
-            # own block, so each block runs its own projection).
             (state_in,) = v.inputs
-            lines.append("ctx.apply_projection(%d, %s);" % (bidx, var[state_in.id]))
-            var[v.id] = var[state_in.id]
+            if v.attrs["projection"] == "custom":
+                # A CUSTOM per-cell projection (ADC-434): re-emit the projection sub-block (the input
+                # placeholder bound to the live state) through the existing per-cell kernels, then copy
+                # the result back into the state IN PLACE (like a while/if body writes its loop var). No
+                # new device primitive -- it reuses cell_compare / where / linear_combine / source /
+                # apply, so the kernel stays heap-free / std::function-free.
+                sub = dict(var)
+                proj_input_id = v.attrs["proj_input"].id
+                sub[proj_input_id] = var[state_in.id]  # the placeholder IS the live state
+                for w in v.attrs["proj_block"]:
+                    if w.id == proj_input_id:
+                        continue  # the input placeholder is already bound to the live state; do not
+                        # re-bind it to a fresh ctx.state() (it would alias the same MultiFab anyway)
+                    self._emit_op(w, base, frozenset(), sub, model, lines, block_idx=block_idx)
+                lines.append(
+                    "ctx.lincomb(%s, static_cast<adc::Real>(0), %s, static_cast<adc::Real>(1), %s);"
+                    % (var[state_in.id], var[state_in.id], sub[v.attrs["proj_result"].id]))
+                var[v.id] = var[state_in.id]
+            else:
+                # In-place positivity projection of the state (the block's own project closure). The
+                # result aliases the input state. Forwards to ctx.apply_projection(idx, state) (ADC-426:
+                # the op's own block, so each block runs its own projection). Byte-identical to before.
+                lines.append("ctx.apply_projection(%d, %s);" % (bidx, var[state_in.id]))
+                var[v.id] = var[state_in.id]
         elif v.op == "cell_compare":
-            # A PER-CELL threshold (spec op 17, ADC-418): mask(i,j,0) = field(i,j,0) <cmp> value ? 1 : 0,
-            # a fresh 1-component scalar_field. Lowered to a for_each_cell select kernel (the mask the
-            # `where` op selects on); no aux / model needed -- it reads component 0 of the input field.
-            (field_in,) = v.inputs
+            # A PER-CELL threshold (spec op 17, ADC-418 + ADC-434): a fresh 1-component scalar_field
+            # mask(i,j,0) = field(i,j,0) <cmp> rhs ? 1 : 0, lowered to a for_each_cell kernel (the mask
+            # the `where` op selects on); no aux / model needed -- it reads component 0 of the inputs.
+            # The rhs is a literal threshold (one input, attrs["value"]) OR a second field read at
+            # component 0 (ADC-434 field-vs-field threshold).
+            field_in = v.inputs[0]
+            rhs_in = v.inputs[1] if len(v.inputs) > 1 else None
             var[v.id] = "m%d" % v.id
             lines.append("adc::MultiFab %s = ctx.alloc_scalar_field(1, 1);" % var[v.id])
             lines += _emit_cell_compare_kernel(var[field_in.id], var[v.id], v.attrs["cmp"],
-                                               v.attrs["value"])
+                                               v.attrs["value"],
+                                               rhs_var=(var[rhs_in.id] if rhs_in is not None else None))
         elif v.op == "where":
             # A PER-CELL conditional select (spec op 17, ADC-418): out(i,j,c) = mask ? a(i,j,c) :
             # b(i,j,c), COMPONENT-WISE. A fresh scratch the same shape as `a` (its vtype / ncomp); the
@@ -2561,16 +2655,26 @@ def _kernel_close():
 # states / scalar_fields, so fab(li) is the same box on every rank.
 
 
-def _emit_cell_compare_kernel(field_var, mask_var, cmp, value):
-    """Lower ``cell_compare``: maskA(i,j,0) = fieldA(i,j,0) <cmp> value ? 1 : 0 over the valid cells of
-    the 1-component mask. Reads component 0 of @p field_var; writes the 0/1 mask into @p mask_var."""
+def _emit_cell_compare_kernel(field_var, mask_var, cmp, value, rhs_var=None):
+    """Lower ``cell_compare``: maskA(i,j,0) = fieldA(i,j,0) <cmp> rhs ? 1 : 0 over the valid cells of
+    the 1-component mask. Reads component 0 of @p field_var; writes the 0/1 mask into @p mask_var. The
+    rhs is the literal @p value (the constant-threshold path) when @p rhs_var is None, or component 0 of
+    the @p rhs_var field (ADC-434 field-vs-field threshold) otherwise. The constant-threshold path is
+    byte-identical to the pre-ADC-434 emit (one read handle, the literal cast)."""
+    if rhs_var is None:
+        rhs_handle_lines = []
+        rhs_cpp = "static_cast<adc::Real>(%s)" % repr(float(value))
+    else:
+        rhs_handle_lines = ["  const adc::ConstArray4 rhsA = %s.fab(li).const_array();" % rhs_var]
+        rhs_cpp = "rhsA(i, j, 0)"
     return [
         "for (int li = 0; li < %s.local_size(); ++li) {" % mask_var,
         "  const adc::Array4 maskA = %s.fab(li).array();" % mask_var,
         "  const adc::ConstArray4 fieldA = %s.fab(li).const_array();" % field_var,
+    ] + rhs_handle_lines + [
         "  adc::for_each_cell(%s.box(li), [=] ADC_HD(int i, int j) {" % mask_var,
-        "    maskA(i, j, 0) = (fieldA(i, j, 0) %s static_cast<adc::Real>(%s)) "
-        "? static_cast<adc::Real>(1) : static_cast<adc::Real>(0);" % (cmp, repr(float(value))),
+        "    maskA(i, j, 0) = (fieldA(i, j, 0) %s %s) "
+        "? static_cast<adc::Real>(1) : static_cast<adc::Real>(0);" % (cmp, rhs_cpp),
         "  });",
         "}",
     ]
