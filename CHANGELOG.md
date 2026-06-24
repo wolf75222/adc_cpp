@@ -20,6 +20,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Spec 3 native Riemann capability validation** (ADC-456, epic ADC-450): board `m.riemann(...)`
+  and `m.finite_volume_rate(riemann=...)` now validate the model's capabilities for the chosen
+  native solver and canonicalize board roles (`density` -> `Density`, `momentum_x` -> `MomentumX`,
+  ...) so the role lookup recognizes them. HLLC/Roe require a pressure and the fluid roles;
+  HLL requires wave speeds; Rusanov requires only a max wave speed. Missing capabilities are
+  rejected early with a clear message ("riemann HLLC requires model capability 'pressure' for
+  state 'U'"), and a valid selection drives the dsl `enable_hllc()`/`enable_roe()` role-derived
+  `ADC_HD` hook generation. New `adc.lib.riemann.speeds.*` / `riemann.hllc.contact_speed.*` /
+  `star_state.*` hook-selector descriptors. New `python/tests/test_riemann_capabilities.py` and
+  `examples/spec3/hllc_capabilities_euler.py`. Generating hooks from arbitrary board formulas and
+  the end-to-end board-model compile remain follow-ups.
 - **Spec 3 reference docs (multispecies / scheduler / custom-solvers) + multi-species example**
   (ADC-455, epic ADC-450): `docs/sphinx/reference/multispecies.md` (species as BlockInstances,
   arbitrary-arity operators, `RateBundle` typed multi-output, `commit_many`, `StageStateSet`),

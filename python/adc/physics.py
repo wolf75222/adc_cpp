@@ -37,6 +37,29 @@ def _safe_name(name):
     return s
 
 
+# Board role vocabulary -> dsl canonical role (adc::VariableRole). The dsl roles_for() uses an
+# explicit role override verbatim, so a board role must already be canonical for the native HLLC/Roe
+# role lookup (which indexes "Density"/"MomentumX"/"MomentumY"/"Energy") to find it.
+_BOARD_ROLE = {
+    "density": "Density",
+    "momentum_x": "MomentumX", "momentum_y": "MomentumY", "momentum_z": "MomentumZ",
+    "energy": "Energy", "pressure": "Pressure", "temperature": "Temperature",
+}
+
+
+def _canon_role(role):
+    """Canonicalize a board role string to a dsl role; pass through None and unknown roles."""
+    if role is None:
+        return None
+    return _BOARD_ROLE.get(str(role).lower(), role)
+
+
+def _roles_for(hyp):
+    """The canonical dsl roles of a HyperbolicModel's conservative state."""
+    from . import dsl as _dsl
+    return _dsl.roles_for(hyp.cons_names, hyp.cons_roles)
+
+
 class StateHandle:
     """A declared state: a name plus the ordered :mod:`adc.dsl` component vars.
 
@@ -227,10 +250,15 @@ class Model:
 
     # --- state / species ---
     def state(self, name="U", components=(), roles=None):
-        """Declare the conservative state. Returns an unpackable :class:`StateHandle`."""
+        """Declare the conservative state. Returns an unpackable :class:`StateHandle`.
+
+        Board role strings (``density`` / ``momentum_x`` / ``momentum_y`` / ``energy`` / ...)
+        are canonicalized to the dsl roles (``Density`` / ``MomentumX`` / ...) so the native
+        Riemann capabilities (HLLC/Roe role lookup) recognize them.
+        """
         role_list = None
         if roles:
-            role_list = [roles.get(c) for c in components]
+            role_list = [_canon_role(roles.get(c)) for c in components]
         vars_ = self._dsl.conservative_vars(*components, roles=role_list)
         handle = StateHandle(name, components, vars_, roles)
         self._states[handle.name] = handle
@@ -359,8 +387,12 @@ class Model:
         the source terms; lowers to the same rate operator a board equation does.
         The native-brick hook codegen for a custom Riemann is tracked by ADC-456.
         """
-        self._riemann = riemann
         self._reconstruction = reconstruction
+        # Selecting a Riemann solver validates the model's capabilities for it and enables
+        # the role-derived hooks (criterion 10); accept a string or an adc.lib descriptor.
+        if riemann is not None:
+            scheme = getattr(riemann, "scheme", riemann)
+            self.riemann(scheme)
         src_names = [s.reg_name if isinstance(s, SourceHandle) else _safe_name(s)
                      for s in sources]
         # A finite-volume rate always assembles -div F; the flux selection is recorded
@@ -396,27 +428,61 @@ class Model:
 
     def riemann(self, name, flux=None, pressure=None, velocity=None, sound_speed=None,
                 wave_speeds=None, contact_speed=None, star_state=None):
-        """Select a Riemann solver and its model capability formulas (board surface).
+        """Select a Riemann solver and validate the model's capabilities for it.
 
-        The capability hooks (pressure / sound_speed / contact_speed / star_state)
-        feed the native C++ solvers; their generation from these board formulas is
-        tracked by ADC-456. For now this records the selection and, for ``hllc`` /
-        ``roe`` over a role-tagged fluid state, enables the existing dsl hooks.
+        The native solvers are C++ (``adc::RusanovFlux`` / ``HLLFlux`` / ``HLLCFlux`` /
+        ``RoeFlux``). HLLC/Roe need model capabilities: a pressure primitive and the fluid
+        roles Density/MomentumX/MomentumY (the dsl ``enable_hllc`` / ``enable_roe`` then
+        generate the ``ADC_HD`` ``contact_speed`` / ``hllc_star_state`` / ``roe_dissipation``
+        hooks from those roles). Missing capabilities are rejected here with a clear message
+        (Spec 3 criterion 10). Generating the hooks from ARBITRARY board formulas (rather than
+        the role-derived ones) is the remaining part of ADC-456.
         """
         self._riemann = name
-        # Record the model capability formulas for the native-hook codegen (ADC-456);
-        # not yet consumed -- kept so they are not silently dropped.
         self._riemann_hooks = {
             "flux": flux, "pressure": pressure, "velocity": velocity,
             "sound_speed": sound_speed, "wave_speeds": wave_speeds,
             "contact_speed": contact_speed, "star_state": star_state,
         }
         kind = str(name).lower()
+        self._validate_riemann_capabilities(kind, pressure, wave_speeds)
         if kind == "hllc":
             self._dsl.enable_hllc()
         elif kind == "roe":
             self._dsl.enable_roe()
         return name
+
+    def _validate_riemann_capabilities(self, kind, pressure, wave_speeds):
+        """Reject a model that lacks the capabilities the chosen Riemann solver needs
+        (Spec 3 criterion 10). Rusanov needs only a max wave speed (always available from the
+        flux/eigenvalues); HLL needs wave speeds; HLLC/Roe need a pressure and fluid roles."""
+        hyp = self._dsl._m
+        roles = set(_roles_for(hyp))
+        has_pressure = ("p" in hyp.prim_defs) or (pressure is not None)
+        fluid = {"Density", "MomentumX", "MomentumY"}
+        if kind in ("hllc", "roe"):
+            if not has_pressure:
+                raise ValueError(
+                    "riemann %s requires model capability 'pressure' for state %r: declare a "
+                    "primitive m.primitive('p', ...) or pass m.riemann(..., pressure=...)"
+                    % (kind.upper(), self._state_name()))
+            missing = fluid - roles
+            if missing:
+                raise ValueError(
+                    "riemann %s requires model capability 'hllc_star_state' for state %r: the "
+                    "fluid roles %s are needed (declare m.state(..., roles={...})); missing %s"
+                    % (kind.upper(), self._state_name(),
+                       sorted(fluid), sorted(missing)))
+        elif kind == "hll":
+            if (wave_speeds is None and not hyp._eig and hyp._wave_speeds is None
+                    and hyp._ws_jacobian is None):
+                raise ValueError(
+                    "riemann HLL requires model capability 'wave_speeds': declare m.flux(..., "
+                    "waves=...) or pass m.riemann('hll', wave_speeds=...)")
+        # rusanov: only max_wave_speed, always derivable -> no extra requirement.
+
+    def _state_name(self):
+        return next(iter(self._states), "U")
 
     def invariant(self, name, expression=None, over=None):
         """Declare a generic invariant ``StateSet -> Scalar`` from an ``integral(...)``."""
