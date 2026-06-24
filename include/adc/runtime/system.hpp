@@ -734,6 +734,28 @@ class System {
   /// Exposed to Python as sim.program_diagnostics() (a dict); program_diagnostic(name) reads one.
   ADC_EXPORT std::map<std::string, Real> program_diagnostics() const;
   /// @}
+  /// @name Compiled-Program RUNTIME parameters (epic ADC-399 / ADC-435, spec ctx.param)
+  /// A name -> Real store a compiled Program reads via ctx.param (ProgramContext::param) and the host
+  /// sets via sim.set_param WITHOUT recompiling the .so. A DSL runtime param (dsl.Param kind='runtime')
+  /// referenced by a Program kernel lowers to ONE host read of this store before the per-cell loop
+  /// (captured by value); a FROZEN const param stays baked as a literal (bit-identical). The store lives
+  /// in Impl (private to the _adc TU) so it outlives the step closure and crosses the dlopen boundary;
+  /// the .so reads it through the ADC_EXPORT accessor below. Distinct from set_block_params (the AOT
+  /// per-block RuntimeParams ABI): this is the System-level param channel for compiled time Programs.
+  /// @{
+  /// Set runtime parameter @p name to @p value (overwrites a prior value; creates it if new). Takes
+  /// effect on the NEXT step -- the .so reads ctx.param("<name>") fresh each step. Changing a value does
+  /// NOT recompile the .so (the value is not in the program source / cache key, only the NAME is).
+  ADC_EXPORT void set_param(const std::string& name, Real value);
+  /// The current value of runtime parameter @p name. @throws std::out_of_range if @p name was never set
+  /// (a typo / an unset param fails loud, not silent 0 -- the host must seed it with set_param before the
+  /// program reads it). The generated problem.so resolves it via RTLD_GLOBAL (like the other seam
+  /// accessors).
+  ADC_EXPORT Real param(const std::string& name) const;
+  /// All runtime parameters (name -> current value). Empty when none has been set. Exposed to Python as
+  /// sim.params() (a dict); param(name) reads one.
+  ADC_EXPORT std::map<std::string, Real> params() const;
+  /// @}
   /// @}
 
   /// @name Diagnostics

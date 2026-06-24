@@ -20,6 +20,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Runtime model parameters in compiled time Programs** (ADC-435, epic ADC-399, spec `ctx.param`):
+  a model parameter declared `dsl.Param(..., kind='runtime')` and read by a compiled Program kernel
+  (a named `source` / `flux` / `linear_source` / local solve / Newton residual) now lowers to a host
+  read `const adc::Real <name> = ctx.param("<name>");` once before the per-cell loop (captured by
+  value) instead of raising `NotImplementedError`. `System::set_param(name, value)` /
+  `System::param(name)` (a new System-level param store, exposed as `sim.set_param` / `sim.param` /
+  `sim.params`) change the value at runtime WITHOUT recompiling the `.so`: only the parameter NAME
+  enters the generated source, so the `.so` cache key is invariant under a runtime-param value change.
+  A frozen `kind='const'` parameter stays baked as a literal (bit-identical to before). New
+  `ProgramContext::param`, `dsl.runtime_param_names_in` / `dsl.freeze_runtime_params_as_vars`, and
+  `python/tests/test_time_runtime_param.py`.
 - **Multi-block compiled time Programs** (ADC-426, epic ADC-399, spec "Multi-blocs"):
   `Program.emit_cpp_program` lowers N `P.state("a")` / N `P.commit` -- the SSA walk allocates a base
   per block and routes every op (state, rhs, solve_fields, projection, max_wave_speed) to its block's

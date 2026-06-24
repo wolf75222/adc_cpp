@@ -1191,6 +1191,48 @@ def _children(e):
     return ()
 
 
+def runtime_param_names_in(exprs):
+    """SORTED set of runtime-parameter names referenced anywhere in @p exprs (an iterable of Expr).
+    Used by the compiled time-program codegen (adc.time): it reads each runtime param ONCE from the
+    System param store before the per-cell loop, so it needs the names without assigning .so indices
+    (the program path does not own a RuntimeParams member -- it reads ctx.param). Order SORTED by name
+    for a deterministic emission (stable .so source / cache key)."""
+    seen = set()
+    stack = list(exprs)
+    while stack:
+        e = stack.pop()
+        if isinstance(e, RuntimeParamRef):
+            seen.add(e.name)
+        else:
+            stack.extend(_children(e))
+    return sorted(seen)
+
+
+def freeze_runtime_params_as_vars(e):
+    """Rewrite the Expr tree @p e to a COPY whose RuntimeParamRef nodes are replaced by a bare
+    ``Var(name, "runtime")`` -- ``to_cpp()`` then emits the bare ``<name>`` (a host scalar local the
+    caller binds to ``ctx.param("<name>")``) instead of ``params.get(<index>)`` (the AOT RuntimeParams
+    read, which a compiled time Program has no member for). The original tree is NOT mutated (the AOT /
+    native brick paths keep reading the shared RuntimeParamRef nodes). Only the node types the
+    source/flux/apply coefficient trees use are rebuilt; an unexpected node is returned as-is (it carries
+    no runtime param by construction -- runtime_param_names_in would have found it)."""
+    if isinstance(e, RuntimeParamRef):
+        return Var(e.name, "runtime")
+    if isinstance(e, _Bin):
+        return type(e)(freeze_runtime_params_as_vars(e.a), freeze_runtime_params_as_vars(e.b))
+    if isinstance(e, (Neg, Sqrt, Abs, Sign)):
+        return type(e)(freeze_runtime_params_as_vars(e.a))
+    if isinstance(e, EigWitness):
+        # A runtime param may sit inside an eig-witness matrix entry (a legal scalar coefficient).
+        # _children recurses into entries() so runtime_param_names_in discovers it -> the host read is
+        # emitted; the entry's to_cpp() must then see the rewritten Var, so rebuild the matrix.
+        return EigWitness([[freeze_runtime_params_as_vars(c) for c in row] for row in e.rows],
+                          e.field, im_tol=e.im_tol)
+    if isinstance(e, StateRef):
+        return StateRef(e.side, freeze_runtime_params_as_vars(e.expr))
+    return e
+
+
 def _expr_uses_cons_or_prim(e):
     """True if the expression tree references a conservative or primitive Var. Tests the Var KIND, so
     the answer does not depend on declaration order. Used to enforce that linear_source coefficients

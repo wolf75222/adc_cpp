@@ -499,6 +499,14 @@ class ProgramContext {
     sys_->record_program_diagnostic(name, value);
   }
 
+  /// The current value of RUNTIME parameter @p name (spec ParamValue param(string), ADC-435), set by the
+  /// host via sim.set_param. A compiled time Program kernel reading a dsl.Param(kind='runtime') lowers to
+  /// ONE host call of this -- ``const adc::Real <name> = ctx.param("<name>");`` -- BEFORE the per-cell
+  /// loop (captured by value), so the value can be changed at runtime WITHOUT recompiling the .so (a
+  /// FROZEN const param stays baked as a literal). Forwards to System::param (throws if the host never
+  /// seeded @p name -- fail-loud, not silent 0). A pure read: it does not feed the numerics by itself.
+  Real param(const std::string& name) const { return sys_->param(name); }
+
  private:
   /// BC of the coefficient / flux fields (ADC-421): periodic preserved, physical boundary -> zero-
   /// gradient (Foextrap). Identical to GeometricMG::eps_bc and the native Schur coeff_bc -- the face

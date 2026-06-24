@@ -131,6 +131,7 @@ compile path (`m.compile`, `m.source`) keep working unchanged.
 | `condensed_schur` as a Program macro (ADC-421) | available (`theta == 1` backward-Euler source stage from `phi^n = 0`); near-match to native `adc.CondensedSchur` (no preconditioner); cross-step phi carry / `theta < 1` extrapolation / energy update deferred |
 | `std.rk` (generic Butcher tableau) / `std.lie` / `std.imex_local` / `std.adams_bashforth(order)` / `std.bdf` + `@P.step` decorator (ADC-423) | available (all lower to the existing IR); `bdf` is cell-local-`L` only (implicit-flux BDF deferred) |
 | Multi-block programs: N `P.state` / N `P.commit`, each op routed to its block index (ADC-426) | available, runs end-to-end (add the System blocks in `P.state` declaration order); per-block `P.solve_fields(state=)` is a coupled solve; the simultaneous multi-target `P.solve_fields_from_blocks` is deferred |
+| Runtime model parameters in compiled kernels (`dsl.Param(..., kind='runtime')` read via `ctx.param`, set via `sim.set_param`) (ADC-435) | available, runs end-to-end; a runtime param is read once per step before the per-cell loop, so `sim.set_param(name, value)` changes the kernel WITHOUT recompiling; a frozen `kind='const'` param stays baked as a literal (bit-identical); the `.so` cache key excludes runtime-param values (only the name enters the program source) |
 
 Each lowered path is verified against an independent reference to machine precision: Forward Euler /
 SSPRK2 / SSPRK3 reproduce the native `adc.Explicit` step bit-for-bit; the compiled `strang` macro

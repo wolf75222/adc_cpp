@@ -186,6 +186,13 @@ struct System::Impl {
   // (System::program_diagnostic / program_diagnostics). Lives HERE (not in the .so) so it outlives the
   // step closure and Python can read it; not referenced by SystemStepper -> no MockImpl impact.
   std::map<std::string, Real> program_diagnostics_;
+  // COMPILED-PROGRAM RUNTIME PARAMETERS (ADC-435, spec ctx.param): name -> current value, set by the host
+  // via System::set_param and read by the installed program via ctx.param (ProgramContext::param). Lives
+  // HERE (not in the .so) so a value change takes effect on the next step WITHOUT recompiling -- the .so
+  // source carries only the param NAME (the cache key is invariant under a value change). A frozen const
+  // param never reaches this map (it is baked as a literal). Empty by default -> the const-param paths
+  // are untouched; not referenced by SystemStepper -> no MockImpl impact.
+  std::map<std::string, Real> runtime_params_;
   // MULTISTEP HISTORY (ADC-406a): SYSTEM-OWNED ring buffers for multistep schemes (Adams-Bashforth and
   // friends). A name maps to a ring of (depth = max lag + 1) MultiFabs, newest at [0], each
   // co-distributed with block 0's state (ba/dm, the block's ncomp). The history lives HERE (not in the
@@ -2237,6 +2244,25 @@ Real System::program_diagnostic(const std::string& name) const {
 }
 std::map<std::string, Real> System::program_diagnostics() const {
   return p_->program_diagnostics_;
+}
+// Compiled-Program runtime parameters (ADC-435, spec ctx.param): the host sets a named scalar that the
+// installed program reads via ctx.param ONCE per step (before the per-cell loop) -- changing it varies
+// the kernel WITHOUT recompiling the .so (only the NAME is in the program source / cache key).
+void System::set_param(const std::string& name, Real value) {
+  p_->runtime_params_[name] = value;
+}
+Real System::param(const std::string& name) const {
+  auto it = p_->runtime_params_.find(name);
+  if (it == p_->runtime_params_.end())
+    throw std::out_of_range(
+        "System::param: runtime parameter '" + name + "' has not been set (call sim.set_param('" +
+        name +
+        "', value); a DSL runtime param's declaration value is its default only "
+        "after the host seeds it)");
+  return it->second;
+}
+std::map<std::string, Real> System::params() const {
+  return p_->runtime_params_;
 }
 std::vector<double> System::get_state(const std::string& name) {
   Impl::Species& s = p_->find(name);

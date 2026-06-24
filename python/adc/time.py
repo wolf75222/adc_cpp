@@ -2479,20 +2479,20 @@ def _aux_comp(impl, name):
         "(%s); cannot map it to an aux component" % (name, sorted(dsl.AUX_CANONICAL), extra))
 
 
-def _check_no_runtime_param(exprs):
-    """Phase-4b kernels read coefficients from the state / aux only (const params are inlined as
-    literals by the dsl Expr tree). A RUNTIME parameter would emit ``params.get(idx)``, unavailable in
-    a ProgramContext kernel -> raise NotImplementedError (deferred), never a .so that fails to link."""
+def _runtime_param_host_reads(exprs):
+    """HOST-scope C++ reads of every RUNTIME parameter (dsl.Param kind='runtime') referenced by
+    @p exprs: ``const adc::Real <name> = ctx.param("<name>");``, one per name, SORTED (ADC-435).
+
+    A compiled time Program has no AOT RuntimeParams member, so a runtime param is NOT baked as a
+    literal (that is a FROZEN const param) nor read via ``params.get(idx)`` (the AOT brick path):
+    it is read ONCE from the System param store before the per-cell loop and captured BY VALUE by the
+    ``[=]`` device lambda. The value can thus be changed at runtime (System::set_param) WITHOUT
+    recompiling -- the .so source carries only the NAME, never the value, so the cache key (sha256 of
+    the source) is invariant under a runtime-param value change. Frozen const params stay inline
+    (bit-identical default)."""
     from . import dsl
-    stack = list(exprs)
-    while stack:
-        e = stack.pop()
-        if isinstance(e, dsl.RuntimeParamRef):
-            raise NotImplementedError(
-                "emit_cpp_program: a Phase-4b source / linear source references a RUNTIME parameter "
-                "(%s); only constants and aux fields are supported in the per-cell kernel yet "
-                "(runtime params in compiled programs are a later phase)" % e.name)
-        stack.extend(dsl._children(e))
+    return ["const adc::Real %s = ctx.param(\"%s\");" % (name, name)
+            for name in dsl.runtime_param_names_in(exprs)]
 
 
 def _cell_locals(impl, exprs, state_var, *, with_cons, with_prim):
@@ -2501,8 +2501,12 @@ def _cell_locals(impl, exprs, state_var, *, with_cons, with_prim):
       - conservative vars -> ``const adc::Real <name> = <state>A(i, j, <idx>);`` (when @p with_cons);
       - primitives -> their dsl formula, in declaration order, only the LIVE ones (when @p with_prim).
     @p impl is the HyperbolicModel; @p state_var the C++ MultiFab variable (its const Array4 is
-    ``<state_var>A``, the aux Array4 is ``auxA``). Raises on a runtime-param dependency (deferred)."""
-    _check_no_runtime_param(exprs)
+    ``<state_var>A``, the aux Array4 is ``auxA``). A RUNTIME-param reference is NOT bound here -- it is a
+    HOST local emitted before the loop by `_runtime_param_host_reads` (captured by the ``[=]`` lambda);
+    a live primitive formula reading one lowers it to the bare name via `freeze_runtime_params_as_vars`
+    (ADC-435). A RuntimeParamRef contributes no dep (like a Const), so cons/prim/aux discovery is
+    unchanged -> a model with only frozen const params lowers bit-identically."""
+    from . import dsl
     deps = set()
     for e in exprs:
         deps |= e.deps()
@@ -2522,7 +2526,9 @@ def _cell_locals(impl, exprs, state_var, *, with_cons, with_prim):
     if with_prim:
         for p, expr in impl.prim_defs.items():  # declaration order (a prim may use an earlier prim)
             if p in live:
-                lines.append("const adc::Real %s = %s;" % (p, expr.to_cpp()))
+                # A prim formula reading a runtime param lowers it to the bare host local name.
+                lines.append("const adc::Real %s = %s;"
+                             % (p, dsl.freeze_runtime_params_as_vars(expr).to_cpp()))
     aux_deps = set(impl.aux_names) | set(getattr(impl, "aux_extra_names", []) or [])
     for name in sorted(deps & aux_deps):
         lines.append("const adc::Real %s = auxA(i, j, %d);" % (name, _aux_comp(impl, name)))
@@ -2607,11 +2613,14 @@ def _emit_source_kernel(model, name, state_var, out_var):
         raise NotImplementedError(
             "emit_cpp_program: source '%s' is not declared on the model (m.source_term); declared: %s"
             % (name, sorted(impl._source_terms)))
+    from . import dsl
     exprs = impl._source_terms[name]
-    body = _kernel_open(out_var, state_var)
+    body = _runtime_param_host_reads(exprs)  # ctx.param reads (host scope, captured by [=]); ADC-435
+    body += _kernel_open(out_var, state_var)
     body += ["    " + ln for ln in _cell_locals(impl, exprs, state_var, with_cons=True,
                                                  with_prim=True)]
-    body += ["    outA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(exprs)]
+    body += ["    outA(i, j, %d) = %s;" % (c, dsl.freeze_runtime_params_as_vars(e).to_cpp())
+             for c, e in enumerate(exprs)]
     body += _kernel_close()
     return body
 
@@ -2634,6 +2643,7 @@ def _emit_flux_kernel(model, names, state_var, fx_var, fy_var):
     for name in names[1:]:  # accumulate the additional named fluxes (their SUM is one -div)
         x_exprs = [x_exprs[c] + flux_terms[name]["x"][c] for c in range(n)]
         y_exprs = [y_exprs[c] + flux_terms[name]["y"][c] for c in range(n)]
+    from . import dsl
     body = _kernel_open(fx_var, state_var)
     # fx and fy share the (ba, dm) of the scratch state, so the SAME loop / handles write both: bind a
     # second write handle to fy's local fab right after _kernel_open's outA (= fxA), still INSIDE the
@@ -2641,24 +2651,30 @@ def _emit_flux_kernel(model, names, state_var, fx_var, fy_var):
     body.insert(3, "  const adc::Array4 fyA = %s.fab(li).array();" % fy_var)
     body += ["    " + ln for ln in _cell_locals(impl, x_exprs + y_exprs, state_var, with_cons=True,
                                                  with_prim=True)]
-    body += ["    outA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(x_exprs)]
-    body += ["    fyA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(y_exprs)]
+    body += ["    outA(i, j, %d) = %s;" % (c, dsl.freeze_runtime_params_as_vars(e).to_cpp())
+             for c, e in enumerate(x_exprs)]
+    body += ["    fyA(i, j, %d) = %s;" % (c, dsl.freeze_runtime_params_as_vars(e).to_cpp())
+             for c, e in enumerate(y_exprs)]
     body += _kernel_close()
-    return body
+    # ctx.param reads at host scope, BEFORE the per-fab loop -- captured by the [=] device lambda; ADC-435.
+    return _runtime_param_host_reads(x_exprs + y_exprs) + body
 
 
 def _emit_apply_kernel(model, name, state_var, out_var):
     """Lower ``apply`` (a named ``m.linear_source`` L): outA(i,j,r) = sum_c L[r][c](aux) * U(i,j,c)."""
+    from . import dsl
     impl = _model_impl(model)
     rows = _linear_source_rows(impl, name)
     n = len(rows)
     flat = [e for row in rows for e in row]
-    body = _kernel_open(out_var, state_var)
+    body = _runtime_param_host_reads(flat)  # ctx.param reads (host scope, captured by [=]); ADC-435
+    body += _kernel_open(out_var, state_var)
     # L coefficients depend on aux / const only (linear_source invariant): cons/prim locals not needed.
     body += ["    " + ln for ln in _cell_locals(impl, flat, state_var, with_cons=False,
                                                  with_prim=False)]
     for r in range(n):
-        terms = ["(%s) * %sA(i, j, %d)" % (rows[r][c].to_cpp(), state_var, c) for c in range(n)]
+        terms = ["(%s) * %sA(i, j, %d)" % (dsl.freeze_runtime_params_as_vars(rows[r][c]).to_cpp(),
+                                            state_var, c) for c in range(n)]
         body.append("    outA(i, j, %d) = %s;" % (r, " + ".join(terms)))
     body += _kernel_close()
     return body
@@ -2668,12 +2684,14 @@ def _emit_solve_local_linear_kernel(model, name, a_coeff, rhs_var, out_var):
     """Lower ``solve_local_linear``: per cell M = I - a*L (a = a_coeff(dt)), invert M (dense N x N
     via adc::detail::mat_inverse) and set outA(i,j,r) = sum_c Minv[r][c] * q(i,j,c), q = the rhs state.
     L's coefficients depend on aux / const only, so M is assembled from the aux locals + the literal a."""
+    from . import dsl
     impl = _model_impl(model)
     rows = _linear_source_rows(impl, name)
     n = len(rows)
     flat = [e for row in rows for e in row]
     a_cpp = _coeff_cpp(a_coeff)
-    body = _kernel_open(out_var, rhs_var)
+    body = _runtime_param_host_reads(flat)  # ctx.param reads (host scope, captured by [=]); ADC-435
+    body += _kernel_open(out_var, rhs_var)
     body += ["    " + ln for ln in _cell_locals(impl, flat, rhs_var, with_cons=False,
                                                  with_prim=False)]
     body.append("    const adc::Real a_ = %s;" % a_cpp)
@@ -2681,7 +2699,8 @@ def _emit_solve_local_linear_kernel(model, name, a_coeff, rhs_var, out_var):
     for r in range(n):
         for c in range(n):
             ident = "adc::Real(1)" if r == c else "adc::Real(0)"
-            body.append("    M_[%d][%d] = %s - a_ * (%s);" % (r, c, ident, rows[r][c].to_cpp()))
+            body.append("    M_[%d][%d] = %s - a_ * (%s);"
+                        % (r, c, ident, dsl.freeze_runtime_params_as_vars(rows[r][c]).to_cpp()))
     body.append("    adc::Real Minv_[%d][%d];" % (n, n))
     # mat_inverse returns false on a singular M; we do not branch in the device kernel (no throw on
     # device). I - a*L is invertible for a well-posed local source (e.g. Lorentz: det = 1 + (a*B)^2 > 0);
@@ -2731,6 +2750,7 @@ def _emit_residual_eval(impl, v, n):
 
     @p v is the solve_local_nonlinear op; @p n the conservative count. Returns the lambda BODY lines
     (indented two spaces past the lambda header). The lambda captures the aux locals + ``Gval`` by ref."""
+    from . import dsl
     block = v.attrs["residual_block"]
     iterate_id = v.attrs["iterate"].id
     guess_id = v.attrs["guess"].id
@@ -2744,7 +2764,7 @@ def _emit_residual_eval(impl, v, n):
             continue  # the iterate / guess placeholders: bound in `comps` above, nothing to emit
         if w.op in ("source", "apply"):
             exprs = _residual_term_exprs(impl, w)
-            comps[w.id] = ["(%s)" % e.to_cpp() for e in exprs]
+            comps[w.id] = ["(%s)" % dsl.freeze_runtime_params_as_vars(e).to_cpp() for e in exprs]
         elif w.op == "linear_combine":
             # An affine sum over earlier terms: comps[w] = sum_k coeff_k(dt) * comps[input_k].
             coeffs = w.attrs["coeffs"]  # aligned with w.inputs; each a dt-polynomial power->float dict
@@ -2781,6 +2801,7 @@ def _emit_solve_local_nonlinear_kernel(model, v, guess_var, out_var):
     iterate stack, the frozen guess, named ``source`` / ``apply`` per-cell Exprs, affine combines). The
     Jacobian is finite-difference: column j perturbs ``U[j] += eps`` and forms ``(r(U+eps e_j)-r(U))/eps``
     with a relative ``eps`` so it scales with the iterate magnitude."""
+    from . import dsl
     impl = _model_impl(model)
     n = len(impl.cons_names)
     tol = repr(float(v.attrs["tol"]))
@@ -2791,7 +2812,13 @@ def _emit_solve_local_nonlinear_kernel(model, v, guess_var, out_var):
     for w in v.attrs["residual_block"]:
         if w.op in ("source", "apply"):
             term_exprs += _residual_term_exprs(impl, w)
-    body = _kernel_open(out_var, guess_var)
+    # Live primitives of the residual terms, in declaration order (a prim may use an earlier prim).
+    live = impl._live_prims(term_exprs) if term_exprs else set()
+    live_prim_exprs = [impl.prim_defs[p] for p in impl.prim_defs if p in live]
+    # ctx.param reads (host scope, captured by the [=] kernel lambda AND the by-ref residual lambda):
+    # cover the residual terms AND any runtime param a live prim formula reads; ADC-435.
+    body = _runtime_param_host_reads(term_exprs + live_prim_exprs)
+    body += _kernel_open(out_var, guess_var)
     # Per-cell aux + the live primitives are NOT pre-bound here: the prims depend on the ITERATE (they
     # are recomputed inside the residual lambda from Ueval). Only the aux locals are cell constants.
     body += ["    " + ln for ln in _cell_locals(impl, term_exprs, guess_var, with_cons=False,
@@ -2807,11 +2834,10 @@ def _emit_solve_local_nonlinear_kernel(model, v, guess_var, out_var):
                 % (n, n))
     for c, cn in enumerate(impl.cons_names):
         body.append("      const adc::Real %s = Ueval[%d];" % (cn, c))
-    # Live primitives of the residual terms, in declaration order (a prim may use an earlier prim).
-    live = impl._live_prims(term_exprs) if term_exprs else set()
     for p, expr in impl.prim_defs.items():
         if p in live:
-            body.append("      const adc::Real %s = %s;" % (p, expr.to_cpp()))
+            body.append("      const adc::Real %s = %s;"
+                        % (p, dsl.freeze_runtime_params_as_vars(expr).to_cpp()))
     body += ["      " + ln for ln in _emit_residual_eval(impl, v, n)]
     body.append("    };")
     # Newton state: the iterate U_ (seeded to the guess), the residual r_, the FD Jacobian J_ and step.

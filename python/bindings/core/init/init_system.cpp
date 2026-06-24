@@ -111,6 +111,12 @@ void init_system(py::module_& m) {
       // program_diagnostics() returns the whole name -> value dict.
       .def("program_diagnostic", &System::program_diagnostic, py::arg("name"))
       .def("program_diagnostics", &System::program_diagnostics)
+      // ADC-435 (spec ctx.param): RUNTIME parameters a compiled Program reads via ctx.param. set_param
+      // changes the value WITHOUT recompiling the .so (only the NAME is in the program source / cache
+      // key); param(name) reads one (raises if never set); params() returns the whole name -> value dict.
+      .def("set_param", &System::set_param, py::arg("name"), py::arg("value"))
+      .def("param", &System::param, py::arg("name"))
+      .def("params", &System::params)
       // Multistep history checkpoint/restart seam (ADC-406b): the facade gathers/restores the
       // System-owned rings DIRECTLY (no .so checkpoint_extra ABI). history_global mirrors state_global
       // (collective gather, component-major); restore_history mirrors set_state (owner-rank scatter).
