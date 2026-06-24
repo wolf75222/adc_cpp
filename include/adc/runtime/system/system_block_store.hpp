@@ -160,6 +160,16 @@ class SystemBlockStore {
     // whose phi/grad are written to the field's OWN aux channel. Trailing + empty default: the
     // positional aggregate init of the other members stays unchanged.
     std::map<std::string, std::function<void(const MultiFab&, MultiFab&)>> named_poisson_rhs;
+    // SOURCE-ONLY residual R <- S(U, aux) (the default/composite source, NO flux divergence), Poisson
+    // frozen (ADC-430). The exact MIRROR of rhs_flux_only: together they split rhs_into (-div F + S).
+    // SourceInto evaluates m.source per cell (the SAME source term assemble_rhs adds) with no
+    // numerical-flux dispatch, so it is bit-identical to the source half of rhs_into. Read by
+    // System::block_source_into, which a compiled time Program's source stage calls so a Lie/Strang
+    // split assembles "the default source but no flux" (spec: rhs flux=False is source-only). EMPTY
+    // (default) for paths that do not build it (the host .so prototype loader); block_source_into fails
+    // loud then. Trailing + empty default: the positional aggregate init of the other members stays
+    // unchanged.
+    std::function<void(MultiFab&, MultiFab&)> source_only;
   };
 
   /// ORDERED registry of the blocks (UNIQUE source of truth). PUBLIC: Impl aliases it as `sp` for the

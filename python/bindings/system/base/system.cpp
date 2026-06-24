@@ -814,6 +814,10 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
   // SourceFreeModel<Model>); empty for paths that do not (the host .so prototype loader) ->
   // block_neg_div_flux_into fails loud rather than silently leaking the default source.
   P->sp.back().rhs_flux_only = std::move(closures.rhs_flux_only);
+  // SOURCE-ONLY residual S(U, aux) (ADC-430): set for native blocks (build_block builds it via
+  // SourceInto<Model>); empty for paths that do not (the host .so prototype loader) ->
+  // block_source_into fails loud rather than silently leaking the flux.
+  P->sp.back().source_only = std::move(closures.source_only);
 }
 
 // Width-aware reallocation of a block state (delegates to Impl::set_block_ghosts). Exposed
@@ -1968,6 +1972,21 @@ void System::block_neg_div_flux_into(int b, MultiFab& U, MultiFab& R) {
         "flux-only RHS (P.rhs(flux=True, sources without 'default')) needs a native block "
         "(add_block / production-backend compiled block)");
   s.rhs_flux_only(U, R);
+}
+// SOURCE-ONLY residual R <- S(U, aux) (ADC-430): the block's SourceInto<Model> path (built in
+// build_block), the exact mirror of block_neg_div_flux_into and bit-identical to the source half of
+// rhs_into. Fails loud on a block that did not build it (the host .so prototype loader) instead of
+// silently leaking the flux.
+void System::block_source_into(int b, MultiFab& U, MultiFab& R) {
+  Impl::Species& s = p_->sp[static_cast<std::size_t>(b)];
+  if (!s.source_only)
+    throw std::runtime_error(
+        "System::block_source_into: block '" + s.name +
+        "' has no source-only residual closure (the host .so prototype loader does not build one); "
+        "a "
+        "source-only RHS (P.rhs(flux=False, sources with 'default')) needs a native block "
+        "(add_block / production-backend compiled block)");
+  s.source_only(U, R);
 }
 // Max |wave speed| of block b on U: the SAME BlockState::max_speed closure step_cfl reads (set at
 // add_block time -- HasStabilitySpeed / max_wave_speed of the model). REUSES it, does not recompute.

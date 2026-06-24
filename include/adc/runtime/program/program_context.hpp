@@ -203,6 +203,17 @@ class ProgramContext {
     sys_->block_neg_div_flux_into(b, u, r);
   }
 
+  /// r <- S(u, aux) for block @p b -- the model's default/composite SOURCE only, WITHOUT the flux
+  /// divergence (the exact MIRROR of @ref neg_div_flux_default_into). Forwards to
+  /// System::block_source_into (the block's SourceInto path, bit-identical to the source half of
+  /// rhs_into). The codegen lowers a SOURCE stage (P.rhs(flux=False, sources with "default")) to this, so
+  /// a Lie/Strang split assembles "the default source but no flux" without the -div F base leaking in
+  /// (epic ADC-399 / ADC-430, spec: rhs flux=False is source-only). Header-inline forwarder, like @ref
+  /// neg_div_flux_default_into.
+  void source_default_into(int b, MultiFab& u, MultiFab& r) const {
+    sys_->block_source_into(b, u, r);
+  }
+
   /// The MIN physical cell size of the grid (Cartesian min(dx, dy); polar min(dr, r_min*dtheta)) -- the
   /// SAME hmin the native CFL uses. Forwards to System::cfl_min_dx. A compiled time Program's dt bound
   /// (epic ADC-399 / ADC-417, spec s18) reads it to express e.g. cfl * hmin / max_wave_speed.

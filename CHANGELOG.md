@@ -998,6 +998,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Fixed
 
+- **Source-only RHS no longer leaks the flux** (ADC-430, epic ADC-399, sibling of ADC-425):
+  `adc.time.Program.rhs(flux=False, ...)` used to STILL emit the `-div F` base -- the codegen routed on
+  `sources` but ignored the `flux` flag, so a source-only stage of a Lie/Strang/IMEX split double-added
+  the flux on any model with a non-zero flux (masked because split source stages were tested only on
+  zero-flux models, where `-div F == 0`). A new runtime primitive `System::block_source_into` (and
+  `ProgramContext::source_default_into`) assembles the model's default source `S(U, aux)` WITHOUT the
+  flux divergence -- the exact mirror of ADC-425's `block_neg_div_flux_into` -- via a per-cell
+  `SourceInto<Model>` kernel (the SAME `m.source` `assemble_rhs` adds, no numerical-flux dispatch, so it
+  is flux-template agnostic and bit-identical to the source half of `rhs_into`). The codegen now branches
+  on `flux`: `flux=False` emits a zeroed base + `ctx.source_default_into` iff `"default"` is requested
+  (so `flux=False,sources=["default"]` is the default source only, `flux=False,sources=["s"]` is just
+  `s`, `flux=False,sources=[]` is the zero RHS); `flux=True` is unchanged. `flux=False` with named
+  fluxes is rejected. New `python/tests/test_time_rhs_flux_false.py`.
 - **Flux-only RHS no longer leaks the default source** (ADC-425, epic ADC-399, spec criterion 17):
   `adc.time.Program.rhs(flux=True, sources=[])` on a model with a default `m.source` used to STILL add
   that source (the codegen always lowered the default-flux RHS to `ctx.rhs_into` = `-div F` + the

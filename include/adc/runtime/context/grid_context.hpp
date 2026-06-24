@@ -72,6 +72,15 @@ struct BlockClosures {
   /// sources are explicit, never summed implicitly). OPTIONAL (empty for block paths that do not build
   /// it, e.g. the host .so prototype loader): System::block_neg_div_flux_into fails loud then.
   std::function<void(MultiFab&, MultiFab&)> rhs_flux_only;
+  /// SOURCE-ONLY residual R <- S(U, aux) (the model's default/composite source, NO flux divergence),
+  /// Poisson frozen (ADC-430). The exact MIRROR of @ref rhs_flux_only: together they split @ref rhs_into
+  /// (-div F + S) into its two halves. Evaluates m.source per cell (the SAME source term assemble_rhs
+  /// adds) with no numerical-flux dispatch, so it is flux-template agnostic and bit-identical to the
+  /// source half of rhs_into. A compiled time Program's source stage (P.rhs(flux=False, sources with
+  /// "default")) reads it so a Lie/Strang split assembles "the default source but no flux" without the
+  /// -div F base leaking in (spec: rhs flux=False is source-only). OPTIONAL (empty for block paths that
+  /// do not build it, e.g. the host .so prototype loader): System::block_source_into fails loud then.
+  std::function<void(MultiFab&, MultiFab&)> source_only;
   /// dt_hotspot diagnostic (ADC-182): (U, w, i, j) -> GLOBAL cell dominating the transport
   /// CFL and its speed. OPTIONAL (empty = block without diagnostic, e.g. historical
   /// unrewired paths); never called by step/step_cfl (off the hot path).

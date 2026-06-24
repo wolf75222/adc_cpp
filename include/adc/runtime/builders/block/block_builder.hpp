@@ -264,6 +264,44 @@ struct RhsInto {
   }
 };
 
+/// SOURCE-ONLY residual kernel R(i,j) <- m.source(U(i,j), aux(i,j)): the EXACT source term of
+/// AssembleRhsKernel (cf. cartesian_operator.hpp: r = S - div Fhat), with NO flux / reconstruction /
+/// numerical-flux dispatch (ADC-430). NAMED FUNCTOR (same device contract as AssembleRhsKernel /
+/// ProjectCellKernel), so the device codegen is robust across the AOT TU boundary. Reads the cell's own
+/// state + aux only (POINTWISE, no neighbor): no ghosts required. ADC_HD.
+template <class Model>
+struct SourceOnlyKernel {
+  Model m;
+  ConstArray4 u;  // block state (read)
+  ConstArray4 a;  // System aux (phi, grad phi, extra fields)
+  Array4 r;       // residual (write)
+  ADC_HD void operator()(int i, int j) const {
+    const auto S = m.source(load_state<Model>(u, i, j), load_aux<aux_comps<Model>()>(a, i, j));
+    for (int c = 0; c < Model::n_vars; ++c)
+      r(i, j, c) = S[c];
+  }
+};
+
+/// SOURCE-ONLY residual R <- S(U, aux) installed as the block's source_only closure (ADC-430). The exact
+/// MIRROR of RhsInto on SourceFreeModel (which is flux without source): SourceInto is source without flux.
+/// Together they split the rhs_into residual -div F + S into its two halves. Bit-identical to the source
+/// term assemble_rhs adds (SAME m.source, SAME load_state / load_aux), but with no numerical-flux
+/// dispatch -- so it is flux-template agnostic (a zero-flux MODEL adapter could not zero HLL/Roe, which
+/// recombine via wave_speeds, but skipping the flux entirely always gives exactly S). Cell-local: NO
+/// fill_ghosts (the source reads the valid cell only, unlike the flux divergence). HOST loop over the
+/// valid cells of each local fab (the kernel is device).
+template <class Model>
+struct SourceInto {
+  Model m;
+  GridContext ctx;
+  void operator()(MultiFab& U, MultiFab& R) const {
+    for (int li = 0; li < U.local_size(); ++li)
+      for_each_cell(R.box(li),
+                    SourceOnlyKernel<Model>{m, U.fab(li).const_array(),
+                                            ctx.aux->fab(li).const_array(), R.fab(li).array()});
+  }
+};
+
 // ============================================================================
 // DISC ROUTING (T5-PR3 work): DISC residual evaluators + the advances that carry them.
 // ============================================================================
@@ -515,6 +553,14 @@ ADC_COLD_FN BlockClosures build_block(const Model& m, const GridContext& ctx, bo
   // not a numerics change.
   bc.rhs_flux_only = detail::RhsInto<Limiter, Flux, SourceFreeModel<Model>>{
       SourceFreeModel<Model>{m}, ctx, recon_prim, pos_floor, nullptr};
+  // SOURCE-ONLY residual R <- S(U, aux) (ADC-430): the exact MIRROR of rhs_flux_only. SourceInto
+  // evaluates m.source per cell (the SAME source term assemble_rhs / rhs_into add) with no numerical-flux
+  // dispatch, so it is bit-identical to the source half of rhs_into and flux-template agnostic (a
+  // zero-flux model adapter could not zero HLL/Roe, which recombine via wave_speeds). A compiled time
+  // Program's source stage reads it so a Lie/Strang split assembles "the default source but no flux"
+  // without the -div F base leaking in (spec: rhs flux=False is source-only). No Limiter/Flux: the
+  // source is cell-local, independent of the spatial scheme.
+  bc.source_only = detail::SourceInto<Model>{m, ctx};
   bc.hotspot =
       detail::HotspotFn<Model>{m, ctx};  // dt_hotspot diagnostic (ADC-182), off the hot path
   // PROJECTION PONCTUELLE post-pas (ADC-177) : fabriquee SEULEMENT si le modele declare le trait
