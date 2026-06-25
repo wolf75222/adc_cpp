@@ -235,6 +235,34 @@ def test_single_species_is_byte_identical_to_state():
     assert via_state().module.module_hash() == s.module.module_hash()
 
 
+def test_field_solve_call_lowers_to_solve_fields_from_blocks_over_all_species():
+    # Regression (adversarial review): a multi-input field_operator CALLED in a Program must lower to
+    # the COUPLED multi-block solve over ALL species -- not solve_fields(args[0]), which would silently
+    # drop every species but the first and read only the first charge into the elliptic RHS.
+    m, _e, _i, _n = _three_fluid_board()
+    mod = m.module
+    P = adctime.Program("ms_fields").bind_operators(mod)
+    sp = mod.state_spaces()
+    e_n = P.state("electrons", space=sp["electrons"])
+    i_n = P.state("ions", space=sp["ions"])
+    n_n = P.state("neutrals", space=sp["neutrals"])
+    f = P.call("fields", e_n, i_n, n_n)
+    assert f.op == "solve_fields_from_blocks", "multi-input field op lowers to the coupled solve"
+    assert len(f.inputs) == 3, "all three species contribute to the field solve (none dropped)"
+
+
+def test_duplicate_species_name_raises():
+    # A reused species name would silently alias the StateSpace -> fail loud at authoring instead.
+    m = physics.Model("dup")
+    m.species("electrons", state=["ne"])
+    try:
+        m.species("electrons", state=["ne2"])
+    except ValueError as exc:
+        assert "already declared" in str(exc)
+    else:
+        raise AssertionError("a duplicate species name must raise ValueError")
+
+
 def _run():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

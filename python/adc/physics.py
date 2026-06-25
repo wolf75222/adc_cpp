@@ -310,6 +310,10 @@ class Model:
         existing operator-first multi-block IR (``adc.model.Module`` with N spaces +
         ``coupled_rate`` + ``solve_fields_from_blocks``), never a parallel runtime.
         """
+        if name in self._species:
+            raise ValueError(
+                "species %r is already declared; each species needs a distinct name "
+                "(a reused name would silently alias the StateSpace)" % name)
         if not self._species and not self._multi_module:
             # First species: keep the single-state dsl-backed path byte-identical to state().
             handle = self.state(name, components=state, roles=roles)

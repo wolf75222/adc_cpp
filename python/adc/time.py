@@ -725,6 +725,14 @@ class Program:
     def _lower_call(self, op, operator_name, args, name):
         kind = op.kind
         if kind == "field_operator":
+            # A multi-input field operator (e.g. fields_from_species over N species) is the COUPLED
+            # multi-block field solve: every input species contributes to the one shared elliptic RHS
+            # (Sum_s elliptic_rhs_s, the default phi). Route it to solve_fields_from_blocks so no
+            # species is dropped -- a single-input field operator stays the historical single-block
+            # solve_fields (named-field routing via the operator name as before).
+            state_args = [a for a in args if getattr(a, "vtype", None) == "state"]
+            if len(state_args) > 1:
+                return self.solve_fields_from_blocks(state_args, name=name)
             field = None if operator_name == "fields_from_state" else operator_name
             return self.solve_fields(name=name, state=args[0], field=field)
         if kind == "local_source":
@@ -762,8 +770,9 @@ class Program:
         A coupled operator (collisions, ionization, ...) of arbitrary arity returns a typed
         ``RateBundle``; ``P.call`` returns a :class:`_CoupledResult` whose ``["electrons"]`` is the
         per-block rate (an RHS Value over that block) so it composes like any other RHS. The
-        coupled-rate KERNEL codegen is deferred (ADC-457): ``_check_lowerable`` refuses to lower a
-        ``coupled_rate`` / ``coupled_rate_out`` node rather than fake it as independent rates.
+        coupled-rate KERNEL codegen has landed (ADC-457): ``_emit_coupled_rate_kernel`` lowers the
+        ``coupled_rate`` node to one multi-state ``for_each_cell`` and each ``coupled_rate_out``
+        projects its block's rate scratch.
         """
         bundle = op.signature.output                 # a model.RateBundle: block -> RateSpace
         blocks = bundle.keys()
