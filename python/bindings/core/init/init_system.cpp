@@ -341,6 +341,16 @@ void init_system(py::module_& m) {
            "the dt "
            "used.",
            py::arg("cfl"))
+      .def("enable_profiling", &System::enable_profiling,
+           "Spec 3 profiling (ADC-459): start timing the step phases (step, field_solve). Disabled "
+           "by default; off the hot path when off.")
+      .def("disable_profiling", &System::disable_profiling,
+           "Stop profiling (keeps accumulated data).")
+      .def("is_profiling", &System::is_profiling)
+      .def("reset_profiling", &System::reset_profiling, "Clear accumulated profiling data.")
+      .def("profile_report", &System::profile_report,
+           "Per-phase / per-brick wall-clock report (count / total / mean / min / max per scope, "
+           "plus counters). Per-rank.")
       .def("dt_hotspot", &System::dt_hotspot,
            "Diagnostic (ADC-182): (w, i, j) of the GLOBAL cell that dominates the transport CFL "
            "bound "

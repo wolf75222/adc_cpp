@@ -582,6 +582,19 @@ class System {
   /// that is faster is sub-cycled n = ceil(w_block / w_min) times. @return the macro-step.
   double step_adaptive(double cfl);
 
+  /// @name Profiling (Spec 3 section 29-30, ADC-459)
+  /// Per-phase / per-brick wall-clock timing of the step. Disabled by default (no hot-path cost
+  /// when off). enable_profiling() then step()/step_cfl() then profile_report() returns the table;
+  /// reset_profiling() clears it. Per-rank (no MPI reduction); the per-Program-node granularity is
+  /// wired through the compiled-program path as a follow-up.
+  /// @{
+  void enable_profiling();
+  void disable_profiling();
+  bool is_profiling() const;
+  void reset_profiling();
+  std::string profile_report() const;
+  /// @}
+
   /// @name Primitives for a time integrator written in Python
   /// solve_fields(); R = eval_rhs(name); U = get_state(name); ...; set_state(name, U).
   /// @{

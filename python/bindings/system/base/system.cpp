@@ -32,6 +32,7 @@
 #include <adc/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
 #include <adc/runtime/program/module_metadata.hpp>  // read_module_metadata / required_aux: install-time requirement validation (ADC-446)
 #include <adc/runtime/program/program_context.hpp>  // ProgramContext: wraps the System for the .so dt_bound call (ADC-417)
+#include <adc/runtime/program/profiler.hpp>  // Profiler / ProfileScope: per-node / per-brick timing (ADC-459)
 
 #include <algorithm>
 #include <cmath>
@@ -187,6 +188,10 @@ struct System::Impl {
   // (System::program_diagnostic / program_diagnostics). Lives HERE (not in the .so) so it outlives the
   // step closure and Python can read it; not referenced by SystemStepper -> no MockImpl impact.
   std::map<std::string, Real> program_diagnostics_;
+  // PER-NODE / PER-BRICK PROFILER (ADC-459, Spec 3 section 29-30): System-owned, like the diagnostics
+  // above -- NOT referenced by SystemStepper, so no MockImpl impact. Disabled by default (no hot-path
+  // cost when off). System::step / solve_fields wrap themselves in a ProfileScope into it.
+  adc::runtime::program::Profiler profiler_;
   // MULTISTEP HISTORY (ADC-406a): SYSTEM-OWNED ring buffers for multistep schemes (Adams-Bashforth and
   // friends). A name maps to a ring of (depth = max lag + 1) MultiFabs, newest at [0], each
   // co-distributed with block 0's state (ba/dm, the block's ncomp). The history lives HERE (not in the
@@ -1827,7 +1832,28 @@ std::vector<double> System::get_primitive_state(const std::string& name) {
 }
 
 void System::solve_fields() {
+  adc::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
   p_->solve_fields();
+}
+
+// --- profiling (ADC-459) -------------------------------------------------------------------------
+// enable_profiling / profile_report drive the System-owned Profiler. Today the System wraps its
+// coarse phases (step, field_solve); the per-Program-node / per-native-brick granularity is wired
+// through the compiled-program ProgramContext as a follow-up.
+void System::enable_profiling() {
+  p_->profiler_.enable();
+}
+void System::disable_profiling() {
+  p_->profiler_.disable();
+}
+bool System::is_profiling() const {
+  return p_->profiler_.enabled();
+}
+void System::reset_profiling() {
+  p_->profiler_.reset();
+}
+std::string System::profile_report() const {
+  return p_->profiler_.report();
 }
 
 void System::solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
@@ -1866,6 +1892,8 @@ ADC_EXPORT void System::set_block_elliptic_field(
 // hold-then-catch-up semantics of the macro-step counter, the condensed source stage and the couplings live
 // now in the header (bit-identical). The public API stays unchanged.
 void System::step(double dt) {
+  adc::runtime::program::ProfileScope s(p_->profiler_, "step");
+  p_->profiler_.count("steps");
   p_->stepper_.step(dt);
 }
 void System::advance(double dt, int nsteps) {

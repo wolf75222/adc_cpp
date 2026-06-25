@@ -20,6 +20,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Spec 3 profiling wired into System** (ADC-459, epic ADC-450): `sim.enable_profiling()` /
+  `disable_profiling()` / `is_profiling()` / `reset_profiling()` / `profile_report()` drive a
+  System-owned `adc::runtime::program::Profiler`; `System::step` and `solve_fields` wrap themselves
+  in a `ProfileScope` (a "step" / "field_solve" phase + a "steps" counter). The profiler lives on
+  `System::Impl` and is not referenced by `SystemStepper`, so the `MockImpl` is unaffected.
+  During `step()` only the "step" phase + the "steps" counter are recorded; the "field_solve" phase
+  is captured on a direct `sim.solve_fields()` call (the stepper drives the Impl's solve, not
+  `System::solve_fields`). Disabled by default (no hot-path cost). New `python/tests/test_profiling.py`
+  (binding surface + enable/disable state machine, and a stepped native end-to-end check that
+  asserts the report carries the "step" phase + "steps=2").
+  The per-Program-node / per-native-brick granularity (through the compiled-program ProgramContext)
+  is the next ADC-459 step.
+
 - **Spec 3 Program profiler (C++ foundation)** (ADC-459, epic ADC-450): `adc::runtime::program::Profiler`
   (`include/adc/runtime/program/profiler.hpp`) -- a header-only per-node / per-brick wall-clock
   accumulator (count / total / mean / min / max per named scope) plus integer counters (kernels,
