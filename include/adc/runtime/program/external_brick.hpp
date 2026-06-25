@@ -16,6 +16,94 @@
 
 namespace adc::runtime::program {
 
+// Escapes a string so a manifest field built from a user-supplied id/category/CSV is always valid
+// JSON: the two structural characters (`"` and `\`) plus every control character (`\n`, `\r`, `\t`,
+// and the rest of `\x00`-`\x1f` as `\uXXXX`), which RFC 8259 forbids unescaped inside a string. A
+// raw control character would make `json.loads` (lib.py) reject the whole manifest, so the escape
+// must be complete, not just the two structural chars. The C++ reader (`field`) reverses it.
+inline std::string json_escape(const std::string& s) {
+  static const char kHex[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      case '\b':
+        out += "\\b";
+        break;
+      case '\f':
+        out += "\\f";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          out += "\\u00";
+          out.push_back(kHex[(static_cast<unsigned char>(c) >> 4) & 0xf]);
+          out.push_back(kHex[static_cast<unsigned char>(c) & 0xf]);
+        } else {
+          out.push_back(c);
+        }
+    }
+  }
+  return out;
+}
+
+// Reverses json_escape so a manifest reader recovers the raw value json_escape encoded: \" \\ \/
+// \n \r \t \b \f and \uXXXX (manifest tokens are ASCII, so a \u escape only ever carries a control
+// byte) back to the character. The C++ field reader uses this to match what json.loads (lib.py)
+// yields from the same manifest. A trailing lone backslash or a truncated \u is copied verbatim.
+inline std::string json_unescape(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    if (s[i] != '\\' || i + 1 >= s.size()) {
+      out.push_back(s[i]);
+      continue;
+    }
+    const char n = s[++i];
+    switch (n) {
+      case 'n':
+        out.push_back('\n');
+        break;
+      case 'r':
+        out.push_back('\r');
+        break;
+      case 't':
+        out.push_back('\t');
+        break;
+      case 'b':
+        out.push_back('\b');
+        break;
+      case 'f':
+        out.push_back('\f');
+        break;
+      case 'u':
+        if (i + 4 < s.size()) {
+          out.push_back(static_cast<char>(std::stoi(s.substr(i + 1, 4), nullptr, 16) & 0xff));
+          i += 4;
+        }
+        break;
+      default:
+        out.push_back(n);
+        break;  // \" \\ \/ and any other escaped char -> itself
+    }
+  }
+  return out;
+}
+
 // The manifest of one external C++ brick: its identity plus the requirements/capabilities the
 // selector and codegen need. All fields are host strings (no device data); `requirements` and
 // `capabilities` are comma-separated lists (the manifest's wire form), empty when none.
@@ -64,6 +152,25 @@ class BrickRegistry {
   // Every registered manifest entry, in registration order.
   const std::vector<BrickManifestEntry>& entries() const { return entries_; }
 
+  // The manifest of every registered brick as the JSON `adc.lib.load_cpp_library` parses:
+  //   {"bricks": [{"id", "category", "requirements", "capabilities"}, ...]}
+  // requirements/capabilities are the CSV strings the macro registered (empty when none). This is
+  // the wire form a brick `.so` exports through `adc_brick_manifest()` (ADC_DEFINE_BRICK_MANIFEST);
+  // the host dlopens the `.so` and feeds the returned string to `_register_manifest`.
+  std::string to_json() const {
+    std::string out = "{\"bricks\":[";
+    for (std::size_t k = 0; k < entries_.size(); ++k) {
+      const BrickManifestEntry& e = entries_[k];
+      if (k != 0)
+        out += ',';
+      out += "{\"id\":\"" + json_escape(e.id) + "\",\"category\":\"" + json_escape(e.category) +
+             "\",\"requirements\":\"" + json_escape(e.requirements) + "\",\"capabilities\":\"" +
+             json_escape(e.capabilities) + "\"}";
+    }
+    out += "]}";
+    return out;
+  }
+
   std::size_t size() const { return entries_.size(); }
 
   void clear() {
@@ -95,5 +202,20 @@ class BrickRegistry {
 // Token-paste helpers so several ADC_REGISTER_BRICK uses in one TU get distinct static names.
 #define ADC_REGISTER_BRICK_CAT_(a, b) ADC_REGISTER_BRICK_CAT2_(a, b)
 #define ADC_REGISTER_BRICK_CAT2_(a, b) a##b
+
+// Exports the C reader `adc.lib.load_cpp_library` dlopens after opening a brick `.so`. Use ONCE at
+// namespace scope in the brick's `.so` (after its ADC_REGISTER_BRICK calls have populated the
+// registry at static-init time):
+//   ADC_REGISTER_BRICK("my_hllc", "riemann", "pressure,wave_speeds");
+//   ADC_DEFINE_BRICK_MANIFEST();
+// It returns the JSON of EVERY brick the `.so` registered (BrickRegistry::to_json). The string is a
+// function-local static built once on first call (the registry is fully populated by then, since the
+// static initializers ran before any host call), so the `const char*` stays valid for the process.
+#define ADC_DEFINE_BRICK_MANIFEST()                                   \
+  extern "C" const char* adc_brick_manifest() {                       \
+    static const std::string manifest =                               \
+        ::adc::runtime::program::BrickRegistry::instance().to_json(); \
+    return manifest.c_str();                                          \
+  }
 
 }  // namespace adc::runtime::program

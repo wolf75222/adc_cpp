@@ -75,11 +75,40 @@ d.native_id      # 'my_hllc'
 d.requirements   # {'capabilities': ['pressure', 'wave_speeds']}
 ```
 
+### Static dispatch of an external Riemann brick
+
+A `riemann` brick is not only catalogued, it is DISPATCHED into the finite-volume machinery in the
+same type system as a native flux (`adc::HLLCFlux`), statically and with no per-cell string lookup.
+The brick `.so` does the static instantiation itself: it defines a `NumericalFlux` functor and uses
+`ADC_DEFINE_EXTERNAL_RIEMANN_BRICK(id, Flux, Model, requirements)`
+(`include/adc/runtime/program/external_riemann_brick.hpp`), which registers the manifest and emits a
+flat-array `adc_brick_residual` entry point that calls `build_block<Limiter, UserFlux>` -- the user
+flux is a compile-time template argument, fully inlined, exactly the leaf the native string ladder
+routes to. The host `ExternalBrickHandle` dlopens the `.so`, reads + registers its manifest, and
+resolves that entry point ONCE; the only runtime string left is the limiter (a 4-way `if` resolved
+once at install, never per cell).
+
+```cpp
+// my_riemann.cpp -- compiled to my_riemann.so against the adc headers
+struct MyRiemann {
+  template <class Model>
+  ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
+                                          const adc::Aux& AL, const typename Model::State& UR,
+                                          const adc::Aux& AR, int dir) const { /* ... */ }
+};
+namespace user { using Model = adc::CompositeModel<adc::Euler, adc::NoSource, adc::BackgroundDensity>; }
+ADC_DEFINE_EXTERNAL_RIEMANN_BRICK("my_riemann", MyRiemann, user::Model, "pressure,wave_speeds");
+ADC_DEFINE_BRICK_MANIFEST();  // exports adc_brick_manifest() once per .so
+```
+
 ## Status
 
-The descriptor catalog, the native ids, the time macros and external C++ brick registration
-(`adc.lib.load_cpp_library` + the C++ `BrickRegistry` / `ADC_REGISTER_BRICK`) are in place.
-`adc.compile_library(name, objects, emit=True)` compiles a reusable brick library to a real
-`.so` (Kokkos toolchain) that exports its ABI key + brick metadata; `adc.read_library_manifest`
-reads it back (with a hard ABI guard) and `adc.compile_problem(..., libraries=[...])` consumes
-it. The `specialization` modes (native / library / specialized / auto) are follow-ups.
+The descriptor catalog, the native ids, the time macros and external C++ bricks are in place:
+`adc.lib.load_cpp_library` + the C++ `BrickRegistry` / `ADC_REGISTER_BRICK` / `ADC_DEFINE_BRICK_MANIFEST`
+register and surface a brick, and `ADC_DEFINE_EXTERNAL_RIEMANN_BRICK` + `ExternalBrickHandle`
+statically dispatch an external Riemann brick's flux (CPU/OpenMP Kokkos validated on macOS; the
+GPU/GH200 dispatch is a ROMEO follow-up). `adc.compile_library(name, objects, emit=True)` compiles a
+reusable brick library to a real `.so` (Kokkos toolchain) that exports its ABI key + brick metadata;
+`adc.read_library_manifest` reads it back (with a hard ABI guard) and
+`adc.compile_problem(..., libraries=[...])` consumes it. The `specialization` modes (native / library
+/ specialized / auto) are follow-ups.

@@ -118,6 +118,7 @@ adc_add_test(test_profiler)  # Spec 3 per-node / per-brick profiler (ADC-459)
 adc_add_test(test_cache_manager)  # Spec 3 scheduler value cache (ADC-458)
 adc_add_test(test_checkpoint_cache)  # Spec 3 scheduler-cache checkpoint/restart round-trip (ADC-458)
 adc_add_test(test_external_brick)  # Spec 3 external C++ brick registry + macro (ADC-463)
+adc_add_test(test_external_brick_json)  # Spec 3 manifest JSON escape/unescape round-trip (ADC-463)
 
 # --- maillage / conteneurs ---
 adc_add_test(test_box2d)
@@ -561,6 +562,33 @@ target_compile_definitions(test_amr_native_loader PRIVATE
   ADC_TEST_CXX_STD="c++${CMAKE_CXX_STANDARD}"
   ADC_TEST_TMPDIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME test_amr_native_loader COMMAND test_amr_native_loader)
+
+# --- external C++ Riemann brick: build a real .so + dlopen + static dispatch (ADC-463, deferred half).
+# Like test_amr_native_loader it compiles a brick .so at run time (g++/c++) and dlopens it, so it needs
+# the DL libs and the compiler/include/std/tmpdir injected. UNLIKE the native-loader test (which skips
+# under Kokkos), it injects the Kokkos interface include dirs + compile options so the brick .so is
+# built ABI-compatible with THIS Kokkos module (for_each.hpp #errors without ADC_HAS_KOKKOS) and the
+# dispatch actually runs on the dev's Kokkos. It still self-skips (exit 0) when the build has no usable
+# C++ compiler (cf. the brick-compile failure branch in the test).
+add_executable(test_external_riemann_dispatch test_external_riemann_dispatch.cpp)
+target_link_libraries(test_external_riemann_dispatch PRIVATE adc::adc adc_dev_options ${CMAKE_DL_LIBS})
+set_target_properties(test_external_riemann_dispatch PROPERTIES ENABLE_EXPORTS ON)
+target_compile_definitions(test_external_riemann_dispatch PRIVATE
+  ADC_TEST_CXX="${CMAKE_CXX_COMPILER}"
+  ADC_TEST_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/../include"
+  ADC_TEST_CXX_STD="c++${CMAKE_CXX_STANDARD}"
+  ADC_TEST_TMPDIR="${CMAKE_CURRENT_BINARY_DIR}")
+# Kokkos flags the run-time brick compile needs to match this module's ABI: the interface include dirs
+# of Kokkos::kokkos (its own + OpenMP/libomp) and the ADC_HAS_KOKKOS define. Passed as space-joined
+# strings the test splices into the g++ command (empty under a non-Kokkos build -> the host path).
+if(ADC_HAS_KOKKOS)
+  target_compile_definitions(test_external_riemann_dispatch PRIVATE
+    ADC_TEST_KOKKOS_INC="$<JOIN:$<TARGET_PROPERTY:Kokkos::kokkos,INTERFACE_INCLUDE_DIRECTORIES>, >"
+    ADC_TEST_KOKKOS_DEFS="$<JOIN:$<TARGET_PROPERTY:Kokkos::kokkos,INTERFACE_COMPILE_DEFINITIONS>, >"
+    ADC_TEST_KOKKOS_OPTS="$<JOIN:$<TARGET_PROPERTY:Kokkos::kokkos,INTERFACE_COMPILE_OPTIONS>, >")
+endif()
+add_test(NAME test_external_riemann_dispatch COMMAND test_external_riemann_dispatch)
+set_tests_properties(test_external_riemann_dispatch PROPERTIES LABELS "core" TIMEOUT 600)
 
 # --- WENO5 sur le chemin "production" NATIF cote AMR (Plan Ideal etape 5 / DSL Phase D) ---
 # Pendant raffine de test_weno5_compiled_model.cpp : prouve que WENO5-Z (3 ghosts) tourne la MEME
