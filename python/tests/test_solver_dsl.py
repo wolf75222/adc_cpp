@@ -201,14 +201,70 @@ def test_custom_solver_is_selectable_like_a_native_solver():
     assert s.scheme == "selectable"
 
 
-def test_cpp_generation_is_deferred_with_a_clear_adc462_error():
-    @lib.solver(name="defer_codegen")
+def test_cpp_generation_lowers_to_a_real_cpp_loop_over_shared_primitives():
+    """ADC-462 C++ follow-up: the Richardson IR lowers to GENERATED C++ that RUNS.
+
+    The kernel must drive the solve entirely in C++ -- a REAL ``for (;;)`` whose convergence
+    predicate re-evaluates each pass, calling the SHARED matrix-free HPC primitives
+    (``adc::dot`` / ``adc::saxpy``). It must NOT contain a Python callback, a ``std::function``,
+    a heap ``new`` in the loop, or a per-cell string lookup (criterion 24.9).
+    """
+    @lib.solver(name="richardson_codegen", signature="(A, b)")
     def s(ctx, A, b):
         return _richardson(ctx, A, b)
 
-    with pytest.raises(NotImplementedError) as exc:
-        lib.generate_solver_cpp(s)
-    assert "ADC-462" in str(exc.value)
+    src = lib.generate_solver_cpp(s)
+    # The generated kernel function and its templated matrix-free operator parameter.
+    assert "richardson_codegen_solve" in src
+    assert "template <class Op>" in src
+    assert "const Op& A" in src
+    # A REAL C++ convergence loop with a re-evaluated break (not a Python loop, not unrolled).
+    assert "for (;;" in src
+    assert "break;" in src
+    # The shared HPC primitives are the backend (the residual norm / the affine update).
+    assert "adc::dot(" in src
+    assert "adc::saxpy(" in src
+    assert "A(" in src  # the matrix-free matvec A(out, x)
+
+    # The no-Python-callback / no-std::function / no-heap proof (criterion 24.9): the kernel is pure
+    # C++ over the shared primitives -- nothing Python, no type-erased indirection, no per-iteration
+    # heap, no string-keyed per-cell dispatch.
+    for banned in ("std::function", "PyObject", "py::", "import ", "new ", "malloc",
+                   'operator_by_name', '["', "scratch_state_like"):
+        assert banned not in src, "generated solver C++ must not contain %r (criterion 24.9)" % banned
+
+
+def test_cpp_generation_binds_the_iteration_cap_to_the_real_loop_counter():
+    """The authored ``it < max_iter`` cap must bound the GENERATED loop for real.
+
+    An SSA scalar literal cannot mutate, so the cap is lowered against the live C++ loop counter
+    (``adc_iters``), not frozen on the initial ``it = 0``. The compare against the max literal must
+    reference that counter.
+    """
+    @lib.solver(name="capped", signature="(A, b)")
+    def s(ctx, A, b):
+        return _richardson(ctx, A, b, max_iter=37)
+
+    src = lib.generate_solver_cpp(s)
+    assert "adc_iters" in src
+    # The authored cap (37) appears as a literal compared against the loop counter.
+    assert "37" in src
+    assert "adc_iters) < static_cast<adc::Real>(37" in src
+
+
+def test_cpp_generation_allocates_scratch_once_before_the_loop():
+    """The matrix-free scratch fields must be allocated ONCE, before the loop -- never inside it
+    (no per-iteration heap churn). Every MultiFab construction must precede the ``for (;;``."""
+    @lib.solver(name="scratch_once", signature="(A, b)")
+    def s(ctx, A, b):
+        return _richardson(ctx, A, b)
+
+    src = lib.generate_solver_cpp(s)
+    loop_at = src.index("for (;;")
+    # The only MultiFab constructed after the loop is the post-loop residual diagnostic; no scratch
+    # is constructed INSIDE the loop body (between the for and its matching closing brace region).
+    body = src[loop_at:src.index("// Final relative residual")]
+    assert "adc::MultiFab " not in body, "no MultiFab may be constructed inside the convergence loop"
 
 
 def test_builder_signature_and_name_are_validated():

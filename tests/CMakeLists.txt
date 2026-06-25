@@ -223,6 +223,35 @@ adc_add_test(test_krylov_solver)
 # de Helmholtz SPD A = I - alpha*Lap : solution manufacturee discretisation-exacte (rhs = A(phi_exact)),
 # convergence + recouvrement de phi_exact, et max_iter=0 -> std::invalid_argument (erreur spec 13).
 adc_add_test(test_generic_krylov)
+# ADC-462 : codegen du SOLVEUR CUSTOM (@adc.lib.solver). Le DSL d'authoring d'IR (adc.lib) ABAISSE un
+# solveur Richardson custom en un noyau C++ autonome (adc.lib.generate_solver_cpp) -- emis par
+# scripts/gen_solver_kernel.py dans l'en-tete genere ci-dessous. Le test COMPILE ce noyau genere
+# contre le runtime adc::adc reel et l'EXECUTE sur un systeme lineaire connu (Helmholtz SPD), puis
+# compare au adc::richardson_solve natif. Prouve que l'abaissement n'est pas seulement emis mais
+# s'execute, sur les primitives HPC partagees (adc::dot / adc::saxpy / adc::lincomb), SANS callback
+# Python ni std::function dans la boucle (critere 24.9). Le Python d'authoring/codegen est pur (pas
+# besoin de l'extension _adc) : on le charge depuis les sources via le module direct.
+# Un interprete Python (n'importe lequel) suffit : le codegen est PUR Python (aucune extension _adc).
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  set(_adc_gen_solver_hpp "${CMAKE_CURRENT_BINARY_DIR}/adc_generated_solver.hpp")
+  add_custom_command(
+    OUTPUT "${_adc_gen_solver_hpp}"
+    COMMAND ${CMAKE_COMMAND} -E env "PYTHONDONTWRITEBYTECODE=1"
+            "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/gen_solver_kernel.py"
+            "${_adc_gen_solver_hpp}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/scripts/gen_solver_kernel.py"
+            "${CMAKE_SOURCE_DIR}/python/adc/lib.py"
+            "${CMAKE_SOURCE_DIR}/python/adc/time.py"
+    COMMENT "Generating custom-solver C++ kernel (adc.lib.generate_solver_cpp, ADC-462)"
+    VERBATIM)
+  add_custom_target(adc_gen_solver_kernel DEPENDS "${_adc_gen_solver_hpp}")
+  adc_add_test(test_solver_codegen_generated)
+  target_include_directories(test_solver_codegen_generated PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  add_dependencies(test_solver_codegen_generated adc_gen_solver_kernel)
+else()
+  message(STATUS "Python3 introuvable : test_solver_codegen_generated (ADC-462 codegen) ignore")
+endif()
 # Schur PR3 (batisseur) : ASSEMBLE l'operateur tensoriel A_op = I + theta^2 dt^2 alpha rho B^{-1}
 # (eps_x/eps_y diag, a_xy/a_yx croises) + le RHS condense -Lap phi^n - theta dt alpha div(rho B^{-1} v^n)
 # depuis les roles Density/MomentumX/MomentumY d'un bloc fluide. PAS de solve (PR4). Tests analytiques :
