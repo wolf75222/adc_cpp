@@ -183,6 +183,13 @@ struct System::Impl {
   // install_program records it. Serialized in the checkpoint so a restart against a DIFFERENT compiled
   // Program is rejected fail-loud (mismatched buffers / cadence would be meaningless).
   std::string installed_program_hash_;
+  // NAME-BASED block binding (Spec 3 criterion 23, ADC-457): program-index -> system-index map. entry
+  // p holds the System block index that the Program's block p (in P.state declaration order) names.
+  // Built by install_program from the .so's adc_program_block_name table; read by ProgramContext to
+  // resolve a Program block index to the name-matched System block. EMPTY = identity (single-block /
+  // order-matching Program, or a ProgramContext built directly in a C++ test). Not referenced by
+  // SystemStepper -> no MockImpl impact (like program_diagnostics_ / installed_program_hash_).
+  std::vector<int> program_block_map_;
   // COMPILED-PROGRAM SCALAR DIAGNOSTICS (ADC-414, spec op 23): name -> last value recorded by the
   // installed program via P.record_scalar (ProgramContext::record_scalar). Retrievable AFTER a step
   // (System::program_diagnostic / program_diagnostics). Lives HERE (not in the .so) so it outlives the
@@ -2315,6 +2322,44 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
     }
   }
 #endif
+  // NAME-based block binding (Spec 3 criterion 23, ADC-457). A compiled Program numbers its blocks in
+  // P.state declaration order (the .so's adc_program_block_name table); the System numbers its blocks
+  // in add order (block_names). They need NOT agree -- bind by NAME, not add-order. Read the .so's
+  // block names, map each Program block index to the System block of that name, and store the
+  // program-index -> system-index map (read by ProgramContext to resolve every ctx.state / rhs_into /
+  // commit). A Program block whose name has no instantiated System block fails loud with the spec
+  // message. A pre-Spec-3 .so (the count symbol absent) carries no table -> clear the map (identity),
+  // i.e. the historical positional convention. Built BEFORE install() so the step closure (which
+  // captures a ProgramContext) sees the map on its first run.
+  {
+    using count_t = int (*)();
+    using name_t = const char* (*)(int);
+    auto block_count = reinterpret_cast<count_t>(adc::dynlib::sym(h, "adc_program_block_count"));
+    auto block_name = reinterpret_cast<name_t>(adc::dynlib::sym(h, "adc_program_block_name"));
+    if (block_count && block_name) {
+      const std::vector<std::string> sys_names = block_names();
+      const int n = block_count();
+      std::vector<int> prog_to_sys(static_cast<std::size_t>(n), -1);
+      for (int p = 0; p < n; ++p) {
+        const std::string want = block_name(p);
+        int found = -1;
+        for (std::size_t s = 0; s < sys_names.size(); ++s)
+          if (sys_names[s] == want) {
+            found = static_cast<int>(s);
+            break;
+          }
+        if (found < 0) {
+          adc::dynlib::close(h);
+          throw std::runtime_error("Program requires block instance '" + want +
+                                   "', but simulation did not instantiate it");
+        }
+        prog_to_sys[static_cast<std::size_t>(p)] = found;
+      }
+      set_program_block_map(prog_to_sys);
+    } else {
+      set_program_block_map({});  // pre-Spec-3 .so: no name table -> identity (positional convention)
+    }
+  }
   install(static_cast<void*>(this));
   // Record the program's IR hash (ADC-406b): the optional adc_program_hash export (a stable IR key,
   // cf. _PROGRAM_CPP_TEMPLATE) is serialized in the checkpoint so a restart against a DIFFERENT
@@ -2344,6 +2389,15 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
 }
 std::string System::installed_program_hash() const {
   return p_->installed_program_hash_;
+}
+// NAME-based block binding seam (Spec 3 criterion 23, ADC-457). install_program builds the map after
+// matching the .so's block names; ProgramContext reads it to translate a Program block index to the
+// name-matched System block index. ADC_EXPORT: resolved by the generated .so across the dlopen boundary.
+void System::set_program_block_map(const std::vector<int>& prog_to_sys) {
+  p_->program_block_map_ = prog_to_sys;
+}
+const std::vector<int>& System::program_block_map() const {
+  return p_->program_block_map_;
 }
 // Block positivity projection (ADC-177) reached by a compiled Program (ProgramContext::apply_projection,
 // spec op 21). REUSES the block's own projection closure; a block without one is a no-op.

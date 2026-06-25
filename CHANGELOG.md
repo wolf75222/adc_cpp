@@ -856,6 +856,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- Bind compiled-Program blocks to System blocks by name, not add-order (ADC-457 criterion 23).
+
 - **`restore_history` scatter uses the multi-box `write_state`** (ADC-406b follow-up): the history
   checkpoint restore now scatters through `Impl::write_state` (the multi-box dispatcher `set_state`
   uses, the true inverse of the multi-box `gather_global`/`history_global`) instead of the mono-box

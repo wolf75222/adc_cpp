@@ -173,6 +173,17 @@ class ProgramContext {
     sys_->install_program_step(std::move(step));
   }
 
+  /// Translate a PROGRAM block index @p b (P.state declaration order, what the codegen emits) to the
+  /// SYSTEM block index it names (Spec 3 criterion 23, ADC-457). install_program stored the map after
+  /// matching the .so's block names to the instantiated System blocks; an EMPTY map is the identity
+  /// (single-block / order-matching Program, or a ProgramContext built directly in a C++ test), so the
+  /// historical positional convention is byte-identical. Every seam method taking a block index routes
+  /// through here, so the System blocks may be added in ANY order vs the Program's P.state declarations.
+  int sys_block(int b) const {
+    const std::vector<int>& m = sys_->program_block_map();
+    return (b >= 0 && b < static_cast<int>(m.size())) ? m[static_cast<std::size_t>(b)] : b;
+  }
+
   void solve_fields() const { sys_->solve_fields(); }
   /// Per-stage field solve (ADC-409): re-solve the elliptic fields and re-fill the shared aux from
   /// block @p b's STAGE state @p u_stage (not its live state), so a field-coupled multi-stage
@@ -180,7 +191,7 @@ class ProgramContext {
   /// System::solve_fields_from_state. With b = 0 and u_stage = U^n (the first stage) it matches
   /// solve_fields(); the codegen lowers every solve_fields op to this, passing the stage's state var.
   void solve_fields_from_state(int b, MultiFab& u_stage) const {
-    sys_->solve_fields_from_state(b, u_stage);
+    sys_->solve_fields_from_state(sys_block(b), u_stage);
   }
   /// Named multi-elliptic field solve (ADC-428): re-solve the SECOND elliptic field @p field from block
   /// @p b's stage state @p u_stage and write its phi (+ centered grad) into the field's OWN aux
@@ -189,7 +200,7 @@ class ProgramContext {
   /// P.solve_fields(field=name, state=U) to this; a default (unnamed) solve_fields keeps the overload
   /// above, byte-identical.
   void solve_fields_from_state(const std::string& field, int b, MultiFab& u_stage) const {
-    sys_->solve_fields_from_state(field, b, u_stage);
+    sys_->solve_fields_from_state(field, sys_block(b), u_stage);
   }
   /// Coupled multi-block field solve (Spec 3 criterion 24, ADC-457): re-solve the elliptic fields and
   /// re-fill the shared aux from the SIMULTANEOUS stage states of MULTIPLE blocks at once -- the system
@@ -200,11 +211,23 @@ class ProgramContext {
   /// from the listed stage-state vars (their declaration order == the block index order, asserted at
   /// emit time). This is the multi-target counterpart of solve_fields_from_state.
   void solve_fields_from_blocks(const std::vector<const MultiFab*>& u_stages) const {
-    sys_->solve_fields_from_blocks(u_stages);
+    // The codegen builds @p u_stages indexed BY PROGRAM block index (a stage state slotted at its own
+    // Program index, the rest nullptr). The System solver expects it indexed by SYSTEM block index, so
+    // re-slot each Program entry p at its name-matched System index sys_block(p) (Spec 3 criterion 23,
+    // ADC-457). Identity map -> the vector is copied unchanged (order-matching Program, byte-identical).
+    const std::vector<int>& m = sys_->program_block_map();
+    if (m.empty()) {
+      sys_->solve_fields_from_blocks(u_stages);
+      return;
+    }
+    std::vector<const MultiFab*> remapped(static_cast<std::size_t>(sys_->n_blocks()), nullptr);
+    for (std::size_t p = 0; p < u_stages.size(); ++p)
+      remapped[static_cast<std::size_t>(sys_block(static_cast<int>(p)))] = u_stages[p];
+    sys_->solve_fields_from_blocks(remapped);
   }
   int n_blocks() const { return sys_->n_blocks(); }
-  MultiFab& state(int b) const { return sys_->block_state(b); }
-  void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(b, u, r); }
+  MultiFab& state(int b) const { return sys_->block_state(sys_block(b)); }
+  void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(sys_block(b), u, r); }
 
   /// r <- -div F(u) for block @p b -- the SAME flux divergence as @ref rhs_into but WITHOUT the model's
   /// default/composite source (Poisson frozen). Forwards to System::block_neg_div_flux_into (the block's
@@ -214,7 +237,7 @@ class ProgramContext {
   /// default source leaking in (epic ADC-399 / ADC-425, spec criterion 17). Header-inline forwarder,
   /// like @ref rhs_into.
   void neg_div_flux_default_into(int b, MultiFab& u, MultiFab& r) const {
-    sys_->block_neg_div_flux_into(b, u, r);
+    sys_->block_neg_div_flux_into(sys_block(b), u, r);
   }
 
   /// r <- S(u, aux) for block @p b -- the model's default/composite SOURCE only, WITHOUT the flux
@@ -225,7 +248,7 @@ class ProgramContext {
   /// (epic ADC-399 / ADC-430, spec: rhs flux=False is source-only). Header-inline forwarder, like @ref
   /// neg_div_flux_default_into.
   void source_default_into(int b, MultiFab& u, MultiFab& r) const {
-    sys_->block_source_into(b, u, r);
+    sys_->block_source_into(sys_block(b), u, r);
   }
 
   /// The MIN physical cell size of the grid (Cartesian min(dx, dy); polar min(dr, r_min*dtheta)) -- the
@@ -238,7 +261,9 @@ class ProgramContext {
   /// wave-speed closure, it does not recompute the speed. @p u is the state the bound is evaluated on
   /// (the block's current state for a CFL bound). The dt_bound expression uses it as the denominator of
   /// cfl * hmin / max_wave_speed (epic ADC-399 / ADC-417, spec s18).
-  Real max_wave_speed(int b, const MultiFab& u) const { return sys_->block_max_speed(b, u); }
+  Real max_wave_speed(int b, const MultiFab& u) const {
+    return sys_->block_max_speed(sys_block(b), u);
+  }
 
   /// The System aux MultiFab (phi=0, grad_x=1, grad_y=2, B_z=3, T_e=4, named fields from
   /// kAuxNamedBase). NOT owned by the context: it is the live System aux (stable address), the same
@@ -559,7 +584,7 @@ class ProgramContext {
   /// valid cells, the SAME Zhang-Shu / floor projection the native per-step path runs (ADC-177, spec
   /// op 21). REUSES the block's own projection closure (set at add_block time); a block WITHOUT a
   /// projection is a no-op. Forwards to System::block_project -- it reimplements no positivity.
-  void apply_projection(int b, MultiFab& u) const { sys_->block_project(b, u); }
+  void apply_projection(int b, MultiFab& u) const { sys_->block_project(sys_block(b), u); }
 
   /// Store a runtime Scalar @p value into the System diagnostics map under @p name (spec op 23),
   /// retrievable after the step via System::program_diagnostic / program_diagnostics (exposed to
