@@ -92,8 +92,9 @@ def test_coupled_rate_rejects_schedule_clearly():
                schedule=adctime.every(2))
 
 
-def test_dump_cpp_plan_marks_coupled_rate_deferred():
-    # the C++ plan must not imply a ctx.coupled_rate(...) call exists; it shows the node as deferred.
+def test_dump_cpp_plan_shows_coupled_rate_kernel():
+    # the C++ plan shows the coupled_rate as ONE multi-state kernel (ADC-457), never a
+    # ctx.coupled_rate(...) call that does not exist.
     mod, e, i, _ = _two_fluid_module()
     P = adctime.Program("step").bind_operators(mod)
     e_n, i_n = P.state("electrons", space=e), P.state("ions", space=i)
@@ -101,16 +102,21 @@ def test_dump_cpp_plan_marks_coupled_rate_deferred():
     P.linear_combine("e1", e_n + P.dt * C["electrons"])
     plan = P.dump_cpp_plan()
     assert "ADC-457" in plan and "ctx.coupled_rate(" not in plan
+    assert "multi-state for_each_cell rate kernel" in plan
+    assert "electrons" in plan and "ions" in plan
 
 
-def test_coupled_rate_codegen_is_deferred():
-    # honest deferral: a coupled_rate node refuses to lower to C++ (the coupled-rate kernel is the
-    # ADC-457 runtime), rather than silently mis-lowering to independent single-block rates.
+def test_coupled_rate_now_lowers_to_cpp():
+    # ADC-457 part B: a coupled_rate lowers to a multi-state kernel rather than refusing. The honest
+    # deferral is now scoped to prim/aux formulas (the cons-only MVP) -- see
+    # test_coupled_rate_codegen.py for the emitted kernel shape and the prim-var raise.
     mod, e, i, _ = _two_fluid_module()
     P = adctime.Program("step").bind_operators(mod)
     e_n, i_n = P.state("electrons", space=e), P.state("ions", space=i)
     C = P.call("collision", e_n, i_n)
     P.commit_many({"electrons": P.linear_combine("e1", e_n + P.dt * C["electrons"]),
                    "ions": P.linear_combine("i1", i_n + P.dt * C["ions"])})
-    with pytest.raises(NotImplementedError, match="coupled_rate"):
-        P._check_lowerable(None)
+    P._check_lowerable(None)  # no longer raises for a cons-only coupled_rate
+    src = P.emit_cpp_program(model=None)
+    assert src.count("adc::for_each_cell") == 1
+    assert "const adc::Real ne =" in src and "const adc::Real ni =" in src

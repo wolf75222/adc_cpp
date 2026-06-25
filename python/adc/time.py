@@ -571,6 +571,11 @@ class Program:
         # OPTIONAL bound operator registry (Spec 2, operator-first): set by bind_operators so P.call
         # can resolve and type-check operators at build time. None = legacy PDE-shortcut-only Program.
         self._registry = None
+        # Per-emit scratch names of coupled_rate blocks, keyed by (coupled node id, block): the
+        # coupled_rate kernel fills them and each coupled_rate_out projection aliases its block's
+        # scratch (ADC-457). Populated during _emit_op; harmless to keep across emits (keys are unique
+        # per node id).
+        self._coupled_scratch = {}
 
     # --- node construction ---
     def _new(self, vtype, op, inputs, attrs, name, block):
@@ -1610,11 +1615,16 @@ class Program:
         lines = ["// C++ plan for GeneratedProgram step of %s" % self.name]
         for v in self._values:
             ins = ", ".join(i.name for i in v.inputs)
-            if v.op in ("coupled_rate", "coupled_rate_out"):
-                # the coupled-rate kernel is not generated yet -- show it as deferred, never as a
-                # ctx.coupled_rate(...) call that does not exist (ADC-457).
-                lines.append("  // %s = %s(%s);  // coupled-rate kernel codegen is ADC-457 (deferred)"
-                             % (v.name, v.op, ins))
+            if v.op == "coupled_rate":
+                # the coupled-rate kernel lowers to ONE multi-state for_each_cell filling every block's
+                # rate scratch at once (ADC-457); there is no single ctx.coupled_rate(...) call.
+                blks = ", ".join(v.attrs.get("blocks", []))
+                lines.append("  // %s: multi-state for_each_cell rate kernel over (%s) for blocks "
+                             "[%s];  // ADC-457" % (v.name, ins, blks))
+            elif v.op == "coupled_rate_out":
+                # a pure projection: it aliases its block's rate scratch (no code of its own).
+                lines.append("  // %s = %s.rate[%r];  // ADC-457 (block projection, no ctx call)"
+                             % (v.name, ins, v.attrs.get("out_block")))
             else:
                 lines.append("  ctx.%s(%s);  // -> %s" % (v.op, ins, v.name))
         for block, st in self._commits.items():
@@ -2513,12 +2523,6 @@ class Program:
                     "commit of unknown block '%s': no P.state('%s') declares it (declared blocks: %s)"
                     % (b, b, sorted(blocks)))
         self._check_schedules_lowerable()
-        for v in self._all_ops():
-            if v.op in ("coupled_rate", "coupled_rate_out"):
-                raise NotImplementedError(
-                    "the coupled_rate kernel codegen is ADC-457: a coupled multi-block rate "
-                    "(node %r) builds + composes in the IR but is not yet lowered to C++ (it must "
-                    "not be faked as independent single-block rates)." % (v.name,))
         for v in self._values:
             self._check_op_lowerable(v, model)
         # Per-cell dense fallback bound for the local dense solves (mat_inverse<N> uses fixed stack
@@ -2566,7 +2570,8 @@ class Program:
                               "fill_boundary", "project", "record_scalar",
                               "cell_compare", "where", "rhs_jacvec",
                               "schur_coeffs", "apply_laplacian_coeff", "schur_explicit_flux",
-                              "schur_rhs", "schur_reconstruct", "schur_energy"})
+                              "schur_rhs", "schur_reconstruct", "schur_energy",
+                              "coupled_rate", "coupled_rate_out"})
 
     # Ops NOT wrapped in a per-node profile scope (ADC-459): they bind a reference or read a cached
     # scalar and do no per-step numerical work, so timing them only adds always-zero noise to
@@ -2603,6 +2608,20 @@ class Program:
                 "emit_cpp_program cannot lower op '%s' (value '%s') yet; supported ops are %s "
                 "(+ %s with a model; nested control flow / Krylov are later phases)"
                 % (v.op, v.name, sorted(Program._ALLOWED_OPS), sorted(Program._MODEL_OPS)))
+        if v.op == "coupled_rate":
+            # A coupled_rate (collisions / ionization, Spec 3 criterion 27) lowers to ONE multi-state
+            # for_each_cell kernel (see _emit_coupled_rate_kernel). The lowering reaches the operator
+            # body (its per-block component formulas) through the BOUND registry, and binds each input
+            # state's cons names from that input's StateSpace -- so the operator must be bound and the
+            # formulas must be cons-only (the MVP). Validate both here so a non-lowerable coupled_rate
+            # fails loud naming ADC-457, never emits an undefined reference.
+            self._coupled_rate_components(v)
+            return
+        if v.op == "coupled_rate_out":
+            # A pure projection of one block out of the coupled bundle: it emits nothing (its var
+            # aliases that block's rate scratch). Lowerable iff its producing coupled_rate is (checked
+            # when that node is walked); nothing to validate here.
+            return
         if v.op in ("while", "range", "if"):  # recurse: the cond / body sub-blocks must lower too
             for key in ("cond_block", "body_block"):
                 for w in v.attrs.get(key, []):
@@ -2685,6 +2704,68 @@ class Program:
                     raise ValueError(
                         "unknown source_term '%s' in rhs '%s'; declared source_terms: %s"
                         % (s, v.name, sorted(impl._source_terms)))
+
+    def _coupled_rate_components(self, v):
+        """Resolve a ``coupled_rate`` node @p v to its per-block component formulas (Spec 3 criterion
+        27, ADC-457), validated for the cons-only MVP. Returns ``{block: [Expr, ...]}`` (one formula
+        per component of that block's StateSpace).
+
+        The component formulas live in the BOUND operator's body (``op.body`` = the ``expr=`` dict
+        passed to ``Module.operator``), reachable through the registry the node's ``operator`` attr
+        names; the input states' cons names come from each input value's StateSpace (set by
+        ``P.state(space=...)``). Raises a clear NotImplementedError naming ADC-457 when a coupled_rate
+        cannot lower in this MVP: no bound registry, no operator body, a block whose component count
+        does not match its StateSpace, or a formula referencing a non-cons (prim / aux) Var."""
+        from . import dsl
+        op_name = v.attrs["operator"]
+        if self._registry is None:
+            raise NotImplementedError(
+                "the coupled_rate kernel codegen (ADC-457) needs the bound operator registry to reach "
+                "operator %r's component formulas; call P.bind_operators(module) before emitting "
+                "(node %r)" % (op_name, v.name))
+        op = self._registry.get(op_name)
+        expr = op.body
+        if not isinstance(expr, dict):
+            raise NotImplementedError(
+                "the coupled_rate kernel codegen (ADC-457) needs operator %r to carry its per-block "
+                "component formulas as an expr={block: [Expr, ...]} dict (got %r); a decorator-body "
+                "coupled_rate is a later phase (node %r)" % (op_name, type(expr).__name__, v.name))
+        # Each coupled_rate_out block must own one input state (its rate scratch is shaped like that
+        # block's state) whose StateSpace gives the component count + cons names.
+        by_block = {s.block: s for s in v.inputs}
+        components = {}
+        for blk, comps in expr.items():
+            state_in = by_block.get(blk)
+            if state_in is None or getattr(state_in, "space", None) is None:
+                raise NotImplementedError(
+                    "the coupled_rate kernel codegen (ADC-457) needs every output block to map to an "
+                    "input State declared with a StateSpace (P.state(%r, space=...)); operator %r "
+                    "block %r has none (node %r)" % (blk, op_name, blk, v.name))
+            ncons = len(state_in.space.components)
+            if len(comps) != ncons:
+                raise NotImplementedError(
+                    "coupled_rate operator %r block %r emits %d component formulas but its StateSpace "
+                    "has %d components; the rate must be full-rank over the block state (ADC-457, "
+                    "node %r)" % (op_name, blk, len(comps), ncons, v.name))
+            for e in comps:
+                for node in self._walk_expr(e):
+                    if isinstance(node, dsl.Var) and node.kind != "cons":
+                        raise NotImplementedError(
+                            "coupled_rate formulas referencing prim/aux vars are deferred (ADC-457): "
+                            "operator %r block %r references %s var %r; the MVP per-cell binding is "
+                            "cons-only (node %r)" % (op_name, blk, node.kind, node.name, v.name))
+            components[blk] = list(comps)
+        return components
+
+    @staticmethod
+    def _walk_expr(e):
+        """Yield every node of a dsl Expr tree (used to scan a coupled_rate formula for non-cons Vars)."""
+        from . import dsl
+        stack = [e]
+        while stack:
+            node = stack.pop()
+            yield node
+            stack.extend(dsl._children(node))
 
     def _emit_body(self, model=None):
         """Generate the C++ of the install function in TWO phases (each list indented uniformly by the
@@ -2826,6 +2907,34 @@ class Program:
             # listed state so a downstream rhs(state, fields) reads the refreshed shared aux like any
             # solve_fields result (the FieldContext carries no readable buffer of its own).
             var[v.id] = var[v.inputs[0].id]
+        elif v.op == "coupled_rate":
+            # A coupled rate (collisions / ionization, Spec 3 criterion 27, ADC-457): ONE multi-state
+            # for_each_cell kernel fills the per-block rate scratch of EVERY participating block at
+            # once -- the component formulas reference cons vars from MULTIPLE input states, so the
+            # blocks cannot be lowered as independent single-block rates. Allocate one rate scratch per
+            # block (shaped like that block's state, via rhs_scratch_like), emit the shared kernel that
+            # binds each input state's Array4 + cons names and writes all block scratches, and record
+            # each block's scratch name so the coupled_rate_out for that block aliases it. All input
+            # states are co-located (same ba/dm as the System aux), so a single shared loop is sound
+            # (the same co-distribution every aux-reading kernel relies on; see _kernel_open).
+            components = self._coupled_rate_components(v)
+            by_block = {s.block: s for s in v.inputs}
+            scratch = {}
+            for blk in components:                       # bundle / expr block order
+                scratch[blk] = "cr%d_%s" % (v.id, blk)
+                lines.append("adc::MultiFab %s = ctx.rhs_scratch_like(%s);"
+                             % (scratch[blk], var[by_block[blk].id]))
+            lines += _emit_coupled_rate_kernel(components, by_block, var, scratch)
+            # Per-block scratch names keyed by (coupled node id, block) so each coupled_rate_out aliases
+            # its block's scratch (the projection emits no code of its own).
+            self._coupled_scratch.update({(v.id, blk): scratch[blk] for blk in scratch})
+            var[v.id] = scratch[next(iter(scratch))]     # a stable alias (the bundle has no single value)
+        elif v.op == "coupled_rate_out":
+            # Pure projection of one block out of the coupled bundle: its var aliases that block's rate
+            # scratch (filled by the coupled_rate kernel above). Emits nothing -- like the FieldContext
+            # alias of solve_fields_from_blocks. The producing coupled_rate is the node's sole input.
+            (coupled_in,) = v.inputs
+            var[v.id] = self._coupled_scratch[(coupled_in.id, v.attrs["out_block"])]
         elif v.op == "history":
             # Read the SYSTEM-OWNED history slot (a MultiFab&, ADC-406a): lag steps back. The reference
             # is bound to a C++ name the affine combine then reads like any other state/RHS term.
@@ -3713,6 +3822,70 @@ def _emit_source_kernel(model, name, state_var, out_var):
     body += ["    outA(i, j, %d) = %s;" % (c, e.to_cpp()) for c, e in enumerate(exprs)]
     body += _kernel_close()
     return body
+
+
+def _emit_coupled_rate_kernel(components, by_block, var, scratch):
+    """Lower a ``coupled_rate`` (Spec 3 criterion 27, ADC-457) to ONE multi-state for_each_cell kernel
+    filling every participating block's rate scratch at once.
+
+    @p components: ``{block: [Expr, ...]}`` -- the per-block component formulas (cons-only MVP).
+    @p by_block:   ``{block: state Value}`` -- each block's input state (its StateSpace gives the cons
+                   names + their component indices; its C++ token gives the read Array4).
+    @p var:        the id -> C++ token map (the input states are already bound to ``ctx.state(idx)``).
+    @p scratch:    ``{block: scratch var name}`` -- the per-block rate scratch (alloc'd by the caller).
+
+    The component formulas reference cons vars from MULTIPLE input states, so the blocks share ONE loop
+    (they cannot be independent single-block rates). The first block drives the loop; all inputs and
+    scratches are co-located (same ba/dm as the System aux), so ``fab(li)`` is the same box on every
+    rank -- the co-distribution every aux-reading kernel relies on (see _kernel_open). Each input
+    state binds its OWN read handle (``<state token>A``); a referenced cons var binds from its state's
+    Array4 at its component index. A cons NAME shared by two states' components AND referenced by a
+    formula is ambiguous (no single source) -- rejected loud, never silently bound to one state."""
+    blocks = list(components)
+    driver = scratch[blocks[0]]                  # the block whose box / local_size drives the loop
+    # Which cons vars does any formula reference, and from which state does each come?
+    referenced = set()
+    for comps in components.values():
+        for e in comps:
+            referenced |= e.deps()
+    cons_source = {}                             # cons name -> (state token, component index)
+    for blk in blocks:
+        st = by_block[blk]
+        for idx, c in enumerate(st.space.components):
+            if c not in referenced:
+                continue
+            if c in cons_source and cons_source[c] != (var[st.id], idx):
+                raise NotImplementedError(
+                    "coupled_rate kernel codegen (ADC-457): cons var %r is a component of more than "
+                    "one input state; the cons-only MVP needs disjoint component names across the "
+                    "coupled states (rename one of them)" % (c,))
+            cons_source[c] = (var[st.id], idx)
+
+    def state_handle(token):
+        return "%sA" % token                     # read handle for an input state token (u0A / u1A)
+
+    lines = ["adc::MultiFab& %s_aux = ctx.aux();" % driver,
+             "for (int li = 0; li < %s.local_size(); ++li) {" % driver]
+    # Bind a write handle per block scratch and a read handle per DISTINCT input state, all inside the
+    # per-fab loop and BEFORE for_each_cell so the device lambda captures them by value.
+    for blk in blocks:
+        lines.append("  const adc::Array4 %sA = %s.fab(li).array();" % (scratch[blk], scratch[blk]))
+    seen_states = []
+    for blk in blocks:
+        tok = var[by_block[blk].id]
+        if tok not in seen_states:
+            seen_states.append(tok)
+            lines.append("  const adc::ConstArray4 %s = %s.fab(li).const_array();"
+                         % (state_handle(tok), tok))
+    lines.append("  adc::for_each_cell(%s.box(li), [=] ADC_HD(int i, int j) {" % driver)
+    for c in sorted(cons_source):                # bind only the referenced cons (no unused locals)
+        tok, idx = cons_source[c]
+        lines.append("    const adc::Real %s = %s(i, j, %d);" % (c, state_handle(tok), idx))
+    for blk in blocks:
+        for comp, e in enumerate(components[blk]):
+            lines.append("    %sA(i, j, %d) = %s;" % (scratch[blk], comp, e.to_cpp()))
+    lines += ["  });", "}"]
+    return lines
 
 
 def _emit_flux_kernel(model, names, state_var, fx_var, fy_var):
