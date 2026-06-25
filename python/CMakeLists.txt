@@ -607,6 +607,17 @@ add_test(NAME test_time_history_checkpoint
 set_tests_properties(test_time_history_checkpoint PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Scheduler value-cache checkpoint/restart (ADC-458, Spec 3 section 30). Section (A) is pure Python:
+# the NPZ facade cache key scheme (cache_nodes / cache_names / cache_ncomp_<id> / cache_last_update_<id>
+# / cache_accum_dt_<id> / cache_value_<id>) round-trips through numpy, and the restart missing-value
+# guard raises the verbatim "checkpoint missing cached value for scheduled node '<name>'". The full
+# compiled-.so held-schedule continuous == restart run is Kokkos-only AOT (ROMEO); the CacheManager
+# serialize/restore round-trip is unit-tested by tests/test_checkpoint_cache.cpp.
+add_test(NAME test_scheduler_cache_checkpoint
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scheduler_cache_checkpoint.py)
+set_tests_properties(test_scheduler_cache_checkpoint PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # Compiled-Program macro-step cadence: substeps + stride (ADC-411). Section (A) is pure Python: the
 # CompiledTime(substeps=, stride=) guards are GONE (the values are stored; negative/zero raise). Section
 # (B) checks parity vs the native cadence on the simple bit-exact cases -- a compiled Forward-Euler

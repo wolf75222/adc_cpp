@@ -137,6 +137,35 @@ void init_system(py::module_& m) {
           py::arg("name"), py::arg("slot"), py::arg("values"))
       .def("set_history_initialized", &System::set_history_initialized, py::arg("name"),
            py::arg("initialized"))
+      // Scheduler value-cache checkpoint/restart seam (ADC-458, Spec 3 section 30): the facade gathers/
+      // restores the System-owned held-node cache DIRECTLY (no .so checkpoint_extra ABI), mirroring the
+      // history seam. program_cache_global mirrors history_global (collective gather, component-major);
+      // restore_program_cache mirrors restore_history (owner-rank scatter + re-key). program_cache_nodes
+      // is empty unless a held schedule cached a value, so a program without one writes no cache keys.
+      .def("program_cache_nodes", &System::program_cache_nodes)
+      .def("program_cache_name", &System::program_cache_name, py::arg("node_id"))
+      .def("program_cache_last_update_step", &System::program_cache_last_update_step,
+           py::arg("node_id"))
+      .def("program_cache_accumulated_dt", &System::program_cache_accumulated_dt, py::arg("node_id"))
+      .def("program_cache_ncomp", &System::program_cache_ncomp, py::arg("node_id"))
+      .def("program_cache_ngrow", &System::program_cache_ngrow, py::arg("node_id"))
+      .def(
+          "program_cache_global",
+          [](const System& s, int node_id) {
+            return to_3d(s.program_cache_global(node_id), s.program_cache_ncomp(node_id), s.ny(),
+                         s.nx());
+          },
+          py::arg("node_id"))
+      .def(
+          "restore_program_cache",
+          [](System& s, int node_id, int ncomp, int ngrow, int last_update_step,
+             double accumulated_dt, const std::string& name,
+             py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
+            s.restore_program_cache(node_id, ncomp, ngrow, last_update_step, accumulated_dt, name,
+                                    flat(arr));
+          },
+          py::arg("node_id"), py::arg("ncomp"), py::arg("ngrow"), py::arg("last_update_step"),
+          py::arg("accumulated_dt"), py::arg("name"), py::arg("values"))
       .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
            py::arg("neutral"), py::arg("rate"))
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))

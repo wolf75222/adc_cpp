@@ -2579,6 +2579,30 @@ class System:
                 for k in range(depth):
                     out["history_%s_%d" % (hname, k)] = np.asarray(
                         self._s.history_global(hname, k), dtype=np.float64)
+        # SCHEDULER VALUE CACHE (ADC-458, Spec 3 section 30): a compiled Program with a held schedule
+        # (every(N).hold / accumulate_dt) caches the System aux / a scratch per node so the field solve
+        # runs only when DUE. The cache lives in the System (program_cache, NOT the .so step closure),
+        # so checkpointing it makes a (run, checkpoint, restart, continue) run bit-for-bit identical to
+        # a continuous run -- else the first post-restart step would cold-start the held node off its
+        # cadence. Keys are OPTIONAL (a program with no held schedule caches nothing): cache_nodes is
+        # the list of cached IR node ids, and per node the cached value + bookkeeping. All ranks gather
+        # (program_cache_global mirrors history_global), only rank 0 writes (below).
+        cache_nodes = (list(self._s.program_cache_nodes())
+                       if hasattr(self._s, "program_cache_nodes") else [])
+        if cache_nodes:
+            out["cache_nodes"] = np.array(cache_nodes, dtype=np.int64)
+            out["cache_names"] = np.array([str(self._s.program_cache_name(nid))
+                                           for nid in cache_nodes])
+            for nid in cache_nodes:
+                out["cache_ncomp_%d" % nid] = int(self._s.program_cache_ncomp(nid))
+                out["cache_ngrow_%d" % nid] = int(self._s.program_cache_ngrow(nid))
+                out["cache_last_update_%d" % nid] = int(
+                    self._s.program_cache_last_update_step(nid))
+                out["cache_accum_dt_%d" % nid] = float(
+                    self._s.program_cache_accumulated_dt(nid))
+                # COLLECTIVE gather of the cached value (all ranks call), like history_global above.
+                out["cache_value_%d" % nid] = np.asarray(
+                    self._s.program_cache_global(nid), dtype=np.float64)
         target = path if path.endswith(".npz") else path + ".npz"
         if _adc.my_rank() != 0:
             return target  # only rank 0 writes the checkpoint (gather already done)
@@ -2656,6 +2680,32 @@ class System:
                     self._s.restore_history(
                         hname, k, np.asarray(d["history_%s_%d" % (hname, k)], dtype=np.float64))
                 self._s.set_history_initialized(hname, bool(d["history_init_" + hname]))
+        # SCHEDULER VALUE CACHE (ADC-458, Spec 3 section 30): restore each held node's cached value +
+        # bookkeeping so a held schedule resumes EXACTLY on its cadence -- continuous == (run, ckpt,
+        # restart, continue) bit-for-bit. The cache is keyed by IR node id (re-keyed by the re-installed
+        # Program, which uses the SAME ids -- guaranteed by the program-hash guard above). A checkpoint
+        # that lists a cache node but lost its value array is a CORRUPT/TRUNCATED checkpoint: fail loud
+        # with the verbatim spec message naming the node, distinct from the hash-mismatch above (the
+        # held node would otherwise silently cold-start off its cadence). Back-compatible: a checkpoint
+        # with no cache_nodes restores as before.
+        if "cache_nodes" in d and hasattr(self._s, "restore_program_cache"):
+            cache_names = ([str(nm) for nm in d["cache_names"]]
+                           if "cache_names" in d else None)
+            for idx, nid in enumerate(int(n) for n in d["cache_nodes"]):
+                name = (cache_names[idx] if cache_names is not None and idx < len(cache_names)
+                        else "node_%d" % nid)
+                value_key = "cache_value_%d" % nid
+                if value_key not in d:
+                    raise RuntimeError(
+                        "checkpoint missing cached value for scheduled node '%s'" % name)
+                # ngrow defaults to 1 for a pre-ngrow-key checkpoint (the aux MVP width) so older
+                # checkpoints still restore; a held scratch (ngrow 2) carries its own key.
+                ngrow = int(d["cache_ngrow_%d" % nid]) if ("cache_ngrow_%d" % nid) in d else 1
+                self._s.restore_program_cache(
+                    nid, int(d["cache_ncomp_%d" % nid]), ngrow,
+                    int(d["cache_last_update_%d" % nid]),
+                    float(d["cache_accum_dt_%d" % nid]), name,
+                    np.asarray(d[value_key], dtype=np.float64))
         self._s.set_clock(float(d["t"]), int(d["macro_step"]))
 
     def __getattr__(self, attr):

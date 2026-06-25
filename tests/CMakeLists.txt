@@ -116,6 +116,7 @@ endforeach()
 # --- runtime program ---
 adc_add_test(test_profiler)  # Spec 3 per-node / per-brick profiler (ADC-459)
 adc_add_test(test_cache_manager)  # Spec 3 scheduler value cache (ADC-458)
+adc_add_test(test_checkpoint_cache)  # Spec 3 scheduler-cache checkpoint/restart round-trip (ADC-458)
 adc_add_test(test_external_brick)  # Spec 3 external C++ brick registry + macro (ADC-463)
 
 # --- maillage / conteneurs ---

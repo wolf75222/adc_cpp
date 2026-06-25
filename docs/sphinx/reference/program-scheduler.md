@@ -12,8 +12,9 @@ policy branch around the statements it emits (the cache lives in the C++ `CacheM
 still refuse to lower, loudly: `on_end()` (a compiled `sim.step(dt)` loop carries no end-of-run
 signal, so the `.so` cannot know the last step -- use an on_end host hook) and a `when(cond)` over a
 bare Python callable (only a Program Bool predicate lowers). The cache cadence RUNTIME in a stepping
-`.so` is exercised on ROMEO; the `CacheManager` is unit-tested by `tests/test_cache_manager.cpp`. The
-checkpoint of the cache state is a follow-up (ADC-458 section 30).
+`.so` is exercised on ROMEO; the `CacheManager` and its checkpoint round-trip are unit-tested by
+`tests/test_cache_manager.cpp` and `tests/test_checkpoint_cache.cpp`. The cache state is checkpointed
+(below).
 ```
 
 ## Authoring
@@ -89,10 +90,20 @@ off-cadence. A field solve caches the System aux; any other node caches its own 
 
 The `CacheManager` (`include/adc/runtime/program/cache_manager.hpp`) stores per node the cached value
 (aux or named scratch), the last update step, the accumulated dt and a validity flag. It is typed,
-C++-allocated and Kokkos/MPI-safe. The checkpoint of this state (serialize/restore on restart,
-invalidate on a Program-hash mismatch) extends the existing checkpoint path and is tracked separately
-(ADC-458 section 30); the `CacheManager` already exposes the in-memory state and accessors the
-serializer will read.
+C++-allocated and Kokkos/MPI-safe. The cache is owned by the `System` (`System::program_cache()`), not
+the `.so` step closure, so the EXISTING checkpoint reaches it: `sim.checkpoint` gathers each valid slot
+exactly the way it gathers the multistep history rings (`program_cache_global` mirrors
+`history_global`), and `sim.restart` scatters them back (`restore_program_cache`). A
+`(run, checkpoint, restart, continue)` run is then bit-for-bit identical to a continuous run -- the held
+node resumes on its cadence instead of cold-starting. Two guards fail loud at restart: a restart against
+a DIFFERENT compiled Program is rejected by the program-hash guard
+(`checkpoint was created with a different compiled Program hash`), and a checkpoint that lists a cached
+node but lost its value array names the node
+(`checkpoint missing cached value for scheduled node '<name>'`). A checkpoint with no cached node
+restores as before (back-compatible). The cache value MultiFab is serialized through the same
+`gather_global` / `write_state` machinery as the block state, so the round-trip is MPI-safe and
+bit-identical under `np>1`; the full compiled-`.so` held-schedule continuous == restart run is
+Kokkos-only AOT (ROMEO).
 
 ## Per-block step policy
 

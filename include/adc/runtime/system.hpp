@@ -32,7 +32,8 @@
 namespace adc {
 
 namespace runtime::program {
-class Profiler;  // per-node wall-clock profiler (ADC-459); full type in program/profiler.hpp
+class Profiler;       // per-node wall-clock profiler (ADC-459); full type in program/profiler.hpp
+class CacheManager;   // scheduler value cache (ADC-458); full type in program/cache_manager.hpp
 }  // namespace runtime::program
 
 /// Mesh and domain shared by all blocks (physical parameters are per block, in the ModelSpec).
@@ -807,6 +808,51 @@ class System {
   /// or "" if no program is installed. Recorded in the checkpoint (sim.checkpoint) so a restart against
   /// a DIFFERENT compiled Program is rejected fail-loud (the buffers / cadence would be meaningless).
   ADC_EXPORT std::string installed_program_hash() const;
+  /// @name Scheduler value cache (epic ADC-399 / ADC-458, Spec 3 section 17-18 + 30)
+  /// The held-node value cache (every(N).hold / accumulate_dt) lives in the SYSTEM (one CacheManager
+  /// per installed Program), NOT in the .so step closure -- so the checkpoint can reach it, exactly the
+  /// way the history rings do. Every ProgramContext (the step closure's copy and any fresh one) forwards
+  /// its cache_* seam ops to this single manager. ADC_EXPORT so the generated problem.so resolves it
+  /// across the dlopen boundary like the other ProgramContext seam accessors.
+  /// @{
+  /// The System-owned scheduler cache (a non-owning reference; lives as long as the System). A compiled
+  /// Program's cache_store_aux / cache_restore_aux / cache_should_update reach it through ProgramContext.
+  ADC_EXPORT runtime::program::CacheManager& program_cache();
+  /// @name Scheduler-cache checkpoint/restart (Spec 3 section 30, ADC-458)
+  /// SERIALIZE / RESTORE the System-owned cache across a checkpoint, mirroring the history seam: the
+  /// facade (sim.checkpoint / sim.restart) gathers each VALID slot (gather_global, MPI-safe) and scatters
+  /// it back (write_state) alongside the block state and histories. The program-hash guard
+  /// (installed_program_hash) rejects a restart against a different compiled Program; a held scheduled
+  /// node the checkpoint never recorded fails loud at restart (the facade compares the restored ids).
+  /// @{
+  /// Node ids of every VALID cached slot (ascending). Empty when no schedule cached a value.
+  ADC_EXPORT std::vector<int> program_cache_nodes() const;
+  /// The scheduled node name of slot @p node_id ("fields_from_state"), or "node_<id>" if it was stored
+  /// without one (the current nameless codegen). Names a missing node verbatim at restart.
+  ADC_EXPORT std::string program_cache_name(int node_id) const;
+  /// The macro step at slot @p node_id's last recompute. @throws if absent.
+  ADC_EXPORT int program_cache_last_update_step(int node_id) const;
+  /// The accumulated skipped dt of slot @p node_id (accumulate_dt policy). 0 if none.
+  ADC_EXPORT double program_cache_accumulated_dt(int node_id) const;
+  /// The component count of slot @p node_id's cached value. @throws if absent.
+  ADC_EXPORT int program_cache_ncomp(int node_id) const;
+  /// The ghost-cell width of slot @p node_id's cached value (1 for the aux, the block-state width for a
+  /// held scratch) -- serialized so restore rebuilds with the same ngrow. @throws if absent.
+  ADC_EXPORT int program_cache_ngrow(int node_id) const;
+  /// GLOBAL (collective, MPI-safe) gather of slot @p node_id's cached MultiFab into a component-major
+  /// buffer of size ncomp*ny*nx, EXACTLY like state_global / history_global. All ranks MUST call it.
+  /// @throws if @p node_id is absent.
+  ADC_EXPORT std::vector<double> program_cache_global(int node_id) const;
+  /// RESTORE (restart) slot @p node_id from a GLOBAL component-major buffer (same layout as
+  /// program_cache_global / set_state): allocate a value MultiFab co-distributed with block 0 (@p ncomp
+  /// components), scatter the buffer into it (owner rank writes, others no-op -- MPI-safe, all ranks
+  /// call it), and re-key the slot with its bookkeeping (@p name may be empty). @throws if no block
+  /// exists yet (the cache value is co-distributed with block 0's storage).
+  ADC_EXPORT void restore_program_cache(int node_id, int ncomp, int ngrow, int last_update_step,
+                                        double accumulated_dt, const std::string& name,
+                                        const std::vector<double>& values);
+  /// @}
+  /// @}
   /// Apply block @p b's post-step positivity projection to @p u in place (ADC-177): U <- project(U,
   /// aux) over the valid cells, the SAME closure the native per-step path runs (s.project). A compiled
   /// time Program reaches it through ProgramContext::apply_projection (spec op 21). REUSES the block's

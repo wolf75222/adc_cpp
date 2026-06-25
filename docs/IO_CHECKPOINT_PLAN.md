@@ -30,6 +30,7 @@ sim.restart("out/chk_000400")                   # reprend exactement (memes bloc
 | state U of each block (all components, valid cells) | MultiFab | the ghosts are reconstructed (fill_boundary) |
 | shared aux (phi, grad, B_z, T_e, width) | Impl::aux + bz_field_ | B_z is an INPUT (not re-derivable) ; phi re-derivable but saving it preserves the warm start (gauss_policy="evolve" : REQUIRED, phi is no longer re-derived !) |
 | model parameters (ModelSpec / runtime params of the .so) | spec + block_params_ | the .so themselves are NOT embedded : we save model_hash + so_path for verification |
+| scheduler value cache (held every(N).hold / accumulate_dt nodes) | System::program_cache (CacheManager) | per node the cached aux/scratch + last_update_step + accumulated_dt ; serialized like the history rings (ADC-458 section 30), so a held node resumes on its cadence ; a missing cached value names the node fail-loud |
 | temporal policy (scheme lie/strang, gauss_policy) | stepper/fields | |
 | Newton options / global dt bounds | add_block / add_dt_bound | the Python `add_dt_bound` callbacks are NOT serializable : document "to be re-set after restart" |
 
