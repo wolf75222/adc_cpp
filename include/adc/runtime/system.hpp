@@ -836,6 +836,9 @@ class System {
   ADC_EXPORT double program_cache_accumulated_dt(int node_id) const;
   /// The component count of slot @p node_id's cached value. @throws if absent.
   ADC_EXPORT int program_cache_ncomp(int node_id) const;
+  /// The ghost-cell width of slot @p node_id's cached value (1 for the aux, the block-state width for a
+  /// held scratch) -- serialized so restore rebuilds with the same ngrow. @throws if absent.
+  ADC_EXPORT int program_cache_ngrow(int node_id) const;
   /// GLOBAL (collective, MPI-safe) gather of slot @p node_id's cached MultiFab into a component-major
   /// buffer of size ncomp*ny*nx, EXACTLY like state_global / history_global. All ranks MUST call it.
   /// @throws if @p node_id is absent.
@@ -845,7 +848,7 @@ class System {
   /// components), scatter the buffer into it (owner rank writes, others no-op -- MPI-safe, all ranks
   /// call it), and re-key the slot with its bookkeeping (@p name may be empty). @throws if no block
   /// exists yet (the cache value is co-distributed with block 0's storage).
-  ADC_EXPORT void restore_program_cache(int node_id, int ncomp, int last_update_step,
+  ADC_EXPORT void restore_program_cache(int node_id, int ncomp, int ngrow, int last_update_step,
                                         double accumulated_dt, const std::string& name,
                                         const std::vector<double>& values);
   /// @}

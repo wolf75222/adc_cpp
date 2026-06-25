@@ -2454,6 +2454,7 @@ double System::program_cache_accumulated_dt(int node_id) const {
   return static_cast<double>(p_->program_cache_.accumulated_dt_of(node_id));
 }
 int System::program_cache_ncomp(int node_id) const { return p_->program_cache_.ncomp_of(node_id); }
+int System::program_cache_ngrow(int node_id) const { return p_->program_cache_.ngrow_of(node_id); }
 std::vector<double> System::program_cache_global(int node_id) const {
   // Reuse the Impl multi-box gather (copy_state -> gather_global): the cache value is co-distributed
   // with block 0's storage (ba/dm), so this is the SAME component-major gather state_global / history_
@@ -2461,18 +2462,19 @@ std::vector<double> System::program_cache_global(int node_id) const {
   const MultiFab& v = p_->program_cache_.value_of(node_id);
   return p_->copy_state(v, v.ncomp());
 }
-void System::restore_program_cache(int node_id, int ncomp, int last_update_step,
+void System::restore_program_cache(int node_id, int ncomp, int ngrow, int last_update_step,
                                    double accumulated_dt, const std::string& name,
                                    const std::vector<double>& values) {
   if (p_->sp.empty())
     throw std::runtime_error(
         "System::restore_program_cache: no block exists yet; the cache value is co-distributed with "
         "block 0's storage (replay the composition before restart)");
-  // Allocate a value co-distributed with block 0 (ba/dm, @p ncomp comps, one ghost like a block state)
-  // and scatter the GLOBAL buffer into it via the SAME write_state set_state uses (owner rank writes,
+  // Allocate a value co-distributed with block 0 (ba/dm, @p ncomp comps, @p ngrow ghosts -- the SAME
+  // ghost width the slot was cached with: 1 for the aux, the block-state width for a held scratch) and
+  // scatter the GLOBAL buffer into it via the SAME write_state set_state uses (owner rank writes,
   // others no-op) -- the true inverse of program_cache_global. Then re-key the slot with its
   // bookkeeping. MPI-safe (all ranks call), bit-identical under np>1.
-  MultiFab value(p_->ba, p_->dm, ncomp, 1);
+  MultiFab value(p_->ba, p_->dm, ncomp, ngrow);
   value.set_val(Real(0));
   p_->write_state(value, ncomp, values);
   p_->program_cache_.restore_slot(node_id, std::move(value), last_update_step,

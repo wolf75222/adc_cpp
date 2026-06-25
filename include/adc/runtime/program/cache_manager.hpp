@@ -156,6 +156,12 @@ class CacheManager {
   // The component count of node `node_id`'s cached value (for the checkpoint's per-slot ncomp key).
   int ncomp_of(int node_id) const { return slots_.at(node_id).value.ncomp(); }
 
+  // The ghost-cell width of node `node_id`'s cached value (for the checkpoint's per-slot ngrow key).
+  // The aux is 1-ghost, but a held SCRATCH slot is allocated at the block-state width (2 ghosts), and a
+  // 2-ghost-stencil consumer reads the 2nd ghost layer -- so restore MUST rebuild with the SAME ngrow,
+  // not a hard-coded 1 (else a held-scratch restart under-reads its outer ghosts).
+  int ngrow_of(int node_id) const { return slots_.at(node_id).value.n_grow(); }
+
   // The cached MultiFab of node `node_id` (the checkpoint gathers it via the System's gather_global,
   // exactly like a history slot). @throws if the slot is absent.
   const MultiFab& value_of(int node_id) const { return slots_.at(node_id).value; }

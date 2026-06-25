@@ -148,6 +148,7 @@ void init_system(py::module_& m) {
            py::arg("node_id"))
       .def("program_cache_accumulated_dt", &System::program_cache_accumulated_dt, py::arg("node_id"))
       .def("program_cache_ncomp", &System::program_cache_ncomp, py::arg("node_id"))
+      .def("program_cache_ngrow", &System::program_cache_ngrow, py::arg("node_id"))
       .def(
           "program_cache_global",
           [](const System& s, int node_id) {
@@ -157,13 +158,13 @@ void init_system(py::module_& m) {
           py::arg("node_id"))
       .def(
           "restore_program_cache",
-          [](System& s, int node_id, int ncomp, int last_update_step, double accumulated_dt,
-             const std::string& name,
+          [](System& s, int node_id, int ncomp, int ngrow, int last_update_step,
+             double accumulated_dt, const std::string& name,
              py::array_t<double, py::array::c_style | py::array::forcecast> arr) {
-            s.restore_program_cache(node_id, ncomp, last_update_step, accumulated_dt, name,
+            s.restore_program_cache(node_id, ncomp, ngrow, last_update_step, accumulated_dt, name,
                                     flat(arr));
           },
-          py::arg("node_id"), py::arg("ncomp"), py::arg("last_update_step"),
+          py::arg("node_id"), py::arg("ncomp"), py::arg("ngrow"), py::arg("last_update_step"),
           py::arg("accumulated_dt"), py::arg("name"), py::arg("values"))
       .def("add_ionization", &System::add_ionization, py::arg("electron"), py::arg("ion"),
            py::arg("neutral"), py::arg("rate"))

@@ -2595,6 +2595,7 @@ class System:
                                            for nid in cache_nodes])
             for nid in cache_nodes:
                 out["cache_ncomp_%d" % nid] = int(self._s.program_cache_ncomp(nid))
+                out["cache_ngrow_%d" % nid] = int(self._s.program_cache_ngrow(nid))
                 out["cache_last_update_%d" % nid] = int(
                     self._s.program_cache_last_update_step(nid))
                 out["cache_accum_dt_%d" % nid] = float(
@@ -2697,8 +2698,11 @@ class System:
                 if value_key not in d:
                     raise RuntimeError(
                         "checkpoint missing cached value for scheduled node '%s'" % name)
+                # ngrow defaults to 1 for a pre-ngrow-key checkpoint (the aux MVP width) so older
+                # checkpoints still restore; a held scratch (ngrow 2) carries its own key.
+                ngrow = int(d["cache_ngrow_%d" % nid]) if ("cache_ngrow_%d" % nid) in d else 1
                 self._s.restore_program_cache(
-                    nid, int(d["cache_ncomp_%d" % nid]),
+                    nid, int(d["cache_ncomp_%d" % nid]), ngrow,
                     int(d["cache_last_update_%d" % nid]),
                     float(d["cache_accum_dt_%d" % nid]), name,
                     np.asarray(d[value_key], dtype=np.float64))

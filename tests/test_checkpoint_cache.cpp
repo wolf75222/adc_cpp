@@ -33,11 +33,11 @@ using adc::runtime::program::CacheSlot;
 
 namespace {
 
-MultiFab make_mf(double fill, int ncomp = 1) {
+MultiFab make_mf(double fill, int ncomp = 1, int ngrow = 1) {
   Box2D dom = Box2D::from_extents(8, 8);
   BoxArray ba = BoxArray::from_domain(dom, 4);
   DistributionMapping dm(ba.size(), n_ranks());
-  MultiFab mf(ba, dm, ncomp, /*ngrow=*/1);
+  MultiFab mf(ba, dm, ncomp, ngrow);
   mf.set_val(fill);
   return mf;
 }
@@ -51,6 +51,7 @@ struct SerializedSlot {
   int last_update_step = -1;
   double accumulated_dt = 0.0;
   int ncomp = 0;
+  int ngrow = 1;  // the cached value's ghost width (1 = aux; 2 = a held scratch); restore rebuilds with it
   MultiFab value = make_mf(0.0);  // stands in for the gathered global buffer
 };
 
@@ -64,6 +65,7 @@ std::vector<SerializedSlot> serialize(const CacheManager& c) {
     s.last_update_step = c.last_update_step(id);
     s.accumulated_dt = static_cast<double>(c.accumulated_dt_of(id));
     s.ncomp = c.ncomp_of(id);
+    s.ngrow = c.ngrow_of(id);  // serialized so restore rebuilds with the same ghost width
     s.value = c.value_of(id);  // a real checkpoint gathers this to a global buffer; here a deep copy
     out.push_back(std::move(s));
   }
@@ -93,16 +95,25 @@ int main() {
     src.store(8, make_mf(3.0, /*ncomp=*/2), 12);
     src.accumulate_dt(8, 0.001);
     src.accumulate_dt(8, 0.002);
+    // a held SCRATCH at the block-state ghost width (2 ghosts): restore MUST rebuild with ngrow 2, not
+    // the aux's 1, else a 2-ghost-stencil consumer under-reads its outer ghosts after restart.
+    src.store(9, make_mf(4.0, /*ncomp=*/1, /*ngrow=*/2), 7);
+
+    // the ngrow accessor distinguishes the aux (1) from a held scratch (2) -- the value restore needs it
+    chk(src.ngrow_of(5) == 1, "aux_slot_ngrow_is_1");
+    chk(src.ngrow_of(9) == 2, "held_scratch_slot_ngrow_is_2");
 
     const std::vector<SerializedSlot> blob = serialize(src);
-    chk(blob.size() == 2, "serialize_two_valid_slots");
+    chk(blob.size() == 3, "serialize_three_valid_slots");
 
     CacheManager dst;
     deserialize(dst, blob);
 
     // node ids + count preserved
-    chk(dst.node_ids().size() == 2, "restore_node_count");
-    chk(dst.has(5) && dst.has(8), "restore_node_ids");
+    chk(dst.node_ids().size() == 3, "restore_node_count");
+    chk(dst.has(5) && dst.has(8) && dst.has(9), "restore_node_ids");
+    // the held-scratch slot's ghost width round-trips (serialized ngrow rebuilds the right width)
+    chk(dst.retrieve(9).n_grow() == 2, "restore_value9_ngrow_preserved");
     // values bit-equal (valid-cell sum: 2.0 over 64 cells; 3.0 over 64 cells x 2 comps)
     chk(std::fabs(sum(dst.retrieve(5)) - 2.0 * 64) < 1e-12, "restore_value5_bit_equal");
     chk(dst.retrieve(8).ncomp() == 2, "restore_value8_ncomp");
