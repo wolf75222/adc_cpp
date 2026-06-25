@@ -881,8 +881,11 @@ class System {
   int nx() const;
   /// MACRO-STEP counter (0-indexed; incremented by step / step_cfl / step_adaptive). Necessary
   /// for checkpoint/restart: the stride cadence (hold-then-catch-up) depends on macro_step % stride,
-  /// not only on the time t (audit 2026-06, IO v1).
-  int macro_step() const;
+  /// not only on the time t (audit 2026-06, IO v1). ADC_EXPORT: a scheduled (every(N)/hold) program
+  /// `.so` calls it for the cadence decision, so it must be in the loader's flat ABI like the other
+  /// seam accessors (grid_context / solve_fields_from_state); without it the held-schedule `.so`
+  /// fails to dlopen ("symbol not found in flat namespace"), caught by the Spec 3 runtime e2e test.
+  ADC_EXPORT int macro_step() const;
   /// RESTORES the clock (t, macro_step) -- reserved for the RESTART (sim.restart). Restoring macro_step
   /// is MANDATORY to resume the stride cadence exactly; a restart that would only restore
   /// t would desynchronize the blocks at stride > 1. @throws if macro_step < 0.
