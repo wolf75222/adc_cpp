@@ -17,8 +17,9 @@
 #include <adc/numerics/elliptic/interface/elliptic_problem.hpp>  // field_postprocess (centered gradient)
 #include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (shared 5-point matvec)
 #include <adc/numerics/linalg/lorentz_eliminator.hpp>  // LorentzEliminator (closed B^{-1}, ADC-421 reconstruct)
-#include <adc/runtime/context/grid_context.hpp>  // GridContext (System aux seam)
-#include <adc/runtime/system.hpp>                // System (the runtime this facade forwards to)
+#include <adc/runtime/context/grid_context.hpp>   // GridContext (System aux seam)
+#include <adc/runtime/program/cache_manager.hpp>  // CacheManager (held-node value cache, ADC-458)
+#include <adc/runtime/system.hpp>                 // System (the runtime this facade forwards to)
 
 /// @file
 /// @brief ProgramContext -- the C++-side facade a generated problem.so calls to run a compiled time
@@ -585,6 +586,30 @@ class ProgramContext {
   }
   /// @}
 
+  /// @name Scheduler value cache (Spec 3 section 17-18, ADC-458)
+  /// A held field-solve node recomputes only when DUE (every N macro-steps) and reuses the cached
+  /// System aux (phi / grad / E) in between. The cache lives here -- one CacheManager per installed
+  /// Program, keyed by the Program node id. The codegen wraps a held solve_fields in
+  /// ``if (cache_should_update(id, N)) { solve_fields_from_state(...); cache_store_aux(id); }
+  ///  else { cache_restore_aux(id); }``. The runtime cadence/checkpoint is exercised in a compiled
+  /// .so step loop (validated on ROMEO; not buildable on a host-only Mac).
+  /// @{
+  /// True if node @p node_id is due to recompute at the current macro step: cold start (never stored),
+  /// then every @p every_n macro steps. Wraps CacheManager::is_due with System::macro_step().
+  bool cache_should_update(int node_id, int every_n) const {
+    return cache_mgr_.is_due(node_id, sys_->macro_step(), every_n);
+  }
+  /// Store a copy of the System aux (the field solve's output) as node @p node_id's cached value,
+  /// stamped at the current macro step (resets its accumulated dt).
+  void cache_store_aux(int node_id) const {
+    cache_mgr_.store(node_id, *sys_->grid_context().aux, sys_->macro_step());
+  }
+  /// Restore node @p node_id's cached aux into the System aux (a held step: no elliptic solve).
+  void cache_restore_aux(int node_id) const {
+    *sys_->grid_context().aux = cache_mgr_.retrieve(node_id);
+  }
+  /// @}
+
  private:
   /// BC of the coefficient / flux fields (ADC-421): periodic preserved, physical boundary -> zero-
   /// gradient (Foextrap). Identical to GeometricMG::eps_bc and the native Schur coeff_bc -- the face
@@ -600,6 +625,9 @@ class ProgramContext {
   }
 
   System* sys_;
+  /// Per-Program-node value cache for held schedules (ADC-458). Mutable: the installed step closure
+  /// holds the ProgramContext by value and calls the const cache_* accessors each step.
+  mutable runtime::program::CacheManager cache_mgr_;
 };
 
 }  // namespace program

@@ -2529,17 +2529,24 @@ class Program:
                     "local dense fallback currently supports n_cons <= 8 (got %d)" % n_cons)
 
     def _check_schedules_lowerable(self):
-        """Refuse to lower a node carrying a non-always schedule: the scheduler runtime (caches,
-        accumulate_dt, checkpoint) is ADC-458, so honoring it is not yet generated. A scheduled
-        Program still BUILDS its IR and is inspectable (dump_operator_ir); it just cannot compile
-        to a silent no-op."""
+        """A non-always schedule lowers only for a HELD field solve (ADC-458): a ``solve_fields`` node
+        with an ``every(N).hold`` schedule recomputes the elliptic solve + caches the System aux every
+        N macro-steps and reuses the cached aux in between (the codegen emits
+        ``ctx.cache_should_update/cache_store_aux/cache_restore_aux``). Other ops/policies are not yet
+        lowered -- they raise rather than silently no-op. The runtime cadence + the checkpoint of the
+        cache are exercised in a compiled .so step loop (validated on ROMEO; the cache MANAGER is
+        unit-tested by tests/test_cache_manager.cpp)."""
         for v in self._all_ops():
             sched = v.attrs.get("schedule")
-            if sched is not None and not sched.is_always():
-                raise NotImplementedError(
-                    "the unified Program scheduler runtime is ADC-458: only always() runs at "
-                    "sim.step today, but node %r carries schedule %r. The schedule is recorded "
-                    "in the IR (see dump_operator_ir) for the ADC-458 runtime." % (v.name, sched))
+            if sched is None or sched.is_always():
+                continue
+            if v.op == "solve_fields" and sched.kind == "every" and sched.policy == "hold":
+                continue  # lowered to the cache branch in _emit_op
+            raise NotImplementedError(
+                "the unified Program scheduler runtime is ADC-458: a %s().%s schedule on node %r "
+                "(op '%s') is not yet lowered -- only a solve_fields with an every(N).hold policy is. "
+                "The schedule is recorded in the IR (see dump_operator_ir)."
+                % (sched.kind, sched.policy, v.name, v.op))
 
     # 'linear_source' is a pure NAME-reference SSA node (vtype 'operator'): it carries no runtime work
     # (consumed by apply / solve_local_linear, which read the model coefficients), so it lowers to
@@ -2780,10 +2787,26 @@ class Program:
                 # channel (distinct from the shared phi/grad). Lowers to the named overload
                 # ctx.solve_fields_from_state(field, block, U) -- block from block_idx (ADC-426); the
                 # default (unnamed) path keeps the 2-arg overload below, byte-identical.
-                lines.append('ctx.solve_fields_from_state(%s, %d, %s);'
-                             % (json.dumps(field), bidx, var[state_in.id]))
+                solve_stmt = ('ctx.solve_fields_from_state(%s, %d, %s);'
+                              % (json.dumps(field), bidx, var[state_in.id]))
             else:
-                lines.append("ctx.solve_fields_from_state(%d, %s);" % (bidx, var[state_in.id]))
+                solve_stmt = "ctx.solve_fields_from_state(%d, %s);" % (bidx, var[state_in.id])
+            sched = v.attrs.get("schedule")
+            if (sched is not None and not sched.is_always()
+                    and sched.kind == "every" and sched.policy == "hold"):
+                # HELD field solve (ADC-458): recompute the elliptic solve + cache the System aux only
+                # when DUE (every N macro-steps); otherwise restore the cached aux (NO solve). The cache
+                # cadence runs in the compiled .so (ROMEO); _check_schedules_lowerable gates this to a
+                # hold solve_fields. _validate_schedule already rejected hold on a non-cacheable operator.
+                n = int(sched.params.get("n", 1))
+                lines.append("if (ctx.cache_should_update(%d, %d)) {" % (v.id, n))
+                lines.append("  " + solve_stmt)
+                lines.append("  ctx.cache_store_aux(%d);" % v.id)
+                lines.append("} else {")
+                lines.append("  ctx.cache_restore_aux(%d);" % v.id)
+                lines.append("}")
+            else:
+                lines.append(solve_stmt)
         elif v.op == "history":
             # Read the SYSTEM-OWNED history slot (a MultiFab&, ADC-406a): lag steps back. The reference
             # is bound to a C++ name the affine combine then reads like any other state/RHS term.

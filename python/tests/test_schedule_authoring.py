@@ -125,14 +125,26 @@ def test_skip_does_not_require_cacheable():
     P.call("fields_from_state", U, schedule=adctime.every(10).skip())   # no raise
 
 
-# --- honesty gate: a non-always schedule must not silently lower to a no-op ---
+# --- honesty gate: a not-yet-lowered non-always schedule must not silently lower to a no-op ---
+# (ADC-458 codegen made a HELD solve_fields lowerable; the other policies/ops still refuse.)
 def test_non_always_schedule_refuses_to_lower():
     mod, u, _ = _module(cacheable=True)
     P = adctime.Program("p").bind_operators(mod)
     U = P.state("plasma", space=u)
-    P.call("fields_from_state", U, schedule=adctime.every(10).hold())
+    # a skip policy on the field solve is not yet lowered (only every(N).hold is) -> still refuses
+    P.call("fields_from_state", U, schedule=adctime.every(10).skip())
     with pytest.raises(NotImplementedError, match="ADC-458"):
         P._check_schedules_lowerable()
+
+
+def test_held_solve_fields_now_lowers():
+    # ADC-458 codegen: a held field solve is the one non-always schedule that lowers (to the cache
+    # branch) -- it must NOT raise (the runtime cadence is exercised in the compiled .so / ROMEO).
+    mod, u, _ = _module(cacheable=True)
+    P = adctime.Program("p").bind_operators(mod)
+    U = P.state("plasma", space=u)
+    P.call("fields_from_state", U, schedule=adctime.every(10).hold())
+    P._check_schedules_lowerable()   # no raise
 
 
 def test_always_schedule_lowers_fine():
