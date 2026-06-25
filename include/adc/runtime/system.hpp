@@ -31,6 +31,10 @@
 
 namespace adc {
 
+namespace runtime::program {
+class Profiler;  // per-node wall-clock profiler (ADC-459); full type in program/profiler.hpp
+}  // namespace runtime::program
+
 /// Mesh and domain shared by all blocks (physical parameters are per block, in the ModelSpec).
 ///
 /// GEOMETRY ("polar grid" work, Phase 1): the CHOICE of geometry lives HERE, in the mesh config,
@@ -593,6 +597,12 @@ class System {
   bool is_profiling() const;
   void reset_profiling();
   std::string profile_report() const;
+  /// The System-owned Profiler (a non-owning reference; lives as long as the System). A compiled time
+  /// Program reaches it through ProgramContext::profile_node to time each Program node into the SAME
+  /// table sim.profile_report() renders -- so per-node scopes ("node:rhs2", ...) accumulate alongside
+  /// the coarse "step" / "field_solve" phases. ADC_EXPORT: a generated problem.so resolves it across
+  /// the dlopen boundary like the other ProgramContext seam accessors (block_state, grid_context).
+  ADC_EXPORT runtime::program::Profiler& profiler();
   /// @}
 
   /// @name Primitives for a time integrator written in Python

@@ -49,6 +49,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   asserts the report carries the "step" phase + "steps=2").
   The per-Program-node / per-native-brick granularity (through the compiled-program ProgramContext)
   is the next ADC-459 step.
+- **Spec 3 per-node Program profiling** (ADC-459, epic ADC-450): the compiled time Program now times
+  each Program node. `System::profiler()` exposes the System-owned `Profiler` and
+  `ProgramContext::profile_node` / `profile_record` time a node into it, so `sim.profile_report()`
+  shows per-node scopes ("node:rhs2", "node:solve_fields1", ...) next to the coarse "step" /
+  "field_solve" phases. `emit_cpp_program` brackets every work node's emitted C++ with a steady_clock
+  pair (pure reference-binding nodes are skipped); additive and free-when-disabled, the numerics are
+  unchanged. New `python/tests/test_pernode_profiling.py` pins the generated source.
 - **Spec 3 custom solver DSL (IR-authoring slice)** (ADC-462, epic ADC-450): `@adc.lib.solver`
   registers a `generated` solver descriptor whose Python builder AUTHORS a solver IR with
   matrix-free Krylov primitives (`SolverContext.norm2` / `dot` / `scalar_int` / `logical_and` /

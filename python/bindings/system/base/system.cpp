@@ -1855,6 +1855,12 @@ void System::reset_profiling() {
 std::string System::profile_report() const {
   return p_->profiler_.report();
 }
+// The System-owned Profiler reference (ADC-459): the compiled-program ProgramContext::profile_node
+// times each Program node into it, so per-node scopes accumulate in the SAME table as the coarse
+// step / field_solve phases. ADC_EXPORT: resolved by a generated problem.so across the dlopen boundary.
+ADC_EXPORT adc::runtime::program::Profiler& System::profiler() {
+  return p_->profiler_;
+}
 
 void System::solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
   p_->solve_fields_from_state(block_idx, U_stage);

@@ -2557,6 +2557,12 @@ class Program:
                               "schur_coeffs", "apply_laplacian_coeff", "schur_explicit_flux",
                               "schur_rhs", "schur_reconstruct", "schur_energy"})
 
+    # Ops NOT wrapped in a per-node profile scope (ADC-459): they bind a reference or read a cached
+    # scalar and do no per-step numerical work, so timing them only adds always-zero noise to
+    # sim.profile_report(). Every other op that emits a statement is wrapped (rhs / solve_fields /
+    # linear_combine / source / apply / reductions / loops / Schur kernels / ...).
+    _PROFILE_SKIP_OPS = frozenset({"state", "history", "hmin", "cfl"})
+
     def _all_ops(self):
         """Iterate over every op of the Program, descending into control-flow + apply sub-blocks (a flat
         view used by the lowerability guards: the sub-block ops are not in self._values). Nested control
@@ -2746,6 +2752,16 @@ class Program:
         now). @p block_idx maps a block name to its runtime index (ADC-426); None inside a sub-block,
         where every op shares the single enclosing block, so a missing map resolves to index 0."""
         bidx = (block_idx or {}).get(v.block, 0)  # this op's runtime block index (0 single-block)
+        # PER-NODE PROFILING (ADC-459, Spec 3 section 29): bracket the C++ this op emits with a
+        # steady_clock pair recorded under "node:<v.name>", so sim.profile_report() shows each Program
+        # node's wall time next to the coarse step / field_solve phases. A steady_clock now() + a
+        # ctx.profile_record (NOT a RAII ProfileScope block) is used so the node's emitted C++
+        # declarations stay at the step-body scope -- a surrounding { } would hide them from later
+        # nodes (e.g. r2 / acc3 read across ops). The timing is additive and ~free when profiling is
+        # off (ctx.profile_record early-returns inside Profiler::record); it changes no numerics. Ops
+        # that emit no statement (a pure inline token: cfl / compare) are not wrapped (the len guard
+        # below skips them). _start marks where this op's lines begin so the open line can be inserted.
+        _profile_start = len(lines)
         if v.op == "state":
             var[v.id] = "u%d" % v.id
             lines.append("adc::MultiFab& %s = ctx.state(%d);" % (var[v.id], bidx))
@@ -3085,6 +3101,20 @@ class Program:
                 lines.append("adc::MultiFab %s = ctx.scratch_state_like(%s);" % (var[v.id], var[base.id]))
                 for inp, coeff in terms:
                     lines.append("ctx.axpy(%s, %s, %s);" % (var[v.id], _coeff_cpp(coeff), var[inp.id]))
+        # PER-NODE PROFILING (ADC-459): if this op emitted at least one statement, bracket those
+        # statements with the steady_clock pair (see the note at the top of _emit_op). A ProfileScope is
+        # named "node:<v.name>"; profile_record(name, _pt) accumulates now() - _pt into the System
+        # Profiler. Inserted only when lines grew (a pure inline-token op emits nothing and is skipped).
+        # The pure reference-binding ops (state / history bind a MultiFab&; hmin reads a cached scalar)
+        # do no per-step numerical work, so they are not wrapped -- the report keeps the meaningful
+        # work nodes (rhs / solve_fields / linear_combine / source / apply / reductions / loops).
+        if v.op not in Program._PROFILE_SKIP_OPS and len(lines) > _profile_start:
+            node_name = json.dumps("node:%s" % v.name)
+            pt = "_pt%d" % v.id  # unique per node id (no redefinition at body scope or in a loop pass)
+            lines.insert(_profile_start,
+                         "const auto %s = std::chrono::steady_clock::now();  // ProfileScope %s"
+                         % (pt, node_name))
+            lines.append("ctx.profile_record(%s, %s);" % (node_name, pt))
 
     def _emit_while(self, v, base, var, model, lines, block_idx=None):
         """Lower a while op to an infinite C++ loop with a break (the condition re-evaluates each pass).
@@ -3907,6 +3937,7 @@ _PROGRAM_CPP_TEMPLATE = '''\
 #include <adc/numerics/linalg/dense_eig.hpp>   // adc::detail::mat_inverse (local dense solve)
 #include <adc/numerics/elliptic/linear/generic_krylov.hpp>  // adc::cg_solve / bicgstab_solve / richardson_solve / gmres_solve (matrix-free)
 #include <adc/core/foundation/types.hpp>
+#include <chrono>                              // std::chrono::steady_clock (per-node profiling pair, ADC-459)
 #include <cmath>                               // std::sqrt / std::fabs / std::pow in lowered formulas
 #include <limits>                              // std::numeric_limits (dt_bound +inf sentinel)
 #include <memory>                              // std::make_shared (persistent matrix-free scratch)

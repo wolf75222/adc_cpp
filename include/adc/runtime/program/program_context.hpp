@@ -1,10 +1,12 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <string>
 #include <utility>
 
-#include <adc/core/foundation/types.hpp>  // Real, ADC_HD
+#include <adc/core/foundation/types.hpp>     // Real, ADC_HD
+#include <adc/runtime/program/profiler.hpp>  // Profiler / ProfileScope (per-node timing, ADC-459)
 #include <adc/coupling/schur/core/schur_condensation.hpp>  // SchurOperatorCoeffKernel / SchurExplicitFluxKernel (native coeff assembly, ADC-421)
 #include <adc/mesh/boundary/physical_bc.hpp>  // fill_ghosts (periodic / physical halo exchange)
 #include <adc/mesh/execution/for_each.hpp>  // for_each_cell (per-cell coeff / reconstruct kernels + negated divergence copy)
@@ -555,6 +557,33 @@ class ProgramContext {
   void record_scalar(const std::string& name, Real value) const {
     sys_->record_program_diagnostic(name, value);
   }
+
+  /// @name Per-node profiling (Spec 3 section 29, ADC-459)
+  /// Time a single Program node into the System Profiler, so sim.profile_report() shows per-node
+  /// times ("node:rhs2", "node:solve_fields1", ...) alongside the coarse "step" / "field_solve"
+  /// phases. The Profiler is disabled by default; both calls are ~free when off (a ProfileScope still
+  /// reads the clock twice -- wrap a per-node scope, the intended granularity, not the inner loops).
+  /// @{
+  /// The System Profiler (non-owning). A hand-written C++ stage can construct its own ProfileScope on
+  /// it; the codegen uses profile_record below (which preserves the step body's C++ variable scope).
+  runtime::program::Profiler& profiler() const { return sys_->profiler(); }
+  /// RAII timer for one node: ``adc::runtime::program::ProfileScope s = ctx.profile_node("node:x");``
+  /// times its own lifetime into the System Profiler. For a hand-rolled C++ stage that can wrap a whole
+  /// block; the generated step body cannot use it (a node's emitted C++ declarations must outlive the
+  /// node), so the codegen pairs a steady_clock now() with profile_record instead.
+  runtime::program::ProfileScope profile_node(const std::string& name) const {
+    return runtime::program::ProfileScope(sys_->profiler(), name);
+  }
+  /// Record one node's elapsed time (now() - @p t0) under @p name into the System Profiler. The
+  /// generated step body captures @p t0 = std::chrono::steady_clock::now() BEFORE the node's
+  /// statements and calls this AFTER them, so the node's C++ declarations stay at body scope (a
+  /// surrounding RAII block would hide them from later nodes). No-op contribution when profiling is
+  /// off (Profiler::record early-returns); the only cost is one extra clock read per node.
+  void profile_record(const std::string& name, std::chrono::steady_clock::time_point t0) const {
+    const auto t1 = std::chrono::steady_clock::now();
+    sys_->profiler().record(name, std::chrono::duration<double>(t1 - t0).count());
+  }
+  /// @}
 
  private:
   /// BC of the coefficient / flux fields (ADC-421): periodic preserved, physical boundary -> zero-
