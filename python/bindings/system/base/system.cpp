@@ -199,6 +199,11 @@ struct System::Impl {
   // above -- NOT referenced by SystemStepper, so no MockImpl impact. Disabled by default (no hot-path
   // cost when off). System::step / solve_fields wrap themselves in a ProfileScope into it.
   adc::runtime::program::Profiler profiler_;
+  // SCHEDULER VALUE CACHE (ADC-458, Spec 3 section 17-18 + 30): the held-node cache (every(N).hold /
+  // accumulate_dt) keyed by IR node id. SYSTEM-OWNED (not the .so step closure) so the checkpoint can
+  // serialize it, exactly like the history rings above; every ProgramContext forwards its cache_* seam
+  // ops to this single manager. Empty by default -> a program with no held schedule never touches it.
+  adc::runtime::program::CacheManager program_cache_;
   // MULTISTEP HISTORY (ADC-406a): SYSTEM-OWNED ring buffers for multistep schemes (Adams-Bashforth and
   // friends). A name maps to a ring of (depth = max lag + 1) MultiFabs, newest at [0], each
   // co-distributed with block 0's state (ba/dm, the block's ncomp). The history lives HERE (not in the
@@ -2429,6 +2434,49 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
 }
 std::string System::installed_program_hash() const {
   return p_->installed_program_hash_;
+}
+// SCHEDULER VALUE CACHE (ADC-458): the System-owned CacheManager every ProgramContext forwards to. The
+// .so resolves this across the dlopen boundary (ADC_EXPORT), so the step closure's cache_store_aux /
+// cache_should_update reach the SAME manager the checkpoint serializes.
+ADC_EXPORT adc::runtime::program::CacheManager& System::program_cache() { return p_->program_cache_; }
+// Scheduler-cache checkpoint/restart seam (ADC-458, Spec 3 section 30): the System owns the cache, so
+// the facade (sim.checkpoint / sim.restart) gathers and restores it DIRECTLY -- reusing the SAME global
+// gather (gather_global, via copy_state) / scatter (write_state) machinery as the block state and the
+// history rings, so the round-trip is MPI-safe and bit-identical under np>1. Mirrors the history seam.
+std::vector<int> System::program_cache_nodes() const { return p_->program_cache_.node_ids(); }
+std::string System::program_cache_name(int node_id) const {
+  return p_->program_cache_.name_of(node_id);
+}
+int System::program_cache_last_update_step(int node_id) const {
+  return p_->program_cache_.last_update_step(node_id);
+}
+double System::program_cache_accumulated_dt(int node_id) const {
+  return static_cast<double>(p_->program_cache_.accumulated_dt_of(node_id));
+}
+int System::program_cache_ncomp(int node_id) const { return p_->program_cache_.ncomp_of(node_id); }
+std::vector<double> System::program_cache_global(int node_id) const {
+  // Reuse the Impl multi-box gather (copy_state -> gather_global): the cache value is co-distributed
+  // with block 0's storage (ba/dm), so this is the SAME component-major gather state_global / history_
+  // global use (device_fence + all_reduce). All ranks call it; @throws if @p node_id is absent.
+  const MultiFab& v = p_->program_cache_.value_of(node_id);
+  return p_->copy_state(v, v.ncomp());
+}
+void System::restore_program_cache(int node_id, int ncomp, int last_update_step,
+                                   double accumulated_dt, const std::string& name,
+                                   const std::vector<double>& values) {
+  if (p_->sp.empty())
+    throw std::runtime_error(
+        "System::restore_program_cache: no block exists yet; the cache value is co-distributed with "
+        "block 0's storage (replay the composition before restart)");
+  // Allocate a value co-distributed with block 0 (ba/dm, @p ncomp comps, one ghost like a block state)
+  // and scatter the GLOBAL buffer into it via the SAME write_state set_state uses (owner rank writes,
+  // others no-op) -- the true inverse of program_cache_global. Then re-key the slot with its
+  // bookkeeping. MPI-safe (all ranks call), bit-identical under np>1.
+  MultiFab value(p_->ba, p_->dm, ncomp, 1);
+  value.set_val(Real(0));
+  p_->write_state(value, ncomp, values);
+  p_->program_cache_.restore_slot(node_id, std::move(value), last_update_step,
+                                  static_cast<Real>(accumulated_dt), name);
 }
 // Configured field (Poisson) solver token, owned by SystemFieldSolver (p_solver, default
 // "geometric_mg"). Read by install_program (Spec criterion 24, solver requirement) and exposed for

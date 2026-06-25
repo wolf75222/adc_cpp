@@ -696,8 +696,10 @@ class ProgramContext {
 
   /// @name Scheduler value cache (Spec 3 section 17-18, ADC-458)
   /// A held field-solve node recomputes only when DUE (every N macro-steps) and reuses the cached
-  /// System aux (phi / grad / E) in between. The cache lives here -- one CacheManager per installed
-  /// Program, keyed by the Program node id. The codegen wraps a held solve_fields in
+  /// System aux (phi / grad / E) in between. The cache is owned by the System (one CacheManager per
+  /// installed Program, keyed by the Program node id) so the checkpoint can reach it (Spec 3 section
+  /// 30); every ProgramContext copy forwards to that single manager via sys_->program_cache(). The
+  /// codegen wraps a held solve_fields in
   /// ``if (cache_should_update(id, N)) { solve_fields_from_state(...); cache_store_aux(id); }
   ///  else { cache_restore_aux(id); }``. The runtime cadence/checkpoint is exercised in a compiled
   /// .so step loop (validated on ROMEO; not buildable on a host-only Mac).
@@ -711,7 +713,7 @@ class ProgramContext {
   /// through, gated on the profiler (zero cost when off). These move only under the compiled .so step
   /// loop that exercises a held schedule (validated on Kokkos/ROMEO, not buildable host-only).
   bool cache_should_update(int node_id, int every_n) const {
-    const bool due = cache_mgr_.is_due(node_id, sys_->macro_step(), every_n);
+    const bool due = sys_->program_cache().is_due(node_id, sys_->macro_step(), every_n);
     if (due) {
       sys_->profiler().count("cache_misses");
       sys_->profiler().count("nodes_due");
@@ -724,11 +726,11 @@ class ProgramContext {
   /// Store a copy of the System aux (the field solve's output) as node @p node_id's cached value,
   /// stamped at the current macro step (resets its accumulated dt).
   void cache_store_aux(int node_id) const {
-    cache_mgr_.store(node_id, *sys_->grid_context().aux, sys_->macro_step());
+    sys_->program_cache().store(node_id, *sys_->grid_context().aux, sys_->macro_step());
   }
   /// Restore node @p node_id's cached aux into the System aux (a held step: no elliptic solve).
   void cache_restore_aux(int node_id) const {
-    *sys_->grid_context().aux = cache_mgr_.retrieve(node_id);
+    *sys_->grid_context().aux = sys_->program_cache().retrieve(node_id);
   }
 
   /// Store a copy of a NAMED scratch MultiFab (a held rhs / source / linear_combine output) as node
@@ -736,11 +738,11 @@ class ProgramContext {
   /// aux; this caches an arbitrary step-body scratch so ANY schedulable node can hold, not only a
   /// field solve.
   void cache_store_scratch(int node_id, const MultiFab& scratch) const {
-    cache_mgr_.store(node_id, scratch, sys_->macro_step());
+    sys_->program_cache().store(node_id, scratch, sys_->macro_step());
   }
   /// Restore node @p node_id's cached scratch into @p scratch (a held step: no recompute).
   void cache_restore_scratch(int node_id, MultiFab& scratch) const {
-    scratch = cache_mgr_.retrieve(node_id);
+    scratch = sys_->program_cache().retrieve(node_id);
   }
   /// The current macro step (0-based). Mirrors System::macro_step(); the codegen lowers on_start() to
   /// ``ctx.macro_step() == 0`` and reads it for any step-indexed predicate.
@@ -748,12 +750,14 @@ class ProgramContext {
   /// Add a skipped step's @p dt to node @p node_id's accumulator (accumulate_dt policy): on a NOT-due
   /// step the held node does not recompute but records the dt so the next due step sees the full
   /// skipped interval. Variable step_cfl safe (the actual skipped dt, not N * dt_current).
-  void cache_accumulate_dt(int node_id, Real dt) const { cache_mgr_.accumulate_dt(node_id, dt); }
+  void cache_accumulate_dt(int node_id, Real dt) const {
+    sys_->program_cache().accumulate_dt(node_id, dt);
+  }
   /// The effective dt a due accumulate_dt step applies: @p dt_now plus the summed skipped dt since the
   /// last recompute (resets the accumulator). The codegen feeds this as the step's dt into the held
   /// node's recompute so it advances over the whole skipped interval at once.
   Real cache_effective_dt(int node_id, Real dt_now) const {
-    return cache_mgr_.effective_dt(node_id, dt_now);
+    return sys_->program_cache().effective_dt(node_id, dt_now);
   }
   /// Fail loud: a node with an `error` policy was reached off its schedule cadence (a stale value would
   /// be read). The codegen emits this on the not-due branch of an `error`-policy node.
@@ -777,9 +781,6 @@ class ProgramContext {
   }
 
   System* sys_;
-  /// Per-Program-node value cache for held schedules (ADC-458). Mutable: the installed step closure
-  /// holds the ProgramContext by value and calls the const cache_* accessors each step.
-  mutable runtime::program::CacheManager cache_mgr_;
 };
 
 }  // namespace program
