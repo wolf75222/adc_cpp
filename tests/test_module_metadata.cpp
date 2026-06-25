@@ -74,6 +74,23 @@ int main() {
         "required_aux on an empty aux array is empty");
   check(required_aux("").empty(), "required_aux on an empty string is empty");
 
+  // (5) required_solver reads the scalar "solver" requirement (Spec criterion 24, ADC-466), and the
+  // KEY match is anchored: an aux field literally named "solver", or any value equal to "solver",
+  // must NOT be misread as a solver requirement (else a valid install is wrongly rejected).
+  check(required_solver("{\"kind\":\"field_operator\",\"solver\":\"geometric_mg\"}") == "geometric_mg",
+        "required_solver extracts the solver requirement");
+  check(required_solver("{\"kind\":\"local_rate\"}").empty(),
+        "required_solver without a solver key is empty");
+  check(required_solver("{\"aux\":[\"solver\"],\"foo\":\"bar\"}").empty(),
+        "required_solver does not misread an aux field named 'solver' (anchored key match)");
+  check(required_solver("{\"aux\":[\"solver\"],\"kind\":\"field_operator\"}").empty(),
+        "required_solver does not read the 'kind' value when 'solver' is only an aux element");
+  check(required_blocks("{\"kind\":\"local_source\",\"block\":[\"ions\"]}") ==
+            std::vector<std::string>{"ions"},
+        "required_blocks extracts the block-instance requirement");
+  check(required_blocks("{\"kind\":\"field_operator\",\"aux\":[\"B_z\"]}").empty(),
+        "required_blocks without a block key is empty");
+
   std::printf(failures == 0 ? "OK  test_module_metadata\n" : "FAILED test_module_metadata\n");
   return failures == 0 ? 0 : 1;
 }

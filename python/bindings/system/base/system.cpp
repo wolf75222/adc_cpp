@@ -2309,7 +2309,19 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
   // block (see SystemFieldSolver::provides_aux). POSIX only: read_module_metadata uses dlsym directly.
   {
     const auto meta = adc::runtime::program::read_module_metadata(h);
+    const std::vector<std::string> sys_block_names = block_names();
+    const std::string configured_solver = poisson_solver();
+    auto has_block = [&sys_block_names](const std::string& want) {
+      for (const auto& nm : sys_block_names) {
+        if (nm == want) {
+          return true;
+        }
+      }
+      return false;
+    };
     for (const auto& op : meta.operators) {
+      // (a) AUX FIELD requirements (ADC-446): the user-supplied application fields B_z / T_e. Only
+      // these are hard requirements (provides_aux); the derived fields phi/grad cannot block.
       for (const auto& aux : adc::runtime::program::required_aux(op.requirements)) {
         if (!p_->fields_.provides_aux(aux)) {
           adc::dynlib::close(h);
@@ -2318,6 +2330,25 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
               "', but simulation did not provide it (B_z -> set_magnetic_field, T_e -> "
               "set_electron_temperature_from, before install_program)");
         }
+      }
+      // (b) BLOCK-INSTANCE requirements (ADC-466, Spec criterion 24): an operator that reads another
+      // species (e.g. collisions) names the block instance it needs; reject if it was not added. The
+      // verbatim spec message names the operator and the missing instance.
+      for (const auto& blk : adc::runtime::program::required_blocks(op.requirements)) {
+        if (!has_block(blk)) {
+          adc::dynlib::close(h);
+          throw std::runtime_error("operator '" + op.name + "' requires block instance '" + blk +
+                                   "'");
+        }
+      }
+      // (c) SOLVER requirement (ADC-466): a field operator that requires a named field solver is
+      // rejected at install when the configured Poisson solver (set_poisson) does not match. The
+      // verbatim spec message names the field operator and the required solver.
+      const std::string need_solver = adc::runtime::program::required_solver(op.requirements);
+      if (!need_solver.empty() && need_solver != configured_solver) {
+        adc::dynlib::close(h);
+        throw std::runtime_error("field operator '" + op.name + "' requires solver '" + need_solver +
+                                 "'");
       }
     }
   }
@@ -2389,6 +2420,12 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
 }
 std::string System::installed_program_hash() const {
   return p_->installed_program_hash_;
+}
+// Configured field (Poisson) solver token, owned by SystemFieldSolver (p_solver, default
+// "geometric_mg"). Read by install_program (Spec criterion 24, solver requirement) and exposed for
+// introspection. Returns the last set_poisson solver, never empty (the default stands).
+std::string System::poisson_solver() const {
+  return p_->fields_.p_solver;
 }
 // NAME-based block binding seam (Spec 3 criterion 23, ADC-457). install_program builds the map after
 // matching the .so's block names; ProgramContext reads it to translate a Program block index to the

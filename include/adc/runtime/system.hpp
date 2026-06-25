@@ -292,6 +292,12 @@ class System {
                    const std::string& wall = "none", double wall_radius = 0.0, double epsilon = 1.0,
                    double abs_tol = 0.0);
 
+  /// Configured field (Poisson) solver token, e.g. "geometric_mg" | "fft" | "fft_spectral"
+  /// (the @p solver of the last set_poisson; default "geometric_mg"). Read by install_program for the
+  /// Spec criterion-24 solver requirement check (a field operator that requires a named solver is
+  /// rejected at install when the configured solver does not match) and exposed for introspection.
+  std::string poisson_solver() const;
+
   /// Sets the TRANSPORT DOMAIN as a DISC centered at (@p cx, @p cy) with radius @p R
   /// (T2 work, CONTRACT inert by default). Materializes a 0/1 cell-centered mask (cell
   /// active when its center is inside the disc, level set hypot(x-cx, y-cy) - R < 0, SAME convention
