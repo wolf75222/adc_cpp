@@ -221,8 +221,14 @@ class ProgramContext {
       return;
     }
     std::vector<const MultiFab*> remapped(static_cast<std::size_t>(sys_->n_blocks()), nullptr);
-    for (std::size_t p = 0; p < u_stages.size(); ++p)
-      remapped[static_cast<std::size_t>(sys_block(static_cast<int>(p)))] = u_stages[p];
+    // Iterate the PROGRAM block indices [0, m.size()) -- NOT u_stages.size(), which is the larger
+    // SYSTEM block count. The codegen sizes u_stages to ctx.n_blocks() but only fills Program slots
+    // [0, n_program_blocks); when the System has MORE blocks than the Program declares (a subset
+    // install), walking the System-sized range would re-map the nullptr padding through the identity
+    // fallthrough and clobber real entries. m[p] is Program block p's System index (install-validated
+    // in range); the unlisted System slots stay nullptr = their live state.
+    for (std::size_t p = 0; p < m.size(); ++p)
+      remapped[static_cast<std::size_t>(m[p])] = u_stages[p];
     sys_->solve_fields_from_blocks(remapped);
   }
   int n_blocks() const { return sys_->n_blocks(); }

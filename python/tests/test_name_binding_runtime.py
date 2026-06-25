@@ -148,7 +148,14 @@ def _run():
 
 
 def test_name_binding_runtime():
-    _run()
+    # _run() / _skip() exit via sys.exit (script semantics, the CI runner reads the rc). Under pytest a
+    # raw SystemExit reports as FAILED, so translate it: rc 0 (pass or clean Kokkos-absent skip) -> pass,
+    # non-zero -> a real assertion failure.
+    try:
+        _run()
+    except SystemExit as exc:  # noqa: BLE001 -- rc carries the verdict
+        if exc.code:
+            raise AssertionError("test_name_binding_runtime reported failures") from None
 
 
 if __name__ == "__main__":

@@ -2332,7 +2332,8 @@ class Program:
         # declaration order are part of the IR identity -- the .so exports them (adc_program_block_name)
         # and install_program binds System blocks to them BY NAME. Reordering P.state changes this list,
         # so two Programs differing only by block order get distinct IR hashes (and distinct .so caches).
-        block_order = sorted(self._block_indices(), key=self._block_indices().get)
+        _order = self._block_indices()
+        block_order = sorted(_order, key=_order.get)
         out = {"name": self.name, "version": 1, "nodes": nodes, "commits": commits,
                "block_order": block_order}
         # The optional dt bound (spec s18 / ADC-417) is part of the IR identity: its presence and its
