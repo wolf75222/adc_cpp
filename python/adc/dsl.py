@@ -1669,6 +1669,10 @@ class HyperbolicModel:
         self._proj = None        # [Expr]: PROJECTION ponctuelle post-pas U <- P(U, aux) (ADC-177)
         self._src_jac = None     # [[Expr]] n x n: ANALYTIC Jacobian dS/dU (None = finite differences)
         self._hllc = False       # True: emit the HLLC capability (contact_speed + star state)
+        self._riemann_hook_forms = {}  # ARBITRARY-formula overrides of the role-derived Riemann hooks
+                                   # (ADC-456): name -> Expr. Codegen'd key: 'pressure' (single-state
+                                   # signature, overrides the pressure(U) hook body). A descriptor or
+                                   # None leaves the role-derived default. Folded into _model_hash.
         self._roe = False        # True: emit the ROE capability (roe_dissipation from the roles)
         self._roe_rows = None    # {"x": [Expr], "y": [Expr]}: roe_dissipation PROVIDED (outside roles)
         self._roe_jacobian = None  # {"x"/"y": [[Expr]]}: roe_dissipation from the FLUX JACOBIAN
@@ -2128,6 +2132,40 @@ class HyperbolicModel:
         passively in the star state, Us[c] = fac*U[c]/rho). REQUIRES: roles Density/MomentumX/
         MomentumY declared + primitive 'p' (explicit error at emission otherwise)."""
         self._hllc = True
+        return self
+
+    # Riemann capability hooks whose body is a SINGLE-state formula (signature ``hook(U)``) and so
+    # can be codegen'd from an arbitrary board Expr in the model's own symbols (ADC-456). The
+    # two-state hooks (contact_speed / hllc_star_state, signature over UL/UR/pL/pR/sL/sR) are NOT
+    # in this set: an arbitrary single-Expr override is ill-defined for them, so they keep the
+    # role-derived default (selected by a capability-hook descriptor).
+    _FORMULA_HOOKS = ("pressure",)
+
+    def set_riemann_hooks(self, **forms):
+        """Record ARBITRARY-formula overrides of the role-derived Riemann hooks (ADC-456, Spec 3
+        section 11). Each keyword is a hook name; the value is an :class:`Expr` (an ``adc.math`` /
+        dsl formula) that REPLACES the canonical role-derived body at codegen, or ``None`` to keep
+        the default. Currently codegen'd hook: ``pressure`` (replaces the ``pressure(U)`` body,
+        default = the primitive 'p' formula).
+
+        Only :class:`Expr` values are recorded; a non-Expr (a :class:`adc.lib.BrickDescriptor`
+        selecting a canonical scheme, or ``None``) is ignored and the role-derived default stands.
+        An Expr passed for a two-state hook (``contact_speed`` / ``star_state`` / ``sound_speed``)
+        raises: those keep the role-derived default selected via a hook descriptor. A formula
+        referencing a quantity the model cannot provide still raises the clear capability error at
+        emission. Without any Expr override the module hash and the emitted brick are bit-identical
+        to the role-derived path."""
+        for name, form in forms.items():
+            if not isinstance(form, Expr):
+                continue  # descriptor / None: role-derived default stands
+            if name not in self._FORMULA_HOOKS:
+                raise NotImplementedError(
+                    "riemann hook %r does not yet accept an arbitrary board formula (its C++ "
+                    "signature spans two states); pass a capability-hook descriptor "
+                    "(e.g. adc.lib.riemann.hllc.contact_speed.euler()) for the role-derived "
+                    "default. Formula override is available for: %s"
+                    % (name, ", ".join(self._FORMULA_HOOKS)))
+            self._riemann_hook_forms[name] = form
         return self
 
     def enable_roe(self):
@@ -2851,6 +2889,21 @@ class HyperbolicModel:
         """True if at least one formula reads a runtime parameter (kind='runtime')."""
         return bool(self.runtime_param_nodes())
 
+    def _validate_hook_form(self, hook, form, allow_aux=True):
+        """Reject an arbitrary-formula Riemann hook (ADC-456) that references a quantity the model
+        cannot provide -- the same dependency rule as :meth:`check`, surfaced as a clear capability
+        error. @p allow_aux: a single-state hook (e.g. pressure(U)) takes no Aux parameter, so an
+        aux dependency is also a missing capability there."""
+        known = set(self.cons_names) | set(self.prim_defs)
+        if allow_aux:
+            known |= set(self.aux_names) | set(self.aux_extra_names)
+        missing = sorted(form.deps() - known)
+        if missing:
+            raise ValueError(
+                "riemann hook %r references undeclared quantity %s: the formula needs model "
+                "capabilities %s that are not provided (declare them, or use the role-derived "
+                "default)" % (hook, missing, missing))
+
     # --- codegen (step 2 : symbolic tree -> compilable C++) ---
     def _codegen_exprs(self, exprs, cse, real="adc::Real", indent="    "):
         """(CSE local lines, [C++ per expr]). If cse, factor the common subexpressions
@@ -3194,7 +3247,18 @@ class HyperbolicModel:
 
         # pressure : emitted IF a primitive 'p' (pressure) is declared (compressible convention) ;
         # required by the canonical HLLC / Roe fluxes (make_block : requires { m.pressure(s); }).
-        if "p" in self.prim_defs:
+        # ADC-456: an ARBITRARY-formula override (m.riemann(..., pressure=<expr>) -> set_riemann_hooks)
+        # codegen's THAT formula as the pressure(U) body instead of the role-derived primitive 'p'.
+        p_form = self._riemann_hook_forms.get("pressure")
+        if p_form is not None:
+            self._validate_hook_form("pressure", p_form, allow_aux=False)
+            S.append("  // pressure(U) hook from an ARBITRARY board formula (m.riemann(pressure=...))")
+            S.append("  ADC_HD adc::Real pressure(const State& U) const {")
+            S += cons_locals() + prim_locals(self._live_prims([p_form]))
+            ptl, pcpps = self._codegen_exprs([p_form], cse)
+            S += ptl
+            S += ["    return %s;" % pcpps[0], "  }", ""]
+        elif "p" in self.prim_defs:
             S.append("  ADC_HD adc::Real pressure(const State& U) const {")
             S += cons_locals() + prim_locals(self._live_prims([], seed=["p"]))
             S += ["    return p;", "  }", ""]
@@ -4170,6 +4234,12 @@ class HyperbolicModel:
         if getattr(m, "_proj", None) is not None:
             parts.append("proj=%s" % ";".join(repr(e) for e in m._proj))
         parts.append("hllc=%d" % (1 if m._hllc else 0))
+        # ARBITRARY-formula Riemann hook overrides (ADC-456): folded ONLY if present, so a model
+        # using the role-derived default keeps a STRICTLY identical cache key to the historical one.
+        forms = getattr(m, "_riemann_hook_forms", None)
+        if forms:
+            parts.append("riemann_hooks=%s" % ";".join(
+                "%s=%r" % (k, forms[k]) for k in sorted(forms)))
         parts.append("roe=%d" % (1 if getattr(m, "_roe", False) else 0))
         # roe_dissipation PROVIDED: added to the hash ONLY if present (without a call, hash unchanged
         # -> bit-identity of the cache key for existing models preserved).
@@ -5054,6 +5124,13 @@ class Model:
         primitive 'p'): riemann='hllc' becomes available for this model EVEN outside 4-variable
         Euler. Delegates to HyperbolicModel.enable_hllc."""
         self._m.enable_hllc()
+
+    def set_riemann_hooks(self, **forms):
+        """Record ARBITRARY-formula overrides of the role-derived Riemann hooks (ADC-456): e.g.
+        ``pressure=<Expr>`` codegen's that formula as the ``pressure(U)`` hook body. Descriptors /
+        ``None`` keep the role-derived default. Delegates to HyperbolicModel.set_riemann_hooks."""
+        self._m.set_riemann_hooks(**forms)
+        return self
 
     def enable_roe(self):
         """Emits the ROE capability (roe_dissipation = ``|A_roe| dU`` generated from the ROLES +
