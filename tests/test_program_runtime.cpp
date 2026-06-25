@@ -135,11 +135,12 @@ int main(int argc, char** argv) {
     ++fails;
   }
 
-  // ADC-459 counters: one step ran solve_fields + (per block) rhs_into + axpy, so "kernels" moved past
-  // the block count, and rhs_scratch_like recorded one scratch allocation with a non-zero byte peak.
+  // ADC-459 counters: one step ran solve_fields + (1 block) rhs_into + axpy = EXACTLY 3 kernel-
+  // dispatching seam ops (no double-count: solve_fields counts once, via Impl::solve_fields). Pinning
+  // the exact value guards against a seam double-counting (a >0 check would not).
   const runtime::program::Profiler& prof = sim.profiler();
-  if (!(prof.counter("kernels") > 0)) {
-    std::printf("FAIL kernels counter not incremented (= %lld)\n",
+  if (prof.counter("kernels") != 3) {
+    std::printf("FAIL kernels counter = %lld, expected 3 (solve_fields + rhs_into + axpy, no double)\n",
                 static_cast<long long>(prof.counter("kernels")));
     ++fails;
   }

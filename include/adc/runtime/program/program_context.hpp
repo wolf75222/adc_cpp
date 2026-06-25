@@ -187,7 +187,9 @@ class ProgramContext {
   }
 
   void solve_fields() const {
-    count_kernel();
+    // No count_kernel() here: this forwards to the PUBLIC System::solve_fields() -> Impl::solve_fields(),
+    // which already counts the kernel. (The from_state/from_blocks/named seams below DO count, because
+    // their Impl paths do not.) Counting here too would double-count this one op.
     sys_->solve_fields();
   }
   /// Per-stage field solve (ADC-409): re-solve the elliptic fields and re-fill the shared aux from
