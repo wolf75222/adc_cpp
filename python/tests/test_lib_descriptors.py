@@ -71,9 +71,17 @@ def test_solver_descriptors():
 
 
 def test_user_riemann_is_external():
-    d = lib.riemann.User("my_hllc_variant")
-    assert d.brick_type == "external_cpp"
-    assert d.native_id == "my_hllc_variant"
+    # A User brick must be loaded first (ADC-463); registering its manifest then makes
+    # riemann.User(id) surface an external_cpp descriptor.
+    import json
+    lib._register_manifest(json.dumps(
+        {"bricks": [{"id": "my_hllc_variant", "category": "riemann"}]}))
+    try:
+        d = lib.riemann.User("my_hllc_variant")
+        assert d.brick_type == "external_cpp"
+        assert d.native_id == "my_hllc_variant"
+    finally:
+        lib._clear_external_catalog()
 
 
 def test_descriptor_requirements_present():
