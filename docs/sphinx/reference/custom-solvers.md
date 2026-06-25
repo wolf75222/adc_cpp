@@ -28,17 +28,19 @@ A solver can be written in the Python DSL and generated to C++ -- it builds an I
 compute in Python:
 
 ```python
-@adc.lib.solver(name="richardson", signature=(A, b, x0) >> x)
-def richardson(ctx, A, b, x0, omega, tol, max_iter):
-    x = x0
-    r = b - A(x)
-    res = ctx.norm2(r)
+@adc.lib.solver(name="richardson", signature="(A, b)")
+def richardson(ctx, A, b, *, omega=0.5, tol=1e-8, max_iter=200):
+    x = ctx.zeros_like(b)
     it = ctx.scalar_int(0)
-    with ctx.while_(ctx.logical_and(res > tol, it < max_iter)):
-        x = x + omega * r
-        r = b - A(x)
-        res = ctx.norm2(r)
-        it = it + 1
+    # The convergence predicate is a BUILDER re-evaluated against the loop-updated x
+    # each pass; passing a pre-built Bool would freeze the test on the initial iterate.
+    def converging():
+        return ctx.logical_and(ctx.norm2(ctx.residual(A, x, b)) > tol,
+                               it < ctx.scalar_int(max_iter))
+    with ctx.while_(converging):
+        r = ctx.residual(A, x, b)          # r = b - A x
+        x = ctx.combine(x + omega * r)     # x <- x + omega*r
+        it = it + ctx.scalar_int(1)
     return x
 ```
 

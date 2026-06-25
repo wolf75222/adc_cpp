@@ -32,6 +32,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   asserts the report carries the "step" phase + "steps=2").
   The per-Program-node / per-native-brick granularity (through the compiled-program ProgramContext)
   is the next ADC-459 step.
+- **Spec 3 custom solver DSL (IR-authoring slice)** (ADC-462, epic ADC-450): `@adc.lib.solver`
+  registers a `generated` solver descriptor whose Python builder AUTHORS a solver IR with
+  matrix-free Krylov primitives (`SolverContext.norm2` / `dot` / `scalar_int` / `logical_and` /
+  `residual` / affine `x + omega*r` / `while_` context manager); the `while_` convergence test takes
+  a condition BUILDER re-evaluated against the loop-updated iterate (recorded into its own
+  `cond_block`, mirroring `adc.time.Program.while_`), never a pre-built Bool frozen on the initial
+  iterate. `adc.lib.build_solver_ir` runs the builder to produce a `SolverIR` (no Python numerics) and
+  the descriptor is selectable like a native solver (`adc.lib.solvers.GMRES()`). The generated-C++
+  lowering + run is deferred: `generate_solver_cpp` raises a clear ADC-462 `NotImplementedError`
+  rather than fake a Python solve. New `python/tests/test_solver_dsl.py` (11);
+  `examples/spec3/custom_richardson_solver.py`.
 
 - **Spec 3 Program profiler (C++ foundation)** (ADC-459, epic ADC-450): `adc::runtime::program::Profiler`
   (`include/adc/runtime/program/profiler.hpp`) -- a header-only per-node / per-brick wall-clock
