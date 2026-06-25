@@ -113,6 +113,9 @@ foreach(_rt adc_runtime_system adc_runtime_amr)
   set_target_properties(${_rt} PROPERTIES JOB_POOL_COMPILE adc_heavy_tu)
 endforeach()
 
+# --- runtime program ---
+adc_add_test(test_profiler)  # Spec 3 per-node / per-brick profiler (ADC-459)
+
 # --- maillage / conteneurs ---
 adc_add_test(test_box2d)
 adc_add_test(test_fab2d)
