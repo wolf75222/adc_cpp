@@ -79,5 +79,7 @@ d.requirements   # {'capabilities': ['pressure', 'wave_speeds']}
 
 The descriptor catalog, the native ids, the time macros and external C++ brick registration
 (`adc.lib.load_cpp_library` + the C++ `BrickRegistry` / `ADC_REGISTER_BRICK`) are in place.
-`compile_library` (separately compiled brick libraries) and the `specialization` modes (native
-/ library / specialized / auto) are follow-ups.
+`adc.compile_library(name, objects, emit=True)` compiles a reusable brick library to a real
+`.so` (Kokkos toolchain) that exports its ABI key + brick metadata; `adc.read_library_manifest`
+reads it back (with a hard ABI guard) and `adc.compile_problem(..., libraries=[...])` consumes
+it. The `specialization` modes (native / library / specialized / auto) are follow-ups.

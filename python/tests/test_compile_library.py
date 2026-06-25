@@ -1,11 +1,13 @@
-"""Spec 3 adc.compile_library: the library manifest / ABI / descriptor layer.
+"""Spec 3 adc.compile_library: the library manifest / ABI / descriptor layer + the real ``.so``.
 
 ``adc.compile_library`` collects generated/macro/native brick objects into a
 reusable-library MANIFEST (name, abi_key, brick list, requirements, capabilities,
-generated symbols) plus a stable content hash. It NEVER computes numerics and, in
-this slice, NEVER emits a compiled ``.so`` -- that is the deferred ADC-464 C++
-follow-up. These tests pin the manifest shape, the hash stability/sensitivity, the
-round-trip through the reader, and the honest ``emit=True`` deferral.
+generated symbols) plus a stable content hash. With ``emit=True`` it ALSO emits the
+library C++ and compiles a REAL ``.so`` (same Kokkos toolchain a problem ``.so`` uses),
+which :func:`adc.read_library_manifest` reads back (dlopen) with a HARD ABI / Kokkos guard;
+``adc.compile_problem(..., libraries=[...])`` reads + validates it. These tests pin the
+manifest shape, the hash stability/sensitivity, the reader round-trip, and -- when Kokkos
+is visible -- the real emit + compile + read-back + the ABI-mismatch hard error.
 """
 import pytest
 
@@ -16,6 +18,19 @@ lib = pytest.importorskip("adc.lib")
 def _objects():
     """A small set of REAL adc.lib brick descriptors (no fakes)."""
     return [lib.solvers.GMRES(), lib.riemann.HLLC()]
+
+
+def _toolchain_or_skip():
+    """The (compiler, cflags, lflags) of the Kokkos loader toolchain, or skip the test.
+
+    adc_cpp is Kokkos-only: the library ``.so`` MUST be compiled with Kokkos (point
+    ADC_KOKKOS_ROOT at an installed Kokkos). A missing toolchain is a clean skip, never a
+    fake; we exercise the manifest layer unconditionally above this gate."""
+    dsl = pytest.importorskip("adc.dsl")
+    try:
+        return dsl.adc_loader_build_flags()
+    except Exception as exc:  # noqa: BLE001  -- no Kokkos / no compiler visible
+        pytest.skip("Kokkos loader toolchain unavailable: %s" % str(exc)[:160])
 
 
 # --- manifest shape --------------------------------------------------------
@@ -116,28 +131,119 @@ def test_non_production_backend_is_rejected():
         adc.compile_library("lib.so", objects=_objects(), backend="jit")
 
 
-# --- honest deferral: emitting the .so raises ------------------------------
-def test_emitting_the_so_raises_adc464():
-    with pytest.raises(NotImplementedError) as exc:
-        adc.compile_library("lib.so", objects=_objects(), emit=True)
-    assert "ADC-464" in str(exc.value)
-
-
-# --- compile_problem libraries= seam ---------------------------------------
-def test_compile_problem_accepts_and_defers_libraries():
-    dsl = pytest.importorskip("adc.dsl")  # numpy-backed; skip if absent
-    time = pytest.importorskip("adc.time")
-    man = adc.compile_library("lib.so", objects=_objects())
-    prog = time.Program("p")
-    # The manifest is validated (round-tripped) but the link is the deferred C++ follow-up.
-    with pytest.raises(NotImplementedError) as exc:
-        dsl.compile_problem(time=prog, libraries=[man])
-    assert "ADC-464" in str(exc.value)
-
-
+# --- compile_problem libraries= seam (validation, no compile) --------------
 def test_compile_problem_rejects_a_corrupt_library():
     dsl = pytest.importorskip("adc.dsl")
     time = pytest.importorskip("adc.time")
     prog = time.Program("p")
+    # A corrupt manifest is rejected at the libraries= read, BEFORE the Program is lowered.
     with pytest.raises((KeyError, ValueError, TypeError)):
         dsl.compile_problem(time=prog, libraries=[{"name": "bad.so"}])
+
+
+# --- real .so: emit + compile + read back (Kokkos-gated) -------------------
+def test_emit_compiles_a_real_so_and_reads_it_back(tmp_path):
+    _toolchain_or_skip()
+    so = str(tmp_path / "my_numerics.so")
+    src = adc.compile_library("my_numerics.so", objects=_objects(), emit=True, so_path=so)
+    import os
+    assert src.so_path == so and os.path.isfile(so)
+    # Read the descriptor BACK from the compiled .so (dlopen + exported metadata).
+    back = adc.read_library_manifest(so)
+    assert back.name == "my_numerics.so"
+    assert back.backend == "production"
+    # The .so carries the SOURCE content hash and the SOURCE ABI key.
+    assert back.content_hash == src.content_hash
+    assert back.abi_key == adc.abi_key()
+    by_id = {b["id"]: b for b in back.bricks}
+    assert set(by_id) == {"gmres", "hllc"}
+    assert by_id["gmres"]["native_id"] == "adc::gmres_solve"
+    assert by_id["hllc"]["native_id"] == "adc::HLLCFlux"
+    # The required model capabilities round-trip through the .so tables.
+    assert "physical_flux" in by_id["hllc"]["requirements"].get("capabilities", [])
+
+
+def test_emit_exports_the_brick_manifest_for_load_cpp_library(tmp_path):
+    _toolchain_or_skip()
+    so = str(tmp_path / "lib.so")
+    adc.compile_library("lib.so", objects=_objects(), emit=True, so_path=so)
+    # The library .so is ALSO a self-describing external-brick .so: adc.lib.load_cpp_library
+    # reads its adc_brick_manifest() JSON and registers the ids in the in-process catalog.
+    lib._clear_external_catalog()
+    n = lib.load_cpp_library(so)
+    assert n == 2
+    # An external descriptor now resolves for a brick the library registered (category-checked).
+    hllc = lib.riemann.User("hllc")
+    assert hllc.brick_type == "external_cpp" and hllc.category == "riemann"
+
+
+def test_emit_exports_generated_symbols(tmp_path):
+    _toolchain_or_skip()
+
+    @lib.solver(name="my_richardson", signature="(A, b)")
+    def _build(ctx, a, b):
+        x = ctx.zeros_like(b)
+        return ctx.combine(x + b)
+
+    so = str(tmp_path / "gen.so")
+    adc.compile_library("gen.so", objects=[lib.solvers.custom("my_richardson")],
+                        emit=True, so_path=so)
+    back = adc.read_library_manifest(so)
+    assert "my_richardson" in back.generated_symbols
+    assert back.bricks[0]["brick_type"] == "generated"
+
+
+def test_read_back_rejects_an_abi_mismatch(tmp_path):
+    """A library .so whose ABI key differs from the loaded _adc module is a HARD error on
+    read-back -- never a silent fallback. We forge a .so with a deliberately wrong ABI key by
+    compiling with a mismatched ADC_HEADER_SIG, then confirm read_library_manifest rejects it."""
+    cc, cflags, lflags = _toolchain_or_skip()
+    dsl = pytest.importorskip("adc.dsl")
+    from adc.library_codegen import emit_library_cpp
+    import os
+    import subprocess
+    import tempfile
+
+    man = adc.compile_library("mismatch.so", objects=_objects())
+    src = emit_library_cpp(man)
+    include = dsl.adc_include()
+    eff_std = dsl._probe_cxx_std(cc, dsl.loader_cxx_std())
+    so = str(tmp_path / "mismatch.so")
+    with tempfile.TemporaryDirectory() as tmp:
+        cpp = os.path.join(tmp, "mismatch.cpp")
+        with open(cpp, "w") as f:
+            f.write(src)
+        # WRONG header signature on purpose -> the .so's ADC_ABI_KEY_LITERAL diverges from _adc.
+        flags = ["-shared", "-fPIC", "-std=" + eff_std,
+                 '-DADC_HEADER_SIG="deadbeef-not-the-real-signature"', *cflags]
+        cmd = [cc, *flags, "-I", include, cpp, "-o", so, *lflags]
+        r = subprocess.run(cmd, capture_output=True)
+        if r.returncode != 0:
+            pytest.skip("could not compile the mismatched .so: %s"
+                        % (r.stderr or b"").decode(errors="replace")[:160])
+    with pytest.raises(RuntimeError) as exc:
+        adc.read_library_manifest(so)
+    assert "ABI" in str(exc.value)
+
+
+# --- consume path: compile_problem(libraries=[.so]) ------------------------
+def test_compile_problem_consumes_a_compiled_library_so(tmp_path):
+    cc, cflags, lflags = _toolchain_or_skip()
+    dsl = pytest.importorskip("adc.dsl")
+    time = pytest.importorskip("adc.time")
+    so = str(tmp_path / "consumed.so")
+    adc.compile_library("consumed.so", objects=_objects(), emit=True, so_path=so)
+    # A real Forward-Euler Program so the problem lowers; libraries=[.so] is read + ABI-checked.
+    P = time.Program("consume")
+    dt = P.dt
+    U = P.state("ions")
+    R = P.rhs(state=U, flux=True, sources=[])
+    P.commit("ions", P.linear_combine("U1", U + dt * R))
+    try:
+        compiled = dsl.compile_problem(time=P, libraries=[so])
+    except RuntimeError as exc:  # .so compile of the PROBLEM failed (toolchain), not the library
+        pytest.skip("compile_problem could not build the problem .so: %s" % str(exc)[:160])
+    # The validated library manifest is carried on the handle, ABI-matched.
+    assert len(compiled.libraries) == 1
+    assert compiled.libraries[0].name == "consumed.so"
+    assert compiled.libraries[0].abi_key == adc.abi_key()

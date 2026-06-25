@@ -50,8 +50,9 @@ MPI reductions / scratch / matrix-free apply / profiler). Modes: `native`, `gene
 
 ```{admonition} Status
 :class: note
-The native Krylov solvers and the `adc.lib.solvers` descriptors exist. The solver DSL
-(`@adc.lib.solver`), `compile_library`, the specialization modes and external C++ solver
-registration are follow-ups; the Program `solve_linear` over the native Krylov solvers is the
-supported path today.
+The native Krylov solvers and the `adc.lib.solvers` descriptors exist; `adc.compile_library`
+compiles a brick library to a real `.so` (see typed-bricks). The solver DSL `@adc.lib.solver`
+authors a solver IR, but lowering that IR to a callable generated C++ kernel, the specialization
+modes and external C++ solver registration are follow-ups; the Program `solve_linear` over the
+native Krylov solvers is the supported path today.
 ```

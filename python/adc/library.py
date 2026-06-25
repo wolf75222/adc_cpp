@@ -9,13 +9,17 @@ scheme, native id, requirements, capabilities), the generated symbols a future
 library-descriptor reader (:func:`read_library_manifest`) and by
 ``adc.compile_problem(..., libraries=[...])``.
 
-This module is the LOCALLY-validatable slice: the manifest, the ABI key and the
-content hash. It is numerics-free (no Python solve) and, crucially, it does NOT
-emit or compile the C++ brick ``.so`` -- that reuses the ``_adc`` / problem.so ABI
-machinery and is the deferred ADC-464 C++ follow-up. ``compile_library(..., emit=True)``
-raises a clear :class:`NotImplementedError` rather than fake a compiled artifact.
+The manifest, the ABI key and the content hash are numerics-free (no Python solve).
+``compile_library(..., emit=True)`` ALSO emits the C++ of the library's bricks
+(:mod:`adc.library_codegen`) and compiles a real ``.so`` with the same Kokkos toolchain a
+problem ``.so`` uses (:func:`adc.dsl.adc_loader_build_flags`, ``ADC_KOKKOS_ROOT``), exporting
+the metadata, the ABI key, the brick list / signatures / requirements / capabilities and the
+generated symbols. :func:`read_library_manifest` reads that descriptor back from the ``.so``
+(dlopen) and rejects an ABI / Kokkos mismatch as a HARD error. ``adc.compile_problem(...,
+libraries=[...])`` reads + validates the compiled ``.so`` (the consume path).
 """
 import hashlib
+import json
 
 from .lib import BrickDescriptor
 
@@ -93,20 +97,26 @@ class LibraryManifest:
 
     An inert metadata record: the library ``name``, the ``backend``, the loaded-module
     ``abi_key`` (header signature + compiler + std), the ``bricks`` (serialized brick
-    entries), the ``generated_symbols`` a future ``.so`` would export, and a stable
-    ``content_hash``. It computes nothing; the codegen / runtime and the library reader
-    consume it. :func:`compile_library` builds it; :func:`read_library_manifest`
-    reconstructs it from :meth:`to_dict`.
+    entries), the ``generated_symbols`` the ``.so`` exports, a stable ``content_hash``, and
+    -- once ``compile_library(..., emit=True)`` has compiled it -- the ``so_path`` of the
+    real artifact (``None`` for a manifest-only build). It computes nothing; the codegen /
+    runtime and the library reader consume it. :func:`compile_library` builds it;
+    :func:`read_library_manifest` reconstructs it from :meth:`to_dict` OR from a compiled
+    ``.so`` path.
     """
 
     def __init__(self, name, backend, abi_key, bricks, generated_symbols,
-                 content_hash):
+                 content_hash, so_path=None):
         self.name = str(name)
         self.backend = str(backend)
         self.abi_key = str(abi_key)
         self.bricks = list(bricks)
         self.generated_symbols = list(generated_symbols)
         self.content_hash = str(content_hash)
+        # Path of the compiled .so, or None for a manifest-only (emit=False) build. It is
+        # provenance, NOT identity: it stays OUT of __eq__ / the content hash (the same
+        # library compiled to two paths is the same library) but IS carried on to_dict.
+        self.so_path = None if so_path is None else str(so_path)
 
     def to_dict(self):
         """The serialized manifest (round-trips through :func:`read_library_manifest`)."""
@@ -118,18 +128,27 @@ class LibraryManifest:
             "bricks": [dict(b) for b in self.bricks],
             "generated_symbols": list(self.generated_symbols),
             "content_hash": self.content_hash,
+            "so_path": self.so_path,
         }
 
+    def _identity(self):
+        """The manifest dict WITHOUT the so_path (the artifact path is provenance, not
+        identity: the same library compiled to two paths compares equal)."""
+        d = self.to_dict()
+        d.pop("so_path", None)
+        return d
+
     def __eq__(self, other):
-        return isinstance(other, LibraryManifest) and self.to_dict() == other.to_dict()
+        return isinstance(other, LibraryManifest) and self._identity() == other._identity()
 
     def __repr__(self):
         return "LibraryManifest(%r, bricks=%d, hash=%s)" % (
             self.name, len(self.bricks), self.content_hash[:12])
 
 
-def compile_library(name, objects, *, backend="production", emit=False):
-    """Build a reusable brick-library MANIFEST from a set of brick descriptors.
+def compile_library(name, objects, *, backend="production", emit=False, so_path=None,
+                    cxx=None, force=False):
+    """Build a reusable brick library from a set of brick descriptors.
 
     @p name is the library ``.so`` name; @p objects is a non-empty list of
     :class:`adc.lib.BrickDescriptor` (native / generated / macro / external bricks,
@@ -137,10 +156,15 @@ def compile_library(name, objects, *, backend="production", emit=False):
     ``@adc.lib.solver`` generated brick). Returns a :class:`LibraryManifest`
     carrying the brick metadata, the loaded-module ABI key and a stable content hash.
 
-    The manifest layer is locally validatable and numerics-free. Emitting and
-    compiling the C++ brick ``.so`` reuses the ``_adc`` / problem.so ABI machinery and
-    is the deferred ADC-464 C++ follow-up: ``emit=True`` raises a clear
-    :class:`NotImplementedError` rather than fake a compiled artifact.
+    With ``emit=False`` (default) it returns the MANIFEST only (numerics-free, no
+    compiler needed). With ``emit=True`` it ALSO emits the library C++
+    (:func:`adc.library_codegen.emit_library_cpp`) and compiles a REAL ``.so`` with the
+    same Kokkos toolchain a problem ``.so`` uses (:func:`adc.dsl.adc_loader_build_flags`,
+    ``ADC_KOKKOS_ROOT``); the returned manifest carries the artifact ``so_path``. Without
+    an explicit ``so_path`` the ``.so`` is cached out-of-source keyed by the content hash +
+    ABI key (``force=True`` recompiles). The ``.so`` exports the metadata, the ABI key, the
+    brick list / requirements / capabilities and the generated symbols; an ABI / Kokkos
+    mismatch when it is later read back is a HARD error -- never a silent fallback.
     """
     if backend != "production":
         raise ValueError(
@@ -156,29 +180,75 @@ def compile_library(name, objects, *, backend="production", emit=False):
         generated_symbols=_generated_symbols(bricks),
         content_hash=_content_hash(name, backend, abi_key, bricks))
     if emit:
-        raise NotImplementedError(
-            "ADC-464: compile_library builds the library MANIFEST (bricks, ABI key, "
-            "content hash); emitting and compiling the C++ brick .so (reusing the "
-            "_adc / problem.so ABI machinery) is the deferred C++ follow-up. The "
-            "manifest for %r is available via compile_library(..., emit=False)." % (name,))
+        manifest.so_path = _emit_and_compile(manifest, so_path=so_path, cxx=cxx, force=force)
     return manifest
 
 
-def read_library_manifest(manifest):
-    """Reconstruct a :class:`LibraryManifest` from its serialized dict (the round-trip
-    reader for :meth:`LibraryManifest.to_dict`).
+def _emit_and_compile(manifest, *, so_path=None, cxx=None, force=False):
+    """Emit @p manifest's C++ and compile the library ``.so``; return its path.
 
-    Accepts a :class:`LibraryManifest` unchanged (idempotent) or a dict produced by
-    :meth:`to_dict`. A dict missing a required key, or carrying an unknown manifest
-    version, is rejected loud (a corrupt / stale manifest must never be silently
-    half-read). ``adc.compile_problem(..., libraries=[...])`` uses this to accept a
-    serialized library descriptor.
+    Reuses the production toolchain helpers (:mod:`adc.dsl`): the same Kokkos compiler,
+    flags and ABI-keyed cache path a problem ``.so`` uses, so the library ``.so`` is
+    ABI-compatible with the loaded ``_adc`` module. Kokkos is mandatory (adc_cpp is
+    Kokkos-only); a missing ``ADC_KOKKOS_ROOT`` is a clear error from
+    :func:`adc.dsl.adc_loader_build_flags`.
     """
+    import os
+    import tempfile
+
+    from . import dsl
+    from .library_codegen import emit_library_cpp
+
+    src = emit_library_cpp(manifest)
+    include = dsl.adc_include()
+    sig = dsl.adc_header_signature(include)
+    cc, cflags, lflags = dsl.adc_loader_build_flags(cxx)
+    eff_std = dsl._probe_cxx_std(cc, dsl.loader_cxx_std())
+
+    if so_path is None:
+        key = "%s|%s|%s" % (sig, cc, eff_std)
+        so_path = dsl._cache_so_path(manifest.content_hash, key, "library-production",
+                                     "library", manifest.name)
+        if not force and os.path.isfile(so_path):
+            return so_path
+
+    optflags = dsl._dsl_optflags()
+    with tempfile.TemporaryDirectory() as tmp:
+        cpp = os.path.join(tmp, "library.cpp")
+        with open(cpp, "w") as f:
+            f.write(src)
+        flags = ["-shared", "-fPIC", "-std=" + eff_std, *optflags,
+                 "-DADC_HEADER_SIG=\"%s\"" % sig, *cflags]
+        cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *lflags]
+        dsl._run_compile(cmd, "compile_library (backend production)")
+    return so_path
+
+
+def read_library_manifest(manifest):
+    """Reconstruct a :class:`LibraryManifest` from a serialized dict, a compiled ``.so`` path,
+    or a :class:`LibraryManifest` (idempotent).
+
+    * a :class:`LibraryManifest` is returned unchanged;
+    * a dict produced by :meth:`to_dict` round-trips; a dict missing a required key, or
+      carrying an unknown manifest version, is rejected loud (a corrupt / stale manifest is
+      never silently half-read);
+    * a ``str`` / ``os.PathLike`` is treated as a compiled library ``.so`` path: it is
+      dlopen'd (:func:`_read_so_manifest`), its exported descriptor is read back, and its ABI
+      key is compared against the loaded ``_adc`` module -- an ABI / Kokkos mismatch is a HARD
+      error (the bricks would otherwise crash the loader with a cryptic symbol failure).
+
+    ``adc.compile_problem(..., libraries=[...])`` uses this to accept a manifest, a serialized
+    descriptor, OR a compiled ``.so`` path.
+    """
+    import os
+
     if isinstance(manifest, LibraryManifest):
         return manifest
+    if isinstance(manifest, (str, os.PathLike)):
+        return _read_so_manifest(os.fspath(manifest))
     if not isinstance(manifest, dict):
-        raise TypeError("read_library_manifest expects a manifest dict or a "
-                        "LibraryManifest; got %r" % (manifest,))
+        raise TypeError("read_library_manifest expects a manifest dict, a compiled .so path, "
+                        "or a LibraryManifest; got %r" % (manifest,))
     missing = [k for k in _REQUIRED_KEYS if k not in manifest]
     if missing:
         raise KeyError("library manifest is missing required keys: %s"
@@ -191,7 +261,81 @@ def read_library_manifest(manifest):
         name=manifest["name"], backend=manifest["backend"],
         abi_key=manifest["abi_key"], bricks=manifest["bricks"],
         generated_symbols=manifest["generated_symbols"],
-        content_hash=manifest["content_hash"])
+        content_hash=manifest["content_hash"], so_path=manifest.get("so_path"))
+
+
+def _read_so_manifest(so_path):
+    """Read a compiled library ``.so`` descriptor back into a :class:`LibraryManifest` (dlopen).
+
+    Opens @p so_path with :func:`ctypes.CDLL` and reads the ``adc_library_*`` exports the
+    codegen emitted (name / backend / content hash / ABI key + the per-brick string tables).
+    Enforces the ABI / Kokkos guard FIRST: the ``.so``'s ``adc_library_abi_key()`` is compared
+    against the loaded ``_adc`` module's ABI key, and a mismatch raises a HARD :class:`RuntimeError`
+    (the bricks were compiled against a different toolchain -- dlopen-ing them into a problem would
+    fail with a cryptic symbol error or, worse, silent UB). A ``.so`` lacking ``adc_library_*``
+    exports is not an adc library (clear error). The static-init ``ADC_REGISTER_BRICK`` calls also
+    populate the in-process external-brick catalog as a side effect of the load.
+    """
+    import ctypes
+
+    handle = ctypes.CDLL(str(so_path))  # raises OSError if the path is not a loadable library
+
+    def cstr(symbol):
+        try:
+            fn = getattr(handle, symbol)
+        except AttributeError as err:
+            raise ValueError(
+                "library %r does not export %s(); it is not an adc compiled brick library "
+                "(adc.compile_library(..., emit=True))" % (so_path, symbol)) from err
+        fn.restype = ctypes.c_char_p
+        raw = fn()
+        return "" if raw is None else raw.decode("utf-8")
+
+    def cint(symbol):
+        fn = getattr(handle, symbol)
+        fn.restype = ctypes.c_int
+        return int(fn())
+
+    def cstr_i(symbol, i):
+        fn = getattr(handle, symbol)
+        fn.restype = ctypes.c_char_p
+        fn.argtypes = [ctypes.c_int]
+        raw = fn(i)
+        return "" if raw is None else raw.decode("utf-8")
+
+    so_abi = cstr("adc_library_abi_key")
+    module_abi = _abi_key()
+    # HARD ABI / Kokkos guard: never silently load bricks compiled against a different toolchain.
+    if module_abi not in ("", "abi_key=unavailable") and so_abi != module_abi:
+        raise RuntimeError(
+            "adc.read_library_manifest: library %r was compiled with an ABI key DIFFERENT "
+            "from the loaded _adc module (library %r vs module %r). The bricks were built "
+            "against another compiler / C++ standard / header tree / Kokkos build; dlopen-ing "
+            "them into a problem would fail with a cryptic symbol error or undefined behavior. "
+            "Recompile the library with adc.compile_library(..., emit=True) using the SAME "
+            "toolchain (ADC_KOKKOS_ROOT) that built _adc." % (so_path, so_abi, module_abi))
+
+    n = cint("adc_library_brick_count")
+    bricks = []
+    for i in range(n):
+        scheme = cstr_i("adc_library_brick_scheme", i)
+        bricks.append({
+            "id": cstr_i("adc_library_brick_id", i),
+            "brick_type": cstr_i("adc_library_brick_type", i),
+            "category": cstr_i("adc_library_brick_category", i),
+            "scheme": scheme or None,
+            "native_id": cstr_i("adc_library_brick_native_id", i),
+            "available": cstr_i("adc_library_brick_available", i) == "1",
+            "requirements": json.loads(cstr_i("adc_library_brick_requirements", i) or "{}"),
+            "capabilities": json.loads(cstr_i("adc_library_brick_capabilities", i) or "{}"),
+            "options": {},
+        })
+    gen = [cstr_i("adc_library_generated_symbol", i)
+           for i in range(cint("adc_library_generated_symbol_count"))]
+    return LibraryManifest(
+        name=cstr("adc_library_name"), backend=cstr("adc_library_backend"),
+        abi_key=so_abi, bricks=bricks, generated_symbols=gen,
+        content_hash=cstr("adc_library_content_hash"), so_path=so_path)
 
 
 def _abi_key():

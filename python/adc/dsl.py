@@ -4585,7 +4585,7 @@ class CompiledProblem:
     module (cf. `adc_loader_build_flags`), so its ABI key matches and `System::install_program`
     accepts it. `os.fspath(compiled)` returns `so_path` (it can be passed where a path is expected)."""
 
-    def __init__(self, so_path, program, model, abi_key, cxx, std):
+    def __init__(self, so_path, program, model, abi_key, cxx, std, libraries=None):
         self.so_path = so_path
         self.program = program          # the adc.time.Program that was lowered
         self.model = model              # the physical model (optional; added as a block in the MVP)
@@ -4594,6 +4594,11 @@ class CompiledProblem:
         self.abi_key = abi_key          # cache key: header signature | compiler | C++ standard
         self.cxx = cxx
         self.std = std
+        # Validated brick libraries (Spec 3 section 21, ADC-464): the LibraryManifests read +
+        # ABI-checked from libraries=[...]. Empty when none were passed. Their bricks (and their
+        # generated symbols) are exposed to the problem; a compiled library .so was already
+        # dlopen'd (and ABI-guarded) by read_library_manifest.
+        self.libraries = list(libraries) if libraries else []
 
     def __fspath__(self):
         return self.so_path
@@ -4750,20 +4755,18 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
         raise ValueError("compiled time programs require backend='production'")
     if target != "system":
         raise ValueError("compiled time programs currently support target='system' only")
-    # Brick libraries (Spec 3 section 21): each entry is a LibraryManifest (or its serialized
-    # dict / a brick-namespace), normalized through the library reader so a corrupt manifest is
-    # rejected loud here. Linking and dlopen-ing the brick .so into the problem reuses the _adc /
-    # problem.so ABI machinery and is the deferred ADC-464 C++ follow-up, so a NON-empty libraries=
-    # raises rather than silently drop the bricks.
+    # Brick libraries (Spec 3 section 21, ADC-464): each entry is a LibraryManifest, its serialized
+    # dict, or a compiled library .so PATH (str / PathLike). The library reader normalizes each one
+    # (a corrupt manifest is rejected loud; a compiled .so is dlopen'd and its ABI key compared
+    # against the loaded _adc module -- a mismatch is a HARD error here, NOT a silent fallback). The
+    # validated library manifests are carried on the CompiledProblem so the bricks they expose are
+    # known to the problem. Their static-init ADC_REGISTER_BRICK calls populate the in-process
+    # external-brick catalog as a side effect of the dlopen (so adc.lib.*.User(id) resolves).
+    library_manifests = []
     if libraries:
         from .library import read_library_manifest
         for lib_obj in libraries:
-            read_library_manifest(lib_obj)  # validate / round-trip the manifest (fail-loud)
-        raise NotImplementedError(
-            "ADC-464: compile_problem accepts and validates brick-library manifests "
-            "(libraries=[...]); linking and dlopen-ing the compiled brick .so into the problem "
-            "(reusing the _adc / problem.so ABI machinery) is the deferred C++ follow-up. Build "
-            "and inspect the manifest with adc.compile_library(...).")
+            library_manifests.append(read_library_manifest(lib_obj))  # validate + ABI guard (fail-loud)
     # A pure operator-first Module (Spec 2, S2-11) lowers to a dsl.Model via the shared codegen.
     if model is not None and isinstance(model, _model.Module):
         model = _module_to_model(model)
@@ -4788,7 +4791,8 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
         so_path = _cache_so_path(program_hash, abi_key, "program-production", target,
                                  getattr(time, "name", "problem"))
         if not force and os.path.isfile(so_path):
-            return CompiledProblem(so_path, time, model, abi_key, cc, eff_std)
+            return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
+                                   libraries=library_manifests)
 
     optflags = _dsl_optflags()
     with tempfile.TemporaryDirectory() as tmp:
@@ -4805,7 +4809,8 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
                  "-DADC_HEADER_SIG=\"%s\"" % sig, *cflags]
         cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *lflags]
         _run_compile(cmd, "compile_problem (backend production)")
-    return CompiledProblem(so_path, time, model, abi_key, cc, eff_std)
+    return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
+                           libraries=library_manifests)
 
 
 class CompiledModel:
