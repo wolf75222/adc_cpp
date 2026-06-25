@@ -113,7 +113,7 @@ if(SKBUILD)
   install(TARGETS _adc LIBRARY DESTINATION adc)
 endif()
 foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py adc/model.py adc/moments.py adc/time.py
-            adc/math.py adc/lib.py adc/physics.py)
+            adc/math.py adc/lib.py adc/physics.py adc/library.py)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()
 

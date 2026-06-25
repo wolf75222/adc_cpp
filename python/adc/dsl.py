@@ -4658,7 +4658,7 @@ def _module_to_model(module):
 
 
 def compile_problem(so_path=None, *, model=None, time=None, backend="production", target="system",
-                    force=False, cxx=None, include=None, std=None, debug=False):
+                    force=False, cxx=None, include=None, std=None, debug=False, libraries=None):
     """Compile an `adc.time.Program` into a `problem.so` the runtime loads via `sim.install_program`.
 
     Lowers the Program IR to C++ (`Program.emit_cpp_program`) and compiles it against the adc headers
@@ -4680,6 +4680,20 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
         raise ValueError("compiled time programs require backend='production'")
     if target != "system":
         raise ValueError("compiled time programs currently support target='system' only")
+    # Brick libraries (Spec 3 section 21): each entry is a LibraryManifest (or its serialized
+    # dict / a brick-namespace), normalized through the library reader so a corrupt manifest is
+    # rejected loud here. Linking and dlopen-ing the brick .so into the problem reuses the _adc /
+    # problem.so ABI machinery and is the deferred ADC-464 C++ follow-up, so a NON-empty libraries=
+    # raises rather than silently drop the bricks.
+    if libraries:
+        from .library import read_library_manifest
+        for lib_obj in libraries:
+            read_library_manifest(lib_obj)  # validate / round-trip the manifest (fail-loud)
+        raise NotImplementedError(
+            "ADC-464: compile_problem accepts and validates brick-library manifests "
+            "(libraries=[...]); linking and dlopen-ing the compiled brick .so into the problem "
+            "(reusing the _adc / problem.so ABI machinery) is the deferred C++ follow-up. Build "
+            "and inspect the manifest with adc.compile_library(...).")
     # A pure operator-first Module (Spec 2, S2-11) lowers to a dsl.Model via the shared codegen.
     if model is not None and isinstance(model, _model.Module):
         model = _module_to_model(model)

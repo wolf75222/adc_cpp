@@ -305,9 +305,11 @@ __all__ = [
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
-    "PythonFlux", "dsl", "time", "model", "math", "physics", "lib", "abi_key", "capabilities",
+    "PythonFlux", "dsl", "time", "model", "math", "physics", "lib", "library",
+    "abi_key", "capabilities",
     "set_threads", "has_kokkos", "parallel_info", "doctor",
     "compile_problem", "CompiledProblem", "CompiledTime",
+    "compile_library", "read_library_manifest", "LibraryManifest",
 ]
 
 
@@ -3255,6 +3257,9 @@ from . import model  # noqa: E402  (adc.model operator-first type system; pure s
 from . import math  # noqa: E402  (adc.math board operators; pure stdlib, Spec 3, dsl lazy)
 from . import lib  # noqa: E402  (adc.lib typed-brick descriptor catalog; pure stdlib, Spec 3)
 from . import physics  # noqa: E402  (adc.physics board model authoring; numpy-free import, Spec 3)
+from . import library  # noqa: E402  (adc.compile_library brick-manifest layer; numpy-free, Spec 3)
+from .library import (  # noqa: E402,F401  (re-export: brick-library manifest API, Spec 3 section 21)
+    LibraryManifest, compile_library, read_library_manifest)
 from .time import CompiledTime  # noqa: E402,F401  (re-export: compiled-Program time policy)
 
 
