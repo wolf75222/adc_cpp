@@ -2043,6 +2043,156 @@ class Program:
         """True iff an optional dt bound was set (spec s18)."""
         return self._dt_bound is not None
 
+    # --- IR optimization passes (Spec 3 s28, ADC-465) --------------------------------------------
+    # Ops whose result is unobservable yet whose evaluation has an OBSERVABLE side effect (a ghost /
+    # aux fill, a recorded diagnostic, a history store): a dead-node pass must NEVER drop them, even
+    # when nothing reads their result. Conservative by construction -- when in doubt, an op belongs
+    # here. The field solves fill the shared phi/aux and ghosts; record_* and check_invariant are
+    # diagnostics; store_history mutates the history ring; fill_boundary / project mutate ghosts /
+    # the state in place. Control-flow / sub-block ops are handled separately (always live: v1 never
+    # rewrites inside a sub-block, so a node feeding one is kept).
+    _SIDE_EFFECT_OPS = frozenset({
+        "fill_boundary", "record_scalar", "record", "store_history", "check_invariant",
+        "solve_fields", "solve_fields_from_blocks", "project",
+    })
+    # Ops that own a recorded sub-block (a while / if / range body, a matrix-free apply, a Newton
+    # residual). v1 does NOT descend into sub-blocks, so these are treated as always-live roots and
+    # every value they (or their sub-blocks) read is conservatively kept.
+    _SUBBLOCK_OPS = frozenset({
+        "while", "if", "range", "matrix_free_operator", "solve_local_nonlinear",
+    })
+
+    @staticmethod
+    def _subblock_value_refs(v):
+        """Yield every Value an op references THROUGH its attrs (sub-block result pointers + the ops
+        nested in its recorded sub-blocks). Used to keep alive anything a control-flow / matrix-free
+        node closes over from the enclosing scope -- v1 never rewrites a sub-block, so it is all live.
+        The flat ``v.inputs`` already covers the directly-passed values; this adds the attr-borne ones."""
+        attrs = v.attrs
+        for key in ("cond", "body", "residual", "iterate", "guess",
+                    "apply_result", "apply_in", "apply_out"):
+            ref = attrs.get(key)
+            if isinstance(ref, Value):
+                yield ref
+            elif isinstance(ref, _Affine):
+                for term, _ in ref.terms:
+                    yield term
+        for key in ("cond_block", "body_block", "apply_block", "residual_block"):
+            block = attrs.get(key)
+            if block:
+                for w in block:
+                    yield w
+                    yield from w.inputs
+                    yield from Program._subblock_value_refs(w)
+
+    def _live_value_ids(self):
+        """The set of value ids reverse-reachable from the commits + every side-effecting / sub-block
+        op (the live roots). A flat-list node not in this set has no consumer and no side effect: it is
+        dead. Sub-block-internal values are included so a dead-node clone keeps a self-consistent IR."""
+        by_id = {v.id: v for v in self._values}
+        # Sub-block ops are not in self._values (they belong to their owning op); index them too so a
+        # reference from one sub-block op to another resolves during the walk.
+        for v in self._values:
+            for w in Program._subblock_value_refs(v):
+                by_id.setdefault(w.id, w)
+        roots = [s.id for s in self._commits.values()]
+        for v in self._values:
+            if v.op in Program._SIDE_EFFECT_OPS or v.op in Program._SUBBLOCK_OPS:
+                roots.append(v.id)
+        live, stack = set(), list(roots)
+        while stack:
+            vid = stack.pop()
+            if vid in live or vid not in by_id:
+                continue
+            live.add(vid)
+            v = by_id[vid]
+            for inp in v.inputs:
+                stack.append(inp.id)
+            for w in Program._subblock_value_refs(v):
+                stack.append(w.id)
+        return live
+
+    def eliminate_dead_nodes(self):
+        """Return a NEW Program with the dead flat-list nodes removed (Spec 3 s28 dead-node
+        elimination, ADC-465). An OPT-IN pass: call it explicitly to optimize a copy -- it NEVER runs
+        on the default ``emit_cpp_program`` path, so it cannot change an existing compiled program.
+
+        A flat node is DEAD iff its result is consumed by no commit and no side-effecting / sub-block
+        op -- directly or transitively -- AND its own op has no side effect. The live set is built by
+        reverse-reachability from the commits plus every side-effecting op (``_SIDE_EFFECT_OPS``:
+        fill_boundary, record_scalar/record, store_history, check_invariant, solve_fields[_from_blocks],
+        project) and every sub-block-owning op (``_SUBBLOCK_OPS``: while/if/range, matrix_free_operator,
+        solve_local_nonlinear). The pass is CONSERVATIVE: a value feeding a control-flow sub-block is
+        kept (v1 never rewrites inside a sub-block). The surviving nodes are renumbered to contiguous
+        ids in their original order, so a program with no dead node round-trips byte-for-byte (same
+        ``_ir_hash`` and emitted C++) and one with a dead node matches the same program written without
+        it. The histories, optional dt bound and bound operator registry carry over unchanged."""
+        live = self._live_value_ids()
+        return self._rebuild(lambda v: v.id in live)
+
+    def _rebuild(self, keep):
+        """Clone this Program into a fresh one keeping the flat nodes for which ``keep(v)`` is true,
+        renumbering surviving ids to a contiguous 0.. range in original order. Sub-blocks are cloned
+        wholesale (never filtered). The clone reproduces the IR identity of an equivalent hand-built
+        Program (same serialization), so it is byte-identical when nothing was dropped."""
+        out = Program(self.name)
+        out.dt = self.dt
+        out._histories = dict(self._histories)
+        out._registry = self._registry
+        idmap = {}  # old Value -> new Value
+
+        def clone_block(block):
+            return [clone(w) for w in block]
+
+        def remap(ref):
+            if isinstance(ref, Value):
+                return idmap[ref]
+            if isinstance(ref, _Affine):
+                return _Affine([(idmap[v], c) for v, c in ref.terms])
+            return ref
+
+        def clone_attrs(v):
+            attrs = {}
+            for key, val in v.attrs.items():
+                if key in ("cond_block", "body_block", "apply_block", "residual_block"):
+                    attrs[key] = clone_block(val) if val else val
+                elif key in ("cond", "body", "residual", "iterate", "guess",
+                             "apply_result", "apply_in", "apply_out"):
+                    attrs[key] = remap(val)
+                else:
+                    attrs[key] = val
+            return attrs
+
+        def clone(v):
+            if v in idmap:
+                return idmap[v]
+            # Clone the sub-block ops first so their ids precede the owning op, matching how a fresh
+            # build records the body before the control-flow node. Inputs / attr refs are remapped
+            # through idmap (every referenced value is live, hence already mappable on its own clone).
+            for key in ("cond_block", "body_block", "apply_block", "residual_block"):
+                block = v.attrs.get(key)
+                if block:
+                    for w in block:
+                        clone(w)
+            for inp in v.inputs:
+                if inp not in idmap:
+                    clone(inp)
+            vid = out._next_id
+            out._next_id += 1
+            nv = Value(out, vid, v.vtype, v.op, [idmap[i] for i in v.inputs],
+                       clone_attrs(v), v.name, v.block)
+            nv.space = v.space
+            idmap[v] = nv
+            return nv
+
+        out._values = [clone(v) for v in self._values if keep(v)]
+        out._commits = {b: idmap[s] for b, s in self._commits.items()}
+        if self._dt_bound is not None:
+            sub, result = self._dt_bound
+            cloned_sub = [clone(w) for w in sub]
+            out._dt_bound = (cloned_sub, idmap[result])
+        return out
+
     def validate(self):
         """Structural validation of the IR. Raises ValueError on a malformed program."""
         if not self._commits:
@@ -4384,6 +4534,13 @@ def imex_local_linear(P, block, *, explicit_operator, implicit_operator, fields_
     u1 = P.solve_local_linear("imex_step", operator=P.I - theta * P.dt * lin, rhs=q, fields=fields)
     P.commit(block, u1)
     return u1
+
+
+def eliminate_dead_nodes(program):
+    """Return a NEW Program with dead flat-list nodes removed (free-function form of
+    :meth:`Program.eliminate_dead_nodes`, Spec 3 s28 / ADC-465). OPT-IN: it optimizes a copy and never
+    touches the default ``emit_cpp_program`` path. See the method for the dead-node rule."""
+    return program.eliminate_dead_nodes()
 
 
 std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,
