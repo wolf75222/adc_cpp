@@ -435,8 +435,14 @@ class Model:
         roles Density/MomentumX/MomentumY (the dsl ``enable_hllc`` / ``enable_roe`` then
         generate the ``ADC_HD`` ``contact_speed`` / ``hllc_star_state`` / ``roe_dissipation``
         hooks from those roles). Missing capabilities are rejected here with a clear message
-        (Spec 3 criterion 10). Generating the hooks from ARBITRARY board formulas (rather than
-        the role-derived ones) is the remaining part of ADC-456.
+        (Spec 3 criterion 10).
+
+        ADC-456: passing an explicit board formula for a capability quantity (e.g.
+        ``pressure=<adc.math expr>``) overrides the role-derived hook with that formula's codegen
+        (lowered via :meth:`adc.dsl.Model.set_riemann_hooks`). A capability hook DESCRIPTOR
+        (``adc.lib.riemann.hllc.contact_speed.euler()``) or ``None`` keeps the role-derived default.
+        A formula referencing a quantity the model cannot provide still raises the clear capability
+        error at codegen.
         """
         self._riemann = name
         self._riemann_hooks = {
@@ -450,6 +456,15 @@ class Model:
             self._dsl.enable_hllc()
         elif kind == "roe":
             self._dsl.enable_roe()
+        # Wire any ARBITRARY board formula through to the dsl codegen (ADC-456). Resolve board nodes
+        # to dsl Exprs; the dsl method codegen's the Expr ones and ignores descriptors / None (the
+        # role-derived default stands). Off the hot path for the role-derived case (no Expr -> no-op).
+        self._dsl.set_riemann_hooks(
+            pressure=self._to_expr(pressure) if pressure is not None else None,
+            sound_speed=self._to_expr(sound_speed) if sound_speed is not None else None,
+            contact_speed=self._to_expr(contact_speed) if contact_speed is not None else None,
+            star_state=self._to_expr(star_state) if star_state is not None else None,
+        )
         return name
 
     def _validate_riemann_capabilities(self, kind, pressure, wave_speeds):

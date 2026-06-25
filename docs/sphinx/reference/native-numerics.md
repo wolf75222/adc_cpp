@@ -55,10 +55,16 @@ Missing capabilities are rejected with a clear message, e.g.
 the dsl `enable_hllc()` / `enable_roe()` that generate the `ADC_HD` `contact_speed` /
 `hllc_star_state` / `roe_dissipation` hooks from the roles.
 
+Passing an explicit board formula for a single-state capability quantity overrides the
+role-derived hook with that formula's codegen: `m.riemann("hllc", pressure=<adc.math expr>)`
+emits the `pressure(U)` hook from the given expression instead of the primitive `p`. A formula
+that references a quantity the model cannot provide raises the same clear capability error at
+codegen.
+
 ## Status
 
 The native solvers, the reconstruction bricks, the descriptor catalog, the board capability
-validation and the role-derived hook generation are in place. Generating the hooks from
-ARBITRARY board formulas (a non-canonical `contact_speed=` / `star_state=` written in `adc.math`,
-beyond the role-derived Toro/Roe forms) and the end-to-end board-model compile path are the
-remaining part of ADC-456.
+validation, the role-derived hook generation and the single-state formula override (`pressure=`)
+are in place. The two-state hooks (`contact_speed` / `star_state`, spanning UL/UR) take only a
+role-derived capability descriptor, not an arbitrary `adc.math` formula; that and the end-to-end
+board-model compile path are the remaining part of ADC-456.
