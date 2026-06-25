@@ -2808,15 +2808,19 @@ class Program:
             # listed states are slotted at their block index, so the runtime sees each coupled block at
             # its stage state and every other (unlisted) block at its live state -- the seam a multi-
             # species step uses (the IR commit_many guarantee: no operator observes a partial group).
-            # The input order == the P.state declaration order (the block index order); we assert it
-            # here so a stale binding fails at emit, not silently mis-routed at runtime.
+            # Each input is routed to the slot of ITS OWN block index (not its position in the list), so
+            # a reordered list still solves correctly; an input whose block was never declared via
+            # P.state has no slot -> fail loud at emit rather than silently mis-route to index 0.
             bmap = block_idx or {}
             vec = "u_stages_%d" % v.id
             lines.append("std::vector<const adc::MultiFab*> %s(ctx.n_blocks(), nullptr);" % vec)
-            for k, st in enumerate(v.inputs):  # inputs = the N state values, in listed order
-                kbidx = bmap.get(st.block, 0)
-                assert st.block == v.inputs[k].block  # invariant: inputs[k] is this slot's state
-                lines.append("%s[%d] = &%s;" % (vec, kbidx, var[st.id]))
+            for st in v.inputs:  # inputs = the N state values, slotted by their own block index
+                if st.block not in bmap:
+                    raise ValueError(
+                        "solve_fields_from_blocks: input node %r has block %r, which is not a "
+                        "declared program block %r -- cannot route it to a coupled slot"
+                        % (st.id, st.block, sorted(bmap)))
+                lines.append("%s[%d] = &%s;" % (vec, bmap[st.block], var[st.id]))
             lines.append("ctx.solve_fields_from_blocks(%s);" % vec)
             # solve_fields_from_blocks returns a FieldContext (the shared aux); its var aliases the first
             # listed state so a downstream rhs(state, fields) reads the refreshed shared aux like any
@@ -3979,7 +3983,7 @@ _PROGRAM_CPP_TEMPLATE = '''\
 #include <cmath>                               // std::sqrt / std::fabs / std::pow in lowered formulas
 #include <limits>                              // std::numeric_limits (dt_bound +inf sentinel)
 #include <memory>                              // std::make_shared (persistent matrix-free scratch)
-#include <vector>                              // std::vector (coupled multi-block field-solve pointer list, ADC-457)
+#include <vector>                              // pointer list for the coupled multi-block field-solve (ADC-457)
 
 extern "C" const char* adc_program_abi_key() {{ return ADC_ABI_KEY_LITERAL; }}
 extern "C" const char* adc_program_name() {{ return {name}; }}

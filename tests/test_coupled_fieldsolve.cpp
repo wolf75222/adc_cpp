@@ -161,6 +161,43 @@ int main(int argc, char** argv) {
   // mattered) -- the override was honored, not ignored.
   chk(d_vs_all > 1e-4, "the stage override changes the potential vs the all-live coupled solve");
 
+  // (b2) ALL-nullptr U_stages: every slot falls back to its block's LIVE state == the all-live solve --
+  std::vector<const MultiFab*> stages_null{nullptr, nullptr};
+  s.solve_fields_from_blocks(stages_null);
+  const std::vector<double> phi_null = s.potential();
+  chk(max_abs_diff(phi_null, phi_blocks) <= tol,
+      "an all-nullptr U_stages falls back to every block's live state (== the all-live coupled solve)");
+
+  // (d) eps != 1: the coupled path scales the system RHS by 1/eps just like solve_fields -------------
+  // The constant-permittivity branch (p_eps_ != 1) is the one RHS-scaling branch the eps=1 cases above
+  // never touch; assert the coupled solve honors it identically to the historical single-target solve.
+  System se(cfg);
+  {
+    ModelSpec spec;
+    spec.transport = "exb";
+    spec.source = "none";
+    spec.elliptic = "charge";
+    spec.q = 1.0;
+    spec.B0 = 1.0;
+    se.add_block("n0", spec, "minmod", "rusanov", "conservative", "explicit", 1, true);
+    se.add_block("n1", spec, "minmod", "rusanov", "conservative", "explicit", 1, true);
+    se.set_poisson("composite", "geometric_mg", "auto", "none", 0.0, 2.0, 0.0);  // eps = 2
+  }
+  se.set_density("n0", q0);
+  se.set_density("n1", q1);
+  se.solve_fields();  // historical, with eps = 2
+  const std::vector<double> phi_eps_ref = se.potential();
+  std::vector<const MultiFab*> stages_eps{&se.block_state(0), &se.block_state(1)};
+  se.solve_fields_from_blocks(stages_eps);
+  const std::vector<double> phi_eps_blocks = se.potential();
+  double eps_maxabs = 0.0;
+  for (double v : phi_eps_ref)
+    eps_maxabs = std::fmax(eps_maxabs, std::fabs(v));
+  const double eps_tol = 1e-12 * std::fmax(eps_maxabs, 1.0);
+  chk(eps_maxabs > 0.0, "the eps != 1 coupled solve produces a non-trivial potential");
+  chk(max_abs_diff(phi_eps_blocks, phi_eps_ref) <= eps_tol,
+      "with eps != 1 the coupled solve scales the RHS by 1/eps like solve_fields (to round-off)");
+
   // (c) SIZE guard: a U_stages not sized to n_blocks() throws (fail-loud on a stale binding) ----------
   bool threw = false;
   try {

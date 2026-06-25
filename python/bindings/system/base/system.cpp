@@ -1877,6 +1877,7 @@ void System::solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
 // once (U_stages indexed by block index; nullptr -> the block's live state), then re-fills the shared
 // aux. ADC_EXPORT: resolved by a generated problem.so (ProgramContext) across the dlopen boundary.
 ADC_EXPORT void System::solve_fields_from_blocks(const std::vector<const MultiFab*>& U_stages) {
+  adc::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
   p_->solve_fields_from_blocks(U_stages);
 }
 
