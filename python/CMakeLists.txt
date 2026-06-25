@@ -112,8 +112,12 @@ set_target_properties(_adc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${ADC_PY_PKG})
 if(SKBUILD)
   install(TARGETS _adc LIBRARY DESTINATION adc)
 endif()
-foreach(pyf adc/__init__.py adc/integrate.py adc/dsl.py adc/model.py adc/moments.py adc/time.py
-            adc/math.py adc/lib.py adc/physics.py adc/library.py adc/library_codegen.py)
+# Copy the pure-Python package (adc/ and every sub-package) into the build tree next to _adc.
+# GLOB_RECURSE + CONFIGURE_DEPENDS so new modules / sub-packages are picked up automatically (a flat
+# explicit list silently dropped a new module from the build tree -- "partially initialized module"
+# import errors that the source tree did not show). configure_file creates the destination sub-dirs.
+file(GLOB_RECURSE _adc_py_sources CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} adc/*.py)
+foreach(pyf ${_adc_py_sources})
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${pyf} ${CMAKE_CURRENT_BINARY_DIR}/${pyf} COPYONLY)
 endforeach()
 
