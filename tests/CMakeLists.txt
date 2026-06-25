@@ -115,6 +115,7 @@ endforeach()
 
 # --- runtime program ---
 adc_add_test(test_profiler)  # Spec 3 per-node / per-brick profiler (ADC-459)
+adc_add_test(test_cache_manager)  # Spec 3 scheduler value cache (ADC-458)
 
 # --- maillage / conteneurs ---
 adc_add_test(test_box2d)

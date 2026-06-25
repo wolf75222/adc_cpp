@@ -19,6 +19,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 ## [Unreleased]
 
 ### Added
+- **Spec 3 scheduler cache foundation (C++)** (ADC-458, epic ADC-450): `adc::runtime::program::CacheManager` + `CacheSlot` (`include/adc/runtime/program/cache_manager.hpp`) -- the per-node value cache the unified Program scheduler needs: `is_due(node, step, every_n)` (cold-start always due, then every N macro-steps), `store`/`retrieve` of a held `MultiFab`, and `accumulate_dt` that sums the skipped steps' dt (so a held result applies with `eff_dt = sum(dt_skipped)`, not `N*dt_current`). Header-only, serial C++ unit test `tests/test_cache_manager.cpp` (built + passing locally). The codegen that un-gates a scheduled node + the checkpoint of the slots are the ADC-458 follow-ups.
 
 - **Spec 3 profiling wired into System** (ADC-459, epic ADC-450): `sim.enable_profiling()` /
   `disable_profiling()` / `is_profiling()` / `reset_profiling()` / `profile_report()` drive a
