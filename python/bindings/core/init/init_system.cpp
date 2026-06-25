@@ -106,6 +106,10 @@ void init_system(py::module_& m) {
       // ADC-406b: IR hash of the installed compiled Program (the .so's adc_program_hash), or "" if
       // none. sim.checkpoint records it; sim.restart rejects a restart against a DIFFERENT Program.
       .def("installed_program_hash", &System::installed_program_hash)
+      // ADC-466 (Spec criterion 24): configured field (Poisson) solver token (the last set_poisson
+      // solver, default "geometric_mg"). install_program reads it to validate a field operator's
+      // solver requirement; exposed so the unified sim.install can pre-validate host-side too.
+      .def("poisson_solver", &System::poisson_solver)
       // ADC-414 (spec op 23): scalar diagnostics a compiled Program records via P.record_scalar,
       // retrievable AFTER sim.step. program_diagnostic(name) reads one (raises if never recorded);
       // program_diagnostics() returns the whole name -> value dict.

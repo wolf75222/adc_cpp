@@ -280,6 +280,16 @@ add_test(NAME test_install_requirement_validation
 set_tests_properties(test_install_requirement_validation PROPERTIES
   ENVIRONMENT "${_adc_py_test_env}")
 
+# Unified install (ADC-466, spec 3 sections 22 + 24) : sim.install(compiled, instances=, params=,
+# aux=, solvers=) cable + installe en UN appel (lowering vers add_equation / set_poisson /
+# set_magnetic_field / set_block_params / install_program) et valide les prerequis a l'installation
+# avec les messages spec verbatim (aux / solver / block instance / capacite riemann). Le RUN .so
+# complet est Kokkos/ROMEO ; la forme d'API + la validation sont testables host.
+add_test(NAME test_unified_install
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_unified_install.py)
+set_tests_properties(test_unified_install PROPERTIES
+  ENVIRONMENT "${_adc_py_test_env}")
+
 # adc.time.Program -- IR du programme temporel compile, mode builder (ADC-401, phase 2a) : etats /
 # solve_fields / rhs / linear_combine / commit construisent une IR typee ; algebre affine de
 # linear_combine (U + dt*R, coefficients RK comme polynomes en dt), validation structurelle (commit

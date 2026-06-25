@@ -281,6 +281,13 @@ spatial = SimpleNamespace(
         "flux_divergence", "adc::SpatialDiscretisation", "fv", category="spatial", **o),
     SourceAssembly=lambda **o: _native(
         "source_assembly", "adc::SpatialDiscretisation", "fv", category="spatial", **o),
+    # The whole finite-volume spatial brick selected per instance by the unified sim.install (Spec 3
+    # section 22): it carries the runtime scheme options (riemann / reconstruction / positivity_floor)
+    # that System.install lowers to the existing add_equation spatial args. ``riemann`` names the
+    # NUMERICAL Riemann flux (not the model's physical flux); ``reconstruction`` is the limiter
+    # (none/minmod/vanleer/weno5).
+    FiniteVolume=lambda **o: _native(
+        "finite_volume", "adc::SpatialDiscretisation", "fv", category="spatial", **o),
 )
 
 

@@ -124,16 +124,16 @@ inline ModuleMetadata read_module_metadata(void* dl_handle) {
   return meta;
 }
 
-/// Extract the aux-field names an operator requires from its ``requirements`` JSON -- the ``"aux"``
-/// array, e.g. {"kind":"local_source","aux":["grad_x","B_z"]} -> {"grad_x","B_z"}. A dependency-free
-/// scan: the core has no JSON library on the install path and the shape is a flat, closed vocabulary
-/// (the codegen emits only ``"kind"``, ``"aux"`` and ``"elliptic_operator"``). It locates the
-/// ``"aux"`` key, the following ``[``, and collects the quoted tokens up to the closing ``]``.
-/// Returns empty when there is no ``"aux"`` array. Used by install-time requirement validation
-/// (Spec-2 criterion 24, ADC-446).
-inline std::vector<std::string> required_aux(const std::string& requirements_json) {
+/// Collect the quoted tokens of a JSON string array keyed by @p key inside the operator's flat
+/// ``requirements`` JSON, e.g. key ``"aux"`` over {"kind":"local_source","aux":["grad_x","B_z"]} ->
+/// {"grad_x","B_z"}. A dependency-free scan: the core has no JSON library on the install path and the
+/// shape is a flat, closed vocabulary (the codegen emits ``"kind"`` plus a handful of requirement
+/// arrays/scalars). It locates @p key, the following ``[``, and collects the quoted tokens up to the
+/// closing ``]``. Returns empty when the key is absent or is not an array. Shared by required_aux /
+/// required_block (Spec criterion 24).
+inline std::vector<std::string> required_string_list(const std::string& requirements_json,
+                                                     const std::string& key) {
   std::vector<std::string> out;
-  const std::string key = "\"aux\"";
   const std::size_t k = requirements_json.find(key);
   if (k == std::string::npos) {
     return out;
@@ -160,6 +160,53 @@ inline std::vector<std::string> required_aux(const std::string& requirements_jso
     p = q2 + 1;
   }
   return out;
+}
+
+/// Read a single quoted JSON string value keyed by @p key inside the operator's flat ``requirements``
+/// JSON, e.g. key ``"solver"`` over {"kind":"field_operator","solver":"geometric_mg"} ->
+/// "geometric_mg". Returns "" when the key is absent. Dependency-free, same closed-vocabulary scan as
+/// required_string_list; used for the scalar requirement kinds (solver, capability, schedule) of
+/// Spec criterion 24.
+inline std::string requirement_string(const std::string& requirements_json, const std::string& key) {
+  const std::size_t k = requirements_json.find(key);
+  if (k == std::string::npos) {
+    return std::string();
+  }
+  // Find the ':' separating key and value, then the opening quote of the value.
+  const std::size_t colon = requirements_json.find(':', k + key.size());
+  if (colon == std::string::npos) {
+    return std::string();
+  }
+  const std::size_t q1 = requirements_json.find('"', colon + 1);
+  if (q1 == std::string::npos) {
+    return std::string();
+  }
+  const std::size_t q2 = requirements_json.find('"', q1 + 1);
+  if (q2 == std::string::npos) {
+    return std::string();
+  }
+  return requirements_json.substr(q1 + 1, q2 - q1 - 1);
+}
+
+/// Aux-field names an operator requires (the ``"aux"`` array). Used by install-time requirement
+/// validation (Spec criterion 24, ADC-446); kept as a named wrapper for call-site clarity.
+inline std::vector<std::string> required_aux(const std::string& requirements_json) {
+  return required_string_list(requirements_json, "\"aux\"");
+}
+
+/// Block-instance names an operator requires (the ``"block"`` array), e.g. a ``collisions`` operator
+/// reading another species: {"kind":"local_source","block":["ions"]} -> {"ions"}. Install-time
+/// validation rejects a simulation that did not instantiate one of them (Spec criterion 24).
+inline std::vector<std::string> required_blocks(const std::string& requirements_json) {
+  return required_string_list(requirements_json, "\"block\"");
+}
+
+/// Solver name a field operator requires (the scalar ``"solver"`` value), e.g.
+/// {"kind":"field_operator","solver":"geometric_mg"} -> "geometric_mg". Empty when the operator has
+/// no solver requirement. Install-time validation rejects a simulation whose configured field solver
+/// does not match (Spec criterion 24).
+inline std::string required_solver(const std::string& requirements_json) {
+  return requirement_string(requirements_json, "\"solver\"");
 }
 
 }  // namespace program
