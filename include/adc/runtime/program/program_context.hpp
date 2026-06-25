@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -185,13 +186,19 @@ class ProgramContext {
     return (b >= 0 && b < static_cast<int>(m.size())) ? m[static_cast<std::size_t>(b)] : b;
   }
 
-  void solve_fields() const { sys_->solve_fields(); }
+  void solve_fields() const {
+    // No count_kernel() here: this forwards to the PUBLIC System::solve_fields() -> Impl::solve_fields(),
+    // which already counts the kernel. (The from_state/from_blocks/named seams below DO count, because
+    // their Impl paths do not.) Counting here too would double-count this one op.
+    sys_->solve_fields();
+  }
   /// Per-stage field solve (ADC-409): re-solve the elliptic fields and re-fill the shared aux from
   /// block @p b's STAGE state @p u_stage (not its live state), so a field-coupled multi-stage
   /// Program's stage k reads phi solved from stage k's own state. Forwards to
   /// System::solve_fields_from_state. With b = 0 and u_stage = U^n (the first stage) it matches
   /// solve_fields(); the codegen lowers every solve_fields op to this, passing the stage's state var.
   void solve_fields_from_state(int b, MultiFab& u_stage) const {
+    count_kernel();
     sys_->solve_fields_from_state(sys_block(b), u_stage);
   }
   /// Named multi-elliptic field solve (ADC-428): re-solve the SECOND elliptic field @p field from block
@@ -201,6 +208,7 @@ class ProgramContext {
   /// P.solve_fields(field=name, state=U) to this; a default (unnamed) solve_fields keeps the overload
   /// above, byte-identical.
   void solve_fields_from_state(const std::string& field, int b, MultiFab& u_stage) const {
+    count_kernel();
     sys_->solve_fields_from_state(field, sys_block(b), u_stage);
   }
   /// Coupled multi-block field solve (Spec 3 criterion 24, ADC-457): re-solve the elliptic fields and
@@ -212,6 +220,7 @@ class ProgramContext {
   /// from the listed stage-state vars (their declaration order == the block index order, asserted at
   /// emit time). This is the multi-target counterpart of solve_fields_from_state.
   void solve_fields_from_blocks(const std::vector<const MultiFab*>& u_stages) const {
+    count_kernel();
     // The codegen builds @p u_stages indexed BY PROGRAM block index (a stage state slotted at its own
     // Program index, the rest nullptr). The System solver expects it indexed by SYSTEM block index, so
     // re-slot each Program entry p at its name-matched System index sys_block(p) (Spec 3 criterion 23,
@@ -234,7 +243,10 @@ class ProgramContext {
   }
   int n_blocks() const { return sys_->n_blocks(); }
   MultiFab& state(int b) const { return sys_->block_state(sys_block(b)); }
-  void rhs_into(int b, MultiFab& u, MultiFab& r) const { sys_->block_rhs_into(sys_block(b), u, r); }
+  void rhs_into(int b, MultiFab& u, MultiFab& r) const {
+    count_kernel();
+    sys_->block_rhs_into(sys_block(b), u, r);
+  }
 
   /// r <- -div F(u) for block @p b -- the SAME flux divergence as @ref rhs_into but WITHOUT the model's
   /// default/composite source (Poisson frozen). Forwards to System::block_neg_div_flux_into (the block's
@@ -244,6 +256,7 @@ class ProgramContext {
   /// default source leaking in (epic ADC-399 / ADC-425, spec criterion 17). Header-inline forwarder,
   /// like @ref rhs_into.
   void neg_div_flux_default_into(int b, MultiFab& u, MultiFab& r) const {
+    count_kernel();
     sys_->block_neg_div_flux_into(sys_block(b), u, r);
   }
 
@@ -255,6 +268,7 @@ class ProgramContext {
   /// (epic ADC-399 / ADC-430, spec: rhs flux=False is source-only). Header-inline forwarder, like @ref
   /// neg_div_flux_default_into.
   void source_default_into(int b, MultiFab& u, MultiFab& r) const {
+    count_kernel();
     sys_->block_source_into(sys_block(b), u, r);
   }
 
@@ -299,6 +313,7 @@ class ProgramContext {
   /// (tests/test_generic_krylov.cpp) wraps in its ApplyFn. The compiled program forms an operator
   /// A(in) = in - alpha*Lap(in) by combining this with ctx.lincomb.
   void laplacian(MultiFab& out, MultiFab& in) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     fill_ghosts(in, gc.geom.domain, gc.bc);
     apply_laplacian(in, gc.geom, out);  // all optional pointers null -> bare 5-point Laplacian
@@ -309,6 +324,7 @@ class ProgramContext {
   /// store_phi=false (the gradient lands in components 0/1) and the centered factors cx = 1/(2 dx),
   /// cy = 1/(2 dy) -- the same derivation the elliptic aux post-process uses (+grad sign).
   void gradient(MultiFab& out, MultiFab& phi) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     fill_ghosts(phi, gc.geom.domain, gc.bc);
     const Real cx = Real(1) / (Real(2) * gc.geom.dx());
@@ -327,6 +343,7 @@ class ProgramContext {
   /// Schur-like flux operator A(phi) = phi - alpha*div(grad phi) by chaining ctx.gradient then
   /// ctx.divergence inside a matrix-free apply.
   void divergence(MultiFab& out, MultiFab& fx, MultiFab& fy) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     fill_ghosts(fx, gc.geom.domain, gc.bc);
     if (&fy != &fx)
@@ -354,6 +371,7 @@ class ProgramContext {
   /// then reused across every Krylov iteration of the matrix-free phi solve.
   void assemble_schur_coeffs(MultiFab& eps_x, MultiFab& eps_y, MultiFab& a_xy, MultiFab& a_yx,
                              const MultiFab& state, Real c, Real th_dt, int c_rho, int c_bz) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     const MultiFab& aux = *sys_->grid_context().aux;
     for (int li = 0; li < eps_x.local_size(); ++li) {
@@ -381,6 +399,7 @@ class ProgramContext {
   void apply_laplacian_coeff(MultiFab& out, MultiFab& in, const MultiFab& eps_x,
                              const MultiFab& eps_y, const MultiFab& a_xy,
                              const MultiFab& a_yx) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     fill_ghosts(in, gc.geom.domain, gc.bc);
     apply_laplacian(in, gc.geom, out, /*coef=*/nullptr, /*eps=*/&eps_x, /*kappa=*/nullptr,
@@ -395,6 +414,7 @@ class ProgramContext {
   /// assembled with ctx.laplacian + ctx.divergence + the affine algebra.
   void schur_explicit_flux(MultiFab& out, const MultiFab& state, Real th_dt, int c_mx, int c_my,
                            int c_bz) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     const MultiFab& aux = *sys_->grid_context().aux;
     for (int li = 0; li < out.local_size(); ++li) {
@@ -418,6 +438,7 @@ class ProgramContext {
   /// combine at IR level): the same fused -Lap - g*div(F) the native source stepper assembles.
   void assemble_schur_rhs(MultiFab& rhs, MultiFab& phi_n, const MultiFab& state, Real th_dt, Real g,
                           int c_mx, int c_my, int c_bz) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     const MultiFab& aux = *sys_->grid_context().aux;
     const BoxArray& ba = rhs.box_array();
@@ -456,6 +477,7 @@ class ProgramContext {
   /// final n+1 extrapolation (factor 1/theta) is left to the caller's affine algebra.
   void schur_reconstruct(MultiFab& state, MultiFab& phi, Real th_dt, int c_rho, int c_mx, int c_my,
                          int c_bz) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     const MultiFab& aux = *sys_->grid_context().aux;
     fill_ghosts(phi, gc.geom.domain, gc.bc);
@@ -478,6 +500,7 @@ class ProgramContext {
   /// component (the macro passes c_E only for an energy block).
   void schur_energy(MultiFab& state, const MultiFab& state_old, int c_rho, int c_mx, int c_my,
                     int c_E) const {
+    count_kernel();
     for (int li = 0; li < state.local_size(); ++li) {
       Array4 st = state.fab(li).array();
       const ConstArray4 so = state_old.fab(li).const_array();
@@ -495,6 +518,7 @@ class ProgramContext {
   /// valid cells are unchanged). This semi-discrete -div F is LINEAR in the flux, so the -div of a SUM
   /// of named fluxes equals the sum of their -div (the named-flux parity guarantee).
   void neg_div_flux_into(MultiFab& r, MultiFab& fx, MultiFab& fy) const {
+    count_kernel();
     const GridContext gc = sys_->grid_context();
     fill_ghosts(fx, gc.geom.domain, gc.bc);
     fill_ghosts(fy, gc.geom.domain, gc.bc);
@@ -512,9 +536,13 @@ class ProgramContext {
   }
 
   /// A zero-initialized RHS scratch with the SAME layout (box array / distribution / ghosts) as @p u,
-  /// so the subsequent axpy(u, ., r) combines identical layouts.
+  /// so the subsequent axpy(u, ., r) combines identical layouts. Records the allocation into the
+  /// scratch peak-memory counters (no-op when profiling is off); scratch_state_like forwards here, so
+  /// every stage / rhs scratch is counted once at its single allocation site (ADC-459).
   MultiFab rhs_scratch_like(const MultiFab& u) const {
-    return MultiFab(u.box_array(), u.dmap(), u.ncomp(), u.n_grow());
+    MultiFab scratch(u.box_array(), u.dmap(), u.ncomp(), u.n_grow());
+    count_scratch(scratch);
+    return scratch;
   }
 
   /// A zero-initialized scratch STATE with the same layout as @p u: an intermediate stage state of a
@@ -523,12 +551,16 @@ class ProgramContext {
   MultiFab scratch_state_like(const MultiFab& u) const { return rhs_scratch_like(u); }
 
   /// u <- u + a r over the valid cells (linear combine; forwards to adc::saxpy).
-  void axpy(MultiFab& u, Real a, const MultiFab& r) const { adc::saxpy(u, a, r); }
+  void axpy(MultiFab& u, Real a, const MultiFab& r) const {
+    count_kernel();
+    adc::saxpy(u, a, r);
+  }
 
   /// z <- a x + b y over the valid cells (assignment, not accumulation; z may alias x or y).
   /// Forwards to adc::lincomb. The codegen uses it for the committed stage: the block state becomes
   /// z = c_base * z + 1 * acc, where acc holds the non-base terms (self-alias z==x is safe).
   void lincomb(MultiFab& z, Real a, const MultiFab& x, Real b, const MultiFab& y) const {
+    count_kernel();
     adc::lincomb(z, a, x, b, y);
   }
 
@@ -629,6 +661,39 @@ class ProgramContext {
   }
   /// @}
 
+  /// @name Profiling counters (Spec 3 section 29, ADC-459)
+  /// The named integer counters sim.profile_report() surfaces alongside the per-node timings: how many
+  /// kernel launches a step issued, how the held-node scheduler hit/missed its cache, and the scratch
+  /// peak memory. Each helper is a single predictable branch when profiling is off (Profiler::count /
+  /// count_max early-return), so the hot path pays nothing unless sim.enable_profiling() ran. These move
+  /// only on the COMPILED-PROGRAM path (a problem.so step body calling these seam ops); the native step
+  /// counts "kernels" at its own elliptic-solve chokepoint instead (System::Impl::solve_fields).
+  /// @{
+  /// One per kernel-dispatching seam op (a -div F / source / matvec / solve). The compiled step body
+  /// reaches the seam through these methods, so counting at this op granularity counts the per-node
+  /// kernel LAUNCHES (the device dispatch in mesh/execution/for_each.hpp is a shared free function with
+  /// no profiler handle -- instrumenting it would touch every numerics TU and add a hidden hot-path
+  /// argument, so the op-granularity count is the deliberate, labeled choice, Spec 3 section 29).
+  void count_kernel(std::int64_t by = 1) const { sys_->profiler().count("kernels", by); }
+  /// Record one scratch MultiFab allocation: bumps the allocation count and updates the byte peak with
+  /// THIS buffer's footprint. The peak is the largest SINGLE scratch (a deep allocation); a running
+  /// "live total" is not tracked because the seam hands the buffer to the caller (no free hook here),
+  /// so we report what is exactly knowable -- the allocation count and the largest one -- never a faked
+  /// live-bytes figure (Spec 3 section 29 scratch peak memory).
+  void count_scratch(const MultiFab& mf) const {
+    runtime::program::Profiler& prof = sys_->profiler();
+    if (!prof.enabled()) {
+      return;  // skip the byte-summing loop entirely when profiling is off (zero hot-path cost)
+    }
+    prof.count("scratch_allocs");
+    std::int64_t bytes = 0;
+    for (int li = 0; li < mf.local_size(); ++li) {
+      bytes += mf.fab(li).size() * static_cast<std::int64_t>(sizeof(Real));
+    }
+    prof.count_max("scratch_peak_bytes", bytes);
+  }
+  /// @}
+
   /// @name Scheduler value cache (Spec 3 section 17-18, ADC-458)
   /// A held field-solve node recomputes only when DUE (every N macro-steps) and reuses the cached
   /// System aux (phi / grad / E) in between. The cache lives here -- one CacheManager per installed
@@ -639,8 +704,22 @@ class ProgramContext {
   /// @{
   /// True if node @p node_id is due to recompute at the current macro step: cold start (never stored),
   /// then every @p every_n macro steps. Wraps CacheManager::is_due with System::macro_step().
+  ///
+  /// PROFILER scheduler counters (ADC-459, Spec 3 section 29): a DUE step recomputes the node (a cache
+  /// "miss" + a "due" scheduled node); a NOT-due step reuses the held value (a cache "hit" + a
+  /// "skipped" scheduled node). Counted here at the one decision point every scheduled node routes
+  /// through, gated on the profiler (zero cost when off). These move only under the compiled .so step
+  /// loop that exercises a held schedule (validated on Kokkos/ROMEO, not buildable host-only).
   bool cache_should_update(int node_id, int every_n) const {
-    return cache_mgr_.is_due(node_id, sys_->macro_step(), every_n);
+    const bool due = cache_mgr_.is_due(node_id, sys_->macro_step(), every_n);
+    if (due) {
+      sys_->profiler().count("cache_misses");
+      sys_->profiler().count("nodes_due");
+    } else {
+      sys_->profiler().count("cache_hits");
+      sys_->profiler().count("nodes_skipped");
+    }
+    return due;
   }
   /// Store a copy of the System aux (the field solve's output) as node @p node_id's cached value,
   /// stamped at the current macro step (resets its accumulated dt).

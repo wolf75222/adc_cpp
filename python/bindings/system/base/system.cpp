@@ -423,7 +423,16 @@ struct System::Impl {
   // ensure_elliptic_polar / solve_fields_polar / solve_fields (body) EXTRACTED into fields_
   // (SystemFieldSolver, Batch B). Pure delegation: the Cartesian/polar dispatch, the device_fence and
   // the order of fill_ghosts/fill_boundary now live in the header (bit-identical).
-  void solve_fields() { fields_.solve_fields(); }
+  //
+  // PROFILER kernel count (ADC-459, Spec 3 section 29): the elliptic field solve is the per-step
+  // kernel-dispatch chokepoint the NATIVE step actually hits (SystemStepper::step calls P->solve_fields
+  // once per Lie step / three times per Strang step), so counting here moves "kernels" on the native
+  // host path -- no SystemStepper edit (Profiler stays an Impl member the stepper never reads). The
+  // count() is a single predictable branch when profiling is off (zero hot-path cost).
+  void solve_fields() {
+    profiler_.count("kernels");
+    fields_.solve_fields();
+  }
   // Per-stage field solve (ADC-409): re-solve + re-fill the shared aux from a stage state of the
   // target block (the rest of the blocks keep their live s.U). Same delegation idiom as solve_fields.
   void solve_fields_from_state(int block_idx, const MultiFab& U_stage) {

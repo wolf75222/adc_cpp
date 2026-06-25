@@ -75,6 +75,23 @@ int main() {
     chk(p.counter("never") == 0, "counter_absent_zero");
   }
 
+  // --- count_max tracks a PEAK, not a sum (scratch peak memory, ADC-459) ---
+  {
+    Profiler p;
+    p.enable();
+    p.count_max("scratch_peak_bytes", 100);  // first-seen creates at the value
+    chk(p.counter("scratch_peak_bytes") == 100, "count_max_first");
+    p.count_max("scratch_peak_bytes", 40);  // smaller: peak unchanged
+    chk(p.counter("scratch_peak_bytes") == 100, "count_max_keeps_peak");
+    p.count_max("scratch_peak_bytes", 250);  // larger: peak rises
+    chk(p.counter("scratch_peak_bytes") == 250, "count_max_rises");
+    // disabled count_max is a no-op
+    p.disable();
+    p.count_max("scratch_peak_bytes", 9999);
+    p.enable();
+    chk(p.counter("scratch_peak_bytes") == 250, "count_max_disabled_noop");
+  }
+
   // --- ProfileScope times a real interval; nested scopes both record ---
   {
     Profiler p;

@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <string>
 #include <vector>
 
 #if defined(ADC_HAS_KOKKOS)
@@ -105,6 +106,12 @@ int main(int argc, char** argv) {
     }
   });
 
+  // Profiling counters (ADC-459, Spec 3 section 29): enable the System Profiler, so the ProgramContext
+  // seam ops the step body calls (solve_fields, rhs_into, axpy) bump "kernels" and rhs_scratch_like
+  // records the scratch peak. This is the HOST-validatable path (a ProgramContext built directly in
+  // C++, no compiled .so); the cache hit/skip counters need a held schedule the codegen emits, so they
+  // are exercised on the Kokkos/ROMEO compiled-.so runtime, not here.
+  sim.enable_profiling();
   const int step0 = sim.macro_step();
   sim.step(dt);
   const std::vector<double> Up = sim.get_state("gas");
@@ -126,6 +133,41 @@ int main(int argc, char** argv) {
   if (!(change > 1e-9)) {
     std::printf("FAIL program step did not change the state (change = %.3e)\n", change);
     ++fails;
+  }
+
+  // ADC-459 counters: one step ran solve_fields + (1 block) rhs_into + axpy = EXACTLY 3 kernel-
+  // dispatching seam ops (no double-count: solve_fields counts once, via Impl::solve_fields). Pinning
+  // the exact value guards against a seam double-counting (a >0 check would not).
+  const runtime::program::Profiler& prof = sim.profiler();
+  if (prof.counter("kernels") != 3) {
+    std::printf("FAIL kernels counter = %lld, expected 3 (solve_fields + rhs_into + axpy, no double)\n",
+                static_cast<long long>(prof.counter("kernels")));
+    ++fails;
+  }
+  if (!(prof.counter("scratch_allocs") > 0)) {
+    std::printf("FAIL scratch_allocs counter not incremented (= %lld)\n",
+                static_cast<long long>(prof.counter("scratch_allocs")));
+    ++fails;
+  }
+  if (!(prof.counter("scratch_peak_bytes") > 0)) {
+    std::printf("FAIL scratch_peak_bytes not recorded (= %lld)\n",
+                static_cast<long long>(prof.counter("scratch_peak_bytes")));
+    ++fails;
+  }
+  // The cache hit/skip counters never fire on this native ProgramContext step (no held schedule); they
+  // exist as counters only after the compiled scheduler emits cache_should_update. Assert they read 0.
+  if (prof.counter("cache_hits") != 0 || prof.counter("cache_misses") != 0) {
+    std::printf("FAIL cache counters moved on the native path (hits=%lld misses=%lld)\n",
+                static_cast<long long>(prof.counter("cache_hits")),
+                static_cast<long long>(prof.counter("cache_misses")));
+    ++fails;
+  }
+  {
+    const std::string report = sim.profile_report();
+    if (report.find("kernels=") == std::string::npos) {
+      std::printf("FAIL profile_report omits the kernels counter line\n");
+      ++fails;
+    }
   }
 
   if (fails == 0)

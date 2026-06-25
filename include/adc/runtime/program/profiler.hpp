@@ -79,6 +79,22 @@ class Profiler {
     }
   }
 
+  // Track a named PEAK counter: set it to max(current, value) instead of accumulating. Used for the
+  // scratch peak memory (the largest single scratch allocation seen, in bytes), where the running sum
+  // is meaningless. First-seen creates the counter at @p value. No-op when disabled.
+  void count_max(const std::string& name, std::int64_t value) {
+    if (!enabled_) {
+      return;
+    }
+    auto it = counters_.find(name);
+    if (it == counters_.end()) {
+      counter_order_.push_back(name);
+      counters_.emplace(name, value);
+    } else {
+      it->second = std::max(it->second, value);
+    }
+  }
+
   const Entry* entry(const std::string& name) const {
     auto it = entries_.find(name);
     return it == entries_.end() ? nullptr : &it->second;
