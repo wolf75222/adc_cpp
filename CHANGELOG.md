@@ -20,6 +20,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Added
 
+- **Spec 3 Program profiler (C++ foundation)** (ADC-459, epic ADC-450): `adc::runtime::program::Profiler`
+  (`include/adc/runtime/program/profiler.hpp`) -- a header-only per-node / per-brick wall-clock
+  accumulator (count / total / mean / min / max per named scope) plus integer counters (kernels,
+  cache hits/misses, scheduled nodes due/skipped) and the report `sim.profile_report()` will return,
+  with an RAII `ProfileScope`. Disabled by default (no measurable hot-path cost when off). Serial C++
+  unit test `tests/test_profiler.cpp` (built + passing locally). The `System` step instrumentation
+  and the `sim.enable_profiling()` / `profile_report()` Python bindings are the ADC-459 follow-up.
+
 - **Spec 3 coupled_rate operator + multi-output P.call** (ADC-457, epic ADC-450): a `coupled_rate`
   operator kind (`model.OPERATOR_KINDS`) whose `Signature` output is a `RateBundle` (now hashable/
   equatable so it can be a signature output), of arbitrary arity. `Program.call` on a coupled_rate
