@@ -42,15 +42,20 @@ import numpy as np
 # Operator-first type system (Spec 2): a typed VIEW only. dsl.py is sometimes loaded as a
 # top-level module without its package (the standalone-import test trick, e.g.
 # test_projection_eig loads dsl.py via spec_from_file_location), where a relative import has no
-# parent package; fall back to loading the sibling model.py by path (it is stdlib-only).
+# parent package; fall back to loading the sibling model/ PACKAGE by path (it is stdlib-only).
+# The package uses relative intra-imports, so we register it under a name and give the spec its
+# submodule search path; `from .spaces import ...` then resolves without importing adc/_adc.
 try:
     from . import model as _model
 except ImportError:  # pragma: no cover - exercised only by the standalone-import path
     import importlib.util as _ilu
 
+    _mdir = os.path.join(os.path.dirname(__file__), "model")
     _mspec = _ilu.spec_from_file_location(
-        "adc_model", os.path.join(os.path.dirname(__file__), "model.py"))
+        "adc_model", os.path.join(_mdir, "__init__.py"),
+        submodule_search_locations=[_mdir])
     _model = _ilu.module_from_spec(_mspec)
+    sys.modules["adc_model"] = _model  # so the package's relative imports resolve
     _mspec.loader.exec_module(_model)
 
 

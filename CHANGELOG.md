@@ -883,6 +883,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **adc.model package extraction** (ADC-469, epic ADC-450): the flat
+  `python/adc/model.py` operator-first core is split into a
+  `python/adc/model/` package (`spaces`, `signatures`, `operators`,
+  `registry`, `module`, `bundles`), with `adc.model` re-exporting the
+  same public surface (no API or behavior change). The package
+  intra-imports are relative; the `dsl.py` standalone-import fallback
+  and the five `docs/docmap.toml` `depends_on` entries are repointed
+  at `model/__init__.py`.
+
 - Bind compiled-Program blocks to System blocks by name, not add-order (ADC-457 criterion 23). The
   block names join the Program IR identity (`block_order` in the hash), so this invalidates every
   pre-existing problem-`.so` cache (a different block binding is correctly a different program).
