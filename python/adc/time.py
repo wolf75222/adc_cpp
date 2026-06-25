@@ -2328,7 +2328,14 @@ class Program:
     def _serialize(self):
         nodes = [Program._serialize_node(v) for v in self._values]
         commits = sorted((b, s.id) for b, s in self._commits.items())
-        out = {"name": self.name, "version": 1, "nodes": nodes, "commits": commits}
+        # NAME-based block binding (Spec 3 criterion 23, ADC-457): the block names in P.state
+        # declaration order are part of the IR identity -- the .so exports them (adc_program_block_name)
+        # and install_program binds System blocks to them BY NAME. Reordering P.state changes this list,
+        # so two Programs differing only by block order get distinct IR hashes (and distinct .so caches).
+        _order = self._block_indices()
+        block_order = sorted(_order, key=_order.get)
+        out = {"name": self.name, "version": 1, "nodes": nodes, "commits": commits,
+               "block_order": block_order}
         # The optional dt bound (spec s18 / ADC-417) is part of the IR identity: its presence and its
         # scalar sub-program feed the hash (the compiled-problem cache key) so two Programs differing
         # only by a dt bound get distinct .so caches.
@@ -2361,11 +2368,16 @@ class Program:
 
         Multi-block (ADC-426): N ``P.state(\"a\")`` / ``P.state(\"b\")`` declarations + N ``P.commit``
         are lowered -- each op routes to its own block's runtime index (``_block_indices``, in the order
-        the blocks are first declared via ``P.state``). The System blocks (``sim.add_equation`` /
-        ``sim.add_block``) MUST be added in that SAME order: the generated ``.so`` addresses them by
-        index. A block declared but never committed is a READ-ONLY block (allowed; e.g. a passive field
-        whose charge couples the others through the shared Poisson). A commit of a block no ``P.state``
-        declares is rejected. A single-block Program lowers byte-identically (its one block is index 0).
+        the blocks are first declared via ``P.state``). The .so also exports its block NAMES in that
+        order (``adc_program_block_count`` / ``adc_program_block_name``); ``System::install_program``
+        binds them to the instantiated System blocks BY NAME (Spec 3 criterion 23, ADC-457), so the
+        System blocks (``sim.add_equation`` / ``sim.add_block``) may be added in ANY order -- a Program
+        block whose name has no instantiated System block fails loud (``Program requires block instance
+        '<name>', but simulation did not instantiate it``). A block declared but never committed is a
+        READ-ONLY block (allowed; e.g. a passive field whose charge couples the others through the shared
+        Poisson). A commit of a block no ``P.state`` declares is rejected. A single-block Program lowers
+        byte-identically (its one block is index 0; an order-matching multi-block Program too -- the
+        name map is the identity).
 
         Phase-4b also lowers the SPLIT-SOURCE / LOCAL-LINEAR ops -- ``source`` (a named ``m.source_term``
         evaluated per cell), ``apply`` (LU for a named ``m.linear_source``) and ``solve_local_linear``
@@ -2417,7 +2429,28 @@ class Program:
         return _PROGRAM_CPP_TEMPLATE.format(
             name=json.dumps(self.name), hash=self._ir_hash(), prelude=prelude, body=body,
             has_dt_bound=has_dt_bound, dt_bound_body=dt_bound_body,
-            module_metadata=self._emit_module_metadata(model))
+            module_metadata=self._emit_module_metadata(model),
+            block_names=self._emit_block_names())
+
+    def _emit_block_names(self):
+        """C++ source of the NAME-based block-binding ABI the .so exports (Spec 3 criterion 23, ADC-457):
+        ``adc_program_block_count()`` and ``adc_program_block_name(int)`` -- the Program's block names in
+        ``_block_indices`` order (P.state declaration order, the order the step body's ``ctx.state(idx)``
+        addresses). System::install_program reads them, matches each to the instantiated System block of
+        that name, and stores the program-index -> system-index map (read by ProgramContext), so the
+        System blocks may be added in ANY order vs the Program's P.state declarations -- a Program block
+        whose name has no System block fails loud. The block names are also part of the IR identity (the
+        block_order field of _serialize feeds the IR hash), so reordering P.state changes the hash."""
+        order = self._block_indices()  # name -> index, declaration order
+        names = sorted(order, key=order.get)
+        cases = "".join('    case %d: return %s;\n' % (order[nm], json.dumps(nm)) for nm in names)
+        return (
+            "// NAME-based block binding (Spec 3 criterion 23, ADC-457): the Program's block names in\n"
+            "// P.state declaration order. install_program matches each to a System block BY NAME (not\n"
+            "// add-order) and builds the program-index -> system-index map ProgramContext resolves.\n"
+            'extern "C" int adc_program_block_count() { return %d; }\n' % len(names) +
+            'extern "C" const char* adc_program_block_name(int i) {\n'
+            '  switch (i) {\n%s    default: return "";\n  }\n}\n' % cases)
 
     def _emit_module_metadata(self, model=None):
         """C++ source of the GeneratedModule metadata the .so exports (Spec 2 / ADC-442).
@@ -2498,8 +2531,11 @@ class Program:
         """Map each block name to a stable runtime block index, in the order the Program FIRST declares
         it via ``P.state(...)`` (ADC-426). Index 0 is the first declared block, 1 the second, ...; the
         single-block program keeps index 0 (byte-identical lowering). The generated ``.so`` addresses
-        blocks by this index, so the System blocks (``sim.add_equation`` / ``sim.add_block``) MUST be
-        added in the SAME order as the Program's ``P.state`` declarations (the order the .so expects)."""
+        blocks by this index in its step body AND exports the block NAMES in this order
+        (``adc_program_block_name``); ``System::install_program`` binds them to the instantiated System
+        blocks BY NAME (Spec 3 criterion 23, ADC-457), so the System block add-order need NOT match the
+        Program's ``P.state`` order -- the historical positional convention is the identity special case
+        (names already in add-order)."""
         order = {}
         for v in self._values:
             if v.op == "state" and v.block not in order:
@@ -4180,6 +4216,7 @@ extern "C" const char* adc_program_abi_key() {{ return ADC_ABI_KEY_LITERAL; }}
 extern "C" const char* adc_program_name() {{ return {name}; }}
 extern "C" const char* adc_program_hash() {{ return "{hash}"; }}
 
+{block_names}
 {module_metadata}
 extern "C" void adc_install_program(void* sys) {{
   adc::runtime::program::ProgramContext ctx(sys);

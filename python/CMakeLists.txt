@@ -371,6 +371,21 @@ add_test(NAME test_time_multiblock
 set_tests_properties(test_time_multiblock PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# NAME-based block binding (Spec 3 criterion 23, ADC-457). The codegen test is PURE PYTHON: the .so
+# exports adc_program_block_count / adc_program_block_name in P.state order, and the block names are
+# part of the IR hash (reordering P.state changes it). The runtime test COMPILES a 2-block .so, installs
+# it on Systems whose blocks were added in DIFFERENT orders (reversed must match in-order: bind by name,
+# not add-order), and asserts a missing block instance fails loud with the verbatim spec message; it
+# self-skips without a compiler / Kokkos / install_program (validated on CI-Kokkos + ROMEO).
+add_test(NAME test_name_binding_codegen
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_name_binding_codegen.py)
+set_tests_properties(test_name_binding_codegen PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME test_name_binding_runtime
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_name_binding_runtime.py)
+set_tests_properties(test_name_binding_runtime PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # Coupled multi-block field-solve codegen (Spec 3 section 12.3 criterion 24, ADC-457) : a multi-block
 # Program with P.solve_fields_from_blocks([...]) lowers to ctx.solve_fields_from_blocks over a per-block
 # stage-state pointer vector (sized to ctx.n_blocks(), each listed block slotted by index). Pure Python

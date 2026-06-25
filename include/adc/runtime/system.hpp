@@ -663,6 +663,23 @@ class System {
   ADC_EXPORT int n_blocks() const;
   /// The conservative state MultiFab of block @p b (zero-copy, non-owning reference).
   ADC_EXPORT MultiFab& block_state(int b);
+  /// @name Compiled-Program NAME-based block binding (Spec 3 criterion 23, ADC-457)
+  /// A compiled Program numbers its blocks in P.state declaration order (the .so's
+  /// adc_program_block_name table); the System numbers its blocks in add_block / add_equation order
+  /// (block_names). They need NOT agree. install_program reads the .so's block names, matches each to
+  /// the System block of that name, and stores the resulting program-index -> system-index map here so
+  /// ProgramContext::state / rhs_into / commit resolve a Program block index to the name-matched System
+  /// block -- NOT the positional index. An EMPTY map is the identity (a single-block or order-matching
+  /// Program lowers byte-identically; ProgramContext built directly, e.g. in a C++ test, also sees
+  /// identity). Lives in Impl (private to the _adc TU) so it survives the dlopen boundary; the seam is
+  /// ADC_EXPORT so the generated .so and ProgramContext resolve it via RTLD_GLOBAL.
+  /// @{
+  /// Install the program-index -> system-index map (entry p = the System block index of Program block
+  /// p). Empty clears it (identity). Set by install_program after matching the .so's block names.
+  ADC_EXPORT void set_program_block_map(const std::vector<int>& prog_to_sys);
+  /// The installed program-index -> system-index map (empty = identity). Read by ProgramContext.
+  ADC_EXPORT const std::vector<int>& program_block_map() const;
+  /// @}
   /// R <- -div F(U) + S(U, aux) for block @p b (the block's frozen-Poisson residual closure).
   ADC_EXPORT void block_rhs_into(int b, MultiFab& U, MultiFab& R);
   /// R <- -div F(U) for block @p b -- the SAME flux divergence as block_rhs_into but WITHOUT the
