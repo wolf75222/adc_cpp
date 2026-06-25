@@ -155,6 +155,27 @@ def test_cse_condensed_schur_buffer_writers_untouched():
     assert Q._ir_hash() == P._ir_hash()
 
 
+def test_cse_does_not_collapse_aux_reading_rhs_across_a_solve():
+    """BLOCKER regression (adversarial review): rhs/source/apply read the SHARED System aux by buffer
+    identity (not via a dataflow input), and solve_fields mutates that aux in place. Two rhs with the
+    SAME (state, fields) dataflow inputs that STRADDLE a second solve_fields compute DIFFERENT values
+    (the second reads the freshly solved aux). They are excluded from _PURE_OPS, so CSE -- which keys
+    only on dataflow inputs -- must KEEP both, never collapse the second onto the stale-aux first."""
+    P = adctime.Program("aux_rhs_cse")
+    dt = P.dt
+    U = P.state("plasma")
+    f = P.solve_fields(U)
+    R1 = P.rhs("R1", state=U, fields=f, flux=True, sources=["default"])
+    P.solve_fields(U)  # re-fills the shared aux IN PLACE between the two rhs reads
+    R2 = P.rhs("R2", state=U, fields=f, flux=True, sources=["default"])
+    P.commit("plasma", P.linear_combine("U1", U + dt * R1 + dt * R2))
+    n_before = sum(1 for v in P._values if v.op == "rhs")
+    assert n_before == 2, "fixture lost an rhs"
+    Q = P.optimize()
+    assert sum(1 for v in Q._values if v.op == "rhs") == 2, \
+        "CSE collapsed two aux-reading rhs across a solve_fields (the second would read stale aux)"
+
+
 # --------------------------------------------------------------------------- redundant solve_fields
 
 def test_redundant_solve_removed_when_no_mutation():

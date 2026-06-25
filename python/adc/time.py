@@ -2112,11 +2112,16 @@ class Program:
     #   - ``solve_local_linear`` is EXCLUDED (it reads its rhs State by buffer; a later op may overwrite
     #     that rhs buffer in place between two solves, so two same-input solves are NOT provably equal);
     #   - ``where`` / ``cell_compare`` ARE pure (fresh scratch, component-wise from inputs only).
-    # Every op OUTSIDE this set is treated as non-CSE-able, so a buffer-writer / side-effecting / unknown
-    # op is never collapsed (safe-by-default, mirroring the dead-node allow-list).
+    #   - ``rhs`` / ``source`` / ``apply`` are EXCLUDED: their per-cell kernels read the SHARED System
+    #     aux (``ctx.aux()``) BY BUFFER IDENTITY, not through a dataflow input edge (see
+    #     ``_emit_source_kernel`` / ``_emit_apply_kernel`` / ``_cell_locals`` -> ``auxA(i,j,...)``). A
+    #     ``solve_fields`` mutates that aux in place, so two same-(state,fields)-input source/apply/rhs
+    #     nodes straddling a field solve are NOT equal (the second reads the freshly solved field). CSE
+    #     keys only on dataflow inputs, so collapsing them would silently read the stale pre-solve aux.
+    # Every op OUTSIDE this set is treated as non-CSE-able, so a buffer-writer / side-effecting / aux-
+    # reading / unknown op is never collapsed (safe-by-default, mirroring the dead-node allow-list).
     _PURE_OPS = frozenset({
-        "rhs", "source", "apply", "linear_combine", "linear_source",
-        "cell_compare", "where", "scalar_op", "compare",
+        "linear_combine", "linear_source", "cell_compare", "where", "scalar_op", "compare",
     })
     # Ops that WRITE a block state or otherwise change what a subsequent ``solve_fields`` over the same
     # state would see (the Poisson RHS reads every block's live state + the shared aux). A redundant
@@ -2143,6 +2148,11 @@ class Program:
             elif isinstance(ref, _Affine):
                 for term, _ in ref.terms:
                     yield term
+        sched = attrs.get("schedule")
+        if sched is not None:
+            cond = getattr(sched, "params", {}).get("cond")
+            if isinstance(cond, Value):
+                yield cond  # a when(cond) predicate is live (kept off the dead-node / CSE-drop path)
         for key in ("cond_block", "body_block", "apply_block", "residual_block"):
             block = attrs.get(key)
             if block:
@@ -2254,6 +2264,12 @@ class Program:
                 elif key in ("cond", "body", "residual", "iterate", "guess",
                              "apply_result", "apply_in", "apply_out"):
                     attrs[key] = remap(val)
+                elif key == "schedule" and val is not None and isinstance(
+                        getattr(val, "params", {}).get("cond"), Value):
+                    # a when(cond) schedule embeds a predicate Value in params["cond"]; remap it onto
+                    # the survivor so a CSE-collapsed/renumbered predicate is not left dangling.
+                    attrs[key] = Schedule(val.kind, val.policy,
+                                          **{**val.params, "cond": remap(val.params["cond"])})
                 else:
                     attrs[key] = val
             return attrs
