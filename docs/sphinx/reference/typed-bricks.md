@@ -54,9 +54,30 @@ T = adc.lib.time.predictor_corrector(P, "plasma",
                                      implicit_operator="implicit_operator")
 ```
 
+## External C++ bricks
+
+A user ships a brick in a standalone `.so` that registers a manifest entry at static-init time
+with the C++ macro `ADC_REGISTER_BRICK(id, category, requirements)`
+(`include/adc/runtime/program/external_brick.hpp`) and exports a C function
+`const char* adc_brick_manifest()` returning JSON over the process-global `BrickRegistry`.
+`adc.lib.load_cpp_library(path)` dlopens the `.so`, reads that manifest, and registers the ids
+in an in-process catalog; `adc.lib.riemann.User(id)` (and the category-agnostic
+`adc.lib.external(id)`) then surface an `external_cpp` descriptor carrying the manifest's
+requirements/capabilities. An id that was never loaded raises a clear `LookupError`
+("external brick 'x' not loaded; call adc.lib.load_cpp_library(...)") rather than fabricate a
+descriptor.
+
+```python
+n = adc.lib.load_cpp_library("./my_bricks.so")   # registers every brick the .so manifests
+d = adc.lib.riemann.User("my_hllc")
+d.brick_type     # 'external_cpp'
+d.native_id      # 'my_hllc'
+d.requirements   # {'capabilities': ['pressure', 'wave_speeds']}
+```
+
 ## Status
 
-The descriptor catalog, the native ids and the time macros are in place. `compile_library`
-(separately compiled brick libraries), the `specialization` modes (native / library /
-specialized / auto) and external C++ brick registration (`adc.lib.load_cpp_library`) are
-follow-ups.
+The descriptor catalog, the native ids, the time macros and external C++ brick registration
+(`adc.lib.load_cpp_library` + the C++ `BrickRegistry` / `ADC_REGISTER_BRICK`) are in place.
+`compile_library` (separately compiled brick libraries) and the `specialization` modes (native
+/ library / specialized / auto) are follow-ups.

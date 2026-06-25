@@ -254,7 +254,7 @@ testable = false
 owner = "Romain"
 mode = "warning"
 depends_on = ["python/adc/lib.py", "python/adc/time.py"]
-tested_by = ["python/tests/test_lib_descriptors.py"]
+tested_by = ["python/tests/test_lib_descriptors.py", "python/tests/test_external_bricks.py"]
 testable = false
 
 [docs."docs/sphinx/reference/multispecies.md"]

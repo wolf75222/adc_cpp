@@ -17,12 +17,13 @@ consume it. The namespaces mirror the Spec 3 catalog (riemann, reconstruction,
 limiters, spatial, fields, solvers, preconditioners, diagnostics, projections,
 invariants, time).
 """
+import json
 from types import SimpleNamespace
 
 __all__ = ["BrickDescriptor", "riemann", "reconstruction", "limiters", "spatial",
            "fields", "solvers", "preconditioners", "diagnostics", "projections",
            "invariants", "time", "solver", "build_solver_ir", "generate_solver_cpp",
-           "SolverContext", "SolverIR"]
+           "SolverContext", "SolverIR", "load_cpp_library", "external"]
 
 BRICK_TYPES = ("native", "generated", "macro", "external_cpp")
 
@@ -73,6 +74,123 @@ class BrickDescriptor:
             self.name, self.brick_type, self.scheme)
 
 
+# --- external C++ bricks (Spec 3 section 21-22 / criterion 20) -------------
+# A user ships a brick in a standalone ``.so`` that registers a manifest entry at
+# static-init time (the C++ ``ADC_REGISTER_BRICK`` macro -> ``BrickRegistry``) and exports
+# a C ``adc_brick_manifest()`` returning JSON. ``load_cpp_library`` dlopens it, parses that
+# JSON and registers the ids in this in-process catalog; ``riemann.User(id)`` /
+# ``external(id)`` then surface an ``external_cpp`` descriptor carrying the manifest's
+# requirements/capabilities. An id that was never loaded raises a clear error -- a
+# descriptor is NEVER fabricated for an unregistered brick.
+_EXTERNAL_BRICKS = {}
+
+
+def _clear_external_catalog():
+    """Drop every loaded external brick (test isolation; not part of the public API)."""
+    _EXTERNAL_BRICKS.clear()
+
+
+def _split_csv(value):
+    """Split a manifest CSV field into a stripped, non-empty token list ([] when absent)."""
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        raise ValueError("manifest requirements/capabilities must be a CSV string; got %r"
+                         % (value,))
+    return [tok.strip() for tok in value.split(",") if tok.strip()]
+
+
+def _register_manifest(manifest_json):
+    """Parse a brick manifest (the JSON ``adc_brick_manifest()`` returns) and register it.
+
+    The manifest is ``{"bricks": [{"id", "category", "requirements", "capabilities"}, ...]}``
+    where ``requirements``/``capabilities`` are optional CSV strings. Each entry's id is
+    registered in the in-process catalog (last load wins on a repeated id). Returns the number
+    of bricks registered. A malformed manifest or an entry missing its id raises ``ValueError``
+    rather than silently drop a brick. This is the seam ``load_cpp_library`` calls after dlopen;
+    it is also usable directly (a test does not need a compiled ``.so``).
+    """
+    try:
+        doc = json.loads(manifest_json)
+    except (json.JSONDecodeError, TypeError) as err:
+        raise ValueError("external brick manifest is not valid JSON: %s" % (err,)) from err
+    bricks = doc.get("bricks") if isinstance(doc, dict) else None
+    if not isinstance(bricks, list):
+        raise ValueError("external brick manifest must be {\"bricks\": [...]}; got %r"
+                         % (manifest_json,))
+    count = 0
+    for entry in bricks:
+        if not isinstance(entry, dict) or not entry.get("id"):
+            raise ValueError("external brick manifest entry must carry a non-empty 'id'; "
+                             "got %r" % (entry,))
+        brick_id = str(entry["id"])
+        _EXTERNAL_BRICKS[brick_id] = {
+            "id": brick_id,
+            "category": str(entry.get("category") or "brick"),
+            "requirements": _split_csv(entry.get("requirements")),
+            "capabilities": _split_csv(entry.get("capabilities")),
+        }
+        count += 1
+    return count
+
+
+def load_cpp_library(path):
+    """Load an external C++ brick ``.so`` and register the bricks it manifests (criterion 20).
+
+    Opens @p path with :func:`ctypes.CDLL` (its static initializers run the
+    ``ADC_REGISTER_BRICK`` registrations), calls the exported C function
+    ``const char* adc_brick_manifest()`` to read the registered bricks as JSON, and registers
+    the ids in the in-process catalog so ``riemann.User(id)`` / :func:`external` resolve. The
+    ``.so`` must export ``adc_brick_manifest`` (a missing symbol is a clear ``ValueError``).
+    Returns the number of bricks registered.
+    """
+    import ctypes
+    handle = ctypes.CDLL(str(path))  # raises OSError if the path is not a loadable library
+    try:
+        manifest_fn = handle.adc_brick_manifest
+    except AttributeError as err:
+        raise ValueError("external brick library %r does not export adc_brick_manifest(); it "
+                         "is not an adc brick .so" % (path,)) from err
+    manifest_fn.restype = ctypes.c_char_p
+    raw = manifest_fn()
+    if raw is None:
+        raise ValueError("external brick library %r: adc_brick_manifest() returned NULL"
+                         % (path,))
+    return _register_manifest(raw.decode("utf-8"))
+
+
+def _external_descriptor(brick_id, *, expect_category=None):
+    """The ``external_cpp`` descriptor for a loaded brick @p brick_id (raise if not loaded).
+
+    An unloaded id raises :class:`LookupError` naming the id and :func:`load_cpp_library`; a
+    category mismatch (selecting via ``riemann.User`` a brick registered as a preconditioner)
+    raises :class:`ValueError`. The manifest requirements/capabilities become list metadata on
+    the descriptor (mirroring the native bricks' ``requirements={"capabilities": [...]}``).
+    """
+    entry = _EXTERNAL_BRICKS.get(str(brick_id))
+    if entry is None:
+        raise LookupError(
+            "external brick %r not loaded; call adc.lib.load_cpp_library(...) on the brick "
+            ".so first (loaded: %s)" % (brick_id, sorted(_EXTERNAL_BRICKS) or "none"))
+    if expect_category is not None and entry["category"] != expect_category:
+        raise ValueError("external brick %r is registered as category %r, not %r"
+                         % (brick_id, entry["category"], expect_category))
+    req = {"capabilities": list(entry["requirements"])} if entry["requirements"] else {}
+    caps = {"provides": list(entry["capabilities"])} if entry["capabilities"] else {}
+    return BrickDescriptor(entry["id"], "external_cpp", category=entry["category"],
+                           native_id=entry["id"], scheme="user",
+                           requirements=req or None, capabilities=caps or None)
+
+
+def external(brick_id):
+    """An ``external_cpp`` descriptor for a loaded brick of ANY category (criterion 20).
+
+    The category-agnostic counterpart of ``riemann.User`` / ``preconditioner.User``: it surfaces
+    whatever category the manifest registered. An unloaded id raises a clear :class:`LookupError`.
+    """
+    return _external_descriptor(brick_id)
+
+
 # Native ids below are the REAL C++ symbols in include/adc (verified): the FV bricks
 # live at top level in ``namespace adc`` (e.g. adc::HLLCFlux), not under a numerics/fv
 # namespace. Some catalogued bricks have no native type yet -- they are emitted with
@@ -106,9 +224,7 @@ riemann = SimpleNamespace(
                           ["physical_flux", "pressure", "wave_speeds",
                            "contact_speed", "hllc_star_state"]),
     Roe=lambda: _riemann("roe", "adc::RoeFlux", ["physical_flux", "roe_average"]),
-    User=lambda native_id, **opts: BrickDescriptor(
-        native_id, "external_cpp", category="riemann", native_id=native_id,
-        scheme="user", options=opts or None),
+    User=lambda brick_id: _external_descriptor(brick_id, expect_category="riemann"),
 )
 
 
@@ -140,9 +256,7 @@ reconstruction = SimpleNamespace(
         "muscl", "adc::Minmod", limiter, category="reconstruction", limiter=limiter),
     WENO5=lambda: _native("weno5", "adc::Weno5", "weno5", category="reconstruction"),
     WENO5Z=lambda: _native("weno5z", "adc::Weno5", "weno5", category="reconstruction"),
-    User=lambda native_id, **opts: BrickDescriptor(
-        native_id, "external_cpp", category="reconstruction", native_id=native_id,
-        scheme="user", options=opts or None),
+    User=lambda brick_id: _external_descriptor(brick_id, expect_category="reconstruction"),
 )
 
 
@@ -520,9 +634,7 @@ preconditioners = SimpleNamespace(
                                  category="preconditioner"),
     GeometricMG=lambda **o: _native("geometric_mg", "adc::GeometricMG", "geometric_mg",
                                     category="preconditioner", **o),
-    User=lambda native_id, **opts: BrickDescriptor(
-        native_id, "external_cpp", category="preconditioner", native_id=native_id,
-        scheme="user", options=opts or None),
+    User=lambda brick_id: _external_descriptor(brick_id, expect_category="preconditioner"),
 )
 
 
