@@ -5,12 +5,15 @@ schedule, replacing the scattered block stride / substeps / source frequency kno
 
 ```{admonition} Status
 :class: note
-The schedule AUTHORING surface (the vocabulary below, policy chaining, recording a schedule on
-a Program node, and the cacheable-capability validation) is available in `adc.time`. The
-RUNTIME that honors a non-trivial schedule (the typed cache, `accumulate_dt`, the checkpoint) is
-tracked by ADC-458, so a node carrying a non-`always` schedule is recorded and inspectable but
-refuses to lower (it is never silently ignored). Per-block cadence that runs today is the
-existing `substeps` / `stride` step policy ({doc}`time-program`).
+The schedule AUTHORING surface (the vocabulary below, policy chaining, recording a schedule on a
+Program node, the cacheable-capability validation) and the CODEGEN that lowers every kind/policy to
+C++ are available in `adc.time` (ADC-458). A scheduled node lowers to a due-test guard plus its
+policy branch around the statements it emits (the cache lives in the C++ `CacheManager`). Two cases
+still refuse to lower, loudly: `on_end()` (a compiled `sim.step(dt)` loop carries no end-of-run
+signal, so the `.so` cannot know the last step -- use an on_end host hook) and a `when(cond)` over a
+bare Python callable (only a Program Bool predicate lowers). The cache cadence RUNTIME in a stepping
+`.so` is exercised on ROMEO; the `CacheManager` is unit-tested by `tests/test_cache_manager.cpp`. The
+checkpoint of the cache state is a follow-up (ADC-458 section 30).
 ```
 
 ## Authoring
@@ -71,15 +74,27 @@ m.operator_capabilities("explicit_rate", cacheable=False, requires_fresh_inputs=
 so requesting `every(10).hold()` on a non-cacheable operator is an error:
 `operator 'explicit_rate' is not cacheable; cannot use schedule hold`.
 
+## Lowering
+
+A scheduled node lowers around the C++ its operation emits. The due test depends on the kind:
+`every(N)` -> `ctx.cache_should_update(id, N)`; `on_start()` -> `ctx.macro_step() == 0`; `when(cond)`
+-> the lowered Program Bool predicate; `subcycle(count, dt)` -> a `for` sub-loop over the sub-dt. The
+policy decides the not-due branch: `recompute` / `skip` run the body only when due (skip keeps the
+stale value, the cacheable contract); `zero` sets the output to zero off-cadence; `hold` stores the
+output when due and restores it otherwise; `accumulate_dt` accumulates the actual skipped dt and reads
+`eff_dt = sum(dt_skipped)` on the due step (never `N * dt_current`); `error` fails loud if read
+off-cadence. A field solve caches the System aux; any other node caches its own named scratch.
+
 ## Cache and checkpoint
 
-A `hold` cache stores the cached value, the last update step/time, the input versions, the
-accumulated dt and a validity flag. It must be typed, C++-allocated, Kokkos/MPI-safe,
-checkpointed and restored, and invalidated on a Program-hash mismatch. This runtime is the
-core of ADC-458; the checkpoint format and the restart validation extend the existing
-checkpoint path.
+The `CacheManager` (`include/adc/runtime/program/cache_manager.hpp`) stores per node the cached value
+(aux or named scratch), the last update step, the accumulated dt and a validity flag. It is typed,
+C++-allocated and Kokkos/MPI-safe. The checkpoint of this state (serialize/restore on restart,
+invalidate on a Program-hash mismatch) extends the existing checkpoint path and is tracked separately
+(ADC-458 section 30); the `CacheManager` already exposes the in-memory state and accessors the
+serializer will read.
 
-## Current mechanism
+## Per-block step policy
 
-Until ADC-458 lands, use the step policy: a block advances `substeps` sub-steps of `dt/substeps`,
-or `1` macro-step out of `stride`. See {doc}`time-program`.
+The older per-block step policy still runs alongside the scheduler: a block advances `substeps`
+sub-steps of `dt/substeps`, or `1` macro-step out of `stride`. See {doc}`time-program`.

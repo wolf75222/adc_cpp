@@ -75,6 +75,37 @@ int main() {
     chk(std::fabs(c.accumulated_dt(2)) < 1e-15, "accum_reset_on_store");
   }
 
+  // --- accumulate_dt on a COLD node + effective_dt (the due-step read, ADC-458) ---
+  {
+    CacheManager c;
+    // a cold accumulate_dt node accumulates from its first skipped step (no slot needed first)
+    chk(std::fabs(c.accumulated_dt(3)) < 1e-15, "accum_cold_zero");
+    c.accumulate_dt(3, 0.01);   // skipped step 1 (dt varies)
+    c.accumulate_dt(3, 0.02);   // skipped step 2
+    chk(std::fabs(c.accumulated_dt(3) - 0.03) < 1e-12, "accum_cold_sum");
+    // due step: eff_dt = dt_now + sum(skipped) = 0.005 + 0.03; resets the accumulator
+    const double eff = c.effective_dt(3, 0.005);
+    chk(std::fabs(eff - 0.035) < 1e-12, "effective_dt_sum");        // NOT N * dt_current
+    chk(std::fabs(c.accumulated_dt(3)) < 1e-15, "effective_dt_resets");
+    // a fresh window then accumulates from zero again
+    c.accumulate_dt(3, 0.004);
+    chk(std::fabs(c.effective_dt(3, 0.006) - 0.010) < 1e-12, "effective_dt_fresh_window");
+  }
+
+  // --- named scratch cache: store/retrieve an arbitrary MultiFab (not only the aux, ADC-458) ---
+  // A held rhs / source / linear_combine caches its OWN scratch through the same store/retrieve API
+  // the aux uses; a deep copy survives a mutation of the source buffer.
+  {
+    CacheManager c;
+    MultiFab scratch = make_mf(3.0);
+    c.store(9, scratch, 0);                 // cache the scratch (deep copy)
+    scratch.set_val(99.0);                  // mutate the live buffer after caching
+    chk(std::fabs(sum(c.retrieve(9)) - 3.0 * 64) < 1e-12, "scratch_cache_deep_copy");
+    // restoring (scratch = retrieve) overwrites the live buffer with the cached content
+    scratch = c.retrieve(9);
+    chk(std::fabs(sum(scratch) - 3.0 * 64) < 1e-12, "scratch_restore");
+  }
+
   // --- multiple independent nodes + clear ---
   {
     CacheManager c;

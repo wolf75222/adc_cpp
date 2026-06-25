@@ -7,7 +7,13 @@
 // typed cache (a MultiFab + its bookkeeping) and the due/store/retrieve/accumulate logic; the
 // codegen wraps a scheduled node in `if (due) { recompute; store } else { retrieve }`, and the
 // ProgramContext owns one CacheManager per installed Program. Host/serial today; checkpoint of the
-// slots is a follow-up (it mirrors the System history serialization).
+// slots is a follow-up (ADC-458 section 30, it mirrors the System history serialization) -- this
+// header exposes the in-memory state + accessors the serializer will read, it does not own the I/O.
+//
+// A slot caches EITHER the System aux (a held field solve restores phi/grad/E) OR a named scratch
+// MultiFab (a held rhs / source / linear_combine restores its own scratch buffer). The store/retrieve
+// API is the same in both cases (a deep MultiFab copy keyed by the IR node id); the codegen picks the
+// aux or the scratch as the value to cache per node.
 
 #include <cstddef>
 #include <map>
@@ -53,10 +59,27 @@ class CacheManager {
   // The cached value of `node_id` (must be valid: guard with is_due()==false first).
   const MultiFab& retrieve(int node_id) const { return slots_.at(node_id).value; }
 
-  // Add a skipped step's dt to node `node_id`'s accumulator (accumulate_dt policy).
-  void accumulate_dt(int node_id, Real dt) { slots_.at(node_id).accumulated_dt += dt; }
+  // Add a skipped step's dt to node `node_id`'s accumulator (accumulate_dt policy). Creates the slot
+  // if the node was never stored (a cold accumulate_dt node accumulates from its first skipped step,
+  // before any recompute), so this never throws on an absent slot -- the sum is the actual skipped dt.
+  void accumulate_dt(int node_id, Real dt) { slots_[node_id].accumulated_dt += dt; }
 
-  Real accumulated_dt(int node_id) const { return slots_.at(node_id).accumulated_dt; }
+  // The accumulated skipped dt of `node_id` (0 if the node has no slot yet).
+  Real accumulated_dt(int node_id) const {
+    auto it = slots_.find(node_id);
+    return it == slots_.end() ? Real(0) : it->second.accumulated_dt;
+  }
+
+  // The effective dt a due accumulate_dt step should apply: the actual dt of THIS step plus the dt
+  // summed over the steps skipped since the last recompute. CRITICAL with a variable step_cfl: this
+  // is the real sum of the skipped dt, never N * dt_current. Resets the accumulator (a fresh window
+  // starts after this recompute); call once at the start of a due accumulate_dt step.
+  Real effective_dt(int node_id, Real dt_now) {
+    CacheSlot& s = slots_[node_id];
+    const Real eff = dt_now + s.accumulated_dt;
+    s.accumulated_dt = Real(0);
+    return eff;
+  }
 
   bool has(int node_id) const {
     auto it = slots_.find(node_id);
