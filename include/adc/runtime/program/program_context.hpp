@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -649,6 +650,36 @@ class ProgramContext {
   /// Restore node @p node_id's cached aux into the System aux (a held step: no elliptic solve).
   void cache_restore_aux(int node_id) const {
     *sys_->grid_context().aux = cache_mgr_.retrieve(node_id);
+  }
+
+  /// Store a copy of a NAMED scratch MultiFab (a held rhs / source / linear_combine output) as node
+  /// @p node_id's cached value, stamped at the current macro step. The aux variants cache the System
+  /// aux; this caches an arbitrary step-body scratch so ANY schedulable node can hold, not only a
+  /// field solve.
+  void cache_store_scratch(int node_id, const MultiFab& scratch) const {
+    cache_mgr_.store(node_id, scratch, sys_->macro_step());
+  }
+  /// Restore node @p node_id's cached scratch into @p scratch (a held step: no recompute).
+  void cache_restore_scratch(int node_id, MultiFab& scratch) const {
+    scratch = cache_mgr_.retrieve(node_id);
+  }
+  /// The current macro step (0-based). Mirrors System::macro_step(); the codegen lowers on_start() to
+  /// ``ctx.macro_step() == 0`` and reads it for any step-indexed predicate.
+  int macro_step() const { return sys_->macro_step(); }
+  /// Add a skipped step's @p dt to node @p node_id's accumulator (accumulate_dt policy): on a NOT-due
+  /// step the held node does not recompute but records the dt so the next due step sees the full
+  /// skipped interval. Variable step_cfl safe (the actual skipped dt, not N * dt_current).
+  void cache_accumulate_dt(int node_id, Real dt) const { cache_mgr_.accumulate_dt(node_id, dt); }
+  /// The effective dt a due accumulate_dt step applies: @p dt_now plus the summed skipped dt since the
+  /// last recompute (resets the accumulator). The codegen feeds this as the step's dt into the held
+  /// node's recompute so it advances over the whole skipped interval at once.
+  Real cache_effective_dt(int node_id, Real dt_now) const {
+    return cache_mgr_.effective_dt(node_id, dt_now);
+  }
+  /// Fail loud: a node with an `error` policy was reached off its schedule cadence (a stale value would
+  /// be read). The codegen emits this on the not-due branch of an `error`-policy node.
+  [[noreturn]] void scheduler_error(const std::string& what) const {
+    throw std::runtime_error("adc Program scheduler: " + what);
   }
   /// @}
 

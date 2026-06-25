@@ -125,25 +125,44 @@ def test_skip_does_not_require_cacheable():
     P.call("fields_from_state", U, schedule=adctime.every(10).skip())   # no raise
 
 
-# --- honesty gate: a not-yet-lowered non-always schedule must not silently lower to a no-op ---
-# (ADC-458 codegen made a HELD solve_fields lowerable; the other policies/ops still refuse.)
-def test_non_always_schedule_refuses_to_lower():
+# --- honesty gate: the two genuinely-unlowerable cases must fail loud, never silently no-op ---
+# (ADC-458 codegen lowers every kind/policy EXCEPT on_end() -- no end-of-run signal in a compiled step
+# loop -- and a when() over a Python callable. The full policy/kind matrix is in test_scheduler_codegen.)
+def test_on_end_schedule_refuses_to_lower():
     mod, u, _ = _module(cacheable=True)
     P = adctime.Program("p").bind_operators(mod)
     U = P.state("plasma", space=u)
-    # a skip policy on the field solve is not yet lowered (only every(N).hold is) -> still refuses
-    P.call("fields_from_state", U, schedule=adctime.every(10).skip())
+    P.call("fields_from_state", U, schedule=adctime.on_end().hold())
+    with pytest.raises(NotImplementedError, match="ADC-458"):
+        P._check_schedules_lowerable()
+
+
+def test_when_python_callable_refuses_to_lower():
+    mod, u, _ = _module(cacheable=True)
+    P = adctime.Program("p").bind_operators(mod)
+    U = P.state("plasma", space=u)
+    # a when() over a bare Python callable is not a Program value -> cannot lower
+    P.call("fields_from_state", U, schedule=adctime.when(lambda: True).hold())
     with pytest.raises(NotImplementedError, match="ADC-458"):
         P._check_schedules_lowerable()
 
 
 def test_held_solve_fields_now_lowers():
-    # ADC-458 codegen: a held field solve is the one non-always schedule that lowers (to the cache
-    # branch) -- it must NOT raise (the runtime cadence is exercised in the compiled .so / ROMEO).
+    # ADC-458 codegen: a held field solve lowers to the cache branch -- it must NOT raise (the runtime
+    # cadence is exercised in the compiled .so / ROMEO).
     mod, u, _ = _module(cacheable=True)
     P = adctime.Program("p").bind_operators(mod)
     U = P.state("plasma", space=u)
     P.call("fields_from_state", U, schedule=adctime.every(10).hold())
+    P._check_schedules_lowerable()   # no raise
+
+
+def test_skip_now_lowers():
+    # ADC-458: skip on a field solve lowers (the op runs only when due; the aux is stale off-cadence).
+    mod, u, _ = _module(cacheable=True)
+    P = adctime.Program("p").bind_operators(mod)
+    U = P.state("plasma", space=u)
+    P.call("fields_from_state", U, schedule=adctime.every(10).skip())
     P._check_schedules_lowerable()   # no raise
 
 
