@@ -1772,12 +1772,13 @@ class System:
 
         @param compiled the compiled problem handle (compile_problem(...) result) carrying ``so_path``;
             installed via install_program after every instance/solver/aux is wired.
-        @param instances dict {name: {"state": str, "initial": array, "spatial": <brick>,
-            "time": <adc.Explicit/IMEX>}}. Each entry adds the named block (add_equation, binding the
-            Program block of that name, Spec criterion 23), sets its initial state and lowers the
-            spatial brick to the add_equation spatial args. The block model is the per-instance
-            ``"model"`` if given, else ``compiled`` (single-instance case). ``spatial`` is an
-            adc.FiniteVolume(...) / adc.Spatial(...) OR an adc.lib.spatial.FiniteVolume(...) descriptor.
+        @param instances dict {name: {"initial": array, "spatial": <brick>, "model": <adc.Model>,
+            "time": <adc.Explicit/IMEX>}}. The block is bound by the dict KEY @p name (Spec criterion
+            23), not a "state" field. Each entry adds the named block (add_equation), sets its
+            "initial" state (if given) and lowers the "spatial" brick to the add_equation spatial args.
+            The block model is the per-instance ``"model"`` if given, else ``compiled`` (single-
+            instance case). ``spatial`` is an adc.FiniteVolume(...) / adc.Spatial(...) OR an
+            adc.lib.spatial.FiniteVolume(...) descriptor.
         @param params dict {param_name: value} of RUNTIME parameters, routed to the instance whose
             compiled model declares the name (set_block_params). Unknown names raise.
         @param aux dict {field_name: array}: "B_z" -> set_magnetic_field, "T_e" -> rejected (it is
@@ -1788,7 +1789,8 @@ class System:
             is wired today; a second named elliptic field raises NotImplementedError (deferred).
 
         @throws the verbatim Spec section-24 errors at install for a missing aux / solver / block
-            instance / Riemann capability / disallowed schedule.
+            instance / Riemann capability. (A disallowed schedule is rejected earlier, at Program
+            authoring/compile -- see adc.time._validate_schedule -- not here.)
         """
         instances = instances or {}
         params = params or {}
@@ -1805,10 +1807,18 @@ class System:
         # "model" if given, else the PHYSICAL model carried by the compiled handle
         # (CompiledProblem.model) -- NOT the handle itself (which is the time Program .so installed in
         # step 5). For a single-instance plasma case the carried model is the block.
+        # Validate the compiled handle up front, BEFORE any System mutation, so a misuse cannot leave a
+        # half-configured System.
+        so_path = getattr(compiled, "so_path", None)
+        if so_path is None:
+            raise TypeError("install: compiled handle has no .so_path (got %r); pass a "
+                            "compile_problem(...) result" % type(compiled).__name__)
+
         compiled_model = getattr(compiled, "model", None)
+        resolved_models = {}  # instance name -> RESOLVED (CompiledModel), reused by the params step
         for name, spec in instances.items():
             if not isinstance(spec, dict):
-                raise TypeError("install: instances[%r] must be a dict (state/initial/spatial/time); "
+                raise TypeError("install: instances[%r] must be a dict (initial/spatial/time/model); "
                                 "got %r" % (name, type(spec).__name__))
             model = spec.get("model", compiled_model)
             if model is None:
@@ -1817,6 +1827,7 @@ class System:
                     "(an adc.Model(...) / CompiledModel), or pass a compiled handle that carries one "
                     "(compile_problem(model=...))." % (name, name))
             model = self._resolve_instance_model(model)
+            resolved_models[name] = model
             spatial = self._lower_spatial(spec.get("spatial"))
             time = spec.get("time")
             # Capability check (section 24): the selected Riemann flux must be backed by the model.
@@ -1830,16 +1841,13 @@ class System:
         for field_name, field in aux.items():
             self._install_aux(field_name, field)
 
-        # (4) PARAMS: route each runtime param to the instance whose compiled model declares it.
+        # (4) PARAMS: route each runtime param to the instance whose RESOLVED (compiled) model declares
+        # it -- the raw dsl.Model has no runtime_param_names, so we read the resolved CompiledModel.
         if params:
-            self._install_params(instances, compiled_model, params)
+            self._install_params(resolved_models, params)
 
         # (5) Install the compiled time Program (binds blocks by name + runs the section-24 .so
         # requirement validation: aux / solver / block instance, verbatim messages).
-        so_path = getattr(compiled, "so_path", None)
-        if so_path is None:
-            raise TypeError("install: compiled handle has no .so_path (got %r); pass a "
-                            "compile_problem(...) result" % type(compiled).__name__)
         self.install_program(so_path)
 
     def _lower_spatial(self, spatial):
@@ -1947,14 +1955,13 @@ class System:
                 return block
         return None
 
-    def _install_params(self, instances, default_model, params):
+    def _install_params(self, resolved_models, params):
         """Route flat {param_name: value} to set_block_params per instance: build each instance's
         sorted runtime-param vector (declaration defaults for unspecified names) and push it. A param
-        name declared by no instance raises (no silent drop). @p default_model is the block model used
-        for an instance that did not name its own (the compiled handle's carried physical model)."""
+        name declared by no instance raises (no silent drop). @p resolved_models maps each instance
+        name to its RESOLVED CompiledModel (the raw dsl.Model has no runtime_param_names accessor)."""
         consumed = set()
-        for name, spec in instances.items():
-            model = spec.get("model", default_model) if isinstance(spec, dict) else default_model
+        for name, model in resolved_models.items():
             # runtime_param_names is a @property (list); runtime_param_values is a method.
             rt_names = list(getattr(model, "runtime_param_names", []) or [])
             if not rt_names:

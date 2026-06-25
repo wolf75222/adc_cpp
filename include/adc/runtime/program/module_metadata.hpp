@@ -168,24 +168,38 @@ inline std::vector<std::string> required_string_list(const std::string& requirem
 /// required_string_list; used for the scalar requirement kinds (solver, capability, schedule) of
 /// Spec criterion 24.
 inline std::string requirement_string(const std::string& requirements_json, const std::string& key) {
-  const std::size_t k = requirements_json.find(key);
-  if (k == std::string::npos) {
-    return std::string();
+  auto is_space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+  // @p key is the quoted JSON key (e.g. "\"solver\""). Match it as a genuine KEY, not as an array
+  // element or a value substring: the first non-space char before it must be '{' or ',', and the
+  // first non-space char after it must be ':'. (Without this, an aux field literally named "solver"
+  // -- {"aux":["solver"],...} -- or any value equal to the key would yield a bogus requirement and
+  // wrongly reject a valid install.) Scan all occurrences until one is a real key.
+  std::size_t k = requirements_json.find(key);
+  while (k != std::string::npos) {
+    std::size_t before = k;
+    while (before > 0 && is_space(requirements_json[before - 1])) {
+      --before;
+    }
+    const bool key_start =
+        before == 0 || requirements_json[before - 1] == '{' || requirements_json[before - 1] == ',';
+    std::size_t after = k + key.size();
+    while (after < requirements_json.size() && is_space(requirements_json[after])) {
+      ++after;
+    }
+    if (key_start && after < requirements_json.size() && requirements_json[after] == ':') {
+      const std::size_t q1 = requirements_json.find('"', after + 1);
+      if (q1 == std::string::npos) {
+        return std::string();
+      }
+      const std::size_t q2 = requirements_json.find('"', q1 + 1);
+      if (q2 == std::string::npos) {
+        return std::string();
+      }
+      return requirements_json.substr(q1 + 1, q2 - q1 - 1);
+    }
+    k = requirements_json.find(key, k + 1);
   }
-  // Find the ':' separating key and value, then the opening quote of the value.
-  const std::size_t colon = requirements_json.find(':', k + key.size());
-  if (colon == std::string::npos) {
-    return std::string();
-  }
-  const std::size_t q1 = requirements_json.find('"', colon + 1);
-  if (q1 == std::string::npos) {
-    return std::string();
-  }
-  const std::size_t q2 = requirements_json.find('"', q1 + 1);
-  if (q2 == std::string::npos) {
-    return std::string();
-  }
-  return requirements_json.substr(q1 + 1, q2 - q1 - 1);
+  return std::string();
 }
 
 /// Aux-field names an operator requires (the ``"aux"`` array). Used by install-time requirement

@@ -133,17 +133,21 @@ def test_install_aux_derived_rejected():
 
 
 def test_install_params_routing():
-    """install routes a flat params dict to set_block_params per instance, and rejects a param name
-    declared by no instance (no silent drop). Host-testable via _install_params."""
+    """install routes a flat params dict to set_block_params per instance (keyed by the RESOLVED
+    CompiledModel's runtime_param_names, NOT the raw dsl.Model), and rejects a param name declared by
+    no instance (no silent drop). Host-testable via _install_params (which takes resolved models)."""
     sim = adc.System(n=N, L=1.0, periodic=True)
-    # An instance whose model declares no runtime params: a stray param name must raise.
-    instances = {"plasma": {"model": _fake_compiled(params={})}}
+    # An instance whose RESOLVED model declares no runtime params: a stray param name must raise.
     try:
-        sim._install_params(instances, _fake_compiled(params={}), {"nu": 1.0})
+        sim._install_params({"plasma": _fake_compiled(params={})}, {"nu": 1.0})
         raise AssertionError("MISMATCH: an unknown param should raise")
     except ValueError as exc:
         assert "declared by no instance" in str(exc)
         print("OK  install rejects a param declared by no instance")
+    # NOTE: the positive routing (a DECLARED runtime param resolves through the CompiledModel's
+    # runtime_param_names -- the fix that stopped reading the raw dsl.Model, which has none) needs a
+    # really-compiled model with a declared runtime param; it is exercised by the Kokkos end-to-end
+    # below (and tracked for a dedicated positive test). _install_params now takes the RESOLVED models.
 
 
 def _lorentz_model(name="adc466_model"):
