@@ -2101,6 +2101,37 @@ class Program:
     _SUBBLOCK_OPS = frozenset({
         "while", "if", "range", "matrix_free_operator", "solve_local_nonlinear",
     })
+    # Ops PROVEN PURE for common-subexpression elimination (Spec 3 s28, ADC-465): each allocates a
+    # FRESH result scratch from its inputs ALONE, reads nothing through a buffer-identity side channel,
+    # and has no side effect (no aux/Poisson/history/diagnostic write, no in-place mutation). Two such
+    # nodes with the same op + vtype + block + inputs + attrs compute the SAME value, so the second can
+    # alias the first with no change to the result. This is a STRICT subset of ``_REMOVABLE_OPS``:
+    #   - ``reduce`` is EXCLUDED (a collective reduction is a global communication; conservatively never
+    #     deduplicated even though two identical reduces give the same scalar -- CSE soundness, not perf,
+    #     drives the list, and a duplicated reduce is dead-node territory, not CSE);
+    #   - ``solve_local_linear`` is EXCLUDED (it reads its rhs State by buffer; a later op may overwrite
+    #     that rhs buffer in place between two solves, so two same-input solves are NOT provably equal);
+    #   - ``where`` / ``cell_compare`` ARE pure (fresh scratch, component-wise from inputs only).
+    #   - ``rhs`` / ``source`` / ``apply`` are EXCLUDED: their per-cell kernels read the SHARED System
+    #     aux (``ctx.aux()``) BY BUFFER IDENTITY, not through a dataflow input edge (see
+    #     ``_emit_source_kernel`` / ``_emit_apply_kernel`` / ``_cell_locals`` -> ``auxA(i,j,...)``). A
+    #     ``solve_fields`` mutates that aux in place, so two same-(state,fields)-input source/apply/rhs
+    #     nodes straddling a field solve are NOT equal (the second reads the freshly solved field). CSE
+    #     keys only on dataflow inputs, so collapsing them would silently read the stale pre-solve aux.
+    # Every op OUTSIDE this set is treated as non-CSE-able, so a buffer-writer / side-effecting / aux-
+    # reading / unknown op is never collapsed (safe-by-default, mirroring the dead-node allow-list).
+    _PURE_OPS = frozenset({
+        "linear_combine", "linear_source", "cell_compare", "where", "scalar_op", "compare",
+    })
+    # Ops that WRITE a block state or otherwise change what a subsequent ``solve_fields`` over the same
+    # state would see (the Poisson RHS reads every block's live state + the shared aux). A redundant
+    # ``solve_fields`` may be eliminated ONLY when none of these appears between the two solves over the
+    # same state input -- conservatively, ANY commit, in-place state mutation (project), boundary fill,
+    # history store, or a second field solve into the shared aux counts as a state/aux barrier.
+    _STATE_BARRIER_OPS = frozenset({
+        "project", "fill_boundary", "store_history",
+        "solve_fields", "solve_fields_from_blocks",
+    })
 
     @staticmethod
     def _subblock_value_refs(v):
@@ -2117,6 +2148,11 @@ class Program:
             elif isinstance(ref, _Affine):
                 for term, _ in ref.terms:
                     yield term
+        sched = attrs.get("schedule")
+        if sched is not None:
+            cond = getattr(sched, "params", {}).get("cond")
+            if isinstance(cond, Value):
+                yield cond  # a when(cond) predicate is live (kept off the dead-node / CSE-drop path)
         for key in ("cond_block", "body_block", "apply_block", "residual_block"):
             block = attrs.get(key)
             if block:
@@ -2175,25 +2211,49 @@ class Program:
         live = self._live_value_ids()
         return self._rebuild(lambda v: v.id in live)
 
-    def _rebuild(self, keep):
+    def _rebuild(self, keep, alias=None):
         """Clone this Program into a fresh one keeping the flat nodes for which ``keep(v)`` is true,
         renumbering surviving ids to a contiguous 0.. range in original order. Sub-blocks are cloned
         wholesale (never filtered). The clone reproduces the IR identity of an equivalent hand-built
-        Program (same serialization), so it is byte-identical when nothing was dropped."""
+        Program (same serialization), so it is byte-identical when nothing was dropped.
+
+        @p alias (optional) maps a DROPPED node id -> the kept representative node id it should be
+        replaced by (the CSE / redundant-solve passes use it to rewire every use of a duplicate onto its
+        survivor). Every reference -- a flat input, an attr-borne Value / affine ref, a commit target --
+        is resolved THROUGH this alias before id lookup, so a dropped node never leaves a dangling
+        reference. A dropped node MUST have an alias entry (the passes guarantee a representative whose
+        id < the duplicate's, hence already cloned); a kept node maps to itself. Without an alias map
+        the behavior is the historical drop-only rebuild."""
         out = Program(self.name)
         out.dt = self.dt
         out._histories = dict(self._histories)
         out._registry = self._registry
         idmap = {}  # old Value -> new Value
+        by_id = {v.id: v for v in self._values}
+        for v in self._values:  # sub-block ops too, so an alias to a sub-block-internal id resolves
+            for w in Program._subblock_value_refs(v):
+                by_id.setdefault(w.id, w)
+        alias = alias or {}
+
+        def rep(v):
+            """Follow @p v through the alias chain to the surviving representative Value (identity for a
+            kept node). The passes only alias onto an EARLIER, kept node, so the chain terminates."""
+            seen = set()
+            while v.id in alias and alias[v.id] != v.id:
+                if v.id in seen:  # defensive: never loop on a malformed alias map
+                    break
+                seen.add(v.id)
+                v = by_id[alias[v.id]]
+            return v
 
         def clone_block(block):
             return [clone(w) for w in block]
 
         def remap(ref):
             if isinstance(ref, Value):
-                return idmap[ref]
+                return idmap[rep(ref)]
             if isinstance(ref, _Affine):
-                return _Affine([(idmap[v], c) for v, c in ref.terms])
+                return _Affine([(idmap[rep(v)], c) for v, c in ref.terms])
             return ref
 
         def clone_attrs(v):
@@ -2204,6 +2264,12 @@ class Program:
                 elif key in ("cond", "body", "residual", "iterate", "guess",
                              "apply_result", "apply_in", "apply_out"):
                     attrs[key] = remap(val)
+                elif key == "schedule" and val is not None and isinstance(
+                        getattr(val, "params", {}).get("cond"), Value):
+                    # a when(cond) schedule embeds a predicate Value in params["cond"]; remap it onto
+                    # the survivor so a CSE-collapsed/renumbered predicate is not left dangling.
+                    attrs[key] = Schedule(val.kind, val.policy,
+                                          **{**val.params, "cond": remap(val.params["cond"])})
                 else:
                     attrs[key] = val
             return attrs
@@ -2215,10 +2281,11 @@ class Program:
             ``set_apply`` records its apply sub-block -- the node id precedes the sub-block ids. Ordering
             every dependency by its original id (ascending) reproduces the build order verbatim for both
             shapes, so a no-drop clone is byte-identical (same renumbering) rather than reordering the
-            matrix_free_operator node after its own sub-block."""
+            matrix_free_operator node after its own sub-block. Each input is resolved THROUGH the alias
+            map, so a dropped duplicate is replaced by its (already-earlier) representative."""
             seen = []
             for inp in v.inputs:
-                seen.append(inp)
+                seen.append(rep(inp))
             for key in ("cond_block", "body_block", "apply_block", "residual_block"):
                 block = v.attrs.get(key)
                 if block:
@@ -2234,12 +2301,13 @@ class Program:
             # Assign new ids in ORIGINAL creation order: clone every predecessor (id < v.id) first,
             # id-ascending, then v, then any sub-block op created AFTER v (e.g. a matrix_free_operator's
             # apply ops, whose original ids exceed the operator node's). Inputs / attr refs are remapped
-            # through idmap (every referenced value is live, hence already mappable on its own clone).
+            # through idmap after alias resolution (every referenced surviving value is mappable on its
+            # own clone).
             for w in deps(v):
                 clone(w)
             vid = out._next_id
             out._next_id += 1
-            nv = Value(out, vid, v.vtype, v.op, [idmap[i] for i in v.inputs],
+            nv = Value(out, vid, v.vtype, v.op, [idmap[rep(i)] for i in v.inputs],
                        clone_attrs(v), v.name, v.block)
             nv.space = v.space
             idmap[v] = nv
@@ -2252,12 +2320,376 @@ class Program:
         for v in kept:
             clone(v)
         out._values = [idmap[v] for v in kept]
-        out._commits = {b: idmap[s] for b, s in self._commits.items()}
+        out._commits = {b: idmap[rep(s)] for b, s in self._commits.items()}
         if self._dt_bound is not None:
             sub, result = self._dt_bound
             cloned_sub = [clone(w) for w in sub]
             out._dt_bound = (cloned_sub, idmap[result])
         return out
+
+    # --- common-subexpression elimination (Spec 3 s28, ADC-465) ---
+    @staticmethod
+    def _cse_key(v, canon):
+        """A canonical, alias-aware fingerprint of a PURE node: its op, vtype, block, the attrs the IR
+        hash uses, and its inputs MAPPED THROUGH @p canon (each input id replaced by the id of the
+        representative node it was deduplicated to). Two pure nodes with the same key compute the SAME
+        value, so the later one can alias the earlier. Built on the same ``_serialize_node`` the IR hash
+        uses (so attr equality is exactly the hash's notion of equality), with the node id stripped (it
+        is position, not identity) and the input ids canonicalized."""
+        node = Program._serialize_node(v)
+        node.pop("id", None)
+        node["inputs"] = tuple(canon.get(i, i) for i in node["inputs"])
+        # JSON-serialize the attrs dict to a stable string so the whole key is hashable / comparable
+        # exactly as the IR hash compares it.
+        return (node["op"], node["vtype"], node["block"], node["inputs"],
+                json.dumps(node["attrs"], sort_keys=True, separators=(",", ":")))
+
+    def eliminate_common_subexpressions(self):
+        """Return a NEW Program with duplicated PURE sub-IR computed once and aliased (Spec 3 s28
+        common-subexpression elimination, ADC-465).
+
+        PROVEN SOUND, not heuristic: a node is a CSE candidate ONLY if its op is on the
+        ``_PURE_OPS`` allow-list -- ops that allocate a fresh result from their inputs alone, read no
+        buffer through a side channel, and have no side effect. For each such node, a canonical key (op,
+        vtype, block, attrs, and inputs mapped to their already-chosen representatives) is computed in
+        creation order; the FIRST node with a given key is the representative, and every later node with
+        the same key is dropped and its uses rewired to the representative. Because the key is exactly
+        the IR hash's notion of equality (same ``_serialize_node`` attrs) over identical
+        (canonicalized) inputs, the representative computes a bit-identical result -- so aliasing the
+        duplicate CANNOT change the emitted numerics. Every NON-pure op (a reduce, a solve, a
+        buffer-writer, a side-effecting op, an unknown op) is NEVER a representative target and is never
+        dropped, so it is always recomputed -- safe-by-default.
+
+        The pass is OPT-IN: it never runs on the default ``emit_cpp_program`` path. Sub-blocks are not
+        descended into (v1), so a value consumed only inside a control-flow body is left untouched. A
+        program with no duplicated pure sub-IR rebuilds BYTE-FOR-BYTE identically (same ``_ir_hash`` and
+        emitted C++); a program with a duplicate emits, after the pass, C++ identical to the same
+        program written with the value computed once."""
+        canon = {}        # duplicate node id -> representative node id (the survivor it aliases)
+        reps = {}         # cse key -> representative node id
+        drop = set()      # ids of dropped duplicates
+        for v in self._values:
+            if v.op not in Program._PURE_OPS:
+                continue
+            # An input that was itself dropped resolves to its representative (so chained duplicates
+            # collapse onto one representative chain, not a dangling id).
+            if any(i.id in drop for i in v.inputs):
+                # canon already maps every dropped input to its survivor; the key uses canon, so this
+                # node keys against the survivors -- no special handling needed beyond canon lookup.
+                pass
+            key = Program._cse_key(v, canon)
+            if key in reps:
+                canon[v.id] = reps[key]
+                drop.add(v.id)
+            else:
+                reps[key] = v.id
+                canon[v.id] = v.id
+        if not drop:
+            return self._rebuild(lambda v: True)  # byte-identical no-op clone
+        return self._rebuild(lambda v: v.id not in drop, alias=canon)
+
+    # --- redundant field-solve elimination (Spec 3 s28, ADC-465) ---
+    def eliminate_redundant_field_solves(self):
+        """Return a NEW Program with a provably-redundant second ``solve_fields`` removed and aliased
+        (Spec 3 s28 redundant-solve elimination, ADC-465).
+
+        ``solve_fields`` is side-effecting (it fills the shared phi/aux and returns a FieldContext), so
+        it is NEVER touched by CSE or dead-node elimination. But two ``solve_fields`` over the SAME
+        state input with NO intervening STATE OR AUX MUTATION recompute the identical fields: the
+        second is redundant and its FieldContext can alias the first. This is the ONLY field solve this
+        pass removes, and ONLY when redundancy is PROVABLE.
+
+        CONSERVATIVE soundness rule: walking the flat list in order, a ``solve_fields(state=U,
+        field=f)`` is redundant iff an EARLIER ``solve_fields`` with the SAME state input AND the same
+        ``field`` attr exists AND, between the two, NO op on the ``_STATE_BARRIER_OPS`` set (a commit
+        target write, ``project``, ``fill_boundary``, ``store_history``, or ANY other field solve --
+        which would re-fill the shared aux) appears. The Poisson RHS reads every block's LIVE state, so
+        a write to ANY block's state -- not just U's -- is a barrier; a ``linear_combine`` that is a
+        commit target is therefore a barrier too. If anything between the two solves could have changed
+        what the elliptic solve sees, the second is kept. The single-block, no-mutation case (e.g. a
+        macro accidentally solving twice from U^n before the first stage) is the one provably-redundant
+        shape eliminated; everything else is left as written.
+
+        OPT-IN: never on the default emit path. Byte-identical no-op when no redundant solve exists."""
+        commit_ids = {s.id for s in self._commits.values()}
+        active = {}       # (state input id, field attr) -> the live representative solve_fields id
+        canon = {}
+        drop = set()
+        for v in self._values:
+            if v.op == "solve_fields":
+                (state_in,) = v.inputs
+                sig = (state_in.id, v.attrs.get("field"))
+                prior = active.get(sig)
+                if prior is not None:
+                    # A redundant re-solve over the same state with no barrier since `prior`.
+                    canon[v.id] = prior
+                    drop.add(v.id)
+                    continue
+                active[sig] = v.id
+                # This solve_fields is itself a barrier for OTHER signatures (it re-fills the shared
+                # aux), so any pending solve over a different state is no longer safe to reuse.
+                active = {sig: v.id}
+                continue
+            # A barrier op invalidates every pending reuse: a state write (commit target, project,
+            # fill_boundary), a history store, or anything that mutates what the elliptic solve reads.
+            if v.op in Program._STATE_BARRIER_OPS or v.id in commit_ids:
+                active = {}
+        if not drop:
+            return self._rebuild(lambda v: True)
+        return self._rebuild(lambda v: v.id not in drop, alias=canon)
+
+    # --- proven-safe optimization pipeline (Spec 3 s28, ADC-465) ---
+    # The TRANSFORM passes, in the order ``optimize`` runs them. Each is PROVEN to preserve the emitted
+    # numerics (see its docstring) and is a byte-identical no-op when it finds nothing to do, so the
+    # whole pipeline is a no-op on an already-optimal Program. Analysis passes (liveness / estimate /
+    # GPU detector) are reports, NOT in this list -- they never rewrite the IR.
+    _OPTIMIZE_PASSES = (
+        ("eliminate_dead_nodes", "dead-node elimination"),
+        ("eliminate_common_subexpressions", "common-subexpression elimination"),
+        ("eliminate_redundant_field_solves", "redundant field-solve elimination"),
+    )
+
+    def optimize(self):
+        """Return a NEW Program with the proven-safe Spec 3 s28 transform passes applied in sequence
+        (ADC-465): dead-node elimination, common-subexpression elimination, redundant field-solve
+        elimination. OPT-IN -- the default ``emit_cpp_program`` path never optimizes. Each pass is
+        proven to preserve the emitted numerics and is byte-identical when it changes nothing, so a
+        Program with no optimizable structure round-trips byte-for-byte (same ``_ir_hash`` and C++)
+        with the pipeline on or off (the spec's hard requirement: optimization must not change
+        results). Use :meth:`dump_passes` to inspect what each pass did."""
+        prog = self
+        for name, _ in Program._OPTIMIZE_PASSES:
+            prog = getattr(prog, name)()
+        return prog
+
+    def dump_passes(self):
+        """Inspect the optimization pipeline: for each proven-safe transform pass, the number of flat
+        nodes before / after and whether it changed the IR hash. A report only -- it RUNS the pipeline
+        on a copy (``self`` is never mutated) and returns a human-readable trace, so a reviewer can see
+        which pass fired and that an all-no-op pipeline leaves the hash unchanged (Spec 3 s28,
+        ADC-465)."""
+        lines = ["# optimization pipeline for Program %r" % self.name]
+        prog = self
+        for name, label in Program._OPTIMIZE_PASSES:
+            before_n, before_h = len(prog._values), prog._ir_hash()
+            nxt = getattr(prog, name)()
+            after_n, after_h = len(nxt._values), nxt._ir_hash()
+            changed = after_h != before_h
+            lines.append("  %-34s %3d -> %3d nodes  %s"
+                         % (label, before_n, after_n, "CHANGED" if changed else "no-op"))
+            prog = nxt
+        lines.append("  final: %d nodes, hash %s" % (len(prog._values), prog._ir_hash()[:12]))
+        return "\n".join(lines)
+
+    # --- analysis passes: liveness / buffer reuse / cost estimate / GPU detectors (Spec 3 s28) ---
+    # Ops that allocate ONE step-body scratch buffer (a MultiFab the size of the block state / a
+    # scalar field). The number of buffers each op writes per "kernel" + how many for_each_cell kernels
+    # it launches drive the memory-traffic and kernel-count estimates and the per-scratch live ranges.
+    # These counts are STRUCTURAL (read off the IR / the lowering above), not a measured profile -- the
+    # measured GPU kernel count is a ROMEO run; this is the host-side static estimate.
+    _SCRATCH_OPS = frozenset({
+        "rhs", "source", "apply", "linear_combine", "linear_source", "solve_local_linear",
+        "solve_local_nonlinear", "cell_compare", "where", "coupled_rate",
+    })
+    # Ops that launch at least one per-cell (for_each_cell) kernel when lowered -- the small-kernel
+    # count a GPU launch-overhead detector flags. A linear_combine lowers to axpy/lincomb (vectorized,
+    # counted as one kernel); a rhs to a divergence/flux kernel; a source/apply/where/cell_compare/
+    # coupled_rate to an explicit for_each_cell. solve_fields / solve_linear launch many internal
+    # kernels (an elliptic / Krylov solve) -- counted as a HEAVY kernel, not a small one.
+    _PERCELL_KERNEL_OPS = frozenset({
+        "rhs", "source", "apply", "linear_combine", "linear_source", "solve_local_linear",
+        "solve_local_nonlinear", "cell_compare", "where", "coupled_rate", "project", "fill_boundary",
+    })
+    _HEAVY_KERNEL_OPS = frozenset({
+        "solve_fields", "solve_fields_from_blocks", "solve_linear",
+    })
+
+    def scratch_liveness(self):
+        """Per-scratch LIVE RANGES over the linear step-body order (Spec 3 s28 scratch-liveness
+        analysis, ADC-465). A REPORT, not a transform: it never rewrites the IR.
+
+        Each scratch-allocating flat node (rhs / source / apply / linear_combine / ... -- the
+        ``_SCRATCH_OPS`` set, the ops that allocate a step-body MultiFab) owns one buffer. Its live
+        range is ``[def_index, last_use_index]``: the node's own position in the flat list, to the
+        position of the LAST flat node that reads it (through a flat input OR an affine combine term).
+        A scratch read only inside a control-flow / matrix-free sub-block (v1 does not descend) is
+        conservatively live to the END of the body. Returns a list of dicts (one per scratch) with the
+        node name, op, def/last-use indices and the live span -- the raw material for buffer reuse."""
+        order = {v.id: i for i, v in enumerate(self._values)}
+        last_use = {}  # scratch node id -> last flat index that reads it
+        end = len(self._values) - 1
+        for i, v in enumerate(self._values):
+            # Flat inputs + affine-term refs + sub-block closed-over refs are all "reads".
+            reads = set(inp.id for inp in v.inputs)
+            for key in ("cond", "body", "residual", "iterate", "guess",
+                        "apply_result", "apply_in", "apply_out"):
+                ref = v.attrs.get(key)
+                if isinstance(ref, Value):
+                    reads.add(ref.id)
+                elif isinstance(ref, _Affine):
+                    reads.update(term.id for term, _ in ref.terms)
+            for rid in reads:
+                if rid in order:
+                    last_use[rid] = max(last_use.get(rid, order[rid]), i)
+            # A sub-block-owning op may read a scratch inside its body (v1 never inspects it): keep every
+            # such closed-over scratch live to the END (conservative, never under-estimates the span).
+            if v.op in Program._SUBBLOCK_OPS:
+                for w in Program._subblock_value_refs(v):
+                    if w.id in order:
+                        last_use[w.id] = end
+        # A committed scratch is read by the final commit copy (after the last flat node).
+        for state in self._commits.values():
+            if state.id in order:
+                last_use[state.id] = max(last_use.get(state.id, order[state.id]), end + 1)
+        out = []
+        for v in self._values:
+            if v.op not in Program._SCRATCH_OPS:
+                continue
+            d = order[v.id]
+            lu = last_use.get(v.id, d)  # an unused scratch is live only at its own def
+            out.append({"name": v.name, "op": v.op, "block": v.block,
+                        "def_index": d, "last_use_index": lu, "live_span": lu - d})
+        return out
+
+    def buffer_reuse_report(self):
+        """Buffer-reuse opportunities from the scratch live ranges (Spec 3 s28 buffer reuse, ADC-465).
+        A REPORT, not a transform: the codegen may keep separate buffers, but the memory ESTIMATE
+        reflects reuse.
+
+        Greedy left-to-right register-allocation over the live ranges from :meth:`scratch_liveness`:
+        scratches sorted by def index; a free buffer (one whose last use precedes the current
+        scratch's def) is reused, else a new buffer is allocated. Two scratches share a buffer only
+        when their live ranges are DISJOINT (the earlier one's last read strictly precedes the later
+        one's def), so reuse can never alias two simultaneously-live values -- this is why it is a
+        sound ESTIMATE of the minimum buffer count, independent of whether the codegen actually
+        reuses. Returns ``{"scratch_count", "buffer_count", "reused", "assignment"}`` where
+        ``reused`` is how many scratches landed on a recycled buffer and ``assignment`` maps each
+        scratch name to its buffer index."""
+        ranges = sorted(self.scratch_liveness(), key=lambda r: r["def_index"])
+        free = []          # buffer index -> last_use_index of its current occupant
+        assignment = {}
+        reused = 0
+        n_buffers = 0
+        for r in ranges:
+            slot = None
+            for b in range(n_buffers):
+                if free[b] < r["def_index"]:  # this buffer's occupant is dead before r is defined
+                    slot = b
+                    break
+            if slot is None:
+                slot = n_buffers
+                n_buffers += 1
+                free.append(r["last_use_index"])
+            else:
+                free[slot] = r["last_use_index"]
+                reused += 1
+            assignment[r["name"]] = slot
+        return {"scratch_count": len(ranges), "buffer_count": n_buffers,
+                "reused": reused, "assignment": assignment}
+
+    def estimate(self):
+        """Static memory-traffic + kernel-count estimate over the lowered IR (Spec 3 s28, ADC-465).
+        A REPORT, not a transform. All figures are STRUCTURAL (counted off the IR / the lowering),
+        in UNITS of one block-state field traversal (n_cons * n_cells * 8 bytes) -- the absolute byte
+        count needs the runtime grid, so the estimate is grid-relative: a "field" is one full
+        state-sized buffer pass. The measured GPU kernel count / wall time is a ROMEO profile; this is
+        the host-side static prediction the GPU detectors threshold on.
+
+        Returns a dict:
+          - ``kernel_count``: total per-cell + heavy kernel launches (one per scratch-writing op, plus
+            the elliptic / Krylov solves);
+          - ``small_kernels``: per-cell kernels that touch only a handful of buffers (launch-overhead
+            bound on a GPU);
+          - ``heavy_kernels``: elliptic / Krylov solves (each many internal kernels);
+          - ``scratch_count`` / ``buffer_count`` / ``buffers_saved``: from the buffer-reuse report;
+          - ``field_reads`` / ``field_writes`` / ``traffic_fields``: field-sized buffer passes
+            (reads + writes), the proxy for memory traffic."""
+        reuse = self.buffer_reuse_report()
+        kernel_count = small = heavy = 0
+        reads = writes = 0
+        for v in self._values:
+            if v.op in Program._HEAVY_KERNEL_OPS:
+                heavy += 1
+                kernel_count += 1
+                # An elliptic / Krylov solve reads the state and writes the shared aux/field: count one
+                # read + one write as a coarse field-traffic proxy (the internal V-cycle traffic is
+                # solver-dependent and out of scope for a structural estimate).
+                reads += 1
+                writes += 1
+                continue
+            if v.op in Program._PERCELL_KERNEL_OPS:
+                kernel_count += 1
+                # One write (its result scratch) + one read per distinct field input it consumes.
+                in_fields = len({i.id for i in v.inputs if i.is_field()})
+                # An affine combine also reads each of its terms.
+                aff = v.attrs.get("coeffs")
+                if aff is not None:
+                    in_fields = max(in_fields, len(aff))
+                writes += 1 if v.op in Program._SCRATCH_OPS else 0
+                reads += in_fields
+                # A "small" kernel touches few buffers (the GPU launch-overhead regime): a per-cell
+                # source / where / cell_compare / a 1-2 term combine.
+                if in_fields <= 2:
+                    small += 1
+        traffic = reads + writes
+        return {"kernel_count": kernel_count, "small_kernels": small, "heavy_kernels": heavy,
+                "scratch_count": reuse["scratch_count"], "buffer_count": reuse["buffer_count"],
+                "buffers_saved": reuse["scratch_count"] - reuse["buffer_count"],
+                "field_reads": reads, "field_writes": writes, "traffic_fields": traffic}
+
+    # GPU heuristic thresholds (Spec 3 s28 detectors, ADC-465). A warning report, never a hard error:
+    # a small step legitimately trips none; a pathological IR (a long chain of tiny per-cell kernels, a
+    # buffer explosion, or heavy field traffic) trips one and the report names it. The numbers are
+    # launch-overhead / occupancy rules of thumb, not a measured limit -- the MEASURED GPU kernel count
+    # is a ROMEO profile (this is the host-side static prediction).
+    _GPU_MAX_SMALL_KERNELS = 12
+    _GPU_MAX_SCRATCHES = 16
+    _GPU_MAX_TRAFFIC_FIELDS = 40
+
+    def gpu_detectors(self):
+        """Flag GPU anti-patterns from the static :meth:`estimate` (Spec 3 s28, ADC-465). Returns a
+        list of warning dicts ``{"detector", "value", "threshold", "message"}`` -- NEVER raises (an
+        analysis report, not a hard error). Detects too-many-small-kernels (launch overhead),
+        too-many-scratches (buffer pressure / allocator churn) and excessive memory traffic
+        (bandwidth bound). An empty list means the IR trips no host-side GPU heuristic; the measured
+        kernel count / occupancy is validated on ROMEO."""
+        est = self.estimate()
+        warnings = []
+        checks = (
+            ("too_many_small_kernels", est["small_kernels"], Program._GPU_MAX_SMALL_KERNELS,
+             "many small per-cell kernels: launch overhead may dominate on a GPU; consider fusing"),
+            ("too_many_scratches", est["buffer_count"], Program._GPU_MAX_SCRATCHES,
+             "many live scratch buffers: GPU memory pressure / allocator churn; consider reuse"),
+            ("excessive_memory_traffic", est["traffic_fields"], Program._GPU_MAX_TRAFFIC_FIELDS,
+             "high field-sized memory traffic: likely bandwidth bound on a GPU"),
+        )
+        for name, value, thresh, msg in checks:
+            if value > thresh:
+                warnings.append({"detector": name, "value": value, "threshold": thresh,
+                                 "message": msg})
+        return warnings
+
+    def estimate_report(self):
+        """A human-readable cost report: the static memory-traffic / kernel-count :meth:`estimate`,
+        the buffer-reuse summary and any GPU detector warnings (Spec 3 s28 inspection surface,
+        ADC-465). A report only -- ``self`` is never mutated."""
+        est = self.estimate()
+        lines = ["# cost estimate for Program %r (static, grid-relative)" % self.name,
+                 "  kernels        : %d (%d small, %d heavy elliptic/Krylov)"
+                 % (est["kernel_count"], est["small_kernels"], est["heavy_kernels"]),
+                 "  scratch buffers: %d allocated, %d after reuse (%d saved)"
+                 % (est["scratch_count"], est["buffer_count"], est["buffers_saved"]),
+                 "  memory traffic : %d field-passes (%d read, %d write)"
+                 % (est["traffic_fields"], est["field_reads"], est["field_writes"])]
+        warnings = self.gpu_detectors()
+        if warnings:
+            lines.append("  GPU detectors  :")
+            for w in warnings:
+                lines.append("    [warn] %s (%d > %d): %s"
+                             % (w["detector"], w["value"], w["threshold"], w["message"]))
+        else:
+            lines.append("  GPU detectors  : none tripped (host-side heuristic)")
+        return "\n".join(lines)
 
     def validate(self):
         """Structural validation of the IR. Raises ValueError on a malformed program."""
@@ -5123,6 +5555,25 @@ def eliminate_dead_nodes(program):
     :meth:`Program.eliminate_dead_nodes`, Spec 3 s28 / ADC-465). OPT-IN: it optimizes a copy and never
     touches the default ``emit_cpp_program`` path. See the method for the dead-node rule."""
     return program.eliminate_dead_nodes()
+
+
+def eliminate_common_subexpressions(program):
+    """Return a NEW Program with duplicated PURE sub-IR computed once and aliased (free-function form
+    of :meth:`Program.eliminate_common_subexpressions`, Spec 3 s28 / ADC-465). OPT-IN, proven-safe."""
+    return program.eliminate_common_subexpressions()
+
+
+def eliminate_redundant_field_solves(program):
+    """Return a NEW Program with a provably-redundant second ``solve_fields`` removed (free-function
+    form of :meth:`Program.eliminate_redundant_field_solves`, Spec 3 s28 / ADC-465). OPT-IN,
+    conservative: only when no state/aux mutation intervenes between the two solves."""
+    return program.eliminate_redundant_field_solves()
+
+
+def optimize(program):
+    """Return a NEW Program with the proven-safe Spec 3 s28 transform passes applied (free-function
+    form of :meth:`Program.optimize`, ADC-465). OPT-IN: byte-identical when nothing is optimizable."""
+    return program.optimize()
 
 
 std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,

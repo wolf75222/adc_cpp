@@ -133,6 +133,31 @@ provides operators with the expected signatures. The model-free type system, the
 the `adc.time.std` operator-first macros are documented in {doc}`operator-modules`; see
 `examples/operator_modules/predictor_corrector_operator_first.py`.
 
+## Optimization passes
+
+The IR carries an **opt-in** pass pipeline. It never runs on the default `emit_cpp_program` path, so
+it cannot change an already-compiled program; you optimize a copy explicitly. The hard requirement is
+that **optimization must not change results**: each transform pass is proven to preserve the emitted
+numerics and is byte-for-byte identical when it finds nothing to do, so a program with no optimizable
+structure emits identical C++ with the pipeline on or off.
+
+| Method | Kind | What it does |
+|---|---|---|
+| `P.eliminate_dead_nodes()` | transform | Drop unconsumed flat nodes whose op allocates a fresh result and has no side effect (an explicit allow-list); every buffer-writer / side-effecting / unknown op is kept. |
+| `P.eliminate_common_subexpressions()` | transform | Compute a duplicated **pure** sub-IR (same op + inputs + attrs) once and alias the rest. Only `_PURE_OPS` are candidates; a reduce, a solve, a buffer-writer or a side-effecting op is never collapsed. The consumer's `axpy` structure is preserved, so the result is bit-identical. |
+| `P.eliminate_redundant_field_solves()` | transform | Remove a second `solve_fields` over the same state when **no** state/aux mutation (a commit, `project`, `fill_boundary`, `store_history`, another field solve) intervenes; conservative -- kept otherwise. |
+| `P.optimize()` | pipeline | Run the three proven-safe transforms in sequence; byte-identical on an already-optimal program. |
+| `P.dump_passes()` | report | Trace each pass's node-count delta and whether it changed the IR hash (the original is never mutated). |
+| `P.scratch_liveness()` | analysis | Per-scratch live ranges `[def, last use]` over the linear step-body order. |
+| `P.buffer_reuse_report()` | analysis | Greedy buffer allocation over disjoint live ranges -- the minimum buffer count the codegen could reuse to. |
+| `P.estimate()` / `P.estimate_report()` | analysis | Static, grid-relative memory-traffic (field-sized passes) + kernel-count estimate. |
+| `P.gpu_detectors()` | analysis | Flag too-many-small-kernels / too-many-scratches / excessive memory traffic (host-side heuristic warnings, never a hard error). |
+
+The analysis passes are reports: the static cost estimate is a host-side prediction (the **measured**
+GPU kernel count / occupancy is a profiled run, not a build-time figure). The transform passes are the
+generic-IR realization of Spec 3 section 28; a pass that cannot be made sound for the general IR stays
+a report rather than a transform that could change numerics.
+
 ## What is implemented today
 
 | Capability | Status |

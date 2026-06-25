@@ -45,6 +45,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
   program with a dead node emits C++ identical to the same program written without it. New
   `python/tests/test_ir_passes.py` pins removal, the parity byte-identities, the side-effect and
   buffer-writer (condensed_schur) exemptions and the IR-hash-changes-but-outputs-same contract.
+- **Spec 3 remaining IR optimization passes** (ADC-465, epic ADC-450, section 28): the section-28
+  pipeline beyond dead-node elimination, all on `adc.time.Program`. Two more proven-safe TRANSFORM
+  passes (opt-in, never on the default `emit_cpp_program` path): `eliminate_common_subexpressions`
+  computes a duplicated PURE sub-IR (same op + inputs + attrs, restricted to a `_PURE_OPS` allow-list)
+  once and aliases the rest, preserving each consumer's `axpy` structure so the result is bit-identical
+  (a reduce, a solve, a buffer-writer or a side-effecting op is never collapsed); and
+  `eliminate_redundant_field_solves` removes a second `solve_fields` over the same state only when no
+  state/aux mutation (a commit, `project`, `fill_boundary`, `store_history`, another field solve)
+  intervenes. `P.optimize()` chains the three proven-safe transforms and is byte-for-byte identical on
+  an already-optimal program; `P.dump_passes()` traces the pipeline. Plus the section-28 ANALYSIS
+  reports (never rewrite the IR): `scratch_liveness` (per-scratch live ranges), `buffer_reuse_report`
+  (minimum buffer count via disjoint-range allocation), `estimate` / `estimate_report` (static,
+  grid-relative memory-traffic + kernel-count) and `gpu_detectors` (too-many-small-kernels /
+  too-many-scratches / excessive-traffic warnings, never a hard error). The measured GPU kernel count
+  is a ROMEO profile; the estimate is the host-side prediction. New `python/tests/test_ir_opt_passes.py`
+  (script + pytest) pins the CSE byte-identity-to-handwritten, the never-collapse-side-effect /
+  buffer-writer guards, the redundant-solve removal-and-keep contract, the report sanity, the GPU
+  detector firing, and the CRITICAL pipeline byte-identity on a non-optimizable program.
 - **Spec 3 profiling wired into System** (ADC-459, epic ADC-450): `sim.enable_profiling()` /
   `disable_profiling()` / `is_profiling()` / `reset_profiling()` / `profile_report()` drive a
   System-owned `adc::runtime::program::Profiler`; `System::step` and `solve_fields` wrap themselves
